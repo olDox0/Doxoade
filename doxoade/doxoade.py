@@ -44,61 +44,49 @@ def _load_config():
 # COMANDOS DA CLI (ARQUITETURA FINAL E ROBUSTA)
 # -----------------------------------------------------------------------------
 
-#atualizado em 2025/09/18-V44. Arquitetura do 'git-new' completamente refeita para ser "à prova de balas", garantindo a criação e o commit do .gitignore antes de outros arquivos e usando 'push --force' para o primeiro envio.
-@cli.command('git-new')
-@click.argument('message')
-@click.argument('remote_url')
-def git_new(message, remote_url):
-    """
-    [WORKFLOW COMPLETO] Inicializa um repositório, cria um .gitignore, faz o primeiro commit e envia para um repositório remoto VAZIO.
-    """
-    click.echo(Fore.CYAN + Style.BRIGHT + "--- [GIT-NEW] Automatizando a publicação de um novo projeto ---")
+#atualizado em 2025/09/18-V46. Novo comando 'tutorial' para guiar novos usuários no workflow completo.
+@cli.command()
+def tutorial():
+    """Exibe um guia passo a passo do workflow recomendado do doxoade."""
     
-    # --- PASSO 0: Verificações de Sanidade ---
-    if os.path.exists('.git'):
-        click.echo(Fore.RED + "[ERRO] Este diretório já é um repositório Git."); sys.exit(1)
-        
-    # --- PASSO 1: Inicialização e .gitignore ---
-    click.echo(Fore.YELLOW + "\nPasso 1: Inicializando repositório e criando .gitignore...")
-    if not _run_git_command(['init', '-b', 'main']): sys.exit(1)
-    
-    # Garante que um .gitignore robusto exista
-    gitignore_content = ("venv/\n\n__pycache__/\n*.py[cod]\n\nbuild/\ndist/\n*.egg-info/\n\n.vscode/\n.idea/\n\n.env\ndesktop.ini\n")
-    with open('.gitignore', 'w', encoding='utf-8') as f: f.write(gitignore_content)
-    
-    if not _run_git_command(['add', '.gitignore']): sys.exit(1)
-    if not _run_git_command(['commit', '-m', 'Commit inicial: Adicionado .gitignore']): sys.exit(1)
-    
-    click.echo(Fore.GREEN + "[OK] Repositório inicializado e .gitignore commitado.")
+    click.echo(Fore.CYAN + Style.BRIGHT + "--- Guia Rápido do Workflow Doxoade ---")
+    click.echo(Fore.WHITE + "Este guia mostra como levar um projeto do zero à publicação no GitHub.")
 
-    # --- PASSO 2: Conexão e Primeiro 'doxoade save' ---
-    click.echo(Fore.YELLOW + "\nPasso 2: Conectando ao repositório remoto e salvando o projeto...")
-    if not _run_git_command(['remote', 'add', 'origin', remote_url]): sys.exit(1)
-    
-    python_executable = sys.executable 
-    save_command = [python_executable, '-m', 'doxoade.doxoade', 'save', message, '--force']
-    
-    process = subprocess.Popen(save_command)
-    process.wait()
-    
-    if process.returncode != 0:
-        click.echo(Fore.RED + "[ERRO] O comando 'doxoade save' falhou. Verifique os erros acima."); sys.exit(1)
-    click.echo(Fore.GREEN + "[OK] Código do projeto salvo com sucesso.")
+    # Passo 1: Criação
+    click.echo(Fore.YELLOW + "\n--- Passo 1: Crie e configure seu projeto ---")
+    click.echo("Primeiro, use 'doxoade init' para criar a estrutura local do seu projeto.")
+    click.echo(Fore.GREEN + '$ doxoade init meu-projeto-tutorial')
+    click.echo("\nDepois, vá para o GitHub, crie um repositório VAZIO e copie a URL.")
+    click.echo("Finalmente, use 'doxoade git-new' para conectar tudo e fazer o primeiro push.")
+    click.echo(Fore.GREEN + '$ cd meu-projeto-tutorial')
+    click.echo(Fore.GREEN + '$ doxoade git-new "Commit inicial do projeto" https://github.com/usuario/meu-projeto-tutorial.git')
 
-    # --- PASSO 3: O Push Final ---
-    click.echo(Fore.YELLOW + "\nPasso 3: Enviando o histórico completo para o GitHub (usando --force)...")
+    # Passo 2: Desenvolvimento
+    click.echo(Fore.YELLOW + "\n--- Passo 2: O ciclo de desenvolvimento diário ---")
+    click.echo("Ative o ambiente virtual e comece a programar.")
+    click.echo(Fore.GREEN + '$ .\\venv\\Scripts\\activate')
+    click.echo("(venv) > ... escreva seu código, modifique arquivos ...")
+    click.echo("\nQuando estiver pronto, use 'doxoade save' para fazer um commit seguro.")
+    click.echo(Fore.GREEN + '(venv) > doxoade save "Implementada a classe Usuario"')
+    click.echo("\nPara enviar suas alterações para o GitHub, use o 'git push' padrão.")
+    click.echo(Fore.GREEN + '(venv) > git push')
     
-    # No contexto de 'git-new', um push forçado é o comportamento correto e esperado
-    # para garantir que o repositório remoto reflita este novo início.
-    if not _run_git_command(['push', '--force', '-u', 'origin', 'main']):
-        sys.exit(1)
-    
-    click.echo(Fore.GREEN + Style.BRIGHT + "\n[GIT-NEW] Projeto publicado com sucesso no GitHub!")
-    
-#atualizado em 2025/09/18-V41. Novo comando 'git-clean' para remover arquivos rastreados que correspondem ao .gitignore.
+    # Passo 3: Automação e Análise
+    click.echo(Fore.YELLOW + "\n--- Passo 3: Análise e automação ---")
+    click.echo("Use os comandos de análise para verificar a saúde do seu projeto a qualquer momento.")
+    click.echo(Fore.GREEN + '$ doxoade check')
+    click.echo(Fore.GREEN + '$ doxoade webcheck')
+    click.echo("\nUse 'doxoade auto' para executar uma suíte de testes completa.")
+    click.echo(Fore.GREEN + '$ doxoade auto "doxoade check ." "doxoade run test_suite.py"')
+    click.echo("\nE use 'doxoade log' para investigar os resultados de análises passadas.")
+    click.echo(Fore.GREEN + '$ doxoade log -n 5 --snippets')
+
+    click.echo(Fore.CYAN + Style.BRIGHT + "\n--- Fim do Guia ---")
+
+#atualizado em 2025/09/18-V45. 'git-clean' agora lê o .gitignore com encoding='utf-8' explícito e lida com erros de decodificação.
 @cli.command('git-clean')
 def git_clean():
-    """Força a remoção de arquivos já rastreados que deveriam ser ignorados."""
+    """Força a remoção de arquivos já rastreados que correspondem ao .gitignore."""
     click.echo(Fore.CYAN + "--- [GIT-CLEAN] Procurando por arquivos rastreados indevidamente ---")
     
     gitignore_path = '.gitignore'
@@ -106,24 +94,23 @@ def git_clean():
         click.echo(Fore.RED + "[ERRO] Arquivo .gitignore não encontrado no diretório atual.")
         sys.exit(1)
 
-    # 1. Obter a lista de padrões do .gitignore
-    with open(gitignore_path, 'r') as f:
-        ignore_patterns = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+    try:
+        with open(gitignore_path, 'r', encoding='utf-8', errors='replace') as f:
+            ignore_patterns = [line.strip() for line in f if line.strip() and not line.startswith('#')]
 
-    # 2. Obter a lista de TODOS os arquivos rastreados pelo Git
+    except Exception as e:
+        click.echo(Fore.RED + f"[ERRO] Não foi possível ler o arquivo .gitignore: {e}")
+        sys.exit(1)
+
     tracked_files_str = _run_git_command(['ls-files'], capture_output=True)
     if tracked_files_str is None:
         sys.exit(1)
     tracked_files = tracked_files_str.splitlines()
 
-    # 3. Encontrar os arquivos que correspondem aos padrões
     files_to_remove = []
     for pattern in ignore_patterns:
-        # Lida com padrões de diretório como 'venv/'
         if pattern.endswith('/'):
             pattern += '*'
-        
-        # fnmatch é perfeito para comparar nomes de arquivos com padrões do gitignore
         matches = fnmatch.filter(tracked_files, pattern)
         if matches:
             files_to_remove.extend(matches)
@@ -138,7 +125,6 @@ def git_clean():
     
     if click.confirm(Fore.RED + "\nVocê tem certeza de que deseja parar de rastrear (untrack) TODOS estes arquivos?", abort=True):
         click.echo(Fore.CYAN + "Removendo arquivos do índice do Git...")
-        # Remove os arquivos um por um para mais segurança
         success = True
         for f in files_to_remove:
             if not _run_git_command(['rm', '--cached', f]):
@@ -151,28 +137,47 @@ def git_clean():
             click.echo(Fore.CYAN + '  doxoade save "Limpeza de arquivos ignorados"')
         else:
             click.echo(Fore.RED + "[ERRO] Ocorreu um erro ao remover um ou mais arquivos.")
-
+    
 #atualizado em 2025/09/17-V40. 'save' agora usa 'git commit -a' para respeitar os arquivos removidos do índice.
 @cli.command()
 @click.argument('message')
 @click.option('--force', is_flag=True, help="Força o commit mesmo que o 'check' encontre avisos ou apenas o erro de ambiente.")
 def save(message, force):
-    """Executa 'check', adiciona todos os arquivos modificados e faz um commit seguro."""
+    """
+    Executa um "commit seguro", protegendo seu repositório de código com erros.
+
+    Este comando é o coração do workflow do doxoade. Ele automatiza 3 passos:
+    1. Executa 'doxoade check' para validar a qualidade do código.
+    2. Se houver erros, o commit é abortado.
+    3. Se tudo estiver OK, ele executa 'git commit -a -m "MESSAGE"'.
+
+    Exemplos:
+      doxoade save "Adicionada funcionalidade de login"
+      doxoade save "Corrigido bug na validação de formulário" --force
+    """
+    # ...
     click.echo(Fore.CYAN + "--- [SAVE] Iniciando processo de salvamento seguro ---")
-    
     click.echo(Fore.YELLOW + "\nPasso 1: Executando 'doxoade check' para garantir a qualidade do código...")
+    
+    # 1. Carrega a configuração do .doxoaderc
+    config = _load_config()
+    ignore_list = config.get('ignore', [])
     
     python_executable = sys.executable
     check_command = [python_executable, '-m', 'doxoade.doxoade', 'check', '.']
-    check_result = subprocess.run(check_command, capture_output=True, text=True, encoding='utf-8', errors='replace')
     
+    # 2. Adiciona as flags --ignore ao comando
+    for folder in ignore_list:
+        check_command.extend(['--ignore', folder])
+
+    check_result = subprocess.run(check_command, capture_output=True, text=True, encoding='utf-8', errors='replace')
+
     output = check_result.stdout
     has_errors = check_result.returncode != 0
     has_warnings = "Aviso(s)" in output and "0 Aviso(s)" not in output
     is_only_env_error = has_errors and "1 Erro(s)" in output and "Ambiente Inconsistente" in output
 
     # --- LÓGICA DE DECISÃO ---
-    
     # 1. Verifica se há erros bloqueantes
     if has_errors and not (force and is_only_env_error):
         click.echo(Fore.RED + "\n[ERRO] 'doxoade check' encontrou erros críticos. O salvamento foi abortado.")
