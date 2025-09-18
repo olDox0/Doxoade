@@ -44,6 +44,57 @@ def _load_config():
 # COMANDOS DA CLI (ARQUITETURA FINAL E ROBUSTA)
 # -----------------------------------------------------------------------------
 
+#atualizado em 2025/09/18-V44. Arquitetura do 'git-new' completamente refeita para ser "à prova de balas", garantindo a criação e o commit do .gitignore antes de outros arquivos e usando 'push --force' para o primeiro envio.
+@cli.command('git-new')
+@click.argument('message')
+@click.argument('remote_url')
+def git_new(message, remote_url):
+    """
+    [WORKFLOW COMPLETO] Inicializa um repositório, cria um .gitignore, faz o primeiro commit e envia para um repositório remoto VAZIO.
+    """
+    click.echo(Fore.CYAN + Style.BRIGHT + "--- [GIT-NEW] Automatizando a publicação de um novo projeto ---")
+    
+    # --- PASSO 0: Verificações de Sanidade ---
+    if os.path.exists('.git'):
+        click.echo(Fore.RED + "[ERRO] Este diretório já é um repositório Git."); sys.exit(1)
+        
+    # --- PASSO 1: Inicialização e .gitignore ---
+    click.echo(Fore.YELLOW + "\nPasso 1: Inicializando repositório e criando .gitignore...")
+    if not _run_git_command(['init', '-b', 'main']): sys.exit(1)
+    
+    # Garante que um .gitignore robusto exista
+    gitignore_content = ("venv/\n\n__pycache__/\n*.py[cod]\n\nbuild/\ndist/\n*.egg-info/\n\n.vscode/\n.idea/\n\n.env\ndesktop.ini\n")
+    with open('.gitignore', 'w', encoding='utf-8') as f: f.write(gitignore_content)
+    
+    if not _run_git_command(['add', '.gitignore']): sys.exit(1)
+    if not _run_git_command(['commit', '-m', 'Commit inicial: Adicionado .gitignore']): sys.exit(1)
+    
+    click.echo(Fore.GREEN + "[OK] Repositório inicializado e .gitignore commitado.")
+
+    # --- PASSO 2: Conexão e Primeiro 'doxoade save' ---
+    click.echo(Fore.YELLOW + "\nPasso 2: Conectando ao repositório remoto e salvando o projeto...")
+    if not _run_git_command(['remote', 'add', 'origin', remote_url]): sys.exit(1)
+    
+    python_executable = sys.executable 
+    save_command = [python_executable, '-m', 'doxoade.doxoade', 'save', message, '--force']
+    
+    process = subprocess.Popen(save_command)
+    process.wait()
+    
+    if process.returncode != 0:
+        click.echo(Fore.RED + "[ERRO] O comando 'doxoade save' falhou. Verifique os erros acima."); sys.exit(1)
+    click.echo(Fore.GREEN + "[OK] Código do projeto salvo com sucesso.")
+
+    # --- PASSO 3: O Push Final ---
+    click.echo(Fore.YELLOW + "\nPasso 3: Enviando o histórico completo para o GitHub (usando --force)...")
+    
+    # No contexto de 'git-new', um push forçado é o comportamento correto e esperado
+    # para garantir que o repositório remoto reflita este novo início.
+    if not _run_git_command(['push', '--force', '-u', 'origin', 'main']):
+        sys.exit(1)
+    
+    click.echo(Fore.GREEN + Style.BRIGHT + "\n[GIT-NEW] Projeto publicado com sucesso no GitHub!")
+    
 #atualizado em 2025/09/18-V41. Novo comando 'git-clean' para remover arquivos rastreados que correspondem ao .gitignore.
 @cli.command('git-clean')
 def git_clean():

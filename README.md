@@ -1,75 +1,92 @@
-# doxoade - olDox222 Advanced Development Environment (v1.0)
-
-`doxoade` é uma ferramenta de linha de comando para analisar e auxiliar no desenvolvimento de projetos Python. Ela foi criada para ser um "engenheiro sênior automatizado", encapsulando lições aprendidas de projetos anteriores para prevenir erros comuns, reforçar boas práticas e acelerar o ciclo de desenvolvimento.
-
-A filosofia da ferramenta é fornecer diagnósticos rápidos e precisos que não apenas identificam um problema, mas também oferecem contexto e soluções baseadas em uma base de conhecimento interna de P&D.
-
-## Funcionalidades Principais
-
-A suíte OADE-LITE v1.0 cobre todo o ciclo de vida básico de um projeto:
-
--   **`doxoade init`**: Um assistente interativo para criar a estrutura inicial de um novo projeto Python, incluindo `venv`, `.gitignore` e arquivos iniciais.
--   **`doxoade run`**: Executa scripts Python garantindo o uso do ambiente virtual (`venv`) correto, prevenindo a classe de erros mais comum de "discrepância de ambiente" e oferecendo diagnóstico em caso de falha.
--   **`doxoade check`**: Executa um diagnóstico completo do código-fonte Python, verificando o ambiente, as dependências e procurando por bugs comuns e "code smells".
--   **`doxoade webcheck`**: Analisa arquivos de frontend (`.html`, `.css`, `.js`) em busca de problemas como links quebrados, erros de sintaxe e más práticas de acessibilidade/manutenção.
--   **`doxoade guicheck`**: Analisa arquivos de GUI (Tkinter) em busca de problemas comuns, como widgets sem ação.
--   **`doxoade clean`**: Limpa o projeto de artefatos de build e cache (`__pycache__`, `build/`, `dist/`, `*.spec`) de forma segura.
-
-## Instalação
-
-O `doxoade` é projetado para ser instalado como uma ferramenta global no seu sistema, permitindo que seja usado para analisar qualquer projeto, em qualquer diretório.
-
-**1. Clone o Repositório (se aplicável):**
-```bash
-git clone <URL_DO_SEU_REPOSITORIO>
+doxoade - olDox222 Advanced Development Environment (v2.0)
+doxoade é uma ferramenta de linha de comando para iniciar, analisar e gerenciar o workflow de projetos Python. Ela foi criada para ser um "engenheiro sênior automatizado", encapsulando lições aprendidas de projetos anteriores para prevenir erros comuns, reforçar boas práticas e acelerar o ciclo de desenvolvimento de forma segura e consistente.
+A filosofia da ferramenta é fornecer diagnósticos e automações que não apenas resolvem um problema, mas também ensinam e impõem um processo de engenharia robusto, desde a criação do projeto até o seu versionamento.
+Funcionalidades Principais
+A suíte OADE v2.0 cobre todo o ciclo de vida de um projeto, integrando análise de código, execução segura e versionamento com Git.
+Ciclo de Vida do Projeto
+doxoade init [NOME_PROJETO]: Um assistente para criar a estrutura inicial de um novo projeto Python, incluindo venv, um .gitignore robusto e a inicialização de um repositório Git (git init -b main).
+doxoade clean: Limpa o projeto de artefatos de build e cache (__pycache__, build/, dist/, *.egg-info, *.spec) de forma segura.
+Análise e Qualidade de Código
+doxoade check: Executa um diagnóstico completo do código-fonte Python, verificando o ambiente, as dependências e procurando por bugs e "code smells" com Pyflakes.
+doxoade webcheck: Analisa arquivos de frontend (.html, .css, .js) em busca de problemas como links quebrados, erros de sintaxe e más práticas.
+doxoade guicheck: Analisa arquivos de GUI (Tkinter) em busca de problemas comuns, como widgets sem ação, usando análise de árvore de sintaxe abstrata (AST).
+Workflow e Automação
+doxoade run <script>: Executa scripts Python de forma segura e não-bloqueante, garantindo o uso do venv correto e oferecendo um diagnóstico pós-execução em caso de falha. O CTRL+C é tratado de forma graciosa.
+doxoade save "MENSAGEM": Um "commit seguro". Ele primeiro executa doxoade check. Se houver erros, o commit é abortado, protegendo seu repositório. Se tudo estiver certo, ele executa git add . e git commit.
+doxoade git-clean: Uma ferramenta de "higienização" que lê seu .gitignore e remove do rastreamento do Git quaisquer arquivos que foram commitados por engano (como a pasta venv).
+doxoade auto "CMD1" "CMD2"...: Um executor de tarefas que roda uma sequência de comandos. Ele executa todos os passos, mesmo que um falhe, e apresenta um sumário final de sucessos e falhas.
+Telemetria e Análise
+doxoade log: Exibe as últimas entradas do log de execuções do doxoade, permitindo uma consulta rápida dos resultados de análises anteriores. A flag --snippets mostra o contexto de código exato para cada problema encontrado.
+Instalação
+O doxoade é projetado para ser instalado como uma ferramenta global.
+1. Clone o Repositório (se aplicável):
+code
+Bash
+git clone <URL_DO_REPOSITORIO>
 cd doxoade
 2. Instale em Modo Editável:
-Recomenda-se instalar em "modo editável" (-e). Isso cria o comando doxoade no seu sistema, mas o vincula diretamente ao código-fonte, permitindo que futuras melhorias na ferramenta sejam refletidas instantaneamente.
-Abra um terminal como Administrador e execute:
+Recomenda-se instalar em "modo editável" (-e). Isso cria o comando doxoade no seu sistema, mas o vincula diretamente ao código-fonte.
 code
 Bash
 # Navegue até a pasta raiz do projeto 'doxoade'
 pip install -e .
 Após a instalação, o comando doxoade estará disponível em qualquer novo terminal.
-Guia de Uso
-Uma vez instalado, você pode usar o doxoade de qualquer diretório para iniciar ou analisar seus projetos.
-Iniciando um Novo Projeto
-Use o assistente init para criar um novo projeto com a estrutura correta.
+Configuração (Opcional)
+Para evitar repetir opções como --ignore em múltiplos comandos, você pode criar um arquivo .doxoaderc na raiz do projeto que deseja analisar.
+Exemplo de .doxoaderc:
+code
+Ini
+[doxoade]
+# Adicione nomes de pastas a serem ignoradas, um por linha.
+ignore = 
+    node_modules
+    backups
+    documentacao_antiga
+Guia de Uso e Workflow Recomendado
+O doxoade foi projetado para se integrar perfeitamente ao seu fluxo de trabalho diário.
+Iniciando um Novo Projeto do Zero
+Este é o fluxo completo, da criação local à publicação no GitHub.
 code
 Bash
-# Navegue para sua pasta de projetos
+# 1. Navegue para sua pasta de trabalho
 cd C:\Caminho\Para\MeusProjetos
 
-# Inicie o assistente
-doxoade init
-Siga as instruções, fornecendo um nome para o seu projeto. O doxoade criará a pasta do projeto, o venv e os arquivos iniciais para você.
-Analisando um Projeto Existente
-O fluxo de trabalho mais comum é usar check, webcheck e guicheck.
+# 2. Crie o projeto. O doxoade vai criar a pasta, o venv, o .gitignore e inicializar o Git.
+doxoade init meu-novo-projeto
+
+# 3. Vá para o GitHub e crie um novo repositório VAZIO chamado "meu-novo-projeto". Copie a URL.
+
+# 4. Entre no diretório do projeto e conecte-o ao GitHub
+cd meu-novo-projeto
+git remote add origin <URL_DO_SEU_REPOSITORIO_NO_GITHUB.git>
+
+# 5. Ative o ambiente virtual
+.\venv\Scripts\activate
+
+# 6. Faça o primeiro commit usando o "commit seguro" do doxoade
+(venv) > doxoade save "Commit inicial: Estrutura do projeto criada pelo doxoade"
+
+# 7. Envie seu projeto para o GitHub pela primeira vez
+(venv) > git push -u origin main
+O Ciclo de Desenvolvimento Diário
+Para cada nova funcionalidade ou correção de bug.
 code
 Bash
-# Navegue até a pasta do projeto que você quer analisar
-cd C:\Caminho\Para\MeuProjeto
+# (venv) > Ative o ambiente virtual, se ainda não estiver ativo.
 
-# Execute a análise de backend (Python)
-doxoade check
+# 1. Escreva seu código, modifique arquivos...
 
-# Execute a análise de frontend, ignorando pastas de backup
-doxoade webcheck . --ignore backups --ignore old_versions
-Omitir o caminho (ou usar .) analisa o diretório atual.
-A opção --ignore pode ser usada várias vezes. venv, build, e dist são ignorados por padrão.
-Executando Scripts com Segurança
-Para executar um script garantindo que ele use o venv do seu projeto, use o comando run.
-code
-Bash
-# Navegue até a pasta do projeto
-cd C:\Caminho\Para\MeuProjeto
+# 2. Quando estiver pronto para salvar, use o 'doxoade save'.
+# Ele irá verificar seu código por erros antes de permitir o commit.
+(venv) > doxoade save "Adicionada funcionalidade de login de usuário"
 
-# Execute o script principal
-doxoade run main.py
+# 3. Se o 'save' foi bem-sucedido, envie suas alterações para o repositório remoto.
+(venv) > git push```
 
-# Execute um script com argumentos
-doxoade run process_data.py --input dados.csv --force```
-O `doxoade run` detecta automaticamente o `venv` do projeto e o utiliza, prevenindo erros de `ModuleNotFoundError`. Se o script falhar, ele apresentará um diagnóstico com possíveis causas baseadas em problemas conhecidos.
+### Executando uma Suíte de Diagnóstico Completa
 
----
-*Este projeto é uma ferramenta interna de P&D para encapsular e automatizar o conhecimento adquirido.*
+Use o `doxoade auto` para rodar uma bateria de testes e ver um sumário no final.
+
+```bash
+# Executa todas as principais verificações e depois tenta rodar a GUI.
+doxoade auto "doxoade check ." "doxoade guicheck ." "doxoade webcheck ." "doxoade run main_gui.py"
