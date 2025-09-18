@@ -1,0 +1,10 @@
+README.md
+setup.py
+doxoade/__init__.py
+doxoade/doxoade.py
+doxoade.egg-info/PKG-INFO
+doxoade.egg-info/SOURCES.txt
+doxoade.egg-info/dependency_links.txt
+doxoade.egg-info/entry_points.txt
+doxoade.egg-info/requires.txt
+doxoade.egg-info/top_level.txt

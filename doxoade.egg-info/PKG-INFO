@@ -1,0 +1,100 @@
+Metadata-Version: 2.4
+Name: doxoade
+Version: 1.0.0
+Summary: olDox222 Advanced Development Environment - Ferramenta de análise de projetos Python
+Author: olDox222
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: click
+Requires-Dist: colorama
+Requires-Dist: beautifulsoup4
+Requires-Dist: lxml
+Requires-Dist: cssutils
+Requires-Dist: esprima
+Requires-Dist: pyflakes
+Dynamic: author
+Dynamic: classifier
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
+
+# doxoade - olDox222 Advanced Development Environment (v1.0)
+
+`doxoade` Ã© uma ferramenta de linha de comando para analisar e auxiliar no desenvolvimento de projetos Python. Ela foi criada para ser um "engenheiro sÃªnior automatizado", encapsulando liÃ§Ãµes aprendidas de projetos anteriores para prevenir erros comuns, reforÃ§ar boas prÃ¡ticas e acelerar o ciclo de desenvolvimento.
+
+A filosofia da ferramenta Ã© fornecer diagnÃ³sticos rÃ¡pidos e precisos que nÃ£o apenas identificam um problema, mas tambÃ©m oferecem contexto e soluÃ§Ãµes baseadas em uma base de conhecimento interna de P&D.
+
+## Funcionalidades Principais
+
+A suÃ­te OADE-LITE v1.0 cobre todo o ciclo de vida bÃ¡sico de um projeto:
+
+-   **`doxoade init`**: Um assistente interativo para criar a estrutura inicial de um novo projeto Python, incluindo `venv`, `.gitignore` e arquivos iniciais.
+-   **`doxoade run`**: Executa scripts Python garantindo o uso do ambiente virtual (`venv`) correto, prevenindo a classe de erros mais comum de "discrepÃ¢ncia de ambiente" e oferecendo diagnÃ³stico em caso de falha.
+-   **`doxoade check`**: Executa um diagnÃ³stico completo do cÃ³digo-fonte Python, verificando o ambiente, as dependÃªncias e procurando por bugs comuns e "code smells".
+-   **`doxoade webcheck`**: Analisa arquivos de frontend (`.html`, `.css`, `.js`) em busca de problemas como links quebrados, erros de sintaxe e mÃ¡s prÃ¡ticas de acessibilidade/manutenÃ§Ã£o.
+-   **`doxoade guicheck`**: Analisa arquivos de GUI (Tkinter) em busca de problemas comuns, como widgets sem aÃ§Ã£o.
+-   **`doxoade clean`**: Limpa o projeto de artefatos de build e cache (`__pycache__`, `build/`, `dist/`, `*.spec`) de forma segura.
+
+## InstalaÃ§Ã£o
+
+O `doxoade` Ã© projetado para ser instalado como uma ferramenta global no seu sistema, permitindo que seja usado para analisar qualquer projeto, em qualquer diretÃ³rio.
+
+**1. Clone o RepositÃ³rio (se aplicÃ¡vel):**
+```bash
+git clone <URL_DO_SEU_REPOSITORIO>
+cd doxoade
+2. Instale em Modo EditÃ¡vel:
+Recomenda-se instalar em "modo editÃ¡vel" (-e). Isso cria o comando doxoade no seu sistema, mas o vincula diretamente ao cÃ³digo-fonte, permitindo que futuras melhorias na ferramenta sejam refletidas instantaneamente.
+Abra um terminal como Administrador e execute:
+code
+Bash
+# Navegue atÃ© a pasta raiz do projeto 'doxoade'
+pip install -e .
+ApÃ³s a instalaÃ§Ã£o, o comando doxoade estarÃ¡ disponÃ­vel em qualquer novo terminal.
+Guia de Uso
+Uma vez instalado, vocÃª pode usar o doxoade de qualquer diretÃ³rio para iniciar ou analisar seus projetos.
+Iniciando um Novo Projeto
+Use o assistente init para criar um novo projeto com a estrutura correta.
+code
+Bash
+# Navegue para sua pasta de projetos
+cd C:\Caminho\Para\MeusProjetos
+
+# Inicie o assistente
+doxoade init
+Siga as instruÃ§Ãµes, fornecendo um nome para o seu projeto. O doxoade criarÃ¡ a pasta do projeto, o venv e os arquivos iniciais para vocÃª.
+Analisando um Projeto Existente
+O fluxo de trabalho mais comum Ã© usar check, webcheck e guicheck.
+code
+Bash
+# Navegue atÃ© a pasta do projeto que vocÃª quer analisar
+cd C:\Caminho\Para\MeuProjeto
+
+# Execute a anÃ¡lise de backend (Python)
+doxoade check
+
+# Execute a anÃ¡lise de frontend, ignorando pastas de backup
+doxoade webcheck . --ignore backups --ignore old_versions
+Omitir o caminho (ou usar .) analisa o diretÃ³rio atual.
+A opÃ§Ã£o --ignore pode ser usada vÃ¡rias vezes. venv, build, e dist sÃ£o ignorados por padrÃ£o.
+Executando Scripts com SeguranÃ§a
+Para executar um script garantindo que ele use o venv do seu projeto, use o comando run.
+code
+Bash
+# Navegue atÃ© a pasta do projeto
+cd C:\Caminho\Para\MeuProjeto
+
+# Execute o script principal
+doxoade run main.py
+
+# Execute um script com argumentos
+doxoade run process_data.py --input dados.csv --force```
+O `doxoade run` detecta automaticamente o `venv` do projeto e o utiliza, prevenindo erros de `ModuleNotFoundError`. Se o script falhar, ele apresentarÃ¡ um diagnÃ³stico com possÃ­veis causas baseadas em problemas conhecidos.
+
+---
+*Este projeto Ã© uma ferramenta interna de P&D para encapsular e automatizar o conhecimento adquirido.*

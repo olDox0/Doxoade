@@ -1,0 +1,7 @@
+[doxoade]
+# Adicione nomes de pastas a serem ignoradas, um por linha.
+# Estes serão combinados com qualquer --ignore passado na linha de comando.
+ignore = 
+    node_modules
+    backups
+    documentacao_antiga

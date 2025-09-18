@@ -1,0 +1,2 @@
+[console_scripts]
+doxoade = doxoade.doxoade:cli

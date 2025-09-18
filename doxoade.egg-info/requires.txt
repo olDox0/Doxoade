@@ -1,0 +1,7 @@
+click
+colorama
+beautifulsoup4
+lxml
+cssutils
+esprima
+pyflakes
