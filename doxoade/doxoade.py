@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import click
 import shlex
+import fnmatch
 from bs4 import BeautifulSoup
 from io import StringIO
 from colorama import init, Fore, Style
@@ -42,6 +43,63 @@ def _load_config():
 # -----------------------------------------------------------------------------
 # COMANDOS DA CLI (ARQUITETURA FINAL E ROBUSTA)
 # -----------------------------------------------------------------------------
+
+#atualizado em 2025/09/18-V41. Novo comando 'git-clean' para remover arquivos rastreados que correspondem ao .gitignore.
+@cli.command('git-clean')
+def git_clean():
+    """Força a remoção de arquivos já rastreados que deveriam ser ignorados."""
+    click.echo(Fore.CYAN + "--- [GIT-CLEAN] Procurando por arquivos rastreados indevidamente ---")
+    
+    gitignore_path = '.gitignore'
+    if not os.path.exists(gitignore_path):
+        click.echo(Fore.RED + "[ERRO] Arquivo .gitignore não encontrado no diretório atual.")
+        sys.exit(1)
+
+    # 1. Obter a lista de padrões do .gitignore
+    with open(gitignore_path, 'r') as f:
+        ignore_patterns = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+
+    # 2. Obter a lista de TODOS os arquivos rastreados pelo Git
+    tracked_files_str = _run_git_command(['ls-files'], capture_output=True)
+    if tracked_files_str is None:
+        sys.exit(1)
+    tracked_files = tracked_files_str.splitlines()
+
+    # 3. Encontrar os arquivos que correspondem aos padrões
+    files_to_remove = []
+    for pattern in ignore_patterns:
+        # Lida com padrões de diretório como 'venv/'
+        if pattern.endswith('/'):
+            pattern += '*'
+        
+        # fnmatch é perfeito para comparar nomes de arquivos com padrões do gitignore
+        matches = fnmatch.filter(tracked_files, pattern)
+        if matches:
+            files_to_remove.extend(matches)
+    
+    if not files_to_remove:
+        click.echo(Fore.GREEN + "[OK] Nenhum arquivo rastreado indevidamente encontrado. Seu repositório está limpo!")
+        return
+
+    click.echo(Fore.YELLOW + "\nOs seguintes arquivos estão sendo rastreados pelo Git, mas correspondem a padrões no seu .gitignore:")
+    for f in files_to_remove:
+        click.echo(f"  - {f}")
+    
+    if click.confirm(Fore.RED + "\nVocê tem certeza de que deseja parar de rastrear (untrack) TODOS estes arquivos?", abort=True):
+        click.echo(Fore.CYAN + "Removendo arquivos do índice do Git...")
+        # Remove os arquivos um por um para mais segurança
+        success = True
+        for f in files_to_remove:
+            if not _run_git_command(['rm', '--cached', f]):
+                success = False
+        
+        if success:
+            click.echo(Fore.GREEN + "\n[OK] Arquivos removidos do rastreamento com sucesso.")
+            click.echo(Fore.YELLOW + "Suas alterações foram preparadas (staged).")
+            click.echo(Fore.YELLOW + "Para finalizar, execute o seguinte comando:")
+            click.echo(Fore.CYAN + '  doxoade save "Limpeza de arquivos ignorados"')
+        else:
+            click.echo(Fore.RED + "[ERRO] Ocorreu um erro ao remover um ou mais arquivos.")
 
 #atualizado em 2025/09/17-V40. 'save' agora usa 'git commit -a' para respeitar os arquivos removidos do índice.
 @cli.command()
