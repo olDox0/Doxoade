@@ -279,20 +279,29 @@ def init(project_name):
     finally:
         os.chdir(original_dir)
 
-#atualizado em 2025/09/16-V29. 'auto' agora invoca 'doxoade' como um módulo ('python -m doxoade') para garantir a propagação correta do código de saída e corrigir o bug do "sucesso falso".
+#atualizado em 2025/09/20-V48. Removido 'capture_output=True' para permitir o streaming de saída em tempo real dos comandos filhos, corrigindo o bug de "eco atrasado".
 @cli.command()
 @click.argument('commands', nargs=-1, required=True)
 def auto(commands):
-    """Executa uma sequência completa de comandos e reporta o status de cada um."""
+    """
+    Executa uma sequência completa de comandos e reporta o status de cada um.
+    
+    Exemplo: doxoade auto "doxoade check ." "doxoade run main.py"
+    """
     total_commands = len(commands)
     click.echo(Fore.CYAN + Style.BRIGHT + f"--- [AUTO] Iniciando sequência de {total_commands} comando(s) ---")
+    
     results = []
+    
     try:
         for i, command_str in enumerate(commands, 1):
             click.echo(Fore.CYAN + f"\n--- [AUTO] Executando Passo {i}/{total_commands}: {command_str} ---")
+            
             step_result = {"command": command_str, "status": "sucesso", "returncode": 0}
+
             try:
                 args = shlex.split(command_str)
+
                 if args and args[0] == 'doxoade':
                     python_executable = sys.executable
                     command_to_run = [python_executable, '-m', 'doxoade.doxoade'] + args[1:]
@@ -301,23 +310,31 @@ def auto(commands):
                     command_to_run = command_str
                     use_shell = True
                 
+                # --- CORREÇÃO APLICADA AQUI ---
+                # Removemos capture_output=True. Agora a saída do filho vai direto para o terminal.
                 process_result = subprocess.run(
-                    command_to_run, shell=use_shell, text=True, encoding='utf-8', 
-                    errors='replace', capture_output=True
+                    command_to_run,
+                    shell=use_shell,
+                    text=True, 
+                    encoding='utf-8', 
+                    errors='replace'
                 )
-                if process_result.stdout: print(process_result.stdout)
-                if process_result.stderr: print(process_result.stderr, file=sys.stderr)
+                
                 if process_result.returncode != 0:
                     step_result["status"] = "falha"
                     step_result["returncode"] = process_result.returncode
+
             except Exception as e:
                 step_result["status"] = "falha"; step_result["error"] = str(e)
+
             results.append(step_result)
+
     except KeyboardInterrupt:
         click.echo(Fore.YELLOW + Style.BRIGHT + "\n\n [AUTO] Sequência cancelada pelo usuário (CTRL+C).")
         sys.exit(1)
         
     click.echo(Fore.CYAN + Style.BRIGHT + "\n--- [AUTO] Sumário da Sequência de Automação ---")
+    
     final_success = True
     for i, result in enumerate(results, 1):
         if result["status"] == "sucesso":
@@ -409,87 +426,85 @@ def guicheck(path, ignore, format):
         if results['summary']['errors'] > 0:
             sys.exit(1)
 
-#atualizado em 2025/09/16-V31. Corrigido bug do "erro suave" garantindo sys.exit(1) no bloco de exceção.
+#atualizado em 2025/09/20-V46. 'run' refatorado para garantir a leitura completa de stdout/stderr após o término do processo, corrigindo o bug do "log engasgado".
 @cli.command(context_settings=dict(ignore_unknown_options=True))
 @click.argument('script_and_args', nargs=-1, type=click.UNPROCESSED)
 def run(script_and_args):
     """Executa um script Python garantindo o uso do venv correto."""
     if not script_and_args:
-        click.echo(Fore.RED + "[ERRO] Erro: Nenhum script especificado para executar.", err=True); return
+        click.echo(Fore.RED + "[ERRO] Erro: Nenhum script especificado para executar.", err=True); sys.exit(1)
     
     script_name = script_and_args[0]
     if not os.path.exists(script_name):
         click.echo(Fore.RED + f"[ERRO] Erro: Não foi possível encontrar o script '{script_name}'.");
-        click.echo(Fore.CYAN + "   > Verifique se o nome e o caminho para o arquivo estão corretos."); return
+        click.echo(Fore.CYAN + "   > Verifique se o nome e o caminho para o arquivo estão corretos."); sys.exit(1)
         
     venv_path = 'venv'
     python_executable = os.path.join(venv_path, 'Scripts', 'python.exe') if os.name == 'nt' else os.path.join(venv_path, 'bin', 'python')
     if not os.path.exists(python_executable):
-        click.echo(Fore.RED + f"[ERRO] Erro: Ambiente virtual não encontrado em '{python_executable}'.", err=True); return
+        click.echo(Fore.RED + f"[ERRO] Erro: Ambiente virtual não encontrado em '{python_executable}'.", err=True); sys.exit(1)
         
-    command_to_run = [python_executable] + list(script_and_args)
+    # Adicionamos a flag '-u' para forçar a saída sem buffer (em tempo real)
+    command_to_run = [python_executable, '-u'] + list(script_and_args)
     click.echo(Fore.CYAN + f"-> Executando '{' '.join(script_and_args)}' com o interpretador do venv...")
     click.echo(Fore.YELLOW + f"   (Caminho do Python: {python_executable})")
     click.echo("-" * 40)
     
     process = None
     full_stderr = ""
-
+    return_code = 1 # Padrão para erro
+    
     try:
         process = subprocess.Popen(command_to_run, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace')
         
-        # Filas para comunicação entre os threads e o fio principal
-        q_stdout = queue.Queue()
-        q_stderr = queue.Queue()
-
-        # Cria e inicia os threads para ler a saída em segundo plano
+        q_stdout = queue.Queue(); q_stderr = queue.Queue()
         stdout_thread = threading.Thread(target=_stream_reader, args=(process.stdout, q_stdout), daemon=True)
         stderr_thread = threading.Thread(target=_stream_reader, args=(process.stderr, q_stderr), daemon=True)
-        stdout_thread.start()
-        stderr_thread.start()
+        stdout_thread.start(); stderr_thread.start()
 
-        # Loop principal: Fica vivo e responsivo enquanto o processo filho roda
+        # Loop principal para saída em tempo real
         while process.poll() is None:
             try:
-                # Exibe a saída em tempo real sem bloquear
-                while not q_stdout.empty():
-                    print(q_stdout.get_nowait(), end='')
+                while not q_stdout.empty(): print(q_stdout.get_nowait(), end='')
                 while not q_stderr.empty():
                     line = q_stderr.get_nowait()
-                    full_stderr += line
-                    print(Fore.RED + line, end='', file=sys.stderr)
-            except queue.Empty:
-                pass
-            time.sleep(0.1) # Pequena pausa para não consumir 100% de CPU
+                    full_stderr += line; print(Fore.RED + line, end='', file=sys.stderr)
+            except queue.Empty: pass
+            time.sleep(0.1)
 
-        # Garante que os threads terminaram antes de prosseguir
+        # --- CORREÇÃO APLICADA AQUI ---
+        # Garante que qualquer saída restante seja lida após o término do processo.
         stdout_thread.join(timeout=1)
         stderr_thread.join(timeout=1)
         
+        # Esvazia as filas uma última vez
+        while not q_stdout.empty(): print(q_stdout.get_nowait(), end='')
+        while not q_stderr.empty():
+            line = q_stderr.get_nowait()
+            full_stderr += line; print(Fore.RED + line, end='', file=sys.stderr)
+        # --- FIM DA CORREÇÃO ---
+
         return_code = process.returncode
 
     except KeyboardInterrupt:
         click.echo("\n" + Fore.YELLOW + "[RUN] Interrupção detectada (CTRL+C). Encerrando o script filho...")
-        if process:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-                click.echo(Fore.YELLOW + "Script encerrado.")
-            except subprocess.TimeoutExpired:
-                click.echo(Fore.RED + "O script não respondeu. Forçando o encerramento (kill).", err=True)
-                process.kill()
+        if process: process.terminate()
         return_code = 130
     except Exception as e:
-        click.echo(Fore.RED + f"[ERRO] Ocorreu um erro inesperado ao executar o script: {e}", err=True)
+        # Sanitiza a mensagem de erro para garantir que ela possa ser impressa em qualquer terminal
+        safe_error = str(e).encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding)
+        click.echo(Fore.RED + f"[ERRO] Ocorreu um erro inesperado ao executar o script: {safe_error}", err=True)
+        if process: process.kill()
         sys.exit(1)
     finally:
         if process and process.poll() is None:
-            process.kill() # Garante que nenhum processo zumbi seja deixado para trás
+            process.kill()
 
     click.echo("-" * 40)
     if return_code != 0 or full_stderr:
         if full_stderr: _analyze_traceback(full_stderr)
         click.echo(Fore.RED + f"[ERRO] O script '{script_name}' terminou com um erro ou avisos (código {return_code}).")
+        sys.exit(1)
     else:
         click.echo(Fore.GREEN + f"[OK] Script '{script_name}' finalizado com sucesso.")
 
