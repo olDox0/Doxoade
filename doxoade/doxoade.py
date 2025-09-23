@@ -1,6 +1,3 @@
-import threading
-import queue
-import time
 import ast
 import json
 import configparser
@@ -426,64 +423,41 @@ def guicheck(path, ignore, format):
         if results['summary']['errors'] > 0:
             sys.exit(1)
 
-#atualizado em 2025/09/20-V46. 'run' refatorado para garantir a leitura completa de stdout/stderr após o término do processo, corrigindo o bug do "log engasgado".
+#atualizado em 2025/09/20-V49. Arquitetura do 'run' refeita para suportar scripts interativos (input()), herdando os fluxos de I/O do terminal.
 @cli.command(context_settings=dict(ignore_unknown_options=True))
 @click.argument('script_and_args', nargs=-1, type=click.UNPROCESSED)
 def run(script_and_args):
-    """Executa um script Python garantindo o uso do venv correto."""
+    """Executa um script Python, suportando interatividade (input) e GUIs."""
     if not script_and_args:
         click.echo(Fore.RED + "[ERRO] Erro: Nenhum script especificado para executar.", err=True); sys.exit(1)
     
     script_name = script_and_args[0]
     if not os.path.exists(script_name):
-        click.echo(Fore.RED + f"[ERRO] Erro: Não foi possível encontrar o script '{script_name}'.");
-        click.echo(Fore.CYAN + "   > Verifique se o nome e o caminho para o arquivo estão corretos."); sys.exit(1)
+        click.echo(Fore.RED + f"[ERRO] Erro: Não foi possível encontrar o script '{script_name}'."); sys.exit(1)
         
     venv_path = 'venv'
     python_executable = os.path.join(venv_path, 'Scripts', 'python.exe') if os.name == 'nt' else os.path.join(venv_path, 'bin', 'python')
     if not os.path.exists(python_executable):
         click.echo(Fore.RED + f"[ERRO] Erro: Ambiente virtual não encontrado em '{python_executable}'.", err=True); sys.exit(1)
         
-    # Adicionamos a flag '-u' para forçar a saída sem buffer (em tempo real)
     command_to_run = [python_executable, '-u'] + list(script_and_args)
     click.echo(Fore.CYAN + f"-> Executando '{' '.join(script_and_args)}' com o interpretador do venv...")
     click.echo(Fore.YELLOW + f"   (Caminho do Python: {python_executable})")
     click.echo("-" * 40)
     
     process = None
-    full_stderr = ""
-    return_code = 1 # Padrão para erro
+    return_code = 1
     
     try:
-        process = subprocess.Popen(command_to_run, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace')
+        # --- MUDANÇA ARQUITETURAL ---
+        # Não especificamos stdout, stderr ou stdin.
+        # Isso faz com que o processo filho herde o terminal do pai,
+        # permitindo a entrada (input) e a saída (print) diretas.
+        process = subprocess.Popen(command_to_run)
         
-        q_stdout = queue.Queue(); q_stderr = queue.Queue()
-        stdout_thread = threading.Thread(target=_stream_reader, args=(process.stdout, q_stdout), daemon=True)
-        stderr_thread = threading.Thread(target=_stream_reader, args=(process.stderr, q_stderr), daemon=True)
-        stdout_thread.start(); stderr_thread.start()
-
-        # Loop principal para saída em tempo real
-        while process.poll() is None:
-            try:
-                while not q_stdout.empty(): print(q_stdout.get_nowait(), end='')
-                while not q_stderr.empty():
-                    line = q_stderr.get_nowait()
-                    full_stderr += line; print(Fore.RED + line, end='', file=sys.stderr)
-            except queue.Empty: pass
-            time.sleep(0.1)
-
-        # --- CORREÇÃO APLICADA AQUI ---
-        # Garante que qualquer saída restante seja lida após o término do processo.
-        stdout_thread.join(timeout=1)
-        stderr_thread.join(timeout=1)
-        
-        # Esvazia as filas uma última vez
-        while not q_stdout.empty(): print(q_stdout.get_nowait(), end='')
-        while not q_stderr.empty():
-            line = q_stderr.get_nowait()
-            full_stderr += line; print(Fore.RED + line, end='', file=sys.stderr)
-        # --- FIM DA CORREÇÃO ---
-
+        # Como não estamos capturando a saída, simplesmente esperamos o processo terminar.
+        # O Popen não é bloqueante, então o KeyboardInterrupt ainda funciona.
+        process.wait()
         return_code = process.returncode
 
     except KeyboardInterrupt:
@@ -491,7 +465,6 @@ def run(script_and_args):
         if process: process.terminate()
         return_code = 130
     except Exception as e:
-        # Sanitiza a mensagem de erro para garantir que ela possa ser impressa em qualquer terminal
         safe_error = str(e).encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding)
         click.echo(Fore.RED + f"[ERRO] Ocorreu um erro inesperado ao executar o script: {safe_error}", err=True)
         if process: process.kill()
@@ -501,9 +474,11 @@ def run(script_and_args):
             process.kill()
 
     click.echo("-" * 40)
-    if return_code != 0 or full_stderr:
-        if full_stderr: _analyze_traceback(full_stderr)
-        click.echo(Fore.RED + f"[ERRO] O script '{script_name}' terminou com um erro ou avisos (código {return_code}).")
+    
+    # IMPORTANTE: Como não capturamos mais o stderr, o diagnóstico pós-execução se torna impossível.
+    # Esta é uma troca consciente: ganhamos interatividade, mas perdemos a análise de traceback.
+    if return_code != 0:
+        click.echo(Fore.RED + f"[ERRO] O script '{script_name}' terminou com o código de erro {return_code}.")
         sys.exit(1)
     else:
         click.echo(Fore.GREEN + f"[OK] Script '{script_name}' finalizado com sucesso.")
@@ -648,13 +623,6 @@ def _display_log_entry(entry, index, total, show_snippets=False):
                         click.echo(Fore.WHITE + f"      {line_num:3}: {code_line}")
     click.echo("")
     
-#atualizado em 2025/09/16-V24. Função trabalhadora para ler streams de I/O em um thread separado de forma não-bloqueante.
-def _stream_reader(stream, q):
-    """Lê linhas de um stream e as coloca em uma fila."""
-    for line in iter(stream.readline, ''):
-        q.put(line)
-    stream.close()
-
 #atualizado em 2025/09/16-V23. Nova função auxiliar para extrair trechos de código de arquivos, enriquecendo os logs.
 def _get_code_snippet(file_path, line_number, context_lines=2):
     """
@@ -831,6 +799,102 @@ def _check_web_assets(path, ignore_list=None):
         elif file_path.endswith('.js'): findings.extend(_analyze_js_file(file_path))
     return findings
 
+#atualizado em 2025/09/23-Versão 5.1. Aprimorada a análise de layout para capturar e reportar os números de linha relevantes para os erros, melhorando a precisão do diagnóstico.
+def _analyze_tkinter_layout(tree, file_path):
+    """
+    Analisa uma AST de um arquivo Python em busca de erros de design de layout Tkinter
+    usando uma abordagem de múltiplas passagens e reportando números de linha.
+    """
+    findings = []
+    
+    # --- PRIMEIRA PASSAGEM: Construir o mapa de hierarquia (quem é pai de quem) ---
+    widget_parent_map = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            if node.value.args:
+                parent_node = node.value.args[0]
+                parent_name = None
+                # Tenta extrair o nome do pai (ex: self.main_frame -> 'main_frame')
+                if isinstance(parent_node, ast.Name): parent_name = parent_node.id
+                elif isinstance(parent_node, ast.Attribute): parent_name = parent_node.attr
+                
+                # Tenta extrair o nome do widget filho (ex: self.my_button -> 'my_button')
+                widget_name = None
+                if hasattr(node.targets[0], 'id'): widget_name = node.targets[0].id
+                elif hasattr(node.targets[0], 'attr'): widget_name = node.targets[0].attr
+
+                if parent_name and widget_name:
+                    widget_parent_map[widget_name] = parent_name
+
+    # --- SEGUNDA PASSAGEM: Coletar dados de layout e configuração de grid ---
+    # Estrutura aprimorada para guardar também o número da linha
+    parent_layouts = {}  # {'parent_name': {'pack': [10, 15], 'grid': [12]}}
+    grid_configs = {}    # {'parent_name': {'rows_weighted': {0, 1}, 'cols_weighted': {0}}}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            widget_name = None
+            if isinstance(node.func.value, ast.Name): widget_name = node.func.value.id
+            elif isinstance(node.func.value, ast.Attribute): widget_name = node.func.value.attr
+                
+            parent_name = widget_parent_map.get(widget_name)
+
+            if node.func.attr in ['pack', 'grid']:
+                layout_manager = node.func.attr
+                if parent_name:
+                    # Inicializa a estrutura se for o primeiro encontro
+                    parent_layouts.setdefault(parent_name, {})
+                    # Adiciona o número da linha à lista daquele gerenciador
+                    parent_layouts[parent_name].setdefault(layout_manager, []).append(node.lineno)
+
+            if node.func.attr in ['rowconfigure', 'columnconfigure'] and parent_name:
+                has_weight = any(kw.arg == 'weight' and isinstance(kw.value, ast.Constant) and kw.value.value > 0 for kw in node.keywords)
+                if has_weight:
+                    config_type = 'rows_weighted' if node.func.attr == 'rowconfigure' else 'cols_weighted'
+                    grid_configs.setdefault(parent_name, {'rows_weighted': set(), 'cols_weighted': set()})
+                    if node.args and isinstance(node.args[0], ast.Constant):
+                        index = node.args[0].value
+                        grid_configs[parent_name][config_type].add(index)
+
+    # --- ANÁLISE FINAL: Usar os dados coletados para encontrar problemas ---
+
+    for parent, layouts in parent_layouts.items():
+        # 1. Encontra pais com múltiplos gerenciadores de layout
+        if len(layouts) > 1:
+            # Concatena todas as linhas de todos os layouts para reportar
+            all_lines = []
+            for manager_lines in layouts.values():
+                all_lines.extend(manager_lines)
+            
+            # Pega a primeira linha como a principal para o relatório
+            line_report = min(all_lines) if all_lines else None
+            
+            findings.append({
+                'type': 'error',
+                'message': f"Uso misto de gerenciadores de layout ({', '.join(layouts.keys())}) no widget pai '{parent}'.",
+                'details': f"As chamadas conflitantes foram encontradas nas linhas: {sorted(all_lines)}.",
+                'ref': 'OADE-15',
+                'file': file_path,
+                'line': line_report 
+            })
+
+        # 2. Encontra pais que usam .grid mas não configuram o peso
+        if 'grid' in layouts:
+            if parent not in grid_configs or not (grid_configs[parent]['rows_weighted'] or grid_configs[parent]['cols_weighted']):
+                # Reporta a linha da primeira chamada .grid() encontrada para este pai
+                line_report = min(layouts['grid']) if layouts['grid'] else None
+                findings.append({
+                    'type': 'warning',
+                    'message': f"O widget pai '{parent}' usa o layout .grid() mas não parece configurar o 'weight'.",
+                    'details': "Sem 'weight' > 0 em .rowconfigure()/.columnconfigure(), o layout não será responsivo.",
+                    'ref': 'OADE-15',
+                    'file': file_path,
+                    'line': line_report
+                })
+                
+    return findings
+
+
 def _check_gui_files(path, ignore_list=None):
     """Analisa arquivos Python de GUI e retorna uma lista de problemas."""
     folders_to_ignore = set([item.lower() for item in ignore_list or []] + ['venv', 'build', 'dist'])
@@ -845,8 +909,17 @@ def _check_gui_files(path, ignore_list=None):
     
     findings = []
     for file_path in files_to_check:
-        findings.extend(_check_gui_events(file_path))
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+        try:
+            tree = ast.parse(content)
+            # Executa ambas as análises e consolida os resultados
+            findings.extend(_check_gui_events(tree, file_path))
+            findings.extend(_analyze_tkinter_layout(tree, file_path))
+        except SyntaxError as e:
+            findings.append({'type': 'error', 'message': f"Erro de sintaxe Python impede análise: {e}", 'file': file_path, 'line': e.lineno})
     return findings
+
 
 # -----------------------------------------------------------------------------
 # FUNÇÕES DE ANÁLISE ESPECÍFICAS (COLETA DE DADOS)
@@ -889,7 +962,7 @@ def _analyze_js_file(file_path):
     except esprima.Error as e:
         return [{'type': 'error', 'message': f"Erro de sintaxe JS: {e.message}", 'file': file_path, 'line': e.lineNumber}]
 
-def _check_gui_events(file_path):
+def _check_gui_events(tree, file_path):
     findings = []
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f: content = f.read()
     try: tree = ast.parse(content)
