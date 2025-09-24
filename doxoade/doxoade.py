@@ -8,6 +8,7 @@ import subprocess
 import click
 import shlex
 import fnmatch
+import tempfile
 from bs4 import BeautifulSoup
 from io import StringIO
 from colorama import init, Fore, Style
@@ -99,6 +100,214 @@ def tutorial():
 
     click.echo(Fore.YELLOW + Style.BRIGHT + "\n--- Fim do Guia ---\n")
     click.echo(Fore.WHITE + "   Lembre-se: use a flag '--help' em qualquer comando para ver mais detalhes e opções. Ex: 'doxoade save --help'.\n")
+
+
+#atualizado em 2025/09/24-Versão 6.1. Aprimorada a lógica da simulação para demonstrar a falha do 'save' e o uso do '--force', tornando o aprendizado mais completo.
+@cli.command('tutorial-simulation')
+def tutorial_simulation():
+    """Executa uma simulação interativa do workflow do doxoade em um ambiente seguro."""
+    
+    click.echo(Fore.CYAN + Style.BRIGHT + "--- Bem-vindo à Simulação do Doxoade ---")
+    click.echo(Fore.WHITE + "Vamos executar o workflow completo em um 'sandbox' (ambiente seguro) temporário.")
+    click.echo(Fore.WHITE + "Nenhum arquivo ou repositório real será modificado.")
+    click.echo(Fore.YELLOW + "Pressione Enter a cada passo para continuar...")
+    click.pause()
+
+    original_dir = os.getcwd()
+    
+    with tempfile.TemporaryDirectory() as temp_dir:
+        try:
+            sim_project_path = os.path.join(temp_dir, 'meu-projeto-simulado')
+            fake_remote_path_str = os.path.join(temp_dir, 'fake_remote.git')
+            fake_remote_url = Path(fake_remote_path_str).as_uri()
+
+            click.echo(Fore.MAGENTA + f"\n[SIMULAÇÃO] Sandbox criado em: {temp_dir}")
+
+            click.echo(Fore.MAGENTA + "[SIMULAÇÃO] Criando um repositório Git 'remoto' falso e seguro...")
+            subprocess.run(['git', 'init', '--bare', fake_remote_path_str], capture_output=True, check=True)
+            click.pause()
+
+            click.echo(Fore.YELLOW + "\n--- Passo 1: Crie e Publique seu Projeto ---")
+            os.chdir(temp_dir)
+            _run_sim_command('doxoade init meu-projeto-simulado\n')
+
+            os.chdir(sim_project_path)
+            _run_sim_command(f'doxoade git-new "Commit inicial simulado" "{fake_remote_url}"\n')
+
+            click.echo(Fore.YELLOW + "\n--- Passo 2: O Ciclo de Desenvolvimento Diário ---")
+            click.echo(Fore.MAGENTA + "[SIMULAÇÃO] Vamos criar um novo arquivo para simular uma alteração...")
+            with open("nova_feature.py", "w") as f:
+                f.write("print('Nova funcionalidade!')\n")
+            click.echo(Fore.WHITE + "Arquivo 'nova_feature.py' criado.")
+            click.pause()
+            
+            _run_sim_command('doxoade save "Adicionada nova feature"\n')
+
+            # --- LÓGICA DE ENSINO APRIMORADA ---
+            click.echo(Fore.MAGENTA + Style.BRIGHT + "\n[APRENDIZADO] O 'save' falhou! Isso é esperado.")
+            click.echo(Fore.WHITE + "Ele falhou porque o 'doxoade check' detectou que não estamos em um ambiente virtual ('venv') ativado.")
+            click.echo(Fore.WHITE + "Esta é a principal proteção do 'doxoade save'.")
+            click.echo(Fore.WHITE + "Para a simulação, vamos usar a flag '--force' para ignorar este erro e continuar.")
+            click.pause()
+
+            _run_sim_command('doxoade save "Adicionada nova feature" --force')
+            
+            click.echo(Fore.MAGENTA + Style.BRIGHT + "\n[APRENDIZADO] Agora que o commit foi feito, vamos sincronizar com o 'remoto'.")
+            click.pause()
+
+            _run_sim_command('doxoade sync\n')
+
+            click.echo(Fore.YELLOW + "\n--- Passo 3: Análise e Qualidade de Código ---")
+            _run_sim_command('doxoade check\n')
+
+            click.echo(Fore.YELLOW + "\n--- Passo 4: Versionamento e Lançamentos (Releases) ---")
+            _run_sim_command('doxoade release v0.1.0-sim "Lançamento da primeira versão simulada"\n')
+
+            click.echo(Fore.YELLOW + "\n--- Passo 5: Limpeza de Artefatos ---")
+            os.makedirs("__pycache__", exist_ok=True)
+            with open("__pycache__/temp.pyc", "w") as f: f.write("cache")
+            _run_sim_command('doxoade clean --force\n')
+
+        except Exception as e:
+            click.echo(Fore.RED + Style.BRIGHT + f"\n[ERRO NA SIMULAÇÃO] A simulação falhou: {e}")
+        finally:
+            os.chdir(original_dir)
+            click.echo(Fore.CYAN + Style.BRIGHT + "\n--- Fim da Simulação ---")
+            click.echo(Fore.MAGENTA + "[SIMULAÇÃO] O sandbox e todos os arquivos temporários foram destruídos.")
+            click.echo(Fore.WHITE + "Seu sistema de arquivos está intacto. Agora você está pronto para usar o doxoade em projetos reais!")
+
+#atualizado em 2025/09/24-Versão 6.2. Novo comando 'tutorial-interactive' que exige que o usuário digite os comandos, melhorando o aprendizado prático.
+@cli.command('tutorial-interactive')
+def tutorial_interactive():
+    """Executa uma simulação PRÁTICA onde VOCÊ digita os comandos."""
+    
+    click.echo(Fore.CYAN + Style.BRIGHT + "--- Bem-vindo ao Laboratório Prático Doxoade ---")
+    click.echo(Fore.WHITE + "Nesta simulação, você irá digitar os comandos para aprender na prática.")
+    click.echo(Fore.WHITE + "Se ficar preso, digite 'ajuda' ou 'hint' para ver a resposta.")
+    click.echo(Fore.WHITE + "Digite 'sair' ou 'exit' para terminar a qualquer momento.")
+    if not click.confirm(Fore.YELLOW + "Podemos começar?"):
+        click.echo("Simulação cancelada."); return
+
+    original_dir = os.getcwd()
+    
+    with tempfile.TemporaryDirectory() as temp_dir:
+        try:
+            sim_project_path = os.path.join(temp_dir, 'meu-projeto-pratico')
+            fake_remote_path_str = os.path.join(temp_dir, 'fake_remote.git')
+            fake_remote_url = Path(fake_remote_path_str).as_uri()
+
+            click.echo(Fore.MAGENTA + f"\n[SIMULAÇÃO] Sandbox seguro criado em: {temp_dir}")
+            subprocess.run(['git', 'init', '--bare', fake_remote_path_str], capture_output=True, check=True)
+            os.chdir(temp_dir)
+
+            # --- Passo 1: Criação e Publicação ---
+            click.echo(Fore.YELLOW + "\n--- Passo 1: Crie e Publique seu Projeto ---")
+            if not _prompt_and_run_sim_command(
+                prompt="Primeiro, use 'doxoade init' para criar um projeto chamado 'meu-projeto-pratico'",
+                expected_command="doxoade init meu-projeto-pratico"
+            ): return
+            
+            os.chdir(sim_project_path)
+            if not _prompt_and_run_sim_command(
+                prompt=f"Ótimo! Agora publique o projeto no nosso 'remote' falso com a mensagem 'Meu primeiro commit'.\nA URL do remote é: {fake_remote_url}",
+                expected_command=f'doxoade git-new "Meu primeiro commit" "{fake_remote_url}"'
+            ): return
+
+            # --- Passo 2: O Ciclo de Desenvolvimento Diário ---
+            click.echo(Fore.YELLOW + "\n--- Passo 2: O Ciclo de Desenvolvimento Diário ---")
+            click.echo(Fore.MAGENTA + "[SIMULAÇÃO] Vou criar um novo arquivo para simular uma alteração...")
+            with open("feature.py", "w") as f: f.write("print('hello world')\n")
+            click.echo(Fore.WHITE + "Arquivo 'feature.py' criado.")
+
+            if not _prompt_and_run_sim_command(
+                prompt="Agora, use o commit seguro para salvar o novo arquivo com a mensagem 'Adicionada feature'",
+                expected_command='doxoade save "Adicionada feature"'
+            ): return
+
+            if not _prompt_and_run_sim_command(
+                prompt="O 'save' falhou (como esperado!). Force o commit para ignorar o erro de ambiente.",
+                expected_command='doxoade save "Adicionada feature" --force'
+            ): return
+
+            if not _prompt_and_run_sim_command(
+                prompt="Excelente! Agora sincronize suas alterações com o repositório remoto.",
+                expected_command='doxoade sync'
+            ): return
+            
+            click.echo(Fore.CYAN + Style.BRIGHT + "\n--- Simulação Concluída com Sucesso! ---")
+
+        except Exception as e:
+            click.echo(Fore.RED + Style.BRIGHT + f"\n[ERRO NA SIMULAÇÃO] A simulação falhou: {e}")
+        finally:
+            os.chdir(original_dir)
+            click.echo(Fore.MAGENTA + "[SIMULAÇÃO] O sandbox e todos os arquivos temporários foram destruídos.")
+
+def _prompt_and_run_sim_command(prompt, expected_command):
+    """Pede ao usuário para digitar um comando, valida, e então o executa."""
+    click.echo(Fore.GREEN + f"\nOBJETIVO: {prompt}")
+    
+    expected_parts = shlex.split(expected_command)
+
+    while True:
+        user_input = click.prompt(Fore.CYAN + "$")
+        
+        if user_input.lower() in ['sair', 'exit']:
+            click.echo(Fore.YELLOW + "Simulação encerrada."); return False
+            
+        if user_input.lower() in ['ajuda', 'hint', 'help']:
+            click.echo(Fore.YELLOW + f"O comando correto é: {expected_command}"); continue
+
+        user_parts = shlex.split(user_input)
+
+        # Lógica de validação flexível:
+        # Para 'save', só verificamos os 3 primeiros componentes
+        is_correct = False
+        if expected_parts[1] == 'save' and len(user_parts) >= 3:
+            is_correct = user_parts[:2] == expected_parts[:2]
+        elif expected_parts[1] == 'git-new' and len(user_parts) >= 3:
+             is_correct = user_parts[:2] == expected_parts[:2]
+        else: # Validação estrita para outros comandos
+            is_correct = user_parts == expected_parts
+
+        if is_correct:
+            click.echo(Fore.GREEN + "Correto!")
+            break
+        else:
+            click.echo(Fore.RED + "Comando incorreto. Tente novamente ou digite 'ajuda'.")
+    
+    # Execução do comando
+    click.echo(Fore.WHITE + Style.DIM + "--- Saída do Comando ---")
+    python_executable = sys.executable
+    command_to_run = [python_executable, '-m', 'doxoade.doxoade'] + user_parts[1:]
+    
+    process = subprocess.Popen(command_to_run, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
+    for line in iter(process.stdout.readline, ''):
+        print(line, end='')
+    process.wait()
+    click.echo(Fore.WHITE + Style.DIM + "--- Fim da Saída ---")
+    return True
+
+def _run_sim_command(command_str):
+    """Função auxiliar para exibir, pausar e executar um comando na simulação."""
+    click.echo(Fore.GREEN + "\nAgora, vamos executar o comando:")
+    click.echo(Fore.CYAN + f'    $ {command_str}')
+    click.pause()
+    click.echo(Fore.WHITE + Style.DIM + "--- Saída do Comando ---")
+    
+    # Executa o comando doxoade usando o mesmo Python que está rodando a simulação
+    python_executable = sys.executable
+    args = shlex.split(command_str)
+    command_to_run = [python_executable, '-m', 'doxoade.doxoade'] + args[1:]
+    
+    # Usamos Popen para streaming de saída em tempo real
+    process = subprocess.Popen(command_to_run, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
+    
+    for line in iter(process.stdout.readline, ''):
+        print(line, end='') # A saída já vem com \n
+    
+    process.wait()
+    click.echo(Fore.WHITE + Style.DIM + "--- Fim da Saída ---\n")
+    
 
 #atualizado em 2025/09/23-Versão 5.2. Adicionados comandos 'release' e 'sync' para completar a suíte Git. Tem como função automatizar o versionamento e a sincronização com o repositório remoto. Melhoria: 'release' agora suporta a geração opcional de uma nota de release simples.
 @cli.command()
@@ -325,7 +534,9 @@ def save(message, force):
     if has_errors and not (force and is_only_env_error):
         click.echo(Fore.RED + "\n[ERRO] 'doxoade check' encontrou erros críticos. O salvamento foi abortado.")
         click.echo(Fore.WHITE + "Por favor, corrija os erros abaixo antes de salvar (ou use --force para ignorar apenas o erro de ambiente):")
-        print(output)
+        # Correção: Garante que a saída seja segura para qualquer terminal
+        safe_output = output.encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding)
+        print(safe_output)
         sys.exit(1)
 
     # 2. Se passamos, verifica se há avisos
@@ -638,7 +849,8 @@ def clean(force):
     click.echo(Fore.CYAN + "-> [CLEAN] Procurando por artefatos de build e cache...")
     targets_to_delete = []
     for root, dirs, files in os.walk('.', topdown=True):
-        dirs[:] = [d for d in dirs if 'venv' in d]
+        # Correção: A lógica estava invertida. Agora removemos os diretórios 'venv'.
+        dirs[:] = [d for d in dirs if 'venv' not in d and '.git' not in d]
         for name in list(dirs):
             if name in TARGET_DIRS or any(p.match(name) for p in TARGET_PATTERNS):
                 targets_to_delete.append(os.path.join(root, name))
