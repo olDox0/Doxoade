@@ -32,15 +32,144 @@ def _load_config():
     """Procura e carrega configurações de um arquivo .doxoaderc."""
     config = configparser.ConfigParser()
     config.read('.doxoaderc')
-    settings = {'ignore': []}
+    settings = {'ignore': [], 'source_dir': '.'}
     if 'doxoade' in config:
         ignore_str = config['doxoade'].get('ignore', '')
         settings['ignore'] = [line.strip() for line in ignore_str.split('\n') if line.strip()]
+        settings['source_dir'] = config['doxoade'].get('source_dir', '.') # Lê a nova configuração
     return settings
 
 # -----------------------------------------------------------------------------
 # COMANDOS DA CLI (ARQUITETURA FINAL E ROBUSTA)
 # -----------------------------------------------------------------------------
+
+#atualizado em 2025/09/24-Versão 7.0. Novo comando 'health' para medir a qualidade do código. Tem como função analisar a complexidade ciclomática com 'radon' e a cobertura de testes com 'coverage.py'.
+@cli.command()
+@click.argument('path', type=click.Path(exists=True, file_okay=False), default='.')
+@click.option('--ignore', multiple=True, help="Ignora uma pasta. Combina com as do .doxoaderc.")
+@click.option('--format', type=click.Choice(['text', 'json']), default='text', help="Define o formato da saída.")
+@click.option('--complexity-threshold', default=10, help="Nível de complexidade a partir do qual um aviso é gerado.", type=int)
+@click.option('--min-coverage', default=70, help="Porcentagem mínima de cobertura de testes aceitável.", type=int)
+def health(path, ignore, format, complexity_threshold, min_coverage):
+    """Analisa a 'saúde' do código com métricas de qualidade (complexidade e testes)."""
+    results = {'summary': {'errors': 0, 'warnings': 0}}
+    try:
+        if format == 'text': click.echo(Fore.YELLOW + f"[HEALTH] Executando 'doxoade health' no diretório '{os.path.abspath(path)}'...")
+        config = _load_config()
+        final_ignore_list = list(set(config['ignore'] + list(ignore)))
+        
+        # Encontra todos os arquivos Python, respeitando a lista de ignorados
+        folders_to_ignore = set([item.lower() for item in final_ignore_list] + ['venv', 'build', 'dist', '.git'])
+        files_to_check = []
+        for root, dirs, files in os.walk(path):
+            dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
+            for file in files:
+                if file.endswith('.py'):
+                    files_to_check.append(os.path.join(root, file))
+
+        results.update({
+            'complexity': _analyze_complexity(path, files_to_check, complexity_threshold),
+            'test_coverage': _analyze_test_coverage(path, min_coverage)
+        })
+
+        _update_summary_from_findings(results)
+        _present_results(format, results)
+    
+    except Exception as e:
+        safe_error = str(e).encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding)
+        click.echo(Fore.RED + f"\n[ERRO FATAL] O 'health check' falhou inesperadamente: {safe_error}", err=True)
+        results['summary']['errors'] += 1
+    finally:
+        _log_execution(command_name='health', path=path, results=results, arguments={"ignore": list(ignore), "format": format})
+        if results['summary']['errors'] > 0:
+            sys.exit(1)
+
+#atualizado em 2025/09/24-Versão 7.5. Corrigido NameError na chamada da função e removido import não utilizado.
+def _analyze_complexity(project_path, files_to_check, threshold):
+    """Analisa a complexidade ciclomática, focando no diretório de código-fonte."""
+    findings = []
+    config = _load_config()
+    source_dir = config.get('source_dir', '.')
+    
+    try:
+        from radon.visitors import ComplexityVisitor
+    except ImportError:
+        return [{'type': 'error', 'message': "A biblioteca 'radon' não está instalada.", 'details': "Adicione 'radon' ao seu requirements.txt e instale."}]
+
+    source_path = os.path.abspath(os.path.join(project_path, source_dir))
+    relevant_files = [f for f in files_to_check if os.path.abspath(f).startswith(source_path)]
+    
+    try:
+        for file_path in relevant_files:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            visitor = ComplexityVisitor.from_code(content)
+            for func in visitor.functions:
+                if func.complexity > threshold:
+                    findings.append({
+                        'type': 'warning',
+                        'message': f"Função '{func.name}' tem complexidade alta ({func.complexity}).",
+                        'details': f"O máximo recomendado é {threshold}.",
+                        'file': file_path,
+                        'line': func.lineno
+                    })
+    except Exception:
+        pass
+    return findings
+
+#atualizado em 2025/09/24-Versão 7.4. 'health' agora lê 'source_dir' do .doxoaderc para focar a análise de radon e coverage, tornando os resultados mais precisos.
+def _analyze_test_coverage(project_path, min_coverage):
+    """Executa a suíte de testes com coverage.py, focando no diretório de código-fonte."""
+    findings = []
+    config = _load_config()
+    # Usa o 'source_dir' do config, ou o diretório do projeto como padrão.
+    source_dir = config.get('source_dir', '.')
+
+    try:
+        from importlib import util as importlib_util
+    except ImportError:
+        return [{'type': 'error', 'message': "Módulo 'importlib' não encontrado."}]
+
+    if not importlib_util.find_spec("coverage"):
+        return [{'type': 'error', 'message': "A biblioteca 'coverage' não está instalada.", 'details': "Adicione 'coverage' e 'pytest' ao seu requirements.txt."}]
+
+    venv_scripts_path = os.path.join(project_path, 'venv', 'Scripts' if os.name == 'nt' else 'bin')
+    python_exe = os.path.join(venv_scripts_path, 'python.exe')
+    python_no_exe = os.path.join(venv_scripts_path, 'python')
+
+    if os.path.exists(python_exe): venv_python = python_exe
+    elif os.path.exists(python_no_exe): venv_python = python_no_exe
+    else: return [{'type': 'error', 'message': "Não foi possível encontrar o executável Python do venv."}]
+
+    # --- LÓGICA APRIMORADA: Passamos o --source para o coverage ---
+    run_tests_cmd = [venv_python, '-m', 'coverage', 'run', f'--source={source_dir}', '-m', 'pytest']
+    generate_report_cmd = [venv_python, '-m', 'coverage', 'json']
+
+    original_dir = os.getcwd()
+    try:
+        os.chdir(project_path)
+        test_result = subprocess.run(run_tests_cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+        
+        if test_result.returncode != 0:
+            if "no tests ran" in test_result.stdout or "collected 0 items" in test_result.stdout:
+                 return [{'type': 'warning', 'message': "Nenhum teste foi encontrado pelo pytest.", 'details': "Verifique se seus arquivos de teste seguem o padrão 'test_*.py' ou '*_test.py'."}]
+            else:
+                return [{'type': 'error', 'message': "A suíte de testes falhou durante a execução.", 'details': f"Saída do Pytest:\n{test_result.stdout}\n{test_result.stderr}"}]
+
+        subprocess.run(generate_report_cmd, capture_output=True, check=True)
+
+        if os.path.exists('coverage.json'):
+            with open('coverage.json', 'r') as f: report_data = json.load(f)
+            total_coverage = report_data['totals']['percent_covered']
+            if total_coverage < min_coverage:
+                findings.append({'type': 'warning', 'message': f"Cobertura de testes está baixa: {total_coverage:.2f}%.", 'details': f"O mínimo recomendado é {min_coverage}%.", 'file': project_path})
+    except Exception: pass
+    finally:
+        if os.path.exists('coverage.json'): os.remove('coverage.json')
+        if os.path.exists('.coverage'): os.remove('.coverage')
+        os.chdir(original_dir)
+        
+    return findings
 
 #atualizado em 2025/09/23-Versão 5.5. Tutorial completamente reescrito para incluir todos os comandos da suíte (sync, release, clean, git-clean, guicheck) e melhorar a clareza para novos usuários.
 @cli.command()
