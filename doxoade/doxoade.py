@@ -43,6 +43,89 @@ def _load_config():
 # COMANDOS DA CLI (ARQUITETURA FINAL E ROBUSTA)
 # -----------------------------------------------------------------------------
 
+#atualizado em 2025/09/24-Versão 8.0. Novo comando 'doctor' para meta-análise da própria ferramenta. Tem como função verificar o ambiente, as dependências internas e a qualidade do código da doxoade.
+@cli.command()
+def doctor():
+    """Executa um diagnóstico completo da própria ferramenta doxoade."""
+    click.echo(Fore.CYAN + Style.BRIGHT + "--- [DOCTOR] Executando diagnóstico da ferramenta Doxoade ---")
+    
+    findings = []
+    
+    # --- Verificação 1: Diagnóstico do PATH ---
+    click.echo(Fore.YELLOW + "\n--- 1. Verificando o ambiente de instalação (PATH)... ---")
+    try:
+        result = subprocess.run(['where', 'doxoade'], capture_output=True, text=True, check=True, encoding='utf-8', errors='replace')
+        locations = result.stdout.strip().splitlines()
+        if len(locations) > 1:
+            findings.append({
+                'type': 'error',
+                'message': "Múltiplas instalações do 'doxoade' encontradas no seu PATH.",
+                'details': "Isso pode causar conflitos. Encontrado em:\n" + "\n".join(f"   - {loc}" for loc in locations)
+            })
+        else:
+            click.echo(Fore.GREEN + f"[OK] Instalação única encontrada em: {locations[0]}")
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        findings.append({'type': 'error', 'message': "Não foi possível executar o comando 'where doxoade'.", 'details': "Isso pode indicar um problema com a instalação ou com o PATH do sistema."})
+
+    # --- Verificação 2: Dependências Internas ---
+    click.echo(Fore.YELLOW + "\n--- 2. Verificando as dependências internas da Doxoade... ---")
+    doxoade_path = _get_doxoade_installation_path()
+    if doxoade_path:
+        doxoade_reqs = os.path.join(doxoade_path, 'requirements.txt')
+        if os.path.exists(doxoade_reqs):
+            try:
+                # Usamos o pip do venv da doxoade para checar suas próprias dependências
+                doxoade_venv_python = os.path.join(doxoade_path, 'venv', 'Scripts', 'python')
+                cmd = [doxoade_venv_python, '-m', 'pip', 'check']
+                result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding='utf-8', errors='replace')
+                click.echo(Fore.GREEN + "[OK] Todas as dependências internas estão corretamente instaladas.")
+            except Exception:
+                findings.append({'type': 'error', 'message': "Verificação de dependências internas falhou.", 'details': "Execute 'pip check' no venv da doxoade para mais detalhes."})
+        else:
+            findings.append({'type': 'warning', 'message': "Arquivo 'requirements.txt' da doxoade não encontrado."})
+    else:
+        findings.append({'type': 'error', 'message': "Não foi possível localizar o diretório de instalação da doxoade."})
+
+    # --- Verificação 3: Auto-Diagnóstico de Qualidade ---
+    click.echo(Fore.YELLOW + "\n--- 3. Executando auto-diagnóstico de qualidade (dogfooding)... ---")
+    if doxoade_path:
+        os.chdir(doxoade_path)
+        cmd = [sys.executable, '-m', 'doxoade.doxoade', 'check', '.']
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+        
+        if result.returncode == 0:
+            click.echo(Fore.GREEN + "[OK] O código-fonte da Doxoade passou em seu próprio teste de qualidade ('check').")
+        else:
+            findings.append({'type': 'warning', 'message': "A Doxoade encontrou problemas de qualidade em seu próprio código.", 'details': f"Execute 'doxoade check .' no diretório da ferramenta para ver os detalhes:\n{result.stdout}"})
+    
+    # --- Sumário Final ---
+    click.echo(Fore.CYAN + Style.BRIGHT + "\n--- Diagnóstico Concluído ---")
+    if not findings:
+        click.echo(Fore.GREEN + Style.BRIGHT + "[SAUDÁVEL] A sua instalação da Doxoade parece estar saudável e pronta para uso!")
+    else:
+        click.echo(Fore.RED + Style.BRIGHT + f"[ATENÇÃO] Foram encontrados {len(findings)} problemas:")
+        for finding in findings:
+             color = Fore.RED if finding['type'] == 'error' else Fore.YELLOW
+             tag = '[ERRO]' if finding['type'] == 'error' else '[AVISO]'
+             click.echo(color + f"{tag} {finding['message']}")
+             if 'details' in finding:
+                 click.echo(Fore.CYAN + f"   > {finding['details']}")
+
+def _get_doxoade_installation_path():
+    """Encontra o caminho do diretório de instalação da própria ferramenta doxoade."""
+    try:
+        # __file__ aponta para o doxoade.py, então subimos dois níveis para chegar à raiz do projeto
+        doxoade_script_path = os.path.abspath(__file__)
+        doxoade_package_path = os.path.dirname(doxoade_script_path)
+        doxoade_root_path = os.path.dirname(doxoade_package_path)
+        # Verificamos se é um diretório de projeto válido procurando pelo setup.py
+        if os.path.exists(os.path.join(doxoade_root_path, 'setup.py')):
+            return doxoade_root_path
+    except NameError:
+        # __file__ não existe em alguns contextos, como em um executável congelado
+        pass
+    return None
+
 #atualizado em 2025/09/24-Versão 7.0. Novo comando 'health' para medir a qualidade do código. Tem como função analisar a complexidade ciclomática com 'radon' e a cobertura de testes com 'coverage.py'.
 @cli.command()
 @click.argument('path', type=click.Path(exists=True, file_okay=False), default='.')
