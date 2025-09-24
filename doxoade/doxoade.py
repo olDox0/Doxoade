@@ -41,44 +41,133 @@ def _load_config():
 # COMANDOS DA CLI (ARQUITETURA FINAL E ROBUSTA)
 # -----------------------------------------------------------------------------
 
-#atualizado em 2025/09/18-V46. Novo comando 'tutorial' para guiar novos usuários no workflow completo.
+#atualizado em 2025/09/23-Versão 5.5. Tutorial completamente reescrito para incluir todos os comandos da suíte (sync, release, clean, git-clean, guicheck) e melhorar a clareza para novos usuários.
 @cli.command()
 def tutorial():
-    """Exibe um guia passo a passo do workflow recomendado do doxoade."""
+    """Exibe um guia passo a passo do workflow completo do doxoade."""
     
-    click.echo(Fore.CYAN + Style.BRIGHT + "--- Guia Rápido do Workflow Doxoade ---")
-    click.echo(Fore.WHITE + "Este guia mostra como levar um projeto do zero à publicação no GitHub.")
+    click.echo(Fore.CYAN + Style.BRIGHT + "--- Guia Completo do Workflow Doxoade ---")
+    click.echo(Fore.WHITE + "Este guia mostra como usar o doxoade para gerenciar um projeto do início ao fim.")
 
-    # Passo 1: Criação
-    click.echo(Fore.YELLOW + "\n--- Passo 1: Crie e configure seu projeto ---")
-    click.echo("Primeiro, use 'doxoade init' para criar a estrutura local do seu projeto.")
-    click.echo(Fore.GREEN + '$ doxoade init meu-projeto-tutorial')
-    click.echo("\nDepois, vá para o GitHub, crie um repositório VAZIO e copie a URL.")
-    click.echo("Finalmente, use 'doxoade git-new' para conectar tudo e fazer o primeiro push.")
-    click.echo(Fore.GREEN + '$ cd meu-projeto-tutorial')
-    click.echo(Fore.GREEN + '$ doxoade git-new "Commit inicial do projeto" https://github.com/usuario/meu-projeto-tutorial.git')
+    # Passo 1: Criação e Publicação
+    click.echo(Fore.YELLOW + "\n\n--- Passo 1: Crie e Publique seu Projeto ---")
+    click.echo(Fore.GREEN + "   1. Use 'doxoade init' para criar a estrutura local do seu projeto.")
+    click.echo(Fore.CYAN + '        $ doxoade init meu-projeto-tutorial\n')
+    click.echo(Fore.GREEN + "   2. Depois, vá para o GitHub (ou similar), crie um repositório VAZIO e copie a URL.")
+    click.echo(Fore.GREEN + "   3. Finalmente, use 'doxoade git-new' para fazer a conexão e o primeiro push.")
+    click.echo(Fore.CYAN + '        $ cd meu-projeto-tutorial')
+    click.echo(Fore.CYAN + '        $ doxoade git-new "Commit inicial do projeto" https://github.com/usuario/meu-projeto-tutorial.git\n')
+    click.echo(Fore.WHITE + "   Seu projeto agora está online!")
 
-    # Passo 2: Desenvolvimento
-    click.echo(Fore.YELLOW + "\n--- Passo 2: O ciclo de desenvolvimento diário ---")
-    click.echo("Ative o ambiente virtual e comece a programar.")
-    click.echo(Fore.GREEN + '$ .\\venv\\Scripts\\activate')
-    click.echo("(venv) > ... escreva seu código, modifique arquivos ...")
-    click.echo("\nQuando estiver pronto, use 'doxoade save' para fazer um commit seguro.")
-    click.echo(Fore.GREEN + '(venv) > doxoade save "Implementada a classe Usuario"')
-    click.echo("\nPara enviar suas alterações para o GitHub, use o 'git push' padrão.")
-    click.echo(Fore.GREEN + '(venv) > git push')
+    # Passo 2: O Ciclo de Desenvolvimento Diário
+    click.echo(Fore.YELLOW + "\n\n--- Passo 2: O Ciclo de Desenvolvimento Diário ---")
+    click.echo(Fore.GREEN + "   1. Ative o ambiente virtual para garantir o isolamento das dependências.")
+    click.echo(Fore.CYAN + '        $ .\\venv\\Scripts\\activate\n')
+    click.echo(Fore.GREEN + "   2. Escreva seu código, modifique arquivos, crie novas funcionalidades...")
+    click.echo(Fore.CYAN + "        (venv) > ... programando ...\n")
+    click.echo(Fore.GREEN + "   3. Quando estiver pronto, use 'doxoade save' para fazer um commit seguro. Ele verifica seu código antes de salvar.")
+    click.echo(Fore.CYAN + '        (venv) > doxoade save "Implementada a classe Usuario"\n')
+    click.echo(Fore.GREEN + "   4. Para manter seu repositório local e o remoto sempre alinhados, use 'doxoade sync'. Ele puxa as últimas alterações e empurra as suas.")
+    click.echo(Fore.CYAN + '        (venv) > doxoade sync')
+
+    # Passo 3: Análise e Qualidade de Código
+    click.echo(Fore.YELLOW + "\n\n--- Passo 3: Análise e Qualidade de Código ---")
+    click.echo(Fore.GREEN + "   A qualquer momento, use os comandos de análise para verificar a saúde do seu projeto:")
+    click.echo(Fore.GREEN + "    - Para código Python (erros, bugs, estilo):")
+    click.echo(Fore.CYAN + '        $ doxoade check\n')
+    click.echo(Fore.GREEN + "    - Para código de frontend (HTML, CSS, JS):")
+    click.echo(Fore.CYAN + '        $ doxoade webcheck\n')
+    click.echo(Fore.GREEN + "    - Para código de interfaces gráficas com Tkinter:")
+    click.echo(Fore.CYAN + '        $ doxoade guicheck')
+
+    # Passo 4: Versionamento e Lançamentos
+    click.echo(Fore.YELLOW + "\n\n--- Passo 4: Versionamento e Lançamentos (Releases) ---")
+    click.echo(Fore.GREEN + "   Quando seu projeto atinge um marco importante (ex: v1.0), você cria uma 'release' para marcar aquela versão.")
+    click.echo(Fore.CYAN + '        $ doxoade release v1.0.0 "Lançamento da primeira versão estável"\n')
+    click.echo(Fore.WHITE + "   Isso cria uma 'tag' no seu Git, facilitando a organização e o versionamento.")
+
+    # Passo 5: Ferramentas Utilitárias e Automação
+    click.echo(Fore.YELLOW + "\n\n--- Passo 5: Ferramentas Utilitárias e Automação ---")
+    click.echo(Fore.GREEN + "    - Para investigar problemas passados, use 'doxoade log'. A flag '--snippets' é muito útil.")
+    click.echo(Fore.CYAN + '        $ doxoade log -n 3 --snippets\n')
+    click.echo(Fore.GREEN + "    - Para limpar o projeto de arquivos de cache e build (ex: __pycache__, dist/):")
+    click.echo(Fore.CYAN + '        $ doxoade clean\n')
+    click.echo(Fore.GREEN + "    - Para 'higienizar' seu repositório caso você tenha acidentalmente commitado arquivos que deveriam ser ignorados (como a 'venv'):")
+    click.echo(Fore.CYAN + '        $ doxoade git-clean\n')
+    click.echo(Fore.GREEN + "    - Para rodar uma sequência de comandos de uma só vez, use 'doxoade auto'.")
+    click.echo(Fore.CYAN + '        $ doxoade auto "doxoade check ." "doxoade run meus_testes.py"')
+
+    click.echo(Fore.YELLOW + Style.BRIGHT + "\n--- Fim do Guia ---\n")
+    click.echo(Fore.WHITE + "   Lembre-se: use a flag '--help' em qualquer comando para ver mais detalhes e opções. Ex: 'doxoade save --help'.\n")
+
+#atualizado em 2025/09/23-Versão 5.2. Adicionados comandos 'release' e 'sync' para completar a suíte Git. Tem como função automatizar o versionamento e a sincronização com o repositório remoto. Melhoria: 'release' agora suporta a geração opcional de uma nota de release simples.
+@cli.command()
+@click.argument('version')
+@click.argument('message')
+@click.option('--remote', default='origin', help='Nome do remote Git (padrão: origin).')
+@click.option('--create-release', is_flag=True, help='Tenta criar uma release no GitHub (requer autenticação configurada).')
+def release(version, message, remote, create_release):
+    """
+    Cria uma tag Git para a versão especificada e opcionalmente prepara uma release no GitHub.
     
-    # Passo 3: Automação e Análise
-    click.echo(Fore.YELLOW + "\n--- Passo 3: Análise e automação ---")
-    click.echo("Use os comandos de análise para verificar a saúde do seu projeto a qualquer momento.")
-    click.echo(Fore.GREEN + '$ doxoade check')
-    click.echo(Fore.GREEN + '$ doxoade webcheck')
-    click.echo("\nUse 'doxoade auto' para executar uma suíte de testes completa.")
-    click.echo(Fore.GREEN + '$ doxoade auto "doxoade check ." "doxoade run test_suite.py"')
-    click.echo("\nE use 'doxoade log' para investigar os resultados de análises passadas.")
-    click.echo(Fore.GREEN + '$ doxoade log -n 5 --snippets')
+    Exemplo: doxoade release v1.2.0 "Lançamento da versão 1.2.0" --create-release
+    """
+    click.echo(Fore.CYAN + f"--- [RELEASE] Criando tag Git para versão {version} ---")
+    
+    if not _run_git_command(['tag', version, '-a', '-m', message]):
+        click.echo(Fore.RED + "[ERRO] Falha ao criar a tag Git.")
+        return
+    
+    click.echo(Fore.GREEN + f"[OK] Tag Git '{version}' criada com sucesso.")
+    
+    # Tentativa de push da tag (se o remote estiver configurado)
+    if _run_git_command(['push', remote, version]):
+        click.echo(Fore.GREEN + f"[OK] Tag '{version}' enviada para o remote '{remote}'.")
+    else:
+        click.echo(Fore.YELLOW + f"[AVISO] Falha ao enviar a tag '{version}' para o remote '{remote}'. Certifique-se de que o remote está configurado e você tem permissões.")
 
-    click.echo(Fore.CYAN + Style.BRIGHT + "\n--- Fim do Guia ---")
+    if create_release:
+        # Lógica para criação de release no GitHub (requer mais interatividade ou API)
+        # Por enquanto, apenas informa ao usuário
+        click.echo(Fore.YELLOW + "\n[INFO] A criação automática de release no GitHub requer autenticação.")
+        click.echo(Fore.YELLOW + "Você pode criar manualmente a release em:")
+        click.echo(f"   https://github.com/{_get_github_repo_info()}/releases/new?tag={version}&title={version}")
+        click.echo(Fore.YELLOW + f"Mensagem sugerida para a release: '{message}'")
+
+#atualizado em 2025/09/23-Versão 5.4. Corrigido bug crítico onde 'sync' não executava 'git push'. Tem como função sincronizar o branch local com o remoto (puxar e empurrar). Melhoria: Adicionado '--no-edit' ao pull para evitar prompts de merge em scripts.
+@cli.command()
+@click.option('--remote', default='origin', help='Nome do remote Git (padrão: origin).')
+def sync(remote):
+    """Sincroniza o branch local atual com o branch remoto (git pull && git push)."""
+    click.echo(Fore.CYAN + f"--- [SYNC] Sincronizando branch com o remote '{remote}' ---")
+    
+    current_branch = _run_git_command(['branch', '--show-current'], capture_output=True)
+    if not current_branch:
+        click.echo(Fore.RED + "[ERRO] Não foi possível determinar o branch atual.")
+        sys.exit(1)
+    
+    click.echo(f"   > Branch atual: '{current_branch}'")
+    
+    # --- PASSO 1: PUXAR ALTERAÇÕES DO REMOTE ---
+    click.echo(Fore.YELLOW + "\nPasso 1: Puxando as últimas alterações do remote (git pull)...")
+    if not _run_git_command(['pull', '--no-edit', remote, current_branch]):
+        click.echo(Fore.RED + "[ERRO] Falha ao realizar o 'git pull'. Verifique conflitos de merge ou problemas de permissão.")
+        sys.exit(1)
+    click.echo(Fore.GREEN + "[OK] Repositório local atualizado.")
+
+    # --- PASSO 2: EMPURRAR ALTERAÇÕES LOCAIS ---
+    click.echo(Fore.YELLOW + "\nPasso 2: Enviando alterações locais para o remote (git push)...")
+    #status_output = _run_git_command(['status', '--porcelain'], capture_output=True)
+    if "ahead" not in _run_git_command(['status', '-sb'], capture_output=True):
+         click.echo(Fore.GREEN + "[OK] Nenhum commit local para enviar. O branch já está sincronizado.")
+    elif not _run_git_command(['push', remote, current_branch]):
+        click.echo(Fore.RED + "[ERRO] Falha ao realizar o 'git push'. Verifique sua conexão ou permissões.")
+        sys.exit(1)
+    else:
+        click.echo(Fore.GREEN + "[OK] Commits locais enviados com sucesso.")
+
+    click.echo(Fore.GREEN + Style.BRIGHT + "\n[SYNC] Sincronização concluída com sucesso!")
+
 
 #atualizado em 2025/09/18-V45. 'git-clean' agora lê o .gitignore com encoding='utf-8' explícito e lida com erros de decodificação.
 @cli.command('git-clean')
@@ -134,6 +223,63 @@ def git_clean():
             click.echo(Fore.CYAN + '  doxoade save "Limpeza de arquivos ignorados"')
         else:
             click.echo(Fore.RED + "[ERRO] Ocorreu um erro ao remover um ou mais arquivos.")
+
+
+#atualizado em 2025/09/23-Versão 5.3. Implementa o comando 'git-new' para a primeira publicação de um projeto. Tem como função automatizar o boilerplate de adicionar remote, commitar e fazer o primeiro push. Melhoria: Adicionada verificação se o remote 'origin' já existe.
+@cli.command('git-new')
+@click.argument('message')
+@click.argument('remote_url')
+def git_new(message, remote_url):
+    """
+    Automatiza a publicação de um novo projeto local em um repositório remoto VAZIO.
+
+    Este comando executa a sequência completa de boilerplate do Git:
+    1. git remote add origin <URL>
+    2. git add .
+    3. git commit -m "MENSAGEM"
+    4. git push -u origin main
+
+    Exemplo:
+      doxoade git-new "Commit inicial do projeto" https://github.com/usuario/repo.git
+    """
+    click.echo(Fore.CYAN + "--- [GIT-NEW] Publicando novo projeto no GitHub ---")
+
+    # Passo 1: Adicionar o repositório remoto
+    click.echo(Fore.YELLOW + f"Passo 1: Adicionando remote 'origin' -> {remote_url}")
+    if not _run_git_command(['remote', 'add', 'origin', remote_url]):
+        # A falha mais comum é o remote já existir. Damos um feedback útil.
+        click.echo(Fore.RED + "[ERRO] Falha ao adicionar o remote. Motivo comum: o remote 'origin' já existe.")
+        click.echo(Fore.YELLOW + "Se o projeto já tem um remote, use 'doxoade save' e 'git push' para atualizá-lo.")
+        sys.exit(1)
+    click.echo(Fore.GREEN + "[OK] Remote adicionado com sucesso.")
+
+    # Passo 2: Adicionar todos os arquivos ao staging
+    click.echo(Fore.YELLOW + "\nPasso 2: Adicionando todos os arquivos ao Git (git add .)...")
+    if not _run_git_command(['add', '.']):
+        sys.exit(1)
+    click.echo(Fore.GREEN + "[OK] Arquivos preparados para o commit.")
+
+    # Passo 3: Fazer o commit inicial
+    click.echo(Fore.YELLOW + f"\nPasso 3: Criando o primeiro commit com a mensagem: '{message}'...")
+    if not _run_git_command(['commit', '-m', message]):
+        sys.exit(1)
+    click.echo(Fore.GREEN + "[OK] Commit inicial criado.")
+
+    # Passo 4: Fazer o push para o repositório remoto
+    current_branch = _run_git_command(['branch', '--show-current'], capture_output=True)
+    if not current_branch:
+        click.echo(Fore.RED + "[ERRO] Não foi possível determinar o branch atual para o push.")
+        sys.exit(1)
+    
+    click.echo(Fore.YELLOW + f"\nPasso 4: Enviando o branch '{current_branch}' para o remote 'origin' (git push)...")
+    if not _run_git_command(['push', '--set-upstream', 'origin', current_branch]):
+        click.echo(Fore.RED + "[ERRO] Falha ao enviar para o repositório remoto.")
+        click.echo(Fore.YELLOW + "Causas comuns: a URL do repositório está incorreta, você não tem permissão, ou o repositório remoto NÃO ESTÁ VAZIO.")
+        sys.exit(1)
+    
+    click.echo(Fore.GREEN + Style.BRIGHT + "\n[GIT-NEW] Projeto publicado com sucesso!")
+    click.echo(f"Você pode ver seu repositório em: {remote_url}")
+
     
 #atualizado em 2025/09/17-V40. 'save' agora usa 'git commit -a' para respeitar os arquivos removidos do índice.
 @cli.command()
@@ -552,6 +698,30 @@ def log(lines, snippets):
 # -----------------------------------------------------------------------------
 # FUNÇÕES AUXILIARES
 # -----------------------------------------------------------------------------
+
+# A função _get_github_repo_info() e _run_git_command() já existem no seu código.
+# Certifique-se de que elas estejam corretamente implementadas e acessíveis.
+# Se _get_github_repo_info() ainda não existe, ela precisaria ser implementada para extrair
+# o nome do usuário e repositório do .git/config ou de comandos como 'git remote get-url origin'.
+
+def _get_github_repo_info():
+    """Extrai a informação do repositório GitHub (usuário/repo) do .git/config."""
+    try:
+        url = _run_git_command(['remote', 'get-url', 'origin'], capture_output=True)
+        if url is None: return "unkown/unkown"
+        
+        # Tenta extrair de SSH URLs (git@github.com:usuario/repo.git)
+        match_ssh = re.match(r'git@github\.com:([\w-]+)/([\w-]+)\.git', url)
+        if match_ssh: return f"{match_ssh.group(1)}/{match_ssh.group(2)}"
+        
+        # Tenta extrair de HTTPS URLs (https://github.com/usuario/repo.git)
+        match_https = re.match(r'https?://github\.com/([\w-]+)/([\w-]+)\.git', url)
+        if match_https: return f"{match_https.group(1)}/{match_https.group(2)}"
+        
+    except Exception:
+        pass
+    return "unkown/unkown"
+    
 
 #atualizado em 2025/09/17-V37. Corrigido TypeError ao garantir que a saída de erro do Git seja sempre uma string.
 def _run_git_command(args, capture_output=False):

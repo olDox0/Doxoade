@@ -17,6 +17,17 @@ setup(
     entry_points={
         'console_scripts': [
             'doxoade = doxoade.doxoade:cli',
+            'doxoade-check = doxoade.doxoade:check',
+            'doxoade-save = doxoade.doxoade:save',
+            'doxoade-init = doxoade.doxoade:init',
+            'doxoade-auto = doxoade.doxoade:auto',
+            'doxoade-run = doxoade.doxoade:run',
+            'doxoade-clean = doxoade.doxoade:clean',
+            'doxoade-log = doxoade.doxoade:log',
+            'doxoade-tutorial = doxoade.doxoade:tutorial',
+            'doxoade-git-clean = doxoade.doxoade:git_clean',
+            'doxoade-release = doxoade.doxoade:release',
+            'doxoade-sync = doxoade.doxoade:sync',
         ],
     },
     classifiers=[
