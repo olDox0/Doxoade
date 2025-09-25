@@ -126,6 +126,162 @@ def _get_doxoade_installation_path():
         pass
     return None
 
+#atualizado em 2025/09/25-Versão 9.1. Novo comando 'dashboard' para visualizar tendências de saúde do projeto a partir dos logs.
+@cli.command()
+@click.option('--project', default=None, help="Filtra o dashboard para um caminho de projeto específico.")
+def dashboard(project):
+    """Exibe um painel com a saúde e tendências dos projetos analisados."""
+    log_file = Path.home() / '.doxoade' / 'doxoade.log'
+    if not log_file.exists():
+        click.echo(Fore.YELLOW + "Nenhum arquivo de log encontrado. Execute alguns comandos de análise primeiro."); return
+
+    click.echo(Fore.CYAN + Style.BRIGHT + "--- [DASHBOARD] Painel de Saúde de Engenharia ---")
+
+    entries = []
+    with open(log_file, 'r', encoding='utf-8') as f:
+        for line in f:
+            try:
+                entry = json.loads(line)
+                # Filtra pelo projeto, se especificado
+                if project and os.path.abspath(project) != entry.get('project_path'):
+                    continue
+                entries.append(entry)
+            except json.JSONDecodeError:
+                continue
+
+    if not entries:
+        click.echo(Fore.RED + "Nenhuma entrada de log encontrada para o filtro especificado."); return
+
+    # --- Análise 1: Tendência de Erros ao Longo do Tempo ---
+    errors_by_day = {}
+    for entry in entries:
+        day = entry['timestamp'][:10] # Pega apenas a data YYYY-MM-DD
+        errors = entry['summary'].get('errors', 0)
+        errors_by_day[day] = errors_by_day.get(day, 0) + errors
+
+    click.echo(Fore.YELLOW + "\n--- Tendência de Erros (últimos 7 dias) ---")
+    sorted_days = sorted(errors_by_day.keys())[-7:]
+    max_errors = max(errors_by_day.values()) if errors_by_day else 1
+    for day in sorted_days:
+        count = errors_by_day[day]
+        bar_length = int((count / max_errors) * 40) if max_errors > 0 else 0
+        bar = '█' * bar_length
+        click.echo(f"{day} | {bar} ({count} erros)")
+
+    # --- Análise 2: Projetos com Mais Problemas ---
+    errors_by_project = {}
+    for entry in entries:
+        proj_name = os.path.basename(entry['project_path'])
+        errors = entry['summary'].get('errors', 0)
+        errors_by_project[proj_name] = errors_by_project.get(proj_name, 0) + errors
+
+    click.echo(Fore.YELLOW + "\n--- Projetos com Mais Erros Registrados ---")
+    sorted_projects = sorted(errors_by_project.items(), key=lambda item: item[1], reverse=True)[:5]
+    for proj, count in sorted_projects:
+        click.echo(f" - {proj}: {count} erros")
+
+    # --- Análise 3: Erros Mais Frequentes ---
+    errors_by_type = {}
+    for entry in entries:
+        for finding in entry.get('findings', []):
+            if finding['type'] == 'error':
+                msg = finding['message'].split(':')[1].strip() if ':' in finding['message'] else finding['message']
+                errors_by_type[msg] = errors_by_type.get(msg, 0) + 1
+    
+    click.echo(Fore.YELLOW + "\n--- Tipos de Erro Mais Frequentes ---")
+    sorted_types = sorted(errors_by_type.items(), key=lambda item: item[1], reverse=True)[:5]
+    for msg_type, count in sorted_types:
+        click.echo(f" - {msg_type}: {count} ocorrências")
+
+#atualizado em 2025/09/25-Versão 8.2. 'setup-health' agora verifica e cria o venv se ele não existir, tornando o comando mais robusto.
+@cli.command('setup-health')
+@click.argument('path', type=click.Path(exists=True, file_okay=False, resolve_path=True), default='.')
+def setup_health(path):
+    """Prepara um projeto para ser analisado pelo 'doxoade health'."""
+    click.echo(Fore.CYAN + Style.BRIGHT + f"--- [SETUP-HEALTH] Configurando o projeto em '{path}' para análise de saúde ---")
+    
+    # --- Passo 0: Verificar e criar o venv, se necessário ---
+    click.echo(Fore.YELLOW + "\n--- 0. Verificando ambiente virtual ('venv')... ---")
+    venv_path = os.path.join(path, 'venv')
+    if not os.path.exists(venv_path):
+        click.echo(Fore.YELLOW + "   > Ambiente virtual não encontrado. Criando agora...")
+        try:
+            subprocess.run([sys.executable, "-m", "venv", venv_path], check=True, capture_output=True)
+            click.echo(Fore.GREEN + "[OK] Ambiente virtual criado com sucesso.")
+        except subprocess.CalledProcessError as e:
+            click.echo(Fore.RED + f"[ERRO] Falha ao criar o ambiente virtual: {e.stderr.decode('utf-8', 'ignore')}")
+            sys.exit(1)
+    else:
+        click.echo(Fore.GREEN + "[OK] Ambiente virtual já existe.")
+
+    # --- Passo 1: Verificar e atualizar requirements.txt ---
+    click.echo(Fore.YELLOW + "\n--- 1. Verificando 'requirements.txt'... ---")
+    req_file = os.path.join(path, 'requirements.txt')
+    health_deps = ['radon', 'coverage', 'pytest']
+    deps_to_add = []
+    
+    if os.path.exists(req_file):
+        with open(req_file, 'r', encoding='utf-8') as f:
+            existing_deps = {line.strip().split('==')[0].lower() for line in f if line.strip() and not line.startswith('#')}
+        
+        for dep in health_deps:
+            if dep not in existing_deps:
+                deps_to_add.append(dep)
+        
+        if deps_to_add:
+            with open(req_file, 'a', encoding='utf-8') as f:
+                f.write('\n# Ferramentas de Análise de Saúde (adicionadas pelo doxoade)\n')
+                for dep in deps_to_add:
+                    f.write(f"{dep}\n")
+            click.echo(Fore.GREEN + f"[OK] Adicionadas as seguintes dependências: {', '.join(deps_to_add)}")
+        else:
+            click.echo(Fore.GREEN + "[OK] Todas as dependências de saúde já estão no arquivo.")
+    else:
+        click.echo(Fore.YELLOW + "[AVISO] Arquivo 'requirements.txt' não encontrado. Criando um novo com as dependências de saúde.")
+        with open(req_file, 'w', encoding='utf-8') as f:
+            f.write('# Ferramentas de Análise de Saúde (adicionadas pelo doxoade)\n')
+            for dep in health_deps:
+                f.write(f"{dep}\n")
+        deps_to_add = health_deps
+
+    # --- Passo 2: Verificar e atualizar .doxoaderc ---
+    click.echo(Fore.YELLOW + "\n--- 2. Verificando '.doxoaderc'... ---")
+    config_file = os.path.join(path, '.doxoaderc')
+    config = configparser.ConfigParser()
+    config.read(config_file)
+    
+    if 'doxoade' not in config:
+        config['doxoade'] = {}
+
+    current_source_dir = config['doxoade'].get('source_dir', '.')
+    
+    new_source_dir = click.prompt(
+        "Qual é o diretório principal do seu código-fonte? (ex: ., src, nome_do_projeto)",
+        default=current_source_dir
+    )
+    config['doxoade']['source_dir'] = new_source_dir
+    
+    with open(config_file, 'w', encoding='utf-8') as f:
+        config.write(f)
+    click.echo(Fore.GREEN + f"[OK] Arquivo '.doxoaderc' configurado com 'source_dir = {new_source_dir}'.")
+    
+    # --- Passo 3: Instalar dependências, se necessário ---
+    if deps_to_add:
+        click.echo(Fore.YELLOW + "\n--- 3. Instalando novas dependências... ---")
+        venv_python = os.path.join(path, 'venv', 'Scripts' if os.name == 'nt' else 'bin', 'python')
+        cmd = [venv_python, '-m', 'pip', 'install', '-r', req_file]
+        
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True, encoding='utf-8', errors='replace')
+            click.echo(Fore.GREEN + "[OK] Dependências instaladas com sucesso!")
+        except subprocess.CalledProcessError as e:
+            click.echo(Fore.RED + "[ERRO] Falha ao instalar as dependências.")
+            click.echo(Fore.CYAN + f"   > Saída do Pip: {e.stdout}{e.stderr}")
+            sys.exit(1)
+    
+    click.echo(Fore.CYAN + Style.BRIGHT + "\n--- Configuração Concluída! ---")
+    click.echo(Fore.WHITE + "O projeto agora está pronto. Você pode executar 'doxoade health' a qualquer momento.")
+
 #atualizado em 2025/09/24-Versão 7.0. Novo comando 'health' para medir a qualidade do código. Tem como função analisar a complexidade ciclomática com 'radon' e a cobertura de testes com 'coverage.py'.
 @cli.command()
 @click.argument('path', type=click.Path(exists=True, file_okay=False), default='.')
@@ -702,88 +858,62 @@ def git_new(message, remote_url):
     click.echo(f"Você pode ver seu repositório em: {remote_url}")
 
     
-#atualizado em 2025/09/17-V40. 'save' agora usa 'git commit -a' para respeitar os arquivos removidos do índice.
+#atualizado em 2025/09/25-Versão 9.2. Corrigida a lógica do '--force' no comando 'save' para ignorar o erro de ambiente mesmo na presença de outros erros.
 @cli.command()
 @click.argument('message')
 @click.option('--force', is_flag=True, help="Força o commit mesmo que o 'check' encontre avisos ou apenas o erro de ambiente.")
 def save(message, force):
-    """
-    Executa um "commit seguro", protegendo seu repositório de código com erros.
-
-    Este comando é o coração do workflow do doxoade. Ele automatiza 3 passos:
-    1. Executa 'doxoade check' para validar a qualidade do código.
-    2. Se houver erros, o commit é abortado.
-    3. Se tudo estiver OK, ele executa 'git commit -a -m "MESSAGE"'.
-
-    Exemplos:
-      doxoade save "Adicionada funcionalidade de login"
-      doxoade save "Corrigido bug na validação de formulário" --force
-    """
-    # ...
+    """Executa um 'commit seguro', protegendo seu repositório de código com erros."""
     click.echo(Fore.CYAN + "--- [SAVE] Iniciando processo de salvamento seguro ---")
     click.echo(Fore.YELLOW + "\nPasso 1: Executando 'doxoade check' para garantir a qualidade do código...")
     
-    # 1. Carrega a configuração do .doxoaderc
     config = _load_config()
     ignore_list = config.get('ignore', [])
     
-    python_executable = sys.executable
-    check_command = [python_executable, '-m', 'doxoade.doxoade', 'check', '.']
-    
-    # 2. Adiciona as flags --ignore ao comando
+    check_command = [sys.executable, '-m', 'doxoade.doxoade', 'check', '.']
     for folder in ignore_list:
         check_command.extend(['--ignore', folder])
 
     check_result = subprocess.run(check_command, capture_output=True, text=True, encoding='utf-8', errors='replace')
 
     output = check_result.stdout
-    has_errors = check_result.returncode != 0
+    return_code = check_result.returncode
     has_warnings = "Aviso(s)" in output and "0 Aviso(s)" not in output
-    is_only_env_error = has_errors and "1 Erro(s)" in output and "Ambiente Inconsistente" in output
-
-    # --- LÓGICA DE DECISÃO ---
-    # 1. Verifica se há erros bloqueantes
-    if has_errors and not (force and is_only_env_error):
-        click.echo(Fore.RED + "\n[ERRO] 'doxoade check' encontrou erros críticos. O salvamento foi abortado.")
-        click.echo(Fore.WHITE + "Por favor, corrija os erros abaixo antes de salvar (ou use --force para ignorar apenas o erro de ambiente):")
-        # Correção: Garante que a saída seja segura para qualquer terminal
-        safe_output = output.encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding)
-        print(safe_output)
-        sys.exit(1)
-
-    # 2. Se passamos, verifica se há avisos
-    if has_warnings and not force:
-        click.echo(Fore.YELLOW + "\n[AVISO] 'doxoade check' encontrou avisos.")
-        if not click.confirm("Deseja continuar com o salvamento mesmo assim?"):
-            click.echo("Salvamento abortado pelo usuário.")
-            sys.exit(0)
+    is_env_error_present = "Ambiente Inconsistente" in output
     
-    # Se chegamos até aqui, o caminho está livre
-    if force and is_only_env_error:
-        click.echo(Fore.YELLOW + "\n[AVISO] Erro de ambiente ignorado devido ao uso da flag --force.")
+    # Contamos quantos erros *reais* existem, além do erro de ambiente.
+    num_errors = int(re.search(r'(\d+) Erro\(s\)', output).group(1)) if re.search(r'(\d+) Erro\(s\)', output) else 0
+    num_non_env_errors = num_errors - 1 if is_env_error_present else num_errors
+
+    # --- NOVA LÓGICA DE DECISÃO ---
+    if return_code != 0:
+        if force and num_non_env_errors == 0:
+            click.echo(Fore.YELLOW + "\n[AVISO] Erro de ambiente ignorado devido ao uso da flag --force.")
+        else:
+            click.echo(Fore.RED + "\n[ERRO] 'doxoade check' encontrou erros críticos. O salvamento foi abortado.")
+            safe_output = output.encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding)
+            print(safe_output)
+            sys.exit(1)
+    
+    if has_warnings and not force:
+        if not click.confirm(Fore.YELLOW + "\n[AVISO] 'doxoade check' encontrou avisos. Deseja continuar com o salvamento mesmo assim?"):
+            click.echo("Salvamento abortado pelo usuário."); sys.exit(0)
     
     click.echo(Fore.GREEN + "[OK] Verificação de qualidade concluída.")
     
-    # --- LÓGICA DO GIT CORRIGIDA ---
     click.echo(Fore.YELLOW + "\nPasso 2: Verificando se há alterações para salvar...")
     status_output = _run_git_command(['status', '--porcelain'], capture_output=True)
     if status_output is None: sys.exit(1)
         
     if not status_output:
-        click.echo(Fore.GREEN + "[OK] Nenhuma alteração nova para salvar. A árvore de trabalho está limpa.")
-        return
+        click.echo(Fore.GREEN + "[OK] Nenhuma alteração nova para salvar. A árvore de trabalho está limpa."); return
 
     click.echo(Fore.YELLOW + f"\nPasso 3: Criando commit com a mensagem: '{message}'...")
-    # A MUDANÇA CRUCIAL: Usamos 'commit -a'.
-    # '-a' automaticamente "adiciona" (stages) todos os arquivos que já estão sendo rastreados
-    # e que foram modificados, e também respeita os arquivos que foram removidos com 'git rm'.
-    # Ele não adiciona arquivos novos, o que é um comportamento seguro.
     if not _run_git_command(['commit', '-a', '-m', message]):
-        
-        # Fallback para o caso de haver arquivos novos que precisam ser adicionados
         click.echo(Fore.YELLOW + "Tentativa inicial de commit falhou (pode haver arquivos novos). Tentando com 'git add .'...")
         if not _run_git_command(['add', '.']): sys.exit(1)
         if not _run_git_command(['commit', '-m', message]): sys.exit(1)
+        
     click.echo(Fore.GREEN + Style.BRIGHT + "\n[SAVE] Alterações salvas com sucesso no repositório!")
 
 #atualizado em 2025/09/17-V38. 'init' agora cria o ramo 'main' por padrão para alinhar com as práticas modernas do Git.
@@ -1145,7 +1275,19 @@ def _get_github_repo_info():
     except Exception:
         pass
     return "unkown/unkown"
-    
+
+def _get_git_commit_hash(path):
+    """Obtém o hash do commit Git atual (HEAD) para um determinado diretório."""
+    original_dir = os.getcwd()
+    try:
+        os.chdir(path)
+        # Usamos rev-parse para obter o hash de forma confiável
+        hash_output = _run_git_command(['rev-parse', 'HEAD'], capture_output=True)
+        return hash_output if hash_output else "N/A"
+    except Exception:
+        return "N/A"
+    finally:
+        os.chdir(original_dir)    
 
 #atualizado em 2025/09/17-V37. Corrigido TypeError ao garantir que a saída de erro do Git seja sempre uma string.
 def _run_git_command(args, capture_output=False):
@@ -1242,7 +1384,7 @@ def _get_code_snippet(file_path, line_number, context_lines=2):
         # Retorna None se o arquivo não puder ser lido ou a linha não existir
         return None
 
-#atualizado em 2025/09/16-V31. Corrigido DeprecationWarning e bug de encoding.
+#atualizado em 2025/09/25-Versão 9.0. Log agora captura o hash do commit Git para permitir análise de tendências.
 def _log_execution(command_name, path, results, arguments):
     """Constrói o log detalhado e o anexa ao arquivo de log."""
     try:
@@ -1251,16 +1393,14 @@ def _log_execution(command_name, path, results, arguments):
         log_file = log_dir / 'doxoade.log'
         
         timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        git_hash = _get_git_commit_hash(path) # <<< NOSSA NOVA CAPTURA DE DADOS
 
-        # Prepara a lista detalhada de findings para o log
         detailed_findings = []
         for category, findings_list in results.items():
             if category == 'summary':
                 continue
             for finding in findings_list:
-                # Cria uma cópia para não modificar o dicionário original
                 finding_copy = finding.copy()
-                # Adiciona a categoria a cada finding para contextualização no log
                 finding_copy['category'] = category
                 detailed_findings.append(finding_copy)
         
@@ -1268,10 +1408,11 @@ def _log_execution(command_name, path, results, arguments):
             "timestamp": timestamp,
             "command": command_name,
             "project_path": os.path.abspath(path),
+            "git_hash": git_hash, # <<< NOSSO NOVO CAMPO DE DADOS
             "arguments": arguments,
-            "summary": results.get('summary', {}), # Pega o sumário do results
+            "summary": results.get('summary', {}),
             "status": "completed",
-            "findings": detailed_findings # Adiciona a lista detalhada
+            "findings": detailed_findings
         }
         
         with open(log_file, 'a', encoding='utf-8') as f:
