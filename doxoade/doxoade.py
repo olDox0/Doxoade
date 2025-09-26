@@ -282,22 +282,46 @@ def setup_health(path):
     click.echo(Fore.CYAN + Style.BRIGHT + "\n--- Configuração Concluída! ---")
     click.echo(Fore.WHITE + "O projeto agora está pronto. Você pode executar 'doxoade health' a qualquer momento.")
 
-#atualizado em 2025/09/24-Versão 7.0. Novo comando 'health' para medir a qualidade do código. Tem como função analisar a complexidade ciclomática com 'radon' e a cobertura de testes com 'coverage.py'.
+#atualizado em 2025/09/26-Versão 10.3. Corrigido o loop infinito no 'health' com uma lógica de verificação de ambiente mais robusta e direta.
 @cli.command()
-@click.argument('path', type=click.Path(exists=True, file_okay=False), default='.')
+@click.pass_context
+@click.argument('path', type=click.Path(exists=True, file_okay=False, resolve_path=True), default='.')
 @click.option('--ignore', multiple=True, help="Ignora uma pasta. Combina com as do .doxoaderc.")
 @click.option('--format', type=click.Choice(['text', 'json']), default='text', help="Define o formato da saída.")
 @click.option('--complexity-threshold', default=10, help="Nível de complexidade a partir do qual um aviso é gerado.", type=int)
 @click.option('--min-coverage', default=70, help="Porcentagem mínima de cobertura de testes aceitável.", type=int)
-def health(path, ignore, format, complexity_threshold, min_coverage):
+def health(ctx, path, ignore, format, complexity_threshold, min_coverage):
     """Analisa a 'saúde' do código com métricas de qualidade (complexidade e testes)."""
+    
+    # --- LÓGICA DE VERIFICAÇÃO FINAL E ROBUSTA ---
+    # Primeiro, verificamos se o executável python do venv existe. Esta é a verificação mais fundamental.
+    venv_scripts_path = os.path.join(path, 'venv', 'Scripts' if os.name == 'nt' else 'bin')
+    python_exe = os.path.join(venv_scripts_path, 'python.exe')
+    python_no_exe = os.path.join(venv_scripts_path, 'python')
+
+    venv_python_path = None
+    if os.path.exists(python_exe):
+        venv_python_path = python_exe
+    elif os.path.exists(python_no_exe):
+        venv_python_path = python_no_exe
+    
+    # Se não encontrarmos o python do venv, o projeto não está pronto.
+    if not venv_python_path:
+        click.echo(Fore.YELLOW + "[AVISO] Este projeto não possui um ambiente virtual ('venv') configurado.")
+        if click.confirm(Fore.CYAN + "Deseja executar 'doxoade setup-health' para configurá-lo automaticamente?"):
+            ctx.invoke(setup_health, path=path)
+            click.echo(Fore.CYAN + Style.BRIGHT + "\nConfiguração concluída. Por favor, execute 'doxoade health' novamente para ver o relatório.")
+        else:
+            click.echo("Comando abortado. Execute 'doxoade setup-health' manualmente para preparar este projeto.")
+        return
+
+    # --- Se o venv existe, o resto da análise nos dirá se as dependências estão faltando ---
     results = {'summary': {'errors': 0, 'warnings': 0}}
     try:
         if format == 'text': click.echo(Fore.YELLOW + f"[HEALTH] Executando 'doxoade health' no diretório '{os.path.abspath(path)}'...")
         config = _load_config()
         final_ignore_list = list(set(config['ignore'] + list(ignore)))
         
-        # Encontra todos os arquivos Python, respeitando a lista de ignorados
         folders_to_ignore = set([item.lower() for item in final_ignore_list] + ['venv', 'build', 'dist', '.git'])
         files_to_check = []
         for root, dirs, files in os.walk(path):
@@ -311,6 +335,24 @@ def health(path, ignore, format, complexity_threshold, min_coverage):
             'test_coverage': _analyze_test_coverage(path, min_coverage)
         })
 
+        # --- NOVA VERIFICAÇÃO PÓS-ANÁLISE ---
+        # Se a única coisa que encontramos foi um erro de dependência, acionamos o setup.
+        is_only_dep_error = False
+        if results['summary']['errors'] > 0:
+            dep_errors = [f for f in results.get('test_coverage', []) + results.get('complexity', []) if f['type'] == 'error']
+            if len(dep_errors) == results['summary']['errors']:
+                is_only_dep_error = True
+
+        if is_only_dep_error:
+             click.echo(Fore.YELLOW + "\n[AVISO] A análise encontrou erros de dependência (ex: 'radon' ou 'coverage' não instalados).")
+             if click.confirm(Fore.CYAN + "Deseja executar 'doxoade setup-health' para instalar as dependências corretas?"):
+                 ctx.invoke(setup_health, path=path)
+                 click.echo(Fore.CYAN + Style.BRIGHT + "\nConfiguração concluída. Por favor, execute 'doxoade health' novamente para ver o relatório.")
+             else:
+                 click.echo("Comando abortado.")
+             return
+
+
         _update_summary_from_findings(results)
         _present_results(format, results)
     
@@ -320,7 +362,7 @@ def health(path, ignore, format, complexity_threshold, min_coverage):
         results['summary']['errors'] += 1
     finally:
         _log_execution(command_name='health', path=path, results=results, arguments={"ignore": list(ignore), "format": format})
-        if results['summary']['errors'] > 0:
+        if results['summary']['errors'] > 0 and not is_only_dep_error:
             sys.exit(1)
 
 #atualizado em 2025/09/24-Versão 7.5. Corrigido NameError na chamada da função e removido import não utilizado.
