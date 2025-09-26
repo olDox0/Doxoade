@@ -916,32 +916,33 @@ def save(message, force):
         
     click.echo(Fore.GREEN + Style.BRIGHT + "\n[SAVE] Alterações salvas com sucesso no repositório!")
 
-#atualizado em 2025/09/17-V38. 'init' agora cria o ramo 'main' por padrão para alinhar com as práticas modernas do Git.
+#atualizado em 2025/09/26-Versão 10.0. Comando 'init' agora suporta publicação automática com a opção '--remote'. Tem como função criar um novo projeto e, opcionalmente, publicá-lo no GitHub em um único passo.
 @cli.command()
 @click.argument('project_name', required=False)
-def init(project_name):
-    """Cria a estrutura inicial de um novo projeto Python, incluindo um repositório Git."""
-    click.echo(Fore.CYAN + "--- [INIT] Assistente de Criação de Novo Projeto (doxoade init) ---")
+@click.option('--remote', help="URL do repositório Git remoto para publicação automática.")
+def init(project_name, remote):
+    """Cria a estrutura de um novo projeto e, opcionalmente, o publica no GitHub."""
+    click.echo(Fore.CYAN + "--- [INIT] Assistente de Criação de Novo Projeto ---")
     
     if not project_name:
         project_name = click.prompt("Qual é o nome do seu novo projeto?")
     
     if not re.match(r'^[a-zA-Z0-9_-]+$', project_name):
-        click.echo(Fore.RED + "[ERRO] Erro: O nome do projeto deve conter apenas letras, números, hífens e underscores."); return
+        click.echo(Fore.RED + "[ERRO] O nome do projeto deve conter apenas letras, números, hífens e underscores."); return
     
     project_path = os.path.abspath(project_name)
     if os.path.exists(project_path):
-        click.echo(Fore.RED + f"[ERRO] Erro: O diretório '{project_path}' já existe."); return
+        click.echo(Fore.RED + f"[ERRO] O diretório '{project_path}' já existe."); return
         
     original_dir = os.getcwd()
     
     try:
+        # --- LÓGICA DE CRIAÇÃO LOCAL (EXISTENTE) ---
         click.echo(f"   > Criando a estrutura do projeto em: {project_path}")
         os.makedirs(project_path)
         
         click.echo("   > Criando ambiente virtual 'venv'...")
-        python_executable = sys.executable
-        subprocess.run([python_executable, "-m", "venv", os.path.join(project_path, "venv")], check=True, capture_output=True)
+        subprocess.run([sys.executable, "-m", "venv", os.path.join(project_path, "venv")], check=True, capture_output=True)
 
         click.echo("   > Criando arquivo .gitignore...")
         gitignore_content = ("venv/\n\n__pycache__/\n*.py[cod]\n\nbuild/\ndist/\n*.egg-info/\n\n.vscode/\n.idea/\n\n.env\n")
@@ -951,25 +952,41 @@ def init(project_name):
         with open(os.path.join(project_path, "requirements.txt"), "w", encoding="utf-8") as f: f.write("# Adicione suas dependências aqui\n")
         
         click.echo("   > Criando arquivo main.py inicial...")
-        main_py_content = ("def main():\n    print(\"Olá, do seu novo projeto!\")\n\nif __name__ == '__main__':\n    main()\n")
+        main_py_content = (f"def main():\n    print(\"Bem-vindo ao {project_name}!\")\n\nif __name__ == '__main__':\n    main()\n")
         with open(os.path.join(project_path, "main.py"), "w", encoding="utf-8") as f: f.write(main_py_content)
 
         click.echo("   > Inicializando repositório Git...")
         os.chdir(project_path)
-        if _run_git_command(['init', '-b', 'main']):
-            click.echo(Fore.GREEN + "     - Repositório Git criado com sucesso no ramo 'main'.")
-        else:
+        if not _run_git_command(['init', '-b', 'main']):
             return
 
-        click.echo(Fore.GREEN + "\n[INIT] Projeto criado com sucesso!")
-        click.echo(Fore.YELLOW + "Próximos passos:")
-        click.echo(f"1. Navegue até a pasta do seu projeto: cd {project_name}")
-        click.echo("2. Configure seu repositório remoto (ex: no GitHub) e adicione-o:")
-        click.echo(Fore.CYAN + "   git remote add origin URL_DO_SEU_REPOSITORIO.git")
-        click.echo("3. Ative o ambiente virtual: .\\venv\\Scripts\\activate")
+        click.echo(Fore.GREEN + "\n[OK] Estrutura local do projeto criada com sucesso!")
 
-    except subprocess.CalledProcessError as e:
-        click.echo(Fore.RED + f"[ERRO] Erro ao criar venv: {e.stderr.decode('utf-8', 'ignore')}")
+        # --- NOVA LÓGICA DE PUBLICAÇÃO AUTOMÁTICA ---
+        if remote:
+            click.echo(Fore.CYAN + "\n--- Publicando projeto no repositório remoto ---")
+            
+            click.echo(f"   > Adicionando remote 'origin' -> {remote}")
+            if not _run_git_command(['remote', 'add', 'origin', remote]): return
+            
+            click.echo("   > Adicionando todos os arquivos ao Git (git add .)...")
+            if not _run_git_command(['add', '.']): return
+
+            commit_message = f"Commit inicial: Estrutura do projeto {project_name}"
+            click.echo(f"   > Criando commit inicial com a mensagem: '{commit_message}'...")
+            if not _run_git_command(['commit', '-m', commit_message]): return
+
+            click.echo("   > Enviando para o branch 'main' no remote 'origin' (git push)...")
+            if not _run_git_command(['push', '--set-upstream', 'origin', 'main']):
+                click.echo(Fore.RED + "[ERRO] Falha ao enviar. Verifique a URL, suas permissões e se o repositório remoto está VAZIO.")
+                return
+
+            click.echo(Fore.GREEN + "\n[OK] Projeto publicado com sucesso!")
+            click.echo(f"   > Veja seu repositório em: {remote}")
+        
+        else:
+            click.echo(Fore.YELLOW + "\nLembrete: Este é um projeto local. Para publicá-lo mais tarde, use 'doxoade git-new'.")
+
     except Exception as e:
         click.echo(Fore.RED + f"[ERRO] Ocorreu um erro inesperado: {e}")
     finally:
