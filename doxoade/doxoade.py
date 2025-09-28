@@ -9,6 +9,8 @@ import click
 import shlex
 import fnmatch
 import tempfile
+import traceback
+from functools import wraps
 from bs4 import BeautifulSoup
 from io import StringIO
 from colorama import init, Fore, Style
@@ -23,10 +25,56 @@ init(autoreset=True)
 # GRUPO PRINCIPAL E CONFIGURAÇÃO
 # -----------------------------------------------------------------------------
 
+#atualizado em 2025/09/26-Versão 10.8. Adicionado tratamento de exceção global para garantir que falhas internas da ferramenta sejam sempre registradas no log.
 @click.group()
 def cli():
     """olDox222 Advanced Development Environment (doxoade) LITE v1.0"""
-    pass
+    # Este é o ponto de entrada principal.
+    # Envolvemos tudo em um try/except para capturar erros fatais da própria ferramenta.
+    try:
+        pass # A mágica do click acontece após esta função
+    except Exception as e:
+        # Se qualquer comando falhar com uma exceção não tratada, nós a registramos.
+        results = {
+            'summary': {'errors': 1, 'warnings': 0},
+            'internal_error': [{
+                'type': 'error',
+                'message': 'A Doxoade encontrou um erro fatal interno.',
+                'details': str(e),
+                'traceback': traceback.format_exc()
+            }]
+        }
+        _log_execution(command_name="FATAL", path=".", results=results, arguments={})
+        # E então deixamos o erro acontecer para que o usuário o veja.
+        raise e
+
+#atualizado em 2025/09/27-Versão 13.1 (Final). Decorador de log corrigido para lidar com todos os tipos de comandos e argumentos de forma robusta, eliminando o IndexError.
+def log_command_execution(func):
+    """
+    Decorador que envolve um comando click para garantir que sua execução
+    e seus argumentos sejam sempre registrados no log.
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        # A forma mais robusta de obter o contexto é através do click.get_current_context()
+        ctx = click.get_current_context()
+        command_name = ctx.command.name
+        
+        # O caminho do projeto é geralmente o argumento 'path', mas usamos '.' como um padrão seguro.
+        path = kwargs.get('path', '.')
+        
+        results = {'summary': {'errors': 0, 'warnings': 0}}
+        try:
+            # Executa o comando original, passando os argumentos exatamente como foram recebidos.
+            return func(*args, **kwargs)
+        except Exception:
+            # O erro fatal já será capturado pelo nosso handler global.
+            raise
+        finally:
+            # Usamos kwargs para registrar os argumentos, que contêm os parâmetros nomeados.
+            _log_execution(command_name, path, results, kwargs)
+            
+    return wrapper
 
 def _load_config():
     """Procura e carrega configurações de um arquivo .doxoaderc."""
@@ -45,12 +93,12 @@ def _load_config():
 
 #atualizado em 2025/09/24-Versão 8.0. Novo comando 'doctor' para meta-análise da própria ferramenta. Tem como função verificar o ambiente, as dependências internas e a qualidade do código da doxoade.
 @cli.command()
+@log_command_execution
 def doctor():
     """Executa um diagnóstico completo da própria ferramenta doxoade."""
     click.echo(Fore.CYAN + Style.BRIGHT + "--- [DOCTOR] Executando diagnóstico da ferramenta Doxoade ---")
-    
+
     findings = []
-    
     # --- Verificação 1: Diagnóstico do PATH ---
     click.echo(Fore.YELLOW + "\n--- 1. Verificando o ambiente de instalação (PATH)... ---")
     try:
@@ -65,8 +113,8 @@ def doctor():
         else:
             click.echo(Fore.GREEN + f"[OK] Instalação única encontrada em: {locations[0]}")
     except (FileNotFoundError, subprocess.CalledProcessError):
-        findings.append({'type': 'error', 'message': "Não foi possível executar o comando 'where doxoade'.", 'details': "Isso pode indicar um problema com a instalação ou com o PATH do sistema."})
-
+        findings.append({'type': 'error', 'message': "Não foi possível executar o comando 'where doxoade'.", 'details': "Isso pode indicar um problema com a instalação ou com o PATH do sistema."  })
+    
     # --- Verificação 2: Dependências Internas ---
     click.echo(Fore.YELLOW + "\n--- 2. Verificando as dependências internas da Doxoade... ---")
     doxoade_path = _get_doxoade_installation_path()
@@ -96,8 +144,8 @@ def doctor():
         if result.returncode == 0:
             click.echo(Fore.GREEN + "[OK] O código-fonte da Doxoade passou em seu próprio teste de qualidade ('check').")
         else:
-            findings.append({'type': 'warning', 'message': "A Doxoade encontrou problemas de qualidade em seu próprio código.", 'details': f"Execute 'doxoade check .' no diretório da ferramenta para ver os detalhes:\n{result.stdout}"})
-    
+            findings.append({'type': 'warning', 'message': "A Doxoade encontrou problemas de qualidade em seu próprio código.", 'details': f"Execute 'doxoade check .' no diretório da ferramenta   para ver os detalhes:\n{result.stdout}"})
+        
     # --- Sumário Final ---
     click.echo(Fore.CYAN + Style.BRIGHT + "\n--- Diagnóstico Concluído ---")
     if not findings:
@@ -105,12 +153,12 @@ def doctor():
     else:
         click.echo(Fore.RED + Style.BRIGHT + f"[ATENÇÃO] Foram encontrados {len(findings)} problemas:")
         for finding in findings:
-             color = Fore.RED if finding['type'] == 'error' else Fore.YELLOW
-             tag = '[ERRO]' if finding['type'] == 'error' else '[AVISO]'
-             click.echo(color + f"{tag} {finding['message']}")
-             if 'details' in finding:
-                 click.echo(Fore.CYAN + f"   > {finding['details']}")
-
+            color = Fore.RED if finding['type'] == 'error' else Fore.YELLOW
+            tag = '[ERRO]' if finding['type'] == 'error' else '[AVISO]'
+            click.echo(color + f"{tag} {finding['message']}")
+            if 'details' in finding:
+                click.echo(Fore.CYAN + f"   > {finding['details']}")
+        
 def _get_doxoade_installation_path():
     """Encontra o caminho do diretório de instalação da própria ferramenta doxoade."""
     try:
@@ -128,9 +176,11 @@ def _get_doxoade_installation_path():
 
 #atualizado em 2025/09/25-Versão 9.1. Novo comando 'dashboard' para visualizar tendências de saúde do projeto a partir dos logs.
 @cli.command()
+@log_command_execution
 @click.option('--project', default=None, help="Filtra o dashboard para um caminho de projeto específico.")
 def dashboard(project):
     """Exibe um painel com a saúde e tendências dos projetos analisados."""
+
     log_file = Path.home() / '.doxoade' / 'doxoade.log'
     if not log_file.exists():
         click.echo(Fore.YELLOW + "Nenhum arquivo de log encontrado. Execute alguns comandos de análise primeiro."); return
@@ -195,11 +245,12 @@ def dashboard(project):
 
 #atualizado em 2025/09/25-Versão 8.2. 'setup-health' agora verifica e cria o venv se ele não existir, tornando o comando mais robusto.
 @cli.command('setup-health')
+@log_command_execution
 @click.argument('path', type=click.Path(exists=True, file_okay=False, resolve_path=True), default='.')
 def setup_health(path):
     """Prepara um projeto para ser analisado pelo 'doxoade health'."""
     click.echo(Fore.CYAN + Style.BRIGHT + f"--- [SETUP-HEALTH] Configurando o projeto em '{path}' para análise de saúde ---")
-    
+
     # --- Passo 0: Verificar e criar o venv, se necessário ---
     click.echo(Fore.YELLOW + "\n--- 0. Verificando ambiente virtual ('venv')... ---")
     venv_path = os.path.join(path, 'venv')
@@ -284,7 +335,6 @@ def setup_health(path):
 
 #atualizado em 2025/09/26-Versão 10.3. Corrigido o loop infinito no 'health' com uma lógica de verificação de ambiente mais robusta e direta.
 @cli.command()
-@click.pass_context
 @click.argument('path', type=click.Path(exists=True, file_okay=False, resolve_path=True), default='.')
 @click.option('--ignore', multiple=True, help="Ignora uma pasta. Combina com as do .doxoaderc.")
 @click.option('--format', type=click.Choice(['text', 'json']), default='text', help="Define o formato da saída.")
@@ -344,13 +394,13 @@ def health(ctx, path, ignore, format, complexity_threshold, min_coverage):
                 is_only_dep_error = True
 
         if is_only_dep_error:
-             click.echo(Fore.YELLOW + "\n[AVISO] A análise encontrou erros de dependência (ex: 'radon' ou 'coverage' não instalados).")
-             if click.confirm(Fore.CYAN + "Deseja executar 'doxoade setup-health' para instalar as dependências corretas?"):
-                 ctx.invoke(setup_health, path=path)
-                 click.echo(Fore.CYAN + Style.BRIGHT + "\nConfiguração concluída. Por favor, execute 'doxoade health' novamente para ver o relatório.")
-             else:
-                 click.echo("Comando abortado.")
-             return
+            click.echo(Fore.YELLOW + "\n[AVISO] A análise encontrou erros de dependência (ex: 'radon' ou 'coverage' não instalados).")
+            if click.confirm(Fore.CYAN + "Deseja executar 'doxoade setup-health' para instalar as dependências corretas?"):
+                ctx.invoke(setup_health, path=path)
+                click.echo(Fore.CYAN + Style.BRIGHT + "\nConfiguração concluída. Por favor, execute 'doxoade health' novamente para ver o relatório.")
+            else:
+                click.echo("Comando abortado.")
+            return
 
 
         _update_summary_from_findings(results)
@@ -365,292 +415,434 @@ def health(ctx, path, ignore, format, complexity_threshold, min_coverage):
         if results['summary']['errors'] > 0 and not is_only_dep_error:
             sys.exit(1)
 
+#atualizado em 2025/09/27-Versão 12.2 (PoC). Novo comando 'apicheck' para análise estática de uso de APIs. Tem como função ler um 'apicheck.json' e verificar se as chamadas de API no código seguem as regras do contrato.
+@cli.command('apicheck')
+@log_command_execution
+@click.argument('path', type=click.Path(exists=True, file_okay=False, resolve_path=True), default='.')
+@click.option('--ignore', multiple=True, help="Ignora uma pasta. Combina com as do .doxoaderc.")
+def apicheck(path, ignore):
+    """Analisa o uso de APIs com base em um arquivo de contrato 'apicheck.json'."""
+    results = {'summary': {'errors': 0, 'warnings': 0}}
+    click.echo(Fore.YELLOW + f"[APICHECK] Executando análise de contratos de API em '{path}'...")
+    
+    results = {'summary': {'errors': 0, 'warnings': 0}}
+    try:
+        # --- Passo 1: Carregar o Contrato ---
+        contract_file = os.path.join(path, 'apicheck.json')
+        if not os.path.exists(contract_file):
+            click.echo(Fore.YELLOW + "[AVISO] Arquivo 'apicheck.json' não encontrado. Nenhuma análise será feita.")
+            return
+    
+        try:
+            with open(contract_file, 'r', encoding='utf-8') as f:
+                contracts = json.load(f).get('contracts', [])
+        except (json.JSONDecodeError, IOError) as e:
+            click.echo(Fore.RED + f"[ERRO] Falha ao ler ou decodificar 'apicheck.json': {e}")
+            sys.exit(1)
+    
+        # --- Passo 2: Encontrar Arquivos e Analisar ---
+        config = _load_config()
+        final_ignore_list = list(set(config['ignore'] + list(ignore)))
+        folders_to_ignore = set([item.lower() for item in final_ignore_list] + ['venv', 'build', 'dist', '.git'])
+        files_to_check = []
+        for root, dirs, files in os.walk(path):
+            dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
+            for file in files:
+                if file.endswith('.py'):
+                    files_to_check.append(os.path.join(root, file))
+    
+        api_findings = []
+        for file_path in files_to_check:
+            api_findings.extend(_analyze_api_calls(file_path, contracts))
+            
+        results['api_contracts'] = api_findings
+        _update_summary_from_findings(results)
+        _present_results('text', results)
+    
+        _log_execution('apicheck', path, results, {'ignore': list(ignore)})
+        if results['summary']['errors'] > 0:
+            sys.exit(1)
+    finally:
+        args = {"ignore": list(ignore)}
+        _log_execution('apicheck', path, results, args)
+
+#atualizado em 2025/09/27-Versão 12.5 (Robusta). Motor do 'apicheck' completamente reescrito para ser mais simples e eficaz, corrigindo a falha na detecção de violações de contrato.
+def _analyze_api_calls(file_path, contracts):
+    """Usa AST para analisar um arquivo Python em busca de violações de contrato de API."""
+
+    results = {'summary': {'errors': 0, 'warnings': 0}}
+    try:
+        findings = []
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                tree = ast.parse(f.read(), filename=file_path)
+        except SyntaxError:
+            return [] # Ignora arquivos com erro de sintaxe
+    
+        # Iteramos sobre todos os nós da árvore
+        for node in ast.walk(tree):
+            # Nosso alvo são apenas os nós de chamada de função
+            if not isinstance(node, ast.Call):
+                continue
+    
+            # Reconstruímos o nome completo da função (ex: 'requests.get')
+            func_name_parts = []
+            curr = node.func
+            while isinstance(curr, ast.Attribute):
+                func_name_parts.insert(0, curr.attr)
+                curr = curr.value
+            if isinstance(curr, ast.Name):
+                func_name_parts.insert(0, curr.id)
+            full_func_name = ".".join(func_name_parts)
+            
+            # Verificamos se esta função corresponde a algum dos nossos contratos
+            for contract in contracts:
+                if contract.get('function') != full_func_name:
+                    continue
+    
+                # --- Contrato Encontrado! Agora validamos as regras ---
+                rules = contract.get('rules', {})
+                provided_args = {kw.arg for kw in node.keywords}
+    
+                # Regra 1: required_params
+                for param in rules.get('required_params', []):
+                    if param not in provided_args:
+                        findings.append({
+                            'type': 'error',
+                            'message': f"Chamada para '{full_func_name}' não possui o parâmetro obrigatório '{param}'.",
+                            'details': f"Contrato '{contract['id']}' exige este parâmetro.",
+                            'file': file_path,
+                            'line': node.lineno
+                        })
+    
+                # Regra 2: forbidden_params
+                for param, bad_value in rules.get('forbidden_params', {}).items():
+                    for kw in node.keywords:
+                        # Verificamos se o argumento tem o valor proibido (ex: verify=False)
+                        if kw.arg == param and isinstance(kw.value, ast.Constant) and kw.value.value == bad_value:
+                            findings.append({
+                                'type': 'error',
+                                'message': f"Chamada para '{full_func_name}' usa o valor proibido '{param}={bad_value}'.",
+                                'details': f"Contrato '{contract['id']}' proíbe este uso por razões de segurança.",
+                                'file': file_path,
+                                'line': node.lineno
+                            })
+                                
+        return findings
+    finally:
+        _log_execution('_analyze_api_calls', ".", results, {'file_path': file_path, 'contracts': contracts})
+
 #atualizado em 2025/09/24-Versão 7.5. Corrigido NameError na chamada da função e removido import não utilizado.
 def _analyze_complexity(project_path, files_to_check, threshold):
     """Analisa a complexidade ciclomática, focando no diretório de código-fonte."""
-    findings = []
-    config = _load_config()
-    source_dir = config.get('source_dir', '.')
     
+    results = {'summary': {'errors': 0, 'warnings': 0}}
     try:
-        from radon.visitors import ComplexityVisitor
-    except ImportError:
-        return [{'type': 'error', 'message': "A biblioteca 'radon' não está instalada.", 'details': "Adicione 'radon' ao seu requirements.txt e instale."}]
-
-    source_path = os.path.abspath(os.path.join(project_path, source_dir))
-    relevant_files = [f for f in files_to_check if os.path.abspath(f).startswith(source_path)]
+        findings = []
+        config = _load_config()
+        source_dir = config.get('source_dir', '.')
+        
+        try:
+            from radon.visitors import ComplexityVisitor
+        except ImportError:
+            return [{'type': 'error', 'message': "A biblioteca 'radon' não está instalada.", 'details': "Adicione 'radon' ao seu requirements.txt e instale."}]
     
-    try:
-        for file_path in relevant_files:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            visitor = ComplexityVisitor.from_code(content)
-            for func in visitor.functions:
-                if func.complexity > threshold:
-                    findings.append({
-                        'type': 'warning',
-                        'message': f"Função '{func.name}' tem complexidade alta ({func.complexity}).",
-                        'details': f"O máximo recomendado é {threshold}.",
-                        'file': file_path,
-                        'line': func.lineno
-                    })
-    except Exception:
-        pass
-    return findings
-
+        source_path = os.path.abspath(os.path.join(project_path, source_dir))
+        relevant_files = [f for f in files_to_check if os.path.abspath(f).startswith(source_path)]
+        
+        try:
+            for file_path in relevant_files:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                visitor = ComplexityVisitor.from_code(content)
+                for func in visitor.functions:
+                    if func.complexity > threshold:
+                        findings.append({
+                            'type': 'warning',
+                            'message': f"Função '{func.name}' tem complexidade alta ({func.complexity}).",
+                            'details': f"O máximo recomendado é {threshold}.",
+                            'file': file_path,
+                            'line': func.lineno
+                        })
+        except Exception:
+            pass
+        return findings
+    finally:
+        _log_execution('_analyze_complexity', ".", results, {'project_path': project_path, 'files_to_check': files_to_check, 'threshold': threshold })
+    
 #atualizado em 2025/09/24-Versão 7.4. 'health' agora lê 'source_dir' do .doxoaderc para focar a análise de radon e coverage, tornando os resultados mais precisos.
 def _analyze_test_coverage(project_path, min_coverage):
     """Executa a suíte de testes com coverage.py, focando no diretório de código-fonte."""
-    findings = []
-    config = _load_config()
-    # Usa o 'source_dir' do config, ou o diretório do projeto como padrão.
-    source_dir = config.get('source_dir', '.')
-
+    
+    results = {'summary': {'errors': 0, 'warnings': 0}}
     try:
-        from importlib import util as importlib_util
-    except ImportError:
-        return [{'type': 'error', 'message': "Módulo 'importlib' não encontrado."}]
-
-    if not importlib_util.find_spec("coverage"):
-        return [{'type': 'error', 'message': "A biblioteca 'coverage' não está instalada.", 'details': "Adicione 'coverage' e 'pytest' ao seu requirements.txt."}]
-
-    venv_scripts_path = os.path.join(project_path, 'venv', 'Scripts' if os.name == 'nt' else 'bin')
-    python_exe = os.path.join(venv_scripts_path, 'python.exe')
-    python_no_exe = os.path.join(venv_scripts_path, 'python')
-
-    if os.path.exists(python_exe): venv_python = python_exe
-    elif os.path.exists(python_no_exe): venv_python = python_no_exe
-    else: return [{'type': 'error', 'message': "Não foi possível encontrar o executável Python do venv."}]
-
-    # --- LÓGICA APRIMORADA: Passamos o --source para o coverage ---
-    run_tests_cmd = [venv_python, '-m', 'coverage', 'run', f'--source={source_dir}', '-m', 'pytest']
-    generate_report_cmd = [venv_python, '-m', 'coverage', 'json']
-
-    original_dir = os.getcwd()
-    try:
-        os.chdir(project_path)
-        test_result = subprocess.run(run_tests_cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
-        
-        if test_result.returncode != 0:
-            if "no tests ran" in test_result.stdout or "collected 0 items" in test_result.stdout:
-                 return [{'type': 'warning', 'message': "Nenhum teste foi encontrado pelo pytest.", 'details': "Verifique se seus arquivos de teste seguem o padrão 'test_*.py' ou '*_test.py'."}]
-            else:
-                return [{'type': 'error', 'message': "A suíte de testes falhou durante a execução.", 'details': f"Saída do Pytest:\n{test_result.stdout}\n{test_result.stderr}"}]
-
-        subprocess.run(generate_report_cmd, capture_output=True, check=True)
-
-        if os.path.exists('coverage.json'):
-            with open('coverage.json', 'r') as f: report_data = json.load(f)
-            total_coverage = report_data['totals']['percent_covered']
-            if total_coverage < min_coverage:
-                findings.append({'type': 'warning', 'message': f"Cobertura de testes está baixa: {total_coverage:.2f}%.", 'details': f"O mínimo recomendado é {min_coverage}%.", 'file': project_path})
-    except Exception: pass
+        findings = []
+        config = _load_config()
+        # Usa o 'source_dir' do config, ou o diretório do projeto como padrão.
+        source_dir = config.get('source_dir', '.')
+    
+        try:
+            from importlib import util as importlib_util
+        except ImportError:
+            return [{'type': 'error', 'message': "Módulo 'importlib' não encontrado."}]
+    
+        if not importlib_util.find_spec("coverage"):
+            return [{'type': 'error', 'message': "A biblioteca 'coverage' não está instalada.", 'details': "Adicione 'coverage' e 'pytest' ao seu requirements.txt."}]
+    
+        venv_scripts_path = os.path.join(project_path, 'venv', 'Scripts' if os.name == 'nt' else 'bin')
+        python_exe = os.path.join(venv_scripts_path, 'python.exe')
+        python_no_exe = os.path.join(venv_scripts_path, 'python')
+    
+        if os.path.exists(python_exe): venv_python = python_exe
+        elif os.path.exists(python_no_exe): venv_python = python_no_exe
+        else: return [{'type': 'error', 'message': "Não foi possível encontrar o executável Python do venv."}]
+    
+        # --- LÓGICA APRIMORADA: Passamos o --source para o coverage ---
+        run_tests_cmd = [venv_python, '-m', 'coverage', 'run', f'--source={source_dir}', '-m', 'pytest']
+        generate_report_cmd = [venv_python, '-m', 'coverage', 'json']
+    
+        original_dir = os.getcwd()
+        try:
+            os.chdir(project_path)
+            test_result = subprocess.run(run_tests_cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+            
+            if test_result.returncode != 0:
+                if "no tests ran" in test_result.stdout or "collected 0 items" in test_result.stdout:
+                    return [{'type': 'warning', 'message': "Nenhum teste foi encontrado pelo pytest.", 'details': "Verifique se seus arquivos de teste seguem o padrão 'test_*.py' ou '*_test.py'."}]
+                else:
+                    return [{'type': 'error', 'message': "A suíte de testes falhou durante a execução.", 'details': f"Saída do Pytest:\n{test_result.stdout}\n{test_result.stderr}"}]
+    
+            subprocess.run(generate_report_cmd, capture_output=True, check=True)
+    
+            if os.path.exists('coverage.json'):
+                with open('coverage.json', 'r') as f: report_data = json.load(f)
+                total_coverage = report_data['totals']['percent_covered']
+                if total_coverage < min_coverage:
+                    findings.append({'type': 'warning', 'message': f"Cobertura de testes está baixa: {total_coverage:.2f}%.", 'details': f"O mínimo recomendado é {min_coverage}%.", 'file': project_path})
+        except Exception: pass
+        finally:
+            if os.path.exists('coverage.json'): os.remove('coverage.json')
+            if os.path.exists('.coverage'): os.remove('.coverage')
+            os.chdir(original_dir)
+            
+        return findings
     finally:
-        if os.path.exists('coverage.json'): os.remove('coverage.json')
-        if os.path.exists('.coverage'): os.remove('.coverage')
-        os.chdir(original_dir)
-        
-    return findings
+        args = {"min_coverage": min_coverage}
+        _log_execution('_analyze_test_coverage', ".", results, {'project_path': project_path, 'args': args })
 
 #atualizado em 2025/09/23-Versão 5.5. Tutorial completamente reescrito para incluir todos os comandos da suíte (sync, release, clean, git-clean, guicheck) e melhorar a clareza para novos usuários.
 @cli.command()
+@log_command_execution
 def tutorial():
     """Exibe um guia passo a passo do workflow completo do doxoade."""
+
+    results = {'summary': {'errors': 0, 'warnings': 0}}
+    try:
+        click.echo(Fore.CYAN + Style.BRIGHT + "--- Guia Completo do Workflow Doxoade ---")
+        click.echo(Fore.WHITE + "Este guia mostra como usar o doxoade para gerenciar um projeto do início ao fim.")
     
-    click.echo(Fore.CYAN + Style.BRIGHT + "--- Guia Completo do Workflow Doxoade ---")
-    click.echo(Fore.WHITE + "Este guia mostra como usar o doxoade para gerenciar um projeto do início ao fim.")
-
-    # Passo 1: Criação e Publicação
-    click.echo(Fore.YELLOW + "\n\n--- Passo 1: Crie e Publique seu Projeto ---")
-    click.echo(Fore.GREEN + "   1. Use 'doxoade init' para criar a estrutura local do seu projeto.")
-    click.echo(Fore.CYAN + '        $ doxoade init meu-projeto-tutorial\n')
-    click.echo(Fore.GREEN + "   2. Depois, vá para o GitHub (ou similar), crie um repositório VAZIO e copie a URL.")
-    click.echo(Fore.GREEN + "   3. Finalmente, use 'doxoade git-new' para fazer a conexão e o primeiro push.")
-    click.echo(Fore.CYAN + '        $ cd meu-projeto-tutorial')
-    click.echo(Fore.CYAN + '        $ doxoade git-new "Commit inicial do projeto" https://github.com/usuario/meu-projeto-tutorial.git\n')
-    click.echo(Fore.WHITE + "   Seu projeto agora está online!")
-
-    # Passo 2: O Ciclo de Desenvolvimento Diário
-    click.echo(Fore.YELLOW + "\n\n--- Passo 2: O Ciclo de Desenvolvimento Diário ---")
-    click.echo(Fore.GREEN + "   1. Ative o ambiente virtual para garantir o isolamento das dependências.")
-    click.echo(Fore.CYAN + '        $ .\\venv\\Scripts\\activate\n')
-    click.echo(Fore.GREEN + "   2. Escreva seu código, modifique arquivos, crie novas funcionalidades...")
-    click.echo(Fore.CYAN + "        (venv) > ... programando ...\n")
-    click.echo(Fore.GREEN + "   3. Quando estiver pronto, use 'doxoade save' para fazer um commit seguro. Ele verifica seu código antes de salvar.")
-    click.echo(Fore.CYAN + '        (venv) > doxoade save "Implementada a classe Usuario"\n')
-    click.echo(Fore.GREEN + "   4. Para manter seu repositório local e o remoto sempre alinhados, use 'doxoade sync'. Ele puxa as últimas alterações e empurra as suas.")
-    click.echo(Fore.CYAN + '        (venv) > doxoade sync')
-
-    # Passo 3: Análise e Qualidade de Código
-    click.echo(Fore.YELLOW + "\n\n--- Passo 3: Análise e Qualidade de Código ---")
-    click.echo(Fore.GREEN + "   A qualquer momento, use os comandos de análise para verificar a saúde do seu projeto:")
-    click.echo(Fore.GREEN + "    - Para código Python (erros, bugs, estilo):")
-    click.echo(Fore.CYAN + '        $ doxoade check\n')
-    click.echo(Fore.GREEN + "    - Para código de frontend (HTML, CSS, JS):")
-    click.echo(Fore.CYAN + '        $ doxoade webcheck\n')
-    click.echo(Fore.GREEN + "    - Para código de interfaces gráficas com Tkinter:")
-    click.echo(Fore.CYAN + '        $ doxoade guicheck')
-
-    # Passo 4: Versionamento e Lançamentos
-    click.echo(Fore.YELLOW + "\n\n--- Passo 4: Versionamento e Lançamentos (Releases) ---")
-    click.echo(Fore.GREEN + "   Quando seu projeto atinge um marco importante (ex: v1.0), você cria uma 'release' para marcar aquela versão.")
-    click.echo(Fore.CYAN + '        $ doxoade release v1.0.0 "Lançamento da primeira versão estável"\n')
-    click.echo(Fore.WHITE + "   Isso cria uma 'tag' no seu Git, facilitando a organização e o versionamento.")
-
-    # Passo 5: Ferramentas Utilitárias e Automação
-    click.echo(Fore.YELLOW + "\n\n--- Passo 5: Ferramentas Utilitárias e Automação ---")
-    click.echo(Fore.GREEN + "    - Para investigar problemas passados, use 'doxoade log'. A flag '--snippets' é muito útil.")
-    click.echo(Fore.CYAN + '        $ doxoade log -n 3 --snippets\n')
-    click.echo(Fore.GREEN + "    - Para limpar o projeto de arquivos de cache e build (ex: __pycache__, dist/):")
-    click.echo(Fore.CYAN + '        $ doxoade clean\n')
-    click.echo(Fore.GREEN + "    - Para 'higienizar' seu repositório caso você tenha acidentalmente commitado arquivos que deveriam ser ignorados (como a 'venv'):")
-    click.echo(Fore.CYAN + '        $ doxoade git-clean\n')
-    click.echo(Fore.GREEN + "    - Para rodar uma sequência de comandos de uma só vez, use 'doxoade auto'.")
-    click.echo(Fore.CYAN + '        $ doxoade auto "doxoade check ." "doxoade run meus_testes.py"')
-
-    click.echo(Fore.YELLOW + Style.BRIGHT + "\n--- Fim do Guia ---\n")
-    click.echo(Fore.WHITE + "   Lembre-se: use a flag '--help' em qualquer comando para ver mais detalhes e opções. Ex: 'doxoade save --help'.\n")
-
+        # Passo 1: Criação e Publicação
+        click.echo(Fore.YELLOW + "\n\n--- Passo 1: Crie e Publique seu Projeto ---")
+        click.echo(Fore.GREEN + "   1. Use 'doxoade init' para criar a estrutura local do seu projeto.")
+        click.echo(Fore.CYAN + '        $ doxoade init meu-projeto-tutorial\n')
+        click.echo(Fore.GREEN + "   2. Depois, vá para o GitHub (ou similar), crie um repositório VAZIO e copie a URL.")
+        click.echo(Fore.GREEN + "   3. Finalmente, use 'doxoade git-new' para fazer a conexão e o primeiro push.")
+        click.echo(Fore.CYAN + '        $ cd meu-projeto-tutorial')
+        click.echo(Fore.CYAN + '        $ doxoade git-new "Commit inicial do projeto" https://github.com/usuario/meu-projeto-tutorial.git\n')
+        click.echo(Fore.WHITE + "   Seu projeto agora está online!")
+    
+        # Passo 2: O Ciclo de Desenvolvimento Diário
+        click.echo(Fore.YELLOW + "\n\n--- Passo 2: O Ciclo de Desenvolvimento Diário ---")
+        click.echo(Fore.GREEN + "   1. Ative o ambiente virtual para garantir o isolamento das dependências.")
+        click.echo(Fore.CYAN + '        $ .\\venv\\Scripts\\activate\n')
+        click.echo(Fore.GREEN + "   2. Escreva seu código, modifique arquivos, crie novas funcionalidades...")
+        click.echo(Fore.CYAN + "        (venv) > ... programando ...\n")
+        click.echo(Fore.GREEN + "   3. Quando estiver pronto, use 'doxoade save' para fazer um commit seguro. Ele verifica seu código antes de salvar.")
+        click.echo(Fore.CYAN + '        (venv) > doxoade save "Implementada a classe Usuario"\n')
+        click.echo(Fore.GREEN + "   4. Para manter seu repositório local e o remoto sempre alinhados, use 'doxoade sync'. Ele puxa as últimas alterações e empurra as suas.")
+        click.echo(Fore.CYAN + '        (venv) > doxoade sync')
+    
+        # Passo 3: Análise e Qualidade de Código
+        click.echo(Fore.YELLOW + "\n\n--- Passo 3: Análise e Qualidade de Código ---")
+        click.echo(Fore.GREEN + "   A qualquer momento, use os comandos de análise para verificar a saúde do seu projeto:")
+        click.echo(Fore.GREEN + "    - Para código Python (erros, bugs, estilo):")
+        click.echo(Fore.CYAN + '        $ doxoade check\n')
+        click.echo(Fore.GREEN + "    - Para código de frontend (HTML, CSS, JS):")
+        click.echo(Fore.CYAN + '        $ doxoade webcheck\n')
+        click.echo(Fore.GREEN + "    - Para código de interfaces gráficas com Tkinter:")
+        click.echo(Fore.CYAN + '        $ doxoade guicheck')
+    
+        # Passo 4: Versionamento e Lançamentos
+        click.echo(Fore.YELLOW + "\n\n--- Passo 4: Versionamento e Lançamentos (Releases) ---")
+        click.echo(Fore.GREEN + "   Quando seu projeto atinge um marco importante (ex: v1.0), você cria uma 'release' para marcar aquela versão.")
+        click.echo(Fore.CYAN + '        $ doxoade release v1.0.0 "Lançamento da primeira versão estável"\n')
+        click.echo(Fore.WHITE + "   Isso cria uma 'tag' no seu Git, facilitando a organização e o versionamento.")
+    
+        # Passo 5: Ferramentas Utilitárias e Automação
+        click.echo(Fore.YELLOW + "\n\n--- Passo 5: Ferramentas Utilitárias e Automação ---")
+        click.echo(Fore.GREEN + "    - Para investigar problemas passados, use 'doxoade log'. A flag '--snippets' é muito útil.")
+        click.echo(Fore.CYAN + '        $ doxoade log -n 3 --snippets\n')
+        click.echo(Fore.GREEN + "    - Para limpar o projeto de arquivos de cache e build (ex: __pycache__, dist/):")
+        click.echo(Fore.CYAN + '        $ doxoade clean\n')
+        click.echo(Fore.GREEN + "    - Para 'higienizar' seu repositório caso você tenha acidentalmente commitado arquivos que deveriam ser ignorados (como a 'venv'):")
+        click.echo(Fore.CYAN + '        $ doxoade git-clean\n')
+        click.echo(Fore.GREEN + "    - Para rodar uma sequência de comandos de uma só vez, use 'doxoade auto'.")
+        click.echo(Fore.CYAN + '        $ doxoade auto "doxoade check ." "doxoade run meus_testes.py"')
+    
+        click.echo(Fore.YELLOW + Style.BRIGHT + "\n--- Fim do Guia ---\n")
+        click.echo(Fore.WHITE + "   Lembre-se: use a flag '--help' em qualquer comando para ver mais detalhes e opções. Ex: 'doxoade save --help'.\n")
+    finally:
+        _log_execution('tutorial', ".", results, {})
 
 #atualizado em 2025/09/24-Versão 6.1. Aprimorada a lógica da simulação para demonstrar a falha do 'save' e o uso do '--force', tornando o aprendizado mais completo.
 @cli.command('tutorial-simulation')
+@log_command_execution
 def tutorial_simulation():
     """Executa uma simulação interativa do workflow do doxoade em um ambiente seguro."""
+
+    results = {'summary': {'errors': 0, 'warnings': 0}}
+    try:
+        click.echo(Fore.CYAN + Style.BRIGHT + "--- Bem-vindo à Simulação do Doxoade ---")
+        click.echo(Fore.WHITE + "Vamos executar o workflow completo em um 'sandbox' (ambiente seguro) temporário.")
+        click.echo(Fore.WHITE + "Nenhum arquivo ou repositório real será modificado.")
+        click.echo(Fore.YELLOW + "Pressione Enter a cada passo para continuar...")
+        click.pause()
     
-    click.echo(Fore.CYAN + Style.BRIGHT + "--- Bem-vindo à Simulação do Doxoade ---")
-    click.echo(Fore.WHITE + "Vamos executar o workflow completo em um 'sandbox' (ambiente seguro) temporário.")
-    click.echo(Fore.WHITE + "Nenhum arquivo ou repositório real será modificado.")
-    click.echo(Fore.YELLOW + "Pressione Enter a cada passo para continuar...")
-    click.pause()
-
-    original_dir = os.getcwd()
+        original_dir = os.getcwd()
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            try:
+                sim_project_path = os.path.join(temp_dir, 'meu-projeto-simulado')
+                fake_remote_path_str = os.path.join(temp_dir, 'fake_remote.git')
+                fake_remote_url = Path(fake_remote_path_str).as_uri()
     
-    with tempfile.TemporaryDirectory() as temp_dir:
-        try:
-            sim_project_path = os.path.join(temp_dir, 'meu-projeto-simulado')
-            fake_remote_path_str = os.path.join(temp_dir, 'fake_remote.git')
-            fake_remote_url = Path(fake_remote_path_str).as_uri()
-
-            click.echo(Fore.MAGENTA + f"\n[SIMULAÇÃO] Sandbox criado em: {temp_dir}")
-
-            click.echo(Fore.MAGENTA + "[SIMULAÇÃO] Criando um repositório Git 'remoto' falso e seguro...")
-            subprocess.run(['git', 'init', '--bare', fake_remote_path_str], capture_output=True, check=True)
-            click.pause()
-
-            click.echo(Fore.YELLOW + "\n--- Passo 1: Crie e Publique seu Projeto ---")
-            os.chdir(temp_dir)
-            _run_sim_command('doxoade init meu-projeto-simulado\n')
-
-            os.chdir(sim_project_path)
-            _run_sim_command(f'doxoade git-new "Commit inicial simulado" "{fake_remote_url}"\n')
-
-            click.echo(Fore.YELLOW + "\n--- Passo 2: O Ciclo de Desenvolvimento Diário ---")
-            click.echo(Fore.MAGENTA + "[SIMULAÇÃO] Vamos criar um novo arquivo para simular uma alteração...")
-            with open("nova_feature.py", "w") as f:
-                f.write("print('Nova funcionalidade!')\n")
-            click.echo(Fore.WHITE + "Arquivo 'nova_feature.py' criado.")
-            click.pause()
-            
-            _run_sim_command('doxoade save "Adicionada nova feature"\n')
-
-            # --- LÓGICA DE ENSINO APRIMORADA ---
-            click.echo(Fore.MAGENTA + Style.BRIGHT + "\n[APRENDIZADO] O 'save' falhou! Isso é esperado.")
-            click.echo(Fore.WHITE + "Ele falhou porque o 'doxoade check' detectou que não estamos em um ambiente virtual ('venv') ativado.")
-            click.echo(Fore.WHITE + "Esta é a principal proteção do 'doxoade save'.")
-            click.echo(Fore.WHITE + "Para a simulação, vamos usar a flag '--force' para ignorar este erro e continuar.")
-            click.pause()
-
-            _run_sim_command('doxoade save "Adicionada nova feature" --force')
-            
-            click.echo(Fore.MAGENTA + Style.BRIGHT + "\n[APRENDIZADO] Agora que o commit foi feito, vamos sincronizar com o 'remoto'.")
-            click.pause()
-
-            _run_sim_command('doxoade sync\n')
-
-            click.echo(Fore.YELLOW + "\n--- Passo 3: Análise e Qualidade de Código ---")
-            _run_sim_command('doxoade check\n')
-
-            click.echo(Fore.YELLOW + "\n--- Passo 4: Versionamento e Lançamentos (Releases) ---")
-            _run_sim_command('doxoade release v0.1.0-sim "Lançamento da primeira versão simulada"\n')
-
-            click.echo(Fore.YELLOW + "\n--- Passo 5: Limpeza de Artefatos ---")
-            os.makedirs("__pycache__", exist_ok=True)
-            with open("__pycache__/temp.pyc", "w") as f: f.write("cache")
-            _run_sim_command('doxoade clean --force\n')
-
-        except Exception as e:
-            click.echo(Fore.RED + Style.BRIGHT + f"\n[ERRO NA SIMULAÇÃO] A simulação falhou: {e}")
-        finally:
-            os.chdir(original_dir)
-            click.echo(Fore.CYAN + Style.BRIGHT + "\n--- Fim da Simulação ---")
-            click.echo(Fore.MAGENTA + "[SIMULAÇÃO] O sandbox e todos os arquivos temporários foram destruídos.")
-            click.echo(Fore.WHITE + "Seu sistema de arquivos está intacto. Agora você está pronto para usar o doxoade em projetos reais!")
+                click.echo(Fore.MAGENTA + f"\n[SIMULAÇÃO] Sandbox criado em: {temp_dir}")
+    
+                click.echo(Fore.MAGENTA + "[SIMULAÇÃO] Criando um repositório Git 'remoto' falso e seguro...")
+                subprocess.run(['git', 'init', '--bare', fake_remote_path_str], capture_output=True, check=True)
+                click.pause()
+    
+                click.echo(Fore.YELLOW + "\n--- Passo 1: Crie e Publique seu Projeto ---")
+                os.chdir(temp_dir)
+                _run_sim_command('doxoade init meu-projeto-simulado\n')
+    
+                os.chdir(sim_project_path)
+                _run_sim_command(f'doxoade git-new "Commit inicial simulado" "{fake_remote_url}"\n')
+    
+                click.echo(Fore.YELLOW + "\n--- Passo 2: O Ciclo de Desenvolvimento Diário ---")
+                click.echo(Fore.MAGENTA + "[SIMULAÇÃO] Vamos criar um novo arquivo para simular uma alteração...")
+                with open("nova_feature.py", "w") as f:
+                    f.write("print('Nova funcionalidade!')\n")
+                click.echo(Fore.WHITE + "Arquivo 'nova_feature.py' criado.")
+                click.pause()
+                
+                _run_sim_command('doxoade save "Adicionada nova feature"\n')
+    
+                # --- LÓGICA DE ENSINO APRIMORADA ---
+                click.echo(Fore.MAGENTA + Style.BRIGHT + "\n[APRENDIZADO] O 'save' falhou! Isso é esperado.")
+                click.echo(Fore.WHITE + "Ele falhou porque o 'doxoade check' detectou que não estamos em um ambiente virtual ('venv') ativado.")
+                click.echo(Fore.WHITE + "Esta é a principal proteção do 'doxoade save'.")
+                click.echo(Fore.WHITE + "Para a simulação, vamos usar a flag '--force' para ignorar este erro e continuar.")
+                click.pause()
+    
+                _run_sim_command('doxoade save "Adicionada nova feature" --force')
+                
+                click.echo(Fore.MAGENTA + Style.BRIGHT + "\n[APRENDIZADO] Agora que o commit foi feito, vamos sincronizar com o 'remoto'.")
+                click.pause()
+    
+                _run_sim_command('doxoade sync\n')
+    
+                click.echo(Fore.YELLOW + "\n--- Passo 3: Análise e Qualidade de Código ---")
+                _run_sim_command('doxoade check\n')
+    
+                click.echo(Fore.YELLOW + "\n--- Passo 4: Versionamento e Lançamentos (Releases) ---")
+                _run_sim_command('doxoade release v0.1.0-sim "Lançamento da primeira versão simulada"\n')
+    
+                click.echo(Fore.YELLOW + "\n--- Passo 5: Limpeza de Artefatos ---")
+                os.makedirs("__pycache__", exist_ok=True)
+                with open("__pycache__/temp.pyc", "w") as f: f.write("cache")
+                _run_sim_command('doxoade clean --force\n')
+    
+            except Exception as e:
+                click.echo(Fore.RED + Style.BRIGHT + f"\n[ERRO NA SIMULAÇÃO] A simulação falhou: {e}")
+            finally:
+                os.chdir(original_dir)
+                click.echo(Fore.CYAN + Style.BRIGHT + "\n--- Fim da Simulação ---")
+                click.echo(Fore.MAGENTA + "[SIMULAÇÃO] O sandbox e todos os arquivos temporários foram destruídos.")
+                click.echo(Fore.WHITE + "Seu sistema de arquivos está intacto. Agora você está pronto para usar o doxoade em projetos reais!")
+    finally:
+        _log_execution('tutorial_simulation', ".", results, {})
 
 #atualizado em 2025/09/24-Versão 6.2. Novo comando 'tutorial-interactive' que exige que o usuário digite os comandos, melhorando o aprendizado prático.
 @cli.command('tutorial-interactive')
+@log_command_execution
 def tutorial_interactive():
     """Executa uma simulação PRÁTICA onde VOCÊ digita os comandos."""
+
+    results = {'summary': {'errors': 0, 'warnings': 0}}
+    try:
+        click.echo(Fore.CYAN + Style.BRIGHT + "--- Bem-vindo ao Laboratório Prático Doxoade ---")
+        click.echo(Fore.WHITE + "Nesta simulação, você irá digitar os comandos para aprender na prática.")
+        click.echo(Fore.WHITE + "Se ficar preso, digite 'ajuda' ou 'hint' para ver a resposta.")
+        click.echo(Fore.WHITE + "Digite 'sair' ou 'exit' para terminar a qualquer momento.")
+        if not click.confirm(Fore.YELLOW + "Podemos começar?"):
+            click.echo("Simulação cancelada."); return
     
-    click.echo(Fore.CYAN + Style.BRIGHT + "--- Bem-vindo ao Laboratório Prático Doxoade ---")
-    click.echo(Fore.WHITE + "Nesta simulação, você irá digitar os comandos para aprender na prática.")
-    click.echo(Fore.WHITE + "Se ficar preso, digite 'ajuda' ou 'hint' para ver a resposta.")
-    click.echo(Fore.WHITE + "Digite 'sair' ou 'exit' para terminar a qualquer momento.")
-    if not click.confirm(Fore.YELLOW + "Podemos começar?"):
-        click.echo("Simulação cancelada."); return
-
-    original_dir = os.getcwd()
+        original_dir = os.getcwd()
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            try:
+                sim_project_path = os.path.join(temp_dir, 'meu-projeto-pratico')
+                fake_remote_path_str = os.path.join(temp_dir, 'fake_remote.git')
+                fake_remote_url = Path(fake_remote_path_str).as_uri()
     
-    with tempfile.TemporaryDirectory() as temp_dir:
-        try:
-            sim_project_path = os.path.join(temp_dir, 'meu-projeto-pratico')
-            fake_remote_path_str = os.path.join(temp_dir, 'fake_remote.git')
-            fake_remote_url = Path(fake_remote_path_str).as_uri()
-
-            click.echo(Fore.MAGENTA + f"\n[SIMULAÇÃO] Sandbox seguro criado em: {temp_dir}")
-            subprocess.run(['git', 'init', '--bare', fake_remote_path_str], capture_output=True, check=True)
-            os.chdir(temp_dir)
-
-            # --- Passo 1: Criação e Publicação ---
-            click.echo(Fore.YELLOW + "\n--- Passo 1: Crie e Publique seu Projeto ---")
-            if not _prompt_and_run_sim_command(
-                prompt="Primeiro, use 'doxoade init' para criar um projeto chamado 'meu-projeto-pratico'",
-                expected_command="doxoade init meu-projeto-pratico"
-            ): return
-            
-            os.chdir(sim_project_path)
-            if not _prompt_and_run_sim_command(
-                prompt=f"Ótimo! Agora publique o projeto no nosso 'remote' falso com a mensagem 'Meu primeiro commit'.\nA URL do remote é: {fake_remote_url}",
-                expected_command=f'doxoade git-new "Meu primeiro commit" "{fake_remote_url}"'
-            ): return
-
-            # --- Passo 2: O Ciclo de Desenvolvimento Diário ---
-            click.echo(Fore.YELLOW + "\n--- Passo 2: O Ciclo de Desenvolvimento Diário ---")
-            click.echo(Fore.MAGENTA + "[SIMULAÇÃO] Vou criar um novo arquivo para simular uma alteração...")
-            with open("feature.py", "w") as f: f.write("print('hello world')\n")
-            click.echo(Fore.WHITE + "Arquivo 'feature.py' criado.")
-
-            if not _prompt_and_run_sim_command(
-                prompt="Agora, use o commit seguro para salvar o novo arquivo com a mensagem 'Adicionada feature'",
-                expected_command='doxoade save "Adicionada feature"'
-            ): return
-
-            if not _prompt_and_run_sim_command(
-                prompt="O 'save' falhou (como esperado!). Force o commit para ignorar o erro de ambiente.",
-                expected_command='doxoade save "Adicionada feature" --force'
-            ): return
-
-            if not _prompt_and_run_sim_command(
-                prompt="Excelente! Agora sincronize suas alterações com o repositório remoto.",
-                expected_command='doxoade sync'
-            ): return
-            
-            click.echo(Fore.CYAN + Style.BRIGHT + "\n--- Simulação Concluída com Sucesso! ---")
-
-        except Exception as e:
-            click.echo(Fore.RED + Style.BRIGHT + f"\n[ERRO NA SIMULAÇÃO] A simulação falhou: {e}")
-        finally:
-            os.chdir(original_dir)
-            click.echo(Fore.MAGENTA + "[SIMULAÇÃO] O sandbox e todos os arquivos temporários foram destruídos.")
+                click.echo(Fore.MAGENTA + f"\n[SIMULAÇÃO] Sandbox seguro criado em: {temp_dir}")
+                subprocess.run(['git', 'init', '--bare', fake_remote_path_str], capture_output=True, check=True)
+                os.chdir(temp_dir)
+    
+                # --- Passo 1: Criação e Publicação ---
+                click.echo(Fore.YELLOW + "\n--- Passo 1: Crie e Publique seu Projeto ---")
+                if not _prompt_and_run_sim_command(
+                    prompt="Primeiro, use 'doxoade init' para criar um projeto chamado 'meu-projeto-pratico'",
+                    expected_command="doxoade init meu-projeto-pratico"
+                ): return
+                
+                os.chdir(sim_project_path)
+                if not _prompt_and_run_sim_command(
+                    prompt=f"Ótimo! Agora publique o projeto no nosso 'remote' falso com a mensagem 'Meu primeiro commit'.\nA URL do remote é: {fake_remote_url}",
+                    expected_command=f'doxoade git-new "Meu primeiro commit" "{fake_remote_url}"'
+                ): return
+    
+                # --- Passo 2: O Ciclo de Desenvolvimento Diário ---
+                click.echo(Fore.YELLOW + "\n--- Passo 2: O Ciclo de Desenvolvimento Diário ---")
+                click.echo(Fore.MAGENTA + "[SIMULAÇÃO] Vou criar um novo arquivo para simular uma alteração...")
+                with open("feature.py", "w") as f: f.write("print('hello world')\n")
+                click.echo(Fore.WHITE + "Arquivo 'feature.py' criado.")
+    
+                if not _prompt_and_run_sim_command(
+                    prompt="Agora, use o commit seguro para salvar o novo arquivo com a mensagem 'Adicionada feature'",
+                    expected_command='doxoade save "Adicionada feature"'
+                ): return
+    
+                if not _prompt_and_run_sim_command(
+                    prompt="O 'save' falhou (como esperado!). Force o commit para ignorar o erro de ambiente.",
+                    expected_command='doxoade save "Adicionada feature" --force'
+                ): return
+    
+                if not _prompt_and_run_sim_command(
+                    prompt="Excelente! Agora sincronize suas alterações com o repositório remoto.",
+                    expected_command='doxoade sync'
+                ): return
+                
+                click.echo(Fore.CYAN + Style.BRIGHT + "\n--- Simulação Concluída com Sucesso! ---")
+    
+            except Exception as e:
+                click.echo(Fore.RED + Style.BRIGHT + f"\n[ERRO NA SIMULAÇÃO] A simulação falhou: {e}")
+            finally:
+                os.chdir(original_dir)
+                click.echo(Fore.MAGENTA + "[SIMULAÇÃO] O sandbox e todos os arquivos temporários foram destruídos.")
+    finally:
+        _log_execution('tutorial_interactive', ".", results, {})
 
 def _prompt_and_run_sim_command(prompt, expected_command):
     """Pede ao usuário para digitar um comando, valida, e então o executa."""
@@ -721,6 +913,7 @@ def _run_sim_command(command_str):
 
 #atualizado em 2025/09/23-Versão 5.2. Adicionados comandos 'release' e 'sync' para completar a suíte Git. Tem como função automatizar o versionamento e a sincronização com o repositório remoto. Melhoria: 'release' agora suporta a geração opcional de uma nota de release simples.
 @cli.command()
+@log_command_execution
 @click.argument('version')
 @click.argument('message')
 @click.option('--remote', default='origin', help='Nome do remote Git (padrão: origin).')
@@ -732,34 +925,39 @@ def release(version, message, remote, create_release):
     Exemplo: doxoade release v1.2.0 "Lançamento da versão 1.2.0" --create-release
     """
     click.echo(Fore.CYAN + f"--- [RELEASE] Criando tag Git para versão {version} ---")
-    
-    if not _run_git_command(['tag', version, '-a', '-m', message]):
-        click.echo(Fore.RED + "[ERRO] Falha ao criar a tag Git.")
-        return
-    
-    click.echo(Fore.GREEN + f"[OK] Tag Git '{version}' criada com sucesso.")
-    
-    # Tentativa de push da tag (se o remote estiver configurado)
-    if _run_git_command(['push', remote, version]):
-        click.echo(Fore.GREEN + f"[OK] Tag '{version}' enviada para o remote '{remote}'.")
-    else:
-        click.echo(Fore.YELLOW + f"[AVISO] Falha ao enviar a tag '{version}' para o remote '{remote}'. Certifique-se de que o remote está configurado e você tem permissões.")
 
-    if create_release:
-        # Lógica para criação de release no GitHub (requer mais interatividade ou API)
-        # Por enquanto, apenas informa ao usuário
-        click.echo(Fore.YELLOW + "\n[INFO] A criação automática de release no GitHub requer autenticação.")
-        click.echo(Fore.YELLOW + "Você pode criar manualmente a release em:")
-        click.echo(f"   https://github.com/{_get_github_repo_info()}/releases/new?tag={version}&title={version}")
-        click.echo(Fore.YELLOW + f"Mensagem sugerida para a release: '{message}'")
+    results = {'summary': {'errors': 0, 'warnings': 0}}
+    try:
+        if not _run_git_command(['tag', version, '-a', '-m', message]):
+            click.echo(Fore.RED + "[ERRO] Falha ao criar a tag Git.")
+            return
+        
+        click.echo(Fore.GREEN + f"[OK] Tag Git '{version}' criada com sucesso.")
+        
+        # Tentativa de push da tag (se o remote estiver configurado)
+        if _run_git_command(['push', remote, version]):
+            click.echo(Fore.GREEN + f"[OK] Tag '{version}' enviada para o remote '{remote}'.")
+        else:
+            click.echo(Fore.YELLOW + f"[AVISO] Falha ao enviar a tag '{version}' para o remote '{remote}'. Certifique-se de que o remote está configurado e você tem permissões.")
+    
+        if create_release:
+            # Lógica para criação de release no GitHub (requer mais interatividade ou API)
+            # Por enquanto, apenas informa ao usuário
+            click.echo(Fore.YELLOW + "\n[INFO] A criação automática de release no GitHub requer autenticação.")
+            click.echo(Fore.YELLOW + "Você pode criar manualmente a release em:")
+            click.echo(f"   https://github.com/{_get_github_repo_info()}/releases/new?tag={version}&title={version}")
+            click.echo(Fore.YELLOW + f"Mensagem sugerida para a release: '{message}'")
+    finally:
+        _log_execution('sync', ".", results, {'remote': remote})
 
 #atualizado em 2025/09/23-Versão 5.4. Corrigido bug crítico onde 'sync' não executava 'git push'. Tem como função sincronizar o branch local com o remoto (puxar e empurrar). Melhoria: Adicionado '--no-edit' ao pull para evitar prompts de merge em scripts.
 @cli.command()
+@log_command_execution
 @click.option('--remote', default='origin', help='Nome do remote Git (padrão: origin).')
 def sync(remote):
     """Sincroniza o branch local atual com o branch remoto (git pull && git push)."""
     click.echo(Fore.CYAN + f"--- [SYNC] Sincronizando branch com o remote '{remote}' ---")
-    
+
     current_branch = _run_git_command(['branch', '--show-current'], capture_output=True)
     if not current_branch:
         click.echo(Fore.RED + "[ERRO] Não foi possível determinar o branch atual.")
@@ -778,7 +976,7 @@ def sync(remote):
     click.echo(Fore.YELLOW + "\nPasso 2: Enviando alterações locais para o remote (git push)...")
     #status_output = _run_git_command(['status', '--porcelain'], capture_output=True)
     if "ahead" not in _run_git_command(['status', '-sb'], capture_output=True):
-         click.echo(Fore.GREEN + "[OK] Nenhum commit local para enviar. O branch já está sincronizado.")
+        click.echo(Fore.GREEN + "[OK] Nenhum commit local para enviar. O branch já está sincronizado.")
     elif not _run_git_command(['push', remote, current_branch]):
         click.echo(Fore.RED + "[ERRO] Falha ao realizar o 'git push'. Verifique sua conexão ou permissões.")
         sys.exit(1)
@@ -787,65 +985,68 @@ def sync(remote):
 
     click.echo(Fore.GREEN + Style.BRIGHT + "\n[SYNC] Sincronização concluída com sucesso!")
 
-
 #atualizado em 2025/09/18-V45. 'git-clean' agora lê o .gitignore com encoding='utf-8' explícito e lida com erros de decodificação.
 @cli.command('git-clean')
+@log_command_execution
 def git_clean():
     """Força a remoção de arquivos já rastreados que correspondem ao .gitignore."""
     click.echo(Fore.CYAN + "--- [GIT-CLEAN] Procurando por arquivos rastreados indevidamente ---")
-    
-    gitignore_path = '.gitignore'
-    if not os.path.exists(gitignore_path):
-        click.echo(Fore.RED + "[ERRO] Arquivo .gitignore não encontrado no diretório atual.")
-        sys.exit(1)
-
+    results = {'summary': {'errors': 0, 'warnings': 0}}
     try:
-        with open(gitignore_path, 'r', encoding='utf-8', errors='replace') as f:
-            ignore_patterns = [line.strip() for line in f if line.strip() and not line.startswith('#')]
-
-    except Exception as e:
-        click.echo(Fore.RED + f"[ERRO] Não foi possível ler o arquivo .gitignore: {e}")
-        sys.exit(1)
-
-    tracked_files_str = _run_git_command(['ls-files'], capture_output=True)
-    if tracked_files_str is None:
-        sys.exit(1)
-    tracked_files = tracked_files_str.splitlines()
-
-    files_to_remove = []
-    for pattern in ignore_patterns:
-        if pattern.endswith('/'):
-            pattern += '*'
-        matches = fnmatch.filter(tracked_files, pattern)
-        if matches:
-            files_to_remove.extend(matches)
+        gitignore_path = '.gitignore'
+        if not os.path.exists(gitignore_path):
+            click.echo(Fore.RED + "[ERRO] Arquivo .gitignore não encontrado no diretório atual.")
+            sys.exit(1)
     
-    if not files_to_remove:
-        click.echo(Fore.GREEN + "[OK] Nenhum arquivo rastreado indevidamente encontrado. Seu repositório está limpo!")
-        return
-
-    click.echo(Fore.YELLOW + "\nOs seguintes arquivos estão sendo rastreados pelo Git, mas correspondem a padrões no seu .gitignore:")
-    for f in files_to_remove:
-        click.echo(f"  - {f}")
+        try:
+            with open(gitignore_path, 'r', encoding='utf-8', errors='replace') as f:
+                ignore_patterns = [line.strip() for line in f if line.strip() and not line.startswith('#')]
     
-    if click.confirm(Fore.RED + "\nVocê tem certeza de que deseja parar de rastrear (untrack) TODOS estes arquivos?", abort=True):
-        click.echo(Fore.CYAN + "Removendo arquivos do índice do Git...")
-        success = True
-        for f in files_to_remove:
-            if not _run_git_command(['rm', '--cached', f]):
-                success = False
+        except Exception as e:
+            click.echo(Fore.RED + f"[ERRO] Não foi possível ler o arquivo .gitignore: {e}")
+            sys.exit(1)
+    
+        tracked_files_str = _run_git_command(['ls-files'], capture_output=True)
+        if tracked_files_str is None:
+            sys.exit(1)
+        tracked_files = tracked_files_str.splitlines()
+    
+        files_to_remove = []
+        for pattern in ignore_patterns:
+            if pattern.endswith('/'):
+                pattern += '*'
+            matches = fnmatch.filter(tracked_files, pattern)
+            if matches:
+                files_to_remove.extend(matches)
         
-        if success:
-            click.echo(Fore.GREEN + "\n[OK] Arquivos removidos do rastreamento com sucesso.")
-            click.echo(Fore.YELLOW + "Suas alterações foram preparadas (staged).")
-            click.echo(Fore.YELLOW + "Para finalizar, execute o seguinte comando:")
-            click.echo(Fore.CYAN + '  doxoade save "Limpeza de arquivos ignorados"')
-        else:
-            click.echo(Fore.RED + "[ERRO] Ocorreu um erro ao remover um ou mais arquivos.")
-
+        if not files_to_remove:
+            click.echo(Fore.GREEN + "[OK] Nenhum arquivo rastreado indevidamente encontrado. Seu repositório está limpo!")
+            return
+    
+        click.echo(Fore.YELLOW + "\nOs seguintes arquivos estão sendo rastreados pelo Git, mas correspondem a padrões no seu .gitignore:")
+        for f in files_to_remove:
+            click.echo(f"  - {f}")
+        
+        if click.confirm(Fore.RED + "\nVocê tem certeza de que deseja parar de rastrear (untrack) TODOS estes arquivos?", abort=True):
+            click.echo(Fore.CYAN + "Removendo arquivos do índice do Git...")
+            success = True
+            for f in files_to_remove:
+                if not _run_git_command(['rm', '--cached', f]):
+                    success = False
+            
+            if success:
+                click.echo(Fore.GREEN + "\n[OK] Arquivos removidos do rastreamento com sucesso.")
+                click.echo(Fore.YELLOW + "Suas alterações foram preparadas (staged).")
+                click.echo(Fore.YELLOW + "Para finalizar, execute o seguinte comando:")
+                click.echo(Fore.CYAN + '  doxoade save "Limpeza de arquivos ignorados"')
+            else:
+                click.echo(Fore.RED + "[ERRO] Ocorreu um erro ao remover um ou mais arquivos.")
+    finally:
+        _log_execution('git_clean', ".", results, {})
 
 #atualizado em 2025/09/23-Versão 5.3. Implementa o comando 'git-new' para a primeira publicação de um projeto. Tem como função automatizar o boilerplate de adicionar remote, commitar e fazer o primeiro push. Melhoria: Adicionada verificação se o remote 'origin' já existe.
 @cli.command('git-new')
+@log_command_execution
 @click.argument('message')
 @click.argument('remote_url')
 def git_new(message, remote_url):
@@ -862,53 +1063,56 @@ def git_new(message, remote_url):
       doxoade git-new "Commit inicial do projeto" https://github.com/usuario/repo.git
     """
     click.echo(Fore.CYAN + "--- [GIT-NEW] Publicando novo projeto no GitHub ---")
-
-    # Passo 1: Adicionar o repositório remoto
-    click.echo(Fore.YELLOW + f"Passo 1: Adicionando remote 'origin' -> {remote_url}")
-    if not _run_git_command(['remote', 'add', 'origin', remote_url]):
-        # A falha mais comum é o remote já existir. Damos um feedback útil.
-        click.echo(Fore.RED + "[ERRO] Falha ao adicionar o remote. Motivo comum: o remote 'origin' já existe.")
-        click.echo(Fore.YELLOW + "Se o projeto já tem um remote, use 'doxoade save' e 'git push' para atualizá-lo.")
-        sys.exit(1)
-    click.echo(Fore.GREEN + "[OK] Remote adicionado com sucesso.")
-
-    # Passo 2: Adicionar todos os arquivos ao staging
-    click.echo(Fore.YELLOW + "\nPasso 2: Adicionando todos os arquivos ao Git (git add .)...")
-    if not _run_git_command(['add', '.']):
-        sys.exit(1)
-    click.echo(Fore.GREEN + "[OK] Arquivos preparados para o commit.")
-
-    # Passo 3: Fazer o commit inicial
-    click.echo(Fore.YELLOW + f"\nPasso 3: Criando o primeiro commit com a mensagem: '{message}'...")
-    if not _run_git_command(['commit', '-m', message]):
-        sys.exit(1)
-    click.echo(Fore.GREEN + "[OK] Commit inicial criado.")
-
-    # Passo 4: Fazer o push para o repositório remoto
-    current_branch = _run_git_command(['branch', '--show-current'], capture_output=True)
-    if not current_branch:
-        click.echo(Fore.RED + "[ERRO] Não foi possível determinar o branch atual para o push.")
-        sys.exit(1)
+    results = {'summary': {'errors': 0, 'warnings': 0}}
+    try:
+        # Passo 1: Adicionar o repositório remoto
+        click.echo(Fore.YELLOW + f"Passo 1: Adicionando remote 'origin' -> {remote_url}")
+        if not _run_git_command(['remote', 'add', 'origin', remote_url]):
+            # A falha mais comum é o remote já existir. Damos um feedback útil.
+            click.echo(Fore.RED + "[ERRO] Falha ao adicionar o remote. Motivo comum: o remote 'origin' já existe.")
+            click.echo(Fore.YELLOW + "Se o projeto já tem um remote, use 'doxoade save' e 'git push' para atualizá-lo.")
+            sys.exit(1)
+        click.echo(Fore.GREEN + "[OK] Remote adicionado com sucesso.")
     
-    click.echo(Fore.YELLOW + f"\nPasso 4: Enviando o branch '{current_branch}' para o remote 'origin' (git push)...")
-    if not _run_git_command(['push', '--set-upstream', 'origin', current_branch]):
-        click.echo(Fore.RED + "[ERRO] Falha ao enviar para o repositório remoto.")
-        click.echo(Fore.YELLOW + "Causas comuns: a URL do repositório está incorreta, você não tem permissão, ou o repositório remoto NÃO ESTÁ VAZIO.")
-        sys.exit(1)
+        # Passo 2: Adicionar todos os arquivos ao staging
+        click.echo(Fore.YELLOW + "\nPasso 2: Adicionando todos os arquivos ao Git (git add .)...")
+        if not _run_git_command(['add', '.']):
+            sys.exit(1)
+        click.echo(Fore.GREEN + "[OK] Arquivos preparados para o commit.")
     
-    click.echo(Fore.GREEN + Style.BRIGHT + "\n[GIT-NEW] Projeto publicado com sucesso!")
-    click.echo(f"Você pode ver seu repositório em: {remote_url}")
+        # Passo 3: Fazer o commit inicial
+        click.echo(Fore.YELLOW + f"\nPasso 3: Criando o primeiro commit com a mensagem: '{message}'...")
+        if not _run_git_command(['commit', '-m', message]):
+            sys.exit(1)
+        click.echo(Fore.GREEN + "[OK] Commit inicial criado.")
+    
+        # Passo 4: Fazer o push para o repositório remoto
+        current_branch = _run_git_command(['branch', '--show-current'], capture_output=True)
+        if not current_branch:
+            click.echo(Fore.RED + "[ERRO] Não foi possível determinar o branch atual para o push.")
+            sys.exit(1)
+        
+        click.echo(Fore.YELLOW + f"\nPasso 4: Enviando o branch '{current_branch}' para o remote 'origin' (git push)...")
+        if not _run_git_command(['push', '--set-upstream', 'origin', current_branch]):
+            click.echo(Fore.RED + "[ERRO] Falha ao enviar para o repositório remoto.")
+            click.echo(Fore.YELLOW + "Causas comuns: a URL do repositório está incorreta, você não tem permissão, ou o repositório remoto NÃO ESTÁ VAZIO.")
+            sys.exit(1)
+        
+        click.echo(Fore.GREEN + Style.BRIGHT + "\n[GIT-NEW] Projeto publicado com sucesso!")
+        click.echo(f"Você pode ver seu repositório em: {remote_url}")
+    finally:
+        _log_execution('git_new', ".", results, {})
 
-    
 #atualizado em 2025/09/25-Versão 9.2. Corrigida a lógica do '--force' no comando 'save' para ignorar o erro de ambiente mesmo na presença de outros erros.
 @cli.command()
+@log_command_execution
 @click.argument('message')
 @click.option('--force', is_flag=True, help="Força o commit mesmo que o 'check' encontre avisos ou apenas o erro de ambiente.")
 def save(message, force):
     """Executa um 'commit seguro', protegendo seu repositório de código com erros."""
     click.echo(Fore.CYAN + "--- [SAVE] Iniciando processo de salvamento seguro ---")
     click.echo(Fore.YELLOW + "\nPasso 1: Executando 'doxoade check' para garantir a qualidade do código...")
-    
+
     config = _load_config()
     ignore_list = config.get('ignore', [])
     
@@ -960,12 +1164,12 @@ def save(message, force):
 
 #atualizado em 2025/09/26-Versão 10.0. Comando 'init' agora suporta publicação automática com a opção '--remote'. Tem como função criar um novo projeto e, opcionalmente, publicá-lo no GitHub em um único passo.
 @cli.command()
+@log_command_execution
 @click.argument('project_name', required=False)
 @click.option('--remote', help="URL do repositório Git remoto para publicação automática.")
 def init(project_name, remote):
     """Cria a estrutura de um novo projeto e, opcionalmente, o publica no GitHub."""
     click.echo(Fore.CYAN + "--- [INIT] Assistente de Criação de Novo Projeto ---")
-    
     if not project_name:
         project_name = click.prompt("Qual é o nome do seu novo projeto?")
     
@@ -1034,62 +1238,90 @@ def init(project_name, remote):
     finally:
         os.chdir(original_dir)
 
-#atualizado em 2025/09/20-V48. Removido 'capture_output=True' para permitir o streaming de saída em tempo real dos comandos filhos, corrigindo o bug de "eco atrasado".
+#atualizado em 2025/09/26-Versão 11.0. Novo comando 'create-pipeline' para gerar arquivos de automação de forma segura, resolvendo todos os problemas de parsing.
+@cli.command('create-pipeline')
+@click.argument('filename')
+@click.argument('commands', nargs=-1, required=True)
+def create_pipeline(filename, commands):
+    """
+    Cria um arquivo de pipeline (.dox) com uma sequência de comandos.
+
+    Cada comando deve ser passado como um argumento separado e entre aspas.
+    Exemplo:
+      doxoade create-pipeline deploy.dox "doxoade health" "doxoade save 'Deploy final' --force"
+    """
+    click.echo(Fore.CYAN + f"--- [CREATE-PIPELINE] Criando arquivo de pipeline: {filename} ---")
+    
+    try:
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(f"# Pipeline gerado pelo doxoade em: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            for command in commands:
+                f.write(f"{command}\n")
+        
+        click.echo(Fore.GREEN + f"[OK] Pipeline '{filename}' criado com sucesso com {len(commands)} passo(s).")
+        click.echo(Fore.YELLOW + f"Agora você pode executá-lo com: doxoade auto --file {filename}")
+    except IOError as e:
+        click.echo(Fore.RED + f"[ERRO] Não foi possível escrever no arquivo '{filename}': {e}")
+        sys.exit(1)
+
+#atualizado em 2025/09/26-Versão 12.1 (Final Definitiva). 'auto' agora usa um pipeline de arquivo temporário E o parser shlex, resolvendo de uma vez por todas todos os bugs de parsing de aspas em todos os ambientes.
 @cli.command()
+@log_command_execution
 @click.argument('commands', nargs=-1, required=True)
 def auto(commands):
     """
-    Executa uma sequência completa de comandos e reporta o status de cada um.
-    
-    Exemplo: doxoade auto "doxoade check ." "doxoade run main.py"
+    Executa uma sequência de comandos como um pipeline robusto.
+
+    Envolva cada comando, especialmente os que contêm espaços ou aspas,
+    em suas próprias aspas duplas. Use aspas simples ou duplas para mensagens internas.
+    Exemplo:
+      doxoade auto "doxoade health" "doxoade save 'Deploy final' --force"
     """
+    if not commands:
+        click.echo(Fore.YELLOW + "Nenhum comando para executar."); return
+
     total_commands = len(commands)
-    click.echo(Fore.CYAN + Style.BRIGHT + f"--- [AUTO] Iniciando sequência de {total_commands} comando(s) ---")
+    click.echo(Fore.CYAN + Style.BRIGHT + f"--- [AUTO] Iniciando pipeline de {total_commands} passo(s) ---")
     
+    with tempfile.NamedTemporaryFile(mode='w+', delete=True, suffix='.dox', encoding='utf-8') as temp_pipeline:
+        for command in commands:
+            temp_pipeline.write(f"{command}\n")
+        temp_pipeline.flush()
+        temp_pipeline.seek(0)
+        commands_to_run = [line.strip() for line in temp_pipeline if line.strip() and not line.strip().startswith('#')]
+
     results = []
-    
     try:
-        for i, command_str in enumerate(commands, 1):
+        for i, command_str in enumerate(commands_to_run, 1):
             click.echo(Fore.CYAN + f"\n--- [AUTO] Executando Passo {i}/{total_commands}: {command_str} ---")
-            
             step_result = {"command": command_str, "status": "sucesso", "returncode": 0}
-
             try:
+                # --- LÓGICA FINAL, DEFINITIVA E CORRETA ---
+                # Usamos shlex para quebrar o comando em uma lista, respeitando as aspas.
                 args = shlex.split(command_str)
-
-                if args and args[0] == 'doxoade':
-                    python_executable = sys.executable
-                    command_to_run = [python_executable, '-m', 'doxoade.doxoade'] + args[1:]
+                
+                # Se o comando é 'doxoade', nós o chamamos como um módulo para máxima robustez.
+                if args[0] == 'doxoade':
+                    final_command = [sys.executable, '-m', 'doxoade.doxoade'] + args[1:]
                     use_shell = False
-                else:
-                    command_to_run = command_str
-                    use_shell = True
-                
-                # --- CORREÇÃO APLICADA AQUI ---
-                # Removemos capture_output=True. Agora a saída do filho vai direto para o terminal.
-                process_result = subprocess.run(
-                    command_to_run,
-                    shell=use_shell,
-                    text=True, 
-                    encoding='utf-8', 
-                    errors='replace'
-                )
-                
-                if process_result.returncode != 0:
-                    step_result["status"] = "falha"
-                    step_result["returncode"] = process_result.returncode
+                else: # Para comandos externos (ex: git), passamos a lista diretamente.
+                    final_command = args
+                    use_shell = True # Shell pode ser necessário para encontrar comandos como 'git'
 
+                process_result = subprocess.run(final_command, shell=use_shell, capture_output=True, text=True, encoding='utf-8', errors='replace')
+                
+                if process_result.stdout: print(process_result.stdout)
+                if process_result.stderr: print(Fore.RED + process_result.stderr)
+                if process_result.returncode != 0:
+                    step_result["status"] = "falha"; step_result["returncode"] = process_result.returncode
             except Exception as e:
                 step_result["status"] = "falha"; step_result["error"] = str(e)
-
             results.append(step_result)
-
     except KeyboardInterrupt:
-        click.echo(Fore.YELLOW + Style.BRIGHT + "\n\n [AUTO] Sequência cancelada pelo usuário (CTRL+C).")
+        click.echo(Fore.YELLOW + Style.BRIGHT + "\n\n [AUTO] Pipeline cancelado pelo usuário.")
         sys.exit(1)
         
-    click.echo(Fore.CYAN + Style.BRIGHT + "\n--- [AUTO] Sumário da Sequência de Automação ---")
-    
+    click.echo(Fore.CYAN + Style.BRIGHT + "\n--- [AUTO] Sumário do Pipeline ---")
     final_success = True
     for i, result in enumerate(results, 1):
         if result["status"] == "sucesso":
@@ -1098,12 +1330,11 @@ def auto(commands):
             final_success = False
             error_details = result.get('error', f"código de saída {result['returncode']}")
             click.echo(Fore.RED + f"[ERRO] Passo {i}: Falha ({error_details}) -> {result['command']}")
-
     click.echo("-" * 40)
     if final_success:
-        click.echo(Fore.GREEN + Style.BRIGHT + "[AUTO] Sequência completa executada com sucesso!")
+        click.echo(Fore.GREEN + Style.BRIGHT + "[AUTO] Pipeline concluído com sucesso!")
     else:
-        click.echo(Fore.RED + Style.BRIGHT + "[ATENÇÃO] Sequência executada, mas um ou mais passos falharam.")
+        click.echo(Fore.RED + Style.BRIGHT + "[ATENÇÃO] Pipeline executado, mas um ou mais passos falharam.")
         sys.exit(1)
 
 @cli.command()
@@ -1183,9 +1414,11 @@ def guicheck(path, ignore, format):
 
 #atualizado em 2025/09/20-V49. Arquitetura do 'run' refeita para suportar scripts interativos (input()), herdando os fluxos de I/O do terminal.
 @cli.command(context_settings=dict(ignore_unknown_options=True))
+@log_command_execution
 @click.argument('script_and_args', nargs=-1, type=click.UNPROCESSED)
 def run(script_and_args):
     """Executa um script Python, suportando interatividade (input) e GUIs."""
+
     if not script_and_args:
         click.echo(Fore.RED + "[ERRO] Erro: Nenhum script especificado para executar.", err=True); sys.exit(1)
     
@@ -1242,9 +1475,11 @@ def run(script_and_args):
         click.echo(Fore.GREEN + f"[OK] Script '{script_name}' finalizado com sucesso.")
 
 @cli.command()
+@log_command_execution
 @click.option('--force', '-f', is_flag=True, help="Força a limpeza sem pedir confirmação.")
 def clean(force):
     """Remove arquivos de cache e build (__pycache__, build/, dist/, *.spec)."""
+
     TARGET_DIRS = ["__pycache__", "build", "dist", ".pytest_cache", ".tox"]
     TARGET_PATTERNS = [re.compile(r".*\.egg-info$"), re.compile(r".*\.spec$")]
     click.echo(Fore.CYAN + "-> [CLEAN] Procurando por artefatos de build e cache...")
@@ -1274,9 +1509,10 @@ def clean(force):
         click.echo(Fore.GREEN + f"\n Limpeza concluída! {deleted_count} itens foram removidos.")
     else:
         click.echo(Fore.CYAN + "\nOperação cancelada.")
-
+    
 #atualizado em 2025/09/16-V26. Adicionada a flag '--snippets' para exibir o contexto de código nos logs.
 @cli.command()
+@log_command_execution
 @click.option('-n', '--lines', default=1, help="Exibe as últimas N linhas do log.", type=int)
 @click.option('-s', '--snippets', is_flag=True, help="Exibe os trechos de código para cada problema.")
 def log(lines, snippets):
@@ -1336,20 +1572,20 @@ def _get_github_repo_info():
     return "unkown/unkown"
 
 def _get_git_commit_hash(path):
-    """Obtém o hash do commit Git atual (HEAD) para um determinado diretório."""
+    """Obtém o hash do commit Git atual (HEAD) de forma silenciosa."""
     original_dir = os.getcwd()
     try:
         os.chdir(path)
-        # Usamos rev-parse para obter o hash de forma confiável
-        hash_output = _run_git_command(['rev-parse', 'HEAD'], capture_output=True)
+        # Usamos silent_fail=True para evitar mensagens de erro em pastas não-Git.
+        hash_output = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True)
         return hash_output if hash_output else "N/A"
     except Exception:
         return "N/A"
     finally:
-        os.chdir(original_dir)    
+        os.chdir(original_dir)
 
-#atualizado em 2025/09/17-V37. Corrigido TypeError ao garantir que a saída de erro do Git seja sempre uma string.
-def _run_git_command(args, capture_output=False):
+#atualizado em 2025/09/27-Versão 12.6 (Final). _run_git_command agora suporta 'silent_fail' para que a captura de hash do log não gere erros em diretórios não-Git.
+def _run_git_command(args, capture_output=False, silent_fail=False):
     """Executa um comando Git e lida com erros comuns."""
     try:
         command = ['git'] + args
@@ -1363,12 +1599,14 @@ def _run_git_command(args, capture_output=False):
         )
         return result.stdout.strip() if capture_output else True
     except FileNotFoundError:
-        click.echo(Fore.RED + "[ERRO GIT] O comando 'git' não foi encontrado. O Git está instalado e no PATH do sistema?")
+        if not silent_fail:
+            click.echo(Fore.RED + "[ERRO GIT] O comando 'git' não foi encontrado. O Git está instalado e no PATH do sistema?")
         return None
     except subprocess.CalledProcessError as e:
-        click.echo(Fore.RED + f"[ERRO GIT] O comando 'git {' '.join(args)}' falhou:")
-        error_output = e.stderr or e.stdout or "Nenhuma saída de erro do Git foi capturada."
-        click.echo(Fore.YELLOW + error_output)
+        if not silent_fail:
+            click.echo(Fore.RED + f"[ERRO GIT] O comando 'git {' '.join(args)}' falhou:")
+            error_output = e.stderr or e.stdout or "Nenhuma saída de erro do Git foi capturada."
+            click.echo(Fore.YELLOW + error_output)
         return None
 
 #atualizado em 2025/09/16-V26. Aprimorada para exibir snippets de código com destaque na linha do erro.
@@ -1443,7 +1681,7 @@ def _get_code_snippet(file_path, line_number, context_lines=2):
         # Retorna None se o arquivo não puder ser lido ou a linha não existir
         return None
 
-#atualizado em 2025/09/25-Versão 9.0. Log agora captura o hash do commit Git para permitir análise de tendências.
+#atualizado em 2025/09/27-Versão 12.7. Logging aprimorado para registrar todas as execuções e falhas internas, não apenas análises.
 def _log_execution(command_name, path, results, arguments):
     """Constrói o log detalhado e o anexa ao arquivo de log."""
     try:
@@ -1452,22 +1690,16 @@ def _log_execution(command_name, path, results, arguments):
         log_file = log_dir / 'doxoade.log'
         
         timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-        git_hash = _get_git_commit_hash(path) # <<< NOSSA NOVA CAPTURA DE DADOS
+        git_hash = _get_git_commit_hash(path)
 
-        detailed_findings = []
-        for category, findings_list in results.items():
-            if category == 'summary':
-                continue
-            for finding in findings_list:
-                finding_copy = finding.copy()
-                finding_copy['category'] = category
-                detailed_findings.append(finding_copy)
+        # Se não houver 'findings', criamos um campo vazio para consistência.
+        detailed_findings = results.get('findings', [])
         
         log_data = {
             "timestamp": timestamp,
             "command": command_name,
             "project_path": os.path.abspath(path),
-            "git_hash": git_hash, # <<< NOSSO NOVO CAMPO DE DADOS
+            "git_hash": git_hash,
             "arguments": arguments,
             "summary": results.get('summary', {}),
             "status": "completed",
@@ -1477,8 +1709,10 @@ def _log_execution(command_name, path, results, arguments):
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(json.dumps(log_data) + '\n')
 
-    except Exception as e:
-        click.echo(Fore.RED + f"\n[AVISO DE LOG] Não foi possível escrever no arquivo de log detalhado: {e}", err=True)
+    except Exception:
+        # Se o próprio logging falhar, não queremos quebrar a ferramenta.
+        # Imprimimos um aviso no terminal como último recurso.
+        click.echo(Fore.RED + "\n[AVISO DE LOG] Não foi possível escrever no arquivo de log detalhado.", err=True)
 
 def _check_environment(path):
     """Verifica o ambiente e retorna uma lista de problemas."""
@@ -1846,4 +2080,22 @@ def _analyze_traceback(stderr_output):
     click.echo(Fore.CYAN + "Nenhum padrão de erro conhecido foi encontrado. Analise o traceback acima.")
 
 if __name__ == '__main__':
-    cli()
+    try:
+        cli()
+    except Exception as e:
+        click.echo(Fore.RED + Style.BRIGHT + "\n--- ERRO FATAL INESPERADO ---")
+        click.echo(Fore.WHITE + "A Doxoade encontrou um erro interno. Um registro detalhado foi salvo no log.")
+        
+        # Criamos um registro de log forense completo
+        results = {
+            'summary': {'errors': 1, 'warnings': 0},
+            'findings': [{
+                'type': 'FATAL_ERROR',
+                'message': 'A Doxoade encontrou um erro fatal interno e foi encerrada.',
+                'details': str(e),
+                'traceback': traceback.format_exc() # A chave para o diagnóstico completo
+            }]
+        }
+        
+        _log_execution(command_name="FATAL", path=".", results=results, arguments={'raw_command': sys.argv})
+        raise e
