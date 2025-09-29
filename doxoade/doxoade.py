@@ -21,6 +21,52 @@ from datetime import datetime, timezone
 # Inicializa o colorama para funcionar no Windows
 init(autoreset=True)
 
+#atualizado em 2025/09/28-Versão 14.0. Implementada a classe ExecutionLogger para um sistema de logging centralizado e robusto.
+class ExecutionLogger:
+    """Um gerenciador de contexto para registrar a execução de um comando doxoade."""
+    def __init__(self, command_name, path, arguments):
+        self.command_name = command_name
+        self.path = path
+        self.arguments = arguments
+        self.results = {
+            'summary': {'errors': 0, 'warnings': 0},
+            'findings': []
+        }
+
+    def add_finding(self, f_type, message, file=None, line=None, details=None):
+        """Adiciona um novo achado (erro ou aviso) ao log."""
+        finding = {'type': f_type.upper(), 'message': message}
+        if file: finding['file'] = file
+        if line: finding['line'] = line
+        if details: finding['details'] = details
+        
+        self.results['findings'].append(finding)
+        
+        if f_type == 'error':
+            self.results['summary']['errors'] += 1
+        elif f_type == 'warning':
+            self.results['summary']['warnings'] += 1
+
+    def __enter__(self):
+        # Quando o bloco 'with' começa, ele retorna o próprio objeto logger.
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # Quando o bloco 'with' termina, este método é chamado automaticamente.
+        
+        # Se uma exceção ocorreu, a registramos como um erro fatal.
+        if exc_type:
+            self.add_finding(
+                'fatal_error',
+                'A Doxoade encontrou um erro fatal interno durante a execução deste comando.',
+                details=str(exc_val),
+            )
+            # Adicionamos o traceback ao último finding para diagnóstico completo.
+            self.results['findings'][-1]['traceback'] = traceback.format_exc()
+
+        # Independentemente do que aconteceu, escrevemos o estado final no log.
+        _log_execution(self.command_name, self.path, self.results, self.arguments)
+
 # -----------------------------------------------------------------------------
 # GRUPO PRINCIPAL E CONFIGURAÇÃO
 # -----------------------------------------------------------------------------
@@ -335,6 +381,7 @@ def setup_health(path):
 
 #atualizado em 2025/09/26-Versão 10.3. Corrigido o loop infinito no 'health' com uma lógica de verificação de ambiente mais robusta e direta.
 @cli.command()
+@click.pass_context
 @click.argument('path', type=click.Path(exists=True, file_okay=False, resolve_path=True), default='.')
 @click.option('--ignore', multiple=True, help="Ignora uma pasta. Combina com as do .doxoaderc.")
 @click.option('--format', type=click.Choice(['text', 'json']), default='text', help="Define o formato da saída.")
@@ -465,6 +512,107 @@ def apicheck(path, ignore):
     finally:
         args = {"ignore": list(ignore)}
         _log_execution('apicheck', path, results, args)
+
+#atualizado em 2025/09/28-Versão 13.4 (PoC). Novo comando 'deepcheck' para análise profunda de fluxo de funções. Tem como função mapear entradas, saídas e pontos de risco lógico (ex: acesso inseguro a dicionários) usando AST.
+@cli.command('deepcheck')
+@click.argument('file_path', type=click.Path(exists=True, dir_okay=False, resolve_path=True))
+@click.option('--func', 'func_name', default=None, help="Analisa profundamente uma função específica.")
+def deepcheck(file_path, func_name):
+    """Executa uma análise profunda do fluxo de dados e pontos de risco em um arquivo Python."""
+    
+    click.echo(Fore.CYAN + Style.BRIGHT + f"--- [DEEPCHECK] Analisando fluxo de '{file_path}' ---")
+    
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            tree = ast.parse(content, filename=file_path)
+    except (SyntaxError, IOError) as e:
+        click.echo(Fore.RED + f"[ERRO] Falha ao ler ou analisar o arquivo: {e}"); sys.exit(1)
+
+    function_dossiers = _analyze_function_flow(tree, content, func_name)
+
+    if not function_dossiers:
+        msg = "Nenhuma função encontrada."
+        if func_name: msg = f"A função '{func_name}' não foi encontrada no arquivo."
+        click.echo(Fore.YELLOW + msg); return
+
+    # --- Apresentação do Relatório ---
+    for dossier in function_dossiers:
+        header_color = Fore.RED if dossier['complexity_rank'] == 'Alta' else Fore.YELLOW if dossier['complexity_rank'] == 'Média' else Fore.WHITE
+        click.echo(header_color + Style.BRIGHT + f"\n--- Função: '{dossier['name']}' (linha {dossier['lineno']}) ---")
+        click.echo(f"  [Complexidade]: {dossier['complexity']} ({dossier['complexity_rank']})")
+
+        click.echo(Fore.CYAN + "\n  [Entradas (Parâmetros)]")
+        if not dossier['params']: click.echo("    - Nenhum parâmetro.")
+        for p in dossier['params']: click.echo(f"    - Nome: {p['name']} (Tipo: {p['type']})")
+
+        click.echo(Fore.CYAN + "\n  [Saídas (Pontos de Retorno)]")
+        if not dossier['returns']: click.echo("    - Nenhum ponto de retorno explícito.")
+        for r in dossier['returns']: click.echo(f"    - Linha {r['lineno']}: Retorna {r['type']}")
+
+        click.echo(Fore.CYAN + "\n  [Pontos de Risco (Micro Análise de Erros)]")
+        if not dossier['risks']: click.echo("    - Nenhum ponto de risco óbvio detectado.")
+        for risk in dossier['risks']:
+            click.echo(Fore.YELLOW + f"    - AVISO (Linha {risk['lineno']}): {risk['message']}")
+            click.echo(Fore.WHITE + f"      > Detalhe: {risk['details']}")
+
+#atualizado em 2025/09/28-Versão 13.5. Corrigido AttributeError no 'deepcheck' ao analisar parâmetros de função (arg.name -> arg.arg).
+def _analyze_function_flow(tree, content, specific_func=None):
+    """Usa AST para analisar o fluxo de dados e pontos de risco em funções."""
+    dossiers = []
+    try:
+        from radon.visitors import ComplexityVisitor
+    except ImportError:
+        class ComplexityVisitor:
+            def __init__(self, functions): self.functions = []
+            @classmethod
+            def from_code(cls, code): return cls([])
+    
+    visitor = ComplexityVisitor.from_code(content)
+    complexity_map = {f.name: f.complexity for f in visitor.functions}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            func_name = node.name
+            
+            if specific_func and func_name != specific_func:
+                continue
+
+            params = []
+            for arg in node.args.args:
+                param_type = ast.unparse(arg.annotation) if arg.annotation else "não anotado"
+                # --- A CORREÇÃO CRUCIAL ESTÁ AQUI ---
+                params.append({'name': arg.arg, 'type': param_type}) # Corrigido de arg.name para arg.arg
+
+            returns = []
+            risks = []
+            for sub_node in ast.walk(node):
+                if isinstance(sub_node, ast.Return) and sub_node.value:
+                    return_type = "um valor literal" if isinstance(sub_node.value, ast.Constant) else "uma variável" if isinstance(sub_node.value, ast.Name) else "o resultado de uma expressão/chamada"
+                    returns.append({'lineno': sub_node.lineno, 'type': return_type})
+                
+                if isinstance(sub_node, ast.Subscript):
+                    if isinstance(sub_node.slice, ast.Constant):
+                        risks.append({
+                            'lineno': sub_node.lineno,
+                            'message': "Acesso a dicionário/lista sem tratamento de chave/índice.",
+                            'details': f"O acesso direto a '{ast.unparse(sub_node)}' pode causar uma 'KeyError' ou 'IndexError'. Considere usar '.get()' para dicionários."
+                        })
+
+            complexity = complexity_map.get(func_name, 0)
+            rank = "Alta" if complexity > 10 else "Média" if complexity > 5 else "Baixa"
+
+            dossiers.append({
+                'name': func_name,
+                'lineno': node.lineno,
+                'params': params,
+                'returns': returns,
+                'risks': risks,
+                'complexity': complexity,
+                'complexity_rank': rank
+            })
+            
+    return dossiers
 
 #atualizado em 2025/09/27-Versão 12.5 (Robusta). Motor do 'apicheck' completamente reescrito para ser mais simples e eficaz, corrigindo a falha na detecção de violações de contrato.
 def _analyze_api_calls(file_path, contracts):
@@ -985,27 +1133,33 @@ def sync(remote):
 
     click.echo(Fore.GREEN + Style.BRIGHT + "\n[SYNC] Sincronização concluída com sucesso!")
 
-#atualizado em 2025/09/18-V45. 'git-clean' agora lê o .gitignore com encoding='utf-8' explícito e lida com erros de decodificação.
+#atualizado em 2025/09/28-Versão 14.0. Refatorado para usar o novo ExecutionLogger.
 @cli.command('git-clean')
-@log_command_execution
-def git_clean():
+@click.pass_context
+def git_clean(ctx):
     """Força a remoção de arquivos já rastreados que correspondem ao .gitignore."""
-    click.echo(Fore.CYAN + "--- [GIT-CLEAN] Procurando por arquivos rastreados indevidamente ---")
-    results = {'summary': {'errors': 0, 'warnings': 0}}
-    try:
+    # O path e os argumentos são extraídos do contexto do click
+    path = '.'
+    arguments = ctx.params
+
+    with ExecutionLogger('git-clean', path, arguments) as logger:
+        click.echo(Fore.CYAN + "--- [GIT-CLEAN] Procurando por arquivos rastreados indevidamente ---")
+        
         gitignore_path = '.gitignore'
         if not os.path.exists(gitignore_path):
-            click.echo(Fore.RED + "[ERRO] Arquivo .gitignore não encontrado no diretório atual.")
-            sys.exit(1)
-    
+            msg = "Arquivo .gitignore não encontrado no diretório atual."
+            logger.add_finding('error', msg)
+            click.echo(Fore.RED + f"[ERRO] {msg}")
+            return # Encerramos a função, mas o log será escrito pelo __exit__
+
         try:
             with open(gitignore_path, 'r', encoding='utf-8', errors='replace') as f:
                 ignore_patterns = [line.strip() for line in f if line.strip() and not line.startswith('#')]
-    
         except Exception as e:
-            click.echo(Fore.RED + f"[ERRO] Não foi possível ler o arquivo .gitignore: {e}")
-            sys.exit(1)
-    
+            msg = f"Não foi possível ler o arquivo .gitignore: {e}"
+            logger.add_finding('error', msg)
+            click.echo(Fore.RED + f"[ERRO] {msg}"); return
+        
         tracked_files_str = _run_git_command(['ls-files'], capture_output=True)
         if tracked_files_str is None:
             sys.exit(1)
@@ -1041,8 +1195,6 @@ def git_clean():
                 click.echo(Fore.CYAN + '  doxoade save "Limpeza de arquivos ignorados"')
             else:
                 click.echo(Fore.RED + "[ERRO] Ocorreu um erro ao remover um ou mais arquivos.")
-    finally:
-        _log_execution('git_clean', ".", results, {})
 
 #atualizado em 2025/09/23-Versão 5.3. Implementa o comando 'git-new' para a primeira publicação de um projeto. Tem como função automatizar o boilerplate de adicionar remote, commitar e fazer o primeiro push. Melhoria: Adicionada verificação se o remote 'origin' já existe.
 @cli.command('git-new')
@@ -1237,6 +1389,67 @@ def init(project_name, remote):
         click.echo(Fore.RED + f"[ERRO] Ocorreu um erro inesperado: {e}")
     finally:
         os.chdir(original_dir)
+
+#atualizado em 2025/09/28-Versão 13.3. Comando 'mk' agora suporta sintaxe de expansão de chaves para criar múltiplos arquivos em um diretório (ex: "src/{a.py, b.py}").
+@cli.command('mk')
+@log_command_execution
+@click.argument('items', nargs=-1, required=True)
+@click.option('--path', '-p', 'base_path', default='.', type=click.Path(exists=True, file_okay=False, resolve_path=True), help="Diretório base onde a estrutura será criada.")
+def mk(base_path, items):
+    """
+    Cria arquivos e pastas rapidamente. Pastas devem terminar com '/'.
+    
+    Suporta expansão de chaves para múltiplos arquivos:
+    
+    Exemplos:
+      doxoade mk src/ tests/ main.py
+      doxoade mk "src/app/{models.py, views.py, controllers.py}"
+    """
+    click.echo(Fore.CYAN + f"--- [MK] Criando estrutura em '{base_path}' ---")
+    
+    processed_items = []
+    # --- NOVA LÓGICA DE EXPANSÃO ---
+    # Primeiro, processamos os itens para expandir a sintaxe de chaves
+    for item in items:
+        match = re.match(r'^(.*)\{(.*)\}(.*)$', item)
+        if match:
+            prefix = match.group(1)
+            content = match.group(2)
+            suffix = match.group(3)
+            # Quebra o conteúdo das chaves pela vírgula
+            filenames = [name.strip() for name in content.split(',')]
+            for filename in filenames:
+                processed_items.append(f"{prefix}{filename}{suffix}")
+        else:
+            processed_items.append(item)
+
+    created_count = 0
+    for item in processed_items:
+        normalized_item = os.path.normpath(item)
+        full_path = os.path.join(base_path, normalized_item)
+        
+        try:
+            if item.endswith(('/', '\\')):
+                os.makedirs(full_path, exist_ok=True)
+                click.echo(Fore.GREEN + f"[CRIADO] Diretório: {full_path}")
+                created_count += 1
+            else:
+                parent_dir = os.path.dirname(full_path)
+                if parent_dir:
+                    os.makedirs(parent_dir, exist_ok=True)
+                
+                if not os.path.exists(full_path):
+                    Path(full_path).touch()
+                    click.echo(Fore.GREEN + f"[CRIADO] Arquivo:   {full_path}")
+                    created_count += 1
+                else:
+                    click.echo(Fore.YELLOW + f"[EXISTE] Arquivo:   {full_path}")
+        except OSError as e:
+            click.echo(Fore.RED + f"[ERRO] Falha ao criar '{full_path}': {e}")
+            continue
+            
+    click.echo(Fore.CYAN + Style.BRIGHT + "\n--- Concluído ---")
+    click.echo(f"{created_count} novo(s) item(ns) criado(s).")
 
 #atualizado em 2025/09/26-Versão 11.0. Novo comando 'create-pipeline' para gerar arquivos de automação de forma segura, resolvendo todos os problemas de parsing.
 @cli.command('create-pipeline')
@@ -1683,8 +1896,9 @@ def _get_code_snippet(file_path, line_number, context_lines=2):
 
 #atualizado em 2025/09/27-Versão 12.7. Logging aprimorado para registrar todas as execuções e falhas internas, não apenas análises.
 def _log_execution(command_name, path, results, arguments):
-    """Constrói o log detalhado e o anexa ao arquivo de log."""
+    """(Função Auxiliar) Escreve o dicionário de log final no arquivo."""
     try:
+        # ... (a lógica interna de encontrar o arquivo e escrever o JSON permanece a mesma) ...
         log_dir = Path.home() / '.doxoade'
         log_dir.mkdir(exist_ok=True)
         log_file = log_dir / 'doxoade.log'
@@ -1692,9 +1906,6 @@ def _log_execution(command_name, path, results, arguments):
         timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         git_hash = _get_git_commit_hash(path)
 
-        # Se não houver 'findings', criamos um campo vazio para consistência.
-        detailed_findings = results.get('findings', [])
-        
         log_data = {
             "timestamp": timestamp,
             "command": command_name,
@@ -1703,15 +1914,12 @@ def _log_execution(command_name, path, results, arguments):
             "arguments": arguments,
             "summary": results.get('summary', {}),
             "status": "completed",
-            "findings": detailed_findings
+            "findings": results.get('findings', [])
         }
         
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(json.dumps(log_data) + '\n')
-
     except Exception:
-        # Se o próprio logging falhar, não queremos quebrar a ferramenta.
-        # Imprimimos um aviso no terminal como último recurso.
         click.echo(Fore.RED + "\n[AVISO DE LOG] Não foi possível escrever no arquivo de log detalhado.", err=True)
 
 def _check_environment(path):
