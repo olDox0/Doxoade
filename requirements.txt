@@ -1,0 +1,12 @@
+click
+colorama
+beautifulsoup4
+lxml
+cssutils
+esprima
+pyflakes
+
+# Ferramentas de Análise de Saúde (adicionadas pelo doxoade)
+radon
+coverage
+pytest

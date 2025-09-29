@@ -32,7 +32,7 @@ Thumbs.db
 
 # --- BACKUPS E ARQUIVOS TEMPORÁRIOS ---
 Vers/
-*.txt
+
 *.mak
 *.log
 
