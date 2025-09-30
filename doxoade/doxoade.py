@@ -1961,13 +1961,21 @@ def _check_dependencies(path):
                     findings.append(finding)
     return findings
     
+#atualizado em 2025/09/29-Versão 15.1. Corrigido bug crítico onde a pasta 'venv' não era ignorada, causando uma avalanche de erros irrelevantes de bibliotecas de terceiros.
 def _check_source_code(path, ignore_list=None, fix_errors=False, text_format=True):
     """Analisa arquivos .py e retorna uma lista de problemas."""
     findings = []
-    folders_to_ignore = set([item.lower() for item in ignore_list or []] + ['venv', 'build', 'dist'])
+    
+    # --- LÓGICA DE IGNORE CORRIGIDA E SIMPLIFICADA ---
+    # Nós garantimos que 'venv' e outras pastas padrão estejam sempre na lista de ignorados.
+    folders_to_ignore = set([item.lower().strip('/') for item in ignore_list or []] + ['venv', 'build', 'dist', '.git'])
     files_to_check = []
-    for root, dirs, files in os.walk(path):
+
+    for root, dirs, files in os.walk(path, topdown=True):
+        # A forma correta e robusta de ignorar diretórios é modificar a lista 'dirs' in-place.
+        # Isso impede que o 'os.walk' sequer entre nessas pastas.
         dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
+        
         for file in files:
             if file.endswith('.py'):
                 files_to_check.append(os.path.join(root, file))
@@ -1992,20 +2000,12 @@ def _check_source_code(path, ignore_list=None, fix_errors=False, text_format=Tru
                     line_num = int(parts[1])
                     message_text = parts[2].strip()
                 except (IndexError, ValueError):
-                    line_num = 'N/A'
-                    message_text = line_error
+                    line_num, message_text = 'N/A', line_error
 
                 if "' imported but unused" in message_text and fix_errors:
                     lines_to_remove.add(line_num)
                 else:
-                    finding = {
-                        'type': 'error', 
-                        'message': message_text, 
-                        'ref': 'Pyflakes', 
-                        'file': file_path, 
-                        'line': line_num
-                    }
-                    # Adiciona o snippet com contexto ao redor da linha do erro
+                    finding = {'type': 'error', 'message': message_text, 'ref': 'Pyflakes', 'file': file_path, 'line': line_num}
                     finding['snippet'] = _get_code_snippet(file_path, line_num)
                     findings.append(finding)
             
@@ -2016,12 +2016,13 @@ def _check_source_code(path, ignore_list=None, fix_errors=False, text_format=Tru
         
         if unsafe_path_regex.search(content):
             findings.append({'type': 'warning', 'message': 'Possível caminho de arquivo inseguro (use C:/ ou r"C:\\")', 'ref': 'ORI-Bug#2', 'file': file_path})
+            
     return findings
     
 def _check_web_assets(path, ignore_list=None):
     """Analisa arquivos web e retorna uma lista de problemas."""
     findings = []
-    folders_to_ignore = set([item.lower() for item in ignore_list or []] + ['venv', 'build', 'dist'])
+    folders_to_ignore = set([item.lower().strip('/') for item in ignore_list or []] + ['venv', 'build', 'dist', '.git'])
     files_to_check = []
     for root, dirs, files in os.walk(path):
         dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
@@ -2133,7 +2134,7 @@ def _analyze_tkinter_layout(tree, file_path):
 
 def _check_gui_files(path, ignore_list=None):
     """Analisa arquivos Python de GUI e retorna uma lista de problemas."""
-    folders_to_ignore = set([item.lower() for item in ignore_list or []] + ['venv', 'build', 'dist'])
+    folders_to_ignore = set([item.lower().strip('/') for item in ignore_list or []] + ['venv', 'build', 'dist', '.git'])
     files_to_check = []
     if os.path.isdir(path):
         for root, dirs, files in os.walk(path):
