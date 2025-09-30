@@ -94,32 +94,21 @@ def cli():
         # E então deixamos o erro acontecer para que o usuário o veja.
         raise e
 
-#atualizado em 2025/09/27-Versão 13.1 (Final). Decorador de log corrigido para lidar com todos os tipos de comandos e argumentos de forma robusta, eliminando o IndexError.
 def log_command_execution(func):
-    """
-    Decorador que envolve um comando click para garantir que sua execução
-    e seus argumentos sejam sempre registrados no log.
-    """
     @wraps(func)
     def wrapper(*args, **kwargs):
-        # A forma mais robusta de obter o contexto é através do click.get_current_context()
         ctx = click.get_current_context()
         command_name = ctx.command.name
-        
-        # O caminho do projeto é geralmente o argumento 'path', mas usamos '.' como um padrão seguro.
         path = kwargs.get('path', '.')
-        
         results = {'summary': {'errors': 0, 'warnings': 0}}
         try:
-            # Executa o comando original, passando os argumentos exatamente como foram recebidos.
             return func(*args, **kwargs)
         except Exception:
-            # O erro fatal já será capturado pelo nosso handler global.
             raise
         finally:
-            # Usamos kwargs para registrar os argumentos, que contêm os parâmetros nomeados.
-            _log_execution(command_name, path, results, kwargs)
-            
+            # Converte qualquer valor não-serializável para string
+            serializable_kwargs = {k: str(v) for k, v in kwargs.items()}
+            _log_execution(command_name, path, results, serializable_kwargs)
     return wrapper
 
 def _load_config():
@@ -139,7 +128,6 @@ def _load_config():
 
 #atualizado em 2025/09/24-Versão 8.0. Novo comando 'doctor' para meta-análise da própria ferramenta. Tem como função verificar o ambiente, as dependências internas e a qualidade do código da doxoade.
 @cli.command()
-@log_command_execution
 def doctor():
     """Executa um diagnóstico completo da própria ferramenta doxoade."""
     click.echo(Fore.CYAN + Style.BRIGHT + "--- [DOCTOR] Executando diagnóstico da ferramenta Doxoade ---")
@@ -464,7 +452,6 @@ def health(ctx, path, ignore, format, complexity_threshold, min_coverage):
 
 #atualizado em 2025/09/27-Versão 12.2 (PoC). Novo comando 'apicheck' para análise estática de uso de APIs. Tem como função ler um 'apicheck.json' e verificar se as chamadas de API no código seguem as regras do contrato.
 @cli.command('apicheck')
-@log_command_execution
 @click.argument('path', type=click.Path(exists=True, file_okay=False, resolve_path=True), default='.')
 @click.option('--ignore', multiple=True, help="Ignora uma pasta. Combina com as do .doxoaderc.")
 def apicheck(path, ignore):
@@ -516,7 +503,7 @@ def apicheck(path, ignore):
 #atualizado em 2025/09/28-Versão 13.4 (PoC). Novo comando 'deepcheck' para análise profunda de fluxo de funções. Tem como função mapear entradas, saídas e pontos de risco lógico (ex: acesso inseguro a dicionários) usando AST.
 @cli.command('deepcheck')
 @click.argument('file_path', type=click.Path(exists=True, dir_okay=False, resolve_path=True))
-@click.option('--func', 'func_name', default=None, help="Analisa profundamente uma função específica.")
+@click.option('--func', '-f', 'func_name', default=None, help="Analisa profundamente uma função específica.")
 def deepcheck(file_path, func_name):
     """Executa uma análise profunda do fluxo de dados e pontos de risco em um arquivo Python."""
     
@@ -1453,6 +1440,7 @@ def mk(base_path, items):
 
 #atualizado em 2025/09/26-Versão 11.0. Novo comando 'create-pipeline' para gerar arquivos de automação de forma segura, resolvendo todos os problemas de parsing.
 @cli.command('create-pipeline')
+@log_command_execution
 @click.argument('filename')
 @click.argument('commands', nargs=-1, required=True)
 def create_pipeline(filename, commands):
@@ -1513,10 +1501,11 @@ def auto(commands):
                 # Usamos shlex para quebrar o comando em uma lista, respeitando as aspas.
                 args = shlex.split(command_str)
                 
-                # Se o comando é 'doxoade', nós o chamamos como um módulo para máxima robustez.
+                # Se o comando é 'doxoade', nós o chamamos com o executável 'doxoade' diretamente.
+                # Isso resolve o problema de 'ModuleNotFoundError' que surge ao usar o sys.executable do Python global.
                 if args[0] == 'doxoade':
-                    final_command = [sys.executable, '-m', 'doxoade.doxoade'] + args[1:]
-                    use_shell = False
+                    final_command = ['doxoade'] + args[1:]
+                    use_shell = True # Deixamos o shell encontrar o executável correto no PATH (que está no venv)
                 else: # Para comandos externos (ex: git), passamos a lista diretamente.
                     final_command = args
                     use_shell = True # Shell pode ser necessário para encontrar comandos como 'git'
@@ -1602,28 +1591,7 @@ def webcheck(path, ignore, format):
         if results['summary']['errors'] > 0:
             sys.exit(1)
 
-@cli.command()
-@click.argument('path', type=click.Path(exists=True, file_okay=True), default='.')
-@click.option('--ignore', multiple=True, help="Ignora uma pasta. Combina com as do .doxoaderc.")
-@click.option('--format', type=click.Choice(['text', 'json']), default='text', help="Define o formato da saída.")
-def guicheck(path, ignore, format):
-    """Analisa arquivos .py em busca de problemas de GUI (Tkinter)."""
-    results = {'summary': {'errors': 0, 'warnings': 0}}
-    try:
-        if format == 'text': click.echo(Fore.YELLOW + f"[GUI] Executando 'doxoade guicheck' no caminho '{os.path.abspath(path)}'...")
-        config = _load_config()
-        final_ignore_list = list(set(config['ignore'] + list(ignore)))
-        results.update({'gui': _check_gui_files(path, final_ignore_list)})
-        _update_summary_from_findings(results)
-        _present_results(format, results)
-    except Exception as e:
-        safe_error = str(e).encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding)
-        click.echo(Fore.RED + f"\n[ERRO FATAL] O 'guicheck' falhou inesperadamente: {safe_error}", err=True)
-        results['summary']['errors'] += 1
-    finally:
-        _log_execution(command_name='guicheck', path=path, results=results, arguments={"ignore": list(ignore), "format": format})
-        if results['summary']['errors'] > 0:
-            sys.exit(1)
+
 
 #atualizado em 2025/09/20-V49. Arquitetura do 'run' refeita para suportar scripts interativos (input()), herdando os fluxos de I/O do terminal.
 @cli.command(context_settings=dict(ignore_unknown_options=True))
@@ -1756,6 +1724,218 @@ def log(lines, snippets):
                 click.echo(Fore.YELLOW + f"Conteúdo da linha: {line.strip()}")
     except Exception as e:
         click.echo(Fore.RED + f"Ocorreu um erro ao ler o arquivo de log: {e}", err=True)
+
+# =============================================================================
+# --- INÍCIO DO BLOCO DE ANÁLISE DE GUI (VERSÃO FINAL) ---
+# =============================================================================
+
+#atualizado em 2025/09/30-Versão 17.6. Tem como função gerenciar a análise de GUI. Melhoria: A captura de exceção agora reporta explicitamente um 'SyntaxError' em vez de ignorá-lo, tornando a ferramenta mais transparente e robusta.
+@cli.command()
+@click.argument('path', type=click.Path(exists=True, file_okay=True), required=False, default='.')
+@click.option('--ignore', multiple=True, help="Ignora uma pasta. Combina com as do .doxoaderc.")
+@click.option('--format', type=click.Choice(['text', 'json']), default='text', help="Define o formato da saída.")
+def guicheck(path, ignore, format):
+    """Analisa arquivos .py em busca de problemas de GUI (Tkinter e Kivy)."""
+    results = {'summary': {'errors': 0, 'warnings': 0}}
+    try:
+        if format == 'text': click.echo(Fore.YELLOW + f"[GUI] Executando análise de GUI em '{os.path.abspath(path)}'...")
+        config = _load_config()
+        final_ignore_list = list(set(config['ignore'] + list(ignore)))
+        
+        results['gui_analysis'] = _check_gui_files(path, final_ignore_list)
+        
+        _update_summary_from_findings(results)
+        _present_results(format, results)
+    except Exception as e:
+        click.echo(Fore.RED + f"Erro fatal no guicheck: {e}")
+        pass
+    finally:
+        _log_execution('guicheck', path, results, {'ignore': list(ignore), 'format': format})
+        if results['summary']['errors'] > 0:
+            sys.exit(1)
+
+def _check_gui_files(path, ignore_list=None):
+    """(Gerente) Detecta o framework de GUI e delega a análise para o especialista apropriado."""
+    folders_to_ignore = set([item.lower().strip('/') for item in ignore_list or []] + ['venv', 'build', 'dist', '.git'])
+    files_to_check = []
+    
+    if os.path.isdir(path):
+        for root, dirs, files in os.walk(path, topdown=True):
+            # --- LÓGICA DE IGNORE CORRETA E ROBUSTA ---
+            dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
+            
+            for file in files:
+                if file.endswith('.py'):
+                    files_to_check.append(os.path.join(root, file))
+    elif path.endswith('.py') and not any(ignored in path for ignored in folders_to_ignore):
+        files_to_check.append(path)
+    
+    findings = []
+    for file_path in files_to_check:
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            framework = "unknown"
+            if "import tkinter" in content or "from tkinter" in content:
+                framework = "tkinter"
+            elif "import kivy" in content or "from kivy" in content:
+                framework = "kivy"
+
+            if framework != "unknown":
+                tree = ast.parse(content, filename=file_path)
+                
+                if framework == "tkinter":
+                    # Adicione aqui a chamada para a função de layout recuperada
+                    findings.extend(_analyze_tkinter_layout(tree, file_path))
+                elif framework == "kivy":
+                    findings.extend(_analyze_kivy_risks(tree, file_path))
+        except SyntaxError as e:
+            findings.append({
+                'type': 'error',
+                'message': f"Erro de sintaxe impede a análise: {e.msg}",
+                'details': "A análise de lógica só pode ser feita em arquivos sintaticamente corretos.",
+                'file': file_path,
+                'line': e.lineno
+            })
+            continue # Pula para o próximo arquivo após reportar o erro.
+        except IOError:
+            # Mantemos o 'continue' silencioso para erros de leitura de arquivo.
+            continue
+    return findings
+
+#atualizado em 2025/09/30-Versão 17.4. Tem como função analisar código Kivy. Melhoria: Removida lógica duplicada e conflitante, deixando apenas a implementação robusta baseada na análise direta da AST.
+def _analyze_kivy_risks(tree, file_path):
+    """(Especialista Kivy) Analisa uma AST em busca de riscos comuns de Kivy."""
+    findings = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+
+        # --- LÓGICA DE DETECÇÃO ÚNICA E ROBUSTA ---
+        is_button_call = False
+        func_node = node.func
+        
+        # Caso 1: Chamada direta -> Button(...)
+        if isinstance(func_node, ast.Name) and func_node.id == 'Button':
+            is_button_call = True
+        # Caso 2: Chamada de atributo -> uix.Button(...)
+        elif isinstance(func_node, ast.Attribute) and func_node.attr == 'Button':
+            is_button_call = True
+        
+        if is_button_call:
+            # Verifica se algum keyword argument começa com 'on_'
+            defined_events = {kw.arg for kw in node.keywords if kw.arg.startswith('on_')}
+            
+            # Se não encontrar 'on_press' ou 'on_release', reporta o aviso.
+            if not ('on_press' in defined_events or 'on_release' in defined_events):
+                findings.append({
+                    'type': 'warning',
+                    'message': "Widget de Botão Kivy não parece ter um evento de ação ('on_press' ou 'on_release').",
+                    'details': "Um botão sem ação pode indicar uma funcionalidade incompleta.",
+                    'file': file_path,
+                    'line': node.lineno
+                })
+    return findings
+
+#atualizado em 2025/09/30-Versão 17.5. Tem como função analisar um arquivo AST em busca de erros de layout Tkinter (mix de pack/grid e falta de weight). Esta função foi reintroduzida a partir do histórico de P&D (OADE-15).
+def _analyze_tkinter_layout(tree, file_path):
+    """
+    Analisa uma AST de um arquivo Python em busca de erros de design de layout Tkinter
+    usando uma abordagem de múltiplas passagens e reportando números de linha.
+    """
+    findings = []
+    
+    # --- PRIMEIRA PASSAGEM: Construir o mapa de hierarquia (quem é pai de quem) ---
+    widget_parent_map = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            if node.value.args:
+                parent_node = node.value.args[0]
+                parent_name = None
+                # Tenta extrair o nome do pai (ex: self.main_frame -> 'main_frame')
+                if isinstance(parent_node, ast.Name): parent_name = parent_node.id
+                elif isinstance(parent_node, ast.Attribute): parent_name = parent_node.attr
+                
+                # Tenta extrair o nome do widget filho (ex: self.my_button -> 'my_button')
+                widget_name = None
+                if hasattr(node.targets[0], 'id'): widget_name = node.targets[0].id
+                elif hasattr(node.targets[0], 'attr'): widget_name = node.targets[0].attr
+
+                if parent_name and widget_name:
+                    widget_parent_map[widget_name] = parent_name
+
+    # --- SEGUNDA PASSAGEM: Coletar dados de layout e configuração de grid ---
+    # Estrutura aprimorada para guardar também o número da linha
+    parent_layouts = {}  # {'parent_name': {'pack': [10, 15], 'grid': [12]}}
+    grid_configs = {}    # {'parent_name': {'rows_weighted': {0, 1}, 'cols_weighted': {0}}}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            widget_name = None
+            if isinstance(node.func.value, ast.Name): widget_name = node.func.value.id
+            elif isinstance(node.func.value, ast.Attribute): widget_name = node.func.value.attr
+                
+            parent_name = widget_parent_map.get(widget_name)
+
+            if node.func.attr in ['pack', 'grid']:
+                layout_manager = node.func.attr
+                if parent_name:
+                    # Inicializa a estrutura se for o primeiro encontro
+                    parent_layouts.setdefault(parent_name, {})
+                    # Adiciona o número da linha à lista daquele gerenciador
+                    parent_layouts[parent_name].setdefault(layout_manager, []).append(node.lineno)
+
+            if node.func.attr in ['rowconfigure', 'columnconfigure'] and parent_name:
+                has_weight = any(kw.arg == 'weight' and isinstance(kw.value, ast.Constant) and kw.value.value > 0 for kw in node.keywords)
+                if has_weight:
+                    config_type = 'rows_weighted' if node.func.attr == 'rowconfigure' else 'cols_weighted'
+                    grid_configs.setdefault(parent_name, {'rows_weighted': set(), 'cols_weighted': set()})
+                    if node.args and isinstance(node.args[0], ast.Constant):
+                        index = node.args[0].value
+                        grid_configs[parent_name][config_type].add(index)
+
+    # --- ANÁLISE FINAL: Usar os dados coletados para encontrar problemas ---
+
+    for parent, layouts in parent_layouts.items():
+        # 1. Encontra pais com múltiplos gerenciadores de layout
+        if len(layouts) > 1:
+            # Concatena todas as linhas de todos os layouts para reportar
+            all_lines = []
+            for manager_lines in layouts.values():
+                all_lines.extend(manager_lines)
+            
+            # Pega a primeira linha como a principal para o relatório
+            line_report = min(all_lines) if all_lines else None
+            
+            findings.append({
+                'type': 'error',
+                'message': f"Uso misto de gerenciadores de layout ({', '.join(layouts.keys())}) no widget pai '{parent}'.",
+                'details': f"As chamadas conflitantes foram encontradas nas linhas: {sorted(all_lines)}.",
+                'ref': 'OADE-15',
+                'file': file_path,
+                'line': line_report 
+            })
+
+        # 2. Encontra pais que usam .grid mas não configuram o peso
+        if 'grid' in layouts:
+            if parent not in grid_configs or not (grid_configs[parent]['rows_weighted'] or grid_configs[parent]['cols_weighted']):
+                # Reporta a linha da primeira chamada .grid() encontrada para este pai
+                line_report = min(layouts['grid']) if layouts['grid'] else None
+                findings.append({
+                    'type': 'warning',
+                    'message': f"O widget pai '{parent}' usa o layout .grid() mas não parece configurar o 'weight'.",
+                    'details': "Sem 'weight' > 0 em .rowconfigure()/.columnconfigure(), o layout não será responsivo.",
+                    'ref': 'OADE-15',
+                    'file': file_path,
+                    'line': line_report
+                })
+                
+    return findings
+    
+# =============================================================================
+# --- FIM DO BLOCO DE ANÁLISE DE GUI ---
+# =============================================================================
 
 # -----------------------------------------------------------------------------
 # FUNÇÕES AUXILIARES
@@ -2036,128 +2216,6 @@ def _check_web_assets(path, ignore_list=None):
         elif file_path.endswith('.js'): findings.extend(_analyze_js_file(file_path))
     return findings
 
-#atualizado em 2025/09/23-Versão 5.1. Aprimorada a análise de layout para capturar e reportar os números de linha relevantes para os erros, melhorando a precisão do diagnóstico.
-def _analyze_tkinter_layout(tree, file_path):
-    """
-    Analisa uma AST de um arquivo Python em busca de erros de design de layout Tkinter
-    usando uma abordagem de múltiplas passagens e reportando números de linha.
-    """
-    findings = []
-    
-    # --- PRIMEIRA PASSAGEM: Construir o mapa de hierarquia (quem é pai de quem) ---
-    widget_parent_map = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
-            if node.value.args:
-                parent_node = node.value.args[0]
-                parent_name = None
-                # Tenta extrair o nome do pai (ex: self.main_frame -> 'main_frame')
-                if isinstance(parent_node, ast.Name): parent_name = parent_node.id
-                elif isinstance(parent_node, ast.Attribute): parent_name = parent_node.attr
-                
-                # Tenta extrair o nome do widget filho (ex: self.my_button -> 'my_button')
-                widget_name = None
-                if hasattr(node.targets[0], 'id'): widget_name = node.targets[0].id
-                elif hasattr(node.targets[0], 'attr'): widget_name = node.targets[0].attr
-
-                if parent_name and widget_name:
-                    widget_parent_map[widget_name] = parent_name
-
-    # --- SEGUNDA PASSAGEM: Coletar dados de layout e configuração de grid ---
-    # Estrutura aprimorada para guardar também o número da linha
-    parent_layouts = {}  # {'parent_name': {'pack': [10, 15], 'grid': [12]}}
-    grid_configs = {}    # {'parent_name': {'rows_weighted': {0, 1}, 'cols_weighted': {0}}}
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-            widget_name = None
-            if isinstance(node.func.value, ast.Name): widget_name = node.func.value.id
-            elif isinstance(node.func.value, ast.Attribute): widget_name = node.func.value.attr
-                
-            parent_name = widget_parent_map.get(widget_name)
-
-            if node.func.attr in ['pack', 'grid']:
-                layout_manager = node.func.attr
-                if parent_name:
-                    # Inicializa a estrutura se for o primeiro encontro
-                    parent_layouts.setdefault(parent_name, {})
-                    # Adiciona o número da linha à lista daquele gerenciador
-                    parent_layouts[parent_name].setdefault(layout_manager, []).append(node.lineno)
-
-            if node.func.attr in ['rowconfigure', 'columnconfigure'] and parent_name:
-                has_weight = any(kw.arg == 'weight' and isinstance(kw.value, ast.Constant) and kw.value.value > 0 for kw in node.keywords)
-                if has_weight:
-                    config_type = 'rows_weighted' if node.func.attr == 'rowconfigure' else 'cols_weighted'
-                    grid_configs.setdefault(parent_name, {'rows_weighted': set(), 'cols_weighted': set()})
-                    if node.args and isinstance(node.args[0], ast.Constant):
-                        index = node.args[0].value
-                        grid_configs[parent_name][config_type].add(index)
-
-    # --- ANÁLISE FINAL: Usar os dados coletados para encontrar problemas ---
-
-    for parent, layouts in parent_layouts.items():
-        # 1. Encontra pais com múltiplos gerenciadores de layout
-        if len(layouts) > 1:
-            # Concatena todas as linhas de todos os layouts para reportar
-            all_lines = []
-            for manager_lines in layouts.values():
-                all_lines.extend(manager_lines)
-            
-            # Pega a primeira linha como a principal para o relatório
-            line_report = min(all_lines) if all_lines else None
-            
-            findings.append({
-                'type': 'error',
-                'message': f"Uso misto de gerenciadores de layout ({', '.join(layouts.keys())}) no widget pai '{parent}'.",
-                'details': f"As chamadas conflitantes foram encontradas nas linhas: {sorted(all_lines)}.",
-                'ref': 'OADE-15',
-                'file': file_path,
-                'line': line_report 
-            })
-
-        # 2. Encontra pais que usam .grid mas não configuram o peso
-        if 'grid' in layouts:
-            if parent not in grid_configs or not (grid_configs[parent]['rows_weighted'] or grid_configs[parent]['cols_weighted']):
-                # Reporta a linha da primeira chamada .grid() encontrada para este pai
-                line_report = min(layouts['grid']) if layouts['grid'] else None
-                findings.append({
-                    'type': 'warning',
-                    'message': f"O widget pai '{parent}' usa o layout .grid() mas não parece configurar o 'weight'.",
-                    'details': "Sem 'weight' > 0 em .rowconfigure()/.columnconfigure(), o layout não será responsivo.",
-                    'ref': 'OADE-15',
-                    'file': file_path,
-                    'line': line_report
-                })
-                
-    return findings
-
-
-def _check_gui_files(path, ignore_list=None):
-    """Analisa arquivos Python de GUI e retorna uma lista de problemas."""
-    folders_to_ignore = set([item.lower().strip('/') for item in ignore_list or []] + ['venv', 'build', 'dist', '.git'])
-    files_to_check = []
-    if os.path.isdir(path):
-        for root, dirs, files in os.walk(path):
-            dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
-            for file in files:
-                if file.endswith('.py'): files_to_check.append(os.path.join(root, file))
-    elif path.endswith('.py'):
-        files_to_check.append(path)
-    
-    findings = []
-    for file_path in files_to_check:
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
-        try:
-            tree = ast.parse(content)
-            # Executa ambas as análises e consolida os resultados
-            findings.extend(_check_gui_events(tree, file_path))
-            findings.extend(_analyze_tkinter_layout(tree, file_path))
-        except SyntaxError as e:
-            findings.append({'type': 'error', 'message': f"Erro de sintaxe Python impede análise: {e}", 'file': file_path, 'line': e.lineno})
-    return findings
-
-
 # -----------------------------------------------------------------------------
 # FUNÇÕES DE ANÁLISE ESPECÍFICAS (COLETA DE DADOS)
 # -----------------------------------------------------------------------------
@@ -2199,26 +2257,6 @@ def _analyze_js_file(file_path):
     except esprima.Error as e:
         return [{'type': 'error', 'message': f"Erro de sintaxe JS: {e.message}", 'file': file_path, 'line': e.lineNumber}]
 
-def _check_gui_events(tree, file_path):
-    findings = []
-    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f: content = f.read()
-    try: tree = ast.parse(content)
-    except SyntaxError as e:
-        return [{'type': 'error', 'message': f"Erro de sintaxe Python impede análise: {e}", 'file': file_path, 'line': e.lineno}]
-    
-    widget_creations = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call) and hasattr(node.value.func, 'attr') and 'Button' in node.value.func.attr:
-            widget_name = node.targets[0].id if hasattr(node.targets[0], 'id') else node.targets[0].attr if hasattr(node.targets[0], 'attr') else None
-            if widget_name:
-                has_command = any(kw.arg == 'command' for kw in node.value.keywords)
-                widget_creations[widget_name] = {'has_command': has_command, 'line': node.lineno}
-    
-    for name, data in widget_creations.items():
-        if not data['has_command']:
-            findings.append({'type': 'warning', 'message': f"Possível widget de botão '{name}' sem ação 'command'.", 'details': "Verifique se um evento .bind() foi associado a ele, ou se a ação está faltando.", 'file': file_path, 'line': data['line']})
-    return findings
-
 # -----------------------------------------------------------------------------
 # FUNÇÕES DE APRESENTAÇÃO E DIAGNÓSTICO
 # -----------------------------------------------------------------------------
@@ -2240,8 +2278,9 @@ def _present_results(format, results):
         'environment': '[AMBIENTE] ANÁLISE DE AMBIENTE',
         'dependencies': '[DEP] ANÁLISE DE DEPENDÊNCIAS',
         'source_code': '[LINT] ANÁLISE DE CÓDIGO',
-        'web_assets': '[WEB] ANÁLISE DE ATIVOS WEB (HTML/CSS/JS)',
-        'gui': '[GUI] ANÁLISE DE GUI (TKINTER)'
+        'web_assets': '[WEB] ANÁLISE DE ATIVOS WEB (HTML/CSS/JS)',  
+        'gui': '[GUI] ANÁLISE DE INTERFACE GRÁFICA', # Mantém compatibilidade
+        'gui_analysis': '[GUI] ANÁLISE DE INTERFACE GRÁFICA' # Novo nome genérico
     }
 
     for category, findings in results.items():
