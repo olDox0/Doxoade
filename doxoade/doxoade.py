@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 # Inicializa o colorama para funcionar no Windows
 init(autoreset=True)
 
-__version__ = "18.4"
+__version__ = "19.3"
 
 #atualizado em 2025/09/28-Versão 18.0. Tem como função registrar um achado. Melhoria: Agora calcula e adiciona um 'finding_hash' para identificar unicamente cada problema.
 class ExecutionLogger:
@@ -38,7 +38,7 @@ class ExecutionLogger:
             'findings': []
         }
 
-    def add_finding(self, f_type, message, file=None, line=None, details=None):
+    def add_finding(self, f_type, message, file=None, line=None, details=None, ref=None, snippet=None):
         """Adiciona um novo achado (erro ou aviso) ao log."""
         unique_str = f"{file}:{line}:{message}"
         finding_hash = hashlib.md5(unique_str.encode()).hexdigest()
@@ -47,12 +47,14 @@ class ExecutionLogger:
         if file: finding['file'] = file
         if line: finding['line'] = line
         if details: finding['details'] = details
+        if ref: finding['ref'] = ref
+        if snippet: finding['snippet'] = snippet # <-- A LINHA ADICIONADA
         
         self.results['findings'].append(finding)
         
-        if f_type == 'error':
+        if f_type == 'error' or 'ERROR' in f_type:
             self.results['summary']['errors'] += 1
-        elif f_type == 'warning':
+        elif f_type == 'warning' or 'WARNING' in f_type:
             self.results['summary']['warnings'] += 1
 
     def __enter__(self):
@@ -1736,29 +1738,28 @@ def log(lines, snippets):
 # --- INÍCIO DO BLOCO DE ANÁLISE DE GUI (VERSÃO FINAL) ---
 # =============================================================================
 
-#atualizado em 2025/09/30-Versão 17.6. Tem como função gerenciar a análise de GUI. Melhoria: A captura de exceção agora reporta explicitamente um 'SyntaxError' em vez de ignorá-lo, tornando a ferramenta mais transparente e robusta.
+#atualizado em 2025/10/01-Versão 19.2. Melhoria: A passagem de dados para o logger agora inclui os snippets de código, completando a funcionalidade.
 @cli.command()
 @click.argument('path', type=click.Path(exists=True, file_okay=True), required=False, default='.')
 @click.option('--ignore', multiple=True, help="Ignora uma pasta. Combina com as do .doxoaderc.")
 @click.option('--format', type=click.Choice(['text', 'json']), default='text', help="Define o formato da saída.")
-def guicheck(path, ignore, format):
+@click.pass_context
+def guicheck(ctx, path, ignore, format):
     """Analisa arquivos .py em busca de problemas de GUI (Tkinter e Kivy)."""
-    results = {'summary': {'errors': 0, 'warnings': 0}}
-    try:
+    arguments = ctx.params
+
+    with ExecutionLogger('guicheck', path, arguments) as logger:
         if format == 'text': click.echo(Fore.YELLOW + f"[GUI] Executando análise de GUI em '{os.path.abspath(path)}'...")
         config = _load_config()
         final_ignore_list = list(set(config['ignore'] + list(ignore)))
         
-        results['gui_analysis'] = _check_gui_files(path, final_ignore_list)
+        gui_findings = _check_gui_files(path, final_ignore_list)
+        for f in gui_findings:
+            logger.add_finding(f['type'], f['message'], details=f.get('details'), file=f.get('file'), line=f.get('line'), ref=f.get('ref'), snippet=f.get('snippet'))
+
+        _present_results(format, logger.results)
         
-        _update_summary_from_findings(results)
-        _present_results(format, results)
-    except Exception as e:
-        click.echo(Fore.RED + f"Erro fatal no guicheck: {e}")
-        pass
-    finally:
-        _log_execution('guicheck', path, results, {'ignore': list(ignore), 'format': format})
-        if results['summary']['errors'] > 0:
+        if logger.results['summary']['errors'] > 0:
             sys.exit(1)
 
 def _check_gui_files(path, ignore_list=None):
@@ -1803,7 +1804,8 @@ def _check_gui_files(path, ignore_list=None):
                 'message': f"Erro de sintaxe impede a análise: {e.msg}",
                 'details': "A análise de lógica só pode ser feita em arquivos sintaticamente corretos.",
                 'file': file_path,
-                'line': e.lineno
+                'line': e.lineno,
+                'snippet': _get_code_snippet(file_path, e.lineno) # <-- ADICIONAR
             })
             continue # Pula para o próximo arquivo após reportar o erro.
         except IOError:
@@ -1811,7 +1813,7 @@ def _check_gui_files(path, ignore_list=None):
             continue
     return findings
 
-#atualizado em 2025/09/30-Versão 17.4. Tem como função analisar código Kivy. Melhoria: Removida lógica duplicada e conflitante, deixando apenas a implementação robusta baseada na análise direta da AST.
+#atualizado em 2025/10/01-Versão 19.0. Melhoria: Agora adiciona snippets de código aos findings.
 def _analyze_kivy_risks(tree, file_path):
     """(Especialista Kivy) Analisa uma AST em busca de riscos comuns de Kivy."""
     findings = []
@@ -1841,11 +1843,12 @@ def _analyze_kivy_risks(tree, file_path):
                     'message': "Widget de Botão Kivy não parece ter um evento de ação ('on_press' ou 'on_release').",
                     'details': "Um botão sem ação pode indicar uma funcionalidade incompleta.",
                     'file': file_path,
-                    'line': node.lineno
+                    'line': node.lineno,
+                    'snippet': _get_code_snippet(file_path, node.lineno) # <-- ADICIONAR
                 })
     return findings
 
-#atualizado em 2025/09/30-Versão 17.5. Tem como função analisar um arquivo AST em busca de erros de layout Tkinter (mix de pack/grid e falta de weight). Esta função foi reintroduzida a partir do histórico de P&D (OADE-15).
+#atualizado em 2025/10/01-Versão 19.1. Melhoria: Corrigido SyntaxError pela falta de uma vírgula.
 def _analyze_tkinter_layout(tree, file_path):
     """
     Analisa uma AST de um arquivo Python em busca de erros de design de layout Tkinter
@@ -1921,7 +1924,8 @@ def _analyze_tkinter_layout(tree, file_path):
                 'details': f"As chamadas conflitantes foram encontradas nas linhas: {sorted(all_lines)}.",
                 'ref': 'OADE-15',
                 'file': file_path,
-                'line': line_report 
+                'line': line_report,
+                'snippet': _get_code_snippet(file_path, line_report)
             })
 
         # 2. Encontra pais que usam .grid mas não configuram o peso
@@ -1935,7 +1939,8 @@ def _analyze_tkinter_layout(tree, file_path):
                     'details': "Sem 'weight' > 0 em .rowconfigure()/.columnconfigure(), o layout não será responsivo.",
                     'ref': 'OADE-15',
                     'file': file_path,
-                    'line': line_report
+                    'line': line_report,
+                    'snippet': _get_code_snippet(file_path, line_report)
                 })
                 
     return findings
@@ -2009,7 +2014,7 @@ def _run_git_command(args, capture_output=False, silent_fail=False):
             click.echo(Fore.YELLOW + error_output)
         return None
 
-#atualizado em 2025/09/30-Versão 18.4. Tem como função exibir uma entrada de log. Melhoria: A apresentação foi completamente refeita para incluir todos os dados forenses (versão, tempo, plataforma, etc.) e detalhes completos dos 'findings', tornando o log muito mais informativo.
+#atualizado em 2025/10/01-Versão 18.7. Tem como função exibir uma entrada de log. Melhoria: Implementada a lógica de exibição para os snippets de código, que agora são mostrados quando a flag --snippets é usada.
 def _display_log_entry(entry, index, total, show_snippets=False):
     """Formata e exibe uma única entrada de log de forma legível, com snippets opcionais."""
     try:
@@ -2059,15 +2064,21 @@ def _display_log_entry(entry, index, total, show_snippets=False):
             if finding.get('details'):
                 click.echo(Fore.CYAN + f"    > {finding.get('details')}")
 
+            # --- LÓGICA DE EXIBIÇÃO DE SNIPPETS ---
             snippet = finding.get('snippet')
             if show_snippets and snippet:
+                # Usamos .get() com um valor padrão para evitar erros se a linha não for um número
+                f_line_int = int(finding.get('line', -1)) 
                 for line_num_str, code_line in snippet.items():
                     line_num = int(line_num_str)
-                    if line_num == f_line:
+                    if line_num == f_line_int:
+                        # Destaque para a linha do erro
                         click.echo(Fore.WHITE + Style.BRIGHT + f"      > {line_num:3}: {code_line}")
                     else:
-                        click.echo(Fore.WHITE + f"        {line_num:3}: {code_line}")
-    click.echo("")  
+                        # Contexto com menos destaque
+                        click.echo(Fore.WHITE + Style.DIM + f"        {line_num:3}: {code_line}")
+            # ----------------------------------------
+    click.echo("")
     
 #atualizado em 2025/09/16-V23. Nova função auxiliar para extrair trechos de código de arquivos, enriquecendo os logs.
 def _get_code_snippet(file_path, line_number, context_lines=2):
