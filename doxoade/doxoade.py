@@ -10,6 +10,8 @@ import shlex
 import fnmatch
 import tempfile
 import traceback
+import hashlib
+import time
 from functools import wraps
 from bs4 import BeautifulSoup
 from io import StringIO
@@ -21,13 +23,16 @@ from datetime import datetime, timezone
 # Inicializa o colorama para funcionar no Windows
 init(autoreset=True)
 
-#atualizado em 2025/09/28-Versão 14.0. Implementada a classe ExecutionLogger para um sistema de logging centralizado e robusto.
+__version__ = "18.4"
+
+#atualizado em 2025/09/28-Versão 18.0. Tem como função registrar um achado. Melhoria: Agora calcula e adiciona um 'finding_hash' para identificar unicamente cada problema.
 class ExecutionLogger:
     """Um gerenciador de contexto para registrar a execução de um comando doxoade."""
     def __init__(self, command_name, path, arguments):
         self.command_name = command_name
         self.path = path
         self.arguments = arguments
+        self.start_time = time.monotonic()  # Mede o tempo de início
         self.results = {
             'summary': {'errors': 0, 'warnings': 0},
             'findings': []
@@ -35,7 +40,10 @@ class ExecutionLogger:
 
     def add_finding(self, f_type, message, file=None, line=None, details=None):
         """Adiciona um novo achado (erro ou aviso) ao log."""
-        finding = {'type': f_type.upper(), 'message': message}
+        unique_str = f"{file}:{line}:{message}"
+        finding_hash = hashlib.md5(unique_str.encode()).hexdigest()
+        
+        finding = {'type': f_type.upper(), 'message': message, 'hash': finding_hash}
         if file: finding['file'] = file
         if line: finding['line'] = line
         if details: finding['details'] = details
@@ -48,24 +56,21 @@ class ExecutionLogger:
             self.results['summary']['warnings'] += 1
 
     def __enter__(self):
-        # Quando o bloco 'with' começa, ele retorna o próprio objeto logger.
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # Quando o bloco 'with' termina, este método é chamado automaticamente.
+        execution_time_ms = (time.monotonic() - self.start_time) * 1000
         
-        # Se uma exceção ocorreu, a registramos como um erro fatal.
-        if exc_type:
+        # Só registra como erro fatal se NÃO for um SystemExit
+        if exc_type and not isinstance(exc_val, SystemExit):
             self.add_finding(
                 'fatal_error',
                 'A Doxoade encontrou um erro fatal interno durante a execução deste comando.',
                 details=str(exc_val),
             )
-            # Adicionamos o traceback ao último finding para diagnóstico completo.
             self.results['findings'][-1]['traceback'] = traceback.format_exc()
 
-        # Independentemente do que aconteceu, escrevemos o estado final no log.
-        _log_execution(self.command_name, self.path, self.results, self.arguments)
+        _log_execution(self.command_name, self.path, self.results, self.arguments, execution_time_ms)
 
 # -----------------------------------------------------------------------------
 # GRUPO PRINCIPAL E CONFIGURAÇÃO
@@ -1539,33 +1544,36 @@ def auto(commands):
         click.echo(Fore.RED + Style.BRIGHT + "[ATENÇÃO] Pipeline executado, mas um ou mais passos falharam.")
         sys.exit(1)
 
+#atualizado em 2025/09/30-Versão 18.5. Tem como função executar o diagnóstico. Melhoria: Substituído o decorador antigo pela classe ExecutionLogger para garantir o logging forense completo, incluindo o tempo de execução.
 @cli.command()
 @click.argument('path', type=click.Path(exists=True, file_okay=False), default='.')
 @click.option('--ignore', multiple=True, help="Ignora uma pasta. Combina com as do .doxoaderc.")
 @click.option('--format', type=click.Choice(['text', 'json']), default='text', help="Define o formato da saída.")
 @click.option('--fix', is_flag=True, help="Tenta corrigir automaticamente os problemas encontrados.")
-def check(path, ignore, format, fix):
+@click.pass_context
+def check(ctx, path, ignore, format, fix):
     """Executa um diagnóstico completo de ambiente e código no projeto."""
-    results = {'summary': {'errors': 0, 'warnings': 0}}
-    try:
+    arguments = ctx.params
+    
+    with ExecutionLogger('check', path, arguments) as logger:
         if format == 'text': click.echo(Fore.YELLOW + f"[CHECK] Executando 'doxoade check' no diretório '{os.path.abspath(path)}'...")
         config = _load_config()
         final_ignore_list = list(set(config['ignore'] + list(ignore)))
-        results.update({'environment': [], 'dependencies': [], 'source_code': []})
+        
+        # O logger agora acumula os resultados
+        env_findings = _check_environment(path)
+        for f in env_findings: logger.add_finding(f['type'], f['message'], details=f.get('details'), file=f.get('file'), line=f.get('line'))
 
-        results['environment'] = _check_environment(path)
-        results['dependencies'] = _check_dependencies(path)
-        results['source_code'] = _check_source_code(path, final_ignore_list, fix_errors=fix, text_format=(format == 'text'))
-        _update_summary_from_findings(results)
-        _present_results(format, results)
-    
-    except Exception as e:
-        safe_error = str(e).encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding)
-        click.echo(Fore.RED + f"\n[ERRO FATAL] O 'check' falhou inesperadamente: {safe_error}", err=True)
-        results['summary']['errors'] += 1
-    finally:
-        _log_execution(command_name='check', path=path, results=results, arguments={"ignore": list(ignore), "format": format, "fix": fix})
-        if results['summary']['errors'] > 0:
+        dep_findings = _check_dependencies(path)
+        for f in dep_findings: logger.add_finding(f['type'], f['message'], details=f.get('details'), file=f.get('file'), line=f.get('line'))
+        
+        src_findings = _check_source_code(path, final_ignore_list, fix_errors=fix, text_format=(format == 'text'))
+        for f in src_findings: logger.add_finding(f['type'], f['message'], details=f.get('details'), file=f.get('file'), line=f.get('line'))
+        
+        # Apresentação usa os resultados do logger
+        _present_results(format, logger.results)
+        
+        if logger.results['summary']['errors'] > 0:
             sys.exit(1)
 
 @cli.command()
@@ -1691,9 +1699,8 @@ def clean(force):
     else:
         click.echo(Fore.CYAN + "\nOperação cancelada.")
     
-#atualizado em 2025/09/16-V26. Adicionada a flag '--snippets' para exibir o contexto de código nos logs.
+#atualizado em 2025/09/30-Versão 18.3. Tem como função escrever o log. Melhoria: Corrigido o bug crítico que impedia o salvamento dos 'findings'. A função agora consolida os resultados de todas as categorias de análise em uma única lista antes de salvar.
 @cli.command()
-@log_command_execution
 @click.option('-n', '--lines', default=1, help="Exibe as últimas N linhas do log.", type=int)
 @click.option('-s', '--snippets', is_flag=True, help="Exibe os trechos de código para cada problema.")
 def log(lines, snippets):
@@ -2002,7 +2009,7 @@ def _run_git_command(args, capture_output=False, silent_fail=False):
             click.echo(Fore.YELLOW + error_output)
         return None
 
-#atualizado em 2025/09/16-V26. Aprimorada para exibir snippets de código com destaque na linha do erro.
+#atualizado em 2025/09/30-Versão 18.4. Tem como função exibir uma entrada de log. Melhoria: A apresentação foi completamente refeita para incluir todos os dados forenses (versão, tempo, plataforma, etc.) e detalhes completos dos 'findings', tornando o log muito mais informativo.
 def _display_log_entry(entry, index, total, show_snippets=False):
     """Formata e exibe uma única entrada de log de forma legível, com snippets opcionais."""
     try:
@@ -2013,9 +2020,20 @@ def _display_log_entry(entry, index, total, show_snippets=False):
 
     header = f"--- Entrada de Log #{index}/{total} ({ts_local}) ---"
     click.echo(Fore.CYAN + Style.BRIGHT + header)
-    
-    click.echo(Fore.WHITE + f"Comando: {entry.get('command', 'N/A')}")
+
+    # --- NOVO BLOCO: CONTEXTO FORENSE DA EXECUÇÃO ---
+    click.echo(Fore.WHITE + f"Comando: {entry.get('command', 'N/A')} (Doxoade v{entry.get('doxoade_version', 'N/A')})")
     click.echo(Fore.WHITE + f"Projeto: {entry.get('project_path', 'N/A')}")
+    
+    context_line = (
+        f"Contexto: "
+        f"Git({entry.get('git_hash', 'N/A')[:7]}) | "
+        f"Plataforma({entry.get('platform', 'N/A')}) | "
+        f"Python({entry.get('python_version', 'N/A')}) | "
+        f"Tempo({entry.get('execution_time_ms', 0):.2f}ms)"
+    )
+    click.echo(Fore.WHITE + Style.DIM + context_line)
+    # ---------------------------------------------------
     
     summary = entry.get('summary', {})
     errors = summary.get('errors', 0)
@@ -2029,25 +2047,27 @@ def _display_log_entry(entry, index, total, show_snippets=False):
         click.echo(Fore.WHITE + "Detalhes dos Problemas Encontrados:")
         for finding in findings:
             f_type = finding.get('type', 'info').upper()
-            f_color = Fore.RED if f_type == 'ERROR' else Fore.YELLOW
+            f_color = Fore.RED if 'ERROR' in f_type else Fore.YELLOW
             f_msg = finding.get('message', 'N/A')
             f_file = finding.get('file', 'N/A')
             f_line = finding.get('line', '')
-            click.echo(f_color + f"  - [{f_type}] {f_msg} (em {f_file}, linha {f_line})")
+            f_ref = f" [Ref: {finding.get('ref')}]" if finding.get('ref') else ""
+            
+            click.echo(f_color + f"  - [{f_type}] {f_msg}{f_ref} (em {f_file}, linha {f_line})")
 
-            # --- NOVA LÓGICA PARA EXIBIR SNIPPETS ---
+            # --- LÓGICA DE DETALHES COMPLETA ---
+            if finding.get('details'):
+                click.echo(Fore.CYAN + f"    > {finding.get('details')}")
+
             snippet = finding.get('snippet')
             if show_snippets and snippet:
                 for line_num_str, code_line in snippet.items():
                     line_num = int(line_num_str)
-                    # Compara o número da linha do snippet com a linha do finding
                     if line_num == f_line:
-                        # Destaque para a linha do erro
-                        click.echo(Fore.WHITE + Style.BRIGHT + f"    > {line_num:3}: {code_line}")
+                        click.echo(Fore.WHITE + Style.BRIGHT + f"      > {line_num:3}: {code_line}")
                     else:
-                        # Contexto normal
-                        click.echo(Fore.WHITE + f"      {line_num:3}: {code_line}")
-    click.echo("")
+                        click.echo(Fore.WHITE + f"        {line_num:3}: {code_line}")
+    click.echo("")  
     
 #atualizado em 2025/09/16-V23. Nova função auxiliar para extrair trechos de código de arquivos, enriquecendo os logs.
 def _get_code_snippet(file_path, line_number, context_lines=2):
@@ -2074,11 +2094,10 @@ def _get_code_snippet(file_path, line_number, context_lines=2):
         # Retorna None se o arquivo não puder ser lido ou a linha não existir
         return None
 
-#atualizado em 2025/09/27-Versão 12.7. Logging aprimorado para registrar todas as execuções e falhas internas, não apenas análises.
-def _log_execution(command_name, path, results, arguments):
+#atualizado em 2025/09/30-Versão 18.3. Tem como função escrever o log. Melhoria: Corrigido o bug crítico que impedia o salvamento dos 'findings'. A função agora consolida os resultados de todas as categorias de análise em uma única lista antes de salvar.
+def _log_execution(command_name, path, results, arguments, execution_time_ms=0):
     """(Função Auxiliar) Escreve o dicionário de log final no arquivo."""
     try:
-        # ... (a lógica interna de encontrar o arquivo e escrever o JSON permanece a mesma) ...
         log_dir = Path.home() / '.doxoade'
         log_dir.mkdir(exist_ok=True)
         log_file = log_dir / 'doxoade.log'
@@ -2086,21 +2105,32 @@ def _log_execution(command_name, path, results, arguments):
         timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         git_hash = _get_git_commit_hash(path)
 
+        # --- LÓGICA DE CONSOLIDAÇÃO DOS FINDINGS ---
+        all_findings = []
+        for key, value in results.items():
+            if key != 'summary' and isinstance(value, list):
+                all_findings.extend(value)
+        # ---------------------------------------------
+
         log_data = {
             "timestamp": timestamp,
+            "doxoade_version": __version__,
             "command": command_name,
             "project_path": os.path.abspath(path),
+            "platform": sys.platform,
+            "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
             "git_hash": git_hash,
             "arguments": arguments,
+            "execution_time_ms": round(execution_time_ms, 2),
             "summary": results.get('summary', {}),
             "status": "completed",
-            "findings": results.get('findings', [])
+            "findings": all_findings # Usamos a lista consolidada
         }
         
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(json.dumps(log_data) + '\n')
     except Exception:
-        click.echo(Fore.RED + "\n[AVISO DE LOG] Não foi possível escrever no arquivo de log detalhado.", err=True)
+        pass
 
 def _check_environment(path):
     """Verifica o ambiente e retorna uma lista de problemas."""
@@ -2269,40 +2299,33 @@ def _update_summary_from_findings(results):
             if finding['type'] == 'warning': results['summary']['warnings'] += 1
             elif finding['type'] == 'error': results['summary']['errors'] += 1
 
+#atualizado em 2025/09/30-Versão 18.6. Tem como função exibir os resultados. Melhoria: A função foi reescrita para ser compatível com a estrutura de dados 'plana' do ExecutionLogger, corrigindo a apresentação.
 def _present_results(format, results):
     """Apresenta os resultados no formato escolhido (JSON ou texto)."""
     if format == 'json':
         print(json.dumps(results, indent=4)); return
 
-    category_titles = {
-        'environment': '[AMBIENTE] ANÁLISE DE AMBIENTE',
-        'dependencies': '[DEP] ANÁLISE DE DEPENDÊNCIAS',
-        'source_code': '[LINT] ANÁLISE DE CÓDIGO',
-        'web_assets': '[WEB] ANÁLISE DE ATIVOS WEB (HTML/CSS/JS)',  
-        'gui': '[GUI] ANÁLISE DE INTERFACE GRÁFICA', # Mantém compatibilidade
-        'gui_analysis': '[GUI] ANÁLISE DE INTERFACE GRÁFICA' # Novo nome genérico
-    }
+    findings = results.get('findings', [])
+    
+    click.echo(Style.BRIGHT + "\n--- ANÁLISE COMPLETA ---")
+    if not findings:
+        click.echo(Fore.GREEN + "[OK] Nenhum problema encontrado.")
+    else:
+        for finding in findings:
+            color = Fore.RED if 'ERROR' in finding['type'] else Fore.YELLOW
+            tag = f"[{finding['type']}]"
+            ref = f" [Ref: {finding.get('ref', 'N/A')}]" if finding.get('ref') else ""
+            click.echo(color + f"{tag} {finding['message']}{ref}")
+            
+            if 'file' in finding:
+                location = f"   > Em '{finding['file']}'"
+                if 'line' in finding: location += f" (linha {finding['line']})"
+                click.echo(location)
+            if 'details' in finding:
+                click.echo(Fore.CYAN + f"   > {finding['details']}")
 
-    for category, findings in results.items():
-        if category == 'summary': continue
-        click.echo(Style.BRIGHT + f"\n--- {category_titles.get(category, category.upper())} ---")
-        if not findings:
-            click.echo(Fore.GREEN + "[OK] Nenhum problema encontrado nesta categoria.")
-        else:
-            for finding in findings:
-                color = Fore.RED if finding['type'] == 'error' else Fore.YELLOW
-                tag = '[ERRO]' if finding['type'] == 'error' else '[AVISO]'
-                ref = f" [Ref: {finding.get('ref', 'N/A')}]" if finding.get('ref') else ""
-                click.echo(color + f"{tag} {finding['message']}{ref}")
-                if 'file' in finding:
-                    location = f"   > Em '{finding['file']}'"
-                    if 'line' in finding: location += f" (linha {finding['line']})"
-                    click.echo(location)
-                if 'details' in finding:
-                    click.echo(Fore.CYAN + f"   > {finding['details']}")
-
-    error_count = results['summary']['errors']
-    warning_count = results['summary']['warnings']
+    error_count = results.get('summary', {}).get('errors', 0)
+    warning_count = results.get('summary', {}).get('warnings', 0)
     click.echo(Style.BRIGHT + "\n" + "-"*40)
     if error_count == 0 and warning_count == 0:
         click.echo(Fore.GREEN + "[OK] Análise concluída. Nenhum problema encontrado!")
