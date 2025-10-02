@@ -28,6 +28,8 @@ setup(
             'doxoade-git-clean = doxoade.doxoade:git_clean',
             'doxoade-release = doxoade.doxoade:release',
             'doxoade-sync = doxoade.doxoade:sync',
+            'doxoade-kvcheck = doxoade.doxoade:kvcheck',
+            'doxoade-encoding = doxoade.doxoade:encoding',
         ],
     },
     classifiers=[
@@ -36,4 +38,4 @@ setup(
         'Operating System :: OS Independent',
     ],
     python_requires='>=3.8',
-)
+)   

@@ -1,3 +1,4 @@
+#atualizado em 2025/10/02-Versão 21.1. Melhoria: Removidos imports duplicados de 'tempfile' e 'Path' que foram corretamente identificados pelo 'doxoade check'.
 import ast
 import json
 import configparser
@@ -8,22 +9,22 @@ import subprocess
 import click
 import shlex
 import fnmatch
-import tempfile
 import traceback
 import hashlib
 import time
+import tempfile
+from pathlib import Path
 from functools import wraps
 from bs4 import BeautifulSoup
 from io import StringIO
 from colorama import init, Fore, Style
 from pyflakes import api as pyflakes_api
-from pathlib import Path
 from datetime import datetime, timezone
 
 # Inicializa o colorama para funcionar no Windows
 init(autoreset=True)
 
-__version__ = "19.3"
+__version__ = "22"
 
 #atualizado em 2025/09/28-Versão 18.0. Tem como função registrar um achado. Melhoria: Agora calcula e adiciona um 'finding_hash' para identificar unicamente cada problema.
 class ExecutionLogger:
@@ -1602,6 +1603,220 @@ def webcheck(path, ignore, format):
             sys.exit(1)
 
 
+@cli.command('kvcheck')
+@click.argument('path', type=click.Path(exists=True, file_okay=True), required=False, default='.')
+@click.option('--ignore', multiple=True, help="Ignora uma pasta.")
+@click.option('--format', type=click.Choice(['text', 'json']), default='text', help="Define o formato da saída.")
+@click.pass_context
+def kvcheck(ctx, path, ignore, format):
+    """Analisa arquivos .kv em busca de problemas de design comuns."""
+    arguments = ctx.params
+
+    with ExecutionLogger('kvcheck', path, arguments) as logger:
+        if format == 'text': click.echo(Fore.YELLOW + f"[KV] Executando análise de .kv em '{os.path.abspath(path)}'...")
+        config = _load_config()
+        final_ignore_list = list(set(config['ignore'] + list(ignore)))
+        
+        folders_to_ignore = set([item.lower().strip('/') for item in final_ignore_list] + ['venv', 'build', 'dist', '.git'])
+        files_to_check = []
+        if os.path.isdir(path):
+            for root, dirs, files in os.walk(path, topdown=True):
+                dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
+                for file in files:
+                    if file.endswith('.kv'):
+                        files_to_check.append(os.path.join(root, file))
+        elif path.endswith('.kv'):
+            files_to_check.append(path)
+
+        for file_path in files_to_check:
+            findings = _analyze_kv_file(file_path)
+            for f in findings:
+                logger.add_finding(f['type'], f['message'], details=f.get('details'), file=f.get('file'), line=f.get('line'), snippet=f.get('snippet'))
+
+        _present_results(format, logger.results)
+        
+        if logger.results['summary']['errors'] > 0:
+            sys.exit(1)
+
+#atualizado em 2025/10/02-Versão 20.1. Tem como função analisar arquivos .kv. Melhoria: A regex do lexer foi corrigida para ignorar comentários no final da linha, consertando a falha de detecção.
+def _analyze_kv_file(file_path):
+    """Analisa um único arquivo .kv em busca de problemas conhecidos."""
+    findings = []
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        
+        # Padrão para encontrar um CodeInput onde o lexer é uma string literal
+        lexer_regex = re.compile(r'^\s+lexer:\s*([\'"]\w+[\'"])')
+        
+        in_code_input = False
+        for i, line_content in enumerate(lines):
+            line_num = i + 1
+            # Se encontrarmos um widget CodeInput, ativamos a flag
+            if 'CodeInput:' in line_content:
+                in_code_input = True
+                continue
+
+            if in_code_input:
+                match = lexer_regex.match(line_content)
+                if match:
+                    findings.append({
+                        'type': 'error',
+                        'message': f"A propriedade 'lexer' está definida como uma string ({match.group(1)}), o que causará um AttributeError.",
+                        'details': "O lexer deve ser um objeto (ex: PythonLexer), importado no .py e passado para o .kv.",
+                        'file': file_path,
+                        'line': line_num,
+                        'snippet': _get_code_snippet(file_path, line_num, 1)
+                    })
+                # Se a indentação voltar ou encontrarmos outro widget, saímos do bloco
+                if not line_content.startswith((' ', '\t', '#', '\n')) and len(line_content.strip()) > 0:
+                    in_code_input = False
+                    
+    except Exception as e:
+        findings.append({'type': 'error', 'message': f"Falha ao analisar o arquivo .kv: {e}", 'file': file_path})
+        
+    return findings
+
+#adicionado em 2025/10/02-Versão 22.0. Tem como função analisar estaticamente os padrões de regex em um arquivo para encontrar erros de sintaxe em tempo de compilação.
+def _analyze_regex_risks(file_path, content):
+    """Analisa o uso da biblioteca 're' em busca de padrões inválidos."""
+    findings = []
+    try:
+        tree = ast.parse(content, filename=file_path)
+    except SyntaxError:
+        return findings # Ignora se o próprio arquivo .py tiver erro de sintaxe
+
+    # Funções da biblioteca 're' que recebem um padrão como primeiro argumento
+    regex_functions = {'compile', 'search', 'match', 'fullmatch', 'split', 'findall', 'finditer', 'sub', 'subn'}
+
+    for node in ast.walk(tree):
+        # Procuramos por chamadas de função (ex: re.sub(...))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            # Verificamos se a chamada é para uma das nossas funções alvo
+            if node.func.attr in regex_functions:
+                # O alvo deve ser o módulo 're'
+                if isinstance(node.func.value, ast.Name) and node.func.value.id == 're':
+                    if node.args:
+                        pattern_node = node.args[0]
+                        # A análise só funciona se o padrão for uma string literal
+                        if isinstance(pattern_node, ast.Constant) and isinstance(pattern_node.value, str):
+                            pattern_str = pattern_node.value
+                            try:
+                                # Tentamos compilar o padrão. Se falhar, encontramos um erro.
+                                re.compile(pattern_str)
+                            except re.error as e:
+                                findings.append({
+                                    'type': 'error',
+                                    'message': f"Padrão de regex inválido detectado estaticamente: {e.msg}",
+                                    'details': f"A expressão '{pattern_str}' na chamada para 're.{node.func.attr}' irá causar um 're.error' em tempo de execução.",
+                                    'file': file_path,
+                                    'line': node.lineno,
+                                    'snippet': _get_code_snippet(file_path, node.lineno)
+                                })
+    return findings
+
+@cli.command('encoding')
+@click.argument('targets', nargs=-1, required=True)
+@click.pass_context
+def encoding(ctx, targets):
+    """Altera a codificação de arquivos para um formato de destino (ex: UTF-8)."""
+    if len(targets) < 2:
+        click.echo(Fore.RED + "[ERRO] Uso incorreto. Exemplo: doxoade encoding *.md UTF-8")
+        return
+
+    input_targets = targets[:-1]
+    target_encoding_str = targets[-1]
+    
+    # Normaliza nomes de encoding comuns
+    encoding_aliases = {
+        'utf8': 'utf-8', 'unicode': 'utf-8',
+        'utf16': 'utf-16', 'utf32': 'utf-32',
+        'latin1': 'latin-1', 'iso-8859-1': 'latin-1'
+    }
+    target_encoding = encoding_aliases.get(target_encoding_str.lower(), target_encoding_str)
+
+    arguments = {'targets': input_targets, 'encoding': target_encoding}
+    with ExecutionLogger('encoding', '.', arguments) as logger:
+        click.echo(Fore.CYAN + f"--- [ENCODING] Convertendo arquivos para {target_encoding.upper()} ---")
+
+        files_to_process = set()
+        for target in input_targets:
+            # pathlib.Path.glob lida com wildcards de forma elegante
+            found_files = list(Path('.').rglob(target))
+            if not found_files and '*' not in target: # Se não encontrou e não era wildcard, talvez seja um arquivo exato
+                 if Path(target).is_file(): files_to_process.add(Path(target))
+            for p in found_files:
+                if p.is_file():
+                    files_to_process.add(p)
+
+        if not files_to_process:
+            logger.add_finding('warning', f"Nenhum arquivo encontrado para os alvos: {', '.join(input_targets)}")
+            click.echo(Fore.YELLOW + "Nenhum arquivo correspondente encontrado.")
+            return
+
+        success_count, skipped_count, error_count = 0, 0, 0
+        for file_path in sorted(list(files_to_process)):
+            status, message = _change_file_encoding(file_path, target_encoding)
+            
+            if status == 'success':
+                success_count += 1
+                click.echo(Fore.GREEN + f"[CONVERTIDO] '{file_path}' -> {message}")
+            elif status == 'skipped':
+                skipped_count += 1
+                click.echo(Fore.WHITE + Style.DIM + f"[IGNORADO]    '{file_path}' já está em {target_encoding.upper()}.")
+            else: # 'error'
+                error_count += 1
+                logger.add_finding('error', message, file=str(file_path))
+                click.echo(Fore.RED + f"[ERRO]        '{file_path}': {message}")
+        
+        click.echo(Fore.CYAN + "\n--- Conversão Concluída ---")
+        click.echo(f"Processados: {success_count} | Ignorados: {skipped_count} | Erros: {error_count}")
+        
+        if logger.results['summary']['errors'] > 0:
+            sys.exit(1)
+
+def _change_file_encoding(file_path, new_encoding):
+    """Lê um arquivo, tenta detectar seu encoding, e o reescreve de forma segura."""
+    # Lista de encodings para tentar, em ordem de probabilidade
+    encodings_to_try = [new_encoding, 'utf-8', sys.getdefaultencoding(), 'cp1252', 'latin-1']
+    
+    source_encoding = None
+    content = None
+
+    for enc in encodings_to_try:
+        try:
+            with open(file_path, 'r', encoding=enc) as f:
+                content = f.read()
+            source_encoding = enc
+            break
+        except UnicodeDecodeError:
+            continue
+        except (IOError, OSError) as e:
+            return 'error', f"Não foi possível ler o arquivo: {e}"
+
+    if not source_encoding:
+        return 'error', "Não foi possível detectar a codificação original do arquivo."
+
+    if source_encoding.lower() == new_encoding.lower():
+        return 'skipped', ""
+
+    # Escrita segura usando um arquivo temporário
+    try:
+        # Cria um arquivo temporário no mesmo diretório para garantir que a substituição seja atômica
+        with tempfile.NamedTemporaryFile(mode='w', encoding=new_encoding, delete=False, dir=os.path.dirname(file_path)) as temp_file:
+            temp_filepath = temp_file.name
+            temp_file.write(content)
+        
+        # Substitui o arquivo original pelo temporário
+        os.replace(temp_filepath, file_path)
+        return 'success', f"{source_encoding.upper()} para {new_encoding.upper()}"
+    except (IOError, OSError) as e:
+        return 'error', f"Falha ao escrever o novo arquivo: {e}"
+    except Exception as e:
+        # Limpeza em caso de erro inesperado
+        if 'temp_filepath' in locals() and os.path.exists(temp_filepath):
+            os.remove(temp_filepath)
+        return 'error', f"Ocorreu um erro inesperado: {e}"
 
 #atualizado em 2025/09/20-V49. Arquitetura do 'run' refeita para suportar scripts interativos (input()), herdando os fluxos de I/O do terminal.
 @cli.command(context_settings=dict(ignore_unknown_options=True))
@@ -2182,7 +2397,7 @@ def _check_dependencies(path):
                     findings.append(finding)
     return findings
     
-#atualizado em 2025/09/29-Versão 15.1. Corrigido bug crítico onde a pasta 'venv' não era ignorada, causando uma avalanche de erros irrelevantes de bibliotecas de terceiros.
+#atualizado em 2025/10/02-Versão 22.0. Tem como função analisar o código fonte. Melhoria: Agora invoca o _analyze_regex_risks para encontrar erros de sintaxe em expressões regulares.
 def _check_source_code(path, ignore_list=None, fix_errors=False, text_format=True):
     """Analisa arquivos .py e retorna uma lista de problemas."""
     findings = []
@@ -2237,7 +2452,10 @@ def _check_source_code(path, ignore_list=None, fix_errors=False, text_format=Tru
         
         if unsafe_path_regex.search(content):
             findings.append({'type': 'warning', 'message': 'Possível caminho de arquivo inseguro (use C:/ ou r"C:\\")', 'ref': 'ORI-Bug#2', 'file': file_path})
-            
+        
+        # --- INTEGRAÇÃO DO NOVO ANALISADOR ---
+        findings.extend(_analyze_regex_risks(file_path, content))
+
     return findings
     
 def _check_web_assets(path, ignore_list=None):
