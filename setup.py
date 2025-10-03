@@ -30,6 +30,7 @@ setup(
             'doxoade-sync = doxoade.doxoade:sync',
             'doxoade-kvcheck = doxoade.doxoade:kvcheck',
             'doxoade-encoding = doxoade.doxoade:encoding',
+            'doxoade-show-trace = doxoade.doxoade:show_trace',
         ],
     },
     classifiers=[

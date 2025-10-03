@@ -13,6 +13,8 @@ import traceback
 import hashlib
 import time
 import tempfile
+import threading
+from queue import Queue, Empty
 from pathlib import Path
 from functools import wraps
 from bs4 import BeautifulSoup
@@ -24,7 +26,7 @@ from datetime import datetime, timezone
 # Inicializa o colorama para funcionar no Windows
 init(autoreset=True)
 
-__version__ = "22"
+__version__ = "25"
 
 #atualizado em 2025/09/28-Versão 18.0. Tem como função registrar um achado. Melhoria: Agora calcula e adiciona um 'finding_hash' para identificar unicamente cada problema.
 class ExecutionLogger:
@@ -1775,6 +1777,64 @@ def encoding(ctx, targets):
         if logger.results['summary']['errors'] > 0:
             sys.exit(1)
 
+#adicionado em 2025/10/02-Versão 25.0. Tem como função analisar e exibir um arquivo de trace de sessão. Melhoria: Encontra automaticamente o trace mais recente se nenhum arquivo for especificado.
+@cli.command('show-trace')
+@click.argument('filepath', type=click.Path(exists=True, dir_okay=False), required=False)
+def show_trace(filepath):
+    """Analisa e exibe um arquivo de trace de sessão (.jsonl) de forma legível."""
+    
+    target_file = filepath
+    if not target_file:
+        click.echo(Fore.CYAN + "Nenhum arquivo especificado. Procurando pelo trace mais recente...")
+        target_file = _find_latest_trace_file()
+        if not target_file:
+            click.echo(Fore.RED + "Nenhum arquivo de trace ('doxoade_trace_*.jsonl') encontrado no diretório atual."); return
+        click.echo(Fore.GREEN + f"Encontrado: '{target_file}'")
+
+    click.echo(Fore.CYAN + Style.BRIGHT + f"\n--- [TRACE REPLAY] Exibindo sessão de '{target_file}' ---")
+    
+    try:
+        with open(target_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        if not lines:
+            click.echo(Fore.YELLOW + "O arquivo de trace está vazio."); return
+
+        first_ts = json.loads(lines[0]).get('ts', 0)
+        
+        for line in lines:
+            try:
+                entry = json.loads(line)
+                ts = entry.get('ts', 0)
+                stream = entry.get('stream', 'unknown')
+                data = entry.get('data', '').rstrip('\n')
+                
+                relative_time = ts - first_ts
+                
+                color = Fore.YELLOW
+                if stream == 'stdout': color = Fore.GREEN
+                elif stream == 'stderr': color = Fore.RED
+                
+                click.echo(color + f"[{relative_time:8.3f}s] [{stream.upper():<6}] " + Style.RESET_ALL + data)
+
+            except (json.JSONDecodeError, KeyError):
+                click.echo(Fore.RED + f"[ERRO] Linha malformada no arquivo de trace: {line.strip()}")
+                continue
+                
+    except Exception as e:
+        click.echo(Fore.RED + f"Falha ao processar o arquivo de trace: {e}")
+
+def _find_latest_trace_file():
+    """Encontra o arquivo de trace mais recente no diretório atual."""
+    try:
+        trace_files = list(Path('.').glob('doxoade_trace_*.jsonl'))
+        if not trace_files:
+            return None
+        latest_file = max(trace_files, key=lambda p: p.stat().st_mtime)
+        return str(latest_file)
+    except Exception:
+        return None
+
 def _change_file_encoding(file_path, new_encoding):
     """Lê um arquivo, tenta detectar seu encoding, e o reescreve de forma segura."""
     # Lista de encodings para tentar, em ordem de probabilidade
@@ -1818,67 +1878,146 @@ def _change_file_encoding(file_path, new_encoding):
             os.remove(temp_filepath)
         return 'error', f"Ocorreu um erro inesperado: {e}"
 
-#atualizado em 2025/09/20-V49. Arquitetura do 'run' refeita para suportar scripts interativos (input()), herdando os fluxos de I/O do terminal.
+#atualizado em 2025/10/02-Versão 24.0. Melhoria: Agora invoca o motor de gravação de sessão específico da plataforma (_run_traced_session_windows) quando --trace é ativado.
 @cli.command(context_settings=dict(ignore_unknown_options=True))
-@log_command_execution
 @click.argument('script_and_args', nargs=-1, type=click.UNPROCESSED)
-def run(script_and_args):
-    """Executa um script Python, suportando interatividade (input) e GUIs."""
+@click.option('--trace', is_flag=True, help="Grava a sessão de I/O completa em um arquivo .trace.")
+@click.pass_context
+def run(ctx, script_and_args, trace):
+    """Executa um script Python, suportando interatividade e gravação de sessão."""
+    arguments = ctx.params
 
     if not script_and_args:
-        click.echo(Fore.RED + "[ERRO] Erro: Nenhum script especificado para executar.", err=True); sys.exit(1)
+        click.echo(Fore.RED + "[ERRO] Nenhum script especificado.", err=True); sys.exit(1)
     
     script_name = script_and_args[0]
     if not os.path.exists(script_name):
-        click.echo(Fore.RED + f"[ERRO] Erro: Não foi possível encontrar o script '{script_name}'."); sys.exit(1)
+        click.echo(Fore.RED + f"[ERRO] Script não encontrado: '{script_name}'."); sys.exit(1)
         
-    venv_path = 'venv'
-    python_executable = os.path.join(venv_path, 'Scripts', 'python.exe') if os.name == 'nt' else os.path.join(venv_path, 'bin', 'python')
-    if not os.path.exists(python_executable):
-        click.echo(Fore.RED + f"[ERRO] Erro: Ambiente virtual não encontrado em '{python_executable}'.", err=True); sys.exit(1)
+    python_executable = _get_venv_python_executable()
+    if not python_executable:
+        click.echo(Fore.RED + "[ERRO] Ambiente virtual 'venv' não encontrado."); sys.exit(1)
         
     command_to_run = [python_executable, '-u'] + list(script_and_args)
-    click.echo(Fore.CYAN + f"-> Executando '{' '.join(script_and_args)}' com o interpretador do venv...")
-    click.echo(Fore.YELLOW + f"   (Caminho do Python: {python_executable})")
-    click.echo("-" * 40)
     
-    process = None
-    return_code = 1
+    with ExecutionLogger('run', '.', arguments) as logger:
+        click.echo(Fore.CYAN + f"-> Executando '{' '.join(script_and_args)}' com o interpretador do venv...")
+        if trace:
+            click.echo(Fore.YELLOW + Style.BRIGHT + "   [MODO TRACE ATIVADO] A sessão será gravada.")
+        click.echo("-" * 40)
+        
+        return_code = 1 # Assume falha por padrão
+
+        if trace:
+            if os.name == 'nt':
+                return_code = _run_traced_session_windows(command_to_run, logger)
+            else:
+                # Marcador para a futura implementação em Linux/macOS
+                logger.add_finding('warning', "O modo --trace ainda não está implementado para plataformas não-Windows.")
+                click.echo(Fore.YELLOW + "AVISO: --trace ainda não suportado neste SO. Executando em modo normal.")
+                # Fallback para execução normal
+                process = subprocess.Popen(command_to_run)
+                process.wait()
+                return_code = process.returncode
+        else:
+            # Lógica de execução interativa padrão (sem captura)
+            try:
+                process = subprocess.Popen(command_to_run)
+                process.wait()
+                return_code = process.returncode
+            except KeyboardInterrupt:
+                click.echo("\n" + Fore.YELLOW + "[RUN] Interrupção (CTRL+C).")
+                return_code = 130
+        
+        click.echo("-" * 40)
+        if return_code != 0:
+            logger.add_finding('error', f"O script terminou com o código de erro {return_code}.")
+            click.echo(Fore.RED + f"[ERRO] O script '{script_name}' terminou com o código de erro {return_code}.")
+            sys.exit(1)
+        else:
+            click.echo(Fore.GREEN + f"[OK] Script '{script_name}' finalizado com sucesso.")
+
+def _get_venv_python_executable():
+    """Encontra o caminho para o executável Python do venv do projeto atual."""
+    # Esta função auxiliar evita duplicação de código
+    venv_path = 'venv'
+    exe_name = 'python.exe' if os.name == 'nt' else 'python'
+    scripts_dir = 'Scripts' if os.name == 'nt' else 'bin'
+    
+    python_executable = os.path.join(venv_path, scripts_dir, exe_name)
+    if os.path.exists(python_executable):
+        return os.path.abspath(python_executable)
+    return None
+
+#adicionado em 2025/10/02-Versão 24.0. Tem como função executar e gravar uma sessão interativa no Windows usando uma arquitetura multi-threaded.
+def _run_traced_session_windows(command, logger):
+    """Executa um comando no Windows, gravando stdin, stdout e stderr."""
+    trace_file_path = f"doxoade_trace_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
     
     try:
-        # --- MUDANÇA ARQUITETURAL ---
-        # Não especificamos stdout, stderr ou stdin.
-        # Isso faz com que o processo filho herde o terminal do pai,
-        # permitindo a entrada (input) e a saída (print) diretas.
-        process = subprocess.Popen(command_to_run)
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            bufsize=1  # Line-buffered
+        )
         
-        # Como não estamos capturando a saída, simplesmente esperamos o processo terminar.
-        # O Popen não é bloqueante, então o KeyboardInterrupt ainda funciona.
-        process.wait()
-        return_code = process.returncode
+        q_out = Queue()
+        q_err = Queue()
 
-    except KeyboardInterrupt:
-        click.echo("\n" + Fore.YELLOW + "[RUN] Interrupção detectada (CTRL+C). Encerrando o script filho...")
-        if process: process.terminate()
-        return_code = 130
+        def _reader_thread(pipe, queue):
+            try:
+                for line in iter(pipe.readline, ''):
+                    queue.put(line)
+            finally:
+                pipe.close()
+
+        # Threads para ler a saída do processo filho
+        threading.Thread(target=_reader_thread, args=[process.stdout, q_out], daemon=True).start()
+        threading.Thread(target=_reader_thread, args=[process.stderr, q_err], daemon=True).start()
+
+        with open(trace_file_path, 'w', encoding='utf-8') as trace_file:
+            click.echo(Fore.YELLOW + f"   [TRACE] Gravando sessão em '{trace_file_path}'...")
+            
+            # Thread para ler a entrada do usuário
+            def _writer_thread():
+                for line in sys.stdin:
+                    process.stdin.write(line)
+                    process.stdin.flush()
+                    log_entry = {'ts': time.time(), 'stream': 'stdin', 'data': line}
+                    trace_file.write(json.dumps(log_entry) + '\n')
+            
+            threading.Thread(target=_writer_thread, daemon=True).start()
+
+            while process.poll() is None:
+                try:
+                    # Exibe stdout
+                    line_out = q_out.get_nowait()
+                    sys.stdout.write(line_out)
+                    log_entry = {'ts': time.time(), 'stream': 'stdout', 'data': line_out}
+                    trace_file.write(json.dumps(log_entry) + '\n')
+                except Empty:
+                    pass
+                try:
+                    # Exibe stderr
+                    line_err = q_err.get_nowait()
+                    sys.stderr.write(Fore.RED + line_err)
+                    log_entry = {'ts': time.time(), 'stream': 'stderr', 'data': line_err}
+                    trace_file.write(json.dumps(log_entry) + '\n')
+                except Empty:
+                    pass
+                time.sleep(0.05) # Evita uso excessivo de CPU
+
+        logger.add_finding('info', f"Sessão gravada com sucesso em '{trace_file_path}'.")
+        return process.returncode
+
     except Exception as e:
-        safe_error = str(e).encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding)
-        click.echo(Fore.RED + f"[ERRO] Ocorreu um erro inesperado ao executar o script: {safe_error}", err=True)
-        if process: process.kill()
-        sys.exit(1)
-    finally:
-        if process and process.poll() is None:
-            process.kill()
-
-    click.echo("-" * 40)
-    
-    # IMPORTANTE: Como não capturamos mais o stderr, o diagnóstico pós-execução se torna impossível.
-    # Esta é uma troca consciente: ganhamos interatividade, mas perdemos a análise de traceback.
-    if return_code != 0:
-        click.echo(Fore.RED + f"[ERRO] O script '{script_name}' terminou com o código de erro {return_code}.")
-        sys.exit(1)
-    else:
-        click.echo(Fore.GREEN + f"[OK] Script '{script_name}' finalizado com sucesso.")
+        logger.add_finding('error', f"Falha na execução do trace: {e}")
+        return 1
 
 @cli.command()
 @log_command_execution
