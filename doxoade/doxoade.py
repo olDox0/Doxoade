@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 # Inicializa o colorama para funcionar no Windows
 init(autoreset=True)
 
-__version__ = "25"
+__version__ = "26"
 
 #atualizado em 2025/09/28-Versão 18.0. Tem como função registrar um achado. Melhoria: Agora calcula e adiciona um 'finding_hash' para identificar unicamente cada problema.
 class ExecutionLogger:
@@ -1824,12 +1824,18 @@ def show_trace(filepath):
     except Exception as e:
         click.echo(Fore.RED + f"Falha ao processar o arquivo de trace: {e}")
 
+#atualizado em 2025/10/02-Versão 26.0. Melhoria: A busca pelo trace mais recente agora é feita no diretório centralizado (~/.doxoade/traces/).
 def _find_latest_trace_file():
-    """Encontra o arquivo de trace mais recente no diretório atual."""
+    """Encontra o arquivo de trace mais recente no diretório global de traces."""
     try:
-        trace_files = list(Path('.').glob('doxoade_trace_*.jsonl'))
+        trace_dir = Path.home() / '.doxoade' / 'traces'
+        if not trace_dir.exists():
+            return None
+            
+        trace_files = list(trace_dir.glob('trace_*.jsonl'))
         if not trace_files:
             return None
+            
         latest_file = max(trace_files, key=lambda p: p.stat().st_mtime)
         return str(latest_file)
     except Exception:
@@ -1949,10 +1955,13 @@ def _get_venv_python_executable():
         return os.path.abspath(python_executable)
     return None
 
-#adicionado em 2025/10/02-Versão 24.0. Tem como função executar e gravar uma sessão interativa no Windows usando uma arquitetura multi-threaded.
+#atualizado em 2025/10/02-Versão 26.0. Melhoria: A gravação de trace agora é salva em um diretório centralizado (~/.doxoade/traces/) para melhor organização.
 def _run_traced_session_windows(command, logger):
     """Executa um comando no Windows, gravando stdin, stdout e stderr."""
-    trace_file_path = f"doxoade_trace_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
+    # --- LÓGICA DE DIRETÓRIO CENTRALIZADO ---
+    trace_dir = Path.home() / '.doxoade' / 'traces'
+    trace_dir.mkdir(parents=True, exist_ok=True)
+    trace_file_path = trace_dir / f"trace_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
     
     try:
         process = subprocess.Popen(
