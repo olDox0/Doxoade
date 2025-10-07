@@ -1,10 +1,10 @@
-#atualizado em 2025/10/02-Versão 21.1. Melhoria: Removidos imports duplicados de 'tempfile' e 'Path' que foram corretamente identificados pelo 'doxoade check'.
+#atualizado em 2025/10/06-Versão 29.4. Melhoria: Removido o import não utilizado de 'importlib.metadata', conforme detectado pelo 'doxoade check'.
 import ast
 import json
 import configparser
 import esprima
 import os, sys, re
-import shutil
+import shutil   
 import subprocess
 import click
 import shlex
@@ -14,6 +14,8 @@ import hashlib
 import time
 import tempfile
 import threading
+import signal
+#from importlib import metadata
 from queue import Queue, Empty
 from pathlib import Path
 from functools import wraps
@@ -26,7 +28,7 @@ from datetime import datetime, timezone
 # Inicializa o colorama para funcionar no Windows
 init(autoreset=True)
 
-__version__ = "26"
+__version__ = "Alfa 30.1"
 
 #atualizado em 2025/09/28-Versão 18.0. Tem como função registrar um achado. Melhoria: Agora calcula e adiciona um 'finding_hash' para identificar unicamente cada problema.
 class ExecutionLogger:
@@ -677,103 +679,85 @@ def _analyze_api_calls(file_path, contracts):
     finally:
         _log_execution('_analyze_api_calls', ".", results, {'file_path': file_path, 'contracts': contracts})
 
-#atualizado em 2025/09/24-Versão 7.5. Corrigido NameError na chamada da função e removido import não utilizado.
+#atualizado em 2025/10/07-Versão 30.1. Melhoria: A função foi completamente limpa, removendo o 'try...finally' e a lógica duplicada para corrigir a falha silenciosa.
 def _analyze_complexity(project_path, files_to_check, threshold):
     """Analisa a complexidade ciclomática, focando no diretório de código-fonte."""
-    
-    results = {'summary': {'errors': 0, 'warnings': 0}}
     try:
-        findings = []
-        config = _load_config()
-        source_dir = config.get('source_dir', '.')
-        
-        try:
-            from radon.visitors import ComplexityVisitor
-        except ImportError:
-            return [{'type': 'error', 'message': "A biblioteca 'radon' não está instalada.", 'details': "Adicione 'radon' ao seu requirements.txt e instale."}]
+        from radon.visitors import ComplexityVisitor
+    except ImportError:
+        return [{'type': 'error', 'message': "A biblioteca 'radon' não está instalada.", 'details': "Execute 'doxoade setup-health' para instalar."}]
+
+    findings = []
+    config = _load_config()
+    source_dir = config.get('source_dir', '.')
+    source_path = os.path.abspath(os.path.join(project_path, source_dir))
+    relevant_files = [f for f in files_to_check if os.path.abspath(f).startswith(source_path)]
     
-        source_path = os.path.abspath(os.path.join(project_path, source_dir))
-        relevant_files = [f for f in files_to_check if os.path.abspath(f).startswith(source_path)]
-        
+    for file_path in relevant_files:
         try:
-            for file_path in relevant_files:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                visitor = ComplexityVisitor.from_code(content)
-                for func in visitor.functions:
-                    if func.complexity > threshold:
-                        findings.append({
-                            'type': 'warning',
-                            'message': f"Função '{func.name}' tem complexidade alta ({func.complexity}).",
-                            'details': f"O máximo recomendado é {threshold}.",
-                            'file': file_path,
-                            'line': func.lineno
-                        })
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            visitor = ComplexityVisitor.from_code(content)
+            for func in visitor.functions:
+                if func.complexity > threshold:
+                    findings.append({
+                        'type': 'warning',
+                        'message': f"Função '{func.name}' tem complexidade alta ({func.complexity}).",
+                        'details': f"O máximo recomendado é {threshold}.",
+                        'file': file_path,
+                        'line': func.lineno
+                    })
         except Exception:
-            pass
-        return findings
-    finally:
-        _log_execution('_analyze_complexity', ".", results, {'project_path': project_path, 'files_to_check': files_to_check, 'threshold': threshold })
+            # Ignora arquivos individuais que possam falhar na análise (ex: SyntaxError)
+            continue
+            
+    return findings
     
 #atualizado em 2025/09/24-Versão 7.4. 'health' agora lê 'source_dir' do .doxoaderc para focar a análise de radon e coverage, tornando os resultados mais precisos.
 def _analyze_test_coverage(project_path, min_coverage):
     """Executa a suíte de testes com coverage.py, focando no diretório de código-fonte."""
-    
-    results = {'summary': {'errors': 0, 'warnings': 0}}
     try:
-        findings = []
-        config = _load_config()
-        # Usa o 'source_dir' do config, ou o diretório do projeto como padrão.
-        source_dir = config.get('source_dir', '.')
-    
-        try:
-            from importlib import util as importlib_util
-        except ImportError:
-            return [{'type': 'error', 'message': "Módulo 'importlib' não encontrado."}]
-    
-        if not importlib_util.find_spec("coverage"):
-            return [{'type': 'error', 'message': "A biblioteca 'coverage' não está instalada.", 'details': "Adicione 'coverage' e 'pytest' ao seu requirements.txt."}]
-    
-        venv_scripts_path = os.path.join(project_path, 'venv', 'Scripts' if os.name == 'nt' else 'bin')
-        python_exe = os.path.join(venv_scripts_path, 'python.exe')
-        python_no_exe = os.path.join(venv_scripts_path, 'python')
-    
-        if os.path.exists(python_exe): venv_python = python_exe
-        elif os.path.exists(python_no_exe): venv_python = python_no_exe
-        else: return [{'type': 'error', 'message': "Não foi possível encontrar o executável Python do venv."}]
-    
-        # --- LÓGICA APRIMORADA: Passamos o --source para o coverage ---
-        run_tests_cmd = [venv_python, '-m', 'coverage', 'run', f'--source={source_dir}', '-m', 'pytest']
-        generate_report_cmd = [venv_python, '-m', 'coverage', 'json']
-    
-        original_dir = os.getcwd()
-        try:
-            os.chdir(project_path)
-            test_result = subprocess.run(run_tests_cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
-            
-            if test_result.returncode != 0:
-                if "no tests ran" in test_result.stdout or "collected 0 items" in test_result.stdout:
-                    return [{'type': 'warning', 'message': "Nenhum teste foi encontrado pelo pytest.", 'details': "Verifique se seus arquivos de teste seguem o padrão 'test_*.py' ou '*_test.py'."}]
-                else:
-                    return [{'type': 'error', 'message': "A suíte de testes falhou durante a execução.", 'details': f"Saída do Pytest:\n{test_result.stdout}\n{test_result.stderr}"}]
-    
-            subprocess.run(generate_report_cmd, capture_output=True, check=True)
-    
-            if os.path.exists('coverage.json'):
-                with open('coverage.json', 'r') as f: report_data = json.load(f)
-                total_coverage = report_data['totals']['percent_covered']
-                if total_coverage < min_coverage:
-                    findings.append({'type': 'warning', 'message': f"Cobertura de testes está baixa: {total_coverage:.2f}%.", 'details': f"O mínimo recomendado é {min_coverage}%.", 'file': project_path})
-        except Exception: pass
-        finally:
-            if os.path.exists('coverage.json'): os.remove('coverage.json')
-            if os.path.exists('.coverage'): os.remove('.coverage')
-            os.chdir(original_dir)
-            
-        return findings
+        from importlib import util as importlib_util
+    except ImportError:
+        return [{'type': 'error', 'message': "Módulo 'importlib' não encontrado."}]
+
+    if not importlib_util.find_spec("coverage") or not importlib_util.find_spec("pytest"):
+        return [{'type': 'error', 'message': "As bibliotecas 'coverage' ou 'pytest' não estão instaladas.", 'details': "Execute 'doxoade setup-health' para instalar."}]
+
+    findings = []
+    config = _load_config()
+    source_dir = config.get('source_dir', '.')
+    venv_python = _get_venv_python_executable(project_path)
+    if not venv_python:
+        return [{'type': 'error', 'message': "Não foi possível encontrar o executável Python do venv."}]
+
+    run_tests_cmd = [venv_python, '-m', 'coverage', 'run', f'--source={source_dir}', '-m', 'pytest']
+    generate_report_cmd = [venv_python, '-m', 'coverage', 'json']
+
+    original_dir = os.getcwd()
+    try:
+        os.chdir(project_path)
+        test_result = subprocess.run(run_tests_cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+        
+        if test_result.returncode != 0:
+            if "no tests ran" in test_result.stdout or "collected 0 items" in test_result.stdout:
+                return [{'type': 'warning', 'message': "Nenhum teste foi encontrado pelo pytest."}]
+            else:
+                return [{'type': 'error', 'message': "A suíte de testes falhou.", 'details': f"Saída do Pytest:\n{test_result.stdout}\n{test_result.stderr}"}]
+
+        subprocess.run(generate_report_cmd, capture_output=True, check=True)
+
+        if os.path.exists('coverage.json'):
+            with open('coverage.json', 'r') as f: report_data = json.load(f)
+            total_coverage = report_data['totals']['percent_covered']
+            if total_coverage < min_coverage:
+                findings.append({'type': 'warning', 'message': f"Cobertura de testes está baixa: {total_coverage:.2f}%.", 'details': f"O mínimo recomendado é {min_coverage}%.", 'file': project_path})
     finally:
-        args = {"min_coverage": min_coverage}
-        _log_execution('_analyze_test_coverage', ".", results, {'project_path': project_path, 'args': args })
+        if os.path.exists('coverage.json'): os.remove('coverage.json')
+        if os.path.exists('.coverage'): os.remove('.coverage')
+        os.chdir(original_dir)
+        
+    return findings
 
 #atualizado em 2025/09/23-Versão 5.5. Tutorial completamente reescrito para incluir todos os comandos da suíte (sync, release, clean, git-clean, guicheck) e melhorar a clareza para novos usuários.
 @cli.command()
@@ -1475,18 +1459,18 @@ def create_pipeline(filename, commands):
         click.echo(Fore.RED + f"[ERRO] Não foi possível escrever no arquivo '{filename}': {e}")
         sys.exit(1)
 
-#atualizado em 2025/09/26-Versão 12.1 (Final Definitiva). 'auto' agora usa um pipeline de arquivo temporário E o parser shlex, resolvendo de uma vez por todas todos os bugs de parsing de aspas em todos os ambientes.
+#atualizado em 2025/10/05-Versão 28.7 (Arquitetura Final). Tem como função executar um pipeline. Melhoria: A arquitetura foi refeita para um modelo híbrido definitivo, usando Popen com shlex.split para comandos não-interativos e Run com isolamento de sinal para comandos interativos. Esta versão corrige todos os bugs de regressão de parsing e interrupção.
 @cli.command()
-@log_command_execution
 @click.argument('commands', nargs=-1, required=True)
 def auto(commands):
     """
     Executa uma sequência de comandos como um pipeline robusto.
 
-    Envolva cada comando, especialmente os que contêm espaços ou aspas,
-    em suas próprias aspas duplas. Use aspas simples ou duplas para mensagens internas.
+    REGRA DE OURO (WINDOWS): Envolva o comando inteiro em aspas duplas "
+    e use aspas simples ' para argumentos internos.
+
     Exemplo:
-      doxoade auto "doxoade health" "doxoade save 'Deploy final' --force"
+      doxoade auto "doxoade check --ignore-finding 'Ambiente Inconsistente'" "doxoade save 'Deploy final'"
     """
     if not commands:
         click.echo(Fore.YELLOW + "Nenhum comando para executar."); return
@@ -1494,6 +1478,7 @@ def auto(commands):
     total_commands = len(commands)
     click.echo(Fore.CYAN + Style.BRIGHT + f"--- [AUTO] Iniciando pipeline de {total_commands} passo(s) ---")
     
+    # O tempfile é essencial para contornar o parsing inicial do cmd.exe
     with tempfile.NamedTemporaryFile(mode='w+', delete=True, suffix='.dox', encoding='utf-8') as temp_pipeline:
         for command in commands:
             temp_pipeline.write(f"{command}\n")
@@ -1502,36 +1487,55 @@ def auto(commands):
         commands_to_run = [line.strip() for line in temp_pipeline if line.strip() and not line.strip().startswith('#')]
 
     results = []
+    original_sigint_handler = signal.getsignal(signal.SIGINT)
+
     try:
         for i, command_str in enumerate(commands_to_run, 1):
             click.echo(Fore.CYAN + f"\n--- [AUTO] Executando Passo {i}/{total_commands}: {command_str} ---")
             step_result = {"command": command_str, "status": "sucesso", "returncode": 0}
+            
             try:
-                # --- LÓGICA FINAL, DEFINITIVA E CORRETA ---
-                # Usamos shlex para quebrar o comando em uma lista, respeitando as aspas.
                 args = shlex.split(command_str)
-                
-                # Se o comando é 'doxoade', nós o chamamos com o executável 'doxoade' diretamente.
-                # Isso resolve o problema de 'ModuleNotFoundError' que surge ao usar o sys.executable do Python global.
-                if args[0] == 'doxoade':
-                    final_command = ['doxoade'] + args[1:]
-                    use_shell = True # Deixamos o shell encontrar o executável correto no PATH (que está no venv)
-                else: # Para comandos externos (ex: git), passamos a lista diretamente.
-                    final_command = args
-                    use_shell = True # Shell pode ser necessário para encontrar comandos como 'git'
+                is_interactive = 'run' in args and 'doxoade' in args
 
-                process_result = subprocess.run(final_command, shell=use_shell, capture_output=True, text=True, encoding='utf-8', errors='replace')
-                
-                if process_result.stdout: print(process_result.stdout)
-                if process_result.stderr: print(Fore.RED + process_result.stderr)
-                if process_result.returncode != 0:
-                    step_result["status"] = "falha"; step_result["returncode"] = process_result.returncode
+                if is_interactive:
+                    # --- ARQUITETURA INTERATIVA (CORRETA) ---
+                    click.echo(Fore.YELLOW + "[AUTO] Comando interativo detectado. Cedendo controle...")
+                    try:
+                        signal.signal(signal.SIGINT, signal.SIG_IGN)
+                        process_result = subprocess.run(command_str, shell=True, text=True, encoding='utf-8', errors='replace')
+                    finally:
+                        signal.signal(signal.SIGINT, original_sigint_handler)
+                    
+                    if process_result.returncode != 0:
+                        step_result["status"] = "falha"; step_result["returncode"] = process_result.returncode
+                else:
+                    # --- ARQUITETURA NÃO-INTERATIVA (CORRETA) ---
+                    process = subprocess.Popen(args, shell=True, text=True, encoding='utf-8', errors='replace',
+                                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+                    def _stream_reader(pipe, color=None):
+                        for line in iter(pipe.readline, ''):
+                            output = color + line + Style.RESET_ALL if color else line
+                            sys.stdout.write(output)
+
+                    stdout_thread = threading.Thread(target=_stream_reader, args=[process.stdout])
+                    stderr_thread = threading.Thread(target=_stream_reader, args=[process.stderr, Fore.RED])
+                    stdout_thread.start(); stderr_thread.start()
+                    process.wait(); stdout_thread.join(); stderr_thread.join()
+
+                    if process.returncode != 0:
+                        step_result["status"] = "falha"; step_result["returncode"] = process.returncode
             except Exception as e:
                 step_result["status"] = "falha"; step_result["error"] = str(e)
+            
             results.append(step_result)
+
     except KeyboardInterrupt:
         click.echo(Fore.YELLOW + Style.BRIGHT + "\n\n [AUTO] Pipeline cancelado pelo usuário.")
         sys.exit(1)
+    finally:
+        signal.signal(signal.SIGINT, original_sigint_handler)
         
     click.echo(Fore.CYAN + Style.BRIGHT + "\n--- [AUTO] Sumário do Pipeline ---")
     final_success = True
@@ -1549,14 +1553,15 @@ def auto(commands):
         click.echo(Fore.RED + Style.BRIGHT + "[ATENÇÃO] Pipeline executado, mas um ou mais passos falharam.")
         sys.exit(1)
 
-#atualizado em 2025/09/30-Versão 18.5. Tem como função executar o diagnóstico. Melhoria: Substituído o decorador antigo pela classe ExecutionLogger para garantir o logging forense completo, incluindo o tempo de execução.
+#atualizado em 2025/10/03-Versão 28.0. Tem como função executar o diagnóstico. Melhoria: Adicionada a opção '--ignore-finding' para suprimir erros específicos, tornando a análise mais flexível para CI/CD.
 @cli.command()
 @click.argument('path', type=click.Path(exists=True, file_okay=False), default='.')
 @click.option('--ignore', multiple=True, help="Ignora uma pasta. Combina com as do .doxoaderc.")
 @click.option('--format', type=click.Choice(['text', 'json']), default='text', help="Define o formato da saída.")
 @click.option('--fix', is_flag=True, help="Tenta corrigir automaticamente os problemas encontrados.")
+@click.option('--ignore-finding', 'ignore_findings_list', multiple=True, help="Ignora um problema específico pelo seu texto (pode ser parcial).")
 @click.pass_context
-def check(ctx, path, ignore, format, fix):
+def check(ctx, path, ignore, format, fix, ignore_findings_list):
     """Executa um diagnóstico completo de ambiente e código no projeto."""
     arguments = ctx.params
     
@@ -1565,20 +1570,34 @@ def check(ctx, path, ignore, format, fix):
         config = _load_config()
         final_ignore_list = list(set(config['ignore'] + list(ignore)))
         
-        # O logger agora acumula os resultados
-        env_findings = _check_environment(path)
-        for f in env_findings: logger.add_finding(f['type'], f['message'], details=f.get('details'), file=f.get('file'), line=f.get('line'))
-
-        dep_findings = _check_dependencies(path)
-        for f in dep_findings: logger.add_finding(f['type'], f['message'], details=f.get('details'), file=f.get('file'), line=f.get('line'))
+        # 1. Executa todas as análises normalmente
+        findings_sources = [
+            _check_environment(path),
+            _check_dependencies(path),
+            _check_source_code(path, final_ignore_list, fix_errors=fix, text_format=(format == 'text'))
+        ]
+        for source in findings_sources:
+            for f in source:
+                logger.add_finding(f.get('type','info'), f['message'], details=f.get('details'), file=f.get('file'), line=f.get('line'), snippet=f.get('snippet'))
         
-        src_findings = _check_source_code(path, final_ignore_list, fix_errors=fix, text_format=(format == 'text'))
-        for f in src_findings: logger.add_finding(f['type'], f['message'], details=f.get('details'), file=f.get('file'), line=f.get('line'))
+        # 2. Filtra os resultados e conta erros críticos
+        critical_errors = 0
+        ignored_hashes = set()
+        for finding in logger.results['findings']:
+            is_ignored = False
+            for ignored_text in ignore_findings_list:
+                if ignored_text in finding['message']:
+                    is_ignored = True
+                    ignored_hashes.add(finding['hash'])
+                    break
+            if not is_ignored and 'ERROR' in finding['type'].upper():
+                critical_errors += 1
         
-        # Apresentação usa os resultados do logger
-        _present_results(format, logger.results)
+        # 3. Apresenta os resultados com o contexto dos ignorados
+        _present_results(format, logger.results, ignored_hashes)
         
-        if logger.results['summary']['errors'] > 0:
+        # 4. Decide a saída com base nos erros CRÍTICOS
+        if critical_errors > 0:
             sys.exit(1)
 
 @cli.command()
@@ -1824,6 +1843,133 @@ def show_trace(filepath):
     except Exception as e:
         click.echo(Fore.RED + f"Falha ao processar o arquivo de trace: {e}")
 
+#adicionado em 2025/10/05-Versão 29.0. Tem como função analisar e remover dependências não utilizadas de um ambiente virtual.
+@cli.command('optimize')
+@click.option('--dry-run', is_flag=True, help="Apenas analisa e relata, não oferece para desinstalar.")
+@click.option('--force', is_flag=True, help="Desinstala pacotes não utilizados sem confirmação.")
+@click.pass_context
+def optimize(ctx, dry_run, force):
+    """Analisa o venv em busca de pacotes instalados mas não utilizados e oferece para removê-los."""
+    arguments = ctx.params
+    path = '.'
+
+    with ExecutionLogger('optimize', path, arguments) as logger:
+        click.echo(Fore.CYAN + "--- [OPTIMIZE] Analisando dependências não utilizadas ---")
+        
+        python_executable = _get_venv_python_executable()
+        if not python_executable:
+            msg = "Ambiente virtual 'venv' não encontrado para análise."
+            logger.add_finding('error', msg)
+            click.echo(Fore.RED + f"[ERRO] {msg}"); sys.exit(1)
+        
+        unused_packages = _find_unused_packages(path, python_executable, logger)
+
+        if not unused_packages:
+            click.echo(Fore.GREEN + "\n[OK] Nenhuma dependência órfã encontrada. Seu ambiente está limpo!")
+            return
+
+        click.echo(Fore.YELLOW + "\nOs seguintes pacotes parecem estar instalados mas não são utilizados no seu código-fonte:")
+        for pkg in unused_packages:
+            click.echo(f"  - {pkg}")
+        
+        logger.add_finding('info', f"Encontrados {len(unused_packages)} pacotes não utilizados.", details=", ".join(unused_packages))
+
+        if dry_run:
+            click.echo(Fore.CYAN + "\nModo 'dry-run' ativado. Nenhuma alteração será feita.")
+            return
+
+        if force or click.confirm(Fore.RED + "\nVocê deseja desinstalar TODOS estes pacotes do seu venv?", abort=True):
+            click.echo(Fore.CYAN + "\nIniciando a limpeza...")
+            cmd = [python_executable, '-m', 'pip', 'uninstall', '-y'] + unused_packages
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+            
+            if result.returncode == 0:
+                click.echo(Fore.GREEN + "\n[OK] Pacotes desinstalados com sucesso!")
+                logger.add_finding('info', f"{len(unused_packages)} pacotes desinstalados com sucesso.")
+            else:
+                click.echo(Fore.RED + "\n[ERRO] Falha ao desinstalar um ou mais pacotes.")
+                click.echo(Fore.WHITE + Style.DIM + result.stderr)
+                logger.add_finding('error', "Falha no processo de desinstalação via pip.", details=result.stderr)
+                sys.exit(1)
+
+#atualizado em 2025/10/06-Versão 30.0. Tem como função encontrar pacotes não utilizados. Melhoria: A lógica agora constrói uma árvore de dependências completa, tornando a análise "dependency-aware" e corrigindo a falha em identificar dependências transitivas.
+def _find_unused_packages(project_path, python_executable, logger):
+    """Compara pacotes instalados com os importados, respeitando a árvore de dependências, e retorna os não utilizados."""
+    
+    _PROBE_SCRIPT = """
+import json
+from importlib import metadata
+
+results = {"packages": {}, "dependencies": {}}
+for dist in metadata.distributions():
+    pkg_name = dist.metadata['name'].lower().replace('_', '-')
+    results["packages"][pkg_name] = [req.split(' ')[0].lower() for req in (dist.requires or [])]
+    
+    provided_modules = set()
+    top_level = dist.read_text('top_level.txt')
+    if top_level:
+        provided_modules.update(t.lower() for t in top_level.strip().split())
+    provided_modules.add(pkg_name.replace('-', '_'))
+    results["dependencies"][pkg_name] = sorted(list(provided_modules))
+
+print(json.dumps(results))
+"""
+    try:
+        # 1. Obter módulos importados pelo código do usuário
+        imported_modules = set()
+        # ... (a lógica de caminhar pela AST para encontrar imports permanece a mesma de antes) ...
+        folders_to_ignore = {'venv', '.git', '__pycache__'}
+        for root, dirs, files in os.walk(project_path, topdown=True):
+            dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
+            for file in files:
+                if file.endswith('.py'):
+                    file_path = os.path.join(root, file)
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            tree = ast.parse(f.read(), filename=file_path)
+                        for node in ast.walk(tree):
+                            if isinstance(node, ast.Import):
+                                for alias in node.names:
+                                    imported_modules.add(alias.name.split('.')[0].lower())
+                            elif isinstance(node, ast.ImportFrom):
+                                if node.module:
+                                    imported_modules.add(node.module.split('.')[0].lower())
+                    except Exception: continue
+
+        # 2. Executar a sonda para obter o mapa de pacotes e suas dependências
+        result = subprocess.run([python_executable, '-c', _PROBE_SCRIPT], capture_output=True, text=True, check=True, encoding='utf-8')
+        probe_results = json.loads(result.stdout)
+        dependency_tree = probe_results["dependencies"]
+        package_deps = probe_results["packages"]
+
+        # 3. Determinar os pacotes DIRETAMENTE utilizados
+        directly_used = set()
+        for pkg_name, provided_modules in dependency_tree.items():
+            if not set(provided_modules).isdisjoint(imported_modules):
+                directly_used.add(pkg_name)
+
+        # 4. Resolver a árvore de dependências completa
+        fully_used = set(directly_used)
+        to_process = list(directly_used)
+        while to_process:
+            current_pkg = to_process.pop()
+            for dep in package_deps.get(current_pkg, []):
+                if dep not in fully_used:
+                    fully_used.add(dep)
+                    to_process.append(dep)
+
+        # 5. Comparação final
+        all_installed = set(package_deps.keys())
+        essential = {'pip', 'setuptools', 'wheel', 'doxoade'}
+        fully_used.update(essential)
+
+        unused = sorted(list(all_installed - fully_used))
+        return unused
+        
+    except Exception as e:
+        logger.add_finding('error', f"Falha ao analisar dependências: {e}")
+        return []
+
 #atualizado em 2025/10/02-Versão 26.0. Melhoria: A busca pelo trace mais recente agora é feita no diretório centralizado (~/.doxoade/traces/).
 def _find_latest_trace_file():
     """Encontra o arquivo de trace mais recente no diretório global de traces."""
@@ -1884,7 +2030,7 @@ def _change_file_encoding(file_path, new_encoding):
             os.remove(temp_filepath)
         return 'error', f"Ocorreu um erro inesperado: {e}"
 
-#atualizado em 2025/10/02-Versão 24.0. Melhoria: Agora invoca o motor de gravação de sessão específico da plataforma (_run_traced_session_windows) quando --trace é ativado.
+#atualizado em 2025/10/05-Versão 28.9. Tem como função executar scripts. Melhoria: Corrigido o NameError ao reordenar a criação do logger para o início da função, garantindo que ele esteja sempre disponível.
 @cli.command(context_settings=dict(ignore_unknown_options=True))
 @click.argument('script_and_args', nargs=-1, type=click.UNPROCESSED)
 @click.option('--trace', is_flag=True, help="Grava a sessão de I/O completa em um arquivo .trace.")
@@ -1897,36 +2043,47 @@ def run(ctx, script_and_args, trace):
         click.echo(Fore.RED + "[ERRO] Nenhum script especificado.", err=True); sys.exit(1)
     
     script_name = script_and_args[0]
-    if not os.path.exists(script_name):
-        click.echo(Fore.RED + f"[ERRO] Script não encontrado: '{script_name}'."); sys.exit(1)
-        
-    python_executable = _get_venv_python_executable()
-    if not python_executable:
-        click.echo(Fore.RED + "[ERRO] Ambiente virtual 'venv' não encontrado."); sys.exit(1)
-        
-    command_to_run = [python_executable, '-u'] + list(script_and_args)
     
     with ExecutionLogger('run', '.', arguments) as logger:
+        if not os.path.exists(script_name):
+            msg = f"Script não encontrado: '{script_name}'."
+            logger.add_finding('error', msg)
+            click.echo(Fore.RED + f"[ERRO] {msg}"); sys.exit(1)
+            
+        python_executable = _get_venv_python_executable()
+        if not python_executable:
+            msg = "Ambiente virtual 'venv' não encontrado."
+            logger.add_finding('error', msg)
+            click.echo(Fore.RED + f"[ERRO] {msg}"); sys.exit(1)
+            
+        if trace:
+            doxoade_dir = os.path.dirname(os.path.abspath(__file__))
+            tracer_path = os.path.join(doxoade_dir, 'tracer.py')
+
+            if not os.path.exists(tracer_path):
+                logger.add_finding('error', "Módulo 'tracer.py' não encontrado na instalação da doxoade.")
+                click.echo(Fore.RED + "[ERRO] Falha crítica: 'tracer.py' não encontrado.")
+                sys.exit(1)
+            command_to_run = [python_executable, '-u', tracer_path] + list(script_and_args)
+        else:
+            command_to_run = [python_executable, '-u'] + list(script_and_args)
+        
         click.echo(Fore.CYAN + f"-> Executando '{' '.join(script_and_args)}' com o interpretador do venv...")
         if trace:
             click.echo(Fore.YELLOW + Style.BRIGHT + "   [MODO TRACE ATIVADO] A sessão será gravada.")
         click.echo("-" * 40)
         
-        return_code = 1 # Assume falha por padrão
-
+        return_code = 1
         if trace:
             if os.name == 'nt':
                 return_code = _run_traced_session_windows(command_to_run, logger)
             else:
-                # Marcador para a futura implementação em Linux/macOS
                 logger.add_finding('warning', "O modo --trace ainda não está implementado para plataformas não-Windows.")
                 click.echo(Fore.YELLOW + "AVISO: --trace ainda não suportado neste SO. Executando em modo normal.")
-                # Fallback para execução normal
                 process = subprocess.Popen(command_to_run)
                 process.wait()
                 return_code = process.returncode
         else:
-            # Lógica de execução interativa padrão (sem captura)
             try:
                 process = subprocess.Popen(command_to_run)
                 process.wait()
@@ -1955,10 +2112,9 @@ def _get_venv_python_executable():
         return os.path.abspath(python_executable)
     return None
 
-#atualizado em 2025/10/02-Versão 26.0. Melhoria: A gravação de trace agora é salva em um diretório centralizado (~/.doxoade/traces/) para melhor organização.
+#atualizado em 2025/10/03-Versão 27.4. Tem como função gravar uma sessão. Melhoria: A arquitetura foi refeita para ser resiliente a scripts rápidos e não-interativos, corrigindo a condição de corrida que causava o NameError e o 'I/O operation on closed file'.
 def _run_traced_session_windows(command, logger):
     """Executa um comando no Windows, gravando stdin, stdout e stderr."""
-    # --- LÓGICA DE DIRETÓRIO CENTRALIZADO ---
     trace_dir = Path.home() / '.doxoade' / 'traces'
     trace_dir.mkdir(parents=True, exist_ok=True)
     trace_file_path = trace_dir / f"trace_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
@@ -1972,7 +2128,7 @@ def _run_traced_session_windows(command, logger):
             text=True,
             encoding='utf-8',
             errors='replace',
-            bufsize=1  # Line-buffered
+            bufsize=1
         )
         
         q_out = Queue()
@@ -1985,41 +2141,46 @@ def _run_traced_session_windows(command, logger):
             finally:
                 pipe.close()
 
-        # Threads para ler a saída do processo filho
         threading.Thread(target=_reader_thread, args=[process.stdout, q_out], daemon=True).start()
         threading.Thread(target=_reader_thread, args=[process.stderr, q_err], daemon=True).start()
 
         with open(trace_file_path, 'w', encoding='utf-8') as trace_file:
             click.echo(Fore.YELLOW + f"   [TRACE] Gravando sessão em '{trace_file_path}'...")
             
-            # Thread para ler a entrada do usuário
-            def _writer_thread():
-                for line in sys.stdin:
-                    process.stdin.write(line)
-                    process.stdin.flush()
-                    log_entry = {'ts': time.time(), 'stream': 'stdin', 'data': line}
-                    trace_file.write(json.dumps(log_entry) + '\n')
+            # O writer thread não é mais necessário para scripts não-interativos.
+            # E para scripts interativos, a implementação anterior era a fonte do bug.
+            # Esta nova arquitetura foca na captura de saída, que é o objetivo principal.
+            # A interatividade no modo trace será nosso próximo desafio de P&D.
             
-            threading.Thread(target=_writer_thread, daemon=True).start()
-
             while process.poll() is None:
                 try:
-                    # Exibe stdout
                     line_out = q_out.get_nowait()
                     sys.stdout.write(line_out)
                     log_entry = {'ts': time.time(), 'stream': 'stdout', 'data': line_out}
                     trace_file.write(json.dumps(log_entry) + '\n')
-                except Empty:
-                    pass
+                except Empty: pass
                 try:
-                    # Exibe stderr
                     line_err = q_err.get_nowait()
                     sys.stderr.write(Fore.RED + line_err)
                     log_entry = {'ts': time.time(), 'stream': 'stderr', 'data': line_err}
                     trace_file.write(json.dumps(log_entry) + '\n')
-                except Empty:
-                    pass
-                time.sleep(0.05) # Evita uso excessivo de CPU
+                except Empty: pass
+                time.sleep(0.05)
+
+            # Fase de Drenagem Final
+            while not q_out.empty() or not q_err.empty():
+                try:
+                    line_out = q_out.get_nowait()
+                    sys.stdout.write(line_out)
+                    log_entry = {'ts': time.time(), 'stream': 'stdout', 'data': line_out}
+                    trace_file.write(json.dumps(log_entry) + '\n')
+                except Empty: pass
+                try:
+                    line_err = q_err.get_nowait()
+                    sys.stderr.write(Fore.RED + line_err)
+                    log_entry = {'ts': time.time(), 'stream': 'stderr', 'data': line_err}
+                    trace_file.write(json.dumps(log_entry) + '\n')
+                except Empty: pass
 
         logger.add_finding('info', f"Sessão gravada com sucesso em '{trace_file_path}'.")
         return process.returncode
@@ -2676,38 +2837,54 @@ def _update_summary_from_findings(results):
             if finding['type'] == 'warning': results['summary']['warnings'] += 1
             elif finding['type'] == 'error': results['summary']['errors'] += 1
 
-#atualizado em 2025/09/30-Versão 18.6. Tem como função exibir os resultados. Melhoria: A função foi reescrita para ser compatível com a estrutura de dados 'plana' do ExecutionLogger, corrigindo a apresentação.
-def _present_results(format, results):
-    """Apresenta os resultados no formato escolhido (JSON ou texto)."""
+#atualizado em 2025/10/03-Versão 28.1. Tem como função exibir os resultados. Melhoria: Agora oculta completamente os 'findings' ignorados da saída principal, exibindo-os apenas na contagem do sumário.
+def _present_results(format, results, ignored_hashes=None):
+    """Apresenta os resultados no formato escolhido, ocultando os ignorados da saída principal."""
+    if ignored_hashes is None:
+        ignored_hashes = set()
+
     if format == 'json':
-        print(json.dumps(results, indent=4)); return
+        for finding in results.get('findings', []):
+            finding['ignored'] = finding.get('hash') in ignored_hashes
+        print(json.dumps(results, indent=4))
+        return
 
     findings = results.get('findings', [])
     
     click.echo(Style.BRIGHT + "\n--- ANÁLISE COMPLETA ---")
-    if not findings:
-        click.echo(Fore.GREEN + "[OK] Nenhum problema encontrado.")
+    
+    # Filtra apenas os findings que NÃO foram ignorados
+    critical_findings = [f for f in findings if f.get('hash') not in ignored_hashes]
+
+    if not critical_findings:
+        click.echo(Fore.GREEN + "[OK] Nenhum problema crítico encontrado.")
     else:
-        for finding in findings:
-            color = Fore.RED if 'ERROR' in finding['type'] else Fore.YELLOW
-            tag = f"[{finding['type']}]"
+        for finding in critical_findings:
+            color = Fore.RED if 'ERROR' in finding['type'].upper() else Fore.YELLOW
+            tag = f"[{finding['type'].upper()}]"
             ref = f" [Ref: {finding.get('ref', 'N/A')}]" if finding.get('ref') else ""
             click.echo(color + f"{tag} {finding['message']}{ref}")
             
             if 'file' in finding:
                 location = f"   > Em '{finding['file']}'"
                 if 'line' in finding: location += f" (linha {finding['line']})"
-                click.echo(location)
+                click.echo(location) # Usa a cor padrão para a localização
             if 'details' in finding:
                 click.echo(Fore.CYAN + f"   > {finding['details']}")
 
     error_count = results.get('summary', {}).get('errors', 0)
     warning_count = results.get('summary', {}).get('warnings', 0)
+    ignored_count = len(ignored_hashes)
+    
     click.echo(Style.BRIGHT + "\n" + "-"*40)
+    
     if error_count == 0 and warning_count == 0:
         click.echo(Fore.GREEN + "[OK] Análise concluída. Nenhum problema encontrado!")
     else:
-        summary_text = f"[FIM] Análise concluída: {Fore.RED}{error_count} Erro(s){Style.RESET_ALL}, {Fore.YELLOW}{warning_count} Aviso(s){Style.RESET_ALL}."
+        summary_text = f"[FIM] Análise concluída: {Fore.RED}{error_count} Erro(s){Style.RESET_ALL}, {Fore.YELLOW}{warning_count} Aviso(s){Style.RESET_ALL}"
+        if ignored_count > 0:
+            summary_text += Style.DIM + f" ({ignored_count} ignorado(s))"
+        summary_text += "."
         click.echo(summary_text)
 
 def _analyze_traceback(stderr_output):
