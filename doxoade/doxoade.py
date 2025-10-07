@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 # Inicializa o colorama para funcionar no Windows
 init(autoreset=True)
 
-__version__ = "Alfa 30.1"
+__version__ = "Alfa 30.2"
 
 #atualizado em 2025/09/28-Versão 18.0. Tem como função registrar um achado. Melhoria: Agora calcula e adiciona um 'finding_hash' para identificar unicamente cada problema.
 class ExecutionLogger:
@@ -2112,7 +2112,7 @@ def _get_venv_python_executable():
         return os.path.abspath(python_executable)
     return None
 
-#atualizado em 2025/10/03-Versão 27.4. Tem como função gravar uma sessão. Melhoria: A arquitetura foi refeita para ser resiliente a scripts rápidos e não-interativos, corrigindo a condição de corrida que causava o NameError e o 'I/O operation on closed file'.
+#atualizado em 2025/10/05-Versão 27.5 (Arquitetura Final). Tem como função gravar uma sessão. Melhoria: A arquitetura foi finalizada para suportar tanto scripts rápidos quanto interativos, reintroduzindo um 'writer thread' robusto para lidar com o 'stdin' e corrigindo o deadlock.
 def _run_traced_session_windows(command, logger):
     """Executa um comando no Windows, gravando stdin, stdout e stderr."""
     trace_dir = Path.home() / '.doxoade' / 'traces'
@@ -2140,28 +2140,39 @@ def _run_traced_session_windows(command, logger):
                     queue.put(line)
             finally:
                 pipe.close()
+        
+        # --- WRITER THREAD REINTRODUZIDO E CORRIGIDO ---
+        def _writer_thread(pipe, trace_f):
+            try:
+                for line in sys.stdin:
+                    pipe.write(line)
+                    pipe.flush()
+                    log_entry = {'ts': time.time(), 'stream': 'stdin', 'data': line}
+                    trace_f.write(json.dumps(log_entry) + '\n')
+            except (IOError, OSError):
+                # O stdin do processo filho foi fechado, o que é normal.
+                pass
 
         threading.Thread(target=_reader_thread, args=[process.stdout, q_out], daemon=True).start()
         threading.Thread(target=_reader_thread, args=[process.stderr, q_err], daemon=True).start()
-
+        
         with open(trace_file_path, 'w', encoding='utf-8') as trace_file:
             click.echo(Fore.YELLOW + f"   [TRACE] Gravando sessão em '{trace_file_path}'...")
             
-            # O writer thread não é mais necessário para scripts não-interativos.
-            # E para scripts interativos, a implementação anterior era a fonte do bug.
-            # Esta nova arquitetura foca na captura de saída, que é o objetivo principal.
-            # A interatividade no modo trace será nosso próximo desafio de P&D.
-            
+            # Inicia o thread para lidar com a entrada do usuário
+            threading.Thread(target=_writer_thread, args=[process.stdin, trace_file], daemon=True).start()
+
+            # Loop principal de I/O
             while process.poll() is None:
                 try:
                     line_out = q_out.get_nowait()
-                    sys.stdout.write(line_out)
+                    sys.stdout.write(line_out); sys.stdout.flush()
                     log_entry = {'ts': time.time(), 'stream': 'stdout', 'data': line_out}
                     trace_file.write(json.dumps(log_entry) + '\n')
                 except Empty: pass
                 try:
                     line_err = q_err.get_nowait()
-                    sys.stderr.write(Fore.RED + line_err)
+                    sys.stderr.write(Fore.RED + line_err); sys.stderr.flush()
                     log_entry = {'ts': time.time(), 'stream': 'stderr', 'data': line_err}
                     trace_file.write(json.dumps(log_entry) + '\n')
                 except Empty: pass
@@ -2171,13 +2182,13 @@ def _run_traced_session_windows(command, logger):
             while not q_out.empty() or not q_err.empty():
                 try:
                     line_out = q_out.get_nowait()
-                    sys.stdout.write(line_out)
+                    sys.stdout.write(line_out); sys.stdout.flush()
                     log_entry = {'ts': time.time(), 'stream': 'stdout', 'data': line_out}
                     trace_file.write(json.dumps(log_entry) + '\n')
                 except Empty: pass
                 try:
                     line_err = q_err.get_nowait()
-                    sys.stderr.write(Fore.RED + line_err)
+                    sys.stderr.write(Fore.RED + line_err); sys.stderr.flush()
                     log_entry = {'ts': time.time(), 'stream': 'stderr', 'data': line_err}
                     trace_file.write(json.dumps(log_entry) + '\n')
                 except Empty: pass
