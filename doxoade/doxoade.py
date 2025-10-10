@@ -1,4 +1,4 @@
-#atualizado em 2025/10/06-Versão 29.4. Melhoria: Removido o import não utilizado de 'importlib.metadata', conforme detectado pelo 'doxoade check'.
+#atualizado em 2025/10/07-Versão 32.1. Melhoria: Corrigida a importação para usar o módulo 'shared_tools', quebrando a dependência circular.
 import ast
 import json
 #import configparser
@@ -10,12 +10,13 @@ import click
 import shlex
 import fnmatch
 import traceback
-import hashlib
+#import hashlib
 import time
 import tempfile
 import threading
 import signal
 import toml
+
 #from importlib import metadata
 from queue import Queue, Empty
 from pathlib import Path
@@ -24,61 +25,20 @@ from bs4 import BeautifulSoup
 from io import StringIO
 from colorama import init, Fore, Style
 from pyflakes import api as pyflakes_api
-from datetime import datetime, timezone
+from datetime import datetime
+
+
+# --- REGISTRO DE PLUGINS DA V2.0 ---
+# Importa apenas o COMANDO do plugin
+from .commands.optimize import optimize
+# Importa as FERRAMENTAS do módulo compartilhado
+from .shared_tools import ExecutionLogger, _get_venv_python_executable, _present_results, _log_execution, _run_git_command
+#_get_git_commit_hash
 
 # Inicializa o colorama para funcionar no Windows
 init(autoreset=True)
 
-__version__ = "31.3 Alfa"
-
-#atualizado em 2025/09/28-Versão 18.0. Tem como função registrar um achado. Melhoria: Agora calcula e adiciona um 'finding_hash' para identificar unicamente cada problema.
-class ExecutionLogger:
-    """Um gerenciador de contexto para registrar a execução de um comando doxoade."""
-    def __init__(self, command_name, path, arguments):
-        self.command_name = command_name
-        self.path = path
-        self.arguments = arguments
-        self.start_time = time.monotonic()  # Mede o tempo de início
-        self.results = {
-            'summary': {'errors': 0, 'warnings': 0},
-            'findings': []
-        }
-
-    def add_finding(self, f_type, message, file=None, line=None, details=None, ref=None, snippet=None):
-        """Adiciona um novo achado (erro ou aviso) ao log."""
-        unique_str = f"{file}:{line}:{message}"
-        finding_hash = hashlib.md5(unique_str.encode()).hexdigest()
-        
-        finding = {'type': f_type.upper(), 'message': message, 'hash': finding_hash}
-        if file: finding['file'] = file
-        if line: finding['line'] = line
-        if details: finding['details'] = details
-        if ref: finding['ref'] = ref
-        if snippet: finding['snippet'] = snippet # <-- A LINHA ADICIONADA
-        
-        self.results['findings'].append(finding)
-        
-        if f_type == 'error' or 'ERROR' in f_type:
-            self.results['summary']['errors'] += 1
-        elif f_type == 'warning' or 'WARNING' in f_type:
-            self.results['summary']['warnings'] += 1
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        execution_time_ms = (time.monotonic() - self.start_time) * 1000
-        
-        # Só registra como erro fatal se NÃO for um SystemExit
-        if exc_type and not isinstance(exc_val, SystemExit):
-            self.add_finding(
-                'fatal_error',
-                'A Doxoade encontrou um erro fatal interno durante a execução deste comando.',
-                details=str(exc_val),
-            )
-            self.results['findings'][-1]['traceback'] = traceback.format_exc()
-
-        _log_execution(self.command_name, self.path, self.results, self.arguments, execution_time_ms)
+__version__ = "32.3 Alfa"
 
 # -----------------------------------------------------------------------------
 # GRUPO PRINCIPAL E CONFIGURAÇÃO
@@ -573,19 +533,19 @@ def deepcheck(file_path, func_name):
 
     # --- Apresentação do Relatório ---
     for dossier in function_dossiers:
-        header_color = Fore.RED if dossier['complexity_rank'] == 'Alta' else Fore.YELLOW if dossier['complexity_rank'] == 'Média' else Fore.WHITE
-        click.echo(header_color + Style.BRIGHT + f"\n--- Função: '{dossier['name']}' (linha {dossier['lineno']}) ---")
+        header_color = Fore.MAGENTA if dossier['complexity_rank'].lower() == 'altissima' else Fore.RED if dossier['complexity_rank'].lower() == 'alta' else Fore.YELLOW if dossier['complexity_rank'].lower() == 'média' else Fore.GREEN if dossier['complexity_rank'].lower() == 'baixa' else Fore.CYAN if dossier['complexity_rank'].lower() == 'baixissima' else Fore.WHITE
+        click.echo(header_color + Style.BRIGHT + f"\n\n--- Função: '{dossier['name']}' (linha {dossier['lineno']}) ---")
         click.echo(f"  [Complexidade]: {dossier['complexity']} ({dossier['complexity_rank']})")
 
-        click.echo(Fore.CYAN + "\n  [Entradas (Parâmetros)]")
+        click.echo(Style.DIM + "  [Entradas (Parâmetros)]")
         if not dossier['params']: click.echo("    - Nenhum parâmetro.")
         for p in dossier['params']: click.echo(f"    - Nome: {p['name']} (Tipo: {p['type']})")
 
-        click.echo(Fore.CYAN + "\n  [Saídas (Pontos de Retorno)]")
+        click.echo(Style.DIM + "  [Saídas (Pontos de Retorno)]")
         if not dossier['returns']: click.echo("    - Nenhum ponto de retorno explícito.")
         for r in dossier['returns']: click.echo(f"    - Linha {r['lineno']}: Retorna {r['type']}")
 
-        click.echo(Fore.CYAN + "\n  [Pontos de Risco (Micro Análise de Erros)]")
+        click.echo(Fore.YELLOW + "  [Pontos de Risco (Micro Análise de Erros)]")
         if not dossier['risks']: click.echo("    - Nenhum ponto de risco óbvio detectado.")
         for risk in dossier['risks']:
             click.echo(Fore.YELLOW + f"    - AVISO (Linha {risk['lineno']}): {risk['message']}")
@@ -635,7 +595,7 @@ def _analyze_function_flow(tree, content, specific_func=None):
                         })
 
             complexity = complexity_map.get(func_name, 0)
-            rank = "Alta" if complexity > 10 else "Média" if complexity > 5 else "Baixa"
+            rank =  "Altissima" if complexity > 20 else "Alta" if complexity > 15 else "Média" if complexity > 10 else "Baixa" if complexity > 5 else "Baixissima"
 
             dossiers.append({
                 'name': func_name,
@@ -1879,133 +1839,6 @@ def show_trace(filepath):
     except Exception as e:
         click.echo(Fore.RED + f"Falha ao processar o arquivo de trace: {e}")
 
-#adicionado em 2025/10/05-Versão 29.0. Tem como função analisar e remover dependências não utilizadas de um ambiente virtual.
-@cli.command('optimize')
-@click.option('--dry-run', is_flag=True, help="Apenas analisa e relata, não oferece para desinstalar.")
-@click.option('--force', is_flag=True, help="Desinstala pacotes não utilizados sem confirmação.")
-@click.pass_context
-def optimize(ctx, dry_run, force):
-    """Analisa o venv em busca de pacotes instalados mas não utilizados e oferece para removê-los."""
-    arguments = ctx.params
-    path = '.'
-
-    with ExecutionLogger('optimize', path, arguments) as logger:
-        click.echo(Fore.CYAN + "--- [OPTIMIZE] Analisando dependências não utilizadas ---")
-        
-        python_executable = _get_venv_python_executable()
-        if not python_executable:
-            msg = "Ambiente virtual 'venv' não encontrado para análise."
-            logger.add_finding('error', msg)
-            click.echo(Fore.RED + f"[ERRO] {msg}"); sys.exit(1)
-        
-        unused_packages = _find_unused_packages(path, python_executable, logger)
-
-        if not unused_packages:
-            click.echo(Fore.GREEN + "\n[OK] Nenhuma dependência órfã encontrada. Seu ambiente está limpo!")
-            return
-
-        click.echo(Fore.YELLOW + "\nOs seguintes pacotes parecem estar instalados mas não são utilizados no seu código-fonte:")
-        for pkg in unused_packages:
-            click.echo(f"  - {pkg}")
-        
-        logger.add_finding('info', f"Encontrados {len(unused_packages)} pacotes não utilizados.", details=", ".join(unused_packages))
-
-        if dry_run:
-            click.echo(Fore.CYAN + "\nModo 'dry-run' ativado. Nenhuma alteração será feita.")
-            return
-
-        if force or click.confirm(Fore.RED + "\nVocê deseja desinstalar TODOS estes pacotes do seu venv?", abort=True):
-            click.echo(Fore.CYAN + "\nIniciando a limpeza...")
-            cmd = [python_executable, '-m', 'pip', 'uninstall', '-y'] + unused_packages
-            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
-            
-            if result.returncode == 0:
-                click.echo(Fore.GREEN + "\n[OK] Pacotes desinstalados com sucesso!")
-                logger.add_finding('info', f"{len(unused_packages)} pacotes desinstalados com sucesso.")
-            else:
-                click.echo(Fore.RED + "\n[ERRO] Falha ao desinstalar um ou mais pacotes.")
-                click.echo(Fore.WHITE + Style.DIM + result.stderr)
-                logger.add_finding('error', "Falha no processo de desinstalação via pip.", details=result.stderr)
-                sys.exit(1)
-
-#atualizado em 2025/10/06-Versão 30.0. Tem como função encontrar pacotes não utilizados. Melhoria: A lógica agora constrói uma árvore de dependências completa, tornando a análise "dependency-aware" e corrigindo a falha em identificar dependências transitivas.
-def _find_unused_packages(project_path, python_executable, logger):
-    """Compara pacotes instalados com os importados, respeitando a árvore de dependências, e retorna os não utilizados."""
-    
-    _PROBE_SCRIPT = """
-import json
-from importlib import metadata
-
-results = {"packages": {}, "dependencies": {}}
-for dist in metadata.distributions():
-    pkg_name = dist.metadata['name'].lower().replace('_', '-')
-    results["packages"][pkg_name] = [req.split(' ')[0].lower() for req in (dist.requires or [])]
-    
-    provided_modules = set()
-    top_level = dist.read_text('top_level.txt')
-    if top_level:
-        provided_modules.update(t.lower() for t in top_level.strip().split())
-    provided_modules.add(pkg_name.replace('-', '_'))
-    results["dependencies"][pkg_name] = sorted(list(provided_modules))
-
-print(json.dumps(results))
-"""
-    try:
-        # 1. Obter módulos importados pelo código do usuário
-        imported_modules = set()
-        # ... (a lógica de caminhar pela AST para encontrar imports permanece a mesma de antes) ...
-        folders_to_ignore = {'venv', '.git', '__pycache__'}
-        for root, dirs, files in os.walk(project_path, topdown=True):
-            dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
-            for file in files:
-                if file.endswith('.py'):
-                    file_path = os.path.join(root, file)
-                    try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            tree = ast.parse(f.read(), filename=file_path)
-                        for node in ast.walk(tree):
-                            if isinstance(node, ast.Import):
-                                for alias in node.names:
-                                    imported_modules.add(alias.name.split('.')[0].lower())
-                            elif isinstance(node, ast.ImportFrom):
-                                if node.module:
-                                    imported_modules.add(node.module.split('.')[0].lower())
-                    except Exception: continue
-
-        # 2. Executar a sonda para obter o mapa de pacotes e suas dependências
-        result = subprocess.run([python_executable, '-c', _PROBE_SCRIPT], capture_output=True, text=True, check=True, encoding='utf-8')
-        probe_results = json.loads(result.stdout)
-        dependency_tree = probe_results["dependencies"]
-        package_deps = probe_results["packages"]
-
-        # 3. Determinar os pacotes DIRETAMENTE utilizados
-        directly_used = set()
-        for pkg_name, provided_modules in dependency_tree.items():
-            if not set(provided_modules).isdisjoint(imported_modules):
-                directly_used.add(pkg_name)
-
-        # 4. Resolver a árvore de dependências completa
-        fully_used = set(directly_used)
-        to_process = list(directly_used)
-        while to_process:
-            current_pkg = to_process.pop()
-            for dep in package_deps.get(current_pkg, []):
-                if dep not in fully_used:
-                    fully_used.add(dep)
-                    to_process.append(dep)
-
-        # 5. Comparação final
-        all_installed = set(package_deps.keys())
-        essential = {'pip', 'setuptools', 'wheel', 'doxoade'}
-        fully_used.update(essential)
-
-        unused = sorted(list(all_installed - fully_used))
-        return unused
-        
-    except Exception as e:
-        logger.add_finding('error', f"Falha ao analisar dependências: {e}")
-        return []
-
 #atualizado em 2025/10/02-Versão 26.0. Melhoria: A busca pelo trace mais recente agora é feita no diretório centralizado (~/.doxoade/traces/).
 def _find_latest_trace_file():
     """Encontra o arquivo de trace mais recente no diretório global de traces."""
@@ -2135,18 +1968,6 @@ def run(ctx, script_and_args, trace):
             sys.exit(1)
         else:
             click.echo(Fore.GREEN + f"[OK] Script '{script_name}' finalizado com sucesso.")
-
-def _get_venv_python_executable():
-    """Encontra o caminho para o executável Python do venv do projeto atual."""
-    # Esta função auxiliar evita duplicação de código
-    venv_path = 'venv'
-    exe_name = 'python.exe' if os.name == 'nt' else 'python'
-    scripts_dir = 'Scripts' if os.name == 'nt' else 'bin'
-    
-    python_executable = os.path.join(venv_path, scripts_dir, exe_name)
-    if os.path.exists(python_executable):
-        return os.path.abspath(python_executable)
-    return None
 
 #atualizado em 2025/10/05-Versão 27.5 (Arquitetura Final). Tem como função gravar uma sessão. Melhoria: A arquitetura foi finalizada para suportar tanto scripts rápidos quanto interativos, reintroduzindo um 'writer thread' robusto para lidar com o 'stdin' e corrigindo o deadlock.
 def _run_traced_session_windows(command, logger):
@@ -2547,44 +2368,6 @@ def _get_github_repo_info():
         pass
     return "unkown/unkown"
 
-def _get_git_commit_hash(path):
-    """Obtém o hash do commit Git atual (HEAD) de forma silenciosa."""
-    original_dir = os.getcwd()
-    try:
-        os.chdir(path)
-        # Usamos silent_fail=True para evitar mensagens de erro em pastas não-Git.
-        hash_output = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True)
-        return hash_output if hash_output else "N/A"
-    except Exception:
-        return "N/A"
-    finally:
-        os.chdir(original_dir)
-
-#atualizado em 2025/09/27-Versão 12.6 (Final). _run_git_command agora suporta 'silent_fail' para que a captura de hash do log não gere erros em diretórios não-Git.
-def _run_git_command(args, capture_output=False, silent_fail=False):
-    """Executa um comando Git e lida com erros comuns."""
-    try:
-        command = ['git'] + args
-        result = subprocess.run(
-            command, 
-            capture_output=capture_output, 
-            text=True, 
-            check=True,
-            encoding='utf-8',
-            errors='replace'
-        )
-        return result.stdout.strip() if capture_output else True
-    except FileNotFoundError:
-        if not silent_fail:
-            click.echo(Fore.RED + "[ERRO GIT] O comando 'git' não foi encontrado. O Git está instalado e no PATH do sistema?")
-        return None
-    except subprocess.CalledProcessError as e:
-        if not silent_fail:
-            click.echo(Fore.RED + f"[ERRO GIT] O comando 'git {' '.join(args)}' falhou:")
-            error_output = e.stderr or e.stdout or "Nenhuma saída de erro do Git foi capturada."
-            click.echo(Fore.YELLOW + error_output)
-        return None
-
 #atualizado em 2025/10/01-Versão 18.7. Tem como função exibir uma entrada de log. Melhoria: Implementada a lógica de exibição para os snippets de código, que agora são mostrados quando a flag --snippets é usada.
 def _display_log_entry(entry, index, total, show_snippets=False):
     """Formata e exibe uma única entrada de log de forma legível, com snippets opcionais."""
@@ -2675,44 +2458,6 @@ def _get_code_snippet(file_path, line_number, context_lines=2):
     except (IOError, IndexError):
         # Retorna None se o arquivo não puder ser lido ou a linha não existir
         return None
-
-#atualizado em 2025/09/30-Versão 18.3. Tem como função escrever o log. Melhoria: Corrigido o bug crítico que impedia o salvamento dos 'findings'. A função agora consolida os resultados de todas as categorias de análise em uma única lista antes de salvar.
-def _log_execution(command_name, path, results, arguments, execution_time_ms=0):
-    """(Função Auxiliar) Escreve o dicionário de log final no arquivo."""
-    try:
-        log_dir = Path.home() / '.doxoade'
-        log_dir.mkdir(exist_ok=True)
-        log_file = log_dir / 'doxoade.log'
-        
-        timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-        git_hash = _get_git_commit_hash(path)
-
-        # --- LÓGICA DE CONSOLIDAÇÃO DOS FINDINGS ---
-        all_findings = []
-        for key, value in results.items():
-            if key != 'summary' and isinstance(value, list):
-                all_findings.extend(value)
-        # ---------------------------------------------
-
-        log_data = {
-            "timestamp": timestamp,
-            "doxoade_version": __version__,
-            "command": command_name,
-            "project_path": os.path.abspath(path),
-            "platform": sys.platform,
-            "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
-            "git_hash": git_hash,
-            "arguments": arguments,
-            "execution_time_ms": round(execution_time_ms, 2),
-            "summary": results.get('summary', {}),
-            "status": "completed",
-            "findings": all_findings # Usamos a lista consolidada
-        }
-        
-        with open(log_file, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(log_data) + '\n')
-    except Exception:
-        pass
 
 def _check_environment(path):
     """Verifica o ambiente e retorna uma lista de problemas."""
@@ -2884,56 +2629,6 @@ def _update_summary_from_findings(results):
             if finding['type'] == 'warning': results['summary']['warnings'] += 1
             elif finding['type'] == 'error': results['summary']['errors'] += 1
 
-#atualizado em 2025/10/03-Versão 28.1. Tem como função exibir os resultados. Melhoria: Agora oculta completamente os 'findings' ignorados da saída principal, exibindo-os apenas na contagem do sumário.
-def _present_results(format, results, ignored_hashes=None):
-    """Apresenta os resultados no formato escolhido, ocultando os ignorados da saída principal."""
-    if ignored_hashes is None:
-        ignored_hashes = set()
-
-    if format == 'json':
-        for finding in results.get('findings', []):
-            finding['ignored'] = finding.get('hash') in ignored_hashes
-        print(json.dumps(results, indent=4))
-        return
-
-    findings = results.get('findings', [])
-    
-    click.echo(Style.BRIGHT + "\n--- ANÁLISE COMPLETA ---")
-    
-    # Filtra apenas os findings que NÃO foram ignorados
-    critical_findings = [f for f in findings if f.get('hash') not in ignored_hashes]
-
-    if not critical_findings:
-        click.echo(Fore.GREEN + "[OK] Nenhum problema crítico encontrado.")
-    else:
-        for finding in critical_findings:
-            color = Fore.RED if 'ERROR' in finding['type'].upper() else Fore.YELLOW
-            tag = f"[{finding['type'].upper()}]"
-            ref = f" [Ref: {finding.get('ref', 'N/A')}]" if finding.get('ref') else ""
-            click.echo(color + f"{tag} {finding['message']}{ref}")
-            
-            if 'file' in finding:
-                location = f"   > Em '{finding['file']}'"
-                if 'line' in finding: location += f" (linha {finding['line']})"
-                click.echo(location) # Usa a cor padrão para a localização
-            if 'details' in finding:
-                click.echo(Fore.CYAN + f"   > {finding['details']}")
-
-    error_count = results.get('summary', {}).get('errors', 0)
-    warning_count = results.get('summary', {}).get('warnings', 0)
-    ignored_count = len(ignored_hashes)
-    
-    click.echo(Style.BRIGHT + "\n" + "-"*40)
-    
-    if error_count == 0 and warning_count == 0:
-        click.echo(Fore.GREEN + "[OK] Análise concluída. Nenhum problema encontrado!")
-    else:
-        summary_text = f"[FIM] Análise concluída: {Fore.RED}{error_count} Erro(s){Style.RESET_ALL}, {Fore.YELLOW}{warning_count} Aviso(s){Style.RESET_ALL}"
-        if ignored_count > 0:
-            summary_text += Style.DIM + f" ({ignored_count} ignorado(s))"
-        summary_text += "."
-        click.echo(summary_text)
-
 def _analyze_traceback(stderr_output):
     """Analisa a saída de erro (stderr) e imprime um diagnóstico formatado."""
     diagnostics = {
@@ -2950,6 +2645,11 @@ def _analyze_traceback(stderr_output):
         if key in stderr_output:
             click.echo(Fore.CYAN + message); return
     click.echo(Fore.CYAN + "Nenhum padrão de erro conhecido foi encontrado. Analise o traceback acima.")
+
+
+#atualizado em 2025/10/07-Versão 32.0. Melhoria: O núcleo agora registra comandos a partir de módulos de plugin externos.
+# --- REGISTRO DE PLUGINS ---
+cli.add_command(optimize)
 
 if __name__ == '__main__':
     try:
