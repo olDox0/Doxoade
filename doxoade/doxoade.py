@@ -1,7 +1,7 @@
 #atualizado em 2025/10/06-Versão 29.4. Melhoria: Removido o import não utilizado de 'importlib.metadata', conforme detectado pelo 'doxoade check'.
 import ast
 import json
-import configparser
+#import configparser
 import esprima
 import os, sys, re
 import shutil   
@@ -15,6 +15,7 @@ import time
 import tempfile
 import threading
 import signal
+import toml
 #from importlib import metadata
 from queue import Queue, Empty
 from pathlib import Path
@@ -28,7 +29,7 @@ from datetime import datetime, timezone
 # Inicializa o colorama para funcionar no Windows
 init(autoreset=True)
 
-__version__ = "Alfa 30.2"
+__version__ = "31.3 Alfa"
 
 #atualizado em 2025/09/28-Versão 18.0. Tem como função registrar um achado. Melhoria: Agora calcula e adiciona um 'finding_hash' para identificar unicamente cada problema.
 class ExecutionLogger:
@@ -123,15 +124,30 @@ def log_command_execution(func):
             _log_execution(command_name, path, results, serializable_kwargs)
     return wrapper
 
+#atualizado em 2025/10/07-Versão 31.2. Tem como função carregar a configuração. Melhoria: A lógica agora é robusta o suficiente para interpretar a diretiva 'ignore' tanto como uma lista TOML quanto como uma string multi-linha, corrigindo o bug de regressão.
 def _load_config():
-    """Procura e carrega configurações de um arquivo .doxoaderc."""
-    config = configparser.ConfigParser()
-    config.read('.doxoaderc')
+    """Procura e carrega configurações de um arquivo pyproject.toml."""
     settings = {'ignore': [], 'source_dir': '.'}
-    if 'doxoade' in config:
-        ignore_str = config['doxoade'].get('ignore', '')
-        settings['ignore'] = [line.strip() for line in ignore_str.split('\n') if line.strip()]
-        settings['source_dir'] = config['doxoade'].get('source_dir', '.') # Lê a nova configuração
+    try:
+        with open('pyproject.toml', 'r', encoding='utf-8') as f:
+            pyproject_data = toml.load(f)
+        
+        doxoade_config = pyproject_data.get('tool', {}).get('doxoade', {})
+        
+        # --- LÓGICA DE INTERPRETAÇÃO ROBUSTA ---
+        ignore_val = doxoade_config.get('ignore', [])
+        if isinstance(ignore_val, str):
+            # Se for uma string (como a criada pelo 'echo'), quebramos por linha.
+            settings['ignore'] = [line.strip() for line in ignore_val.split('\n') if line.strip()]
+        elif isinstance(ignore_val, list):
+            # Se for uma lista (formato TOML correto), usamos diretamente.
+            settings['ignore'] = ignore_val
+            
+        settings['source_dir'] = doxoade_config.get('source_dir', '.')
+            
+    except (FileNotFoundError, toml.TomlDecodeError):
+        pass
+        
     return settings
 
 # -----------------------------------------------------------------------------
@@ -288,14 +304,19 @@ def dashboard(project):
     sorted_types = sorted(errors_by_type.items(), key=lambda item: item[1], reverse=True)[:5]
     for msg_type, count in sorted_types:
         click.echo(f" - {msg_type}: {count} ocorrências")
-
-#atualizado em 2025/09/25-Versão 8.2. 'setup-health' agora verifica e cria o venv se ele não existir, tornando o comando mais robusto.
+        
+#atualizado em 2025/10/07-Versão 31.3. Tem como função preparar um projeto para análise. Melhoria: A lógica de escrita foi refeita para sempre criar a diretiva 'ignore' como uma lista TOML, garantindo um parsing robusto e corrigindo o bug do 'ignore' não ser respeitado.
 @cli.command('setup-health')
-@log_command_execution
 @click.argument('path', type=click.Path(exists=True, file_okay=False, resolve_path=True), default='.')
-def setup_health(path):
+@click.pass_context
+def setup_health(ctx, path):
     """Prepara um projeto para ser analisado pelo 'doxoade health'."""
+    
     click.echo(Fore.CYAN + Style.BRIGHT + f"--- [SETUP-HEALTH] Configurando o projeto em '{path}' para análise de saúde ---")
+
+    arguments = ctx.params
+    with ExecutionLogger('setup-health', path, arguments) as logger:
+        click.echo(Fore.CYAN + Style.BRIGHT + f"--- [SETUP-HEALTH] Configurando o projeto em '{path}' para análise de saúde ---")
 
     # --- Passo 0: Verificar e criar o venv, se necessário ---
     click.echo(Fore.YELLOW + "\n--- 0. Verificando ambiente virtual ('venv')... ---")
@@ -341,26 +362,36 @@ def setup_health(path):
                 f.write(f"{dep}\n")
         deps_to_add = health_deps
 
-    # --- Passo 2: Verificar e atualizar .doxoaderc ---
-    click.echo(Fore.YELLOW + "\n--- 2. Verificando '.doxoaderc'... ---")
-    config_file = os.path.join(path, '.doxoaderc')
-    config = configparser.ConfigParser()
-    config.read(config_file)
+    # --- Passo 2: Verificar e atualizar pyproject.toml (LÓGICA REFEITA) ---
+    click.echo(Fore.YELLOW + "\n--- 2. Verificando 'pyproject.toml'... ---")
+    pyproject_path = os.path.join(path, 'pyproject.toml')
     
-    if 'doxoade' not in config:
-        config['doxoade'] = {}
+    pyproject_data = {}
+    if os.path.exists(pyproject_path):
+        try:
+            with open(pyproject_path, 'r', encoding='utf-8') as f:
+                pyproject_data = toml.load(f)
+        except toml.TomlDecodeError:
+            logger.add_finding('error', "Arquivo 'pyproject.toml' corrompido.")
+            click.echo(Fore.RED + "[ERRO] Seu 'pyproject.toml' parece corrompido."); sys.exit(1)
 
-    current_source_dir = config['doxoade'].get('source_dir', '.')
-    
-    new_source_dir = click.prompt(
-        "Qual é o diretório principal do seu código-fonte? (ex: ., src, nome_do_projeto)",
-        default=current_source_dir
-    )
-    config['doxoade']['source_dir'] = new_source_dir
-    
-    with open(config_file, 'w', encoding='utf-8') as f:
-        config.write(f)
-    click.echo(Fore.GREEN + f"[OK] Arquivo '.doxoaderc' configurado com 'source_dir = {new_source_dir}'.")
+    # Garante a estrutura completa, incluindo 'ignore' como lista
+    tool_table = pyproject_data.setdefault('tool', {})
+    doxoade_table = tool_table.setdefault('doxoade', {})
+    doxoade_table.setdefault('source_dir', '.')
+    doxoade_table.setdefault('ignore', []) # Garante que 'ignore' seja uma lista
+
+    current_source_dir = doxoade_table.get('source_dir', '.')
+    new_source_dir = click.prompt("Diretório do código-fonte?", default=current_source_dir)
+    doxoade_table['source_dir'] = new_source_dir
+        
+    try:
+        with open(pyproject_path, 'w', encoding='utf-8') as f:
+            toml.dump(pyproject_data, f)
+        click.echo(Fore.GREEN + "[OK] 'pyproject.toml' configurado com '[tool.doxoade]'.")
+    except Exception as e:
+        logger.add_finding('error', f"Falha ao escrever no 'pyproject.toml': {e}")
+        click.echo(Fore.RED + f"[ERRO] Falha ao escrever no 'pyproject.toml': {e}"); sys.exit(1)
     
     # --- Passo 3: Instalar dependências, se necessário ---
     if deps_to_add:
@@ -379,7 +410,7 @@ def setup_health(path):
     click.echo(Fore.CYAN + Style.BRIGHT + "\n--- Configuração Concluída! ---")
     click.echo(Fore.WHITE + "O projeto agora está pronto. Você pode executar 'doxoade health' a qualquer momento.")
 
-#atualizado em 2025/09/26-Versão 10.3. Corrigido o loop infinito no 'health' com uma lógica de verificação de ambiente mais robusta e direta.
+#atualizado em 2025/10/07-Versão 31.1. Melhoria: Corrigido o UnboundLocalError ao inicializar a variável 'is_only_dep_error'.
 @cli.command()
 @click.pass_context
 @click.argument('path', type=click.Path(exists=True, file_okay=False, resolve_path=True), default='.')
@@ -389,6 +420,8 @@ def setup_health(path):
 @click.option('--min-coverage', default=70, help="Porcentagem mínima de cobertura de testes aceitável.", type=int)
 def health(ctx, path, ignore, format, complexity_threshold, min_coverage):
     """Analisa a 'saúde' do código com métricas de qualidade (complexidade e testes)."""
+    
+    is_only_dep_error = False # <-- ADICIONAR ESTA LINHA
     
     # --- LÓGICA DE VERIFICAÇÃO FINAL E ROBUSTA ---
     # Primeiro, verificamos se o executável python do venv existe. Esta é a verificação mais fundamental.
@@ -531,9 +564,12 @@ def deepcheck(file_path, func_name):
     function_dossiers = _analyze_function_flow(tree, content, func_name)
 
     if not function_dossiers:
-        msg = "Nenhuma função encontrada."
-        if func_name: msg = f"A função '{func_name}' não foi encontrada no arquivo."
-        click.echo(Fore.YELLOW + msg); return
+            if func_name:
+                click.echo(Fore.YELLOW + f"A função '{func_name}' não foi encontrada no arquivo.")
+            else:
+                click.echo(Fore.YELLOW + "Nenhuma função encontrada no escopo global.")
+                click.echo(Fore.CYAN + "   > Lembrete: 'deepcheck' analisa o conteúdo de blocos 'def'. A análise de classes ou do corpo do script ainda não é suportada.")
+            return
 
     # --- Apresentação do Relatório ---
     for dossier in function_dossiers:
@@ -727,7 +763,7 @@ def _analyze_test_coverage(project_path, min_coverage):
     findings = []
     config = _load_config()
     source_dir = config.get('source_dir', '.')
-    venv_python = _get_venv_python_executable(project_path)
+    venv_python = _get_venv_python_executable()
     if not venv_python:
         return [{'type': 'error', 'message': "Não foi possível encontrar o executável Python do venv."}]
 
