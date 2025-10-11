@@ -1,7 +1,6 @@
-#atualizado em 2025/10/07-Versão 32.1. Melhoria: Corrigida a importação para usar o módulo 'shared_tools', quebrando a dependência circular.
+# doxoade/doxoade.py
 import ast
 import json
-#import configparser
 import esprima
 import os, sys, re
 import shutil   
@@ -10,14 +9,11 @@ import click
 import shlex
 import fnmatch
 import traceback
-#import hashlib
 import time
 import tempfile
 import threading
 import signal
 import toml
-
-#from importlib import metadata
 from queue import Queue, Empty
 from pathlib import Path
 from functools import wraps
@@ -27,18 +23,22 @@ from colorama import init, Fore, Style
 from pyflakes import api as pyflakes_api
 from datetime import datetime
 
-
 # --- REGISTRO DE PLUGINS DA V2.0 ---
-# Importa apenas o COMANDO do plugin
 from .commands.optimize import optimize
-# Importa as FERRAMENTAS do módulo compartilhado
-from .shared_tools import ExecutionLogger, _get_venv_python_executable, _present_results, _log_execution, _run_git_command
-#_get_git_commit_hash
+from .commands.health import health  # <-- NOVA IMPORTAÇÃO
+from .shared_tools import (
+    ExecutionLogger, 
+    _get_venv_python_executable, 
+    _present_results, 
+    _log_execution, 
+    _run_git_command, 
+    _load_config, 
+    _update_summary_from_findings
+)
 
-# Inicializa o colorama para funcionar no Windows
 init(autoreset=True)
 
-__version__ = "32.3 Alfa"
+__version__ = "33.0 Alfa"
 
 # -----------------------------------------------------------------------------
 # GRUPO PRINCIPAL E CONFIGURAÇÃO
@@ -83,32 +83,6 @@ def log_command_execution(func):
             serializable_kwargs = {k: str(v) for k, v in kwargs.items()}
             _log_execution(command_name, path, results, serializable_kwargs)
     return wrapper
-
-#atualizado em 2025/10/07-Versão 31.2. Tem como função carregar a configuração. Melhoria: A lógica agora é robusta o suficiente para interpretar a diretiva 'ignore' tanto como uma lista TOML quanto como uma string multi-linha, corrigindo o bug de regressão.
-def _load_config():
-    """Procura e carrega configurações de um arquivo pyproject.toml."""
-    settings = {'ignore': [], 'source_dir': '.'}
-    try:
-        with open('pyproject.toml', 'r', encoding='utf-8') as f:
-            pyproject_data = toml.load(f)
-        
-        doxoade_config = pyproject_data.get('tool', {}).get('doxoade', {})
-        
-        # --- LÓGICA DE INTERPRETAÇÃO ROBUSTA ---
-        ignore_val = doxoade_config.get('ignore', [])
-        if isinstance(ignore_val, str):
-            # Se for uma string (como a criada pelo 'echo'), quebramos por linha.
-            settings['ignore'] = [line.strip() for line in ignore_val.split('\n') if line.strip()]
-        elif isinstance(ignore_val, list):
-            # Se for uma lista (formato TOML correto), usamos diretamente.
-            settings['ignore'] = ignore_val
-            
-        settings['source_dir'] = doxoade_config.get('source_dir', '.')
-            
-    except (FileNotFoundError, toml.TomlDecodeError):
-        pass
-        
-    return settings
 
 # -----------------------------------------------------------------------------
 # COMANDOS DA CLI (ARQUITETURA FINAL E ROBUSTA)
@@ -370,91 +344,6 @@ def setup_health(ctx, path):
     click.echo(Fore.CYAN + Style.BRIGHT + "\n--- Configuração Concluída! ---")
     click.echo(Fore.WHITE + "O projeto agora está pronto. Você pode executar 'doxoade health' a qualquer momento.")
 
-#atualizado em 2025/10/07-Versão 31.1. Melhoria: Corrigido o UnboundLocalError ao inicializar a variável 'is_only_dep_error'.
-@cli.command()
-@click.pass_context
-@click.argument('path', type=click.Path(exists=True, file_okay=False, resolve_path=True), default='.')
-@click.option('--ignore', multiple=True, help="Ignora uma pasta. Combina com as do .doxoaderc.")
-@click.option('--format', type=click.Choice(['text', 'json']), default='text', help="Define o formato da saída.")
-@click.option('--complexity-threshold', default=10, help="Nível de complexidade a partir do qual um aviso é gerado.", type=int)
-@click.option('--min-coverage', default=70, help="Porcentagem mínima de cobertura de testes aceitável.", type=int)
-def health(ctx, path, ignore, format, complexity_threshold, min_coverage):
-    """Analisa a 'saúde' do código com métricas de qualidade (complexidade e testes)."""
-    
-    is_only_dep_error = False # <-- ADICIONAR ESTA LINHA
-    
-    # --- LÓGICA DE VERIFICAÇÃO FINAL E ROBUSTA ---
-    # Primeiro, verificamos se o executável python do venv existe. Esta é a verificação mais fundamental.
-    venv_scripts_path = os.path.join(path, 'venv', 'Scripts' if os.name == 'nt' else 'bin')
-    python_exe = os.path.join(venv_scripts_path, 'python.exe')
-    python_no_exe = os.path.join(venv_scripts_path, 'python')
-
-    venv_python_path = None
-    if os.path.exists(python_exe):
-        venv_python_path = python_exe
-    elif os.path.exists(python_no_exe):
-        venv_python_path = python_no_exe
-    
-    # Se não encontrarmos o python do venv, o projeto não está pronto.
-    if not venv_python_path:
-        click.echo(Fore.YELLOW + "[AVISO] Este projeto não possui um ambiente virtual ('venv') configurado.")
-        if click.confirm(Fore.CYAN + "Deseja executar 'doxoade setup-health' para configurá-lo automaticamente?"):
-            ctx.invoke(setup_health, path=path)
-            click.echo(Fore.CYAN + Style.BRIGHT + "\nConfiguração concluída. Por favor, execute 'doxoade health' novamente para ver o relatório.")
-        else:
-            click.echo("Comando abortado. Execute 'doxoade setup-health' manualmente para preparar este projeto.")
-        return
-
-    # --- Se o venv existe, o resto da análise nos dirá se as dependências estão faltando ---
-    results = {'summary': {'errors': 0, 'warnings': 0}}
-    try:
-        if format == 'text': click.echo(Fore.YELLOW + f"[HEALTH] Executando 'doxoade health' no diretório '{os.path.abspath(path)}'...")
-        config = _load_config()
-        final_ignore_list = list(set(config['ignore'] + list(ignore)))
-        
-        folders_to_ignore = set([item.lower() for item in final_ignore_list] + ['venv', 'build', 'dist', '.git'])
-        files_to_check = []
-        for root, dirs, files in os.walk(path):
-            dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
-            for file in files:
-                if file.endswith('.py'):
-                    files_to_check.append(os.path.join(root, file))
-
-        results.update({
-            'complexity': _analyze_complexity(path, files_to_check, complexity_threshold),
-            'test_coverage': _analyze_test_coverage(path, min_coverage)
-        })
-
-        # --- NOVA VERIFICAÇÃO PÓS-ANÁLISE ---
-        # Se a única coisa que encontramos foi um erro de dependência, acionamos o setup.
-        is_only_dep_error = False
-        if results['summary']['errors'] > 0:
-            dep_errors = [f for f in results.get('test_coverage', []) + results.get('complexity', []) if f['type'] == 'error']
-            if len(dep_errors) == results['summary']['errors']:
-                is_only_dep_error = True
-
-        if is_only_dep_error:
-            click.echo(Fore.YELLOW + "\n[AVISO] A análise encontrou erros de dependência (ex: 'radon' ou 'coverage' não instalados).")
-            if click.confirm(Fore.CYAN + "Deseja executar 'doxoade setup-health' para instalar as dependências corretas?"):
-                ctx.invoke(setup_health, path=path)
-                click.echo(Fore.CYAN + Style.BRIGHT + "\nConfiguração concluída. Por favor, execute 'doxoade health' novamente para ver o relatório.")
-            else:
-                click.echo("Comando abortado.")
-            return
-
-
-        _update_summary_from_findings(results)
-        _present_results(format, results)
-    
-    except Exception as e:
-        safe_error = str(e).encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding)
-        click.echo(Fore.RED + f"\n[ERRO FATAL] O 'health check' falhou inesperadamente: {safe_error}", err=True)
-        results['summary']['errors'] += 1
-    finally:
-        _log_execution(command_name='health', path=path, results=results, arguments={"ignore": list(ignore), "format": format})
-        if results['summary']['errors'] > 0 and not is_only_dep_error:
-            sys.exit(1)
-
 #atualizado em 2025/09/27-Versão 12.2 (PoC). Novo comando 'apicheck' para análise estática de uso de APIs. Tem como função ler um 'apicheck.json' e verificar se as chamadas de API no código seguem as regras do contrato.
 @cli.command('apicheck')
 @click.argument('path', type=click.Path(exists=True, file_okay=False, resolve_path=True), default='.')
@@ -674,86 +563,6 @@ def _analyze_api_calls(file_path, contracts):
         return findings
     finally:
         _log_execution('_analyze_api_calls', ".", results, {'file_path': file_path, 'contracts': contracts})
-
-#atualizado em 2025/10/07-Versão 30.1. Melhoria: A função foi completamente limpa, removendo o 'try...finally' e a lógica duplicada para corrigir a falha silenciosa.
-def _analyze_complexity(project_path, files_to_check, threshold):
-    """Analisa a complexidade ciclomática, focando no diretório de código-fonte."""
-    try:
-        from radon.visitors import ComplexityVisitor
-    except ImportError:
-        return [{'type': 'error', 'message': "A biblioteca 'radon' não está instalada.", 'details': "Execute 'doxoade setup-health' para instalar."}]
-
-    findings = []
-    config = _load_config()
-    source_dir = config.get('source_dir', '.')
-    source_path = os.path.abspath(os.path.join(project_path, source_dir))
-    relevant_files = [f for f in files_to_check if os.path.abspath(f).startswith(source_path)]
-    
-    for file_path in relevant_files:
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            visitor = ComplexityVisitor.from_code(content)
-            for func in visitor.functions:
-                if func.complexity > threshold:
-                    findings.append({
-                        'type': 'warning',
-                        'message': f"Função '{func.name}' tem complexidade alta ({func.complexity}).",
-                        'details': f"O máximo recomendado é {threshold}.",
-                        'file': file_path,
-                        'line': func.lineno
-                    })
-        except Exception:
-            # Ignora arquivos individuais que possam falhar na análise (ex: SyntaxError)
-            continue
-            
-    return findings
-    
-#atualizado em 2025/09/24-Versão 7.4. 'health' agora lê 'source_dir' do .doxoaderc para focar a análise de radon e coverage, tornando os resultados mais precisos.
-def _analyze_test_coverage(project_path, min_coverage):
-    """Executa a suíte de testes com coverage.py, focando no diretório de código-fonte."""
-    try:
-        from importlib import util as importlib_util
-    except ImportError:
-        return [{'type': 'error', 'message': "Módulo 'importlib' não encontrado."}]
-
-    if not importlib_util.find_spec("coverage") or not importlib_util.find_spec("pytest"):
-        return [{'type': 'error', 'message': "As bibliotecas 'coverage' ou 'pytest' não estão instaladas.", 'details': "Execute 'doxoade setup-health' para instalar."}]
-
-    findings = []
-    config = _load_config()
-    source_dir = config.get('source_dir', '.')
-    venv_python = _get_venv_python_executable()
-    if not venv_python:
-        return [{'type': 'error', 'message': "Não foi possível encontrar o executável Python do venv."}]
-
-    run_tests_cmd = [venv_python, '-m', 'coverage', 'run', f'--source={source_dir}', '-m', 'pytest']
-    generate_report_cmd = [venv_python, '-m', 'coverage', 'json']
-
-    original_dir = os.getcwd()
-    try:
-        os.chdir(project_path)
-        test_result = subprocess.run(run_tests_cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
-        
-        if test_result.returncode != 0:
-            if "no tests ran" in test_result.stdout or "collected 0 items" in test_result.stdout:
-                return [{'type': 'warning', 'message': "Nenhum teste foi encontrado pelo pytest."}]
-            else:
-                return [{'type': 'error', 'message': "A suíte de testes falhou.", 'details': f"Saída do Pytest:\n{test_result.stdout}\n{test_result.stderr}"}]
-
-        subprocess.run(generate_report_cmd, capture_output=True, check=True)
-
-        if os.path.exists('coverage.json'):
-            with open('coverage.json', 'r') as f: report_data = json.load(f)
-            total_coverage = report_data['totals']['percent_covered']
-            if total_coverage < min_coverage:
-                findings.append({'type': 'warning', 'message': f"Cobertura de testes está baixa: {total_coverage:.2f}%.", 'details': f"O mínimo recomendado é {min_coverage}%.", 'file': project_path})
-    finally:
-        if os.path.exists('coverage.json'): os.remove('coverage.json')
-        if os.path.exists('.coverage'): os.remove('.coverage')
-        os.chdir(original_dir)
-        
-    return findings
 
 #atualizado em 2025/09/23-Versão 5.5. Tutorial completamente reescrito para incluir todos os comandos da suíte (sync, release, clean, git-clean, guicheck) e melhorar a clareza para novos usuários.
 @cli.command()
@@ -2240,103 +2049,66 @@ def _analyze_kivy_risks(tree, file_path):
                 })
     return findings
 
-#atualizado em 2025/10/01-Versão 19.1. Melhoria: Corrigido SyntaxError pela falta de uma vírgula.
 def _analyze_tkinter_layout(tree, file_path):
-    """
-    Analisa uma AST de um arquivo Python em busca de erros de design de layout Tkinter
-    usando uma abordagem de múltiplas passagens e reportando números de linha.
-    """
-    findings = []
-    
-    # --- PRIMEIRA PASSAGEM: Construir o mapa de hierarquia (quem é pai de quem) ---
+    #2025/10/11 - 33.0(Ver), 2.0(Fnc). Refatorada para reduzir complexidade.
+    #A função agora atua como um "gerente" que orquestra as três fases da análise de layout.
+    widget_parent_map = _build_widget_parent_map(tree)
+    parent_layouts, grid_configs = _collect_layout_data(tree, widget_parent_map)
+    findings = _perform_layout_analysis(parent_layouts, grid_configs, file_path)
+    return findings
+
+def _build_widget_parent_map(tree):
+    #2025/10/11 - 33.0(Ver), 1.0(Fnc). Nova função auxiliar.
+    #A função tem como objetivo fazer a "Primeira Passagem" na AST para mapear a hierarquia dos widgets.
     widget_parent_map = {}
     for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
-            if node.value.args:
-                parent_node = node.value.args[0]
-                parent_name = None
-                # Tenta extrair o nome do pai (ex: self.main_frame -> 'main_frame')
-                if isinstance(parent_node, ast.Name): parent_name = parent_node.id
-                elif isinstance(parent_node, ast.Attribute): parent_name = parent_node.attr
-                
-                # Tenta extrair o nome do widget filho (ex: self.my_button -> 'my_button')
-                widget_name = None
-                if hasattr(node.targets[0], 'id'): widget_name = node.targets[0].id
-                elif hasattr(node.targets[0], 'attr'): widget_name = node.targets[0].attr
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call) and node.value.args:
+            parent_node = node.value.args[0]
+            parent_name = ast.unparse(parent_node)
+            
+            if hasattr(node.targets[0], 'id') or hasattr(node.targets[0], 'attr'):
+                widget_name = ast.unparse(node.targets[0])
+                widget_parent_map[widget_name] = parent_name
+    return widget_parent_map
 
-                if parent_name and widget_name:
-                    widget_parent_map[widget_name] = parent_name
-
-    # --- SEGUNDA PASSAGEM: Coletar dados de layout e configuração de grid ---
-    # Estrutura aprimorada para guardar também o número da linha
-    parent_layouts = {}  # {'parent_name': {'pack': [10, 15], 'grid': [12]}}
-    grid_configs = {}    # {'parent_name': {'rows_weighted': {0, 1}, 'cols_weighted': {0}}}
-
+def _collect_layout_data(tree, widget_parent_map):
+    #2025/10/11 - 33.0(Ver), 1.0(Fnc). Nova função auxiliar.
+    #A função tem como objetivo fazer a "Segunda Passagem" para coletar dados de layout e configuração de grid.
+    parent_layouts = {}
+    grid_configs = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-            widget_name = None
-            if isinstance(node.func.value, ast.Name): widget_name = node.func.value.id
-            elif isinstance(node.func.value, ast.Attribute): widget_name = node.func.value.attr
-                
+            widget_name = ast.unparse(node.func.value)
             parent_name = widget_parent_map.get(widget_name)
 
+            if not parent_name:
+                continue
+
             if node.func.attr in ['pack', 'grid']:
-                layout_manager = node.func.attr
-                if parent_name:
-                    # Inicializa a estrutura se for o primeiro encontro
-                    parent_layouts.setdefault(parent_name, {})
-                    # Adiciona o número da linha à lista daquele gerenciador
-                    parent_layouts[parent_name].setdefault(layout_manager, []).append(node.lineno)
+                parent_layouts.setdefault(parent_name, {}).setdefault(node.func.attr, []).append(node.lineno)
 
-            if node.func.attr in ['rowconfigure', 'columnconfigure'] and parent_name:
+            if node.func.attr in ['rowconfigure', 'columnconfigure']:
                 has_weight = any(kw.arg == 'weight' and isinstance(kw.value, ast.Constant) and kw.value.value > 0 for kw in node.keywords)
-                if has_weight:
+                if has_weight and node.args and isinstance(node.args[0], ast.Constant):
                     config_type = 'rows_weighted' if node.func.attr == 'rowconfigure' else 'cols_weighted'
-                    grid_configs.setdefault(parent_name, {'rows_weighted': set(), 'cols_weighted': set()})
-                    if node.args and isinstance(node.args[0], ast.Constant):
-                        index = node.args[0].value
-                        grid_configs[parent_name][config_type].add(index)
+                    grid_configs.setdefault(parent_name, {'rows_weighted': set(), 'cols_weighted': set()})[config_type].add(node.args[0].value)
+    return parent_layouts, grid_configs
 
-    # --- ANÁLISE FINAL: Usar os dados coletados para encontrar problemas ---
-
+def _perform_layout_analysis(parent_layouts, grid_configs, file_path):
+    #2025/10/11 - 33.0(Ver), 1.0(Fnc). Nova função auxiliar.
+    #A função tem como objetivo fazer a "Análise Final" sobre os dados coletados para encontrar os problemas.
+    findings = []
     for parent, layouts in parent_layouts.items():
-        # 1. Encontra pais com múltiplos gerenciadores de layout
         if len(layouts) > 1:
-            # Concatena todas as linhas de todos os layouts para reportar
-            all_lines = []
-            for manager_lines in layouts.values():
-                all_lines.extend(manager_lines)
-            
-            # Pega a primeira linha como a principal para o relatório
+            all_lines = [line for manager_lines in layouts.values() for line in manager_lines]
             line_report = min(all_lines) if all_lines else None
-            
-            findings.append({
-                'type': 'error',
-                'message': f"Uso misto de gerenciadores de layout ({', '.join(layouts.keys())}) no widget pai '{parent}'.",
-                'details': f"As chamadas conflitantes foram encontradas nas linhas: {sorted(all_lines)}.",
-                'ref': 'OADE-15',
-                'file': file_path,
-                'line': line_report,
-                'snippet': _get_code_snippet(file_path, line_report)
-            })
+            findings.append({'type': 'error', 'message': f"Uso misto de gerenciadores ({', '.join(layouts.keys())}) no pai '{parent}'.", 'file': file_path, 'line': line_report})
 
-        # 2. Encontra pais que usam .grid mas não configuram o peso
-        if 'grid' in layouts:
-            if parent not in grid_configs or not (grid_configs[parent]['rows_weighted'] or grid_configs[parent]['cols_weighted']):
-                # Reporta a linha da primeira chamada .grid() encontrada para este pai
-                line_report = min(layouts['grid']) if layouts['grid'] else None
-                findings.append({
-                    'type': 'warning',
-                    'message': f"O widget pai '{parent}' usa o layout .grid() mas não parece configurar o 'weight'.",
-                    'details': "Sem 'weight' > 0 em .rowconfigure()/.columnconfigure(), o layout não será responsivo.",
-                    'ref': 'OADE-15',
-                    'file': file_path,
-                    'line': line_report,
-                    'snippet': _get_code_snippet(file_path, line_report)
-                })
-                
+        if 'grid' in layouts and (parent not in grid_configs or not (grid_configs[parent]['rows_weighted'] or grid_configs[parent]['cols_weighted'])):
+            line_report = min(layouts['grid']) if layouts['grid'] else None
+            findings.append({'type': 'warning', 'message': f"Pai '{parent}' usa .grid() mas não configura 'weight'.", 'details': "Layout não será responsivo.", 'file': file_path, 'line': line_report})
     return findings
-    
+
 # =============================================================================
 # --- FIM DO BLOCO DE ANÁLISE DE GUI ---
 # =============================================================================
@@ -2621,14 +2393,6 @@ def _analyze_js_file(file_path):
 # FUNÇÕES DE APRESENTAÇÃO E DIAGNÓSTICO
 # -----------------------------------------------------------------------------
 
-def _update_summary_from_findings(results):
-    """Atualiza o sumário de erros/avisos com base nos findings coletados."""
-    for category in results:
-        if category == 'summary': continue
-        for finding in results[category]:
-            if finding['type'] == 'warning': results['summary']['warnings'] += 1
-            elif finding['type'] == 'error': results['summary']['errors'] += 1
-
 def _analyze_traceback(stderr_output):
     """Analisa a saída de erro (stderr) e imprime um diagnóstico formatado."""
     diagnostics = {
@@ -2650,6 +2414,7 @@ def _analyze_traceback(stderr_output):
 #atualizado em 2025/10/07-Versão 32.0. Melhoria: O núcleo agora registra comandos a partir de módulos de plugin externos.
 # --- REGISTRO DE PLUGINS ---
 cli.add_command(optimize)
+cli.add_command(health)
 
 if __name__ == '__main__':
     try:
