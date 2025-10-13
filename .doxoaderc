@@ -1,7 +1,0 @@
-[doxoade]
-ignore = 
-	node_modules
-	backups
-	documentacao_antiga
-source_dir = doxoade
-

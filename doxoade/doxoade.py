@@ -1,13 +1,14 @@
 # doxoade/doxoade.py
-import ast
+#import ast, esprima, fnmatch
+#from bs4 import BeautifulSoup
+#from io import StringIO
+#from pyflakes import api as pyflakes_api
 import json
-import esprima
 import os, sys, re
 import shutil   
 import subprocess
 import click
 import shlex
-import fnmatch
 import traceback
 import time
 import tempfile
@@ -17,28 +18,36 @@ import toml
 from queue import Queue, Empty
 from pathlib import Path
 from functools import wraps
-from bs4 import BeautifulSoup
-from io import StringIO
 from colorama import init, Fore, Style
-from pyflakes import api as pyflakes_api
 from datetime import datetime
 
 # --- REGISTRO DE PLUGINS DA V2.0 ---
 from .commands.optimize import optimize
-from .commands.health import health  # <-- NOVA IMPORTAÇÃO
+from .commands.health import health
+from .commands.check import check
+from .commands.guicheck import guicheck
+from .commands.webcheck import webcheck
+from .commands.kvcheck import kvcheck
+from .commands.encoding import encoding
+from .commands.apicheck import apicheck
+from .commands.deepcheck import deepcheck
+from .commands.save import save
+from .commands.git_clean import git_clean
+
 from .shared_tools import (
     ExecutionLogger, 
     _get_venv_python_executable, 
-    _present_results, 
+#    _present_results, 
     _log_execution, 
     _run_git_command, 
-    _load_config, 
-    _update_summary_from_findings
+#    _load_config, 
+#    _update_summary_from_findings,
+#    _get_code_snippet
 )
 
 init(autoreset=True)
 
-__version__ = "33.0 Alfa"
+__version__ = "35.0 Alfa"
 
 # -----------------------------------------------------------------------------
 # GRUPO PRINCIPAL E CONFIGURAÇÃO
@@ -173,68 +182,79 @@ def _get_doxoade_installation_path():
 #atualizado em 2025/09/25-Versão 9.1. Novo comando 'dashboard' para visualizar tendências de saúde do projeto a partir dos logs.
 @cli.command()
 @log_command_execution
-@click.option('--project', default=None, help="Filtra o dashboard para um caminho de projeto específico.")
+@click.option('--project', default=None, help="Filtra o dashboard para um projeto específico.")
 def dashboard(project):
-    """Exibe um painel com a saúde e tendências dos projetos analisados."""
-
+    #2025/10/11 - 34.0(Ver), 2.0(Fnc). Refatorada para reduzir complexidade e adicionar novos insights.
+    #A função tem como objetivo exibir um painel com a saúde e tendências dos projetos analisados.
     log_file = Path.home() / '.doxoade' / 'doxoade.log'
     if not log_file.exists():
-        click.echo(Fore.YELLOW + "Nenhum arquivo de log encontrado. Execute alguns comandos de análise primeiro."); return
+        click.echo(Fore.YELLOW + "Nenhum arquivo de log encontrado."); return
 
     click.echo(Fore.CYAN + Style.BRIGHT + "--- [DASHBOARD] Painel de Saúde de Engenharia ---")
 
-    entries = []
-    with open(log_file, 'r', encoding='utf-8') as f:
-        for line in f:
-            try:
-                entry = json.loads(line)
-                # Filtra pelo projeto, se especificado
-                if project and os.path.abspath(project) != entry.get('project_path'):
-                    continue
-                entries.append(entry)
-            except json.JSONDecodeError:
-                continue
+    try:
+        with open(log_file, 'r', encoding='utf-8') as f:
+            entries = [json.loads(line) for line in f]
+    except (json.JSONDecodeError, IOError):
+        click.echo(Fore.RED + "Erro ao ler o arquivo de log."); return
+
+    if project:
+        entries = [e for e in entries if os.path.abspath(project) == e.get('project_path')]
 
     if not entries:
         click.echo(Fore.RED + "Nenhuma entrada de log encontrada para o filtro especificado."); return
 
-    # --- Análise 1: Tendência de Erros ao Longo do Tempo ---
-    errors_by_day = {}
+    click.echo(f"Analisando {len(entries)} execuções registradas...\n")
+    
+    _display_error_trend(entries)
+    _display_project_summary(entries)
+    _display_common_issues(entries)
+
+def _display_error_trend(entries):
+    #2025/10/11 - 34.0(Ver), 1.0(Fnc). Nova função auxiliar.
+    #A função tem como objetivo exibir a tendência de erros e avisos ao longo do tempo.
+    issues_by_day = {}
     for entry in entries:
-        day = entry['timestamp'][:10] # Pega apenas a data YYYY-MM-DD
-        errors = entry['summary'].get('errors', 0)
-        errors_by_day[day] = errors_by_day.get(day, 0) + errors
+        day = entry.get('timestamp', 'N/A')[:10]
+        summary = entry.get('summary', {})
+        errors = summary.get('errors', 0)
+        warnings = summary.get('warnings', 0)
+        
+        day_stats = issues_by_day.setdefault(day, {'errors': 0, 'warnings': 0})
+        day_stats['errors'] += errors
+        day_stats['warnings'] += warnings
 
-    click.echo(Fore.YELLOW + "\n--- Tendência de Erros (últimos 7 dias) ---")
-    sorted_days = sorted(errors_by_day.keys())[-7:]
-    max_errors = max(errors_by_day.values()) if errors_by_day else 1
+    click.echo(Fore.YELLOW + "--- Tendência de Problemas (últimos 7 dias) ---")
+    sorted_days = sorted(issues_by_day.keys())[-7:]
     for day in sorted_days:
-        count = errors_by_day[day]
-        bar_length = int((count / max_errors) * 40) if max_errors > 0 else 0
-        bar = '█' * bar_length
-        click.echo(f"{day} | {bar} ({count} erros)")
+        stats = issues_by_day[day]
+        click.echo(f"{day} | {Fore.RED}{stats['errors']} Erro(s){Style.RESET_ALL}, {Fore.YELLOW}{stats['warnings']} Aviso(s){Style.RESET_ALL}")
 
-    # --- Análise 2: Projetos com Mais Problemas ---
+def _display_project_summary(entries):
+    #2025/10/11 - 34.0(Ver), 1.0(Fnc). Nova função auxiliar.
+    #A função tem como objetivo exibir quais projetos têm mais problemas.
     errors_by_project = {}
     for entry in entries:
-        proj_name = os.path.basename(entry['project_path'])
-        errors = entry['summary'].get('errors', 0)
+        proj_name = os.path.basename(entry.get('project_path', 'Desconhecido'))
+        errors = entry.get('summary', {}).get('errors', 0)
         errors_by_project[proj_name] = errors_by_project.get(proj_name, 0) + errors
-
+    
     click.echo(Fore.YELLOW + "\n--- Projetos com Mais Erros Registrados ---")
     sorted_projects = sorted(errors_by_project.items(), key=lambda item: item[1], reverse=True)[:5]
     for proj, count in sorted_projects:
         click.echo(f" - {proj}: {count} erros")
 
-    # --- Análise 3: Erros Mais Frequentes ---
+def _display_common_issues(entries):
+    #2025/10/11 - 34.0(Ver), 1.0(Fnc). Nova função auxiliar.
+    #A função tem como objetivo exibir os tipos de erro mais comuns.
     errors_by_type = {}
     for entry in entries:
         for finding in entry.get('findings', []):
-            if finding['type'] == 'error':
-                msg = finding['message'].split(':')[1].strip() if ':' in finding['message'] else finding['message']
+            if finding.get('type', '').upper() == 'ERROR':
+                msg = finding.get('message', 'Erro desconhecido').split(':')[0].strip()
                 errors_by_type[msg] = errors_by_type.get(msg, 0) + 1
     
-    click.echo(Fore.YELLOW + "\n--- Tipos de Erro Mais Frequentes ---")
+    click.echo(Fore.YELLOW + "\n--- Tipos de Erro Mais Comuns ---")
     sorted_types = sorted(errors_by_type.items(), key=lambda item: item[1], reverse=True)[:5]
     for msg_type, count in sorted_types:
         click.echo(f" - {msg_type}: {count} ocorrências")
@@ -343,226 +363,6 @@ def setup_health(ctx, path):
     
     click.echo(Fore.CYAN + Style.BRIGHT + "\n--- Configuração Concluída! ---")
     click.echo(Fore.WHITE + "O projeto agora está pronto. Você pode executar 'doxoade health' a qualquer momento.")
-
-#atualizado em 2025/09/27-Versão 12.2 (PoC). Novo comando 'apicheck' para análise estática de uso de APIs. Tem como função ler um 'apicheck.json' e verificar se as chamadas de API no código seguem as regras do contrato.
-@cli.command('apicheck')
-@click.argument('path', type=click.Path(exists=True, file_okay=False, resolve_path=True), default='.')
-@click.option('--ignore', multiple=True, help="Ignora uma pasta. Combina com as do .doxoaderc.")
-def apicheck(path, ignore):
-    """Analisa o uso de APIs com base em um arquivo de contrato 'apicheck.json'."""
-    results = {'summary': {'errors': 0, 'warnings': 0}}
-    click.echo(Fore.YELLOW + f"[APICHECK] Executando análise de contratos de API em '{path}'...")
-    
-    results = {'summary': {'errors': 0, 'warnings': 0}}
-    try:
-        # --- Passo 1: Carregar o Contrato ---
-        contract_file = os.path.join(path, 'apicheck.json')
-        if not os.path.exists(contract_file):
-            click.echo(Fore.YELLOW + "[AVISO] Arquivo 'apicheck.json' não encontrado. Nenhuma análise será feita.")
-            return
-    
-        try:
-            with open(contract_file, 'r', encoding='utf-8') as f:
-                contracts = json.load(f).get('contracts', [])
-        except (json.JSONDecodeError, IOError) as e:
-            click.echo(Fore.RED + f"[ERRO] Falha ao ler ou decodificar 'apicheck.json': {e}")
-            sys.exit(1)
-    
-        # --- Passo 2: Encontrar Arquivos e Analisar ---
-        config = _load_config()
-        final_ignore_list = list(set(config['ignore'] + list(ignore)))
-        folders_to_ignore = set([item.lower() for item in final_ignore_list] + ['venv', 'build', 'dist', '.git'])
-        files_to_check = []
-        for root, dirs, files in os.walk(path):
-            dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
-            for file in files:
-                if file.endswith('.py'):
-                    files_to_check.append(os.path.join(root, file))
-    
-        api_findings = []
-        for file_path in files_to_check:
-            api_findings.extend(_analyze_api_calls(file_path, contracts))
-            
-        results['api_contracts'] = api_findings
-        _update_summary_from_findings(results)
-        _present_results('text', results)
-    
-        _log_execution('apicheck', path, results, {'ignore': list(ignore)})
-        if results['summary']['errors'] > 0:
-            sys.exit(1)
-    finally:
-        args = {"ignore": list(ignore)}
-        _log_execution('apicheck', path, results, args)
-
-#atualizado em 2025/09/28-Versão 13.4 (PoC). Novo comando 'deepcheck' para análise profunda de fluxo de funções. Tem como função mapear entradas, saídas e pontos de risco lógico (ex: acesso inseguro a dicionários) usando AST.
-@cli.command('deepcheck')
-@click.argument('file_path', type=click.Path(exists=True, dir_okay=False, resolve_path=True))
-@click.option('--func', '-f', 'func_name', default=None, help="Analisa profundamente uma função específica.")
-def deepcheck(file_path, func_name):
-    """Executa uma análise profunda do fluxo de dados e pontos de risco em um arquivo Python."""
-    
-    click.echo(Fore.CYAN + Style.BRIGHT + f"--- [DEEPCHECK] Analisando fluxo de '{file_path}' ---")
-    
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-            tree = ast.parse(content, filename=file_path)
-    except (SyntaxError, IOError) as e:
-        click.echo(Fore.RED + f"[ERRO] Falha ao ler ou analisar o arquivo: {e}"); sys.exit(1)
-
-    function_dossiers = _analyze_function_flow(tree, content, func_name)
-
-    if not function_dossiers:
-            if func_name:
-                click.echo(Fore.YELLOW + f"A função '{func_name}' não foi encontrada no arquivo.")
-            else:
-                click.echo(Fore.YELLOW + "Nenhuma função encontrada no escopo global.")
-                click.echo(Fore.CYAN + "   > Lembrete: 'deepcheck' analisa o conteúdo de blocos 'def'. A análise de classes ou do corpo do script ainda não é suportada.")
-            return
-
-    # --- Apresentação do Relatório ---
-    for dossier in function_dossiers:
-        header_color = Fore.MAGENTA if dossier['complexity_rank'].lower() == 'altissima' else Fore.RED if dossier['complexity_rank'].lower() == 'alta' else Fore.YELLOW if dossier['complexity_rank'].lower() == 'média' else Fore.GREEN if dossier['complexity_rank'].lower() == 'baixa' else Fore.CYAN if dossier['complexity_rank'].lower() == 'baixissima' else Fore.WHITE
-        click.echo(header_color + Style.BRIGHT + f"\n\n--- Função: '{dossier['name']}' (linha {dossier['lineno']}) ---")
-        click.echo(f"  [Complexidade]: {dossier['complexity']} ({dossier['complexity_rank']})")
-
-        click.echo(Style.DIM + "  [Entradas (Parâmetros)]")
-        if not dossier['params']: click.echo("    - Nenhum parâmetro.")
-        for p in dossier['params']: click.echo(f"    - Nome: {p['name']} (Tipo: {p['type']})")
-
-        click.echo(Style.DIM + "  [Saídas (Pontos de Retorno)]")
-        if not dossier['returns']: click.echo("    - Nenhum ponto de retorno explícito.")
-        for r in dossier['returns']: click.echo(f"    - Linha {r['lineno']}: Retorna {r['type']}")
-
-        click.echo(Fore.YELLOW + "  [Pontos de Risco (Micro Análise de Erros)]")
-        if not dossier['risks']: click.echo("    - Nenhum ponto de risco óbvio detectado.")
-        for risk in dossier['risks']:
-            click.echo(Fore.YELLOW + f"    - AVISO (Linha {risk['lineno']}): {risk['message']}")
-            click.echo(Fore.WHITE + f"      > Detalhe: {risk['details']}")
-
-#atualizado em 2025/09/28-Versão 13.5. Corrigido AttributeError no 'deepcheck' ao analisar parâmetros de função (arg.name -> arg.arg).
-def _analyze_function_flow(tree, content, specific_func=None):
-    """Usa AST para analisar o fluxo de dados e pontos de risco em funções."""
-    dossiers = []
-    try:
-        from radon.visitors import ComplexityVisitor
-    except ImportError:
-        class ComplexityVisitor:
-            def __init__(self, functions): self.functions = []
-            @classmethod
-            def from_code(cls, code): return cls([])
-    
-    visitor = ComplexityVisitor.from_code(content)
-    complexity_map = {f.name: f.complexity for f in visitor.functions}
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef):
-            func_name = node.name
-            
-            if specific_func and func_name != specific_func:
-                continue
-
-            params = []
-            for arg in node.args.args:
-                param_type = ast.unparse(arg.annotation) if arg.annotation else "não anotado"
-                # --- A CORREÇÃO CRUCIAL ESTÁ AQUI ---
-                params.append({'name': arg.arg, 'type': param_type}) # Corrigido de arg.name para arg.arg
-
-            returns = []
-            risks = []
-            for sub_node in ast.walk(node):
-                if isinstance(sub_node, ast.Return) and sub_node.value:
-                    return_type = "um valor literal" if isinstance(sub_node.value, ast.Constant) else "uma variável" if isinstance(sub_node.value, ast.Name) else "o resultado de uma expressão/chamada"
-                    returns.append({'lineno': sub_node.lineno, 'type': return_type})
-                
-                if isinstance(sub_node, ast.Subscript):
-                    if isinstance(sub_node.slice, ast.Constant):
-                        risks.append({
-                            'lineno': sub_node.lineno,
-                            'message': "Acesso a dicionário/lista sem tratamento de chave/índice.",
-                            'details': f"O acesso direto a '{ast.unparse(sub_node)}' pode causar uma 'KeyError' ou 'IndexError'. Considere usar '.get()' para dicionários."
-                        })
-
-            complexity = complexity_map.get(func_name, 0)
-            rank =  "Altissima" if complexity > 20 else "Alta" if complexity > 15 else "Média" if complexity > 10 else "Baixa" if complexity > 5 else "Baixissima"
-
-            dossiers.append({
-                'name': func_name,
-                'lineno': node.lineno,
-                'params': params,
-                'returns': returns,
-                'risks': risks,
-                'complexity': complexity,
-                'complexity_rank': rank
-            })
-            
-    return dossiers
-
-#atualizado em 2025/09/27-Versão 12.5 (Robusta). Motor do 'apicheck' completamente reescrito para ser mais simples e eficaz, corrigindo a falha na detecção de violações de contrato.
-def _analyze_api_calls(file_path, contracts):
-    """Usa AST para analisar um arquivo Python em busca de violações de contrato de API."""
-
-    results = {'summary': {'errors': 0, 'warnings': 0}}
-    try:
-        findings = []
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                tree = ast.parse(f.read(), filename=file_path)
-        except SyntaxError:
-            return [] # Ignora arquivos com erro de sintaxe
-    
-        # Iteramos sobre todos os nós da árvore
-        for node in ast.walk(tree):
-            # Nosso alvo são apenas os nós de chamada de função
-            if not isinstance(node, ast.Call):
-                continue
-    
-            # Reconstruímos o nome completo da função (ex: 'requests.get')
-            func_name_parts = []
-            curr = node.func
-            while isinstance(curr, ast.Attribute):
-                func_name_parts.insert(0, curr.attr)
-                curr = curr.value
-            if isinstance(curr, ast.Name):
-                func_name_parts.insert(0, curr.id)
-            full_func_name = ".".join(func_name_parts)
-            
-            # Verificamos se esta função corresponde a algum dos nossos contratos
-            for contract in contracts:
-                if contract.get('function') != full_func_name:
-                    continue
-    
-                # --- Contrato Encontrado! Agora validamos as regras ---
-                rules = contract.get('rules', {})
-                provided_args = {kw.arg for kw in node.keywords}
-    
-                # Regra 1: required_params
-                for param in rules.get('required_params', []):
-                    if param not in provided_args:
-                        findings.append({
-                            'type': 'error',
-                            'message': f"Chamada para '{full_func_name}' não possui o parâmetro obrigatório '{param}'.",
-                            'details': f"Contrato '{contract['id']}' exige este parâmetro.",
-                            'file': file_path,
-                            'line': node.lineno
-                        })
-    
-                # Regra 2: forbidden_params
-                for param, bad_value in rules.get('forbidden_params', {}).items():
-                    for kw in node.keywords:
-                        # Verificamos se o argumento tem o valor proibido (ex: verify=False)
-                        if kw.arg == param and isinstance(kw.value, ast.Constant) and kw.value.value == bad_value:
-                            findings.append({
-                                'type': 'error',
-                                'message': f"Chamada para '{full_func_name}' usa o valor proibido '{param}={bad_value}'.",
-                                'details': f"Contrato '{contract['id']}' proíbe este uso por razões de segurança.",
-                                'file': file_path,
-                                'line': node.lineno
-                            })
-                                
-        return findings
-    finally:
-        _log_execution('_analyze_api_calls', ".", results, {'file_path': file_path, 'contracts': contracts})
 
 #atualizado em 2025/09/23-Versão 5.5. Tutorial completamente reescrito para incluir todos os comandos da suíte (sync, release, clean, git-clean, guicheck) e melhorar a clareza para novos usuários.
 @cli.command()
@@ -919,69 +719,6 @@ def sync(remote):
 
     click.echo(Fore.GREEN + Style.BRIGHT + "\n[SYNC] Sincronização concluída com sucesso!")
 
-#atualizado em 2025/09/28-Versão 14.0. Refatorado para usar o novo ExecutionLogger.
-@cli.command('git-clean')
-@click.pass_context
-def git_clean(ctx):
-    """Força a remoção de arquivos já rastreados que correspondem ao .gitignore."""
-    # O path e os argumentos são extraídos do contexto do click
-    path = '.'
-    arguments = ctx.params
-
-    with ExecutionLogger('git-clean', path, arguments) as logger:
-        click.echo(Fore.CYAN + "--- [GIT-CLEAN] Procurando por arquivos rastreados indevidamente ---")
-        
-        gitignore_path = '.gitignore'
-        if not os.path.exists(gitignore_path):
-            msg = "Arquivo .gitignore não encontrado no diretório atual."
-            logger.add_finding('error', msg)
-            click.echo(Fore.RED + f"[ERRO] {msg}")
-            return # Encerramos a função, mas o log será escrito pelo __exit__
-
-        try:
-            with open(gitignore_path, 'r', encoding='utf-8', errors='replace') as f:
-                ignore_patterns = [line.strip() for line in f if line.strip() and not line.startswith('#')]
-        except Exception as e:
-            msg = f"Não foi possível ler o arquivo .gitignore: {e}"
-            logger.add_finding('error', msg)
-            click.echo(Fore.RED + f"[ERRO] {msg}"); return
-        
-        tracked_files_str = _run_git_command(['ls-files'], capture_output=True)
-        if tracked_files_str is None:
-            sys.exit(1)
-        tracked_files = tracked_files_str.splitlines()
-    
-        files_to_remove = []
-        for pattern in ignore_patterns:
-            if pattern.endswith('/'):
-                pattern += '*'
-            matches = fnmatch.filter(tracked_files, pattern)
-            if matches:
-                files_to_remove.extend(matches)
-        
-        if not files_to_remove:
-            click.echo(Fore.GREEN + "[OK] Nenhum arquivo rastreado indevidamente encontrado. Seu repositório está limpo!")
-            return
-    
-        click.echo(Fore.YELLOW + "\nOs seguintes arquivos estão sendo rastreados pelo Git, mas correspondem a padrões no seu .gitignore:")
-        for f in files_to_remove:
-            click.echo(f"  - {f}")
-        
-        if click.confirm(Fore.RED + "\nVocê tem certeza de que deseja parar de rastrear (untrack) TODOS estes arquivos?", abort=True):
-            click.echo(Fore.CYAN + "Removendo arquivos do índice do Git...")
-            success = True
-            for f in files_to_remove:
-                if not _run_git_command(['rm', '--cached', f]):
-                    success = False
-            
-            if success:
-                click.echo(Fore.GREEN + "\n[OK] Arquivos removidos do rastreamento com sucesso.")
-                click.echo(Fore.YELLOW + "Suas alterações foram preparadas (staged).")
-                click.echo(Fore.YELLOW + "Para finalizar, execute o seguinte comando:")
-                click.echo(Fore.CYAN + '  doxoade save "Limpeza de arquivos ignorados"')
-            else:
-                click.echo(Fore.RED + "[ERRO] Ocorreu um erro ao remover um ou mais arquivos.")
-
 #atualizado em 2025/09/23-Versão 5.3. Implementa o comando 'git-new' para a primeira publicação de um projeto. Tem como função automatizar o boilerplate de adicionar remote, commitar e fazer o primeiro push. Melhoria: Adicionada verificação se o remote 'origin' já existe.
 @cli.command('git-new')
 @log_command_execution
@@ -1040,65 +777,6 @@ def git_new(message, remote_url):
         click.echo(f"Você pode ver seu repositório em: {remote_url}")
     finally:
         _log_execution('git_new', ".", results, {})
-
-#atualizado em 2025/09/25-Versão 9.2. Corrigida a lógica do '--force' no comando 'save' para ignorar o erro de ambiente mesmo na presença de outros erros.
-@cli.command()
-@log_command_execution
-@click.argument('message')
-@click.option('--force', is_flag=True, help="Força o commit mesmo que o 'check' encontre avisos ou apenas o erro de ambiente.")
-def save(message, force):
-    """Executa um 'commit seguro', protegendo seu repositório de código com erros."""
-    click.echo(Fore.CYAN + "--- [SAVE] Iniciando processo de salvamento seguro ---")
-    click.echo(Fore.YELLOW + "\nPasso 1: Executando 'doxoade check' para garantir a qualidade do código...")
-
-    config = _load_config()
-    ignore_list = config.get('ignore', [])
-    
-    check_command = [sys.executable, '-m', 'doxoade.doxoade', 'check', '.']
-    for folder in ignore_list:
-        check_command.extend(['--ignore', folder])
-
-    check_result = subprocess.run(check_command, capture_output=True, text=True, encoding='utf-8', errors='replace')
-
-    output = check_result.stdout
-    return_code = check_result.returncode
-    has_warnings = "Aviso(s)" in output and "0 Aviso(s)" not in output
-    is_env_error_present = "Ambiente Inconsistente" in output
-    
-    # Contamos quantos erros *reais* existem, além do erro de ambiente.
-    num_errors = int(re.search(r'(\d+) Erro\(s\)', output).group(1)) if re.search(r'(\d+) Erro\(s\)', output) else 0
-    num_non_env_errors = num_errors - 1 if is_env_error_present else num_errors
-
-    # --- NOVA LÓGICA DE DECISÃO ---
-    if return_code != 0:
-        if force and num_non_env_errors == 0:
-            click.echo(Fore.YELLOW + "\n[AVISO] Erro de ambiente ignorado devido ao uso da flag --force.")
-        else:
-            click.echo(Fore.RED + "\n[ERRO] 'doxoade check' encontrou erros críticos. O salvamento foi abortado.")
-            safe_output = output.encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding)
-            print(safe_output)
-            sys.exit(1)
-    
-    if has_warnings and not force:
-        if not click.confirm(Fore.YELLOW + "\n[AVISO] 'doxoade check' encontrou avisos. Deseja continuar com o salvamento mesmo assim?"):
-            click.echo("Salvamento abortado pelo usuário."); sys.exit(0)
-    
-    click.echo(Fore.GREEN + "[OK] Verificação de qualidade concluída.")
-    
-    click.echo(Fore.YELLOW + "\nPasso 2: Verificando se há alterações para salvar...")
-    status_output = _run_git_command(['status', '--porcelain'], capture_output=True)
-    if status_output is None: sys.exit(1)
-        
-    if not status_output:
-        click.echo(Fore.GREEN + "[OK] Nenhuma alteração nova para salvar. A árvore de trabalho está limpa."); return
-
-    click.echo(Fore.YELLOW + f"\nPasso 3: Criando commit com a mensagem: '{message}'...")
-    if not _run_git_command(['commit', '-a', '-m', message]):
-        click.echo(Fore.YELLOW + "Tentativa inicial de commit falhou (pode haver arquivos novos). Tentando com 'git add .'...")
-        if not _run_git_command(['add', '.']): sys.exit(1)
-        if not _run_git_command(['commit', '-m', message]): sys.exit(1)
-        
-    click.echo(Fore.GREEN + Style.BRIGHT + "\n[SAVE] Alterações salvas com sucesso no repositório!")
 
 #atualizado em 2025/09/26-Versão 10.0. Comando 'init' agora suporta publicação automática com a opção '--remote'. Tem como função criar um novo projeto e, opcionalmente, publicá-lo no GitHub em um único passo.
 @cli.command()
@@ -1358,249 +1036,6 @@ def auto(commands):
         click.echo(Fore.RED + Style.BRIGHT + "[ATENÇÃO] Pipeline executado, mas um ou mais passos falharam.")
         sys.exit(1)
 
-#atualizado em 2025/10/03-Versão 28.0. Tem como função executar o diagnóstico. Melhoria: Adicionada a opção '--ignore-finding' para suprimir erros específicos, tornando a análise mais flexível para CI/CD.
-@cli.command()
-@click.argument('path', type=click.Path(exists=True, file_okay=False), default='.')
-@click.option('--ignore', multiple=True, help="Ignora uma pasta. Combina com as do .doxoaderc.")
-@click.option('--format', type=click.Choice(['text', 'json']), default='text', help="Define o formato da saída.")
-@click.option('--fix', is_flag=True, help="Tenta corrigir automaticamente os problemas encontrados.")
-@click.option('--ignore-finding', 'ignore_findings_list', multiple=True, help="Ignora um problema específico pelo seu texto (pode ser parcial).")
-@click.pass_context
-def check(ctx, path, ignore, format, fix, ignore_findings_list):
-    """Executa um diagnóstico completo de ambiente e código no projeto."""
-    arguments = ctx.params
-    
-    with ExecutionLogger('check', path, arguments) as logger:
-        if format == 'text': click.echo(Fore.YELLOW + f"[CHECK] Executando 'doxoade check' no diretório '{os.path.abspath(path)}'...")
-        config = _load_config()
-        final_ignore_list = list(set(config['ignore'] + list(ignore)))
-        
-        # 1. Executa todas as análises normalmente
-        findings_sources = [
-            _check_environment(path),
-            _check_dependencies(path),
-            _check_source_code(path, final_ignore_list, fix_errors=fix, text_format=(format == 'text'))
-        ]
-        for source in findings_sources:
-            for f in source:
-                logger.add_finding(f.get('type','info'), f['message'], details=f.get('details'), file=f.get('file'), line=f.get('line'), snippet=f.get('snippet'))
-        
-        # 2. Filtra os resultados e conta erros críticos
-        critical_errors = 0
-        ignored_hashes = set()
-        for finding in logger.results['findings']:
-            is_ignored = False
-            for ignored_text in ignore_findings_list:
-                if ignored_text in finding['message']:
-                    is_ignored = True
-                    ignored_hashes.add(finding['hash'])
-                    break
-            if not is_ignored and 'ERROR' in finding['type'].upper():
-                critical_errors += 1
-        
-        # 3. Apresenta os resultados com o contexto dos ignorados
-        _present_results(format, logger.results, ignored_hashes)
-        
-        # 4. Decide a saída com base nos erros CRÍTICOS
-        if critical_errors > 0:
-            sys.exit(1)
-
-@cli.command()
-@click.argument('path', type=click.Path(exists=True, file_okay=False), default='.')
-@click.option('--ignore', multiple=True, help="Ignora uma pasta. Combina com as do .doxoaderc.")
-@click.option('--format', type=click.Choice(['text', 'json']), default='text', help="Define o formato da saída.")
-def webcheck(path, ignore, format):
-    """Analisa arquivos .html, .css e .js em busca de problemas comuns."""
-    results = {'summary': {'errors': 0, 'warnings': 0}}
-    try:
-        if format == 'text': click.echo(Fore.YELLOW + f"[WEB] Executando 'doxoade webcheck' no diretório '{os.path.abspath(path)}'...")
-        config = _load_config()
-        final_ignore_list = list(set(config['ignore'] + list(ignore)))
-        results.update({'web_assets': _check_web_assets(path, final_ignore_list)})
-        _update_summary_from_findings(results)
-        _present_results(format, results)
-    except Exception as e:
-        safe_error = str(e).encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding)
-        click.echo(Fore.RED + f"\n[ERRO FATAL] O 'webcheck' falhou inesperadamente: {safe_error}", err=True)
-        results['summary']['errors'] += 1
-    finally:
-        _log_execution(command_name='webcheck', path=path, results=results, arguments={"ignore": list(ignore), "format": format})
-        if results['summary']['errors'] > 0:
-            sys.exit(1)
-
-
-@cli.command('kvcheck')
-@click.argument('path', type=click.Path(exists=True, file_okay=True), required=False, default='.')
-@click.option('--ignore', multiple=True, help="Ignora uma pasta.")
-@click.option('--format', type=click.Choice(['text', 'json']), default='text', help="Define o formato da saída.")
-@click.pass_context
-def kvcheck(ctx, path, ignore, format):
-    """Analisa arquivos .kv em busca de problemas de design comuns."""
-    arguments = ctx.params
-
-    with ExecutionLogger('kvcheck', path, arguments) as logger:
-        if format == 'text': click.echo(Fore.YELLOW + f"[KV] Executando análise de .kv em '{os.path.abspath(path)}'...")
-        config = _load_config()
-        final_ignore_list = list(set(config['ignore'] + list(ignore)))
-        
-        folders_to_ignore = set([item.lower().strip('/') for item in final_ignore_list] + ['venv', 'build', 'dist', '.git'])
-        files_to_check = []
-        if os.path.isdir(path):
-            for root, dirs, files in os.walk(path, topdown=True):
-                dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
-                for file in files:
-                    if file.endswith('.kv'):
-                        files_to_check.append(os.path.join(root, file))
-        elif path.endswith('.kv'):
-            files_to_check.append(path)
-
-        for file_path in files_to_check:
-            findings = _analyze_kv_file(file_path)
-            for f in findings:
-                logger.add_finding(f['type'], f['message'], details=f.get('details'), file=f.get('file'), line=f.get('line'), snippet=f.get('snippet'))
-
-        _present_results(format, logger.results)
-        
-        if logger.results['summary']['errors'] > 0:
-            sys.exit(1)
-
-#atualizado em 2025/10/02-Versão 20.1. Tem como função analisar arquivos .kv. Melhoria: A regex do lexer foi corrigida para ignorar comentários no final da linha, consertando a falha de detecção.
-def _analyze_kv_file(file_path):
-    """Analisa um único arquivo .kv em busca de problemas conhecidos."""
-    findings = []
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-        
-        # Padrão para encontrar um CodeInput onde o lexer é uma string literal
-        lexer_regex = re.compile(r'^\s+lexer:\s*([\'"]\w+[\'"])')
-        
-        in_code_input = False
-        for i, line_content in enumerate(lines):
-            line_num = i + 1
-            # Se encontrarmos um widget CodeInput, ativamos a flag
-            if 'CodeInput:' in line_content:
-                in_code_input = True
-                continue
-
-            if in_code_input:
-                match = lexer_regex.match(line_content)
-                if match:
-                    findings.append({
-                        'type': 'error',
-                        'message': f"A propriedade 'lexer' está definida como uma string ({match.group(1)}), o que causará um AttributeError.",
-                        'details': "O lexer deve ser um objeto (ex: PythonLexer), importado no .py e passado para o .kv.",
-                        'file': file_path,
-                        'line': line_num,
-                        'snippet': _get_code_snippet(file_path, line_num, 1)
-                    })
-                # Se a indentação voltar ou encontrarmos outro widget, saímos do bloco
-                if not line_content.startswith((' ', '\t', '#', '\n')) and len(line_content.strip()) > 0:
-                    in_code_input = False
-                    
-    except Exception as e:
-        findings.append({'type': 'error', 'message': f"Falha ao analisar o arquivo .kv: {e}", 'file': file_path})
-        
-    return findings
-
-#adicionado em 2025/10/02-Versão 22.0. Tem como função analisar estaticamente os padrões de regex em um arquivo para encontrar erros de sintaxe em tempo de compilação.
-def _analyze_regex_risks(file_path, content):
-    """Analisa o uso da biblioteca 're' em busca de padrões inválidos."""
-    findings = []
-    try:
-        tree = ast.parse(content, filename=file_path)
-    except SyntaxError:
-        return findings # Ignora se o próprio arquivo .py tiver erro de sintaxe
-
-    # Funções da biblioteca 're' que recebem um padrão como primeiro argumento
-    regex_functions = {'compile', 'search', 'match', 'fullmatch', 'split', 'findall', 'finditer', 'sub', 'subn'}
-
-    for node in ast.walk(tree):
-        # Procuramos por chamadas de função (ex: re.sub(...))
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-            # Verificamos se a chamada é para uma das nossas funções alvo
-            if node.func.attr in regex_functions:
-                # O alvo deve ser o módulo 're'
-                if isinstance(node.func.value, ast.Name) and node.func.value.id == 're':
-                    if node.args:
-                        pattern_node = node.args[0]
-                        # A análise só funciona se o padrão for uma string literal
-                        if isinstance(pattern_node, ast.Constant) and isinstance(pattern_node.value, str):
-                            pattern_str = pattern_node.value
-                            try:
-                                # Tentamos compilar o padrão. Se falhar, encontramos um erro.
-                                re.compile(pattern_str)
-                            except re.error as e:
-                                findings.append({
-                                    'type': 'error',
-                                    'message': f"Padrão de regex inválido detectado estaticamente: {e.msg}",
-                                    'details': f"A expressão '{pattern_str}' na chamada para 're.{node.func.attr}' irá causar um 're.error' em tempo de execução.",
-                                    'file': file_path,
-                                    'line': node.lineno,
-                                    'snippet': _get_code_snippet(file_path, node.lineno)
-                                })
-    return findings
-
-@cli.command('encoding')
-@click.argument('targets', nargs=-1, required=True)
-@click.pass_context
-def encoding(ctx, targets):
-    """Altera a codificação de arquivos para um formato de destino (ex: UTF-8)."""
-    if len(targets) < 2:
-        click.echo(Fore.RED + "[ERRO] Uso incorreto. Exemplo: doxoade encoding *.md UTF-8")
-        return
-
-    input_targets = targets[:-1]
-    target_encoding_str = targets[-1]
-    
-    # Normaliza nomes de encoding comuns
-    encoding_aliases = {
-        'utf8': 'utf-8', 'unicode': 'utf-8',
-        'utf16': 'utf-16', 'utf32': 'utf-32',
-        'latin1': 'latin-1', 'iso-8859-1': 'latin-1'
-    }
-    target_encoding = encoding_aliases.get(target_encoding_str.lower(), target_encoding_str)
-
-    arguments = {'targets': input_targets, 'encoding': target_encoding}
-    with ExecutionLogger('encoding', '.', arguments) as logger:
-        click.echo(Fore.CYAN + f"--- [ENCODING] Convertendo arquivos para {target_encoding.upper()} ---")
-
-        files_to_process = set()
-        for target in input_targets:
-            # pathlib.Path.glob lida com wildcards de forma elegante
-            found_files = list(Path('.').rglob(target))
-            if not found_files and '*' not in target: # Se não encontrou e não era wildcard, talvez seja um arquivo exato
-                 if Path(target).is_file(): files_to_process.add(Path(target))
-            for p in found_files:
-                if p.is_file():
-                    files_to_process.add(p)
-
-        if not files_to_process:
-            logger.add_finding('warning', f"Nenhum arquivo encontrado para os alvos: {', '.join(input_targets)}")
-            click.echo(Fore.YELLOW + "Nenhum arquivo correspondente encontrado.")
-            return
-
-        success_count, skipped_count, error_count = 0, 0, 0
-        for file_path in sorted(list(files_to_process)):
-            status, message = _change_file_encoding(file_path, target_encoding)
-            
-            if status == 'success':
-                success_count += 1
-                click.echo(Fore.GREEN + f"[CONVERTIDO] '{file_path}' -> {message}")
-            elif status == 'skipped':
-                skipped_count += 1
-                click.echo(Fore.WHITE + Style.DIM + f"[IGNORADO]    '{file_path}' já está em {target_encoding.upper()}.")
-            else: # 'error'
-                error_count += 1
-                logger.add_finding('error', message, file=str(file_path))
-                click.echo(Fore.RED + f"[ERRO]        '{file_path}': {message}")
-        
-        click.echo(Fore.CYAN + "\n--- Conversão Concluída ---")
-        click.echo(f"Processados: {success_count} | Ignorados: {skipped_count} | Erros: {error_count}")
-        
-        if logger.results['summary']['errors'] > 0:
-            sys.exit(1)
-
 #adicionado em 2025/10/02-Versão 25.0. Tem como função analisar e exibir um arquivo de trace de sessão. Melhoria: Encontra automaticamente o trace mais recente se nenhum arquivo for especificado.
 @cli.command('show-trace')
 @click.argument('filepath', type=click.Path(exists=True, dir_okay=False), required=False)
@@ -1664,49 +1099,6 @@ def _find_latest_trace_file():
         return str(latest_file)
     except Exception:
         return None
-
-def _change_file_encoding(file_path, new_encoding):
-    """Lê um arquivo, tenta detectar seu encoding, e o reescreve de forma segura."""
-    # Lista de encodings para tentar, em ordem de probabilidade
-    encodings_to_try = [new_encoding, 'utf-8', sys.getdefaultencoding(), 'cp1252', 'latin-1']
-    
-    source_encoding = None
-    content = None
-
-    for enc in encodings_to_try:
-        try:
-            with open(file_path, 'r', encoding=enc) as f:
-                content = f.read()
-            source_encoding = enc
-            break
-        except UnicodeDecodeError:
-            continue
-        except (IOError, OSError) as e:
-            return 'error', f"Não foi possível ler o arquivo: {e}"
-
-    if not source_encoding:
-        return 'error', "Não foi possível detectar a codificação original do arquivo."
-
-    if source_encoding.lower() == new_encoding.lower():
-        return 'skipped', ""
-
-    # Escrita segura usando um arquivo temporário
-    try:
-        # Cria um arquivo temporário no mesmo diretório para garantir que a substituição seja atômica
-        with tempfile.NamedTemporaryFile(mode='w', encoding=new_encoding, delete=False, dir=os.path.dirname(file_path)) as temp_file:
-            temp_filepath = temp_file.name
-            temp_file.write(content)
-        
-        # Substitui o arquivo original pelo temporário
-        os.replace(temp_filepath, file_path)
-        return 'success', f"{source_encoding.upper()} para {new_encoding.upper()}"
-    except (IOError, OSError) as e:
-        return 'error', f"Falha ao escrever o novo arquivo: {e}"
-    except Exception as e:
-        # Limpeza em caso de erro inesperado
-        if 'temp_filepath' in locals() and os.path.exists(temp_filepath):
-            os.remove(temp_filepath)
-        return 'error', f"Ocorreu um erro inesperado: {e}"
 
 #atualizado em 2025/10/05-Versão 28.9. Tem como função executar scripts. Melhoria: Corrigido o NameError ao reordenar a criação do logger para o início da função, garantindo que ele esteja sempre disponível.
 @cli.command(context_settings=dict(ignore_unknown_options=True))
@@ -1870,37 +1262,42 @@ def _run_traced_session_windows(command, logger):
 @log_command_execution
 @click.option('--force', '-f', is_flag=True, help="Força a limpeza sem pedir confirmação.")
 def clean(force):
-    """Remove arquivos de cache e build (__pycache__, build/, dist/, *.spec)."""
-
-    TARGET_DIRS = ["__pycache__", "build", "dist", ".pytest_cache", ".tox"]
-    TARGET_PATTERNS = [re.compile(r".*\.egg-info$"), re.compile(r".*\.spec$")]
+    #2025/10/11 - 34.0(Ver), 2.0(Fnc). Refatorada para reduzir complexidade.
+    #A função tem como objetivo remover arquivos de cache e build.
     click.echo(Fore.CYAN + "-> [CLEAN] Procurando por artefatos de build e cache...")
-    targets_to_delete = []
-    for root, dirs, files in os.walk('.', topdown=True):
-        # Correção: A lógica estava invertida. Agora removemos os diretórios 'venv'.
-        dirs[:] = [d for d in dirs if 'venv' not in d and '.git' not in d]
-        for name in list(dirs):
-            if name in TARGET_DIRS or any(p.match(name) for p in TARGET_PATTERNS):
-                targets_to_delete.append(os.path.join(root, name))
-        for name in files:
-            if any(p.match(name) for p in TARGET_PATTERNS):
-                targets_to_delete.append(os.path.join(root, name))
+    
+    TARGET_PATTERNS = ["__pycache__", "build", "dist", ".pytest_cache", ".tox", "*.egg-info", "*.spec"]
+    
+    # Usamos Path.glob para encontrar todos os alvos de uma vez
+    all_paths = [p for pattern in TARGET_PATTERNS for p in Path('.').rglob(pattern)]
+    
+    # Filtramos para garantir que não estamos deletando dentro de venv
+    targets_to_delete = {p for p in all_paths if 'venv' not in p.parts and '.git' not in p.parts}
+
     if not targets_to_delete:
         click.echo(Fore.GREEN + "[OK] O projeto já está limpo."); return
+
     click.echo(Fore.YELLOW + f"Encontrados {len(targets_to_delete)} itens para remover:")
-    for target in targets_to_delete: click.echo(f"  - {target}")
-    if force or click.confirm(f"\n{Fore.YELLOW}Remover permanentemente estes itens?"):
-        deleted_count = 0
-        click.echo(Fore.CYAN + "\n-> Iniciando a limpeza...")
-        for target in targets_to_delete:
-            try:
-                if os.path.isdir(target): shutil.rmtree(target); click.echo(f"  {Fore.RED}Removido diretório: {target}")
-                elif os.path.isfile(target): os.remove(target); click.echo(f"  {Fore.RED}Removido arquivo: {target}")
-                deleted_count += 1
-            except OSError as e: click.echo(Fore.RED + f"  Erro ao remover {target}: {e}", err=True)
-        click.echo(Fore.GREEN + f"\n Limpeza concluída! {deleted_count} itens foram removidos.")
-    else:
-        click.echo(Fore.CYAN + "\nOperação cancelada.")
+    for target in sorted(targets_to_delete): click.echo(f"  - {target}")
+
+    if not force and not click.confirm(f"\n{Fore.YELLOW}Remover permanentemente estes itens?"):
+        click.echo(Fore.CYAN + "\nOperação cancelada."); return
+
+    click.echo(Fore.CYAN + "\n-> Iniciando a limpeza...")
+    deleted_count = 0
+    for target in sorted(targets_to_delete, reverse=True): # Deletamos do mais profundo para o mais raso
+        try:
+            if target.is_dir():
+                shutil.rmtree(target)
+                click.echo(f"  {Fore.RED}Removido diretório: {target}")
+            elif target.is_file():
+                target.unlink()
+                click.echo(f"  {Fore.RED}Removido arquivo: {target}")
+            deleted_count += 1
+        except OSError as e:
+            click.echo(Fore.RED + f"  Erro ao remover {target}: {e}", err=True)
+    
+    click.echo(Fore.GREEN + f"\n Limpeza concluída! {deleted_count} itens foram removidos.")
     
 #atualizado em 2025/09/30-Versão 18.3. Tem como função escrever o log. Melhoria: Corrigido o bug crítico que impedia o salvamento dos 'findings'. A função agora consolida os resultados de todas as categorias de análise em uma única lista antes de salvar.
 @cli.command()
@@ -1934,184 +1331,6 @@ def log(lines, snippets):
                 click.echo(Fore.YELLOW + f"Conteúdo da linha: {line.strip()}")
     except Exception as e:
         click.echo(Fore.RED + f"Ocorreu um erro ao ler o arquivo de log: {e}", err=True)
-
-# =============================================================================
-# --- INÍCIO DO BLOCO DE ANÁLISE DE GUI (VERSÃO FINAL) ---
-# =============================================================================
-
-#atualizado em 2025/10/01-Versão 19.2. Melhoria: A passagem de dados para o logger agora inclui os snippets de código, completando a funcionalidade.
-@cli.command()
-@click.argument('path', type=click.Path(exists=True, file_okay=True), required=False, default='.')
-@click.option('--ignore', multiple=True, help="Ignora uma pasta. Combina com as do .doxoaderc.")
-@click.option('--format', type=click.Choice(['text', 'json']), default='text', help="Define o formato da saída.")
-@click.pass_context
-def guicheck(ctx, path, ignore, format):
-    """Analisa arquivos .py em busca de problemas de GUI (Tkinter e Kivy)."""
-    arguments = ctx.params
-
-    with ExecutionLogger('guicheck', path, arguments) as logger:
-        if format == 'text': click.echo(Fore.YELLOW + f"[GUI] Executando análise de GUI em '{os.path.abspath(path)}'...")
-        config = _load_config()
-        final_ignore_list = list(set(config['ignore'] + list(ignore)))
-        
-        gui_findings = _check_gui_files(path, final_ignore_list)
-        for f in gui_findings:
-            logger.add_finding(f['type'], f['message'], details=f.get('details'), file=f.get('file'), line=f.get('line'), ref=f.get('ref'), snippet=f.get('snippet'))
-
-        _present_results(format, logger.results)
-        
-        if logger.results['summary']['errors'] > 0:
-            sys.exit(1)
-
-def _check_gui_files(path, ignore_list=None):
-    """(Gerente) Detecta o framework de GUI e delega a análise para o especialista apropriado."""
-    folders_to_ignore = set([item.lower().strip('/') for item in ignore_list or []] + ['venv', 'build', 'dist', '.git'])
-    files_to_check = []
-    
-    if os.path.isdir(path):
-        for root, dirs, files in os.walk(path, topdown=True):
-            # --- LÓGICA DE IGNORE CORRETA E ROBUSTA ---
-            dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
-            
-            for file in files:
-                if file.endswith('.py'):
-                    files_to_check.append(os.path.join(root, file))
-    elif path.endswith('.py') and not any(ignored in path for ignored in folders_to_ignore):
-        files_to_check.append(path)
-    
-    findings = []
-    for file_path in files_to_check:
-        try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
-            
-            framework = "unknown"
-            if "import tkinter" in content or "from tkinter" in content:
-                framework = "tkinter"
-            elif "import kivy" in content or "from kivy" in content:
-                framework = "kivy"
-
-            if framework != "unknown":
-                tree = ast.parse(content, filename=file_path)
-                
-                if framework == "tkinter":
-                    # Adicione aqui a chamada para a função de layout recuperada
-                    findings.extend(_analyze_tkinter_layout(tree, file_path))
-                elif framework == "kivy":
-                    findings.extend(_analyze_kivy_risks(tree, file_path))
-        except SyntaxError as e:
-            findings.append({
-                'type': 'error',
-                'message': f"Erro de sintaxe impede a análise: {e.msg}",
-                'details': "A análise de lógica só pode ser feita em arquivos sintaticamente corretos.",
-                'file': file_path,
-                'line': e.lineno,
-                'snippet': _get_code_snippet(file_path, e.lineno) # <-- ADICIONAR
-            })
-            continue # Pula para o próximo arquivo após reportar o erro.
-        except IOError:
-            # Mantemos o 'continue' silencioso para erros de leitura de arquivo.
-            continue
-    return findings
-
-#atualizado em 2025/10/01-Versão 19.0. Melhoria: Agora adiciona snippets de código aos findings.
-def _analyze_kivy_risks(tree, file_path):
-    """(Especialista Kivy) Analisa uma AST em busca de riscos comuns de Kivy."""
-    findings = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-
-        # --- LÓGICA DE DETECÇÃO ÚNICA E ROBUSTA ---
-        is_button_call = False
-        func_node = node.func
-        
-        # Caso 1: Chamada direta -> Button(...)
-        if isinstance(func_node, ast.Name) and func_node.id == 'Button':
-            is_button_call = True
-        # Caso 2: Chamada de atributo -> uix.Button(...)
-        elif isinstance(func_node, ast.Attribute) and func_node.attr == 'Button':
-            is_button_call = True
-        
-        if is_button_call:
-            # Verifica se algum keyword argument começa com 'on_'
-            defined_events = {kw.arg for kw in node.keywords if kw.arg.startswith('on_')}
-            
-            # Se não encontrar 'on_press' ou 'on_release', reporta o aviso.
-            if not ('on_press' in defined_events or 'on_release' in defined_events):
-                findings.append({
-                    'type': 'warning',
-                    'message': "Widget de Botão Kivy não parece ter um evento de ação ('on_press' ou 'on_release').",
-                    'details': "Um botão sem ação pode indicar uma funcionalidade incompleta.",
-                    'file': file_path,
-                    'line': node.lineno,
-                    'snippet': _get_code_snippet(file_path, node.lineno) # <-- ADICIONAR
-                })
-    return findings
-
-def _analyze_tkinter_layout(tree, file_path):
-    #2025/10/11 - 33.0(Ver), 2.0(Fnc). Refatorada para reduzir complexidade.
-    #A função agora atua como um "gerente" que orquestra as três fases da análise de layout.
-    widget_parent_map = _build_widget_parent_map(tree)
-    parent_layouts, grid_configs = _collect_layout_data(tree, widget_parent_map)
-    findings = _perform_layout_analysis(parent_layouts, grid_configs, file_path)
-    return findings
-
-def _build_widget_parent_map(tree):
-    #2025/10/11 - 33.0(Ver), 1.0(Fnc). Nova função auxiliar.
-    #A função tem como objetivo fazer a "Primeira Passagem" na AST para mapear a hierarquia dos widgets.
-    widget_parent_map = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call) and node.value.args:
-            parent_node = node.value.args[0]
-            parent_name = ast.unparse(parent_node)
-            
-            if hasattr(node.targets[0], 'id') or hasattr(node.targets[0], 'attr'):
-                widget_name = ast.unparse(node.targets[0])
-                widget_parent_map[widget_name] = parent_name
-    return widget_parent_map
-
-def _collect_layout_data(tree, widget_parent_map):
-    #2025/10/11 - 33.0(Ver), 1.0(Fnc). Nova função auxiliar.
-    #A função tem como objetivo fazer a "Segunda Passagem" para coletar dados de layout e configuração de grid.
-    parent_layouts = {}
-    grid_configs = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-            widget_name = ast.unparse(node.func.value)
-            parent_name = widget_parent_map.get(widget_name)
-
-            if not parent_name:
-                continue
-
-            if node.func.attr in ['pack', 'grid']:
-                parent_layouts.setdefault(parent_name, {}).setdefault(node.func.attr, []).append(node.lineno)
-
-            if node.func.attr in ['rowconfigure', 'columnconfigure']:
-                has_weight = any(kw.arg == 'weight' and isinstance(kw.value, ast.Constant) and kw.value.value > 0 for kw in node.keywords)
-                if has_weight and node.args and isinstance(node.args[0], ast.Constant):
-                    config_type = 'rows_weighted' if node.func.attr == 'rowconfigure' else 'cols_weighted'
-                    grid_configs.setdefault(parent_name, {'rows_weighted': set(), 'cols_weighted': set()})[config_type].add(node.args[0].value)
-    return parent_layouts, grid_configs
-
-def _perform_layout_analysis(parent_layouts, grid_configs, file_path):
-    #2025/10/11 - 33.0(Ver), 1.0(Fnc). Nova função auxiliar.
-    #A função tem como objetivo fazer a "Análise Final" sobre os dados coletados para encontrar os problemas.
-    findings = []
-    for parent, layouts in parent_layouts.items():
-        if len(layouts) > 1:
-            all_lines = [line for manager_lines in layouts.values() for line in manager_lines]
-            line_report = min(all_lines) if all_lines else None
-            findings.append({'type': 'error', 'message': f"Uso misto de gerenciadores ({', '.join(layouts.keys())}) no pai '{parent}'.", 'file': file_path, 'line': line_report})
-
-        if 'grid' in layouts and (parent not in grid_configs or not (grid_configs[parent]['rows_weighted'] or grid_configs[parent]['cols_weighted'])):
-            line_report = min(layouts['grid']) if layouts['grid'] else None
-            findings.append({'type': 'warning', 'message': f"Pai '{parent}' usa .grid() mas não configura 'weight'.", 'details': "Layout não será responsivo.", 'file': file_path, 'line': line_report})
-    return findings
-
-# =============================================================================
-# --- FIM DO BLOCO DE ANÁLISE DE GUI ---
-# =============================================================================
 
 # -----------------------------------------------------------------------------
 # FUNÇÕES AUXILIARES
@@ -2206,189 +1425,6 @@ def _display_log_entry(entry, index, total, show_snippets=False):
             # ----------------------------------------
     click.echo("")
     
-#atualizado em 2025/09/16-V23. Nova função auxiliar para extrair trechos de código de arquivos, enriquecendo os logs.
-def _get_code_snippet(file_path, line_number, context_lines=2):
-    """
-    Extrai um trecho de código de um arquivo, centrado em uma linha específica.
-    Retorna um dicionário {numero_da_linha: 'código'} ou None se não for possível.
-    """
-    if not line_number or not isinstance(line_number, int) or line_number <= 0:
-        return None
-    try:
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            lines = f.readlines()
-        
-        start = max(0, line_number - context_lines - 1)
-        end = min(len(lines), line_number + context_lines)
-        
-        snippet = {}
-        for i in range(start, end):
-            # Armazena o número da linha (1-indexed) e o conteúdo da linha (sem o \n)
-            snippet[i + 1] = lines[i].rstrip('\n')
-            
-        return snippet
-    except (IOError, IndexError):
-        # Retorna None se o arquivo não puder ser lido ou a linha não existir
-        return None
-
-def _check_environment(path):
-    """Verifica o ambiente e retorna uma lista de problemas."""
-    expected = os.path.abspath(os.path.join(path, 'venv', 'Scripts' if os.name == 'nt' else 'bin', 'python.exe' if os.name == 'nt' else 'python'))
-    current = os.path.abspath(sys.executable)
-    if current.lower() != expected.lower():
-        return [{'type': 'error', 'message': 'Ambiente Inconsistente!', 'details': f'Terminal usa: {current}\n   > Projeto espera: {expected}', 'ref': 'OTRAN-Bug#2'}]
-    return []
-
-#atualizado em 2025/09/16-V23. Integração com _get_code_snippet para adicionar contexto de código aos findings.
-def _check_dependencies(path):
-    """Verifica requirements.txt e retorna uma lista de problemas com snippets."""
-    findings = []
-    req_file = os.path.join(path, 'requirements.txt')
-    if not os.path.exists(req_file):
-        return [{'type': 'warning', 'message': "Arquivo 'requirements.txt' não encontrado."}]
-    CRITICAL_PACKAGES = ['numpy', 'opencv-python', 'Pillow']
-    with open(req_file, 'r', encoding='utf-8') as f:
-        # Usamos readlines() para ter acesso às linhas para o snippet
-        lines = f.readlines()
-
-    for i, line_content in enumerate(lines):
-        line_num = i + 1
-        line = line_content.strip()
-        if line and not line.startswith('#'):
-            for pkg in CRITICAL_PACKAGES:
-                if line.lower().startswith(pkg) and not any(c in line for c in '==<>~'):
-                    finding = {
-                        'type': 'warning', 
-                        'message': f"Pacote crítico '{pkg}' não tem versão fixada.", 
-                        'details': "Considere fixar a versão (ex: 'numpy<2.0').", 
-                        'ref': 'OTM-Bug#2', 
-                        'file': req_file, 
-                        'line': line_num
-                    }
-                    # Adiciona o snippet da linha específica
-                    finding['snippet'] = {line_num: line}
-                    findings.append(finding)
-    return findings
-    
-#atualizado em 2025/10/02-Versão 22.0. Tem como função analisar o código fonte. Melhoria: Agora invoca o _analyze_regex_risks para encontrar erros de sintaxe em expressões regulares.
-def _check_source_code(path, ignore_list=None, fix_errors=False, text_format=True):
-    """Analisa arquivos .py e retorna uma lista de problemas."""
-    findings = []
-    
-    # --- LÓGICA DE IGNORE CORRIGIDA E SIMPLIFICADA ---
-    # Nós garantimos que 'venv' e outras pastas padrão estejam sempre na lista de ignorados.
-    folders_to_ignore = set([item.lower().strip('/') for item in ignore_list or []] + ['venv', 'build', 'dist', '.git'])
-    files_to_check = []
-
-    for root, dirs, files in os.walk(path, topdown=True):
-        # A forma correta e robusta de ignorar diretórios é modificar a lista 'dirs' in-place.
-        # Isso impede que o 'os.walk' sequer entre nessas pastas.
-        dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
-        
-        for file in files:
-            if file.endswith('.py'):
-                files_to_check.append(os.path.join(root, file))
-
-    unsafe_path_regex = re.compile(r'[^rR]"[a-zA-Z]:\\[^"]*"')
-
-    for file_path in files_to_check:
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
-            original_lines = content.splitlines()
-        
-        output_stream = StringIO()
-        reporter = pyflakes_api.modReporter.Reporter(output_stream, output_stream)
-        pyflakes_api.check(content, file_path, reporter)
-        pyflakes_output = output_stream.getvalue().strip()
-        
-        if pyflakes_output:
-            lines_to_remove = set()
-            for line_error in pyflakes_output.splitlines():
-                try:
-                    parts = line_error.split(':', 2)
-                    line_num = int(parts[1])
-                    message_text = parts[2].strip()
-                except (IndexError, ValueError):
-                    line_num, message_text = 'N/A', line_error
-
-                if "' imported but unused" in message_text and fix_errors:
-                    lines_to_remove.add(line_num)
-                else:
-                    finding = {'type': 'error', 'message': message_text, 'ref': 'Pyflakes', 'file': file_path, 'line': line_num}
-                    finding['snippet'] = _get_code_snippet(file_path, line_num)
-                    findings.append(finding)
-            
-            if lines_to_remove:
-                new_lines = [line for i, line in enumerate(original_lines) if (i + 1) not in lines_to_remove]
-                with open(file_path, 'w', encoding='utf-8') as f: f.write("\n".join(new_lines))
-                if text_format: click.echo(Fore.GREEN + f"   [FIXED] Em '{file_path}': Removidas {len(lines_to_remove)} importações não utilizadas.")
-        
-        if unsafe_path_regex.search(content):
-            findings.append({'type': 'warning', 'message': 'Possível caminho de arquivo inseguro (use C:/ ou r"C:\\")', 'ref': 'ORI-Bug#2', 'file': file_path})
-        
-        # --- INTEGRAÇÃO DO NOVO ANALISADOR ---
-        findings.extend(_analyze_regex_risks(file_path, content))
-
-    return findings
-    
-def _check_web_assets(path, ignore_list=None):
-    """Analisa arquivos web e retorna uma lista de problemas."""
-    findings = []
-    folders_to_ignore = set([item.lower().strip('/') for item in ignore_list or []] + ['venv', 'build', 'dist', '.git'])
-    files_to_check = []
-    for root, dirs, files in os.walk(path):
-        dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
-        for file in files:
-            if file.endswith(('.html', '.htm', '.css', '.js')):
-                files_to_check.append(os.path.join(root, file))
-    
-    for file_path in files_to_check:
-        if file_path.endswith(('.html', '.htm')): findings.extend(_analyze_html_file(file_path))
-        elif file_path.endswith('.css'): findings.extend(_analyze_css_file(file_path))
-        elif file_path.endswith('.js'): findings.extend(_analyze_js_file(file_path))
-    return findings
-
-# -----------------------------------------------------------------------------
-# FUNÇÕES DE ANÁLISE ESPECÍFICAS (COLETA DE DADOS)
-# -----------------------------------------------------------------------------
-
-def _analyze_html_file(file_path):
-    findings = []
-    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f: content = f.read()
-    soup = BeautifulSoup(content, 'lxml')
-    for tag in soup.find_all('a', href=True):
-        href = tag['href']
-        if any(p in href for p in ['{{', '{%']) or href.startswith(('http', '#', 'mailto:', 'javascript:')): continue
-        target = os.path.normpath(os.path.join(os.path.dirname(file_path), href))
-        if not os.path.exists(target):
-            findings.append({'type': 'error', 'message': f"Link quebrado para '{href}'", 'file': file_path})
-    for tag in soup.find_all('img', alt=None):
-        findings.append({'type': 'warning', 'message': f"Imagem sem atributo 'alt' (src: {tag.get('src', 'N/A')[:50]}...)", 'file': file_path})
-    return findings
-
-def _analyze_css_file(file_path):
-    findings = []
-    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f: content = f.read()
-    if content.lower().count('!important') > 3:
-        findings.append({'type': 'warning', 'message': "Uso excessivo de '!important'", 'details': "Pode indicar problemas de especificidade.", 'file': file_path})
-    if re.search(r'^\s*#\w|[\{,]\s*#\w', content):
-        findings.append({'type': 'warning', 'message': "Seletor de ID ('#') encontrado.", 'details': "Pode criar regras muito específicas e difíceis de manter.", 'file': file_path})
-    for match in re.finditer(r'url\(([^)]+)\)', content):
-        url_path = match.group(1).strip(' \'"')
-        if url_path.startswith(('data:', 'http', '//', '#')): continue
-        target = os.path.normpath(os.path.join(os.path.dirname(file_path), url_path))
-        if not os.path.exists(target):
-            findings.append({'type': 'error', 'message': f"Link 'url()' quebrado para '{url_path}'", 'file': file_path})
-    return findings
-
-def _analyze_js_file(file_path):
-    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f: content = f.read()
-    try:
-        esprima.parseScript(content)
-        return []
-    except esprima.Error as e:
-        return [{'type': 'error', 'message': f"Erro de sintaxe JS: {e.message}", 'file': file_path, 'line': e.lineNumber}]
-
 # -----------------------------------------------------------------------------
 # FUNÇÕES DE APRESENTAÇÃO E DIAGNÓSTICO
 # -----------------------------------------------------------------------------
@@ -2415,6 +1451,15 @@ def _analyze_traceback(stderr_output):
 # --- REGISTRO DE PLUGINS ---
 cli.add_command(optimize)
 cli.add_command(health)
+cli.add_command(check)
+cli.add_command(guicheck)
+cli.add_command(webcheck)
+cli.add_command(kvcheck)
+cli.add_command(encoding)
+cli.add_command(apicheck)
+cli.add_command(deepcheck)
+cli.add_command(save)
+cli.add_command(git_clean)
 
 if __name__ == '__main__':
     try:

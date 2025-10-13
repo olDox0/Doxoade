@@ -5,6 +5,7 @@ lxml
 cssutils
 esprima
 pyflakes
+toml
 
 # Ferramentas de Análise de Saúde (adicionadas pelo doxoade)
 radon
