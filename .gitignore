@@ -21,7 +21,8 @@ dist/
 credentials.json
 token.json
 config.json
-d.bat
+#doxoade.bat
+*.log
 
 # Arquivos de Configuração de IDE
 .vscode/
