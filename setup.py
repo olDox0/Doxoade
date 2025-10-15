@@ -1,15 +1,19 @@
 from setuptools import setup, find_packages
 
-# Lê o conteúdo do requirements.txt para as dependências
-with open('requirements.txt') as f:
+# Lê o conteúdo do requirements.txt de forma segura
+with open('requirements.txt', 'r', encoding='utf-8') as f:
     requirements = f.read().splitlines()
+
+# Lê o conteúdo do README.md de forma segura
+with open('README.md', 'r', encoding='utf-8') as f:
+    long_description = f.read()
 
 setup(
     name='doxoade',
     version='1.0.0',
     author='olDox222',
-    description='olDox222 Advanced Development Environment - Ferramenta de análise de projetos Python',
-    long_description=open('README.md').read(),
+    description='olDox222 Advanced Development Environment',
+    long_description=long_description,  # Usa a variável que lemos com segurança
     long_description_content_type='text/markdown',
     packages=find_packages(),
     include_package_data=True,
@@ -40,4 +44,4 @@ setup(
         'Operating System :: OS Independent',
     ],
     python_requires='>=3.8',
-)   
+)
