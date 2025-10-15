@@ -35,9 +35,8 @@ def check(ctx, path, ignore, format, fix, ignore_findings_list):
         final_ignore_list = list(set(config.get('ignore', []) + list(ignore)))
         
         findings_sources = [
-            _check_environment(path),
             _check_dependencies(path),
-            _check_source_code(path, final_ignore_list, fix_errors=fix, text_format=(format == 'text'))
+            _check_source_code(path, final_ignore_list, fix_errors=fix)
         ]
         for source in findings_sources:
             for f in source:
@@ -56,15 +55,6 @@ def check(ctx, path, ignore, format, fix, ignore_findings_list):
         
         if critical_errors > 0:
             sys.exit(1)
-
-def _check_environment(path):
-    #2025/10/11 - 34.0(Ver), 1.0(Fnc). Função movida para plugin.
-    #A função tem como objetivo verificar a consistência do ambiente virtual.
-    expected = os.path.abspath(os.path.join(path, 'venv', 'Scripts' if os.name == 'nt' else 'bin', 'python.exe' if os.name == 'nt' else 'python'))
-    current = os.path.abspath(sys.executable)
-    if current.lower() != expected.lower():
-        return [{'type': 'error', 'message': 'Ambiente Inconsistente!', 'details': f'Terminal usa: {current}\n   > Projeto espera: {expected}'}]
-    return []
 
 def _check_dependencies(path):
     #2025/10/11 - 34.0(Ver), 1.0(Fnc). Função movida para plugin.
