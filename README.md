@@ -67,6 +67,15 @@ Após a instalação, o comando `doxoade` estará disponível em qualquer novo t
 
 ---
 
+## Modo de Uso Avançado e Advertências
+
+### Acesso Universal (Adicionando ao PATH)
+
+A `doxoade` foi projetada para ser uma ferramenta de sistema, como o `git`. Para torná-la acessível de qualquer diretório, o `doxoade doctor` irá guiá-lo no processo de configuração para sua plataforma (Windows, Linux, Termux).
+
+**ADVERTÊNCIA CRÍTICA:** **Nunca** adicione o diretório de código-fonte da `doxoade` diretamente à sua variável `PATH` do sistema. Esta é uma prática de configuração instável que pode causar falhas imprevisíveis, especialmente em caminhos que contêm espaços. Siga sempre as instruções fornecidas pelo `doxoade doctor` para uma instalação robusta.
+
+
 ## Workflow Recomendado
 
 ### Iniciando um Novo Projeto

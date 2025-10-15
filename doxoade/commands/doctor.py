@@ -4,7 +4,7 @@ import re
 import sys
 import subprocess
 import json
-import shutil
+#import shutil
 from pathlib import Path
 
 import click
@@ -12,7 +12,7 @@ from colorama import Fore, Style
 
 from ..shared_tools import ExecutionLogger
 
-__version__ = "35.5 Alfa (Phoenix)"
+__version__ = "35.8 Alfa Phoenix"
 
 def _check_and_create_venv(target_path, logger):
     venv_path = os.path.join(target_path, 'venv')
@@ -144,23 +144,30 @@ def _find_doxoade_root():
     return None
 
 def _verify_and_guide_path(logger):
-    """Verifica o PATH e guia o usuário com o caminho correto da doxoade."""
-    click.echo(Fore.WHITE + "Verificando a acessibilidade do comando principal...")
+    """
+    Verifica a acessibilidade, o risco de conflito e a origem da instalação
+    do comando 'doxoade', guiando o usuário com as melhores práticas.
+    """
+    click.echo(Fore.WHITE + "Verificando a acessibilidade e a saúde da instalação...")
 
-    executable_name = "doxoade.bat" if os.name == 'nt' else "doxoade"
-    
-    if shutil.which(executable_name):
-        click.echo(Fore.GREEN + f"   > [OK] Comando '{executable_name}' encontrado no PATH.")
-        logger.add_finding('info', f"Comando '{executable_name}' acessível via PATH.")
-        return True
-    else:
+    # --- ETAPA 1: DETECÇÃO DE MÚLTIPLOS EXECUTÁVEIS ---
+    # Usamos 'where' no Windows e 'which -a' no Linux/macOS para encontrar TODAS as ocorrências.
+    cmd = ['where', 'doxoade.bat'] if os.name == 'nt' else ['which', '-a', 'doxoade']
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding='utf-8', errors='replace')
+        executables = result.stdout.strip().splitlines()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        executables = []
+
+    # --- Cenário 1: Nenhum comando 'doxoade' encontrado ---
+    if not executables:
         doxoade_root = _find_doxoade_root()
         if not doxoade_root:
             click.echo(Fore.RED + "   > [ERRO CRÍTICO] Não foi possível localizar o diretório raiz da doxoade para fornecer o guia.")
             return False
 
-        click.echo(Fore.YELLOW + f"   > [AVISO] O comando '{executable_name}' não foi encontrado no seu PATH global.")
-        logger.add_finding('warning', f"Comando '{executable_name}' não está no PATH do sistema.")
+        click.echo(Fore.YELLOW + "   > [AVISO] O comando 'doxoade' não foi encontrado no seu PATH global.")
+        logger.add_finding('warning', "Comando 'doxoade' não está no PATH do sistema.")
 
         click.echo(Fore.CYAN + "\n--- GUIA DE INSTALAÇÃO UNIVERSAL ---")
         if os.name == 'nt':
@@ -169,12 +176,40 @@ def _verify_and_guide_path(logger):
             click.echo(Fore.WHITE + Style.BRIGHT + f"   {doxoade_root}")
             click.echo("2. FECHE E REABRA seu terminal para aplicar a alteração.")
         else:
+            # Lógica para Linux/macOS/Termux
             run_doxoade_path = doxoade_root / 'run_doxoade.py'
             click.echo("Para tornar a 'doxoade' acessível no Linux, macOS ou Termux:")
             click.echo("1. Adicione a seguinte linha ao seu arquivo ~/.bashrc ou ~/.zshrc:")
             click.echo(Fore.WHITE + Style.BRIGHT + f"   alias doxoade='python {run_doxoade_path}'")
             click.echo("2. Execute 'source ~/.bashrc' ou FECHE E REABRA seu terminal.")
         return False
+
+    # --- Cenário 2: Múltiplas instalações conflitantes encontradas ---
+    if len(executables) > 1:
+        details = "\n".join(f"   - {exe}" for exe in executables)
+        click.echo(Fore.RED + "   > [ERRO CRÍTICO] Múltiplas instalações de 'doxoade' encontradas no seu PATH!")
+        click.echo(Fore.CYAN + "     Isso causará comportamento imprevisível. Desinstale ou remova os caminhos extras do seu PATH.")
+        click.echo(Fore.WHITE + details)
+        logger.add_finding('error', "Conflito de PATH: Múltiplas instalações de 'doxoade' detectadas.", details=details)
+        return False
+
+    # --- Cenário 3: Uma única instalação encontrada, verificamos sua origem ---
+    doxoade_executable = executables[0]
+    
+    # Verificação de "Origem Suspeita": o caminho do executável está em um diretório genérico
+    # que NÃO termina com 'Scripts' ou 'bin', que são os padrões de instalação do pip.
+    is_safe_origin = os.path.basename(os.path.dirname(doxoade_executable)).lower() in ['scripts', 'bin']
+    
+    if not is_safe_origin:
+        click.echo(Fore.YELLOW + "   > [AVISO DE CONFIGURAÇÃO] Sua variável PATH parece apontar diretamente para uma pasta de projeto.")
+        click.echo(Fore.CYAN + "     Esta é uma configuração instável e não recomendada que pode causar erros.")
+        click.echo(Fore.CYAN + "     Para uma instalação robusta, siga o 'GUIA DE INSTALAÇÃO UNIVERSAL' acima para configurar seu PATH corretamente.")
+        logger.add_finding('warning', "Configuração de PATH não recomendada detectada.", details=f"Origem do comando: {doxoade_executable}")
+    else:
+        click.echo(Fore.GREEN + "   > [OK] Comando 'doxoade' encontrado em uma origem segura no PATH: {doxoade_executable}")
+
+    logger.add_finding('info', "Comando 'doxoade' acessível via PATH.")
+    return True
 
 @click.command('doctor')
 @click.pass_context
