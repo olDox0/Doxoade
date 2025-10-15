@@ -206,7 +206,7 @@ def _verify_and_guide_path(logger):
         click.echo(Fore.CYAN + "     Para uma instalação robusta, siga o 'GUIA DE INSTALAÇÃO UNIVERSAL' acima para configurar seu PATH corretamente.")
         logger.add_finding('warning', "Configuração de PATH não recomendada detectada.", details=f"Origem do comando: {doxoade_executable}")
     else:
-        click.echo(Fore.GREEN + "   > [OK] Comando 'doxoade' encontrado em uma origem segura no PATH: {doxoade_executable}")
+        click.echo(Fore.GREEN + f"   > [OK] Comando 'doxoade' encontrado em uma origem segura no PATH: {doxoade_executable}")
 
     logger.add_finding('info', "Comando 'doxoade' acessível via PATH.")
     return True
