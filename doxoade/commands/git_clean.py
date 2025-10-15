@@ -6,13 +6,39 @@ import fnmatch
 import click
 from colorama import Fore
 
-# Importa as ferramentas necessárias do módulo compartilhado
-from ..shared_tools import (
-    ExecutionLogger,
-    _run_git_command
-)
+from ..shared_tools import ExecutionLogger, _run_git_command
 
-__version__ = "34.0 Alfa"
+__version__ = "35.7 Alfa (Phoenix)"
+
+def _read_gitignore(path, logger):
+    """Lê e processa os padrões do arquivo .gitignore."""
+    gitignore_path = os.path.join(path, '.gitignore')
+    if not os.path.exists(gitignore_path):
+        logger.add_finding('error', "Arquivo .gitignore não encontrado.")
+        return None
+    try:
+        with open(gitignore_path, 'r', encoding='utf-8', errors='replace') as f:
+            return [line.strip() for line in f if line.strip() and not line.startswith('#')]
+    except IOError as e:
+        logger.add_finding('error', f"Não foi possível ler o .gitignore: {e}")
+        return None
+
+def _find_mismatched_files(ignore_patterns, logger):
+    """Encontra arquivos rastreados pelo Git que correspondem aos padrões ignorados."""
+    tracked_files_str = _run_git_command(['ls-files'], capture_output=True)
+    if tracked_files_str is None:
+        logger.add_finding('error', "Falha ao listar os arquivos rastreados pelo Git.")
+        return None
+    
+    tracked_files = tracked_files_str.splitlines()
+    files_to_remove = set()
+    for pattern in ignore_patterns:
+        # Garante que padrões de diretório (ex: 'venv/') funcionem
+        normalized_pattern = pattern + '*' if pattern.endswith('/') else pattern
+        matches = fnmatch.filter(tracked_files, normalized_pattern)
+        if matches:
+            files_to_remove.update(matches)
+    return sorted(list(files_to_remove))
 
 @click.command('git-clean')
 @click.pass_context
@@ -20,63 +46,37 @@ def git_clean(ctx):
     """Força a remoção de arquivos já rastreados que correspondem ao .gitignore."""
     path = '.'
     arguments = ctx.params
-
     with ExecutionLogger('git-clean', path, arguments) as logger:
         click.echo(Fore.CYAN + "--- [GIT-CLEAN] Procurando por arquivos rastreados indevidamente ---")
         
-        gitignore_path = '.gitignore'
-        if not os.path.exists(gitignore_path):
-            msg = "Arquivo .gitignore não encontrado no diretório atual."
-            logger.add_finding('error', msg)
-            click.echo(Fore.RED + f"[ERRO] {msg}")
+        ignore_patterns = _read_gitignore(path, logger)
+        if ignore_patterns is None:
             sys.exit(1)
 
-        try:
-            with open(gitignore_path, 'r', encoding='utf-8', errors='replace') as f:
-                ignore_patterns = [line.strip() for line in f if line.strip() and not line.startswith('#')]
-        except Exception as e:
-            msg = f"Não foi possível ler o arquivo .gitignore: {e}"
-            logger.add_finding('error', msg)
-            click.echo(Fore.RED + f"[ERRO] {msg}")
+        files_to_remove = _find_mismatched_files(ignore_patterns, logger)
+        if files_to_remove is None:
             sys.exit(1)
-        
-        tracked_files_str = _run_git_command(['ls-files'], capture_output=True)
-        if tracked_files_str is None:
-            sys.exit(1)
-        tracked_files = tracked_files_str.splitlines()
-    
-        files_to_remove = []
-        for pattern in ignore_patterns:
-            if pattern.endswith('/'):
-                pattern += '*'
-            matches = fnmatch.filter(tracked_files, pattern)
-            if matches:
-                files_to_remove.extend(matches)
-        
-        files_to_remove = sorted(list(set(files_to_remove)))
 
         if not files_to_remove:
-            click.echo(Fore.GREEN + "[OK] Nenhum arquivo rastreado indevidamente encontrado. Seu repositório está limpo!")
+            click.echo(Fore.GREEN + "[OK] Nenhum arquivo rastreado indevidamente encontrado.")
             return
     
-        click.echo(Fore.YELLOW + "\nOs seguintes arquivos estão sendo rastreados pelo Git, mas correspondem a padrões no seu .gitignore:")
+        click.echo(Fore.YELLOW + "\nArquivos rastreados que correspondem ao .gitignore:")
         for f in files_to_remove:
             click.echo(f"  - {f}")
         
-        if click.confirm(Fore.RED + "\nVocê tem certeza de que deseja parar de rastrear (untrack) TODOS estes arquivos?", abort=True):
+        if click.confirm(Fore.RED + "\nDeseja parar de rastrear (untrack) TODOS estes arquivos?", abort=True):
             click.echo(Fore.CYAN + "Removendo arquivos do índice do Git...")
-            success = True
+            success_count = 0
             for f in files_to_remove:
-                if not _run_git_command(['rm', '--cached', f]):
-                    success = False
+                if _run_git_command(['rm', '--cached', f]):
+                    success_count += 1
             
-            if success:
-                logger.add_finding('info', f"{len(files_to_remove)} arquivos removidos do rastreamento.", details=", ".join(files_to_remove))
-                click.echo(Fore.GREEN + "\n[OK] Arquivos removidos do rastreamento com sucesso.")
-                click.echo(Fore.YELLOW + "Suas alterações foram preparadas (staged).")
-                click.echo(Fore.YELLOW + "Para finalizar, execute o seguinte comando:")
-                click.echo(Fore.CYAN + '  doxoade save "Limpeza de arquivos ignorados"')
+            if success_count == len(files_to_remove):
+                logger.add_finding('info', f"{success_count} arquivos removidos do rastreamento.", details=", ".join(files_to_remove))
+                click.echo(Fore.GREEN + "\n[OK] Arquivos removidos do rastreamento.")
+                click.echo(Fore.YELLOW + "Suas alterações foram preparadas (staged). Finalize com 'doxoade save'.")
             else:
-                logger.add_finding('error', "Ocorreu um erro ao remover um ou mais arquivos do índice do Git.")
-                click.echo(Fore.RED + "[ERRO] Ocorreu um erro ao remover um ou mais arquivos.")
+                logger.add_finding('error', "Ocorreu um erro ao remover um ou mais arquivos do índice.")
+                click.echo(Fore.RED + "[ERRO] Falha ao remover um ou mais arquivos.")
                 sys.exit(1)
