@@ -12,7 +12,7 @@ from colorama import Fore, Style
 
 from ..shared_tools import ExecutionLogger
 
-__version__ = "35.8 Alfa Phoenix"
+__version__ = "35.81 Alfa Phoenix"
 
 def _check_and_create_venv(target_path, logger):
     venv_path = os.path.join(target_path, 'venv')
