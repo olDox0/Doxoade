@@ -8,7 +8,11 @@ A filosofia da `doxoade` é simples: **cada bug, cada erro de ambiente e cada li
 
 ## Instalação Universal
 
+<<<<<<< HEAD
 A `doxoade` foi projetada para ser uma ferramenta de sistema, acessível de qualquer diretório. A instalação é um processo de duas etapas: preparar o ambiente e depois configurar o acesso universal.
+=======
+A `doxoade` foi projetada para ser uma ferramenta de sistema, acessível de qualquer diretório. Siga o guia para sua plataforma.
+>>>>>>> 05d512d058f3fbfa68ccc0771fdca94bec322750
 
 ### No Windows
 
@@ -17,12 +21,21 @@ A `doxoade` foi projetada para ser uma ferramenta de sistema, acessível de qual
     git clone https://github.com/olDox0/Doxoade.git
     cd Doxoade
     ```
+<<<<<<< HEAD
 2.  **Execute o Instalador/Reparador Universal:** O comando `doctor` irá preparar todo o ambiente da `doxoade` pela primeira vez.
     ```bash
     # Cria o venv, instala dependências e prepara a ferramenta
     doxoade.bat doctor .
     ```
 3.  **Configure o Acesso Universal (Apenas uma vez):** O `doctor`, ao final, fornecerá um **"Guia de Instalação Universal"**. Siga as instruções para adicionar a pasta do projeto `Doxoade` ao seu `PATH` de sistema.
+=======
+2.  **Execute o `doctor` pela primeira vez:** O `doctor` irá configurar o ambiente da `doxoade` para você.
+    ```bash
+    .\venv\Scripts\python.exe run_doxoade.py doctor .
+    ```
+    *   Siga as instruções para criar o `venv` e instalar as dependências.
+3.  **Configure o Acesso Universal (Apenas uma vez):** No final, o `doctor` fornecerá um **"Guia de Instalação Universal"**. Siga as instruções para adicionar a pasta do projeto `Doxoade` ao seu `PATH` de sistema.
+>>>>>>> 05d512d058f3fbfa68ccc0771fdca94bec322750
 4.  **Reinicie o Terminal:** Feche e reabra completamente seu terminal. O comando `doxoade` agora estará disponível em qualquer lugar.
 
 ### No Linux, macOS ou Termux
@@ -37,14 +50,22 @@ A `doxoade` foi projetada para ser uma ferramenta de sistema, acessível de qual
     chmod +x install.sh
     ./install.sh
     ```
+<<<<<<< HEAD
     *   O script cuidará da verificação de dependências de sistema, da instalação das bibliotecas Python e da configuração do `alias` universal.
+=======
+    *   O script cuidará da verificação de dependências, da instalação e da configuração do `alias`.
+>>>>>>> 05d512d058f3fbfa68ccc0771fdca94bec322750
 3.  **Ative o `alias`:**
     ```bash
     source ~/.bashrc  # ou ~/.zshrc, conforme instruído pelo script
     ```
     *   O comando `doxoade` agora estará disponível em qualquer lugar.
 
+<<<<<<< HEAD
 > **ADVERTÊNCIA CRÍTICA:** Siga sempre as instruções fornecidas pelo `doctor` ou pelo `install.sh`. Nunca adicione manualmente um caminho que não seja a raiz do projeto `Doxoade` ao seu `PATH`, pois configurações instáveis podem causar falhas imprevisíveis.
+=======
+> **ADVERTÊNCIA CRÍTICA:** Nunca adicione o diretório de desenvolvimento da `doxoade` ao seu `PATH` manualmente de uma forma diferente da recomendada pelo `doctor`. Configurações instáveis podem causar falhas imprevisíveis.
+>>>>>>> 05d512d058f3fbfa68ccc0771fdca94bec322750
 
 ---
 
@@ -56,7 +77,11 @@ A `doxoade` foi projetada para dois cenários principais.
 
 Use este workflow para criar projetos que são saudáveis e robustos desde o primeiro dia.
 
+<<<<<<< HEAD
 1.  **`doxoade init <nome-do-projeto>`**: Cria um novo diretório de projeto com `venv`, `.gitignore` e repositório Git.
+=======
+1.  **`doxoade init <nome-do-projeto>`**: Cria um novo diretório de projeto com `venv`, `.gitignore` e repositório Git inicializado.
+>>>>>>> 05d512d058f3fbfa68ccc0771fdca94bec322750
 2.  **`cd <nome-do-projeto>`**: Entre no diretório.
 3.  **`doxoade git-new "Commit inicial" <url-remota>`**: Publica seu projeto em um repositório remoto **vazio**.
 4.  **`.\venv\Scripts\activate`** (ou `source venv/bin/activate`): Ative o ambiente virtual.
@@ -70,8 +95,13 @@ Use este workflow para projetos antigos, clonados ou de terceiros para garantir 
 1.  **`cd /caminho/para/projeto-antigo`**: Navegue até a pasta raiz do projeto.
 2.  **`doxoade doctor .`**: **Este é o passo mais importante.** Chame o `doctor` para analisar e reparar o ambiente. Ele irá:
     *   Detectar e se oferecer para criar um `venv` ausente.
+<<<<<<< HEAD
     *   Verificar o `requirements.txt`, se oferecer para instalar dependências ausentes e provar que a instalação foi bem-sucedida.
     *   Verificar se o `venv` está isolado e não contaminado.
+=======
+    *   Detectar e se oferecer para instalar dependências de um `requirements.txt`.
+    *   Verificar a integridade e o isolamento do ambiente.
+>>>>>>> 05d512d058f3fbfa68ccc0771fdca94bec322750
 3.  **`.\venv\Scripts\activate`**: Uma vez que o `doctor` reportou `[SAUDÁVEL]`, ative o `venv` recém-curado.
 4.  **Inicie o Workflow A:** Agora que o ambiente é confiável, você pode começar o ciclo de desenvolvimento normal com `doxoade save` e `doxoade sync`.
 
@@ -95,7 +125,11 @@ Use este workflow para projetos antigos, clonados ou de terceiros para garantir 
 
 #### Análise de Qualidade
 *   `check`: Análise estática de código Python em busca de erros e "code smells".
+<<<<<<< HEAD
 *   `health`: Mede a qualidade do código (complexidade e cobertura de testes).
+=======
+*   `health`: Mede a qualidade do código (complexidade ciclomática e cobertura de testes).
+>>>>>>> 05d512d058f3fbfa68ccc0771fdca94bec322750
 *   `deepcheck <ARQUIVO>`: Análise profunda de fluxo de dados e pontos de risco em funções Python.
 *   `guicheck`: Análise especializada em código de GUI (Tkinter, Kivy).
 *   `kvcheck`: Análise especializada em arquivos `.kv` da Kivy.

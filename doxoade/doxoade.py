@@ -38,7 +38,7 @@ from .commands.doctor import doctor
 from .commands.auto import auto
 from .commands.git_workflow import release, sync
 from .commands.utils import log, show_trace, mk, create_pipeline
-
+from .commands.intelligence import intelligence
 from .shared_tools import (
     ExecutionLogger, 
 #    _get_venv_python_executable, 
@@ -364,6 +364,7 @@ cli.add_command(log)
 cli.add_command(show_trace)
 cli.add_command(mk)
 cli.add_command(create_pipeline)
+cli.add_command(intelligence)
 
 if __name__ == '__main__':
     try:

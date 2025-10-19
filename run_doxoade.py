@@ -1,15 +1,6 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
-"""
-Ponto de entrada robusto para a Doxoade.
-Este script garante que a ferramenta seja executada com o interpretador
-correto e com o caminho do módulo devidamente configurado.
-"""
-
-# run_doxoade.py
-import re
+# run_doxoade.py (Versão Final e Simples)
 import sys
+import re
 from doxoade.doxoade import cli
 
 if __name__ == '__main__':
