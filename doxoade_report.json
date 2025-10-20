@@ -1,0 +1,958 @@
+{
+    "report_generated_at_utc": "2025-10-19T14:47:51.913221+00:00",
+    "doxoade_version": "37.2 Alfa (Hardening)",
+    "project_path": "C:\\Users\\olDox222\\Documents\\Meu laptop (1)\\A20250924YMD\\DOSSIER\\Altonomo\\Projetos_E_Programas\\Projeto OADE\\doxoade",
+    "telemetry": {
+        "directory_tree": "./\n    .gitignore\n    README.md\n    __init__.py\n    desktop.ini\n    doxoade.bat\n    doxoade_report.json\n    install.sh\n    meu_app.spec\n    meu_app.specpython\n    pyproject.toml\n    requirements.txt\n    run_doxoade.py\n    setup.py\n    temp.log\n    .pytest_cache/\n        .gitignore\n        CACHEDIR.TAG\n        README.md\n        v/\n            cache/\n                lastfailed\n                nodeids\n    doxoade/\n        __init__.py\n        database.py\n        doxoade.py\n        shared_tools.py\n        tracer.py\n        commands/\n            __init__.py\n            apicheck.py\n            auto.py\n            check.py\n            clean.py\n            deepcheck.py\n            doctor.py\n            encoding.py\n            git_clean.py\n            git_new.py\n            git_workflow.py\n            guicheck.py\n            health.py\n            init.py\n            intelligence.py\n            kvcheck.py\n            optimize.py\n            run.py\n            save.py\n            tutorial.py\n            utils.py\n            webcheck.py\n        doxoade.egg-info/\n            PKG-INFO\n            SOURCES.txt\n            dependency_links.txt\n            requires.txt\n            top_level.txt\n    doxoade.egg-info/\n        PKG-INFO\n        SOURCES.txt\n        dependency_links.txt\n        entry_points.txt\n        requires.txt\n        top_level.txt\n    tests/\n        test_core_invocation.py\n        test_doctor_logic.py\n        test_doxoade.py",
+        "filesystem": [
+            {
+                "path": ".gitignore",
+                "size_bytes": 756,
+                "created_at_utc": "2025-09-17T23:59:39.829157+00:00",
+                "modified_at_utc": "2025-10-19T13:25:30.528260+00:00",
+                "encoding": "utf-8"
+            },
+            {
+                "path": "README.md",
+                "size_bytes": 8625,
+                "created_at_utc": "2025-09-07T23:57:34.381355+00:00",
+                "modified_at_utc": "2025-10-19T13:25:30.528260+00:00",
+                "encoding": "utf-8"
+            },
+            {
+                "path": "__init__.py",
+                "size_bytes": 0,
+                "created_at_utc": "2025-10-10T20:09:13.367187+00:00",
+                "modified_at_utc": "2025-10-10T20:09:13.367187+00:00",
+                "encoding": "empty",
+                "functions": []
+            },
+            {
+                "path": "desktop.ini",
+                "size_bytes": 115,
+                "created_at_utc": "2025-09-08T00:14:02.482591+00:00",
+                "modified_at_utc": "2025-09-08T00:14:03.316539+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": "doxoade.bat",
+                "size_bytes": 146,
+                "created_at_utc": "2025-10-19T01:32:00.212138+00:00",
+                "modified_at_utc": "2025-10-19T02:07:14.615490+00:00",
+                "encoding": "utf-8"
+            },
+            {
+                "path": "doxoade_report.json",
+                "size_bytes": 37623,
+                "created_at_utc": "2025-10-19T13:43:44.442573+00:00",
+                "modified_at_utc": "2025-10-19T14:28:34.503555+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": "install.sh",
+                "size_bytes": 2461,
+                "created_at_utc": "2025-10-19T13:25:30.559500+00:00",
+                "modified_at_utc": "2025-10-19T13:25:30.559500+00:00",
+                "encoding": "utf-8"
+            },
+            {
+                "path": "meu_app.spec",
+                "size_bytes": 9,
+                "created_at_utc": "2025-09-08T00:43:27.765175+00:00",
+                "modified_at_utc": "2025-09-08T00:43:27.766175+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": "meu_app.specpython",
+                "size_bytes": 31,
+                "created_at_utc": "2025-09-08T00:19:59.959683+00:00",
+                "modified_at_utc": "2025-09-08T00:19:59.960690+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": "pyproject.toml",
+                "size_bytes": 107,
+                "created_at_utc": "2025-10-11T16:27:38.326984+00:00",
+                "modified_at_utc": "2025-10-19T02:07:14.677987+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": "requirements.txt",
+                "size_bytes": 165,
+                "created_at_utc": "2025-09-07T23:51:37.653233+00:00",
+                "modified_at_utc": "2025-10-14T19:24:33.420577+00:00",
+                "encoding": "utf-8"
+            },
+            {
+                "path": "run_doxoade.py",
+                "size_bytes": 210,
+                "created_at_utc": "2025-10-19T01:31:21.114664+00:00",
+                "modified_at_utc": "2025-10-19T13:25:30.559500+00:00",
+                "encoding": "MacRoman",
+                "functions": []
+            },
+            {
+                "path": "setup.py",
+                "size_bytes": 1872,
+                "created_at_utc": "2025-09-10T03:23:32.263890+00:00",
+                "modified_at_utc": "2025-10-19T13:25:30.559500+00:00",
+                "encoding": "utf-8",
+                "functions": []
+            },
+            {
+                "path": "temp.log",
+                "size_bytes": 17,
+                "created_at_utc": "2025-10-14T20:39:05.910921+00:00",
+                "modified_at_utc": "2025-10-14T20:39:05.910921+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": ".pytest_cache/.gitignore",
+                "size_bytes": 39,
+                "created_at_utc": "2025-09-25T23:43:32.037689+00:00",
+                "modified_at_utc": "2025-09-25T23:43:32.037689+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": ".pytest_cache/CACHEDIR.TAG",
+                "size_bytes": 191,
+                "created_at_utc": "2025-09-25T23:43:32.037689+00:00",
+                "modified_at_utc": "2025-09-25T23:43:32.037689+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": ".pytest_cache/README.md",
+                "size_bytes": 310,
+                "created_at_utc": "2025-09-25T23:43:32.022062+00:00",
+                "modified_at_utc": "2025-09-25T23:43:32.022062+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": ".pytest_cache/v/cache/lastfailed",
+                "size_bytes": 81,
+                "created_at_utc": "2025-10-16T03:50:42.899409+00:00",
+                "modified_at_utc": "2025-10-19T14:13:50.021941+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": ".pytest_cache/v/cache/nodeids",
+                "size_bytes": 619,
+                "created_at_utc": "2025-09-25T23:43:32.037689+00:00",
+                "modified_at_utc": "2025-10-19T14:14:42.818829+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": "doxoade/__init__.py",
+                "size_bytes": 0,
+                "created_at_utc": "2025-09-10T03:47:18.521597+00:00",
+                "modified_at_utc": "2025-09-10T03:47:18.840580+00:00",
+                "encoding": "empty",
+                "functions": []
+            },
+            {
+                "path": "doxoade/database.py",
+                "size_bytes": 1755,
+                "created_at_utc": "2025-10-18T23:59:17.291354+00:00",
+                "modified_at_utc": "2025-10-18T23:59:17.650568+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "get_db_connection",
+                        "line": 6
+                    },
+                    {
+                        "name": "init_db",
+                        "line": 12
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/doxoade.py",
+                "size_bytes": 18297,
+                "created_at_utc": "2025-09-07T23:57:15.658402+00:00",
+                "modified_at_utc": "2025-10-19T13:41:52.757097+00:00",
+                "encoding": "ascii",
+                "functions": [
+                    {
+                        "name": "cli",
+                        "line": 64
+                    },
+                    {
+                        "name": "log_command_execution",
+                        "line": 85
+                    },
+                    {
+                        "name": "dashboard",
+                        "line": 110
+                    },
+                    {
+                        "name": "_display_error_trend",
+                        "line": 137
+                    },
+                    {
+                        "name": "_display_project_summary",
+                        "line": 157
+                    },
+                    {
+                        "name": "_display_common_issues",
+                        "line": 171
+                    },
+                    {
+                        "name": "setup_health",
+                        "line": 190
+                    },
+                    {
+                        "name": "_get_github_repo_info",
+                        "line": 300
+                    },
+                    {
+                        "name": "_analyze_traceback",
+                        "line": 322
+                    },
+                    {
+                        "name": "wrapper",
+                        "line": 87
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/shared_tools.py",
+                "size_bytes": 11241,
+                "created_at_utc": "2025-10-10T20:32:43.994665+00:00",
+                "modified_at_utc": "2025-10-19T02:07:14.662364+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "_log_execution",
+                        "line": 72
+                    },
+                    {
+                        "name": "_get_venv_python_executable",
+                        "line": 110
+                    },
+                    {
+                        "name": "_get_git_commit_hash",
+                        "line": 121
+                    },
+                    {
+                        "name": "_run_git_command",
+                        "line": 133
+                    },
+                    {
+                        "name": "_present_results",
+                        "line": 152
+                    },
+                    {
+                        "name": "_print_finding_details",
+                        "line": 178
+                    },
+                    {
+                        "name": "_print_summary",
+                        "line": 197
+                    },
+                    {
+                        "name": "_load_config",
+                        "line": 216
+                    },
+                    {
+                        "name": "_update_summary_from_findings",
+                        "line": 239
+                    },
+                    {
+                        "name": "_get_code_snippet",
+                        "line": 249
+                    },
+                    {
+                        "name": "__init__",
+                        "line": 21
+                    },
+                    {
+                        "name": "add_finding",
+                        "line": 31
+                    },
+                    {
+                        "name": "__enter__",
+                        "line": 50
+                    },
+                    {
+                        "name": "__exit__",
+                        "line": 53
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/tracer.py",
+                "size_bytes": 2153,
+                "created_at_utc": "2025-10-03T21:13:14.675999+00:00",
+                "modified_at_utc": "2025-10-03T21:13:14.972860+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "_traced_on_press",
+                        "line": 10
+                    },
+                    {
+                        "name": "instrument_kivy",
+                        "line": 28
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/__init__.py",
+                "size_bytes": 0,
+                "created_at_utc": "2025-10-10T19:50:13.162332+00:00",
+                "modified_at_utc": "2025-10-10T19:50:13.162332+00:00",
+                "encoding": "empty",
+                "functions": []
+            },
+            {
+                "path": "doxoade/commands/apicheck.py",
+                "size_bytes": 5335,
+                "created_at_utc": "2025-10-13T14:16:03.016034+00:00",
+                "modified_at_utc": "2025-10-13T14:21:08.124337+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "apicheck",
+                        "line": 25
+                    },
+                    {
+                        "name": "_analyze_api_calls",
+                        "line": 69
+                    },
+                    {
+                        "name": "_get_full_function_name",
+                        "line": 86
+                    },
+                    {
+                        "name": "_validate_call_against_contract",
+                        "line": 97
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/auto.py",
+                "size_bytes": 5076,
+                "created_at_utc": "2025-10-13T23:09:27.529360+00:00",
+                "modified_at_utc": "2025-10-19T13:25:30.528260+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "_execute_command",
+                        "line": 16
+                    },
+                    {
+                        "name": "auto",
+                        "line": 47
+                    },
+                    {
+                        "name": "_stream_reader",
+                        "line": 29
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/check.py",
+                "size_bytes": 6972,
+                "created_at_utc": "2025-10-11T18:48:01.916991+00:00",
+                "modified_at_utc": "2025-10-19T13:25:30.543877+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "check",
+                        "line": 28
+                    },
+                    {
+                        "name": "_check_dependencies",
+                        "line": 59
+                    },
+                    {
+                        "name": "_check_source_code",
+                        "line": 85
+                    },
+                    {
+                        "name": "_analyze_regex_risks",
+                        "line": 126
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/clean.py",
+                "size_bytes": 2407,
+                "created_at_utc": "2025-10-13T19:27:01.026500+00:00",
+                "modified_at_utc": "2025-10-13T19:34:48.367735+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "clean",
+                        "line": 15
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/deepcheck.py",
+                "size_bytes": 5972,
+                "created_at_utc": "2025-10-13T16:07:24.661882+00:00",
+                "modified_at_utc": "2025-10-13T16:17:36.873545+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "deepcheck",
+                        "line": 17
+                    },
+                    {
+                        "name": "_analyze_function_flow",
+                        "line": 63
+                    },
+                    {
+                        "name": "_extract_function_parameters",
+                        "line": 90
+                    },
+                    {
+                        "name": "_find_returns_and_risks",
+                        "line": 98
+                    },
+                    {
+                        "name": "_get_complexity_rank",
+                        "line": 115
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/doctor.py",
+                "size_bytes": 13962,
+                "created_at_utc": "2025-10-13T22:42:52.586899+00:00",
+                "modified_at_utc": "2025-10-19T13:25:30.543877+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "_check_and_create_venv",
+                        "line": 17
+                    },
+                    {
+                        "name": "_install_dependencies",
+                        "line": 40
+                    },
+                    {
+                        "name": "_prepare_verification_data",
+                        "line": 67
+                    },
+                    {
+                        "name": "_run_verification_probe",
+                        "line": 87
+                    },
+                    {
+                        "name": "_verify_environment",
+                        "line": 127
+                    },
+                    {
+                        "name": "_find_doxoade_root",
+                        "line": 137
+                    },
+                    {
+                        "name": "_verify_and_guide_path",
+                        "line": 146
+                    },
+                    {
+                        "name": "doctor",
+                        "line": 217
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/encoding.py",
+                "size_bytes": 4482,
+                "created_at_utc": "2025-10-13T14:05:50.014411+00:00",
+                "modified_at_utc": "2025-10-13T14:05:50.389262+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "encoding",
+                        "line": 18
+                    },
+                    {
+                        "name": "_change_file_encoding",
+                        "line": 73
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/git_clean.py",
+                "size_bytes": 3636,
+                "created_at_utc": "2025-10-13T16:33:12.768431+00:00",
+                "modified_at_utc": "2025-10-19T13:25:30.543877+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "_read_gitignore",
+                        "line": 13
+                    },
+                    {
+                        "name": "_find_mismatched_files",
+                        "line": 26
+                    },
+                    {
+                        "name": "git_clean",
+                        "line": 45
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/git_new.py",
+                "size_bytes": 3499,
+                "created_at_utc": "2025-10-13T16:43:15.278239+00:00",
+                "modified_at_utc": "2025-10-13T16:43:15.653218+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "git_new",
+                        "line": 18
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/git_workflow.py",
+                "size_bytes": 2698,
+                "created_at_utc": "2025-10-13T23:15:30.620979+00:00",
+                "modified_at_utc": "2025-10-13T23:18:21.478466+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "release",
+                        "line": 17
+                    },
+                    {
+                        "name": "sync",
+                        "line": 35
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/guicheck.py",
+                "size_bytes": 8642,
+                "created_at_utc": "2025-10-13T05:00:27.815171+00:00",
+                "modified_at_utc": "2025-10-13T05:00:28.143281+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "guicheck",
+                        "line": 28
+                    },
+                    {
+                        "name": "_check_gui_files",
+                        "line": 47
+                    },
+                    {
+                        "name": "_find_py_files_to_check",
+                        "line": 64
+                    },
+                    {
+                        "name": "_analyze_single_gui_file",
+                        "line": 79
+                    },
+                    {
+                        "name": "_analyze_kivy_risks",
+                        "line": 99
+                    },
+                    {
+                        "name": "_analyze_tkinter_layout",
+                        "line": 126
+                    },
+                    {
+                        "name": "_build_widget_parent_map",
+                        "line": 133
+                    },
+                    {
+                        "name": "_collect_layout_data",
+                        "line": 145
+                    },
+                    {
+                        "name": "_perform_layout_analysis",
+                        "line": 166
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/health.py",
+                "size_bytes": 8871,
+                "created_at_utc": "2025-10-11T14:30:13.877669+00:00",
+                "modified_at_utc": "2025-10-11T18:39:03.246200+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "health",
+                        "line": 27
+                    },
+                    {
+                        "name": "_handle_missing_venv",
+                        "line": 49
+                    },
+                    {
+                        "name": "_run_all_analyses",
+                        "line": 64
+                    },
+                    {
+                        "name": "_handle_dependency_errors",
+                        "line": 83
+                    },
+                    {
+                        "name": "_analyze_complexity",
+                        "line": 98
+                    },
+                    {
+                        "name": "_analyze_test_coverage",
+                        "line": 131
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/init.py",
+                "size_bytes": 5486,
+                "created_at_utc": "2025-10-13T16:47:18.117972+00:00",
+                "modified_at_utc": "2025-10-13T16:52:33.782759+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "init",
+                        "line": 24
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/intelligence.py",
+                "size_bytes": 5428,
+                "created_at_utc": "2025-10-19T13:40:47.415593+00:00",
+                "modified_at_utc": "2025-10-19T14:47:29.679785+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "_generate_tree_representation",
+                        "line": 17
+                    },
+                    {
+                        "name": "_get_file_encoding",
+                        "line": 33
+                    },
+                    {
+                        "name": "_extract_python_functions",
+                        "line": 45
+                    },
+                    {
+                        "name": "_analyze_file_metadata",
+                        "line": 58
+                    },
+                    {
+                        "name": "_gather_filesystem_data",
+                        "line": 77
+                    },
+                    {
+                        "name": "intelligence",
+                        "line": 93
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/kvcheck.py",
+                "size_bytes": 3900,
+                "created_at_utc": "2025-10-13T13:50:02.796957+00:00",
+                "modified_at_utc": "2025-10-13T13:50:03.218775+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "kvcheck",
+                        "line": 24
+                    },
+                    {
+                        "name": "_analyze_kv_file",
+                        "line": 55
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/optimize.py",
+                "size_bytes": 6975,
+                "created_at_utc": "2025-10-10T19:50:13.162332+00:00",
+                "modified_at_utc": "2025-10-10T21:55:23.177098+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "optimize",
+                        "line": 21
+                    },
+                    {
+                        "name": "_find_unused_packages",
+                        "line": 66
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/run.py",
+                "size_bytes": 7446,
+                "created_at_utc": "2025-10-13T17:03:20.495972+00:00",
+                "modified_at_utc": "2025-10-13T17:03:20.902088+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "run",
+                        "line": 27
+                    },
+                    {
+                        "name": "_run_traced_session_windows",
+                        "line": 95
+                    },
+                    {
+                        "name": "_reader_thread",
+                        "line": 116
+                    },
+                    {
+                        "name": "_writer_thread",
+                        "line": 123
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/save.py",
+                "size_bytes": 3783,
+                "created_at_utc": "2025-10-13T16:23:29.776662+00:00",
+                "modified_at_utc": "2025-10-19T13:25:30.559500+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "_run_quality_check",
+                        "line": 14
+                    },
+                    {
+                        "name": "_can_proceed_with_commit",
+                        "line": 30
+                    },
+                    {
+                        "name": "save",
+                        "line": 52
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/tutorial.py",
+                "size_bytes": 10857,
+                "created_at_utc": "2025-10-13T19:38:40.787730+00:00",
+                "modified_at_utc": "2025-10-14T17:01:47.577206+00:00",
+                "encoding": "ascii",
+                "functions": [
+                    {
+                        "name": "tutorial_group",
+                        "line": 17
+                    },
+                    {
+                        "name": "_find_project_root",
+                        "line": 21
+                    },
+                    {
+                        "name": "tutorial",
+                        "line": 31
+                    },
+                    {
+                        "name": "tutorial_simulation",
+                        "line": 84
+                    },
+                    {
+                        "name": "tutorial_interactive",
+                        "line": 120
+                    },
+                    {
+                        "name": "_run_sim_command",
+                        "line": 162
+                    },
+                    {
+                        "name": "_prompt_and_run_sim_command",
+                        "line": 179
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/utils.py",
+                "size_bytes": 11375,
+                "created_at_utc": "2025-10-13T23:23:12.466469+00:00",
+                "modified_at_utc": "2025-10-14T14:52:29.813260+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "log",
+                        "line": 20
+                    },
+                    {
+                        "name": "show_trace",
+                        "line": 54
+                    },
+                    {
+                        "name": "mk",
+                        "line": 102
+                    },
+                    {
+                        "name": "create_pipeline",
+                        "line": 164
+                    },
+                    {
+                        "name": "_display_log_entry",
+                        "line": 189
+                    },
+                    {
+                        "name": "_find_latest_trace_file",
+                        "line": 254
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/webcheck.py",
+                "size_bytes": 5216,
+                "created_at_utc": "2025-10-13T13:30:49.664326+00:00",
+                "modified_at_utc": "2025-10-13T13:45:39.241137+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "webcheck",
+                        "line": 26
+                    },
+                    {
+                        "name": "_check_web_assets",
+                        "line": 50
+                    },
+                    {
+                        "name": "_analyze_html_file",
+                        "line": 70
+                    },
+                    {
+                        "name": "_analyze_css_file",
+                        "line": 86
+                    },
+                    {
+                        "name": "_analyze_js_file",
+                        "line": 103
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/doxoade.egg-info/PKG-INFO",
+                "size_bytes": 7383,
+                "created_at_utc": "2025-10-19T01:39:04.514051+00:00",
+                "modified_at_utc": "2025-10-19T01:39:04.514051+00:00",
+                "encoding": "utf-8"
+            },
+            {
+                "path": "doxoade/doxoade.egg-info/SOURCES.txt",
+                "size_bytes": 785,
+                "created_at_utc": "2025-10-19T00:53:49.198744+00:00",
+                "modified_at_utc": "2025-10-19T01:39:04.607795+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": "doxoade/doxoade.egg-info/dependency_links.txt",
+                "size_bytes": 1,
+                "created_at_utc": "2025-10-19T00:53:49.183123+00:00",
+                "modified_at_utc": "2025-10-19T01:39:04.514051+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": "doxoade/doxoade.egg-info/requires.txt",
+                "size_bytes": 88,
+                "created_at_utc": "2025-10-19T00:53:49.198744+00:00",
+                "modified_at_utc": "2025-10-19T01:39:04.514051+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": "doxoade/doxoade.egg-info/top_level.txt",
+                "size_bytes": 9,
+                "created_at_utc": "2025-10-19T00:53:49.198744+00:00",
+                "modified_at_utc": "2025-10-19T01:39:04.514051+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": "doxoade.egg-info/PKG-INFO",
+                "size_bytes": 6544,
+                "created_at_utc": "2025-10-19T13:17:07.513041+00:00",
+                "modified_at_utc": "2025-10-19T13:17:07.513041+00:00",
+                "encoding": "utf-8"
+            },
+            {
+                "path": "doxoade.egg-info/SOURCES.txt",
+                "size_bytes": 984,
+                "created_at_utc": "2025-09-10T03:34:47.068739+00:00",
+                "modified_at_utc": "2025-10-19T13:17:07.669260+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": "doxoade.egg-info/dependency_links.txt",
+                "size_bytes": 1,
+                "created_at_utc": "2025-09-10T03:34:47.055741+00:00",
+                "modified_at_utc": "2025-10-19T13:17:07.528658+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": "doxoade.egg-info/entry_points.txt",
+                "size_bytes": 646,
+                "created_at_utc": "2025-09-10T03:34:47.056739+00:00",
+                "modified_at_utc": "2025-10-19T13:17:07.528658+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": "doxoade.egg-info/requires.txt",
+                "size_bytes": 88,
+                "created_at_utc": "2025-09-10T03:34:47.064740+00:00",
+                "modified_at_utc": "2025-10-19T13:17:07.544281+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": "doxoade.egg-info/top_level.txt",
+                "size_bytes": 8,
+                "created_at_utc": "2025-09-10T03:34:47.066740+00:00",
+                "modified_at_utc": "2025-10-19T13:17:07.544281+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": "tests/test_core_invocation.py",
+                "size_bytes": 1310,
+                "created_at_utc": "2025-10-16T03:43:53.682908+00:00",
+                "modified_at_utc": "2025-10-16T03:43:54.042156+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "runner",
+                        "line": 10
+                    },
+                    {
+                        "name": "test_cli_invocation_help",
+                        "line": 13
+                    },
+                    {
+                        "name": "test_doctor_invocation_help",
+                        "line": 21
+                    },
+                    {
+                        "name": "test_tutorial_group_invocation_help",
+                        "line": 30
+                    }
+                ]
+            },
+            {
+                "path": "tests/test_doctor_logic.py",
+                "size_bytes": 2696,
+                "created_at_utc": "2025-10-16T03:50:19.274749+00:00",
+                "modified_at_utc": "2025-10-19T14:16:27.539877+00:00",
+                "encoding": "ascii",
+                "functions": []
+            },
+            {
+                "path": "tests/test_doxoade.py",
+                "size_bytes": 166,
+                "created_at_utc": "2025-10-11T19:46:09.940574+00:00",
+                "modified_at_utc": "2025-10-11T19:46:54.506279+00:00",
+                "encoding": "ascii",
+                "functions": [
+                    {
+                        "name": "test_placeholder",
+                        "line": 3
+                    }
+                ]
+            }
+        ]
+    }
+}
