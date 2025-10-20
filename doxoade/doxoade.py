@@ -17,29 +17,34 @@ from functools import wraps
 from colorama import init as colorama_init, Fore, Style
 #from datetime import datetime
 
+PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
+PACKAGE_PARENT = os.path.dirname(PACKAGE_DIR)
+if PACKAGE_PARENT not in sys.path:
+    sys.path.insert(0, PACKAGE_PARENT)
+
 # --- REGISTRO DE PLUGINS DA V2.0 ---
-from .commands.apicheck import apicheck
-from .commands.check import check
-from .commands.clean import clean
-from .commands.deepcheck import deepcheck
-from .commands.encoding import encoding
-from .commands.git_clean import git_clean
-from .commands.git_new import git_new
-from .commands.guicheck import guicheck
-from .commands.health import health
-from .commands.init import init
-from .commands.kvcheck import kvcheck
-from .commands.optimize import optimize
-from .commands.run import run
-from .commands.save import save
-from .commands.webcheck import webcheck
-from .commands.tutorial import tutorial_group
-from .commands.doctor import doctor
-from .commands.auto import auto
-from .commands.git_workflow import release, sync
-from .commands.utils import log, show_trace, mk, create_pipeline
-from .commands.intelligence import intelligence
-from .shared_tools import (
+from doxoade.commands.apicheck import apicheck
+from doxoade.commands.check import check
+from doxoade.commands.clean import clean
+from doxoade.commands.deepcheck import deepcheck
+from doxoade.commands.encoding import encoding
+from doxoade.commands.git_clean import git_clean
+from doxoade.commands.git_new import git_new
+from doxoade.commands.guicheck import guicheck
+from doxoade.commands.health import health
+from doxoade.commands.init import init
+from doxoade.commands.kvcheck import kvcheck
+from doxoade.commands.optimize import optimize
+from doxoade.commands.run import run
+from doxoade.commands.save import save
+from doxoade.commands.webcheck import webcheck
+from doxoade.commands.tutorial import tutorial_group
+from doxoade.commands.doctor import doctor
+from doxoade.commands.auto import auto
+from doxoade.commands.git_workflow import release, sync
+from doxoade.commands.utils import log, show_trace, mk, create_pipeline
+from doxoade.commands.intelligence import intelligence
+from doxoade.shared_tools import (
     ExecutionLogger, 
 #    _get_venv_python_executable, 
 #    _present_results, 

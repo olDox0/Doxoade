@@ -1,3 +1,3 @@
 [tool.doxoade]
 source_dir = "doxoade"
-ignore = ["node_modules", "backups", "documentacao_antiga", "Vers"]
+ignore = [ "node_modules", "backups", "documentacao_antiga", "Vers",]

@@ -65,7 +65,7 @@ def _install_dependencies(target_path, logger):
         return False
 
 def _prepare_verification_data(target_path, logger):
-    """Lê o requirements.txt e prepara os dados para a sonda."""
+    """Lê o requirements.txt e retorna um conjunto de pacotes necessários."""
     requirements_file = os.path.join(target_path, 'requirements.txt')
     if not os.path.isfile(requirements_file):
         return None, {'status': 'ok', 'message': 'Nenhum requirements.txt para verificar.'}
@@ -100,8 +100,7 @@ results['is_isolated'] = sys.prefix != sys.base_prefix
 results['installed_packages'] = list(results['installed_packages'])
 print(json.dumps(results))
 """
-    venv_python_exe = 'python.exe' if os.name == 'nt' else 'python'
-    venv_python = os.path.join(target_path, 'venv', 'Scripts' if os.name == 'nt' else 'bin', venv_python_exe)
+    venv_python = os.path.join(target_path, 'venv', 'Scripts' if os.name == 'nt' else 'bin', 'python')
     try:
         result = subprocess.run([venv_python, '-c', _PROBE_SCRIPT], capture_output=True, text=True, check=True)
         probe_data = json.loads(result.stdout)

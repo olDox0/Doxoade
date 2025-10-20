@@ -1,7 +1,7 @@
 # doxoade/commands/save.py
 import sys
 import subprocess
-import re
+#import re
 import shutil
 
 import click
@@ -33,13 +33,14 @@ def _can_proceed_with_commit(check_result, force_flag, logger):
         click.echo(Fore.GREEN + "[OK] Verificação de qualidade concluída.")
         return True
 
-    num_errors = int(re.search(r'(\d+) Erro\(s\)', output).group(1)) if re.search(r'(\d+) Erro\(s\)', output) else 0
-    is_env_error_only = "Ambiente Inconsistente" in output and num_errors == 1
-
-    if force_flag and is_env_error_only:
-        click.echo(Fore.YELLOW + "\n[AVISO] Erro de ambiente ignorado com --force.")
+    # --- A NOVA LÓGICA INTELIGENTE ---
+    if force_flag:
+        click.echo(Fore.YELLOW + "\n[AVISO] A verificação de qualidade encontrou erros, mas a flag --force foi usada.")
+        click.echo(Fore.YELLOW + "Prosseguindo com o commit sob a responsabilidade do usuário.")
+        logger.add_finding('warning', "Commit forçado apesar dos erros do 'check'.", details=output)
         return True
         
+    # Se não houver --force, o comportamento normal é abortar.
     logger.add_finding('error', "Commit abortado devido a erros do 'check'.", details=output)
     click.echo(Fore.RED + "\n[ERRO] 'doxoade check' encontrou erros. Commit abortado.")
     print(output.encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding))

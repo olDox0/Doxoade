@@ -1,3 +1,2 @@
 @echo off
-rem %~dp0 expande para o caminho do diretório onde o .bat está localizado.
-"%~dp0\venv\Scripts\python.exe" "%~dp0\run_doxoade.py" %*
+"C:\Users\olDox222\Documents\Meu laptop (1)\A20250924YMD\DOSSIER\Altonomo\Projetos_E_Programas\Projeto OADE\doxoade\venv\Scripts\python.exe" "C:\Users\olDox222\Documents\Meu laptop (1)\A20250924YMD\DOSSIER\Altonomo\Projetos_E_Programas\Projeto OADE\doxoade\run_doxoade.py" %*
