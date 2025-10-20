@@ -176,14 +176,12 @@ def _present_results(format, results, ignored_hashes=None):
     _print_summary(results, len(ignored_hashes))
 
 def _print_finding_details(finding):
-    #2025/10/11 - 33.0(Ver), 1.0(Fnc). Nova função auxiliar.
-    #A função tem como objetivo imprimir os detalhes de um único 'finding'.
+    """Imprime os detalhes de um único 'finding', incluindo o snippet se disponível."""
     f_type = finding.get('type', 'INFO').upper()
     color = Fore.RED if 'ERROR' in f_type else Fore.YELLOW
     tag = f"[{f_type}]"
-    ref = f" [Ref: {finding.get('ref')}]" if finding.get('ref') else ""
     
-    click.echo(color + f"{tag} {finding.get('message', 'Mensagem não encontrada.')}{ref}")
+    click.echo(color + f"{tag} {finding.get('message', 'Mensagem não encontrada.')}")
     
     if finding.get('file'):
         location = f"   > Em '{finding.get('file')}'"
@@ -193,6 +191,18 @@ def _print_finding_details(finding):
     
     if finding.get('details'):
         click.echo(Fore.CYAN + f"   > {finding.get('details')}")
+
+    # A NOVA LÓGICA DE SNIPPET
+    snippet = finding.get('snippet')
+    if snippet:
+        # Usamos .get() com um valor padrão para segurança
+        line_num_error = int(finding.get('line', -1))
+        for line_num_str, code_line in snippet.items():
+            line_num = int(line_num_str)
+            if line_num == line_num_error:
+                click.echo(Fore.WHITE + Style.BRIGHT + f"      > {line_num:4}: {code_line}")
+            else:
+                click.echo(Fore.WHITE + Style.DIM + f"        {line_num:4}: {code_line}")
 
 def _print_summary(results, ignored_count):
     #2025/10/11 - 33.0(Ver), 1.0(Fnc). Nova função auxiliar.

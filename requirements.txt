@@ -6,6 +6,7 @@ cssutils
 esprima
 pyflakes
 toml
+chardet
 
 # Ferramentas de Análise de Saúde (adicionadas pelo doxoade)
 radon

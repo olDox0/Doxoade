@@ -1,9 +1,11 @@
 # doxoade/commands/health.py
-import os
 import sys
-import json
 import subprocess
+import shutil
+import os
+import json
 import click
+#import shutil
 from colorama import Fore, Style
 
 # Importa as ferramentas necessárias do módulo compartilhado (nível acima)
@@ -47,17 +49,31 @@ def health(ctx, path, ignore, format, complexity_threshold, min_coverage):
             sys.exit(1)
 
 def _handle_missing_venv(ctx, path, logger):
-    #2025/10/11 - 33.0(Ver), 1.0(Fnc). Nova função auxiliar.
-    #A função tem como objetivo verificar o venv e solicitar a configuração se ausente.
+    """Verifica o venv e oferece para chamar o 'setup-health' via subprocesso."""
+    # Usamos o _get_venv_python_executable de shared_tools, então precisamos importá-lo
+    from ..shared_tools import _get_venv_python_executable
+    
     if not _get_venv_python_executable():
-        logger.add_finding('warning', "Projeto sem ambiente virtual ('venv') configurado.")
-        click.echo(Fore.YELLOW + "[AVISO] Este projeto não possui um ambiente virtual ('venv') configurado.")
+        logger.add_finding('warning', "Projeto sem 'venv' configurado.")
+        click.echo(Fore.YELLOW + "[AVISO] Este projeto não possui um ambiente virtual ('venv').")
         if click.confirm(Fore.CYAN + "Deseja executar 'doxoade setup-health' para configurá-lo?"):
-            setup_health_command = ctx.parent.get_command(ctx, 'setup-health')
-            ctx.invoke(setup_health_command, path=path)
-            click.echo(Fore.CYAN + Style.BRIGHT + "\nConfiguração concluída. Por favor, execute 'doxoade health' novamente.")
+            
+            runner_path = shutil.which("doxoade.bat") or shutil.which("doxoade")
+            if not runner_path:
+                click.echo(Fore.RED + "[ERRO] Não foi possível encontrar o comando 'doxoade' para executar o reparo.")
+                return False
+
+            cmd = [runner_path, 'setup-health', path]
+            try:
+                # Usamos .run com check=True para simplicidade
+                subprocess.run(cmd, check=True)
+                click.echo(Fore.CYAN + Style.BRIGHT + "\nConfiguração concluída. Por favor, execute 'doxoade health' novamente.")
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                click.echo(Fore.RED + "[ERRO] Falha ao executar 'doxoade setup-health'.")
+                return False
         else:
             click.echo("Comando abortado.")
+        # Retornamos False para indicar que o health não pode continuar agora
         return False
     return True
 
