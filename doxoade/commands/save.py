@@ -9,7 +9,7 @@ from colorama import Fore, Style
 
 from ..shared_tools import ExecutionLogger, _load_config, _run_git_command
 
-__version__ = "35.6 Alfa (Phoenix)"
+__version__ = "35.7 Alfa (Phoenix)"
 
 def _run_quality_check(logger):
     click.echo(Fore.YELLOW + "\nPasso 1: Executando 'doxoade check'...")
@@ -49,7 +49,7 @@ def _can_proceed_with_commit(check_result, force_flag, logger):
 @click.command('save')
 @click.pass_context
 @click.argument('message')
-@click.option('--force', is_flag=True, help="Força o commit mesmo se houver apenas um erro de ambiente.")
+@click.option('--force', is_flag=True, help="Força o commit mesmo se o 'check' encontrar erros.")
 def save(ctx, message, force):
     """Executa um 'commit seguro', protegendo o repositório de código com erros."""
     arguments = ctx.params
@@ -63,21 +63,17 @@ def save(ctx, message, force):
         if not _can_proceed_with_commit(check_result, force, logger):
             sys.exit(1)
         
-        # --- A LÓGICA RESTAURADA COMEÇA AQUI ---
-        click.echo(Fore.YELLOW + "\nPasso 2: Verificando se há alterações para salvar...")
-        status_output = _run_git_command(['status', '--porcelain'], capture_output=True)
-        if status_output is None: sys.exit(1)
-        if not status_output:
-            click.echo(Fore.GREEN + "[OK] Nenhuma alteração nova para salvar. A árvore de trabalho está limpa.")
-            return
+        click.echo(Fore.YELLOW + "\nPasso 2: Preparando todos os arquivos para o commit (git add .)...")
+        if not _run_git_command(['add', '.']):
+            logger.add_finding('error', "Falha ao executar 'git add .'.")
+            click.echo(Fore.RED + "[ERRO] Falha ao preparar os arquivos para o commit.")
+            sys.exit(1)
+        click.echo(Fore.GREEN + "[OK] Arquivos preparados.")
 
         click.echo(Fore.YELLOW + f"\nPasso 3: Criando commit com a mensagem: '{message}'...")
-        # A lógica de 'commit -a' primeiro é mais eficiente
-        if not _run_git_command(['commit', '-a', '-m', message]):
-            click.echo(Fore.YELLOW + "Tentando com 'git add .' para arquivos novos...")
-            if not _run_git_command(['add', '.']): sys.exit(1)
-            if not _run_git_command(['commit', '-m', message]): 
-                logger.add_finding('error', "Falha ao executar 'git commit' final.")
-                sys.exit(1)
+        if not _run_git_command(['commit', '-m', message]):
+            # Este bloco agora só é acionado se o commit falhar por outros motivos (ex: nada para commitar)
+            click.echo(Fore.YELLOW + "[AVISO] O Git não encontrou nenhuma alteração para commitar.")
+            return
             
         click.echo(Fore.GREEN + Style.BRIGHT + "\n[SAVE] Alterações salvas com sucesso!")
