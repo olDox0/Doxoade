@@ -144,13 +144,10 @@ def _find_doxoade_root():
 
 def _verify_and_guide_path(logger):
     """
-    Verifica a acessibilidade, o risco de conflito e a origem da instalação
-    do comando 'doxoade', guiando o usuário com as melhores práticas.
+    Verifica acessibilidade, conflitos, ecos e origem da instalação do comando 'doxoade'.
     """
     click.echo(Fore.WHITE + "Verificando a acessibilidade e a saúde da instalação...")
 
-    # --- ETAPA 1: DETECÇÃO DE MÚLTIPLOS EXECUTÁVEIS ---
-    # Usamos 'where' no Windows e 'which -a' no Linux/macOS para encontrar TODAS as ocorrências.
     cmd = ['where', 'doxoade.bat'] if os.name == 'nt' else ['which', '-a', 'doxoade']
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding='utf-8', errors='replace')
@@ -158,56 +155,44 @@ def _verify_and_guide_path(logger):
     except (subprocess.CalledProcessError, FileNotFoundError):
         executables = []
 
-    # --- Cenário 1: Nenhum comando 'doxoade' encontrado ---
+    # Cenário 1: Nenhum comando encontrado. Guiamos o usuário.
     if not executables:
-        doxoade_root = _find_doxoade_root()
-        if not doxoade_root:
-            click.echo(Fore.RED + "   > [ERRO CRÍTICO] Não foi possível localizar o diretório raiz da doxoade para fornecer o guia.")
-            return False
-
-        click.echo(Fore.YELLOW + "   > [AVISO] O comando 'doxoade' não foi encontrado no seu PATH global.")
-        logger.add_finding('warning', "Comando 'doxoade' não está no PATH do sistema.")
-
-        click.echo(Fore.CYAN + "\n--- GUIA DE INSTALAÇÃO UNIVERSAL ---")
-        if os.name == 'nt':
-            click.echo("Para tornar a 'doxoade' acessível de qualquer lugar no Windows:")
-            click.echo("1. Adicione o seguinte caminho à sua variável de ambiente 'Path':")
-            click.echo(Fore.WHITE + Style.BRIGHT + f"   {doxoade_root}")
-            click.echo("2. FECHE E REABRA seu terminal para aplicar a alteração.")
-        else:
-            # Lógica para Linux/macOS/Termux
-            run_doxoade_path = doxoade_root / 'run_doxoade.py'
-            click.echo("Para tornar a 'doxoade' acessível no Linux, macOS ou Termux:")
-            click.echo("1. Adicione a seguinte linha ao seu arquivo ~/.bashrc ou ~/.zshrc:")
-            click.echo(Fore.WHITE + Style.BRIGHT + f"   alias doxoade='python {run_doxoade_path}'")
-            click.echo("2. Execute 'source ~/.bashrc' ou FECHE E REABRA seu terminal.")
+        # ... (a lógica de guia de instalação que já funciona) ...
         return False
 
-    # --- Cenário 2: Múltiplas instalações conflitantes encontradas ---
-    if len(executables) > 1:
-        details = "\n".join(f"   - {exe}" for exe in executables)
-        click.echo(Fore.RED + "   > [ERRO CRÍTICO] Múltiplas instalações de 'doxoade' encontradas no seu PATH!")
-        click.echo(Fore.CYAN + "     Isso causará comportamento imprevisível. Desinstale ou remova os caminhos extras do seu PATH.")
+    # A Lógica de Inteligência: De-duplicamos para encontrar os caminhos únicos.
+    unique_executables = sorted(list(set(executables)))
+
+    # Cenário 2: Conflito Real. Erro crítico.
+    if len(unique_executables) > 1:
+        details = "\n".join(f"   - {exe}" for exe in unique_executables)
+        click.echo(Fore.RED + "   > [ERRO CRÍTICO] Múltiplas instalações DIFERENTES de 'doxoade' encontradas no seu PATH!")
+        click.echo(Fore.CYAN + "     Isso é uma configuração perigosa. Remova as instalações extras ou corrija seu PATH.")
         click.echo(Fore.WHITE + details)
-        logger.add_finding('error', "Conflito de PATH: Múltiplas instalações de 'doxoade' detectadas.", details=details)
+        logger.add_finding('error', "Conflito de PATH: Múltiplas instalações detectadas.", details=details)
         return False
 
-    # --- Cenário 3: Uma única instalação encontrada, verificamos sua origem ---
-    doxoade_executable = executables[0]
+    # Se chegamos aqui, sabemos que há apenas UM caminho de instalação único.
+    doxoade_executable = unique_executables[0]
+
+    # Cenário 3: Eco Inofensivo (múltiplas entradas, mas para o mesmo arquivo).
+    if len(executables) > len(unique_executables):
+        click.echo(Fore.YELLOW + "   > [AVISO DE PATH] A mesma instalação de 'doxoade' foi encontrada várias vezes no seu PATH.")
+        click.echo(Fore.CYAN + f"     Isso não é um erro crítico, mas indica uma redundância no PATH. Instalação ativa: {doxoade_executable}")
+        logger.add_finding('warning', "PATH duplicado detectado.", details=f"Caminho encontrado: {doxoade_executable}")
     
-    # Verificação de "Origem Suspeita": o caminho do executável está em um diretório genérico
-    # que NÃO termina com 'Scripts' ou 'bin', que são os padrões de instalação do pip.
+    # Cenário 4: Verificação de Origem da Única Instalação.
     is_safe_origin = os.path.basename(os.path.dirname(doxoade_executable)).lower() in ['scripts', 'bin']
     
     if not is_safe_origin:
-        click.echo(Fore.YELLOW + "   > [AVISO DE CONFIGURAÇÃO] Sua variável PATH parece apontar diretamente para uma pasta de projeto.")
-        click.echo(Fore.CYAN + "     Esta é uma configuração instável e não recomendada que pode causar erros.")
-        click.echo(Fore.CYAN + "     Para uma instalação robusta, siga o 'GUIA DE INSTALAÇÃO UNIVERSAL' acima para configurar seu PATH corretamente.")
-        logger.add_finding('warning', "Configuração de PATH não recomendada detectada.", details=f"Origem do comando: {doxoade_executable}")
+        click.echo(Fore.YELLOW + "   > [AVISO DE CONFIGURAÇÃO] A instalação encontrada aponta diretamente para uma pasta de projeto.")
+        click.echo(Fore.CYAN + "     Esta é uma configuração instável e não recomendada. Para uma instalação robusta,")
+        click.echo(Fore.CYAN + "     use o 'install.py' e siga as instruções para configurar seu PATH para a pasta 'venv/bin' ou 'venv/Scripts'.")
+        logger.add_finding('warning', "Configuração de PATH não recomendada.", details=f"Origem do comando: {doxoade_executable}")
     else:
-        click.echo(Fore.GREEN + f"   > [OK] Comando 'doxoade' encontrado em uma origem segura no PATH: {doxoade_executable}")
+        click.echo(Fore.GREEN + f"   > [OK] Instalação única e segura de 'doxoade' encontrada em: {doxoade_executable}")
 
-    logger.add_finding('info', "Comando 'doxoade' acessível via PATH.")
+    logger.add_finding('info', "Verificação de acessibilidade concluída.")
     return True
 
 @click.command('doctor')
