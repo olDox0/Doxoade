@@ -47,17 +47,33 @@ def get_shell_config_file():
     return Path.home() / ".profile"
 
 def update_shell_config(config_file, venv_bin_path):
-    """Adiciona ou atualiza o PATH no arquivo de configuração do shell de forma segura."""
-    config_file.touch() # Garante que o arquivo exista
+    """Adiciona o PATH ao arquivo de configuração do shell de forma idempotente."""
+    config_file.touch()
     
     with open(config_file, "r") as f:
         lines = f.readlines()
 
-    # Marcadores para encontrar nossa seção de configuração
+    # Marcadores
     start_marker = "# START DOXOADE CONFIG\n"
     end_marker = "# END DOXOADE CONFIG\n"
     
-    # Remove qualquer configuração antiga da doxoade
+    # A nova linha de configuração que queremos garantir que exista
+    path_export_line = f'export PATH="{venv_bin_path}:$PATH"\n'
+    
+    # Lógica de idempotência: se o bloco já existe e está correto, não fazemos nada.
+    try:
+        start_index = lines.index(start_marker)
+        end_index = lines.index(end_marker)
+        # Verifica se a linha correta já está dentro do bloco
+        if path_export_line in lines[start_index:end_index]:
+            print_success(f"Configuração do PATH já está correta em: {config_file}")
+            return
+    except ValueError:
+        # Bloco não encontrado, continuaremos para criá-lo.
+        pass
+
+    # Se chegamos aqui, o bloco está ausente ou incorreto, então o reconstruímos.
+    print_warning(f"Atualizando a configuração da Doxoade em {config_file}...")
     new_lines = []
     in_doxoade_block = False
     for line in lines:
@@ -70,16 +86,15 @@ def update_shell_config(config_file, venv_bin_path):
         if not in_doxoade_block:
             new_lines.append(line)
 
-    # Adiciona o novo bloco de configuração no final
     new_lines.append("\n")
     new_lines.append(start_marker)
-    new_lines.append(f'export PATH="{venv_bin_path}:$PATH"\n')
+    new_lines.append(path_export_line)
     new_lines.append(end_marker)
 
     with open(config_file, "w") as f:
         f.writelines(new_lines)
     
-    print_success(f"Configuração do PATH atualizada em: {config_file}")
+    print_success(f"Configuração do PATH foi escrita em: {config_file}")
 
 def main():
     print_header("Iniciando a instalação robusta da Doxoade")
