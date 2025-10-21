@@ -1,0 +1,2 @@
+# Pipeline gerado pelo doxoade em: 2025-10-21 01:02:09
+doxoade check . --ignore vers

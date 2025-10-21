@@ -1,147 +1,116 @@
+# DEV.V10-20251021. >>>
+# atualizado em 2025/10/21 - Versão do projeto 42(Ver), Versão da função 2.1(Fnc).
+# Descrição: Corrige o bug "No such file or directory" ao fazer todos os caminhos de arquivo (requirements.txt, etc.)
+# serem relativos à localização do próprio script 'install.py', garantindo que ele possa ser executado de qualquer lugar.
 import sys
 import os
 import subprocess
 import platform
-from pathlib import Path
+#import shutil
 
 # --- Configurações ---
-VENV_DIR = "venv"
-REQUIREMENTS_FILE = "requirements.txt"
-PROJECT_ROOT = Path(__file__).resolve().parent
+# A MUDANÇA CRÍTICA: O PROJECT_ROOT agora é a localização do script.
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
-def print_header(message):
-    print(f"\n--- {message} ---")
-
-def print_success(message):
-    print(f"[OK] {message}")
-
-def print_warning(message):
-    print(f"[AVISO] {message}")
-
-def print_error(message):
+# --- Funções Auxiliares de Saída ---
+def print_header(message): print(f"\n--- {message} ---")
+def print_success(message): print(f"[OK] {message}")
+def print_warning(message): print(f"[AVISO] {message}")
+def print_error(message, details=""):
     print(f"[ERRO] {message}")
+    if details: print(details)
     sys.exit(1)
 
-def run_command(command, cwd=None, error_message=""):
-    """Executa um comando e aborta em caso de erro."""
+def run_command(command, error_message, working_directory=None):
+    """Executa um comando usando o interpretador Python que iniciou este script."""
     try:
-        # Usamos capture_output=True para suprimir a saída a menos que haja um erro
-        process = subprocess.run(command, check=True, capture_output=True, text=True, encoding='utf-8', errors='ignore', cwd=cwd)
-        return process
+        # Adiciona o parâmetro 'cwd' (current working directory)
+        subprocess.run(command, check=True, capture_output=True, text=True, encoding='utf-8', errors='ignore', cwd=working_directory)
     except subprocess.CalledProcessError as e:
-        print_error(error_message or f"O comando '{' '.join(command)}' falhou.")
-        print(e.stderr)
-        sys.exit(1)
+        print_error(error_message, f"STDOUT: {e.stdout}\nSTDERR: {e.stderr}")
     except FileNotFoundError:
-        print_error(f"Comando não encontrado: {command[0]}. Certifique-se de que o Python está no seu PATH.")
-        sys.exit(1)
+        print_error(f"Comando não encontrado: {command[0]}.")
 
-def get_shell_config_file():
-    """Detecta o arquivo de configuração do shell do usuário."""
-    shell = os.environ.get("SHELL", "")
-    if "zsh" in shell:
-        return Path.home() / ".zshrc"
-    if "bash" in shell:
-        return Path.home() / ".bashrc"
-    # Fallback para outros shells baseados em sh
-    return Path.home() / ".profile"
-
-def update_shell_config(config_file, venv_bin_path):
-    """Adiciona o PATH ao arquivo de configuração do shell de forma idempotente."""
-    config_file.touch()
-    
-    with open(config_file, "r") as f:
-        lines = f.readlines()
-
-    # Marcadores
-    start_marker = "# START DOXOADE CONFIG\n"
-    end_marker = "# END DOXOADE CONFIG\n"
-    
-    # A nova linha de configuração que queremos garantir que exista
-    path_export_line = f'export PATH="{venv_bin_path}:$PATH"\n'
-    
-    # Lógica de idempotência: se o bloco já existe e está correto, não fazemos nada.
-    try:
-        start_index = lines.index(start_marker)
-        end_index = lines.index(end_marker)
-        # Verifica se a linha correta já está dentro do bloco
-        if path_export_line in lines[start_index:end_index]:
-            print_success(f"Configuração do PATH já está correta em: {config_file}")
-            return
-    except ValueError:
-        # Bloco não encontrado, continuaremos para criá-lo.
-        pass
-
-    # Se chegamos aqui, o bloco está ausente ou incorreto, então o reconstruímos.
-    print_warning(f"Atualizando a configuração da Doxoade em {config_file}...")
-    new_lines = []
-    in_doxoade_block = False
-    for line in lines:
-        if line == start_marker:
-            in_doxoade_block = True
-            continue
-        if line == end_marker:
-            in_doxoade_block = False
-            continue
-        if not in_doxoade_block:
-            new_lines.append(line)
-
-    new_lines.append("\n")
-    new_lines.append(start_marker)
-    new_lines.append(path_export_line)
-    new_lines.append(end_marker)
-
-    with open(config_file, "w") as f:
-        f.writelines(new_lines)
-    
-    print_success(f"Configuração do PATH foi escrita em: {config_file}")
-
-def main():
-    print_header("Iniciando a instalação robusta da Doxoade")
-
-    # Passo 1: Criar o Ambiente Virtual
-    if not os.path.isdir(VENV_DIR):
-        print_header("Passo 1: Criando Ambiente Virtual")
-        run_command([sys.executable, "-m", "venv", VENV_DIR], error_message="Falha ao criar o ambiente virtual.")
-        print_success(f"Ambiente virtual '{VENV_DIR}' criado.")
-    else:
-        print_success("Ambiente virtual já existente.")
-
-    # Passo 2: Determinar o Caminho do Python do Venv
+def get_scripts_path(python_executable):
+    """Encontra o diretório 'Scripts' ou 'bin' de um interpretador Python."""
     if platform.system() == "Windows":
-        venv_python = os.path.join(PROJECT_ROOT, VENV_DIR, 'Scripts', 'python.exe')
+        return os.path.join(os.path.dirname(python_executable), "Scripts")
     else:
-        venv_python = os.path.join(PROJECT_ROOT, VENV_DIR, 'bin', 'python')
+        return os.path.join(os.path.dirname(python_executable), "bin")
 
-    # Passo 3: Instalar Dependências no Venv
-    print_header("Passo 2: Instalando dependências no venv")
-    run_command([venv_python, "-m", "pip", "install", "--upgrade", "pip"], error_message="Falha ao atualizar o pip.")
-    run_command([venv_python, "-m", "pip", "install", "-r", REQUIREMENTS_FILE], error_message="Falha ao instalar as dependências do requirements.txt.")
+def _add_to_path_windows(scripts_path):
+    """Tenta adicionar o caminho ao PATH do sistema no Windows usando setx."""
+    print(f"Tentando adicionar '{scripts_path}' ao PATH do sistema (requer privilégios de admin)...")
+    try:
+        current_path = subprocess.check_output('echo %PATH%', shell=True).decode().strip()
+        if scripts_path in current_path:
+            print_success("O caminho já está configurado no PATH do sistema.")
+            return True
+        
+        command = ['setx', '/M', 'PATH', f'{current_path};{scripts_path}']
+        subprocess.run(command, capture_output=True, text=True, check=True)
+        print_success("PATH do sistema atualizado com sucesso!")
+        return True
+    except subprocess.CalledProcessError:
+        print_warning("Falha ao modificar o PATH automaticamente.")
+        print("   > Causa Provável: Este script não foi executado como Administrador.")
+        return False
+        
+def main():
+    print_header("Iniciando a instalação de sistema da Doxoade")
+    
+    # --- Utilitario 1: Instalar dependências e o pacote ---
+    python_exe = sys.executable
+    
+    # A MUDANÇA CRÍTICA: Construir o caminho completo para requirements.txt
+    requirements_path = os.path.join(PROJECT_ROOT, 'requirements.txt')
+
+    print_header("Passo 1: Instalando dependências...")
+    run_command([python_exe, "-m", "pip", "install", "-r", requirements_path], "Falha ao instalar dependências.")
     print_success("Dependências instaladas com sucesso.")
 
-    # Passo 4: Instalar a Doxoade em Modo Editável
-    print_header("Passo 3: Instalando a Doxoade")
-    run_command([venv_python, "-m", "pip", "install", "-e", "."], error_message="Falha ao instalar a Doxoade.")
-    print_success("Doxoade instalada com sucesso no ambiente virtual.")
+    print_header("Passo 2: Instalando a Doxoade...")
+    # A MUDANÇA CRÍTICA: Executar o pip install a partir da raiz do projeto
+    run_command([python_exe, "-m", "pip", "install", "--force-reinstall", "."], "Falha ao instalar o pacote Doxoade.", working_directory=PROJECT_ROOT)
+    print_success("Doxoade instalada como um pacote de sistema.")
 
-    # Passo 5: Configuração Universal Automatizada
-    print_header("Passo 4: Configurando o Acesso Universal")
+    # --- Utilitario 2: Configurar o PATH ---
+    print_header("Passo 3: Verificando a acessibilidade do comando...")
+    scripts_path = get_scripts_path(python_exe)
+    
     if platform.system() == "Windows":
-        # No Windows, a modificação do PATH é mais complexa e perigosa. Guiar é mais seguro.
-        venv_scripts_path = PROJECT_ROOT / VENV_DIR / "Scripts"
-        print_warning("Ação manual necessária para concluir a instalação no Windows:")
-        print("1. Pesquise por 'Editar as variáveis de ambiente do sistema' e abra.")
-        print("2. Clique em 'Variáveis de Ambiente...'.")
-        print("3. Em 'Variáveis de usuário', selecione 'Path' e clique em 'Editar...'.")
-        print("4. Clique em 'Novo' e cole o seguinte caminho:")
-        print(f"   {venv_scripts_path}")
-    else: # Linux, macOS, Termux - Automação Segura
-        venv_bin_path = PROJECT_ROOT / VENV_DIR / "bin"
-        config_file = get_shell_config_file()
-        update_shell_config(config_file, venv_bin_path)
+        if not _add_to_path_windows(scripts_path):
+            print_warning("Ação manual necessária para concluir a instalação:")
+            print("1. Pesquise por 'Editar as variáveis de ambiente do sistema' e abra.")
+            print("2. Clique em 'Variáveis de Ambiente...'.")
+            print("3. Em 'Variáveis de sistema', selecione 'Path' e clique em 'Editar...'.")
+            print("4. Clique em 'Novo' e cole o seguinte caminho:")
+            print(f"   {scripts_path}")
+    else: # Linux, macOS, Termux
+        shell_config_file = ""
+        shell = os.environ.get("SHELL", "")
+        if "zsh" in shell:
+            shell_config_file = "~/.zshrc"
+        elif "bash" in shell:
+            shell_config_file = "~/.bashrc"
+        elif "fish" in shell:
+            shell_config_file = "~/.config/fish/config.fish"
+            
+        print_warning("Ação manual necessária para concluir a instalação:")
+        if shell_config_file:
+            print(f"1. Adicione a seguinte linha ao seu arquivo de configuração do shell ({shell_config_file}):")
+            if "fish" in shell:
+                 print(f"   set -Ua fish_user_paths '{scripts_path}'")
+            else:
+                 print(f"   export PATH=\"{scripts_path}:$PATH\"")
+            print("2. Reinicie seu shell com 'source' ou abrindo um novo terminal.")
+        else:
+            print("Não foi possível detectar seu shell. Adicione o seguinte diretório ao seu PATH:")
+            print(f"   {scripts_path}")
+
 
     print("\n--- Instalação Concluída! ---")
-    print("IMPORTANTE: FECHE E REABRA SEU TERMINAL (ou execute 'source ~/.bashrc') para que as mudanças tenham efeito.")
+    print("IMPORTANTE: FECHE E REABRA SEU TERMINAL para que as alterações no PATH tenham efeito.")
 
 if __name__ == "__main__":
     main()

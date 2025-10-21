@@ -1,2 +1,0 @@
-@echo off
-"C:\Users\olDox222\Documents\Meu laptop (1)\A20250924YMD\DOSSIER\Altonomo\Projetos_E_Programas\Projeto OADE\doxoade\venv\Scripts\python.exe" "C:\Users\olDox222\Documents\Meu laptop (1)\A20250924YMD\DOSSIER\Altonomo\Projetos_E_Programas\Projeto OADE\doxoade\run_doxoade.py" %*
