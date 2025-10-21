@@ -1,10 +1,12 @@
 # doxoade/commands/clean.py
+# atualizado em 2025/10/21 - Versão do projeto 42(Ver), Versão da função 2.0(Fnc).
+# Descrição: Aprimora o tratamento de erro para detectar falhas de permissão e sugerir a execução com privilégios de administrador.
+import os
 from colorama import Fore
 from pathlib import Path
 import click
 import shutil
 
-# Importa as ferramentas necessárias do módulo compartilhado
 from ..shared_tools import ExecutionLogger
 
 __version__ = "34.0 Alfa"
@@ -44,14 +46,19 @@ def clean(ctx, force):
             try:
                 if target.is_dir():
                     shutil.rmtree(target)
-                    click.echo(f"  {Fore.RED}Removido diretório: {target}")
+                    click.echo(f"  {Fore.GREEN}Removido diretório: {target}")
                 elif target.is_file():
                     target.unlink()
-                    click.echo(f"  {Fore.RED}Removido arquivo: {target}")
+                    click.echo(f"  {Fore.GREEN}Removido arquivo: {target}")
                 deleted_count += 1
             except OSError as e:
+                error_message = f"Erro ao remover {target}: {e}"
+                # No Windows, 'Acesso negado' é o WinError 5 ou PermissionError. No Linux, é o errno 13.
+                if (os.name == 'nt' and isinstance(e, PermissionError)) or (hasattr(e, 'winerror') and e.winerror == 5) or (hasattr(e, 'errno') and e.errno == 13):
+                    error_message += "\n     Dica: Tente executar o comando em um terminal com privilégios de administrador."
+                
                 logger.add_finding('error', f"Erro ao remover {target}: {e}")
-                click.echo(Fore.RED + f"  Erro ao remover {target}: {e}", err=True)
+                click.echo(Fore.RED + f"  {error_message}", err=True)
         
         logger.add_finding('info', f"{deleted_count} itens removidos.")
         click.echo(Fore.GREEN + f"\n Limpeza concluída! {deleted_count} itens foram removidos.")

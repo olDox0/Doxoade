@@ -1,11 +1,13 @@
+#doxoade/commands/tutorial.py
 # doxoade/commands/tutorial.py
-#import sys
+# atualizado em 2025/10/21 - Versão do projeto 42(Ver), Versão da função 2.0(Fnc).
+# Descrição: Corrige a falha de localização de caminho ao usar 'shutil.which' para encontrar o executável 'doxoade' ativo no PATH.
 import click
 import os
 import shlex
 import subprocess
 import tempfile
-
+import shutil
 from colorama import Fore, Style
 from pathlib import Path
 
@@ -18,13 +20,7 @@ def tutorial_group():
     """Comandos para aprender o workflow do doxoade."""
     pass
 
-def _find_project_root():
-    current_path = Path(__file__).parent
-    while current_path != current_path.parent: # Para evitar loop infinito na raiz do sistema
-        if (current_path / "run_doxoade.py").exists():
-            return current_path
-        current_path = current_path.parent
-    return None
+# A função _find_project_root() foi REMOVIDA.
 
 @tutorial_group.command('main')
 @click.pass_context
@@ -34,7 +30,6 @@ def tutorial(ctx):
         click.echo(Fore.CYAN + Style.BRIGHT + "--- Guia Completo do Workflow Doxoade ---")
         click.echo(Fore.WHITE + "Este guia mostra os dois principais workflows da doxoade.")
 
-        # --- SEÇÃO A: PROJETOS NOVOS ---
         click.echo(Fore.MAGENTA + Style.BRIGHT + "\n\n--- Workflow A: Iniciando um Projeto NOVO do Zero ---")
         click.echo(Fore.WHITE + "Use este workflow para criar projetos saudáveis desde o primeiro dia.")
         
@@ -56,7 +51,6 @@ def tutorial(ctx):
         click.echo(Fore.GREEN + "   4. Ao final do dia, sincronize seus commits com o remoto usando 'doxoade sync'.")
         click.echo(Fore.CYAN + '        (venv) > doxoade sync')
 
-        # --- SEÇÃO B: PROJETOS EXISTENTES ---
         click.echo(Fore.MAGENTA + Style.BRIGHT + "\n\n--- Workflow B: Diagnosticando e Reparando um Projeto EXISTENTE ---")
         click.echo(Fore.WHITE + "Use este workflow para projetos antigos, clonados ou de terceiros.")
 
@@ -88,12 +82,11 @@ def tutorial_simulation(ctx):
         if not click.confirm(Fore.YELLOW + "Podemos começar?"):
             return
         
-        # A linha que estava faltando
-        project_root = _find_project_root()
-        if not project_root:
-            click.echo(Fore.RED + "[ERRO] Não foi possível localizar a raiz do projeto doxoade.")
+        # LÓGICA CORRIGIDA
+        runner_path = shutil.which("doxoade.bat") or shutil.which("doxoade")
+        if not runner_path:
+            click.echo(Fore.RED + "[ERRO] O comando 'doxoade' não foi encontrado no seu PATH. A simulação não pode continuar.")
             return
-        runner_path = str(project_root / "doxoade.bat")
         
         original_dir = os.getcwd()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -124,11 +117,11 @@ def tutorial_interactive(ctx):
         if not click.confirm(Fore.YELLOW + "Podemos começar?"):
             return
 
-        project_root = _find_project_root()
-        if not project_root:
-            click.echo(Fore.RED + "[ERRO] Não foi possível localizar a raiz do projeto doxoade.")
+        # LÓGICA CORRIGIDA
+        runner_path = shutil.which("doxoade.bat") or shutil.which("doxoade")
+        if not runner_path:
+            click.echo(Fore.RED + "[ERRO] O comando 'doxoade' não foi encontrado no seu PATH. A simulação não pode continuar.")
             return
-        runner_path = str(project_root / "doxoade.bat")
         
         original_dir = os.getcwd()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -167,7 +160,6 @@ def _run_sim_command(command_str, runner_path):
     click.echo(Fore.WHITE + Style.DIM + "--- Saída do Comando ---")
     
     args = shlex.split(command_str)
-    # A lógica corrigida: usa o caminho absoluto do runner
     command_to_run = [runner_path] + args[1:]
     
     process = subprocess.Popen(command_to_run, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
@@ -187,7 +179,6 @@ def _prompt_and_run_sim_command(prompt, expected_command, runner_path):
         if user_input.lower() in ['ajuda', 'hint', 'help']:
             click.echo(Fore.YELLOW + f"O comando correto é: {expected_command}"); continue
 
-        # Lógica de validação simplificada
         if user_input.strip() == expected_command.strip():
             click.echo(Fore.GREEN + "Correto!"); break
         else:
@@ -195,7 +186,6 @@ def _prompt_and_run_sim_command(prompt, expected_command, runner_path):
 
     click.echo(Fore.WHITE + Style.DIM + "--- Saída do Comando ---")
     
-    # Usamos shlex.split para lidar com as aspas corretamente
     args = shlex.split(user_input)
     command_to_run = [runner_path] + args[1:]
     
