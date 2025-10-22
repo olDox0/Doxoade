@@ -44,6 +44,8 @@ from doxoade.commands.auto import auto
 from doxoade.commands.git_workflow import release, sync
 from doxoade.commands.utils import log, show_trace, mk, create_pipeline
 from doxoade.commands.intelligence import intelligence
+from doxoade.commands.global_health import global_health
+from doxoade.commands.rebuild import rebuild
 from doxoade.shared_tools import (
     ExecutionLogger, 
 #    _get_venv_python_executable, 
@@ -370,6 +372,8 @@ cli.add_command(show_trace)
 cli.add_command(mk)
 cli.add_command(create_pipeline)
 cli.add_command(intelligence)
+cli.add_command(global_health)
+cli.add_command(rebuild)
 
 if __name__ == '__main__':
     try:
