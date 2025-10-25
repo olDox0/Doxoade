@@ -1,14 +1,11 @@
 # DEV.V10-20251022. >>>
 # doxoade/commands/config.py
-# atualizado em 2025/10/22 - Versão do projeto 43(Ver), Versão da função 1.0(Fnc).
-# Descrição: Novo comando 'config --fix' para auditar e reparar interativamente
-# o arquivo de configuração pyproject.toml do projeto.
+# atualizado em 2025/10/22 - Versão do projeto 43(Ver), Versão da função 2.0(Fnc).
+# Descrição: CORREÇÃO DE LÓGICA. A sequência de operações foi corrigida para garantir
+# que a variável 'toml_data' seja definida antes de ser usada, resolvendo o UnboundLocalError.
 
-import os
-import toml
-import click
+import os, toml, click
 from colorama import Fore, Style
-
 from ..shared_tools import ExecutionLogger, _find_project_root
 
 @click.group('config')
@@ -29,7 +26,7 @@ def config_fix(ctx):
         root_path = _find_project_root()
         config_path = os.path.join(root_path, 'pyproject.toml')
 
-        # --- Utilitário 1: Carregar ou Criar Configuração ---
+        # --- LÓGICA CORRIGIDA: Utilitário 1 (Carregar) vem PRIMEIRO ---
         try:
             if os.path.exists(config_path):
                 with open(config_path, 'r', encoding='utf-8') as f:
@@ -42,11 +39,15 @@ def config_fix(ctx):
             click.echo(Fore.RED + f"   > [ERRO] O arquivo 'pyproject.toml' parece estar corrompido: {e}")
             return
             
-        doxoade_config = toml_data.setdefault('tool', {}).setdefault('doxoade', {})
+        # --- LÓGICA CORRIGIDA: Utilitário 2 (Modificar) vem DEPOIS ---
+        tool_table = toml_data.setdefault('tool', {})
+        doxoade_config = tool_table.setdefault('doxoade', {})
+        
         doxoade_config.setdefault('ignore', [])
+        doxoade_config.setdefault('keep', [])
         current_source_dir = doxoade_config.setdefault('source_dir', '.')
 
-        # --- Utilitário 2: Validar e Sugerir Correção ---
+        # --- Utilitário 3: Validar e Sugerir Correção ---
         search_path = os.path.join(root_path, current_source_dir)
 
         if os.path.isdir(search_path):
@@ -56,7 +57,6 @@ def config_fix(ctx):
             logger.add_finding('WARNING', f"O 'source_dir' configurado ('{current_source_dir}') é inválido.")
             click.echo(Fore.YELLOW + f"   > [AVISO] O 'source_dir' atual ('{current_source_dir}') aponta para um diretório inexistente.")
             
-            # Tenta encontrar uma alternativa inteligente
             if current_source_dir != '.' and os.path.isdir(os.path.join(root_path, '.')):
                 if click.confirm(Fore.CYAN + "     > Corrigir para '.' (diretório raiz do projeto)?"):
                     doxoade_config['source_dir'] = '.'
