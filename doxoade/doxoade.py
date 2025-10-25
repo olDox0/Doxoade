@@ -44,6 +44,7 @@ from doxoade.commands.optimize import optimize
 from doxoade.commands.rebuild import rebuild
 from doxoade.commands.run import run
 from doxoade.commands.save import save
+from doxoade.commands.self_test import self_test
 from doxoade.commands.tutorial import tutorial_group
 from doxoade.commands.utils import log, show_trace, mk, create_pipeline
 from doxoade.commands.webcheck import webcheck
@@ -191,7 +192,10 @@ def _display_common_issues(entries):
     for msg_type, count in sorted_types:
         click.echo(f" - {msg_type}: {count} ocorrências")
         
-#atualizado em 2025/10/07-Versão 31.3. Tem como função preparar um projeto para análise. Melhoria: A lógica de escrita foi refeita para sempre criar a diretiva 'ignore' como uma lista TOML, garantindo um parsing robusto e corrigindo o bug do 'ignore' não ser respeitado.
+# (Substitua a função setup_health inteira)
+# atualizado em 2025/10/22 - Versão do projeto 43(Ver), Versão da função 3.0(Fnc).
+# Descrição: CORREÇÃO DE LÓGICA. A sequência de operações foi corrigida para garantir
+# que a lista 'keep' seja criada e populada corretamente antes de salvar.
 @cli.command('setup-health')
 @click.argument('path', type=click.Path(exists=True, file_okay=False, resolve_path=True), default='.')
 @click.pass_context
@@ -248,33 +252,41 @@ def setup_health(ctx, path):
                 f.write(f"{dep}\n")
         deps_to_add = health_deps
 
-    # --- Passo 2: Verificar e atualizar pyproject.toml (LÓGICA REFEITA) ---
     click.echo(Fore.YELLOW + "\n--- 2. Verificando 'pyproject.toml'... ---")
     pyproject_path = os.path.join(path, 'pyproject.toml')
     
-    pyproject_data = {}
-    if os.path.exists(pyproject_path):
-        try:
+    try:
+        if os.path.exists(pyproject_path):
             with open(pyproject_path, 'r', encoding='utf-8') as f:
-                pyproject_data = toml.load(f)
-        except toml.TomlDecodeError:
-            logger.add_finding('error', "Arquivo 'pyproject.toml' corrompido.")
-            click.echo(Fore.RED + "[ERRO] Seu 'pyproject.toml' parece corrompido."); sys.exit(1)
+                toml_data = toml.load(f)
+        else:
+            toml_data = {}
+    except toml.TomlDecodeError as e:
+        logger.add_finding('error', "Arquivo 'pyproject.toml' corrompido.")
+        click.echo(Fore.RED + "[ERRO] Seu 'pyproject.toml' parece corrompido."); sys.exit(1)
 
-    # Garante a estrutura completa, incluindo 'ignore' como lista
-    tool_table = pyproject_data.setdefault('tool', {})
-    doxoade_table = tool_table.setdefault('doxoade', {})
-    doxoade_table.setdefault('source_dir', '.')
-    doxoade_table.setdefault('ignore', []) # Garante que 'ignore' seja uma lista
+    tool_table = toml_data.setdefault('tool', {})
+    doxoade_config = tool_table.setdefault('doxoade', {})
+    
+    # Garante os valores padrão
+    doxoade_config.setdefault('ignore', [])
+    current_source_dir = doxoade_config.setdefault('source_dir', '.')
 
-    current_source_dir = doxoade_table.get('source_dir', '.')
+    # Atualiza a lista 'keep'
+    packages_to_keep = set(doxoade_config.setdefault('keep', []))
+    health_tools = {"pytest", "coverage", "radon"}
+    packages_to_keep.update(health_tools)
+    doxoade_config['keep'] = sorted(list(packages_to_keep))
+    
+    # Pergunta sobre o source_dir
     new_source_dir = click.prompt("Diretório do código-fonte?", default=current_source_dir)
-    doxoade_table['source_dir'] = new_source_dir
-        
+    doxoade_config['source_dir'] = new_source_dir
+    
+    # Salva o arquivo
     try:
         with open(pyproject_path, 'w', encoding='utf-8') as f:
-            toml.dump(pyproject_data, f)
-        click.echo(Fore.GREEN + "[OK] 'pyproject.toml' configurado com '[tool.doxoade]'.")
+            toml.dump(toml_data, f)
+        click.echo(Fore.GREEN + "[OK] 'pyproject.toml' configurado e atualizado com a lista 'keep'.")
     except Exception as e:
         logger.add_finding('error', f"Falha ao escrever no 'pyproject.toml': {e}")
         click.echo(Fore.RED + f"[ERRO] Falha ao escrever no 'pyproject.toml': {e}"); sys.exit(1)
@@ -370,6 +382,7 @@ cli.add_command(rebuild)
 cli.add_command(release)
 cli.add_command(run)
 cli.add_command(save)
+cli.add_command(self_test)
 cli.add_command(show_trace)
 cli.add_command(sync)
 cli.add_command(tutorial_group)

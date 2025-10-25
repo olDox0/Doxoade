@@ -1,11 +1,4 @@
 [tool.doxoade]
 source_dir = "doxoade"
-ignore = [
-    "Vers/", "node_modules", "backups", "documentacao_antiga"
-]
-# <<< ADICIONE ESTE BLOCO NOVO >>>
-keep = [
-    "pytest",   # Usado pelo 'health' via subprocess
-    "coverage", # Usado pelo 'health' via subprocess
-    "radon"     # Usado pelo 'health' via subprocess
-]
+#ignore = [ "Vers/", "node_modules", "backups", "documentacao_antiga",]
+keep = [ "coverage", "pytest", "radon",]

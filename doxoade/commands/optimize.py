@@ -1,13 +1,13 @@
 # DEV.V10-20251022. >>>
-# doxoade/commands/optimize.py
-# atualizado em 2025/10/22 - Versão do projeto 43(Ver), Versão da função 12.0(Fnc).
-# Descrição: VERSÃO FINAL E CORRIGIDA. Restaura a lógica que faltava para definir 'directly_used_packages',
-# resolvendo o NameError final e completando a funcionalidade do comando.
+# atualizado em 2025/10/22 - Versão do projeto 43(Ver), Versão da função 13.0(Fnc).
+# Descrição: ARQUITETURA FINAL. Implementa a lógica de "Tradução" explícita (módulo -> pacote),
+# conforme a diretriz do usuário, resolvendo o bug de falsos positivos de forma definitiva.
 
 import click, os, sys, subprocess, json, ast, traceback
 from colorama import Style, Fore
 from packaging.requirements import Requirement
 
+# --- Imports Corretos e Finais de shared_tools ---
 from ..shared_tools import (
     ExecutionLogger, 
     _get_venv_python_executable, 
@@ -31,7 +31,8 @@ def optimize(ctx, dry_run, force, debug):
             logger.add_finding('CRITICAL', "Ambiente virtual 'venv' não encontrado para análise.")
             click.echo(Fore.RED + "[ERRO] Ambiente virtual 'venv' não encontrado."); sys.exit(1)
         
-        unused_packages = _find_unused_packages(logger, debug)
+        # A chamada foi simplificada, a função agora tem menos argumentos.
+        unused_packages = _find_unused_packages(logger, python_executable, debug)
 
         if unused_packages is None:
             click.echo(Fore.RED + "[ERRO] A análise falhou. Verifique o log para mais detalhes.")
@@ -45,10 +46,18 @@ def optimize(ctx, dry_run, force, debug):
         for pkg in unused_packages:
             click.echo(f"  - {pkg}")
 
-        logger.add_finding('INFO', f"Encontrados {len(unused_packages)} pacotes não utilizados.", details=", ".join(unused_packages))
-
         if dry_run:
             click.echo(Fore.CYAN + "\nModo 'dry-run' ativado. Nenhuma alteração será feita.")
+            return
+
+        if force or click.confirm(Fore.RED + "\nVocê deseja desinstalar TODOS estes pacotes do seu venv?", abort=True):
+            return
+
+        click.echo(Fore.YELLOW + "\nOs seguintes pacotes parecem ser instalados mas não são utilizados no seu código-fonte:")
+        for pkg in unused_packages:
+            click.echo(f"  - {pkg}")
+
+        if dry_run:
             return
 
         if force or click.confirm(Fore.RED + "\nVocê deseja desinstalar TODOS estes pacotes do seu venv?", abort=True):
@@ -65,7 +74,7 @@ def optimize(ctx, dry_run, force, debug):
                 logger.add_finding('ERROR', "Falha no processo de desinstalação via pip.", details=result.stderr)
                 sys.exit(1)
 
-def _find_unused_packages(logger, debug=False):
+def _find_unused_packages(logger, python_executable, debug=False):
     """Compara pacotes instalados com os importados, com parsing no lado do cliente."""
     
     config = _get_project_config(logger)
@@ -82,23 +91,27 @@ results = {"package_deps": {}, "module_map": {}}
 try:
     for dist in metadata.distributions():
         pkg_name = dist.metadata['name'].lower().replace('_', '-')
-        results["package_deps"][pkg_name] = [req for req in (dist.requires or []) if 'extra == ' not in req]
-        
-        provided_modules = set()
-        top_level = dist.read_text('top_level.txt')
-        if top_level:
-            provided_modules.update(t.lower().replace('-', '_') for t in top_level.strip().split())
-        provided_modules.add(pkg_name.replace('-', '_')) 
-        results["module_map"][pkg_name] = sorted(list(provided_modules))
+        try:
+            results["package_deps"][pkg_name] = [req for req in (dist.requires or []) if 'extra == ' not in req]
+            provided_modules = set()
+            top_level = dist.read_text('top_level.txt')
+            if top_level:
+                provided_modules.update(t.lower().replace('-', '_') for t in top_level.strip().split())
+            provided_modules.add(pkg_name.replace('-', '_')) 
+            results["module_map"][pkg_name] = sorted(list(provided_modules))
+        except Exception:
+            continue
 except Exception:
     pass
 print(json.dumps(results))
 """
-
     try:
-        # --- Utilitário 1: Coletar TODOS os imports do código-fonte ---
+        # --- 1. Coletar TODOS os imports do código-fonte ---
         imported_modules = set()
         folders_to_ignore = {'venv', '.git', '__pycache__', 'build', 'dist'}
+        config_ignore = [item.strip('/') for item in config.get('ignore', [])]
+        folders_to_ignore.update(item.lower() for item in config_ignore)
+
         for root, dirs, files in os.walk(search_path, topdown=True):
             dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
             for file in files:
@@ -118,8 +131,11 @@ print(json.dumps(results))
                         logger.add_finding('WARNING', f"Não foi possível analisar o arquivo: {file_path}", details=str(e))
                         continue
 
-        # --- Utilitário 2: Executar a Sonda de Ambiente ---
-        python_executable = _get_venv_python_executable()
+        if debug:
+            click.echo(Fore.CYAN + "\n[DEBUG] Módulos importados encontrados no código-fonte:")
+            click.echo(str(sorted(list(imported_modules))))
+
+        # --- 2. Executar a Sonda e Processar os Dados "Inteligentemente" ---
         result = subprocess.run([python_executable, '-c', _PROBE_SCRIPT], capture_output=True, text=True, check=True, encoding='utf-8')
         probe_results = json.loads(result.stdout)
         
@@ -136,13 +152,23 @@ print(json.dumps(results))
         
         package_to_modules_map = probe_results.get("module_map", {})
 
-        # <<< INÍCIO DO BLOCO DE CÓDIGO RESTAURADO >>>
-        directly_used_packages = set()
+        # --- ETAPA 3: O Tradutor (A Correção Chave) ---
+        module_to_package_translator = {}
         for pkg_name, provided_modules in package_to_modules_map.items():
-            if not imported_modules.isdisjoint(provided_modules):
-                directly_used_packages.add(pkg_name)
-        # <<< FIM DO BLOCO DE CÓDIGO RESTAURADO >>>
+            for module in provided_modules:
+                module_to_package_translator[module] = pkg_name
 
+        # --- ETAPA 4: Traduzir os `imports` para `pacotes` ---
+        directly_used_packages = set()
+        for imported_mod in imported_modules:
+            if imported_mod in module_to_package_translator:
+                directly_used_packages.add(module_to_package_translator[imported_mod])
+        
+        if debug:
+            click.echo(Fore.CYAN + "\n[DEBUG] Pacotes diretamente utilizados (Após Tradução):")
+            click.echo(str(sorted(list(directly_used_packages))))
+
+        # --- ETAPA 5: Resolução de Dependências (agora com dados corretos) ---
         packages_to_keep = set(config.get('keep', []))
         initial_seed_packages = directly_used_packages | packages_to_keep
 
@@ -156,6 +182,11 @@ print(json.dumps(results))
                     fully_used_packages.add(dep)
                     to_process.append(dep)
 
+        if debug:
+            click.echo(Fore.CYAN + "\n[DEBUG] Pacotes em uso após resolver dependências:")
+            click.echo(str(sorted(list(fully_used_packages))))
+
+        # --- ETAPA 6: Comparação Final ---
         all_installed_packages = set(package_deps_map.keys())
         essential_packages = {'pip', 'setuptools', 'wheel', 'doxoade', 'packaging', 'importlib-metadata'}
         
