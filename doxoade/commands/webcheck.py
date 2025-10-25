@@ -9,12 +9,9 @@ import click
 from colorama import Fore
 
 # Importa as ferramentas necessárias do módulo compartilhado
-from ..shared_tools import (
-    ExecutionLogger,
-    _load_config,
-    _present_results,
-    #_update_summary_from_findings
-)
+from ..shared_tools import ExecutionLogger, _present_results, _get_project_config
+#from ..shared_tools import ExecutionLogger, _load_config, _present_results
+#_update_summary_from_findings
 
 __version__ = "34.0 Alfa"
 
@@ -30,7 +27,7 @@ def webcheck(ctx, path, ignore, format):
         try:
             if format == 'text':
                 click.echo(Fore.YELLOW + f"[WEB] Executando 'doxoade webcheck' no diretório '{os.path.abspath(path)}'...")
-            config = _load_config()
+            config = _get_project_config(logger)
             final_ignore_list = list(set(config.get('ignore', []) + list(ignore)))
 
             web_findings = _check_web_assets(path, final_ignore_list)

@@ -10,9 +10,8 @@ from colorama import Fore
 # Importa as ferramentas necessárias do módulo compartilhado
 from ..shared_tools import (
     ExecutionLogger,
-    _load_config,
     _present_results,
-#    _update_summary_from_findings
+    _load_config_and_get_search_path
 )
 
 __version__ = "34.0 Alfa"
@@ -29,6 +28,11 @@ def apicheck(ctx, path, ignore, format):
         if format == 'text':
             click.echo(Fore.YELLOW + f"[APICHECK] Executando análise de contratos de API em '{path}'...")
     
+        search_path = _load_config_and_get_search_path(logger)
+        if not search_path:
+            _present_results(format, logger.results)
+            sys.exit(1)
+            
         # --- Passo 1: Carregar o Contrato ---
         contract_file = os.path.join(path, 'apicheck.json')
         if not os.path.exists(contract_file):

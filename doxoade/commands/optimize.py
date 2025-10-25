@@ -1,47 +1,50 @@
 # DEV.V10-20251022. >>>
 # doxoade/commands/optimize.py
-# atualizado em 2025/10/22 - Versão do projeto 43(Ver), Versão da função 2.0(Fnc).
-# Descrição: Corrige uma falha crítica de falsos positivos. A análise de imports agora percorre
-# a AST inteira, detectando 'lazy imports' (imports dentro de funções), tornando a análise precisa.
+# atualizado em 2025/10/22 - Versão do projeto 43(Ver), Versão da função 12.0(Fnc).
+# Descrição: VERSÃO FINAL E CORRIGIDA. Restaura a lógica que faltava para definir 'directly_used_packages',
+# resolvendo o NameError final e completando a funcionalidade do comando.
 
-import click
-import os
-import sys
-import subprocess
-import json
-import ast
+import click, os, sys, subprocess, json, ast, traceback
 from colorama import Style, Fore
+from packaging.requirements import Requirement
 
-from ..shared_tools import ExecutionLogger, _get_venv_python_executable
+from ..shared_tools import (
+    ExecutionLogger, 
+    _get_venv_python_executable, 
+    _get_project_config
+)
 
 @click.command('optimize')
-@click.option('--dry-run', is_flag=True, help="Apenas analisa e relata, não oferece para desinstalar.")
-@click.option('--force', is_flag=True, help="Desinstala pacotes não utilizados sem confirmação.")
+@click.option('--dry-run', is_flag=True, help="Apenas analisa e relata...")
+@click.option('--force', is_flag=True, help="Desinstala pacotes não utilizados...")
+@click.option('--debug', is_flag=True, help="Ativa a saída de depuração...")
 @click.pass_context
-def optimize(ctx, dry_run, force):
-    """Analisa o venv em busca de pacotes instalados mas não utilizados e oferece para removê-los."""
-    arguments = ctx.params
+def optimize(ctx, dry_run, force, debug):
+    """Analisa o venv em busca de pacotes instalados mas não utilizados."""
+    arguments = {k: v for k, v in locals().items() if k != 'ctx'}
     path = '.'
-
     with ExecutionLogger('optimize', path, arguments) as logger:
         click.echo(Fore.CYAN + "--- [OPTIMIZE] Analisando dependências não utilizadas ---")
         
         python_executable = _get_venv_python_executable()
         if not python_executable:
-            msg = "Ambiente virtual 'venv' não encontrado para análise."
-            logger.add_finding('CRITICAL', msg)
-            click.echo(Fore.RED + f"[ERRO] {msg}"); sys.exit(1)
+            logger.add_finding('CRITICAL', "Ambiente virtual 'venv' não encontrado para análise.")
+            click.echo(Fore.RED + "[ERRO] Ambiente virtual 'venv' não encontrado."); sys.exit(1)
         
-        unused_packages = _find_unused_packages(path, python_executable, logger)
+        unused_packages = _find_unused_packages(logger, debug)
+
+        if unused_packages is None:
+            click.echo(Fore.RED + "[ERRO] A análise falhou. Verifique o log para mais detalhes.")
+            sys.exit(1)
 
         if not unused_packages:
             click.echo(Fore.GREEN + "\n[OK] Nenhuma dependência órfã encontrada. Seu ambiente está limpo!")
             return
 
-        click.echo(Fore.YELLOW + "\nOs seguintes pacotes parecem estar instalados mas não são utilizados no seu código-fonte:")
+        click.echo(Fore.YELLOW + "\nOs seguintes pacotes parecem ser instalados mas não são utilizados no seu código-fonte:")
         for pkg in unused_packages:
             click.echo(f"  - {pkg}")
-        
+
         logger.add_finding('INFO', f"Encontrados {len(unused_packages)} pacotes não utilizados.", details=", ".join(unused_packages))
 
         if dry_run:
@@ -62,37 +65,41 @@ def optimize(ctx, dry_run, force):
                 logger.add_finding('ERROR', "Falha no processo de desinstalação via pip.", details=result.stderr)
                 sys.exit(1)
 
-def _find_unused_packages(project_path, python_executable, logger):
-    """Compara pacotes instalados com os importados, respeitando a árvore de dependências e lazy loading."""
+def _find_unused_packages(logger, debug=False):
+    """Compara pacotes instalados com os importados, com parsing no lado do cliente."""
+    
+    config = _get_project_config(logger)
+    if not config.get('search_path_valid'):
+        return None
+    search_path = config.get('search_path')
+    
+    click.echo(Fore.CYAN + f"   > Analisando código-fonte em: '{search_path}'")
     
     _PROBE_SCRIPT = """
 import json
 from importlib import metadata
-results = {"packages": {}, "dependencies": {}}
+results = {"package_deps": {}, "module_map": {}}
 try:
     for dist in metadata.distributions():
         pkg_name = dist.metadata['name'].lower().replace('_', '-')
-        results["packages"][pkg_name] = [req.split(' ')[0].lower().replace('_', '-') for req in (dist.requires or []) if 'extra == ' not in req]
+        results["package_deps"][pkg_name] = [req for req in (dist.requires or []) if 'extra == ' not in req]
         
         provided_modules = set()
-        # Mapeia o nome do pacote para os módulos que ele fornece (ex: 'beautifulsoup4' -> 'bs4')
         top_level = dist.read_text('top_level.txt')
         if top_level:
             provided_modules.update(t.lower().replace('-', '_') for t in top_level.strip().split())
-        
-        # Fallback: adiciona o próprio nome do pacote como um módulo provável
         provided_modules.add(pkg_name.replace('-', '_')) 
-        results["dependencies"][pkg_name] = sorted(list(provided_modules))
+        results["module_map"][pkg_name] = sorted(list(provided_modules))
 except Exception:
-    # Em caso de erro na sonda, retorna um dicionário vazio para não quebrar a análise.
     pass
 print(json.dumps(results))
 """
+
     try:
-        # --- Utilitário 1: Obter TODOS os módulos importados (incluindo lazy imports) ---
+        # --- Utilitário 1: Coletar TODOS os imports do código-fonte ---
         imported_modules = set()
         folders_to_ignore = {'venv', '.git', '__pycache__', 'build', 'dist'}
-        for root, dirs, files in os.walk(project_path, topdown=True):
+        for root, dirs, files in os.walk(search_path, topdown=True):
             dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
             for file in files:
                 if file.endswith('.py'):
@@ -101,31 +108,47 @@ print(json.dumps(results))
                         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                             content = f.read()
                         tree = ast.parse(content, filename=file_path)
-                        # A LÓGICA CORRETA: ast.walk percorre a árvore inteira, incluindo corpos de funções.
                         for node in ast.walk(tree):
                             if isinstance(node, ast.Import):
                                 for alias in node.names:
                                     imported_modules.add(alias.name.split('.')[0].lower())
                             elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
                                 imported_modules.add(node.module.split('.')[0].lower())
-                    except Exception: 
+                    except (SyntaxError, IOError) as e:
+                        logger.add_finding('WARNING', f"Não foi possível analisar o arquivo: {file_path}", details=str(e))
                         continue
 
         # --- Utilitário 2: Executar a Sonda de Ambiente ---
+        python_executable = _get_venv_python_executable()
         result = subprocess.run([python_executable, '-c', _PROBE_SCRIPT], capture_output=True, text=True, check=True, encoding='utf-8')
         probe_results = json.loads(result.stdout)
-        package_to_modules_map = probe_results.get("dependencies", {})
-        package_deps_map = probe_results.get("packages", {})
+        
+        package_deps_map_raw = probe_results.get("package_deps", {})
+        package_deps_map = {}
+        for pkg, raw_deps in package_deps_map_raw.items():
+            parsed_deps = []
+            for req_str in raw_deps:
+                try:
+                    parsed_deps.append(Requirement(req_str).name.lower().replace('_', '-'))
+                except:
+                    pass
+            package_deps_map[pkg] = parsed_deps
+        
+        package_to_modules_map = probe_results.get("module_map", {})
 
-        # --- Utilitário 3: Resolver dependências ---
+        # <<< INÍCIO DO BLOCO DE CÓDIGO RESTAURADO >>>
         directly_used_packages = set()
         for pkg_name, provided_modules in package_to_modules_map.items():
-            # Se qualquer um dos módulos que um pacote fornece estiver na nossa lista de imports, o pacote é usado.
             if not imported_modules.isdisjoint(provided_modules):
                 directly_used_packages.add(pkg_name)
+        # <<< FIM DO BLOCO DE CÓDIGO RESTAURADO >>>
 
-        fully_used_packages = set(directly_used_packages)
-        to_process = list(directly_used_packages)
+        packages_to_keep = set(config.get('keep', []))
+        initial_seed_packages = directly_used_packages | packages_to_keep
+
+        fully_used_packages = set(initial_seed_packages)
+        to_process = list(initial_seed_packages)
+        
         while to_process:
             current_pkg = to_process.pop()
             for dep in package_deps_map.get(current_pkg, []):
@@ -133,7 +156,6 @@ print(json.dumps(results))
                     fully_used_packages.add(dep)
                     to_process.append(dep)
 
-        # --- Utilitário 4: Comparação Final ---
         all_installed_packages = set(package_deps_map.keys())
         essential_packages = {'pip', 'setuptools', 'wheel', 'doxoade', 'packaging', 'importlib-metadata'}
         
@@ -142,4 +164,4 @@ print(json.dumps(results))
         
     except Exception as e:
         logger.add_finding('ERROR', f"Falha ao analisar dependências: {e}", details=traceback.format_exc())
-        return []
+        return None

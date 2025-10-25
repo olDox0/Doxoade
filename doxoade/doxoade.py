@@ -5,16 +5,16 @@
 #from io import StringIO
 #from pyflakes import api as pyflakes_api
 
-import click
-import json
-import os, sys, re
-import subprocess
-import toml
 import traceback
-#from queue import Queue, Empty
+import toml
+import subprocess
+import os, sys, re
+import json
+import click
 from pathlib import Path
 from functools import wraps
 from colorama import init as colorama_init, Fore, Style
+#from queue import Queue, Empty
 #from datetime import datetime
 
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -24,28 +24,29 @@ if PACKAGE_PARENT not in sys.path:
 
 # --- REGISTRO DE PLUGINS DA V2.0 ---
 from doxoade.commands.apicheck import apicheck
+from doxoade.commands.auto import auto
 from doxoade.commands.check import check
 from doxoade.commands.clean import clean
+from doxoade.commands.config import config_group
 from doxoade.commands.deepcheck import deepcheck
+from doxoade.commands.doctor import doctor
 from doxoade.commands.encoding import encoding
 from doxoade.commands.git_clean import git_clean
 from doxoade.commands.git_new import git_new
+from doxoade.commands.git_workflow import release, sync
+from doxoade.commands.global_health import global_health
 from doxoade.commands.guicheck import guicheck
 from doxoade.commands.health import health
 from doxoade.commands.init import init
+from doxoade.commands.intelligence import intelligence
 from doxoade.commands.kvcheck import kvcheck
 from doxoade.commands.optimize import optimize
+from doxoade.commands.rebuild import rebuild
 from doxoade.commands.run import run
 from doxoade.commands.save import save
-from doxoade.commands.webcheck import webcheck
 from doxoade.commands.tutorial import tutorial_group
-from doxoade.commands.doctor import doctor
-from doxoade.commands.auto import auto
-from doxoade.commands.git_workflow import release, sync
 from doxoade.commands.utils import log, show_trace, mk, create_pipeline
-from doxoade.commands.intelligence import intelligence
-from doxoade.commands.global_health import global_health
-from doxoade.commands.rebuild import rebuild
+from doxoade.commands.webcheck import webcheck
 from doxoade.shared_tools import (
     ExecutionLogger, 
 #    _get_venv_python_executable, 
@@ -343,37 +344,36 @@ def _analyze_traceback(stderr_output):
             click.echo(Fore.CYAN + message); return
     click.echo(Fore.CYAN + "Nenhum padrão de erro conhecido foi encontrado. Analise o traceback acima.")
 
-
-
-#atualizado em 2025/10/07-Versão 32.0. Melhoria: O núcleo agora registra comandos a partir de módulos de plugin externos.
+#atualizado em 2025/10/24-Versão 34.0.
 # --- REGISTRO DE PLUGINS ---
 cli.add_command(apicheck)
+cli.add_command(auto)
 cli.add_command(check)
 cli.add_command(clean)
+cli.add_command(config_group)
+cli.add_command(create_pipeline)
 cli.add_command(deepcheck)
+cli.add_command(doctor)
 cli.add_command(encoding)
 cli.add_command(git_clean)
 cli.add_command(git_new)
+cli.add_command(global_health)
 cli.add_command(guicheck)
 cli.add_command(health)
 cli.add_command(init)
+cli.add_command(intelligence)
 cli.add_command(kvcheck)
+cli.add_command(log)
+cli.add_command(mk)
 cli.add_command(optimize)
+cli.add_command(rebuild)
+cli.add_command(release)
 cli.add_command(run)
 cli.add_command(save)
-cli.add_command(webcheck)
-cli.add_command(tutorial_group)
-cli.add_command(doctor)
-cli.add_command(auto)
-cli.add_command(release)
-cli.add_command(sync)
-cli.add_command(log)
 cli.add_command(show_trace)
-cli.add_command(mk)
-cli.add_command(create_pipeline)
-cli.add_command(intelligence)
-cli.add_command(global_health)
-cli.add_command(rebuild)
+cli.add_command(sync)
+cli.add_command(tutorial_group)
+cli.add_command(webcheck)
 
 if __name__ == '__main__':
     try:
