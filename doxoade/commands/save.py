@@ -6,8 +6,8 @@ import shutil
 
 import click
 from colorama import Fore, Style
-
-from ..shared_tools import ExecutionLogger, _load_config, _run_git_command
+from ..shared_tools import ExecutionLogger, _get_project_config, _run_git_command
+#from ..shared_tools import ExecutionLogger, _load_config, _run_git_command
 
 __version__ = "35.7 Alfa (Phoenix)"
 
@@ -18,7 +18,7 @@ def _run_quality_check(logger):
         logger.add_finding('error', "Runner 'doxoade.bat' não encontrado.")
         return None, "Runner 'doxoade.bat' não encontrado no PATH."
 
-    config = _load_config()
+    config = _get_project_config(logger)
     ignore_list = config.get('ignore', [])
     
     check_command = [runner_path, 'check', '.']

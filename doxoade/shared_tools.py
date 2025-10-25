@@ -1,12 +1,12 @@
-# DEV.V10-20251021.
+# DEV.V10-20251022. >>>
 # doxoade/shared_tools.py
-# atualizado em 2025/10/22 - Versão do projeto 43(Ver), Versão da função 4.0(Fnc).
-# Descrição: Introduz Níveis de Severidade (CRITICAL, ERROR, WARNING, INFO) no ExecutionLogger e na apresentação de resultados.
-# click, traceback,
-import time, hashlib, json, subprocess, os, sys, click, toml
-from datetime import datetime, timezone
+# atualizado em 2025/10/22 - Versão do projeto 43(Ver), Versão da função 8.0(Fnc).
+# Descrição: VERSÃO FINAL E CORRIGIDA. Contém a única função _get_project_config como "Fonte da Verdade".
+
+import os, sys, json, toml, time, hashlib, subprocess, click
 from pathlib import Path
 from colorama import Fore, Style
+from datetime import datetime, timezone
 
 # -----------------------------------------------------------------------------
 # CLASSE DE LOGGING COMPARTILHADA
@@ -98,8 +98,11 @@ def _log_execution(command_name, path, results, arguments, execution_time_ms=0):
             # A correção do '\n' que fizemos antes
             f.write(json.dumps(log_data) + '\n')
     # O 'except' agora tem um 'try' correspondente
-    except Exception:
-        pass
+# atualizado em 2025/10/22 - Versão do projeto 43(Ver), Versão da função 6.1(Fnc).
+# Descrição: Eleva a severidade de um SyntaxError para CRITICAL, pois ele impede a execução.
+    except (SyntaxError, IOError) as e:
+        # Um erro de sintaxe é CRÍTICO porque impede qualquer análise mais profunda ou execução.
+        logger.add_finding('CRITICAL', "Erro de sintaxe impede a análise.", file=file_path, line=getattr(e, 'lineno', None))
 
 def _get_venv_python_executable():
     """Encontra o caminho para o executável Python do venv do projeto atual."""
@@ -175,11 +178,20 @@ def _present_results(format, results, ignored_hashes=None):
     
     _print_summary(results, len(ignored_hashes))
 
+# atualizado em 2025/10/22 - Versão do projeto 43(Ver), Versão da função 7.1(Fnc).
+# Descrição: Corrige o bug de apresentação ao usar a chave 'severity' em vez da antiga 'type'.
 def _print_finding_details(finding):
-    """Imprime os detalhes de um único 'finding', incluindo o snippet se disponível."""
-    f_type = finding.get('type', 'INFO').upper()
-    color = Fore.RED if 'ERROR' in f_type else Fore.YELLOW
-    tag = f"[{f_type}]"
+    """Imprime os detalhes de um único 'finding' usando a chave 'severity'."""
+    severity = finding.get('severity', 'INFO').upper()
+    
+    color_map = {
+        'CRITICAL': Fore.MAGENTA,
+        'ERROR': Fore.RED,
+        'WARNING': Fore.YELLOW,
+        'INFO': Fore.CYAN
+    }
+    color = color_map.get(severity, Fore.WHITE)
+    tag = f"[{severity}]"
     
     click.echo(color + f"{tag} {finding.get('message', 'Mensagem não encontrada.')}")
     
@@ -205,46 +217,92 @@ def _print_finding_details(finding):
                 click.echo(Fore.WHITE + Style.DIM + f"        {line_num:4}: {code_line}")
 
 def _print_summary(results, ignored_count):
-    #2025/10/11 - 33.0(Ver), 1.0(Fnc). Nova função auxiliar.
-    #A função tem como objetivo imprimir o sumário final da análise.
+    """Imprime o sumário final, agora ciente de todos os níveis de severidade."""
     summary = results.get('summary', {})
+    critical_count = summary.get('critical', 0)
     error_count = summary.get('errors', 0)
     warning_count = summary.get('warnings', 0)
     
     click.echo(Style.BRIGHT + "\n" + "-"*40)
     
-    if error_count == 0 and warning_count == 0:
+    if critical_count == 0 and error_count == 0 and warning_count == 0:
         click.echo(Fore.GREEN + "[OK] Análise concluída. Nenhum problema encontrado!")
         return
 
-    summary_text = f"[FIM] Análise concluída: {Fore.RED}{error_count} Erro(s){Style.RESET_ALL}, {Fore.YELLOW}{warning_count} Aviso(s){Style.RESET_ALL}"
+    summary_parts = []
+    if critical_count > 0:
+        summary_parts.append(f"{Fore.MAGENTA}{critical_count} Erro(s) Crítico(s){Style.RESET_ALL}")
+    if error_count > 0:
+        summary_parts.append(f"{Fore.RED}{error_count} Erro(s){Style.RESET_ALL}")
+    if warning_count > 0:
+        summary_parts.append(f"{Fore.YELLOW}{warning_count} Aviso(s){Style.RESET_ALL}")
+        
+    summary_text = f"[FIM] Análise concluída: {', '.join(summary_parts)}"
     if ignored_count > 0:
         summary_text += Style.DIM + f" ({ignored_count} ignorado(s))"
     summary_text += "."
     click.echo(summary_text)
 
-def _load_config():
-    #2025/10/11 - 33.0(Ver), 2.0(Fnc). Função movida para shared_tools.
-    #A função tem como objetivo procurar e carregar configurações de um arquivo pyproject.toml.
-    settings = {'ignore': [], 'source_dir': '.'}
-    try:
-        with open('pyproject.toml', 'r', encoding='utf-8') as f:
-            pyproject_data = toml.load(f)
-        
-        doxoade_config = pyproject_data.get('tool', {}).get('doxoade', {})
-        
-        ignore_val = doxoade_config.get('ignore', [])
-        if isinstance(ignore_val, str):
-            settings['ignore'] = [line.strip() for line in ignore_val.split('\n') if line.strip()]
-        elif isinstance(ignore_val, list):
-            settings['ignore'] = ignore_val
-            
-        settings['source_dir'] = doxoade_config.get('source_dir', '.')
-            
-    except (FileNotFoundError, toml.TomlDecodeError):
-        pass
-        
-    return settings
+def _find_project_root():
+    """Sobe a árvore de diretórios em busca de um marcador de projeto (.git ou pyproject.toml)."""
+    current_path = Path('.').resolve()
+    while current_path != current_path.parent:
+        if (current_path / '.git').is_dir() or (current_path / 'pyproject.toml').is_file():
+            return str(current_path)
+        current_path = current_path.parent
+    return str(Path('.').resolve())
+
+def _get_project_config(logger):
+    """A 'Fonte da Verdade' para configuração. Encontra a raiz, lê o toml e valida o search_path."""
+    root_path = _find_project_root()
+    
+    config = {'ignore': [], 'source_dir': '.'}
+    config_path = os.path.join(root_path, 'pyproject.toml')
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                toml_data = toml.load(f)
+                config.update(toml_data.get('tool', {}).get('doxoade', {}))
+        except Exception as e:
+            logger.add_finding('WARNING', "Não foi possível ler o pyproject.toml.", details=str(e))
+
+    source_dir = config.get('source_dir', '.')
+    search_path = os.path.join(root_path, source_dir)
+
+    config['search_path_valid'] = True
+    if not os.path.isdir(search_path):
+        logger.add_finding('CRITICAL', f"O diretório de código-fonte '{search_path}' não existe.",
+                           details="Verifique a diretiva 'source_dir' no seu pyproject.toml.")
+        config['search_path_valid'] = False
+
+    config['root_path'] = root_path
+    config['search_path'] = search_path
+    
+    return config
+
+def _load_config_and_get_search_path(logger):
+    """A nova 'Fonte da Verdade'. Encontra a raiz, carrega a config e valida o search_path."""
+    root_path = _find_project_root()
+    
+    config = {'source_dir': '.'} # Padrão
+    config_path = os.path.join(root_path, 'pyproject.toml')
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                # O .get(config) no final garante que, se a seção não existir, usamos o default.
+                config = toml.load(f).get('tool', {}).get('doxoade', config)
+        except Exception as e:
+            logger.add_finding('WARNING', "Não foi possível ler o pyproject.toml.", details=str(e))
+
+    source_dir = config.get('source_dir', '.')
+    search_path = os.path.join(root_path, source_dir)
+
+    if not os.path.isdir(search_path):
+        logger.add_finding('CRITICAL', f"O diretório de código-fonte '{search_path}' não existe.",
+                           details="Verifique a diretiva 'source_dir' no seu pyproject.toml.")
+        return None # Sinaliza um erro fatal
+
+    return search_path
 
 def _update_summary_from_findings(results):
     #2025/10/11 - 33.0(Ver), 2.0(Fnc). Função movida para shared_tools.

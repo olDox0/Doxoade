@@ -10,7 +10,8 @@ import chardet
 import click
 from colorama import Fore
 
-from ..shared_tools import ExecutionLogger, _load_config
+from ..shared_tools import ExecutionLogger, _get_project_config
+#from ..shared_tools import ExecutionLogger, _load_config
 
 __version__ = "37.2 Alfa (Hardening)"
 
@@ -98,8 +99,8 @@ def intelligence(ctx, output):
     with ExecutionLogger('intelligence', path, arguments) as logger:
         click.echo(Fore.CYAN + "--- [INTELLIGENCE] Gerando dossiê de diagnóstico ---")
 
-        config = _load_config()
-        ignore_patterns = set(config.get('ignore', []) + ['venv', '.git', '__pycache__', '*.egg-info', 'build', 'dist'])
+        config = _get_project_config(logger)
+        ignore_patterns = set(config.get('ignore', []) + ['venv', '.git', ...])
 
         report_data = {
             "report_generated_at_utc": datetime.now(timezone.utc).isoformat(),
