@@ -2,7 +2,7 @@ import pytest
 from click.testing import CliRunner
 
 # Importamos o ponto de entrada principal da nossa aplicação
-from doxoade.doxoade import cli
+from doxoade import cli  # Importação corrigida para o padrão de pacote
 
 # O "fixture" é uma função de setup que o pytest executa antes de cada teste.
 # Aqui, ele cria uma instância do nosso "runner" de testes.

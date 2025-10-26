@@ -8,6 +8,7 @@ pyflakes
 toml
 chardet
 packaging
+pytest-cov
 
 # Ferramentas de Análise de Saúde (adicionadas pelo doxoade)
 radon

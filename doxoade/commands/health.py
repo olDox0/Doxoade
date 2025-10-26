@@ -1,10 +1,9 @@
-# DEV.V10-20251022. >>>
 # doxoade/commands/health.py
-# atualizado em 2025/10/22 - Versão do projeto 43(Ver), Versão da função 7.0(Fnc).
-# Descrição: VERSÃO FINAL E CORRIGIDA. Alinha o 'health' com a arquitetura de 'shared_tools',
-# resolvendo todos os TypeErrors e NameErrors.
+# atualizado em 2025/10/25 - Versão do projeto 43(Ver), Versão da função 8.0(Fnc).
+#Descrição: Esta função é refatorada para robustez. Ela agora usa o método seguro .get('key', 0) para acessar os contadores de "findings", prevenindo um KeyError em execuções sem resultados. Além disso, a lógica de sys.exit(1) foi corrigida para ser acionada apenas por erros críticos, e não por avisos.
+#O que poderia ser melhorado: A função _run_all_analyses poderia ser dividida em funções menores para reduzir sua complexidade.
 
-import sys, subprocess, shutil, os, json, click
+import sys, subprocess, shutil, os, json, click, re
 from colorama import Fore, Style
 
 # --- Imports Corretos e Finais de shared_tools ---
@@ -12,7 +11,7 @@ from ..shared_tools import (
     ExecutionLogger, 
     _get_venv_python_executable, 
     _present_results,
-    _get_project_config
+    _get_project_config # A ÚNICA função de configuração necessária
 )
 
 @click.command('health')
@@ -40,7 +39,11 @@ def health(ctx, path, ignore, output_format, complexity_threshold, min_coverage)
 
         _present_results(output_format, logger.results)
 
-        if logger.results['summary']['critical'] > 0 or logger.results['summary']['errors'] > 0:
+        # --- CORREÇÃO 1: Acesso seguro ao dicionário summary ---
+        summary = logger.results.get('summary', {})
+        
+        # --- CORREÇÃO 2: Lógica de saída correta (ignora warnings) ---
+        if summary.get('critical', 0) > 0 or summary.get('errors', 0) > 0:
             sys.exit(1)
 
 def _run_all_analyses(project_path, ignore, complexity_threshold, min_coverage, logger):

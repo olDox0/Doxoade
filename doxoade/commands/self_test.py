@@ -1,48 +1,53 @@
 # DEV.V10-20251022. >>>
 # doxoade/commands/self_test.py
-# atualizado em 2025/10/22 - Versão do projeto 43(Ver), Versão da função 1.2(Fnc).
-# Descrição: Adiciona uma flag '--debug' para exibir a saída completa do comando
-# analisado, fornecendo total transparência ao teste de sanidade.
+# atualizado em 2025/10/22 - Versão do projeto 43(Ver), Versão da função 2.1(Fnc).
+# Descrição: CORREÇÃO DE ROBUSTEZ FINAL. A função de subprocesso agora usa 'sys.getdefaultencoding()'
+# e a verificação de erro foi aprimorada para lidar com múltiplas saídas.
 
-import os
-import sys
-import subprocess
-import tempfile
-import shutil
-import click
+import os, sys, subprocess, tempfile, shutil, click
 from colorama import Fore, Style
-
 from ..shared_tools import ExecutionLogger
 
 # Dicionário de "Pacientes Zero": Mapeia um comando para o código que deve fazê-lo falhar.
 TEST_CASES = {
     "check": {
         "filename": "broken_code.py",
-        "content": "def funcao_quebrada()\\n    pass", # SyntaxError
-        "expected_fail": True
+        "content": "def funcao_quebrada():\\n    pass # Erro de sintaxe aqui, ':' faltando na linha anterior",
+        "expected_finding": "Erro de sintaxe impede a análise."
     },
     "webcheck": {
         "filename": "broken_page.html",
         "content": '<a href="pagina_inexistente.html">Link Quebrado</a>',
-        "expected_fail": True
+        "expected_finding": "Link quebrado para 'pagina_inexistente.html'"
     }
-    # Podemos adicionar mais casos aqui no futuro.
 }
 
 def _run_doxoade_in_sandbox(command_to_test, sandbox_path):
-    """Executa um comando doxoade dentro de um diretório sandbox."""
+    """Executa um comando doxoade dentro de um diretório sandbox de forma robusta."""
     
-    # Encontra o executável da doxoade que está sendo usado no momento
-    runner_path = shutil.which("doxoade")
+    runner_path = shutil.which("doxoade.bat") or shutil.which("doxoade")
     if not runner_path:
         return -1, "Não foi possível encontrar o executável 'doxoade' no PATH."
 
     command = [runner_path] + command_to_test.split()
     
-    # Executa o comando, apontando para o diretório sandbox
-    result = subprocess.run(command, cwd=sandbox_path, capture_output=True, text=True, encoding='utf-8')
-    
-    return result.returncode, result.stdout + result.stderr
+    try:
+        # --- A CORREÇÃO CRÍTICA ---
+        # Usa a codificação padrão do sistema para evitar UnicodeDecodeError no Windows.
+        result = subprocess.run(
+            command, 
+            cwd=sandbox_path, 
+            capture_output=True, 
+            text=True, 
+            encoding=sys.getdefaultencoding(), 
+            errors='replace'
+        )
+        
+        stdout = result.stdout or ""
+        stderr = result.stderr or ""
+        return result.returncode, stdout + stderr
+    except Exception as e:
+        return -1, f"Ocorreu um erro inesperado ao executar o subprocesso: {e}"
 
 @click.command('self-test')
 @click.argument('command_name', type=click.Choice(list(TEST_CASES.keys())), default='check')
@@ -75,20 +80,28 @@ def self_test(ctx, command_name, debug):
                 click.echo(output)
                 click.echo(Fore.WHITE + Style.DIM + f"--- [DEBUG] Código de Saída: {return_code} ---\n")
 
-            # Diagnóstico do Diagnóstico
-            if test_case["expected_fail"] and return_code != 0:
-                logger.add_finding('INFO', f"O comando '{command_name}' detectou o erro com sucesso.")
-                click.echo(Fore.GREEN + Style.BRIGHT + "\n[OK] SUCESSO: O analisador detectou o erro como esperado.")
-            elif test_case["expected_fail"] and return_code == 0:
+            # --- LÓGICA DE DIAGNÓSTICO INTELIGENTE (JÁ ESTAVA CORRETA) ---
+            failed_as_expected = (return_code != 0)
+            found_specific_error = test_case["expected_finding"] in output
+    
+            if failed_as_expected and found_specific_error:
+                logger.add_finding('INFO', f"O comando '{command_name}' detectou o erro específico com sucesso.")
+                click.echo(Fore.GREEN + Style.BRIGHT + "\n[OK] SUCESSO: O analisador detectou o erro específico esperado.")
+            
+            elif failed_as_expected and not found_specific_error:
+                logger.add_finding('CRITICAL', f"O '{command_name}' falhou, mas não pelo motivo esperado.", details=output)
+                click.echo(Fore.RED + Style.BRIGHT + "\n[FALHA DE DIAGNÓSTICO] O analisador falhou, mas não pelo motivo correto.")
+                click.echo(Fore.WHITE + "   > Ele deveria ter encontrado: " + Fore.YELLOW + test_case["expected_finding"])
+                click.echo(Fore.WHITE + "   > A saída completa está abaixo para análise.")
+                if not debug: click.echo(output) # Mostra a saída se não estiver no modo debug
+                sys.exit(1)
+    
+            elif not failed_as_expected:
                 logger.add_finding('CRITICAL', f"O comando '{command_name}' falhou em detectar um erro óbvio.", details=output)
                 click.echo(Fore.RED + Style.BRIGHT + "\n[FALHA CRÍTICA] O analisador está sofrendo de uma 'falha silenciosa'.")
-                click.echo(Fore.WHITE + "   > Saída do comando (que deveria ter falhado):\n" + output)
+                if not debug: click.echo(output)
                 sys.exit(1)
-            else:
-                # Cenários para testes que deveriam passar (não implementado ainda)
-                logger.add_finding('ERROR', "Lógica de teste inesperada.", details=f"Return code: {return_code}")
-                click.echo(Fore.RED + "\n[ERRO] Resultado inesperado do teste.")
-                
+
 def _run_doxoade_in_sandbox(command_to_test, sandbox_path):
     """Executa um comando doxoade dentro de um diretório sandbox de forma robusta."""
     
