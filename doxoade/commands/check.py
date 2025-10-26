@@ -1,8 +1,8 @@
 # DEV.V10-20251022. >>>
 # doxoade/commands/check.py
-# atualizado em 2025/10/22 - Versão do projeto 43(Ver), Versão da função 13.0(Fnc).
-# Descrição: CORREÇÃO DE BUG CRÍTICO. A paralelização com ThreadPoolExecutor foi REMOVIDA
-# e substituída por um loop sequencial simples para garantir a execução da análise.
+# atualizado em 2025/10/22 - Versão do projeto 43(Ver), Versão da função 12.1(Fnc).
+# Descrição: CORREÇÃO DE REGRESSÃO. Restaura a importação de 'ExecutionLogger'
+# que foi acidentalmente removida, resolvendo o NameError.
 
 import sys, os, ast, json, subprocess
 from io import StringIO
@@ -10,8 +10,9 @@ from pyflakes import api as pyflakes_api
 import click
 from colorama import Fore
 
+
 from ..shared_tools import (
-    ExecutionLogger, 
+    ExecutionLogger, # <-- RESTAURE ESTA LINHA
     _present_results, 
     _get_code_snippet,
     _get_venv_python_executable, 
@@ -149,7 +150,6 @@ def _orchestrate_check_analysis(cmd_line_ignore, logger):
     all_imports = []
 
     # <<< INÍCIO DA CORREÇÃO CRÍTICA: REMOÇÃO DA PARALELIZAÇÃO >>>
-    # Substituímos o ThreadPoolExecutor por um loop for simples e confiável.
     click.echo(Fore.CYAN + f"[DEBUG] Analisando {len(files_to_check)} arquivos sequencialmente...")
     for file_path in files_to_check:
         findings, imports = _analyze_single_file_statically(file_path)

@@ -4,7 +4,7 @@ import re
 import sys
 import subprocess
 import json
-#import shutil
+import shutil
 from pathlib import Path
 
 import click
@@ -233,7 +233,8 @@ def doctor(ctx, path):
                 else: return
             else:
                 click.echo(Fore.GREEN + f"   > [OK] {verification.get('message')}")
-
+            click.echo(Fore.YELLOW + "\n--- Passo 3: Verificando Sanidade do Ambiente de Testes ---")
+            _verify_test_environment('.', logger)
             # Passo Final: Acessibilidade Global
             click.echo(Fore.YELLOW + "\n--- Passo Final: Verificando Acessibilidade Global ---")
             _verify_and_guide_path(logger)
@@ -242,3 +243,51 @@ def doctor(ctx, path):
             click.echo(Fore.GREEN + Style.BRIGHT + "[SAUDÁVEL] O ambiente do projeto foi verificado.")
         finally:
             os.chdir(original_dir)
+            
+def _verify_test_environment(target_path, logger):
+    """Diagnostica problemas comuns no ambiente de testes."""
+    click.echo(Fore.WHITE + "Verificando sanidade do ambiente de testes...")
+    has_issues = False
+
+    # --- UTILITARIO 1: Verificar Conflito de PATH do Pytest ---
+    # FLUXO 1: Localizar o executável do pytest dentro do venv.
+    venv_pytest_path = os.path.join(target_path, 'venv', 'Scripts' if os.name == 'nt' else 'bin', 'pytest.exe' if os.name == 'nt' else 'pytest')
+    
+    # FLUXO 2: Localizar o primeiro executável 'pytest' encontrado no PATH global.
+    global_pytest_path = shutil.which('pytest')
+
+    # FLUXO 3: Comparar e alertar se não forem o mesmo.
+    if global_pytest_path and os.path.normcase(os.path.abspath(global_pytest_path)) != os.path.normcase(os.path.abspath(venv_pytest_path)):
+        has_issues = True
+        msg = "Conflito de PATH detectado para o Pytest."
+        details = f"O comando 'pytest' aponta para '{global_pytest_path}', mas o do venv é '{venv_pytest_path}'. Use a execução explícita: '.\\venv\\Scripts\\python.exe -m pytest ...'"
+        logger.add_finding('warning', msg, details=details)
+        click.echo(Fore.YELLOW + f"   > [AVISO] {msg}\n     {details}")
+
+    # --- UTILITARIO 2: Verificar Instalação em Modo Editável ---
+    # FLUXO 1: Executar 'pip list -e' para ver os pacotes editáveis.
+    venv_python = os.path.join(target_path, 'venv', 'Scripts' if os.name == 'nt' else 'bin', 'python')
+    try:
+        result = subprocess.run([venv_python, '-m', 'pip', 'list', '-e'], capture_output=True, text=True, check=True, encoding='utf-8')
+        # FLUXO 2: Verificar se o caminho do projeto atual está na saída.
+        if os.path.abspath(target_path).lower() not in result.stdout.lower():
+            has_issues = True
+            msg = "Projeto não parece estar instalado em modo editável."
+            details = "Isso pode causar 'ImportError' nos testes. Execute: '.\\venv\\Scripts\\python.exe -m pip install -e .'"
+            logger.add_finding('warning', msg, details=details)
+            click.echo(Fore.YELLOW + f"   > [AVISO] {msg}\n     {details}")
+    except subprocess.CalledProcessError:
+        pass # Ignora falhas do pip aqui, outros diagnósticos podem pegar.
+
+    # --- UTILITARIO 3: Verificar __init__.py na Raiz ---
+    # FLUXO 1: Checar a existência do arquivo na raiz do projeto.
+    root_init_file = os.path.join(target_path, '__init__.py')
+    if os.path.exists(root_init_file):
+        has_issues = True
+        msg = "Arquivo '__init__.py' encontrado na raiz do projeto."
+        details = "Isso cria um pacote ambíguo e é uma causa comum de 'ImportError' em testes. Recomenda-se a remoção."
+        logger.add_finding('error', msg, details=details)
+        click.echo(Fore.RED + f"   > [ERRO] {msg}\n     {details}")
+
+    if not has_issues:
+        click.echo(Fore.GREEN + "   > [OK] Ambiente de testes parece são.")
