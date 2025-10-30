@@ -68,6 +68,7 @@ def _run_all_analyses(project_path, ignore, complexity_threshold, min_coverage, 
     all_findings = []
     all_findings.extend(_analyze_complexity(files_to_check, complexity_threshold))
     all_findings.extend(_analyze_test_coverage(project_path, min_coverage, source_dir_relative))
+    all_findings.extend(_analyze_requirements_quality(project_path))
     return all_findings
 
 def _analyze_complexity(files_to_check, threshold):
@@ -134,3 +135,39 @@ def _analyze_test_coverage(project_path, min_coverage, source_dir):
         os.chdir(original_dir)
         
     return []
+    
+def _analyze_requirements_quality(project_path):
+    """Analisa o requirements.txt em busca de boas práticas."""
+    findings = []
+    requirements_file = os.path.join(project_path, 'requirements.txt')
+    if not os.path.exists(requirements_file):
+        return findings
+
+    # Pacotes críticos que frequentemente causam problemas de ABI se não forem pinados.
+    CRITICAL_PACKAGES = {'numpy', 'torch', 'tensorflow', 'pandas', 'scikit-learn'}
+    
+    try:
+        with open(requirements_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            
+            # Verifica se a linha contém um dos pacotes críticos
+            # e se NÃO contém '=='
+            if any(pkg in line for pkg in CRITICAL_PACKAGES) and '==' not in line:
+                package_name = line.split(">=")[0].split("<=")[0].split("~=")[0].strip()
+                if package_name in CRITICAL_PACKAGES:
+                    findings.append({
+                        'severity': 'WARNING',
+                        'message': f"Pacote crítico '{package_name}' não possui versão exata (==) fixada.",
+                        'details': "Em projetos de ML, é crucial fixar versões de pacotes como numpy/torch para garantir a estabilidade do ambiente.",
+                        'file': requirements_file,
+                        'line': i + 1
+                    })
+    except IOError:
+        pass # Ignora erros de leitura, pois o arquivo é opcional.
+        
+    return findings

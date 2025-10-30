@@ -18,49 +18,68 @@ from colorama import Fore, Style
 from ..shared_tools import ExecutionLogger
 
 def _check_path(logger):
-    """Verifica a acessibilidade, conflitos e origem do comando 'doxoade' no PATH."""
+    """Verifica acessibilidade, conflitos, e oferece a remoção de instalações 'fantasmas'."""
     click.echo(Fore.YELLOW + "\n--- 1. Análise de Acessibilidade (PATH) ---")
     
-    # --- Utilitário 1: Encontrar todos os executáveis ---
-    # CORREÇÃO CRÍTICA: Procuramos por 'doxoade' sem extensão.
+    # --- UTILITARIO 1: Encontrar todos os executáveis ---
     cmd = ['where', 'doxoade'] if os.name == 'nt' else ['which', '-a', 'doxoade']
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding='utf-8', errors='replace')
-        executables = result.stdout.strip().splitlines()
+        all_executables = result.stdout.strip().splitlines()
     except (subprocess.CalledProcessError, FileNotFoundError):
-        executables = []
+        all_executables = []
 
-    # --- Fluxo 1: Nenhum comando encontrado ---
-    if not executables:
-        msg = "O comando 'doxoade' não foi encontrado no PATH do sistema."
-        logger.add_finding('error', msg, details="A ferramenta não está universalmente acessível.")
-        click.echo(Fore.RED + f"   > [FALHA] {msg}")
+    if not all_executables:
+        # Lógica para guiar a instalação (não é o foco agora, mas deve existir)
+        click.echo(Fore.RED + "   > [FALHA] O comando 'doxoade' não foi encontrado no PATH.")
         return False, None
 
-    # --- Utilitário 2: Analisar os executáveis encontrados ---
-    unique_executables = sorted(list(set(p.lower() for p in executables)))
-    
-    # --- Fluxo 2: Conflito de múltiplas instalações ---
-    if len(unique_executables) > 1:
-        details = "\n".join(f"     - {exe}" for exe in unique_executables)
-        msg = "Múltiplas instalações DIFERENTES de 'doxoade' encontradas."
-        logger.add_finding('error', "Conflito crítico de PATH.", details=details)
-        click.echo(Fore.RED + f"   > [FALHA] {msg}")
-        click.echo(Fore.WHITE + details)
-        return False, None
+    # --- UTILITARIO 2: Identificar a instalação correta e os "fantasmas" ---
+    # A instalação "correta" é a que está no mesmo diretório de scripts do Python que está nos executando.
+    correct_scripts_dir = os.path.dirname(sys.executable)
+    ghost_installs = [
+        exe for exe in all_executables 
+        if os.path.normcase(os.path.dirname(exe)) != os.path.normcase(correct_scripts_dir)
+    ]
+    correct_install = [
+        exe for exe in all_executables if exe not in ghost_installs
+    ]
 
-    executable_path = unique_executables[0]
+    # --- UTILITARIO 3: Ação de Reparo Interativa ---
+    if not ghost_installs:
+        click.echo(Fore.GREEN + f"   > [OK] Instalação única e consistente encontrada: {correct_install[0]}")
+        return True, correct_install[0]
+
+    # FLUXO 1: Informar o usuário sobre os fantasmas
+    click.echo(Fore.RED + f"   > [FALHA] Múltiplas instalações conflitantes ('fantasmas') encontradas!")
+    click.echo(Fore.GREEN + f"     - Instalação Ativa/Correta: {correct_install[0]}")
+    for ghost in ghost_installs:
+        click.echo(Fore.RED + f"     - Instalação Fantasma:      {ghost}")
     
-    # --- Fluxo 3: Origem da instalação ---
-    parent_dir_name = os.path.basename(os.path.dirname(executable_path))
-    if parent_dir_name.lower() not in ['scripts', 'bin']:
-        msg = "A instalação aponta para uma pasta de projeto, o que é instável."
-        logger.add_finding('warning', "Configuração de PATH não recomendada.", details=f"Origem: {executable_path}")
-        click.echo(Fore.YELLOW + f"   > [AVISO] {msg}")
-    else:
-        click.echo(Fore.GREEN + f"   > [OK] Instalação única encontrada: {executable_path}")
+    # FLUXO 2: Solicitar permissão para o reparo
+    if click.confirm(Fore.YELLOW + "\n[PERIGO] Deseja que eu tente remover PERMANENTEMENTE os arquivos executáveis 'fantasmas'?"):
+        success_count = 0
+        click.echo(Fore.CYAN + "   > Iniciando remoção...")
+        for ghost_path in ghost_installs:
+            try:
+                os.remove(ghost_path)
+                click.echo(Fore.GREEN + f"     - [REMOVIDO] {ghost_path}")
+                logger.add_finding('info', f"Instalação fantasma removida: {ghost_path}")
+                success_count += 1
+            except (OSError, PermissionError) as e:
+                details = "Causa comum: o terminal não foi executado como Administrador."
+                click.echo(Fore.RED + f"     - [FALHA] Não foi possível remover {ghost_path}: {e}\n       {details}")
+                logger.add_finding('error', f"Falha ao remover fantasma: {ghost_path}", details=str(e))
         
-    return True, executable_path
+        if success_count == len(ghost_installs):
+            click.echo(Fore.GREEN + "\n   > [OK] Reparo concluído com sucesso. O ambiente está limpo.")
+            return True, correct_install[0]
+        else:
+            click.echo(Fore.RED + "\n   > [FALHA] O reparo não foi totalmente concluído. Execute como Administrador e tente novamente.")
+            return False, None
+    else:
+        click.echo(Fore.YELLOW + "   > Operação de reparo cancelada pelo usuário.")
+        return False, None
 
 def _check_dependencies(logger):
     """Verifica se as dependências da doxoade estão instaladas e com versões compatíveis."""
@@ -115,10 +134,40 @@ def global_health(ctx):
         path_ok, _ = _check_path(logger)
         deps_ok = _check_dependencies(logger)
 
+        integrity_ok = _verify_installation_integrity(logger)
+
         click.echo(Fore.CYAN + Style.BRIGHT + "\n--- Diagnóstico Concluído ---")
-        if path_ok and deps_ok:
+        if path_ok and deps_ok and integrity_ok:
             click.echo(Fore.GREEN + Style.BRIGHT + "[SAUDÁVEL] A instalação da Doxoade está correta e funcional.")
         else:
             logger.add_finding('error', 'A verificação de saúde global encontrou um ou mais problemas.')
             click.echo(Fore.RED + Style.BRIGHT + "[PROBLEMA] Um ou mais problemas foram encontrados. Verifique os detalhes acima.")
             sys.exit(1)
+            
+def _verify_installation_integrity(logger):
+    """Executa uma sonda para garantir que as dependências principais são importáveis."""
+    click.echo(Fore.YELLOW + "\n--- 3. Análise de Integridade da Instalação ---")
+    
+    # Sonda que tenta importar os pacotes mais fundamentais.
+    _PROBE_SCRIPT = "import click; import colorama; import subprocess; print('OK')"
+    
+    try:
+        # Usa sys.executable para garantir que estamos testando o Python
+        # que está executando a própria doxoade.
+        result = subprocess.run(
+            [sys.executable, "-c", _PROBE_SCRIPT],
+            capture_output=True, text=True, check=True, encoding='utf-8'
+        )
+        if "OK" in result.stdout:
+            click.echo(Fore.GREEN + "   > [OK] Dependências principais estão íntegras.")
+            return True
+        else:
+            raise subprocess.CalledProcessError(1, "cmd", stdout=result.stdout, stderr=result.stderr)
+            
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        msg = "Ambiente da doxoade parece corrompido. Dependências principais falharam ao importar."
+        details = f"Recomendação: Execute um reparo forçado com pip:\n   > {os.path.basename(sys.executable)} -m pip install --force-reinstall -r requirements.txt"
+        logger.add_finding('critical', msg, details=details)
+        click.echo(Fore.RED + f"   > [FALHA CRÍTICA] {msg}")
+        click.echo(Fore.CYAN + f"     {details}")
+        return False

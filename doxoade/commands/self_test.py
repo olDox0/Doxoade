@@ -8,12 +8,12 @@ import os, sys, subprocess, tempfile, shutil, click
 from colorama import Fore, Style
 from ..shared_tools import ExecutionLogger
 
-# Dicionário de "Pacientes Zero": Mapeia um comando para o código que deve fazê-lo falhar.
+# No início do arquivo self_test.py
 TEST_CASES = {
     "check": {
         "filename": "broken_code.py",
         "content": "def funcao_quebrada():\\n    pass # Erro de sintaxe aqui, ':' faltando na linha anterior",
-        "expected_finding": "Erro de sintaxe impede a análise."
+        "expected_finding": "Erro de sintaxe impede a analise" # ASCII PURO, sem ponto final
     },
     "webcheck": {
         "filename": "broken_page.html",
@@ -32,8 +32,8 @@ def _run_doxoade_in_sandbox(command_to_test, sandbox_path):
     command = [runner_path] + command_to_test.split()
     
     try:
-        # --- A CORREÇÃO CRÍTICA ---
-        # Usa a codificação padrão do sistema para evitar UnicodeDecodeError no Windows.
+        # --- A CORREÇÃO CRÍTICA DE ROBUSTEZ ---
+        # Usa a codificação padrão do sistema e substitui erros para evitar falhas.
         result = subprocess.run(
             command, 
             cwd=sandbox_path, 
@@ -81,9 +81,23 @@ def self_test(ctx, command_name, debug):
                 click.echo(Fore.WHITE + Style.DIM + f"--- [DEBUG] Código de Saída: {return_code} ---\n")
 
             # --- LÓGICA DE DIAGNÓSTICO INTELIGENTE (JÁ ESTAVA CORRETA) ---
-            failed_as_expected = (return_code != 0)
-            found_specific_error = test_case["expected_finding"] in output
-    
+
+            click.echo("\n--- [DEPURAÇÃO DE BYTES] ---")
+            click.echo(f"Output (bytes):       {output.encode('utf-8', 'replace')}")
+            click.echo(f"Expected (bytes):     {test_case['expected_finding'].encode('utf-8', 'replace')}")
+            click.echo(f"Match found:          {test_case['expected_finding'] in output}")
+            click.echo("--- [FIM DA DEPURAÇÃO] ---\n")
+            # --- FIM DA LÓGICA DE DEPURAÇÃO ---
+
+            # --- LÓGICA DE DIAGNÓSTICO FINAL E ROBUSTA ---
+            failed_as_expected = return_code != 0
+            
+            # Normaliza ambas as strings para ASCII puro, ignorando caracteres problemáticos.
+            normalized_output = output.encode('ascii', 'ignore').decode('ascii')
+            normalized_expected = test_case["expected_finding"].encode('ascii', 'ignore').decode('ascii')
+            
+            found_specific_error = normalized_expected in normalized_output
+            
             if failed_as_expected and found_specific_error:
                 logger.add_finding('INFO', f"O comando '{command_name}' detectou o erro específico com sucesso.")
                 click.echo(Fore.GREEN + Style.BRIGHT + "\n[OK] SUCESSO: O analisador detectou o erro específico esperado.")
@@ -92,10 +106,11 @@ def self_test(ctx, command_name, debug):
                 logger.add_finding('CRITICAL', f"O '{command_name}' falhou, mas não pelo motivo esperado.", details=output)
                 click.echo(Fore.RED + Style.BRIGHT + "\n[FALHA DE DIAGNÓSTICO] O analisador falhou, mas não pelo motivo correto.")
                 click.echo(Fore.WHITE + "   > Ele deveria ter encontrado: " + Fore.YELLOW + test_case["expected_finding"])
-                click.echo(Fore.WHITE + "   > A saída completa está abaixo para análise.")
-                if not debug: click.echo(output) # Mostra a saída se não estiver no modo debug
+                if not debug:
+                    click.echo(Fore.WHITE + "   > A saída completa está abaixo para análise.")
+                    click.echo(output)
                 sys.exit(1)
-    
+
             elif not failed_as_expected:
                 logger.add_finding('CRITICAL', f"O comando '{command_name}' falhou em detectar um erro óbvio.", details=output)
                 click.echo(Fore.RED + Style.BRIGHT + "\n[FALHA CRÍTICA] O analisador está sofrendo de uma 'falha silenciosa'.")
