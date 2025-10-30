@@ -49,7 +49,7 @@ def _create_venv(path, logger):
         return False
 
 def _install_requirements(path, logger):
-    """Instala dependências do requirements.txt."""
+    """Instala dependências e valida a consistência do ambiente."""
     req_file = os.path.join(path, 'requirements.txt')
     if not os.path.isfile(req_file):
         click.echo(Fore.YELLOW + "   > 'requirements.txt' não encontrado. Nenhuma dependência para instalar.")
@@ -62,17 +62,36 @@ def _install_requirements(path, logger):
         return False
         
     try:
+        # --- UTilitario 1: Instalação de Dependências ---
         click.echo(Fore.WHITE + "   > Instalando dependências do 'requirements.txt'...")
-        cmd = [venv_python, '-m', 'pip', 'install', '-r', req_file]
-        subprocess.run(cmd, check=True, capture_output=True, cwd=path)
+        install_cmd = [venv_python, '-m', 'pip', 'install', '-r', req_file]
+        install_result = subprocess.run(install_cmd, check=True, capture_output=True, cwd=path, text=True, encoding='utf-8', errors='replace')
         logger.add_finding('info', "Dependências do requirements.txt instaladas.")
         click.echo(Fore.GREEN + "   > [OK] Dependências instaladas.")
-        return True
+        
+        # --- UTILITARIO 2: Validação de Consistência (A Nova Inteligência) ---
+        click.echo(Fore.WHITE + "   > Verificando a consistência das dependências instaladas...")
+        check_cmd = [venv_python, '-m', 'pip', 'check']
+        check_result = subprocess.run(check_cmd, capture_output=True, cwd=path, text=True, encoding='utf-8', errors='replace')
+        
+        if check_result.returncode == 0:
+            logger.add_finding('info', "Verificação 'pip check' bem-sucedida.")
+            click.echo(Fore.GREEN + "   > [OK] Ambiente consistente.")
+            return True
+        else:
+            msg = "Inconsistências de dependência detectadas após a instalação."
+            details = check_result.stdout + check_result.stderr
+            logger.add_finding('error', msg, details=details)
+            click.echo(Fore.RED + f"   > [FALHA] {msg}")
+            click.echo(Fore.RED + Style.DIM + details)
+            return False
+
     except subprocess.CalledProcessError as e:
         msg = "Falha ao instalar dependências via pip."
-        logger.add_finding('error', msg, details=e.stderr.decode('utf-8', 'ignore'))
+        details = e.stdout + e.stderr
+        logger.add_finding('error', msg, details=details)
         click.echo(Fore.RED + f"   > [FALHA] {msg}")
-        click.echo(Fore.RED + Style.DIM + e.stderr.decode('utf-8', 'ignore'))
+        click.echo(Fore.RED + Style.DIM + details)
         return False
 
 @click.command('rebuild')

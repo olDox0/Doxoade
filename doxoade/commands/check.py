@@ -110,29 +110,52 @@ def _analyze_single_file_statically(file_path):
 
     return findings, imports
 
-def _run_import_probe(all_imports, venv_python, logger):
-    """Executa a Sonda de Ambiente com todos os imports coletados."""
+def _run_import_probe(all_imports, venv_python, logger, search_path):
+    """Executa a Sonda de Ambiente e valida imports contra pacotes locais."""
     unique_module_names = sorted(list({imp['module'] for imp in all_imports}))
     if not unique_module_names:
         return []
 
+    # --- UTILITARIO 1: Executar Sonda de Ambiente para Pacotes Instalados ---
     try:
         process = subprocess.run(
             [venv_python, "-c", _PROBE_SCRIPT],
             input=json.dumps(unique_module_names),
             capture_output=True, text=True, check=True, encoding='utf-8'
         )
-        missing_modules = set(json.loads(process.stdout))
+        missing_from_venv = set(json.loads(process.stdout))
     except (subprocess.CalledProcessError, json.JSONDecodeError) as e:
         logger.add_finding('CRITICAL', "A Sonda de Ambiente falhou.", details=str(e))
         return []
 
+    if not missing_from_venv:
+        return [] # Todos os imports foram resolvidos no venv, trabalho concluído.
+
+    # --- UTILITARIO 2: Verificação de Pacotes Locais (A Correção Chave) ---
+    truly_missing_modules = set()
+    for module_name in missing_from_venv:
+        # FLUXO 1: Verificar se o módulo corresponde a um arquivo .py
+        potential_file = os.path.join(search_path, f"{module_name}.py")
+        
+        # FLUXO 2: Verificar se o módulo corresponde a uma pasta (pacote)
+        potential_package = os.path.join(search_path, module_name)
+        
+        if not os.path.exists(potential_file) and not os.path.isdir(potential_package):
+            truly_missing_modules.add(module_name)
+    
+    if not truly_missing_modules:
+        return [] # Todos os "ausentes" foram encontrados como pacotes locais.
+
+    # --- UTILITARIO 3: Gerar Findings Apenas para Módulos Realmente Ausentes ---
     import_findings = []
+    # --- A Correção Chave: Lista de Exceções ---
+    IGNORE_MODULES = {'setuptools', 'kivy', 'ia_core'} # Módulos a ignorar
+    
     for imp in all_imports:
-        if imp['module'] in missing_modules and imp['module'] not in ['ia_core', 'setuptools', 'kivy']:
+        if imp['module'] in truly_missing_modules and imp['module'] not in IGNORE_MODULES:
             import_findings.append({
                 'severity': 'CRITICAL',
-                'message': f"Import não resolvido: Módulo '{imp['module']}' não foi encontrado no venv.",
+                'message': f"Import não resolvido: Módulo '{imp['module']}' não foi encontrado no venv nem como um pacote local.",
                 'file': imp['file'], 'line': imp['line'],
                 'snippet': _get_code_snippet(imp['file'], imp['line'])
             })
@@ -161,7 +184,7 @@ def _orchestrate_check_analysis(cmd_line_ignore, logger):
     if not venv_python:
         logger.add_finding('CRITICAL', "Ambiente virtual 'venv' não encontrado.")
     else:
-        import_findings = _run_import_probe(all_imports, venv_python, logger)
+        import_findings = _run_import_probe(all_imports, venv_python, logger, config.get('search_path'))
         all_static_findings.extend(import_findings)
 
     for f in all_static_findings:
