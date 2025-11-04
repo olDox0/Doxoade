@@ -35,15 +35,17 @@ def health(ctx, path, ignore, output_format, complexity_threshold, min_coverage)
 
         findings = _run_all_analyses(path, list(ignore), complexity_threshold, min_coverage, logger)
         for f in findings:
-            logger.add_finding(f.get('severity', 'WARNING'), f['message'], details=f.get('details'), file=f.get('file'), line=f.get('line'))
+            # CORREÇÃO: Usa .get() para acesso seguro, embora já fosse seguro.
+            logger.add_finding(f.get('severity', 'WARNING'), f.get('message', 'Mensagem ausente'), details=f.get('details'), file=f.get('file'), line=f.get('line'))
 
         _present_results(output_format, logger.results)
-
-        # --- CORREÇÃO 1: Acesso seguro ao dicionário summary ---
-        summary = logger.results.get('summary', {})
         
-        # --- CORREÇÃO 2: Lógica de saída correta (ignora warnings) ---
-        if summary.get('critical', 0) > 0 or summary.get('errors', 0) > 0:
+        # --- CORREÇÃO DE PONTOS DE RISCO ---
+        summary = logger.results.get('summary', {})
+        critical_count = summary.get('critical', 0)
+        error_count = summary.get('errors', 0)
+        
+        if critical_count > 0 or error_count > 0:
             sys.exit(1)
 
 def _run_all_analyses(project_path, ignore, complexity_threshold, min_coverage, logger):
@@ -92,8 +94,26 @@ def _analyze_complexity(files_to_check, threshold):
             continue
     return findings
     
+def _execute_coverage_run(venv_python, source_dir):
+    """Executa o pytest via coverage e retorna o resultado do processo."""
+    run_tests_cmd = [venv_python, '-m', 'coverage', 'run', f'--source={source_dir}', '-m', 'pytest']
+    return subprocess.run(run_tests_cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+
+def _generate_and_parse_coverage_report(venv_python, min_coverage, project_path):
+    """Gera o relatório JSON do coverage e o analisa."""
+    generate_report_cmd = [venv_python, '-m', 'coverage', 'json']
+    subprocess.run(generate_report_cmd, capture_output=True, check=True, encoding='utf-8')
+
+    if os.path.exists('coverage.json'):
+        with open('coverage.json', 'r') as f:
+            report_data = json.load(f)
+        total_coverage = report_data.get('totals', {}).get('percent_covered', 0)
+        if total_coverage < min_coverage:
+            return [{'severity': 'WARNING', 'message': f"Cobertura de testes está baixa: {total_coverage:.2f}%.", 'details': f"Mínimo: {min_coverage}%.", 'file': project_path}]
+    return []
+
 def _analyze_test_coverage(project_path, min_coverage, source_dir):
-    """Analisa a cobertura de testes do projeto."""
+    """(Orquestrador) Analisa a cobertura de testes do projeto."""
     try:
         from importlib import util as importlib_util
     except ImportError:
@@ -106,35 +126,27 @@ def _analyze_test_coverage(project_path, min_coverage, source_dir):
     if not venv_python:
         return [{'severity': 'ERROR', 'message': "Não foi possível encontrar o executável Python do venv."}]
 
-    run_tests_cmd = [venv_python, '-m', 'coverage', 'run', f'--source={source_dir}', '-m', 'pytest']
-    generate_report_cmd = [venv_python, '-m', 'coverage', 'json']
-    
     original_dir = os.getcwd()
     try:
         os.chdir(project_path)
-        test_result = subprocess.run(run_tests_cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
         
-        if test_result.returncode != 0 and test_result.returncode != 5: # 5 = no tests collected
+        test_result = _execute_coverage_run(venv_python, source_dir)
+        
+        # 5 = no tests collected, que não é um erro fatal.
+        if test_result.returncode != 0 and test_result.returncode != 5:
             return [{'severity': 'ERROR', 'message': "A suíte de testes falhou.", 'details': f"Saída do Pytest:\n{test_result.stdout}\n{test_result.stderr}"}]
         
         if "no tests ran" in test_result.stdout or "collected 0 items" in test_result.stdout:
             return [{'severity': 'WARNING', 'message': "Nenhum teste foi encontrado pelo pytest."}]
 
-        subprocess.run(generate_report_cmd, capture_output=True, check=True, encoding='utf-8')
+        return _generate_and_parse_coverage_report(venv_python, min_coverage, project_path)
 
-        if os.path.exists('coverage.json'):
-            with open('coverage.json', 'r') as f: report_data = json.load(f)
-            total_coverage = report_data.get('totals', {}).get('percent_covered', 0)
-            if total_coverage < min_coverage:
-                return [{'severity': 'WARNING', 'message': f"Cobertura de testes está baixa: {total_coverage:.2f}%.", 'details': f"Mínimo: {min_coverage}%.", 'file': project_path}]
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         return [{'severity': 'ERROR', 'message': "Falha ao executar o coverage ou pytest.", 'details': str(e)}]
     finally:
         if os.path.exists('coverage.json'): os.remove('coverage.json')
         if os.path.exists('.coverage'): os.remove('.coverage')
         os.chdir(original_dir)
-        
-    return []
     
 def _analyze_requirements_quality(project_path):
     """Analisa o requirements.txt em busca de boas práticas."""

@@ -11,9 +11,13 @@ import subprocess
 import os, sys, re
 import json
 import click
+import pandas as pd
+from datetime import datetime
 from pathlib import Path
 from functools import wraps
 from colorama import init as colorama_init, Fore, Style
+from doxoade.database import get_db_connection
+
 #from queue import Queue, Empty
 #from datetime import datetime
 
@@ -23,31 +27,35 @@ if PACKAGE_PARENT not in sys.path:
     sys.path.insert(0, PACKAGE_PARENT)
 
 # --- REGISTRO DE PLUGINS DA V2.0 ---
-from doxoade.commands.apicheck import apicheck
-from doxoade.commands.auto import auto
-from doxoade.commands.check import check
-from doxoade.commands.clean import clean
-from doxoade.commands.config import config_group
-from doxoade.commands.deepcheck import deepcheck
-from doxoade.commands.doctor import doctor
-from doxoade.commands.encoding import encoding
-from doxoade.commands.git_clean import git_clean
-from doxoade.commands.git_new import git_new
-from doxoade.commands.git_workflow import release, sync
-from doxoade.commands.global_health import global_health
-from doxoade.commands.guicheck import guicheck
-from doxoade.commands.health import health
-from doxoade.commands.init import init
-from doxoade.commands.intelligence import intelligence
-from doxoade.commands.kvcheck import kvcheck
-from doxoade.commands.optimize import optimize
-from doxoade.commands.rebuild import rebuild
-from doxoade.commands.run import run
-from doxoade.commands.save import save
-from doxoade.commands.self_test import self_test
-from doxoade.commands.tutorial import tutorial_group
-from doxoade.commands.utils import log, show_trace, mk, create_pipeline
+from doxoade.database import init_db
 from doxoade.commands.webcheck import webcheck
+from doxoade.commands.utils import log, show_trace, mk, create_pipeline, setup_regression
+from doxoade.commands.tutorial import tutorial_group
+from doxoade.commands.self_test import self_test
+from doxoade.commands.save import save
+from doxoade.commands.run import run
+from doxoade.commands.regression_test import regression_test
+from doxoade.commands.rebuild import rebuild
+from doxoade.commands.optimize import optimize
+from doxoade.commands.kvcheck import kvcheck
+from doxoade.commands.intelligence import intelligence
+from doxoade.commands.init import init
+from doxoade.commands.health import health
+from doxoade.commands.guicheck import guicheck
+from doxoade.commands.global_health import global_health
+from doxoade.commands.git_workflow import release, sync
+from doxoade.commands.git_new import git_new
+from doxoade.commands.git_clean import git_clean
+from doxoade.commands.encoding import encoding
+from doxoade.commands.doctor import doctor
+from doxoade.commands.deepcheck import deepcheck
+from doxoade.commands.config import config_group
+from doxoade.commands.clean import clean
+from doxoade.commands.check import check
+from doxoade.commands.canonize import canonize
+from doxoade.commands.auto import auto
+from doxoade.commands.apicheck import apicheck
+
 from doxoade.shared_tools import (
     ExecutionLogger, 
 #    _get_venv_python_executable, 
@@ -69,27 +77,18 @@ __version__ = "35.0 Alfa"
 # -----------------------------------------------------------------------------
 
 #atualizado em 2025/09/26-Versão 10.8. Adicionado tratamento de exceção global para garantir que falhas internas da ferramenta sejam sempre registradas no log.
-@click.group()
-def cli():
+@click.group(invoke_without_command=True)
+@click.pass_context
+def cli(ctx):
     """olDox222 Advanced Development Environment (doxoade) LITE v1.0"""
-    # Este é o ponto de entrada principal.
-    # Envolvemos tudo em um try/except para capturar erros fatais da própria ferramenta.
     try:
-        pass # A mágica do click acontece após esta função
+        init_db()
     except Exception as e:
-        # Se qualquer comando falhar com uma exceção não tratada, nós a registramos.
-        results = {
-            'summary': {'errors': 1, 'warnings': 0},
-            'internal_error': [{
-                'type': 'error',
-                'message': 'A Doxoade encontrou um erro fatal interno.',
-                'details': str(e),
-                'traceback': traceback.format_exc()
-            }]
-        }
-        _log_execution(command_name="FATAL", path=".", results=results, arguments={})
-        # E então deixamos o erro acontecer para que o usuário o veja.
+        click.echo(Fore.RED + f"Falha crítica na inicialização do banco de dados: {e}")
         raise e
+
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
 
 def log_command_execution(func):
     @wraps(func)
@@ -114,82 +113,76 @@ def log_command_execution(func):
 
 #atualizado em 2025/09/25-Versão 9.1. Novo comando 'dashboard' para visualizar tendências de saúde do projeto a partir dos logs.
 @cli.command()
-@log_command_execution
 @click.option('--project', default=None, help="Filtra o dashboard para um projeto específico.")
 def dashboard(project):
-    #2025/10/11 - 34.0(Ver), 2.0(Fnc). Refatorada para reduzir complexidade e adicionar novos insights.
-    #A função tem como objetivo exibir um painel com a saúde e tendências dos projetos analisados.
-    log_file = Path.home() / '.doxoade' / 'doxoade.log'
-    if not log_file.exists():
-        click.echo(Fore.YELLOW + "Nenhum arquivo de log encontrado."); return
-
-    click.echo(Fore.CYAN + Style.BRIGHT + "--- [DASHBOARD] Painel de Saúde de Engenharia ---")
+    """Exibe um painel com a saúde e tendências dos projetos a partir do banco de dados."""
+    click.echo(Fore.CYAN + Style.BRIGHT + "--- [DASHBOARD] Painel de Saúde de Engenharia (Projeto Sapiens) ---")
 
     try:
-        with open(log_file, 'r', encoding='utf-8') as f:
-            entries = [json.loads(line) for line in f]
-    except (json.JSONDecodeError, IOError):
-        click.echo(Fore.RED + "Erro ao ler o arquivo de log."); return
-
-    if project:
-        entries = [e for e in entries if os.path.abspath(project) == e.get('project_path')]
-
-    if not entries:
-        click.echo(Fore.RED + "Nenhuma entrada de log encontrada para o filtro especificado."); return
-
-    click.echo(f"Analisando {len(entries)} execuções registradas...\n")
-    
-    _display_error_trend(entries)
-    _display_project_summary(entries)
-    _display_common_issues(entries)
-
-def _display_error_trend(entries):
-    #2025/10/11 - 34.0(Ver), 1.0(Fnc). Nova função auxiliar.
-    #A função tem como objetivo exibir a tendência de erros e avisos ao longo do tempo.
-    issues_by_day = {}
-    for entry in entries:
-        day = entry.get('timestamp', 'N/A')[:10]
-        summary = entry.get('summary', {})
-        errors = summary.get('errors', 0)
-        warnings = summary.get('warnings', 0)
+        conn = get_db_connection()
         
-        day_stats = issues_by_day.setdefault(day, {'errors': 0, 'warnings': 0})
-        day_stats['errors'] += errors
-        day_stats['warnings'] += warnings
+        # Constrói a query base
+        query = "SELECT e.timestamp, e.project_path, f.severity, f.message FROM events e JOIN findings f ON e.id = f.event_id"
+        params = []
+        if project:
+            query += " WHERE e.project_path = ?"
+            params.append(os.path.abspath(project))
+            
+        # Usa o pandas para carregar os dados diretamente da query
+        df = pd.read_sql_query(query, conn, params=params)
+        conn.close()
 
+        if df.empty:
+            click.echo(Fore.YELLOW + "Nenhum 'finding' encontrado no banco de dados para o filtro especificado.")
+            return
+
+        click.echo(f"Analisando {len(df)} findings registrados...\n")
+        
+        # Converte o timestamp para datetime para análise
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+
+        _display_error_trend_db(df)
+        _display_project_summary_db(df)
+        _display_common_issues_db(df)
+
+    except Exception as e:
+        click.echo(Fore.RED + f"Erro ao gerar o dashboard: {e}")
+
+def _display_error_trend_db(df):
+    """Exibe a tendência de problemas a partir de um DataFrame."""
     click.echo(Fore.YELLOW + "--- Tendência de Problemas (últimos 7 dias) ---")
-    sorted_days = sorted(issues_by_day.keys())[-7:]
-    for day in sorted_days:
-        stats = issues_by_day[day]
-        click.echo(f"{day} | {Fore.RED}{stats['errors']} Erro(s){Style.RESET_ALL}, {Fore.YELLOW}{stats['warnings']} Aviso(s){Style.RESET_ALL}")
-
-def _display_project_summary(entries):
-    #2025/10/11 - 34.0(Ver), 1.0(Fnc). Nova função auxiliar.
-    #A função tem como objetivo exibir quais projetos têm mais problemas.
-    errors_by_project = {}
-    for entry in entries:
-        proj_name = os.path.basename(entry.get('project_path', 'Desconhecido'))
-        errors = entry.get('summary', {}).get('errors', 0)
-        errors_by_project[proj_name] = errors_by_project.get(proj_name, 0) + errors
+    df['day'] = df['timestamp'].dt.date
+    recent_df = df[df['day'] >= (datetime.now().date() - pd.Timedelta(days=7))]
     
+    issues_by_day = recent_df.groupby('day')['severity'].value_counts().unstack(fill_value=0)
+    
+    for day, row in issues_by_day.iterrows():
+        errors = row.get('ERROR', 0) + row.get('CRITICAL', 0)
+        warnings = row.get('WARNING', 0)
+        click.echo(f"{day} | {Fore.RED}{errors} Erro(s){Style.RESET_ALL}, {Fore.YELLOW}{warnings} Aviso(s){Style.RESET_ALL}")
+
+def _display_project_summary_db(df):
+    """Exibe quais projetos têm mais problemas a partir de um DataFrame."""
     click.echo(Fore.YELLOW + "\n--- Projetos com Mais Erros Registrados ---")
-    sorted_projects = sorted(errors_by_project.items(), key=lambda item: item[1], reverse=True)[:5]
-    for proj, count in sorted_projects:
+    df['project_name'] = df['project_path'].apply(os.path.basename)
+    error_df = df[df['severity'].isin(['ERROR', 'CRITICAL'])]
+    
+    errors_by_project = error_df.groupby('project_name').size().sort_values(ascending=False).head(5)
+    
+    for proj, count in errors_by_project.items():
         click.echo(f" - {proj}: {count} erros")
 
-def _display_common_issues(entries):
-    #2025/10/11 - 34.0(Ver), 1.0(Fnc). Nova função auxiliar.
-    #A função tem como objetivo exibir os tipos de erro mais comuns.
-    errors_by_type = {}
-    for entry in entries:
-        for finding in entry.get('findings', []):
-            if finding.get('type', '').upper() == 'ERROR':
-                msg = finding.get('message', 'Erro desconhecido').split(':')[0].strip()
-                errors_by_type[msg] = errors_by_type.get(msg, 0) + 1
-    
+def _display_common_issues_db(df):
+    """Exibe os tipos de erro mais comuns a partir de um DataFrame."""
     click.echo(Fore.YELLOW + "\n--- Tipos de Erro Mais Comuns ---")
-    sorted_types = sorted(errors_by_type.items(), key=lambda item: item[1], reverse=True)[:5]
-    for msg_type, count in sorted_types:
+    error_df = df[df['severity'].isin(['ERROR', 'CRITICAL'])]
+    
+    # Extrai a mensagem principal antes de dois pontos ou parênteses
+    error_df['message_type'] = error_df['message'].str.split('[:(]').str[0].str.strip()
+    
+    errors_by_type = error_df.groupby('message_type').size().sort_values(ascending=False).head(5)
+    
+    for msg_type, count in errors_by_type.items():
         click.echo(f" - {msg_type}: {count} ocorrências")
         
 # (Substitua a função setup_health inteira)
@@ -387,6 +380,9 @@ cli.add_command(show_trace)
 cli.add_command(sync)
 cli.add_command(tutorial_group)
 cli.add_command(webcheck)
+cli.add_command(canonize)
+cli.add_command(setup_regression)
+cli.add_command(regression_test)
 
 if __name__ == '__main__':
     try:

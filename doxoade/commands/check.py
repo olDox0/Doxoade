@@ -35,34 +35,18 @@ if __name__ == "__main__":
 
 def _collect_files_to_analyze(config, cmd_line_ignore):
     """Encontra todos os arquivos .py que devem ser analisados."""
-    root_path = config.get('root_path')
     search_path = config.get('search_path')
-    special_root_files = {'setup.py'}
     
     config_ignore = [item.strip('/\\') for item in config.get('ignore', [])]
-    # <<< DEBUG >>>
-    click.echo(Fore.CYAN + f"\n[DEBUG] Ignorados do pyproject.toml: {config_ignore}")
-    click.echo(Fore.CYAN + f"[DEBUG] Ignorados da linha de comando: {list(cmd_line_ignore)}")
-    
     folders_to_ignore = set([item.lower() for item in config_ignore + list(cmd_line_ignore)] + ['venv', 'build', 'dist', '.git'])
     
-    # <<< DEBUG >>>
-    click.echo(Fore.CYAN + f"[DEBUG] Lista final de pastas a ignorar: {folders_to_ignore}")
-    
     files_to_check = []
-    for root, dirs, files in os.walk(root_path, topdown=True):
+    # A busca agora começa a partir do search_path
+    for root, dirs, files in os.walk(search_path, topdown=True):
         dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
         for file in files:
-            if not file.endswith('.py'):
-                continue
-            
-            file_path = os.path.join(root, file)
-            relative_path = os.path.relpath(file_path, root_path)
-
-            is_in_source = os.path.abspath(file_path).startswith(os.path.abspath(search_path))
-            is_special_file = relative_path in special_root_files
-            if is_in_source or is_special_file:
-                files_to_check.append(file_path)
+            if file.endswith('.py'):
+                files_to_check.append(os.path.join(root, file))
                 
     return files_to_check
 
@@ -161,24 +145,27 @@ def _run_import_probe(all_imports, venv_python, logger, search_path):
             })
     return import_findings
 
-def _orchestrate_check_analysis(cmd_line_ignore, logger):
+def _orchestrate_check_analysis(cmd_line_ignore, logger, start_path='.'):
     """Orquestra todo o processo de análise do 'check'."""
-    config = _get_project_config(logger)
+    config = _get_project_config(logger, start_path=start_path)
+    click.echo(f"DEBUG [check]: root_path = {config.get('root_path')}")
+    click.echo(f"DEBUG [check]: search_path = {config.get('search_path')}")
+
     if not config.get('search_path_valid'):
         return
 
     files_to_check = _collect_files_to_analyze(config, cmd_line_ignore)
+
+    click.echo(f"DEBUG [check]: files_to_check = {files_to_check}")
     
     all_static_findings = []
     all_imports = []
 
-    # <<< INÍCIO DA CORREÇÃO CRÍTICA: REMOÇÃO DA PARALELIZAÇÃO >>>
     click.echo(Fore.CYAN + f"[DEBUG] Analisando {len(files_to_check)} arquivos sequencialmente...")
     for file_path in files_to_check:
         findings, imports = _analyze_single_file_statically(file_path)
         all_static_findings.extend(findings)
         all_imports.extend(imports)
-    # <<< FIM DA CORREÇÃO CRÍTICA >>>
 
     venv_python = _get_venv_python_executable()
     if not venv_python:
@@ -201,7 +188,7 @@ def check(ctx, path, cmd_line_ignore):
     with ExecutionLogger('check', path, arguments) as logger:
         click.echo(Fore.YELLOW + "[CHECK] Executando análise de integridade do projeto...")
         
-        _orchestrate_check_analysis(cmd_line_ignore, logger)
+        _orchestrate_check_analysis(cmd_line_ignore, logger, path)
 
         _present_results('text', logger.results)
         

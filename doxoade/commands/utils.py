@@ -3,6 +3,9 @@ import os
 import sys
 import re
 import json
+import shutil
+import textwrap
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -266,3 +269,43 @@ def _find_latest_trace_file():
     except Exception:
         return None
     pass
+
+@click.command('setup-regression')
+def setup_regression():
+    """Cria a estrutura de diretórios e arquivos para os testes de regressão."""
+    click.echo(Fore.CYAN + "--- [SETUP-REGRESSION] Configurando o ambiente do Projeto Cânone ---")
+    
+    base_dir = "regression_tests"
+    fixtures_dir = os.path.join(base_dir, "fixtures")
+    canon_dir = os.path.join(base_dir, "canon")
+    
+    patient_zero_project = os.path.join(fixtures_dir, "project_syntax_error")
+    # Usamos textwrap para um código mais limpo
+    patient_zero_code = textwrap.dedent("""
+        def func():
+         pass # Erro de indentação
+    """)
+
+    canon_toml_content = textwrap.dedent("""
+        # Define os casos de teste para o sistema de regressão.
+        [[test_case]]
+        id = "check_finds_syntax_error"
+        command = "doxoade check ."
+        project = "project_syntax_error"
+    """)
+    
+    try:
+        os.makedirs(patient_zero_project, exist_ok=True)
+        os.makedirs(canon_dir, exist_ok=True)
+        
+        with open(os.path.join(patient_zero_project, "main.py"), "w", encoding="utf-8") as f:
+            f.write(patient_zero_code)
+        
+        with open(os.path.join(base_dir, "canon.toml"), "w", encoding="utf-8") as f:
+            f.write(canon_toml_content)
+            
+        click.echo(Fore.GREEN + "   > [OK] Estrutura de regressão simplificada criada com sucesso.")
+        
+    except OSError as e:
+        click.echo(Fore.RED + f"\\n[ERRO] Falha ao criar a estrutura de diretórios: {e}")
+        sys.exit(1)
