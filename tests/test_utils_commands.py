@@ -1,12 +1,47 @@
 # tests/test_utils_commands.py
 import os
 import sys
+import json
+from pathlib import Path
 from click.testing import CliRunner
 
 # Garante que o pacote 'doxoade' seja importável
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from doxoade.doxoade import cli
+
+def test_log_command_reads_last_n_lines(runner: CliRunner, tmp_path, monkeypatch):
+    """
+    Valida se 'doxoade log -n' lê e exibe o número correto de linhas do log.
+    """
+    # FLUXO 1: Preparar um Ambiente com um Arquivo de Log Falso
+    fake_home = tmp_path
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+    
+    log_dir = fake_home / ".doxoade"
+    log_dir.mkdir()
+    log_file = log_dir / "doxoade.log"
+
+    log_entries = [
+        {"timestamp": "2025-01-01T10:00:00Z", "command": "command1", "summary": {"errors": 1}},
+        {"timestamp": "2025-01-01T11:00:00Z", "command": "command2", "summary": {"errors": 0}},
+        {"timestamp": "2025-01-01T12:00:00Z", "command": "command3", "summary": {"errors": 0}},
+    ]
+    # --- A CORREÇÃO CHAVE ---
+    # Usa uma quebra de linha real ('\n') para separar as entradas JSON.
+    with open(log_file, "w", encoding="utf-8") as f:
+        for entry in log_entries:
+            f.write(json.dumps(entry) + '\n')
+
+    # FLUXO 2: Executar o Comando 'log'
+    result = runner.invoke(cli, ['log', '-n', '2'], catch_exceptions=False)
+
+    # FLUXO 3: Validar a Saída
+    assert result.exit_code == 0, f"O comando log falhou. Saída: {result.output}"
+    
+    assert "Comando: command2" in result.output
+    assert "Comando: command3" in result.output
+    assert "Comando: command1" not in result.output
 
 def test_mk_creates_files_and_folders(runner: CliRunner, tmp_path, monkeypatch):
     """

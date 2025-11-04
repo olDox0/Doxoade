@@ -64,45 +64,43 @@ class ExecutionLogger:
 # -----------------------------------------------------------------------------
 
 def _log_execution(command_name, path, results, arguments, execution_time_ms=0):
-    """(Função Auxiliar) Escreve o dicionário de log final no arquivo."""
-    # A linha 'try:' que estava faltando
+    """(Função Auxiliar) Escreve os resultados da execução no banco de dados."""
+    
+    # Importação local para evitar importações circulares
+    from .database import get_db_connection
+    
+    timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+    project_path_abs = os.path.abspath(path)
+    
     try:
-        log_dir = Path.home() / '.doxoade'
-        log_dir.mkdir(exist_ok=True)
-        log_file = log_dir / 'doxoade.log'
-        
-        timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-        
-        all_findings = []
-        # Corrigido para iterar sobre os valores do dicionário de resultados
-        for category_findings in results.values():
-            if isinstance(category_findings, list):
-                all_findings.extend(category_findings)
+        conn = get_db_connection()
+        cursor = conn.cursor()
 
-        log_data = {
-            "timestamp": timestamp,
-            "doxoade_version": "32.2", 
-            "command": command_name,
-            "project_path": os.path.abspath(path),
-            "platform": sys.platform,
-            "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
-            "git_hash": _get_git_commit_hash(path),
-            "arguments": arguments,
-            "execution_time_ms": round(execution_time_ms, 2),
-            "summary": results.get('summary', {}),
-            "status": "completed",
-            "findings": all_findings
-        }
+        # Inserir o evento principal e obter seu ID
+        cursor.execute("""
+            INSERT INTO events (timestamp, doxoade_version, command, project_path, execution_time_ms, status)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (timestamp, "43.0", command_name, project_path_abs, round(execution_time_ms, 2), "completed"))
+        event_id = cursor.lastrowid
+
+        # Inserir todos os findings associados ao evento
+        for finding in results.get('findings', []):
+            file_path = finding.get('file')
+            file_rel = os.path.relpath(file_path, project_path_abs) if file_path and os.path.isabs(file_path) else file_path
+            
+            cursor.execute("""
+                INSERT INTO findings (event_id, severity, message, details, file, line, finding_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (event_id, finding.get('severity'), finding.get('message'), finding.get('details'), file_rel, finding.get('line'), finding.get('hash')))
         
-        with open(log_file, 'a', encoding='utf-8') as f:
-            # A correção do '\n' que fizemos antes
-            f.write(json.dumps(log_data) + '\n')
-    # O 'except' agora tem um 'try' correspondente
-# atualizado em 2025/10/22 - Versão do projeto 43(Ver), Versão da função 6.1(Fnc).
-# Descrição: Eleva a severidade de um SyntaxError para CRITICAL, pois ele impede a execução.
-    except (SyntaxError, IOError) as e:
-        # Um erro de sintaxe é CRÍTICO porque impede qualquer análise mais profunda ou execução.
-        logger.add_finding('CRITICAL', "Erro de sintaxe impede a análise.", file=file_path, line=getattr(e, 'lineno', None))
+        conn.commit()
+    except sqlite3.Error as e:
+        # Se a escrita no BD falhar, não quebramos a ferramenta.
+        # Apenas imprimimos um aviso.
+        click.echo(Fore.RED + f"\n[AVISO] Falha ao registrar a execução no banco de dados: {e}")
+    finally:
+        if 'conn' in locals() and conn:
+            conn.close()
 
 def _get_venv_python_executable():
     """Encontra o caminho para o executável Python do venv do projeto atual."""
@@ -243,18 +241,21 @@ def _print_summary(results, ignored_count):
     summary_text += "."
     click.echo(summary_text)
 
-def _find_project_root():
-    """Sobe a árvore de diretórios em busca de um marcador de projeto (.git ou pyproject.toml)."""
-    current_path = Path('.').resolve()
+# Substitua a função _find_project_root inteira
+def _find_project_root(start_path='.'):
+    """Sobe a árvore de diretórios a partir de start_path em busca de um marcador de projeto."""
+    current_path = Path(start_path).resolve()
+    # Adiciona uma verificação para não subir além do necessário
+    original_path = current_path
     while current_path != current_path.parent:
         if (current_path / '.git').is_dir() or (current_path / 'pyproject.toml').is_file():
             return str(current_path)
         current_path = current_path.parent
-    return str(Path('.').resolve())
+    return str(original_path) # Retorna o ponto de partida se nada for encontrado
 
-def _get_project_config(logger):
-    """A 'Fonte da Verdade' para configuração. Encontra a raiz, lê o toml e valida o search_path."""
-    root_path = _find_project_root()
+def _get_project_config(logger, start_path='.'):
+    """Lê a configuração do pyproject.toml a partir do start_path."""
+    root_path = os.path.abspath(start_path)
     
     config = {'ignore': [], 'source_dir': '.'}
     config_path = os.path.join(root_path, 'pyproject.toml')
@@ -269,11 +270,15 @@ def _get_project_config(logger):
     source_dir = config.get('source_dir', '.')
     search_path = os.path.join(root_path, source_dir)
 
-    config['search_path_valid'] = True
-    if not os.path.isdir(search_path):
-        logger.add_finding('CRITICAL', f"O diretório de código-fonte '{search_path}' não existe.",
-                           details="Verifique a diretiva 'source_dir' no seu pyproject.toml.")
-        config['search_path_valid'] = False
+    config['search_path_valid'] = os.path.isdir(search_path)
+    if not config['search_path_valid']:
+         # --- A CORREÇÃO CHAVE ---
+         # Adiciona o argumento 'details' que estava faltando.
+         logger.add_finding(
+             'CRITICAL', 
+             f"O diretório de código-fonte '{search_path}' não existe.",
+             details="Verifique a diretiva 'source_dir' no seu pyproject.toml."
+        )
 
     config['root_path'] = root_path
     config['search_path'] = search_path
