@@ -1,9 +1,0 @@
-doxoade health --help
-doxoade health
-doxoade self-test --help
-doxoade self-test
-doxoade tutorial --help
-doxoade tutorial main
-doxoade tutorial interactive
-doxoade tutorial simulation
-
