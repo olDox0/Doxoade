@@ -1,37 +1,44 @@
 {
-  "summary": {
-    "critical": 1,
-    "errors": 0,
-    "warnings": 0,
-    "info": 0
-  },
-  "findings": [
-    {
-      "severity": "CRITICAL",
-      "message": "Erro de sintaxe impede a análise: SyntaxError:<PROJECT_PATH>\\.\\main.py:1:unexpected character after line continuation character",
-      "hash": "b84d92eb19af24f434b481e51cad4fc1",
-      "file": "main.py",
-      "line": 1,
-      "snippet": {
-        "1": "def func():\\n    pass # Erro de indentacao"
+  "git_hash": "e9c8bb18dc4c0f5c2146fa73d0356cd6d2804ab8",
+  "report": {
+    "summary": {
+      "critical": 1,
+      "errors": 0,
+      "warnings": 0,
+      "info": 0
+    },
+    "findings": [
+      {
+        "severity": "CRITICAL",
+        "message": "Erro de sintaxe impede a análise: SyntaxError:<PROJECT_PATH>\\.\\main.py:1:unexpected character after line continuation character",
+        "hash": "b84d92eb19af24f434b481e51cad4fc1",
+        "file": "main.py",
+        "line": 1,
+        "snippet": {
+          "1": "def func():\\n    pass # Erro de indentacao"
+        }
       }
-    }
-  ],
-  "file_reports": {
-    "main.py": {
-      "static_analysis": {
-        "findings": [
-          {
-            "severity": "CRITICAL",
-            "message": "Erro de sintaxe impede a análise: SyntaxError:<PROJECT_PATH>\\.\\main.py:1:unexpected character after line continuation character",
-            "file": "<PROJECT_PATH>\\.\\main.py",
-            "line": 1
-          }
-        ],
-        "imports": []
-      },
-      "structure_analysis": {
-        "error": "Falha ao ler ou analisar o arquivo: unexpected character after line continuation character (main.py, line 1)"
+    ],
+    "file_reports": {
+      "main.py": {
+        "static_analysis": {
+          "findings": [
+            {
+              "severity": "CRITICAL",
+              "message": "Erro de sintaxe impede a análise: SyntaxError:<PROJECT_PATH>\\.\\main.py:1:unexpected character after line continuation character",
+              "hash": "b84d92eb19af24f434b481e51cad4fc1",
+              "file": "main.py",
+              "line": 1,
+              "snippet": {
+                "1": "def func():\\n    pass # Erro de indentacao"
+              }
+            }
+          ],
+          "imports": []
+        },
+        "structure_analysis": {
+          "error": "Falha ao ler ou analisar o arquivo: unexpected character after line continuation character (main.py, line 1)"
+        }
       }
     }
   }

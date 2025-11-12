@@ -1,29 +1,32 @@
 {
-  "summary": {
-    "critical": 0,
-    "errors": 0,
-    "warnings": 0,
-    "info": 0
-  },
-  "findings": [],
-  "file_reports": {
-    "main.py": {
-      "static_analysis": {
-        "findings": [],
-        "imports": []
-      },
-      "structure_analysis": {
-        "functions": [
-          {
-            "name": "main",
-            "lineno": 1,
-            "params": [],
-            "returns": [],
-            "risks": [],
-            "complexity": 1,
-            "complexity_rank": "Baixissima"
-          }
-        ]
+  "git_hash": "e9c8bb18dc4c0f5c2146fa73d0356cd6d2804ab8",
+  "report": {
+    "summary": {
+      "critical": 0,
+      "errors": 0,
+      "warnings": 0,
+      "info": 0
+    },
+    "findings": [],
+    "file_reports": {
+      "main.py": {
+        "static_analysis": {
+          "findings": [],
+          "imports": []
+        },
+        "structure_analysis": {
+          "functions": [
+            {
+              "name": "main",
+              "lineno": 1,
+              "params": [],
+              "returns": [],
+              "risks": [],
+              "complexity": 1,
+              "complexity_rank": "Baixissima"
+            }
+          ]
+        }
       }
     }
   }
