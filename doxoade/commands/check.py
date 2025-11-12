@@ -279,7 +279,16 @@ def run_check_logic(path, cmd_line_ignore, fix, debug):
                 import_findings = _run_import_probe(all_imports, python_executable, logger, config.get('search_path'))
                 for f in import_findings:
                     logger.add_finding(f['severity'], f['message'], file=f['file'], line=f['line'], snippet=f.get('snippet'))
-        
+
+        for report in logger.results['file_reports'].values():
+            report['static_analysis']['findings'] = []
+            
+        # Repopula com os findings completos do logger (que contêm o 'hash')
+        for finding in logger.results['findings']:
+            file_path = finding.get('file')
+            if file_path in logger.results['file_reports']:
+                logger.results['file_reports'][file_path]['static_analysis']['findings'].append(finding)
+
         return logger.results
 
 @click.command('check')
