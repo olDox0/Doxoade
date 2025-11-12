@@ -1,0 +1,4 @@
+[tool.doxoade]
+source_dir = "."
+# Adicionamos o ignore aqui para o caso de teste específico
+ignore = ["regression_tests/"]

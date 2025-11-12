@@ -1,0 +1,1 @@
+doxoade auto --file PipelineTeste.txt

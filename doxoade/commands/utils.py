@@ -3,9 +3,9 @@ import os
 import sys
 import re
 import json
-import shutil
+#import shutil
 import textwrap
-import subprocess
+#import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -281,10 +281,7 @@ def setup_regression():
     
     patient_zero_project = os.path.join(fixtures_dir, "project_syntax_error")
     # Usamos textwrap para um código mais limpo
-    patient_zero_code = textwrap.dedent("""
-        def func():
-         pass # Erro de indentação
-    """)
+    patient_zero_code = "def func():\\n    pass # Erro de indentacao"
 
     canon_toml_content = textwrap.dedent("""
         # Define os casos de teste para o sistema de regressão.

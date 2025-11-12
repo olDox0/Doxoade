@@ -1,5 +1,4 @@
-
 [[test_case]]
-id = "check_finds_syntax_error"
+id = "check_healthy_project"
 command = "doxoade check ."
-project = "project_syntax_error"
+project = "project_healthy"

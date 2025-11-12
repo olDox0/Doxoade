@@ -9,11 +9,11 @@ import traceback
 import toml
 import subprocess
 import os, sys, re
-import json
+#import json
 import click
 import pandas as pd
 from datetime import datetime
-from pathlib import Path
+#from pathlib import Path
 from functools import wraps
 from colorama import init as colorama_init, Fore, Style
 from doxoade.database import get_db_connection
@@ -175,10 +175,10 @@ def _display_project_summary_db(df):
 def _display_common_issues_db(df):
     """Exibe os tipos de erro mais comuns a partir de um DataFrame."""
     click.echo(Fore.YELLOW + "\n--- Tipos de Erro Mais Comuns ---")
-    error_df = df[df['severity'].isin(['ERROR', 'CRITICAL'])]
+    error_df = df[df['severity'].isin(['ERROR', 'CRITICAL'])].copy()
     
     # Extrai a mensagem principal antes de dois pontos ou parênteses
-    error_df['message_type'] = error_df['message'].str.split('[:(]').str[0].str.strip()
+    error_df.loc[:, 'message_type'] = error_df['message'].str.split('[:(]').str[0].str.strip()
     
     errors_by_type = error_df.groupby('message_type').size().sort_values(ascending=False).head(5)
     
@@ -254,7 +254,7 @@ def setup_health(ctx, path):
                 toml_data = toml.load(f)
         else:
             toml_data = {}
-    except toml.TomlDecodeError as e:
+    except toml.TomlDecodeError:
         logger.add_finding('error', "Arquivo 'pyproject.toml' corrompido.")
         click.echo(Fore.RED + "[ERRO] Seu 'pyproject.toml' parece corrompido."); sys.exit(1)
 

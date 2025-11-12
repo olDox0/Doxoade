@@ -65,7 +65,7 @@ def _install_requirements(path, logger):
         # --- UTilitario 1: Instalação de Dependências ---
         click.echo(Fore.WHITE + "   > Instalando dependências do 'requirements.txt'...")
         install_cmd = [venv_python, '-m', 'pip', 'install', '-r', req_file]
-        install_result = subprocess.run(install_cmd, check=True, capture_output=True, cwd=path, text=True, encoding='utf-8', errors='replace')
+        subprocess.run(install_cmd, check=True, capture_output=True, cwd=path, text=True, encoding='utf-8', errors='replace')
         logger.add_finding('info', "Dependências do requirements.txt instaladas.")
         click.echo(Fore.GREEN + "   > [OK] Dependências instaladas.")
         

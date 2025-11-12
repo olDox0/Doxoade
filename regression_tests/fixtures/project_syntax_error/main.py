@@ -1,3 +1,1 @@
-
-def func():
- pass # Erro de indentação
+def func():\n    pass # Erro de indentacao
