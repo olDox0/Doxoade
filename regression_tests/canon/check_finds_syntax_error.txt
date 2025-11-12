@@ -5,19 +5,18 @@ doxoade check .
 1
 
 --- STDOUT ---
-[CHECK] Executando an�lise de integridade do projeto...
-DEBUG [check]: root_path = <PROJECT_PATH>
-DEBUG [check]: search_path = <PROJECT_PATH>\.
-DEBUG [check]: files_to_check = ['C:\\Users\\olDox222\\Documents\\Meu laptop (1)\\A20251021\\DOSSIER\\Altonomo\\Projetos_E_Programas\\Projeto OADE\\doxoade\\regression_tests\\fixtures\\project_syntax_error\\.\\main.py', 'C:\\Users\\olDox222\\Documents\\Meu laptop (1)\\A20251021\\DOSSIER\\Altonomo\\Projetos_E_Programas\\Projeto OADE\\doxoade\\regression_tests\\fixtures\\project_syntax_error\\.\\regression_tests\\fixtures\\project_syntax_error\\main.py']
-[DEBUG] Analisando 2 arquivos sequencialmente...
+[CHECK] Executando an�lise...
 
 --- AN�LISE COMPLETA ---
-[CRITICAL] Erro de sintaxe impede a an�lise.
+[CRITICAL] Erro de sintaxe impede a an�lise: SyntaxError:<PROJECT_PATH>\.\main.py:1:unexpected character after line continuation character
+   > Em '<PROJECT_PATH>\.\main.py' (linha 1)
+      >    1: def func():\n    pass # Erro de indentacao
+[CRITICAL] Erro de sintaxe impede a an�lise: SyntaxError:<PROJECT_PATH>\.\regression_tests\fixtures\project_syntax_error\main.py:1:unexpected character after line continuation character
    > Em '<PROJECT_PATH>\.\regression_tests\fixtures\project_syntax_error\main.py' (linha 1)
       >    1: def func():\n pass # Erro de indentacao
 
 ----------------------------------------
-[FIM] An�lise conclu�da: 1 Erro(s) Cr�tico(s).
+[FIM] An�lise conclu�da: 2 Erro(s) Cr�tico(s).
 
 
 --- STDERR ---

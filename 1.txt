@@ -1,0 +1,14 @@
+doxoade check . --ignore vers --debug
+doxoade self-test
+pytest tests/test_check_command.py -s -v
+pytest -v --basetemp=./pytest_temp_dir tests/test_check_command.py
+pytest -v -p no:cache tests/test_check_command.py
+pytest -v tests/test_check_command.py
+
+
+type ".\regression_tests\fixtures\project_healthy\main.py"
+type ".\regression_tests\canon\check_healthy_project.json"
+
+doxoade canonize
+doxoade check .
+doxoade regression-test

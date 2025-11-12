@@ -51,7 +51,7 @@ def _check_path(logger):
         return True, correct_install[0]
 
     # FLUXO 1: Informar o usuário sobre os fantasmas
-    click.echo(Fore.RED + f"   > [FALHA] Múltiplas instalações conflitantes ('fantasmas') encontradas!")
+    click.echo(Fore.RED + "   > [FALHA] Múltiplas instalações conflitantes ('fantasmas') encontradas!")
     click.echo(Fore.GREEN + f"     - Instalação Ativa/Correta: {correct_install[0]}")
     for ghost in ghost_installs:
         click.echo(Fore.RED + f"     - Instalação Fantasma:      {ghost}")
@@ -164,7 +164,7 @@ def _verify_installation_integrity(logger):
         else:
             raise subprocess.CalledProcessError(1, "cmd", stdout=result.stdout, stderr=result.stderr)
             
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+    except (subprocess.CalledProcessError, FileNotFoundError):
         msg = "Ambiente da doxoade parece corrompido. Dependências principais falharam ao importar."
         details = f"Recomendação: Execute um reparo forçado com pip:\n   > {os.path.basename(sys.executable)} -m pip install --force-reinstall -r requirements.txt"
         logger.add_finding('critical', msg, details=details)

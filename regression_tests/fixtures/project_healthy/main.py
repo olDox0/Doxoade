@@ -1,4 +1,5 @@
+import os 
 def main():
     print("Este projeto é saudável.")
-    if name == "main":
-        main()
+if __name__ == "__main__":
+    main()

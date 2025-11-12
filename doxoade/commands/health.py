@@ -3,8 +3,14 @@
 #Descrição: Esta função é refatorada para robustez. Ela agora usa o método seguro .get('key', 0) para acessar os contadores de "findings", prevenindo um KeyError em execuções sem resultados. Além disso, a lógica de sys.exit(1) foi corrigida para ser acionada apenas por erros críticos, e não por avisos.
 #O que poderia ser melhorado: A função _run_all_analyses poderia ser dividida em funções menores para reduzir sua complexidade.
 
-import sys, subprocess, shutil, os, json, click, re
-from colorama import Fore, Style
+import sys
+import subprocess
+#import shutil
+import os
+import json
+import click
+#import re
+from colorama import Fore
 
 # --- Imports Corretos e Finais de shared_tools ---
 from ..shared_tools import (
@@ -96,7 +102,7 @@ def _analyze_complexity(files_to_check, threshold):
     
 def _execute_coverage_run(venv_python, source_dir):
     """Executa o pytest via coverage e retorna o resultado do processo."""
-    run_tests_cmd = [venv_python, '-m', 'coverage', 'run', f'--source={source_dir}', '-m', 'pytest']
+    run_tests_cmd = [venv_python, '-m', 'coverage', 'run', f'--source={source_dir}', '-m', 'pytest', '-p', 'no:cache']
     return subprocess.run(run_tests_cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
 
 def _generate_and_parse_coverage_report(venv_python, min_coverage, project_path):

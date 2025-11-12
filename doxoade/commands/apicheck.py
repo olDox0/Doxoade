@@ -7,54 +7,55 @@ import json
 import click
 from colorama import Fore
 
-# Importa as ferramentas necessárias do módulo compartilhado
+# Importa as ferramentas necessárias do módulo compartilhado, removendo a importação quebrada
 from ..shared_tools import (
+    _get_project_config,
     ExecutionLogger,
     _present_results,
-    _load_config_and_get_search_path
 )
-
-__version__ = "34.0 Alfa"
 
 @click.command('apicheck')
 @click.pass_context
 @click.argument('path', type=click.Path(exists=True, file_okay=False, resolve_path=True), default='.')
-@click.option('--ignore', multiple=True, help="Ignora uma pasta. Combina com as do .doxoaderc.")
-@click.option('--format', type=click.Choice(['text', 'json']), default='text', help="Define o formato da saída.")
-def apicheck(ctx, path, ignore, format):
+@click.option('--ignore', multiple=True, help="Ignora uma pasta. Combina com as do pyproject.toml.")
+@click.option('--format', 'output_format', type=click.Choice(['text', 'json']), default='text', help="Define o formato da saída.")
+def apicheck(ctx, path, ignore, output_format):
     """Analisa o uso de APIs com base em um arquivo de contrato 'apicheck.json'."""
     arguments = ctx.params
     with ExecutionLogger('apicheck', path, arguments) as logger:
-        if format == 'text':
+        if output_format == 'text':
             click.echo(Fore.YELLOW + f"[APICHECK] Executando análise de contratos de API em '{path}'...")
     
-        search_path = _load_config_and_get_search_path(logger)
-        if not search_path:
-            _present_results(format, logger.results)
+        # LÓGICA ATUALIZADA para obter configuração e caminho de busca
+        config = _get_project_config(logger, start_path=path)
+        if not config.get('search_path_valid'):
+            _present_results(output_format, logger.results)
             sys.exit(1)
-            
+        search_path = config.get('search_path')
+
         # --- Passo 1: Carregar o Contrato ---
-        contract_file = os.path.join(path, 'apicheck.json')
+        contract_file = os.path.join(search_path, 'apicheck.json')
         if not os.path.exists(contract_file):
-            logger.add_finding('warning', "Arquivo 'apicheck.json' não encontrado. Nenhuma análise será feita.")
-            click.echo(Fore.YELLOW + "[AVISO] Arquivo 'apicheck.json' não encontrado.")
-            _present_results(format, logger.results)
+            logger.add_finding('WARNING', "Arquivo 'apicheck.json' não encontrado. Nenhuma análise será feita.")
+            if output_format == 'text':
+                click.echo(Fore.YELLOW + "[AVISO] Arquivo 'apicheck.json' não encontrado.")
+            _present_results(output_format, logger.results)
             return
     
         try:
             with open(contract_file, 'r', encoding='utf-8') as f:
                 contracts = json.load(f).get('contracts', [])
         except (json.JSONDecodeError, IOError) as e:
-            logger.add_finding('error', f"Falha ao ler ou decodificar 'apicheck.json': {e}")
-            click.echo(Fore.RED + f"[ERRO] Falha ao ler ou decodificar 'apicheck.json': {e}")
+            logger.add_finding('CRITICAL', f"Falha ao ler ou decodificar 'apicheck.json': {e}")
+            if output_format == 'text':
+                click.echo(Fore.RED + f"[ERRO] Falha ao ler ou decodificar 'apicheck.json': {e}")
             sys.exit(1)
     
         # --- Passo 2: Encontrar Arquivos e Analisar ---
-        config = _load_config()
         final_ignore_list = list(set(config.get('ignore', []) + list(ignore)))
         folders_to_ignore = set([item.lower() for item in final_ignore_list] + ['venv', 'build', 'dist', '.git'])
         files_to_check = []
-        for root, dirs, files in os.walk(path):
+        for root, dirs, files in os.walk(search_path):
             dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
             for file in files:
                 if file.endswith('.py'):
@@ -63,11 +64,13 @@ def apicheck(ctx, path, ignore, format):
         for file_path in files_to_check:
             api_findings = _analyze_api_calls(file_path, contracts)
             for f in api_findings:
-                logger.add_finding(f['type'], f['message'], details=f.get('details'), file=f.get('file'), line=f.get('line'))
+                # Corrigido para usar a nova estrutura de severidade
+                severity = f.get('severity', 'ERROR') # 'type' foi trocado por 'severity'
+                logger.add_finding(severity, f['message'], details=f.get('details'), file=f.get('file'), line=f.get('line'))
 
-        _present_results(format, logger.results)
+        _present_results(output_format, logger.results)
     
-        if logger.results['summary']['errors'] > 0:
+        if logger.results['summary']['critical'] > 0 or logger.results['summary']['errors'] > 0:
             sys.exit(1)
 
 def _analyze_api_calls(file_path, contracts):
@@ -108,7 +111,7 @@ def _validate_call_against_contract(node, contract, file_path):
     for param in rules.get('required_params', []):
         if param not in provided_args:
             findings.append({
-                'type': 'error', 'message': f"Chamada para '{contract.get('function')}' não possui o parâmetro obrigatório '{param}'.",
+                'severity': 'ERROR', 'message': f"Chamada para '{contract.get('function')}' não possui o parâmetro obrigatório '{param}'.",
                 'details': f"Contrato '{contract.get('id')}' exige este parâmetro.",
                 'file': file_path, 'line': node.lineno
             })
@@ -118,7 +121,7 @@ def _validate_call_against_contract(node, contract, file_path):
         for kw in node.keywords:
             if kw.arg == param and isinstance(kw.value, ast.Constant) and kw.value.value == bad_value:
                 findings.append({
-                    'type': 'error', 'message': f"Chamada para '{contract.get('function')}' usa o valor proibido '{param}={bad_value}'.",
+                    'severity': 'ERROR', 'message': f"Chamada para '{contract.get('function')}' usa o valor proibido '{param}={bad_value}'.",
                     'details': f"Contrato '{contract.get('id')}' proíbe este uso.",
                     'file': file_path, 'line': node.lineno
                 })
