@@ -48,6 +48,7 @@ from doxoade.commands.git_new import git_new
 from doxoade.commands.git_clean import git_clean
 from doxoade.commands.encoding import encoding
 from doxoade.commands.doctor import doctor
+from doxoade.commands.diff import diff
 from doxoade.commands.deepcheck import deepcheck
 from doxoade.commands.config import config_group
 from doxoade.commands.clean import clean
@@ -353,11 +354,13 @@ def _analyze_traceback(stderr_output):
 # --- REGISTRO DE PLUGINS ---
 cli.add_command(apicheck)
 cli.add_command(auto)
+cli.add_command(canonize)
 cli.add_command(check)
 cli.add_command(clean)
 cli.add_command(config_group)
 cli.add_command(create_pipeline)
 cli.add_command(deepcheck)
+cli.add_command(diff)
 cli.add_command(doctor)
 cli.add_command(encoding)
 cli.add_command(git_clean)
@@ -372,17 +375,16 @@ cli.add_command(log)
 cli.add_command(mk)
 cli.add_command(optimize)
 cli.add_command(rebuild)
+cli.add_command(regression_test)
 cli.add_command(release)
 cli.add_command(run)
 cli.add_command(save)
 cli.add_command(self_test)
+cli.add_command(setup_regression)
 cli.add_command(show_trace)
 cli.add_command(sync)
 cli.add_command(tutorial_group)
 cli.add_command(webcheck)
-cli.add_command(canonize)
-cli.add_command(setup_regression)
-cli.add_command(regression_test)
 
 if __name__ == '__main__':
     try:
