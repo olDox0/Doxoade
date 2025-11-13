@@ -87,20 +87,14 @@ if __name__ == "__main__":
 """
 
 def _collect_files_to_analyze(config, cmd_line_ignore):
-    """(Versão Definitiva) Coleta arquivos .py, ignorando diretórios pelo nome."""
     search_path = config.get('search_path')
-    
     config_ignore = [p.strip('/\\').lower() for p in config.get('ignore', [])]
     cmd_line_ignore_list = [p.strip('/\\').lower() for p in cmd_line_ignore]
-    
     folders_to_ignore = set(config_ignore + cmd_line_ignore_list)
     folders_to_ignore.update(['venv', 'build', 'dist', '.git', '__pycache__'])
-
     files_to_check = []
     for root, dirs, files in os.walk(search_path, topdown=True):
-        # A forma correta e testada: modifica a lista 'dirs' para não visitar pastas ignoradas.
         dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
-        
         for file in files:
             if file.endswith('.py'):
                 files_to_check.append(os.path.join(root, file))
@@ -237,18 +231,15 @@ def _fix_unused_imports(file_path, logger):
                 f.write("\n".join(new_lines))
         
         return fix_count
-    except (IOError, OSError, SyntaxError) as e:
+    except Exception as e:
         logger.add_finding('WARNING', f"Não foi possível processar ou corrigir o arquivo {file_path}", details=str(e))
         return 0
 
 def run_check_logic(path, cmd_line_ignore, fix, debug):
-    """Lógica pura do 'check' que retorna os resultados."""
     with ExecutionLogger('check_logic', path, {}) as logger:
         config = _get_project_config(logger, start_path=path)
         if not config.get('search_path_valid'): return logger.results
-
         files_to_process = _collect_files_to_analyze(config, cmd_line_ignore)
-        
         if fix:
             click.echo(Fore.CYAN + "Modo de correção (--fix) ativado...")
             total_fixed = 0
