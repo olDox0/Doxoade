@@ -1,15 +1,15 @@
 {
-    "report_generated_at_utc": "2025-11-11T00:00:12.311599+00:00",
+    "report_generated_at_utc": "2025-11-13T21:03:49.459444+00:00",
     "doxoade_version": "37.2 Alfa (Hardening)",
     "project_path": "C:\\Users\\olDox222\\Documents\\Meu laptop (1)\\A20251021\\DOSSIER\\Altonomo\\Projetos_E_Programas\\Projeto OADE\\doxoade",
     "telemetry": {
-        "directory_tree": "./\n    .gitignore\n    0.txt\n    1.txt\n    Exemplo.txt\n    PipelineHelp.txt\n    PipelineTeste.txt\n    README.md\n    desktop.ini\n    doxoade_report.json\n    install.py\n    meu_app.specpython\n    pyproject.toml\n    requirements.txt\n    run_doxoade.py\n    setup.py\n    temp.log\n    Canone_Test/\n        teste1.py\n        teste2.py\n    Exemplo/\n        exemplo.py\n        exemplow.py\n    Vers/\n        20251018doxoade.bat\n        20251018run_doxoade.py\n        20251019doxoade.bat\n        20251019install.sh\n        20251103Ainstall.py\n        20251103Arun_doxoade.py\n        20251103Asetup.py\n        BKP15102025A_run_doxoade.py\n    doxoade/\n        __init__.py\n        database.py\n        doxoade.py\n        shared_tools.py\n        tracer.py\n        Vers/\n            20251103Adatabase.py\n            20251103Adoxoade.py\n            20251103Ashared_tools.py\n            20251103Atracer.py\n            CheckPrecaucao20251011A1602.py\n            doxoade011025A.py\n            doxoade20251002.py\n            doxoade20251006A.py\n        __pycache__/\n            __init__.cpython-312.pyc\n            database.cpython-312.pyc\n            doxoade.cpython-312.pyc\n            shared_tools.cpython-312.pyc\n        commands/\n            __init__.py\n            apicheck.py\n            auto.py\n            canonize.py\n            check.py\n            clean.py\n            config.py\n            deepcheck.py\n            doctor.py\n            encoding.py\n            git_clean.py\n            git_new.py\n            git_workflow.py\n            global_health.py\n            guicheck.py\n            health.py\n            init.py\n            intelligence.py\n            kvcheck.py\n            optimize.py\n            rebuild.py\n            regression_test.py\n            run.py\n            save.py\n            self_test.py\n            tutorial.py\n            utils.py\n            webcheck.py\n            Vers/\n                20251103Aapicheck.py\n                20251103Aauto.py\n                20251103Acanonize.py\n                20251103Acheck.py\n                20251103Aclean.py\n                20251103Aconfig.py\n                20251103Adeepcheck.py\n                20251103Adoctor.py\n                20251103Aencoding.py\n                20251103Agit_clean.py\n                20251103Agit_new.py\n                20251103Agit_workflow.py\n                20251103Aglobal_health.py\n                20251103Aguicheck.py\n                20251103Ahealth.py\n                20251103Ainit.py\n                20251103Aintelligence.py\n                20251103Akvcheck.py\n                20251103Aoptimize.py\n                20251103Arebuild.py\n                20251103Aregression_test.py\n                20251103Arun.py\n                20251103Asave.py\n                20251103Aself_test.py\n                20251103Atutorial.py\n                20251103Autils.py\n                20251103Awebcheck.py\n                20251108Acheck.py\n                GuicheckFun\u00e7\u00f5esBKP.py\n                apicheck20251013A.py\n                check20251013A.py\n                deepcheck20251013A.py\n                encoding20251013A.py\n                git_clean20251013A.py\n                guicheck20251013A.py\n                health20251013A.py\n                kvcheck20251013A.py\n                optimize20251013A.py\n                save20251013A.py\n                webcheck20251013A.py\n                __pycache__/\n                    20251103Aregression_test.cpython-312-pytest-8.4.2.pyc\n                    20251103Aself_test.cpython-312-pytest-8.4.2.pyc\n            __pycache__/\n                __init__.cpython-312.pyc\n                apicheck.cpython-312.pyc\n                auto.cpython-312.pyc\n                canonize.cpython-312.pyc\n                check.cpython-312.pyc\n                clean.cpython-312.pyc\n                config.cpython-312.pyc\n                deepcheck.cpython-312.pyc\n                doctor.cpython-312.pyc\n                encoding.cpython-312.pyc\n                git_clean.cpython-312.pyc\n                git_new.cpython-312.pyc\n                git_workflow.cpython-312.pyc\n                global_health.cpython-312.pyc\n                guicheck.cpython-312.pyc\n                health.cpython-312.pyc\n                init.cpython-312.pyc\n                intelligence.cpython-312.pyc\n                kvcheck.cpython-312.pyc\n                optimize.cpython-312.pyc\n                rebuild.cpython-312.pyc\n                regression_test.cpython-312-pytest-8.4.2.pyc\n                regression_test.cpython-312.pyc\n                run.cpython-312.pyc\n                save.cpython-312.pyc\n                self_test.cpython-312-pytest-8.4.2.pyc\n                self_test.cpython-312.pyc\n                tutorial.cpython-312.pyc\n                utils.cpython-312.pyc\n                webcheck.cpython-312.pyc\n    doxoade.egg-info/\n        PKG-INFO\n        SOURCES.txt\n        dependency_links.txt\n        entry_points.txt\n        requires.txt\n        top_level.txt\n    regression_tests/\n        canon.toml\n        canon/\n            check_finds_syntax_error.txt\n        fixtures/\n            project_healthy/\n                main.py\n            project_syntax_error/\n                main.py\n                requirements.txt\n                regression_tests/\n                    canon.toml\n                    canon/\n                    fixtures/\n                        project_syntax_error/\n                            main.py\n    tests/\n        conftest.py\n        debug_check.py\n        helpers.py\n        test_check_command.py\n        test_clean_command.py\n        test_core_invocation.py\n        test_deepcheck_command.py\n        test_doctor_command.py\n        test_doctor_logic.py\n        test_doxoade.py\n        test_fix_logic.py\n        test_guicheck_command.py\n        test_health_command.py\n        test_init_command.py\n        test_optimize_command.py\n        test_rebuild_command.py\n        test_save_command.py\n        test_shared_tools.py\n        test_utils_commands.py\n        __pycache__/\n            conftest.cpython-312-pytest-8.4.2.pyc\n            debug_check.cpython-312-pytest-8.4.2.pyc\n            test_check_command.cpython-312-pytest-8.4.2.pyc\n            test_clean_command.cpython-312-pytest-8.4.2.pyc\n            test_core_invocation.cpython-312-pytest-8.4.2.pyc\n            test_deepcheck_command.cpython-312-pytest-8.4.2.pyc\n            test_doctor_command.cpython-312-pytest-8.4.2.pyc\n            test_doctor_logic.cpython-312-pytest-8.4.2.pyc\n            test_doxoade.cpython-312-pytest-8.4.2.pyc\n            test_fix_logic.cpython-312-pytest-8.4.2.pyc\n            test_guicheck_command.cpython-312-pytest-8.4.2.pyc\n            test_health_command.cpython-312-pytest-8.4.2.pyc\n            test_init_command.cpython-312-pytest-8.4.2.pyc\n            test_optimize_command.cpython-312-pytest-8.4.2.pyc\n            test_rebuild_command.cpython-312-pytest-8.4.2.pyc\n            test_save_command.cpython-312-pytest-8.4.2.pyc\n            test_shared_tools.cpython-312-pytest-8.4.2.pyc\n            test_utils_commands.cpython-312-pytest-8.4.2.pyc",
+        "directory_tree": "./\n    .gitignore\n    0.txt\n    1.txt\n    Exemplo.txt\n    PipelineHelp.txt\n    PipelineTeste.txt\n    README.md\n    desktop.ini\n    doxoade_report.json\n    install.py\n    meu_app.specpython\n    pyproject.toml\n    requirements.txt\n    run_doxoade.py\n    setup.py\n    temp.log\n    .pytest_cache/\n        .gitignore\n        CACHEDIR.TAG\n        README.md\n        v/\n            cache/\n                lastfailed\n                nodeids\n    Canone_Test/\n        teste1.py\n        teste2.py\n    Exemplo/\n        exemplo.py\n        exemplow.py\n    Vers/\n        20251018doxoade.bat\n        20251018run_doxoade.py\n        20251019doxoade.bat\n        20251019install.sh\n        20251103Ainstall.py\n        20251103Arun_doxoade.py\n        20251103Asetup.py\n        BKP15102025A_run_doxoade.py\n    doxoade/\n        __init__.py\n        database.py\n        doxoade.py\n        shared_tools.py\n        tracer.py\n        Vers/\n            20251103Adatabase.py\n            20251103Adoxoade.py\n            20251103Ashared_tools.py\n            20251103Atracer.py\n            CheckPrecaucao20251011A1602.py\n            doxoade011025A.py\n            doxoade20251002.py\n            doxoade20251006A.py\n        __pycache__/\n            __init__.cpython-312.pyc\n            database.cpython-312.pyc\n            doxoade.cpython-312.pyc\n            shared_tools.cpython-312.pyc\n        commands/\n            __init__.py\n            apicheck.py\n            auto.py\n            canonize.py\n            check.py\n            clean.py\n            config.py\n            deepcheck.py\n            diff.py\n            doctor.py\n            encoding.py\n            git_clean.py\n            git_new.py\n            git_workflow.py\n            global_health.py\n            guicheck.py\n            health.py\n            init.py\n            intelligence.py\n            kvcheck.py\n            optimize.py\n            rebuild.py\n            regression_test.py\n            run.py\n            save.py\n            self_test.py\n            tutorial.py\n            utils.py\n            webcheck.py\n            Vers/\n                20251013Aapicheck.py\n                20251013Acheck.py\n                20251013Adeepcheck.py\n                20251013Aencoding.py\n                20251013Agit_clean.py\n                20251013Aguicheck.py\n                20251013Ahealth.py\n                20251013Akvcheck.py\n                20251013Aoptimize.py\n                20251013Asave.py\n                20251013Awebcheck.py\n                20251013GuicheckFun\u00e7\u00f5esBKP.py\n                20251103Aapicheck.py\n                20251103Aauto.py\n                20251103Acanonize.py\n                20251103Acheck.py\n                20251103Aclean.py\n                20251103Aconfig.py\n                20251103Adeepcheck.py\n                20251103Adoctor.py\n                20251103Aencoding.py\n                20251103Agit_clean.py\n                20251103Agit_new.py\n                20251103Agit_workflow.py\n                20251103Aglobal_health.py\n                20251103Aguicheck.py\n                20251103Ahealth.py\n                20251103Ainit.py\n                20251103Aintelligence.py\n                20251103Akvcheck.py\n                20251103Aoptimize.py\n                20251103Arebuild.py\n                20251103Aregression_test.py\n                20251103Arun.py\n                20251103Asave.py\n                20251103Aself_test.py\n                20251103Atutorial.py\n                20251103Autils.py\n                20251103Awebcheck.py\n                20251108Acheck.py\n                20251111Ccheck.py\n                20251111Cregression_test.py\n                20251113Aregression_test.py\n                20251113Bcanonize.py\n                20251113Bregression_test.py\n                __pycache__/\n                    20251103Aregression_test.cpython-312-pytest-8.4.2.pyc\n                    20251103Aself_test.cpython-312-pytest-8.4.2.pyc\n            __pycache__/\n                __init__.cpython-312.pyc\n                apicheck.cpython-312.pyc\n                auto.cpython-312.pyc\n                canonize.cpython-312.pyc\n                check.cpython-312.pyc\n                clean.cpython-312.pyc\n                config.cpython-312.pyc\n                deepcheck.cpython-312.pyc\n                diff.cpython-312.pyc\n                doctor.cpython-312.pyc\n                encoding.cpython-312.pyc\n                git_clean.cpython-312.pyc\n                git_new.cpython-312.pyc\n                git_workflow.cpython-312.pyc\n                global_health.cpython-312.pyc\n                guicheck.cpython-312.pyc\n                health.cpython-312.pyc\n                init.cpython-312.pyc\n                intelligence.cpython-312.pyc\n                kvcheck.cpython-312.pyc\n                optimize.cpython-312.pyc\n                rebuild.cpython-312.pyc\n                regression_test.cpython-312-pytest-8.4.2.pyc\n                regression_test.cpython-312.pyc\n                run.cpython-312.pyc\n                save.cpython-312.pyc\n                self_test.cpython-312-pytest-8.4.2.pyc\n                self_test.cpython-312.pyc\n                tutorial.cpython-312.pyc\n                utils.cpython-312.pyc\n                webcheck.cpython-312.pyc\n    doxoade.egg-info/\n        PKG-INFO\n        SOURCES.txt\n        dependency_links.txt\n        entry_points.txt\n        requires.txt\n        top_level.txt\n    pytest_temp_dir/\n        test_check_finds_syntax_error0/\n            broken_code.py\n            pyproject.toml\n        test_check_finds_unresolved_im0/\n            main.py\n            pyproject.toml\n        test_check_finds_unused_import0/\n            main.py\n            pyproject.toml\n        test_check_passes_on_clean_cod0/\n            main.py\n            pyproject.toml\n    regression_tests/\n        canon.toml\n        canon/\n            check_finds_syntax_error.json\n            check_finds_syntax_error.txt\n            check_healthy_project.json\n            project_snapshot.json\n        fixtures/\n            project_healthy/\n                main.py\n                pyproject.toml\n            project_syntax_error/\n                main.py\n                pyproject.toml\n                requirements.txt\n                regression_tests/\n                    canon.toml\n                    canon/\n                    fixtures/\n                        project_syntax_error/\n                            main.py\n    tests/\n        conftest.py\n        debug_check.py\n        helpers.py\n        test_canonize_command.py\n        test_check_command.py\n        test_clean_command.py\n        test_core_invocation.py\n        test_deepcheck_command.py\n        test_doctor_command.py\n        test_doctor_logic.py\n        test_doxoade.py\n        test_fix_logic.py\n        test_guicheck_command.py\n        test_health_command.py\n        test_init_command.py\n        test_optimize_command.py\n        test_rebuild_command.py\n        test_regression_logic.py\n        test_save_command.py\n        test_shared_tools.py\n        test_utils_commands.py\n        __pycache__/\n            conftest.cpython-312-pytest-8.4.2.pyc\n            debug_check.cpython-312-pytest-8.4.2.pyc\n            test_canonize_command.cpython-312-pytest-8.4.2.pyc\n            test_check_command.cpython-312-pytest-8.4.2.pyc\n            test_clean_command.cpython-312-pytest-8.4.2.pyc\n            test_core_invocation.cpython-312-pytest-8.4.2.pyc\n            test_deepcheck_command.cpython-312-pytest-8.4.2.pyc\n            test_doctor_command.cpython-312-pytest-8.4.2.pyc\n            test_doctor_logic.cpython-312-pytest-8.4.2.pyc\n            test_doxoade.cpython-312-pytest-8.4.2.pyc\n            test_fix_logic.cpython-312-pytest-8.4.2.pyc\n            test_guicheck_command.cpython-312-pytest-8.4.2.pyc\n            test_health_command.cpython-312-pytest-8.4.2.pyc\n            test_init_command.cpython-312-pytest-8.4.2.pyc\n            test_optimize_command.cpython-312-pytest-8.4.2.pyc\n            test_rebuild_command.cpython-312-pytest-8.4.2.pyc\n            test_regression_logic.cpython-312-pytest-8.4.2.pyc\n            test_save_command.cpython-312-pytest-8.4.2.pyc\n            test_shared_tools.cpython-312-pytest-8.4.2.pyc\n            test_utils_commands.cpython-312-pytest-8.4.2.pyc\n    tmp/\n        test_canonize_all_creates_proj0/\n            main.py\n            regression_tests/\n                canon/\n                    project_snapshot.json",
         "filesystem": [
             {
                 "path": ".gitignore",
-                "size_bytes": 756,
+                "size_bytes": 773,
                 "created_at_utc": "2025-09-17T23:59:39.829157+00:00",
-                "modified_at_utc": "2025-10-19T13:25:30.528260+00:00",
+                "modified_at_utc": "2025-11-12T01:52:35.004622+00:00",
                 "encoding": "utf-8"
             },
             {
@@ -21,9 +21,9 @@
             },
             {
                 "path": "1.txt",
-                "size_bytes": 256,
+                "size_bytes": 750,
                 "created_at_utc": "2025-11-08T02:06:34.006300+00:00",
-                "modified_at_utc": "2025-11-10T02:25:45.725410+00:00",
+                "modified_at_utc": "2025-11-13T01:36:49.299492+00:00",
                 "encoding": "ascii"
             },
             {
@@ -63,9 +63,9 @@
             },
             {
                 "path": "doxoade_report.json",
-                "size_bytes": 161568,
+                "size_bytes": 156667,
                 "created_at_utc": "2025-11-06T03:00:23.848361+00:00",
-                "modified_at_utc": "2025-11-10T05:00:09.245414+00:00",
+                "modified_at_utc": "2025-11-11T00:00:17.652340+00:00",
                 "encoding": "ascii"
             },
             {
@@ -118,9 +118,9 @@
             },
             {
                 "path": "pyproject.toml",
-                "size_bytes": 191,
+                "size_bytes": 348,
                 "created_at_utc": "2025-10-11T16:27:38.326984+00:00",
-                "modified_at_utc": "2025-11-10T03:42:46.210518+00:00",
+                "modified_at_utc": "2025-11-12T21:27:05.527315+00:00",
                 "encoding": "ascii"
             },
             {
@@ -151,6 +151,41 @@
                 "size_bytes": 17,
                 "created_at_utc": "2025-10-14T20:39:05.910921+00:00",
                 "modified_at_utc": "2025-10-14T20:39:05.910921+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": ".pytest_cache/.gitignore",
+                "size_bytes": 39,
+                "created_at_utc": "2025-11-05T03:26:29.848303+00:00",
+                "modified_at_utc": "2025-11-05T03:26:29.849303+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": ".pytest_cache/CACHEDIR.TAG",
+                "size_bytes": 191,
+                "created_at_utc": "2025-11-05T03:26:29.850303+00:00",
+                "modified_at_utc": "2025-11-05T03:26:29.854638+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": ".pytest_cache/README.md",
+                "size_bytes": 310,
+                "created_at_utc": "2025-11-05T03:26:29.847307+00:00",
+                "modified_at_utc": "2025-11-05T03:26:29.847307+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": ".pytest_cache/v/cache/lastfailed",
+                "size_bytes": 338,
+                "created_at_utc": "2025-11-05T03:26:29.881043+00:00",
+                "modified_at_utc": "2025-11-10T03:33:16.078397+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": ".pytest_cache/v/cache/nodeids",
+                "size_bytes": 3181,
+                "created_at_utc": "2025-11-05T03:26:29.875839+00:00",
+                "modified_at_utc": "2025-11-11T22:49:58.588979+00:00",
                 "encoding": "ascii"
             },
             {
@@ -311,115 +346,123 @@
             },
             {
                 "path": "doxoade/doxoade.py",
-                "size_bytes": 18414,
+                "size_bytes": 18477,
                 "created_at_utc": "2025-09-07T23:57:15.658402+00:00",
-                "modified_at_utc": "2025-11-10T04:17:47.471179+00:00",
+                "modified_at_utc": "2025-11-13T07:11:40.338466+00:00",
                 "encoding": "ascii",
                 "functions": [
                     {
                         "name": "cli",
-                        "line": 82
+                        "line": 83
                     },
                     {
                         "name": "log_command_execution",
-                        "line": 93
+                        "line": 94
                     },
                     {
                         "name": "dashboard",
-                        "line": 117
+                        "line": 118
                     },
                     {
                         "name": "_display_error_trend_db",
-                        "line": 151
+                        "line": 152
                     },
                     {
                         "name": "_display_project_summary_db",
-                        "line": 164
+                        "line": 165
                     },
                     {
                         "name": "_display_common_issues_db",
-                        "line": 175
+                        "line": 176
                     },
                     {
                         "name": "setup_health",
-                        "line": 195
+                        "line": 196
                     },
                     {
                         "name": "_get_github_repo_info",
-                        "line": 313
+                        "line": 314
                     },
                     {
                         "name": "_analyze_traceback",
-                        "line": 335
+                        "line": 336
                     },
                     {
                         "name": "wrapper",
-                        "line": 95
+                        "line": 96
                     }
                 ]
             },
             {
                 "path": "doxoade/shared_tools.py",
-                "size_bytes": 13168,
+                "size_bytes": 14583,
                 "created_at_utc": "2025-10-10T20:32:43.994665+00:00",
-                "modified_at_utc": "2025-11-10T05:57:09.152110+00:00",
+                "modified_at_utc": "2025-11-11T23:36:05.899230+00:00",
                 "encoding": "utf-8",
                 "functions": [
                     {
+                        "name": "_find_project_root",
+                        "line": 58
+                    },
+                    {
                         "name": "_log_execution",
-                        "line": 59
+                        "line": 80
                     },
                     {
                         "name": "_get_venv_python_executable",
-                        "line": 79
-                    },
-                    {
-                        "name": "_get_git_commit_hash",
-                        "line": 89
-                    },
-                    {
-                        "name": "_run_git_command",
                         "line": 100
                     },
                     {
+                        "name": "_get_git_commit_hash",
+                        "line": 110
+                    },
+                    {
+                        "name": "_run_git_command",
+                        "line": 121
+                    },
+                    {
                         "name": "_present_results",
-                        "line": 115
+                        "line": 136
                     },
                     {
                         "name": "_print_finding_details",
-                        "line": 138
+                        "line": 159
                     },
                     {
                         "name": "_print_summary",
-                        "line": 161
+                        "line": 182
                     },
                     {
                         "name": "_get_project_config",
-                        "line": 179
+                        "line": 200
                     },
                     {
                         "name": "_get_code_snippet",
-                        "line": 199
+                        "line": 220
+                    },
+                    {
+                        "name": "_sanitize_json_output",
+                        "line": 241
                     },
                     {
                         "name": "_get_complexity_rank",
-                        "line": 214
+                        "line": 251
                     },
                     {
                         "name": "_extract_function_parameters",
-                        "line": 222
+                        "line": 259
                     },
                     {
                         "name": "_find_returns_and_risks_in_function",
-                        "line": 230
+                        "line": 267
                     },
                     {
                         "name": "_analyze_function_flow",
-                        "line": 247
+                        "line": 284
                     },
                     {
                         "name": "analyze_file_structure",
-                        "line": 273
+                        "line": 310
                     },
                     {
                         "name": "__init__",
@@ -1480,17 +1523,17 @@
             },
             {
                 "path": "doxoade/__pycache__/doxoade.cpython-312.pyc",
-                "size_bytes": 24721,
-                "created_at_utc": "2025-11-10T04:18:57.236600+00:00",
-                "modified_at_utc": "2025-11-10T04:18:57.237601+00:00",
+                "size_bytes": 24818,
+                "created_at_utc": "2025-11-13T07:12:00.565005+00:00",
+                "modified_at_utc": "2025-11-13T07:12:00.565005+00:00",
                 "encoding": "Windows-1252"
             },
             {
                 "path": "doxoade/__pycache__/shared_tools.cpython-312.pyc",
-                "size_bytes": 20001,
-                "created_at_utc": "2025-11-10T06:01:09.665828+00:00",
-                "modified_at_utc": "2025-11-10T06:01:09.666754+00:00",
-                "encoding": "MacRoman"
+                "size_bytes": 21579,
+                "created_at_utc": "2025-11-11T23:58:33.943956+00:00",
+                "modified_at_utc": "2025-11-11T23:58:33.943956+00:00",
+                "encoding": "Windows-1252"
             },
             {
                 "path": "doxoade/commands/__init__.py",
@@ -1548,59 +1591,59 @@
             },
             {
                 "path": "doxoade/commands/canonize.py",
-                "size_bytes": 3970,
+                "size_bytes": 2009,
                 "created_at_utc": "2025-11-01T21:23:19.492003+00:00",
-                "modified_at_utc": "2025-11-10T04:02:27.802374+00:00",
+                "modified_at_utc": "2025-11-13T05:22:55.337589+00:00",
                 "encoding": "utf-8",
                 "functions": [
                     {
-                        "name": "_sanitize_output",
-                        "line": 15
-                    },
-                    {
                         "name": "canonize",
-                        "line": 23
+                        "line": 12
                     }
                 ]
             },
             {
                 "path": "doxoade/commands/check.py",
-                "size_bytes": 14750,
+                "size_bytes": 14338,
                 "created_at_utc": "2025-10-11T18:48:01.916991+00:00",
-                "modified_at_utc": "2025-11-10T06:00:24.927911+00:00",
+                "modified_at_utc": "2025-11-13T08:05:32.127342+00:00",
                 "encoding": "utf-8",
                 "functions": [
                     {
                         "name": "_collect_files_to_analyze",
-                        "line": 87
+                        "line": 89
                     },
                     {
                         "name": "_run_syntax_probe",
-                        "line": 99
+                        "line": 103
                     },
                     {
                         "name": "_run_pyflakes_probe",
-                        "line": 119
+                        "line": 123
                     },
                     {
                         "name": "_extract_imports",
-                        "line": 150
+                        "line": 154
                     },
                     {
                         "name": "_analyze_single_file_statically",
-                        "line": 164
+                        "line": 168
                     },
                     {
                         "name": "_run_import_probe",
-                        "line": 172
+                        "line": 176
                     },
                     {
                         "name": "_fix_unused_imports",
-                        "line": 196
+                        "line": 200
+                    },
+                    {
+                        "name": "run_check_logic",
+                        "line": 238
                     },
                     {
                         "name": "check",
-                        "line": 233
+                        "line": 292
                     }
                 ]
             },
@@ -1660,6 +1703,23 @@
                     {
                         "name": "_get_complexity_rank",
                         "line": 115
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/diff.py",
+                "size_bytes": 3054,
+                "created_at_utc": "2025-11-13T07:08:33.914696+00:00",
+                "modified_at_utc": "2025-11-13T08:01:00.247301+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "_present_diff_output",
+                        "line": 11
+                    },
+                    {
+                        "name": "diff",
+                        "line": 50
                     }
                 ]
             },
@@ -1807,9 +1867,9 @@
             },
             {
                 "path": "doxoade/commands/guicheck.py",
-                "size_bytes": 6115,
+                "size_bytes": 6116,
                 "created_at_utc": "2025-10-13T05:00:27.815171+00:00",
-                "modified_at_utc": "2025-11-10T21:47:58.900256+00:00",
+                "modified_at_utc": "2025-11-11T01:25:56.578519+00:00",
                 "encoding": "utf-8",
                 "functions": [
                     {
@@ -1935,9 +1995,9 @@
             },
             {
                 "path": "doxoade/commands/kvcheck.py",
-                "size_bytes": 3760,
+                "size_bytes": 3761,
                 "created_at_utc": "2025-10-13T13:50:02.796957+00:00",
-                "modified_at_utc": "2025-11-10T21:30:48.607275+00:00",
+                "modified_at_utc": "2025-11-11T01:26:27.595748+00:00",
                 "encoding": "utf-8",
                 "functions": [
                     {
@@ -1994,18 +2054,22 @@
             },
             {
                 "path": "doxoade/commands/regression_test.py",
-                "size_bytes": 4079,
+                "size_bytes": 8017,
                 "created_at_utc": "2025-11-01T22:56:07.311985+00:00",
-                "modified_at_utc": "2025-11-03T03:24:27.281130+00:00",
+                "modified_at_utc": "2025-11-13T06:45:30.105390+00:00",
                 "encoding": "utf-8",
                 "functions": [
                     {
-                        "name": "_sanitize_output",
-                        "line": 15
+                        "name": "_get_all_findings",
+                        "line": 22
+                    },
+                    {
+                        "name": "_present_regression_diff",
+                        "line": 33
                     },
                     {
                         "name": "regression_test",
-                        "line": 23
+                        "line": 104
                     }
                 ]
             },
@@ -2172,6 +2236,318 @@
                     {
                         "name": "_analyze_js_file",
                         "line": 100
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/Vers/20251013Aapicheck.py",
+                "size_bytes": 5335,
+                "created_at_utc": "2025-10-13T16:41:25.365099+00:00",
+                "modified_at_utc": "2025-10-13T14:21:08.124337+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "apicheck",
+                        "line": 25
+                    },
+                    {
+                        "name": "_analyze_api_calls",
+                        "line": 69
+                    },
+                    {
+                        "name": "_get_full_function_name",
+                        "line": 86
+                    },
+                    {
+                        "name": "_validate_call_against_contract",
+                        "line": 97
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/Vers/20251013Acheck.py",
+                "size_bytes": 7628,
+                "created_at_utc": "2025-10-13T16:41:25.380724+00:00",
+                "modified_at_utc": "2025-10-11T19:29:45.017153+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "check",
+                        "line": 28
+                    },
+                    {
+                        "name": "_check_environment",
+                        "line": 60
+                    },
+                    {
+                        "name": "_check_dependencies",
+                        "line": 69
+                    },
+                    {
+                        "name": "_check_source_code",
+                        "line": 95
+                    },
+                    {
+                        "name": "_analyze_regex_risks",
+                        "line": 136
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/Vers/20251013Adeepcheck.py",
+                "size_bytes": 5972,
+                "created_at_utc": "2025-10-13T16:41:25.396348+00:00",
+                "modified_at_utc": "2025-10-13T16:17:36.873545+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "deepcheck",
+                        "line": 17
+                    },
+                    {
+                        "name": "_analyze_function_flow",
+                        "line": 63
+                    },
+                    {
+                        "name": "_extract_function_parameters",
+                        "line": 90
+                    },
+                    {
+                        "name": "_find_returns_and_risks",
+                        "line": 98
+                    },
+                    {
+                        "name": "_get_complexity_rank",
+                        "line": 115
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/Vers/20251013Aencoding.py",
+                "size_bytes": 4482,
+                "created_at_utc": "2025-10-13T16:41:25.411971+00:00",
+                "modified_at_utc": "2025-10-13T14:05:50.389262+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "encoding",
+                        "line": 18
+                    },
+                    {
+                        "name": "_change_file_encoding",
+                        "line": 73
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/Vers/20251013Agit_clean.py",
+                "size_bytes": 3569,
+                "created_at_utc": "2025-10-13T16:41:25.427596+00:00",
+                "modified_at_utc": "2025-10-13T16:36:44.766951+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "git_clean",
+                        "line": 19
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/Vers/20251013Aguicheck.py",
+                "size_bytes": 8642,
+                "created_at_utc": "2025-10-13T16:41:25.427596+00:00",
+                "modified_at_utc": "2025-10-13T05:00:28.143281+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "guicheck",
+                        "line": 28
+                    },
+                    {
+                        "name": "_check_gui_files",
+                        "line": 47
+                    },
+                    {
+                        "name": "_find_py_files_to_check",
+                        "line": 64
+                    },
+                    {
+                        "name": "_analyze_single_gui_file",
+                        "line": 79
+                    },
+                    {
+                        "name": "_analyze_kivy_risks",
+                        "line": 99
+                    },
+                    {
+                        "name": "_analyze_tkinter_layout",
+                        "line": 126
+                    },
+                    {
+                        "name": "_build_widget_parent_map",
+                        "line": 133
+                    },
+                    {
+                        "name": "_collect_layout_data",
+                        "line": 145
+                    },
+                    {
+                        "name": "_perform_layout_analysis",
+                        "line": 166
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/Vers/20251013Ahealth.py",
+                "size_bytes": 8871,
+                "created_at_utc": "2025-10-13T16:41:25.443221+00:00",
+                "modified_at_utc": "2025-10-11T18:39:03.246200+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "health",
+                        "line": 27
+                    },
+                    {
+                        "name": "_handle_missing_venv",
+                        "line": 49
+                    },
+                    {
+                        "name": "_run_all_analyses",
+                        "line": 64
+                    },
+                    {
+                        "name": "_handle_dependency_errors",
+                        "line": 83
+                    },
+                    {
+                        "name": "_analyze_complexity",
+                        "line": 98
+                    },
+                    {
+                        "name": "_analyze_test_coverage",
+                        "line": 131
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/Vers/20251013Akvcheck.py",
+                "size_bytes": 3900,
+                "created_at_utc": "2025-10-13T16:41:25.458845+00:00",
+                "modified_at_utc": "2025-10-13T13:50:03.218775+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "kvcheck",
+                        "line": 24
+                    },
+                    {
+                        "name": "_analyze_kv_file",
+                        "line": 55
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/Vers/20251013Aoptimize.py",
+                "size_bytes": 6975,
+                "created_at_utc": "2025-10-13T16:41:25.474470+00:00",
+                "modified_at_utc": "2025-10-10T21:55:23.177098+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "optimize",
+                        "line": 21
+                    },
+                    {
+                        "name": "_find_unused_packages",
+                        "line": 66
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/Vers/20251013Asave.py",
+                "size_bytes": 3913,
+                "created_at_utc": "2025-10-13T16:41:25.474470+00:00",
+                "modified_at_utc": "2025-10-13T16:23:30.198517+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "save",
+                        "line": 22
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/Vers/20251013Awebcheck.py",
+                "size_bytes": 5216,
+                "created_at_utc": "2025-10-13T16:41:25.349477+00:00",
+                "modified_at_utc": "2025-10-13T13:45:39.241137+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "webcheck",
+                        "line": 26
+                    },
+                    {
+                        "name": "_check_web_assets",
+                        "line": 50
+                    },
+                    {
+                        "name": "_analyze_html_file",
+                        "line": 70
+                    },
+                    {
+                        "name": "_analyze_css_file",
+                        "line": 86
+                    },
+                    {
+                        "name": "_analyze_js_file",
+                        "line": 103
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/Vers/20251013GuicheckFun\u00e7\u00f5esBKP.py",
+                "size_bytes": 9541,
+                "created_at_utc": "2025-10-13T05:03:20.685933+00:00",
+                "modified_at_utc": "2025-10-13T05:08:01.502175+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "guicheck",
+                        "line": 20
+                    },
+                    {
+                        "name": "_check_gui_files",
+                        "line": 38
+                    },
+                    {
+                        "name": "_find_py_files_to_check",
+                        "line": 56
+                    },
+                    {
+                        "name": "_analyze_single_gui_file",
+                        "line": 72
+                    },
+                    {
+                        "name": "_analyze_kivy_risks",
+                        "line": 94
+                    },
+                    {
+                        "name": "_analyze_tkinter_layout",
+                        "line": 128
+                    },
+                    {
+                        "name": "_build_widget_parent_map",
+                        "line": 136
+                    },
+                    {
+                        "name": "_collect_layout_data",
+                        "line": 150
+                    },
+                    {
+                        "name": "_perform_layout_analysis",
+                        "line": 173
                     }
                 ]
             },
@@ -2868,314 +3244,115 @@
                 ]
             },
             {
-                "path": "doxoade/commands/Vers/GuicheckFun\u00e7\u00f5esBKP.py",
-                "size_bytes": 9541,
-                "created_at_utc": "2025-10-13T05:03:20.685933+00:00",
-                "modified_at_utc": "2025-10-13T05:08:01.502175+00:00",
+                "path": "doxoade/commands/Vers/20251111Ccheck.py",
+                "size_bytes": 14171,
+                "created_at_utc": "2025-11-12T01:59:13.229389+00:00",
+                "modified_at_utc": "2025-11-12T00:28:46.414226+00:00",
                 "encoding": "utf-8",
                 "functions": [
                     {
-                        "name": "guicheck",
+                        "name": "_collect_files_to_analyze",
+                        "line": 89
+                    },
+                    {
+                        "name": "_run_syntax_probe",
+                        "line": 109
+                    },
+                    {
+                        "name": "_run_pyflakes_probe",
+                        "line": 129
+                    },
+                    {
+                        "name": "_extract_imports",
+                        "line": 160
+                    },
+                    {
+                        "name": "_analyze_single_file_statically",
+                        "line": 174
+                    },
+                    {
+                        "name": "_run_import_probe",
+                        "line": 182
+                    },
+                    {
+                        "name": "_fix_unused_imports",
+                        "line": 206
+                    },
+                    {
+                        "name": "run_check_logic",
+                        "line": 244
+                    },
+                    {
+                        "name": "check",
+                        "line": 292
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/Vers/20251111Cregression_test.py",
+                "size_bytes": 2602,
+                "created_at_utc": "2025-11-12T01:59:13.245014+00:00",
+                "modified_at_utc": "2025-11-12T01:29:22.942004+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "regression_test",
+                        "line": 13
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/Vers/20251113Aregression_test.py",
+                "size_bytes": 7034,
+                "created_at_utc": "2025-11-13T04:46:33.866206+00:00",
+                "modified_at_utc": "2025-11-13T04:35:57.243174+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "_get_all_findings",
                         "line": 20
                     },
                     {
-                        "name": "_check_gui_files",
-                        "line": 38
+                        "name": "_present_regression_diff",
+                        "line": 32
                     },
                     {
-                        "name": "_find_py_files_to_check",
-                        "line": 56
-                    },
-                    {
-                        "name": "_analyze_single_gui_file",
-                        "line": 72
-                    },
-                    {
-                        "name": "_analyze_kivy_risks",
-                        "line": 94
-                    },
-                    {
-                        "name": "_analyze_tkinter_layout",
-                        "line": 128
-                    },
-                    {
-                        "name": "_build_widget_parent_map",
-                        "line": 136
-                    },
-                    {
-                        "name": "_collect_layout_data",
-                        "line": 150
-                    },
-                    {
-                        "name": "_perform_layout_analysis",
-                        "line": 173
+                        "name": "regression_test",
+                        "line": 101
                     }
                 ]
             },
             {
-                "path": "doxoade/commands/Vers/apicheck20251013A.py",
-                "size_bytes": 5335,
-                "created_at_utc": "2025-10-13T16:41:25.365099+00:00",
-                "modified_at_utc": "2025-10-13T14:21:08.124337+00:00",
+                "path": "doxoade/commands/Vers/20251113Bcanonize.py",
+                "size_bytes": 2009,
+                "created_at_utc": "2025-11-13T06:41:20.973258+00:00",
+                "modified_at_utc": "2025-11-13T05:22:55.337589+00:00",
                 "encoding": "utf-8",
                 "functions": [
                     {
-                        "name": "apicheck",
-                        "line": 25
-                    },
-                    {
-                        "name": "_analyze_api_calls",
-                        "line": 69
-                    },
-                    {
-                        "name": "_get_full_function_name",
-                        "line": 86
-                    },
-                    {
-                        "name": "_validate_call_against_contract",
-                        "line": 97
+                        "name": "canonize",
+                        "line": 12
                     }
                 ]
             },
             {
-                "path": "doxoade/commands/Vers/check20251013A.py",
-                "size_bytes": 7628,
-                "created_at_utc": "2025-10-13T16:41:25.380724+00:00",
-                "modified_at_utc": "2025-10-11T19:29:45.017153+00:00",
+                "path": "doxoade/commands/Vers/20251113Bregression_test.py",
+                "size_bytes": 8017,
+                "created_at_utc": "2025-11-13T06:40:45.764708+00:00",
+                "modified_at_utc": "2025-11-13T06:25:41.941484+00:00",
                 "encoding": "utf-8",
                 "functions": [
                     {
-                        "name": "check",
-                        "line": 28
-                    },
-                    {
-                        "name": "_check_environment",
-                        "line": 60
-                    },
-                    {
-                        "name": "_check_dependencies",
-                        "line": 69
-                    },
-                    {
-                        "name": "_check_source_code",
-                        "line": 95
-                    },
-                    {
-                        "name": "_analyze_regex_risks",
-                        "line": 136
-                    }
-                ]
-            },
-            {
-                "path": "doxoade/commands/Vers/deepcheck20251013A.py",
-                "size_bytes": 5972,
-                "created_at_utc": "2025-10-13T16:41:25.396348+00:00",
-                "modified_at_utc": "2025-10-13T16:17:36.873545+00:00",
-                "encoding": "utf-8",
-                "functions": [
-                    {
-                        "name": "deepcheck",
-                        "line": 17
-                    },
-                    {
-                        "name": "_analyze_function_flow",
-                        "line": 63
-                    },
-                    {
-                        "name": "_extract_function_parameters",
-                        "line": 90
-                    },
-                    {
-                        "name": "_find_returns_and_risks",
-                        "line": 98
-                    },
-                    {
-                        "name": "_get_complexity_rank",
-                        "line": 115
-                    }
-                ]
-            },
-            {
-                "path": "doxoade/commands/Vers/encoding20251013A.py",
-                "size_bytes": 4482,
-                "created_at_utc": "2025-10-13T16:41:25.411971+00:00",
-                "modified_at_utc": "2025-10-13T14:05:50.389262+00:00",
-                "encoding": "utf-8",
-                "functions": [
-                    {
-                        "name": "encoding",
-                        "line": 18
-                    },
-                    {
-                        "name": "_change_file_encoding",
-                        "line": 73
-                    }
-                ]
-            },
-            {
-                "path": "doxoade/commands/Vers/git_clean20251013A.py",
-                "size_bytes": 3569,
-                "created_at_utc": "2025-10-13T16:41:25.427596+00:00",
-                "modified_at_utc": "2025-10-13T16:36:44.766951+00:00",
-                "encoding": "utf-8",
-                "functions": [
-                    {
-                        "name": "git_clean",
-                        "line": 19
-                    }
-                ]
-            },
-            {
-                "path": "doxoade/commands/Vers/guicheck20251013A.py",
-                "size_bytes": 8642,
-                "created_at_utc": "2025-10-13T16:41:25.427596+00:00",
-                "modified_at_utc": "2025-10-13T05:00:28.143281+00:00",
-                "encoding": "utf-8",
-                "functions": [
-                    {
-                        "name": "guicheck",
-                        "line": 28
-                    },
-                    {
-                        "name": "_check_gui_files",
-                        "line": 47
-                    },
-                    {
-                        "name": "_find_py_files_to_check",
-                        "line": 64
-                    },
-                    {
-                        "name": "_analyze_single_gui_file",
-                        "line": 79
-                    },
-                    {
-                        "name": "_analyze_kivy_risks",
-                        "line": 99
-                    },
-                    {
-                        "name": "_analyze_tkinter_layout",
-                        "line": 126
-                    },
-                    {
-                        "name": "_build_widget_parent_map",
-                        "line": 133
-                    },
-                    {
-                        "name": "_collect_layout_data",
-                        "line": 145
-                    },
-                    {
-                        "name": "_perform_layout_analysis",
-                        "line": 166
-                    }
-                ]
-            },
-            {
-                "path": "doxoade/commands/Vers/health20251013A.py",
-                "size_bytes": 8871,
-                "created_at_utc": "2025-10-13T16:41:25.443221+00:00",
-                "modified_at_utc": "2025-10-11T18:39:03.246200+00:00",
-                "encoding": "utf-8",
-                "functions": [
-                    {
-                        "name": "health",
-                        "line": 27
-                    },
-                    {
-                        "name": "_handle_missing_venv",
-                        "line": 49
-                    },
-                    {
-                        "name": "_run_all_analyses",
-                        "line": 64
-                    },
-                    {
-                        "name": "_handle_dependency_errors",
-                        "line": 83
-                    },
-                    {
-                        "name": "_analyze_complexity",
-                        "line": 98
-                    },
-                    {
-                        "name": "_analyze_test_coverage",
-                        "line": 131
-                    }
-                ]
-            },
-            {
-                "path": "doxoade/commands/Vers/kvcheck20251013A.py",
-                "size_bytes": 3900,
-                "created_at_utc": "2025-10-13T16:41:25.458845+00:00",
-                "modified_at_utc": "2025-10-13T13:50:03.218775+00:00",
-                "encoding": "utf-8",
-                "functions": [
-                    {
-                        "name": "kvcheck",
-                        "line": 24
-                    },
-                    {
-                        "name": "_analyze_kv_file",
-                        "line": 55
-                    }
-                ]
-            },
-            {
-                "path": "doxoade/commands/Vers/optimize20251013A.py",
-                "size_bytes": 6975,
-                "created_at_utc": "2025-10-13T16:41:25.474470+00:00",
-                "modified_at_utc": "2025-10-10T21:55:23.177098+00:00",
-                "encoding": "utf-8",
-                "functions": [
-                    {
-                        "name": "optimize",
-                        "line": 21
-                    },
-                    {
-                        "name": "_find_unused_packages",
-                        "line": 66
-                    }
-                ]
-            },
-            {
-                "path": "doxoade/commands/Vers/save20251013A.py",
-                "size_bytes": 3913,
-                "created_at_utc": "2025-10-13T16:41:25.474470+00:00",
-                "modified_at_utc": "2025-10-13T16:23:30.198517+00:00",
-                "encoding": "utf-8",
-                "functions": [
-                    {
-                        "name": "save",
+                        "name": "_get_all_findings",
                         "line": 22
-                    }
-                ]
-            },
-            {
-                "path": "doxoade/commands/Vers/webcheck20251013A.py",
-                "size_bytes": 5216,
-                "created_at_utc": "2025-10-13T16:41:25.349477+00:00",
-                "modified_at_utc": "2025-10-13T13:45:39.241137+00:00",
-                "encoding": "utf-8",
-                "functions": [
-                    {
-                        "name": "webcheck",
-                        "line": 26
                     },
                     {
-                        "name": "_check_web_assets",
-                        "line": 50
+                        "name": "_present_regression_diff",
+                        "line": 33
                     },
                     {
-                        "name": "_analyze_html_file",
-                        "line": 70
-                    },
-                    {
-                        "name": "_analyze_css_file",
-                        "line": 86
-                    },
-                    {
-                        "name": "_analyze_js_file",
-                        "line": 103
+                        "name": "regression_test",
+                        "line": 104
                     }
                 ]
             },
@@ -3216,16 +3393,16 @@
             },
             {
                 "path": "doxoade/commands/__pycache__/canonize.cpython-312.pyc",
-                "size_bytes": 5312,
-                "created_at_utc": "2025-11-10T04:05:30.066766+00:00",
-                "modified_at_utc": "2025-11-10T04:05:30.066766+00:00",
+                "size_bytes": 3662,
+                "created_at_utc": "2025-11-13T05:23:39.247876+00:00",
+                "modified_at_utc": "2025-11-13T05:23:39.247876+00:00",
                 "encoding": "Windows-1254"
             },
             {
                 "path": "doxoade/commands/__pycache__/check.cpython-312.pyc",
-                "size_bytes": 19100,
-                "created_at_utc": "2025-11-10T22:00:49.894133+00:00",
-                "modified_at_utc": "2025-11-10T22:00:49.894133+00:00",
+                "size_bytes": 19379,
+                "created_at_utc": "2025-11-13T08:05:40.141172+00:00",
+                "modified_at_utc": "2025-11-13T08:05:40.141172+00:00",
                 "encoding": "Windows-1252"
             },
             {
@@ -3248,6 +3425,13 @@
                 "created_at_utc": "2025-11-05T03:26:19.583852+00:00",
                 "modified_at_utc": "2025-11-05T03:26:19.583852+00:00",
                 "encoding": "Windows-1254"
+            },
+            {
+                "path": "doxoade/commands/__pycache__/diff.cpython-312.pyc",
+                "size_bytes": 4596,
+                "created_at_utc": "2025-11-13T08:01:08.872333+00:00",
+                "modified_at_utc": "2025-11-13T08:01:08.887957+00:00",
+                "encoding": "Windows-1252"
             },
             {
                 "path": "doxoade/commands/__pycache__/doctor.cpython-312.pyc",
@@ -3293,10 +3477,10 @@
             },
             {
                 "path": "doxoade/commands/__pycache__/guicheck.cpython-312.pyc",
-                "size_bytes": 8451,
-                "created_at_utc": "2025-11-10T21:50:02.441796+00:00",
-                "modified_at_utc": "2025-11-10T21:50:02.443795+00:00",
-                "encoding": "Windows-1252"
+                "size_bytes": 8413,
+                "created_at_utc": "2025-11-11T01:27:23.255186+00:00",
+                "modified_at_utc": "2025-11-11T01:27:23.255186+00:00",
+                "encoding": "Windows-1254"
             },
             {
                 "path": "doxoade/commands/__pycache__/health.cpython-312.pyc",
@@ -3321,10 +3505,10 @@
             },
             {
                 "path": "doxoade/commands/__pycache__/kvcheck.cpython-312.pyc",
-                "size_bytes": 4668,
-                "created_at_utc": "2025-11-10T21:31:37.978542+00:00",
-                "modified_at_utc": "2025-11-10T21:31:37.978542+00:00",
-                "encoding": "Windows-1252"
+                "size_bytes": 4630,
+                "created_at_utc": "2025-11-11T01:27:23.239563+00:00",
+                "modified_at_utc": "2025-11-11T01:27:23.239563+00:00",
+                "encoding": "Windows-1254"
             },
             {
                 "path": "doxoade/commands/__pycache__/optimize.cpython-312.pyc",
@@ -3342,17 +3526,17 @@
             },
             {
                 "path": "doxoade/commands/__pycache__/regression_test.cpython-312-pytest-8.4.2.pyc",
-                "size_bytes": 6472,
-                "created_at_utc": "2025-11-05T03:26:18.698939+00:00",
-                "modified_at_utc": "2025-11-05T03:26:18.699940+00:00",
+                "size_bytes": 8444,
+                "created_at_utc": "2025-11-12T21:32:25.911228+00:00",
+                "modified_at_utc": "2025-11-12T21:32:25.911228+00:00",
                 "encoding": "Windows-1254"
             },
             {
                 "path": "doxoade/commands/__pycache__/regression_test.cpython-312.pyc",
-                "size_bytes": 6359,
-                "created_at_utc": "2025-11-05T21:56:27.158897+00:00",
-                "modified_at_utc": "2025-11-05T21:56:27.158897+00:00",
-                "encoding": "Windows-1254"
+                "size_bytes": 10632,
+                "created_at_utc": "2025-11-13T06:46:22.799653+00:00",
+                "modified_at_utc": "2025-11-13T06:46:22.799653+00:00",
+                "encoding": "Windows-1252"
             },
             {
                 "path": "doxoade/commands/__pycache__/run.cpython-312.pyc",
@@ -3446,11 +3630,83 @@
                 "encoding": "ascii"
             },
             {
+                "path": "pytest_temp_dir/test_check_finds_syntax_error0/broken_code.py",
+                "size_bytes": 28,
+                "created_at_utc": "2025-11-10T00:29:53.591769+00:00",
+                "modified_at_utc": "2025-11-10T00:29:53.591769+00:00",
+                "encoding": "ascii",
+                "functions": [
+                    {
+                        "name": "my_function",
+                        "line": 1
+                    }
+                ]
+            },
+            {
+                "path": "pytest_temp_dir/test_check_finds_syntax_error0/pyproject.toml",
+                "size_bytes": 0,
+                "created_at_utc": "2025-11-10T00:29:53.591769+00:00",
+                "modified_at_utc": "2025-11-10T00:29:53.591769+00:00",
+                "encoding": "empty"
+            },
+            {
+                "path": "pytest_temp_dir/test_check_finds_unresolved_im0/main.py",
+                "size_bytes": 28,
+                "created_at_utc": "2025-11-10T00:30:28.041432+00:00",
+                "modified_at_utc": "2025-11-10T00:30:28.041432+00:00",
+                "encoding": "ascii",
+                "functions": []
+            },
+            {
+                "path": "pytest_temp_dir/test_check_finds_unresolved_im0/pyproject.toml",
+                "size_bytes": 0,
+                "created_at_utc": "2025-11-10T00:30:28.041432+00:00",
+                "modified_at_utc": "2025-11-10T00:30:28.041432+00:00",
+                "encoding": "empty"
+            },
+            {
+                "path": "pytest_temp_dir/test_check_finds_unused_import0/main.py",
+                "size_bytes": 43,
+                "created_at_utc": "2025-11-10T00:29:53.669766+00:00",
+                "modified_at_utc": "2025-11-10T00:29:53.669766+00:00",
+                "encoding": "ascii",
+                "functions": []
+            },
+            {
+                "path": "pytest_temp_dir/test_check_finds_unused_import0/pyproject.toml",
+                "size_bytes": 0,
+                "created_at_utc": "2025-11-10T00:29:53.669766+00:00",
+                "modified_at_utc": "2025-11-10T00:29:53.669766+00:00",
+                "encoding": "empty"
+            },
+            {
+                "path": "pytest_temp_dir/test_check_passes_on_clean_cod0/main.py",
+                "size_bytes": 20,
+                "created_at_utc": "2025-11-10T00:29:52.638567+00:00",
+                "modified_at_utc": "2025-11-10T00:29:52.654193+00:00",
+                "encoding": "ascii",
+                "functions": []
+            },
+            {
+                "path": "pytest_temp_dir/test_check_passes_on_clean_cod0/pyproject.toml",
+                "size_bytes": 0,
+                "created_at_utc": "2025-11-10T00:29:52.654193+00:00",
+                "modified_at_utc": "2025-11-10T00:29:52.654193+00:00",
+                "encoding": "empty"
+            },
+            {
                 "path": "regression_tests/canon.toml",
-                "size_bytes": 171,
+                "size_bytes": 245,
                 "created_at_utc": "2025-11-01T21:45:32.363361+00:00",
-                "modified_at_utc": "2025-11-10T03:43:19.931418+00:00",
-                "encoding": "MacRoman"
+                "modified_at_utc": "2025-11-11T03:12:05.367524+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": "regression_tests/canon/check_finds_syntax_error.json",
+                "size_bytes": 1419,
+                "created_at_utc": "2025-11-11T02:22:56.990047+00:00",
+                "modified_at_utc": "2025-11-12T21:31:17.998215+00:00",
+                "encoding": "utf-8"
             },
             {
                 "path": "regression_tests/canon/check_finds_syntax_error.txt",
@@ -3460,10 +3716,24 @@
                 "encoding": "utf-8"
             },
             {
+                "path": "regression_tests/canon/check_healthy_project.json",
+                "size_bytes": 702,
+                "created_at_utc": "2025-11-11T03:04:37.264091+00:00",
+                "modified_at_utc": "2025-11-12T21:31:19.201276+00:00",
+                "encoding": "ascii"
+            },
+            {
+                "path": "regression_tests/canon/project_snapshot.json",
+                "size_bytes": 232831,
+                "created_at_utc": "2025-11-12T20:23:22.950921+00:00",
+                "modified_at_utc": "2025-11-13T06:49:53.043823+00:00",
+                "encoding": "ascii"
+            },
+            {
                 "path": "regression_tests/fixtures/project_healthy/main.py",
                 "size_bytes": 92,
                 "created_at_utc": "2025-11-04T01:26:54.995214+00:00",
-                "modified_at_utc": "2025-11-04T01:26:55.338951+00:00",
+                "modified_at_utc": "2025-11-12T21:50:43.812164+00:00",
                 "encoding": "utf-8",
                 "functions": [
                     {
@@ -3473,12 +3743,26 @@
                 ]
             },
             {
+                "path": "regression_tests/fixtures/project_healthy/pyproject.toml",
+                "size_bytes": 32,
+                "created_at_utc": "2025-11-11T20:23:21.441730+00:00",
+                "modified_at_utc": "2025-11-11T20:23:21.769540+00:00",
+                "encoding": "ascii"
+            },
+            {
                 "path": "regression_tests/fixtures/project_syntax_error/main.py",
                 "size_bytes": 42,
                 "created_at_utc": "2025-11-01T21:45:32.361131+00:00",
-                "modified_at_utc": "2025-11-10T03:43:19.931418+00:00",
+                "modified_at_utc": "2025-11-11T00:14:11.503506+00:00",
                 "encoding": "ascii",
                 "functions": []
+            },
+            {
+                "path": "regression_tests/fixtures/project_syntax_error/pyproject.toml",
+                "size_bytes": 126,
+                "created_at_utc": "2025-11-11T20:23:52.115958+00:00",
+                "modified_at_utc": "2025-11-11T21:02:33.188512+00:00",
+                "encoding": "MacRoman"
             },
             {
                 "path": "regression_tests/fixtures/project_syntax_error/requirements.txt",
@@ -3489,9 +3773,9 @@
             },
             {
                 "path": "regression_tests/fixtures/project_syntax_error/regression_tests/canon.toml",
-                "size_bytes": 113,
+                "size_bytes": 101,
                 "created_at_utc": "2025-11-03T03:55:02.518335+00:00",
-                "modified_at_utc": "2025-11-03T04:02:55.043075+00:00",
+                "modified_at_utc": "2025-11-11T02:51:33.360023+00:00",
                 "encoding": "ascii"
             },
             {
@@ -3535,6 +3819,19 @@
                 "modified_at_utc": "2025-10-25T20:13:12.942612+00:00",
                 "encoding": "utf-8",
                 "functions": []
+            },
+            {
+                "path": "tests/test_canonize_command.py",
+                "size_bytes": 2050,
+                "created_at_utc": "2025-11-12T20:09:43.006495+00:00",
+                "modified_at_utc": "2025-11-12T20:46:34.921774+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "test_canonize_all_creates_project_snapshot",
+                        "line": 10
+                    }
+                ]
             },
             {
                 "path": "tests/test_check_command.py",
@@ -3766,6 +4063,19 @@
                 ]
             },
             {
+                "path": "tests/test_regression_logic.py",
+                "size_bytes": 2129,
+                "created_at_utc": "2025-11-11T22:48:57.209903+00:00",
+                "modified_at_utc": "2025-11-11T22:48:57.584761+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "test_regression_detection_in_isolation",
+                        "line": 12
+                    }
+                ]
+            },
+            {
                 "path": "tests/test_save_command.py",
                 "size_bytes": 4299,
                 "created_at_utc": "2025-10-26T01:22:38.326235+00:00",
@@ -3848,6 +4158,13 @@
                 "size_bytes": 9468,
                 "created_at_utc": "2025-11-10T05:26:43.479485+00:00",
                 "modified_at_utc": "2025-11-10T05:26:43.493142+00:00",
+                "encoding": "Windows-1252"
+            },
+            {
+                "path": "tests/__pycache__/test_canonize_command.cpython-312-pytest-8.4.2.pyc",
+                "size_bytes": 6632,
+                "created_at_utc": "2025-11-12T20:41:43.686424+00:00",
+                "modified_at_utc": "2025-11-12T20:41:43.702046+00:00",
                 "encoding": "Windows-1252"
             },
             {
@@ -3942,6 +4259,13 @@
                 "encoding": "Windows-1252"
             },
             {
+                "path": "tests/__pycache__/test_regression_logic.cpython-312-pytest-8.4.2.pyc",
+                "size_bytes": 4550,
+                "created_at_utc": "2025-11-11T22:49:51.197534+00:00",
+                "modified_at_utc": "2025-11-11T22:49:51.197534+00:00",
+                "encoding": "Windows-1254"
+            },
+            {
                 "path": "tests/__pycache__/test_save_command.cpython-312-pytest-8.4.2.pyc",
                 "size_bytes": 10665,
                 "created_at_utc": "2025-11-06T02:44:33.385856+00:00",
@@ -3961,6 +4285,21 @@
                 "created_at_utc": "2025-11-06T02:44:34.112211+00:00",
                 "modified_at_utc": "2025-11-06T02:44:34.117211+00:00",
                 "encoding": "Windows-1252"
+            },
+            {
+                "path": "tmp/test_canonize_all_creates_proj0/main.py",
+                "size_bytes": 9,
+                "created_at_utc": "2025-11-12T20:18:27.240243+00:00",
+                "modified_at_utc": "2025-11-12T20:18:27.243249+00:00",
+                "encoding": "ascii",
+                "functions": []
+            },
+            {
+                "path": "tmp/test_canonize_all_creates_proj0/regression_tests/canon/project_snapshot.json",
+                "size_bytes": 434,
+                "created_at_utc": "2025-11-12T20:18:32.422190+00:00",
+                "modified_at_utc": "2025-11-12T20:18:32.452262+00:00",
+                "encoding": "utf-8"
             }
         ]
     }
