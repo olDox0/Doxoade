@@ -40,7 +40,5 @@ Vers/
 *.mak
 *.log
 
-# --- Ícones (Opcional, mas geralmente incluído) ---
-# Se o seu ícone for um ativo do projeto, você pode remover a linha abaixo.
-# Se for algo que o usuário pode substituir, é bom ignorar.
-# *.ico
+# Doxoade cache files
+.doxoade_cache/
