@@ -8,6 +8,7 @@ import subprocess
 import click
 import sqlite3
 import ast
+from collections import Counter
 from pathlib import Path
 from colorama import Fore, Style
 from datetime import datetime, timezone
@@ -25,12 +26,18 @@ class ExecutionLogger:
             'findings': []
         }
 
-    def add_finding(self, severity, message, file=None, line=None, details=None, snippet=None):
+    def add_finding(self, severity, category, message, file=None, line=None, details=None, snippet=None):
         severity = severity.upper()
+        category = category.upper() # Padroniza a categoria para maiúsculas
         unique_str = f"{file}:{line}:{message}"
         finding_hash = hashlib.md5(unique_str.encode()).hexdigest()
         
-        finding = {'severity': severity, 'message': message, 'hash': finding_hash}
+        finding = {
+            'severity': severity,
+            'category': category, # <-- A GRANDE MUDANÇA ESTÁ AQUI
+            'message': message,
+            'hash': finding_hash
+        }
         if file: finding['file'] = os.path.relpath(file, self.path) if self.path != '.' else file
         if line: finding['line'] = line
         if details: finding['details'] = details
@@ -50,7 +57,9 @@ class ExecutionLogger:
         execution_time_ms = (time.monotonic() - self.start_time) * 1000
         if exc_type and not isinstance(exc_val, SystemExit):
             self.add_finding(
-                'CRITICAL', 'A Doxoade encontrou um erro fatal interno.',
+                'CRITICAL',
+                'INTERNAL-ERROR',  # <-- Adiciona a categoria para o erro fatal
+                'A Doxoade encontrou um erro fatal interno.',
                 details=f"{exc_type.__name__}: {exc_val}",
             )
         _log_execution(self.command_name, self.path, self.results, self.arguments, execution_time_ms)
@@ -158,9 +167,10 @@ def _present_results(format, results, ignored_hashes=None):
 
 def _print_finding_details(finding):
     severity = finding.get('severity', 'INFO').upper()
+    category = (finding.get('category') or 'UNCATEGORIZED').upper()
     color_map = {'CRITICAL': Fore.MAGENTA, 'ERROR': Fore.RED, 'WARNING': Fore.YELLOW, 'INFO': Fore.CYAN}
     color = color_map.get(severity, Fore.WHITE)
-    tag = f"[{severity}]"
+    tag = f"[{severity}][{category}]"
     click.echo(color + f"{tag} {finding.get('message', 'Mensagem não encontrada.')}")
     if finding.get('file'):
         location = f"   > Em '{finding.get('file')}'"
@@ -181,19 +191,36 @@ def _print_finding_details(finding):
 
 def _print_summary(results, ignored_count):
     summary = results.get('summary', {})
+    findings = results.get('findings', [])
+    
+    # Filtra apenas os findings que não foram ignorados
+    display_findings = [f for f in findings if f.get('hash') not in (ignored_count or set())]
+    
     critical_count = summary.get('critical', 0)
     error_count = summary.get('errors', 0)
     warning_count = summary.get('warnings', 0)
+    
     click.echo(Style.BRIGHT + "\n" + "-"*40)
-    if critical_count == 0 and error_count == 0 and warning_count == 0:
+    
+    if not display_findings:
         click.echo(Fore.GREEN + "[OK] Análise concluída. Nenhum problema encontrado!")
         return
+        
+    # --- NOVA LÓGICA DE RESUMO POR CATEGORIA ---
+    category_counts = Counter(f['category'] for f in display_findings)
+    if category_counts:
+        click.echo(Style.BRIGHT + "Resumo por Categoria:")
+        for category, count in sorted(category_counts.items()):
+            click.echo(f"  - {category}: {count}")
+    # --- FIM DA NOVA LÓGICA ---
+
     summary_parts = []
-    if critical_count > 0: summary_parts.append(f"{Fore.MAGENTA}{critical_count} Erro(s) Crítico(s){Style.RESET_ALL}")
+    if critical_count > 0: summary_parts.append(f"{Fore.MAGENTA}{critical_count} Crítico(s){Style.RESET_ALL}")
     if error_count > 0: summary_parts.append(f"{Fore.RED}{error_count} Erro(s){Style.RESET_ALL}")
     if warning_count > 0: summary_parts.append(f"{Fore.YELLOW}{warning_count} Aviso(s){Style.RESET_ALL}")
+
     summary_text = f"[FIM] Análise concluída: {', '.join(summary_parts)}"
-    if ignored_count > 0: summary_text += Style.DIM + f" ({ignored_count} ignorado(s))"
+    if ignored_count and ignored_count > 0: summary_text += Style.DIM + f" ({ignored_count} ignorado(s))"
     summary_text += "."
     click.echo(summary_text)
 

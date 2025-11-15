@@ -67,9 +67,9 @@ def _run_syntax_probe(file_path, python_executable, debug=False):
         if result.returncode != 0:
             line_match = re.search(r':(\d+):', result.stderr)
             line_num = int(line_match.group(1)) if line_match else 1
-            findings.append({'severity': 'CRITICAL', 'message': f"Erro de sintaxe impede a análise: {result.stderr.strip()}", 'file': file_path, 'line': line_num})
+            findings.append({'severity': 'CRITICAL', 'category': 'SYNTAX', 'message': f"Erro de sintaxe impede a análise: {result.stderr.strip()}", 'file': file_path, 'line': line_num})
     except Exception as e:
-        findings.append({'severity': 'CRITICAL', 'message': f"Falha catastrófica ao invocar a sonda de sintaxe: {e}", 'file': file_path})
+        findings.append({'severity': 'CRITICAL', 'category': 'SYNTAX', 'message': f"Falha catastrófica ao invocar a sonda de sintaxe: {e}", 'file': file_path, 'line': line_num})
     return findings
 
 def _run_pyflakes_probe(file_path, python_executable, debug=False):
@@ -100,19 +100,29 @@ def _run_pyflakes_probe(file_path, python_executable, debug=False):
             match = re.match(r'(.+?):(\d+):(\d+):\s(.+)', line_error)
             if match:
                 _, line_num, _, message_text = match.groups()
-                
-                # Define o padrão como WARNING
-                severity = 'WARNING'
-                
-                # Promove para ERROR se for sobre código não utilizado/redefinido
+    
+                # --- LÓGICA DE CLASSIFICAÇÃO APRIMORADA ---
                 if 'imported but unused' in message_text or 'redefinition' in message_text:
                     severity = 'ERROR'
-                
-                # Promove para CRITICAL se for um erro que quebraria a execução
-                if 'undefined name' in message_text or 'takes 0 positional arguments' in message_text:
+                    category = 'DEADCODE'
+                elif 'undefined name' in message_text:
                     severity = 'CRITICAL'
-                    
-                findings.append({'severity': severity, 'message': message_text, 'file': file_path, 'line': int(line_num)})
+                    category = 'RUNTIME-RISK'
+                # Adicione mais regras aqui se necessário, como para f-strings
+                elif "f-string is missing placeholders" in message_text:
+                    severity = 'WARNING'
+                    category = 'STYLE'
+                else:
+                    severity = 'WARNING'
+                    category = 'STYLE' # Padrão para outros avisos do Pyflakes
+    
+                findings.append({
+                    'severity': severity,
+                    'category': category,
+                    'message': message_text,
+                    'file': file_path,
+                    'line': int(line_num)
+                })
     except Exception as e:
         findings.append({'severity': 'CRITICAL', 'message': f"Falha catastrófica ao invocar a sonda Pyflakes: {e}", 'file': file_path})
     return findings
@@ -141,7 +151,7 @@ def _run_import_probe(all_imports, venv_python, logger, search_path):
     IGNORE_MODULES = {'setuptools', 'kivy', 'ia_core'}
     for imp in all_imports:
         if imp['module'] in truly_missing_modules and imp['module'] not in IGNORE_MODULES:
-            import_findings.append({'severity': 'CRITICAL', 'message': f"Import não resolvido: Módulo '{imp['module']}' não foi encontrado.", 'file': imp['file'], 'line': imp['line'], 'snippet': _get_code_snippet(imp['file'], imp['line'])})
+            import_findings.append({'severity': 'CRITICAL', 'category': 'DEPENDENCY', 'message': f"Import não resolvido: Módulo '{imp['module']}' não foi encontrado.", 'file': imp['file'], 'line': imp['line'], 'snippet': _get_code_snippet(imp['file'], imp['line'])})
     return import_findings
 
 def _extract_imports(file_path):
@@ -321,69 +331,74 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
     with ExecutionLogger('check_logic', path, {}) as logger:
         config = _get_project_config(logger, start_path=path)
         if not config.get('search_path_valid'):
-            return logger.results
+            return logger.results # Saída segura se o caminho for inválido
 
         python_executable = _get_venv_python_executable()
         if not python_executable:
-            logger.add_finding('CRITICAL', "Ambiente virtual 'venv' não encontrado ou inválido.")
-            return logger.results
+            logger.add_finding('CRITICAL', 'SETUP', "Ambiente virtual 'venv' não encontrado ou inválido.")
+            return logger.results # Saída segura
 
-        # --- ETAPA 1: Coleta de Arquivos ---
-        files_to_process = _collect_files_to_analyze(config, cmd_line_ignore)
+        # --- Pipeline de Análise ---
+        analysis_state = {
+            'root_path': path,
+            'files_to_process': _collect_files_to_analyze(config, cmd_line_ignore),
+            'raw_findings': [],
+            'file_reports': {}
+        }
         
-        # --- ETAPAS 2, 3 e 4 (Opcional): Análise por Arquivo com Cache ---
-        all_imports = []
-        raw_findings = []
-        file_reports = {}
-
-        for file_path in files_to_process:
+        # --- Análise por Arquivo com Cache ---
+        files_for_next_step = []
+        for file_path in analysis_state['files_to_process']:
             file_hash = _get_file_hash(file_path)
             rel_file_path = os.path.relpath(file_path, path)
 
-            # Lógica do Cache: Tenta encontrar um resultado válido no cache
+            # Lógica do Cache
             if file_hash and rel_file_path in cache and cache[rel_file_path].get('hash') == file_hash:
-                # CACHE HIT: Reutiliza os resultados
                 cached_item = cache[rel_file_path]
-                findings, imports = cached_item.get('findings', []), cached_item.get('imports', [])
+                findings = cached_item.get('findings', [])
+                imports = cached_item.get('imports', [])
                 if not fast:
-                    file_reports[rel_file_path] = {'structure_analysis': cached_item.get('structure', {})}
+                    analysis_state['file_reports'][rel_file_path] = {'structure_analysis': cached_item.get('structure', {})}
             else:
-                # CACHE MISS: Executa a análise completa para este arquivo
+                # Análise de Sintaxe (fail-fast)
+                syntax_findings = _run_syntax_probe(file_path, python_executable, debug)
+                if syntax_findings:
+                    analysis_state['raw_findings'].extend(syntax_findings)
+                    continue # Pula para o próximo arquivo se houver erro de sintaxe
+
+                # Análise Estática (Pyflakes)
                 findings, imports = _analyze_single_file_statically(file_path, python_executable, debug)
                 
                 structure = {}
                 if not fast:
                     structure = analyze_file_structure(file_path)
-                    file_reports[rel_file_path] = {'structure_analysis': structure}
+                    analysis_state['file_reports'][rel_file_path] = {'structure_analysis': structure}
                 
-                # Atualiza o cache com os novos resultados
                 if file_hash:
                     cache[rel_file_path] = {'hash': file_hash, 'findings': findings, 'imports': imports, 'structure': structure}
 
-            raw_findings.extend(findings)
-            all_imports.extend(imports)
+            analysis_state['raw_findings'].extend(findings)
+            files_for_next_step.append({'path': file_path, 'imports': imports})
 
-        # --- ETAPA 5: Análise de Imports Agregados ---
+        # --- Análise Agregada ---
+        all_imports = [imp for file_info in files_for_next_step for imp in file_info['imports']]
         if all_imports and not no_imports:
             import_findings = _run_import_probe(all_imports, python_executable, logger, config.get('search_path'))
-            raw_findings.extend(import_findings)
+            analysis_state['raw_findings'].extend(import_findings)
 
-        # --- ETAPA OPCIONAL: Correção Automática ---
+        # --- Correção Automática ---
         if fix:
             click.echo(Fore.CYAN + "\nModo de correção (--fix) ativado...")
-            for file_path in files_to_process:
-                # O --fix invalida o cache para o próximo run, o que é o comportamento esperado
+            for file_path in analysis_state['files_to_process']:
                 _fix_unused_imports(file_path, logger)
 
-        # --- FINALIZAÇÃO: Processa e Formata os Resultados ---
-        for finding in raw_findings:
+        # --- Finalização e Formatação ---
+        for finding in analysis_state['raw_findings']:
             snippet = _get_code_snippet(finding.get('file'), finding.get('line'))
             logger.add_finding(
-                finding['severity'], finding['message'], file=finding.get('file'),
-                line=finding.get('line'), snippet=snippet, details=finding.get('details')
+                finding['severity'], finding.get('category', 'UNCATEGORIZED'), finding['message'],
+                file=finding.get('file'), line=finding.get('line'), snippet=snippet, details=finding.get('details')
             )
-        
-        logger.results['file_reports'] = file_reports
         
         if not no_cache:
             _save_cache(cache)

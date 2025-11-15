@@ -3,53 +3,93 @@ import os
 import sys
 import re
 import json
-#import shutil
 import textwrap
-#import subprocess
-from datetime import datetime
-from pathlib import Path
-
+import sqlite3
 import click
+from pathlib import Path
+from datetime import datetime
 from colorama import Fore, Style
+from ..shared_tools import _print_finding_details, _get_code_snippet
+from ..database import get_db_connection
 
 #from ..shared_tools import ExecutionLogger
 
 __version__ = "34.0 Alfa"
 
 @click.command('log')
-@click.pass_context
-@click.option('-n', '--lines', default=1, help="Exibe as últimas N linhas do log.", type=int)
+@click.option('-n', '--lines', 'limit', default=10, help="Limita o número de findings exibidos.")
 @click.option('-s', '--snippets', is_flag=True, help="Exibe os trechos de código para cada problema.")
-def log(ctx, lines, snippets):
-    """Exibe as últimas entradas do arquivo de log do doxoade."""
-    log_file = Path.home() / '.doxoade' / 'doxoade.log'
+@click.option('-b', '--busca', 'search_term', default=None, help="Filtra os findings pela mensagem, categoria ou nome do arquivo.")
+def log(limit, snippets, search_term):
+    """Exibe e busca nas últimas entradas de log do banco de dados do doxoade."""
     
-    if not log_file.exists():
-        click.echo(Fore.YELLOW + "Nenhum arquivo de log encontrado. Execute um comando de análise primeiro."); return
-
+    conn = None
     try:
-        with open(log_file, 'r', encoding='utf-8') as f:
-            all_lines = f.readlines()
-        
-        if not all_lines:
-            click.echo(Fore.YELLOW + "O arquivo de log está vazio."); return
-            
-        last_n_lines = all_lines[-lines:]
-        
-        total_to_show = len(last_n_lines)
-        for i, line in enumerate(last_n_lines):
-            try:
-                entry = json.loads(line)
-                # Passa a flag 'snippets' para a função de exibição
-                _display_log_entry(entry, index=i + 1, total=total_to_show, show_snippets=snippets)
-            except json.JSONDecodeError:
-                click.echo(Fore.RED + f"--- Erro ao ler a entrada #{i + 1} ---")
-                click.echo(Fore.RED + "A linha no arquivo de log não é um JSON válido.")
-                click.echo(Fore.YELLOW + f"Conteúdo da linha: {line.strip()}")
-    except Exception as e:
-        click.echo(Fore.RED + f"Ocorreu um erro ao ler o arquivo de log: {e}", err=True)
+        conn = get_db_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
 
-    pass # Placeholder
+        # Constrói a query SQL dinamicamente
+        query = """
+            SELECT 
+                f.*, 
+                e.command, e.project_path, e.timestamp, e.doxoade_version
+            FROM findings f
+            JOIN events e ON f.event_id = e.id
+        """
+        params = []
+
+        if search_term:
+            click.echo(Fore.CYAN + f"Buscando por '{search_term}' nos logs...")
+            query += " WHERE f.message LIKE ? OR f.category LIKE ? OR f.file LIKE ?"
+            like_term = f"%{search_term}%"
+            params.extend([like_term, like_term, like_term])
+
+        query += " ORDER BY e.timestamp DESC LIMIT ?"
+        params.append(limit)
+        
+        cursor.execute(query, params)
+        findings = cursor.fetchall()
+
+        if not findings:
+            click.echo(Fore.YELLOW + "Nenhum problema correspondente encontrado no banco de dados.")
+            return
+
+        click.echo(Style.BRIGHT + f"\n--- Exibindo {len(findings)} problema(s) encontrado(s) ---")
+        
+        # Inverte a lista para mostrar do mais antigo ao mais recente
+        for finding in reversed(findings):
+            finding_dict = dict(finding)
+            
+            # --- LÓGICA CONSOLIDADA AQUI DENTRO DO LOOP ---
+            
+            # 1. Adiciona o contexto do evento no campo 'details'
+            event_info = (
+                f"Comando: {finding_dict.get('command', 'N/A')} | "
+                f"Projeto: {os.path.basename(finding_dict.get('project_path', 'N/A'))} | "
+                f"Data: {finding_dict.get('timestamp', 'N/A')}"
+            )
+            finding_dict['details'] = event_info
+
+            # 2. Se -s for usado, gera o snippet sob demanda
+            if snippets and finding_dict.get('file') and finding_dict.get('line'):
+                project_path = finding_dict.get('project_path', '')
+                full_file_path = os.path.join(project_path, finding_dict['file'])
+                
+                if os.path.exists(full_file_path):
+                    snippet = _get_code_snippet(full_file_path, finding_dict['line'])
+                    if snippet:
+                        finding_dict['snippet'] = snippet
+            
+            # 3. Chama a função de impressão com o dicionário completo
+            _print_finding_details(finding_dict)
+            click.echo("-" * 40)
+
+    except sqlite3.Error as e:
+        click.echo(Fore.RED + f"Ocorreu um erro ao ler o banco de dados: {e}", err=True)
+    finally:
+        if conn:
+            conn.close()
 
 @click.command('show-trace')
 @click.pass_context
@@ -189,68 +229,44 @@ def create_pipeline(ctx, filename, commands):
     pass # Placeholder
 
 # Funções auxiliares (copie-as para este arquivo também)
-def _display_log_entry(entry, index, total, show_snippets=False):
-    try:
-        ts = datetime.fromisoformat(entry['timestamp'].replace('Z', '+00:00'))
-        ts_local = ts.astimezone().strftime('%Y-%m-%d %H:%M:%S')
-    except (ValueError, KeyError):
-        ts_local = entry.get('timestamp', 'N/A')
-
+def _display_log_entry(cursor, event, index, total, show_snippets=False):
+    """Formata e exibe um único evento do banco de dados."""
+    ts_local = event['timestamp'] # O timestamp já deve estar em um formato legível
     header = f"--- Entrada de Log #{index}/{total} ({ts_local}) ---"
     click.echo(Fore.CYAN + Style.BRIGHT + header)
 
-    # --- NOVO BLOCO: CONTEXTO FORENSE DA EXECUÇÃO ---
-    click.echo(Fore.WHITE + f"Comando: {entry.get('command', 'N/A')} (Doxoade v{entry.get('doxoade_version', 'N/A')})")
-    click.echo(Fore.WHITE + f"Projeto: {entry.get('project_path', 'N/A')}")
-    
-    context_line = (
-        f"Contexto: "
-        f"Git({entry.get('git_hash', 'N/A')[:7]}) | "
-        f"Plataforma({entry.get('platform', 'N/A')}) | "
-        f"Python({entry.get('python_version', 'N/A')}) | "
-        f"Tempo({entry.get('execution_time_ms', 0):.2f}ms)"
-    )
-    click.echo(Fore.WHITE + Style.DIM + context_line)
-    # ---------------------------------------------------
-    
-    summary = entry.get('summary', {})
-    errors = summary.get('errors', 0)
-    warnings = summary.get('warnings', 0)
-    
-    summary_color = Fore.RED if errors > 0 else Fore.YELLOW if warnings > 0 else Fore.GREEN
-    click.echo(summary_color + f"Resultado: {errors} Erro(s), {warnings} Aviso(s)")
+    click.echo(Fore.WHITE + f"Comando: {event['command']} (Doxoade v{event['doxoade_version']})")
+    click.echo(Fore.WHITE + f"Projeto: {event['project_path']}")
+    click.echo(Fore.WHITE + Style.DIM + f"Tempo: {event['execution_time_ms']:.2f}ms")
 
-    findings = entry.get('findings')
-    if findings:
-        click.echo(Fore.WHITE + "Detalhes dos Problemas Encontrados:")
+    # Busca os 'findings' associados a este evento
+    cursor.execute("SELECT * FROM findings WHERE event_id = ?", (event['id'],))
+    findings = cursor.fetchall()
+
+    if not findings:
+        click.echo(Fore.GREEN + "Resultado: Nenhum problema encontrado nesta execução.")
+    else:
+        summary_text = f"Resultado: {len(findings)} problema(s) encontrado(s)."
+        click.echo(Fore.YELLOW + summary_text)
+        click.echo(Fore.WHITE + "Detalhes dos Problemas:")
         for finding in findings:
-            f_type = finding.get('type', 'info').upper()
-            f_color = Fore.RED if 'ERROR' in f_type else Fore.YELLOW
-            f_msg = finding.get('message', 'N/A')
-            f_file = finding.get('file', 'N/A')
-            f_line = finding.get('line', '')
-            f_ref = f" [Ref: {finding.get('ref')}]" if finding.get('ref') else ""
+            finding_dict = dict(finding)
             
-            click.echo(f_color + f"  - [{f_type}] {f_msg}{f_ref} (em {f_file}, linha {f_line})")
+            # --- NOVA LÓGICA DE SNIPPET SOB DEMANDA ---
+            if show_snippets and finding_dict.get('file') and finding_dict.get('line'):
+                # O caminho do arquivo no DB é relativo, precisamos do caminho absoluto do projeto
+                project_path = event['project_path']
+                full_file_path = os.path.join(project_path, finding_dict['file'])
+                
+                # Se o arquivo ainda existir, recalcula o snippet
+                if os.path.exists(full_file_path):
+                    snippet = _get_code_snippet(full_file_path, finding_dict['line'])
+                    if snippet:
+                        finding_dict['snippet'] = snippet # Adiciona ao dicionário antes de imprimir
+            # --- FIM DA NOVA LÓGICA ---
 
-            # --- LÓGICA DE DETALHES COMPLETA ---
-            if finding.get('details'):
-                click.echo(Fore.CYAN + f"    > {finding.get('details')}")
-
-            # --- LÓGICA DE EXIBIÇÃO DE SNIPPETS ---
-            snippet = finding.get('snippet')
-            if show_snippets and snippet:
-                # Usamos .get() com um valor padrão para evitar erros se a linha não for um número
-                f_line_int = int(finding.get('line', -1)) 
-                for line_num_str, code_line in snippet.items():
-                    line_num = int(line_num_str)
-                    if line_num == f_line_int:
-                        # Destaque para a linha do erro
-                        click.echo(Fore.WHITE + Style.BRIGHT + f"      > {line_num:3}: {code_line}")
-                    else:
-                        # Contexto com menos destaque
-                        click.echo(Fore.WHITE + Style.DIM + f"        {line_num:3}: {code_line}")
-            # ----------------------------------------
+            _print_finding_details(finding_dict)
+    
     click.echo("")
     pass
 
