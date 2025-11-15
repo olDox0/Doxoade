@@ -1,6 +1,6 @@
 [tool.doxoade]
 source_dir = "."
-keep = [ "coverage", "pytest", "radon"]
+keep = [ "coverage", "pytest", "radon", "jsondiff", "pyyaml", "setuptools"]
 ignore = [
     "tests/",
     "regression_tests/",
@@ -11,6 +11,9 @@ ignore = [
     "pytest_temp_dir/",
     "tmp/"
 ]
+
+[project.optional-dependencies]
+dashboard = ["pandas"]
 
 [tool.pytest.ini_options]
 addopts = "-v"
