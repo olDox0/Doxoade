@@ -31,6 +31,17 @@ def run_command(command, error_message, working_directory=None):
     except FileNotFoundError:
         print_error(f"Comando não encontrado: {command[0]}.")
 
+    print("--- Iniciando a instalação de sistema da Doxoade ---")
+    
+    # A ÚNICA COISA QUE PRECISAMOS FAZER É ISSO:
+    command = [sys.executable, "-m", "pip", "install", "-e", "."]
+    result = run_command(command)
+    
+    if result.returncode != 0:
+        print("[ERRO] Falha ao instalar o projeto em modo editável.")
+    else:
+        print("[OK] Doxoade instalado com sucesso em modo editável.")
+
 def get_scripts_path(python_executable):
     """Encontra o diretório 'Scripts' ou 'bin' de um interpretador Python."""
     if platform.system() == "Windows":

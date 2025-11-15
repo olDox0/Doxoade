@@ -1,25 +1,13 @@
 # doxoade/doxoade.py
 
-#import ast, esprima, fnmatch, shutil, time, shlex, signal, tempfile, threading
-#from bs4 import BeautifulSoup
-#from io import StringIO
-#from pyflakes import api as pyflakes_api
-
 import traceback
 import toml
 import subprocess
 import os, sys, re
-#import json
 import click
-import pandas as pd
-from datetime import datetime
-#from pathlib import Path
 from functools import wraps
+from doxoade.database import init_db
 from colorama import init as colorama_init, Fore, Style
-from doxoade.database import get_db_connection
-
-#from queue import Queue, Empty
-#from datetime import datetime
 
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 PACKAGE_PARENT = os.path.dirname(PACKAGE_DIR)
@@ -27,7 +15,6 @@ if PACKAGE_PARENT not in sys.path:
     sys.path.insert(0, PACKAGE_PARENT)
 
 # --- REGISTRO DE PLUGINS DA V2.0 ---
-from doxoade.database import init_db
 from doxoade.commands.webcheck import webcheck
 from doxoade.commands.utils import log, show_trace, mk, create_pipeline, setup_regression
 from doxoade.commands.tutorial import tutorial_group
@@ -47,6 +34,7 @@ from doxoade.commands.git_workflow import release, sync
 from doxoade.commands.git_new import git_new
 from doxoade.commands.git_clean import git_clean
 from doxoade.commands.encoding import encoding
+from doxoade.commands.dashboard import dashboard
 from doxoade.commands.doctor import doctor
 from doxoade.commands.diff import diff
 from doxoade.commands.deepcheck import deepcheck
@@ -112,84 +100,6 @@ def log_command_execution(func):
 # COMANDOS DA CLI (ARQUITETURA FINAL E ROBUSTA)
 # -----------------------------------------------------------------------------
 
-#atualizado em 2025/09/25-Versão 9.1. Novo comando 'dashboard' para visualizar tendências de saúde do projeto a partir dos logs.
-@cli.command()
-@click.option('--project', default=None, help="Filtra o dashboard para um projeto específico.")
-def dashboard(project):
-    """Exibe um painel com a saúde e tendências dos projetos a partir do banco de dados."""
-    click.echo(Fore.CYAN + Style.BRIGHT + "--- [DASHBOARD] Painel de Saúde de Engenharia (Projeto Sapiens) ---")
-
-    try:
-        conn = get_db_connection()
-        
-        # Constrói a query base
-        query = "SELECT e.timestamp, e.project_path, f.severity, f.message FROM events e JOIN findings f ON e.id = f.event_id"
-        params = []
-        if project:
-            query += " WHERE e.project_path = ?"
-            params.append(os.path.abspath(project))
-            
-        # Usa o pandas para carregar os dados diretamente da query
-        df = pd.read_sql_query(query, conn, params=params)
-        conn.close()
-
-        if df.empty:
-            click.echo(Fore.YELLOW + "Nenhum 'finding' encontrado no banco de dados para o filtro especificado.")
-            return
-
-        click.echo(f"Analisando {len(df)} findings registrados...\n")
-        
-        # Converte o timestamp para datetime para análise
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-
-        _display_error_trend_db(df)
-        _display_project_summary_db(df)
-        _display_common_issues_db(df)
-
-    except Exception as e:
-        click.echo(Fore.RED + f"Erro ao gerar o dashboard: {e}")
-
-def _display_error_trend_db(df):
-    """Exibe a tendência de problemas a partir de um DataFrame."""
-    click.echo(Fore.YELLOW + "--- Tendência de Problemas (últimos 7 dias) ---")
-    df['day'] = df['timestamp'].dt.date
-    recent_df = df[df['day'] >= (datetime.now().date() - pd.Timedelta(days=7))]
-    
-    issues_by_day = recent_df.groupby('day')['severity'].value_counts().unstack(fill_value=0)
-    
-    for day, row in issues_by_day.iterrows():
-        errors = row.get('ERROR', 0) + row.get('CRITICAL', 0)
-        warnings = row.get('WARNING', 0)
-        click.echo(f"{day} | {Fore.RED}{errors} Erro(s){Style.RESET_ALL}, {Fore.YELLOW}{warnings} Aviso(s){Style.RESET_ALL}")
-
-def _display_project_summary_db(df):
-    """Exibe quais projetos têm mais problemas a partir de um DataFrame."""
-    click.echo(Fore.YELLOW + "\n--- Projetos com Mais Erros Registrados ---")
-    df['project_name'] = df['project_path'].apply(os.path.basename)
-    error_df = df[df['severity'].isin(['ERROR', 'CRITICAL'])]
-    
-    errors_by_project = error_df.groupby('project_name').size().sort_values(ascending=False).head(5)
-    
-    for proj, count in errors_by_project.items():
-        click.echo(f" - {proj}: {count} erros")
-
-def _display_common_issues_db(df):
-    """Exibe os tipos de erro mais comuns a partir de um DataFrame."""
-    click.echo(Fore.YELLOW + "\n--- Tipos de Erro Mais Comuns ---")
-    error_df = df[df['severity'].isin(['ERROR', 'CRITICAL'])].copy()
-    
-    # Extrai a mensagem principal antes de dois pontos ou parênteses
-    error_df.loc[:, 'message_type'] = error_df['message'].str.split('[:(]').str[0].str.strip()
-    
-    errors_by_type = error_df.groupby('message_type').size().sort_values(ascending=False).head(5)
-    
-    for msg_type, count in errors_by_type.items():
-        click.echo(f" - {msg_type}: {count} ocorrências")
-        
-# (Substitua a função setup_health inteira)
-# atualizado em 2025/10/22 - Versão do projeto 43(Ver), Versão da função 3.0(Fnc).
-# Descrição: CORREÇÃO DE LÓGICA. A sequência de operações foi corrigida para garantir
-# que a lista 'keep' seja criada e populada corretamente antes de salvar.
 @cli.command('setup-health')
 @click.argument('path', type=click.Path(exists=True, file_okay=False, resolve_path=True), default='.')
 @click.pass_context
@@ -359,6 +269,7 @@ cli.add_command(check)
 cli.add_command(clean)
 cli.add_command(config_group)
 cli.add_command(create_pipeline)
+cli.add_command(dashboard)
 cli.add_command(deepcheck)
 cli.add_command(diff)
 cli.add_command(doctor)
