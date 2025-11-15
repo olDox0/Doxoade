@@ -15,7 +15,7 @@ ignore = [
 [project]
 name = "doxoade"
 version = "46.0"
-requires-python = ">=3.12.9"
+requires-python = ">=3.11"
 dependencies = [
     "click",
     "colorama",
