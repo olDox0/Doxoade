@@ -2,7 +2,7 @@
 source_dir = "."
 keep = [ "coverage", "pytest", "radon"]
 ignore = [
-#    "tests/",
+    "tests/",
     "regression_tests/",
     "Canone_Test/",
     "Vers/",
