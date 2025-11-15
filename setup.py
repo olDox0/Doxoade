@@ -1,5 +1,6 @@
 # setup.py
-from setuptools import setup
+from setuptools import setup, find_packages
 
-# A mágica acontece no pyproject.toml
-setup()
+setup(
+    packages=find_packages(include=['doxoade', 'doxoade.*'])
+)
