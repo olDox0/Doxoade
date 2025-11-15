@@ -33,14 +33,22 @@ dependencies = [
     "pytest",
     "jsondiff",
     "pyyaml",
-    "setuptools"
+    "setuptools",
+    "pandas==1.5.3"
 ]
 
 [project.optional-dependencies]
-dashboard = ["pandas"]
+dashboard = ["pandas==1.5.3"]
 
 [project.scripts]
 doxoade = "doxoade.doxoade:cli"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["doxoade"]
 
 [tool.pytest.ini_options]
 addopts = "-v"
