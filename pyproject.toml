@@ -34,7 +34,7 @@ dependencies = [
     "jsondiff",
     "pyyaml",
     "setuptools",
-    "pandas==1.5.3"
+    "pandas"
 ]
 
 [project.optional-dependencies]
