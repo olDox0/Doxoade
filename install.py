@@ -21,26 +21,34 @@ def print_error(message, details=""):
     if details: print(details)
     sys.exit(1)
 
-def run_command(command, error_message, working_directory=None):
-    """Executa um comando usando o interpretador Python que iniciou este script."""
+def run_command(command):
+    """Executa um comando e retorna o resultado."""
     try:
-        # Adiciona o parâmetro 'cwd' (current working directory)
-        subprocess.run(command, check=True, capture_output=True, text=True, encoding='utf-8', errors='ignore', cwd=working_directory)
+        # Usamos sys.executable para garantir que estamos usando o Python correto
+        return subprocess.run(command, check=True, capture_output=True, text=True, encoding='utf-8')
     except subprocess.CalledProcessError as e:
-        print_error(error_message, f"STDOUT: {e.stdout}\nSTDERR: {e.stderr}")
+        print(f"[ERRO] O comando falhou. Código de saída: {e.returncode}")
+        print(f"STDOUT:\n{e.stdout}")
+        print(f"STDERR:\n{e.stderr}")
+        return e
     except FileNotFoundError:
-        print_error(f"Comando não encontrado: {command[0]}.")
+        print(f"[ERRO] Comando '{command[0]}' não encontrado.")
+        return None
 
-    print("--- Iniciando a instalação de sistema da Doxoade ---")
-    
-    # A ÚNICA COISA QUE PRECISAMOS FAZER É ISSO:
-    command = [sys.executable, "-m", "pip", "install", "-e", "."]
-    result = run_command(command)
-    
-    if result.returncode != 0:
-        print("[ERRO] Falha ao instalar o projeto em modo editável.")
-    else:
-        print("[OK] Doxoade instalado com sucesso em modo editável.")
+print("--- Iniciando a instalação do Doxoade ---")
+
+# O comando correto para instalar um projeto com pyproject.toml
+# Usa o pip do python que está executando o script.
+command = [sys.executable, "-m", "pip", "install", "-e", "."]
+
+print(f"Executando: {' '.join(command)}")
+result = run_command(command)
+
+if result and result.returncode == 0:
+    print("\n[SUCESSO] Doxoade instalado com sucesso em modo editável.")
+    print("O comando 'doxoade' agora deve estar disponível no seu sistema.")
+else:
+    print("\n[FALHA] A instalação do Doxoade falhou.")
 
 def get_scripts_path(python_executable):
     """Encontra o diretório 'Scripts' ou 'bin' de um interpretador Python."""
