@@ -12,8 +12,35 @@ ignore = [
     "tmp/"
 ]
 
+[project]
+name = "doxoade"
+version = "46.0"
+requires-python = ">=3.12.9"
+dependencies = [
+    "click",
+    "colorama",
+    "beautifulsoup4",
+    "lxml",
+    "cssutils",
+    "esprima",
+    "pyflakes",
+    "toml",
+    "chardet",
+    "packaging",
+    "pytest-cov",
+    "radon",
+    "coverage",
+    "pytest",
+    "jsondiff",
+    "pyyaml",
+    "setuptools"
+]
+
 [project.optional-dependencies]
 dashboard = ["pandas"]
+
+[project.scripts]
+doxoade = "doxoade.doxoade:cli"
 
 [tool.pytest.ini_options]
 addopts = "-v"
