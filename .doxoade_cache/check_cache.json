@@ -1,6 +1,6 @@
 {
   "install.py": {
-    "hash": "deb73de124daf62d37c3ebed0a4ef68904e0807968cb095710f2b9a286a1b93a",
+    "hash": "636f8b1ad3546e94e0891f59c5ecddbc5b05869d66a4474639da9f935d2dc637",
     "findings": [],
     "imports": [
       {
@@ -93,30 +93,35 @@
             {
               "name": "command",
               "type": "n\u00e3o anotado"
-            },
-            {
-              "name": "error_message",
-              "type": "n\u00e3o anotado"
-            },
-            {
-              "name": "working_directory",
-              "type": "n\u00e3o anotado"
             }
           ],
-          "returns": [],
+          "returns": [
+            {
+              "lineno": 28,
+              "type": "express\u00e3o"
+            },
+            {
+              "lineno": 33,
+              "type": "vari\u00e1vel"
+            },
+            {
+              "lineno": 36,
+              "type": "literal"
+            }
+          ],
           "risks": [
             {
-              "lineno": 32,
+              "lineno": 35,
               "message": "Acesso a dicion\u00e1rio/lista sem tratamento.",
               "details": "Acesso direto a 'command[0]' pode causar 'KeyError' ou 'IndexError'."
             }
           ],
-          "complexity": 4,
+          "complexity": 3,
           "complexity_rank": "Baixissima"
         },
         {
           "name": "get_scripts_path",
-          "lineno": 45,
+          "lineno": 53,
           "params": [
             {
               "name": "python_executable",
@@ -125,11 +130,11 @@
           ],
           "returns": [
             {
-              "lineno": 48,
+              "lineno": 56,
               "type": "express\u00e3o"
             },
             {
-              "lineno": 50,
+              "lineno": 58,
               "type": "express\u00e3o"
             }
           ],
@@ -139,7 +144,7 @@
         },
         {
           "name": "_add_to_path_windows",
-          "lineno": 52,
+          "lineno": 60,
           "params": [
             {
               "name": "scripts_path",
@@ -148,15 +153,15 @@
           ],
           "returns": [
             {
-              "lineno": 64,
+              "lineno": 72,
               "type": "literal"
             },
             {
-              "lineno": 59,
+              "lineno": 67,
               "type": "literal"
             },
             {
-              "lineno": 68,
+              "lineno": 76,
               "type": "literal"
             }
           ],
@@ -166,7 +171,7 @@
         },
         {
           "name": "main",
-          "lineno": 70,
+          "lineno": 78,
           "params": [],
           "returns": [],
           "risks": [],
