@@ -1,113 +1,68 @@
-# DEV.V10-20251021. >>>
-# atualizado em 2025/10/21 - Versão do projeto 42(Ver), Versão da função 2.1(Fnc).
-# Descrição: Corrige o bug "No such file or directory" ao fazer todos os caminhos de arquivo (requirements.txt, etc.)
-# serem relativos à localização do próprio script 'install.py', garantindo que ele possa ser executado de qualquer lugar.
+# install.py (Versão Final e Limpa)
 import sys
 import os
 import subprocess
-import platform
-#import shutil
+#import platform
+from colorama import init, Fore, Style
 
-# --- Configurações ---
-# A MUDANÇA CRÍTICA: O PROJECT_ROOT agora é a localização do script.
+# Inicializa o colorama
+init(autoreset=True)
+
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
-# --- Funções Auxiliares de Saída ---
-def print_header(message): print(f"\n--- {message} ---")
-def print_success(message): print(f"[OK] {message}")
-def print_warning(message): print(f"[AVISO] {message}")
-def print_error(message, details=""):
-    print(f"[ERRO] {message}")
-    if details: print(details)
-    sys.exit(1)
+def print_header(message): print(Style.BRIGHT + Fore.CYAN + f"\n--- {message} ---")
+def print_success(message): print(Fore.GREEN + f"[OK] {message}")
+def print_warning(message): print(Fore.YELLOW + f"[AVISO] {message}")
+def print_error(message): sys.exit(Fore.RED + f"[ERRO] {message}")
 
-def run_command_interactive(command):
-    """
-    Executa um comando e transmite sua saída (stdout/stderr) em tempo real.
-    Retorna o código de saída do processo.
-    """
+def run_pip_install():
+    """Executa 'pip install -e .' de forma interativa."""
     try:
-        process = subprocess.run(
-            command, check=True, text=True, encoding='utf-8'
+        # Usa o mesmo Python que está executando o script de instalação
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-e", PROJECT_ROOT],
+            check=True
         )
-        return process.returncode
-    except subprocess.CalledProcessError as e:
-        print(f"\n[ERRO] O comando falhou com o código de saída: {e.returncode}", file=sys.stderr)
-        return e.returncode
-    except FileNotFoundError:
-        print(f"[ERRO] Comando '{command[0]}' não encontrado.", file=sys.stderr)
-        return 1
-    except KeyboardInterrupt:
-        print("\n[AVISO] Instalação interrompida pelo usuário.", file=sys.stderr)
-        return 130
-
-def get_scripts_path(python_executable):
-    """Encontra o diretório 'Scripts' ou 'bin' de um interpretador Python."""
-    if platform.system() == "Windows":
-        return os.path.join(os.path.dirname(python_executable), "Scripts")
-    else:
-        return os.path.join(os.path.dirname(python_executable), "bin")
-
-def _add_to_path_windows(scripts_path):
-    """Tenta adicionar o caminho ao PATH do sistema no Windows usando setx."""
-    print(f"Tentando adicionar '{scripts_path}' ao PATH do sistema (requer privilégios de admin)...")
-    try:
-        current_path = subprocess.check_output('echo %PATH%', shell=True).decode().strip()
-        if scripts_path in current_path:
-            print_success("O caminho já está configurado no PATH do sistema.")
-            return True
-        
-        command = ['setx', '/M', 'PATH', f'{current_path};{scripts_path}']
-        subprocess.run(command, capture_output=True, text=True, check=True)
-        print_success("PATH do sistema atualizado com sucesso!")
         return True
-    except subprocess.CalledProcessError:
-        print_warning("Falha ao modificar o PATH automaticamente.")
-        print("   > Causa Provável: Este script não foi executado como Administrador.")
+    except (subprocess.CalledProcessError, KeyboardInterrupt):
         return False
-        
+
 def main():
-    print_header("Iniciando a instalação do Doxoade")
+    print_header("Instalador Doxoade para Windows")
 
-    # --- Passo 1: Instalar o projeto e suas dependências ---
-    # O comando correto para instalar um projeto moderno com pyproject.toml
-    command = [sys.executable, "-m", "pip", "install", "-e", "."]
-    print(f"Executando: {' '.join(command)}\n")
+    # Passo 1: Instalação via pip
+    if not run_pip_install():
+        print_error("A instalação via pip falhou. Corrija os erros acima e tente novamente.")
     
-    exit_code = run_command_interactive(command)
-
-    if exit_code != 0:
-        print_error("A instalação do Doxoade não foi concluída.")
-        sys.exit(exit_code)
-
     print_success("Doxoade instalado com sucesso em modo editável.")
 
-    # --- Passo 2: Ajudar o usuário a configurar o PATH (se necessário) ---
-    print_header("Passo 2: Verificando a acessibilidade do comando")
-    scripts_path = get_scripts_path(sys.executable)
+    # Passo 2: Verificação e guia do PATH
+    print_header("Verificando Acesso Universal (PATH)")
     
-    # Lógica para verificar se o comando já está acessível
-    try:
-        subprocess.run(['doxoade', '--version'], check=True, capture_output=True)
-        print_success("O comando 'doxoade' já está acessível no seu PATH.")
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        print_warning("O comando 'doxoade' pode não estar acessível globalmente.")
-        if platform.system() == "Windows":
-            print("   > Para torná-lo acessível, adicione o seguinte diretório ao seu PATH do sistema:")
-            print(f"     {scripts_path}")
-        else: # Linux, macOS, Termux
-            shell = os.environ.get("SHELL", "")
-            if "bash" in shell or "zsh" in shell:
-                config_file = "~/.bashrc" if "bash" in shell else "~/.zshrc"
-                print(f"   > Para torná-lo acessível, adicione a seguinte linha ao seu arquivo '{config_file}':")
-                print(f"     export PATH=\"{scripts_path}:$PATH\"")
-                print(f"   > Depois, reinicie seu terminal ou execute: source {config_file}")
-            else:
-                print("   > Para torná-lo acessível, adicione o seguinte diretório ao seu PATH:")
-                print(f"     {scripts_path}")
+    # O caminho correto que DEVE estar no PATH
+    scripts_path = os.path.join(PROJECT_ROOT, 'venv', 'Scripts')
+    doxoade_exe_path = os.path.join(scripts_path, 'doxoade.exe')
 
-    print("\n--- Instalação Concluída! ---")
-    print("Se você precisou alterar o PATH, lembre-se de reiniciar seu terminal.")
+    try:
+        result = subprocess.run(['where', 'doxoade'], check=True, capture_output=True, text=True)
+        found_paths = result.stdout.strip().splitlines()
+        
+        if any(os.path.normcase(p) == os.path.normcase(doxoade_exe_path) for p in found_paths):
+            print_success(f"O comando 'doxoade' está corretamente configurado no seu PATH:\n    {doxoade_exe_path}")
+            if len(found_paths) > 1:
+                print_warning("Múltiplas versões do 'doxoade' foram encontradas. Isso pode causar conflitos.")
+                print("Certifique-se de que o caminho correto tenha prioridade no seu PATH.")
+        else:
+            print_warning(f"Um 'doxoade' foi encontrado, mas não é o da instalação atual: {found_paths[0]}")
+            print_warning(f"Por favor, ajuste seu PATH para priorizar: {scripts_path}")
+
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        print_warning("O comando 'doxoade' não foi encontrado no seu PATH.")
+        print("   > Para concluir, adicione o seguinte diretório ao seu PATH do sistema:")
+        print(Fore.YELLOW + f"     {scripts_path}")
+        print("   > Depois, reinicie completamente seu terminal.")
+
+    print(Style.BRIGHT + Fore.CYAN + "\n--- Instalação Concluída! ---")
 
 if __name__ == "__main__":
     main()
