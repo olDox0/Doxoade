@@ -18,8 +18,13 @@ from importlib import resources
 from .._version import __version__ as DOXOADE_VERSION
 
 from ..shared_tools import (
-    ExecutionLogger, _present_results, _get_code_snippet,
-    _get_venv_python_executable, _get_project_config, analyze_file_structure
+    ExecutionLogger,
+    _present_results,
+    _get_code_snippet,
+    _get_venv_python_executable,
+    _get_project_config,
+    collect_files_to_analyze,
+    analyze_file_structure
 )
 
 # AS STRINGS DAS SONDAS FORAM REMOVIDAS DAQUI!
@@ -33,21 +38,6 @@ def _get_probe_path(probe_name):
         # Fallback para Python < 3.9
         from pkg_resources import resource_filename
         return resource_filename('doxoade', f'probes/{probe_name}')
-
-def _collect_files_to_analyze(config, cmd_line_ignore):
-    # (Esta função permanece sem alterações)
-    search_path = config.get('search_path')
-    config_ignore = [p.strip('/\\').lower() for p in config.get('ignore', [])]
-    cmd_line_ignore_list = [p.strip('/\\').lower() for p in cmd_line_ignore]
-    folders_to_ignore = set(config_ignore + cmd_line_ignore_list)
-    folders_to_ignore.update(['venv', 'build', 'dist', '.git', '__pycache__'])
-    files_to_check = []
-    for root, dirs, files in os.walk(search_path, topdown=True):
-        dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
-        for file in files:
-            if file.endswith('.py'):
-                files_to_check.append(os.path.join(root, file))
-    return files_to_check
 
 def _run_syntax_probe(file_path, python_executable, debug=False):
     findings = []
@@ -220,7 +210,7 @@ def _fix_unused_imports(file_path, logger):
 
 def step_collect_files(state, config, cmd_line_ignore):
     """Etapa 1: Coleta os arquivos Python a serem analisados."""
-    state['files_to_process'] = _collect_files_to_analyze(config, cmd_line_ignore)
+    state['files_to_process'] = collect_files_to_analyze(config, cmd_line_ignore) # <-- USE A FUNÇÃO IMPORTADA
     return state
 
 def step_run_syntax_probes(state, python_executable, debug):
@@ -341,7 +331,7 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
         # --- Pipeline de Análise ---
         analysis_state = {
             'root_path': path,
-            'files_to_process': _collect_files_to_analyze(config, cmd_line_ignore),
+            'files_to_process': collect_files_to_analyze(config, cmd_line_ignore),
             'raw_findings': [],
             'file_reports': {}
         }

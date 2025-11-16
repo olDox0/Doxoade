@@ -1,120 +1,116 @@
 # doxoade/commands/auto.py
-# atualizado em 2025/10/21 - Versão do projeto 42(Ver), Versão da função 3.0(Fnc).
-# Descrição: Reintroduz a opção '--file' para restaurar a funcionalidade de pipeline a partir de arquivos.
 import sys
 import subprocess
-import shlex
-import signal
-import threading
-import shutil
-
+import os
 import click
 from colorama import Fore, Style
-
 from ..shared_tools import ExecutionLogger
 
-__version__ = "35.6 Alfa (Phoenix)"
+__version__ = "37.0 Alfa (Interactive Pipelines)"
 
-# Esta função de execução permanece a mesma, pois é robusta.
-def _execute_command(command_to_run, is_interactive, original_sigint_handler):
-    if is_interactive:
-        click.echo(Fore.YELLOW + "[AUTO] Comando interativo detectado. Cedendo controle...")
-        try:
-            signal.signal(signal.SIGINT, signal.SIG_IGN)
-            return subprocess.run(command_to_run, shell=False)
-        finally:
-            signal.signal(signal.SIGINT, original_sigint_handler)
-    else:
-        process = subprocess.Popen(command_to_run, shell=False, text=True, encoding='utf-8', errors='replace',
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+def _execute_command(command_str, inputs=None):
+    """
+    (Versão Corrigida) Executa um comando, lida com inputs e força a saída colorida.
+    """
+    try:
+        env = os.environ.copy()
+        env["FORCE_COLOR"] = "1"
+        env["PYTHONIOENCODING"] = "UTF-8"
 
-        def _stream_reader(pipe, color=None):
-            for line in iter(pipe.readline, ''):
-                output = color + line + Style.RESET_ALL if color else line
-                sys.stdout.write(output)
-                sys.stdout.flush()
+        input_str = "\n".join(inputs) + "\n" if inputs else None
 
-        stdout_thread = threading.Thread(target=_stream_reader, args=[process.stdout])
-        stderr_thread = threading.Thread(target=_stream_reader, args=[process.stderr, Fore.RED])
+        # --- A ÚNICA MUDANÇA ESTÁ AQUI ---
+        # Passamos a string do comando diretamente, sem tentar dividi-la primeiro.
+        # O 'shell=True' cuidará de interpretar a string corretamente.
+        process = subprocess.Popen(
+            command_str,  # <-- MUDANÇA AQUI
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.PIPE,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            env=env,
+            shell=True
+        )
+        stdout, stderr = process.communicate(input=input_str)
+
+        sys.stdout.write(stdout)
+        sys.stderr.write(Fore.RED + stderr + Style.RESET_ALL)
         
-        stdout_thread.start(); stderr_thread.start()
-        process.wait()
-        stdout_thread.join(); stderr_thread.join()
-        
-        return process
+        return process.returncode
+
+    except Exception as e:
+        click.echo(Fore.RED + f"   > Erro inesperado ao executar comando: {e}")
+        return 1
 
 @click.command('auto')
 @click.pass_context
-@click.argument('commands', nargs=-1, required=False) # Tornou-se opcional
+@click.argument('commands', nargs=-1, required=False)
 @click.option('--file', 'filepath', type=click.Path(exists=True, dir_okay=False), help="Executa um pipeline a partir de um arquivo.")
 def auto(ctx, commands, filepath):
     """Executa uma sequência de comandos como um pipeline robusto."""
     arguments = ctx.params
     
-    # --- NOVO UTILITÁRIO 1: CARREGAR COMANDOS ---
-    commands_to_run = []
+    # --- PARSER DA NOVA SINTAXE DE PIPELINE ---
+    pipeline_steps = []
+    source_lines = []
+
     if filepath:
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
-                commands_to_run = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+                source_lines = f.readlines()
         except IOError as e:
-            click.echo(Fore.RED + f"[ERRO] Falha ao ler o arquivo de pipeline: {e}")
-            sys.exit(1)
+            click.echo(Fore.RED + f"[ERRO] Falha ao ler o arquivo de pipeline: {e}"); sys.exit(1)
     elif commands:
-        commands_to_run = list(commands)
-    # --- FIM DO UTILITÁRIO ---
+        source_lines = list(commands)
+
+    temp_inputs = []
+    for line in source_lines:
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        if line.startswith('ECHO:'):
+            pipeline_steps.append({'type': 'echo', 'value': line[5:].strip()})
+        elif line.startswith('>'):
+            temp_inputs.append(line[1:].strip())
+        else:
+            pipeline_steps.append({'type': 'command', 'value': line, 'inputs': temp_inputs})
+            temp_inputs = []
+    # --- FIM DO PARSER ---
 
     with ExecutionLogger('auto', '.', arguments) as logger:
-        if not commands_to_run:
+        if not pipeline_steps:
             click.echo(Fore.YELLOW + "Nenhum comando para executar."); return
 
-        runner_path = shutil.which("doxoade.bat") or shutil.which("doxoade")
-        if not runner_path:
-            click.echo(Fore.RED + "[AUTO ERRO] Runner 'doxoade' não encontrado no PATH.")
-            sys.exit(1)
-
-        click.echo(Fore.CYAN + Style.BRIGHT + f"--- [AUTO] Iniciando pipeline de {len(commands_to_run)} passo(s) ---")
+        click.echo(Fore.CYAN + Style.BRIGHT + f"--- [AUTO] Iniciando pipeline de {len(pipeline_steps)} passo(s) ---")
         
         results = []
-        original_sigint_handler = signal.getsignal(signal.SIGINT)
+        final_success = True
 
-        try:
-            for i, command_str in enumerate(commands_to_run, 1):
-                click.echo(Fore.CYAN + f"\n--- [AUTO] Executando Passo {i}/{len(commands_to_run)}: {command_str} ---")
-                step_result = {"command": command_str, "status": "sucesso", "returncode": 0}
-                
-                try:
-                    args = shlex.split(command_str)
-                    command_to_run_abs = [runner_path] + args[1:]
-                    
-                    is_interactive = any(cmd in command_str for cmd in ['run', 'tutorial interactive'])
-                    
-                    process_result = _execute_command(command_to_run_abs, is_interactive, original_sigint_handler)
+        for i, step in enumerate(pipeline_steps, 1):
+            if step['type'] == 'echo':
+                click.echo(Fore.MAGENTA + Style.BRIGHT + f"\n--- [AUTO] {step['value']} ---")
+                continue
 
-                    if process_result.returncode != 0:
-                        step_result.update({"status": "falha", "returncode": process_result.returncode})
-                
-                except Exception as e:
-                    step_result.update({"status": "falha", "error": str(e)})
-                
-                results.append(step_result)
-                logger.add_finding('info', f"Passo '{command_str}' concluído com status: {step_result.get('status')}")
-
-        except KeyboardInterrupt:
-            click.echo(Fore.YELLOW + Style.BRIGHT + "\n\n [AUTO] Pipeline cancelado pelo usuário.")
-            sys.exit(1)
-        finally:
-            signal.signal(signal.SIGINT, original_sigint_handler)
+            command_str = step['value']
+            inputs = step['inputs']
+            
+            click.echo(Fore.CYAN + f"\n--- [AUTO] Executando Passo {i}/{len(pipeline_steps)}: {command_str} ---")
+            
+            return_code = _execute_command(command_str, inputs)
+            
+            status = "sucesso" if return_code == 0 else "falha"
+            results.append({"command": command_str, "status": status, "returncode": return_code})
+            
+            if status == "falha": final_success = False
             
         click.echo(Fore.CYAN + Style.BRIGHT + "\n--- [AUTO] Sumário do Pipeline ---")
-        final_success = True
-        for i, result in enumerate(results, 1):
-            if result.get("status") == "sucesso":
-                click.echo(Fore.GREEN + f"[OK] Passo {i}: Sucesso -> {result.get('command')}")
+        for res in results:
+            if res["status"] == "sucesso":
+                click.echo(Fore.GREEN + f"[OK] Sucesso -> {res['command']}")
             else:
-                final_success = False
-                error_details = result.get('error', f"código de saída {result.get('returncode', 'N/A')}")
-                click.echo(Fore.RED + f"[ERRO] Passo {i}: Falha ({error_details}) -> {result.get('command')}")
+                click.echo(Fore.RED + f"[ERRO] Falha (código {res['returncode']}) -> {res['command']}")
         click.echo("-" * 40)
         
         if final_success:

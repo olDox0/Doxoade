@@ -16,12 +16,20 @@ from ..database import get_db_connection
 
 __version__ = "34.0 Alfa"
 
+# Em doxoade/commands/utils.py
+
 @click.command('log')
 @click.option('-n', '--lines', 'limit', default=10, help="Limita o número de findings exibidos.")
 @click.option('-s', '--snippets', is_flag=True, help="Exibe os trechos de código para cada problema.")
-@click.option('-b', '--busca', 'search_term', default=None, help="Filtra os findings pela mensagem, categoria ou nome do arquivo.")
-def log(limit, snippets, search_term):
-    """Exibe e busca nas últimas entradas de log do banco de dados do doxoade."""
+@click.option('-b', '--busca', 'search_term', default=None, help="Filtra os findings por um termo na mensagem.")
+@click.option('--command', default=None, help="Filtra por um nome de comando específico (ex: check).")
+@click.option('--file', default=None, help="Filtra por um nome de arquivo (pode ser parcial).")
+@click.option('--category', default=None, help="Filtra por uma categoria de problema (ex: DEADCODE).")
+@click.option('--severity', default=None, help="Filtra por um nível de severidade (ex: CRITICAL).")
+@click.option('--after', default=None, help="Mostra apenas findings a partir desta data (YYYY-MM-DD).")
+@click.option('--before', default=None, help="Mostra apenas findings até esta data (YYYY-MM-DD).")
+def log(limit, snippets, search_term, command, file, category, severity, after, before):
+    """Exibe e busca de forma avançada nas entradas de log do banco de dados."""
     
     conn = None
     try:
@@ -29,59 +37,84 @@ def log(limit, snippets, search_term):
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        # Constrói a query SQL dinamicamente
-        query = """
+        # --- CONSTRUÇÃO DA QUERY DINÂMICA ---
+        base_query = """
             SELECT 
                 f.*, 
-                e.command, e.project_path, e.timestamp, e.doxoade_version
+                e.command, e.project_path, e.timestamp
             FROM findings f
             JOIN events e ON f.event_id = e.id
         """
+        where_clauses = []
         params = []
 
         if search_term:
-            click.echo(Fore.CYAN + f"Buscando por '{search_term}' nos logs...")
-            query += " WHERE f.message LIKE ? OR f.category LIKE ? OR f.file LIKE ?"
-            like_term = f"%{search_term}%"
-            params.extend([like_term, like_term, like_term])
-
+            where_clauses.append("f.message LIKE ?")
+            params.append(f"%{search_term}%")
+        if command:
+            where_clauses.append("e.command LIKE ?")
+            params.append(f"%{command}%")
+        if file:
+            normalized_file = file.replace('\\', '/')
+            where_clauses.append("f.file LIKE ?")
+            params.append(f"%{normalized_file}%")
+        if category:
+            where_clauses.append("f.category = ?")
+            params.append(category.upper())
+        if severity:
+            where_clauses.append("f.severity = ?")
+            params.append(severity.upper())
+        if after:
+            where_clauses.append("e.timestamp >= ?")
+            params.append(after)
+        if before:
+            # Adiciona ' 23:59:59' para incluir o dia inteiro
+            where_clauses.append("e.timestamp <= ?")
+            params.append(f"{before} 23:59:59")
+            
+        # Monta a query final
+        if where_clauses:
+            query = base_query + " WHERE " + " AND ".join(where_clauses)
+        else:
+            query = base_query
+            
         query += " ORDER BY e.timestamp DESC LIMIT ?"
         params.append(limit)
         
+        # --- FIM DA CONSTRUÇÃO DA QUERY ---
+
+        if any([search_term, command, file, category, severity, after, before]):
+             click.echo(Fore.CYAN + "Executando busca avançada nos logs...")
+
         cursor.execute(query, params)
         findings = cursor.fetchall()
 
         if not findings:
-            click.echo(Fore.YELLOW + "Nenhum problema correspondente encontrado no banco de dados.")
+            click.echo(Fore.YELLOW + "Nenhum problema correspondente encontrado para os filtros aplicados.")
             return
 
         click.echo(Style.BRIGHT + f"\n--- Exibindo {len(findings)} problema(s) encontrado(s) ---")
         
-        # Inverte a lista para mostrar do mais antigo ao mais recente
-        for finding in reversed(findings):
+        for finding in reversed(findings): # Mostra do mais antigo ao mais recente
             finding_dict = dict(finding)
             
-            # --- LÓGICA CONSOLIDADA AQUI DENTRO DO LOOP ---
-            
-            # 1. Adiciona o contexto do evento no campo 'details'
+            # Adiciona o contexto do evento no campo 'details'
             event_info = (
-                f"Comando: {finding_dict.get('command', 'N/A')} | "
-                f"Projeto: {os.path.basename(finding_dict.get('project_path', 'N/A'))} | "
-                f"Data: {finding_dict.get('timestamp', 'N/A')}"
+                f"Comando: {finding_dict.get('command')} | "
+                f"Projeto: {os.path.basename(finding_dict.get('project_path'))} | "
+                f"Data: {finding_dict.get('timestamp')}"
             )
             finding_dict['details'] = event_info
 
-            # 2. Se -s for usado, gera o snippet sob demanda
+            # Gera o snippet sob demanda se a flag -s for usada
             if snippets and finding_dict.get('file') and finding_dict.get('line'):
                 project_path = finding_dict.get('project_path', '')
                 full_file_path = os.path.join(project_path, finding_dict['file'])
-                
                 if os.path.exists(full_file_path):
                     snippet = _get_code_snippet(full_file_path, finding_dict['line'])
                     if snippet:
                         finding_dict['snippet'] = snippet
             
-            # 3. Chama a função de impressão com o dicionário completo
             _print_finding_details(finding_dict)
             click.echo("-" * 40)
 

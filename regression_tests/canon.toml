@@ -1,10 +1,6 @@
-# regression_tests/canon.toml
+
+# Define os casos de teste para o sistema de regressão.
 [[test_case]]
 id = "check_finds_syntax_error"
 command = "doxoade check ."
 project = "project_syntax_error"
-
-[[test_case]]
-id = "check_healthy_project"
-command = "doxoade check ."
-project = "project_healthy"

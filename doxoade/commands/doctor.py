@@ -65,7 +65,7 @@ def _install_dependencies(target_path, logger):
         return False
 
 def _prepare_verification_data(target_path, logger):
-    """Lê o requirements.txt e retorna um conjunto de pacotes necessários."""
+    """(Versão Corrigida) Lê o requirements.txt e retorna um conjunto de pacotes necessários."""
     requirements_file = os.path.join(target_path, 'requirements.txt')
     if not os.path.isfile(requirements_file):
         return None, {'status': 'ok', 'message': 'Nenhum requirements.txt para verificar.'}
@@ -75,10 +75,17 @@ def _prepare_verification_data(target_path, logger):
         with open(requirements_file, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
-                if line and not line.startswith('#'):
-                    match = re.match(r'^[a-zA-Z0-9_-]+', line)
-                    if match:
-                        packages_required.add(match.group(0).lower().replace('_', '-'))
+                # CORREÇÃO: Ignora linhas vazias, comentários e flags como '-e' ou '-r'
+                if not line or line.startswith('#') or line.startswith('-'):
+                    continue
+                
+                # Extrai apenas o nome do pacote, ignorando versões e extras
+                match = re.match(r'^[a-zA-Z0-9_.-]+', line)
+                if match:
+                    # Normaliza o nome (ex: converte '_' para '-')
+                    package_name = match.group(0).lower().replace('_', '-')
+                    packages_required.add(package_name)
+                    
         return packages_required, None
     except IOError as e:
         logger.add_finding('error', f"Não foi possível ler o requirements.txt: {e}")

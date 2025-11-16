@@ -53,6 +53,7 @@ def _extract_python_functions(file_path, logger):
             if isinstance(node, ast.FunctionDef):
                 functions.append({"name": node.name, "line": node.lineno})
     except (SyntaxError, ValueError) as e:
+        # CORREÇÃO: Assinatura corrigida (severity, message)
         logger.add_finding('warning', f"Não foi possível analisar AST de: {file_path}", details=str(e))
     return functions
 
@@ -93,14 +94,19 @@ def _gather_filesystem_data(path, logger, ignore_patterns):
 @click.option('--output', '-o', default='doxoade_report.json', help="Nome do arquivo de saída do relatório.")
 def intelligence(ctx, output):
     """Gera um dossiê de diagnóstico completo do projeto em formato JSON."""
-    # A linha que estava faltando, restaurada:
     path = '.'
     arguments = ctx.params
     with ExecutionLogger('intelligence', path, arguments) as logger:
         click.echo(Fore.CYAN + "--- [INTELLIGENCE] Gerando dossiê de diagnóstico ---")
 
         config = _get_project_config(logger)
-        ignore_patterns = set(config.get('ignore', []) + ['venv', '.git', ...])
+        
+        # CORREÇÃO LÓGICA: Limpar barras finais dos padrões de ignore
+        raw_ignore = config.get('ignore', [])
+        clean_ignore = {item.strip('/\\') for item in raw_ignore}
+        
+        # Adicionar padrões padrão
+        ignore_patterns = clean_ignore.union({'venv', '.git', '__pycache__', '.pytest_cache', 'doxoade.egg-info'})
 
         report_data = {
             "report_generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -116,10 +122,11 @@ def intelligence(ctx, output):
             with open(output, 'w', encoding='utf-8') as f:
                 json.dump(report_data, f, indent=4)
             click.echo(Fore.GREEN + f"\n[OK] Dossiê de diagnóstico salvo em: {output}")
+            # CORREÇÃO: Assinatura corrigida
             logger.add_finding('info', f"Relatório de inteligência gerado com sucesso em '{output}'.")
         except IOError as e:
             click.echo(Fore.RED + f"\n[ERRO] Falha ao salvar o relatório: {e}")
+            # CORREÇÃO: Assinatura corrigida
             logger.add_finding('error', "Falha ao escrever o arquivo de relatório.", details=str(e))
-            # O import de sys estava faltando
             import sys
             sys.exit(1)
