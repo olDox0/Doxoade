@@ -17,38 +17,39 @@ if PACKAGE_PARENT not in sys.path:
     sys.path.insert(0, PACKAGE_PARENT)
 
 # --- REGISTRO DE PLUGINS DA V2.0 ---
-from doxoade.commands.webcheck import webcheck
-from doxoade.commands.utils import log, show_trace, mk, create_pipeline, setup_regression
-from doxoade.commands.tutorial import tutorial_group
-from doxoade.commands.self_test import self_test
-from doxoade.commands.save import save
-from doxoade.commands.run import run
-from doxoade.commands.regression_test import regression_test
-from doxoade.commands.rebuild import rebuild
-from doxoade.commands.python import python
-from doxoade.commands.optimize import optimize
-from doxoade.commands.migrate_db import migrate_db
-from doxoade.commands.kvcheck import kvcheck
-from doxoade.commands.intelligence import intelligence
-from doxoade.commands.init import init
-from doxoade.commands.health import health
-from doxoade.commands.guicheck import guicheck
-from doxoade.commands.global_health import global_health
-from doxoade.commands.git_workflow import release, sync
-from doxoade.commands.git_new import git_new
-from doxoade.commands.git_clean import git_clean
-from doxoade.commands.encoding import encoding
-from doxoade.commands.dashboard import dashboard
-from doxoade.commands.doctor import doctor
-from doxoade.commands.diff import diff
-from doxoade.commands.deepcheck import deepcheck
-from doxoade.commands.config import config_group
-from doxoade.commands.clean import clean
-from doxoade.commands.check import check
-from doxoade.commands.canonize import canonize
-from doxoade.commands.auto import auto
 from doxoade.commands.apicheck import apicheck
+from doxoade.commands.auto import auto
+from doxoade.commands.canonize import canonize
+from doxoade.commands.check import check
+from doxoade.commands.clean import clean
+from doxoade.commands.config import config_group
+from doxoade.commands.dashboard import dashboard
+from doxoade.commands.deepcheck import deepcheck
+from doxoade.commands.diff import diff
+from doxoade.commands.doctor import doctor
+from doxoade.commands.encoding import encoding
+from doxoade.commands.git_clean import git_clean
+from doxoade.commands.git_new import git_new
+from doxoade.commands.git_workflow import release, sync
+from doxoade.commands.global_health import global_health
+from doxoade.commands.guicheck import guicheck
+from doxoade.commands.health import health
 from doxoade.commands.impact_analysis import impact_analysis
+from doxoade.commands.init import init
+from doxoade.commands.install import install
+from doxoade.commands.intelligence import intelligence
+from doxoade.commands.kvcheck import kvcheck
+from doxoade.commands.migrate_db import migrate_db
+from doxoade.commands.python import python
+from doxoade.commands.rebuild import rebuild
+from doxoade.commands.regression_test import regression_test
+from doxoade.commands.run import run
+from doxoade.commands.save import save
+from doxoade.commands.self_test import self_test
+from doxoade.commands.tutorial import tutorial_group
+from doxoade.commands.utils import log, show_trace, mk, create_pipeline, setup_regression
+from doxoade.commands.venv_up import venv_up
+from doxoade.commands.webcheck import webcheck
 
 from doxoade.shared_tools import (
     ExecutionLogger, 
@@ -278,7 +279,6 @@ cli.add_command(config_group)
 cli.add_command(create_pipeline)
 cli.add_command(dashboard)
 cli.add_command(deepcheck)
-cli.add_command(impact_analysis)
 cli.add_command(diff)
 cli.add_command(doctor)
 cli.add_command(encoding)
@@ -287,13 +287,14 @@ cli.add_command(git_new)
 cli.add_command(global_health)
 cli.add_command(guicheck)
 cli.add_command(health)
+cli.add_command(impact_analysis)
 cli.add_command(init)
+cli.add_command(install)
 cli.add_command(intelligence)
 cli.add_command(kvcheck)
 cli.add_command(log)
 cli.add_command(migrate_db)
 cli.add_command(mk)
-cli.add_command(optimize)
 cli.add_command(python)
 cli.add_command(rebuild)
 cli.add_command(regression_test)
@@ -305,6 +306,7 @@ cli.add_command(setup_regression)
 cli.add_command(show_trace)
 cli.add_command(sync)
 cli.add_command(tutorial_group)
+cli.add_command(venv_up)
 cli.add_command(webcheck)
 
 if __name__ == '__main__':
