@@ -25,6 +25,7 @@ from doxoade.commands.save import save
 from doxoade.commands.run import run
 from doxoade.commands.regression_test import regression_test
 from doxoade.commands.rebuild import rebuild
+from doxoade.commands.python import python
 from doxoade.commands.optimize import optimize
 from doxoade.commands.migrate_db import migrate_db
 from doxoade.commands.kvcheck import kvcheck
@@ -293,6 +294,7 @@ cli.add_command(log)
 cli.add_command(migrate_db)
 cli.add_command(mk)
 cli.add_command(optimize)
+cli.add_command(python)
 cli.add_command(rebuild)
 cli.add_command(regression_test)
 cli.add_command(release)
