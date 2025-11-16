@@ -26,15 +26,16 @@ class ExecutionLogger:
             'findings': []
         }
 
-    def add_finding(self, severity, category, message, file=None, line=None, details=None, snippet=None):
+    # CORREÇÃO: Alterada a ordem: 'message' é o segundo argumento. 'category' agora é opcional.
+    def add_finding(self, severity, message, category='UNCATEGORIZED', file=None, line=None, details=None, snippet=None):
         severity = severity.upper()
-        category = category.upper() # Padroniza a categoria para maiúsculas
+        category = category.upper() 
         unique_str = f"{file}:{line}:{message}"
         finding_hash = hashlib.md5(unique_str.encode()).hexdigest()
         
         finding = {
             'severity': severity,
-            'category': category, # <-- A GRANDE MUDANÇA ESTÁ AQUI
+            'category': category,
             'message': message,
             'hash': finding_hash
         }
@@ -56,10 +57,11 @@ class ExecutionLogger:
     def __exit__(self, exc_type, exc_val, exc_tb):
         execution_time_ms = (time.monotonic() - self.start_time) * 1000
         if exc_type and not isinstance(exc_val, SystemExit):
+            # CORREÇÃO: Chamada atualizada para a nova assinatura
             self.add_finding(
                 'CRITICAL',
-                'INTERNAL-ERROR',  # <-- Adiciona a categoria para o erro fatal
                 'A Doxoade encontrou um erro fatal interno.',
+                category='INTERNAL-ERROR',
                 details=f"{exc_type.__name__}: {exc_val}",
             )
         _log_execution(self.command_name, self.path, self.results, self.arguments, execution_time_ms)
@@ -350,3 +352,27 @@ def analyze_file_structure(file_path):
     
     function_dossiers = _analyze_function_flow(tree, content)
     return {'functions': function_dossiers}
+    
+def collect_files_to_analyze(config, cmd_line_ignore=None):
+    """
+    (Fonte da Verdade) Coleta uma lista de arquivos .py para análise, respeitando
+    as configurações de ignore do pyproject.toml e da linha de comando.
+    """
+    if cmd_line_ignore is None:
+        cmd_line_ignore = []
+        
+    search_path = config.get('search_path')
+    config_ignore = [p.strip('/\\').lower() for p in config.get('ignore', [])]
+    # Converte a tupla de 'cmd_line_ignore' em uma lista
+    cmd_line_ignore_list = [p.strip('/\\').lower() for p in list(cmd_line_ignore)]
+    folders_to_ignore = set(config_ignore + cmd_line_ignore_list)
+    folders_to_ignore.update(['venv', 'build', 'dist', '.git', '__pycache__'])
+    
+    files_to_check = []
+    for root, dirs, files in os.walk(search_path, topdown=True):
+        # A lógica de poda que funciona
+        dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
+        for file in files:
+            if file.endswith('.py'):
+                files_to_check.append(os.path.join(root, file))
+    return files_to_check

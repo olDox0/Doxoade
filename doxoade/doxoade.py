@@ -3,7 +3,9 @@
 import traceback
 import toml
 import subprocess
-import os, sys, re
+import os
+import sys
+import re
 import click
 from functools import wraps
 from doxoade.database import init_db
@@ -24,6 +26,7 @@ from doxoade.commands.run import run
 from doxoade.commands.regression_test import regression_test
 from doxoade.commands.rebuild import rebuild
 from doxoade.commands.optimize import optimize
+from doxoade.commands.migrate_db import migrate_db
 from doxoade.commands.kvcheck import kvcheck
 from doxoade.commands.intelligence import intelligence
 from doxoade.commands.init import init
@@ -44,6 +47,7 @@ from doxoade.commands.check import check
 from doxoade.commands.canonize import canonize
 from doxoade.commands.auto import auto
 from doxoade.commands.apicheck import apicheck
+from doxoade.commands.impact_analysis import impact_analysis
 
 from doxoade.shared_tools import (
     ExecutionLogger, 
@@ -70,6 +74,8 @@ __version__ = "35.0 Alfa"
 @click.pass_context
 def cli(ctx):
     """olDox222 Advanced Development Environment (doxoade) LITE v1.0"""
+    if sys.stdout.encoding != 'utf-8':
+        sys.stdout.reconfigure(errors='replace')
     try:
         init_db()
     except Exception as e:
@@ -271,6 +277,7 @@ cli.add_command(config_group)
 cli.add_command(create_pipeline)
 cli.add_command(dashboard)
 cli.add_command(deepcheck)
+cli.add_command(impact_analysis)
 cli.add_command(diff)
 cli.add_command(doctor)
 cli.add_command(encoding)
@@ -283,6 +290,7 @@ cli.add_command(init)
 cli.add_command(intelligence)
 cli.add_command(kvcheck)
 cli.add_command(log)
+cli.add_command(migrate_db)
 cli.add_command(mk)
 cli.add_command(optimize)
 cli.add_command(rebuild)

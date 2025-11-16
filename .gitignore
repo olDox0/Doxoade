@@ -42,3 +42,7 @@ Vers/
 
 # Doxoade cache files
 .doxoade_cache/
+
+
+#Nabter arquivos
+!requirements.txt
