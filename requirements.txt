@@ -1,14 +1,15 @@
+-e .
+PyYAML==6.0.3
+Pygments==2.19.2
 beautifulsoup4==4.14.2
 chardet==5.2.0
 click==8.3.0
 colorama==0.4.6
 coverage==7.11.1
 cssutils==2.11.1
--e git+https://github.com/olDox0/Doxoade.git@7e0878bbc10601605729e1e33296b571806b40ed#egg=doxoade
 esprima==4.0.1
 iniconfig==2.3.0
 jsondiff==2.2.1
-ldap3==2.9.1
 lxml==6.0.2
 mando==0.7.1
 more-itertools==10.8.0
@@ -16,16 +17,13 @@ numpy==2.3.4
 packaging==25.0
 pandas==2.2.3
 pluggy==1.6.0
-pyasn1==0.6.1
-pydirectory==0.1.15
 pyflakes==3.4.0
-Pygments==2.19.2
-pytest==8.4.2
 pytest-cov==7.0.0
+pytest==8.4.2
 python-dateutil==2.9.0.post0
 pytz==2025.2
-PyYAML==6.0.3
 radon==6.0.1
+requests==2.32.5
 setuptools==80.9.0
 six==1.17.0
 soupsieve==2.8

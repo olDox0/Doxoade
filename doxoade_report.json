@@ -1,9 +1,9 @@
 {
-    "report_generated_at_utc": "2025-11-15T19:20:11.578331+00:00",
+    "report_generated_at_utc": "2025-11-16T18:56:32.212068+00:00",
     "doxoade_version": "37.2 Alfa (Hardening)",
     "project_path": "C:\\Users\\olDox222\\Documents\\Meu laptop (1)\\A20251021\\DOSSIER\\Altonomo\\Projetos_E_Programas\\Projeto OADE\\doxoade",
     "telemetry": {
-        "directory_tree": "./\n    .gitignore\n    0.txt\n    1.txt\n    Exemplo.txt\n    PipelineHelp.txt\n    PipelineTeste.txt\n    README.md\n    desktop.ini\n    doxoade_report.json\n    install.py\n    meu_app.specpython\n    pyproject.toml\n    requirements.txt\n    run_doxoade.py\n    setup.py\n    temp.log\n    .doxoade_cache/\n        check_cache.json\n    Exemplo/\n        exemplo.py\n        exemplow.py\n    doxoade/\n        __init__.py\n        _version.py\n        database.py\n        doxoade.py\n        shared_tools.py\n        tracer.py\n        commands/\n            __init__.py\n            apicheck.py\n            auto.py\n            canonize.py\n            check.py\n            clean.py\n            config.py\n            dashboard.py\n            deepcheck.py\n            diff.py\n            doctor.py\n            encoding.py\n            git_clean.py\n            git_new.py\n            git_workflow.py\n            global_health.py\n            guicheck.py\n            health.py\n            init.py\n            intelligence.py\n            kvcheck.py\n            migrate_db.py\n            optimize.py\n            rebuild.py\n            regression_test.py\n            run.py\n            save.py\n            self_test.py\n            tutorial.py\n            utils.py\n            webcheck.py\n        probes/\n            __init__.py\n            import_probe.py\n            static_probe.py\n            syntax_probe.py",
+        "directory_tree": "./\n    .gitignore\n    0.txt\n    1.txt\n    Exemplo.txt\n    PipelineHelp.txt\n    PipelineTeste.txt\n    README.md\n    desktop.ini\n    doxoade_report.json\n    install-python.bat\n    install-python.sh\n    install.py\n    install.sh\n    meu_app.specpython\n    pyproject.toml\n    requirements.txt\n    run_doxoade.py\n    setup.py\n    temp.log\n    .doxoade_cache/\n        check_cache.json\n    Exemplo/\n        exemplo.py\n        exemplow.py\n    doxoade/\n        __init__.py\n        _version.py\n        database.py\n        doxoade.py\n        shared_tools.py\n        tracer.py\n        commands/\n            __init__.py\n            apicheck.py\n            auto.py\n            canonize.py\n            check.py\n            clean.py\n            config.py\n            dashboard.py\n            deepcheck.py\n            diff.py\n            doctor.py\n            encoding.py\n            git_clean.py\n            git_new.py\n            git_workflow.py\n            global_health.py\n            guicheck.py\n            health.py\n            impact_analysis.py\n            init.py\n            install.py\n            intelligence.py\n            kvcheck.py\n            migrate_db.py\n            optimize.py\n            python.py\n            rebuild.py\n            regression_test.py\n            run.py\n            save.py\n            self_test.py\n            tutorial.py\n            utils.py\n            webcheck.py\n        probes/\n            __init__.py\n            import_probe.py\n            static_probe.py\n            syntax_probe.py",
         "filesystem": [
             {
                 "path": ".gitignore",
@@ -23,21 +23,21 @@
                 "path": "1.txt",
                 "size_bytes": 752,
                 "created_at_utc": "2025-11-08T02:06:34.006300+00:00",
-                "modified_at_utc": "2025-11-15T02:26:24.696520+00:00",
+                "modified_at_utc": "2025-11-16T01:49:07.278960+00:00",
                 "encoding": "ascii"
             },
             {
                 "path": "Exemplo.txt",
                 "size_bytes": 78,
                 "created_at_utc": "2025-11-06T02:59:57.984912+00:00",
-                "modified_at_utc": "2025-11-15T19:13:37.089410+00:00",
+                "modified_at_utc": "2025-11-16T18:48:02.929346+00:00",
                 "encoding": "ascii"
             },
             {
                 "path": "PipelineHelp.txt",
-                "size_bytes": 1547,
+                "size_bytes": 1675,
                 "created_at_utc": "2025-11-06T02:29:24.225657+00:00",
-                "modified_at_utc": "2025-11-15T19:11:06.576929+00:00",
+                "modified_at_utc": "2025-11-16T18:46:27.424876+00:00",
                 "encoding": "ascii"
             },
             {
@@ -49,9 +49,9 @@
             },
             {
                 "path": "README.md",
-                "size_bytes": 8625,
+                "size_bytes": 7442,
                 "created_at_utc": "2025-09-07T23:57:34.381355+00:00",
-                "modified_at_utc": "2025-10-19T13:25:30.528260+00:00",
+                "modified_at_utc": "2025-11-16T05:04:33.789142+00:00",
                 "encoding": "utf-8"
             },
             {
@@ -63,51 +63,64 @@
             },
             {
                 "path": "doxoade_report.json",
-                "size_bytes": 44668,
+                "size_bytes": 48385,
                 "created_at_utc": "2025-11-06T03:00:23.848361+00:00",
-                "modified_at_utc": "2025-11-15T19:13:50.060736+00:00",
+                "modified_at_utc": "2025-11-16T18:48:12.813316+00:00",
                 "encoding": "ascii"
             },
             {
+                "path": "install-python.bat",
+                "size_bytes": 1937,
+                "created_at_utc": "2025-11-16T05:33:23.129749+00:00",
+                "modified_at_utc": "2025-11-16T06:15:17.384374+00:00",
+                "encoding": "utf-8"
+            },
+            {
+                "path": "install-python.sh",
+                "size_bytes": 1413,
+                "created_at_utc": "2025-11-16T06:16:11.264437+00:00",
+                "modified_at_utc": "2025-11-16T06:16:11.639416+00:00",
+                "encoding": "ISO-8859-1"
+            },
+            {
                 "path": "install.py",
-                "size_bytes": 5220,
+                "size_bytes": 2893,
                 "created_at_utc": "2025-10-19T23:38:37.023570+00:00",
-                "modified_at_utc": "2025-11-15T06:05:50.848336+00:00",
+                "modified_at_utc": "2025-11-16T06:57:11.277380+00:00",
                 "encoding": "utf-8",
                 "functions": [
                     {
                         "name": "print_header",
-                        "line": 16
+                        "line": 13
                     },
                     {
                         "name": "print_success",
-                        "line": 17
+                        "line": 14
                     },
                     {
                         "name": "print_warning",
-                        "line": 18
+                        "line": 15
                     },
                     {
                         "name": "print_error",
-                        "line": 19
+                        "line": 16
                     },
                     {
-                        "name": "run_command_interactive",
-                        "line": 24
-                    },
-                    {
-                        "name": "get_scripts_path",
-                        "line": 44
-                    },
-                    {
-                        "name": "_add_to_path_windows",
-                        "line": 51
+                        "name": "run_pip_install",
+                        "line": 18
                     },
                     {
                         "name": "main",
-                        "line": 69
+                        "line": 30
                     }
                 ]
+            },
+            {
+                "path": "install.sh",
+                "size_bytes": 1760,
+                "created_at_utc": "2025-11-16T06:21:32.171913+00:00",
+                "modified_at_utc": "2025-11-16T06:21:32.546895+00:00",
+                "encoding": "utf-8"
             },
             {
                 "path": "meu_app.specpython",
@@ -118,16 +131,16 @@
             },
             {
                 "path": "pyproject.toml",
-                "size_bytes": 996,
+                "size_bytes": 1111,
                 "created_at_utc": "2025-10-11T16:27:38.326984+00:00",
-                "modified_at_utc": "2025-11-15T17:47:01.189911+00:00",
+                "modified_at_utc": "2025-11-15T22:15:42.048184+00:00",
                 "encoding": "ascii"
             },
             {
                 "path": "requirements.txt",
-                "size_bytes": 568,
+                "size_bytes": 593,
                 "created_at_utc": "2025-09-07T23:51:37.653233+00:00",
-                "modified_at_utc": "2025-11-15T16:21:37.077192+00:00",
+                "modified_at_utc": "2025-11-16T18:43:50.907913+00:00",
                 "encoding": "ascii"
             },
             {
@@ -155,9 +168,9 @@
             },
             {
                 "path": ".doxoade_cache/check_cache.json",
-                "size_bytes": 888783,
+                "size_bytes": 906793,
                 "created_at_utc": "2025-11-14T23:44:41.219594+00:00",
-                "modified_at_utc": "2025-11-15T19:12:58.698020+00:00",
+                "modified_at_utc": "2025-11-16T18:47:28.402615+00:00",
                 "encoding": "ascii"
             },
             {
@@ -211,42 +224,42 @@
             },
             {
                 "path": "doxoade/doxoade.py",
-                "size_bytes": 14548,
+                "size_bytes": 14799,
                 "created_at_utc": "2025-09-07T23:57:15.658402+00:00",
-                "modified_at_utc": "2025-11-15T17:13:18.488806+00:00",
+                "modified_at_utc": "2025-11-16T18:19:15.183072+00:00",
                 "encoding": "ascii",
                 "functions": [
                     {
                         "name": "cli",
-                        "line": 72
+                        "line": 77
                     },
                     {
                         "name": "log_command_execution",
-                        "line": 85
+                        "line": 90
                     },
                     {
                         "name": "setup_health",
-                        "line": 109
+                        "line": 114
                     },
                     {
                         "name": "_get_github_repo_info",
-                        "line": 227
+                        "line": 232
                     },
                     {
                         "name": "_analyze_traceback",
-                        "line": 249
+                        "line": 254
                     },
                     {
                         "name": "wrapper",
-                        "line": 87
+                        "line": 92
                     }
                 ]
             },
             {
                 "path": "doxoade/shared_tools.py",
-                "size_bytes": 15640,
+                "size_bytes": 16743,
                 "created_at_utc": "2025-10-10T20:32:43.994665+00:00",
-                "modified_at_utc": "2025-11-15T16:06:47.545842+00:00",
+                "modified_at_utc": "2025-11-16T00:23:50.960558+00:00",
                 "encoding": "utf-8",
                 "functions": [
                     {
@@ -312,6 +325,10 @@
                     {
                         "name": "analyze_file_structure",
                         "line": 339
+                    },
+                    {
+                        "name": "collect_files_to_analyze",
+                        "line": 356
                     },
                     {
                         "name": "__init__",
@@ -413,86 +430,82 @@
             },
             {
                 "path": "doxoade/commands/check.py",
-                "size_bytes": 21224,
+                "size_bytes": 20521,
                 "created_at_utc": "2025-10-11T18:48:01.916991+00:00",
-                "modified_at_utc": "2025-11-15T00:48:46.283882+00:00",
+                "modified_at_utc": "2025-11-15T23:11:22.989386+00:00",
                 "encoding": "MacRoman",
                 "functions": [
                     {
                         "name": "_get_probe_path",
-                        "line": 26
-                    },
-                    {
-                        "name": "_collect_files_to_analyze",
-                        "line": 37
+                        "line": 31
                     },
                     {
                         "name": "_run_syntax_probe",
-                        "line": 52
+                        "line": 42
                     },
                     {
                         "name": "_run_pyflakes_probe",
-                        "line": 75
+                        "line": 65
                     },
                     {
                         "name": "_run_import_probe",
-                        "line": 130
+                        "line": 120
                     },
                     {
                         "name": "_extract_imports",
-                        "line": 157
+                        "line": 147
                     },
                     {
                         "name": "_analyze_single_file_statically",
-                        "line": 171
+                        "line": 161
                     },
                     {
                         "name": "_fix_unused_imports",
-                        "line": 179
+                        "line": 169
                     },
                     {
                         "name": "step_collect_files",
-                        "line": 221
+                        "line": 211
                     },
                     {
                         "name": "step_run_syntax_probes",
-                        "line": 226
+                        "line": 216
                     },
                     {
                         "name": "step_run_pyflakes_probes",
-                        "line": 239
+                        "line": 229
                     },
                     {
                         "name": "step_extract_imports",
-                        "line": 246
+                        "line": 236
                     },
                     {
                         "name": "step_run_import_probe",
-                        "line": 255
+                        "line": 245
                     },
                     {
                         "name": "step_run_structure_analysis",
-                        "line": 262
+                        "line": 252
                     },
                     {
                         "name": "_get_file_hash",
-                        "line": 279
+                        "line": 269
                     },
                     {
                         "name": "_load_cache",
-                        "line": 290
+                        "line": 280
                     },
                     {
                         "name": "_save_cache",
-                        "line": 307
+                        "line": 297
                     },
                     {
                         "name": "run_check_logic",
-                        "line": 322
+                        "line": 312
                     },
                     {
                         "name": "check",
-                        "line": 423
+                        "line": 413
                     }
                 ]
             },
@@ -712,26 +725,26 @@
             },
             {
                 "path": "doxoade/commands/global_health.py",
-                "size_bytes": 8932,
+                "size_bytes": 9870,
                 "created_at_utc": "2025-10-21T17:35:45.183316+00:00",
-                "modified_at_utc": "2025-11-10T04:18:39.042264+00:00",
+                "modified_at_utc": "2025-11-16T02:17:06.621082+00:00",
                 "encoding": "utf-8",
                 "functions": [
                     {
                         "name": "_check_path",
-                        "line": 20
+                        "line": 16
                     },
                     {
                         "name": "_check_dependencies",
-                        "line": 84
+                        "line": 71
+                    },
+                    {
+                        "name": "_check_library_conflicts",
+                        "line": 95
                     },
                     {
                         "name": "global_health",
-                        "line": 128
-                    },
-                    {
-                        "name": "_verify_installation_integrity",
-                        "line": 147
+                        "line": 170
                     }
                 ]
             },
@@ -818,6 +831,47 @@
                 ]
             },
             {
+                "path": "doxoade/commands/impact_analysis.py",
+                "size_bytes": 6885,
+                "created_at_utc": "2025-11-16T00:48:28.685008+00:00",
+                "modified_at_utc": "2025-11-16T01:49:47.032965+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "_resolve_relative_import",
+                        "line": 10
+                    },
+                    {
+                        "name": "_build_project_index",
+                        "line": 54
+                    },
+                    {
+                        "name": "_path_to_module_name",
+                        "line": 90
+                    },
+                    {
+                        "name": "_present_impact_results",
+                        "line": 96
+                    },
+                    {
+                        "name": "impact_analysis",
+                        "line": 127
+                    },
+                    {
+                        "name": "__init__",
+                        "line": 36
+                    },
+                    {
+                        "name": "visit_Import",
+                        "line": 40
+                    },
+                    {
+                        "name": "visit_ImportFrom",
+                        "line": 45
+                    }
+                ]
+            },
+            {
                 "path": "doxoade/commands/init.py",
                 "size_bytes": 5486,
                 "created_at_utc": "2025-10-13T16:47:18.117972+00:00",
@@ -827,6 +881,31 @@
                     {
                         "name": "init",
                         "line": 24
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/install.py",
+                "size_bytes": 6381,
+                "created_at_utc": "2025-11-16T18:17:31.216202+00:00",
+                "modified_at_utc": "2025-11-16T18:32:22.583848+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "_run_pip_command",
+                        "line": 11
+                    },
+                    {
+                        "name": "_get_installed_version",
+                        "line": 35
+                    },
+                    {
+                        "name": "_update_requirements",
+                        "line": 42
+                    },
+                    {
+                        "name": "install",
+                        "line": 73
                     }
                 ]
             },
@@ -882,18 +961,18 @@
             },
             {
                 "path": "doxoade/commands/migrate_db.py",
-                "size_bytes": 3916,
+                "size_bytes": 4316,
                 "created_at_utc": "2025-11-15T06:25:00.929120+00:00",
-                "modified_at_utc": "2025-11-15T06:25:01.364367+00:00",
+                "modified_at_utc": "2025-11-15T20:11:59.467447+00:00",
                 "encoding": "utf-8",
                 "functions": [
                     {
-                        "name": "get_db_path",
-                        "line": 7
+                        "name": "_map_severity",
+                        "line": 10
                     },
                     {
                         "name": "migrate_db",
-                        "line": 12
+                        "line": 19
                     }
                 ]
             },
@@ -911,6 +990,23 @@
                     {
                         "name": "_find_unused_packages",
                         "line": 77
+                    }
+                ]
+            },
+            {
+                "path": "doxoade/commands/python.py",
+                "size_bytes": 4869,
+                "created_at_utc": "2025-11-16T04:38:51.111359+00:00",
+                "modified_at_utc": "2025-11-16T04:46:36.077415+00:00",
+                "encoding": "utf-8",
+                "functions": [
+                    {
+                        "name": "_install_for_termux",
+                        "line": 14
+                    },
+                    {
+                        "name": "python",
+                        "line": 56
                     }
                 ]
             },
