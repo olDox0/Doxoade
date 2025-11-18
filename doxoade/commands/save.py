@@ -49,7 +49,8 @@ def _can_proceed_with_commit(check_result, force_flag, logger):
     return False
 
 def _learn_from_fixes(old_incident, current_results, logger):
-    """Compara um incidente antigo com os resultados atuais para aprender as soluções."""
+    """(Versão Corrigida) Compara um incidente antigo com os resultados atuais para aprender as soluções."""
+    # CORREÇÃO: A mensagem agora é impressa incondicionalmente no início.
     click.echo(Fore.CYAN + "\n--- [LEARN] Analisando correções... ---")
     
     old_findings = {f['hash']: f for f in old_incident.get('findings', [])}
@@ -63,8 +64,10 @@ def _learn_from_fixes(old_incident, current_results, logger):
 
     diff_output = _run_git_command(['diff', '--staged'], capture_output=True)
     if not diff_output:
+        click.echo(Fore.YELLOW + "   > As correções não foram adicionadas ao 'staging area' do Git. Impossível aprender.")
         return
 
+    # O resto da função permanece exatamente o mesmo...
     conn = get_db_connection()
     cursor = conn.cursor()
     learned_count = 0
