@@ -14,6 +14,57 @@ from ..shared_tools import ExecutionLogger
 
 __version__ = "35.81 Alfa Phoenix"
 
+def _verify_gitignore_logic(target_path, logger):
+    """
+    (Versão Direta) Audita o .gitignore e oferece para mover as regras de negação (!) para o final.
+    """
+    click.echo(Fore.WHITE + "Verificando a lógica do arquivo .gitignore...")
+    gitignore_path = os.path.join(target_path, '.gitignore')
+    
+    if not os.path.isfile(gitignore_path):
+        click.echo(Fore.GREEN + "   > [OK] Arquivo .gitignore não encontrado. Nenhuma verificação necessária.")
+        return
+
+    try:
+        with open(gitignore_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        # Separa as linhas de negação de todo o resto.
+        negation_lines = [line for line in lines if line.strip().startswith('!')]
+        other_lines = [line for line in lines if not line.strip().startswith('!')]
+
+        # Se não houver regras de negação, não há nada a fazer.
+        if not negation_lines:
+            click.echo(Fore.GREEN + "   > [OK] Nenhuma regra de negação (!) encontrada no .gitignore.")
+            return
+
+        # Se houver regras de negação, oferece para reorganizar por segurança.
+        click.echo(Fore.YELLOW + "   > [INFO] Regras de negação (!) foram encontradas no seu .gitignore.")
+        click.echo(Fore.CYAN + "     Para garantir que funcionem corretamente, elas devem estar no final do arquivo.")
+        
+        if click.confirm(Fore.YELLOW + "     Deseja reorganizar o arquivo agora? (Um backup .bkp será criado)"):
+            # Ação de backup direta
+            backup_path = gitignore_path + '.bkp'
+            shutil.copy2(gitignore_path, backup_path)
+            click.echo(Fore.WHITE + f"     - Backup do arquivo original salvo em: {os.path.basename(backup_path)}")
+
+            # Constrói o novo conteúdo de forma robusta
+            # Junta as outras linhas, removendo espaços extras no final, e adiciona as negações
+            new_content = "".join(other_lines).strip()
+            new_content += "\n\n# Exceções (movidas para o final para garantir prioridade)\n"
+            new_content += "".join(negation_lines).strip() + "\n"
+
+            with open(gitignore_path, 'w', encoding='utf-8') as f:
+                f.write(new_content)
+            
+            msg = "Arquivo .gitignore foi reorganizado com sucesso."
+            logger.add_finding("INFO", msg, category="GIT-CONFIG-REPAIR")
+            click.echo(Fore.GREEN + f"   > [OK] {msg}")
+
+    except Exception as e:
+        logger.add_finding("ERROR", "Falha ao processar o .gitignore.", details=str(e))
+        click.echo(Fore.RED + f"   > [ERRO] Não foi possível processar o .gitignore: {e}")
+
 def _check_and_create_venv(target_path, logger):
     venv_path = os.path.join(target_path, 'venv')
     click.echo(Fore.WHITE + f"Verificando a existência de '{venv_path}'...")
@@ -210,7 +261,6 @@ def doctor(ctx, path):
     arguments = ctx.params
     with ExecutionLogger('doctor', path, arguments) as logger:
         click.echo(Fore.CYAN + Style.BRIGHT + f"--- [DOCTOR] Iniciando diagnóstico para: {os.path.abspath(path)} ---")
-        
         original_dir = os.getcwd()
         try:
             os.chdir(path)
@@ -242,7 +292,12 @@ def doctor(ctx, path):
                 click.echo(Fore.GREEN + f"   > [OK] {verification.get('message')}")
             click.echo(Fore.YELLOW + "\n--- Passo 3: Verificando Sanidade do Ambiente de Testes ---")
             _verify_test_environment('.', logger)
-            # Passo Final: Acessibilidade Global
+
+            # --- CORREÇÃO: MOVA A CHAMADA PARA CÁ ---
+            click.echo(Fore.YELLOW + "\n--- Passo 4: Verificando Configuração do Git ---")
+            _verify_gitignore_logic('.', logger)
+            # --- FIM DA CORREÇÃO ---
+            
             click.echo(Fore.YELLOW + "\n--- Passo Final: Verificando Acessibilidade Global ---")
             _verify_and_guide_path(logger)
 
@@ -298,3 +353,4 @@ def _verify_test_environment(target_path, logger):
 
     if not has_issues:
         click.echo(Fore.GREEN + "   > [OK] Ambiente de testes parece são.")
+        

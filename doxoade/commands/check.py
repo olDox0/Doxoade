@@ -24,7 +24,8 @@ from ..shared_tools import (
     _get_venv_python_executable,
     _get_project_config,
     collect_files_to_analyze,
-    analyze_file_structure
+    analyze_file_structure,
+    _run_git_command
 )
 
 # AS STRINGS DAS SONDAS FORAM REMOVIDAS DAQUI!
@@ -395,6 +396,38 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
             
         return logger.results
 
+def _persist_incidents(logger_results):
+    """Salva os problemas encontrados em um arquivo de cache para análise futura."""
+    cache_dir = '.doxoade_cache'
+    incident_file = os.path.join(cache_dir, 'incidents.json')
+    
+    findings = logger_results.get('findings', [])
+
+    # Se não houver problemas, garante que qualquer arquivo de incidente antigo seja limpo.
+    if not findings:
+        if os.path.exists(incident_file):
+            try:
+                os.remove(incident_file)
+            except OSError:
+                pass # Ignora se não conseguir remover
+        return
+
+    # Se houver problemas, persiste o incidente.
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        commit_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True)
+        
+        incident_data = {
+            "commit_hash": commit_hash or "N/A",
+            "findings": findings
+        }
+        
+        with open(incident_file, 'w', encoding='utf-8') as f:
+            json.dump(incident_data, f, indent=4)
+            
+    except Exception as e:
+        # Esta funcionalidade é "best-effort", não deve quebrar o comando check se falhar.
+        click.echo(Fore.YELLOW + f"\n[AVISO] Não foi possível salvar o cache do incidente: {e}")
 
 # =============================================================================
 # O COMANDO CLICK
@@ -420,11 +453,9 @@ def check(ctx, path, cmd_line_ignore, fix, debug, output_format, fast, no_import
         fast=fast, no_imports=no_imports, no_cache=no_cache
     )
     
+    _persist_incidents(results)
+    
     if output_format == 'json':
-        # Remove a chave 'findings' interna para evitar duplicatas, se necessário
-        if 'findings' in results:
-            # A apresentação JSON pode ter sua própria lógica de formatação
-            pass
         print(json.dumps(results, indent=2, ensure_ascii=False))
     else:
         if not debug:
