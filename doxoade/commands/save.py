@@ -49,10 +49,15 @@ def _can_proceed_with_commit(check_result, force_flag, logger):
     return False
 
 def _learn_from_fixes(old_incident, current_results, logger):
-    """(Versão Corrigida) Compara um incidente antigo com os resultados atuais para aprender as soluções."""
-    # CORREÇÃO: A mensagem agora é impressa incondicionalmente no início.
+    """Compara um incidente antigo com os resultados atuais para aprender as soluções."""
     click.echo(Fore.CYAN + "\n--- [LEARN] Analisando correções... ---")
-    
+
+    # NOVA VERIFICAÇÃO: Garante que estamos comparando estados diferentes
+    current_commit_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True)
+    if old_incident.get('commit_hash') == current_commit_hash and not _run_git_command(['diff', '--staged'], capture_output=True):
+        click.echo(Fore.WHITE + "Nenhuma mudança de código detectada desde o último incidente. Pulando aprendizado.")
+        return
+
     old_findings = {f['hash']: f for f in old_incident.get('findings', [])}
     current_hashes = {f['hash'] for f in current_results.get('findings', [])}
     

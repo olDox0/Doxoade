@@ -397,36 +397,24 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
         return logger.results
 
 def _persist_incidents(logger_results):
-    """Salva os problemas encontrados em um arquivo de cache para análise futura."""
+    """(Versão Corrigida) Salva o resultado mais recente do check no cache."""
     cache_dir = '.doxoade_cache'
     incident_file = os.path.join(cache_dir, 'incidents.json')
     
-    findings = logger_results.get('findings', [])
-
-    # Se não houver problemas, garante que qualquer arquivo de incidente antigo seja limpo.
-    if not findings:
-        if os.path.exists(incident_file):
-            try:
-                os.remove(incident_file)
-            except OSError:
-                pass # Ignora se não conseguir remover
-        return
-
-    # Se houver problemas, persiste o incidente.
     try:
         os.makedirs(cache_dir, exist_ok=True)
         commit_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True)
         
+        # Simplesmente escreve o estado atual, seja ele com ou sem 'findings'
         incident_data = {
             "commit_hash": commit_hash or "N/A",
-            "findings": findings
+            "findings": logger_results.get('findings', [])
         }
         
         with open(incident_file, 'w', encoding='utf-8') as f:
             json.dump(incident_data, f, indent=4)
             
     except Exception as e:
-        # Esta funcionalidade é "best-effort", não deve quebrar o comando check se falhar.
         click.echo(Fore.YELLOW + f"\n[AVISO] Não foi possível salvar o cache do incidente: {e}")
 
 # =============================================================================
