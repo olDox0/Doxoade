@@ -106,40 +106,54 @@ def save(ctx, message, force):
     with ExecutionLogger('save', '.', arguments) as logger:
         click.echo(Fore.CYAN + "--- [SAVE] Iniciando processo de salvamento seguro ---")
 
+        # PASSO 1: Preparar arquivos
         click.echo(Fore.YELLOW + "\nPasso 1: Preparando todos os arquivos para o commit (git add .)...")
         if not _run_git_command(['add', '.']):
             click.echo(Fore.RED + "[ERRO] Falha ao preparar os arquivos."); sys.exit(1)
         click.echo(Fore.GREEN + "[OK] Arquivos preparados.")
 
+        # PASSO 2: Executar verificação de qualidade
         click.echo(Fore.YELLOW + "\nPasso 2: Executando verificação de qualidade ('doxoade check')...")
         check_results, error_msg = _run_quality_check(logger)
-        if not check_results:
+        if check_results is None: # Verificação alterada para 'is None' para mais robustez
             click.echo(Fore.RED + f"[ERRO] {error_msg}"); sys.exit(1)
-
-        summary = check_results.get('summary', {})
-        has_errors = summary.get('critical', 0) > 0 or summary.get('errors', 0) > 0
-
+        
+        # --- INÍCIO DA CORREÇÃO LÓGICA ---
+        
+        # PASSO 3: Lógica de Aprendizagem (SEMPRE tenta aprender se um incidente existe)
         incident_file = os.path.join('.doxoade_cache', 'incidents.json')
         if os.path.exists(incident_file):
             try:
                 with open(incident_file, 'r', encoding='utf-8') as f:
                     incident_data = json.load(f)
+                
+                # A chamada de aprendizado agora acontece aqui, incondicionalmente
                 _learn_from_fixes(incident_data, check_results, logger)
+                
+                # Limpa o incidente somente após a tentativa de aprendizado
                 os.remove(incident_file)
             except (IOError, json.JSONDecodeError):
-                pass
+                pass # Ignora se não conseguir ler ou deletar o arquivo de incidente
+
+        # PASSO 4: Decidir sobre o commit com base nos resultados do check
+        summary = check_results.get('summary', {})
+        has_errors = summary.get('critical', 0) > 0 or summary.get('errors', 0) > 0
 
         if has_errors and not force:
             logger.add_finding('ERROR', "Commit abortado devido a erros do 'check'.", details=json.dumps(check_results))
             click.echo(Fore.RED + "\n[ERRO] 'doxoade check' encontrou erros. Commit abortado.")
             _present_results('text', check_results)
             sys.exit(1)
-        
-        if has_errors and force:
+        elif has_errors and force:
             click.echo(Fore.YELLOW + "\n[AVISO] Erros encontrados, mas o commit foi forçado.")
             logger.add_finding('WARNING', "Commit forçado apesar dos erros do 'check'.")
+        else:
+             click.echo(Fore.GREEN + "\n[OK] Verificação de qualidade concluída sem erros críticos.")
 
-        click.echo(Fore.YELLOW + f"\nPasso 3: Criando commit com a mensagem: '{message}'...")
+        # --- FIM DA CORREÇÃO LÓGICA ---
+        
+        # PASSO 5: Executar o commit
+        click.echo(Fore.YELLOW + f"\nPasso 5: Criando commit com a mensagem: '{message}'...")
         if not _run_git_command(['commit', '-m', message]):
             click.echo(Fore.YELLOW + "[AVISO] O Git não encontrou nenhuma alteração para commitar.")
             return

@@ -25,6 +25,7 @@ config.json
 #doxoade.bat
 *.log
 *.txt
+*.bkp
 
 # Arquivos de Configuração de IDE
 .vscode/
@@ -42,9 +43,6 @@ Vers/
 
 # Doxoade cache files
 .doxoade_cache/
-
-
-#Nabter arquivos
 
 # Exceções (movidas para o final para garantir prioridade)
 !requirements.txt
