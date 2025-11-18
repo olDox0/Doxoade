@@ -165,12 +165,93 @@ def _check_library_conflicts(logger, requirements):
 
     return all_ok
 
+def _check_pip_health(logger):
+    """(Versão Final) Executa uma verificação de saúde específica para a instalação do pip."""
+    click.echo(Fore.YELLOW + "\n--- 4. Análise de Saúde do Pip ---")
+    all_ok = True
+    
+    try:
+        result = subprocess.run(
+            [sys.executable, '-m', 'pip', '--version'],
+            capture_output=True, text=True, check=True, encoding='utf-8'
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        msg = "O comando 'pip' não está acessível ou funcional através do interpretador Python atual."
+        logger.add_finding("CRITICAL", msg, category="PIP-HEALTH")
+        click.echo(Fore.RED + f"   > [FALHA CRÍTICA] {msg}")
+        return False
+
+    # --- INÍCIO DA CORREÇÃO FINAL ---
+    pip_path_str = result.stdout.split('from ')[1].split(' (python')[0].strip()
+    python_executable_path = sys.executable
+    
+    # Raiz do venv a partir do python.exe (ex: ...\venv\Scripts -> ...\venv)
+    venv_root_from_python = os.path.abspath(os.path.join(os.path.dirname(python_executable_path), '..'))
+    
+    # Raiz do venv a partir do pacote pip (ex: ...\venv\Lib\site-packages\pip -> ...\venv)
+    # PRECISAMOS SUBIR 3 NÍVEIS: pip -> site-packages -> Lib -> venv
+    venv_root_from_pip = os.path.abspath(os.path.join(pip_path_str, '..', '..', '..'))
+
+    if os.path.normcase(venv_root_from_python) != os.path.normcase(venv_root_from_pip):
+        all_ok = False
+        msg = "Conflito de instalação detectado. O 'pip' em uso não pertence à instalação Python atual."
+        # ... (lógica de erro inalterada) ...
+    else:
+        click.echo(Fore.GREEN + "   > [OK] A instalação do 'pip' está corretamente associada ao Python ativo.")
+    # --- FIM DA CORREÇÃO ---
+
+    # 3. Verifica se há atualizações para o pip (lógica inalterada)
+    try:
+        check_result = subprocess.run(
+            [sys.executable, '-m', 'pip', 'list', '--outdated'],
+            capture_output=True, text=True, encoding='utf-8'
+        )
+        if 'pip ' in check_result.stdout.lower(): # Uma forma mais robusta de verificar
+            update_line = [line for line in check_result.stdout.splitlines() if line.lower().startswith('pip ')][0]
+            parts = update_line.split()
+            current_version, latest_version = parts[1], parts[2]
+
+            msg = f"Uma nova versão do pip está disponível: {current_version} -> {latest_version}"
+            details = f"Para atualizar, execute: {os.path.basename(sys.executable)} -m pip install --upgrade pip"
+            logger.add_finding("INFO", msg, category="PIP-HEALTH", details=details)
+            click.echo(Fore.YELLOW + f"   > [INFO] {msg}")
+            click.echo(Fore.CYAN + f"     {details}")
+        else:
+            click.echo(Fore.GREEN + "   > [OK] Você está usando a versão mais recente do pip.")
+    except Exception:
+        pass
+
+    # 4. Oferece para limpar o cache (lógica inalterada)
+    if click.confirm(Fore.YELLOW + "\n     Deseja verificar e, se necessário, limpar o cache do pip? (Isso pode resolver problemas de download)"):
+        try:
+            # Adiciona '--no-input' para evitar que o pip peça confirmação
+            subprocess.run([sys.executable, '-m', 'pip', 'cache', 'purge', '--no-input'], check=True, capture_output=True)
+            click.echo(Fore.GREEN + "   > [OK] Cache do pip limpo com sucesso.")
+        except subprocess.CalledProcessError:
+            click.echo(Fore.RED + "   > [FALHA] Não foi possível limpar o cache do pip.")
+    
+    return all_ok
+
 @click.command('global-health')
 @click.pass_context
-def global_health(ctx):
+@click.option('--pip', 'check_pip', is_flag=True, help="Executa uma verificação de saúde focada no pip.")
+def global_health(ctx, check_pip):
     """Verifica a saúde da instalação global da doxoade no sistema."""
     arguments = ctx.params
     with ExecutionLogger('global-health', '.', arguments) as logger:
+        # Se a flag --pip for usada, executa apenas a verificação do pip
+        if check_pip:
+            click.echo(Fore.CYAN + Style.BRIGHT + "--- [GLOBAL-HEALTH --PIP] Verificando a saúde do Pip ---")
+            pip_ok = _check_pip_health(logger)
+            click.echo(Fore.CYAN + Style.BRIGHT + "\n--- Diagnóstico Concluído ---")
+            if pip_ok:
+                click.echo(Fore.GREEN + Style.BRIGHT + "[SAUDÁVEL] A instalação do Pip parece correta.")
+            else:
+                click.echo(Fore.RED + Style.BRIGHT + "[PROBLEMA] Um ou mais problemas foram encontrados na instalação do Pip.")
+                sys.exit(1)
+            return
+
+        # Fluxo normal do global-health
         click.echo(Fore.CYAN + Style.BRIGHT + "--- [GLOBAL-HEALTH] Verificando a saúde da instalação Doxoade ---")
         
         path_ok = _check_path(logger)
@@ -179,7 +260,7 @@ def global_health(ctx):
             reqs_str = metadata.requires('doxoade')
             requirements = [Requirement(r) for r in reqs_str if "extra ==" not in r] if reqs_str else []
         except metadata.PackageNotFoundError:
-            click.echo(Fore.RED + "   > [FALHA CRÍTICA] Doxoade não parece estar instalado. Execute 'pip install -e .' no diretório do projeto.")
+            click.echo(Fore.RED + "   > [FALHA CRÍTICA] Doxoade não parece estar instalado.")
             sys.exit(1)
 
         deps_ok = _check_dependencies(logger, requirements)
@@ -189,6 +270,6 @@ def global_health(ctx):
         if path_ok and deps_ok and conflicts_ok:
             click.echo(Fore.GREEN + Style.BRIGHT + "[SAUDÁVEL] A instalação da Doxoade está correta e funcional.")
         else:
-            logger.add_finding('error', 'A verificação de saúde global encontrou um ou mais problemas.', category="GLOBAL-HEALTH-SUMMARY")
-            click.echo(Fore.RED + Style.BRIGHT + "[PROBLEMA] Um ou mais problemas foram encontrados. Verifique os detalhes acima.")
+            logger.add_finding('error', 'A verificação de saúde global encontrou problemas.', category="GLOBAL-HEALTH-SUMMARY")
+            click.echo(Fore.RED + Style.BRIGHT + "[PROBLEMA] Um ou mais problemas foram encontrados.")
             sys.exit(1)
