@@ -20,7 +20,7 @@ def _run_quality_check():
         return None
 
 def _manage_incidents_and_learn(current_results, logger, project_path):
-    """Gerencia incidentes no DB e aprende com as correções."""
+    """(Versão Definitiva) Gerencia incidentes e aprende comparando com o commit do incidente."""
     click.echo(Fore.CYAN + "\n--- [LEARN] Verificando incidentes e aprendendo com correções... ---")
     
     conn = get_db_connection()
@@ -43,10 +43,16 @@ def _manage_incidents_and_learn(current_results, logger, project_path):
                 for f_hash in resolved_hashes:
                     incident = old_findings_map[f_hash]
                     file_path = incident['file_path']
+                    incident_commit = incident['commit_hash']
                     
-                    # CORREÇÃO FINAL: O diff é contra o staging area, que já contém as correções
-                    diff_output = _run_git_command(['diff', '--staged', '--', file_path], capture_output=True)
-                    if not diff_output: continue
+                    # --- A CORREÇÃO CRUCIAL ---
+                    # Compara o commit onde o erro foi visto pela última vez com o estado atual do arquivo no disco.
+                    # O '--' é importante para o Git não confundir o hash com um nome de branch.
+                    diff_output = _run_git_command(['diff', incident_commit, '--', file_path], capture_output=True)
+                    
+                    if not diff_output:
+                        # Se não houver diff, pode ser um erro de metadados, mas não devemos parar
+                        continue
 
                     message = incident['message']
                     cursor.execute(
@@ -55,6 +61,7 @@ def _manage_incidents_and_learn(current_results, logger, project_path):
                     )
                     learned_count += 1
         
+        # Lógica de atualização do DB
         cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
         if current_findings:
             commit_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True) or "N/A"
@@ -108,9 +115,7 @@ def save(ctx, message, force):
         
         if "nothing to commit" in (_run_git_command(['status', '--porcelain'], capture_output=True) or ""):
              click.echo(Fore.YELLOW + "[AVISO] Nenhuma alteração para commitar."); return
-
-        commit_output = _run_git_command(['commit', '-m', message], capture_output=True)
-        
+        _run_git_command(['commit', '-m', message])
         new_commit_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True)
         if new_commit_hash:
             conn = get_db_connection()
