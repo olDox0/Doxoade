@@ -19,19 +19,21 @@ def _run_quality_check():
         click.echo(Fore.RED + f"A análise de qualidade falhou com um erro interno: {e}")
         return None
 
-def _manage_incidents_and_learn(current_results, logger, project_path):
-    """(Versão Definitiva) Gerencia incidentes e aprende comparando com o commit do incidente."""
+def _manage_incidents_and_learn(logger, project_path):
+    """(Versão Final Corrigida) Gerencia incidentes e aprende com as correções."""
     click.echo(Fore.CYAN + "\n--- [LEARN] Verificando incidentes e aprendendo com correções... ---")
     
+    # PASSO 1: Sempre obtenha o estado atual primeiro.
+    current_results = run_check_logic('.', [], False, False, no_cache=True)
+    current_findings = current_results.get('findings', [])
+    current_hashes = {f['hash'] for f in current_findings}
+
     conn = get_db_connection()
     cursor = conn.cursor()
     
     try:
         cursor.execute("SELECT * FROM open_incidents WHERE project_path = ?", (project_path,))
         open_incidents = cursor.fetchall()
-        
-        current_findings = current_results.get('findings', [])
-        current_hashes = {f['hash'] for f in current_findings}
         
         learned_count = 0
         if open_incidents:
@@ -43,8 +45,9 @@ def _manage_incidents_and_learn(current_results, logger, project_path):
                 for f_hash in resolved_hashes:
                     incident = old_findings_map[f_hash]
                     file_path = incident['file_path']
-                    diff_output = _run_git_command(['diff', '--staged', 'HEAD', '--', file_path], capture_output=True)
+                    incident_commit = incident['commit_hash']
                     
+                    diff_output = _run_git_command(['diff', incident_commit, '--', file_path], capture_output=True)
                     if not diff_output: continue
 
                     message = incident['message']
@@ -54,7 +57,7 @@ def _manage_incidents_and_learn(current_results, logger, project_path):
                     )
                     learned_count += 1
         
-        # Lógica de atualização do DB
+        # PASSO 2: Atualizar a lista de incidentes abertos.
         cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
         if current_findings:
             commit_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True) or "N/A"
@@ -77,6 +80,9 @@ def _manage_incidents_and_learn(current_results, logger, project_path):
         logger.add_finding("ERROR", "Falha ao gerenciar incidentes.", details=str(e))
     finally:
         conn.close()
+    
+    # Retorna os resultados do check para a função 'save'
+    return current_results
 
 @click.command('save')
 @click.pass_context
@@ -91,12 +97,8 @@ def save(ctx, message, force):
 
         _run_git_command(['add', '.'])
         
-        check_results = _run_quality_check()
-        if check_results is None:
-            sys.exit(1)
+        check_results = _manage_incidents_and_learn(logger, project_path)
         
-        _manage_incidents_and_learn(check_results, logger, project_path)
-
         summary = check_results.get('summary', {})
         has_errors = summary.get('critical', 0) > 0 or summary.get('errors', 0) > 0
 
