@@ -1,11 +1,9 @@
 # doxoade/commands/save.py
 import sys
 import os
-#import json
 from datetime import datetime, timezone
 import click
 from colorama import Fore, Style
-#import tempfile
 
 from ..database import get_db_connection
 from ..shared_tools import ExecutionLogger, _run_git_command, _present_results
@@ -19,17 +17,16 @@ def _run_quality_check():
         click.echo(Fore.RED + f"A análise de qualidade falhou com um erro interno: {e}")
         return None
 
-def _manage_incidents_and_learn(logger, project_path):
-    """(Versão Final Corrigida) Gerencia incidentes e aprende com as correções."""
+def _manage_incidents_and_learn(current_results, logger, project_path):
+    """(Assinatura Final) Gerencia incidentes no DB e aprende com as correções."""
     click.echo(Fore.CYAN + "\n--- [LEARN] Verificando incidentes e aprendendo com correções... ---")
     
-    # PASSO 1: Sempre obtenha o estado atual primeiro.
-    current_results = run_check_logic('.', [], False, False, no_cache=True)
-    current_findings = current_results.get('findings', [])
-    current_hashes = {f['hash'] for f in current_findings}
-
     conn = get_db_connection()
     cursor = conn.cursor()
+    
+    # Define current_findings no escopo mais alto para garantir que sempre exista
+    current_findings = current_results.get('findings', [])
+    current_hashes = {f['hash'] for f in current_findings}
     
     try:
         cursor.execute("SELECT * FROM open_incidents WHERE project_path = ?", (project_path,))
@@ -45,9 +42,10 @@ def _manage_incidents_and_learn(logger, project_path):
                 for f_hash in resolved_hashes:
                     incident = old_findings_map[f_hash]
                     file_path = incident['file_path']
-                    incident_commit = incident['commit_hash']
                     
-                    diff_output = _run_git_command(['diff', incident_commit, '--', file_path], capture_output=True)
+                    # Compara o HEAD (último commit) com o staging area
+                    diff_output = _run_git_command(['diff', '--staged', 'HEAD', '--', file_path], capture_output=True)
+                    
                     if not diff_output: continue
 
                     message = incident['message']
@@ -57,7 +55,7 @@ def _manage_incidents_and_learn(logger, project_path):
                     )
                     learned_count += 1
         
-        # PASSO 2: Atualizar a lista de incidentes abertos.
+        # Lógica de atualização do DB
         cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
         if current_findings:
             commit_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True) or "N/A"
@@ -95,9 +93,14 @@ def save(ctx, message, force):
         project_path = os.getcwd()
         click.echo(Fore.CYAN + "--- [SAVE] Iniciando processo de salvamento seguro ---")
 
+        click.echo(Fore.YELLOW + "\nPasso 1: Preparando todos os arquivos para o commit (git add .)...")
         _run_git_command(['add', '.'])
+        click.echo(Fore.GREEN + "[OK] Arquivos preparados.")
+
+        click.echo(Fore.YELLOW + "\nPasso 2: Executando verificação de qualidade...")
+        check_results = run_check_logic('.', [], False, False, no_cache=True)
         
-        check_results = _manage_incidents_and_learn(logger, project_path)
+        _manage_incidents_and_learn(check_results, logger, project_path)
         
         summary = check_results.get('summary', {})
         has_errors = summary.get('critical', 0) > 0 or summary.get('errors', 0) > 0
@@ -110,7 +113,10 @@ def save(ctx, message, force):
         
         if "nothing to commit" in (_run_git_command(['status', '--porcelain'], capture_output=True) or ""):
              click.echo(Fore.YELLOW + "[AVISO] Nenhuma alteração para commitar."); return
+        
+        click.echo(Fore.YELLOW + f"\nPasso 3: Criando commit com a mensagem: '{message}'...")
         _run_git_command(['commit', '-m', message])
+        
         new_commit_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True)
         if new_commit_hash:
             conn = get_db_connection()
