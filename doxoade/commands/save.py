@@ -25,7 +25,7 @@ def _run_check_on_content(content, logger):
         return []
 
 def _manage_incidents_and_learn(current_results, logger, project_path):
-    """(Assinatura Corrigida) Gerencia incidentes no DB e aprende com as correções."""
+    """(Versão Final e Definitiva) Gerencia incidentes no DB e aprende com as correções."""
     click.echo(Fore.CYAN + "\n--- [LEARN] Verificando incidentes e aprendendo com correções... ---")
     
     conn = get_db_connection()
@@ -45,19 +45,28 @@ def _manage_incidents_and_learn(current_results, logger, project_path):
             
             if resolved_hashes:
                 click.echo(Fore.WHITE + f"   > {len(resolved_hashes)} problema(s) resolvido(s) detectado(s).")
+                
+                # Pega o hash do commit atual para salvar na solução
+                new_commit_hash_placeholder = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True)
+
                 for f_hash in resolved_hashes:
                     incident = old_findings_map[f_hash]
                     file_path = incident['file_path']
-                    diff_output = _run_git_command(['diff', '--staged', '--', file_path], capture_output=True)
+                    incident_commit = incident['commit_hash']
+                    
+                    # CORREÇÃO CRUCIAL: Compara o commit do incidente com o estado ATUAL do arquivo no disco
+                    diff_output = _run_git_command(['diff', incident_commit, '--', file_path], capture_output=True)
+                    
                     if not diff_output: continue
 
                     message = incident['message']
                     cursor.execute(
                         "INSERT OR REPLACE INTO solutions (finding_hash, resolution_diff, commit_hash, project_path, timestamp, file_path, message) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                        (f_hash, diff_output, "PENDING_COMMIT", project_path, datetime.now(timezone.utc).isoformat(), file_path, message)
+                        (f_hash, diff_output, new_commit_hash_placeholder or "PENDING_COMMIT", project_path, datetime.now(timezone.utc).isoformat(), file_path, message)
                     )
                     learned_count += 1
         
+        # ATUALIZAÇÃO: A lógica de limpar e repopular a tabela de incidentes está correta.
         cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
         if current_findings:
             commit_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True) or "N/A"
