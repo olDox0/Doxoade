@@ -82,6 +82,13 @@ def init_db():
             except sqlite3.OperationalError as e:
                 if "duplicate column name" not in str(e): raise e
 
+        if current_version < 6:
+            click.echo("Atualizando esquema v6 (adicionando 'message' a solutions)...")
+            try:
+                cursor.execute("ALTER TABLE solutions ADD COLUMN message TEXT NOT NULL DEFAULT '';")
+            except sqlite3.OperationalError as e:
+                if "duplicate column name" not in str(e): raise e
+        
         cursor.execute("UPDATE schema_version SET version = ?;", (DB_VERSION,))
         conn.commit()
         click.echo(f"Esquema do banco de dados atualizado com sucesso para a v{DB_VERSION}.")
