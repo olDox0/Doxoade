@@ -43,7 +43,7 @@ def _manage_incidents_and_learn(current_results, logger, project_path):
                 for f_hash in resolved_hashes:
                     incident = old_findings_map[f_hash]
                     file_path = incident['file_path']
-                    diff_output = _run_git_command(['diff', '--cached', incident['commit_hash'], '--', file_path], capture_output=True)
+                    diff_output = _run_git_command(['diff', '--staged', 'HEAD', '--', file_path], capture_output=True)
                     
                     if not diff_output: continue
 
