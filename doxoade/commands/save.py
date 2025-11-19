@@ -1,28 +1,82 @@
 # doxoade/commands/save.py
 import sys
-import subprocess
-import shutil
+#import subprocess
+#import shutil
 import os
 import json
+import subprocess
 from datetime import datetime, timezone
 import click
 from colorama import Fore, Style
 
 from ..database import get_db_connection
 from ..shared_tools import ExecutionLogger, _run_git_command, _present_results
-from .check import run_check_logic
+from .check import run_check_logic # Lógica de análise importada
 
 def _run_quality_check():
     """Executa 'doxoade check' e retorna os resultados como um dicionário."""
-    runner_path = shutil.which("doxoade.bat") or shutil.which("doxoade")
-    if not runner_path: return None, "Runner 'doxoade' não encontrado."
-    
-    cmd = [runner_path, 'check', '.', '--format', 'json']
+    # Chama o módulo doxoade diretamente com o interpretador atual
+    cmd = [sys.executable, '-m', 'doxoade', 'check', '.', '--format', 'json']
     result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
     try:
         return json.loads(result.stdout), None
     except json.JSONDecodeError:
         return None, f"A análise de qualidade falhou.\n{result.stderr}"
+
+def _learn_from_fixes(logger, project_path):
+    """Aprende com as mudanças preparadas (staged), comparando-as com o estado do último commit (HEAD)."""
+    click.echo(Fore.CYAN + "\n--- [LEARN] Verificando se as mudanças resolveram problemas... ---")
+
+    # Pega apenas os arquivos Python modificados que estão no staging area
+    changed_files_str = _run_git_command(['diff', '--staged', '--name-only', '--diff-filter=M', '*.py'], capture_output=True)
+    if not changed_files_str:
+        click.echo(Fore.WHITE + "   > Nenhuma modificação em arquivos Python preparada para commit.")
+        return
+
+    # Executa a análise de qualidade APENAS UMA VEZ no estado atual (pós-correção)
+    current_results = run_check_logic('.', [], False, False)
+    current_findings_map = {f['hash']: f for f in current_results.get('findings', [])}
+
+    learned_count = 0
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        for file_path in changed_files_str.splitlines():
+            # Pega o conteúdo do arquivo no último commit
+            old_content = _run_git_command(['show', f'HEAD:{file_path}'], capture_output=True, silent_fail=True)
+            if old_content is None: continue # Arquivo novo
+
+            # Analisa o conteúdo antigo em memória (usando um truque com arquivo temporário)
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.py', encoding='utf-8') as tmp:
+                tmp.write(old_content)
+                tmp_path = tmp.name
+            
+            old_results = run_check_logic(os.path.dirname(tmp_path), [], False, False, fast=True, no_imports=True)
+            os.remove(tmp_path)
+            
+            old_hashes = {f['hash'] for f in old_results.get('findings', [])}
+            
+            # Compara os problemas do arquivo antigo com os problemas globais atuais
+            for f_hash in old_hashes:
+                if f_hash not in current_findings_map: # Problema resolvido!
+                    diff_output = _run_git_command(['diff', '--staged', '--', file_path], capture_output=True)
+                    if diff_output:
+                        cursor.execute("INSERT OR REPLACE INTO solutions VALUES (NULL, ?, ?, ?, ?, ?, ?)",
+                                       (f_hash, diff_output, "PENDING", project_path, datetime.now(timezone.utc).isoformat(), file_path))
+                        learned_count += 1
+        
+        if learned_count > 0:
+            conn.commit()
+            click.echo(Fore.GREEN + f"[OK] {learned_count} solução(ões) aprendida(s).")
+        else:
+            click.echo(Fore.WHITE + "   > Nenhuma solução aprendida neste commit.")
+    except Exception as e:
+        conn.rollback()
+        logger.add_finding("ERROR", "Falha ao aprender com as correções.", details=str(e))
+    finally:
+        conn.close()
 
 def _can_proceed_with_commit(check_result, force_flag, logger):
     output = check_result.stdout
@@ -43,68 +97,6 @@ def _can_proceed_with_commit(check_result, force_flag, logger):
     print(output.encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding))
     return False
 
-def _manage_incidents_and_learn(current_results, logger, project_path):
-    """(Versão Flexível) Aprende com incidentes resolvidos comparando com o commit do incidente."""
-    click.echo(Fore.CYAN + "\n--- [LEARN] Verificando incidentes e aprendendo com correções... ---")
-    
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute("SELECT * FROM open_incidents WHERE project_path = ?", (project_path,))
-        open_incidents = cursor.fetchall()
-        if not open_incidents:
-            click.echo(Fore.WHITE + "   > Nenhum incidente aberto conhecido para este projeto.")
-            return
-
-        current_hashes = {f['hash'] for f in current_results.get('findings', [])}
-        learned_count = 0
-        
-        for incident in open_incidents:
-            finding_hash = incident['finding_hash']
-            if finding_hash not in current_hashes:
-                # O problema foi resolvido!
-                file_path = incident['file_path']
-                incident_commit = incident['commit_hash']
-
-                # NOVA LÓGICA: Compara o estado ATUAL do arquivo com o estado do commit ONDE o erro foi encontrado.
-                diff_output = _run_git_command(['diff', incident_commit, 'HEAD', '--', file_path], capture_output=True)
-                
-                if not diff_output: continue
-
-                cursor.execute(
-                    "INSERT OR REPLACE INTO solutions (...) VALUES (?, ?, ?, ?, ?, ?)",
-                    (finding_hash, diff_output, "PENDING_COMMIT", project_path, datetime.now(timezone.utc).isoformat(), file_path)
-                )
-                cursor.execute("DELETE FROM open_incidents WHERE finding_hash = ?", (finding_hash,))
-                learned_count += 1
-        
-        conn.commit()
-        if learned_count > 0:
-            click.echo(Fore.GREEN + f"[OK] {learned_count} solução(ões) aprendida(s) e armazenada(s).")
-        else:
-            click.echo(Fore.WHITE + "   > Nenhum incidente conhecido foi resolvido com as mudanças atuais.")
-
-    except Exception as e:
-        conn.rollback()
-        logger.add_finding("ERROR", "Falha ao gerenciar incidentes.", details=str(e))
-    finally:
-        conn.close()
-
-def _get_findings_from_content(content, file_path, logger):
-    """Executa a lógica de análise em um conteúdo de arquivo em memória."""
-    # Esta é uma simulação simplificada. Idealmente, a lógica do `check`
-    # seria refatorada para aceitar conteúdo de string diretamente.
-    # Por enquanto, vamos usar um arquivo temporário.
-    import tempfile
-    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.py', encoding='utf-8') as tmp:
-        tmp.write(content)
-        tmp_path = tmp.name
-    
-    results = run_check_logic(os.path.dirname(tmp_path), [], False, False)
-    os.remove(tmp_path)
-    return results.get('findings', [])
-
 @click.command('save')
 @click.pass_context
 @click.argument('message')
@@ -116,61 +108,36 @@ def save(ctx, message, force):
         project_path = os.getcwd()
         click.echo(Fore.CYAN + "--- [SAVE] Iniciando processo de salvamento seguro ---")
 
-        _run_git_command(['add', '.'])
+        # PASSO 1: Preparar TODAS as mudanças primeiro. Esta é a correção crucial.
+        click.echo(Fore.YELLOW + "\nPasso 1: Preparando todos os arquivos para o commit (git add .)...")
+        if not _run_git_command(['add', '.']): 
+            click.echo(Fore.RED + "[ERRO] Falha ao preparar os arquivos."); sys.exit(1)
+        click.echo(Fore.GREEN + "[OK] Arquivos preparados.")
         
-        # 1. Pega os arquivos modificados
-        changed_files_str = _run_git_command(['diff', '--staged', '--name-only', '--diff-filter=M'], capture_output=True)
-        if not changed_files_str:
-            if not _run_git_command(['commit', '-m', message]):
-                 click.echo(Fore.YELLOW + "[AVISO] Nenhuma alteração para commitar."); return
-            click.echo(Fore.GREEN + Style.BRIGHT + "\n[SAVE] Alterações salvas com sucesso!"); return
+        # PASSO 2: Aprender com as mudanças que acabamos de preparar.
+        _learn_from_fixes(logger, project_path)
 
-        changed_files = changed_files_str.splitlines()
+        # PASSO 3: Verificar a qualidade do estado FINAL.
+        click.echo(Fore.YELLOW + "\nPasso 3: Verificando a qualidade final do código...")
+        final_check_results = run_check_logic('.', [], False, False, no_cache=True) # Força reanálise
         
-        # 2. Roda o check no estado ATUAL
-        current_results = run_check_logic('.', [], False, False)
-        current_findings = current_results.get('findings', [])
-        
-        # 3. APRENDIZADO
-        click.echo(Fore.CYAN + "\n--- [LEARN] Verificando se as mudanças resolveram problemas... ---")
-        learned_count = 0
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        for file_path in changed_files:
-            # Pega a versão do arquivo no último commit
-            old_content = _run_git_command(['show', f'HEAD:{file_path}'], capture_output=True, silent_fail=True)
-            if old_content is None: continue # Arquivo novo, não havia problemas antes
-            
-            old_findings_in_file = _get_findings_from_content(old_content, file_path, logger)
-            current_findings_in_file = [f for f in current_findings if os.path.normcase(f.get('file', '')) == os.path.normcase(file_path)]
-            
-            old_hashes = {f['hash'] for f in old_findings_in_file}
-            current_hashes = {f['hash'] for f in current_findings_in_file}
-            resolved_hashes = old_hashes - current_hashes
+        summary = final_check_results.get('summary', {})
+        has_errors = summary.get('critical', 0) > 0 or summary.get('errors', 0) > 0
 
-            if resolved_hashes:
-                diff_output = _run_git_command(['diff', '--staged', '--', file_path], capture_output=True)
-                for f_hash in resolved_hashes:
-                    cursor.execute("INSERT OR REPLACE INTO solutions VALUES (NULL, ?, ?, ?, ?, ?, ?)",
-                                   (f_hash, diff_output, "PENDING", project_path, datetime.now(timezone.utc).isoformat(), file_path))
-                    learned_count += 1
-        
-        if learned_count > 0:
-            conn.commit()
-            click.echo(Fore.GREEN + f"[OK] {learned_count} solução(ões) aprendida(s).")
-        else:
-            click.echo(Fore.WHITE + "   > Nenhuma solução aprendida neste commit.")
-        conn.close()
-
-        # 4. DECISÃO DE COMMIT
-        has_errors = current_results.get('summary', {}).get('critical', 0) > 0 or current_results.get('summary', {}).get('errors', 0) > 0
         if has_errors and not force:
-            _present_results('text', current_results)
+            click.echo(Fore.RED + "\n[ERRO] 'doxoade check' encontrou erros no estado final. Commit abortado.")
+            _present_results('text', final_check_results)
+            click.echo(Fore.YELLOW + "Desfazendo 'git add' para permitir a correção...")
             _run_git_command(['reset'])
             sys.exit(1)
+        
+        if has_errors and force:
+            click.echo(Fore.YELLOW + "\n[AVISO] Erros encontrados, mas o commit foi forçado.")
 
-        # 5. COMMIT
-        if not _run_git_command(['commit', '-m', message]):
+        # PASSO 4: Fazer o commit.
+        click.echo(Fore.YELLOW + f"\nPasso 4: Criando commit com a mensagem: '{message}'...")
+        commit_output = _run_git_command(['commit', '-m', message], capture_output=True)
+        if "nothing to commit" in (commit_output or ""):
             click.echo(Fore.YELLOW + "[AVISO] Nenhuma alteração para commitar."); return
+        
         click.echo(Fore.GREEN + Style.BRIGHT + "\n[SAVE] Alterações salvas com sucesso!")
