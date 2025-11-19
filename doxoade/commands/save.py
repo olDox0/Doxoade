@@ -43,56 +43,46 @@ def _can_proceed_with_commit(check_result, force_flag, logger):
     return False
 
 def _manage_incidents_and_learn(current_results, logger, project_path):
-    """Gerencia o ciclo de vida de incidentes: aprende com os resolvidos e atualiza os abertos."""
+    """(Versão Flexível) Aprende com incidentes resolvidos comparando com o commit do incidente."""
     click.echo(Fore.CYAN + "\n--- [LEARN] Verificando incidentes e aprendendo com correções... ---")
     
     conn = get_db_connection()
     cursor = conn.cursor()
     
     try:
-        # Pega os incidentes antigos
         cursor.execute("SELECT * FROM open_incidents WHERE project_path = ?", (project_path,))
         open_incidents = cursor.fetchall()
-        
-        current_findings = current_results.get('findings', [])
-        current_hashes = {f['hash'] for f in current_findings}
-        
+        if not open_incidents:
+            click.echo(Fore.WHITE + "   > Nenhum incidente aberto conhecido para este projeto.")
+            return
+
+        current_hashes = {f['hash'] for f in current_results.get('findings', [])}
         learned_count = 0
-        if open_incidents:
-            old_hashes = {inc['finding_hash']: inc for inc in open_incidents}
-            resolved_hashes = set(old_hashes.keys()) - current_hashes
-            
-            if resolved_hashes:
-                click.echo(Fore.WHITE + f"   > {len(resolved_hashes)} problema(s) resolvido(s) detectado(s).")
-                for f_hash in resolved_hashes:
-                    incident = old_hashes[f_hash]
-                    file_path = incident['file_path']
-                    diff_output = _run_git_command(['diff', '--staged', '--', file_path], capture_output=True)
-                    if not diff_output: continue
-
-                    cursor.execute(
-                        "INSERT OR REPLACE INTO solutions (finding_hash, resolution_diff, commit_hash, project_path, timestamp, file_path) VALUES (?, ?, ?, ?, ?, ?)",
-                        (f_hash, diff_output, "PENDING_COMMIT", project_path, datetime.now(timezone.utc).isoformat(), file_path)
-                    )
-                    learned_count += 1
         
-        # ATUALIZAÇÃO: Limpa os incidentes antigos e registra os novos
-        cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
-        if current_findings:
-            commit_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True) or "N/A"
-            incidents_to_add = [
-                (f.get('hash'), f.get('file'), commit_hash, datetime.now(timezone.utc).isoformat(), project_path)
-                for f in current_findings if f.get('hash')
-            ]
-            if incidents_to_add:
-                cursor.executemany("INSERT OR REPLACE INTO open_incidents VALUES (?, ?, ?, ?, ?)", incidents_to_add)
+        for incident in open_incidents:
+            finding_hash = incident['finding_hash']
+            if finding_hash not in current_hashes:
+                # O problema foi resolvido!
+                file_path = incident['file_path']
+                incident_commit = incident['commit_hash']
 
+                # NOVA LÓGICA: Compara o estado ATUAL do arquivo com o estado do commit ONDE o erro foi encontrado.
+                diff_output = _run_git_command(['diff', incident_commit, 'HEAD', '--', file_path], capture_output=True)
+                
+                if not diff_output: continue
+
+                cursor.execute(
+                    "INSERT OR REPLACE INTO solutions (...) VALUES (?, ?, ?, ?, ?, ?)",
+                    (finding_hash, diff_output, "PENDING_COMMIT", project_path, datetime.now(timezone.utc).isoformat(), file_path)
+                )
+                cursor.execute("DELETE FROM open_incidents WHERE finding_hash = ?", (finding_hash,))
+                learned_count += 1
+        
         conn.commit()
-
         if learned_count > 0:
             click.echo(Fore.GREEN + f"[OK] {learned_count} solução(ões) aprendida(s) e armazenada(s).")
         else:
-            click.echo(Fore.WHITE + "   > Nenhum incidente resolvido para aprender neste commit.")
+            click.echo(Fore.WHITE + "   > Nenhum incidente conhecido foi resolvido com as mudanças atuais.")
 
     except Exception as e:
         conn.rollback()
