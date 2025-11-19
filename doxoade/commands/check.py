@@ -17,8 +17,10 @@ from importlib import resources
 # Linha corrigida, que não causa o ciclo
 from .._version import __version__ as DOXOADE_VERSION
 
+from datetime import datetime, timezone
+from ..database import get_db_connection # <-- O IMPORT QUE FALTAVA
 from ..shared_tools import (
-    ExecutionLogger,
+    ExecutionLogger, 
     _present_results,
     _get_code_snippet,
     _get_venv_python_executable,
@@ -396,26 +398,50 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
             
         return logger.results
 
-def _persist_incidents(logger_results):
-    """(Versão Corrigida) Salva o resultado mais recente do check no cache."""
-    cache_dir = '.doxoade_cache'
-    incident_file = os.path.join(cache_dir, 'incidents.json')
+def _update_open_incidents(logger_results, project_path):
+    """
+    Atualiza a tabela 'open_incidents' no banco de dados com os problemas encontrados.
+    """
+    findings = logger_results.get('findings', [])
+    commit_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True) or "N/A"
     
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
     try:
-        os.makedirs(cache_dir, exist_ok=True)
-        commit_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True)
+        # Limpa incidentes antigos *apenas para este projeto*
+        cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
+
+        if not findings:
+            conn.commit()
+            return
+
+        incidents_to_add = []
+        for f in findings:
+            # Garante que o hash existe antes de adicionar
+            if f.get('hash'):
+                incidents_to_add.append((
+                    f.get('hash'),
+                    f.get('file'),
+                    commit_hash,
+                    datetime.now(timezone.utc).isoformat(),
+                    project_path
+                ))
         
-        # Simplesmente escreve o estado atual, seja ele com ou sem 'findings'
-        incident_data = {
-            "commit_hash": commit_hash or "N/A",
-            "findings": logger_results.get('findings', [])
-        }
+        if incidents_to_add:
+            cursor.executemany("""
+                INSERT OR REPLACE INTO open_incidents 
+                (finding_hash, file_path, commit_hash, timestamp, project_path)
+                VALUES (?, ?, ?, ?, ?)
+            """, incidents_to_add)
+
+        conn.commit()
         
-        with open(incident_file, 'w', encoding='utf-8') as f:
-            json.dump(incident_data, f, indent=4)
-            
     except Exception as e:
-        click.echo(Fore.YELLOW + f"\n[AVISO] Não foi possível salvar o cache do incidente: {e}")
+        conn.rollback()
+        click.echo(Fore.YELLOW + f"\n[AVISO] Não foi possível atualizar a base de dados de incidentes: {e}")
+    finally:
+        conn.close()
 
 # =============================================================================
 # O COMANDO CLICK
@@ -440,8 +466,8 @@ def check(ctx, path, cmd_line_ignore, fix, debug, output_format, fast, no_import
         path, cmd_line_ignore, fix, debug, 
         fast=fast, no_imports=no_imports, no_cache=no_cache
     )
-    
-    _persist_incidents(results)
+    _update_open_incidents(results, os.path.abspath(path))
+#    _persist_incidents(results)
     
     if output_format == 'json':
         print(json.dumps(results, indent=2, ensure_ascii=False))
