@@ -34,6 +34,7 @@ from doxoade.commands.git_workflow import release, sync
 from doxoade.commands.global_health import global_health
 from doxoade.commands.guicheck import guicheck
 from doxoade.commands.health import health
+from doxoade.commands.history import history
 from doxoade.commands.impact_analysis import impact_analysis
 from doxoade.commands.init import init
 from doxoade.commands.install import install
@@ -288,6 +289,7 @@ cli.add_command(git_new)
 cli.add_command(global_health)
 cli.add_command(guicheck)
 cli.add_command(health)
+cli.add_command(history)
 cli.add_command(impact_analysis)
 cli.add_command(init)
 cli.add_command(install)
