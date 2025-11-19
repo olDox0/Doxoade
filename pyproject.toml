@@ -3,25 +3,26 @@ name = "doxoade"
 version = "46.0"
 requires-python = ">=3.11"
 dependencies = [
+    "beautifulsoup4",
+    "chardet",
     "click",
     "colorama",
-    "beautifulsoup4",
-    "lxml",
+    "coverage",
     "cssutils",
     "esprima",
-    "pyflakes",
-    "toml",
-    "chardet",
-    "packaging",
-    "pytest-cov",
-    "radon",
-    "coverage",
-    "pytest",
     "jsondiff",
-    "pyyaml",
-    "setuptools",
+    "lxml",
+    "packaging",
     "pandas<2.3",
-    "stdlib_list"
+    "pyflakes",
+    "pytest",
+    "pytest-cov",
+    "pytest-cov",
+    "pyyaml",
+    "radon",
+    "setuptools",
+    "stdlib_list",
+    "toml"
 ]
 
 [build-system]
