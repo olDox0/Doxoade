@@ -42,11 +42,11 @@ def _manage_incidents_and_learn(current_results, logger, project_path):
                 for f_hash in resolved_hashes:
                     incident = old_findings_map[f_hash]
                     file_path = incident['file_path']
+                    incident_commit = incident['commit_hash'] # Pega o hash do incidente
+                    diff_output = _run_git_command(['diff', '--staged', incident_commit, '--', file_path], capture_output=True)
                     
-                    # Compara o HEAD (último commit) com o staging area
-                    diff_output = _run_git_command(['diff', '--staged', 'HEAD', '--', file_path], capture_output=True)
-                    
-                    if not diff_output: continue
+                    if not diff_output:
+                        continue
 
                     message = incident['message']
                     cursor.execute(
