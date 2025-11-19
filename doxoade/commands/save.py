@@ -10,6 +10,7 @@ from colorama import Fore, Style
 
 from ..database import get_db_connection
 from ..shared_tools import ExecutionLogger, _run_git_command, _present_results
+from .check import run_check_logic
 
 def _run_quality_check():
     """Executa 'doxoade check' e retorna os resultados como um dicionário."""
@@ -90,6 +91,20 @@ def _manage_incidents_and_learn(current_results, logger, project_path):
     finally:
         conn.close()
 
+def _get_findings_from_content(content, file_path, logger):
+    """Executa a lógica de análise em um conteúdo de arquivo em memória."""
+    # Esta é uma simulação simplificada. Idealmente, a lógica do `check`
+    # seria refatorada para aceitar conteúdo de string diretamente.
+    # Por enquanto, vamos usar um arquivo temporário.
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.py', encoding='utf-8') as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+    
+    results = run_check_logic(os.path.dirname(tmp_path), [], False, False)
+    os.remove(tmp_path)
+    return results.get('findings', [])
+
 @click.command('save')
 @click.pass_context
 @click.argument('message')
@@ -101,35 +116,61 @@ def save(ctx, message, force):
         project_path = os.getcwd()
         click.echo(Fore.CYAN + "--- [SAVE] Iniciando processo de salvamento seguro ---")
 
-        click.echo(Fore.YELLOW + "\nPasso 1: Preparando todos os arquivos para o commit (git add .)...")
-        if not _run_git_command(['add', '.']): sys.exit(1)
-        click.echo(Fore.GREEN + "[OK] Arquivos preparados.")
-
-        click.echo(Fore.YELLOW + "\nPasso 2: Executando verificação de qualidade ('doxoade check')...")
-        check_results, error_msg = _run_quality_check() # Não precisa mais passar o logger
-        if check_results is None:
-            click.echo(Fore.RED + f"[ERRO] {error_msg}"); sys.exit(1)
+        _run_git_command(['add', '.'])
         
-        _manage_incidents_and_learn(check_results, logger, project_path)
+        # 1. Pega os arquivos modificados
+        changed_files_str = _run_git_command(['diff', '--staged', '--name-only', '--diff-filter=M'], capture_output=True)
+        if not changed_files_str:
+            if not _run_git_command(['commit', '-m', message]):
+                 click.echo(Fore.YELLOW + "[AVISO] Nenhuma alteração para commitar."); return
+            click.echo(Fore.GREEN + Style.BRIGHT + "\n[SAVE] Alterações salvas com sucesso!"); return
 
-        summary = check_results.get('summary', {})
-        has_errors = summary.get('critical', 0) > 0 or summary.get('errors', 0) > 0
+        changed_files = changed_files_str.splitlines()
+        
+        # 2. Roda o check no estado ATUAL
+        current_results = run_check_logic('.', [], False, False)
+        current_findings = current_results.get('findings', [])
+        
+        # 3. APRENDIZADO
+        click.echo(Fore.CYAN + "\n--- [LEARN] Verificando se as mudanças resolveram problemas... ---")
+        learned_count = 0
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        for file_path in changed_files:
+            # Pega a versão do arquivo no último commit
+            old_content = _run_git_command(['show', f'HEAD:{file_path}'], capture_output=True, silent_fail=True)
+            if old_content is None: continue # Arquivo novo, não havia problemas antes
+            
+            old_findings_in_file = _get_findings_from_content(old_content, file_path, logger)
+            current_findings_in_file = [f for f in current_findings if os.path.normcase(f.get('file', '')) == os.path.normcase(file_path)]
+            
+            old_hashes = {f['hash'] for f in old_findings_in_file}
+            current_hashes = {f['hash'] for f in current_findings_in_file}
+            resolved_hashes = old_hashes - current_hashes
 
+            if resolved_hashes:
+                diff_output = _run_git_command(['diff', '--staged', '--', file_path], capture_output=True)
+                for f_hash in resolved_hashes:
+                    cursor.execute("INSERT OR REPLACE INTO solutions VALUES (NULL, ?, ?, ?, ?, ?, ?)",
+                                   (f_hash, diff_output, "PENDING", project_path, datetime.now(timezone.utc).isoformat(), file_path))
+                    learned_count += 1
+        
+        if learned_count > 0:
+            conn.commit()
+            click.echo(Fore.GREEN + f"[OK] {learned_count} solução(ões) aprendida(s).")
+        else:
+            click.echo(Fore.WHITE + "   > Nenhuma solução aprendida neste commit.")
+        conn.close()
+
+        # 4. DECISÃO DE COMMIT
+        has_errors = current_results.get('summary', {}).get('critical', 0) > 0 or current_results.get('summary', {}).get('errors', 0) > 0
         if has_errors and not force:
-            logger.add_finding('ERROR', "Commit abortado devido a erros do 'check'.", details=json.dumps(check_results))
-            click.echo(Fore.RED + "\n[ERRO] 'doxoade check' encontrou erros. Commit abortado.")
-            _present_results('text', check_results)
-            # Desfaz o 'git add' para o usuário poder corrigir
-            click.echo(Fore.YELLOW + "Desfazendo 'git add' para permitir a correção...")
+            _present_results('text', current_results)
             _run_git_command(['reset'])
             sys.exit(1)
-        
-        if has_errors and force:
-            logger.add_finding('WARNING', "Commit forçado apesar dos erros do 'check'.")
 
-        click.echo(Fore.YELLOW + f"\nPasso 3: Criando commit com a mensagem: '{message}'...")
-        commit_output = _run_git_command(['commit', '-m', message], capture_output=True)
-        if not commit_output or "nothing to commit" in commit_output:
-            click.echo(Fore.YELLOW + "[AVISO] O Git não encontrou nenhuma alteração para commitar."); return
-
+        # 5. COMMIT
+        if not _run_git_command(['commit', '-m', message]):
+            click.echo(Fore.YELLOW + "[AVISO] Nenhuma alteração para commitar."); return
         click.echo(Fore.GREEN + Style.BRIGHT + "\n[SAVE] Alterações salvas com sucesso!")
