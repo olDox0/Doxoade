@@ -43,16 +43,9 @@ def _manage_incidents_and_learn(current_results, logger, project_path):
                 for f_hash in resolved_hashes:
                     incident = old_findings_map[f_hash]
                     file_path = incident['file_path']
-                    incident_commit = incident['commit_hash']
+                    diff_output = _run_git_command(['diff', '--cached', incident['commit_hash'], '--', file_path], capture_output=True)
                     
-                    # --- A CORREÇÃO CRUCIAL ---
-                    # Compara o commit onde o erro foi visto pela última vez com o estado atual do arquivo no disco.
-                    # O '--' é importante para o Git não confundir o hash com um nome de branch.
-                    diff_output = _run_git_command(['diff', incident_commit, '--', file_path], capture_output=True)
-                    
-                    if not diff_output:
-                        # Se não houver diff, pode ser um erro de metadados, mas não devemos parar
-                        continue
+                    if not diff_output: continue
 
                     message = incident['message']
                     cursor.execute(
