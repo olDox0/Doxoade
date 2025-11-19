@@ -1,99 +1,83 @@
 # doxoade/commands/save.py
 import sys
-import subprocess
-import shutil
 import os
-import json
+#import json
+#import subprocess
 from datetime import datetime, timezone
 import click
 from colorama import Fore, Style
 
 from ..database import get_db_connection
 from ..shared_tools import ExecutionLogger, _run_git_command, _present_results
+from .check import run_check_logic
 
-def _run_quality_check():
-    """Executa 'doxoade check' no formato JSON e retorna os resultados."""
-    runner_path = shutil.which("doxoade.bat") or shutil.which("doxoade")
-    if not runner_path:
-        return None, "Runner 'doxoade' não encontrado no PATH."
-    
-    check_command = [runner_path, 'check', '.', '--format', 'json']
-    result = subprocess.run(check_command, capture_output=True, text=True, encoding='utf-8', errors='replace')
-    
+def _run_quality_check(logger):
+    """(Versão Final) Executa a lógica do 'check' diretamente em memória."""
+    click.echo(Fore.YELLOW + "\nPasso 2: Executando verificação de qualidade (em memória)...")
     try:
-        return json.loads(result.stdout), None
-    except json.JSONDecodeError:
-        return None, f"A análise de qualidade falhou ou produziu uma saída inválida.\n{result.stderr}"
+        # Chama a função de lógica do check diretamente
+        results = run_check_logic(path='.', cmd_line_ignore=[], fix=False, debug=False, no_cache=True)
+        return results, None
+    except Exception as e:
+        # Captura qualquer erro inesperado da lógica do check
+        return None, f"A análise de qualidade falhou com um erro interno: {e}"
 
-def _learn_from_fixes(old_incident, current_results, logger, project_path):
-    """
-    (Versão Final) Compara um incidente antigo (do incidents.json) com os 
-    resultados atuais para aprender e salvar as soluções no banco de dados.
-    """
-    click.echo(Fore.CYAN + "\n--- [LEARN] Analisando correções... ---")
+def _manage_incidents_and_learn(current_results, logger, project_path):
+    """Gerencia incidentes no DB e aprende com as correções."""
+    click.echo(Fore.CYAN + "\n--- [LEARN] Verificando incidentes e aprendendo com correções... ---")
     
-    # 1. Mapeia os 'findings' antigos e atuais para fácil consulta por hash
-    old_findings_map = {f['hash']: f for f in old_incident.get('findings', [])}
-    current_hashes = {f['hash'] for f in current_results.get('findings', [])}
-    
-    # 2. Identifica os hashes dos problemas que foram resolvidos
-    resolved_hashes = set(old_findings_map.keys()) - current_hashes
-    
-    if not resolved_hashes:
-        click.echo(Fore.WHITE + "   > Nenhum problema previamente identificado foi resolvido neste commit.")
-        return
-
-    # 3. Conecta ao banco de dados para salvar o aprendizado
     conn = get_db_connection()
     cursor = conn.cursor()
-    learned_count = 0
     
     try:
-        for f_hash in resolved_hashes:
-            # Pega os detalhes completos do problema original que foi resolvido
-            resolved_finding = old_findings_map[f_hash]
-            file_path = resolved_finding.get('file')
-            
-            # Se não houver um arquivo associado, não podemos gerar um diff.
-            if not file_path:
-                continue
-
-            # 4. Captura o 'diff' APENAS para o arquivo onde o problema foi resolvido.
-            #    Isso torna a solução granular e precisa.
-            diff_output = _run_git_command(['diff', '--staged', '--', file_path], capture_output=True)
-            
-            # Se não houver 'diff' para este arquivo, pula para o próximo.
-            if not diff_output:
-                continue
-
-            # 5. Salva a solução completa no banco de dados, incluindo a mensagem do erro.
-            cursor.execute("""
-                INSERT OR REPLACE INTO solutions 
-                (finding_hash, resolution_diff, commit_hash, project_path, timestamp, file_path, message)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                f_hash,
-                diff_output,
-                "PENDING_COMMIT",  # O hash real será atualizado após o commit
-                project_path,
-                datetime.now(timezone.utc).isoformat(),
-                file_path,
-                resolved_finding.get('message', 'Mensagem de erro não registrada') # Salva a mensagem
-            ))
-            learned_count += 1
+        cursor.execute("SELECT * FROM open_incidents WHERE project_path = ?", (project_path,))
+        open_incidents = cursor.fetchall()
         
+        current_findings = current_results.get('findings', [])
+        current_hashes = {f['hash'] for f in current_findings}
+        
+        learned_count = 0
+        if open_incidents:
+            old_findings_map = {inc['finding_hash']: inc for inc in open_incidents}
+            resolved_hashes = set(old_findings_map.keys()) - current_hashes
+            
+            if resolved_hashes:
+                click.echo(Fore.WHITE + f"   > {len(resolved_hashes)} problema(s) resolvido(s) detectado(s).")
+                for f_hash in resolved_hashes:
+                    incident = old_findings_map[f_hash]
+                    file_path = incident['file_path']
+                    diff_output = _run_git_command(['diff', '--staged', '--', file_path], capture_output=True)
+                    if not diff_output: continue
+
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO solutions (finding_hash, resolution_diff, commit_hash, project_path, timestamp, file_path, message) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (f_hash, diff_output, "PENDING_COMMIT", project_path, datetime.now(timezone.utc).isoformat(), file_path, incident['message'])
+                    )
+                    learned_count += 1
+        
+        cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
+        if current_findings:
+            commit_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True) or "N/A"
+            incidents_to_add = [
+                (f.get('hash'), f.get('file'), f.get('message'), commit_hash, datetime.now(timezone.utc).isoformat(), project_path)
+                for f in current_findings if f.get('hash')
+            ]
+            if incidents_to_add:
+                cursor.executemany("INSERT OR REPLACE INTO open_incidents (finding_hash, file_path, message, commit_hash, timestamp, project_path) VALUES (?, ?, ?, ?, ?, ?)", incidents_to_add)
+
         conn.commit()
-        
+
         if learned_count > 0:
             click.echo(Fore.GREEN + f"[OK] {learned_count} solução(ões) aprendida(s) e armazenada(s).")
         else:
-            click.echo(Fore.WHITE + "   > Embora problemas tenham sido resolvidos, as mudanças não estavam preparadas (staged) para aprendizado.")
+            click.echo(Fore.WHITE + "   > Nenhuma solução aprendida neste commit.")
 
     except Exception as e:
         conn.rollback()
-        logger.add_finding("ERROR", "Falha ao salvar soluções no banco de dados.", details=str(e))
+        logger.add_finding("ERROR", "Falha ao gerenciar incidentes.", details=str(e))
     finally:
         conn.close()
+
 
 @click.command('save')
 @click.pass_context
@@ -106,39 +90,20 @@ def save(ctx, message, force):
         project_path = os.getcwd()
         click.echo(Fore.CYAN + "--- [SAVE] Iniciando processo de salvamento seguro ---")
 
-        # PASSO 1: Preparar arquivos
-        click.echo(Fore.YELLOW + "\nPasso 1: Preparando todos os arquivos para o commit (git add .)...")
-        if not _run_git_command(['add', '.']): 
-            click.echo(Fore.RED + "[ERRO] Falha ao preparar os arquivos."); sys.exit(1)
-        click.echo(Fore.GREEN + "[OK] Arquivos preparados.")
+        _run_git_command(['add', '.'])
         
-        # PASSO 2: Executar verificação de qualidade
-        click.echo(Fore.YELLOW + "\nPasso 2: Executando verificação de qualidade ('doxoade check')...")
-        check_results, error_msg = _run_quality_check()
+        check_results, error_msg = _run_quality_check(logger) # Passa o logger
         if check_results is None:
             click.echo(Fore.RED + f"[ERRO] {error_msg}"); sys.exit(1)
-        
-        # PASSO 3: Lógica de Aprendizagem
-        incident_file = os.path.join('.doxoade_cache', 'incidents.json')
-        if os.path.exists(incident_file):
-            try:
-                with open(incident_file, 'r', encoding='utf-8') as f:
-                    incident_data = json.load(f)
-                _learn_from_fixes(incident_data, check_results, logger, project_path)
-                # Limpa o incidente somente após a tentativa de aprendizado
-                os.remove(incident_file) 
-            except (IOError, json.JSONDecodeError):
-                pass
 
-        # PASSO 4: Decidir sobre o commit
+        _manage_incidents_and_learn(check_results, logger, project_path)
+
         summary = check_results.get('summary', {})
         has_errors = summary.get('critical', 0) > 0 or summary.get('errors', 0) > 0
 
         if has_errors and not force:
-            logger.add_finding('ERROR', "Commit abortado devido a erros do 'check'.", details=json.dumps(check_results))
             click.echo(Fore.RED + "\n[ERRO] 'doxoade check' encontrou erros. Commit abortado.")
             _present_results('text', check_results)
-            click.echo(Fore.YELLOW + "Desfazendo 'git add' para permitir a correção...")
             _run_git_command(['reset'])
             sys.exit(1)
         

@@ -4,7 +4,7 @@ from pathlib import Path
 import click
 
 DB_FILE = Path.home() / '.doxoade' / 'doxoade.db'
-DB_VERSION = 5 # A versão final que precisamos
+DB_VERSION = 7 # A versão final que precisamos
 
 def get_db_connection():
     """Cria o diretório se necessário e retorna uma conexão com o banco de dados."""
@@ -88,6 +88,12 @@ def init_db():
                 cursor.execute("ALTER TABLE solutions ADD COLUMN message TEXT NOT NULL DEFAULT '';")
             except sqlite3.OperationalError as e:
                 if "duplicate column name" not in str(e): raise e
+        
+        if current_version < 7:
+            click.echo("Atualizando esquema v7 (adicionando 'message' a incidentes)...")
+            try:
+                cursor.execute("ALTER TABLE open_incidents ADD COLUMN message TEXT NOT NULL DEFAULT '';")
+            except sqlite3.OperationalError: pass # Ignora se já existir
         
         cursor.execute("UPDATE schema_version SET version = ?;", (DB_VERSION,))
         conn.commit()
