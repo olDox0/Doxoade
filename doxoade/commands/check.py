@@ -1,18 +1,19 @@
 # doxoade/commands/check.py
 import sys
-import os
-import ast
-import json
 import subprocess
-import re
-import click
+#import sqlite3 
 import shutil
+import re
+import os
+import json
 import hashlib
-from pathlib import Path
-from colorama import Fore
-from io import StringIO
+import click
+import ast
 from pyflakes import api as pyflakes_api
+from pathlib import Path
+from io import StringIO
 from importlib import resources
+from colorama import Fore
 
 # Linha corrigida, que não causa o ciclo
 from .._version import __version__ as DOXOADE_VERSION
@@ -30,7 +31,6 @@ from ..shared_tools import (
     _run_git_command
 )
 
-# AS STRINGS DAS SONDAS FORAM REMOVIDAS DAQUI!
 def _get_probe_path(probe_name):
     """Encontra o caminho para um arquivo de sonda de forma segura."""
     try:
@@ -312,6 +312,33 @@ def _save_cache(cache_data):
 # O ORQUESTRADOR DO PIPELINE
 # =============================================================================
 
+def _enrich_findings_with_solutions(findings):
+    """Consulta o DB por soluções conhecidas e as anexa aos findings."""
+    if not findings:
+        return
+    
+    conn = get_db_connection()
+    # Não precisa de row_factory aqui
+    cursor = conn.cursor()
+    
+    try:
+        for finding in findings:
+            finding_hash = finding.get('hash')
+            if not finding_hash:
+                continue
+            
+            # Busca a solução mais recente para este hash de erro
+            cursor.execute("SELECT resolution_diff FROM solutions WHERE finding_hash = ? ORDER BY timestamp DESC LIMIT 1", (finding_hash,))
+            result = cursor.fetchone()
+            if result:
+                # Anexa a sugestão ao dicionário do finding
+                finding['suggestion'] = result[0]
+    except Exception:
+        # Falha silenciosa para não quebrar a análise principal
+        pass
+    finally:
+        conn.close()
+
 def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=False, no_cache=False):
     """
     Orquestra a análise estática, combinando uma arquitetura de pipeline com um sistema de cache.
@@ -386,10 +413,10 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
                 _fix_unused_imports(file_path, logger)
 
         # --- Finalização e Formatação ---
+        _enrich_findings_with_solutions(analysis_state['raw_findings']) # <<-- NOVA CHAMADA
+
         for finding in analysis_state['raw_findings']:
             snippet = _get_code_snippet(finding.get('file'), finding.get('line'))
-            
-            # Usando argumentos nomeados para garantir que os dados corretos vão para os parâmetros corretos.
             logger.add_finding(
                 severity=finding['severity'], 
                 message=finding['message'],
@@ -397,7 +424,8 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
                 file=finding.get('file'), 
                 line=finding.get('line'), 
                 snippet=snippet, 
-                details=finding.get('details')
+                details=finding.get('details'),
+                suggestion=finding.get('suggestion') # <<-- PASSA A SUGESTÃO PARA O LOGGER
             )
         
         if not no_cache:

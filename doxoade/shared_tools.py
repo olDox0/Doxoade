@@ -26,7 +26,7 @@ class ExecutionLogger:
         }
 
     # CORREÇÃO: Alterada a ordem: 'message' é o segundo argumento. 'category' agora é opcional.
-    def add_finding(self, severity, message, category='UNCATEGORIZED', file=None, line=None, details=None, snippet=None):
+    def add_finding(self, severity, message, category='UNCATEGORIZED', file=None, line=None, details=None, snippet=None, suggestion=None):
         severity = severity.upper()
         category = category.upper() 
         unique_str = f"{file}:{line}:{message}"
@@ -42,6 +42,7 @@ class ExecutionLogger:
         if line: finding['line'] = line
         if details: finding['details'] = details
         if snippet: finding['snippet'] = snippet
+        if suggestion: finding['suggestion'] = suggestion
         
         self.results['findings'].append(finding)
         
@@ -185,6 +186,9 @@ def _print_finding_details(finding):
     color = color_map.get(severity, Fore.WHITE)
     tag = f"[{severity}][{category}]"
     click.echo(color + f"{tag} {finding.get('message', 'Mensagem não encontrada.')}")
+    if finding.get('suggestion'):
+        click.echo(Fore.CYAN + Style.BRIGHT + "\n   > [SUGESTÃO DO HISTÓRICO]")
+        _present_diff_output(finding['suggestion'])
     if finding.get('file'):
         location = f"   > Em '{finding.get('file')}'"
         if finding.get('line'):
