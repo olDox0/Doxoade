@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timezone
 import click
 from colorama import Fore, Style
-
+import sqlite3
 from ..database import get_db_connection
 from ..shared_tools import ExecutionLogger, _run_git_command, _present_results
 from .check import run_check_logic
@@ -24,13 +24,16 @@ def _manage_incidents_and_learn(current_results, logger, project_path):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Define current_findings no escopo mais alto para garantir que sempre exista
     current_findings = current_results.get('findings', [])
     current_hashes = {f['hash'] for f in current_findings}
     
     try:
         cursor.execute("SELECT * FROM open_incidents WHERE project_path = ?", (project_path,))
-        open_incidents = cursor.fetchall()
+        # Usando dict_factory para facilitar o acesso às colunas pelo nome
+        conn.row_factory = sqlite3.Row 
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM open_incidents WHERE project_path = ?", (project_path,))
+        open_incidents = [dict(row) for row in cursor.fetchall()]
         
         learned_count = 0
         if open_incidents:
@@ -42,22 +45,32 @@ def _manage_incidents_and_learn(current_results, logger, project_path):
                 for f_hash in resolved_hashes:
                     incident = old_findings_map[f_hash]
                     file_path = incident['file_path']
-                    incident_commit = incident['commit_hash'] # Pega o hash do incidente
-                    diff_output = _run_git_command(['diff', '--staged', incident_commit, '--', file_path], capture_output=True)
+                    incident_commit = incident['commit_hash']
+                    
+                    # >>>>>>>> A CORREÇÃO CRÍTICA ESTÁ AQUI <<<<<<<<<
+                    # Compara o commit onde o erro foi registrado (incident_commit)
+                    # com o estado atual do "staging area" (--cached), que já contém a correção.
+                    diff_output = _run_git_command(
+                        ['diff', '--cached', incident_commit, '--', file_path], 
+                        capture_output=True
+                    )
                     
                     if not diff_output:
+                        # Este 'continue' não deve mais ser acionado para correções reais.
                         continue
 
-                    message = incident['message']
+                    # Recupera a mensagem original do incidente
+                    message = incident.get('message', 'Mensagem não registrada.') 
                     cursor.execute(
                         "INSERT OR REPLACE INTO solutions (finding_hash, resolution_diff, commit_hash, project_path, timestamp, file_path, message) VALUES (?, ?, ?, ?, ?, ?, ?)",
                         (f_hash, diff_output, "PENDING_COMMIT", project_path, datetime.now(timezone.utc).isoformat(), file_path, message)
                     )
                     learned_count += 1
         
-        # Lógica de atualização do DB
+        # Lógica de atualização do DB (já está correta no seu arquivo)
         cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
         if current_findings:
+            # Pega o commit atual para registrar os novos incidentes
             commit_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True) or "N/A"
             incidents_to_add = [
                 (f.get('hash'), f.get('file'), f.get('message'), commit_hash, datetime.now(timezone.utc).isoformat(), project_path)
@@ -79,7 +92,6 @@ def _manage_incidents_and_learn(current_results, logger, project_path):
     finally:
         conn.close()
     
-    # Retorna os resultados do check para a função 'save'
     return current_results
 
 @click.command('save')
