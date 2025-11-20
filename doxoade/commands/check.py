@@ -426,7 +426,7 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
                 line=finding.get('line'), 
                 snippet=snippet, 
                 details=finding.get('details'),
-                suggestion=finding.get('suggestion') # Esta linha já deve estar correta
+                suggestion=finding.get('suggestion')
             )
         
         if not no_cache:
