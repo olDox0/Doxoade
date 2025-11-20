@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import click
 from colorama import Fore, Style
 import sqlite3
+#import antigravity
 from ..database import get_db_connection
 from ..shared_tools import ExecutionLogger, _run_git_command, _present_results
 from .check import run_check_logic
