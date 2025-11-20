@@ -48,16 +48,13 @@ def _manage_incidents_and_learn(current_results, logger, project_path):
                     file_path = incident['file_path']
                     incident_commit = incident['commit_hash']
                     
-                    # >>>>>>>> A CORREÇÃO CRÍTICA ESTÁ AQUI <<<<<<<<<
-                    # Compara o commit onde o erro foi registrado (incident_commit)
-                    # com o estado atual do "staging area" (--cached), que já contém a correção.
                     diff_output = _run_git_command(
-                        ['diff', '--cached', incident_commit, '--', file_path], 
+                        ['diff', incident_commit, '--', file_path], 
                         capture_output=True
                     )
                     
                     if not diff_output:
-                        # Este 'continue' não deve mais ser acionado para correções reais.
+                        click.echo(Fore.YELLOW + f"   > [DEBUG] Diff vazio para o arquivo {file_path} entre HEAD e {incident_commit}")
                         continue
 
                     # Recupera a mensagem original do incidente
