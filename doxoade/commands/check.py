@@ -409,7 +409,6 @@ def _update_open_incidents(logger_results, project_path):
     cursor = conn.cursor()
 
     try:
-        # Limpa incidentes antigos *apenas para este projeto*
         cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
 
         if not findings:
@@ -418,11 +417,11 @@ def _update_open_incidents(logger_results, project_path):
 
         incidents_to_add = []
         for f in findings:
-            # Garante que o hash existe antes de adicionar
             if f.get('hash'):
                 incidents_to_add.append((
                     f.get('hash'),
                     f.get('file'),
+                    f.get('message'), 
                     commit_hash,
                     datetime.now(timezone.utc).isoformat(),
                     project_path
@@ -431,8 +430,8 @@ def _update_open_incidents(logger_results, project_path):
         if incidents_to_add:
             cursor.executemany("""
                 INSERT OR REPLACE INTO open_incidents 
-                (finding_hash, file_path, commit_hash, timestamp, project_path)
-                VALUES (?, ?, ?, ?, ?)
+                (finding_hash, file_path, message, commit_hash, timestamp, project_path)
+                VALUES (?, ?, ?, ?, ?, ?)
             """, incidents_to_add)
 
         conn.commit()
@@ -466,7 +465,7 @@ def check(ctx, path, cmd_line_ignore, fix, debug, output_format, fast, no_import
         path, cmd_line_ignore, fix, debug, 
         fast=fast, no_imports=no_imports, no_cache=no_cache
     )
-#    _update_open_incidents(results, os.path.abspath(path))
+    _update_open_incidents(results, os.path.abspath(path))
     
     if output_format == 'json':
         print(json.dumps(results, indent=2, ensure_ascii=False))
