@@ -500,7 +500,7 @@ def check(ctx, path, cmd_line_ignore, fix, debug, output_format, fast, no_import
         path, cmd_line_ignore, fix, debug, 
         fast=fast, no_imports=no_imports, no_cache=no_cache
     )
-    _update_open_incidents(results, os.path.abspath(path))
+    _update_open_incidents(results, os.path.abspath(path)) 
     
     if output_format == 'json':
         print(json.dumps(results, indent=2, ensure_ascii=False))
