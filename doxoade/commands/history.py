@@ -2,7 +2,7 @@
 import click
 from colorama import Fore, Style
 from ..database import get_db_connection
-from ..shared_tools import ExecutionLogger
+from ..shared_tools import ExecutionLogger, _present_diff_output # <-- IMPORTE A FUNÇÃO AQUI
 
 def _format_diff(diff_text):
     """Colore a saída do diff para melhor legibilidade."""
@@ -58,6 +58,8 @@ def history(ctx, finding_hash, message):
                 click.echo(f"  - {Fore.YELLOW}Data:{Style.RESET_ALL} {sol['timestamp']}")
                 click.echo(f"\n{Fore.MAGENTA}--- Correção Aplicada (Diff) ---{Style.RESET_ALL}")
                 click.echo(_format_diff(sol['resolution_diff']))
+                _present_diff_output(sol['resolution_diff'])
+                
                 click.echo(Fore.MAGENTA + "--------------------------------" + Style.RESET_ALL)
 
         except Exception as e:
