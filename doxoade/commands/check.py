@@ -18,7 +18,7 @@ from colorama import Fore
 # Linha corrigida, que não causa o ciclo
 from .._version import __version__ as DOXOADE_VERSION
 
-from datetime import datetime, timezone
+#from datetime import datetime, timezone
 from ..database import get_db_connection # <-- O IMPORT QUE FALTAVA
 from ..shared_tools import (
     ExecutionLogger, 
@@ -28,7 +28,8 @@ from ..shared_tools import (
     _get_project_config,
     collect_files_to_analyze,
     analyze_file_structure,
-    _run_git_command
+ #   _run_git_command,
+    _update_open_incidents
 )
 
 def _get_probe_path(probe_name):
@@ -432,50 +433,6 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
             _save_cache(cache)
             
         return logger.results
-
-def _update_open_incidents(logger_results, project_path):
-    """
-    Atualiza a tabela 'open_incidents' no banco de dados com os problemas encontrados.
-    """
-    findings = logger_results.get('findings', [])
-    commit_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True) or "N/A"
-    
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
-
-        if not findings:
-            conn.commit()
-            return
-
-        incidents_to_add = []
-        for f in findings:
-            if f.get('hash'):
-                incidents_to_add.append((
-                    f.get('hash'),
-                    f.get('file'),
-                    f.get('message'), 
-                    commit_hash,
-                    datetime.now(timezone.utc).isoformat(),
-                    project_path
-                ))
-        
-        if incidents_to_add:
-            cursor.executemany("""
-                INSERT OR REPLACE INTO open_incidents 
-                (finding_hash, file_path, message, commit_hash, timestamp, project_path)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, incidents_to_add)
-
-        conn.commit()
-        
-    except Exception as e:
-        conn.rollback()
-        click.echo(Fore.YELLOW + f"\n[AVISO] Não foi possível atualizar a base de dados de incidentes: {e}")
-    finally:
-        conn.close()
 
 # =============================================================================
 # O COMANDO CLICK
