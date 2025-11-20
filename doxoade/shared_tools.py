@@ -100,7 +100,19 @@ def _log_execution(command_name, path, results, arguments, execution_time_ms=0):
         for finding in results.get('findings', []):
             file_path = finding.get('file')
             file_rel = os.path.relpath(file_path, project_path_abs) if file_path and os.path.isabs(file_path) else file_path
-            cursor.execute("INSERT INTO findings (event_id, severity, message, details, file, line, finding_hash) VALUES (?, ?, ?, ?, ?, ?, ?)", (event_id, finding.get('severity'), finding.get('message'), finding.get('details'), file_rel, finding.get('line'), finding.get('hash')))
+            
+            # Adicionamos a coluna 'category' ao INSERT e o valor correspondente.
+            cursor.execute(
+                "INSERT INTO findings (event_id, severity, message, details, file, line, finding_hash, category) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", 
+                (event_id, 
+                 finding.get('severity'), 
+                 finding.get('message'), 
+                 finding.get('details'), 
+                 file_rel, 
+                 finding.get('line'), 
+                 finding.get('hash'),
+                 finding.get('category')) # <-- Valor da categoria adicionado
+            )
         conn.commit()
     except sqlite3.Error as e:
         click.echo(Fore.RED + f"\n[AVISO] Falha ao registrar a execução no banco de dados: {e}")
