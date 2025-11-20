@@ -414,7 +414,7 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
                 _fix_unused_imports(file_path, logger)
 
         # --- Finalização e Formatação ---
-        _enrich_findings_with_solutions(analysis_state['raw_findings']) # <<-- NOVA CHAMADA
+        _enrich_findings_with_solutions(analysis_state['raw_findings'])
 
         for finding in analysis_state['raw_findings']:
             snippet = _get_code_snippet(finding.get('file'), finding.get('line'))
@@ -426,7 +426,7 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
                 line=finding.get('line'), 
                 snippet=snippet, 
                 details=finding.get('details'),
-                suggestion=finding.get('suggestion') # <<-- PASSA A SUGESTÃO PARA O LOGGER
+                suggestion=finding.get('suggestion') # Esta linha já deve estar correta
             )
         
         if not no_cache:

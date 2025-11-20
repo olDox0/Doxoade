@@ -43,7 +43,8 @@ class ExecutionLogger:
         if line: finding['line'] = line
         if details: finding['details'] = details
         if snippet: finding['snippet'] = snippet
-        if suggestion: finding['suggestion'] = suggestion
+        if suggestion:
+            finding['suggestion'] = suggestion
         
         self.results['findings'].append(finding)
         
