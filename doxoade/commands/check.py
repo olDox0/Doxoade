@@ -388,9 +388,16 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
         # --- Finalização e Formatação ---
         for finding in analysis_state['raw_findings']:
             snippet = _get_code_snippet(finding.get('file'), finding.get('line'))
+            
+            # Usando argumentos nomeados para garantir que os dados corretos vão para os parâmetros corretos.
             logger.add_finding(
-                finding['severity'], finding.get('category', 'UNCATEGORIZED'), finding['message'],
-                file=finding.get('file'), line=finding.get('line'), snippet=snippet, details=finding.get('details')
+                severity=finding['severity'], 
+                message=finding['message'],
+                category=finding.get('category', 'UNCATEGORIZED'),
+                file=finding.get('file'), 
+                line=finding.get('line'), 
+                snippet=snippet, 
+                details=finding.get('details')
             )
         
         if not no_cache:

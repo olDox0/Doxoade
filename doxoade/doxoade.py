@@ -56,10 +56,10 @@ from doxoade.commands.webcheck import webcheck
 
 from doxoade.shared_tools import (
     ExecutionLogger, 
+    _log_execution, 
+    _run_git_command
 #    _get_venv_python_executable, 
 #    _present_results, 
-    _log_execution, 
-    _run_git_command, 
 #    _load_config, 
 #    _update_summary_from_findings,
 #    _get_code_snippet
