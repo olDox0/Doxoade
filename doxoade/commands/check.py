@@ -349,84 +349,116 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
     
     cache = {} if no_cache else _load_cache()
     
-    with ExecutionLogger('check_logic', path, {}) as logger:
-        config = _get_project_config(logger, start_path=path)
-        if not config.get('search_path_valid'):
-            return logger.results # Saída segura se o caminho for inválido
-
-        python_executable = _get_venv_python_executable()
-        if not python_executable:
-            logger.add_finding('CRITICAL', 'SETUP', "Ambiente virtual 'venv' não encontrado ou inválido.")
-            return logger.results # Saída segura
-
-        # --- Pipeline de Análise ---
-        analysis_state = {
-            'root_path': path,
-            'files_to_process': collect_files_to_analyze(config, cmd_line_ignore),
-            'raw_findings': [],
-            'file_reports': {}
+    config = _get_project_config(None, start_path=path)
+    if not config.get('search_path_valid'):
+        return {
+            'summary': {'critical': 1, 'errors': 0, 'warnings': 0, 'info': 0},
+            'findings': [{
+                'severity': 'CRITICAL', 
+                'category': 'SETUP',
+                'message': f"O diretório de código-fonte '{config.get('search_path')}' não existe."
+            }]
         }
-        
-        # --- Análise por Arquivo com Cache ---
-        files_for_next_step = []
+
+    python_executable = _get_venv_python_executable()
+    if not python_executable:
+        return {
+            'summary': {'critical': 1, 'errors': 0, 'warnings': 0, 'info': 0},
+            'findings': [{
+                'severity': 'CRITICAL', 
+                'category': 'SETUP',
+                'message': "Ambiente virtual 'venv' não encontrado ou inválido."
+            }]
+        }
+
+    # --- Início do Pipeline de Análise ---
+    analysis_state = {
+        'root_path': path,
+        'files_to_process': collect_files_to_analyze(config, cmd_line_ignore),
+        'raw_findings': [],
+        'file_reports': {}
+    }
+    
+    # --- Etapa 1: Análise por Arquivo com Cache ---
+    files_for_next_step = []
+    for file_path in analysis_state['files_to_process']:
+        file_hash = _get_file_hash(file_path)
+        rel_file_path = os.path.relpath(file_path, path)
+
+        if not no_cache and file_hash and rel_file_path in cache and cache[rel_file_path].get('hash') == file_hash:
+            cached_item = cache[rel_file_path]
+            findings = cached_item.get('findings', [])
+            imports = cached_item.get('imports', [])
+            if not fast:
+                analysis_state['file_reports'][rel_file_path] = {'structure_analysis': cached_item.get('structure', {})}
+        else:
+            syntax_findings = _run_syntax_probe(file_path, python_executable, debug)
+            if syntax_findings:
+                analysis_state['raw_findings'].extend(syntax_findings)
+                continue
+
+            findings, imports = _analyze_single_file_statically(file_path, python_executable, debug)
+            
+            structure = {}
+            if not fast:
+                structure = analyze_file_structure(file_path)
+                analysis_state['file_reports'][rel_file_path] = {'structure_analysis': structure}
+            
+            if file_hash:
+                cache[rel_file_path] = {'hash': file_hash, 'findings': findings, 'imports': imports, 'structure': structure}
+
+        analysis_state['raw_findings'].extend(findings)
+        files_for_next_step.append({'path': file_path, 'imports': imports})
+
+    # --- Etapa 2: Análise Agregada de Imports ---
+    all_imports = [imp for file_info in files_for_next_step for imp in file_info['imports']]
+    if all_imports and not no_imports:
+        # Usamos um logger temporário aqui para a sonda de import, para não poluir o principal
+        temp_logger = ExecutionLogger('import_probe', path, {})
+        import_findings = _run_import_probe(all_imports, python_executable, temp_logger, config.get('search_path'))
+        analysis_state['raw_findings'].extend(import_findings)
+
+    # --- Etapa 3: Correção Automática (se ativada) ---
+    if fix:
+        click.echo(Fore.CYAN + "\nModo de correção (--fix) ativado...")
+        fix_logger = ExecutionLogger('fix', path, {})
         for file_path in analysis_state['files_to_process']:
-            file_hash = _get_file_hash(file_path)
-            rel_file_path = os.path.relpath(file_path, path)
+            _fix_unused_imports(file_path, fix_logger)
+        # Opcional: Adicionar findings do fix_logger aos resultados principais se necessário
 
-            # Lógica do Cache
-            if file_hash and rel_file_path in cache and cache[rel_file_path].get('hash') == file_hash:
-                cached_item = cache[rel_file_path]
-                findings = cached_item.get('findings', [])
-                imports = cached_item.get('imports', [])
-                if not fast:
-                    analysis_state['file_reports'][rel_file_path] = {'structure_analysis': cached_item.get('structure', {})}
-            else:
-                # Análise de Sintaxe (fail-fast)
-                syntax_findings = _run_syntax_probe(file_path, python_executable, debug)
-                if syntax_findings:
-                    analysis_state['raw_findings'].extend(syntax_findings)
-                    continue # Pula para o próximo arquivo se houver erro de sintaxe
+    # --- BLOCO DE FINALIZAÇÃO E ENRIQUECIMENTO ---
+    # 1. Enriquecemos os 'raw_findings' com hashes consistentes
+    final_findings = []
+    for f in analysis_state['raw_findings']:
+        file = f.get('file')
+        line = f.get('line')
+        message = f.get('message')
+        
+        if file and line and message:
+            rel_file_path = os.path.relpath(file, path) if os.path.isabs(file) else file
+            unique_str = f"{rel_file_path}:{line}:{message}"
+            f['hash'] = hashlib.md5(unique_str.encode('utf-8', 'ignore')).hexdigest()
+        else:
+            f['hash'] = None
+        final_findings.append(f)
 
-                # Análise Estática (Pyflakes)
-                findings, imports = _analyze_single_file_statically(file_path, python_executable, debug)
-                
-                structure = {}
-                if not fast:
-                    structure = analyze_file_structure(file_path)
-                    analysis_state['file_reports'][rel_file_path] = {'structure_analysis': structure}
-                
-                if file_hash:
-                    cache[rel_file_path] = {'hash': file_hash, 'findings': findings, 'imports': imports, 'structure': structure}
+    # 2. Buscamos as soluções agora que os hashes existem
+    _enrich_findings_with_solutions(final_findings)
 
-            analysis_state['raw_findings'].extend(findings)
-            files_for_next_step.append({'path': file_path, 'imports': imports})
-
-        # --- Análise Agregada ---
-        all_imports = [imp for file_info in files_for_next_step for imp in file_info['imports']]
-        if all_imports and not no_imports:
-            import_findings = _run_import_probe(all_imports, python_executable, logger, config.get('search_path'))
-            analysis_state['raw_findings'].extend(import_findings)
-
-        # --- Correção Automática ---
-        if fix:
-            click.echo(Fore.CYAN + "\nModo de correção (--fix) ativado...")
-            for file_path in analysis_state['files_to_process']:
-                _fix_unused_imports(file_path, logger)
-
-        # --- Finalização e Formatação ---
-        _enrich_findings_with_solutions(analysis_state['raw_findings'])
-
-        for finding in analysis_state['raw_findings']:
+    # 3. Finalmente, instanciamos o logger e passamos os resultados finais para ele
+    with ExecutionLogger('check', path, {'fix': fix, 'debug': debug}) as logger:
+        for finding in final_findings:
             snippet = _get_code_snippet(finding.get('file'), finding.get('line'))
             logger.add_finding(
                 severity=finding['severity'], 
-                message=finding['message'],
+                message=finding.get('message', ''),
                 category=finding.get('category', 'UNCATEGORIZED'),
                 file=finding.get('file'), 
                 line=finding.get('line'), 
                 snippet=snippet, 
                 details=finding.get('details'),
-                suggestion=finding.get('suggestion')
+                suggestion=finding.get('suggestion'),
+                finding_hash=finding.get('hash')
             )
         
         if not no_cache:

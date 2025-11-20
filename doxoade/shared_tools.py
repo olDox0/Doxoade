@@ -27,27 +27,34 @@ class ExecutionLogger:
         }
 
     # CORREÇÃO: Alterada a ordem: 'message' é o segundo argumento. 'category' agora é opcional.
-    def add_finding(self, severity, message, category='UNCATEGORIZED', file=None, line=None, details=None, snippet=None, suggestion=None):
+    def add_finding(self, severity, message, category='UNCATEGORIZED', file=None, line=None, details=None, snippet=None, suggestion=None, finding_hash=None):
+        """Adiciona um problema encontrado aos resultados, usando um hash pré-calculado."""
         severity = severity.upper()
         category = category.upper() 
-        unique_str = f"{file}:{line}:{message}"
-        finding_hash = hashlib.md5(unique_str.encode()).hexdigest()
         
+        # Se um hash não for fornecido, calcula um como fallback (segurança)
+        if finding_hash is None and file and line and message:
+            rel_file_path = os.path.relpath(file, self.path) if self.path != '.' else file
+            unique_str = f"{rel_file_path}:{line}:{message}"
+            finding_hash = hashlib.md5(unique_str.encode('utf-8', 'ignore')).hexdigest()
+
+        # Constrói o dicionário 'finding' UMA VEZ
         finding = {
             'severity': severity,
             'category': category,
             'message': message,
-            'hash': finding_hash
+            'hash': finding_hash,
+            'file': os.path.relpath(file, self.path) if file and self.path != '.' else file,
+            'line': line,
+            'details': details,
+            'snippet': snippet,
+            'suggestion': suggestion
         }
-        if file: finding['file'] = os.path.relpath(file, self.path) if self.path != '.' else file
-        if line: finding['line'] = line
-        if details: finding['details'] = details
-        if snippet: finding['snippet'] = snippet
-        if suggestion:
-            finding['suggestion'] = suggestion
         
+        # Adiciona o dicionário completo à lista
         self.results['findings'].append(finding)
         
+        # Atualiza o sumário
         if severity == 'CRITICAL': self.results['summary']['critical'] += 1
         elif severity == 'ERROR': self.results['summary']['errors'] += 1
         elif severity == 'WARNING': self.results['summary']['warnings'] += 1
