@@ -49,12 +49,13 @@ def _manage_incidents_and_learn(current_results, logger, project_path):
                     incident_commit = incident['commit_hash']
                     
                     diff_output = _run_git_command(
-                        ['diff', incident_commit, '--', file_path], 
+                        ['diff', '--cached', incident_commit, '--', file_path],
                         capture_output=True
                     )
                     
                     if not diff_output:
-                        click.echo(Fore.YELLOW + f"   > [DEBUG] Diff vazio para o arquivo {file_path} entre HEAD e {incident_commit}")
+                        # Este 'continue' só será acionado se a correção não produzir um diff,
+                        # o que é raro, mas pode acontecer (ex: apenas mudança de espaços em branco).
                         continue
 
                     # Recupera a mensagem original do incidente
