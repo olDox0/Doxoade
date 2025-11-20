@@ -19,7 +19,7 @@ def _run_quality_check():
         return None
 
 def _manage_incidents_and_learn(current_results, logger, project_path):
-    """(Assinatura Final) Gerencia incidentes no DB e aprende com as correções."""
+    """(Arquitetura Final) Apenas lê incidentes abertos e aprende com as correções."""
     click.echo(Fore.CYAN + "\n--- [LEARN] Verificando incidentes e aprendendo com correções... ---")
     
     conn = get_db_connection()
@@ -29,10 +29,11 @@ def _manage_incidents_and_learn(current_results, logger, project_path):
     current_hashes = {f['hash'] for f in current_findings}
     
     try:
-        cursor.execute("SELECT * FROM open_incidents WHERE project_path = ?", (project_path,))
-        # Usando dict_factory para facilitar o acesso às colunas pelo nome
+        # Define o row_factory para facilitar o acesso por nome de coluna
         conn.row_factory = sqlite3.Row 
         cursor = conn.cursor()
+        
+        # 1. Lê os incidentes que foram registrados pelo último 'doxoade check'
         cursor.execute("SELECT * FROM open_incidents WHERE project_path = ?", (project_path,))
         open_incidents = [dict(row) for row in cursor.fetchall()]
         
@@ -48,17 +49,15 @@ def _manage_incidents_and_learn(current_results, logger, project_path):
                     file_path = incident['file_path']
                     incident_commit = incident['commit_hash']
                     
+                    # Lógica de diff (já está correta)
                     diff_output = _run_git_command(
                         ['diff', '--cached', incident_commit, '--', file_path],
                         capture_output=True
                     )
                     
                     if not diff_output:
-                        # Este 'continue' só será acionado se a correção não produzir um diff,
-                        # o que é raro, mas pode acontecer (ex: apenas mudança de espaços em branco).
                         continue
 
-                    # Recupera a mensagem original do incidente
                     message = incident.get('message', 'Mensagem não registrada.') 
                     cursor.execute(
                         "INSERT OR REPLACE INTO solutions (finding_hash, resolution_diff, commit_hash, project_path, timestamp, file_path, message) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -78,12 +77,15 @@ def _manage_incidents_and_learn(current_results, logger, project_path):
             if incidents_to_add:
                 cursor.executemany("INSERT OR REPLACE INTO open_incidents (finding_hash, file_path, message, commit_hash, timestamp, project_path) VALUES (?, ?, ?, ?, ?, ?)", incidents_to_add)
 
+        if not current_findings:
+             cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
+
         conn.commit()
 
         if learned_count > 0:
             click.echo(Fore.GREEN + f"[OK] {learned_count} solução(ões) aprendida(s) e armazenada(s).")
         else:
-            click.echo(Fore.WHITE + "   > Nenhuma solução aprendida neste commit.")
+            click.echo(Fore.WHITE + "   > Nenhuma solução nova aprendida neste commit.")
 
     except Exception as e:
         conn.rollback()
@@ -109,6 +111,7 @@ def save(ctx, message, force):
         click.echo(Fore.GREEN + "[OK] Arquivos preparados.")
 
         click.echo(Fore.YELLOW + "\nPasso 2: Executando verificação de qualidade...")
+
         check_results = run_check_logic('.', [], False, False, no_cache=True)
         
         _manage_incidents_and_learn(check_results, logger, project_path)
@@ -119,6 +122,8 @@ def save(ctx, message, force):
         if has_errors and not force:
             click.echo(Fore.RED + "\n[ERRO] 'doxoade check' encontrou erros. Commit abortado.")
             _present_results('text', check_results)
+
+            click.echo(Fore.YELLOW + "Execute 'doxoade check .' para atualizar a lista de incidentes e ver sugestões.")
             _run_git_command(['reset'])
             sys.exit(1)
         
