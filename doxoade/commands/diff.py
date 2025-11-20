@@ -3,45 +3,10 @@ import os
 import sys
 import subprocess
 import click
-import re
+#import re
 from colorama import Fore
 
-from ..shared_tools import _run_git_command
-
-def _present_diff_output(output):
-    """(Versão Polida) Analisa a saída do 'git diff' e a formata de forma elegante."""
-    old_line_num = 0
-    new_line_num = 0
-
-    for line in output.splitlines():
-        if line.startswith('@@'):
-            match = re.search(r'@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@', line)
-            if match:
-                old_line_num = int(match.group(1))
-                new_line_num = int(match.group(2))
-                click.echo(Fore.CYAN + f"\n\n--- Mudança(s) a partir da linha {old_line_num} ---")
-            else:
-                click.echo(Fore.CYAN + line)
-            continue
-
-        if line.startswith('diff --git') or line.startswith('index') or line.startswith('---') or line.startswith('+++'):
-            continue
-
-        if not line: continue
-
-        char = line[0]
-        content = line[1:]
-        
-        if char == '+':
-            click.echo(Fore.GREEN + f"     | {new_line_num:4d} | +    {content}")
-            new_line_num += 1
-        elif char == '-':
-            click.echo(Fore.RED   + f"{old_line_num:4d} |      | -    {content}")
-            old_line_num += 1
-        else:
-            click.echo(Fore.WHITE + f"{old_line_num:4d} | {new_line_num:4d} |      {content}")
-            old_line_num += 1
-            new_line_num += 1
+from ..shared_tools import _run_git_command, _present_diff_output
 
 @click.command('diff')
 @click.argument('path', type=click.Path(exists=True))

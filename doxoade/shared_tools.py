@@ -1,20 +1,19 @@
 # doxoade/shared_tools.py
-import os
-import json
 import toml
 import time
-import hashlib
 import subprocess
-import click
 import sqlite3
+import re
+import os
+import json
+import hashlib
+import click
 import ast
-from collections import Counter
 from pathlib import Path
-from colorama import Fore, Style
 from datetime import datetime, timezone
+from colorama import Fore, Style
+from collections import Counter
 
-# A classe ExecutionLogger e as funções auxiliares existentes permanecem as mesmas...
-# (O código anterior foi omitido para focar nas novidades)
 class ExecutionLogger:
     def __init__(self, command_name, path, arguments):
         self.command_name = command_name
@@ -286,9 +285,6 @@ def _sanitize_json_output(json_data, project_path):
     sanitized_string = raw_json_string.replace(path_to_replace, "<PROJECT_PATH>")
     return json.loads(sanitized_string)
 
-
-# --- NOVO BLOCO DE ANÁLISE ESTRUTURAL (Extraído de deepcheck.py) ---
-
 def _get_complexity_rank(complexity):
     """Classifica a complexidade ciclomática."""
     if complexity > 20: return "Altissima"
@@ -388,3 +384,41 @@ def collect_files_to_analyze(config, cmd_line_ignore=None):
             if file.endswith('.py'):
                 files_to_check.append(os.path.join(root, file))
     return files_to_check
+    
+def _present_diff_output(output):
+    """(Fonte da Verdade) Analisa a saída do 'git diff' e a formata de forma elegante."""
+    old_line_num = 0
+    new_line_num = 0
+
+    for line in output.splitlines():
+        if line.startswith('@@'):
+            match = re.search(r'@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@', line)
+            if match:
+                old_line_num = int(match.group(1))
+                new_line_num = int(match.group(2))
+                # Ajuste para ser mais genérico, sem a parte da linha
+                click.echo(Fore.CYAN + line)
+            else:
+                click.echo(Fore.CYAN + line)
+            continue
+        
+        # Ignora cabeçalhos do git diff
+        if line.startswith('diff --git') or line.startswith('index') or line.startswith('---') or line.startswith('+++'):
+            continue
+
+        if not line: continue
+
+        char = line[0]
+        content = line[1:]
+        
+        if char == '+':
+            click.echo(Fore.GREEN + f" {content}")
+            new_line_num += 1
+        elif char == '-':
+            click.echo(Fore.RED + f"-{content}")
+            old_line_num += 1
+        else:
+            # Para linhas de contexto, não mostramos os números de linha para manter a simplicidade
+            click.echo(Fore.WHITE + f" {content}")
+            old_line_num += 1
+            new_line_num += 1
