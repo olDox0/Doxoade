@@ -458,9 +458,11 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
                 category=finding.get('category', 'UNCATEGORIZED'),
                 file=finding.get('file'), 
                 line=finding.get('line'), 
+#                suggestion=finding.get('suggestion'),
                 snippet=snippet, 
                 details=finding.get('details'),
-                suggestion=finding.get('suggestion'),
+                suggestion_content=finding.get('suggestion_content'), # <--- CORRETO
+                suggestion_line=finding.get('suggestion_line'),       # <--- CORRETO
                 finding_hash=finding.get('hash')
             )
         

@@ -26,35 +26,31 @@ class ExecutionLogger:
             'findings': []
         }
 
-    # CORREÇÃO: Alterada a ordem: 'message' é o segundo argumento. 'category' agora é opcional.
-    def add_finding(self, severity, message, category='UNCATEGORIZED', file=None, line=None, details=None, snippet=None, suggestion=None, finding_hash=None):
-        """Adiciona um problema encontrado aos resultados, usando um hash pré-calculado."""
+    def add_finding(self, severity, message, category='UNCATEGORIZED', file=None, line=None, details=None, snippet=None, suggestion_content=None, suggestion_line=None, finding_hash=None):
+        """(Versão Final) Adiciona um 'finding' completo, incluindo dados para sugestão."""
         severity = severity.upper()
         category = category.upper() 
         
-        # Se um hash não for fornecido, calcula um como fallback (segurança)
         if finding_hash is None and file and line and message:
-            rel_file_path = os.path.relpath(file, self.path) if self.path != '.' else file
+            rel_file_path = os.path.relpath(file, self.path) if os.path.isabs(file) else file
             unique_str = f"{rel_file_path}:{line}:{message}"
             finding_hash = hashlib.md5(unique_str.encode('utf-8', 'ignore')).hexdigest()
 
-        # Constrói o dicionário 'finding' UMA VEZ
         finding = {
             'severity': severity,
             'category': category,
             'message': message,
-            'hash': finding_hash, # Confia no hash que foi passado
+            'hash': finding_hash,
             'file': os.path.relpath(file, self.path) if file and os.path.isabs(file) else file,
             'line': line,
             'details': details,
             'snippet': snippet,
-            'suggestion': suggestion
+            'suggestion_content': suggestion_content,
+            'suggestion_line': suggestion_line
         }
         
-        # Adiciona o dicionário completo à lista
         self.results['findings'].append(finding)
         
-        # Atualiza o sumário
         if severity == 'CRITICAL': self.results['summary']['critical'] += 1
         elif severity == 'ERROR': self.results['summary']['errors'] += 1
         elif severity == 'WARNING': self.results['summary']['warnings'] += 1
@@ -190,16 +186,13 @@ def _present_results(format, results, ignored_hashes=None):
 
 def _get_code_snippet_from_string(content, line_number, context_lines=2):
     """Extrai um snippet de uma string de conteúdo, não de um arquivo."""
-    if not line_number or not isinstance(line_number, int) or line_number <= 0:
-        return None
+    if not line_number or not isinstance(line_number, int) or line_number <= 0: return None
     try:
         lines = content.splitlines()
         start = max(0, line_number - context_lines - 1)
         end = min(len(lines), line_number + context_lines)
-        snippet = {i + 1: lines[i] for i in range(start, end)}
-        return snippet
-    except IndexError:
-        return None
+        return {i + 1: lines[i] for i in range(start, end)}
+    except IndexError: return None
         
 def _print_finding_details(finding):
     """(Versão Final) Imprime os detalhes de um 'finding' na ordem correta."""
@@ -235,15 +228,13 @@ def _print_finding_details(finding):
     if finding.get('suggestion_content'):
         click.echo(Fore.CYAN + Style.BRIGHT + "\n   > [SUGESTÃO DO HISTÓRICO]")
         
-        # Gera e imprime o snippet da SUGESTÃO
         suggestion_snippet = _get_code_snippet_from_string(
             finding['suggestion_content'],
-            finding['suggestion_line']
+            finding.get('suggestion_line')
         )
         if suggestion_snippet:
-            error_line = finding['suggestion_line']
-            for line_num_str, code_line in suggestion_snippet.items():
-                line_num = int(line_num_str)
+            error_line = finding.get('suggestion_line')
+            for line_num, code_line in suggestion_snippet.items():
                 prefix = "      > " if line_num == error_line else "        "
                 line_color = Fore.GREEN + Style.BRIGHT if line_num == error_line else Fore.WHITE + Style.DIM
                 click.echo(line_color + f"{prefix}{line_num:4}: {code_line}")
