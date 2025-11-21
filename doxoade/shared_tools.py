@@ -43,8 +43,8 @@ class ExecutionLogger:
             'severity': severity,
             'category': category,
             'message': message,
-            'hash': finding_hash,
-            'file': os.path.relpath(file, self.path) if file and self.path != '.' else file,
+            'hash': finding_hash, # Confia no hash que foi passado
+            'file': os.path.relpath(file, self.path) if file and os.path.isabs(file) else file,
             'line': line,
             'details': details,
             'snippet': snippet,
@@ -189,31 +189,39 @@ def _present_results(format, results, ignored_hashes=None):
     _print_summary(results, len(ignored_hashes))
 
 def _print_finding_details(finding):
+    """(Versão Final) Imprime os detalhes de um 'finding' na ordem correta."""
     severity = finding.get('severity', 'INFO').upper()
     category = (finding.get('category') or 'UNCATEGORIZED').upper()
     color_map = {'CRITICAL': Fore.MAGENTA, 'ERROR': Fore.RED, 'WARNING': Fore.YELLOW, 'INFO': Fore.CYAN}
     color = color_map.get(severity, Fore.WHITE)
     tag = f"[{severity}][{category}]"
+    
+    # 1. Mensagem do erro
     click.echo(color + f"{tag} {finding.get('message', 'Mensagem não encontrada.')}")
-    if finding.get('suggestion'):
-        click.echo(Fore.CYAN + Style.BRIGHT + "\n   > [SUGESTÃO DO HISTÓRICO]")
-        _present_diff_output(finding['suggestion'])
+    
+    # 2. Localização e Snippet de Código
     if finding.get('file'):
         location = f"   > Em '{finding.get('file')}'"
         if finding.get('line'):
             location += f" (linha {finding.get('line')})"
         click.echo(location)
+
     if finding.get('details'):
         click.echo(Fore.CYAN + f"   > {finding.get('details')}")
+        
     snippet = finding.get('snippet')
     if snippet:
         line_num_error = int(finding.get('line', -1))
         for line_num_str, code_line in snippet.items():
             line_num = int(line_num_str)
-            if line_num == line_num_error:
-                click.echo(Fore.WHITE + Style.BRIGHT + f"      > {line_num:4}: {code_line}")
-            else:
-                click.echo(Fore.WHITE + Style.DIM + f"        {line_num:4}: {code_line}")
+            prefix = "      > " if line_num == line_num_error else "        "
+            line_color = Fore.WHITE + Style.BRIGHT if line_num == line_num_error else Fore.WHITE + Style.DIM
+            click.echo(line_color + f"{prefix}{line_num:4}: {code_line}")
+
+    # 3. Sugestão do Histórico (por último)
+    if finding.get('suggestion'):
+        click.echo(Fore.CYAN + Style.BRIGHT + "\n   > [SUGESTÃO DO HISTÓRICO]")
+        _present_diff_output(finding['suggestion'], error_line_number=finding.get('line'))
 
 def _print_summary(results, ignored_count):
     summary = results.get('summary', {})
@@ -398,43 +406,85 @@ def collect_files_to_analyze(config, cmd_line_ignore=None):
                 files_to_check.append(os.path.join(root, file))
     return files_to_check
     
-def _present_diff_output(output):
-    """(Fonte da Verdade) Analisa a saída do 'git diff' e a formata de forma elegante."""
-    old_line_num = 0
-    new_line_num = 0
+def _present_diff_output(output, error_line_number=None):
+    """
+    (Versão Final V5 - Simplificada e Robusta) Formata e exibe a saída do 'git diff'.
+    """
+    lines_to_print = []
+    in_relevant_hunk = (error_line_number is None)
+    
+    line_num_old, line_num_new = 0, 0
 
     for line in output.splitlines():
         if line.startswith('@@'):
-            match = re.search(r'@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@', line)
-            if match:
-                old_line_num = int(match.group(1))
-                new_line_num = int(match.group(2))
-                # Ajuste para ser mais genérico, sem a parte da linha
-                click.echo(Fore.CYAN + line)
-            else:
-                click.echo(Fore.CYAN + line)
-            continue
-        
-        # Ignora cabeçalhos do git diff
-        if line.startswith('diff --git') or line.startswith('index') or line.startswith('---') or line.startswith('+++'):
-            continue
+            # Se já estávamos imprimindo um hunk contextual e encontramos o próximo, paramos.
+            if in_relevant_hunk and error_line_number is not None and lines_to_print:
+                break
 
-        if not line: continue
+            match = re.search(r'@@ -(\d+)(,(\d+))? \+(\d+)(,(\d+))? @@(.*)', line)
+            if not match: continue
 
-        char = line[0]
-        content = line[1:]
+            line_num_old = int(match.group(1))
+            line_num_new = int(match.group(4))
+            context = match.group(7).strip()
+            
+            # Decide se este hunk é relevante
+            start_line_old = int(match.group(1))
+            len_old = int(match.group(3) or 1)
+            in_relevant_hunk = (error_line_number is None) or \
+                               (start_line_old <= error_line_number < start_line_old + len_old)
+
+            if in_relevant_hunk:
+                header = f"Mudanças perto da linha {start_line_old}"
+                if context: header += f" (contexto: {context})"
+                lines_to_print.append(Fore.CYAN + header)
+
+        elif in_relevant_hunk:
+            if line.startswith('+'):
+                lines_to_print.append(Fore.GREEN + f"     + | {line[1:]}")
+                line_num_new += 1
+            elif line.startswith('-'):
+                lines_to_print.append(Fore.RED + f"{line_num_old:4d} - | {line[1:]}")
+                line_num_old += 1
+            elif line.startswith(' '):
+                lines_to_print.append(Fore.WHITE + f"{line_num_old:4d}   | {line[1:]}")
+                line_num_old += 1
+                line_num_new += 1
+    
+    if lines_to_print:
+        click.echo('\n'.join(lines_to_print))
+
+def _print_single_hunk(header_line, lines):
+    match = re.search(r'@@ -(\d+)(,(\d+))? \+(\d+)(,(\d+))? @@(.*)', header_line)
+    if not match: return
+
+    line_num_old = int(match.group(1))
+    line_num_new = int(match.group(4))
+    context = match.group(7).strip()
+
+    header_text = f"Mudanças perto da linha {line_num_old}"
+    if context: header_text += f" (contexto: {context})"
+    click.echo(Fore.CYAN + header_text)
+
+    j = 0
+    while j < len(lines):
+        line = lines[j]
+        is_modified = (line.startswith('-') and j + 1 < len(lines) and lines[j+1].startswith('+'))
         
-        if char == '+':
-            click.echo(Fore.GREEN + f" {content}")
-            new_line_num += 1
-        elif char == '-':
-            click.echo(Fore.RED + f"-{content}")
-            old_line_num += 1
-        else:
-            # Para linhas de contexto, não mostramos os números de linha para manter a simplicidade
-            click.echo(Fore.WHITE + f" {content}")
-            old_line_num += 1
-            new_line_num += 1
+        if is_modified:
+            click.echo(Fore.YELLOW + f"{line_num_old:4d} M | {line[1:]}")
+            click.echo(Fore.YELLOW + f"     > | {lines[j+1][1:]}")
+            line_num_old += 1; line_num_new += 1; j += 2
+        elif line.startswith('-'):
+            click.echo(Fore.RED + f"{line_num_old:4d} - | {line[1:]}")
+            line_num_old += 1; j += 1
+        elif line.startswith('+'):
+            click.echo(Fore.GREEN + f"     + | {line[1:]}")
+            line_num_new += 1; j += 1
+        elif line.startswith(' '):
+            click.echo(Fore.WHITE + f"{line_num_old:4d}   | {line[1:]}")
+            line_num_old += 1; line_num_new += 1; j += 1
+        else: j += 1
             
 def _update_open_incidents(logger_results, project_path):
     """
