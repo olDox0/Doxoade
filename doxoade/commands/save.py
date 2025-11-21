@@ -39,7 +39,7 @@ def _run_quality_check():
         return None
 
 def _learn_from_saved_commit(new_commit_hash, logger, project_path):
-    """(V6 Final) Compara incidentes, aprende soluções concretas e tenta abstrair templates."""
+    """(V7 Final) Aprende soluções concretas e templates."""
     click.echo(Fore.CYAN + "\n--- [LEARN] Verificando incidentes resolvidos... ---")
     
     conn = get_db_connection()
@@ -60,7 +60,7 @@ def _learn_from_saved_commit(new_commit_hash, logger, project_path):
         for incident in open_incidents:
             diff_output = _run_git_command(
                 ['diff', incident['commit_hash'], new_commit_hash, '--', incident['file_path']],
-                capture_output=True
+                capture_output=True, silent_fail=True # silent_fail para não quebrar se o arquivo foi renomeado/deletado
             )
             
             if diff_output:
@@ -68,19 +68,18 @@ def _learn_from_saved_commit(new_commit_hash, logger, project_path):
                 cursor.execute(
                     "INSERT OR REPLACE INTO solutions (finding_hash, stable_content, commit_hash, project_path, timestamp, file_path, message, error_line) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (incident['finding_hash'], 
-                     _run_git_command(['show', f"{new_commit_hash}:{incident['file_path']}"], capture_output=True), 
+                     _run_git_command(['show', f"{new_commit_hash}:{incident['file_path']}"], capture_output=True, silent_fail=True), 
                      new_commit_hash, project_path, datetime.now(timezone.utc).isoformat(), 
                      incident['file_path'], incident['message'], incident.get('line'))
                 )
                 learned_solutions += 1
 
                 # 2. TENTA APRENDER O TEMPLATE
-                if _abstract_and_learn_template(conn, incident):
+                if _abstract_and_learn_template(cursor, incident):
                     learned_templates += 1
 
-        # Limpa todos os incidentes abertos, pois o commit foi um sucesso.
         cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
-        conn.commit()
+        conn.commit() # <<<<<<<<<<<<<<<< COMMIT FINAL DA TRANSAÇÃO
 
         if learned_solutions > 0:
             click.echo(Fore.GREEN + f"[OK] {learned_solutions} solução(ões) concreta(s) aprendida(s).")
@@ -96,7 +95,7 @@ def _learn_from_saved_commit(new_commit_hash, logger, project_path):
     finally:
         if 'conn' in locals() and conn: conn.close()
 
-def _abstract_and_learn_template(conn, concrete_finding):
+def _abstract_and_learn_template(cursor, concrete_finding):
     """Analisa um 'finding' e tenta criar/atualizar um template de solução."""
     message = concrete_finding.get('message', '')
     category = concrete_finding.get('category', '')
@@ -106,21 +105,15 @@ def _abstract_and_learn_template(conn, concrete_finding):
     problem_pattern = None
     solution_template = "REMOVE_LINE" 
     
-    # --- Motor de Regras de Abstração (corrigido para não sobrescrever) ---
-    if problem_pattern is None:
-        match = re.match(r"'(.*?)' imported but unused", message)
-        if match and category == 'DEADCODE':
-            problem_pattern = "'<MODULE>' imported but unused"
-    
-    if problem_pattern is None:
-        match = re.match(r"redefinition of unused '(.*?)' from line", message)
-        if match and category == 'DEADCODE':
-            problem_pattern = "redefinition of unused '<VAR>' from line"
+    if re.match(r"'(.*?)' imported but unused", message) and category == 'DEADCODE':
+        problem_pattern = "'<MODULE>' imported but unused"
+    elif re.match(r"redefinition of unused '(.*?)' from line", message) and category == 'DEADCODE':
+        problem_pattern = "redefinition of unused '<VAR>' from line"
 
     if not problem_pattern:
+        click.echo(Fore.YELLOW + "   > [Debug Gênese] Nenhuma regra de abstração correspondeu.")
         return False
 
-    cursor = conn.cursor()
     cursor.execute("SELECT id, confidence FROM solution_templates WHERE problem_pattern = ?", (problem_pattern,))
     existing = cursor.fetchone()
 
