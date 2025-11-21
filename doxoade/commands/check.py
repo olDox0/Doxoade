@@ -434,22 +434,20 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
         line = f.get('line')
         message = f.get('message')
         
-        finding_with_hash = f.copy() # Cria uma cópia para não modificar o original
+        finding_with_hash = f.copy()
 
         if file and line and message:
-            # FONTE DA VERDADE DO HASH: Sempre usa o caminho relativo à raiz do projeto.
             rel_file_path = os.path.relpath(file, path) if os.path.isabs(file) else file
             unique_str = f"{rel_file_path}:{line}:{message}"
             finding_with_hash['hash'] = hashlib.md5(unique_str.encode('utf-8', 'ignore')).hexdigest()
         else:
             finding_with_hash['hash'] = None
         
-        final_findings.append(finding_with_hash)
+        final_findings.append(finding_with_hash) 
 
-    # 2. AGORA que os hashes existem e são consistentes, buscamos as soluções
     _enrich_findings_with_solutions(final_findings)
 
-    # 3. Finalmente, instanciamos o logger e passamos os resultados para ele
+    # 3. Passa os resultados para o logger
     with ExecutionLogger('check', path, {'fix': fix, 'debug': debug}) as logger:
         for finding in final_findings:
             snippet = _get_code_snippet(finding.get('file'), finding.get('line'))
@@ -462,7 +460,6 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
                 snippet=snippet, 
                 details=finding.get('details'),
                 suggestion=finding.get('suggestion'),
-                # Passa o hash pré-calculado, que agora é o correto
                 finding_hash=finding.get('hash')
             )
         
