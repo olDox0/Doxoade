@@ -45,8 +45,7 @@ def _learn_from_saved_commit(new_commit_hash, logger, project_path):
         click.echo(Fore.WHITE + f"   > {len(open_incidents)} incidente(s) aberto(s) encontrado(s). Verificando se foram resolvidos...")
         for incident in open_incidents:
             f_hash = incident['finding_hash']
-            file_path = incident['file_path']
-#            incident_commit = incident['commit_hash']
+            file_path = incident['file_path'] 
             
             corrected_content = _run_git_command(
                 ['show', f"{new_commit_hash}:{file_path}"],
@@ -61,6 +60,7 @@ def _learn_from_saved_commit(new_commit_hash, logger, project_path):
                 (f_hash, corrected_content, new_commit_hash, project_path, datetime.now(timezone.utc).isoformat(), file_path, incident['message'], incident['line'])
             )
             learned_count += 1
+
 
         # Limpa todos os incidentes abertos, pois o commit foi um sucesso.
         cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))

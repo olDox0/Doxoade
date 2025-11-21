@@ -235,10 +235,6 @@ def _print_finding_details(finding):
     if finding.get('suggestion_content'):
         click.echo(Fore.CYAN + Style.BRIGHT + "\n   > [SUGESTÃO DO HISTÓRICO]")
         
-        # Pega a localização do erro original para a sugestão
-        if finding.get('file'):
-            click.echo(f"   > Em '{finding.get('file')}' (versão estável)")
-
         # Gera e imprime o snippet da SUGESTÃO
         suggestion_snippet = _get_code_snippet_from_string(
             finding['suggestion_content'],
@@ -249,7 +245,6 @@ def _print_finding_details(finding):
             for line_num_str, code_line in suggestion_snippet.items():
                 line_num = int(line_num_str)
                 prefix = "      > " if line_num == error_line else "        "
-                # Na sugestão, a linha do erro é a corrigida, então mostramos em verde
                 line_color = Fore.GREEN + Style.BRIGHT if line_num == error_line else Fore.WHITE + Style.DIM
                 click.echo(line_color + f"{prefix}{line_num:4}: {code_line}")
 
@@ -540,13 +535,12 @@ def _update_open_incidents(logger_results, project_path):
         incidents_to_add = []
         for f in logger_results.get('findings', []):
             if f.get('hash') and f.get('file'):
-                absolute_file_path = os.path.join(project_path, f['file'])
-                git_relative_path = os.path.relpath(absolute_file_path, git_root).replace('\\', '/')
+                git_relative_path = f['file'].replace('\\', '/')
 
                 incidents_to_add.append((
                     f['hash'],
                     git_relative_path, # <--- Usa o caminho padronizado
-                    f.get('line'), # <--- Adiciona a linha do erro
+                    f.get('line'),
                     f['message'], 
                     commit_hash,
                     datetime.now(timezone.utc).isoformat(),
@@ -554,10 +548,11 @@ def _update_open_incidents(logger_results, project_path):
                 ))
         
         if incidents_to_add:
+            # Garanta que a ordem e o número de '?' corresponda aos 7 itens
             cursor.executemany("""
                 INSERT OR REPLACE INTO open_incidents 
-                (finding_hash, file_path, message, commit_hash, timestamp, project_path)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (finding_hash, file_path, line, message, commit_hash, timestamp, project_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             """, incidents_to_add)
 
         conn.commit()
