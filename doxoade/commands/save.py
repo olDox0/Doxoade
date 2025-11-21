@@ -1,12 +1,13 @@
 # doxoade/commands/save.py
 import sys
-import os
-from datetime import datetime, timezone
-import click
 import sqlite3
+import re
+import os
+import click
+from datetime import datetime, timezone
 from colorama import Fore, Style
-#import antigravity
 from ..database import get_db_connection
+#import antigravity
 from ..shared_tools import (
     ExecutionLogger, 
     _run_git_command, 
@@ -60,6 +61,8 @@ def _learn_from_saved_commit(new_commit_hash, logger, project_path):
             f_hash = incident['finding_hash']
             file_path = incident['file_path'] 
             
+            learned_this_loop = False
+
             corrected_content = _run_git_command(
                 ['show', f"{new_commit_hash}:{file_path}"],
                 capture_output=True
@@ -70,10 +73,13 @@ def _learn_from_saved_commit(new_commit_hash, logger, project_path):
     
             cursor.execute(
                 "INSERT OR REPLACE INTO solutions (finding_hash, stable_content, commit_hash, project_path, timestamp, file_path, message, error_line) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (f_hash, corrected_content, new_commit_hash, project_path, datetime.now(timezone.utc).isoformat(), file_path, incident['message'], incident['line'])
+                (f_hash, corrected_content, new_commit_hash, project_path, datetime.now(timezone.utc).isoformat(), file_path, incident['message'], incident.get('line')) # use .get('line') para segurança
             )
             learned_count += 1
+            learned_this_loop = True
 
+            if learned_this_loop:
+                _abstract_and_learn_template(conn, incident)
 
         # Limpa todos os incidentes abertos, pois o commit foi um sucesso.
         cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
@@ -89,6 +95,47 @@ def _learn_from_saved_commit(new_commit_hash, logger, project_path):
         logger.add_finding("ERROR", "Falha ao aprender com as correções.", details=str(e))
     finally:
         conn.close()
+
+def _abstract_and_learn_template(conn, concrete_finding):
+    """Analisa um 'finding' concreto e tenta criar um template de solução genérico."""
+    message = concrete_finding.get('message', '')
+    category = concrete_finding.get('category', '')
+
+    # --- Motor de Regras de Abstração ---
+    problem_pattern = None
+    solution_template = "REMOVE_LINE" # A maioria das correções simples é remover a linha
+
+    # Regra 1: Imports não utilizados
+    match = re.match(r"'(.*?)' imported but unused", message)
+    if match and category == 'DEADCODE':
+        problem_pattern = "'<MODULE>' imported but unused"
+    
+    # Regra 2: Redefinições não utilizadas
+    match = re.match(r"redefinition of unused '(.*?)' from line", message)
+    if match and category == 'DEADCODE':
+        problem_pattern = "redefinition of unused '<VAR>' from line"
+
+    # Adicione mais regras aqui para outros tipos de erro...
+
+    if not problem_pattern:
+        return # Não sabemos como abstrair este problema ainda
+
+    # Se chegamos aqui, temos um template. Vamos salvá-lo ou atualizá-lo.
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, confidence FROM solution_templates WHERE problem_pattern = ?", (problem_pattern,))
+    existing = cursor.fetchone()
+
+    if existing:
+        # O template já existe, aumentamos a confiança
+        new_confidence = existing['confidence'] + 1
+        cursor.execute("UPDATE solution_templates SET confidence = ? WHERE id = ?", (new_confidence, existing['id']))
+    else:
+        # Novo template, inserimos com confiança inicial
+        cursor.execute(
+            "INSERT INTO solution_templates (problem_pattern, solution_template, category, created_at) VALUES (?, ?, ?, ?)",
+            (problem_pattern, solution_template, category, datetime.now(timezone.utc).isoformat())
+        )
+    conn.commit()
 
 @click.command('save')
 @click.pass_context

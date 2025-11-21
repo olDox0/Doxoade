@@ -1,7 +1,7 @@
 # doxoade/commands/check.py
 import sys
 import subprocess
-#import sqlite3 
+import sqlite3 
 import shutil
 import re
 import os
@@ -314,16 +314,21 @@ def _save_cache(cache_data):
 # =============================================================================
 
 def _enrich_findings_with_solutions(findings):
-    """Consulta o DB por soluções conhecidas e as anexa aos findings."""
-    if not findings:
-        return
-    
+    """
+    (Projeto Gênese) Consulta o DB por soluções exatas E por templates genéricos.
+    """
+    if not findings: return
     conn = get_db_connection()
-    # Não precisa de row_factory aqui
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
     try:
+        # Pega todos os templates de uma vez para eficiência
+        cursor.execute("SELECT * FROM solution_templates ORDER BY confidence DESC")
+        templates = cursor.fetchall()
+
         for finding in findings:
+            # 1. Tenta encontrar uma solução exata primeiro (lógica atual)
             finding_hash = finding.get('hash')
             if not finding_hash:
                 continue
@@ -335,9 +340,38 @@ def _enrich_findings_with_solutions(findings):
                 # Salva o conteúdo completo e a linha do erro original
                 finding['suggestion_content'] = result['stable_content']
                 finding['suggestion_line'] = result['error_line']
-    except Exception:
-        # Falha silenciosa para não quebrar a análise principal
-        pass
+            
+            # 2. Se não encontrou, tenta aplicar um template
+            if not finding.get('suggestion_content'):
+                message = finding.get('message', '')
+                category = finding.get('category', '')
+                
+                for template in templates:
+                    if template['category'] != category:
+                        continue
+
+                    # Converte o padrão do DB em uma regex
+                    # Ex: "'<MODULE>' imported but unused" -> "'.*?' imported but unused"
+                    pattern_regex = re.escape(template['problem_pattern']).replace("<MODULE>", "'(.*?)'").replace("<VAR>", "'(.*?)'")
+                    
+                    if re.match(pattern_regex, message):
+                        # Encontramos um template aplicável!
+                        if template['solution_template'] == 'REMOVE_LINE':
+                            # Gera uma sugestão "virtual" de código estável
+                            try:
+                                with open(finding['file'], 'r') as f:
+                                    lines = f.readlines()
+                                # A "solução" é a lista de linhas, exceto a linha do erro
+                                lines.pop(finding['line'] - 1) 
+                                stable_content = "".join(lines)
+                                
+                                finding['suggestion_content'] = stable_content
+                                finding['suggestion_line'] = finding['line']
+                                finding['suggestion_source'] = "TEMPLATE" # Marca a sugestão como gerada
+                                break # Para no primeiro template que funcionar
+                            except (IOError, IndexError):
+                                continue
+
     finally:
         conn.close()
 

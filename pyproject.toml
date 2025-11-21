@@ -1,6 +1,6 @@
 [project]
 name = "doxoade"
-version = "46.0"
+version = "55.0"
 requires-python = ">=3.11"
 dependencies = [
     "beautifulsoup4",

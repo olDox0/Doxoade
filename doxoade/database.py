@@ -1,10 +1,11 @@
 # doxoade/database.py
+#import shutil
 import sqlite3
 from pathlib import Path
 import click
 
 DB_FILE = Path.home() / '.doxoade' / 'doxoade.db'
-DB_VERSION = 9 # A versão final que precisamos
+DB_VERSION = 10 # A versão final que precisamos
 
 def get_db_connection():
     """Cria o diretório se necessário e retorna uma conexão com o banco de dados."""
@@ -116,6 +117,19 @@ def init_db():
             try:
                 cursor.execute("ALTER TABLE open_incidents ADD COLUMN line INTEGER;")
             except sqlite3.OperationalError: pass
+
+        if current_version < 10:
+            click.echo("Atualizando esquema v10 (Projeto Gênese: Tabela de Templates)...")
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS solution_templates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    problem_pattern TEXT NOT NULL UNIQUE,
+                    solution_template TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    confidence INTEGER DEFAULT 1,
+                    created_at TEXT NOT NULL
+                );
+            """)
 
         cursor.execute("UPDATE schema_version SET version = ?;", (DB_VERSION,))
         conn.commit()
