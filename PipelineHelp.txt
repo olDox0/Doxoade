@@ -1,0 +1,67 @@
+# Pipeline gerado pelo doxoade em: 2025-11-05 23:29:24
+doxoade --help
+doxoade apicheck --help
+doxoade auto --help
+doxoade canonize --help
+doxoade canonize
+doxoade check --help
+doxoade check . --ignore vers
+doxoade clean --help
+doxoade clean
+> n
+doxoade config --help
+doxoade create-pipeline --help
+doxoade create-pipeline Exemplo.txt "doxoade intelligence"
+doxoade auto --file Exemplo.txt
+doxoade dashboard --help
+doxoade dashboard
+doxoade deepcheck --help
+doxoade deepcheck ./doxoade/commands/auto.py
+doxoade doctor --help
+doxoade doctor
+doxoade diff install.py
+doxoade encoding --help
+doxoade encoding *.txt UTF8
+doxoade git-clean --help
+doxoade git-clean
+doxoade git-new --help
+doxoade global-health --help
+doxoade global-health
+doxoade guicheck --help
+doxoade health --help
+doxoade health
+doxoade impact-analysis --help
+doxoade impact-analysis doxoade/shared_tools.py
+doxoade install --help
+doxoade init --help
+doxoade intelligence --help
+doxoade intelligence
+doxoade kvcheck --help
+doxoade log --help
+doxoade log -n 1 -s
+doxoade mk --help
+doxoade mk Exemplo/{exemplo.py,exemplow.py}
+doxoade optimize --help
+doxoade pythob --help
+doxoade rebuild --help
+doxoade regression-test --help
+doxoade regression-test
+doxoade release --help
+doxoade run --help
+doxoade save --help
+doxoade self-test --help
+doxoade self-test
+doxoade setup-health --help
+doxoade setup-health
+> .
+doxoade setup-regression --help
+doxoade setup-regression
+doxoade show-trace --help
+doxoade sync --help
+doxoade tutorial --help
+doxoade tutorial main
+doxoade tutorial interactive
+> n
+doxoade tutorial simulation
+> n
+doxoade webcheck --help

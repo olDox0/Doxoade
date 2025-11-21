@@ -341,7 +341,7 @@ def _enrich_findings_with_solutions(findings):
     finally:
         conn.close()
 
-def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=False, no_cache=False):
+def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=False, no_cache=False, target_files=None):
     """
     Orquestra a análise estática, combinando uma arquitetura de pipeline com um sistema de cache.
     """
@@ -372,15 +372,13 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
             }]
         }
 
-    # --- Início do Pipeline de Análise ---
     analysis_state = {
         'root_path': path,
-        'files_to_process': collect_files_to_analyze(config, cmd_line_ignore),
+        'files_to_process': target_files if target_files else collect_files_to_analyze(config, cmd_line_ignore),
         'raw_findings': [],
         'file_reports': {}
     }
     
-    # --- Etapa 1: Análise por Arquivo com Cache ---
     files_for_next_step = []
     for file_path in analysis_state['files_to_process']:
         file_hash = _get_file_hash(file_path)
