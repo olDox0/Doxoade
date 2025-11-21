@@ -38,11 +38,11 @@ def _run_quality_check():
         return None
 
 def _learn_from_saved_commit(new_commit_hash, logger, project_path):
-    """Compara incidentes abertos com o novo commit para aprender soluções."""
+    """(Versão Final Corrigida) Compara incidentes, aprende soluções E templates."""
     click.echo(Fore.CYAN + "\n--- [LEARN] Verificando incidentes resolvidos... ---")
     
     conn = get_db_connection()
-    cursor = conn.cursor()
+    # Não precisa do cursor aqui ainda
     
     try:
         conn.row_factory = sqlite3.Row 
@@ -57,38 +57,43 @@ def _learn_from_saved_commit(new_commit_hash, logger, project_path):
 
         learned_count = 0
         click.echo(Fore.WHITE + f"   > {len(open_incidents)} incidente(s) aberto(s) encontrado(s). Verificando se foram resolvidos...")
+        
         for incident in open_incidents:
-            f_hash = incident['finding_hash']
-            file_path = incident['file_path'] 
+            file_path = incident['file_path']
             
-            learned_this_loop = False
-
-            corrected_content = _run_git_command(
-                ['show', f"{new_commit_hash}:{file_path}"],
+            # Compara o commit do erro com o novo commit da correção
+            diff_output = _run_git_command(
+                ['diff', incident['commit_hash'], new_commit_hash, '--', file_path],
                 capture_output=True
             )
             
-            if not corrected_content:
-                continue
-    
-            cursor.execute(
-                "INSERT OR REPLACE INTO solutions (finding_hash, stable_content, commit_hash, project_path, timestamp, file_path, message, error_line) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (f_hash, corrected_content, new_commit_hash, project_path, datetime.now(timezone.utc).isoformat(), file_path, incident['message'], incident.get('line')) # use .get('line') para segurança
-            )
-            learned_count += 1
-            learned_this_loop = True
+            # Se há um diff, significa que o problema foi resolvido
+            if diff_output:
+                # 1. Aprende a solução concreta
+                cursor.execute(
+                    "INSERT OR REPLACE INTO solutions (finding_hash, stable_content, commit_hash, project_path, timestamp, file_path, message, error_line) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (incident['finding_hash'], 
+                     _run_git_command(['show', f"{new_commit_hash}:{file_path}"], capture_output=True), 
+                     new_commit_hash, 
+                     project_path, 
+                     datetime.now(timezone.utc).isoformat(), 
+                     file_path, 
+                     incident['message'], 
+                     incident.get('line'))
+                )
+                learned_count += 1
 
-            if learned_this_loop:
+                # 2. TENTA APRENDER O TEMPLATE (AGORA A CHAMADA FUNCIONA)
                 _abstract_and_learn_template(conn, incident)
 
-        # Limpa todos os incidentes abertos, pois o commit foi um sucesso.
+        # Limpa todos os incidentes abertos, pois o commit foi um sucesso
         cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
         conn.commit()
 
         if learned_count > 0:
             click.echo(Fore.GREEN + f"[OK] {learned_count} solução(ões) aprendida(s) e armazenada(s).")
         else:
-            click.echo(Fore.WHITE + "   > Nenhuma solução nova foi aprendida neste commit.")
+            click.echo(Fore.WHITE + "   > Nenhuma solução nova foi aprendida neste commit (nenhuma mudança detectada nos arquivos com erro).")
 
     except Exception as e:
         conn.rollback()
