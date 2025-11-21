@@ -39,7 +39,7 @@ def _run_quality_check():
         return None
 
 def _learn_from_saved_commit(new_commit_hash, logger, project_path):
-    """(Versão Final Corrigida) Compara incidentes, aprende soluções E templates."""
+    """(V6 Final) Compara incidentes, aprende soluções concretas e tenta abstrair templates."""
     click.echo(Fore.CYAN + "\n--- [LEARN] Verificando incidentes resolvidos... ---")
     
     conn = get_db_connection()
@@ -51,18 +51,15 @@ def _learn_from_saved_commit(new_commit_hash, logger, project_path):
         open_incidents = [dict(row) for row in cursor.fetchall()]
         
         if not open_incidents:
-            click.echo(Fore.WHITE + "   > Nenhum incidente aberto encontrado para aprender.")
+            click.echo(Fore.WHITE + "   > Nenhum incidente aberto para aprender.")
             return
 
         learned_solutions = 0
         learned_templates = 0
         
-        click.echo(Fore.WHITE + f"   > {len(open_incidents)} incidente(s) aberto(s) encontrado(s). Verificando se foram resolvidos...")
-        
         for incident in open_incidents:
-            file_path = incident['file_path']
             diff_output = _run_git_command(
-                ['diff', incident['commit_hash'], new_commit_hash, '--', file_path],
+                ['diff', incident['commit_hash'], new_commit_hash, '--', incident['file_path']],
                 capture_output=True
             )
             
@@ -71,15 +68,14 @@ def _learn_from_saved_commit(new_commit_hash, logger, project_path):
                 cursor.execute(
                     "INSERT OR REPLACE INTO solutions (finding_hash, stable_content, commit_hash, project_path, timestamp, file_path, message, error_line) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (incident['finding_hash'], 
-                     _run_git_command(['show', f"{new_commit_hash}:{file_path}"], capture_output=True), 
+                     _run_git_command(['show', f"{new_commit_hash}:{incident['file_path']}"], capture_output=True), 
                      new_commit_hash, project_path, datetime.now(timezone.utc).isoformat(), 
-                     file_path, incident['message'], incident.get('line'))
+                     incident['file_path'], incident['message'], incident.get('line'))
                 )
                 learned_solutions += 1
 
-                # 2. TENTA APRENDER O TEMPLATE (AGORA A CHAMADA FUNCIONA)
-                template_created = _abstract_and_learn_template(conn, incident)
-                if template_created:
+                # 2. TENTA APRENDER O TEMPLATE
+                if _abstract_and_learn_template(conn, incident):
                     learned_templates += 1
 
         # Limpa todos os incidentes abertos, pois o commit foi um sucesso.
@@ -89,9 +85,10 @@ def _learn_from_saved_commit(new_commit_hash, logger, project_path):
         if learned_solutions > 0:
             click.echo(Fore.GREEN + f"[OK] {learned_solutions} solução(ões) concreta(s) aprendida(s).")
         if learned_templates > 0:
-            click.echo(Fore.GREEN + f"[OK] {learned_templates} novo(s) template(s) de solução aprendido(s).")
-        if learned_solutions == 0 and learned_templates == 0:
-            click.echo(Fore.WHITE + "   > Nenhuma solução nova foi aprendida neste commit.")
+            click.echo(Fore.GREEN + f"[Gênese] {learned_templates} template(s) de solução aprendido(s)/reforçado(s).")
+        
+        if learned_solutions == 0:
+            click.echo(Fore.WHITE + "   > Nenhuma solução nova foi aprendida (nenhuma mudança detectada nos arquivos com erro).")
 
     except Exception as e:
         conn.rollback()
@@ -103,19 +100,23 @@ def _abstract_and_learn_template(conn, concrete_finding):
     """Analisa um 'finding' e tenta criar/atualizar um template de solução."""
     message = concrete_finding.get('message', '')
     category = concrete_finding.get('category', '')
+    
     problem_pattern = None
     solution_template = "REMOVE_LINE" 
     
-    match = re.match(r"'(.*?)' imported but unused", message)
-    if match and category == 'DEADCODE':
-        problem_pattern = "'<MODULE>' imported but unused"
+    # --- Motor de Regras de Abstração (corrigido para não sobrescrever) ---
+    if problem_pattern is None:
+        match = re.match(r"'(.*?)' imported but unused", message)
+        if match and category == 'DEADCODE':
+            problem_pattern = "'<MODULE>' imported but unused"
     
-    match = re.match(r"redefinition of unused '(.*?)' from line", message)
-    if match and category == 'DEADCODE':
-        problem_pattern = "redefinition of unused '<VAR>' from line"
+    if problem_pattern is None:
+        match = re.match(r"redefinition of unused '(.*?)' from line", message)
+        if match and category == 'DEADCODE':
+            problem_pattern = "redefinition of unused '<VAR>' from line"
 
     if not problem_pattern:
-        return False # Não sabemos como abstrair
+        return False
 
     cursor = conn.cursor()
     cursor.execute("SELECT id, confidence FROM solution_templates WHERE problem_pattern = ?", (problem_pattern,))
@@ -132,8 +133,7 @@ def _abstract_and_learn_template(conn, concrete_finding):
         )
         click.echo(Fore.CYAN + f"   > [Gênese] Novo template aprendido: '{problem_pattern}'")
     
-    # conn.commit() é chamado no final de _learn_from_saved_commit
-    return True # Indica que um template foi criado/atualizado
+    return True
 
 @click.command('save')
 @click.pass_context
