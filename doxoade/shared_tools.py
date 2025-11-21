@@ -533,17 +533,18 @@ def _update_open_incidents(logger_results, project_path):
                     git_relative_path, # <--- Usa o caminho padronizado
                     f.get('line'),
                     f['message'], 
+                    f.get('category'),
                     commit_hash,
                     datetime.now(timezone.utc).isoformat(),
                     project_path
                 ))
         
         if incidents_to_add:
-            # Garanta que a ordem e o número de '?' corresponda aos 7 itens
+
             cursor.executemany("""
                 INSERT OR REPLACE INTO open_incidents 
-                (finding_hash, file_path, line, message, commit_hash, timestamp, project_path)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (finding_hash, file_path, line, message, category, commit_hash, timestamp, project_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, incidents_to_add)
 
         conn.commit()

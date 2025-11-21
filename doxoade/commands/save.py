@@ -101,6 +101,8 @@ def _abstract_and_learn_template(conn, concrete_finding):
     message = concrete_finding.get('message', '')
     category = concrete_finding.get('category', '')
     
+    click.echo(Fore.MAGENTA + f"   > [Debug Gênese] Tentando abstrair: msg='{message}', cat='{category}'")
+    
     problem_pattern = None
     solution_template = "REMOVE_LINE" 
     
