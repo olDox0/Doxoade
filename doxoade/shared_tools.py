@@ -526,6 +526,10 @@ def _update_open_incidents(logger_results, project_path):
     conn = get_db_connection()
     cursor = conn.cursor()
 
+    git_root = _run_git_command(['rev-parse', '--show-toplevel'], capture_output=True, silent_fail=True)
+    if not git_root:
+        git_root = project_path
+
     try:
         cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
 
@@ -534,12 +538,16 @@ def _update_open_incidents(logger_results, project_path):
             return
 
         incidents_to_add = []
-        for f in findings:
-            if f.get('hash'):
+        for f in logger_results.get('findings', []):
+            if f.get('hash') and f.get('file'):
+                absolute_file_path = os.path.join(project_path, f['file'])
+                git_relative_path = os.path.relpath(absolute_file_path, git_root).replace('\\', '/')
+
                 incidents_to_add.append((
-                    f.get('hash'),
-                    f.get('file'),
-                    f.get('message'), 
+                    f['hash'],
+                    git_relative_path, # <--- Usa o caminho padronizado
+                    f.get('line'), # <--- Adiciona a linha do erro
+                    f['message'], 
                     commit_hash,
                     datetime.now(timezone.utc).isoformat(),
                     project_path
