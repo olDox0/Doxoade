@@ -46,3 +46,4 @@ Vers/
 
 # Exceções (movidas para o final para garantir prioridade)
 !requirements.txt
+!PipelineHelp.txt

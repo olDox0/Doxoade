@@ -15,6 +15,19 @@ from ..shared_tools import (
 )
 from .check import run_check_logic
 
+def _get_staged_python_files(git_root):
+    """Retorna uma lista de caminhos absolutos de arquivos .py no staging area."""
+    # --diff-filter=AMR -> Apenas arquivos Adicionados, Modificados, Renomeados
+    staged_files_str = _run_git_command(
+        ['diff', '--name-only', '--cached', '--diff-filter=AMR', '--', '*.py'], 
+        capture_output=True
+    )
+    if not staged_files_str:
+        return []
+    
+    # Converte os caminhos relativos do Git em caminhos absolutos
+    return [os.path.join(git_root, f.strip()) for f in staged_files_str.splitlines()]
+
 def _run_quality_check():
     """Executa a lógica do check em memória e retorna os resultados."""
     try:
@@ -96,6 +109,20 @@ def save(ctx, message, force):
 
         click.echo(Fore.YELLOW + "\nPasso 2: Executando verificação de qualidade...")
         check_results = run_check_logic('.', [], False, False, no_cache=True)
+        
+        git_root = _run_git_command(['rev-parse', '--show-toplevel'], capture_output=True)
+        files_to_check = _get_staged_python_files(git_root)
+        
+        if not files_to_check:
+            click.echo(Fore.GREEN + "[OK] Nenhuma modificação em arquivos Python para verificar.")
+            check_results = {'summary': {}, 'findings': []}
+        else:
+            click.echo(f"   > Analisando {len(files_to_check)} arquivo(s) modificado(s)...")
+            check_results = run_check_logic(
+                '.', [], False, False, 
+                no_cache=True, 
+                target_files=files_to_check # <-- Passa apenas os arquivos modificados
+            )
         
         summary = check_results.get('summary', {})
         has_errors = summary.get('critical', 0) > 0 or summary.get('errors', 0) > 0
