@@ -1,4 +1,5 @@
 # doxoade/commands/save.py
+#import subprocess
 import sys
 import sqlite3
 import re
@@ -42,8 +43,6 @@ def _learn_from_saved_commit(new_commit_hash, logger, project_path):
     click.echo(Fore.CYAN + "\n--- [LEARN] Verificando incidentes resolvidos... ---")
     
     conn = get_db_connection()
-    # Não precisa do cursor aqui ainda
-    
     try:
         conn.row_factory = sqlite3.Row 
         cursor = conn.cursor()
@@ -55,92 +54,86 @@ def _learn_from_saved_commit(new_commit_hash, logger, project_path):
             click.echo(Fore.WHITE + "   > Nenhum incidente aberto encontrado para aprender.")
             return
 
-        learned_count = 0
+        learned_solutions = 0
+        learned_templates = 0
+        
         click.echo(Fore.WHITE + f"   > {len(open_incidents)} incidente(s) aberto(s) encontrado(s). Verificando se foram resolvidos...")
         
         for incident in open_incidents:
             file_path = incident['file_path']
-            
-            # Compara o commit do erro com o novo commit da correção
             diff_output = _run_git_command(
                 ['diff', incident['commit_hash'], new_commit_hash, '--', file_path],
                 capture_output=True
             )
             
-            # Se há um diff, significa que o problema foi resolvido
             if diff_output:
                 # 1. Aprende a solução concreta
                 cursor.execute(
                     "INSERT OR REPLACE INTO solutions (finding_hash, stable_content, commit_hash, project_path, timestamp, file_path, message, error_line) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (incident['finding_hash'], 
                      _run_git_command(['show', f"{new_commit_hash}:{file_path}"], capture_output=True), 
-                     new_commit_hash, 
-                     project_path, 
-                     datetime.now(timezone.utc).isoformat(), 
-                     file_path, 
-                     incident['message'], 
-                     incident.get('line'))
+                     new_commit_hash, project_path, datetime.now(timezone.utc).isoformat(), 
+                     file_path, incident['message'], incident.get('line'))
                 )
-                learned_count += 1
+                learned_solutions += 1
 
                 # 2. TENTA APRENDER O TEMPLATE (AGORA A CHAMADA FUNCIONA)
-                _abstract_and_learn_template(conn, incident)
+                template_created = _abstract_and_learn_template(conn, incident)
+                if template_created:
+                    learned_templates += 1
 
-        # Limpa todos os incidentes abertos, pois o commit foi um sucesso
+        # Limpa todos os incidentes abertos, pois o commit foi um sucesso.
         cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
         conn.commit()
 
-        if learned_count > 0:
-            click.echo(Fore.GREEN + f"[OK] {learned_count} solução(ões) aprendida(s) e armazenada(s).")
-        else:
-            click.echo(Fore.WHITE + "   > Nenhuma solução nova foi aprendida neste commit (nenhuma mudança detectada nos arquivos com erro).")
+        if learned_solutions > 0:
+            click.echo(Fore.GREEN + f"[OK] {learned_solutions} solução(ões) concreta(s) aprendida(s).")
+        if learned_templates > 0:
+            click.echo(Fore.GREEN + f"[OK] {learned_templates} novo(s) template(s) de solução aprendido(s).")
+        if learned_solutions == 0 and learned_templates == 0:
+            click.echo(Fore.WHITE + "   > Nenhuma solução nova foi aprendida neste commit.")
 
     except Exception as e:
         conn.rollback()
         logger.add_finding("ERROR", "Falha ao aprender com as correções.", details=str(e))
     finally:
-        conn.close()
+        if 'conn' in locals() and conn: conn.close()
 
 def _abstract_and_learn_template(conn, concrete_finding):
-    """Analisa um 'finding' concreto e tenta criar um template de solução genérico."""
+    """Analisa um 'finding' e tenta criar/atualizar um template de solução."""
     message = concrete_finding.get('message', '')
     category = concrete_finding.get('category', '')
-
-    # --- Motor de Regras de Abstração ---
     problem_pattern = None
-    solution_template = "REMOVE_LINE" # A maioria das correções simples é remover a linha
-
-    # Regra 1: Imports não utilizados
+    solution_template = "REMOVE_LINE" 
+    
     match = re.match(r"'(.*?)' imported but unused", message)
     if match and category == 'DEADCODE':
         problem_pattern = "'<MODULE>' imported but unused"
     
-    # Regra 2: Redefinições não utilizadas
     match = re.match(r"redefinition of unused '(.*?)' from line", message)
     if match and category == 'DEADCODE':
         problem_pattern = "redefinition of unused '<VAR>' from line"
 
-    # Adicione mais regras aqui para outros tipos de erro...
-
     if not problem_pattern:
-        return # Não sabemos como abstrair este problema ainda
+        return False # Não sabemos como abstrair
 
-    # Se chegamos aqui, temos um template. Vamos salvá-lo ou atualizá-lo.
     cursor = conn.cursor()
     cursor.execute("SELECT id, confidence FROM solution_templates WHERE problem_pattern = ?", (problem_pattern,))
     existing = cursor.fetchone()
 
     if existing:
-        # O template já existe, aumentamos a confiança
         new_confidence = existing['confidence'] + 1
         cursor.execute("UPDATE solution_templates SET confidence = ? WHERE id = ?", (new_confidence, existing['id']))
+        click.echo(Fore.CYAN + f"   > [Gênese] Confiança do template '{problem_pattern}' aumentada para {new_confidence}.")
     else:
-        # Novo template, inserimos com confiança inicial
         cursor.execute(
             "INSERT INTO solution_templates (problem_pattern, solution_template, category, created_at) VALUES (?, ?, ?, ?)",
             (problem_pattern, solution_template, category, datetime.now(timezone.utc).isoformat())
         )
-    conn.commit()
+        click.echo(Fore.CYAN + f"   > [Gênese] Novo template aprendido: '{problem_pattern}'")
+    
+    # conn.commit() é chamado no final de _learn_from_saved_commit
+    return True # Indica que um template foi criado/atualizado
 
 @click.command('save')
 @click.pass_context
