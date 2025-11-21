@@ -329,11 +329,12 @@ def _enrich_findings_with_solutions(findings):
                 continue
             
             # Busca a solução mais recente para este hash de erro
-            cursor.execute("SELECT resolution_diff FROM solutions WHERE finding_hash = ? ORDER BY timestamp DESC LIMIT 1", (finding_hash,))
+            cursor.execute("SELECT stable_content, error_line FROM solutions WHERE finding_hash = ? ORDER BY timestamp DESC LIMIT 1", (finding_hash,))
             result = cursor.fetchone()
             if result:
-                # Anexa a sugestão ao dicionário do finding
-                finding['suggestion'] = result[0]
+                # Salva o conteúdo completo e a linha do erro original
+                finding['suggestion_content'] = result['stable_content']
+                finding['suggestion_line'] = result['error_line']
     except Exception:
         # Falha silenciosa para não quebrar a análise principal
         pass

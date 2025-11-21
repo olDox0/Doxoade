@@ -188,6 +188,19 @@ def _present_results(format, results, ignored_hashes=None):
     
     _print_summary(results, len(ignored_hashes))
 
+def _get_code_snippet_from_string(content, line_number, context_lines=2):
+    """Extrai um snippet de uma string de conteúdo, não de um arquivo."""
+    if not line_number or not isinstance(line_number, int) or line_number <= 0:
+        return None
+    try:
+        lines = content.splitlines()
+        start = max(0, line_number - context_lines - 1)
+        end = min(len(lines), line_number + context_lines)
+        snippet = {i + 1: lines[i] for i in range(start, end)}
+        return snippet
+    except IndexError:
+        return None
+        
 def _print_finding_details(finding):
     """(Versão Final) Imprime os detalhes de um 'finding' na ordem correta."""
     severity = finding.get('severity', 'INFO').upper()
@@ -219,9 +232,26 @@ def _print_finding_details(finding):
             click.echo(line_color + f"{prefix}{line_num:4}: {code_line}")
 
     # 3. Sugestão do Histórico (por último)
-    if finding.get('suggestion'):
+    if finding.get('suggestion_content'):
         click.echo(Fore.CYAN + Style.BRIGHT + "\n   > [SUGESTÃO DO HISTÓRICO]")
-        _present_diff_output(finding['suggestion'], error_line_number=finding.get('line'))
+        
+        # Pega a localização do erro original para a sugestão
+        if finding.get('file'):
+            click.echo(f"   > Em '{finding.get('file')}' (versão estável)")
+
+        # Gera e imprime o snippet da SUGESTÃO
+        suggestion_snippet = _get_code_snippet_from_string(
+            finding['suggestion_content'],
+            finding['suggestion_line']
+        )
+        if suggestion_snippet:
+            error_line = finding['suggestion_line']
+            for line_num_str, code_line in suggestion_snippet.items():
+                line_num = int(line_num_str)
+                prefix = "      > " if line_num == error_line else "        "
+                # Na sugestão, a linha do erro é a corrigida, então mostramos em verde
+                line_color = Fore.GREEN + Style.BRIGHT if line_num == error_line else Fore.WHITE + Style.DIM
+                click.echo(line_color + f"{prefix}{line_num:4}: {code_line}")
 
 def _print_summary(results, ignored_count):
     summary = results.get('summary', {})

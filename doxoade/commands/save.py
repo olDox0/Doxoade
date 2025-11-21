@@ -46,20 +46,19 @@ def _learn_from_saved_commit(new_commit_hash, logger, project_path):
         for incident in open_incidents:
             f_hash = incident['finding_hash']
             file_path = incident['file_path']
-            incident_commit = incident['commit_hash']
+#            incident_commit = incident['commit_hash']
             
-            # COMPARAÇÃO ROBUSTA: O commit do erro VS o novo commit da correção.
-            diff_output = _run_git_command(
-                ['diff', incident_commit, new_commit_hash, '--', file_path],
+            corrected_content = _run_git_command(
+                ['show', f"{new_commit_hash}:{file_path}"],
                 capture_output=True
             )
             
-            if not diff_output:
+            if not corrected_content:
                 continue
-
+    
             cursor.execute(
-                "INSERT OR REPLACE INTO solutions (finding_hash, resolution_diff, commit_hash, project_path, timestamp, file_path, message) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (f_hash, diff_output, new_commit_hash, project_path, datetime.now(timezone.utc).isoformat(), file_path, incident['message'])
+                "INSERT OR REPLACE INTO solutions (finding_hash, stable_content, commit_hash, project_path, timestamp, file_path, message, error_line) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (f_hash, corrected_content, new_commit_hash, project_path, datetime.now(timezone.utc).isoformat(), file_path, incident['message'], incident['line'])
             )
             learned_count += 1
 
