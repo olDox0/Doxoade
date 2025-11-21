@@ -1,4 +1,5 @@
 # doxoade/commands/history.py
+#import sys
 import click
 from colorama import Fore, Style
 from ..database import get_db_connection
