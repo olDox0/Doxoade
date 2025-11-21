@@ -314,64 +314,62 @@ def _save_cache(cache_data):
 # =============================================================================
 
 def _enrich_findings_with_solutions(findings):
-    """
-    (Projeto Gênese) Consulta o DB por soluções exatas E por templates genéricos.
-    """
+    """(Projeto Gênese - Corrigido) Consulta o DB por soluções exatas E por templates genéricos."""
     if not findings: return
+    
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
     try:
-        # Pega todos os templates de uma vez para eficiência
         cursor.execute("SELECT * FROM solution_templates ORDER BY confidence DESC")
         templates = cursor.fetchall()
 
         for finding in findings:
-            # 1. Tenta encontrar uma solução exata primeiro (lógica atual)
+            # 1. Tenta encontrar uma solução exata primeiro
             finding_hash = finding.get('hash')
-            if not finding_hash:
-                continue
-            
-            # Busca a solução mais recente para este hash de erro
-            cursor.execute("SELECT stable_content, error_line FROM solutions WHERE finding_hash = ? ORDER BY timestamp DESC LIMIT 1", (finding_hash,))
-            result = cursor.fetchone()
-            if result:
-                # Salva o conteúdo completo e a linha do erro original
-                finding['suggestion_content'] = result['stable_content']
-                finding['suggestion_line'] = result['error_line']
-            
-            # 2. Se não encontrou, tenta aplicar um template
-            if not finding.get('suggestion_content'):
-                message = finding.get('message', '')
-                category = finding.get('category', '')
-                
-                for template in templates:
-                    if template['category'] != category:
-                        continue
+            if finding_hash:
+                cursor.execute("SELECT stable_content, error_line FROM solutions WHERE finding_hash = ? LIMIT 1", (finding_hash,))
+                exact_solution = cursor.fetchone()
+                if exact_solution:
+                    finding['suggestion_content'] = exact_solution['stable_content']
+                    finding['suggestion_line'] = exact_solution['error_line']
+                    finding['suggestion_source'] = "EXACT"
+                    continue # Já encontramos a melhor solução, vamos para o próximo erro
 
-                    # Converte o padrão do DB em uma regex
-                    # Ex: "'<MODULE>' imported but unused" -> "'.*?' imported but unused"
-                    pattern_regex = re.escape(template['problem_pattern']).replace("<MODULE>", "'(.*?)'").replace("<VAR>", "'(.*?)'")
-                    
-                    if re.match(pattern_regex, message):
-                        # Encontramos um template aplicável!
-                        if template['solution_template'] == 'REMOVE_LINE':
-                            # Gera uma sugestão "virtual" de código estável
-                            try:
-                                with open(finding['file'], 'r') as f:
-                                    lines = f.readlines()
-                                # A "solução" é a lista de linhas, exceto a linha do erro
+            # 2. Se não encontrou, tenta aplicar um template
+            message = finding.get('message', '')
+            category = finding.get('category', '')
+            
+            for template in templates:
+                if template['category'] != category:
+                    continue
+
+                # --- LÓGICA DE REGEX CORRIGIDA ---
+                # Transforma o padrão em uma regex segura, substituindo placeholders.
+                pattern_str = template['problem_pattern']
+                # Escapa caracteres especiais de regex, EXCETO os nossos placeholders
+                pattern_regex_str = re.escape(pattern_str).replace(r'\<MODULE\>', '(.*?)').replace(r'\<VAR\>', '(.*?)')
+                
+                # Usa re.fullmatch para garantir que o padrão corresponda à mensagem inteira
+                if re.fullmatch(pattern_regex_str, message):
+                    if template['solution_template'] == 'REMOVE_LINE':
+                        try:
+                            with open(finding['file'], 'r', encoding='utf-8', errors='ignore') as f:
+                                lines = f.readlines()
+                            
+                            # A "solução" é a lista de linhas, exceto a linha do erro
+                            # Garante que a linha a ser removida é válida
+                            if 0 < finding['line'] <= len(lines):
                                 lines.pop(finding['line'] - 1) 
                                 stable_content = "".join(lines)
                                 
                                 finding['suggestion_content'] = stable_content
                                 finding['suggestion_line'] = finding['line']
-                                finding['suggestion_source'] = "TEMPLATE" # Marca a sugestão como gerada
+                                finding['suggestion_source'] = "TEMPLATE"
                                 break # Para no primeiro template que funcionar
-                            except (IOError, IndexError):
-                                continue
-
+                        except (IOError, IndexError, TypeError):
+                            continue
     finally:
         conn.close()
 
