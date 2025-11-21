@@ -4,7 +4,7 @@ from pathlib import Path
 import click
 
 DB_FILE = Path.home() / '.doxoade' / 'doxoade.db'
-DB_VERSION = 8 # A versão final que precisamos
+DB_VERSION = 9 # A versão final que precisamos
 
 def get_db_connection():
     """Cria o diretório se necessário e retorna uma conexão com o banco de dados."""
@@ -110,6 +110,12 @@ def init_db():
                         timestamp TEXT NOT NULL, file_path TEXT NOT NULL, message TEXT, error_line INTEGER
                     );
                 """)
+
+        if current_version < 9:
+            click.echo("Atualizando esquema v9 (adicionando 'line' a incidentes)...")
+            try:
+                cursor.execute("ALTER TABLE open_incidents ADD COLUMN line INTEGER;")
+            except sqlite3.OperationalError: pass
 
         cursor.execute("UPDATE schema_version SET version = ?;", (DB_VERSION,))
         conn.commit()
