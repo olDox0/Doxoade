@@ -39,7 +39,7 @@ def _run_quality_check():
         return None
 
 def _learn_from_saved_commit(new_commit_hash, logger, project_path):
-    """(V7 Final) Aprende soluções concretas e templates."""
+    """(V8 Final) Aprende soluções concretas e templates de forma transacional."""
     click.echo(Fore.CYAN + "\n--- [LEARN] Verificando incidentes resolvidos... ---")
     
     conn = get_db_connection()
@@ -60,7 +60,7 @@ def _learn_from_saved_commit(new_commit_hash, logger, project_path):
         for incident in open_incidents:
             diff_output = _run_git_command(
                 ['diff', incident['commit_hash'], new_commit_hash, '--', incident['file_path']],
-                capture_output=True, silent_fail=True # silent_fail para não quebrar se o arquivo foi renomeado/deletado
+                capture_output=True, silent_fail=True
             )
             
             if diff_output:
@@ -78,8 +78,12 @@ def _learn_from_saved_commit(new_commit_hash, logger, project_path):
                 if _abstract_and_learn_template(cursor, incident):
                     learned_templates += 1
 
+        # Limpa todos os incidentes abertos, pois o commit foi um sucesso
         cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
-        conn.commit() # <<<<<<<<<<<<<<<< COMMIT FINAL DA TRANSAÇÃO
+        
+        # >>>>> A CORREÇÃO CRÍTICA ESTÁ AQUI <<<<<
+        # O commit acontece no final, salvando TODAS as mudanças (solutions, templates, deletes).
+        conn.commit() 
 
         if learned_solutions > 0:
             click.echo(Fore.GREEN + f"[OK] {learned_solutions} solução(ões) concreta(s) aprendida(s).")
