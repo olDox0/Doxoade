@@ -58,7 +58,7 @@ def history(ctx, finding_hash, message):
                 click.echo(f"  - {Fore.YELLOW}Data:{Style.RESET_ALL} {sol['timestamp']}")
                 click.echo(f"\n{Fore.MAGENTA}--- Correção Aplicada (Diff) ---{Style.RESET_ALL}")
                 click.echo(_format_diff(sol['resolution_diff']))
-                _present_diff_output(sol['resolution_diff'])
+                _present_diff_output(sol['resolution_diff']) 
                 
                 click.echo(Fore.MAGENTA + "--------------------------------" + Style.RESET_ALL)
 
