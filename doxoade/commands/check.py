@@ -314,7 +314,7 @@ def _save_cache(cache_data):
 # =============================================================================
 
 def _enrich_findings_with_solutions(findings):
-    """(Projeto Gênese - Corrigido) Consulta o DB por soluções exatas E por templates genéricos."""
+    """(Projeto Gênese - V2 Corrigido) Consulta o DB por soluções exatas E por templates genéricos."""
     if not findings: return
     
     conn = get_db_connection()
@@ -335,7 +335,7 @@ def _enrich_findings_with_solutions(findings):
                     finding['suggestion_content'] = exact_solution['stable_content']
                     finding['suggestion_line'] = exact_solution['error_line']
                     finding['suggestion_source'] = "EXACT"
-                    continue # Já encontramos a melhor solução, vamos para o próximo erro
+                    continue # Já encontramos a melhor solução
 
             # 2. Se não encontrou, tenta aplicar um template
             message = finding.get('message', '')
@@ -345,30 +345,50 @@ def _enrich_findings_with_solutions(findings):
                 if template['category'] != category:
                     continue
 
-                # --- LÓGICA DE REGEX CORRIGIDA ---
-                # Transforma o padrão em uma regex segura, substituindo placeholders.
+                # --- LÓGICA DE REGEX CORRIGIDA V2 ---
+                # O pattern armazenado é algo como: '<MODULE>' imported but unused
+                # Precisamos transformar em uma regex que capture o módulo
                 pattern_str = template['problem_pattern']
-                # Escapa caracteres especiais de regex, EXCETO os nossos placeholders
-                pattern_regex_str = re.escape(pattern_str).replace(r'\<MODULE\>', '(.*?)').replace(r'\<VAR\>', '(.*?)')
                 
-                # Usa re.fullmatch para garantir que o padrão corresponda à mensagem inteira
-                if re.fullmatch(pattern_regex_str, message):
+                # Substitui os placeholders ANTES de escapar
+                # Usamos marcadores temporários únicos
+                pattern_with_markers = pattern_str.replace('<MODULE>', '___MODULE___').replace('<VAR>', '___VAR___')
+                
+                # Escapa caracteres especiais de regex
+                escaped_pattern = re.escape(pattern_with_markers)
+                
+                # Substitui os marcadores por grupos de captura
+                pattern_regex_str = escaped_pattern.replace('___MODULE___', '(.+?)').replace('___VAR___', '(.+?)')
+                
+                # Debug (pode remover depois)
+                # click.echo(f"[DEBUG] Pattern: {pattern_str} -> Regex: {pattern_regex_str} -> Msg: {message}")
+                
+                # Usa re.fullmatch para garantir correspondência completa
+                match = re.fullmatch(pattern_regex_str, message)
+                if match:
                     if template['solution_template'] == 'REMOVE_LINE':
                         try:
-                            with open(finding['file'], 'r', encoding='utf-8', errors='ignore') as f:
+                            file_path = finding.get('file')
+                            line_num = finding.get('line')
+                            
+                            if not file_path or not line_num:
+                                continue
+                                
+                            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                                 lines = f.readlines()
                             
-                            # A "solução" é a lista de linhas, exceto a linha do erro
-                            # Garante que a linha a ser removida é válida
-                            if 0 < finding['line'] <= len(lines):
-                                lines.pop(finding['line'] - 1) 
-                                stable_content = "".join(lines)
+                            # A "solução" é o arquivo sem a linha do erro
+                            if 0 < line_num <= len(lines):
+                                # Cria uma cópia das linhas sem a linha problemática
+                                new_lines = lines[:line_num-1] + lines[line_num:]
+                                stable_content = "".join(new_lines)
                                 
                                 finding['suggestion_content'] = stable_content
-                                finding['suggestion_line'] = finding['line']
+                                finding['suggestion_line'] = line_num
                                 finding['suggestion_source'] = "TEMPLATE"
                                 break # Para no primeiro template que funcionar
                         except (IOError, IndexError, TypeError):
+                            # click.echo(f"[DEBUG] Erro ao aplicar template: {e}")
                             continue
     finally:
         conn.close()

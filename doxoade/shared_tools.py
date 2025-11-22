@@ -195,7 +195,7 @@ def _get_code_snippet_from_string(content, line_number, context_lines=2):
     except IndexError: return None
         
 def _print_finding_details(finding):
-    """(Versão Final) Imprime os detalhes de um 'finding' na ordem correta."""
+    """(Versão Final V2) Imprime os detalhes de um 'finding' com diff visual para sugestões."""
     severity = finding.get('severity', 'INFO').upper()
     category = (finding.get('category') or 'UNCATEGORIZED').upper()
     color_map = {'CRITICAL': Fore.MAGENTA, 'ERROR': Fore.RED, 'WARNING': Fore.YELLOW, 'INFO': Fore.CYAN}
@@ -216,28 +216,63 @@ def _print_finding_details(finding):
         click.echo(Fore.CYAN + f"   > {finding.get('details')}")
         
     snippet = finding.get('snippet')
+    error_line = int(finding.get('line', -1))
+    
     if snippet:
-        line_num_error = int(finding.get('line', -1))
         for line_num_str, code_line in snippet.items():
             line_num = int(line_num_str)
-            prefix = "      > " if line_num == line_num_error else "        "
-            line_color = Fore.WHITE + Style.BRIGHT if line_num == line_num_error else Fore.WHITE + Style.DIM
+            prefix = "      > " if line_num == error_line else "        "
+            line_color = Fore.WHITE + Style.BRIGHT if line_num == error_line else Fore.WHITE + Style.DIM
             click.echo(line_color + f"{prefix}{line_num:4}: {code_line}")
 
-    # 3. Sugestão do Histórico (por último)
+    # 3. Sugestão do Histórico (com diff visual)
     if finding.get('suggestion_content'):
-        click.echo(Fore.CYAN + Style.BRIGHT + "\n   > [SUGESTÃO DO HISTÓRICO]")
+        source = finding.get('suggestion_source', 'HISTÓRICO')
+        source_label = "TEMPLATE" if source == "TEMPLATE" else "SOLUÇÃO EXATA"
         
-        suggestion_snippet = _get_code_snippet_from_string(
-            finding['suggestion_content'],
-            finding.get('suggestion_line')
-        )
-        if suggestion_snippet:
-            error_line = finding.get('suggestion_line')
-            for line_num, code_line in suggestion_snippet.items():
-                prefix = "      > " if line_num == error_line else "        "
-                line_color = Fore.GREEN + Style.BRIGHT if line_num == error_line else Fore.WHITE + Style.DIM
-                click.echo(line_color + f"{prefix}{line_num:4}: {code_line}")
+        click.echo(Fore.CYAN + Style.BRIGHT + f"\n   > [SUGESTÃO - {source_label}]")
+        
+        # Se temos o snippet original e a sugestão, mostramos um diff
+        if snippet and finding.get('suggestion_line'):
+            suggestion_line = finding.get('suggestion_line')
+            
+            # Mostra a linha que será REMOVIDA (em vermelho com -)
+            # Tenta encontrar a linha no snippet (pode ser int ou str como chave)
+            original_code = None
+            for k, v in snippet.items():
+                if int(k) == error_line:
+                    original_code = v
+                    break
+            
+            if original_code:
+                click.echo(Fore.RED + f"      - {error_line:4}: {original_code}")
+            
+            # Mostra o contexto após a remoção (snippet da sugestão)
+            suggestion_snippet = _get_code_snippet_from_string(
+                finding['suggestion_content'],
+                suggestion_line,
+                context_lines=2
+            )
+            
+            if suggestion_snippet:
+                click.echo(Fore.GREEN + Style.DIM + "        (após a correção:)")
+                for line_num, code_line in suggestion_snippet.items():
+                    # Ajusta a numeração para refletir o arquivo corrigido
+                    display_num = line_num
+                    prefix = "      + " if line_num == suggestion_line else "        "
+                    line_color = Fore.GREEN if line_num == suggestion_line else Fore.WHITE + Style.DIM
+                    click.echo(line_color + f"{prefix}{display_num:4}: {code_line}")
+        else:
+            # Fallback: mostra apenas o snippet da sugestão
+            suggestion_snippet = _get_code_snippet_from_string(
+                finding['suggestion_content'],
+                finding.get('suggestion_line')
+            )
+            if suggestion_snippet:
+                for line_num, code_line in suggestion_snippet.items():
+                    prefix = "      > " if line_num == finding.get('suggestion_line') else "        "
+                    line_color = Fore.GREEN + Style.BRIGHT if line_num == finding.get('suggestion_line') else Fore.WHITE + Style.DIM
+                    click.echo(line_color + f"{prefix}{line_num:4}: {code_line}")
 
 def _print_summary(results, ignored_count):
     summary = results.get('summary', {})
