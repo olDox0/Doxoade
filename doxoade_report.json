@@ -1,15 +1,15 @@
 {
-    "report_generated_at_utc": "2025-11-22T01:00:06.499808+00:00",
+    "report_generated_at_utc": "2025-11-22T16:21:58.057358+00:00",
     "doxoade_version": "37.2 Alfa (Hardening)",
     "project_path": "C:\\Users\\olDox222\\Documents\\Meu laptop (1)\\A20251021\\DOSSIER\\Altonomo\\Projetos_E_Programas\\Projeto OADE\\doxoade",
     "telemetry": {
-        "directory_tree": "./\n    .gitignore\n    0.txt\n    1.txt\n    PipelineHelp.txt\n    PipelineTeste.txt\n    README.md\n    desktop.ini\n    doxoade_report.json\n    install-python.bat\n    install-python.sh\n    install.py\n    install.sh\n    meu_app.specpython\n    nu\u00e7\n    pyproject.toml\n    requirements.txt\n    run_doxoade.py\n    setup.py\n    temp.log\n    .doxoade_cache/\n        check_cache.json\n    doxoade/\n        __init__.py\n        _version.py\n        database.py\n        doxoade.py\n        shared_tools.py\n        tracer.py\n        commands/\n            __init__.py\n            apicheck.py\n            auto.py\n            canonize.py\n            check.py\n            clean.py\n            config.py\n            dashboard.py\n            db_query.py\n            deepcheck.py\n            diff.py\n            doctor.py\n            encoding.py\n            git_clean.py\n            git_new.py\n            git_workflow.py\n            global_health.py\n            guicheck.py\n            health.py\n            history.py\n            impact_analysis.py\n            init.py\n            install.py\n            intelligence.py\n            kvcheck.py\n            migrate_db.py\n            mirror.py\n            python.py\n            rebuild.py\n            regression_test.py\n            run.py\n            save.py\n            self_test.py\n            tutorial.py\n            utils.py\n            venv_up.py\n            webcheck.py\n        probes/\n            __init__.py\n            import_probe.py\n            static_probe.py\n            syntax_probe.py",
+        "directory_tree": "./\n    .gitignore\n    0.txt\n    1.txt\n    PipelineHelp.txt\n    PipelineTeste.txt\n    README.md\n    desktop.ini\n    doxoade_report.json\n    install-python.bat\n    install-python.sh\n    install.py\n    install.sh\n    meu_app.specpython\n    pyproject.toml\n    requirements.txt\n    run_doxoade.py\n    setup.py\n    temp.log\n    .doxoade_cache/\n        check_cache.json\n    doxoade/\n        __init__.py\n        _version.py\n        database.py\n        doxoade.py\n        shared_tools.py\n        tracer.py\n        commands/\n            __init__.py\n            apicheck.py\n            auto.py\n            canonize.py\n            check.py\n            clean.py\n            config.py\n            dashboard.py\n            db_query.py\n            deepcheck.py\n            diff.py\n            doctor.py\n            encoding.py\n            git_clean.py\n            git_new.py\n            git_workflow.py\n            global_health.py\n            guicheck.py\n            health.py\n            history.py\n            impact_analysis.py\n            init.py\n            install.py\n            intelligence.py\n            kvcheck.py\n            migrate_db.py\n            mirror.py\n            python.py\n            rebuild.py\n            regression_test.py\n            run.py\n            save.py\n            self_test.py\n            tutorial.py\n            utils.py\n            venv_up.py\n            webcheck.py\n        probes/\n            __init__.py\n            import_probe.py\n            static_probe.py\n            syntax_probe.py",
         "filesystem": [
             {
                 "path": ".gitignore",
-                "size_bytes": 715,
+                "size_bytes": 742,
                 "created_at_utc": "2025-09-17T23:59:39.829157+00:00",
-                "modified_at_utc": "2025-11-21T04:27:19.513538+00:00",
+                "modified_at_utc": "2025-11-22T07:12:32.707466+00:00",
                 "encoding": "utf-8"
             },
             {
@@ -23,7 +23,7 @@
                 "path": "1.txt",
                 "size_bytes": 2078,
                 "created_at_utc": "2025-11-08T02:06:34.006300+00:00",
-                "modified_at_utc": "2025-11-21T23:57:49.418905+00:00",
+                "modified_at_utc": "2025-11-22T02:00:14.413129+00:00",
                 "encoding": "ascii"
             },
             {
@@ -56,9 +56,9 @@
             },
             {
                 "path": "doxoade_report.json",
-                "size_bytes": 49615,
+                "size_bytes": 50969,
                 "created_at_utc": "2025-11-20T00:03:39.997936+00:00",
-                "modified_at_utc": "2025-11-20T00:03:40.013561+00:00",
+                "modified_at_utc": "2025-11-22T01:00:08.251775+00:00",
                 "encoding": "ascii"
             },
             {
@@ -123,13 +123,6 @@
                 "encoding": "ascii"
             },
             {
-                "path": "nu\u00e7",
-                "size_bytes": 28,
-                "created_at_utc": "2025-11-21T21:38:23.059801+00:00",
-                "modified_at_utc": "2025-11-21T21:38:23.059801+00:00",
-                "encoding": "ascii"
-            },
-            {
                 "path": "pyproject.toml",
                 "size_bytes": 1130,
                 "created_at_utc": "2025-10-11T16:27:38.326984+00:00",
@@ -168,9 +161,9 @@
             },
             {
                 "path": ".doxoade_cache/check_cache.json",
-                "size_bytes": 982360,
+                "size_bytes": 992843,
                 "created_at_utc": "2025-11-14T23:44:41.219594+00:00",
-                "modified_at_utc": "2025-11-22T00:40:05.884522+00:00",
+                "modified_at_utc": "2025-11-22T07:27:44.983645+00:00",
                 "encoding": "ascii"
             },
             {
@@ -191,18 +184,18 @@
             },
             {
                 "path": "doxoade/database.py",
-                "size_bytes": 6554,
+                "size_bytes": 8567,
                 "created_at_utc": "2025-10-18T23:59:17.291354+00:00",
-                "modified_at_utc": "2025-11-21T21:44:59.133509+00:00",
+                "modified_at_utc": "2025-11-22T02:12:47.344928+00:00",
                 "encoding": "utf-8",
                 "functions": [
                     {
                         "name": "get_db_connection",
-                        "line": 11
+                        "line": 9
                     },
                     {
                         "name": "init_db",
-                        "line": 18
+                        "line": 16
                     }
                 ]
             },
@@ -241,9 +234,9 @@
             },
             {
                 "path": "doxoade/shared_tools.py",
-                "size_bytes": 23962,
+                "size_bytes": 28344,
                 "created_at_utc": "2025-10-10T20:32:43.994665+00:00",
-                "modified_at_utc": "2025-11-21T21:35:35.451728+00:00",
+                "modified_at_utc": "2025-11-22T04:49:17.209176+00:00",
                 "encoding": "utf-8",
                 "functions": [
                     {
@@ -280,55 +273,55 @@
                     },
                     {
                         "name": "_print_summary",
-                        "line": 242
+                        "line": 296
                     },
                     {
                         "name": "_get_project_config",
-                        "line": 277
+                        "line": 331
                     },
                     {
                         "name": "_get_code_snippet",
-                        "line": 297
+                        "line": 351
                     },
                     {
                         "name": "_sanitize_json_output",
-                        "line": 318
+                        "line": 372
                     },
                     {
                         "name": "_get_complexity_rank",
-                        "line": 325
+                        "line": 379
                     },
                     {
                         "name": "_extract_function_parameters",
-                        "line": 333
+                        "line": 387
                     },
                     {
                         "name": "_find_returns_and_risks_in_function",
-                        "line": 341
+                        "line": 395
                     },
                     {
                         "name": "_analyze_function_flow",
-                        "line": 358
+                        "line": 412
                     },
                     {
                         "name": "analyze_file_structure",
-                        "line": 384
+                        "line": 438
                     },
                     {
                         "name": "collect_files_to_analyze",
-                        "line": 401
+                        "line": 455
                     },
                     {
                         "name": "_present_diff_output",
-                        "line": 425
+                        "line": 479
                     },
                     {
                         "name": "_print_single_hunk",
-                        "line": 473
+                        "line": 527
                     },
                     {
                         "name": "_update_open_incidents",
-                        "line": 505
+                        "line": 559
                     },
                     {
                         "name": "__init__",
@@ -430,9 +423,9 @@
             },
             {
                 "path": "doxoade/commands/check.py",
-                "size_bytes": 25326,
+                "size_bytes": 37323,
                 "created_at_utc": "2025-10-11T18:48:01.916991+00:00",
-                "modified_at_utc": "2025-11-21T19:53:53.810834+00:00",
+                "modified_at_utc": "2025-11-22T06:56:57.780578+00:00",
                 "encoding": "MacRoman",
                 "functions": [
                     {
@@ -504,12 +497,20 @@
                         "line": 316
                     },
                     {
+                        "name": "_manage_incidents",
+                        "line": 448
+                    },
+                    {
+                        "name": "_learn_template_from_incident",
+                        "line": 570
+                    },
+                    {
                         "name": "run_check_logic",
-                        "line": 376
+                        "line": 633
                     },
                     {
                         "name": "check",
-                        "line": 518
+                        "line": 791
                     }
                 ]
             },
@@ -1133,30 +1134,26 @@
             },
             {
                 "path": "doxoade/commands/save.py",
-                "size_bytes": 8722,
+                "size_bytes": 12333,
                 "created_at_utc": "2025-10-13T16:23:29.776662+00:00",
-                "modified_at_utc": "2025-11-22T00:46:47.944690+00:00",
-                "encoding": "ascii",
+                "modified_at_utc": "2025-11-22T07:27:35.390597+00:00",
+                "encoding": "utf-8",
                 "functions": [
                     {
                         "name": "_get_staged_python_files",
-                        "line": 20
+                        "line": 18
                     },
                     {
-                        "name": "_run_quality_check",
-                        "line": 33
-                    },
-                    {
-                        "name": "_learn_from_saved_commit",
-                        "line": 41
+                        "name": "_learn_solutions_from_commit",
+                        "line": 28
                     },
                     {
                         "name": "_abstract_and_learn_template",
-                        "line": 101
+                        "line": 141
                     },
                     {
                         "name": "save",
-                        "line": 140
+                        "line": 234
                     }
                 ]
             },
