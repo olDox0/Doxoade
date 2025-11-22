@@ -1,6 +1,5 @@
 # doxoade/commands/save.py
 # Versão Gênese V2 - Simplificado: foca apenas em aprender soluções
-
 import sys
 import sqlite3
 import re
