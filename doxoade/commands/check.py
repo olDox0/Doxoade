@@ -314,7 +314,16 @@ def _save_cache(cache_data):
 # =============================================================================
 
 def _enrich_findings_with_solutions(findings):
-    """(Projeto Gênese - V2 Corrigido) Consulta o DB por soluções exatas E por templates genéricos."""
+    """
+    (Gênese V2 - Expandido) Consulta o DB por soluções exatas E aplica templates genéricos.
+    
+    Templates suportados:
+    - REMOVE_LINE: Remove a linha problemática
+    - REMOVE_F_PREFIX: Remove o 'f' de f-strings sem placeholders
+    - REPLACE_WITH_UNDERSCORE: Substitui variável por '_'
+    - ADD_IMPORT_OR_DEFINE: Apenas sugere (ação manual necessária)
+    - FIX_INDENTATION: Apenas sugere (ação manual necessária)
+    """
     if not findings: return
     
     conn = get_db_connection()
@@ -335,9 +344,9 @@ def _enrich_findings_with_solutions(findings):
                     finding['suggestion_content'] = exact_solution['stable_content']
                     finding['suggestion_line'] = exact_solution['error_line']
                     finding['suggestion_source'] = "EXACT"
-                    continue # Já encontramos a melhor solução
+                    continue
 
-            # 2. Se não encontrou, tenta aplicar um template
+            # 2. Tenta aplicar um template
             message = finding.get('message', '')
             category = finding.get('category', '')
             
@@ -345,51 +354,94 @@ def _enrich_findings_with_solutions(findings):
                 if template['category'] != category:
                     continue
 
-                # --- LÓGICA DE REGEX CORRIGIDA V2 ---
-                # O pattern armazenado é algo como: '<MODULE>' imported but unused
-                # Precisamos transformar em uma regex que capture o módulo
+                # Constrói regex a partir do pattern
                 pattern_str = template['problem_pattern']
-                
-                # Substitui os placeholders ANTES de escapar
-                # Usamos marcadores temporários únicos
-                pattern_with_markers = pattern_str.replace('<MODULE>', '___MODULE___').replace('<VAR>', '___VAR___')
-                
-                # Escapa caracteres especiais de regex
+                pattern_with_markers = (pattern_str
+                    .replace('<MODULE>', '___MODULE___')
+                    .replace('<VAR>', '___VAR___')
+                    .replace('<LINE>', '___LINE___'))
                 escaped_pattern = re.escape(pattern_with_markers)
+                pattern_regex_str = (escaped_pattern
+                    .replace('___MODULE___', '(.+?)')
+                    .replace('___VAR___', '(.+?)')
+                    .replace('___LINE___', r'(\d+)'))
                 
-                # Substitui os marcadores por grupos de captura
-                pattern_regex_str = escaped_pattern.replace('___MODULE___', '(.+?)').replace('___VAR___', '(.+?)')
-                
-                # Debug (pode remover depois)
-                # click.echo(f"[DEBUG] Pattern: {pattern_str} -> Regex: {pattern_regex_str} -> Msg: {message}")
-                
-                # Usa re.fullmatch para garantir correspondência completa
                 match = re.fullmatch(pattern_regex_str, message)
-                if match:
-                    if template['solution_template'] == 'REMOVE_LINE':
-                        try:
-                            file_path = finding.get('file')
-                            line_num = finding.get('line')
+                if not match:
+                    continue
+                
+                # Aplica a solução baseada no tipo de template
+                solution_type = template['solution_template']
+                file_path = finding.get('file')
+                line_num = finding.get('line')
+                
+                if not file_path or not line_num:
+                    continue
+                
+                try:
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        lines = f.readlines()
+                    
+                    if line_num < 1 or line_num > len(lines):
+                        continue
+                    
+                    original_line = lines[line_num - 1]
+                    
+                    # =========================================================
+                    # APLICADORES DE TEMPLATE
+                    # =========================================================
+                    
+                    if solution_type == "REMOVE_LINE":
+                        # Remove a linha problemática
+                        new_lines = lines[:line_num-1] + lines[line_num:]
+                        finding['suggestion_content'] = "".join(new_lines)
+                        finding['suggestion_line'] = line_num
+                        finding['suggestion_source'] = "TEMPLATE"
+                        finding['suggestion_action'] = "Remover linha"
+                        break
+                    
+                    elif solution_type == "REMOVE_F_PREFIX":
+                        # Remove o 'f' de f-strings
+                        # Encontra f" ou f' e remove o f
+                        new_line = re.sub(r'\bf(["\'])', r'\1', original_line)
+                        if new_line != original_line:
+                            new_lines = lines[:line_num-1] + [new_line] + lines[line_num:]
+                            finding['suggestion_content'] = "".join(new_lines)
+                            finding['suggestion_line'] = line_num
+                            finding['suggestion_source'] = "TEMPLATE"
+                            finding['suggestion_action'] = "Remover prefixo 'f'"
+                            break
+                    
+                    elif solution_type == "REPLACE_WITH_UNDERSCORE":
+                        # Substitui "as var:" por "as _:" em except
+                        # Ou "var =" por "_ =" em atribuições
+                        var_name = match.group(1) if match.groups() else None
+                        if var_name:
+                            # Tenta substituir em padrão "as var"
+                            new_line = re.sub(rf'\bas\s+{re.escape(var_name)}\b', 'as _', original_line)
+                            if new_line == original_line:
+                                # Tenta substituir atribuição simples
+                                new_line = re.sub(rf'^(\s*){re.escape(var_name)}\s*=', r'\1_ =', original_line)
                             
-                            if not file_path or not line_num:
-                                continue
-                                
-                            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                                lines = f.readlines()
-                            
-                            # A "solução" é o arquivo sem a linha do erro
-                            if 0 < line_num <= len(lines):
-                                # Cria uma cópia das linhas sem a linha problemática
-                                new_lines = lines[:line_num-1] + lines[line_num:]
-                                stable_content = "".join(new_lines)
-                                
-                                finding['suggestion_content'] = stable_content
+                            if new_line != original_line:
+                                new_lines = lines[:line_num-1] + [new_line] + lines[line_num:]
+                                finding['suggestion_content'] = "".join(new_lines)
                                 finding['suggestion_line'] = line_num
                                 finding['suggestion_source'] = "TEMPLATE"
-                                break # Para no primeiro template que funcionar
-                        except (IOError, IndexError, TypeError):
-                            # click.echo(f"[DEBUG] Erro ao aplicar template: {e}")
-                            continue
+                                finding['suggestion_action'] = f"Substituir '{var_name}' por '_'"
+                                break
+                    
+                    elif solution_type in ("ADD_IMPORT_OR_DEFINE", "FIX_INDENTATION"):
+                        # Estes requerem ação manual - apenas marca como sugestão
+                        finding['suggestion_source'] = "TEMPLATE_MANUAL"
+                        finding['suggestion_action'] = {
+                            "ADD_IMPORT_OR_DEFINE": "Adicionar import ou definir a variável",
+                            "FIX_INDENTATION": "Corrigir indentação manualmente"
+                        }.get(solution_type, "Correção manual necessária")
+                        break
+                        
+                except (IOError, IndexError, TypeError):
+                    continue
     finally:
         conn.close()
 

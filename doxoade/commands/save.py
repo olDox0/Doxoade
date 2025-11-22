@@ -139,30 +139,78 @@ def _learn_solutions_from_commit(new_commit_hash, logger, project_path):
         if conn: conn.close()
 
 def _abstract_and_learn_template(cursor, concrete_finding):
-    """Analisa um 'finding' e tenta criar/atualizar um template de solução."""
+    """
+    (Gênese V2 - Expandido) Analisa um 'finding' e tenta criar/atualizar um template de solução.
+    
+    Templates suportados:
+    - DEADCODE: imports não usados, redefinições
+    - STYLE: f-strings sem placeholders, variáveis não usadas
+    - RUNTIME-RISK: nomes indefinidos
+    """
     message = concrete_finding.get('message', '')
     category = concrete_finding.get('category', '')
     
+    # Inferência de categoria se não fornecida
     if not category:
         if 'imported but unused' in message or 'redefinition of unused' in message:
             category = 'DEADCODE'
         elif 'undefined name' in message:
             category = 'RUNTIME-RISK'
+        elif 'f-string' in message or 'assigned to but never used' in message:
+            category = 'STYLE'
         else:
             category = 'UNCATEGORIZED'
     
     problem_pattern = None
-    solution_template = "REMOVE_LINE" 
+    solution_template = None
     
-    # Regras de abstração
-    if re.match(r"'(.*?)' imported but unused", message):
+    # REGRAS DE ABSTRAÇÃO - DEADCODE
+    
+    # Regra 1: Import não usado
+    # Exemplo: "'os' imported but unused"
+    if re.match(r"'(.+?)' imported but unused", message):
         problem_pattern = "'<MODULE>' imported but unused"
-    elif re.match(r"redefinition of unused '(.*?)' from line", message):
-        problem_pattern = "redefinition of unused '<VAR>' from line"
+        solution_template = "REMOVE_LINE"
+    
+    # Regra 2: Redefinição de variável/import não usado
+    # Exemplo: "redefinition of unused 'conn' from line 42"
+    elif re.match(r"redefinition of unused '(.+?)' from line \d+", message):
+        problem_pattern = "redefinition of unused '<VAR>' from line <LINE>"
+        solution_template = "REMOVE_LINE"
+    
+    # REGRAS DE ABSTRAÇÃO - STYLE
+    
+    # Regra 3: f-string sem placeholders
+    # Exemplo: "f-string is missing placeholders"
+    elif message == "f-string is missing placeholders":
+        problem_pattern = "f-string is missing placeholders"
+        solution_template = "REMOVE_F_PREFIX"
+    
+    # Regra 4: Variável local atribuída mas nunca usada
+    # Exemplo: "local variable 'e' is assigned to but never used"
+    elif re.match(r"local variable '(.+?)' is assigned to but never used", message):
+        problem_pattern = "local variable '<VAR>' is assigned to but never used"
+        solution_template = "REPLACE_WITH_UNDERSCORE"
+    
+    # REGRAS DE ABSTRAÇÃO - RUNTIME-RISK
 
+    # Regra 5: Nome indefinido
+    # Exemplo: "undefined name 'foo'"
+    elif re.match(r"undefined name '(.+?)'", message):
+        problem_pattern = "undefined name '<VAR>'"
+        solution_template = "ADD_IMPORT_OR_DEFINE"  # Sugestão: precisa de ação manual
+    
+    # REGRAS DE ABSTRAÇÃO - SYNTAX (informativo)
+
+    # Regra 6: Erro de indentação
+    elif 'unexpected indent' in message.lower() or 'expected an indented block' in message.lower():
+        problem_pattern = "indentation error"
+        solution_template = "FIX_INDENTATION"
+    
     if not problem_pattern:
         return False
 
+    # Verifica se o template já existe
     cursor.execute("SELECT id, confidence FROM solution_templates WHERE problem_pattern = ?", (problem_pattern,))
     existing = cursor.fetchone()
 
@@ -175,7 +223,7 @@ def _abstract_and_learn_template(cursor, concrete_finding):
             "INSERT INTO solution_templates (problem_pattern, solution_template, category, created_at) VALUES (?, ?, ?, ?)",
             (problem_pattern, solution_template, category, datetime.now(timezone.utc).isoformat())
         )
-        click.echo(Fore.CYAN + f"   > [GÊNESE] Novo template: '{problem_pattern}'")
+        click.echo(Fore.CYAN + f"   > [GÊNESE] Novo template: '{problem_pattern}' ({solution_template})")
     
     return True
 

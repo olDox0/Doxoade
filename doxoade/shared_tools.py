@@ -226,11 +226,30 @@ def _print_finding_details(finding):
             click.echo(line_color + f"{prefix}{line_num:4}: {code_line}")
 
     # 3. Sugestão do Histórico (com diff visual)
-    if finding.get('suggestion_content'):
+    if finding.get('suggestion_content') or finding.get('suggestion_action'):
         source = finding.get('suggestion_source', 'HISTÓRICO')
-        source_label = "TEMPLATE" if source == "TEMPLATE" else "SOLUÇÃO EXATA"
         
-        click.echo(Fore.CYAN + Style.BRIGHT + f"\n   > [SUGESTÃO - {source_label}]")
+        # Define o label baseado na fonte
+        if source == "TEMPLATE":
+            source_label = "TEMPLATE"
+        elif source == "TEMPLATE_MANUAL":
+            source_label = "SUGESTÃO"
+        elif source == "EXACT":
+            source_label = "SOLUÇÃO EXATA"
+        else:
+            source_label = "HISTÓRICO"
+        
+        # Se é uma sugestão manual (sem conteúdo automático)
+        if source == "TEMPLATE_MANUAL":
+            action = finding.get('suggestion_action', 'Correção manual necessária')
+            click.echo(Fore.CYAN + Style.BRIGHT + f"\n   > [{source_label}] {action}")
+            return
+        
+        click.echo(Fore.CYAN + Style.BRIGHT + f"\n   > [{source_label}]")
+        
+        # Mostra a ação se disponível
+        if finding.get('suggestion_action'):
+            click.echo(Fore.WHITE + f"      Ação: {finding.get('suggestion_action')}")
         
         # Se temos o snippet original e a sugestão, mostramos um diff
         if snippet and finding.get('suggestion_line'):
