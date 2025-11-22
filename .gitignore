@@ -18,7 +18,9 @@ dist/
 *.spec
 
 # --- ARQUIVOS SENSÍVEIS E DE USUÁRIO (NUNCA COMPARTILHAR) ---
+doxoade_report.json
 Exemplo/
+tmp/
 credentials.json
 token.json
 config.json
