@@ -39,13 +39,13 @@ def _run_quality_check():
         return None
 
 def _learn_from_saved_commit(new_commit_hash, logger, project_path):
-    """(V7 Final) Aprende soluções concretas e templates de forma transacional."""
+    """(V8 Final) Aprende soluções concretas e templates de forma transacional."""
     click.echo(Fore.CYAN + "\n--- [LEARN] Verificando incidentes resolvidos... ---")
     
     conn = get_db_connection()
     try:
         conn.row_factory = sqlite3.Row 
-        cursor = conn.cursor() # <<<<<<< CRIA O CURSOR UMA ÚNICA VEZ
+        cursor = conn.cursor()
         
         cursor.execute("SELECT * FROM open_incidents WHERE project_path = ?", (project_path,))
         open_incidents = [dict(row) for row in cursor.fetchall()]
@@ -74,12 +74,12 @@ def _learn_from_saved_commit(new_commit_hash, logger, project_path):
                 )
                 learned_solutions += 1
 
-                # 2. TENTA APRENDER O TEMPLATE, PASSANDO O MESMO CURSOR
+                # 2. TENTA APRENDER O TEMPLATE
                 if _abstract_and_learn_template(cursor, incident):
                     learned_templates += 1
 
         cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
-        conn.commit() # Salva TODAS as operações (INSERTs, UPDATEs, DELETEs) de uma vez
+        conn.commit()
 
         if learned_solutions > 0:
             click.echo(Fore.GREEN + f"[OK] {learned_solutions} solução(ões) concreta(s) aprendida(s).")
@@ -95,7 +95,7 @@ def _learn_from_saved_commit(new_commit_hash, logger, project_path):
     finally:
         if 'conn' in locals() and conn: conn.close()
 
-def _abstract_and_learn_template(cursor, concrete_finding): # <<<<<<< RECEBE 'cursor', NÃO 'conn'
+def _abstract_and_learn_template(cursor, concrete_finding):
     """Analisa um 'finding' e tenta criar/atualizar um template de solução."""
     message = concrete_finding.get('message', '')
     category = concrete_finding.get('category', '')
@@ -114,7 +114,6 @@ def _abstract_and_learn_template(cursor, concrete_finding): # <<<<<<< RECEBE 'cu
         click.echo(Fore.YELLOW + "   > [Debug Gênese] Nenhuma regra de abstração correspondeu.")
         return False
 
-    # NÃO CRIA UM NOVO CURSOR. USA O QUE FOI PASSADO.
     cursor.execute("SELECT id, confidence FROM solution_templates WHERE problem_pattern = ?", (problem_pattern,))
     existing = cursor.fetchone()
 
