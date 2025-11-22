@@ -19,7 +19,7 @@ from colorama import Fore
 from .._version import __version__ as DOXOADE_VERSION
 
 #from datetime import datetime, timezone
-from ..database import get_db_connection # <-- O IMPORT QUE FALTAVA
+from ..database import get_db_connection
 from ..shared_tools import (
     ExecutionLogger, 
     _present_results,
