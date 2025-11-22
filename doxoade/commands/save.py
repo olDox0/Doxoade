@@ -78,8 +78,11 @@ def _learn_from_saved_commit(new_commit_hash, logger, project_path):
                 if _abstract_and_learn_template(cursor, incident):
                     learned_templates += 1
 
+        # Limpa todos os incidentes abertos, pois o commit foi um sucesso
         cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
-        conn.commit()
+        
+        # O commit acontece no final, salvando TODAS as mudanças
+        conn.commit() 
 
         if learned_solutions > 0:
             click.echo(Fore.GREEN + f"[OK] {learned_solutions} solução(ões) concreta(s) aprendida(s).")
