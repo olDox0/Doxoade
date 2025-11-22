@@ -33,7 +33,8 @@ build-backend = "setuptools.build_meta"
 dashboard = ["pandas<2.3",]
 
 [project.scripts]
-doxoade = "doxoade.doxoade:cli"
+doxoade = "doxoade.cli:cli"
+#doxoade = "doxoade.doxoade:cli"
 
 [tool.doxoade]
 source_dir = "."
