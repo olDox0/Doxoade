@@ -393,6 +393,94 @@ def _enrich_findings_with_solutions(findings):
     finally:
         conn.close()
 
+def _manage_incidents(findings, project_path):
+    """
+    (Gênese V2) Gerencia incidentes de forma inteligente:
+    - Adiciona novos incidentes encontrados
+    - Remove incidentes que foram corrigidos (não aparecem mais nos findings)
+    - Retorna estatísticas de mudanças
+    """
+    from ..database import get_db_connection
+    from ..shared_tools import _run_git_command
+    from datetime import datetime, timezone
+    
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    stats = {'added': 0, 'resolved': 0, 'unchanged': 0}
+    
+    try:
+        # 1. Obtém os incidentes atuais do banco para este projeto
+        cursor.execute("SELECT finding_hash, file_path, message FROM open_incidents WHERE project_path = ?", (project_path,))
+        existing_incidents = {row['finding_hash']: dict(row) for row in cursor.fetchall()}
+        
+        # 2. Obtém os hashes dos findings atuais
+        current_finding_hashes = {f.get('hash') for f in findings if f.get('hash')}
+        
+        # 3. Identifica incidentes resolvidos (existiam antes, não existem mais)
+        resolved_hashes = set(existing_incidents.keys()) - current_finding_hashes
+        
+        # 4. Identifica novos incidentes
+        new_hashes = current_finding_hashes - set(existing_incidents.keys())
+        
+        # 5. Remove incidentes resolvidos
+        if resolved_hashes:
+            for resolved_hash in resolved_hashes:
+                cursor.execute("DELETE FROM open_incidents WHERE finding_hash = ? AND project_path = ?", 
+                             (resolved_hash, project_path))
+                stats['resolved'] += 1
+        
+        # 6. Adiciona novos incidentes
+        commit_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True) or "N/A"
+        
+        for finding in findings:
+            f_hash = finding.get('hash')
+            if not f_hash or f_hash not in new_hashes:
+                continue
+            
+            file_path = finding.get('file', '')
+            if file_path:
+                file_path = file_path.replace('\\', '/')
+            
+            category = finding.get('category') or 'UNCATEGORIZED'
+            if category == 'UNCATEGORIZED':
+                msg = finding.get('message', '')
+                if 'imported but unused' in msg or 'redefinition of unused' in msg:
+                    category = 'DEADCODE'
+                elif 'undefined name' in msg:
+                    category = 'RUNTIME-RISK'
+                elif 'syntax' in msg.lower():
+                    category = 'SYNTAX'
+            
+            cursor.execute("""
+                INSERT OR REPLACE INTO open_incidents 
+                (finding_hash, file_path, line, message, category, commit_hash, timestamp, project_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                f_hash,
+                file_path,
+                finding.get('line'),
+                finding.get('message', ''),
+                category,
+                commit_hash,
+                datetime.now(timezone.utc).isoformat(),
+                project_path
+            ))
+            stats['added'] += 1
+        
+        stats['unchanged'] = len(current_finding_hashes) - stats['added']
+        
+        conn.commit()
+        
+    except Exception as e:
+        conn.rollback()
+        click.echo(Fore.YELLOW + f"[AVISO] Erro ao gerenciar incidentes: {e}")
+    finally:
+        conn.close()
+    
+    return stats
+
 def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=False, no_cache=False, target_files=None):
     """
     Orquestra a análise estática, combinando uma arquitetura de pipeline com um sistema de cache.
@@ -464,7 +552,6 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
     # --- Etapa 2: Análise Agregada de Imports ---
     all_imports = [imp for file_info in files_for_next_step for imp in file_info['imports']]
     if all_imports and not no_imports:
-        # Usamos um logger temporário aqui para a sonda de import, para não poluir o principal
         temp_logger = ExecutionLogger('import_probe', path, {})
         import_findings = _run_import_probe(all_imports, python_executable, temp_logger, config.get('search_path'))
         analysis_state['raw_findings'].extend(import_findings)
@@ -475,10 +562,10 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
         fix_logger = ExecutionLogger('fix', path, {})
         for file_path in analysis_state['files_to_process']:
             _fix_unused_imports(file_path, fix_logger)
-        # Opcional: Adicionar findings do fix_logger aos resultados principais se necessário
 
-    # --- BLOCO DE FINALIZAÇÃO E ENRIQUECIMENTO ---
-    # 1. Enriquecemos os 'raw_findings' com hashes consistentes
+    # --- BLOCO DE FINALIZAÇÃO E ENRIQUECIMENTO (GÊNESE V2) ---
+    
+    # 1. Adiciona hashes consistentes aos findings
     final_findings = []
     for f in analysis_state['raw_findings']:
         file = f.get('file')
@@ -496,9 +583,23 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
         
         final_findings.append(finding_with_hash) 
 
+    # 2. Enriquece com sugestões do histórico
     _enrich_findings_with_solutions(final_findings)
+    
+    # 3. GÊNESE V2: Gerencia incidentes ativamente
+    project_path = os.path.abspath(path)
+    incident_stats = _manage_incidents(final_findings, project_path)
+    
+    # Mostra estatísticas de incidentes (apenas se houver mudanças)
+    if incident_stats['added'] > 0 or incident_stats['resolved'] > 0:
+        parts = []
+        if incident_stats['added'] > 0:
+            parts.append(f"{incident_stats['added']} novo(s)")
+        if incident_stats['resolved'] > 0:
+            parts.append(f"{incident_stats['resolved']} resolvido(s)")
+        click.echo(Fore.CYAN + f"   > [GÊNESE] Incidentes: {', '.join(parts)}")
 
-    # 3. Passa os resultados para o logger
+    # 4. Passa os resultados para o logger
     with ExecutionLogger('check', path, {'fix': fix, 'debug': debug}) as logger:
         for finding in final_findings:
             snippet = _get_code_snippet(finding.get('file'), finding.get('line'))
@@ -508,16 +609,15 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
                 category=finding.get('category', 'UNCATEGORIZED'),
                 file=finding.get('file'), 
                 line=finding.get('line'), 
-#                suggestion=finding.get('suggestion'),
                 snippet=snippet, 
                 details=finding.get('details'),
-                suggestion_content=finding.get('suggestion_content'), # <--- CORRETO
-                suggestion_line=finding.get('suggestion_line'),       # <--- CORRETO
+                suggestion_content=finding.get('suggestion_content'),
+                suggestion_line=finding.get('suggestion_line'),
                 finding_hash=finding.get('hash')
             )
         
         if not no_cache:
-            _save_cache(cache) # O cache precisa ser ajustado para salvar os findings com hash
+            _save_cache(cache)
             
         return logger.results
 

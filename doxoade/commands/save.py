@@ -1,5 +1,6 @@
 # doxoade/commands/save.py
-#import calendar
+# Versão Gênese V2 - Simplificado: foca apenas em aprender soluções
+
 import sys
 import sqlite3
 import re
@@ -11,8 +12,7 @@ from ..database import get_db_connection
 from ..shared_tools import (
     ExecutionLogger, 
     _run_git_command, 
-    _present_results,
-    _update_open_incidents
+    _present_results
 )
 from .check import run_check_logic
 
@@ -26,113 +26,124 @@ def _get_staged_python_files(git_root):
         return []
     return [os.path.join(git_root, f.strip()) for f in staged_files_str.splitlines()]
 
-def _run_quality_check():
-    """Executa a lógica do check em memória e retorna os resultados."""
-    try:
-        return run_check_logic(path='.', cmd_line_ignore=[], fix=False, debug=False, no_cache=True)
-    except Exception as e:
-        click.echo(Fore.RED + f"A análise de qualidade falhou com um erro interno: {e}")
-        return None
-
-def _learn_from_saved_commit(new_commit_hash, logger, project_path):
-    """(V9 - Corrigido) Aprende soluções concretas e templates de forma transacional."""
-    click.echo(Fore.CYAN + "\n--- [LEARN] Verificando incidentes resolvidos... ---")
+def _learn_solutions_from_commit(new_commit_hash, logger, project_path):
+    """
+    (Gênese V2) Aprende soluções a partir dos incidentes que foram resolvidos.
+    O check já gerencia os incidentes - aqui apenas consultamos quais foram resolvidos
+    e aprendemos as soluções.
+    """
+    click.echo(Fore.CYAN + "\n--- [LEARN] Buscando soluções para aprender... ---")
     
     conn = get_db_connection()
     try:
         conn.row_factory = sqlite3.Row 
         cursor = conn.cursor()
         
-        cursor.execute("SELECT * FROM open_incidents WHERE project_path = ?", (project_path,))
-        open_incidents = [dict(row) for row in cursor.fetchall()]
-        
-        if not open_incidents:
-            click.echo(Fore.WHITE + "   > Nenhum incidente aberto para aprender.")
-            return
-
-        learned_solutions = 0
-        learned_templates = 0
-        
-        # Obtém a lista de arquivos modificados neste commit
+        # Obtém arquivos modificados neste commit
         modified_files_str = _run_git_command(
             ['diff-tree', '--no-commit-id', '--name-only', '-r', new_commit_hash],
             capture_output=True, silent_fail=True
         ) or ""
         modified_files = set(f.strip().replace('\\', '/') for f in modified_files_str.splitlines())
         
-        click.echo(Fore.WHITE + f"   > Arquivos modificados neste commit: {modified_files}")
-        click.echo(Fore.WHITE + f"   > Incidentes abertos: {len(open_incidents)}")
+        if not modified_files:
+            click.echo(Fore.WHITE + "   > Nenhum arquivo modificado neste commit.")
+            return
         
-        for incident in open_incidents:
-            incident_file = incident['file_path'].replace('\\', '/')
+        # Busca incidentes que EXISTIAM para os arquivos modificados
+        # mas que agora foram resolvidos (o check já os removeu da tabela open_incidents)
+        # Precisamos consultar o histórico de eventos/findings para saber o que foi corrigido
+        
+        # Abordagem alternativa: buscar na tabela solutions os hashes que ainda não têm solução
+        # mas cujos arquivos foram modificados
+        
+        # Por enquanto, vamos usar uma abordagem mais simples:
+        # Se o commit passou sem erros nos arquivos modificados, assume que correções foram feitas
+        
+        learned_solutions = 0
+        learned_templates = 0
+        
+        # Busca findings recentes (últimas 24h) para os arquivos modificados que não têm solução ainda
+        cursor.execute("""
+            SELECT DISTINCT f.finding_hash, f.file, f.line, f.message, f.category
+            FROM findings f
+            JOIN events e ON f.event_id = e.id
+            WHERE e.project_path = ?
+            AND f.severity IN ('CRITICAL', 'ERROR')
+            AND datetime(e.timestamp) > datetime('now', '-1 day')
+            AND f.finding_hash NOT IN (SELECT finding_hash FROM solutions WHERE project_path = ?)
+        """, (project_path, project_path))
+        
+        recent_findings = cursor.fetchall()
+        
+        for finding in recent_findings:
+            file_path = finding['file']
+            if not file_path:
+                continue
+                
+            # Normaliza o caminho
+            normalized_path = file_path.replace('\\', '/')
             
-            # Verifica se o arquivo do incidente foi modificado neste commit
-            if incident_file not in modified_files:
-                click.echo(Fore.YELLOW + f"   > Arquivo '{incident_file}' não foi modificado neste commit. Pulando.")
+            # Verifica se este arquivo foi modificado no commit
+            if normalized_path not in modified_files:
                 continue
             
-            # Obtém o conteúdo corrigido do arquivo
+            # Obtém o conteúdo corrigido
             corrected_content = _run_git_command(
-                ['show', f"{new_commit_hash}:{incident_file}"],
+                ['show', f"{new_commit_hash}:{normalized_path}"],
                 capture_output=True, silent_fail=True
             )
             
             if not corrected_content:
-                click.echo(Fore.YELLOW + f"   > Não foi possível obter o conteúdo de '{incident_file}'.")
                 continue
             
-            # 1. Aprende a solução concreta
+            # Salva a solução
             cursor.execute(
-                "INSERT OR REPLACE INTO solutions (finding_hash, stable_content, commit_hash, project_path, timestamp, file_path, message, error_line) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (incident['finding_hash'], 
+                """INSERT OR REPLACE INTO solutions 
+                   (finding_hash, stable_content, commit_hash, project_path, timestamp, file_path, message, error_line) 
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (finding['finding_hash'], 
                  corrected_content, 
                  new_commit_hash, 
                  project_path, 
                  datetime.now(timezone.utc).isoformat(), 
-                 incident['file_path'], 
-                 incident['message'], 
-                 incident.get('line'))
+                 file_path, 
+                 finding['message'], 
+                 finding['line'])
             )
             learned_solutions += 1
-            click.echo(Fore.GREEN + f"   > Solução aprendida para: {incident['message'][:50]}...")
+            click.echo(Fore.GREEN + f"   > Solução aprendida: {finding['message'][:60]}...")
 
-            # 2. TENTA APRENDER O TEMPLATE
-            if _abstract_and_learn_template(cursor, incident):
+            # Tenta aprender template
+            incident_data = {
+                'message': finding['message'],
+                'category': finding['category'] or 'UNCATEGORIZED'
+            }
+            if _abstract_and_learn_template(cursor, incident_data):
                 learned_templates += 1
 
-        # Limpa todos os incidentes dos arquivos que foram modificados
-        for incident in open_incidents:
-            incident_file = incident['file_path'].replace('\\', '/')
-            if incident_file in modified_files:
-                cursor.execute(
-                    "DELETE FROM open_incidents WHERE finding_hash = ? AND project_path = ?", 
-                    (incident['finding_hash'], project_path)
-                )
+        conn.commit()
         
-        conn.commit() 
-
         if learned_solutions > 0:
-            click.echo(Fore.GREEN + f"[OK] {learned_solutions} solução(ões) concreta(s) aprendida(s).")
+            click.echo(Fore.GREEN + f"[OK] {learned_solutions} solução(ões) aprendida(s).")
         if learned_templates > 0:
-            click.echo(Fore.GREEN + f"[Gênese] {learned_templates} template(s) de solução aprendido(s)/reforçado(s).")
-        
+            click.echo(Fore.GREEN + f"[GÊNESE] {learned_templates} template(s) aprendido(s)/reforçado(s).")
         if learned_solutions == 0:
-            click.echo(Fore.WHITE + "   > Nenhuma solução nova foi aprendida (arquivos com erro não foram modificados).")
+            click.echo(Fore.WHITE + "   > Nenhuma solução nova para aprender.")
 
     except Exception as e:
         conn.rollback()
-        logger.add_finding("ERROR", "Falha ao aprender com as correções.", details=str(e))
+        logger.add_finding("ERROR", "Falha ao aprender soluções.", details=str(e))
         import traceback
-        click.echo(Fore.RED + f"   > [DEBUG] Traceback: {traceback.format_exc()}")
+        click.echo(Fore.RED + f"   > [DEBUG] {traceback.format_exc()}")
     finally:
-        if 'conn' in locals() and conn: conn.close()
+        if conn: conn.close()
 
 def _abstract_and_learn_template(cursor, concrete_finding):
     """Analisa um 'finding' e tenta criar/atualizar um template de solução."""
     message = concrete_finding.get('message', '')
     category = concrete_finding.get('category', '')
     
-    # Se a categoria está vazia, tenta inferir do tipo de mensagem
     if not category:
         if 'imported but unused' in message or 'redefinition of unused' in message:
             category = 'DEADCODE'
@@ -140,8 +151,6 @@ def _abstract_and_learn_template(cursor, concrete_finding):
             category = 'RUNTIME-RISK'
         else:
             category = 'UNCATEGORIZED'
-    
-    click.echo(Fore.MAGENTA + f"   > [Debug Gênese] Tentando abstrair: msg='{message}', cat='{category}'")
     
     problem_pattern = None
     solution_template = "REMOVE_LINE" 
@@ -153,7 +162,6 @@ def _abstract_and_learn_template(cursor, concrete_finding):
         problem_pattern = "redefinition of unused '<VAR>' from line"
 
     if not problem_pattern:
-        click.echo(Fore.YELLOW + "   > [Debug Gênese] Nenhuma regra de abstração correspondeu.")
         return False
 
     cursor.execute("SELECT id, confidence FROM solution_templates WHERE problem_pattern = ?", (problem_pattern,))
@@ -162,13 +170,13 @@ def _abstract_and_learn_template(cursor, concrete_finding):
     if existing:
         new_confidence = existing['confidence'] + 1
         cursor.execute("UPDATE solution_templates SET confidence = ? WHERE id = ?", (new_confidence, existing['id']))
-        click.echo(Fore.CYAN + f"   > [Gênese] Confiança do template '{problem_pattern}' aumentada para {new_confidence}.")
+        click.echo(Fore.CYAN + f"   > [GÊNESE] Confiança de '{problem_pattern}' → {new_confidence}")
     else:
         cursor.execute(
             "INSERT INTO solution_templates (problem_pattern, solution_template, category, created_at) VALUES (?, ?, ?, ?)",
             (problem_pattern, solution_template, category, datetime.now(timezone.utc).isoformat())
         )
-        click.echo(Fore.CYAN + f"   > [Gênese] Novo template aprendido: '{problem_pattern}'")
+        click.echo(Fore.CYAN + f"   > [GÊNESE] Novo template: '{problem_pattern}'")
     
     return True
 
@@ -177,30 +185,32 @@ def _abstract_and_learn_template(cursor, concrete_finding):
 @click.argument('message')
 @click.option('--force', is_flag=True, help="Força o commit mesmo se o 'check' encontrar erros.")
 def save(ctx, message, force):
-    """Executa um 'commit seguro', aprendendo com as correções e protegendo o repositório."""
+    """Executa um 'commit seguro', verificando qualidade e aprendendo com correções."""
     project_path = os.getcwd()
     with ExecutionLogger('save', project_path, ctx.params) as logger:
         click.echo(Fore.CYAN + "--- [SAVE] Iniciando processo de salvamento seguro ---")
 
-        click.echo(Fore.YELLOW + "\nPasso 1: Preparando todos os arquivos (git add .)...")
+        # Passo 1: Preparar arquivos
+        click.echo(Fore.YELLOW + "\nPasso 1: Preparando arquivos (git add .)...")
         _run_git_command(['add', '.'])
         click.echo(Fore.GREEN + "[OK] Arquivos preparados.")
         
         status_output = _run_git_command(['status', '--porcelain'], capture_output=True) or ""
         if not status_output.strip():
-             click.echo(Fore.YELLOW + "[AVISO] Nenhuma alteração para commitar.")
-             return
+            click.echo(Fore.YELLOW + "[AVISO] Nenhuma alteração para commitar.")
+            return
 
-        click.echo(Fore.YELLOW + "\nPasso 2: Executando verificação de qualidade...")
+        # Passo 2: Verificação de qualidade (o check agora gerencia incidentes automaticamente)
+        click.echo(Fore.YELLOW + "\nPasso 2: Verificando qualidade...")
         
         git_root = _run_git_command(['rev-parse', '--show-toplevel'], capture_output=True)
         files_to_check = _get_staged_python_files(git_root)
         
         if not files_to_check:
-            click.echo(Fore.GREEN + "[OK] Nenhuma modificação em arquivos Python para verificar.")
+            click.echo(Fore.GREEN + "[OK] Nenhum arquivo Python modificado.")
             check_results = {'summary': {}, 'findings': []}
         else:
-            click.echo(f"   > Analisando {len(files_to_check)} arquivo(s) modificado(s)...")
+            click.echo(f"   > Analisando {len(files_to_check)} arquivo(s)...")
             check_results = run_check_logic(
                 '.', [], False, False, 
                 no_cache=True, 
@@ -211,19 +221,20 @@ def save(ctx, message, force):
         has_errors = summary.get('critical', 0) > 0 or summary.get('errors', 0) > 0
 
         if has_errors and not force:
-            click.echo(Fore.RED + "\n[ERRO] 'doxoade check' encontrou erros. Commit abortado.")
-            # IMPORTANTE: Registra os incidentes ANTES de abortar
-            _update_open_incidents(check_results, project_path)
+            click.echo(Fore.RED + "\n[ERRO] Erros encontrados. Commit abortado.")
+            click.echo(Fore.WHITE + "   Use --force para forçar o commit, ou corrija os erros.")
             _present_results('text', check_results)
             _run_git_command(['reset'])
             sys.exit(1)
         
-        click.echo(Fore.YELLOW + f"\nPasso 3: Criando commit com a mensagem: '{message}'...")
+        # Passo 3: Criar commit
+        click.echo(Fore.YELLOW + "\nPasso 3: Criando commit...")
         _run_git_command(['commit', '-m', message])
         
         new_commit_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True)
         
+        # Passo 4: Aprender soluções
         if new_commit_hash:
-            _learn_from_saved_commit(new_commit_hash, logger, project_path)
+            _learn_solutions_from_commit(new_commit_hash, logger, project_path)
 
         click.echo(Fore.GREEN + Style.BRIGHT + "\n[SAVE] Alterações salvas com sucesso!")
