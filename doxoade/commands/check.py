@@ -1,4 +1,5 @@
 # doxoade/commands/check.py
+import calendar
 import sys
 import subprocess
 import sqlite3 
@@ -52,7 +53,7 @@ def _run_syntax_probe(file_path, python_executable, debug=False):
         result = subprocess.run(syntax_cmd, capture_output=True, text=True, encoding='utf-8', errors='backslashreplace')
         # ... (o resto da função continua igual) ...
         if debug:
-            click.echo(Fore.CYAN + "\n--- [DEBUG-SYNTAX PROBE] ---")
+            click.echo(Fore.CYAN + f"\n--- [DEBUG-SYNTAX PROBE] ---")
             click.echo(f"  > Alvo: {file_path}")
             click.echo(f"  > RC Sonda Sintaxe: {result.returncode}")
             click.echo(f"  > STDERR Sintaxe:\n---\n{result.stderr.strip()}\n---")
@@ -295,7 +296,7 @@ def _load_cache():
             return {}  # Cache é inválido
         
         return cache_data
-    except (json.JSONDecodeError, IOError):
+    except (json.JSONDecodeError, IOError) as _e:
         return {}
 
 def _save_cache(cache_data):
