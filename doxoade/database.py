@@ -1,12 +1,10 @@
 # doxoade/database.py
-#import os
-#import shutil
 import sqlite3
 from pathlib import Path
 import click
 
 DB_FILE = Path.home() / '.doxoade' / 'doxoade.db'
-DB_VERSION = 12 # A versão final que precisamos
+DB_VERSION = 13  # Incrementado para forçar re-verificação
 
 def get_db_connection():
     """Cria o diretório se necessário e retorna uma conexão com o banco de dados."""
@@ -95,16 +93,14 @@ def init_db():
             click.echo("Atualizando esquema v7 (adicionando 'message' a incidentes)...")
             try:
                 cursor.execute("ALTER TABLE open_incidents ADD COLUMN message TEXT NOT NULL DEFAULT '';")
-            except sqlite3.OperationalError: pass # Ignora se já existir
+            except sqlite3.OperationalError: pass
 
         if current_version < 8:
             click.echo("Atualizando esquema v8 (de diff para stable_content)...")
             try:
-                # Renomeia a coluna e adiciona a nova coluna para a linha do erro
                 cursor.execute("ALTER TABLE solutions RENAME COLUMN resolution_diff TO stable_content;")
                 cursor.execute("ALTER TABLE solutions ADD COLUMN error_line INTEGER;")
             except sqlite3.OperationalError:
-                # Fallback se a tabela já foi modificada ou não existe
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS solutions (
                         id INTEGER PRIMARY KEY AUTOINCREMENT, finding_hash TEXT NOT NULL UNIQUE,
@@ -119,24 +115,63 @@ def init_db():
                 cursor.execute("ALTER TABLE open_incidents ADD COLUMN line INTEGER;")
             except sqlite3.OperationalError: pass
 
+        # Migração para a Versão 10 - CORRIGIDA
         if current_version < 10:
             click.echo("Atualizando esquema v10 (Projeto Gênese: Tabela de Templates)...")
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS solution_templates (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    problem_pattern TEXT NOT NULL UNIQUE,
-                    solution_template TEXT NOT NULL,
-                    category TEXT NOT NULL,
-                    confidence INTEGER DEFAULT 1,
-                    created_at TEXT NOT NULL
-                );
-            """)
+            # Primeiro, verifica se a tabela existe e se tem a estrutura correta
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='solution_templates'")
+            table_exists = cursor.fetchone()
+            
+            if table_exists:
+                # Verifica se a coluna problem_pattern existe
+                cursor.execute("PRAGMA table_info(solution_templates)")
+                columns = {row['name'] for row in cursor.fetchall()}
+                if 'problem_pattern' not in columns:
+                    click.echo("   > Tabela solution_templates existe mas com estrutura incorreta. Recriando...")
+                    cursor.execute("DROP TABLE solution_templates")
+                    table_exists = None
+            
+            if not table_exists:
+                cursor.execute("""
+                    CREATE TABLE solution_templates (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        problem_pattern TEXT NOT NULL UNIQUE,
+                        solution_template TEXT NOT NULL,
+                        category TEXT NOT NULL,
+                        confidence INTEGER DEFAULT 1,
+                        created_at TEXT NOT NULL
+                    );
+                """)
+                click.echo("   > Tabela solution_templates criada com sucesso.")
 
         if current_version < 12:
-            click.echo("Atualizando esquema v11 (adicionando 'category' a incidentes)...")
+            click.echo("Atualizando esquema v12 (adicionando 'category' a incidentes)...")
             try:
                 cursor.execute("ALTER TABLE open_incidents ADD COLUMN category TEXT;")
             except sqlite3.OperationalError: pass
+
+        # Versão 13: Verificação de integridade das tabelas críticas
+        if current_version < 13:
+            click.echo("Atualizando esquema v13 (verificação de integridade)...")
+            
+            # Verifica solution_templates novamente
+            cursor.execute("PRAGMA table_info(solution_templates)")
+            columns = {row['name'] for row in cursor.fetchall()}
+            required_columns = {'id', 'problem_pattern', 'solution_template', 'category', 'confidence', 'created_at'}
+            
+            if not required_columns.issubset(columns):
+                click.echo("   > Recriando tabela solution_templates com estrutura correta...")
+                cursor.execute("DROP TABLE IF EXISTS solution_templates")
+                cursor.execute("""
+                    CREATE TABLE solution_templates (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        problem_pattern TEXT NOT NULL UNIQUE,
+                        solution_template TEXT NOT NULL,
+                        category TEXT NOT NULL,
+                        confidence INTEGER DEFAULT 1,
+                        created_at TEXT NOT NULL
+                    );
+                """)
 
         cursor.execute("UPDATE schema_version SET version = ?;", (DB_VERSION,))
         conn.commit()
