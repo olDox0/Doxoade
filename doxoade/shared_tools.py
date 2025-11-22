@@ -504,7 +504,8 @@ def _print_single_hunk(header_line, lines):
             
 def _update_open_incidents(logger_results, project_path):
     """
-    Atualiza a tabela 'open_incidents' no banco de dados com os problemas encontrados.
+    (V2 - Corrigida) Atualiza a tabela 'open_incidents' no banco de dados com os problemas encontrados.
+    Garante que a categoria seja sempre persistida.
     """
     findings = logger_results.get('findings', [])
     commit_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True) or "N/A"
@@ -517,40 +518,76 @@ def _update_open_incidents(logger_results, project_path):
         git_root = project_path
 
     try:
-        cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
-
+        # NÃO deleta todos os incidentes - apenas atualiza/insere os novos
+        # Isso preserva incidentes de arquivos que não foram analisados neste run
+        
         if not findings:
+            # Se não há findings, limpa apenas os incidentes deste projeto
+            cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
             conn.commit()
             return
 
         incidents_to_add = []
-        for f in logger_results.get('findings', []):
-            if f.get('hash') and f.get('file'):
-                git_relative_path = f['file'].replace('\\', '/')
+        processed_hashes = set()
+        
+        for f in findings:
+            finding_hash = f.get('hash')
+            file_path = f.get('file')
+            
+            if not finding_hash or not file_path:
+                continue
+            
+            # Evita duplicatas no mesmo batch
+            if finding_hash in processed_hashes:
+                continue
+            processed_hashes.add(finding_hash)
+            
+            # Normaliza o caminho do arquivo
+            git_relative_path = file_path.replace('\\', '/')
+            
+            # Garante que a categoria nunca seja None
+            category = f.get('category') or 'UNCATEGORIZED'
+            
+            # Infere categoria se estiver como UNCATEGORIZED
+            if category == 'UNCATEGORIZED':
+                message = f.get('message', '')
+                if 'imported but unused' in message or 'redefinition of unused' in message:
+                    category = 'DEADCODE'
+                elif 'undefined name' in message:
+                    category = 'RUNTIME-RISK'
+                elif 'Erro de sintaxe' in message or 'SyntaxError' in message:
+                    category = 'SYNTAX'
 
-                incidents_to_add.append((
-                    f['hash'],
-                    git_relative_path, # <--- Usa o caminho padronizado
-                    f.get('line'),
-                    f['message'], 
-                    f.get('category'),
-                    commit_hash,
-                    datetime.now(timezone.utc).isoformat(),
-                    project_path
-                ))
+            incidents_to_add.append((
+                finding_hash,
+                git_relative_path,
+                f.get('line'),
+                f.get('message', ''),
+                category,  # Agora sempre terá um valor
+                commit_hash,
+                datetime.now(timezone.utc).isoformat(),
+                project_path
+            ))
         
         if incidents_to_add:
-
+            # Primeiro, remove os incidentes antigos deste projeto
+            cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
+            
+            # Depois, insere os novos
             cursor.executemany("""
-                INSERT OR REPLACE INTO open_incidents 
+                INSERT INTO open_incidents 
                 (finding_hash, file_path, line, message, category, commit_hash, timestamp, project_path)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, incidents_to_add)
+            
+            click.echo(Fore.CYAN + f"   > [DEBUG] {len(incidents_to_add)} incidente(s) registrado(s) para aprendizado futuro.")
 
         conn.commit()
         
     except Exception as e:
         conn.rollback()
         click.echo(Fore.YELLOW + f"\n[AVISO] Não foi possível atualizar a base de dados de incidentes: {e}")
+        import traceback
+        click.echo(Fore.RED + f"   > Traceback: {traceback.format_exc()}")
     finally:
         conn.close()
