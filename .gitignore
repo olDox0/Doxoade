@@ -47,5 +47,7 @@ Vers/
 .doxoade_cache/
 
 # Exceções (movidas para o final para garantir prioridade)
+
+# Exceções (movidas para o final para garantir prioridade)
 !requirements.txt
 !PipelineHelp.txt
