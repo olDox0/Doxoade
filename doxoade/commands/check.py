@@ -447,9 +447,9 @@ def _enrich_findings_with_solutions(findings):
 
 def _manage_incidents(findings, project_path):
     """
-    (Gênese V2) Gerencia incidentes de forma inteligente:
+    (Gênese V3) Gerencia incidentes E aprende soluções automaticamente:
     - Adiciona novos incidentes encontrados
-    - Remove incidentes que foram corrigidos (não aparecem mais nos findings)
+    - Quando um incidente é resolvido, APRENDE a solução antes de removê-lo
     - Retorna estatísticas de mudanças
     """
     from ..database import get_db_connection
@@ -460,11 +460,11 @@ def _manage_incidents(findings, project_path):
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
-    stats = {'added': 0, 'resolved': 0, 'unchanged': 0}
+    stats = {'added': 0, 'resolved': 0, 'learned': 0, 'templates': 0}
     
     try:
         # 1. Obtém os incidentes atuais do banco para este projeto
-        cursor.execute("SELECT finding_hash, file_path, message FROM open_incidents WHERE project_path = ?", (project_path,))
+        cursor.execute("SELECT * FROM open_incidents WHERE project_path = ?", (project_path,))
         existing_incidents = {row['finding_hash']: dict(row) for row in cursor.fetchall()}
         
         # 2. Obtém os hashes dos findings atuais
@@ -476,12 +476,46 @@ def _manage_incidents(findings, project_path):
         # 4. Identifica novos incidentes
         new_hashes = current_finding_hashes - set(existing_incidents.keys())
         
-        # 5. Remove incidentes resolvidos
-        if resolved_hashes:
-            for resolved_hash in resolved_hashes:
-                cursor.execute("DELETE FROM open_incidents WHERE finding_hash = ? AND project_path = ?", 
-                             (resolved_hash, project_path))
-                stats['resolved'] += 1
+        # 5. APRENDE com os incidentes resolvidos ANTES de removê-los
+        for resolved_hash in resolved_hashes:
+            incident = existing_incidents[resolved_hash]
+            file_path = incident.get('file_path', '')
+            
+            if not file_path:
+                continue
+            
+            # Lê o conteúdo atual do arquivo (que agora está corrigido)
+            abs_file_path = os.path.join(project_path, file_path)
+            try:
+                with open(abs_file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    corrected_content = f.read()
+            except IOError:
+                continue
+            
+            # Salva a solução no banco
+            cursor.execute(
+                """INSERT OR REPLACE INTO solutions 
+                   (finding_hash, stable_content, commit_hash, project_path, timestamp, file_path, message, error_line) 
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (resolved_hash,
+                 corrected_content,
+                 "local",  # Não é de um commit, é local
+                 project_path,
+                 datetime.now(timezone.utc).isoformat(),
+                 file_path,
+                 incident.get('message', ''),
+                 incident.get('line'))
+            )
+            stats['learned'] += 1
+            
+            # Tenta aprender template
+            if _learn_template_from_incident(cursor, incident):
+                stats['templates'] += 1
+            
+            # Remove o incidente
+            cursor.execute("DELETE FROM open_incidents WHERE finding_hash = ? AND project_path = ?", 
+                         (resolved_hash, project_path))
+            stats['resolved'] += 1
         
         # 6. Adiciona novos incidentes
         commit_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True) or "N/A"
@@ -493,7 +527,7 @@ def _manage_incidents(findings, project_path):
             
             file_path = finding.get('file', '')
             if file_path:
-                file_path = file_path.replace('\\', '/')
+                file_path = os.path.relpath(file_path, project_path).replace('\\', '/')
             
             category = finding.get('category') or 'UNCATEGORIZED'
             if category == 'UNCATEGORIZED':
@@ -504,6 +538,8 @@ def _manage_incidents(findings, project_path):
                     category = 'RUNTIME-RISK'
                 elif 'syntax' in msg.lower():
                     category = 'SYNTAX'
+                elif 'f-string' in msg or 'assigned to but never used' in msg:
+                    category = 'STYLE'
             
             cursor.execute("""
                 INSERT OR REPLACE INTO open_incidents 
@@ -521,8 +557,6 @@ def _manage_incidents(findings, project_path):
             ))
             stats['added'] += 1
         
-        stats['unchanged'] = len(current_finding_hashes) - stats['added']
-        
         conn.commit()
         
     except Exception as e:
@@ -532,6 +566,69 @@ def _manage_incidents(findings, project_path):
         conn.close()
     
     return stats
+
+def _learn_template_from_incident(cursor, incident):
+    """
+    (Gênese V3) Aprende um template a partir de um incidente resolvido.
+    Chamado diretamente pelo check quando um incidente é resolvido.
+    """
+    from datetime import datetime, timezone
+    
+    message = incident.get('message', '')
+    category = incident.get('category', '')
+    
+    if not category:
+        if 'imported but unused' in message or 'redefinition of unused' in message:
+            category = 'DEADCODE'
+        elif 'undefined name' in message:
+            category = 'RUNTIME-RISK'
+        elif 'f-string' in message or 'assigned to but never used' in message:
+            category = 'STYLE'
+        else:
+            category = 'UNCATEGORIZED'
+    
+    problem_pattern = None
+    solution_template = None
+    
+    # Regras de abstração
+    if re.match(r"'(.+?)' imported but unused", message):
+        problem_pattern = "'<MODULE>' imported but unused"
+        solution_template = "REMOVE_LINE"
+    
+    elif re.match(r"redefinition of unused '(.+?)' from line \d+", message):
+        problem_pattern = "redefinition of unused '<VAR>' from line <LINE>"
+        solution_template = "REMOVE_LINE"
+    
+    elif message == "f-string is missing placeholders":
+        problem_pattern = "f-string is missing placeholders"
+        solution_template = "REMOVE_F_PREFIX"
+    
+    elif re.match(r"local variable '(.+?)' is assigned to but never used", message):
+        problem_pattern = "local variable '<VAR>' is assigned to but never used"
+        solution_template = "REPLACE_WITH_UNDERSCORE"
+    
+    elif re.match(r"undefined name '(.+?)'", message):
+        problem_pattern = "undefined name '<VAR>'"
+        solution_template = "ADD_IMPORT_OR_DEFINE"
+
+    if not problem_pattern:
+        return False
+
+    cursor.execute("SELECT id, confidence FROM solution_templates WHERE problem_pattern = ?", (problem_pattern,))
+    existing = cursor.fetchone()
+
+    if existing:
+        new_confidence = existing['confidence'] + 1
+        cursor.execute("UPDATE solution_templates SET confidence = ? WHERE id = ?", (new_confidence, existing['id']))
+        click.echo(Fore.CYAN + f"   > [GÊNESE] Template '{problem_pattern[:30]}...' → confiança {new_confidence}")
+    else:
+        cursor.execute(
+            "INSERT INTO solution_templates (problem_pattern, solution_template, category, created_at) VALUES (?, ?, ?, ?)",
+            (problem_pattern, solution_template, category, datetime.now(timezone.utc).isoformat())
+        )
+        click.echo(Fore.CYAN + f"   > [GÊNESE] Novo template: '{problem_pattern}' ({solution_template})")
+    
+    return True
 
 def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=False, no_cache=False, target_files=None):
     """
@@ -649,7 +746,11 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
             parts.append(f"{incident_stats['added']} novo(s)")
         if incident_stats['resolved'] > 0:
             parts.append(f"{incident_stats['resolved']} resolvido(s)")
-        click.echo(Fore.CYAN + f"   > [GÊNESE] Incidentes: {', '.join(parts)}")
+        if incident_stats['learned'] > 0:
+            parts.append(f"{incident_stats['learned']} solução(ões) aprendida(s)")
+        if incident_stats['templates'] > 0:
+            parts.append(f"{incident_stats['templates']} template(s) criado(s)/reforçado(s)")
+        click.echo(Fore.CYAN + f"   > [GÊNESE] {', '.join(parts)}")
 
     # 4. Passa os resultados para o logger
     with ExecutionLogger('check', path, {'fix': fix, 'debug': debug}) as logger:
