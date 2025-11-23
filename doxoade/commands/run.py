@@ -3,15 +3,49 @@ import click
 import subprocess
 import sys
 import os
+#import glob 
 from colorama import Fore, Style
 from ..shared_tools import _get_venv_python_executable, _mine_traceback, _analyze_runtime_error
+
+def _get_flow_probe_path():
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_dir, 'probes', 'flow_runner.py')
+
+def _smart_find_script(script_name, root_path='.'):
+    """Procura um script Python recursivamente se não estiver na raiz."""
+    if os.path.exists(script_name):
+        return script_name
+        
+    click.echo(Fore.YELLOW + f"   > '{script_name}' não encontrado na raiz. Buscando no projeto...")
+    
+    matches = []
+    for root, dirs, files in os.walk(root_path):
+        # Otimização: Ignora pastas pesadas
+        dirs[:] = [d for d in dirs if d not in ('venv', '.git', '__pycache__', 'node_modules', '.doxoade_cache')]
+        
+        if script_name in files:
+            matches.append(os.path.join(root, script_name))
+            
+    if not matches:
+        return None
+    
+    if len(matches) == 1:
+        click.echo(Fore.GREEN + f"   > Encontrado em: {matches[0]}")
+        return matches[0]
+    else:
+        # Se houver vários, usa o mais curto (mais próximo da raiz) ou o primeiro
+        matches.sort(key=len)
+        chosen = matches[0]
+        click.echo(Fore.YELLOW + f"   > Múltiplos arquivos encontrados. Usando: {chosen}")
+        return chosen
 
 @click.command('run')
 @click.argument('script', required=False)
 @click.argument('args', nargs=-1)
+@click.option('--flow', is_flag=True, help="Ativa o modo Flow (Rastreamento visual).")
 @click.pass_context
-def run(ctx, script, args):
-    """Executa um script Python usando o 'venv' do projeto com análise de falhas."""
+def run(ctx, script, args, flow):
+    """Executa um script Python. Se não achar, procura no projeto."""
     
     venv_python = _get_venv_python_executable()
     
@@ -19,72 +53,73 @@ def run(ctx, script, args):
         click.echo(Fore.RED + "[ERRO] Ambiente virtual não encontrado. Execute 'doxoade doctor' primeiro.")
         sys.exit(1)
 
-    # Se não passar script, abre o REPL do Python
     if not script:
         subprocess.run([venv_python])
         return
 
-    # Constrói o comando
-    command = [venv_python, script] + list(args)
+    # --- CORREÇÃO AQUI: Bloqueio se não encontrar ---
+    real_script_path = _smart_find_script(script)
     
-    click.echo(Fore.CYAN + f"--- [RUN] Executando: {script} ---")
+    if not real_script_path:
+        click.echo(Fore.RED + f"[ERRO] O arquivo '{script}' não foi encontrado neste projeto.")
+        # Não tenta rodar, apenas sai
+        sys.exit(1)
+
+    # Configuração do Comando
+    if flow:
+        probe_path = _get_flow_probe_path()
+        if not os.path.exists(probe_path):
+             click.echo(Fore.RED + f"[ERRO INTERNO] Sonda Flow não encontrada em: {probe_path}")
+             sys.exit(1)
+             
+        command = [venv_python, probe_path, real_script_path] + list(args)
+        click.echo(Fore.MAGENTA + Style.BRIGHT + "--- [ATIVANDO MODO FLOW] ---")
+    else:
+        command = [venv_python, real_script_path] + list(args)
+        click.echo(Fore.CYAN + f"--- [RUN] Executando: {real_script_path} ---")
     
+    # Execução Blindada
     try:
-        # Gênese V4: Usamos Popen para capturar stderr em tempo real mas também guardar para análise
-        # Nota: Para manter a interatividade (input), não podemos capturar stdout facilmente sem threads complexas.
-        # Vamos deixar o stdout ir pro terminal, mas capturar stderr se possível, ou confiar no exit code.
-        
-        # Abordagem Híbrida Simples:
-        # Rodamos o processo. Se falhar, nós (infelizmente) não teremos o stderr capturado se ele foi pro terminal.
-        # PARA TERMOS A ANÁLISE, precisamos capturar o stderr.
+        # Captura output para análise, mas faz streaming se possível seria ideal. 
+        # Como estamos usando capture_output=True, o usuário vê tudo no final ou se der erro.
+        # Para o FLOW funcionar bem com input/output em tempo real, o ideal seria não capturar
+        # MAS para a nossa Gênese V4 (Análise de Erro) funcionar, precisamos capturar o stderr.
+        # Dilema resolvido: O Flow imprime linha a linha, então capture_output segura isso até o fim?
+        # Não, no código anterior vimos o Flow saindo. Ah, porque o python bufferiza.
         
         process = subprocess.run(
             command, 
-            capture_output=True, # Captura para analisar
+            capture_output=True,
             text=True, 
             encoding='utf-8', 
             errors='replace'
         )
         
-        # Imprime o que aconteceu (já que capturamos, precisamos mostrar)
         if process.stdout:
             click.echo(process.stdout, nl=False)
         
         if process.stderr:
+            # Se for erro, imprime em vermelho
             click.echo(Fore.RED + process.stderr, nl=False)
 
         if process.returncode != 0:
-            # Separador visual
-            click.echo(Fore.WHITE + Style.DIM + "-" * 50)
-            
-            # 1. Minerar o Traceback
+            click.echo(Style.BRIGHT + Fore.YELLOW + "\n\n--- [ANÁLISE DE FALHA (Gênese V4)] ---")
             error_data = _mine_traceback(process.stderr)
             
             if error_data:
-                # Título do Erro em Vermelho Vivo
-                click.echo(Fore.RED + Style.BRIGHT + f"[FALHA DE EXECUÇÃO] {error_data['error_type']}")
+                click.echo(Fore.RED + f"Erro Detectado: {error_data['error_type']}")
+                click.echo(Fore.WHITE + f"   > Arquivo: {os.path.basename(error_data['file'])} (Linha {error_data['line']})")
+                click.echo(Fore.WHITE + f"   > Mensagem: {error_data['message']}")
                 
-                # Detalhes em Branco/Ciano
-                file_name = os.path.basename(error_data['file'])
-                click.echo(Fore.CYAN + f"   Arquivo: {file_name}" + Fore.WHITE + f" (Linha {error_data['line']})")
-                click.echo(Fore.CYAN + f"   Contexto: {error_data['context']}")
-                
-                # Código que quebrou (destacado)
-                if error_data['code'] != 'N/A':
+                if error_data.get('code') and error_data['code'] != 'N/A':
                     click.echo(Fore.YELLOW + f"   > {error_data['code']}")
                 
-                # Mensagem Original
-                click.echo(Fore.WHITE + Style.DIM + f"   Detalhe: {error_data['message']}")
-
-                # 2. Sugestão Automática
                 suggestion = _analyze_runtime_error(error_data)
                 if suggestion:
                     click.echo(Fore.GREEN + Style.BRIGHT + "\n[SUGESTÃO AUTOMÁTICA]")
                     click.echo(Fore.GREEN + f"   {suggestion}")
             else:
-                # Fallback elegante
-                click.echo(Fore.YELLOW + "[Gênese V4] O script falhou, mas não consegui isolar a causa exata no traceback.")
-                click.echo(Fore.WHITE + "Verifique a saída padrão acima para detalhes.")
+                click.echo(Fore.YELLOW + "   > Não foi possível estruturar o traceback (erro genérico ou desconhecido).")
                 
             sys.exit(process.returncode)
 
