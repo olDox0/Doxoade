@@ -1,56 +1,94 @@
 # doxoade/commands/run.py
-import os
-import sys
-import subprocess
 import click
-from colorama import Fore
+import subprocess
+import sys
+import os
+from colorama import Fore, Style
+from ..shared_tools import _get_venv_python_executable, _mine_traceback, _analyze_runtime_error
 
-from ..shared_tools import ExecutionLogger, _get_venv_python_executable
-
-@click.command('run', context_settings=dict(ignore_unknown_options=True))
+@click.command('run')
+@click.argument('script', required=False)
+@click.argument('args', nargs=-1)
 @click.pass_context
-@click.argument('script_and_args', nargs=-1, type=click.UNPROCESSED)
-def run(ctx, script_and_args):
-    """Executa um script Python usando o ambiente virtual do projeto."""
-    arguments = ctx.params
-    with ExecutionLogger('run', '.', arguments) as logger:
-        if not script_and_args:
-            click.echo(Fore.RED + "[ERRO] Nenhum script especificado. Para ativar o venv, use 'doxoade venv-up'.")
-            sys.exit(1)
+def run(ctx, script, args):
+    """Executa um script Python usando o 'venv' do projeto com análise de falhas."""
+    
+    venv_python = _get_venv_python_executable()
+    
+    if not venv_python:
+        click.echo(Fore.RED + "[ERRO] Ambiente virtual não encontrado. Execute 'doxoade doctor' primeiro.")
+        sys.exit(1)
 
-        venv_python = _get_venv_python_executable()
-        if not venv_python:
-            msg = "Ambiente virtual 'venv' não foi encontrado."
-            logger.add_finding("CRITICAL", msg, category="VENV")
-            click.echo(Fore.RED + f"[ERRO] {msg}")
-            sys.exit(1)
+    # Se não passar script, abre o REPL do Python
+    if not script:
+        subprocess.run([venv_python])
+        return
 
-        script_path = script_and_args[0]
-        if not os.path.exists(script_path):
-            msg = f"Script não encontrado: '{script_path}'."
-            logger.add_finding('ERROR', msg, category="FILE-NOT-FOUND")
-            click.echo(Fore.RED + f"[ERRO] {msg}")
-            sys.exit(1)
-
-        command = [venv_python] + list(script_and_args)
+    # Constrói o comando
+    command = [venv_python, script] + list(args)
+    
+    click.echo(Fore.CYAN + f"--- [RUN] Executando: {script} ---")
+    
+    try:
+        # Gênese V4: Usamos Popen para capturar stderr em tempo real mas também guardar para análise
+        # Nota: Para manter a interatividade (input), não podemos capturar stdout facilmente sem threads complexas.
+        # Vamos deixar o stdout ir pro terminal, mas capturar stderr se possível, ou confiar no exit code.
         
-        click.echo(Fore.CYAN + f"--- Executando '{' '.join(script_and_args)}' ---")
+        # Abordagem Híbrida Simples:
+        # Rodamos o processo. Se falhar, nós (infelizmente) não teremos o stderr capturado se ele foi pro terminal.
+        # PARA TERMOS A ANÁLISE, precisamos capturar o stderr.
         
-        try:
-            # Herda o I/O, o que permite interatividade total (input(), etc.)
-            result = subprocess.run(command)
+        process = subprocess.run(
+            command, 
+            capture_output=True, # Captura para analisar
+            text=True, 
+            encoding='utf-8', 
+            errors='replace'
+        )
+        
+        # Imprime o que aconteceu (já que capturamos, precisamos mostrar)
+        if process.stdout:
+            click.echo(process.stdout, nl=False)
+        
+        if process.stderr:
+            click.echo(Fore.RED + process.stderr, nl=False)
+
+        if process.returncode != 0:
+            # Separador visual
+            click.echo(Fore.WHITE + Style.DIM + "-" * 50)
             
-            click.echo(Fore.CYAN + "--- Execução Finalizada ---")
+            # 1. Minerar o Traceback
+            error_data = _mine_traceback(process.stderr)
             
-            if result.returncode != 0:
-                msg = f"O script terminou com o código de erro {result.returncode}."
-                logger.add_finding('ERROR', msg, category="EXECUTION")
-                click.echo(Fore.RED + f"[ERRO] {msg}")
-                sys.exit(result.returncode)
+            if error_data:
+                # Título do Erro em Vermelho Vivo
+                click.echo(Fore.RED + Style.BRIGHT + f"[FALHA DE EXECUÇÃO] {error_data['error_type']}")
+                
+                # Detalhes em Branco/Ciano
+                file_name = os.path.basename(error_data['file'])
+                click.echo(Fore.CYAN + f"   Arquivo: {file_name}" + Fore.WHITE + f" (Linha {error_data['line']})")
+                click.echo(Fore.CYAN + f"   Contexto: {error_data['context']}")
+                
+                # Código que quebrou (destacado)
+                if error_data['code'] != 'N/A':
+                    click.echo(Fore.YELLOW + f"   > {error_data['code']}")
+                
+                # Mensagem Original
+                click.echo(Fore.WHITE + Style.DIM + f"   Detalhe: {error_data['message']}")
+
+                # 2. Sugestão Automática
+                suggestion = _analyze_runtime_error(error_data)
+                if suggestion:
+                    click.echo(Fore.GREEN + Style.BRIGHT + "\n[SUGESTÃO AUTOMÁTICA]")
+                    click.echo(Fore.GREEN + f"   {suggestion}")
             else:
-                click.echo(Fore.GREEN + "[OK] Script finalizado com sucesso.")
+                # Fallback elegante
+                click.echo(Fore.YELLOW + "[Gênese V4] O script falhou, mas não consegui isolar a causa exata no traceback.")
+                click.echo(Fore.WHITE + "Verifique a saída padrão acima para detalhes.")
+                
+            sys.exit(process.returncode)
 
-        except KeyboardInterrupt:
-            click.echo("\n" + Fore.YELLOW + "[AVISO] Execução interrompida pelo usuário.")
-            logger.add_finding("INFO", "Execução interrompida pelo usuário.", category="EXECUTION")
-            sys.exit(130)
+    except KeyboardInterrupt:
+        click.echo(Fore.YELLOW + "\n[INFO] Execução interrompida pelo usuário.")
+    except Exception as e:
+        click.echo(Fore.RED + f"\n[ERRO CRÍTICO NO RUNNER] {e}")
