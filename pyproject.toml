@@ -39,7 +39,7 @@ doxoade = "doxoade.cli:cli"
 [tool.doxoade]
 source_dir = "."
 keep = [ "coverage", "jsondiff", "pytest", "pyyaml", "radon", "setuptools",]
-ignore = [ "tests/", "regression_tests/", "Canone_Test/", "Vers/", "doxoade.egg-info/", ".pytest_cache/", "pytest_temp_dir/", "tmp/",]
+ignore = [ "commands_test/", "tests/", "regression_tests/", "Canone_Test/", "Vers/", "doxoade.egg-info/", ".pytest_cache/", "pytest_temp_dir/", "tmp/",]
 
 [tool.setuptools]
 packages = [ "doxoade",]
