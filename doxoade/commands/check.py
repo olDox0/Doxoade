@@ -1,4 +1,5 @@
 # doxoade/commands/check.py
+#import traceback
 import sys
 import subprocess
 import sqlite3 
@@ -313,6 +314,173 @@ def _save_cache(cache_data):
 # O ORQUESTRADOR DO PIPELINE
 # =============================================================================
 
+STDLIB_MODULES = {
+    'sys': ['exit', 'path', 'argv', 'stdout', 'stderr', 'stdin', 'version', 'platform', 'modules'],
+    'os': ['path', 'getcwd', 'chdir', 'listdir', 'mkdir', 'makedirs', 'remove', 'rename', 'environ', 
+           'sep', 'name', 'walk', 'stat', 'getenv', 'system', 'popen'],
+    're': ['match', 'search', 'findall', 'sub', 'split', 'compile', 'fullmatch', 'escape', 'IGNORECASE', 'VERBOSE'],
+    'json': ['dumps', 'loads', 'dump', 'load', 'JSONDecodeError'],
+    'datetime': ['datetime', 'date', 'time', 'timedelta', 'timezone'],
+    'time': ['sleep', 'time', 'monotonic', 'perf_counter'],
+    'hashlib': ['md5', 'sha256', 'sha1', 'sha512'],
+    'sqlite3': ['connect', 'Row', 'Error', 'OperationalError'],
+    'subprocess': ['run', 'Popen', 'PIPE', 'CalledProcessError', 'check_output'],
+    'pathlib': ['Path', 'PurePath'],
+    'ast': ['parse', 'walk', 'literal_eval', 'NodeVisitor', 'dump'],
+    'shutil': ['copy', 'copy2', 'copytree', 'rmtree', 'move'],
+    'io': ['StringIO', 'BytesIO'],
+    'collections': ['Counter', 'defaultdict', 'OrderedDict', 'namedtuple', 'deque'],
+    'functools': ['wraps', 'partial', 'lru_cache', 'reduce'],
+    'itertools': ['chain', 'cycle', 'repeat', 'combinations', 'permutations'],
+    'traceback': ['format_exc', 'print_exc', 'extract_tb'],
+    'importlib': ['import_module', 'resources'],
+    'toml': ['load', 'dump', 'loads', 'dumps', 'TomlDecodeError'],
+    'click': ['command', 'group', 'option', 'argument', 'echo', 'pass_context', 'Path', 'Choice'],
+}
+
+# Mapeamento de módulos de terceiros comuns
+COMMON_THIRD_PARTY = {
+    'colorama': ['Fore', 'Back', 'Style', 'init'],
+    'pyflakes': ['api', 'checker'],
+    'requests': ['get', 'post', 'put', 'delete', 'Session', 'Response'],
+    'flask': ['Flask', 'request', 'render_template', 'redirect', 'url_for'],
+    'pytest': ['fixture', 'mark', 'raises'],
+}
+
+# Combina os dois dicionários
+ALL_KNOWN_MODULES = {**STDLIB_MODULES, **COMMON_THIRD_PARTY}
+
+def _analyze_dependencies(findings, file_path):
+    """
+    (Gênese V3 - Abdução) Analisa dependências e enriquece findings de 'undefined name'
+    com informação sobre qual import provavelmente está faltando.
+    
+    Retorna os findings enriquecidos com:
+    - 'missing_import': nome do módulo que provavelmente precisa ser importado
+    - 'import_suggestion': linha de import sugerida
+    """
+    if not findings:
+        return findings
+    
+    # Filtra apenas os findings de 'undefined name'
+    undefined_findings = [f for f in findings if 'undefined name' in f.get('message', '')]
+    
+    if not undefined_findings:
+        return findings
+    
+    # Lê os imports atuais do arquivo
+    current_imports = _extract_current_imports(file_path)
+    
+    for finding in undefined_findings:
+        message = finding.get('message', '')
+        match = re.match(r"undefined name '(.+?)'", message)
+        if not match:
+            continue
+        
+        undefined_name = match.group(1)
+        
+        # Caso 1: O nome indefinido É um módulo conhecido
+        if undefined_name in ALL_KNOWN_MODULES:
+            if undefined_name not in current_imports:
+                finding['missing_import'] = undefined_name
+                finding['import_suggestion'] = f"import {undefined_name}"
+                finding['dependency_type'] = 'MISSING_MODULE_IMPORT'
+                continue
+        
+        # Caso 2: O nome indefinido é um EXPORT de algum módulo conhecido
+        for module, exports in ALL_KNOWN_MODULES.items():
+            if undefined_name in exports:
+                if module not in current_imports:
+                    finding['missing_import'] = module
+                    finding['import_suggestion'] = f"from {module} import {undefined_name}"
+                    finding['dependency_type'] = 'MISSING_SYMBOL_IMPORT'
+                    break
+                else:
+                    # Módulo importado mas símbolo não
+                    import_info = current_imports.get(module, {})
+                    if import_info.get('type') == 'import' and undefined_name in exports:
+                        # Usou "import module" mas está tentando usar "symbol" diretamente
+                        finding['import_suggestion'] = f"Use '{module}.{undefined_name}' ou 'from {module} import {undefined_name}'"
+                        finding['dependency_type'] = 'WRONG_IMPORT_STYLE'
+                        break
+        
+        # Caso 3: Tenta inferir do contexto (nome similar a módulos conhecidos)
+        if 'missing_import' not in finding:
+            # Verifica se é uma variação comum (ex: 'Fore' -> 'colorama')
+            for module, exports in ALL_KNOWN_MODULES.items():
+                if undefined_name in exports:
+                    finding['missing_import'] = module
+                    finding['import_suggestion'] = f"from {module} import {undefined_name}"
+                    finding['dependency_type'] = 'INFERRED_IMPORT'
+                    break
+    
+    return findings
+
+
+def _extract_current_imports(file_path):
+    """
+    Extrai os imports atuais de um arquivo Python.
+    Retorna um dicionário: {nome_módulo: {type: 'import'|'from', symbols: [...]}}
+    """
+    imports = {}
+    
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+        
+        tree = ast.parse(content, filename=file_path)
+        
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    module_name = alias.name.split('.')[0]
+                    imports[module_name] = {
+                        'type': 'import',
+                        'alias': alias.asname,
+                        'symbols': []
+                    }
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    module_name = node.module.split('.')[0]
+                    symbols = [alias.name for alias in node.names]
+                    if module_name in imports:
+                        imports[module_name]['symbols'].extend(symbols)
+                    else:
+                        imports[module_name] = {
+                            'type': 'from',
+                            'alias': None,
+                            'symbols': symbols
+                        }
+    except (SyntaxError, IOError):
+        pass
+    
+    return imports
+
+
+def _enrich_with_dependency_analysis(findings, project_path):
+    """
+    Enriquece os findings com análise de dependências.
+    """
+    # Agrupa findings por arquivo
+    by_file = {}
+    for f in findings:
+        file_path = f.get('file')
+        if file_path:
+            abs_path = os.path.join(project_path, file_path) if not os.path.isabs(file_path) else file_path
+            if abs_path not in by_file:
+                by_file[abs_path] = []
+            by_file[abs_path].append(f)
+
+    for file_path, file_findings in by_file.items():
+        _analyze_dependencies(file_findings, file_path)
+        
+        # DEBUG: Verificar se está adicionando import_suggestion
+#        for f in file_findings:
+#            if f.get('import_suggestion'):
+#                click.echo(Fore.MAGENTA + f"   > [DEBUG-ABDUÇÃO] {f.get('message')} -> {f.get('import_suggestion')}")
+
+    return findings
+
 def _enrich_findings_with_solutions(findings):
     """
     (Gênese V2 - Expandido) Consulta o DB por soluções exatas E aplica templates genéricos.
@@ -335,6 +503,8 @@ def _enrich_findings_with_solutions(findings):
         templates = cursor.fetchall()
 
         for finding in findings:
+            if finding.get('import_suggestion'):
+                continue
             # 1. Tenta encontrar uma solução exata primeiro
             finding_hash = finding.get('hash')
             if finding_hash:
@@ -432,13 +602,14 @@ def _enrich_findings_with_solutions(findings):
                                 break
                     
                     elif solution_type in ("ADD_IMPORT_OR_DEFINE", "FIX_INDENTATION"):
-                        # Estes requerem ação manual - apenas marca como sugestão
-                        finding['suggestion_source'] = "TEMPLATE_MANUAL"
-                        finding['suggestion_action'] = {
-                            "ADD_IMPORT_OR_DEFINE": "Adicionar import ou definir a variável",
-                            "FIX_INDENTATION": "Corrigir indentação manualmente"
-                        }.get(solution_type, "Correção manual necessária")
-                        break
+                        # MODIFICADO: Só mostra se não tiver import_suggestion
+                        if not finding.get('import_suggestion'):
+                            finding['suggestion_source'] = "TEMPLATE_MANUAL"
+                            finding['suggestion_action'] = {
+                                "ADD_IMPORT_OR_DEFINE": "Adicionar import ou definir a variável",
+                                "FIX_INDENTATION": "Corrigir indentação manualmente"
+                            }.get(solution_type, "Correção manual necessária")
+                            break
                         
                 except (IOError, IndexError, TypeError):
                     continue
@@ -732,11 +903,14 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
         
         final_findings.append(finding_with_hash) 
 
-    # 2. Enriquece com sugestões do histórico
+    # 2. NOVO: Análise de Dependências (Abdução)
+    project_path = os.path.abspath(path)
+    _enrich_with_dependency_analysis(final_findings, project_path)
+
+    # 3. Enriquece com sugestões do histórico (só se não tiver sugestão de import)
     _enrich_findings_with_solutions(final_findings)
     
-    # 3. GÊNESE V2: Gerencia incidentes ativamente
-    project_path = os.path.abspath(path)
+    # 4. GÊNESE V3: Gerencia incidentes E aprende automaticamente
     incident_stats = _manage_incidents(final_findings, project_path)
     
     # Mostra estatísticas de incidentes (apenas se houver mudanças)
@@ -766,7 +940,11 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
                 details=finding.get('details'),
                 suggestion_content=finding.get('suggestion_content'),
                 suggestion_line=finding.get('suggestion_line'),
-                finding_hash=finding.get('hash')
+                finding_hash=finding.get('hash'),
+                # --- NOVOS ARGUMENTOS ---
+                import_suggestion=finding.get('import_suggestion'),
+                dependency_type=finding.get('dependency_type'),
+                missing_import=finding.get('missing_import')
             )
         
         if not no_cache:

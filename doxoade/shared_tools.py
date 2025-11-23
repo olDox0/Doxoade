@@ -26,8 +26,8 @@ class ExecutionLogger:
             'findings': []
         }
 
-    def add_finding(self, severity, message, category='UNCATEGORIZED', file=None, line=None, details=None, snippet=None, suggestion_content=None, suggestion_line=None, finding_hash=None):
-        """(Versão Final) Adiciona um 'finding' completo, incluindo dados para sugestão."""
+    def add_finding(self, severity, message, category='UNCATEGORIZED', file=None, line=None, details=None, snippet=None, suggestion_content=None, suggestion_line=None, finding_hash=None, import_suggestion=None, dependency_type=None, missing_import=None):
+        """(Versão Final V3) Adiciona um 'finding' completo, incluindo dados de abdução."""
         severity = severity.upper()
         category = category.upper() 
         
@@ -46,7 +46,11 @@ class ExecutionLogger:
             'details': details,
             'snippet': snippet,
             'suggestion_content': suggestion_content,
-            'suggestion_line': suggestion_line
+            'suggestion_line': suggestion_line,
+            # --- NOVOS CAMPOS ---
+            'import_suggestion': import_suggestion,
+            'dependency_type': dependency_type,
+            'missing_import': missing_import
         }
         
         self.results['findings'].append(finding)
@@ -195,7 +199,7 @@ def _get_code_snippet_from_string(content, line_number, context_lines=2):
     except IndexError: return None
         
 def _print_finding_details(finding):
-    """(Versão Final V2) Imprime os detalhes de um 'finding' com diff visual para sugestões."""
+    """(Versão Final V3) Imprime os detalhes de um 'finding' com análise de dependências."""
     severity = finding.get('severity', 'INFO').upper()
     category = (finding.get('category') or 'UNCATEGORIZED').upper()
     color_map = {'CRITICAL': Fore.MAGENTA, 'ERROR': Fore.RED, 'WARNING': Fore.YELLOW, 'INFO': Fore.CYAN}
@@ -225,11 +229,29 @@ def _print_finding_details(finding):
             line_color = Fore.WHITE + Style.BRIGHT if line_num == error_line else Fore.WHITE + Style.DIM
             click.echo(line_color + f"{prefix}{line_num:4}: {code_line}")
 
+    # 2.5 NOVO: Sugestão de Import (Análise de Dependências)
+    if finding.get('import_suggestion'):
+        dep_type = finding.get('dependency_type', 'UNKNOWN')
+        
+        type_labels = {
+            'MISSING_MODULE_IMPORT': 'Import de módulo faltando',
+            'MISSING_SYMBOL_IMPORT': 'Import de símbolo faltando', 
+            'WRONG_IMPORT_STYLE': 'Estilo de import incorreto',
+            'INFERRED_IMPORT': 'Import sugerido (inferido)'
+        }
+        label = type_labels.get(dep_type, 'Sugestão')
+        
+        click.echo(Fore.CYAN + Style.BRIGHT + f"\n   > [ABDUÇÃO - {label}]")
+        click.echo(Fore.GREEN + f"      Adicione: {finding.get('import_suggestion')}")
+        
+        if finding.get('missing_import'):
+            click.echo(Fore.WHITE + Style.DIM + f"      (módulo: {finding.get('missing_import')})")
+        return  # Se temos sugestão de import, não mostra o histórico genérico
+
     # 3. Sugestão do Histórico (com diff visual)
     if finding.get('suggestion_content') or finding.get('suggestion_action'):
         source = finding.get('suggestion_source', 'HISTÓRICO')
         
-        # Define o label baseado na fonte
         if source == "TEMPLATE":
             source_label = "TEMPLATE"
         elif source == "TEMPLATE_MANUAL":
@@ -239,15 +261,13 @@ def _print_finding_details(finding):
         else:
             source_label = "HISTÓRICO"
         
-        # Se é uma sugestão manual (sem conteúdo automático)
         if source == "TEMPLATE_MANUAL":
             action = finding.get('suggestion_action', 'Correção manual necessária')
             click.echo(Fore.CYAN + Style.BRIGHT + f"\n   > [{source_label}] {action}")
             return
-        
+
         click.echo(Fore.CYAN + Style.BRIGHT + f"\n   > [{source_label}]")
         
-        # Mostra a ação se disponível
         if finding.get('suggestion_action'):
             click.echo(Fore.WHITE + f"      Ação: {finding.get('suggestion_action')}")
         
@@ -255,8 +275,6 @@ def _print_finding_details(finding):
         if snippet and finding.get('suggestion_line'):
             suggestion_line = finding.get('suggestion_line')
             
-            # Mostra a linha que será REMOVIDA (em vermelho com -)
-            # Tenta encontrar a linha no snippet (pode ser int ou str como chave)
             original_code = None
             for k, v in snippet.items():
                 if int(k) == error_line:
@@ -266,7 +284,6 @@ def _print_finding_details(finding):
             if original_code:
                 click.echo(Fore.RED + f"      - {error_line:4}: {original_code}")
             
-            # Mostra o contexto após a remoção (snippet da sugestão)
             suggestion_snippet = _get_code_snippet_from_string(
                 finding['suggestion_content'],
                 suggestion_line,
@@ -276,22 +293,10 @@ def _print_finding_details(finding):
             if suggestion_snippet:
                 click.echo(Fore.GREEN + Style.DIM + "        (após a correção:)")
                 for line_num, code_line in suggestion_snippet.items():
-                    # Ajusta a numeração para refletir o arquivo corrigido
                     display_num = line_num
                     prefix = "      + " if line_num == suggestion_line else "        "
                     line_color = Fore.GREEN if line_num == suggestion_line else Fore.WHITE + Style.DIM
                     click.echo(line_color + f"{prefix}{display_num:4}: {code_line}")
-        else:
-            # Fallback: mostra apenas o snippet da sugestão
-            suggestion_snippet = _get_code_snippet_from_string(
-                finding['suggestion_content'],
-                finding.get('suggestion_line')
-            )
-            if suggestion_snippet:
-                for line_num, code_line in suggestion_snippet.items():
-                    prefix = "      > " if line_num == finding.get('suggestion_line') else "        "
-                    line_color = Fore.GREEN + Style.BRIGHT if line_num == finding.get('suggestion_line') else Fore.WHITE + Style.DIM
-                    click.echo(line_color + f"{prefix}{line_num:4}: {code_line}")
 
 def _print_summary(results, ignored_count):
     summary = results.get('summary', {})
