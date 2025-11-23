@@ -14,6 +14,29 @@ from ..shared_tools import ExecutionLogger
 
 __version__ = "35.81 Alfa Phoenix"
 
+def detect_windows_store_alias():
+    """
+    Detecta se o alias da Microsoft Store está sequestrando o comando 'python'.
+    Retorna True se o problema for detectado.
+    """
+    if sys.platform != "win32":
+        return False
+
+    # O comando shutil.which retorna o primeiro executável encontrado no PATH
+    python_path = shutil.which("python")
+    
+    if python_path and "WindowsApps" in python_path:
+        print(Fore.RED + Style.BRIGHT + "\n[ALERTA CRÍTICO DE AMBIENTE] 'App Execution Alias' Detectado")
+        print(Fore.YELLOW + f"   > O comando 'python' está apontando para: {python_path}")
+        print("   > Isso é um atalho da Microsoft Store que impede a execução de scripts.")
+        print("\n   SOLUÇÃO:")
+        print("   1. Abra o Menu Iniciar e digite: 'Gerenciar aliases de execução do aplicativo'")
+        print("   2. Desative os interruptores para 'App Installer', 'Python' e 'Python3'.")
+        print("   3. Reinicie seu terminal.")
+        return True
+    
+    return False
+
 def _verify_gitignore_logic(target_path, logger):
     """
     (Versão Direta) Audita o .gitignore e oferece para mover as regras de negação (!) para o final.
