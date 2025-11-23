@@ -650,3 +650,99 @@ def _update_open_incidents(logger_results, project_path):
         click.echo(Fore.RED + f"   > Traceback: {traceback.format_exc()}")
     finally:
         conn.close()
+
+def _mine_traceback(stderr_output):
+    """
+    (Gênese V4 - Antifragilidade - Atualizado Py3.11+) Analisa um traceback bruto.
+    """
+    if not stderr_output:
+        return None
+
+    # NOVO REGEX:
+    # 1. Pega File, line, in module
+    # 2. Pega a linha de código (que pode ser seguida por linhas de ~~~~)
+    # 3. Pega o TipoDeErro: Mensagem
+    # O (?s) permite que o ponto (.) pegue novas linhas, mas controlamos com non-greedy
+    
+    # Estratégia: Encontrar o ÚLTIMO bloco "File ..."
+    file_blocks = list(re.finditer(r'File "(.+?)", line (\d+), in (.+?)\n\s*(.+?)\n', stderr_output))
+    
+    # Encontrar a ÚLTIMA linha de erro "Error: ..."
+    # (Pega qualquer palavra terminada em Error ou Exception no inicio da linha)
+    error_match = re.search(r'\n(\w+Error|Exception): (.+)', stderr_output)
+    
+    if not error_match:
+        # Fallback genérico se não achar "XError:"
+        error_match = re.search(r'\n(\w+): (.+)', stderr_output)
+
+    if not error_match:
+        return None
+
+    error_type = error_match.group(1)
+    message = error_match.group(2)
+    
+    if file_blocks:
+        last_block = file_blocks[-1]
+        code_line = last_block.group(4).strip()
+        
+        # Limpa as marcas de erro do Python 3.11 (~~~~^^^^) se elas tiverem sido capturadas
+        if set(code_line).issubset({'~', '^', ' '}):
+             # Se a linha capturada for só til e circunflexo, pegamos a anterior (a do código real)
+             # Mas nosso regex pega a linha LOGO APOS o 'in module', que é o código.
+             # O problema é se o output tiver quebras estranhas.
+             pass
+
+        return {
+            'file': last_block.group(1),
+            'line': int(last_block.group(2)),
+            'context': last_block.group(3),
+            'code': code_line,
+            'error_type': error_type,
+            'message': message
+        }
+    else:
+        # Caso raro: Erro sem arquivo (ex: erro de import raiz)
+        return {
+            'file': 'Desconhecido',
+            'line': 0,
+            'context': 'Runtime',
+            'code': 'N/A',
+            'error_type': error_type,
+            'message': message
+        }
+
+def _analyze_runtime_error(error_data):
+    """
+    (Gênese V4) Gera sugestões baseadas no erro de runtime minerado.
+    """
+    if not error_data: return None
+    
+    etype = error_data['error_type']
+    msg = error_data['message']
+    
+    suggestion = None
+    
+    if etype == 'ModuleNotFoundError':
+        module = msg.replace("No module named ", "").strip("'")
+        suggestion = f"Falta instalar ou importar: '{module}'.\n      Tente: pip install {module} ou verifique o import."
+        
+    elif etype == 'ZeroDivisionError':
+        suggestion = "Divisão por zero detectada. Adicione uma verificação 'if divisor != 0:' ou um bloco try/except."
+        
+    elif etype == 'IndexError':
+        suggestion = "Tentativa de acessar um índice que não existe na lista. Verifique o tamanho da lista (len)."
+        
+    elif etype == 'KeyError':
+        suggestion = f"A chave {msg} não existe no dicionário. Use .get({msg}) ou verifique se a chave está correta."
+        
+    elif etype == 'TypeError':
+        if "NoneType" in msg:
+            suggestion = "Uma variável é 'None' onde não deveria. Verifique se alguma função retornou valor."
+            
+    elif etype == 'IndentationError':
+        suggestion = "Erro de indentação. Mistura de tabs e espaços ou alinhamento incorreto."
+
+    elif etype == 'SyntaxError':
+        suggestion = "Erro de sintaxe. Verifique parênteses não fechados ou dois pontos ':' faltando."
+
+    return suggestion
