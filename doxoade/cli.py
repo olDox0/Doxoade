@@ -46,6 +46,7 @@ from doxoade.commands.mirror  import mirror
 from doxoade.commands.python import python
 from doxoade.commands.rebuild import rebuild
 from doxoade.commands.regression_test import regression_test
+from doxoade.commands.rewind import rewind
 from doxoade.commands.run import run
 from doxoade.commands.save import save
 from doxoade.commands.self_test import self_test
@@ -299,12 +300,13 @@ cli.add_command(intelligence)
 cli.add_command(kvcheck)
 cli.add_command(log)
 cli.add_command(migrate_db)
-cli.add_command(mk)
 cli.add_command(mirror)
+cli.add_command(mk)
 cli.add_command(python)
 cli.add_command(rebuild)
 cli.add_command(regression_test)
 cli.add_command(release)
+cli.add_command(rewind)
 cli.add_command(run)
 cli.add_command(save)
 cli.add_command(self_test)
