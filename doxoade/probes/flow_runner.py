@@ -121,7 +121,7 @@ def run_flow(script_path):
     sys.settrace(tracer.trace_calls)
     sys.path.insert(0, os.path.dirname(abs_script_path))
     
-    original_argv = sys.argv
+#    original_argv = sys.argv
 #    sys.argv = [abs_script_path] + sys.argv[2:]
     
     try:

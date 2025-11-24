@@ -25,6 +25,7 @@ from doxoade.commands.clean import clean
 from doxoade.commands.config import config_group
 from doxoade.commands.dashboard import dashboard
 from doxoade.commands.db_query import db_query
+from doxoade.commands.debug import debug
 from doxoade.commands.deepcheck import deepcheck
 from doxoade.commands.diff import diff
 from doxoade.commands.doctor import doctor
@@ -284,6 +285,7 @@ cli.add_command(create_pipeline)
 cli.add_command(dashboard)
 cli.add_command(db_query)
 cli.add_command(deepcheck)
+cli.add_command(debug)
 cli.add_command(diff)
 cli.add_command(doctor)
 cli.add_command(encoding)
