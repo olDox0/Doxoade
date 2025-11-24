@@ -19,7 +19,7 @@ from colorama import Fore
 # Linha corrigida, que não causa o ciclo
 from .._version import __version__ as DOXOADE_VERSION
 
-#from datetime import datetime, timezone
+from ..fixer import AutoFixer
 from ..database import get_db_connection
 from ..shared_tools import (
     ExecutionLogger, 
@@ -801,6 +801,77 @@ def _learn_template_from_incident(cursor, incident):
     
     return True
 
+def _run_smart_fix(findings, project_path, logger):
+    """
+    (Gênese V7) Aplica correções baseadas em templates aprendidos.
+    """
+    from ..database import get_db_connection
+    
+    fixer = AutoFixer(logger)
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    fixed_count = 0
+    
+    try:
+        # Carrega templates confiáveis
+        cursor.execute("SELECT * FROM solution_templates WHERE confidence > 0")
+        templates = cursor.fetchall()
+        
+        # Ordena findings de baixo para cima (para não estragar indices de linha ao deletar)
+        # Isso é crucial quando removemos linhas!
+        sorted_findings = sorted(findings, key=lambda x: x.get('line', 0), reverse=True)
+        
+        # Para evitar conflitos, aplicamos um fix por arquivo por passada, ou gerenciamos offset
+        # Simplificação V1: Tenta aplicar tudo (assumindo que remove_line é a unica que muda indices drasticamente)
+        
+        for finding in sorted_findings:
+            msg = finding.get('message', '')
+            category = finding.get('category', '')
+            
+            # Procura um template compatível
+            matched_template = None
+            context = {}
+            
+            for t in templates:
+                if t['category'] != category: continue
+                
+                # Reconstrói regex do template
+                pattern_regex = (re.escape(t['problem_pattern'])
+                    .replace('___MODULE___', '(.+?)') # No DB salvamos com placeholders limpos? 
+                    # Nota: No passo anterior, salvamos como '<MODULE>'.
+                    # Vamos ajustar o regex builder para ser consistente.
+                    .replace('<MODULE>', '(.+?)')
+                    .replace('<VAR>', '(.+?)')
+                    .replace('<LINE>', r'(\d+)'))
+                
+                match = re.fullmatch(pattern_regex, msg)
+                if match:
+                    matched_template = t
+                    # Extrai variáveis se houver grupos de captura
+                    # Isso é frágil se houver multiplos grupos.
+                    # Melhor: Se o template for REPLACE_WITH_UNDERSCORE, precisamos do nome da variavel.
+                    if t['solution_template'] == 'REPLACE_WITH_UNDERSCORE':
+                        # Assume que o grupo 1 é a variável (padrão do regex)
+                        if match.groups():
+                            context['var_name'] = match.group(1)
+                    break
+            
+            if matched_template:
+                # Aplica o fix
+                file_abs = os.path.join(project_path, finding['file'])
+                if fixer.apply_fix(file_abs, finding['line'], matched_template['solution_template'], context):
+                    fixed_count += 1
+                    click.echo(Fore.GREEN + f"   > [AUTOFIX] Aplicado: {matched_template['solution_template']} em {finding['file']}:{finding['line']}")
+                    
+    except Exception as e:
+        click.echo(Fore.RED + f"[ERRO AUTOFIX] {e}")
+    finally:
+        conn.close()
+        
+    return fixed_count
+
 def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=False, no_cache=False, target_files=None):
     """
     Orquestra a análise estática, combinando uma arquitetura de pipeline com um sistema de cache.
@@ -876,12 +947,31 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
         import_findings = _run_import_probe(all_imports, python_executable, temp_logger, config.get('search_path'))
         analysis_state['raw_findings'].extend(import_findings)
 
-    # --- Etapa 3: Correção Automática (se ativada) ---
+    # --- Etapa 3: Correção Automática (Gênese V7) ---
     if fix:
         click.echo(Fore.CYAN + "\nModo de correção (--fix) ativado...")
-        fix_logger = ExecutionLogger('fix', path, {})
-        for file_path in analysis_state['files_to_process']:
-            _fix_unused_imports(file_path, fix_logger)
+        
+        # Precisamos calcular os hashes e categorias antes do fix
+        temp_findings_for_fix = []
+        for f in analysis_state['raw_findings']:
+             # (Lógica de hash simplificada para o fix)
+             temp_findings_for_fix.append(f)
+             
+        # Precisamos do caminho absoluto
+        project_abs = os.path.abspath(path)
+        
+        # Correção: O _run_smart_fix precisa de um logger.
+        with ExecutionLogger('fix', path, {}) as fix_logger:
+             count = _run_smart_fix(analysis_state['raw_findings'], project_abs, fix_logger)
+             
+        if count > 0:
+             click.echo(Fore.GREEN + f"   > Total de correções aplicadas: {count}")
+             click.echo(Fore.YELLOW + "   > Recomendado rodar 'check' novamente para verificar.")
+#    if fix:
+#        click.echo(Fore.CYAN + "\nModo de correção (--fix) ativado...")
+#        fix_logger = ExecutionLogger('fix', path, {})
+#        for file_path in analysis_state['files_to_process']:
+#            _fix_unused_imports(file_path, fix_logger)
 
     # --- BLOCO DE FINALIZAÇÃO E ENRIQUECIMENTO (GÊNESE V2) ---
     
@@ -958,7 +1048,8 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
 
 @click.command('check')
 @click.pass_context
-@click.argument('path', type=click.Path(exists=True, file_okay=False), default='.')
+@click.argument('path', type=click.Path(exists=True, file_okay=True), default='.')
+#@click.argument('path', type=click.Path(exists=True, file_okay=False), default='.')
 @click.option('--ignore', 'cmd_line_ignore', multiple=True, help="Ignora uma pasta.")
 @click.option('--fix', is_flag=True, help="Tenta corrigir problemas automaticamente.")
 @click.option('--debug', is_flag=True, help="Ativa a saída de depuração detalhada.")
