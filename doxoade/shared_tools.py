@@ -220,7 +220,8 @@ def _print_finding_details(finding):
         click.echo(Fore.CYAN + f"   > {finding.get('details')}")
         
     snippet = finding.get('snippet')
-    error_line = int(finding.get('line', -1))
+    # Usa 'or -1' para garantir que None vire -1
+    error_line = int(finding.get('line') or -1)
     
     if snippet:
         for line_num_str, code_line in snippet.items():
