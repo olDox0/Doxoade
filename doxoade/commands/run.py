@@ -39,44 +39,66 @@ def _smart_find_script(script_name, root_path='.'):
         click.echo(Fore.YELLOW + f"   > Múltiplos arquivos encontrados. Usando: {chosen}")
         return chosen
 
+def _get_wrapper_path():
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_dir, 'probes', 'command_wrapper.py')
+
 @click.command('run')
 @click.argument('script', required=False)
 @click.argument('args', nargs=-1)
-@click.option('--flow', is_flag=True, help="Ativa o modo Flow (Rastreamento visual).")
+@click.option('--flow', is_flag=True, help="Ativa o modo Flow.")
+@click.option('--internal', is_flag=True, help="Executa um comando interno do Doxoade (ex: check, doctor) sob o Flow.")
 @click.pass_context
-def run(ctx, script, args, flow):
-    """Executa um script Python. Se não achar, procura no projeto."""
+def run(ctx, script, args, flow, internal):
+    """Executa scripts ou comandos internos com análise."""
     
     venv_python = _get_venv_python_executable()
-    
     if not venv_python:
-        click.echo(Fore.RED + "[ERRO] Ambiente virtual não encontrado. Execute 'doxoade doctor' primeiro.")
+        click.echo(Fore.RED + "[ERRO] Venv não encontrado.")
         sys.exit(1)
 
-    if not script:
-        subprocess.run([venv_python])
-        return
-
-    # --- CORREÇÃO AQUI: Bloqueio se não encontrar ---
-    real_script_path = _smart_find_script(script)
-    
-    if not real_script_path:
-        click.echo(Fore.RED + f"[ERRO] O arquivo '{script}' não foi encontrado neste projeto.")
-        # Não tenta rodar, apenas sai
-        sys.exit(1)
-
-    # Configuração do Comando
-    if flow:
+    # Lógica para Comandos Internos (Meta-Análise)
+    if internal:
+        if not flow:
+            click.echo(Fore.YELLOW + "[AVISO] --internal geralmente é usado com --flow. Ativando Flow automaticamente.")
+            flow = True
+            
+        wrapper_path = _get_wrapper_path()
         probe_path = _get_flow_probe_path()
-        if not os.path.exists(probe_path):
-             click.echo(Fore.RED + f"[ERRO INTERNO] Sonda Flow não encontrada em: {probe_path}")
-             sys.exit(1)
-             
-        command = [venv_python, probe_path, real_script_path] + list(args)
-        click.echo(Fore.MAGENTA + Style.BRIGHT + "--- [ATIVANDO MODO FLOW] ---")
+        
+        # Comando: python flow_runner.py command_wrapper.py <comando> <args>
+        # Isso faz o Flow rastrear o Wrapper, que chama o comando.
+        # O filtro do Flow precisa permitir ver o código do Doxoade!
+        
+        command = [venv_python, probe_path, wrapper_path, script] + list(args)
+        click.echo(Fore.MAGENTA + Style.BRIGHT + f"--- [META-FLOW] Analisando comando interno: {script} ---")
+        
     else:
-        command = [venv_python, real_script_path] + list(args)
-        click.echo(Fore.CYAN + f"--- [RUN] Executando: {real_script_path} ---")
+
+        if not script:
+            subprocess.run([venv_python])
+            return
+    
+        # --- CORREÇÃO AQUI: Bloqueio se não encontrar ---
+        real_script_path = _smart_find_script(script)
+        
+        if not real_script_path:
+            click.echo(Fore.RED + f"[ERRO] O arquivo '{script}' não foi encontrado neste projeto.")
+            # Não tenta rodar, apenas sai
+            sys.exit(1)
+    
+        # Configuração do Comando
+        if flow:
+            probe_path = _get_flow_probe_path()
+            if not os.path.exists(probe_path):
+                click.echo(Fore.RED + f"[ERRO INTERNO] Sonda Flow não encontrada em: {probe_path}")
+                sys.exit(1)
+                
+            command = [venv_python, probe_path, real_script_path] + list(args)
+            click.echo(Fore.MAGENTA + Style.BRIGHT + "--- [ATIVANDO MODO FLOW] ---")
+        else:
+            command = [venv_python, real_script_path] + list(args)
+            click.echo(Fore.CYAN + f"--- [RUN] Executando: {real_script_path} ---")
     
     # Execução Blindada
     try:
