@@ -23,6 +23,7 @@ class FlowTracer:
 
         self.python_dir = os.path.normcase(os.path.dirname(sys.executable))
         self.cwd = os.getcwd()
+        self.target_name = os.path.basename(self.target_script) # Pega o nome do script
         
         # SEPARADOR VISUAL SEGURO
         # Tenta usar o caractere bonito, mas se o terminal não suportar, usa pipe normal
@@ -41,7 +42,15 @@ class FlowTracer:
         if code_path.startswith('<'): return self.trace_calls
         
         abs_path = os.path.normcase(os.path.abspath(code_path))
+        
+        # Se estamos rodando o 'command_wrapper.py', QUEREMOS ver o código do 'doxoade'
+        is_meta_analysis = 'command_wrapper.py' in self.target_name
+        
         if 'flow_runner.py' in abs_path: return self.trace_calls
+        
+        # Se NÃO for meta-análise, aplica o filtro antigo
+        if not is_meta_analysis:
+             if os.sep + 'doxoade' + os.sep in abs_path: return self.trace_calls
         
         is_in_cwd = abs_path.startswith(os.path.normcase(self.cwd))
         if not is_in_cwd: return self.trace_calls
@@ -112,10 +121,16 @@ def run_flow(script_path):
     sys.settrace(tracer.trace_calls)
     sys.path.insert(0, os.path.dirname(abs_script_path))
     
+    original_argv = sys.argv
+#    sys.argv = [abs_script_path] + sys.argv[2:]
+    
     try:
         with open(abs_script_path, 'rb') as f:
             code = compile(f.read(), abs_script_path, 'exec')
-            globs = {'__name__': '__main__', '__file__': abs_script_path}
+            globs = {
+                '__name__': '__main__',
+                '__file__': abs_script_path,
+            }
             exec(code, globs)
     except Exception as e:
         sys.settrace(None)
