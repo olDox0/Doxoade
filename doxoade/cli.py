@@ -142,7 +142,7 @@ def setup_health(ctx, path):
     # --- Passo 1: Verificar e atualizar requirements.txt ---
     click.echo(Fore.YELLOW + "\n--- 1. Verificando 'requirements.txt'... ---")
     req_file = os.path.join(path, 'requirements.txt')
-    health_deps = ['radon', 'coverage', 'pytest']
+    health_deps = ['radon', 'coverage', 'pytest', 'pyflakes'] 
     deps_to_add = []
     
     if os.path.exists(req_file):
@@ -191,7 +191,7 @@ def setup_health(ctx, path):
 
     # Atualiza a lista 'keep'
     packages_to_keep = set(doxoade_config.setdefault('keep', []))
-    health_tools = {"pytest", "coverage", "radon"}
+    health_tools = {"pytest", "coverage", "radon", "pyflakes"}
     packages_to_keep.update(health_tools)
     doxoade_config['keep'] = sorted(list(packages_to_keep))
     
