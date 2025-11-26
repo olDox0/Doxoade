@@ -750,3 +750,12 @@ def _analyze_runtime_error(error_data):
         suggestion = "Erro de sintaxe. Verifique parênteses não fechados ou dois pontos ':' faltando."
 
     return suggestion
+    
+def _format_timestamp(iso_str):
+    """Converte ISO UTC para hora local legível."""
+    try:
+        dt_utc = datetime.fromisoformat(iso_str)
+        dt_local = dt_utc.astimezone() # Converte para o timezone do sistema
+        return dt_local.strftime("%Y-%m-%d %H:%M:%S")
+    except:
+        return iso_str

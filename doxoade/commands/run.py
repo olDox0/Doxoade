@@ -5,7 +5,52 @@ import sys
 import os
 # [DOX-UNUSED] import glob 
 from colorama import Fore, Style
+from datetime import datetime, timezone
+from ..database import get_db_connection
 from ..shared_tools import _get_venv_python_executable, _mine_traceback, _analyze_runtime_error
+
+def _register_runtime_incident(error_data):
+    """
+    (Gênese V9) Registra um erro de execução como incidente aberto para aprendizado futuro.
+    """
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Gera um hash único para o erro
+        import hashlib
+        unique_str = f"{error_data['file']}:{error_data['line']}:{error_data['message']}"
+        finding_hash = hashlib.md5(unique_str.encode('utf-8', 'ignore')).hexdigest()
+        
+        # Normaliza caminho
+        project_path = os.getcwd()
+        file_path = os.path.relpath(error_data['file'], project_path).replace('\\', '/')
+        
+        # Define categoria (Runtime é sempre risco)
+        category = 'RUNTIME-ERROR'
+        
+        # Insere no banco
+        cursor.execute("""
+            INSERT OR REPLACE INTO open_incidents 
+            (finding_hash, file_path, line, message, category, commit_hash, timestamp, project_path)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            finding_hash,
+            file_path,
+            error_data['line'],
+            f"{error_data['error_type']}: {error_data['message']}",
+            category,
+            "runtime", # Não atrelado a commit específico
+            datetime.now(timezone.utc).isoformat(),
+            project_path
+        ))
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        # Falha silenciosa para não atrapalhar a UX do erro
+        return False
 
 def _get_flow_probe_path():
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -117,6 +162,9 @@ def run(ctx, script, args, flow, internal):
                     if suggestion:
                         click.echo(Fore.GREEN + Style.BRIGHT + "\n[SUGESTÃO AUTOMÁTICA]")
                         click.echo(Fore.GREEN + f"   {suggestion}")
+                        
+                    if _register_runtime_incident(error_data):
+                        click.echo(Fore.CYAN + Style.DIM + "   > [GÊNESE] Incidente registrado para aprendizado.")
                 else:
                     click.echo(Fore.YELLOW + "   > Não foi possível estruturar o traceback.")
                 sys.exit(process.returncode)
