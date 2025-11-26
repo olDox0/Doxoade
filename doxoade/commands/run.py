@@ -48,7 +48,7 @@ def _register_runtime_incident(error_data):
         conn.commit()
         conn.close()
         return True
-    except Exception as e:
+    except Exception:
         # Falha silenciosa para não atrapalhar a UX do erro
         return False
 
