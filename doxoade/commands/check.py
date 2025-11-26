@@ -18,9 +18,9 @@ from colorama import Fore
 
 # Linha corrigida, que não causa o ciclo
 from .._version import __version__ as DOXOADE_VERSION
-
-from ..fixer import AutoFixer
 from ..database import get_db_connection
+from ..fixer import AutoFixer
+from ..learning import LearningEngine
 from ..shared_tools import (
     ExecutionLogger, 
     _present_results,
@@ -679,8 +679,27 @@ def _manage_incidents(findings, project_path):
             )
             stats['learned'] += 1
             
-            # Tenta aprender template
-            if _learn_template_from_incident(cursor, incident):
+            # Tenta aprender template (Gênese V8)
+            # Instancia o motor (pode ser fora do loop para otimizar, mas aqui é seguro)
+            # Mas espere, o LearningEngine precisa do 'cursor'.
+            
+            # O ideal é instanciar UMA VEZ antes do loop
+            # learner = LearningEngine(cursor) (Coloque isso antes do 'for resolved_hash...')
+            
+            # Dentro do loop:
+            # Precisamos do conteúdo original e corrigido.
+            # Se não tivermos, passamos None e ele tenta só as regras hardcoded.
+            
+            learner = LearningEngine(cursor) # Instancia rápida
+            
+            # Tenta recuperar o conteúdo antigo do git (HEAD)
+            original_content = None
+            corrected_content = None
+            
+            # (Opcional: Lógica de ler arquivos para o modo flexível futuro)
+            # Por enquanto, para consertar o erro, passamos None
+            
+            if learner.learn_from_incident(incident, corrected_content, original_content):
                 stats['templates'] += 1
             
             # Remove o incidente
@@ -737,69 +756,6 @@ def _manage_incidents(findings, project_path):
         conn.close()
     
     return stats
-
-def _learn_template_from_incident(cursor, incident):
-    """
-    (Gênese V3) Aprende um template a partir de um incidente resolvido.
-    Chamado diretamente pelo check quando um incidente é resolvido.
-    """
-    from datetime import datetime, timezone
-    
-    message = incident.get('message', '')
-    category = incident.get('category', '')
-    
-    if not category:
-        if 'imported but unused' in message or 'redefinition of unused' in message:
-            category = 'DEADCODE'
-        elif 'undefined name' in message:
-            category = 'RUNTIME-RISK'
-        elif 'f-string' in message or 'assigned to but never used' in message:
-            category = 'STYLE'
-        else:
-            category = 'UNCATEGORIZED'
-    
-    problem_pattern = None
-    solution_template = None
-    
-    # Regras de abstração
-    if re.match(r"'(.+?)' imported but unused", message):
-        problem_pattern = "'<MODULE>' imported but unused"
-        solution_template = "REMOVE_LINE"
-    
-    elif re.match(r"redefinition of unused '(.+?)' from line \d+", message):
-        problem_pattern = "redefinition of unused '<VAR>' from line <LINE>"
-        solution_template = "REMOVE_LINE"
-    
-    elif message == "f-string is missing placeholders":
-        problem_pattern = "f-string is missing placeholders"
-        solution_template = "REMOVE_F_PREFIX"
-    
-    elif re.match(r"local variable '(.+?)' is assigned to but never used", message):
-        problem_pattern = "local variable '<VAR>' is assigned to but never used"
-        solution_template = "REPLACE_WITH_UNDERSCORE"
-    
-    elif re.match(r"undefined name '(.+?)'", message):
-        problem_pattern = "undefined name '<VAR>'"
-        solution_template = "ADD_IMPORT_OR_DEFINE"
-
-    if not problem_pattern:
-        return False
-
-    cursor.execute("SELECT id, confidence FROM solution_templates WHERE problem_pattern = ?", (problem_pattern,))
-    existing = cursor.fetchone()
-
-    if existing:
-        new_confidence = existing['confidence'] + 1
-        cursor.execute("UPDATE solution_templates SET confidence = ? WHERE id = ?", (new_confidence, existing['id']))
-        click.echo(Fore.CYAN + f"   > [GÊNESE] Template '{problem_pattern[:30]}...' → confiança {new_confidence}")
-    else:
-        cursor.execute(
-            "INSERT INTO solution_templates (problem_pattern, solution_template, category, created_at) VALUES (?, ?, ?, ?)",
-            (problem_pattern, solution_template, category, datetime.now(timezone.utc).isoformat())
-        )
-        click.echo(Fore.CYAN + f"   > [GÊNESE] Novo template: '{problem_pattern}' ({solution_template})")
-    
-    return True
 
 def _run_smart_fix(findings, project_path, logger):
     """
