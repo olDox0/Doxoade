@@ -815,6 +815,9 @@ def _run_smart_fix(findings, project_path, logger):
                     break
             
             if matched_template:
+                # Prepara o contexto para o Fixer
+                context['diff_pattern'] = matched_template['diff_pattern'] # <--- LINHA CRÍTICA
+                
                 # Aplica o fix
                 file_abs = os.path.join(project_path, finding['file'])
                 if fixer.apply_fix(file_abs, finding['line'], matched_template['solution_template'], context):

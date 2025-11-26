@@ -4,7 +4,7 @@ from pathlib import Path
 import click
 
 DB_FILE = Path.home() / '.doxoade' / 'doxoade.db'
-DB_VERSION = 13  # Incrementado para forçar re-verificação
+DB_VERSION = 14  # Incrementado para forçar re-verificação
 
 def get_db_connection():
     """Cria o diretório se necessário e retorna uma conexão com o banco de dados."""
@@ -172,6 +172,16 @@ def init_db():
                         created_at TEXT NOT NULL
                     );
                 """)
+
+        if current_version < 14:
+            click.echo("Atualizando esquema v14 (Gênese V8: Suporte a Aprendizado Flexível)...")
+            try:
+                # Adiciona coluna para o tipo de template (HARDCODED vs FLEXIBLE)
+                cursor.execute("ALTER TABLE solution_templates ADD COLUMN type TEXT DEFAULT 'HARDCODED';")
+                # Adiciona coluna para armazenar o padrão de diff (JSON ou texto formatado)
+                cursor.execute("ALTER TABLE solution_templates ADD COLUMN diff_pattern TEXT;")
+            except sqlite3.OperationalError:
+                pass # Colunas já existem
 
         cursor.execute("UPDATE schema_version SET version = ?;", (DB_VERSION,))
         conn.commit()

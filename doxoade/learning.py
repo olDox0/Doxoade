@@ -2,6 +2,7 @@
 import re
 import click
 import difflib
+#import json
 from datetime import datetime, timezone
 from colorama import Fore
 
@@ -59,79 +60,104 @@ class LearningEngine:
 
     def _learn_flexible_pattern(self, message, category, original, corrected, line_num):
         """
-        (Gênese V8) Tenta entender o que mudou no código e criar um padrão genérico.
+        (Gênese V8) Analisa a transformação e salva um template flexível.
         """
+        # 1. Abstrai a mensagem
+        abstract_msg = self._abstract_message_dynamic(message)
+        
         try:
             orig_lines = original.splitlines()
             corr_lines = corrected.splitlines()
             
-            if line_num > len(orig_lines): return False
-            
-            # Focamos na linha do erro
-#            bad_line = orig_lines[line_num - 1].strip()
-            
-            # Tenta achar a linha correspondente no arquivo corrigido
-            # Isso é difícil se a linha foi deletada ou movida.
-            # Vamos usar difflib para achar a mudança local
-            
+            # Usa difflib para achar o bloco exato que mudou
             matcher = difflib.SequenceMatcher(None, orig_lines, corr_lines)
+            
             for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-                # Estamos procurando a mudança que cobre a linha do erro
-                if i1 <= (line_num - 1) < i2:
-                    if tag == 'replace':
-                        # Substituição! Vamos analisar a transformação
-                        old_snippet = "\n".join(orig_lines[i1:i2])
-                        new_snippet = "\n".join(corr_lines[j1:j2])
-                        
-                        # Abstração Trivial: Generalizar Variáveis
-                        # Se a mensagem diz "NameError: name 'xyz' is not defined"
-                        # e o código mudou de 'foo(xyz)' para 'foo("xyz")'
-                        # Podemos tentar abstrair 'xyz' como <VAR>
-                        
-                        # Por enquanto, vamos salvar um padrão genérico baseado na mensagem
-                        # Ex: Transformar "ValueError: invalid literal for int() with base 10: ''"
-                        # em "ValueError: invalid literal for int() with base 10: '<VAL>'"
-                        
-                        abstract_msg = self._abstract_message(message)
-                        
-                        # Se conseguirmos abstrair a mensagem, salvamos o DIFF como template
-                        if abstract_msg != message:
-                            # TODO: Salvar o diff abstrato. 
-                            # Por hoje, apenas registramos que detectamos um padrão flexível
-                            print(Fore.MAGENTA + f"   > [GÊNESE V8] Padrão Flexível Detectado: {abstract_msg}")
-                            print(Fore.MAGENTA + f"     Transformação: {old_snippet.strip()} -> {new_snippet.strip()}")
-                            return True
+                # line_num é 1-based, indices são 0-based
+                error_idx = line_num - 1
+                
+                # CASO 1: DELEÇÃO (REMOVE_LINE)
+                # Se o erro estava numa linha que foi deletada
+                if tag == 'delete' and i1 <= error_idx < i2:
+                    print(Fore.MAGENTA + f"   > [GÊNESE V8] Padrão de Deleção Detectado: {abstract_msg}")
+                    return self._save_template(
+                        pattern=abstract_msg, 
+                        template='REMOVE_LINE', 
+                        category=category, 
+                        source="FLEXIBLE_DEL"
+                    )
+
+                # CASO 2: SUBSTITUIÇÃO (APPLY_DIFF)
+                # Se o erro estava numa linha que foi alterada
+                elif tag == 'replace' and i1 <= error_idx < i2:
+                    # Captura os blocos
+                    old_block = "\n".join(orig_lines[i1:i2])
+                    new_block = "\n".join(corr_lines[j1:j2])
                     
-                    elif tag == 'delete':
-                        # Se foi deletado, cai no REMOVE_LINE, que já cobrimos ou podemos reforçar
-                        pass
-                        
-        except Exception:
-            pass
+                    import json
+                    diff_data = json.dumps({
+                        'old': old_block,
+                        'new': new_block,
+                        'op': tag
+                    })
+                    
+                    print(Fore.MAGENTA + f"   > [GÊNESE V8] Padrão de Substituição Detectado: {abstract_msg}")
+                    return self._save_template(
+                        pattern=abstract_msg, 
+                        template='APPLY_DIFF', 
+                        category=category, 
+                        source="FLEXIBLE_DIFF",
+                        diff_pattern=diff_data
+                    )
+                
+                # CASO 3: INSERÇÃO (Complexo, deixamos para depois ou tratamos como DIFF sem old_block)
+                # O problema do insert é que não temos 'old_block' para o fixer procurar onde inserir.
+                # O fixer precisa de contexto. Por enquanto, ignoramos INSERT puro.
+
+        except Exception as e:
+            print(Fore.RED + f"[ERRO LEARNING] Falha ao analisar diff: {e}")
+            import traceback
+            print(traceback.format_exc())
+            
         return False
 
-    def _abstract_message(self, message):
-        """Substitui partes variáveis da mensagem por tokens."""
-        # Substitui strings entre aspas
-        msg = re.sub(r"'.*?'", "'<VAR>'", message)
-        # Substitui números
+    def _abstract_message_dynamic(self, message):
+        """Tenta tornar a mensagem genérica usando heurísticas."""
+        msg = message
+        # Strings entre aspas (ex: 'foo') -> '<STR>'
+        msg = re.sub(r"'.*?'", "'<STR>'", msg)
+        # Números -> '<NUM>'
         msg = re.sub(r"\b\d+\b", "<NUM>", msg)
         return msg
-
-    def _save_template(self, pattern, template, category, source):
+        
+    def _save_template(self, pattern, template, category, source, diff_pattern=None):
+        # Verifica se já existe
         self.cursor.execute("SELECT id, confidence FROM solution_templates WHERE problem_pattern = ?", (pattern,))
         existing = self.cursor.fetchone()
 
         if existing:
+            # ... (update confidence igual) ...
+            # Opcional: Atualizar o diff se ele for melhor? Por enquanto, só confiança.
             new_conf = existing['confidence'] + 1
             self.cursor.execute("UPDATE solution_templates SET confidence = ? WHERE id = ?", (new_conf, existing['id']))
             print(Fore.CYAN + f"   > [GÊNESE] Template '{pattern[:30]}...' reforçado (Conf: {new_conf})")
         else:
+            # INSERT CORRIGIDO
+            # Precisamos garantir que as colunas existam no DB (v14)
+            
+            # Define o tipo
+            tpl_type = "FLEXIBLE" if source.startswith("FLEXIBLE") else "HARDCODED"
+            
             self.cursor.execute(
-                "INSERT INTO solution_templates (problem_pattern, solution_template, category, created_at) VALUES (?, ?, ?, ?)",
-                (pattern, template, category, datetime.now(timezone.utc).isoformat())
+                """
+                INSERT INTO solution_templates 
+                (problem_pattern, solution_template, category, created_at, type, diff_pattern) 
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (pattern, template, category, datetime.now(timezone.utc).isoformat(), tpl_type, diff_pattern)
             )
             print(Fore.CYAN + f"   > [GÊNESE] Novo template ({source}): '{pattern}'")
+            
         return True
         
 def _learn_template_from_incident(cursor, incident):
