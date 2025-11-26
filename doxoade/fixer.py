@@ -1,6 +1,7 @@
 # doxoade/fixer.py
 import os
 import re
+import json
 #from colorama import Fore, Style
 
 class AutoFixer:
@@ -28,7 +29,36 @@ class AutoFixer:
             
             # --- LÓGICA DOS TEMPLATES ---
 
-            if solution_type == "REMOVE_LINE":
+            if solution_type == "APPLY_DIFF":
+                # Gênese V8: Aplicação de Diff Flexível
+                diff_json = context_data.get('diff_pattern')
+                if diff_json:
+                    try:
+                        diff_data = json.loads(diff_json)
+                        old_block = diff_data.get('old', '').strip()
+                        new_block = diff_data.get('new', '')
+                         
+                        # Validação de Segurança: O código no disco é igual ao esperado?
+                        current_line = lines[line_num - 1].strip()
+                         
+                        # Se a linha atual faz parte do bloco antigo, aplicamos
+                        if old_block and current_line in old_block:
+                            # Modo Seguro: Comenta o antigo e insere o novo
+                            indent_match = re.match(r"^(\s*)", lines[line_num - 1])
+                            indent = indent_match.group(1) if indent_match else ""
+                             
+                            # Comenta a linha original
+                            lines[line_num - 1] = f"{indent}# [DOX-FIX] {lines[line_num - 1].lstrip()}"
+                             
+                            # Insere as novas linhas
+                            for i, new_l in enumerate(new_block.splitlines()):
+                                lines.insert(line_num + i, f"{indent}{new_l}\n")
+                                 
+                            modified = True
+                    except json.JSONDecodeError:
+                        pass
+
+            elif solution_type == "REMOVE_LINE":
                 # Estratégia Segura: Comentar a linha mantendo a indentação
                 # Regex para capturar a indentação inicial
                 indent_match = re.match(r"^(\s*)", original_line)

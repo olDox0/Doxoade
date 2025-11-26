@@ -349,7 +349,10 @@ def _get_project_config(logger, start_path='.'):
     search_path = os.path.join(root_path, source_dir)
     config['search_path_valid'] = os.path.isdir(search_path)
     if not config['search_path_valid']:
-         logger.add_finding('CRITICAL', f"O diretório de código-fonte '{search_path}' não existe.", details="Verifique a diretiva 'source_dir' no seu pyproject.toml.")
+        if logger:
+            logger.add_finding('CRITICAL', f"O diretório de código-fonte '{search_path}' não existe.", details="Verifique a diretiva 'source_dir' no seu pyproject.toml.")
+        else:
+            pass
     config['root_path'] = root_path
     config['search_path'] = search_path
     return config
