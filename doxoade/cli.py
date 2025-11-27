@@ -44,6 +44,7 @@ from doxoade.commands.intelligence import intelligence
 from doxoade.commands.kvcheck import kvcheck
 from doxoade.commands.migrate_db import migrate_db
 from doxoade.commands.mirror  import mirror 
+from doxoade.commands.moddify import moddify
 from doxoade.commands.python import python
 from doxoade.commands.rebuild import rebuild
 from doxoade.commands.regression_test import regression_test
@@ -303,6 +304,7 @@ cli.add_command(kvcheck)
 cli.add_command(log)
 cli.add_command(migrate_db)
 cli.add_command(mirror)
+cli.add_command(moddify)
 cli.add_command(mk)
 cli.add_command(python)
 cli.add_command(rebuild)
