@@ -1,0 +1,18 @@
+{
+  "genesis": {
+    "title": "A Arquitetura Gênese",
+    "content": "Gênese é o motor cognitivo do Doxoade.\nV3 (Abdução): Infere imports faltantes.\nV4 (Antifragilidade): Analisa tracebacks de crash.\nV5 (Flow): Visualiza a execução em tempo real.\nV7 (Autofix): Corrige código de forma segura."
+  },
+  "qa": {
+    "title": "Controle de Qualidade Avançado",
+    "content": "Use comentários para controlar o Doxoade:\n# noqa: Silencia erros.\n# TODO: Cria um lembrete.\n# ADTI: Cria um erro crítico artificial."
+  },
+  "moddify": {
+    "title": "Moddify: Editor Cirúrgico",
+    "content": "Ferramenta para refatoração em lote via CLI.\n\nComandos:\n- add: Adiciona linhas.\n- remove: Remove por linha ou conteúdo.\n- replace: Substitui texto.\n- swap: Troca linha inteira.\n\nExemplo: doxoade moddify replace arq.py 'velho' 'novo'"
+  },
+  "hunter": {
+    "title": "Hunter Probe: Análise de Risco",
+    "content": "Sonda de análise semântica que detecta:\n- Segurança: Uso de eval(), exec().\n- Estabilidade: Argumentos mutáveis (def f(l=[])).\n- Robustez: Except genérico (try... except:)."
+  }
+}
