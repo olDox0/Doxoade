@@ -23,7 +23,7 @@ def safe_serialize(obj, depth=0):
     # Fallback genérico
     try:
         return str(obj)
-    except:
+    except Exception:
         return "<unserializable>"
 
 def run_debug(script_path):
@@ -43,7 +43,7 @@ def run_debug(script_path):
         globs = {'__name__': '__main__', '__file__': abs_path}
         with open(abs_path, 'rb') as f:
             code = compile(f.read(), abs_path, 'exec')
-            exec(code, globs)
+            exec(code, globs) # noqa
         
         # SUCESSO: Captura estado global final
         debug_data['status'] = 'success'
