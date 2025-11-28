@@ -2,13 +2,15 @@
 
 import traceback
 import toml
-import subprocess
-import os
+import time
 import sys
+import subprocess
 import re
+import os
 import click
 from functools import wraps
 from doxoade.database import init_db
+from datetime import datetime
 from colorama import init as colorama_init, Fore, Style
 
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -92,22 +94,47 @@ def cli(ctx):
 
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
+#    if ctx.invoked_subcommand:
+#        now = datetime.now().strftime("%H:%M:%S")
+        
+@cli.result_callback()
+def process_result(result, **kwargs):
+    # Aqui podemos logar o tempo total da sessão
+    pass
 
 def log_command_execution(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
         ctx = click.get_current_context()
         command_name = ctx.command.name
-        path = kwargs.get('path', '.')
-        results = {'summary': {'errors': 0, 'warnings': 0}}
+        
+        # --- TELEMETRIA INICIAL ---
+        start_time = time.perf_counter()
+        start_dt = datetime.now().strftime("%H:%M:%S")
+        click.echo(Fore.CYAN + Style.DIM + f"[{start_dt}] Iniciando '{command_name}'..." + Style.RESET_ALL)
+        
         try:
             return func(*args, **kwargs)
         except Exception:
             raise
         finally:
-            # Converte qualquer valor não-serializável para string
-            serializable_kwargs = {k: str(v) for k, v in kwargs.items()}
-            _log_execution(command_name, path, results, serializable_kwargs)
+            # --- TELEMETRIA FINAL ---
+            end_time = time.perf_counter()
+            duration = end_time - start_time
+            
+            # Cor baseada na performance
+            if duration < 0.5:
+                color = Fore.GREEN
+            elif duration < 2.0:
+                color = Fore.YELLOW
+            else:
+                color = Fore.RED
+                
+            click.echo(f"{color}{Style.DIM}[{command_name}] Concluído em {duration:.3f}s{Style.RESET_ALL}")
+            
+            # Aqui já existe a lógica de logar no DB via _log_execution
+            # Certifique-se de que o _log_execution está recebendo a duração correta em ms
+            # (O código atual já faz isso no shared_tools, mas aqui reforçamos o feedback visual)
     return wrapper
 
 # -----------------------------------------------------------------------------
