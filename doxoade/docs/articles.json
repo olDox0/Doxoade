@@ -1,18 +1,38 @@
 {
   "genesis": {
-    "title": "A Arquitetura Gênese",
-    "content": "Gênese é o motor cognitivo do Doxoade.\nV3 (Abdução): Infere imports faltantes.\nV4 (Antifragilidade): Analisa tracebacks de crash.\nV5 (Flow): Visualiza a execução em tempo real.\nV7 (Autofix): Corrige código de forma segura."
+    "title": "A Arquitetura Gênese (Motor Cognitivo)",
+    "content": "Gênese é a inteligência evolutiva do Doxoade.\n\nVersões:\n- V1 (Check): Análise estática básica.\n- V2 (Learning): Aprendizado de soluções baseadas em regex fixo.\n- V3 (Abdução): Inferência de imports faltantes (Ex: 'undefined name json' -> 'import json').\n- V4 (Antifragilidade): Mineração de traceback no 'run' para sugerir correções de runtime.\n- V5 (Flow): Visualização de execução em tempo real.\n- V7 (Autofix): Correção não-destrutiva (comenta código ruim).\n- V8 (Flexível): Aprendizado de padrões de diff genéricos.\n- V10 (Hunter): Análise semântica de riscos.\n- V11 (QA): Filtragem por comentários (# noqa, # TODO)."
+  },
+  "check": {
+    "title": "Comando Check: O Auditor",
+    "content": "O 'check' é o coração da análise estática. Ele roda em pipeline:\n1. Sonda de Sintaxe (Fast Fail).\n2. Sonda Estática (Pyflakes).\n3. Sonda Hunter (Riscos/Segurança).\n4. Abdução (Inferência de Imports).\n5. Gestão de Incidentes (DB).\n\nUse '--fix' para aplicar correções automáticas seguras."
+  },
+  "run": {
+    "title": "Comando Run: O Executor",
+    "content": "Executa scripts no ambiente virtual correto.\n\nModos:\n- Normal: 'doxoade run script.py' (Interativo, rápido).\n- Flow: 'doxoade run script.py --flow' (Visualizador Matrix, mostra variáveis e tempo linha a linha).\n- Internal: '--internal' (Para debugar comandos do próprio Doxoade).\n\nO modo Flow captura erros e aciona a Gênese V4 para diagnóstico."
+  },
+  "moddify": {
+    "title": "Moddify: Editor Cirúrgico CLI",
+    "content": "Ferramenta para refatoração em lote.\n\nComandos:\n- add: Inserir linhas (--line X).\n- remove: Remover linhas (--line X ou --content 'text').\n- replace: Substituir texto ('velho' 'novo').\n- swap: Trocar linha inteira.\n- show: Exibir trechos com filtro (--search).\n\nDica: Use '@@' no add para inserir múltiplas linhas."
   },
   "qa": {
     "title": "Controle de Qualidade Avançado",
-    "content": "Use comentários para controlar o Doxoade:\n# noqa: Silencia erros.\n# TODO: Cria um lembrete.\n# ADTI: Cria um erro crítico artificial."
-  },
-  "moddify": {
-    "title": "Moddify: Editor Cirúrgico",
-    "content": "Ferramenta para refatoração em lote via CLI.\n\nComandos:\n- add: Adiciona linhas.\n- remove: Remove por linha ou conteúdo.\n- replace: Substitui texto.\n- swap: Troca linha inteira.\n\nExemplo: doxoade moddify replace arq.py 'velho' 'novo'"
+    "content": "Use comentários para controlar o Doxoade:\n\nSilenciadores:\n  # noqa  -> Ignora erros nesta linha.\n\nLembretes Ativos (aparecem no relatório):\n  # TODO  -> Cria um aviso INFO.\n  # FIXME -> Cria um aviso WARNING.\n  # ADTI  -> (Always Display This Issue) Cria um CRITICAL.\n\nUse 'ckqa', 'vyqa' para suas próprias tags de revisão."
   },
   "hunter": {
     "title": "Hunter Probe: Análise de Risco",
-    "content": "Sonda de análise semântica que detecta:\n- Segurança: Uso de eval(), exec().\n- Estabilidade: Argumentos mutáveis (def f(l=[])).\n- Robustez: Except genérico (try... except:)."
+    "content": "Sonda semântica (AST) que detecta o que o linter ignora:\n- Segurança: Uso de eval(), exec().\n- Estabilidade: Argumentos padrão mutáveis (def f(l=[])).\n- Robustez: Except genérico (try... except:).\n- Estilo: Comparação com None (== None vs is None)."
+  },
+  "debug": {
+    "title": "Debug & Gen-Test",
+    "content": "Ferramentas de introspecção:\n- 'doxoade debug script.py': Roda o script e mostra o estado final das variáveis (ou o estado no momento do crash).\n- '--gen-test': Cria automaticamente um arquivo pytest ('test_script_gen.py') com asserts baseados no estado capturado."
+  },
+  "rewind": {
+    "title": "Rewind: Máquina do Tempo",
+    "content": "Reverte arquivos individualmente usando o Git, mas cria um backup automático (.bak) antes.\n\nUso:\n- 'doxoade rewind --list': Vê o histórico.\n- 'doxoade rewind arq.py -c <HASH>': Reverte para o commit especificado."
+  },
+  "portability": {
+    "title": "Portabilidade Universal",
+    "content": "O Doxoade foi projetado para rodar identicamente no Windows e no Linux (incluindo Android/Termux).\n\nPrincípios:\n- Lei da Unicidade: Entry point ('cli.py') nunca tem o mesmo nome do pacote.\n- Paridade de Instalação: Use sempre 'pip install -e .' para criar executáveis corretos.\n- Caminhos: Use sempre 'os.path.join' ou 'pathlib'."
   }
 }
