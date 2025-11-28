@@ -33,6 +33,113 @@ from ..shared_tools import (
     _update_open_incidents
 )
 
+
+# Lista de tags que silenciam erros
+SILENCERS = {
+    'noqa', 'numerator', 'ignore', 'skipline', 'asis', 'no-check', 
+    'suppress', 'disable', 'dtiw', 'igfi'
+}
+
+# Lista de tags que CRIAM avisos (Lembretes de QA)
+# Mapeia TAG -> Severidade
+QA_TAGS = {
+    'TODO': 'INFO',
+    'FIXME': 'WARNING',
+    'BUG': 'ERROR',
+    'HACK': 'WARNING',
+    'XXX': 'CRITICAL',
+    'CKQA': 'WARNING',      # Check Quality Assurance
+    'VYQA': 'INFO',         # Verify QA
+    'ADTI': 'CRITICAL',     # Always Display This Issue
+    'QA-CHECK': 'WARNING'   # Nome intuitivo universal
+}
+
+def _filter_and_inject_findings(findings, file_path):
+    """
+    (Gênese V11)
+    1. Filtra findings se a linha tiver diretivas de silêncio (# noqa).
+    2. Injeta novos findings se encontrar tags de QA (# TODO, # FIXME).
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            lines = f.readlines()
+    except IOError:
+        return findings
+
+    final_findings = []
+    
+    # 1. FILTRAGEM (Supressão)
+    for f in findings:
+        line_num = f.get('line')
+        if not line_num or line_num > len(lines):
+            final_findings.append(f)
+            continue
+            
+        line_content = lines[line_num - 1]
+        
+        # Verifica se tem silenciador
+        is_silenced = False
+        # Extrai comentários
+        if '#' in line_content:
+            comment = line_content.split('#', 1)[1].strip().upper()
+            
+            # Verifica silenciadores genéricos
+            for tag in SILENCERS:
+                if tag.upper() in comment:
+                    # Verifica se é específico (ex: noqa: SECURITY)
+                    if ':' in comment:
+                        # Formato: NOQA: E501, SECURITY
+                        directives = comment.split(':')[-1].replace(',', ' ').split()
+                        category = f.get('category', '').upper()
+                        # Se a categoria do erro estiver na lista, silencia
+                        # Se a lista tiver 'ALL' ou vazia, silencia tudo? 
+                        # Vamos simplificar: Se tiver 'TAG: CAT', só silencia se bater CAT.
+                        # Se só tiver 'TAG', silencia tudo.
+                        
+                        # Verifica se alguma diretiva bate com a categoria ou parte da mensagem
+                        matches_category = any(d in category for d in directives)
+                        matches_msg = any(d.lower() in f.get('message', '').lower() for d in directives)
+                        
+                        if matches_category or matches_msg:
+                            is_silenced = True
+                    else:
+                        # Silenciador global na linha
+                        is_silenced = True
+                    break
+        
+        if not is_silenced:
+            final_findings.append(f)
+
+    # 2. INJEÇÃO (QA Tags)
+    # Escaneia o arquivo inteiro uma vez
+    for i, line in enumerate(lines):
+        if '#' in line:
+            comment_part = line.split('#', 1)[1].strip()
+            # Verifica se começa com alguma tag conhecida
+            # Ex: # TODO: Refatorar isso
+            
+            # Pega a primeira palavra do comentário
+            first_word = comment_part.split(':')[0].split()[0].upper()
+            
+            # Remove pontuação comum (ex: TODO:)
+            first_word = first_word.rstrip(':')
+            
+            if first_word in QA_TAGS:
+                severity = QA_TAGS[first_word]
+                msg = comment_part[len(first_word):].strip().lstrip(':').strip()
+                if not msg: msg = "Lembrete de QA sem descrição."
+                
+                final_findings.append({
+                    'severity': severity,
+                    'category': 'QA-REMINDER',
+                    'message': f"[{first_word}] {msg}",
+                    'file': file_path,
+                    'line': i + 1,
+                    'snippet': _get_code_snippet(file_path, i + 1)
+                })
+
+    return final_findings
+
 def _get_probe_path(probe_name):
     """Encontra o caminho para um arquivo de sonda de forma segura."""
     try:
@@ -956,11 +1063,6 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
         if count > 0:
              click.echo(Fore.GREEN + f"   > Total de correções aplicadas: {count}")
              click.echo(Fore.YELLOW + "   > Recomendado rodar 'check' novamente para verificar.")
-#    if fix:
-#        click.echo(Fore.CYAN + "\nModo de correção (--fix) ativado...")
-#        fix_logger = ExecutionLogger('fix', path, {})
-#        for file_path in analysis_state['files_to_process']:
-#            _fix_unused_imports(file_path, fix_logger)
 
     # --- BLOCO DE FINALIZAÇÃO E ENRIQUECIMENTO (GÊNESE V2) ---
     
@@ -1004,6 +1106,33 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
         if incident_stats['templates'] > 0:
             parts.append(f"{incident_stats['templates']} template(s) criado(s)/reforçado(s)")
         click.echo(Fore.CYAN + f"   > [GÊNESE] {', '.join(parts)}")
+
+    # --- GÊNESE V11: FILTRAGEM E INJEÇÃO ---
+    # Agrupa por arquivo para processar
+    all_findings_filtered = []
+    
+    # Organiza findings por arquivo
+    findings_by_file = {}
+    for f in final_findings:
+        path = f.get('file')
+        if path not in findings_by_file: findings_by_file[path] = []
+        findings_by_file[path].append(f)
+        
+    # Processa cada arquivo (incluindo arquivos sem findings, para achar TODOs)
+    # Precisamos iterar sobre analysis_state['files_to_process']
+    
+    for file_path in analysis_state['files_to_process']:
+        rel_path = os.path.relpath(file_path, path) if os.path.isabs(file_path) else file_path
+        
+        current_file_findings = findings_by_file.get(rel_path, [])
+        
+        # Aplica o filtro e injeção
+        processed_findings = _filter_and_inject_findings(current_file_findings, file_path)
+        
+        all_findings_filtered.extend(processed_findings)
+        
+    # Substitui a lista final
+    final_findings = all_findings_filtered
 
     # 4. Passa os resultados para o logger
     with ExecutionLogger('check', path, {'fix': fix, 'debug': debug}) as logger:

@@ -136,7 +136,7 @@ print(json.dumps(results))
             for req_str in raw_deps:
                 try:
                     parsed_deps.append(Requirement(req_str).name.lower().replace('_', '-'))
-                except:
+                except Exception:
                     pass
             package_deps_map[pkg] = parsed_deps
         

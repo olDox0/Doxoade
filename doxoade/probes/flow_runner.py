@@ -84,7 +84,7 @@ class FlowTracer:
                 try: 
                     # Mudei o nome da variável aqui para bater com o uso abaixo
                     v_str = repr(val) 
-                except: 
+                except Exception:
                     v_str = "<obj>"
                 
                 if len(v_str) > 30: v_str = v_str[:27] + "..."
@@ -131,7 +131,7 @@ def run_flow(script_path):
                 '__name__': '__main__',
                 '__file__': abs_script_path,
             }
-            exec(code, globs)
+            exec(code, globs) # noqa
     except Exception as e:
         sys.settrace(None)
         print(Fore.RED + "-"*100)
