@@ -26,6 +26,9 @@ class ExecutionLogger:
             'findings': []
         }
 
+        self.start_dt = datetime.now().strftime("%H:%M:%S")
+        click.echo(Fore.CYAN + Style.DIM + f"[{self.start_dt}] Executando {command_name}..." + Style.RESET_ALL)
+
     def add_finding(self, severity, message, category='UNCATEGORIZED', file=None, line=None, details=None, snippet=None, suggestion_content=None, suggestion_line=None, finding_hash=None, import_suggestion=None, dependency_type=None, missing_import=None):
         """(Versão Final V3) Adiciona um 'finding' completo, incluindo dados de abdução."""
         severity = severity.upper()
@@ -74,6 +77,21 @@ class ExecutionLogger:
                 details=f"{exc_type.__name__}: {exc_val}",
             )
         _log_execution(self.command_name, self.path, self.results, self.arguments, execution_time_ms)
+
+        duration = time.monotonic() - self.start_time
+        color = Fore.GREEN if duration < 1.0 else (Fore.YELLOW if duration < 3.0 else Fore.RED)
+        click.echo(f"{color}{Style.DIM}[{self.command_name}] Tempo total: {duration:.3f}s{Style.RESET_ALL}")
+
+def _format_timestamp(iso_str):
+    """Converte ISO UTC para hora local legível."""
+    try:
+        dt_utc = datetime.fromisoformat(iso_str)
+        dt_local = dt_utc.astimezone() # Converte para o timezone do sistema
+        return dt_local.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return iso_str
+    except ValueError:
+        return iso_str
 
 def _find_project_root(start_path='.'):
     """
@@ -750,12 +768,3 @@ def _analyze_runtime_error(error_data):
         suggestion = "Erro de sintaxe. Verifique parênteses não fechados ou dois pontos ':' faltando."
 
     return suggestion
-    
-def _format_timestamp(iso_str):
-    """Converte ISO UTC para hora local legível."""
-    try:
-        dt_utc = datetime.fromisoformat(iso_str)
-        dt_local = dt_utc.astimezone() # Converte para o timezone do sistema
-        return dt_local.strftime("%Y-%m-%d %H:%M:%S")
-    except:
-        return iso_str
