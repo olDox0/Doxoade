@@ -122,6 +122,34 @@ def _run_pyflakes_probe(file_path, python_executable, debug=False):
         findings.append({'severity': 'CRITICAL', 'message': f"Falha catastrófica ao invocar a sonda Pyflakes: {e}", 'file': file_path})
     return findings
 
+def _run_hunter_probe(file_path, python_executable, debug=False):
+    """Executa a sonda de caça a riscos (Hunter Probe)."""
+    findings = []
+    probe_path = _get_probe_path('hunter_probe.py')
+    
+    cmd = [python_executable, probe_path, file_path]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+        
+        if debug and result.stderr:
+             click.echo(Fore.CYAN + f"[DEBUG-HUNTER] {result.stderr}")
+
+        if result.returncode == 0 and result.stdout.strip():
+            try:
+                raw_data = json.loads(result.stdout)
+                # Adiciona o nome do arquivo a cada finding
+                for item in raw_data:
+                    item['file'] = file_path
+                    findings.append(item)
+            except json.JSONDecodeError:
+                pass
+                
+    except Exception as e:
+        findings.append({'severity': 'ERROR', 'message': f"Falha no Hunter Probe: {e}", 'file': file_path, 'line': 1})
+        
+    return findings
+
 def _run_import_probe(all_imports, venv_python, logger, search_path):
     unique_module_names = sorted(list({imp['module'] for imp in all_imports}))
     if not unique_module_names: return []
@@ -887,6 +915,8 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
                 continue
 
             findings, imports = _analyze_single_file_statically(file_path, python_executable, debug)
+            hunter_findings = _run_hunter_probe(file_path, python_executable, debug)
+            findings.extend(hunter_findings)
             
             structure = {}
             if not fast:
