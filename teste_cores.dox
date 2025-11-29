@@ -1,0 +1,6 @@
+BATCH echo "Teste de Shell" -> SHELL_OUT
+BATCH dir -> DIRETORIO
+PRINT "Diretorio: {DIRETORIO}"
+PRINT-GREEN "Saída do Shell: {SHELL_OUT}"
+PRINT-RED "Isso é um erro simulado."
+PRINT-YELLOW "Atenção: Processo finalizado."

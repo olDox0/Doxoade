@@ -2,7 +2,7 @@
 import os, sys
 from click.testing import CliRunner
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from doxoade.doxoade import cli
+from doxoade.cli import cli
 
 def test_check_fix_comments_out_unused_import(runner: CliRunner, tmp_path, monkeypatch):
     """Valida se 'doxoade check --fix' comenta imports não utilizados."""
