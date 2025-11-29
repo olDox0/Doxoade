@@ -35,4 +35,12 @@
     "title": "Portabilidade Universal",
     "content": "O Doxoade foi projetado para rodar identicamente no Windows e no Linux (incluindo Android/Termux).\n\nPrincípios:\n- Lei da Unicidade: Entry point ('cli.py') nunca tem o mesmo nome do pacote.\n- Paridade de Instalação: Use sempre 'pip install -e .' para criar executáveis corretos.\n- Caminhos: Use sempre 'os.path.join' ou 'pathlib'."
   }
+  "incidents": {
+    "title": "Registro de Incidentes Notáveis",
+    "content": "Histórico de problemas complexos resolvidos:\n\n1. A Crise do Shadowing (22/11/2025):\n   - Problema: 'doxoade' não rodava no Linux/Termux.\n   - Causa: Arquivo 'doxoade.py' conflitava com pacote 'doxoade/'.\n   - Solução: Renomeado entry-point para 'cli.py'.\n\n2. O Apagão dos Testes (28/11/2025):\n   - Problema: 'doxoade health' falhou massivamente.\n   - Causa: Testes unitários não acompanharam a refatoração (imports antigos).\n   - Solução: Script de migração em massa para atualizar imports 'doxoade.doxoade' -> 'doxoade.cli'."
+  }
+  "maestro": {
+    "title": "Maestro: Orquestração Inteligente",
+    "content": "Linguagem de script para automação (.dox).\n\nComandos:\n- RUN cmd -> VAR: Executa comando Doxoade.\n- BATCH cmd -> VAR: Executa comando do Sistema (Shell).\n- PRINT[-RED/GREEN/YELLOW] 'msg': Exibe mensagem.\n- IF VAR CONTAINS 'text' ... ELSE ... END: Lógica condicional.\n- GREP 'text' IN VAR -> VAR: Filtra texto.\n- FIND '*.py' IN 'dir' -> VAR: Lista arquivos."
+  }
 }

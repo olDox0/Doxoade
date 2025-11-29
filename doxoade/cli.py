@@ -44,6 +44,7 @@ from doxoade.commands.init import init
 from doxoade.commands.install import install
 from doxoade.commands.intelligence import intelligence
 from doxoade.commands.kvcheck import kvcheck
+from doxoade.commands.maestro import maestro
 from doxoade.commands.migrate_db import migrate_db
 from doxoade.commands.mirror  import mirror 
 from doxoade.commands.moddify import moddify
@@ -330,6 +331,7 @@ cli.add_command(install)
 cli.add_command(intelligence)
 cli.add_command(kvcheck)
 cli.add_command(log)
+cli.add_command(maestro)
 cli.add_command(migrate_db)
 cli.add_command(mirror)
 cli.add_command(moddify)

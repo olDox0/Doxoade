@@ -4,7 +4,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 # Não precisa mais de sys.path.insert, o pytest lida com isso
-from doxoade.doxoade import cli
+from doxoade.cli import cli
 from doxoade.commands import check as check_module
 
 # --- FUNÇÃO HELPER ROBUSTA ---

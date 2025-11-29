@@ -5,7 +5,7 @@ import json
 from click.testing import CliRunner
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from doxoade.doxoade import cli
+from doxoade.cli import cli
 
 def test_canonize_all_creates_project_snapshot(tmp_path, monkeypatch):
     """

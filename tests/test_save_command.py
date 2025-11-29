@@ -8,7 +8,7 @@ from click.testing import CliRunner
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from unittest.mock import MagicMock
-from doxoade.doxoade import cli
+from doxoade.cli import cli
 
 def _get_commit_count(repo_path):
     """Função auxiliar para contar o número de commits em um repositório."""
