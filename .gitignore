@@ -28,6 +28,7 @@ config.json
 *.log
 *.txt
 *.bkp
+*.dox
 
 # Arquivos de Configuração de IDE
 .vscode/

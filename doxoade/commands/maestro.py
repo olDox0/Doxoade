@@ -9,7 +9,9 @@ from colorama import Fore, Style
 class MaestroInterpreter:
     def __init__(self):
         self.variables = {}
-        self.history = []
+        self.lines = []
+        self.ip = 0 # Instruction Pointer
+        self.loop_stack = [] # Para controlar FOR/WHILE aninhados
 
     def _resolve_vars(self, text):
         """Substitui {VAR} pelo valor da variável."""
@@ -23,23 +25,22 @@ class MaestroInterpreter:
             return
 
         with open(filepath, 'r', encoding='utf-8') as f:
-            lines = [l.strip() for l in f.readlines()]
+            self.lines = [l.strip() for l in f.readlines()]
+        
+        self.ip = 0
+        self.run()
 
-        self._execute_block(lines)
-
-    def _execute_block(self, lines):
-        i = 0
-        while i < len(lines):
-            line = lines[i]
-            i += 1
+    def run(self):
+        while self.ip < len(self.lines):
+            line = self.lines[self.ip]
+            self.ip += 1 # Avança IP
             
-            # Ignora comentários e linhas vazias
-            if not line or line.startswith('#'):
-                continue
+            if not line or line.startswith('#'): continue
 
+            # --- COMANDOS BÁSICOS ---
             if line.startswith('PRINT '):
                 msg = self._resolve_vars(line[6:].strip().strip('"'))
-                click.echo(Fore.MAGENTA + f"[MAESTRO] {msg}") # Padrão
+                click.echo(Fore.MAGENTA + f"[MAESTRO] {msg}")
             
             elif line.startswith('PRINT-RED '):
                 msg = self._resolve_vars(line[10:].strip().strip('"'))
@@ -52,115 +53,75 @@ class MaestroInterpreter:
             elif line.startswith('PRINT-YELLOW '):
                 msg = self._resolve_vars(line[13:].strip().strip('"'))
                 click.echo(Fore.YELLOW + Style.BRIGHT + f"[MAESTRO] {msg}")
+            
+            elif line.startswith('SET '):
+                # Sintaxe: SET var = valor
+                parts = line[4:].split('=')
+                var = parts[0].strip()
+                val = self._resolve_vars(parts[1].strip()).strip('"')
+                if val.isdigit(): val = int(val)
+                self.variables[var] = val
+
+            elif line.startswith('INC '):
+                var = line[4:].strip()
+                if var in self.variables and isinstance(self.variables[var], int):
+                    self.variables[var] += 1
+            
+            elif line.startswith('READ_LINES '):
+                # READ_LINES file -> VAR
+                parts = line[11:].split('->')
+                fname = self._resolve_vars(parts[0].strip())
+                var = parts[1].strip()
+                if os.path.exists(fname):
+                    with open(fname, 'r', encoding='utf-8', errors='ignore') as f:
+                        self.variables[var] = [l.strip() for l in f.readlines()]
+                else:
+                    self.variables[var] = []
 
             # --- COMANDO BATCH (Script Nativo) ---
-            # Executa diretamente no shell do sistema (cmd ou bash)
-            # Sintaxe: BATCH echo "oi" -> VAR
             elif line.startswith('BATCH '):
                 parts = line[6:].split('->')
                 cmd_str = parts[0].strip()
                 target_var = parts[1].strip() if len(parts) > 1 else None
                 
                 cmd_str = self._resolve_vars(cmd_str)
-                
                 click.echo(Fore.BLUE + f"   > [SHELL] {cmd_str}")
                 
                 try:
-                    # shell=True permite pipes e redirecionamentos nativos
                     result = subprocess.run(cmd_str, shell=True, capture_output=True, text=True, encoding='utf-8', errors='replace')
-                    
                     output = result.stdout + result.stderr
                     
-                    # Se não capturar, mostra na tela
                     if not target_var:
                         print(output, end='')
                     else:
                         self.variables[target_var] = output.strip()
-                        
                 except Exception as e:
                     click.echo(Fore.RED + f"[MAESTRO BATCH ERROR] {e}")
 
-            # Comando: RUN
+            # --- COMANDO RUN (Doxoade) ---
             elif line.startswith('RUN '):
                 parts = line[4:].split('->')
                 cmd_str = parts[0].strip()
                 target_var = parts[1].strip() if len(parts) > 1 else None
                 
                 cmd_str = self._resolve_vars(cmd_str)
-                
                 click.echo(Fore.CYAN + f"   > Executando: {cmd_str}")
                 
-                # Executa (capturando sempre para poder usar em variáveis)
                 try:
-                    # Usa shell=True para permitir pipes e comandos complexos se necessário
-                    # ou shlex para segurança. Vamos de shlex para consistência com o resto.
                     args = shlex.split(cmd_str)
                     result = subprocess.run(args, capture_output=True, text=True, encoding='utf-8', errors='replace')
-                    
                     output = result.stdout + result.stderr
                     
-                    # Mostra output se não for capturado, ou se tiver erro
                     if not target_var or result.returncode != 0:
                          click.echo(output)
 
                     if target_var:
                         self.variables[target_var] = output.strip()
-                        
                 except Exception as e:
                     click.echo(Fore.RED + f"[MAESTRO ERROR] Falha ao executar '{cmd_str}': {e}")
 
-            # Comando: IF
-            elif line.startswith('IF '):
-                # Sintaxe: IF VAR CONTAINS "TEXTO"
-                # Parsing simplificado
-                match = re.match(r'IF\s+(\w+)\s+CONTAINS\s+"(.*)"', line)
-                if match:
-                    var_name, search_text = match.groups()
-                    var_value = self.variables.get(var_name, "")
-                    condition = search_text in var_value
-                else:
-                    click.echo(Fore.RED + f"[MAESTRO SINTAXE] IF inválido: {line}")
-                    condition = False
-
-                # Encontra o bloco ELSE e END
-                block_content = []
-                else_content = []
-                nesting = 1
-                
-                # Escaneia para achar o escopo
-                has_else = False
-                while i < len(lines):
-                    inner_line = lines[i]
-                    i += 1
-                    
-                    if inner_line.startswith('IF '):
-                        nesting += 1
-                    elif inner_line == 'END':
-                        nesting -= 1
-                        if nesting == 0: break
-                    elif inner_line == 'ELSE' and nesting == 1:
-                        has_else = True
-                        continue # Pula a linha do ELSE e começa a gravar no else_content
-                    
-                    if has_else:
-                        else_content.append(inner_line)
-                    else:
-                        block_content.append(inner_line)
-
-                # Executa o bloco correto recursivamente
-                if condition:
-                    self._execute_block(block_content)
-                elif else_content:
-                    self._execute_block(else_content)
-
-            elif line == 'ELSE' or line == 'END':
-                # Se encontramos isso aqui fora do loop do IF, é erro de estrutura ou fim de fluxo
-                pass
-
-            # Comando: FIND (Glob)
-            # Sintaxe: FIND "*.py" [IN "path"] -> VAR
+            # --- COMANDOS DE ARQUIVO ---
             elif line.startswith('FIND '):
-                # Parse simplificado
                 parts = line[5:].split('->')
                 left = parts[0].strip()
                 target_var = parts[1].strip() if len(parts) > 1 else None
@@ -176,10 +137,8 @@ class MaestroInterpreter:
                 else:
                     pattern = pattern.strip().strip('"')
 
-                # Resolve variáveis no path/pattern
                 path = self._resolve_vars(path)
                 pattern = self._resolve_vars(pattern)
-
                 full_pattern = os.path.join(path, pattern)
                 files = glob.glob(full_pattern, recursive=True)
                 
@@ -189,8 +148,6 @@ class MaestroInterpreter:
                 
                 click.echo(Fore.CYAN + f"   > Encontrados {len(files)} arquivos.")
 
-            # Comando: GREP (Busca em texto)
-            # Sintaxe: GREP "texto" IN VAR -> VAR_RESULT
             elif line.startswith('GREP '):
                 parts = line[5:].split('->')
                 left = parts[0].strip()
@@ -207,7 +164,9 @@ class MaestroInterpreter:
                 term = self._resolve_vars(term)
                 content = self.variables.get(source_var, "")
                 
-                # Filtra linhas
+                if isinstance(content, list):
+                    content = "\n".join(content)
+                
                 found_lines = [l for l in content.splitlines() if term in l]
                 result_str = "\n".join(found_lines)
                 
@@ -216,7 +175,95 @@ class MaestroInterpreter:
                     
                 click.echo(Fore.CYAN + f"   > Grep encontrou {len(found_lines)} ocorrências.")
 
+            # --- CONTROLE DE FLUXO V3 ---
+            elif line.startswith('IF '):
+                # Pré-processa a linha para resolver variáveis {VAR} antes do regex
+                # Isso permite: IF line CONTAINS "{start_marker}"
+                line_resolved = self._resolve_vars(line)
+                
+                match = re.match(r'IF\s+(\w+)\s+(==|!=|CONTAINS)\s+"(.*)"', line_resolved)
+                
+                condition = False
+                if match:
+                    var_name, op, val_str = match.groups()
+                    # A var_name ainda é o nome da variável da esquerda
+                    var_val = str(self.variables.get(var_name, ""))
+                    
+                    if op == '==':
+                        condition = (var_val == val_str)
+                    elif op == '!=':
+                        condition = (var_val != val_str)
+                    elif op == 'CONTAINS':
+                        condition = (val_str in var_val)
+                else:
+                    # Tenta sintaxe simplificada booleana? Não, vamos manter estrito por enquanto
+                    click.echo(Fore.RED + f"[MAESTRO SINTAXE] IF inválido: {line}")
+                    condition = False
 
+                if not condition:
+                    self._skip_block()
+            
+            elif line == 'ELSE':
+                self._skip_block()
+
+            elif line.startswith('FOR '):
+                parts = line[4:].split(' IN ')
+                iter_var = parts[0].strip()
+                list_name = parts[1].strip()
+                
+                source_list = self.variables.get(list_name, [])
+                if not isinstance(source_list, list):
+                    # Tenta converter string multi-linha em lista
+                    if isinstance(source_list, str):
+                        source_list = source_list.splitlines()
+                    else:
+                        click.echo(f"[MAESTRO ERROR] {list_name} não é iterável.")
+                        self._skip_block()
+                        continue
+                
+                if not source_list:
+                    self._skip_block()
+                    continue
+
+                self.loop_stack.append({
+                    'type': 'FOR',
+                    'start_ip': self.ip,
+                    'var': iter_var,
+                    'items': source_list,
+                    'idx': 0
+                })
+                self.variables[iter_var] = source_list[0]
+
+            elif line == 'END':
+                if self.loop_stack:
+                    loop = self.loop_stack[-1]
+                    if loop['type'] == 'FOR':
+                        loop['idx'] += 1
+                        if loop['idx'] < len(loop['items']):
+                            self.variables[loop['var']] = loop['items'][loop['idx']]
+                            self.ip = loop['start_ip']
+                        else:
+                            self.loop_stack.pop()
+            
+            elif line == 'BREAK':
+                if self.loop_stack:
+                    self.loop_stack.pop()
+                    self._skip_block(break_loop=True)
+
+    def _skip_block(self, break_loop=False):
+        """Avança self.ip até o END/ELSE correspondente."""
+        nesting = 1
+        while self.ip < len(self.lines):
+            line = self.lines[self.ip]
+            self.ip += 1
+            
+            if line.startswith('IF ') or line.startswith('FOR ') or line.startswith('WHILE '):
+                nesting += 1
+            elif line == 'END':
+                nesting -= 1
+                if nesting == 0: return
+            elif line == 'ELSE' and nesting == 1 and not break_loop:
+                return
 
 # Templates Embutidos
 TEMPLATES = {
@@ -241,7 +288,6 @@ IF CHECK CONTAINS "SECURITY"
     PRINT "ABORTAR: Falhas de segurança detectadas (Hunter Probe)."
 ELSE
     PRINT "Segurança OK. Preparando release..."
-    # Aqui iria o comando de build/release
 END
 """
 }
@@ -254,14 +300,12 @@ def maestro(workflow_file, show_list, template_name):
     """
     Executa ou gerencia pipelines de automação (.dox).
     """
-    # Modo Listagem
     if show_list:
         click.echo(Fore.CYAN + "--- Templates Maestro Disponíveis ---")
         for name in TEMPLATES:
             click.echo(f" - {name}")
         return
 
-    # Modo Criação (Use)
     if template_name:
         content = TEMPLATES.get(template_name)
         if not content:
@@ -279,7 +323,6 @@ def maestro(workflow_file, show_list, template_name):
         click.echo("Execute com: doxoade maestro " + filename)
         return
 
-    # Modo Execução
     if not workflow_file:
         click.echo(Fore.RED + "Erro: Forneça um arquivo .dox ou use --list/--use.")
         return
