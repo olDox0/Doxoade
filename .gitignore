@@ -28,6 +28,7 @@ config.json
 *.log
 *.txt
 *.bkp
+*.bak
 *.dox
 
 # Arquivos de Configuração de IDE
