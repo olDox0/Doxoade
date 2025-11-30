@@ -34,13 +34,17 @@
   "portability": {
     "title": "Portabilidade Universal",
     "content": "O Doxoade foi projetado para rodar identicamente no Windows e no Linux (incluindo Android/Termux).\n\nPrincípios:\n- Lei da Unicidade: Entry point ('cli.py') nunca tem o mesmo nome do pacote.\n- Paridade de Instalação: Use sempre 'pip install -e .' para criar executáveis corretos.\n- Caminhos: Use sempre 'os.path.join' ou 'pathlib'."
-  }
+  },
   "incidents": {
     "title": "Registro de Incidentes Notáveis",
     "content": "Histórico de problemas complexos resolvidos:\n\n1. A Crise do Shadowing (22/11/2025):\n   - Problema: 'doxoade' não rodava no Linux/Termux.\n   - Causa: Arquivo 'doxoade.py' conflitava com pacote 'doxoade/'.\n   - Solução: Renomeado entry-point para 'cli.py'.\n\n2. O Apagão dos Testes (28/11/2025):\n   - Problema: 'doxoade health' falhou massivamente.\n   - Causa: Testes unitários não acompanharam a refatoração (imports antigos).\n   - Solução: Script de migração em massa para atualizar imports 'doxoade.doxoade' -> 'doxoade.cli'."
-  }
+  },
   "maestro": {
-    "title": "Maestro: Orquestração Inteligente",
-    "content": "Linguagem de script para automação (.dox).\n\nComandos:\n- RUN cmd -> VAR: Executa comando Doxoade.\n- BATCH cmd -> VAR: Executa comando do Sistema (Shell).\n- PRINT[-RED/GREEN/YELLOW] 'msg': Exibe mensagem.\n- IF VAR CONTAINS 'text' ... ELSE ... END: Lógica condicional.\n- GREP 'text' IN VAR -> VAR: Filtra texto.\n- FIND '*.py' IN 'dir' -> VAR: Lista arquivos."
+    "title": "Manual do Maestro: Orquestração e Automação Inteligente",
+    "content": "O Maestro é o interpretador de scripts de automação do Doxoade (.dox). Ele permite criar pipelines condicionais que reagem ao resultado dos comandos.\n\n=== COMANDOS DE EXECUÇÃO ===\n\n1. RUN <comando> [-> VAR]\n   Executa um comando Doxoade (no ambiente virtual).\n   Ex: RUN doxoade check . -> REPORT\n\n2. BATCH <comando> [-> VAR]\n   Executa um comando do sistema operacional (Shell).\n   Ex: BATCH echo 'Iniciando' -> LOG\n   Ex: BATCH dir /B\n\n=== COMANDOS DE SAÍDA (FEEDBACK) ===\n\n3. PRINT[-COLOR] \"mensagem\"\n   Exibe texto no console. Suporta variáveis {VAR}.\n   Cores: PRINT, PRINT-RED, PRINT-GREEN, PRINT-YELLOW.\n   Ex: PRINT-GREEN \"Sucesso no teste: {TEST_ID}\"\n\n=== COMANDOS DE LÓGICA ===\n\n4. IF <VAR> CONTAINS \"texto\"\n   ... ELSE ... END\n   Bloco condicional baseado em string.\n\n=== COMANDOS DE TEXTO E ARQUIVO ===\n\n5. GREP \"texto\" IN <VAR> -> <NOVA_VAR>\n   Filtra linhas que contêm o texto.\n\n6. FIND \"pattern\" IN \"path\" -> <VAR>\n   Busca arquivos recursivamente.\n   Ex: FIND \"*.py\" IN \"src/\" -> PY_FILES\n\n=== EXEMPLO COMPLETO (CI/CD LOCAL) ===\n\nPRINT-CYAN \"--- CI START ---\"\nRUN doxoade check . --no-cache -> CHECK_OUT\n\nIF CHECK_OUT CONTAINS \"CRITICAL\"\n    PRINT-RED \"Falha crítica detectada!\"\n    GREP \"CRITICAL\" IN CHECK_OUT -> ERROS\n    PRINT \"{ERROS}\"\n    BATCH exit 1\nELSE\n    PRINT-GREEN \"Código aprovado.\"\n    RUN doxoade health\nEND\n"
+  },
+  "maestro_adv": {
+    "title": "Maestro Avançado: Scripting Lógico (V3)",
+    "content": "O Maestro V3 transforma o Doxoade em uma linguagem de script completa (Turing-complete) para automação complexa.\n\n=== VARIÁVEIS E MATEMÁTICA ===\n- SET var = \"valor\": Define uma variável.\n- SET copia = \"{original}\": Atribui valor de outra variável (USE CHAVES!).\n- INC var: Incrementa uma variável numérica em 1.\n\n=== MANIPULAÇÃO DE ARQUIVOS ===\n- READ_LINES arquivo.txt -> VAR_LISTA: Lê um arquivo para a memória linha por linha.\n\n=== CONTROLE DE FLUXO: LOOPS ===\nFOR linha IN VAR_LISTA\n    PRINT \"Processando: {linha}\"\n    BREAK  (Opcional: para sair do loop)\nEND\n\n=== CONTROLE DE FLUXO: CONDICIONAIS ===\nSuporta operadores: ==, !=, CONTAINS.\n\nIF \"{status}\" == \"erro\"\n    PRINT-RED \"Falha detectada!\"\nELSE\n    IF line CONTAINS \"Sucesso\"\n        PRINT-GREEN \"OK\"\n    END\nEND\n\n=== EXEMPLO: RASTREIO DE LOG ===\nSET found = \"no\"\nREAD_LINES log.txt -> CONTENT\nFOR line IN CONTENT\n    IF line CONTAINS \"CRITICAL\"\n        SET found = \"yes\"\n        BREAK\n    END\nEND\n\nIF \"{found}\" == \"yes\"\n    BATCH echo \"Alerta enviado!\"\nEND"
   }
 }
