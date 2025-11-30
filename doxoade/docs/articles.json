@@ -1,50 +1,67 @@
 {
   "genesis": {
     "title": "A Arquitetura Gênese (Motor Cognitivo)",
-    "content": "Gênese é a inteligência evolutiva do Doxoade.\n\nVersões:\n- V1 (Check): Análise estática básica.\n- V2 (Learning): Aprendizado de soluções baseadas em regex fixo.\n- V3 (Abdução): Inferência de imports faltantes (Ex: 'undefined name json' -> 'import json').\n- V4 (Antifragilidade): Mineração de traceback no 'run' para sugerir correções de runtime.\n- V5 (Flow): Visualização de execução em tempo real.\n- V7 (Autofix): Correção não-destrutiva (comenta código ruim).\n- V8 (Flexível): Aprendizado de padrões de diff genéricos.\n- V10 (Hunter): Análise semântica de riscos.\n- V11 (QA): Filtragem por comentários (# noqa, # TODO)."
+    "date": "2025-11-29",
+    "content": "Gênese é a inteligência evolutiva do Doxoade.\n\nVersões:\n- V1 (Check): Análise estática básica.\n- V2 (Learning): Aprendizado de soluções baseadas em regex fixo.\n- V3 (Abdução): Inferência de imports faltantes (Ex: 'undefined name json' -> 'import json').\n- V4 (Antifragilidade): Mineração de traceback no 'run' para sugerir correções de runtime.\n- V5 (Flow): Visualização de execução em tempo real.\n- V7 (Autofix): Correção não-destrutiva (comenta código ruim).\n- V8 (Flexível): Aprendizado de padrões de diff genéricos.\n- V10 (Hunter): Análise semântica de riscos.\n- V11 (QA): Filtragem por comentários (# noqa, # TODO).\n- V14 (Maestro Fast): Primitivas nativas para manipulação de arquivos em alta performance."
   },
   "check": {
     "title": "Comando Check: O Auditor",
+    "date": "2025-11-29",
     "content": "O 'check' é o coração da análise estática. Ele roda em pipeline:\n1. Sonda de Sintaxe (Fast Fail).\n2. Sonda Estática (Pyflakes).\n3. Sonda Hunter (Riscos/Segurança).\n4. Abdução (Inferência de Imports).\n5. Gestão de Incidentes (DB).\n\nUse '--fix' para aplicar correções automáticas seguras."
   },
   "run": {
     "title": "Comando Run: O Executor",
+    "date": "2025-11-29",
     "content": "Executa scripts no ambiente virtual correto.\n\nModos:\n- Normal: 'doxoade run script.py' (Interativo, rápido).\n- Flow: 'doxoade run script.py --flow' (Visualizador Matrix, mostra variáveis e tempo linha a linha).\n- Internal: '--internal' (Para debugar comandos do próprio Doxoade).\n\nO modo Flow captura erros e aciona a Gênese V4 para diagnóstico."
   },
   "moddify": {
     "title": "Moddify: Editor Cirúrgico CLI",
+    "date": "2025-11-29",
     "content": "Ferramenta para refatoração em lote.\n\nComandos:\n- add: Inserir linhas (--line X).\n- remove: Remover linhas (--line X ou --content 'text').\n- replace: Substituir texto ('velho' 'novo').\n- swap: Trocar linha inteira.\n- show: Exibir trechos com filtro (--search).\n\nDica: Use '@@' no add para inserir múltiplas linhas."
   },
   "qa": {
     "title": "Controle de Qualidade Avançado",
+    "date": "2025-11-29",
     "content": "Use comentários para controlar o Doxoade:\n\nSilenciadores:\n  # noqa  -> Ignora erros nesta linha.\n\nLembretes Ativos (aparecem no relatório):\n  # TODO  -> Cria um aviso INFO.\n  # FIXME -> Cria um aviso WARNING.\n  # ADTI  -> (Always Display This Issue) Cria um CRITICAL.\n\nUse 'ckqa', 'vyqa' para suas próprias tags de revisão."
   },
   "hunter": {
     "title": "Hunter Probe: Análise de Risco",
+    "date": "2025-11-29",
     "content": "Sonda semântica (AST) que detecta o que o linter ignora:\n- Segurança: Uso de eval(), exec().\n- Estabilidade: Argumentos padrão mutáveis (def f(l=[])).\n- Robustez: Except genérico (try... except:).\n- Estilo: Comparação com None (== None vs is None)."
   },
   "debug": {
     "title": "Debug & Gen-Test",
+    "date": "2025-11-29",
     "content": "Ferramentas de introspecção:\n- 'doxoade debug script.py': Roda o script e mostra o estado final das variáveis (ou o estado no momento do crash).\n- '--gen-test': Cria automaticamente um arquivo pytest ('test_script_gen.py') com asserts baseados no estado capturado."
   },
   "rewind": {
     "title": "Rewind: Máquina do Tempo",
+    "date": "2025-11-29",
     "content": "Reverte arquivos individualmente usando o Git, mas cria um backup automático (.bak) antes.\n\nUso:\n- 'doxoade rewind --list': Vê o histórico.\n- 'doxoade rewind arq.py -c <HASH>': Reverte para o commit especificado."
   },
   "portability": {
     "title": "Portabilidade Universal",
+    "date": "2025-11-29",
     "content": "O Doxoade foi projetado para rodar identicamente no Windows e no Linux (incluindo Android/Termux).\n\nPrincípios:\n- Lei da Unicidade: Entry point ('cli.py') nunca tem o mesmo nome do pacote.\n- Paridade de Instalação: Use sempre 'pip install -e .' para criar executáveis corretos.\n- Caminhos: Use sempre 'os.path.join' ou 'pathlib'."
   },
   "incidents": {
     "title": "Registro de Incidentes Notáveis",
+    "date": "2025-11-29",
     "content": "Histórico de problemas complexos resolvidos:\n\n1. A Crise do Shadowing (22/11/2025):\n   - Problema: 'doxoade' não rodava no Linux/Termux.\n   - Causa: Arquivo 'doxoade.py' conflitava com pacote 'doxoade/'.\n   - Solução: Renomeado entry-point para 'cli.py'.\n\n2. O Apagão dos Testes (28/11/2025):\n   - Problema: 'doxoade health' falhou massivamente.\n   - Causa: Testes unitários não acompanharam a refatoração (imports antigos).\n   - Solução: Script de migração em massa para atualizar imports 'doxoade.doxoade' -> 'doxoade.cli'."
   },
   "maestro": {
-    "title": "Manual do Maestro: Orquestração e Automação Inteligente",
-    "content": "O Maestro é o interpretador de scripts de automação do Doxoade (.dox). Ele permite criar pipelines condicionais que reagem ao resultado dos comandos.\n\n=== COMANDOS DE EXECUÇÃO ===\n\n1. RUN <comando> [-> VAR]\n   Executa um comando Doxoade (no ambiente virtual).\n   Ex: RUN doxoade check . -> REPORT\n\n2. BATCH <comando> [-> VAR]\n   Executa um comando do sistema operacional (Shell).\n   Ex: BATCH echo 'Iniciando' -> LOG\n   Ex: BATCH dir /B\n\n=== COMANDOS DE SAÍDA (FEEDBACK) ===\n\n3. PRINT[-COLOR] \"mensagem\"\n   Exibe texto no console. Suporta variáveis {VAR}.\n   Cores: PRINT, PRINT-RED, PRINT-GREEN, PRINT-YELLOW.\n   Ex: PRINT-GREEN \"Sucesso no teste: {TEST_ID}\"\n\n=== COMANDOS DE LÓGICA ===\n\n4. IF <VAR> CONTAINS \"texto\"\n   ... ELSE ... END\n   Bloco condicional baseado em string.\n\n=== COMANDOS DE TEXTO E ARQUIVO ===\n\n5. GREP \"texto\" IN <VAR> -> <NOVA_VAR>\n   Filtra linhas que contêm o texto.\n\n6. FIND \"pattern\" IN \"path\" -> <VAR>\n   Busca arquivos recursivamente.\n   Ex: FIND \"*.py\" IN \"src/\" -> PY_FILES\n\n=== EXEMPLO COMPLETO (CI/CD LOCAL) ===\n\nPRINT-CYAN \"--- CI START ---\"\nRUN doxoade check . --no-cache -> CHECK_OUT\n\nIF CHECK_OUT CONTAINS \"CRITICAL\"\n    PRINT-RED \"Falha crítica detectada!\"\n    GREP \"CRITICAL\" IN CHECK_OUT -> ERROS\n    PRINT \"{ERROS}\"\n    BATCH exit 1\nELSE\n    PRINT-GREEN \"Código aprovado.\"\n    RUN doxoade health\nEND\n"
+    "title": "Manual do Maestro: Orquestração",
+    "date": "2025-11-29",
+    "content": "O Maestro é o interpretador de scripts de automação do Doxoade (.dox). Ele permite criar pipelines condicionais que reagem ao resultado dos comandos.\n\n=== COMANDOS DE EXECUÇÃO ===\n\n1. RUN <comando> [-> VAR]\n   Executa um comando Doxoade (no ambiente virtual).\n   Ex: RUN doxoade check . -> REPORT\n\n2. BATCH <comando> [-> VAR]\n   Executa um comando do sistema operacional (Shell).\n   Ex: BATCH echo 'Iniciando' -> LOG\n\n=== COMANDOS DE LÓGICA ===\n\n3. IF <VAR> CONTAINS \"texto\"\n   ... ELSE ... END\n   Bloco condicional baseado em string.\n\n=== COMANDOS DE TEXTO ===\n\n4. GREP \"texto\" IN <VAR> -> <NOVA_VAR>\n   Filtra linhas que contêm o texto.\n\n5. FIND \"pattern\" IN \"path\" -> <VAR>\n   Busca arquivos recursivamente.\n"
   },
   "maestro_adv": {
     "title": "Maestro Avançado: Scripting Lógico (V3)",
-    "content": "O Maestro V3 transforma o Doxoade em uma linguagem de script completa (Turing-complete) para automação complexa.\n\n=== VARIÁVEIS E MATEMÁTICA ===\n- SET var = \"valor\": Define uma variável.\n- SET copia = \"{original}\": Atribui valor de outra variável (USE CHAVES!).\n- INC var: Incrementa uma variável numérica em 1.\n\n=== MANIPULAÇÃO DE ARQUIVOS ===\n- READ_LINES arquivo.txt -> VAR_LISTA: Lê um arquivo para a memória linha por linha.\n\n=== CONTROLE DE FLUXO: LOOPS ===\nFOR linha IN VAR_LISTA\n    PRINT \"Processando: {linha}\"\n    BREAK  (Opcional: para sair do loop)\nEND\n\n=== CONTROLE DE FLUXO: CONDICIONAIS ===\nSuporta operadores: ==, !=, CONTAINS.\n\nIF \"{status}\" == \"erro\"\n    PRINT-RED \"Falha detectada!\"\nELSE\n    IF line CONTAINS \"Sucesso\"\n        PRINT-GREEN \"OK\"\n    END\nEND\n\n=== EXEMPLO: RASTREIO DE LOG ===\nSET found = \"no\"\nREAD_LINES log.txt -> CONTENT\nFOR line IN CONTENT\n    IF line CONTAINS \"CRITICAL\"\n        SET found = \"yes\"\n        BREAK\n    END\nEND\n\nIF \"{found}\" == \"yes\"\n    BATCH echo \"Alerta enviado!\"\nEND"
+    "date": "2025-11-29",
+    "content": "O Maestro V3 transforma o Doxoade em uma linguagem de script completa (Turing-complete).\n\n=== VARIÁVEIS E MATEMÁTICA ===\n- SET var = \"valor\": Define uma variável.\n- SET copia = \"{original}\": Atribui valor de outra variável (USE CHAVES!).\n- INC var: Incrementa uma variável numérica em 1.\n\n=== CONTROLE DE FLUXO ===\nFOR linha IN VAR_LISTA\n    PRINT \"Processando: {linha}\"\n    BREAK\nEND\n\nIF \"{status}\" == \"erro\"\n    PRINT-RED \"Falha detectada!\"\nEND"
+  },
+  "maestro_perf": {
+    "title": "Maestro: Performance Nativa (Gênese V14)",
+    "date": "2025-11-30",
+    "content": "Introduzido na Gênese V14 para resolver gargalos de performance ao processar arquivos grandes sem usar loops explícitos.\n\n=== PROBLEMA ===\nLoops FOR line IN LIST em arquivos com 10k+ linhas eram lentos devido à interpretação linha a linha.\n\n=== SOLUÇÃO NATIVA ===\nNovos comandos que executam a lógica em baixo nível (Python nativo/C), reduzindo o tempo de execução de segundos para milissegundos.\n\n1. FIND_LINE_NUMBER \"texto\" IN arquivo -> VAR\n   Retorna o índice da linha onde o texto ocorre pela primeira vez (ou -1 se não achar).\n   Ex: FIND_LINE_NUMBER \".pytest_cache\" IN arvore.txt -> LINHA_ALVO\n\n2. DELETE_BLOCK_TREE AT {LINHA} IN arquivo\n   Remove a linha alvo e, inteligentemente, todas as linhas seguintes que possuem indentação maior (filhos na árvore).\n   Ex: DELETE_BLOCK_TREE AT {LINHA_ALVO} IN arvore.txt\n\n=== QUANDO USAR ===\nUse estes comandos sempre que precisar manipular arquivos grandes de texto ou árvores de diretórios (como a saída do comando tree)."
   }
 }
