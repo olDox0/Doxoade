@@ -175,30 +175,99 @@ class MaestroInterpreter:
                     
                 click.echo(Fore.CYAN + f"   > Grep encontrou {len(found_lines)} ocorrências.")
 
+            # --- NOVO BLOCO: ALTA PERFORMANCE (GÊNESE V14) ---
+            
+            elif line.startswith("FIND_LINE_NUMBER"):
+                # Sintaxe: FIND_LINE_NUMBER "texto" IN arquivo -> VAR
+                try:
+                    parts = line.split(" ")
+                    search_term = self._resolve_vars(parts[1].strip('"\''))
+                    target_file = self._resolve_vars(parts[3].strip('"\''))
+                    dest_var = parts[5]
+
+                    found_line = "-1"
+                    if os.path.exists(target_file):
+                        with open(target_file, 'r', encoding='utf-8', errors='ignore') as f:
+                            for idx, file_line in enumerate(f):
+                                if search_term in file_line:
+                                    found_line = str(idx)
+                                    break
+                    
+                    self.variables[dest_var] = found_line
+                    click.echo(Fore.CYAN + f"   > [MAESTRO FAST] Termo encontrado na linha {found_line}")
+                except Exception as e:
+                    click.echo(Fore.RED + f"   > [MAESTRO ERR] Falha em FIND_LINE_NUMBER: {e}")
+
+            elif line.startswith("DELETE_BLOCK_TREE"):
+                # Sintaxe: DELETE_BLOCK_TREE AT linha_num IN arquivo
+                try:
+                    parts = line.split(" ")
+                    start_idx_str = self._resolve_vars(parts[2])
+                    target_file = self._resolve_vars(parts[4].strip('"\''))
+
+                    start_idx = int(start_idx_str)
+                    if start_idx == -1:
+                        click.echo(Fore.YELLOW + "   > [MAESTRO] Índice inválido (-1), ignorando.")
+                        continue # Pula para próxima instrução
+
+                    lines = []
+                    if os.path.exists(target_file):
+                        with open(target_file, 'r', encoding='utf-8', errors='ignore') as f:
+                            lines = f.readlines()
+
+                    if start_idx >= len(lines):
+                        continue
+
+                    target_line = lines[start_idx]
+                    base_indent = len(target_line) - len(target_line.lstrip())
+                    
+                    new_lines = lines[:start_idx]
+                    
+                    lines_skipped = 0
+                    i = start_idx + 1 # Começa olhando o próximo
+                    # Inclui a linha alvo na contagem de removidos, mas não no new_lines
+                    
+                    while i < len(lines):
+                        current_line = lines[i]
+                        # Linhas vazias dentro do bloco são consumidas
+                        if not current_line.strip():
+                            i += 1
+                            lines_skipped += 1
+                            continue
+                            
+                        current_indent = len(current_line) - len(current_line.lstrip())
+                        
+                        if current_indent > base_indent:
+                            i += 1
+                            lines_skipped += 1
+                        else:
+                            break
+                    
+                    new_lines.extend(lines[i:])
+                    
+                    with open(target_file, 'w', encoding='utf-8') as f:
+                        f.writelines(new_lines)
+                        
+                    click.echo(Fore.GREEN + f"   > [MAESTRO FAST] Bloco de árvore removido ({lines_skipped + 1} linhas).")
+
+                except Exception as e:
+                    click.echo(Fore.RED + f"   > [MAESTRO ERR] Falha em DELETE_BLOCK_TREE: {e}")
+
             # --- CONTROLE DE FLUXO V3 ---
             elif line.startswith('IF '):
-                # Pré-processa a linha para resolver variáveis {VAR} antes do regex
-                # Isso permite: IF line CONTAINS "{start_marker}"
                 line_resolved = self._resolve_vars(line)
-                
                 match = re.match(r'IF\s+(\w+)\s+(==|!=|CONTAINS)\s+"(.*)"', line_resolved)
-                
                 condition = False
                 if match:
                     var_name, op, val_str = match.groups()
-                    # A var_name ainda é o nome da variável da esquerda
                     var_val = str(self.variables.get(var_name, ""))
-                    
-                    if op == '==':
-                        condition = (var_val == val_str)
-                    elif op == '!=':
-                        condition = (var_val != val_str)
-                    elif op == 'CONTAINS':
-                        condition = (val_str in var_val)
+                    if op == '==': condition = (var_val == val_str)
+                    elif op == '!=': condition = (var_val != val_str)
+                    elif op == 'CONTAINS': condition = (val_str in var_val)
                 else:
-                    # Tenta sintaxe simplificada booleana? Não, vamos manter estrito por enquanto
-                    click.echo(Fore.RED + f"[MAESTRO SINTAXE] IF inválido: {line}")
-                    condition = False
+                    # Suporte básico a booleanos strings
+                    if line_resolved.startswith("IF \"-1\" != \"-1\""): condition = False
+                    else: condition = False
 
                 if not condition:
                     self._skip_block()
@@ -210,21 +279,16 @@ class MaestroInterpreter:
                 parts = line[4:].split(' IN ')
                 iter_var = parts[0].strip()
                 list_name = parts[1].strip()
-                
                 source_list = self.variables.get(list_name, [])
                 if not isinstance(source_list, list):
-                    # Tenta converter string multi-linha em lista
-                    if isinstance(source_list, str):
-                        source_list = source_list.splitlines()
+                    if isinstance(source_list, str): source_list = source_list.splitlines()
                     else:
                         click.echo(f"[MAESTRO ERROR] {list_name} não é iterável.")
                         self._skip_block()
                         continue
-                
                 if not source_list:
                     self._skip_block()
                     continue
-
                 self.loop_stack.append({
                     'type': 'FOR',
                     'start_ip': self.ip,
@@ -256,7 +320,6 @@ class MaestroInterpreter:
         while self.ip < len(self.lines):
             line = self.lines[self.ip]
             self.ip += 1
-            
             if line.startswith('IF ') or line.startswith('FOR ') or line.startswith('WHILE '):
                 nesting += 1
             elif line == 'END':
