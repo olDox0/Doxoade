@@ -6,8 +6,8 @@
   },
   "check": {
     "title": "Comando Check: O Auditor",
-    "date": "2025-11-29",
-    "content": "O 'check' é o coração da análise estática. Ele roda em pipeline:\n1. Sonda de Sintaxe (Fast Fail).\n2. Sonda Estática (Pyflakes).\n3. Sonda Hunter (Riscos/Segurança).\n4. Abdução (Inferência de Imports).\n5. Gestão de Incidentes (DB).\n\nUse '--fix' para aplicar correções automáticas seguras."
+    "date": "2025-11-30",
+    "content": "O 'check' é o coração da análise estática. Ele roda em pipeline:\n1. Sonda de Sintaxe (Fast Fail).\n2. Sonda Estática (Pyflakes).\n3. Sonda Hunter (Riscos/Segurança).\n4. Abdução (Inferência de Imports).\n5. Sonda de Clonagem (Detecta funções duplicadas).\n6. Gestão de Incidentes (DB).\n\nUse '--fix' para aplicar correções automáticas seguras."
   },
   "run": {
     "title": "Comando Run: O Executor",
