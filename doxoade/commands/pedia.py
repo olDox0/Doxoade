@@ -57,7 +57,7 @@ def _search_git_history(term):
             hash_val, msg = line.split(' ', 1)
             results.append((f"git:{hash_val}", msg))
         return results
-    except:
+    except Exception:
         return []
 
 @click.group('pedia')
@@ -193,7 +193,7 @@ def search_comments(term):
                             # Exibe o resultado
                             click.echo(f"{Fore.BLUE}{rel_path}:{i+1} {Fore.WHITE}{line.strip()}")
                             count += 1
-            except: pass
+            except Exception: pass
 
     if count == 0:
         click.echo(Fore.YELLOW + "Nenhum comentário encontrado.")
