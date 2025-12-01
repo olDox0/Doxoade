@@ -2,12 +2,17 @@
   "genesis": {
     "title": "A Arquitetura Gênese (Motor Cognitivo)",
     "date": "2025-11-29",
-    "content": "Gênese é a inteligência evolutiva do Doxoade.\n\nVersões:\n- V1 (Check): Análise estática básica.\n- V2 (Learning): Aprendizado de soluções baseadas em regex fixo.\n- V3 (Abdução): Inferência de imports faltantes (Ex: 'undefined name json' -> 'import json').\n- V4 (Antifragilidade): Mineração de traceback no 'run' para sugerir correções de runtime.\n- V5 (Flow): Visualização de execução em tempo real.\n- V7 (Autofix): Correção não-destrutiva (comenta código ruim).\n- V8 (Flexível): Aprendizado de padrões de diff genéricos.\n- V10 (Hunter): Análise semântica de riscos.\n- V11 (QA): Filtragem por comentários (# noqa, # TODO).\n- V14 (Maestro Fast): Primitivas nativas para manipulação de arquivos em alta performance."
+    "content": "Gênese é a inteligência evolutiva do Doxoade.\n\nVersões:\n- V1 (Check): Análise estática básica.\n- V2 (Learning): Aprendizado de soluções baseadas em regex fixo.\n- V3 (Abdução): Inferência de imports faltantes.\n- V4 (Antifragilidade): Mineração de traceback no 'run'.\n- V5 (Flow): Visualização de execução em tempo real.\n- V7 (Autofix): Correção não-destrutiva.\n- V8 (Flexível): Aprendizado de padrões de diff genéricos.\n- V10 (Hunter): Análise semântica de riscos.\n- V14 (Maestro Fast): Primitivas nativas de performance.\n- V14 (DRY Probe): Detecção de clones estruturais (código duplicado) ignorando nomes de variáveis."
+  },
+  "dry_check": {
+    "title": "Detecção de Clones (DRY)",
+    "date": "2025-12-01",
+    "content": "Ferramenta para garantir o princípio 'Don't Repeat Yourself' (Não se Repita).\n\n=== COMO FUNCIONA ===\nO Doxoade analisa a Árvore Sintática (AST) do seu código, remove comentários, docstrings e normaliza nomes de variáveis (ex: 'x' e 'y' viram 'arg_0').\n\nSe duas funções tiverem a mesma lógica estrutural, mesmo com nomes diferentes, elas são marcadas como duplicatas.\n\n=== USO ===\nExecute: 'doxoade check . --clones'\n\n=== QUANDO REFATORAR ===\n- Duplicação no mesmo arquivo: Tente parametrizar a função.\n- Duplicação em arquivos diferentes: Mova a lógica para 'shared_tools.py' ou uma classe base comum."
   },
   "check": {
     "title": "Comando Check: O Auditor",
     "date": "2025-11-29",
-    "content": "O 'check' é o coração da análise estática. Ele roda em pipeline:\n1. Sonda de Sintaxe (Fast Fail).\n2. Sonda Estática (Pyflakes).\n3. Sonda Hunter (Riscos/Segurança).\n4. Abdução (Inferência de Imports).\n5. Gestão de Incidentes (DB).\n\nUse '--fix' para aplicar correções automáticas seguras."
+    "content": "O 'check' é o coração da análise estática. Ele roda em pipeline:\n1. Sonda de Sintaxe (Fast Fail).\n2. Sonda Estática (Pyflakes).\n3. Sonda Hunter (Riscos/Segurança).\n4. Sonda DRY (Detecção de Clones - opcional com --clones).\n5. Abdução (Inferência de Imports).\n6. Gestão de Incidentes (DB).\n\nUse '--fix' para aplicar correções automáticas seguras."
   },
   "run": {
     "title": "Comando Run: O Executor",
