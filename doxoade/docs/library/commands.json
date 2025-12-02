@@ -48,5 +48,10 @@
     "title": "Protocolo Lázaro (Anti-Crash & Forense)",
     "date": "2025-12-02",
     "content": "Sistema de recuperação de falhas catastróficas. Se o núcleo do Doxoade quebrar, o Lázaro intercepta o crash e executa uma 'Análise Forense', comparando a linha defeituosa com a versão estável do Git (Smart Context). Oferece reversão automática ou edição de emergência."
+  },
+  "verilog": {
+    "title": "Comando Verilog: Diagnóstico de Hardware",
+    "date": "2025-12-02",
+    "content": "Sonda especializada para projetos de hardware (OC8BS).\n\nFuncionalidades:\n- Varre arquivos .v e .sv.\n- Verifica sintaxe usando 'iverilog -g2012' (SystemVerilog).\n- Reporta erros de compilação no formato Doxoade.\n\nUso:\n  doxoade verilog .          (Verifica todos individualmente)\n  doxoade verilog -e top.v   (Verifica a partir de um módulo topo)"
   }
 }

@@ -60,6 +60,7 @@ from doxoade.commands.tutorial import tutorial_group
 from doxoade.commands.style import style
 from doxoade.commands.utils import log, show_trace, mk, create_pipeline, setup_regression
 from doxoade.commands.venv_up import venv_up
+from doxoade.commands.verilog import verilog
 from doxoade.commands.webcheck import webcheck
 
 from doxoade.shared_tools import (
@@ -352,6 +353,7 @@ cli.add_command(style)
 cli.add_command(sync)
 cli.add_command(tutorial_group)
 cli.add_command(venv_up)
+cli.add_command(verilog)
 cli.add_command(webcheck)
 
 if __name__ == '__main__':

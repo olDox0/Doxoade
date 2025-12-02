@@ -40,7 +40,7 @@ def analyze_crash(traceback_text):
                 try:
                     line_part = line.split('line ')[1].split(',')[0]
                     crash_info['line'] = int(line_part)
-                except: pass
+                except Exception: pass
             break
             
     return crash_info
@@ -97,7 +97,7 @@ def activate_protocol(error_text):
                     print(f"[ATUAL/ERRO]  : {bad_line}")
                 else:
                     print(f"[ATUAL/ERRO]  : (Linha {info['line']} não acessível)")
-        except: pass
+        except Exception: pass
 
         # 2. Pega versão estável do Git
         git_context = get_git_context(info['file'], info['line'])

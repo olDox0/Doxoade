@@ -37,7 +37,7 @@ def load_articles():
         try:
             with open(LEGACY_FILE, 'r', encoding='utf-8') as f:
                 articles.update(json.load(f))
-        except: pass
+        except Exception: pass
 
     # 2. Carrega Internals (Markdown)
     # Mapeia nome do arquivo (sem extensão) para um artigo
@@ -93,7 +93,7 @@ def _search_git_history(term):
             hash_val, msg = line.split(' ', 1)
             results.append((f"git:{hash_val}", msg))
         return results
-    except:
+    except Exception:
         return []
 
 @click.group('pedia')
@@ -235,6 +235,6 @@ def search_comments(term):
                                 rel = os.path.relpath(file_path, project_root)
                                 click.echo(f"{Fore.BLUE}{rel}:{i+1} {Fore.WHITE}{line.strip()}")
                                 count += 1
-            except: pass
+            except Exception: pass
     
     if count == 0: click.echo(Fore.YELLOW + "Nenhum comentário encontrado.")
