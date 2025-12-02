@@ -1,9 +1,4 @@
 {
-  "genesis": {
-    "title": "A Arquitetura Gênese (Motor Cognitivo)",
-    "date": "2025-11-29",
-    "content": "Gênese é a inteligência evolutiva do Doxoade.\n\nVersões:\n- V1 (Check): Análise estática básica.\n- V2 (Learning): Aprendizado de soluções baseadas em regex fixo.\n- V3 (Abdução): Inferência de imports faltantes.\n- V4 (Antifragilidade): Mineração de traceback no 'run'.\n- V5 (Flow): Visualização de execução em tempo real.\n- V7 (Autofix): Correção não-destrutiva.\n- V8 (Flexível): Aprendizado de padrões de diff genéricos.\n- V10 (Hunter): Análise semântica de riscos.\n- V14 (Maestro Fast): Primitivas nativas de performance.\n- V14 (DRY Probe): Detecção de clones estruturais."
-  },
   "check": {
     "title": "Comando Check: O Auditor",
     "date": "2025-11-29",
@@ -18,11 +13,6 @@
     "title": "Moddify: Editor Cirúrgico CLI",
     "date": "2025-11-29",
     "content": "Ferramenta para refatoração em lote.\n\nComandos:\n- add: Inserir linhas.\n- remove: Remover linhas.\n- replace: Substituir texto.\n- swap: Trocar linha inteira.\n- show: Exibir trechos com filtro."
-  },
-  "qa": {
-    "title": "Controle de Qualidade Avançado",
-    "date": "2025-11-29",
-    "content": "Use comentários para controlar o Doxoade:\n\nSilenciadores:\n  # noqa  -> Ignora erros nesta linha.\n\nLembretes Ativos:\n  # TODO  -> Aviso INFO.\n  # FIXME -> Aviso WARNING.\n  # ADTI  -> Aviso CRITICAL."
   },
   "hunter": {
     "title": "Hunter Probe: Análise de Risco",
@@ -39,39 +29,19 @@
     "date": "2025-11-29",
     "content": "Reverte arquivos individualmente usando o Git, mas cria um backup automático (.bak) antes."
   },
-  "portability": {
-    "title": "Portabilidade Universal",
-    "date": "2025-11-29",
-    "content": "O Doxoade foi projetado para rodar identicamente no Windows e no Linux (incluindo Android/Termux)."
-  },
-  "incidents": {
-    "title": "Registro de Incidentes Notáveis",
-    "date": "2025-11-29",
-    "content": "Histórico de problemas complexos resolvidos:\n1. A Crise do Shadowing (22/11/2025)\n2. O Apagão dos Testes (28/11/2025)"
-  },
   "maestro": {
     "title": "Manual do Maestro: Orquestração",
     "date": "2025-11-29",
     "content": "O Maestro é o interpretador de scripts de automação do Doxoade (.dox).\n\nComandos:\n- RUN <cmd>\n- BATCH <cmd>\n- IF <var> CONTAINS \"txt\" ... END"
-  },
-  "maestro_adv": {
-    "title": "Maestro Avançado: Scripting Lógico (V3)",
-    "date": "2025-11-29",
-    "content": "O Maestro V3 transforma o Doxoade em uma linguagem de script completa (Turing-complete)."
   },
   "maestro_perf": {
     "title": "Maestro: Performance Nativa (Gênese V14)",
     "date": "2025-11-30",
     "content": "Comandos de alta performance para arquivos grandes:\n- FIND_LINE_NUMBER\n- DELETE_BLOCK_TREE"
   },
-  "dry_check": {
-    "title": "Detecção de Clones (DRY)",
+  "style": {
+    "title": "Comando Style: Arquiteto Automatizado",
     "date": "2025-12-01",
-    "content": "Ferramenta para garantir o princípio 'Don't Repeat Yourself'. Detecta lógica duplicada mesmo com variáveis renomeadas."
-  },
-  "mpot": {
-    "title": "Modern Power of Ten (Padrões de Robustez)",
-    "date": "2025-11-26",
-    "content": "Regras de engenharia inspiradas na NASA/JPL para código crítico, adaptadas para Python moderno.\n\n1. Fluxo Simples: Evite recursão sem limites.\n4. Coesão: Funções devem ter ~60 linhas.\n5. Contratos: Use 'assert' para programação defensiva.\n6. Escopo: Evite 'global'."
+    "content": "Analisa o código contra os princípios 'Modern Power of Ten'.\nUse '--comment' para verificar apenas falta de documentação."
   }
 }
