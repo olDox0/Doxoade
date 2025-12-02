@@ -1,0 +1,12 @@
+{
+  "qa": {
+    "title": "Controle de Qualidade Avançado",
+    "date": "2025-11-29",
+    "content": "Use comentários para controlar o Doxoade:\n\nSilenciadores:\n  # noqa  -> Ignora erros nesta linha.\n\nLembretes Ativos:\n  # TODO  -> Aviso INFO.\n  # FIXME -> Aviso WARNING.\n  # ADTI  -> Aviso CRITICAL."
+  },
+  "incidents": {
+    "title": "Registro de Incidentes Notáveis",
+    "date": "2025-11-29",
+    "content": "Histórico de problemas complexos resolvidos:\n1. A Crise do Shadowing (22/11/2025)\n2. O Apagão dos Testes (28/11/2025)"
+  }
+}
