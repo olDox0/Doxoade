@@ -43,5 +43,10 @@
     "title": "Comando Style: Arquiteto Automatizado",
     "date": "2025-12-01",
     "content": "Analisa o código contra os princípios 'Modern Power of Ten'.\nUse '--comment' para verificar apenas falta de documentação."
+  },
+  "lazarus": {
+    "title": "Protocolo Lázaro (Anti-Crash)",
+    "date": "2025-12-02",
+    "content": "Sistema de recuperação de falhas catastróficas. Se o núcleo do Doxoade quebrar (ex: erro de sintaxe no próprio código), o Lázaro intercepta o crash e oferece um menu de emergência para reverter o arquivo via Git ou editá-lo manualmente, impedindo o deadlock da ferramenta."
   }
 }
