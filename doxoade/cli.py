@@ -58,6 +58,7 @@ from doxoade.commands.save import save
 from doxoade.commands.self_test import self_test
 from doxoade.commands.tutorial import tutorial_group
 from doxoade.commands.style import style
+from doxoade.commands.test import test
 from doxoade.commands.utils import log, show_trace, mk, create_pipeline, setup_regression
 from doxoade.commands.venv_up import venv_up
 from doxoade.commands.verilog import verilog
@@ -351,6 +352,7 @@ cli.add_command(setup_regression)
 cli.add_command(show_trace)
 cli.add_command(style)
 cli.add_command(sync)
+cli.add_command(test)
 cli.add_command(tutorial_group)
 cli.add_command(venv_up)
 cli.add_command(verilog)

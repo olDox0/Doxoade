@@ -53,5 +53,10 @@
     "title": "Comando Verilog: Diagnóstico de Hardware",
     "date": "2025-12-02",
     "content": "Sonda especializada para projetos de hardware (OC8BS).\n\nFuncionalidades:\n- Varre arquivos .v e .sv.\n- Verifica sintaxe usando 'iverilog -g2012' (SystemVerilog).\n- Reporta erros de compilação no formato Doxoade.\n\nUso:\n  doxoade verilog .          (Verifica todos individualmente)\n  doxoade verilog -e top.v   (Verifica a partir de um módulo topo)"
+  },
+  "test": {
+    "title": "Comando Test: Suite Unitária Unificada",
+    "date": "2025-12-02",
+    "content": "Wrapper integrado para o Pytest.\nExecuta testes unitários e registra resultados na memória do sistema (Gênese).\nUso:\n  doxoade test          (Roda tudo)\n  doxoade test -v       (Verbose)\n  doxoade test --watch  (Modo sentinela)"
   }
 }
