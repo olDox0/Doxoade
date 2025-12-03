@@ -22,7 +22,8 @@ dependencies = [
     "radon",
     "setuptools",
     "stdlib_list",
-    "toml"
+    "toml",
+	"rich"
 ]
 
 [build-system]

@@ -47,6 +47,7 @@ from doxoade.commands.kvcheck import kvcheck
 from doxoade.commands.maestro import maestro
 from doxoade.commands.migrate_db import migrate_db
 from doxoade.commands.mirror  import mirror 
+from doxoade.commands.mobile_ide import ide
 from doxoade.commands.moddify import moddify
 from doxoade.commands.pedia import pedia
 from doxoade.commands.python import python
@@ -328,6 +329,7 @@ cli.add_command(global_health)
 cli.add_command(guicheck)
 cli.add_command(health)
 cli.add_command(history)
+cli.add_command(ide)
 cli.add_command(impact_analysis)
 cli.add_command(init)
 cli.add_command(install)
