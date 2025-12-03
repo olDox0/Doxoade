@@ -1,182 +1,214 @@
 # doxoade/commands/run.py
+"""
+Módulo executor do Doxoade.
+Responsável por rodar scripts Python dentro do ambiente virtual gerenciado,
+com suporte a instrumentação (Flow), execução interna e captura de falhas para o Gênese.
+"""
 import click
 import subprocess
 import sys
 import os
-# [DOX-UNUSED] import glob 
-from colorama import Fore, Style
-from datetime import datetime, timezone
+#import shlex
+from colorama import Fore
+from ..shared_tools import (
+    #ExecutionLogger, 
+    _get_venv_python_executable, 
+    _mine_traceback, 
+    _analyze_runtime_error
+)
 from ..database import get_db_connection
-from ..shared_tools import _get_venv_python_executable, _mine_traceback, _analyze_runtime_error
+from datetime import datetime, timezone
 
 def _register_runtime_incident(error_data):
     """
-    (Gênese V9) Registra um erro de execução como incidente aberto para aprendizado futuro.
+    (Gênese V9) Registra um erro de runtime no banco de dados para aprendizado futuro.
+    
+    Args:
+        error_data (dict): Dicionário contendo 'message', 'file', 'line', etc.
     """
+    if not error_data: return
+
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         
         # Gera um hash único para o erro
         import hashlib
-        unique_str = f"{error_data['file']}:{error_data['line']}:{error_data['message']}"
-        finding_hash = hashlib.md5(unique_str.encode('utf-8', 'ignore')).hexdigest()
+        unique_str = f"{error_data.get('file')}:{error_data.get('line')}:{error_data.get('message')}"
+        f_hash = hashlib.md5(unique_str.encode('utf-8')).hexdigest()
         
-        # Normaliza caminho
-        project_path = os.getcwd()
-        file_path = os.path.relpath(error_data['file'], project_path).replace('\\', '/')
+        # Define categoria baseada no tipo de erro
+        category = "RUNTIME-CRASH"
         
-        # Define categoria (Runtime é sempre risco)
-        category = 'RUNTIME-ERROR'
-        
-        # Insere no banco
         cursor.execute("""
             INSERT OR REPLACE INTO open_incidents 
             (finding_hash, file_path, line, message, category, commit_hash, timestamp, project_path)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            finding_hash,
-            file_path,
-            error_data['line'],
-            f"{error_data['error_type']}: {error_data['message']}",
+            f_hash,
+            error_data.get('file'),
+            error_data.get('line', 0),
+            error_data.get('message'),
             category,
-            "runtime", # Não atrelado a commit específico
+            "runtime", # Não associado a commit específico
             datetime.now(timezone.utc).isoformat(),
-            project_path
+            os.getcwd()
         ))
-        
         conn.commit()
         conn.close()
-        return True
-    except Exception:
-        # Falha silenciosa para não atrapalhar a UX do erro
-        return False
+    except Exception as e:
+        click.echo(Fore.RED + f"[GÊNESE ERROR] Falha ao registrar incidente: {e}")
 
 def _get_flow_probe_path():
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base_dir, 'probes', 'flow_runner.py')
+    """Retorna o caminho absoluto para a sonda 'flow_runner.py'."""
+    # [MPoT-5] Contrato: O arquivo deve existir.
+    from importlib import resources
+    try:
+        with resources.path('doxoade.probes', 'flow_runner.py') as p:
+            path = str(p)
+    except (ImportError, AttributeError):
+        # Fallback para sistemas antigos
+        path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'probes', 'flow_runner.py')
+    
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Sonda Flow não encontrada em: {path}")
+    return path
 
-def _get_wrapper_path():
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base_dir, 'probes', 'command_wrapper.py')
-
-def _smart_find_script(script_name, root_path='.'):
-    """Procura um script Python recursivamente se não estiver na raiz."""
+def _smart_find_script(script_name):
+    """
+    Tenta localizar o script alvo, permitindo omissão de extensão .py.
+    
+    Args:
+        script_name (str): Nome ou caminho do script.
+    
+    Returns:
+        str: Caminho resolvido ou o original se não encontrado.
+    """
     if os.path.exists(script_name):
         return script_name
-        
-    click.echo(Fore.YELLOW + f"   > '{script_name}' não encontrado na raiz. Buscando no projeto...")
     
-    matches = []
-    for root, dirs, files in os.walk(root_path):
-        dirs[:] = [d for d in dirs if d not in ('venv', '.git', '__pycache__', 'node_modules', '.doxoade_cache')]
-        if script_name in files:
-            matches.append(os.path.join(root, script_name))
+    if not script_name.endswith('.py'):
+        potential = script_name + ".py"
+        if os.path.exists(potential):
+            return potential
             
-    if not matches:
-        return None
+    # [MPoT-5] Contrato implícito: Retorna o original para o subprocesso falhar ruidosamente depois
+    return script_name
+
+def _build_execution_command(script_path, python_exe, flow=False, args=None):
+    """
+    Constrói a lista de argumentos para o subprocesso.
+    Separa a lógica de montagem da lógica de execução (facilita teste unitário).
+    """
+    cmd = [python_exe]
     
-    if len(matches) == 1:
-        click.echo(Fore.GREEN + f"   > Encontrado em: {matches[0]}")
-        return matches[0]
-    else:
-        matches.sort(key=len)
-        chosen = matches[0]
-        click.echo(Fore.YELLOW + f"   > Múltiplos arquivos encontrados. Usando: {chosen}")
-        return chosen
+    if flow:
+        # Modo Matrix: Injeta o flow_runner antes do script
+        probe = _get_flow_probe_path()
+        cmd.append(probe)
+        
+    cmd.append(script_path)
+    
+    if args:
+        cmd.extend(args)
+        
+    return cmd
 
 @click.command('run')
 @click.argument('script', required=False)
 @click.argument('args', nargs=-1)
-@click.option('--flow', is_flag=True, help="Ativa o modo Flow (Rastreamento visual).")
-@click.option('--internal', is_flag=True, help="Executa comando interno do Doxoade.")
+@click.option('--flow', is_flag=True, help="Ativa visualização de execução (Matrix Mode).")
+@click.option('--internal', is_flag=True, help="Executa comandos internos do Doxoade (Self-Debug).")
 @click.pass_context
 def run(ctx, script, args, flow, internal):
-    """Executa um script Python ou comando interno."""
+    """
+    Executa um script Python ou comando interno no ambiente controlado.
     
-    venv_python = _get_venv_python_executable()
-    if not venv_python:
-        click.echo(Fore.RED + "[ERRO] Ambiente virtual não encontrado.")
-        sys.exit(1)
+    Exemplos:
+        doxoade run main.py
+        doxoade run main --flow
+        doxoade run check . --internal
+    """
+    # 1. Configuração do Ambiente
+    python_exe = _get_venv_python_executable()
+    if not python_exe:
+        # Fallback para o python do sistema se não houver venv, mas avisa
+        python_exe = sys.executable
+        if not internal:
+            click.echo(Fore.YELLOW + "[AVISO] 'venv' não detectado. Usando Python do sistema.")
 
-    # --- CONFIGURAÇÃO DO COMANDO ---
+    # 2. Resolução do Alvo
     if internal:
-        if not flow:
-            click.echo(Fore.YELLOW + "[AVISO] --internal geralmente é usado com --flow. Ativando Flow.")
-            flow = True
-        wrapper_path = _get_wrapper_path()
-        probe_path = _get_flow_probe_path()
-        command = [venv_python, probe_path, wrapper_path, script] + list(args)
-        click.echo(Fore.MAGENTA + Style.BRIGHT + f"--- [META-FLOW] Analisando comando interno: {script} ---")
+        # Modo interno: roda o próprio doxoade como módulo
+#        target_script = "-m"
+        target_args = ["doxoade", script] + list(args) if script else ["doxoade"] + list(args)
         
+        # Ajuste para chamar o módulo
+        cmd = [python_exe] + target_args
+        display_name = f"doxoade (internal) {' '.join(target_args)}"
+    
     else:
+        # Modo Script de Usuário
         if not script:
-            subprocess.run([venv_python]); return
+            click.echo(Fore.RED + "Erro: Argumento SCRIPT necessário (ou use --internal).")
+            return
 
-        real_script_path = _smart_find_script(script)
-        if not real_script_path:
-            click.echo(Fore.RED + f"[ERRO] O arquivo '{script}' não foi encontrado neste projeto.")
-            sys.exit(1)
+        resolved_script = _smart_find_script(script)
+        if not os.path.exists(resolved_script):
+            click.echo(Fore.RED + f"Erro: Arquivo '{resolved_script}' não encontrado.")
+            return
 
-        if flow:
-            probe_path = _get_flow_probe_path()
-            if not os.path.exists(probe_path):
-                 click.echo(Fore.RED + "[ERRO INTERNO] Sonda Flow não encontrada.")
-                 sys.exit(1)
-            command = [venv_python, probe_path, real_script_path] + list(args)
-            click.echo(Fore.MAGENTA + Style.BRIGHT + "--- [ATIVANDO MODO FLOW] ---")
-        else:
-            command = [venv_python, real_script_path] + list(args)
-            click.echo(Fore.CYAN + f"--- [RUN] Executando: {real_script_path} ---")
+        cmd = _build_execution_command(resolved_script, python_exe, flow, list(args))
+        display_name = resolved_script
 
-    # --- EXECUÇÃO BLINDADA ---
+    # 3. Execução
+    click.echo(Fore.CYAN + f"--- [RUN] Executando: {display_name} ---")
+    
     try:
+        # Usamos capture_output=True se precisarmos analisar o erro (Antifragilidade)
+        # Mas para interatividade (input/output em tempo real), normalmente não capturamos.
+        # Dilema: Se capturarmos, perdemos interatividade. Se não capturarmos, perdemos o erro para o Gênese.
+        # Solução V9: Em modo normal, deixamos fluir. Se quebrar, o usuário vê no terminal.
+        # Se for FLOW, capturamos para análise.
+        
         if flow:
-            # MODO FLOW: Captura output para não quebrar layout e permitir análise
-            process = subprocess.run(
-                command, 
-                capture_output=True,
-                text=True, 
-                encoding='utf-8', 
-                errors='replace'
-            )
-            
-            # Mostra o que foi capturado
-            if process.stdout: click.echo(process.stdout, nl=False)
-            if process.stderr: click.echo(Fore.RED + process.stderr, nl=False)
-
-            # Análise de Falha (Gênese V4) só funciona se capturamos stderr
-            if process.returncode != 0:
-                click.echo(Style.BRIGHT + Fore.YELLOW + "\n\n--- [ANÁLISE DE FALHA (Gênese V4)] ---")
-                error_data = _mine_traceback(process.stderr)
-                
-                if error_data:
-                    click.echo(Fore.RED + f"Erro Detectado: {error_data['error_type']}")
-                    click.echo(Fore.WHITE + f"   > Arquivo: {os.path.basename(error_data['file'])} (Linha {error_data['line']})")
-                    click.echo(Fore.WHITE + f"   > Mensagem: {error_data['message']}")
-                    
-                    if error_data.get('code') and error_data['code'] != 'N/A':
-                        click.echo(Fore.YELLOW + f"   > {error_data['code']}")
-                    
-                    suggestion = _analyze_runtime_error(error_data)
-                    if suggestion:
-                        click.echo(Fore.GREEN + Style.BRIGHT + "\n[SUGESTÃO AUTOMÁTICA]")
-                        click.echo(Fore.GREEN + f"   {suggestion}")
-                        
-                    if _register_runtime_incident(error_data):
-                        click.echo(Fore.CYAN + Style.DIM + "   > [GÊNESE] Incidente registrado para aprendizado.")
-                else:
-                    click.echo(Fore.YELLOW + "   > Não foi possível estruturar o traceback.")
-                sys.exit(process.returncode)
-
+            # Modo Flow captura tudo para processar
+            result = subprocess.run(cmd, text=True, capture_output=True, encoding='utf-8', errors='replace')
+            print(result.stdout) # Imprime o output do flow
+            print(result.stderr, file=sys.stderr)
+            return_code = result.returncode
+            stderr_content = result.stderr
         else:
-            # MODO NORMAL: Execução Direta (Interativo)
-            # Usa subprocess.call para conectar diretamente ao terminal (input() funciona)
-            # Não captura stderr, então Gênese V4 não roda aqui (o usuário vê o erro nativo do Python)
-            return_code = subprocess.call(command)
-            sys.exit(return_code)
+            # Modo Interativo (Normal) - Permite input() do usuário
+            # Não capturamos stderr aqui, então a Gênese de runtime fica limitada neste modo
+            # para preservar a UX.
+            result = subprocess.run(cmd)
+            return_code = result.returncode
+            stderr_content = None # Não disponível em modo stream
+
+        # 4. Pós-Processamento e Aprendizado (Antifragilidade)
+        if return_code != 0:
+            click.echo(Fore.RED + f"\n[FALHA] Processo terminou com código {return_code}.")
+            
+            if stderr_content:
+                # Gênese V4: Mineração de Traceback
+                error_data = _mine_traceback(stderr_content)
+                if error_data:
+                    suggestion = _analyze_runtime_error(error_data)
+                    
+                    click.echo(Fore.YELLOW + "\n--- [DIAGNÓSTICO RUNTIME] ---")
+                    click.echo(f"Erro: {error_data['error_type']}")
+                    click.echo(f"Msg : {error_data['message']}")
+                    click.echo(f"Loc : {error_data['file']}:{error_data['line']}")
+                    
+                    if suggestion:
+                        click.echo(Fore.GREEN + f"Sugestão: {suggestion}")
+                    
+                    # Gênese V9: Registro
+                    _register_runtime_incident(error_data)
+                    click.echo(Fore.CYAN + "   > [GÊNESE] Incidente registrado para aprendizado.")
 
     except KeyboardInterrupt:
-        click.echo(Fore.YELLOW + "\n[INFO] Execução interrompida pelo usuário.")
+        click.echo(Fore.YELLOW + "\n[RUN] Interrompido pelo usuário.")
     except Exception as e:
-        click.echo(Fore.RED + f"\n[ERRO CRÍTICO NO RUNNER] {e}")
+        click.echo(Fore.RED + f"[ERRO SISTEMA] Falha ao invocar subprocesso: {e}")
