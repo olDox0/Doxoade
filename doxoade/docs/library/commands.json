@@ -58,5 +58,10 @@
     "title": "Comando Test: Suite Unitária Unificada",
     "date": "2025-12-02",
     "content": "Wrapper integrado para o Pytest.\nExecuta testes unitários e registra resultados na memória do sistema (Gênese).\nUso:\n  doxoade test          (Roda tudo)\n  doxoade test -v       (Verbose)\n  doxoade test --watch  (Modo sentinela)"
+  },
+  "merge": {
+    "title": "Comando Merge: Resolvedor Inteligente",
+    "date": "2025-12-02",
+    "content": "Assistente para fusão de branches e resolução de conflitos.\n\nFuncionalidades:\n- Inicia merges: 'doxoade merge <branch>'\n- Detecta conflitos: 'doxoade merge' (sem args)\n- Resolução Interativa: Apresenta 'Ours' vs 'Theirs'.\n- Validação: Roda 'check' no arquivo resolvido antes de aceitar."
   }
 }
