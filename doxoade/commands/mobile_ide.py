@@ -521,11 +521,25 @@ class MobileIDE:
                 show_extended_menu(self)
     
     def open_external_editor(self):
-        """Abre arquivo no editor externo"""
+        """Abre arquivo no editor externo com detecção inteligente"""
         if not self.current_file:
             return
     
         editor = get_best_editor()
+    
+        # Correção automática para Windows
+        if os.name == 'nt':
+            if editor.lower() in ['notepad++', 'notepadpp']:
+                possíveis = [
+                    r"C:\Program Files\Notepad++\notepad++.exe",
+                    r"C:\Program Files (x86)\Notepad++\notepad++.exe"
+                ]
+                for caminho in possíveis:
+                    if os.path.exists(caminho):
+                        editor = caminho
+                        break
+                else:
+                    editor = "notepad++.exe"
     
         try:
             subprocess.run([editor, str(self.current_file)])
