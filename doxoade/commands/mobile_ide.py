@@ -520,21 +520,19 @@ class MobileIDE:
             elif choice == 'm':
                 show_extended_menu(self)
     
-def open_external_editor(self):
-    """Abre arquivo no editor externo"""
-    if not self.current_file:
-        return
-
-    editor = get_best_editor()
-
-    try:
-        subprocess.run([editor, str(self.current_file)])
-        # Recarrega após edição
-        self.load_file(self.current_file)
-    except FileNotFoundError:
-        console.print(f"[red]Editor não encontrado: {editor}[/red]")
-        input("\nPressione Enter...")
-
+    def open_external_editor(self):
+        """Abre arquivo no editor externo"""
+        if not self.current_file:
+            return
+    
+        editor = get_best_editor()
+    
+        try:
+            subprocess.run([editor, str(self.current_file)])
+            self.load_file(self.current_file)
+        except FileNotFoundError:
+            console.print(f"[red]Editor não encontrado: {editor}[/red]")
+            input("\nPressione Enter...")
     
     def run_doxoade_check(self):
         """Executa doxoade check no arquivo atual"""
@@ -572,10 +570,13 @@ def open_external_editor(self):
                 self.edit_file()
 
 
-def mobile_ide_main(start_path: str = ".", file: Optional[str] = None):
+def mobile_ide_main(start_path: str = ".", file: Optional[str] = None, editor: Optional[str] = None):
     """Função principal"""
     try:
         ide = MobileIDE(start_path)
+        if editor:
+            os.environ["EDITOR"] = editor
+
         
         # Se arquivo especificado, abre diretamente
         if file:
@@ -607,7 +608,9 @@ else:
     @click.command('ide')
     @click.option('--path', default='.', help='Diretório inicial')
     @click.option('--file', help='Abrir arquivo específico')
-    def ide(path, file):
+    @click.option('--editor', help='Forçar editor (micro, nano, vim, code, etc)')
+    def ide(path, file, editor):
+
         """
         🚀 IDE móvel multiplataforma (Windows/Linux/Termux)
         
@@ -624,7 +627,7 @@ else:
           doxoade ide --path ~/projetos
           doxoade ide --file main.py
         """
-        mobile_ide_main(path, file)
+        mobile_ide_main(path, file, editor)
     
     @click.command('ide-setup')
     def ide_setup():
