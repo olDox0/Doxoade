@@ -33,6 +33,7 @@ from doxoade.commands.diff import diff
 from doxoade.commands.doctor import doctor
 from doxoade.commands.encoding import encoding
 from doxoade.commands.git_clean import git_clean
+from doxoade.commands.git_merge import merge
 from doxoade.commands.git_new import git_new
 from doxoade.commands.git_workflow import release, sync
 from doxoade.commands.global_health import global_health
@@ -338,6 +339,7 @@ cli.add_command(intelligence)
 cli.add_command(kvcheck)
 cli.add_command(log)
 cli.add_command(maestro)
+cli.add_command(merge)
 cli.add_command(migrate_db)
 cli.add_command(mirror)
 cli.add_command(moddify)
