@@ -1,5 +1,5 @@
 # Doxoade - Seu Engenheiro Sênior Automatizado
-Texto do Main
+
 **Doxoade** (de *olDox222 Advanced Development Environment*) é uma plataforma de engenharia de software via linha de comando, projetada para encapsular e automatizar as lições aprendidas em anos de Pesquisa & Desenvolvimento. Ela atua como um **"engenheiro sênior automatizado"** que participa ativamente do seu workflow, protegendo a integridade do seu código, garantindo a saúde dos seus ambientes e acelerando o ciclo de desenvolvimento.
 
 A filosofia da `doxoade` é simples: **cada bug, cada erro de ambiente e cada lição de P&D é codificada em uma ferramenta proativa**, para que você nunca mais precise resolver o mesmo problema duas vezes.
