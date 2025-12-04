@@ -5,6 +5,7 @@ import os
 import glob
 import shutil
 import textwrap
+import re
 from colorama import Fore, Style, Back
 from ..shared_tools import _run_git_command
 
@@ -103,26 +104,76 @@ def pedia():
     """Base de Conhecimento Integrada (Doxoadepédia)."""
     pass
 
+def _render_markdown(content):
+    """Renderiza conteúdo Markdown com cores de alta intensidade (Neon)."""
+    
+    bold_pattern = re.compile(r'\*\*(.*?)\*\*')
+    code_pattern = re.compile(r'`(.*?)`')
+
+    for line in content.splitlines():
+        stripped = line.strip()
+        
+        # --- BLOCOS DE CÓDIGO ---
+        if line.startswith('    ') or line.startswith('\t'):
+            # Cinza claro para blocos
+            click.echo(Fore.LIGHTBLACK_EX + "    │ " + stripped + Fore.RESET)
+            continue
+            
+        # --- CABEÇALHOS (H1, H2, H3) ---
+        if line.startswith('# '):
+            title = line[2:]
+            # Cyan Claro + Negrito
+            click.echo(Fore.LIGHTCYAN_EX + Style.BRIGHT + "\n" + title.upper())
+            click.echo(Fore.LIGHTCYAN_EX + Style.DIM + "=" * len(title) + Style.RESET_ALL)
+            continue
+        elif line.startswith('## '):
+            # Vermelho Claro
+            click.echo(Fore.LIGHTRED_EX + Style.BRIGHT + "\n" + line[3:] + Style.RESET_ALL)
+            continue
+        elif line.startswith('### '):
+            # Verde Claro
+            click.echo(Fore.LIGHTGREEN_EX + Style.BRIGHT + "\n" + line[4:] + Style.RESET_ALL)
+            continue
+
+        # --- LISTAS ---
+        prefix = ""
+        if stripped.startswith('* '):
+            indent_level = len(line) - len(line.lstrip())
+            indent = " " * (indent_level + 2)
+            # Amarelo Claro (O que você quer!)
+            prefix = f"{indent}{Fore.LIGHTYELLOW_EX}● {Fore.RESET}" 
+            line = stripped[2:] 
+        else:
+            prefix = Fore.RESET
+            
+        # --- FORMATAÇÃO INLINE ---
+        
+        # Negrito -> Cyan Claro
+        line = bold_pattern.sub(lambda m: f"{Fore.LIGHTCYAN_EX}{m.group(1)}{Fore.RESET}", line)
+        
+        # Código Inline -> Amarelo Claro (Destaque forte)
+        line = code_pattern.sub(lambda m: f"{Fore.LIGHTYELLOW_EX}{m.group(1)}{Fore.RESET}", line)
+        
+        # --- METADADOS ---
+        if ':' in line and not line.startswith(' ') and not prefix.strip():
+            key, val = line.split(':', 1)
+            if len(key) < 20 and 'http' not in key:
+                # Azul Claro para chaves
+                click.echo(f"{Fore.LIGHTBLUE_EX}{key}:{Fore.RESET}{val}")
+                continue
+
+        # Imprime
+        click.echo(f"{prefix}{line}")
+
 def _print_wrapped(key, title, max_key_len, color_key):
     """Imprime chave e título com quebra de linha inteligente."""
-    # Obtém largura do terminal
     cols, _ = shutil.get_terminal_size()
-    
-    # Calcula espaço disponível para a descrição
-    # key + " : " = max_key_len + 3
     prefix_len = max_key_len + 3
     desc_width = max(20, cols - prefix_len)
-    
-    # Quebra o texto
     wrapper = textwrap.TextWrapper(width=desc_width)
     lines = wrapper.wrap(title)
-    
-    if not lines: return # Segurança
-
-    # Primeira linha: Chave + Título
+    if not lines: return
     click.echo(f"{color_key}{key:<{max_key_len}}{Fore.WHITE} : {lines[0]}")
-    
-    # Linhas subsequentes: Espaço vazio + Resto do título
     for line in lines[1:]:
         padding = " " * (max_key_len + 3)
         click.echo(f"{padding}{Fore.WHITE}{line}")
@@ -163,7 +214,6 @@ def list_articles():
 def read_article(topic):
     """Lê um artigo específico."""
     articles = load_articles()
-    # Tenta match exato ou case-insensitive
     article = articles.get(topic) or articles.get(topic.lower())
     
     if not article:
@@ -181,20 +231,9 @@ def read_article(topic):
     click.echo(Back.BLUE + Fore.WHITE + Style.BRIGHT + f" {title} " + Style.RESET_ALL)
     if date:
         click.echo(Style.DIM + f"Atualizado em: {date}")
-    click.echo("") # Linha em branco
+    click.echo("") 
     
-    # Renderização simples de Markdown (apenas cores para headers)
-    for line in content.splitlines():
-        if line.startswith('# '): # H1
-            click.echo(Fore.CYAN + Style.BRIGHT + line)
-        elif line.startswith('## '): # H2
-            click.echo(Fore.GREEN + Style.BRIGHT + line)
-        elif line.startswith('### '): # H3
-            click.echo(Fore.YELLOW + line)
-        elif line.startswith('```') or line.startswith('    '): # Code block
-            click.echo(Fore.WHITE + Style.DIM + line)
-        else:
-            click.echo(Fore.WHITE + line)
+    _render_markdown(content)
 
 @pedia.command('search')
 @click.argument('term')
