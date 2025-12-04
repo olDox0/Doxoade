@@ -40,26 +40,35 @@ def is_termux():
     return os.path.exists('/data/data/com.termux')
 
 def get_best_editor():
-    """Retorna o melhor editor disponível baseado no ambiente"""
+    """Retorna o editor escolhido pelo usuário ou o melhor disponível"""
+
+    # 1. Se o usuário definiu EDITOR no sistema, respeita
+    env_editor = os.environ.get("EDITOR")
+    if env_editor:
+        return env_editor
+
+    # 2. Se estiver no Termux, prioriza micro > nano > vim
     if is_termux():
-        # Prioridade no Termux
         editors = ['micro', 'nano', 'vim', 'vi']
     else:
-        # Prioridade no desktop
-        if os.name == 'nt':  # Windows
+        if os.name == 'nt':
             editors = ['notepad++.exe', 'code', 'notepad.exe']
-        else:  # Linux/Mac
+        else:
             editors = ['code', 'gedit', 'nano', 'vim']
-    
+
     for editor in editors:
         try:
-            subprocess.run(['which', editor] if os.name != 'nt' else ['where', editor],
-                         capture_output=True, check=True)
+            subprocess.run(
+                ['which', editor] if os.name != 'nt' else ['where', editor],
+                capture_output=True,
+                check=True
+            )
             return editor
         except Exception:
             continue
-    
-    return 'nano'  # Fallback universal
+
+    return 'nano'
+
 
 
 # COMANDOS TERMUX-SPECIFIC
@@ -511,29 +520,21 @@ class MobileIDE:
             elif choice == 'm':
                 show_extended_menu(self)
     
-    def open_external_editor(self):
-        """Abre arquivo no editor externo"""
-        if not self.current_file:
-            return
-        
-        editors = {
-            'nt': ['notepad++.exe', 'notepad.exe'],
-            'posix': ['nano', 'vim', 'vi', 'code']
-        }
-        
-        editor_list = editors.get(os.name, ['nano'])
-        
-        for editor in editor_list:
-            try:
-                subprocess.run([editor, str(self.current_file)])
-                # Recarrega após edição
-                self.load_file(self.current_file)
-                return
-            except FileNotFoundError:
-                continue
-        
-        console.print("[red]Nenhum editor disponível[/red]")
+def open_external_editor(self):
+    """Abre arquivo no editor externo"""
+    if not self.current_file:
+        return
+
+    editor = get_best_editor()
+
+    try:
+        subprocess.run([editor, str(self.current_file)])
+        # Recarrega após edição
+        self.load_file(self.current_file)
+    except FileNotFoundError:
+        console.print(f"[red]Editor não encontrado: {editor}[/red]")
         input("\nPressione Enter...")
+
     
     def run_doxoade_check(self):
         """Executa doxoade check no arquivo atual"""
