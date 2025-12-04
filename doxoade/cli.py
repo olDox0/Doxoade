@@ -20,6 +20,7 @@ if PACKAGE_PARENT not in sys.path:
 
 # --- REGISTRO DE PLUGINS DA V2.0 ---
 from doxoade.commands.apicheck import apicheck
+from doxoade.commands.android import android_group
 from doxoade.commands.auto import auto
 from doxoade.commands.canonize import canonize
 from doxoade.commands.check import check
@@ -310,6 +311,7 @@ def _analyze_traceback(stderr_output):
 
 #atualizado em 2025/10/24-Versão 34.0.
 # --- REGISTRO DE PLUGINS ---
+cli.add_command(android_group)
 cli.add_command(apicheck)
 cli.add_command(auto)
 cli.add_command(canonize)
