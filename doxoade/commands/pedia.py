@@ -3,6 +3,8 @@ import click
 import json
 import os
 import glob
+import shutil
+import textwrap
 from colorama import Fore, Style, Back
 from ..shared_tools import _run_git_command
 
@@ -101,27 +103,58 @@ def pedia():
     """Base de Conhecimento Integrada (Doxoadepédia)."""
     pass
 
+def _print_wrapped(key, title, max_key_len, color_key):
+    """Imprime chave e título com quebra de linha inteligente."""
+    # Obtém largura do terminal
+    cols, _ = shutil.get_terminal_size()
+    
+    # Calcula espaço disponível para a descrição
+    # key + " : " = max_key_len + 3
+    prefix_len = max_key_len + 3
+    desc_width = max(20, cols - prefix_len)
+    
+    # Quebra o texto
+    wrapper = textwrap.TextWrapper(width=desc_width)
+    lines = wrapper.wrap(title)
+    
+    if not lines: return # Segurança
+
+    # Primeira linha: Chave + Título
+    click.echo(f"{color_key}{key:<{max_key_len}}{Fore.WHITE} : {lines[0]}")
+    
+    # Linhas subsequentes: Espaço vazio + Resto do título
+    for line in lines[1:]:
+        padding = " " * (max_key_len + 3)
+        click.echo(f"{padding}{Fore.WHITE}{line}")
+
 @pedia.command('list')
 def list_articles():
     """Lista todos os artigos disponíveis (Conceitos, Comandos e Internals)."""
     articles = load_articles()
     click.echo(Fore.CYAN + "\n--- Doxoadepédia: Índice ---")
     
-    # Separa por tipo para melhor visualização
     internals = {k: v for k, v in articles.items() if v.get('source') == 'internal'}
     standards = {k: v for k, v in articles.items() if v.get('source') != 'internal'}
+    
+    all_keys = list(articles.keys())
+    if not all_keys:
+        click.echo("Nenhum artigo encontrado.")
+        return
+        
+    max_len = max(len(k) for k in all_keys) + 2 
     
     if standards:
         click.echo(Fore.WHITE + Style.BRIGHT + "\n[Biblioteca Geral]")
         for key in sorted(standards.keys()):
             data = standards[key]
-            click.echo(f"{Fore.YELLOW}{key:<20}{Fore.WHITE} : {data.get('title', 'Sem Título')}")
+            _print_wrapped(key, data.get('title', 'Sem Título'), max_len, Fore.YELLOW)
 
     if internals:
         click.echo(Fore.WHITE + Style.BRIGHT + "\n[Doxoade Internals]")
         for key in sorted(internals.keys()):
             data = internals[key]
-            click.echo(f"{Fore.MAGENTA}{key:<20}{Fore.WHITE} : {data.get('title')}")
+            title = data.get('title', '').replace('[INTERNAL] ', '')
+            _print_wrapped(key, title, max_len, Fore.MAGENTA)
 
     click.echo(Style.DIM + "\nUse 'doxoade pedia read <nome>' para ler.")
 
