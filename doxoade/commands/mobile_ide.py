@@ -11,25 +11,261 @@ import sys
 import subprocess
 from pathlib import Path
 from typing import List, Optional
+from datetime import datetime  # ← ADICIONE ESTA LINHA
+from rich.console import Console
+from rich.prompt import Confirm
 
 try:
-    from rich.console import Console
     from rich.panel import Panel
     from rich.table import Table
     from rich.syntax import Syntax
-    from rich.prompt import Prompt, Confirm
+    from rich.prompt import Prompt, Confirm # noqa
     from rich.layout import Layout # noqa
     from rich.live import Live # noqa
 except ImportError:
     print("❌ Dependência faltando. Instalando rich...")
     subprocess.run([sys.executable, "-m", "pip", "install", "rich", "prompt_toolkit"])
-    from rich.console import Console
+    from rich.console import Console # noqa
     from rich.panel import Panel
     from rich.table import Table
     from rich.syntax import Syntax
     from rich.prompt import Prompt, Confirm
 
 console = Console()
+
+# DETECTOR DE AMBIENTE
+
+def is_termux():
+    """Detecta se está rodando no Termux"""
+    return os.path.exists('/data/data/com.termux')
+
+def get_best_editor():
+    """Retorna o melhor editor disponível baseado no ambiente"""
+    if is_termux():
+        # Prioridade no Termux
+        editors = ['micro', 'nano', 'vim', 'vi']
+    else:
+        # Prioridade no desktop
+        if os.name == 'nt':  # Windows
+            editors = ['notepad++.exe', 'code', 'notepad.exe']
+        else:  # Linux/Mac
+            editors = ['code', 'gedit', 'nano', 'vim']
+    
+    for editor in editors:
+        try:
+            subprocess.run(['which', editor] if os.name != 'nt' else ['where', editor],
+                         capture_output=True, check=True)
+            return editor
+        except Exception:
+            continue
+    
+    return 'nano'  # Fallback universal
+
+
+# COMANDOS TERMUX-SPECIFIC
+
+def termux_share_file(file_path: Path):
+    """Compartilha arquivo usando o Termux API"""
+    if not is_termux():
+        console.print("[yellow]Comando disponível apenas no Termux[/yellow]")
+        return
+    
+    try:
+        subprocess.run(['termux-share', str(file_path)])
+        console.print(f"[green]✓ Compartilhando: {file_path.name}[/green]")
+    except FileNotFoundError:
+        console.print("[red]Instale termux-api: pkg install termux-api[/red]")
+
+def termux_clipboard_copy(text: str):
+    """Copia texto para área de transferência (Termux)"""
+    if not is_termux():
+        console.print("[yellow]Comando disponível apenas no Termux[/yellow]")
+        return
+    
+    try:
+        subprocess.run(['termux-clipboard-set'], input=text.encode())
+        console.print("[green]✓ Copiado para área de transferência[/green]")
+    except FileNotFoundError:
+        console.print("[red]Instale termux-api: pkg install termux-api[/red]")
+
+def termux_toast(message: str):
+    """Mostra notificação toast (Termux)"""
+    if is_termux():
+        try:
+            subprocess.run(['termux-toast', message])
+        except Exception:
+            pass
+
+
+# NOVOS COMANDOS PARA A IDE
+
+def show_file_info(file_path: Path):
+    """Mostra informações detalhadas do arquivo"""
+    stat = file_path.stat()
+    
+    table = Table(title=f"📊 Informações: {file_path.name}")
+    table.add_column("Propriedade", style="cyan")
+    table.add_column("Valor", style="white")
+    
+    table.add_row("Tamanho", f"{stat.st_size:,} bytes")
+    table.add_row("Linhas", str(len(file_path.read_text(errors='ignore').splitlines())))
+    table.add_row("Modificado", str(datetime.fromtimestamp(stat.st_mtime)))  # ← AGORA FUNCIONA
+    table.add_row("Permissões", oct(stat.st_mode)[-3:])
+    table.add_row("Caminho completo", str(file_path.resolve()))
+    
+    console.print(table)
+    input("\nPressione Enter...")
+
+def git_status_visual():
+    """Mostra status do Git de forma visual"""
+    try:
+        result = subprocess.run(
+            ['git', 'status', '--short'],
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode == 0:
+            syntax = Syntax(result.stdout, "diff", theme="monokai")
+            console.print("\n[bold cyan]📊 Git Status:[/bold cyan]")
+            console.print(syntax)
+        else:
+            console.print("[yellow]Não é um repositório Git[/yellow]")
+    except FileNotFoundError:
+        console.print("[red]Git não instalado[/red]")
+    
+    input("\nPressione Enter...")
+
+def quick_search_in_files(directory: Path, term: str):
+    """Busca rápida em arquivos"""
+    console.print(f"\n[cyan]🔍 Buscando '{term}'...[/cyan]")
+    
+    results = []
+    for file_path in directory.rglob("*.py"):
+        try:
+            lines = file_path.read_text(errors='ignore').splitlines()
+            for i, line in enumerate(lines, 1):
+                if term.lower() in line.lower():
+                    results.append((file_path, i, line.strip()))
+        except Exception:
+            continue
+    
+    if results:
+        table = Table(title=f"Encontrado {len(results)} resultado(s)")
+        table.add_column("Arquivo", style="cyan")
+        table.add_column("Linha", style="yellow", width=6)
+        table.add_column("Conteúdo", style="white")
+        
+        for path, line_num, content in results[:20]:  # Limita a 20
+            table.add_row(path.name, str(line_num), content[:60] + "...")
+        
+        console.print(table)
+        
+        if len(results) > 20:
+            console.print(f"\n[dim]... e mais {len(results) - 20} resultado(s)[/dim]")
+    else:
+        console.print("[yellow]Nenhum resultado encontrado[/yellow]")
+    
+    input("\nPressione Enter...")
+
+
+# MENU ESTENDIDO PARA A IDE
+
+def show_extended_menu(ide_instance):
+    """Menu com comandos avançados"""
+    while True:
+        ide_instance.clear_screen()
+        
+        console.print(Panel(
+            "[bold cyan]🛠️  MENU AVANÇADO[/bold cyan]",
+            style="bold white on blue"
+        ))
+        
+        options = [
+            ("1", "📊", "Informações do arquivo"),
+            ("2", "🔍", "Buscar em arquivos"),
+            ("3", "📋", "Git status"),
+            ("4", "📤", "Compartilhar arquivo (Termux)"),
+            ("5", "📋", "Copiar caminho"),
+            ("6", "🧹", "Limpar cache Python"),
+            ("7", "🔙", "Voltar")
+        ]
+        
+        for key, icon, desc in options:
+            color = "cyan" if key != "7" else "yellow"
+            console.print(f"  [{color}]{key}. {icon} {desc}[/{color}]")
+        
+        choice = Prompt.ask("\n> ", default="7")
+        
+        if choice == "1" and ide_instance.current_file:
+            show_file_info(ide_instance.current_file)
+        elif choice == "2":
+            term = Prompt.ask("Buscar por")
+            if term:
+                quick_search_in_files(ide_instance.start_path, term)
+        elif choice == "3":
+            git_status_visual()
+        elif choice == "4" and ide_instance.current_file:
+            termux_share_file(ide_instance.current_file)
+            input("\nPressione Enter...")
+        elif choice == "5" and ide_instance.current_file:
+            path_str = str(ide_instance.current_file.resolve())
+            if is_termux():
+                termux_clipboard_copy(path_str)
+            else:
+                console.print(f"\n[cyan]{path_str}[/cyan]")
+            input("\nPressione Enter...")
+        elif choice == "6":
+            clean_python_cache(ide_instance.start_path)
+        elif choice == "7":
+            break
+
+def clean_python_cache(directory: Path):
+    """Remove arquivos __pycache__ e .pyc"""
+    import shutil
+    removed = 0
+    
+    for item in directory.rglob("__pycache__"):
+        try:
+            shutil.rmtree(item)
+            removed += 1
+        except Exception:
+            pass
+    
+    for item in directory.rglob("*.pyc"):
+        try:
+            item.unlink()
+            removed += 1
+        except Exception:
+            pass
+    
+    console.print(f"[green]✓ {removed} arquivo(s)/pasta(s) removido(s)[/green]")
+    input("\nPressione Enter...")
+
+
+# INSTALAÇÃO AUTOMÁTICA DE EDITORES (TERMUX)
+
+def setup_termux_editors():
+    """Instala os melhores editores para Termux"""
+    if not is_termux():
+        console.print("[yellow]Apenas para Termux[/yellow]")
+        return
+    
+    console.print("\n[bold cyan]📦 Instalador de Editores para Termux[/bold cyan]\n")
+    
+    editors = [
+        ("micro", "Editor moderno e intuitivo (RECOMENDADO)"),
+        ("nano", "Editor clássico e leve"),
+        ("vim", "Editor poderoso (curva de aprendizado)"),
+    ]
+    
+    for editor, desc in editors:
+        if Confirm.ask(f"Instalar {editor}? ({desc})"):
+            console.print(f"[cyan]Instalando {editor}...[/cyan]")
+            subprocess.run(['pkg', 'install', '-y', editor])
+    
+    console.print("\n[green]✓ Configuração concluída![/green]")
+
 
 class MobileIDE:
     """IDE simplificada e multiplataforma"""
@@ -251,6 +487,7 @@ class MobileIDE:
             console.print("  [cyan]r[/cyan] - Executar (se for Python)")
             console.print("  [cyan]s[/cyan] - Salvar")
             console.print("  [cyan]d[/cyan] - Ver Doxoade check")
+            console.print("  [cyan]m[/cyan] - Menu avançado")
             console.print("  [cyan]q[/cyan] - Voltar ao explorador")
             
             choice = Prompt.ask("\n> ", default="q").strip().lower()
@@ -271,6 +508,8 @@ class MobileIDE:
                 self.execute_python(self.current_file)
             elif choice == 'd':
                 self.run_doxoade_check()
+            elif choice == 'm':
+                show_extended_menu(self)
     
     def open_external_editor(self):
         """Abre arquivo no editor externo"""
@@ -278,7 +517,7 @@ class MobileIDE:
             return
         
         editors = {
-            'nt': ['notepad.exe', 'notepad++.exe'],
+            'nt': ['notepad++.exe', 'notepad.exe'],
             'posix': ['nano', 'vim', 'vi', 'code']
         }
         
@@ -308,7 +547,7 @@ class MobileIDE:
         ))
         
         try:
-            result = subprocess.run( # noqa
+            subprocess.run(
                 ['doxoade', 'check', str(self.current_file)],
                 cwd=self.current_file.parent,
                 capture_output=False
@@ -359,7 +598,6 @@ def mobile_ide_main(start_path: str = ".", file: Optional[str] = None):
 
 # === INTEGRAÇÃO COM DOXOADE CLI ===
 if __name__ == '__main__':
-    import sys
     path = sys.argv[1] if len(sys.argv) > 1 else "."
     mobile_ide_main(path)
 else:
@@ -378,6 +616,7 @@ else:
         - Execução de scripts Python
         - Integração com Doxoade check
         - Editor externo (Notepad++/nano/vim)
+        - Menu avançado (busca, git, etc)
         
         Exemplos:
           doxoade ide
@@ -385,3 +624,8 @@ else:
           doxoade ide --file main.py
         """
         mobile_ide_main(path, file)
+    
+    @click.command('ide-setup')
+    def ide_setup():
+        """Configura editores ideais para Termux"""
+        setup_termux_editors()
