@@ -63,5 +63,10 @@
     "title": "Comando Merge: Resolvedor Inteligente",
     "date": "2025-12-02",
     "content": "Assistente para fusão de branches e resolução de conflitos.\n\nFuncionalidades:\n- Inicia merges: 'doxoade merge <branch>'\n- Detecta conflitos: 'doxoade merge' (sem args)\n- Resolução Interativa: Apresenta 'Ours' vs 'Theirs'.\n- Validação: Roda 'check' no arquivo resolvido antes de aceitar."
+  },
+  "android": {
+    "title": "Integração Android (Termux)",
+    "date": "2025-12-03",
+    "content": "Gerencia troca de arquivos entre o ambiente isolado do Termux e o armazenamento compartilhado do Android.\n\nComandos:\n- export: Envia para Downloads/DoxoadeExports.\n- import: Traz de Downloads.\n- --zip: Cria backup compactado."
   }
 }
