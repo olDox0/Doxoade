@@ -69,8 +69,6 @@ def get_best_editor():
 
     return 'nano'
 
-
-
 # COMANDOS TERMUX-SPECIFIC
 
 def termux_share_file(file_path: Path):
