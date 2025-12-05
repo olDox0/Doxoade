@@ -1,118 +1,105 @@
 # doxoade/fixer.py
+"""
+Motor de Correção (AutoFixer).
+Aplica patches cirúrgicos no código fonte com base em templates.
+"""
 import os
 import re
-import json
-#from colorama import Fore, Style
+#from colorama import Fore
 
 class AutoFixer:
-    def __init__(self, logger=None):
+    def __init__(self, logger):
         self.logger = logger
 
-    def apply_fix(self, file_path, line_num, solution_type, context_data=None):
+    def apply_fix(self, file_path, line_num, template_type, context):
         """
-        Aplica uma correção atômica em um arquivo baseada em um template.
-        Retorna True se houve alteração.
+        Despacha a correção para a estratégia adequada.
         """
         if not os.path.exists(file_path):
+            self.logger.add_finding('ERROR', f"Arquivo não encontrado: {file_path}")
             return False
 
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
-
+            
+            # Validação de limites
             if line_num < 1 or line_num > len(lines):
                 return False
 
-            original_line = lines[line_num - 1]
-            new_lines = list(lines)
-            modified = False
+            # Despacho de Estratégia
+            if template_type == "REMOVE_LINE":
+                return self._apply_remove_line(file_path, lines, line_num)
             
-            # --- LÓGICA DOS TEMPLATES ---
-
-            if solution_type == "APPLY_DIFF":
-                # Gênese V8: Aplicação de Diff Flexível
-                diff_json = context_data.get('diff_pattern')
-                if diff_json:
-                    try:
-                        diff_data = json.loads(diff_json)
-                        old_block = diff_data.get('old', '').strip()
-                        new_block = diff_data.get('new', '')
-                         
-                        # Validação de Segurança: O código no disco é igual ao esperado?
-                        current_line = lines[line_num - 1].strip()
-                         
-                        # Se a linha atual faz parte do bloco antigo, aplicamos
-                        if old_block and current_line in old_block:
-                            # Modo Seguro: Comenta o antigo e insere o novo
-                            indent_match = re.match(r"^(\s*)", lines[line_num - 1])
-                            indent = indent_match.group(1) if indent_match else ""
-                             
-                            # Comenta a linha original
-                            lines[line_num - 1] = f"{indent}# [DOX-FIX] {lines[line_num - 1].lstrip()}"
-                             
-                            # Insere as novas linhas
-                            for i, new_l in enumerate(new_block.splitlines()):
-                                lines.insert(line_num + i, f"{indent}{new_l}\n")
-                                 
-                            modified = True
-                    except json.JSONDecodeError:
-                        pass
-
-            elif solution_type == "REMOVE_LINE":
-                # Estratégia Segura: Comentar a linha mantendo a indentação
-                # Regex para capturar a indentação inicial
-                indent_match = re.match(r"^(\s*)", original_line)
-                indent = indent_match.group(1) if indent_match else ""
-                
-                # O conteúdo sem a indentação
-                content = original_line.lstrip()
-                
-                # Reescreve como comentário com tag
-                new_lines[line_num - 1] = f"{indent}# [DOX-UNUSED] {content}"
-                modified = True
-
-            elif solution_type == "REMOVE_F_PREFIX":
-                # Remove f" ou f'
-                fixed_line = re.sub(r'\bf(["\'])', r'\1', original_line)
-                if fixed_line != original_line:
-                    new_lines[line_num - 1] = fixed_line
-                    modified = True
-
-            elif solution_type == "REPLACE_WITH_UNDERSCORE":
-                # Recebe a variável alvo via context_data
-                var_name = context_data.get('var_name')
-                if var_name:
-                    # 1. Prepara a linha comentada (Histórico)
-                    indent_match = re.match(r"^(\s*)", original_line)
-                    indent = indent_match.group(1) if indent_match else ""
-                    content = original_line.lstrip()
-                    comment_line = f"{indent}# [DOX-UNUSED] {content}"
-                    
-                    # 2. Prepara a linha corrigida
-                    fixed_line = original_line # Começa com original
-                    
-                    # Tenta 'var =' -> '_ ='
-                    fixed_line = re.sub(rf'^(\s*){re.escape(var_name)}\s*=', r'\1_ =', fixed_line)
-                    # Tenta 'as var' -> 'as _'
-                    if fixed_line == original_line:
-                        fixed_line = re.sub(rf'\bas\s+{re.escape(var_name)}\b', 'as _', fixed_line)
-                    
-                    if fixed_line != original_line:
-                        # Substitui a linha original pela corrigida...
-                        new_lines[line_num - 1] = fixed_line
-                        # ... E insere a comentada ANTES dela
-                        new_lines.insert(line_num - 1, comment_line)
-                        modified = True
-
-            # --- GRAVAÇÃO ---
-            if modified:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.writelines(new_lines)
-                return True
+            elif template_type == "REMOVE_F_PREFIX":
+                return self._apply_remove_f_prefix(file_path, lines, line_num)
+            
+            elif template_type == "REPLACE_WITH_UNDERSCORE":
+                return self._apply_replace_with_underscore(file_path, lines, line_num, context)
+            
+            # Adicione novas estratégias aqui
+            
+            return False
 
         except Exception as e:
-            if self.logger:
-                self.logger.add_finding('ERROR', f"Falha ao aplicar fix em {file_path}: {e}")
+            self.logger.add_finding('ERROR', f"Falha ao aplicar fix em {file_path}: {e}")
+            return False
+
+    def _save_file(self, file_path, lines):
+        """Escreve o arquivo de volta no disco."""
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.writelines(lines)
+            return True
+        except IOError:
+            return False
+
+    def _apply_remove_line(self, file_path, lines, line_num):
+        """Estratégia: Comentar a linha (Soft Delete)."""
+        idx = line_num - 1
+        original = lines[idx]
+        
+        # Evita comentar duas vezes
+        if original.strip().startswith("# [DOX-UNUSED]"):
             return False
             
-        return False
+        # Preserva a indentação
+        indent = len(original) - len(original.lstrip())
+        spaces = original[:indent]
+        content = original.strip()
+        
+        lines[idx] = f"{spaces}# [DOX-UNUSED] {content}\n"
+        return self._save_file(file_path, lines)
+
+    def _apply_remove_f_prefix(self, file_path, lines, line_num):
+        """Estratégia: Remover prefixo f de strings."""
+        idx = line_num - 1
+        original = lines[idx]
+        
+        # Regex seguro para f" ou f'
+        new_line = re.sub(r'\bf(["\'])', r'\1', original)
+        
+        if new_line == original: return False
+        
+        lines[idx] = new_line
+        return self._save_file(file_path, lines)
+
+    def _apply_replace_with_underscore(self, file_path, lines, line_num, context):
+        """Estratégia: Substituir variável não usada por _."""
+        var_name = context.get('var_name')
+        if not var_name: return False
+        
+        idx = line_num - 1
+        original = lines[idx]
+        
+        # Tenta: "as var" -> "as _"
+        new_line = re.sub(rf'\bas\s+{re.escape(var_name)}\b', 'as _', original)
+        
+        # Tenta: "var =" -> "_ =" (no início da linha ou após indentação)
+        if new_line == original:
+             new_line = re.sub(rf'^(\s*){re.escape(var_name)}\s*=', r'\1_ =', original)
+             
+        if new_line == original: return False
+        
+        lines[idx] = new_line
+        return self._save_file(file_path, lines)
