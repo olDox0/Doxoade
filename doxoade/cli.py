@@ -13,6 +13,10 @@ from doxoade.database import init_db
 from datetime import datetime
 from colorama import init as colorama_init, Fore, Style
 
+# Força UTF-8 no stdout para suportar emojis no Windows
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
+
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 PACKAGE_PARENT = os.path.dirname(PACKAGE_DIR)
 if PACKAGE_PARENT not in sys.path:
