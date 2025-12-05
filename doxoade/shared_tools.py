@@ -29,8 +29,8 @@ class ExecutionLogger:
         self.start_dt = datetime.now().strftime("%H:%M:%S")
         click.echo(Fore.CYAN + Style.DIM + f"[{self.start_dt}] Executando {command_name}..." + Style.RESET_ALL)
 
-    def add_finding(self, severity, message, category='UNCATEGORIZED', file=None, line=None, details=None, snippet=None, suggestion_content=None, suggestion_line=None, finding_hash=None, import_suggestion=None, dependency_type=None, missing_import=None):
-        """(Versão Final V3) Adiciona um 'finding' completo, incluindo dados de abdução."""
+    def add_finding(self, severity, message, category='UNCATEGORIZED', file=None, line=None, details=None, snippet=None, suggestion_content=None, suggestion_line=None, finding_hash=None, import_suggestion=None, dependency_type=None, missing_import=None, suggestion_source=None, suggestion_action=None):
+        """(Versão Final V4) Adiciona um 'finding' completo com todos os metadados do Gênese."""
         severity = severity.upper()
         category = category.upper() 
         
@@ -48,9 +48,11 @@ class ExecutionLogger:
             'line': line,
             'details': details,
             'snippet': snippet,
+            # --- CAMPOS RESTAURADOS DO GÊNESE ---
             'suggestion_content': suggestion_content,
             'suggestion_line': suggestion_line,
-            # --- NOVOS CAMPOS ---
+            'suggestion_source': suggestion_source,
+            'suggestion_action': suggestion_action,
             'import_suggestion': import_suggestion,
             'dependency_type': dependency_type,
             'missing_import': missing_import
@@ -69,7 +71,6 @@ class ExecutionLogger:
     def __exit__(self, exc_type, exc_val, exc_tb):
         execution_time_ms = (time.monotonic() - self.start_time) * 1000
         if exc_type and not isinstance(exc_val, SystemExit):
-            # CORREÇÃO: Chamada atualizada para a nova assinatura
             self.add_finding(
                 'CRITICAL',
                 'A Doxoade encontrou um erro fatal interno.',
@@ -83,38 +84,25 @@ class ExecutionLogger:
         click.echo(f"{color}{Style.DIM}[{self.command_name}] Tempo total: {duration:.3f}s{Style.RESET_ALL}")
 
 def _format_timestamp(iso_str):
-    """Converte ISO UTC para hora local legível."""
     try:
         dt_utc = datetime.fromisoformat(iso_str)
-        dt_local = dt_utc.astimezone() # Converte para o timezone do sistema
+        dt_local = dt_utc.astimezone()
         return dt_local.strftime("%Y-%m-%d %H:%M:%S")
-    except Exception:
-        return iso_str
-    except ValueError:
-        return iso_str
+    except Exception: return iso_str
+    except ValueError: return iso_str
 
 def _find_project_root(start_path='.'):
     """
     (Versão Corrigida) Encontra a raiz do projeto, priorizando um pyproject.toml local.
     """
     current_path = Path(start_path).resolve()
-
-    # Prioridade #1: Se um pyproject.toml existe ONDE o comando foi chamado,
-    # este é o root. Isso isola os testes de regressão.
-    if (current_path / 'pyproject.toml').is_file():
-        return str(current_path)
-
-    # Lógica de fallback para o usuário: procurar para cima por .git
+    if (current_path / 'pyproject.toml').is_file(): return str(current_path)
     search_path = current_path
     while search_path != search_path.parent:
-        if (search_path / '.git').is_dir():
-            return str(search_path)
+        if (search_path / '.git').is_dir(): return str(search_path)
         search_path = search_path.parent
-        
-    # Se nada for encontrado, retorna o ponto de partida original.
     return str(current_path)
 
-# --- Funções Auxiliares (sem mudanças) ---
 def _log_execution(command_name, path, results, arguments, execution_time_ms=0):
     from .database import get_db_connection
     timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
@@ -127,84 +115,108 @@ def _log_execution(command_name, path, results, arguments, execution_time_ms=0):
         for finding in results.get('findings', []):
             file_path = finding.get('file')
             file_rel = os.path.relpath(file_path, project_path_abs) if file_path and os.path.isabs(file_path) else file_path
-            
-            # Adicionamos a coluna 'category' ao INSERT e o valor correspondente.
             cursor.execute(
                 "INSERT INTO findings (event_id, severity, message, details, file, line, finding_hash, category) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", 
-                (event_id, 
-                 finding.get('severity'), 
-                 finding.get('message'), 
-                 finding.get('details'), 
-                 file_rel, 
-                 finding.get('line'), 
-                 finding.get('hash'),
-                 finding.get('category')) # <-- Valor da categoria adicionado
+                (event_id, finding.get('severity'), finding.get('message'), finding.get('details'), file_rel, finding.get('line'), finding.get('hash'), finding.get('category'))
             )
         conn.commit()
-    except sqlite3.Error as e:
-        click.echo(Fore.RED + f"\n[AVISO] Falha ao registrar a execução no banco de dados: {e}")
+    except sqlite3.Error: pass
     finally:
-        if 'conn' in locals() and conn:
-            conn.close()
+        if 'conn' in locals() and conn: conn.close()
 
 def _get_venv_python_executable():
     venv_path = 'venv'
     exe_name = 'python.exe' if os.name == 'nt' else 'python'
     scripts_dir = 'Scripts' if os.name == 'nt' else 'bin'
     python_executable = os.path.join(venv_path, scripts_dir, exe_name)
-    if os.path.exists(python_executable):
-        return os.path.abspath(python_executable)
+    if os.path.exists(python_executable): return os.path.abspath(python_executable)
     return None
 
-# ... (outras funções auxiliares como _get_git_commit_hash, _run_git_command, etc. permanecem aqui) ...
 def _get_git_commit_hash(path):
     original_dir = os.getcwd()
     try:
         os.chdir(path)
         hash_output = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True)
         return hash_output if hash_output else "N/A"
-    except Exception:
-        return "N/A"
-    finally:
-        os.chdir(original_dir)
+    except: return "N/A"
+    finally: os.chdir(original_dir)
 
 def _run_git_command(args, capture_output=False, silent_fail=False):
     try:
+        # Força encoding utf-8 para evitar problemas de charmap no Windows
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
         command = ['git'] + args
         result = subprocess.run(
             command, capture_output=capture_output, text=True, check=True,
             encoding='utf-8', errors='replace'
         )
+        result = subprocess.run(command, capture_output=capture_output, text=True, check=True, encoding='utf-8', errors='replace', env=env)
         return result.stdout.strip() if capture_output else True
-    except FileNotFoundError:
+    except (FileNotFoundError, subprocess.CalledProcessError):
         if not silent_fail:
-            click.echo(Fore.RED + "[ERRO GIT] O comando 'git' não foi encontrado.")
-        return None
-    except subprocess.CalledProcessError:
+            if not capture_output: print(Fore.RED + "[ERRO GIT] O comando falhou.")
         return None
 
-def _present_results(format, results, ignored_hashes=None):
-    if ignored_hashes is None:
-        ignored_hashes = set()
-    
-    if format == 'json':
-        # Adiciona o campo 'ignored' para a saída JSON, mas não imprime aqui
-        for finding in results.get('findings', []):
-            finding['ignored'] = finding.get('hash') in ignored_hashes
-        print(json.dumps(results, indent=4, ensure_ascii=False)) # Usar ensure_ascii=False para melhor visualização
+def _present_results(output_format, results):
+    findings = results.get('findings', [])
+    summary = results.get('summary', {})
+    if not findings:
+        print(Fore.GREEN + Style.BRIGHT + "\n[OK] Nenhum problema encontrado! 🎉")
         return
+    print(Fore.CYAN + Style.BRIGHT + "\n--- ANÁLISE COMPLETA ---")
+    for finding in findings:
+        severity = finding.get('severity', 'INFO')
+        category = finding.get('category', 'UNCATEGORIZED')
+        message = finding.get('message', 'Sem mensagem')
+        file_path = finding.get('file', 'Arquivo desconhecido')
+        line_num = finding.get('line')
+        snippet = finding.get('snippet', '')
+        severity_colors = {'CRITICAL': Fore.RED + Style.BRIGHT, 'ERROR': Fore.RED, 'WARNING': Fore.YELLOW, 'INFO': Fore.CYAN}
+        color = severity_colors.get(severity, Fore.WHITE)
+        print(f"{color}[{severity}][{category}] {message}")
+        print(Fore.WHITE + f"   > Em '{file_path}'" + (f" (linha {line_num})" if line_num else ""))
+        if snippet: print(snippet)
+        
+        # Exibe sugestões
+        suggestion_content = finding.get('suggestion_content')
+        suggestion_line = finding.get('suggestion_line')
+        suggestion_source = finding.get('suggestion_source')
+        suggestion_action = finding.get('suggestion_action')
+        import_suggestion = finding.get('import_suggestion')
+        
+        if suggestion_content and suggestion_line:
+            print(Fore.GREEN + Style.BRIGHT + "   💡 SOLUÇÃO CONHECIDA:")
+            if suggestion_source == "EXACT": print(Fore.GREEN + "   > Fonte: Solução exata do histórico")
+            elif suggestion_source == "TEMPLATE": 
+                action_text = f" ({suggestion_action})" if suggestion_action else ""
+                print(Fore.GREEN + f"   > Fonte: Template aprendido{action_text}")
+            
+            suggestion_lines = suggestion_content.splitlines()
+            context_start = max(0, suggestion_line - 3)
+            context_end = min(len(suggestion_lines), suggestion_line + 2)
+            for i in range(context_start, context_end):
+                line_display = i + 1
+                prefix = "   >" if (i + 1) == suggestion_line else "    "
+                print(f"{Fore.GREEN}{prefix} {line_display:4}: {suggestion_lines[i]}")
+        elif import_suggestion:
+            print(Fore.CYAN + Style.BRIGHT + "   💡 SUGESTÃO:")
+            print(Fore.CYAN + f"   > {import_suggestion}")
+        elif suggestion_action:
+            print(Fore.YELLOW + Style.BRIGHT + "   ⚠️  AÇÃO NECESSÁRIA:")
+            print(Fore.YELLOW + f"   > {suggestion_action}")
+        print()
     
-    click.echo(Style.BRIGHT + "\n--- ANÁLISE COMPLETA ---")
-    
-    display_findings = [f for f in results.get('findings', []) if f.get('hash') not in ignored_hashes]
-    
-    if not display_findings:
-        click.echo(Fore.GREEN + "[OK] Nenhum problema crítico encontrado.")
-    else:
-        for finding in display_findings:
-            _print_finding_details(finding)
-    
-    _print_summary(results, len(ignored_hashes))
+    total = len(findings)
+    critical = summary.get('critical', 0)
+    errors = summary.get('errors', 0)
+    warnings = summary.get('warnings', 0)
+    if critical > 0: final_msg = f"[CRÍTICO] {critical} Erro(s) crítico(s)."
+    elif errors > 0: final_msg = f"[ERRO] {errors} Erro(s)."
+    elif warnings > 0: final_msg = f"[FIM] {warnings} Aviso(s)."
+    else: final_msg = f"[FIM] {total} problema(s)."
+    print(Fore.WHITE + "-" * 40)
+    print(final_msg + Style.RESET_ALL)
 
 def _get_code_snippet_from_string(content, line_number, context_lines=2):
     """Extrai um snippet de uma string de conteúdo, não de um arquivo."""
@@ -215,7 +227,7 @@ def _get_code_snippet_from_string(content, line_number, context_lines=2):
         end = min(len(lines), line_number + context_lines)
         return {i + 1: lines[i] for i in range(start, end)}
     except IndexError: return None
-        
+
 def _print_finding_details(finding):
     """(Versão Final V3) Imprime os detalhes de um 'finding' com análise de dependências."""
     severity = finding.get('severity', 'INFO').upper()
@@ -361,23 +373,20 @@ def _get_project_config(logger, start_path='.'):
             with open(config_path, 'r', encoding='utf-8') as f:
                 toml_data = toml.load(f)
                 config.update(toml_data.get('tool', {}).get('doxoade', {}))
-        except Exception as e:
-            logger.add_finding('WARNING', "Não foi possível ler o pyproject.toml.", details=str(e))
+        except Exception as config_except:
+                logger.add_finding('WARNING', "Não foi possível ler o pyproject.toml.", details=str(config_except))
     source_dir = config.get('source_dir', '.')
     search_path = os.path.join(root_path, source_dir)
     config['search_path_valid'] = os.path.isdir(search_path)
     if not config['search_path_valid']:
         if logger:
             logger.add_finding('CRITICAL', f"O diretório de código-fonte '{search_path}' não existe.", details="Verifique a diretiva 'source_dir' no seu pyproject.toml.")
-        else:
-            pass
     config['root_path'] = root_path
     config['search_path'] = search_path
     return config
 
 def _get_code_snippet(file_path, line_number, context_lines=2):
-    if not line_number or not isinstance(line_number, int) or line_number <= 0:
-        return None
+    if not line_number or not isinstance(line_number, int) or line_number <= 0: return None
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             lines = f.readlines()
@@ -385,9 +394,7 @@ def _get_code_snippet(file_path, line_number, context_lines=2):
         end = min(len(lines), line_number + context_lines)
         snippet = {i + 1: lines[i].rstrip('\n') for i in range(start, end)}
         return snippet
-    except (IOError, IndexError):
-        return None
-
+    except (IOError, IndexError): return None
 
 # --- NOVO BLOCO: FERRAMENTAS COMPARTILHADAS DE REGRESSÃO ---
 
@@ -478,31 +485,27 @@ def analyze_file_structure(file_path):
     
     function_dossiers = _analyze_function_flow(tree, content)
     return {'functions': function_dossiers}
-    
+
 def collect_files_to_analyze(config, cmd_line_ignore=None):
     """
     (Fonte da Verdade) Coleta uma lista de arquivos .py para análise, respeitando
     as configurações de ignore do pyproject.toml e da linha de comando.
     """
-    if cmd_line_ignore is None:
-        cmd_line_ignore = []
-        
+    if cmd_line_ignore is None: cmd_line_ignore = []
     search_path = config.get('search_path')
     config_ignore = [p.strip('/\\').lower() for p in config.get('ignore', [])]
-    # Converte a tupla de 'cmd_line_ignore' em uma lista
     cmd_line_ignore_list = [p.strip('/\\').lower() for p in list(cmd_line_ignore)]
     folders_to_ignore = set(config_ignore + cmd_line_ignore_list)
-    folders_to_ignore.update(['venv', 'build', 'dist', '.git', '__pycache__'])
+    folders_to_ignore.update(['venv', 'build', 'dist', '.git', '__pycache__', '.doxoade_cache', 'pytest_temp_dir'])
     
     files_to_check = []
     for root, dirs, files in os.walk(search_path, topdown=True):
-        # A lógica de poda que funciona
         dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
         for file in files:
             if file.endswith('.py'):
                 files_to_check.append(os.path.join(root, file))
     return files_to_check
-    
+
 def _present_diff_output(output, error_line_number=None):
     """
     (Versão Final V5 - Simplificada e Robusta) Formata e exibe a saída do 'git diff'.

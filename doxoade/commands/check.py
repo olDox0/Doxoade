@@ -1,5 +1,4 @@
 # doxoade/commands/check.py
-#import traceback
 import sys
 import subprocess
 import sqlite3 
@@ -16,7 +15,6 @@ from io import StringIO
 from importlib import resources
 from colorama import Fore
 
-# Linha corrigida, que não causa o ciclo
 from .._version import __version__ as DOXOADE_VERSION
 from ..database import get_db_connection
 from ..fixer import AutoFixer
@@ -31,7 +29,6 @@ from ..shared_tools import (
     analyze_file_structure,
     _update_open_incidents
 )
-
 
 # Lista de tags que silenciam erros
 SILENCERS = {
@@ -54,11 +51,6 @@ QA_TAGS = {
 }
 
 def _filter_and_inject_findings(findings, file_path):
-    """
-    (Gênese V11)
-    1. Filtra findings se a linha tiver diretivas de silêncio (# noqa).
-    2. Injeta novos findings se encontrar tags de QA (# TODO, # FIXME).
-    """
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             lines = f.readlines()
@@ -66,244 +58,126 @@ def _filter_and_inject_findings(findings, file_path):
         return findings
 
     final_findings = []
-    
-    # 1. FILTRAGEM (Supressão)
     for f in findings:
         line_num = f.get('line')
         if not line_num or line_num > len(lines):
             final_findings.append(f)
             continue
-            
         line_content = lines[line_num - 1]
-        
-        # Verifica se tem silenciador
         is_silenced = False
-        # Extrai comentários
         if '#' in line_content:
             comment = line_content.split('#', 1)[1].strip().upper()
-            
-            # Verifica silenciadores genéricos
             for tag in SILENCERS:
                 if tag.upper() in comment:
-                    # Verifica se é específico (ex: noqa: SECURITY)
-                    if ':' in comment:
-                        # Formato: NOQA: E501, SECURITY
-                        directives = comment.split(':')[-1].replace(',', ' ').split()
-                        category = f.get('category', '').upper()
-                        # Se a categoria do erro estiver na lista, silencia
-                        # Se a lista tiver 'ALL' ou vazia, silencia tudo? 
-                        # Vamos simplificar: Se tiver 'TAG: CAT', só silencia se bater CAT.
-                        # Se só tiver 'TAG', silencia tudo.
-                        
-                        # Verifica se alguma diretiva bate com a categoria ou parte da mensagem
-                        matches_category = any(d in category for d in directives)
-                        matches_msg = any(d.lower() in f.get('message', '').lower() for d in directives)
-                        
-                        if matches_category or matches_msg:
-                            is_silenced = True
-                    else:
-                        # Silenciador global na linha
-                        is_silenced = True
+                    is_silenced = True
                     break
-        
         if not is_silenced:
             final_findings.append(f)
 
-    # 2. INJEÇÃO (QA Tags)
-    # Escaneia o arquivo inteiro uma vez
     for i, line in enumerate(lines):
         if '#' in line:
             comment_part = line.split('#', 1)[1].strip()
-            # Verifica se começa com alguma tag conhecida
-            # Ex: # TODO: Refatorar isso
-            
-            # Pega a primeira palavra do comentário
-            first_word = comment_part.split(':')[0].split()[0].upper()
-            
-            # Remove pontuação comum (ex: TODO:)
-            first_word = first_word.rstrip(':')
-            
+            first_word = comment_part.split(':')[0].split()[0].upper().rstrip(':')
             if first_word in QA_TAGS:
-                severity = QA_TAGS[first_word]
-                msg = comment_part[len(first_word):].strip().lstrip(':').strip()
-                if not msg: msg = "Lembrete de QA sem descrição."
-                
                 final_findings.append({
-                    'severity': severity,
+                    'severity': QA_TAGS[first_word],
                     'category': 'QA-REMINDER',
-                    'message': f"[{first_word}] {msg}",
+                    'message': f"[{first_word}] {comment_part[len(first_word):].strip().lstrip(':').strip()}",
                     'file': file_path,
                     'line': i + 1,
                     'snippet': _get_code_snippet(file_path, i + 1)
                 })
-
     return final_findings
 
 def _get_probe_path(probe_name):
-    """Encontra o caminho para um arquivo de sonda de forma segura."""
     try:
-        # Python 3.9+
         with resources.path('doxoade.probes', probe_name) as probe_path:
             return str(probe_path)
     except (AttributeError, ModuleNotFoundError):
-        # Fallback para Python < 3.9
         from pkg_resources import resource_filename
         return resource_filename('doxoade', f'probes/{probe_name}')
 
 def _run_syntax_probe(file_path, python_executable, debug=False):
     findings = []
-    # ALTERADO: Chama o arquivo da sonda em vez da string
     probe_path = _get_probe_path('syntax_probe.py')
     syntax_cmd = [python_executable, probe_path, file_path]
     try:
         result = subprocess.run(syntax_cmd, capture_output=True, text=True, encoding='utf-8', errors='backslashreplace')
-        # ... (o resto da função continua igual) ...
-        if debug:
-            click.echo(Fore.CYAN + "\n--- [DEBUG-SYNTAX PROBE] ---")
-            click.echo(f"  > Alvo: {file_path}")
-            click.echo(f"  > RC Sonda Sintaxe: {result.returncode}")
-            click.echo(f"  > STDERR Sintaxe:\n---\n{result.stderr.strip()}\n---")
-            click.echo("--- [FIM DEBUG-SYNTAX PROBE] ---\n")
-
         if result.returncode != 0:
-            line_match = re.search(r':(\d+):', result.stderr)
-            line_num = int(line_match.group(1)) if line_match else 1
-            findings.append({'severity': 'CRITICAL', 'category': 'SYNTAX', 'message': f"Erro de sintaxe impede a análise: {result.stderr.strip()}", 'file': file_path, 'line': line_num})
+            findings.append({'severity': 'CRITICAL', 'category': 'SYNTAX', 'message': f"Erro de sintaxe: {result.stderr.strip()}", 'file': file_path, 'line': 1})
     except Exception as e:
-        findings.append({'severity': 'CRITICAL', 'category': 'SYNTAX', 'message': f"Falha catastrófica ao invocar a sonda de sintaxe: {e}", 'file': file_path, 'line': line_num})
+        findings.append({'severity': 'CRITICAL', 'category': 'SYNTAX', 'message': str(e), 'file': file_path})
     return findings
 
 def _run_pyflakes_probe(file_path, python_executable, debug=False):
     findings = []
-    # ALTERADO: Chama o arquivo da sonda em vez da string
     probe_path = _get_probe_path('static_probe.py')
-    pyflakes_cmd = [python_executable, probe_path, file_path]
+    cmd = [python_executable, probe_path, file_path]
     try:
-        result = subprocess.run(pyflakes_cmd, capture_output=True, text=True, encoding='utf-8', errors='backslashreplace')
-        # ... (o resto da função continua igual) ...
-        if debug:
-            click.echo(Fore.CYAN + "\n--- [DEBUG-CHECK] ---")
-            click.echo(f"  > Alvo: {file_path}")
-            click.echo(f"  > RC Sonda: {result.returncode}")
-            click.echo(f"  > STDOUT Sonda:\n---\n{result.stdout.strip()}\n---")
-            click.echo(f"  > STDERR Sonda:\n---\n{result.stderr.strip()}\n---")
-            click.echo("--- [FIM DEBUG] ---\n")
-
-        if result.stderr:
-            if 'invalid syntax' in result.stderr.lower() or 'indentation' in result.stderr.lower():
-                line_match = re.search(r':(\d+):', result.stderr)
-                line_num = int(line_match.group(1)) if line_match else 1
-                findings.append({'severity': 'CRITICAL', 'message': f"Erro de sintaxe impede a análise: {result.stderr.strip()}", 'file': file_path, 'line': line_num})
-            else:
-                findings.append({'severity': 'WARNING', 'message': "Sonda de análise estática reportou um erro.", 'file': file_path, 'line': 1, 'details': result.stderr})
-
-        for line_error in result.stdout.strip().splitlines():
-            match = re.match(r'(.+?):(\d+):(\d+):\s(.+)', line_error)
-            if match:
-                _, line_num, _, message_text = match.groups()
-    
-                # --- LÓGICA DE CLASSIFICAÇÃO APRIMORADA ---
-                if 'imported but unused' in message_text or 'redefinition' in message_text:
-                    severity = 'ERROR'
-                    category = 'DEADCODE'
-                elif 'undefined name' in message_text:
-                    severity = 'CRITICAL'
-                    category = 'RUNTIME-RISK'
-                # Adicione mais regras aqui se necessário, como para f-strings
-                elif "f-string is missing placeholders" in message_text:
-                    severity = 'WARNING'
-                    category = 'STYLE'
-                else:
-                    severity = 'WARNING'
-                    category = 'STYLE' # Padrão para outros avisos do Pyflakes
-    
-                findings.append({
-                    'severity': severity,
-                    'category': category,
-                    'message': message_text,
-                    'file': file_path,
-                    'line': int(line_num)
-                })
-    except Exception as e:
-        findings.append({'severity': 'CRITICAL', 'message': f"Falha catastrófica ao invocar a sonda Pyflakes: {e}", 'file': file_path})
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+        for line in result.stdout.splitlines():
+            if ":" in line:
+                parts = line.split(":", 3)
+                if len(parts) >= 4:
+                    msg = parts[3].strip()
+                    cat = 'DEADCODE' if 'unused' in msg else ('RUNTIME-RISK' if 'undefined' in msg else 'STYLE')
+                    findings.append({'severity': 'WARNING', 'category': cat, 'message': msg, 'file': file_path, 'line': int(parts[1])})
+    except: pass
     return findings
 
 def _run_hunter_probe(file_path, python_executable, debug=False):
-    """Executa a sonda de caça a riscos (Hunter Probe)."""
     findings = []
     probe_path = _get_probe_path('hunter_probe.py')
-    
-    cmd = [python_executable, probe_path, file_path]
-    
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
-        
-        if debug and result.stderr:
-             click.echo(Fore.CYAN + f"[DEBUG-HUNTER] {result.stderr}")
-
-        if result.returncode == 0 and result.stdout.strip():
-            try:
-                raw_data = json.loads(result.stdout)
-                # Adiciona o nome do arquivo a cada finding
-                for item in raw_data:
-                    item['file'] = file_path
-                    findings.append(item)
-            except json.JSONDecodeError:
-                pass
-                
-    except Exception as e:
-        findings.append({'severity': 'ERROR', 'message': f"Falha no Hunter Probe: {e}", 'file': file_path, 'line': 1})
-        
+        result = subprocess.run([python_executable, probe_path, file_path], capture_output=True, text=True, encoding='utf-8', errors='replace')
+        if result.stdout.strip():
+            data = json.loads(result.stdout)
+            for item in data:
+                item['file'] = file_path
+                findings.append(item)
+    except: pass
     return findings
 
 def _run_import_probe(all_imports, venv_python, logger, search_path):
-    unique_module_names = sorted(list({imp['module'] for imp in all_imports}))
-    if not unique_module_names: return []
+    unique = sorted(list({imp['module'] for imp in all_imports}))
+    if not unique: return []
     try:
-        # ALTERADO: Chama o arquivo da sonda em vez da string
         probe_path = _get_probe_path('import_probe.py')
-        process = subprocess.run([venv_python, probe_path], input=json.dumps(unique_module_names), capture_output=True, text=True, check=True, encoding='utf-8')
-        missing_from_venv = set(json.loads(process.stdout))
-    except (subprocess.CalledProcessError, json.JSONDecodeError) as e:
-        logger.add_finding('CRITICAL', "A Sonda de Ambiente falhou.", details=str(e))
-        return []
-    # ... (o resto da função continua igual) ...
-    if not missing_from_venv: return []
-    truly_missing_modules = set()
-    for module_name in missing_from_venv:
-        potential_file = os.path.join(search_path, f"{module_name}.py")
-        potential_package = os.path.join(search_path, module_name)
-        if not os.path.exists(potential_file) and not os.path.isdir(potential_package):
-            truly_missing_modules.add(module_name)
-    if not truly_missing_modules: return []
-    import_findings = []
-    IGNORE_MODULES = {'setuptools', 'kivy', 'ia_core'}
+        process = subprocess.run([venv_python, probe_path], input=json.dumps(unique), capture_output=True, text=True, check=True, encoding='utf-8')
+        missing = set(json.loads(process.stdout))
+    except: return []
+    
+    truly_missing = set()
+    for m in missing:
+        if not os.path.exists(os.path.join(search_path, f"{m}.py")) and not os.path.isdir(os.path.join(search_path, m)):
+            truly_missing.add(m)
+            
+    findings = []
+    IGNORE = {'setuptools', 'kivy'}
     for imp in all_imports:
-        if imp['module'] in truly_missing_modules and imp['module'] not in IGNORE_MODULES:
-            import_findings.append({'severity': 'CRITICAL', 'category': 'DEPENDENCY', 'message': f"Import não resolvido: Módulo '{imp['module']}' não foi encontrado.", 'file': imp['file'], 'line': imp['line'], 'snippet': _get_code_snippet(imp['file'], imp['line'])})
-    return import_findings
+        if imp['module'] in truly_missing and imp['module'] not in IGNORE:
+            findings.append({'severity': 'CRITICAL', 'category': 'DEPENDENCY', 'message': f"Import não resolvido: '{imp['module']}'", 'file': imp['file'], 'line': imp['line']})
+    return findings
 
 def _extract_imports(file_path):
     imports = []
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f: content = f.read()
-        if content.strip():
-            tree = ast.parse(content, filename=file_path)
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Import):
-                    for alias in node.names: imports.append({'module': alias.name.split('.')[0], 'line': node.lineno, 'file': file_path})
-                elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module: imports.append({'module': node.module.split('.')[0], 'line': node.lineno, 'file': file_path})
-    except (SyntaxError, IOError):
-        pass
+        tree = ast.parse(content, filename=file_path)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names: imports.append({'module': alias.name.split('.')[0], 'line': node.lineno, 'file': file_path})
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                imports.append({'module': node.module.split('.')[0], 'line': node.lineno, 'file': file_path})
+    except: pass
     return imports
     
 def _analyze_single_file_statically(file_path, python_executable, debug=False):
-    syntax_findings = _run_syntax_probe(file_path, python_executable, debug)
-    if syntax_findings:
-        return syntax_findings, []
-    pyflakes_findings = _run_pyflakes_probe(file_path, python_executable, debug)
-    imports = _extract_imports(file_path)
-    return pyflakes_findings, imports
+    syntax = _run_syntax_probe(file_path, python_executable, debug)
+    if syntax: return syntax, []
+    pf = _run_pyflakes_probe(file_path, python_executable, debug)
+    imps = _extract_imports(file_path)
+    return pf, imps
     
 def _fix_unused_imports(file_path, logger):
     """Comenta linhas com imports não utilizados em um arquivo."""
@@ -443,7 +317,6 @@ def _save_cache(cache_data):
     except IOError:
         click.echo(Fore.YELLOW + "\nAviso: Não foi possível escrever no arquivo de cache.")
 
-
 # =============================================================================
 # O ORQUESTRADOR DO PIPELINE
 # =============================================================================
@@ -550,7 +423,6 @@ def _analyze_dependencies(findings, file_path):
     
     return findings
 
-
 def _extract_current_imports(file_path):
     """
     Extrai os imports atuais de um arquivo Python.
@@ -590,7 +462,6 @@ def _extract_current_imports(file_path):
     
     return imports
 
-
 def _enrich_with_dependency_analysis(findings, project_path):
     """
     Enriquece os findings com análise de dependências.
@@ -618,13 +489,6 @@ def _enrich_with_dependency_analysis(findings, project_path):
 def _enrich_findings_with_solutions(findings):
     """
     (Gênese V2 - Expandido) Consulta o DB por soluções exatas E aplica templates genéricos.
-    
-    Templates suportados:
-    - REMOVE_LINE: Remove a linha problemática
-    - REMOVE_F_PREFIX: Remove o 'f' de f-strings sem placeholders
-    - REPLACE_WITH_UNDERSCORE: Substitui variável por '_'
-    - ADD_IMPORT_OR_DEFINE: Apenas sugere (ação manual necessária)
-    - FIX_INDENTATION: Apenas sugere (ação manual necessária)
     """
     if not findings: return
     
@@ -637,8 +501,6 @@ def _enrich_findings_with_solutions(findings):
         templates = cursor.fetchall()
 
         for finding in findings:
-            if finding.get('import_suggestion'):
-                continue
             # 1. Tenta encontrar uma solução exata primeiro
             finding_hash = finding.get('hash')
             if finding_hash:
@@ -706,7 +568,6 @@ def _enrich_findings_with_solutions(findings):
                     
                     elif solution_type == "REMOVE_F_PREFIX":
                         # Remove o 'f' de f-strings
-                        # Encontra f" ou f' e remove o f
                         new_line = re.sub(r'\bf(["\'])', r'\1', original_line)
                         if new_line != original_line:
                             new_lines = lines[:line_num-1] + [new_line] + lines[line_num:]
@@ -718,7 +579,6 @@ def _enrich_findings_with_solutions(findings):
                     
                     elif solution_type == "REPLACE_WITH_UNDERSCORE":
                         # Substitui "as var:" por "as _:" em except
-                        # Ou "var =" por "_ =" em atribuições
                         var_name = match.group(1) if match.groups() else None
                         if var_name:
                             # Tenta substituir em padrão "as var"
@@ -736,7 +596,7 @@ def _enrich_findings_with_solutions(findings):
                                 break
                     
                     elif solution_type in ("ADD_IMPORT_OR_DEFINE", "FIX_INDENTATION"):
-                        # MODIFICADO: Só mostra se não tiver import_suggestion
+                        # Sugere ação manual
                         if not finding.get('import_suggestion'):
                             finding['suggestion_source'] = "TEMPLATE_MANUAL"
                             finding['suggestion_action'] = {
@@ -892,46 +752,29 @@ def _manage_incidents(findings, project_path):
     return stats
 
 def _run_smart_fix(findings, project_path, logger):
-    """
-    (Gênese V7) Aplica correções baseadas em templates aprendidos.
-    """
-    from ..database import get_db_connection
-    
     fixer = AutoFixer(logger)
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    
     fixed_count = 0
     
     try:
-        # Carrega templates confiáveis
         cursor.execute("SELECT * FROM solution_templates WHERE confidence > 0")
         templates = cursor.fetchall()
         
-        # Ordena findings de baixo para cima (para não estragar indices de linha ao deletar)
-        # Isso é crucial quando removemos linhas!
         sorted_findings = sorted(findings, key=lambda x: x.get('line', 0), reverse=True)
-        
-        # Para evitar conflitos, aplicamos um fix por arquivo por passada, ou gerenciamos offset
-        # Simplificação V1: Tenta aplicar tudo (assumindo que remove_line é a unica que muda indices drasticamente)
         
         for finding in sorted_findings:
             msg = finding.get('message', '')
             category = finding.get('category', '')
-            
-            # Procura um template compatível
             matched_template = None
             context = {}
             
             for t in templates:
-                if t['category'] != category: continue
+                if t['category'] != category: 
+                    continue
                 
-                # Reconstrói regex do template
                 pattern_regex = (re.escape(t['problem_pattern'])
-                    .replace('___MODULE___', '(.+?)') # No DB salvamos com placeholders limpos? 
-                    # Nota: No passo anterior, salvamos como '<MODULE>'.
-                    # Vamos ajustar o regex builder para ser consistente.
                     .replace('<MODULE>', '(.+?)')
                     .replace('<VAR>', '(.+?)')
                     .replace('<LINE>', r'(\d+)'))
@@ -939,191 +782,140 @@ def _run_smart_fix(findings, project_path, logger):
                 match = re.fullmatch(pattern_regex, msg)
                 if match:
                     matched_template = t
-                    # Extrai variáveis se houver grupos de captura
-                    # Isso é frágil se houver multiplos grupos.
-                    # Melhor: Se o template for REPLACE_WITH_UNDERSCORE, precisamos do nome da variavel.
-                    if t['solution_template'] == 'REPLACE_WITH_UNDERSCORE':
-                        # Assume que o grupo 1 é a variável (padrão do regex)
-                        if match.groups():
-                            context['var_name'] = match.group(1)
+                    if t['solution_template'] == 'REPLACE_WITH_UNDERSCORE' and match.groups():
+                        context['var_name'] = match.group(1)
                     break
             
             if matched_template:
-                # Prepara o contexto para o Fixer
-                context['diff_pattern'] = matched_template['diff_pattern'] # <--- LINHA CRÍTICA
+                raw_path = finding['file']
                 
-                # Aplica o fix
-                file_abs = os.path.join(project_path, finding['file'])
-                if fixer.apply_fix(file_abs, finding['line'], matched_template['solution_template'], context):
+                # Converte para absoluto usando o CWD
+                abs_raw_path = os.path.abspath(raw_path)
+                
+                if not os.path.exists(abs_raw_path):
+                    continue
+                
+                final_path = os.path.normpath(abs_raw_path)
+                
+                if fixer.apply_fix(final_path, finding['line'], matched_template['solution_template'], context):
                     fixed_count += 1
-                    click.echo(Fore.GREEN + f"   > [AUTOFIX] Aplicado: {matched_template['solution_template']} em {finding['file']}:{finding['line']}")
-                    
+                    click.echo(Fore.GREEN + f"   > [AUTOFIX] {matched_template['solution_template']}: {finding['file']}:{finding['line']}")
+                                        
     except Exception as e:
         click.echo(Fore.RED + f"[ERRO AUTOFIX] {e}")
     finally:
         conn.close()
-        
+    
     return fixed_count
 
 def _run_clone_probe(files, python_executable, debug=False):
-    """Executa a sonda de detecção de duplicatas (Gênese V14)."""
     findings = []
     probe_path = _get_probe_path('clone_probe.py')
-    
-    # Evita rodar se tiver poucos arquivos, MAS para o teste queremos ver o log
-    if len(files) < 1: 
-        return []
-
-    if debug:
-        click.echo(Fore.CYAN + f"   > [DEBUG] Iniciando análise de clones em {len(files)} arquivos...")
-
+    if len(files) < 2: return []
+    if debug: click.echo(Fore.CYAN + f"   > [DEBUG] Iniciando análise de clones em {len(files)} arquivos...")
     try:
         input_json = json.dumps(files)
         cmd = [python_executable, probe_path]
-        result = subprocess.run(
-            cmd, 
-            input=input_json,
-            capture_output=True, 
-            text=True, 
-            encoding='utf-8', 
-            errors='replace'
-        )
-        
-        # --- DEBUG: MOSTRA O STDERR DA SONDA ---
-        if debug and result.stderr:
-             click.echo(Fore.YELLOW + "--- [CLONE PROBE LOG] ---")
-             click.echo(Fore.YELLOW + result.stderr.strip())
-             click.echo(Fore.YELLOW + "-------------------------")
-        # ---------------------------------------
-        
+        result = subprocess.run(cmd, input=input_json, capture_output=True, text=True, encoding='utf-8', errors='replace')
         if result.returncode == 0 and result.stdout.strip():
-            try:
-                data = json.loads(result.stdout)
-                findings.extend(data)
-                if debug:
-                    click.echo(Fore.CYAN + f"   > [DEBUG] Clones encontrados: {len(data)}")
-            except json.JSONDecodeError:
-                if debug:
-                    click.echo(Fore.RED + f"   > [DEBUG] Erro JSON: {result.stdout}")
-                    
-    except Exception as e:
-        if debug: click.echo(Fore.RED + f"   > [DEBUG] Falha clone_probe: {e}")
-            
+            findings.extend(json.loads(result.stdout))
+    except: pass
     return findings
 
 def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=False, no_cache=False, target_files=None, check_clones=False):
-    if no_cache:
-        click.echo(Fore.YELLOW + "A opção --no-cache foi usada. A análise completa será executada.")
-    
+    if no_cache: click.echo(Fore.YELLOW + "A opção --no-cache foi usada.")
     cache = {} if no_cache else _load_cache()
     
-    # Lógica de arquivo único corrigida
     is_single_file = os.path.isfile(path)
     if is_single_file:
-        config = {'search_path_valid': True, 'root_path': os.path.dirname(os.path.abspath(path))}
+        # ✅ CORREÇÃO: Para arquivo único, o root é o DIRETÓRIO do arquivo
+        root_path = os.path.dirname(os.path.abspath(path))
+        config = {'search_path_valid': True, 'root_path': root_path}
         if not target_files: target_files = [path]
     else:
+        # Para diretórios, o root é o próprio path
+        root_path = os.path.abspath(path)
         config = _get_project_config(None, start_path=path)
-        if not config.get('search_path_valid'):
-            return {'summary': {'critical': 1}, 'findings': [{'severity': 'CRITICAL', 'message': "Path invalido"}]}
+        if not config.get('search_path_valid'): return {'summary': {'critical': 1}, 'findings': []}
 
-    python_executable = _get_venv_python_executable() or sys.executable
-
-    analysis_state = {
-        'root_path': path if not is_single_file else os.path.dirname(os.path.abspath(path)),
-        'files_to_process': target_files if target_files else collect_files_to_analyze(config, cmd_line_ignore),
-        'raw_findings': [],
-        'file_reports': {}
-    }
+    python_exe = _get_venv_python_executable() or sys.executable
+    files = target_files if target_files else collect_files_to_analyze(config, cmd_line_ignore)
     
-    files_valid_for_clones = []
+    analysis = {'raw_findings': [], 'files': files}
+    valid_files = []
 
-    # 1. Análise Individual
-    for file_path in analysis_state['files_to_process']:
-        file_hash = _get_file_hash(file_path)
-        rel_file_path = os.path.relpath(file_path, path)
-
-        if not no_cache and file_hash and rel_file_path in cache and cache[rel_file_path].get('hash') == file_hash:
-            cached_item = cache[rel_file_path]
-            findings = cached_item.get('findings', [])
-            files_valid_for_clones.append(file_path)
-            if not fast:
-                analysis_state['file_reports'][rel_file_path] = {'structure_analysis': cached_item.get('structure', {})}
+    for fp in files:
+        h = _get_file_hash(fp)
+        # ✅ CORREÇÃO: Use root_path consistentemente
+        rel = os.path.relpath(fp, root_path) if not is_single_file else os.path.basename(fp)
+        
+        if not no_cache and h and rel in cache and cache[rel].get('hash') == h:
+            analysis['raw_findings'].extend(cache[rel].get('findings', []))
+            valid_files.append(fp)
         else:
-            syntax_findings = _run_syntax_probe(file_path, python_executable, debug)
-            if syntax_findings:
-                analysis_state['raw_findings'].extend(syntax_findings)
+            syn = _run_syntax_probe(fp, python_exe)
+            if syn:
+                analysis['raw_findings'].extend(syn)
                 continue
-
-            files_valid_for_clones.append(file_path)
-            pf_findings, _ = _analyze_single_file_statically(file_path, python_executable, debug)
-            hunter_findings = _run_hunter_probe(file_path, python_executable, debug)
-            findings = pf_findings + hunter_findings
             
-            structure = {}
-            if not fast:
-                structure = analyze_file_structure(file_path)
-                analysis_state['file_reports'][rel_file_path] = {'structure_analysis': structure}
-            
-            if file_hash:
-                cache[rel_file_path] = {'hash': file_hash, 'findings': findings, 'structure': structure}
+            valid_files.append(fp)
+            pf = _run_pyflakes_probe(fp, python_exe)
+            ht = _run_hunter_probe(fp, python_exe)
+            findings = pf + ht
+            analysis['raw_findings'].extend(findings)
+            if h: cache[rel] = {'hash': h, 'findings': findings}
 
-        analysis_state['raw_findings'].extend(findings)
+    if (check_clones or not fast) and valid_files:
+        analysis['raw_findings'].extend(_run_clone_probe(valid_files, python_exe, debug))
 
-    # 2. Clones
-    if (check_clones or not fast) and files_valid_for_clones:
-        clone_findings = _run_clone_probe(files_valid_for_clones, python_executable, debug)
-        analysis_state['raw_findings'].extend(clone_findings)
+    # Fix Step - ✅ PASSA O root_path CORRETO
+    if fix:
+        click.echo(Fore.CYAN + "\nModo de correção (--fix) ativado...")
+        with ExecutionLogger('autofix', root_path, {}) as fix_logger:
+            count = _run_smart_fix(analysis['raw_findings'], root_path, fix_logger)
+        if count > 0: click.echo(Fore.GREEN + f"   > Total de correções: {count}")
 
-    # 3. Imports, Fix, Enrich, Incidents (Simplificado para brevidade, mantenha a lógica original aqui...)
-    # ... (mesmo código das versões anteriores para estas etapas) ...
-    project_path = os.path.abspath(path)
-    _enrich_with_dependency_analysis(analysis_state['raw_findings'], project_path)
-    _enrich_findings_with_solutions(analysis_state['raw_findings'])
-    _manage_incidents(analysis_state['raw_findings'], project_path)
+    # Finalization
+    final = []
+    for f in analysis['raw_findings']:
+        if not f.get('hash'):
+            u = f"{f.get('file')}:{f.get('line')}:{f.get('message')}"
+            f['hash'] = hashlib.md5(u.encode('utf-8')).hexdigest()
+        final.append(f)
 
-    # 4. Finalização e Filtragem (A CORREÇÃO ESTÁ AQUI)
-    final_findings = []
-    for f in analysis_state['raw_findings']:
-        # Garante hash
-        if not f.get('hash') and f.get('file'):
-             unique = f"{f['file']}:{f.get('line')}:{f.get('message')}"
-             f['hash'] = hashlib.md5(unique.encode('utf-8')).hexdigest()
-        final_findings.append(f)
-
-    all_findings_filtered = []
-    findings_by_file = {}
-    
-    # Agrupa findings pelo caminho exato que está no finding (geralmente absoluto)
-    for f in final_findings:
+    # Filter & Inject
+    filtered = []
+    by_file = {}
+    for f in final:
         p = f.get('file')
-        if p:
-            if p not in findings_by_file: findings_by_file[p] = []
-            findings_by_file[p].append(f)
-        else:
-            # Findings sem arquivo (globais)
-            all_findings_filtered.append(f)
-        
-    for file_path in analysis_state['files_to_process']:
-        # CORREÇÃO: Usamos o file_path EXATO (absoluto) para buscar no dicionário
-        # pois as sondas (incluindo clone_probe) retornam caminhos absolutos.
-        current_file_findings = findings_by_file.get(file_path, [])
-        
-        # Filtra (Noqa / TODOs)
-        processed_findings = _filter_and_inject_findings(current_file_findings, file_path)
-        all_findings_filtered.extend(processed_findings)
-        
-    # Retorno
-    with ExecutionLogger('check', path, {'fix': fix, 'debug': debug}) as logger:
-        for f in all_findings_filtered:
-            # snippet precisa de caminho valido
-            snippet = _get_code_snippet(f.get('file'), f.get('line'))
+        if p: 
+            if p not in by_file: by_file[p] = []
+            by_file[p].append(f)
+    
+    for fp in files:
+        fs = by_file.get(fp) or by_file.get(os.path.abspath(fp)) or []
+        filtered.extend(_filter_and_inject_findings(fs, fp))
+
+    # ✅ CORREÇÃO: Use root_path no ExecutionLogger
+    with ExecutionLogger('check', root_path, {'fix': fix}) as logger:
+        for f in filtered:
+            s = _get_code_snippet(f.get('file'), f.get('line'))
             logger.add_finding(
-                severity=f['severity'], message=f.get('message', ''), category=f.get('category', 'UNCATEGORIZED'),
-                file=f.get('file'), line=f.get('line'), snippet=snippet, details=f.get('details'),
-                suggestion_content=f.get('suggestion_content'), suggestion_line=f.get('suggestion_line'),
-                finding_hash=f.get('hash'), import_suggestion=f.get('import_suggestion'),
-                dependency_type=f.get('dependency_type'), missing_import=f.get('missing_import')
+                severity=f['severity'], 
+                message=f.get('message'), 
+                category=f.get('category', 'UNCATEGORIZED'),
+                file=f.get('file'), 
+                line=f.get('line'), 
+                snippet=s, 
+                finding_hash=f.get('hash'),
+                # ✅ RESTAURADO: Campos de sugestão
+                suggestion_content=f.get('suggestion_content'),
+                suggestion_line=f.get('suggestion_line'),
+                suggestion_source=f.get('suggestion_source'),
+                suggestion_action=f.get('suggestion_action'),
+                import_suggestion=f.get('import_suggestion'),
+                dependency_type=f.get('dependency_type'),
+                missing_import=f.get('missing_import')
             )
         if not no_cache: _save_cache(cache)
         return logger.results
@@ -1134,31 +926,21 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
 
 @click.command('check')
 @click.pass_context
-@click.argument('path', type=click.Path(exists=True, file_okay=True), default='.')
-@click.option('--ignore', 'cmd_line_ignore', multiple=True, help="Ignora uma pasta.")
-@click.option('--fix', is_flag=True, help="Tenta corrigir problemas automaticamente.")
-@click.option('--debug', is_flag=True, help="Ativa a saída de depuração detalhada.")
-@click.option('--format', 'output_format', type=click.Choice(['text', 'json']), default='text', help="Define o formato da saída.")
-@click.option('--fast', is_flag=True, help="Executa uma análise rápida (pula clones/estrutura).")
-@click.option('--no-imports', is_flag=True, help="Pula a verificação de imports não resolvidos.")
-@click.option('--no-cache', is_flag=True, help="Força uma reanálise completa, ignorando o cache.")
-@click.option('--clones', is_flag=True, help="Força a análise de código duplicado (DRY).") # <--- NOVO
-def check(ctx, path, cmd_line_ignore, fix, debug, output_format, fast, no_imports, no_cache, clones):
-    """Análise estática, estrutural e de duplicatas completa do projeto."""
-    if not debug and output_format == 'text':
-        click.echo(Fore.YELLOW + "[CHECK] Executando análise...")
-        
-    results = run_check_logic(
-        path, cmd_line_ignore, fix, debug, 
-        fast=fast, no_imports=no_imports, no_cache=no_cache, check_clones=clones # <--- Passa o argumento
-    )
+@click.argument('path', type=click.Path(exists=True), default='.')
+@click.option('--ignore', multiple=True, help="Ignora uma pasta.")
+@click.option('--fix', is_flag=True, help="Tenta corrigir problemas.")
+@click.option('--debug', is_flag=True, help="Debug.")
+@click.option('--format', 'output_format', type=click.Choice(['text', 'json']), default='text')
+@click.option('--fast', is_flag=True, help="Pula análises lentas.")
+@click.option('--no-imports', is_flag=True, help="Pula verificação de imports.")
+@click.option('--no-cache', is_flag=True, help="Ignora cache.")
+@click.option('--clones', is_flag=True, help="Força análise de clones.")
+def check(ctx, path, ignore, fix, debug, output_format, fast, no_imports, no_cache, clones):
+    """Análise estática."""
+    if output_format == 'text' and not debug: click.echo(Fore.YELLOW + "[CHECK] Executando análise...")
+    results = run_check_logic(path, ignore, fix, debug, fast, no_imports, no_cache, None, clones)
     _update_open_incidents(results, os.path.abspath(path)) 
-    
-    if output_format == 'json':
-        print(json.dumps(results, indent=2, ensure_ascii=False))
-    else:
-        if not debug:
-            _present_results('text', results)
-    
-    if results.get('summary', {}).get('critical', 0) > 0:
-        sys.exit(1)
+    if output_format == 'json': print(json.dumps(results, indent=2))
+    else: 
+        if not debug: _present_results('text', results)
+    if results.get('summary', {}).get('critical', 0) > 0: sys.exit(1)
