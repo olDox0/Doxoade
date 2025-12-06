@@ -1,0 +1,37 @@
+{
+  "dogfooding": {
+    "title": "Dogfooding (Auto-Consumo)",
+    "definition": "A prática de usar a própria ferramenta para desenvolver a ferramenta. O Doxoade é testado rodando 'doxoade check .' em si mesmo. É a forma mais rápida de encontrar falhas de UX e bugs.",
+    "origin": "Prática padrão da indústria (Microsoft, anos 80)."
+  },
+  "ast_analysis": {
+    "title": "Análise AST (Abstract Syntax Tree)",
+    "definition": "Técnica usada pelo 'check' e 'guicheck'. Em vez de ler o código como texto (Regex), transformamos o código em uma árvore lógica. Permite entender que 'x = 1' é uma atribuição, não apenas caracteres.",
+    "origin": "Compiladores."
+  },
+  "atomic_write": {
+    "title": "Escrita Atômica",
+    "definition": "Padrão de segurança para salvar arquivos. Nunca sobrescreve o arquivo original diretamente. 1. Escreve num arquivo temporário. 2. Se der sucesso, faz 'os.replace' (que é atômico). Evita corrupção se o PC desligar no meio.",
+    "origin": "Sistemas de Arquivos / Bancos de Dados."
+  },
+  "exit_code_contract": {
+    "title": "Contrato do Código de Saída",
+    "definition": "A regra de ouro da automação: Se uma ferramenta falha, ela DEVE retornar 'exit(1)'. Se retornar 0, ferramentas de orquestração (como 'auto' ou CI/CD) acharão que deu tudo certo. Foi a causa do bug 'Sucesso Falso'.",
+    "origin": "Unix/POSIX."
+  },
+  "ux_driven_design": {
+    "title": "Design Orientado a UX",
+    "definition": "Filosofia onde a complexidade técnica é absorvida pela ferramenta para simplificar a vida do usuário. Exemplo: A rejeição do 'create-pipeline' em favor do 'auto' com gestão transparente de arquivos temporários.",
+    "origin": "Lição aprendida na Saga do Auto."
+  },
+  "fail_loudly": {
+    "title": "Princípio Falhe Ruidosamente",
+    "definition": "Uma ferramenta que falha com um erro explícito é melhor do que uma que falha silenciosamente ou finge sucesso. A transparência constrói confiança.",
+    "origin": "Crise da Confiança (Outubro 2025)."
+  },
+  "probing": {
+    "title": "Sondagem (Probing)",
+    "definition": "Técnica de injetar um script mínimo em um ambiente externo para extrair dados (como dependências instaladas) sem contaminar o processo principal com imports conflitantes.",
+    "origin": "Resolvendo o Paradoxo dos Dois Ambientes."
+  }
+}
