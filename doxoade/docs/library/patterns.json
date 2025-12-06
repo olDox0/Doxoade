@@ -1,0 +1,22 @@
+{
+  "probe_pattern": {
+    "title": "Padrão da Sonda Isolada (The Probe)",
+    "context": "Resolvendo o 'Paradoxo dos Dois Ambientes' (OADE-GLO-V3).",
+    "content": "Problema: Analisar um venv externo a partir do venv do Doxoade gera conflitos de importação.\nSolução: Não importe nada. Injete um script 'burro' (sem dependências) no python do alvo via subprocesso, capture o JSON de saída e analise-o no processo pai.\nUso: 'optimize', 'check', 'doctor'."
+  },
+  "transparent_abstraction": {
+    "title": "Abstração Transparente (Bypass de Shell)",
+    "context": "Resolvendo a 'Saga das Aspas' no Windows (OADE-26).",
+    "content": "Problema: O cmd.exe quebra argumentos com aspas aninhadas, tornando impossível passar comandos complexos via CLI.\nSolução: O comando recebe os args, escreve-os num arquivo temporário seguro (tempfile), e executa o arquivo. O usuário não vê o arquivo, mas a execução é perfeita.\nUso: 'doxoade auto'."
+  },
+  "self_sufficient_bootstrap": {
+    "title": "Bootstrap Autossuficiente",
+    "context": "Resolvendo a 'Crise da Portabilidade' (OADE-251020).",
+    "content": "Problema: 'ImportError: attempted relative import' quando instalado via pip.\nSolução: Um bloco de código no topo do entry-point que calcula sua própria localização e injeta o caminho pai no sys.path antes de qualquer import.\nResultado: O Doxoade roda igual se for script, módulo ou executável."
+  },
+  "manager_specialist": {
+    "title": "Padrão Gerente-Especialista",
+    "context": "Expansão do 'guicheck' para Kivy e Tkinter (OADE-29).",
+    "content": "Problema: Como analisar múltiplos frameworks sem criar um 'god-object'?\nSolução: Separar a lógica em um 'Gerente' (detecta o tipo de arquivo) e 'Especialistas' (sabem analisar apenas uma tecnologia). Adicionar suporte a PyQt agora exige apenas criar um novo especialista."
+  }
+}
