@@ -60,7 +60,7 @@ from doxoade.commands.python import python
 from doxoade.commands.rebuild import rebuild
 from doxoade.commands.regression_test import regression_test
 from doxoade.commands.rewind import rewind
-from doxoade.commands.run import run
+from doxoade.commands.run import run, flow_command
 from doxoade.commands.save import save
 from doxoade.commands.self_test import self_test
 from doxoade.commands.tutorial import tutorial_group
@@ -330,6 +330,7 @@ cli.add_command(debug)
 cli.add_command(diff)
 cli.add_command(doctor)
 cli.add_command(encoding)
+cli.add_command(flow_command, name='flow')
 cli.add_command(git_clean)
 cli.add_command(git_new)
 cli.add_command(global_health)
