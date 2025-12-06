@@ -1,0 +1,26 @@
+{
+  "saga_quotes": {
+    "title": "A Saga das Aspas (Windows CMD)",
+    "date": "2025-09-26",
+    "story": "O 'doxoade auto' falhava ao receber comandos com aspas aninhadas (ex: save \"msg\"). O cmd.exe destruía os argumentos antes de chegarem ao Python. Tentativas de 'shlex' falharam. Solução final: Abstração Transparente (escrever num arquivo temporário e rodar o arquivo).",
+    "lesson": "Não tente ser mais esperto que o Shell. Contorne-o."
+  },
+  "saga_portability": {
+    "title": "A Saga da Portabilidade (Termux)",
+    "date": "2025-10-15",
+    "story": "O Doxoade funcionava no Windows, mas quebrava no Android/Linux com 'ImportError'. Descobrimos que o pip cria entry-points que executam o script diretamente, quebrando imports relativos. Solução: Renomeação para 'cli.py' e Bootstrap Autossuficiente.",
+    "lesson": "O ambiente de desenvolvimento (dev) esconde pecados que a produção (prod) revela."
+  },
+  "saga_health": {
+    "title": "A Saga do Health (Venv Contaminado)",
+    "date": "2025-09-24",
+    "story": "O comando 'health' falhava em encontrar testes ou bibliotecas. Causa: Venvs criados com acesso a pacotes globais (--system-site-packages) causavam confusão no 'pip', que achava que tudo estava instalado mas o python isolado não achava. Solução: Destruir e recriar venvs (Protocolo Fênix).",
+    "lesson": "Ambientes contaminados não se depuram, se destroem."
+  },
+  "paradox_two_envs": {
+    "title": "O Paradoxo dos Dois Ambientes",
+    "date": "2025-10-22",
+    "story": "O 'check' reportava erros de importação em projetos que funcionavam. Motivo: O 'check' rodava no venv do Doxoade, mas tentava validar imports do venv do Projeto Alvo. Solução: Arquitetura de Sonda Isolada.",
+    "lesson": "Você não pode validar o vizinho usando os óculos da sua casa."
+  }
+}

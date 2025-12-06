@@ -1,0 +1,22 @@
+{
+  "project_cyborg": {
+    "title": "Projeto Cíborg (Augmented Coding)",
+    "status": "Concept",
+    "description": "Integração com LLMs locais (Llama/DeepSeek) rodando no Termux ou PC. O Doxoade não apenas sugeriria correções, mas geraria o código faltante validado pelo 'check'."
+  },
+  "maestro_native": {
+    "title": "Maestro Nativo (Performance)",
+    "status": "Planned",
+    "description": "Compilação de scripts '.dox' para Python puro ou C, visando resolver o gargalo de loops em arquivos grandes detectado na versão Alpha 60."
+  },
+  "plugin_engine": {
+    "title": "Motor de Plugins Real",
+    "status": "In Progress",
+    "description": "Refatoração final do 'check.py' (que ainda é monolítico) para um carregador dinâmico de sondas, permitindo que usuários criem suas próprias regras de verificação."
+  },
+  "global_sapiens": {
+    "title": "Sapiens Global",
+    "status": "Concept",
+    "description": "Sincronização de conhecimento (templates de solução) entre diferentes projetos. Se o Doxoade aprende a corrigir um bug no Projeto A, ele já sabe como corrigir no Projeto B."
+  }
+}
