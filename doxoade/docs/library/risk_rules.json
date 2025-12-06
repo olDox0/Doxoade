@@ -1,0 +1,31 @@
+{
+  "rule_shell_injection": {
+    "pattern": "shell=True",
+    "risk_score": 50,
+    "category": "SECURITY",
+    "linked_incident": "saga_quotes",
+    "message": "Uso de shell=True detectado. Alto risco de quebra de argumentos no Windows e injeção de comandos."
+  },
+  "rule_encoding_blindness": {
+    "pattern": "open\\(.*\\)",
+    "negative_lookahead": "encoding=",
+    "risk_score": 30,
+    "category": "PORTABILITY",
+    "linked_incident": "unicode_plague",
+    "message": "Abertura de arquivo sem especificar encoding='utf-8'. Risco de crash em Windows CP1252."
+  },
+  "rule_critical_file_mod": {
+    "file_pattern": "cli.py|shared_tools.py",
+    "risk_score": 20,
+    "category": "STABILITY",
+    "linked_incident": "shadowing_crisis",
+    "message": "Modificação no Núcleo ou na Fonte da Verdade. Exige revisão redobrada para evitar regressões circulares."
+  },
+  "rule_hardcoded_path": {
+    "pattern": "\\\\\\\\|/",
+    "risk_score": 15,
+    "category": "PORTABILITY",
+    "linked_incident": "saga_portability",
+    "message": "Uso de separadores de caminho hardcoded. Use os.path.join ou pathlib para compatibilidade Windows/Linux."
+  }
+}
