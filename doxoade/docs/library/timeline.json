@@ -1,0 +1,22 @@
+{
+  "era_genesis_flow": {
+    "title": "Era IV: Flow & Refatoração (Dez 2025)",
+    "date": "2025-12",
+    "content": "Foco em introspecção dinâmica e estabilidade estrutural.\n\nMarcos:\n- Flow Runner: Visualização de execução linha-a-linha ('doxoade run --flow').\n- MPoT Compliance: Refatoração massiva do núcleo Learning/Fixer para padrões da NASA.\n- Lazarus: Implementação completa do sistema anti-crash com análise forense.\n- Verilog: Suporte inicial a hardware (SystemVerilog).\n- Android Sync: Ponte segura entre Termux e Armazenamento."
+  },
+  "era_maestro": {
+    "title": "Era III: O Maestro & A Gênese (Nov 2025)",
+    "date": "2025-11",
+    "content": "Foco em automação programável e inteligência de correção.\n\nMarcos:\n- Maestro: Linguagem de script (.dox) para automação cross-platform.\n- Gênese V14: Aprendizado por inferência (Abdução) e templates de correção.\n- Moddify: Ferramenta CLI para edição cirúrgica de arquivos.\n- Pedia: Base de conhecimento integrada (JSON/MD).\n- Debug Probe: Ferramentas de geração de testes (--gen-test)."
+  },
+  "era_phoenix": {
+    "title": "Era II: Protocolo Phoenix (Out 2025)",
+    "date": "2025-10",
+    "content": "Foco em ambiente, instalação e persistência.\n\nMarcos:\n- Protocolo Phoenix: Instaladores universais e comando 'doctor'.\n- Sapiens DB: Migração de logs de texto para SQLite.\n- Cânone: Implementação de testes de regressão (Snapshot Testing).\n- Global Health: Diagnóstico da instalação do Doxoade no sistema."
+  },
+  "era_foundation": {
+    "title": "Era I: Fundação & Interface (Set 2025)",
+    "date": "2025-09",
+    "content": "Estabelecimento da CLI e ferramentas visuais.\n\nMarcos:\n- CLI Structure: Organização baseada em Click.\n- GUI Check: Primeiras sondas especializadas (Kivy/Tkinter).\n- Tutorial: Sistema de gamificação inicial.\n- Git-New: Automação 'Zero to Hero' para novos repositórios."
+  }
+}
