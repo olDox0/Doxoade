@@ -58,7 +58,7 @@ class AutoFixer:
     def _apply_remove_line(self, lines, line_num):
         idx = line_num - 1
         original = lines[idx]
-        
+        print(f"DEBUG: Tentando remover linha {line_num}: {original.strip()}")
         if "# [DOX-UNUSED]" in original:
             return False
             
