@@ -1,0 +1,27 @@
+{
+  "lazarus": {
+    "title": "Protocolo Lázaro (Anti-Crash & Forense)",
+    "date": "2025-12-02",
+    "content": "Sistema de recuperação de falhas catastróficas (Crash Recovery). Se o núcleo do Doxoade quebrar:\n1. O Wrapper de segurança captura o Traceback.\n2. O 'Smart Context' compara a linha quebrada com a última versão estável no Git.\n3. Uma análise forense sugere se foi um erro de lógica recente.\n4. O incidente é salvo para o motor Gênese aprender.\n\nComando associado: Automático (Rescue System)."
+  },
+  "phoenix": {
+    "title": "Protocolo Fênix (Saúde de Ambiente)",
+    "date": "2025-10-15",
+    "content": "Conjunto de rotinas de auto-cura para o ambiente de desenvolvimento.\nObjetivo: Garantir que o código rode igual no Windows, Linux e Android (Termux).\n\nCapacidades:\n- Detecção e criação automática de venv.\n- Sincronização de requirements.txt.\n- Verificação de PATH e dependências globais.\n\nComandos: 'doctor', 'rebuild', 'global-health'."
+  },
+  "sapiens": {
+    "title": "Arquitetura Sapiens (Memória Persistente)",
+    "date": "2025-11-03",
+    "content": "A camada de persistência que transforma o Doxoade de um Linter estático em um Engenheiro com memória.\nSubstituiu logs de texto por SQLite.\n\nTabelas:\n- Findings: Erros encontrados.\n- Incidents: Erros não resolvidos (Dívida Técnica).\n- Solutions: O que foi corrigido e como (Base para Gênese).\n\nComandos: 'history', 'log', 'dashboard'."
+  },
+  "mpot": {
+    "title": "Padrão MPoT (Modern Power of Ten)",
+    "date": "2025-12-01",
+    "content": "Adaptação das regras de segurança de código da NASA (JPL) para Python moderno.\n\nRegras Aplicadas pelo comando 'style':\n1. Evitar fluxo de controle complexo (Recursão não limitada).\n2. Funções curtas (~60 linhas).\n3. Proibição de 'global'.\n4. Programação Defensiva (Asserts).\n5. Documentação obrigatória em interfaces públicas."
+  },
+  "genesis_v14": {
+    "title": "Motor Gênese V14 (Estratégia & Abdução)",
+    "date": "2025-12-05",
+    "content": "A versão mais recente da IA Simbólica do Doxoade.\n\nEvolução:\n- Refatoração para 'Strategy Pattern' (Modularidade).\n- Capacidade de Abdução: Infere o que falta (ex: imports) sem precisar ver o erro antes.\n- Integração com Runtime: Aprende com falhas de execução capturadas pelo 'flow'."
+  }
+}

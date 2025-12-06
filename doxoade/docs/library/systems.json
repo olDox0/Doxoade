@@ -1,0 +1,27 @@
+{
+  "core_arch": {
+    "title": "Arquitetura do Núcleo",
+    "files": ["doxoade/cli.py", "doxoade/shared_tools.py", "doxoade/database.py"],
+    "description": "O sistema nervoso central. 'cli.py' gerencia a entrada, 'shared_tools' fornece a verdade universal (logs, git, paths) e 'database' persiste a memória."
+  },
+  "genesis_engine": {
+    "title": "Motor Gênese (IA Simbólica)",
+    "files": ["doxoade/learning.py", "doxoade/fixer.py"],
+    "description": "O cérebro evolutivo. 'learning.py' abstrai padrões de correção de diffs e 'fixer.py' aplica essas correções cirurgicamente no código."
+  },
+  "maestro_system": {
+    "title": "O Maestro (Orquestração)",
+    "files": ["doxoade/commands/maestro.py", "doxoade/commands/moddify.py"],
+    "description": "Interpretador DSL. O 'maestro.py' lê scripts .dox e o 'moddify.py' atua como o braço mecânico para editar arquivos em lote."
+  },
+  "probes_layer": {
+    "title": "Camada de Sondas (Probes)",
+    "files": ["doxoade/probes/syntax_probe.py", "doxoade/probes/hunter_probe.py", "doxoade/probes/clone_probe.py"],
+    "description": "Processos isolados (Sandbox). Analisam código perigoso ou instável sem derrubar o núcleo principal."
+  },
+  "phoenix_protocols": {
+    "title": "Protocolos de Cura (Fênix)",
+    "files": ["doxoade/commands/doctor.py", "doxoade/commands/install.py", "doxoade/commands/rebuild.py"],
+    "description": "Ferramentas de resiliência de ambiente. Garantem que o venv e as dependências estejam saudáveis."
+  }
+}
