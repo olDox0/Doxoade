@@ -2,21 +2,21 @@
   "era_genesis_flow": {
     "title": "Era IV: Flow & Refatoração (Dez 2025)",
     "date": "2025-12",
-    "content": "Foco em introspecção dinâmica e estabilidade estrutural.\n\nMarcos:\n- Flow Runner: Visualização de execução linha-a-linha ('doxoade run --flow').\n- MPoT Compliance: Refatoração massiva do núcleo Learning/Fixer para padrões da NASA.\n- Lazarus: Implementação completa do sistema anti-crash com análise forense.\n- Verilog: Suporte inicial a hardware (SystemVerilog).\n- Android Sync: Ponte segura entre Termux e Armazenamento."
+    "content": "Foco em introspecção dinâmica e estabilidade estrutural.\nMarcos: Flow Runner, MPoT Compliance, Lazarus, Verilog, Android Sync."
   },
   "era_maestro": {
     "title": "Era III: O Maestro & A Gênese (Nov 2025)",
     "date": "2025-11",
-    "content": "Foco em automação programável e inteligência de correção.\n\nMarcos:\n- Maestro: Linguagem de script (.dox) para automação cross-platform.\n- Gênese V14: Aprendizado por inferência (Abdução) e templates de correção.\n- Moddify: Ferramenta CLI para edição cirúrgica de arquivos.\n- Pedia: Base de conhecimento integrada (JSON/MD).\n- Debug Probe: Ferramentas de geração de testes (--gen-test)."
+    "content": "A era da Automação Cognitiva.\nMarcos:\n- Gênese V3 (Abdução): O sistema começa a sugerir imports.\n- Maestro: Criação da DSL .dox.\n- Pedia: Base de conhecimento integrada.\n- Crise do Sombreamento: Resolvida com a refatoração cli.py."
   },
   "era_phoenix": {
-    "title": "Era II: Protocolo Phoenix (Out 2025)",
+    "title": "Era II: Protocolo Fênix (Out 2025)",
     "date": "2025-10",
-    "content": "Foco em ambiente, instalação e persistência.\n\nMarcos:\n- Protocolo Phoenix: Instaladores universais e comando 'doctor'.\n- Sapiens DB: Migração de logs de texto para SQLite.\n- Cânone: Implementação de testes de regressão (Snapshot Testing).\n- Global Health: Diagnóstico da instalação do Doxoade no sistema."
+    "content": "A batalha pelo Ambiente.\nMarcos:\n- A Crise da Confiança: Descoberta da falha silenciosa.\n- Doctor: O nascimento do auto-diagnóstico.\n- Setup-Health: Automação da criação de venv.\n- Arquitetura Autossuficiente: A solução para o ImportError."
   },
   "era_foundation": {
-    "title": "Era I: Fundação & Interface (Set 2025)",
+    "title": "Era I: Fundação & Workflow (Set 2025)",
     "date": "2025-09",
-    "content": "Estabelecimento da CLI e ferramentas visuais.\n\nMarcos:\n- CLI Structure: Organização baseada em Click.\n- GUI Check: Primeiras sondas especializadas (Kivy/Tkinter).\n- Tutorial: Sistema de gamificação inicial.\n- Git-New: Automação 'Zero to Hero' para novos repositórios."
+    "content": "O início da jornada CLI.\nMarcos:\n- A Saga das Aspas: Parsing de comandos no Windows (nascimento do auto).\n- Webcheck/Guicheck: Primeiros especialistas.\n- Git-New: Automação 'Zero to Hero'."
   }
 }

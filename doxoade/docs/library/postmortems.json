@@ -1,0 +1,34 @@
+{
+  "shadowing_crisis": {
+    "title": "A Crise do Sombreamento (Name Shadowing)",
+    "date": "2025-11-22",
+    "severity": "CRITICAL",
+    "symptom": "ModuleNotFoundError no Linux/Termux apesar de instalação correta.",
+    "root_cause": "O arquivo de entrada chamava-se 'doxoade.py' e a pasta do pacote também 'doxoade/'. O interpretador priorizava o arquivo, ocultando o pacote.",
+    "fix": "Renomeação definitiva do entry-point para 'cli.py'."
+  },
+  "silent_failure": {
+    "title": "A Falha Silenciosa (A Ilusão de Sucesso)",
+    "date": "2025-10-25",
+    "severity": "CATASTROPHIC",
+    "symptom": "Comandos 'check' e 'optimize' reportavam [OK] em projetos vazios ou quebrados.",
+    "root_cause": "Lógica de descoberta de arquivos falhava silenciosamente se o diretório não existisse ou se a configuração estivesse errada.",
+    "fix": "Implementação da 'Fonte Única da Verdade' (_get_project_config) que falha ruidosamente (exit 1) se a configuração for inválida."
+  },
+  "unicode_plague": {
+    "title": "A Praga do Unicode (Windows CP1252)",
+    "date": "2025-11-23",
+    "severity": "HIGH",
+    "symptom": "Crash imediato ao tentar imprimir emojis ou barras verticais no cmd.exe.",
+    "root_cause": "Assumir que todo terminal é UTF-8. O Windows padrão usa CP1252.",
+    "fix": "Implementação de Fallback Seguro: tentar imprimir UTF-8, se falhar (UnicodeEncodeError), usar caracteres ASCII simples."
+  },
+  "zombie_process": {
+    "title": "O Processo Zumbi (GUI Deadlock)",
+    "date": "2025-09-14",
+    "severity": "MEDIUM",
+    "symptom": "CTRL+C não encerrava o 'doxoade run' se a GUI filha travasse.",
+    "root_cause": "Subprocesso bloqueante sem tratamento de sinais.",
+    "fix": "Migração para subprocess.Popen não-bloqueante e envio explícito de kill() ao capturar KeyboardInterrupt."
+  }
+}
