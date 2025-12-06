@@ -114,101 +114,110 @@ def _build_execution_command(script_path, python_exe, flow=False, args=None):
         
     return cmd
 
-@click.command('run')
-@click.argument('script', required=False)
-@click.argument('args', nargs=-1)
+@click.command('run', context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.option('--flow', is_flag=True, help="Ativa visualização de execução (Matrix Mode).")
 @click.option('--internal', is_flag=True, help="Executa comandos internos do Doxoade (Self-Debug).")
+@click.argument('script', required=False)
 @click.pass_context
-def run(ctx, script, args, flow, internal):
+def run(ctx, flow, internal, script):
     """
-    Executa um script Python ou comando interno no ambiente controlado.
+    Executa um script Python com ambiente controlado.
     
     Exemplos:
         doxoade run main.py
-        doxoade run main --flow
-        doxoade run check . --internal
+        doxoade run main.py --flow
+        doxoade flow main.py
+        doxoade run check --internal (Equivale a rodar python -m doxoade.commands.check)
     """
-    # 1. Configuração do Ambiente
-    python_exe = _get_venv_python_executable()
-    if not python_exe:
-        # Fallback para o python do sistema se não houver venv, mas avisa
-        python_exe = sys.executable
-        if not internal:
-            click.echo(Fore.YELLOW + "[AVISO] 'venv' não detectado. Usando Python do sistema.")
-
-    # 2. Resolução do Alvo
-    if internal:
-        # Modo interno: roda o próprio doxoade como módulo
-#        target_script = "-m"
-        target_args = ["doxoade", script] + list(args) if script else ["doxoade"] + list(args)
-        
-        # Ajuste para chamar o módulo
-        cmd = [python_exe] + target_args
-        display_name = f"doxoade (internal) {' '.join(target_args)}"
+    args = ctx.args  # Argumentos extras passados após o script
     
+    if not script and not internal:
+        click.echo(Fore.RED + "Erro: Especifique um script ou use --internal.")
+        return
+
+    # Configurar Ambiente
+    env = os.environ.copy()
+    current_cwd = os.getcwd()
+    
+    # Adiciona o diretório atual ao PYTHONPATH
+    if "PYTHONPATH" in env:
+        env["PYTHONPATH"] = f"{current_cwd}{os.pathsep}{env['PYTHONPATH']}"
     else:
-        # Modo Script de Usuário
-        if not script:
-            click.echo(Fore.RED + "Erro: Argumento SCRIPT necessário (ou use --internal).")
-            return
-
-        resolved_script = _smart_find_script(script)
-        if not os.path.exists(resolved_script):
-            click.echo(Fore.RED + f"Erro: Arquivo '{resolved_script}' não encontrado.")
-            return
-
-        cmd = _build_execution_command(resolved_script, python_exe, flow, list(args))
-        display_name = resolved_script
-
-    # 3. Execução
-    click.echo(Fore.CYAN + f"--- [RUN] Executando: {display_name} ---")
+        env["PYTHONPATH"] = current_cwd
     
-    try:
-        # Usamos capture_output=True se precisarmos analisar o erro (Antifragilidade)
-        # Mas para interatividade (input/output em tempo real), normalmente não capturamos.
-        # Dilema: Se capturarmos, perdemos interatividade. Se não capturarmos, perdemos o erro para o Gênese.
-        # Solução V9: Em modo normal, deixamos fluir. Se quebrar, o usuário vê no terminal.
-        # Se for FLOW, capturamos para análise.
+    env["PYTHONIOENCODING"] = "utf-8"
+
+    cmd = []
+    
+    if internal:
+        if not script:
+             click.echo(Fore.RED + "Erro: Para --internal, informe o nome do comando (ex: check).")
+             return
+        
+        # Modo Internal: Roda como módulo (-m) para preservar imports relativos
+        # Ex: doxoade run check --internal -> python -m doxoade.commands.check
+        module_name = f"doxoade.commands.{script.replace('.py', '')}"
+        
+        # Para comandos internos funcionarem como __main__, eles precisam ter o bloco if __name__ == "__main__":
+        # O check.py atual é desenhado para ser invocado pelo Click, mas podemos forçar a execução.
+        # Se usarmos --flow com internal, usamos o flow_runner no arquivo físico.
         
         if flow:
-            # Modo Flow captura tudo para processar
-            result = subprocess.run(cmd, text=True, capture_output=True, encoding='utf-8', errors='replace')
-            print(result.stdout) # Imprime o output do flow
-            print(result.stderr, file=sys.stderr)
-            return_code = result.returncode
-            stderr_content = result.stderr
+             # Flow precisa do arquivo físico
+             target_script = f"doxoade/commands/{script}.py" if not script.endswith(".py") else f"doxoade/commands/{script}"
+             if not os.path.exists(target_script):
+                 click.echo(Fore.RED + f"Erro: Arquivo interno '{target_script}' não encontrado.")
+                 return
+             
+             # Precisamos achar o flow_runner
+             flow_runner_path = os.path.join("doxoade", "probes", "flow_runner.py")
+             cmd = [sys.executable, flow_runner_path, target_script] + args
+             
         else:
-            # Modo Interativo (Normal) - Permite input() do usuário
-            # Não capturamos stderr aqui, então a Gênese de runtime fica limitada neste modo
-            # para preservar a UX.
-            result = subprocess.run(cmd)
-            return_code = result.returncode
-            stderr_content = None # Não disponível em modo stream
+             # Execução normal interna via módulo
+             cmd = [sys.executable, "-m", module_name] + args
 
-        # 4. Pós-Processamento e Aprendizado (Antifragilidade)
-        if return_code != 0:
-            click.echo(Fore.RED + f"\n[FALHA] Processo terminou com código {return_code}.")
+    else:
+        # Modo Script Normal
+        target_script = script
+        if not os.path.exists(target_script):
+            click.echo(Fore.RED + f"Erro: Arquivo '{target_script}' não encontrado.")
+            return
+
+        if flow:
+            flow_runner_path = os.path.join("doxoade", "probes", "flow_runner.py")
+            # Se não achar localmente (instalado via pip?), tenta achar relativo ao pacote
+            if not os.path.exists(flow_runner_path):
+                 # Fallback: Tenta achar onde o doxoade está instalado
+                 import doxoade
+                 pkg_dir = os.path.dirname(doxoade.__file__)
+                 flow_runner_path = os.path.join(pkg_dir, "probes", "flow_runner.py")
             
-            if stderr_content:
-                # Gênese V4: Mineração de Traceback
-                error_data = _mine_traceback(stderr_content)
-                if error_data:
-                    suggestion = _analyze_runtime_error(error_data)
-                    
-                    click.echo(Fore.YELLOW + "\n--- [DIAGNÓSTICO RUNTIME] ---")
-                    click.echo(f"Erro: {error_data['error_type']}")
-                    click.echo(f"Msg : {error_data['message']}")
-                    click.echo(f"Loc : {error_data['file']}:{error_data['line']}")
-                    
-                    if suggestion:
-                        click.echo(Fore.GREEN + f"Sugestão: {suggestion}")
-                    
-                    # Gênese V9: Registro
-                    _register_runtime_incident(error_data)
-                    click.echo(Fore.CYAN + "   > [GÊNESE] Incidente registrado para aprendizado.")
+            if not os.path.exists(flow_runner_path):
+                 click.echo(Fore.RED + "Erro: flow_runner.py não encontrado (instalação corrompida?).")
+                 return
 
+            cmd = [sys.executable, flow_runner_path, target_script] + args
+        else:
+            cmd = [sys.executable, target_script] + args
+
+    try:
+        if not flow:
+            click.echo(Fore.CYAN + f"--- [RUN] Executando: {' '.join(cmd)} ---")
+        
+        subprocess.run(cmd, env=env, check=True)
+        
+    except subprocess.CalledProcessError as e:
+        click.echo(Fore.RED + f"\n[FALHA] Processo terminou com código {e.returncode}.")
+        sys.exit(e.returncode)
     except KeyboardInterrupt:
-        click.echo(Fore.YELLOW + "\n[RUN] Interrompido pelo usuário.")
+        click.echo(Fore.YELLOW + "\n[INTERROMPIDO] Execução cancelada pelo usuário.")
     except Exception as e:
-        click.echo(Fore.RED + f"[ERRO SISTEMA] Falha ao invocar subprocesso: {e}")
+        click.echo(Fore.RED + f"\n[ERRO INTERNO] {e}")
+
+@click.command('flow', context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
+@click.argument('script')
+@click.pass_context
+def flow_command(ctx, script):
+    """Alias para 'doxoade run --flow'."""
+    ctx.invoke(run, script=script, flow=True, internal=False)

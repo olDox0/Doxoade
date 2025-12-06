@@ -91,10 +91,17 @@ def _filter_and_inject_findings(findings, file_path):
     return final_findings
 
 def _get_probe_path(probe_name):
+    """Encontra o caminho para um arquivo de sonda de forma segura."""
     try:
+        # Tenta método moderno (Python 3.9+) - Evita DeprecationWarning
+        if hasattr(resources, 'files'):
+            return str(resources.files('doxoade.probes').joinpath(probe_name))
+
+        # Fallback para Python < 3.9
         with resources.path('doxoade.probes', probe_name) as probe_path:
             return str(probe_path)
-    except (AttributeError, ModuleNotFoundError):
+    except Exception:
+        # Fallback para ambientes muito antigos ou zipados
         from pkg_resources import resource_filename
         return resource_filename('doxoade', f'probes/{probe_name}')
 
@@ -976,3 +983,6 @@ def check(ctx, path, cmd_line_ignore, fix, debug, output_format, fast, no_import
             _present_results('text', results)
     if results.get('summary', {}).get('critical', 0) > 0:
         sys.exit(1)
+
+if __name__ == "__main__":
+    check()
