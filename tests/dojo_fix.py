@@ -3,7 +3,7 @@
 # [DOX-UNUSED] import re  # Não usado
 
 def teste_dojo():
-    # x = 10
+    # [DOX-UNUSED] x = 10
     # [DOX-UNUSED] x = 20  # Redefinição inútil
     
     print("Ola mundo")  # f-string inútil
