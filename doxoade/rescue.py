@@ -4,6 +4,9 @@ import os
 import subprocess
 import json
 import datetime
+import sqlite3
+import hashlib
+from pathlib import Path
 
 def run_git_command(args):
     """Executa git sem depender do shared_tools."""
@@ -73,6 +76,77 @@ def get_git_context(filepath, linenum):
     except Exception:
         return None
 
+def perform_post_mortem(info):
+    """
+    (NOVO) Realiza a autópsia do erro antes de reverter.
+    Salva o estado 'Quebrado' vs 'Estável' no banco de dados para aprendizado futuro.
+    """
+    print("\n[DOXOADE] 🔬 Realizando autópsia digital...")
+    file_path = info['file']
+    if not file_path or not os.path.exists(file_path):
+        return
+
+    try:
+        # 1. Captura o conteúdo 'Quebrado' (Atual)
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+            broken_content = f.read()
+
+        # 2. Captura o conteúdo 'Estável' (Git)
+        rel_path = os.path.relpath(file_path, os.getcwd()).replace('\\', '/')
+        stable_content = run_git_command(['show', f'HEAD:{rel_path}'])
+        
+        if not stable_content:
+            print("   > [AVISO] Não foi possível recuperar versão do Git para comparação.")
+            return
+
+        # 3. Gera um Hash único para esse crash
+        # Hash = ErrorMsg + Line + File
+        unique_str = f"{info['error']}:{info['line']}:{rel_path}"
+        crash_hash = hashlib.md5(unique_str.encode('utf-8')).hexdigest()
+
+        # 4. Salva no Banco de Dados
+        # Usamos a tabela 'solutions' pois efetivamente estamos dizendo:
+        # "Para este erro (crash_hash), a solução é o conteúdo estável."
+        db_path = Path.home() / '.doxoade' / 'doxoade.db'
+        
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # Garante que a tabela existe (caso o rescue rode num ambiente muito novo/velho)
+        # (A estrutura deve bater com database.py v8+)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS solutions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, finding_hash TEXT NOT NULL UNIQUE,
+                stable_content TEXT NOT NULL, commit_hash TEXT NOT NULL, project_path TEXT NOT NULL,
+                timestamp TEXT NOT NULL, file_path TEXT NOT NULL, message TEXT, error_line INTEGER
+            );
+        """)
+
+        cursor.execute("""
+            INSERT OR REPLACE INTO solutions 
+            (finding_hash, stable_content, commit_hash, project_path, timestamp, file_path, message, error_line)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            crash_hash,
+            stable_content,
+            "RESCUE_REVERT", # Marca especial indicando que foi um rescue
+            os.getcwd(),
+            datetime.datetime.utcnow().isoformat(),
+            rel_path,
+            f"[CRASH] {info['error']}",
+            info['line']
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        print("   > [MEMÓRIA] Incidente gravado. O Gênese aprenderá com este erro.")
+        print("   > [INFO] O conteúdo estável foi registrado como a 'Solução' para este Crash.")
+
+    except Exception as e:
+        print(f"   > [ERRO AUTÓPSIA] Falha ao gravar dados: {e}")
+
+
 def activate_protocol(error_text):
     print("\n" + "!"*60)
     print("   [CRASH FATAL DO SISTEMA DETECTADO]")
@@ -85,7 +159,7 @@ def activate_protocol(error_text):
     if info['file']:
         print(f"LOCAL:  {info['file']}:{info['line']}")
         
-        # --- NOVO: ANÁLISE COMPARATIVA (Smart Suggestion) ---
+        # --- ANÁLISE COMPARATIVA (Smart Suggestion) ---
         print("\n--- ANÁLISE FORENSE (O que mudou?) ---")
         
         # 1. Pega linha atual (Quebrada)
@@ -109,13 +183,16 @@ def activate_protocol(error_text):
         # ----------------------------------------------------
     
     print("\n--- OPÇÕES DE RESGATE ---")
-    print("1. [GIT] Reverter arquivo para a versão ESTÁVEL.")
+    print("1. [GIT] Reverter arquivo para a versão ESTÁVEL (e Aprender).")
     print("2. [EDIT] Abrir no Notepad++ para corrigir.")
     print("3. [INFO] Ver traceback completo.")
     
     choice = input("\nEscolha (1-3): ").strip()
     
     if choice == '1' and info['file']:
+        # CHAMA A AUTÓPSIA ANTES DE REVERTER
+        perform_post_mortem(info)
+        
         print(f"Revertendo {info['file']}...")
         run_git_command(['checkout', info['file']])
         print("Arquivo revertido com sucesso.")
@@ -140,9 +217,11 @@ def activate_protocol(error_text):
         print(error_text)
 
 def save_crash_memory(info, action):
-    """Salva o incidente para aprendizado."""
+    """Salva um log simples JSON local (backup)."""
     cache_dir = os.path.join(os.getcwd(), '.doxoade_cache')
-    if not os.path.exists(cache_dir): os.makedirs(cache_dir)
+    if not os.path.exists(cache_dir): 
+        try: os.makedirs(cache_dir)
+        except Exception: pass
     
     report = {
         "timestamp": str(datetime.datetime.now()),
@@ -152,8 +231,10 @@ def save_crash_memory(info, action):
         "action_taken": action
     }
     
-    with open(os.path.join(cache_dir, 'fatal_crash_report.json'), 'w') as f:
-        json.dump(report, f)
+    try:
+        with open(os.path.join(cache_dir, 'fatal_crash_report.json'), 'w') as f:
+            json.dump(report, f)
+    except Exception: pass
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:

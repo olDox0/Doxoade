@@ -27,7 +27,8 @@ from ..shared_tools import (
     _get_project_config,
     collect_files_to_analyze,
     analyze_file_structure,
-    _update_open_incidents
+    _update_open_incidents,
+    _get_file_hash
 )
 
 # Lista de tags que silenciam erros
@@ -122,7 +123,7 @@ def _run_pyflakes_probe(file_path, python_executable, debug=False):
                     msg = parts[3].strip()
                     cat = 'DEADCODE' if 'unused' in msg else ('RUNTIME-RISK' if 'undefined' in msg else 'STYLE')
                     findings.append({'severity': 'WARNING', 'category': cat, 'message': msg, 'file': file_path, 'line': int(parts[1])})
-    except: pass
+    except Exception: pass
     return findings
 
 def _run_hunter_probe(file_path, python_executable, debug=False):
@@ -135,7 +136,7 @@ def _run_hunter_probe(file_path, python_executable, debug=False):
             for item in data:
                 item['file'] = file_path
                 findings.append(item)
-    except: pass
+    except Exception: pass
     return findings
 
 def _run_import_probe(all_imports, venv_python, logger, search_path):
@@ -145,7 +146,7 @@ def _run_import_probe(all_imports, venv_python, logger, search_path):
         probe_path = _get_probe_path('import_probe.py')
         process = subprocess.run([venv_python, probe_path], input=json.dumps(unique), capture_output=True, text=True, check=True, encoding='utf-8')
         missing = set(json.loads(process.stdout))
-    except: return []
+    except Exception: return []
     
     truly_missing = set()
     for m in missing:
@@ -169,7 +170,7 @@ def _extract_imports(file_path):
                 for alias in node.names: imports.append({'module': alias.name.split('.')[0], 'line': node.lineno, 'file': file_path})
             elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
                 imports.append({'module': node.module.split('.')[0], 'line': node.lineno, 'file': file_path})
-    except: pass
+    except Exception: pass
     return imports
     
 def _analyze_single_file_statically(file_path, python_executable, debug=False):
@@ -279,17 +280,6 @@ def step_run_structure_analysis(state):
 CACHE_DIR = Path(".doxoade_cache")
 CHECK_CACHE_FILE = CACHE_DIR / "check_cache.json"
 
-def _get_file_hash(file_path):
-    """Calcula o hash SHA256 do conteúdo de um arquivo."""
-    h = hashlib.sha256()
-    try:
-        with open(file_path, 'rb') as f:
-            while chunk := f.read(8192):
-                h.update(chunk)
-        return h.hexdigest()
-    except IOError:
-        return None
-
 def _load_cache():
     """Carrega o cache se ele for válido para a versão atual do doxoade."""
     if not CHECK_CACHE_FILE.is_file():
@@ -368,24 +358,18 @@ def _analyze_dependencies(findings, file_path):
     """
     if not findings:
         return findings
-    
     # Filtra apenas os findings de 'undefined name'
     undefined_findings = [f for f in findings if 'undefined name' in f.get('message', '')]
-    
     if not undefined_findings:
         return findings
-    
     # Lê os imports atuais do arquivo
     current_imports = _extract_current_imports(file_path)
-    
     for finding in undefined_findings:
         message = finding.get('message', '')
         match = re.match(r"undefined name '(.+?)'", message)
         if not match:
             continue
-        
         undefined_name = match.group(1)
-        
         # Caso 1: O nome indefinido É um módulo conhecido
         if undefined_name in ALL_KNOWN_MODULES:
             if undefined_name not in current_imports:
@@ -393,7 +377,6 @@ def _analyze_dependencies(findings, file_path):
                 finding['import_suggestion'] = f"import {undefined_name}"
                 finding['dependency_type'] = 'MISSING_MODULE_IMPORT'
                 continue
-        
         # Caso 2: O nome indefinido é um EXPORT de algum módulo conhecido
         for module, exports in ALL_KNOWN_MODULES.items():
             if undefined_name in exports:
@@ -420,7 +403,6 @@ def _analyze_dependencies(findings, file_path):
                     finding['import_suggestion'] = f"from {module} import {undefined_name}"
                     finding['dependency_type'] = 'INFERRED_IMPORT'
                     break
-    
     return findings
 
 def _extract_current_imports(file_path):
@@ -819,36 +801,70 @@ def _run_clone_probe(files, python_executable, debug=False):
         result = subprocess.run(cmd, input=input_json, capture_output=True, text=True, encoding='utf-8', errors='replace')
         if result.returncode == 0 and result.stdout.strip():
             findings.extend(json.loads(result.stdout))
-    except: pass
+    except Exception: pass
+    return findings
+
+def _run_xref_probe(files, python_executable, project_root, debug=False):
+    """Executa a Sonda de Referência Cruzada (XRef) para detectar imports quebrados e assinaturas erradas."""
+    findings = []
+    # Precisa de pelo menos 2 arquivos ou 1 arquivo + imports para fazer sentido, 
+    # mas vamos rodar sempre que houver arquivos válidos e não for modo --fast.
+    if not files: return []
+    
+    probe_path = _get_probe_path('xref_probe.py')
+    
+    if debug: click.echo(Fore.CYAN + f"   > [DEBUG] Executando XRef Probe (Integridade) em {len(files)} arquivos...")
+    
+    try:
+        input_json = json.dumps(files)
+        # Passa project_root como argumento e files via stdin
+        cmd = [python_executable, probe_path, project_root]
+        
+        result = subprocess.run(
+            cmd, 
+            input=input_json, 
+            capture_output=True, 
+            text=True, 
+            encoding='utf-8', 
+            errors='replace'
+        )
+        
+        if result.returncode == 0 and result.stdout.strip():
+            findings = json.loads(result.stdout)
+        elif debug and result.stderr:
+             click.echo(Fore.RED + f"   > [DEBUG-XREF ERROR] {result.stderr}")
+            
+    except Exception as e:
+        if debug: click.echo(Fore.RED + f"   > [DEBUG] Erro ao invocar XRef Probe: {e}")
+        pass
+        
     return findings
 
 def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=False, no_cache=False, target_files=None, check_clones=False):
     if no_cache: click.echo(Fore.YELLOW + "A opção --no-cache foi usada.")
     cache = {} if no_cache else _load_cache()
-    
+
     is_single_file = os.path.isfile(path)
     if is_single_file:
-        # ✅ CORREÇÃO: Para arquivo único, o root é o DIRETÓRIO do arquivo
         root_path = os.path.dirname(os.path.abspath(path))
         config = {'search_path_valid': True, 'root_path': root_path}
         if not target_files: target_files = [path]
     else:
-        # Para diretórios, o root é o próprio path
         root_path = os.path.abspath(path)
         config = _get_project_config(None, start_path=path)
         if not config.get('search_path_valid'): return {'summary': {'critical': 1}, 'findings': []}
 
     python_exe = _get_venv_python_executable() or sys.executable
     files = target_files if target_files else collect_files_to_analyze(config, cmd_line_ignore)
-    
+
     analysis = {'raw_findings': [], 'files': files}
     valid_files = []
 
+    # --- FASE 1: Análise Individual (Arquivos Isolados) ---
     for fp in files:
         h = _get_file_hash(fp)
-        # ✅ CORREÇÃO: Use root_path consistentemente
         rel = os.path.relpath(fp, root_path) if not is_single_file else os.path.basename(fp)
-        
+
         if not no_cache and h and rel in cache and cache[rel].get('hash') == h:
             analysis['raw_findings'].extend(cache[rel].get('findings', []))
             valid_files.append(fp)
@@ -857,7 +873,7 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
             if syn:
                 analysis['raw_findings'].extend(syn)
                 continue
-            
+
             valid_files.append(fp)
             pf = _run_pyflakes_probe(fp, python_exe)
             ht = _run_hunter_probe(fp, python_exe)
@@ -865,17 +881,28 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
             analysis['raw_findings'].extend(findings)
             if h: cache[rel] = {'hash': h, 'findings': findings}
 
+    # --- FASE 2: Análise Global (Cross-File) ---
+    
+    # 2.1 Clones (Duplicação)
     if (check_clones or not fast) and valid_files:
         analysis['raw_findings'].extend(_run_clone_probe(valid_files, python_exe, debug))
 
-    # Fix Step - ✅ PASSA O root_path CORRETO
+    # 2.2 XRef (Integridade de Links) - [NOVO]
+    if not fast and valid_files:
+        xref_findings = _run_xref_probe(valid_files, python_exe, root_path, debug)
+        analysis['raw_findings'].extend(xref_findings)
+
+    # --- FASE 3: Enriquecimento e Correção ---
+    _enrich_with_dependency_analysis(analysis['raw_findings'], root_path)
+    _enrich_findings_with_solutions(analysis['raw_findings'])
+
     if fix:
         click.echo(Fore.CYAN + "\nModo de correção (--fix) ativado...")
         with ExecutionLogger('autofix', root_path, {}) as fix_logger:
             count = _run_smart_fix(analysis['raw_findings'], root_path, fix_logger)
         if count > 0: click.echo(Fore.GREEN + f"   > Total de correções: {count}")
 
-    # Finalization
+    # Finalization (Hash calculation, Filtering, Output)
     final = []
     for f in analysis['raw_findings']:
         if not f.get('hash'):
@@ -883,32 +910,29 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
             f['hash'] = hashlib.md5(u.encode('utf-8')).hexdigest()
         final.append(f)
 
-    # Filter & Inject
     filtered = []
     by_file = {}
     for f in final:
         p = f.get('file')
-        if p: 
+        if p:
             if p not in by_file: by_file[p] = []
             by_file[p].append(f)
-    
+
     for fp in files:
         fs = by_file.get(fp) or by_file.get(os.path.abspath(fp)) or []
         filtered.extend(_filter_and_inject_findings(fs, fp))
 
-    # ✅ CORREÇÃO: Use root_path no ExecutionLogger
     with ExecutionLogger('check', root_path, {'fix': fix}) as logger:
         for f in filtered:
             s = _get_code_snippet(f.get('file'), f.get('line'))
             logger.add_finding(
-                severity=f['severity'], 
-                message=f.get('message'), 
+                severity=f['severity'],
+                message=f.get('message'),
                 category=f.get('category', 'UNCATEGORIZED'),
-                file=f.get('file'), 
-                line=f.get('line'), 
-                snippet=s, 
+                file=f.get('file'),
+                line=f.get('line'),
+                snippet=s,
                 finding_hash=f.get('hash'),
-                # ✅ RESTAURADO: Campos de sugestão
                 suggestion_content=f.get('suggestion_content'),
                 suggestion_line=f.get('suggestion_line'),
                 suggestion_source=f.get('suggestion_source'),
@@ -926,21 +950,29 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
 
 @click.command('check')
 @click.pass_context
-@click.argument('path', type=click.Path(exists=True), default='.')
-@click.option('--ignore', multiple=True, help="Ignora uma pasta.")
-@click.option('--fix', is_flag=True, help="Tenta corrigir problemas.")
-@click.option('--debug', is_flag=True, help="Debug.")
-@click.option('--format', 'output_format', type=click.Choice(['text', 'json']), default='text')
-@click.option('--fast', is_flag=True, help="Pula análises lentas.")
-@click.option('--no-imports', is_flag=True, help="Pula verificação de imports.")
-@click.option('--no-cache', is_flag=True, help="Ignora cache.")
-@click.option('--clones', is_flag=True, help="Força análise de clones.")
-def check(ctx, path, ignore, fix, debug, output_format, fast, no_imports, no_cache, clones):
-    """Análise estática."""
-    if output_format == 'text' and not debug: click.echo(Fore.YELLOW + "[CHECK] Executando análise...")
-    results = run_check_logic(path, ignore, fix, debug, fast, no_imports, no_cache, None, clones)
+@click.argument('path', type=click.Path(exists=True, file_okay=True), default='.')
+@click.option('--ignore', 'cmd_line_ignore', multiple=True, help="Ignora uma pasta.")
+@click.option('--fix', is_flag=True, help="Tenta corrigir problemas automaticamente.")
+@click.option('--debug', is_flag=True, help="Ativa a saída de depuração detalhada.")
+@click.option('--format', 'output_format', type=click.Choice(['text', 'json']), default='text', help="Define o formato da saída.")
+@click.option('--fast', is_flag=True, help="Executa uma análise rápida (pula clones/estrutura).")
+@click.option('--no-imports', is_flag=True, help="Pula a verificação de imports não resolvidos.")
+@click.option('--no-cache', is_flag=True, help="Força uma reanálise completa, ignorando o cache.")
+@click.option('--clones', is_flag=True, help="Força a análise de código duplicado (DRY).")
+def check(ctx, path, cmd_line_ignore, fix, debug, output_format, fast, no_imports, no_cache, clones):
+    """Análise estática, estrutural e de duplicatas completa do projeto."""
+    if not debug and output_format == 'text':
+        click.echo(Fore.YELLOW + "[CHECK] Executando análise...")
+    results = run_check_logic(
+        path, cmd_line_ignore, fix, debug,
+        fast=fast, no_imports=no_imports, no_cache=no_cache, check_clones=clones
+    )
     _update_open_incidents(results, os.path.abspath(path)) 
-    if output_format == 'json': print(json.dumps(results, indent=2))
-    else: 
-        if not debug: _present_results('text', results)
-    if results.get('summary', {}).get('critical', 0) > 0: sys.exit(1)
+    
+    if output_format == 'json': 
+        print(json.dumps(results, indent=2, ensure_ascii=False))
+    else:
+        if not debug:
+            _present_results('text', results)
+    if results.get('summary', {}).get('critical', 0) > 0:
+        sys.exit(1)
