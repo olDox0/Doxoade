@@ -1,0 +1,17 @@
+{
+  "policy_r0": {
+    "title": "Política R0 (Zero Recorrência)",
+    "type": "Mandatory",
+    "description": "Um erro catastrófico previamente documentado em 'postmortems' ou 'accidents' NUNCA deve ser reintroduzido no código base. O sistema deve bloquear commits que reintroduzam padrões conhecidos de falha."
+  },
+  "policy_transparency": {
+    "title": "Política de Transparência Radical",
+    "type": "Philosophy",
+    "description": "Ferramentas não devem falhar silenciosamente. Se uma ação é tomada (correção, reparo), o usuário deve ser notificado. Ocultar erros é pior do que o erro em si."
+  },
+  "policy_environment": {
+    "title": "Soberania do Ambiente",
+    "type": "Operational",
+    "description": "O Doxoade nunca deve assumir que o ambiente do usuário (PATH, Venv, Encoding) é perfeito. Ele deve diagnosticar e, se autorizado, reparar. A ferramenta deve ser robusta ao caos externo."
+  }
+}
