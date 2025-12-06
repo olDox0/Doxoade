@@ -2,96 +2,81 @@
   "check": {
     "title": "Comando Check: O Auditor",
     "date": "2025-11-29",
-    "content": "O 'check' é o coração da análise estática. Ele roda em pipeline:\n1. Sonda de Sintaxe (Fast Fail).\n2. Sonda Estática (Pyflakes).\n3. Sonda Hunter (Riscos/Segurança).\n4. Sonda DRY (Detecção de Clones).\n5. Abdução (Inferência de Imports).\n6. Gestão de Incidentes (DB).\n\nUse '--fix' para aplicar correções automáticas seguras."
+    "content": "Análise estática completa.\nPipeline: Sintaxe -> Pyflakes -> Hunter (Risco) -> DRY (Clones) -> Abdução (Imports).\nUse '--fix' para correções seguras e '--clones' para detectar código duplicado."
   },
   "run": {
     "title": "Comando Run: O Executor",
-    "date": "2025-11-29",
-    "content": "Executa scripts no ambiente virtual correto.\n\nModos:\n- Normal: 'doxoade run script.py' (Interativo, rápido).\n- Flow: 'doxoade run script.py --flow' (Visualizador Matrix).\n- Internal: '--internal' (Para debugar comandos internos)."
+    "date": "2025-12-06",
+    "content": "Executa scripts no ambiente virtual correto.\nModos:\n- Normal: 'doxoade run script.py'\n- Flow: '--flow' (Profiler visual Matrix Mode).\n- Internal: '--internal' (Debug do próprio Doxoade)."
   },
-  "moddify": {
-    "title": "Moddify: Editor Cirúrgico CLI",
-    "date": "2025-11-29",
-    "content": "Ferramenta para refatoração em lote.\n\nComandos:\n- add: Inserir linhas.\n- remove: Remover linhas.\n- replace: Substituir texto.\n- swap: Trocar linha inteira.\n- show: Exibir trechos com filtro."
+  "doctor": {
+    "title": "Comando Doctor: O Médico",
+    "date": "2025-10-15",
+    "content": "Protocolo Fênix de auto-cura.\nDiagnostica e repara:\n- Ambiente Virtual (venv) quebrado ou inexistente.\n- Dependências desincronizadas (requirements.txt).\n- Conflitos de PATH no Windows/Linux."
   },
-  "hunter": {
-    "title": "Hunter Probe: Análise de Risco",
-    "date": "2025-11-29",
-    "content": "Sonda semântica (AST) que detecta o que o linter ignora:\n- Segurança: Uso de eval(), exec().\n- Estabilidade: Argumentos padrão mutáveis.\n- Robustez: Except genérico."
+  "init": {
+    "title": "Comando Init: Gênese de Projeto",
+    "date": "2025-09-18",
+    "content": "Cria a estrutura padrão de um novo projeto Doxoade.\nGera: .gitignore robusto, venv, estrutura de pastas e inicializa o Git localmente."
   },
-  "debug": {
-    "title": "Debug & Gen-Test",
-    "date": "2025-11-29",
-    "content": "Ferramentas de introspecção:\n- 'doxoade debug script.py': Roda o script e mostra o estado final.\n- '--gen-test': Cria arquivo pytest automático."
+  "git_new": {
+    "title": "Comando Git-New: Zero to Hero",
+    "date": "2025-09-18",
+    "content": "Automação de publicação inicial.\nConecta um projeto local a um repositório remoto vazio, faz o primeiro commit e o push inicial em um único comando."
   },
-  "rewind": {
-    "title": "Rewind: Máquina do Tempo",
-    "date": "2025-11-29",
-    "content": "Reverte arquivos individualmente usando o Git, mas cria um backup automático (.bak) antes."
+  "rebuild": {
+    "title": "Comando Rebuild: Reset de Fábrica",
+    "date": "2025-10-19",
+    "content": "[DESTRUTIVO] Deleta e recria o ambiente virtual do zero.\nÚtil quando o pip está corrompido além da capacidade de reparo do 'doctor'."
   },
   "maestro": {
-    "title": "Maestro: Automação (.dox)",
+    "title": "Comando Maestro: Orquestrador",
     "date": "2025-11-30",
-    "content": "Interpretador de scripts de automação. Permite criar pipelines complexos (build, deploy, check) que rodam identicamente em Windows e Termux.\nSuporta: Variáveis, Loops (FOR), Condicionais (IF) e comandos nativos de alta performance (Fast Mode)."
-  },
-  "maestro_perf": {
-    "title": "Maestro: Performance Nativa (Gênese V14)",
-    "date": "2025-11-30",
-    "content": "Comandos de alta performance para arquivos grandes:\n- FIND_LINE_NUMBER\n- DELETE_BLOCK_TREE"
-  },
-  "style": {
-    "title": "Comando Style: Arquiteto Automatizado",
-    "date": "2025-12-01",
-    "content": "Analisa o código contra os princípios 'Modern Power of Ten'.\nUse '--comment' para verificar apenas falta de documentação."
-  },
-  "lazarus": {
-    "title": "Protocolo Lázaro (Anti-Crash & Forense)",
-    "date": "2025-12-02",
-    "content": "Sistema de recuperação de falhas catastróficas. Se o núcleo do Doxoade quebrar, o Lázaro intercepta o crash e executa uma 'Análise Forense', comparando a linha defeituosa com a versão estável do Git (Smart Context). Oferece reversão automática ou edição de emergência."
-  },
-  "verilog": {
-    "title": "Comando Verilog (Hardware)",
-    "date": "2025-12-02",
-    "content": "Expansão do Doxoade para engenharia de hardware.\nUsa o 'iverilog' para verificar a sintaxe de arquivos .v e .sv (SystemVerilog), integrando os erros ao relatório padrão do Doxoade."
-  },
-  "test": {
-    "title": "Comando Test: Suite Unitária Unificada",
-    "date": "2025-12-02",
-    "content": "Wrapper integrado para o Pytest.\nExecuta testes unitários e registra resultados na memória do sistema (Gênese).\nUso:\n  doxoade test          (Roda tudo)\n  doxoade test -v       (Verbose)\n  doxoade test --watch  (Modo sentinela)"
-  },
-  "merge": {
-    "title": "Comando Merge (Resolvedor)",
-    "date": "2025-12-03",
-    "content": "Interface interativa para resolver conflitos de Git.\nNão apenas faz o merge, mas valida a sintaxe do arquivo resultante antes de permitir o commit, evitando que um merge quebre o projeto."
-  },
-  "android": {
-    "title": "Integração Android",
-    "date": "2025-12-04",
-    "content": "Ponte entre o ambiente isolado do Linux/Termux e o armazenamento compartilhado do Android.\n- export: Envia projeto para 'Downloads/DoxoadeExports'.\n- import: Traz projetos de volta.\n- Gerencia permissões de armazenamento automaticamente."
+    "content": "Executa scripts de automação '.dox'.\nPermite criar pipelines de CI/CD locais que funcionam em qualquer SO.\nSuporta: RUN, BATCH, IF/ELSE e comandos nativos de performance (Fast Mode)."
   },
   "ide": {
-    "title": "Comando IDE (Ambiente Móvel)",
+    "title": "Comando IDE: Ambiente Móvel",
     "date": "2025-12-03",
-    "content": "Transforma o terminal (especialmente Termux) em uma IDE TUI (Text User Interface).\nFuncionalidades:\n- Explorador de arquivos.\n- Edição rápida (integração com nano/micro/vim).\n- Execução de scripts e Check num atalho.\n- Gestão de Git visual."
+    "content": "Interface TUI para desenvolvimento no Termux/Terminal.\nInclui explorador de arquivos, integração com editores (nano/vim) e atalhos para git e check."
   },
   "flow": {
-    "title": "Comando Flow (Run Visual)",
+    "title": "Comando Flow: Visualizer",
     "date": "2025-12-06",
-    "content": "Profiler de execução em tempo real (Matrix Mode).\nAlias para 'doxoade run --flow'.\nMostra cada linha sendo executada, o tempo gasto e as mudanças nas variáveis locais. Essencial para debugar loops infinitos ou lentidão."
+    "content": "Alias para 'doxoade run --flow'.\nMostra a execução do código linha a linha em tempo real, útil para entender loops infinitos ou lógica complexa."
   },
-  "impact_analysis": {
-    "title": "Impact Analysis (Grafo de Dependência)",
-    "date": "2025-11-15",
-    "content": "Analisa 'Quem chama quem'.\n- Rastreamento Profundo: Descobre dependências indiretas.\n- Mermaid Graph: Gera código para visualizar o diagrama de classes/módulos.\nUso: 'doxoade impact-analysis arquivo.py -g'"
+  "merge": {
+    "title": "Comando Merge: Resolvedor",
+    "date": "2025-12-03",
+    "content": "Assistente interativo para resolução de conflitos Git.\nValida a sintaxe do arquivo mesclado antes de permitir a conclusão do merge."
   },
-  "history": {
-    "title": "Comando History (Memória)",
-    "date": "2025-11-20",
-    "content": "Interface de consulta ao banco de dados Sapiens.\nPermite ver como erros passados foram resolvidos. Fundamental para o aprendizado da IA Gênese."
+  "verilog": {
+    "title": "Comando Verilog: Hardware",
+    "date": "2025-12-02",
+    "content": "Sonda para SystemVerilog (via iverilog).\nVerifica sintaxe de hardware e integra erros ao relatório padrão."
+  },
+  "android": {
+    "title": "Comando Android: Sync",
+    "date": "2025-12-04",
+    "content": "Ponte de arquivos para Termux.\nExporta e Importa projetos entre o ambiente isolado do Linux e o armazenamento compartilhado do Android."
   },
   "pedia": {
-    "title": "Comando Pedia (Knowledge Base)",
+    "title": "Comando Pedia: Base de Conhecimento",
     "date": "2025-11-28",
-    "content": "O sistema que você está usando agora.\nLê arquivos JSON e Markdown da pasta 'docs/library' e 'docs/internals' para fornecer documentação contextualizada no terminal."
+    "content": "Sistema de documentação integrado.\nLê JSONs da biblioteca e Markdowns internos para fornecer ajuda contextualizada."
+  },
+  "moddify": {
+    "title": "Comando Moddify: Editor CLI",
+    "date": "2025-11-27",
+    "content": "Edição cirúrgica de arquivos via linha de comando.\nComandos: add, remove, replace. Usado extensivamente pelo Maestro para refatoração automática."
+  },
+  "style": {
+    "title": "Comando Style: O Arquiteto",
+    "date": "2025-12-01",
+    "content": "Validação arquitetural baseada no 'Modern Power of Ten'.\nVerifica complexidade, tamanho de funções e presença de documentação."
+  },
+  "canonize": {
+    "title": "Comando Canonize: Snapshot",
+    "date": "2025-11-12",
+    "content": "Cria o 'Gold Standard' para testes de regressão.\nSalva a saída atual do check como a versão correta, para comparações futuras."
   }
 }

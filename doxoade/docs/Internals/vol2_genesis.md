@@ -1,5 +1,3 @@
----
-
 # Doxoade Internals - Vol. 2: O Motor Gênese
 
 **Versão do Documento:** 1.0 (Gênese V14)

@@ -1,6 +1,3 @@
-
----
-
 # Doxoade Internals - Vol. 5: Guia de Contribuição e Manutenção
 
 **Versão do Documento:** 1.0 (Gênese V14)

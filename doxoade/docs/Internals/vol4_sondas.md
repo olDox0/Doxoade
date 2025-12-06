@@ -1,5 +1,3 @@
----
-
 # Doxoade Internals - Vol. 4: Sondas e Diagnósticos
 
 **Versão do Documento:** 1.0 (Gênese V14)
