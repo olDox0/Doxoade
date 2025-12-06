@@ -1,5 +1,3 @@
----
-
 # Doxoade Internals - Vol. 3: O Maestro e Automação
 
 **Versão do Documento:** 1.0 (Gênese V14)

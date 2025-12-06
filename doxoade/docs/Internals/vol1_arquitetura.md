@@ -1,5 +1,3 @@
----
-
 # Doxoade Internals - Vol. 1: Fundação e Arquitetura
 
 **Versão do Documento:** 1.0 (Gênese V14)
