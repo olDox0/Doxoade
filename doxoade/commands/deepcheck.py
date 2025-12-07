@@ -1,4 +1,8 @@
 # doxoade/commands/deepcheck.py
+"""
+Módulo de Análise Profunda (Deepcheck).
+Responsável por análise semântica, fluxo de dados e validação de contratos.
+"""
 import ast
 import sys
 import click
@@ -20,6 +24,7 @@ class AdvancedFunctionVisitor(ast.NodeVisitor):
         self.current_scope_vars = set()
 
     def visit_FunctionDef(self, node):
+        """Analisa assinatura da função."""
         # 1. Análise de Contrato (Input)
         for arg in node.args.args:
             p_type = ast.unparse(arg.annotation) if arg.annotation else "Any"
@@ -33,6 +38,7 @@ class AdvancedFunctionVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Return(self, node):
+        """Registra pontos de retorno e tipos."""
         ret_info = {'lineno': node.lineno}
         
         if node.value is None:
@@ -58,6 +64,8 @@ class AdvancedFunctionVisitor(ast.NodeVisitor):
         self.returns.append(ret_info)
 
     def visit_Call(self, node):
+        """Registra chamadas de função."""
+        assert visitor is not None, "Visitor não pode ser nulo"
         func_name = ast.unparse(node.func)
         args = [ast.unparse(a) for a in node.args]
         keywords = [k.arg for k in node.keywords if k.arg]
@@ -71,11 +79,13 @@ class AdvancedFunctionVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Name(self, node):
+        """Rastreia uso de variáveis."""
         if isinstance(node.ctx, ast.Load):
             self.used_vars.add(node.id)
         self.generic_visit(node)
 
     def visit_Assign(self, node):
+        """Rastreia atribuições."""
         for target in node.targets:
             if isinstance(target, ast.Name):
                 name = target.id
@@ -86,11 +96,13 @@ class AdvancedFunctionVisitor(ast.NodeVisitor):
         self.generic_visit(node)
         
     def visit_Raise(self, node):
+        """Registra exceções levantadas."""
         exc = ast.unparse(node.exc) if node.exc else "Unknown"
         self.raised_exceptions.append({'lineno': node.lineno, 'exc': exc})
 
 def _analyze_contract_consistency(visitor):
     """Verifica se o código obedece aos contratos de tipo."""
+    assert visitor is not None, "Visitor não pode ser nulo"
     issues = []
     
     # 1. Parâmetros não usados
@@ -124,6 +136,9 @@ def _analyze_contract_consistency(visitor):
     return issues
 
 def _present_deep_analysis(visitor, name, lineno, complexity):
+    """Apresenta os resultados da análise no terminal."""
+    assert name, "Nome da função é obrigatório"
+    
     click.echo(Fore.CYAN + Style.BRIGHT + f"\n=== ANÁLISE PROFUNDA: '{name}' (Linha {lineno}) ===")
     click.echo(f"Complexidade: {complexity}")
     
@@ -166,16 +181,14 @@ def _present_deep_analysis(visitor, name, lineno, complexity):
         
     click.echo(Fore.CYAN + "="*50)
 
-# ... (Manter _get_complexity_rank e outras auxiliares se necessário) ...
-
 @click.command('deepcheck')
 @click.argument('file_path', type=click.Path(exists=True, dir_okay=False, resolve_path=True))
 @click.option('--func', '-f', 'func_name', default=None, help="Analisa profundamente uma função específica.")
 @click.option('--verbose', '-v', is_flag=True, help="Exibe um relatório ainda mais detalhado.")
 def deepcheck(file_path, func_name, verbose):
     """Executa uma análise profunda semântica."""
+    assert file_path, "Caminho do arquivo é obrigatório"
     
-    # ... (Leitura do arquivo igual) ...
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
