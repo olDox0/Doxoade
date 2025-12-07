@@ -1,326 +1,176 @@
 # doxoade/commands/search.py
 """
 Sistema Sapiens Search - Busca Inteligente de Código
-Versão 1.0 - MVP (Minimum Viable Product)
+Versão 2.1 - Refatorado para usar módulo indexer
 
 Filosofia MPoT:
 - Funções < 60 linhas
 - Uma responsabilidade por função
 - Documentação clara
 - Fail loudly (erros explícitos)
+- Contratos com assertions
 """
 
 import click
-import ast
 import os
-import re
+import subprocess
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Set
-from collections import defaultdict
-from colorama import Fore, Style
+from typing import List, Dict, Any, Set
 from difflib import SequenceMatcher
+from colorama import Fore, Style
 
 from ..shared_tools import _get_project_config, ExecutionLogger
+# IMPORTAÇÃO DA NOVA ARQUITETURA
+from ..indexer import CodeIndexer, TextMatcher, IndexCache
 
 # ============================================================================
-# FASE 1: INDEXAÇÃO BÁSICA
+# FASE 3: ESTATÍSTICAS E INTEGRAÇÃO GIT
 # ============================================================================
 
-class CodeIndexer:
+def _search_in_commits(query: str, fuzzy: bool, limit: int = 20) -> List[Dict]:
     """
-    Indexador de código Python.
-    
-    Responsabilidades:
-    - Extrair funções, classes e docstrings
-    - Mapear definições e usos
-    - Construir grafo de chamadas
+    Busca em mensagens de commit do Git.
     """
+    assert query, "Query não pode estar vazia"
     
-    def __init__(self, project_root: str):
-        self.project_root = Path(project_root)
-        self.index = {
-            'functions': {},      # {name: [locations]}
-            'classes': {},        # {name: [locations]}
-            'calls': defaultdict(set),  # {func: {callers}}
-            'comments': {},       # {file: [(line, text)]}
-            'docstrings': {}      # {func_name: docstring}
-        }
-    
-    def index_project(self, ignore_dirs: Optional[Set[str]] = None) -> None:
-        """Indexa todos os arquivos .py do projeto."""
-        if ignore_dirs is None:
-            ignore_dirs = {'venv', '.git', '__pycache__', 'build', 'dist'}
+    try:
+        cmd = [
+            'git', 'log', 
+            f'--grep={query}',
+            '--oneline',
+            '--no-merges',
+            f'-n{limit}'
+        ]
         
-        py_files = self._collect_python_files(ignore_dirs)
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+            errors='replace'
+        )
         
-        click.echo(Fore.CYAN + f"Indexando {len(py_files)} arquivos...")
+        if result.returncode != 0:
+            return []
         
-        for file_path in py_files:
-            self._index_file(file_path)
-    
-    def _collect_python_files(self, ignore_dirs: Set[str]) -> List[Path]:
-        """Coleta todos os arquivos Python do projeto."""
-        files = []
-        
-        for root, dirs, filenames in os.walk(self.project_root):
-            # Remove diretórios ignorados
-            dirs[:] = [d for d in dirs if d not in ignore_dirs]
+        matches = []
+        for line in result.stdout.splitlines():
+            if not line.strip():
+                continue
             
-            for filename in filenames:
-                if filename.endswith('.py'):
-                    files.append(Path(root) / filename)
-        
-        return files
-    
-    def _index_file(self, file_path: Path) -> None:
-        """Indexa um arquivo Python individual."""
-        try:
-            content = file_path.read_text(encoding='utf-8', errors='ignore')
-            
-            # Parse AST
-            tree = ast.parse(content, filename=str(file_path))
-            
-            # Extrai informações
-            self._extract_definitions(tree, file_path)
-            self._extract_calls(tree, file_path)
-            self._extract_comments(content, file_path)
-            
-        except SyntaxError:
-            # Arquivo com erro de sintaxe - ignora silenciosamente
-            pass
-        except Exception as e:
-            click.echo(Fore.YELLOW + f"⚠ Erro ao indexar {file_path.name}: {e}")
-    
-    def _extract_definitions(self, tree: ast.AST, file_path: Path) -> None:
-        """Extrai funções e classes do AST."""
-        rel_path = file_path.relative_to(self.project_root)
-        
-        for node in ast.walk(tree):
-            # Funções
-            if isinstance(node, ast.FunctionDef):
-                location = {
-                    'file': str(rel_path),
-                    'line': node.lineno,
-                    'name': node.name,
-                    'docstring': ast.get_docstring(node)
-                }
+            parts = line.split(' ', 1)
+            if len(parts) == 2:
+                commit_hash, message = parts
                 
-                if node.name not in self.index['functions']:
-                    self.index['functions'][node.name] = []
-                
-                self.index['functions'][node.name].append(location)
-                
-                # Guarda docstring
-                if location['docstring']:
-                    self.index['docstrings'][node.name] = location['docstring']
-            
-            # Classes
-            elif isinstance(node, ast.ClassDef):
-                location = {
-                    'file': str(rel_path),
-                    'line': node.lineno,
-                    'name': node.name,
-                    'docstring': ast.get_docstring(node)
-                }
-                
-                if node.name not in self.index['classes']:
-                    self.index['classes'][node.name] = []
-                
-                self.index['classes'][node.name].append(location)
-    
-    def _extract_calls(self, tree: ast.AST, file_path: Path) -> None:
-        """Mapeia chamadas de função (grafo de dependências)."""
-        rel_path = file_path.relative_to(self.project_root)
+                if TextMatcher.match_text(query, message, fuzzy):
+                    matches.append({
+                        'type': 'commit',
+                        'hash': commit_hash,
+                        'message': message
+                    })
         
-        # Primeiro, identifica todas as funções neste arquivo
-        function_scopes = {}
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef):
-                function_scopes[node.name] = node
+        return matches
         
-        # Depois, encontra chamadas dentro de cada função
-        for func_name, func_node in function_scopes.items():
-            for node in ast.walk(func_node):
-                if isinstance(node, ast.Call):
-                    # Tenta extrair o nome da função chamada
-                    called_func = self._get_call_name(node.func)
-                    
-                    if called_func:
-                        self.index['calls'][called_func].add(func_name)
-    
-    def _get_call_name(self, node: ast.AST) -> Optional[str]:
-        """Extrai o nome de uma chamada de função."""
-        if isinstance(node, ast.Name):
-            return node.id
-        elif isinstance(node, ast.Attribute):
-            # Ex: obj.method() -> retorna 'method'
-            return node.attr
-        return None
-    
-    def _extract_comments(self, content: str, file_path: Path) -> None:
-        """Extrai comentários do código."""
-        rel_path = str(file_path.relative_to(self.project_root))
-        comments = []
-        
-        for i, line in enumerate(content.splitlines(), 1):
-            if '#' in line:
-                comment = line.split('#', 1)[1].strip()
-                if comment:  # Ignora comentários vazios
-                    comments.append((i, comment))
-        
-        if comments:
-            self.index['comments'][rel_path] = comments
+    except FileNotFoundError:
+        return []
+    except Exception:
+        return []
 
-
-# ============================================================================
-# FASE 2: BUSCA INTELIGENTE
-# ============================================================================
-
-class TextMatcher:
+def _generate_usage_stats(indexer: CodeIndexer, func_name: str) -> Dict[str, Any]:
     """
-    Matcher de texto com fuzzy matching e normalização.
-    
-    Funcionalidades:
-    - Normalização de termos (plural/singular, typos comuns)
-    - Fuzzy matching (similaridade de strings)
-    - Sinônimos programáticos
+    Gera estatísticas de uso de uma função.
     """
+    assert indexer and func_name, "Parâmetros não podem estar vazios"
     
-    # Mapa de normalizações comuns
-    NORMALIZATIONS = {
-        'postmortems': ['post-mortems', 'postmortem', 'post_mortems'],
-        'database': ['db', 'banco', 'bd'],
-        'function': ['func', 'funcao', 'função'],
-        'class': ['classe'],
-        'error': ['erro', 'exception'],
+    stats = {
+        'function': func_name,
+        'definitions': [],
+        'total_callers': 0,
+        'callers_by_file': {},
+        'call_frequency': {}
     }
     
-    @staticmethod
-    def normalize_term(term: str) -> Set[str]:
-        """
-        Gera variações normalizadas de um termo.
-        
-        Retorna:
-            Set de strings com o termo original + variações
-        """
-        variations = {term.lower()}
-        
-        # Remove hífens e underscores
-        variations.add(term.replace('-', '').replace('_', ''))
-        
-        # Adiciona versão com hífens/underscores substituídos por espaço
-        variations.add(term.replace('-', ' ').replace('_', ' '))
-        
-        # Adiciona sinônimos conhecidos
-        term_lower = term.lower()
-        for canonical, aliases in TextMatcher.NORMALIZATIONS.items():
-            if term_lower == canonical or term_lower in aliases:
-                variations.add(canonical)
-                variations.update(aliases)
-        
-        return variations
+    if func_name in indexer.index['functions']:
+        stats['definitions'] = indexer.index['functions'][func_name]
     
-    @staticmethod
-    def fuzzy_match(query: str, target: str, threshold: float = 0.6) -> bool:
-        """
-        Verifica se query é similar o suficiente a target.
+    if func_name in indexer.index['calls']:
+        callers = list(indexer.index['calls'][func_name])
+        stats['total_callers'] = len(callers)
         
-        Args:
-            query: Termo buscado
-            target: Termo alvo
-            threshold: Similaridade mínima (0.0 a 1.0)
+        for caller in callers:
+            if caller in indexer.index['functions']:
+                for loc in indexer.index['functions'][caller]:
+                    file_path = loc['file']
+                    if file_path not in stats['callers_by_file']:
+                        stats['callers_by_file'][file_path] = []
+                    stats['callers_by_file'][file_path].append(caller)
         
-        Retorna:
-            True se similaridade >= threshold
-        """
-        ratio = SequenceMatcher(None, query.lower(), target.lower()).ratio()
-        return ratio >= threshold
+        stats['call_frequency'] = {
+            file: len(funcs) 
+            for file, funcs in stats['callers_by_file'].items()
+        }
     
-    @staticmethod
-    def match_text(query: str, text: str, fuzzy: bool = False) -> bool:
-        """
-        Verifica se query está presente em text.
-        
-        Args:
-            query: Termo buscado
-            text: Texto onde buscar
-            fuzzy: Se True, usa fuzzy matching
-        
-        Retorna:
-            True se houver match
-        """
-        if not query or not text:
-            return False
-        
-        # Normaliza ambos
-        query_variations = TextMatcher.normalize_term(query)
-        text_lower = text.lower()
-        
-        # Match exato (após normalização)
-        for variation in query_variations:
-            if variation in text_lower:
-                return True
-        
-        # Fuzzy match (opcional)
-        if fuzzy:
-            words = text_lower.split()
-            for word in words:
-                if TextMatcher.fuzzy_match(query, word):
-                    return True
-        
-        return False
+    return stats
 
+def _display_stats(stats: Dict[str, Any]) -> None:
+    """Exibe estatísticas formatadas."""
+    func_name = stats['function']
+    
+    click.echo(Fore.CYAN + Style.BRIGHT + f"\n╔═══ Estatísticas: '{func_name}' ═══╗" + Style.RESET_ALL)
+    
+    if stats['definitions']:
+        click.echo(Fore.GREEN + "\n[Definição]")
+        for loc in stats['definitions']:
+            click.echo(f"  {Fore.YELLOW}{loc['file']}:{loc['line']}")
+            if loc['docstring']:
+                first_line = loc['docstring'].split('\n')[0].strip()
+                click.echo(f"  {Style.DIM}{first_line}{Style.RESET_ALL}")
+    else:
+        click.echo(Fore.YELLOW + "\n[Definição]")
+        click.echo("  Não encontrada (pode ser importada de lib externa)")
+    
+    total = stats['total_callers']
+    if total > 0:
+        click.echo(Fore.CYAN + Style.BRIGHT + f"\n[Uso]")
+        click.echo(f"  Usada em {Fore.YELLOW}{total}{Fore.WHITE} lugares")
+        
+        top_files = sorted(
+            stats['call_frequency'].items(),
+            key=lambda x: x[1],
+            reverse=True
+        )[:5]
+        
+        if top_files:
+            click.echo(Fore.WHITE + "\n  Top arquivos:")
+            for file_path, count in top_files:
+                click.echo(f"    • {Fore.BLUE}{file_path}{Fore.WHITE}: {count}x")
+                
+                callers = stats['callers_by_file'][file_path]
+                for caller in callers[:3]:
+                    click.echo(f"      {Style.DIM}→ {caller}{Style.RESET_ALL}")
+                
+                if len(callers) > 3:
+                    click.echo(f"      {Style.DIM}... e mais {len(callers) - 3}{Style.RESET_ALL}")
+    else:
+        click.echo(Fore.YELLOW + "\n[Uso]")
+        click.echo("  Não usada em nenhum lugar (função morta?)")
+
+def _suggest_similar_functions(indexer: CodeIndexer, query: str, threshold: float = 0.7) -> List[str]:
+    """Sugere funções similares."""
+    assert indexer and query, "Parâmetros não podem estar vazios"
+    
+    suggestions = []
+    for func_name in indexer.index['functions'].keys():
+        ratio = SequenceMatcher(None, query.lower(), func_name.lower()).ratio()
+        if ratio >= threshold:
+            suggestions.append((func_name, ratio))
+    
+    suggestions.sort(key=lambda x: x[1], reverse=True)
+    return [name for name, _ in suggestions[:5]]
 
 # ============================================================================
-# FASE 3: COMANDO CLI
+# FUNÇÕES DE BUSCA (Delega para o Indexer/Matcher mas formata aqui)
 # ============================================================================
-
-@click.command('search')
-@click.argument('query')
-@click.option('--code', '-c', is_flag=True, help='Busca no código fonte')
-@click.option('--function', '-f', is_flag=True, help='Busca funções relacionadas')
-@click.option('--comment', is_flag=True, help='Busca em comentários')
-@click.option('--fuzzy', is_flag=True, help='Ativa busca fuzzy (typos)')
-@click.option('--callers', is_flag=True, help='Mostra quem chama a função')
-@click.pass_context
-def search(ctx, query, code, function, comment, fuzzy, callers):
-    """
-    Busca inteligente no código do projeto.
-    
-    Exemplos:
-        doxoade search "output" --code
-        doxoade search "logger" --function
-        doxoade search "postmortems" --fuzzy
-        doxoade search "_log_execution" --callers
-    """
-    # Configuração do projeto
-    config = _get_project_config(None)
-    project_root = config['root_path']
-    
-    with ExecutionLogger('search', project_root, ctx.params) as logger:
-        click.echo(Fore.CYAN + Style.BRIGHT + f"\n╔═══ Busca: '{query}' ═══╗" + Style.RESET_ALL)
-        
-        # Indexa projeto
-        indexer = CodeIndexer(project_root)
-        ignore_dirs = set(config.get('ignore', []))
-        ignore_dirs.update({'venv', '.git', '__pycache__'})
-        
-        indexer.index_project(ignore_dirs)
-        
-        # Executa busca
-        results = _perform_search(indexer, query, code, function, comment, fuzzy, callers)
-        
-        # Exibe resultados
-        _display_results(results, query)
-        
-        # Estatísticas
-        total = sum(len(v) for v in results.values())
-        if total == 0:
-            click.echo(Fore.YELLOW + "\nNenhum resultado encontrado.")
-            logger.add_finding('INFO', f"Busca por '{query}' não retornou resultados")
-        else:
-            click.echo(Fore.GREEN + f"\n{total} resultado(s) encontrado(s).")
-
 
 def _perform_search(
     indexer: CodeIndexer, 
@@ -328,153 +178,194 @@ def _perform_search(
     search_code: bool,
     search_functions: bool,
     search_comments: bool,
+    search_commits: bool,
     fuzzy: bool,
     show_callers: bool
 ) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Executa a busca no índice.
+    """Executa a busca unificada."""
+    assert indexer, "Indexer não pode ser None"
+    assert query, "Query não pode estar vazia"
     
-    Retorna:
-        Dicionário com categorias de resultados
-    """
     results = {
         'functions': [],
-        'classes': [],
         'code': [],
         'comments': [],
+        'commits': [],
         'callers': []
     }
     
-    # Busca em funções
-    if search_functions or not any([search_code, search_functions, search_comments]):
+    # 1. Busca Funções (Default ou Explícito)
+    if search_functions or not any([search_code, search_functions, search_comments, search_commits]):
         results['functions'] = _search_functions(indexer, query, fuzzy)
     
-    # Busca em código (raw text)
+    # 2. Busca Código Raw (Opcional)
     if search_code:
-        results['code'] = _search_in_code(indexer.project_root, query, fuzzy)
+        # A busca raw ainda é feita aqui pois depende de varredura de texto,
+        # não do índice estruturado. Poderíamos mover para um módulo 'scanner'.
+        results['code'] = _search_in_code_raw(indexer.project_root, query, fuzzy)
     
-    # Busca em comentários
+    # 3. Busca Comentários (Do Índice)
     if search_comments:
         results['comments'] = _search_comments(indexer, query, fuzzy)
     
-    # Mostra call graph
+    # 4. Busca Commits (Git)
+    if search_commits:
+        results['commits'] = _search_in_commits(query, fuzzy)
+    
+    # 5. Call Graph
     if show_callers:
         results['callers'] = _find_callers(indexer, query)
     
     return results
 
-
 def _search_functions(indexer: CodeIndexer, query: str, fuzzy: bool) -> List[Dict]:
-    """Busca funções por nome ou docstring."""
     matches = []
-    
     for func_name, locations in indexer.index['functions'].items():
-        # Match no nome da função
         if TextMatcher.match_text(query, func_name, fuzzy):
             for loc in locations:
                 matches.append({
-                    'type': 'function',
                     'name': func_name,
                     'file': loc['file'],
                     'line': loc['line'],
-                    'docstring': loc['docstring'],
-                    'match_type': 'name'
+                    'docstring': loc['docstring']
                 })
-        
-        # Match na docstring
         elif func_name in indexer.index['docstrings']:
             docstring = indexer.index['docstrings'][func_name]
             if TextMatcher.match_text(query, docstring, fuzzy):
                 for loc in locations:
                     matches.append({
-                        'type': 'function',
                         'name': func_name,
                         'file': loc['file'],
                         'line': loc['line'],
-                        'docstring': docstring,
-                        'match_type': 'docstring'
+                        'docstring': docstring
                     })
-    
     return matches
-
-
-def _search_in_code(project_root: Path, query: str, fuzzy: bool) -> List[Dict]:
-    """Busca raw no código fonte."""
-    matches = []
-    
-    # TODO: Implementar busca linha por linha
-    # Por enquanto, retorna vazio (Fase 2)
-    
-    return matches
-
 
 def _search_comments(indexer: CodeIndexer, query: str, fuzzy: bool) -> List[Dict]:
-    """Busca em comentários."""
     matches = []
-    
     for file_path, comments in indexer.index['comments'].items():
         for line_num, comment_text in comments:
             if TextMatcher.match_text(query, comment_text, fuzzy):
                 matches.append({
-                    'type': 'comment',
                     'file': file_path,
                     'line': line_num,
                     'text': comment_text
                 })
-    
     return matches
 
-
 def _find_callers(indexer: CodeIndexer, func_name: str) -> List[Dict]:
-    """Encontra quem chama uma função."""
     callers = []
-    
     if func_name in indexer.index['calls']:
         for caller in indexer.index['calls'][func_name]:
-            # Encontra localização do caller
             if caller in indexer.index['functions']:
                 for loc in indexer.index['functions'][caller]:
                     callers.append({
-                        'type': 'caller',
                         'name': caller,
                         'file': loc['file'],
                         'line': loc['line']
                     })
-    
     return callers
 
+def _search_in_code_raw(project_root: Path, query: str, fuzzy: bool) -> List[Dict]:
+    """Busca textual direta (fallback/complemento)."""
+    matches = []
+    for root, dirs, filenames in os.walk(project_root):
+        dirs[:] = [d for d in dirs if d not in {'venv', '.git', '__pycache__', 'build', 'dist'}]
+        for filename in filenames:
+            if not filename.endswith('.py'): continue
+            file_path = Path(root) / filename
+            try:
+                lines = file_path.read_text(encoding='utf-8', errors='ignore').splitlines()
+                for i, line in enumerate(lines, 1):
+                    if TextMatcher.match_text(query, line, fuzzy):
+                        # Extrai snippet simples
+                        snippet_start = max(0, i-2)
+                        snippet_lines = [(j+1, lines[j]) for j in range(snippet_start, min(len(lines), i+1))]
+                        
+                        matches.append({
+                            'file': str(file_path.relative_to(project_root)),
+                            'line': i,
+                            'text': line.strip(),
+                            'snippet': snippet_lines
+                        })
+            except Exception: pass
+    return matches
 
 def _display_results(results: Dict[str, List[Dict]], query: str) -> None:
-    """Exibe resultados formatados."""
-    
-    # Funções
+    # Exibe funções
     if results['functions']:
         click.echo(Fore.CYAN + Style.BRIGHT + "\n[Funções]")
-        for match in results['functions'][:10]:  # Limita a 10
-            click.echo(
-                f"{Fore.YELLOW}{match['name']:<30}{Fore.WHITE} "
-                f"{match['file']}:{match['line']}"
-            )
-            
+        for match in results['functions'][:10]:
+            click.echo(f"{Fore.YELLOW}{match['name']:<30}{Fore.WHITE} {match['file']}:{match['line']}")
             if match['docstring']:
-                # Primeira linha da docstring
                 first_line = match['docstring'].split('\n')[0].strip()
                 click.echo(f"  {Style.DIM}{first_line}{Style.RESET_ALL}")
     
-    # Comentários
+    # Exibe código
+    if results['code']:
+        click.echo(Fore.CYAN + Style.BRIGHT + "\n[Código]")
+        for match in results['code'][:15]:
+            click.echo(f"{Fore.BLUE}{match['file']}:{match['line']}")
+            for lnum, ltext in match['snippet']:
+                prefix = "  > " if lnum == match['line'] else "    "
+                color = Style.BRIGHT if lnum == match['line'] else Style.DIM
+                click.echo(f"{Fore.WHITE}{color}{prefix}{lnum:4}: {ltext}{Style.RESET_ALL}")
+    
+    # Exibe comentários e commits (simplificado para brevidade, mas deve existir)
     if results['comments']:
         click.echo(Fore.CYAN + Style.BRIGHT + "\n[Comentários]")
         for match in results['comments'][:10]:
-            click.echo(
-                f"{Fore.BLUE}{match['file']}:{match['line']}{Fore.WHITE} "
-                f"# {match['text']}"
-            )
+            click.echo(f"{Fore.BLUE}{match['file']}:{match['line']}{Fore.WHITE} # {match['text']}")
+
+    if results['commits']:
+        click.echo(Fore.CYAN + Style.BRIGHT + "\n[Commits]")
+        for match in results['commits'][:10]:
+            click.echo(f"{Fore.MAGENTA}{match['hash']}{Fore.WHITE}: {match['message']}")
+
+# ============================================================================
+# COMANDO CLI
+# ============================================================================
+
+@click.command('search')
+@click.argument('query')
+@click.option('--code', '-c', is_flag=True, help='Busca no código fonte')
+@click.option('--function', '-f', is_flag=True, help='Busca funções relacionadas')
+@click.option('--comment', is_flag=True, help='Busca em comentários')
+@click.option('--commits', is_flag=True, help='Busca em mensagens de commit')
+@click.option('--fuzzy', is_flag=True, help='Ativa busca fuzzy (typos)')
+@click.option('--callers', is_flag=True, help='Mostra quem chama a função')
+@click.option('--stats', is_flag=True, help='Estatísticas de uso da função')
+@click.option('--no-cache', is_flag=True, help='Força re-indexação (ignora cache)')
+@click.pass_context
+def search(ctx, query, code, function, comment, commits, fuzzy, callers, stats, no_cache):
+    """Busca inteligente no código do projeto."""
+    config = _get_project_config(None)
+    project_root = config['root_path']
     
-    # Call graph
-    if results['callers']:
-        click.echo(Fore.CYAN + Style.BRIGHT + "\n[Quem Chama Esta Função]")
-        for match in results['callers']:
-            click.echo(
-                f"{Fore.GREEN}  ← {match['name']:<30}{Fore.WHITE} "
-                f"{match['file']}:{match['line']}"
-            )
+    with ExecutionLogger('search', project_root, ctx.params) as logger:
+        click.echo(Fore.CYAN + Style.BRIGHT + f"\n╔═══ Busca: '{query}' ═══╗" + Style.RESET_ALL)
+        
+        # Usa o novo Indexer modular
+        indexer = CodeIndexer(project_root)
+        ignore_dirs = set(config.get('ignore', []))
+        ignore_dirs.update({'venv', '.git', '__pycache__'})
+        
+        # Indexa (usa cache automaticamente se possível)
+        indexer.index_project(ignore_dirs, use_cache=not no_cache)
+        
+        if stats:
+            usage_stats = _generate_usage_stats(indexer, query)
+            _display_stats(usage_stats)
+            return
+            
+        results = _perform_search(indexer, query, code, function, comment, commits, fuzzy, callers)
+        _display_results(results, query)
+        
+        total = sum(len(v) for v in results.values())
+        if total == 0:
+            click.echo(Fore.YELLOW + "\nNenhum resultado encontrado.")
+            if function or not any([code, comment, commits]):
+                suggestions = _suggest_similar_functions(indexer, query)
+                if suggestions:
+                    click.echo(Fore.CYAN + "\nVocê quis dizer:")
+                    for s in suggestions: click.echo(f"  • {Fore.YELLOW}{s}")
