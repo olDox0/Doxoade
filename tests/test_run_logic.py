@@ -1,3 +1,4 @@
+# TEST-TARGET: doxoade/commands/run.py
 # tests/test_run_logic.py
 import os
 # Removido pytest (não usado explicitamente, o runner 'pytest' injeta asserts)

@@ -70,6 +70,7 @@ from doxoade.commands.tutorial import tutorial_group
 from doxoade.commands.search import search
 from doxoade.commands.style import style
 from doxoade.commands.test import test
+from doxoade.commands.test_mapper import test_map
 from doxoade.commands.timeline import timeline
 from doxoade.commands.utils import log, show_trace, mk, create_pipeline, setup_regression
 from doxoade.commands.venv_up import venv_up
@@ -401,6 +402,7 @@ cli.add_command(show_trace)
 cli.add_command(style)
 cli.add_command(sync)
 cli.add_command(test)
+cli.add_command(test_map)
 cli.add_command(timeline)
 cli.add_command(tutorial_group)
 cli.add_command(venv_up)
