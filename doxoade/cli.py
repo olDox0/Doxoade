@@ -10,6 +10,7 @@ import os
 import click
 from functools import wraps
 from doxoade.database import init_db
+from doxoade.chronos import chronos_recorder
 from datetime import datetime
 from colorama import init as colorama_init, Fore, Style
 
@@ -28,6 +29,7 @@ from doxoade.commands.android import android_group
 from doxoade.commands.auto import auto
 from doxoade.commands.canonize import canonize
 from doxoade.commands.check import check
+from doxoade.chronos import chronos_recorder
 from doxoade.commands.clean import clean
 from doxoade.commands.config import config_group
 from doxoade.commands.dashboard import dashboard
@@ -67,6 +69,7 @@ from doxoade.commands.self_test import self_test
 from doxoade.commands.tutorial import tutorial_group
 from doxoade.commands.style import style
 from doxoade.commands.test import test
+from doxoade.commands.timeline import timeline
 from doxoade.commands.utils import log, show_trace, mk, create_pipeline, setup_regression
 from doxoade.commands.venv_up import venv_up
 from doxoade.commands.verilog import verilog
@@ -85,18 +88,16 @@ from doxoade.shared_tools import (
 
 colorama_init(autoreset=True)
 
-__version__ = "35.0 Alfa"
-
+__version__ = "63.0 Alfa"
 
 # -----------------------------------------------------------------------------
 # GRUPO PRINCIPAL E CONFIGURAÇÃO
 # -----------------------------------------------------------------------------
 
-#atualizado em 2025/09/26-Versão 10.8. Adicionado tratamento de exceção global para garantir que falhas internas da ferramenta sejam sempre registradas no log.
 @click.group(invoke_without_command=True)
 @click.pass_context
 def cli(ctx):
-    """olDox222 Advanced Development Environment (doxoade) LITE v1.0"""
+    """olDox222 Advanced Development Environment (doxoade) v14"""
     if sys.stdout.encoding != 'utf-8':
         sys.stdout.reconfigure(errors='replace')
     try:
@@ -105,15 +106,33 @@ def cli(ctx):
         click.echo(Fore.RED + f"Falha crítica na inicialização do banco de dados: {e}")
         raise e
 
+    # --- CHRONOS START (Hook Global) ---
+    # Inicializa o contexto para passar dados
+    ctx.ensure_object(dict)
+
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
-#    if ctx.invoked_subcommand:
-#        now = datetime.now().strftime("%H:%M:%S")
+    if ctx.invoked_subcommand:
+        try:
+            # Inicia a gravação assim que qualquer subcomando é invocado
+            chronos_recorder.start_command(ctx)
+            # Marca o tempo de início no contexto para calcular a duração depois
+            ctx.obj['start_time'] = time.perf_counter()
+        except Exception:
+            # Não deixa o Chronos quebrar a ferramenta se o DB estiver travado
+            pass
         
 @cli.result_callback()
 def process_result(result, **kwargs):
-    # Aqui podemos logar o tempo total da sessão
-    pass
+    """Executado após o sucesso de qualquer comando."""
+    ctx = click.get_current_context(silent=True)
+    if ctx and ctx.obj and 'start_time' in ctx.obj:
+        # --- CHRONOS END (Success) ---
+        duration = (time.perf_counter() - ctx.obj['start_time']) * 1000
+        try:
+            chronos_recorder.end_command(0, duration)
+        except Exception:
+            pass
 
 def log_command_execution(func):
     @wraps(func)
@@ -121,20 +140,36 @@ def log_command_execution(func):
         ctx = click.get_current_context()
         command_name = ctx.command.name
         
+        # --- 1. CHRONOS START ---
+        # Inicia a gravação da sessão no histórico
+        try:
+            chronos_recorder.start_command(ctx)
+        except Exception:
+            pass # Não falha se o logger falhar
+        
         # --- TELEMETRIA INICIAL ---
         start_time = time.perf_counter()
         start_dt = datetime.now().strftime("%H:%M:%S")
         click.echo(Fore.CYAN + Style.DIM + f"[{start_dt}] Iniciando '{command_name}'..." + Style.RESET_ALL)
         
+        exit_code = 0
         try:
             return func(*args, **kwargs)
         except Exception:
+            exit_code = 1
             raise
         finally:
             # --- TELEMETRIA FINAL ---
             end_time = time.perf_counter()
             duration = end_time - start_time
+            duration_ms = duration * 1000
             
+            # --- 2. CHRONOS END ---
+            try:
+                chronos_recorder.end_command(exit_code, duration_ms)
+            except Exception:
+                pass
+
             # Cor baseada na performance
             if duration < 0.5:
                 color = Fore.GREEN
@@ -145,9 +180,6 @@ def log_command_execution(func):
                 
             click.echo(f"{color}{Style.DIM}[{command_name}] Concluído em {duration:.3f}s{Style.RESET_ALL}")
             
-            # Aqui já existe a lógica de logar no DB via _log_execution
-            # Certifique-se de que o _log_execution está recebendo a duração correta em ms
-            # (O código atual já faz isso no shared_tools, mas aqui reforçamos o feedback visual)
     return wrapper
 
 # -----------------------------------------------------------------------------
@@ -367,6 +399,7 @@ cli.add_command(show_trace)
 cli.add_command(style)
 cli.add_command(sync)
 cli.add_command(test)
+cli.add_command(timeline)
 cli.add_command(tutorial_group)
 cli.add_command(venv_up)
 cli.add_command(verilog)
@@ -392,3 +425,7 @@ if __name__ == '__main__':
         
         _log_execution(command_name="FATAL", path=".", results=results, arguments={'raw_command': sys.argv})
         raise e
+        try:
+            chronos_recorder.end_command(1, 0)
+        except: 
+            pass

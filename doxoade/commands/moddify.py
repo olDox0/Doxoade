@@ -4,6 +4,8 @@ import click
 import shutil
 from colorama import Fore
 
+from ..chronos import chronos_recorder
+
 def _backup_file(file_path):
     shutil.copy2(file_path, f"{file_path}.bak")
 
@@ -12,8 +14,16 @@ def _read_lines(file_path):
         return f.readlines()
 
 def _write_lines(file_path, lines):
-    with open(file_path, 'w', encoding='utf-8') as f:
-        f.writelines(lines)
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            old_content = f.read()
+    except FileNotFoundError:
+        old_content = ""
+
+    new_content = "".join(lines)
+    
+    # REGISTRA NO CHRONOS
+    chronos_recorder.log_file_change(file_path, old_content, new_content, operation='MODIFY')
 
 def _parse_line_range(range_str, max_lines):
     """Converte '1-10' ou '1,3,5' em um set de inteiros."""

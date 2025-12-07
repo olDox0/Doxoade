@@ -4,7 +4,7 @@ from pathlib import Path
 import click
 
 DB_FILE = Path.home() / '.doxoade' / 'doxoade.db'
-DB_VERSION = 14  # Incrementado para forçar re-verificação
+DB_VERSION = 15  # Incrementado para forçar re-verificação
 
 def get_db_connection():
     """Cria o diretório se necessário e retorna uma conexão com o banco de dados."""
@@ -182,6 +182,41 @@ def init_db():
                 cursor.execute("ALTER TABLE solution_templates ADD COLUMN diff_pattern TEXT;")
             except sqlite3.OperationalError:
                 pass # Colunas já existem
+
+        if current_version < 15:
+            click.echo("Atualizando esquema v15 (Protocolo Chronos: Histórico Robusto)...")
+            
+            # Tabela de Histórico de Comandos (Ações do Usuário)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS command_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_uuid TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    command_name TEXT NOT NULL,
+                    full_command_line TEXT NOT NULL,
+                    working_dir TEXT NOT NULL,
+                    exit_code INTEGER,
+                    duration_ms REAL
+                );
+            """)
+
+            # Tabela de Auditoria de Arquivos (Mutações)
+            # Registra o "Antes" e "Depois" de qualquer arquivo tocado pelo Doxoade
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS file_audit (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    command_id INTEGER NOT NULL,
+                    file_path TEXT NOT NULL,
+                    operation_type TEXT NOT NULL, -- 'MODIFY', 'CREATE', 'DELETE'
+                    diff_content TEXT, -- O patch do que mudou
+                    backup_path TEXT,
+                    FOREIGN KEY (command_id) REFERENCES command_history (id)
+                );
+            """)
+            
+            # Índices para performance
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_cmd_hist_ts ON command_history(timestamp);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_audit_path ON file_audit(file_path);")
 
         cursor.execute("UPDATE schema_version SET version = ?;", (DB_VERSION,))
         conn.commit()

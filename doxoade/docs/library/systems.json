@@ -23,5 +23,10 @@
     "title": "Protocolos de Cura (Fênix)",
     "files": ["doxoade/commands/doctor.py", "doxoade/commands/install.py", "doxoade/commands/rebuild.py"],
     "description": "Ferramentas de resiliência de ambiente. Garantem que o venv e as dependências estejam saudáveis."
+  },
+  "chronos_system": {
+    "title": "Sistema Chronos (Telemetria)",
+    "files": ["doxoade/chronos.py", "doxoade/commands/timeline.py"],
+    "description": "O Guardião do Tempo. Grava cada comando executado e cada arquivo modificado pelo Doxoade no banco de dados, permitindo auditoria e reversão futura."
   }
 }
