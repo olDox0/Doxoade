@@ -429,5 +429,5 @@ if __name__ == '__main__':
         raise e
         try:
             chronos_recorder.end_command(1, 0)
-        except: 
+        except Exception: 
             pass
