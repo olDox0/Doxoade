@@ -67,6 +67,7 @@ from doxoade.commands.run import run, flow_command
 from doxoade.commands.save import save
 from doxoade.commands.self_test import self_test
 from doxoade.commands.tutorial import tutorial_group
+from doxoade.commands.search import search
 from doxoade.commands.style import style
 from doxoade.commands.test import test
 from doxoade.commands.timeline import timeline
@@ -394,6 +395,7 @@ cli.add_command(rewind)
 cli.add_command(run)
 cli.add_command(save)
 cli.add_command(self_test)
+cli.add_command(search)
 cli.add_command(setup_regression)
 cli.add_command(show_trace)
 cli.add_command(style)
