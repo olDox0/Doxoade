@@ -83,5 +83,10 @@
     "title": "Comando Timeline: Histórico",
     "date": "2025-12-06",
     "content": "Visualiza a linha do tempo de ações do Doxoade.\nMostra comandos executados, tempo de duração e arquivos modificados (com diffs).\nUso: 'doxoade timeline --full'."
+  },
+  "security": {
+    "title": "Comando Security: Auditoria de Segurança",
+    "date": "2025-12-04",
+    "content": "Suite leve de segurança.\n- SAST (Bandit): Busca falhas lógicas no código.\n- SCA (Safety): Busca CVEs nas dependências.\nUso: 'doxoade security' (tudo) ou flags --sast / --sca."
   }
 }
