@@ -3,6 +3,7 @@ import sys
 import subprocess
 import os
 import click
+import shlex
 from colorama import Fore, Style
 from ..shared_tools import ExecutionLogger
 
@@ -12,6 +13,17 @@ def _execute_command(command_str, inputs=None):
     """
     (Versão Corrigida) Executa um comando, lida com inputs e força a saída colorida.
     """
+    
+    click.echo(Fore.YELLOW + f"   > Executando: {command_string}")
+    
+    # [SEGURANÇA] shlex para dividir a string em argumentos seguros
+    
+    try:
+        args = shlex.split(command_string)
+    except ValueError as e:
+        click.echo(Fore.RED + f"   > Erro de sintaxe no comando: {e}")
+        return 1
+    
     try:
         env = os.environ.copy()
         env["FORCE_COLOR"] = "1"
@@ -23,32 +35,34 @@ def _execute_command(command_str, inputs=None):
         # Passamos a string do comando diretamente, sem tentar dividi-la primeiro.
         # O 'shell=True' cuidará de interpretar a string corretamente.
         process = subprocess.Popen(
-            command_str,  # <-- MUDANÇA AQUI
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=subprocess.PIPE,
+            args,
+            stdin=subprocess.PIPE if input_str else None,
+            stdout=sys.stdout, 
+            stderr=sys.stderr,
             text=True,
             encoding='utf-8',
             errors='replace',
             env=env,
-            shell=True
+            shell=False 
         )
-        stdout, stderr = process.communicate(input=input_str)
+        if input_str:
+            process.communicate(input=input_str)
+        else:
+            process.wait()
 
-        sys.stdout.write(stdout)
-        sys.stderr.write(Fore.RED + stderr + Style.RESET_ALL)
-        
         return process.returncode
 
+    except FileNotFoundError:
+        click.echo(Fore.RED + f"   > Comando não encontrado: {args[0]}")
+        return 1
     except Exception as e:
         click.echo(Fore.RED + f"   > Erro inesperado ao executar comando: {e}")
         return 1
 
 @click.command('auto')
-@click.pass_context
-@click.argument('commands', nargs=-1, required=False)
-@click.option('--file', 'filepath', type=click.Path(exists=True, dir_okay=False), help="Executa um pipeline a partir de um arquivo.")
-def auto(ctx, commands, filepath):
+@click.argument('prompt', required=False)
+@click.option('--file', '-f', multiple=True, help="Arquivos de contexto para a IA.")
+def auto(prompt, file):
     """Executa uma sequência de comandos como um pipeline robusto."""
     arguments = ctx.params
     
