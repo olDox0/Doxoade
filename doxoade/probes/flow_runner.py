@@ -2,152 +2,162 @@
 import sys
 import os
 import time
-import linecache
-from colorama import init, Fore, Style, Back
-
-# Força UTF-8 no stdout para Windows
-if sys.platform == "win32":
-    sys.stdout.reconfigure(encoding='utf-8')
-
-init(autoreset=True)
+import inspect
+import datetime
+import json
 
 class FlowTracer:
-    def __init__(self, target_script):
-        self.target_script = os.path.normcase(os.path.abspath(target_script))
+    def __init__(self):
         self.last_time = time.perf_counter()
         self.last_locals = {}
+        # Cores ANSI
+        self.CYAN = '\033[96m'
+        self.YELLOW = '\033[93m'
+        self.GREEN = '\033[92m'
+        self.RED = '\033[91m'
+        self.RESET = '\033[0m'
+        self.DIM = '\033[2m'
         
-        self.SLOW = 0.1
-        self.CRITICAL = 1.0
-
-        self.python_dir = os.path.normcase(os.path.dirname(sys.executable))
-        self.cwd = os.getcwd()
+        # Configuração de Layout
+        self.col_time = 10
+        self.col_loc = 20
+        self.col_code = 50
+        self.col_vars = 40
         
-        # Tenta usar o caractere bonito, mas se o terminal não suportar, usa pipe normal
+        # Símbolo separador
+        self.sep_char = "|"
         try:
-            self.sep_char = "│"
-            print(" " + self.sep_char + " ", end="\r") # Teste silencioso
-        except UnicodeEncodeError:
-            self.sep_char = "|"
+            if sys.stdout.encoding and sys.stdout.encoding.lower().startswith('utf'):
+                self.sep_char = "│"
+        except: pass
+
+        self._print_header()
+
+    def _print_header(self):
+        width = self.col_time + self.col_loc + self.col_code + self.col_vars
+        print("=" * width)
+        print(f" DOXOADE FLOW v1.2 | Rastreando: {sys.argv[0]}")
+        print(f" Performance:  {self.RED}>1.0s{self.RESET}   {self.YELLOW}>0.1s{self.RESET}")
+        print("=" * width)
+
+    def _safe_compare_changed(self, old_val, new_val):
+        """Compara valores de forma segura (suporte a NumPy/Pandas)."""
+        try:
+            is_diff = (old_val != new_val)
+            if hasattr(is_diff, 'any'): # Para arrays numpy
+                return is_diff.any()
+            return bool(is_diff)
+        except:
+            return True
 
     def trace_calls(self, frame, event, arg):
         if event != 'line':
             return self.trace_calls
+            
+        code = frame.f_code
+        filename = code.co_filename
+        fname_lower = filename.lower()
         
-        code_path = frame.f_code.co_filename
-        if code_path.startswith('<'): return self.trace_calls
+        # --- FILTROS DE RUÍDO APRIMORADOS ---
+        # 1. Ignora o próprio Doxoade
+        if "doxoade" in fname_lower and "probes" in fname_lower: return self.trace_calls
         
-        abs_path = os.path.normcase(os.path.abspath(code_path))
+        # 2. Ignora arquivos que não são Python
+        if not filename.endswith(".py"): return self.trace_calls
         
-        # --- FILTROS DE RUÍDO ---
-        # 1. Ignora bibliotecas do Python (site-packages, lib)
-        # 2. Ignora o próprio flow_runner
-        # 3. Ignora arquivos fora do diretório do projeto
+        # 3. Ignora bibliotecas padrão e site-packages (reduz ruído de imports como numpy)
+        # No Windows, bibliotecas padrão ficam em Lib\ (ex: Lib\enum.py)
+        # Bibliotecas externas ficam em Lib\site-packages\
+        if "site-packages" in fname_lower: return self.trace_calls
+        if os.sep + "lib" + os.sep in fname_lower: return self.trace_calls 
         
-        if 'flow_runner.py' in abs_path: return self.trace_calls
-        
-        is_in_cwd = abs_path.startswith(os.path.normcase(self.cwd))
-        if not is_in_cwd: return self.trace_calls
-        
-        # Filtros extras de libs
-        if 'site-packages' in abs_path or os.sep + 'lib' + os.sep in abs_path: return self.trace_calls
-        if 'venv' in abs_path: return self.trace_calls
+        # --- FIM DOS FILTROS ---
 
-        # --- CÁLCULO DE TEMPO ---
         current_time = time.perf_counter()
         delta = current_time - self.last_time
         self.last_time = current_time
         
-        if delta > self.CRITICAL:
-            t_color = Fore.WHITE + Back.RED + Style.BRIGHT
-        elif delta > self.SLOW:
-            t_color = Fore.BLACK + Back.YELLOW
-        else:
-            t_color = Fore.CYAN + Style.DIM
-
-        time_str = f"{delta:.4f}s"
-
-        # --- EXTRAÇÃO DE CONTEXTO ---
         lineno = frame.f_lineno
-        filename = os.path.basename(code_path)
-        line_content = linecache.getline(code_path, lineno).strip()
-        if len(filename) > 15: filename = filename[:12] + "..."
+        
+        # Formata tempo
+        t_str = f"{delta:.4f}s"
+        if delta > 1.0: t_str = f"{self.RED}{t_str}{self.RESET}"
+        elif delta > 0.1: t_str = f"{self.YELLOW}{t_str}{self.RESET}"
+        
+        # Lê código
+        try:
+            import linecache
+            line_content = linecache.getline(filename, lineno).strip()
+        except:
+            line_content = "???"
 
-        # --- MONITORAMENTO DE VARIÁVEIS ---
-        current_locals = frame.f_locals.copy()
-        changes = []
-        for name, val in current_locals.items():
+        # Processa variáveis
+        curr_locals = frame.f_locals.copy()
+        diffs = []
+        
+        for name, val in curr_locals.items():
             if name.startswith('__'): continue
-            # Só mostra se mudou ou é novo
-            if name not in self.last_locals or self.last_locals[name] != val:
-                try: 
-                    v_str = repr(val) 
-                except Exception:
-                    v_str = "<obj>"
-                
-                if len(v_str) > 40: v_str = v_str[:37] + "..."
-                
-                changes.append(f"{Fore.GREEN}{name}{Fore.WHITE}={Style.DIM}{v_str}")
-        
-        self.last_locals = current_locals
-
-        # --- VISUALIZAÇÃO MATRIX ---
-        col_time = f"{t_color} {time_str} {Style.RESET_ALL}"
-        col_loc = f"{Fore.BLUE}{filename}:{Fore.WHITE}{lineno:<4}"
-        col_code = f"{Fore.WHITE}{line_content:<50}"
-        
-        sep = f"{Fore.BLACK + Style.BRIGHT}{self.sep_char}{Style.RESET_ALL}"
-        
-        output = f"{col_time} {sep} {col_loc} {sep} {col_code}"
-        
-        if changes:
-            output += f" {sep} {' '.join(changes)}"
             
-        print(output)
+            if name not in self.last_locals or self._safe_compare_changed(self.last_locals.get(name), val):
+                # --- PROTEÇÃO CONTRA CRASH DE INSPEÇÃO ---
+                try:
+                    val_str = str(val)
+                except Exception:
+                    # Se falhar ao converter pra string (ex: objeto não inicializado), mostra placeholder
+                    val_str = "<Unprintable>"
+                # -----------------------------------------
+                
+                val_str = val_str.replace('\n', ' ')
+                if len(val_str) > 25: val_str = val_str[:22] + "..."
+                diffs.append(f"{name}={val_str}")
+        
+        self.last_locals = curr_locals
+        
+        # Formatação Visual
+        fname = os.path.basename(filename)
+        if len(fname) > 15: fname = fname[:12] + "..."
+        loc = f"{fname}:{lineno}"
+        
+        vars_str = ", ".join(diffs)
+        
+        sep = f" {self.sep_char} "
+        # Ajuste de espaçamento manual para alinhar colunas com cores ANSI
+        print(f" {t_str:<19} {sep} {loc:<{self.col_loc}} {sep} {line_content:<{self.col_code}} {sep} {self.DIM}{vars_str}{self.RESET}")
+        
         return self.trace_calls
 
 def run_flow(script_path, args):
-    abs_script_path = os.path.abspath(script_path)
-    
-    print(Fore.MAGENTA + Style.BRIGHT + "="*100)
-    print(Fore.MAGENTA + Style.BRIGHT + f" DOXOADE FLOW v1.0 | Rastreando: {os.path.basename(script_path)}")
-    print(Fore.WHITE + Style.DIM + f" Performance: {Back.RED} >1.0s {Style.RESET_ALL} {Back.YELLOW}{Fore.BLACK} >0.1s {Style.RESET_ALL}")
-    print(Fore.MAGENTA + Style.BRIGHT + "="*100)
-    
-    tracer = FlowTracer(abs_script_path)
-    
-    # Prepara o ambiente para o script fingir que é o __main__
-    sys.path.insert(0, os.path.dirname(abs_script_path))
-    # Adiciona raiz do projeto também para imports absolutos funcionarem
-    sys.path.insert(0, os.getcwd())
-    
-    sys.argv = [script_path] + args
-    
+    tracer = FlowTracer()
     sys.settrace(tracer.trace_calls)
     
+    sys.argv = [script_path] + args
+    file_dir = os.path.dirname(os.path.abspath(script_path))
+    if file_dir not in sys.path:
+        sys.path.insert(0, file_dir)
+    
     try:
-        with open(abs_script_path, 'rb') as f:
-            code = compile(f.read(), abs_script_path, 'exec')
+        with open(script_path, 'rb') as f:
+            code = compile(f.read(), script_path, 'exec')
+            
             globs = {
+                '__file__': script_path,
                 '__name__': '__main__',
-                '__file__': abs_script_path,
-                '__doc__': None,
-                '__package__': None
+                '__package__': None,
+                '__cached__': None,
             }
+            
             exec(code, globs) # noqa
     except Exception as e:
-        sys.settrace(None)
-        print(Fore.RED + "-"*100)
-        print(Fore.RED + Style.BRIGHT + f"[FLOW CRASH] O script falhou: {e}")
-        # Aqui poderíamos invocar o rescue.py se quiséssemos ser agressivos
-        raise e
+        print("\n" + "-" * 80)
+        print(f"[FLOW CRASH] O script falhou (Erro do Usuário): {e}")
+        print("-" * 80)
+        # Não damos raise aqui para não mostrar o traceback do doxoade, apenas do script
     finally:
         sys.settrace(None)
-        print(Fore.GREEN + "-"*100)
-        print(Fore.GREEN + "[FLOW] Finalizado.")
+        print("\n[FLOW] Finalizado.")
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2: 
+    if len(sys.argv) < 2:
         print("Uso: flow_runner.py <script> [args]")
         sys.exit(1)
     run_flow(sys.argv[1], sys.argv[2:])
