@@ -122,37 +122,32 @@ def _build_execution_command(script_path, python_exe, flow=False, args=None):
 def run(ctx, flow, internal, script):
     """
     Executa um script Python com ambiente controlado.
-    
-    Exemplos:
-        doxoade run main.py
-        doxoade run main.py --flow
-        doxoade flow main.py
-        doxoade run check --internal (Equivale a rodar python -m doxoade.commands.check)
     """
-    args = ctx.args  # Argumentos extras passados após o script
+    args = ctx.args
     
     if not script and not internal:
         click.echo(Fore.RED + "Erro: Especifique um script ou use --internal.")
         return
 
-    # Configurar Ambiente
+    # 1. Configuração do Ambiente
     env = os.environ.copy()
-    # Tenta achar venv local explicitamente
-    current_cwd = os.path.join(os.getcwd(), 'venv', 'Scripts', 'python.exe')
-    if os.path.exists(current_cwd):
-        python_exe = current_cwd
-        click.echo(Fore.GREEN + f"[AMBIENTE] Usando venv local: {python_exe}")
+    current_cwd = os.getcwd()
+    
+    # Tenta achar venv local explicitamente (Prioridade Máxima)
+    local_venv_exe = os.path.join(current_cwd, 'venv', 'Scripts', 'python.exe')
+    if os.path.exists(local_venv_exe):
+        python_exe = local_venv_exe
+        # click.echo(Fore.GREEN + f"[AMBIENTE] Usando venv local: {python_exe}")
     else:
         # Tenta via shared_tools
         python_exe = _get_venv_python_executable()
         
     if not python_exe:
-        # Fallback
         python_exe = sys.executable
         if not internal:
              click.echo(Fore.YELLOW + "[AVISO] 'venv' não detectado. Usando Python do sistema.")
     
-    # Adiciona o diretório atual ao PYTHONPATH
+    # Configura PYTHONPATH e Encoding
     if "PYTHONPATH" in env:
         env["PYTHONPATH"] = f"{current_cwd}{os.pathsep}{env['PYTHONPATH']}"
     else:
@@ -164,16 +159,11 @@ def run(ctx, flow, internal, script):
     
     if internal:
         if not script:
-             click.echo(Fore.RED + "Erro: Para --internal, informe o nome do comando (ex: check).")
+             click.echo(Fore.RED + "Erro: Para --internal, informe o nome do comando.")
              return
         
-        # Modo Internal: Roda como módulo (-m) para preservar imports relativos
-        # Ex: doxoade run check --internal -> python -m doxoade.commands.check
+        # Modo Internal: Roda como módulo
         module_name = f"doxoade.commands.{script.replace('.py', '')}"
-        
-        # Para comandos internos funcionarem como __main__, eles precisam ter o bloco if __name__ == "__main__":
-        # O check.py atual é desenhado para ser invocado pelo Click, mas podemos forçar a execução.
-        # Se usarmos --flow com internal, usamos o flow_runner no arquivo físico.
         
         if flow:
              # Flow precisa do arquivo físico
@@ -182,35 +172,24 @@ def run(ctx, flow, internal, script):
                  click.echo(Fore.RED + f"Erro: Arquivo interno '{target_script}' não encontrado.")
                  return
              
-             # Precisamos achar o flow_runner
-             flow_runner_path = os.path.join("doxoade", "probes", "flow_runner.py")
-             cmd = [python_exe, flow_runner_path, target_script] + list(args)
+             probe = _get_flow_probe_path()
+             cmd = [python_exe, probe, target_script] + list(args)
              
         else:
-             # Execução normal interna via módulo
-             cmd = [python_exe, target_script] + list(args)
+             # Execução normal interna via módulo (-m)
+             # CORREÇÃO AQUI: Usa -m e module_name, não target_script
+             cmd = [python_exe, "-m", module_name] + list(args)
 
     else:
-        # Modo Script Normal
+        # Modo Script Normal (Usuário)
         target_script = script
         if not os.path.exists(target_script):
             click.echo(Fore.RED + f"Erro: Arquivo '{target_script}' não encontrado.")
             return
 
         if flow:
-            flow_runner_path = os.path.join("doxoade", "probes", "flow_runner.py")
-            # Se não achar localmente (instalado via pip?), tenta achar relativo ao pacote
-            if not os.path.exists(flow_runner_path):
-                 # Fallback: Tenta achar onde o doxoade está instalado
-                 import doxoade
-                 pkg_dir = os.path.dirname(doxoade.__file__)
-                 flow_runner_path = os.path.join(pkg_dir, "probes", "flow_runner.py")
-            
-            if not os.path.exists(flow_runner_path):
-                 click.echo(Fore.RED + "Erro: flow_runner.py não encontrado (instalação corrompida?).")
-                 return
-
-            cmd = [python_exe, flow_runner_path, target_script] + list(args)
+            probe = _get_flow_probe_path()
+            cmd = [python_exe, probe, target_script] + list(args)
         else:
             cmd = [python_exe, target_script] + list(args)
 
@@ -218,7 +197,8 @@ def run(ctx, flow, internal, script):
         if not flow:
             click.echo(Fore.CYAN + f"--- [RUN] Executando: {' '.join(cmd)} ---")
         
-        subprocess.run(cmd, env=env, check=True)
+        # shell=False é mais seguro
+        subprocess.run(cmd, env=env, check=True, shell=False)
         
     except subprocess.CalledProcessError as e:
         click.echo(Fore.RED + f"\n[FALHA] Processo terminou com código {e.returncode}.")
