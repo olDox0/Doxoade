@@ -131,12 +131,25 @@ def _log_execution(command_name, path, results, arguments, execution_time_ms=0):
     finally:
        if conn: conn.close()
 
-def _get_venv_python_executable():
-    venv_path = 'venv'
+def _get_venv_python_executable(start_path='.'):
+    """
+    Localiza o interpretador Python do ambiente virtual.
+    Busca na raiz do projeto (identificada por .git ou pyproject.toml).
+    """
+    # 1. Encontra a raiz real do projeto
+    project_root = _find_project_root(start_path)
+    
+    # 2. Constrói o caminho absoluto para o venv nessa raiz
+    venv_path = os.path.join(project_root, 'venv')
+    
     exe_name = 'python.exe' if os.name == 'nt' else 'python'
     scripts_dir = 'Scripts' if os.name == 'nt' else 'bin'
+    
     python_executable = os.path.join(venv_path, scripts_dir, exe_name)
-    if os.path.exists(python_executable): return os.path.abspath(python_executable)
+    
+    if os.path.exists(python_executable):
+        return os.path.abspath(python_executable)
+    
     return None
 
 def _get_git_commit_hash(path):
