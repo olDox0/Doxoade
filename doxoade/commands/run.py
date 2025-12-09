@@ -137,7 +137,20 @@ def run(ctx, flow, internal, script):
 
     # Configurar Ambiente
     env = os.environ.copy()
-    current_cwd = os.getcwd()
+    # Tenta achar venv local explicitamente
+    current_cwd = os.path.join(os.getcwd(), 'venv', 'Scripts', 'python.exe')
+    if os.path.exists(current_cwd):
+        python_exe = current_cwd
+        click.echo(Fore.GREEN + f"[AMBIENTE] Usando venv local: {python_exe}")
+    else:
+        # Tenta via shared_tools
+        python_exe = _get_venv_python_executable()
+        
+    if not python_exe:
+        # Fallback
+        python_exe = sys.executable
+        if not internal:
+             click.echo(Fore.YELLOW + "[AVISO] 'venv' não detectado. Usando Python do sistema.")
     
     # Adiciona o diretório atual ao PYTHONPATH
     if "PYTHONPATH" in env:
@@ -171,11 +184,11 @@ def run(ctx, flow, internal, script):
              
              # Precisamos achar o flow_runner
              flow_runner_path = os.path.join("doxoade", "probes", "flow_runner.py")
-             cmd = [sys.executable, flow_runner_path, target_script] + args
+             cmd = [python_exe, flow_runner_path, target_script] + list(args)
              
         else:
              # Execução normal interna via módulo
-             cmd = [sys.executable, "-m", module_name] + args
+             cmd = [python_exe, target_script] + list(args)
 
     else:
         # Modo Script Normal
@@ -197,9 +210,9 @@ def run(ctx, flow, internal, script):
                  click.echo(Fore.RED + "Erro: flow_runner.py não encontrado (instalação corrompida?).")
                  return
 
-            cmd = [sys.executable, flow_runner_path, target_script] + args
+            cmd = [python_exe, flow_runner_path, target_script] + list(args)
         else:
-            cmd = [sys.executable, target_script] + args
+            cmd = [python_exe, target_script] + list(args)
 
     try:
         if not flow:
