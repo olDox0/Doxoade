@@ -85,8 +85,8 @@
     "content": "Visualiza a linha do tempo de ações do Doxoade.\nMostra comandos executados, tempo de duração e arquivos modificados (com diffs).\nUso: 'doxoade timeline --full'."
   },
   "security": {
-    "title": "Comando Security: Auditoria de Segurança",
-    "date": "2025-12-04",
-    "content": "Suite leve de segurança.\n- SAST (Bandit): Busca falhas lógicas no código.\n- SCA (Safety): Busca CVEs nas dependências.\nUso: 'doxoade security' (tudo) ou flags --sast / --sca."
-  }
+    "title": "Comando Security: Auditoria Blindada",
+    "date": "2025-12-09",
+    "content": "Realiza auditoria de segurança (SAST + SCA) usando ferramentas internas.\n\nArquitetura 'Batteries Included':\n- O Doxoade carrega suas próprias versões do 'bandit' e 'safety'.\n- Não exige instalação no projeto alvo.\n- Usa heurística de caminho para achar os executáveis.\n\nUso:\n  doxoade security        (Varredura completa)\n  doxoade security --sast (Apenas Código)\n  doxoade security --sca  (Apenas Dependências)"
+  } 
 }

@@ -31,64 +31,8 @@ from ..shared_tools import (
     _get_file_hash
 )
 
-# Lista de tags que silenciam erros
-SILENCERS = {
-    'noqa', 'numerator', 'ignore', 'skipline', 'asis', 'no-check', 
-    'suppress', 'disable', 'dtiw', 'igfi'
-}
-
-# Lista de tags que CRIAM avisos (Lembretes de QA)
-# Mapeia TAG -> Severidade
-QA_TAGS = {
-    'TODO': 'INFO',
-    'FIXME': 'WARNING',
-    'BUG': 'ERROR',
-    'HACK': 'WARNING',
-    'XXX': 'CRITICAL',
-    'CKQA': 'WARNING',      # Check Quality Assurance
-    'VYQA': 'INFO',         # Verify QA
-    'ADTI': 'CRITICAL',     # Always Display This Issue
-    'QA-CHECK': 'WARNING'   # Nome intuitivo universal
-}
-
-def _filter_and_inject_findings(findings, file_path):
-    try:
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            lines = f.readlines()
-    except IOError:
-        return findings
-
-    final_findings = []
-    for f in findings:
-        line_num = f.get('line')
-        if not line_num or line_num > len(lines):
-            final_findings.append(f)
-            continue
-        line_content = lines[line_num - 1]
-        is_silenced = False
-        if '#' in line_content:
-            comment = line_content.split('#', 1)[1].strip().upper()
-            for tag in SILENCERS:
-                if tag.upper() in comment:
-                    is_silenced = True
-                    break
-        if not is_silenced:
-            final_findings.append(f)
-
-    for i, line in enumerate(lines):
-        if '#' in line:
-            comment_part = line.split('#', 1)[1].strip()
-            first_word = comment_part.split(':')[0].split()[0].upper().rstrip(':')
-            if first_word in QA_TAGS:
-                final_findings.append({
-                    'severity': QA_TAGS[first_word],
-                    'category': 'QA-REMINDER',
-                    'message': f"[{first_word}] {comment_part[len(first_word):].strip().lstrip(':').strip()}",
-                    'file': file_path,
-                    'line': i + 1,
-                    'snippet': _get_code_snippet(file_path, i + 1)
-                })
-    return final_findings
+# [REFATORAÇÃO] Importa a lógica de filtros do novo módulo
+from .check_filters import filter_and_inject_findings
 
 def _get_probe_path(probe_name):
     """Encontra o caminho para um arquivo de sonda de forma segura."""
@@ -358,25 +302,27 @@ def _analyze_dependencies(findings, file_path):
     """
     (Gênese V3 - Abdução) Analisa dependências e enriquece findings de 'undefined name'
     com informação sobre qual import provavelmente está faltando.
-    
-    Retorna os findings enriquecidos com:
-    - 'missing_import': nome do módulo que provavelmente precisa ser importado
-    - 'import_suggestion': linha de import sugerida
     """
     if not findings:
         return findings
+    
     # Filtra apenas os findings de 'undefined name'
     undefined_findings = [f for f in findings if 'undefined name' in f.get('message', '')]
+    
     if not undefined_findings:
         return findings
+    
     # Lê os imports atuais do arquivo
     current_imports = _extract_current_imports(file_path)
+    
     for finding in undefined_findings:
         message = finding.get('message', '')
         match = re.match(r"undefined name '(.+?)'", message)
         if not match:
             continue
+        
         undefined_name = match.group(1)
+        
         # Caso 1: O nome indefinido É um módulo conhecido
         if undefined_name in ALL_KNOWN_MODULES:
             if undefined_name not in current_imports:
@@ -384,6 +330,7 @@ def _analyze_dependencies(findings, file_path):
                 finding['import_suggestion'] = f"import {undefined_name}"
                 finding['dependency_type'] = 'MISSING_MODULE_IMPORT'
                 continue
+        
         # Caso 2: O nome indefinido é um EXPORT de algum módulo conhecido
         for module, exports in ALL_KNOWN_MODULES.items():
             if undefined_name in exports:
@@ -410,7 +357,9 @@ def _analyze_dependencies(findings, file_path):
                     finding['import_suggestion'] = f"from {module} import {undefined_name}"
                     finding['dependency_type'] = 'INFERRED_IMPORT'
                     break
+    
     return findings
+
 
 def _extract_current_imports(file_path):
     """
@@ -467,11 +416,6 @@ def _enrich_with_dependency_analysis(findings, project_path):
 
     for file_path, file_findings in by_file.items():
         _analyze_dependencies(file_findings, file_path)
-        
-        # DEBUG: Verificar se está adicionando import_suggestion
-#        for f in file_findings:
-#            if f.get('import_suggestion'):
-#                click.echo(Fore.MAGENTA + f"   > [DEBUG-ABDUÇÃO] {f.get('message')} -> {f.get('import_suggestion')}")
 
     return findings
 
@@ -490,6 +434,8 @@ def _enrich_findings_with_solutions(findings):
         templates = cursor.fetchall()
 
         for finding in findings:
+            if finding.get('import_suggestion'):
+                continue
             # 1. Tenta encontrar uma solução exata primeiro
             finding_hash = finding.get('hash')
             if finding_hash:
@@ -601,10 +547,7 @@ def _enrich_findings_with_solutions(findings):
 
 def _manage_incidents(findings, project_path):
     """
-    (Gênese V3) Gerencia incidentes E aprende soluções automaticamente:
-    - Adiciona novos incidentes encontrados
-    - Quando um incidente é resolvido, APRENDE a solução antes de removê-lo
-    - Retorna estatísticas de mudanças
+    (Gênese V3) Gerencia incidentes E aprende soluções automaticamente.
     """
     from ..database import get_db_connection
     from ..shared_tools import _run_git_command
@@ -663,25 +606,8 @@ def _manage_incidents(findings, project_path):
             stats['learned'] += 1
             
             # Tenta aprender template (Gênese V8)
-            # Instancia o motor (pode ser fora do loop para otimizar, mas aqui é seguro)
-            # Mas espere, o LearningEngine precisa do 'cursor'.
-            
-            # O ideal é instanciar UMA VEZ antes do loop
-            # learner = LearningEngine(cursor) (Coloque isso antes do 'for resolved_hash...')
-            
-            # Dentro do loop:
-            # Precisamos do conteúdo original e corrigido.
-            # Se não tivermos, passamos None e ele tenta só as regras hardcoded.
-            
-            learner = LearningEngine(cursor) # Instancia rápida
-            
-            # Tenta recuperar o conteúdo antigo do git (HEAD)
-            original_content = None
-            corrected_content = None
-            
-            # (Opcional: Lógica de ler arquivos para o modo flexível futuro)
-            # Por enquanto, para consertar o erro, passamos None
-            
+            learner = LearningEngine(cursor) 
+            original_content = None # Tenta recuperar o conteúdo antigo do git se possível, aqui simplificado
             if learner.learn_from_incident(incident, corrected_content, original_content):
                 stats['templates'] += 1
             
@@ -734,7 +660,7 @@ def _manage_incidents(findings, project_path):
         
     except Exception as e:
         conn.rollback()
-        click.echo(Fore.YELLOW + f"[AVISO] Erro ao gerenciar incidentes: {e}")
+        # click.echo(Fore.YELLOW + f"[AVISO] Erro ao gerenciar incidentes: {e}")
     finally:
         conn.close()
     
@@ -777,19 +703,16 @@ def _run_smart_fix(findings, project_path, logger):
             
             if matched_template:
                 raw_path = finding['file']
+                if os.path.isabs(raw_path):
+                    file_abs = raw_path
+                else:
+                    file_abs = os.path.abspath(os.path.join(project_path, raw_path))
+                file_abs = os.path.normpath(file_abs)
                 
-                # Converte para absoluto usando o CWD
-                abs_raw_path = os.path.abspath(raw_path)
-                
-                if not os.path.exists(abs_raw_path):
-                    continue
-                
-                final_path = os.path.normpath(abs_raw_path)
-                
-                if fixer.apply_fix(final_path, finding['line'], matched_template['solution_template'], context):
+                if fixer.apply_fix(file_abs, finding['line'], matched_template['solution_template'], context):
                     fixed_count += 1
-                    click.echo(Fore.GREEN + f"   > [AUTOFIX] {matched_template['solution_template']}: {finding['file']}:{finding['line']}")
-                                        
+                    click.echo(Fore.GREEN + f"   > [AUTOFIX] Aplicado: {matched_template['solution_template']} em {finding['file']}:{finding['line']}")
+                    
     except Exception as e:
         click.echo(Fore.RED + f"[ERRO AUTOFIX] {e}")
     finally:
@@ -812,39 +735,18 @@ def _run_clone_probe(files, python_executable, debug=False):
     return findings
 
 def _run_xref_probe(files, python_executable, project_root, debug=False):
-    """Executa a Sonda de Referência Cruzada (XRef) para detectar imports quebrados e assinaturas erradas."""
-    findings = []
-    # Precisa de pelo menos 2 arquivos ou 1 arquivo + imports para fazer sentido, 
-    # mas vamos rodar sempre que houver arquivos válidos e não for modo --fast.
+    """Executa a Sonda de Referência Cruzada (XRef)."""
     if not files: return []
-    
     probe_path = _get_probe_path('xref_probe.py')
-    
     if debug: click.echo(Fore.CYAN + f"   > [DEBUG] Executando XRef Probe (Integridade) em {len(files)} arquivos...")
-    
+    findings = []
     try:
         input_json = json.dumps(files)
-        # Passa project_root como argumento e files via stdin
         cmd = [python_executable, probe_path, project_root]
-        
-        result = subprocess.run(
-            cmd, 
-            input=input_json, 
-            capture_output=True, 
-            text=True, 
-            encoding='utf-8', 
-            errors='replace'
-        )
-        
+        result = subprocess.run(cmd, input=input_json, capture_output=True, text=True, encoding='utf-8', errors='replace')
         if result.returncode == 0 and result.stdout.strip():
             findings = json.loads(result.stdout)
-        elif debug and result.stderr:
-             click.echo(Fore.RED + f"   > [DEBUG-XREF ERROR] {result.stderr}")
-            
-    except Exception as e:
-        if debug: click.echo(Fore.RED + f"   > [DEBUG] Erro ao invocar XRef Probe: {e}")
-        pass
-        
+    except Exception: pass
     return findings
 
 def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=False, no_cache=False, target_files=None, check_clones=False):
@@ -894,7 +796,7 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
     if (check_clones or not fast) and valid_files:
         analysis['raw_findings'].extend(_run_clone_probe(valid_files, python_exe, debug))
 
-    # 2.2 XRef (Integridade de Links) - [NOVO]
+    # 2.2 XRef (Integridade de Links)
     if not fast and valid_files:
         xref_findings = _run_xref_probe(valid_files, python_exe, root_path, debug)
         analysis['raw_findings'].extend(xref_findings)
@@ -926,8 +828,9 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
             by_file[p].append(f)
 
     for fp in files:
+        # Busca tanto por caminho absoluto quanto relativo para garantir
         fs = by_file.get(fp) or by_file.get(os.path.abspath(fp)) or []
-        filtered.extend(_filter_and_inject_findings(fs, fp))
+        filtered.extend(filter_and_inject_findings(fs, fp))
 
     with ExecutionLogger('check', root_path, {'fix': fix}) as logger:
         for f in filtered:
@@ -957,8 +860,8 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
 
 @click.command('check')
 @click.pass_context
-@click.argument('path', type=click.Path(exists=True, file_okay=True), default='.')
-@click.option('--ignore', 'cmd_line_ignore', multiple=True, help="Ignora uma pasta.")
+@click.argument('path', type=click.Path(exists=True), default='.')
+@click.option('--ignore', multiple=True, help="Ignora uma pasta.")
 @click.option('--fix', is_flag=True, help="Tenta corrigir problemas automaticamente.")
 @click.option('--debug', is_flag=True, help="Ativa a saída de depuração detalhada.")
 @click.option('--format', 'output_format', type=click.Choice(['text', 'json']), default='text', help="Define o formato da saída.")
@@ -966,21 +869,23 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
 @click.option('--no-imports', is_flag=True, help="Pula a verificação de imports não resolvidos.")
 @click.option('--no-cache', is_flag=True, help="Força uma reanálise completa, ignorando o cache.")
 @click.option('--clones', is_flag=True, help="Força a análise de código duplicado (DRY).")
-def check(ctx, path, cmd_line_ignore, fix, debug, output_format, fast, no_imports, no_cache, clones):
+def check(ctx, path, ignore, fix, debug, output_format, fast, no_imports, no_cache, clones):
     """Análise estática, estrutural e de duplicatas completa do projeto."""
     if not debug and output_format == 'text':
         click.echo(Fore.YELLOW + "[CHECK] Executando análise...")
+        
     results = run_check_logic(
-        path, cmd_line_ignore, fix, debug,
+        path, ignore, fix, debug, 
         fast=fast, no_imports=no_imports, no_cache=no_cache, check_clones=clones
     )
     _update_open_incidents(results, os.path.abspath(path)) 
     
-    if output_format == 'json': 
+    if output_format == 'json':
         print(json.dumps(results, indent=2, ensure_ascii=False))
     else:
         if not debug:
             _present_results('text', results)
+    
     if results.get('summary', {}).get('critical', 0) > 0:
         sys.exit(1)
 
