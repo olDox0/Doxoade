@@ -112,12 +112,12 @@ class TestMapper:
             
             for func in funcs:
                 lines.append(f"def test_{func}_exists():")
-                lines.append(f"    # TODO: Implementar teste para {func}")
+                lines.append(f"    # TODO: Implementar teste para {func}") # noqa
                 lines.append(f"    assert callable({func})")
                 lines.append("")
                 
             return "\n".join(lines)
-        except:
+        except Exception:
             return "# Falha ao gerar esqueleto."
 
 @click.command('test-map')

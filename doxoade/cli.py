@@ -195,111 +195,41 @@ def log_command_execution(func):
 def setup_health(ctx, path):
     """Prepara um projeto para ser analisado pelo 'doxoade health'."""
     
-    click.echo(Fore.CYAN + Style.BRIGHT + f"--- [SETUP-HEALTH] Configurando o projeto em '{path}' para análise de saúde ---")
-
+    click.echo(Fore.CYAN + Style.BRIGHT + f"--- [SETUP-HEALTH] Configurando '{path}' ---")
     arguments = ctx.params
+    
     with ExecutionLogger('setup-health', path, arguments) as logger:
-        click.echo(Fore.CYAN + Style.BRIGHT + f"--- [SETUP-HEALTH] Configurando o projeto em '{path}' para análise de saúde ---")
-
-    # --- Passo 0: Verificar e criar o venv, se necessário ---
-    click.echo(Fore.YELLOW + "\n--- 0. Verificando ambiente virtual ('venv')... ---")
-    venv_path = os.path.join(path, 'venv')
-    if not os.path.exists(venv_path):
-        click.echo(Fore.YELLOW + "   > Ambiente virtual não encontrado. Criando agora...")
-        try:
-            subprocess.run([sys.executable, "-m", "venv", venv_path], check=True, capture_output=True)
-            click.echo(Fore.GREEN + "[OK] Ambiente virtual criado com sucesso.")
-        except subprocess.CalledProcessError as e:
-            click.echo(Fore.RED + f"[ERRO] Falha ao criar o ambiente virtual: {e.stderr.decode('utf-8', 'ignore')}")
-            sys.exit(1)
-    else:
-        click.echo(Fore.GREEN + "[OK] Ambiente virtual já existe.")
-
-    # --- Passo 1: Verificar e atualizar requirements.txt ---
-    click.echo(Fore.YELLOW + "\n--- 1. Verificando 'requirements.txt'... ---")
-    req_file = os.path.join(path, 'requirements.txt')
-    health_deps = ['radon', 'coverage', 'pytest', 'pyflakes'] 
-    deps_to_add = []
-    
-    if os.path.exists(req_file):
-        with open(req_file, 'r', encoding='utf-8') as f:
-            existing_deps = {line.strip().split('==')[0].lower() for line in f if line.strip() and not line.startswith('#')}
-        
-        for dep in health_deps:
-            if dep not in existing_deps:
-                deps_to_add.append(dep)
-        
-        if deps_to_add:
-            with open(req_file, 'a', encoding='utf-8') as f:
-                f.write('\n# Ferramentas de Análise de Saúde (adicionadas pelo doxoade)\n')
-                for dep in deps_to_add:
-                    f.write(f"{dep}\n")
-            click.echo(Fore.GREEN + f"[OK] Adicionadas as seguintes dependências: {', '.join(deps_to_add)}")
+        # 1. Venv
+        venv_path = os.path.join(path, 'venv')
+        if not os.path.exists(venv_path):
+            click.echo(Fore.YELLOW + "   > Criando ambiente virtual 'venv'...")
+            try:
+                subprocess.run([sys.executable, "-m", "venv", venv_path], check=True, capture_output=True)
+                click.echo(Fore.GREEN + "[OK] Venv criado.")
+            except subprocess.CalledProcessError:
+                click.echo(Fore.RED + "[ERRO] Falha ao criar venv."); sys.exit(1)
         else:
-            click.echo(Fore.GREEN + "[OK] Todas as dependências de saúde já estão no arquivo.")
-    else:
-        click.echo(Fore.YELLOW + "[AVISO] Arquivo 'requirements.txt' não encontrado. Criando um novo com as dependências de saúde.")
-        with open(req_file, 'w', encoding='utf-8') as f:
-            f.write('# Ferramentas de Análise de Saúde (adicionadas pelo doxoade)\n')
-            for dep in health_deps:
-                f.write(f"{dep}\n")
-        deps_to_add = health_deps
+            click.echo(Fore.GREEN + "[OK] Venv já existe.")
 
-    click.echo(Fore.YELLOW + "\n--- 2. Verificando 'pyproject.toml'... ---")
-    pyproject_path = os.path.join(path, 'pyproject.toml')
-    
-    try:
-        if os.path.exists(pyproject_path):
-            with open(pyproject_path, 'r', encoding='utf-8') as f:
-                toml_data = toml.load(f)
-        else:
-            toml_data = {}
-    except toml.TomlDecodeError:
-        logger.add_finding('error', "Arquivo 'pyproject.toml' corrompido.")
-        click.echo(Fore.RED + "[ERRO] Seu 'pyproject.toml' parece corrompido."); sys.exit(1)
-
-    tool_table = toml_data.setdefault('tool', {})
-    doxoade_config = tool_table.setdefault('doxoade', {})
-    
-    # Garante os valores padrão
-    doxoade_config.setdefault('ignore', [])
-    current_source_dir = doxoade_config.setdefault('source_dir', '.')
-
-    # Atualiza a lista 'keep'
-    packages_to_keep = set(doxoade_config.setdefault('keep', []))
-    health_tools = {"pytest", "coverage", "radon", "pyflakes"}
-    packages_to_keep.update(health_tools)
-    doxoade_config['keep'] = sorted(list(packages_to_keep))
-    
-    # Pergunta sobre o source_dir
-    new_source_dir = click.prompt("Diretório do código-fonte?", default=current_source_dir)
-    doxoade_config['source_dir'] = new_source_dir
-    
-    # Salva o arquivo
-    try:
-        with open(pyproject_path, 'w', encoding='utf-8') as f:
-            toml.dump(toml_data, f)
-        click.echo(Fore.GREEN + "[OK] 'pyproject.toml' configurado e atualizado com a lista 'keep'.")
-    except Exception as e:
-        logger.add_finding('error', f"Falha ao escrever no 'pyproject.toml': {e}")
-        click.echo(Fore.RED + f"[ERRO] Falha ao escrever no 'pyproject.toml': {e}"); sys.exit(1)
-    
-    # --- Passo 3: Instalar dependências, se necessário ---
-    if deps_to_add:
-        click.echo(Fore.YELLOW + "\n--- 3. Instalando novas dependências... ---")
-        venv_python = os.path.join(path, 'venv', 'Scripts' if os.name == 'nt' else 'bin', 'python')
-        cmd = [venv_python, '-m', 'pip', 'install', '-r', req_file]
+        # 2. Pyproject.toml (Configuração de Ignore)
+        click.echo(Fore.WHITE + "   > Verificando 'pyproject.toml'...")
+        pyproject_path = os.path.join(path, 'pyproject.toml')
         
-        try:
-            subprocess.run(cmd, check=True, capture_output=True, text=True, encoding='utf-8', errors='replace')
-            click.echo(Fore.GREEN + "[OK] Dependências instaladas com sucesso!")
-        except subprocess.CalledProcessError as e:
-            click.echo(Fore.RED + "[ERRO] Falha ao instalar as dependências.")
-            click.echo(Fore.CYAN + f"   > Saída do Pip: {e.stdout}{e.stderr}")
-            sys.exit(1)
-    
-    click.echo(Fore.CYAN + Style.BRIGHT + "\n--- Configuração Concluída! ---")
-    click.echo(Fore.WHITE + "O projeto agora está pronto. Você pode executar 'doxoade health' a qualquer momento.")
+        # Cria padrão se não existir
+        if not os.path.exists(pyproject_path):
+            with open(pyproject_path, 'w', encoding='utf-8') as f:
+                f.write("[tool.doxoade]\nignore = ['venv', '.git']\nsource_dir = \".\"\n")
+            click.echo(Fore.GREEN + "[OK] Arquivo de configuração criado.")
+        else:
+            click.echo(Fore.GREEN + "[OK] Configuração já existe.")
+        
+        # 3. Aviso sobre Dependências de Teste
+        click.echo(Fore.CYAN + "\nNota sobre Cobertura de Testes:")
+        click.echo(Fore.WHITE + "   O Doxoade usa ferramentas internas para análise estática.")
+        click.echo(Fore.WHITE + "   Para análise de COBERTURA (Coverage), você deve instalar 'pytest' e 'coverage'")
+        click.echo(Fore.WHITE + "   no venv deste projeto manualmente, pois dependem do seu código.")
+        
+        click.echo(Fore.GREEN + Style.BRIGHT + "\n[PRONTO] Projeto configurado.")
     
 # -----------------------------------------------------------------------------
 # FUNÇÕES AUXILIARES
