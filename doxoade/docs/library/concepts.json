@@ -38,5 +38,10 @@
     "title": "Aprendizado Semântico (AST)",
     "date": "2025-12-10",
     "content": "Evolução do Gênese (V15+). Em vez de comparar texto (diff), o sistema compara a Árvore Sintática (AST) para entender mudanças estruturais como 'envolver em Try/Except' ou 'adicionar If'."
+  },
+  "risk": {
+    "title": "Comando Risk: Gestão de Estabilidade",
+    "date": "2025-12-06",
+    "content": "Analisa a estabilidade operacional (falhas recentes) e a dívida técnica real (ignorando testes) para gerar um Score de Risco. Ajuda a decidir se é hora de criar features ou corrigir bugs."
   }
 }
