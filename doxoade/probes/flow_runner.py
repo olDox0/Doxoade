@@ -29,7 +29,7 @@ class FlowTracer:
         try:
             if sys.stdout.encoding and sys.stdout.encoding.lower().startswith('utf'):
                 self.sep_char = "│"
-        except: pass
+        except Exception: pass
 
         self._print_header()
 
@@ -47,7 +47,7 @@ class FlowTracer:
             if hasattr(is_diff, 'any'): # Para arrays numpy
                 return is_diff.any()
             return bool(is_diff)
-        except:
+        except Exception:
             return True
 
     def trace_calls(self, frame, event, arg):
@@ -88,7 +88,7 @@ class FlowTracer:
         try:
             import linecache
             line_content = linecache.getline(filename, lineno).strip()
-        except:
+        except Exception:
             line_content = "???"
 
         # Processa variáveis
