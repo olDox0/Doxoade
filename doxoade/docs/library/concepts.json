@@ -18,5 +18,25 @@
     "title": "Portabilidade Universal",
     "date": "2025-11-29",
     "content": "O Doxoade foi projetado para rodar identicamente no Windows e no Linux (incluindo Android/Termux)."
+  },
+  "lazarus": {
+    "title": "Protocolo Lázaro (Anti-Crash)",
+    "date": "2025-12-10",
+    "content": "Padrão de arquitetura onde o entry-point é um wrapper blindado. Se o núcleo falhar, o Lázaro ativa o 'rescue.py' (isolado) para oferecer reversão via Git."
+  },
+  "batteries_included": {
+    "title": "Arquitetura Batteries Included",
+    "date": "2025-12-10",
+    "content": "Estratégia onde o Doxoade carrega suas próprias ferramentas (Bandit, Safety, Radon) e as localiza via heurística de caminho, permitindo auditar projetos externos sem instalar dependências neles."
+  },
+  "canonical_io": {
+    "title": "Normalização Canônica de IO",
+    "date": "2025-12-10",
+    "content": "Princípio de segurança: Nunca passar caminhos relativos entre módulos. Converter sempre para 'os.path.normpath(os.path.abspath(p))' antes de qualquer operação de arquivo."
+  },
+  "ast_learning": {
+    "title": "Aprendizado Semântico (AST)",
+    "date": "2025-12-10",
+    "content": "Evolução do Gênese (V15+). Em vez de comparar texto (diff), o sistema compara a Árvore Sintática (AST) para entender mudanças estruturais como 'envolver em Try/Except' ou 'adicionar If'."
   }
 }

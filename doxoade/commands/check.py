@@ -764,7 +764,31 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
         if not config.get('search_path_valid'): return {'summary': {'critical': 1}, 'findings': []}
 
     python_exe = _get_venv_python_executable() or sys.executable
-    files = target_files if target_files else collect_files_to_analyze(config, cmd_line_ignore)
+    
+    # Lógica de exclusão robusta
+    ignore_list = config.get('ignore', [])
+    if cmd_line_ignore:
+        ignore_list.extend(cmd_line_ignore)
+    
+    # Normaliza padrões de ignore
+    ignore_patterns = [p.strip('/\\').lower() for p in ignore_list]
+    # Adiciona padrões padrão do sistema
+    ignore_patterns.extend(['venv', 'build', 'dist', '.git', '__pycache__', '.doxoade_cache', 'pytest_temp_dir'])
+
+    if target_files:
+        # Se alvos foram passados (ex: pelo 'save'), filtramos eles contra o ignore config
+        files = []
+        for f in target_files:
+            # Verifica se alguma parte do caminho está na lista de ignore
+            parts = f.replace('\\', '/').split('/')
+            if not any(part.lower() in ignore_patterns for part in parts):
+                files.append(f)
+            else:
+                # Opcional: Avisar em debug que foi ignorado
+                if debug: click.echo(f"   > [DEBUG] Ignorando '{f}' (match em config)")
+    else:
+        # Coleta automática
+        files = collect_files_to_analyze(config, cmd_line_ignore)
 
     analysis = {'raw_findings': [], 'files': files}
     valid_files = []
