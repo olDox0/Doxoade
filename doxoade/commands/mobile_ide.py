@@ -19,13 +19,13 @@ try:
     from rich.panel import Panel
     from rich.table import Table
     from rich.syntax import Syntax
-    from rich.prompt import Prompt, Confirm # noqa
-    from rich.layout import Layout # noqa
-    from rich.live import Live # noqa
+    # [DOX-UNUSED] from rich.prompt import Prompt, Confirm # noqa
+    # [DOX-UNUSED] from rich.layout import Layout # noqa
+    # [DOX-UNUSED] from rich.live import Live # noqa
 except ImportError:
     print("❌ Dependência faltando. Instalando rich...")
     subprocess.run([sys.executable, "-m", "pip", "install", "rich", "prompt_toolkit"])
-    from rich.console import Console # noqa
+    # [DOX-UNUSED] from rich.console import Console # noqa
     from rich.panel import Panel
     from rich.table import Table
     from rich.syntax import Syntax

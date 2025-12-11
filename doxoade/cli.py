@@ -66,6 +66,7 @@ from doxoade.commands.rewind import rewind
 from doxoade.commands.risk import risk
 from doxoade.commands.run import run, flow_command
 from doxoade.commands.save import save
+from doxoade.commands.scaffold import scaffold
 from doxoade.commands.self_test import self_test
 from doxoade.commands.tutorial import tutorial_group
 from doxoade.commands.search import search
@@ -328,6 +329,7 @@ cli.add_command(rewind)
 cli.add_command(risk)
 cli.add_command(run)
 cli.add_command(save)
+cli.add_command(scaffold)
 cli.add_command(self_test)
 cli.add_command(search)
 cli.add_command(security)

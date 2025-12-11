@@ -1,0 +1,12 @@
+{
+  "chronos_overview": {
+    "title": "Chronos: O Guardião do Tempo",
+    "date": "2025-12-10",
+    "content": "Chronos é o sistema de telemetria e auditoria do Doxoade.\nEle intercepta cada comando executado, registrando:\n- Comando completo e diretório.\n- Tempo de execução.\n- Status (Sucesso/Falha).\n- Diffs de arquivos modificados (Auditoria).\n\nPermite responder: 'O que eu fiz ontem que quebrou o projeto?'"
+  },
+  "timeline_cmd": {
+    "title": "Comando Timeline",
+    "date": "2025-12-10",
+    "content": "Interface de visualização do Chronos.\n\nUso:\n  doxoade timeline       (Ver últimos 10 eventos)\n  doxoade timeline -n 50 (Ver últimos 50)\n  doxoade timeline --full (Ver diffs de arquivos alterados)"
+  }
+}

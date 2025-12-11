@@ -1,13 +1,14 @@
 # doxoade/commands/install.py
+import traceback
+import sys
 import subprocess
 import os
-import sys
-from importlib import metadata
 import json
-import ast
-import traceback
-from packaging.requirements import Requirement
 import click
+import ast
+from packaging.requirements import Requirement
+from importlib.metadata import version, PackageNotFoundError
+from importlib import metadata
 from colorama import Fore, Style
 
 from ..shared_tools import ExecutionLogger, _get_venv_python_executable, _get_project_config
@@ -287,3 +288,14 @@ def install(ctx, packages, uninstall, optimize):
                     click.echo(Fore.RED + f"Erro ao salvar '{package_name}' no requirements.txt.")
             else:
                 click.echo(Fore.YELLOW + f"Não foi possível determinar a versão de '{package_name}' para salvar.")
+                
+        # VERIFICAÇÃO DE VERSÃO
+        from importlib.metadata import version, PackageNotFoundError
+        for pkg in packages:
+            try:
+                # Remove especificadores de versão (ex: 'pandas==2.0' -> 'pandas')
+                clean_name = pkg.split('=')[0].split('<')[0].split('>')[0]
+                installed_ver = version(clean_name)
+                click.echo(Fore.CYAN + f"   > Verificado: {clean_name} v{installed_ver} instalado.")
+            except PackageNotFoundError:
+                click.echo(Fore.YELLOW + f"   [AVISO] {clean_name} instalado, mas metadados não encontrados.")
