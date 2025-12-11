@@ -1,0 +1,12 @@
+{
+  "web_check_v2": {
+    "title": "Webcheck 2.0 (Web-in-Python)",
+    "date": "2025-12-10",
+    "content": "O 'webcheck' foi atualizado para suportar frameworks como NiceGUI, onde HTML/CSS vivem dentro do Python.\n\nFuncionalidades:\n- Analisa arquivos .py via AST.\n- Extrai strings de '.style(...)' e 'ui.add_head_html(...)'.\n- Valida a sintaxe CSS/HTML extraída para prevenir erros visuais em runtime."
+  },
+  "scaffold_cmd": {
+    "title": "Comando Scaffold",
+    "date": "2025-12-10",
+    "content": "Gerador de código boilerplate para acelerar o desenvolvimento.\n\nUso:\n  doxoade scaffold NomeDaTela --type page\n  doxoade scaffold Componente --type component\n\nResultado: Cria arquivos em 'src/ui' ou 'src/components' com estrutura de classe NiceGUI padrão."
+  }
+}

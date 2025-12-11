@@ -1,0 +1,12 @@
+{
+  "risk_concept": {
+    "title": "Gestão de Risco (Política R0)",
+    "date": "2025-12-10",
+    "content": "Sistema para quantificar a estabilidade do projeto antes de inovar.\nO 'Risk Score' (0-100) é calculado baseado no ESTADO PRESENTE:\n- Dívida Técnica (Erros do 'check').\n- Violações de Arquitetura (Erros do 'style').\n- Complexidade Ciclomática.\n- Status dos Testes Unitários.\n\nObjetivo: Impedir o desenvolvimento de features sobre uma base instável."
+  },
+  "risk_cmd": {
+    "title": "Comando Risk",
+    "date": "2025-12-10",
+    "content": "Gera o relatório de risco.\n\nUso:\n  doxoade risk          (Relatório resumido)\n  doxoade risk --debug  (Detalhes dos incidentes que baixam o score)\n\nInterpretação:\n  > 90 (Verde): Seguro para inovar.\n  < 60 (Vermelho): Pare e refatore (Use 'check --fix')."
+  }
+}
