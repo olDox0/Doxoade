@@ -27,6 +27,7 @@ if PACKAGE_PARENT not in sys.path:
 from doxoade.commands.apicheck import apicheck
 from doxoade.commands.android import android_group
 from doxoade.commands.auto import auto
+from doxoade.commands.brain import brain 
 from doxoade.commands.canonize import canonize
 from doxoade.commands.check import check
 from doxoade.chronos import chronos_recorder
@@ -286,6 +287,7 @@ def _analyze_traceback(stderr_output):
 cli.add_command(android_group)
 cli.add_command(apicheck)
 cli.add_command(auto)
+cli.add_command(brain)
 cli.add_command(canonize)
 cli.add_command(check)
 cli.add_command(clean)

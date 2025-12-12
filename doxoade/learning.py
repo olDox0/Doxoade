@@ -122,3 +122,9 @@ class LearningEngine:
             return True
         except Exception:
             return False
+            
+        # GATILHO NEURAL
+        if new_conf > 5: # Se a regra já funcionou 5 vezes
+            print(f"{Fore.MAGENTA}   🧠 [NEURO] Conceito '{pattern}' consolidado. Sugerindo retreino neural.")
+            # Aqui poderíamos chamar o treino automaticamente ou apenas marcar uma flag no banco
+            # self.cursor.execute("INSERT INTO brain_queue ...")

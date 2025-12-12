@@ -131,7 +131,14 @@ def _analyze_py_web_content(file_path):
                         # O cssutils espera um seletor completo. Vamos "mockar" um seletor para validar.
                         mock_css = f".mock_selector {{ {css_str} }}"
                         findings.extend(_validate_css_content(mock_css, file_path, line_offset=node.lineno, is_fragment=True))
-
+                        
+                # Validação de Segurança NiceGUI
+                if func_name == 'html':
+                    # Verifica se 'sanitize' foi passado
+                    has_sanitize = any(k.arg == 'sanitize' for k in node.keywords)
+                    if not has_sanitize:
+                         findings.append({'type': 'error', 'message': "NiceGUI: ui.html() requer argumento 'sanitize=True/False'.", 'file': file_path, 'line': node.lineno})
+                         
             # 2. Busca: Variáveis CSS_GLOBAL = "..."
             if isinstance(node, ast.Assign):
                 for target in node.targets:
