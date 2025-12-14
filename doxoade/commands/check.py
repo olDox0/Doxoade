@@ -56,9 +56,23 @@ def _run_syntax_probe(file_path, python_executable, debug=False):
     try:
         result = subprocess.run(syntax_cmd, capture_output=True, text=True, encoding='utf-8', errors='backslashreplace')
         if result.returncode != 0:
-            findings.append({'severity': 'CRITICAL', 'category': 'SYNTAX', 'message': f"Erro de sintaxe: {result.stderr.strip()}", 'file': file_path, 'line': 1})
+            msg = result.stderr.strip()
+            line_num = 1 # Valor padrão caso falhe a extração
+            
+            # [FIX] Extração inteligente da linha do erro
+            match = re.search(r'(?:line |:)(\d+)(?:[:\n]|$)', msg)
+            if match:
+                line_num = int(match.group(1))
+
+            findings.append({
+                'severity': 'CRITICAL', 
+                'category': 'SYNTAX', 
+                'message': f"Erro de sintaxe: {msg}", 
+                'file': file_path, 
+                'line': line_num
+            })
     except Exception as e:
-        findings.append({'severity': 'CRITICAL', 'category': 'SYNTAX', 'message': str(e), 'file': file_path})
+        findings.append({'severity': 'CRITICAL', 'category': 'SYNTAX', 'message': str(e), 'file': file_path, 'line': 1})
     return findings
 
 def _run_pyflakes_probe(file_path, python_executable, debug=False):
@@ -749,7 +763,7 @@ def _run_xref_probe(files, python_executable, project_root, debug=False):
     except Exception: pass
     return findings
 
-def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=False, no_cache=False, target_files=None, check_clones=False):
+def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=False, no_cache=False, target_files=None, check_clones=False, continue_on_error=False):
     if no_cache: click.echo(Fore.YELLOW + "A opção --no-cache foi usada.")
     cache = {} if no_cache else _load_cache()
 
@@ -762,6 +776,9 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
         root_path = os.path.abspath(path)
         config = _get_project_config(None, start_path=path)
         if not config.get('search_path_valid'): return {'summary': {'critical': 1}, 'findings': []}
+
+    # Verifica configuração de "continue-on-error" (CLI vence Config)
+    should_continue = continue_on_error or config.get('continue_on_error', False)
 
     python_exe = _get_venv_python_executable() or sys.executable
     
@@ -795,6 +812,14 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
 
     # --- FASE 1: Análise Individual (Arquivos Isolados) ---
     for fp in files:
+        # [FIX] Ignora arquivos vazios imediatamente para evitar falsos positivos
+        # de cache ou erros de parser em arquivos 0-byte.
+        try:
+            if os.path.getsize(fp) == 0:
+                continue
+        except OSError:
+            pass
+
         h = _get_file_hash(fp)
         rel = os.path.relpath(fp, root_path) if not is_single_file else os.path.basename(fp)
 
@@ -805,7 +830,10 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
             syn = _run_syntax_probe(fp, python_exe)
             if syn:
                 analysis['raw_findings'].extend(syn)
-                continue
+                # [FEATURE] Se should_continue for True, continuamos tentando
+                # rodar sondas que não dependem estritamente da AST válida.
+                if not should_continue:
+                    continue
 
             valid_files.append(fp)
             pf = _run_pyflakes_probe(fp, python_exe)
@@ -893,14 +921,16 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
 @click.option('--no-imports', is_flag=True, help="Pula a verificação de imports não resolvidos.")
 @click.option('--no-cache', is_flag=True, help="Força uma reanálise completa, ignorando o cache.")
 @click.option('--clones', is_flag=True, help="Força a análise de código duplicado (DRY).")
-def check(ctx, path, ignore, fix, debug, output_format, fast, no_imports, no_cache, clones):
+@click.option('--continue-on-error', '-C', is_flag=True, help="Tenta continuar a análise mesmo após erros de sintaxe.")
+def check(ctx, path, ignore, fix, debug, output_format, fast, no_imports, no_cache, clones, continue_on_error):
     """Análise estática, estrutural e de duplicatas completa do projeto."""
     if not debug and output_format == 'text':
         click.echo(Fore.YELLOW + "[CHECK] Executando análise...")
         
     results = run_check_logic(
         path, ignore, fix, debug, 
-        fast=fast, no_imports=no_imports, no_cache=no_cache, check_clones=clones
+        fast=fast, no_imports=no_imports, no_cache=no_cache, check_clones=clones,
+        continue_on_error=continue_on_error
     )
     _update_open_incidents(results, os.path.abspath(path)) 
     

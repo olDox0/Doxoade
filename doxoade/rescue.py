@@ -6,6 +6,7 @@ import json
 import datetime
 import sqlite3
 import hashlib
+import traceback
 from pathlib import Path
 
 def run_git_command(args):
@@ -26,6 +27,7 @@ def run_git_command(args):
         return result.stdout.strip()
     except Exception:
         return None
+    finally: print("." ,end="",flush=True)
 
 def analyze_crash(traceback_text):
     """Mineração de traceback simplificada e independente."""
@@ -44,6 +46,7 @@ def analyze_crash(traceback_text):
                     line_part = line.split('line ')[1].split(',')[0]
                     crash_info['line'] = int(line_part)
                 except Exception: pass
+                finally: print("." ,end="",flush=True)
             break
             
     return crash_info
@@ -75,6 +78,7 @@ def get_git_context(filepath, linenum):
         return context_str.rstrip()
     except Exception:
         return None
+    finally: print("." ,end="",flush=True)
 
 def perform_post_mortem(info):
     """
@@ -145,6 +149,7 @@ def perform_post_mortem(info):
 
     except Exception as e:
         print(f"   > [ERRO AUTÓPSIA] Falha ao gravar dados: {e}")
+    finally: print("." ,end="",flush=True)
 
 
 def activate_protocol(error_text):
@@ -171,7 +176,8 @@ def activate_protocol(error_text):
                     print(f"[ATUAL/ERRO]  : {bad_line}")
                 else:
                     print(f"[ATUAL/ERRO]  : (Linha {info['line']} não acessível)")
-        except Exception: pass
+        except Exception: print(traceback.format_exc())
+        finally: print("." ,end="",flush=True)
 
         # 2. Pega versão estável do Git
         git_context = get_git_context(info['file'], info['line'])
@@ -221,7 +227,8 @@ def save_crash_memory(info, action):
     cache_dir = os.path.join(os.getcwd(), '.doxoade_cache')
     if not os.path.exists(cache_dir): 
         try: os.makedirs(cache_dir)
-        except Exception: pass
+        except Exception: print(traceback.format_exc())
+        finally: print("." ,end="",flush=True)
     
     report = {
         "timestamp": str(datetime.datetime.now()),
@@ -234,8 +241,8 @@ def save_crash_memory(info, action):
     try:
         with open(os.path.join(cache_dir, 'fatal_crash_report.json'), 'w') as f:
             json.dump(report, f)
-    except Exception: pass
-
+    except Exception: print(traceback.format_exc())
+    finally: print("." ,end="",flush=True)
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         with open(sys.argv[1], 'r', encoding='utf-8', errors='replace') as f:
