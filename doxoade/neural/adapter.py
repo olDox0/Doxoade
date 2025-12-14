@@ -34,7 +34,8 @@ class BrainLoader:
                     # Ex: Input "undefined name" -> Output "REPLACE_WITH_UNDERSCORE"
                     pattern = row[0].replace('<VAR>', 'var').replace('<MODULE>', 'mod')
 #                    dataset.append((pattern, row[1]))
-                    dataset.append((pattern, row[1] + " <EOS>")) 
+                    dataset.append((pattern, row[1] + " ENDMARKER")) 
+                    #dataset.append((pattern, row[1] + " <EOS>")) 
             except sqlite3.Error:
                 pass
 

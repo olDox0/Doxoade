@@ -47,8 +47,8 @@ def train(epochs):
         for inp_text, target_text in dataset:
             # Adiciona EOS para ensinar parada
             full_seq = inp_text + " " + target_text
-            if "<EOS>" not in full_seq: full_seq += " <EOS>"
-            
+            #if "<EOS>" not in full_seq: full_seq += " <EOS>"
+            if "ENDMARKER" not in full_seq: full_seq += " ENDMARKER"
             ids = tok.converter_para_ids(full_seq)
             input_ids = ids[:-1]
             target_ids = ids[1:]
@@ -144,9 +144,7 @@ def consult(prompt):
         if escolha is None: break 
         
         palavra = tok.inverso.get(escolha)
-        
-        # CHECK DE PARADA
-        if palavra == "<EOS>":
+        if palavra == "ENDMARKER":
             click.echo(Fore.YELLOW + " [FIM]" + Style.RESET_ALL)
             break
             
