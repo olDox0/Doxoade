@@ -31,7 +31,8 @@ class Tokenizer:
         self.contador = 0
         self.adicionar_token("<PAD>")
         self.adicionar_token("<UNK>")
-        self.adicionar_token("<EOS>")
+        self.adicionar_token("ENDMARKER")
+        # self.adicionar_token("<EOS>")
     
     def adicionar_token(self, token):
         if token not in self.vocabulario:

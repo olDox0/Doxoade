@@ -19,7 +19,7 @@ try:
     from rich.panel import Panel
     from rich.table import Table
     from rich.syntax import Syntax
-    # [DOX-UNUSED] from rich.prompt import Prompt, Confirm # noqa
+    from rich.prompt import Prompt, Confirm # noqa
     # [DOX-UNUSED] from rich.layout import Layout # noqa
     # [DOX-UNUSED] from rich.live import Live # noqa
 except ImportError:

@@ -52,8 +52,7 @@ class ArquitetoLogico:
         if self.estado == "CORPO" and last_was_value and curr_is_value:
             return False, "Sintaxe: Variável seguida de Variável sem operador"
 
-        # Regra do Fim (<EOS>)
-        if token == "<EOS>":
+        if token == "ENDMARKER":
             if self.pilha_parenteses > 0: return False, "Pilha aberta"
             if self.estado != "RETORNO": return False, "Fim prematuro"
             return True, "FIM"
