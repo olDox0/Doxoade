@@ -21,6 +21,8 @@ dist/
 doxoade_report.json
 Exemplo/
 tmp/
+.dox_agent_workspace/
+.dox_lab/
 credentials.json
 token.json
 config.json
@@ -47,10 +49,6 @@ Vers/
 
 # Doxoade cache files
 .doxoade_cache/
-
-# Exceções (movidas para o final para garantir prioridade)
-
-# Exceções (movidas para o final para garantir prioridade)
 
 # Exceções (movidas para o final para garantir prioridade)
 !requirements.txt
