@@ -19,8 +19,6 @@ class AdvancedFunctionVisitor(ast.NodeVisitor):
         self.assignments = {} # {nome: [linhas]}
         self.used_vars = set()
         self.raised_exceptions = []
-        
-        # Estado
         self.current_scope_vars = set()
 
     def visit_FunctionDef(self, node):
@@ -46,36 +44,45 @@ class AdvancedFunctionVisitor(ast.NodeVisitor):
             ret_info['value'] = 'None'
             ret_info['is_none'] = True
         else:
-            # Tenta inferir tipo básico
             if isinstance(node.value, ast.Constant):
                 ret_info['type'] = type(node.value.value).__name__
                 ret_info['value'] = str(node.value.value)
                 ret_info['is_none'] = node.value.value is None
             elif isinstance(node.value, ast.Name):
-                ret_info['type'] = 'Variable' # Difícil saber o tipo estaticamente
+                ret_info['type'] = 'Variable' 
                 ret_info['value'] = node.value.id
                 self.used_vars.add(node.value.id)
                 ret_info['is_none'] = False
             else:
                 ret_info['type'] = 'Expression'
-                ret_info['value'] = ast.unparse(node.value)
+                try:
+                    ret_info['value'] = ast.unparse(node.value)
+                except Exception:
+                    ret_info['value'] = "Complex Expr"
                 ret_info['is_none'] = False
                 
         self.returns.append(ret_info)
+        # Importante: Visitar o valor de retorno para marcar variáveis usadas nele!
+        if node.value:
+            self.visit(node.value)
 
     def visit_Call(self, node):
         """Registra chamadas de função."""
-        assert visitor is not None, "Visitor não pode ser nulo"
-        func_name = ast.unparse(node.func)
-        args = [ast.unparse(a) for a in node.args]
-        keywords = [k.arg for k in node.keywords if k.arg]
-        
-        self.calls.append({
-            'lineno': node.lineno,
-            'name': func_name,
-            'args': args,
-            'kwargs': keywords
-        })
+        # CORREÇÃO: Removido assert quebrado
+        try:
+            func_name = ast.unparse(node.func)
+            args = [ast.unparse(a) for a in node.args]
+            keywords = [k.arg for k in node.keywords if k.arg]
+            
+            self.calls.append({
+                'lineno': node.lineno,
+                'name': func_name,
+                'args': args,
+                'kwargs': keywords
+            })
+        except Exception:
+            pass # Parsing seguro
+            
         self.generic_visit(node)
 
     def visit_Name(self, node):
@@ -99,16 +106,18 @@ class AdvancedFunctionVisitor(ast.NodeVisitor):
         """Registra exceções levantadas."""
         exc = ast.unparse(node.exc) if node.exc else "Unknown"
         self.raised_exceptions.append({'lineno': node.lineno, 'exc': exc})
+        self.generic_visit(node)
 
 def _analyze_contract_consistency(visitor):
     """Verifica se o código obedece aos contratos de tipo."""
-    assert visitor is not None, "Visitor não pode ser nulo"
     issues = []
     
     # 1. Parâmetros não usados
     for param in visitor.params:
         if param not in visitor.used_vars:
-            issues.append(f"Parâmetro '{param}' declarado mas nunca usado (Dead Param).")
+            # Filtro para ignorar 'self' em métodos
+            if param != 'self':
+                issues.append(f"Parâmetro '{param}' declarado mas nunca usado (Dead Param).")
             
     # 2. Inconsistência de Retorno
     return_types = set()
@@ -120,24 +129,14 @@ def _analyze_contract_consistency(visitor):
         if r['is_none']: has_none_return = True
         else: has_value_return = True
         
-    # Mistura de retorno com valor e sem valor (ex: return 1 e return None implícito)
-    # Nota: Em Python é válido, mas muitas vezes é bug.
     if has_value_return and has_none_return:
-        issues.append("Função retorna valores mistos (Valor e None). Verifique se todos os caminhos retornam algo.")
-
-    # Contrato Declarado vs Real
-    declared = visitor.declared_return
-    if declared != "Any":
-        # Validação simples
-        if declared == "bool" and any(t not in ['bool', 'Constant', 'Expression', 'Variable'] for t in return_types):
-             # Heurística fraca, mas ajuda
-             pass 
+        # Verifica se o None é explícito ou implícito (fundo da função)
+        issues.append("Função retorna valores mistos (Valor e None). Risco de TypeError.")
 
     return issues
 
 def _present_deep_analysis(visitor, name, lineno, complexity):
     """Apresenta os resultados da análise no terminal."""
-    assert name, "Nome da função é obrigatório"
     
     click.echo(Fore.CYAN + Style.BRIGHT + f"\n=== ANÁLISE PROFUNDA: '{name}' (Linha {lineno}) ===")
     click.echo(f"Complexidade: {complexity}")
@@ -148,7 +147,7 @@ def _present_deep_analysis(visitor, name, lineno, complexity):
         click.echo("  Entrada: (Nenhuma)")
     else:
         for p, t in visitor.params.items():
-            status = Fore.RED + "(Não Usado)" if p not in visitor.used_vars else Fore.GREEN + "(Usado)"
+            status = Fore.RED + "(Não Usado)" if p not in visitor.used_vars and p != 'self' else Fore.GREEN + "(Usado)"
             click.echo(f"  Entrada: {p}: {t} {status}{Fore.RESET}")
             
     click.echo(f"  Saída Declarada: {visitor.declared_return}")
@@ -164,9 +163,13 @@ def _present_deep_analysis(visitor, name, lineno, complexity):
     # 3. Trabalho (Calls)
     if visitor.calls:
         click.echo(Fore.YELLOW + "\n[TRABALHO REALIZADO (Chamadas)]")
-        for c in visitor.calls:
-            args_str = ", ".join(c['args'] + [f"{k}=..." for k in c['kwargs']])
+        # Limita visualização para não poluir
+        for c in visitor.calls[:10]:
+            args_str = ", ".join(c['args'][:3])
+            if len(c['args']) > 3: args_str += "..."
             click.echo(f"  Linha {c['lineno']}: {c['name']}({args_str})")
+        if len(visitor.calls) > 10:
+             click.echo(f"  ... e mais {len(visitor.calls)-10} chamadas.")
 
     # 4. Diagnóstico de Problemas
     issues = _analyze_contract_consistency(visitor)
@@ -198,31 +201,28 @@ def deepcheck(file_path, func_name, verbose):
         
     # Encontra função
     target_node = None
+    all_funcs = []
+    
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef):
+            all_funcs.append(node)
             if func_name and node.name == func_name:
                 target_node = node
                 break
-            # Se não especificou nome, pega a primeira? Ou lista todas?
-            # O comportamento antigo listava todas. Vamos manter se func_name for None.
     
-    # Se pediu uma especifica e não achou
-    if func_name and not target_node:
-        click.echo(Fore.RED + f"Função '{func_name}' não encontrada.")
+    nodes_to_analyze = [target_node] if target_node else all_funcs
+    
+    if not nodes_to_analyze:
+        click.echo(Fore.YELLOW + "Nenhuma função encontrada para análise.")
         return
-
-    # Lista de nós a analisar
-    nodes_to_analyze = [target_node] if target_node else [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]
     
     from ..shared_tools import _get_complexity_rank
-    # Precisamos recalcular complexidade aqui ou importar se já tiver
-    # Vou usar uma simplificação ou importar se shared_tools tiver
     
     for node in nodes_to_analyze:
         visitor = AdvancedFunctionVisitor()
         visitor.visit(node)
         
-        # Complexidade (Placeholder ou real)
+        # Placeholder de complexidade (futuro: usar Radon)
         complexity = "N/A" 
         
         _present_deep_analysis(visitor, node.name, node.lineno, complexity)

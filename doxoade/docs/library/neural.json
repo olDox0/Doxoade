@@ -1,0 +1,22 @@
+{
+  "neuro_suite": {
+    "title": "Neuro-Suite (Córtex V1)",
+    "date": "2025-12-12",
+    "content": "Subsistema de Inteligência Artificial Neuro-Simbólica integrado ao Doxoade.\nObjetivo: Complementar a análise estática (Gênese) com inferência semântica e autocompletar inteligente."
+  },
+  "architecture": {
+    "title": "Arquitetura Híbrida (System 1 + System 2)",
+    "date": "2025-12-12",
+    "content": "Combina uma Rede Neural LSTM (Intuição/Estatística) com um Autômato de Pilha (Lógica/Regras).\nA LSTM gera tokens criativos, o 'Arquiteto Lógico' veta alucinações sintáticas em tempo real."
+  },
+  "quantization": {
+    "title": "Otimização de Hardware",
+    "date": "2025-12-12",
+    "content": "O motor neural utiliza Quantização 8-bit simulada para reduzir o tamanho do modelo (~90KB) e suporta operações Float32 com 'Gradient Clipping' para estabilidade em CPUs ARM (Termux)."
+  },
+  "features": {
+    "title": "Capacidades Neurais",
+    "date": "2025-12-12",
+    "content": "1. 'doxoade brain train': Aprende sintaxe Python e regras de correção do banco de dados.\n2. 'doxoade brain consult': Gera código ou sugere correções baseado em contexto.\n3. 'doxoade brain analyze': (Planejado) Classificação semântica de funções (Matemática vs IO)."
+  }
+}
