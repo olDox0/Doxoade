@@ -38,7 +38,7 @@ class ExecutionLogger:
         if finding_hash is None and file and line and message:
             rel_file_path = os.path.relpath(file, self.path) if os.path.isabs(file) else file
             unique_str = f"{rel_file_path}:{line}:{message}"
-            finding_hash = hashlib.md5(unique_str.encode('utf-8', 'ignore')).hexdigest()
+            finding_hash = hashlib.sha256(unique_str.encode('utf-8', 'ignore')).hexdigest()
 
         finding = {
             'severity': severity,
@@ -546,18 +546,36 @@ def analyze_file_structure(file_path):
 
 def collect_files_to_analyze(config, cmd_line_ignore=None):
     if cmd_line_ignore is None: cmd_line_ignore = []
-    search_path = config.get('search_path')
+    search_path = config.get('search_path', '.') # Default para '.' se não houver
+    
+    # Normaliza padrões de ignore
     config_ignore = [p.strip('/\\').lower() for p in config.get('ignore', [])]
     cmd_line_ignore_list = [p.strip('/\\').lower() for p in list(cmd_line_ignore)]
+    
     folders_to_ignore = set(config_ignore + cmd_line_ignore_list)
-    folders_to_ignore.update(['venv', 'build', 'dist', '.git', '__pycache__', '.doxoade_cache', 'pytest_temp_dir'])
+    # Adiciona padrões de sistema obrigatórios
+    folders_to_ignore.update(['venv', 'build', 'dist', '.git', '__pycache__', '.doxoade_cache', 'pytest_temp_dir', '.dox_agent_workspace'])
 
     files_to_check = []
-    for root, dirs, files in os.walk(search_path, topdown=True):
-        dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
+    
+    # Normaliza o caminho de busca
+    abs_search_path = os.path.abspath(search_path)
+
+    for root, dirs, files in os.walk(abs_search_path, topdown=True):
+        # Modifica dirs in-place para o os.walk não descer nessas pastas
+        # Filtra pastas que comecem com '.' ou estejam na lista de ignore
+        dirs[:] = [d for d in dirs if not d.startswith('.') and d.lower() not in folders_to_ignore]
+        
+        # Filtragem extra para garantir (caso algo passe)
+        # Verifica se o caminho atual contém alguma pasta ignorada
+        rel_root = os.path.relpath(root, abs_search_path)
+        if any(part.lower() in folders_to_ignore for part in rel_root.split(os.sep)):
+            continue
+
         for file in files:
             if file.endswith('.py'):
                 files_to_check.append(os.path.join(root, file))
+                
     return files_to_check
 
 def _present_diff_output(output, error_line_number=None):
@@ -640,6 +658,22 @@ def _print_single_hunk(header_line, lines):
             line_num_old += 1; line_num_new += 1; j += 1
         else: j += 1
             
+
+def _is_path_ignored(file_path, project_path):
+    """Verifica se um arquivo deve ser ignorado baseado na config do projeto."""
+    # Carrega config (pode ser otimizado com cache se necessário)
+    config = _get_project_config(None, start_path=project_path)
+    ignore_list = [p.strip('/\\').lower() for p in config.get('ignore', [])]
+    ignore_list.extend(['venv', '.git', '__pycache__', '.doxoade_cache', '.dox_agent_workspace'])
+    
+    rel_path = os.path.relpath(file_path, project_path)
+    parts = rel_path.split(os.sep)
+    
+    for part in parts:
+        if part.lower() in ignore_list or part.startswith('.'):
+            return True
+    return False
+
 def _update_open_incidents(logger_results, project_path):
     # CORREÇÃO: Import local para evitar ciclo
     from .database import get_db_connection
@@ -650,13 +684,13 @@ def _update_open_incidents(logger_results, project_path):
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    git_root = _run_git_command(['rev-parse', '--show-toplevel'], capture_output=True, silent_fail=True)
-    if not git_root:
-        git_root = project_path
-
     try:
+        # Primeiro, limpamos incidentes antigos do projeto
+        # Mas APENAS aqueles que não estão na lista de ignore (para não ressuscitar fantasmas)
+        # Simplificação: Deletamos tudo deste projeto e recriamos o estado atual.
+        cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
+        
         if not findings:
-            cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
             conn.commit()
             return
 
@@ -669,6 +703,11 @@ def _update_open_incidents(logger_results, project_path):
             
             if not finding_hash or not file_path:
                 continue
+                
+            # [SECURITY FIX] Verifica se o arquivo deveria ser ignorado
+            # Se for um arquivo de teste temporário ou pasta ignorada, NÃO GRAVA no banco.
+            if _is_path_ignored(os.path.abspath(os.path.join(project_path, file_path)), project_path):
+                continue
             
             if finding_hash in processed_hashes:
                 continue
@@ -677,6 +716,7 @@ def _update_open_incidents(logger_results, project_path):
             git_relative_path = file_path.replace('\\', '/')
             category = f.get('category') or 'UNCATEGORIZED'
             
+            # ... (Lógica de categoria mantida igual) ...
             if category == 'UNCATEGORIZED':
                 message = f.get('message', '')
                 if 'imported but unused' in message or 'redefinition of unused' in message:
@@ -698,22 +738,22 @@ def _update_open_incidents(logger_results, project_path):
             ))
         
         if incidents_to_add:
-            cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
             cursor.executemany("""
                 INSERT INTO open_incidents 
                 (finding_hash, file_path, line, message, category, commit_hash, timestamp, project_path)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, incidents_to_add)
             
-            click.echo(Fore.CYAN + f"   > [DEBUG] {len(incidents_to_add)} incidente(s) registrado(s) para aprendizado futuro.")
+            # Removemos o print de debug para não poluir, ou mantemos condicional
+            # click.echo(Fore.CYAN + f"   > [DEBUG] {len(incidents_to_add)} incidente(s) registrado(s).")
 
         conn.commit()
         
     except Exception as e:
         conn.rollback()
-        # Silencia erros de DB para não poluir o output do usuário final
     finally:
         conn.close()
+
 
 def _mine_traceback(stderr_output):
     """

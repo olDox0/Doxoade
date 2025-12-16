@@ -6,17 +6,14 @@ import os
 import json
 import click
 from colorama import Fore, Style
-from ..shared_tools import ExecutionLogger, _get_venv_python_executable
+from ..shared_tools import ExecutionLogger, _get_venv_python_executable, _get_project_config
+
+# Mapeamento para comparação de severidade
+SEVERITY_MAP = {'LOW': 1, 'MEDIUM': 2, 'HIGH': 3, 'CRITICAL': 4}
 
 def _get_tool_path(tool_name):
     """
     Localiza o executável da ferramenta de segurança.
-    
-    Estratégia de Busca:
-    1. Venv do Projeto Alvo (Prioridade: Override do usuário).
-    2. Ambiente do Interpretador Atual (Onde o doxoade está rodando).
-    3. [NOVO] Venv da Fonte do Doxoade (Baseado na localização do arquivo).
-    4. PATH Global.
     """
     tool_exe = tool_name + ('.exe' if os.name == 'nt' else '')
     
@@ -24,14 +21,12 @@ def _get_tool_path(tool_name):
     target_python = _get_venv_python_executable()
     if target_python:
         target_venv_dir = os.path.dirname(target_python)
-        # Verifica raiz, Scripts e bin
         for sub in ['', 'Scripts', 'bin']:
             path = os.path.join(target_venv_dir, sub, tool_exe)
             if os.path.exists(path): return path
 
-    # 2. Busca no Ambiente do Interpretador Atual (Sys Executable)
+    # 2. Busca no Ambiente do Interpretador Atual
     current_python_dir = os.path.dirname(sys.executable)
-    # Tenta Scripts/ (Win) e bin/ (Linux) e raiz
     possible_dirs = [
         current_python_dir,
         os.path.join(current_python_dir, 'Scripts'),
@@ -41,44 +36,64 @@ def _get_tool_path(tool_name):
         path = os.path.join(d, tool_exe)
         if os.path.exists(path): return path
 
-    # 3. [NOVO] Busca Baseada na Localização do Código Fonte (Editable Mode Magic)
-    # Se estamos rodando de um 'pip install -e .', __file__ aponta para o source.
-    # Estrutura esperada: .../Projeto OADE/doxoade/doxoade/commands/security.py
-    # Venv esperado:      .../Projeto OADE/doxoade/venv
-    
+    # 3. Busca Baseada na Localização do Código Fonte
     try:
-        # Sobe 3 níveis: commands -> doxoade (pkg) -> root
         current_file = os.path.abspath(__file__)
-        pkg_dir = os.path.dirname(os.path.dirname(current_file)) # .../doxoade/doxoade
-        root_dir = os.path.dirname(pkg_dir) # .../doxoade
+        pkg_dir = os.path.dirname(os.path.dirname(current_file))
+        root_dir = os.path.dirname(pkg_dir)
         
         source_venv_dirs = [
-            os.path.join(root_dir, 'venv', 'Scripts'), # Windows Source Venv
-            os.path.join(root_dir, 'venv', 'bin')      # Linux Source Venv
+            os.path.join(root_dir, 'venv', 'Scripts'),
+            os.path.join(root_dir, 'venv', 'bin')
         ]
         
         for d in source_venv_dirs:
             path = os.path.join(d, tool_exe)
             if os.path.exists(path): 
-                # click.echo(f"[DEBUG] Ferramenta encontrada na fonte: {path}")
                 return path
     except Exception: pass
 
     # 4. Fallback para PATH Global
     return shutil.which(tool_name)
 
-def _check_tool(tool_name):
-    return _get_tool_path(tool_name) is not None
+def _is_file_ignored(filepath, ignores):
+    """
+    Verifica manualmente se o arquivo deve ser ignorado.
+    """
+    filepath = os.path.normpath(filepath)
+    parts = filepath.split(os.sep)
+    clean_ignores = {os.path.normpath(i).strip(os.sep) for i in ignores}
+    
+    for part in parts:
+        if part in clean_ignores:
+            return True
+    return False
 
-def _run_bandit(target, logger):
+def _run_bandit(target, logger, config_ignore):
+    """Executa o Bandit (SAST) com filtragem dupla."""
     tool = _get_tool_path('bandit')
     if not tool: 
         click.echo(Fore.RED + "   [ERRO] Executável do Bandit não encontrado.")
         return []
     
-    click.echo(Fore.YELLOW + "   > Executando SAST (Bandit)...")
-    excludes = "venv,.git,__pycache__,build,dist,.doxoade_cache,site-packages"
-    cmd = [tool, '-r', target, '-f', 'json', '-q', '-x', excludes]
+    # Lista padrão de exclusão de infraestrutura
+    system_excludes = [
+        "venv", ".git", "__pycache__", "build", "dist", 
+        ".doxoade_cache", "site-packages", ".idea", ".vscode", "node_modules",
+        "doxoade.egg-info", "tests", "regression_tests"
+    ]
+    
+    # Processa a lista do TOML
+    custom_excludes = [item.strip('/\\') for item in config_ignore]
+    
+    # Combina para passar ao Bandit (Melhor esforço)
+    final_excludes = list(set(system_excludes + custom_excludes))
+    excludes_str = ",".join(final_excludes)
+    
+    click.echo(Fore.YELLOW + f"   > Executando SAST (Bandit)... (Ignorando: {len(final_excludes)} diretórios)")
+    
+    # -r: recursivo, -f: json
+    cmd = [tool, '-r', target, '-f', 'json', '-q', '-x', excludes_str]
     
     try:
         result = subprocess.run(
@@ -87,16 +102,29 @@ def _run_bandit(target, logger):
         try:
             data = json.loads(result.stdout)
             findings = []
+            skipped_count = 0
+            
             for item in data.get('results', []):
+                filename = item.get('filename', '')
+                
+                # Aplica o filtro manual de pastas
+                if _is_file_ignored(filename, final_excludes):
+                    skipped_count += 1
+                    continue
+
                 findings.append({
                     'tool': 'BANDIT',
                     'severity': item['issue_severity'],
                     'confidence': item['issue_confidence'],
                     'message': item['issue_text'],
-                    'file': item['filename'],
+                    'file': filename,
                     'line': item['line_number'],
                     'code': item['code'].strip()
                 })
+            
+            if skipped_count > 0:
+                click.echo(Fore.WHITE + Style.DIM + f"   > Filtragem: {skipped_count} alertas ignorados (pastas de teste/venv).")
+                
             return findings
         except json.JSONDecodeError: return []
     except Exception as e:
@@ -119,13 +147,18 @@ def _run_safety(logger):
         try:
             data = json.loads(result.stdout)
             findings = []
-            if isinstance(data, dict) and 'vulnerabilities' in data: vulns = data['vulnerabilities']
-            else: vulns = data 
+            
+            vulns = []
+            if isinstance(data, dict) and 'vulnerabilities' in data:
+                vulns = data['vulnerabilities']
+            elif isinstance(data, list):
+                vulns = data
             
             for item in vulns:
                 pkg = item.get('package_name', item.get('name', 'unknown'))
                 ver = item.get('installed_version', item.get('version', '?'))
                 desc = item.get('advisory', 'Sem descrição')
+                # Vulnerabilidades de dependência são consideradas HIGH por padrão
                 findings.append({
                     'tool': 'SAFETY',
                     'severity': 'HIGH',
@@ -144,34 +177,74 @@ def _run_safety(logger):
 @click.argument('target', default='.')
 @click.option('--sast', is_flag=True, help="Executa apenas análise estática (Bandit).")
 @click.option('--sca', is_flag=True, help="Executa apenas análise de dependências (Safety).")
-def security(ctx, target, sast, sca):
+@click.option('--level', '-l', type=click.Choice(['LOW', 'MEDIUM', 'HIGH']), default='LOW', help="Filtra resultados por severidade mínima.")
+def security(ctx, target, sast, sca, level):
     """Realiza auditoria de segurança (SAST + SCA)."""
+    
     with ExecutionLogger('security', target, ctx.params) as logger:
         click.echo(Fore.CYAN + f"--- [SECURITY] Auditoria de Segurança em '{target}' ---")
+        click.echo(Fore.WHITE + Style.DIM + f"   > Nível de filtro: {level}+")
+        
+        config = _get_project_config(logger, start_path=target)
+        config_ignore = config.get('ignore', [])
+        
         run_all = not (sast or sca)
         findings = []
 
         bandit_path = _get_tool_path('bandit')
         safety_path = _get_tool_path('safety')
 
-        if not bandit_path and (run_all or sast):
-             click.echo(Fore.RED + "[AVISO] 'bandit' não encontrado.")
-        if not safety_path and (run_all or sca):
-             click.echo(Fore.RED + "[AVISO] 'safety' não encontrado.")
+        if not bandit_path and (run_all or sast): click.echo(Fore.RED + "[AVISO] 'bandit' não encontrado.")
+        if not safety_path and (run_all or sca): click.echo(Fore.RED + "[AVISO] 'safety' não encontrado.")
 
-        if (run_all or sast) and bandit_path: findings.extend(_run_bandit(target, logger))
-        if (run_all or sca) and safety_path: findings.extend(_run_safety(logger))
+        if (run_all or sast) and bandit_path: 
+            findings.extend(_run_bandit(target, logger, config_ignore))
+            
+        if (run_all or sca) and safety_path: 
+            findings.extend(_run_safety(logger))
 
-        if not findings:
-            if bandit_path or safety_path: click.echo(Fore.GREEN + "\n[OK] Nenhuma vulnerabilidade conhecida encontrada.")
-            return
+        # --- FILTRAGEM POR SEVERIDADE ---
+        target_val = SEVERITY_MAP.get(level, 1)
+        visible_findings = []
+        hidden_count = 0
 
-        click.echo(Fore.RED + Style.BRIGHT + f"\n[ALERTA] {len(findings)} problemas de segurança detectados!")
         for f in findings:
             sev = f['severity'].upper()
+            f_val = SEVERITY_MAP.get(sev, 1)
+            
+            if f_val >= target_val:
+                visible_findings.append(f)
+            else:
+                hidden_count += 1
+
+        if not visible_findings:
+            if hidden_count > 0:
+                click.echo(Fore.GREEN + f"\n[OK] Nenhum problema de nível {level} ou superior encontrado.")
+                click.echo(Fore.WHITE + Style.DIM + f"     ({hidden_count} problemas de menor severidade ignorados).")
+            else:
+                click.echo(Fore.GREEN + "\n[OK] Nenhuma vulnerabilidade conhecida encontrada.")
+            return
+
+        click.echo(Fore.RED + Style.BRIGHT + f"\n[ALERTA] {len(visible_findings)} problemas detectados (Filtro: {level}+)!")
+        if hidden_count > 0:
+            click.echo(Fore.WHITE + Style.DIM + f"         (Ocultando {hidden_count} problemas menores)")
+
+        for f in visible_findings:
+            sev = f['severity'].upper()
             color = Fore.RED if sev in ['HIGH', 'CRITICAL'] else (Fore.YELLOW if sev == 'MEDIUM' else Fore.WHITE)
+            
             click.echo(f"\n{color}[{f['tool']}][{sev}] {f['message']}")
             click.echo(Fore.WHITE + f"   > Em: {f['file']}:{f['line']}")
             if f.get('code'): click.echo(Fore.CYAN + f"   > Código: {f.get('code')}")
-            logger.add_finding(severity='CRITICAL' if sev in ['HIGH', 'CRITICAL'] else 'WARNING', category='SECURITY', message=f"[{f['tool']}] {f['message']}", file=f['file'], line=f['line'])
+            
+            # Loga no banco apenas se for relevante
+            log_sev = 'CRITICAL' if sev in ['HIGH', 'CRITICAL'] else 'WARNING'
+            logger.add_finding(
+                severity=log_sev, 
+                category='SECURITY', 
+                message=f"[{f['tool']}] {f['message']}", 
+                file=f['file'], 
+                line=f['line']
+            )
+            
         click.echo(Fore.RED + "\nRecomendação: Revise e corrija estas vulnerabilidades imediatamente.")

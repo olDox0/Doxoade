@@ -66,7 +66,7 @@ def get_structural_hash(node):
     normalizer = StructuralNormalizer()
     normalized_node = normalizer.visit(node_copy)
     dump = ast.dump(normalized_node, include_attributes=False)
-    return hashlib.md5(dump.encode('utf-8')).hexdigest()
+    return hashlib.sha256(dump.encode('utf-8')).hexdigest()
 
 def is_trivial_or_config(node):
     """

@@ -11,17 +11,18 @@ Filosofia MPoT:
 - Contratos com assertions
 """
 
-import click
-import os
 import subprocess
-from pathlib import Path
+import sqlite3
+import os
+import click
 from typing import List, Dict, Any, Set
+from pathlib import Path
 from difflib import SequenceMatcher
 from colorama import Fore, Style
 
 from ..shared_tools import _get_project_config, ExecutionLogger
-# IMPORTAÇÃO DA NOVA ARQUITETURA
 from ..indexer import CodeIndexer, TextMatcher, IndexCache
+from ..database import get_db_connection
 
 # ============================================================================
 # FASE 3: ESTATÍSTICAS E INTEGRAÇÃO GIT
@@ -169,6 +170,81 @@ def _suggest_similar_functions(indexer: CodeIndexer, query: str, threshold: floa
     return [name for name, _ in suggestions[:5]]
 
 # ============================================================================
+# NOVO: BUSCA NO BANCO DE DADOS (DATA CROSSING)
+# ============================================================================
+
+def _search_in_database(query: str, fuzzy: bool) -> Dict[str, List[Dict]]:
+    """Busca cruzada em incidentes e soluções no banco de dados."""
+    results = {
+        'incidents': [],
+        'solutions': []
+    }
+    
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # Prepara query SQL para busca textual (LIKE)
+    # Nota: Fuzzy real em SQL é lento, usamos LIKE %query% como aproximação
+    sql_wildcard = f"%{query}%"
+    
+    try:
+        # 1. Busca em Incidentes Abertos
+        cursor.execute("""
+            SELECT * FROM open_incidents 
+            WHERE message LIKE ? OR file_path LIKE ? OR category LIKE ?
+            ORDER BY timestamp DESC LIMIT 10
+        """, (sql_wildcard, sql_wildcard, sql_wildcard))
+        
+        for row in cursor.fetchall():
+            results['incidents'].append({
+                'file': row['file_path'],
+                'line': row['line'],
+                'message': row['message'],
+                'category': row['category'],
+                'hash': row['finding_hash']
+            })
+            
+        # 2. Busca em Soluções Passadas
+        cursor.execute("""
+            SELECT * FROM solutions 
+            WHERE message LIKE ? OR file_path LIKE ? 
+            ORDER BY timestamp DESC LIMIT 10
+        """, (sql_wildcard, sql_wildcard))
+        
+        for row in cursor.fetchall():
+            results['solutions'].append({
+                'file': row['file_path'],
+                'line': row['error_line'],
+                'message': row['message'],
+                'hash': row['finding_hash'],
+                'timestamp': row['timestamp']
+            })
+            
+    except Exception as e:
+        click.echo(Fore.RED + f"[DB Error] {e}")
+    finally:
+        conn.close()
+        
+    return results
+
+def _display_db_results(db_results: Dict[str, List[Dict]]):
+    """Exibe os resultados do banco de dados."""
+    
+    if db_results['incidents']:
+        click.echo(Fore.RED + Style.BRIGHT + "\n╔═══ Incidentes Ativos (Não Resolvidos) ═══╗")
+        for inc in db_results['incidents']:
+            click.echo(f"{Fore.YELLOW}[{inc['category']}] {Fore.WHITE}{inc['message']}")
+            click.echo(f"  Em: {inc['file']}:{inc['line']}")
+            
+    if db_results['solutions']:
+        click.echo(Fore.GREEN + Style.BRIGHT + "\n╔═══ Soluções Históricas (Base de Conhecimento) ═══╗")
+        for sol in db_results['solutions']:
+            click.echo(f"{Fore.WHITE}{sol['message']}")
+            click.echo(f"  {Fore.CYAN}Resolvido em:{Style.RESET_ALL} {sol['file']} (Hash: {sol['hash'][:8]})")
+
+
+# ============================================================================
 # FUNÇÕES DE BUSCA (Delega para o Indexer/Matcher mas formata aqui)
 # ============================================================================
 
@@ -179,9 +255,10 @@ def _perform_search(
     search_functions: bool,
     search_comments: bool,
     search_commits: bool,
+    search_db: bool, # Novo parâmetro
     fuzzy: bool,
     show_callers: bool
-) -> Dict[str, List[Dict[str, Any]]]:
+) -> Dict[str, Any]: 
     """Executa a busca unificada."""
     assert indexer, "Indexer não pode ser None"
     assert query, "Query não pode estar vazia"
@@ -191,11 +268,12 @@ def _perform_search(
         'code': [],
         'comments': [],
         'commits': [],
-        'callers': []
+        'callers': [],
+        'database': {}
     }
     
     # 1. Busca Funções (Default ou Explícito)
-    if search_functions or not any([search_code, search_functions, search_comments, search_commits]):
+    if search_functions or not any([search_code, search_functions, search_comments, search_commits, search_db]):
         results['functions'] = _search_functions(indexer, query, fuzzy)
     
     # 2. Busca Código Raw (Opcional)
@@ -215,6 +293,9 @@ def _perform_search(
     # 5. Call Graph
     if show_callers:
         results['callers'] = _find_callers(indexer, query)
+    
+    if search_db:
+        results['database'] = _search_in_database(query, fuzzy)
     
     return results
 
@@ -323,7 +404,7 @@ def _display_results(results: Dict[str, List[Dict]], query: str) -> None:
             click.echo(f"{Fore.MAGENTA}{match['hash']}{Fore.WHITE}: {match['message']}")
 
 # ============================================================================
-# COMANDO CLI
+# COMANDO CLI ATUALIZADO
 # ============================================================================
 
 @click.command('search')
@@ -332,25 +413,30 @@ def _display_results(results: Dict[str, List[Dict]], query: str) -> None:
 @click.option('--function', '-f', is_flag=True, help='Busca funções relacionadas')
 @click.option('--comment', is_flag=True, help='Busca em comentários')
 @click.option('--commits', is_flag=True, help='Busca em mensagens de commit')
+@click.option('--incidents', '-i', is_flag=True, help='Busca na Base de Conhecimento (Incidentes e Soluções)')
 @click.option('--fuzzy', is_flag=True, help='Ativa busca fuzzy (typos)')
 @click.option('--callers', is_flag=True, help='Mostra quem chama a função')
 @click.option('--stats', is_flag=True, help='Estatísticas de uso da função')
 @click.option('--no-cache', is_flag=True, help='Força re-indexação (ignora cache)')
 @click.pass_context
-def search(ctx, query, code, function, comment, commits, fuzzy, callers, stats, no_cache):
-    """Busca inteligente no código do projeto."""
+def search(ctx, query, code, function, comment, commits, incidents, fuzzy, callers, stats, no_cache):
+    """Busca inteligente no código e na memória do projeto."""
     config = _get_project_config(None)
     project_root = config['root_path']
     
     with ExecutionLogger('search', project_root, ctx.params) as logger:
         click.echo(Fore.CYAN + Style.BRIGHT + f"\n╔═══ Busca: '{query}' ═══╗" + Style.RESET_ALL)
         
-        # Usa o novo Indexer modular
+        # Se for apenas busca de banco de dados, não precisamos indexar o código (Performance)
+        if incidents and not any([code, function, comment, commits, callers, stats]):
+            db_results = _search_in_database(query, fuzzy)
+            _display_db_results(db_results)
+            return
+
+        # Indexação Padrão
         indexer = CodeIndexer(project_root)
         ignore_dirs = set(config.get('ignore', []))
         ignore_dirs.update({'venv', '.git', '__pycache__'})
-        
-        # Indexa (usa cache automaticamente se possível)
         indexer.index_project(ignore_dirs, use_cache=not no_cache)
         
         if stats:
@@ -358,14 +444,18 @@ def search(ctx, query, code, function, comment, commits, fuzzy, callers, stats, 
             _display_stats(usage_stats)
             return
             
-        results = _perform_search(indexer, query, code, function, comment, commits, fuzzy, callers)
+        results = _perform_search(indexer, query, code, function, comment, commits, incidents, fuzzy, callers)
+        
+        # Exibe resultados de código
         _display_results(results, query)
         
-        total = sum(len(v) for v in results.values())
+        # Exibe resultados de banco
+        if incidents:
+            _display_db_results(results['database'])
+        
+        # Verifica se achou algo
+        total = sum(len(v) for k, v in results.items() if isinstance(v, list))
+        if results['database']: total += len(results['database'].get('incidents', [])) + len(results['database'].get('solutions', []))
+        
         if total == 0:
             click.echo(Fore.YELLOW + "\nNenhum resultado encontrado.")
-            if function or not any([code, comment, commits]):
-                suggestions = _suggest_similar_functions(indexer, query)
-                if suggestions:
-                    click.echo(Fore.CYAN + "\nVocê quis dizer:")
-                    for s in suggestions: click.echo(f"  • {Fore.YELLOW}{s}")

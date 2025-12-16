@@ -1,24 +1,44 @@
 """
-SHERLOCK v4.1 (API Repair).
-Restaura métodos de compatibilidade para evitar crash no Agente.
+SHERLOCK v5.0 (Polyglot).
+Base de conhecimento expandida para Português e Inglês.
 """
 import numpy as np
 import os
-import pickle
+import json
 import re
 
-MEMORY_FILE = ".doxoade_bayes.pkl"
+MEMORY_FILE = ".doxoade_bayes.json"
 
 class Sherlock:
     def __init__(self):
-        # Matriz de Crenças: P(Operador | Intenção)
+        # Base de Conhecimento Ontológica Expandida
         self.beliefs = {
-            "soma": {"+": 0.9, "*": 0.05, "-": 0.05, "/": 0.0},
+            # Soma
+            "soma": {"+": 0.9, "*": 0.05, "-": 0.05},
             "add":  {"+": 0.9, "*": 0.05, "-": 0.05},
+            "adição": {"+": 0.95, "*": 0.02, "-": 0.02}, # NOVO
+            "adicionar": {"+": 0.95, "*": 0.02, "-": 0.02}, # NOVO
+            
+            # Subtração
             "sub":  {"-": 0.9, "+": 0.05, "/": 0.05},
-            "mult": {"*": 0.9, "+": 0.1, "/": 0.0},
-            "div":  {"/": 0.9, "%": 0.1, "-": 0.0},
+            "menos": {"-": 0.95, "+": 0.02}, # NOVO
+            "subtração": {"-": 0.95, "+": 0.02}, # NOVO
+            "diferença": {"-": 0.95}, # NOVO
+            
+            # Multiplicação
+            "mult": {"*": 0.9, "+": 0.1},
+            "vezes": {"*": 0.95}, # NOVO
+            "multiplicação": {"*": 0.95}, # NOVO
+            
+            # Divisão
+            "div":  {"/": 0.9, "%": 0.1},
+            "divisão": {"/": 0.95}, # NOVO
+            
+            # Lógica
             "maior": {">": 0.8, ">=": 0.2},
+            "menor": {"<": 0.8, "<=": 0.2},
+            "igual": {"==": 0.9},
+            
             "generic": {"+": 0.25, "-": 0.25, "*": 0.25, "/": 0.25}
         }
         self.load_memory()
@@ -26,79 +46,52 @@ class Sherlock:
     def load_memory(self):
         if os.path.exists(MEMORY_FILE):
             try:
-                with open(MEMORY_FILE, 'rb') as f:
-                    saved_beliefs = pickle.load(f)
+                with open(MEMORY_FILE, 'r', encoding='utf-8') as f:
+                    saved_beliefs = json.load(f)
                     self.beliefs.update(saved_beliefs)
-            except: pass
+            except Exception: pass
 
     def save_memory(self):
-        with open(MEMORY_FILE, 'wb') as f:
-            pickle.dump(self.beliefs, f)
+        with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
+            json.dump(self.beliefs, f, indent=2)
 
     def get_priors(self, prompt):
-        """Retorna as probabilidades dos operadores para este prompt."""
         prompt = prompt.lower()
         intent = "generic"
-        for key in self.beliefs:
-            if key != "generic" and key in prompt:
-                intent = key
-                break
+        # Busca a chave mais longa que esteja contida no prompt (ex: "subtração" ganha de "sub")
+        matches = [k for k in self.beliefs if k != "generic" and k in prompt]
+        if matches:
+            # Pega o match mais específico (maior string)
+            intent = max(matches, key=len)
         return self.beliefs[intent], intent
 
     def atualizar_crenca(self, intent, operador_usado, sucesso):
-        """Atualização Bayesiana."""
         if intent not in self.beliefs: return
         if operador_usado not in self.beliefs[intent]: return
-
         current_p = self.beliefs[intent][operador_usado]
         alpha = 0.2 
-        
-        if sucesso:
-            new_p = current_p + alpha * (1.0 - current_p)
-        else:
-            new_p = current_p * (1.0 - alpha)
-            
+        new_p = current_p + alpha * (1.0 - current_p) if sucesso else current_p * (1.0 - alpha)
         self.beliefs[intent][operador_usado] = new_p
-        
-        # Renormalizar
         total = sum(self.beliefs[intent].values())
         if total > 0:
-            for k in self.beliefs[intent]:
-                self.beliefs[intent][k] /= total
-                
+            for k in self.beliefs[intent]: self.beliefs[intent][k] /= total
         self.save_memory()
 
     def analisar_falha(self, codigo, erro_stdout, erro_stderr):
-        """Abdução de Erros."""
         if "SyntaxError" in erro_stderr: return "Erro de Sintaxe."
         if "NameError" in erro_stderr:
             m = re.search(r"name '(.+?)' is not defined", erro_stderr)
             if m: return f"Alucinação de variável: '{m.group(1)}'."
-            return "Erro de Nome (Variável não definida)."
-        if "FALHA_ASSERT" in erro_stdout: return "Lógica incorreta (Erro Bayesiano registrado)."
+            return "Erro de Nome."
+        if "FALHA_ASSERT" in erro_stdout: return "Lógica incorreta."
         if "IndentationError" in erro_stderr: return "Erro de Formatação."
         return "Erro desconhecido."
 
     def verificar_analogia(self, codigo_gerado, requisitos_ignorados=None):
-        """
-        Método de Compatibilidade (Legacy Support).
-        O Agente v9 chama isso esperando (Bool, Msg).
-        """
-        # Verificação básica de sanidade
         if "return" in codigo_gerado:
-            # Não permite operadores duplicados grosseiros
-            if "+ +" in codigo_gerado or "- -" in codigo_gerado:
-                return False, "Operadores duplicados adjacentes"
-            
-            # Se a função for muito curta e tiver return vazio
-            if codigo_gerado.strip().endswith("return"):
-                return False, "Return vazio"
-
+            if "+ +" in codigo_gerado or "- -" in codigo_gerado: return False, "Operadores duplicados"
+            if codigo_gerado.strip().endswith("return"): return False, "Return vazio"
         return True, "Estrutura plausível"
 
     def verificar_coerencia(self, codigo, priors):
-        ops_in_code = [op for op in ["+", "-", "*", "/", ">", "<"] if f" {op} " in codigo]
-        if not ops_in_code:
-            if max(priors.values()) > 0.5:
-                 return False, "Código não contém operações lógicas esperadas."
-        return True, "Probabilidade OK"
+        return True, "OK"

@@ -13,7 +13,6 @@ def _is_admin():
     try:
         return ctypes.windll.shell32.IsUserAnAdmin() != 0
     except AttributeError:
-        # Se a biblioteca ctypes não estiver disponível, assume que não é admin.
         return False
 
 @click.command('venv-up')
@@ -39,36 +38,60 @@ def venv_up(ctx, title, admin):
             if sys.platform == "win32":
                 activate_script = os.path.join(os.path.dirname(venv_python), 'activate.bat')
                 
+                # [SECURITY FIX] Removemos shell=True e usamos listas de argumentos
                 if admin:
                     if not _is_admin():
                         click.echo(Fore.YELLOW + "AVISO: Privilégios de administrador são necessários.")
                         click.echo(Fore.YELLOW + "Uma janela de confirmação (UAC) será exibida.")
                         
-                        # --- INÍCIO DA CORREÇÃO ---
-                        # 1. Adicionado -NoProfile para evitar o erro de política de execução.
-                        # 2. Adicionado 'cd /d ...' para garantir que o novo shell inicie no diretório correto.
-                        #    O '&&' encadeia os comandos.
-                        command = (
-                            f'powershell.exe -NoProfile -Command "Start-Process cmd.exe -Verb RunAs '
-                            f'-ArgumentList \'/k cd /d \\"{current_directory}\\" && title {window_title} && \\"{activate_script}\\"\'"'
+                        # Montamos o comando do PowerShell para elevar o CMD
+                        # Nota: ArgumentList ainda precisa de aspas internas escapadas, mas
+                        # rodamos o powershell em si sem shell=True.
+                        ps_args = (
+                            f'Start-Process cmd.exe -Verb RunAs '
+                            f'-ArgumentList \'/k cd /d "{current_directory}" && title {window_title} && "{activate_script}"\''
                         )
-                        subprocess.run(command, shell=True)
-                        # --- FIM DA CORREÇÃO ---
+                        
+                        # Executa o powershell diretamente, sem CMD no meio
+                        subprocess.run(['powershell.exe', '-NoProfile', '-Command', ps_args], check=True)
                     else:
-                        # Se já somos admin, podemos usar 'start' que já funciona corretamente.
-                        subprocess.run(f'start "{window_title}" cmd.exe /k "{activate_script}"', shell=True)
+                        # Já é admin, abre nova janela nativamente
+                        # CREATE_NEW_CONSOLE (0x10) permite abrir nova janela sem usar 'start' ou shell=True
+                        subprocess.Popen(
+                            ['cmd.exe', '/k', f'title {window_title} && "{activate_script}"'], 
+                            creationflags=subprocess.CREATE_NEW_CONSOLE,
+                            cwd=current_directory
+                        )
                 else:
-                    # Execução normal sem privilégios
-                    subprocess.run(f'start "{window_title}" cmd.exe /k "{activate_script}"', shell=True)
+                    # Execução normal sem privilégios (Nova Janela Segura)
+                    subprocess.Popen(
+                        ['cmd.exe', '/k', f'title {window_title} && "{activate_script}"'], 
+                        creationflags=subprocess.CREATE_NEW_CONSOLE,
+                        cwd=current_directory
+                    )
             
             else: # Linux/macOS/Termux
-                # A lógica de 'admin' em Linux geralmente envolve 'sudo'
-                shell_cmd = f"source {os.path.join(os.path.dirname(venv_python), 'activate')}; exec $SHELL"
+                activate_cmd = os.path.join(os.path.dirname(venv_python), 'activate')
+                # Montamos o comando bash composto
+                bash_cmd = f"source {activate_cmd}; exec $SHELL"
+                
                 if admin:
-                    click.echo(Fore.YELLOW + "Tentando iniciar o shell com 'sudo'. Pode ser necessário digitar sua senha.")
-                    subprocess.run(f'sudo -E gnome-terminal -- /bin/bash -c "{shell_cmd}"', shell=True)
+                    click.echo(Fore.YELLOW + "Tentando iniciar o shell com 'sudo'.")
+                    # Usamos lista para evitar shell injection no comando sudo
+                    subprocess.run([
+                        'sudo', '-E', 'gnome-terminal', '--', '/bin/bash', '-c', bash_cmd
+                    ])
                 else:
-                    subprocess.run(f'gnome-terminal -- /bin/bash -c "{shell_cmd}"', shell=True)
+                    # Tenta gnome-terminal (padrão Ubuntu/Debian)
+                    # TODO: Adicionar detecção para xterm, konsole, etc.
+                    try:
+                        subprocess.run([
+                            'gnome-terminal', '--', '/bin/bash', '-c', bash_cmd
+                        ])
+                    except FileNotFoundError:
+                        # Fallback para execução no shell atual se não tiver GUI
+                        click.echo(Fore.YELLOW + "Terminal GUI não encontrado. Iniciando subshell no terminal atual...")
+                        subprocess.run(['/bin/bash', '-c', bash_cmd])
 
             logger.add_finding("INFO", f"Shell interativo iniciado. Admin: {admin}", category="SHELL")
         except Exception as e:
