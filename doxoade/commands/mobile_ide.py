@@ -103,6 +103,28 @@ def termux_toast(message: str):
         except Exception:
             pass
 
+def setup_micro_split_workflow():
+    """Configura atalho Alt-d no micro para workflow de split."""
+    import json
+    
+    config_dir = Path.home() / ".config" / "micro"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    bindings_file = config_dir / "bindings.json"
+    
+    current_bindings = {}
+    if bindings_file.exists():
+        try:
+            current_bindings = json.loads(bindings_file.read_text())
+        except Exception:
+            pass
+            
+    # Adiciona o atalho Dual View
+    current_bindings["Alt-d"] = "command:hsplit,command:new"
+    
+    # Salva
+    bindings_file.write_text(json.dumps(current_bindings, indent=4))
+    console.print("[green]✓ Workflow 'Alt-d' configurado no Micro![/green]")
+    console.print("   > Abra um arquivo e pressione Alt+d para abrir o painel de rascunho.")
 
 # NOVOS COMANDOS PARA A IDE
 
@@ -645,3 +667,4 @@ else:
     def ide_setup():
         """Configura editores ideais para Termux"""
         setup_termux_editors()
+        setup_micro_split_workflow()
