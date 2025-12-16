@@ -311,7 +311,7 @@ class MobileIDE:
     
     def clear_screen(self):
         """Limpa a tela de forma multiplataforma"""
-        os.system('cls' if os.name == 'nt' else 'clear')
+        print("\033[2J\033[H", end="")
     
     def show_header(self, title: str):
         """Mostra cabeçalho"""

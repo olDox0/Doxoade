@@ -20,7 +20,7 @@ def get_check_penalty(cursor):
             AND file_path NOT LIKE '%pytest%'
         """)
         rows = cursor.fetchall()
-    except: return 0, "Erro DB"
+    except Exception: return 0, "Erro DB"
     
     penalty = 0
     weights = {'SYNTAX': 15, 'CRITICAL': 10, 'RUNTIME-RISK': 8, 'ERROR': 5, 'WARNING': 2}
@@ -48,7 +48,7 @@ def get_style_penalty(cursor):
         # Penalidade leve (estilo é importante, mas não crítico)
         penalty = min(20, violations * 2)
         return penalty, f"{violations} violações de arquitetura (MPoT)"
-    except: return 0, "N/A"
+    except Exception: return 0, "N/A"
 
 def get_complexity_penalty(cursor):
     """
@@ -73,7 +73,7 @@ def get_complexity_penalty(cursor):
         
         penalty = min(20, high_complex_funcs * 5)
         return penalty, f"{high_complex_funcs} funções complexas"
-    except: return 0, "N/A"
+    except Exception: return 0, "N/A"
 
 def get_test_status_penalty(cursor):
     """Verifica se o último teste passou."""
@@ -85,7 +85,7 @@ def get_test_status_penalty(cursor):
         if row['exit_code'] != 0:
             return 30, "Última bateria de testes FALHOU"
         return 0, "Testes passando"
-    except: return 0, "N/A"
+    except Exception: return 0, "N/A"
 
 def get_risk_level(score):
     if score >= 90: return "BAIXO", Fore.GREEN
