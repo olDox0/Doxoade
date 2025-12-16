@@ -24,11 +24,9 @@ if PACKAGE_PARENT not in sys.path:
     sys.path.insert(0, PACKAGE_PARENT)
 
 # --- REGISTRO DE PLUGINS DA V2.0 ---
-from doxoade.commands.agent import agent_cmd
 from doxoade.commands.apicheck import apicheck
 from doxoade.commands.android import android_group
 from doxoade.commands.auto import auto
-from doxoade.commands.brain import brain 
 from doxoade.commands.canonize import canonize
 from doxoade.commands.check import check
 from doxoade.chronos import chronos_recorder
@@ -54,7 +52,6 @@ from doxoade.commands.init import init
 from doxoade.commands.install import install
 from doxoade.commands.intelligence import intelligence
 from doxoade.commands.kvcheck import kvcheck
-from doxoade.commands.lab import lab
 from doxoade.commands.lab_ast import lab_ast
 from doxoade.commands.maestro import maestro
 from doxoade.commands.migrate_db import migrate_db
@@ -286,11 +283,9 @@ def _analyze_traceback(stderr_output):
 
 #atualizado em 2025/10/24-Versão 34.0.
 # --- REGISTRO DE PLUGINS ---
-cli.add_command(agent_cmd)
 cli.add_command(android_group)
 cli.add_command(apicheck)
 cli.add_command(auto)
-cli.add_command(brain)
 cli.add_command(canonize)
 cli.add_command(check)
 cli.add_command(clean)
@@ -317,7 +312,6 @@ cli.add_command(init)
 cli.add_command(install)
 cli.add_command(intelligence)
 cli.add_command(kvcheck)
-cli.add_command(lab)
 cli.add_command(lab_ast)
 cli.add_command(log)
 cli.add_command(maestro)
