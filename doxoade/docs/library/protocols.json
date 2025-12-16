@@ -23,5 +23,10 @@
     "title": "Motor Gênese V14 (Estratégia & Abdução)",
     "date": "2025-12-05",
     "content": "A versão mais recente da IA Simbólica do Doxoade.\n\nEvolução:\n- Refatoração para 'Strategy Pattern' (Modularidade).\n- Capacidade de Abdução: Infere o que falta (ex: imports) sem precisar ver o erro antes.\n- Integração com Runtime: Aprende com falhas de execução capturadas pelo 'flow'."
+  },
+  "aegis": {
+    "title": "Protocolo Aegis (Blindagem & Hardening)",
+    "date": "2025-12-15",
+    "content": "Política de Segurança de Tolerância Zero.\n\nDiretrizes:\n1. 'Ground Zero': Nenhuma vulnerabilidade HIGH ou MEDIUM é permitida no master.\n2. Proibição de 'shell=True' e 'os.system' em comandos de produção.\n3. Dados sobre Código: Preferência estrita por JSON em vez de Pickle para persistência.\n4. Filtragem Dupla: O sistema de segurança filtra falsos positivos antes de alertar o usuário.\n\nComando associado: 'security --level HIGH'"
   }
 }

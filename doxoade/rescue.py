@@ -106,7 +106,7 @@ def perform_post_mortem(info):
         # 3. Gera um Hash único para esse crash
         # Hash = ErrorMsg + Line + File
         unique_str = f"{info['error']}:{info['line']}:{rel_path}"
-        crash_hash = hashlib.md5(unique_str.encode('utf-8')).hexdigest()
+        crash_hash = hashlib.sha256(unique_str.encode('utf-8')).hexdigest()
 
         # 4. Salva no Banco de Dados
         # Usamos a tabela 'solutions' pois efetivamente estamos dizendo:

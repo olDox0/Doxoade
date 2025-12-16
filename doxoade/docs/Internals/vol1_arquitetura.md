@@ -110,3 +110,8 @@ O estado do sistema reside em `~/.doxoade/doxoade.db` (SQLite).
 *   `solution_templates`: O "Conhecimento Abstraído". Regras regex aprendidas para aplicar autofix.
 
 ---
+
+## 6. Segurança (Aegis)
+*   **Segurança por Design (Protocolo Aegis):**
+    *   **Sanitização de Subprocessos:** O uso de `shell=True` é estritamente proibido. Argumentos são passados como listas para evitar injeção de comandos.
+    *   **Dados Inertes:** A persistência de estado (memória da IA, configurações) é feita exclusivamente em JSON ou formatos inertes. O uso de `pickle` é vetado para evitar execução de código arbitrário na desserialização.

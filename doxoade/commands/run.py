@@ -35,7 +35,7 @@ def _register_runtime_incident(error_data):
         # Gera um hash único para o erro
         import hashlib
         unique_str = f"{error_data.get('file')}:{error_data.get('line')}:{error_data.get('message')}"
-        f_hash = hashlib.md5(unique_str.encode('utf-8')).hexdigest()
+        f_hash = hashlib.sha256(unique_str.encode('utf-8')).hexdigest()
         
         # Define categoria baseada no tipo de erro
         category = "RUNTIME-CRASH"

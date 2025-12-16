@@ -40,7 +40,7 @@ class IntentionBrain:
         # Se não conhecer, vai dar <UNK>, mas ainda funciona pelo contexto.
         try:
             ids = self.tok.converter_para_ids(signature_text)
-        except:
+        except Exception:
             return "DESCONHECIDO"
 
         if len(ids) == 0: return "VAZIO"
