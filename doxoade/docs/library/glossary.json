@@ -33,5 +33,15 @@
     "title": "Sondagem (Probing)",
     "definition": "Técnica de injetar um script mínimo em um ambiente externo para extrair dados (como dependências instaladas) sem contaminar o processo principal com imports conflitantes.",
     "origin": "Resolvendo o Paradoxo dos Dois Ambientes."
+  },
+  "hardening": {
+    "title": "Hardening (Endurecimento)",
+    "definition": "O processo de proteger um sistema reduzindo sua superfície de vulnerabilidade. No Doxoade, envolveu remover 'shell=True', trocar MD5 por SHA256 e eliminar o uso de Pickle inseguro.",
+    "origin": "Segurança da Informação."
+  },
+  "double_filtering": {
+    "title": "Filtragem Dupla (Double Filtering)",
+    "definition": "Técnica usada no comando 'security'. Como ferramentas externas (Bandit) às vezes ignoram configurações de exclusão, o Doxoade aplica um segundo filtro em Python no JSON de resultados, garantindo que pastas como 'venv' nunca gerem alertas falsos.",
+    "origin": "Correção do Doxoade v55 (Dez 2025)."
   }
 }

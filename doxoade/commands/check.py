@@ -280,6 +280,8 @@ STDLIB_MODULES = {
     'sys': ['exit', 'path', 'argv', 'stdout', 'stderr', 'stdin', 'version', 'platform', 'modules'],
     'os': ['path', 'getcwd', 'chdir', 'listdir', 'mkdir', 'makedirs', 'remove', 'rename', 'environ', 
            'sep', 'name', 'walk', 'stat', 'getenv', 'system', 'popen'],
+    'math': ['ceil', 'floor', 'sqrt', 'pi', 'pow', 'cos', 'sin', 'tan', 'degrees', 'radians'],
+    'random': ['randint', 'choice', 'shuffle', 'random', 'seed'],
     're': ['match', 'search', 'findall', 'sub', 'split', 'compile', 'fullmatch', 'escape', 'IGNORECASE', 'VERBOSE'],
     'json': ['dumps', 'loads', 'dump', 'load', 'JSONDecodeError'],
     'datetime': ['datetime', 'date', 'time', 'timedelta', 'timezone'],
@@ -868,7 +870,7 @@ def run_check_logic(path, cmd_line_ignore, fix, debug, fast=False, no_imports=Fa
     for f in analysis['raw_findings']:
         if not f.get('hash'):
             u = f"{f.get('file')}:{f.get('line')}:{f.get('message')}"
-            f['hash'] = hashlib.md5(u.encode('utf-8')).hexdigest()
+            f['hash'] = hashlib.sha256(u.encode('utf-8')).hexdigest()
         final.append(f)
 
     filtered = []

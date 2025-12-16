@@ -19,7 +19,7 @@ def _register_test_failure(node_id, error_message):
         # O arquivo é a parte antes do ::
         file_path = node_id.split("::")[0] if "::" in node_id else "unknown"
         
-        f_hash = hashlib.md5(f"{node_id}:{error_message}".encode('utf-8')).hexdigest()
+        f_hash = hashlib.sha256(f"{node_id}:{error_message}".encode('utf-8')).hexdigest()
         
         cursor.execute("""
             INSERT OR REPLACE INTO open_incidents 

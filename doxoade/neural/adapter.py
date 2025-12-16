@@ -1,43 +1,52 @@
 """
-Neural Adapter v4.1 (Dynamic Volume).
-Permite configurar a quantidade de dados sintéticos gerados.
+Neural Adapter v5.0 (Curriculum Engine).
+Serve dados baseados no nível de dificuldade solicitado.
 """
 import sqlite3
 import random
 import os
 from ..database import get_db_connection
-from .codex_gen import gerar_funcao_simples, gerar_funcao_condicional
+from .codex_gen import gerar_sintaxe_basica, gerar_funcao_simples, gerar_funcao_condicional
 
 class BrainLoader:
     def __init__(self):
-        pass 
+        try:
+            self.conn = get_db_connection()
+            self.cursor = self.conn.cursor()
+        except Exception:
+            self.conn = None
 
-    def get_training_data(self, limit=200):
+    def get_training_data(self, limit=200, difficulty=1):
         """
-        Gera dados de treino com limite configurável.
+        Gera dados baseados no nível de dificuldade (Curriculum Learning).
         """
-        print(f"   🧪 Gerando {limit} exemplos sintéticos de alta pureza...")
-        return self._generate_synthetic_batch(limit)
+        print(f"   🎓 Gerando currículo Nível {difficulty} ({limit} amostras)...")
+        return self._generate_curriculum_batch(limit, difficulty)
 
-    def _generate_synthetic_batch(self, count):
+    def _generate_curriculum_batch(self, count, level):
         data = []
-        # Currículo Básico (Garante que sempre existam, independente do count)
-        data.append(("def soma ( a , b ) :", "return a + b ENDMARKER"))
-        data.append(("def sub ( x , y ) :", "return x - y ENDMARKER"))
-        data.append(("def maior ( a , b ) :", "if a > b : return a else : return b ENDMARKER"))
         
-        # Se count for muito pequeno, garante pelo menos o básico
-        remaining = max(0, count - 3)
-        
-        for _ in range(remaining):
-            if random.random() < 0.4:
-                full_code = gerar_funcao_condicional()
-            else:
-                full_code = gerar_funcao_simples()
+        for _ in range(count):
+            r = random.random()
+            
+            if level == 1:
+                # FASE 1: 100% Sintaxe Básica
+                full_code = gerar_sintaxe_basica()
+                
+            elif level == 2:
+                # FASE 2: 20% Sintaxe, 80% Matemática Linear
+                if r < 0.2: full_code = gerar_sintaxe_basica()
+                else: full_code = gerar_funcao_simples()
+                
+            elif level >= 3:
+                # FASE 3: Mistura Total
+                if r < 0.1: full_code = gerar_sintaxe_basica()
+                elif r < 0.5: full_code = gerar_funcao_simples()
+                else: full_code = gerar_funcao_condicional()
             
             tokens = full_code.split()
-            if len(tokens) > 4:
-                split_point = random.randint(3, len(tokens) - 1)
+            if len(tokens) > 3:
+                split_point = random.randint(2, len(tokens) - 1)
                 inp = " ".join(tokens[:split_point])
                 out = " ".join(tokens[split_point:])
                 data.append((inp, out + " ENDMARKER"))
