@@ -1,6 +1,7 @@
+# doxoade/neural/logic.py
 """
-Neuro-Symbolic Logic Monitor v11.1 (The Dictator).
-Força 'return' imediatamente após a definição da função.
+Neuro-Symbolic Logic Monitor v12.0 (The Firewall).
+Bloqueio total de sintaxe inválida em expressões matemáticas.
 """
 
 class ArquitetoLogico:
@@ -34,7 +35,8 @@ class ArquitetoLogico:
             self.pilha_parenteses -= 1
             if self.pilha_parenteses == 0: self.estado = "TRANSICAO" 
         elif token == ":": 
-            self.estado = "CORPO"
+            if self.estado == "TRANSICAO" or self.estado == "ARGS": self.estado = "CORPO"
+            else: self.estado = "CORPO"
         elif token == "return": 
             self.estado = "RETORNO"
             self.complexidade_expressao = 0
@@ -50,13 +52,7 @@ class ArquitetoLogico:
             self.complexidade_expressao += 1
 
     def validar(self, token):
-        # 1. REGRA DO DITADOR (CORPO)
-        # Após ':', só aceitamos 'return'. Nada de variáveis soltas.
-        if self.estado == "CORPO":
-            if token != "return": return False, "Esperando 'return'"
-            return True, "OK"
-
-        # 2. Whitelist Básica
+        # 1. WHITELIST BÁSICA
         eh_conhecido = (
             token in self.keywords or token in self.operadores or
             token in self.pontuacao or token in self.especiais or 
@@ -67,50 +63,55 @@ class ArquitetoLogico:
 
         if not eh_conhecido: return False, f"Token desconhecido: '{token}'"
 
-        # 3. Regras de Estado
+        # 2. REGRAS ESTRUTURAIS RÍGIDAS
         if self.estado == "ARGS_PRE" and token != "(": return False, "Esperando '('"
         if self.estado == "TRANSICAO" and token != ":": return False, "Esperando ':'"
-        if token == ":" and self.estado != "TRANSICAO": return False, "Dois pontos fora de lugar"
-        if self.estado == "ARGS" and token in self.keywords: return False, "Keyword em args"
-
-        # 4. Regras do Retorno
-        if self.estado == "RETORNO":
-            if token == "=": return False, "Atribuição no return"
-            if token in ["def", "return", "class", "import"]: return False, "Comando ilegal"
-            
-            # Anti-Alucinação Estrita
-            is_alpha = token.isalnum() and not token.isdigit()
-            if is_alpha and token not in self.memoria_variaveis and token not in ["if", "else", "and", "or"]:
-                return False, f"Alucinação: '{token}' não existe"
-
-        # 5. Adjacência
-        last_val = (self.ultimo_token.isalnum() and self.ultimo_token not in self.keywords)
-        curr_val = (token.isalnum() and token not in self.keywords)
         
-        if (self.estado == "ARGS" or self.estado in ["RETORNO"]) and last_val and curr_val:
-             if token not in ["if", "else"]:
-                 return False, "Valores adjacentes"
+        # 3. REGRAS DO CORPO/RETORNO (Onde estava falhando)
+        if self.estado == "RETORNO":
+            # Não pode fechar parenteses se não abriu (evita 'return )')
+            if token == ")" and self.pilha_parenteses <= 0: return False, "Fecha parenteses sem abrir"
+            
+            # Não pode começar expressão com operador ou pontuação (exceto '(')
+            if self.ultimo_token == "return":
+                if token in self.operadores or token in [")", ":", ","]:
+                    return False, "Operador/Pontuação após return"
+            
+            # Não pode ter dois operadores seguidos (evita '+ /')
+            if self.ultimo_token in self.operadores and token in self.operadores:
+                return False, "Operadores adjacentes"
+
+            # Não pode ter variável seguida de variável (evita 'a b')
+            if (self.ultimo_token in self.memoria_variaveis or self.ultimo_token.isdigit()) and \
+               (token in self.memoria_variaveis or token.isdigit()):
+                return False, "Variáveis adjacentes"
+
+        # 4. Regras Gerais
+        if token == ":" and self.estado != "TRANSICAO" and self.estado != "CORPO": return False, "Dois pontos perdido"
+        if self.estado == "ARGS" and token in self.keywords: return False, "Keyword em args"
 
         return True, "OK"
 
     def sugerir_correcao(self):
         if self.estado == "ARGS_PRE": return "("
         if self.estado == "TRANSICAO": return ":"
-        
-        # AQUI: Se estiver no corpo, force o return
         if self.estado == "CORPO": return "return"
-        
         if self.pilha_parenteses > 0 and self.ultimo_token not in [",", "("]: return ")"
         
         if self.estado == "RETORNO":
-            if self.variaveis_pendentes:
-                if self.ultimo_token in self.operadores:
-                    return list(self.variaveis_pendentes)[0]
-                if self.ultimo_token == "return":
-                    return list(self.variaveis_pendentes)[0]
-                return "+"
-            elif self.complexidade_expressao >= 1:
-                if self.ultimo_token not in self.operadores:
-                    return "ENDMARKER"
+            # Se acabou de dar return, PRECISA de uma variável
+            if self.ultimo_token == "return":
+                 if self.memoria_variaveis: return list(self.memoria_variaveis)[0]
+            
+            # Se acabou de dar operador, PRECISA de uma variável
+            if self.ultimo_token in self.operadores:
+                 # Pega uma pendente ou a primeira
+                 if self.variaveis_pendentes: return list(self.variaveis_pendentes)[0]
+                 if self.memoria_variaveis: return list(self.memoria_variaveis)[0]
+            
+            # Se acabou de dar variável, PRECISA de operador ou FIM
+            if self.ultimo_token in self.memoria_variaveis:
+                 if self.variaveis_pendentes: return "+" # Operador padrão
+                 return "ENDMARKER"
                 
         return None
