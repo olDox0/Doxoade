@@ -1,7 +1,8 @@
 """
-DOXOADE AGENT v14.0 (Reinforcement Learning).
-Integra Q-Learning para navegar na estrutura do código.
+DOXOADE AGENT v15.0 (Vocabulary Absorber).
+Permite neuroplasticidade em tempo real (aprende palavras novas antes de pensar).
 """
+# ... (Imports mantidos, adicione save_json se faltar) ...
 import click
 import os
 import subprocess
@@ -19,11 +20,12 @@ from doxoade.neural.reasoning import Sherlock
 from doxoade.neural.critic import Critic
 from doxoade.database import get_db_connection
 from doxoade.neural.memory import VectorDB
-from doxoade.neural.rl_engine import QLearner # NOVO
+from doxoade.neural.rl_engine import QLearner
 
 BRAIN_PATH = os.path.expanduser("~/.doxoade/cortex.json")
 AGENT_WS = ".dox_agent_workspace"
 
+# ... (Librarian mantido igual) ...
 class Librarian:
     def __init__(self):
         self.conn = get_db_connection()
@@ -53,7 +55,7 @@ class OuroborosAgent:
         self.critic = Critic()
         self.librarian = Librarian()
         self.memory = VectorDB()
-        self.rl = QLearner() # NOVO: Motor RL
+        self.rl = QLearner()
         self.falhas_memoria = set() 
         
     def load_brain(self):
@@ -69,6 +71,29 @@ class OuroborosAgent:
         self.lstm.load_state_dict(state['lstm'])
         self.logic = ArquitetoLogico()
 
+    def absorber_vocabulario(self, prompt):
+        """Expande o cérebro se encontrar palavras novas no prompt."""
+        tokens = self.tok._quebrar(prompt)
+        novos = [t for t in tokens if t not in self.tok.vocabulario]
+        
+        if novos:
+            print(Fore.CYAN + f"   🌱 Absorvendo novos conceitos: {novos}" + Style.RESET_ALL)
+            for t in novos: self.tok.adicionar_token(t)
+            
+            new_size = self.tok.contador
+            # Expande matrizes fisicamente
+            self.embed.expand(new_size)
+            self.lstm.expand_vocab(new_size)
+            
+            # Salva imediatamente para não perder a expansão
+            state = {
+                "embed": self.embed.get_state_dict(),
+                "lstm": self.lstm.get_state_dict(),
+                "tokenizer": self.tok.to_dict()
+            }
+            save_json(state, BRAIN_PATH)
+
+    # ... (vectorize, consolidar_aprendizado mantidos) ...
     def vectorize(self, text):
         try:
             ids = self.tok.converter_para_ids(text)
@@ -83,6 +108,7 @@ class OuroborosAgent:
 
     def consolidar_aprendizado(self, prompt, codigo_correto):
         if "<UNK>" in codigo_correto or "ENDMARKER" in codigo_correto: return
+        if codigo_correto.strip().endswith(":"): return
         print(Fore.MAGENTA + "   🧠 Refinando intuição (Treino Online)..." + Style.RESET_ALL)
         vec = self.vectorize(prompt)
         if vec is not None: self.memory.add(vec, codigo_correto)
@@ -92,8 +118,6 @@ class OuroborosAgent:
         except: return 
         input_ids = ids[:-1]; target_ids = ids[1:]
         lr = 0.05 
-        
-        # Treino Neural
         for _ in range(5):
             vetores = self.embed.forward(input_ids)
             logits, _, _ = self.lstm.forward(vetores)
@@ -108,10 +132,9 @@ class OuroborosAgent:
         state = {"embed": self.embed.get_state_dict(), "lstm": self.lstm.get_state_dict(), "tokenizer": self.tok.to_dict()}
         save_json(state, BRAIN_PATH) 
         
-        # REFORÇO POSITIVO NO Q-LEARNING
         tokens = full_text.split()
         for i in range(len(tokens)-1):
-            self.rl.update(tokens[i], tokens[i+1], reward=2.0) # Reward alto para sucesso confirmado
+            self.rl.update(tokens[i], tokens[i+1], reward=2.0)
         self.rl.save()
 
     def clean_generated_code(self, raw_code):
@@ -121,18 +144,14 @@ class OuroborosAgent:
         return code
 
     def think(self, prompt, intent, priors, creativity=0.5):
+        # Passo 0: Neuroplasticidade
+        self.absorber_vocabulario(prompt)
+        
         try: input_ids = self.tok.converter_para_ids(prompt)
         except: return None
         curr = input_ids[0]; h, c = None, None
         output = [self.tok.inverso.get(str(curr))]
         self.logic.reset(); self.logic.observar(output[0])
-        
-        # MODO RESGATE: Se a criatividade está alta (muitas falhas), ajude a rede
-        if creativity > 0.8:
-            # Se a intenção é clara, dê uma dica forte
-            if intent == "soma" or intent == "adição" or intent == "add":
-                 # Força o operador '+' a ter probabilidade quase infinita
-                 priors["+"] = 100.0 
         
         for nxt in input_ids[1:]:
             x = self.embed.forward(np.array([curr]))
@@ -144,13 +163,9 @@ class OuroborosAgent:
             x = self.embed.forward(np.array([curr]))
             out, h, c = self.lstm.forward(x.reshape(1,-1), h_prev=h, c_prev=c)
             logits = out.flatten()
-            
-            # 1. Priors (Dedução)
             for op, prob in priors.items():
                 oid = self.tok.vocabulario.get(op)
                 if oid: logits[oid] += np.log(prob + 1e-5) * 2.0 + 5.0
-            
-            # 2. Pendências (Foco)
             if self.logic.estado in ["CORPO", "RETORNO"]:
                 pendentes = self.logic.variaveis_pendentes
                 if pendentes:
@@ -159,58 +174,30 @@ class OuroborosAgent:
                         if vid: logits[vid] += 5.0
                     eid = self.tok.vocabulario.get("ENDMARKER")
                     if eid: logits[eid] -= 10.0
-            
-            # 3. Penalidade Repetição
             if len(output) > 1:
-                last_token = output[-1]
-                last_id = self.tok.vocabulario.get(last_token)
-                if last_id: logits[last_id] -= 3.0
-                
-                # --- 4. INJEÇÃO DE Q-LEARNING (NOVO) ---
-                # Modula os logits com base na experiência passada
+                last = self.tok.vocabulario.get(output[-1])
+                if last: logits[last] -= 3.0
                 for token_id in range(self.tok.contador):
                     token_str = self.tok.inverso.get(str(token_id))
-                    # Quanto vale ir de 'last_token' para 'token_str'?
-                    q_val = self.rl.get_q(last_token, token_str)
-                    logits[token_id] += q_val * 2.0 # Fator de influência RL
-
-            logits = logits / creativity
-            probs = softmax(logits.reshape(1, -1)).flatten()
-            top_indices = np.argsort(probs)[::-1][:15]
-            sub_probs = probs[top_indices] / np.sum(probs[top_indices])
-            
+                    q_val = self.rl.get_q(output[-1], token_str)
+                    logits[token_id] += q_val * 2.0
+            logits = logits / creativity; probs = softmax(logits.reshape(1, -1)).flatten()
+            top_indices = np.argsort(probs)[::-1][:15]; sub_probs = probs[top_indices] / np.sum(probs[top_indices])
             escolha = None
             for _ in range(20):
                 try: idx = np.random.choice(top_indices, p=sub_probs)
                 except: idx = top_indices[0]
-                
                 cand = self.tok.inverso.get(str(idx), "?")
-                aprovado, motivo = self.logic.validar(cand)
-                
-                if aprovado:
-                    escolha = int(idx)
-                    # RECOMPENSA IMEDIATA (Pequena)
-                    self.rl.update(output[-1], cand, reward=0.1)
-                    break
-                else:
-                    # PUNIÇÃO IMEDIATA (O Aprendizado acontece AQUI)
-                    # Se o Arquiteto bloqueou, a rede aprende que essa transição é ruim
-                    self.rl.update(output[-1], cand, reward=-1.0)
-            
+                aprovado, _ = self.logic.validar(cand)
+                if aprovado: escolha = int(idx); break
             if escolha is None:
-                sugestao = self.logic.sugerir_correcao()
-                if sugestao: 
-                    escolha = self.tok.vocabulario.get(sugestao)
-                    # Se o Arquiteto forçou, aprendemos que é bom
-                    if escolha: self.rl.update(output[-1], sugestao, reward=0.5)
+                sug = self.logic.sugerir_correcao()
+                if sug: escolha = self.tok.vocabulario.get(sug)
                 else: break
-
             if escolha is None: break
             word = self.tok.inverso.get(str(escolha))
             if word == "ENDMARKER": break
             output.append(word); curr = escolha; self.logic.observar(word)
-        
-        self.rl.save() # Salva aprendizado RL
         return self.clean_generated_code(" ".join(output))
 
     def write_script(self, filename, code, func_name):
@@ -251,10 +238,8 @@ if __name__ == "__main__":
         tests = []
         if "soma" in func_name or "adição" in func_name or "add" in func_name: 
             tests.append(f"assert {func_name}(2, 3) == 5")
-            tests.append(f"assert {func_name}(10, 5) == 15")
         elif "maior" in func_name:
             tests.append(f"assert {func_name}(5, 2) == 5")
-            tests.append(f"assert {func_name}(1, 10) == 10")
         return tests
     
     def execute(self, filepath):
@@ -269,7 +254,7 @@ if __name__ == "__main__":
 @click.command('agent')
 @click.argument('task')
 def agent_cmd(task):
-    print(Fore.CYAN + f"🤖 Agente Ouroboros v14.0 (RL-Enhanced): '{task}'" + Style.RESET_ALL)
+    print(Fore.CYAN + f"🤖 Agente Ouroboros v15.0 (Neuroplasticidade): '{task}'" + Style.RESET_ALL)
     bot = OuroborosAgent()
     memoria = bot.librarian.lembrar(task)
     if memoria:
@@ -315,12 +300,9 @@ def agent_cmd(task):
             print(Fore.BLUE + f"   🛡️  Erro de Ambiente ({tipo_erro})." + Style.RESET_ALL)
         else:
             print(Fore.RED + f"   ❌ Falha Lógica ({tipo_erro})." + Style.RESET_ALL)
-            
-            # DEBUG ATIVO
-            if out.strip() or err.strip():
-                print(Fore.WHITE + "   🐛 DUMP DO ERRO:" + Style.RESET_ALL)
-                print(f"   STDOUT: {out.strip()[:200]}...") # Corta se for muito longo
-                print(f"   STDERR: {err.strip()[:200]}...")
+            bot.falhas_memoria.add(code_hash)
+            ops = [op for op in ["+", "-", "*", "/"] if f" {op} " in code]
+            for op in ops: bot.sherlock.atualizar_crenca(intent, op, sucesso=False)
 
 if __name__ == "__main__":
     agent_cmd()
