@@ -1,40 +1,22 @@
 """
-DOXONET CORE v14.2 (Tensor Alignment).
-Correção de desempacotamento de cache para backpropagation da DoxoAct.
+DOXONET CORE v15.0 (Elastic Neuroplasticity).
+Permite que o cérebro cresça fisicamente (novos pesos) em tempo de execução.
 """
 import numpy as np
 import re
 import json
 import os
 
-# --- UTILITÁRIOS MATEMÁTICOS ---
-def sigmoid(x):
-    return 1.0 / (1.0 + np.exp(-np.clip(x, -60.0, 60.0)))
-
-def dsigmoid(y):
-    return y * (1.0 - y)
-
-def dtanh(y):
-    return 1.0 - y * y
-
+# --- UTILITÁRIOS ---
+def sigmoid(x): return 1.0 / (1.0 + np.exp(-np.clip(x, -60.0, 60.0)))
+def dsigmoid(y): return y * (1.0 - y)
+def dtanh(y): return 1.0 - y * y
 def softmax(x):
-    x_safe = np.nan_to_num(x)
-    x_safe = np.clip(x_safe, -60, 60)
+    x_safe = np.nan_to_num(x); x_safe = np.clip(x_safe, -60, 60)
     e_x = np.exp(x_safe - np.max(x_safe, axis=1, keepdims=True))
     return e_x / (e_x.sum(axis=1, keepdims=True) + 1e-8)
-
-# --- DOXO MATHEMATICS ---
-def doxo_act(x):
-    s = sigmoid(x)
-    return (x * s) + (0.1 * np.sin(x))
-
-def d_doxo_act(x, y=None):
-    s = sigmoid(x)
-    d_swish = s + (x * s * (1.0 - s))
-    d_sin = 0.1 * np.cos(x)
-    return d_swish + d_sin
-
-# --- SERIALIZAÇÃO ---
+def doxo_act(x): s = sigmoid(x); return (x * s) + (0.1 * np.sin(x))
+def d_doxo_act(x, y=None): s = sigmoid(x); return s + (x * s * (1.0 - s)) + (0.1 * np.cos(x))
 def save_json(data, fp):
     with open(fp, 'w', encoding='utf-8') as f: json.dump(data, f, indent=None)
 def load_json(fp):
@@ -71,51 +53,36 @@ class CamadaEmbedding:
         self.E = np.random.randn(V, D).astype(np.float32) * 0.1
         self.grad_buffer = np.zeros_like(self.E); self.m = np.zeros_like(self.E); self.v = np.zeros_like(self.E); self.t = 0
         self.ultimo_input = None
-        
-    def init_symbolic(self, tokenizer):
-        print("   🧬 Injetando DNA Simbólico...")
-        keywords = ["def", "return", "if", "else", "elif", "pass", "ENDMARKER"]
-        ops = ["+", "-", "*", "/", "%", "==", "!=", ">", "<", "="]
-        pont = ["(", ")", ":", ","]
-        for token, idx in tokenizer.vocabulario.items():
-            if idx >= self.E.shape[0]: continue
-            vec = self.E[idx]
-            if token in keywords: vec[0] = 1.0
-            elif token in ops: vec[1] = 1.0
-            elif token in pont: vec[2] = 1.0
-            elif token.isalnum(): vec[3] = 1.0
-            self.E[idx] = vec
 
-    def forward(self, ids):
-        self.ultimo_input = ids
-        return self.E[ids]
-    def accumulate_grad(self, dY):
+    def expand(self, new_V):
+        """Cresce a matriz de embeddings para acomodar novas palavras."""
+        if new_V <= self.V: return
+        added = new_V - self.V
+        # Novos pesos iniciados com ruído pequeno
+        new_E = np.random.randn(added, self.D).astype(np.float32) * 0.1
+        self.E = np.vstack((self.E, new_E))
+        # Expande buffers do otimizador com zeros
+        zeros = np.zeros((added, self.D), dtype=np.float32)
+        self.grad_buffer = np.vstack((self.grad_buffer, zeros))
+        self.m = np.vstack((self.m, zeros))
+        self.v = np.vstack((self.v, zeros))
+        self.V = new_V
+
+    def forward(self, ids): self.ultimo_input = ids; return self.E[ids]
+    def accumulate_grad(self, dY): 
         dY = np.nan_to_num(dY)
         np.add.at(self.grad_buffer, self.ultimo_input, dY)
     def apply_update(self, lr, batch_size=1):
-        self.t += 1
-        self.m = 0.9 * self.m + 0.1 * self.grad_buffer
+        self.t += 1; self.m = 0.9 * self.m + 0.1 * self.grad_buffer
         self.v = 0.999 * self.v + 0.001 * (self.grad_buffer ** 2)
         m_hat = self.m / (1 - 0.9**self.t); v_hat = self.v / (1 - 0.999**self.t)
-        self.E -= lr * m_hat / (np.sqrt(v_hat) + 1e-7)
-        self.grad_buffer.fill(0)
-    
+        self.E -= lr * m_hat / (np.sqrt(v_hat) + 1e-7); self.grad_buffer.fill(0)
     def get_state_dict(self): return {'E': [quantize(self.E)[0], quantize(self.E)[1]]}
-    
     def load_state_dict(self, s):
-        # Carregamento Elástico
-        if 'E' in s: loaded_E = dequantize(s['E'][0], s['E'][1])
-        elif 'q_E' in s: loaded_E = dequantize(s['q_E'], s['s_E'])
-        else: return
-
-        if self.E.shape[0] >= loaded_E.shape[0]:
-            rows = loaded_E.shape[0]
-            self.E[:rows] = loaded_E
-            print(f"   🌱 Embedding Expandido/Preservado ({rows} -> {self.E.shape[0]} tokens)")
-        else:
-            self.E = loaded_E[:self.E.shape[0]]
-
+        if 'E' in s: self.E = dequantize(s['E'][0], s['E'][1])
+        elif 'q_E' in s: self.E = dequantize(s['q_E'], s['s_E'])
         self.m = np.zeros_like(self.E); self.v = np.zeros_like(self.E); self.t = 0
+        self.V = self.E.shape[0]
 
 class LSTM:
     def __init__(self, I, H, O):
@@ -134,13 +101,29 @@ class LSTM:
         self.adam_v = {k: np.zeros_like(v) for k, v in self.params.items()}
         self.t = 0
 
+    def expand_vocab(self, new_O):
+        """Expande a camada de saída (Wy, by) para o novo tamanho do vocabulário."""
+        if new_O <= self.O: return
+        added = new_O - self.O
+        std = np.float32(1.0 / np.sqrt(self.H))
+        
+        # Expande Wy (colunas)
+        new_Wy = np.random.uniform(-std, std, (self.H, added)).astype(np.float32)
+        self.params['Wy'] = np.hstack((self.params['Wy'], new_Wy))
+        
+        # Expande by (colunas)
+        new_by = np.zeros((1, added), dtype=np.float32)
+        self.params['by'] = np.hstack((self.params['by'], new_by))
+        
+        self.O = new_O
+        self.reset_grads() # Reseta otimizador para garantir estabilidade (Trade-off)
+
     def prune(self, threshold_percentile=10):
         total, zeros = 0, 0
         for k in ['Wf', 'Wi', 'Wc', 'Wo', 'Wy']:
             w = self.params[k]
             mask = np.abs(w) > np.percentile(np.abs(w), threshold_percentile)
-            w *= mask.astype(np.float32)
-            self.adam_m[k] *= mask.astype(np.float32); self.adam_v[k] *= mask.astype(np.float32)
+            w *= mask.astype(np.float32); self.adam_m[k] *= mask.astype(np.float32); self.adam_v[k] *= mask.astype(np.float32)
             total += w.size; zeros += (w.size - np.sum(mask))
         return (zeros/total)*100
 
@@ -157,9 +140,7 @@ class LSTM:
             c_bar = np.tanh(np.dot(concat, Wc) + bc); o = sigmoid(np.dot(concat, Wo) + bo)
             c = f * c + i * c_bar; tanh_c = doxo_act(c); h = o * tanh_c
             y = np.dot(h, Wy) + by
-            # Cache sem c_prev redundante, mas precisamos dele para backprop
-            self.cache.append((concat, f, i, c_bar, c, tanh_c, o, h))
-            outputs.append(y)
+            self.cache.append((concat, f, i, c_bar, c, tanh_c, o, h)); outputs.append(y)
         return np.array(outputs), h, c
 
     def accumulate_grad(self, dY):
@@ -170,24 +151,13 @@ class LSTM:
         
         for t in reversed(range(inputs_len)):
             dy = dY[t].reshape(1, -1)
-            # CORREÇÃO: Unpack completo
             concat, f, i, c_bar, c_curr, h_act_curr, o, h_curr = self.cache[t]
+            c_prev = self.cache[t-1][4] if t > 0 else np.zeros_like(c_curr)
             
-            # Recupera c_prev do passo anterior (ou do init se t=0)
-            if t > 0:
-                # O índice 4 da tupla é 'c'
-                c_prev = self.cache[t-1][4]
-            else:
-                # Se não tem anterior, assume zero ou estado inicial
-                c_prev = np.zeros_like(c_curr)
-
             self.grads['Wy'] += np.dot(h_curr.T, dy); self.grads['by'] += dy
             dh = np.dot(dy, Wy.T) + dh_next
             do = dh * h_act_curr; do_raw = dsigmoid(o) * do
-            
-            # Gradiente da DoxoAct
             dc = dc_next + (dh * o * d_doxo_act(c_curr))
-            
             dc_bar = dc * i; dc_bar_raw = dtanh(c_bar) * dc_bar
             di = dc * c_bar; di_raw = dsigmoid(i) * di
             df = dc * c_prev; df_raw = dsigmoid(f) * df
@@ -211,30 +181,22 @@ class LSTM:
             g = self.grads[k] * scale
             self.adam_m[k] = 0.9 * self.adam_m[k] + 0.1 * g
             self.adam_v[k] = 0.999 * self.adam_v[k] + 0.001 * (g**2)
-            m_hat = self.adam_m[k] / (1 - 0.9**self.t)
-            v_hat = self.adam_v[k] / (1 - 0.999**self.t)
+            m_hat = self.adam_m[k] / (1 - 0.9**self.t); v_hat = self.adam_v[k] / (1 - 0.999**self.t)
             self.params[k] -= lr * m_hat / (np.sqrt(v_hat) + 1e-7)
             self.grads[k].fill(0)
 
-    def get_state_dict(self):
-        return {k: quantize(v) for k, v in self.params.items()}
-
+    def get_state_dict(self): return {k: quantize(v) for k, v in self.params.items()}
     def load_state_dict(self, state):
         for k in self.params:
             if k in state:
-                val = state[k]
-                loaded_param = dequantize(val[0], val[1])
+                val = state[k]; loaded_param = dequantize(val[0], val[1])
                 # Carregamento Elástico
                 if k in ['Wy', 'by']:
-                    current_shape = self.params[k].shape
-                    loaded_shape = loaded_param.shape
-                    if current_shape != loaded_shape:
-                        cols = min(current_shape[1], loaded_shape[1])
-                        if len(current_shape) > 1: self.params[k][:, :cols] = loaded_param[:, :cols]
+                    curr_sh = self.params[k].shape; load_sh = loaded_param.shape
+                    if curr_sh != load_sh:
+                        cols = min(curr_sh[1], load_sh[1])
+                        if len(curr_sh) > 1: self.params[k][:, :cols] = loaded_param[:, :cols]
                         else: self.params[k][:cols] = loaded_param[:cols]
-                        print(f"   🌱 {k} Adaptado: {loaded_shape[1]} -> {current_shape[1]}")
                         continue
                 self.params[k] = loaded_param
-            elif f'q_{k}' in state:
-                self.params[k] = dequantize(state[f'q_{k}'], state[f's_{k}'])
         self.reset_grads()
