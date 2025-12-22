@@ -4,30 +4,26 @@ from pathlib import Path
 import click
 
 DB_FILE = Path.home() / '.doxoade' / 'doxoade.db'
-DB_VERSION = 15  # Incrementado para forçar re-verificação
+DB_VERSION = 18  # Incremento para MaxTelemetry v2
 
 def get_db_connection():
-    """Cria o diretório se necessário e retorna uma conexão com o banco de dados."""
     DB_FILE.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
 def init_db():
-    """Cria e/ou migra o esquema do banco de dados para a versão mais recente."""
     conn = get_db_connection()
     cursor = conn.cursor()
     
     try:
         cursor.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);")
-        
         cursor.execute("SELECT COUNT(*) FROM schema_version")
         if cursor.fetchone()[0] == 0:
             cursor.execute("INSERT INTO schema_version (version) VALUES (0);")
 
         cursor.execute("SELECT version FROM schema_version;")
-        current_version_row = cursor.fetchone()
-        current_version = current_version_row['version'] if current_version_row else 0
+        current_version = cursor.fetchone()['version']
 
         if current_version >= DB_VERSION:
             return
@@ -217,6 +213,32 @@ def init_db():
             # Índices para performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_cmd_hist_ts ON command_history(timestamp);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_audit_path ON file_audit(file_path);")
+
+        # Migração v16 (MaxTelemetry)
+        if current_version < 16:
+            click.echo("Atualizando esquema v16 (MaxTelemetry: CPU, RAM, Profiling)...")
+            try:
+                cursor.execute("ALTER TABLE command_history ADD COLUMN cpu_percent REAL DEFAULT 0;")
+                cursor.execute("ALTER TABLE command_history ADD COLUMN peak_memory_mb REAL DEFAULT 0;")
+                cursor.execute("ALTER TABLE command_history ADD COLUMN io_read_mb REAL DEFAULT 0;")
+                cursor.execute("ALTER TABLE command_history ADD COLUMN io_write_mb REAL DEFAULT 0;")
+                cursor.execute("ALTER TABLE command_history ADD COLUMN profile_data TEXT;") # JSON com top funções
+            except sqlite3.OperationalError:
+                pass # Colunas já existem
+
+        # Migração v17 (Deep Context)
+        if current_version < 17:
+            click.echo("Atualizando esquema v17 (Contexto de Hardware)...")
+            try:
+                cursor.execute("ALTER TABLE command_history ADD COLUMN system_info TEXT;")
+            except sqlite3.OperationalError: pass
+
+        # Migração v18 (Line Profiling) - YMD2025,12,22
+        if current_version < 18:
+            click.echo("Atualizando esquema v18 (Heatmap de Linhas de Código)...")
+            try:
+                cursor.execute("ALTER TABLE command_history ADD COLUMN line_profile_data TEXT;")
+            except sqlite3.OperationalError: pass
 
         cursor.execute("UPDATE schema_version SET version = ?;", (DB_VERSION,))
         conn.commit()

@@ -1,6 +1,6 @@
 """
-NEURAL PROFILER v2.0 (Deep Scan).
-Gera relatórios detalhados de performance com visualização de gargalos.
+NEURAL PROFILER v2.1 (Safe Mode).
+Tratamento de exceção para conflitos de profiling e relatórios detalhados.
 """
 import cProfile
 import pstats
@@ -16,7 +16,12 @@ class NeuralProfiler:
 
     def __enter__(self):
         if self.enabled:
-            self.pr.enable()
+            try:
+                self.pr.enable()
+            except ValueError:
+                # Se já existe um profiler rodando (ex: IDE ou wrapper), não quebra.
+                print(Fore.YELLOW + "   ⚠️ [CRONOS] Profiler global já ativo. Ignorando perfilamento local." + Style.RESET_ALL)
+                self.enabled = False 
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -26,23 +31,14 @@ class NeuralProfiler:
 
     def _gerar_relatorio_detalhado(self):
         s = io.StringIO()
-        # Ordena por tempo cumulativo para ver o fluxo
         ps = pstats.Stats(self.pr, stream=s).sort_stats(SortKey.CUMULATIVE)
         
         print(Fore.CYAN + "\n" + "="*60)
         print(f"📊 RELATÓRIO DE PERFORMANCE (CRONOS v2.0)")
         print("="*60 + Style.RESET_ALL)
         
-        # Pega os dados brutos
-        ps.print_stats(20) # Top 20 funções
-        
-        # Parse manual para criar tabela bonita
-        print(f"\n{Fore.YELLOW}{'CHAMADAS':<10} | {'TOTAL (s)':<10} | {'POR CHAMADA':<12} | {'FUNÇÃO'}{Style.RESET_ALL}")
-        print("-" * 80)
-        
-        # Uma heurística para pegar as estatísticas internas
-        # (O pstats não facilita acesso direto aos dados, então filtramos a string ou usamos func_list)
-        # Vamos focar na análise heurística que é mais útil:
+        # Top 20 funções
+        ps.print_stats(20)
         
         total_calls = ps.total_calls
         total_time = ps.total_tt
@@ -53,27 +49,23 @@ class NeuralProfiler:
         print(Fore.CYAN + "\n🔍 DIAGNÓSTICO DE GARGALOS:" + Style.RESET_ALL)
         
         output = s.getvalue()
-        
-        # Detectores de Padrão
         gargalos = []
         
+        # Detecção de Math Lookup (Novo na v16)
+        if "fast_exp" in output:
+             gargalos.append((Fore.GREEN + "[OTIMIZADO] Math Lookup", "Tabela de exponenciais está sendo usada."))
+
         if "dot" in output or "matmul" in output:
-            gargalos.append((Fore.RED + "[CRÍTICO] Álgebra Linear", "O processador está saturado com multiplicações de matrizes. (Normal para IA)"))
+            gargalos.append((Fore.RED + "[CRÍTICO] Álgebra Linear", "CPU saturada com multiplicação de matrizes."))
         
         if "method 'reduce' of 'numpy.ufunc'" in output:
             gargalos.append((Fore.YELLOW + "[ALTO] Reduções NumPy", "Muitas operações de soma/max (Softmax/Loss)."))
             
         if "built-in method io.open" in output:
              gargalos.append((Fore.MAGENTA + "[I/O] Acesso a Disco", "Leitura/Escrita de arquivos lenta."))
-             
-        if "method 'append' of 'list'" in output:
-             gargalos.append((Fore.YELLOW + "[MÉDIO] Listas Python", "Uso excessivo de listas dinâmicas. Tente pré-alocar com NumPy."))
-
-        if "get_state" in output or "quantize" in output:
-             gargalos.append((Fore.BLUE + "[INFO] Overhead de Compressão", "A quantização 8-bit está consumindo tempo."))
 
         if not gargalos:
-            print("   ✅ Nenhum gargalo óbvio detectado (Distribuição equilibrada).")
+            print("   ✅ Distribuição equilibrada (ou o treino foi muito rápido).")
         else:
             for titulo, desc in gargalos:
                 print(f"   {titulo}: {desc}")

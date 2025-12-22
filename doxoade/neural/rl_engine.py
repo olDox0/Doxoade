@@ -41,7 +41,7 @@ class QLearner:
             try:
                 with open(Q_PATH, 'r', encoding='utf-8') as f:
                     self.q_table = json.load(f)
-            except: pass
+            except Exception: pass
             
     def get_boost(self, prev_token, candidate_token):
         """Retorna um boost para os logits baseado no Q-Value."""

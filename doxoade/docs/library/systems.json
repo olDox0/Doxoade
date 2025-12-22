@@ -34,5 +34,10 @@
     "title": "Comando Search: Busca Inteligente",
     "date": "2025-12-07",
     "content": "Busca inteligente no código do projeto com cache persistente.\n\n**Modos:**\n- `--function` / `-f`: Busca funções por nome ou docstring\n- `--code` / `-c`: Busca texto no código fonte\n- `--comment`: Busca em comentários\n- `--commits`: Busca em mensagens de commit (Git)\n- `--callers`: Mostra quem chama a função\n- `--stats`: Estatísticas de uso da função\n- `--fuzzy`: Ativa correção de typos\n- `--no-cache`: Força re-indexação\n\n**Recursos:**\n- Cache persistente (23x mais rápido)\n- Indexação AST completa\n- Fuzzy matching para typos\n- Normalização automática de termos\n- Grafo de dependências (call graph)\n- Sugestões inteligentes\n- Integração com Git\n\n**Exemplos:**\n```bash\n# Busca funções\ndoxoade search \"logger\" --function\n\n# Estatísticas de uso\ndoxoade search \"_run_git_command\" --stats\n\n# Busca em commits\ndoxoade search \"postmortems\" --commits\n\n# Call graph\ndoxoade search \"_log_execution\" --callers\n\n# Busca com typo\ndoxoade search \"excution\" --fuzzy\n\n# Busca no código\ndoxoade search \"subprocess.run\" --code\n\n# Comentários\ndoxoade search \"TODO\" --comment\n```"
+  },
+  "qa_integrated": {
+    "title": "Suite de QA Integrada (Cânone)",
+    "files": ["doxoade/commands/canonize.py", "doxoade/commands/regression_test.py", "doxoade/commands/test_mapper.py"],
+    "description": "O tripe de garantia de qualidade:\n1. Mapper: Garante que todo arquivo .py tenha um test_*.py correspondente.\n2. Canonize: Tira uma 'foto' do estado atual (Static + Runtime).\n3. Regression: Compara o agora com a foto. Suporta 'Regressão Relativa' para tolerância a falhas legadas."
   }
 }

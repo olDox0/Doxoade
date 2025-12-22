@@ -130,12 +130,20 @@ class IntegrityChecker(ast.NodeVisitor):
         if isinstance(node.func, ast.Name):
             func_name = node.func.id
         
-        if func_name and func_name in self.imports_map:
+        if not func_name: return
+
+        def_info = None
+        
+        # 1. Tenta resolver via Imports (Módulos externos indexados)
+        if func_name in self.imports_map:
             def_info = self.imports_map[func_name]
+        # 2. Tenta resolver localmente (No mesmo arquivo)
+        elif self.current_file in self.index and func_name in self.index[self.current_file]['defs']:
+            def_info = self.index[self.current_file]['defs'][func_name]
             
+        if def_info:
             if def_info.get('type') == 'function':
                 if def_info.get('is_click'):
-                    # Pula validação de click, mas continua visitando filhos!
                     self.generic_visit(node)
                     return
 
@@ -161,8 +169,7 @@ class IntegrityChecker(ast.NodeVisitor):
                             'file': self.current_file
                         })
         
-        # IMPORTANTE: Continua visitando os argumentos da chamada!
-        # Sem isso, chamadas aninhadas (ex: print(soma())) são ignoradas.
+        # Continua visitando os argumentos
         self.generic_visit(node)
 
 if __name__ == "__main__":

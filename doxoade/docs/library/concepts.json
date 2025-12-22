@@ -43,5 +43,20 @@
     "title": "Comando Risk: Gestão de Estabilidade",
     "date": "2025-12-06",
     "content": "Analisa a estabilidade operacional (falhas recentes) e a dívida técnica real (ignorando testes) para gerar um Score de Risco. Ajuda a decidir se é hora de criar features ou corrigir bugs."
+  },
+  "neuro_symbolic": {
+    "title": "IA Neuro-Simbólica",
+    "date": "2025-12-22",
+    "content": "Arquitetura híbrida do Doxoade. Usa Redes Neurais (LSTM) para intuição/criatividade e Sistemas Simbólicos (Autômatos/Bayes) para garantir lógica e sintaxe correta. Evita alucinações comuns em LLMs puros."
+  },
+  "doxo_act": {
+    "title": "Função de Ativação DoxoAct",
+    "date": "2025-12-22",
+    "content": "f(x) = x * sigmoid(x) + 0.1 * sin(x). Uma função de ativação proprietária desenhada para introduzir periodicidade no aprendizado de sintaxe de código."
+  },
+  "ouroboros_loop": {
+    "title": "Ciclo Ouroboros",
+    "date": "2025-12-22",
+    "content": "O loop de auto-aperfeiçoamento do Agente: 1. Gera Hipótese -> 2. Cria Teste Unitário -> 3. Executa -> 4. Se passar, treina o cérebro com o próprio código gerado."
   }
 }
