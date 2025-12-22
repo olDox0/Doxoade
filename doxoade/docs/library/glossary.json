@@ -43,5 +43,20 @@
     "title": "Filtragem Dupla (Double Filtering)",
     "definition": "Técnica usada no comando 'security'. Como ferramentas externas (Bandit) às vezes ignoram configurações de exclusão, o Doxoade aplica um segundo filtro em Python no JSON de resultados, garantindo que pastas como 'venv' nunca gerem alertas falsos.",
     "origin": "Correção do Doxoade v55 (Dez 2025)."
+  },
+  "relative_regression": {
+    "title": "Regressão Relativa",
+    "definition": "Filosofia de teste onde o sucesso é medido pela não-deterioração do sistema. Permite que o desenvolvimento continue em projetos com dívida técnica (testes falhando), desde que novos bugs não sejam introduzidos.",
+    "origin": "Doxoade QA v63.0"
+  },
+  "test_scaffolding": {
+    "title": "Test Scaffolding (Andaime de Testes)",
+    "definition": "Geração automática de arquivos de teste vazios ('esqueletos') que espelham a estrutura do código fonte. Garante 100% de cobertura arquitetural, servindo de lembrete e base para a implementação da lógica de teste real.",
+    "origin": "Comando 'test-map --generate'"
+  },
+  "safe_sync": {
+    "title": "Safe Sync (Sincronização Segura)",
+    "definition": "Modo de operação do Git onde o Doxoade realiza uma auditoria 'Pré-Voo' (Dry Run) comparando as árvores locais e remotas. Se detectar deleções ou sobrescritas perigosas, exige confirmação manual explícita antes de executar o comando real.",
+    "origin": "Comando 'sync --safe'"
   }
 }

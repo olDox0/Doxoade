@@ -1,6 +1,6 @@
 """
-SHERLOCK v5.0 (Polyglot).
-Base de conhecimento expandida para Português e Inglês.
+SHERLOCK v5.1 (Semantic Update).
+Adiciona compreensão do conceito de 'total' e 'result'.
 """
 import numpy as np
 import os
@@ -11,28 +11,29 @@ MEMORY_FILE = ".doxoade_bayes.json"
 
 class Sherlock:
     def __init__(self):
-        # Base de Conhecimento Ontológica Expandida
         self.beliefs = {
-            # Soma
+            # Soma / Adição
             "soma": {"+": 0.9, "*": 0.05, "-": 0.05},
             "add":  {"+": 0.9, "*": 0.05, "-": 0.05},
-            "adição": {"+": 0.95, "*": 0.02, "-": 0.02}, # NOVO
-            "adicionar": {"+": 0.95, "*": 0.02, "-": 0.02}, # NOVO
+            "adição": {"+": 0.95, "*": 0.02, "-": 0.02},
+            "adicionar": {"+": 0.95, "*": 0.02, "-": 0.02},
+            "total": {"+": 0.95}, # NOVO: Total geralmente é soma
             
             # Subtração
             "sub":  {"-": 0.9, "+": 0.05, "/": 0.05},
-            "menos": {"-": 0.95, "+": 0.02}, # NOVO
-            "subtração": {"-": 0.95, "+": 0.02}, # NOVO
-            "diferença": {"-": 0.95}, # NOVO
+            "menos": {"-": 0.95, "+": 0.02},
+            "subtração": {"-": 0.95, "+": 0.02},
+            "diferença": {"-": 0.95},
             
             # Multiplicação
             "mult": {"*": 0.9, "+": 0.1},
-            "vezes": {"*": 0.95}, # NOVO
-            "multiplicação": {"*": 0.95}, # NOVO
+            "vezes": {"*": 0.95},
+            "multiplicação": {"*": 0.95},
+            "produto": {"*": 0.95},
             
             # Divisão
             "div":  {"/": 0.9, "%": 0.1},
-            "divisão": {"/": 0.95}, # NOVO
+            "divisão": {"/": 0.95},
             
             # Lógica
             "maior": {">": 0.8, ">=": 0.2},
@@ -58,10 +59,8 @@ class Sherlock:
     def get_priors(self, prompt):
         prompt = prompt.lower()
         intent = "generic"
-        # Busca a chave mais longa que esteja contida no prompt (ex: "subtração" ganha de "sub")
         matches = [k for k in self.beliefs if k != "generic" and k in prompt]
         if matches:
-            # Pega o match mais específico (maior string)
             intent = max(matches, key=len)
         return self.beliefs[intent], intent
 
@@ -85,6 +84,7 @@ class Sherlock:
             return "Erro de Nome."
         if "FALHA_ASSERT" in erro_stdout: return "Lógica incorreta."
         if "IndentationError" in erro_stderr: return "Erro de Formatação."
+        if "TypeError" in erro_stderr: return "Erro de Tipagem/Argumentos."
         return "Erro desconhecido."
 
     def verificar_analogia(self, codigo_gerado, requisitos_ignorados=None):

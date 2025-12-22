@@ -65,4 +65,4 @@ class VectorDB:
                 data = load_json(MEMORY_PATH)
                 self.vectors = data["vectors"]
                 self.payloads = data["payloads"]
-            except: pass
+            except Exception: pass

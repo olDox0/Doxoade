@@ -30,5 +30,21 @@
     "symptom": "CTRL+C não encerrava o 'doxoade run' se a GUI filha travasse.",
     "root_cause": "Subprocesso bloqueante sem tratamento de sinais.",
     "fix": "Migração para subprocess.Popen não-bloqueante e envio explícito de kill() ao capturar KeyboardInterrupt."
+  },
+  "toxic_memory_spill": {
+    "title": "O Vazamento de Memória Tóxica",
+    "date": "2025-12-22",
+    "severity": "HIGH",
+    "symptom": "O Agente recomendava código quebrado ('def <UNK>') com alta confiança.",
+    "root_cause": "Falta de validação no pipeline de memorização. O sistema priorizava similaridade semântica sobre validade sintática.",
+    "fix": "Implementação de Quality Gates no Librarian e comando 'brain forget' para purga."
+  },
+  "dimensional_collapse": {
+    "title": "O Colapso Dimensional (Batching)",
+    "date": "2025-12-21",
+    "severity": "CRITICAL",
+    "symptom": "Crash durante treino acelerado: 'ValueError: broadcast shape mismatch'.",
+    "root_cause": "A camada de Embedding não sabia lidar com tensores 3D introduzidos pelo True Batching.",
+    "fix": "Core v18.0 com Universal Shape Adaptor (reshape dinâmico de gradientes)."
   }
 }

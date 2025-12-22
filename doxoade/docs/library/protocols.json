@@ -28,5 +28,15 @@
     "title": "Protocolo Aegis (Blindagem & Hardening)",
     "date": "2025-12-15",
     "content": "Política de Segurança de Tolerância Zero.\n\nDiretrizes:\n1. 'Ground Zero': Nenhuma vulnerabilidade HIGH ou MEDIUM é permitida no master.\n2. Proibição de 'shell=True' e 'os.system' em comandos de produção.\n3. Dados sobre Código: Preferência estrita por JSON em vez de Pickle para persistência.\n4. Filtragem Dupla: O sistema de segurança filtra falsos positivos antes de alertar o usuário.\n\nComando associado: 'security --level HIGH'"
+  },
+  "canon_v2": {
+    "title": "Protocolo Cânone V2 (Regressão Relativa)",
+    "date": "2025-12-20",
+    "content": "Evolução do sistema de QA. O 'Cânone' agora grava não apenas a análise estática, mas o estado de execução dos testes (Exit Code).\n\nPrincípio da Relatividade:\nSe o projeto estava falhando no momento do Snapshot (Canonize) e continua falhando da mesma maneira, o sistema considera 'APROVADO'. Regressão é apenas a introdução de *novas* falhas.\n\nComandos: 'canonize --all', 'regression-test'."
+  },
+  "ouroboros_git": {
+    "title": "Protocolo Ouroboros (Auto-Reconciliação Git)",
+    "date": "2025-12-20",
+    "content": "Capacidade dos comandos de infraestrutura de se curarem ao encontrar estados inesperados.\n\nExemplo Prático:\nAo rodar 'git-new' em um repositório remoto não-vazio, o Doxoade detecta a rejeição, executa um 'pull --rebase --allow-unrelated-histories' automaticamente e tenta o push novamente, fundindo os históricos sem intervenção humana."
   }
 }

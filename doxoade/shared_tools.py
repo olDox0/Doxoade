@@ -4,6 +4,7 @@ import time
 import subprocess
 import sqlite3
 import re
+import sys
 import os
 import json
 import hashlib
@@ -26,9 +27,19 @@ class ExecutionLogger:
             'findings': []
         }
 
+        # [FIX] Verifica se output_format é json para não sujar a saída stdout
+        # Verifica tanto argumentos diretos quanto o contexto do Click se disponível
+        is_json = False
+        if isinstance(arguments, dict) and arguments.get('output_format') == 'json':
+            is_json = True
+        
+        # Proteção extra: verifica sys.argv
+        if '--format=json' in sys.argv or '--format json' in sys.argv:
+            is_json = True
+
         self.start_dt = datetime.now().strftime("%H:%M:%S")
-        # Verifica se output_format é json para não sujar a saída stdout
-        if arguments.get('output_format') != 'json':
+        
+        if not is_json:
             click.echo(Fore.CYAN + Style.DIM + f"[{self.start_dt}] Executando {command_name}..." + Style.RESET_ALL)
 
     def add_finding(self, severity, message, category='UNCATEGORIZED', file=None, line=None, details=None, snippet=None, suggestion_content=None, suggestion_line=None, finding_hash=None, import_suggestion=None, dependency_type=None, missing_import=None, suggestion_source=None, suggestion_action=None):
@@ -78,13 +89,17 @@ class ExecutionLogger:
                 details=f"{exc_type.__name__}: {exc_val}",
             )
         
-        # Loga no banco
         _log_execution(self.command_name, self.path, self.results, self.arguments, execution_time_ms)
 
-        duration = time.monotonic() - self.start_time
-        color = Fore.GREEN if duration < 1.0 else (Fore.YELLOW if duration < 3.0 else Fore.RED)
-        
-        if self.arguments.get('output_format') != 'json':
+        # [FIX] Checagem de JSON mais robusta
+        is_json = False
+        if isinstance(self.arguments, dict) and self.arguments.get('output_format') == 'json':
+            is_json = True
+        if '--format=json' in sys.argv: is_json = True
+
+        if not is_json:
+            duration = time.monotonic() - self.start_time
+            color = Fore.GREEN if duration < 1.0 else (Fore.YELLOW if duration < 3.0 else Fore.RED)
             click.echo(f"{color}{Style.DIM}[{self.command_name}] Tempo total: {duration:.3f}s{Style.RESET_ALL}")
 
 def _format_timestamp(iso_str):
@@ -386,34 +401,55 @@ def _print_summary(results, ignored_count):
     summary = results.get('summary', {})
     findings = results.get('findings', [])
     
-    # Filtra apenas os findings que não foram ignorados
+    # Filtra apenas os findings que não foram ignorados na contagem
     display_findings = [f for f in findings if f.get('hash') not in (ignored_count or set())]
     
     critical_count = summary.get('critical', 0)
     error_count = summary.get('errors', 0)
     warning_count = summary.get('warnings', 0)
     
-    click.echo(Style.BRIGHT + "\n" + "-"*40)
+    click.echo(Style.BRIGHT + "\n" + "-"*60)
     
     if not display_findings:
         click.echo(Fore.GREEN + "[OK] Análise concluída. Nenhum problema encontrado!")
         return
         
-    # --- NOVA LÓGICA DE RESUMO POR CATEGORIA ---
+    # --- PAINEL DE INTELIGÊNCIA DE CATEGORIAS ---
     category_counts = Counter(f['category'] for f in display_findings)
+    
     if category_counts:
-        click.echo(Style.BRIGHT + "Resumo por Categoria:")
-        for category, count in sorted(category_counts.items()):
-            click.echo(f"  - {category}: {count}")
-    # --- FIM DA NOVA LÓGICA ---
+        click.echo(Fore.CYAN + "📊 Distribuição e Filtros:")
+        click.echo(Fore.WHITE + f"{'CATEGORIA':<20} | {'QTD':<5} | {'AÇÃO SUGERIDA'}")
+        click.echo(Fore.WHITE + "-"*60)
+        
+        # Categorias que nunca devem ser ignoradas (Critical)
+        CRITICAL_CATS = {'SECURITY', 'CRITICAL', 'SYNTAX', 'RISK-MUTABLE'}
 
+        for category, count in sorted(category_counts.items(), key=lambda x: x[1], reverse=True):
+            cat_display = f"{category}"
+            count_display = f"{count}"
+            
+            if category in CRITICAL_CATS:
+                cat_color = Fore.RED
+                action = f"{Fore.RED}CORRIGIR IMEDIATAMENTE (Não filtrar)"
+            else:
+                cat_color = Fore.YELLOW
+                # Sugere o comando de exclusão exato
+                action = f"{Style.DIM}--exclude {category}{Style.RESET_ALL}"
+            
+            click.echo(f"{cat_color}{cat_display:<20}{Style.RESET_ALL} | {Fore.WHITE}{count_display:<5}{Style.RESET_ALL} | {action}")
+            
+    # --- FIM DO PAINEL ---
+
+    click.echo(Fore.WHITE + "-"*60)
+    
     summary_parts = []
     if critical_count > 0: summary_parts.append(f"{Fore.MAGENTA}{critical_count} Crítico(s){Style.RESET_ALL}")
     if error_count > 0: summary_parts.append(f"{Fore.RED}{error_count} Erro(s){Style.RESET_ALL}")
     if warning_count > 0: summary_parts.append(f"{Fore.YELLOW}{warning_count} Aviso(s){Style.RESET_ALL}")
 
-    summary_text = f"[FIM] Análise concluída: {', '.join(summary_parts)}"
-    if ignored_count and ignored_count > 0: summary_text += Style.DIM + f" ({ignored_count} ignorado(s))"
+    summary_text = f"[FIM] Total: {', '.join(summary_parts)}"
+    if ignored_count and ignored_count > 0: summary_text += Style.DIM + f" ({ignored_count} suprimido(s))"
     summary_text += "."
     click.echo(summary_text)
 
@@ -451,11 +487,21 @@ def _get_code_snippet(file_path, line_number, context_lines=2):
     except (IOError, IndexError): return None
 
 # --- NOVO BLOCO: FERRAMENTAS COMPARTILHADAS DE REGRESSÃO ---
-
 REGRESSION_BASE_DIR = "regression_tests"
 FIXTURES_DIR = os.path.join(REGRESSION_BASE_DIR, "fixtures")
 CANON_DIR = os.path.join(REGRESSION_BASE_DIR, "canon")
 CONFIG_FILE = os.path.join(REGRESSION_BASE_DIR, "canon.toml")
+
+def _get_all_findings(results_report):
+    """Extrai uma lista plana de todos os findings de um relatório de 'check'."""
+    all_findings = []
+    if not results_report or 'file_reports' not in results_report:
+        return []
+    for file_path, report in results_report['file_reports'].items():
+        for finding in report.get('static_analysis', {}).get('findings', []):
+            finding['path_for_diff'] = file_path 
+            all_findings.append(finding)
+    return all_findings
 
 def _sanitize_json_output(json_data, project_path):
     """(Versão Final) Substitui caminhos de forma robusta."""
@@ -658,7 +704,6 @@ def _print_single_hunk(header_line, lines):
             line_num_old += 1; line_num_new += 1; j += 1
         else: j += 1
             
-
 def _is_path_ignored(file_path, project_path):
     """Verifica se um arquivo deve ser ignorado baseado na config do projeto."""
     # Carrega config (pode ser otimizado com cache se necessário)
@@ -753,7 +798,6 @@ def _update_open_incidents(logger_results, project_path):
         conn.rollback()
     finally:
         conn.close()
-
 
 def _mine_traceback(stderr_output):
     """

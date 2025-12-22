@@ -41,6 +41,7 @@ doxoade = 'doxoade.__main__:main'
 source_dir = "."
 keep = [ "coverage", "jsondiff", "pytest", "pyyaml", "radon", "setuptools",]
 ignore = [ "commands_test/", "tests/", "regression_tests/", "Canone_Test/", "Vers/", "venv/", "doxoade.egg-info/", ".pytest_cache/", "pytest_temp_dir/", "tmp/", ".dox_agent_workspace/", "dox_lab/",]
+exclude_categories = ["STYLE", "DOCS"]
 
 [tool.setuptools]
 packages = [ "doxoade",]

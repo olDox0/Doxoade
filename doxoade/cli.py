@@ -75,6 +75,7 @@ from doxoade.commands.tutorial import tutorial_group
 from doxoade.commands.search import search
 from doxoade.commands.security import security
 from doxoade.commands.style import style
+from doxoade.commands.telemetry import telemetry
 from doxoade.commands.test import test
 from doxoade.commands.test_mapper import test_map
 from doxoade.commands.timeline import timeline
@@ -123,11 +124,9 @@ def cli(ctx):
     if ctx.invoked_subcommand:
         try:
             # Inicia a gravação assim que qualquer subcomando é invocado
-            chronos_recorder.start_command(ctx)
-            # Marca o tempo de início no contexto para calcular a duração depois
+            chronos_recorder.start_command(ctx) # <--- ISSO VAI ATIVAR O MAXTELEMETRY
             ctx.obj['start_time'] = time.perf_counter()
         except Exception:
-            # Não deixa o Chronos quebrar a ferramenta se o DB estiver travado
             pass
         
 @cli.result_callback()
@@ -343,6 +342,7 @@ cli.add_command(setup_regression)
 cli.add_command(show_trace)
 cli.add_command(style)
 cli.add_command(sync)
+cli.add_command(telemetry)
 cli.add_command(test)
 cli.add_command(test_map)
 cli.add_command(timeline)

@@ -1,8 +1,7 @@
 """
-DOXOADE AGENT v15.0 (Vocabulary Absorber).
-Permite neuroplasticidade em tempo real (aprende palavras novas antes de pensar).
+DOXOADE AGENT v16.2 (Stable).
+Correção final de variáveis e escopo de execução.
 """
-# ... (Imports mantidos, adicione save_json se faltar) ...
 import click
 import os
 import subprocess
@@ -25,7 +24,6 @@ from doxoade.neural.rl_engine import QLearner
 BRAIN_PATH = os.path.expanduser("~/.doxoade/cortex.json")
 AGENT_WS = ".dox_agent_workspace"
 
-# ... (Librarian mantido igual) ...
 class Librarian:
     def __init__(self):
         self.conn = get_db_connection()
@@ -72,28 +70,17 @@ class OuroborosAgent:
         self.logic = ArquitetoLogico()
 
     def absorber_vocabulario(self, prompt):
-        """Expande o cérebro se encontrar palavras novas no prompt."""
         tokens = self.tok._quebrar(prompt)
         novos = [t for t in tokens if t not in self.tok.vocabulario]
-        
         if novos:
             print(Fore.CYAN + f"   🌱 Absorvendo novos conceitos: {novos}" + Style.RESET_ALL)
             for t in novos: self.tok.adicionar_token(t)
-            
             new_size = self.tok.contador
-            # Expande matrizes fisicamente
             self.embed.expand(new_size)
             self.lstm.expand_vocab(new_size)
-            
-            # Salva imediatamente para não perder a expansão
-            state = {
-                "embed": self.embed.get_state_dict(),
-                "lstm": self.lstm.get_state_dict(),
-                "tokenizer": self.tok.to_dict()
-            }
+            state = {"embed": self.embed.get_state_dict(), "lstm": self.lstm.get_state_dict(), "tokenizer": self.tok.to_dict()}
             save_json(state, BRAIN_PATH)
 
-    # ... (vectorize, consolidar_aprendizado mantidos) ...
     def vectorize(self, text):
         try:
             ids = self.tok.converter_para_ids(text)
@@ -107,8 +94,7 @@ class OuroborosAgent:
         except: return None
 
     def consolidar_aprendizado(self, prompt, codigo_correto):
-        if "<UNK>" in codigo_correto or "ENDMARKER" in codigo_correto: return
-        if codigo_correto.strip().endswith(":"): return
+        if "<UNK>" in codigo_correto or "ENDMARKER" in codigo_correto or codigo_correto.strip().endswith(":"): return
         print(Fore.MAGENTA + "   🧠 Refinando intuição (Treino Online)..." + Style.RESET_ALL)
         vec = self.vectorize(prompt)
         if vec is not None: self.memory.add(vec, codigo_correto)
@@ -128,13 +114,10 @@ class OuroborosAgent:
             self.embed.accumulate_grad(dInputs)
             self.lstm.apply_update(lr, batch_size=1)
             self.embed.apply_update(lr, batch_size=1)
-        
         state = {"embed": self.embed.get_state_dict(), "lstm": self.lstm.get_state_dict(), "tokenizer": self.tok.to_dict()}
         save_json(state, BRAIN_PATH) 
-        
         tokens = full_text.split()
-        for i in range(len(tokens)-1):
-            self.rl.update(tokens[i], tokens[i+1], reward=2.0)
+        for i in range(len(tokens)-1): self.rl.update(tokens[i], tokens[i+1], reward=2.0)
         self.rl.save()
 
     def clean_generated_code(self, raw_code):
@@ -144,14 +127,20 @@ class OuroborosAgent:
         return code
 
     def think(self, prompt, intent, priors, creativity=0.5):
-        # Passo 0: Neuroplasticidade
         self.absorber_vocabulario(prompt)
-        
         try: input_ids = self.tok.converter_para_ids(prompt)
         except: return None
         curr = input_ids[0]; h, c = None, None
         output = [self.tok.inverso.get(str(curr))]
-        self.logic.reset(); self.logic.observar(output[0])
+        
+        # CONFIGURAÇÃO DE REGRAS DINÂMICAS
+        min_args = 0
+        if intent in ["soma", "sub", "mult", "div", "adição", "adicionar", "total", "calcular"]:
+             min_args = 2
+             
+        self.logic.reset()
+        self.logic.set_constraints(min_args=min_args) 
+        self.logic.observar(output[0])
         
         for nxt in input_ids[1:]:
             x = self.embed.forward(np.array([curr]))
@@ -190,10 +179,15 @@ class OuroborosAgent:
                 cand = self.tok.inverso.get(str(idx), "?")
                 aprovado, _ = self.logic.validar(cand)
                 if aprovado: escolha = int(idx); break
+            
+            # --- FIX: NOME DA VARIÁVEL CORRIGIDO ---
             if escolha is None:
-                sug = self.logic.sugerir_correcao()
-                if sug: escolha = self.tok.vocabulario.get(sug)
+                sugestao = self.logic.sugerir_correcao()
+                if sugestao: 
+                    escolha = self.tok.vocabulario.get(sugestao)
                 else: break
+            # ---------------------------------------
+
             if escolha is None: break
             word = self.tok.inverso.get(str(escolha))
             if word == "ENDMARKER": break
@@ -205,27 +199,36 @@ class OuroborosAgent:
         tests = self.generate_test_cases(func_name)
         if not tests: tests = ["pass"]
         bloco = "\n        ".join(tests)
+        
+        # Código no escopo global
         full_code = f"""
 import sys
-# {code}
+
+# === CÓDIGO DA IA ===
+{code}
+# ====================
+
 if __name__ == "__main__":
     try:
-        if '{func_name}' not in locals():
-            print("ERRO_NOME: Função não definida")
+        # Verifica no escopo global
+        if '{func_name}' not in globals():
+            print("ERRO_NOME: Função '{func_name}' não encontrada no escopo global.")
             sys.exit(1)
+        
+        # Smoke Test
         try:
-             res = {func_name}(2,3)
-             if res is None:
-                 print("ERRO_RETORNO: Função retornou None")
-                 sys.exit(1)
-        except: pass
+             # Executa a função para ver se crasha ou pede args
+             func = globals()['{func_name}']
+             func(2,3)
+        except TypeError as te:
+             print(f"ERRO_ARGS: {{te}}")
+             sys.exit(1)
+        except Exception: pass
+
         {bloco}
         print("SUCESSO_TESTES")
     except AssertionError:
         print("FALHA_ASSERT")
-        sys.exit(1)
-    except NameError as ne:
-        print(f"ERRO_NOME: {{ne}}") 
         sys.exit(1)
     except Exception as e:
         print(f"ERRO: {{e}}")
@@ -236,10 +239,12 @@ if __name__ == "__main__":
 
     def generate_test_cases(self, func_name):
         tests = []
-        if "soma" in func_name or "adição" in func_name or "add" in func_name: 
+        if any(x in func_name for x in ["soma", "adição", "add", "total", "calcular"]): 
             tests.append(f"assert {func_name}(2, 3) == 5")
+            tests.append(f"assert {func_name}(10, 5) == 15")
         elif "maior" in func_name:
             tests.append(f"assert {func_name}(5, 2) == 5")
+            tests.append(f"assert {func_name}(1, 10) == 10")
         return tests
     
     def execute(self, filepath):
@@ -254,13 +259,23 @@ if __name__ == "__main__":
 @click.command('agent')
 @click.argument('task')
 def agent_cmd(task):
-    print(Fore.CYAN + f"🤖 Agente Ouroboros v15.0 (Neuroplasticidade): '{task}'" + Style.RESET_ALL)
+    print(Fore.CYAN + f"🤖 Agente Ouroboros v16.2 (Stable): '{task}'" + Style.RESET_ALL)
     bot = OuroborosAgent()
     memoria = bot.librarian.lembrar(task)
-    if memoria:
-        print(Fore.GREEN + f"   📚 Memória encontrada!" + Style.RESET_ALL)
-        print(f"   📝 Código: {memoria}")
-        return
+    # 0. MEMÓRIA
+    task_vec = bot.vectorize(task)
+    if task_vec is not None:
+        memoria = bot.memory.search(task_vec)
+        if memoria:
+            # FIX: Reconstrói a assinatura se estiver incompleta
+            if not memoria.strip().startswith("def "):
+                 # Tenta extrair o nome da task (ex: "def calcular_total")
+                 # Assume que task já é "def nome"
+                 memoria = f"{task} {memoria}"
+            
+            print(Fore.GREEN + f"   ✅ Já sei fazer isso! (Recuperado do VectorDB)" + Style.RESET_ALL)
+            print(f"   📝 Código: {memoria}")
+            return
     priors, intent = bot.sherlock.get_priors(task)
     try: func_name = task.split()[1]
     except: func_name = "func"
@@ -287,6 +302,8 @@ def agent_cmd(task):
         success, out, err = bot.execute(script_path)
         veredito, culpado, tipo_erro = bot.critic.julgar_execucao(out, err, code)
         if "ERRO_RETORNO" in out: veredito="CULPADO"; tipo_erro="Função Vazia"
+        if "ERRO_ARGS" in out: veredito="CULPADO"; tipo_erro="Argumentos Incorretos"
+        if "ERRO_NOME" in out: veredito="CULPADO"; tipo_erro="Nome Incorreto"
 
         if veredito == "SUCESSO":
             print(Fore.GREEN + "   ✅ EUREKA! Solução válida." + Style.RESET_ALL)
@@ -300,6 +317,8 @@ def agent_cmd(task):
             print(Fore.BLUE + f"   🛡️  Erro de Ambiente ({tipo_erro})." + Style.RESET_ALL)
         else:
             print(Fore.RED + f"   ❌ Falha Lógica ({tipo_erro})." + Style.RESET_ALL)
+            if out.strip() or err.strip():
+                print(Fore.WHITE + f"   🐛 DUMP: {out.strip()} {err.strip()}")
             bot.falhas_memoria.add(code_hash)
             ops = [op for op in ["+", "-", "*", "/"] if f" {op} " in code]
             for op in ops: bot.sherlock.atualizar_crenca(intent, op, sucesso=False)

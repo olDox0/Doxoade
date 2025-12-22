@@ -18,5 +18,15 @@
     "title": "Era I: Fundação & Workflow (Set 2025)",
     "date": "2025-09",
     "content": "O início da jornada CLI.\nMarcos:\n- A Saga das Aspas: Parsing de comandos no Windows (nascimento do auto).\n- Webcheck/Guicheck: Primeiros especialistas.\n- Git-New: Automação 'Zero to Hero'."
+  },
+  "era_neural": {
+    "title": "Era V: A Singularidade Neural (Dez 2025)",
+    "date": "2025-12-22",
+    "content": "O nascimento do Córtex. Desenvolvimento do motor 'DoxoNet' (NumPy puro), Agente Ouroboros e arquitetura Neuro-Simbólica. O sistema agora é capaz de escrever e corrigir seu próprio código."
+  },
+  "era_genesis_flow": {
+    "title": "Era IV: Flow & Refatoração (Dez 2025)",
+    "date": "2025-12",
+    "content": "Foco em introspecção dinâmica e estabilidade estrutural. Marcos: Flow Runner, MPoT Compliance, Lazarus, Verilog, Android Sync."
   }
 }

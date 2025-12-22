@@ -1,0 +1,1 @@
+# Falha ao gerar esqueleto (Erro de Parse).
