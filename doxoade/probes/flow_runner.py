@@ -10,45 +10,89 @@ class FlowTracer:
     def __init__(self):
         self.last_time = time.perf_counter()
         self.last_locals = {}
-        # Cores ANSI
-        self.CYAN = '\033[96m'
-        self.YELLOW = '\033[93m'
-        self.GREEN = '\033[92m'
-        self.RED = '\033[91m'
-        self.RESET = '\033[0m'
-        self.DIM = '\033[2m'
+        self.last_filename = ""
         
-        # Configuração de Layout
-        self.col_time = 10
-        self.col_loc = 20
-        self.col_code = 50
-        self.col_vars = 40
+        # Paleta de Cores (ANSI)
+        self.C_RESET = '\033[0m'
+        self.C_DIM = '\033[2m'
+        self.C_CYAN = '\033[96m'
+        self.C_YELLOW = '\033[93m'
+        self.C_GREEN = '\033[92m'
+        self.C_RED = '\033[91m'
+        self.C_MAGENTA = '\033[95m'
+        self.C_BLUE = '\033[94m'
+        self.C_BOLD = '\033[1m'
+        self.C_BORDER = '\033[90m' # Cinza escuro
+        self.C_WHITE = '\033[97m'  # Branco brilhante [CORREÇÃO]
         
-        # Símbolo separador
-        self.sep_char = "|"
-        try:
-            if sys.stdout.encoding and sys.stdout.encoding.lower().startswith('utf'):
-                self.sep_char = "│"
-        except Exception: pass
-
+        # Configuração de Layout (Largura Fixa)
+        self.W_TIME = 10
+        self.W_LOC = 25
+        self.W_CODE = 60
+        # Variables pega o resto
+        
+        self.sep = f"{self.C_BORDER}│{self.C_RESET}"
         self._print_header()
 
     def _print_header(self):
-        width = self.col_time + self.col_loc + self.col_code + self.col_vars
-        print("=" * width)
-        print(f" DOXOADE FLOW v1.2 | Rastreando: {sys.argv[0]}")
-        print(f" Performance:  {self.RED}>1.0s{self.RESET}   {self.YELLOW}>0.1s{self.RESET}")
-        print("=" * width)
+        # Cabeçalho Estilizado
+        line = f"{self.C_BORDER}{'─'*120}{self.C_RESET}"
+        print(line)
+        print(f"{self.C_CYAN}{self.C_BOLD} DOXOADE FLOW v2.0 (Nexus View){self.C_RESET} | Rastreando: {os.path.basename(sys.argv[0])}")
+        print(f" {self.C_DIM}Legenda:{self.C_RESET} {self.C_GREEN}<1ms{self.C_RESET} {self.C_CYAN}<10ms{self.C_RESET} {self.C_YELLOW}>100ms{self.C_RESET} {self.C_RED}>1s (Gargalo){self.C_RESET}")
+        
+        # Títulos das Colunas
+        h_time = "TEMPO".center(self.W_TIME)
+        h_loc = "ARQUIVO:LINHA".ljust(self.W_LOC)
+        h_code = "CÓDIGO EXECUTADO".ljust(self.W_CODE)
+        h_vars = "ESTADO / VARIÁVEIS"
+        
+        print(f"{self.C_BORDER}┌{'─'*self.W_TIME}┬{'─'*self.W_LOC}┬{'─'*self.W_CODE}┬{'─'*30}{self.C_RESET}")
+        print(f"{self.C_BORDER}│{self.C_RESET}{self.C_BOLD}{h_time}{self.C_RESET}{self.sep}{self.C_BOLD} {h_loc}{self.C_RESET}{self.sep}{self.C_BOLD} {h_code}{self.C_RESET}{self.sep}{self.C_BOLD} {h_vars}{self.C_RESET}")
+        print(f"{self.C_BORDER}├{'─'*self.W_TIME}┼{'─'*self.W_LOC}┼{'─'*self.W_CODE}┼{'─'*30}{self.C_RESET}")
 
     def _safe_compare_changed(self, old_val, new_val):
         """Compara valores de forma segura (suporte a NumPy/Pandas)."""
         try:
             is_diff = (old_val != new_val)
-            if hasattr(is_diff, 'any'): # Para arrays numpy
+            if hasattr(is_diff, 'any'): 
                 return is_diff.any()
             return bool(is_diff)
         except Exception:
             return True
+
+    def _format_time(self, seconds):
+        """Formata o tempo com cor baseada na duração."""
+        ms = seconds * 1000
+        text = f"{ms:.1f}ms" if ms < 1000 else f"{seconds:.2f}s"
+        
+        # Padding manual para garantir alinhamento (9 caracteres)
+        text = text.rjust(self.W_TIME - 1) + " "
+
+        if seconds > 1.0: return f"{self.C_RED}{self.C_BOLD}{text}{self.C_RESET}"
+        if seconds > 0.1: return f"{self.C_YELLOW}{text}{self.C_RESET}"
+        if seconds > 0.01: return f"{self.C_CYAN}{text}{self.C_RESET}"
+        return f"{self.C_GREEN}{self.C_DIM}{text}{self.C_RESET}"
+
+    def _format_code(self, line):
+        """Trunca e coloriza o código."""
+        max_len = self.W_CODE - 2
+        if len(line) > max_len:
+            line = line[:max_len-3] + "..."
+        
+        # Highlight básico
+        line = line.replace("import ", f"{self.C_MAGENTA}import {self.C_RESET}")
+        line = line.replace("from ", f"{self.C_MAGENTA}from {self.C_RESET}")
+        line = line.replace("def ", f"{self.C_BLUE}def {self.C_RESET}")
+        line = line.replace("class ", f"{self.C_BLUE}class {self.C_RESET}")
+        line = line.replace("return", f"{self.C_RED}return{self.C_RESET}")
+        
+        # Preenchimento com espaços para manter a coluna alinhada
+        # (Removemos cores para calcular tamanho real, depois recolocamos)
+        clean_len = len(line.replace(self.C_MAGENTA, "").replace(self.C_BLUE, "").replace(self.C_RED, "").replace(self.C_RESET, ""))
+        padding = " " * (self.W_CODE - clean_len - 1)
+        
+        return f" {line}{padding}"
 
     def trace_calls(self, frame, event, arg):
         if event != 'line':
@@ -58,20 +102,12 @@ class FlowTracer:
         filename = code.co_filename
         fname_lower = filename.lower()
         
-        # --- FILTROS DE RUÍDO APRIMORADOS ---
-        # 1. Ignora o próprio Doxoade
+        # --- FILTROS ---
         if "doxoade" in fname_lower and "probes" in fname_lower: return self.trace_calls
-        
-        # 2. Ignora arquivos que não são Python
         if not filename.endswith(".py"): return self.trace_calls
-        
-        # 3. Ignora bibliotecas padrão e site-packages (reduz ruído de imports como numpy)
-        # No Windows, bibliotecas padrão ficam em Lib\ (ex: Lib\enum.py)
-        # Bibliotecas externas ficam em Lib\site-packages\
         if "site-packages" in fname_lower: return self.trace_calls
         if os.sep + "lib" + os.sep in fname_lower: return self.trace_calls 
-        
-        # --- FIM DOS FILTROS ---
+        # ---------------
 
         current_time = time.perf_counter()
         delta = current_time - self.last_time
@@ -79,50 +115,61 @@ class FlowTracer:
         
         lineno = frame.f_lineno
         
-        # Formata tempo
-        t_str = f"{delta:.4f}s"
-        if delta > 1.0: t_str = f"{self.RED}{t_str}{self.RESET}"
-        elif delta > 0.1: t_str = f"{self.YELLOW}{t_str}{self.RESET}"
+        # --- PREPARAÇÃO DE DADOS ---
         
-        # Lê código
+        # 1. Tempo
+        time_str = self._format_time(delta)
+        
+        # 2. Localização (Arquivo:Linha)
+        fname_base = os.path.basename(filename)
+        
+        # Diminui visualmente se for o mesmo arquivo da linha anterior
+        if fname_base == self.last_filename:
+            loc_display = f"{self.C_DIM}\" : {lineno:<4}{self.C_RESET}"
+        else:
+            loc_display = f"{self.C_WHITE}{fname_base}{self.C_DIM}:{lineno}{self.C_RESET}"
+            self.last_filename = fname_base
+            
+        # Garante alinhamento removendo caracteres de escape para cálculo
+        clean_loc = f"{fname_base}:{lineno}"
+        pad_loc = " " * (self.W_LOC - len(clean_loc) - 1)
+        # Se for muito longo, trunca
+        if len(clean_loc) > self.W_LOC - 1:
+            loc_display = f"{fname_base[:self.W_LOC-5]}...:{lineno}"
+            pad_loc = ""
+            
+        final_loc = f" {loc_display}{pad_loc}"
+
+        # 3. Código
         try:
             import linecache
             line_content = linecache.getline(filename, lineno).strip()
         except Exception:
             line_content = "???"
+        
+        code_str = self._format_code(line_content)
 
-        # Processa variáveis
+        # 4. Variáveis (Diff)
         curr_locals = frame.f_locals.copy()
         diffs = []
-        
         for name, val in curr_locals.items():
             if name.startswith('__'): continue
-            
             if name not in self.last_locals or self._safe_compare_changed(self.last_locals.get(name), val):
-                # --- PROTEÇÃO CONTRA CRASH DE INSPEÇÃO ---
                 try:
                     val_str = str(val)
-                except Exception:
-                    # Se falhar ao converter pra string (ex: objeto não inicializado), mostra placeholder
-                    val_str = "<Unprintable>"
-                # -----------------------------------------
+                except: val_str = "<?>"
                 
                 val_str = val_str.replace('\n', ' ')
-                if len(val_str) > 25: val_str = val_str[:22] + "..."
-                diffs.append(f"{name}={val_str}")
+                if len(val_str) > 30: val_str = val_str[:27] + "..."
+                
+                # Cor para variáveis: Nome (Cyan) = Valor (Amarelo)
+                diffs.append(f"{self.C_CYAN}{name}{self.C_DIM}={self.C_YELLOW}{val_str}{self.C_RESET}")
         
         self.last_locals = curr_locals
-        
-        # Formatação Visual
-        fname = os.path.basename(filename)
-        if len(fname) > 15: fname = fname[:12] + "..."
-        loc = f"{fname}:{lineno}"
-        
         vars_str = ", ".join(diffs)
         
-        sep = f" {self.sep_char} "
-        # Ajuste de espaçamento manual para alinhar colunas com cores ANSI
-        print(f" {t_str:<19} {sep} {loc:<{self.col_loc}} {sep} {line_content:<{self.col_code}} {sep} {self.DIM}{vars_str}{self.RESET}")
+        # --- IMPRESSÃO ---
+        print(f"{self.C_BORDER}│{self.C_RESET}{time_str}{self.sep}{final_loc}{self.sep}{code_str}{self.sep} {vars_str}")
         
         return self.trace_calls
 
@@ -138,22 +185,20 @@ def run_flow(script_path, args):
     try:
         with open(script_path, 'rb') as f:
             code = compile(f.read(), script_path, 'exec')
-            
             globs = {
                 '__file__': script_path,
                 '__name__': '__main__',
                 '__package__': None,
                 '__cached__': None,
             }
-            
             exec(code, globs) # noqa
     except Exception as e:
         print("\n" + "-" * 80)
         print(f"[FLOW CRASH] O script falhou (Erro do Usuário): {e}")
         print("-" * 80)
-        # Não damos raise aqui para não mostrar o traceback do doxoade, apenas do script
     finally:
         sys.settrace(None)
+        print(f"\033[90m└{'─'*100}┘\033[0m") # Rodapé da tabela
         print("\n[FLOW] Finalizado.")
 
 if __name__ == "__main__":

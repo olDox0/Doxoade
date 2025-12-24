@@ -8,10 +8,10 @@ import click
 import subprocess
 import sys
 import os
-#import shlex
-from colorama import Fore
+from pathlib import Path
+from colorama import Fore, Style
 from ..shared_tools import (
-    #ExecutionLogger, 
+    ExecutionLogger, 
     _get_venv_python_executable, 
     _mine_traceback, 
     _analyze_runtime_error
@@ -60,40 +60,24 @@ def _register_runtime_incident(error_data):
         click.echo(Fore.RED + f"[GÊNESE ERROR] Falha ao registrar incidente: {e}")
 
 def _get_flow_probe_path():
-    """Retorna o caminho absoluto para a sonda 'flow_runner.py'."""
-    # [MPoT-5] Contrato: O arquivo deve existir.
-    from importlib import resources
-    try:
-        with resources.path('doxoade.probes', 'flow_runner.py') as p:
-            path = str(p)
-    except (ImportError, AttributeError):
-        # Fallback para sistemas antigos
-        path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'probes', 'flow_runner.py')
-    
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"Sonda Flow não encontrada em: {path}")
-    return path
+    """Retorna o caminho absoluto para a sonda de fluxo."""
+    # Assume que a sonda está em doxoade/probes/flow_runner.py
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    # Sobe commands -> doxoade
+    root = os.path.dirname(current_dir)
+    return os.path.join(root, 'probes', 'flow_runner.py')
 
-def _smart_find_script(script_name):
-    """
-    Tenta localizar o script alvo, permitindo omissão de extensão .py.
-    
-    Args:
-        script_name (str): Nome ou caminho do script.
-    
-    Returns:
-        str: Caminho resolvido ou o original se não encontrado.
-    """
-    if os.path.exists(script_name):
-        return script_name
-    
-    if not script_name.endswith('.py'):
-        potential = script_name + ".py"
-        if os.path.exists(potential):
-            return potential
-            
-    # [MPoT-5] Contrato implícito: Retorna o original para o subprocesso falhar ruidosamente depois
-    return script_name
+def _smart_find_script(name):
+    """Tenta encontrar o script python recursivamente se não estiver no root."""
+    if os.path.exists(name): return name
+    # Procura apenas um nível de profundidade para não demorar
+    for root, dirs, files in os.walk('.'):
+        if name in files:
+            return os.path.join(root, name)
+        # Evita descer em pastas pesadas
+        if 'venv' in dirs: dirs.remove('venv')
+        if '.git' in dirs: dirs.remove('.git')
+    return name
 
 def _build_execution_command(script_path, python_exe, flow=False, args=None):
     """
@@ -114,40 +98,50 @@ def _build_execution_command(script_path, python_exe, flow=False, args=None):
         
     return cmd
 
+def _smart_find_script(name):
+    """(Legado) Tenta encontrar o script python recursivamente."""
+    if os.path.exists(name): return name
+    for root, dirs, files in os.walk('.'):
+        if name in files:
+            return os.path.join(root, name)
+    return name
+
 @click.command('run', context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
-@click.option('--flow', is_flag=True, help="Ativa visualização de execução (Matrix Mode).")
+@click.option('--flow', is_flag=True, help="Ativa visualização de execução (Matrix Mode) - Apenas Python.")
 @click.option('--internal', is_flag=True, help="Executa comandos internos do Doxoade (Self-Debug).")
-@click.argument('script', required=False)
+@click.argument('target', required=False)
 @click.pass_context
-def run(ctx, flow, internal, script):
+def run(ctx, flow, internal, target):
     """
-    Executa um script Python com ambiente controlado.
-    """
-    args = ctx.args
+    Executor Universal com Telemetria (MaxTelemetry).
     
-    if not script and not internal:
-        click.echo(Fore.RED + "Erro: Especifique um script ou use --internal.")
+    Modos:
+    1. Python: 'doxoade run app.py' (Usa venv, suporta --flow)
+    2. Interno: 'doxoade run --internal check' (Debug do próprio Doxoade)
+    3. Sistema: 'doxoade run npm start' (Executa binários externos)
+    """
+    # Captura argumentos extras passados após o comando
+    extra_args = ctx.args
+
+    if not target and not internal:
+        click.echo(Fore.YELLOW + "Uso: doxoade run <script.py | comando> [argumentos]")
         return
 
-    # 1. Configuração do Ambiente
+    # 1. Configuração do Ambiente (Python)
     env = os.environ.copy()
     current_cwd = os.getcwd()
     
-    # Tenta achar venv local explicitamente (Prioridade Máxima)
+    # Tenta achar venv local explicitamente
     local_venv_exe = os.path.join(current_cwd, 'venv', 'Scripts', 'python.exe')
+    if sys.platform != "win32":
+        local_venv_exe = os.path.join(current_cwd, 'venv', 'bin', 'python')
+
     if os.path.exists(local_venv_exe):
         python_exe = local_venv_exe
-        # click.echo(Fore.GREEN + f"[AMBIENTE] Usando venv local: {python_exe}")
     else:
-        # Tenta via shared_tools
-        python_exe = _get_venv_python_executable()
-        
-    if not python_exe:
-        python_exe = sys.executable
-        if not internal:
-             click.echo(Fore.YELLOW + "[AVISO] 'venv' não detectado. Usando Python do sistema.")
-    
-    # Configura PYTHONPATH e Encoding
+        python_exe = _get_venv_python_executable() or sys.executable
+
+    # Configura PYTHONPATH para garantir imports corretos
     if "PYTHONPATH" in env:
         env["PYTHONPATH"] = f"{current_cwd}{os.pathsep}{env['PYTHONPATH']}"
     else:
@@ -156,48 +150,86 @@ def run(ctx, flow, internal, script):
     env["PYTHONIOENCODING"] = "utf-8"
 
     cmd = []
-    
+
+    # --- CENÁRIO A: COMANDO INTERNO (--internal) ---
     if internal:
-        if not script:
-             click.echo(Fore.RED + "Erro: Para --internal, informe o nome do comando.")
+        if not target:
+             click.echo(Fore.RED + "Erro: Para --internal, informe o nome do comando (ex: check).")
              return
         
-        # Modo Internal: Roda como módulo
-        module_name = f"doxoade.commands.{script.replace('.py', '')}"
+        click.echo(Fore.CYAN + f"--- [RUN:INTERNAL] Debugando 'doxoade {target}' ---")
+        
+        module_name = f"doxoade.commands.{target.replace('.py', '')}"
         
         if flow:
-             # Flow precisa do arquivo físico
-             target_script = f"doxoade/commands/{script}.py" if not script.endswith(".py") else f"doxoade/commands/{script}"
+             # Flow precisa do arquivo físico para instrumentar
+             # Tenta localizar o arquivo do comando
+             base_dir = os.path.dirname(os.path.abspath(__file__))
+             target_script = os.path.join(base_dir, f"{target}.py")
+             
              if not os.path.exists(target_script):
                  click.echo(Fore.RED + f"Erro: Arquivo interno '{target_script}' não encontrado.")
                  return
              
              probe = _get_flow_probe_path()
-             cmd = [python_exe, probe, target_script] + list(args)
-             
+             cmd = [python_exe, probe, target_script] + extra_args
         else:
-             # Execução normal interna via módulo (-m)
-             # CORREÇÃO AQUI: Usa -m e module_name, não target_script
-             cmd = [python_exe, "-m", module_name] + list(args)
+             # Execução normal via módulo (-m)
+             cmd = [python_exe, "-m", module_name] + extra_args
 
-    else:
-        # Modo Script Normal (Usuário)
-        target_script = script
-        if not os.path.exists(target_script):
-            click.echo(Fore.RED + f"Erro: Arquivo '{target_script}' não encontrado.")
+    # --- CENÁRIO B: SCRIPT PYTHON ---
+    # Detecta se é Python (.py ou arquivo existente com shebang/extensão)
+    elif target.endswith('.py') or (os.path.exists(_smart_find_script(target)) and _smart_find_script(target).endswith('.py')):
+        
+        real_script = _smart_find_script(target)
+        if not os.path.exists(real_script):
+            click.echo(Fore.RED + f"Erro: Arquivo Python '{target}' não encontrado.")
             return
+
+        click.echo(Fore.CYAN + f"--- [RUN:PYTHON] Executando: {real_script} ---")
 
         if flow:
             probe = _get_flow_probe_path()
-            cmd = [python_exe, probe, target_script] + list(args)
+            cmd = [python_exe, probe, real_script] + extra_args
         else:
-            cmd = [python_exe, target_script] + list(args)
+            cmd = [python_exe, real_script] + extra_args
 
-    try:
-        if not flow:
-            click.echo(Fore.CYAN + f"--- [RUN] Executando: {' '.join(cmd)} ---")
+    # --- CENÁRIO C: COMANDO DO SISTEMA (Substitui 'exec') ---
+    else:
+        if flow:
+            click.echo(Fore.YELLOW + "[AVISO] --flow não suportado para comandos do sistema. Executando normal.")
+
+        # Reconstrói o comando completo
+        full_cmd = [target] + extra_args
+        click.echo(Fore.CYAN + f"--- [RUN:SYSTEM] Executando: {' '.join(full_cmd)} ---")
+
+        # Lógica de Shell para Windows (comandos internos como dir, echo)
+        use_shell = False
+        if os.name == 'nt':
+            # Lista de comandos que exigem shell=True no Windows
+            win_shell_cmds = {'dir', 'echo', 'type', 'del', 'copy', 'move', 'cls', 'mkdir', 'rmdir'}
+            if target.lower() in win_shell_cmds:
+                use_shell = True
         
-        # shell=False é mais seguro
+        # Executa diretamente
+        try:
+            # O MaxTelemetry (Chronos) monitorará os recursos deste subprocesso
+            subprocess.run(full_cmd, env=env, check=True, shell=use_shell)
+            return # Sai com sucesso
+        except FileNotFoundError:
+            click.echo(Fore.RED + f"[ERRO] Comando não encontrado: {target}")
+            click.echo(Fore.YELLOW + "Dica: Se for um script Python, adicione a extensão .py")
+            sys.exit(1)
+        except subprocess.CalledProcessError as e:
+            click.echo(Fore.RED + f"\n[FALHA] Comando retornou código {e.returncode}.")
+            sys.exit(e.returncode)
+        except KeyboardInterrupt:
+            click.echo(Fore.YELLOW + "\n[INTERROMPIDO] Execução cancelada.")
+            return
+
+    # Execução para Casos A (Internal) e B (Python)
+    try:
+        # shell=False é mais seguro para Python
         subprocess.run(cmd, env=env, check=True, shell=False)
         
     except subprocess.CalledProcessError as e:

@@ -105,7 +105,7 @@ def _print_stats(cursor, command_filter):
     """Gera dashboard estatístico."""
     query = "SELECT command_name, duration_ms, cpu_percent, peak_memory_mb FROM command_history"
     if command_filter:
-        query += f" WHERE command_name = '{command_filter}'"
+        query += f" WHERE LOWER(command_name) = '{command_filter.lower()}'"
         
     cursor.execute(query)
     rows = cursor.fetchall()
@@ -117,17 +117,21 @@ def _print_stats(cursor, command_filter):
     stats = {}
     for row in rows:
         cmd = row['command_name']
-        if cmd not in stats: stats[cmd] = {'dur': [], 'cpu': [], 'ram': []}
+        if cmd not in stats:
+            stats[cmd] = {'dur': [], 'cpu': [], 'ram': []}
         
-        if row['duration_ms']: stats[cmd]['dur'].append(row['duration_ms'])
-        if row['cpu_percent']: stats[cmd]['cpu'].append(row['cpu_percent'])
-        if row['peak_memory_mb']: stats[cmd]['ram'].append(row['peak_memory_mb'])
+        # [FIX] Só adiciona se não for None
+        if row['duration_ms'] is not None: stats[cmd]['dur'].append(row['duration_ms'])
+        if row['cpu_percent'] is not None: stats[cmd]['cpu'].append(row['cpu_percent'])
+        if row['peak_memory_mb'] is not None: stats[cmd]['ram'].append(row['peak_memory_mb'])
 
     click.echo(Fore.CYAN + Style.BRIGHT + "\n=== 📈 MÉTRICAS DE PERFORMANCE (MÉDIAS) ===")
     click.echo(f"{'COMANDO':<15} | {'QTD':<5} | {'TEMPO(ms)':<10} | {'CPU(%)':<8} | {'RAM(MB)':<8}")
     click.echo("-" * 65)
 
-    for cmd, data in sorted(stats.items(), key=lambda x: statistics.mean(x[1]['dur']), reverse=True):
+    for cmd, data in sorted(stats.items(), key=lambda x: statistics.mean(x[1]['dur']) if x[1]['dur'] else 0, reverse=True):
+        if not data['dur']: continue 
+        
         count = len(data['dur'])
         avg_dur = statistics.mean(data['dur'])
         avg_cpu = statistics.mean(data['cpu']) if data['cpu'] else 0
@@ -168,8 +172,8 @@ def telemetry(limit, command, stats, processing, memory, disk, verbose):
     query = "SELECT * FROM command_history WHERE 1=1"
     params = []
     if command:
-        query += " AND command_name = ?"
-        params.append(command)
+        query += " AND LOWER(command_name) = ?"
+        params.append(command.lower())
     query += " ORDER BY id DESC LIMIT ?"
     params.append(limit)
     
