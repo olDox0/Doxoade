@@ -23,6 +23,7 @@ Exemplo/
 tmp/
 .dox_agent_workspace/
 .dox_lab/
+test/
 credentials.json
 token.json
 config.json
@@ -53,3 +54,4 @@ Vers/
 # Exceções (movidas para o final para garantir prioridade)
 !requirements.txt
 !PipelineHelp.txt
+!test/doxoade/
