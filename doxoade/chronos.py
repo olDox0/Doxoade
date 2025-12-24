@@ -42,10 +42,9 @@ class ResourceMonitor(threading.Thread):
         
         # Inclui o pai
         try:
-            # Usamos 0.0 aqui para não bloquear, o sleep principal controla o tick
             cpu_total += parent_proc.cpu_percent(interval=None) 
             mem_total += parent_proc.memory_info().rss
-        except: pass
+        except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError): pass
 
         # Inclui os filhos (recursivo)
         try:
@@ -54,8 +53,8 @@ class ResourceMonitor(threading.Thread):
                 try:
                     cpu_total += child.cpu_percent(interval=None)
                     mem_total += child.memory_info().rss
-                except: pass
-        except: pass
+                except (psutil.NoSuchProcess, psutil.AccessDenied): pass
+        except (psutil.NoSuchProcess, psutil.AccessDenied): pass
         
         return cpu_total, mem_total / (1024 * 1024)
 
@@ -65,14 +64,14 @@ class ResourceMonitor(threading.Thread):
         w = 0
         procs = [parent_proc]
         try: procs.extend(parent_proc.children(recursive=True))
-        except: pass
+        except (psutil.NoSuchProcess, psutil.AccessDenied): pass
 
         for p in procs:
             try:
                 io = p.io_counters()
                 r += io.read_bytes
                 w += io.write_bytes
-            except: pass
+            except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError): pass
         return r, w
 
     def run(self):
@@ -80,17 +79,13 @@ class ResourceMonitor(threading.Thread):
         
         try:
             parent = psutil.Process(self.pid)
-            
-            # Inicializa CPU percent para a primeira chamada não ser 0.0
             parent.cpu_percent(interval=None)
             
-            # Snapshot inicial de IO (Árvore)
             r_start, w_start = self._get_tree_io(parent)
             self.peaks['io_read_start'] = r_start
             self.peaks['io_write_start'] = w_start
 
             while self.running:
-                # Sleep define a janela de amostragem de CPU
                 time.sleep(0.5) 
                 
                 cpu, mem = self._get_process_tree_stats(parent)
@@ -98,12 +93,11 @@ class ResourceMonitor(threading.Thread):
                 if cpu > self.peaks['cpu_percent']: self.peaks['cpu_percent'] = cpu
                 if mem > self.peaks['memory_mb']: self.peaks['memory_mb'] = mem
                 
-            # Snapshot final de IO
             r_end, w_end = self._get_tree_io(parent)
             self.peaks['io_read_end'] = r_end
             self.peaks['io_write_end'] = w_end
 
-        except psutil.NoSuchProcess:
+        except (psutil.NoSuchProcess, Exception):
             pass
 
     def stop(self):

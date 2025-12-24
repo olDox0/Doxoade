@@ -50,6 +50,12 @@ from .tools.db_utils import (
 # 6. LOGGER (Core)
 from .tools.logger import ExecutionLogger
 
+# 7. GÊNESE & ABDUÇÃO (Intelligence)
+from .tools.genesis import (
+    _enrich_with_dependency_analysis,
+    _enrich_findings_with_solutions
+)
+
 # Constantes de Diretório (Mantidas aqui por compatibilidade)
 import os
 REGRESSION_BASE_DIR = "regression_tests"

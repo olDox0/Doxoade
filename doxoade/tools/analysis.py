@@ -5,18 +5,29 @@ import re
 import json
 
 def _get_file_hash(file_path):
-    """Calcula o hash SHA256 do conteúdo de um arquivo."""
+    """Calcula o hash SHA256 do conteúdo de um arquivo (Buffer Otimizado)."""
     h = hashlib.sha256()
+    # Buffer de 64KB (mais eficiente que 8KB)
+    BUF_SIZE = 65536 
     try:
         with open(file_path, 'rb') as f:
-            while chunk := f.read(8192):
+            while True:
+                chunk = f.read(BUF_SIZE)
+                if not chunk:
+                    break
                 h.update(chunk)
         return h.hexdigest()
     except IOError:
         return None
 
 def _get_code_snippet(file_path, line_number, context_lines=2):
-    if not line_number or not isinstance(line_number, int) or line_number <= 0: return None
+    # [FIX] Proteção contra arquivo Nulo ou Vazio
+    if not file_path: 
+        return None
+
+    if not line_number or not isinstance(line_number, int) or line_number <= 0: 
+        return None
+        
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             lines = f.readlines()
@@ -24,7 +35,8 @@ def _get_code_snippet(file_path, line_number, context_lines=2):
         end = min(len(lines), line_number + context_lines)
         snippet = {i + 1: lines[i].rstrip('\n') for i in range(start, end)}
         return snippet
-    except (IOError, IndexError): return None
+    except (IOError, IndexError, OSError): # OSError pega erros de caminho inválido no Windows
+        return None
 
 def _get_code_snippet_from_string(content, line_number, context_lines=2):
     if not line_number or not isinstance(line_number, int) or line_number <= 0: return None

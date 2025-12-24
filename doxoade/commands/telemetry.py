@@ -37,7 +37,6 @@ def _analyze_processing(row):
     cpu_time = (dur * (cpu/100))
     click.echo(f"     Tempo de CPU Efetivo: {cpu_time:.0f}ms")
 
-    # [NOVO] Exibição de Linhas Quentes (Microscópio)
     if line_json:
         try:
             hot_lines = json.loads(line_json)
@@ -56,7 +55,14 @@ def _analyze_processing(row):
                     
                     click.echo(f"       {Fore.YELLOW}{fname}:{lineno}{Style.RESET_ALL} (Amostras: {hits})")
                     click.echo(f"         > {Style.DIM}{content}{Style.RESET_ALL}")
-        except: pass
+                    
+            if 'system_info' in row.keys() and row['system_info']:
+                try:
+                    sys_info = json.loads(row['system_info'])
+                    os_str = f"{sys_info.get('os')} {sys_info.get('release')} ({sys_info.get('arch')})"
+                    click.echo(f"  Ambiente:  {os_str} | Py {sys_info.get('python')}")
+                except Exception: pass # <--- CORRIGIDO
+        except Exception: pass # <--- CORRIGIDO
 
     # Exibição de Funções (Visão Geral)
     if profile_json:
