@@ -21,12 +21,11 @@ except ImportError:
     HAS_PSUTIL = False
 
 class ResourceMonitor(threading.Thread):
-    # ... (MANTENHA A CLASSE ResourceMonitor IGUAL A ANTES) ...
     def __init__(self, pid):
         super().__init__()
         self.pid = pid
         self.running = True
-        self.daemon = True # Importante
+        self.daemon = True
         self.peaks = {
             'cpu_percent': 0.0,
             'memory_mb': 0.0,
@@ -36,84 +35,123 @@ class ResourceMonitor(threading.Thread):
             'io_write_end': 0
         }
 
+    def _get_process_tree_stats(self, parent_proc):
+        """[NOVO] Soma recursos da árvore de processos (Pai + Filhos)."""
+        cpu_total = 0.0
+        mem_total = 0.0
+        
+        # Inclui o pai
+        try:
+            # Usamos 0.0 aqui para não bloquear, o sleep principal controla o tick
+            cpu_total += parent_proc.cpu_percent(interval=None) 
+            mem_total += parent_proc.memory_info().rss
+        except: pass
+
+        # Inclui os filhos (recursivo)
+        try:
+            children = parent_proc.children(recursive=True)
+            for child in children:
+                try:
+                    cpu_total += child.cpu_percent(interval=None)
+                    mem_total += child.memory_info().rss
+                except: pass
+        except: pass
+        
+        return cpu_total, mem_total / (1024 * 1024)
+
+    def _get_tree_io(self, parent_proc):
+        """[NOVO] Soma I/O da árvore."""
+        r = 0
+        w = 0
+        procs = [parent_proc]
+        try: procs.extend(parent_proc.children(recursive=True))
+        except: pass
+
+        for p in procs:
+            try:
+                io = p.io_counters()
+                r += io.read_bytes
+                w += io.write_bytes
+            except: pass
+        return r, w
+
     def run(self):
         if not HAS_PSUTIL: return
+        
         try:
-            proc = psutil.Process(self.pid)
-            try:
-                io_counters = proc.io_counters()
-                self.peaks['io_read_start'] = io_counters.read_bytes
-                self.peaks['io_write_start'] = io_counters.write_bytes
-            except (AttributeError, psutil.AccessDenied): pass
+            parent = psutil.Process(self.pid)
+            
+            # Inicializa CPU percent para a primeira chamada não ser 0.0
+            parent.cpu_percent(interval=None)
+            
+            # Snapshot inicial de IO (Árvore)
+            r_start, w_start = self._get_tree_io(parent)
+            self.peaks['io_read_start'] = r_start
+            self.peaks['io_write_start'] = w_start
 
             while self.running:
-                try:
-                    cpu = proc.cpu_percent(interval=0.1) # Sleep de 0.1s acontece aqui
-                    if cpu > self.peaks['cpu_percent']: self.peaks['cpu_percent'] = cpu
-                except: pass
-                try:
-                    mem = proc.memory_info().rss / (1024 * 1024)
-                    if mem > self.peaks['memory_mb']: self.peaks['memory_mb'] = mem
-                except: pass
-                if not self.running: break
-            
-            try:
-                io_counters = proc.io_counters()
-                self.peaks['io_read_end'] = io_counters.read_bytes
-                self.peaks['io_write_end'] = io_counters.write_bytes
-            except: pass
-        except psutil.NoSuchProcess: pass
+                # Sleep define a janela de amostragem de CPU
+                time.sleep(0.5) 
+                
+                cpu, mem = self._get_process_tree_stats(parent)
+                
+                if cpu > self.peaks['cpu_percent']: self.peaks['cpu_percent'] = cpu
+                if mem > self.peaks['memory_mb']: self.peaks['memory_mb'] = mem
+                
+            # Snapshot final de IO
+            r_end, w_end = self._get_tree_io(parent)
+            self.peaks['io_read_end'] = r_end
+            self.peaks['io_write_end'] = w_end
+
+        except psutil.NoSuchProcess:
+            pass
 
     def stop(self):
         self.running = False
 
     def get_stats(self):
-        read_mb = max(0, (self.peaks['io_read_end'] - self.peaks['io_read_start']) / (1024*1024))
-        write_mb = max(0, (self.peaks['io_write_end'] - self.peaks['io_write_start']) / (1024*1024))
-        return {'cpu': round(self.peaks['cpu_percent'], 1), 'ram': round(self.peaks['memory_mb'], 1), 'read': round(read_mb, 2), 'write': round(write_mb, 2)}
+        # [FIX] Garante cálculo de IO mesmo se processo morreu rápido
+        read_bytes = max(0, self.peaks['io_read_end'] - self.peaks['io_read_start'])
+        write_bytes = max(0, self.peaks['io_write_end'] - self.peaks['io_write_start'])
+        
+        return {
+            'cpu': round(self.peaks['cpu_percent'], 1),
+            'ram': round(self.peaks['memory_mb'], 1),
+            'read': round(read_bytes / (1024*1024), 2),
+            'write': round(write_bytes / (1024*1024), 2)
+        }
 
-# --- NOVA CLASSE: CODE SAMPLER ---
+# --- CodeSampler Mantido Igual ---
 class CodeSampler(threading.Thread):
-    """
-    Espião Estatístico: Verifica a cada X ms onde o código está parando.
-    Identifica linhas quentes (hot lines) sem overhead massivo.
-    """
-    def __init__(self, interval=0.01): # 10ms
+    def __init__(self, interval=0.01):
         super().__init__()
         self.interval = interval
         self.running = True
         self.daemon = True
-        self.samples = collections.defaultdict(int) # {(arquivo, linha): contagem}
+        self.samples = collections.defaultdict(int)
         self.main_thread_id = threading.main_thread().ident
 
     def run(self):
         while self.running:
             time.sleep(self.interval)
             try:
-                # Pega o frame atual da thread principal
                 frame = sys._current_frames().get(self.main_thread_id)
                 if frame:
-                    # Filtra bibliotecas internas do Python para focar no projeto
                     filename = frame.f_code.co_filename
                     if "doxoade" in filename or os.getcwd() in filename:
                         self.samples[(filename, frame.f_lineno)] += 1
-            except Exception:
-                pass
+            except Exception: pass
 
-    def stop(self):
-        self.running = False
-        
+    def stop(self): self.running = False
     def get_hot_lines(self, limit=5):
-        # Retorna as 5 linhas mais frequentes
-        sorted_lines = sorted(self.samples.items(), key=lambda item: item[1], reverse=True)
-        return sorted_lines[:limit]
+        return sorted(self.samples.items(), key=lambda item: item[1], reverse=True)[:limit]
 
 class ChronosRecorder:
     def __init__(self):
         self.session_uuid = str(uuid.uuid4())
         self.monitor = None
         self.profiler = None
-        self.sampler = None # Novo
+        self.sampler = None
         self.system_context = {}
         
     def start_command(self, ctx):
@@ -131,16 +169,13 @@ class ChronosRecorder:
             "cores": psutil.cpu_count() if HAS_PSUTIL else 1
         }
 
-        # 1. Monitor Hardware
         self.monitor = ResourceMonitor(os.getpid())
         self.monitor.start()
         
-        # 2. Profiler de Função (cProfile)
         self.profiler = cProfile.Profile()
         self.profiler.enable()
         
-        # 3. Profiler de Linha (Sampler) [NOVO]
-        self.sampler = CodeSampler(interval=0.01) # 10ms de resolução
+        self.sampler = CodeSampler(interval=0.01)
         self.sampler.start()
         
         self.start_timestamp = datetime.now(timezone.utc).isoformat()
@@ -150,14 +185,12 @@ class ChronosRecorder:
     def end_command(self, exit_code, duration_ms):
         if not self.monitor: return
 
-        # Para monitores
         self.monitor.stop()
-        self.sampler.stop() # Para o espião
+        self.sampler.stop()
         
         resources = self.monitor.get_stats()
         hot_lines = self.sampler.get_hot_lines()
         
-        # Processa cProfile
         self.profiler.disable()
         s = io.StringIO()
         ps = pstats.Stats(self.profiler, stream=s).sort_stats('cumulative')
@@ -169,17 +202,10 @@ class ChronosRecorder:
             if "(" in line and ")" in line and os.getcwd() in line:
                 top_funcs.append(line.strip())
 
-        # Formata dados das linhas quentes para salvar
-        # Formato: [{"file": "...", "line": 10, "hits": 50}, ...]
         line_profile_data = []
         for (fname, lineno), hits in hot_lines:
-            # Limpa o caminho para ser relativo ao projeto
             clean_name = fname.replace(os.getcwd(), "").strip(os.sep)
-            line_profile_data.append({
-                "file": clean_name,
-                "line": lineno,
-                "hits": hits
-            })
+            line_profile_data.append({"file": clean_name, "line": lineno, "hits": hits})
 
         try:
             conn = get_db_connection()
@@ -203,11 +229,10 @@ class ChronosRecorder:
                 resources['write'],
                 json.dumps(top_funcs[:10]),
                 json.dumps(self.system_context),
-                json.dumps(line_profile_data) # [NOVO] Salva as linhas
+                json.dumps(line_profile_data)
             ))
             conn.commit()
             conn.close()
-        except Exception:
-            pass
+        except Exception: pass
 
 chronos_recorder = ChronosRecorder()
