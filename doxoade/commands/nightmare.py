@@ -132,3 +132,14 @@ def teste_assinatura(a, b):
     return a + b
 
 teste_assinatura(1) # Falta argumento 'b'
+
+import os
+import sys
+
+def funcao_horrivel():
+    try:
+        eval("print('hack')") # SECURITY
+    except: # RISK-EXCEPTION
+        pass
+    
+    x = 10 # DEADCODE

@@ -157,7 +157,7 @@ class FlowTracer:
             if name not in self.last_locals or self._safe_compare_changed(self.last_locals.get(name), val):
                 try:
                     val_str = str(val)
-                except: val_str = "<?>"
+                except Exception: val_str = "<?>" # <--- CORRIGIDO (era except:)
                 
                 val_str = val_str.replace('\n', ' ')
                 if len(val_str) > 30: val_str = val_str[:27] + "..."

@@ -28,8 +28,6 @@ def _get_staged_python_files(git_root):
 def _learn_solutions_from_commit(new_commit_hash, logger, project_path):
     """
     (Gênese V2) Aprende soluções a partir dos incidentes que foram resolvidos.
-    O check já gerencia os incidentes - aqui apenas consultamos quais foram resolvidos
-    e aprendemos as soluções.
     """
     click.echo(Fore.CYAN + "\n--- [LEARN] Buscando soluções para aprender... ---")
     
@@ -48,16 +46,6 @@ def _learn_solutions_from_commit(new_commit_hash, logger, project_path):
         if not modified_files:
             click.echo(Fore.WHITE + "   > Nenhum arquivo modificado neste commit.")
             return
-        
-        # Busca incidentes que EXISTIAM para os arquivos modificados
-        # mas que agora foram resolvidos (o check já os removeu da tabela open_incidents)
-        # Precisamos consultar o histórico de eventos/findings para saber o que foi corrigido
-        
-        # Abordagem alternativa: buscar na tabela solutions os hashes que ainda não têm solução
-        # mas cujos arquivos foram modificados
-        
-        # Por enquanto, vamos usar uma abordagem mais simples:
-        # Se o commit passou sem erros nos arquivos modificados, assume que correções foram feitas
         
         learned_solutions = 0
         learned_templates = 0
@@ -133,19 +121,14 @@ def _learn_solutions_from_commit(new_commit_hash, logger, project_path):
     except Exception as e:
         conn.rollback()
         logger.add_finding("ERROR", "Falha ao aprender soluções.", details=str(e))
-        import traceback
-        click.echo(Fore.RED + f"   > [DEBUG] {traceback.format_exc()}")
+        # import traceback
+        # click.echo(Fore.RED + f"   > [DEBUG] {traceback.format_exc()}")
     finally:
         if conn: conn.close()
 
 def _abstract_and_learn_template(cursor, concrete_finding):
     """
     (Gênese V2 - Expandido) Analisa um 'finding' e tenta criar/atualizar um template de solução.
-    
-    Templates suportados:
-    - DEADCODE: imports não usados, redefinições
-    - STYLE: f-strings sem placeholders, variáveis não usadas
-    - RUNTIME-RISK: nomes indefinidos
     """
     message = concrete_finding.get('message', '')
     category = concrete_finding.get('category', '')
@@ -165,44 +148,27 @@ def _abstract_and_learn_template(cursor, concrete_finding):
     solution_template = None
     
     # REGRAS DE ABSTRAÇÃO - DEADCODE
-    
-    # Regra 1: Import não usado
-    # Exemplo: "'os' imported but unused"
     if re.match(r"'(.+?)' imported but unused", message):
         problem_pattern = "'<MODULE>' imported but unused"
         solution_template = "REMOVE_LINE"
-    
-    # Regra 2: Redefinição de variável/import não usado
-    # Exemplo: "redefinition of unused 'conn' from line 42"
     elif re.match(r"redefinition of unused '(.+?)' from line \d+", message):
         problem_pattern = "redefinition of unused '<VAR>' from line <LINE>"
         solution_template = "REMOVE_LINE"
     
     # REGRAS DE ABSTRAÇÃO - STYLE
-    
-    # Regra 3: f-string sem placeholders
-    # Exemplo: "f-string is missing placeholders"
     elif message == "f-string is missing placeholders":
         problem_pattern = "f-string is missing placeholders"
         solution_template = "REMOVE_F_PREFIX"
-    
-    # Regra 4: Variável local atribuída mas nunca usada
-    # Exemplo: "local variable 'e' is assigned to but never used"
     elif re.match(r"local variable '(.+?)' is assigned to but never used", message):
         problem_pattern = "local variable '<VAR>' is assigned to but never used"
         solution_template = "REPLACE_WITH_UNDERSCORE"
     
     # REGRAS DE ABSTRAÇÃO - RUNTIME-RISK
-
-    # Regra 5: Nome indefinido
-    # Exemplo: "undefined name 'foo'"
     elif re.match(r"undefined name '(.+?)'", message):
         problem_pattern = "undefined name '<VAR>'"
-        solution_template = "ADD_IMPORT_OR_DEFINE"  # Sugestão: precisa de ação manual
+        solution_template = "ADD_IMPORT_OR_DEFINE"
     
-    # REGRAS DE ABSTRAÇÃO - SYNTAX (informativo)
-
-    # Regra 6: Erro de indentação
+    # REGRAS DE ABSTRAÇÃO - SYNTAX
     elif 'unexpected indent' in message.lower() or 'expected an indented block' in message.lower():
         problem_pattern = "indentation error"
         solution_template = "FIX_INDENTATION"
@@ -247,7 +213,7 @@ def save(ctx, message, force):
             click.echo(Fore.YELLOW + "[AVISO] Nenhuma alteração para commitar.")
             return
 
-        # Passo 2: Verificação de qualidade (o check agora gerencia incidentes automaticamente)
+        # Passo 2: Verificação de qualidade
         click.echo(Fore.YELLOW + "\nPasso 2: Verificando qualidade...")
         
         git_root = _run_git_command(['rev-parse', '--show-toplevel'], capture_output=True)
@@ -258,10 +224,20 @@ def save(ctx, message, force):
             check_results = {'summary': {}, 'findings': []}
         else:
             click.echo(f"   > Analisando {len(files_to_check)} arquivo(s)...")
+            
+            # [FIX] Atualizado para a nova assinatura do run_check_logic
             check_results = run_check_logic(
-                '.', [], False, False, 
-                no_cache=True, 
-                target_files=files_to_check
+                path='.',
+                ignore=[],
+                fix=False,
+                debug=False,
+                fast=False,             # Novo
+                no_imports=False,       # Novo
+                no_cache=True,          # Save sempre força verificação limpa
+                target_files=files_to_check,
+                clones=False,           # Novo (Clones é pesado para commit diário)
+                continue_on_error=False,# Novo (Erro deve bloquear commit)
+                exclude_categories=[]   # Novo (Verifica tudo)
             )
         
         summary = check_results.get('summary', {})

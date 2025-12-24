@@ -19,6 +19,10 @@ QA_TAGS = {
 }
 
 def filter_and_inject_findings(findings, file_path):
+    # [FIX] Proteção robusta: Se não houver arquivo, retorna a lista original sem processar TODOs
+    if not file_path:
+        return findings
+
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             lines = f.readlines()
@@ -30,7 +34,7 @@ def filter_and_inject_findings(findings, file_path):
     # 1. Filtra erros silenciados
     for f in findings:
         line_num = f.get('line')
-        if not line_num or line_num > len(lines):
+        if not line_num or not isinstance(line_num, int) or line_num > len(lines):
             final_findings.append(f)
             continue
             
@@ -51,10 +55,13 @@ def filter_and_inject_findings(findings, file_path):
     for i, line in enumerate(lines):
         if '#' in line:
             parts = line.split('#', 1)
-            comment_part = parts[1].strip()
+            if len(parts) < 2: continue
             
+            comment_part = parts[1].strip()
+            if not comment_part: continue
+
             # Pega a primeira palavra do comentário (ex: "TODO:" -> "TODO")
-            first_word_raw = comment_part.split()[0] if comment_part else ""
+            first_word_raw = comment_part.split()[0]
             first_word = first_word_raw.upper().rstrip(':')
             
             if first_word in QA_TAGS:
