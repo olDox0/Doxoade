@@ -38,6 +38,7 @@ from doxoade.commands.dashboard import dashboard
 from doxoade.commands.db_query import db_query
 from doxoade.commands.debug import debug
 from doxoade.commands.deepcheck import deepcheck
+from doxoade.commands.diagnose import diagnose
 from doxoade.commands.diff import diff
 from doxoade.commands.doctor import doctor
 from doxoade.commands.encoding import encoding
@@ -299,6 +300,7 @@ cli.add_command(dashboard)
 cli.add_command(db_query)
 cli.add_command(deepcheck)
 cli.add_command(debug)
+cli.add_command(diagnose)
 cli.add_command(diff)
 cli.add_command(doctor)
 cli.add_command(encoding)
