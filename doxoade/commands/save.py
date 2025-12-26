@@ -150,7 +150,7 @@ def _abstract_and_learn_template(cursor, concrete_finding):
     # REGRAS DE ABSTRAÇÃO - DEADCODE
     if re.match(r"'(.+?)' imported but unused", message):
         problem_pattern = "'<MODULE>' imported but unused"
-        solution_template = "REMOVE_LINE"
+        solution_template = "FIX_UNUSED_IMPORT" 
     elif re.match(r"redefinition of unused '(.+?)' from line \d+", message):
         problem_pattern = "redefinition of unused '<VAR>' from line <LINE>"
         solution_template = "REMOVE_LINE"
@@ -167,6 +167,11 @@ def _abstract_and_learn_template(cursor, concrete_finding):
     elif re.match(r"undefined name '(.+?)'", message):
         problem_pattern = "undefined name '<VAR>'"
         solution_template = "ADD_IMPORT_OR_DEFINE"
+    
+    # [NOVO] Regra para except genérico
+    elif "Uso de 'except:' genérico detectado" in message:
+        problem_pattern = "Uso de 'except:' genérico detectado"
+        solution_template = "FIX_BARE_EXCEPT"
     
     # REGRAS DE ABSTRAÇÃO - SYNTAX
     elif 'unexpected indent' in message.lower() or 'expected an indented block' in message.lower():

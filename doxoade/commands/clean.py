@@ -1,64 +1,71 @@
 # doxoade/commands/clean.py
-# atualizado em 2025/10/21 - Versão do projeto 42(Ver), Versão da função 2.0(Fnc).
-# Descrição: Aprimora o tratamento de erro para detectar falhas de permissão e sugerir a execução com privilégios de administrador.
 import os
-from colorama import Fore
-from pathlib import Path
-import click
 import shutil
-
+import click
+from pathlib import Path
+from colorama import Fore, Style
 from ..shared_tools import ExecutionLogger
 
-__version__ = "34.0 Alfa"
-
 @click.command('clean')
-@click.pass_context
-@click.option('--force', '-f', is_flag=True, help="Força a limpeza sem pedir confirmação.")
-def clean(ctx, force):
-    """Remove arquivos de cache e build do projeto."""
-    arguments = ctx.params
-    path = '.'
-
-    with ExecutionLogger('clean', path, arguments) as logger:
+def clean():
+    """Limpa artefatos temporários, caches e builds do projeto."""
+    with ExecutionLogger('clean', '.', {}) as logger:
         click.echo(Fore.CYAN + "-> [CLEAN] Procurando por artefatos de build e cache...")
         
-        TARGET_PATTERNS = ["__pycache__", "build", "dist", ".pytest_cache", ".tox", "*.egg-info", "*.spec"]
+        # Lista de padrões para remover
+        TARGETS = [
+            '__pycache__',
+            '.pytest_cache',
+            '.doxoade_cache',   # <--- O CULPADO
+            '.dox_agent_workspace',
+            'build',
+            'dist',
+            '*.egg-info',
+            '.coverage',
+            'htmlcov'
+        ]
         
-        all_paths = [p for pattern in TARGET_PATTERNS for p in Path('.').rglob(pattern)]
+        found_items = []
+        root = Path('.')
         
-        targets_to_delete = {p for p in all_paths if 'venv' not in p.parts and '.git' not in p.parts}
+        # Varredura inteligente
+        for pattern in TARGETS:
+            # Se for glob (*.egg-info)
+            if '*' in pattern:
+                found_items.extend(list(root.glob(pattern)))
+            else:
+                # Busca recursiva para pastas comuns como __pycache__
+                if pattern == '__pycache__':
+                    found_items.extend(list(root.rglob(pattern)))
+                else:
+                    # Busca na raiz para pastas de config
+                    p = root / pattern
+                    if p.exists():
+                        found_items.append(p)
 
-        if not targets_to_delete:
-            click.echo(Fore.GREEN + "[OK] O projeto já está limpo.")
+        if not found_items:
+            click.echo(Fore.GREEN + "   Nenhum lixo encontrado. O projeto está limpo.")
             return
 
-        click.echo(Fore.YELLOW + f"Encontrados {len(targets_to_delete)} itens para remover:")
-        for target in sorted(targets_to_delete):
-            click.echo(f"  - {target}")
+        click.echo(f"Encontrados {len(found_items)} itens para remover:")
+        for item in found_items[:10]:
+            click.echo(f"  - {item}")
+        if len(found_items) > 10:
+            click.echo(f"  - ... e mais {len(found_items) - 10}")
 
-        if not force and not click.confirm(f"\n{Fore.YELLOW}Remover permanentemente estes itens?"):
-            click.echo(Fore.CYAN + "\nOperação cancelada.")
-            return
-
-        click.echo(Fore.CYAN + "\n-> Iniciando a limpeza...")
-        deleted_count = 0
-        for target in sorted(targets_to_delete, reverse=True):
-            try:
-                if target.is_dir():
-                    shutil.rmtree(target)
-                    click.echo(f"  {Fore.GREEN}Removido diretório: {target}")
-                elif target.is_file():
-                    target.unlink()
-                    click.echo(f"  {Fore.GREEN}Removido arquivo: {target}")
-                deleted_count += 1
-            except OSError as e:
-                error_message = f"Erro ao remover {target}: {e}"
-                # No Windows, 'Acesso negado' é o WinError 5 ou PermissionError. No Linux, é o errno 13.
-                if (os.name == 'nt' and isinstance(e, PermissionError)) or (hasattr(e, 'winerror') and e.winerror == 5) or (hasattr(e, 'errno') and e.errno == 13):
-                    error_message += "\n     Dica: Tente executar o comando em um terminal com privilégios de administrador."
-                
-                logger.add_finding('error', f"Erro ao remover {target}: {e}")
-                click.echo(Fore.RED + f"  {error_message}", err=True)
-        
-        logger.add_finding('info', f"{deleted_count} itens removidos.")
-        click.echo(Fore.GREEN + f"\n Limpeza concluída! {deleted_count} itens foram removidos.")
+        if click.confirm(Fore.YELLOW + "\nRemover permanentemente estes itens?", default=True):
+            click.echo("\n-> Iniciando a limpeza...")
+            count = 0
+            for item in found_items:
+                try:
+                    if item.is_dir():
+                        shutil.rmtree(item)
+                    else:
+                        item.unlink()
+                    count += 1
+                except Exception as e:
+                    click.echo(Fore.RED + f"   [ERRO] Não foi possível remover {item}: {e}")
+            
+            click.echo(Fore.GREEN + f"\n Limpeza concluída! {count} itens foram removidos.")
+        else:
+            click.echo("Operação cancelada.")
