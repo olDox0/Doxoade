@@ -209,7 +209,7 @@ def _search_in_code_raw(project_root: Path, query: str, fuzzy: bool, limit: int)
             try:
                 content = ""
                 try: content = file_path.read_text(encoding='utf-8')
-                except: content = file_path.read_text(encoding='latin-1', errors='ignore')
+                except Exception: content = file_path.read_text(encoding='latin-1', errors='ignore')
                 
                 lines = content.splitlines()
                 for i, line in enumerate(lines, 1):
@@ -335,7 +335,7 @@ def search(ctx, query, code, function, comment, commits, incidents, timeline, li
     config = _get_project_config(None)
     project_root = config['root_path']
     
-    with ExecutionLogger('search', project_root, ctx.params) as logger:
+    with ExecutionLogger('search', project_root, ctx.params):
         click.echo(Fore.CYAN + Style.BRIGHT + f"\n╔═══ Nexus Search: '{query}' (Limit: {limit}) ═══╗" + Style.RESET_ALL)
         
         indexer = CodeIndexer(project_root)
@@ -359,3 +359,4 @@ def search(ctx, query, code, function, comment, commits, incidents, timeline, li
         
         if total == 0:
             click.echo(Fore.YELLOW + "\nNenhum resultado encontrado.")
+            # Comentario Inutil

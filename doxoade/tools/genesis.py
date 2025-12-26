@@ -115,9 +115,9 @@ def _enrich_with_dependency_analysis(findings, project_path):
     return findings
 
 # --- LÓGICA DE SOLUÇÕES (Gênese) ---
-
 def _enrich_findings_with_solutions(findings):
     if not findings: return
+    
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -129,77 +129,102 @@ def _enrich_findings_with_solutions(findings):
         for finding in findings:
             if finding.get('import_suggestion'): continue
             
+            message = finding.get('message', '')
+            category = finding.get('category', '')
+            file_path = finding.get('file')
+            line_num = finding.get('line')
+
+            if not file_path or not line_num: continue
+
+            # --- 1. Tenta Solução Exata (Histórico do arquivo) ---
             finding_hash = finding.get('hash')
             if finding_hash:
                 cursor.execute("SELECT stable_content, error_line FROM solutions WHERE finding_hash = ? LIMIT 1", (finding_hash,))
-                exact_solution = cursor.fetchone()
-                if exact_solution:
-                    finding['suggestion_content'] = exact_solution['stable_content']
-                    finding['suggestion_line'] = exact_solution['error_line']
+                exact = cursor.fetchone()
+                if exact:
+                    finding['suggestion_content'] = exact['stable_content']
+                    finding['suggestion_line'] = exact['error_line']
                     finding['suggestion_source'] = "EXACT"
-                    continue
+                    continue # Se achou exata, pula o resto
 
-            message = finding.get('message', '')
-            category = finding.get('category', '')
-            
+            # --- 2. Tenta Templates do Banco (Gênese Aprendido) ---
+            template_found = False
             for template in templates:
                 if template['category'] != category: continue
                 
-                pattern_str = template['problem_pattern']
-                pattern_with_markers = (pattern_str
-                    .replace('<MODULE>', '___MODULE___')
-                    .replace('<VAR>', '___VAR___')
-                    .replace('<LINE>', '___LINE___'))
-                escaped_pattern = re.escape(pattern_with_markers)
-                pattern_regex_str = (escaped_pattern
-                    .replace('___MODULE___', '(.+?)')
-                    .replace('___VAR___', '(.+?)')
-                    .replace('___LINE___', r'(\d+)'))
+                # Prepara Regex do Template
+                pattern_regex = (re.escape(template['problem_pattern'])
+                    .replace('<MODULE>', '(.+?)')
+                    .replace('<VAR>', '(.+?)')
+                    .replace('<LINE>', r'(\d+)'))
                 
-                match = re.fullmatch(pattern_regex_str, message)
-                if not match: continue
-                
-                solution_type = template['solution_template']
-                file_path = finding.get('file')
-                line_num = finding.get('line')
-                if not file_path or not line_num: continue
-                
+                if re.fullmatch(pattern_regex, message):
+                    # Aplica lógica do template para VISUALIZAÇÃO
+                    try:
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            lines = f.readlines()
+                        
+                        idx = line_num - 1
+                        if idx < 0 or idx >= len(lines): break
+                        
+                        sol_type = template['solution_template']
+                        
+                        # Simula a correção para exibição
+                        new_content = None
+                        action = "Aplicar correção"
+                        
+                        if sol_type == "REMOVE_LINE":
+                            # Simulação visual de remoção (mostra linha vazia ou comentário)
+                            new_content = f"# [DOX-UNUSED] {lines[idx]}" 
+                            action = "Remover linha"
+                        elif sol_type == "REMOVE_F_PREFIX":
+                            new_content = re.sub(r'\bf(["\'])', r'\1', lines[idx])
+                            action = "Remover prefixo 'f'"
+                        
+                        if new_content:
+                            finding['suggestion_content'] = new_content
+                            finding['suggestion_line'] = line_num
+                            finding['suggestion_source'] = "TEMPLATE"
+                            finding['suggestion_action'] = action
+                            template_found = True
+                            break
+                    except: pass
+            
+            if template_found: continue
+
+            # --- 3. Inteligência Nativa (Hardcoded Rules) ---
+            # Para casos críticos que queremos garantir mesmo sem treino prévio
+            
+            # Regra: Except Genérico -> Except Exception
+            if "Uso de 'except:' genérico detectado" in message:
                 try:
                     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                         lines = f.readlines()
-                    if line_num < 1 or line_num > len(lines): continue
-                    
-                    original_line = lines[line_num - 1]
-                    
-                    if solution_type == "REMOVE_LINE":
-                        new_lines = lines[:line_num-1] + lines[line_num:]
-                        finding['suggestion_content'] = "".join(new_lines)
-                        finding['suggestion_line'] = line_num
-                        finding['suggestion_source'] = "TEMPLATE"
-                        finding['suggestion_action'] = "Remover linha"
-                        break
-                    elif solution_type == "REMOVE_F_PREFIX":
-                        new_line = re.sub(r'\bf(["\'])', r'\1', original_line)
-                        if new_line != original_line:
-                            new_lines = lines[:line_num-1] + [new_line] + lines[line_num:]
-                            finding['suggestion_content'] = "".join(new_lines)
+                    idx = line_num - 1
+                    if 0 <= idx < len(lines):
+                        original = lines[idx]
+                        # Simula a correção
+                        new_line = re.sub(r'except\s*:', 'except Exception:', original, count=1)
+                        
+                        if new_line != original:
+                            finding['suggestion_content'] = new_line
                             finding['suggestion_line'] = line_num
-                            finding['suggestion_source'] = "TEMPLATE"
-                            finding['suggestion_action'] = "Remover prefixo 'f'"
-                            break
-                    elif solution_type == "REPLACE_WITH_UNDERSCORE":
-                         var_name = match.group(1) if match.groups() else None
-                         if var_name:
-                             new_line = re.sub(rf'\bas\s+{re.escape(var_name)}\b', 'as _', original_line)
-                             if new_line == original_line:
-                                 new_line = re.sub(rf'^(\s*){re.escape(var_name)}\s*=', r'\1_ =', original_line)
-                             if new_line != original_line:
-                                 new_lines = lines[:line_num-1] + [new_line] + lines[line_num:]
-                                 finding['suggestion_content'] = "".join(new_lines)
-                                 finding['suggestion_line'] = line_num
-                                 finding['suggestion_source'] = "TEMPLATE"
-                                 finding['suggestion_action'] = f"Substituir '{var_name}' por '_'"
-                                 break
-                except Exception: continue
+                            finding['suggestion_source'] = "REGRA NATIVA (Segurança)"
+                            finding['suggestion_action'] = "Restringir exceção"
+                except: pass
+
+            # Regra: Redefinição de Função -> Comentar
+            elif "redefinition of unused" in message and category == 'DEADCODE':
+                 try:
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        lines = f.readlines()
+                    idx = line_num - 1
+                    if 0 <= idx < len(lines):
+                        finding['suggestion_content'] = f"# [DOX-UNUSED] {lines[idx]}"
+                        finding['suggestion_line'] = line_num
+                        finding['suggestion_source'] = "REGRA NATIVA"
+                        finding['suggestion_action'] = "Comentar redefinição"
+                 except: pass
+
     finally:
         conn.close()

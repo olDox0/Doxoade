@@ -13,7 +13,7 @@ def _log_execution(command_name, path, results, arguments, execution_time_ms=0):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO events (timestamp, doxoade_version, command, project_path, execution_time_ms, status) VALUES (?, ?, ?, ?, ?, ?)", (timestamp, "63.1", command_name, project_path_abs, round(execution_time_ms, 2), "completed"))
+        cursor.execute("INSERT INTO events (timestamp, doxoade_version, command, project_path, execution_time_ms, status) VALUES (?, ?, ?, ?, ?, ?)", (timestamp, "63.2", command_name, project_path_abs, round(execution_time_ms, 2), "completed"))
         event_id = cursor.lastrowid
         for finding in results.get('findings', []):
             file_path = finding.get('file')
@@ -35,6 +35,7 @@ def _update_open_incidents(logger_results, project_path):
     cursor = conn.cursor()
 
     try:
+        # Remove incidentes antigos deste projeto específico
         cursor.execute("DELETE FROM open_incidents WHERE project_path = ?", (project_path,))
         
         if not findings:
@@ -50,7 +51,9 @@ def _update_open_incidents(logger_results, project_path):
             
             if not finding_hash or not file_path: continue
             
-            if _is_path_ignored(os.path.abspath(os.path.join(project_path, file_path)), project_path):
+            # Garante caminho absoluto para checagem de ignore
+            abs_file_path = os.path.abspath(os.path.join(project_path, file_path))
+            if _is_path_ignored(abs_file_path, project_path):
                 continue
             
             if finding_hash in processed_hashes: continue
@@ -63,12 +66,15 @@ def _update_open_incidents(logger_results, project_path):
             ))
         
         if incidents_to_add:
+            # [FIX] Usa INSERT OR REPLACE para evitar crash de Unique Constraint
             cursor.executemany("""
-                INSERT INTO open_incidents 
+                INSERT OR REPLACE INTO open_incidents 
                 (finding_hash, file_path, line, message, category, commit_hash, timestamp, project_path)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, incidents_to_add)
             
         conn.commit()
+    except Exception:
+        conn.rollback()
     finally:
         conn.close()
