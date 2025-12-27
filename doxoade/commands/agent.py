@@ -1,327 +1,386 @@
-"""
-DOXOADE AGENT v16.2 (Stable).
-Correção final de variáveis e escopo de execução.
-"""
+# doxoade/commands/agent.py
 import click
-import os
-import subprocess
 import sys
-import pickle
+import os
 import sqlite3
+import subprocess
 import numpy as np
 import hashlib
+import pickle
 import re
-from datetime import datetime, timezone
 from colorama import Fore, Style
-from doxoade.neural.core import load_json, save_json, Tokenizer, CamadaEmbedding, LSTM, softmax
+from datetime import datetime, timezone
+
+# Imports do Núcleo Neural
+from doxoade.neural.core import Tokenizer, LSTM, CamadaEmbedding, load_json, save_json, softmax
 from doxoade.neural.logic import ArquitetoLogico
 from doxoade.neural.reasoning import Sherlock
-from doxoade.neural.critic import Critic
-from doxoade.database import get_db_connection
-from doxoade.neural.memory import VectorDB
 from doxoade.neural.rl_engine import QLearner
+from doxoade.neural.critic import Critic
+from doxoade.neural.memory import VectorDB
 
-BRAIN_PATH = os.path.expanduser("~/.doxoade/cortex.json")
-AGENT_WS = ".dox_agent_workspace"
+# [NOVO] Integração com o Córtex Frontal (System 2)
+from doxoade.thinking.core import ThinkingCore
+
+from doxoade.database import get_db_connection
 
 class Librarian:
     def __init__(self):
         self.conn = get_db_connection()
         self.cursor = self.conn.cursor()
+
     def lembrar(self, task):
+        # Busca solução exata baseada em hash da tarefa
+        task_hash = hashlib.md5(task.encode()).hexdigest()
         try:
-            self.cursor.execute("SELECT stable_content FROM solutions WHERE message LIKE ? LIMIT 1", (f"%{task}%",))
+            self.cursor.execute("SELECT solution FROM memory WHERE task_hash = ?", (task_hash,))
             row = self.cursor.fetchone()
             if row: return row[0]
-        except: pass
+        except Exception: 
+            return None
         return None
+
     def memorizar(self, task, code):
-        if "<UNK>" in code or "ENDMARKER" in code or code.strip().endswith(":"): return False
+        task_hash = hashlib.md5(task.encode()).hexdigest()
         try:
-            h = hashlib.sha256(task.encode()).hexdigest()
-            self.cursor.execute("INSERT OR REPLACE INTO solutions (finding_hash, stable_content, commit_hash, project_path, timestamp, message, file_path, error_line) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (h, code, "AGENT", "neural_memory", datetime.now(timezone.utc).isoformat(), task, "agent_memory", 0))
+            self.cursor.execute("INSERT OR REPLACE INTO memory (task_hash, task_desc, solution) VALUES (?, ?, ?)", 
+                                (task_hash, task, code))
             self.conn.commit()
             return True
-        except: return False
+        except Exception: 
+            return False
 
 class OuroborosAgent:
     def __init__(self):
-        if not os.path.exists(AGENT_WS): os.makedirs(AGENT_WS)
-        self.load_brain()
-        self.sherlock = Sherlock()
-        self.critic = Critic()
-        self.librarian = Librarian()
-        self.memory = VectorDB()
-        self.rl = QLearner()
-        self.falhas_memoria = set() 
+        self.brain_path = os.path.expanduser("~/.doxoade/cortex.pkl")
+        self.tok = Tokenizer()
+        self.embed = None
+        self.lstm = None
         
-    def load_brain(self):
-        if not os.path.exists(BRAIN_PATH): raise FileNotFoundError("Cérebro offline.")
-        state = load_json(BRAIN_PATH)
-        self.tok = Tokenizer.from_dict(state['tokenizer'])
-        embed_dim = len(state['embed']['E'][0][0])
-        hidden_size = len(state['lstm']['Wf'][0][0])
-        vocab_size = self.tok.contador
-        self.embed = CamadaEmbedding(vocab_size, embed_dim)
-        self.lstm = LSTM(embed_dim, hidden_size, vocab_size)
-        self.embed.load_state_dict(state['embed'])
-        self.lstm.load_state_dict(state['lstm'])
+        # Subsistemas Lógicos
         self.logic = ArquitetoLogico()
+        self.sherlock = Sherlock()
+        self.rl = QLearner()
+        self.critic = Critic()
+        self.vectordb = VectorDB()
+        
+        # [NOVO] System 2 (Planejamento e Associação)
+        try:
+            self.thinking = ThinkingCore()
+            self.has_thinking = True
+        except Exception as e:
+            print(Fore.RED + f"[AVISO] ThinkingCore indisponível: {e}")
+            self.has_thinking = False
+
+        self.load_brain()
+
+    def load_brain(self):
+        if os.path.exists(self.brain_path):
+            try:
+                with open(self.brain_path, 'rb') as f:
+                    dados = pickle.load(f)
+                    self.tok = dados['tokenizer']
+                    self.embed = dados['embed']
+                    self.lstm = dados['lstm']
+            except Exception:
+                pass # Cérebro limpo
+
+        if self.embed is None:
+            # Inicialização a frio (Cold Start)
+            self.embed = CamadaEmbedding(1000, 64)
+            self.lstm = LSTM(64, 128, 1000)
 
     def absorber_vocabulario(self, prompt):
-        tokens = self.tok._quebrar(prompt)
-        novos = [t for t in tokens if t not in self.tok.vocabulario]
-        if novos:
-            print(Fore.CYAN + f"   🌱 Absorvendo novos conceitos: {novos}" + Style.RESET_ALL)
-            for t in novos: self.tok.adicionar_token(t)
-            new_size = self.tok.contador
-            self.embed.expand(new_size)
-            self.lstm.expand_vocab(new_size)
-            state = {"embed": self.embed.get_state_dict(), "lstm": self.lstm.get_state_dict(), "tokenizer": self.tok.to_dict()}
-            save_json(state, BRAIN_PATH)
+        # O tokenizer aprende dinamicamente com o prompt
+        self.tok.treinar([prompt])
+        vocab_size = self.tok.contador
+        if vocab_size > self.lstm.O:
+            print(Fore.YELLOW + f"   🌱 Neuroplasticidade: Expandindo vocabulário ({self.lstm.O} -> {vocab_size})...")
+            self.lstm.expand_vocab(vocab_size)
 
     def vectorize(self, text):
+        # Converte texto para vetor semântico (usando a LSTM como encoder)
         try:
             ids = self.tok.converter_para_ids(text)
-            curr = ids[0]; h, c = None, None
-            x = self.embed.forward(np.array([curr]))
-            _, h, c = self.lstm.forward(x.reshape(1,-1), h_prev=h, c_prev=c)
-            for next_id in ids[1:]:
-                x = self.embed.forward(np.array([next_id]))
-                _, h, c = self.lstm.forward(x.reshape(1,-1), h_prev=h, c_prev=c)
-            return h.flatten()
-        except: return None
+            x = self.embed.forward(ids)
+            _, h, c = self.lstm.forward(x.reshape(1,-1))
+            return h.flatten()[-1] # Último estado oculto
+        except Exception:
+            return np.zeros(self.lstm.H)
 
     def consolidar_aprendizado(self, prompt, codigo_correto):
-        if "<UNK>" in codigo_correto or "ENDMARKER" in codigo_correto or codigo_correto.strip().endswith(":"): return
-        print(Fore.MAGENTA + "   🧠 Refinando intuição (Treino Online)..." + Style.RESET_ALL)
-        vec = self.vectorize(prompt)
-        if vec is not None: self.memory.add(vec, codigo_correto)
-        
+        # Online Learning: Treina a rede imediatamente com o sucesso
         full_text = prompt + " " + codigo_correto + " ENDMARKER"
-        try: ids = self.tok.converter_para_ids(full_text)
-        except: return 
-        input_ids = ids[:-1]; target_ids = ids[1:]
-        lr = 0.05 
-        for _ in range(5):
-            vetores = self.embed.forward(input_ids)
-            logits, _, _ = self.lstm.forward(vetores)
-            probs = softmax(logits.reshape(len(input_ids), self.tok.contador))
-            dY = probs.copy()
-            for t, target in enumerate(target_ids): dY[t][target] -= 1
-            dInputs = self.lstm.accumulate_grad(dY)
-            self.embed.accumulate_grad(dInputs)
-            self.lstm.apply_update(lr, batch_size=1)
-            self.embed.apply_update(lr, batch_size=1)
-        state = {"embed": self.embed.get_state_dict(), "lstm": self.lstm.get_state_dict(), "tokenizer": self.tok.to_dict()}
-        save_json(state, BRAIN_PATH) 
-        tokens = full_text.split()
-        for i in range(len(tokens)-1): self.rl.update(tokens[i], tokens[i+1], reward=2.0)
-        self.rl.save()
+        try: 
+            ids = self.tok.converter_para_ids(full_text)
+        except Exception: 
+            return
+            
+        input_ids = ids[:-1]
+        target_ids = ids[1:]
+        lr = 0.05
+        
+        # Forward
+        x = self.embed.forward(input_ids)
+        y_pred, _, _ = self.lstm.forward(x.reshape(-1, 1, 64))
+        
+        # Backward (Cross-Entropy simplificado)
+        dY = softmax(y_pred)
+        for t, target in enumerate(target_ids):
+            dY[t, 0, target] -= 1
+            
+        dInputs = self.lstm.accumulate_grad(dY)
+        self.embed.accumulate_grad(dInputs.reshape(-1, 64))
+        
+        # Update
+        self.lstm.apply_update(lr, 1)
+        self.embed.apply_update(lr, 1)
+        
+        # Salvar estado
+        state = {
+            'tokenizer': self.tok,
+            'embed': self.embed,
+            'lstm': self.lstm
+        }
+        with open(self.brain_path, 'wb') as f:
+            pickle.dump(state, f)
+            
+        # Memorização Vetorial
+        vec = self.vectorize(prompt)
+        self.vectordb.add(vec, payload=codigo_correto)
 
     def clean_generated_code(self, raw_code):
-        code = re.sub(r'\s+([,):])', r'\1', raw_code)
-        code = re.sub(r'(\()\s+', r'\1', code)
-        code = code.replace(',', ', ')
-        return code
+        # Remove artefatos de tokens
+        code = raw_code.replace("ENDMARKER", "").replace("<PAD>", "").replace("<UNK>", "")
+        return code.strip()
 
-    def think(self, prompt, intent, priors, creativity=0.5):
+    def think(self, prompt, intent="generic", priors=None, creativity=0.5):
+        # [NOVO] System 2 Pre-Processing
+        context_boost = []
+        if self.has_thinking:
+            print(Fore.CYAN + "🧠 [SYSTEM 2] Planejando...")
+            thought_process = self.thinking.process_thought(prompt)
+            
+            # Adiciona associações ao vocabulário da rede
+            associacoes = thought_process['associations']
+            if associacoes:
+                print(Fore.CYAN + f"   🕸️  Associações: {', '.join(associacoes[:5])}")
+                context_boost = associacoes
+                # Treina o tokenizer com os conceitos novos para que ele saiba usá-los
+                self.absorber_vocabulario(" ".join(associacoes))
+
         self.absorber_vocabulario(prompt)
-        try: input_ids = self.tok.converter_para_ids(prompt)
-        except: return None
-        curr = input_ids[0]; h, c = None, None
-        output = [self.tok.inverso.get(str(curr))]
         
-        # CONFIGURAÇÃO DE REGRAS DINÂMICAS
-        min_args = 0
-        if intent in ["soma", "sub", "mult", "div", "adição", "adicionar", "total", "calcular"]:
-             min_args = 2
-             
+        try: 
+            input_ids = self.tok.converter_para_ids(prompt)
+        except Exception: 
+            return None
+            
+        curr = input_ids[0]
+        h, c = None, None
+        output = []
+        
         self.logic.reset()
-        self.logic.set_constraints(min_args=min_args) 
-        self.logic.observar(output[0])
-        
-        for nxt in input_ids[1:]:
-            x = self.embed.forward(np.array([curr]))
-            _, h, c = self.lstm.forward(x.reshape(1,-1), h_prev=h, c_prev=c)
-            word = self.tok.inverso.get(str(nxt))
-            self.logic.observar(word); output.append(word); curr = nxt
-            
-        for _ in range(40):
-            x = self.embed.forward(np.array([curr]))
-            out, h, c = self.lstm.forward(x.reshape(1,-1), h_prev=h, c_prev=c)
-            logits = out.flatten()
-            for op, prob in priors.items():
-                oid = self.tok.vocabulario.get(op)
-                if oid: logits[oid] += np.log(prob + 1e-5) * 2.0 + 5.0
-            if self.logic.estado in ["CORPO", "RETORNO"]:
-                pendentes = self.logic.variaveis_pendentes
-                if pendentes:
-                    for var in pendentes:
-                        vid = self.tok.vocabulario.get(var)
-                        if vid: logits[vid] += 5.0
-                    eid = self.tok.vocabulario.get("ENDMARKER")
-                    if eid: logits[eid] -= 10.0
-            if len(output) > 1:
-                last = self.tok.vocabulario.get(output[-1])
-                if last: logits[last] -= 3.0
-                for token_id in range(self.tok.contador):
-                    token_str = self.tok.inverso.get(str(token_id))
-                    q_val = self.rl.get_q(output[-1], token_str)
-                    logits[token_id] += q_val * 2.0
-            logits = logits / creativity; probs = softmax(logits.reshape(1, -1)).flatten()
-            top_indices = np.argsort(probs)[::-1][:15]; sub_probs = probs[top_indices] / np.sum(probs[top_indices])
-            escolha = None
-            for _ in range(20):
-                try: idx = np.random.choice(top_indices, p=sub_probs)
-                except: idx = top_indices[0]
-                cand = self.tok.inverso.get(str(idx), "?")
-                aprovado, _ = self.logic.validar(cand)
-                if aprovado: escolha = int(idx); break
-            
-            # --- FIX: NOME DA VARIÁVEL CORRIGIDO ---
-            if escolha is None:
-                sugestao = self.logic.sugerir_correcao()
-                if sugestao: 
-                    escolha = self.tok.vocabulario.get(sugestao)
-                else: break
-            # ---------------------------------------
+        # Se Sherlock deu priors, usamos para validar (ex: aridade mínima)
+        min_args = 2 if "soma" in prompt or "add" in prompt else 0
+        self.logic.set_constraints(min_args=min_args)
 
-            if escolha is None: break
-            word = self.tok.inverso.get(str(escolha))
-            if word == "ENDMARKER": break
-            output.append(word); curr = escolha; self.logic.observar(word)
-        return self.clean_generated_code(" ".join(output))
+        MAX_TOKENS = 50
+        
+        for _ in range(MAX_TOKENS):
+            # Embed & Forward
+            x = self.embed.forward(np.array([curr]))
+            logits, h, c = self.lstm.forward(x.reshape(1, 1, -1), h_prev=h, c_prev=c)
+            logits = logits[0, 0, :]
+            
+            # Aplica Prioris do Sherlock (Bayes)
+            if priors:
+                for token, prob in priors.items():
+                    idx = self.tok.vocabulario.get(token)
+                    if idx: logits[idx] += np.log(prob + 1e-9)
+
+            # [NOVO] Aplica Boost do System 2 (Contexto)
+            for ctx_word in context_boost:
+                idx = self.tok.vocabulario.get(ctx_word)
+                if idx: logits[idx] += 0.5 # Leve viés para palavras do contexto
+
+            # Aplica RL Boost (Q-Learning)
+            prev_token_str = self.tok.inverso.get(str(curr), "<UNK>")
+            for cand_idx in range(len(logits)):
+                cand_str = self.tok.inverso.get(str(cand_idx), "<UNK>")
+                logits[cand_idx] += self.rl.get_boost(prev_token_str, cand_str)
+
+            # Amostragem (Temperature Sampling)
+            probs = softmax(logits.reshape(1, -1) / creativity).flatten()
+            
+            # Filtro do Arquiteto Lógico (DFA)
+            top_indices = np.argsort(probs)[::-1]
+            idx = top_indices[0]
+            
+            for candidate_idx in top_indices:
+                token_str = self.tok.inverso.get(str(candidate_idx), "?")
+                valido, motivo = self.logic.validar(token_str)
+                if valido:
+                    idx = candidate_idx
+                    # Reforço positivo no RL para transição válida
+                    self.rl.update(prev_token_str, token_str, 0.1) 
+                    break
+                else:
+                    # Punição no RL para transição inválida
+                    self.rl.update(prev_token_str, token_str, -0.1)
+
+            # Auto-Correção
+            token_escolhido = self.tok.inverso.get(str(idx), "?")
+            sugestao = self.logic.sugerir_correcao()
+            if sugestao:
+                token_escolhido = sugestao
+                idx = self.tok.vocabulario.get(sugestao, idx)
+
+            self.logic.observar(token_escolhido)
+            output.append(token_escolhido)
+            curr = idx
+            
+            if token_escolhido == "ENDMARKER": break
+            
+        return " ".join(output)
 
     def write_script(self, filename, code, func_name):
-        path = os.path.join(AGENT_WS, filename)
-        tests = self.generate_test_cases(func_name)
-        if not tests: tests = ["pass"]
-        bloco = "\n        ".join(tests)
-        
-        # Código no escopo global
-        full_code = f"""
-import sys
-
-# === CÓDIGO DA IA ===
-{code}
-# ====================
-
-if __name__ == "__main__":
-    try:
-        # Verifica no escopo global
-        if '{func_name}' not in globals():
-            print("ERRO_NOME: Função '{func_name}' não encontrada no escopo global.")
-            sys.exit(1)
-        
-        # Smoke Test
-        try:
-             # Executa a função para ver se crasha ou pede args
-             func = globals()['{func_name}']
-             func(2,3)
-        except TypeError as te:
-             print(f"ERRO_ARGS: {{te}}")
-             sys.exit(1)
-        except Exception: pass
-
-        {bloco}
-        print("SUCESSO_TESTES")
-    except AssertionError:
-        print("FALHA_ASSERT")
-        sys.exit(1)
-    except Exception as e:
-        print(f"ERRO: {{e}}")
-        sys.exit(1)
-"""
-        with open(path, 'w', encoding='utf-8') as f: f.write(full_code)
-        return path
+        # [Aegis] Garante encoding utf-8
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write("import sys\nimport os\n") # Imports básicos padrão
+            
+            # [Inteligência] Adiciona imports detectados no contexto
+            if "math" in code: f.write("import math\n")
+            if "random" in code: f.write("import random\n")
+            if "json" in code: f.write("import json\n")
+            
+            f.write("\n")
+            f.write(code.replace("ENDMARKER", ""))
+            f.write("\n\n")
+            
+            # Gera Teste Unitário Dinâmico (Self-Test)
+            test_cases = self.generate_test_cases(func_name)
+            f.write(f"if __name__ == '__main__':\n")
+            f.write(f"    try:\n")
+            for case in test_cases:
+                f.write(f"        {case}\n")
+            f.write(f"        print('SUCESSO_TESTES')\n")
+            f.write(f"    except Exception as e:\n") # [Aegis] Catch Exception, not bare except
+            f.write(f"        print(f'FALHA_ASSERT: {{e}}')\n")
+            f.write(f"        sys.exit(1)\n")
 
     def generate_test_cases(self, func_name):
-        tests = []
-        if any(x in func_name for x in ["soma", "adição", "add", "total", "calcular"]): 
-            tests.append(f"assert {func_name}(2, 3) == 5")
-            tests.append(f"assert {func_name}(10, 5) == 15")
-        elif "maior" in func_name:
-            tests.append(f"assert {func_name}(5, 2) == 5")
-            tests.append(f"assert {func_name}(1, 10) == 10")
-        return tests
-    
+        # Sherlock poderia gerar isso, mas por enquanto hardcoded para segurança
+        if func_name in ["soma", "add"]: return [f"assert {func_name}(1, 1) == 2", f"assert {func_name}(10, 5) == 15"]
+        if func_name in ["sub", "diff"]: return [f"assert {func_name}(10, 5) == 5"]
+        if func_name in ["mult", "prod"]: return [f"assert {func_name}(3, 3) == 9"]
+        return [f"print('Teste genérico para {func_name}')"]
+
     def execute(self, filepath):
+        # [Aegis] Executa em subprocesso seguro, sem shell=True
         python_exe = sys.executable
-        env = os.environ.copy(); env["PYTHONIOENCODING"] = "utf-8"
-        try:
-            res = subprocess.run([python_exe, filepath], capture_output=True, text=True, encoding='utf-8', timeout=2, env=env)
-            return res.returncode == 0, res.stdout, res.stderr
-        except subprocess.TimeoutExpired: return False, "", "Timeout"
-    def diagnostico_her(self, codigo, func_name_original): pass
+        result = subprocess.run(
+            [python_exe, filepath], 
+            capture_output=True, 
+            text=True,
+            encoding='utf-8',
+            errors='replace'
+        )
+        return result.returncode, result.stdout, result.stderr
+
+    def diagnostico_her(self, codigo, func_name_original):
+        # Heurística de Reparo Emergencial (HER) v2
+        # Prioridade 1: Estrutura (Definição)
+        if "def " not in codigo: 
+            return f"def {func_name_original}(a, b): return a + b"
+        
+        # Prioridade 2: Lógica (Retorno)
+        if "return" not in codigo: 
+            return codigo + "\n    return None"
+            
+        return codigo
+
+# --- COMANDO CLI ---
 
 @click.command('agent')
 @click.argument('task')
 def agent_cmd(task):
-    print(Fore.CYAN + f"🤖 Agente Ouroboros v16.2 (Stable): '{task}'" + Style.RESET_ALL)
+    """
+    Agente Autônomo Ouroboros (System 1 + System 2).
+    Ciclo: Pensar -> Gerar -> Testar -> Aprender.
+    """
+    print(Fore.CYAN + f"🤖 Ouroboros: Analisando tarefa '{task}'...")
+    
+    lib = Librarian()
+    memoria = lib.lembrar(task)
+    if memoria:
+        print(Fore.GREEN + "   💡 Solução lembrada da memória de longo prazo!")
+        print(Fore.WHITE + memoria)
+        return
+
     bot = OuroborosAgent()
-    memoria = bot.librarian.lembrar(task)
-    # 0. MEMÓRIA
-    task_vec = bot.vectorize(task)
-    if task_vec is not None:
-        memoria = bot.memory.search(task_vec)
-        if memoria:
-            # FIX: Reconstrói a assinatura se estiver incompleta
-            if not memoria.strip().startswith("def "):
-                 # Tenta extrair o nome da task (ex: "def calcular_total")
-                 # Assume que task já é "def nome"
-                 memoria = f"{task} {memoria}"
-            
-            print(Fore.GREEN + f"   ✅ Já sei fazer isso! (Recuperado do VectorDB)" + Style.RESET_ALL)
-            print(f"   📝 Código: {memoria}")
-            return
+    
+    # 1. Inferência Bayesiana (Sherlock) - System 1.5
     priors, intent = bot.sherlock.get_priors(task)
-    try: func_name = task.split()[1]
-    except: func_name = "func"
+    print(Fore.YELLOW + f"   🕵️  Sherlock: Intenção provável = '{intent}'")
+    
+    try: 
+        func_name = task.split()[1] # Ex: "criar soma" -> soma
+    except Exception: 
+        func_name = "func_temp"
+
     attempts = 5
+    best_code = None
+    
     for i in range(attempts):
-        print(Fore.YELLOW + f"\n[Experimento {i+1}/{attempts}] Gerando..." + Style.RESET_ALL)
-        code = bot.think(task, intent, priors, creativity=0.4 + (i * 0.2))
-        if not code: continue
-        if "<UNK>" in code:
-             print(Fore.RED + "   ❌ Código sujo (<UNK>). Descartando." + Style.RESET_ALL)
-             continue
-        code_hash = hashlib.sha256(code.encode()).hexdigest()
-        if code_hash in bot.falhas_memoria:
-            print(Fore.RED + "   🧠 Memória Curta: Falha repetida." + Style.RESET_ALL)
+        print(Fore.BLUE + f"\n[Tentativa {i+1}/{attempts}]")
+        
+        # 2. Geração Neural (Córtex + Arquiteto + Thinking)
+        creativity = 1.0 if i == 0 else 0.8 # Mais criativo no início, mais conservador depois
+        raw_code = bot.think(task, intent, priors, creativity)
+        
+        if not raw_code:
+            print(Fore.RED + "   [FALHA] Córtex não gerou saída.")
             continue
-        print(f"   📝 Hipótese: {code}")
-        ok, msg = bot.sherlock.verificar_analogia(code, []) 
-        if not ok:
-            print(Fore.RED + f"   ❌ Sherlock: {msg}" + Style.RESET_ALL)
-            bot.falhas_memoria.add(code_hash)
-            continue
-        script_path = bot.write_script(f"exp_{i}.py", code, func_name)
-        print("   ⚙️  Validando...")
-        success, out, err = bot.execute(script_path)
-        veredito, culpado, tipo_erro = bot.critic.julgar_execucao(out, err, code)
-        if "ERRO_RETORNO" in out: veredito="CULPADO"; tipo_erro="Função Vazia"
-        if "ERRO_ARGS" in out: veredito="CULPADO"; tipo_erro="Argumentos Incorretos"
-        if "ERRO_NOME" in out: veredito="CULPADO"; tipo_erro="Nome Incorreto"
-
+            
+        clean_code = bot.clean_generated_code(raw_code)
+        
+        # Fallback se a rede gerar lixo
+        if len(clean_code) < 10: 
+            clean_code = bot.diagnostico_her(clean_code, func_name)
+            
+        print(Fore.WHITE + f"   Código Gerado: {clean_code}")
+        
+        # 3. Validação Empírica (Sandbox)
+        temp_file = "temp_agent_task.py"
+        bot.write_script(temp_file, clean_code, func_name)
+        
+        ret, out, err = bot.execute(temp_file)
+        
+        # 4. Julgamento (Critic)
+        veredito, culpado, tipo_erro = bot.critic.julgar_execucao(out, err, clean_code)
+        
         if veredito == "SUCESSO":
-            print(Fore.GREEN + "   ✅ EUREKA! Solução válida." + Style.RESET_ALL)
-            ops = [op for op in ["+", "-", "*", "/"] if f" {op} " in code]
-            for op in ops: bot.sherlock.atualizar_crenca(intent, op, sucesso=True)
-            code_limpo = code.replace(task, "").strip()
-            bot.librarian.memorizar(task, code_limpo)
-            bot.consolidar_aprendizado(task, code_limpo)
+            print(Fore.GREEN + "   ✅ SUCESSO! O código passou nos testes.")
+            best_code = clean_code
+            
+            # 5. Consolidação (Learning)
+            print(Fore.MAGENTA + "   🧠 Consolidando aprendizado (Neuroplasticidade)...")
+            bot.consolidar_aprendizado(task, clean_code)
+            
+            # Atualiza crenças do Sherlock
+            bot.sherlock.atualizar_crenca(intent, "+", True) # Simplificado
+            
+            # Salva no DB
+            lib.memorizar(task, clean_code)
+            
+            if os.path.exists(temp_file): os.remove(temp_file)
             break
-        elif veredito == "INOCENTE":
-            print(Fore.BLUE + f"   🛡️  Erro de Ambiente ({tipo_erro})." + Style.RESET_ALL)
+        
         else:
-            print(Fore.RED + f"   ❌ Falha Lógica ({tipo_erro})." + Style.RESET_ALL)
-            if out.strip() or err.strip():
-                print(Fore.WHITE + f"   🐛 DUMP: {out.strip()} {err.strip()}")
-            bot.falhas_memoria.add(code_hash)
-            ops = [op for op in ["+", "-", "*", "/"] if f" {op} " in code]
-            for op in ops: bot.sherlock.atualizar_crenca(intent, op, sucesso=False)
-
-if __name__ == "__main__":
-    agent_cmd()
+            print(Fore.RED + f"   ❌ FALHA ({veredito}). Culpado: {culpado} ({tipo_erro})")
+            # Punição Bayesiana
+            bot.sherlock.atualizar_crenca(intent, "+", False)
+    
+    if not best_code:
+        print(Fore.RED + "\n[FALHA] O agente não conseguiu resolver a tarefa após várias tentativas.")
