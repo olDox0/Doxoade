@@ -145,7 +145,7 @@ def _enrich_findings_with_solutions(findings):
                     finding['suggestion_content'] = exact['stable_content']
                     finding['suggestion_line'] = exact['error_line']
                     finding['suggestion_source'] = "EXACT"
-                    continue # Se achou exata, pula o resto
+                    continue 
 
             # --- 2. Tenta Templates do Banco (Gênese Aprendido) ---
             template_found = False
@@ -158,7 +158,8 @@ def _enrich_findings_with_solutions(findings):
                     .replace('<VAR>', '(.+?)')
                     .replace('<LINE>', r'(\d+)'))
                 
-                if re.fullmatch(pattern_regex, message):
+                match = re.fullmatch(pattern_regex, message)
+                if match:
                     # Aplica lógica do template para VISUALIZAÇÃO
                     try:
                         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -173,14 +174,37 @@ def _enrich_findings_with_solutions(findings):
                         new_content = None
                         action = "Aplicar correção"
                         
+                        # [CHANGE] Terminologia mais segura
                         if sol_type == "REMOVE_LINE":
-                            # Simulação visual de remoção (mostra linha vazia ou comentário)
                             new_content = f"# [DOX-UNUSED] {lines[idx]}" 
-                            action = "Remover linha"
+                            action = "Modificar linha (Desativar)"
+                        
                         elif sol_type == "REMOVE_F_PREFIX":
                             new_content = re.sub(r'\bf(["\'])', r'\1', lines[idx])
-                            action = "Remover prefixo 'f'"
+                            action = "Modificar linha (Remover prefixo 'f')"
                         
+                        # [NOVO] Simulação visual de Smart Import
+                        elif sol_type == "FIX_UNUSED_IMPORT":
+                            # Tenta extrair o nome da variável do erro ou usa <VAR> se capturado
+                            # Regex comum: "'VarName' imported but unused"
+                            var_match = re.search(r"'([^']+)'", message)
+                            if var_match:
+                                var_name = var_match.group(1).split('.')[-1]
+                                original_line = lines[idx]
+                                # Simula a remoção da string
+                                sim_line = original_line.replace(f", {var_name}", "").replace(f"{var_name}, ", "").replace(var_name, "")
+                                # Limpeza básica de vírgulas órfãs
+                                sim_line = re.sub(r'import\s*,', 'import ', sim_line)
+                                sim_line = re.sub(r',\s*$', '', sim_line.rstrip()) + '\n'
+                                
+                                # Se a linha ficou vazia (só sobrou o import), vira comentário
+                                if sim_line.strip() == "from typing import" or sim_line.strip() == "import":
+                                    new_content = f"# [DOX-UNUSED] {original_line}"
+                                    action = "Modificar linha (Desativar Import)"
+                                else:
+                                    new_content = sim_line
+                                    action = "Modificar linha (Remover Símbolo)"
+
                         if new_content:
                             finding['suggestion_content'] = new_content
                             finding['suggestion_line'] = line_num
@@ -188,12 +212,11 @@ def _enrich_findings_with_solutions(findings):
                             finding['suggestion_action'] = action
                             template_found = True
                             break
-                    except: pass
+                    except Exception: pass
             
             if template_found: continue
 
             # --- 3. Inteligência Nativa (Hardcoded Rules) ---
-            # Para casos críticos que queremos garantir mesmo sem treino prévio
             
             # Regra: Except Genérico -> Except Exception
             if "Uso de 'except:' genérico detectado" in message:
@@ -203,7 +226,6 @@ def _enrich_findings_with_solutions(findings):
                     idx = line_num - 1
                     if 0 <= idx < len(lines):
                         original = lines[idx]
-                        # Simula a correção
                         new_line = re.sub(r'except\s*:', 'except Exception:', original, count=1)
                         
                         if new_line != original:
@@ -223,7 +245,7 @@ def _enrich_findings_with_solutions(findings):
                         finding['suggestion_content'] = f"# [DOX-UNUSED] {lines[idx]}"
                         finding['suggestion_line'] = line_num
                         finding['suggestion_source'] = "REGRA NATIVA"
-                        finding['suggestion_action'] = "Comentar redefinição"
+                        finding['suggestion_action'] = "Modificar linha (Desativar)"
                  except: pass
 
     finally:

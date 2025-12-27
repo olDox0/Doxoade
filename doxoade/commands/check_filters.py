@@ -1,4 +1,6 @@
 # doxoade/commands/check_filters.py
+
+import os
 from ..shared_tools import _get_code_snippet
 
 SILENCERS = {
@@ -18,6 +20,10 @@ QA_TAGS = {
     'QA-CHECK': 'WARNING'
 }
 
+# Arquivos que agem como Fachada (Facade Pattern)
+# Neles, "imported but unused" é uma feature, não um bug.
+FACADE_FILES = {'shared_tools.py', '__init__.py'}
+
 def filter_and_inject_findings(findings, file_path):
     # [FIX] Proteção robusta: Se não houver arquivo, retorna a lista original sem processar TODOs
     if not file_path:
@@ -31,8 +37,24 @@ def filter_and_inject_findings(findings, file_path):
 
     final_findings = []
     
-    # 1. Filtra erros silenciados
+    # Identifica se é um arquivo de fachada
+    filename = os.path.basename(file_path)
+    is_facade = filename in FACADE_FILES
+
+    # 1. Filtra erros silenciados e falsos positivos estruturais
     for f in findings:
+        message = f.get('message', '').lower()
+        category = f.get('category', '').upper()
+        
+        # --- FILTRO DE FACHADA (FACADE FILTER) ---
+        # Se for shared_tools ou __init__, ignora "imported but unused"
+        if is_facade:
+            if 'imported but unused' in message or 'unused import' in message:
+                continue
+            # Ignora redefinições se for apenas re-exportação
+            if 'redefinition of' in message:
+                continue
+
         line_num = f.get('line')
         if not line_num or not isinstance(line_num, int) or line_num > len(lines):
             final_findings.append(f)
@@ -41,6 +63,7 @@ def filter_and_inject_findings(findings, file_path):
         line_content = lines[line_num - 1]
         is_silenced = False
         
+        # Verifica tags de silenciamento na linha (# noqa, etc)
         if '#' in line_content:
             comment = line_content.split('#', 1)[1].strip().lower()
             for tag in SILENCERS:
