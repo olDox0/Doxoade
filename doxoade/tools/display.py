@@ -1,10 +1,22 @@
 # doxoade/tools/display.py
 import click
-import re
+import re, sys
 from datetime import datetime
 from colorama import Fore, Style
 from collections import Counter
 from .analysis import _get_code_snippet_from_string
+
+def _get_icon(emoji, fallback):
+    try:
+        # Tenta codificar para o output atual. Se falhar, usa fallback ASCII.
+        emoji.encode(sys.stdout.encoding or 'ascii')
+        return emoji
+    except UnicodeEncodeError:
+        return fallback
+
+# Definição de Ícones Seguros
+ICON_LIGHTBULB = _get_icon("💡", "[!]")
+ICON_WRENCH = _get_icon("🛠", "->")
 
 def _present_results(output_format, results):
     findings = results.get('findings', [])
@@ -61,16 +73,16 @@ def _print_finding_details(finding):
 
     if finding.get('import_suggestion'):
         click.echo(Fore.CYAN + Style.BRIGHT + f"\n   > [ABDUÇÃO]")
-        click.echo(Fore.GREEN + f"   💡 SUGESTÃO:\n   > {finding.get('import_suggestion')}")
+        click.echo(Fore.GREEN + f"   {ICON_LIGHTBULB} SUGESTÃO:\n   > {finding.get('import_suggestion')}")
         return
 
     if finding.get('suggestion_content') or finding.get('suggestion_action'):
         source = finding.get('suggestion_source', 'HISTÓRICO')
-        click.echo(Fore.CYAN + Style.BRIGHT + f"\n   💡 SOLUÇÃO CONHECIDA:")
+        click.echo(Fore.CYAN + Style.BRIGHT + f"\n   {ICON_LIGHTBULB} SOLUÇÃO CONHECIDA:")
         click.echo(Fore.GREEN + f"   > Fonte: {source}")
         
         if finding.get('suggestion_action'):
-            click.echo(Fore.YELLOW + f"   🛠  AÇÃO: {finding.get('suggestion_action')}")
+            click.echo(Fore.YELLOW + f"   {ICON_WRENCH}  AÇÃO: {finding.get('suggestion_action')}")
             
         if snippet and finding.get('suggestion_line') and finding.get('suggestion_content'):
             suggestion_line = finding.get('suggestion_line')

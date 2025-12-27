@@ -48,16 +48,15 @@ def _load_cache():
 
 def _save_cache(data):
     # [ADICIONE ESTE PRINT]
-    print(f"[DEBUG_TRACE] Tentando salvar cache. Itens na memória: {len(data)}")
+    #print(f"[DEBUG_TRACE] Tentando salvar cache. Itens na memória: {len(data)}")
     
     try:
         if not CACHE_DIR.exists():
             CACHE_DIR.mkdir(exist_ok=True)
         with open(CHECK_CACHE_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2)
-        print("[DEBUG_TRACE] Salvo com sucesso.") # Confirmação
+        #print("[DEBUG_TRACE] Salvo com sucesso.") # Confirmação
     except Exception as e:
-        # ISSO É CRUCIAL: Precisamos ver o erro se falhar!
         print(f"[ERRO CRÍTICO NO SAVE] {e}")
 
 # --- FUNÇÕES DE SUPORTE ÀS SONDAS ---

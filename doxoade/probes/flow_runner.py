@@ -6,11 +6,24 @@ import inspect
 import datetime
 import json
 
+# Tenta configurar encoding seguro
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception: pass
+
 class FlowTracer:
-    def __init__(self):
+    def __init__(self, watch_var=None):
+        # Estado do Watchpoint
+        self.watch_var = watch_var
+        self.last_val_repr = None
+        self.var_found = False
+        
+        # Estado do Profiler (Matrix Mode/Legado)
+        self.start_time = time.time()
         self.last_time = time.perf_counter()
-        self.last_locals = {}
-        self.last_filename = ""
+        self.last_filename = None  # [FIX] O culpado do último crash
+        self.last_lineno = 0       # [FIX] Prevenindo o próximo crash
         
         # Paleta de Cores (ANSI)
         self.C_RESET = '\033[0m'
@@ -97,6 +110,51 @@ class FlowTracer:
     def trace_calls(self, frame, event, arg):
         if event != 'line':
             return self.trace_calls
+
+        # Lógica do Watchpoint
+        if self.watch_var:
+            if self.watch_var in frame.f_locals:
+                current_val = frame.f_locals[self.watch_var]
+                # Usamos repr() para comparar valor + tipo de forma segura e imutável
+                curr_repr = repr(current_val)
+                
+                # Encurta representações gigantes (como o dict do cache)
+                if len(curr_repr) > 100:
+                    preview = curr_repr[:100] + "..."
+                    # Adiciona meta-info se for dict ou list
+                    if isinstance(current_val, dict):
+                        curr_repr_display = f"<Dict len={len(current_val)}> {preview}"
+                    elif isinstance(current_val, list):
+                        curr_repr_display = f"<List len={len(current_val)}> {preview}"
+                    else:
+                        curr_repr_display = preview
+                else:
+                    curr_repr_display = curr_repr
+
+                if not self.var_found:
+                    self.var_found = True
+                    self.last_val_repr = curr_repr
+                    print(f"👀 [WATCH] Variável '{self.watch_var}' encontrada.")
+                    print(f"   Valor Inicial: {curr_repr_display}")
+                
+                elif curr_repr != self.last_val_repr:
+                    # MUTAÇÃO DETECTADA!
+                    lineno = frame.f_lineno
+                    filename = os.path.basename(frame.f_code.co_filename)
+                    
+                    # Tenta ler a linha do código
+                    try:
+                        import linecache
+                        line_content = linecache.getline(frame.f_code.co_filename, lineno).strip()
+                    except:
+                        line_content = "???"
+
+                    print(f"\n🚨 [MUTAÇÃO] '{self.watch_var}' alterada em {filename}:{lineno}")
+                    print(f"   Code : {line_content}")
+                    print(f"   Novo : {curr_repr_display}")
+                    
+                    self.last_val_repr = curr_repr
+            return self.trace_calls
             
         code = frame.f_code
         filename = code.co_filename
@@ -173,36 +231,61 @@ class FlowTracer:
         
         return self.trace_calls
 
-def run_flow(script_path, args):
-    tracer = FlowTracer()
+def _setup_package_context(script_path):
+    """Permite imports relativos (copiado do debug_probe para consistência)."""
+    abs_path = os.path.abspath(script_path)
+    directory = os.path.dirname(abs_path)
+    package_parts = []
+    current = directory
+    while os.path.exists(os.path.join(current, '__init__.py')):
+        package_parts.insert(0, os.path.basename(current))
+        parent = os.path.dirname(current)
+        if parent == current: break
+        current = parent
+    if current not in sys.path: sys.path.insert(0, current)
+    return ".".join(package_parts) if package_parts else None
+
+def run_flow(script_path, args=None, watch_var=None):
+    abs_path = os.path.abspath(script_path)
+    package_name = _setup_package_context(abs_path)
+    
+    # Prepara argumentos
+    if args:
+        sys.argv = [script_path] + args
+    else:
+        sys.argv = [script_path]
+
+    tracer = FlowTracer(watch_var=watch_var)
+    
+    print(f"--- Iniciando Trace (Watch: {watch_var}) ---")
+    
+    globs = {
+        '__name__': '__main__',
+        '__file__': abs_path,
+        '__package__': package_name
+    }
+
     sys.settrace(tracer.trace_calls)
-    
-    sys.argv = [script_path] + args
-    file_dir = os.path.dirname(os.path.abspath(script_path))
-    if file_dir not in sys.path:
-        sys.path.insert(0, file_dir)
-    
     try:
-        with open(script_path, 'rb') as f:
-            code = compile(f.read(), script_path, 'exec')
-            globs = {
-                '__file__': script_path,
-                '__name__': '__main__',
-                '__package__': None,
-                '__cached__': None,
-            }
+        with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
+            code = compile(f.read(), abs_path, 'exec')
             exec(code, globs) # noqa
+    except SystemExit:
+        pass # Ignora exit() do script alvo
     except Exception as e:
-        print("\n" + "-" * 80)
-        print(f"[FLOW CRASH] O script falhou (Erro do Usuário): {e}")
-        print("-" * 80)
+        sys.settrace(None)
+        print(f"\n[CRASH] O script falhou: {e}")
     finally:
         sys.settrace(None)
-        print(f"\033[90m└{'─'*100}┘\033[0m") # Rodapé da tabela
-        print("\n[FLOW] Finalizado.")
+        print("\n--- Trace Finalizado ---")
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Uso: flow_runner.py <script> [args]")
-        sys.exit(1)
-    run_flow(sys.argv[1], sys.argv[2:])
+    # Exemplo de chamada: python flow_runner.py script.py --watch variavel
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("script")
+    parser.add_argument("--watch", help="Variável para monitorar")
+    parser.add_argument("args", nargs=argparse.REMAINDER) # Captura o resto dos args
+    
+    opts = parser.parse_args()
+    run_flow(opts.script, opts.args, opts.watch)
