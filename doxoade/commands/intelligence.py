@@ -1,132 +1,213 @@
 # doxoade/commands/intelligence.py
 import os
-#import sys
 import json
 import ast
-
+import re
 from datetime import datetime, timezone
 import chardet
-
 import click
 from colorama import Fore
 
 from ..shared_tools import ExecutionLogger, _get_project_config
-#from ..shared_tools import ExecutionLogger, _load_config
+from ..tools.git import _run_git_command
+from ..dnm import DNM
 
-__version__ = "37.2 Alfa (Hardening)"
+__version__ = "38.0 Alfa (Deep Insight)"
 
-def _generate_tree_representation(path, ignore_patterns):
-    """Gera uma representação textual da árvore de diretórios."""
-    tree_lines = []
-    for root, dirs, files in os.walk(path, topdown=True):
-        dirs[:] = [d for d in sorted(dirs) if d not in ignore_patterns]
-        files = [f for f in sorted(files)]
+class InsightVisitor(ast.NodeVisitor):
+    """Extrai inteligência profunda da AST."""
+    def __init__(self):
+        self.classes = []
+        self.functions = []
+        self.imports = []
+        self.todos = []
         
-        level = root.replace(path, '').count(os.sep)
-        indent = ' ' * 4 * (level)
-        tree_lines.append(f"{indent}{os.path.basename(root)}/")
+    def visit_ClassDef(self, node):
+        methods = [n.name for n in node.body if isinstance(n, ast.FunctionDef)]
+        self.classes.append({
+            "name": node.name,
+            "lineno": node.lineno,
+            "docstring": ast.get_docstring(node) or "",
+            "methods": methods,
+            "bases": [ast.unparse(b) for b in node.bases]
+        })
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node):
+        # Ignora métodos dentro de classes (já pegos no visit_ClassDef de forma rasa)
+        # ou pega tudo? Vamos pegar tudo para ter stats completos.
+        args = [a.arg for a in node.args.args]
+        decorators = [ast.unparse(d) for d in node.decorator_list]
+        self.functions.append({
+            "name": node.name,
+            "lineno": node.lineno,
+            "docstring": ast.get_docstring(node) or "",
+            "args": args,
+            "decorators": decorators,
+            "complexity": self._estimate_complexity(node)
+        })
+        self.generic_visit(node)
+
+    def visit_Import(self, node):
+        for alias in node.names:
+            self.imports.append(alias.name)
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node):
+        module = node.module or ""
+        for alias in node.names:
+            self.imports.append(f"{module}.{alias.name}")
+        self.generic_visit(node)
+
+    def _estimate_complexity(self, node):
+        """Estimativa rápida de complexidade ciclomática."""
+        complexity = 1
+        for child in ast.walk(node):
+            if isinstance(child, (ast.If, ast.While, ast.For, ast.ExceptHandler, ast.With)):
+                complexity += 1
+        return complexity
+
+def _extract_todos(content):
+    """Extrai comentários de dívida técnica."""
+    todos = []
+    for i, line in enumerate(content.splitlines(), 1):
+        if "#" in line:
+            comment = line.split("#", 1)[1].strip()
+            # Regex para pegar TODO, FIXME, HACK, etc
+            match = re.match(r'\b(TODO|FIXME|HACK|XXX|BUG)\b[:\s]*(.*)', comment, re.IGNORECASE)
+            if match:
+                tag, text = match.groups()
+                todos.append({
+                    "tag": tag.upper(),
+                    "line": i,
+                    "text": text.strip()
+                })
+    return todos
+
+def _analyze_python_deep(file_path, content):
+    """Realiza a análise profunda do código Python."""
+    try:
+        tree = ast.parse(content, filename=file_path)
+        visitor = InsightVisitor()
+        visitor.visit(tree)
         
-        sub_indent = ' ' * 4 * (level + 1)
-        for f in files:
-            tree_lines.append(f"{sub_indent}{f}")
-    return "\n".join(tree_lines)
+        return {
+            "classes": visitor.classes,
+            "functions": visitor.functions,
+            "imports": sorted(list(set(visitor.imports))),
+            "todos": _extract_todos(content),
+            "loc": len(content.splitlines())
+        }
+    except Exception as e:
+        return {"error": f"AST Parse Error: {str(e)}"}
 
-def _get_file_encoding(file_path):
-    """Detecta a codificação de um arquivo com alta confiança."""
+def _get_git_info(file_path):
+    """Obtém informações do último commit deste arquivo."""
     try:
-        with open(file_path, 'rb') as f:
-            raw_data = f.read(1024)
-            if not raw_data: return 'empty'
-            result = chardet.detect(raw_data)
-            # CORREÇÃO: Usamos .get() para um acesso seguro.
-            return result.get('encoding', 'unknown')
-    except (IOError, OSError):
-        return 'unreadable'
-
-def _extract_python_functions(file_path, logger):
-    """Usa AST para extrair nomes de funções de um arquivo Python."""
-    functions = []
-    try:
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            tree = ast.parse(f.read(), filename=file_path)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef):
-                functions.append({"name": node.name, "line": node.lineno})
-    except (SyntaxError, ValueError) as e:
-        # CORREÇÃO: Assinatura corrigida (severity, message)
-        logger.add_finding('warning', f"Não foi possível analisar AST de: {file_path}", details=str(e))
-    return functions
+        # Formato: Hash|Autor|Data|Mensagem
+        fmt = "%h|%an|%ai|%s"
+        # Precisamos do caminho relativo à raiz do git
+        cmd = ['log', '-n', '1', f'--format={fmt}', '--', file_path]
+        output = _run_git_command(cmd, capture_output=True, silent_fail=True)
+        if output:
+            parts = output.strip().split('|')
+            if len(parts) >= 4:
+                return {
+                    "last_commit_hash": parts[0],
+                    "author": parts[1],
+                    "date": parts[2],
+                    "message": parts[3]
+                }
+    except Exception: pass
+    return None
 
 def _analyze_file_metadata(file_path_str, root_path, logger):
-    """Coleta todos os metadados para um único arquivo."""
+    """Coleta metadados ricos para um único arquivo."""
     try:
         stats = os.stat(file_path_str)
-        file_info = {
-            "path": os.path.relpath(file_path_str, root_path).replace('\\', '/'),
-            "size_bytes": stats.st_size,
-            "created_at_utc": datetime.fromtimestamp(stats.st_ctime, tz=timezone.utc).isoformat(),
-            "modified_at_utc": datetime.fromtimestamp(stats.st_mtime, tz=timezone.utc).isoformat(),
-            "encoding": _get_file_encoding(file_path_str)
-        }
-        if file_path_str.endswith('.py'):
-            # CORREÇÃO: Usamos .get() para uma atribuição segura.
-            file_info["functions"] = _extract_python_functions(file_path_str, logger)
-        return file_info
-    except (FileNotFoundError, OSError) as e:
-        logger.add_finding('warning', f"Não foi possível analisar o arquivo: {file_path_str}", details=str(e))
-        return None
+        rel_path = os.path.relpath(file_path_str, root_path).replace('\\', '/')
+        
+        # Leitura segura
+        content = ""
+        encoding = "utf-8"
+        try:
+            with open(file_path_str, 'rb') as f:
+                raw = f.read()
+                result = chardet.detect(raw)
+                encoding = result.get('encoding', 'utf-8')
+                content = raw.decode(encoding or 'utf-8', errors='replace')
+        except Exception:
+            return None # Pula arquivos binários ou ilegíveis
 
-def _gather_filesystem_data(path, logger, ignore_patterns):
-    """Versão refatorada que delega a análise de arquivo."""
-    click.echo(Fore.WHITE + "Coletando telemetria do sistema de arquivos...")
-    file_list = []
-    for root, dirs, files in os.walk(path, topdown=True):
-        dirs[:] = [d for d in sorted(dirs) if d not in ignore_patterns]
-        for file in sorted(files):
-            file_path_str = os.path.join(root, file)
-            metadata = _analyze_file_metadata(file_path_str, path, logger)
-            if metadata:
-                file_list.append(metadata)
-    return file_list
+        file_info = {
+            "path": rel_path,
+            "size_bytes": stats.st_size,
+            "modified_at_utc": datetime.fromtimestamp(stats.st_mtime, tz=timezone.utc).isoformat(),
+            "language": "python" if file_path_str.endswith(".py") else "text",
+            "git_status": _get_git_info(file_path_str)
+        }
+
+        if file_path_str.endswith('.py'):
+            # Injeta a inteligência profunda
+            deep_data = _analyze_python_deep(file_path_str, content)
+            file_info.update(deep_data)
+        else:
+            # Para outros arquivos, apenas conta linhas
+            file_info["loc"] = len(content.splitlines())
+
+        return file_info
+    except Exception as e:
+        logger.add_finding('warning', f"Erro ao analisar: {file_path_str}", details=str(e))
+        return None
 
 @click.command('intelligence')
 @click.pass_context
-@click.option('--output', '-o', default='doxoade_report.json', help="Nome do arquivo de saída do relatório.")
+@click.option('--output', '-o', default='doxoade_report.json', help="Nome do arquivo de saída.")
 def intelligence(ctx, output):
-    """Gera um dossiê de diagnóstico completo do projeto em formato JSON."""
+    """Gera um dossiê de Inteligência Profunda (Deep Insight) do projeto."""
     path = '.'
     arguments = ctx.params
+    
     with ExecutionLogger('intelligence', path, arguments) as logger:
-        click.echo(Fore.CYAN + "--- [INTELLIGENCE] Gerando dossiê de diagnóstico ---")
-
-        config = _get_project_config(logger)
+        click.echo(Fore.CYAN + "--- [INTELLIGENCE] Gerando Dossiê de Conhecimento ---")
         
-        # CORREÇÃO LÓGICA: Limpar barras finais dos padrões de ignore
-        raw_ignore = config.get('ignore', [])
-        clean_ignore = {item.strip('/\\') for item in raw_ignore}
+        # Usa o DNM para navegação robusta (respeita .gitignore)
+        dnm = DNM(path)
+        files = dnm.scan() # Pega tudo, não só .py, mas respeita ignores
         
-        # Adicionar padrões padrão
-        ignore_patterns = clean_ignore.union({'venv', '.git', '__pycache__', '.pytest_cache', 'doxoade.egg-info'})
+        click.echo(Fore.WHITE + f"   > Analisando {len(files)} arquivos (Estrutura, Semântica, Git)...")
+        
+        analyzed_files = []
+        with click.progressbar(files, label='Processando') as bar:
+            for file_path in bar:
+                data = _analyze_file_metadata(file_path, path, logger)
+                if data:
+                    analyzed_files.append(data)
 
+        # Sumário Executivo
+        total_loc = sum(f.get('loc', 0) for f in analyzed_files)
+        total_todos = sum(len(f.get('todos', [])) for f in analyzed_files if 'todos' in f)
+        
         report_data = {
-            "report_generated_at_utc": datetime.now(timezone.utc).isoformat(),
-            "doxoade_version": __version__,
-            "project_path": os.path.abspath(path),
-            "telemetry": {
-                "directory_tree": _generate_tree_representation(path, ignore_patterns),
-                "filesystem": _gather_filesystem_data(path, logger, ignore_patterns)
-            }
+            "header": {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "doxoade_version": __version__,
+                "project_root": os.path.abspath(path),
+                "metrics": {
+                    "total_files": len(analyzed_files),
+                    "total_loc": total_loc,
+                    "technical_debt_items": total_todos
+                }
+            },
+            "codebase": analyzed_files
         }
         
         try:
             with open(output, 'w', encoding='utf-8') as f:
-                json.dump(report_data, f, indent=4)
-            click.echo(Fore.GREEN + f"\n[OK] Dossiê de diagnóstico salvo em: {output}")
-            # CORREÇÃO: Assinatura corrigida
-            logger.add_finding('info', f"Relatório de inteligência gerado com sucesso em '{output}'.")
+                json.dump(report_data, f, indent=2)
+            click.echo(Fore.GREEN + f"\n[OK] Dossiê salvo em: {output}")
+            click.echo(f"   - LOC Total: {total_loc}")
+            click.echo(f"   - Dívida Técnica: {total_todos} itens")
         except IOError as e:
-            click.echo(Fore.RED + f"\n[ERRO] Falha ao salvar o relatório: {e}")
-            # CORREÇÃO: Assinatura corrigida
-            logger.add_finding('error', "Falha ao escrever o arquivo de relatório.", details=str(e))
-            import sys
+            click.echo(Fore.RED + f"\n[ERRO] Falha ao salvar relatório: {e}")
             sys.exit(1)

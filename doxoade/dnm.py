@@ -2,7 +2,7 @@
 import os
 import pathspec
 from pathlib import Path
-from typing import List, Set, Optional
+from typing import List, Optional
 from doxoade.tools.filesystem import _get_project_config
 
 class DNM:

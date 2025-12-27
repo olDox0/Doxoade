@@ -5,17 +5,17 @@ import re
 import json
 
 def _get_file_hash(file_path):
-    """Calcula o hash SHA256 do conteúdo de um arquivo (Buffer Otimizado)."""
+    """Calcula o hash SHA256 do conteúdo normalizado (CRLF -> LF)."""
     h = hashlib.sha256()
-    # Buffer de 64KB (mais eficiente que 8KB)
-    BUF_SIZE = 65536 
     try:
-        with open(file_path, 'rb') as f:
-            while True:
-                chunk = f.read(BUF_SIZE)
-                if not chunk:
-                    break
-                h.update(chunk)
+        # [FIX] Lê como texto para ignorar diferenças de quebra de linha do SO
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+        
+        # Normaliza para estilo UNIX (LF) antes de hashear
+        # Isso impede que o Git no Windows invalide o cache desnecessariamente
+        content_normalized = content.replace('\r\n', '\n')
+        h.update(content_normalized.encode('utf-8'))
         return h.hexdigest()
     except IOError:
         return None

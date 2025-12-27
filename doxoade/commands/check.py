@@ -6,7 +6,7 @@ import click
 import hashlib
 import sqlite3
 from pathlib import Path
-from colorama import Fore
+from colorama import Fore, Style
 
 # Imports da nova arquitetura (Fachada)
 from ..shared_tools import (
@@ -47,11 +47,18 @@ def _load_cache():
     except Exception: return {}
 
 def _save_cache(data):
+    # [ADICIONE ESTE PRINT]
+    print(f"[DEBUG_TRACE] Tentando salvar cache. Itens na memória: {len(data)}")
+    
     try:
-        CACHE_DIR.mkdir(exist_ok=True)
+        if not CACHE_DIR.exists():
+            CACHE_DIR.mkdir(exist_ok=True)
         with open(CHECK_CACHE_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2)
-    except Exception: pass
+        print("[DEBUG_TRACE] Salvo com sucesso.") # Confirmação
+    except Exception as e:
+        # ISSO É CRUCIAL: Precisamos ver o erro se falhar!
+        print(f"[ERRO CRÍTICO NO SAVE] {e}")
 
 # --- FUNÇÕES DE SUPORTE ÀS SONDAS ---
 
@@ -70,14 +77,14 @@ def _run_probe(probe_file, target_file, python_exe, debug=False, input_data=None
     """Executor genérico de sondas em subprocesso."""
     import subprocess
     probe_path = _get_probe_path(probe_file)
-    
+
     cmd = [python_exe, probe_path]
     if target_file:
         cmd.append(target_file)
-        
+
     if debug:
         filename = os.path.basename(target_file) if target_file else "STDIN"
-        click.echo(Fore.DIM + f"   [DEBUG] Probe '{probe_file}' -> {filename}" + Style.RESET_ALL)
+        click.echo(Style.DIM + f"   [DEBUG] Probe '{probe_file}' -> {filename}" + Style.RESET_ALL)
 
     try:
         result = subprocess.run(
@@ -233,6 +240,9 @@ def run_check_logic(path, ignore, fix, debug, fast, no_imports, no_cache, target
     # Isso garante que 'relpath' seja sempre relativo ao projeto, e não ao arquivo atual.
     project_root = _find_project_root(abs_input)
     
+    if debug:
+        click.echo(Fore.MAGENTA + f"[DEBUG] Cache carregado: {len(cache)} entradas.")
+    
     if target_files:
         files = [os.path.abspath(f) for f in target_files]
         if debug: click.echo(f"[DEBUG] Alvos manuais: {len(files)}")
@@ -260,35 +270,53 @@ def run_check_logic(path, ignore, fix, debug, fast, no_imports, no_cache, target
             stat = os.stat(fp)
             mtime = stat.st_mtime
             size = stat.st_size
-            
+
             if size == 0: continue
 
-            # [FIX] Usa project_root para garantir caminhos relativos bonitos e consistentes
-            rel = os.path.relpath(fp, project_root)
-            
+            # [FIX] Normaliza a chave do cache para usar '/' sempre
+            # Evita que 'doxoade\file.py' seja diferente de 'doxoade/file.py' no JSON
+            rel_raw = os.path.relpath(fp, project_root)
+            rel = rel_raw.replace('\\', '/')
+
             cached_data = cache.get(rel)
-            
+
             hit = False
             if not no_cache and cached_data:
-                if cached_data.get('mtime') == mtime and cached_data.get('size') == size:
+                # 1. Tentativa Rápida (Metadados do SO)
+                cached_mtime = cached_data.get('mtime', 0)
+                cached_size = cached_data.get('size', 0)
+                
+                # Usamos uma tolerância mínima para flutuações de float no mtime
+                if abs(cached_mtime - mtime) < 0.0001 and cached_size == size:
                     hit = True
-                elif 'mtime' not in cached_data and cached_data.get('hash') == _get_file_hash(fp):
-                    hit = True
+                
+                # 2. Tentativa Lenta (Hash do Conteúdo - Fallback)
+                # Se o mtime mudou (ex: save sem edit), verificamos o hash
+                else:
+                    current_hash = _get_file_hash(fp)
+                    if cached_data.get('hash') == current_hash:
+                        hit = True
+                        # [OTIMIZAÇÃO] Atualiza o mtime no cache para o próximo ser rápido
+                        # (Não precisa salvar disco agora, será salvo no final)
+                        cache[rel]['mtime'] = mtime
+                        cache[rel]['size'] = size
 
             if hit:
                 if debug: click.echo(Fore.GREEN + f"[CACHE] {rel}")
-                
-                # [FIX] Cura do Cache
+
                 cached_findings = cached_data.get('findings', [])
                 for cf in cached_findings:
-                    if not cf.get('file'): cf['file'] = rel
-                
+                    # Atualiza o caminho do finding para o formato atual do sistema
+                    cf['file'] = rel_raw 
+
                 raw_findings.extend(cached_findings)
-                cache[rel]['mtime'] = mtime
+                # Garante que o cache em memória esteja atualizado
+                cache[rel]['mtime'] = mtime 
                 cache[rel]['size'] = size
             else:
+                # Se não houve hit, adicionamos para escanear
                 files_to_scan.append((fp, rel, mtime, size))
-                
+
         except OSError:
             continue
 
@@ -322,13 +350,15 @@ def run_check_logic(path, ignore, fix, debug, fast, no_imports, no_cache, target
     _enrich_findings_with_solutions(raw_findings)
 
     # --- AUTOFIX ---
-    if fix: 
+    if fix:
         no_cache = True
         click.echo(Fore.CYAN + "\nModo de correção (--fix) ativado...")
         with ExecutionLogger('autofix', project_root, {}) as fix_logger:
             count = _run_smart_fix(raw_findings, project_root, fix_logger)
         if count > 0: click.echo(Fore.GREEN + f"   > Total de correções: {count}")
-    cache = {} if no_cache else _load_cache()
+        
+        # Se rodou fix, invalidamos o cache atual para não salvar dados obsoletos
+        cache = {} 
     
     # 5. Filtragem e Priorização
     if exclude_categories is None: exclude_categories = []
@@ -401,6 +431,9 @@ def run_check_logic(path, ignore, fix, debug, fast, no_imports, no_cache, target
                 import_suggestion=f.get('import_suggestion')
             )
         
+        if debug:
+            print(f"[DEBUG_TRACE] Fim da lógica. no_cache={no_cache}, cache_size={len(cache)}")
+
         if not no_cache: _save_cache(cache)
         return logger.results
 
@@ -419,6 +452,9 @@ def _process_file(item, python_exe, debug, continue_on_error, raw_findings, cach
     raw_findings.extend(new_findings)
     
     file_hash = _get_file_hash(fp)
+    if debug:
+        print(f"[DEBUG_TRACE] Atualizando cache para: {rel} | Hash: {file_hash is not None}")
+
     cache[rel] = {
         'hash': file_hash, 'mtime': mtime, 'size': size, 'findings': new_findings
     }
