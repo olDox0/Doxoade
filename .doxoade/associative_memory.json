@@ -1,0 +1,52 @@
+{
+  "importerror": {
+    "modulo": 0.2,
+    "critico": 0.2,
+    "check": 0.2,
+    "ocorreu": 0.2
+  },
+  "modulo": {
+    "importerror": 0.2,
+    "critico": 0.2,
+    "check": 0.2,
+    "ocorreu": 0.2
+  },
+  "critico": {
+    "importerror": 0.2,
+    "modulo": 0.2,
+    "check": 0.2,
+    "ocorreu": 0.2
+  },
+  "check": {
+    "importerror": 0.2,
+    "modulo": 0.2,
+    "critico": 0.2,
+    "ocorreu": 0.2
+  },
+  "ocorreu": {
+    "importerror": 0.2,
+    "modulo": 0.2,
+    "critico": 0.2,
+    "check": 0.2
+  },
+  "novo": {
+    "preciso": 0.1,
+    "scaffold": 0.1,
+    "criar": 0.1
+  },
+  "preciso": {
+    "novo": 0.1,
+    "scaffold": 0.1,
+    "criar": 0.1
+  },
+  "scaffold": {
+    "novo": 0.1,
+    "preciso": 0.1,
+    "criar": 0.1
+  },
+  "criar": {
+    "novo": 0.1,
+    "preciso": 0.1,
+    "scaffold": 0.1
+  }
+}

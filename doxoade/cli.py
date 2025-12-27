@@ -72,6 +72,7 @@ from doxoade.commands.run import run, flow_command
 from doxoade.commands.save import save
 from doxoade.commands.scaffold import scaffold
 from doxoade.commands.self_test import self_test
+from doxoade.commands.think import think
 from doxoade.commands.tutorial import tutorial_group
 from doxoade.commands.search import search
 from doxoade.commands.security import security
@@ -347,6 +348,7 @@ cli.add_command(sync)
 cli.add_command(telemetry)
 cli.add_command(test)
 cli.add_command(test_map)
+cli.add_command(think)
 cli.add_command(timeline)
 cli.add_command(tutorial_group)
 cli.add_command(venv_up)
