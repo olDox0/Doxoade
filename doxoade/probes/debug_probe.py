@@ -5,6 +5,12 @@ import json
 import traceback
 import types
 
+# [FIX] Força UTF-8 no stdout para suportar emojis no Windows (Protocolo anti-cp1252)
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 def safe_serialize(obj, depth=0):
     """Converte objetos complexos em representações seguras para JSON."""
     if depth > 2: return "..."
@@ -12,7 +18,7 @@ def safe_serialize(obj, depth=0):
     if isinstance(obj, (str, int, float, bool, type(None))):
         return obj
     if isinstance(obj, (list, tuple)):
-        return [safe_serialize(x, depth+1) for x in obj[:10]] # Limita tamanho
+        return [safe_serialize(x, depth+1) for x in obj[:10]]
     if isinstance(obj, dict):
         return {str(k): safe_serialize(v, depth+1) for k, v in list(obj.items())[:10]}
     if isinstance(obj, types.FunctionType):
@@ -20,15 +26,42 @@ def safe_serialize(obj, depth=0):
     if isinstance(obj, types.ModuleType):
         return f"<module {obj.__name__}>"
     
-    # Fallback genérico
     try:
         return str(obj)
     except Exception:
         return "<unserializable>"
 
+def _setup_package_context(script_path):
+    """
+    Mágica para permitir imports relativos (from ..tools import x).
+    Sobe a árvore de diretórios procurando __init__.py para definir o pacote.
+    """
+    abs_path = os.path.abspath(script_path)
+    directory = os.path.dirname(abs_path)
+    package_parts = []
+
+    # Sobe enquanto encontrar __init__.py
+    current = directory
+    while os.path.exists(os.path.join(current, '__init__.py')):
+        package_parts.insert(0, os.path.basename(current))
+        parent = os.path.dirname(current)
+        if parent == current: # Evita loop infinito na raiz do disco
+            break
+        current = parent
+    
+    # O 'current' agora é a raiz do projeto (onde o pacote começa)
+    # Adicionamos ao sys.path para o Python achar os módulos
+    if current not in sys.path:
+        sys.path.insert(0, current)
+    
+    # Retorna o nome do pacote (ex: "doxoade.commands")
+    return ".".join(package_parts) if package_parts else None
+
 def run_debug(script_path):
     abs_path = os.path.abspath(script_path)
-    sys.path.insert(0, os.path.dirname(abs_path))
+    
+    # [FIX] Configura o contexto do pacote antes de executar
+    package_name = _setup_package_context(abs_path)
     
     debug_data = {
         'status': 'unknown',
@@ -39,13 +72,17 @@ def run_debug(script_path):
     }
 
     try:
-        # Executa o script em um contexto isolado
-        globs = {'__name__': '__main__', '__file__': abs_path}
-        with open(abs_path, 'rb') as f:
+        # Executa o script injetando o __package__ correto
+        globs = {
+            '__name__': '__main__', 
+            '__file__': abs_path,
+            '__package__': package_name  # <--- A CHAVE DA CORREÇÃO
+        }
+        
+        with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
             code = compile(f.read(), abs_path, 'exec')
             exec(code, globs) # noqa
         
-        # SUCESSO: Captura estado global final
         debug_data['status'] = 'success'
         for k, v in globs.items():
             if not k.startswith('__'):
@@ -55,24 +92,21 @@ def run_debug(script_path):
                     debug_data['variables'][k] = safe_serialize(v)
 
     except Exception:
-        # FALHA: Captura estado local do erro
         etype, value, tb = sys.exc_info()
         debug_data['status'] = 'error'
         debug_data['error'] = f"{etype.__name__}: {value}"
-        # Pega o último frame (onde o erro ocorreu no script do usuário)
-        # Precisamos filtrar frames do próprio probe
+        
+        # Filtra frames do probe para mostrar onde errou no script do usuário
         while tb.tb_next:
             tb = tb.tb_next
             
         frame = tb.tb_frame
         debug_data['traceback'] = traceback.format_exc()
         
-        # Captura variáveis locais no momento da morte
         for k, v in frame.f_locals.items():
             if not k.startswith('__'):
                  debug_data['variables'][k] = safe_serialize(v)
 
-    # Imprime o marcador especial e o JSON para o processo pai pegar
     print("\n---DOXOADE-DEBUG-DATA---")
     print(json.dumps(debug_data))
 

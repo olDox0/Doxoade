@@ -53,14 +53,71 @@ def _generate_pytest_file(script_path, variables):
 
 @click.command('debug')
 @click.argument('script', type=click.Path(exists=True))
-@click.option('--gen-test', is_flag=True, help="Gera um arquivo de teste (pytest) baseado no estado final.")
-def debug(script, gen_test):
+@click.option('--watch', help='Rastreia as mutações de uma variável específica em tempo real.')
+@click.option('--args', help='Argumentos para passar ao script (entre aspas).')
+def debug(script, watch, args):
     """
-    Executa uma 'Autópsia de Código' ou 'Inspeção de Estado'.
+    Executa uma 'Autópsia de Código' ou Monitoramento em Tempo Real.
     
-    Identifica variáveis e funções no momento da falha ou ao final da execução.
-    Útil para entender o que aconteceu sem encher o código de prints.
+    Modos:
+    1. Padrão: Roda o script e, se falhar, mostra o estado das variáveis no momento do crash.
+    2. Watch: (--watch 'var'): Roda o script e avisa toda vez que a variável muda de valor.
     """
+    python_exe = _get_venv_python_executable() or sys.executable
+    
+    if watch:
+        # MODO WATCH (Usa flow_runner)
+        click.echo(Fore.CYAN + f"🔍 [WATCH] Iniciando vigilância sobre '{watch}' em {script}...")
+        
+        # Localiza o runner
+        from ..probes import flow_runner
+        runner_path = flow_runner.__file__
+        
+        cmd = [python_exe, runner_path, script, "--watch", watch]
+        if args:
+            cmd.extend(args.split())
+            
+        try:
+            # Executa com output em tempo real
+            subprocess.run(cmd, check=False)
+        except KeyboardInterrupt:
+            click.echo("\n[DEBUG] Interrompido pelo usuário.")
+            
+    else:
+        # MODO AUTÓPSIA (Usa debug_probe) - Lógica original
+        from ..probes import debug_probe
+        probe_path = debug_probe.__file__
+        
+        click.echo(Fore.YELLOW + f"🩺 [DEBUG] Analisando {script} (Modo Autópsia)...")
+        
+        try:
+            result = subprocess.run(
+                [python_exe, probe_path, script],
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace'
+            )
+            
+            output = result.stdout
+            # Separa o JSON do output normal do script
+            if "---DOXOADE-DEBUG-DATA---" in output:
+                script_out, json_data = output.split("---DOXOADE-DEBUG-DATA---")
+                click.echo(Fore.WHITE + "--- Saída do Script ---")
+                click.echo(script_out)
+                
+                # Aqui você pode processar o JSON e mostrar bonitinho
+                # Por enquanto, mostra o output bruto se não crashou
+                if "error" in json_data:
+                     click.echo(Fore.RED + "\n[CRASH DETECTADO] Veja o relatório acima.")
+            else:
+                click.echo(output)
+                if result.stderr:
+                    click.echo(Fore.RED + "STDERR:\n" + result.stderr)
+
+        except Exception as e:
+            click.echo(Fore.RED + f"Erro ao executar depurador: {e}")
+    
     venv_python = _get_venv_python_executable()
     if not venv_python:
         click.echo(Fore.RED + "[ERRO] Venv não encontrado.")
