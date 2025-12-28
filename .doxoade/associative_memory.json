@@ -566,7 +566,9 @@
     "dinamicamente": 0.05,
     "durante": 0.05,
     "treino": 0.05,
-    "soma": 1.0
+    "soma": 1.0,
+    "funcao": 0.1,
+    "salvar_texto": 0.1
   },
   "arquitetura": {
     "cleo": 0.2,
@@ -2310,7 +2312,7 @@
     "loops": 0.1,
     "expl": 0.15000000000000002,
     "delete_block_tree": 0.05,
-    "arquivo": 0.3,
+    "arquivo": 0.4,
     "especializada": 0.1,
     "estruturas": 0.05,
     "rvore": 0.1,
@@ -2718,7 +2720,7 @@
     "escrita": 0.05,
     "mica": 0.1,
     "padr": 0.05,
-    "salvar": 0.05,
+    "salvar": 0.15000000000000002,
     "sobrescreve": 0.05,
     "complexidade": 0.05,
     "absorvida": 0.05,
@@ -2930,7 +2932,9 @@
     "migrada": 0.1,
     "eliminar": 0.1,
     "riscos": 0.1,
-    "remota": 0.05
+    "remota": 0.05,
+    "funcao": 0.1,
+    "escrever": 0.1
   },
   "uma": {
     "migrou": 0.05,
@@ -12856,11 +12860,13 @@
     "definition": 0.05,
     "padr": 0.05,
     "seguran": 0.05,
-    "para": 0.05,
+    "para": 0.15000000000000002,
     "arquivos": 0.05,
     "sobrescreve": 0.05,
-    "arquivo": 0.05,
-    "original": 0.05
+    "arquivo": 0.15000000000000002,
+    "original": 0.05,
+    "funcao": 0.1,
+    "escrever": 0.1
   },
   "save": {
     "nada": 0.05,
@@ -15164,7 +15170,7 @@
     "engenheiro": 0.05,
     "nsubstituiu": 0.05,
     "logs": 0.05,
-    "texto": 0.05,
+    "texto": 1.0,
     "precisar": 0.05,
     "ver": 0.05,
     "runtime": 0.15000000000000002,
@@ -15245,7 +15251,9 @@
     "dfa": 0.05,
     "monitora": 0.05,
     "fluxo": 0.05,
-    "tokens": 0.05
+    "tokens": 0.05,
+    "salvar_arquivo": 0.9999999999999999,
+    "nome": 0.9999999999999999
   },
   "except": {
     "use": 0.15000000000000002,
@@ -16025,7 +16033,7 @@
     "delete_block_tree": 0.1,
     "gica": 0.1,
     "especializada": 0.05,
-    "para": 0.3,
+    "para": 0.4,
     "estruturas": 0.05,
     "rvore": 0.1,
     "mecanismo": 0.05,
@@ -16120,7 +16128,7 @@
     "sistema": 0.05,
     "abstra": 0.05,
     "transparente": 0.05,
-    "escrever": 0.05,
+    "escrever": 0.15000000000000002,
     "num": 0.25,
     "tempor": 0.25,
     "rio": 0.35,
@@ -16144,7 +16152,7 @@
     "aprendizado": 0.05,
     "sem": 0.1,
     "ntico": 0.05,
-    "salvar": 0.05,
+    "salvar": 0.15000000000000002,
     "nunca": 0.05,
     "sobrescreve": 0.05,
     "original": 0.1,
@@ -16199,7 +16207,8 @@
     "mapper": 0.05,
     "test_": 0.05,
     "canonize": 0.05,
-    "tira": 0.05
+    "tira": 0.05,
+    "funcao": 0.1
   },
   "tenha": {
     "garante": 0.1,
@@ -28257,7 +28266,7 @@
     "por": 0.05,
     "docstring": 0.05,
     "code": 0.05,
-    "texto": 0.05,
+    "texto": 1.0,
     "digo": 0.1,
     "matematicamente": 0.05,
     "gerado": 0.05,
@@ -28265,7 +28274,9 @@
     "que": 0.05,
     "pede": 0.05,
     "realmente": 0.05,
-    "resulta": 0.05
+    "resulta": 0.05,
+    "salvar_arquivo": 0.9999999999999999,
+    "com": 0.9999999999999999
   },
   "operador": {
     "fun": 0.05,
@@ -45808,7 +45819,7 @@
     "digo": 0.15000000000000002,
     "como": 0.05,
     "transformamos": 0.05,
-    "com": 0.05,
+    "com": 1.0,
     "mem": 0.05,
     "ria": 0.05,
     "nsubstituiu": 0.05,
@@ -45817,13 +45828,14 @@
     "sqlite": 0.05,
     "ntabelas": 0.05,
     "findings": 0.05,
-    "nome": 0.05,
+    "nome": 1.0,
     "docstring": 0.05,
     "code": 0.05,
     "busca": 0.1,
     "fonte": 0.05,
     "comment": 0.05,
-    "coment": 0.05
+    "coment": 0.05,
+    "salvar_arquivo": 0.9999999999999999
   },
   "realiza": {
     "velocidade": 0.05,
@@ -57041,7 +57053,7 @@
     "abstra": 0.05,
     "transparente": 0.05,
     "num": 0.05,
-    "arquivo": 0.05,
+    "arquivo": 0.15000000000000002,
     "tempor": 0.05,
     "rio": 0.05,
     "rodar": 0.05,
@@ -57054,7 +57066,10 @@
     "seu": 0.05,
     "prio": 0.05,
     "digo": 0.05,
-    "era_genesis_flow": 0.05
+    "era_genesis_flow": 0.05,
+    "funcao": 0.1,
+    "salvar": 0.1,
+    "para": 0.1
   },
   "num": {
     "solu": 0.05,
@@ -70646,5 +70661,22 @@
     "linear": 0.05,
     "tasks": 0.05,
     "fine": 0.05
+  },
+  "funcao": {
+    "salvar_texto": 0.1,
+    "criar": 0.1,
+    "escrever": 0.1,
+    "salvar": 0.1,
+    "arquivo": 0.1,
+    "para": 0.1
+  },
+  "salvar_texto": {
+    "funcao": 0.1,
+    "criar": 0.1
+  },
+  "salvar_arquivo": {
+    "texto": 0.9999999999999999,
+    "com": 0.9999999999999999,
+    "nome": 0.9999999999999999
   }
 }
