@@ -140,6 +140,7 @@ def train(epochs, batch, samples, prune, profile):
         # --- CURRICULUM LOOP ---
         phase1_end = int(epochs * 0.2) 
         phase2_end = int(epochs * 0.6) 
+        phase3_end = int(epochs * 0.9) 
         
         current_difficulty = 0
         
@@ -147,6 +148,7 @@ def train(epochs, batch, samples, prune, profile):
             new_difficulty = 1
             if e > phase1_end: new_difficulty = 2
             if e > phase2_end: new_difficulty = 3
+            if e > phase3_end: new_difficulty = 4
             
             # Regenera dados ao mudar de fase
             if new_difficulty != current_difficulty:

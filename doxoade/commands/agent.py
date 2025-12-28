@@ -270,10 +270,24 @@ class OuroborosAgent:
             f.write(f"        sys.exit(1)\n")
 
     def generate_test_cases(self, func_name):
-        # Sherlock poderia gerar isso, mas por enquanto hardcoded para segurança
-        if func_name in ["soma", "add"]: return [f"assert {func_name}(1, 1) == 2", f"assert {func_name}(10, 5) == 15"]
-        if func_name in ["sub", "diff"]: return [f"assert {func_name}(10, 5) == 5"]
-        if func_name in ["mult", "prod"]: return [f"assert {func_name}(3, 3) == 9"]
+        fn = func_name.lower()
+        
+        # Testes de Matemática
+        if fn in ["soma", "add", "plus"]: return [f"assert {func_name}(1, 1) == 2", f"assert {func_name}(10, 5) == 15"]
+        if fn in ["sub", "diff"]: return [f"assert {func_name}(10, 5) == 5"]
+        if fn in ["mult", "prod"]: return [f"assert {func_name}(3, 3) == 9"]
+        
+        # [NOVO] Testes de I/O (Corrigido)
+        if any(x in fn for x in ["salvar", "save", "escrever", "write", "arquivo", "file"]):
+            # Usamos strings normais e escapamos as aspas internas com cuidado
+            return [
+                "import os",
+                "try: os.remove('teste_io.txt')\n        except: pass", 
+                f"{func_name}('teste_io.txt', 'Ola Doxoade')", 
+                "assert os.path.exists('teste_io.txt') or os.path.exists('file.txt')",
+                "with open('teste_io.txt' if os.path.exists('teste_io.txt') else 'file.txt', 'r') as f: assert 'Ola' in f.read()"
+            ]
+
         return [f"print('Teste genérico para {func_name}')"]
 
     def execute(self, filepath):
