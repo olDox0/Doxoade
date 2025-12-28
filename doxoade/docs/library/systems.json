@@ -1,43 +1,7 @@
 {
-  "core_arch": {
-    "title": "Arquitetura do Núcleo",
-    "files": ["doxoade/cli.py", "doxoade/shared_tools.py", "doxoade/database.py"],
-    "description": "O sistema nervoso central. 'cli.py' gerencia a entrada, 'shared_tools' fornece a verdade universal (logs, git, paths) e 'database' persiste a memória."
-  },
-  "genesis_engine": {
-    "title": "Motor Gênese (IA Simbólica)",
-    "files": ["doxoade/learning.py", "doxoade/fixer.py"],
-    "description": "O cérebro evolutivo. 'learning.py' abstrai padrões de correção de diffs e 'fixer.py' aplica essas correções cirurgicamente no código."
-  },
-  "maestro_system": {
-    "title": "O Maestro (Orquestração)",
-    "files": ["doxoade/commands/maestro.py", "doxoade/commands/moddify.py"],
-    "description": "Interpretador DSL. O 'maestro.py' lê scripts .dox e o 'moddify.py' atua como o braço mecânico para editar arquivos em lote."
-  },
-  "probes_layer": {
-    "title": "Camada de Sondas (Probes)",
-    "files": ["doxoade/probes/syntax_probe.py", "doxoade/probes/hunter_probe.py", "doxoade/probes/clone_probe.py"],
-    "description": "Processos isolados (Sandbox). Analisam código perigoso ou instável sem derrubar o núcleo principal."
-  },
-  "phoenix_protocols": {
-    "title": "Protocolos de Cura (Fênix)",
-    "files": ["doxoade/commands/doctor.py", "doxoade/commands/install.py", "doxoade/commands/rebuild.py"],
-    "description": "Ferramentas de resiliência de ambiente. Garantem que o venv e as dependências estejam saudáveis."
-  },
-  "chronos_system": {
-    "title": "Sistema Chronos (Telemetria)",
-    "files": ["doxoade/chronos.py", "doxoade/commands/timeline.py"],
-    "description": "O Guardião do Tempo. Grava cada comando executado e cada arquivo modificado pelo Doxoade no banco de dados, permitindo auditoria e reversão futura."
-  },
-{
-  "search": {
-    "title": "Comando Search: Busca Inteligente",
-    "date": "2025-12-07",
-    "content": "Busca inteligente no código do projeto com cache persistente.\n\n**Modos:**\n- `--function` / `-f`: Busca funções por nome ou docstring\n- `--code` / `-c`: Busca texto no código fonte\n- `--comment`: Busca em comentários\n- `--commits`: Busca em mensagens de commit (Git)\n- `--callers`: Mostra quem chama a função\n- `--stats`: Estatísticas de uso da função\n- `--fuzzy`: Ativa correção de typos\n- `--no-cache`: Força re-indexação\n\n**Recursos:**\n- Cache persistente (23x mais rápido)\n- Indexação AST completa\n- Fuzzy matching para typos\n- Normalização automática de termos\n- Grafo de dependências (call graph)\n- Sugestões inteligentes\n- Integração com Git\n\n**Exemplos:**\n```bash\n# Busca funções\ndoxoade search \"logger\" --function\n\n# Estatísticas de uso\ndoxoade search \"_run_git_command\" --stats\n\n# Busca em commits\ndoxoade search \"postmortems\" --commits\n\n# Call graph\ndoxoade search \"_log_execution\" --callers\n\n# Busca com typo\ndoxoade search \"excution\" --fuzzy\n\n# Busca no código\ndoxoade search \"subprocess.run\" --code\n\n# Comentários\ndoxoade search \"TODO\" --comment\n```"
-  },
-  "qa_integrated": {
-    "title": "Suite de QA Integrada (Cânone)",
-    "files": ["doxoade/commands/canonize.py", "doxoade/commands/regression_test.py", "doxoade/commands/test_mapper.py"],
-    "description": "O tripe de garantia de qualidade:\n1. Mapper: Garante que todo arquivo .py tenha um test_*.py correspondente.\n2. Canonize: Tira uma 'foto' do estado atual (Static + Runtime).\n3. Regression: Compara o agora com a foto. Suporta 'Regressão Relativa' para tolerância a falhas legadas."
+  "system_2": {
+    "title": "Thinking Core (Córtex Frontal)",
+    "date": "2025-12-27",
+    "content": "Subsistema de funções executivas. Responsável por: 1. Associação (Memória Parietal), 2. Planejamento (DLPFC) e 3. Monitoramento de Erro (Sherlock/ACC). Atua antes da geração de código."
   }
 }

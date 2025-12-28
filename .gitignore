@@ -32,6 +32,7 @@ config.json
 *.bkp
 *.bak
 *.dox
+*.nppBackup
 
 # Arquivos de Configuração de IDE
 .vscode/
