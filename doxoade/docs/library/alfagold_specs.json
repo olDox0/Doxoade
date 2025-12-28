@@ -1,0 +1,17 @@
+{
+  "overview": {
+    "title": "Alfagold Architecture (Transformer)",
+    "date": "2025-12-28",
+    "content": "Motor de IA Generativa 'From Scratch' implementado em NumPy puro. Substitui a recorrência (LSTM) pela Atenção (Self-Attention), permitindo contexto global e eliminação do gradiente evanescente."
+  },
+  "components": {
+    "title": "Componentes do Núcleo",
+    "date": "2025-12-28",
+    "content": "1. Tokenizer BPE: Codificação de pares de bytes para vocabulário eficiente.\n2. Multi-Head Attention: Implementação otimizada (Flash Attention simulado via chunking).\n3. Positional Encoding: Injeção senoidal de ordem na sequência.\n4. AdamW Optimizer: Descida de gradiente com decaimento de peso."
+  },
+  "performance": {
+    "title": "Telemetria Alfa",
+    "date": "2025-12-28",
+    "content": "Treinamento de I/O (Nível 4) atingiu Loss de 0.10. Tempo de inferência < 200ms em CPU. Capacidade de gerar blocos lógicos como 'with open' e 'def function'."
+  }
+}
