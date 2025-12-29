@@ -1,46 +1,41 @@
-# Adicione ao final do arquivo, ou substitua o conteúdo:
-
+# doxoade/neural/codex_gen.py
 import random
 
-FUNCOES = [
-    "soma", "sub", "mult", "div", "maior", 
-    "adicionar", "adição", "somar", "mais",
-    "calcular", "processar",
-    # [NOVO] Verbos de I/O
-    "salvar", "ler", "escrever", "gravar", "carregar"
-]
-VARIAVEIS = ["a", "b", "x", "y", "val", "num", "dado", "valor", "texto", "conteudo", "arquivo"]
-OPS = ["+", "-", "*", "/", "%"]
+FUNCOES = ["salvar", "carregar", "logar", "processar", "ler", "escrever"]
+VARIAVEIS = ["nome", "dados", "texto", "conteudo", "caminho"]
+MODOS = ["'w'", "'r'", "'a'"]
 
 def gerar_sintaxe_basica():
     f = random.choice(FUNCOES)
-    v1 = random.choice(VARIAVEIS)
-    return f"def {f} ( {v1} ) : pass"
+    v = random.choice(VARIAVEIS)
+    return f"def {f} ( {v} ) : pass"
 
 def gerar_funcao_simples():
     f = random.choice(FUNCOES)
-    v1 = random.choice(VARIAVEIS)
-    v2 = random.choice(VARIAVEIS)
-    while v2 == v1: v2 = random.choice(VARIAVEIS)
-    op = random.choice(OPS)
-    return f"def {f} ( {v1} , {v2} ) : return {v1} {op} {v2}"
+    return f"def {f} ( a , b ) : return a + b"
 
 def gerar_funcao_condicional():
-    f = random.choice(FUNCOES)
     v = random.choice(VARIAVEIS)
-    return f"def {f} ( {v} ) : if {v} : return True else : return False"
+    return f"def checar ( {v} ) : if {v} : return True"
 
-# [NOVO] Padrão de I/O
+# [NOVO] O Dataset de Ouro (Python Fluente)
 def gerar_funcao_io():
-    acao = random.choice(["salvar", "escrever", "gravar"])
-    var = random.choice(["texto", "dados", "conteudo"])
-    # Ensina o padrão 'with open'
-    return f"def {acao}_{var} ( {var} ) : with open ( 'file.txt' , 'w' ) as f : f.write ( {var} )"
+    """Gera código I/O Pythonicamente perfeito."""
+    f_name = random.choice(["salvar_arquivo", "gravar_texto", "escrever_log"])
+    arg = random.choice(["nome", "caminho"])
+    conteudo = random.choice(["texto", "dados", "msg"])
+    modo = "'w'"
+    
+    # Variações válidas
+    templates = [
+        f"def {f_name}({arg}): with open({arg}, {modo}) as f: f.write({conteudo})",
+        f"def {f_name}({arg}): with open('file.txt', {modo}) as f: f.write({conteudo})",
+        f"def {f_name}({arg}, {conteudo}): with open({arg}, {modo}) as arquivo: arquivo.write({conteudo})"
+    ]
+    return random.choice(templates)
 
-# [NOVO] Atualiza o vocabulário
 def obter_vocabulario_completo():
-    tokens = ["def", "(", ")", ":", "return", ",", "pass", "<PAD>", "<UNK>", "ENDMARKER"]
-    tokens += ["if", "else", "elif", "True", "False", "None"] 
-    tokens += ["with", "open", "as", "f", "write", "read", "'w'", "'r'", "'file.txt'", "."] # Tokens de I/O
-    tokens += FUNCOES + VARIAVEIS + OPS 
-    return list(set(tokens))
+    # Garante que todos os símbolos do Python estejam aqui
+    return list(set(FUNCOES + VARIAVEIS + MODOS + 
+        ["def", "return", "if", "else", "with", "open", "as", "write", "read", 
+         "(", ")", ":", ".", ",", "pass", "True", "False", "None"]))
