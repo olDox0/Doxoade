@@ -59,20 +59,17 @@ def clean():
             for item in found_items:
                 try:
                     if item.is_dir():
-                        # Tática de Guerra: Se falhar, tenta renomear e marcar para depois
                         try:
                             shutil.rmtree(item)
                         except PermissionError:
+                            # Tática de Guerra: Renomeia o que não pode deletar
                             temp_name = f"{item}_{uuid.uuid4().hex[:4]}.old"
                             os.rename(item, temp_name)
                             shutil.rmtree(temp_name, ignore_errors=True)
                     else:
                         item.unlink()
                     count += 1
-                except Exception:
-                    # TODO: Implementar log silencioso para falhas de limpeza no mobile
-                    pass 
-            
+                except Exception: pass
             click.echo(Fore.GREEN + f"\n Limpeza concluída! {count} itens removidos.")
         else:
             click.echo("Operação cancelada.")

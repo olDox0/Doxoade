@@ -68,5 +68,10 @@
     "title": "Architectural Linting (Linter de Arquitetura)",
     "definition": "Diferente do linter de sintaxe (como Pyflakes), o linter de arquitetura valida regras de design e robustez, como o tamanho das funções, o nível de aninhamento e a presença de contratos, baseando-se no Modern Power of Ten.",
     "origin": "Doxoade Core - Comando 'style'."
+  },
+  "hot_line_profiling": {
+    "title": "Profiling de Linha (Hot Lines)",
+    "definition": "Técnica de amostragem estatística executada pelo Chronos que identifica quais linhas exatas de código estão consumindo a maior parte do ciclo de CPU. No Doxoade, isso é exibido com o impacto percentual e o trecho do código fonte original.",
+    "origin": "MaxTelemetry v2.2 - MPoT-12."
   }
 }

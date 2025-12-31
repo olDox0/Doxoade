@@ -118,5 +118,13 @@
     "symptom": "Crash fatal 'TypeError' durante a execução do comando save.",
     "root_cause": "A refatoração de limpeza do check.py removeu parâmetros legados (ignore, no_imports), mas as chamadas internas no save.py não foram atualizadas simultaneamente.",
     "fix": "Sincronização das assinaturas de função e restauração do parâmetro 'target_files' no orquestrador de lógica para permitir auditorias parciais rápidas."
+  },
+  "telemetry_memory_bloat": {
+    "title": "Inchaço de Memória na Telemetria",
+    "date": "2025-12-30",
+    "severity": "MEDIUM",
+    "symptom": "O comando 'telemetry --stats' consumia muita RAM ao calcular médias de longos históricos.",
+    "root_cause": "A lógica anterior trazia todos os dados do banco para o Python e usava 'statistics.mean()'.",
+    "fix": "Migração para 'Lean SQL Analytics'. O cálculo de médias agora ocorre dentro da engine do SQLite, transferindo apenas o resultado final para o Doxoade."
   }
 }
