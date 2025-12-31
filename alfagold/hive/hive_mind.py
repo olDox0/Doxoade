@@ -1,70 +1,72 @@
 # alfagold/hive/hive_mind.py
 import numpy as np
+from colorama import Fore
+
 from ..core.state_packet import StatePacket
 from ..core.moe_router import MoERouter
-
-# Importando os Experts
 from ..experts.generator_expert import GeneratorExpert
-from ..experts.syntax_expert import SyntaxExpert   # Antigo Logic/Arquiteto (renomear/adaptar se necessário)
-# from ..experts.memory_expert import MemoryExpert # Futuro
+from ..experts.syntax_expert import SyntaxExpert
 
 class HiveMindMoE:
     def __init__(self):
-        # 1. Hardware
+        # 1. Experts
         self.generator = GeneratorExpert()
-        # self.syntax = SyntaxExpert() # Habilitar quando migrado
         
-        # 2. Roteador (Gating Network)
-        # Input: Dimensão do modelo (64)
-        # Outputs: 2 Experts (Generator, Syntax - por enquanto)
+        # O SyntaxExpert precisa do tokenizer do modelo para saber os IDs
+        self.syntax = SyntaxExpert(self.generator.model.tokenizer)
+        
+        # 2. Roteador
         self.router = MoERouter(input_dim=self.generator.model.d_model, num_experts=2)
         
     def generate_step(self, packet: StatePacket, temp=0.7):
-        """
-        Executa um passo de tempo cognitivo.
-        """
-        # 1. Roteamento: Quem deve trabalhar agora?
-        weights = [1.0, 0.0]
-        if packet.embedding_vector is not None:
-             weights = self.router.route(packet.embedding_vector)
-             # [FIX] Uso da variável para silenciar o linter e preparar o futuro
-             # print(f"DEBUG: Router Weights: {weights}") 
+        """Executa um passo de tempo cognitivo."""
         
-        # 2. Execução dos Experts (Soft Mixing)
-        # Por enquanto, focamos no Generator como motor principal
+        # --- FASE 1: GERAÇÃO (Excitação) ---
         packet = self.generator.process(packet)
         final_logits = packet.logits.copy()
         
-        # Aqui entraria a mistura com outros experts baseada nos 'weights'
-        # Ex: if weights[1] > 0.5: packet = self.syntax.process(packet) ...
+        # --- FASE 2: INIBIÇÃO (Sintaxe) ---
+        # Pede ao SyntaxExpert uma máscara baseada no estado atual
+        # Passamos o shape atual dos logits para garantir alinhamento
+        mask = self.syntax.get_inhibition_mask(final_logits.shape[0])
+        packet.inhibition_mask = mask
         
-        # 3. Decisão (Amostragem)
+        # Fusão Neural
+        final_logits += mask
+        
+        # --- FASE 3: DECISÃO (Amostragem) ---
         scaled_logits = np.clip(final_logits / temp, -50, 50)
         exp_logits = np.exp(scaled_logits - np.max(scaled_logits))
         probs = exp_logits / np.sum(exp_logits)
         
         next_id = int(np.random.choice(len(probs), p=probs))
         
-        # 4. Atualização do Estado
+        # --- FASE 4: FEEDBACK (Atualização de Estado) ---
         packet.token_ids.append(next_id)
         token_str = self.generator.decode(next_id)
         packet.generated_token = token_str
         
+        # O SyntaxExpert observa o que foi decidido para atualizar sua máquina de estados
+        self.syntax.observe(token_str)
+        
         return packet, token_str
 
     def run_sequence(self, prompt, length=50):
-        """Loop de geração completo."""
         packet = StatePacket(input_text=prompt)
         print(f"🧠 [HiveMoE] Prompt: {prompt}")
         
+        # Sincroniza o SyntaxExpert com o prompt inicial
+        # (Lê o prompt token por token para setar o estado correto, ex: NOME)
+        initial_ids = self.generator.model.tokenizer.encode(prompt)
+        for tid in initial_ids:
+            t_str = self.generator.decode(tid)
+            self.syntax.observe(t_str)
+            
         full_text = ""
         
         for _ in range(length):
             packet, token = self.generate_step(packet)
-            
-            # Critério de Parada Simples
             if "ENDMARKER" in token: break
-            
             print(".", end="", flush=True)
             full_text += token
             

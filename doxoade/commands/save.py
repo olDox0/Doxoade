@@ -1,12 +1,19 @@
-# doxoade/commands/save.py
-# Versão Gênese V2 - Simplificado: foca apenas em aprender soluções
+# -*- coding: utf-8 -*-
+"""
+Módulo de Salvamento Seguro e Aprendizado (Gênese V2).
+Responsável por garantir que correções de bugs sejam transformadas em 
+conhecimento persistente no banco de dados.
+"""
+
 import sys
 import sqlite3
 import re
 import os
 import click
 from datetime import datetime, timezone
-from colorama import Fore, Style
+from typing import List, Dict, Any, Tuple, Set
+from rich.console import Console
+
 from ..database import get_db_connection
 from ..shared_tools import (
     ExecutionLogger, 
@@ -15,7 +22,9 @@ from ..shared_tools import (
 )
 from .check import run_check_logic
 
-def _get_staged_python_files(git_root):
+__version__ = "63.3 Alfa (Gold Standard)"
+
+def _get_staged_python_files(git_root: str) -> List[str]:
     """Retorna uma lista de caminhos absolutos de arquivos .py no staging area."""
     staged_files_str = _run_git_command(
         ['diff', '--name-only', '--cached', '--diff-filter=AMR', '--', '*.py'], 
@@ -25,18 +34,55 @@ def _get_staged_python_files(git_root):
         return []
     return [os.path.join(git_root, f.strip()) for f in staged_files_str.splitlines()]
 
-def _learn_solutions_from_commit(new_commit_hash, logger, project_path):
+def _process_finding_for_learning(cursor: sqlite3.Cursor, finding: sqlite3.Row, 
+                                 modified_files: Set[str], new_commit_hash: str, 
+                                 project_path: str) -> bool:
     """
-    (Gênese V2) Aprende soluções a partir dos incidentes que foram resolvidos.
+    Analisa um finding individual e, se resolvido no commit, registra a solução.
+    MPoT-5: Contratos de validação de entrada implementados.
     """
-    click.echo(Fore.CYAN + "\n--- [LEARN] Buscando soluções para aprender... ---")
+    if cursor is None or finding is None or modified_files is None:
+        raise ValueError("Parâmetros de banco ou dados de commit inválidos.")
+
+    file_path = finding['file']
+    if not file_path:
+        return False
+        
+    normalized_path = file_path.replace('\\', '/')
+    if normalized_path not in modified_files:
+        return False
+    
+    # Obtém o conteúdo corrigido (Estado Desejado)
+    corrected_content = _run_git_command(
+        ['show', f"{new_commit_hash}:{normalized_path}"],
+        capture_output=True, silent_fail=True
+    )
+    
+    if not corrected_content:
+        return False
+    
+    cursor.execute(
+        """INSERT OR REPLACE INTO solutions 
+           (finding_hash, stable_content, commit_hash, project_path, timestamp, file_path, message, error_line) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (finding['finding_hash'], corrected_content, new_commit_hash, project_path, 
+         datetime.now(timezone.utc).isoformat(), file_path, finding['message'], finding['line'])
+    )
+    return True
+
+def _learn_solutions_from_commit(new_commit_hash: str, project_path: str):
+    """
+    Orquestra o aprendizado de soluções a partir de um commit recém-criado.
+    Removido parâmetro 'logger' não utilizado (Fix Deepcheck).
+    """
+    console = Console()
+    console.print("\n[bold cyan]--- [LEARN] Buscando soluções para aprender... ---[/bold cyan]")
     
     conn = get_db_connection()
     try:
         conn.row_factory = sqlite3.Row 
         cursor = conn.cursor()
         
-        # Obtém arquivos modificados neste commit
         modified_files_str = _run_git_command(
             ['diff-tree', '--no-commit-id', '--name-only', '-r', new_commit_hash],
             capture_output=True, silent_fail=True
@@ -44,13 +90,9 @@ def _learn_solutions_from_commit(new_commit_hash, logger, project_path):
         modified_files = set(f.strip().replace('\\', '/') for f in modified_files_str.splitlines())
         
         if not modified_files:
-            click.echo(Fore.WHITE + "   > Nenhum arquivo modificado neste commit.")
             return
-        
-        learned_solutions = 0
-        learned_templates = 0
-        
-        # Busca findings recentes (últimas 24h) para os arquivos modificados que não têm solução ainda
+
+        # Busca findings recentes (24h) ativos antes deste commit
         cursor.execute("""
             SELECT DISTINCT f.finding_hash, f.file, f.line, f.message, f.category
             FROM findings f
@@ -61,208 +103,121 @@ def _learn_solutions_from_commit(new_commit_hash, logger, project_path):
             AND f.finding_hash NOT IN (SELECT finding_hash FROM solutions WHERE project_path = ?)
         """, (project_path, project_path))
         
-        recent_findings = cursor.fetchall()
+        findings = cursor.fetchall()
+        learned_count = 0
         
-        for finding in recent_findings:
-            file_path = finding['file']
-            if not file_path:
-                continue
-                
-            # Normaliza o caminho
-            normalized_path = file_path.replace('\\', '/')
-            
-            # Verifica se este arquivo foi modificado no commit
-            if normalized_path not in modified_files:
-                continue
-            
-            # Obtém o conteúdo corrigido
-            corrected_content = _run_git_command(
-                ['show', f"{new_commit_hash}:{normalized_path}"],
-                capture_output=True, silent_fail=True
-            )
-            
-            if not corrected_content:
-                continue
-            
-            # Salva a solução
-            cursor.execute(
-                """INSERT OR REPLACE INTO solutions 
-                   (finding_hash, stable_content, commit_hash, project_path, timestamp, file_path, message, error_line) 
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (finding['finding_hash'], 
-                 corrected_content, 
-                 new_commit_hash, 
-                 project_path, 
-                 datetime.now(timezone.utc).isoformat(), 
-                 file_path, 
-                 finding['message'], 
-                 finding['line'])
-            )
-            learned_solutions += 1
-            click.echo(Fore.GREEN + f"   > Solução aprendida: {finding['message'][:60]}...")
-
-            # Tenta aprender template
-            incident_data = {
-                'message': finding['message'],
-                'category': finding['category'] or 'UNCATEGORIZED'
-            }
-            if _abstract_and_learn_template(cursor, incident_data):
-                learned_templates += 1
+        for f in findings:
+            if _process_finding_for_learning(cursor, f, modified_files, new_commit_hash, project_path):
+                learned_count += 1
+                console.print(f"   [green]> Solução aprendida:[/green] {f['message'][:50]}...")
+                _abstract_and_learn_template(cursor, {'message': f['message'], 'category': f['category']})
 
         conn.commit()
-        
-        if learned_solutions > 0:
-            click.echo(Fore.GREEN + f"[OK] {learned_solutions} solução(ões) aprendida(s).")
-        if learned_templates > 0:
-            click.echo(Fore.GREEN + f"[GÊNESE] {learned_templates} template(s) aprendido(s)/reforçado(s).")
-        if learned_solutions == 0:
-            click.echo(Fore.WHITE + "   > Nenhuma solução nova para aprender.")
-
-    except Exception as e:
-        conn.rollback()
-        logger.add_finding("ERROR", "Falha ao aprender soluções.", details=str(e))
-        # import traceback
-        # click.echo(Fore.RED + f"   > [DEBUG] {traceback.format_exc()}")
+        if learned_count > 0:
+            console.print(f"[bold green][GÊNESE] {learned_count} nova(s) solução(ões) integrada(s).[/bold green]")
     finally:
         if conn: conn.close()
 
-def _abstract_and_learn_template(cursor, concrete_finding):
+def _get_template_for_message(message: str) -> Tuple[str, str, str]:
     """
-    (Gênese V2 - Expandido) Analisa um 'finding' e tenta criar/atualizar um template de solução.
+    Mapeia mensagens de erro para padrões de templates.
+    MPoT-7: Retorna tupla de strings vazias em vez de None para consistência.
     """
-    message = concrete_finding.get('message', '')
-    category = concrete_finding.get('category', '')
+    if not message:
+        return ("", "", "")
+
+    rules = [
+        (r"'(.+?)' imported but unused", "'<MODULE>' imported but unused", "FIX_UNUSED_IMPORT", "DEADCODE"),
+        (r"redefinition of unused '(.+?)' from line \d+", "redefinition of unused '<VAR>' from line <LINE>", "REMOVE_LINE", "DEADCODE"),
+        (r"f-string is missing placeholders", "f-string is missing placeholders", "REMOVE_F_PREFIX", "STYLE"),
+        (r"undefined name '(.+?)'", "undefined name '<VAR>'", "ADD_IMPORT_OR_DEFINE", "RUNTIME-RISK"),
+        (r"Uso de 'except:' genérico", "Uso de 'except:' genérico detectado", "FIX_BARE_EXCEPT", "SECURITY")
+    ]
     
-    # Inferência de categoria se não fornecida
-    if not category:
-        if 'imported but unused' in message or 'redefinition of unused' in message:
-            category = 'DEADCODE'
-        elif 'undefined name' in message:
-            category = 'RUNTIME-RISK'
-        elif 'f-string' in message or 'assigned to but never used' in message:
-            category = 'STYLE'
-        else:
-            category = 'UNCATEGORIZED'
+    for regex, pattern, template, category in rules:
+        if re.search(regex, message):
+            return (pattern, template, category)
+            
+    return ("", "", "") # Retorno consistente
+
+def _abstract_and_learn_template(cursor: sqlite3.Cursor, concrete_finding: Dict[str, Any]) -> bool:
+    """Extrai e persiste padrões abstratos de solução no banco de dados."""
+    if cursor is None:
+        raise ValueError("Cursor do banco de dados é obrigatório.")
+
+    pattern, template, category = _get_template_for_message(concrete_finding.get('message', ''))
     
-    problem_pattern = None
-    solution_template = None
-    
-    # REGRAS DE ABSTRAÇÃO - DEADCODE
-    if re.match(r"'(.+?)' imported but unused", message):
-        problem_pattern = "'<MODULE>' imported but unused"
-        solution_template = "FIX_UNUSED_IMPORT" 
-    elif re.match(r"redefinition of unused '(.+?)' from line \d+", message):
-        problem_pattern = "redefinition of unused '<VAR>' from line <LINE>"
-        solution_template = "REMOVE_LINE"
-    
-    # REGRAS DE ABSTRAÇÃO - STYLE
-    elif message == "f-string is missing placeholders":
-        problem_pattern = "f-string is missing placeholders"
-        solution_template = "REMOVE_F_PREFIX"
-    elif re.match(r"local variable '(.+?)' is assigned to but never used", message):
-        problem_pattern = "local variable '<VAR>' is assigned to but never used"
-        solution_template = "REPLACE_WITH_UNDERSCORE"
-    
-    # REGRAS DE ABSTRAÇÃO - RUNTIME-RISK
-    elif re.match(r"undefined name '(.+?)'", message):
-        problem_pattern = "undefined name '<VAR>'"
-        solution_template = "ADD_IMPORT_OR_DEFINE"
-    
-    # [NOVO] Regra para except genérico
-    elif "Uso de 'except:' genérico detectado" in message:
-        problem_pattern = "Uso de 'except:' genérico detectado"
-        solution_template = "FIX_BARE_EXCEPT"
-    
-    # REGRAS DE ABSTRAÇÃO - SYNTAX
-    elif 'unexpected indent' in message.lower() or 'expected an indented block' in message.lower():
-        problem_pattern = "indentation error"
-        solution_template = "FIX_INDENTATION"
-    
-    if not problem_pattern:
+    if not pattern: # Se o retorno for a tupla vazia
         return False
 
-    # Verifica se o template já existe
-    cursor.execute("SELECT id, confidence FROM solution_templates WHERE problem_pattern = ?", (problem_pattern,))
+    cursor.execute("SELECT id, confidence FROM solution_templates WHERE problem_pattern = ?", (pattern,))
     existing = cursor.fetchone()
 
     if existing:
-        new_confidence = existing['confidence'] + 1
-        cursor.execute("UPDATE solution_templates SET confidence = ? WHERE id = ?", (new_confidence, existing['id']))
-        click.echo(Fore.CYAN + f"   > [GÊNESE] Confiança de '{problem_pattern}' → {new_confidence}")
+        cursor.execute("UPDATE solution_templates SET confidence = ? WHERE id = ?", 
+                       (existing['confidence'] + 1, existing['id']))
     else:
         cursor.execute(
             "INSERT INTO solution_templates (problem_pattern, solution_template, category, created_at) VALUES (?, ?, ?, ?)",
-            (problem_pattern, solution_template, category, datetime.now(timezone.utc).isoformat())
+            (pattern, template, category, datetime.now(timezone.utc).isoformat())
         )
-        click.echo(Fore.CYAN + f"   > [GÊNESE] Novo template: '{problem_pattern}' ({solution_template})")
-    
     return True
 
 @click.command('save')
 @click.pass_context
 @click.argument('message')
-@click.option('--force', is_flag=True, help="Força o commit mesmo se o 'check' encontrar erros.")
-def save(ctx, message, force):
-    """Executa um 'commit seguro', verificando qualidade e aprendendo com correções."""
+@click.option('--force', is_flag=True, help="Força o commit ignorando erros de qualidade.")
+def save(ctx, message: str, force: bool):
+    """Executa commit seguro com aprendizado automatizado."""
+    console = Console()
     project_path = os.getcwd()
-    with ExecutionLogger('save', project_path, ctx.params) as logger:
-        click.echo(Fore.CYAN + "--- [SAVE] Iniciando processo de salvamento seguro ---")
+    
+    # FIX: Removido o 'as logger' para silenciar o aviso de variável não utilizada,
+    # já que o context manager ainda é necessário para a telemetria/Chronos.
+    with ExecutionLogger('save', project_path, ctx.params):
+        console.print("[bold cyan]--- [SAVE] Salvamento Seguro e Inteligente ---[/bold cyan]")
 
-        # Passo 1: Preparar arquivos
-        click.echo(Fore.YELLOW + "\nPasso 1: Preparando arquivos (git add .)...")
+        # 1. Preparação
         _run_git_command(['add', '.'])
-        click.echo(Fore.GREEN + "[OK] Arquivos preparados.")
-        
-        status_output = _run_git_command(['status', '--porcelain'], capture_output=True) or ""
-        if not status_output.strip():
-            click.echo(Fore.YELLOW + "[AVISO] Nenhuma alteração para commitar.")
+        status = (_run_git_command(['status', '--porcelain'], capture_output=True) or "").strip()
+        if not status:
+            console.print("[yellow][AVISO] Nada para salvar.[/yellow]")
             return
 
-        # Passo 2: Verificação de qualidade
-        click.echo(Fore.YELLOW + "\nPasso 2: Verificando qualidade...")
-        
+        # 2. Qualidade
         git_root = _run_git_command(['rev-parse', '--show-toplevel'], capture_output=True)
-        files_to_check = _get_staged_python_files(git_root)
+        staged_py = _get_staged_python_files(git_root)
         
-        if not files_to_check:
-            click.echo(Fore.GREEN + "[OK] Nenhum arquivo Python modificado.")
-            check_results = {'summary': {}, 'findings': []}
-        else:
-            click.echo(f"   > Analisando {len(files_to_check)} arquivo(s)...")
-            
-            # [FIX] Atualizado para a nova assinatura do run_check_logic
-            check_results = run_check_logic(
-                path='.',
-                ignore=[],
-                fix=False,
-                debug=False,
-                fast=False,             # Novo
-                no_imports=False,       # Novo
-                no_cache=True,          # Save sempre força verificação limpa
-                target_files=files_to_check,
-                clones=False,           # Novo (Clones é pesado para commit diário)
-                continue_on_error=False,# Novo (Erro deve bloquear commit)
-                exclude_categories=[]   # Novo (Verifica tudo)
+        if staged_py:
+            # Roda o check filtrando pelo TOML (graças ao fix acima)
+            results = run_check_logic(
+                path='.', fix=False, fast=True, no_cache=True, 
+                clones=False, continue_on_error=True, # Permite pegar todos os erros
+                target_files=staged_py
             )
-        
-        summary = check_results.get('summary', {})
-        has_errors = summary.get('critical', 0) > 0 or summary.get('errors', 0) > 0
+            
+            summary = results.get('summary', {})
+            # O commit só é bloqueado por erros reais (Code Breaking)
+            has_blocking_errors = summary.get('critical', 0) > 0 or summary.get('errors', 0) > 0
+    
+            if has_blocking_errors and not force:
+                console.print("[bold red]\n[ERRO] Qualidade insuficiente: Erros Críticos detectados.[/bold red]")
+                
+                # FILTRO DE EXIBIÇÃO: Mostra apenas o que bloqueia o commit
+                blocking_findings = [
+                    f for f in results.get('findings', []) 
+                    if f['severity'] in ['CRITICAL', 'ERROR']
+                ]
+                results['findings'] = blocking_findings # Substitui para a exibição
+                
+                _present_results('text', results)
+                console.print("[bold yellow]\\nAvisos de STYLE/DOCS foram ignorados para este commit.[/bold yellow]")
+                sys.exit(1)
 
-        if has_errors and not force:
-            click.echo(Fore.RED + "\n[ERRO] Erros encontrados. Commit abortado.")
-            click.echo(Fore.WHITE + "   Use --force para forçar o commit, ou corrija os erros.")
-            _present_results('text', check_results)
-            _run_git_command(['reset'])
-            sys.exit(1)
-        
-        # Passo 3: Criar commit
-        click.echo(Fore.YELLOW + "\nPasso 3: Criando commit...")
+        # 3. Commit e Aprendizado
         _run_git_command(['commit', '-m', message])
-        
-        new_commit_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True)
-        
-        # Passo 4: Aprender soluções
-        if new_commit_hash:
-            _learn_solutions_from_commit(new_commit_hash, logger, project_path)
+        new_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True)
+        if new_hash:
+            _learn_solutions_from_commit(new_hash, project_path)
 
-        click.echo(Fore.GREEN + Style.BRIGHT + "\n[SAVE] Alterações salvas com sucesso!")
+        console.print("[bold green]\n[OK] Projeto salvo e Gênese atualizada.[/bold green]")

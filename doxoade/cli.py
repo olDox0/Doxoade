@@ -269,6 +269,11 @@ def _get_github_repo_info():
 # FUNÇÕES DE APRESENTAÇÃO E DIAGNÓSTICO
 # -----------------------------------------------------------------------------
 
+@cli.command('self-diagnose')
+def self_diagnose():
+    from .diagnostic.check_diagnose import verificar_integridade_sondas
+    verificar_integridade_sondas()
+
 def _analyze_traceback(stderr_output):
     """Analisa a saída de erro (stderr) e imprime um diagnóstico formatado."""
     diagnostics = {

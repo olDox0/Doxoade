@@ -58,5 +58,15 @@
     "title": "Safe Sync (Sincronização Segura)",
     "definition": "Modo de operação do Git onde o Doxoade realiza uma auditoria 'Pré-Voo' (Dry Run) comparando as árvores locais e remotas. Se detectar deleções ou sobrescritas perigosas, exige confirmação manual explícita antes de executar o comando real.",
     "origin": "Comando 'sync --safe'"
+  },
+  "lean_analytics": {
+    "title": "Lean Analytics (Análise Enxuta)",
+    "definition": "Prática de processamento de dados estatísticos sem dependências de frameworks de Data Science (como Pandas). Utiliza estruturas nativas como 'collections.Counter' e 'rich.table' para garantir que ferramentas de engenharia rodem instantaneamente em dispositivos móveis e Termux.",
+    "origin": "Refatoração Doxoade v69 - Mobile-First Initiative."
+  },
+  "architectural_linting": {
+    "title": "Architectural Linting (Linter de Arquitetura)",
+    "definition": "Diferente do linter de sintaxe (como Pyflakes), o linter de arquitetura valida regras de design e robustez, como o tamanho das funções, o nível de aninhamento e a presença de contratos, baseando-se no Modern Power of Ten.",
+    "origin": "Doxoade Core - Comando 'style'."
   }
 }

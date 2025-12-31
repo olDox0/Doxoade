@@ -52,5 +52,7 @@ Vers/
 .doxoade_cache/
 
 # Exceções (movidas para o final para garantir prioridade)
+
+# Exceções (Auto-fixed)
 !requirements.txt
 !PipelineHelp.txt

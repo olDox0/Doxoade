@@ -18,5 +18,47 @@
     "title": "Padrão Gerente-Especialista",
     "context": "Expansão do 'guicheck' para Kivy e Tkinter (OADE-29).",
     "content": "Problema: Como analisar múltiplos frameworks sem criar um 'god-object'?\nSolução: Separar a lógica em um 'Gerente' (detecta o tipo de arquivo) e 'Especialistas' (sabem analisar apenas uma tecnologia). Adicionar suporte a PyQt agora exige apenas criar um novo especialista."
+  },
+  "secure_contract_pattern": {
+    "title": "Padrão de Contrato Blindado (Secure Contract)",
+    "context": "Resolvendo o conflito entre MPoT-5 (Asserções) e Segurança (Bandit LOW: B101).",
+    "content": "Problema: Asserts são removidos em Python otimizado (-O), deixando o sistema vulnerável a falhas silenciosas.\nSolução: Substituir 'assert condition' por verificações explícitas 'if not condition: raise ValueError()'. Isso garante a validade do contrato em qualquer modo de execução.\nUso: 'doxoade dashboard', 'doxoade health'.",
+    "linked_policy": "policy_r0"
+  },
+  "ast_web_extraction": {
+    "title": "Extração de Web-in-Python via AST",
+    "context": "Validando sintaxe web dentro de frameworks declarativos (NiceGUI/Streamlit).",
+    "content": "O sistema percorre a árvore sintática (AST) do Python em busca de chamadas específicas (ex: 'ui.html', '.style'). O conteúdo das strings constantes é isolado e passado para analisadores especializados de HTML/CSS como se fossem arquivos independentes.",
+    "linked_incident": "webcheck_v2_nicegui"
+  },
+  "payload_probing": {
+    "title": "Payload Probing (Sondagem por Carga Útil)",
+    "context": "Comunicação entre o Core do Doxoade e sub-processos de análise.",
+    "content": "Em vez de passar múltiplos argumentos via CLI (que podem estourar o limite de caracteres no Windows), o Core envia um objeto JSON (Payload) via stdin para a sonda. A sonda processa e devolve o resultado via stdout, também em JSON.",
+    "linked_incident": "saga_quotes"
+  },
+  "total_type_consistency": {
+    "title": "Consistência Total de Tipos (MPoT-7)",
+    "context": "Evitando falhas silenciosas de 'NoneType' em pipelines de dados.",
+    "content": "Funções de utilidade (como leitores de arquivos) devem retornar um objeto vazio do mesmo tipo esperado (ex: '' para string, [] para lista) em vez de 'None' em caso de erro não-fatal. Isso simplifica a lógica do chamador e previne quebras de runtime descobertas pelo deepcheck.",
+    "linked_incident": "deepcheck_mixed_returns"
+  },
+  "safe_evolution_loop": {
+    "title": "Loop de Evolução Segura (Safe-Save)",
+    "context": "Fluxo principal de salvamento do projeto.",
+    "content": "O comando 'save' atua como um portão de qualidade. Ele impede a entrada de erros 'CRITICAL' ou 'ERROR' no histórico do Git. Após o commit, ele analisa a diferença entre os incidentes abertos e o código atual para alimentar o motor Gênese com soluções bem-sucedidas.",
+    "linked_policy": "policy_r0"
+  },
+  "contract_synchronization": {
+    "title": "Sincronização de Contratos em Testes",
+    "context": "Ajustando suítes de teste após refatorações MPoT-7.",
+    "content": "Ao aplicar a consistência de tipos (evitar retornos None), os testes unitários devem ser atualizados para validar o 'Objeto Vazio' (Null Object Pattern) correspondente. Isso garante que os pipelines de dados subsequentes não precisem de checagens 'if x is not None', reduzindo a complexidade ciclomática global.",
+    "linked_incident": "pytest_save_contract_mismatch"
+  },
+  "hybrid_probe_parsing": {
+    "title": "Parsing de Sondas Híbridas",
+    "context": "Gerenciando diferentes formatos de saída de sub-processos.",
+    "content": "Implementado o padrão 'Format-Aware Dispatch'. O orquestrador detecta o tipo de sonda (Texto vs JSON) e aplica o parser correspondente. Sondas legadas (Pyflakes) são processadas via Regex, enquanto sondas modernas (Hunter/Style) são decodificadas como objetos JSON estruturados.",
+    "linked_incident": "regression_check_v38.2"
   }
 }

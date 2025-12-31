@@ -1,28 +1,39 @@
-# doxoade/commands/intelligence.py
+# -*- coding: utf-8 -*-
+"""
+Módulo de Inteligência Profunda (Deep Insight).
+Varre o projeto para extrair metadados, estrutura de classes/funções,
+dívida técnica (TODOs) e estado do Git.
+Otimizado para Termux: removido chardet em favor de detecção heurística rápida.
+"""
+
 import os
 import json
 import ast
 import re
+import sys
+import logging
 from datetime import datetime, timezone
-import chardet
-import click
-from colorama import Fore
+from typing import List, Dict, Any, Optional
 
-from ..shared_tools import ExecutionLogger, _get_project_config
+import click
+from rich.console import Console
+
+from ..shared_tools import ExecutionLogger
 from ..tools.git import _run_git_command
 from ..dnm import DNM
 
-__version__ = "38.0 Alfa (Deep Insight)"
+__version__ = "38.1 Alfa (Termux-Optimized)"
 
 class InsightVisitor(ast.NodeVisitor):
-    """Extrai inteligência profunda da AST."""
+    """Extrai inteligência profunda da Árvore Sintática Abstrata (AST)."""
+    
     def __init__(self):
         self.classes = []
         self.functions = []
         self.imports = []
-        self.todos = []
         
-    def visit_ClassDef(self, node):
+    def visit_ClassDef(self, node: ast.ClassDef):
+        """Mapeia definições de classes e seus métodos."""
         methods = [n.name for n in node.body if isinstance(n, ast.FunctionDef)]
         self.classes.append({
             "name": node.name,
@@ -33,9 +44,8 @@ class InsightVisitor(ast.NodeVisitor):
         })
         self.generic_visit(node)
 
-    def visit_FunctionDef(self, node):
-        # Ignora métodos dentro de classes (já pegos no visit_ClassDef de forma rasa)
-        # ou pega tudo? Vamos pegar tudo para ter stats completos.
+    def visit_FunctionDef(self, node: ast.FunctionDef):
+        """Mapeia funções, argumentos e calcula complexidade básica."""
         args = [a.arg for a in node.args.args]
         decorators = [ast.unparse(d) for d in node.decorator_list]
         self.functions.append({
@@ -48,33 +58,37 @@ class InsightVisitor(ast.NodeVisitor):
         })
         self.generic_visit(node)
 
-    def visit_Import(self, node):
+    def visit_Import(self, node: ast.Import):
+        """Registra imports globais."""
         for alias in node.names:
             self.imports.append(alias.name)
         self.generic_visit(node)
 
-    def visit_ImportFrom(self, node):
+    def visit_ImportFrom(self, node: ast.ImportFrom):
+        """Registra imports de módulos específicos."""
         module = node.module or ""
         for alias in node.names:
             self.imports.append(f"{module}.{alias.name}")
         self.generic_visit(node)
 
-    def _estimate_complexity(self, node):
-        """Estimativa rápida de complexidade ciclomática."""
+    def _estimate_complexity(self, node: ast.AST) -> int:
+        """Estimativa rápida de complexidade ciclomática baseada em nós de desvio."""
         complexity = 1
         for child in ast.walk(node):
             if isinstance(child, (ast.If, ast.While, ast.For, ast.ExceptHandler, ast.With)):
                 complexity += 1
         return complexity
 
-def _extract_todos(content):
-    """Extrai comentários de dívida técnica."""
+def _extract_todos(content: str) -> List[Dict[str, Any]]:
+    """Extrai comentários de dívida técnica utilizando Regex otimizado."""
     todos = []
+    # Compila a regex para performance no loop
+    todo_pattern = re.compile(r'\b(TODO|FIXME|HACK|XXX|BUG)\b[:\s]*(.*)', re.IGNORECASE)
+    
     for i, line in enumerate(content.splitlines(), 1):
         if "#" in line:
             comment = line.split("#", 1)[1].strip()
-            # Regex para pegar TODO, FIXME, HACK, etc
-            match = re.match(r'\b(TODO|FIXME|HACK|XXX|BUG)\b[:\s]*(.*)', comment, re.IGNORECASE)
+            match = todo_pattern.match(comment)
             if match:
                 tag, text = match.groups()
                 todos.append({
@@ -84,31 +98,29 @@ def _extract_todos(content):
                 })
     return todos
 
-def _analyze_python_deep(file_path, content):
-    """Realiza a análise profunda do código Python."""
-    try:
-        tree = ast.parse(content, filename=file_path)
-        visitor = InsightVisitor()
-        visitor.visit(tree)
-        
-        return {
-            "classes": visitor.classes,
-            "functions": visitor.functions,
-            "imports": sorted(list(set(visitor.imports))),
-            "todos": _extract_todos(content),
-            "loc": len(content.splitlines())
-        }
-    except Exception as e:
-        return {"error": f"AST Parse Error: {str(e)}"}
+def _read_file_safely(file_path: str) -> str:
+    """
+    Lê o conteúdo do arquivo com fallback de encoding.
+    MPoT-7: Retorna string vazia em vez de None para manter consistência de tipo.
+    """
+    if os.path.getsize(file_path) > 1024 * 1024:
+        return ""
 
-def _get_git_info(file_path):
-    """Obtém informações do último commit deste arquivo."""
+    for enc in ['utf-8', 'latin-1', 'cp1252']:
+        try:
+            with open(file_path, 'r', encoding=enc) as f:
+                return f.read()
+        except (UnicodeDecodeError, PermissionError):
+            continue
+    return ""
+
+def _get_git_info(file_path: str) -> Optional[Dict[str, str]]:
+    """Obtém informações do último commit deste arquivo via Git."""
     try:
-        # Formato: Hash|Autor|Data|Mensagem
         fmt = "%h|%an|%ai|%s"
-        # Precisamos do caminho relativo à raiz do git
         cmd = ['log', '-n', '1', f'--format={fmt}', '--', file_path]
         output = _run_git_command(cmd, capture_output=True, silent_fail=True)
+        
         if output:
             parts = output.strip().split('|')
             if len(parts) >= 4:
@@ -118,26 +130,26 @@ def _get_git_info(file_path):
                     "date": parts[2],
                     "message": parts[3]
                 }
-    except Exception: pass
+    except Exception as e:
+        logging.debug(f"Falha ao obter Git Info para {file_path}: {e}")
     return None
 
-def _analyze_file_metadata(file_path_str, root_path, logger):
-    """Coleta metadados ricos para um único arquivo."""
+def _analyze_file_metadata(file_path_str: str, root_path: str, logger: ExecutionLogger) -> Optional[Dict[str, Any]]:
+    """
+    Coleta metadados ricos para um único arquivo.
+    Retorna None apenas se o arquivo for irrelevante (binário/vazio).
+    """
     try:
+        content = _read_file_safely(file_path_str)
+        if not content: # Se o conteúdo vier vazio do _read_file_safely
+            return None 
+
         stats = os.stat(file_path_str)
         rel_path = os.path.relpath(file_path_str, root_path).replace('\\', '/')
         
-        # Leitura segura
-        content = ""
-        encoding = "utf-8"
-        try:
-            with open(file_path_str, 'rb') as f:
-                raw = f.read()
-                result = chardet.detect(raw)
-                encoding = result.get('encoding', 'utf-8')
-                content = raw.decode(encoding or 'utf-8', errors='replace')
-        except Exception:
-            return None # Pula arquivos binários ou ilegíveis
+        content = _read_file_safely(file_path_str)
+        if content is None:
+            return None # Arquivo binário ou ilegível
 
         file_info = {
             "path": rel_path,
@@ -148,11 +160,20 @@ def _analyze_file_metadata(file_path_str, root_path, logger):
         }
 
         if file_path_str.endswith('.py'):
-            # Injeta a inteligência profunda
-            deep_data = _analyze_python_deep(file_path_str, content)
-            file_info.update(deep_data)
+            try:
+                tree = ast.parse(content, filename=file_path_str)
+                visitor = InsightVisitor()
+                visitor.visit(tree)
+                file_info.update({
+                    "classes": visitor.classes,
+                    "functions": visitor.functions,
+                    "imports": sorted(list(set(visitor.imports))),
+                    "todos": _extract_todos(content),
+                    "loc": len(content.splitlines())
+                })
+            except SyntaxError as e:
+                file_info["error"] = f"AST Parse Error: {str(e)}"
         else:
-            # Para outros arquivos, apenas conta linhas
             file_info["loc"] = len(content.splitlines())
 
         return file_info
@@ -167,15 +188,15 @@ def intelligence(ctx, output):
     """Gera um dossiê de Inteligência Profunda (Deep Insight) do projeto."""
     path = '.'
     arguments = ctx.params
+    console = Console()
     
     with ExecutionLogger('intelligence', path, arguments) as logger:
-        click.echo(Fore.CYAN + "--- [INTELLIGENCE] Gerando Dossiê de Conhecimento ---")
+        console.print("[bold cyan]--- [INTELLIGENCE] Gerando Dossiê de Conhecimento ---[/bold cyan]")
         
-        # Usa o DNM para navegação robusta (respeita .gitignore)
         dnm = DNM(path)
-        files = dnm.scan() # Pega tudo, não só .py, mas respeita ignores
+        files = dnm.scan()
         
-        click.echo(Fore.WHITE + f"   > Analisando {len(files)} arquivos (Estrutura, Semântica, Git)...")
+        console.print(f"   > Analisando [bold]{len(files)}[/bold] arquivos (Estrutura, Semântica, Git)...")
         
         analyzed_files = []
         with click.progressbar(files, label='Processando') as bar:
@@ -205,9 +226,8 @@ def intelligence(ctx, output):
         try:
             with open(output, 'w', encoding='utf-8') as f:
                 json.dump(report_data, f, indent=2)
-            click.echo(Fore.GREEN + f"\n[OK] Dossiê salvo em: {output}")
-            click.echo(f"   - LOC Total: {total_loc}")
-            click.echo(f"   - Dívida Técnica: {total_todos} itens")
+            console.print(f"\n[bold green][OK] Dossiê salvo em: {output}[/bold green]")
+            console.print(f"   - LOC Total: {total_loc} | Dívida Técnica: {total_todos} itens")
         except IOError as e:
-            click.echo(Fore.RED + f"\n[ERRO] Falha ao salvar relatório: {e}")
+            console.print(f"[bold red]\n[ERRO] Falha ao salvar relatório: {e}[/bold red]")
             sys.exit(1)

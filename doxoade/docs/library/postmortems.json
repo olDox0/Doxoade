@@ -46,5 +46,77 @@
     "symptom": "Crash durante treino acelerado: 'ValueError: broadcast shape mismatch'.",
     "root_cause": "A camada de Embedding não sabia lidar com tensores 3D introduzidos pelo True Batching.",
     "fix": "Core v18.0 com Universal Shape Adaptor (reshape dinâmico de gradientes)."
+  },
+  "pandas_weight_crisis": {
+    "title": "A Crise de Peso do Dashboard (Pandas Overhead)",
+    "date": "2025-12-30",
+    "severity": "MEDIUM",
+    "symptom": "Lentidão extrema na inicialização do comando 'dashboard' no Termux e consumo de 52MB extras de RAM.",
+    "root_cause": "Uso de 'pandas' para operações simples de contagem e agrupamento que poderiam ser feitas nativamente.",
+    "fix": "Remoção total da dependência Pandas. Implementação de lógica de agregação via SQL e agrupamento via 'collections.Counter'. Ganho de 90% na velocidade de startup."
+  },
+  "pytest_import_error": {
+    "title": "Falha de Descoberta de Módulo no Pytest",
+    "date": "2025-12-30",
+    "severity": "LOW",
+    "symptom": "ModuleNotFoundError ao rodar testes unitários, apesar do pacote estar instalado.",
+    "root_cause": "O Pytest não injeta automaticamente o diretório raiz no sys.path quando executado como binário direto, ignorando os bootstraps do cli.py.",
+    "fix": "Executar via 'python -m pytest' para garantir que o diretório atual seja tratado como parte do PYTHONPATH."
+  },
+  "css_parser_leniency_bug": {
+    "title": "Falha na Detecção de CSS (Leniency do Parser)",
+    "date": "2025-12-30",
+    "severity": "LOW",
+    "symptom": "O comando webcheck reportava [OK] mesmo para CSS com erros de sintaxe (;;;).",
+    "root_cause": "A lib cssutils prioriza a recuperação de erros (error recovery) sobre a validação estrita, não lançando exceções para fragmentos 'feios' mas parseáveis.",
+    "fix": "Implementada verificação de 'len(sheet.cssRules)' e validação de 'prop.value' para garantir que o estilo injetado seja funcional e não apenas ignorado pelo parser."
+  },
+  "style_complexity_irony": {
+    "title": "A Ironia da Complexidade no Style",
+    "date": "2025-12-30",
+    "severity": "LOW",
+    "symptom": "O comando 'doxoade check' acusou alta complexidade no próprio comando 'style'.",
+    "root_cause": "O comando style acumulava responsabilidades de: descoberta de arquivos, orquestração de subprocesso e renderização de UI em uma única função.",
+    "fix": "Refatoração para o padrão 'Expert-Split'. A função principal agora apenas coordena três funções especialistas, reduzindo o tamanho de 92 para 38 linhas, atingindo conformidade MPoT-4."
+  },
+  "intelligence_performance_spike": {
+    "title": "Gargalo Crítico de CPU no Intelligence",
+    "date": "2025-12-30",
+    "severity": "HIGH",
+    "symptom": "O comando intelligence levava mais de 1 minuto para processar 200 arquivos, drenando bateria no Termux.",
+    "root_cause": "Uso da biblioteca 'chardet' para detecção de encoding em cada arquivo. O custo computacional de análise estatística de bytes era proibitivo.",
+    "fix": "Implementação do Padrão 'Tiered Fallback Read'. O sistema agora tenta UTF-8 (nativo) e escala para Latin-1 apenas se necessário. Ganho de performance superior a 90%."
+  },
+  "pathlib_encoding_trap": {
+    "title": "A Armadilha de Encoding do Pathlib",
+    "date": "2025-12-30",
+    "severity": "LOW",
+    "symptom": "Testes de strings falhando no Windows (AssertionError) devido a caracteres como 'ç' e 'õ' corrompidos.",
+    "root_cause": "O método 'Path.read_text()' usa o encoding do sistema por padrão (CP1252 no Windows). Se o comando escreve em UTF-8, o teste lê lixo binário.",
+    "fix": "Obrigatoriedade de passar 'encoding=\"utf-8\"' em todos os métodos read_text e write_text dentro da suíte de testes do Doxoade."
+  },
+  "refactoring_unused_logger_trap": {
+    "title": "A Armadilha do Logger Não Utilizado",
+    "date": "2025-12-30",
+    "severity": "LOW",
+    "symptom": "Aviso de 'variable assigned but never used' no comando save.",
+    "root_cause": "Após mover a lógica de aprendizado para funções puras que acessam o banco diretamente, o objeto 'logger' do context manager tornou-se desnecessário para o corpo da função, embora o context manager em si ainda fosse necessário para telemetria.",
+    "fix": "Remoção do alias 'as logger'. O Doxoade agora mantém o monitoramento silencioso do comando sem poluir o escopo de variáveis."
+  },
+  "filter_root_path_bug": {
+    "title": "Falha na Localização do Código Fonte para Filtros",
+    "date": "2025-12-30",
+    "severity": "HIGH",
+    "symptom": "O comando 'check' ignorava a tag '# noqa', exibindo erros que deveriam estar silenciados.",
+    "root_cause": "O orquestrador passava o 'project_root' para a função de filtragem, que tentava abrir a pasta raiz como se fosse um arquivo de texto, falhando na leitura das linhas e, consequentemente, ignorando os comentários de silenciamento.",
+    "fix": "Refatoração do pipeline de relatório para agrupar achados por arquivo e invocar o filtro com caminhos absolutos validados, garantindo acesso ao conteúdo original da linha."
+  },
+  "interface_desynchronization": {
+    "title": "Desincronização de Interface (Check vs Save)",
+    "date": "2025-12-30",
+    "severity": "CRITICAL",
+    "symptom": "Crash fatal 'TypeError' durante a execução do comando save.",
+    "root_cause": "A refatoração de limpeza do check.py removeu parâmetros legados (ignore, no_imports), mas as chamadas internas no save.py não foram atualizadas simultaneamente.",
+    "fix": "Sincronização das assinaturas de função e restauração do parâmetro 'target_files' no orquestrador de lógica para permitir auditorias parciais rápidas."
   }
 }
