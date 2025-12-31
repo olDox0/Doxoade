@@ -1,151 +1,127 @@
-# doxoade/commands/risk.py
+# -*- coding: utf-8 -*-
 """
-Módulo de Gestão de Risco e Estabilidade (R0) - Versão 3.0 (Estado Presente)
-Foca no estado atual do código, ignorando histórico de comandos falhos.
+Módulo de Gestão de Risco Operacional (v4.3 - Gold Standard).
+Calcula estabilidade baseada na densidade estatística de arquivos afetados.
+Conformidade MPoT: Funções curtas, contratos ativos e lógica desacoplada.
 """
+
 import click
 import sqlite3
-import statistics
+import os
+from typing import Dict, Any, List, Tuple
 from colorama import Fore, Style
 from ..database import get_db_connection
+from ..dnm import DNM
 
-def get_check_penalty(cursor):
-    """Calcula penalidade baseada em incidentes ABERTOS (Estado Atual)."""
-    try:
-        # Filtra explicitamente pastas de teste e temporárias
-        cursor.execute("""
-            SELECT category, file_path FROM open_incidents 
-            WHERE file_path NOT LIKE '%test%' 
-            AND file_path NOT LIKE '%Temp%' 
-            AND file_path NOT LIKE '%pytest%'
-        """)
-        rows = cursor.fetchall()
-    except Exception: return 0, "Erro DB"
+__version__ = "4.3 Alfa (Gold Standard - Final)"
+
+def _get_project_metrics(cursor: sqlite3.Cursor, project_path: str) -> Dict[str, Any]:
+    """Coleta métricas base. MPoT-5: Contrato Ativo."""
+    if cursor is None or not project_path:
+        raise ValueError("Dados de contexto (Cursor/Path) são obrigatórios.")
+
+    dnm = DNM(project_path)
+    all_files = dnm.scan(extensions=['.py'])
+    total_count = len(all_files) or 1
+
+    metrics = {'total_files': total_count, 'affected_files': 0, 'by_category': {}}
+
+    # Agrupa incidentes por categoria para calcular densidade
+    cursor.execute("""
+        SELECT category, COUNT(DISTINCT file_path) as file_count
+        FROM open_incidents WHERE project_path = ? GROUP BY category
+    """, (project_path,))
     
-    penalty = 0
-    weights = {'SYNTAX': 15, 'CRITICAL': 10, 'RUNTIME-RISK': 8, 'ERROR': 5, 'WARNING': 2}
+    for row in cursor.fetchall():
+        cat = (row['category'] or 'UNCATEGORIZED').upper()
+        metrics['by_category'][cat] = row['file_count']
+
+    cursor.execute("SELECT COUNT(DISTINCT file_path) FROM open_incidents WHERE project_path = ?", (project_path,))
+    metrics['affected_files'] = cursor.fetchone()[0]
+    return metrics
+
+def calculate_density_penalty(metrics: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Calcula a penalidade ponderada por densidade de arquivos."""
+    if not metrics or 'total_files' not in metrics:
+        raise ValueError("Métricas inválidas para cálculo.")
+
+    total = metrics['total_files']
+    weights = {
+        'SYNTAX': 100, 'CRITICAL': 80, 'SECURITY': 70, 
+        'RUNTIME-RISK': 50, 'COMPLEXITY': 40, 'STYLE': 20, 'DEADCODE': 10
+    }
+
+    results = []
+    for cat, count in metrics['by_category'].items():
+        density = count / total
+        penalty = min(25, (density * weights.get(cat, 15)))
+        results.append({
+            'name': cat, 'penalty': round(penalty, 1),
+            'density_pct': round(density * 100, 1), 'count': count
+        })
+    return results
+
+def _get_risk_styling(score: float) -> Tuple[str, str, str]:
+    """Determina o nível e a cor do Score (Helper de UI)."""
+    if score >= 90: return "BAIXO", Fore.GREEN, "🟢"
+    if score >= 75: return "MÉDIO", Fore.YELLOW, "🟡"
+    if score >= 50: return "ALTO", Fore.RED, "🟠"
+    return "CRÍTICO", Fore.MAGENTA, "🔴"
+
+def _get_engineering_directive(score: float, test_pen: int) -> str:
+    """Define a recomendação técnica baseada nos dados."""
+    if test_pen >= 30:
+        return f"{Fore.RED}🛑 BLOQUEIO: Corrija os testes antes de prosseguir."
+    if score < 50:
+        return f"{Fore.RED}🛠️ EMERGÊNCIA: Realize um 'Technical Debt Sweep'."
+    if score < 80:
+        return f"{Fore.YELLOW}🧹 MODO FAXINA: Priorize limpeza e refatoração."
+    return f"{Fore.GREEN}🚀 ESTRADA LIVRE: Base sólida para inovação."
+
+def _display_risk_report(score: float, metrics: Dict[str, Any], penalties: List[Dict[str, Any]], test_pen: int):
+    """Renderiza o relatório final. MPoT-4: CC < 10."""
+    if metrics is None or penalties is None:
+        raise ValueError("Dados insuficientes para renderização.")
+
+    level, color, icon = _get_risk_styling(score)
+    click.echo(Fore.CYAN + Style.BRIGHT + f"--- [RISK] Auditoria de Densidade v{__version__} ---")
+    click.echo(f"\nScore de Saúde: {color}{Style.BRIGHT}{int(score)}/100 ({level} {icon})")
     
-    count = 0
-    for r in rows:
-        cat = (r['category'] or '').upper()
-        penalty += weights.get(cat, 1)
-        count += 1
-        
-    return min(40, penalty), f"{count} problemas de código ativos"
+    af_pct = (metrics['affected_files'] / metrics['total_files']) * 100
+    click.echo(Fore.WHITE + f"Base: {metrics['total_files']} arqs | Afetados: {metrics['affected_files']} ({af_pct:.1f}%)")
 
-def get_style_penalty(cursor):
-    """Lê o último relatório do 'style' (MPoT)."""
-    try:
-        # Busca último evento 'style'
-        cursor.execute("SELECT id FROM events WHERE command = 'style' ORDER BY id DESC LIMIT 1")
-        row = cursor.fetchone()
-        if not row: return 0, "Sem dados de estilo"
-        
-        event_id = row['id']
-        cursor.execute("SELECT count(*) FROM findings WHERE event_id = ?", (event_id,))
-        violations = cursor.fetchone()[0]
-        
-        # Penalidade leve (estilo é importante, mas não crítico)
-        penalty = min(20, violations * 2)
-        return penalty, f"{violations} violações de arquitetura (MPoT)"
-    except Exception: return 0, "N/A"
+    click.echo("\nDistribuição de Impacto:")
+    for p in sorted(penalties, key=lambda x: x['penalty'], reverse=True):
+        p_col = Fore.RED if p['penalty'] > 10 else (Fore.YELLOW if p['penalty'] > 5 else Fore.WHITE)
+        click.echo(f"   [{p['name']:<15}] {p_col}-{p['penalty']:>4}{Style.RESET_ALL} | "
+                   f"Afeta {p['density_pct']}% dos arquivos ({p['count']} un)")
 
-def get_complexity_penalty(cursor):
-    """
-    Analisa complexidade baseada em dados do 'deepcheck' ou 'health'.
-    Procura findings de categoria 'COMPLEXITY'.
-    """
-    try:
-        # Busca nos últimos eventos
-        cursor.execute("""
-            SELECT id FROM events 
-            WHERE command IN ('health', 'deepcheck') 
-            ORDER BY id DESC LIMIT 1
-        """)
-        row = cursor.fetchone()
-        if not row: return 0, "Sem dados de complexidade"
-        
-        event_id = row['id']
-        # Tenta achar métricas nos detalhes dos findings
-        # (Isso é uma aproximação, idealmente teríamos uma tabela de métricas)
-        cursor.execute("SELECT count(*) FROM findings WHERE event_id = ? AND message LIKE '%Alta Complexidade%'", (event_id,))
-        high_complex_funcs = cursor.fetchone()[0]
-        
-        penalty = min(20, high_complex_funcs * 5)
-        return penalty, f"{high_complex_funcs} funções complexas"
-    except Exception: return 0, "N/A"
+    if test_pen > 0:
+        click.echo(f"   [{'SEGURANÇA':<15}] {Fore.RED}-{test_pen:>4}{Style.RESET_ALL} | Testes: FALHA/AUSENTE")
 
-def get_test_status_penalty(cursor):
-    """Verifica se o último teste passou."""
-    try:
-        cursor.execute("SELECT exit_code FROM command_history WHERE command_name = 'test' ORDER BY id DESC LIMIT 1")
-        row = cursor.fetchone()
-        if not row: return 0, "Sem testes recentes"
-        
-        if row['exit_code'] != 0:
-            return 30, "Última bateria de testes FALHOU"
-        return 0, "Testes passando"
-    except Exception: return 0, "N/A"
-
-def get_risk_level(score):
-    if score >= 90: return "BAIXO", Fore.GREEN
-    if score >= 70: return "MÉDIO", Fore.YELLOW
-    if score >= 50: return "ALTO", Fore.RED
-    return "CRÍTICO", Fore.MAGENTA
+    click.echo(f"\n{Style.BRIGHT}Diretriz de Engenharia:")
+    click.echo(f"   {_get_engineering_directive(score, test_pen)}")
 
 @click.command('risk')
 def risk():
-    """(Gerencial) Score de Risco V3 (Estado Atual do Código)."""
+    """(Gerencial) Análise de Risco v4.3: Densidade de Dívida Técnica."""
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     try:
-        # 1. Código (Check)
-        check_pen, check_msg = get_check_penalty(cursor)
+        project_path = os.getcwd()
+        metrics = _get_project_metrics(cursor, project_path)
+        penalties = calculate_density_penalty(metrics)
         
-        # 2. Arquitetura (Style)
-        style_pen, style_msg = get_style_penalty(cursor)
+        cursor.execute("SELECT exit_code FROM command_history WHERE command_name = 'test' ORDER BY id DESC LIMIT 1")
+        test_row = cursor.fetchone()
+        test_penalty = 0 if (test_row and test_row['exit_code'] == 0) else 20
         
-        # 3. Complexidade
-        complex_pen, complex_msg = get_complexity_penalty(cursor)
-        
-        # 4. Testes
-        test_pen, test_msg = get_test_status_penalty(cursor)
-        
-        # Cálculo: 100 - Penalidades
-        total_penalty = check_pen + style_pen + complex_pen + test_pen
-        final_score = max(0, 100 - total_penalty)
-        
-        level, color = get_risk_level(final_score)
-
-        click.echo(Fore.CYAN + Style.BRIGHT + "--- Relatório de Risco V3 (Estado Presente) ---")
-        click.echo(f"\nScore Atual: {color}{Style.BRIGHT}{int(final_score)}/100 ({level}){Style.RESET_ALL}")
-        
-        click.echo("\nComposição do Risco (Penalidades):")
-        
-        # Helper de exibição
-        def show_factor(name, penalty, msg):
-            p_color = Fore.GREEN if penalty == 0 else (Fore.YELLOW if penalty < 10 else Fore.RED)
-            print(f"   [{name:<12}] {p_color}-{penalty:<3}{Style.RESET_ALL} | {msg}")
-
-        show_factor("Código", check_pen, check_msg)
-        show_factor("Arquitetura", style_pen, style_msg)
-        show_factor("Complexidade", complex_pen, complex_msg)
-        show_factor("Testes", test_pen, test_msg)
-
-        # Recomendação
-        click.echo(f"\n{Style.BRIGHT}Próximo Passo:")
-        if test_pen > 0:
-            click.echo(Fore.RED + "   CORRIGIR TESTES. Nada importa se os testes não passam.")
-        elif check_pen > 20:
-            click.echo(Fore.YELLOW + "   LIMPEZA. Resolva os incidentes abertos (doxoade check --fix).")
-        elif style_pen > 10:
-            click.echo(Fore.BLUE + "   REFATORAÇÃO. Melhore a arquitetura e documentação.")
-        else:
-            click.echo(Fore.GREEN + "   INOVAÇÃO. O terreno está limpo para novas features.")
+        final_score = max(0, 100 - (sum(p['penalty'] for p in penalties) + test_penalty))
+        _display_risk_report(final_score, metrics, penalties, test_penalty)
 
     except Exception as e:
-        click.echo(Fore.RED + f"Erro: {e}")
+        click.echo(Fore.RED + f"[ERRO] Falha no cálculo: {e}")
     finally:
         conn.close()
