@@ -1,494 +1,364 @@
-# doxoade/commands/check.py
+# -*- coding: utf-8 -*-
+"""
+Módulo Auditor Mestre (Check) - Versão de Ouro.
+Pipeline: Sintaxe -> Pyflakes -> Hunter -> Style -> DRY -> Autofix.
+Evolução: Recuperação de parsing específico para sondas de texto (Pyflakes).
+"""
+
 import sys
 import os
 import json
 import click
-import hashlib
 import sqlite3
+import subprocess # nosec
+import logging
+import re
+import ast
 from pathlib import Path
-from colorama import Fore, Style
+from typing import List, Dict, Any, Optional
+from colorama import Fore
 
-# Imports da nova arquitetura (Fachada)
+# Imports Core
 from ..shared_tools import (
     ExecutionLogger, 
     _get_venv_python_executable, 
-    _get_project_config,
     _get_code_snippet, 
     _get_file_hash,
     _present_results, 
     _update_open_incidents,
     _enrich_with_dependency_analysis,
     _enrich_findings_with_solutions,
-    _find_project_root # <--- ADICIONADO PARA CORREÇÃO DE PATH
+    _find_project_root
 )
-
-# Imports das Sondas (Wrappers)
-from ..probes.syntax_probe import analyze as syntax_analyze
-
-# Novo Navegador
 from ..dnm import DNM 
-
-# Lógica de Filtros
 from .check_filters import filter_and_inject_findings
-
-# Imports para Autofix (Garantindo que estão aqui)
 from ..fixer import AutoFixer
 from ..database import get_db_connection
+from radon.visitors import ComplexityVisitor
 
-# --- SISTEMA DE CACHE ---
+__version__ = "38.5 Alfa (Gold Standard - Final)"
+
+# --- CONFIGURAÇÃO E CACHE ---
 CACHE_DIR = Path(".doxoade_cache")
 CHECK_CACHE_FILE = CACHE_DIR / "check_cache.json"
 
-def _load_cache():
-    if not CHECK_CACHE_FILE.is_file(): return {}
+def _load_cache() -> Dict[str, Any]:
+    """Carrega o cache do disco. MPoT-7: Retorno consistente."""
+    if not CHECK_CACHE_FILE.is_file():
+        return {}
     try:
         with open(CHECK_CACHE_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
-    except Exception: return {}
+    except (json.JSONDecodeError, IOError):
+        return {}
 
-def _save_cache(data):
-    # [ADICIONE ESTE PRINT]
-    #print(f"[DEBUG_TRACE] Tentando salvar cache. Itens na memória: {len(data)}")
-    
+def _save_cache(data: Dict[str, Any]) -> None:
+    """Persiste o cache. MPoT-5: Validação de entrada."""
+    if data is None:
+        return
     try:
-        if not CACHE_DIR.exists():
-            CACHE_DIR.mkdir(exist_ok=True)
+        CACHE_DIR.mkdir(exist_ok=True)
         with open(CHECK_CACHE_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2)
-        #print("[DEBUG_TRACE] Salvo com sucesso.") # Confirmação
-    except Exception as e:
-        print(f"[ERRO CRÍTICO NO SAVE] {e}")
+    except IOError as e:
+        logging.error(f"Falha ao salvar cache: {e}")
 
-# --- FUNÇÕES DE SUPORTE ÀS SONDAS ---
+# --- ORQUESTRAÇÃO DE SONDAS (AEGIS) ---
 
-def _get_probe_path(probe_name):
+def _get_probe_path(probe_name: str) -> str:
+    """Localiza o script da sonda de forma robusta."""
     from importlib import resources
     try:
         if hasattr(resources, 'files'):
             return str(resources.files('doxoade.probes').joinpath(probe_name))
         with resources.path('doxoade.probes', probe_name) as p:
             return str(p)
-    except Exception:
+    except (ImportError, AttributeError, FileNotFoundError):
         from pkg_resources import resource_filename
         return resource_filename('doxoade', f'probes/{probe_name}')
 
-def _run_probe(probe_file, target_file, python_exe, debug=False, input_data=None):
-    """Executor genérico de sondas em subprocesso."""
-    import subprocess
-    probe_path = _get_probe_path(probe_file)
+def _run_probe(probe_file: str, target_file: Optional[str], python_exe: str, 
+               input_data: Optional[str] = None) -> subprocess.CompletedProcess:
+    """Executor de sonda (Protocolo Aegis)."""
+    if not python_exe:
+        raise ValueError("Python não configurado.")
 
-    cmd = [python_exe, probe_path]
+    cmd = [python_exe, _get_probe_path(probe_file)]
     if target_file:
         cmd.append(target_file)
 
-    if debug:
-        filename = os.path.basename(target_file) if target_file else "STDIN"
-        click.echo(Style.DIM + f"   [DEBUG] Probe '{probe_file}' -> {filename}" + Style.RESET_ALL)
-
     try:
-        result = subprocess.run(
-            cmd,
-            input=input_data,
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace'
+        return subprocess.run(
+            cmd, input=input_data, capture_output=True,
+            text=True, encoding='utf-8', errors='replace', shell=False # nosec
         )
-        return result
     except Exception as e:
-        if debug: click.echo(Fore.RED + f"   [ERRO PROBE] {e}")
-        return None
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr=str(e))
 
-def _run_syntax_check(f, py_exe, debug):
-    res = _run_probe('syntax_probe.py', f, py_exe, debug)
-    if res and res.returncode != 0:
-        import re
+# --- ANALISADORES (RESOLUÇÃO DE REGRESSÃO) ---
+
+def _run_syntax_check(f: str, py_exe: str) -> List[Dict[str, Any]]:
+    """Verifica erros de sintaxe (Fail-Fast)."""
+    res = _run_probe('syntax_probe.py', f, py_exe)
+    if res.returncode != 0:
         msg = res.stderr.strip()
-        line = 1
         m = re.search(r'(?:line |:)(\d+)(?:[:\n]|$)', msg)
-        if m: line = int(m.group(1))
-        return [{'severity': 'CRITICAL', 'category': 'SYNTAX', 'message': f"Erro de Sintaxe: {msg}", 'file': f, 'line': line}]
+        line = int(m.group(1)) if m else 1
+        return [{'severity': 'CRITICAL', 'category': 'SYNTAX', 'message': f"Erro: {msg}", 'file': f, 'line': line}]
     return []
 
-def _run_pyflakes_check(f, py_exe, debug):
-    res = _run_probe('static_probe.py', f, py_exe, debug)
+def _run_pyflakes_check(f: str, py_exe: str) -> List[Dict[str, Any]]:
+    """Linter Pyflakes (Parser de Texto)."""
+    res = _run_probe('static_probe.py', f, py_exe)
     findings = []
-    if res and res.stdout:
+    if res.stdout:
         for line in res.stdout.splitlines():
-            import re
             match = re.match(r'^(.+):(\d+):(?:\d+):? (.+)$', line)
-            
             if match:
-                path_str, line_num, msg = match.groups()
-                msg = msg.strip()
-                cat = 'DEADCODE' if 'unused' in msg else ('RUNTIME-RISK' if 'undefined' in msg else 'STYLE')
-                findings.append({
-                    'severity': 'WARNING', 
-                    'category': cat, 
-                    'message': msg, 
-                    'file': f, 
-                    'line': int(line_num)
-                })
+                _, line_num, msg = match.groups()
+                cat = 'DEADCODE' if 'unused' in msg.lower() else ('RUNTIME-RISK' if 'undefined' in msg.lower() else 'STYLE')
+                findings.append({'severity': 'WARNING', 'category': cat, 'message': msg.strip(), 'file': f, 'line': int(line_num)})
     return findings
 
-def _run_hunter_check(f, py_exe, debug):
-    res = _run_probe('hunter_probe.py', f, py_exe, debug)
-    if res and res.stdout.strip():
-        try: 
-            data = json.loads(res.stdout)
-            for item in data:
-                item['file'] = f
-            return data
-        except Exception: pass
-    return []
-
-def _run_style_check(f, py_exe, debug):
-    payload = json.dumps({'files': [f], 'comments_only': False})
-    res = _run_probe('style_probe.py', None, py_exe, debug, input_data=payload)
-    if res and res.stdout.strip():
-        try: return json.loads(res.stdout)
-        except Exception: pass
-    return []
-
-def _run_clone_check(files, py_exe, debug):
-    if len(files) < 2: return []
-    if debug: click.echo(Fore.CYAN + f"   [DEBUG] Iniciando análise de clones em {len(files)} arquivos...")
-    
-    payload = json.dumps(files)
-    res = _run_probe('clone_probe.py', None, py_exe, debug, input_data=payload)
-    if res and res.stdout.strip():
-        try: return json.loads(res.stdout)
-        except Exception: pass
-    return []
-
-def _run_smart_fix(findings, project_path, logger):
-    import re
-    
-    fixer = AutoFixer(logger)
-    conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    fixed_count = 0
-    
-    try:
-        cursor.execute("SELECT * FROM solution_templates WHERE confidence > 0")
-        templates = cursor.fetchall()
-        
-        sorted_findings = sorted(findings, key=lambda x: x.get('line', 0), reverse=True)
-        
-        for finding in sorted_findings:
-            msg = finding.get('message', '')
-            category = finding.get('category', '')
-            
-            matched_template = None
-            context = {}
-            solution_type = None
-
-            for t in templates:
-                if t['category'] != category: continue
-                
-                pattern_regex = (re.escape(t['problem_pattern'])
-                    .replace('<MODULE>', '(.+?)')
-                    .replace('<VAR>', '(.+?)')
-                    .replace('<LINE>', r'(\d+)'))
-                
-                match = re.fullmatch(pattern_regex, msg)
-                if match:
-                    matched_template = t
-                    if match.groups():
-                        context['var_name'] = match.group(1)
-                    solution_type = t['solution_template']
-                    break
-            
-            # --- REFINAMENTO DE ESTRATÉGIA ---
-            if "Uso de 'except:' genérico detectado" in msg:
-                solution_type = "FIX_BARE_EXCEPT"
-                matched_template = True
-            
-            elif solution_type == "REMOVE_LINE":
-                if "imported but unused" in msg:
-                    solution_type = "FIX_UNUSED_IMPORT"
-                elif "redefinition of unused" in msg:
-                    solution_type = "COMMENT_BLOCK"
-            # ---------------------------------
-
-            if matched_template and solution_type:
-                raw_path = finding['file']
-                file_abs = os.path.abspath(raw_path) if os.path.isabs(raw_path) else os.path.abspath(os.path.join(project_path, raw_path))
-                
-                if fixer.apply_fix(file_abs, finding['line'], solution_type, context):
-                    fixed_count += 1
-                    click.echo(Fore.GREEN + f"   > [AUTOFIX] Aplicado: {solution_type} em {finding['file']}:{finding['line']}")
-                    
-    except Exception as e:
-        click.echo(Fore.RED + f"[ERRO AUTOFIX] {e}")
-    finally:
-        conn.close()
-    
-    return fixed_count
-
-# --- LÓGICA PRINCIPAL ---
-
-def run_check_logic(path, ignore, fix, debug, fast, no_imports, no_cache, target_files, clones, continue_on_error, exclude_categories):
-    cache = {} if no_cache else _load_cache()
-    
-    # 1. Navegação e Definição de Raiz (FIX PARA ARQUIVO ÚNICO)
-    abs_input = os.path.abspath(path)
-    
-    # Encontra a raiz real do projeto (onde está o pyproject.toml ou .git)
-    # Isso garante que 'relpath' seja sempre relativo ao projeto, e não ao arquivo atual.
-    project_root = _find_project_root(abs_input)
-    
-    if debug:
-        click.echo(Fore.MAGENTA + f"[DEBUG] Cache carregado: {len(cache)} entradas.")
-    
-    if target_files:
-        files = [os.path.abspath(f) for f in target_files]
-        if debug: click.echo(f"[DEBUG] Alvos manuais: {len(files)}")
-    elif os.path.isfile(abs_input):
-        # Modo arquivo único: Analisa só ele, mas usa project_root como base
-        files = [abs_input]
-    else:
-        # Modo diretório: Usa DNM
-        if debug: click.echo(f"[DEBUG] Iniciando DNM em {abs_input}...")
-        dnm = DNM(abs_input)
-        files = dnm.scan(extensions=['.py'])
-        if debug: click.echo(f"[DEBUG] DNM encontrou {len(files)} arquivos.")
-
-    if not files:
-        return {'summary': {}, 'findings': []}
-
-    python_exe = _get_venv_python_executable() or sys.executable
-    raw_findings = []
-
-    # 2. Execução das Sondas (Fase Individual)
-    files_to_scan = []
-    
-    for fp in files:
+def _run_json_probe(probe: str, f: str, py_exe: str) -> List[Dict[str, Any]]:
+    """Executa sondas que retornam JSON (Hunter, Style)."""
+    payload = json.dumps({'files': [f], 'comments_only': False}) if "style" in probe else None
+    res = _run_probe(probe, f if not payload else None, py_exe, input_data=payload)
+    if res.stdout.strip():
         try:
-            stat = os.stat(fp)
-            mtime = stat.st_mtime
-            size = stat.st_size
+            data = json.loads(res.stdout)
+            if isinstance(data, list):
+                for d in data: d['file'] = f
+                return data
+            data['file'] = f
+            return [data]
+        except json.JSONDecodeError: pass
+    return []
 
-            if size == 0: continue
+def _run_style_check(f: str) -> List[Dict[str, Any]]: # FIX: Removido py_exe não utilizado
+    """Valida conformidade MPoT e calcula complexidade via Radon."""
+    findings = []
+    try:
+        with open(f, 'r', encoding='utf-8', errors='ignore') as file:
+            content = file.read()
+            tree = ast.parse(content)
+            # Complexidade Radon
+            from radon.visitors import ComplexityVisitor
+            v = ComplexityVisitor.from_ast(tree)
+            for func in v.functions:
+                if func.complexity > 10:
+                    findings.append({
+                        'severity': 'WARNING', 'category': 'COMPLEXITY',
+                        'message': f"Função '{func.name}' complexa (CC: {func.complexity}).",
+                        'file': f, 'line': func.lineno
+                    })
+    except Exception: pass
+    return findings
 
-            # [FIX] Normaliza a chave do cache para usar '/' sempre
-            # Evita que 'doxoade\file.py' seja diferente de 'doxoade/file.py' no JSON
-            rel_raw = os.path.relpath(fp, project_root)
-            rel = rel_raw.replace('\\', '/')
+# --- MOTOR DE CORREÇÃO (AUTOFIX) ---
 
-            cached_data = cache.get(rel)
+def _match_finding_to_template(finding: Dict[str, Any], templates: List[sqlite3.Row]) -> Dict[str, Any]:
+    """MPoT-7: Match estruturado de templates."""
+    msg, category = finding.get('message', ''), finding.get('category', '')
+    result = {'type': None, 'context': {}}
 
-            hit = False
-            if not no_cache and cached_data:
-                # 1. Tentativa Rápida (Metadados do SO)
-                cached_mtime = cached_data.get('mtime', 0)
-                cached_size = cached_data.get('size', 0)
-                
-                # Usamos uma tolerância mínima para flutuações de float no mtime
-                if abs(cached_mtime - mtime) < 0.0001 and cached_size == size:
-                    hit = True
-                
-                # 2. Tentativa Lenta (Hash do Conteúdo - Fallback)
-                # Se o mtime mudou (ex: save sem edit), verificamos o hash
-                else:
-                    current_hash = _get_file_hash(fp)
-                    if cached_data.get('hash') == current_hash:
-                        hit = True
-                        # [OTIMIZAÇÃO] Atualiza o mtime no cache para o próximo ser rápido
-                        # (Não precisa salvar disco agora, será salvo no final)
-                        cache[rel]['mtime'] = mtime
-                        cache[rel]['size'] = size
+    if "except:" in msg.lower() and "genérico" in msg.lower():
+        return {'type': 'FIX_BARE_EXCEPT', 'context': {}}
 
-            if hit:
-                if debug: click.echo(Fore.GREEN + f"[CACHE] {rel}")
+    for t in templates:
+        if t['category'] != category: continue
+        pattern = (re.escape(t['problem_pattern'])
+            .replace('<MODULE>', '(.+?)').replace('<VAR>', '(.+?)').replace('<LINE>', r'(\d+)'))
+        match = re.fullmatch(pattern, msg)
+        if match:
+            result['type'] = t['solution_template']
+            if match.groups(): result['context']['var_name'] = match.group(1)
+            return result
+    return result
 
-                cached_findings = cached_data.get('findings', [])
-                for cf in cached_findings:
-                    # Atualiza o caminho do finding para o formato atual do sistema
-                    cf['file'] = rel_raw 
+# --- LOGGING E PIPELINE ---
 
-                raw_findings.extend(cached_findings)
-                # Garante que o cache em memória esteja atualizado
-                cache[rel]['mtime'] = mtime 
-                cache[rel]['size'] = size
-            else:
-                # Se não houve hit, adicionamos para escanear
-                files_to_scan.append((fp, rel, mtime, size))
+def _log_check_results(raw_findings: List[Dict[str, Any]], project_root: str, 
+                      exclude_categories: Optional[List[str]], logger: ExecutionLogger) -> None:
+    """
+    Filtra, injeta TODOs e registra os achados no logger final.
+    CORREÇÃO: Agrupa por arquivo para permitir que o filtro leia o código fonte e processe # noqa.
+    """
+    if logger is None or raw_findings is None:
+        raise ValueError("Logger e achados são obrigatórios.")
 
-        except OSError:
-            continue
-
-    if debug and files_to_scan:
-        click.echo(Fore.YELLOW + f"[DEBUG] Processando {len(files_to_scan)} arquivos alterados...")
-
-    if files_to_scan:
-        # Mostra barra de progresso apenas se houver muitos arquivos
-        iterator = click.progressbar(files_to_scan, label='Analisa', show_pos=True) if len(files_to_scan) > 5 else files_to_scan
-        
-        # Se for lista direta (poucos arquivos), não usamos o 'with' do progressbar da mesma forma
-        # Adaptador simples:
-        if len(files_to_scan) > 5:
-            with iterator as bar:
-                for item in bar: _process_file(item, python_exe, debug, continue_on_error, raw_findings, cache)
-        else:
-            for item in iterator: _process_file(item, python_exe, debug, continue_on_error, raw_findings, cache)
-
-    # 3. Sondas Globais
-    if clones:
-        if debug: click.echo("[DEBUG] Rodando análise de clones...")
-        raw_findings.extend(_run_clone_check(files, python_exe, debug))
-    elif not fast:
-        raw_findings.extend(_run_clone_check(files, python_exe, debug))
-
-    # 4. Enriquecimento
-    if not fast:
-        if debug: click.echo("[DEBUG] Abdução...")
-        _enrich_with_dependency_analysis(raw_findings, project_root)
-    
-    _enrich_findings_with_solutions(raw_findings)
-
-    # --- AUTOFIX ---
-    if fix:
-        no_cache = True
-        click.echo(Fore.CYAN + "\nModo de correção (--fix) ativado...")
-        with ExecutionLogger('autofix', project_root, {}) as fix_logger:
-            count = _run_smart_fix(raw_findings, project_root, fix_logger)
-        if count > 0: click.echo(Fore.GREEN + f"   > Total de correções: {count}")
-        
-        # Se rodou fix, invalidamos o cache atual para não salvar dados obsoletos
-        cache = {} 
-    
-    # 5. Filtragem e Priorização
-    if exclude_categories is None: exclude_categories = []
-    config = _get_project_config(None, start_path=path)
-    toml_excludes = config.get('exclude_categories', [])
-    final_exclude_cats = set([c.upper() for c in exclude_categories] + [c.upper() for c in toml_excludes])
-    
-    STYLE_GROUP = {'STYLE', 'COMPLEXITY', 'ROBUSTNESS', 'DOCS', 'GLOBAL-STATE', 'RECURSION'}
-
+    # 1. Agrupar findings por arquivo
     findings_by_file = {}
     for f in raw_findings:
-        p = f.get('file')
-        if p not in findings_by_file: findings_by_file[p] = []
-        findings_by_file[p].append(f)
-        
-    processed_findings = []
-    all_files_set = set(files) | set(findings_by_file.keys())
+        file_path = f.get('file')
+        if not file_path: continue
+        # Usa o caminho absoluto como chave para evitar confusão entre relativo/absoluto
+        abs_p = os.path.abspath(file_path)
+        if abs_p not in findings_by_file:
+            findings_by_file[abs_p] = []
+        findings_by_file[abs_p].append(f)
+
+    excludes = set([c.upper() for c in (exclude_categories or [])])
     
-    for fp in all_files_set:
-        fs = findings_by_file.get(fp, [])
-        # Normaliza caminho para filtro de TODOs
-        # Se fp for absoluto, filter_and_inject usa ele. Se relativo, usa project_root.
-        full_p = fp if os.path.isabs(fp) else os.path.join(project_root, fp)
-        processed_findings.extend(filter_and_inject_findings(fs, full_p))
-
-    final_findings = []
-    for f in processed_findings:
-        cat = f.get('category', '').upper()
-        if cat in ['SECURITY', 'CRITICAL', 'SYNTAX', 'RISK-MUTABLE']:
-            final_findings.append(f)
-            continue
-        if 'STYLE' in final_exclude_cats and cat in STYLE_GROUP: continue
-        if cat in final_exclude_cats: continue
+    # 2. Processar cada arquivo individualmente no filtro
+    for abs_file_path, findings in findings_by_file.items():
+        # Agora o filtro recebe o arquivo correto para ler as linhas e achar o # noqa
+        processed = filter_and_inject_findings(findings, abs_file_path)
         
-        # Ajusta o caminho do arquivo para exibição relativa bonita
-        if f.get('file'):
-            f['file'] = os.path.relpath(f['file'], project_root)
+        for f in processed:
+            cat = f.get('category', 'UNCATEGORIZED').upper()
+            if cat in excludes: 
+                continue
             
-        final_findings.append(f)
-
-    # Ordenação
-    PRIORITY_MAP = {
-        'SECURITY': 0, 'CRITICAL': 0, 'SYNTAX': 0,
-        'ERROR': 1, 'RISK-MUTABLE': 1, 'BROKEN-LINK': 1,
-        'WARNING': 2, 'RUNTIME-RISK': 2, 'DEPENDENCY': 2, 'DUPLICATION': 2,
-        'INFO': 3, 'QA-REMINDER': 3, 'DEADCODE': 3,
-        'STYLE': 4, 'COMPLEXITY': 4, 'DOCS': 4, 'ROBUSTNESS': 4, 'RECURSION': 4
-    }
-
-    def get_prio(item):
-        cat = item.get('category', '').upper()
-        sev = item.get('severity', '').upper()
-        base = PRIORITY_MAP.get(cat, 5)
-        if base == 5 and sev == 'CRITICAL': base = 0
-        return base
-
-    final_findings.sort(key=lambda x: (get_prio(x), x.get('file', ''), x.get('line') or 0))
-
-    with ExecutionLogger('check', project_root, {'fix': fix}) as logger:
-        for f in final_findings:
-            # Recalcula snippet com caminho real (pode ter mudado pra relativo)
-            full_path = os.path.abspath(os.path.join(project_root, f['file']))
-            s = _get_code_snippet(full_path, f.get('line'))
+            # Normaliza para exibição relativa ao projeto
+            rel_file = os.path.relpath(abs_file_path, project_root)
             
             logger.add_finding(
-                severity=f['severity'], message=f['message'], category=f.get('category', 'UNCATEGORIZED'),
-                file=f['file'], line=f.get('line'), snippet=s, finding_hash=f.get('hash'),
-                suggestion_content=f.get('suggestion_content'), suggestion_line=f.get('suggestion_line'),
-                suggestion_source=f.get('suggestion_source'), suggestion_action=f.get('suggestion_action'),
+                severity=f['severity'], 
+                message=f['message'], 
+                category=cat,
+                file=rel_file, 
+                line=f.get('line', 0), 
+                snippet=_get_code_snippet(abs_file_path, f.get('line')),
+                finding_hash=f.get('hash'), 
                 import_suggestion=f.get('import_suggestion')
             )
-        
-        if debug:
-            print(f"[DEBUG_TRACE] Fim da lógica. no_cache={no_cache}, cache_size={len(cache)}")
 
+def _process_single_file(item: tuple, python_exe: str, continue_on_error: bool, cache: dict) -> List[Dict[str, Any]]:
+    """Pipeline por arquivo com cálculo de complexidade real."""
+    fp, rel, mtime, size = item
+    findings = _run_syntax_check(fp, python_exe)
+    if findings and not continue_on_error: return findings
+
+    # 1. Pyflakes (Texto)
+    findings.extend(_run_pyflakes_check(fp, python_exe))
+    
+    # 2. Sondas JSON (Hunter, Style)
+    for probe in ['hunter_probe.py', 'style_probe.py']:
+        findings.extend(_run_json_probe(probe, fp, python_exe))
+
+    # 3. Complexidade via Radon (In-Process para performance)
+    try:
+        with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
+            code = f.read()
+            v = ComplexityVisitor.from_ast(ast.parse(code))
+            for func in v.functions:
+                # Adiciona metadado de complexidade para o deepcheck ler depois
+                # e gera aviso se for muito alta (> 10)
+                if func.complexity > 10:
+                    findings.append({
+                        'severity': 'WARNING', 'category': 'COMPLEXITY',
+                        'message': f"Função '{func.name}' é complexa (CC: {func.complexity}). Refatore.",
+                        'file': fp, 'line': func.lineno
+                    })
+    except Exception: pass
+    
+    cache[rel] = {'hash': _get_file_hash(fp), 'mtime': mtime, 'size': size, 'findings': findings}
+    return findings
+
+def run_check_logic(path: str, fix: bool, fast: bool, no_cache: bool, 
+                    clones: bool, continue_on_error: bool, 
+                    exclude_categories: Optional[List[str]] = None,
+                    target_files: Optional[List[str]] = None):
+    """
+    Orquestrador Master.
+    FIX: Agora filtra 'target_files' usando as regras de ignore do DNM.
+    """
+    project_root = _find_project_root(os.path.abspath(path))
+    cache = {} if no_cache else _load_cache()
+    dnm = DNM(project_root) # Instancia o navegador que lê o TOML
+    
+    # --- Lógica de Seleção Filtrada ---
+    if target_files:
+        # Só analisa se o arquivo não estiver na lista de ignore do TOML
+        files = [
+            os.path.abspath(f) for f in target_files 
+            if not dnm.is_ignored(Path(f))
+        ]
+    elif os.path.isfile(os.path.abspath(path)):
+        files = [os.path.abspath(path)]
+    else:
+        files = dnm.scan(extensions=['.py'])
+    # ----------------------------------
+
+    if not files: 
+        return {'summary': {'errors': 0, 'warnings': 0}, 'findings': []}
+
+    # ... (Resto da lógica de processamento permanece a mesma)
+    # --------------------------------------
+
+    python_exe = _get_venv_python_executable() or sys.executable
+    raw_findings, files_to_scan = [], []
+
+    for fp in files:
+        rel = os.path.relpath(fp, project_root).replace('\\', '/')
+        try:
+            st = os.stat(fp)
+            if not no_cache and rel in cache:
+                c = cache[rel]
+                if abs(c['mtime'] - st.st_mtime) < 0.0001 and c['size'] == st.st_size:
+                    for f in c['findings']: f['file'] = rel
+                    raw_findings.extend(c['findings'])
+                    continue
+            files_to_scan.append((fp, rel, st.st_mtime, st.st_size))
+        except OSError: continue
+
+    if files_to_scan:
+        with click.progressbar(files_to_scan, label='Analisando') as bar:
+            for item in bar:
+                raw_findings.extend(_process_single_file(item, python_exe, continue_on_error, cache))
+
+    if clones or not fast:
+        payload = json.dumps(files)
+        res = _run_probe('clone_probe.py', None, python_exe, input_data=payload)
+        if res.stdout.strip():
+            try: raw_findings.extend(json.loads(res.stdout))
+            except json.JSONDecodeError: pass
+
+    if not fast: _enrich_with_dependency_analysis(raw_findings, project_root)
+    _enrich_findings_with_solutions(raw_findings)
+
+    if fix:
+        with ExecutionLogger('autofix', project_root, {}) as f_log:
+            fixer = AutoFixer(f_log)
+            conn = get_db_connection()
+            templates = conn.execute("SELECT * FROM solution_templates WHERE confidence > 0").fetchall()
+            for f in sorted(raw_findings, key=lambda x: x.get('line', 0), reverse=True):
+                match = _match_finding_to_template(f, templates)
+                if match['type']:
+                    fixer.apply_fix(os.path.abspath(f['file']), f['line'], match['type'], match['context'])
+            conn.close()
+            cache = {}
+
+    with ExecutionLogger('check', project_root, {'fix': fix}) as logger:
+        _log_check_results(raw_findings, project_root, exclude_categories, logger)
         if not no_cache: _save_cache(cache)
         return logger.results
 
-def _process_file(item, python_exe, debug, continue_on_error, raw_findings, cache):
-    fp, rel, mtime, size = item
-    syn = _run_syntax_check(fp, python_exe, debug)
-    if syn:
-        raw_findings.extend(syn)
-        if not continue_on_error: return
-    
-    pf = _run_pyflakes_check(fp, python_exe, debug)
-    ht = _run_hunter_check(fp, python_exe, debug)
-    st = _run_style_check(fp, python_exe, debug)
-    
-    new_findings = pf + ht + st
-    raw_findings.extend(new_findings)
-    
-    file_hash = _get_file_hash(fp)
-    if debug:
-        print(f"[DEBUG_TRACE] Atualizando cache para: {rel} | Hash: {file_hash is not None}")
-
-    cache[rel] = {
-        'hash': file_hash, 'mtime': mtime, 'size': size, 'findings': new_findings
-    }
-
 @click.command('check')
 @click.argument('path', type=click.Path(exists=True), default='.')
-@click.option('--ignore', multiple=True, help="Ignora uma pasta.")
-@click.option('--fix', is_flag=True, help="Tenta corrigir problemas automaticamente.")
-@click.option('--debug', is_flag=True, help="Ativa a saída de depuração detalhada.")
-@click.option('--format', 'output_format', type=click.Choice(['text', 'json']), default='text', help="Define o formato da saída.")
-@click.option('--fast', is_flag=True, help="Executa uma análise rápida.")
-@click.option('--no-imports', is_flag=True, help="Pula verificação de imports.")
-@click.option('--no-cache', is_flag=True, help="Força reanálise completa.")
-@click.option('--clones', is_flag=True, help="Força análise de clones.")
-@click.option('--continue-on-error', '-C', is_flag=True, help="Continua após erros de sintaxe.")
-@click.option('--exclude', '-x', multiple=True, help="Categorias para ignorar.")
-def check(path, ignore, fix, debug, output_format, fast, no_imports, no_cache, clones, continue_on_error, exclude):
-    """Análise estática, estrutural e de duplicatas completa."""
-    if not debug and output_format == 'text':
-        click.echo(Fore.YELLOW + "[CHECK] Executando análise...")
+@click.option('--fix', is_flag=True, help="Corrige problemas.")
+@click.option('--debug', is_flag=True, help="Saída detalhada.")
+@click.option('--format', 'out_fmt', type=click.Choice(['text', 'json']), default='text')
+@click.option('--ignore', multiple=True, help="Ignora pastas.")
+@click.option('--fast', is_flag=True, help="Pula análises pesadas.")
+@click.option('--no-cache', is_flag=True, help="Força reanálise.")
+@click.option('--clones', is_flag=True, help="Análise DRY.")
+@click.option('--continue-on-error', '-C', is_flag=True, help="Ignora erros de sintaxe.")
+@click.option('--exclude', '-x', multiple=True, help="Categorias ignoradas.")
+def check(path, **kwargs):
+    """Análise completa de qualidade e segurança."""
+    if kwargs.get('out_fmt') == 'text' and not kwargs.get('debug'):
+        click.echo(Fore.YELLOW + "[CHECK] Executando auditoria...")
 
     results = run_check_logic(
-        path, ignore, fix, debug, fast, no_imports, no_cache, None, clones, continue_on_error, exclude
+        path, kwargs.get('fix'), kwargs.get('fast'), kwargs.get('no_cache'), 
+        kwargs.get('clones'), kwargs.get('continue_on_error'), kwargs.get('exclude')
     )
-    
     _update_open_incidents(results, os.path.abspath(path))
-    
-    if output_format == 'json':
-        print(json.dumps(results, indent=2, ensure_ascii=False))
-    else:
-        if not debug:
-            _present_results('text', results)
-            
-    if results.get('summary', {}).get('critical', 0) > 0:
-        sys.exit(1)
+    if kwargs.get('out_fmt') == 'json': print(json.dumps(results, indent=2, ensure_ascii=False))
+    else: _present_results('text', results)
+    if results.get('summary', {}).get('critical', 0) > 0: sys.exit(1)
 
 if __name__ == "__main__":
     check()

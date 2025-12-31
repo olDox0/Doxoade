@@ -135,6 +135,20 @@ def _analyze_contract_consistency(visitor):
 
     return issues
 
+def _analyze_function_nodes(self, node):
+    """
+    Analisa os nós da função para distinguir contratos de erros.
+    """
+    for i, child in enumerate(node.body):
+        # MPoT-Aware: Identifica 'raise' nas primeiras linhas como Contrato
+        if isinstance(child, ast.Raise) and i < 3:
+            self.contracts.append({
+                'line': child.lineno,
+                'type': ast.unparse(child.exc).split('(')[0],
+                'message': ast.unparse(child.exc)
+            })
+            continue # Não trata como erro de fluxo não-planejado
+
 def _present_deep_analysis(visitor, name, lineno, complexity):
     """Apresenta os resultados da análise no terminal."""
     
@@ -181,6 +195,11 @@ def _present_deep_analysis(visitor, name, lineno, complexity):
             click.echo(f"  [!] Levanta Exceção: {exc['exc']} (Linha {exc['lineno']})")
     else:
         click.echo(Fore.GREEN + "\n[OK] Nenhum problema de contrato óbvio detectado.")
+        
+    if self.contracts:
+        console.print("[bold cyan][CONTRATOS ATIVOS (MPoT-5)][/bold cyan]")
+        for c in self.contracts:
+            console.print(f"  Line {c['line']}: {c['type']} -> Proteção de entrada validada.")
         
     click.echo(Fore.CYAN + "="*50)
 

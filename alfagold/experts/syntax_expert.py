@@ -1,36 +1,58 @@
 # alfagold/experts/syntax_expert.py
+import numpy as np
 
-"""
-Syntax Expert (Antigo ArquitetoLogico).
-Responsável por garantir a integridade gramatical do código gerado.
-"""
-
-class SyntaxExpert: # <--- Renomeado de ArquitetoLogico
-    def __init__(self):
-        self.memoria_variaveis = set()
+class SyntaxExpert:
+    """
+    Expert Simbólico (Broca).
+    Gera máscaras de inibição para garantir a gramática.
+    """
+    def __init__(self, tokenizer):
+        self.tokenizer = tokenizer
+        self.vocab_size = len(tokenizer.vocab)
+        
+        # Estado Interno
         self.pilha_parenteses = 0 
         self.estado = "INICIO" 
         self.ultimo_token = ""
         self.assinatura_concluida = False
         
-        self.pontuacao = ["(", ")", ":", ",", "."]
+        # Cache de IDs (Mapeamento Robusto)
+        self.ids = self._map_structural_tokens()
+        
         self.keywords = ["def", "return", "if", "else", "with", "open", "as", "pass", "import"]
+        self.pontuacao = ["(", ")", ":", ",", "."]
+
+    def _map_structural_tokens(self):
+        """Encontra os IDs reais dos tokens de pontuação."""
+        target_chars = {"(": "open", ")": "close", ":": "colon", ",": "comma"}
+        mapped = {v: -1 for v in target_chars.values()}
         
+        # Busca exata
+        for char, name in target_chars.items():
+            ids = self.tokenizer.encode(char)
+            if ids: mapped[name] = ids[0]
+            
+        return mapped
+
     def reset(self):
-        self.__init__()
+        self.__init__(self.tokenizer)
 
-    def observing(self, token): # Renomeado de 'observar' para inglês técnico no futuro? Mantendo 'observar' por compatibilidade se preferir, ou padronizando.
-        # Vamos manter os nomes de métodos compatíveis com a lógica antiga por enquanto
-        self.observar(token)
-
-    def observar(self, token):
-        token = token.strip()
+    def observe(self, token_str):
+        """Atualiza o estado mental baseado no token escolhido."""
+        token = token_str.strip()
         if not token: return
+        self.ultimo_token = token
         
+        # Máquina de Estados
         if token == "def": 
             self.estado = "NOME"
             self.assinatura_concluida = False
-        
+            return
+
+        if self.estado == "NOME" and token.isidentifier() and token not in self.keywords:
+            self.estado = "ARGS_PRE"
+            return
+
         for char in token:
             if char == "(": 
                 self.pilha_parenteses += 1
@@ -44,37 +66,44 @@ class SyntaxExpert: # <--- Renomeado de ArquitetoLogico
                     self.estado = "CORPO"
                     self.assinatura_concluida = True
 
-        self.ultimo_token = token
+    def get_inhibition_mask(self, current_logits_shape):
+        """Gera o vetor de inibição (Mask)."""
+        # Garante que a máscara bata com o tamanho do vetor de logits do modelo
+        mask = np.zeros(current_logits_shape, dtype=np.float32)
+        
+        i_open = self.ids['open']
+        i_close = self.ids['close']
+        i_colon = self.ids['colon']
+        
+        # Se não mapeou, não arrisca bloquear
+        if i_open == -1 or i_colon == -1: return mask
 
-    def validar(self, token):
-        token = token.strip()
-        if not token: return True, "Espaço"
+        # --- REGRAS DE BLOQUEIO ---
+        if self.estado == "ARGS_PRE":
+            mask[:] = -1000.0; mask[i_open] = 500.0 
+            
+        elif self.estado == "TRANSICAO":
+            mask[:] = -1000.0; mask[i_colon] = 500.0
+            
+        elif self.estado == "NOME":
+            # Bloqueia pontuação no nome
+            mask[i_colon] = -1000.0
+            mask[i_open] = 50.0 
 
-        if not self.assinatura_concluida:
-            if self.estado == "NOME":
-                if not token.isidentifier() and "(" not in token: return False, "Nome inválido"
-                if any(c in ":.," for c in token): return False, "Pontuação no nome"
+        elif self.estado == "ARGS":
+            # Bloqueia palavras-chave e pontuação de bloco
+            proibidos = [".", ":", ";", "{", "}", "[", "]", "=", "<", ">", 
+                         "def", "class", "if", "else", "return", "with", "for", "while", "import"]
+            
+            # Penalidade varredura (Lento, mas seguro para V1)
+            # Numa versão otimizada, cachearíamos os IDs proibidos no init
+            for token_str, token_id in self.tokenizer.vocab.items():
+                if token_id < len(mask):
+                    clean = token_str.replace(' ', '').replace('Ġ', '').strip()
+                    if clean in proibidos: mask[token_id] = -2000.0
+            
+            # Se já temos variáveis (heurística simples), encoraja fechar
+            if self.pilha_parenteses > 0:
+                mask[i_close] += 5.0
 
-        if self.estado == "ARGS":
-            if token in self.keywords: return False, "Keyword em argumento"
-            last_was_var = self.ultimo_token.isidentifier() and self.ultimo_token not in self.keywords
-            if last_was_var:
-                if token.isidentifier(): return False, "Variável duplicada"
-                if token not in [",", ")"]: return False, "Esperando separador"
-
-        if self.estado == "TRANSICAO":
-            if ":" not in token: return False, "Esperando ':'"
-
-        if self.estado == "CORPO":
-            if self.ultimo_token == ":" or self.ultimo_token.endswith(":"):
-                if token in [".", ",", ")", "]", "}"] or token == "(": return False, "Início de bloco inválido"
-
-        return True, "OK"
-
-    def sugerir_correcao(self):
-        if self.estado == "ARGS_PRE": return "("
-        if self.estado == "TRANSICAO": return ":"
-        if self.estado == "ARGS":
-            if self.ultimo_token.isidentifier() and self.ultimo_token not in self.keywords: return ")"
-        if self.estado == "CORPO" and (self.ultimo_token == ":" or self.ultimo_token.endswith(":")): return "with" 
-        return None
+        return mask

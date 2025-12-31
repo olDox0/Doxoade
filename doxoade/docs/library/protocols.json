@@ -38,5 +38,15 @@
     "title": "Protocolo Ouroboros (Auto-Reconciliação Git)",
     "date": "2025-12-20",
     "content": "Capacidade dos comandos de infraestrutura de se curarem ao encontrar estados inesperados.\n\nExemplo Prático:\nAo rodar 'git-new' em um repositório remoto não-vazio, o Doxoade detecta a rejeição, executa um 'pull --rebase --allow-unrelated-histories' automaticamente e tenta o push novamente, fundindo os históricos sem intervenção humana."
+  },
+  "phoenix_v2": {
+    "title": "Protocolo Fênix (v2 Gold)",
+    "date": "2025-12-30",
+    "content": "A auto-cura do ambiente agora é baseada em 'Isolamento de Sonda'. O Doctor injeta scripts efêmeros nos venvs dos projetos para verificar integridade sem contaminar o processo principal do Doxoade. Inclui auditoria de PATH e reorganização semântica de arquivos de configuração (.gitignore)."
+  },
+  "test_mirror_policy": {
+    "title": "Política de Espelhamento de Testes",
+    "type": "Mandatory",
+    "description": "A estrutura do diretório 'tests/' deve espelhar exatamente a estrutura do pacote 'doxoade/'. Exemplo: O código em 'doxoade/commands/check.py' deve ser testado em 'tests/doxoade/commands/test_check.py'. Arquivos fora dessa estrutura são considerados 'Legacy' ou 'Sandbox' e devem residir em 'tests/old/'."
   }
 }
