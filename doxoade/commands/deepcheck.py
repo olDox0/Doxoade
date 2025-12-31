@@ -196,11 +196,11 @@ def _present_deep_analysis(visitor, name, lineno, complexity):
     else:
         click.echo(Fore.GREEN + "\n[OK] Nenhum problema de contrato óbvio detectado.")
         
-    if self.contracts:
+    if hasattr(visitor, 'contracts') and visitor.contracts:
         console.print("[bold cyan][CONTRATOS ATIVOS (MPoT-5)][/bold cyan]")
-        for c in self.contracts:
+        for c in visitor.contracts:
             console.print(f"  Line {c['line']}: {c['type']} -> Proteção de entrada validada.")
-        
+            
     click.echo(Fore.CYAN + "="*50)
 
 @click.command('deepcheck')

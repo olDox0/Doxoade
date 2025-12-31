@@ -78,3 +78,9 @@ O Doxoade v69 utiliza o padrão **Lazy File Inspection** para filtros. Em vez de
 **Benefícios:**
 - **Economia de RAM:** Em projetos de 1000+ arquivos, a economia é de aproximadamente 40MB.
 - **Priorização de Fachada:** Arquivos como `shared_tools.py` são tratados como agregadores de API, onde avisos de "imported but unused" são silenciados por design para facilitar o desenvolvimento modular.
+
+## 9. UI Resiliente em Tabelas
+Para garantir que relatórios complexos (como o MaxTelemetry) não desformatem o terminal em dispositivos Android/Termux, adotamos o padrão **Ellipsis Overflow**.
+- Colunas de caminhos de arquivos possuem `max_width` definido.
+- O conteúdo excedente é truncado com `...` em vez de empurrar as colunas vizinhas para fora da tela.
+- Isso preserva a "Tabela Industrial" do Doxoade como uma ferramenta legível em qualquer resolução.
