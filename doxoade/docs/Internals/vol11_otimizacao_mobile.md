@@ -84,3 +84,10 @@ Para garantir que relatórios complexos (como o MaxTelemetry) não desformatem o
 - Colunas de caminhos de arquivos possuem `max_width` definido.
 - O conteúdo excedente é truncado com `...` em vez de empurrar as colunas vizinhas para fora da tela.
 - Isso preserva a "Tabela Industrial" do Doxoade como uma ferramenta legível em qualquer resolução.
+
+## 10. Densidade Estatística vs Contagem Absoluta
+A partir da v4.0, o Score de Risco abandonou a contagem bruta de erros. 
+**Motivo:** Um projeto com 1000 arquivos e 100 erros é muito mais estável que um projeto com 10 arquivos e 100 erros.
+
+**Nova Fórmula:** `Penalidade = (Arquivos_Afetados / Total_Arquivos) * Peso_Severidade`. 
+Isso permite que o Score de Risco funcione como um KPI (Key Performance Indicator) real para a gerência técnica.

@@ -13,5 +13,10 @@
     "title": "Soberania do Ambiente",
     "type": "Operational",
     "description": "O Doxoade nunca deve assumir que o ambiente do usuário (PATH, Venv, Encoding) é perfeito. Ele deve diagnosticar e, se autorizado, reparar. A ferramenta deve ser robusta ao caos externo."
+  },
+  "policy_risk_gate": {
+    "title": "Política de Portão de Risco (Risk Gate)",
+    "type": "Managerial",
+    "description": "Nenhum desenvolvimento de feature deve ser iniciado se o Score de Risco estiver abaixo de 70. Scores abaixo de 50 exigem 'TECHNICAL DEBT SWEEP' (limpeza total da dívida técnica) antes do próximo ciclo de inovação."
   }
 }
