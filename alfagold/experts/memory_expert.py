@@ -1,68 +1,95 @@
-"""
-DOXOADE VECTOR MEMORY.
-Implementação de Banco de Dados Vetorial usando apenas NumPy.
-Permite busca semântica (por significado) em vez de exata.
-"""
+# alfagold/experts/memory_expert.py
 import numpy as np
-import json
 import os
-import pickle
-from doxoade.neural.core import load_json, save_json
+import json
+from typing import List, Optional, Tuple
 
-MEMORY_PATH = os.path.expanduser("~/.doxoade/vector_db.json")
+# [FIX] Persistência Segura
+from ..core.persistence import save_model_state, load_model_state
 
-class VectorDB:
+MEMORY_BASE = os.path.expanduser("~/.doxoade/vector_db")
+
+class MemoryExpert:
+    """
+    Expert de Memória (Hipocampo).
+    Armazena vetores semânticos em formato binário otimizado (NPZ).
+    """
     def __init__(self):
-        self.vectors = [] # Lista de vetores (numpy arrays)
-        self.payloads = [] # Lista de dados (código, metadados)
+        self.vectors = np.empty((0, 0), dtype=np.float32) # Matriz vazia inicial
+        self.payloads: List[str] = []
         self.load()
 
-    def _cosine_similarity(self, v1, v2):
-        """Calcula o ângulo entre dois vetores."""
-        dot_product = np.dot(v1, v2)
-        norm_v1 = np.linalg.norm(v1)
-        norm_v2 = np.linalg.norm(v2)
-        return dot_product / (norm_v1 * norm_v2 + 1e-8)
-
-    def add(self, vector, payload):
-        """Adiciona uma memória."""
-        # Normaliza o vetor para otimizar busca futura (L2 norm)
-        # vector = vector / (np.linalg.norm(vector) + 1e-8)
-        self.vectors.append(vector.tolist()) # Salva como lista para JSON
+    def add(self, vector: np.ndarray, payload: str):
+        """Adiciona uma memória ao banco."""
+        # [MPoT-5] Validação de Contrato
+        if not isinstance(vector, np.ndarray):
+            raise ValueError("Vetor de memória deve ser um numpy array.")
+            
+        vector = vector.astype(np.float32)
+        
+        # Inicializa matriz se estiver vazia
+        if self.vectors.shape[0] == 0:
+            self.vectors = vector.reshape(1, -1)
+        else:
+            # Verifica dimensão
+            if vector.shape[0] != self.vectors.shape[1]:
+                # Se dimensão mudou (ex: modelo novo 64 vs 128), reseta
+                print("   ♻️ [Memory] Dimensão mudou. Reiniciando hipocampo.")
+                self.vectors = vector.reshape(1, -1)
+                self.payloads = []
+            else:
+                self.vectors = np.vstack([self.vectors, vector])
+                
         self.payloads.append(payload)
         self.save()
 
-    def search(self, query_vector, limit=1, threshold=0.85):
-        """Busca o vizinho mais próximo (Nearest Neighbor)."""
-        if not self.vectors: return None
+    def search(self, query_vector: np.ndarray, threshold: float = 0.85) -> Optional[str]:
+        """Busca o vizinho mais próximo (Cosseno)."""
+        if self.vectors.shape[0] == 0: return None
 
-        query_vector = np.array(query_vector)
-        best_score = -1.0
-        best_payload = None
-
-        # Busca Linear (Rápida o suficiente para < 100k itens)
-        for i, vec in enumerate(self.vectors):
-            db_vec = np.array(vec)
-            score = self._cosine_similarity(query_vector, db_vec)
-            
-            if score > best_score:
-                best_score = score
-                best_payload = self.payloads[i]
-
+        # Similaridade de Cosseno: (A . B) / (|A| * |B|)
+        # Assumindo que query_vector não é normalizado
+        norm_q = np.linalg.norm(query_vector)
+        if norm_q == 0: return None
+        
+        # Produto escalar em lote
+        # (N_memories, D) dot (D,) -> (N_memories,)
+        scores = np.dot(self.vectors, query_vector)
+        
+        # Normalização (Vetorizamos as normas do banco para velocidade)
+        norms_db = np.linalg.norm(self.vectors, axis=1)
+        scores /= (norms_db * norm_q + 1e-9)
+        
+        best_idx = np.argmax(scores)
+        best_score = scores[best_idx]
+        
         if best_score >= threshold:
-            print(f"   🧠 Memória Semântica: Match {best_score:.2f}")
-            return best_payload
+            return self.payloads[best_idx]
             
         return None
 
     def save(self):
-        data = {"vectors": self.vectors, "payloads": self.payloads}
-        save_json(data, MEMORY_PATH)
+        """Salva vetores em NPZ e textos em JSON."""
+        params = {'vectors': self.vectors}
+        config = {'payloads': self.payloads}
+        save_model_state(MEMORY_BASE, params, config)
 
     def load(self):
-        if os.path.exists(MEMORY_PATH):
-            try:
-                data = load_json(MEMORY_PATH)
-                self.vectors = data["vectors"]
-                self.payloads = data["payloads"]
-            except Exception: pass
+        """Carrega do disco."""
+        try:
+            # Tenta carregar formato seguro
+            if os.path.exists(MEMORY_BASE + ".npz"):
+                params, config = load_model_state(MEMORY_BASE)
+                self.vectors = params['vectors']
+                self.payloads = config.get('payloads', [])
+                # print(f"   🧠 [Memory] {len(self.payloads)} memórias carregadas.")
+                return
+        except Exception:
+            pass
+            
+        # Fallback legado (apagar se existir para limpar formato antigo)
+        old_json = MEMORY_BASE + ".json"
+        if os.path.exists(old_json) and not os.path.exists(MEMORY_BASE + ".npz"):
+            # Se só existir o JSON (formato antigo textual), ignora e começa limpo
+            # pois converter lista de lista de float é lento e inseguro
+            pass

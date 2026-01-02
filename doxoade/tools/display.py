@@ -77,12 +77,16 @@ def _print_finding_details(finding):
         return
 
     if finding.get('suggestion_content') or finding.get('suggestion_action'):
-        source = finding.get('suggestion_source', 'HISTÓRICO')
+        source = finding.get('suggestion_source', 'GÊNESE')
         click.echo(Fore.CYAN + Style.BRIGHT + f"\n   {ICON_LIGHTBULB} SOLUÇÃO CONHECIDA:")
         click.echo(Fore.GREEN + f"   > Fonte: {source}")
         
         if finding.get('suggestion_action'):
             click.echo(Fore.YELLOW + f"   {ICON_WRENCH}  AÇÃO: {finding.get('suggestion_action')}")
+            
+        if finding.get('suggestion_content'):
+            # Mostra a linha corrigida
+            click.echo(Fore.GREEN + f"   > Sugestão: {finding['suggestion_content'].strip()}")
             
         if snippet and finding.get('suggestion_line') and finding.get('suggestion_content'):
             suggestion_line = finding.get('suggestion_line')

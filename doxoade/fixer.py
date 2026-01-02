@@ -1,6 +1,7 @@
 # doxoade/fixer.py
 import os
 import re
+import logging
 from colorama import Fore
 
 class AutoFixer:
@@ -82,38 +83,37 @@ class AutoFixer:
         return True
 
     def _apply_smart_import_fix(self, lines, idx, var_name):
-        """Remove um import específico de uma lista ou comenta a linha se for único."""
+        """
+        Remove um símbolo específico de uma linha de import sem quebrar a sintaxe.
+        Trata: 'from x import a, b' -> 'from x import a'
+        """
         line = lines[idx]
-        if not var_name: return False
         
-        # Limpeza do nome (ex: 'colorama.Style' -> 'Style')
-        clean_var = var_name.split('.')[-1]
-        
-        if clean_var not in line:
+        # 1. Se a linha tem parênteses abrindo e é apenas a abertura, NÃO comenta (evita SyntaxError)
+        if '(' in line and var_name not in line:
             return False
 
-        # Caso 1: Import Composto (from X import A, B)
-        # Verifica se há vírgulas ou múltiplos imports na linha
-        if "," in line and "import" in line:
-            # Tenta remover combinações de vírgula + espaço
-            # 1. ", Style" (Final ou meio)
-            new_line = line.replace(f", {clean_var}", "")
-            # 2. "Style, " (Início da lista)
-            if new_line == line:
-                new_line = line.replace(f"{clean_var}, ", "")
-            # 3. "Style," (Sem espaço, raro mas possível)
-            if new_line == line:
-                new_line = line.replace(f"{clean_var},", "")
+        # 2. Se o símbolo é o único no import, comenta a linha toda
+        # Regex para detectar se há mais de um símbolo após o 'import'
+        symbols_match = re.search(r'import\s+(.+)', line)
+        if symbols_match:
+            symbols_str = symbols_match.group(1).strip('() \n')
+            symbols_list = [s.strip() for s in symbols_str.split(',')]
             
-            # Se mudou, salva. Se não mudou (talvez seja o único item mas com virgula trailing), cai no fallback
-            if new_line != line:
-                lines[idx] = new_line
+            if len(symbols_list) <= 1:
+                lines[idx] = f"# [DOX-UNUSED] {line}"
                 return True
-        
-        # Caso 2: Import Único ou falha no parse do composto
-        # Se só sobrou ele, comenta a linha inteira
-        if not line.strip().startswith("#"):
-            lines[idx] = f"# [DOX-UNUSED] {lines[idx]}"
+            
+            # 3. Neurocirurgia: Remove apenas o símbolo inútil e limpa as vírgulas
+            new_symbols = [s for s in symbols_list if s != var_name]
+            new_symbols_str = ", ".join(new_symbols)
+            
+            # Reconstrói a linha mantendo a estrutura (from ou import puro)
+            if 'from' in line:
+                module_part = line.split('import')[0]
+                lines[idx] = f"{module_part}import {new_symbols_str}\n"
+            else:
+                lines[idx] = f"import {new_symbols_str}\n"
             return True
             
         return False

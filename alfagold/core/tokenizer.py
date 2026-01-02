@@ -1,10 +1,9 @@
-# doxoade/neural/alfagold/tokenizer.py
+# alfagold/core/tokenizer.py
 import re
 from collections import defaultdict, Counter
 
 class AlfagoldTokenizer:
     def __init__(self):
-        # Mapeia bytes para caracteres unicode seguros
         self.byte_encoder = self.bytes_to_unicode()
         self.byte_decoder = {v: k for k, v in self.byte_encoder.items()}
         
@@ -12,14 +11,9 @@ class AlfagoldTokenizer:
         self.inverse_vocab = {} 
         self.bpe_ranks = {}
         self.cache = {}
-        
-        # Estado inicial
         self.vocab_size = 0
 
     def bytes_to_unicode(self):
-        """
-        Cria um mapa de bytes para caracteres unicode imprimíveis.
-        """
         bs = list(range(ord("!"), ord("~")+1)) + list(range(ord("¡"), ord("¬")+1)) + list(range(ord("®"), ord("ÿ")+1))
         cs = bs[:]
         n = 0
@@ -32,7 +26,6 @@ class AlfagoldTokenizer:
         return dict(zip(bs, cs))
 
     def get_stats(self, vocab):
-        """Conta a frequência de pares de símbolos adjacentes."""
         pairs = defaultdict(int)
         for word, freq in vocab.items():
             symbols = word.split()
@@ -41,7 +34,6 @@ class AlfagoldTokenizer:
         return pairs
 
     def merge_vocab(self, pair, v_in):
-        """Mescla o par mais frequente em todo o vocabulário."""
         v_out = {}
         bigram = re.escape(' '.join(pair))
         p = re.compile(r'(?<!\S)' + bigram + r'(?!\S)')
@@ -54,7 +46,6 @@ class AlfagoldTokenizer:
         print(f"   🔨 [BPE] Treinando Tokenizer (Alvo: {vocab_size})...")
         tokens_raw = re.findall(r"\w+|[^\w\s]", text, re.UNICODE)
         
-        # Conta frequência
         vocab = Counter()
         for token in tokens_raw:
             chars = " ".join([self.byte_encoder[b] for b in token.encode('utf-8')])
@@ -71,19 +62,15 @@ class AlfagoldTokenizer:
             vocab = self.merge_vocab(best, vocab)
 
         print("   🔨 [BPE] Mapeando IDs Únicos...")
-        
-        # [FIX] Reinicia os dicionários para garantir limpeza
         self.vocab = {}
         self.inverse_vocab = {}
         current_id = 0
         
-        # 1. Bytes Base (0-255)
         for b in self.byte_encoder.values():
             self.vocab[b] = current_id
             self.inverse_vocab[current_id] = b
             current_id += 1
             
-        # 2. Tokens Aprendidos (Merges)
         for word in sorted(vocab.keys()):
             token = word.replace(' ', '')
             if token not in self.vocab:
@@ -91,14 +78,13 @@ class AlfagoldTokenizer:
                 self.inverse_vocab[current_id] = token
                 current_id += 1
                 
-        # 3. Tokens Especiais
         for special in ["<UNK>", "<PAD>", "ENDMARKER"]:
             if special not in self.vocab:
                 self.vocab[special] = current_id
                 self.inverse_vocab[current_id] = special
                 current_id += 1
         
-        print(f"   ✅ [BPE] Concluído. Vocab Final: {len(self.vocab)} (Max ID: {current_id-1})")
+        print(f"   ✅ [BPE] Concluído. Vocab Final: {len(self.vocab)}")
 
     def bpe(self, token):
         if token in self.cache: return self.cache[token]
@@ -138,7 +124,6 @@ class AlfagoldTokenizer:
         tokens_raw = re.findall(r"\w+|[^\w\s]", text, re.UNICODE)
         ids = []
         unk_id = self.vocab.get("<UNK>", 0)
-        
         for token in tokens_raw:
             if not token: continue
             bpe_tokens = self.bpe(token).split(' ')
@@ -160,3 +145,29 @@ class AlfagoldTokenizer:
             if len(text) > 0 and part.isalnum() and text[-1].isalnum(): text += " " + part
             else: text += part
         return text
+
+    # [FIX] Métodos de Serialização JSON-Friendly
+    def get_state(self):
+        """Retorna estado serializável em JSON."""
+        # Converte chaves de tupla ('a', 'b') para string "a b"
+        serialized_ranks = {f"{k[0]} {k[1]}": v for k, v in self.bpe_ranks.items()}
+        return {
+            'vocab': self.vocab,
+            'inverse_vocab': {str(k): v for k, v in self.inverse_vocab.items()}, # Chaves JSON devem ser string
+            'bpe_ranks': serialized_ranks,
+            'vocab_size': self.vocab_size
+        }
+
+    def set_state(self, state):
+        """Restaura estado do JSON."""
+        self.vocab = state['vocab']
+        # Converte chaves de volta para int
+        self.inverse_vocab = {int(k): v for k, v in state['inverse_vocab'].items()}
+        self.vocab_size = state.get('vocab_size', 0)
+        
+        # Restaura tuplas dos ranks
+        self.bpe_ranks = {}
+        for k, v in state['bpe_ranks'].items():
+            parts = k.split(" ")
+            if len(parts) == 2:
+                self.bpe_ranks[tuple(parts)] = v

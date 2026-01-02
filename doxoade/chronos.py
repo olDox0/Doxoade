@@ -132,8 +132,12 @@ class CodeSampler(threading.Thread):
                 frame = sys._current_frames().get(self.main_thread_id)
                 if frame:
                     filename = frame.f_code.co_filename
-                    if "doxoade" in filename or os.getcwd() in filename:
-                        self.samples[(filename, frame.f_lineno)] += 1
+                    # FILTRO DE OURO: Ignora a si mesmo e ferramentas de suporte
+                    if any(x in filename for x in ["chronos.py", "database.py", "db_utils.py"]):
+                        continue
+                    
+                    # Foca no código do usuário ou nos comandos reais
+                    self.samples[(filename, frame.f_lineno)] += 1
             except Exception: pass
 
     def stop(self): self.running = False

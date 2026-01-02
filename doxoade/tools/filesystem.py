@@ -42,17 +42,24 @@ def _get_project_config(logger, start_path='.'):
     return config
 
 def _get_venv_python_executable(start_path='.'):
-    """Localiza o interpretador Python do venv."""
-    project_root = _find_project_root(start_path)
-    venv_path = os.path.join(project_root, 'venv')
+    """Localiza o interpretador Python do venv do projeto alvo."""
+    # Garante que estamos olhando para o diretório onde o usuário está
+    abs_start = os.path.abspath(start_path)
     
+    # Procura venv na pasta atual ou acima
+    venv_dir = os.path.join(abs_start, 'venv')
+    if not os.path.exists(venv_dir):
+        # Tenta achar a raiz se o usuário estiver em uma subpasta do projeto
+        project_root = _find_project_root(abs_start)
+        venv_dir = os.path.join(project_root, 'venv')
+
     exe_name = 'python.exe' if os.name == 'nt' else 'python'
     scripts_dir = 'Scripts' if os.name == 'nt' else 'bin'
-    
-    python_executable = os.path.join(venv_path, scripts_dir, exe_name)
+    python_executable = os.path.join(venv_dir, scripts_dir, exe_name)
     
     if os.path.exists(python_executable):
         return os.path.abspath(python_executable)
+        
     return None
 
 def _is_path_ignored(file_path, project_path):
