@@ -1,130 +1,161 @@
 # doxoade/neural/hrl.py
 import numpy as np
 import os
-import pickle
+import sys
+
+# [FIX] Garante acesso à raiz para importar alfagold
+current_dir = os.path.dirname(os.path.abspath(__file__)) # .../doxoade/neural
+project_root = os.path.dirname(os.path.dirname(current_dir)) # .../
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+# Agora o import funciona
+from alfagold.core.persistence import save_model_state, load_model_state
 from .core import softmax
 
 class HRLManager:
     """
-    HRL Manager v4.0 (The Maestro).
-    Arquitetura focada em Estado. O sinal simbólico tem via expressa (Skip Connection).
+    HRL Manager v5.0 (Stabilized & Entropic).
+    - Normalização Global de Estado.
+    - Regularização por Entropia (Evita colapso de modo).
+    - Inércia Temporal (Recebe a opção anterior como input).
     """
     def __init__(self, input_dim=64, vocab_size=2000, num_options=3):
         self.input_dim = input_dim
         self.num_options = num_options
         self.vocab_size = vocab_size
-        self.state_dim = 6 # INICIO, NOME, ARGS_PRE, ARGS, TRANSICAO, CORPO
         
-        # Rede Principal (Contexto -> Opção)
-        self.W_ctx = np.random.randn(input_dim, 32) * 0.05
+        # State Dim: Embedding(64) + Simbólico(6) + LastOption(3)
+        self.state_dim = 6 
+        self.total_input_dim = input_dim + self.state_dim + num_options
         
-        # Rede de Estado (Estado -> Opção) - PESOS MAIORES INICIAIS
-        # Isso atua como um "Instinto" base
-        self.W_state = np.random.randn(self.state_dim, 32) * 0.5 
+        # Pesos (Xavier Initialization)
+        scale = np.sqrt(2.0 / self.total_input_dim)
+        self.W1 = np.random.randn(self.total_input_dim, 64).astype(np.float32) * scale
+        self.W2 = np.random.randn(64, num_options).astype(np.float32) * 0.1
         
-        # Camada de Combinação
-        self.W_final = np.random.randn(32, num_options) * 0.1
-        
-        # Bias de Opção (Vocabulário)
+        # Bias de Opção (Matrix de Influência)
         self.option_embeddings = np.zeros((num_options, vocab_size), dtype=np.float32)
         
         self.cache = {}
         self.episode_buffer = [] 
         self.current_option = 0
+        self.last_option = 0 # Memória de curto prazo (Inércia)
 
-    def forward(self, token_vector, state_idx):
-        # 1. Processa Contexto (Semântica)
-        h_ctx = np.dot(token_vector, self.W_ctx)
+    def _normalize(self, x):
+        """LayerNorm manual para o vetor de entrada."""
+        mean = np.mean(x)
+        std = np.std(x) + 1e-8
+        return (x - mean) / std
+
+    def forward(self, full_input):
+        # Normalização Global (Resolve o problema de escala 2.0 vs 0.05)
+        norm_input = self._normalize(full_input)
         
-        # 2. Processa Estado (Estrutura) - One Hot Manual
-        state_vec = np.zeros(self.state_dim)
-        idx = min(state_idx, self.state_dim - 1)
-        state_vec[idx] = 1.0
+        h = np.maximum(0, np.dot(norm_input, self.W1))
+        logits = np.dot(h, self.W2)
         
-        h_state = np.dot(state_vec, self.W_state)
-        
-        # 3. Fusão (Soma os sinais)
-        # ReLU
-        h_combined = np.maximum(0, h_ctx + h_state)
-        
-        # 4. Decisão
-        logits = np.dot(h_combined, self.W_final)
-        
-        # Clip para estabilidade
-        logits = np.clip(logits, -50, 50)
+        # Clip logits
+        logits = np.clip(logits, -20, 20)
         probs = softmax(logits.reshape(1, -1)).flatten()
         
-        # Cache para treino
-        self.cache['token_vec'] = token_vector
-        self.cache['state_vec'] = state_vec
-        self.cache['h_combined'] = h_combined
+        self.cache['input'] = norm_input # Guarda o normalizado para o backprop
+        self.cache['h'] = h
         self.cache['probs'] = probs
         
         return probs
 
     def select_option(self, token_vector, state_idx, epsilon=0.1):
-        probs = self.forward(token_vector, state_idx)
+        # 1. Monta o vetor de estado completo
+        # Parte A: Estado Simbólico (One-Hot)
+        state_vec = np.zeros(self.state_dim, dtype=np.float32)
+        idx = min(state_idx, self.state_dim - 1)
+        state_vec[idx] = 1.0
         
-        # Fallback NaN
-        if np.isnan(probs).any(): probs = np.ones(self.num_options) / self.num_options
-
+        # Parte B: Opção Anterior (One-Hot) - Dá noção de continuidade
+        prev_opt_vec = np.zeros(self.num_options, dtype=np.float32)
+        prev_opt_vec[self.last_option] = 1.0
+        
+        # Concatena tudo
+        full_input = np.concatenate((token_vector, state_vec, prev_opt_vec))
+        
+        probs = self.forward(full_input)
+        
         if np.random.rand() < epsilon:
             option = np.random.randint(self.num_options)
         else:
             option = np.argmax(probs)
             
+        # Atualiza memória
+        self.last_option = self.current_option
         self.current_option = option
+        
         self.cache['last_action'] = option
         return option
 
     def register_step(self, reward):
-        # Salva snapshot para o buffer
-        if 'token_vec' in self.cache:
+        if 'input' in self.cache:
             self.episode_buffer.append({
-                'token_vec': self.cache['token_vec'],
-                'state_vec': self.cache['state_vec'],
-                'h': self.cache['h_combined'],
+                'input': self.cache['input'],
+                'h': self.cache['h'],
                 'probs': self.cache['probs'],
                 'action': self.cache['last_action'],
                 'reward': reward
             })
 
-    def train_episode(self, lr=0.01):
+    def train_episode(self, lr=0.01, entropy_beta=0.05):
+        """
+        Policy Gradient com Bônus de Entropia.
+        """
         if not self.episode_buffer: return 0
         
-        # Baseline simples
-        rewards = [s['reward'] for s in self.episode_buffer]
-        avg_reward = np.mean(rewards)
+        total_reward = sum(step['reward'] for step in self.episode_buffer)
+        baseline = total_reward / len(self.episode_buffer)
         
         loss_sum = 0
         
         for step in self.episode_buffer:
-            advantage = step['reward'] - avg_reward
+            advantage = step['reward'] - baseline
             advantage = np.clip(advantage, -2.0, 2.0)
             
-            # Gradiente Logits
-            d_logits = step['probs'].copy()
-            d_logits[step['action']] -= 1
+            probs = step['probs']
+            action = step['action']
+            
+            # Entropia: -sum(p * log(p))
+            # Queremos maximizar a entropia, então o gradiente é na direção de uniformizar as probs
+            # Gradiente da entropia em relação aos logits é complexo, simplificação:
+            # penaliza certeza excessiva
+            
+            # Gradiente do Objetivo Principal (J = log_prob * A)
+            d_logits = probs.copy()
+            d_logits[action] -= 1
             d_logits *= -advantage
             
-            # Backprop W_final
-            d_W_final = np.outer(step['h'], d_logits)
+            # Gradiente da Entropia (Regularização)
+            # H = -p log p
+            # dH/dlogits = p * (log p + 1) - p * sum(...) -> Aproximação: atrai para 0
+            # Adicionamos um termo que empurra probs para distribuição uniforme
+            d_entropy = probs * (np.log(probs + 1e-9) + 1)
             
-            # Backprop Hidden (ReLU)
-            d_h = np.dot(self.W_final, d_logits)
+            # Soma os gradientes: Queremos minimizar Loss (Maximizar Reward + Entropia)
+            # dLoss = d_Policy - beta * d_Entropy
+            total_grad = d_logits - (entropy_beta * d_entropy)
+            
+            # Backprop
+            d_W2 = np.outer(step['h'], total_grad)
+            d_h = np.dot(self.W2, total_grad)
             d_h[step['h'] <= 0] = 0
+            d_W1 = np.outer(step['input'], d_h)
             
-            # Backprop Ramos (State e Context)
-            # Como h = h_ctx + h_state, o gradiente flui igual para ambos
-            d_W_ctx = np.outer(step['token_vec'], d_h)
-            d_W_state = np.outer(step['state_vec'], d_h)
+            # Update com Clipping
+            self.W1 -= np.clip(lr * d_W1, -0.1, 0.1)
+            self.W2 -= np.clip(lr * d_W2, -0.1, 0.1)
             
-            # Updates
-            self.W_final -= lr * d_W_final
-            self.W_ctx -= lr * d_W_ctx
-            self.W_state -= lr * d_W_state # Esse deve aprender rápido!
-            
-            loss_sum += np.sum(d_logits**2)
+            # Cálculo real da Loss (Policy Loss - Entropy Bonus)
+            log_prob = np.log(probs[action] + 1e-9)
+            entropy = -np.sum(probs * np.log(probs + 1e-9))
+            policy_loss = -log_prob * advantage
+            loss_sum += (policy_loss - entropy_beta * entropy)
 
         self.episode_buffer = []
         return loss_sum
@@ -132,6 +163,8 @@ class HRLManager:
     def update_option_bias(self, option_idx, token_id, reward, lr=0.05):
         if token_id >= self.vocab_size: return
         delta = np.clip(lr * reward, -0.5, 0.5)
+        # Decay (Esquecimento leve) para evitar saturação
+        self.option_embeddings[option_idx, token_id] *= 0.999 
         self.option_embeddings[option_idx, token_id] += delta
         self.option_embeddings[option_idx, token_id] = np.clip(
             self.option_embeddings[option_idx, token_id], -5.0, 5.0
@@ -148,15 +181,13 @@ class HRLAgent:
             d_model = 64
             
         self.manager = HRLManager(input_dim=d_model, vocab_size=vocab_size)
-        self.path = os.path.expanduser("~/.doxoade/hrl_manager_v4.pkl") # V4
+        self.path_base = os.path.expanduser("~/.doxoade/hrl_manager_v5") # V5
         self.load()
 
     def step(self, context_ids, symbolic_state="INICIO", training=False):
-        # Mapeamento Estendido
         mapa = {"INICIO":0, "NOME":1, "ARGS_PRE":2, "ARGS":3, "TRANSICAO":4, "CORPO":5}
         state_idx = mapa.get(symbolic_state, 0)
 
-        # Context Embedding
         window = 5
         if len(context_ids) > 0:
             ids_to_embed = context_ids[-window:]
@@ -164,26 +195,20 @@ class HRLAgent:
                 vecs = self.worker.params['w_token'][ids_to_embed]
             else:
                 vecs = self.worker.token_embedding[ids_to_embed]
-            # Normaliza para reduzir ruído
             token_vector = np.mean(vecs, axis=0)
-            norm = np.linalg.norm(token_vector)
-            if norm > 0: token_vector /= norm
         else:
             token_vector = np.zeros(self.manager.input_dim)
 
-        # Decisão
-        eps = 0.2 if training else 0.0
+        eps = 0.3 if training else 0.0
         option_idx = self.manager.select_option(token_vector, state_idx, epsilon=eps)
         
-        # Worker Forward
         logits, _ = self.worker.forward(context_ids)
-        
-        # Bias
         bias = self.manager.option_embeddings[option_idx]
-        vocab_len = len(logits[-1])
-        if len(bias) != vocab_len:
-             new_bias = np.zeros(vocab_len)
-             m = min(len(bias), vocab_len)
+        
+        # Safety resize
+        if len(bias) != len(logits[-1]):
+             new_bias = np.zeros(len(logits[-1]))
+             m = min(len(bias), len(logits[-1]))
              new_bias[:m] = bias[:m]
              bias = new_bias
              
@@ -191,24 +216,36 @@ class HRLAgent:
 
     def register_feedback(self, token_id, reward):
         self.manager.register_step(reward)
-        if token_id < self.manager.vocab_size:
-            self.manager.update_option_bias(self.manager.current_option, token_id, reward)
+        self.manager.update_option_bias(self.manager.current_option, token_id, reward)
 
     def end_episode(self):
         return self.manager.train_episode()
 
     def save(self):
-        with open(self.path, 'wb') as f: pickle.dump(self.manager, f)
+        params = {
+            'W1': self.manager.W1,
+            'W2': self.manager.W2,
+            'option_embeddings': self.manager.option_embeddings
+        }
+        config = {
+            'input_dim': self.manager.input_dim,
+            'num_options': self.manager.num_options,
+            'vocab_size': self.manager.vocab_size,
+            'state_dim': self.manager.state_dim
+        }
+        save_model_state(self.path_base, params, config)
             
     def load(self):
-        if os.path.exists(self.path):
-            try:
-                with open(self.path, 'rb') as f:
-                    saved = pickle.load(f)
-                    # Verifica compatibilidade V4
-                    if hasattr(saved, 'state_dim') and saved.state_dim == 6:
-                        self.manager = saved
-                        print("   🧠 Maestro (HRL v4) carregado.")
-                    else:
-                        print("⚠️ [HRL] Versão antiga detectada. Iniciando Maestro v4.")
-            except: pass
+        # Tenta carregar V5
+        try:
+            if os.path.exists(self.path_base + ".npz"):
+                params, config = load_model_state(self.path_base)
+                # Verifica compatibilidade dimensional
+                if params['W1'].shape == self.manager.W1.shape:
+                    self.manager.W1 = params['W1']
+                    self.manager.W2 = params['W2']
+                    self.manager.option_embeddings = params['option_embeddings']
+                    print("   🧠 HRL Manager v5 (Entropy+Norm) carregado.")
+                else:
+                    print("⚠️ [HRL] Dimensões mudaram. Reiniciando.")
+        except: pass

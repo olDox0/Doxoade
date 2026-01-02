@@ -183,18 +183,35 @@ def _match_finding_to_template(finding: Dict[str, Any], templates: List[sqlite3.
 
 def _log_check_results(raw_findings: List[Dict[str, Any]], project_root: str, 
                       exclude_categories: Optional[List[str]], logger: ExecutionLogger) -> None:
-    """Filtra e registra achados."""
+    """Filtra e registra achados, incluindo sugestões da Gênese."""
     if not raw_findings: return
+    
     processed = filter_and_inject_findings(raw_findings, project_root)
     excludes = set([c.upper() for c in (exclude_categories or [])])
+    
     for f in processed:
         cat = f.get('category', 'UNCATEGORIZED').upper()
         if cat in excludes: continue
-        rel_file = os.path.relpath(os.path.abspath(f['file']), project_root)
+        
+        # Garante caminho absoluto para leitura do snippet e relativo para exibição
+        abs_file = os.path.abspath(f['file'])
+        rel_file = os.path.relpath(abs_file, project_root)
+        
+        # --- FIX: Passagem de TODOS os campos para o Logger ---
         logger.add_finding(
-            severity=f['severity'], message=f['message'], category=cat,
-            file=rel_file, line=f['line'], snippet=_get_code_snippet(os.path.abspath(f['file']), f['line']),
-            finding_hash=f.get('hash')
+            severity=f['severity'], 
+            message=f['message'], 
+            category=cat,
+            file=rel_file, 
+            line=f.get('line', 0), 
+            snippet=_get_code_snippet(abs_file, f.get('line')),
+            finding_hash=f.get('hash'),
+            # Dados da Gênese (Fundamentais para exibir sugestões)
+            import_suggestion=f.get('import_suggestion'),
+            suggestion_content=f.get('suggestion_content'),
+            suggestion_line=f.get('suggestion_line'),
+            suggestion_source=f.get('suggestion_source'),
+            suggestion_action=f.get('suggestion_action')
         )
 
 def _process_single_file(item: tuple, python_exe: str, continue_on_error: bool, cache: dict) -> List[Dict[str, Any]]:
@@ -236,14 +253,27 @@ def run_check_logic(path: str, fix: bool, fast: bool, no_cache: bool,
         rel = os.path.relpath(fp, project_root).replace('\\', '/')
         try:
             st = os.stat(fp)
+            # --- BLINDAGEM DE CACHE (Resiliência v69.1) ---
             if not no_cache and rel in cache:
                 c = cache[rel]
-                if abs(c['mtime'] - st.st_mtime) < 0.0001 and c['size'] == st.st_size:
-                    for f in c['findings']: f['file'] = fp
-                    raw_findings.extend(c['findings'])
-                    continue
+                
+                # MPoT-7: Validação defensiva de chaves do dicionário externo
+                mtime_cached = c.get('mtime')
+                size_cached = c.get('size')
+                findings_cached = c.get('findings')
+
+                # Só considera "Hit" se todas as métricas existirem e baterem
+                if all(v is not None for v in [mtime_cached, size_cached, findings_cached]):
+                    if abs(mtime_cached - st.st_mtime) < 0.0001 and size_cached == st.st_size:
+                        for f in findings_cached: 
+                            f['file'] = fp
+                        raw_findings.extend(findings_cached)
+                        continue
+            
+            # Se chegou aqui, é um "Cache Miss" ou Cache Inválido
             files_to_scan.append((fp, rel, st.st_mtime, st.st_size))
-        except OSError: continue
+        except OSError: 
+            continue
 
     if files_to_scan:
         with click.progressbar(files_to_scan, label='Analisando') as bar:
@@ -252,7 +282,7 @@ def run_check_logic(path: str, fix: bool, fast: bool, no_cache: bool,
 
     if clones or not fast: raw_findings.extend(_run_clone_check(files, python_exe))
     if not fast: _enrich_with_dependency_analysis(raw_findings, project_root)
-    _enrich_findings_with_solutions(raw_findings)
+    _enrich_findings_with_solutions(raw_findings, project_root)
 
     if fix:
         with ExecutionLogger('autofix', project_root, {}) as f_log:

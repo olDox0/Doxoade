@@ -126,5 +126,41 @@
     "symptom": "O comando 'telemetry --stats' consumia muita RAM ao calcular médias de longos históricos.",
     "root_cause": "A lógica anterior trazia todos os dados do banco para o Python e usava 'statistics.mean()'.",
     "fix": "Migração para 'Lean SQL Analytics'. O cálculo de médias agora ocorre dentro da engine do SQLite, transferindo apenas o resultado final para o Doxoade."
+  },
+  "winerror_5_rebuild_fix": {
+    "title": "Superação do WinError 5 (Acesso Negado)",
+    "date": "2026-01-01",
+    "severity": "HIGH",
+    "root_cause": "Locks do Windows em binários de venv ativos ou indexados por IDEs.",
+    "fix": "Implementação do Padrão de Renomeação Transitória. O diretório bloqueado é movido para um nome temporário, permitindo a recriação imediata do ambiente no caminho original."
+  },
+  "cache_key_error_v69": {
+    "title": "Crash por Inconsistência de Cache (KeyError)",
+    "date": "2026-01-01",
+    "severity": "HIGH",
+    "root_cause": "O sistema assumia a existência de chaves 'mtime' em arquivos de cache gerados por versões legadas ou corrompidos.",
+    "fix": "Implementação de verificações defensivas com '.get()' e 'all()'. O sistema agora descarta automaticamente entradas de cache mal-formadas, garantindo continuidade operacional (Fail-Soft)."
+  },
+  "autofix_partial_import_regression": {
+    "title": "Regressão de Autofix em Imports Múltiplos",
+    "date": "2026-01-01",
+    "severity": "HIGH",
+    "root_cause": "O motor de correção tratava 'from x import a, b' como uma linha atômica, comentando-a inteira quando apenas 'a' era inútil, quebrando o símbolo 'b'.",
+    "fix": "Implementação do 'Neurocirurgião de Imports' no fixer.py, que decompõe a lista de símbolos e reconstrói a instrução preservando os elementos úteis."
+  },
+  "mtl_numerical_explosion": {
+    "title": "Explosão de Incerteza e Saturação de LUT",
+    "date": "2026-01-02",
+    "severity": "CRITICAL",
+    "symptom": "Loss disparando de 1.5 para 4.1 e Sigma (σ) explodindo em 3 épocas.",
+    "root_cause": "Inicialização aleatória sem seed gerando ativações fora do range da MathLUT (-10, 10). O clipping da LUT gerou gradientes fantasmas que desorientaram o AdamW. O mecanismo de Smart Loss optou por aumentar a incerteza para mitigar o erro matemático.",
+    "fix": "Implementação de Seed fixa (42), Fallback analítico na LUT para valores Extremos (Out-of-Range) e Gradient Clipping Global no orquestrador de treino."
+  },
+  "save_logic_crash_v71": {
+    "title": "Crash de Escopo no Comando Save",
+    "date": "2026-01-02",
+    "severity": "HIGH",
+    "root_cause": "Tentativa de acessar a variável 'fix_applied' sem inicialização prévia. O erro foi introduzido durante o planejamento da fase de auto-reversão do Protocolo Lázaro.",
+    "fix": "Inicialização explícita de todas as flags de estado no topo do comando 'save', seguindo o padrão MPoT-6 (Escopo Limpo)."
   }
 }

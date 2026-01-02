@@ -13,6 +13,7 @@ import click
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Tuple, Set
 from rich.console import Console
+from colorama import Fore 
 
 from ..database import get_db_connection
 from ..shared_tools import (
@@ -172,52 +173,57 @@ def save(ctx, message: str, force: bool):
     console = Console()
     project_path = os.getcwd()
     
-    # FIX: Removido o 'as logger' para silenciar o aviso de variável não utilizada,
-    # já que o context manager ainda é necessário para a telemetria/Chronos.
+    # MPoT-5: Inicialização explícita de estado para evitar NameError
+    fix_applied = False 
+    
     with ExecutionLogger('save', project_path, ctx.params):
         console.print("[bold cyan]--- [SAVE] Salvamento Seguro e Inteligente ---[/bold cyan]")
 
-        # 1. Preparação
+        # 1. Preparação Git
         _run_git_command(['add', '.'])
         status = (_run_git_command(['status', '--porcelain'], capture_output=True) or "").strip()
         if not status:
-            console.print("[yellow][AVISO] Nada para salvar.[/yellow]")
+            console.print("[yellow][AVISO] Nada para salvar: working tree limpa.[/yellow]")
             return
 
-        # 2. Qualidade
+        # 2. Portão de Qualidade
         git_root = _run_git_command(['rev-parse', '--show-toplevel'], capture_output=True)
         staged_py = _get_staged_python_files(git_root)
         
         if staged_py:
-            # Roda o check filtrando pelo TOML (graças ao fix acima)
+            console.print(f"   > Auditando {len(staged_py)} arquivo(s) Python...")
+            
+            # Executa o check (Ouro v38.8)
             results = run_check_logic(
                 path='.', fix=False, fast=True, no_cache=True, 
-                clones=False, continue_on_error=True, # Permite pegar todos os erros
+                clones=False, continue_on_error=True,
                 target_files=staged_py
             )
             
+            # Protocolo Lázaro Preventivo: Se tivéssemos aplicado fix, 
+            # verificaríamos 'fix_applied' aqui.
+            if fix_applied:
+                # [Lógica futura para auto-reversão de sintaxe]
+                pass
+
             summary = results.get('summary', {})
             # O commit só é bloqueado por erros reais (Code Breaking)
-            has_blocking_errors = summary.get('critical', 0) > 0 or summary.get('errors', 0) > 0
-    
-            if has_blocking_errors and not force:
-                console.print("[bold red]\n[ERRO] Qualidade insuficiente: Erros Críticos detectados.[/bold red]")
-                
-                # FILTRO DE EXIBIÇÃO: Mostra apenas o que bloqueia o commit
-                blocking_findings = [
-                    f for f in results.get('findings', []) 
-                    if f['severity'] in ['CRITICAL', 'ERROR']
-                ]
-                results['findings'] = blocking_findings # Substitui para a exibição
-                
+            blocking = [f for f in results.get('findings', []) if f['severity'] in ['CRITICAL', 'ERROR']]
+            
+            if blocking and not force:
+                console.print("[bold red]\n[ERRO] Bloqueio de Qualidade: Falhas críticas detectadas.[/bold red]")
+                results['findings'] = blocking 
                 _present_results('text', results)
-                console.print("[bold yellow]\\nAvisos de STYLE/DOCS foram ignorados para este commit.[/bold yellow]")
+                console.print(Fore.YELLOW + "\n(Use --force se desejar ignorar estes erros)")
                 sys.exit(1)
+            elif results.get('findings'):
+                 console.print(Fore.GREEN + f"[OK] {len(results['findings'])} avisos detectados (não bloqueantes).")
 
-        # 3. Commit e Aprendizado
+        # 3. Finalização do Commit
         _run_git_command(['commit', '-m', message])
         new_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True)
+        
         if new_hash:
             _learn_solutions_from_commit(new_hash, project_path)
 
-        console.print("[bold green]\n[OK] Projeto salvo e Gênese atualizada.[/bold green]")
+        console.print("[bold green]\n[OK] Alfa 71.10: Commit finalizado e Gênese atualizada.[/bold green]")

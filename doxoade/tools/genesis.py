@@ -1,59 +1,59 @@
-# doxoade/tools/genesis.py
+# -*- coding: utf-8 -*-
+"""
+Motor Gênese & Abdução (v15.1 Gold).
+Responsável por sugerir correções (Inteligência Simbólica) e inferir imports.
+Evolução: MPoT-Aware, Detecção de Complexidade e Blindagem de Caminhos.
+"""
+
 import re
 import ast
 import os
 import sqlite3
+import logging
+from typing import List, Dict, Any, Optional, Tuple
 from doxoade.database import get_db_connection
 
-# --- DADOS DE CONHECIMENTO ---
+# --- DADOS DE CONHECIMENTO (STDLIB & THIRD PARTY) ---
+# Mantidos para suportar a lógica de Abdução de Imports
 STDLIB_MODULES = {
-    'sys': ['exit', 'path', 'argv', 'stdout', 'stderr', 'stdin', 'version', 'platform', 'modules'],
-    'os': ['path', 'getcwd', 'chdir', 'listdir', 'mkdir', 'makedirs', 'remove', 'rename', 'environ', 'sep', 'name', 'walk', 'stat', 'getenv', 'system', 'popen'],
-    'math': ['ceil', 'floor', 'sqrt', 'pi', 'pow', 'cos', 'sin', 'tan', 'degrees', 'radians'],
+    'sys': ['exit', 'path', 'argv', 'stdout', 'stderr', 'stdin', 'version', 'modules'],
+    'os': ['path', 'getcwd', 'chdir', 'listdir', 'mkdir', 'environ', 'name', 'walk', 'stat'],
+    'math': ['ceil', 'floor', 'sqrt', 'pi', 'pow', 'cos', 'sin', 'tan'],
     'random': ['randint', 'choice', 'shuffle', 'random', 'seed'],
-    're': ['match', 'search', 'findall', 'sub', 'split', 'compile', 'fullmatch', 'escape', 'IGNORECASE', 'VERBOSE'],
+    're': ['match', 'search', 'findall', 'sub', 'compile', 'fullmatch', 'escape'],
     'json': ['dumps', 'loads', 'dump', 'load', 'JSONDecodeError'],
     'datetime': ['datetime', 'date', 'time', 'timedelta', 'timezone'],
     'time': ['sleep', 'time', 'monotonic', 'perf_counter'],
-    'hashlib': ['md5', 'sha256', 'sha1', 'sha512'],
-    'sqlite3': ['connect', 'Row', 'Error', 'OperationalError'],
-    'subprocess': ['run', 'Popen', 'PIPE', 'CalledProcessError', 'check_output'],
+    'hashlib': ['md5', 'sha256', 'sha1'],
+    'subprocess': ['run', 'Popen', 'PIPE', 'CalledProcessError'],
     'pathlib': ['Path', 'PurePath'],
-    'ast': ['parse', 'walk', 'literal_eval', 'NodeVisitor', 'dump'],
-    'shutil': ['copy', 'copy2', 'copytree', 'rmtree', 'move'],
-    'io': ['StringIO', 'BytesIO'],
-    'collections': ['Counter', 'defaultdict', 'OrderedDict', 'namedtuple', 'deque'],
-    'functools': ['wraps', 'partial', 'lru_cache', 'reduce'],
-    'itertools': ['chain', 'cycle', 'repeat', 'combinations', 'permutations'],
-    'traceback': ['format_exc', 'print_exc', 'extract_tb'],
-    'importlib': ['import_module', 'resources'],
-    'toml': ['load', 'dump', 'loads', 'dumps', 'TomlDecodeError'],
-    'click': ['command', 'group', 'option', 'argument', 'echo', 'pass_context', 'Path', 'Choice'],
+    'ast': ['parse', 'walk', 'NodeVisitor', 'unparse'],
+    'shutil': ['copy', 'copy2', 'rmtree', 'move'],
+    'collections': ['Counter', 'defaultdict', 'deque', 'namedtuple'],
 }
 
 COMMON_THIRD_PARTY = {
     'colorama': ['Fore', 'Back', 'Style', 'init'],
-    'pyflakes': ['api', 'checker'],
-    'requests': ['get', 'post', 'put', 'delete', 'Session', 'Response'],
-    'flask': ['Flask', 'request', 'render_template', 'redirect', 'url_for'],
+    'rich': ['console', 'table', 'panel', 'progress'],
     'pytest': ['fixture', 'mark', 'raises'],
 }
 
 ALL_KNOWN_MODULES = {**STDLIB_MODULES, **COMMON_THIRD_PARTY}
 
-# --- LÓGICA DE ABDUÇÃO ---
+# --- LÓGICA DE ABDUÇÃO (INFERÊNCIA DE IMPORTS) ---
 
-def _extract_current_imports(file_path):
+def _extract_current_imports(file_path: str) -> Dict[str, Any]:
+    """Extrai os imports existentes no arquivo para evitar duplicatas."""
     imports = {}
     try:
+        if not os.path.exists(file_path): return {}
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
-        tree = ast.parse(content, filename=file_path)
+            tree = ast.parse(f.read(), filename=file_path)
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     module_name = alias.name.split('.')[0]
-                    imports[module_name] = {'type': 'import', 'alias': alias.asname, 'symbols': []}
+                    imports[module_name] = {'type': 'import', 'symbols': []}
             elif isinstance(node, ast.ImportFrom):
                 if node.module:
                     module_name = node.module.split('.')[0]
@@ -61,192 +61,163 @@ def _extract_current_imports(file_path):
                     if module_name in imports:
                         imports[module_name]['symbols'].extend(symbols)
                     else:
-                        imports[module_name] = {'type': 'from', 'alias': None, 'symbols': symbols}
+                        imports[module_name] = {'type': 'from', 'symbols': symbols}
     except Exception: pass
     return imports
 
-def _analyze_dependencies(findings, file_path):
-    if not findings: return findings
-    undefined_findings = [f for f in findings if 'undefined name' in f.get('message', '')]
-    if not undefined_findings: return findings
+def _analyze_dependencies(findings: List[Dict[str, Any]], file_path: str):
+    """Cruza nomes indefinidos com a base de conhecimento para sugerir imports."""
+    undefined = [f for f in findings if 'undefined name' in f.get('message', '')]
+    if not undefined: return findings
     
     current_imports = _extract_current_imports(file_path)
     
-    for finding in undefined_findings:
-        message = finding.get('message', '')
-        match = re.match(r"undefined name '(.+?)'", message)
+    for f in undefined:
+        match = re.search(r"undefined name '(.+?)'", f.get('message', ''))
         if not match: continue
+        name = match.group(1)
         
-        undefined_name = match.group(1)
-        
-        if undefined_name in ALL_KNOWN_MODULES:
-            if undefined_name not in current_imports:
-                finding['missing_import'] = undefined_name
-                finding['import_suggestion'] = f"import {undefined_name}"
-                finding['dependency_type'] = 'MISSING_MODULE_IMPORT'
-                continue
-        
-        for module, exports in ALL_KNOWN_MODULES.items():
-            if undefined_name in exports:
-                if module not in current_imports:
-                    finding['missing_import'] = module
-                    finding['import_suggestion'] = f"from {module} import {undefined_name}"
-                    finding['dependency_type'] = 'MISSING_SYMBOL_IMPORT'
+        # Tenta sugerir o import do módulo ou do símbolo
+        if name in ALL_KNOWN_MODULES and name not in current_imports:
+            f['import_suggestion'] = f"import {name}"
+        else:
+            for mod, exports in ALL_KNOWN_MODULES.items():
+                if name in exports and mod not in current_imports:
+                    f['import_suggestion'] = f"from {mod} import {name}"
                     break
-                else:
-                    import_info = current_imports.get(module, {})
-                    if import_info.get('type') == 'import' and undefined_name in exports:
-                        finding['import_suggestion'] = f"Use '{module}.{undefined_name}' ou 'from {module} import {undefined_name}'"
-                        finding['dependency_type'] = 'WRONG_IMPORT_STYLE'
-                        break
     return findings
 
-def _enrich_with_dependency_analysis(findings, project_path):
-    by_file = {}
-    for f in findings:
-        file_path = f.get('file')
-        if file_path:
-            abs_path = os.path.join(project_path, file_path) if not os.path.isabs(file_path) else file_path
-            if abs_path not in by_file: by_file[abs_path] = []
-            by_file[abs_path].append(f)
+# --- LÓGICA DE ENRIQUECIMENTO (GÊNESE) ---
 
-    for file_path, file_findings in by_file.items():
-        _analyze_dependencies(file_findings, file_path)
-    return findings
+def _simulate_fix(finding: Dict[str, Any], project_root: str, file_path: str, line_num: int, 
+                  pattern: str, replacement: str, source: str, action: str):
+    """Simula a correção garantindo que o arquivo seja encontrado."""
+    try:
+        # Resolve o caminho absoluto de forma resiliente
+        if os.path.isabs(file_path):
+            abs_path = file_path
+        else:
+            abs_path = os.path.normpath(os.path.join(project_root, file_path))
 
-# --- LÓGICA DE SOLUÇÕES (Gênese) ---
-def _enrich_findings_with_solutions(findings):
+        if not os.path.exists(abs_path):
+            return
+
+        with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
+            lines = f.readlines()
+        
+        idx = line_num - 1
+        if 0 <= idx < len(lines):
+            original = lines[idx]
+            new_line = re.sub(pattern, replacement, original, count=1)
+            
+            if new_line != original:
+                finding['suggestion_content'] = new_line
+                finding['suggestion_line'] = line_num
+                finding['suggestion_source'] = source
+                finding['suggestion_action'] = action
+    except Exception:
+        pass
+
+
+def _try_apply_template(finding: Dict[str, Any], templates: List[sqlite3.Row]) -> bool:
+    """Tenta casar o erro com um padrão aprendido no banco de dados."""
+    message = finding.get('message', '')
+    category = finding.get('category', '').upper()
+    file_path = finding.get('file')
+    line_num = finding.get('line')
+
+    for t in templates:
+        if t['category'] != category: continue
+        
+        # Converte padrão abstrato para Regex real
+        regex = (re.escape(t['problem_pattern'])
+                 .replace('<MODULE>', '(.+?)')
+                 .replace('<VAR>', '(.+?)')
+                 .replace('<LINE>', r'(\d+)'))
+        
+        if re.fullmatch(regex, message):
+            _simulate_fix(finding, file_path, line_num, r'^(.*)$', 
+                         t['solution_template'], "MEMÓRIA (Gênese)", "Aplicar Template")
+            return True
+    return False
+
+def _apply_native_intelligence(finding: Dict[str, Any], project_root: str):
+    """Regras universais ativadas por padrão."""
+    message = finding.get('message', '').lower()
+    category = finding.get('category', '').upper()
+    file_path = finding.get('file')
+    line_num = finding.get('line')
+
+    if not file_path or not line_num: return
+
+    # FIX: Regex mais flexível para capturar variações do erro de except
+    if "except:" in message or "except" in message and "exception" not in message:
+        _simulate_fix(finding, project_root, file_path, line_num, 
+                     r'except\s*:', 'except Exception:', 
+                     "REGRA NATIVA (Segurança)", "Restringir exceção")
+
+    elif "f-string is missing placeholders" in message:
+        _simulate_fix(finding, project_root, file_path, line_num, 
+                     r'\bf(["\'])', r'\1', 
+                     "REGRA NATIVA (Estilo)", "Remover prefixo 'f'")
+
+    elif "redefinition of unused" in message:
+        _simulate_fix(finding, project_root, file_path, line_num, 
+                     r'^(.*)$', r'# [DOX-UNUSED] \1', 
+                     "REGRA NATIVA", "Comentar redefinição")
+
+    elif category == 'COMPLEXITY':
+        # Para complexidade, injetamos um TODO acima da função
+        finding['suggestion_content'] = f"# TODO: Refatorar para reduzir complexidade (CC)\n"
+        finding['suggestion_line'] = line_num
+        finding['suggestion_source'] = "ARQUITETO"
+        finding['suggestion_action'] = "Adicionar nota de refatoração"
+
+def _enrich_findings_with_solutions(findings: List[Dict[str, Any]], project_root: str):
+    """Orquestrador. FIX: Agora exige e repassa o project_root."""
     if not findings: return
     
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    
     try:
-        cursor.execute("SELECT * FROM solution_templates ORDER BY confidence DESC")
-        templates = cursor.fetchall()
+        conn.row_factory = sqlite3.Row
+        templates = conn.execute("SELECT * FROM solution_templates ORDER BY confidence DESC").fetchall()
 
-        for finding in findings:
-            if finding.get('import_suggestion'): continue
-            
-            message = finding.get('message', '')
-            category = finding.get('category', '')
-            file_path = finding.get('file')
-            line_num = finding.get('line')
+        for f in findings:
+            if f.get('import_suggestion') or not f.get('file'):
+                continue
 
-            if not file_path or not line_num: continue
-
-            # --- 1. Tenta Solução Exata (Histórico do arquivo) ---
-            finding_hash = finding.get('hash')
-            if finding_hash:
-                cursor.execute("SELECT stable_content, error_line FROM solutions WHERE finding_hash = ? LIMIT 1", (finding_hash,))
-                exact = cursor.fetchone()
-                if exact:
-                    finding['suggestion_content'] = exact['stable_content']
-                    finding['suggestion_line'] = exact['error_line']
-                    finding['suggestion_source'] = "EXACT"
-                    continue 
-
-            # --- 2. Tenta Templates do Banco (Gênese Aprendido) ---
-            template_found = False
-            for template in templates:
-                if template['category'] != category: continue
-                
-                # Prepara Regex do Template
-                pattern_regex = (re.escape(template['problem_pattern'])
-                    .replace('<MODULE>', '(.+?)')
-                    .replace('<VAR>', '(.+?)')
-                    .replace('<LINE>', r'(\d+)'))
-                
-                match = re.fullmatch(pattern_regex, message)
-                if match:
-                    # Aplica lógica do template para VISUALIZAÇÃO
-                    try:
-                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                            lines = f.readlines()
-                        
-                        idx = line_num - 1
-                        if idx < 0 or idx >= len(lines): break
-                        
-                        sol_type = template['solution_template']
-                        
-                        # Simula a correção para exibição
-                        new_content = None
-                        action = "Aplicar correção"
-                        
-                        # [CHANGE] Terminologia mais segura
-                        if sol_type == "REMOVE_LINE":
-                            new_content = f"# [DOX-UNUSED] {lines[idx]}" 
-                            action = "Modificar linha (Desativar)"
-                        
-                        elif sol_type == "REMOVE_F_PREFIX":
-                            new_content = re.sub(r'\bf(["\'])', r'\1', lines[idx])
-                            action = "Modificar linha (Remover prefixo 'f')"
-                        
-                        # [NOVO] Simulação visual de Smart Import
-                        elif sol_type == "FIX_UNUSED_IMPORT":
-                            # Tenta extrair o nome da variável do erro ou usa <VAR> se capturado
-                            # Regex comum: "'VarName' imported but unused"
-                            var_match = re.search(r"'([^']+)'", message)
-                            if var_match:
-                                var_name = var_match.group(1).split('.')[-1]
-                                original_line = lines[idx]
-                                # Simula a remoção da string
-                                sim_line = original_line.replace(f", {var_name}", "").replace(f"{var_name}, ", "").replace(var_name, "")
-                                # Limpeza básica de vírgulas órfãs
-                                sim_line = re.sub(r'import\s*,', 'import ', sim_line)
-                                sim_line = re.sub(r',\s*$', '', sim_line.rstrip()) + '\n'
-                                
-                                # Se a linha ficou vazia (só sobrou o import), vira comentário
-                                if sim_line.strip() == "from typing import" or sim_line.strip() == "import":
-                                    new_content = f"# [DOX-UNUSED] {original_line}"
-                                    action = "Modificar linha (Desativar Import)"
-                                else:
-                                    new_content = sim_line
-                                    action = "Modificar linha (Remover Símbolo)"
-
-                        if new_content:
-                            finding['suggestion_content'] = new_content
-                            finding['suggestion_line'] = line_num
-                            finding['suggestion_source'] = "TEMPLATE"
-                            finding['suggestion_action'] = action
-                            template_found = True
-                            break
-                    except Exception: pass
-            
-            if template_found: continue
-
-            # --- 3. Inteligência Nativa (Hardcoded Rules) ---
-            
-            # Regra: Except Genérico -> Except Exception
-            if "Uso de 'except:' genérico detectado" in message:
-                try:
-                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                        lines = f.readlines()
-                    idx = line_num - 1
-                    if 0 <= idx < len(lines):
-                        original = lines[idx]
-                        new_line = re.sub(r'except\s*:', 'except Exception:', original, count=1)
-                        
-                        if new_line != original:
-                            finding['suggestion_content'] = new_line
-                            finding['suggestion_line'] = line_num
-                            finding['suggestion_source'] = "REGRA NATIVA (Segurança)"
-                            finding['suggestion_action'] = "Restringir exceção"
-                except: pass
-
-            # Regra: Redefinição de Função -> Comentar
-            elif "redefinition of unused" in message and category == 'DEADCODE':
-                 try:
-                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                        lines = f.readlines()
-                    idx = line_num - 1
-                    if 0 <= idx < len(lines):
-                        finding['suggestion_content'] = f"# [DOX-UNUSED] {lines[idx]}"
-                        finding['suggestion_line'] = line_num
-                        finding['suggestion_source'] = "REGRA NATIVA"
-                        finding['suggestion_action'] = "Modificar linha (Desativar)"
-                 except: pass
-
+            # Prioridade: 1. Templates -> 2. Regras Nativas
+            if not _try_apply_template(f, project_root, templates):
+                _apply_native_intelligence(f, project_root)
     finally:
         conn.close()
+
+def _enrich_with_dependency_analysis(findings: List[Dict[str, Any]], project_path: str):
+    """Agrupa por arquivo e aplica abdução de dependências."""
+    by_file = {}
+    for f in findings:
+        path = f.get('file')
+        if path:
+            abs_p = os.path.join(project_path, path) if not os.path.isabs(path) else path
+            if abs_p not in by_file: by_file[abs_p] = []
+            by_file[abs_p].append(f)
+
+    for path, file_findings in by_file.items():
+        _analyze_dependencies(file_findings, path)
+    return findings
+    
+def _try_apply_template(finding: Dict[str, Any], project_root: str, templates: List[sqlite3.Row]) -> bool:
+    """Tenta casar erro com padrão aprendido. FIX: Adicionado project_root."""
+    message = finding.get('message', '')
+    category = finding.get('category', '').upper()
+    
+    for t in templates:
+        if t['category'] != category: continue
+        regex = (re.escape(t['problem_pattern'])
+                 .replace('<MODULE>', '(.+?)').replace('<VAR>', '(.+?)').replace('<LINE>', r'(\d+)'))
+        
+        if re.fullmatch(regex, message):
+            _simulate_fix(finding, project_root, finding['file'], finding['line'], 
+                         r'^(.*)$', t['solution_template'], "MEMÓRIA (Gênese)", "Aplicar Template")
+            return True
+    return False
