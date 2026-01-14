@@ -143,7 +143,8 @@ def _analyze_requirements_quality(project_path):
     if not os.path.exists(requirements_file):
         return findings
 
-    CRITICAL_PACKAGES = {'numpy', 'torch', 'tensorflow', 'pandas', 'scikit-learn', 'django', 'flask'}
+        CRITICAL_PACKAGES = {'numpy', 'packaging', 'click', 'rich'}
+        #HEAVY_PACKAGES_WARNING = {'pandas', 'torch', 'tensorflow', 'scikit-learn', 'lxml'}
     
     try:
         with open(requirements_file, 'r', encoding='utf-8') as f:
