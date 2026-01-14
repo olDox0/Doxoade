@@ -75,5 +75,20 @@
     "title": "Auditoria de Diff Semântico",
     "context": "Revisão pré-commit em repositórios massivos.",
     "content": "Parser de diff otimizado que extrai assinaturas de funções e comentários, ignorando metadados de baixo nível do Git para foco em engenharia."
+  },
+  "historical_signature_comparison": {
+    "title": "Comparação de Assinatura Histórica",
+    "context": "Detecção de regressões em refatorações de longa duração.",
+    "content": "Padrão que utiliza o Git como banco de dados de conteúdo e a AST como parser de estrutura para validar a evolução da interface de um arquivo."
+  },
+  "expert_split_render": {
+    "title": "Renderização Expert-Split",
+    "context": "Redução de complexidade em comandos de interface.",
+    "content": "Decomposição de funções de UI em sub-renderizadores especialistas (Env, Git, Integrity, Changes). Mantém a Complexidade Ciclomática (CC) abaixo de 6 mesmo em relatórios densos."
+  },
+  "lazy_group_routing": {
+    "title": "Roteamento de Grupo Lazy",
+    "context": "Startup de CLI com múltiplas dependências.",
+    "content": "Uso de mapeamento estático 'string:modulo' para adiar imports até o momento da invocação. Vital para performance em hardware ARM/RISC."
   }
 }

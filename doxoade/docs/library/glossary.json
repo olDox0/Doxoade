@@ -83,5 +83,15 @@
     "title": "Esvaziamento na Saída (Flush on Exit)",
     "definition": "Garantia de que buffers em memória sejam gravados no disco antes do processo ser finalizado pelo Sistema Operacional.",
     "origin": "db_utils Async Engine"
+  },
+  "functional_erosion": {
+    "title": "Erosão Funcional",
+    "definition": "A perda gradual de capacidades de um software devido a refatorações que ignoram casos de borda ou removem parâmetros de configuração anteriormente úteis.",
+    "origin": "Doxoade Archival Research"
+  },
+  "semantic_archival": {
+    "title": "Arquivologia Semântica",
+    "definition": "O processo de catalogar e comparar a estrutura lógica do código (não apenas o texto) ao longo do tempo.",
+    "origin": "Diff Legacy Implementation"
   }
 }

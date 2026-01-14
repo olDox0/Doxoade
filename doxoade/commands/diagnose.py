@@ -3,6 +3,7 @@
 Diagnose: Auditoria de situação e integridade do projeto.
 PASC-6: Verbosidade em importação e funcionalidade (Otimização de RAM).
 """
+import os
 from json import dumps
 from click import command, option, echo, argument, Path
 from colorama import Fore, Style
@@ -58,12 +59,18 @@ def _render_env(env: dict):
 
 def _render_git(git: dict, detailed: bool, show_all: bool, show_max: bool, 
                 show_code: bool, only_comments: bool):
+    """Renderizador de seção Git (MPoT-17)."""
     echo(f"{Fore.WHITE}{Style.BRIGHT}\n📦 ESTADO DO REPOSITÓRIO{Style.RESET_ALL}")
     if not git['is_git_repo']:
         echo(f"   {Fore.RED}Não é um repositório Git.{Style.RESET_ALL}")
         return
 
     echo(f"   Branch:   {Fore.GREEN}{git['branch']}{Style.RESET_ALL}")
+    _render_git_status_logic(git, detailed, show_all, show_max, show_code, only_comments)
+    _render_last_commit(git.get('last_commit_info'))
+
+def _render_git_status_logic(git, detailed, show_all, show_max, show_code, only_comments):
+    """Encapsula a lógica de decisão do status Git (Reduz CC)."""
     if git['dirty_tree']:
         echo(f"   Status:   {Fore.YELLOW}MODIFICADO (Alterações não salvas){Style.RESET_ALL}")
         echo(f"   Pendentes: {git.get('pending_count', 0)} arquivo(s)")
@@ -71,42 +78,47 @@ def _render_git(git: dict, detailed: bool, show_all: bool, show_max: bool,
         if detailed and 'changes' in git:
             _render_detailed_changes(git['changes'], show_all, show_max, show_code, only_comments)
         else:
-            # CORREÇÃO: Respeita a flag show_all para listar os arquivos pendentes
-            pending = git.get('pending_files', [])
-            display_limit = None if show_all else 10 # Aumentei de 5 para 10 no modo compacto
-            display_list = pending if show_all else pending[:display_limit]
-            
-            for f in display_list:
-                echo(f"      {Fore.RED}• {f}{Style.RESET_ALL}")
-            
-            if not show_all and len(pending) > 10:
-                echo(f"      {Style.DIM}... e mais {len(pending)-10} arquivos (Use -a para ver todos).{Style.RESET_ALL}")
+            _render_pending_simple(git.get('pending_files', []), show_all)
     else:
         echo(f"   Status:   {Fore.GREEN}LIMPO (Tudo salvo){Style.RESET_ALL}")
-    
-    last = git.get('last_commit_info')
+
+
+def _render_pending_simple(pending, show_all):
+    """Lista simples de arquivos pendentes."""
+    display_limit = None if show_all else 10
+    display_list = pending if show_all else pending[:display_limit]
+    for f in display_list:
+        echo(f"      {Fore.RED}• {f}{Style.RESET_ALL}")
+    if not show_all and len(pending) > 10:
+        echo(f"      {Style.DIM}... e mais {len(pending)-10} arquivos (Use -a).{Style.RESET_ALL}")
+
+def _render_last_commit(last):
+    """Exibe info do último commit."""
     if last:
         echo(f"\n   Último:   {Style.DIM}{last['hash']} - {last['author']} : {last['subject']}{Style.RESET_ALL}")
 
 def _render_detailed_changes(changes: list, show_all: bool, show_max: bool, 
                              show_code: bool, only_comments: bool):
+    """Orquestrador de mudanças detalhadas (Reduz CC)."""
     display_list = changes if show_all or show_max else changes[:10]
 
     for item in display_list:
         if only_comments and not item.get('comments'):
             continue
-            
         _render_single_file_status(item)
-        
-        if only_comments:
-            _render_comments_only(item['comments'])
-        elif show_code:
-            _render_code_hunks(item['hunks'])
-        else:
-            _render_file_diff_content(item, show_max)
+        _render_file_content_router(item, show_max, show_code, only_comments)
 
     if not (show_all or show_max) and len(changes) > 10:
-        echo(f"\n      {Style.DIM}... e mais {len(changes)-10} arquivos (Use -a para ver tudo).{Style.RESET_ALL}")
+        echo(f"\n      {Style.DIM}... e mais {len(changes)-10} arquivos (Use -a).{Style.RESET_ALL}")
+
+def _render_file_content_router(item, show_max, show_code, only_comments):
+    """Roteia o conteúdo para o renderizador especialista (PASC-10)."""
+    if only_comments:
+        _render_comments_only(item['comments'])
+    elif show_code:
+        _render_code_hunks(item['hunks'])
+    else:
+        _render_file_diff_content(item, show_max)
 
 def _render_single_file_status(item: dict):
     """Sincronia Chief-Gold: Alinhamento vertical por campo fixo."""
