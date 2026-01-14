@@ -16,6 +16,7 @@ import click
 from colorama import Fore, Style
 
 from ..shared_tools import ExecutionLogger, _get_venv_python_executable
+from ..tools.pkg_manager import get_best_installer, run_install
 
 __version__ = "36.1 Alfa Phoenix (Gold Standard)"
 
@@ -166,15 +167,40 @@ def _verify_and_guide_path(logger: ExecutionLogger) -> bool:
     click.echo(Fore.GREEN + f"   > [OK] Instalação ativa: {paths[0]}")
     return True
 
+def _ensure_uv_on_termux():
+    """Verifica e sugere instalação do UV no ambiente Termux."""
+    if os.path.exists("/data/data/com.termux"):
+        if not shutil.which("uv"):
+            click.echo(Fore.YELLOW + "   [!] UV não detectado. No Termux: 'pkg install uv' para máxima performance.")
+
+def _repair_dependencies(target_path, logger):
+    """Usa o UV para sincronizar dependências de forma ultra-rápida."""
+    req_file = os.path.join(target_path, "requirements.txt")
+    if not os.path.exists(req_file):
+        return
+
+    installer = get_best_installer()
+    click.echo(Fore.CYAN + f"   > Sincronizando dependências via {installer.upper()}...")
+    
+    venv_py = _get_venv_python_executable(target_path)
+    res = run_install(["-r", req_file], venv_python=venv_py)
+    
+    if isinstance(res, Exception):
+        logger.add_finding("ERROR", f"Falha na instalação: {res}", category="ENVIRONMENT")
+    else:
+        click.echo(Fore.GREEN + f"   [OK] Ambiente curado via {installer.upper()}.")
+
 @click.command('doctor')
 @click.pass_context
 @click.argument('path', type=click.Path(exists=True), default='.')
 def doctor(ctx, path):
     """Executa o diagnóstico completo de saúde do projeto."""
-    with ExecutionLogger('doctor', path, ctx.params) as logger:
-        click.echo(Fore.CYAN + Style.BRIGHT + f"--- [DOCTOR] Iniciando Fênix em: {os.path.abspath(path)} ---")
+    abs_path = os.path.abspath(path)
+    with ExecutionLogger('doctor', abs_path, ctx.params) as logger:
+        click.echo(Fore.BLUE + Style.BRIGHT + f"--- [DOCTOR] Analisando saúde de: {path} ---")
         
         # 1. Verificação de Venv
+        _ensure_uv_on_termux()
         if not _check_and_create_venv(path, logger):
             click.echo(Fore.RED + "   Abordando: Ambiente virtual inválido.")
             return
@@ -187,5 +213,6 @@ def doctor(ctx, path):
         # 3. Lógica de Reparo
         _verify_gitignore_logic(path, logger)
         _verify_and_guide_path(logger)
+        _repair_dependencies(abs_path, logger)
         
         click.echo(Fore.GREEN + Style.BRIGHT + "\n[FIM] Saúde do projeto verificada.")

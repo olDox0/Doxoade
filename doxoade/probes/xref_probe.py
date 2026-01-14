@@ -4,16 +4,23 @@ import sys
 import os
 import json
 
+def canonical(p):
+    return os.path.abspath(p).replace('\\', '/').lower()
+    
 class ProjectIndexer(ast.NodeVisitor):
     """
     Passo 1: Cria um índice de definições (Funções, Classes e Variáveis Globais).
     """
-    def __init__(self):
-        self.index = {}
+    def __init__(self, index, project_root):
+        self.index = index
+        # Normaliza o root para comparação de string
+        self.project_root = os.path.abspath(project_root).replace('\\', '/')
         self.current_file = None
+        self.findings = []
+        self.imports_map = {}
 
     def index_file(self, file_path):
-        self.current_file = os.path.abspath(file_path)
+        self.current_file = canonical(file_path) # <--- SEMPRE CANÔNICO
         self.index[self.current_file] = {'defs': {}}
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -66,13 +73,13 @@ class ProjectIndexer(ast.NodeVisitor):
 class IntegrityChecker(ast.NodeVisitor):
     def __init__(self, index, project_root):
         self.index = index
-        self.project_root = os.path.abspath(project_root)
+        self.project_root = canonical(project_root)
         self.current_file = None
         self.findings = []
         self.imports_map = {} 
 
     def check_file(self, file_path):
-        self.current_file = os.path.abspath(file_path)
+        self.current_file = canonical(file_path)
         self.imports_map = {} 
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -83,43 +90,65 @@ class IntegrityChecker(ast.NodeVisitor):
             pass
 
     def _resolve_module_path(self, module_name, level=0):
-        if not module_name and level == 0: return None
-        start_dir = self.project_root
+        """
+        Resolve o caminho físico de um módulo com precisão cirúrgica.
+        Trata: 'import os', 'from modulo import x' e 'from .importado import y'.
+        """
+        # 1. Determina o diretório de partida (Base para imports relativos)
+        current_dir = os.path.dirname(self.current_file)
+        
+        # 2. Caso de Import Relativo (from . import x)
         if level > 0:
-            start_dir = os.path.dirname(self.current_file)
-            
+            # Sobe 'level - 1' níveis a partir do diretório atual
+            for _ in range(level - 1):
+                current_dir = os.path.dirname(current_dir)
+            start_dir = current_dir
+        else:
+            # Import Absoluto: Começa da raiz do projeto
+            start_dir = self.project_root
+
+        # 3. Constrói o caminho provável baseado nos pontos (modulo.submodulo)
         parts = module_name.split('.') if module_name else []
         
+        # Candidato A: arquivo.py
         candidate = os.path.join(start_dir, *parts) + ".py"
-        if os.path.abspath(candidate) in self.index: 
-            return os.path.abspath(candidate)
-        
+        can_path = canonical(candidate)
+        if can_path in self.index:
+            return can_path
+            
+        # Candidato B: modulo/__init__.py (Pacote)
         candidate_pkg = os.path.join(start_dir, *parts, "__init__.py")
-        if os.path.abspath(candidate_pkg) in self.index:
-            return os.path.abspath(candidate_pkg)
+        can_pkg = canonical(candidate_pkg)
+        if can_pkg in self.index:
+            return can_pkg
 
+        # Candidato C: Tenta a partir da raiz como fallback para imports ambíguos
         candidate_root = os.path.join(self.project_root, *parts) + ".py"
-        if os.path.abspath(candidate_root) in self.index:
-            return os.path.abspath(candidate_root)
+        can_root = canonical(candidate_root)
+        if can_root in self.index:
+            return can_root
             
         return None
 
     def visit_ImportFrom(self, node):
-        target_file = self._resolve_module_path(node.module, node.level)
-        if not target_file: return
+        # Normaliza o modulo para busca (trata imports relativos simplificados)
+        module_name = node.module if node.module else ""
+        target_file = self._resolve_module_path(module_name, node.level)
+        
+        # DEBUG INTERNO (Se necessário)
+        # print(f"DEBUG: Tentando resolver {module_name} -> {target_file}", file=sys.stderr)
+        
+        if not target_file or target_file not in self.index:
+            return
 
         target_defs = self.index[target_file]['defs']
-
         for alias in node.names:
             if alias.name == '*': continue
-            
             if alias.name not in target_defs:
                 self.findings.append({
-                    'severity': 'ERROR',
-                    'category': 'BROKEN-LINK',
-                    'message': f"Import quebrado: '{alias.name}' não foi encontrado em '{node.module}'.",
-                    'line': node.lineno,
-                    'file': self.current_file
+                    'severity': 'ERROR', 'category': 'BROKEN-LINK',
+                    'message': f"Import quebrado: '{alias.name}' não existe em '{module_name}'.",
+                    'line': node.lineno, 'file': self.current_file
                 })
             else:
                 local_name = alias.asname or alias.name

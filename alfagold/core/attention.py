@@ -1,76 +1,57 @@
 # alfagold/core/attention.py
 import numpy as np
 
-# --- Tabelas Globais ---
 class AttentionPrecompute:
-    """Pré-calcula constantes e tabelas para acelerar a atenção."""
     def __init__(self, max_seq=4096, d_k=64, dtype=np.float32):
         self.scale = 1.0 / np.sqrt(d_k).astype(dtype)
-        # Máscara causal (triangular superior invertida)
         self.causal_mask = np.triu(np.ones((max_seq, max_seq)), k=1) * -1e9
 
-# Instância global
 PRECOMP = AttentionPrecompute()
 
-# --- Implementações do Mecanismo de Atenção ---
-
-def scaled_dot_product_attention(Q, K, V, mask=None):
+def multi_head_attention(Q, K, V, n_heads, mask_type=None):
     """
-    Implementação base: Attention(Q, K, V) = softmax(QK^T / sqrt(dk)) V
+    Mecanismo de Atenção Multi-Head (Hydra).
     """
-    # Matmul: (..., Seq_Q, D) x (..., D, Seq_K) -> (..., Seq_Q, Seq_K)
-    # NumPy usa swapaxes para transpor as duas últimas dimensões
-    scores = np.matmul(Q, K.swapaxes(-2, -1)) * PRECOMP.scale
+    # 1. Normalização de Input (Garante 3D: Batch, Seq, Dim)
+    is_2d = Q.ndim == 2
+    if is_2d:
+        Q = Q[np.newaxis, ...] # (1, Seq, Dim)
+        K = K[np.newaxis, ...]
+        V = V[np.newaxis, ...]
     
-    if mask is not None:
-        # Aplica a máscara apenas na região relevante
-        seq_q = scores.shape[-2]
-        seq_k = scores.shape[-1]
-        scores += mask[:seq_q, :seq_k]
+    batch_size, seq_len, d_model = Q.shape
+    d_head = d_model // n_heads
     
-    # Softmax estável numericamente
-    exp_scores = np.exp(scores - np.max(scores, axis=-1, keepdims=True))
-    attention_weights = exp_scores / np.sum(exp_scores, axis=-1, keepdims=True)
+    # 2. Split Heads
+    # (Batch, Seq, Heads, D_head) -> (Batch, Heads, Seq, D_head)
+    Q_s = Q.reshape(batch_size, seq_len, n_heads, d_head).swapaxes(1, 2)
+    K_s = K.reshape(batch_size, seq_len, n_heads, d_head).swapaxes(1, 2)
+    V_s = V.reshape(batch_size, seq_len, n_heads, d_head).swapaxes(1, 2)
     
-    output = np.matmul(attention_weights, V)
-    return output, attention_weights
-
-def flash_attention_numpy(Q, K, V, block_size=128):
-    """Aproximação FlashAttention para economizar memória em sequências longas."""
-    seq_len = Q.shape[-2]
-    out = np.zeros_like(Q)
+    # 3. Scaled Dot-Product
+    # scale ajustado para d_head
+    scale = 1.0 / np.sqrt(d_head)
+    scores = np.matmul(Q_s, K_s.swapaxes(-1, -2)) * scale
     
-    # Loop em blocos de K/V (colunas da matriz de atenção)
-    for i in range(0, seq_len, block_size):
-        # Fatia (Batch, i:i+blk, D)
-        K_block = K[..., i:i+block_size, :]
-        V_block = V[..., i:i+block_size, :]
+    if mask_type == 'causal':
+        mask = PRECOMP.causal_mask[:seq_len, :seq_len]
+        scores += mask
+    
+    # 4. Softmax
+    scores_shifted = scores - np.max(scores, axis=-1, keepdims=True)
+    exp_scores = np.exp(scores_shifted)
+    weights = exp_scores / np.sum(exp_scores, axis=-1, keepdims=True)
+    
+    # 5. Output Ponderado
+    attn_out_s = np.matmul(weights, V_s)
+    
+    # 6. Merge Heads
+    # (Batch, Heads, Seq, D_head) -> (Batch, Seq, Heads, D_head) -> (Batch, Seq, D_model)
+    out = attn_out_s.swapaxes(1, 2).reshape(batch_size, seq_len, d_model)
+    
+    if is_2d:
+        return out[0], weights[0]
         
-        # Loop em blocos de Q (linhas da matriz de atenção)
-        for j in range(0, seq_len, block_size):
-            Q_block = Q[..., j:j+block_size, :]
-            
-            # Scores locais
-            S = np.matmul(Q_block, K_block.swapaxes(-2, -1)) * PRECOMP.scale
-            
-            # Softmax estável por bloco
-            P = np.exp(S - np.max(S, axis=-1, keepdims=True))
-            denominador = np.sum(P, axis=-1, keepdims=True) + 1e-9
-            P /= denominador
-            
-            # Acumula na saída
-            out[..., j:j+block_size, :] += np.matmul(P, V_block)
-            
-    fator_norm = seq_len / block_size
-    return out / fator_norm, None
+    return out, weights
 
-def execute_attention(Q, K, V, mask_type=None):
-    """Função Mestra de Atenção."""
-    seq_len = Q.shape[-2]
-    mask = PRECOMP.causal_mask if mask_type == 'causal' else None
-
-    # Se a sequência é gigante, use FlashAttention
-    if seq_len > 2048:
-        return flash_attention_numpy(Q, K, V)
-    else:
-        return scaled_dot_product_attention(Q, K, V, mask)
+execute_attention = multi_head_attention

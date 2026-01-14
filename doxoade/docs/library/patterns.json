@@ -60,5 +60,20 @@
     "context": "Gerenciando diferentes formatos de saída de sub-processos.",
     "content": "Implementado o padrão 'Format-Aware Dispatch'. O orquestrador detecta o tipo de sonda (Texto vs JSON) e aplica o parser correspondente. Sondas legadas (Pyflakes) são processadas via Regex, enquanto sondas modernas (Hunter/Style) são decodificadas como objetos JSON estruturados.",
     "linked_incident": "regression_check_v38.2"
+  },
+  "lazy_group_dispatcher": {
+    "title": "Padrão Despachante Lazy (Lazy Group)",
+    "context": "Startup do CLI com 50+ comandos.",
+    "content": "Substitui o registro imediato de comandos por um mapeamento de strings. O módulo só é carregado via importlib no momento do 'get_command'."
+  },
+  "background_persistence_worker": {
+    "title": "Trabalhador de Persistência (Async Buffer)",
+    "context": "Latência de escrita em banco de dados SQLite.",
+    "content": "Isola operações de I/O em uma thread separada usando uma fila thread-safe. Remove o bloqueio da thread principal de execução."
+  },
+  "semantic_diff_audit": {
+    "title": "Auditoria de Diff Semântico",
+    "context": "Revisão pré-commit em repositórios massivos.",
+    "content": "Parser de diff otimizado que extrai assinaturas de funções e comentários, ignorando metadados de baixo nível do Git para foco em engenharia."
   }
 }

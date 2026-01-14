@@ -9,7 +9,7 @@ import click
 from pathlib import Path
 from datetime import datetime
 from colorama import Fore, Style
-from ..shared_tools import _print_finding_details, _get_code_snippet
+from ..shared_tools import _print_finding_details, _get_code_snippet, ExecutionLogger, _run_git_command # Adicione estes imports
 from ..database import get_db_connection
 
 #from ..shared_tools import ExecutionLogger
@@ -355,3 +355,69 @@ def setup_regression():
     except OSError as e:
         click.echo(Fore.RED + f"\\n[ERRO] Falha ao criar a estrutura de diretórios: {e}")
         sys.exit(1)
+        
+# -----------------------------------------------------------------------------
+# COMANDOS DA CLI (ARQUITETURA FINAL E ROBUSTA)
+# -----------------------------------------------------------------------------
+
+@click.command('setup-health')
+@click.argument('path', type=click.Path(exists=True, file_okay=False, resolve_path=True), default='.')
+@click.pass_context
+def setup_health_cmd(ctx, path): # Renomeei para evitar conflito de nome
+    """Prepara um projeto para ser analisado pelo 'doxoade health'."""
+    
+    click.echo(Fore.CYAN + Style.BRIGHT + f"--- [SETUP-HEALTH] Configurando '{path}' ---")
+    arguments = ctx.params
+    
+    # O ExecutionLogger agora funciona pois importamos acima
+    with ExecutionLogger('setup-health', path, arguments) as logger:
+        # 1. Venv
+        venv_path = os.path.join(path, 'venv')
+        if not os.path.exists(venv_path):
+            click.echo(Fore.YELLOW + "   > Criando ambiente virtual 'venv'...")
+            try:
+                import subprocess
+                subprocess.run([sys.executable, "-m", "venv", venv_path], check=True, capture_output=True)
+                click.echo(Fore.GREEN + "[OK] Venv criado.")
+            except Exception:
+                click.echo(Fore.RED + "[ERRO] Falha ao criar venv."); sys.exit(1)
+        else:
+            click.echo(Fore.GREEN + "[OK] Venv já existe.")
+
+        # 2. Pyproject.toml
+        pyproject_path = os.path.join(path, 'pyproject.toml')
+        if not os.path.exists(pyproject_path):
+            with open(pyproject_path, 'w', encoding='utf-8') as f:
+                f.write("[tool.doxoade]\nignore = ['venv', '.git']\nsource_dir = \".\"\n")
+            click.echo(Fore.GREEN + "[OK] Arquivo de configuração criado.")
+        
+        click.echo(Fore.GREEN + Style.BRIGHT + "\n[PRONTO] Projeto configurado.")
+   
+# -----------------------------------------------------------------------------
+# FUNÇÕES AUXILIARES
+# -----------------------------------------------------------------------------
+
+def _get_github_repo_info():
+    try:
+        url = _run_git_command(['remote', 'get-url', 'origin'], capture_output=True)
+        if not url: return "unknown/unknown"
+        match = re.search(r'github\.com[:/]([\w-]+)/([\w-]+)', url)
+        if match: return f"{match.group(1)}/{match.group(2)}"
+    except: pass
+    return "unknown/unknown"
+
+# -----------------------------------------------------------------------------
+# FUNÇÕES DE APRESENTAÇÃO E DIAGNÓSTICO
+# -----------------------------------------------------------------------------
+
+def _analyze_traceback(stderr_output):
+    diagnostics = {
+        "ModuleNotFoundError": "Erro de importação. Lib não instalada no venv.",
+        "AttributeError": "Erro de atributo. Cheque digitação ou versão da API.",
+        "FileNotFoundError": "Arquivo não encontrado. Verifique caminhos e escapes."
+    }
+    click.echo(Fore.YELLOW + "\n--- [DIAGNÓSTICO] ---")
+    for key, message in diagnostics.items():
+        if key in stderr_output:
+            click.echo(Fore.CYAN + f"[PADRÃO DETECTADO] {message}"); return
+    click.echo(Fore.CYAN + "Analise o traceback acima para detalhes.")

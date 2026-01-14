@@ -35,6 +35,7 @@ from ..dnm import DNM
 from .check_filters import filter_and_inject_findings
 from ..fixer import AutoFixer
 from ..database import get_db_connection
+from ..probes.manager import ProbeManager
 
 __version__ = "38.8 Alfa (Gold-Standard-Fixed)"
 
@@ -97,22 +98,34 @@ def _run_probe(probe_file: str, target_file: Optional[str], python_exe: str,
 
 # --- ANALISADORES (DEFINIÇÕES LOCAIS) ---
 
-def _run_syntax_check(f: str, py_exe: str) -> List[Dict[str, Any]]:
-    """Verifica erros de sintaxe fatais."""
-    res = _run_probe('syntax_probe.py', f, py_exe)
-    if res.returncode != 0:
-        msg = res.stderr.strip()
-        m = re.search(r'(?:line |:)(\d+)(?:[:\n]|$)', msg)
+def _run_probe_via_manager(manager: ProbeManager, probe_name: str, target_file: Optional[str], 
+                          payload: Optional[Dict[str, Any]] = None):
+    """Encapsula a execução via Manager no pipeline do Check."""
+    probe_path = _get_probe_path(probe_name)
+    result = manager.execute(probe_path, target_file, payload)
+    
+    if not result["success"]:
+        # Se falhou, registramos como erro de infraestrutura
+        logging.error(f"Sonda {probe_name} falhou: {result['error']}")
+        return result["stdout"], result["error"], False
+    
+    return result["stdout"], None, True
+
+# 1. Ajuste os Analisadores para usar o Manager
+def _run_syntax_check(f: str, manager: ProbeManager) -> List[Dict[str, Any]]:
+    res = manager.execute(_get_probe_path('syntax_probe.py'), f)
+    if not res["success"]:
+        msg = res["error"]
+        m = re.search(r'(?:line |:)(\d+)', msg)
         line = int(m.group(1)) if m else 1
-        return [{'severity': 'CRITICAL', 'category': 'SYNTAX', 'message': f"Erro: {msg}", 'file': f, 'line': line}]
+        return [{'severity': 'CRITICAL', 'category': 'SYNTAX', 'message': f"Sintaxe Inválida: {msg}", 'file': f, 'line': line}]
     return []
 
-def _run_pyflakes_check(f: str, py_exe: str) -> List[Dict[str, Any]]:
-    """Linter Pyflakes (Parser de Texto)."""
-    res = _run_probe('static_probe.py', f, py_exe)
+def _run_pyflakes_check(f: str, manager: ProbeManager) -> List[Dict[str, Any]]:
+    res = manager.execute(_get_probe_path('static_probe.py'), f)
     findings = []
-    if res.stdout:
-        for line in res.stdout.splitlines():
+    if res["stdout"]:
+        for line in res["stdout"].splitlines():
             match = re.match(r'^(.+):(\d+):(?:\d+):? (.+)$', line)
             if match:
                 _, line_num, msg = match.groups()
@@ -120,20 +133,153 @@ def _run_pyflakes_check(f: str, py_exe: str) -> List[Dict[str, Any]]:
                 findings.append({'severity': 'WARNING', 'category': cat, 'message': msg.strip(), 'file': f, 'line': int(line_num)})
     return findings
 
-def _run_json_probe(probe: str, f: str, py_exe: str) -> List[Dict[str, Any]]:
-    """Executa sondas JSON (Hunter, Style)."""
-    payload = json.dumps({'files': [f], 'comments_only': False}) if "style" in probe else None
-    res = _run_probe(probe, f if not payload else None, py_exe, input_data=payload)
-    if res.stdout.strip():
+def _run_json_probe(probe_name: str, f: str, manager: ProbeManager) -> List[Dict[str, Any]]:
+    # Hunter e Style usam JSON
+    payload = {'files': [f], 'comments_only': False} if "style" in probe_name else None
+    res = manager.execute(_get_probe_path(probe_name), f if not payload else None, payload=payload)
+    if res["stdout"].strip():
         try:
-            data = json.loads(res.stdout)
+            data = json.loads(res["stdout"])
             if isinstance(data, list):
                 for d in data: d['file'] = f
                 return data
             data['file'] = f
             return [data]
-        except json.JSONDecodeError: pass
+        except: pass
     return []
+
+# 2. O CORAÇÃO DO ERRO: Ajuste a definição de process_single_file
+def _process_single_file(item: tuple, manager: ProbeManager, continue_on_error: bool, cache: dict) -> List[Dict[str, Any]]:
+    """Executa a bateria de sondas usando o manager blindado."""
+    fp, rel, mtime, size = item
+    
+    # Executa pipeline
+    findings = _run_syntax_check(fp, manager)
+    if findings and not continue_on_error:
+        return findings
+        
+    findings.extend(_run_pyflakes_check(fp, manager))
+    findings.extend(_run_json_probe('hunter_probe.py', fp, manager))
+    findings.extend(_run_style_check(fp)) # Style check é local/AST, não precisa de manager
+    
+    # Atualiza cache
+    cache[rel] = {'hash': _get_file_hash(fp), 'mtime': mtime, 'size': size, 'findings': findings}
+    return findings
+
+def run_check_logic(path: str, fix: bool, fast: bool, no_cache: bool, 
+                    clones: bool, continue_on_error: bool, exclude_categories: Optional[List[str]] = None,
+                    target_files: Optional[List[str]] = None):
+    """Orquestrador Master com filtragem de diretório."""
+    abs_input_path = os.path.abspath(path)
+    project_root = _find_project_root(abs_input_path)
+    dnm = DNM(project_root)
+    cache = {} if no_cache else _load_cache()
+    python_exe = _get_venv_python_executable() or sys.executable
+    manager = ProbeManager(python_exe, project_root) # Instancia uma vez
+    
+    # Seleção de Alvos
+    if target_files:
+        # Se os arquivos foram passados explicitamente, confiamos no chamador.
+        # Removemos o filtro 'if not dnm.is_ignored' daqui.
+        files = [os.path.abspath(f) for f in target_files]
+    elif os.path.isfile(abs_input_path):
+        files = [abs_input_path]
+    else:
+        # Modo diretório: aqui sim o DNM manda.
+        all_project_files = dnm.scan(extensions=['.py'])
+        files = [f for f in all_project_files if os.path.abspath(f).startswith(abs_input_path)]
+
+    if not files:
+        # Adicione este log para debug interno se necessário
+        # logging.debug("Nenhum arquivo selecionado para análise.")
+        return {'summary': {'errors': 0, 'warnings': 0}, 'findings': []}
+
+
+    raw_findings, files_to_scan = [], []
+
+    for fp in files:
+        rel = os.path.relpath(fp, project_root).replace('\\', '/')
+        try:
+            st = os.stat(fp)
+            # --- BLINDAGEM DE CACHE (Resiliência v69.1) ---
+            if not no_cache and rel in cache:
+                c = cache[rel]
+                
+                # MPoT-7: Validação defensiva de chaves do dicionário externo
+                mtime_cached = c.get('mtime')
+                size_cached = c.get('size')
+                findings_cached = c.get('findings')
+
+                # Só considera "Hit" se todas as métricas existirem e baterem
+                if all(v is not None for v in [mtime_cached, size_cached, findings_cached]):
+                    if abs(mtime_cached - st.st_mtime) < 0.0001 and size_cached == st.st_size:
+                        for f in findings_cached: 
+                            f['file'] = fp
+                        raw_findings.extend(findings_cached)
+                        continue
+            
+            # Se chegou aqui, é um "Cache Miss" ou Cache Inválido
+            files_to_scan.append((fp, rel, st.st_mtime, st.st_size))
+        except OSError: 
+            continue
+
+    # --- FASE 1: ANÁLISE INDIVIDUAL (Já operacional) ---
+    if files_to_scan:
+        with click.progressbar(files_to_scan, label='Analisando') as bar:
+            for item in bar:
+                raw_findings.extend(_process_single_file(item, manager, continue_on_error, cache))
+
+    # --- FASE 2: ANÁLISE ESTRUTURAL (PROBES DE ELITE) ---
+    if not fast:
+        def canonical(p): return os.path.abspath(p).replace('\\', '/').lower()
+        c_files = [canonical(f) for f in files]
+        c_root = canonical(project_root)
+        
+        # Payload unificado para todas as sondas de elite
+        ctx_payload = {"files": c_files, "project_root": c_root}
+        
+        # Lista de sondas para execução em lote
+        structural_probes = [
+            ('clone_probe.py', 'Clones'),
+            ('orphan_probe.py', 'Órfãos'),
+            ('xref_probe.py', 'XREF')
+        ]
+
+        for probe_file, label in structural_probes:
+            # XREF precisa do root no argv[1] por design legado, os outros não.
+            target = c_root if probe_file == 'xref_probe.py' else None
+            
+            res = manager.execute(_get_probe_path(probe_file), target_file=target, payload=ctx_payload)
+            
+            if res["success"] and res["stdout"]:
+                try:
+                    data = json.loads(res["stdout"])
+                    for d in data: 
+                        if 'file' in d: d['file'] = os.path.normpath(d['file'])
+                    raw_findings.extend(data)
+                except Exception as e:
+                    logging.error(f"Erro ao processar {label}: {e}")
+
+    # --- FASE 3: ENRIQUECIMENTO ---
+    # Garante que as descobertas sejam enriquecidas antes de ir para o Logger
+    _enrich_findings_with_solutions(raw_findings, project_root)
+
+    if fix:
+        with ExecutionLogger('autofix', project_root, {}) as f_log:
+            fixer = AutoFixer(f_log)
+            conn = get_db_connection()
+            templates = conn.execute("SELECT * FROM solution_templates WHERE confidence > 0").fetchall()
+            for f in sorted(raw_findings, key=lambda x: x.get('line', 0), reverse=True):
+                match = _match_finding_to_template(f, templates)
+                if match['type']:
+                    fixer.apply_fix(os.path.abspath(f['file']), f['line'], match['type'], match['context'])
+            conn.close()
+            cache = {}
+
+    with ExecutionLogger('check', project_root, {'fix': fix}) as logger:
+        _log_check_results(raw_findings, project_root, exclude_categories, logger)
+        if not no_cache: _save_cache(cache)
+        return logger.results
 
 def _run_style_check(f: str) -> List[Dict[str, Any]]:
     """Calcula complexidade real via Radon e valida MPoT."""
@@ -214,93 +360,6 @@ def _log_check_results(raw_findings: List[Dict[str, Any]], project_root: str,
             suggestion_action=f.get('suggestion_action')
         )
 
-def _process_single_file(item: tuple, python_exe: str, continue_on_error: bool, cache: dict) -> List[Dict[str, Any]]:
-    """Executa a bateria de sondas em um arquivo."""
-    fp, rel, mtime, size = item
-    findings = _run_syntax_check(fp, python_exe)
-    if findings and not continue_on_error: return findings
-    findings.extend(_run_pyflakes_check(fp, python_exe))
-    findings.extend(_run_json_probe('hunter_probe.py', fp, python_exe))
-    findings.extend(_run_style_check(fp))
-    cache[rel] = {'hash': _get_file_hash(fp), 'mtime': mtime, 'size': size, 'findings': findings}
-    return findings
-
-def run_check_logic(path: str, fix: bool, fast: bool, no_cache: bool, 
-                    clones: bool, continue_on_error: bool, exclude_categories: Optional[List[str]] = None,
-                    target_files: Optional[List[str]] = None):
-    """Orquestrador Master com filtragem de diretório."""
-    abs_input_path = os.path.abspath(path)
-    project_root = _find_project_root(abs_input_path)
-    dnm = DNM(project_root)
-    cache = {} if no_cache else _load_cache()
-    
-    # Seleção de Alvos
-    if target_files:
-        files = [os.path.abspath(f) for f in target_files if not dnm.is_ignored(Path(f))]
-    elif os.path.isfile(abs_input_path):
-        files = [abs_input_path]
-    else:
-        # Resolve o bug de diretório: pega da raiz, mas filtra pelo input
-        all_project_files = dnm.scan(extensions=['.py'])
-        files = [f for f in all_project_files if os.path.abspath(f).startswith(abs_input_path)]
-
-    if not files: return {'summary': {'errors': 0, 'warnings': 0}, 'findings': []}
-
-    python_exe = _get_venv_python_executable() or sys.executable
-    raw_findings, files_to_scan = [], []
-
-    for fp in files:
-        rel = os.path.relpath(fp, project_root).replace('\\', '/')
-        try:
-            st = os.stat(fp)
-            # --- BLINDAGEM DE CACHE (Resiliência v69.1) ---
-            if not no_cache and rel in cache:
-                c = cache[rel]
-                
-                # MPoT-7: Validação defensiva de chaves do dicionário externo
-                mtime_cached = c.get('mtime')
-                size_cached = c.get('size')
-                findings_cached = c.get('findings')
-
-                # Só considera "Hit" se todas as métricas existirem e baterem
-                if all(v is not None for v in [mtime_cached, size_cached, findings_cached]):
-                    if abs(mtime_cached - st.st_mtime) < 0.0001 and size_cached == st.st_size:
-                        for f in findings_cached: 
-                            f['file'] = fp
-                        raw_findings.extend(findings_cached)
-                        continue
-            
-            # Se chegou aqui, é um "Cache Miss" ou Cache Inválido
-            files_to_scan.append((fp, rel, st.st_mtime, st.st_size))
-        except OSError: 
-            continue
-
-    if files_to_scan:
-        with click.progressbar(files_to_scan, label='Analisando') as bar:
-            for item in bar:
-                raw_findings.extend(_process_single_file(item, python_exe, continue_on_error, cache))
-
-    if clones or not fast: raw_findings.extend(_run_clone_check(files, python_exe))
-    if not fast: _enrich_with_dependency_analysis(raw_findings, project_root)
-    _enrich_findings_with_solutions(raw_findings, project_root)
-
-    if fix:
-        with ExecutionLogger('autofix', project_root, {}) as f_log:
-            fixer = AutoFixer(f_log)
-            conn = get_db_connection()
-            templates = conn.execute("SELECT * FROM solution_templates WHERE confidence > 0").fetchall()
-            for f in sorted(raw_findings, key=lambda x: x.get('line', 0), reverse=True):
-                match = _match_finding_to_template(f, templates)
-                if match['type']:
-                    fixer.apply_fix(os.path.abspath(f['file']), f['line'], match['type'], match['context'])
-            conn.close()
-            cache = {}
-
-    with ExecutionLogger('check', project_root, {'fix': fix}) as logger:
-        _log_check_results(raw_findings, project_root, exclude_categories, logger)
-        if not no_cache: _save_cache(cache)
-        return logger.results
-
 @click.command('check')
 @click.argument('path', type=click.Path(exists=True), default='.')
 @click.option('--fix', is_flag=True, help="Corrige problemas.")
@@ -326,5 +385,24 @@ def check(path, **kwargs):
     else: _present_results('text', results)
     if results.get('summary', {}).get('critical', 0) > 0: sys.exit(1)
 
+# doxoade/probes/xref_probe.py
+
 if __name__ == "__main__":
-    check()
+    try:
+        if len(sys.argv) < 2:
+            print("[]"); sys.exit(0)
+            
+        project_root = sys.argv[1] # Recebe o target_file do manager
+        raw_input = sys.stdin.read().strip()
+        if not raw_input:
+            print("[]"); sys.exit(0)
+            
+        data = json.loads(raw_input)
+        # Extrai a lista de arquivos do dicionário unificado
+        files = data.get("files", []) if isinstance(data, dict) else data
+    except exception as e:
+        logging.error(f" Ocorrencia no __main__ do check:{e}")
+        logging.error(f"     raw_findings: {raw_findings}")
+        logging.error(f"     project_root: {project_root}")
+        logging.error(f"     data: {data}")
+        logging.error(f"     files: {files}")

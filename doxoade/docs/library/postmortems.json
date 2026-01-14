@@ -162,5 +162,21 @@
     "severity": "HIGH",
     "root_cause": "Tentativa de acessar a variável 'fix_applied' sem inicialização prévia. O erro foi introduzido durante o planejamento da fase de auto-reversão do Protocolo Lázaro.",
     "fix": "Inicialização explícita de todas as flags de estado no topo do comando 'save', seguindo o padrão MPoT-6 (Escopo Limpo)."
+  },
+  "import_time_overhead_v71": {
+    "title": "Sobrecarga de Importação (Efeito Colateral)",
+    "date": "2026-01-02",
+    "severity": "MEDIUM",
+    "symptom": "Geração de tabelas MathLUT durante comandos administrativos (save/check).",
+    "root_cause": "Instanciação de classes pesadas no escopo global de módulos importados pelo Core.",
+    "fix": "Implementação de Lazy Initialization (Singleton Pattern). O custo computacional agora é postergado para o momento da primeira execução real da IA."
+  },
+  "persistence_interface_desync": {
+    "title": "Desincronização da Interface de Persistência",
+    "date": "2026-01-13",
+    "severity": "CRITICAL",
+    "symptom": "Crash imediato no comando 'check' após implementação do Async Worker.",
+    "root_cause": "A refatoração do db_utils removeu acidentalmente a função '_update_open_incidents', quebrando o contrato com o orquestrador do Check.",
+    "fix": "Restauração da função com blindagem MPoT-7 (isinstance check) para suportar resultados do linter em formato de string."
   }
 }

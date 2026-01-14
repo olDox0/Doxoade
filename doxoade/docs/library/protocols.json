@@ -48,5 +48,20 @@
     "title": "Política de Espelhamento de Testes",
     "type": "Mandatory",
     "description": "A estrutura do diretório 'tests/' deve espelhar exatamente a estrutura do pacote 'doxoade/'. Exemplo: O código em 'doxoade/commands/check.py' deve ser testado em 'tests/doxoade/commands/test_check.py'. Arquivos fora dessa estrutura são considerados 'Legacy' ou 'Sandbox' e devem residir em 'tests/old/'."
+  },
+  "pasc": {
+    "title": "PASC (Atualização Segura de Códigos)",
+    "date": "2026-01-09",
+    "content": "Conjunto de 10 leis para integridade de software. Foco em Anti-Regressividade (Regra 2) e Verbosidade Seletiva (Regra 6) para controle de recursos."
+  },
+  "chief_gold_ui": {
+    "title": "Padrão Visual Chief-Gold",
+    "date": "2026-01-13",
+    "content": "Protocolo de simetria industrial para CLIs. Exige alinhamento de colchetes de linha [ 000 ] e padding dinâmico de pontos para caminhos em Azul-Brilhante."
+  },
+  "lazy_dispatch": {
+    "title": "Protocolo de Despacho Lazy",
+    "date": "2026-01-13",
+    "content": "Proíbe a importação de dependências pesadas no escopo global do Core. Garante que o custo de processamento seja proporcional à tarefa executada."
   }
 }

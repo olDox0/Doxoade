@@ -98,17 +98,30 @@ def analyze_style(files, comments_only):
     # Correção lógica:
     return visitor.findings
 
+# doxoade/probes/style_probe.py
+
 if __name__ == "__main__":
-    try:
-        input_data = sys.stdin.read()
-        if input_data:
-            data = json.loads(input_data)
-            files = data.get('files', [])
-            comments_only = data.get('comments_only', False)
-            
-            print(json.dumps(analyze_style(files, comments_only)))
-        else:
-            print("[]")
-    except Exception:
-        # Erro seguro
-        print(json.dumps([]))
+    files = []
+    comments_only = False
+
+    # MODO 1: Argumento CLI (Single File - Prioritário para Diagnóstico)
+    if len(sys.argv) > 1:
+        files = [sys.argv[1]]
+    
+    # MODO 2: STDIN (Batch Mode - Usado pelo Check em larga escala)
+    elif not sys.stdin.isatty():
+        try:
+            input_data = sys.stdin.read().strip()
+            if input_data:
+                data = json.loads(input_data)
+                files = data.get('files', [])
+                comments_only = data.get('comments_only', False)
+        except Exception:
+            pass
+
+    # Execução
+    if files:
+        # Garante que o output seja APENAS o JSON para não sujar o parser do Manager
+        print(json.dumps(analyze_style(files, comments_only)))
+    else:
+        print("[]")

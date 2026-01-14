@@ -73,5 +73,15 @@
     "title": "Profiling de Linha (Hot Lines)",
     "definition": "Técnica de amostragem estatística executada pelo Chronos que identifica quais linhas exatas de código estão consumindo a maior parte do ciclo de CPU. No Doxoade, isso é exibido com o impacto percentual e o trecho do código fonte original.",
     "origin": "MaxTelemetry v2.2 - MPoT-12."
+  },
+  "semantic_diff": {
+    "title": "Semantic Diff (Diff Semântico)",
+    "definition": "Uma visualização de alterações que prioriza o significado lógico (funções, classes, intenção) sobre a simples mudança de caracteres texto.",
+    "origin": "Diagnose v75.0"
+  },
+  "flush_on_exit": {
+    "title": "Esvaziamento na Saída (Flush on Exit)",
+    "definition": "Garantia de que buffers em memória sejam gravados no disco antes do processo ser finalizado pelo Sistema Operacional.",
+    "origin": "db_utils Async Engine"
   }
 }

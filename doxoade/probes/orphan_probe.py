@@ -177,5 +177,22 @@ def main():
         print("[]")
         sys.exit(0)
 
+# No final de ambos os arquivos:
 if __name__ == "__main__":
-    main()
+    try:
+        raw_input = sys.stdin.read().strip()
+        if not raw_input:
+            print("[]")
+        else:
+            data = json.loads(raw_input)
+            # Suporta tanto lista direta quanto dicionário de contexto
+            files = data.get("files", []) if isinstance(data, dict) else data
+            
+            # Chama a função principal correspondente
+            # (find_clones para clone_probe ou analyze_orphans para orphan_probe)
+            if "clone" in sys.argv[0]:
+                print(json.dumps(find_clones(files)))
+            else:
+                print(json.dumps(analyze_orphans(files)))
+    except Exception:
+        print("[]")

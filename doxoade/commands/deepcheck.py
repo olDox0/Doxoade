@@ -182,8 +182,8 @@ def _present_deep_analysis(visitor, name, lineno, complexity):
             args_str = ", ".join(c['args'][:3])
             if len(c['args']) > 3: args_str += "..."
             click.echo(f"  Linha {c['lineno']}: {c['name']}({args_str})")
-        if len(visitor.calls) > 10:
-             click.echo(f"  ... e mais {len(visitor.calls)-10} chamadas.")
+#        if len(visitor.calls) > 10:
+#             click.echo(f"  ... e mais {len(visitor.calls)-10} chamadas.")
 
     # 4. Diagnóstico de Problemas
     issues = _analyze_contract_consistency(visitor)

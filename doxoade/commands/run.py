@@ -8,13 +8,13 @@ import click
 import subprocess
 import sys
 import os
-from pathlib import Path
-from colorama import Fore, Style
+# [DOX-UNUSED] from pathlib import Path
+from colorama import Fore
 from ..shared_tools import (
-    ExecutionLogger, 
-    _get_venv_python_executable, 
-    _mine_traceback, 
-    _analyze_runtime_error
+#      ExecutionLogger, 
+      _get_venv_python_executable, 
+#      _mine_traceback, 
+#      _analyze_runtime_error
 )
 from ..database import get_db_connection
 from datetime import datetime, timezone
@@ -67,17 +67,17 @@ def _get_flow_probe_path():
     root = os.path.dirname(current_dir)
     return os.path.join(root, 'probes', 'flow_runner.py')
 
-def _smart_find_script(name):
-    """Tenta encontrar o script python recursivamente se não estiver no root."""
-    if os.path.exists(name): return name
-    # Procura apenas um nível de profundidade para não demorar
-    for root, dirs, files in os.walk('.'):
-        if name in files:
-            return os.path.join(root, name)
-        # Evita descer em pastas pesadas
-        if 'venv' in dirs: dirs.remove('venv')
-        if '.git' in dirs: dirs.remove('.git')
-    return name
+def _get_probe_path(probe_name: str) -> str:
+    """Localiza o script da sonda de forma robusta."""
+    from importlib import resources
+    try:
+        if hasattr(resources, 'files'):
+            return str(resources.files('doxoade.probes').joinpath(probe_name))
+        with resources.path('doxoade.probes', probe_name) as p:
+            return str(p)
+    except (ImportError, AttributeError, FileNotFoundError):
+        from pkg_resources import resource_filename
+        return resource_filename('doxoade', f'probes/{probe_name}')
 
 def _build_execution_command(script_path, python_exe, flow=False, args=None):
     """
@@ -105,6 +105,17 @@ def _smart_find_script(name):
         if name in files:
             return os.path.join(root, name)
     return name
+
+#    """Tenta encontrar o script python recursivamente se não estiver no root."""
+#    if os.path.exists(name): return name
+#    # Procura apenas um nível de profundidade para não demorar
+#    for root, dirs, files in os.walk('.'):
+#        if name in files:
+#            return os.path.join(root, name)
+#        # Evita descer em pastas pesadas
+#        if 'venv' in dirs: dirs.remove('venv')
+#        if '.git' in dirs: dirs.remove('.git')
+#    return name
 
 @click.command('run', context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.option('--flow', is_flag=True, help="Ativa visualização de execução (Matrix Mode) - Apenas Python.")
@@ -245,4 +256,4 @@ def run(ctx, flow, internal, target):
 @click.pass_context
 def flow_command(ctx, script):
     """Alias para 'doxoade run --flow'."""
-    ctx.invoke(run, script=script, flow=True, internal=False)
+    ctx.invoke(run, target=script, flow=True, internal=False)

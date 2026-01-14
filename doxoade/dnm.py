@@ -39,56 +39,46 @@ class DNM:
 
         return pathspec.PathSpec.from_lines("gitwildmatch", patterns)
 
-    def is_ignored(self, file_path: Path) -> bool:
-        """Verifica se um caminho (arquivo ou pasta) deve ser ignorado."""
+    def is_ignored(self, file_path) -> bool: # Removi a dica de tipo rígida para aceitar str
+        """Verifica se um caminho deve ser ignorado, aceitando Path ou str."""
         try:
-            rel_path = file_path.relative_to(self.root)
-        except ValueError:
-            return True # Fora da raiz
+            # GÊNERO: Conversão defensiva (Aegis Pattern)
+            path_obj = Path(file_path).resolve()
+            rel_path = path_obj.relative_to(self.root)
+        except (ValueError, Exception):
+            # Se não conseguir calcular a relação, ou está fora da raiz ou o path é inválido
+            return True 
 
         # Verifica se alguma parte do caminho é proibida explicitamente
-        # (ex: venv/lib/site-packages -> venv é proibido)
         for part in rel_path.parts:
             if part in self.SYSTEM_IGNORES:
                 return True
 
-        # Usa a spec do gitignore/toml para match complexo
-        # pathspec trabalha melhor com strings estilo unix
+        # Normaliza para comparação com pathspec
         return self.ignore_spec.match_file(str(rel_path).replace(os.sep, "/"))
 
     def scan(self, extensions: Optional[List[str]] = None) -> List[str]:
-        """
-        Retorna lista de caminhos ABSOLUTOS de arquivos válidos.
-        """
         valid_files = []
-        
-        # Normaliza extensões (ex: ['.py'])
         if extensions:
             extensions = {e.lower() if e.startswith('.') else f'.{e.lower()}' for e in extensions}
 
         for root, dirs, files in os.walk(self.root):
             root_path = Path(root)
             
-            # 1. Filtragem de Diretórios (In-place modification)
-            # Remove diretórios ignorados para não descer neles (Performance)
-            # Precisamos iterar sobre uma cópia para modificar a lista original
-            dirs[:] = [
-                d for d in dirs 
-                if not self.is_ignored(root_path / d)
-            ]
+            # Filtro de Pastas (Performance)
+            dirs[:] = [d for d in dirs if not self.is_ignored(root_path / d)]
             
-            # 2. Filtragem de Arquivos
             for file in files:
                 file_path = root_path / file
-                
-                # Filtro de Extensão
                 if extensions and file_path.suffix.lower() not in extensions:
                     continue
                 
-                # Filtro de Ignore
                 if self.is_ignored(file_path):
                     continue
                 
-                valid_files.append(str(file_path))
+                # PADRONIZAÇÃO GOLD: Absoluto + Unix Style
+                # Isso evita que o Windows quebre a comparação de strings nas sondas
+                canonical_path = str(file_path.absolute()).replace('\\', '/')
+                valid_files.append(canonical_path)
 
         return sorted(valid_files)

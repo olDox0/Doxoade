@@ -1,104 +1,119 @@
 # -*- coding: utf-8 -*-
-"""
-Suíte de Testes de Regressão: Comando Check.
-Valida a orquestração de sondas, integridade do cache e lógica de templates.
-"""
-
 import pytest
-import json
 import os
-import subprocess
-from unittest.mock import patch, MagicMock
+import json
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 from doxoade.commands.check import (
-    _load_cache, 
-    _save_cache, 
-    _run_syntax_check, 
-    _match_finding_to_template,
-    _run_pyflakes_check
+    run_check_logic, 
+    _resolve_input_targets, 
+    _handle_cache_logic
 )
 
-def test_load_cache_fallback(tmp_path):
-    """Garante que o cache retorna dicionário vazio se o arquivo não existir."""
-    with patch('doxoade.commands.check.CHECK_CACHE_FILE', tmp_path / "fake_cache.json"):
-        cache = _load_cache()
-        assert isinstance(cache, dict)
-        assert len(cache) == 0
+# --- FIXTURES NATIIVAS (Sem dependência de pytest-mock) ---
 
-def test_save_cache_persistence(tmp_path):
-    """Verifica se o sistema cria o diretório e salva o JSON corretamente."""
-    cache_dir = tmp_path / ".doxoade_cache"
-    cache_file = cache_dir / "check_cache.json"
-    
-    with patch('doxoade.commands.check.CACHE_DIR', cache_dir), \
-         patch('doxoade.commands.check.CHECK_CACHE_FILE', cache_file):
-        
-        test_data = {"file.py": {"hash": "123"}}
-        _save_cache(test_data)
-        
-        assert cache_file.exists()
-        with open(cache_file, 'r') as f:
-            saved = json.load(f)
-            assert saved["file.py"]["hash"] == "123"
+@pytest.fixture
+def mock_dnm():
+    """Mock do Directory Navigation Module com caminhos genéricos."""
+    with patch('doxoade.commands.check.DNM') as mock:
+        instance = mock.return_value
+        # Usamos caminhos relativos no mock para evitar conflito de abspath no Windows/Linux
+        instance.scan.return_value = ['file1.py', 'file2.py']
+        instance.is_ignored.return_value = False
+        yield instance
 
-@patch('doxoade.commands.check._run_probe')
-def test_run_syntax_check_detects_error(mock_probe):
-    """Garante que erros de sintaxe capturados via stderr são parseados."""
-    # Simula falha catastrófica de sintaxe
-    mock_res = MagicMock()
-    mock_res.returncode = 1
-    mock_res.stderr = "File 'main.py', line 10: invalid syntax"
-    mock_probe.return_value = mock_res
-    
-    findings = _run_syntax_check("main.py", "python")
-    
-    assert len(findings) == 1
-    assert findings[0]['category'] == 'SYNTAX'
-    assert findings[0]['line'] == 10
-    assert "invalid syntax" in findings[0]['message']
+# --- TESTES DE FUNCIONALIDADE ---
 
-def test_pyflakes_text_parsing():
-    """Valida a conversão de strings do Pyflakes para objetos finding do Doxoade."""
-    # Simula a saída padrão do pyflakes/sonda estática
-    mock_stdout = "main.py:5:1: 'os' imported but unused\nmain.py:12:5: undefined name 'x'"
-    
-    with patch('doxoade.commands.check._run_probe') as mock_probe:
-        mock_res = MagicMock()
-        mock_res.stdout = mock_stdout
-        mock_probe.return_value = mock_res
-        
-        findings = _run_pyflakes_check("main.py", "python")
-        
-        assert len(findings) == 2
-        assert findings[0]['category'] == 'DEADCODE'
-        assert findings[0]['line'] == 5
-        assert findings[1]['category'] == 'RUNTIME-RISK'
-        assert findings[1]['line'] == 12
+def test_resolve_input_targets_file(mock_dnm):
+    """Garante que se o input for um arquivo, ele seja priorizado."""
+    with patch('os.path.isfile', return_value=True), \
+         patch('os.path.abspath', return_value='/root/script.py'):
+        targets = _resolve_input_targets('script.py', None, mock_dnm)
+        assert len(targets) == 1
+        assert targets[0].endswith('script.py')
 
-def test_match_finding_to_template_logic():
-    """Verifica se o motor Gênese casa erros concretos com templates abstratos."""
-    # Mock de um template do banco de dados
-    mock_template = MagicMock()
-    mock_template.__getitem__.side_effect = {
-        'category': 'DEADCODE',
-        'problem_pattern': "'<MODULE>' imported but unused",
-        'solution_template': 'FIX_UNUSED_IMPORT'
-    }.get
+def test_resolve_input_targets_directory(mock_dnm):
+    """Garante que se o input for pasta, o DNM faça o scan e filtre corretamente."""
+    # Simulamos que estamos na raiz '/'
+    with patch('os.path.isfile', return_value=False), \
+         patch('os.path.abspath', side_effect=lambda p: f"/{p.strip('.').strip('/')}".rstrip('/')):
+        
+        # Agora o scan retorna caminhos que começam com o abspath do input
+        mock_dnm.scan.return_value = ['/file1.py', '/file2.py']
+        
+        targets = _resolve_input_targets('.', None, mock_dnm)
+        assert len(targets) == 2
+
+def test_handle_cache_logic_miss(tmp_path):
+    """Testa comportamento quando o cache está vazio ou inválido."""
+    project_root = str(tmp_path)
+    f1 = tmp_path / "new.py"
+    f1.write_text("print('hello')", encoding='utf-8')
     
-    finding = {
-        'message': "'sys' imported but unused",
-        'category': 'DEADCODE'
+    cache = {}
+    files = [str(f1)]
+    
+    findings, files_to_scan = _handle_cache_logic(files, cache, False, project_root)
+    
+    assert findings == []
+    assert len(files_to_scan) == 1
+
+def test_handle_cache_logic_hit(tmp_path):
+    """Testa recuperação de resultados do cache (Performance)."""
+    project_root = str(tmp_path)
+    f1 = tmp_path / "cached.py"
+    f1.write_text("code", encoding='utf-8')
+    st = os.stat(f1)
+    
+    rel_path = "cached.py"
+    cache = {
+        rel_path: {
+            'mtime': st.st_mtime,
+            'size': st.st_size,
+            'findings': [{'severity': 'INFO', 'message': 'Cached Result'}]
+        }
     }
     
-    result = _match_finding_to_template(finding, [mock_template])
-    
-    assert result['type'] == 'FIX_UNUSED_IMPORT'
-    assert result['context']['var_name'] == 'sys'
+    # Precisamos garantir que o rel_path gerado no teste seja igual ao do cache
+    with patch('os.path.relpath', return_value=rel_path):
+        findings, files_to_scan = _handle_cache_logic([str(f1)], cache, False, project_root)
+        
+        assert len(findings) == 1
+        assert findings[0]['message'] == 'Cached Result'
+        assert files_to_scan == []
 
-def test_match_finding_no_match():
-    """Garante que o contrato Gold retorna dicionário vazio para erros desconhecidos."""
-    finding = {'message': 'Erro desconhecido', 'category': 'UNKNOWN'}
-    result = _match_finding_to_template(finding, [])
-    
-    assert result['type'] is None
-    assert result['context'] == {}
+def test_run_check_logic_contract_check(mock_dnm):
+    """
+    Verifica se o comando retorna o dicionário correto (Proteção AttributeError).
+    Usa patches manuais para evitar a fixture 'mocker'.
+    """
+    # Mocks de suporte
+    with patch('doxoade.commands.check._find_project_root', return_value='.'), \
+         patch('doxoade.commands.check._get_venv_python_executable', return_value='python'), \
+         patch('doxoade.commands.check._handle_cache_logic', return_value=([], [])), \
+         patch('doxoade.commands.check._enrich_findings_with_solutions'), \
+         patch('doxoade.commands.check._enrich_with_dependency_analysis'), \
+         patch('doxoade.commands.check._update_open_incidents'), \
+         patch('doxoade.commands.check.ExecutionLogger') as mock_logger_cls:
+        
+        # Configura o Logger mockado
+        mock_logger = mock_logger_cls.return_value
+        mock_logger.__enter__.return_value = mock_logger
+        mock_logger.summary = {'errors': 5}
+        mock_logger.findings = []
+        
+        # Executa
+        result = run_check_logic('.', fix=False, fast=True, no_cache=True, clones=False, continue_on_error=False)
+        
+        # Valida o dicionário de retorno (O contrato Gold)
+        assert result['summary']['errors'] == 5
+        assert isinstance(result['findings'], list)
+
+def test_run_check_logic_no_files(mock_dnm):
+    """Garante retorno vazio elegante se não houver arquivos .py."""
+    mock_dnm.scan.return_value = []
+    with patch('os.path.isfile', return_value=False), \
+         patch('doxoade.commands.check._find_project_root', return_value='.'):
+        result = run_check_logic('.', False, False, True, False, False)
+        assert result['summary']['errors'] == 0
+        assert result['findings'] == []

@@ -4,7 +4,12 @@ import os
 import importlib
 import platform
 import shutil
-from doxoade.tools.git import _run_git_command
+from ..tools.git import (
+    _run_git_command,
+    _get_detailed_diff_stats,
+    _get_last_commit_info
+)
+#from doxoade.tools.git import (
 
 class SystemInspector:
     
@@ -48,33 +53,34 @@ class SystemInspector:
             "package_manager": pkg_manager
         }
 
-    def check_git_health(self):
-        """Verifica se o repositório git está saudável."""
+    def check_git_health(self, detailed: bool = False, show_code: bool = False, target_path: str = None):
+        """Verifica o repositório com suporte a foco em path específico."""
         try:
+            # Verifica se é repo
             is_repo = _run_git_command(['rev-parse', '--is-inside-work-tree'], capture_output=True, silent_fail=True)
-            if not is_repo or is_repo.strip() != 'true':
-                 return {"is_git_repo": False, "status": "Not a git repository"}
+            if not is_repo or is_repo.strip() != 'true': return {"is_git_repo": False}
 
             branch = _run_git_command(['branch', '--show-current'], capture_output=True, silent_fail=True)
-            status = _run_git_command(['status', '--porcelain'], capture_output=True, silent_fail=True)
-            last_commit = _run_git_command(['log', '-1', '--format=%h - %s'], capture_output=True, silent_fail=True)
             
-            is_dirty = bool(status and status.strip())
+            # Status filtrado por path se fornecido
+            status_cmd = ['status', '--porcelain']
+            if target_path: status_cmd.extend(['--', target_path])
+            status = _run_git_command(status_cmd, capture_output=True, silent_fail=True)
             
-            # [MELHORIA] Retorna a lista de arquivos, não só a contagem
-            pending_files = []
-            if status:
-                for line in status.splitlines():
-                    if line.strip():
-                        pending_files.append(line.strip())
-            
-            return {
+            git_data = {
                 "is_git_repo": True,
-                "branch": branch.strip() if branch else "DETACHED",
-                "dirty_tree": is_dirty,
-                "pending_files": pending_files, # Lista real agora
-                "last_commit": last_commit.strip() if last_commit else "Initial"
+                "branch": branch.strip() if branch else "HEAD",
+                "dirty_tree": bool(status and status.strip()),
+                "pending_count": len(status.splitlines()) if status else 0,
+                "last_commit_info": _get_last_commit_info()
             }
+
+            if detailed and git_data['dirty_tree']:
+                git_data['changes'] = _get_detailed_diff_stats(show_code=show_code, target_path=target_path)
+            else:
+                git_data['pending_files'] = [l.strip() for l in status.splitlines()] if status else []
+
+            return git_data
         except Exception as e:
             return {"is_git_repo": False, "error": str(e)}
 
@@ -100,9 +106,9 @@ class SystemInspector:
                 results[mod] = f"CRASH ({e})"
         return results
 
-    def run_full_diagnosis(self):
+    def run_full_diagnosis(self, detailed: bool = False, show_code: bool = False, target_path: str = None):
         return {
             "environment": self.check_environment(),
-            "git": self.check_git_health(),
+            "git": self.check_git_health(detailed=detailed, show_code=show_code, target_path=target_path),
             "integrity": self.verify_core_modules()
         }
