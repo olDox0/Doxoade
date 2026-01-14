@@ -33,12 +33,22 @@ def print_error(message: str):
     sys.exit(Fore.RED + f"[ERRO] {message}")
 
 def check_termux_environment() -> bool:
-    """Detecta ambiente Termux e sugere dependências para ARM/RISC."""
+    """Detecta ambiente Termux e valida ferramentas de build para ARM."""
     is_termux = "com.termux" in sys.executable or os.path.exists("/data/data/com.termux")
     if is_termux:
         print_header("Ambiente Termux (Android/ARM) Detectado")
-        print("   > Instalando dependências de sistema recomendadas...")
-        print(Fore.YELLOW + "     pkg install python-numpy ndk-sysroot clang")
+        
+        # Lista de binários vitais para evitar o erro que você teve
+        required_tools = ["clang", "cmake", "ninja"]
+        missing = [tool for tool in required_tools if not shutil.which(tool)]
+        
+        if missing:
+            print(Fore.RED + f"[CRÍTICO] Ferramentas de build ausentes: {', '.join(missing)}")
+            print(Fore.YELLOW + "Para corrigir, execute:")
+            print(Fore.CYAN + f"    pkg install {' '.join(missing)} ndk-sysroot python-numpy")
+            print_error("Instalação abortada para prevenir falha de compilação em ARM.")
+            
+        print_success("Ferramentas de build nativas detectadas.")
     return is_termux
 
 def run_pip_install() -> bool:
