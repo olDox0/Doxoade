@@ -163,3 +163,29 @@ def _get_last_commit_info():
         "date": parts[2],
         "subject": parts[3]
     }
+    
+def _get_file_history_metadata(path: str, limit: int = 10):
+    """
+    Recupera metadados dos últimos commits que afetaram o arquivo (PASC-1.1).
+    """
+    # Formato: hash|data|autor|mensagem
+    fmt = "%h|%as|%an|%s"
+    cmd = ['log', f'-{limit}', f'--format={fmt}', '--', path]
+    raw = _run_git_command(cmd, capture_output=True, silent_fail=True)
+    
+    history = []
+    if raw:
+        for line in raw.splitlines():
+            parts = line.split('|')
+            if len(parts) >= 4:
+                history.append({
+                    'hash': parts[0],
+                    'date': parts[1],
+                    'author': parts[2],
+                    'subject': parts[3]
+                })
+    return history
+
+def _get_historical_content(path: str, commit_hash: str) -> str:
+    """Recupera o conteúdo de um arquivo em um ponto específico do tempo."""
+    return _run_git_command(['show', f'{commit_hash}:{path}'], capture_output=True, silent_fail=True) or ""

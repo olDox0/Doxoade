@@ -1,8 +1,14 @@
-# install.py (Versão Final e Limpa)
+# -*- coding: utf-8 -*-
+"""
+Doxoade Universal Installer - Chief Gold Edition.
+Projetado para instalação segura e resiliente em Windows, Linux e Android (Termux).
+Conformidade: MPoT-7, PASC-6.3, Aegis-Protocol.
+"""
+
 import sys
 import os
-import subprocess
-#import platform
+import shutil
+from subprocess import run, CalledProcessError  # nosec
 from colorama import init, Fore, Style
 
 # Inicializa o colorama
@@ -10,57 +16,79 @@ init(autoreset=True)
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
-def print_header(message): print(Style.BRIGHT + Fore.CYAN + f"\n--- {message} ---")
-def print_success(message): print(Fore.GREEN + f"[OK] {message}")
-def print_warning(message): print(Fore.YELLOW + f"[AVISO] {message}")
-def print_error(message): sys.exit(Fore.RED + f"[ERRO] {message}")
+def print_header(message: str):
+    """Exibe cabeçalhos destacados no terminal (MPoT-4)."""
+    print(Style.BRIGHT + Fore.CYAN + f"\n--- {message} ---")
 
-def run_pip_install():
-    """Executa 'pip install -e .' de forma interativa."""
+def print_success(message: str):
+    """Exibe mensagens de sucesso confirmadas (MPoT-4)."""
+    print(Fore.GREEN + f"[OK] {message}")
+
+def print_warning(message: str):
+    """Exibe avisos que requerem atenção do usuário (MPoT-4)."""
+    print(Fore.YELLOW + f"[AVISO] {message}")
+
+def print_error(message: str):
+    """Finaliza a execução em caso de falha crítica (MPoT-15)."""
+    sys.exit(Fore.RED + f"[ERRO] {message}")
+
+def check_termux_environment() -> bool:
+    """Detecta ambiente Termux e sugere dependências para ARM/RISC."""
+    is_termux = "com.termux" in sys.executable or os.path.exists("/data/data/com.termux")
+    if is_termux:
+        print_header("Ambiente Termux (Android/ARM) Detectado")
+        print("   > Instalando dependências de sistema recomendadas...")
+        print(Fore.YELLOW + "     pkg install python-numpy ndk-sysroot clang")
+    return is_termux
+
+def run_pip_install() -> bool:
+    """Executa a instalação em modo editável (Verbose Lookup)."""
     try:
-        # Usa o mesmo Python que está executando o script de instalação
-        subprocess.run(
+        # PASC-6.2: Chamada direta da função 'run' importada explicitamente
+        run(
             [sys.executable, "-m", "pip", "install", "-e", PROJECT_ROOT],
-            check=True
+            check=True,
+            shell=False  # nosec
         )
         return True
-    except (subprocess.CalledProcessError, KeyboardInterrupt):
+    except (CalledProcessError, KeyboardInterrupt):
         return False
 
 def main():
-    print_header("Instalador Doxoade para Windows")
+    """Orquestrador do bootstrapping (MPoT-17)."""
+    config_exists = os.path.exists(os.path.join(PROJECT_ROOT, "pyproject.toml"))
+    if not config_exists:
+        raise RuntimeError("Integridade Falhou: pyproject.toml não encontrado na raiz.")
 
-    # Passo 1: Instalação via pip
+    check_termux_environment()
+    
+    label = "Universal" if not os.name == 'nt' else "Windows"
+    print_header(f"Instalador Doxoade {label} (Chief-Gold)")
+
     if not run_pip_install():
-        print_error("A instalação via pip falhou. Corrija os erros acima e tente novamente.")
+        print_error("A instalação falhou. Verifique logs do pip.")
     
-    print_success("Doxoade instalado com sucesso em modo editável.")
+    print_success("Doxoade instalado em modo editável.")
 
-    # Passo 2: Verificação e guia do PATH
-    print_header("Verificando Acesso Universal (PATH)")
+    print_header("Verificando Rastreabilidade (PATH)")
     
-    # O caminho correto que DEVE estar no PATH
-    scripts_path = os.path.join(PROJECT_ROOT, 'venv', 'Scripts')
-    doxoade_exe_path = os.path.join(scripts_path, 'doxoade.exe')
+    scripts_dir = "Scripts" if os.name == 'nt' else "bin"
+    bin_name = "doxoade.exe" if os.name == 'nt' else "doxoade"
+    
+    scripts_path = os.path.join(PROJECT_ROOT, 'venv', scripts_dir)
+    target_exe = os.path.join(scripts_path, bin_name)
 
-    try:
-        result = subprocess.run(['where', 'doxoade'], check=True, capture_output=True, text=True)
-        found_paths = result.stdout.strip().splitlines()
-        
-        if any(os.path.normcase(p) == os.path.normcase(doxoade_exe_path) for p in found_paths):
-            print_success(f"O comando 'doxoade' está corretamente configurado no seu PATH:\n    {doxoade_exe_path}")
-            if len(found_paths) > 1:
-                print_warning("Múltiplas versões do 'doxoade' foram encontradas. Isso pode causar conflitos.")
-                print("Certifique-se de que o caminho correto tenha prioridade no seu PATH.")
+    found_path = shutil.which("doxoade")
+
+    if found_path:
+        if os.path.normcase(found_path) == os.path.normcase(target_exe):
+            print_success(f"Binário detectado e verificado:\n    {found_path}")
         else:
-            print_warning(f"Um 'doxoade' foi encontrado, mas não é o da instalação atual: {found_paths[0]}")
-            print_warning(f"Por favor, ajuste seu PATH para priorizar: {scripts_path}")
-
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        print_warning("O comando 'doxoade' não foi encontrado no seu PATH.")
-        print("   > Para concluir, adicione o seguinte diretório ao seu PATH do sistema:")
-        print(Fore.YELLOW + f"     {scripts_path}")
-        print("   > Depois, reinicie completamente seu terminal.")
+            print_warning(f"Conflito detectado: {found_path}")
+            print(f"   > Priorize a nova instalação no PATH: {scripts_path}")
+    else:
+        print_warning("Binário não mapeado no PATH global.")
+        print(f"   > Adicione manualmente: {scripts_path}")
 
     print(Style.BRIGHT + Fore.CYAN + "\n--- Instalação Concluída! ---")
 

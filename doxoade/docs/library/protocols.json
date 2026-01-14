@@ -63,5 +63,30 @@
     "title": "Protocolo de Despacho Lazy",
     "date": "2026-01-13",
     "content": "Proíbe a importação de dependências pesadas no escopo global do Core. Garante que o custo de processamento seja proporcional à tarefa executada."
+  },
+  "pasc_1_1": {
+    "title": "PASC-1.1 (Resgate Temporal)",
+    "date": "2026-01-14",
+    "content": "Protocolo de proteção contra regressões funcionais. Exige a verificação de assinaturas históricas via 'diff -l' após grandes refatorações para garantir que parâmetros críticos e funcionalidades secundárias não foram descartados acidentalmente."
+  },
+  "semantic_contract_integrity": {
+    "title": "Integridade de Contrato Semântico",
+    "date": "2026-01-14",
+    "content": "Diretriz que prioriza a manutenção da assinatura das funções (API interna). Se um argumento for removido, ele deve ser reciclado ou documentado conforme PASC-9."
+  },
+  "pasc": {
+    "title": "PASC (Políticas de Atualização Segura de Códigos)",
+    "date": "2026-01-14",
+    "content": "Conjunto de 10 leis para evolução de software. Destaque para a Lei 1.1 (Resgate Temporal), que exige auditoria de assinaturas históricas para evitar a poda acidental de funcionalidades durante refatorações."
+  },
+  "pasc_6": {
+    "title": "PASC-6 (Verbosidade Seletiva)",
+    "date": "2026-01-14",
+    "content": "6.1: Importações explícitas para controle de RAM. 6.2: Funcionalidades externas verbosas para auditoria de fluxo. 6.3: Obrigatoriedade de UTF-8 nativo."
+  },
+  "semantic_archival": {
+    "title": "Arquivologia Semântica (Legacy Audit)",
+    "date": "2026-01-14",
+    "content": "Uso de AST sobre o histórico do Git para validar a evolução de contratos (assinaturas de funções) em vez de apenas texto bruto."
   }
 }

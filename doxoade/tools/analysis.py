@@ -195,3 +195,40 @@ def _get_all_findings(results_report):
             finding['path_for_diff'] = file_path 
             all_findings.append(finding)
     return all_findings
+
+def _extract_function_signatures(content: str) -> dict:
+    """
+    Extrai o mapa semântico de funções e seus argumentos (MPoT-7).
+    Retorna: { 'nome_funcao': ['arg1', 'arg2'] }
+    """
+    if not content:
+        return {}
+    try:
+        tree = ast.parse(content)
+        functions = {}
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                # Captura apenas argumentos posicionais e nomeados padrão para simplicidade
+                args = [arg.arg for arg in node.args.args]
+                functions[node.name] = {
+                    'args': args,
+                    'is_async': isinstance(node, ast.AsyncFunctionDef)
+                }
+        return functions
+    except Exception:
+        return {}
+        
+def _get_function_source(content: str, func_name: str) -> str:
+    """Extrai o código fonte de uma função específica via AST (PASC-1.1)."""
+    try:
+        tree = ast.parse(content)
+        lines = content.splitlines()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == func_name:
+                # O AST nos dá a linha de início e fim no Python 3.8+
+                start = node.lineno - 1
+                end = getattr(node, 'end_lineno', node.lineno + 5) 
+                return "\n".join(lines[start:end])
+        return ""
+    except Exception:
+        return ""
