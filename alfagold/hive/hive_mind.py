@@ -3,53 +3,82 @@ import numpy as np
 from colorama import Fore
 
 from ..core.state_packet import StatePacket
-from ..core.moe_router import MoERouter
+from ..core.adaptive_router import AdaptiveRouter
 from ..experts.generator_expert import GeneratorExpert
 from ..experts.syntax_expert import SyntaxExpert
 from ..experts.planning_expert import PlanningExpert
 from ..experts.refinement_expert import RefinementExpert
-# [NOVO]
 from ..experts.reward_expert import RewardExpert
 
 class HiveMindMoE:
+    """
+    Cérebro Central (Orquestrador MoE).
+    Coordena: Generator (Wernicke), Syntax (Broca), Planner (Frontal),
+    Router (Tálamo) e Refinement (Cerebelo).
+    """
     def __init__(self):
-        # Experts
         self.generator = GeneratorExpert()
+        
         self.syntax = SyntaxExpert(self.generator.model.tokenizer)
         self.planner = PlanningExpert(
             d_model=self.generator.model.d_model,
             vocab_size=len(self.generator.model.tokenizer.vocab)
         )
         self.cerebellum = RefinementExpert()
-        # [NOVO] O Crítico Interno
         self.rewarder = RewardExpert(self.generator.model.tokenizer)
         
-        self.router = MoERouter(input_dim=self.generator.model.d_model, num_experts=3)
+        self.router = AdaptiveRouter(d_model=self.generator.model.d_model, num_clusters=3)
+        
+        # Cache de IDs
+        def safe_get_id(text):
+            ids = self.generator.model.tokenizer.encode(text)
+            return ids[0] if ids else -1
+
+        self.id_space = safe_get_id(" ")
 
     def generate_step(self, packet: StatePacket, temp=0.7):
-        # ... (Mantém a lógica de geração idêntica à versão anterior) ...
-        # (Copiando a lógica para garantir que o arquivo fique completo)
+        # 1. GERAÇÃO
         packet = self.generator.process(packet)
+        
+        # 2. PLANEJAMENTO
         packet.syntax_state = self.syntax.estado
         packet = self.planner.process(packet)
         
+        # 3. ROTEAMENTO
+        if packet.embedding_vector is not None:
+            self.router.route(packet.embedding_vector, training=False)
+
+        # 4. INIBIÇÃO
         final_logits = packet.logits.copy()
         mask = self.syntax.get_inhibition_mask(final_logits.shape[0])
+        packet.inhibition_mask = mask
         final_logits += mask
         
+        # 5. DECISÃO
         scaled_logits = np.clip(final_logits / temp, -50, 50)
         exp_logits = np.exp(scaled_logits - np.max(scaled_logits))
         probs = exp_logits / np.sum(exp_logits)
         
         next_id = None
+        
+        # Amostragem com Validação
         for _ in range(10):
             cand_id = int(np.random.choice(len(probs), p=probs))
-            token_str = self.generator.decode(cand_id).strip()
-            if not token_str: token_str = " "
-            valido, _ = self.syntax.validar(token_str)
+            
+            # [FIX] Decodifica RAW (sem strip)
+            raw_token = self.generator.decode(cand_id)
+            clean_token = raw_token.strip()
+            
+            # Se for só espaço, considera válido para o Arquiteto (ele ignora)
+            if not clean_token: 
+                next_id = cand_id
+                break
+                
+            valido, _ = self.syntax.validar(clean_token)
             if valido:
                 next_id = cand_id
-                self.syntax.observe(token_str)
+                # Atualiza estado do Arquiteto com token limpo
+                self.syntax.observe(clean_token)
                 break
             else:
                 probs[cand_id] = 0
@@ -57,66 +86,52 @@ class HiveMindMoE:
                 if s > 0: probs /= s
                 else: break
         
+        # Fallback
         if next_id is None:
             sug = self.syntax.sugerir_correcao()
             if sug:
                 sug_ids = self.generator.model.tokenizer.encode(sug)
-                if sug_ids: next_id = sug_ids[0]; self.syntax.observe(sug)
+                if sug_ids: 
+                    next_id = sug_ids[0]
+                    self.syntax.observe(sug)
         
-        if next_id is None: next_id = int(np.argmax(final_logits))
+        # Fallback Final
+        if next_id is None:
+            next_id = int(np.argmax(final_logits))
+            raw_token = self.generator.decode(next_id)
+            self.syntax.observe(raw_token.strip())
             
+        # 6. FEEDBACK
         packet.token_ids.append(next_id)
-        packet.generated_token = self.generator.decode(next_id)
-        return packet, packet.generated_token
-
-    def run_sequence(self, prompt, length=50, attempts=3):
-        """
-        Gera múltiplas tentativas e escolhe a melhor (Metacognição).
-        """
-        best_code = ""
-        best_score = -1.0
         
-        print(f"🧠 [HiveMoE] Metacognição Ativa (Best of {attempts})")
+        # [FIX] Retorna o token bruto (com espaços) para o texto final
+        raw_token = self.generator.decode(next_id)
+        packet.generated_token = raw_token
         
-        for i in range(attempts):
-            # Reinicia estado para nova tentativa
-            packet = StatePacket(input_text=prompt)
-            input_ids = self.generator.model.tokenizer.encode(prompt)
-            packet.token_ids = list(input_ids)
-            
-            # Reset do Arquiteto
-            self.syntax.reset()
-            for tid in input_ids: self.syntax.observe(self.generator.decode(tid))
-            
-            # Geração (com temperatura variada para explorar)
-            # Tentativa 1: Focada (0.1). Tentativa 2/3: Criativa (0.5/0.8)
-            current_temp = 0.1 + (i * 0.3)
-            raw_text = ""
-            
-            # print(f"   🤔 Pensando variação #{i+1} (t={current_temp:.1f})...", end="", flush=True)
-            
-            for _ in range(length):
-                packet, token = self.generate_step(packet, temp=current_temp)
-                if "ENDMARKER" in token: break
-                raw_text += token
-            
-            # Refinamento (Cerebelo)
-            full_candidate = prompt + raw_text
-            refined_candidate = self.cerebellum.process(full_candidate)
-            
-            # Avaliação (Orbitofrontal)
-            score = self.rewarder.evaluate(prompt, refined_candidate)
-            
-            # [FIX] MOSTRAR O PENSAMENTO
-            print(f"   🤔 Tentativa #{i+1}: Score {score:.2f} | Len: {len(refined_candidate)}")
-            # print(f"      Code: {refined_candidate[:30]}...") # Opcional
-            
-            if score > best_score:
-                best_score = score
-                best_code = refined_candidate
-                
-            # Se achou algo muito bom, para cedo
-            if best_score > 0.8: break
+        return packet, raw_token
 
-        print(f"\n🏆 Melhor Resultado (Score: {best_score:.2f}):")
-        return best_code
+    def run_sequence(self, prompt, length=50):
+        packet = StatePacket(input_text=prompt)
+        print(f"🧠 [HiveMoE] Prompt: {prompt}")
+        
+        input_ids = self.generator.model.tokenizer.encode(prompt)
+        packet.token_ids = list(input_ids)
+        
+        self.syntax.reset()
+        for tid in input_ids:
+            t_str = self.generator.decode(tid).strip()
+            if t_str: self.syntax.observe(t_str)
+            
+        full_text = ""
+        
+        for _ in range(length):
+            packet, token = self.generate_step(packet)
+            
+            if "ENDMARKER" in token: 
+                if self.syntax.estado == "CORPO": break
+            
+            print(".", end="", flush=True)
+            full_text += token
+            
+        print("\n✅ Concluído.")
+        return full_text

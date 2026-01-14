@@ -1,4 +1,10 @@
-# doxoade/database.py
+# -*- coding: utf-8 -*-
+"""
+Módulo de Persistência (Sapiens/Chronos) - v71.1.
+Gerencia o ciclo de vida do banco de dados e migrações de esquema.
+ESTRATÉGIA: Migration Dispatcher para conformidade MPoT-4/17.
+"""
+
 import sqlite3
 from pathlib import Path
 import click
@@ -7,242 +13,123 @@ DB_FILE = Path.home() / '.doxoade' / 'doxoade.db'
 DB_VERSION = 18  # Incremento para MaxTelemetry v2
 
 def get_db_connection():
+    """Mantida Original: Abre conexão persistente com Row Factory."""
     DB_FILE.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
+# --- ESPECIALISTAS EM MIGRAÇÃO (MPoT-4: Funções < 60 linhas) ---
+
+def _m_v1_v3_core(cursor):
+    """Esquema Inicial: Events, Findings e Solutions."""
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL, doxoade_version TEXT,
+        command TEXT NOT NULL, project_path TEXT NOT NULL, execution_time_ms REAL, status TEXT
+    );""")
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS findings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, event_id INTEGER NOT NULL, severity TEXT NOT NULL,
+        message TEXT NOT NULL, details TEXT, file TEXT, line INTEGER, finding_hash TEXT,
+        category TEXT, FOREIGN KEY (event_id) REFERENCES events (id)
+    );""")
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS solutions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, finding_hash TEXT NOT NULL UNIQUE,
+        stable_content TEXT NOT NULL, commit_hash TEXT NOT NULL, project_path TEXT NOT NULL,
+        timestamp TEXT NOT NULL, file_path TEXT NOT NULL, message TEXT, error_line INTEGER
+    );""")
+
+def _m_v4_v9_incidents(cursor):
+    """Dívida Técnica: Tabela de Incidentes Abertos."""
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS open_incidents (
+        finding_hash TEXT PRIMARY KEY, file_path TEXT NOT NULL,
+        commit_hash TEXT NOT NULL, timestamp TEXT NOT NULL,
+        project_path TEXT NOT NULL DEFAULT '', message TEXT NOT NULL DEFAULT '',
+        line INTEGER, category TEXT
+    );""")
+
+def _m_v10_v14_genesis(cursor):
+    """Projeto Gênese: IA Simbólica e Templates."""
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS solution_templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        problem_pattern TEXT NOT NULL UNIQUE,
+        solution_template TEXT NOT NULL,
+        category TEXT NOT NULL,
+        confidence INTEGER DEFAULT 1,
+        created_at TEXT NOT NULL,
+        type TEXT DEFAULT 'HARDCODED',
+        diff_pattern TEXT
+    );""")
+
+def _m_v15_chronos(cursor):
+    """Protocolo Chronos: Auditoria de Comandos e Arquivos."""
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS command_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, session_uuid TEXT NOT NULL,
+        timestamp TEXT NOT NULL, command_name TEXT NOT NULL,
+        full_command_line TEXT NOT NULL, working_dir TEXT NOT NULL,
+        exit_code INTEGER, duration_ms REAL, cpu_percent REAL DEFAULT 0,
+        peak_memory_mb REAL DEFAULT 0, io_read_mb REAL DEFAULT 0,
+        io_write_mb REAL DEFAULT 0, profile_data TEXT, system_info TEXT,
+        line_profile_data TEXT
+    );""")
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS file_audit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, command_id INTEGER NOT NULL,
+        file_path TEXT NOT NULL, operation_type TEXT NOT NULL,
+        diff_content TEXT, backup_path TEXT,
+        FOREIGN KEY (command_id) REFERENCES command_history (id)
+    );""")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_cmd_hist_ts ON command_history(timestamp);")
+
+def _apply_incremental_patches(cursor, current_version):
+    """Aplica alterações de colunas em tabelas existentes (Resiliência)."""
+    # Exemplo: v6 (Solutions), v7 (Incidents), etc.
+    alterations = [
+        (2, "ALTER TABLE findings ADD COLUMN category TEXT;"),
+        (6, "ALTER TABLE solutions ADD COLUMN message TEXT NOT NULL DEFAULT '';"),
+        (12, "ALTER TABLE open_incidents ADD COLUMN category TEXT;")
+    ]
+    for ver, sql in alterations:
+        if current_version < ver:
+            try: cursor.execute(sql)
+            except sqlite3.OperationalError: pass
+
+# --- ORQUESTRADOR (COMPLEXIDADE REDUZIDA) ---
+
 def init_db():
+    """Inicia o banco e despacha migrações de forma granular."""
     conn = get_db_connection()
     cursor = conn.cursor()
     
     try:
         cursor.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);")
-        cursor.execute("SELECT COUNT(*) FROM schema_version")
-        if cursor.fetchone()[0] == 0:
-            cursor.execute("INSERT INTO schema_version (version) VALUES (0);")
-
-        cursor.execute("SELECT version FROM schema_version;")
-        current_version = cursor.fetchone()['version']
+        cursor.execute("SELECT version FROM schema_version UNION SELECT 0 ORDER BY version DESC LIMIT 1;")
+        current_version = cursor.fetchone()[0]
 
         if current_version >= DB_VERSION:
             return
 
-        click.echo(f"Atualizando esquema do banco de dados de v{current_version} para v{DB_VERSION}...")
+        click.echo(f"🔧 Atualizando Doxoade-DB de v{current_version} para v{DB_VERSION}...")
 
-        # Migração para a Versão 1
-        if current_version < 1:
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL, doxoade_version TEXT,
-                command TEXT NOT NULL, project_path TEXT NOT NULL, execution_time_ms REAL, status TEXT
-            );
-            """)
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS findings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, event_id INTEGER NOT NULL, severity TEXT NOT NULL,
-                message TEXT NOT NULL, details TEXT, file TEXT, line INTEGER, finding_hash TEXT,
-                FOREIGN KEY (event_id) REFERENCES events (id)
-            );
-            """)
+        # 1. Criação/Migração de Tabelas (Estrutural)
+        if current_version < 3: _m_v1_v3_core(cursor)
+        if current_version < 9: _m_v4_v9_incidents(cursor)
+        if current_version < 14: _m_v10_v14_genesis(cursor)
+        if current_version < 18: _m_v15_chronos(cursor)
 
-        # Migração para a Versão 2
-        if current_version < 2:
-            try:
-                cursor.execute("ALTER TABLE findings ADD COLUMN category TEXT;")
-            except sqlite3.OperationalError as e:
-                if "duplicate column name" not in str(e): raise e
+        # 2. Patches Granulares (Colunas e Índices)
+        _apply_incremental_patches(cursor, current_version)
 
-        # Migração para a Versão 3
-        if current_version < 3:
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS solutions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, finding_hash TEXT NOT NULL UNIQUE,
-                resolution_diff TEXT NOT NULL, commit_hash TEXT NOT NULL, project_path TEXT NOT NULL,
-                timestamp TEXT NOT NULL, file_path TEXT NOT NULL
-            );
-            """)
-        
-        # Migração para a Versão 4
-        if current_version < 4:
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS open_incidents (
-                finding_hash TEXT PRIMARY KEY, file_path TEXT NOT NULL,
-                commit_hash TEXT NOT NULL, timestamp TEXT NOT NULL
-            );
-            """)
-
-        if current_version < 5:
-            try:
-                cursor.execute("ALTER TABLE open_incidents ADD COLUMN project_path TEXT NOT NULL DEFAULT '';")
-            except sqlite3.OperationalError as e:
-                if "duplicate column name" not in str(e): raise e
-
-        if current_version < 6:
-            click.echo("Atualizando esquema v6 (adicionando 'message' a solutions)...")
-            try:
-                cursor.execute("ALTER TABLE solutions ADD COLUMN message TEXT NOT NULL DEFAULT '';")
-            except sqlite3.OperationalError as e:
-                if "duplicate column name" not in str(e): raise e
-        
-        if current_version < 7:
-            click.echo("Atualizando esquema v7 (adicionando 'message' a incidentes)...")
-            try:
-                cursor.execute("ALTER TABLE open_incidents ADD COLUMN message TEXT NOT NULL DEFAULT '';")
-            except sqlite3.OperationalError: pass
-
-        if current_version < 8:
-            click.echo("Atualizando esquema v8 (de diff para stable_content)...")
-            try:
-                cursor.execute("ALTER TABLE solutions RENAME COLUMN resolution_diff TO stable_content;")
-                cursor.execute("ALTER TABLE solutions ADD COLUMN error_line INTEGER;")
-            except sqlite3.OperationalError:
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS solutions (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT, finding_hash TEXT NOT NULL UNIQUE,
-                        stable_content TEXT NOT NULL, commit_hash TEXT NOT NULL, project_path TEXT NOT NULL,
-                        timestamp TEXT NOT NULL, file_path TEXT NOT NULL, message TEXT, error_line INTEGER
-                    );
-                """)
-
-        if current_version < 9:
-            click.echo("Atualizando esquema v9 (adicionando 'line' a incidentes)...")
-            try:
-                cursor.execute("ALTER TABLE open_incidents ADD COLUMN line INTEGER;")
-            except sqlite3.OperationalError: pass
-
-        # Migração para a Versão 10 - CORRIGIDA
-        if current_version < 10:
-            click.echo("Atualizando esquema v10 (Projeto Gênese: Tabela de Templates)...")
-            # Primeiro, verifica se a tabela existe e se tem a estrutura correta
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='solution_templates'")
-            table_exists = cursor.fetchone()
-            
-            if table_exists:
-                # Verifica se a coluna problem_pattern existe
-                cursor.execute("PRAGMA table_info(solution_templates)")
-                columns = {row['name'] for row in cursor.fetchall()}
-                if 'problem_pattern' not in columns:
-                    click.echo("   > Tabela solution_templates existe mas com estrutura incorreta. Recriando...")
-                    cursor.execute("DROP TABLE solution_templates")
-                    table_exists = None
-            
-            if not table_exists:
-                cursor.execute("""
-                    CREATE TABLE solution_templates (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        problem_pattern TEXT NOT NULL UNIQUE,
-                        solution_template TEXT NOT NULL,
-                        category TEXT NOT NULL,
-                        confidence INTEGER DEFAULT 1,
-                        created_at TEXT NOT NULL
-                    );
-                """)
-                click.echo("   > Tabela solution_templates criada com sucesso.")
-
-        if current_version < 12:
-            click.echo("Atualizando esquema v12 (adicionando 'category' a incidentes)...")
-            try:
-                cursor.execute("ALTER TABLE open_incidents ADD COLUMN category TEXT;")
-            except sqlite3.OperationalError: pass
-
-        # Versão 13: Verificação de integridade das tabelas críticas
-        if current_version < 13:
-            click.echo("Atualizando esquema v13 (verificação de integridade)...")
-            
-            # Verifica solution_templates novamente
-            cursor.execute("PRAGMA table_info(solution_templates)")
-            columns = {row['name'] for row in cursor.fetchall()}
-            required_columns = {'id', 'problem_pattern', 'solution_template', 'category', 'confidence', 'created_at'}
-            
-            if not required_columns.issubset(columns):
-                click.echo("   > Recriando tabela solution_templates com estrutura correta...")
-                cursor.execute("DROP TABLE IF EXISTS solution_templates")
-                cursor.execute("""
-                    CREATE TABLE solution_templates (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        problem_pattern TEXT NOT NULL UNIQUE,
-                        solution_template TEXT NOT NULL,
-                        category TEXT NOT NULL,
-                        confidence INTEGER DEFAULT 1,
-                        created_at TEXT NOT NULL
-                    );
-                """)
-
-        if current_version < 14:
-            click.echo("Atualizando esquema v14 (Gênese V8: Suporte a Aprendizado Flexível)...")
-            try:
-                # Adiciona coluna para o tipo de template (HARDCODED vs FLEXIBLE)
-                cursor.execute("ALTER TABLE solution_templates ADD COLUMN type TEXT DEFAULT 'HARDCODED';")
-                # Adiciona coluna para armazenar o padrão de diff (JSON ou texto formatado)
-                cursor.execute("ALTER TABLE solution_templates ADD COLUMN diff_pattern TEXT;")
-            except sqlite3.OperationalError:
-                pass # Colunas já existem
-
-        if current_version < 15:
-            click.echo("Atualizando esquema v15 (Protocolo Chronos: Histórico Robusto)...")
-            
-            # Tabela de Histórico de Comandos (Ações do Usuário)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS command_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_uuid TEXT NOT NULL,
-                    timestamp TEXT NOT NULL,
-                    command_name TEXT NOT NULL,
-                    full_command_line TEXT NOT NULL,
-                    working_dir TEXT NOT NULL,
-                    exit_code INTEGER,
-                    duration_ms REAL
-                );
-            """)
-
-            # Tabela de Auditoria de Arquivos (Mutações)
-            # Registra o "Antes" e "Depois" de qualquer arquivo tocado pelo Doxoade
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS file_audit (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    command_id INTEGER NOT NULL,
-                    file_path TEXT NOT NULL,
-                    operation_type TEXT NOT NULL, -- 'MODIFY', 'CREATE', 'DELETE'
-                    diff_content TEXT, -- O patch do que mudou
-                    backup_path TEXT,
-                    FOREIGN KEY (command_id) REFERENCES command_history (id)
-                );
-            """)
-            
-            # Índices para performance
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_cmd_hist_ts ON command_history(timestamp);")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_audit_path ON file_audit(file_path);")
-
-        # Migração v16 (MaxTelemetry)
-        if current_version < 16:
-            click.echo("Atualizando esquema v16 (MaxTelemetry: CPU, RAM, Profiling)...")
-            try:
-                cursor.execute("ALTER TABLE command_history ADD COLUMN cpu_percent REAL DEFAULT 0;")
-                cursor.execute("ALTER TABLE command_history ADD COLUMN peak_memory_mb REAL DEFAULT 0;")
-                cursor.execute("ALTER TABLE command_history ADD COLUMN io_read_mb REAL DEFAULT 0;")
-                cursor.execute("ALTER TABLE command_history ADD COLUMN io_write_mb REAL DEFAULT 0;")
-                cursor.execute("ALTER TABLE command_history ADD COLUMN profile_data TEXT;") # JSON com top funções
-            except sqlite3.OperationalError:
-                pass # Colunas já existem
-
-        # Migração v17 (Deep Context)
-        if current_version < 17:
-            click.echo("Atualizando esquema v17 (Contexto de Hardware)...")
-            try:
-                cursor.execute("ALTER TABLE command_history ADD COLUMN system_info TEXT;")
-            except sqlite3.OperationalError: pass
-
-        # Migração v18 (Line Profiling) - YMD2025,12,22
-        if current_version < 18:
-            click.echo("Atualizando esquema v18 (Heatmap de Linhas de Código)...")
-            try:
-                cursor.execute("ALTER TABLE command_history ADD COLUMN line_profile_data TEXT;")
-            except sqlite3.OperationalError: pass
-
-        cursor.execute("UPDATE schema_version SET version = ?;", (DB_VERSION,))
+        # 3. Finalização
+        cursor.execute("DELETE FROM schema_version;")
+        cursor.execute("INSERT INTO schema_version (version) VALUES (?);", (DB_VERSION,))
         conn.commit()
-        click.echo(f"Esquema do banco de dados atualizado com sucesso para a v{DB_VERSION}.")
+        click.echo(f"✅ Banco de dados sincronizado (Versão {DB_VERSION}).")
 
     finally:
         conn.close()

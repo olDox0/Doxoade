@@ -116,10 +116,11 @@ def find_clones(files):
     clones = []
 
     for file_path in files:
-        if not os.path.exists(file_path): continue
+        c_path = file_path.replace('\\', '/').lower() # Garante paridade
+        if not os.path.exists(c_path): continue
         
         try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(c_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
             
             tree = ast.parse(content, filename=file_path)
@@ -140,7 +141,7 @@ def find_clones(files):
                         hashes[func_hash] = []
                     
                     hashes[func_hash].append({
-                        'file': file_path,
+                        'file': c_path, # Guarda o canônico
                         'line': node.lineno,
                         'name': node.name
                     })
@@ -175,11 +176,22 @@ def find_clones(files):
 
     return clones
 
+# No final de ambos os arquivos:
 if __name__ == "__main__":
     try:
-        input_data = sys.stdin.read()
-        if input_data:
-            print(json.dumps(find_clones(json.loads(input_data))))
-        else: print("[]")
+        raw_input = sys.stdin.read().strip()
+        if not raw_input:
+            print("[]")
+        else:
+            data = json.loads(raw_input)
+            # Suporta tanto lista direta quanto dicionário de contexto
+            files = data.get("files", []) if isinstance(data, dict) else data
+            
+            # Chama a função principal correspondente
+            # (find_clones para clone_probe ou analyze_orphans para orphan_probe)
+            if "clone" in sys.argv[0]:
+                print(json.dumps(find_clones(files)))
+            else:
+                print(json.dumps(analyze_orphans(files)))
     except Exception:
-        print(json.dumps([]))
+        print("[]")

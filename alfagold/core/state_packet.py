@@ -16,13 +16,18 @@ class StatePacket:
     # 2. Estado Neural (Latente)
     embedding_vector: Optional[np.ndarray] = None # (D_model,)
     
-    # 3. Sinais dos Experts
+    # 3. Estado Simbólico (Broca/Arquiteto) -> [FIX: Reintroduzido]
+    syntax_state: str = "INICIO" # NOME, ARGS, CORPO
+    
+    # 4. Estado Executivo (HRL/Planner) -> [FIX: Reintroduzido]
+    current_goal: str = "GENERIC" 
+    
+    # 5. Sinais dos Experts
     logits: Optional[np.ndarray] = None           # Sinal Excitátorio (Generator)
     inhibition_mask: Optional[np.ndarray] = None  # Sinal Inibitório (Syntax)
     
-    # 4. Saída Final
-    generated_token_id: int = -1
-    generated_token_str: str = ""
+    # 6. Saída Final
+    generated_token: str = ""
     
     def clone(self):
         from copy import deepcopy

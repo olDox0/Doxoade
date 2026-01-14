@@ -3,21 +3,16 @@ import numpy as np
 
 class SyntaxExpert:
     """
-    Syntax Expert v22.1 (History Fix).
-    Restaura o rastreio de histórico para permitir recompensas de combo no treino.
+    Syntax Expert v23.0 (Variable Boost).
+    Incentiva identificadores em ARGS e bloqueia aspas explicitamente.
     """
     def __init__(self, tokenizer):
         self.tokenizer = tokenizer
         self.vocab_size = len(tokenizer.vocab)
-        
         self.memoria_variaveis = set()
         self.pilha_parenteses = 0 
         self.estado = "INICIO" 
-        
-        # [FIX] Histórico restaurado
         self.ultimo_token = ""
-        self.penultimo_token = ""
-        
         self.assinatura_concluida = False
         
         self.ids = self._map_structural_tokens()
@@ -40,9 +35,6 @@ class SyntaxExpert:
     def observar(self, token):
         token = token.strip()
         if not token: return
-        
-        # [FIX] Atualização do histórico
-        self.penultimo_token = self.ultimo_token
         self.ultimo_token = token
         
         if token == "def": 
@@ -72,27 +64,40 @@ class SyntaxExpert:
 
     def get_inhibition_mask(self, current_logits_shape):
         mask = np.zeros(current_logits_shape, dtype=np.float32)
-        i_open, i_colon = self.ids['open'], self.ids['colon']
-        
+        i_open, i_colon, i_close = self.ids['open'], self.ids['colon'], self.ids['close']
         if i_open == -1: return mask
 
-        # --- REGRAS DE BLOQUEIO ---
-        
-        if self.estado == "NOME":
-            # Penaliza tudo que não for alfanumérico
+        # Assinatura
+        if self.estado == "ARGS_PRE":
+            mask[:] = -2000.0; mask[i_open] = 2000.0 
+        elif self.estado == "TRANSICAO":
+            mask[:] = -2000.0; mask[self.ids['colon']] = 2000.0
+        elif self.estado == "NOME":
+            mask[self.ids['colon']] = -1000.0; mask[i_open] = 100.0 
+
+        # ARGS: Bloqueio + Incentivo
+        elif self.estado == "ARGS":
+            proibidos = [".", ":", ";", "{", "}", "[", "]", "=", "<", ">", "'", '"'] + self.keywords
+            
             vocab = self.tokenizer.vocab
             for token_str, token_id in vocab.items():
-                if token_id < len(mask):
-                    clean = token_str.replace(' ', '').replace('Ġ', '').strip()
-                    if not clean.isidentifier():
-                        mask[token_id] = -5000.0
-        
-        elif self.estado == "ARGS_PRE":
-            mask[:] = -2000.0; mask[i_open] = 2000.0 
-            
-        elif self.estado == "TRANSICAO":
-            mask[:] = -2000.0; mask[i_colon] = 2000.0
-            
+                if token_id >= len(mask): continue
+                
+                clean = token_str.replace(' ', '').replace('Ġ', '').strip()
+                
+                # Bloqueio
+                if any(p in clean for p in proibidos):
+                    mask[token_id] = -2000.0
+                
+                # [NOVO] Boost em Variáveis
+                # Se for identificador puro e não keyword, ajuda o modelo a escolher
+                elif clean.isidentifier() and clean not in self.keywords:
+                    mask[token_id] += 5.0
+
+            # Se já temos variáveis, encoraja fechar
+            if self.memoria_variaveis:
+                mask[i_close] += 50.0
+
         return mask
 
     def validar(self, token):
@@ -103,20 +108,24 @@ class SyntaxExpert:
             if self.estado == "NOME":
                 if not token.isidentifier(): return False, "Nome inválido"
                 if token in self.keywords: return False, "Keyword como nome"
-
             if self.estado == "ARGS_PRE" and "(" not in token: return False, "Esperando '('"
             if self.estado == "TRANSICAO" and ":" not in token: return False, "Esperando ':'"
 
         if self.estado == "ARGS":
-            if any(x in token for x in ["open", "with", "print"]): return False, "Comando em argumento"
-            
+            if any(x in token for x in ["open", "with", "print", "'", '"']): return False, "Inválido em args"
+            last_was_var = self.ultimo_token.isidentifier() and self.ultimo_token not in self.keywords
+            if last_was_var and token.isidentifier(): return False, "Variáveis adjacentes"
+
+        if self.estado == "CORPO":
+            if self.ultimo_token.endswith(":") and token in [".", ",", ")", "]", "}"]: return False, "Início inválido"
+            if self.ultimo_token == "with" and "open" not in token: return False, "Esperando 'open'"
+
         return True, "OK"
 
     def sugerir_correcao(self):
         if self.estado == "ARGS_PRE": return "("
         if self.estado == "TRANSICAO": return ":"
-        if self.estado == "CORPO":
-            if self.ultimo_token.endswith(":"): return "with"
-            if self.ultimo_token == "with": return "open"
-            
+        if self.estado == "ARGS" and self.ultimo_token.isidentifier(): return ")" 
+        if self.estado == "CORPO" and self.ultimo_token.endswith(":"): return "with"
+        if self.estado == "CORPO" and self.ultimo_token == "with": return "open"
         return None
