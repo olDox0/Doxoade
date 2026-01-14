@@ -65,14 +65,29 @@ class FlowTracer:
         print(f"{self.C_BORDER}├{'─'*self.W_TIME}┼{'─'*self.W_LOC}┼{'─'*self.W_CODE}┼{'─'*30}{self.C_RESET}")
 
     def _safe_compare_changed(self, old_val, new_val):
-        """Compara valores de forma segura (suporte a NumPy/Pandas)."""
+        """Compara valores de forma segura (Lazy support para NumPy/Pandas)."""
         try:
-            is_diff = (old_val != new_val)
-            if hasattr(is_diff, 'any'): 
-                return is_diff.any()
-            return bool(is_diff)
+            # Se os valores forem simples, a comparação é imediata
+            if old_val == new_val: return False
         except Exception:
-            return True
+            # Se falhar (ex: comparando arrays), entramos na lógica de tipos complexos
+            
+            # PASC-6.1: Importamos apenas o necessário localmente
+            module_name = type(old_val).__module__.split('.')[0]
+            
+            if module_name == 'numpy':
+                import numpy as np
+                return not np.array_equal(old_val, new_val)
+                
+            if module_name == 'pandas':
+                try:
+                    import pandas as pd
+                    if isinstance(old_val, (pd.DataFrame, pd.Series)):
+                        return not old_val.equals(new_val)
+                except ImportError:
+                    return True # Se não tem pandas, assumimos que mudou para ser seguro
+                    
+        return True
 
     def _format_time(self, seconds):
         """Formata o tempo com cor baseada na duração."""
