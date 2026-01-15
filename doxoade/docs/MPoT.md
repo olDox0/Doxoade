@@ -28,8 +28,10 @@
 *   **Porquê:** Melhora a manutenibilidade e facilita testes unitários.
 *   **Controle:** Bloqueio no CI para funções "monstruosas".
 
-### 5. Asserções e Contratos
-*   **Regra:** Média de 2 asserções por função. Devem validar invariantes e pré/pós-condições.
+### 5. Asserções e Contratos (Refinado v75.0)
+*   **5.1.Regra:** Todas as funções internas que recebem dados de IO ou de outros módulos devem validar a integridade da entrada (ex: `if not path: raise ValueError`).
+*   **Porquê:** Evita o efeito cascata de erros (AttributeError/NameError) e facilita o diagnóstico via Protocolo Lázaro.
+*   **5.2.Regra:** Média de 2 asserções por função. Devem validar invariantes e pré/pós-condições.
 *   **Porquê:** Detecta falhas de lógica no momento exato em que ocorrem.
 
 ### 6. Escopo Mínimo e Imutabilidade
