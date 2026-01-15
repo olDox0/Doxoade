@@ -1,16 +1,25 @@
 # doxoade/probes/flow_runner.py
+"""
+Flow Runner é usado pelo doxoade run para analisar ao vivo o processamento do arquivo.
+Assim é obtido informações de performace e uso de variavies e funções.
+Até mesmo em outros arquivos usados, para identificar gargalos com facilidade.
+"""
 import sys
 import os
 import time
-import inspect
-import datetime
-import json
+#import inspect
+#import datetime
+#import json
 
 # Tenta configurar encoding seguro
 if hasattr(sys.stdout, 'reconfigure'):
     try:
         sys.stdout.reconfigure(encoding='utf-8')
-    except Exception: pass
+    except Exception as e:
+        import logging
+        logging.error(f" FUNÇÃO - Exception: {e}")
+
+#__all__ = ['']
 
 class FlowTracer:
     def __init__(self, watch_var=None):
@@ -48,6 +57,7 @@ class FlowTracer:
         self._print_header()
 
     def _print_header(self):
+        """Exibição da interface, com os contornos e bordas e os dados."""
         # Cabeçalho Estilizado
         line = f"{self.C_BORDER}{'─'*120}{self.C_RESET}"
         print(line)
@@ -91,6 +101,8 @@ class FlowTracer:
 
     def _format_time(self, seconds):
         """Formata o tempo com cor baseada na duração."""
+        if seconds is None:
+            raise ValueError("_format_time: variavel 'seconds' não pode ser None.")
         ms = seconds * 1000
         text = f"{ms:.1f}ms" if ms < 1000 else f"{seconds:.2f}s"
         
@@ -104,6 +116,8 @@ class FlowTracer:
 
     def _format_code(self, line):
         """Trunca e coloriza o código."""
+        if line is None:
+            raise ValueError("_format_code: variavel 'line' não pode ser None.")
         max_len = self.W_CODE - 2
         if len(line) > max_len:
             line = line[:max_len-3] + "..."
@@ -122,7 +136,10 @@ class FlowTracer:
         
         return f" {line}{padding}"
 
-    def trace_calls(self, frame, event, arg):
+    def trace_calls(self, frame, event, arg): #noqa
+        """ """
+        if frame is None:
+            raise ValueError("trace_calls: variavel 'frame' não pode ser None.")
         if event != 'line':
             return self.trace_calls
 
@@ -161,8 +178,8 @@ class FlowTracer:
                     try:
                         import linecache
                         line_content = linecache.getline(frame.f_code.co_filename, lineno).strip()
-                    except:
-                        line_content = "???"
+                    except Exception as e:
+                        line_content = f"ERR:{e}"
 
                     print(f"\n🚨 [MUTAÇÃO] '{self.watch_var}' alterada em {filename}:{lineno}")
                     print(f"   Code : {line_content}")
@@ -248,6 +265,8 @@ class FlowTracer:
 
 def _setup_package_context(script_path):
     """Permite imports relativos (copiado do debug_probe para consistência)."""
+    if script_path is None:
+        raise ValueError("_setup_package_context: variavel 'script_path' não pode ser None.")
     abs_path = os.path.abspath(script_path)
     directory = os.path.dirname(abs_path)
     package_parts = []
@@ -261,6 +280,9 @@ def _setup_package_context(script_path):
     return ".".join(package_parts) if package_parts else None
 
 def run_flow(script_path, args=None, watch_var=None):
+    """Executa operações para rodar o sistema de leitura do processamento do alvo."""
+    if script_path is None:
+        raise ValueError("run_flow: variavel 'script_path' não pode ser None.")
     abs_path = os.path.abspath(script_path)
     package_name = _setup_package_context(abs_path)
     
@@ -285,11 +307,11 @@ def run_flow(script_path, args=None, watch_var=None):
         with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
             code = compile(f.read(), abs_path, 'exec')
             exec(code, globs) # noqa
-    except SystemExit:
-        pass # Ignora exit() do script alvo
+    except SystemExit as e:
+        print(f"\n[CRASH] code: {code} SystemExit: {e}")
     except Exception as e:
         sys.settrace(None)
-        print(f"\n[CRASH] O script falhou: {e}")
+        print(f"\n[CRASH] code: {code} falha: {e}")
     finally:
         sys.settrace(None)
         print("\n--- Trace Finalizado ---")
