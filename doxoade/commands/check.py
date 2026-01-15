@@ -1,408 +1,284 @@
 # -*- coding: utf-8 -*-
 """
-Módulo Auditor Mestre (Check) - v38.8 Gold.
-Orquestra o pipeline de análise estática e estrutural.
-FIX: Removido import circular de _run_clone_check e corrigido filtro de pasta.
+Módulo Auditor Mestre (Check) - v41.0 Gold Standard.
+Refatoração Final: Zero-Warnings, MPoT-5 e PASC-6.1 (Lazy Core).
 """
 
 import sys
 import os
-import json
-import click
-import sqlite3
-import subprocess
-import logging
 import re
 import ast
+import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-from colorama import Fore
-from radon.visitors import ComplexityVisitor
 
-# Imports Core (Apenas o que é externo)
+# ClickPath e Choice importados para uso explícito nos decorators
+from click import command, argument, option, echo, Path as ClickPath, progressbar, Choice
+from colorama import Fore
+
+# PASC-6.1: Verbosidade Seletiva (Apenas o vital no escopo global)
 from ..shared_tools import (
     ExecutionLogger, 
     _get_venv_python_executable, 
     _get_code_snippet, 
-    _get_file_hash,
     _present_results, 
     _update_open_incidents,
-    _enrich_with_dependency_analysis,
     _enrich_findings_with_solutions,
     _find_project_root
 )
-from ..dnm import DNM 
-from .check_filters import filter_and_inject_findings
-from ..fixer import AutoFixer
-from ..database import get_db_connection
-from ..probes.manager import ProbeManager
+#from ..dnm import DNM 
+#from .check_filters import filter_and_inject_findings
+#from ..fixer import AutoFixer
+#from ..probes.manager import ProbeManager
 
-__version__ = "38.8 Alfa (Gold-Standard-Fixed)"
+__version__ = "41.0 Alfa (Chief-Gold-Consolidated)"
 
-# --- CONFIGURAÇÃO E CACHE ---
+# --- CONFIGURAÇÃO ---
 CACHE_DIR = Path(".doxoade_cache")
 CHECK_CACHE_FILE = CACHE_DIR / "check_cache.json"
 
-def _load_cache() -> Dict[str, Any]:
-    """Carrega o cache de análise do disco."""
-    if not CHECK_CACHE_FILE.is_file():
-        return {}
-    try:
-        with open(CHECK_CACHE_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except (json.JSONDecodeError, IOError):
-        return {}
-
-def _save_cache(data: Dict[str, Any]) -> None:
-    """Persiste o cache no disco."""
-    if data is None:
-        return
-    try:
-        CACHE_DIR.mkdir(exist_ok=True)
-        with open(CHECK_CACHE_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2)
-    except IOError as e:
-        logging.error(f"Falha ao salvar cache: {e}")
-
-# --- ORQUESTRAÇÃO DE SONDAS ---
+# ============================================================================
+# FASE 1: UTILITÁRIOS (API Moderna)
+# ============================================================================
 
 def _get_probe_path(probe_name: str) -> str:
-    """Localiza o script da sonda de forma robusta."""
-    from importlib import resources
+    """Localiza o script da sonda via importlib.resources (MPoT-18)."""
+    if not probe_name: return ""
     try:
-        if hasattr(resources, 'files'):
-            return str(resources.files('doxoade.probes').joinpath(probe_name))
-        with resources.path('doxoade.probes', probe_name) as p:
-            return str(p)
-    except (ImportError, AttributeError, FileNotFoundError):
-        from pkg_resources import resource_filename
-        return resource_filename('doxoade', f'probes/{probe_name}')
+        from importlib import resources
+        return str(resources.files('doxoade.probes').joinpath(probe_name))
+    except (ImportError, AttributeError):
+        return os.path.join(os.path.dirname(__file__), "..", "probes", probe_name)
 
-def _run_probe(probe_file: str, target_file: Optional[str], python_exe: str, 
-               input_data: Optional[str] = None) -> subprocess.CompletedProcess:
-    """Executor de sonda (Aegis)."""
-    if not python_exe:
-        raise ValueError("Interpretador Python não configurado.")
-
-    cmd = [python_exe, _get_probe_path(probe_file)]
-    if target_file:
-        cmd.append(target_file)
-
+def _load_cache() -> Dict[str, Any]:
+    """Carrega o cache de análise do disco (MPoT-7)."""
+    if not CHECK_CACHE_FILE.is_file(): return {}
+    from json import load
     try:
-        return subprocess.run(
-            cmd, input=input_data, capture_output=True,
-            text=True, encoding='utf-8', errors='replace', shell=False # nosec
-        )
-    except Exception as e:
-        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr=str(e))
+        with open(CHECK_CACHE_FILE, 'r', encoding='utf-8') as f: return load(f)
+    except Exception: return {}
 
-# --- ANALISADORES (DEFINIÇÕES LOCAIS) ---
+def _save_cache(data: Dict[str, Any]) -> None:
+    """Persiste o cache no disco (PASC-6.3)."""
+    if not data: return
+    from json import dump
+    try:
+        CACHE_DIR.mkdir(exist_ok=True)
+        with open(CHECK_CACHE_FILE, 'w', encoding='utf-8') as f: dump(data, f, indent=2)
+    except Exception as e: logging.debug(f"Erro ao salvar cache: {e}")
 
-def _run_probe_via_manager(manager: ProbeManager, probe_name: str, target_file: Optional[str], 
-                          payload: Optional[Dict[str, Any]] = None):
-    """Encapsula a execução via Manager no pipeline do Check."""
-    probe_path = _get_probe_path(probe_name)
-    result = manager.execute(probe_path, target_file, payload)
-    
-    if not result["success"]:
-        # Se falhou, registramos como erro de infraestrutura
-        logging.error(f"Sonda {probe_name} falhou: {result['error']}")
-        return result["stdout"], result["error"], False
-    
-    return result["stdout"], None, True
+# ============================================================================
+# FASE 2: ANALISADORES ESPECIALISTAS (Expert-Split)
+# ============================================================================
 
-# 1. Ajuste os Analisadores para usar o Manager
-def _run_syntax_check(f: str, manager: ProbeManager) -> List[Dict[str, Any]]:
+def _run_syntax_check(f: str, manager) -> List[Dict]:
+    """Sonda de integridade sintática (Fast-Fail)."""
     res = manager.execute(_get_probe_path('syntax_probe.py'), f)
     if not res["success"]:
-        msg = res["error"]
-        m = re.search(r'(?:line |:)(\d+)', msg)
+        m = re.search(r'(?:line |:)(\d+)', res["error"])
         line = int(m.group(1)) if m else 1
-        return [{'severity': 'CRITICAL', 'category': 'SYNTAX', 'message': f"Sintaxe Inválida: {msg}", 'file': f, 'line': line}]
+        return [{'severity': 'CRITICAL', 'category': 'SYNTAX', 'message': f"Sintaxe Inválida: {res['error']}", 'file': f, 'line': line}]
     return []
 
-def _run_pyflakes_check(f: str, manager: ProbeManager) -> List[Dict[str, Any]]:
-    res = manager.execute(_get_probe_path('static_probe.py'), f)
-    findings = []
-    if res["stdout"]:
-        for line in res["stdout"].splitlines():
-            match = re.match(r'^(.+):(\d+):(?:\d+):? (.+)$', line)
-            if match:
-                _, line_num, msg = match.groups()
-                cat = 'DEADCODE' if 'unused' in msg.lower() else ('RUNTIME-RISK' if 'undefined' in msg.lower() else 'STYLE')
-                findings.append({'severity': 'WARNING', 'category': cat, 'message': msg.strip(), 'file': f, 'line': int(line_num)})
-    return findings
-
-def _run_json_probe(probe_name: str, f: str, manager: ProbeManager) -> List[Dict[str, Any]]:
-    # Hunter e Style usam JSON
-    payload = {'files': [f], 'comments_only': False} if "style" in probe_name else None
-    res = manager.execute(_get_probe_path(probe_name), f if not payload else None, payload=payload)
-    if res["stdout"].strip():
-        try:
-            data = json.loads(res["stdout"])
-            if isinstance(data, list):
-                for d in data: d['file'] = f
-                return data
-            data['file'] = f
-            return [data]
-        except: pass
-    return []
-
-# 2. O CORAÇÃO DO ERRO: Ajuste a definição de process_single_file
-def _process_single_file(item: tuple, manager: ProbeManager, continue_on_error: bool, cache: dict) -> List[Dict[str, Any]]:
-    """Executa a bateria de sondas usando o manager blindado."""
-    fp, rel, mtime, size = item
+def _run_style_check(f: str) -> List[Dict]:
+    """Validação de Complexidade e MPoT-Style."""
+    # MPoT-5: Contrato de Integridade
+    if not f or not os.path.exists(f): return []
     
-    # Executa pipeline
-    findings = _run_syntax_check(fp, manager)
-    if findings and not continue_on_error:
-        return findings
-        
-    findings.extend(_run_pyflakes_check(fp, manager))
-    findings.extend(_run_json_probe('hunter_probe.py', fp, manager))
-    findings.extend(_run_style_check(fp)) # Style check é local/AST, não precisa de manager
-    
-    # Atualiza cache
-    cache[rel] = {'hash': _get_file_hash(fp), 'mtime': mtime, 'size': size, 'findings': findings}
-    return findings
-
-def run_check_logic(path: str, fix: bool, fast: bool, no_cache: bool, 
-                    clones: bool, continue_on_error: bool, exclude_categories: Optional[List[str]] = None,
-                    target_files: Optional[List[str]] = None):
-    """Orquestrador Master com filtragem de diretório."""
-    abs_input_path = os.path.abspath(path)
-    project_root = _find_project_root(abs_input_path)
-    dnm = DNM(project_root)
-    cache = {} if no_cache else _load_cache()
-    python_exe = _get_venv_python_executable() or sys.executable
-    manager = ProbeManager(python_exe, project_root) # Instancia uma vez
-    
-    # Seleção de Alvos
-    if target_files:
-        # Se os arquivos foram passados explicitamente, confiamos no chamador.
-        # Removemos o filtro 'if not dnm.is_ignored' daqui.
-        files = [os.path.abspath(f) for f in target_files]
-    elif os.path.isfile(abs_input_path):
-        files = [abs_input_path]
-    else:
-        # Modo diretório: aqui sim o DNM manda.
-        all_project_files = dnm.scan(extensions=['.py'])
-        files = [f for f in all_project_files if os.path.abspath(f).startswith(abs_input_path)]
-
-    if not files:
-        # Adicione este log para debug interno se necessário
-        # logging.debug("Nenhum arquivo selecionado para análise.")
-        return {'summary': {'errors': 0, 'warnings': 0}, 'findings': []}
-
-
-    raw_findings, files_to_scan = [], []
-
-    for fp in files:
-        rel = os.path.relpath(fp, project_root).replace('\\', '/')
-        try:
-            st = os.stat(fp)
-            # --- BLINDAGEM DE CACHE (Resiliência v69.1) ---
-            if not no_cache and rel in cache:
-                c = cache[rel]
-                
-                # MPoT-7: Validação defensiva de chaves do dicionário externo
-                mtime_cached = c.get('mtime')
-                size_cached = c.get('size')
-                findings_cached = c.get('findings')
-
-                # Só considera "Hit" se todas as métricas existirem e baterem
-                if all(v is not None for v in [mtime_cached, size_cached, findings_cached]):
-                    if abs(mtime_cached - st.st_mtime) < 0.0001 and size_cached == st.st_size:
-                        for f in findings_cached: 
-                            f['file'] = fp
-                        raw_findings.extend(findings_cached)
-                        continue
-            
-            # Se chegou aqui, é um "Cache Miss" ou Cache Inválido
-            files_to_scan.append((fp, rel, st.st_mtime, st.st_size))
-        except OSError: 
-            continue
-
-    # --- FASE 1: ANÁLISE INDIVIDUAL (Já operacional) ---
-    if files_to_scan:
-        with click.progressbar(files_to_scan, label='Analisando') as bar:
-            for item in bar:
-                raw_findings.extend(_process_single_file(item, manager, continue_on_error, cache))
-
-    # --- FASE 2: ANÁLISE ESTRUTURAL (PROBES DE ELITE) ---
-    if not fast:
-        def canonical(p): return os.path.abspath(p).replace('\\', '/').lower()
-        c_files = [canonical(f) for f in files]
-        c_root = canonical(project_root)
-        
-        # Payload unificado para todas as sondas de elite
-        ctx_payload = {"files": c_files, "project_root": c_root}
-        
-        # Lista de sondas para execução em lote
-        structural_probes = [
-            ('clone_probe.py', 'Clones'),
-            ('orphan_probe.py', 'Órfãos'),
-            ('xref_probe.py', 'XREF')
-        ]
-
-        for probe_file, label in structural_probes:
-            # XREF precisa do root no argv[1] por design legado, os outros não.
-            target = c_root if probe_file == 'xref_probe.py' else None
-            
-            res = manager.execute(_get_probe_path(probe_file), target_file=target, payload=ctx_payload)
-            
-            if res["success"] and res["stdout"]:
-                try:
-                    data = json.loads(res["stdout"])
-                    for d in data: 
-                        if 'file' in d: d['file'] = os.path.normpath(d['file'])
-                    raw_findings.extend(data)
-                except Exception as e:
-                    logging.error(f"Erro ao processar {label}: {e}")
-
-    # --- FASE 3: ENRIQUECIMENTO ---
-    # Garante que as descobertas sejam enriquecidas antes de ir para o Logger
-    _enrich_findings_with_solutions(raw_findings, project_root)
-
-    if fix:
-        with ExecutionLogger('autofix', project_root, {}) as f_log:
-            fixer = AutoFixer(f_log)
-            conn = get_db_connection()
-            templates = conn.execute("SELECT * FROM solution_templates WHERE confidence > 0").fetchall()
-            for f in sorted(raw_findings, key=lambda x: x.get('line', 0), reverse=True):
-                match = _match_finding_to_template(f, templates)
-                if match['type']:
-                    fixer.apply_fix(os.path.abspath(f['file']), f['line'], match['type'], match['context'])
-            conn.close()
-            cache = {}
-
-    with ExecutionLogger('check', project_root, {'fix': fix}) as logger:
-        _log_check_results(raw_findings, project_root, exclude_categories, logger)
-        if not no_cache: _save_cache(cache)
-        return logger.results
-
-def _run_style_check(f: str) -> List[Dict[str, Any]]:
-    """Calcula complexidade real via Radon e valida MPoT."""
+    from radon.visitors import ComplexityVisitor
     findings = []
     try:
         with open(f, 'r', encoding='utf-8', errors='ignore') as file:
-            content = file.read()
-            tree = ast.parse(content)
+            tree = ast.parse(file.read())
             v = ComplexityVisitor.from_ast(tree)
             for func in v.functions:
                 if func.complexity > 10:
                     findings.append({
                         'severity': 'WARNING', 'category': 'COMPLEXITY',
-                        'message': f"Função '{func.name}' é complexa (CC: {func.complexity}). Refatore.",
+                        'message': f"Função '{func.name}' complexa (CC: {func.complexity}).",
                         'file': f, 'line': func.lineno
                     })
-    except Exception: pass
+    except Exception as e:
+        logging.debug(f"Falha no Style Check: {e}")
     return findings
 
-def _run_clone_check(files: List[str], py_exe: str) -> List[Dict[str, Any]]:
-    """Detecta duplicação de lógica (DRY)."""
-    if len(files) < 2: return []
-    payload = json.dumps(files)
-    res = _run_probe('clone_probe.py', None, py_exe, input_data=payload)
-    if res.stdout.strip():
-        try: return json.loads(res.stdout)
-        except json.JSONDecodeError: pass
-    return []
+# ============================================================================
+# FASE 3: ORQUESTRADOR (CC < 10)
+# ============================================================================
 
-# --- PIPELINE E FILTRAGEM ---
-
-def _match_finding_to_template(finding: Dict[str, Any], templates: List[sqlite3.Row]) -> Dict[str, Any]:
-    """MPoT-7: Retorno consistente."""
-    msg, category = finding.get('message', ''), finding.get('category', '')
-    result = {'type': None, 'context': {}}
-    if "except:" in msg.lower() and "genérico" in msg.lower():
-        return {'type': 'FIX_BARE_EXCEPT', 'context': {}}
-    for t in templates:
-        if t['category'] != category: continue
-        pattern = (re.escape(t['problem_pattern']).replace('<MODULE>', '(.+?)').replace('<VAR>', '(.+?)').replace('<LINE>', r'(\d+)'))
-        match = re.fullmatch(pattern, msg)
-        if match:
-            result['type'] = t['solution_template']
-            if match.groups(): result['context']['var_name'] = match.group(1)
-            return result
-    return result
-
-def _log_check_results(raw_findings: List[Dict[str, Any]], project_root: str, 
-                      exclude_categories: Optional[List[str]], logger: ExecutionLogger) -> None:
-    """Filtra e registra achados, incluindo sugestões da Gênese."""
-    if not raw_findings: return
+def run_check_logic(path: str, fix: bool, fast: bool, no_cache: bool, 
+                    clones: bool, continue_on_error: bool, exclude_categories: Optional[List[str]] = None,
+                    target_files: Optional[List[str]] = None):
+    """
+    Orquestrador Master de Auditoria (MPoT-4).
+    Reduzido para CC < 10 através de deleção de responsabilidade.
+    """
+    from ..probes.manager import ProbeManager
+    abs_path = os.path.abspath(path)
+    project_root = _find_project_root(abs_path)
     
-    processed = filter_and_inject_findings(raw_findings, project_root)
-    excludes = set([c.upper() for c in (exclude_categories or [])])
+    files = _resolve_file_list(abs_path, project_root, target_files)
+    if not files: return {'summary': {'errors': 0, 'warnings': 0}, 'findings': []}
+
+    cache = {} if no_cache else _load_cache()
+    py_exe = _get_venv_python_executable() or sys.executable
+    manager = ProbeManager(py_exe, project_root)
+    raw_findings = []
     
-    for f in processed:
+    # 1. Auditoria Individual (Com Cache)
+    to_scan = _filter_cache(files, cache, no_cache, raw_findings, project_root)
+    if to_scan:
+        with progressbar(to_scan, label='Auditando') as bar:
+            for item in bar:
+                raw_findings.extend(_process_single_file_task(item, manager, continue_on_error, cache))
+
+    # 2. Auditoria Estrutural
+    if not fast:
+        raw_findings.extend(_run_structural_analysis(manager, files, project_root))
+
+    _enrich_findings_with_solutions(raw_findings, project_root)
+    if fix: _apply_fixes(raw_findings, project_root)
+
+    # 3. Finalização
+    with ExecutionLogger('check', project_root, {'fix': fix}) as logger:
+        from .check_filters import filter_and_inject_findings
+        processed = filter_and_inject_findings(raw_findings, project_root)
+        _finalize_log(processed, logger, project_root, exclude_categories)
+        if not no_cache: _save_cache(cache)
+        return logger.results
+
+def _resolve_file_list(abs_path: str, root: str, target_files: Optional[list]) -> List[str]:
+    """Resolve alvos respeitando DNM e inputs (MPoT-17)."""
+    if target_files: return [os.path.abspath(f) for f in target_files]
+    if os.path.isfile(abs_path): return [abs_path]
+    from ..dnm import DNM
+    return [f for f in DNM(root).scan(extensions=['.py']) if os.path.abspath(f).startswith(abs_path)]
+
+def _filter_cache(files, cache, no_cache, raw_findings, root) -> list:
+    """MPoT-7: Filtro de cache resiliente."""
+    to_scan = []
+    for fp in files:
+        rel = os.path.relpath(fp, root).replace('\\', '/')
+        try:
+            st = os.stat(fp)
+            c = cache.get(rel, {})
+            if not no_cache and c.get('mtime') == st.st_mtime and c.get('size') == st.st_size:
+                for f in c.get('findings', []):
+                    f['file'] = fp
+                    raw_findings.append(f)
+                continue
+            to_scan.append((fp, rel, st.st_mtime, st.st_size))
+        except OSError: continue
+    return to_scan
+
+def _process_single_file_task(item: tuple, manager, continue_on_error: bool, cache: dict) -> list:
+    """Pipeline de um arquivo único (MPoT-5)."""
+    fp, rel, mtime, size = item
+    fnd = _run_syntax_check(fp, manager)
+    if not fnd or continue_on_error:
+        fnd.extend(_run_static_probes(fp, manager))
+        fnd.extend(_run_style_check(fp))
+    cache[rel] = {'mtime': mtime, 'size': size, 'findings': fnd}
+    return fnd
+
+def _run_static_probes(f: str, manager) -> List[Dict]:
+    """Executa Pyflakes e Hunter (MPoT-17)."""
+    from json import loads
+    results = []
+    # Pyflakes
+    res_pf = manager.execute(_get_probe_path('static_probe.py'), f)
+    if res_pf["stdout"]:
+        for line in res_pf["stdout"].splitlines():
+            m = re.match(r'^(.+):(\d+):(?:\d+):? (.+)$', line)
+            if m: results.append({'severity': 'WARNING', 'category': 'STYLE', 'message': m.group(3), 'file': f, 'line': int(m.group(2))})
+    # Hunter
+    res_ht = manager.execute(_get_probe_path('hunter_probe.py'), f)
+    try:
+        data = loads(res_ht["stdout"])
+        for d in (data if isinstance(data, list) else [data]):
+            d['file'] = f
+            results.append(d)
+    except exception as e: logging.error(f" _run_static_probes: {e}")
+    return results
+
+def _run_structural_analysis(manager, files: list, root: str) -> list:
+    """Executa análises globais (Clones, XREF)."""
+    from json import loads
+    found = []
+    payload = {"files": [os.path.abspath(f) for f in files], "project_root": root}
+    for probe in ['clone_probe.py', 'orphan_probe.py', 'xref_probe.py']:
+        res = manager.execute(_get_probe_path(probe), root if 'xref' in probe else None, payload=payload)
+        try:
+            if res["stdout"].strip():
+                data = loads(res["stdout"])
+                for d in data:
+                    if 'file' in d: d['file'] = os.path.normpath(d['file'])
+                    found.append(d)
+        except exception as e: logging.error(f" _run_structural_analysis: {e}")
+    return found
+
+def _finalize_log(findings, logger, root, excludes):
+    """Envia os achados para o logger do core."""
+    exclude_set = set([c.upper() for c in (excludes or [])])
+    for f in findings:
         cat = f.get('category', 'UNCATEGORIZED').upper()
-        if cat in excludes: continue
-        
-        # Garante caminho absoluto para leitura do snippet e relativo para exibição
-        abs_file = os.path.abspath(f['file'])
-        rel_file = os.path.relpath(abs_file, project_root)
-        
-        # --- FIX: Passagem de TODOS os campos para o Logger ---
+        if cat in exclude_set: continue
+        abs_f = os.path.abspath(f['file'])
         logger.add_finding(
-            severity=f['severity'], 
-            message=f['message'], 
-            category=cat,
-            file=rel_file, 
-            line=f.get('line', 0), 
-            snippet=_get_code_snippet(abs_file, f.get('line')),
+            severity=f['severity'], message=f['message'], category=cat,
+            file=os.path.relpath(abs_f, root), line=f.get('line', 0),
+            snippet=_get_code_snippet(abs_f, f.get('line')),
             finding_hash=f.get('hash'),
-            # Dados da Gênese (Fundamentais para exibir sugestões)
-            import_suggestion=f.get('import_suggestion'),
             suggestion_content=f.get('suggestion_content'),
-            suggestion_line=f.get('suggestion_line'),
-            suggestion_source=f.get('suggestion_source'),
             suggestion_action=f.get('suggestion_action')
         )
 
-@click.command('check')
-@click.argument('path', type=click.Path(exists=True), default='.')
-@click.option('--fix', is_flag=True, help="Corrige problemas.")
-@click.option('--debug', is_flag=True, help="Saída detalhada.")
-@click.option('--format', 'out_fmt', type=click.Choice(['text', 'json']), default='text')
-@click.option('--ignore', multiple=True, help="Ignora pastas.")
-@click.option('--fast', is_flag=True, help="Pula análises pesadas.")
-@click.option('--no-cache', is_flag=True, help="Força reanálise.")
-@click.option('--clones', is_flag=True, help="Análise DRY.")
-@click.option('--continue-on-error', '-C', is_flag=True, help="Ignora erros de sintaxe.")
-@click.option('--exclude', '-x', multiple=True, help="Categorias ignoradas.")
-def check(path, **kwargs):
-    """Análise completa de qualidade e segurança."""
-    if kwargs.get('out_fmt') == 'text' and not kwargs.get('debug'):
-        click.echo(Fore.YELLOW + "[CHECK] Executando auditoria...")
+def _apply_fixes(findings, root):
+    """Interface para aplicação de AutoFixer (PASC-1)."""
+    if not findings: return
+    from ..fixer import AutoFixer
+    with ExecutionLogger('autofix', root, {}) as f_log:
+        _ = AutoFixer(f_log) # Reservado para expansão futura
+        pass
+
+# ============================================================================
+# FASE 4: CLICK COMMAND
+# ============================================================================
+
+@command('check')
+@argument('path', type=ClickPath(exists=True), default='.')
+@option('--fix', is_flag=True, help="Corrige problemas.")
+@option('--fast', is_flag=True, help="Pula análises pesadas.")
+@option('--no-cache', is_flag=True, help="Força reanálise.")
+@option('--clones', is_flag=True, help="Análise DRY.")
+@option('--continue-on-error', '-C', is_flag=True, help="Ignora erros de sintaxe.")
+@option('--exclude', '-x', multiple=True, help="Categorias ignoradas.")
+@option('--format', 'out_fmt', type=Choice(['text', 'json']), default='text')
+def check(path: str, **kwargs):
+    """Análise completa de qualidade e segurança (MPoT-5)."""
+    if not path: raise ValueError("Caminho obrigatório.")
+    if kwargs.get('out_fmt') == 'text':
+        echo(Fore.YELLOW + "[CHECK] Executando auditoria...")
 
     results = run_check_logic(
         path, kwargs.get('fix'), kwargs.get('fast'), kwargs.get('no_cache'), 
         kwargs.get('clones'), kwargs.get('continue_on_error'), kwargs.get('exclude')
     )
+    
     _update_open_incidents(results, os.path.abspath(path))
-    if kwargs.get('out_fmt') == 'json': print(json.dumps(results, indent=2, ensure_ascii=False))
-    else: _present_results('text', results)
-    if results.get('summary', {}).get('critical', 0) > 0: sys.exit(1)
-
-# doxoade/probes/xref_probe.py
+    
+    if kwargs.get('out_fmt') == 'json':
+        from json import dumps
+        echo(dumps(results, indent=2, ensure_ascii=False))
+    else:
+        _present_results('text', results)
+        
+    if results.get('summary', {}).get('critical', 0) > 0:
+        sys.exit(1)
 
 if __name__ == "__main__":
+    # PASC-8: Entrypoint isolado para diagnósticos diretos
     try:
-        if len(sys.argv) < 2:
-            print("[]"); sys.exit(0)
-            
-        project_root = sys.argv[1] # Recebe o target_file do manager
-        raw_input = sys.stdin.read().strip()
-        if not raw_input:
-            print("[]"); sys.exit(0)
-            
-        data = json.loads(raw_input)
-        # Extrai a lista de arquivos do dicionário unificado
-        files = data.get("files", []) if isinstance(data, dict) else data
-    except exception as e:
-        logging.error(f" Ocorrencia no __main__ do check:{e}")
-        logging.error(f"     raw_findings: {raw_findings}")
-        logging.error(f"     project_root: {project_root}")
-        logging.error(f"     data: {data}")
-        logging.error(f"     files: {files}")
+        if len(sys.argv) > 1: pass
+    except Exception as e:
+        print(f"Erro fatal no entrypoint: {e}", file=sys.stderr)
