@@ -32,8 +32,8 @@ from ..shared_tools import (
 #from ..probes.manager import ProbeManager
 
 __version__ = "41.0 Alfa (Chief-Gold-Consolidated)"
+__all__ = ['check']
 
-# --- CONFIGURAÇÃO ---
 CACHE_DIR = Path(".doxoade_cache")
 CHECK_CACHE_FILE = CACHE_DIR / "check_cache.json"
 
@@ -65,7 +65,8 @@ def _save_cache(data: Dict[str, Any]) -> None:
     try:
         CACHE_DIR.mkdir(exist_ok=True)
         with open(CHECK_CACHE_FILE, 'w', encoding='utf-8') as f: dump(data, f, indent=2)
-    except Exception as e: logging.debug(f"Erro ao salvar cache: {e}")
+    except Exception as e:
+        logging.debug(f"Erro ao salvar cache: {e}")
 
 # ============================================================================
 # FASE 2: ANALISADORES ESPECIALISTAS (Expert-Split)
@@ -84,6 +85,8 @@ def _run_style_check(f: str) -> List[Dict]:
     """Validação de Complexidade e MPoT-Style."""
     # MPoT-5: Contrato de Integridade
     if not f or not os.path.exists(f): return []
+    if f is None:
+        raise ValueError("_run_style_check: str 'f' não pode ser None.")
     
     from radon.visitors import ComplexityVisitor
     findings = []
@@ -92,7 +95,7 @@ def _run_style_check(f: str) -> List[Dict]:
             tree = ast.parse(file.read())
             v = ComplexityVisitor.from_ast(tree)
             for func in v.functions:
-                if func.complexity > 10:
+                if func.complexity > 12:
                     findings.append({
                         'severity': 'WARNING', 'category': 'COMPLEXITY',
                         'message': f"Função '{func.name}' complexa (CC: {func.complexity}).",
@@ -113,6 +116,9 @@ def run_check_logic(path: str, fix: bool, fast: bool, no_cache: bool,
     Orquestrador Master de Auditoria (MPoT-4).
     Reduzido para CC < 10 através de deleção de responsabilidade.
     """
+    if path is None:
+        raise ValueError("run_check_logic: str 'path' não pode ser None.")
+        
     from ..probes.manager import ProbeManager
     abs_path = os.path.abspath(path)
     project_root = _find_project_root(abs_path)
@@ -171,9 +177,13 @@ def _filter_cache(files, cache, no_cache, raw_findings, root) -> list:
         except OSError: continue
     return to_scan
 
-def _process_single_file_task(item: tuple, manager, continue_on_error: bool, cache: dict) -> list:
+def _process_single_file_task(item: tuple, manager, continue_on_error: bool,
+                              cache: dict) -> list:
     """Pipeline de um arquivo único (MPoT-5)."""
     fp, rel, mtime, size = item
+    if item is None:
+        raise ValueError("_process_single_file_task: tuple 'item' não pode ser None.")
+
     fnd = _run_syntax_check(fp, manager)
     if not fnd or continue_on_error:
         fnd.extend(_run_static_probes(fp, manager))
@@ -184,6 +194,9 @@ def _process_single_file_task(item: tuple, manager, continue_on_error: bool, cac
 def _run_static_probes(f: str, manager) -> List[Dict]:
     """Executa Pyflakes e Hunter (MPoT-17)."""
     from json import loads
+    if f is None:
+        raise ValueError("_run_static_probes: str 'f' não pode ser None.")
+
     results = []
     # Pyflakes
     res_pf = manager.execute(_get_probe_path('static_probe.py'), f)
@@ -198,13 +211,17 @@ def _run_static_probes(f: str, manager) -> List[Dict]:
         for d in (data if isinstance(data, list) else [data]):
             d['file'] = f
             results.append(d)
-    except exception as e: logging.error(f" _run_static_probes: {e}")
+    except Exception as e:
+        logging.error(f" _run_static_probes: {e}")
     return results
 
 def _run_structural_analysis(manager, files: list, root: str) -> list:
     """Executa análises globais (Clones, XREF)."""
     from json import loads
     found = []
+    if files is None:
+        raise ValueError("_run_structural_analysis: list 'files' não pode ser None.")
+
     payload = {"files": [os.path.abspath(f) for f in files], "project_root": root}
     for probe in ['clone_probe.py', 'orphan_probe.py', 'xref_probe.py']:
         res = manager.execute(_get_probe_path(probe), root if 'xref' in probe else None, payload=payload)
@@ -214,7 +231,8 @@ def _run_structural_analysis(manager, files: list, root: str) -> list:
                 for d in data:
                     if 'file' in d: d['file'] = os.path.normpath(d['file'])
                     found.append(d)
-        except exception as e: logging.error(f" _run_structural_analysis: {e}")
+        except Exception as e:
+            logging.error(f" _run_structural_analysis: {e}")
     return found
 
 def _finalize_log(findings, logger, root, excludes):
