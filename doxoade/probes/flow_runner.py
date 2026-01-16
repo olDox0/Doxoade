@@ -279,39 +279,41 @@ def _setup_package_context(script_path):
     if current not in sys.path: sys.path.insert(0, current)
     return ".".join(package_parts) if package_parts else None
 
-def run_flow(script_path, args=None, watch_var=None):
-    """Executa operações para rodar o sistema de leitura do processamento do alvo."""
-    if script_path is None:
-        raise ValueError("run_flow: variavel 'script_path' não pode ser None.")
-    abs_path = os.path.abspath(script_path)
+def run_flow(abs_path, args, watch_var=None):
+    """Executa o sistema de leitura de fluxo dentro do Sandbox Aegis (MPoT-8.3)."""
+    if not abs_path:
+        raise ValueError("run_flow: absolute path is required.")
+        
     package_name = _setup_package_context(abs_path)
-    
-    # Prepara argumentos
-    if args:
-        sys.argv = [script_path] + args
-    else:
-        sys.argv = [script_path]
+    sys.argv = [abs_path] + (args or [])
 
     tracer = FlowTracer(watch_var=watch_var)
-    
     print(f"--- Iniciando Trace (Watch: {watch_var}) ---")
     
+    # Contexto de execução
     globs = {
         '__name__': '__main__',
         '__file__': abs_path,
         '__package__': package_name
     }
 
+    # Ativa rastreio
     sys.settrace(tracer.trace_calls)
     try:
         with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
-            code = compile(f.read(), abs_path, 'exec')
-            exec(code, globs) # noqa
-    except SystemExit as e:
-        print(f"\n[CRASH] code: {code} SystemExit: {e}")
+            code_content = f.read()
+            
+        # PASC-6.6: Import localizado para segurança
+        from ..tools.security_utils import restricted_safe_exec
+        
+        # MUDANÇA CRÍTICA: Substituído exec() nativo pelo Sandbox
+        # Isso impede que o script alvo faça 'import os' ou 'subprocess'
+        restricted_safe_exec(code_content, globs)
+        
     except Exception as e:
         sys.settrace(None)
-        print(f"\n[CRASH] code: {code} falha: {e}")
+        # Lázaro Protocol format
+        print(f"\n{Fore.RED}[CRASH] Execution Blocked: {e}{Style.RESET_ALL}")
     finally:
         sys.settrace(None)
         print("\n--- Trace Finalizado ---")

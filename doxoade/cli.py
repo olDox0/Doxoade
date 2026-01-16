@@ -61,6 +61,7 @@ class DoxoadeLazyGroup(click.Group):
             'git-new': 'doxoade.commands.git_new:git_new',
             'global-health': 'doxoade.commands.global_health:global_health',
             'guicheck': 'doxoade.commands.guicheck:guicheck',
+            'hack': 'doxoade.commands.hacking:hack',
             'health': 'doxoade.commands.health:health',
             'history': 'doxoade.commands.history:history',
             'ide': 'doxoade.commands.mobile_ide:ide',
@@ -125,8 +126,9 @@ class DoxoadeLazyGroup(click.Group):
 
 # 3. Grupo Principal
 @click.group(cls=DoxoadeLazyGroup, invoke_without_command=True)
+@click.option('--guard', is_flag=True, help="Ativa a verificação de integridade antes da execução.")
 @click.pass_context
-def cli(ctx):
+def cli(ctx, guard):
     """olDox222 Advanced Development Environment (doxoade) v14"""
     ctx.ensure_object(dict)
     
@@ -141,6 +143,13 @@ def cli(ctx):
     except Exception as e:
         click.echo(f"{Fore.RED}Falha crítica no banco: {e}")
         sys.exit(1)
+
+    if guard:
+        # PASC-8: Chama a verificação antes de qualquer comando
+        from .commands.hacking import verify_silent
+        if not verify_silent():
+            click.echo(Fore.RED + "Execução bloqueada por falha de integridade.")
+            sys.exit(1)
 
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())

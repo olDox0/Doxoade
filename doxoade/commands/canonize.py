@@ -1,90 +1,75 @@
-# doxoade/commands/canonize.py
+# -*- coding: utf-8 -*-
+"""
+Canonization Module - Gold Standard Snapshot.
+Compliance: MPoT-5, PASC-6.
+"""
 import os
 import sys
-import json
-import click
-import subprocess
-from colorama import Fore, Style
-from ..shared_tools import _sanitize_json_output, _get_git_commit_hash, CANON_DIR
-from .test_mapper import TestMapper
+import datetime
+from json import dumps, loads
+from click import command, option, echo
+from colorama import Style, Fore
+from pathlib import Path
 
-@click.command('canonize')
-@click.option('--all', 'all_project', is_flag=True, help="Canoniza o estado do projeto atual.")
-@click.option('--run-tests', is_flag=True, default=True, help="Executa pytest para salvar o status dos testes.")
-def canonize(all_project, run_tests):
+from ..shared_tools import _get_git_commit_hash, CANON_DIR, ExecutionLogger
+
+__all__ = ['canonize']
+
+@command('canonize')
+@option('--all', 'all_project', is_flag=True, help="Canoniza o estado total do projeto.")
+@option('--run-tests', is_flag=True, default=True, help="Executa testes antes de salvar.")
+def canonize(all_project: bool, run_tests: bool):
     """Cria um snapshot 'Sagrado' do projeto (Lint + Testes + Estrutura)."""
     if not all_project:
-        click.echo(Fore.YELLOW + "Use --all para canonizar o projeto todo.")
+        echo(Fore.YELLOW + "⚠ Use --all para confirmar a canonização total do projeto.")
         return
 
     os.makedirs(CANON_DIR, exist_ok=True)
     git_hash = _get_git_commit_hash('.')
-    
-    # [FIX] Invocação robusta via módulo python em vez de buscar executável
-    # Isso evita problemas de extensão (.exe) no Windows sem shell=True
 
-    click.echo(Fore.CYAN + "--- [CANONIZE] Criando snapshot do projeto ---")
-    click.echo(Fore.WHITE + f"  > Commit Base: {git_hash[:7]}")
+    with ExecutionLogger('canonize', '.', {'all': all_project}) as _:
+        echo(f"{Fore.CYAN}{Style.BRIGHT}--- [CANONIZE] Gerando Snapshot 'Gold' ---")
+        
+        # 1. Análise Estática
+        echo(f"{Fore.WHITE}  > Fase 1: Análise Estática (Check)...")
+        from .check import run_check_logic
+        static_results = run_check_logic('.', fix=False, fast=True, no_cache=True, clones=False, continue_on_error=True)
+        
+        # 2. Estrutura de Testes
+        echo(f"{Fore.WHITE}  > Fase 2: Mapeamento de Testes...")
+        from .test_mapper import TestMapper
+        test_matrix = TestMapper('.').scan()
 
-    # 1. Coleta Dados Estáticos (Check)
-    click.echo(Fore.WHITE + "  > Executando Análise Estática (Check)...")
-    
-    # [FIX] sys.executable -m doxoade
-    command_parts = [sys.executable, '-m', 'doxoade', 'check', '.', '--format=json']
-    
-    result = subprocess.run(command_parts, capture_output=True, text=True, shell=False, encoding='utf-8', errors='replace')
-    
-    try:
-        check_report = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        click.echo(Fore.RED + "Erro fatal: Saída do check inválida.")
-        # Debug output para ajudar se falhar de novo
-        if result.stderr:
-            click.echo(Fore.YELLOW + f"STDERR: {result.stderr}")
-        sys.exit(1)
+        # 3. Execução Comportamental
+        test_results = {"status": "SKIPPED", "exit_code": 0}
+        if run_tests:
+            echo(f"{Fore.WHITE}  > Fase 3: Execução de Testes (Pytest)...")
+            from subprocess import run as sub_run # nosec
+            pt_res = sub_run([sys.executable, "-m", "pytest", "-q", "--tb=no"], capture_output=True, text=True, shell=False)
+            test_results = {
+                "exit_code": pt_res.returncode,
+                "status": "PASS" if pt_res.returncode == 0 else "FAIL",
+                "summary": pt_res.stdout.splitlines()[-1] if pt_res.stdout else "No output"
+            }
 
-    # 2. Coleta Mapa de Testes (Estrutura)
-    click.echo(Fore.WHITE + "  > Mapeando Cobertura de Testes...")
-    mapper = TestMapper('.')
-    test_matrix = mapper.scan()
+        # 4. Consolidação
+        snapshot_data = {
+            'timestamp': datetime.datetime.now().isoformat(),
+            'git_hash': git_hash,
+            'static_analysis': static_results,
+            'test_structure': test_matrix,
+            'test_execution': test_results
+        }
 
-    # 3. Executa Testes (Comportamento)
-    test_results = {"passed": 0, "failed": 0, "total": 0, "details": []}
-    if run_tests:
-        click.echo(Fore.WHITE + "  > Executando Pytest (Isso pode demorar)...")
-        try:
-            # -q: quiet, --tb=line: traceback curto
-            pytest_cmd = [sys.executable, "-m", "pytest", "-q", "--tb=line"]
-            pt_res = subprocess.run(pytest_cmd, capture_output=True, text=True, encoding='utf-8')
-            
-            test_results['exit_code'] = pt_res.returncode
-            test_results['output_summary'] = pt_res.stdout.splitlines()[-1] if pt_res.stdout else "Sem output"
-            
-            if pt_res.returncode == 0:
-                test_results['status'] = "PASS"
-            else:
-                test_results['status'] = "FAIL"
-                
-        except Exception as e:
-            test_results['status'] = "ERROR"
-            test_results['error'] = str(e)
+        with open(os.path.join(CANON_DIR, "project_snapshot.json"), 'w', encoding='utf-8') as f:
+            from json import dump
+            dump(snapshot_data, f, indent=2, ensure_ascii=False)
 
-    # 4. Consolida o Cânone
-    sanitized_check = _sanitize_json_output(check_report, '.')
-    
-    snapshot_data = {
-        'timestamp': str(os.path.getmtime('.')),
-        'git_hash': git_hash,
-        'static_analysis': sanitized_check,
-        'test_structure': test_matrix,
-        'test_execution': test_results
-    }
-    
-    snapshot_path = os.path.join(CANON_DIR, "project_snapshot.json")
-    
-    with open(snapshot_path, 'w', encoding='utf-8') as f:
-        json.dump(snapshot_data, f, indent=2, ensure_ascii=False)
-    
-    click.echo(Fore.GREEN + f"    [OK] Snapshot salvo em '{snapshot_path}'.")
-    if test_results.get('status') == 'FAIL':
-        click.echo(Fore.YELLOW + "    [AVISO] O snapshot foi salvo com testes falhando. Isso será o novo normal.")
+        _render_canon_summary(snapshot_data)
+
+def _render_canon_summary(data: dict):
+    """Exibe evidências do que foi salvo (MPoT-4)."""
+    echo(f"\n{Fore.GREEN}{Style.BRIGHT}✔ Snapshot 'Gold' Consolidado!")
+    echo(f"   {Fore.WHITE}Commit:   {Fore.YELLOW}{data['git_hash'][:7]}")
+    echo(f"   {Fore.WHITE}Lint:     {Fore.YELLOW}{len(data['static_analysis'].get('findings', []))} problemas conhecidos.")
+    echo(f"   {Fore.WHITE}Testes:   [{data['test_execution']['status']}] {data['test_execution'].get('summary')}")
