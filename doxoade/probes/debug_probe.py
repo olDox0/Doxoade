@@ -58,18 +58,13 @@ def _setup_package_context(script_path):
     return ".".join(package_parts) if package_parts else None
 
 def run_debug(script_path):
-    abs_path = os.path.abspath(script_path)
+    """Analisa o estado de um script sob o Lazarus Protocol (Aegis)."""
+    if not script_path: raise ValueError("script_path required.")
     
-    # [FIX] Configura o contexto do pacote antes de executar
+    abs_path = os.path.abspath(script_path)
     package_name = _setup_package_context(abs_path)
     
-    debug_data = {
-        'status': 'unknown',
-        'variables': {},
-        'functions': [],
-        'error': None,
-        'traceback': None
-    }
+    debug_data = {'status': 'unknown', 'variables': {}, 'functions': [], 'error': None}
 
     try:
         # Executa o script injetando o __package__ correto
@@ -80,8 +75,11 @@ def run_debug(script_path):
         }
         
         with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
             code = compile(f.read(), abs_path, 'exec')
             exec(code, globs) # noqa
+        from ..tools.security_utils import restricted_safe_exec
+        restricted_safe_exec(content, globs)
         
         debug_data['status'] = 'success'
         for k, v in globs.items():
@@ -91,10 +89,10 @@ def run_debug(script_path):
                 elif not isinstance(v, types.ModuleType):
                     debug_data['variables'][k] = safe_serialize(v)
 
-    except Exception:
-        etype, value, tb = sys.exc_info()
+    except Exception as e:
         debug_data['status'] = 'error'
-        debug_data['error'] = f"{etype.__name__}: {value}"
+        debug_data['error'] = str(e)
+        etype, value, tb = sys.exc_info()
         
         # Filtra frames do probe para mostrar onde errou no script do usuário
         while tb.tb_next:

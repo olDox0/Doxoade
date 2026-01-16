@@ -93,5 +93,15 @@
     "title": "Arquivologia Semântica",
     "definition": "O processo de catalogar e comparar a estrutura lógica do código (não apenas o texto) ao longo do tempo.",
     "origin": "Diff Legacy Implementation"
+  },
+  "attack_path": {
+    "title": "Caminho de Ataque (Attack Path)",
+    "definition": "O rastro lógico que um dado não confiável percorre desde a sua entrada (Source) até uma função executora perigosa (Sink).",
+    "origin": "Pentest v75.60"
+  },
+  "taint_analysis": {
+    "title": "Análise de Taint (Contaminação)",
+    "definition": "Técnica de segurança que marca variáveis vindas de inputs externos como 'sujas' e monitora seu fluxo pelo programa.",
+    "origin": "Security Tools v2.1"
   }
 }

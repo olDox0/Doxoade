@@ -66,8 +66,8 @@
   },
   "pasc_1_1": {
     "title": "PASC-1.1 (Resgate Temporal)",
-    "date": "2026-01-14",
-    "content": "Protocolo de proteção contra regressões funcionais. Exige a verificação de assinaturas históricas via 'diff -l' após grandes refatorações para garantir que parâmetros críticos e funcionalidades secundárias não foram descartados acidentalmente."
+    "date": "2026-01-16",
+    "content": "Protocolo de proteção contra erosão funcional. Exige o uso do 'diff -l' para validar que a reformulação do código não resultou em perda de argumentos ou utilitários essenciais."
   },
   "semantic_contract_integrity": {
     "title": "Integridade de Contrato Semântico",
@@ -88,5 +88,20 @@
     "title": "Arquivologia Semântica (Legacy Audit)",
     "date": "2026-01-14",
     "content": "Uso de AST sobre o histórico do Git para validar a evolução de contratos (assinaturas de funções) em vez de apenas texto bruto."
+  },
+  "aegis_v2": {
+    "title": "Aegis Protocol (Hardening)",
+    "date": "2026-01-15",
+    "content": "Proíbe estritamente shell=True e exige silenciamento deliberado (# nosec) apenas após revisão humana. Zera falsos positivos de segurança em profilers (exec/eval)."
+  },
+  "chief_gold_ui": {
+    "title": "Chief-Gold Visual Standard",
+    "date": "2026-01-15",
+    "content": "Padrão de simetria industrial: Alinhamento de colchetes fixos [ 000 ] e padding dinâmico de pontos para caminhos Azul-Cobalto."
+  },
+  "aegis_sandbox": {
+    "title": "Protocolo Aegis (Sandbox)",
+    "date": "2026-01-16",
+    "content": "Garantia de que qualquer execução dinâmica (exec/eval) seja precedida por análise AST e restrição total de builtins, eliminando riscos de RCE e Injeção."
   }
 }

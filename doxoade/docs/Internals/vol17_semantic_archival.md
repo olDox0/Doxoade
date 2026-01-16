@@ -1,7 +1,8 @@
-# Doxoade Internals - Vol. 16: Arquivologia Forense e Resgate Temporal
+# Doxoade Internals - Vol. 17: Arquivologia Semântica e Resgate de Poder
 
+**Data:** 16/01/2026
 **Versão:** 1.0 (Lazy-Gold)
-**Foco:** Combate à Entropia Funcional
+**Foco:** Combate à Erosão Funcional (PASC-1.1)
 
 ## 1. O Desafio da Evolução
 Refatorações agressivas costumam causar a "Erosão Funcional", onde parâmetros importantes são removidos por serem considerados (erroneamente) obsoletos.
@@ -20,3 +21,11 @@ O modo `--legacy-code` permite injetar o corpo das funções removidas diretamen
 - **Diagnose:** Painel de Situação (O que está acontecendo agora?).
 - **Diff Standard:** Auditoria de Linhas (Como o texto mudou?).
 - **Diff Legacy:** Auditoria de Poder (O que a ferramenta deixou de saber fazer?).
+
+## 5. O Problema da Poda Silenciosa
+Em refatorações de larga escala (como a transição para Lazy-Gold), é comum a remoção de argumentos de funções ou deleção de utilitários considerados "mortos". O `git diff` textual falha em alertar sobre a perda de capacidade lógica.
+### A Solução: Auditoria Semântica (`diff -l`)
+Implementamos um motor de análise que utiliza o Git como banco de dados de conteúdo e a AST como parser de estrutura.
+- **Assinaturas Históricas:** O sistema extrai o mapa `função: [argumentos]` de cada commit.
+- **Relatório de Regressão:** Dispara alertas de `CONTRATO ALTERADO` quando a interface de uma função perde parâmetros entre versões.
+- **Legacy Code Injection (-lc):** Permite injetar o corpo de funções removidas no terminal para reciclagem imediata (PASC-9).
