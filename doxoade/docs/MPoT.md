@@ -73,6 +73,25 @@
 ### 15. Semantic Diff (Integridade de Contrato)
 *   Após refatorações, é obrigatório o uso de `doxoade diff -l` para verificar se assinaturas de funções foram preservadas (PASC-1.1).
 
+
+## ainda para revisão
+
+### 16. Política anti-monolito
+*   **Regra:** Não tolera-se scripts monoliticos com funções complexas em um arquivo unico, mesmo que seja um arquivo que serve para compartilhamento de funções;
+*   Só permitindo em casos especiais de linguas muito complexas e verbosas, nestes casos é permitido um script mais complexos. Não é permitido ter mais de 500 linhas caso sejá python.
+
+### 17. Principio de Resposabilidade
+*   **Regra:** Um unico arquivo não pode ter mais excesso de responsabilidade, ouseja ele não pode carregar o projeto ao ponto de se ele quebrar todo projeto quebra, as partes devem ser quase independentes, um sistema de diagnostico(Diagnostic/) independente é recomendado.
+
+### 18. Bibliotecas Padrão
+*   **Regra:** Priorize utilizar bibliotecas padrão da linguagem de programação utilizada, use bibliotecas externas se a biblioteca padrão não conseguir cumprir o objetivo do projeto, esta estrategia deixa projetos mais leves e portaveis.
+
+
+### 19. Quarentena de Testes (Test-Lock)
+- **19.1. Isolamento de test(Test-Isolation):** O diretório `tests/` é considerado uma zona de quarentena. Arquivos dentro dele não devem ser importáveis por módulos de produção.
+- **19.2. Bloqueio de Execução(Run-Block):** O comando `doxoade run` deve recusar a execução de qualquer arquivo em `tests/` ou subpastas de erro proposital, a menos que a flag `--test-mode` seja passada explicitamente.
+- **19.3. Assinatura de Chamada(Call-Signature):** Scripts de teste sensíveis devem verificar se o ambiente `DOXOADE_AUTHORIZED_RUN` está ativo, abortando a execução caso contrário.
+
 ---
 
 ## 🏆 Exemplo de Ouro: Padrão Chief-Gold
