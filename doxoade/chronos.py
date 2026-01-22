@@ -11,7 +11,7 @@ import io
 import platform
 import collections
 from datetime import datetime, timezone
-from pathlib import Path
+# [DOX-UNUSED] from pathlib import Path
 from .database import get_db_connection
 
 try:

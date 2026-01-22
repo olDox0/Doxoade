@@ -58,7 +58,7 @@ def git_new(ctx, message, remote_url):
             # Se já tem commit, apenas verifica se há mudanças pendentes para commitar
             status = _run_git_command(['status', '--porcelain'], capture_output=True)
             if status and status.strip():
-                click.echo(Fore.YELLOW + f"\nPasso 3: Commitando alterações pendentes...")
+                click.echo(Fore.YELLOW + "\nPasso 3: Commitando alterações pendentes...")
                 _run_git_command(['commit', '-m', message])
                 click.echo(Fore.GREEN + "[OK] Alterações commitadas.")
             else:

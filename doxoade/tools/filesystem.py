@@ -1,6 +1,6 @@
 # doxoade/tools/filesystem.py
 import os
-import sys
+# [DOX-UNUSED] import sys
 import toml
 from pathlib import Path
 from colorama import Fore

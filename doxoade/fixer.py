@@ -1,20 +1,19 @@
 # doxoade/fixer.py
 import os
 import re
-import logging
-from colorama import Fore
+# [DOX-UNUSED] import logging
+from colorama import Style
 
 class AutoFixer:
-    """
-    Motor de Correção Profunda (PASC v1.2).
-    Capaz de identificar blocos lógicos e realizar limpeza seletiva de símbolos.
-    """
     def __init__(self, logger):
         self.logger = logger
 
     def apply_fix(self, file_path, line_number, fix_type, context=None):
         try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            abs_path = os.path.normpath(os.path.abspath(file_path))
+            if not os.path.exists(abs_path): return False
+
+            with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
             
             idx = line_number - 1
@@ -22,119 +21,130 @@ class AutoFixer:
 
             modified = False
             new_lines = list(lines)
-            line_content = new_lines[idx].strip()
 
-            # --- REGRA DE OURO: UPGRADE DE ESTRATÉGIA ---
-            # Se mandarem remover uma linha que abre um bloco (paren ou dois pontos),
-            # o Fixer automaticamente assume que deve comentar o BLOCO todo.
-            if fix_type == "REMOVE_LINE":
-                if line_content.endswith(':') or ('(' in line_content and ')' not in line_content):
-                    fix_type = "COMMENT_BLOCK"
-
-            # --- DESPACHO ---
+            # --- DICIONÁRIO DE EXECUÇÃO ---
             if fix_type == "FIX_UNUSED_IMPORT":
+                # Proteção caso o context chegue vazio
                 var_name = context.get('var_name') if context else None
                 modified = self._apply_smart_import_fix(new_lines, idx, var_name)
 
-            elif fix_type == "COMMENT_BLOCK":
-                modified = self._apply_comment_block(new_lines, idx)
+            elif fix_type == "REPLACE_WITH_UNDERSCORE":
+                modified = self._apply_comment_unused_line(new_lines, idx)
 
-            elif fix_type == "REMOVE_LINE":
-                if not new_lines[idx].strip().startswith("#"):
-                    new_lines[idx] = f"# [DOX-UNUSED] {new_lines[idx]}"
-                    modified = True
+            elif fix_type == "RESTRICT_EXCEPTION":
+                modified = self._apply_forensic_exception_fix(new_lines, idx, abs_path)
 
-            elif fix_type == "FIX_BARE_EXCEPT":
-                modified = self._apply_safe_exception_fix(new_lines, idx, file_path)
+            elif fix_type == "REMOVE_F_PREFIX":
+                modified = self._apply_remove_f_prefix(new_lines, idx)
+            
+#            logging.error(f"{Fore.GREEN}fix_type: {fix_type}\n")
+#            logging.error(f"{Fore.GREEN}modified: {modified}\n")
+#            logging.error(f"{Fore.GREEN}abs_path: {abs_path}\n")
+#            logging.error(f"{Fore.GREEN}new_lines: {new_lines}\n")
 
             if modified:
-                return self._save_file(file_path, new_lines)
+                return self._save_file(abs_path, new_lines)
             return False
-        except Exception: return False
+        except Exception as e:
+            import sys as dox_exc_sys
+            _, exc_obj, exc_tb = dox_exc_sys.exc_info()
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            line_number = exc_tb.tb_lineno
+            print(f"\033[0m \033[1m Filename: {fname}   ■ Line: {line_number} \033[31m ■ Exception type: {e} ■ Exception value: {exc_obj} \033[0m")
+
+    def _apply_remove_f_prefix(self, lines, idx):
+        line = lines[idx]
+        new_line = re.sub(r'f(["\'])', r'\1', line, count=1)
+        if new_line != line:
+            lines[idx] = new_line
+            return True
+        return False
+
+    def _apply_comment_unused_line(self, lines, idx):
+        line = lines[idx]
+        if not line.strip().startswith("#"):
+            lines[idx] = f"# [DOX-UNUSED] {line}"
+            return True
+        return False
+
+    def _get_function_name(self, lines, idx):
+        for i in range(idx - 1, -1, -1):
+            line = lines[i].strip()
+            if line.startswith('def '):
+                match = re.search(r'def\s+([\w\d_]+)', line)
+                return match.group(1) if match else "global"
+            if line.startswith('class '): break
+        return "unknown"
+
+    def _apply_forensic_exception_fix(self, lines, idx, file_path):
+        original = lines[idx]
+        if not re.search(r'^\s*except\s*:', original): return False
+
+        # DETECÇÃO DE DNA (Captura a indentação e o caractere de step: Tab ou Espaço)
+        raw_indent = re.match(r'^(\s*)', original).group(1)
+        step = "\t" if "\t" in "".join(lines[:10]) else "    "
+        
+        func_name = self._get_function_name(lines, idx)
+        is_infra = any(x in file_path.replace('\\', '/') for x in ['probes/', 'tools/', 'database.py'])
+
+        match_inline = re.search(r'except\s*:\s*(.*)', original)
+        inline_stmt = match_inline.group(1).strip() if match_inline else ""
+        if inline_stmt == "pass": inline_stmt = ""
+
+        if is_infra:
+            new_block = [
+                f"{raw_indent}except Exception as e:\n",
+                f"{raw_indent}{step}import logging as _dox_log\n",
+                f"{raw_indent}{step}_dox_log.error(f\"[INFRA] {func_name}: {{e}}\")\n"
+            ]
+        else:
+            new_block = [
+                f"{raw_indent}except Exception as e:\n",
+                f"{raw_indent}{step}import sys as _dox_sys, os as _dox_os\n",
+                f"{raw_indent}{step}exc_obj, exc_tb = _dox_sys.exc_info() #exc_type\n",
+                f"{raw_indent}{step}f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]\n",
+                f"{raw_indent}{step}line_n = exc_tb.tb_lineno\n",
+                f"{raw_indent}{step}print(f\"\\033[1;34m[ FORENSIC ]\\033[0m \\033[1mFile: {{f_name}} | L: {{line_n}} | Func: {func_name}\\033[0m\")\n",
+                f"{raw_indent}{step}print(f\"\\033[31m  ■ Type: {{type(e).__name__}} | Value: {{e}}\\033[0m\")\n"
+            ]
+        if inline_stmt: new_block.append(f"{raw_indent}{step}{inline_stmt}\n")
+        lines[idx] = "".join(new_block)
+        return True
 
     def _apply_smart_import_fix(self, lines, idx, var_name):
-        """
-        Limpa imports sem quebrar o arquivo.
-        Se 'from x import (a, b)' e 'a' for inútil, remove apenas 'a'.
-        """
         line = lines[idx]
         if not var_name: return False
-        
-        # Pega apenas o nome final (ex: 'Style' de 'colorama.Style')
         base_name = var_name.split('.')[-1]
 
-        # 1. Se abre bloco parentetizado e o símbolo não está na mesma linha
-        if '(' in line and ')' not in line and base_name not in line:
-            # Não fazemos nada nesta linha, o check vai apontar a linha real do símbolo dentro do bloco
-            return False
-
-        # 2. Se a linha contém outros símbolos além do que queremos remover
-        # (Checagem simplificada via vírgula ou múltiplos imports)
-        if ',' in line:
-            # Neurocirurgia: remove o símbolo e limpa vírgulas/espaços
-            pattern = rf'\b{re.escape(base_name)}\b\s*,?\s*'
-            new_line = re.sub(pattern, '', line)
-            # Limpa vírgula órfã no final (ex: from x import a, )
-            new_line = new_line.replace('import ,', 'import').strip()
-            if new_line.endswith(','): new_line = new_line[:-1]
-            if new_line.strip().endswith('import'): # Ficou vazio
-                 lines[idx] = f"# [DOX-UNUSED] {line}"
-            else:
-                 lines[idx] = new_line + "\n"
+        if ',' not in line and 'import ' + base_name in line:
+            lines[idx] = f"# [DOX-UNUSED] {line}"
             return True
-        
-        # 3. Se for o único símbolo, comenta a linha toda
-        lines[idx] = f"# [DOX-UNUSED] {line}"
-        return True
 
-    def _apply_comment_block(self, lines, idx):
-        """Comenta o cabeçalho e TODO o corpo indentado, incluindo linhas vazias."""
-        header = lines[idx]
-        if header.strip().startswith("#"): return False
+        patterns = [
+            rf',\s*\b{re.escape(base_name)}\b', 
+            rf'\b{re.escape(base_name)}\b\s*,', 
+            rf'\bimport\s+{re.escape(base_name)}\b' 
+        ]
         
-        # Calcula a indentação base do cabeçalho (ex: def ou from)
-        initial_indent = len(header) - len(header.lstrip())
-        lines[idx] = f"# [DOX-BLOCK] {header}"
+        new_line = line
+        for p in patterns:
+            new_line = re.sub(p, '', new_line)
         
-        i = idx + 1
-        while i < len(lines):
-            line = lines[i]
-            
-            # Se a linha for puramente vazia, comentamos e continuamos
-            if not line.strip():
-                lines[i] = f"#\n"
-                i += 1
-                continue
-            
-            current_indent = len(line) - len(line.lstrip())
-            
-            # REGRA MPoT: Se a indentação for maior que a do cabeçalho,
-            # ou se a linha começar com fechamento de bloco ')' ou '}', pertence ao bloco.
-            if current_indent > initial_indent or line.strip().startswith((')', '}')):
-                lines[i] = f"# {line}"
-                if line.strip().startswith((')', '}')): 
-                    break # Fim do bloco detectado
-                i += 1
-            else:
-                # Encontramos uma linha com a mesma indentação ou menor: o bloco acabou.
-                break
-        return True
-
-    def _apply_safe_exception_fix(self, lines, idx, file_path):
-        """Transforma 'except: pass' em log estruturado."""
-        original = lines[idx]
-        indent = original[:len(original) - len(original.lstrip())]
-        if ' as ' not in original:
-            lines[idx] = re.sub(r'except\s*:?\s*', 'except Exception as e: ', original)
-        if idx + 1 < len(lines) and 'pass' in lines[idx+1]:
-            fname = os.path.basename(file_path)
-            lines[idx+1] = f'{indent}    import logging\n{indent}    logging.error(f"[DOXO-AF] Falha em {fname} L{idx+1}: {{e}}")\n'
-            return True
+        if re.search(r'import\s*$', new_line.strip()):
+            lines[idx] = f"# [DOX-UNUSED] {line}"
+        else:
+            lines[idx] = re.sub(r'\s+', ' ', new_line).rstrip() + '\n'
+        
         return True
 
     def _save_file(self, file_path, lines):
         try:
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.writelines(lines)
+            with open(file_path, 'w', encoding='utf-8') as f: f.writelines(lines)
             return True
-        except IOError: return False
+        except IOError as e:
+            import sys as dox_exc_sys
+            _, exc_obj, exc_tb = dox_exc_sys.exc_info()
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            line_number = exc_tb.tb_lineno
+            print(f"\033[0m \033[1m Filename: {fname}   ■ Line: {line_number} \033[31m ■ Exception type: {e} ■ Exception value: {exc_obj} \033[0m")
+            return False

@@ -6,14 +6,14 @@ import click
 import os
 import subprocess
 import sys
-import shutil
+# [DOX-UNUSED] import shutil
 import time
 import pickle
 import numpy as np
-from colorama import Fore, Style
-from doxoade.shared_tools import ExecutionLogger, _get_venv_python_executable, _mine_traceback
-from doxoade.neural.core import Tokenizer, CamadaEmbedding, LSTM, softmax
-from doxoade.neural.logic import ArquitetoLogico
+from colorama import Fore
+from doxoade.shared_tools import _get_venv_python_executable, _mine_traceback
+# [DOX-UNUSED] from doxoade.neural.core import softmax
+# [DOX-UNUSED] from doxoade.neural.logic import ArquitetoLogico
 
 LAB_DIR = ".dox_lab"
 BRAIN_PATH = os.path.expanduser("~/.doxoade/cortex.pkl")

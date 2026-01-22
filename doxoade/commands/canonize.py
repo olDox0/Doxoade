@@ -6,10 +6,10 @@ Compliance: MPoT-5, PASC-6.
 import os
 import sys
 import datetime
-from json import dumps, loads
+# [DOX-UNUSED] from json import loads
 from click import command, option, echo
 from colorama import Style, Fore
-from pathlib import Path
+# [DOX-UNUSED] from pathlib import Path
 
 from ..shared_tools import _get_git_commit_hash, CANON_DIR, ExecutionLogger
 

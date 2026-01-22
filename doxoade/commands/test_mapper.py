@@ -2,9 +2,9 @@
 import os
 import ast
 import click
-import json
+# [DOX-UNUSED] import json
 from pathlib import Path
-from colorama import Fore, Style
+from colorama import Fore
 from ..shared_tools import ExecutionLogger, _get_project_config
 
 class TestMapper:

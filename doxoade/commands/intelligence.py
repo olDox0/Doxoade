@@ -10,13 +10,13 @@ import ast
 import re
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import List, Dict, Any, Optional
+# [DOX-UNUSED] from pathlib import Path
+from typing import List, Dict, Any
 
 import click
 from rich.console import Console
 
-from ..shared_tools import ExecutionLogger, _get_code_snippet
+from ..shared_tools import ExecutionLogger
 from ..tools.git import _run_git_command
 from ..dnm import DNM
 
@@ -75,7 +75,14 @@ def _get_git_hotness(file_path: str) -> int:
     try:
         res = _run_git_command(['rev-list', '--count', '--since="30 days ago"', 'HEAD', '--', file_path], capture_output=True, silent_fail=True)
         return int(res) if res and res.isdigit() else 0
-    except: return 0
+    except Exception as e:
+        import os as _dox_os
+        exc_type, exc_obj, exc_tb = sys.exc_info()
+        f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        line_n = exc_tb.tb_lineno
+        print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: _get_git_hotness\033[0m")
+        print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
+        return 0
 
 def _analyze_file_chief(file_path: str, root: str) -> Dict[str, Any]:
     rel_path = os.path.relpath(file_path, root).replace('\\', '/')
@@ -88,7 +95,14 @@ def _analyze_file_chief(file_path: str, root: str) -> Dict[str, Any]:
             with open(file_path, 'r', encoding=enc, errors='ignore') as f:
                 content = f.read()
                 break
-        except: continue
+        except Exception as e:
+            import sys as _dox_sys, os as _dox_os
+            exc_type, exc_obj, exc_tb = sys.exc_info()
+            f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            line_n = exc_tb.tb_lineno
+            print(f"\033[1;34m\n[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: _analyze_file_chief\033[0m")
+            print(f"\033[31m    ■ Type: {type(e).__name__} | Value: {e}\033[0m")
+            continue
 
     data = {
         "path": rel_path, "size": os.path.getsize(file_path), "loc": len(content.splitlines()),
@@ -107,7 +121,15 @@ def _analyze_file_chief(file_path: str, root: str) -> Dict[str, Any]:
                 "avg_complexity": round(sum(visitor.stats["complexities"])/len(visitor.stats["complexities"]), 2) if visitor.stats["complexities"] else 1,
                 "todos": _find_debt_tags(content)
             })
-        except: data["type"] = "source_corrupt"
+        except Exception as e:
+            import os as _dox_os
+            exc_type, exc_obj, exc_tb = sys.exc_info()
+            f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            line_n = exc_tb.tb_lineno
+            print(f"\033[1;34m\n[ FORENSIC ]\033[0m \033[1mFile: {file_path} | L: {line_n} | Func: _analyze_file_chief\033[0m")
+            print(f"\033[31m    ■ Type: {type(e).__name__} | Value: {e}\033[0m")
+            data["type"] = "source_corrupt"
+            
     elif ext in ['.md', '.txt', '.json']:
         data["type"] = "documentation"
         if ext == '.md': data["summary"] = re.findall(r'^#+\s+(.*)', content, re.MULTILINE)[:5]

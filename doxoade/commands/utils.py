@@ -403,7 +403,13 @@ def _get_github_repo_info():
         if not url: return "unknown/unknown"
         match = re.search(r'github\.com[:/]([\w-]+)/([\w-]+)', url)
         if match: return f"{match.group(1)}/{match.group(2)}"
-    except: pass
+    except Exception as e:
+        import sys, os
+        _, exc_obj, exc_tb = sys.exc_info()
+        f_name = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        line_n = exc_tb.tb_lineno
+        print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: _get_github_repo_info\033[0m")
+        print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
     return "unknown/unknown"
 
 # -----------------------------------------------------------------------------

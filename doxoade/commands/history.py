@@ -4,7 +4,7 @@ import sqlite3
 import os
 from colorama import Fore, Style
 from ..database import get_db_connection
-from ..shared_tools import ExecutionLogger, _format_timestamp, _get_code_snippet
+from ..shared_tools import ExecutionLogger, _format_timestamp
 
 def _render_context(content, target_line, context_lines, header_title, header_color):
     """Renderiza um bloco de código com destaque."""

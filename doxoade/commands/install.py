@@ -7,7 +7,7 @@ import json
 import click
 import ast
 from packaging.requirements import Requirement
-from importlib.metadata import version, PackageNotFoundError
+# [DOX-UNUSED] from importlib.metadata import PackageNotFoundError
 from importlib import metadata
 from colorama import Fore, Style
 

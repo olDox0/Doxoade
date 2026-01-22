@@ -72,7 +72,7 @@ def _print_finding_details(finding):
             click.echo(line_color + f"{prefix}{line_num:4}: {code_line}")
 
     if finding.get('import_suggestion'):
-        click.echo(Fore.CYAN + Style.BRIGHT + f"\n   > [ABDUÇÃO]")
+        click.echo(Fore.CYAN + Style.BRIGHT + "\n   > [ABDUÇÃO]")
         click.echo(Fore.GREEN + f"   {ICON_LIGHTBULB} SUGESTÃO:\n   > {finding.get('import_suggestion')}")
         return
 
@@ -98,7 +98,7 @@ def _print_finding_details(finding):
                     click.echo(Fore.GREEN + f"{prefix}{line_num:4}: {code_line}")
 
 def _print_summary(results, ignored_count):
-    summary = results.get('summary', {})
+# [DOX-UNUSED]     summary = results.get('summary', {})
     findings = results.get('findings', [])
     display_findings = [f for f in findings if f.get('hash') not in (ignored_count or set())]
     

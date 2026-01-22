@@ -3,7 +3,7 @@ import os
 import shutil
 import click
 from pathlib import Path
-from colorama import Fore, Style
+from colorama import Fore
 import uuid
 from ..shared_tools import ExecutionLogger
 

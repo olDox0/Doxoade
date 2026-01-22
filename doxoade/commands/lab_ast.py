@@ -1,7 +1,7 @@
 # doxoade/commands/lab_ast.py
 import click
 import json
-import sys
+# [DOX-UNUSED] import sys
 import os
 from colorama import Fore, Style
 
@@ -26,13 +26,13 @@ def lab_ast(target, reference):
       doxoade lab-ast arquivo.py           (Compara Disco vs Git HEAD)
       doxoade lab-ast velho.py novo.py     (Comparação explícita)
     """
-    click.echo(Fore.CYAN + f"--- [LAB-AST] Análise Estrutural V2 ---")
+    click.echo(Fore.CYAN + "--- [LAB-AST] Análise Estrutural V2 ---")
     
     # Modo 1: Comparação Explícita (Dois arquivos)
     if reference:
         file_old_path = target
         file_new_path = reference
-        click.echo(f"   > Modo: Comparação de Arquivos")
+        click.echo("   > Modo: Comparação de Arquivos")
         click.echo(f"   > Base: {file_old_path}")
         click.echo(f"   > Alvo: {file_new_path}")
         
@@ -42,7 +42,7 @@ def lab_ast(target, reference):
     # Modo 2: Comparação Git (Arquivo vs HEAD)
     else:
         file_new_path = target
-        click.echo(f"   > Modo: Integração Git (Worktree vs HEAD)")
+        click.echo("   > Modo: Integração Git (Worktree vs HEAD)")
         click.echo(f"   > Alvo: {file_new_path}")
         
         with open(file_new_path, 'r', encoding='utf-8') as f: code_new = f.read()
