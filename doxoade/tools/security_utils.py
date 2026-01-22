@@ -100,18 +100,43 @@ def generate_exploit_poc(function_name: str) -> str:
     """Generates a canary payload to prove vulnerability."""
     return "print('--- AEGIS BYPASS ATTEMPT ---')" if function_name in ['eval', 'exec'] else "whoami"
 
-def restricted_safe_exec(code_str: str, globals_dict: Optional[dict] = None):
-    """Executes code in a restricted sandbox (Aegis Shield)."""
-    safe_globals = {"__builtins__": {}}
-    if globals_dict: safe_globals.update(globals_dict)
+def restricted_safe_exec(code_str: str, globals_dict: Optional[dict] = None, allow_imports: bool = False):
+    import builtins
+    import sys
+    import os
+
+    safe_builtins = {}
+    if allow_imports:
+        # Injeção de funções e módulos essenciais para o Core
+        essential = [
+            '__import__', 'print', 'len', 'range', 'dict', 'list', 'set', 'tuple',
+            'str', 'int', 'float', 'bool', 'Exception', 'type', 'isinstance',
+            'iter', 'next', 'enumerate', 'zip', 'open', 'repr', 'getattr', 'setattr'
+        ]
+        for func in essential:
+            if hasattr(builtins, func):
+                safe_builtins[func] = getattr(builtins, func)
+        
+        # Módulos de sistema precisam estar acessíveis nos builtins para scripts do Core
+        safe_builtins['sys'] = sys
+        safe_builtins['os'] = os
+
+    safe_globals = {"__builtins__": safe_builtins}
+    if globals_dict:
+        safe_globals.update(globals_dict)
+    
     try:
         tree = ast.parse(code_str)
         for node in ast.walk(tree):
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
+            if not allow_imports and isinstance(node, (ast.Import, ast.ImportFrom)):
                 raise RuntimeError("Sandbox Breach: Dynamic imports forbidden.")
+            
             if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
-                raise RuntimeError(f"Sandbox Breach: Private access ({node.attr}) blocked.")
+                if node.attr not in ['__name__', '__file__', '__package__', '__path__']:
+                    raise RuntimeError(f"Sandbox Breach: Private access ({node.attr}) blocked.")
+
         compiled = compile(tree, filename="<sandbox>", mode="exec")
         exec(compiled, safe_globals) # noqa: B102
+        
     except Exception as e:
         raise RuntimeError(f"Aegis Sandbox Blocked: {e}")

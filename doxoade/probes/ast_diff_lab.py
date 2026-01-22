@@ -1,6 +1,6 @@
 import ast
 import json
-import sys
+# [DOX-UNUSED] import sys
 
 def get_ast_structure(code):
     """Simplifica a AST para comparação."""

@@ -206,7 +206,7 @@ def save(ctx, message: str, force: bool):
                 # [Lógica futura para auto-reversão de sintaxe]
                 pass
 
-            summary = results.get('summary', {})
+# [DOX-UNUSED]             summary = results.get('summary', {})
             # O commit só é bloqueado por erros reais (Code Breaking)
             blocking = [f for f in results.get('findings', []) if f['severity'] in ['CRITICAL', 'ERROR']]
             

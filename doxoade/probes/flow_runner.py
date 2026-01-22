@@ -1,330 +1,164 @@
+# -*- coding: utf-8 -*-
 # doxoade/probes/flow_runner.py
-"""
-Flow Runner é usado pelo doxoade run para analisar ao vivo o processamento do arquivo.
-Assim é obtido informações de performace e uso de variavies e funções.
-Até mesmo em outros arquivos usados, para identificar gargalos com facilidade.
-"""
 import sys
 import os
 import time
-#import inspect
-#import datetime
-#import json
+import argparse
+import warnings
+from colorama import Fore
 
-# Tenta configurar encoding seguro
-if hasattr(sys.stdout, 'reconfigure'):
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-    except Exception as e:
-        import logging
-        logging.error(f" FUNÇÃO - Exception: {e}")
+# [MPoT-14] Silenciador de interferência do interpretador (Python 3.12+)
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="opcode")
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="dis")
 
-#__all__ = ['']
+# CONFIGURAÇÕES TÉCNICAS (Nexus View)
+C_RESET, C_DIM, C_CYAN = '\033[0m', '\033[2m', '\033[96m'
+C_YELLOW, C_GREEN, C_RED = '\033[93m', '\033[92m', '\033[91m'
+C_WHITE, C_BORDER, C_MAGENTA = '\033[97m', '\033[90m', '\033[95m'
+C_BOLD = '\033[1m'
+SEP = f"{C_BORDER}│{C_RESET}"
 
-class FlowTracer:
-    def __init__(self, watch_var=None):
-        # Estado do Watchpoint
-        self.watch_var = watch_var
-        self.last_val_repr = None
-        self.var_found = False
-        
-        # Estado do Profiler (Matrix Mode/Legado)
-        self.start_time = time.time()
-        self.last_time = time.perf_counter()
-        self.last_filename = None  # [FIX] O culpado do último crash
-        self.last_lineno = 0       # [FIX] Prevenindo o próximo crash
-        
-        # Paleta de Cores (ANSI)
-        self.C_RESET = '\033[0m'
-        self.C_DIM = '\033[2m'
-        self.C_CYAN = '\033[96m'
-        self.C_YELLOW = '\033[93m'
-        self.C_GREEN = '\033[92m'
-        self.C_RED = '\033[91m'
-        self.C_MAGENTA = '\033[95m'
-        self.C_BLUE = '\033[94m'
-        self.C_BOLD = '\033[1m'
-        self.C_BORDER = '\033[90m' # Cinza escuro
-        self.C_WHITE = '\033[97m'  # Branco brilhante [CORREÇÃO]
-        
-        # Configuração de Layout (Largura Fixa)
-        self.W_TIME = 10
-        self.W_LOC = 25
-        self.W_CODE = 60
-        # Variables pega o resto
-        
-        self.sep = f"{self.C_BORDER}│{self.C_RESET}"
-        self._print_header()
+# Memória de Rastro (Global para ser acessível pela função estática)
+_STATE = {
+    'last_time': time.perf_counter(),
+    'last_locals': {},
+    'watch_var': None,
+    'slow_threshold': 0,
+    'script_path': '',
+    'var_found': False,
+    'last_val_repr': None
+}
 
-    def _print_header(self):
-        """Exibição da interface, com os contornos e bordas e os dados."""
-        # Cabeçalho Estilizado
-        line = f"{self.C_BORDER}{'─'*120}{self.C_RESET}"
-        print(line)
-        print(f"{self.C_CYAN}{self.C_BOLD} DOXOADE FLOW v2.0 (Nexus View){self.C_RESET} | Rastreando: {os.path.basename(sys.argv[0])}")
-        print(f" {self.C_DIM}Legenda:{self.C_RESET} {self.C_GREEN}<1ms{self.C_RESET} {self.C_CYAN}<10ms{self.C_RESET} {self.C_YELLOW}>100ms{self.C_RESET} {self.C_RED}>1s (Gargalo){self.C_RESET}")
-        
-        # Títulos das Colunas
-        h_time = "TEMPO".center(self.W_TIME)
-        h_loc = "ARQUIVO:LINHA".ljust(self.W_LOC)
-        h_code = "CÓDIGO EXECUTADO".ljust(self.W_CODE)
-        h_vars = "ESTADO / VARIÁVEIS"
-        
-        print(f"{self.C_BORDER}┌{'─'*self.W_TIME}┬{'─'*self.W_LOC}┬{'─'*self.W_CODE}┬{'─'*30}{self.C_RESET}")
-        print(f"{self.C_BORDER}│{self.C_RESET}{self.C_BOLD}{h_time}{self.C_RESET}{self.sep}{self.C_BOLD} {h_loc}{self.C_RESET}{self.sep}{self.C_BOLD} {h_code}{self.C_RESET}{self.sep}{self.C_BOLD} {h_vars}{self.C_RESET}")
-        print(f"{self.C_BORDER}├{'─'*self.W_TIME}┼{'─'*self.W_LOC}┼{'─'*self.W_CODE}┼{'─'*30}{self.C_RESET}")
-
-    def _safe_compare_changed(self, old_val, new_val):
-        """Compara valores de forma segura (Lazy support para NumPy/Pandas)."""
-        try:
-            # Se os valores forem simples, a comparação é imediata
-            if old_val == new_val: return False
-        except Exception:
-            # Se falhar (ex: comparando arrays), entramos na lógica de tipos complexos
-            
-            # PASC-6.1: Importamos apenas o necessário localmente
-            module_name = type(old_val).__module__.split('.')[0]
-            
-            if module_name == 'numpy':
-                import numpy as np
-                return not np.array_equal(old_val, new_val)
-                
-            if module_name == 'pandas':
-                try:
-                    import pandas as pd
-                    if isinstance(old_val, (pd.DataFrame, pd.Series)):
-                        return not old_val.equals(new_val)
-                except ImportError:
-                    return True # Se não tem pandas, assumimos que mudou para ser seguro
-                    
-        return True
-
-    def _format_time(self, seconds):
-        """Formata o tempo com cor baseada na duração."""
-        if seconds is None:
-            raise ValueError("_format_time: variavel 'seconds' não pode ser None.")
-        ms = seconds * 1000
-        text = f"{ms:.1f}ms" if ms < 1000 else f"{seconds:.2f}s"
-        
-        # Padding manual para garantir alinhamento (9 caracteres)
-        text = text.rjust(self.W_TIME - 1) + " "
-
-        if seconds > 1.0: return f"{self.C_RED}{self.C_BOLD}{text}{self.C_RESET}"
-        if seconds > 0.1: return f"{self.C_YELLOW}{text}{self.C_RESET}"
-        if seconds > 0.01: return f"{self.C_CYAN}{text}{self.C_RESET}"
-        return f"{self.C_GREEN}{self.C_DIM}{text}{self.C_RESET}"
-
-    def _format_code(self, line):
-        """Trunca e coloriza o código."""
-        if line is None:
-            raise ValueError("_format_code: variavel 'line' não pode ser None.")
-        max_len = self.W_CODE - 2
-        if len(line) > max_len:
-            line = line[:max_len-3] + "..."
-        
-        # Highlight básico
-        line = line.replace("import ", f"{self.C_MAGENTA}import {self.C_RESET}")
-        line = line.replace("from ", f"{self.C_MAGENTA}from {self.C_RESET}")
-        line = line.replace("def ", f"{self.C_BLUE}def {self.C_RESET}")
-        line = line.replace("class ", f"{self.C_BLUE}class {self.C_RESET}")
-        line = line.replace("return", f"{self.C_RED}return{self.C_RESET}")
-        
-        # Preenchimento com espaços para manter a coluna alinhada
-        # (Removemos cores para calcular tamanho real, depois recolocamos)
-        clean_len = len(line.replace(self.C_MAGENTA, "").replace(self.C_BLUE, "").replace(self.C_RED, "").replace(self.C_RESET, ""))
-        padding = " " * (self.W_CODE - clean_len - 1)
-        
-        return f" {line}{padding}"
-
-    def trace_calls(self, frame, event, arg): #noqa
-        """ """
-        if frame is None:
-            raise ValueError("trace_calls: variavel 'frame' não pode ser None.")
-        if event != 'line':
-            return self.trace_calls
-
-        # Lógica do Watchpoint
-        if self.watch_var:
-            if self.watch_var in frame.f_locals:
-                current_val = frame.f_locals[self.watch_var]
-                # Usamos repr() para comparar valor + tipo de forma segura e imutável
-                curr_repr = repr(current_val)
-                
-                # Encurta representações gigantes (como o dict do cache)
-                if len(curr_repr) > 100:
-                    preview = curr_repr[:100] + "..."
-                    # Adiciona meta-info se for dict ou list
-                    if isinstance(current_val, dict):
-                        curr_repr_display = f"<Dict len={len(current_val)}> {preview}"
-                    elif isinstance(current_val, list):
-                        curr_repr_display = f"<List len={len(current_val)}> {preview}"
-                    else:
-                        curr_repr_display = preview
-                else:
-                    curr_repr_display = curr_repr
-
-                if not self.var_found:
-                    self.var_found = True
-                    self.last_val_repr = curr_repr
-                    print(f"👀 [WATCH] Variável '{self.watch_var}' encontrada.")
-                    print(f"   Valor Inicial: {curr_repr_display}")
-                
-                elif curr_repr != self.last_val_repr:
-                    # MUTAÇÃO DETECTADA!
-                    lineno = frame.f_lineno
-                    filename = os.path.basename(frame.f_code.co_filename)
-                    
-                    # Tenta ler a linha do código
-                    try:
-                        import linecache
-                        line_content = linecache.getline(frame.f_code.co_filename, lineno).strip()
-                    except Exception as e:
-                        line_content = f"ERR:{e}"
-
-                    print(f"\n🚨 [MUTAÇÃO] '{self.watch_var}' alterada em {filename}:{lineno}")
-                    print(f"   Code : {line_content}")
-                    print(f"   Novo : {curr_repr_display}")
-                    
-                    self.last_val_repr = curr_repr
-            return self.trace_calls
-            
-        code = frame.f_code
-        filename = code.co_filename
-        fname_lower = filename.lower()
-        
-        # --- FILTROS ---
-        if "doxoade" in fname_lower and "probes" in fname_lower: return self.trace_calls
-        if not filename.endswith(".py"): return self.trace_calls
-        if "site-packages" in fname_lower: return self.trace_calls
-        if os.sep + "lib" + os.sep in fname_lower: return self.trace_calls 
-        # ---------------
-
-        current_time = time.perf_counter()
-        delta = current_time - self.last_time
-        self.last_time = current_time
-        
-        lineno = frame.f_lineno
-        
-        # --- PREPARAÇÃO DE DADOS ---
-        
-        # 1. Tempo
-        time_str = self._format_time(delta)
-        
-        # 2. Localização (Arquivo:Linha)
-        fname_base = os.path.basename(filename)
-        
-        # Diminui visualmente se for o mesmo arquivo da linha anterior
-        if fname_base == self.last_filename:
-            loc_display = f"{self.C_DIM}\" : {lineno:<4}{self.C_RESET}"
-        else:
-            loc_display = f"{self.C_WHITE}{fname_base}{self.C_DIM}:{lineno}{self.C_RESET}"
-            self.last_filename = fname_base
-            
-        # Garante alinhamento removendo caracteres de escape para cálculo
-        clean_loc = f"{fname_base}:{lineno}"
-        pad_loc = " " * (self.W_LOC - len(clean_loc) - 1)
-        # Se for muito longo, trunca
-        if len(clean_loc) > self.W_LOC - 1:
-            loc_display = f"{fname_base[:self.W_LOC-5]}...:{lineno}"
-            pad_loc = ""
-            
-        final_loc = f" {loc_display}{pad_loc}"
-
-        # 3. Código
-        try:
-            import linecache
-            line_content = linecache.getline(filename, lineno).strip()
-        except Exception:
-            line_content = "???"
-        
-        code_str = self._format_code(line_content)
-
-        # 4. Variáveis (Diff)
-        curr_locals = frame.f_locals.copy()
-        diffs = []
-        for name, val in curr_locals.items():
-            if name.startswith('__'): continue
-            if name not in self.last_locals or self._safe_compare_changed(self.last_locals.get(name), val):
-                try:
-                    val_str = str(val)
-                except Exception: val_str = "<?>" # <--- CORRIGIDO (era except:)
-                
-                val_str = val_str.replace('\n', ' ')
-                if len(val_str) > 30: val_str = val_str[:27] + "..."
-                
-                # Cor para variáveis: Nome (Cyan) = Valor (Amarelo)
-                diffs.append(f"{self.C_CYAN}{name}{self.C_DIM}={self.C_YELLOW}{val_str}{self.C_RESET}")
-        
-        self.last_locals = curr_locals
-        vars_str = ", ".join(diffs)
-        
-        # --- IMPRESSÃO ---
-        print(f"{self.C_BORDER}│{self.C_RESET}{time_str}{self.sep}{final_loc}{self.sep}{code_str}{self.sep} {vars_str}")
-        
-        return self.trace_calls
-
-def _setup_package_context(script_path):
-    """Permite imports relativos (copiado do debug_probe para consistência)."""
-    if script_path is None:
-        raise ValueError("_setup_package_context: variavel 'script_path' não pode ser None.")
+def _bootstrap_path(script_path):
     abs_path = os.path.abspath(script_path)
-    directory = os.path.dirname(abs_path)
-    package_parts = []
-    current = directory
-    while os.path.exists(os.path.join(current, '__init__.py')):
-        package_parts.insert(0, os.path.basename(current))
-        parent = os.path.dirname(current)
-        if parent == current: break
-        current = parent
-    if current not in sys.path: sys.path.insert(0, current)
-    return ".".join(package_parts) if package_parts else None
+    parts = abs_path.replace('\\', '/').split('/')
+    try:
+        idx = parts.index('doxoade')
+        project_root = "/".join(parts[:idx])
+        if project_root not in sys.path: sys.path.insert(0, project_root)
+        package_parts = []
+        current = os.path.dirname(abs_path)
+        while os.path.exists(os.path.join(current, '__init__.py')):
+            package_parts.insert(0, os.path.basename(current))
+            current = os.path.dirname(current)
+            if os.path.basename(current) == 'doxoade':
+                package_parts.insert(0, 'doxoade')
+                break
+        return ".".join(package_parts) if package_parts else None
+    except ValueError: return None
 
-def run_flow(abs_path, args, watch_var=None):
-    """Executa o sistema de leitura de fluxo dentro do Sandbox Aegis (MPoT-8.3)."""
-    if not abs_path:
-        raise ValueError("run_flow: absolute path is required.")
-        
-    package_name = _setup_package_context(abs_path)
-    sys.argv = [abs_path] + (args or [])
+def _format_time(seconds):
+    ms = seconds * 1000
+    text = f"{ms:.1f}ms".rjust(9)
+    if ms > 1000: return f"{C_RED}{seconds:.2f}s  {C_RESET}"
+    if ms > 100:  return f"{C_YELLOW}{text} {C_RESET}"
+    return f"{C_GREEN}{text} {C_RESET}"
 
-    tracer = FlowTracer(watch_var=watch_var)
-    print(f"--- Iniciando Trace (Watch: {watch_var}) ---")
+def _check_watch(frame):
+    """Monitora mutações de variáveis (Independente do escopo)."""
+    if _STATE['watch_var'] in frame.f_locals:
+        val = frame.f_locals[_STATE['watch_var']]
+        curr_repr = repr(val)
+        if curr_repr != _STATE['last_val_repr']:
+            print(f"\n🚨 {C_MAGENTA}[MUTAÇÃO]{C_RESET} {_STATE['watch_var']} {C_DIM}at {os.path.basename(frame.f_code.co_filename)}:{frame.f_lineno}")
+            print(f"   {C_BOLD}Novo Valor:{C_RESET} {C_YELLOW}{curr_repr[:100]}{C_RESET}")
+            _STATE['last_val_repr'] = curr_repr
+
+def static_trace_calls(frame, event, arg):
+    """
+    Função de rastro principal (Stateless).
+    MPoT-1: Protegida contra UnboundLocalError e corrupção de sandbox.
+    """
+    if event != 'line': return static_trace_calls
+
+    # 1. Filtro de Segurança Imediato (Evita avisos do Python 3.12)
+    filename = frame.f_code.co_filename
+    if "Lib" in filename or "site-packages" in filename or "probes" in filename:
+        return static_trace_calls
+
+    current_time = time.perf_counter()
+    elapsed = current_time - _STATE['last_time']
+    delta_ms = elapsed * 1000
+    _STATE['last_time'] = current_time
+
+    # 2. Processa Watch se ativo
+    if _STATE['watch_var']:
+        _check_watch(frame)
+
+    # 3. Filtro de Gargalo
+    if _STATE['slow_threshold'] > 0 and delta_ms < _STATE['slow_threshold']:
+        return static_trace_calls
+
+    # 4. Interface Nexus View
+    time_str = _format_time(elapsed)
+    loc = f" {os.path.basename(filename)}:{frame.f_lineno}".ljust(25)
     
-    # Contexto de execução
-    globs = {
-        '__name__': '__main__',
-        '__file__': abs_path,
-        '__package__': package_name
-    }
+    try:
+        import linecache
+        code_line = linecache.getline(filename, frame.f_lineno).strip()
+    except Exception as e:
+        import logging as _dox_log
+        _dox_log.error(f"[INFRA] static_trace_calls: {e}")
+        code_line = "???"
+    
+    # Diferencial de Variáveis
+    diffs = []
+    for name, val in frame.f_locals.items():
+        if name.startswith('__'): continue
+        if _STATE['last_locals'].get(name) != val:
+            v_str = str(val).replace('\n', ' ')
+            if len(v_str) > 25: v_str = v_str[:22] + "..."
+            diffs.append(f"{C_CYAN}{name}{C_DIM}={C_YELLOW}{v_str}{C_RESET}")
+    
+    _STATE['last_locals'] = frame.f_locals.copy()
+    print(f"{C_BORDER}│{C_RESET}{time_str}{SEP}{loc}{SEP} {code_line[:48].ljust(48)}{SEP} {', '.join(diffs)}")
+    
+    return static_trace_calls
 
-    # Ativa rastreio
-    sys.settrace(tracer.trace_calls)
+def run_flow(script_path, watch_var=None, slow_ms=0):
+    # Garantia de tipo MPoT-5 (Robustez)
+    try:
+        slow_ms = float(slow_ms)
+    except (ValueError, TypeError):
+        slow_ms = 0.0
+
+    _STATE['script_path'] = script_path
+    _STATE['watch_var'] = watch_var
+    _STATE['slow_threshold'] = slow_ms
+    
+    abs_path = os.path.abspath(script_path)
+    package_name = _bootstrap_path(abs_path)
+    
+    globs = {'__name__': '__main__', '__file__': abs_path, '__package__': package_name}
+
+    # Cabeçalho Nexus Gold
+    print(f"{C_BORDER}{'─'*115}{C_RESET}")
+    print(f"{C_CYAN}{C_BOLD} DOXOADE FLOW v2.3 (Stateless Gold){C_RESET} | Alvo: {os.path.basename(abs_path)}")
+    if int(slow_ms) > 0: print(f" {Fore.YELLOW}⚠️ [ MODO GARGALO ] Exibindo apenas linhas > {slow_ms}ms{C_RESET}")
+    print(f"{C_BORDER}┌{'─'*10}┬{'─'*25}┬{'─'*50}┬{'─'*25}┐{C_RESET}")
+
     try:
         with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
-            code_content = f.read()
-            
-        # PASC-6.6: Import localizado para segurança
-        from ..tools.security_utils import restricted_safe_exec
+            content = f.read()
+
+        from doxoade.tools.security_utils import restricted_safe_exec
         
-        # MUDANÇA CRÍTICA: Substituído exec() nativo pelo Sandbox
-        # Isso impede que o script alvo faça 'import os' ou 'subprocess'
-        restricted_safe_exec(code_content, globs)
+        sys.settrace(static_trace_calls)
+        try:
+            restricted_safe_exec(content, globs, allow_imports=True)
+        finally:
+            sys.settrace(None)
+            
+        print(f"{C_BORDER}{'─'*115}{C_RESET}")
+        print("--- Trace Finalizado ---")
         
     except Exception as e:
-        sys.settrace(None)
-        # Lázaro Protocol format
-        print(f"\n{Fore.RED}[CRASH] Execution Blocked: {e}{Style.RESET_ALL}")
-    finally:
-        sys.settrace(None)
-        print("\n--- Trace Finalizado ---")
+        print(f"\n{Fore.RED}[CRASH FLOW] {e}")
 
 if __name__ == "__main__":
-    # Exemplo de chamada: python flow_runner.py script.py --watch variavel
-    import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("script")
-    parser.add_argument("--watch", help="Variável para monitorar")
-    parser.add_argument("args", nargs=argparse.REMAINDER) # Captura o resto dos args
-    
-    opts = parser.parse_args()
-    run_flow(opts.script, opts.args, opts.watch)
+    parser.add_argument("--watch", default=None)
+    parser.add_argument("--slow", default=0)
+    args = parser.parse_args()
+    run_flow(args.script, args.watch, args.slow)

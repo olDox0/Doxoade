@@ -7,7 +7,7 @@ import threading
 import queue
 import sys
 import os
-import sqlite3
+# [DOX-UNUSED] import sqlite3
 from datetime import datetime, timezone
 
 # --- INFRAESTRUTURA ASYNC ---

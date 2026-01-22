@@ -16,7 +16,7 @@ from ..shared_tools import ExecutionLogger, _run_git_command, _present_diff_outp
 @click.option('--limit', default=5, help="Quantidade de commits para retroceder na análise.")
 def diff(path, revision_hash, show_legacy, limit, show_legacy_code):
     """Analisa diferenças de código e regressões de funcionalidade."""
-    from ..tools.git import _get_file_history_metadata
+# [DOX-UNUSED]     from ..tools.git import _get_file_history_metadata
     
     # 6.2: Parâmetros explícitos
     params = {'revision': revision_hash, 'legacy': show_legacy, 'lc': show_legacy_code}

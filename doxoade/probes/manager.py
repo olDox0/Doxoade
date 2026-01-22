@@ -1,6 +1,6 @@
 # doxoade/probes/manager.py
 import subprocess
-import sys
+# [DOX-UNUSED] import sys
 import os
 import json
 from typing import Optional, Dict, Any

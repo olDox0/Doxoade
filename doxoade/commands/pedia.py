@@ -2,12 +2,12 @@
 import click
 import json
 import os
-import glob
+# [DOX-UNUSED] import glob
 import shutil
 import textwrap
 import re
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple
 from colorama import Fore, Style, Back
 from ..shared_tools import _run_git_command
 # === CONFIGURAÇÃO ===
@@ -373,7 +373,7 @@ def _build_extra_info(article: dict) -> str:
     if 'linked_incident' in article:
         lines.append(f"**Incidente Relacionado:** `{article['linked_incident']}`")
     if 'message' in article and 'pattern' in article:  # Só para risk_rules
-        lines.append(f"\n**Mensagem:**")
+        lines.append("\n**Mensagem:**")
         lines.append(f"{article['message']}")
     
     # Campos especiais de postmortems.json
@@ -393,10 +393,10 @@ def _build_extra_info(article: dict) -> str:
     if 'fix' in article:
         lines.append(f"**Solução:** {article['fix']}")
     if 'story' in article:
-        lines.append(f"\n**História:**")
+        lines.append("\n**História:**")
         lines.append(article['story'])
     if 'lesson' in article:
-        lines.append(f"\n**Lição Aprendida:**")
+        lines.append("\n**Lição Aprendida:**")
         lines.append(f"> {article['lesson']}")
     
     # Campos especiais de roadmap.json

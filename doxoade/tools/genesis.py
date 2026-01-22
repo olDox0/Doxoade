@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# doxoade/tools/genesis.py
 """
 Motor Gênese & Abdução (v15.1 Gold).
 Responsável por sugerir correções (Inteligência Simbólica) e inferir imports.
@@ -9,9 +10,10 @@ import re
 import ast
 import os
 import sqlite3
-import logging
-from typing import List, Dict, Any, Optional, Tuple
-from doxoade.database import get_db_connection
+# [DOX-UNUSED] import logging
+from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
+# [DOX-UNUSED] from doxoade.database import get_db_connection
 
 # --- DADOS DE CONHECIMENTO (STDLIB & THIRD PARTY) ---
 # Mantidos para suportar a lógica de Abdução de Imports
@@ -141,56 +143,48 @@ def _try_apply_template(finding: Dict[str, Any], templates: List[sqlite3.Row]) -
             return True
     return False
 
-def _apply_native_intelligence(finding: Dict[str, Any], project_root: str):
-    """Regras universais ativadas por padrão."""
-    message = finding.get('message', '').lower()
-    category = finding.get('category', '').upper()
-    file_path = finding.get('file')
-    line_num = finding.get('line')
-
-    if not file_path or not line_num: return
-
-    # FIX: Regex mais flexível para capturar variações do erro de except
-    if "except:" in message or "except" in message and "exception" not in message:
-        _simulate_fix(finding, project_root, file_path, line_num, 
-                     r'except\s*:', 'except Exception:', 
-                     "REGRA NATIVA (Segurança)", "Restringir exceção")
-
-    elif "f-string is missing placeholders" in message:
-        _simulate_fix(finding, project_root, file_path, line_num, 
-                     r'\bf(["\'])', r'\1', 
-                     "REGRA NATIVA (Estilo)", "Remover prefixo 'f'")
-
-    elif "redefinition of unused" in message:
-        _simulate_fix(finding, project_root, file_path, line_num, 
-                     r'^(.*)$', r'# [DOX-UNUSED] \1', 
-                     "REGRA NATIVA", "Comentar redefinição")
-
-    elif category == 'COMPLEXITY':
-        # Para complexidade, injetamos um TODO acima da função
-        finding['suggestion_content'] = f"# TODO: Refatorar para reduzir complexidade (CC)\n"
-        finding['suggestion_line'] = line_num
-        finding['suggestion_source'] = "ARQUITETO"
-        finding['suggestion_action'] = "Adicionar nota de refatoração"
-
 def _enrich_findings_with_solutions(findings: List[Dict[str, Any]], project_root: str):
-    """Orquestrador. FIX: Agora exige e repassa o project_root."""
+    """MPoT-17: Rotula achados. Prioridade para Regras Nativas."""
     if not findings: return
+    for f in findings:
+        _apply_native_intelligence(f, project_root)
+
+def _apply_native_intelligence(finding: Dict[str, Any], project_root: str):
+    """Sentencia achados com IDs técnicos, filtrando riscos sintáticos."""
+    msg = finding.get('message', '').lower()
+    snippet = finding.get('snippet', {})
+    line_num = finding.get('line')
     
-    conn = get_db_connection()
-    try:
-        conn.row_factory = sqlite3.Row
-        templates = conn.execute("SELECT * FROM solution_templates ORDER BY confidence DESC").fetchall()
+    # 1. Recupera o conteúdo real da linha para análise de segurança
+    line_content = ""
+    if snippet and str(line_num) in snippet:
+        line_content = snippet[str(line_num)].strip()
+    elif snippet and line_num in snippet:
+        line_content = snippet[line_num].strip()
 
-        for f in findings:
-            if f.get('import_suggestion') or not f.get('file'):
-                continue
+    # --- ESCUDO MPoT: Proteção de Tuplas/Multiple Assignment ---
+    # Se a linha contém uma vírgula antes do '=', é perigoso comentar automaticamente
+    is_multiple_assignment = "," in line_content.split('=')[0] if '=' in line_content else False
 
-            # Prioridade: 1. Templates -> 2. Regras Nativas
-            if not _try_apply_template(f, project_root, templates):
-                _apply_native_intelligence(f, project_root)
-    finally:
-        conn.close()
+    # 2. Mapeamento de Sentenças (ID Técnico)
+    if "f-string is missing placeholders" in msg:
+        finding['suggestion_action'] = "REMOVE_F_PREFIX"
+    
+    elif "except:" in msg or ("except" in msg and ":" in msg and "exception" not in msg):
+        finding['suggestion_action'] = "RESTRICT_EXCEPTION"
+
+    elif "assigned to but never used" in msg:
+        # Só permite fix automático se NÃO for atribuição múltipla
+        if not is_multiple_assignment:
+            finding['suggestion_action'] = "REPLACE_WITH_UNDERSCORE"
+        else:
+            finding['suggestion_action'] = None # Requer intervenção humana
+
+    elif "imported but unused" in msg:
+        finding['suggestion_action'] = "FIX_UNUSED_IMPORT"
+
+    if finding.get('suggestion_action'):
+        finding['suggestion_source'] = "GÊNESE (Nativa)"
 
 def _enrich_with_dependency_analysis(findings: List[Dict[str, Any]], project_path: str):
     """Agrupa por arquivo e aplica abdução de dependências."""

@@ -10,7 +10,7 @@ import os
 import subprocess
 import shutil
 import uuid
-from typing import Optional
+# [DOX-UNUSED] from typing import Optional
 
 import click
 from colorama import Fore, Style

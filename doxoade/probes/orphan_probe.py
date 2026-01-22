@@ -12,7 +12,7 @@ import ast
 import sys
 import json
 import os
-from pathlib import Path
+# [DOX-UNUSED] from pathlib import Path
 
 class FunctionIndexer(ast.NodeVisitor):
     """Indexa todas as definições de funções."""
@@ -172,7 +172,7 @@ def main():
         findings = analyze_orphans(files)
         print(json.dumps(findings))
         
-    except Exception as e:
+    except Exception:
         # Retorna lista vazia em caso de erro (fail-safe)
         print("[]")
         sys.exit(0)

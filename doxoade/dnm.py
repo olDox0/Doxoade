@@ -23,19 +23,28 @@ class DNM:
         self.ignore_spec = self._load_ignore_spec()
 
     def _load_ignore_spec(self) -> pathspec.PathSpec:
-        """Carrega regras de ignore do TOML e padrões do sistema."""
+        """Carrega regras de ignore com fallback para Modo Genérico."""
         patterns = list(self.SYSTEM_IGNORES)
         
-        # 1. Carrega do pyproject.toml
-        config = _get_project_config(None, start_path=str(self.root))
-        toml_ignores = config.get('ignore', [])
-        patterns.extend(toml_ignores)
-        
-        # 2. Carrega do .gitignore (se existir) para paridade com Git
+        try:
+            # 1. Tenta carregar do TOML (se existir)
+            config = _get_project_config(None, start_path=str(self.root))
+            toml_ignores = config.get('ignore', [])
+            patterns.extend(toml_ignores)
+        except Exception: pass
+
+        # 2. Tenta carregar do .gitignore (se existir)
         gitignore = self.root / ".gitignore"
         if gitignore.exists():
-            with open(gitignore, "r", encoding="utf-8") as f:
-                patterns.extend(f.read().splitlines())
+            try:
+                with open(gitignore, "r", encoding="utf-8") as f:
+                    patterns.extend(f.read().splitlines())
+            except Exception: pass
+
+        # Se a lista estiver vazia (além do sistema), adiciona o básico
+        if len(patterns) == len(self.SYSTEM_IGNORES):
+            patterns.append("*.pyc")
+            patterns.append("__pycache__/")
 
         return pathspec.PathSpec.from_lines("gitwildmatch", patterns)
 

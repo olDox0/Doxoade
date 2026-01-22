@@ -1,7 +1,7 @@
 # doxoade/commands/think.py
 import click
 import time
-from colorama import Fore, Style
+from colorama import Fore
 from ..thinking.core import ThinkingCore
 
 @click.command('think')

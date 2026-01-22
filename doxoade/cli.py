@@ -7,12 +7,13 @@ Isolamento de Responsabilidade (MPoT-17).
 import time
 import sys
 import os
-from importlib import import_module
-from datetime import datetime
-from functools import wraps
-
 import click
-from colorama import init as colorama_init, Fore, Style
+from typing import List, Dict, Any, Optional 
+from importlib import import_module
+from colorama import init as colorama_init, Fore
+# [DOX-UNUSED] from functools import wraps
+# [DOX-UNUSED] from datetime import datetime
+
 
 # 1. Configuração de Ambiente (Bootstrap)
 if sys.stdout.encoding != 'utf-8':
@@ -37,12 +38,12 @@ class DoxoadeLazyGroup(click.Group):
         super().__init__(*args, **kwargs)
         # Mapeamento explícito: 'comando': 'modulo:atributo'
         self._lazy_map = {
-            'agent': 'doxoade.commands.agent:agent_cmd',
+# [sicdox]            'agent': 'doxoade.commands.agent:agent_cmd',
             'alfagold': 'doxoade.commands.alfagold:alfagold',
             'android': 'doxoade.commands.android:android_group',
             'apicheck': 'doxoade.commands.apicheck:apicheck',
             'auto': 'doxoade.commands.auto:auto',
-            'brain': 'doxoade.commands.brain:brain',
+# [sicdox]            'brain': 'doxoade.commands.brain:brain',
             'canonize': 'doxoade.commands.canonize:canonize',
             'check': 'doxoade.commands.check:check',
             'clean': 'doxoade.commands.clean:clean',
@@ -71,8 +72,8 @@ class DoxoadeLazyGroup(click.Group):
             'install': 'doxoade.commands.install:install',
             'intelligence': 'doxoade.commands.intelligence:intelligence',
             'kvcheck': 'doxoade.commands.kvcheck:kvcheck',
-            'lab': 'doxoade.commands.lab:lab',
-            'lab-ast': 'doxoade.commands.lab_ast:lab_ast',
+#            'lab': 'doxoade.commands.lab:lab',
+#            'lab-ast': 'doxoade.commands.lab_ast:lab_ast',
             'log': 'doxoade.commands.utils:log',
             'maestro': 'doxoade.commands.maestro:maestro',
             'merge': 'doxoade.commands.git_merge:merge',
@@ -95,13 +96,14 @@ class DoxoadeLazyGroup(click.Group):
             'self-test': 'doxoade.commands.self_test:self_test',
             'setup-health': 'doxoade.commands.utils:setup_health_cmd',
             'setup-regression': 'doxoade.commands.utils:setup_regression',
+            'sicdox': 'doxoade.commands.sicdox:sicdox_group',
             'show-trace': 'doxoade.commands.utils:show_trace',
             'style': 'doxoade.commands.style:style',
             'sync': 'doxoade.commands.git_workflow:sync',
             'telemetry': 'doxoade.commands.telemetry:telemetry',
             'test': 'doxoade.commands.test:test',
             'test-map': 'doxoade.commands.test_mapper:test_map',
-            'think': 'doxoade.commands.think:think',
+# [sicdox]            'think': 'doxoade.commands.think:think',
             'timeline': 'doxoade.commands.timeline:timeline',
             'tutorial': 'doxoade.commands.tutorial:tutorial_group',
             'venv-up': 'doxoade.commands.venv_up:venv_up',
@@ -121,9 +123,22 @@ class DoxoadeLazyGroup(click.Group):
             mod = import_module(module_path)
             return getattr(mod, attr_name)
         except Exception as e:
-            click.echo(f"{Fore.RED}[ERRO] Falha ao carregar '{name}': {e}")
+            import sys as _dox_sys, os as _dox_os
+            _, exc_obj, exc_tb = _dox_sys.exc_info()
+            
+            # Navega no traceback para encontrar o erro real no módulo de comando
+            while exc_tb.tb_next:
+                exc_tb = exc_tb.tb_next
+            
+            fname = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            line_number = exc_tb.tb_lineno
+            
+            # Chief-Gold Forensic UI
+            click.echo(f"\033[1;34m[ LAZY-LOAD FAIL ]\033[0m \033[1mCommand: {name}\033[0m")
+            click.echo(f"   \033[31m■ Archive : {fname} (Line: {line_number})")
+            click.echo(f"   ■ Exception: {type(e).__name__}: {e}\033[0m")
             return None
-
+            
 # 3. Grupo Principal
 @click.group(cls=DoxoadeLazyGroup, invoke_without_command=True)
 @click.option('--guard', is_flag=True, help="Ativa a verificação de integridade antes da execução.")
@@ -189,6 +204,19 @@ def dir_diagnose_cmd():
         click.echo(f"{Fore.GREEN}\n[OK] Infraestrutura de diretórios validada.")
     else:
         click.echo(f"{Fore.RED}\n[FALHA] O sistema se perde em subpastas.")
+
+@click.group('sicdox')
+def sicdox():
+    """Sistemas Cognitivos do Doxoade: Unificação de IA e Automação."""
+    pass
+
+# Adicionamos os subcomandos ao grupo
+@sicdox.command('directory')
+@click.argument('path', default='.')
+def sicdox_directory(path):
+    """Audita a percepção de pastas do SiCDox."""
+    from .diagnostic.directory_diagnose import auditar_percepcao_espacial
+    auditar_percepcao_espacial(path)
 
 def main():
     """Wrapper de execução blindado com encerramento de logs."""

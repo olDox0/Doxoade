@@ -1,0 +1,2286 @@
+[
+  {
+    "function": "_render_variable_analysis",
+    "score": 80,
+    "cc": 3,
+    "variables": {
+      "echo": {
+        "type": "Inferred",
+        "scope": "GLOBAL",
+        "addr": "0xCBB11ED8",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          102,
+          104,
+          105,
+          109
+        ]
+      },
+      "Fore": {
+        "type": "Inferred",
+        "scope": "GLOBAL",
+        "addr": "0x1DE3ED66",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          102,
+          109,
+          110,
+          111,
+          112
+        ]
+      },
+      "Style": {
+        "type": "Inferred",
+        "scope": "GLOBAL",
+        "addr": "0xAE284F90",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          102,
+          104,
+          105,
+          109,
+          110,
+          111,
+          112
+        ]
+      },
+      "n": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x7B8B965A",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          107,
+          109
+        ]
+      },
+      "m": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x6F8F5771",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          107,
+          108,
+          110,
+          111,
+          112
+        ]
+      },
+      "sorted": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x26DECC94",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          107
+        ]
+      },
+      "visitor": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x12787093",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          107
+        ]
+      },
+      "p_str": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x81C24374",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          108,
+          113
+        ]
+      },
+      "globals": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x0C54ED5F",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          108
+        ]
+      },
+      "p": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x83878C91",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "lines": [
+          108
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "visitor"
+      ],
+      [
+        "' '.join([globals().get(f'P_{p}', p) for p in m['purpose']])",
+        "processa ➔",
+        "p_str"
+      ]
+    ],
+    "issues": [
+      "Hibridismo UI/SYS (-20)"
+    ]
+  },
+  {
+    "function": "_render_comparison",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "dict": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xBB4C3743",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          115
+        ]
+      },
+      "echo": {
+        "type": "Inferred",
+        "scope": "GLOBAL",
+        "addr": "0xCBB11ED8",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          117,
+          122
+        ]
+      },
+      "Fore": {
+        "type": "Inferred",
+        "scope": "GLOBAL",
+        "addr": "0x1DE3ED66",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          117,
+          121
+        ]
+      },
+      "Style": {
+        "type": "Inferred",
+        "scope": "GLOBAL",
+        "addr": "0xAE284F90",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          117,
+          122
+        ]
+      },
+      "delta": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x63BCABF8",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          120,
+          121,
+          122
+        ]
+      },
+      "new": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x22AF645D",
+        "purpose": [
+          "OPER",
+          "CALC"
+        ],
+        "lines": [
+          120,
+          122
+        ]
+      },
+      "old": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x149603E6",
+        "purpose": [
+          "OPER",
+          "CALC"
+        ],
+        "lines": [
+          120,
+          122
+        ]
+      },
+      "color": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x70DDA5DF",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          121,
+          122
+        ]
+      },
+      "reverse": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x4D9C2073",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          121
+        ]
+      },
+      "label": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xD304BA20",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          122
+        ]
+      },
+      "echo_delta": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x7BF2810B",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          124,
+          125
+        ]
+      },
+      "old_rep": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x01681F74",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          124,
+          125
+        ]
+      },
+      "new_rep": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xE43BD8DB",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          124,
+          125
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "old_rep"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "new_rep"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "label"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "old"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "new"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "reverse"
+      ],
+      [
+        "new - old",
+        "processa ➔",
+        "delta"
+      ],
+      [
+        "(Fore.GREEN if delta <= 0 else Fore.RED) if reverse else Fore.GREEN if delta >= 0 else Fore.RED",
+        "processa ➔",
+        "color"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "calculate_architectural_score",
+    "score": 100,
+    "cc": 10,
+    "variables": {
+      "score": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xCA1CD3C3",
+        "purpose": [
+          "OPER",
+          "IO",
+          "CALC"
+        ],
+        "lines": [
+          131,
+          134,
+          136,
+          141,
+          142
+        ]
+      },
+      "penalties": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x71CAE69B",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          131,
+          134,
+          136,
+          141,
+          142
+        ]
+      },
+      "cc": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xE0323A90",
+        "purpose": [
+          "OPER",
+          "CALC"
+        ],
+        "lines": [
+          132,
+          133
+        ]
+      },
+      "p": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x83878C91",
+        "purpose": [
+          "OPER",
+          "CALC"
+        ],
+        "lines": [
+          133,
+          134,
+          138,
+          140,
+          141
+        ]
+      },
+      "any": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x100B8CAD",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          135
+        ]
+      },
+      "c": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x4A8A08F0",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          135
+        ]
+      },
+      "visitor": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x12787093",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          135,
+          138
+        ]
+      },
+      "dead_params": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x228D1F1A",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "lines": [
+          138,
+          139,
+          140
+        ]
+      },
+      "len": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xF5A8E923",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          140
+        ]
+      },
+      "max": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x2FFE4E77",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          142
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "visitor"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "cc"
+      ],
+      [
+        "(cc - 12) * 4",
+        "processa ➔",
+        "p"
+      ],
+      [
+        "[p for p in visitor.params if p not in visitor.read_vars and p != 'self']",
+        "processa ➔",
+        "dead_params"
+      ],
+      [
+        "len(dead_params) * 5",
+        "processa ➔",
+        "p"
+      ],
+      [
+        "(max(0, score), penalties)",
+        "finaliza ➔",
+        "EXIT"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "_render_deep_report",
+    "score": 12,
+    "cc": 29,
+    "variables": {
+      "score": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xCA1CD3C3",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          145,
+          147,
+          156,
+          170,
+          171
+        ]
+      },
+      "penalties": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x71CAE69B",
+        "purpose": [
+          "OPER",
+          "CALC"
+        ],
+        "lines": [
+          145,
+          147,
+          157,
+          203,
+          205
+        ]
+      },
+      "calculate_architectural_score": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xB8D2A235",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          145
+        ]
+      },
+      "visitor": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x12787093",
+        "purpose": [
+          "IO",
+          "OPER"
+        ],
+        "lines": [
+          145,
+          146,
+          147,
+          149,
+          157,
+          180,
+          190,
+          196,
+          197,
+          198,
+          199,
+          208,
+          210
+        ]
+      },
+      "cc": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xE0323A90",
+        "purpose": [
+          "IO",
+          "OPER"
+        ],
+        "lines": [
+          145,
+          147,
+          156,
+          172
+        ]
+      },
+      "serializable_vars": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x658C3C2C",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          146,
+          147,
+          148,
+          150,
+          157
+        ]
+      },
+      "k": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x8CE4B16B",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          146
+        ]
+      },
+      "v": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x9E3669D1",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          146
+        ]
+      },
+      "list": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x10AE9FC7",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          146,
+          152
+        ]
+      },
+      "sorted": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x26DECC94",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          146,
+          152,
+          180
+        ]
+      },
+      "current_report": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xEAB9A6A4",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "lines": [
+          147,
+          155,
+          160,
+          162,
+          166,
+          213
+        ]
+      },
+      "name": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xB068931C",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          147,
+          156,
+          169
+        ]
+      },
+      "var": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xB2145AAC",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          149,
+          150
+        ]
+      },
+      "meta": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xE9A23CBC",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          149,
+          151,
+          152
+        ]
+      },
+      "as_json": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x5BF37A34",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          160
+        ]
+      },
+      "compare_to": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x5DD4F9DE",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "lines": [
+          161,
+          162,
+          166
+        ]
+      },
+      "_render_comparison": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x4EE05DDF",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          162,
+          166
+        ]
+      },
+      "echo": {
+        "type": "Inferred",
+        "scope": "GLOBAL",
+        "addr": "0xCBB11ED8",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          169,
+          171,
+          172,
+          177,
+          178,
+          179,
+          182,
+          189,
+          192,
+          195,
+          197,
+          199,
+          202,
+          203,
+          205,
+          209,
+          210,
+          212
+        ]
+      },
+      "Fore": {
+        "type": "Inferred",
+        "scope": "GLOBAL",
+        "addr": "0x1DE3ED66",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          169,
+          170,
+          177,
+          182,
+          183,
+          184,
+          185,
+          189,
+          191,
+          192,
+          195,
+          196,
+          197,
+          198,
+          199,
+          202,
+          203,
+          205,
+          209,
+          210,
+          212
+        ]
+      },
+      "Style": {
+        "type": "Inferred",
+        "scope": "GLOBAL",
+        "addr": "0xAE284F90",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          169,
+          171,
+          172,
+          177,
+          178,
+          179,
+          182,
+          183,
+          184,
+          185,
+          189,
+          195,
+          202,
+          212
+        ]
+      },
+      "score_color": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xEC19D3DA",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          170,
+          171
+        ]
+      },
+      "show_vars": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x1281C97D",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          176
+        ]
+      },
+      "n": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x7B8B965A",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          180,
+          182,
+          208,
+          209,
+          210
+        ]
+      },
+      "m": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x6F8F5771",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          180,
+          181,
+          183,
+          184,
+          185,
+          208,
+          209
+        ]
+      },
+      "p_str": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x81C24374",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          181,
+          186
+        ]
+      },
+      "globals": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x0C54ED5F",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          181
+        ]
+      },
+      "p": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x83878C91",
+        "purpose": [
+          "OPER",
+          "IO",
+          "CALC"
+        ],
+        "lines": [
+          181,
+          196,
+          197,
+          205
+        ]
+      },
+      "show_flow": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xB62BEEDF",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          188
+        ]
+      },
+      "orig": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x025F2533",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "lines": [
+          190,
+          191,
+          192
+        ]
+      },
+      "action": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x418C5509",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          190,
+          192
+        ]
+      },
+      "dest": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x0B43C25C",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          190,
+          191,
+          192
+        ]
+      },
+      "c_o": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x0E81A4AA",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          191,
+          192
+        ]
+      },
+      "c_d": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x4FEAE835",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          191,
+          192
+        ]
+      },
+      "str": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x341BE97D",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          192
+        ]
+      },
+      "inputs": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xA8AFF967",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          196
+        ]
+      },
+      "outputs": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x25BEF4F2",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          198
+        ]
+      },
+      "r": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x4B43B0AE",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          198,
+          199
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "visitor"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "name"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "cc"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "as_json"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "show_vars"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "show_flow"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "compare_to"
+      ],
+      [
+        "{k: {**v, 'purpose': list(v['purpose']), 'lines': sorted(list(v['lines']))} for k, v in visitor.vars_meta.items()}",
+        "processa ➔",
+        "serializable_vars"
+      ],
+      [
+        "{'function': name, 'score': score, 'cc': cc, 'variables': serializable_vars, 'flow': visitor.flow_map, 'issues': penalties}",
+        "processa ➔",
+        "current_report"
+      ],
+      [
+        "{}",
+        "processa ➔",
+        "serializable_vars"
+      ],
+      [
+        "{'function': name, 'score': score, 'cc': cc, 'variables': serializable_vars, 'flow': visitor.flow_map, 'issues': penalties}",
+        "processa ➔",
+        "current_report"
+      ],
+      [
+        "current_report",
+        "finaliza ➔",
+        "EXIT"
+      ],
+      [
+        "Fore.GREEN if score > 80 else Fore.YELLOW if score > 50 else Fore.RED",
+        "processa ➔",
+        "score_color"
+      ],
+      [
+        "' '.join([globals().get(f'P_{p}', p) for p in m['purpose']])",
+        "processa ➔",
+        "p_str"
+      ],
+      [
+        "[f'{Fore.MAGENTA}{p}{Fore.RESET}' for p in visitor.params.keys()]",
+        "processa ➔",
+        "inputs"
+      ],
+      [
+        "[f'{Fore.GREEN}{r['value']}{Fore.RESET}' for r in visitor.returns]",
+        "processa ➔",
+        "outputs"
+      ],
+      [
+        "current_report",
+        "finaliza ➔",
+        "EXIT"
+      ]
+    ],
+    "issues": [
+      "CC alta (-68)",
+      "Hibridismo UI/SYS (-20)"
+    ]
+  },
+  {
+    "function": "__init__",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "self": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x590F53E8",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          17,
+          18,
+          19
+        ]
+      },
+      "module_imports": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x11BD29C1",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          17
+        ]
+      },
+      "set": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xCDAEEEBA",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          17,
+          19
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "module_imports"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "_get_static_addr",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "hashlib": {
+        "type": "Inferred",
+        "scope": "GLOBAL",
+        "addr": "0x011B172C",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          23
+        ]
+      },
+      "name": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xB068931C",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          23
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "name"
+      ],
+      [
+        "f'0x{hashlib.md5(name.encode()).hexdigest()[:8].upper()}'",
+        "finaliza ➔",
+        "EXIT"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "_detect_purpose",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "p": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x83878C91",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "lines": [
+          28,
+          29,
+          30,
+          31,
+          32
+        ]
+      },
+      "getattr": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x4F28611E",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          28
+        ]
+      },
+      "node": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x36C45369",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          28
+        ]
+      },
+      "isinstance": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x96349D86",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          29,
+          30,
+          31,
+          32
+        ]
+      },
+      "ast": {
+        "type": "Inferred",
+        "scope": "GLOBAL",
+        "addr": "0x7C3A6C0F",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          29,
+          30,
+          31,
+          32
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "node"
+      ],
+      [
+        "getattr(node, 'parent', None)",
+        "processa ➔",
+        "p"
+      ],
+      [
+        "'CALC'",
+        "finaliza ➔",
+        "EXIT"
+      ],
+      [
+        "'IO'",
+        "finaliza ➔",
+        "EXIT"
+      ],
+      [
+        "'OPER'",
+        "finaliza ➔",
+        "EXIT"
+      ],
+      [
+        "'CONST'",
+        "finaliza ➔",
+        "EXIT"
+      ],
+      [
+        "'OPER'",
+        "finaliza ➔",
+        "EXIT"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "visit_Name",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "node": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x36C45369",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "lines": [
+          36,
+          37,
+          38,
+          39,
+          48,
+          49,
+          50
+        ]
+      },
+      "name": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xB068931C",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "lines": [
+          37,
+          38,
+          39,
+          41,
+          42,
+          43,
+          48,
+          49
+        ]
+      },
+      "isinstance": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x96349D86",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          38,
+          39
+        ]
+      },
+      "ast": {
+        "type": "Inferred",
+        "scope": "GLOBAL",
+        "addr": "0x7C3A6C0F",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          38,
+          39
+        ]
+      },
+      "self": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x590F53E8",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          38,
+          39,
+          41,
+          42,
+          43,
+          48,
+          49,
+          50
+        ]
+      },
+      "scope": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x31A1FD14",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          42,
+          43
+        ]
+      },
+      "set": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xCDAEEEBA",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          43
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "node"
+      ],
+      [
+        "node.id",
+        "processa ➔",
+        "name"
+      ],
+      [
+        "'GLOBAL' if name in self.module_imports else 'LOCAL'",
+        "processa ➔",
+        "scope"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "visit_Call",
+    "score": 80,
+    "cc": 1,
+    "variables": {
+      "full_name": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x73037E23",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          54,
+          55
+        ]
+      },
+      "ast": {
+        "type": "Inferred",
+        "scope": "GLOBAL",
+        "addr": "0x7C3A6C0F",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          54
+        ]
+      },
+      "node": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x36C45369",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "lines": [
+          54,
+          55,
+          67
+        ]
+      },
+      "self": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x590F53E8",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          55,
+          67
+        ]
+      },
+      "any": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x100B8CAD",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          55
+        ]
+      },
+      "x": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x9DD4E461",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          55
+        ]
+      },
+      "UI_KEYWORDS": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x0E76E265",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          55
+        ]
+      },
+      "SYS_KEYWORDS": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xC1234F2D",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          55
+        ]
+      },
+      "Exception": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xB0D4998A",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          61
+        ]
+      },
+      "exc_tb": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x26D34871",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          63,
+          64,
+          65
+        ]
+      },
+      "dox_exc_sys": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xC24A978C",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          63
+        ]
+      },
+      "fname": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xA3DA707B",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          64,
+          66
+        ]
+      },
+      "os": {
+        "type": "Inferred",
+        "scope": "GLOBAL",
+        "addr": "0xDD302F94",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          64
+        ]
+      },
+      "line_number": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xB95ACBD8",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          65,
+          66
+        ]
+      },
+      "print": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xF7531E2D",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          66
+        ]
+      },
+      "e": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xE1671797",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          66
+        ]
+      },
+      "exc_obj": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x46DC6C2B",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          66
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "node"
+      ],
+      [
+        "ast.unparse(node.func)",
+        "processa ➔",
+        "full_name"
+      ],
+      [
+        "dox_exc_sys.exc_info()",
+        "processa ➔",
+        "exc_tb"
+      ],
+      [
+        "os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]",
+        "processa ➔",
+        "fname"
+      ],
+      [
+        "exc_tb.tb_lineno",
+        "processa ➔",
+        "line_number"
+      ]
+    ],
+    "issues": [
+      "Hibridismo UI/SYS (-20)"
+    ]
+  },
+  {
+    "function": "visit_FunctionDef",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "arg": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x61DD86C2",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          70,
+          71,
+          73
+        ]
+      },
+      "node": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x36C45369",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "lines": [
+          70,
+          75,
+          76
+        ]
+      },
+      "name": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xB068931C",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "lines": [
+          71,
+          72,
+          73,
+          74
+        ]
+      },
+      "addr": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x3EF9A0D7",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          72,
+          73
+        ]
+      },
+      "self": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x590F53E8",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          72,
+          73,
+          74,
+          75,
+          76
+        ]
+      },
+      "ast": {
+        "type": "Inferred",
+        "scope": "GLOBAL",
+        "addr": "0x7C3A6C0F",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          73,
+          75
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "node"
+      ],
+      [
+        "arg.arg",
+        "processa ➔",
+        "name"
+      ],
+      [
+        "self._get_static_addr(name)",
+        "processa ➔",
+        "addr"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "visit_Assign",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "target": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x42AEFBAE",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "lines": [
+          79,
+          80,
+          82
+        ]
+      },
+      "node": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x36C45369",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "lines": [
+          79,
+          81,
+          82,
+          84
+        ]
+      },
+      "isinstance": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x96349D86",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          80
+        ]
+      },
+      "ast": {
+        "type": "Inferred",
+        "scope": "GLOBAL",
+        "addr": "0x7C3A6C0F",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          80,
+          81,
+          82
+        ]
+      },
+      "value_repr": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xE637ADBF",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          81
+        ]
+      },
+      "self": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x590F53E8",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          82,
+          84
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "node"
+      ],
+      [
+        "ast.unparse(node.value)",
+        "processa ➔",
+        "value_repr"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "visit_Return",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "val": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x3A6D0284",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          87,
+          88,
+          89
+        ]
+      },
+      "node": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x36C45369",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "lines": [
+          87,
+          88,
+          90
+        ]
+      },
+      "ast": {
+        "type": "Inferred",
+        "scope": "GLOBAL",
+        "addr": "0x7C3A6C0F",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          87
+        ]
+      },
+      "self": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x590F53E8",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          88,
+          89,
+          90
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "node"
+      ],
+      [
+        "ast.unparse(node.value) if node.value else 'None'",
+        "processa ➔",
+        "val"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "visit_Try",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "handler": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xC1CBFE27",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          93,
+          94,
+          95
+        ]
+      },
+      "node": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x36C45369",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "lines": [
+          93,
+          96
+        ]
+      },
+      "self": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x590F53E8",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          94,
+          96
+        ]
+      },
+      "any": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x100B8CAD",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          95
+        ]
+      },
+      "isinstance": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x96349D86",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          95
+        ]
+      },
+      "s": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x03C7C0AC",
+        "purpose": [
+          "IO",
+          "OPER"
+        ],
+        "lines": [
+          95
+        ]
+      },
+      "ast": {
+        "type": "Inferred",
+        "scope": "GLOBAL",
+        "addr": "0x7C3A6C0F",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          95
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "node"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "echo_delta",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "delta": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x63BCABF8",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          120,
+          121,
+          122
+        ]
+      },
+      "new": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x22AF645D",
+        "purpose": [
+          "OPER",
+          "CALC"
+        ],
+        "lines": [
+          120,
+          122
+        ]
+      },
+      "old": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x149603E6",
+        "purpose": [
+          "OPER",
+          "CALC"
+        ],
+        "lines": [
+          120,
+          122
+        ]
+      },
+      "color": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x70DDA5DF",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          121,
+          122
+        ]
+      },
+      "reverse": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0x4D9C2073",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          121
+        ]
+      },
+      "Fore": {
+        "type": "Inferred",
+        "scope": "GLOBAL",
+        "addr": "0x1DE3ED66",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          121
+        ]
+      },
+      "echo": {
+        "type": "Inferred",
+        "scope": "GLOBAL",
+        "addr": "0xCBB11ED8",
+        "purpose": [
+          "IO"
+        ],
+        "lines": [
+          122
+        ]
+      },
+      "label": {
+        "type": "Inferred",
+        "scope": "LOCAL",
+        "addr": "0xD304BA20",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          122
+        ]
+      },
+      "Style": {
+        "type": "Inferred",
+        "scope": "GLOBAL",
+        "addr": "0xAE284F90",
+        "purpose": [
+          "OPER"
+        ],
+        "lines": [
+          122
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "label"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "old"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "new"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "reverse"
+      ],
+      [
+        "new - old",
+        "processa ➔",
+        "delta"
+      ],
+      [
+        "(Fore.GREEN if delta <= 0 else Fore.RED) if reverse else Fore.GREEN if delta >= 0 else Fore.RED",
+        "processa ➔",
+        "color"
+      ]
+    ],
+    "issues": []
+  }
+]

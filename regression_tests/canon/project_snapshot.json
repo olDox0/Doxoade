@@ -1,11 +1,11 @@
 {
-  "timestamp": "2026-01-16T17:23:54.748806",
-  "git_hash": "e4e719a4731111f55b89c56cdbe0da77f78940c4",
+  "timestamp": "2026-01-16T21:11:15.539432",
+  "git_hash": "df4622de13953ae58e9a4382a5cd0d08978d5843",
   "static_analysis": {
     "summary": {
       "critical": 0,
       "errors": 0,
-      "warnings": 186,
+      "warnings": 181,
       "info": 3
     },
     "findings": [
@@ -2632,75 +2632,6 @@
       },
       {
         "severity": "WARNING",
-        "category": "STYLE",
-        "message": "'os' imported but unused",
-        "hash": "973dc29d8c0493f22ce175b703a69a21d8e48fd21bbe87e6d3ef68d1de35b8c8",
-        "file": "doxoade\\commands\\regression_test.py",
-        "line": 6,
-        "details": null,
-        "snippet": {
-          "4": "Provides detailed evidence-based comparison.",
-          "5": "\"\"\"",
-          "6": "import os",
-          "7": "import sys",
-          "8": "from click import command, option, echo"
-        },
-        "suggestion_content": null,
-        "suggestion_line": null,
-        "suggestion_source": null,
-        "suggestion_action": null,
-        "import_suggestion": null,
-        "dependency_type": null,
-        "missing_import": null
-      },
-      {
-        "severity": "WARNING",
-        "category": "STYLE",
-        "message": "'..shared_tools.CANON_DIR' imported but unused",
-        "hash": "b38a3493f4eda27d9793496c2715d38f5d4ab4e6f5a450a6715818bdc0a1442e",
-        "file": "doxoade\\commands\\regression_test.py",
-        "line": 10,
-        "details": null,
-        "snippet": {
-          "8": "from click import command, option, echo",
-          "9": "from colorama import Style, Fore",
-          "10": "from ..shared_tools import ExecutionLogger, CANON_DIR, _present_diff_output",
-          "11": "",
-          "12": "__all__ = ['regression_test']"
-        },
-        "suggestion_content": null,
-        "suggestion_line": null,
-        "suggestion_source": null,
-        "suggestion_action": null,
-        "import_suggestion": null,
-        "dependency_type": null,
-        "missing_import": null
-      },
-      {
-        "severity": "WARNING",
-        "category": "STYLE",
-        "message": "'..shared_tools._present_diff_output' imported but unused",
-        "hash": "6a87027afc6ade99bdcc94d78fc94974ea8a3b3901cd23237f1bdf342643426f",
-        "file": "doxoade\\commands\\regression_test.py",
-        "line": 10,
-        "details": null,
-        "snippet": {
-          "8": "from click import command, option, echo",
-          "9": "from colorama import Style, Fore",
-          "10": "from ..shared_tools import ExecutionLogger, CANON_DIR, _present_diff_output",
-          "11": "",
-          "12": "__all__ = ['regression_test']"
-        },
-        "suggestion_content": null,
-        "suggestion_line": null,
-        "suggestion_source": null,
-        "suggestion_action": null,
-        "import_suggestion": null,
-        "dependency_type": null,
-        "missing_import": null
-      },
-      {
-        "severity": "WARNING",
         "category": "COMPLEXITY",
         "message": "Função 'rewind' complexa (CC: 15).",
         "hash": "7df740d9e86a679e960a4ba569f4980dcf3a42f3d9e5b8ae1eee0395679cc911",
@@ -2713,29 +2644,6 @@
           "15": "def rewind(file_path, commit, show_list):",
           "16": "    \"\"\"",
           "17": "    Reverte um arquivo para uma versão anterior (Time Travel)."
-        },
-        "suggestion_content": "# TODO: Refatorar para reduzir complexidade (CC)\n",
-        "suggestion_line": null,
-        "suggestion_source": null,
-        "suggestion_action": "Adicionar nota de refatoração",
-        "import_suggestion": null,
-        "dependency_type": null,
-        "missing_import": null
-      },
-      {
-        "severity": "WARNING",
-        "category": "COMPLEXITY",
-        "message": "Função 'run' complexa (CC: 25).",
-        "hash": "dae2c2c4a5dbe0d9b9760d595f01f95e9970ca18ea45f07ad6c93d3dedaac461",
-        "file": "doxoade\\commands\\run.py",
-        "line": 125,
-        "details": null,
-        "snippet": {
-          "123": "@click.argument('target', required=False)",
-          "124": "@click.pass_context",
-          "125": "def run(ctx, flow, internal, target):",
-          "126": "    \"\"\"",
-          "127": "    Executor Universal com Telemetria (MaxTelemetry)."
         },
         "suggestion_content": "# TODO: Refatorar para reduzir complexidade (CC)\n",
         "suggestion_line": null,
@@ -4192,29 +4100,6 @@
       },
       {
         "severity": "WARNING",
-        "category": "COMPLEXITY",
-        "message": "Função '_classify_sink_node' complexa (CC: 17).",
-        "hash": "858cfd72956fbb85bdae25bd12b86e3343fe2131d4ffe81f9ab4991149cb8600",
-        "file": "doxoade\\tools\\security_utils.py",
-        "line": 73,
-        "details": null,
-        "snippet": {
-          "71": "    return vulns",
-          "72": "",
-          "73": "def _classify_sink_node(node: ast.Call, func_id: str, taint_map: dict) -> Dict:",
-          "74": "    \"\"\"",
-          "75": "    Classificador Sofisticado de Sinks (Aegis-Protocol)."
-        },
-        "suggestion_content": "# TODO: Refatorar para reduzir complexidade (CC)\n",
-        "suggestion_line": null,
-        "suggestion_source": null,
-        "suggestion_action": "Adicionar nota de refatoração",
-        "import_suggestion": null,
-        "dependency_type": null,
-        "missing_import": null
-      },
-      {
-        "severity": "WARNING",
         "category": "STYLE",
         "message": "'alfagold.core.adaptive_router.AdaptiveRouter' imported but unused",
         "hash": "9eb875b2b89dedc5ff991fdd86aa732eca579ae5a50b06a28f575305cc1b6b06",
@@ -4768,6 +4653,6 @@
   "test_execution": {
     "exit_code": 2,
     "status": "FAIL",
-    "summary": "======================= 3 warnings, 12 errors in 21.44s ======================="
+    "summary": "================= 3 warnings, 13 errors in 170.12s (0:02:50) =================="
   }
 }
