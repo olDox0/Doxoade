@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # doxoade/chronos.py
 import os
 import sys
@@ -31,9 +32,44 @@ class ResourceMonitor(threading.Thread):
             'memory_mb': 0.0,
             'io_read_start': 0,
             'io_write_start': 0,
-            'io_read_end': 0,
-            'io_write_end': 0
+            'io_read_max': 0,
+            'io_write_max': 0
         }
+
+    def _update_tree_metrics(self, parent_proc):
+        """Varre a árvore e acumula métricas de I/O e picos de RAM (MPoT-12)."""
+        cpu_total = 0.0
+        mem_total = 0.0
+        r_tree = 0
+        w_tree = 0
+        
+        try:
+            # Lista todos os processos da árvore (Pai + Filhos vivos)
+            procs = [parent_proc] + parent_proc.children(recursive=True)
+            for p in procs:
+                try:
+                    # CPU e RAM (Picos Instantâneos)
+                    cpu_total += p.cpu_percent(interval=None)
+                    mem_total += p.memory_info().rss
+                    
+                    # I/O (Valores Acumulados)
+                    # Como processos filhos morrem, guardamos o maior valor visto na árvore
+                    io = p.io_counters()
+                    r_tree += io.read_bytes
+                    w_tree += io.write_bytes
+                except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
+                    continue
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+        # Atualiza Picos de CPU/RAM
+        if cpu_total > self.peaks['cpu_percent']: self.peaks['cpu_percent'] = cpu_total
+        if (mem_total / (1024*1024)) > self.peaks['memory_mb']: 
+            self.peaks['memory_mb'] = mem_total / (1024*1024)
+            
+        # Atualiza Máximos de I/O (Estratégia de Retenção)
+        if r_tree > self.peaks['io_read_max']: self.peaks['io_read_max'] = r_tree
+        if w_tree > self.peaks['io_write_max']: self.peaks['io_write_max'] = w_tree
 
     def _get_process_tree_stats(self, parent_proc):
         """[NOVO] Soma recursos da árvore de processos (Pai + Filhos)."""
@@ -80,13 +116,17 @@ class ResourceMonitor(threading.Thread):
         try:
             parent = psutil.Process(self.pid)
             parent.cpu_percent(interval=None)
-            
-            r_start, w_start = self._get_tree_io(parent)
-            self.peaks['io_read_start'] = r_start
-            self.peaks['io_write_start'] = w_start
+            parent = psutil.Process(self.pid)
+            # Baseline inicial
+            try:
+                io_init = parent.io_counters()
+                self.peaks['io_read_start'] = io_init.read_bytes
+                self.peaks['io_write_start'] = io_init.write_bytes
+            except: pass
 
             while self.running:
-                time.sleep(0.5) 
+                self._update_tree_metrics(parent)
+                time.sleep(0.3)
                 
                 cpu, mem = self._get_process_tree_stats(parent)
                 
@@ -104,16 +144,26 @@ class ResourceMonitor(threading.Thread):
         self.running = False
 
     def get_stats(self):
-        # [FIX] Garante cálculo de IO mesmo se processo morreu rápido
-        read_bytes = max(0, self.peaks['io_read_end'] - self.peaks['io_read_start'])
-        write_bytes = max(0, self.peaks['io_write_end'] - self.peaks['io_write_start'])
+        """Calcula o delta real de I/O processado."""
+        # O delta é o maior valor de I/O visto menos o ponto de partida
+        read_bytes = max(0, self.peaks['io_read_max'] - self.peaks['io_read_start'])
+        write_bytes = max(0, self.peaks['io_write_max'] - self.peaks['io_write_start'])
         
         return {
             'cpu': round(self.peaks['cpu_percent'], 1),
             'ram': round(self.peaks['memory_mb'], 1),
-            'read': round(read_bytes / (1024*1024), 2),
-            'write': round(write_bytes / (1024*1024), 2)
+            'read': round(read_bytes / (1024*1024), 3), # Precisão aumentada
+            'write': round(write_bytes / (1024*1024), 3)
         }
+
+    def _check_memory_safety(self, mem_mb):
+        """Aegis Guard: Impede que o Doxoade devore a RAM do usuário (Leak protection)."""
+        RAM_SAFETY_THRESHOLD = 1024.0 # 1GB limite rígido para o processo Doxoade
+        
+        if mem_mb > RAM_SAFETY_THRESHOLD:
+            print(f"\n🚨 {Fore.RED}[AEGIS MEMORY GUARD]{Fore.RESET} Doxoade excedeu limite de segurança (1GB).")
+            print("   > Abortando tarefa para evitar instabilidade no Windows.")
+            os._exit(1) # Fail-Stop Mensurável (MPoT-15)
 
 # --- CodeSampler Mantido Igual ---
 class CodeSampler(threading.Thread):

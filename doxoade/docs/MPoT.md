@@ -19,8 +19,11 @@
 *   **Regra:** Todo loop deve ter um limite superior ou timeout. Em processamento de massa (Busca/Check), use **Generators** para manter o uso de RAM constante.
 
 ### 3. Alocação e Persistência Assíncrona
-*   **Regra:** Proibido I/O de banco de dados na thread principal de comandos sensíveis. Use o **Async Buffer Pattern** (DoxoLogWorker).
+- **3.1. Regra:** Proibido I/O de banco de dados na thread principal de comandos sensíveis. Use o **Async Buffer Pattern** (`DoxoLogWorker`).
 *   **Porquê:** Elimina latências de disco (fsync) e protege contra travamentos no Windows/Termux.
+- **3.2. Regra:** Proibido I/O síncrono ou alocação dinâmica incontrolada em loops de massa.
+*   **Implementação:** Uso obrigatório da `MemoryArena` para achados e `UFS` para leitura de código.
+*   **PASC Link:** Lei 6.4 (Well-Processing).
 
 ### 4. Funções Curtas (Expert-Split)
 *   **Regra:** Limite rígido de **60 linhas** por função. Funções de interface devem ser decompostas em sub-renderizadores especialistas.
@@ -62,6 +65,8 @@
 
 ### 12. Telemetria de Baixo Custo (Chronos v2)
 *   O monitoramento não deve alterar o comportamento do sistema. O custo de observabilidade deve ser inferior a 2% do tempo total de CPU.
+*   **Regra:** O monitoramento deve incluir Telemetria de Árvore (Pai + Filhos) e detecção de I/O Read/Write granular.
+*   **Aegis Memory Guard:** Disjuntor automático em 1GB de RAM para proteção do SO.
 
 ### 13. Soberania da Biblioteca Padrão (No-Giant-Libs)
 *   Priorize a `stdlib`. Bibliotecas gigantes (Pandas/LXML) devem ser opcionais e instaladas apenas via `optional-dependencies`.

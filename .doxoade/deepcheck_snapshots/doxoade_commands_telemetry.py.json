@@ -1,0 +1,723 @@
+[
+  {
+    "function": "telemetry",
+    "score": 80,
+    "cc": 2,
+    "variables": {
+      "conn": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x0C1D0E2E",
+        "lines": [
+          20,
+          21,
+          22,
+          30
+        ]
+      },
+      "get_db_connection": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x764A99DE",
+        "lines": [
+          20
+        ]
+      },
+      "sqlite3": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xDC2DEB24",
+        "lines": [
+          21
+        ]
+      },
+      "cursor": {
+        "type": "Inferred",
+        "purpose": [
+          "IO",
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x1791A97A",
+        "lines": [
+          22,
+          26,
+          28
+        ]
+      },
+      "stats": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x44650105",
+        "lines": [
+          25
+        ]
+      },
+      "_handle_stats_view": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xAD67E069",
+        "lines": [
+          26
+        ]
+      },
+      "command": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x1DCCADFE",
+        "lines": [
+          26,
+          28
+        ]
+      },
+      "_handle_history_view": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xF58CAA92",
+        "lines": [
+          28
+        ]
+      },
+      "limit": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xAA9F73EE",
+        "lines": [
+          28
+        ]
+      },
+      "verbose": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x2C7AEA42",
+        "lines": [
+          28
+        ]
+      },
+      "click": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xA8AFFC08",
+        "lines": [
+          13,
+          14,
+          15,
+          16,
+          17
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "limit"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "command"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "stats"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "verbose"
+      ],
+      [
+        "get_db_connection()",
+        "processa ➔",
+        "conn"
+      ],
+      [
+        "conn.cursor()",
+        "processa ➔",
+        "cursor"
+      ]
+    ],
+    "issues": [
+      "Hibridismo UI/SYS (-20)"
+    ]
+  },
+  {
+    "function": "_handle_stats_view",
+    "score": 100,
+    "cc": 2,
+    "variables": {
+      "query": {
+        "type": "Inferred",
+        "purpose": [
+          "IO",
+          "OPER",
+          "CALC"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x1B1CC7F0",
+        "lines": [
+          33,
+          35,
+          36
+        ]
+      },
+      "command_filter": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x39B8DA76",
+        "lines": [
+          34,
+          35
+        ]
+      },
+      "cursor": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x1791A97A",
+        "lines": [
+          36,
+          37
+        ]
+      },
+      "stats": {
+        "type": "Inferred",
+        "purpose": [
+          "IO",
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x44650105",
+        "lines": [
+          37,
+          38
+        ]
+      },
+      "utils": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x2B3583E6",
+        "lines": [
+          37
+        ]
+      },
+      "io": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xF98ED07A",
+        "lines": [
+          38
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "cursor"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "command_filter"
+      ],
+      [
+        "'SELECT * FROM command_history'",
+        "processa ➔",
+        "query"
+      ],
+      [
+        "utils.aggregate_command_stats(cursor.fetchall())",
+        "processa ➔",
+        "stats"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "_handle_history_view",
+    "score": 100,
+    "cc": 4,
+    "variables": {
+      "query": {
+        "type": "Inferred",
+        "purpose": [
+          "IO",
+          "OPER",
+          "CALC"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x1B1CC7F0",
+        "lines": [
+          41,
+          44,
+          45,
+          47
+        ]
+      },
+      "params": {
+        "type": "Inferred",
+        "purpose": [
+          "IO",
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x21FFCE5B",
+        "lines": [
+          42,
+          44,
+          45,
+          47
+        ]
+      },
+      "command_filter": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x39B8DA76",
+        "lines": [
+          43,
+          44
+        ]
+      },
+      "limit": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xAA9F73EE",
+        "lines": [
+          45
+        ]
+      },
+      "cursor": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x1791A97A",
+        "lines": [
+          47,
+          48
+        ]
+      },
+      "rows": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "CALC"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xDF347A37",
+        "lines": [
+          48,
+          49,
+          52
+        ]
+      },
+      "click": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xA8AFFC08",
+        "lines": [
+          49,
+          51
+        ]
+      },
+      "Fore": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x1DE3ED66",
+        "lines": [
+          51
+        ]
+      },
+      "Style": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xAE284F90",
+        "lines": [
+          51
+        ]
+      },
+      "row": {
+        "type": "Inferred",
+        "purpose": [
+          "IO",
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xF1965A85",
+        "lines": [
+          52,
+          53
+        ]
+      },
+      "_render_nexus_card": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x5BC413B5",
+        "lines": [
+          53
+        ]
+      },
+      "verbose": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x2C7AEA42",
+        "lines": [
+          53
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "cursor"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "command_filter"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "limit"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "verbose"
+      ],
+      [
+        "'SELECT * FROM command_history WHERE 1=1'",
+        "processa ➔",
+        "query"
+      ],
+      [
+        "[]",
+        "processa ➔",
+        "params"
+      ],
+      [
+        "cursor.fetchall()",
+        "processa ➔",
+        "rows"
+      ],
+      [
+        "click.echo('Nenhum dado encontrado.')",
+        "finaliza ➔",
+        "EXIT"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "_render_nexus_card",
+    "score": 80,
+    "cc": 9,
+    "variables": {
+      "status_sym": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x4E01E6CF",
+        "lines": [
+          57,
+          59
+        ]
+      },
+      "row": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xF1965A85",
+        "lines": [
+          57,
+          58,
+          59,
+          61,
+          62,
+          72,
+          73
+        ]
+      },
+      "Fore": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x1DE3ED66",
+        "lines": [
+          57,
+          59,
+          67,
+          68
+        ]
+      },
+      "ts": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x4D682EC4",
+        "lines": [
+          58,
+          59
+        ]
+      },
+      "click": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xA8AFFC08",
+        "lines": [
+          59,
+          75
+        ]
+      },
+      "Style": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xAE284F90",
+        "lines": [
+          59,
+          75
+        ]
+      },
+      "cpu": {
+        "type": "Inferred",
+        "purpose": [
+          "IO",
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xD9747E2D",
+        "lines": [
+          61,
+          64,
+          67
+        ]
+      },
+      "ram": {
+        "type": "Inferred",
+        "purpose": [
+          "IO",
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x4641999A",
+        "lines": [
+          61,
+          64,
+          68
+        ]
+      },
+      "read_mb": {
+        "type": "Inferred",
+        "purpose": [
+          "IO",
+          "OPER",
+          "CALC"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xD2601477",
+        "lines": [
+          62,
+          64,
+          69
+        ]
+      },
+      "write_mb": {
+        "type": "Inferred",
+        "purpose": [
+          "IO",
+          "OPER",
+          "CALC"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x90AF55EA",
+        "lines": [
+          62,
+          64,
+          69
+        ]
+      },
+      "st": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x627FCDB6",
+        "lines": [
+          64,
+          67,
+          68,
+          69
+        ]
+      },
+      "utils": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x2B3583E6",
+        "lines": [
+          64,
+          72,
+          73
+        ]
+      },
+      "io": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xF98ED07A",
+        "lines": [
+          67,
+          68,
+          69,
+          72
+        ]
+      },
+      "verbose": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x2C7AEA42",
+        "lines": [
+          71
+        ]
+      },
+      "sys": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x36BCBB80",
+        "lines": [
+          73,
+          74,
+          75
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "row"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "verbose"
+      ],
+      [
+        "Fore.GREEN + '✔' if row['exit_code'] == 0 else Fore.RED + '✘'",
+        "processa ➔",
+        "status_sym"
+      ],
+      [
+        "(row['timestamp'] or '')[:19].replace('T', ' ')",
+        "processa ➔",
+        "ts"
+      ],
+      [
+        "utils.get_resource_status(cpu, ram, read_mb + write_mb)",
+        "processa ➔",
+        "st"
+      ],
+      [
+        "utils.parse_json_safe(row['system_info'])",
+        "processa ➔",
+        "sys"
+      ]
+    ],
+    "issues": [
+      "Hibridismo UI/SYS (-20)"
+    ]
+  }
+]

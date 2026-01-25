@@ -62,9 +62,10 @@ def _print_finding_details(finding):
         click.echo(Fore.CYAN + f"   > {finding.get('details')}")
         
     snippet = finding.get('snippet')
-    error_line = int(finding.get('line') or -1)
+    error_line = finding.get('line')
+#    error_line = int(finding.get('line') or -1)
     
-    if snippet:
+    if snippet and isinstance(snippet, dict):
         for line_num_str, code_line in snippet.items():
             line_num = int(line_num_str)
             prefix = "   > " if line_num == error_line else "     "

@@ -1,0 +1,1810 @@
+[
+  {
+    "function": "__init__",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "super": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x1B323165",
+        "lines": [
+          26
+        ]
+      },
+      "self": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x590F53E8",
+        "lines": [
+          27,
+          28,
+          29,
+          30
+        ]
+      },
+      "pid": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x0DB3209E",
+        "lines": [
+          27
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "pid"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "_update_tree_metrics",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "cpu_total": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "CALC"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x498684FF",
+        "lines": [
+          41,
+          52,
+          66
+        ]
+      },
+      "mem_total": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "CALC"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xD162FDCF",
+        "lines": [
+          42,
+          53,
+          67,
+          68
+        ]
+      },
+      "r_tree": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "CALC"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x0E7D2FB1",
+        "lines": [
+          43,
+          58,
+          71
+        ]
+      },
+      "w_tree": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "CALC"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x7EAF97F4",
+        "lines": [
+          44,
+          59,
+          72
+        ]
+      },
+      "procs": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xB3C3D4E6",
+        "lines": [
+          48,
+          49
+        ]
+      },
+      "parent_proc": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x29C0D2B3",
+        "lines": [
+          48
+        ]
+      },
+      "p": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x83878C91",
+        "lines": [
+          49,
+          52,
+          53,
+          57
+        ]
+      },
+      "io": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xF98ED07A",
+        "lines": [
+          57,
+          58,
+          59
+        ]
+      },
+      "psutil": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xFFAAC496",
+        "lines": [
+          60,
+          62
+        ]
+      },
+      "AttributeError": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x463A9D7E",
+        "lines": [
+          60
+        ]
+      },
+      "self": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x590F53E8",
+        "lines": [
+          66,
+          67,
+          68,
+          71,
+          72
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "parent_proc"
+      ],
+      [
+        "0.0",
+        "processa ➔",
+        "cpu_total"
+      ],
+      [
+        "0.0",
+        "processa ➔",
+        "mem_total"
+      ],
+      [
+        "0",
+        "processa ➔",
+        "r_tree"
+      ],
+      [
+        "0",
+        "processa ➔",
+        "w_tree"
+      ],
+      [
+        "[parent_proc] + parent_proc.children(recursive=True)",
+        "processa ➔",
+        "procs"
+      ],
+      [
+        "p.io_counters()",
+        "processa ➔",
+        "io"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "_get_process_tree_stats",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "cpu_total": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "CALC"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x498684FF",
+        "lines": [
+          76,
+          81,
+          90,
+          95
+        ]
+      },
+      "mem_total": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "CALC"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xD162FDCF",
+        "lines": [
+          77,
+          82,
+          91,
+          95
+        ]
+      },
+      "parent_proc": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x29C0D2B3",
+        "lines": [
+          81,
+          82,
+          87
+        ]
+      },
+      "psutil": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xFFAAC496",
+        "lines": [
+          83,
+          92,
+          93
+        ]
+      },
+      "AttributeError": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x463A9D7E",
+        "lines": [
+          83
+        ]
+      },
+      "children": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x268184C1",
+        "lines": [
+          87,
+          88
+        ]
+      },
+      "child": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x1B7D5726",
+        "lines": [
+          88,
+          90,
+          91
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "parent_proc"
+      ],
+      [
+        "0.0",
+        "processa ➔",
+        "cpu_total"
+      ],
+      [
+        "0.0",
+        "processa ➔",
+        "mem_total"
+      ],
+      [
+        "parent_proc.children(recursive=True)",
+        "processa ➔",
+        "children"
+      ],
+      [
+        "(cpu_total, mem_total / (1024 * 1024))",
+        "finaliza ➔",
+        "EXIT"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "_get_tree_io",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "r": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "CALC"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x4B43B0AE",
+        "lines": [
+          99,
+          108,
+          111
+        ]
+      },
+      "w": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "CALC"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xF1290186",
+        "lines": [
+          100,
+          109,
+          111
+        ]
+      },
+      "procs": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xB3C3D4E6",
+        "lines": [
+          101,
+          102,
+          105
+        ]
+      },
+      "parent_proc": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x29C0D2B3",
+        "lines": [
+          101,
+          102
+        ]
+      },
+      "psutil": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xFFAAC496",
+        "lines": [
+          103,
+          110
+        ]
+      },
+      "p": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x83878C91",
+        "lines": [
+          105,
+          107
+        ]
+      },
+      "io": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xF98ED07A",
+        "lines": [
+          107,
+          108,
+          109
+        ]
+      },
+      "AttributeError": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x463A9D7E",
+        "lines": [
+          110
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "parent_proc"
+      ],
+      [
+        "0",
+        "processa ➔",
+        "r"
+      ],
+      [
+        "0",
+        "processa ➔",
+        "w"
+      ],
+      [
+        "[parent_proc]",
+        "processa ➔",
+        "procs"
+      ],
+      [
+        "p.io_counters()",
+        "processa ➔",
+        "io"
+      ],
+      [
+        "(r, w)",
+        "finaliza ➔",
+        "EXIT"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "run",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "HAS_PSUTIL": {
+        "type": "Inferred",
+        "purpose": [
+          "CALC"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x0F04B64A",
+        "lines": [
+          114
+        ]
+      },
+      "parent": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xD0E45878",
+        "lines": [
+          117,
+          118,
+          119,
+          122,
+          128,
+          131,
+          136
+        ]
+      },
+      "psutil": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xFFAAC496",
+        "lines": [
+          117,
+          119,
+          140
+        ]
+      },
+      "self": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x590F53E8",
+        "lines": [
+          117,
+          119,
+          123,
+          124,
+          127,
+          128,
+          131,
+          133,
+          134,
+          136,
+          137,
+          138
+        ]
+      },
+      "io_init": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xE9ACB710",
+        "lines": [
+          122,
+          123,
+          124
+        ]
+      },
+      "time": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x07CC694B",
+        "lines": [
+          129
+        ]
+      },
+      "cpu": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xD9747E2D",
+        "lines": [
+          131,
+          133
+        ]
+      },
+      "mem": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xAFC4FC7E",
+        "lines": [
+          131,
+          134
+        ]
+      },
+      "r_end": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xABFB27CF",
+        "lines": [
+          136,
+          137
+        ]
+      },
+      "w_end": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x00BDBBE4",
+        "lines": [
+          136,
+          138
+        ]
+      },
+      "Exception": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xB0D4998A",
+        "lines": [
+          140
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ],
+      [
+        "None",
+        "finaliza ➔",
+        "EXIT"
+      ],
+      [
+        "psutil.Process(self.pid)",
+        "processa ➔",
+        "parent"
+      ],
+      [
+        "psutil.Process(self.pid)",
+        "processa ➔",
+        "parent"
+      ],
+      [
+        "parent.io_counters()",
+        "processa ➔",
+        "io_init"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "stop",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "self": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x590F53E8",
+        "lines": [
+          144
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "get_stats",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "read_bytes": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "CALC"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x41E837B8",
+        "lines": [
+          149,
+          155
+        ]
+      },
+      "max": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x2FFE4E77",
+        "lines": [
+          149,
+          150
+        ]
+      },
+      "self": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x590F53E8",
+        "lines": [
+          149,
+          150,
+          153,
+          154
+        ]
+      },
+      "write_bytes": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "CALC"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xF6EC0CD6",
+        "lines": [
+          150,
+          156
+        ]
+      },
+      "round": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x9BBD993D",
+        "lines": [
+          153,
+          154,
+          155,
+          156
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ],
+      [
+        "max(0, self.peaks['io_read_max'] - self.peaks['io_read_start'])",
+        "processa ➔",
+        "read_bytes"
+      ],
+      [
+        "max(0, self.peaks['io_write_max'] - self.peaks['io_write_start'])",
+        "processa ➔",
+        "write_bytes"
+      ],
+      [
+        "{'cpu': round(self.peaks['cpu_percent'], 1), 'ram': round(self.peaks['memory_mb'], 1), 'read': round(read_bytes / (1024 * 1024), 3), 'write': round(write_bytes / (1024 * 1024), 3)}",
+        "finaliza ➔",
+        "EXIT"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "_check_memory_safety",
+    "score": 80,
+    "cc": 1,
+    "variables": {
+      "RAM_SAFETY_THRESHOLD": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xA3CE6D9C",
+        "lines": [
+          161,
+          163
+        ]
+      },
+      "mem_mb": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xAE63A578",
+        "lines": [
+          163
+        ]
+      },
+      "print": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xF7531E2D",
+        "lines": [
+          164,
+          165
+        ]
+      },
+      "Fore": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x1DE3ED66",
+        "lines": [
+          164
+        ]
+      },
+      "os": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xDD302F94",
+        "lines": [
+          166
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "mem_mb"
+      ],
+      [
+        "1024.0",
+        "processa ➔",
+        "RAM_SAFETY_THRESHOLD"
+      ]
+    ],
+    "issues": [
+      "Hibridismo UI/SYS (-20)"
+    ]
+  },
+  {
+    "function": "__init__",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "super": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x1B323165",
+        "lines": [
+          171
+        ]
+      },
+      "self": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x590F53E8",
+        "lines": [
+          172,
+          173,
+          174,
+          175,
+          176
+        ]
+      },
+      "interval": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xD2E16D3F",
+        "lines": [
+          172
+        ]
+      },
+      "collections": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x0B9ABFE6",
+        "lines": [
+          175
+        ]
+      },
+      "int": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xFA7153F7",
+        "lines": [
+          175
+        ]
+      },
+      "threading": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xB180E860",
+        "lines": [
+          176
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "interval"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "run",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "self": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x590F53E8",
+        "lines": [
+          179,
+          180,
+          182,
+          186
+        ]
+      },
+      "time": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x07CC694B",
+        "lines": [
+          180
+        ]
+      },
+      "frame": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xDCF3E36E",
+        "lines": [
+          182,
+          183,
+          184,
+          186
+        ]
+      },
+      "sys": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x36BCBB80",
+        "lines": [
+          182
+        ]
+      },
+      "filename": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x435ED7E9",
+        "lines": [
+          184,
+          185,
+          186
+        ]
+      },
+      "os": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xDD302F94",
+        "lines": [
+          185
+        ]
+      },
+      "Exception": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xB0D4998A",
+        "lines": [
+          187
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ],
+      [
+        "sys._current_frames().get(self.main_thread_id)",
+        "processa ➔",
+        "frame"
+      ],
+      [
+        "frame.f_code.co_filename",
+        "processa ➔",
+        "filename"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "stop",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "self": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x590F53E8",
+        "lines": [
+          189
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "get_hot_lines",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "sorted": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x26DECC94",
+        "lines": [
+          191
+        ]
+      },
+      "self": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x590F53E8",
+        "lines": [
+          191
+        ]
+      },
+      "item": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x447B7147",
+        "lines": [
+          191
+        ]
+      },
+      "limit": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xAA9F73EE",
+        "lines": [
+          191
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "limit"
+      ],
+      [
+        "sorted(self.samples.items(), key=lambda item: item[1], reverse=True)[:limit]",
+        "finaliza ➔",
+        "EXIT"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "__init__",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "self": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x590F53E8",
+        "lines": [
+          195,
+          196,
+          197,
+          198,
+          199
+        ]
+      },
+      "str": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x341BE97D",
+        "lines": [
+          195
+        ]
+      },
+      "uuid": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xEF7C876F",
+        "lines": [
+          195
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "start_command",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "ctx": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xECACFFFF",
+        "lines": [
+          202,
+          203,
+          205
+        ]
+      },
+      "self": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x590F53E8",
+        "lines": [
+          203,
+          205,
+          207,
+          216,
+          217,
+          219,
+          220,
+          222,
+          223,
+          225,
+          226,
+          227
+        ]
+      },
+      "platform": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x34A6E5D6",
+        "lines": [
+          208,
+          209,
+          210,
+          211,
+          212
+        ]
+      },
+      "HAS_PSUTIL": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x0F04B64A",
+        "lines": [
+          213
+        ]
+      },
+      "psutil": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xFFAAC496",
+        "lines": [
+          213
+        ]
+      },
+      "ResourceMonitor": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x392BDAC9",
+        "lines": [
+          216
+        ]
+      },
+      "os": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xDD302F94",
+        "lines": [
+          216,
+          227
+        ]
+      },
+      "cProfile": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xE5E6FE62",
+        "lines": [
+          219
+        ]
+      },
+      "CodeSampler": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x50DD6951",
+        "lines": [
+          222
+        ]
+      },
+      "datetime": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xDFEAAEB4",
+        "lines": [
+          225
+        ]
+      },
+      "timezone": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xB2C6CC48",
+        "lines": [
+          225
+        ]
+      },
+      "sys": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x36BCBB80",
+        "lines": [
+          226
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "ctx"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "end_command",
+    "score": 80,
+    "cc": 1,
+    "variables": {
+      "self": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x590F53E8",
+        "lines": [
+          230,
+          232,
+          233,
+          235,
+          236,
+          238,
+          240,
+          263,
+          264,
+          265,
+          266,
+          267,
+          275
+        ]
+      },
+      "resources": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x55B558C7",
+        "lines": [
+          235,
+          270,
+          271,
+          272,
+          273
+        ]
+      },
+      "hot_lines": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x5B0F9867",
+        "lines": [
+          236,
+          250
+        ]
+      },
+      "s": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x03C7C0AC",
+        "lines": [
+          239,
+          240,
+          242
+        ]
+      },
+      "io": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xF98ED07A",
+        "lines": [
+          239
+        ]
+      },
+      "ps": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x8812C36A",
+        "lines": [
+          240,
+          241
+        ]
+      },
+      "pstats": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xF84D6F3B",
+        "lines": [
+          240
+        ]
+      },
+      "profile_text": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xB230E0B5",
+        "lines": [
+          242,
+          245
+        ]
+      },
+      "top_funcs": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xE676F894",
+        "lines": [
+          244,
+          247,
+          274
+        ]
+      },
+      "line": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x6438C669",
+        "lines": [
+          245,
+          246,
+          247
+        ]
+      },
+      "os": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xDD302F94",
+        "lines": [
+          246,
+          251
+        ]
+      },
+      "line_profile_data": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xB4562EC3",
+        "lines": [
+          249,
+          252,
+          276
+        ]
+      },
+      "fname": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xA3DA707B",
+        "lines": [
+          250,
+          251
+        ]
+      },
+      "lineno": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x5525DA36",
+        "lines": [
+          250,
+          252
+        ]
+      },
+      "hits": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x46AB2997",
+        "lines": [
+          250,
+          252
+        ]
+      },
+      "clean_name": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x0330ACB7",
+        "lines": [
+          251,
+          252
+        ]
+      },
+      "conn": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x0C1D0E2E",
+        "lines": [
+          255,
+          256,
+          278,
+          279
+        ]
+      },
+      "get_db_connection": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x764A99DE",
+        "lines": [
+          255
+        ]
+      },
+      "cursor": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x1791A97A",
+        "lines": [
+          256,
+          257
+        ]
+      },
+      "exit_code": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xA43FB4E7",
+        "lines": [
+          268
+        ]
+      },
+      "duration_ms": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xFDBF8560",
+        "lines": [
+          269
+        ]
+      },
+      "json": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x466DEEC7",
+        "lines": [
+          274,
+          275,
+          276
+        ]
+      },
+      "Exception": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xB0D4998A",
+        "lines": [
+          280
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "self"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "exit_code"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "duration_ms"
+      ],
+      [
+        "None",
+        "finaliza ➔",
+        "EXIT"
+      ],
+      [
+        "self.monitor.get_stats()",
+        "processa ➔",
+        "resources"
+      ],
+      [
+        "self.sampler.get_hot_lines()",
+        "processa ➔",
+        "hot_lines"
+      ],
+      [
+        "io.StringIO()",
+        "processa ➔",
+        "s"
+      ],
+      [
+        "pstats.Stats(self.profiler, stream=s).sort_stats('cumulative')",
+        "processa ➔",
+        "ps"
+      ],
+      [
+        "s.getvalue()",
+        "processa ➔",
+        "profile_text"
+      ],
+      [
+        "[]",
+        "processa ➔",
+        "top_funcs"
+      ],
+      [
+        "[]",
+        "processa ➔",
+        "line_profile_data"
+      ],
+      [
+        "fname.replace(os.getcwd(), '').strip(os.sep)",
+        "processa ➔",
+        "clean_name"
+      ],
+      [
+        "get_db_connection()",
+        "processa ➔",
+        "conn"
+      ],
+      [
+        "conn.cursor()",
+        "processa ➔",
+        "cursor"
+      ]
+    ],
+    "issues": [
+      "Hibridismo UI/SYS (-20)"
+    ]
+  }
+]

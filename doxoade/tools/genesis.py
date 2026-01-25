@@ -11,7 +11,7 @@ import ast
 import os
 import sqlite3
 # [DOX-UNUSED] import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from typing import List, Dict, Any
 # [DOX-UNUSED] from doxoade.database import get_db_connection
 

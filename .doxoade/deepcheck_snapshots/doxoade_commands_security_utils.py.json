@@ -1,0 +1,471 @@
+[
+  {
+    "function": "get_tool_path",
+    "score": 100,
+    "cc": 8,
+    "variables": {
+      "str": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x341BE97D",
+        "lines": [
+          13
+        ]
+      },
+      "tool_name": {
+        "type": "Inferred",
+        "purpose": [
+          "IO",
+          "CALC"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x6F6BDBAD",
+        "lines": [
+          15,
+          18,
+          21
+        ]
+      },
+      "ValueError": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x5A2CFD89",
+        "lines": [
+          16
+        ]
+      },
+      "exe": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x98E83379",
+        "lines": [
+          18,
+          30
+        ]
+      },
+      "os": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xDD302F94",
+        "lines": [
+          18,
+          26,
+          27,
+          30,
+          31
+        ]
+      },
+      "path_exe": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x682EA54E",
+        "lines": [
+          21,
+          22
+        ]
+      },
+      "shutil": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x3982C30C",
+        "lines": [
+          21
+        ]
+      },
+      "search_dirs": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x2E54FE1C",
+        "lines": [
+          25,
+          29
+        ]
+      },
+      "sys": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x36BCBB80",
+        "lines": [
+          26
+        ]
+      },
+      "d": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x8277E091",
+        "lines": [
+          29,
+          30
+        ]
+      },
+      "p": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x83878C91",
+        "lines": [
+          30,
+          31
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "tool_name"
+      ],
+      [
+        "tool_name + ('.exe' if os.name == 'nt' else '')",
+        "processa ➔",
+        "exe"
+      ],
+      [
+        "shutil.which(tool_name)",
+        "processa ➔",
+        "path_exe"
+      ],
+      [
+        "path_exe",
+        "finaliza ➔",
+        "EXIT"
+      ],
+      [
+        "[os.path.join(sys.prefix, 'Scripts' if os.name == 'nt' else 'bin'), os.path.join(os.getcwd(), 'venv', 'Scripts' if os.name == 'nt' else 'bin')]",
+        "processa ➔",
+        "search_dirs"
+      ],
+      [
+        "os.path.join(d, exe)",
+        "processa ➔",
+        "p"
+      ],
+      [
+        "p",
+        "finaliza ➔",
+        "EXIT"
+      ],
+      [
+        "None",
+        "finaliza ➔",
+        "EXIT"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "is_path_ignored",
+    "score": 100,
+    "cc": 3,
+    "variables": {
+      "str": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x341BE97D",
+        "lines": [
+          35,
+          40
+        ]
+      },
+      "list": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x10AE9FC7",
+        "lines": [
+          35
+        ]
+      },
+      "norm_path": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x7727AD21",
+        "lines": [
+          37,
+          39
+        ]
+      },
+      "os": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xDD302F94",
+        "lines": [
+          37,
+          39
+        ]
+      },
+      "filepath": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x6A2A431F",
+        "lines": [
+          37
+        ]
+      },
+      "path_parts": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xE6223BEE",
+        "lines": [
+          39,
+          41
+        ]
+      },
+      "clean_ignores": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x37A2D37F",
+        "lines": [
+          40,
+          41
+        ]
+      },
+      "i": {
+        "type": "Inferred",
+        "purpose": [
+          "IO",
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x865C0C0B",
+        "lines": [
+          40
+        ]
+      },
+      "ignore_list": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xDDED5291",
+        "lines": [
+          40
+        ]
+      },
+      "any": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x100B8CAD",
+        "lines": [
+          41
+        ]
+      },
+      "part": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xF4C9385F",
+        "lines": [
+          41
+        ]
+      },
+      "bool": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xC506FF13",
+        "lines": [
+          35
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "filepath"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "ignore_list"
+      ],
+      [
+        "os.path.normpath(filepath)",
+        "processa ➔",
+        "norm_path"
+      ],
+      [
+        "norm_path.split(os.sep)",
+        "processa ➔",
+        "path_parts"
+      ],
+      [
+        "{str(i).strip('/\\\\') for i in ignore_list}",
+        "processa ➔",
+        "clean_ignores"
+      ],
+      [
+        "any((part in clean_ignores for part in path_parts))",
+        "finaliza ➔",
+        "EXIT"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "has_project_config",
+    "score": 100,
+    "cc": 2,
+    "variables": {
+      "str": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x341BE97D",
+        "lines": [
+          43
+        ]
+      },
+      "configs": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xC23F7AB8",
+        "lines": [
+          45,
+          46
+        ]
+      },
+      "any": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x100B8CAD",
+        "lines": [
+          46
+        ]
+      },
+      "os": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xDD302F94",
+        "lines": [
+          46
+        ]
+      },
+      "target_path": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xB215BB15",
+        "lines": [
+          46
+        ]
+      },
+      "c": {
+        "type": "Inferred",
+        "purpose": [
+          "IO",
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x4A8A08F0",
+        "lines": [
+          46
+        ]
+      },
+      "bool": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xC506FF13",
+        "lines": [
+          43
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "target_path"
+      ],
+      [
+        "['pyproject.toml', '.doxoade.toml', 'doxoade.toml']",
+        "processa ➔",
+        "configs"
+      ],
+      [
+        "any((os.path.exists(os.path.join(target_path, c)) for c in configs))",
+        "finaliza ➔",
+        "EXIT"
+      ]
+    ],
+    "issues": []
+  }
+]

@@ -1,0 +1,736 @@
+[
+  {
+    "function": "_render_variable_table",
+    "score": 100,
+    "cc": 4,
+    "variables": {
+      "dict": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xBB4C3743",
+        "lines": [
+          13
+        ]
+      },
+      "variables": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "CALC"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x87CD8B88",
+        "lines": [
+          14,
+          16
+        ]
+      },
+      "click": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xA8AFFC08",
+        "lines": [
+          15,
+          19
+        ]
+      },
+      "Fore": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x1DE3ED66",
+        "lines": [
+          15,
+          19
+        ]
+      },
+      "k": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x8CE4B16B",
+        "lines": [
+          16,
+          19
+        ]
+      },
+      "v": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x9E3669D1",
+        "lines": [
+          16,
+          17
+        ]
+      },
+      "val": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x3A6D0284",
+        "lines": [
+          17,
+          18,
+          19
+        ]
+      },
+      "str": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x341BE97D",
+        "lines": [
+          17
+        ]
+      },
+      "len": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xF5A8E923",
+        "lines": [
+          18
+        ]
+      },
+      "Style": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xAE284F90",
+        "lines": [
+          19
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "variables"
+      ],
+      [
+        "None",
+        "finaliza ➔",
+        "EXIT"
+      ],
+      [
+        "str(v).replace('\\n', ' ')",
+        "processa ➔",
+        "val"
+      ],
+      [
+        "val[:67] + '...'",
+        "processa ➔",
+        "val"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "debug",
+    "score": 72,
+    "cc": 14,
+    "variables": {
+      "python_exe": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x36D3E613",
+        "lines": [
+          29,
+          43,
+          57
+        ]
+      },
+      "_get_venv_python_executable": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x17BD0F9A",
+        "lines": [
+          29
+        ]
+      },
+      "sys": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x36BCBB80",
+        "lines": [
+          29
+        ]
+      },
+      "project_root": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x5299AC43",
+        "lines": [
+          30,
+          33
+        ]
+      },
+      "_find_project_root": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x321BD437",
+        "lines": [
+          30
+        ]
+      },
+      "os": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xDD302F94",
+        "lines": [
+          30,
+          32,
+          33,
+          72,
+          82
+        ]
+      },
+      "script": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x3205C0DE",
+        "lines": [
+          30,
+          40,
+          43,
+          56,
+          57,
+          72
+        ]
+      },
+      "env": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xFF035A1D",
+        "lines": [
+          32,
+          33,
+          34,
+          49,
+          61
+        ]
+      },
+      "watch": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xD2974C96",
+        "lines": [
+          37,
+          39,
+          44
+        ]
+      },
+      "bottleneck": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xFC9D9D1D",
+        "lines": [
+          37,
+          45
+        ]
+      },
+      "mode_label": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x17170B7F",
+        "lines": [
+          39,
+          40
+        ]
+      },
+      "click": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xA8AFFC08",
+        "lines": [
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          40,
+          51,
+          56,
+          64,
+          65,
+          70,
+          71,
+          72,
+          74,
+          75,
+          77
+        ]
+      },
+      "Fore": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x1DE3ED66",
+        "lines": [
+          40,
+          51,
+          56,
+          64,
+          70,
+          71,
+          72,
+          74,
+          77
+        ]
+      },
+      "cmd": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xDFFF0A7F",
+        "lines": [
+          43,
+          44,
+          45,
+          46,
+          49,
+          57,
+          58,
+          61
+        ]
+      },
+      "flow_runner": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x3B989E7E",
+        "lines": [
+          43
+        ]
+      },
+      "str": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x341BE97D",
+        "lines": [
+          45
+        ]
+      },
+      "threshold": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xF0598264",
+        "lines": [
+          45
+        ]
+      },
+      "args": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xA956AF09",
+        "lines": [
+          46,
+          58
+        ]
+      },
+      "subprocess": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xC246F93A",
+        "lines": [
+          49,
+          61
+        ]
+      },
+      "KeyboardInterrupt": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xFB54BE38",
+        "lines": [
+          50
+        ]
+      },
+      "Style": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xAE284F90",
+        "lines": [
+          56,
+          70
+        ]
+      },
+      "debug_probe": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x0B5390A3",
+        "lines": [
+          57
+        ]
+      },
+      "result": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xB4A88417",
+        "lines": [
+          61,
+          62,
+          65
+        ]
+      },
+      "parts": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x78F0805F",
+        "lines": [
+          62,
+          63,
+          68
+        ]
+      },
+      "len": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xF5A8E923",
+        "lines": [
+          63
+        ]
+      },
+      "data": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x8D777F38",
+        "lines": [
+          68,
+          69,
+          71,
+          72,
+          73,
+          75,
+          78
+        ]
+      },
+      "json": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x466DEEC7",
+        "lines": [
+          68
+        ]
+      },
+      "_render_variable_table": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x73CA86A3",
+        "lines": [
+          73,
+          78
+        ]
+      },
+      "Exception": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xB0D4998A",
+        "lines": [
+          79
+        ]
+      },
+      "exc_obj": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x46DC6C2B",
+        "lines": [
+          81,
+          84
+        ]
+      },
+      "exc_tb": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x26D34871",
+        "lines": [
+          81,
+          82,
+          83
+        ]
+      },
+      "dox_exc_sys": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xC24A978C",
+        "lines": [
+          81
+        ]
+      },
+      "fname": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xA3DA707B",
+        "lines": [
+          82,
+          84
+        ]
+      },
+      "line_number": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xB95ACBD8",
+        "lines": [
+          83,
+          84
+        ]
+      },
+      "print": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xF7531E2D",
+        "lines": [
+          84
+        ]
+      },
+      "e": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xE1671797",
+        "lines": [
+          84
+        ]
+      },
+      "int": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xFA7153F7",
+        "lines": [
+          25
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "script"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "watch"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "bottleneck"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "threshold"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "args"
+      ],
+      [
+        "_get_venv_python_executable() or sys.executable",
+        "processa ➔",
+        "python_exe"
+      ],
+      [
+        "_find_project_root(os.path.abspath(script))",
+        "processa ➔",
+        "project_root"
+      ],
+      [
+        "os.environ.copy()",
+        "processa ➔",
+        "env"
+      ],
+      [
+        "'VIGILÂNCIA' if watch else 'GARGALOS'",
+        "processa ➔",
+        "mode_label"
+      ],
+      [
+        "[python_exe, flow_runner.__file__, script]",
+        "processa ➔",
+        "cmd"
+      ],
+      [
+        "None",
+        "finaliza ➔",
+        "EXIT"
+      ],
+      [
+        "[python_exe, debug_probe.__file__, script]",
+        "processa ➔",
+        "cmd"
+      ],
+      [
+        "subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', env=env)",
+        "processa ➔",
+        "result"
+      ],
+      [
+        "result.stdout.split('---DOXOADE-DEBUG-DATA---')",
+        "processa ➔",
+        "parts"
+      ],
+      [
+        "None",
+        "finaliza ➔",
+        "EXIT"
+      ],
+      [
+        "json.loads(parts[1])",
+        "processa ➔",
+        "data"
+      ],
+      [
+        "os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]",
+        "processa ➔",
+        "fname"
+      ],
+      [
+        "exc_tb.tb_lineno",
+        "processa ➔",
+        "line_number"
+      ]
+    ],
+    "issues": [
+      "CC alta (-8)",
+      "Hibridismo UI/SYS (-20)"
+    ]
+  }
+]

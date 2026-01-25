@@ -1,0 +1,1095 @@
+[
+  {
+    "function": "_execute_security_pipeline",
+    "score": 100,
+    "cc": 3,
+    "variables": {
+      "engines": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xA07F9B4B",
+        "lines": [
+          15,
+          22
+        ]
+      },
+      "_run_bandit_engine": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x33B6EE77",
+        "lines": [
+          16
+        ]
+      },
+      "target": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x42AEFBAE",
+        "lines": [
+          16,
+          17
+        ]
+      },
+      "ignore_list": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xDDED5291",
+        "lines": [
+          16
+        ]
+      },
+      "_run_safety_engine": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xB5C98397",
+        "lines": [
+          17
+        ]
+      },
+      "logger": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x6DB435F3",
+        "lines": [
+          17
+        ]
+      },
+      "findings": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xF85B7855",
+        "lines": [
+          20,
+          27,
+          28
+        ]
+      },
+      "get_progress_bar": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x3338D45B",
+        "lines": [
+          22
+        ]
+      },
+      "bar": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x37B51D19",
+        "lines": [
+          22,
+          23
+        ]
+      },
+      "_": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xB14A7B80",
+        "lines": [
+          23
+        ]
+      },
+      "engine_func": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x69E98670",
+        "lines": [
+          23,
+          25
+        ]
+      },
+      "result": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xB4A88417",
+        "lines": [
+          25,
+          26,
+          27
+        ]
+      },
+      "isinstance": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x96349D86",
+        "lines": [
+          26
+        ]
+      },
+      "list": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x10AE9FC7",
+        "lines": [
+          26
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "target"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "ignore_list"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "logger"
+      ],
+      [
+        "[('SAST (Bandit)', lambda: _run_bandit_engine(target, ignore_list)), ('SCA (Safety)', lambda: _run_safety_engine(target, logger))]",
+        "processa ➔",
+        "engines"
+      ],
+      [
+        "[]",
+        "processa ➔",
+        "findings"
+      ],
+      [
+        "engine_func()",
+        "processa ➔",
+        "result"
+      ],
+      [
+        "findings",
+        "finaliza ➔",
+        "EXIT"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "_run_security_logic",
+    "score": 75,
+    "cc": 2,
+    "variables": {
+      "target_abs": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x7BC70CFC",
+        "lines": [
+          32,
+          33,
+          36,
+          43
+        ]
+      },
+      "os": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xDD302F94",
+        "lines": [
+          32
+        ]
+      },
+      "target": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x42AEFBAE",
+        "lines": [
+          32
+        ]
+      },
+      "print_header": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x24C5EB26",
+        "lines": [
+          33
+        ]
+      },
+      "level": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xC9E9A848",
+        "lines": [
+          33,
+          44
+        ]
+      },
+      "config": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x22450232",
+        "lines": [
+          36,
+          38
+        ]
+      },
+      "_get_project_config": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xAA03739C",
+        "lines": [
+          36
+        ]
+      },
+      "logger": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x6DB435F3",
+        "lines": [
+          36,
+          43
+        ]
+      },
+      "ignore_list": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xDDED5291",
+        "lines": [
+          38,
+          39,
+          40,
+          43
+        ]
+      },
+      "print_config_suggestion": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xDCD5506F",
+        "lines": [
+          41
+        ]
+      },
+      "findings": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xF85B7855",
+        "lines": [
+          43,
+          45
+        ]
+      },
+      "_execute_security_pipeline": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x45A9552E",
+        "lines": [
+          43
+        ]
+      },
+      "min_level_int": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x3331773D",
+        "lines": [
+          44,
+          45
+        ]
+      },
+      "SEVERITY_MAP": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x541224CE",
+        "lines": [
+          44,
+          45
+        ]
+      },
+      "render_findings": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xCF0B9305",
+        "lines": [
+          45
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "ctx_params"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "target"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "level"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "logger"
+      ],
+      [
+        "os.path.abspath(target)",
+        "processa ➔",
+        "target_abs"
+      ],
+      [
+        "_get_project_config(logger, start_path=target_abs)",
+        "processa ➔",
+        "config"
+      ],
+      [
+        "config.get('ignore')",
+        "processa ➔",
+        "ignore_list"
+      ],
+      [
+        "['.git', 'venv', '.venv', '__pycache__', 'build', 'dist']",
+        "processa ➔",
+        "ignore_list"
+      ],
+      [
+        "_execute_security_pipeline(target_abs, ignore_list, logger)",
+        "processa ➔",
+        "findings"
+      ],
+      [
+        "SEVERITY_MAP.get(level.upper(), 1)",
+        "processa ➔",
+        "min_level_int"
+      ]
+    ],
+    "issues": [
+      "Hibridismo UI/SYS (-20)",
+      "Parâmetros não lidos (-5)"
+    ]
+  },
+  {
+    "function": "security",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "ExecutionLogger": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xCE625338",
+        "lines": [
+          54
+        ]
+      },
+      "target": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x42AEFBAE",
+        "lines": [
+          54,
+          55
+        ]
+      },
+      "ctx": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xECACFFFF",
+        "lines": [
+          54,
+          55
+        ]
+      },
+      "logger": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x6DB435F3",
+        "lines": [
+          54,
+          55
+        ]
+      },
+      "_run_security_logic": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x135ECBE0",
+        "lines": [
+          55
+        ]
+      },
+      "level": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xC9E9A848",
+        "lines": [
+          55
+        ]
+      },
+      "command": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x1DCCADFE",
+        "lines": [
+          47
+        ]
+      },
+      "argument": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x03CDE060",
+        "lines": [
+          48
+        ]
+      },
+      "option": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xEF3E30E0",
+        "lines": [
+          49
+        ]
+      },
+      "Choice": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x458B9DCC",
+        "lines": [
+          49
+        ]
+      },
+      "pass_context": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xD5B9D60B",
+        "lines": [
+          50
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "ctx"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "target"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "level"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "_run_bandit_engine",
+    "score": 100,
+    "cc": 6,
+    "variables": {
+      "tool": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "CALC"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x39AB32C5",
+        "lines": [
+          64,
+          65,
+          69
+        ]
+      },
+      "get_tool_path": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xF7D3E582",
+        "lines": [
+          64
+        ]
+      },
+      "excludes": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x7D1B98EC",
+        "lines": [
+          68,
+          69
+        ]
+      },
+      "ignore_list": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xDDED5291",
+        "lines": [
+          68,
+          84
+        ]
+      },
+      "cmd": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xDFFF0A7F",
+        "lines": [
+          69,
+          72
+        ]
+      },
+      "target": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x42AEFBAE",
+        "lines": [
+          69
+        ]
+      },
+      "res": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x9B207167",
+        "lines": [
+          72,
+          73,
+          74
+        ]
+      },
+      "run": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xA53108F7",
+        "lines": [
+          72
+        ]
+      },
+      "data": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x8D777F38",
+        "lines": [
+          74,
+          83
+        ]
+      },
+      "loads": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x4AC257C5",
+        "lines": [
+          74
+        ]
+      },
+      "i": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x865C0C0B",
+        "lines": [
+          79,
+          80,
+          81,
+          83,
+          84
+        ]
+      },
+      "is_path_ignored": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xDC80B2FF",
+        "lines": [
+          84
+        ]
+      },
+      "TimeoutExpired": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x6EEE5FA4",
+        "lines": [
+          86
+        ]
+      },
+      "Exception": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xB0D4998A",
+        "lines": [
+          86
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "target"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "ignore_list"
+      ],
+      [
+        "get_tool_path('bandit')",
+        "processa ➔",
+        "tool"
+      ],
+      [
+        "[]",
+        "finaliza ➔",
+        "EXIT"
+      ],
+      [
+        "','.join(ignore_list)",
+        "processa ➔",
+        "excludes"
+      ],
+      [
+        "[tool, '-r', target, '-f', 'json', '-q', '-x', excludes]",
+        "processa ➔",
+        "cmd"
+      ],
+      [
+        "run(cmd, capture_output=True, text=True, encoding='utf-8', timeout=180)",
+        "processa ➔",
+        "res"
+      ],
+      [
+        "[]",
+        "finaliza ➔",
+        "EXIT"
+      ],
+      [
+        "loads(res.stdout)",
+        "processa ➔",
+        "data"
+      ],
+      [
+        "[{'tool': 'BANDIT', 'severity': i['issue_severity'], 'message': i['issue_text'], 'file': i['filename'], 'line': i['line_number'], 'code': i['code'].strip()} for i in data.get('results', []) if not is_path_ignored(i['filename'], ignore_list)]",
+        "finaliza ➔",
+        "EXIT"
+      ],
+      [
+        "[]",
+        "finaliza ➔",
+        "EXIT"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "_run_safety_engine",
+    "score": 100,
+    "cc": 7,
+    "variables": {
+      "tool": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "CALC"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x39AB32C5",
+        "lines": [
+          94,
+          96,
+          100
+        ]
+      },
+      "get_tool_path": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xF7D3E582",
+        "lines": [
+          94
+        ]
+      },
+      "req_file": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x9D91C391",
+        "lines": [
+          95,
+          96,
+          100
+        ]
+      },
+      "os": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xDD302F94",
+        "lines": [
+          95,
+          96
+        ]
+      },
+      "target": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x42AEFBAE",
+        "lines": [
+          95
+        ]
+      },
+      "res": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x9B207167",
+        "lines": [
+          100,
+          101,
+          102
+        ]
+      },
+      "run": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xA53108F7",
+        "lines": [
+          100
+        ]
+      },
+      "data": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x8D777F38",
+        "lines": [
+          102,
+          103
+        ]
+      },
+      "loads": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x4AC257C5",
+        "lines": [
+          102
+        ]
+      },
+      "vulns": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xC5FDBE11",
+        "lines": [
+          103,
+          109
+        ]
+      },
+      "isinstance": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x96349D86",
+        "lines": [
+          103
+        ]
+      },
+      "dict": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xBB4C3743",
+        "lines": [
+          103
+        ]
+      },
+      "v": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x9E3669D1",
+        "lines": [
+          107,
+          109
+        ]
+      },
+      "Exception": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xB0D4998A",
+        "lines": [
+          110
+        ]
+      },
+      "logger": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x6DB435F3",
+        "lines": [
+          111
+        ]
+      },
+      "e": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xE1671797",
+        "lines": [
+          111
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "target"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "logger"
+      ],
+      [
+        "get_tool_path('safety')",
+        "processa ➔",
+        "tool"
+      ],
+      [
+        "os.path.join(target, 'requirements.txt')",
+        "processa ➔",
+        "req_file"
+      ],
+      [
+        "[]",
+        "finaliza ➔",
+        "EXIT"
+      ],
+      [
+        "run([tool, 'check', '-r', req_file, '--json'], capture_output=True, text=True, timeout=60)",
+        "processa ➔",
+        "res"
+      ],
+      [
+        "[]",
+        "finaliza ➔",
+        "EXIT"
+      ],
+      [
+        "loads(res.stdout)",
+        "processa ➔",
+        "data"
+      ],
+      [
+        "data.get('vulnerabilities', []) if isinstance(data, dict) else data",
+        "processa ➔",
+        "vulns"
+      ],
+      [
+        "[{'tool': 'SAFETY', 'severity': 'HIGH', 'message': f'Vulnerabilidade: {v.get('package_name')} -> {v.get('advisory')}', 'file': 'requirements.txt', 'line': 0} for v in vulns]",
+        "finaliza ➔",
+        "EXIT"
+      ],
+      [
+        "[]",
+        "finaliza ➔",
+        "EXIT"
+      ]
+    ],
+    "issues": []
+  }
+]

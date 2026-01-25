@@ -69,16 +69,25 @@ def _run_syntax_check(f: str, manager) -> List[Dict]:
     return []
 
 def _run_style_check(f: str) -> List[Dict]:
-    if f is None or not os.path.exists(f): return []
+    if f is None: return []
     from radon.visitors import ComplexityVisitor
+    from ..tools.streamer import ufs
+    
     findings = []
     try:
-        with open(f, 'r', encoding='utf-8', errors='ignore') as file:
-            tree = ast.parse(file.read())
-            v = ComplexityVisitor.from_ast(tree)
-            for func in v.functions:
-                if func.complexity > 12:
-                    findings.append({'severity': 'WARNING', 'category': 'COMPLEXITY', 'message': f"Função '{func.name}' complexa (CC: {func.complexity}).", 'file': f, 'line': func.lineno})
+        # [TECNOLOGIA UFS] Evita o custo de I/O do radon abrir o arquivo novamente
+        lines = ufs.get_lines(f)
+        if not lines: return []
+        
+        tree = ast.parse("".join(lines))
+        v = ComplexityVisitor.from_ast(tree)
+        for func in v.functions:
+            if func.complexity > 12:
+                findings.append({
+                    'severity': 'WARNING', 'category': 'COMPLEXITY', 
+                    'message': f"Função '{func.name}' complexa (CC: {func.complexity}).", 
+                    'file': f, 'line': func.lineno
+                })
     except Exception as e:
         import sys as _dox_sys, os as _dox_os
         _, exc_obj, exc_tb = _dox_sys.exc_info()
@@ -138,7 +147,7 @@ def _apply_fixes(findings, root, fix_specify: Optional[str] = None):
 # --- FASE 4: OPERAÇÃO DO run_check_logic ---
 
 def _setup_environment(path: str) -> tuple:
-    """Especialista 1: Configuração de Âncora e Caminhos (Sistema)."""
+    """Especialista 1: Configuração de Âncora (Target-Aware)."""
     doxo_pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     doxo_anchor = os.path.dirname(doxo_pkg_dir)
     
@@ -146,13 +155,14 @@ def _setup_environment(path: str) -> tuple:
     os.environ["PYTHONPATH"] = doxo_anchor + os.pathsep + os.environ.get("PYTHONPATH", "")
     os.environ["PYTHONIOENCODING"] = "utf-8"
 
-    target_path = os.path.abspath(path if path else ".")
-    project_root = _find_project_root(target_path)
+    target_abs = os.path.abspath(path if path else ".")
+    project_root = _find_project_root(target_abs)
     
     if not project_root or not os.path.isdir(project_root):
-        project_root = target_path if os.path.isdir(target_path) else os.path.dirname(target_path)
+        project_root = target_abs if os.path.isdir(target_abs) else os.path.dirname(target_abs)
+#        project_root = target_path if os.path.isdir(target_path) else os.path.dirname(target_path)
     
-    return target_path, os.path.normpath(project_root)
+    return target_abs, os.path.normpath(project_root)
 
 def _initialize_manager(target_path: str, project_root: str):
     """Especialista 2: Gestão de Venv e ProbeManager (Ferramental)."""
@@ -161,18 +171,38 @@ def _initialize_manager(target_path: str, project_root: str):
     return ProbeManager(py_exe, project_root)
 
 def _execute_scan_cycle(manager, target_path, project_root, **kwargs) -> tuple:
-    """Especialista 3: Execução do Pipeline de Sondas (Processamento)."""
+    from ..tools.memory_pool import finding_arena
+    from ..tools.streamer import ufs # Importa o novo UFS
+    
     files = _resolve_file_list(target_path, project_root, kwargs.get('target_files'))
     if not files: return [], {}
+
+    is_targeted = len(files) == 1
 
     cache = {} if kwargs.get('no_cache') else _load_cache()
     raw_findings = []
     
     to_scan = _filter_cache(files, cache, kwargs.get('no_cache'), raw_findings, project_root)
+    
     if to_scan:
         with progressbar(to_scan, label='Auditando') as bar:
             for item in bar:
-                raw_findings.extend(_process_single_file_task(item, manager, kwargs.get('continue_on_error'), cache))
+                # Passa a intenção para a tarefa individual
+                raw_findings.extend(
+                    _process_single_file_task(item, manager, kwargs.get('continue_on_error'), cache, is_targeted)
+                )
+                
+                results = _process_single_file_task(item, manager, kwargs.get('continue_on_error'), cache)
+                # 2. Transfere os resultados para a Arena (MPoT-3)
+                for res in results:
+                    arena_res = finding_arena.rent(
+                        res['severity'], res['category'], res['message'], 
+                        res['file'], res['line']
+                    )
+                    raw_findings.append(arena_res)
+    
+    # 3. Finaliza o ciclo: Limpa o Streamer de arquivos para o próximo comando
+    ufs.clear()
     
     return raw_findings, cache
 
@@ -232,44 +262,81 @@ def _finalize_report(raw_findings, project_root, cache, **kwargs):
         return logger.results
 
 def _resolve_file_list(abs_path, root, target_files):
-    if target_files: return [os.path.abspath(f) for f in target_files]
+    """Localizador de arquivos via DNM ancorado no alvo."""
+    if target_files: 
+        return [os.path.abspath(f) for f in target_files]
     
-    # Se for um arquivo específico, retorna apenas ele
-    if os.path.isfile(abs_path): return [abs_path]
+    if os.path.isfile(abs_path): 
+        return [abs_path]
     
     from ..dnm import DNM
-    # DNM scan agora é ancorado no path alvo para garantir descoberta em outros projetos
-    found = DNM(root).scan(extensions=['.py'])
+    # MPoT-17: DNM inicializado com o diretório ALVO
+    # Isso garante que o .gitignore do outro projeto seja respeitado
+    dnm_manager = DNM(abs_path)
+    found = dnm_manager.scan(extensions=['py'])
     
-    # Se o DNM falhou ou estamos em uma subpasta, filtramos pelo caminho absoluto
-    return [f for f in found if os.path.abspath(f).startswith(abs_path)]
+    # Fallback caso o DNM não encontre nada (ex: pasta sem arquivos .py válidos)
+    if not found:
+        return []
+        
+    return found
 
 def _filter_cache(files, cache, no_cache, raw_findings, root):
+    """Otimização de cache com chaves universais (PASC-6.4)."""
     to_scan = []
+    
+    #root_str = str(root).replace('\\', '/')
+    
     for fp in files:
-        # Se o arquivo está fora da raiz (projeto externo sem git), relpath pode falhar
+        abs_fp = fp.replace('\\', '/')
+        # Usamos o path absoluto como chave primária para evitar colisões entre projetos
+        # ou o mtime + path absoluto transformado em hash.
+#        abs_fp = os.path.abspath(fp).replace('\\', '/')
         try:
-            rel = os.path.relpath(fp, root).replace('\\', '/')
             st = os.stat(fp)
-            c = cache.get(rel, {})
+            # A chave do cache deve ser o arquivo absoluto para funcionar em múltiplos projetos
+            # no mesmo ambiente de cache global do Doxoade.
+            cache_key = abs_fp
+            
+            c = cache.get(cache_key, {})
             if not no_cache and c.get('mtime') == st.st_mtime:
                 for f in c.get('findings', []):
                     f['file'] = fp
                     raw_findings.append(f)
                 continue
-            to_scan.append((fp, rel, st.st_mtime, st.st_size))
+            to_scan.append((fp, cache_key, st.st_mtime, st.st_size))
         except (OSError, ValueError):
-            # Fallback para arquivos fora da raiz detectada
-            to_scan.append((fp, os.path.basename(fp), 0, 0))
+            to_scan.append((fp, abs_fp, 0, 0))
     return to_scan
 
-def _process_single_file_task(item, manager, cont_error, cache):
+def _process_single_file_task(item, manager, cont_error, cache, is_targeted=False):
+    from ..tools.governor import governor
+    from ..tools.streamer import ufs
+    
     fp, rel, mtime, size = item
+    
+    # 1. Carrega o arquivo no UFS (Primeira e única leitura)
+    ufs.get_lines(fp)
+    
+    # 2. Consulta o Governador
+    skip_deep = governor.pace(targeted=is_targeted)
+    
+    # 3. Auditoria Vital
     fnd = _run_syntax_check(fp, manager)
+    
+    # 4. Auditoria Adaptativa (Sem duplicar mensagens)
     if not fnd or cont_error:
-        fnd.extend(_run_static_probes(fp, manager))
-        fnd.extend(_run_style_check(fp))
-    # Só salva no cache se tivermos metadados válidos
+        if not skip_deep:
+            fnd.extend(_run_static_probes(fp, manager))
+            fnd.extend(_run_style_check(fp))
+        elif not any(f.get('category') == 'SYSTEM' for f in fnd):
+            # Injeta a mensagem apenas uma vez por arquivo
+            fnd.append({
+                'severity': 'INFO', 'category': 'SYSTEM', 
+                'message': 'ALB: Análise reduzida por carga do sistema.', 
+                'file': fp, 'line': 0
+            })
+            
     if mtime > 0:
         cache[rel] = {'mtime': mtime, 'size': size, 'findings': fnd}
     return fnd

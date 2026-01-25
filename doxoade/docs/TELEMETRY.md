@@ -20,3 +20,9 @@ O Doxoade possui um sistema de observabilidade nível industrial embutido.
 *   `doxoade telemetry -n 1 -p`: Visão de Processamento (CPU + Hot Lines).
 *   `doxoade telemetry -n 1 -m`: Visão de Memória (RAM + Leaks).
 *   `doxoade telemetry -n 1 -d`: Visão de I/O (Disco).
+
+### Novas Capacidades de fundo:
+1.  **Dual Disk View:** Separação visual entre Leitura (R) e Escrita (W) com precisão de Bytes.
+2.  **Resource Status:** Classificação em tempo real (Ocioso, Moderado, Alto, Crítico).
+3.  **ALB Reporting:** Registro de quantas tarefas foram adaptadas ou omitidas para salvar recursos.
+4.  **Hot Lines v2:** Identificação de gargalos de I/O em chamadas de sistema (os.stat, open).

@@ -1,0 +1,418 @@
+[
+  {
+    "function": "print_header",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "str": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x341BE97D",
+        "lines": [
+          10
+        ]
+      },
+      "echo": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xCBB11ED8",
+        "lines": [
+          11,
+          12
+        ]
+      },
+      "Fore": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x1DE3ED66",
+        "lines": [
+          11,
+          12
+        ]
+      },
+      "target": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x42AEFBAE",
+        "lines": [
+          11
+        ]
+      },
+      "Style": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xAE284F90",
+        "lines": [
+          12
+        ]
+      },
+      "level": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xC9E9A848",
+        "lines": [
+          12
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "target"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "level"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "print_config_suggestion",
+    "score": 100,
+    "cc": 1,
+    "variables": {
+      "echo": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xCBB11ED8",
+        "lines": [
+          16,
+          17
+        ]
+      },
+      "Fore": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x1DE3ED66",
+        "lines": [
+          16,
+          17
+        ]
+      },
+      "Style": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xAE284F90",
+        "lines": [
+          17
+        ]
+      }
+    },
+    "flow": [],
+    "issues": []
+  },
+  {
+    "function": "get_progress_bar",
+    "score": 100,
+    "cc": 2,
+    "variables": {
+      "progressbar": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xB1872363",
+        "lines": [
+          20
+        ]
+      },
+      "tasks": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x2CB1AD4F",
+        "lines": [
+          21
+        ]
+      },
+      "Fore": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x1DE3ED66",
+        "lines": [
+          22,
+          23
+        ]
+      },
+      "item": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x447B7147",
+        "lines": [
+          26
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "tasks"
+      ],
+      [
+        "progressbar(tasks, label=Fore.WHITE + 'Inspecionando Defesas', fill_char=Fore.CYAN + '█' + Fore.RESET, empty_char='░', show_pos=True, item_show_func=lambda item: f'({item[0]})' if item else '')",
+        "finaliza ➔",
+        "EXIT"
+      ]
+    ],
+    "issues": []
+  },
+  {
+    "function": "render_findings",
+    "score": 100,
+    "cc": 8,
+    "variables": {
+      "list": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x10AE9FC7",
+        "lines": [
+          29
+        ]
+      },
+      "int": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xFA7153F7",
+        "lines": [
+          29
+        ]
+      },
+      "dict": {
+        "type": "Inferred",
+        "purpose": [
+          "IO",
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xBB4C3743",
+        "lines": [
+          29,
+          33
+        ]
+      },
+      "visible": {
+        "type": "Inferred",
+        "purpose": [
+          "CALC",
+          "OPER",
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x46CF0E59",
+        "lines": [
+          31,
+          35,
+          38,
+          39
+        ]
+      },
+      "f": {
+        "type": "Inferred",
+        "purpose": [
+          "IO",
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x8FA14CDD",
+        "lines": [
+          32,
+          33,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44
+        ]
+      },
+      "findings": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xF85B7855",
+        "lines": [
+          32
+        ]
+      },
+      "isinstance": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x96349D86",
+        "lines": [
+          33
+        ]
+      },
+      "severity_map": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xFC9087C3",
+        "lines": [
+          33
+        ]
+      },
+      "min_level": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x8D997DE6",
+        "lines": [
+          33
+        ]
+      },
+      "echo": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xCBB11ED8",
+        "lines": [
+          36,
+          38,
+          41,
+          42,
+          44
+        ]
+      },
+      "Fore": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0x1DE3ED66",
+        "lines": [
+          36,
+          38,
+          40,
+          42,
+          44
+        ]
+      },
+      "Style": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "GLOBAL",
+        "addr": "0xAE284F90",
+        "lines": [
+          36,
+          38
+        ]
+      },
+      "len": {
+        "type": "Inferred",
+        "purpose": [
+          "IO"
+        ],
+        "scope": "LOCAL",
+        "addr": "0xF5A8E923",
+        "lines": [
+          38
+        ]
+      },
+      "color": {
+        "type": "Inferred",
+        "purpose": [
+          "OPER"
+        ],
+        "scope": "LOCAL",
+        "addr": "0x70DDA5DF",
+        "lines": [
+          40,
+          41
+        ]
+      }
+    },
+    "flow": [
+      [
+        "ENTRY",
+        "recebe",
+        "findings"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "min_level"
+      ],
+      [
+        "ENTRY",
+        "recebe",
+        "severity_map"
+      ],
+      [
+        "[f for f in findings if isinstance(f, dict) and severity_map.get(f.get('severity', 'LOW').upper(), 1) >= min_level]",
+        "processa ➔",
+        "visible"
+      ],
+      [
+        "None",
+        "finaliza ➔",
+        "EXIT"
+      ],
+      [
+        "Fore.RED if f['severity'] in ['HIGH', 'CRITICAL'] else Fore.YELLOW",
+        "processa ➔",
+        "color"
+      ]
+    ],
+    "issues": []
+  }
+]
