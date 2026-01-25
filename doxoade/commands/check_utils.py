@@ -6,7 +6,7 @@ from colorama import Fore, Style
 from click import echo
 
 def _finalize_log(findings, logger, root, excludes):
-    """Envia os achados para o logger do core (MPoT-7)."""
+    """Envia os achados para o logger com caminhos resilientes."""
     exclude_set = set([c.upper() for c in (excludes or [])])
     from ..tools.analysis import _get_code_snippet
     
@@ -16,11 +16,14 @@ def _finalize_log(findings, logger, root, excludes):
         
         abs_f = os.path.abspath(f['file'])
         try:
-            # Tenta caminho relativo, se falhar ou sair da raiz, usa o nome do arquivo
+            # Tenta mostrar o caminho relativo à raiz do projeto alvo
             rel_f = os.path.relpath(abs_f, root)
-            if rel_f.startswith('..'): rel_f = os.path.basename(abs_f)
+            # Se subir demais (../..), usa o nome do arquivo para não poluir a UI
+            if rel_f.count('..') > 2:
+                rel_f = os.path.basename(abs_f)
         except ValueError:
-            rel_f = os.path.basename(abs_f)
+            # Fallback para caminhos em drives diferentes (Windows)
+            rel_f = abs_f
 
         logger.add_finding(
             severity=f['severity'], message=f['message'], category=cat,
@@ -29,11 +32,13 @@ def _finalize_log(findings, logger, root, excludes):
             suggestion_action=f.get('suggestion_action')
         )
 
-def _render_archived_view(results: Dict[str, Any]):
-    """Exibe o Dossiê de Erros com Colorimetria Industrial (Chief-Gold UI)."""
+# doxoade/commands/check_utils.py
+
+def _render_archived_view(results):
+    """Exibe o Dossiê Gold de forma simétrica com Colorimetria Industrial."""
     findings = results.get('findings', [])
     if not findings:
-        echo(f"\n{Fore.GREEN}{Style.BRIGHT}✔ [ESTADO DE OURO]{Fore.WHITE} Nenhum problema encontrado no radar!{Style.RESET_ALL}")
+        echo(f"\n{Fore.GREEN}{Style.BRIGHT}✔ [ESTADO DE OURO]{Fore.WHITE} Nenhum problema encontrado!{Style.RESET_ALL}")
         return
 
     from collections import defaultdict
@@ -44,8 +49,7 @@ def _render_archived_view(results: Dict[str, Any]):
     # Título do Dossiê em Azul Cobalto
     echo(f"\n{Fore.BLUE}{Style.BRIGHT}--- 📂 DOSSIÊ DE DÍVIDA TÉCNICA ({len(grouped)} arquivos afetados) ---{Style.RESET_ALL}")
     
-    # Mapeamento de Cores por Categoria para Intuitividade
-    # Vermelho = Perigo/Complexidade | Amarelo = Estilo/Atenção | Ciano = Limpeza
+    # Mapeamento de Cores por Categoria (Compliance: PASC-10)
     cat_colors = {
         'COMPLEXITY': Fore.RED,
         'RUNTIME-RISK': Fore.RED + Style.BRIGHT,
@@ -54,38 +58,47 @@ def _render_archived_view(results: Dict[str, Any]):
         'DEADCODE': Fore.CYAN,
         'UNUSED-PRIVATE': Fore.CYAN + Style.DIM,
         'STYLE': Fore.YELLOW,
-        'QA-REMINDER': Fore.GREEN
+        'QA-REMINDER': Fore.GREEN,
+        'SYSTEM': Fore.CYAN + Style.BRIGHT
     }
 
     for file_path, file_findings in sorted(grouped.items()):
-        count = len(file_findings)
+        # [MPoT-7] Limpeza de redundância para evitar poluição visual
+        unique_findings = []
+        seen_keys = set()
+        for f in file_findings:
+            key = (f.get('line', 0), f.get('message', ''))
+            if key not in seen_keys:
+                unique_findings.append(f)
+                seen_keys.add(key)
         
-        # Cabeçalho do Arquivo (Simetria Chief-Gold)
+        count = len(unique_findings)
+        
+        # Cabeçalho do Arquivo com Intensidade Dinâmica
         header_color = Fore.BLUE if count < 5 else (Fore.YELLOW if count < 10 else Fore.RED)
         echo(f"\n{header_color}{Style.BRIGHT}[  {count:03}  ]{Fore.WHITE} {file_path}{Style.RESET_ALL}")
         
-        for f in file_findings:
-            sev = f.get('severity', 'WARNING').upper()
+        for f in unique_findings:
             cat = f.get('category', 'STYLE').upper()
-            
-            # Determina a cor do bullet baseada na categoria ou severidade
-            color = cat_colors.get(cat, Fore.YELLOW)
-            if sev == 'CRITICAL': color = Fore.MAGENTA
-            
+            sev = f.get('severity', 'WARNING').upper()
             line = str(f.get('line', '??')).ljust(4)
-            msg = f.get('message', '')
             
-            # Renderização da Linha: Bullet Colorido | Linha em Dim | Categoria | Mensagem em Branco
-            echo(f"   {color}■{Fore.WHITE}{Style.DIM} [ L-{line}] {Style.NORMAL}{color}{cat:<15}{Fore.WHITE}: {msg}{Style.RESET_ALL}")
+            # Seleção de Cor baseada na Categoria ou Severidade Crítica
+            color = cat_colors.get(cat, Fore.YELLOW)
+            if sev == 'CRITICAL': color = Fore.MAGENTA + Style.BRIGHT
             
-    # Resumo Rodapé de Alta Visibilidade
+            # RENDERIZAÇÃO GOLD: 
+            # Bullet (Cor) | Linha (Dim) | Categoria (Cor Alinhada) | Mensagem (White)
+            echo(f"   {color}■{Fore.WHITE}{Style.DIM} [ L-{line}] {Style.NORMAL}{color}{cat:<15}{Fore.WHITE}: {f['message']}{Style.RESET_ALL}")
+
+    # Resumo Final de Alta Visibilidade
     summary = results.get('summary', {})
-    #echo(f"\n{Fore.BLUE}{Style.BRIGHT}─" * 70)
+    echo(f"{Fore.BLUE}{Style.BRIGHT}─" * 75 + Style.RESET_ALL)
     echo(f"  {Fore.WHITE}SOMA TOTAL: "
          f"{Fore.RED}{summary.get('errors', 0)} Erros{Fore.WHITE} | "
          f"{Fore.YELLOW}{summary.get('warnings', 0)} Avisos{Fore.WHITE} | "
          f"{Fore.MAGENTA}{summary.get('critical', 0)} Críticos")
-    echo(f"{Fore.BLUE}{Style.BRIGHT}─" * 70 + Style.RESET_ALL)
+    echo(f"{Fore.BLUE}{Style.BRIGHT}─" * 75 + Style.RESET_ALL)
     
 def _render_issue_summary(findings: List[Dict[str, Any]]):
     """Sumário Estatístico Chief-Gold (Alinhamento Industrial)."""
@@ -126,3 +139,16 @@ def _render_issue_summary(findings: List[Dict[str, Any]]):
             
             echo(f"{line}{hint}{Style.RESET_ALL}")
     echo(f"{Fore.CYAN}{Style.DIM}─" * 85 + Style.RESET_ALL)
+    
+    from ..tools.memory_pool import finding_arena
+    from ..tools.streamer import ufs
+    
+    echo(f"\n{Fore.BLUE}{Style.BRIGHT}🛡  ALB PROTECT:{Style.RESET_ALL}")
+    echo(f"   Reciclagem de Memória : {Fore.GREEN}{finding_arena._ptr} objetos reutilizados")
+    echo(f"   Economia de Disco     : {Fore.GREEN}{ufs.reads_saved} aberturas evitadas")
+    echo(f"{Fore.CYAN}{Style.DIM}─" * 85 + Style.RESET_ALL)
+    
+def _load_file_lines(file_path: str) -> list:
+    """Usa o Streamer Unificado para evitar re-leitura de disco (MPoT-3)."""
+    from ..tools.streamer import ufs # PASC-6.6
+    return ufs.get_lines(file_path)

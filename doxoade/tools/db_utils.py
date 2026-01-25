@@ -3,12 +3,14 @@
 Utilitários de Banco de Dados com Persistência Assíncrona.
 Resolve o gargalo de latência (Hot Line) via Async Buffer Pattern.
 """
+# [DOX-UNUSED] import time
 import threading
+# [DOX-UNUSED] import sys
 import queue
-import sys
 import os
-# [DOX-UNUSED] import sqlite3
 from datetime import datetime, timezone
+# [DOX-UNUSED] from .governor import governor # PASC-6.6
+# [DOX-UNUSED] import sqlite3
 
 # --- INFRAESTRUTURA ASYNC ---
 _LOG_QUEUE = queue.Queue()
@@ -16,28 +18,46 @@ _WORKER_THREAD = None
 _STOP_EVENT = threading.Event()
 
 def _db_worker():
-    """Consumidor: Processa a fila de escrita em background."""
+    """Consumidor Adaptativo: Gerencia commits baseados na latência do disco."""
     from doxoade.database import get_db_connection
+    from .governor import governor
     
     conn = None
+    batch_buffer = []
+    MAX_BATCH_SIZE = 50
+    
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         
         while not _STOP_EVENT.is_set() or not _LOG_QUEUE.empty():
             try:
-                item = _LOG_QUEUE.get(timeout=0.5)
+                # PASC-6.4: Baseline de pressão
+                _, _, disk_p = governor.get_system_health()
+                is_busy = disk_p > getattr(governor, 'DISK_BUSY_LIMIT', 80.0)
+                
+                timeout = 2.0 if is_busy else 0.5
+                item = _LOG_QUEUE.get(timeout=timeout)
                 if item is None: break
                 
-                query, params = item
-                cursor.execute(query, params)
-                conn.commit()
+                batch_buffer.append(item)
+
+                # [FIX NameError] Sincronizado com a variável do loop
+                if len(batch_buffer) >= MAX_BATCH_SIZE or disk_p < 30.0:
+                    for query, params in batch_buffer:
+                        cursor.execute(query, params)
+                    conn.commit()
+                    batch_buffer = []
+                
                 _LOG_QUEUE.task_done()
                 
             except queue.Empty:
+                if batch_buffer:
+                    for query, params in batch_buffer:
+                        cursor.execute(query, params)
+                    conn.commit()
+                    batch_buffer = []
                 continue
-            except Exception as e:
-                sys.stderr.write(f"\n[INTERNAL-ERROR] Falha na persistência assíncrona: {e}\n")
     finally:
         if conn: conn.close()
 

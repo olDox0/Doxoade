@@ -71,7 +71,7 @@ class DNM:
         if extensions:
             extensions = {e.lower() if e.startswith('.') else f'.{e.lower()}' for e in extensions}
 
-        for root, dirs, files in os.walk(self.root):
+        for root, dirs, files in os.walk(str(self.root)):
             root_path = Path(root)
             
             # Filtro de Pastas (Performance)

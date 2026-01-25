@@ -1,208 +1,106 @@
 # -*- coding: utf-8 -*-
 """
 Security Suite - Chief Gold Edition.
-SAST (Bandit) & SCA (Safety) integration with double-filtering.
-Compliance: MPoT-4, MPoT-5, PASC-6.
+Performance: PASC-6.4 Consolidated Batching.
 """
-
-import sys
 import os
-import shutil
-import logging
-from click import command, argument, option, echo, Choice, pass_context
-from colorama import Fore, Style
+from click import command, argument, option, pass_context, Choice
+from .security_utils import get_tool_path, is_path_ignored, get_essential_ignores, SEVERITY_MAP, batch_list
+from .security_io import print_header, render_findings, get_progress_bar
+from ..shared_tools import ExecutionLogger, _get_project_config
 
-from ..shared_tools import ExecutionLogger, _get_venv_python_executable, _get_project_config
-
-__all__ = ['security']
-
-# Mapeamento para comparação de severidade
-SEVERITY_MAP = {'LOW': 1, 'MEDIUM': 2, 'HIGH': 3, 'CRITICAL': 4}
-
-# ============================================================================
-# FASE 1: LOCALIZAÇÃO E FILTRAGEM (MPoT-17)
-# ============================================================================
-
-def _get_tool_path(tool_name: str) -> str:
-    """Localiza o executável da ferramenta via heurística multinível."""
-    if not tool_name:
-        raise ValueError("Contrato Violado: 'tool_name' é obrigatório.")
+def _execute_security_pipeline(target, ignore_set, logger):
+    """Pipeline de alta performance com DNM e Batching (MPoT-2)."""
+    from ..dnm import DNM
     
-    exe = tool_name + ('.exe' if os.name == 'nt' else '')
+    # DNM Scan é pesado, chamamos apenas uma vez (MPoT-17)
+    dnm = DNM(target)
+    py_files = dnm.scan(extensions=['py'])
     
-    # 1. Venv do Alvo
-    target_py = _get_venv_python_executable()
-    if target_py:
-        target_dir = os.path.dirname(target_py)
-        for sub in ['', 'Scripts', 'bin']:
-            p = os.path.join(target_dir, sub, exe)
-            if os.path.exists(p): return p
-
-    # 2. Ambiente Atual
-    curr_py_dir = os.path.dirname(sys.executable)
-    for sub in ['', 'Scripts', 'bin']:
-        p = os.path.join(curr_py_dir, sub, exe)
-        if os.path.exists(p): return p
-
-    # 3. Fallback PATH
-    return shutil.which(tool_name)
-
-def _is_file_ignored(filepath: str, ignores: list) -> bool:
-    """Verifica se o arquivo pertence a diretórios ignorados (Aegis)."""
-    norm_path = os.path.normpath(filepath)
-    parts = norm_path.split(os.sep)
-    clean_ignores = {os.path.normpath(i).strip(os.sep) for i in ignores}
-    return any(part in clean_ignores for part in parts)
-
-# ============================================================================
-# FASE 2: EXECUTORES ESPECIALISTAS (SAST/SCA)
-# ============================================================================
-
-def _run_bandit(target: str, config_ignore: list) -> list:
-    """Executa Bandit (SAST) com parsing JSON e filtragem manual."""
-    if not target:
-        raise ValueError("Contrato Violado: 'target' é obrigatório para Bandit.")
+    findings = []
     
-    tool = _get_tool_path('bandit')
-    if not tool: return []
-    
-    from json import loads
-    from subprocess import run # nosec - PASC-6.1
-    
-    sys_excludes = ["venv", ".git", "__pycache__", "build", "dist", "site-packages", "tests"]
-    # Garante que operamos com listas limpas
-    clean_custom = [str(i).strip('/\\') for i in (config_ignore or [])]
-    final_excludes = list(set(sys_excludes + clean_custom))
-    
-    echo(Fore.YELLOW + f"   > Executando SAST (Bandit)... (Ignorando: {len(final_excludes)} dirs)")
-    
-    cmd = [tool, '-r', target, '-f', 'json', '-q', '-x', ",".join(final_excludes)]
-    try:
-        res = run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=120, shell=False) # nosec
-        data = loads(res.stdout)
-        findings = []
-        for item in data.get('results', []):
-            fname = item.get('filename', '')
-            if _is_file_ignored(fname, final_excludes): continue
-            findings.append({
-                'tool': 'BANDIT', 'severity': item['issue_severity'],
-                'message': item['issue_text'], 'file': fname,
-                'line': item['line_number'], 'code': item['code'].strip()
-            })
-        return findings
-    except Exception as e:
-        logging.debug(f"Bandit execution failed: {e}")
-        return []
-
-def _run_safety(logger: ExecutionLogger) -> list:
-    """
-    Executa Safety (SCA) para auditoria de dependências (PASC-6.2).
-    """
-    # MPoT-5: Contrato de Integridade
-    if logger is None:
-        raise ValueError("Contrato Violado: 'logger' é obrigatório para telemetria Safety.")
-
-    tool = _get_tool_path('safety')
-    if not tool: return []
-    
-    from json import loads
-    from subprocess import run # nosec
-    echo(Fore.YELLOW + "   > Executando SCA (Safety)...")
-    
-    try:
-        res = run([tool, 'check', '--json'], capture_output=True, text=True, encoding='utf-8', timeout=60, shell=False) # nosec
-        data = loads(res.stdout)
-        findings = []
+    if py_files:
+        # PASC-6.4: Batching de 40 arquivos (Equilíbrio entre UI e Performance)
+        batches = list(batch_list(py_files, 40))
         
-        # Normalização de saída (v2+ retorna dict, v1 retorna list)
-        vulns = data.get('vulnerabilities', []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
-        
-        for item in vulns:
-            pkg = item.get('package_name', item.get('name', 'unknown'))
-            ver = item.get('installed_version', item.get('version', '?'))
-            desc = item.get('advisory', 'No description')
+        with get_progress_bar(batches, label="Análise SAST") as bar:
+            for batch in bar:
+                result = _run_bandit_engine(batch, ignore_set)
+                if result:
+                    findings.extend(result)
+
+    # Análise SCA (Safety)
+    with get_progress_bar([["requirements.txt"]], label="Análise SCA ") as bar:
+        for _ in bar:
+            findings.extend(_run_safety_engine(target, logger))
             
-            findings.append({
-                'tool': 'SAFETY', 'severity': 'HIGH', 'file': 'requirements.txt', 'line': 0,
-                'message': f"Vulnerabilidade em {pkg} ({ver}): {desc}"
-            })
-        return findings
-    except Exception as e:
-        logger.add_finding('ERROR', f"Safety failed: {e}", category='SECURITY')
-        return []
+    return findings
 
-# ============================================================================
-# FASE 3: RENDERIZADORES (UI/UX Chief-Gold)
-# ============================================================================
-
-def _display_findings(findings: list, level: str, logger: ExecutionLogger):
-    """Renderiza os achados respeitando o filtro de severidade (MPoT-4)."""
-    # MPoT-5: Contrato de Robustez
-    if findings is None:
-        raise ValueError("Contrato Violado: 'findings' não pode ser None.")
-        
-    target_val = SEVERITY_MAP.get(level, 1)
-    visible = []
-    hidden_count = 0
-
-    for f in findings:
-        f_val = SEVERITY_MAP.get(f['severity'].upper(), 1)
-        if f_val >= target_val: visible.append(f)
-        else: hidden_count += 1
-
-    if not visible:
-        msg = f"\n[OK] Nenhum problema nível {level}+ encontrado."
-        echo(Fore.GREEN + msg + (f" ({hidden_count} menores ocultos)" if hidden_count > 0 else ""))
-        return
-
-    echo(Fore.RED + Style.BRIGHT + f"\n[ALERTA] {len(visible)} problemas detectados (Filtro: {level}+)!")
+def _run_security_logic(ctx_params, target, level, logger):
+    target_abs = os.path.abspath(target)
+    print_header(target_abs, level)
     
-    for f in visible:
-        sev = f['severity'].upper()
-        color = Fore.RED if sev in ['HIGH', 'CRITICAL'] else (Fore.YELLOW if sev == 'MEDIUM' else Fore.WHITE)
-        echo(f"\n{color}[{f['tool']}][{sev}] {f['message']}")
-        echo(Fore.WHITE + f"   > Em: {f['file']}:{f['line']}")
-        if f.get('code'): echo(Fore.CYAN + f"   > Código: {f['code']}")
-        
-        # Loga no banco (Persistência Assíncrona via Core)
-        log_sev = 'CRITICAL' if sev in ['HIGH', 'CRITICAL'] else 'WARNING'
-        logger.add_finding(
-            severity=log_sev,
-            category='SECURITY', message=f"[{f['tool']}] {f['message']}",
-            file=f['file'], line=f['line']
-        )
-
-# ============================================================================
-# FASE 4: ORQUESTRADOR PRINCIPAL
-# ============================================================================
+    config = _get_project_config(logger, start_path=target_abs)
+    # Converte para set para busca O(1) no Utils
+    ignore_set = set(config.get('ignore') or []) | get_essential_ignores()
+    
+    findings = _execute_security_pipeline(target_abs, ignore_set, logger)
+    
+    min_level_int = SEVERITY_MAP.get(level.upper(), 1)
+    render_findings(findings, min_level_int, SEVERITY_MAP)
 
 @command('security')
 @argument('target', default='.')
-@option('--sast', is_flag=True, help="Apenas Bandit.")
-@option('--sca', is_flag=True, help="Apenas Safety.")
-@option('--level', '-l', type=Choice(['LOW', 'MEDIUM', 'HIGH']), default='LOW', help="Severidade mínima.")
+@option('--level', '-l', type=Choice(['LOW', 'MEDIUM', 'HIGH']), default='LOW')
 @pass_context
-def security(ctx, target, sast, sca, level):
-    """Realiza auditoria de segurança (SAST + SCA) (MPoT-5)."""
-    # MPoT-5: Contrato de Integridade
-    if not target or not os.path.exists(target):
-        raise ValueError(f"Security Error: Alvo '{target}' não existe.")
-
+def security(ctx, target, level):
+    """Auditoria de Segurança (MPoT-5)."""
     with ExecutionLogger('security', target, ctx.params) as logger:
-        echo(Fore.CYAN + f"--- [SECURITY] Auditoria em '{target}' ---")
-        echo(Fore.WHITE + Style.DIM + f"   > Nível de filtro: {level}+")
-        
-        config = _get_project_config(logger, start_path=target)
-        run_all = not (sast or sca)
-        findings = []
+        _run_security_logic(ctx.params, target, level, logger)
 
-        if (run_all or sast): 
-            findings.extend(_run_bandit(target, config.get('ignore', [])))
-            
-        if (run_all or sca): 
-            findings.extend(_run_safety(logger))
+def _run_bandit_engine(file_list, ignore_set):
+    """Motor SAST focado em processamento de lista."""
+    from json import loads
+    from subprocess import run
+    
+    tool = get_tool_path('bandit')
+    if not tool or not file_list: return []
 
-        _display_findings(findings, level, logger)
+    # Comando otimizado: passa a lista de arquivos direta para evitar re-scan do Bandit
+    cmd = [tool, '-f', 'json', '-q'] + file_list
+    
+    try:
+        res = run(cmd, capture_output=True, text=True, encoding='utf-8', timeout=60)
+        if not res.stdout: return []
         
-        if any(f['severity'].upper() in ['HIGH', 'CRITICAL'] for f in findings):
-            echo(Fore.RED + "\nRecomendação: Revise estas vulnerabilidades imediatamente.")
+        data = loads(res.stdout)
+        # Filtro Aegis no retorno para garantir integridade
+        return [
+            {
+                'tool': 'BANDIT', 'severity': i['issue_severity'].upper(),
+                'message': i['issue_text'], 'file': i['filename'],
+                'line': i['line_number'], 'code': i['code'].strip()
+            }
+            for i in data.get('results', [])
+            if not is_path_ignored(i['filename'], ignore_set)
+        ]
+    except Exception:
+        return []
+
+def _run_safety_engine(target, logger):
+    from subprocess import run
+    from json import loads
+    tool = get_tool_path('safety')
+    req_file = os.path.join(target, 'requirements.txt')
+    if not tool or not os.path.exists(req_file): return []
+    try:
+        res = run([tool, 'check', '-r', req_file, '--json'], capture_output=True, text=True, timeout=60)
+        if not res.stdout: return []
+        data = loads(res.stdout)
+        vulns = data.get('vulnerabilities', []) if isinstance(data, dict) else data
+        return [{
+            'tool': 'SAFETY', 'severity': 'HIGH',
+            'message': f"Vulnerabilidade: {v.get('package_name')} -> {v.get('advisory')}",
+            'file': 'requirements.txt', 'line': 0
+        } for v in vulns]
+    except Exception: return []

@@ -2,7 +2,7 @@
 import os
 import re
 # [DOX-UNUSED] import logging
-from colorama import Style
+# [DOX-UNUSED] from colorama import Style
 
 class AutoFixer:
     def __init__(self, logger):

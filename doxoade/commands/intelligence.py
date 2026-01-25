@@ -96,8 +96,8 @@ def _analyze_file_chief(file_path: str, root: str) -> Dict[str, Any]:
                 content = f.read()
                 break
         except Exception as e:
-            import sys as _dox_sys, os as _dox_os
-            exc_type, exc_obj, exc_tb = sys.exc_info()
+            import os as _dox_os
+            exc_obj, exc_tb = sys.exc_info()
             f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
             line_n = exc_tb.tb_lineno
             print(f"\033[1;34m\n[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: _analyze_file_chief\033[0m")

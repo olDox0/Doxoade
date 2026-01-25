@@ -8,7 +8,7 @@ import time
 import sys
 import os
 import click
-from typing import List, Dict, Any, Optional 
+# [DOX-UNUSED] from typing import Optional
 from importlib import import_module
 from colorama import init as colorama_init, Fore
 # [DOX-UNUSED] from functools import wraps
@@ -39,7 +39,7 @@ class DoxoadeLazyGroup(click.Group):
         # Mapeamento explícito: 'comando': 'modulo:atributo'
         self._lazy_map = {
 # [sicdox]            'agent': 'doxoade.commands.agent:agent_cmd',
-            'alfagold': 'doxoade.commands.alfagold:alfagold',
+#            'alfagold': 'doxoade.commands.alfagold:alfagold',
             'android': 'doxoade.commands.android:android_group',
             'apicheck': 'doxoade.commands.apicheck:apicheck',
             'auto': 'doxoade.commands.auto:auto',
@@ -96,7 +96,7 @@ class DoxoadeLazyGroup(click.Group):
             'self-test': 'doxoade.commands.self_test:self_test',
             'setup-health': 'doxoade.commands.utils:setup_health_cmd',
             'setup-regression': 'doxoade.commands.utils:setup_regression',
-            'sicdox': 'doxoade.commands.sicdox:sicdox_group',
+#            'sicdox': 'doxoade.commands.sicdox:sicdox_group',
             'show-trace': 'doxoade.commands.utils:show_trace',
             'style': 'doxoade.commands.style:style',
             'sync': 'doxoade.commands.git_workflow:sync',
@@ -205,18 +205,18 @@ def dir_diagnose_cmd():
     else:
         click.echo(f"{Fore.RED}\n[FALHA] O sistema se perde em subpastas.")
 
-@click.group('sicdox')
-def sicdox():
-    """Sistemas Cognitivos do Doxoade: Unificação de IA e Automação."""
-    pass
-
-# Adicionamos os subcomandos ao grupo
-@sicdox.command('directory')
-@click.argument('path', default='.')
-def sicdox_directory(path):
-    """Audita a percepção de pastas do SiCDox."""
-    from .diagnostic.directory_diagnose import auditar_percepcao_espacial
-    auditar_percepcao_espacial(path)
+#@click.group('sicdox')
+#def sicdox():
+#    """Sistemas Cognitivos do Doxoade: Unificação de IA e Automação."""
+#    pass
+#
+## Adicionamos os subcomandos ao grupo
+#@sicdox.command('directory')
+#@click.argument('path', default='.')
+#def sicdox_directory(path):
+#    """Audita a percepção de pastas do SiCDox."""
+#    from .diagnostic.directory_diagnose import auditar_percepcao_espacial
+#    auditar_percepcao_espacial(path)
 
 def main():
     """Wrapper de execução blindado com encerramento de logs."""

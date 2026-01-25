@@ -1,8 +1,12 @@
+# -*- coding: utf-8 -*-
 # doxoade/tools/analysis.py
 import ast
+import os
 import hashlib
 import re
 import json
+
+from .streamer import ufs
 
 def _get_file_hash(file_path):
     """Calcula o hash SHA256 do conteúdo normalizado (CRLF -> LF)."""
@@ -21,22 +25,17 @@ def _get_file_hash(file_path):
         return None
 
 def _get_code_snippet(file_path, line_number, context_lines=2):
-    # [FIX] Proteção contra arquivo Nulo ou Vazio
-    if not file_path: 
-        return None
-
-    if not line_number or not isinstance(line_number, int) or line_number <= 0: 
-        return None
-        
-    try:
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            lines = f.readlines()
-        start = max(0, line_number - context_lines - 1)
-        end = min(len(lines), line_number + context_lines)
-        snippet = {i + 1: lines[i].rstrip('\n') for i in range(start, end)}
-        return snippet
-    except (IOError, IndexError, OSError): # OSError pega erros de caminho inválido no Windows
-        return None
+    """Sniper Gold: Zero I/O de disco (Pure RAM)."""
+    if not line_number: return {}
+    
+    # Puxa do buffer central (UFS)
+    lines = ufs.get_lines(file_path)
+    if not lines: return {}
+    
+    start = max(0, line_number - context_lines - 1)
+    end = min(len(lines), line_number + context_lines)
+    # Entrega o dicionário exato que o display.py precisa
+    return {i + 1: lines[i].rstrip('\n') for i in range(start, end)}
 
 def _get_code_snippet_from_string(content, line_number, context_lines=2):
     if not line_number or not isinstance(line_number, int) or line_number <= 0: return None
@@ -101,7 +100,13 @@ def _analyze_function_flow(tree, content):
     return dossiers
 
 def analyze_file_structure(file_path):
+    """Analisa a estrutura via AST usando o buffer do UFS."""
+    lines = ufs.get_lines(file_path)
+    if not lines: return {}
+    
+    import ast
     try:
+        tree = ast.parse("".join(lines))
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
             if not content.strip():
@@ -109,7 +114,7 @@ def analyze_file_structure(file_path):
             tree = ast.parse(content, filename=file_path)
     except (SyntaxError, IOError) as e:
         return {'error': f"Falha ao ler ou analisar o arquivo: {e}"}
-
+        
     functions = []
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef):

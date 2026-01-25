@@ -1,11 +1,9 @@
 # doxoade/shared_tools.py
 """
 Módulo de Fachada (Facade) para Ferramentas Compartilhadas.
-
 Este módulo existe para manter a retrocompatibilidade com comandos antigos
 que importam de `doxoade.shared_tools`. Ele redireciona as chamadas para
 a nova estrutura modular em `doxoade.tools.*`.
-
 IMPORTANTE: Novos desenvolvimentos devem importar diretamente de `doxoade.tools`.
 """
 
