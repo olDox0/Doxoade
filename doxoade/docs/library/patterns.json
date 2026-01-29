@@ -90,5 +90,25 @@
     "title": "Roteamento de Grupo Lazy",
     "context": "Startup de CLI com múltiplas dependências.",
     "content": "Uso de mapeamento estático 'string:modulo' para adiar imports até o momento da invocação. Vital para performance em hardware ARM/RISC."
+  },
+  "adaptive_batch_commit": {
+    "title": "Adaptive Batch Commit",
+    "context": "Latência de escrita em HDDs lentos no Windows.",
+    "content": "O worker de persistência monitora a latência do disco. Se alta, retém dados em RAM; se baixa, realiza commits em lotes de 50 registros para otimizar o fsync."
+  },
+  "targeted_bypass": {
+    "title": "Desvio de Intencionalidade (Targeted Bypass)",
+    "context": "Governador bloqueando produtividade em arquivos individuais.",
+    "content": "Padrão onde o sistema relaxa proteções automáticas se detectar uma ação direta e cirúrgica do usuário, priorizando a experiência imediata."
+  },
+  "package_virtualization": {
+    "title": "Virtualização de Pacote (Package Virtualization)",
+    "context": "Execução de scripts isolados que dependem de hierarquia de pastas.",
+    "content": "Simula um ambiente de pacote real definindo __package__, __path__ e injetando o objeto types.ModuleType no sys.modules antes da execução via exec()."
+  },
+  "noise_gate_tracing": {
+    "title": "Noise Gate Tracing (Rastro de Curto-Circuito)",
+    "context": "Overhead de rastro em bibliotecas externas de grande porte (venv).",
+    "content": "O rastreador retorna 'None' imediatamente ao detectar caminhos fora da project_root, cortando o processamento de linhas internas de bibliotecas de terceiros."
   }
 }

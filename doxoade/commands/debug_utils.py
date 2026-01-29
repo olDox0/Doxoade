@@ -4,40 +4,36 @@ Debug Utils - PASC-1.2 & MPoT-17.
 Environment anchoring and probe orchestration.
 """
 import os
-# [DOX-UNUSED] import sys
+import sys
 from ..shared_tools import _find_project_root
 
 def get_debug_env(script_path: str) -> dict:
-    """Calcula o ambiente com Injeção de Âncora do Core (MPoT-10)."""
+    """Injeta a âncora do Doxoade e a raiz do projeto no ambiente filho."""
     target_abs = os.path.abspath(script_path)
     project_root = _find_project_root(target_abs)
     
-    # 1. Localiza a instalação física do Doxoade
-    # doxoade/commands/debug_utils.py -> doxoade/ -> (dir_pai_que_contem_o_pacote)
-    doxo_pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    doxo_anchor = os.path.dirname(doxo_pkg_dir)
+    # Localiza onde o Doxoade está instalado fisicamente
+    # Sobe 2 níveis a partir de commands/debug_utils.py para chegar na raiz do pacote
+    doxo_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
     env = os.environ.copy()
-    # PASC-6.5: Adiciona a âncora do Doxoade e a raiz do projeto ao PYTHONPATH
-    env["PYTHONPATH"] = (
-        doxo_anchor + os.pathsep + 
-        os.path.dirname(project_root) + os.pathsep + 
+    # Adiciona a pasta PAI do doxoade para que 'import doxoade' funcione
+    # Adiciona a pasta do projeto atual para que imports locais funcionem
+    env["PYTHONPATH"] = os.pathsep.join([
+        doxo_dir,
+        os.path.dirname(project_root) if project_root else os.path.dirname(target_abs),
         env.get("PYTHONPATH", "")
-    )
+    ])
     env["PYTHONIOENCODING"] = "utf-8"
     return env
 
 def build_probe_command(python_exe: str, probe_file: str, script: str, **kwargs) -> list:
-    """Constrói o comando da sonda com argumentos dinâmicos."""
-    cmd = [python_exe, probe_file, script]
+    """Constrói o comando garantindo caminhos absolutos para evitar o 'Aborted!'."""
+    # Garante que o caminho da sonda e do script sejam absolutos
+    cmd = [python_exe, os.path.abspath(probe_file), os.path.abspath(script)]
     
-    watch = kwargs.get('watch')
-    bottleneck = kwargs.get('bottleneck')
-    threshold = kwargs.get('threshold')
-    extra_args = kwargs.get('args')
-
-    if watch: cmd.extend(["--watch", watch])
-    if bottleneck: cmd.extend(["--slow", str(threshold)])
-    if extra_args: cmd.extend(extra_args.split())
+    if kwargs.get('watch'): cmd.extend(["--watch", kwargs['watch']])
+    if kwargs.get('bottleneck'): cmd.extend(["--slow", str(kwargs.get('threshold', 100))])
+    if kwargs.get('args'): cmd.extend(kwargs['args'].split())
     
     return cmd
