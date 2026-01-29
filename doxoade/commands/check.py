@@ -172,28 +172,35 @@ def _initialize_manager(target_path: str, project_root: str):
 
 def _execute_scan_cycle(manager, target_path, project_root, **kwargs) -> tuple:
     from ..tools.memory_pool import finding_arena
-    from ..tools.streamer import ufs # Importa o novo UFS
+    from ..tools.streamer import ufs
     
     files = _resolve_file_list(target_path, project_root, kwargs.get('target_files'))
     if not files: return [], {}
 
-    is_targeted = len(files) == 1
+    # [SOBERANIA ABSOLUTA]
+    # Se o usuário quer Full Power, o cache atual é INVÁLIDO.
+    is_full_power = kwargs.get('full_power', False)
+    force_no_cache = kwargs.get('no_cache', False) or is_full_power
 
-    cache = {} if kwargs.get('no_cache') else _load_cache()
+    # Se for Full Power, começamos com um cache vazio para forçar a re-análise
+    cache = {} if force_no_cache else _load_cache()
     raw_findings = []
     
-    to_scan = _filter_cache(files, cache, kwargs.get('no_cache'), raw_findings, project_root)
+    # 1. Filtra os arquivos (O force_no_cache garante que todos caiam no 'to_scan')
+    to_scan = _filter_cache(files, cache, force_no_cache, raw_findings, project_root)
+    
+    is_targeted = len(files) == 1
     
     if to_scan:
         with progressbar(to_scan, label='Auditando') as bar:
             for item in bar:
-                # Passa a intenção para a tarefa individual
-                raw_findings.extend(
-                    _process_single_file_task(item, manager, kwargs.get('continue_on_error'), cache, is_targeted)
+                # 2. Processa a tarefa com o sinalizador de força
+                results = _process_single_file_task(
+                    item, manager, kwargs.get('continue_on_error'), 
+                    cache, is_targeted, is_full_power
                 )
                 
-                results = _process_single_file_task(item, manager, kwargs.get('continue_on_error'), cache)
-                # 2. Transfere os resultados para a Arena (MPoT-3)
+                # Injeta na Arena
                 for res in results:
                     arena_res = finding_arena.rent(
                         res['severity'], res['category'], res['message'], 
@@ -201,9 +208,7 @@ def _execute_scan_cycle(manager, target_path, project_root, **kwargs) -> tuple:
                     )
                     raw_findings.append(arena_res)
     
-    # 3. Finaliza o ciclo: Limpa o Streamer de arquivos para o próximo comando
     ufs.clear()
-    
     return raw_findings, cache
 
 def _handle_remediation(raw_findings, project_root, **kwargs):
@@ -309,28 +314,25 @@ def _filter_cache(files, cache, no_cache, raw_findings, root):
             to_scan.append((fp, abs_fp, 0, 0))
     return to_scan
 
-def _process_single_file_task(item, manager, cont_error, cache, is_targeted=False):
+def _process_single_file_task(item, manager, cont_error, cache, is_targeted=False, force_power=False):
     from ..tools.governor import governor
     from ..tools.streamer import ufs
     
     fp, rel, mtime, size = item
-    
-    # 1. Carrega o arquivo no UFS (Primeira e única leitura)
     ufs.get_lines(fp)
     
-    # 2. Consulta o Governador
-    skip_deep = governor.pace(targeted=is_targeted)
+    # [TECNOLOGIA GOLD] O Governador agora é forçado a liberar o motor
+    skip_deep = governor.pace(targeted=is_targeted, force=force_power)
     
-    # 3. Auditoria Vital
     fnd = _run_syntax_check(fp, manager)
     
-    # 4. Auditoria Adaptativa (Sem duplicar mensagens)
     if not fnd or cont_error:
         if not skip_deep:
+            # Aqui rodam as sondas reais
             fnd.extend(_run_static_probes(fp, manager))
             fnd.extend(_run_style_check(fp))
+        # A mensagem de "Análise reduzida" só entra se skip_deep for TRUE
         elif not any(f.get('category') == 'SYSTEM' for f in fnd):
-            # Injeta a mensagem apenas uma vez por arquivo
             fnd.append({
                 'severity': 'INFO', 'category': 'SYSTEM', 
                 'message': 'ALB: Análise reduzida por carga do sistema.', 
@@ -344,29 +346,57 @@ def _process_single_file_task(item, manager, cont_error, cache, is_targeted=Fals
 # --- CLICK COMMAND MANTIDO ---
 @command('check')
 @argument('path', type=ClickPath(exists=True), default='.')
-@option('--fix', is_flag=True, help="Corrige problemas.")
-@option('--fix-specify', '-fs', type=str, help="Reparo específico.")
-@option('--only', '-o', type=str, help="Filtra categoria.")
 @option('--archives', '-a', is_flag=True, help="Modo Dossiê.")
-@option('--fast', is_flag=True, help="Pula pesados.")
-@option('--no-cache', is_flag=True, help="Força reanálise.")
 @option('--clones', is_flag=True, help="Análise DRY.")
 @option('--continue-on-error', '-C', is_flag=True, help="Ignora sintaxe.")
 @option('--exclude', '-x', multiple=True, help="Ignora categorias.")
+@option('--fast', is_flag=True, help="Pula pesados.")
+@option('--fix', is_flag=True, help="Corrige problemas.")
+@option('--fix-specify', '-fs', type=str, help="Reparo específico.")
 @option('--format', 'out_fmt', type=Choice(['text', 'json']), default='text')
+@option('--full-power', '-fp', is_flag=True, help="Desativa o ALB e força análise máxima.")
+@option('--no-cache', '-no', is_flag=True, help="Força reanálise.")
+@option('--npp', is_flag=True, help="Integração direta com Notepad++.")
+@option('--npp-clear', '-nppc', is_flag=True, help="Limpa marcações no Notepad++.")
+@option('--only', '-o', type=str, help="Filtra categoria.")
 def check(path: str, **kwargs):
     """🔍 Auditoria de Qualidade e Segurança (Chief-Gold)."""
     if not path: raise ValueError("Caminho obrigatório.")
     if kwargs.get('out_fmt', 'text') == 'text': echo(Fore.YELLOW + "[CHECK] Executando auditoria...")
 
     results = run_check_logic(
-        path, fix=kwargs.get('fix'), fast=kwargs.get('fast'), no_cache=kwargs.get('no_cache'), 
-        clones=kwargs.get('clones'), continue_on_error=kwargs.get('continue_on_error'), 
-        exclude_categories=kwargs.get('exclude'), fix_specify=kwargs.get('fix_specify'),
-        only_category=kwargs.get('only'), archives_mode=kwargs.get('archives')
+        path, 
+        fix=kwargs.get('fix'), 
+        fast=kwargs.get('fast'), 
+        no_cache=kwargs.get('no_cache'), 
+        clones=kwargs.get('clones'), 
+        continue_on_error=kwargs.get('continue_on_error'), 
+        exclude_categories=kwargs.get('exclude'), 
+        fix_specify=kwargs.get('fix_specify'),
+        only_category=kwargs.get('only'), 
+        archives_mode=kwargs.get('archives'),
+        full_power=kwargs.get('full_power')
     )
     
     _update_open_incidents(results, os.path.abspath(path))
+    
+    # PASC-8.13: Divisão de sistemas (Config/Logic)
+    target_abs = os.path.abspath(path)
+    project_root = _find_project_root(target_abs)
+
+    # Requisito de Limpeza (Cleanup)
+    if kwargs.get('npp_clear'):
+        from .check_notepadpp import cleanup_npp_bridge
+        cleanup_npp_bridge(project_root)
+        return
+
+    # Requisito de Integração
+    if kwargs.get('npp'):
+        from .check_notepadpp import run_npp_workflow
+        # Passa o project_root explicitamente para respeitar PASC-8.3
+        kwargs['project_root'] = project_root
+        run_npp_workflow(path, **kwargs)
+        return
     
     if kwargs.get('out_fmt') == 'json':
         from json import dumps
@@ -374,9 +404,9 @@ def check(path: str, **kwargs):
     elif kwargs.get('archives'):
         from .check_utils import _render_issue_summary, _render_archived_view
         _render_archived_view(results)
-        _render_issue_summary(results.get('findings', []))
+        _render_issue_summary(results.get('findings', []), full_power=kwargs.get('full_power'))
     else:
         from .check_utils import _render_issue_summary
         _present_results('text', results)
-        _render_issue_summary(results.get('findings', []))
+        _render_issue_summary(results.get('findings', []), full_power=kwargs.get('full_power'))
     if results.get('summary', {}).get('critical', 0) > 0: sys.exit(1)

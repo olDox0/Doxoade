@@ -103,5 +103,15 @@
     "title": "Análise de Taint (Contaminação)",
     "definition": "Técnica de segurança que marca variáveis vindas de inputs externos como 'sujas' e monitora seu fluxo pelo programa.",
     "origin": "Security Tools v2.1"
+  },
+  "sampling_rate": {
+    "title": "Taxa de Amostragem (Sampling Rate)",
+    "definition": "Intervalo definido para consultas de telemetria ao sistema operacional. No Doxoade, fixado em 2s para evitar consumo inútil de CPU.",
+    "origin": "Otimização ALB v1.8"
+  },
+  "io_tax": {
+    "title": "Imposto de I/O",
+    "definition": "O custo computacional de transitar entre o espaço do usuário e o kernel para ler metadados de arquivos.",
+    "origin": "Doxoade Max Telemetry Analysis"
   }
 }

@@ -103,5 +103,30 @@
     "title": "Protocolo Aegis (Sandbox)",
     "date": "2026-01-16",
     "content": "Garantia de que qualquer execução dinâmica (exec/eval) seja precedida por análise AST e restrição total de builtins, eliminando riscos de RCE e Injeção."
+  },
+  "alb_v19": {
+    "title": "Protocolo ALB v1.9 (Simbiose Digital)",
+    "date": "2026-01-24",
+    "content": "Sistema de balanceamento adaptativo que modula a carga do Doxoade baseado no estresse do processador e memória do hospedeiro.\nInclui o 'Targeted Bypass' para garantir performance instantânea em scans de arquivo único."
+  },
+  "ufs_v10": {
+    "title": "Unified File Streamer (UFS)",
+    "date": "2026-01-24",
+    "content": "Camada de abstração de I/O que garante que cada arquivo de código seja lido apenas uma vez do disco por ciclo. Compartilha buffers em RAM entre check, analysis e filters."
+  },
+  "memory_arena_gold": {
+    "title": "Arena de Memória Chief-Gold",
+    "date": "2026-01-24",
+    "content": "Implementação estrita de MPoT-3. Pré-alocação de objetos para evitar o overhead do Garbage Collector do Python durante scans massivos."
+  },
+  "nexus_flow_v33": {
+    "title": "Protocolo Nexus Flow v3.3 (Lentes Seletivas)",
+    "date": "2026-01-29",
+    "content": "Sistema de observabilidade avançada com filtragem de ruído. Permite alternar entre rastro de valores (--flow-val), auditoria de I/O de módulos (--flow-import) e visualização de Call Stack hierárquica (--flow-func)."
+  },
+  "process_reaper": {
+    "title": "Protocolo Ceifador (Reaper Protocol)",
+    "date": "2026-01-28",
+    "content": "Mecanismo de segurança Aegis que garante a integridade do sistema operacional do usuário, impedindo que subprocessos (servidores/crawlers) sobrevivam à finalização do comando pai."
   }
 }

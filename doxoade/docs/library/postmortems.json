@@ -178,5 +178,53 @@
     "symptom": "Crash imediato no comando 'check' após implementação do Async Worker.",
     "root_cause": "A refatoração do db_utils removeu acidentalmente a função '_update_open_incidents', quebrando o contrato com o orquestrador do Check.",
     "fix": "Restauração da função com blindagem MPoT-7 (isinstance check) para suportar resultados do linter em formato de string."
+  },
+  "governor_attribute_desync": {
+    "title": "A Divergência de Contrato do ALB",
+    "date": "2026-01-24",
+    "severity": "HIGH",
+    "symptom": "Crash 'AttributeError' no Governador e morte silenciosa do DoxoLogWorker.",
+    "root_cause": "Adição de métricas de disco sem inicialização correspondente no construtor da classe Singleton.",
+    "fix": "Protocolo de Sincronização de Interface: Inicialização de todos os limiares no __init__ e uso de getattr defensivo no Worker."
+  },
+  "telemetry_echo_crash": {
+    "title": "O Fantasma do Namespace (echo)",
+    "date": "2026-01-24",
+    "severity": "MEDIUM",
+    "symptom": "NameError: name 'echo' is not defined ao rodar telemetry -v.",
+    "root_cause": "Refatoração acelerada movendo lógica de UI sem importar o wrapper do Click no novo módulo.",
+    "fix": "Sustituição por click.echo e isolamento total no telemetry_io.py."
+  },
+  "kernel_call_tax": {
+    "title": "O Imposto de Chamada de Sistema (Windows)",
+    "date": "2026-01-24",
+    "severity": "MEDIUM",
+    "symptom": "CPU em 100% mesmo em tarefas simples de listagem.",
+    "root_cause": "Uso excessivo de os.path.abspath e psutil.disk_usage dentro de loops apertados, forçando trocas de contexto no kernel.",
+    "fix": "Implementação de Sampling Rate (2s) no Governador e normalização de string pura (Bypass) no check.py."
+  },
+  "zombie_server_leak": {
+    "title": "A Crise do Servidor Órfão (Zombie Process)",
+    "date": "2026-01-28",
+    "severity": "HIGH",
+    "symptom": "Servidores FastAPI/Flask permaneciam ativos em background após o fechamento do Doxoade.",
+    "root_cause": "Subprocessos de longa duração não eram vinculados ao ciclo de vida do processo pai via Job Objects ou SIGKILL.",
+    "fix": "Implementação do Protocolo Ceifador (Process Reaper) que utiliza psutil para matar recursivamente toda a árvore de processos no encerramento."
+  },
+  "sandbox_build_class_failure": {
+    "title": "O Bloqueio de Orientação a Objetos (Aegis)",
+    "date": "2026-01-29",
+    "severity": "MEDIUM",
+    "symptom": "Crash 'NameError: __build_class__ not found' ao tentar instanciar classes no sandbox.",
+    "root_cause": "Rigor excessivo do Aegis Sandbox bloqueando funções internas vitais do interpretador para construção de classes.",
+    "fix": "Refino do restricted_safe_exec com whitelist de métodos mágicos (__build_class__, __path__, __init__) para suporte total a POO."
+  },
+  "relative_import_vacuum": {
+    "title": "O Vácuo de Contexto (Relative Import Error)",
+    "date": "2026-01-29",
+    "severity": "HIGH",
+    "symptom": "ImportError ao rodar arquivos em subpastas via flow.",
+    "root_cause": "O comando exec() puro não possui metadados de __package__, invalidando imports relativos (from .base).",
+    "fix": "Protocolo de Virtualização de Pacote: Injeção dinâmica de metadados e criação de módulos fantasmas no sys.modules em tempo de execução."
   }
 }

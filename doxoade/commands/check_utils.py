@@ -100,10 +100,13 @@ def _render_archived_view(results):
          f"{Fore.MAGENTA}{summary.get('critical', 0)} Críticos")
     echo(f"{Fore.BLUE}{Style.BRIGHT}─" * 75 + Style.RESET_ALL)
     
-def _render_issue_summary(findings: List[Dict[str, Any]]):
+def _render_issue_summary(findings: List[Dict[str, Any]], **kwargs):
     """Sumário Estatístico Chief-Gold (Alinhamento Industrial)."""
     if not findings: return
     from collections import defaultdict
+    from ..tools.streamer import ufs
+    from ..tools.memory_pool import finding_arena
+    from ..tools.governor import governor
     
     stats = defaultdict(lambda: defaultdict(int))
     id_map = {
@@ -143,7 +146,13 @@ def _render_issue_summary(findings: List[Dict[str, Any]]):
     from ..tools.memory_pool import finding_arena
     from ..tools.streamer import ufs
     
-    echo(f"\n{Fore.BLUE}{Style.BRIGHT}🛡  ALB PROTECT:{Style.RESET_ALL}")
+    # Detecção de status para a UI
+    if kwargs.get('full_power'):
+        status = f"{Fore.RED}{Style.BRIGHT}OVERRIDE (FULL-POWER)"
+    else:
+        status = f"{Fore.GREEN}ATIVO" if governor.enabled else f"{Fore.RED}DESATIVADO"
+        
+    echo(f"\n{Fore.BLUE}{Style.BRIGHT}🛡  ALB PROTECT ({status}):{Style.RESET_ALL}")
     echo(f"   Reciclagem de Memória : {Fore.GREEN}{finding_arena._ptr} objetos reutilizados")
     echo(f"   Economia de Disco     : {Fore.GREEN}{ufs.reads_saved} aberturas evitadas")
     echo(f"{Fore.CYAN}{Style.DIM}─" * 85 + Style.RESET_ALL)

@@ -18,7 +18,8 @@ class ResourceGovernor:
         
         self.base_sleep = 0.03
         self.last_pace_time = 0
-        self.interventions = 0 # FIX: Atributo inicializado
+        self.enabled = True
+        self.interventions = 0
         
         self._cached_disk = 0
         self._last_disk_check = 0
@@ -26,6 +27,28 @@ class ResourceGovernor:
         self._cache = {'cpu': 0, 'ram': 0, 'disk': 0}
         self._last_sample = 0
 
+    def pace(self, targeted=False, force=False):
+        """Aplica modulação de carga com override de Soberania."""
+        # [ALB BYPASS] Se force=True, ignora CPU/RAM e retorna False (não pula nada)
+        if force:
+            return False 
+
+        now = time.time()
+        # Cooldown de amostragem
+        if now - self.last_pace_time < 0.5:
+            return False 
+            
+        self.last_pace_time = now
+        sleep_time, skip_heavy = self.decide_pace()
+        
+        if targeted and not skip_heavy:
+            return False
+
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+            self.interventions += 1
+        return skip_heavy
+        
     def get_system_health(self):
         now = time.time()
         # MPoT-12: Amostragem a cada 2 segundos. Fora isso, usa o cache.
@@ -50,28 +73,6 @@ class ResourceGovernor:
         if cpu > self.CPU_LIMIT_ECO:
             return self.base_sleep * 2, False
         return 0.0, False
-
-    def pace(self, targeted=False):
-        """Aplica a modulação de carga com Bypass para Alvos Únicos."""
-        now = time.time()
-        if now - self.last_pace_time < 0.5:
-            return False 
-            
-        self.last_pace_time = now
-        
-        # [TECNOLOGIA GOLD] Prioridade do Operador
-        # Se for um arquivo individual, ignoramos o fôlego a menos que a RAM esteja em 95%
-        if targeted:
-            _, ram, _ = self.get_system_health()
-            if ram < 95.0:
-                return False # Sai sem sleep e sem pular análise
-
-        sleep_time, skip_heavy = self.decide_pace()
-        
-        if sleep_time > 0:
-            time.sleep(sleep_time)
-            self.interventions += 1
-        return skip_heavy
 
     def get_disk_pressure(self):
         """Calcula a pressão de I/O baseada na variação de tempo de atividade."""

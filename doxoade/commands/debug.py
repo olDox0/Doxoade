@@ -7,6 +7,7 @@ import click
 import subprocess
 import sys
 import json
+from colorama import Fore
 from .debug_utils import get_debug_env, build_probe_command
 from .debug_io import print_debug_header, render_variable_table, report_crash
 from ..shared_tools import _get_venv_python_executable
@@ -40,21 +41,55 @@ def debug(script, watch, bottleneck, threshold, args):
     cmd = build_probe_command(python_exe, debug_probe.__file__, script, args=args)
 
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', env=env)
-        parts = res.stdout.split("---DOXOADE-DEBUG-DATA---")
+        # Mudamos de .run (que espera o fim) para .Popen (que monitora em tempo real)
+        process = subprocess.Popen(
+            cmd, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE, 
+            text=True, 
+            encoding='utf-8', 
+            env=env
+        )
         
-        if len(parts) < 2:
-            click.secho("\n[!] Sonda falhou ao retornar dados estruturados.", fg='red')
-            if res.stderr: click.echo(res.stderr)
+        click.echo(Fore.YELLOW + "   > Aguardando sinalização da sonda...")
+        
+        # [TECNOLOGIA NEXUS] Tenta ler a primeira saída para ver se o boot falhou
+        try:
+            # Aguarda um tempo curto para ver se o servidor crashou no boot
+            stdout, stderr = process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            import sys as exc_sys
+            import os as exc_os
+            exc_type, exc_obj, exc_tb = exc_sys.exc_info()
+            fname = exc_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            line_number = exc_tb.tb_lineno
+            print(f"\033[0m \033[1m \nFilename: {fname}   \n■ Line: {line_number} \033[31m \n■ Exception type: {exc_type} \n■ Exception value: {'\n  >>>  '.join(str(exc_obj).split('\''))} \033[0m")
+#            print(f"\033[0m \033[1m \nFilename: {fname}   \n■ Line: {line_number} \033[31m \n■ Exception type: {exc_type} \n■ Exception value: {exc_obj} \033[0m")
+            
+            # Se deu timeout, o servidor está VIVO e em loop (Comportamento esperado do FastAPI)
+            click.secho("\n📡 [ SERVIDOR ATIVO ] Loop detectado. O rastro está em background.", fg='cyan')
+            click.echo(Fore.WHITE + "   > Para servidores, use 'doxoade run --flow' para ver as rotas em real-time.")
             return
 
-        data = json.loads(parts[1])
-        if data.get('status') == 'error':
-            report_crash(data, script)
+        # Se o processo terminou em menos de 5s, houve um erro ou o script era curto
+        if "---DOXOADE-DEBUG-DATA---" in stdout:
+            parts = stdout.split("---DOXOADE-DEBUG-DATA---")
+            data = json.loads(parts[1])
+            if data.get('status') == 'error':
+                report_crash(data, script)
+            else:
+                click.secho("\n✅ [ SUCESSO ] Execução concluída.", fg='green')
+                render_variable_table(data.get('variables'))
         else:
-            click.secho("\n✅ [ SUCESSO ] Execução concluída.", fg='green')
-            render_variable_table(data.get('variables'))
-            
+            # Se não tem o marcador e o processo morreu, imprimimos o erro real
+            click.secho("\n🚨 [ FALHA DE BOOTSTRAP ]", fg='red', bold=True)
+            if stderr: click.echo(f"{Fore.RED}{stderr}")
+            if stdout: click.echo(stdout)
+
     except Exception as e:
-        # PASC-5.3: Tratamento informativo
-        click.secho(f"\n❌ Falha Crítica no Orquestrador: {e}", fg='red', bold=True)
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        print(f"\033[31m ■ Exception type: {e} ■ Exception value: {exc_obj}\n")
+        exc_trace(exc_tb)
+        click.secho(f"\n❌ Erro no Orquestrador: {e}", fg='red')

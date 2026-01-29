@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# doxoade/tools/security_utils.py
 """
 Security & Integrity Utilities - Aegis Guard v2.3.
 Hardened against introspection and taint injection.
@@ -8,6 +9,7 @@ import hashlib
 import ast
 import logging
 import os  # FIX: Adicionado import global essencial
+from colorama import Fore
 from pathlib import Path
 from typing import Optional, List, Dict
 
@@ -30,7 +32,14 @@ def calculate_integrity_hash(root_path: Path) -> str:
             with open(path, "rb") as f:
                 for chunk in iter(lambda: f.read(4096), b""):
                     hasher.update(chunk)
-        except OSError: continue
+        except OSError as e:
+            import sys as exc_sys
+            from traceback import print_tb as exc_trace
+            _, exc_obj, exc_tb = exc_sys.exc_info()
+            print(f"\033[31m ■ Exception type: {e} ■ Exception value: {exc_obj}\n")
+            exc_trace(exc_tb)
+            continue
+            
     return hasher.hexdigest()
 
 def validate_execution_context(file_path: str, is_test_mode: bool):
@@ -62,7 +71,12 @@ def simulate_taint_analysis(file_path: str) -> List[Dict]:
         taint_map = _map_taint_sources(tree)
         return _audit_sinks_for_vulnerabilities(tree, taint_map)
     except Exception as e:
-        logging.debug(f"Taint Analysis Skip {file_path}: {e}")
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        print(f"\033[31m ■ Exception type: {e} ■ Exception value: {exc_obj}\n")
+        exc_trace(exc_tb)
+        logging.debug(f"\nTaint Analysis Skip {file_path}: {e}")
         return []
 
 def _map_taint_sources(tree: ast.AST) -> Dict[str, str]:
@@ -109,10 +123,12 @@ def restricted_safe_exec(code_str: str, globals_dict: Optional[dict] = None, all
     if allow_imports:
         # Injeção de funções e módulos essenciais para o Core
         essential = [
-            '__import__', 'print', 'len', 'range', 'dict', 'list', 'set', 'tuple',
-            'str', 'int', 'float', 'bool', 'Exception', 'type', 'isinstance',
-            'iter', 'next', 'enumerate', 'zip', 'open', 'repr', 'getattr', 'setattr'
+            '__import__', '__build_class__', 'print', 'len', 'range', 'dict', 
+            'list', 'set', 'tuple', 'str', 'int', 'float', 'bool', 'Exception', 
+            'type', 'isinstance', 'iter', 'next', 'enumerate', 'zip', 'open',
+            'getattr', 'setattr', 'hasattr', 'repr'
         ]
+
         for func in essential:
             if hasattr(builtins, func):
                 safe_builtins[func] = getattr(builtins, func)
@@ -132,11 +148,23 @@ def restricted_safe_exec(code_str: str, globals_dict: Optional[dict] = None, all
                 raise RuntimeError("Sandbox Breach: Dynamic imports forbidden.")
             
             if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
-                if node.attr not in ['__name__', '__file__', '__package__', '__path__']:
+                allowed = {
+                    '__name__', '__file__', '__package__', '__path__', # __path__ é VITAL
+                    '__module__', '__loader__', '__spec__', '__dict__',
+                    '__all__', '__class__', '__init__', '__str__', '__repr__', 
+                    '__enter__', '__exit__', '__call__', '__mro__', '__bases__'
+                }
+                if node.attr not in allowed:
                     raise RuntimeError(f"Sandbox Breach: Private access ({node.attr}) blocked.")
 
         compiled = compile(tree, filename="<sandbox>", mode="exec")
+        # Injeção segura
         exec(compiled, safe_globals) # noqa: B102
         
     except Exception as e:
-        raise RuntimeError(f"Aegis Sandbox Blocked: {e}")
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        print(f"\033[31m ■ Exception type: {e} ■ Exception value: {exc_obj}\n")
+        exc_trace(exc_tb)
+        raise RuntimeError(f"\nAegis Sandbox Blocked: {e}")

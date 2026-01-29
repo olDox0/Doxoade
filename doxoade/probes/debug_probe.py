@@ -31,7 +31,12 @@ def _bootstrap(script_path):
                 break
         
         return ".".join(package_parts) if package_parts else None
-    except ValueError:
+    except ValueError as e:
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        print(f"\033[31m ■ Exception type: {e} ■ Exception value: {exc_obj}\n")
+        exc_trace(exc_tb)
         return None
 
 def safe_serialize(obj, depth=0):
@@ -47,27 +52,37 @@ def run_debug(script_path):
     
     debug_data = {'status': 'unknown', 'variables': {}, 'error': None}
 
+    globs = {
+        '__name__': '__main__',
+        '__file__': abs_path,
+        '__package__': None, # package_name,
+    }
+
     try:
-        with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
-
+        sys.stdout.write("\n--- BOOTING AEGIS SANDBOX ---\n")
+        sys.stdout.flush() 
         from doxoade.tools.security_utils import restricted_safe_exec
-
-        globs = {
-            '__name__': '__main__',
-            '__file__': abs_path,
-            '__package__': package_name,
-        }
+#        with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(abs_path, 'r', encoding='utf-8') as f:
+            content = f.read()
 
         # Execução via Aegis com permissão de import para depuração de infra
         restricted_safe_exec(content, globs, allow_imports=True)
         
         debug_data['status'] = 'success'
+        debug_data['variables'] = _capture_locals(globs) # Captura o que foi definido até o boot
         for k, v in globs.items():
             if not k.startswith('__') and not isinstance(v, types.ModuleType):
-                debug_data['variables'][k] = safe_serialize(v)
+                try:
+                    debug_data['variables'][k] = safe_serialize(v)
+                except: continue
 
     except Exception as e:
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        print(f"\033[31m ■ Exception type: {e} ■ Exception value: {exc_obj}\n")
+        exc_trace(exc_tb)
         debug_data['status'] = 'error'
         debug_data['error'] = str(e)
         _, _, tb = sys.exc_info()
