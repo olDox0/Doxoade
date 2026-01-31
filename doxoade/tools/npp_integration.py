@@ -1,41 +1,35 @@
+# -*- coding: utf-8 -*-
 # doxoade/tools/npp_integration.py
 import json
 import os
-import subprocess
-from .display import Fore, Style
+import time
 
-def signal_notepadpp(file_path, findings, project_root):
+def signal_notepadpp(file_path: str, findings: list, project_root: str):
     """
-    Sinaliza ao Notepad++ os achados de uma análise.
-    PASC 8.7: Contrato de comunicação via JSON Atômico.
+    Exporta achados para o bridge JSON.
+    Este código roda no terminal (Doxoade).
     """
-    bridge_file = os.path.join(project_root, ".doxoade", "npp_bridge.json")
+    bridge_dir = os.path.join(project_root, ".doxoade")
+    bridge_file = os.path.join(bridge_dir, "npp_bridge.json")
     
-    # PASC 1.3: Garantir diretório de metadados
-    os.makedirs(os.path.dirname(bridge_file), exist_ok=True)
+    if not os.path.exists(bridge_dir):
+        os.makedirs(bridge_dir, exist_ok=True)
 
     payload = {
-        "source": os.path.abspath(file_path),
-        "timestamp": os.getpid(), # ID do processo para unicidade
+        "protocol": "Doxoade-NPP-v1",
+        "source": os.path.abspath(file_path).replace("\\", "/"),
+        "timestamp": time.time(),
         "findings": [
-            {"line": f.get('line'), "msg": f.get('message'), "sev": f.get('severity')}
-            for f in findings if f.get('line')
+            {
+                "line": f.get('line', 0),
+                "msg": f.get('message', 'No message'),
+                "sev": f.get('severity', 'WARNING')
+            } for f in findings if f.get('line', 0) > 0
         ]
     }
 
-    # Escrita Atômica (Segurança contra corrupção)
-    temp_bridge = bridge_file + ".tmp"
-    with open(temp_bridge, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=4)
-    os.replace(temp_bridge, bridge_file)
-
-    # Invoca o N++ para focar no arquivo e na primeira linha de erro
-    # Chief-Gold: Posicionamento instantâneo
-    if payload["findings"]:
-        first_err = payload["findings"][0]["line"]
-        try:
-            # Tenta localizar o executável via PATH
-            subprocess.Popen(["notepad++", "-n" + str(first_err), payload["source"]])
-        except FileNotFoundError:
-            # Fallback silencioso conforme PASC 8.9
-            pass
+    # Escrita Atômica
+    temp_file = bridge_file + ".tmp"
+    with open(temp_file, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+    os.replace(temp_file, bridge_file)

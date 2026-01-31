@@ -110,5 +110,10 @@
     "title": "Noise Gate Tracing (Rastro de Curto-Circuito)",
     "context": "Overhead de rastro em bibliotecas externas de grande porte (venv).",
     "content": "O rastreador retorna 'None' imediatamente ao detectar caminhos fora da project_root, cortando o processamento de linhas internas de bibliotecas de terceiros."
+  },
+  "targeted_sniper_lens": {
+    "title": "Lente de Sniper (Targeted Trace)",
+    "context": "Necessidade de auditar apenas um módulo dentro de um fluxo complexo.",
+    "content": "Padrão de instrumentação onde o rastro permanece silenciado até que o ponteiro de execução atinja o arquivo alvo definido pelo operador, ignorando o ruído do orquestrador."
   }
 }

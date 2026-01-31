@@ -208,7 +208,6 @@ def _execute_scan_cycle(manager, target_path, project_root, **kwargs) -> tuple:
                     )
                     raw_findings.append(arena_res)
     
-    ufs.clear()
     return raw_findings, cache
 
 def _handle_remediation(raw_findings, project_root, **kwargs):
@@ -248,22 +247,25 @@ def run_check_logic(path: str, **kwargs):
     return _finalize_report(processed_findings, project_root, cache, fix_active=fix_was_active, **kwargs)
 
 def _finalize_report(raw_findings, project_root, cache, **kwargs):
-    # RESOLVIDO: Busca segura no kwargs para evitar NameError
     fix_active = kwargs.get('fix', False) or kwargs.get('fix_specify') is not None
     only_cat = kwargs.get('only_category')
-    arch_mode = kwargs.get('archives_mode', False)
-    no_cache = kwargs.get('no_cache', False)
+    
+    # [NEXUS SILENCE] Filtra o ruído ALB para o terminal
+    visual_findings = [f for f in raw_findings if f.get('category') != 'SYSTEM']
+    
+    # Define o contexto do logger sem duplicidade
+    ctx_params = {'fix': fix_active, 'only': only_cat}
 
-    with ExecutionLogger('check', project_root, {'fix': fix_active, 'only': only_cat, 'archives': arch_mode}) as logger:
+    with ExecutionLogger('check', project_root, ctx_params) as logger:
         from .check_filters import filter_and_inject_findings
         from .check_utils import _finalize_log
         
-        processed = filter_and_inject_findings(raw_findings, project_root)
+        processed = filter_and_inject_findings(visual_findings, project_root)
         if only_cat:
             processed = [f for f in processed if f.get('category', '').upper() == only_cat.upper()]
         
         _finalize_log(processed, logger, project_root, kwargs.get('exclude_categories'))
-        if not no_cache: _save_cache(cache)
+        if not kwargs.get('no_cache'): _save_cache(cache)
         return logger.results
 
 def _resolve_file_list(abs_path, root, target_files):
@@ -321,26 +323,32 @@ def _process_single_file_task(item, manager, cont_error, cache, is_targeted=Fals
     fp, rel, mtime, size = item
     ufs.get_lines(fp)
     
-    # [TECNOLOGIA GOLD] O Governador agora é forçado a liberar o motor
-    skip_deep = governor.pace(targeted=is_targeted, force=force_power)
+    # [ALB v2.1] Modulação de Carga
+    skip_deep = governor.pace(targeted=is_targeted, force=force_power, file_path=fp)
     
     fnd = _run_syntax_check(fp, manager)
+    alb_triggered = False
+    alb_intervened = False
     
     if not fnd or cont_error:
         if not skip_deep:
-            # Aqui rodam as sondas reais
             fnd.extend(_run_static_probes(fp, manager))
             fnd.extend(_run_style_check(fp))
-        # A mensagem de "Análise reduzida" só entra se skip_deep for TRUE
-        elif not any(f.get('category') == 'SYSTEM' for f in fnd):
-            fnd.append({
-                'severity': 'INFO', 'category': 'SYSTEM', 
-                'message': 'ALB: Análise reduzida por carga do sistema.', 
-                'file': fp, 'line': 0
-            })
+        else:
+            alb_triggered = True
+            # Injeta a tag que será capturada pelo filtro no check_utils
+            fnd.append({'severity': 'INFO', 'category': 'SYSTEM', 'message': 'ALB_REDUCED', 'file': fp, 'line': 0})
             
-    if mtime > 0:
+    # [TECNOLOGIA GOLD: CACHE INTEGRITY]
+    # Se o ALB interveio, NÃO salvamos esse resultado no cache.
+    # Isso garante que na próxima execução o sistema tente a análise profunda novamente.
+    if mtime > 0 and not alb_intervened:
         cache[rel] = {'mtime': mtime, 'size': size, 'findings': fnd}
+    elif alb_intervened and rel in cache:
+        # Se antes tínhamos um cache bom e agora o sistema está lento,
+        # mantemos o cache antigo (profundo) em vez de sobrescrever com o reduzido.
+        pass
+
     return fnd
 
 # --- CLICK COMMAND MANTIDO ---
@@ -393,7 +401,6 @@ def check(path: str, **kwargs):
     # Requisito de Integração
     if kwargs.get('npp'):
         from .check_notepadpp import run_npp_workflow
-        # Passa o project_root explicitamente para respeitar PASC-8.3
         kwargs['project_root'] = project_root
         run_npp_workflow(path, **kwargs)
         return
@@ -402,11 +409,20 @@ def check(path: str, **kwargs):
         from json import dumps
         echo(dumps(results, indent=2, ensure_ascii=False))
     elif kwargs.get('archives'):
-        from .check_utils import _render_issue_summary, _render_archived_view
+        from .check_utils import _render_archived_view, _render_issue_summary
+#        from .check_utils import _render_issue_summary, _render_archived_view
         _render_archived_view(results)
         _render_issue_summary(results.get('findings', []), full_power=kwargs.get('full_power'))
     else:
         from .check_utils import _render_issue_summary
-        _present_results('text', results)
+        if kwargs.get('archives'):
+            _render_archived_view(results)
+        else:
+            _present_results('text', results)
         _render_issue_summary(results.get('findings', []), full_power=kwargs.get('full_power'))
+
+    # [TECNOLOGIA GOLD] Limpeza de recursos APÓS a última exibição para não zerar o contador
+    from ..tools.streamer import ufs
+    ufs.clear()
+    
     if results.get('summary', {}).get('critical', 0) > 0: sys.exit(1)

@@ -32,77 +32,65 @@ def _finalize_log(findings, logger, root, excludes):
             suggestion_action=f.get('suggestion_action')
         )
 
-# doxoade/commands/check_utils.py
-
 def _render_archived_view(results):
-    """Exibe o Dossiê Gold de forma simétrica com Colorimetria Industrial."""
+    """RENDERIZA APENAS A LISTA (Limpa o hibridismo)."""
     findings = results.get('findings', [])
-    if not findings:
-        echo(f"\n{Fore.GREEN}{Style.BRIGHT}✔ [ESTADO DE OURO]{Fore.WHITE} Nenhum problema encontrado!{Style.RESET_ALL}")
-        return
+    if not findings: return
 
     from collections import defaultdict
     grouped = defaultdict(list)
     for f in findings:
-        grouped[f['file']].append(f)
+        # Ignora avisos ALB na lista detalhada para manter o silêncio
+        if f.get('category') != 'SYSTEM':
+            grouped[f['file']].append(f)
 
-    # Título do Dossiê em Azul Cobalto
-    echo(f"\n{Fore.BLUE}{Style.BRIGHT}--- 📂 DOSSIÊ DE DÍVIDA TÉCNICA ({len(grouped)} arquivos afetados) ---{Style.RESET_ALL}")
+    if not grouped: return
+    echo(f"\n{Fore.BLUE}{Style.BRIGHT}--- 📂 DOSSIÊ DE DÍVIDA TÉCNICA ({len(grouped)} arquivos) ---{Style.RESET_ALL}")
     
-    # Mapeamento de Cores por Categoria (Compliance: PASC-10)
     cat_colors = {
-        'COMPLEXITY': Fore.RED,
-        'RUNTIME-RISK': Fore.RED + Style.BRIGHT,
-        'SECURITY': Fore.MAGENTA + Style.BRIGHT,
-        'SYNTAX': Fore.LIGHTRED_EX + Style.BRIGHT,
-        'DEADCODE': Fore.CYAN,
-        'UNUSED-PRIVATE': Fore.CYAN + Style.DIM,
-        'STYLE': Fore.YELLOW,
-        'QA-REMINDER': Fore.GREEN,
-        'SYSTEM': Fore.CYAN + Style.BRIGHT
+        'COMPLEXITY': Fore.RED, 'RUNTIME-RISK': Fore.RED + Style.BRIGHT,
+        'SECURITY': Fore.MAGENTA + Style.BRIGHT, 'SYNTAX': Fore.LIGHTRED_EX + Style.BRIGHT,
+        'DEADCODE': Fore.CYAN, 'STYLE': Fore.YELLOW, 'QA-REMINDER': Fore.GREEN
     }
 
-    for file_path, file_findings in sorted(grouped.items()):
-        # [MPoT-7] Limpeza de redundância para evitar poluição visual
+    for file_path, file_findings in sorted(filtered_grouped.items()):
         unique_findings = []
-        seen_keys = set()
+        seen = set()
         for f in file_findings:
             key = (f.get('line', 0), f.get('message', ''))
-            if key not in seen_keys:
-                unique_findings.append(f)
-                seen_keys.add(key)
+            if key not in seen:
+                unique_findings.append(f); seen.add(key)
         
         count = len(unique_findings)
-        
-        # Cabeçalho do Arquivo com Intensidade Dinâmica
         header_color = Fore.BLUE if count < 5 else (Fore.YELLOW if count < 10 else Fore.RED)
         echo(f"\n{header_color}{Style.BRIGHT}[  {count:03}  ]{Fore.WHITE} {file_path}{Style.RESET_ALL}")
         
         for f in unique_findings:
             cat = f.get('category', 'STYLE').upper()
-            sev = f.get('severity', 'WARNING').upper()
-            line = str(f.get('line', '??')).ljust(4)
-            
-            # Seleção de Cor baseada na Categoria ou Severidade Crítica
             color = cat_colors.get(cat, Fore.YELLOW)
-            if sev == 'CRITICAL': color = Fore.MAGENTA + Style.BRIGHT
-            
-            # RENDERIZAÇÃO GOLD: 
-            # Bullet (Cor) | Linha (Dim) | Categoria (Cor Alinhada) | Mensagem (White)
+            line = str(f.get('line', '??')).ljust(4)
             echo(f"   {color}■{Fore.WHITE}{Style.DIM} [ L-{line}] {Style.NORMAL}{color}{cat:<15}{Fore.WHITE}: {f['message']}{Style.RESET_ALL}")
 
-    # Resumo Final de Alta Visibilidade
+    # --- 3. BLOCO CONSOLIDADO ALB (Nexus Silence) ---
+    if alb_files:
+        from ..tools.governor import governor
+        echo(f"\n{Fore.CYAN}{Style.BRIGHT}⚖  ALB RESOURCE REPORT:{Style.RESET_ALL}")
+        echo(f"   Status      : {Fore.YELLOW}Análise reduzida em {len(alb_files)} tarefas para preservação de hardware")
+        echo(f"   Economia    : {Fore.GREEN}~{governor.get_savings_estimate()} de processamento poupados")
+        
+        names = [os.path.basename(f) for f in alb_files]
+        display_str = ", ".join(names[:10]) + (f" ... e mais {len(names)-10}" if len(names) > 10 else "")
+        echo(f"   Alvos       : {Fore.WHITE}{display_str}")
+
+    # Resumo Final
     summary = results.get('summary', {})
-    echo(f"{Fore.BLUE}{Style.BRIGHT}─" * 75 + Style.RESET_ALL)
-    echo(f"  {Fore.WHITE}SOMA TOTAL: "
-         f"{Fore.RED}{summary.get('errors', 0)} Erros{Fore.WHITE} | "
-         f"{Fore.YELLOW}{summary.get('warnings', 0)} Avisos{Fore.WHITE} | "
-         f"{Fore.MAGENTA}{summary.get('critical', 0)} Críticos")
+    echo(f"\n{Fore.BLUE}{Style.BRIGHT}─" * 75 + Style.RESET_ALL)
+    echo(f"  {Fore.WHITE}SOMA TOTAL: {Fore.RED}{summary.get('errors', 0)} Erros{Fore.WHITE} | {Fore.YELLOW}{summary.get('warnings', 0)} Avisos")
     echo(f"{Fore.BLUE}{Style.BRIGHT}─" * 75 + Style.RESET_ALL)
     
 def _render_issue_summary(findings: List[Dict[str, Any]], **kwargs):
-    """Sumário Estatístico Chief-Gold (Alinhamento Industrial)."""
-    if not findings: return
+    """Sumário Estatístico Nexus Gold consolidado."""
+    if not findings and not kwargs.get('full_power'): return
     from collections import defaultdict
     from ..tools.streamer import ufs
     from ..tools.memory_pool import finding_arena
@@ -141,10 +129,8 @@ def _render_issue_summary(findings: List[Dict[str, Any]], **kwargs):
                 hint = f" {Fore.CYAN}· sugestão: {Fore.GREEN}{Style.BRIGHT}doxoade check -fs {id_map[sub]}"
             
             echo(f"{line}{hint}{Style.RESET_ALL}")
-    echo(f"{Fore.CYAN}{Style.DIM}─" * 85 + Style.RESET_ALL)
     
-    from ..tools.memory_pool import finding_arena
-    from ..tools.streamer import ufs
+    echo(f"{Fore.CYAN}{Style.DIM}─" * 85 + Style.RESET_ALL)
     
     # Detecção de status para a UI
     if kwargs.get('full_power'):
@@ -152,12 +138,27 @@ def _render_issue_summary(findings: List[Dict[str, Any]], **kwargs):
     else:
         status = f"{Fore.GREEN}ATIVO" if governor.enabled else f"{Fore.RED}DESATIVADO"
         
-    echo(f"\n{Fore.BLUE}{Style.BRIGHT}🛡  ALB PROTECT ({status}):{Style.RESET_ALL}")
-    echo(f"   Reciclagem de Memória : {Fore.GREEN}{finding_arena._ptr} objetos reutilizados")
-    echo(f"   Economia de Disco     : {Fore.GREEN}{ufs.reads_saved} aberturas evitadas")
-    echo(f"{Fore.CYAN}{Style.DIM}─" * 85 + Style.RESET_ALL)
+    # Exibe o relatório consolidado
+    status_text = f"{Fore.RED}OVERRIDE" if kwargs.get('full_power') else f"{Fore.GREEN}ATIVO"
+    _render_resource_report(kwargs.get('full_power'))
     
 def _load_file_lines(file_path: str) -> list:
     """Usa o Streamer Unificado para evitar re-leitura de disco (MPoT-3)."""
     from ..tools.streamer import ufs # PASC-6.6
     return ufs.get_lines(file_path)
+    
+def _render_resource_report(full_power):
+    from ..tools.memory_pool import finding_arena
+    from ..tools.streamer import ufs
+    from ..tools.governor import governor
+    
+    status = f"{Fore.RED}OVERRIDE" if full_power else f"{Fore.GREEN}ATIVO"
+    echo(f"\n{Fore.BLUE}{Style.BRIGHT}🛡  ALB PROTECT ({status}):{Style.RESET_ALL}")
+    
+    if governor.interventions > 0:
+        echo(f"   Economia de CPU       : {Fore.GREEN}~{governor.get_savings_estimate()} poupados")
+        echo(f"   Tarefas Adaptadas     : {Fore.YELLOW}{governor.interventions} arquivos omitidos")
+    
+    echo(f"   Reciclagem de Memória : {Fore.GREEN}{finding_arena._ptr} objetos reutilizados")
+    echo(f"   Economia de Disco     : {Fore.GREEN}{ufs.reads_saved} aberturas evitadas")
+    echo(f"{Fore.CYAN}{Style.DIM}─" * 85 + Style.RESET_ALL)

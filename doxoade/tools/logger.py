@@ -65,7 +65,12 @@ class ExecutionLogger:
         is_json = False
         if isinstance(self.arguments, dict) and self.arguments.get('output_format') == 'json': is_json = True
         if '--format=json' in sys.argv: is_json = True
-
+        
+        # [NEXUS SILENCE] Se for o check, encerramos silenciosamente
+        # para permitir que o check_utils imprima o sumário Gold.
+        if self.command_name == 'check' and '--format=json' not in sys.argv:
+            return
+            
         if not is_json:
             duration = time.monotonic() - self.start_time
             color = Fore.GREEN if duration < 1.0 else (Fore.YELLOW if duration < 3.0 else Fore.RED)

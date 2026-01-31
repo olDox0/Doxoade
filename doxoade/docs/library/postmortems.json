@@ -226,5 +226,21 @@
     "symptom": "ImportError ao rodar arquivos em subpastas via flow.",
     "root_cause": "O comando exec() puro não possui metadados de __package__, invalidando imports relativos (from .base).",
     "fix": "Protocolo de Virtualização de Pacote: Injeção dinâmica de metadados e criação de módulos fantasmas no sys.modules em tempo de execução."
+  },
+  "alb_cache_poisoning": {
+    "title": "Envenenamento de Cache pelo ALB",
+    "date": "2026-01-30",
+    "severity": "MEDIUM",
+    "symptom": "Avisos de 'Análise reduzida' persistiam mesmo com CPU livre.",
+    "root_cause": "O sistema salvava o estado temporário do ALB no cache de arquivos, impedindo re-análises profundas automáticas.",
+    "fix": "Implementação da Lei de Efemeridade: avisos da categoria SYSTEM são ignorados pelo motor de persistência de cache."
+  },
+  "nexus_trace_loop_spam": {
+    "title": "Saturação de Rastro (Trace Spam)",
+    "date": "2026-01-29",
+    "severity": "LOW",
+    "symptom": "Milhares de linhas repetitivas no flow impossibilitavam o diagnóstico.",
+    "root_cause": "List comprehensions e loops de processamento de string geravam eventos de linha para cada iteração.",
+    "fix": "Algoritmo 'Iron Gate' (v3.9) de compressão de ciclos por janela deslizante."
   }
 }
