@@ -10,68 +10,77 @@ import os
 
 class ResourceGovernor:
     def __init__(self):
-        # MPoT-15: Limiares Gold
-        self.CPU_LIMIT_ECO = 100.0
-        self.CPU_LIMIT_CRIT = 150.0
+        # MPoT-15: Elevando limiares para processadores modernos (AMD64/Multi-core)
+        self.CPU_LIMIT_ECO = 110.0
+        self.CPU_LIMIT_CRIT = 180.0
         self.DISK_BUSY_LIMIT = 85.0
-        self.RAM_LIMIT_CRIT = 75.0
+        self.RAM_LIMIT_CRIT = 90.0
         
         self.base_sleep = 0.03
-        self.last_pace_time = 0
-        self.enabled = True
         self.interventions = 0
+        self.affected_files = []
+        self.enabled = True
         
+        self.last_pace_time = 0
         self._cached_disk = 0
         self._last_disk_check = 0
+        self._last_disk_sample = 0
         
-        self._cache = {'cpu': 0, 'ram': 0, 'disk': 0}
+        self._cache = {'cpu': 0.0, 'ram': 0.0, 'disk': 0.0}
         self._last_sample = 0
 
-    def pace(self, targeted=False, force=False):
-        """Aplica modulação de carga com override de Soberania."""
-        # [ALB BYPASS] Se force=True, ignora CPU/RAM e retorna False (não pula nada)
-        if force:
-            return False 
-
+    def pace(self, targeted=False, force=False, file_path=None):
+        if force or not self.enabled: return False
+        
         now = time.time()
-        # Cooldown de amostragem
-        if now - self.last_pace_time < 0.5:
-            return False 
-            
+        if now - self.last_pace_time < 0.5: return False 
         self.last_pace_time = now
+        
         sleep_time, skip_heavy = self.decide_pace()
         
-        if targeted and not skip_heavy:
-            return False
+        if targeted and not skip_heavy: return False
 
         if sleep_time > 0:
             time.sleep(sleep_time)
-            self.interventions += 1
+            if skip_heavy:
+                self.interventions += 1
+                if file_path: self.affected_files.append(file_path)
         return skip_heavy
+
+    def get_savings_estimate(self):
+        total_sec = self.interventions * 1.1
+        return f"{total_sec:.1f}s" if total_sec < 60 else f"{total_sec/60:.1f}min"
         
     def get_system_health(self):
+        """Coleta métricas com amostragem estratificada (PASC-6.4)."""
         now = time.time()
-        # MPoT-12: Amostragem a cada 2 segundos. Fora isso, usa o cache.
-        if now - self._last_sample < 2.0:
-            return self._cache['cpu'], self._cache['ram'], self._cache['disk']
-
-        try:
+        
+        # CPU/RAM: Amostragem a cada 1.5 segundos
+        if now - self._last_sample > 1.5:
             self._cache['cpu'] = psutil.cpu_percent(interval=None)
             self._cache['ram'] = psutil.virtual_memory().percent
-            self._cache['disk'] = psutil.disk_usage(os.getcwd()).percent
             self._last_sample = now
-        except: pass
-        
+            
+        # DISCO: Amostragem a cada 10 segundos (Operação cara no Windows)
+        if now - self._last_disk_sample > 10.0:
+            try:
+                cpu = psutil.cpu_percent(interval=None)
+                ram = psutil.virtual_memory().percent
+                disk = psutil.disk_usage(os.getcwd()).percent 
+                return cpu, ram, disk
+            except: return 0.0, 0.0, 0.0
+            
+#                self._cache['disk'] = psutil.disk_usage(os.getcwd()).percent
+#            except: self._cache['disk'] = 0.0
+            self._last_disk_sample = now
+            
         return self._cache['cpu'], self._cache['ram'], self._cache['disk']
 
     def decide_pace(self):
         cpu, ram, disk = self.get_system_health()
-        if disk > self.DISK_BUSY_LIMIT or ram > self.RAM_LIMIT_CRIT:
-            return self.base_sleep * 15, True
-        if cpu > self.CPU_LIMIT_CRIT:
-            return self.base_sleep * 10, True
-        if cpu > self.CPU_LIMIT_ECO:
-            return self.base_sleep * 2, False
+        if disk > self.DISK_BUSY_LIMIT or ram > self.RAM_LIMIT_CRIT: return self.base_sleep * 15, True
+        if cpu > self.CPU_LIMIT_CRIT: return self.base_sleep * 10, True
+        if cpu > self.CPU_LIMIT_ECO: return self.base_sleep * 2, False
         return 0.0, False
 
     def get_disk_pressure(self):

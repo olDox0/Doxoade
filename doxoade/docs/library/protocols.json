@@ -128,5 +128,15 @@
     "title": "Protocolo Ceifador (Reaper Protocol)",
     "date": "2026-01-28",
     "content": "Mecanismo de segurança Aegis que garante a integridade do sistema operacional do usuário, impedindo que subprocessos (servidores/crawlers) sobrevivam à finalização do comando pai."
+  },
+  "nexus_silence_gold": {
+    "title": "Protocolo Nexus Silence (v42.7)",
+    "date": "2026-01-30",
+    "content": "Diretriz de UX industrial que proíbe o spam de mensagens de sistema no terminal. Consolida intervenções do ALB em um único relatório de eficiência no rodapé do comando."
+  },
+  "iron_gate_compression": {
+    "title": "Iron Gate (Compressão de Fluxo)",
+    "date": "2026-01-29",
+    "content": "Algoritmo de monitoramento que detecta padrões cíclicos de execução (A-B-A-B) e os colapsa em uma única linha informativa para preservar a clareza do diagnóstico."
   }
 }

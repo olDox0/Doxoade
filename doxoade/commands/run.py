@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/run.py
 """
-Universal Executor - Aegis v2.2 (Nexus Gold).
+Universal Executor - Aegis v2.3 (Target Sniper Ready).
+Compliance: MPoT-19, PASC-6.
 """
-import sys, subprocess, os
+import sys
+import subprocess
+import os
+import click # FIX: Importação essencial para click.Path
 from colorama import Fore, Style
 from click import command, argument, option, echo, pass_context
 from .debug_utils import get_debug_env
@@ -16,22 +20,24 @@ from ..shared_tools import ExecutionLogger, _get_venv_python_executable
 @option('--flow-val', is_flag=True, help="Rastreio de variáveis.")
 @option('--flow-import', is_flag=True, help="Rastreio de módulos e I/O.")
 @option('--flow-func', is_flag=True, help="Rastreio de funções.")
+@option('--file', '-f', type=click.Path(exists=True), help="Monitora apenas este arquivo.")
 @option('--test-mode', is_flag=True)
 @pass_context
-def run(ctx, script: str, flow, flow_val, flow_import, flow_func, test_mode):
-    """Executor Universal com Lentes Nexus (PASC-6)."""
+def run(ctx, script: str, flow, flow_val, flow_import, flow_func, file, test_mode):
+    """Executor Universal com Lentes Nexus v4.0."""
     from ..tools.security_utils import validate_execution_context
     
     if not script: raise ValueError("Script required.")
     abs_path = os.path.abspath(script)
-    active_flow = any([flow, flow_val, flow_import, flow_func])
+    
+    # Ativa o rastro se qualquer flag for usada ou se um arquivo alvo for definido
+    active_flow = any([flow, flow_val, flow_import, flow_func, file])
 
     with ExecutionLogger('run', abs_path, ctx.params) as _:
         try:
             validate_execution_context(abs_path, test_mode)
             os.environ["DOXOADE_AUTHORIZED_RUN"] = "1"
             
-            # Execução Única
             if active_flow:
                 _execute_with_flow(abs_path, ctx.params)
             else:
@@ -57,6 +63,8 @@ def _execute_with_flow(script_path, params):
     if params.get('flow_val'): cmd.append("--val")
     if params.get('flow_import'): cmd.append("--import")
     if params.get('flow_func'): cmd.append("--func")
+    if params.get('file'): 
+        cmd.extend(["--target", os.path.abspath(params['file'])])
     
     process = None
     try:

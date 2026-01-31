@@ -12,7 +12,6 @@ import os
 import sqlite3
 # [DOX-UNUSED] import logging
 from typing import List, Dict, Any
-from typing import List, Dict, Any
 # [DOX-UNUSED] from doxoade.database import get_db_connection
 
 # --- DADOS DE CONHECIMENTO (STDLIB & THIRD PARTY) ---
@@ -121,7 +120,7 @@ def _simulate_fix(finding: Dict[str, Any], project_root: str, file_path: str, li
         pass
 
 
-def _try_apply_template(finding: Dict[str, Any], templates: List[sqlite3.Row]) -> bool:
+def _apply_solution_template(finding: Dict[str, Any], templates: List[sqlite3.Row]) -> bool:
     """Tenta casar o erro com um padrão aprendido no banco de dados."""
     message = finding.get('message', '')
     category = finding.get('category', '').upper()
@@ -199,19 +198,3 @@ def _enrich_with_dependency_analysis(findings: List[Dict[str, Any]], project_pat
     for path, file_findings in by_file.items():
         _analyze_dependencies(file_findings, path)
     return findings
-    
-def _try_apply_template(finding: Dict[str, Any], project_root: str, templates: List[sqlite3.Row]) -> bool:
-    """Tenta casar erro com padrão aprendido. FIX: Adicionado project_root."""
-    message = finding.get('message', '')
-    category = finding.get('category', '').upper()
-    
-    for t in templates:
-        if t['category'] != category: continue
-        regex = (re.escape(t['problem_pattern'])
-                 .replace('<MODULE>', '(.+?)').replace('<VAR>', '(.+?)').replace('<LINE>', r'(\d+)'))
-        
-        if re.fullmatch(regex, message):
-            _simulate_fix(finding, project_root, finding['file'], finding['line'], 
-                         r'^(.*)$', t['solution_template'], "MEMÓRIA (Gênese)", "Aplicar Template")
-            return True
-    return False
