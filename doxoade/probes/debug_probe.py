@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # doxoade/probes/debug_probe.py
 import sys
 import os
@@ -46,9 +47,18 @@ def safe_serialize(obj, depth=0):
     if isinstance(obj, dict): return {str(k): safe_serialize(v, depth+1) for k, v in list(obj.items())[:5]}
     return str(type(obj).__name__)
 
+def _capture_locals(globs):
+    """Resgata variáveis do escopo após a execução (Aegis Shield)."""
+    captured = {}
+    import types
+    for k, v in globs.items():
+        if not k.startswith('__') and not isinstance(v, types.ModuleType):
+            captured[k] = safe_serialize(v)
+    return captured
+
 def run_debug(script_path):
     abs_path = os.path.abspath(script_path)
-    package_name = _bootstrap(abs_path)
+# [DOX-UNUSED]     package_name = _bootstrap(abs_path)
     
     debug_data = {'status': 'unknown', 'variables': {}, 'error': None}
 
@@ -75,7 +85,10 @@ def run_debug(script_path):
             if not k.startswith('__') and not isinstance(v, types.ModuleType):
                 try:
                     debug_data['variables'][k] = safe_serialize(v)
-                except: continue
+                except Exception as e:
+                    import logging as _dox_log
+                    _dox_log.error(f"[INFRA] run_debug: {e}")
+                    continue
 
     except Exception as e:
         import sys as exc_sys

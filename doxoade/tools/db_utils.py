@@ -70,11 +70,13 @@ def start_persistence_worker():
         _WORKER_THREAD.start()
 
 def stop_persistence_worker():
-    """Garante que o buffer seja esvaziado antes de fechar."""
+    """Garante que o buffer seja esvaziado antes de fechar (MPoT-3)."""
+    global _WORKER_THREAD
     _STOP_EVENT.set()
     _LOG_QUEUE.put(None)
     if _WORKER_THREAD:
         _WORKER_THREAD.join(timeout=2.0)
+        _WORKER_THREAD = None # Reseta para a próxima ignição
 
 # --- PRODUTORES (APIs Públicas) ---
 

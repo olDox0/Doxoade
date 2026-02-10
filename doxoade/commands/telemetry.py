@@ -74,3 +74,7 @@ def _render_nexus_card(row, verbose):
         sys = utils.parse_json_safe(row['system_info'])
         if sys:
             click.echo(f"   {Style.DIM}Ambiente: {sys.get('os')} {sys.get('arch')} | Py {sys.get('python')}")
+    cpu = row['cpu_percent'] or 0
+    if cpu > 150.0: # Se usou mais de 1.5 núcleos, é um candidato!
+        from .telemetry_io import echo
+        echo(f"   {Fore.MAGENTA}🚀 VULCAN HINT: Esta run foi pesada. Use 'doxoade vulcan ignite' para 50x de ganho.")

@@ -12,8 +12,6 @@ from colorama import Fore, Style
 from ..shared_tools import _print_finding_details, _get_code_snippet, ExecutionLogger, _run_git_command # Adicione estes imports
 from ..database import get_db_connection
 
-#from ..shared_tools import ExecutionLogger
-
 __version__ = "34.0 Alfa"
 
 # Em doxoade/commands/utils.py
@@ -363,14 +361,18 @@ def setup_regression():
 @click.command('setup-health')
 @click.argument('path', type=click.Path(exists=True, file_okay=False, resolve_path=True), default='.')
 @click.pass_context
-def setup_health_cmd(ctx, path): # Renomeei para evitar conflito de nome
-    """Prepara um projeto para ser analisado pelo 'doxoade health'."""
+def setup_health_cmd(path, arguments):
+    """Configura o ambiente de saúde do projeto."""
+    import click
+    from colorama import Fore
+    
+    ctx = click.get_current_context()
     
     click.echo(Fore.CYAN + Style.BRIGHT + f"--- [SETUP-HEALTH] Configurando '{path}' ---")
     arguments = ctx.params
     
     # O ExecutionLogger agora funciona pois importamos acima
-    with ExecutionLogger('setup-health', path, arguments) as logger:
+    with ExecutionLogger('setup-health', path, arguments) as _:
         # 1. Venv
         venv_path = os.path.join(path, 'venv')
         if not os.path.exists(venv_path):

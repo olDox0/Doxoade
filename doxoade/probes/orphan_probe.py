@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # doxoade/probes/orphan_probe.py
 """
 Orphan Probe - Detector de Funções Órfãs
@@ -185,14 +186,9 @@ if __name__ == "__main__":
             print("[]")
         else:
             data = json.loads(raw_input)
-            # Suporta tanto lista direta quanto dicionário de contexto
             files = data.get("files", []) if isinstance(data, dict) else data
-            
-            # Chama a função principal correspondente
-            # (find_clones para clone_probe ou analyze_orphans para orphan_probe)
-            if "clone" in sys.argv[0]:
-                print(json.dumps(find_clones(files)))
-            else:
-                print(json.dumps(analyze_orphans(files)))
-    except Exception:
+            # FIX: Chama APENAS o que pertence a esta sonda
+            print(json.dumps(analyze_orphans(files)))
+    except Exception as e:
+        sys.stderr.write(f"ProbeError:Orphan:{str(e)}")
         print("[]")

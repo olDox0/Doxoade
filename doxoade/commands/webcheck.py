@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# doxoade/commands/webcheck.py
 """
 Módulo de Auditoria Web e Web-in-Python (NiceGUI).
 Realiza análise estática em arquivos HTML, CSS, JS e extrai strings de 
@@ -17,7 +18,13 @@ from bs4 import BeautifulSoup
 import click
 from colorama import Fore
 
+from ..probes.web_probe import WebAuditProbe
 from ..shared_tools import ExecutionLogger, _present_results, _get_project_config
+
+try:
+    import requests
+except ImportError:
+    requests = None 
 
 __version__ = "36.1 Alfa (Termux-Safe)"
 
@@ -26,20 +33,33 @@ cssutils.log.setLevel(logging.CRITICAL)
 
 @click.command('webcheck')
 @click.pass_context
+#@click.argument('path', default='.')
 @click.argument('path', type=click.Path(exists=True, file_okay=True), default='.')
 @click.option('--ignore', multiple=True, help="Ignores specific folders.")
 @click.option('--format', type=click.Choice(['text', 'json']), default='text', help="Output format.")
 def webcheck(ctx, path, ignore, format):
-    """
-    Analisa ativos web (HTML/CSS/JS) e Web-in-Python (NiceGUI).
-    Valida sintaxe CSS/HTML injetada via strings Python.
-    """
+    """Realiza Auditoria Web Sênior (Peso, Assets e Visual)."""
     if path is None:
         raise ValueError("O caminho de análise não pode ser nulo.")
 
     arguments = ctx.params
+#    with ExecutionLogger('webcheck', path, ctx.params) as logger:
     with ExecutionLogger('webcheck', path, arguments) as logger:
         try:
+            probe = WebAuditProbe(path)
+            
+            # 1. Auditoria de Peso (Resolve o susto dos 59MB)
+            for f in probe.audit_payloads():
+                logger.add_finding('CRITICAL', f['msg'], file=f.get('file'))
+                
+            # 2. Auditoria Visual (Piano Black / Emerald Compliance)
+            for f in probe.audit_visuals():
+                logger.add_finding('WARNING', f['msg'], file=f.get('file'))
+                
+            # 3. Saúde de Assets
+            for f in probe.check_cdn_health():
+                logger.add_finding('ERROR', f['msg'])
+            
             if format == 'text':
                 click.echo(Fore.YELLOW + f"[WEB] Doxoade v{__version__} analisando '{os.path.abspath(path)}'...")
             
@@ -63,6 +83,10 @@ def webcheck(ctx, path, ignore, format):
             if logger.results['summary']['errors'] > 0:
                 sys.exit(1)
         except Exception as e:
+            from traceback import print_tb as exc_trace
+            _, exc_obj, exc_tb = sys.exc_info()
+            print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+            exc_trace(exc_tb)
             logger.add_finding('CRITICAL', 'Falha inesperada no webcheck.', details=str(e))
             sys.exit(1)
 
@@ -97,6 +121,10 @@ def _analyze_html_file(file_path: str):
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             return _validate_html_content(f.read(), file_path)
     except Exception as e:
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = sys.exc_info()
+        print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+        exc_trace(exc_tb)
         return [{'type': 'error', 'message': f"Erro de leitura HTML: {e}", 'file': file_path}]
 
 def _analyze_css_file(file_path: str):
@@ -105,6 +133,11 @@ def _analyze_css_file(file_path: str):
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             return _validate_css_content(f.read(), file_path)
     except Exception as e:
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = sys.exc_info()
+        print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+        exc_trace(exc_tb)
+
         return [{'type': 'error', 'message': f"Erro de leitura CSS: {e}", 'file': file_path}]
 
 def _analyze_js_file(file_path: str):
@@ -114,8 +147,18 @@ def _analyze_js_file(file_path: str):
             esprima.parseScript(f.read())
         return []
     except esprima.Error as e:
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = sys.exc_info()
+        print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+        exc_trace(exc_tb)
+
         return [{'type': 'error', 'message': f"Sintaxe JS Inválida: {e.message}", 'file': file_path, 'line': e.lineNumber}]
     except Exception as e:
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = sys.exc_info()
+        print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+        exc_trace(exc_tb)
+
         return [{'type': 'warning', 'message': f"Falha no parser JS: {str(e)}", 'file': file_path}]
 
 # --- WEB-IN-PYTHON (AST) ---
@@ -173,6 +216,10 @@ def _analyze_py_web_content(file_path: str):
                             findings.extend(_validate_css_content(css_str, file_path, line_offset=node.lineno))
 
     except Exception as e:
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = sys.exc_info()
+        print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+        exc_trace(exc_tb)
         # Bandit Fix: Logar a falha em vez de pass silencioso
         logging.debug(f"Falha ao analisar AST web em {file_path}: {e}")
         
@@ -198,6 +245,10 @@ def _validate_html_content(content: str, file_path: str, line_offset: int = 0):
                      'line': line_offset
                  })
     except Exception as e:
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = sys.exc_info()
+        print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+        exc_trace(exc_tb)
         findings.append({'type': 'error', 'message': f"HTML Inválido: {e}", 'file': file_path, 'line': line_offset})
     return findings
 
@@ -249,6 +300,10 @@ def _validate_css_content(content: str, file_path: str, line_offset: int = 0, is
              })
 
     except Exception as e:
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = sys.exc_info()
+        print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+        exc_trace(exc_tb)
         findings.append({'type': 'error', 'message': f"Sintaxe CSS Fatal: {str(e)}", 'file': file_path, 'line': line_offset})
     finally:
         # IMPORTANTE: Remover o handler para não vazar memória/logs

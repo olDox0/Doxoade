@@ -55,7 +55,8 @@ def init(ctx, project_name, remote):
             subprocess.run([sys.executable, "-m", "venv", os.path.join(project_path, "venv")], check=True, capture_output=True)
 
             click.echo("   > Criando arquivo .gitignore...")
-            gitignore_content = ("venv/\n\n__pycache__/\n*.py[cod]\n\nbuild/\ndist/\n*.egg-info/\n\n.vscode/\n.idea/\n\n.env\n")
+            gitignore_content = (f"# {project_name} .gitignore\n\nvenv/\n__pycache__/\n*.py[cod]\nbuild/\ndist/\n*.egg-info/\n.vscode/\n.idea/\n.env\n\n# --- Arquivos de Cache do Python ---\n\n__pycache__/\n*.py[cod]\n*.pyc\n*.pyo\n*.pyd\n\n# --- Arquivos de Ambiente Virtual ---\n\nvenv/\n.venv/\nenv/\n.env\n\n# --- Arquivos de Build e Distribuição (para PyInstaller) ---\n\nbuild/\ndist/\n*.egg-info/\n*.spec\n\n# --- ARQUIVOS SENSÍVEIS E DE USUÁRIO (NUNCA COMPARTILHAR) ---\n\n*.json\n*.log\n*.old\n*.txt\n*.bkp\n*.bak\n*.dox\n*.nppBackup\n\nExemplo/\ntmp/\n\n# --- Arquivos de Configuração de IDE ---\n\n.vscode/\n.idea/\n\n# --- Arquivos de sistema do Windows ---\n\ndesktop.ini\nThumbs.db\n# --- BACKUPS E ARQUIVOS TEMPORÁRIOS ---\n\nVers/\n\n*.mak\n*.log\n\n# --- Doxoade cache files\n\n.doxoade_cache/\n.dox_agent_workspace/\n.dox_lab/\ndoxoade/opt/\n\n# Exceções (Auto-fixed pelo Doxoade)\n\n!requirements.txt\n")
+
             with open(os.path.join(project_path, ".gitignore"), "w", encoding="utf-8") as f: f.write(gitignore_content)
             
             click.echo("   > Criando arquivo requirements.txt...")

@@ -113,5 +113,30 @@
     "title": "Imposto de I/O",
     "definition": "O custo computacional de transitar entre o espaço do usuário e o kernel para ler metadados de arquivos.",
     "origin": "Doxoade Max Telemetry Analysis"
+  },
+  "nogil_execution": {
+    "title": "Execução NOGIL (No Global Interpreter Lock)",
+    "definition": "Estado de execução onde o rastro se desprende do interpretador Python, permitindo que o processador execute instruções C puras em paralelo, sem travas de memória. Essencial para atingir speedups acima de 100x.",
+    "origin": "Vulcan Forge v6.0"
+  },
+  "hard_c_typing": {
+    "title": "Tipagem de Ferro (Hard-C-Typing)",
+    "definition": "Prática agressiva de conversão de variáveis Python dinâmicas para tipos primitivos de C (unsigned int, long long, double) na assinatura e no corpo da função, eliminando a intermediação da API do Python.",
+    "origin": "Vulcan Forge v5.5"
+  },
+  "c_api_bloat": {
+    "title": "Inchaço de C-API (C-API Bloat)",
+    "definition": "Fenômeno onde um código compilado em C é lento (ex: 0.9x speedup) porque continua consultando o interpretador Python para gerenciar objetos em vez de usar registradores de hardware.",
+    "origin": "Vanguard Case #001"
+  },
+  "foundry_silo": {
+    "title": "Silo da Forja (Foundry)",
+    "definition": "Ambiente de quarentena (.doxoade/vulcan/foundry) onde ocorrem a transpilação e compilação nativa, impedindo que artefatos temporários (.obj, .c) poluam o diretório de produção.",
+    "origin": "Vulcan Environment v1.0"
+  },
+  "bitwise_crunching": {
+    "title": "Moagem de Bits (Bitwise Crunching)",
+    "definition": "Operações lógicas de baixo nível (XOR, AND, OR, LShift) que são processadas em ciclos únicos de CPU no Vulcano, mas custam caro no Python devido ao overhead de objetos imutáveis.",
+    "origin": "Ironclad Test v5.2"
   }
 }

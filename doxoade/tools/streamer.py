@@ -32,7 +32,10 @@ class FileStreamer:
             if ram_usage < 85.0:
                 self._cache[key] = lines
             return lines
-        except: return []
+        except Exception as e:
+            import logging as _dox_log
+            _dox_log.error(f"[INFRA] get_lines: {e}")
+            return []
 
     def clear(self):
         self._cache.clear()

@@ -68,7 +68,10 @@ class ResourceGovernor:
                 ram = psutil.virtual_memory().percent
                 disk = psutil.disk_usage(os.getcwd()).percent 
                 return cpu, ram, disk
-            except: return 0.0, 0.0, 0.0
+            except Exception as e:
+                import logging as _dox_log
+                _dox_log.error(f"[INFRA] get_system_health: {e}")
+                return 0.0, 0.0, 0.0
             
 #                self._cache['disk'] = psutil.disk_usage(os.getcwd()).percent
 #            except: self._cache['disk'] = 0.0
@@ -92,7 +95,9 @@ class ResourceGovernor:
             # Nota: No Windows, monitoramos o tempo de resposta via psutil
             # Para fins de ALB, simplificamos para ocupação global
             return usage
-        except:
+        except Exception as e:
+            import logging as _dox_log
+            _dox_log.error(f"[INFRA] get_disk_pressure: {e}")
             return 0
 
     def get_report(self):

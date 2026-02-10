@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # doxoade/tools/analysis.py
 import ast
-import os
+# [DOX-UNUSED] import os
 import hashlib
 import re
 import json

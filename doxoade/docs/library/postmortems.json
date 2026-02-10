@@ -242,5 +242,21 @@
     "symptom": "Milhares de linhas repetitivas no flow impossibilitavam o diagnóstico.",
     "root_cause": "List comprehensions e loops de processamento de string geravam eventos de linha para cada iteração.",
     "fix": "Algoritmo 'Iron Gate' (v3.9) de compressão de ciclos por janela deslizante."
+  },
+  "vulcan_object_bottleneck": {
+    "title": "O Gargalo da Inércia de Objeto",
+    "date": "2026-01-31",
+    "severity": "MEDIUM",
+    "symptom": "Binário Vulcano apresentando speedup de 0.9x (mais lento que Python).",
+    "root_cause": "Falta de tipagem estática nos argumentos e variáveis locais, forçando o C a interagir com PyObjects dentro de loops massivos.",
+    "fix": "Implementação do Hard-C-Typing no VulcanForge: conversão forçada de argumentos para long/double e injeção de cdef nas variáveis de loop."
+  },
+  "subprocess_telemetry_blindness": {
+    "title": "A Barreira de Visibilidade do Subprocesso",
+    "date": "2026-02-01",
+    "severity": "HIGH",
+    "symptom": "Advisor reportando 'Nenhum Hot-Path detectado' mesmo após execuções pesadas.",
+    "root_cause": "O rastro térmico ocorria em um processo filho (subprocess), tornando os hits de linha invisíveis para o CodeSampler que residia no processo pai.",
+    "fix": "Migração para o 'In-Process Bridge': o rastro --flow agora incorpora o script alvo na mesma memória do Doxoade, permitindo visão total da pilha de chamadas (f_back)."
   }
 }

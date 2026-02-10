@@ -5,7 +5,7 @@ Garante a limpeza de processos órfãos (Anti-Zombie Protocol).
 Compliance: MPoT-15, Aegis Rule 17.
 """
 import os
-import subprocess
+# [DOX-UNUSED] import subprocess
 import psutil
 import signal
 

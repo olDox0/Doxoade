@@ -4,7 +4,7 @@ Debug Utils - PASC-1.2 & MPoT-17.
 Environment anchoring and probe orchestration.
 """
 import os
-import sys
+# [DOX-UNUSED] import sys
 from ..shared_tools import _find_project_root
 
 def get_debug_env(script_path: str) -> dict:

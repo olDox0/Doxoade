@@ -10,6 +10,7 @@ from click import command, argument, option, echo, pass_context
 from colorama import Fore, Style
 
 from ..shared_tools import _get_project_config, ExecutionLogger
+from .search_systems.search_utils import extract_function_block, search_git_history_content, get_code_from_commit, extract_block_from_git
 
 # ============================================================================
 # FASE 1: MOTORES DE BUSCA (LÓGICA PURA)
@@ -58,12 +59,14 @@ def _search_in_code_stream(project_root: Path, query: str, limit: int) -> list:
         
     matches = []
     query_lower = query.lower()
+    QUARANTINE = {
+        'venv', '.git', '__pycache__', 'build', 'dist', 
+        '.doxoade_cache', '.doxoade', '.pytest_cache' # Adicionado .doxoade
+    }
 
     for root, dirs, filenames in walk(project_root):
         # Filtro de Pastas (Isolamento de Processamento)
-        dirs[:] = [d for d in dirs if d not in {
-            'venv', '.git', '__pycache__', 'build', 'dist', '.doxoade_cache'
-        }]
+        dirs[:] = [d for d in dirs if d not in QUARANTINE]
         
         for filename in filenames:
             file_path = Path(root) / filename
@@ -132,13 +135,15 @@ def _render_code_matches(matches: list):
 @command('search')
 @argument('query')
 @option('--code', '-c', is_flag=True, help='Busca no código/docs')
-@option('--commits', is_flag=True, help='Busca em commits')
+@option('--full', '-f', is_flag=True, help='Exibe a função inteira (detecção por indentação)')
+@option('--commits', is_flag=True, help='Busca em mensagens e conteúdo histórico')
+@option('--specify-commit', '-sc', help='Busca o código dentro de um commit específico')
 @option('--incidents', '-i', is_flag=True, help='Busca incidentes')
 @option('--timeline', '-t', is_flag=True, help='Busca na timeline')
 @option('--limit', '-n', default=20, help='Limite (Padrão: 20)')
 @pass_context
-def search(ctx, query, code, commits, incidents, timeline, limit):
-    """Busca Nexus: Código, Docs, Histórico e Timeline unificados."""
+def search(ctx, query, code, full, commits, incidents, timeline, specify_commit, limit):
+    """Busca Nexus v4.3: Viagem no tempo e recuperação de código."""
     if not query:
         raise ValueError("Contrato Violado: Query de busca é obrigatória.")
 
@@ -146,7 +151,59 @@ def search(ctx, query, code, commits, incidents, timeline, limit):
     root = Path(config['root_path'])
     
     with ExecutionLogger('search', str(root), ctx.params):
-        echo(f"{Fore.CYAN}{Style.BRIGHT}\n╔═══ Nexus Search: '{query}' (Limit: {limit}) ═══╗{Style.RESET_ALL}")
+        echo(f"{Fore.CYAN}{Style.BRIGHT}╔═══ Nexus Search: '{query}' ═══╗{Style.RESET_ALL}")
+        
+        # 1. Busca Local (Código)
+        if code or (not any([code, commits, incidents, timeline])):
+            matches = _search_in_code_stream(root, query, limit)
+            if matches:
+                echo(f"{Fore.CYAN}{Style.BRIGHT}\n[Código & Docs]")
+                for m in matches:
+                    color = Fore.MAGENTA if m['type'] in ['.md', '.txt'] else Fore.BLUE
+                    echo(f"{color}[{m['type'].upper()}] {m['file']}:{m['line']}{Style.RESET_ALL}")
+                    
+                    if full and m['type'] == '.py':
+                        block = extract_function_block(str(root / m['file']), m['line'])
+                        echo(f"{Style.DIM}{block}{Style.RESET_ALL}\n")
+                    else:
+                        echo(f"    > {m['text']}")
+
+        # 2. Busca em Commits (Mensagens + Conteúdo Histórico)
+        if commits:
+            # Busca em mensagens (o que já tínhamos)
+            msg_matches = _search_in_commits(query, limit)
+            # Busca no conteúdo (Pickaxe Search)
+            content_matches = search_git_history_content(query, limit)
+            
+            if msg_matches or content_matches:
+                echo(f"{Fore.YELLOW}{Style.BRIGHT}\n[Linhagem Git / Histórico]")
+                seen_hashes = set()
+                for m in msg_matches + content_matches:
+                    if m['hash'] not in seen_hashes:
+                        echo(f" {Fore.MAGENTA}{m['hash']}{Fore.WHITE}: {m.get('message') or m.get('msg')}")
+                        seen_hashes.add(m['hash'])
+
+        # 3. Busca em Commits especifico
+        if specify_commit:
+            echo(f"{Fore.YELLOW}⏳ Consultando snapshot do commit: {specify_commit}...{Style.RESET_ALL}")
+            results = get_code_from_commit(specify_commit, query)
+            
+            if not results:
+                echo(f"   {Fore.RED}Nenhuma ocorrência encontrada nesse commit.{Style.RESET_ALL}")
+            
+            for r in results:
+                echo(f"{Fore.BLUE}[HISTORIC] {r['file']}:{r['line']}{Style.RESET_ALL}")
+                if full:
+                    # EXTRAÇÃO INTEGRAL: Agora com indentação industrial
+                    block = extract_block_from_git(specify_commit, r['file'], r['line'])
+                    # Formatação Gold: indenta o bloco histórico para contrastar com o atual
+                    lines = block.splitlines()
+                    for line in lines:
+                        echo(f"      {Style.DIM}{line}{Style.RESET_ALL}")
+                    echo("") 
+                else:
+                    echo(f"    > {r['text']}")
+            return
         
         # 1. Fontes de Dados (Busca Lógica)
         all_off = not any([code, commits, incidents, timeline])
@@ -156,17 +213,6 @@ def search(ctx, query, code, commits, incidents, timeline, limit):
 
         if timeline or all_off:
             _render_timeline(_search_in_timeline(query, limit))
-
-        if code or all_off:
-            matches = _search_in_code_stream(root, query, limit)
-            _render_code_matches(matches)
-
-        if commits:
-            commit_matches = _search_in_commits(query, limit)
-            if commit_matches:
-                echo(f"{Fore.CYAN}{Style.BRIGHT}\n[Commits]")
-                for m in commit_matches:
-                    echo(f"{Fore.MAGENTA}{m['hash']}{Fore.WHITE}: {m['message']}")
 
 def _search_in_database(query: str, limit: int) -> dict:
     """Busca SQL com contrato de segurança (MPoT-5)."""

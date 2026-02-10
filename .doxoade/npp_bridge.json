@@ -1,0 +1,22 @@
+{
+  "protocol": "Doxoade-NPP-v1",
+  "source": "C:/Users/olDox222/Documents/A20251122/DOSSIER/Altonomo/Projetos_E_Programas/Projeto OADE/doxoade/doxoade/commands/run.py",
+  "timestamp": 1770015170.117789,
+  "findings": [
+    {
+      "line": 8,
+      "msg": "'subprocess' imported but unused",
+      "sev": "WARNING"
+    },
+    {
+      "line": 13,
+      "msg": "'.debug_utils.get_debug_env' imported but unused",
+      "sev": "WARNING"
+    },
+    {
+      "line": 14,
+      "msg": "'..tools.reaper.kill_process_tree' imported but unused",
+      "sev": "WARNING"
+    }
+  ]
+}

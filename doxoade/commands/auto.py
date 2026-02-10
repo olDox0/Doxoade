@@ -1,28 +1,35 @@
+# -*- coding: utf-8 -*-
 # doxoade/commands/auto.py
 import sys
-import subprocess
 import os
 import click
 import shlex
-from colorama import Fore, Style
+from colorama import Fore #, Style
 from ..shared_tools import ExecutionLogger
 
 __version__ = "37.0 Alfa (Interactive Pipelines)"
 
-def _execute_command(command_str, inputs=None):
-    """
-    (Versão Corrigida) Executa um comando, lida com inputs e força a saída colorida.
-    """
-    
+def _execute_command(command_string: str, env: dict, inputs: list = None): # FIX: Mantido 'inputs'
+    """Executa comando com proteção Aegis."""
+    import subprocess
+    import shlex
     click.echo(Fore.YELLOW + f"   > Executando: {command_string}")
-    
-    # [SEGURANÇA] shlex para dividir a string em argumentos seguros
     
     try:
         args = shlex.split(command_string)
-    except ValueError as e:
-        click.echo(Fore.RED + f"   > Erro de sintaxe no comando: {e}")
-        return 1
+        process = subprocess.Popen(
+            args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, 
+            stderr=subprocess.STDOUT, text=True, env=env, shell=False
+        )
+        if inputs: # FIX: Sincronizado com o argumento
+            out, _ = process.communicate(input="\n".join(inputs))
+            return out
+        process.wait()
+    except Exception as e:
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = sys.exc_info()
+        print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+        exc_trace(exc_tb)
     
     try:
         env = os.environ.copy()
@@ -52,20 +59,32 @@ def _execute_command(command_str, inputs=None):
 
         return process.returncode
 
-    except FileNotFoundError:
+    except FileNotFoundError as e:
         click.echo(Fore.RED + f"   > Comando não encontrado: {args[0]}")
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = sys.exc_info()
+        print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+        exc_trace(exc_tb)
         return 1
     except Exception as e:
         click.echo(Fore.RED + f"   > Erro inesperado ao executar comando: {e}")
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = sys.exc_info()
+        print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+        exc_trace(exc_tb)
+
         return 1
+    return ""
 
 @click.command('auto')
 @click.argument('prompt', required=False)
-@click.option('--file', '-f', multiple=True, help="Arquivos de contexto para a IA.")
-def auto(prompt, file):
+@click.option('--file', '-f', 'filepath', multiple=True, help="Arquivos de contexto para a IA.")
+@click.pass_context
+def auto(ctx, prompt, filepath):
     """Executa uma sequência de comandos como um pipeline robusto."""
     arguments = ctx.params
-    
+# [DOX-UNUSED]     params = ctx.params
+    commands = []
     # --- PARSER DA NOVA SINTAXE DE PIPELINE ---
     pipeline_steps = []
     source_lines = []
@@ -76,6 +95,10 @@ def auto(prompt, file):
                 source_lines = f.readlines()
         except IOError as e:
             click.echo(Fore.RED + f"[ERRO] Falha ao ler o arquivo de pipeline: {e}"); sys.exit(1)
+            from traceback import print_tb as exc_trace
+            _, exc_obj, exc_tb = sys.exc_info()
+            print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+            exc_trace(exc_tb)
     elif commands:
         source_lines = list(commands)
 

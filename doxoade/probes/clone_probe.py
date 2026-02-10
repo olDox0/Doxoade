@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # doxoade/probes/clone_probe.py
 import ast
 import hashlib
@@ -68,130 +69,85 @@ def get_structural_hash(node):
     dump = ast.dump(normalized_node, include_attributes=False)
     return hashlib.sha256(dump.encode('utf-8')).hexdigest()
 
-def is_trivial_or_config(node):
-    """
-    Verifica se a função deve ser ignorada:
-    1. Se é um @click.group ou @*.group
-    2. Se o corpo é apenas 'pass' ou '...' (placeholder)
-    """
-    # 1. Filtro de Decorator (Evita Click Groups)
-    for decorator in node.decorator_list:
-        # Lida com @click.group() -> Call
-        if isinstance(decorator, ast.Call):
-            func = decorator.func
-        else:
-            func = decorator
-            
-        # Verifica atributo .group (ex: click.group, cli.group)
-        if isinstance(func, ast.Attribute) and func.attr == 'group':
-            return True
-        # Verifica nome direto (ex: @group)
-        if isinstance(func, ast.Name) and func.id == 'group':
-            return True
+def is_trivial_or_config(node: ast.FunctionDef) -> bool:
+    """Verifica se a função deve ser ignorada por ser configuração ou vazia."""
+    if _has_ignored_decorator(node): return True
+    return _is_body_placeholder(node)
 
-    # 2. Filtro de Corpo Trivial (Placeholder)
-    # Filtra docstrings manualmente para checar o que sobra
-    effective_body = [
-        stmt for stmt in node.body 
-        if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant))
-    ]
-    
-    # Se não sobrou nada ou só tem 'pass', ignora
-    if not effective_body:
-        return True
-    
-    if len(effective_body) == 1:
-        stmt = effective_body[0]
-        # É 'pass'?
-        if isinstance(stmt, ast.Pass):
-            return True
-        # É '...' (Ellipsis)?
-        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) and stmt.value.value is Ellipsis:
-            return True
-            
+def _has_ignored_decorator(node):
+    for d in node.decorator_list:
+        func = d.func if isinstance(d, ast.Call) else d
+        if isinstance(func, (ast.Attribute, ast.Name)):
+            name = getattr(func, 'attr', getattr(func, 'id', ''))
+            if name == 'group': return True
     return False
 
-def find_clones(files):
+def _is_body_placeholder(node):
+    body = [s for s in node.body if not (isinstance(s, ast.Expr) and isinstance(s.value, (ast.Constant, ast.Str)))]
+    if not body: return True
+    if len(body) == 1:
+        s = body[0]
+        if isinstance(s, ast.Pass): return True
+        if isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant) and s.value.value is Ellipsis: return True
+    return False
+
+def find_clones(files: list) -> list:
+    """Orquestrador de busca de duplicatas (CC: 3)."""
     hashes = {}
+    for f_path in files:
+        _process_file_for_hashes(f_path, hashes)
+    
     clones = []
-
-    for file_path in files:
-        c_path = file_path.replace('\\', '/').lower() # Garante paridade
-        if not os.path.exists(c_path): continue
-        
-        try:
-            with open(c_path, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
-            
-            tree = ast.parse(content, filename=file_path)
-            
-            for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef):
-                    # Ignora métodos mágicos
-                    if node.name.startswith('__') and node.name.endswith('__'): continue
-                    
-                    # --- NOVO FILTRO INTELIGENTE ---
-                    if is_trivial_or_config(node):
-                        continue
-                    # -------------------------------
-
-                    func_hash = get_structural_hash(node)
-                    
-                    if func_hash not in hashes:
-                        hashes[func_hash] = []
-                    
-                    hashes[func_hash].append({
-                        'file': c_path, # Guarda o canônico
-                        'line': node.lineno,
-                        'name': node.name
-                    })
-        except Exception:
-            continue
-
-    for h, occurrences in hashes.items():
+    for h_val, occurrences in hashes.items():
         if len(occurrences) > 1:
-            files_set = {o['file'] for o in occurrences}
-            is_cross_file = len(files_set) > 1
-            severity = "WARNING" if is_cross_file else "INFO"
-            
-            names_found = list({o['name'] for o in occurrences})
-            names_str = ", ".join(names_found)
-            locations = [f"{os.path.basename(o['file'])}:{o['line']}" for o in occurrences]
-            
-            msg = f"Lógica duplicada (Hash {h[:6]}). Funções: [{names_str}]."
-            if is_cross_file:
-                details = f"Duplicação detectada em múltiplos arquivos: {', '.join(locations)}. Considere mover para shared_tools."
-            else:
-                details = f"Duplicação interna no mesmo arquivo: {locations[0]}."
-
-            for occ in occurrences:
-                clones.append({
-                    'severity': severity,
-                    'category': 'DUPLICATION',
-                    'message': msg,
-                    'file': occ['file'],
-                    'line': occ['line'],
-                    'details': details
-                })
-
+            clones.extend(_generate_clone_findings(h_val, occurrences))
     return clones
+
+def _process_file_for_hashes(file_path: str, hashes: dict):
+    """Especialista: Varre um arquivo e extrai assinaturas estruturais."""
+    c_path = file_path.replace('\\', '/').lower()
+    if not os.path.exists(c_path): return
+
+    try:
+        with open(c_path, 'r', encoding='utf-8', errors='ignore') as f:
+            tree = ast.parse(f.read(), filename=file_path)
+            
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                if node.name.startswith('__') or is_trivial_or_config(node):
+                    continue
+                
+                h = get_structural_hash(node)
+                if h not in hashes: hashes[h] = []
+                hashes[h].append({'file': c_path, 'line': node.lineno, 'name': node.name})
+    except Exception: pass
+
+def _generate_clone_findings(h_val: str, occurrences: list) -> list:
+    """Especialista: Transforma colisões de hash em alertas do linter."""
+    files_set = {o['file'] for o in occurrences}
+    is_cross = len(files_set) > 1
+    
+    names = ", ".join(list({o['name'] for o in occurrences}))
+    locs = [f"{os.path.basename(o['file'])}:{o['line']}" for o in occurrences]
+    
+    msg = f"Lógica duplicada (Struc-Hash {h_val[:6]}). Funções: [{names}]."
+    details = f"Detecção em: {', '.join(locs)}."
+    
+    return [{
+        'severity': 'WARNING' if is_cross else 'INFO',
+        'category': 'DUPLICATION',
+        'message': msg,
+        'file': occ['file'],
+        'line': occ['line'],
+        'details': details
+    } for occ in occurrences]
 
 # No final de ambos os arquivos:
 if __name__ == "__main__":
     try:
         raw_input = sys.stdin.read().strip()
-        if not raw_input:
-            print("[]")
-        else:
-            data = json.loads(raw_input)
-            # Suporta tanto lista direta quanto dicionário de contexto
-            files = data.get("files", []) if isinstance(data, dict) else data
-            
-            # Chama a função principal correspondente
-            # (find_clones para clone_probe ou analyze_orphans para orphan_probe)
-            if "clone" in sys.argv[0]:
-                print(json.dumps(find_clones(files)))
-            else:
-                print(json.dumps(analyze_orphans(files)))
+        data = json.loads(raw_input) if raw_input else []
+        files = data.get("files", []) if isinstance(data, dict) else data
+        print(json.dumps(find_clones(files)))
     except Exception:
         print("[]")

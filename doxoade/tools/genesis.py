@@ -149,38 +149,34 @@ def _enrich_findings_with_solutions(findings: List[Dict[str, Any]], project_root
         _apply_native_intelligence(f, project_root)
 
 def _apply_native_intelligence(finding: Dict[str, Any], project_root: str):
-    """Sentencia achados com IDs técnicos, filtrando riscos sintáticos."""
+    """Sentencia achados com IDs técnicos usando mapeamento de dicionário (CC: 2)."""
     msg = finding.get('message', '').lower()
-    snippet = finding.get('snippet', {})
     line_num = finding.get('line')
+    snippet = finding.get('snippet', {})
     
-    # 1. Recupera o conteúdo real da linha para análise de segurança
+    # 1. Recupera o conteúdo real da linha
     line_content = ""
-    if snippet and str(line_num) in snippet:
-        line_content = snippet[str(line_num)].strip()
-    elif snippet and line_num in snippet:
-        line_content = snippet[line_num].strip()
+    if snippet:
+        # Tenta pegar a chave como string ou int
+        line_content = snippet.get(str(line_num), snippet.get(line_num, "")).strip()
 
-    # --- ESCUDO MPoT: Proteção de Tuplas/Multiple Assignment ---
-    # Se a linha contém uma vírgula antes do '=', é perigoso comentar automaticamente
-    is_multiple_assignment = "," in line_content.split('=')[0] if '=' in line_content else False
+    # 2. Mapeamento de Gatilhos (MPoT-10)
+    # Adicione novos padrões aqui
+    patterns = {
+        "f-string is missing placeholders": "REMOVE_F_PREFIX",
+        "except:": "RESTRICT_EXCEPTION",
+        "imported but unused": "FIX_UNUSED_IMPORT"
+    }
 
-    # 2. Mapeamento de Sentenças (ID Técnico)
-    if "f-string is missing placeholders" in msg:
-        finding['suggestion_action'] = "REMOVE_F_PREFIX"
-    
-    elif "except:" in msg or ("except" in msg and ":" in msg and "exception" not in msg):
-        finding['suggestion_action'] = "RESTRICT_EXCEPTION"
+    for phrase, action in patterns.items():
+        if phrase in msg:
+            finding['suggestion_action'] = action
+            break
 
-    elif "assigned to but never used" in msg:
-        # Só permite fix automático se NÃO for atribuição múltipla
-        if not is_multiple_assignment:
-            finding['suggestion_action'] = "REPLACE_WITH_UNDERSCORE"
-        else:
-            finding['suggestion_action'] = None # Requer intervenção humana
-
-    elif "imported but unused" in msg:
-        finding['suggestion_action'] = "FIX_UNUSED_IMPORT"
+    # 3. Tratamento Especial para Unused Variable (Segurança MPoT-8)
+    if "assigned to but never used" in msg:
+        is_multiple = "," in line_content.split('=')[0] if '=' in line_content else False
+        finding['suggestion_action'] = "REPLACE_WITH_UNDERSCORE" if not is_multiple else None
 
     if finding.get('suggestion_action'):
         finding['suggestion_source'] = "GÊNESE (Nativa)"

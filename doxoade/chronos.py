@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
 # doxoade/chronos.py
-import os
-import sys
-import time
 import uuid
-import json
+import time
 import threading
-import cProfile
+import sys
 import pstats
-import io
 import platform
+import os
+import json
+import io
+import cProfile
 import collections
 from datetime import datetime, timezone
-# [DOX-UNUSED] from pathlib import Path
+from colorama import Fore
 from .database import get_db_connection
 
 try:
@@ -122,7 +122,13 @@ class ResourceMonitor(threading.Thread):
                 io_init = parent.io_counters()
                 self.peaks['io_read_start'] = io_init.read_bytes
                 self.peaks['io_write_start'] = io_init.write_bytes
-            except: pass
+            except Exception as e:
+                import sys as _dox_sys, os as _dox_os
+                exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
+                f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                line_n = exc_tb.tb_lineno
+                print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: run\033[0m")
+                print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
 
             while self.running:
                 self._update_tree_metrics(parent)
@@ -176,15 +182,32 @@ class CodeSampler(threading.Thread):
         self.main_thread_id = threading.main_thread().ident
 
     def run(self):
+        root_anchor = os.getcwd().lower().replace('\\', '/')
         while self.running:
             time.sleep(self.interval)
             try:
                 frame = sys._current_frames().get(self.main_thread_id)
-                if frame:
+                # [TECNOLOGIA GOLD] Stack-Walking
+                # Subimos a pilha para encontrar o código que não seja do Core do Doxoade
+                while frame:
                     filename = frame.f_code.co_filename
-                    if "doxoade" in filename or os.getcwd() in filename:
+                    norm_file = filename.lower().replace('\\', '/')
+                    
+                    # Ignora bibliotecas padrão, internos e a infra do Doxoade
+                    is_internal = "doxoade/doxoade" in norm_file or "doxoade\\doxoade" in norm_file
+                    is_lib = "lib/" in norm_file or "lib\\" in norm_file or "<" in norm_file
+                    
+                    # Se encontramos algo do projeto que não é a ferramenta em si:
+                    if root_anchor in norm_file and not is_internal and not is_lib:
                         self.samples[(filename, frame.f_lineno)] += 1
-            except Exception: pass
+                        break # Achamos o "trabalhador" real, podemos parar
+                    
+                    frame = frame.f_back # Sobe para quem chamou
+            except Exception as e:
+                from traceback import print_tb as exc_trace
+                _, exc_obj, exc_tb = sys.exc_info()
+                print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+                exc_trace(exc_tb)
 
     def stop(self): self.running = False
     def get_hot_lines(self, limit=5):
@@ -248,8 +271,9 @@ class ChronosRecorder:
 
         line_profile_data = []
         for (fname, lineno), hits in hot_lines:
-            clean_name = fname.replace(os.getcwd(), "").strip(os.sep)
-            line_profile_data.append({"file": clean_name, "line": lineno, "hits": hits})
+            # [FIX] Salvamos o path absoluto para o Advisor não se perder entre projetos
+            abs_fname = os.path.abspath(fname).replace('\\', '/')
+            line_profile_data.append({"file": abs_fname, "line": lineno, "hits": hits})
 
         try:
             conn = get_db_connection()
@@ -278,5 +302,11 @@ class ChronosRecorder:
             conn.commit()
             conn.close()
         except Exception: pass
+
+    def check_vulcan_efficiency(self, func_name, py_time, native_time):
+        gain = py_time / native_time
+        if gain < 1.1: # Ganho insignificante
+            # Recomenda reversão por custo-benefício de risco
+            pass
 
 chronos_recorder = ChronosRecorder()

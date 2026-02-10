@@ -62,9 +62,23 @@ class AutoFixer:
 
     def _apply_comment_unused_line(self, lines, idx):
         line = lines[idx]
+        
+        # 1. Inteligência de Bloco (MPoT-8): Detecta 'with ... as logger:' ou 'for x in ...:'
+        # Se for um início de bloco, substituímos por '_' em vez de comentar a linha
+        block_pattern = r'^(?P<indent>\s*)(?P<type>with|for)\s+(?P<logic>.+)\s+as\s+(?P<var>[\w\d_]+):'
+        match = re.search(block_pattern, line)
+        
+        if match:
+            # Transforma 'as logger:' em 'as _:' mantendo a lógica funcional
+            new_line = re.sub(r'\s+as\s+[\w\d_]+:', ' as _:', line)
+            lines[idx] = new_line
+            return True
+            
+        # 2. Se for uma atribuição simples (x = 10), comenta com tag de segurança
         if not line.strip().startswith("#"):
             lines[idx] = f"# [DOX-UNUSED] {line}"
             return True
+            
         return False
 
     def _get_function_name(self, lines, idx):

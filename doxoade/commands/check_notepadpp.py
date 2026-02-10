@@ -8,8 +8,8 @@ from .check import run_check_logic
 
 def run_npp_workflow(path: str, **kwargs):
     """
-    Expert-Split para fluxo de editor.
-    Compliance: PASC-8.14 (Anti-Fragilidade)
+    Expert-Split: Orquestrador Notepad++.
+    Compliance: PASC-8.13 (Separação de Contexto).
     """
     target = os.path.abspath(path)
     
@@ -17,21 +17,24 @@ def run_npp_workflow(path: str, **kwargs):
         click.echo(Fore.RED + "[!] Erro: NPP Integration exige um arquivo específico.")
         return
 
-    # Injeção Segura de Flags (Evita o TypeError de múltiplos valores)
-    # NPP Bridge exige dados frescos e completos
+    # PASC-8.5: Limpeza Cirúrgica do Contrato
+    # Extraímos 'project_root' do kwargs para que ele não colida com as chamadas internas
+    # mas o mantemos disponível para o signal_notepadpp no final.
+    project_root = kwargs.pop('project_root', os.path.dirname(target))
+
+    # Injeção de Segurança para o Bridge
     kwargs['no_cache'] = True
     kwargs['full_power'] = True
 
-    # Executa a auditoria usando apenas o kwargs atualizado
+    # Agora o kwargs está 'limpo' de duplicatas
     results = run_check_logic(target, **kwargs)
     
     findings = results.get('findings', [])
-    project_root = kwargs.get('project_root', os.path.dirname(target))
 
+    # Usa o root que extraímos cirurgicamente
     signal_notepadpp(target, findings, project_root)
     
     if not findings:
         click.echo(Fore.GREEN + "[N++ Bridge] Arquivo limpo. Feedback enviado.")
     else:
-        # PASC-6.2: Verbosidade Seletiva
         click.echo(Fore.CYAN + f"[N++ Bridge] {len(findings)} incidentes mapeados no editor.")

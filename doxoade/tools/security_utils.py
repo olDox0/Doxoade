@@ -7,11 +7,13 @@ Compliance: MPoT-4, MPoT-8, PASC-6.
 """
 import hashlib
 import ast
+import sys
 import logging
 import os  # FIX: Adicionado import global essencial
-from colorama import Fore
+# [DOX-UNUSED] from colorama import Fore
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import List, Dict
+from .filesystem import _find_project_root
 
 __all__ = ['calculate_integrity_hash', 'restricted_safe_exec', 'simulate_taint_analysis', 'generate_exploit_poc', 'validate_execution_context']
 
@@ -114,57 +116,110 @@ def generate_exploit_poc(function_name: str) -> str:
     """Generates a canary payload to prove vulnerability."""
     return "print('--- AEGIS BYPASS ATTEMPT ---')" if function_name in ['eval', 'exec'] else "whoami"
 
-def restricted_safe_exec(code_str: str, globals_dict: Optional[dict] = None, allow_imports: bool = False):
+def restricted_safe_exec(code_str, globals_dict=None, allow_imports=False, filename="<sandbox>"):
     import builtins
-    import sys
-    import os
-
-    safe_builtins = {}
-    if allow_imports:
-        # Injeção de funções e módulos essenciais para o Core
-        essential = [
-            '__import__', '__build_class__', 'print', 'len', 'range', 'dict', 
-            'list', 'set', 'tuple', 'str', 'int', 'float', 'bool', 'Exception', 
-            'type', 'isinstance', 'iter', 'next', 'enumerate', 'zip', 'open',
-            'getattr', 'setattr', 'hasattr', 'repr'
-        ]
-
-        for func in essential:
-            if hasattr(builtins, func):
-                safe_builtins[func] = getattr(builtins, func)
-        
-        # Módulos de sistema precisam estar acessíveis nos builtins para scripts do Core
-        safe_builtins['sys'] = sys
-        safe_builtins['os'] = os
-
-    safe_globals = {"__builtins__": safe_builtins}
-    if globals_dict:
-        safe_globals.update(globals_dict)
+    abs_path = os.path.abspath(filename)
     
-    try:
-        tree = ast.parse(code_str)
-        for node in ast.walk(tree):
-            if not allow_imports and isinstance(node, (ast.Import, ast.ImportFrom)):
-                raise RuntimeError("Sandbox Breach: Dynamic imports forbidden.")
-            
-            if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
-                allowed = {
-                    '__name__', '__file__', '__package__', '__path__', # __path__ é VITAL
-                    '__module__', '__loader__', '__spec__', '__dict__',
-                    '__all__', '__class__', '__init__', '__str__', '__repr__', 
-                    '__enter__', '__exit__', '__call__', '__mro__', '__bases__'
-                }
-                if node.attr not in allowed:
-                    raise RuntimeError(f"Sandbox Breach: Private access ({node.attr}) blocked.")
+    # 1. LOCALIZAÇÃO DA ÂNCORA (PASC 8.4)
+    # Em vez de pegar apenas o diretório do arquivo, buscamos a raiz do projeto
+    project_anchor = _find_project_root(os.path.dirname(abs_path))
+    old_cwd = os.getcwd()
 
-        compiled = compile(tree, filename="<sandbox>", mode="exec")
-        # Injeção segura
-        exec(compiled, safe_globals) # noqa: B102
+    try:
+        # SOBERANIA: Move o processo para a raiz do projeto antes de executar
+        # Isso resolve o erro de 'ia_core/' e também o 'index.html' do Flask
+        os.chdir(project_anchor)
+        
+        if allow_imports:
+            _inject_target_environment(filename)
+            safe_builtins = builtins.__dict__.copy()
+        else:
+            # (Builtins restritos mantidos...)
+            essential = ['__import__', 'print', 'len', 'range', 'dict', 'list', 'set', 'tuple', 'str', 'int', 'float', 'bool', 'Exception', 'type', 'isinstance', 'open', 'getattr', 'setattr', 'hasattr']
+            safe_builtins = {k: getattr(builtins, k) for k in essential if hasattr(builtins, k)}
+            safe_builtins['sys'], safe_builtins['os'] = sys, os
+
+        safe_globals = {
+            "__builtins__": safe_builtins,
+            "__file__": abs_path,
+            "__package__": None,
+            "__name__": "__main__"
+        }
+        if globals_dict: safe_globals.update(globals_dict)
+
+        tree = ast.parse(code_str)
+        _validate_ast_safety(tree, allow_imports)
+        compiled = compile(tree, filename=filename, mode="exec")
+        exec(compiled, safe_globals) # noqa: S102, B102
         
     except Exception as e:
-        import sys as exc_sys
-        from traceback import print_tb as exc_trace
-        _, exc_obj, exc_tb = exc_sys.exc_info()
-        print(f"\033[31m ■ Exception type: {e} ■ Exception value: {exc_obj}\n")
-        exc_trace(exc_tb)
-        raise RuntimeError(f"\nAegis Sandbox Blocked: {e}")
+        # PASC-8.9: Se for FileNotFoundError, reportamos de forma amigável
+        if isinstance(e, FileNotFoundError):
+             print("\033[33m   [!] Erro de Caminho: O script tentou acessar um arquivo que não existe na raiz.")
+             print(f"       Raiz Atual: {project_anchor}")
+             print(f"       Alvo: {e.filename}\033[0m")
+        _handle_sandbox_exception(e)
+    finally:
+        os.chdir(old_cwd)
+        
+def _inject_target_environment(file_path: str):
+    """Injeta caminhos do projeto no sys.path de forma limpa."""
+    target_dir = os.path.dirname(os.path.abspath(file_path))
+    
+    # Adiciona o diretório do script para imports diretos (import config)
+    if target_dir not in sys.path:
+        sys.path.insert(0, target_dir)
+    
+    # Busca por venv para injetar dependências (requests, bs4)
+    current = target_dir
+    while current != os.path.dirname(current):
+        venv_path = os.path.join(current, "venv")
+        if os.path.exists(venv_path):
+            sp = os.path.join(venv_path, "Lib", "site-packages") if os.name == 'nt' else \
+                 os.path.join(venv_path, "lib", f"python{sys.version_info.major}.{sys.version_info.minor}", "site-packages")
+            if os.path.exists(sp) and sp not in sys.path:
+                sys.path.insert(1, sp)
+            break
+        current = os.path.dirname(current)
+        
+def _get_safe_builtins(allow_imports: bool) -> dict:
+    """Configura o dicionário de builtins permitido (PASC 8.12)."""
+    import builtins
+    if allow_imports:
+        return builtins.__dict__.copy()
+    
+    essential = [
+        '__import__', '__build_class__', 'print', 'len', 'range', 'dict', 
+        'list', 'set', 'tuple', 'str', 'int', 'float', 'bool', 'Exception', 
+        'type', 'isinstance', 'iter', 'next', 'enumerate', 'zip', 'open',
+        'getattr', 'setattr', 'hasattr', 'repr'
+    ]
+    safe = {k: getattr(builtins, k) for k in essential if hasattr(builtins, k)}
+    safe['sys'], safe['os'] = sys, os
+    return safe
+    
+def _validate_ast_safety(tree: ast.AST, allow_imports: bool):
+    """Filtro Semântico Aegis."""
+    for node in ast.walk(tree):
+        if not allow_imports and isinstance(node, (ast.Import, ast.ImportFrom)):
+            raise RuntimeError("Sandbox Breach: Dynamic imports forbidden.")
+        if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+            forbidden = {'__subclasses__', '__globals__', '__builtins__', '__code__'}
+            if node.attr in forbidden:
+                raise RuntimeError("Sandbox Breach: Private access blocked.")
+
+def _handle_sandbox_exception(e: Exception):
+    """Dispatcher Forense."""
+    if isinstance(e, (NameError, ImportError, ModuleNotFoundError, SyntaxError)):
+        raise e
+    
+    # Isola o IO do log forense para evitar alerta de hibridismo
+    import os as _os
+    _, _, exc_tb = sys.exc_info()
+    f_name = _os.path.split(exc_tb.tb_frame.f_code.co_filename)[1] if exc_tb else "unknown"
+    line_n = exc_tb.tb_lineno if exc_tb else 0
+    
+    msg = f"\033[1;34m\n[ FORENSIC:AEGIS ]\033[0m \033[1mFile: {f_name} | L: {line_n}\033[0m\n"
+    msg += f"\033[31m    ■ Exception: {type(e).__name__} | Value: {e}\033[0m"
+    print(msg)
+    raise RuntimeError(f"Aegis Sandbox Blocked: {e}")

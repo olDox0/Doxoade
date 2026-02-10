@@ -115,5 +115,40 @@
     "title": "Lente de Sniper (Targeted Trace)",
     "context": "Necessidade de auditar apenas um módulo dentro de um fluxo complexo.",
     "content": "Padrão de instrumentação onde o rastro permanece silenciado até que o ponteiro de execução atinja o arquivo alvo definido pelo operador, ignorando o ruído do orquestrador."
+  },
+  "shadow_equivalence_test": {
+    "title": "Teste de Equivalência em Sombra",
+    "context": "Validação de binários nativos gerados dinamicamente.",
+    "content": "Roda a função original e a otimizada em paralelo, comparando os outputs bit-a-bit. Se houver divergência, o sistema executa o 'Kill-Switch' e reverte para o Python estável."
+  },
+  "ghost_typing_inference": {
+    "title": "Inferência de Tipagem Fantasma (Ghost Typing)",
+    "context": "Transpilação de Python dinâmico para C estático.",
+    "content": "Padrão onde o VulcanForge analisa as atribuições constantes na AST para injetar tipos primitivos de C (double, long, int) no Cython, eliminando o overhead de 'PyObject' em loops críticos."
+  },
+  "atomic_binary_promotion": {
+    "title": "Promoção Binária Atômica",
+    "context": "Substituição de extensões compiladas em tempo de execução.",
+    "content": "Utiliza a renomeação transitória de arquivos (.pyd/.so) para permitir o hot-swap de funções otimizadas sem interromper o processo pai ou causar bloqueios de arquivo no Windows."
+  },
+  "zero_overhead_loop": {
+    "title": "Loop de Overhead Zero",
+    "context": "Processamento numérico e matemático intensivo.",
+    "content": "Padrão de transpilação onde o corpo do loop é isolado de chamadas à API do Python, permitindo que o compilador GCC aplique otimizações O3 e SIMD diretamente no hardware."
+  },
+  "iron_hard_casting": {
+    "title": "Casting de Ferro (Iron-Hard Casting)",
+    "context": "Operações bitwise e loops numéricos em hardware limitado.",
+    "content": "Padrão de transpilação v6.1 que injeta casts nativos de C (<unsigned int>, <double>) diretamente nos literais da AST. Isso impede que o compilador invoque a API do Python dentro de blocos NOGIL, resultando em speedups superiores a 300x."
+  },
+  "hot_swap_bridge": {
+    "title": "Ponte de Substituição (Hot-Swap Bridge)",
+    "context": "Integração de binários nativos sem alterar o código-fonte original.",
+    "content": "Uso de importlib.util para desviar chamadas de funções Python para extensões compiladas (.pyd/.so) em tempo de execução, permitindo o rollback imediato em caso de falha."
+  },
+  "forced_replacement_lock": {
+    "title": "Substituição Forçada (Lock Bypass)",
+    "context": "Impossibilidade de atualizar binários em uso no Windows (WinError 5).",
+    "content": "Padrão que renomeia o binário ativo para um sufixo transitório (.old_trash), liberando o path original para a instalação do novo metal sem interromper o processo."
   }
 }

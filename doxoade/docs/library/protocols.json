@@ -138,5 +138,45 @@
     "title": "Iron Gate (Compressão de Fluxo)",
     "date": "2026-01-29",
     "content": "Algoritmo de monitoramento que detecta padrões cíclicos de execução (A-B-A-B) e os colapsa em uma única linha informativa para preservar a clareza do diagnóstico."
+  },
+  "vulcan_ignite_v1": {
+    "title": "Protocolo Vulcano (Otimização Nativa)",
+    "date": "2026-01-30",
+    "content": "Sistema de transpilação dinâmica que converte gargalos em Python para C (Cython) ou Assembly. Opera sob o regime de 'Foundry Isolation' para garantir que falhas de compilação não afetem o Core."
+  },
+  "vulcan_foundry_isolation": {
+    "title": "Protocolo de Isolação da Forja (Foundry)",
+    "date": "2026-01-31",
+    "content": "Garante que toda compilação nativa ocorra em um diretório efêmero (.doxoade/vulcan/foundry). Proíbe a poluição do diretório raiz com artefatos de build (.obj, .lib, .c). Binários só são promovidos para a pasta bin/ após validação do Lab."
+  },
+  "shadow_execution_equivalence": {
+    "title": "Protocolo de Equivalência em Sombra (Shadowing)",
+    "date": "2026-01-31",
+    "content": "Regra de ouro para otimização nativa: o binário nunca assume o controle imediatamente. Durante a fase de teste, o sistema executa a versão Python e a Nativa em paralelo, comparando os resultados. Qualquer divergência de bit resulta no descarte automático do binário."
+  },
+  "hard_c_typing_protocol": {
+    "title": "Protocolo Hard-C-Typing",
+    "date": "2026-01-31",
+    "content": "Diretriz obrigatória para a Forja Vulcano: toda variável identificada como acumuladora ou contadora de loop deve ser explicitamente tipada como primitivo C (int, long, double) para evitar o overhead do Global Interpreter Lock (GIL)."
+  },
+  "vulcan_autopilot_v1": {
+    "title": "Protocolo Vulcan Autopilot",
+    "date": "2026-02-03",
+    "content": "Sistema de otimização em malha fechada: Chronos (detecta) -> Advisor (valida) -> Forge (traduz) -> Compiler (forja) -> Lab (valida bits) -> Promotion (ativa binário)."
+  },
+  "abyss_edge_protocol": {
+    "title": "Protocolo Borda do Abismo (Abyss-Edge)",
+    "date": "2026-01-31",
+    "content": "Conjunto de guardas estáticas que analisam a AST do código gerado para C. Proíbe ponteiros brutos (*) e injeta proteções aritméticas contra divisão por zero e estouro de índice (boundscheck)."
+  },
+  "merit_promotion": {
+    "title": "Promoção por Mérito (Vulcan Promotion)",
+    "date": "2026-02-03",
+    "content": "Regra que impede a ativação de um binário otimizado a menos que ele passe por dois critérios no Lab: 1. Integridade de bits de 100%; 2. Ganho de performance superior a 10x."
+  },
+  "shadow_validation": {
+    "title": "Validação em Sombra (Shadowing)",
+    "date": "2026-02-01",
+    "content": "Mecanismo de teste onde a versão Python e a versão Vulcano rodam simultaneamente com os mesmos inputs para garantir que a otimização não alterou a lógica do programa."
   }
 }

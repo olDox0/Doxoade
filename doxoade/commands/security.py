@@ -1,38 +1,38 @@
 # -*- coding: utf-8 -*-
+# doxoade/commands/security.py:
 """
 Security Suite - Chief Gold Edition.
 Performance: PASC-6.4 Consolidated Batching.
 """
 import os
+import sys
+import re
+# [FIX STYLE] Removidos loads e JSONDecodeError daqui para usar imports locais
+from subprocess import run, PIPE
 from click import command, argument, option, pass_context, Choice
-from .security_utils import get_tool_path, is_path_ignored, get_essential_ignores, SEVERITY_MAP, batch_list
+
+from .security_utils import get_tool_path, get_essential_ignores, SEVERITY_MAP, batch_list
 from .security_io import print_header, render_findings, get_progress_bar
 from ..shared_tools import ExecutionLogger, _get_project_config
 
 def _execute_security_pipeline(target, ignore_set, logger):
-    """Pipeline de alta performance com DNM e Batching (MPoT-2)."""
     from ..dnm import DNM
-    
-    # DNM Scan é pesado, chamamos apenas uma vez (MPoT-17)
     dnm = DNM(target)
     py_files = dnm.scan(extensions=['py'])
-    
     findings = []
     
     if py_files:
-        # PASC-6.4: Batching de 40 arquivos (Equilíbrio entre UI e Performance)
         batches = list(batch_list(py_files, 40))
-        
         with get_progress_bar(batches, label="Análise SAST") as bar:
-            for batch in bar:
-                result = _run_bandit_engine(batch, ignore_set)
-                if result:
-                    findings.extend(result)
+            for item_batch in bar:
+                result = _run_bandit_engine(item_batch, ignore_set)
+                if result: findings.extend(result)
 
-    # Análise SCA (Safety)
+    # 3. Análise SCA (Safety) - FIX: Indentação e Loop
     with get_progress_bar([["requirements.txt"]], label="Análise SCA ") as bar:
         for _ in bar:
-            findings.extend(_run_safety_engine(target, logger))
+            sca_res = _run_safety_engine(target, logger)
+            if sca_res: findings.extend(sca_res)
             
     return findings
 
@@ -59,48 +59,72 @@ def security(ctx, target, level):
         _run_security_logic(ctx.params, target, level, logger)
 
 def _run_bandit_engine(file_list, ignore_set):
-    """Motor SAST focado em processamento de lista."""
-    from json import loads
-    from subprocess import run
-    
+    import json # FIX: Usando local para evitar 'redefinition'
     tool = get_tool_path('bandit')
     if not tool or not file_list: return []
-
-    # Comando otimizado: passa a lista de arquivos direta para evitar re-scan do Bandit
-    cmd = [tool, '-f', 'json', '-q'] + file_list
-    
+    cmd = [tool, '-f', 'json'] + file_list
     try:
-        res = run(cmd, capture_output=True, text=True, encoding='utf-8', timeout=60)
+        res = run(cmd, stdout=PIPE, stderr=PIPE, text=True, encoding='utf-8')
         if not res.stdout: return []
-        
-        data = loads(res.stdout)
-        # Filtro Aegis no retorno para garantir integridade
-        return [
-            {
-                'tool': 'BANDIT', 'severity': i['issue_severity'].upper(),
-                'message': i['issue_text'], 'file': i['filename'],
-                'line': i['line_number'], 'code': i['code'].strip()
-            }
-            for i in data.get('results', [])
-            if not is_path_ignored(i['filename'], ignore_set)
-        ]
-    except Exception:
-        return []
+        data = json.loads(res.stdout)
+        return [{
+            'tool': 'BANDIT', 'severity': i['issue_severity'].upper(),
+            'message': i['issue_text'], 'file': i['filename'],
+            'line': i['line_number'], 'code': i['code'].strip()
+        } for i in data.get('results', [])]
+    except Exception: return []
 
 def _run_safety_engine(target, logger):
-    from subprocess import run
-    from json import loads
+    """Orquestrador SCA resiliente (CC: 3)."""
     tool = get_tool_path('safety')
     req_file = os.path.join(target, 'requirements.txt')
     if not tool or not os.path.exists(req_file): return []
+    
     try:
-        res = run([tool, 'check', '-r', req_file, '--json'], capture_output=True, text=True, timeout=60)
-        if not res.stdout: return []
-        data = loads(res.stdout)
+        # shell=False + PIPE (Aegis Shield)
+        res = run([tool, 'check', '-r', req_file, '--json'], stdout=PIPE, stderr=PIPE, text=True, timeout=60)
+        return _parse_safety_output(res.stdout) if res.stdout else []
+    except Exception as e:
+        print(f"\033[31m   [!] Erro crítico no motor SCA: {e}\033[0m")
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = sys.exc_info()
+        print(f"\033[31m ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+        exc_trace(exc_tb)
+        return []
+
+def _parse_safety_output(raw_stdout: str) -> list:
+    """Decodificador Cirúrgico (MPoT-7)."""
+    import json
+    raw_stdout = raw_stdout.strip()
+    if not raw_stdout: return []
+
+    # 1. Localiza o início real do JSON (pode haver warnings de texto antes)
+    match = re.search(r'[\[\{]', raw_stdout)
+    if not match: return []
+    
+    content = raw_stdout[match.start():]
+    
+    try:
+        # raw_decode lê exatamente um objeto/lista e para, ignorando "Extra Data"
+        decoder = json.JSONDecoder()
+        data, _ = decoder.raw_decode(content)
+        
+        # 2. Normalização de formato (Safety v2 vs v3)
         vulns = data.get('vulnerabilities', []) if isinstance(data, dict) else data
+        if not isinstance(vulns, list): vulns = []
+        
         return [{
             'tool': 'SAFETY', 'severity': 'HIGH',
-            'message': f"Vulnerabilidade: {v.get('package_name')} -> {v.get('advisory')}",
+            'message': f"Vulnerabilidade: {v.get('package_name')} -> {v.get('advisory', 'risco detectado')}",
             'file': 'requirements.txt', 'line': 0
         } for v in vulns]
-    except Exception: return []
+    except Exception as e:
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = sys.exc_info()
+        print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+        exc_trace(exc_tb)
+        return []
+
+def _print_security_forensic(scope: str, e: Exception):
+    """Log forense independente para evitar dependências circulares."""
+    print(f"\033[1;34m\n[ FORENSIC:SECURITY:{scope} ]\033[0m \033[31m Erro: {e}\033[0m")

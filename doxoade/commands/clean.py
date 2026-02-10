@@ -10,7 +10,7 @@ from ..shared_tools import ExecutionLogger
 @click.command('clean')
 def clean():
     """Limpa artefatos temporários, caches e builds do projeto."""
-    with ExecutionLogger('clean', '.', {}) as logger:
+    with ExecutionLogger('clean', '.', {}) as _:
         click.echo(Fore.CYAN + "-> [CLEAN] Procurando por artefatos de build e cache...")
         
         # Lista de padrões para remover

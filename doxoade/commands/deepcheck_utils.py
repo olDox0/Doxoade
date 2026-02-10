@@ -2,11 +2,12 @@
 # doxoade/commands/deepcheck_utils.py
 import ast
 import os
-import hashlib
+import sys
 # [DOX-UNUSED] import json
 from colorama import Fore, Style
 from click import echo
 # [DOX-UNUSED] from typing import Optional
+# [DOX-UNUSED] from collections import defaultdict
 
 P_IO, P_CALC, P_OPER, P_CONST = f"{Fore.MAGENTA}IO{Fore.RESET}", f"{Fore.YELLOW}CALC{Fore.RESET}", f"{Fore.CYAN}OPER{Fore.RESET}", f"{Fore.WHITE}CONST{Fore.RESET}"
 UI_KEYWORDS = {'click', 'echo', 'print', 'Fore', 'Console', 'rich', 'progressbar', 'input'}
@@ -20,10 +21,12 @@ class DeepAnalyzer(ast.NodeVisitor):
 #        self.flow_map, self.read_vars, self.assigned_vars = [], set(), set()
         #self.is_god_function = False
 
-    def _get_static_addr(self, name):
-        return f"0x{hashlib.md5(name.encode()).hexdigest()[:8].upper()}"
-#        h = hashlib.md5(name.encode()).hexdigest()[:8]
-#        return f"0x{h.upper()}"
+    def _get_static_addr(self, name: str) -> str:
+        """Gera endereço virtual para inspeção visual (Fix: Bandit HIGH)."""
+        import hashlib
+        # MPoT-8: Uso de SHA256 com truncagem para endereços virtuais
+        h = hashlib.sha256(name.encode()).hexdigest()[:8].upper()
+        return f"0x{h}"
 
     def _detect_purpose(self, node):
         p = getattr(node, 'parent', None)
@@ -54,34 +57,38 @@ class DeepAnalyzer(ast.NodeVisitor):
         try:
             full_name = ast.unparse(node.func)
             self.calls.append({'line': node.lineno, 'name': full_name, 'is_ui': any(x in full_name for x in UI_KEYWORDS), 'is_sys': any(x in full_name for x in SYS_KEYWORDS)})
-#            self.calls.append({
-#                'line': node.lineno, 'name': full_name,
-#                'is_ui': any(x in full_name for x in UI_KEYWORDS),
-#                'is_sys': any(x in full_name for x in SYS_KEYWORDS)
-#            })
         except Exception as e:
-            import sys as dox_exc_sys
-            exc_tb = dox_exc_sys.exc_info()
-            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            line_number = exc_tb.tb_lineno
-            print(f"\033[0m \033[1m Filename: {fname}   ■ Line: {line_number} \033[31m ■ Exception type: {e} ■ Exception value: {exc_obj} \033[0m")
+            # FIX: Agora sys é global ao módulo, evitando UnboundLocalError
+            _, exc_val, exc_tb = sys.exc_info()
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1] if exc_tb else "unknown"
+            line_n = exc_tb.tb_lineno if exc_tb else 0
+            # FIX: echo agora é global ao módulo
+            echo(f"\033[31m ■ Erro AST em {fname}:{line_n} | {e}\033[0m")
         self.generic_visit(node)
 
-    def visit_FunctionDef(self, node):
-        for arg in node.args.args:
-            name = arg.arg
-            addr = self._get_static_addr(name)
-            self.params[name] = {"type": ast.unparse(arg.annotation) if arg.annotation else "Any", "addr": self._get_static_addr(name)}
-            self.flow_map.append(("ENTRY", "recebe", name))
-        self.declared_return = ast.unparse(node.returns) if node.returns else "Any"
+    def visit_FunctionDef(self, node: ast.FunctionDef):
+        try:
+            for arg in node.args.args:
+                name = arg.arg
+                addr = self._get_static_addr(name)
+                self.params[name] = {"type": ast.unparse(arg.annotation) if arg.annotation else "Any", "addr": addr}
+#                self.params[name] = {"type": ast.unparse(arg.annotation) if arg.annotation else "Any", "addr": self._get_static_addr(name)}
+                self.flow_map.append(("ENTRY", "recebe", name))
+            self.declared_return = ast.unparse(node.returns) if node.returns else "Any"
+        except Exception as e:
+            import sys as exc_sys
+            from traceback import print_tb as exc_trace
+            _, exc_obj, exc_tb = exc_sys.exc_info()
+            print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+            exc_trace(exc_tb)
         self.generic_visit(node)
 
     def visit_Assign(self, node):
         for target in node.targets:
             if isinstance(target, ast.Name):
                 value_repr = ast.unparse(node.value)
-                self.flow_map.append((ast.unparse(node.value), "processa ➔", target.id))
-#                self.flow_map.append((value_repr, "processa ➔", target.id))
+#                self.flow_map.append((ast.unparse(node.value), "processa ➔", target.id))
+                self.flow_map.append((value_repr, "processa ➔", target.id))
         self.generic_visit(node)
 
     def visit_Return(self, node):
@@ -112,19 +119,6 @@ def _render_variable_analysis(visitor):
              f"{Fore.YELLOW}{m['addr']:<12} {Style.RESET_ALL}│{Style.NORMAL} "
              f"{Fore.CYAN}{m['scope']:<8} {Style.RESET_ALL}│{Style.NORMAL} "
              f"{p_str}")
-
-def _render_comparison(old_rep: dict, new_rep: dict):
-    """Visualiza o Delta Semântico."""
-    echo(f"\n   {Fore.YELLOW}{Style.BRIGHT}[ 📊 SEMANTIC DIFF / COMPARAÇÃO ]{Style.RESET_ALL}")
-    
-    def echo_delta(label, old, new, reverse=False):
-        delta = new - old
-        color = (Fore.GREEN if delta <= 0 else Fore.RED) if reverse else (Fore.GREEN if delta >= 0 else Fore.RED)
-        echo(f"      {label:<25} : {old} ➔ {new} {color}({delta:+}){Style.RESET_ALL}")
-
-    echo_delta("Score Arquitetural", old_rep['score'], new_rep['score'])
-    echo_delta("Complexidade Ciclomática", old_rep['cc'], new_rep['cc'], reverse=True)
-
 
 # --- ENGINE DE CÁLCULO E RELATÓRIO ---
 

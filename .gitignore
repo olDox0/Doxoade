@@ -1,5 +1,5 @@
 # Arquivos de Cache do Python
-__pycache__
+__pycache__/
 *.py[cod]
 *.pyc
 *.pyo
@@ -55,3 +55,6 @@ Vers/
 # Exceções (Auto-fixed pelo Doxoade)
 !requirements.txt
 !PipelineHelp.txt
+
+# terceirizados
+opt/w64devkit/

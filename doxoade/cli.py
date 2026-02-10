@@ -108,6 +108,7 @@ class DoxoadeLazyGroup(click.Group):
             'tutorial': 'doxoade.commands.tutorial:tutorial_group',
             'venv-up': 'doxoade.commands.venv_up:venv_up',
             'verilog': 'doxoade.commands.verilog:verilog',
+            'vulcan': 'doxoade.commands.vulcan_cmd:vulcan_group',
             'webcheck': 'doxoade.commands.webcheck:webcheck',
         }
 
@@ -135,7 +136,7 @@ class DoxoadeLazyGroup(click.Group):
             
             # Chief-Gold Forensic UI
             click.echo(f"\033[1;34m[ LAZY-LOAD FAIL ]\033[0m \033[1mCommand: {name}\033[0m")
-            click.echo(f"   \033[31m■ Archive : {fname} (Line: {line_number})")
+            click.echo(f"   \033[31m■ Archive : {fname} (Line: {line_number}) \n   ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}")
             click.echo(f"   ■ Exception: {type(e).__name__}: {e}\033[0m")
             return None
             
@@ -174,8 +175,11 @@ def cli(ctx, guard):
         ctx.obj['start_time'] = time.perf_counter()
         try:
             chronos_recorder.start_command(ctx)
-        except Exception: 
-            pass
+        except Exception as e:
+            _, exc_obj, exc_tb = sys.exc_info()
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            line_number = exc_tb.tb_lineno
+            print(f"\033[0m \033[1m \nFilename: {fname}   \n■ Line: {line_number} \033[31m \n■ Exception type: {e} . . .  \n■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))} \033[0m")
 
 @cli.result_callback()
 def process_result(result, **kwargs):
@@ -188,8 +192,11 @@ def process_result(result, **kwargs):
         from doxoade.chronos import chronos_recorder
         try:
             chronos_recorder.end_command(exit_code, duration_ms)
-        except Exception: 
-            pass
+        except Exception as e:
+            _, exc_obj, exc_tb = sys.exc_info()
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            line_number = exc_tb.tb_lineno
+            print(f"\033[0m \033[1m \nFilename: {fname}   \n■ Line: {line_number} \033[31m \n■ Exception type: {e} . . .  \n■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))} \033[0m")
 
 # Comandos de Diagnóstico do Core (Lazy inside commands/utils)
 @cli.command('self-diagnose')
@@ -227,6 +234,10 @@ def main():
         click.echo(f"{Fore.YELLOW}\n[!] Interrupção manual. Finalizando...")
         sys.exit(130)
     except Exception as e:
+        _, exc_obj, exc_tb = sys.exc_info()
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        line_number = exc_tb.tb_lineno
+        print(f"\033[0m \033[1m \nFilename: {fname}   \n■ Line: {line_number} \033[31m \n■ Exception type: {e} . . .  \n■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))} \033[0m")
         from doxoade.rescue import analyze_crash
         analyze_crash(e)
         sys.exit(1)
