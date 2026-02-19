@@ -4,6 +4,7 @@ import pathspec
 from pathlib import Path
 from typing import List, Optional
 from doxoade.tools.filesystem import _get_project_config
+import logging 
 
 class DNM:
     """
@@ -14,6 +15,7 @@ class DNM:
     # Ignores Universais (Nunca analisar)
     SYSTEM_IGNORES = {
         '__pycache__', '.git', '.hg', '.svn', '.tox', '.venv', 'venv', 
+        'pytest_temp_dir', 'foundry', 'bin', 'recovery_zone', 'tmp',
         'env', 'node_modules', '.idea', '.vscode', '.doxoade_cache', 
         'dist', 'build', 'doxoade.egg-info', 'htmlcov', '.pytest_cache'
     }
@@ -48,23 +50,31 @@ class DNM:
 
         return pathspec.PathSpec.from_lines("gitwildmatch", patterns)
 
-    def is_ignored(self, file_path) -> bool: # Removi a dica de tipo rígida para aceitar str
-        """Verifica se um caminho deve ser ignorado, aceitando Path ou str."""
+    def is_ignored(self, file_path) -> bool:
         try:
-            # GÊNERO: Conversão defensiva (Aegis Pattern)
-            path_obj = Path(file_path).resolve()
-            rel_path = path_obj.relative_to(self.root)
-        except (ValueError, Exception):
-            # Se não conseguir calcular a relação, ou está fora da raiz ou o path é inválido
-            return True 
+            abs_p = os.path.abspath(file_path).replace('\\', '/')
+            if any(x in abs_p for x in ['nppBackup', '.bak', 'pytest_temp_dir']):
+                return True
+            
+            rel_p = os.path.relpath(abs_p, self.root).replace('\\', '/')
+            
+            # FIX: Sincronizado com rel_p
+            for part in rel_p.split('/'):
+                if part in self.SYSTEM_IGNORES:
+                    return True
+
+            return self.ignore_spec.match_file(rel_p)
+        except Exception as e:
+            logging.info(f" is_ignored - Exception: {e}")
+            return False
 
         # Verifica se alguma parte do caminho é proibida explicitamente
-        for part in rel_path.parts:
+        for part in rel_p.parts:
             if part in self.SYSTEM_IGNORES:
                 return True
 
         # Normaliza para comparação com pathspec
-        return self.ignore_spec.match_file(str(rel_path).replace(os.sep, "/"))
+        return self.ignore_spec.match_file(str(rel_p).replace(os.sep, "/"))
 
     def scan(self, extensions: Optional[List[str]] = None) -> List[str]:
         valid_files = []
@@ -91,3 +101,14 @@ class DNM:
                 valid_files.append(canonical_path)
 
         return sorted(valid_files)
+        
+# No final do arquivo doxoade/dnm.py
+try:
+    from .tools.vulcan.bridge import vulcan_bridge
+    vulcan_bridge.apply_turbo("dnm", globals())
+except Exception as e:
+    import sys as dox_exc_sys
+    _, exc_obj, exc_tb = dox_exc_sys.exc_info()
+    fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+    line_number = exc_tb.tb_lineno
+    print(f"\033[0m \033[1m Filename: {fname}   ■ Line: {line_number} \033[31m ■ Exception type: {e} ■ Exception value: {exc_obj} \033[0m")

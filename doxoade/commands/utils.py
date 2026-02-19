@@ -1,126 +1,84 @@
+# -*- coding: utf-8 -*-
 # doxoade/commands/utils.py
+"""
+Utility Commands Facade - v97.0 Platinum.
+Compliance: OSL-4, PASC-8.5.
+"""
 import os
 import sys
 import re
 import json
 import textwrap
-import sqlite3
+import sqlite3 # noqa
 import click
 from pathlib import Path
 from datetime import datetime
 from colorama import Fore, Style
-from ..shared_tools import _print_finding_details, _get_code_snippet, ExecutionLogger, _run_git_command # Adicione estes imports
+ # Adicione estes imports
+from ..shared_tools import (
+    _print_finding_details, 
+    _get_code_snippet, 
+    ExecutionLogger, 
+    _find_project_root,
+    _run_git_command
+)
 from ..database import get_db_connection
 
 __version__ = "34.0 Alfa"
 
-# Em doxoade/commands/utils.py
-
 @click.command('log')
-@click.option('-n', '--lines', 'limit', default=10, help="Limita o número de findings exibidos.")
-@click.option('-s', '--snippets', is_flag=True, help="Exibe os trechos de código para cada problema.")
-@click.option('-b', '--busca', 'search_term', default=None, help="Filtra os findings por um termo na mensagem.")
-@click.option('--command', default=None, help="Filtra por um nome de comando específico (ex: check).")
-@click.option('--file', default=None, help="Filtra por um nome de arquivo (pode ser parcial).")
-@click.option('--category', default=None, help="Filtra por uma categoria de problema (ex: DEADCODE).")
-@click.option('--severity', default=None, help="Filtra por um nível de severidade (ex: CRITICAL).")
-@click.option('--after', default=None, help="Mostra apenas findings a partir desta data (YYYY-MM-DD).")
-@click.option('--before', default=None, help="Mostra apenas findings até esta data (YYYY-MM-DD).")
-def log(limit, snippets, search_term, command, file, category, severity, after, before):
-    """Exibe e busca de forma avançada nas entradas de log do banco de dados."""
-    
-    conn = None
+@click.option('-n', '--lines', 'limit', default=10, help="Limite de findings.")
+@click.option('-s', '--snippets', is_flag=True, help="Exibe código.")
+def log(limit, snippets):
+    """📜 Consulta o histórico de incidentes no banco de dados."""
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
     try:
-        conn = get_db_connection()
-        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-
-        # --- CONSTRUÇÃO DA QUERY DINÂMICA ---
-        base_query = """
-            SELECT 
-                f.*, 
-                e.command, e.project_path, e.timestamp
-            FROM findings f
-            JOIN events e ON f.event_id = e.id
-        """
-        where_clauses = []
-        params = []
-
-        if search_term:
-            where_clauses.append("f.message LIKE ?")
-            params.append(f"%{search_term}%")
-        if command:
-            where_clauses.append("e.command LIKE ?")
-            params.append(f"%{command}%")
-        if file:
-            normalized_file = file.replace('\\', '/')
-            where_clauses.append("f.file LIKE ?")
-            params.append(f"%{normalized_file}%")
-        if category:
-            where_clauses.append("f.category = ?")
-            params.append(category.upper())
-        if severity:
-            where_clauses.append("f.severity = ?")
-            params.append(severity.upper())
-        if after:
-            where_clauses.append("e.timestamp >= ?")
-            params.append(after)
-        if before:
-            # Adiciona ' 23:59:59' para incluir o dia inteiro
-            where_clauses.append("e.timestamp <= ?")
-            params.append(f"{before} 23:59:59")
-            
-        # Monta a query final
-        if where_clauses:
-            query = base_query + " WHERE " + " AND ".join(where_clauses)
-        else:
-            query = base_query
-            
-        query += " ORDER BY e.timestamp DESC LIMIT ?"
-        params.append(limit)
-        
-        # --- FIM DA CONSTRUÇÃO DA QUERY ---
-
-        if any([search_term, command, file, category, severity, after, before]):
-             click.echo(Fore.CYAN + "Executando busca avançada nos logs...")
-
-        cursor.execute(query, params)
+        cursor.execute("SELECT f.*, e.command, e.project_path, e.timestamp FROM findings f JOIN events e ON f.event_id = e.id ORDER BY e.timestamp DESC LIMIT ?", (limit,))
         findings = cursor.fetchall()
-
         if not findings:
-            click.echo(Fore.YELLOW + "Nenhum problema correspondente encontrado para os filtros aplicados.")
+            click.echo("[-] Nenhum registro encontrado.")
             return
 
-        click.echo(Style.BRIGHT + f"\n--- Exibindo {len(findings)} problema(s) encontrado(s) ---")
-        
-        for finding in reversed(findings): # Mostra do mais antigo ao mais recente
-            finding_dict = dict(finding)
-            
-            # Adiciona o contexto do evento no campo 'details'
-            event_info = (
-                f"Comando: {finding_dict.get('command')} | "
-                f"Projeto: {os.path.basename(finding_dict.get('project_path'))} | "
-                f"Data: {finding_dict.get('timestamp')}"
-            )
-            finding_dict['details'] = event_info
+        for row in reversed(findings):
+            f_dict = dict(row)
+            f_dict['details'] = f"CMD: {f_dict.get('command')} | Data: {f_dict.get('timestamp')}"
+            if snippets and f_dict.get('file') and f_dict.get('line'):
+                full_p = os.path.join(f_dict.get('project_path', ''), f_dict['file'])
+                if os.path.exists(full_p):
+                    f_dict['snippet'] = _get_code_snippet(full_p, f_dict['line'])
+            _print_finding_details(f_dict)
+            print()
+    finally: conn.close()
 
-            # Gera o snippet sob demanda se a flag -s for usada
-            if snippets and finding_dict.get('file') and finding_dict.get('line'):
-                project_path = finding_dict.get('project_path', '')
-                full_file_path = os.path.join(project_path, finding_dict['file'])
-                if os.path.exists(full_file_path):
-                    snippet = _get_code_snippet(full_file_path, finding_dict['line'])
-                    if snippet:
-                        finding_dict['snippet'] = snippet
-            
-            _print_finding_details(finding_dict)
-            click.echo("-" * 40)
+def _build_log_query(search_term, command, file, category, severity, after, before, limit):
+    """Especialista em construção de SQL (PASC 8.5). CC reduzida."""
+    base = "SELECT f.*, e.command, e.project_path, e.timestamp FROM findings f JOIN events e ON f.event_id = e.id"
+    clauses, params = [], []
 
-    except sqlite3.Error as e:
-        click.echo(Fore.RED + f"Ocorreu um erro ao ler o banco de dados: {e}", err=True)
-    finally:
-        if conn:
-            conn.close()
+    if search_term: clauses.append("f.message LIKE ?"); params.append(f"%{search_term}%")
+    if command: clauses.append("e.command LIKE ?"); params.append(f"%{command}%")
+    if file: clauses.append("f.file LIKE ?"); params.append(f"%{file.replace('\\', '/')}%")
+    if category: clauses.append("f.category = ?"); params.append(category.upper())
+    if severity: clauses.append("f.severity = ?"); params.append(severity.upper())
+    if after: clauses.append("e.timestamp >= ?"); params.append(after)
+    if before: clauses.append("e.timestamp <= ?"); params.append(f"{before} 23:59:59")
+
+    query = base + (" WHERE " + " AND ".join(clauses) if clauses else "")
+    query += " ORDER BY e.timestamp DESC LIMIT ?"
+    params.append(limit)
+    return query, params
+
+def _render_log_entry(f_dict, show_snippets):
+    """Especialista em UI de Log."""
+    f_dict['details'] = f"CMD: {f_dict.get('command')} | Data: {f_dict.get('timestamp')}"
+    if show_snippets and f_dict.get('file') and f_dict.get('line'):
+        full_p = os.path.join(f_dict.get('project_path', ''), f_dict['file'])
+        if os.path.exists(full_p):
+            f_dict['snippet'] = _get_code_snippet(full_p, f_dict['line'])
+    _print_finding_details(f_dict)
+    print()
 
 @click.command('show-trace')
 @click.pass_context
@@ -170,66 +128,14 @@ def show_trace(ctx, filepath):
     pass # Placeholder
 
 @click.command('mk')
-@click.pass_context
-@click.argument('items', nargs=-1, required=True)
-@click.option('--path', '-p', 'base_path', default='.', type=click.Path(exists=True, file_okay=False, resolve_path=True))
-def mk(ctx, base_path, items):
-#    """Cria arquivos e pastas rapidamente."""
-    """
-    Cria arquivos e pastas rapidamente. Pastas devem terminar com '/'.
-    
-    Suporta expansão de chaves para múltiplos arquivos:
-    
-    Exemplos:
-      doxoade mk src/ tests/ main.py
-      doxoade mk "src/app/{models.py, views.py, controllers.py}"
-    """
-    click.echo(Fore.CYAN + f"--- [MK] Criando estrutura em '{base_path}' ---")
-    
-    processed_items = []
-    # --- NOVA LÓGICA DE EXPANSÃO ---
-    # Primeiro, processamos os itens para expandir a sintaxe de chaves
-    for item in items:
-        match = re.match(r'^(.*)\{(.*)\}(.*)$', item)
-        if match:
-            prefix = match.group(1)
-            content = match.group(2)
-            suffix = match.group(3)
-            # Quebra o conteúdo das chaves pela vírgula
-            filenames = [name.strip() for name in content.split(',')]
-            for filename in filenames:
-                processed_items.append(f"{prefix}{filename}{suffix}")
-        else:
-            processed_items.append(item)
-
-    created_count = 0
-    for item in processed_items:
-        normalized_item = os.path.normpath(item)
-        full_path = os.path.join(base_path, normalized_item)
-        
-        try:
-            if item.endswith(('/', '\\')):
-                os.makedirs(full_path, exist_ok=True)
-                click.echo(Fore.GREEN + f"[CRIADO] Diretório: {full_path}")
-                created_count += 1
-            else:
-                parent_dir = os.path.dirname(full_path)
-                if parent_dir:
-                    os.makedirs(parent_dir, exist_ok=True)
-                
-                if not os.path.exists(full_path):
-                    Path(full_path).touch()
-                    click.echo(Fore.GREEN + f"[CRIADO] Arquivo:   {full_path}")
-                    created_count += 1
-                else:
-                    click.echo(Fore.YELLOW + f"[EXISTE] Arquivo:   {full_path}")
-        except OSError as e:
-            click.echo(Fore.RED + f"[ERRO] Falha ao criar '{full_path}': {e}")
-            continue
-            
-    click.echo(Fore.CYAN + Style.BRIGHT + "\n--- Concluído ---")
-    click.echo(f"{created_count} novo(s) item(ns) criado(s).")
-    pass # Placeholder
+@click.argument('items', nargs=-1)
+@click.option('--path', '-p', 'base_path', default='.', type=click.Path(exists=True))
+@click.option('--architecture', '-a', type=click.Path(exists=True))
+@click.option('--tree', '-t', is_flag=True)
+def mk(base_path, items, architecture, tree):
+    """🔨 Construtor de Topologia e Visualizador Nexus."""
+    from .mk_systems.mk_commands import execute_mk_logic
+    execute_mk_logic(base_path, items, architecture, tree)
 
 @click.command('create-pipeline')
 @click.pass_context
@@ -359,41 +265,28 @@ def setup_regression():
 # -----------------------------------------------------------------------------
 
 @click.command('setup-health')
-@click.argument('path', type=click.Path(exists=True, file_okay=False, resolve_path=True), default='.')
+@click.argument('path', default='.')
 @click.pass_context
-def setup_health_cmd(path, arguments):
-    """Configura o ambiente de saúde do projeto."""
-    import click
-    from colorama import Fore
+def setup_health_cmd(ctx, path):
+    """🛡️ Inicializa protocolos de saúde no projeto."""
+    root = _find_project_root(os.path.abspath(path))
+    click.echo(Fore.CYAN + f"--- [SETUP-HEALTH] Configurando '{os.path.basename(root)}' ---")
     
-    ctx = click.get_current_context()
-    
-    click.echo(Fore.CYAN + Style.BRIGHT + f"--- [SETUP-HEALTH] Configurando '{path}' ---")
-    arguments = ctx.params
-    
-    # O ExecutionLogger agora funciona pois importamos acima
-    with ExecutionLogger('setup-health', path, arguments) as _:
+    with ExecutionLogger('setup-health', root, ctx.params) as _:
         # 1. Venv
-        venv_path = os.path.join(path, 'venv')
+        venv_path = os.path.join(root, 'venv')
         if not os.path.exists(venv_path):
-            click.echo(Fore.YELLOW + "   > Criando ambiente virtual 'venv'...")
-            try:
-                import subprocess
-                subprocess.run([sys.executable, "-m", "venv", venv_path], check=True, capture_output=True)
-                click.echo(Fore.GREEN + "[OK] Venv criado.")
-            except Exception:
-                click.echo(Fore.RED + "[ERRO] Falha ao criar venv."); sys.exit(1)
-        else:
-            click.echo(Fore.GREEN + "[OK] Venv já existe.")
-
-        # 2. Pyproject.toml
-        pyproject_path = os.path.join(path, 'pyproject.toml')
+            click.echo(Fore.YELLOW + "   > Criando venv...")
+            import subprocess
+            subprocess.run([sys.executable, "-m", "venv", venv_path], check=True, capture_output=True)
+        
+        # 2. TOML
+        pyproject_path = os.path.join(root, 'pyproject.toml')
         if not os.path.exists(pyproject_path):
             with open(pyproject_path, 'w', encoding='utf-8') as f:
-                f.write("[tool.doxoade]\nignore = ['venv', '.git']\nsource_dir = \".\"\n")
-            click.echo(Fore.GREEN + "[OK] Arquivo de configuração criado.")
+                f.write('[tool.doxoade]\nignore = [\"venv/\", \".git/\", \"__pycache__/\"]\nsource_dir = \".\"\n')
         
-        click.echo(Fore.GREEN + Style.BRIGHT + "\n[PRONTO] Projeto configurado.")
+        click.secho("✅ Estado de Ouro configurado.", fg='green', bold=True)
    
 # -----------------------------------------------------------------------------
 # FUNÇÕES AUXILIARES

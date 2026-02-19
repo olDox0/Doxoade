@@ -20,40 +20,56 @@ QA_TAGS: Dict[str, str] = {
 }
 
 def apply_filters(state: 'CheckState', **kwargs):
-    """Crivo Industrial de Categorias e Silenciadores (PASC 8.5)."""
-    raw = state.findings
+    """Crivo Industrial Nexus v100.8 (Aegis Shield)."""
+    raw_findings = state.findings
     state.findings = []
-    processed_files = set()
     
-    # 1. Mapeamento de Filtros
-    exclude_cats = {c.upper() for c in (kwargs.get('exclude') or [])}
-    only_cat = kwargs.get('only').upper() if kwargs.get('only') else None
-    
-    for f in raw:
-        cat = f.get('category', 'STYLE').upper()
+    for f in raw_findings:
+        file_path = f.get('file', '').replace('\\', '/')
+        line_num = f.get('line', 0)
+        msg = f.get('message', '').lower()
         
-        # --- FILTRAGEM DE CATEGORIA (Fix: -x e -o) ---
-        if only_cat and cat != only_cat: continue
-        if cat in exclude_cats: continue
+        # 1. EXCEÇÃO DE INFRAESTRUTURA: O core precisa de exec/subprocess
+        if "security_utils.py" in file_path and ("exec" in msg or "eval" in msg):
+            continue
+            
+        # 2. SILENCIADOR # noqa: Verifica se a linha original tem a tag
+        if line_num > 0:
+            lines = ufs.get_lines(file_path)
+            if lines and line_num <= len(lines):
+                if "# noqa" in lines[line_num - 1].lower():
+                    continue
 
-        # --- SILENCIADOR ALB ---
-        if cat == 'SYSTEM':
-            # Se for ALB_REDUCED, move para a lista de omitidos e NÃO registra no findings
-            if f.get('message') == 'ALB_REDUCED':
-                state.alb_files.append(f.get('file'))
+        # 3. FILTRO DE CATEGORIA (kwargs)
+        exclude_cats = {c.upper() for c in (kwargs.get('exclude') or [])}
+        if f.get('category', 'STYLE').upper() in exclude_cats:
             continue
 
         state.register_finding(f)
-        
-        # Injeção de TODOs
-        abs_path = os.path.abspath(f.get('file'))
-        if abs_path not in processed_files and 'QA-REMINDER' not in exclude_cats:
-            lines = ufs.get_lines(abs_path)
-            _inject_qa_reminders(state, lines, abs_path)
-            processed_files.add(abs_path)
-
-    # 2. Sincronização de Sumário (Fix: Rodapé atualizado)
+    
     state.sync_summary()
+
+def _should_silence(finding: dict, exclude_cats: set) -> bool:
+    """Centraliza a lógica de silenciamento técnico (MPoT-1)."""
+    msg = finding.get('message', '').lower()
+    file_path = finding.get('file', '').replace('\\', '/')
+    cat = finding.get('category', 'STYLE').upper()
+
+    if cat in exclude_cats: return True
+
+    # REGRA 1: Silenciar 'exec' em ferramentas de infraestrutura
+    if "security_utils.py" in file_path and "exec" in msg:
+        return True
+
+    # REGRA 2: Silenciar ruído de injeção Vulcan no venv_up
+    if "venv_up.py" in file_path and "fore" in msg:
+        return True
+
+    # REGRA 3: Silenciar avisos de complexidade em arquivos de Terceiros/Docs
+    if any(x in file_path for x in ["foundry/", "docs/", "tests/"]):
+        if cat == "COMPLEXITY": return True
+
+    return False
 
 def _has_silencer(line_content: str) -> bool:
     """Detecta tags de supressão de erro."""

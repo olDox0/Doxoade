@@ -138,5 +138,30 @@
     "title": "Moagem de Bits (Bitwise Crunching)",
     "definition": "Operações lógicas de baixo nível (XOR, AND, OR, LShift) que são processadas em ciclos únicos de CPU no Vulcano, mas custam caro no Python devido ao overhead de objetos imutáveis.",
     "origin": "Ironclad Test v5.2"
+  },
+  "Path_Sovereignty": {
+    "title": "Path Sovereignty",
+    "definition": "Capacidade de um comando se ancorar na raiz do projeto alvo, ignorando a hierarquia da instalação do Doxoade via CheckIO.",
+    "origin": ""
+  },
+  "Ghost_Type_Protocol": {
+    "title": "Ghost-Type Protocol",
+    "definition": "Técnica de limpeza JIT da árvore AST que remove anotações de tipo modernas (list[str]) para garantir compatibilidade com compiladores C.",
+    "origin": ""
+  },
+  "Hot_Swap_Nativo": {
+    "title": "Hot-Swap_Nativo",
+    "definition": "Substituição dinâmica de uma função Python por sua versão compilada em C (.pyd/.so) durante o restricted_safe_exec.",
+    "origin": ""
+  },
+  "Staleness_Check": {
+    "title": "Staleness_Check",
+    "definition": "Verificação de integridade temporal que compara o mtime do código-fonte com o do binário, forçando o fallback para Python se o código for mais novo.",
+    "origin": ""
+  },
+  "Modular_Facade": {
+    "title": "Modular_Facade",
+    "definition": "Padrão de design onde o arquivo na pasta commands/ é apenas uma casca de input, delegando 100% da lógica para os sub-sistemas.",
+    "origin": ""
   }
 }

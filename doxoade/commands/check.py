@@ -3,14 +3,8 @@
 import os
 import sys
 import click
-from ..shared_tools import ExecutionLogger, _update_open_incidents, _present_results
-
 from .check_systems.check_state import CheckState
-from .check_systems.check_io import CheckIO
-from .check_systems.check_engine import run_audit_engine, run_check_logic
-from .check_systems.check_filters import apply_filters
-from .check_systems.check_refactor import analyze_refactor_opportunities
-from .check_systems.check_utils import render_archived_view, _render_issue_summary
+from .check_systems.check_engine import run_check_logic
 
 __all__ = ['check', 'run_check_logic']
 
@@ -33,6 +27,7 @@ __all__ = ['check', 'run_check_logic']
 @click.pass_context
 def check(ctx, path: str, **kwargs):
     """🔍 Auditoria de Qualidade Modular v85.2 (Full Power)."""
+    from .check_systems.check_io import CheckIO
     io = CheckIO(path)
     
     # Requisito de Limpeza NPP
@@ -40,12 +35,12 @@ def check(ctx, path: str, **kwargs):
         from .check_notepadpp import cleanup_npp_bridge
         cleanup_npp_bridge(io.project_root)
         return
-
-    # Estado Inicial
-    state = CheckState(root=io.project_root, target_path=io.target_abs, is_full_power=kwargs.get('full_power'))
-
-    with ExecutionLogger('check', state.root, ctx.params):
+    from ..shared_tools import ExecutionLogger
+    with ExecutionLogger('check', io.project_root, ctx.params) as logger:
+#    with ExecutionLogger('check', state.root, ctx.params):
+        state = CheckState(root=io.project_root, target_path=io.target_abs, is_full_power=kwargs.get('full_power'))
         # 1. Motor de Auditoria (Passa 'fast', 'clones', 'no_cache', 'full_power')
+        from .check_systems.check_engine import run_audit_engine
         run_audit_engine(state, io, **kwargs)
 
         # 2. Segurança Aegis (Passa 'security')
@@ -54,7 +49,9 @@ def check(ctx, path: str, **kwargs):
             analyze_security(state)
 
         # 3. Crivos e Refatoração (Passa 'exclude' e 'only')
+        from .check_systems.check_filters import apply_filters
         apply_filters(state, **kwargs) # <--- AGORA COM KWARGS
+        from .check_systems.check_refactor import analyze_refactor_opportunities
         analyze_refactor_opportunities(state)
 
         # 4. Lógica de AUTO-FIX (Restaurada)
@@ -68,7 +65,12 @@ def check(ctx, path: str, **kwargs):
             return
 
         # 6. Sincronização e Saída
+        from ..shared_tools import _update_open_incidents
         _update_open_incidents(state.findings, state.target_path)
+        
+        for f in state.findings:
+            logger.add_finding(f['severity'], f['message'], f.get('category'), f.get('file'), f.get('line'))
+        
         _render_output(state, kwargs)
 
     # Limpeza de Memória
@@ -78,6 +80,8 @@ def check(ctx, path: str, **kwargs):
 
 def _render_output(state: CheckState, kwargs: dict):
     """Despachante de Interface Único (PASC 8.5)."""
+    from .check_systems.check_utils import render_archived_view, _render_issue_summary
+    from ..shared_tools import _present_results
     if kwargs.get('out_fmt') == 'json':
         import json
         click.echo(json.dumps({'summary': state.summary, 'findings': state.findings}, indent=2))

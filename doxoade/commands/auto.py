@@ -3,55 +3,34 @@
 import sys
 import os
 import click
-import shlex
-from colorama import Fore #, Style
+# [DOX-UNUSED] import shlex
+from colorama import Fore, Style
 from ..shared_tools import ExecutionLogger
 
 __version__ = "37.0 Alfa (Interactive Pipelines)"
 
-def _execute_command(command_string: str, env: dict, inputs: list = None): # FIX: Mantido 'inputs'
-    """Executa comando com proteção Aegis."""
+def _execute_command(command_string: str, env: dict, inputs: list = None):
     import subprocess
     import shlex
+
     click.echo(Fore.YELLOW + f"   > Executando: {command_string}")
-    
-    try:
-        args = shlex.split(command_string)
-        process = subprocess.Popen(
-            args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, 
-            stderr=subprocess.STDOUT, text=True, env=env, shell=False
-        )
-        if inputs: # FIX: Sincronizado com o argumento
-            out, _ = process.communicate(input="\n".join(inputs))
-            return out
-        process.wait()
-    except Exception as e:
-        from traceback import print_tb as exc_trace
-        _, exc_obj, exc_tb = sys.exc_info()
-        print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
-        exc_trace(exc_tb)
-    
-    try:
-        env = os.environ.copy()
-        env["FORCE_COLOR"] = "1"
-        env["PYTHONIOENCODING"] = "UTF-8"
 
-        input_str = "\n".join(inputs) + "\n" if inputs else None
+    args = shlex.split(command_string)
+    input_str = "\n".join(inputs) + "\n" if inputs else None
 
-        # --- A ÚNICA MUDANÇA ESTÁ AQUI ---
-        # Passamos a string do comando diretamente, sem tentar dividi-la primeiro.
-        # O 'shell=True' cuidará de interpretar a string corretamente.
+    try:
         process = subprocess.Popen(
             args,
             stdin=subprocess.PIPE if input_str else None,
-            stdout=sys.stdout, 
+            stdout=sys.stdout,
             stderr=sys.stderr,
             text=True,
-            encoding='utf-8',
-            errors='replace',
+            encoding="utf-8",
+            errors="replace",
             env=env,
-            shell=False 
+            shell=False
         )
+
         if input_str:
             process.communicate(input=input_str)
         else:
@@ -59,22 +38,14 @@ def _execute_command(command_string: str, env: dict, inputs: list = None): # FIX
 
         return process.returncode
 
-    except FileNotFoundError as e:
+    except FileNotFoundError:
         click.echo(Fore.RED + f"   > Comando não encontrado: {args[0]}")
-        from traceback import print_tb as exc_trace
-        _, exc_obj, exc_tb = sys.exc_info()
-        print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
-        exc_trace(exc_tb)
-        return 1
-    except Exception as e:
-        click.echo(Fore.RED + f"   > Erro inesperado ao executar comando: {e}")
-        from traceback import print_tb as exc_trace
-        _, exc_obj, exc_tb = sys.exc_info()
-        print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
-        exc_trace(exc_tb)
+        return 127
 
+    except Exception as e:
+        click.echo(Fore.RED + f"   > Erro ao executar comando: {e}")
         return 1
-    return ""
+
 
 @click.command('auto')
 @click.argument('prompt', required=False)
@@ -91,14 +62,17 @@ def auto(ctx, prompt, filepath):
 
     if filepath:
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
+            # PASC-8.12: Garantindo leitura segura
+            with open(filepath[0] if isinstance(filepath, tuple) else filepath, 'r', encoding='utf-8') as f:
                 source_lines = f.readlines()
         except IOError as e:
-            click.echo(Fore.RED + f"[ERRO] Falha ao ler o arquivo de pipeline: {e}"); sys.exit(1)
-            from traceback import print_tb as exc_trace
-            _, exc_obj, exc_tb = sys.exc_info()
-            print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
-            exc_trace(exc_tb)
+            click.echo(Fore.RED + f"[ERRO] Falha ao ler o arquivo de pipeline: {e}")
+            sys.exit(1) # Corrigido: exit em vez de continue, pois não estamos em loop aqui
+            import sys as dox_exc_sys
+            _, exc_obj, exc_tb = dox_exc_sys.exc_info()
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            line_number = exc_tb.tb_lineno
+            print(f"\033[0m \033[1m Filename: {fname}   ■ Line: {line_number} \033[31m ■ Exception type: {e} ■ Exception value: {exc_obj} \033[0m")
     elif commands:
         source_lines = list(commands)
 
@@ -135,7 +109,9 @@ def auto(ctx, prompt, filepath):
             
             click.echo(Fore.CYAN + f"\n--- [AUTO] Executando Passo {i}/{len(pipeline_steps)}: {command_str} ---")
             
-            return_code = _execute_command(command_str, inputs)
+            env = os.environ.copy()
+            return_code = _execute_command(command_str, env, inputs)
+#            return_code = _execute_command(command_str, inputs)
             
             status = "sucesso" if return_code == 0 else "falha"
             results.append({"command": command_str, "status": status, "returncode": return_code})

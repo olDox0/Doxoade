@@ -28,13 +28,16 @@ def calculate_integrity_hash(root_path: Path) -> str:
     hasher = hashlib.sha256()
     for path in sorted(root_path.rglob("*.py")):
         path_str = str(path).replace("\\", "/")
-        ignored = ["venv", ".git", "__pycache__", ".doxoade_cache", "tests", "chief_dossier.json"]
-        if any(x in path_str for x in ignored): continue
+        # PASC 19: Ignora quarentenas e lixo físico
+        if any(x in path_str for x in ["venv", ".git", "pytest_temp_dir", "foundry"]):
+            continue
         try:
+            # PASC 3.0: Verifica permissão antes de abrir
+            if not os.access(path, os.R_OK): continue
             with open(path, "rb") as f:
                 for chunk in iter(lambda: f.read(4096), b""):
                     hasher.update(chunk)
-        except OSError as e:
+        except (OSError, PermissionError) as e:
             import sys as exc_sys
             from traceback import print_tb as exc_trace
             _, exc_obj, exc_tb = exc_sys.exc_info()
@@ -209,8 +212,8 @@ def _validate_ast_safety(tree: ast.AST, allow_imports: bool):
                 raise RuntimeError("Sandbox Breach: Private access blocked.")
 
 def _handle_sandbox_exception(e: Exception):
-    """Dispatcher Forense."""
-    if isinstance(e, (NameError, ImportError, ModuleNotFoundError, SyntaxError)):
+    """Dispatcher Forense (OSL-5.3)."""
+    if isinstance(e, (NameError, ImportError, ModuleNotFoundError, SyntaxError, ValueError)):
         raise e
     
     # Isola o IO do log forense para evitar alerta de hibridismo
@@ -222,4 +225,5 @@ def _handle_sandbox_exception(e: Exception):
     msg = f"\033[1;34m\n[ FORENSIC:AEGIS ]\033[0m \033[1mFile: {f_name} | L: {line_n}\033[0m\n"
     msg += f"\033[31m    ■ Exception: {type(e).__name__} | Value: {e}\033[0m"
     print(msg)
-    raise RuntimeError(f"Aegis Sandbox Blocked: {e}")
+    raise RuntimeError(f"Aegis Sandbox Blocked: {str(e)}")
+#    raise RuntimeError(f"Aegis Sandbox Blocked: {e}")

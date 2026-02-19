@@ -1,9 +1,17 @@
+# -*- coding: utf-8 -*-
 # doxoade/tools/filesystem.py
 import os
 # [DOX-UNUSED] import sys
 import toml
 from pathlib import Path
-from colorama import Fore
+# [DOX-UNUSED] from colorama import Fore
+
+# Fonte Única da Verdade para Exclusões (OSL-17)
+SYSTEM_IGNORES = {
+    'venv', '.git', '__pycache__', 'build', 'dist', 
+    '.doxoade', '.doxoade_cache', 'node_modules', 
+    '.vscode', '.idea', 'pytest_temp_dir', '.dox_agent_workspace'
+}
 
 def _find_project_root(start_path='.'):
     """Encontra a raiz do projeto (pyproject.toml ou .git)."""
@@ -17,29 +25,39 @@ def _find_project_root(start_path='.'):
         search_path = search_path.parent
     return str(current_path)
 
-def _get_project_config(logger, start_path='.'):
-    """Lê configurações do pyproject.toml."""
-    root_path = os.path.abspath(start_path)
-    config = {'ignore': [], 'source_dir': '.'}
+def _get_project_config(logger=None, start_path='.'):
+    """
+    Fonte Única da Verdade para Configuração (PASC 8.3).
+    Garante que o retorno seja sempre uma tupla previsível.
+    """
+    root_path = _find_project_root(start_path)
+    config = {'ignore': [], 'source_dir': '.', 'root_path': root_path}
     config_path = os.path.join(root_path, 'pyproject.toml')
     
     if os.path.exists(config_path):
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
-                toml_data = toml.load(f)
-                config.update(toml_data.get('tool', {}).get('doxoade', {}))
-        except Exception as config_except:
-            if logger:
-                # Evita dependência circular com Logger aqui, apenas imprime se necessário ou ignora
-                print(Fore.YELLOW + f"[Config] Aviso: Erro ao ler pyproject.toml: {config_except}")
+                data = toml.load(f)
+                dox_config = data.get('tool', {}).get('doxoade', {})
+                config.update(dox_config)
+        except Exception as e:
+            if logger: logger.add_finding("WARNING", f"Erro no TOML: {e}")
 
+    # Normalização OSL: search_path é obrigatório e absoluto
     source_dir = config.get('source_dir', '.')
-    search_path = os.path.join(root_path, source_dir)
-    config['search_path_valid'] = os.path.isdir(search_path)
-    
-    config['root_path'] = root_path
-    config['search_path'] = search_path
+    config['search_path'] = os.path.abspath(os.path.join(root_path, source_dir))
     return config
+
+def get_file_metadata(file_path: str):
+    """
+    Sincronizador de Unpack (Fix: expected 2).
+    Sempre retorna exatamente (mtime: float, size: int).
+    """
+    try:
+        st = os.stat(file_path)
+        return float(st.st_mtime), int(st.st_size)
+    except (OSError, FileNotFoundError):
+        return 0.0, 0
 
 def _get_venv_python_executable(start_path='.'):
     """Localiza o interpretador Python do venv do projeto alvo."""
@@ -109,3 +127,32 @@ def collect_files_to_analyze(config, cmd_line_ignore=None):
                 files_to_check.append(os.path.join(root, file))
                 
     return files_to_check
+    
+def is_ignored(path: str, project_root: str, extra_patterns: set = None) -> bool:
+    """Verifica se um caminho deve ser ignorado (PASC-8.17)."""
+    try:
+        rel_path = os.path.relpath(path, project_root).replace('\\', '/')
+    except ValueError: return True
+    
+    parts = rel_path.lower().split('/')
+    
+    # Combina ignores do sistema com os customizados do usuário
+    combined_ignores = SYSTEM_IGNORES.union(extra_patterns or set())
+    
+    # Se qualquer parte do caminho está na lista de proibidos, ignora
+    return any(part in combined_ignores for part in parts)
+
+def collect_project_files(search_path: str, project_root: str, extra_ignores: set = None):
+    """
+    Iterador Industrial de Arquivos (PASC-6.4).
+    Otimiza o os.walk cortando diretórios ignorados na raiz da recursão.
+    """
+    combined_ignores = SYSTEM_IGNORES.union(extra_ignores or set())
+    
+    for root, dirs, files in os.walk(search_path, topdown=True):
+        # Otimização Crítica: Modificar dirs in-place impede o walk de entrar nelas
+        dirs[:] = [d for d in dirs if d.lower() not in combined_ignores and not d.startswith('.')]
+        
+        for file in files:
+            if file.endswith('.py'):
+                yield os.path.join(root, file)

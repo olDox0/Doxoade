@@ -1,23 +1,90 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/search_systems/search_utils.py
 """Especialista em Blocos de Código e Busca Histórica (MPoT-4)."""
+import os
 import subprocess
+from click import echo
+from colorama import Fore, Style
 
-def extract_function_block(file_path: str, start_line: int) -> str:
-    """Extrai o bloco inteiro de uma função baseando-se na indentação (PASC-6.4)."""
+from .search_state import SearchState
+
+def render_search_results(state: 'SearchState'):
+    """Interface Forense Unificada (Chief-Style)."""
+    if state.matches:
+        echo(f"{Fore.CYAN}{Style.BRIGHT}\n[Código & Docs]{Style.RESET_ALL}")
+        
+        for m in state.matches:
+            is_py = m['type'] == '.py'
+            color = Fore.BLUE if is_py else Fore.MAGENTA
+            echo(f"{color} [{m['type'].upper()}] {m['file']}:{m['line']}{Style.RESET_ALL}")
+            
+            # DECISÃO DE VISÃO: Bloco Completo ou Snippet?
+            if state.is_full_mode and is_py:
+                block = extract_function_block(os.path.join(state.root, m['file']), m['line'])
+                if block:
+                    for line in block.splitlines():
+                        # Realça a linha que contém o match original
+                        is_target = f":{m['line']}:" in f":{line.split(':')[0] if ':' in line else ''}:"
+                        s_color = Fore.WHITE + Style.BRIGHT if is_target else Style.DIM
+                        echo(f"    {s_color}{line}{Style.RESET_ALL}")
+                    echo("")
+                    continue
+
+            # Fallback para Snippet Normal
+            from ...tools.analysis import _get_code_snippet
+            snippet = _get_code_snippet(os.path.join(state.root, m['file']), m['line'])
+            for snip_line, snip_text in sorted(snippet.items()):
+                is_target = (int(snip_line) == m['line'])
+                prefix = "      > " if is_target else "        "
+                s_color = Fore.WHITE + Style.BRIGHT if is_target else Fore.WHITE + Style.DIM
+                echo(f"{s_color}{prefix}{snip_line:4}: {snip_text}{Style.RESET_ALL}")
+
+    # 2. Banco de Dados
+    if state.db_results['incidents']:
+        echo(f"{Fore.RED}{Style.BRIGHT}\n╔═══ Incidentes Ativos ═══╗{Style.RESET_ALL}")
+        for inc in state.db_results['incidents']:
+            echo(f"{Fore.YELLOW}[{inc['category']}] {Fore.WHITE}{inc['message']}{Style.RESET_ALL}")
+            echo(f"  Em: {inc['file']}:{inc['line']}")
+
+    # 3. Timeline Chronos
+    if state.timeline:
+        echo(f"{Fore.MAGENTA}{Style.BRIGHT}\n╔═══ Timeline (Chronos) ═══╗{Style.RESET_ALL}")
+        for t in state.timeline:
+            status = f"{Fore.GREEN}✔" if t['exit_code'] == 0 else f"{Fore.RED}✘"
+            echo(f" {status} {Fore.WHITE}{t['timestamp'][:19]} | {Fore.CYAN}{t['full_line']}{Style.RESET_ALL}")
+            
+    # 4. Verificação de Vácuo (MPoT-15)
+    has_results = any([state.matches, state.timeline, 
+                      state.db_results['incidents'], state.db_results['solutions'],
+                      state.git_results])
+    if not has_results:
+        echo(f"\n{Fore.YELLOW}   [!] Nenhum resultado encontrado para '{state.query}' nos filtros ativos.{Style.RESET_ALL}")
+
+def extract_function_block(file_path: str, match_line: int) -> str:
+    """Extrai o bloco lógico (def/class) escaneando para cima e para baixo (PASC-8.10)."""
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             lines = f.readlines()
         
-        target_idx = start_line - 1
-        if target_idx >= len(lines): return ""
+        match_idx = match_line - 1
+        if match_idx >= len(lines): return ""
+
+        # 1. SCAN UP: Encontra o início da função/classe
+        start_idx = match_idx
+        while start_idx > 0:
+            line = lines[start_idx].strip()
+            # Se encontrar um def/class com indentação menor ou igual, paramos
+            if line.startswith(('def ', 'class ', '@')):
+                break
+            start_idx -= 1
         
-        base_line = lines[target_idx]
-        # Detecta indentação inicial (espaços ou tabs)
+        # 2. CAPTURA INDENTAÇÃO BASE
+        base_line = lines[start_idx]
         indent = len(base_line) - len(base_line.lstrip())
         
-        block = [base_line.rstrip()]
-        for i in range(target_idx + 1, len(lines)):
+        # 3. SCAN DOWN: Encontra o fim do bloco
+        block = []
+        for i in range(start_idx, len(lines)):
             line = lines[i]
             if not line.strip(): # Pula linhas vazias
                 block.append(line.rstrip())
@@ -73,14 +140,22 @@ def get_code_from_commit(commit_hash: str, query: str) -> list:
     except Exception: return []
     
 def extract_block_from_git(commit_hash: str, file_path: str, start_line: int) -> str:
-    """Extrai o bloco de código de um commit (PASC-1.1)."""
-    # 1. Recupera o arquivo integral daquele snapshot
-    cmd = ['git', 'show', f'{commit_hash}:{file_path}']
+    """Extrai bloco histórico garantindo path relativo à raiz do Git (Aegis Pattern)."""
+    from ...shared_tools import _find_project_root
+    project_root = _find_project_root(os.getcwd())
+    
+    # NORMALIZAÇÃO DE PATH (Vital para Windows/Git)
+    abs_file = os.path.abspath(file_path)
+    rel_git_path = os.path.relpath(abs_file, project_root).replace('\\', '/')
+    
+    cmd = ['git', 'show', f'{commit_hash}:{rel_git_path}']
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore', shell=False)
-        if res.returncode != 0: return f"{file_path} não encontrado no commit {commit_hash}."
+        if res.returncode != 0: 
+            return f"Erro: {rel_git_path} não consta no commit {commit_hash}."
         
         lines = res.stdout.splitlines()
+        # Aqui aplicaríamos a mesma lógica de Scan Up/Down nos 'lines' se necessário
         target_idx = int(start_line) - 1
         if target_idx < 0 or target_idx >= len(lines): return ""
 
@@ -104,7 +179,13 @@ def extract_block_from_git(commit_hash: str, file_path: str, start_line: int) ->
             if curr_indent <= indent and line.strip():
                 break
             block.append(line)
-            
-        return "\n".join(block)
+        return "\n".join([f"{i+1:4}: {l}" for i, l in enumerate(lines[max(0, target_idx-5):target_idx+15])])
     except Exception as e:
-        return f"Falha na extração histórica: {e}"
+        return f"Falha na arqueologia: {e}"
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        line_number = exc_tb.tb_lineno
+        print(f"\033[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+        exc_trace(exc_tb)

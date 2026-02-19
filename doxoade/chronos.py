@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# doxoade/chronos.py
+# doxoade/chronos.py (v94.6 Platinum)
 import uuid
 import time
 import threading
@@ -171,46 +171,43 @@ class ResourceMonitor(threading.Thread):
             print("   > Abortando tarefa para evitar instabilidade no Windows.")
             os._exit(1) # Fail-Stop Mensurável (MPoT-15)
 
-# --- CodeSampler Mantido Igual ---
 class CodeSampler(threading.Thread):
     def __init__(self, interval=0.01):
-        super().__init__()
+        super().__init__(daemon=True)
         self.interval = interval
         self.running = True
-        self.daemon = True
         self.samples = collections.defaultdict(int)
         self.main_thread_id = threading.main_thread().ident
 
     def run(self):
-        root_anchor = os.getcwd().lower().replace('\\', '/')
+        # Localiza diretórios para filtragem de ruído
+        lib_path = os.path.dirname(os.__file__).lower().replace('\\', '/')
+        
         while self.running:
             time.sleep(self.interval)
             try:
                 frame = sys._current_frames().get(self.main_thread_id)
-                # [TECNOLOGIA GOLD] Stack-Walking
-                # Subimos a pilha para encontrar o código que não seja do Core do Doxoade
                 while frame:
                     filename = frame.f_code.co_filename
                     norm_file = filename.lower().replace('\\', '/')
                     
-                    # Ignora bibliotecas padrão, internos e a infra do Doxoade
-                    is_internal = "doxoade/doxoade" in norm_file or "doxoade\\doxoade" in norm_file
-                    is_lib = "lib/" in norm_file or "lib\\" in norm_file or "<" in norm_file
+                    # PASC-8.12: Filtro de Ruído Industrial (Ignora o "congelado" e a STDLIB)
+                    if any(x in norm_file for x in ["<frozen", "chronos.py", "threading.py"]) or norm_file.startswith(lib_path):
+                        frame = frame.f_back
+                        continue
                     
-                    # Se encontramos algo do projeto que não é a ferramenta em si:
-                    if root_anchor in norm_file and not is_internal and not is_lib:
-                        self.samples[(filename, frame.f_lineno)] += 1
-                        break # Achamos o "trabalhador" real, podemos parar
-                    
-                    frame = frame.f_back # Sobe para quem chamou
+                    # Registra apenas o que é código real de execução
+                    self.samples[(os.path.abspath(filename), frame.f_lineno)] += 1
+                    break
             except Exception as e:
-                from traceback import print_tb as exc_trace
-                _, exc_obj, exc_tb = sys.exc_info()
-                print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
-                exc_trace(exc_tb)
+                import sys as dox_exc_sys
+                _, exc_obj, exc_tb = dox_exc_sys.exc_info()
+                fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                line_number = exc_tb.tb_lineno
+                print(f"\033[0m \033[1m Filename: {fname}   ■ Line: {line_number} \033[31m ■ Exception type: {e} ■ Exception value: {exc_obj} \033[0m")
 
     def stop(self): self.running = False
-    def get_hot_lines(self, limit=5):
+    def get_hot_lines(self, limit=10):
         return sorted(self.samples.items(), key=lambda item: item[1], reverse=True)[:limit]
 
 class ChronosRecorder:
@@ -271,37 +268,29 @@ class ChronosRecorder:
 
         line_profile_data = []
         for (fname, lineno), hits in hot_lines:
-            # [FIX] Salvamos o path absoluto para o Advisor não se perder entre projetos
-            abs_fname = os.path.abspath(fname).replace('\\', '/')
-            line_profile_data.append({"file": abs_fname, "line": lineno, "hits": hits})
+            line_profile_data.append({"file": fname.replace('\\', '/'), "line": lineno, "hits": hits})
 
         try:
             conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
+            conn.execute("""
                 INSERT INTO command_history 
                 (session_uuid, timestamp, command_name, full_command_line, working_dir, exit_code, duration_ms, 
-                 cpu_percent, peak_memory_mb, io_read_mb, io_write_mb, profile_data, system_info, line_profile_data)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 cpu_percent, peak_memory_mb, io_read_mb, io_write_mb, line_profile_data, system_info)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                self.session_uuid,
-                self.start_timestamp,
-                self.cmd_name,
-                self.full_cmd,
-                self.work_dir,
-                exit_code,
-                duration_ms,
-                resources['cpu'],
-                resources['ram'],
-                resources['read'],
-                resources['write'],
-                json.dumps(top_funcs[:10]),
-                json.dumps(self.system_context),
-                json.dumps(line_profile_data)
+                self.session_uuid, datetime.now(timezone.utc).isoformat(), self.cmd_name,
+                " ".join(sys.argv), os.getcwd(), exit_code, duration_ms,
+                resources['cpu'], resources['ram'], resources['read'], resources['write'],
+                json.dumps(line_profile_data), json.dumps(self.system_context)
             ))
             conn.commit()
             conn.close()
-        except Exception: pass
+        except Exception as e:
+            import sys as dox_exc_sys
+            _, exc_obj, exc_tb = dox_exc_sys.exc_info()
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            line_number = exc_tb.tb_lineno
+            print(f"\033[0m \033[1m Filename: {fname}   ■ Line: {line_number} \033[31m ■ Exception type: {e} ■ Exception value: {exc_obj} \033[0m")
 
     def check_vulcan_efficiency(self, func_name, py_time, native_time):
         gain = py_time / native_time

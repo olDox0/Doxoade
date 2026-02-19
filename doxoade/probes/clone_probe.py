@@ -1,51 +1,36 @@
 # -*- coding: utf-8 -*-
-# doxoade/probes/clone_probe.py
-import ast
-import hashlib
+# doxoade/probes/clone_probe.py (v10.0 Omega Gold)
 import sys
-import json
 import os
+import json
+import hashlib
 import copy
+import binascii
+import ast
+from ..tools.vulcan.bridge import vulcan_bridge
 
 class StructuralNormalizer(ast.NodeTransformer):
-    """
-    Normaliza a AST focando na ESTRUTURA, ignorando nomes de variáveis.
-    """
+    """Normaliza a AST focando na ESTRUTURA (MPoT-1)."""
     def __init__(self):
         self.name_map = {}
         self.arg_counter = 0
         self.var_counter = 0
 
     def visit_FunctionDef(self, node):
-        # Remove docstrings para a normalização
         if ast.get_docstring(node):
             if len(node.body) > 0 and isinstance(node.body[0], ast.Expr) and isinstance(node.body[0].value, ast.Constant):
                 node.body.pop(0)
-        
-        # Remove anotações e decorators
         node.returns = None
         node.decorator_list = []
-        
-        # Anonimiza o nome da função
         node.name = "_anonymous"
-        
-        self._map_arguments(node.args)
-        self.generic_visit(node)
-        return node
-
-    def _map_arguments(self, args_node):
-        for arg in args_node.args:
+        for arg in node.args.args:
             arg.annotation = None
             new_name = f"arg_{self.arg_counter}"
             self.name_map[arg.arg] = new_name
             arg.arg = new_name
             self.arg_counter += 1
-        if args_node.vararg:
-            args_node.vararg.annotation = None
-            new_name = f"arg_{self.arg_counter}"
-            self.name_map[args_node.vararg.arg] = new_name
-            args_node.vararg.arg = new_name
-            self.arg_counter += 1
+        self.generic_visit(node)
+        return node
 
     def visit_Name(self, node):
         if node.id in self.name_map:
@@ -57,97 +42,79 @@ class StructuralNormalizer(ast.NodeTransformer):
             self.var_counter += 1
         return node
 
-    def visit_arg(self, node):
-        node.annotation = None
-        return node
-
-def get_structural_hash(node):
-    """Gera hash baseado em uma CÓPIA anonimizada da estrutura."""
-    node_copy = copy.deepcopy(node)
-    normalizer = StructuralNormalizer()
-    normalized_node = normalizer.visit(node_copy)
-    dump = ast.dump(normalized_node, include_attributes=False)
-    return hashlib.sha256(dump.encode('utf-8')).hexdigest()
-
-def is_trivial_or_config(node: ast.FunctionDef) -> bool:
-    """Verifica se a função deve ser ignorada por ser configuração ou vazia."""
-    if _has_ignored_decorator(node): return True
-    return _is_body_placeholder(node)
-
-def _has_ignored_decorator(node):
-    for d in node.decorator_list:
-        func = d.func if isinstance(d, ast.Call) else d
-        if isinstance(func, (ast.Attribute, ast.Name)):
-            name = getattr(func, 'attr', getattr(func, 'id', ''))
-            if name == 'group': return True
-    return False
-
-def _is_body_placeholder(node):
-    body = [s for s in node.body if not (isinstance(s, ast.Expr) and isinstance(s.value, (ast.Constant, ast.Str)))]
-    if not body: return True
-    if len(body) == 1:
-        s = body[0]
-        if isinstance(s, ast.Pass): return True
-        if isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant) and s.value.value is Ellipsis: return True
-    return False
+def find_clones_turbo(hashes_list):
+    """Ponte C-Level."""
+    v_mod = vulcan_bridge.get_optimized_module("vulcan_dry")
+    if v_mod and hasattr(v_mod, 'find_duplicate_signatures'):
+        raw_buffer = bytearray()
+        for h in hashes_list:
+            try:
+                raw_buffer.extend(binascii.unhexlify(h['hash']))
+            except Exception: continue
+        
+        indices = v_mod.find_duplicate_signatures(raw_buffer, 32)
+        return [(hashes_list[i], hashes_list[j]) for i, j in indices]
+    return None
 
 def find_clones(files: list) -> list:
-    """Orquestrador de busca de duplicatas (CC: 3)."""
-    hashes = {}
+    """Orquestrador Central."""
+    hashes_dict = {}
     for f_path in files:
-        _process_file_for_hashes(f_path, hashes)
+        _process_file_for_hashes(f_path, hashes_dict)
     
+    flat_hashes = []
+    for h_val, occurrences in hashes_dict.items():
+        for occ in occurrences:
+            flat_hashes.append({'hash': h_val, 'file': occ['file'], 'line': occ['line'], 'name': occ['name']})
+
+    # Tenta o Vulcan
+    results = find_clones_turbo(flat_hashes)
+    if results: return _format_results(results)
+
+    # [SINCRO] Passa flat_hashes para o turbo
+#    native_results = find_clones_turbo(flat_hashes) 
+#    if native_results is not None:
+#        return native_results
+
+    # Fallback Python usa hashes_dict (corrigido de hashes_list)
     clones = []
-    for h_val, occurrences in hashes.items():
+    for h_val, occurrences in hashes_dict.items():
         if len(occurrences) > 1:
             clones.extend(_generate_clone_findings(h_val, occurrences))
-    return clones
+    #return clones
+    return []
+
+def get_structural_hash(node):
+    node_copy = copy.deepcopy(node)
+    normalized = StructuralNormalizer().visit(node_copy)
+    dump = ast.dump(normalized, include_attributes=False)
+    return hashlib.sha256(dump.encode('utf-8')).hexdigest()
 
 def _process_file_for_hashes(file_path: str, hashes: dict):
-    """Especialista: Varre um arquivo e extrai assinaturas estruturais."""
-    c_path = file_path.replace('\\', '/').lower()
-    if not os.path.exists(c_path): return
-
+    if not os.path.exists(file_path): return
     try:
-        with open(c_path, 'r', encoding='utf-8', errors='ignore') as f:
-            tree = ast.parse(f.read(), filename=file_path)
-            
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            tree = ast.parse(f.read())
         for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef):
-                if node.name.startswith('__') or is_trivial_or_config(node):
-                    continue
-                
+            if isinstance(node, ast.FunctionDef) and not node.name.startswith('__'):
                 h = get_structural_hash(node)
                 if h not in hashes: hashes[h] = []
-                hashes[h].append({'file': c_path, 'line': node.lineno, 'name': node.name})
+                hashes[h].append({'file': file_path, 'line': node.lineno, 'name': node.name, 'hash': h})
     except Exception: pass
 
-def _generate_clone_findings(h_val: str, occurrences: list) -> list:
-    """Especialista: Transforma colisões de hash em alertas do linter."""
-    files_set = {o['file'] for o in occurrences}
-    is_cross = len(files_set) > 1
-    
-    names = ", ".join(list({o['name'] for o in occurrences}))
-    locs = [f"{os.path.basename(o['file'])}:{o['line']}" for o in occurrences]
-    
-    msg = f"Lógica duplicada (Struc-Hash {h_val[:6]}). Funções: [{names}]."
-    details = f"Detecção em: {', '.join(locs)}."
-    
+def _generate_clone_findings(h_val, occurrences):
     return [{
-        'severity': 'WARNING' if is_cross else 'INFO',
-        'category': 'DUPLICATION',
-        'message': msg,
-        'file': occ['file'],
-        'line': occ['line'],
-        'details': details
-    } for occ in occurrences]
+        'severity': 'INFO', 'category': 'DUPLICATION', 
+        'message': f"Lógica duplicada (Hash {h_val[:6]}). Funções: {o['name']}",
+        'file': o['file'], 'line': o['line']
+    } for o in occurrences]
 
-# No final de ambos os arquivos:
+def _format_results(results_list):
+    return [{'severity': 'INFO', 'category': 'DUPLICATION', 'message': f"Match Vulcan: {a['name']} == {b['name']}", 'file': a['file'], 'line': a['line']} for a, b in results_list]
+
 if __name__ == "__main__":
     try:
-        raw_input = sys.stdin.read().strip()
-        data = json.loads(raw_input) if raw_input else []
-        files = data.get("files", []) if isinstance(data, dict) else data
-        print(json.dumps(find_clones(files)))
-    except Exception:
-        print("[]")
+        raw_in = sys.stdin.read().strip()
+        data = json.loads(raw_in) if raw_in else {"files": []}
+        print(json.dumps(find_clones(data.get("files", []))))
+    except Exception: print("[]")

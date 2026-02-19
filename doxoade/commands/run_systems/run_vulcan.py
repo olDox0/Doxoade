@@ -1,23 +1,23 @@
 # -*- coding: utf-8 -*-
-# doxoade/commands/run_systems/run_vulcan.py (v83.6 Gold Fix)
+# doxoade/commands/run_systems/run_vulcan.py (v84.2 Gold Fix)
 import os
-# Importamos a instância em minúsculo 'vulcan_bridge' (PASC 8.12)
 from ...tools.vulcan.bridge import vulcan_bridge
 
 def apply_vulcan_turbo(script_path: str, globs: dict):
-    """Injeta binário nativo apenas se estiver sincronizado (v83.6)."""
-    script_name = os.path.basename(script_path).replace('.py', '')
+    """Injeta binário nativo com Sincronia de Assinatura v84.2."""
     
-    # FIX: Chamar na instância 'vulcan_bridge', não na classe 'VulcanBridge'
+    # 1. Verifica integridade temporal (Staleness)
     if vulcan_bridge.is_binary_stale(script_path):
-        # O código mudou, ignoramos o binário silenciosamente
         return
 
-    # Tenta carregar o módulo
-    v_mod = vulcan_bridge.get_optimized_module(script_name, script_path)
+    # 2. FIX: Chamada sincronizada com a assinatura (self + 1 arg)
+    v_mod = vulcan_bridge.get_optimized_module(script_path)
+    
     if v_mod:
         from click import echo
-        echo(f"\033[93m🔥 [VULCAN-TURBO] Acelerando lógica de '{script_name}'\033[0m")
+        script_display = os.path.basename(script_path).replace('.py', '')
+        echo(f"\033[93m🔥 [VULCAN-TURBO] Módulo '{script_display}' operando em modo nativo.\033[0m")
+        
         for attr in dir(v_mod):
             if attr.endswith('_vulcan_optimized'):
                 orig = attr.replace('_vulcan_optimized', '')

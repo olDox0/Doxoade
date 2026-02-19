@@ -1,113 +1,72 @@
 # -*- coding: utf-8 -*-
-# doxoade/tools/vulcan/advisor.py
-"""
-Vulcan Advisor - Performance Intelligence v1.0.
-Mineração de telemetria Chronos para identificação de Hot-Paths.
-Compliance: MPoT-4, PASC-6.4, Aegis-10.
-"""
+# doxoade/tools/vulcan/advisor.py (v98.0 Smart-State)
 import os
 import json
-# [DOX-UNUSED] import sqlite3
+# [DOX-UNUSED] from colorama import Fore
 from pathlib import Path
-from typing import List, Dict, Any
+# [DOX-UNUSED] from typing import Any
 from ...database import get_db_connection
 
 class VulcanAdvisor:
-    """Consultor de Otimização: Identifica candidatos baseados em fatos (telemetria)."""
-    
     def __init__(self, project_root: str):
         self.root = Path(project_root).resolve()
-        # [MODO TESTE]
-        self.MIN_HITS = 10         # Aceita rastro nítido
-        self.MIN_CPU_PERCENT = 0.0 # Aceita qualquer carga
-        self.MAX_FILE_SIZE_KB = 50
+        self.bin_dir = self.root / ".doxoade" / "vulcan" / "bin"
+        self.MIN_HITS = 3
 
-    def get_optimization_candidates(self) -> List[Dict[str, Any]]:
+    def get_optimization_candidates(self) -> list:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
-        # [NEXUS FIX] Busca rastro de 'run' (que agora é in-process), ignorando o exit_code
-        query = """
-            SELECT line_profile_data, cpu_percent, working_dir 
-            FROM command_history 
-            ORDER BY id DESC LIMIT 50
-        """
+        # Busca rastro térmico
+        query = "SELECT line_profile_data, working_dir FROM command_history ORDER BY id DESC LIMIT 100"
         try:
             cursor.execute(query)
-            rows = cursor.fetchall()
-        except Exception as e:
-            import logging as _dox_log
-            _dox_log.error(f"[INFRA] get_optimization_candidates: {e}")
-            return []
+            return self._process_telemetry(cursor.fetchall())
         finally: conn.close()
-        return self._process_telemetry_data(rows)
 
-    def _process_telemetry_data(self, rows) -> List[Dict[str, Any]]:
-        aggregated_hits = {}
-        # Normaliza a raiz atual para comparação case-insensitive (Windows)
-        current_root = str(self.root).lower().replace('\\', '/')
-
-        for profile_json, cpu, db_work_dir in rows:
+    def _process_telemetry(self, rows):
+        aggregated = {}
+        for profile_json, db_work_dir in rows:
             if not profile_json: continue
-            data = self._safe_parse_json(profile_json)
-            for item in data:
-                # [FIX VITAL] Normalização Absoluta de Caminho
-                f_raw = item['file'].replace('\\', '/')
-                if not os.path.isabs(f_raw):
-                    abs_f = os.path.abspath(os.path.join(db_work_dir, f_raw))
-                else:
-                    abs_f = f_raw
-                
-                abs_f = abs_f.lower().replace('\\', '/')
-                
-                # Se o arquivo está na sandbox ou no projeto, nós o aceitamos
-                if current_root in abs_f:
-                    key = (abs_f, item['line'])
-                    aggregated_hits[key] = aggregated_hits.get(key, 0) + item['hits']
-        #print(f"aggregated_hits: {aggregated_hits}")
-        return self._filter_safe_targets(aggregated_hits)
-
-    def _filter_safe_targets(self, hits_map) -> List[Dict[str, Any]]:
-        """Aplica leis de quarentena e segurança (Aegis Shield)."""
-        candidates = []
-        processed_files = set()
-
-        for (file_path, line), hits in sorted(hits_map.items(), key=lambda x: x[1], reverse=True):
-            if hits < self.MIN_HITS or file_path in processed_files:
+            try:
+                for item in json.loads(profile_json):
+                    f_raw = item['file'].replace('\\', '/')
+                    abs_f = os.path.abspath(os.path.join(db_work_dir, f_raw)) if not os.path.isabs(f_raw) else f_raw
+                    if os.path.exists(abs_f):
+                        hits = item['hits']
+                        # BÔNUS TOOLS: Bibliotecas internas ganham 3x mais prioridade
+                        if "tools/" in abs_f.replace('\\', '/'):
+                            hits *= 3
+                        aggregated[abs_f] = aggregated.get(abs_f, 0) + hits
+            except Exception as e:
+                import logging as _dox_log
+                _dox_log.error(f"[INFRA] _process_telemetry: {e}")
                 continue
             
-            # PASC-1.3 & 1.6: Verifica se o arquivo é gerenciável
-            if self._is_file_safe_for_vulcan(file_path):
-                candidates.append({
-                    'file': file_path,
-                    'line': line,
-                    'hits': hits,
-                    'reason': f"Hot-Path detectado ({hits} hits em CPU-Bound)."
-                })
-                processed_files.add(file_path)
+        for abs_f, hits in aggregated.items():
+            # Hefesto Boost: Bibliotecas em tools/ ganham bônus de prioridade
+            if "tools/" in abs_f.replace('\\', '/'):
+                aggregated[abs_f] = hits * 2 
+                
+        return self._filter_stale_files(aggregated)
 
-        print(f"candidates: {candidates}")
+    def _filter_stale_files(self, hits_map):
+        candidates = []
+        for file_path, hits in sorted(hits_map.items(), key=lambda x: x[1], reverse=True):
+            if hits < self.MIN_HITS: continue
+            
+            # PASC-2: Se o binário existe e é mais novo que o fonte, pula.
+            if self._is_already_compiled(file_path):
+                continue
+                
+            candidates.append({'file': file_path, 'hits': hits})
         return candidates
 
-    def _is_file_safe_for_vulcan(self, file_path: str) -> bool:
-        p = Path(file_path).resolve()
-        p_str = str(p).lower()
-        if not p.exists(): return False
+    def _is_already_compiled(self, py_path):
+        stem = Path(py_path).stem
+        ext = ".pyd" if os.name == 'nt' else ".so"
+        bins = list(self.bin_dir.glob(f"v_{stem}*{ext}"))
+        if not bins: return False
         
-        # [AEGIS CORE SHIELD] Protege o Doxoade, mas libera a Sandbox
-        if "doxoade/doxoade" in p_str or "doxoade\\doxoade" in p_str:
-            return False 
-        
-        # Libera vulcan_sandbox explicitamente para seus testes
-        if "tests" in p_str and "vulcan_sandbox" not in p_str:
-            return False
-            
-        if any(x in p_str for x in ["venv", "lib/"]): return False
-        return True
-
-    def _safe_parse_json(self, data):
-        try: return json.loads(data)
-        except Exception: return [] # [FIX] Restrito
-
-# Instância exportada para o Vulcan Autopilot
-vulcan_advisor = VulcanAdvisor(os.getcwd())
+        # Compara datas
+        latest_bin = max(os.path.getmtime(b) for b in bins)
+        return os.path.getmtime(py_path) <= latest_bin

@@ -108,11 +108,13 @@ def _finalize_log(findings, logger, root, excludes):
         )
         
 def _calculate_incident_stats(findings: List[Dict[str, Any]]) -> dict:
-    """Especialista de contagem estatística (Expert-Split)."""
+    """Especialista de contagem estatística centralizado (PASC 8.5)."""
     from collections import defaultdict
     stats = defaultdict(lambda: defaultdict(int))
     for f in findings:
         cat = f.get('category', 'UNCATEGORIZED').upper()
+        if cat == 'SYSTEM': continue
+        
         msg = f.get('message', '').lower()
         sub = "geral"
         if "f-string" in msg: sub = "f-string"

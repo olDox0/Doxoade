@@ -1,6 +1,6 @@
 # doxoade/commands/history.py
 import click
-import sqlite3
+import sqlite3 # noqa
 import os
 from colorama import Fore, Style
 from ..database import get_db_connection
@@ -64,8 +64,12 @@ def history(ctx, finding_hash, message, file, category, limit, context, unsolved
             title_mode = "SOLUÇÃO APRENDIDA (RESOLVIDO)"
             color_mode = Fore.GREEN
 
-        # Construção Dinâmica da Query
-        query = f"SELECT * FROM {table} WHERE 1=1"
+        # Whitelist de tabelas para evitar SQL Injection (Apolo Rule)
+        table_map = {"unsolved": "open_incidents", "solved": "solutions"}
+        table = table_map.get("unsolved" if unsolved else "solved")
+
+        query = f"SELECT * FROM {table} WHERE 1=1" # nosec: B608 (Whitelist interna)
+        # ^ Bandit ainda pode reclamar, mas como a fonte é interna (table_map), é seguro.
         params = []
         
         if finding_hash:

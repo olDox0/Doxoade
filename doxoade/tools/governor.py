@@ -4,9 +4,17 @@
 Doxoade Resource Governor - ALB v1.2.
 Agora com Sensibilidade de I/O e Latência.
 """
-import psutil
+#import psutil
 import time
 import os
+
+try:
+    import psutil
+    HAS_PSUTIL = True
+except Exception as e:
+    import logging as _dox_log
+    _dox_log.error(f"[INFRA] unknown: {e}")
+    HAS_PSUTIL = False
 
 class ResourceGovernor:
     def __init__(self):
@@ -53,6 +61,7 @@ class ResourceGovernor:
         
     def get_system_health(self):
         """Coleta métricas com amostragem estratificada (PASC-6.4)."""
+        if not HAS_PSUTIL: return 0.0, 0.0, 0.0
         now = time.time()
         
         # CPU/RAM: Amostragem a cada 1.5 segundos

@@ -20,17 +20,25 @@ class VulcanSafetyGuard(ast.NodeTransformer):
         self.violations = []
 
     def verify_no_pointers(self, pyx_code: str) -> bool:
-        """Regra 1 (v1.3): Aegis Shield calibrado para Python moderno."""
+        """
+        Regra 1 (v1.2): No-Pointer Leak (Aegis Shield).
+        Bloqueia ponteiros C, mas ignora expansão de argumentos Python (* e **).
+        """
         import re
-        # Regex: Detecta tipos C seguidos de '*' (ex: int *, double*), 
-        # mas ignora nomes de argumentos Python (**kwargs, *args)
+        # Regex calibrada: Ignora '*' ou '**' se estiverem colados em nomes de variáveis 
+        # comuns de expansão ou em assinaturas de função.
+        # Captura: tipos C como 'int*' ou 'double *', mas ignora '**kwargs'
         pointer_pattern = r'\b(int|double|float|char|void)\s*\*'
 
         for line in pyx_code.splitlines():
             clean_line = line.split('#')[0]
+            
+            # Se encontrar um padrão de ponteiro real do C:
             if re.search(pointer_pattern, clean_line):
-                if '[:]' not in clean_line: # Permite MemoryViews
-                    self.violations.append(f"Regra 1: Uso de memória bruta em '{line.strip()}'")
+                # Se não for uma MemoryView aceitável ([:]):
+                if '[:]' not in clean_line:
+                    self.violations.append(f"Regra 1 violada: Uso de memória bruta em '{line.strip()}'")
+        
         return len(self.violations) == 0
 
     def visit_BinOp(self, node):

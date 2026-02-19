@@ -1,19 +1,21 @@
 # -*- coding: utf-8 -*-
+# doxoade/commands/save.py
+
 """
-Módulo de Salvamento Seguro e Aprendizado (Gênese V2).
-Responsável por garantir que correções de bugs sejam transformadas em 
-conhecimento persistente no banco de dados.
+Comando Save - v80.1 Gold.
+Gatekeeper Ma'at (Produção) & Anúbis (Infraestrutura).
 """
 
 import sys
-import sqlite3
+import sqlite3 # noqa
 import re
 import os
 import click
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Tuple, Set
+from typing import Dict, Any, Tuple, Set
 from rich.console import Console
-from colorama import Fore 
+from colorama import Fore
+import subprocess
 
 from ..database import get_db_connection
 from ..shared_tools import (
@@ -25,15 +27,21 @@ from .check import run_check_logic
 
 __version__ = "63.3 Alfa (Gold Standard)"
 
-def _get_staged_python_files(git_root: str) -> List[str]:
-    """Retorna uma lista de caminhos absolutos de arquivos .py no staging area."""
-    staged_files_str = _run_git_command(
-        ['diff', '--name-only', '--cached', '--diff-filter=AMR', '--', '*.py'], 
-        capture_output=True
-    )
-    if not staged_files_str:
-        return []
-    return [os.path.join(git_root, f.strip()) for f in staged_files_str.splitlines()]
+def _get_staged_python_files(git_root):
+    """Filtra o Stage contra lixo e arquivos deletados (PASC 3.0)."""
+    # AMR: Added, Modified, Renamed. Ignora Deletados.
+    res = _run_git_command(['diff', '--name-only', '--cached', '--diff-filter=AMR', '--', '*.py'], capture_output=True)
+    if not res: return []
+    
+    from ..dnm import DNM
+    dnm = DNM(git_root)
+    valid = []
+    for f in res.splitlines():
+        p = os.path.normpath(os.path.join(git_root, f.strip())).replace('\\', '/')
+        # Só envia para o tribunal se o arquivo EXISTIR fisicamente
+        if os.path.isfile(p) and not dnm.is_ignored(p):
+            valid.append(p)
+    return valid
 
 def _process_finding_for_learning(cursor: sqlite3.Cursor, finding: sqlite3.Row, 
                                  modified_files: Set[str], new_commit_hash: str, 
@@ -165,65 +173,103 @@ def _abstract_and_learn_template(cursor: sqlite3.Cursor, concrete_finding: Dict[
     return True
 
 @click.command('save')
-@click.pass_context
-@click.argument('message')
+@click.argument('message', required=False)
+@click.option('--archives', '-a', help="Lista arquivos de um commit.")
+@click.option('--remove-commit', '-rc', help="Apaga o último commit.")
 @click.option('--force', is_flag=True, help="Força o commit ignorando erros de qualidade.")
-def save(ctx, message: str, force: bool):
+@click.pass_context
+def save(ctx, message, archives, remove_commit, force):
     """Executa commit seguro com aprendizado automatizado."""
     console = Console()
     project_path = os.getcwd()
     
     # MPoT-5: Inicialização explícita de estado para evitar NameError
-    fix_applied = False 
-    
-    with ExecutionLogger('save', project_path, ctx.params):
-        console.print("[bold cyan]--- [SAVE] Salvamento Seguro e Inteligente ---[/bold cyan]")
+# [DOX-UNUSED]     fix_applied = False 
 
-        # 1. Preparação Git
-        _run_git_command(['add', '.'])
-        status = (_run_git_command(['status', '--porcelain'], capture_output=True) or "").strip()
-        if not status:
-            console.print("[yellow][AVISO] Nada para salvar: working tree limpa.[/yellow]")
+    # --- A. OPERAÇÕES DE HISTÓRICO (OSIRIS) ---
+    if remove_commit or archives:
+        from .git_systems.git_archivist import GitArchivist
+        archivist = GitArchivist(project_path)
+        if remove_commit:
+            if click.confirm(f"{Fore.RED}⚠️ APAGAR commit {remove_commit}?"):
+                success, err = archivist.delete_commit(remove_commit)
+                click.echo(Fore.GREEN + "✔ OK" if success else Fore.RED + f"✘ {err}")
+            return
+        if archives:
+            success, data = archivist.list_commit_assets(archives)
+            if success:
+                for item in sorted(data, key=lambda x: x['size'], reverse=True):
+                    click.echo(f"  {item['size']:>7.1f} KB │ {item['path']}")
             return
 
-        # 2. Portão de Qualidade
+    if not message:
+        click.echo(Fore.RED + "Erro: Mensagem obrigatória para save."); return
+
+    with ExecutionLogger('save', project_path, ctx.params):
+        _run_git_command(['add', '.'])
         git_root = _run_git_command(['rev-parse', '--show-toplevel'], capture_output=True)
-        staged_py = _get_staged_python_files(git_root)
         
-        if staged_py:
-            console.print(f"   > Auditando {len(staged_py)} arquivo(s) Python...")
-            
-            # Executa o check (Ouro v38.8)
-            results = run_check_logic(
-                path='.', fix=False, fast=True, no_cache=True, 
-                clones=False, continue_on_error=True,
-                target_files=staged_py
-            )
-            
-            # Protocolo Lázaro Preventivo: Se tivéssemos aplicado fix, 
-            # verificaríamos 'fix_applied' aqui.
-            if fix_applied:
-                # [Lógica futura para auto-reversão de sintaxe]
-                pass
+        # --- REFRESH DE SINCRO (Ação de Zeus) ---
+        # Usamos a função auxiliar que já filtra arquivos DELETADOS (AMR)
+        staged_prod = _get_staged_python_files(git_root)
+        
+        from ..dnm import DNM
+        dnm = DNM(project_path)
+        
+        # Filtro de Leaks (Anúbis)
+        leaks = [os.path.relpath(f, git_root) for f in staged_prod if dnm.is_ignored(f)]
+        
+        if leaks and not force:
+            console.print("\n[bold yellow]⚖  [ANÚBIS] Vazamento de Infra detectado![/bold yellow]")
+            for l in leaks: console.print(f"   {Fore.RED}✘ {l}")
+            if click.confirm("\nPurificar stage automaticamente?"):
+                for l in leaks: 
+                    subprocess.run(['git', 'rm', '--cached', os.path.join(git_root, l)], capture_output=True)
+                # RE-SINCRONIZA: Atualiza a lista após a limpeza
+                staged_prod = _get_staged_python_files(git_root)
 
-# [DOX-UNUSED]             summary = results.get('summary', {})
-            # O commit só é bloqueado por erros reais (Code Breaking)
+        # --- TRIBUNAL DE MA'AT ---
+        if staged_prod and not force:
+            console.print("   > [MA'AT] Julgando integridade da produção...")
+            # Check Logic agora só vê o que existe no disco
+            results = run_check_logic(path='.', fix=False, fast=True, target_files=staged_prod)
+            
+            from .audit_systems.maat_engine import MaatEngine
+            maat = MaatEngine(project_path)
+            is_stable, maat_findings = maat.run_full_audit(staged_prod)
+            
             blocking = [f for f in results.get('findings', []) if f['severity'] in ['CRITICAL', 'ERROR']]
-            
-            if blocking and not force:
-                console.print("[bold red]\n[ERRO] Bloqueio de Qualidade: Falhas críticas detectadas.[/bold red]")
-                results['findings'] = blocking 
-                _present_results('text', results)
-                console.print(Fore.YELLOW + "\n(Use --force se desejar ignorar estes erros)")
+            if blocking or not is_stable:
+                console.print("\n[bold red]🛑 BLOQUEIO: Regressões detectadas![/bold red]")
+                # FEEDBACK DETALHADO (Solicitado pelo Chefe)
+                if blocking:
+                    _present_results('text', {'summary': results['summary'], 'findings': blocking})
+                
+                if maat_findings:
+                    console.print(f"\n[bold yellow]⚖  ACHADOS DE MA'AT:[/bold yellow]")
+                    for mf in maat_findings:
+                        console.print(f"   [red]✘[/red] {mf['message']} ({os.path.basename(mf['file'])})")
                 sys.exit(1)
-            elif results.get('findings'):
-                 console.print(Fore.GREEN + f"[OK] {len(results['findings'])} avisos detectados (não bloqueantes).")
 
-        # 3. Finalização do Commit
-        _run_git_command(['commit', '-m', message])
+        # --- D. SEPULTAMENTO (COMMIT) ---
+        if _run_git_command(['commit', '-m', message]):
+            console.print("[bold green]✔ Alfa 80.1: Conhecimento sepultado com sucesso.[/bold green]")
         new_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True)
         
         if new_hash:
             _learn_solutions_from_commit(new_hash, project_path)
 
         console.print("[bold green]\n[OK] Alfa 71.10: Commit finalizado e Gênese atualizada.[/bold green]")
+        
+def _verify_succession_integrity():
+    """Garante que as tecnologias citadas no save v94 existam de fato."""
+# [DOX-UNUSED]     from ..tools.vulcan.bridge import vulcan_bridge
+    # 1. Verifica se o Vulcan está operando no Core
+    if not any(f.endswith('.pyd') for f in os.listdir('.doxoade/vulcan/bin')):
+        return False, "Regressão detectada: Binários Vulcan ausentes."
+    
+    # 2. Verifica se o Tribunal de Ma'at está no ar
+    if not os.path.exists('doxoade/commands/audit_systems/maat_engine.py'):
+        return False, "Regressão detectada: Ma'at Engine perdido."
+        
+    return True, "Integridade de Sucessão confirmada."

@@ -1,49 +1,46 @@
+# -*- coding: utf-8 -*-
 # doxoade/cli.py
 """
-Ponto de Entrada Principal (Core Router).
-Implementa Lazy Loading para otimização de RAM (PASC-6.1) e 
-Isolamento de Responsabilidade (MPoT-17).
+Ponto de Entrada Principal (Core Router) - v85.0 Platinum.
+Orquestrador Zeus: Gerenciamento de Comandos e Ciclo de Vida.
+Compliance: OSL-1, PASC-6.1 (Lazy Loading), PASC-8.4.
 """
-import time
 import sys
 import os
+import time
 import click
-# [DOX-UNUSED] from typing import Optional
+import traceback
 from importlib import import_module
-from colorama import init as colorama_init, Fore
-# [DOX-UNUSED] from functools import wraps
-# [DOX-UNUSED] from datetime import datetime
+from colorama import init as colorama_init, Fore, Style
+#from ._version import __version__
 
-
-# 1. Configuração de Ambiente (Bootstrap)
-if sys.stdout.encoding != 'utf-8':
-    sys.stdout.reconfigure(encoding='utf-8')
-
+# --- BOOTSTRAP DE AMBIENTE (OSL-10) ---
 colorama_init(autoreset=True)
+if sys.stdout.encoding != 'utf-8':
+    try: sys.stdout.reconfigure(encoding='utf-8')
+    except Exception as e:
+        import sys as dox_exc_sys
+        _, exc_obj, exc_tb = dox_exc_sys.exc_info()
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        line_number = exc_tb.tb_lineno
+        print(f"\033[0m \033[1m Filename: {fname}   ■ Line: {line_number} \033[31m ■ Exception type: {e} ■ Exception value: {exc_obj} \033[0m")
 
-PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
-PACKAGE_PARENT = os.path.dirname(PACKAGE_DIR)
-if PACKAGE_PARENT not in sys.path:
-    sys.path.insert(0, PACKAGE_PARENT)
 
-__version__ = "63.0 Alfa (Lazy-Gold)"
+# --- MOTOR DE CARREGAMENTO DIFERIDO (LAZY ENGINE) ---
 
-# 2. Gerenciador de Carregamento Diferido (Lazy Engine)
 class DoxoadeLazyGroup(click.Group):
     """
-    Despachante inteligente: Só importa o módulo do comando se ele for invocado.
-    Reduz o tempo de startup em ~80% (PASC-6.1).
+    Despachante de Comandos (PASC-6.7).
+    Reduz pegada de RAM ao carregar módulos apenas sob demanda.
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Mapeamento explícito: 'comando': 'modulo:atributo'
+        # O Mapa da Verdade: Centraliza as rotas para a IA entender o fluxo
         self._lazy_map = {
-# [sicdox]            'agent': 'doxoade.commands.agent:agent_cmd',
-#            'alfagold': 'doxoade.commands.alfagold:alfagold',
             'android': 'doxoade.commands.android:android_group',
             'apicheck': 'doxoade.commands.apicheck:apicheck',
+            'audit': 'doxoade.commands.audit_cmd:audit',
             'auto': 'doxoade.commands.auto:auto',
-# [sicdox]            'brain': 'doxoade.commands.brain:brain',
             'canonize': 'doxoade.commands.canonize:canonize',
             'check': 'doxoade.commands.check:check',
             'clean': 'doxoade.commands.clean:clean',
@@ -66,14 +63,11 @@ class DoxoadeLazyGroup(click.Group):
             'health': 'doxoade.commands.health:health',
             'history': 'doxoade.commands.history:history',
             'ide': 'doxoade.commands.mobile_ide:ide',
-            'ide-setup': 'doxoade.commands.mobile_ide:ide_setup',
             'impact-analysis': 'doxoade.commands.impact_analysis:impact_analysis',
             'init': 'doxoade.commands.init:init',
             'install': 'doxoade.commands.install:install',
             'intelligence': 'doxoade.commands.intelligence:intelligence',
             'kvcheck': 'doxoade.commands.kvcheck:kvcheck',
-#            'lab': 'doxoade.commands.lab:lab',
-#            'lab-ast': 'doxoade.commands.lab_ast:lab_ast',
             'log': 'doxoade.commands.utils:log',
             'maestro': 'doxoade.commands.maestro:maestro',
             'merge': 'doxoade.commands.git_merge:merge',
@@ -82,10 +76,12 @@ class DoxoadeLazyGroup(click.Group):
             'mk': 'doxoade.commands.utils:mk',
             'moddify': 'doxoade.commands.moddify:moddify',
             'pedia': 'doxoade.commands.pedia:pedia',
+            'purge-history': 'doxoade.commands.purge_history:purge_history',
             'python': 'doxoade.commands.python:python',
             'rebuild': 'doxoade.commands.rebuild:rebuild',
             'regression-test': 'doxoade.commands.regression_test:regression_test',
             'release': 'doxoade.commands.git_workflow:release',
+            'rescue': 'doxoade.commands.rescue_cmd:rescue',
             'rewind': 'doxoade.commands.rewind:rewind',
             'risk': 'doxoade.commands.risk:risk',
             'run': 'doxoade.commands.run:run',
@@ -95,17 +91,12 @@ class DoxoadeLazyGroup(click.Group):
             'security': 'doxoade.commands.security:security',
             'self-test': 'doxoade.commands.self_test:self_test',
             'setup-health': 'doxoade.commands.utils:setup_health_cmd',
-            'setup-regression': 'doxoade.commands.utils:setup_regression',
-#            'sicdox': 'doxoade.commands.sicdox:sicdox_group',
             'show-trace': 'doxoade.commands.utils:show_trace',
             'style': 'doxoade.commands.style:style',
             'sync': 'doxoade.commands.git_workflow:sync',
             'telemetry': 'doxoade.commands.telemetry:telemetry',
             'test': 'doxoade.commands.test:test',
-            'test-map': 'doxoade.commands.test_mapper:test_map',
-# [sicdox]            'think': 'doxoade.commands.think:think',
             'timeline': 'doxoade.commands.timeline:timeline',
-            'tutorial': 'doxoade.commands.tutorial:tutorial_group',
             'venv-up': 'doxoade.commands.venv_up:venv_up',
             'verilog': 'doxoade.commands.verilog:verilog',
             'vulcan': 'doxoade.commands.vulcan_cmd:vulcan_group',
@@ -116,134 +107,95 @@ class DoxoadeLazyGroup(click.Group):
         return sorted(self._lazy_map.keys())
 
     def get_command(self, ctx, name):
-        if name not in self._lazy_map:
-            return None
-        
+        if name not in self._lazy_map: return None
         module_path, attr_name = self._lazy_map[name].split(':')
         try:
             mod = import_module(module_path)
             return getattr(mod, attr_name)
         except Exception as e:
-            import sys as _dox_sys, os as _dox_os
-            _, exc_obj, exc_tb = _dox_sys.exc_info()
-            
-            # Navega no traceback para encontrar o erro real no módulo de comando
-            while exc_tb.tb_next:
-                exc_tb = exc_tb.tb_next
-            
-            fname = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            line_number = exc_tb.tb_lineno
-            
-            # Chief-Gold Forensic UI
-            click.echo(f"\033[1;34m[ LAZY-LOAD FAIL ]\033[0m \033[1mCommand: {name}\033[0m")
-            click.echo(f"   \033[31m■ Archive : {fname} (Line: {line_number}) \n   ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}")
-            click.echo(f"   ■ Exception: {type(e).__name__}: {e}\033[0m")
+            self._print_fatal_import(name, e)
             return None
-            
-# 3. Grupo Principal
+
+    def _print_fatal_import(self, cmd_name, e):
+        print(f"\033[31m\n[ FATAL ] Erro ao carregar comando '{cmd_name}'")
+        print(f"   ■ Causa: {e}\033[0m")
+        if '--debug' in sys.argv: traceback.print_exc()
+
+# --- ORQUESTRADOR PRINCIPAL ---
+
 @click.group(cls=DoxoadeLazyGroup, invoke_without_command=True)
-@click.option('--guard', is_flag=True, help="Ativa a verificação de integridade antes da execução.")
+@click.option('--guard', is_flag=True, help="Verificação de integridade Aegis.")
 @click.pass_context
 def cli(ctx, guard):
-    """olDox222 Advanced Development Environment (doxoade) v14"""
+    """olDox222 Advanced Development Environment (doxoade)."""
     ctx.ensure_object(dict)
     
-    # PASC-3: Inicia worker de persistência logo no início
+    # 1. Persistência (Osíris)
     from doxoade.tools.db_utils import start_persistence_worker
     start_persistence_worker()
     
-    # 6.2: Inicialização explícita do banco
+    # 2. Banco de Dados (Ma'at)
     from doxoade.database import init_db
-    try:
-        init_db()
+    try: init_db()
     except Exception as e:
-        click.echo(f"{Fore.RED}Falha crítica no banco: {e}")
+        click.secho(f"Falha na integridade da base: {e}", fg='red')
         sys.exit(1)
 
-    if guard:
-        # PASC-8: Chama a verificação antes de qualquer comando
-        from .commands.hacking import verify_silent
-        if not verify_silent():
-            click.echo(Fore.RED + "Execução bloqueada por falha de integridade.")
-            sys.exit(1)
-
-    if ctx.invoked_subcommand is None:
-        click.echo(ctx.get_help())
-    else:
-        # Chronos: Importado localmente para economizar RAM
+    # 3. Telemetria (Chronos)
+    if ctx.invoked_subcommand:
         from doxoade.chronos import chronos_recorder
         ctx.obj['start_time'] = time.perf_counter()
-        try:
-            chronos_recorder.start_command(ctx)
-        except Exception as e:
-            _, exc_obj, exc_tb = sys.exc_info()
-            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            line_number = exc_tb.tb_lineno
-            print(f"\033[0m \033[1m \nFilename: {fname}   \n■ Line: {line_number} \033[31m \n■ Exception type: {e} . . .  \n■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))} \033[0m")
+        chronos_recorder.start_command(ctx)
+    else:
+        click.echo(ctx.get_help())
 
 @cli.result_callback()
 def process_result(result, **kwargs):
-    """Encerramento de Telemetria e Auditoria Chronos."""
+    """Sela a execução e finaliza telemetria (PASC-8.20)."""
     ctx = click.get_current_context()
     if ctx.obj and 'start_time' in ctx.obj:
         duration_ms = (time.perf_counter() - ctx.obj['start_time']) * 1000
         exit_code = 0 if sys.exc_info()[0] is None else 1
-        
         from doxoade.chronos import chronos_recorder
         try:
             chronos_recorder.end_command(exit_code, duration_ms)
         except Exception as e:
-            _, exc_obj, exc_tb = sys.exc_info()
+            import sys as dox_exc_sys
+            _, exc_obj, exc_tb = dox_exc_sys.exc_info()
             fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
             line_number = exc_tb.tb_lineno
-            print(f"\033[0m \033[1m \nFilename: {fname}   \n■ Line: {line_number} \033[31m \n■ Exception type: {e} . . .  \n■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))} \033[0m")
+            print(f"\033[0m \033[1m Filename: {fname}   ■ Line: {line_number} \033[31m ■ Exception type: {e} ■ Exception value: {exc_obj} \033[0m")
 
-# Comandos de Diagnóstico do Core (Lazy inside commands/utils)
-@cli.command('self-diagnose')
-def self_diagnose():
-    from .diagnostic.check_diagnose import verificar_integridade_sondas
-    verificar_integridade_sondas()
-
-@cli.command('directory-diagnose')
-def dir_diagnose_cmd():
-    from .diagnostic.directory_diagnose import executar_diagnostico_diretorio
-    if executar_diagnostico_diretorio():
-        click.echo(f"{Fore.GREEN}\n[OK] Infraestrutura de diretórios validada.")
-    else:
-        click.echo(f"{Fore.RED}\n[FALHA] O sistema se perde em subpastas.")
-
-#@click.group('sicdox')
-#def sicdox():
-#    """Sistemas Cognitivos do Doxoade: Unificação de IA e Automação."""
-#    pass
-#
-## Adicionamos os subcomandos ao grupo
-#@sicdox.command('directory')
-#@click.argument('path', default='.')
-#def sicdox_directory(path):
-#    """Audita a percepção de pastas do SiCDox."""
-#    from .diagnostic.directory_diagnose import auditar_percepcao_espacial
-#    auditar_percepcao_espacial(path)
+# --- FUNÇÃO DE ENTRADA (BOOTSTRAP) ---
 
 def main():
-    """Wrapper de execução blindado com encerramento de logs."""
-    from doxoade.tools.db_utils import stop_persistence_worker
+    """Wrapper blindado com Injeção Vulcan (Hefesto)."""
+    
+    # 1. Prioridade Vulcan (PASC-6.4)
+    project_root = os.getcwd()
+    vulcan_bin = os.path.join(project_root, ".doxoade", "vulcan", "bin")
+    if os.path.exists(vulcan_bin) and vulcan_bin not in sys.path:
+        sys.path.insert(0, vulcan_bin)
+
     try:
         cli(obj={})
     except KeyboardInterrupt:
-        click.echo(f"{Fore.YELLOW}\n[!] Interrupção manual. Finalizando...")
+        click.secho("\n[!] Operação cancelada pelo usuário.", fg='yellow')
         sys.exit(130)
-    except Exception as e:
-        _, exc_obj, exc_tb = sys.exc_info()
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        line_number = exc_tb.tb_lineno
-        print(f"\033[0m \033[1m \nFilename: {fname}   \n■ Line: {line_number} \033[31m \n■ Exception type: {e} . . .  \n■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))} \033[0m")
+# [DOX-UNUSED]     except Exception as e:
+        # PASC-1.1: Captura o rastro completo antes de enviar para o resgate
+        import traceback
+        err_full_text = traceback.format_exc() 
+        
         from doxoade.rescue import analyze_crash
-        analyze_crash(e)
+        print(f"\n{Fore.RED}{Style.BRIGHT}[ NUCLEUS CRASH ]")
+        
+        # Correção: Passa o texto formatado, não o objeto de exceção
+        analyze_crash(err_full_text) 
         sys.exit(1)
     finally:
-        # GARANTIA GOLD: Esvazia o buffer de logs antes de fechar o processo
+        from doxoade.tools.db_utils import stop_persistence_worker
         stop_persistence_worker()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

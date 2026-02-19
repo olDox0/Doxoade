@@ -178,5 +178,15 @@
     "title": "Validação em Sombra (Shadowing)",
     "date": "2026-02-01",
     "content": "Mecanismo de teste onde a versão Python e a versão Vulcano rodam simultaneamente com os mesmos inputs para garantir que a otimização não alterou a lógica do programa."
+  },
+  "anubis": {
+    "title": "Protocolo Anúbis (Purificação do Limbo)",
+    "date": "2026-02-14",
+    "content": "Sistema de interceptação de pré-sepultamento (Pre-commit). Verifica vazamentos de infraestrutura no Stage area. Se um arquivo marcado como ignorado pelo DNM for detectado no commit, o Anúbis oferece a purificação automática (git rm --cached), preservando o disco mas limpando o histórico."
+  },
+  "maat_v1": {
+    "title": "Tribunal de Ma'at (Sincronia de Invariantes)",
+    "date": "2026-02-14",
+    "content": "Evolução do Check. Atua como Gatekeeper no comando Save. Avalia o 'Peso do Coração' (Bytes/Linhas) e a 'Verdade do Silício' (Paridade SIMD). Bloqueia a persistência se o score arquitetural for < 80."
   }
 }

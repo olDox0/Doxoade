@@ -1,97 +1,64 @@
-# -*- coding: utf-8 -*-
-# doxoade/tools/vulcan/compiler.py (v82.9 Gold)
-import os
-import sys
-import subprocess
-import shutil
+# doxoade/tools/vulcan/compiler.py
+import os, sys, subprocess, shutil
 from pathlib import Path
-from colorama import Fore
 
 class VulcanCompiler:
+    _cached_env = None # Cache de Classe (Pitstop)
+
     def __init__(self, env):
         self.env = env
 
-    def compile(self, module_name: str):
-        foundry_path = self.env.foundry.resolve()
-        setup_path = foundry_path / "setup_tmp.py"
+    def _prepare_pitstop_env(self):
+        """Prepara o toolkit GCC apenas uma vez (Hefesto)."""
+        if VulcanCompiler._cached_env is not None:
+            return VulcanCompiler._cached_env
+
+        # Localiza w64devkit dentro do projeto
+        core_root = Path(__file__).resolve().parents[3]
+        gcc_exe = core_root / "opt" / "w64devkit" / "bin" / "gcc.exe"
         
-        # 1. SETUP DE COMPILAÇÃO
+        env = os.environ.copy()
+        if gcc_exe.exists():
+            bin_dir = str(gcc_exe.parent)
+            env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
+            env["CC"] = "gcc"
+            env["CXX"] = "g++"
+            env["DISTUTILS_USE_SDK"] = "1"
+            env["PY_VULCAN_PITSTOP"] = "1"
+            
+        VulcanCompiler._cached_env = env
+        return env
+
+    def compile(self, module_name: str):
+        """Compilação otimizada com flags de silício (-O3)."""
+        build_env = self._prepare_pitstop_env()
+        foundry_path = self.env.foundry.resolve()
+        
+        # Setup Dinâmico focado em performance
         setup_content = f"""
 from setuptools import setup, Extension
 from Cython.Build import cythonize
-import numpy as np
-setup(
-    ext_modules=cythonize("{module_name}.pyx", language_level=3),
-    include_dirs=[np.get_include()]
-)
+ext = Extension("{module_name}", ["{module_name}.pyx"], 
+                extra_compile_args=['-O3', '-ffast-math', '-march=native'])
+setup(ext_modules=cythonize(ext, language_level=3))
 """
-        setup_path.write_text(setup_content, encoding='utf-8')
+        (foundry_path / "setup_tmp.py").write_text(setup_content, encoding='utf-8')
 
-        # 2. CONFIGURAÇÃO DE AMBIENTE (BATTERIES INCLUDED)
-        core_root = Path(__file__).resolve().parents[3]
-        doxo_python = core_root / "venv" / "Scripts" / "python.exe" if os.name == 'nt' else sys.executable
-        opt_bin = core_root / "opt" / "w64devkit" / "bin"
+        # Comando de compilação sem carregar shell pesado
+        cmd = [sys.executable, "setup_tmp.py", "build_ext", "--inplace"]
+        if os.name == 'nt': cmd.append("--compiler=mingw32")
 
-        build_env = os.environ.copy()
-        build_env["PYTHONPATH"] = str(core_root) + os.pathsep + build_env.get("PYTHONPATH", "")
+        res = subprocess.run(cmd, cwd=str(foundry_path), env=build_env, 
+                             capture_output=True, text=True)
         
-        # FORÇA O GCC (MinGW) NO WINDOWS
-        if os.name == 'nt' and opt_bin.exists():
-            build_env["PATH"] = str(opt_bin) + os.pathsep + build_env["PATH"]
-            # Variáveis que o setuptools/distutils respeitam para ignorar MSVC
-            build_env["CC"] = "gcc"
-            build_env["CXX"] = "g++"
-
-        cmd = [str(doxo_python), "setup_tmp.py", "build_ext", "--inplace"]
-        
-        # Adiciona a flag de compilador MingW32 explicitamente no Windows
-        if os.name == 'nt' and opt_bin.exists():
-            cmd.append("--compiler=mingw32")
-
-        try:
-            res = subprocess.run(
-                cmd, cwd=str(foundry_path), env=build_env,
-                capture_output=True, text=True, encoding='utf-8', errors='replace'
-            )
-
-            if res.returncode != 0:
-                print(f"{Fore.RED}   ✘ Erro de Compilação em {module_name}:")
-                # Pega a essência do erro do compilador
-                err = res.stderr
-                if "required" in err and "Visual C++" in err:
-                    print(f"{Fore.YELLOW}     [!] O Python ignorou o GCC e buscou MSVC. Tentando bypass alternativo...")
-                else:
-                    lines = [l for l in err.splitlines() if 'error:' in l.lower()][-3:]
-                    for l in lines: print(f"     {Fore.YELLOW}{l}")
-                return False
-
-            return self._promote_binary(module_name)
-        except Exception as e:
-            from traceback import print_tb as exc_trace
-            _, exc_obj, exc_tb = sys.exc_info()
-            print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
-            exc_trace(exc_tb)
-            print(f"{Fore.RED}   ✘ Falha na Forja: {e}")
+        if res.returncode != 0:
             return False
+        return self._promote_binary(module_name)
 
-    def _promote_binary(self, module_name):
-        # ... (lógica de move original preservada)
+    def _promote_binary(self, name):
+        # Lógica de movimentação para .doxoade/vulcan/bin
         ext = ".pyd" if os.name == 'nt' else ".so"
-        for file in self.env.foundry.glob(f"{module_name}*{ext}"):
-            dest = self.env.bin_dir / f"{module_name}{ext}"
-            try:
-                if dest.exists():
-                    temp = dest.with_suffix('.old_trash')
-                    if temp.exists(): temp.unlink()
-                    os.rename(str(dest), str(temp))
-                shutil.move(str(file), str(dest))
-                return True
-            except Exception as e:
-                import logging as _dox_log
-                import sys as exc_sys
-                from traceback import print_tb as exc_trace
-                _, exc_obj, exc_tb = exc_sys.exc_info()
-                print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
-                exc_trace(exc_tb)
-                _dox_log.error(f"[INFRA] _promote_binary: {e}")
+        for f in self.env.foundry.glob(f"{name}*{ext}"):
+            shutil.move(str(f), str(self.env.bin_dir / f"{name}{ext}"))
+            return True
         return False

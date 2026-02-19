@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
+# doxoade/commands/intelligence_utils.py
 """
 Support_Utils para Intelligence (PASC 1.2 / MPoT 17).
 Foco: Extração de Metadados de Documentação e Análise de Fluxo de IO.
 """
-
 import os
 import ast
 import re
@@ -16,31 +16,42 @@ IO_KEYWORDS = {'open', 'read', 'write', 'load', 'dump', 'print', 'input', 'get',
 IO_MODULES = {'os', 'sys', 'pathlib', 'shutil', 'subprocess', 'socket', 'requests', 'json', 'toml'}
 
 def get_ignore_spec(root: str):
+    """
+    Carrega especificações de ignorar do pyproject.toml ou defaults (PASC 8.13/10).
+    """
     import toml
     import pathspec
+    
+    # Padrões obrigatórios de sobrevivência (Sempre ignorar)
+    default_patterns = [
+        '.git/', '__pycache__/', 'venv/', '.venv/', 
+        '*.pyc', '.vscode/', '.idea/', 'dist/', 'build/',
+        '*.bak', 'recovery_zone/', 'chief_dossier.json'
+    ]
+    
     config_path = os.path.join(root, "pyproject.toml")
-    if not os.path.exists(config_path): return None
-    try:
-        config = toml.load(config_path)
-        patterns = config.get("tool", {}).get("doxoade", {}).get("ignore", [])
-        return pathspec.PathSpec.from_lines('gitwildmatch', patterns) if patterns else None
-    except Exception as e:
-        from traceback import print_tb as exc_trace
-        _, exc_obj, exc_tb = sys.exc_info()
-        print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
-        exc_trace(exc_tb)
+    patterns = default_patterns.copy()
 
-        _print_forensic("get_ignore_spec", e)
-    return None
+    if os.path.exists(config_path):
+        try:
+            config = toml.load(config_path)
+            # Busca em tool.doxoade.ignore
+            toml_patterns = config.get("tool", {}).get("doxoade", {}).get("ignore", [])
+            if toml_patterns:
+                patterns.extend(toml_patterns)
+        except Exception as e:
+            _print_forensic("get_ignore_spec_toml", e)
+
+    return pathspec.PathSpec.from_lines('gitwildmatch', patterns)
 
 class ChiefInsightVisitor(ast.NodeVisitor):
     def __init__(self):
         self.stats = {
             "classes": [], "functions": [], 
             "imports": {"stdlib": [], "external": []},
-            "complexities": [], "mpot_4_violations": 0
+            "complexities": [], "mpot_4_violations": 0, "docstrings": {}
         }
-        
+
     def _detect_io_calls(self, node: ast.AST) -> List[str]:
         """Rastreia chamadas de IO dentro da função (PASC 8.2)."""
         io_found = set()
@@ -70,13 +81,46 @@ class ChiefInsightVisitor(ast.NodeVisitor):
             "io_flow": self._detect_io_calls(node) # Novo: Rastreio de Fluxo
         })
 
-    def visit_FunctionDef(self, node: ast.FunctionDef):
-        self._analyze_func(node)
+    def visit_FunctionDef(self, node):
+        doc = ast.get_docstring(node) or ""
+        self.stats["functions"].append(node.name)
+        if doc:
+            self.stats["docstrings"][node.name] = doc
+        
+        # Lógica de complexidade simplificada (exemplo)
+        complexity = len([n for n in ast.walk(node) if isinstance(n, (ast.If, ast.For, ast.While, ast.ExceptHandler))]) + 1
+        self.stats["complexities"].append(complexity)
+        
+        # PASC 1.3 / OSL 4 (Expert-Split)
+        if len(node.body) > 60:
+            self.stats["mpot_4_violations"] += 1
         self.generic_visit(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
         self._analyze_func(node)
         self.generic_visit(node)
+
+    # REINTEGRANDO LOGICA RESGATADA DO DOSSIER (22/01)
+    def visit_ClassDef(self, node):
+        methods = [n.name for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        self.stats['classes'].append({'name': node.name, 'methods_count': len(methods)})
+        self.generic_visit(node)
+
+    def visit_Import(self, node):
+        for alias in node.names:
+            self._sort_import(alias.name)
+
+    def visit_ImportFrom(self, node):
+        if node.module:
+            self._sort_import(node.module)
+
+    def _sort_import(self, name):
+        """Separa stdlib de externos (PASC 6.1)."""
+        root_mod = name.split('.')[0]
+        if root_mod in sys.builtin_module_names or root_mod in ['os', 'sys', 'ast', 'json', 're', 'time']:
+            self.stats["imports"]["stdlib"].append(name)
+        else:
+            self.stats["imports"]["external"].append(name)
 
 def analyze_document(file_path: str, ext: str) -> Dict[str, Any]:
     """Extrai dados ricos de documentação (PASC 3.2 / 8.3)."""
@@ -113,3 +157,80 @@ def _print_forensic(func_name: str, e: Exception):
     line_n = exc_tb.tb_lineno if exc_tb else 0
     print(f"\033[1;34m\n[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: {func_name}\033[0m")
     print(f"\033[31m    ■ Type: {type(e).__name__} | Value: {e}\033[0m")
+    
+class SemanticAnalyzer:
+    """Extrai a estrutura lógica para tokens de IA (OSL 4 / PASC 8.10)."""
+    def __init__(self, code):
+        self.code = code
+        try:
+            self.tree = ast.parse(code)
+        except Exception as e:
+            import sys as _dox_sys, os as _dox_os
+            exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
+            f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            line_n = exc_tb.tb_lineno
+            print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: __init__\033[0m")
+            print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
+            self.tree = None
+
+    def get_map(self):
+        if not self.tree: return {"role": "CORRUPT_SOURCE"}
+        
+        # Identifica o papel do arquivo (God Assignment)
+        imports = [n.names[0].name for n in ast.walk(self.tree) if isinstance(n, ast.Import)]
+        
+        return {
+            "role": self._infer_role(imports),
+            "classes": [n.name for n in ast.walk(self.tree) if isinstance(n, ast.ClassDef)],
+            "exported_symbols": [n.name for n in ast.walk(self.tree) if isinstance(n, ast.FunctionDef) if not n.name.startswith('_')],
+            "complexity_index": len([n for n in ast.walk(self.tree) if isinstance(n, (ast.If, ast.For, ast.While))])
+        }
+
+    def _infer_role(self, imports):
+        if 'click' in imports: return "ZEUS_CLI"
+        if 'socket' in imports or 'requests' in imports: return "POSEIDON_NET"
+        if 'sqlite3' in imports: return "HADES_DB"
+        return "GENERIC_LOGIC"
+
+    def get_summary(self):
+        """Retorna um mapa simplificado da 'alma' do arquivo."""
+        if not self.tree: 
+            return {"status": "corrupt", "classes": [], "functions": [], "complexity": 0}
+        
+        return {
+            "status": "stable",
+            "classes": [n.name for n in ast.walk(self.tree) if isinstance(n, ast.ClassDef)],
+            "functions": [n.name for n in ast.walk(self.tree) if isinstance(n, ast.FunctionDef)],
+            "complexity": len([n for n in ast.walk(self.tree) if isinstance(n, (ast.If, ast.For, ast.While))])
+        }
+
+    def get_docstrings(self):
+        """Mapeia docstrings a símbolos para entendimento contextual."""
+        docs = {}
+        if not self.tree: return docs
+        for node in ast.walk(self.tree):
+            if isinstance(node, (ast.FunctionDef, ast.ClassDef, ast.Module)):
+                doc = ast.get_docstring(node)
+                if doc:
+                    name = getattr(node, 'name', 'module_root')
+                    docs[name] = {"intent": doc.split('\n')[0], "full_doc": doc}
+        return docs
+        
+class NexusThothMapper:
+    """Mapeia a topologia do código para o panteão Doxoade (AI-Ready)."""
+    GOD_MAP = {
+        "Zeus": {"keywords": ["cli", "main", "orchestrator"], "imports": ["click"]},
+        "Poseidon": {"keywords": ["stream", "socket", "io", "flow"], "imports": ["asyncio", "socket"]},
+        "Hades": {"keywords": ["db", "storage", "cache"], "imports": ["sqlite3", "json"]},
+        "Atena": {"keywords": ["logic", "architecture", "nexus"], "imports": ["abc"]},
+        "Anúbis": {"keywords": ["check", "security", "audit"], "imports": ["hashlib", "re"]}
+    }
+
+    @classmethod
+    def identify(cls, file_path, imports):
+        name = file_path.lower()
+        for god, criteria in cls.GOD_MAP.items():
+            if any(k in name for k in criteria["keywords"]) or \
+               any(imp in imports for imp in criteria["imports"]):
+                return god
+        return "Dionísio"

@@ -54,6 +54,7 @@ def _run_legacy_audit(rel_path: str, limit: int, show_code: bool, search_moved: 
     from ..tools.git import _get_file_history_metadata, _get_historical_content
     from ..tools.analysis import _extract_function_signatures, _get_function_source
     from .search import _search_in_code_stream 
+#    from .search_systems.search_engine import _search_code_logic as _search_in_code_stream
     from ..shared_tools import _find_project_root
 
     current_content = ""

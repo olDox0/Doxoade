@@ -45,7 +45,12 @@ def run_git_command(args: list) -> Optional[str]:
 def analyze_crash(traceback_text: str) -> Dict[str, Any]:
     """Extracts forensic metadata from traceback (MPoT-5)."""
     if not traceback_text:
-        raise ValueError("Lazarus Failure: Traceback text is required.")
+        logging.debug("Lazarus Failure: Traceback text is required.")
+        return {}
+#        raise ValueError("Lazarus Failure: Traceback text is required.")
+
+    if not isinstance(traceback_text, str):
+        traceback_text = str(traceback_text)
 
     lines = traceback_text.splitlines()
     crash_info = {'file': None, 'line': None, 'error': lines[-1] if lines else "Unknown Error"}

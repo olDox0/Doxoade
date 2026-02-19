@@ -58,5 +58,10 @@
     "title": "Ciclo Ouroboros",
     "date": "2025-12-22",
     "content": "O loop de auto-aperfeiçoamento do Agente: 1. Gera Hipótese -> 2. Cria Teste Unitário -> 3. Executa -> 4. Se passar, treina o cérebro com o próprio código gerado."
+  },
+  "history_surgery": {
+    "title": "Cirurgia de Histórico (Protocolo Osíris)",
+    "date": "2026-02-14",
+    "content": "A capacidade de reescrever o passado sem corromper o presente. Implementado via GitArchivist, permite a remoção cirúrgica de arquivos de commits enterrados (HEAD) e o desfazimento de sepultamentos (Soft Reset) para correções de última hora."
   }
 }

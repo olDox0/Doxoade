@@ -154,3 +154,13 @@ def _format_timestamp(iso_str):
         return dt_local.strftime("%Y-%m-%d %H:%M:%S")
     except Exception: return iso_str
     except ValueError: return iso_str
+    
+def _print_maat_summary(findings, score):
+    """Interface de Ma'at: O Peso do Coração contra a Pena."""
+    from colorama import Fore, Style, Back
+    
+    print("\n" + Back.WHITE + Fore.BLACK + f" ⚖  SENTENÇA DE MA'AT: {score}/100 " + Style.RESET_ALL)
+    
+    for f in findings:
+        prefix = f"{Fore.RED}[REGRESSÃO]{Fore.RESET}" if f['severity'] == 'CRITICAL' else f"{Fore.YELLOW}[ALERTA]{Fore.RESET}"
+        print(f"  {prefix} {f['category']}: {f['message']}")
