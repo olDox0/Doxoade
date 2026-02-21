@@ -19,11 +19,13 @@ colorama_init(autoreset=True)
 if sys.stdout.encoding != 'utf-8':
     try: sys.stdout.reconfigure(encoding='utf-8')
     except Exception as e:
-        import sys as dox_exc_sys
-        _, exc_obj, exc_tb = dox_exc_sys.exc_info()
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         line_number = exc_tb.tb_lineno
-        print(f"\033[0m \033[1m Filename: {fname}   ■ Line: {line_number} \033[31m ■ Exception type: {e} ■ Exception value: {exc_obj} \033[0m")
+        print(f"\033[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+        exc_trace(exc_tb)
 
 
 # --- MOTOR DE CARREGAMENTO DIFERIDO (LAZY ENGINE) ---
@@ -113,6 +115,13 @@ class DoxoadeLazyGroup(click.Group):
             mod = import_module(module_path)
             return getattr(mod, attr_name)
         except Exception as e:
+            import sys as exc_sys
+            from traceback import print_tb as exc_trace
+            _, exc_obj, exc_tb = exc_sys.exc_info()
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            line_number = exc_tb.tb_lineno
+            print(f"\033[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+            exc_trace(exc_tb)
             self._print_fatal_import(name, e)
             return None
 
@@ -139,6 +148,13 @@ def cli(ctx, guard):
     try: init_db()
     except Exception as e:
         click.secho(f"Falha na integridade da base: {e}", fg='red')
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        line_number = exc_tb.tb_lineno
+        print(f"\033[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+        exc_trace(exc_tb)
         sys.exit(1)
 
     # 3. Telemetria (Chronos)
@@ -160,11 +176,14 @@ def process_result(result, **kwargs):
         try:
             chronos_recorder.end_command(exit_code, duration_ms)
         except Exception as e:
-            import sys as dox_exc_sys
-            _, exc_obj, exc_tb = dox_exc_sys.exc_info()
+            import sys as exc_sys
+            from traceback import print_tb as exc_trace
+            _, exc_obj, exc_tb = exc_sys.exc_info()
             fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
             line_number = exc_tb.tb_lineno
-            print(f"\033[0m \033[1m Filename: {fname}   ■ Line: {line_number} \033[31m ■ Exception type: {e} ■ Exception value: {exc_obj} \033[0m")
+            print(f"\033[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+            exc_trace(exc_tb)
+
 
 # --- FUNÇÃO DE ENTRADA (BOOTSTRAP) ---
 
@@ -193,6 +212,14 @@ def main():
         # Correção: Passa o texto formatado, não o objeto de exceção
         analyze_crash(err_full_text) 
         sys.exit(1)
+    except Exception as e:
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        line_number = exc_tb.tb_lineno
+        print(f"\033[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+        exc_trace(exc_tb)
     finally:
         from doxoade.tools.db_utils import stop_persistence_worker
         stop_persistence_worker()

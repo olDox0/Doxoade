@@ -19,22 +19,23 @@ class MkEngine:
         self.stack = [(-1, self.base_path)]
 
     def _process_single_item(self, indent, raw_name):
-        """Cria arquivos ou pastas respeitando a indentação do arquivo de arquitetura."""
-        while self.stack and self.stack[-1][0] >= indent:
+        """Gerencia a pilha de diretórios com proteção de escopo (OSL-1)."""
+        # Remove da pilha qualquer diretório que tenha indentação maior ou igual à atual
+        while len(self.stack) > 1 and self.stack[-1][0] >= indent:
             self.stack.pop()
 
         name, content = clean_path_and_content(raw_name)
         parent_path = self.stack[-1][1]
         full_path = os.path.normpath(os.path.join(parent_path, name))
 
-        if is_directory(name):
+        if is_directory(raw_name):
             os.makedirs(full_path, exist_ok=True)
+            # Só adiciona na pilha se for um diretório para servir de pai para os próximos
             self.stack.append((indent, full_path))
             return full_path, "Diretório"
         else:
-            parent_dir = os.path.dirname(full_path)
-            if parent_dir: os.makedirs(parent_dir, exist_ok=True)
-            #os.makedirs(os.path.dirname(full_path), exist_ok=True)
+            # Garante que a pasta pai do arquivo exista
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
             with open(full_path, 'w', encoding='utf-8') as f:
                 f.write(content)
             return full_path, "Arquivo"
