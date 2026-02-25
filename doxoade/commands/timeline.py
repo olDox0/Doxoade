@@ -1,8 +1,7 @@
 import click
 import sqlite3
-from colorama import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style
 from ..database import get_db_connection
-
 @click.command('timeline')
 @click.option('-n', '--limit', default=10, help="Número de eventos.")
 @click.option('--full', is_flag=True, help="Mostra o diff completo das alterações.")
@@ -41,5 +40,4 @@ def timeline(limit, full):
                     # Indenta o diff para ficar bonito
                     diff_view = "\n".join(["      " + l for l in change['diff_content'].splitlines()])
                     click.echo(Fore.WHITE + Style.DIM + diff_view)
-
     conn.close()

@@ -4,9 +4,7 @@ import os
 import ast
 from datetime import datetime
 from ..intelligence_utils import SemanticAnalyzer, NexusThothMapper, ChiefInsightVisitor
-
 CRITICAL_THRESHOLD = datetime(2026, 2, 14, 21, 0, 0)
-
 def analyze_file_chief(file_path: str, project_root: str, docs=False, source=False) -> dict:
     """Motor de Scan Nexus v100.1 (PASC 1.3 Compliance)."""
     rel_path = os.path.relpath(file_path, project_root).replace('\\', '/')
@@ -16,14 +14,11 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
         "size": os.path.getsize(file_path),
         "god_assignment": "Unknown"
     }
-
     if not file_path.endswith('.py'):
         return data
-
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
-
         # 1. Análise Semântica
         sem = SemanticAnalyzer(content)
         data.update(sem.get_summary())
@@ -33,19 +28,16 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
         visitor.visit(sem.tree)
         all_imports = visitor.stats["imports"]["stdlib"] + visitor.stats["imports"]["external"]
         data["god_assignment"] = NexusThothMapper.identify(rel_path, all_imports)
-
         # 3. Arqueologia de 3 Camadas (Protocolo Osíris)
         backups = _get_safe_backups(file_path)
         if backups:
             data["archaeology_layers"] = _perform_triple_diff(content, backups)
-
         if source: data["source_minified"] = content[:5000] # Token Optimization
         
     except Exception as e:
         data["error"] = str(e)
     
     return data
-
 def _get_safe_backups(file_path, count=3):
     """Localiza os backups mais recentes dentro da zona de segurança (Janela Ma'at)."""
     candidates = []
@@ -55,7 +47,6 @@ def _get_safe_backups(file_path, count=3):
     if os.path.exists(npp_dir):
         base = os.path.basename(file_path)
         potentials.extend([os.path.join(npp_dir, f) for f in os.listdir(npp_dir) if f.startswith(base)])
-
     for p in potentials:
         if os.path.exists(p):
             mtime = datetime.fromtimestamp(os.path.getmtime(p))
@@ -67,21 +58,18 @@ def _get_safe_backups(file_path, count=3):
     candidates.sort(key=lambda x: x[0], reverse=True)
     return [c[1] for c in candidates[:count]]
 #    return [] # Implementação detalhada enviada no bloco anterior
-
 def _perform_triple_diff(current_code, backup_list):
     """Compara o código atual com até 3 backups (Protocolo Osíris)."""
     diff_report = []
     try:
         curr_tree = ast.parse(current_code)
         curr_funcs = {n.name: ast.unparse(n) for n in ast.walk(curr_tree) if isinstance(n, ast.FunctionDef)}
-
         for i, b_path in enumerate(backup_list):
             layer = _analyze_layer(i + 1, b_path, curr_funcs)
             if layer:
                 diff_report.append(layer)
     except Exception: pass
     return diff_report
-
 def _analyze_layer(level, b_path, curr_funcs):
     """Analisa uma única camada de backup contra o código atual."""
     try:
@@ -97,7 +85,6 @@ def _analyze_layer(level, b_path, curr_funcs):
             "date": datetime.fromtimestamp(mtime).isoformat(),
             "lost_logic": []
         }
-
         # Detecta o que foi removido (Logic Loss)
         for name, code in b_funcs.items():
             if name not in curr_funcs and not name.startswith('_'):

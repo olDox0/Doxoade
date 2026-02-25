@@ -6,10 +6,9 @@ PASC-6: Verbosidade em importação e funcionalidade (Otimização de RAM).
 import os
 from json import dumps
 from click import command, option, echo, argument, Path
-from colorama import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style
 from ..shared_tools import ExecutionLogger
 from ..diagnostic.inspector import SystemInspector
-
 @command('diagnose')
 @argument('path', required=False, type=Path(exists=True))
 @option('--json', 'as_json', is_flag=True, help="Saída em formato JSON.")
@@ -36,7 +35,6 @@ def diagnose(path: str, as_json: bool, detailed: bool, show_all: bool,
         if as_json:
             echo(dumps(data, indent=2))
             return
-
         # Se o foco for um arquivo específico e o modo for código, podemos ser mais diretos
         if not (path and os.path.isfile(path) and show_code):
             _render_env(data['environment'])
@@ -45,7 +43,6 @@ def diagnose(path: str, as_json: bool, detailed: bool, show_all: bool,
         
         if not path:
             _render_integrity(data['integrity'])
-
 def _render_env(env: dict):
     echo(f"{Fore.WHITE}{Style.BRIGHT}\n🖥️  AMBIENTE DE EXECUÇÃO{Style.RESET_ALL}")
     echo(f"   OS:       {Fore.YELLOW}{env['os']} {env['release']} ({env['arch']}){Style.RESET_ALL}")
@@ -56,7 +53,6 @@ def _render_env(env: dict):
     v_color = Fore.GREEN if v_active else Fore.RED
     v_text = 'ATIVO' if v_active else 'INATIVO'
     echo(f"   VENV:     {v_color}{v_text}{Style.RESET_ALL} (...{path_display})")
-
 def _render_git(git: dict, detailed: bool, show_all: bool, show_max: bool, 
                 show_code: bool, only_comments: bool):
     """Renderizador de seção Git (MPoT-17)."""
@@ -64,11 +60,9 @@ def _render_git(git: dict, detailed: bool, show_all: bool, show_max: bool,
     if not git['is_git_repo']:
         echo(f"   {Fore.RED}Não é um repositório Git.{Style.RESET_ALL}")
         return
-
     echo(f"   Branch:   {Fore.GREEN}{git['branch']}{Style.RESET_ALL}")
     _render_git_status_logic(git, detailed, show_all, show_max, show_code, only_comments)
     _render_last_commit(git.get('last_commit_info'))
-
 def _render_git_status_logic(git, detailed, show_all, show_max, show_code, only_comments):
     """Encapsula a lógica de decisão do status Git (Reduz CC)."""
     if git['dirty_tree']:
@@ -81,8 +75,6 @@ def _render_git_status_logic(git, detailed, show_all, show_max, show_code, only_
             _render_pending_simple(git.get('pending_files', []), show_all)
     else:
         echo(f"   Status:   {Fore.GREEN}LIMPO (Tudo salvo){Style.RESET_ALL}")
-
-
 def _render_pending_simple(pending, show_all):
     """Lista simples de arquivos pendentes."""
     display_limit = None if show_all else 10
@@ -91,26 +83,21 @@ def _render_pending_simple(pending, show_all):
         echo(f"      {Fore.RED}• {f}{Style.RESET_ALL}")
     if not show_all and len(pending) > 10:
         echo(f"      {Style.DIM}... e mais {len(pending)-10} arquivos (Use -a).{Style.RESET_ALL}")
-
 def _render_last_commit(last):
     """Exibe info do último commit."""
     if last:
         echo(f"\n   Último:   {Style.DIM}{last['hash']} - {last['author']} : {last['subject']}{Style.RESET_ALL}")
-
 def _render_detailed_changes(changes: list, show_all: bool, show_max: bool, 
                              show_code: bool, only_comments: bool):
     """Orquestrador de mudanças detalhadas (Reduz CC)."""
     display_list = changes if show_all or show_max else changes[:10]
-
     for item in display_list:
         if only_comments and not item.get('comments'):
             continue
         _render_single_file_status(item)
         _render_file_content_router(item, show_max, show_code, only_comments)
-
     if not (show_all or show_max) and len(changes) > 10:
         echo(f"\n      {Style.DIM}... e mais {len(changes)-10} arquivos (Use -a).{Style.RESET_ALL}")
-
 def _render_file_content_router(item, show_max, show_code, only_comments):
     """Roteia o conteúdo para o renderizador especialista (PASC-10)."""
     if only_comments:
@@ -119,7 +106,6 @@ def _render_file_content_router(item, show_max, show_code, only_comments):
         _render_code_hunks(item['hunks'])
     else:
         _render_file_diff_content(item, show_max)
-
 def _render_single_file_status(item: dict):
     """Sincronia Chief-Gold: Alinhamento vertical por campo fixo."""
     added, rem = item['added'], item['removed']
@@ -144,7 +130,6 @@ def _render_single_file_status(item: dict):
     
     path = f"{Fore.BLUE}{Style.BRIGHT}{item['path']}{Style.RESET_ALL}"
     echo(f"      • M {brackets} {Fore.BLUE}{dots}{Style.RESET_ALL} {path}")
-
 def _render_file_diff_content(item: dict, show_max: bool):
     """Visualização semântica (Funções e Comentários)."""
     for f in item['functions']:
@@ -159,7 +144,6 @@ def _render_file_diff_content(item: dict, show_max: bool):
     
     if not show_max and len(item['comments']) > 3:
         echo(f"            {Style.DIM}... e mais {len(item['comments'])-3} comentários (Use -m).{Style.RESET_ALL}")
-
 def _render_code_hunks(hunks: list):
     """Renderiza blocos de código com prefixo e linha."""
     for h in hunks:
@@ -168,7 +152,6 @@ def _render_code_hunks(hunks: list):
         elif h['type'] == 'rem': color, prefix = Fore.RED, "-"
         else:                    color, prefix = Style.DIM, " "
         echo(f"          {color}{prefix} {l_num} {h['content'][1:]}{Style.RESET_ALL}")
-
 def _render_comments_only(comments: list):
     """Renderizador de comentários corrigido (Simetria de Símbolos)."""
     for comm in comments:
@@ -180,7 +163,6 @@ def _render_comments_only(comments: list):
         # Sincronia: Espaço fixo para número da linha
         l_tag = f"[ {str(comm['line']):^4} ]"
         echo(f"          {color}{symbol} {l_tag} # {comm['text']}{Style.RESET_ALL}")
-
 def _render_integrity(core: dict):
     echo(f"{Fore.WHITE}{Style.BRIGHT}\n🛡️  INTEGRIDADE DO NÚCLEO{Style.RESET_ALL}")
     for mod, status in core.items():

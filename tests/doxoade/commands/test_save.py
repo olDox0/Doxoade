@@ -4,7 +4,6 @@ import os
 from unittest.mock import patch, MagicMock
 from click.testing import CliRunner
 from doxoade.cli import cli
-
 @patch('doxoade.commands.save._run_git_command')
 def test_save_no_changes(mock_git):
     """Garante que o save avisa quando não há nada para comitar."""
@@ -14,7 +13,6 @@ def test_save_no_changes(mock_git):
     
     result = runner.invoke(cli, ['save', 'test commit'])
     assert "Nada para salvar" in result.output
-
 @patch('doxoade.commands.save._run_git_command')
 @patch('doxoade.commands.save.run_check_logic')
 def test_save_blocks_on_error(mock_check, mock_git):
@@ -31,7 +29,6 @@ def test_save_blocks_on_error(mock_check, mock_git):
     result = runner.invoke(cli, ['save', 'bad commit'])
     assert result.exit_code == 1
     assert "Qualidade insuficiente" in result.output
-
 def test_template_learning_logic():
     """Valida a extração de templates a partir de mensagens de erro."""
     from doxoade.commands.save import _get_template_for_message

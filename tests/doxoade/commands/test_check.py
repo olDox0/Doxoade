@@ -9,9 +9,7 @@ from doxoade.commands.check import (
     _resolve_input_targets, 
     _handle_cache_logic
 )
-
 # --- FIXTURES NATIIVAS (Sem dependência de pytest-mock) ---
-
 @pytest.fixture
 def mock_dnm():
     """Mock do Directory Navigation Module com caminhos genéricos."""
@@ -21,9 +19,7 @@ def mock_dnm():
         instance.scan.return_value = ['file1.py', 'file2.py']
         instance.is_ignored.return_value = False
         yield instance
-
 # --- TESTES DE FUNCIONALIDADE ---
-
 def test_resolve_input_targets_file(mock_dnm):
     """Garante que se o input for um arquivo, ele seja priorizado."""
     with patch('os.path.isfile', return_value=True), \
@@ -31,7 +27,6 @@ def test_resolve_input_targets_file(mock_dnm):
         targets = _resolve_input_targets('script.py', None, mock_dnm)
         assert len(targets) == 1
         assert targets[0].endswith('script.py')
-
 def test_resolve_input_targets_directory(mock_dnm):
     """Garante que se o input for pasta, o DNM faça o scan e filtre corretamente."""
     # Simulamos que estamos na raiz '/'
@@ -43,7 +38,6 @@ def test_resolve_input_targets_directory(mock_dnm):
         
         targets = _resolve_input_targets('.', None, mock_dnm)
         assert len(targets) == 2
-
 def test_handle_cache_logic_miss(tmp_path):
     """Testa comportamento quando o cache está vazio ou inválido."""
     project_root = str(tmp_path)
@@ -57,7 +51,6 @@ def test_handle_cache_logic_miss(tmp_path):
     
     assert findings == []
     assert len(files_to_scan) == 1
-
 def test_handle_cache_logic_hit(tmp_path):
     """Testa recuperação de resultados do cache (Performance)."""
     project_root = str(tmp_path)
@@ -81,7 +74,6 @@ def test_handle_cache_logic_hit(tmp_path):
         assert len(findings) == 1
         assert findings[0]['message'] == 'Cached Result'
         assert files_to_scan == []
-
 def test_run_check_logic_contract_check(mock_dnm):
     """
     Verifica se o comando retorna o dicionário correto (Proteção AttributeError).
@@ -108,7 +100,6 @@ def test_run_check_logic_contract_check(mock_dnm):
         # Valida o dicionário de retorno (O contrato Gold)
         assert result['summary']['errors'] == 5
         assert isinstance(result['findings'], list)
-
 def test_run_check_logic_no_files(mock_dnm):
     """Garante retorno vazio elegante se não houver arquivos .py."""
     mock_dnm.scan.return_value = []

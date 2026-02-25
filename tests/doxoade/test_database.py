@@ -4,18 +4,14 @@ import sqlite3
 import os
 from unittest.mock import patch, MagicMock
 from doxoade.database import init_db, DB_VERSION
-
 # --- FIXTURES ---
-
 @pytest.fixture
 def mock_db_path(tmp_path):
     """Cria um caminho temporário para o banco de dados de teste."""
     db_file = tmp_path / "test_doxoade.db"
     with patch('doxoade.database.DB_FILE', db_file):
         yield db_file
-
 # --- TESTES DE INTEGRIDADE ---
-
 def test_init_db_creates_all_tables(mock_db_path):
     """Verifica se o Migration Dispatcher cria todas as tabelas essenciais."""
     init_db()
@@ -36,7 +32,6 @@ def test_init_db_creates_all_tables(mock_db_path):
         assert table in tables, f"Tabela crítica ausente: {table}"
     
     conn.close()
-
 def test_schema_version_is_updated(mock_db_path):
     """Garante que a versão do esquema no banco bate com a constante do código."""
     init_db()
@@ -47,7 +42,6 @@ def test_schema_version_is_updated(mock_db_path):
     
     assert version == DB_VERSION
     conn.close()
-
 def test_incremental_patches_resilience(mock_db_path):
     """
     Testa se o sistema é resiliente a migrações repetidas 
@@ -60,7 +54,6 @@ def test_incremental_patches_resilience(mock_db_path):
         init_db()
     except sqlite3.OperationalError as e:
         pytest.fail(f"init_db falhou em execução subsequente: {e}")
-
 def test_m_v15_chronos_columns(mock_db_path):
     """Verifica se as colunas de telemetria do Chronos (v15/v16) foram criadas."""
     init_db()

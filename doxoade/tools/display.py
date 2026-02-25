@@ -2,7 +2,7 @@
 import click
 import re, sys
 from datetime import datetime
-from colorama import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style
 from collections import Counter
 from .analysis import _get_code_snippet_from_string
 
@@ -157,7 +157,7 @@ def _format_timestamp(iso_str):
     
 def _print_maat_summary(findings, score):
     """Interface de Ma'at: O Peso do Coração contra a Pena."""
-    from colorama import Fore, Style, Back
+    from doxoade.tools.doxcolors import Fore, Style, Back
     
     print("\n" + Back.WHITE + Fore.BLACK + f" ⚖  SENTENÇA DE MA'AT: {score}/100 " + Style.RESET_ALL)
     

@@ -1,7 +1,6 @@
 # tests/test_check_filters.py
 import pytest
 from doxoade.commands.check_filters import filter_and_inject_findings
-
 def test_filter_removes_silenced_error(tmp_path):
     """Testa se # noqa remove o erro."""
     # Setup
@@ -20,7 +19,6 @@ def test_filter_removes_silenced_error(tmp_path):
     
     # Assert
     assert len(result) == 0
-
 def test_filter_keeps_normal_error(tmp_path):
     """Testa se erro sem tag é mantido."""
     f = tmp_path / "test.py"
@@ -37,7 +35,6 @@ def test_filter_keeps_normal_error(tmp_path):
     
     assert len(result) == 1
     assert result[0]['message'] == "Erro real"
-
 def test_inject_qa_tags(tmp_path):
     """Testa se # TODO cria um finding."""
     f = tmp_path / "test.py"

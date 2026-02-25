@@ -1,26 +1,21 @@
 # doxoade/indexer/cache.py
 """
 Cache Persistente para Índices de Código.
-
 Responsabilidades:
 - Salvar/carregar índice do disco (SQLite)
 - Detectar mudanças nos arquivos via hash
 - Invalidar cache quando necessário
-
 Filosofia MPoT:
 - Funções < 60 linhas
 - Assertions em pontos críticos
 - Fail loudly
 """
-
 import sqlite3
 import hashlib
 from pathlib import Path
 from typing import Dict, List, Optional
 from collections import defaultdict
 from datetime import datetime
-
-
 class IndexCache:
     """
     Cache persistente do índice usando SQLite.

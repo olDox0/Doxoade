@@ -7,13 +7,11 @@ Especialista em manipulação de histórico e remoção de evidências (PASC 2.0
 import subprocess
 import sys
 import os
-from colorama import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style
 from ...tools.filesystem import _get_venv_python_executable
-
 class GitArchivist:
     def __init__(self, root):
         self.root = root
-
     def nuclear_purge(self, patterns: list, dry_run: bool = False):
         """Purga profunda via git-filter-repo (Standard Osíris)."""
         # 1. Garante que estamos na raiz
@@ -25,7 +23,6 @@ class GitArchivist:
         
         if dry_run:
             cmd.append("--analyze")
-
         for p in patterns:
             p = p.replace('\\', '/')
             # Se o padrão tem wildcard (*), usa path-glob, senão usa path simples
@@ -35,7 +32,6 @@ class GitArchivist:
                 cmd.extend(['--path', p])
         
         cmd.append('--invert-paths')
-
         try:
             # PASC-8.8: Fluxo Explícito
             res = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', shell=False)
@@ -46,7 +42,6 @@ class GitArchivist:
                 return False, res.stderr
         except Exception as e:
             return False, str(e)
-
     def remove_files_from_commit(self, commit_hash, files: list):
         """Remove arquivos específicos de um commit já realizado (PASC 1.1)."""
         print(f"{Fore.YELLOW}🧪 Iniciando cirurgia no commit {commit_hash}...{Style.RESET_ALL}")
@@ -54,7 +49,6 @@ class GitArchivist:
         # 1. Validação de estado (OSL 10)
         if self._is_dirty():
             return False, "Working tree está suja. Faça save ou stash antes da cirurgia."
-
         try:
             # Estratégia: Soft Reset -> Unstage -> Re-commit
             # Se for o último commit (HEAD), é simples. Se for antigo, exige rebase.
@@ -71,7 +65,6 @@ class GitArchivist:
                 return False, "Modificar commits antigos via CLI exige Rebase Interativo (Feature em Lab)."
         except Exception as e:
             return False, str(e)
-
     def delete_commit(self, commit_hash):
         """Apaga um commit específico e volta os arquivos para o Stage."""
         if not self._is_head(commit_hash):
@@ -83,17 +76,14 @@ class GitArchivist:
             return True, "Commit desfeito. As mudanças voltaram para o Stage (Prontas para novo save)."
         except Exception as e:
             return False, str(e)
-
     def _is_dirty(self):
         res = subprocess.run(['git', 'status', '--porcelain'], capture_output=True, text=True)
         return bool(res.stdout.strip())
-
     def _is_head(self, commit_hash):
         head_hash = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
         return head_hash.startswith(commit_hash) or commit_hash.lower() == "head"
         
 # doxoade/commands/git_systems/git_archivist.py
-
     def list_commit_assets(self, commit_hash, show_all=False):
         """Lista arquivos de um commit respeitando as regras de ignore do Doxoade."""
         target = commit_hash if commit_hash else "HEAD"
@@ -107,7 +97,6 @@ class GitArchivist:
             
             if res.returncode != 0:
                 return False, f"Commit '{target}' não encontrado."
-
             files_data = []
             for line in res.stdout.splitlines():
                 parts = line.split()

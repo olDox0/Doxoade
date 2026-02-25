@@ -1,64 +1,157 @@
-# doxoade/tools/vulcan/compiler.py
-import os, sys, subprocess, shutil
+# doxoade/tools/vulcan/compiler.py  (patch v6)
+import os, sys, subprocess, shutil, time, json
+
 from pathlib import Path
+from doxoade.tools.doxcolors import Fore
+# [DOX-UNUSED] from .artifact_manager import probe_and_promote
+
+# Global para telemetria da sessão de compilação
+COMPILATION_TELEMETRY = []
 
 class VulcanCompiler:
-    _cached_env = None # Cache de Classe (Pitstop)
+    _cached_env = None  # Cache de Classe (Pitstop)
 
-    def __init__(self, env):
+    def __init__(self, env, pid_registry: dict = None):
         self.env = env
+        self._pid_registry: dict = pid_registry if pid_registry is not None else {}
+        self._registry_key: str  = ""
 
     def _prepare_pitstop_env(self):
         """Prepara o toolkit GCC apenas uma vez (Hefesto)."""
         if VulcanCompiler._cached_env is not None:
             return VulcanCompiler._cached_env
 
-        # Localiza w64devkit dentro do projeto
         core_root = Path(__file__).resolve().parents[3]
-        gcc_exe = core_root / "opt" / "w64devkit" / "bin" / "gcc.exe"
-        
+        gcc_exe   = core_root / "opt" / "w64devkit" / "bin" / "gcc.exe"
+
         env = os.environ.copy()
         if gcc_exe.exists():
             bin_dir = str(gcc_exe.parent)
-            env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
-            env["CC"] = "gcc"
-            env["CXX"] = "g++"
+            env["PATH"]              = bin_dir + os.pathsep + env.get("PATH", "")
+            env["CC"]                = "gcc"
+            env["CXX"]               = "g++"
             env["DISTUTILS_USE_SDK"] = "1"
             env["PY_VULCAN_PITSTOP"] = "1"
-            
+
         VulcanCompiler._cached_env = env
         return env
 
-    def compile(self, module_name: str):
-        """Compilação otimizada com flags de silício (-O3)."""
-        build_env = self._prepare_pitstop_env()
+    def compile(self, module_name: str) -> tuple[bool, str | None]:
+        """
+        Compila o módulo e retorna uma tupla (sucesso, erro).
+        Sincronizado com a API do Autopilot v83.1+.
+        """
         foundry_path = self.env.foundry.resolve()
-        
-        # Setup Dinâmico focado em performance
+        setup_path   = foundry_path / "setup_tmp.py"
+        build_env    = self._prepare_pitstop_env()
+
+        # FIX 1: numpy era importado incondicionalmente — quebrava 100% das
+        # compilações de módulos que não usam arrays (venv_up, intelligence_engine…).
+        # Agora é opcional via try/except dentro do próprio setup_tmp.py.
+        #
+        # FIX 2: -march=native e -ffast-math causam ICE no mingw32 em algumas
+        # versões do w64devkit. Substituídos por -O2 no Windows.
+        _extra_args = "['-O2']" if os.name == 'nt' else "['-O3', '-ffast-math']"
+
         setup_content = f"""
 from setuptools import setup, Extension
 from Cython.Build import cythonize
-ext = Extension("{module_name}", ["{module_name}.pyx"], 
-                extra_compile_args=['-O3', '-ffast-math', '-march=native'])
-setup(ext_modules=cythonize(ext, language_level=3))
+
+try:
+    import numpy as np
+    _include_dirs = [np.get_include()]
+except ImportError:
+    _include_dirs = []
+
+ext = Extension(
+    "{module_name}",
+    ["{module_name}.pyx"],
+    extra_compile_args={_extra_args},
+    include_dirs=_include_dirs,
+)
+setup(ext_modules=cythonize(ext, language_level=3, quiet=True))
 """
-        (foundry_path / "setup_tmp.py").write_text(setup_content, encoding='utf-8')
+        setup_path.write_text(setup_content, encoding='utf-8')
 
-        # Comando de compilação sem carregar shell pesado
-        cmd = [sys.executable, "setup_tmp.py", "build_ext", "--inplace"]
-        if os.name == 'nt': cmd.append("--compiler=mingw32")
+        core_root   = Path(__file__).resolve().parents[3]
+        doxo_python = (core_root / "venv" / "Scripts" / "python.exe"
+                       if os.name == 'nt' else sys.executable)
 
-        res = subprocess.run(cmd, cwd=str(foundry_path), env=build_env, 
-                             capture_output=True, text=True)
-        
-        if res.returncode != 0:
-            return False
-        return self._promote_binary(module_name)
+        cmd = [str(doxo_python), "setup_tmp.py", "build_ext", "--inplace"]
+        if os.name == 'nt':
+            cmd.append("--compiler=mingw32")
 
-    def _promote_binary(self, name):
-        # Lógica de movimentação para .doxoade/vulcan/bin
+        try:
+            res = subprocess.run(
+                cmd, cwd=str(foundry_path), env=build_env,
+                capture_output=True, text=True, encoding='utf-8', errors='replace'
+            )
+
+            if res.returncode != 0:
+                # Extrai só a última linha útil do stderr para não poluir o log
+                stderr_lines = [l.strip() for l in (res.stderr or "").splitlines() if l.strip()]
+                error_summary = stderr_lines[-1] if stderr_lines else f"Exit code {res.returncode}"
+                return False, error_summary
+
+            if self._promote_binary(module_name):
+                return True, None
+            else:
+                return False, "Binário compilado não encontrado após build (promote falhou)."
+
+        except KeyboardInterrupt:
+            # FIX 3: sys.exit(130) em thread worker vira SystemExit(BaseException),
+            # escapa do except Exception do Autopilot e chega ao vulcan_cmd, que
+            # imprime "Comando interrompido. Saindo...".
+            # Retornar tupla mantém tudo dentro do fluxo do ThreadPoolExecutor.
+            return False, "Interrompido (KeyboardInterrupt no worker)"
+        except Exception as e:
+            return False, str(e)
+
+    def _promote_to_staging(self, module_name: str) -> Path | None:
+        """Move o binário compilado para o diretório de staging."""
         ext = ".pyd" if os.name == 'nt' else ".so"
-        for f in self.env.foundry.glob(f"{name}*{ext}"):
-            shutil.move(str(f), str(self.env.bin_dir / f"{name}{ext}"))
+        src_file = next(self.env.foundry.glob(f"{module_name}*{ext}"), None)
+        if not src_file:
+            return None
+
+        dest_dir  = self.env.staging
+        dest_file = dest_dir / src_file.name
+        shutil.move(str(src_file), str(dest_file))
+        return dest_file
+
+    @staticmethod
+    def save_telemetry_report(project_root: str):
+        """Salva o relatório de telemetria da compilação."""
+        if not COMPILATION_TELEMETRY:
+            return
+
+        report_path = (Path(project_root) / ".doxoade" / "vulcan" / "logs"
+                       / f"compile_telemetry_{time.strftime('%Y%m%d_%H%M%S')}.json")
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+
+        summary = {
+            'total':       len(COMPILATION_TELEMETRY),
+            'success':     sum(1 for r in COMPILATION_TELEMETRY if r['status'] == 'OK'),
+            'failed':      sum(1 for r in COMPILATION_TELEMETRY if r['status'] not in ['OK', 'QUARANTINED']),
+            'quarantined': sum(1 for r in COMPILATION_TELEMETRY if r['status'] == 'QUARANTINED'),
+            'total_time':  sum(r['duration'] for r in COMPILATION_TELEMETRY),
+        }
+
+        full_report = {'summary': summary, 'details': COMPILATION_TELEMETRY}
+        report_path.write_text(json.dumps(full_report, indent=2), encoding="utf-8")
+        print(Fore.CYAN + f"\n[TELEMETRY] Relatório de compilação salvo em: {report_path}")
+
+    def _promote_binary(self, module_name: str, to_staging: bool = False) -> bool:
+        """Move o binário compilado para o diretório de staging ou bin."""
+        ext      = ".pyd" if os.name == 'nt' else ".so"
+        src_file = next(self.env.foundry.glob(f"{module_name}*{ext}"), None)
+        if not src_file:
+            return False
+
+        try:
+            dest_dir  = self.env.staging if to_staging else self.env.bin_dir
+            dest_file = dest_dir / src_file.name
+            shutil.move(str(src_file), str(dest_file))
             return True
-        return False
+        except Exception:
+            return False

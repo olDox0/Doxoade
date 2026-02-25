@@ -2,7 +2,6 @@
 import sys
 import json
 import importlib.util
-
 def check_modules(modules_to_check):
     if not modules_to_check: return []
     missing = []
@@ -14,7 +13,6 @@ def check_modules(modules_to_check):
         except (ValueError, ImportError):
             missing.append(module_name)
     return missing
-
 if __name__ == "__main__":
     try:
         raw_input = sys.stdin.read().strip()

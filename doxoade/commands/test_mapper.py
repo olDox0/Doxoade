@@ -4,9 +4,8 @@ import ast
 import click
 # [DOX-UNUSED] import json
 from pathlib import Path
-from colorama import Fore
+from doxoade.tools.doxcolors import Fore
 from ..shared_tools import ExecutionLogger, _get_project_config
-
 class TestMapper:
     """
     Motor de correlação entre Código Fonte e Testes.
@@ -21,12 +20,10 @@ class TestMapper:
         }
         self.config = _get_project_config(None, start_path=str(self.root))
         self.ignore_patterns = self._load_ignore_patterns()
-
     def _load_ignore_patterns(self):
         toml_ignores = {p.strip('/\\') for p in self.config.get('ignore', [])}
         system_ignores = {'venv', '.git', '__pycache__', 'site-packages', 'build', 'dist', '.doxoade_cache', 'htmlcov', '.pytest_cache'}
         return toml_ignores.union(system_ignores)
-
     def _is_ignored_source(self, path):
         try:
             rel_path = path.relative_to(self.root)
@@ -50,7 +47,6 @@ class TestMapper:
         if path.name == "__init__.py":
             return True
         return False
-
     def assess_test_status(self, test_path):
         """Analisa se o teste é um esqueleto, WIP ou real."""
         try:
@@ -74,7 +70,6 @@ class TestMapper:
             
         except Exception:
             return "UNKNOWN", Fore.WHITE + "?"
-
     def scan(self):
         # ... (Lógica de scan idêntica à anterior, mantendo a robustez) ...
         # Copiando a lógica robusta que fizemos no passo anterior:
@@ -83,7 +78,6 @@ class TestMapper:
         full_ignore_list.discard('tests')
         full_ignore_list.discard('tests/')
         full_ignore_list.discard('commands_test')
-
         all_py = list(self.root.rglob("*.py"))
         sources = []
         tests = []
@@ -99,19 +93,16 @@ class TestMapper:
                     is_valid_test = False
                     break
             if not is_valid_test: continue
-
             is_test_file = p.name.startswith("test_") or p.name.endswith("_test.py") or "tests" in p.parts
             
             if is_test_file:
                 tests.append(p)
             else:
                 sources.append(p)
-
         test_metadata = {}
         for t in tests:
             targets = self._find_targets_in_test(t)
             test_metadata[t] = targets
-
         for s in sources:
             try: rel_s = s.relative_to(self.root)
             except ValueError: continue
@@ -132,12 +123,9 @@ class TestMapper:
                 if s.name in t_targets or rel_s_str in t_targets:
                     self.map['covered'][rel_s_str].append(t_rel)
                     found = True
-
             if not found:
                 self.map['orphans'].append(rel_s_str)
-
         return self.map
-
     def _find_targets_in_test(self, test_path):
         targets = []
         try:
@@ -149,7 +137,6 @@ class TestMapper:
                 targets.append(m.strip().replace('\\', '/'))
         except Exception: pass
         return targets
-
     def generate_skeleton(self, source_path):
         # ... (Código de geração mantido igual) ...
         try:
@@ -173,13 +160,11 @@ class TestMapper:
                 lines.append("def test_smoke():")
                 lines.append("    # Teste de fumaça (importação)")
                 lines.append("    assert True")
-
             for cls in classes:
                 lines.append(f"def test_{cls}_initialization():")
                 lines.append(f"    # TODO: Instanciar {cls} e verificar estado inicial")
                 lines.append("    pass")
                 lines.append("")
-
             for func in funcs:
                 lines.append(f"def test_{func}_behavior():")
                 lines.append(f"    # TODO: Implementar teste lógico para {func}") 
@@ -189,7 +174,6 @@ class TestMapper:
             return "\n".join(lines)
         except Exception:
             return f"# Falha ao gerar esqueleto para {source_path}."
-
 @click.command('test-map')
 @click.option('--generate', '-g', is_flag=True, help="Gera arquivos de teste para os órfãos.")
 @click.pass_context
@@ -203,7 +187,6 @@ def test_map(ctx, generate):
         
         # Estatísticas de Status
         stats = {'SKELETON': 0, 'WIP': 0, 'REAL': 0}
-
         sorted_covered = sorted(matrix['covered'].items())
         covered_only = [(src, t) for src, t in sorted_covered if t]
         
@@ -240,7 +223,6 @@ def test_map(ctx, generate):
                             f.write(content)
                         click.echo(Fore.GREEN + f"   > [GEN] Gerado: {test_path}")
                         logger.add_finding("INFO", f"Teste gerado para {src}")
-
         total_src = len(matrix['covered'])
         real_covered = len(covered_only)
         coverage_pct = (real_covered / total_src * 100) if total_src > 0 else 0

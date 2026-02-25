@@ -1,9 +1,7 @@
 import sys
 import subprocess
 import os
-
 PROBE_PATH = os.path.join("doxoade", "probes", "flow_runner.py")
-
 def test_flow_runner_execution(tmp_path):
     """Verifica se o flow runner executa um script simples e produz output."""
     script = tmp_path / "ola.py"
@@ -13,7 +11,6 @@ def test_flow_runner_execution(tmp_path):
     # Força ambiente UTF-8
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
-
     result = subprocess.run(
         [sys.executable, PROBE_PATH, str(script)],
         capture_output=True, 
@@ -27,7 +24,6 @@ def test_flow_runner_execution(tmp_path):
     if result.stdout is None:
         print(f"STDOUT None! Stderr: {result.stderr}")
         assert False, "Subprocesso não retornou stdout (crash de encoding?)"
-
     # Verifica se rodou
     assert result.returncode == 0
     assert "Ola Mundo" in result.stdout

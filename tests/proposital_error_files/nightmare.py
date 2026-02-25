@@ -4,10 +4,8 @@ import hashlib
 import subprocess
 import pickle
 import modulo_fantasma_xyz  # [DEPENDENCY] Import que não existe
-
 # [STYLE] Variável global
 SENHA_MESTRE = "admin123"  # [SECURITY] Senha Hardcoded
-
 def funcao_perigosa(dados=[]):  # [RISK-MUTABLE] Argumento padrão mutável
     # [DOCS] Falta docstring
     
@@ -17,7 +15,6 @@ def funcao_perigosa(dados=[]):  # [RISK-MUTABLE] Argumento padrão mutável
     # [STYLE] Comparação com None
     if dados == None:
         return
-
     # [RISK-EXCEPTION] Except genérico
     try:
         # [SECURITY] Execução arbitrária
@@ -34,14 +31,11 @@ def funcao_perigosa(dados=[]):  # [RISK-MUTABLE] Argumento padrão mutável
         
     except:
         pass
-
     # [ABDUÇÃO] 'math' e 'random' não foram importados
     print(math.pi)
     print(random.randint(1, 10))
-
     # [STYLE] Recursão
     funcao_perigosa(dados)
-
 def funcao_gigante_e_complexa():
     # [COMPLEXITY] Função muito longa (MPoT)
     print("Linha 1")
@@ -111,7 +105,6 @@ def funcao_gigante_e_complexa():
 # doxoade/commands/nightmare.py
 def bug_fatal():
     eval("print('Eu sou um erro de seguranca no core!')")
-
 # [DUPLICATION] Função clonada (igual a funcao_perigosa mas com nome diferente)
 def clone_da_perigosa(dados=[]):
     # [DOCS] Falta docstring
@@ -126,16 +119,12 @@ def clone_da_perigosa(dados=[]):
     print(math.pi)
     print(random.randint(1, 10))
     funcao_perigosa(dados)
-
 # [SIGNATURE-MISMATCH] Chamada incorreta (XRef)
 def teste_assinatura(a, b):
     return a + b
-
 teste_assinatura(1) # Falta argumento 'b'
-
 import os
 import sys
-
 def funcao_horrivel():
     try:
         eval("print('hack')") # SECURITY

@@ -10,7 +10,7 @@ import ast
 import sys
 import logging
 import os  # FIX: Adicionado import global essencial
-# [DOX-UNUSED] from colorama import Fore
+# [DOX-UNUSED] from doxoade.tools.doxcolors import Fore
 from pathlib import Path
 from typing import List, Dict
 from .filesystem import _find_project_root
@@ -21,6 +21,7 @@ __all__ = ['calculate_integrity_hash', 'restricted_safe_exec', 'simulate_taint_a
 SOURCES = {'input', 'sys.argv', 'environ', 'get_json', 'args', 'read'}
 SINKS = {'eval', 'exec', 'os.system', 'subprocess.run', 'sub_run', 'sub_popen'}
 QUARANTINE_ZONES = ["tests/", "regression_tests/", "proposital_error_files/", "old/", "check_exame.py"]
+_AST_VALIDATION_CACHE = {}
 
 def calculate_integrity_hash(root_path: Path) -> str:
     """Generates a deterministic SHA-256 hash of the core code."""
@@ -28,16 +29,13 @@ def calculate_integrity_hash(root_path: Path) -> str:
     hasher = hashlib.sha256()
     for path in sorted(root_path.rglob("*.py")):
         path_str = str(path).replace("\\", "/")
-        # PASC 19: Ignora quarentenas e lixo físico
-        if any(x in path_str for x in ["venv", ".git", "pytest_temp_dir", "foundry"]):
-            continue
+        ignored = ["venv", ".git", "__pycache__", ".doxoade_cache", "tests", "chief_dossier.json"]
+        if any(x in path_str for x in ignored): continue
         try:
-            # PASC 3.0: Verifica permissão antes de abrir
-            if not os.access(path, os.R_OK): continue
             with open(path, "rb") as f:
                 for chunk in iter(lambda: f.read(4096), b""):
                     hasher.update(chunk)
-        except (OSError, PermissionError) as e:
+        except OSError as e:
             import sys as exc_sys
             from traceback import print_tb as exc_trace
             _, exc_obj, exc_tb = exc_sys.exc_info()
@@ -122,6 +120,7 @@ def generate_exploit_poc(function_name: str) -> str:
 def restricted_safe_exec(code_str, globals_dict=None, allow_imports=False, filename="<sandbox>"):
     import builtins
     abs_path = os.path.abspath(filename)
+    code_hash = hashlib.sha256(code_str.encode("utf-8")).hexdigest()
     
     # 1. LOCALIZAÇÃO DA ÂNCORA (PASC 8.4)
     # Em vez de pegar apenas o diretório do arquivo, buscamos a raiz do projeto
@@ -150,10 +149,17 @@ def restricted_safe_exec(code_str, globals_dict=None, allow_imports=False, filen
         }
         if globals_dict: safe_globals.update(globals_dict)
 
-        tree = ast.parse(code_str)
-        _validate_ast_safety(tree, allow_imports)
-        compiled = compile(tree, filename=filename, mode="exec")
-        exec(compiled, safe_globals) # noqa: S102, B102
+        cache_key = (code_hash, allow_imports)
+
+        if cache_key in _AST_VALIDATION_CACHE:
+            compiled = _AST_VALIDATION_CACHE[cache_key]
+        else:
+            tree = ast.parse(code_str)
+            _validate_ast_safety(tree, allow_imports)
+            compiled = compile(tree, filename=filename, mode="exec")
+            _AST_VALIDATION_CACHE[cache_key] = compiled
+
+        exec(compiled, safe_globals) # noqa: B102
         
     except Exception as e:
         # PASC-8.9: Se for FileNotFoundError, reportamos de forma amigável
@@ -212,8 +218,8 @@ def _validate_ast_safety(tree: ast.AST, allow_imports: bool):
                 raise RuntimeError("Sandbox Breach: Private access blocked.")
 
 def _handle_sandbox_exception(e: Exception):
-    """Dispatcher Forense (OSL-5.3)."""
-    if isinstance(e, (NameError, ImportError, ModuleNotFoundError, SyntaxError, ValueError)):
+    """Dispatcher Forense."""
+    if isinstance(e, (NameError, ImportError, ModuleNotFoundError, SyntaxError)):
         raise e
     
     # Isola o IO do log forense para evitar alerta de hibridismo
@@ -225,5 +231,4 @@ def _handle_sandbox_exception(e: Exception):
     msg = f"\033[1;34m\n[ FORENSIC:AEGIS ]\033[0m \033[1mFile: {f_name} | L: {line_n}\033[0m\n"
     msg += f"\033[31m    ■ Exception: {type(e).__name__} | Value: {e}\033[0m"
     print(msg)
-    raise RuntimeError(f"Aegis Sandbox Blocked: {str(e)}")
-#    raise RuntimeError(f"Aegis Sandbox Blocked: {e}")
+    raise RuntimeError(f"Aegis Sandbox Blocked: {e}")

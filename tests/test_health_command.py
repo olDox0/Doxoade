@@ -5,12 +5,9 @@ import json
 import subprocess
 from unittest.mock import MagicMock
 from doxoade.commands.health import _analyze_test_coverage
-
 # Garante que o pacote 'doxoade' seja importável
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 from doxoade.commands.health import _analyze_complexity
-
 def test_analyze_complexity_logic_directly(tmp_path):
     """
     Valida a lógica de _analyze_complexity diretamente (Teste de Unidade Puro).
@@ -45,11 +42,9 @@ def very_complex_function(a, b, c, d, e, f):
 """
     complex_file_path = project_dir / "complex_code.py"
     complex_file_path.write_text(complex_code, encoding="utf-8")
-
     # FLUXO 2: Executar a Função Alvo Diretamente
     # Usamos um threshold de 36 para garantir que a complexidade 37 seja detectada.
     findings = _analyze_complexity([str(complex_file_path)], threshold=36)
-
     # FLUXO 3: Validar a Saída de Dados
     assert len(findings) == 1
     
@@ -85,7 +80,6 @@ def test_analyze_test_coverage_success(tmp_path, monkeypatch):
     findings = _analyze_test_coverage(str(project_dir), min_coverage=90, source_dir='.')
     
     assert findings == []
-
 def test_analyze_test_coverage_low_coverage(tmp_path, monkeypatch):
     """
     Valida a detecção de baixa cobertura de testes.
@@ -107,7 +101,6 @@ def test_analyze_test_coverage_low_coverage(tmp_path, monkeypatch):
     assert len(findings) == 1
     assert findings[0]['severity'] == 'WARNING'
     assert "Cobertura de testes está baixa: 50.00%." in findings[0]['message']
-
 def test_analyze_test_coverage_pytest_fails(tmp_path, monkeypatch):
     """
     Valida o tratamento de falha na execução do pytest.

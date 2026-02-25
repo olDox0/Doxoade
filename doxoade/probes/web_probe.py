@@ -6,17 +6,14 @@ Tailwind e chart.js
 """
 import os
 import re
-
 try:
     import requests
 except ImportError:
     requests = None 
-
 class WebAuditProbe:
     def __init__(self, project_path):
         self.path = project_path
         self.dox_palette = ['#26bc5f', '#FF6700', '#E8AA00', '#C81576', '#006CFF', '#EDF1F5', '#19171a', '#4C4552']
-
     def audit_visuals(self):
         """Valida se as cores hexadecimais batem com a paleta Dox."""
         findings = []
@@ -31,7 +28,6 @@ class WebAuditProbe:
                             if color.lower() not in [c.lower() for c in self.dox_palette]:
                                 findings.append({'type': 'warning', 'msg': f"Visual: Cor fora do padrão: {color}", 'file': f})
         return findings
-
     def check_cdn_health(self):
         """Verifica CDNs com Importação Tardia (Hybrid Venv Strategy)."""
         try:
@@ -49,7 +45,6 @@ class WebAuditProbe:
             except Exception:
                 findings.append({'type': 'error', 'msg': f"Asset Health: Timeout em {url}"})
         return findings
-
     def audit_payloads(self):
         """Monitora o peso do projeto (MPoT-16)."""
         findings = []

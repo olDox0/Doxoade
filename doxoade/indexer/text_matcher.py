@@ -1,22 +1,17 @@
 # doxoade/indexer/text_matcher.py
 """
 Matcher de Texto Inteligente.
-
 Responsabilidades:
 - Normalização de termos (plural/singular, variações)
 - Fuzzy matching para correção de typos
 - Mapeamento de sinônimos programáticos
-
 Filosofia MPoT:
 - Métodos estáticos (sem estado)
 - Assertions em validações
 - Contratos claros
 """
-
 from typing import Set
 from difflib import SequenceMatcher
-
-
 class TextMatcher:
     """
     Matcher de texto com fuzzy matching e normalização.

@@ -3,17 +3,14 @@ import ast
 import os
 import sys
 import json
-
 import click
-from colorama import Fore
-
+from doxoade.tools.doxcolors import Fore
 # Importa as ferramentas necessárias do módulo compartilhado, removendo a importação quebrada
 from ..shared_tools import (
     _get_project_config,
     ExecutionLogger,
     _present_results,
 )
-
 @click.command('apicheck')
 @click.pass_context
 @click.argument('path', type=click.Path(exists=True, file_okay=False, resolve_path=True), default='.')
@@ -32,7 +29,6 @@ def apicheck(ctx, path, ignore, output_format):
             _present_results(output_format, logger.results)
             sys.exit(1)
         search_path = config.get('search_path')
-
         # --- Passo 1: Carregar o Contrato ---
         contract_file = os.path.join(search_path, 'apicheck.json')
         if not os.path.exists(contract_file):
@@ -67,12 +63,10 @@ def apicheck(ctx, path, ignore, output_format):
                 # Corrigido para usar a nova estrutura de severidade
                 severity = f.get('severity', 'ERROR') # 'type' foi trocado por 'severity'
                 logger.add_finding(severity, f['message'], details=f.get('details'), file=f.get('file'), line=f.get('line'))
-
         _present_results(output_format, logger.results)
     
         if logger.results['summary']['critical'] > 0 or logger.results['summary']['errors'] > 0:
             sys.exit(1)
-
 def _analyze_api_calls(file_path, contracts):
     """Orquestra a análise de chamadas de API."""
     try:
@@ -80,7 +74,6 @@ def _analyze_api_calls(file_path, contracts):
             tree = ast.parse(f.read(), filename=file_path)
     except (SyntaxError, IOError):
         return []
-
     all_findings = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
@@ -89,7 +82,6 @@ def _analyze_api_calls(file_path, contracts):
                 if contract.get('function') == full_func_name:
                     all_findings.extend(_validate_call_against_contract(node, contract, file_path))
     return all_findings
-
 def _get_full_function_name(call_node):
     """Reconstrói o nome completo de uma chamada de função a partir de um nó AST."""
     func = call_node.func
@@ -100,13 +92,11 @@ def _get_full_function_name(call_node):
     if isinstance(func, ast.Name):
         parts.insert(0, func.id)
     return ".".join(parts)
-
 def _validate_call_against_contract(node, contract, file_path):
     """Valida um único nó de chamada contra as regras de um único contrato."""
     findings = []
     rules = contract.get('rules', {})
     provided_args = {kw.arg for kw in node.keywords}
-
     # Valida parâmetros obrigatórios
     for param in rules.get('required_params', []):
         if param not in provided_args:
@@ -115,7 +105,6 @@ def _validate_call_against_contract(node, contract, file_path):
                 'details': f"Contrato '{contract.get('id')}' exige este parâmetro.",
                 'file': file_path, 'line': node.lineno
             })
-
     # Valida parâmetros proibidos
     for param, bad_value in rules.get('forbidden_params', {}).items():
         for kw in node.keywords:

@@ -7,14 +7,12 @@ from doxoade.commands.intelligence import (
     _read_file_safely
 )
 import ast
-
 def test_insight_visitor_extraction():
     """Garante que o Visitor extrai classes e funções corretamente."""
     code = """
 class MinhaClasse:
     def meu_metodo(self, a):
         return a
-
 def minha_funcao(x, y=10):
     # TODO: teste
     return x + y
@@ -29,7 +27,6 @@ def minha_funcao(x, y=10):
     
     assert len(visitor.functions) == 2 # Método + Função Global
     assert any(f['name'] == 'minha_funcao' for f in visitor.functions)
-
 def test_todo_extraction_regex():
     """Valida a detecção de tags de dívida técnica."""
     content = """
@@ -44,7 +41,6 @@ def test_todo_extraction_regex():
     assert "FIXME" in tags
     assert "HACK" in tags
     assert todos[0]['text'] == "Implementar isso"
-
 def test_read_file_safely_encodings(tmp_path):
     """Testa a resiliência de leitura em diferentes encodings."""
     d = tmp_path / "subdir"
@@ -56,7 +52,6 @@ def test_read_file_safely_encodings(tmp_path):
     
     content = _read_file_safely(str(p))
     assert "acentuação" in content
-
 def test_complexity_estimation():
     """Verifica se a estimativa de complexidade ciclomática básica funciona."""
     code = """

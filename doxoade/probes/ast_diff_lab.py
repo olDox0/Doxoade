@@ -1,7 +1,6 @@
 import ast
 import json
 # [DOX-UNUSED] import sys
-
 def get_ast_structure(code):
     """Simplifica a AST para comparação."""
     try:
@@ -12,7 +11,6 @@ def get_ast_structure(code):
     # Pega o primeiro nó significativo
     if not tree.body: return None
     return tree.body[0]
-
 def analyze_transformation(code_old, code_new):
     node_old = get_ast_structure(code_old)
     node_new = get_ast_structure(code_new)
@@ -39,7 +37,6 @@ def analyze_transformation(code_old, code_new):
                 "handlers": handlers,
                 "confidence": 0.9
             }
-
     # Caso 2: If (Guard Clause)
     if isinstance(node_new, ast.If):
         old_str = ast.unparse(node_old).strip()
@@ -55,7 +52,6 @@ def analyze_transformation(code_old, code_new):
             }
             
     return {"type": "NO_MATCH", "confidence": 0}
-
 if __name__ == "__main__":
     # Teste Hardcoded para Prova de Conceito
     old = "x = 10 / 0"

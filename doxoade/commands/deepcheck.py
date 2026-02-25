@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/deepcheck.py
 import ast, json, click
-from colorama import Fore
+from doxoade.tools.doxcolors import Fore
 # [DOX-UNUSED] from typing import Optional
 from .deepcheck_utils import DeepAnalyzer, _render_deep_report
 from .deepcheck_io import load_git_content, save_snapshot, load_snapshot, render_lineage_summary
-
 def _prepare_context(content):
     """Prepara árvore e metadados."""
     tree = ast.parse(content)
@@ -18,12 +17,10 @@ def _prepare_context(content):
             names = [n.name.split('.')[0] for n in (node.names if hasattr(node, 'names') else [])]
             if isinstance(node, ast.ImportFrom) and node.module: names.append(node.module.split('.')[0])
             module_imports.update(names)
-
     from radon.visitors import ComplexityVisitor
     try: cc_map = {f.name: f.complexity for f in ComplexityVisitor.from_code(content).functions}
     except Exception: cc_map = {}
     return {"tree": tree, "imports": module_imports, "cc_map": cc_map}
-
 def _run_orchestrated_scan(file_path, func_filter, flags):
     """Executa a análise semântica e orquestra a comparação."""
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f: content = f.read()
@@ -40,10 +37,8 @@ def _run_orchestrated_scan(file_path, func_filter, flags):
                 comp_map[node.name] = _render_deep_report(v, node.name, g_ctx["cc_map"].get(node.name, 1), as_json=True)
     elif flags.get('json_comp'):
         comp_map = load_snapshot(file_path)
-
     nodes = [n for n in ast.walk(ctx["tree"]) if isinstance(n, ast.FunctionDef)]
     if func_filter: nodes = [n for n in nodes if n.name == func_filter]
-
     final_results = []
     for node in nodes:
         visitor = DeepAnalyzer(module_imports=ctx["imports"]); visitor.visit(node)
@@ -53,10 +48,8 @@ def _run_orchestrated_scan(file_path, func_filter, flags):
         
         if flags.get('flow') and not flags.get('as_json'): render_lineage_summary(visitor)
         final_results.append(report)
-
     save_snapshot(file_path, final_results)
     return final_results
-
 @click.command('deepcheck')
 @click.argument('file_path', type=click.Path(exists=True))
 @click.option('--func', '-f', help="Analisa apenas esta função.")

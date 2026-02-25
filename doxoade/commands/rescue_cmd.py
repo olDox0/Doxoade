@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/rescue_cmd.py (v2)
 import click
-from colorama import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style
 from .rescue_systems.scavenger_logic import Scavenger
-
 @click.command('rescue')
 @click.option('--scavenge', '-s', is_flag=True, help="Minera objetos perdidos no Git.")
 @click.option('--backups', '-b', is_flag=True, help="Lista backups do Notepad++.")
@@ -13,7 +12,6 @@ from .rescue_systems.scavenger_logic import Scavenger
 def rescue(ctx, scavenge, backups, deep, npp):
     """🩺 Protocolo Lázaro: Resgate de material volátil ou perdido."""
     scav = Scavenger(".")
-
     if deep:
         results = scav.deep_scavenge_reflog(deep)
         if not results:
@@ -23,7 +21,6 @@ def rescue(ctx, scavenge, backups, deep, npp):
         for r in results:
             click.echo(f"  {Fore.CYAN}{r}")
         click.echo(Fore.YELLOW + "\nUse 'git show <hash>' para tentar ver o conteúdo.")
-
     if npp:
         backups = scav.recover_from_npp_session()
         click.echo(f"\n{Fore.MAGENTA}Recuperação de Sessão Notepad++ (%APPDATA%):{Style.RESET_ALL}")
@@ -49,7 +46,6 @@ def rescue(ctx, scavenge, backups, deep, npp):
             with open(fname, 'w', encoding='utf-8') as f:
                 f.write(target['full'])
             click.echo(Fore.GREEN + f"✔ Material materializado em {fname}")
-
     if backups:
         files = scav.scan_npp_backups()
         click.echo(f"\n{Fore.YELLOW}Backups do Notepad++ encontrados:{Style.RESET_ALL}")

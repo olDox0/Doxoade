@@ -14,7 +14,6 @@ import sys
 import json
 import os
 # [DOX-UNUSED] from pathlib import Path
-
 class FunctionIndexer(ast.NodeVisitor):
     """Indexa todas as definições de funções."""
     def __init__(self, file_path):
@@ -43,7 +42,6 @@ class FunctionIndexer(ast.NodeVisitor):
         })
         
         self.generic_visit(node)
-
 class CallTracker(ast.NodeVisitor):
     """Rastreia todas as chamadas de função."""
     def __init__(self):
@@ -59,7 +57,6 @@ class CallTracker(ast.NodeVisitor):
             self.calls.add(node.func.attr)
             
         self.generic_visit(node)
-
 class ExportChecker(ast.NodeVisitor):
     """Verifica se uma função está em __all__."""
     def __init__(self):
@@ -74,7 +71,6 @@ class ExportChecker(ast.NodeVisitor):
                         if isinstance(elt, ast.Constant):
                             self.exported.add(elt.value)
         self.generic_visit(node)
-
 def analyze_orphans(files):
     """
     Análise principal: encontra funções órfãs.
@@ -159,7 +155,6 @@ def analyze_orphans(files):
         })
     
     return orphans
-
 def main():
     """Entry point quando executado como probe standalone."""
     try:
@@ -177,7 +172,6 @@ def main():
         # Retorna lista vazia em caso de erro (fail-safe)
         print("[]")
         sys.exit(0)
-
 # No final de ambos os arquivos:
 if __name__ == "__main__":
     try:

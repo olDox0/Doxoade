@@ -3,15 +3,11 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-
 import click
-from colorama import Fore, Style
-
+from doxoade.tools.doxcolors import Fore, Style
 # Importa as ferramentas necessárias do módulo compartilhado
 from ..shared_tools import ExecutionLogger
-
 __version__ = "34.0 Alfa"
-
 @click.command('encoding')
 @click.pass_context
 @click.argument('targets', nargs=-1, required=True)
@@ -20,7 +16,6 @@ def encoding(ctx, targets):
     if len(targets) < 2:
         click.echo(Fore.RED + "[ERRO] Uso incorreto. Exemplo: doxoade encoding *.md UTF-8")
         return
-
     input_targets = targets[:-1]
     target_encoding_str = targets[-1]
     
@@ -30,11 +25,9 @@ def encoding(ctx, targets):
         'latin1': 'latin-1', 'iso-8859-1': 'latin-1'
     }
     target_encoding = encoding_aliases.get(target_encoding_str.lower(), target_encoding_str)
-
     arguments = {'targets': input_targets, 'encoding': target_encoding}
     with ExecutionLogger('encoding', '.', arguments) as logger:
         click.echo(Fore.CYAN + f"--- [ENCODING] Convertendo arquivos para {target_encoding.upper()} ---")
-
         files_to_process = set()
         for target in input_targets:
             found_files = list(Path('.').rglob(target))
@@ -43,12 +36,10 @@ def encoding(ctx, targets):
             for p in found_files:
                 if p.is_file():
                     files_to_process.add(p)
-
         if not files_to_process:
             logger.add_finding('warning', f"Nenhum arquivo encontrado para os alvos: {', '.join(input_targets)}")
             click.echo(Fore.YELLOW + "Nenhum arquivo correspondente encontrado.")
             return
-
         success_count, skipped_count, error_count = 0, 0, 0
         for file_path in sorted(list(files_to_process)):
             status, message = _change_file_encoding(file_path, target_encoding)
@@ -69,14 +60,12 @@ def encoding(ctx, targets):
         
         if logger.results['summary']['errors'] > 0:
             sys.exit(1)
-
 def _change_file_encoding(file_path, new_encoding):
     """Lê um arquivo, tenta detectar seu encoding, e o reescreve de forma segura."""
     encodings_to_try = [new_encoding, 'utf-8', sys.getdefaultencoding(), 'cp1252', 'latin-1']
     
     source_encoding = None
     content = None
-
     for enc in encodings_to_try:
         try:
             with open(file_path, 'r', encoding=enc) as f:
@@ -87,13 +76,10 @@ def _change_file_encoding(file_path, new_encoding):
             continue
         except (IOError, OSError) as e:
             return 'error', f"Não foi possível ler o arquivo: {e}"
-
     if not source_encoding:
         return 'error', "Não foi possível detectar a codificação original do arquivo."
-
     if source_encoding.lower() == new_encoding.lower():
         return 'skipped', ""
-
     try:
         with tempfile.NamedTemporaryFile(mode='w', encoding=new_encoding, delete=False, dir=os.path.dirname(file_path)) as temp_file:
             temp_filepath = temp_file.name

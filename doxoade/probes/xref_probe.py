@@ -3,7 +3,6 @@ import ast
 import sys
 import os
 import json
-
 def canonical(p):
     return os.path.abspath(p).replace('\\', '/').lower()
     
@@ -18,7 +17,6 @@ class ProjectIndexer(ast.NodeVisitor):
         self.current_file = None
         self.findings = []
         self.imports_map = {}
-
     def index_file(self, file_path):
         self.current_file = canonical(file_path) # <--- SEMPRE CANÔNICO
         self.index[self.current_file] = {'defs': {}}
@@ -29,7 +27,6 @@ class ProjectIndexer(ast.NodeVisitor):
             self.visit(tree)
         except Exception:
             pass 
-
     def visit_FunctionDef(self, node):
         # Detecta se é comando Click
         is_click = False
@@ -38,7 +35,6 @@ class ProjectIndexer(ast.NodeVisitor):
                 is_click = True
             elif isinstance(dec, ast.Attribute) and dec.attr in ['command', 'group']:
                 is_click = True
-
         args_count = len(node.args.args)
         defaults_count = len(node.args.defaults)
         min_args = args_count - defaults_count
@@ -51,16 +47,13 @@ class ProjectIndexer(ast.NodeVisitor):
             'is_click': is_click,
             'lineno': node.lineno
         }
-
     def visit_AsyncFunctionDef(self, node):
         self.visit_FunctionDef(node)
-
     def visit_ClassDef(self, node):
         self.index[self.current_file]['defs'][node.name] = {
             'type': 'class',
             'lineno': node.lineno
         }
-
     def visit_Assign(self, node):
         if node.col_offset == 0:
             for target in node.targets:
@@ -69,7 +62,6 @@ class ProjectIndexer(ast.NodeVisitor):
                         'type': 'variable',
                         'lineno': node.lineno
                     }
-
 class IntegrityChecker(ast.NodeVisitor):
     def __init__(self, index, project_root):
         self.index = index
@@ -77,7 +69,6 @@ class IntegrityChecker(ast.NodeVisitor):
         self.current_file = None
         self.findings = []
         self.imports_map = {} 
-
     def check_file(self, file_path):
         self.current_file = canonical(file_path)
         self.imports_map = {} 
@@ -88,7 +79,6 @@ class IntegrityChecker(ast.NodeVisitor):
             self.visit(tree)
         except Exception:
             pass
-
     def _resolve_module_path(self, module_name, level=0):
         """
         Resolve o caminho físico de um módulo com precisão cirúrgica.
@@ -106,7 +96,6 @@ class IntegrityChecker(ast.NodeVisitor):
         else:
             # Import Absoluto: Começa da raiz do projeto
             start_dir = self.project_root
-
         # 3. Constrói o caminho provável baseado nos pontos (modulo.submodulo)
         parts = module_name.split('.') if module_name else []
         
@@ -121,7 +110,6 @@ class IntegrityChecker(ast.NodeVisitor):
         can_pkg = canonical(candidate_pkg)
         if can_pkg in self.index:
             return can_pkg
-
         # Candidato C: Tenta a partir da raiz como fallback para imports ambíguos
         candidate_root = os.path.join(self.project_root, *parts) + ".py"
         can_root = canonical(candidate_root)
@@ -129,7 +117,6 @@ class IntegrityChecker(ast.NodeVisitor):
             return can_root
             
         return None
-
     def visit_ImportFrom(self, node):
         # Normaliza o modulo para busca (trata imports relativos simplificados)
         module_name = node.module if node.module else ""
@@ -140,7 +127,6 @@ class IntegrityChecker(ast.NodeVisitor):
         
         if not target_file or target_file not in self.index:
             return
-
         target_defs = self.index[target_file]['defs']
         for alias in node.names:
             if alias.name == '*': continue
@@ -153,14 +139,12 @@ class IntegrityChecker(ast.NodeVisitor):
             else:
                 local_name = alias.asname or alias.name
                 self.imports_map[local_name] = target_defs[alias.name]
-
     def visit_Call(self, node):
         func_name = None
         if isinstance(node.func, ast.Name):
             func_name = node.func.id
         
         if not func_name: return
-
         def_info = None
         
         # 1. Tenta resolver via Imports (Módulos externos indexados)
@@ -175,7 +159,6 @@ class IntegrityChecker(ast.NodeVisitor):
                 if def_info.get('is_click'):
                     self.generic_visit(node)
                     return
-
                 args_passed = len(node.args) + len(node.keywords)
                 min_req = def_info['min_args']
                 max_req = def_info['max_args']
@@ -200,7 +183,6 @@ class IntegrityChecker(ast.NodeVisitor):
         
         # Continua visitando os argumentos
         self.generic_visit(node)
-
 if __name__ == "__main__":
     try:
         if len(sys.argv) < 2:

@@ -9,10 +9,8 @@ import ast
 from packaging.requirements import Requirement
 # [DOX-UNUSED] from importlib.metadata import PackageNotFoundError
 from importlib import metadata
-from colorama import Fore, Style
-
+from doxoade.tools.doxcolors import Fore, Style
 from ..shared_tools import ExecutionLogger, _get_venv_python_executable, _get_project_config
-
 def _run_pip_command(venv_python, command):
     """Executa um comando pip e transmite a saída em tempo real."""
     try:
@@ -25,14 +23,12 @@ def _run_pip_command(venv_python, command):
     except FileNotFoundError:
         click.echo(Fore.RED + "Erro: O executável do pip ou do Python não foi encontrado no venv.")
         return False
-
 def _get_installed_version(package_name):
     """Verifica se um pacote está instalado e retorna sua versão."""
     try:
         return metadata.version(package_name)
     except metadata.PackageNotFoundError:
         return None
-
 def _update_requirements(package_name, version=None):
     """(Versão Corrigida) Adiciona ou remove um pacote do requirements.txt de forma segura."""
     req_file = 'requirements.txt'
@@ -42,7 +38,6 @@ def _update_requirements(package_name, version=None):
             with open(req_file, 'r', encoding='utf-8') as f:
                 # Lê as linhas e remove quebras de linha extras
                 lines = [line.strip() for line in f if line.strip()]
-
         normalized_package_name = package_name.lower().replace('_', '-')
         
         # Remove qualquer linha existente para este pacote
@@ -50,11 +45,9 @@ def _update_requirements(package_name, version=None):
             line for line in lines 
             if not line.lower().replace('_', '-').startswith(normalized_package_name)
         ]
-
         # Adiciona a nova linha se uma versão foi fornecida
         if version:
             lines.append(f"{package_name}=={version}")
-
         # Escreve o arquivo de volta, garantindo que cada entrada tenha sua própria linha
         with open(req_file, 'w', encoding='utf-8') as f:
             f.write("\n".join(sorted(lines)))
@@ -62,7 +55,6 @@ def _update_requirements(package_name, version=None):
         return True
     except IOError:
         return False
-
 # LÓGICA MOVIDA DO OPTIMIZE.PY
 def _find_unused_packages(logger, python_executable, debug=False):
     """Compara pacotes instalados com os importados. (Lógica do optimize)"""
@@ -71,7 +63,6 @@ def _find_unused_packages(logger, python_executable, debug=False):
     search_path = config.get('search_path')
     
 # Dentro da função _find_unused_packages em install.py
-
     _PROBE_SCRIPT = """
 import json
 from importlib import metadata
@@ -109,7 +100,6 @@ print(json.dumps(results))
         folders_to_ignore = {'venv', '.git', '__pycache__', 'build', 'dist'}
         config_ignore = {item.strip('/\\') for item in config.get('ignore', [])}
         folders_to_ignore.update(config_ignore)
-
         for root, dirs, files in os.walk(search_path, topdown=True):
             dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
             for file in files:
@@ -142,13 +132,11 @@ print(json.dumps(results))
             package_deps_map[pkg] = parsed_deps
         
         package_to_modules_map = probe_results.get("module_map", {})
-
         # --- ETAPA 3: O Tradutor (A Correção Chave) ---
         module_to_package_translator = {}
         for pkg_name, provided_modules in package_to_modules_map.items():
             for module in provided_modules:
                 module_to_package_translator[module] = pkg_name
-
         # --- ETAPA 4: Traduzir os `imports` para `pacotes` ---
         directly_used_packages = set()
         for imported_mod in imported_modules:
@@ -158,11 +146,9 @@ print(json.dumps(results))
         if debug:
             click.echo(Fore.CYAN + "\n[DEBUG] Pacotes diretamente utilizados (Após Tradução):")
             click.echo(str(sorted(list(directly_used_packages))))
-
         # --- ETAPA 5: Resolução de Dependências (agora com dados corretos) ---
         packages_to_keep = set(config.get('keep', []))
         initial_seed_packages = directly_used_packages | packages_to_keep
-
         fully_used_packages = set(initial_seed_packages)
         to_process = list(initial_seed_packages)
         
@@ -172,11 +158,9 @@ print(json.dumps(results))
                 if dep not in fully_used_packages:
                     fully_used_packages.add(dep)
                     to_process.append(dep)
-
         if debug:
             click.echo(Fore.CYAN + "\n[DEBUG] Pacotes em uso após resolver dependências:")
             click.echo(str(sorted(list(fully_used_packages))))
-
         all_installed_packages = set(package_deps_map.keys())
         essential_packages = {'pip', 'setuptools', 'wheel', 'doxoade', 'packaging', 'importlib-metadata'}
         
@@ -186,7 +170,6 @@ print(json.dumps(results))
     except Exception as e:
         logger.add_finding('ERROR', f"Falha ao analisar dependências: {e}", details=traceback.format_exc())
         return None
-
 @click.command('install')
 @click.pass_context
 @click.argument('packages', nargs=-1)
@@ -202,7 +185,6 @@ def install(ctx, packages, uninstall, optimize):
             logger.add_finding("CRITICAL", msg, category="VENV")
             click.echo(Fore.RED + f"[ERRO] {msg}")
             sys.exit(1)
-
         # MODO DE OTIMIZAÇÃO (NOVA FUNCIONALIDADE)
         if optimize:
             click.echo(Fore.CYAN + "--- [OPTIMIZE] Analisando dependências não utilizadas ---")
@@ -211,10 +193,8 @@ def install(ctx, packages, uninstall, optimize):
             if unused_packages is None: sys.exit(1)
             if not unused_packages:
                 click.echo(Fore.GREEN + "\n[OK] Nenhuma dependência órfã encontrada."); return
-
             click.echo(Fore.YELLOW + "\nPacotes não utilizados encontrados:")
             for pkg in unused_packages: click.echo(f"  - {pkg}")
-
             if click.confirm(Fore.RED + "\nDeseja desinstalar estes pacotes E removê-los do requirements.txt?", abort=True):
                 if not _run_pip_command(venv_python, ['uninstall', '-y'] + unused_packages):
                     logger.add_finding("ERROR", "Falha na desinstalação durante a otimização.", category="PIP")
@@ -229,7 +209,6 @@ def install(ctx, packages, uninstall, optimize):
                 
                 click.echo(Fore.GREEN + Style.BRIGHT + "\nOtimização concluída.")
             return
-
         # MODO DE DESINSTALAÇÃO
         if uninstall:
             if not packages:
@@ -240,43 +219,35 @@ def install(ctx, packages, uninstall, optimize):
             if not _run_pip_command(venv_python, ['uninstall', '-y'] + list(packages)):
                 logger.add_finding("ERROR", "Falha na desinstalação via pip.", category="PIP")
                 return
-
             for package_name in packages:
                 if _update_requirements(package_name):
                     click.echo(Fore.GREEN + f"'{package_name}' removido do requirements.txt.")
                     logger.add_finding("INFO", f"Pacote '{package_name}' removido.", category="REQUIREMENTS")
                 else:
                     click.echo(Fore.RED + f"Erro ao remover '{package_name}' do requirements.txt.")
-
             click.echo(Fore.GREEN + Style.BRIGHT + "\nDesinstalação concluída.")
             return
-
         # MODO DE SINCRONIZAÇÃO
         if not packages:
             click.echo(Fore.CYAN + "--- Sincronizando ambiente com requirements.txt ---")
             if not os.path.exists('requirements.txt'):
                 click.echo(Fore.YELLOW + "Arquivo 'requirements.txt' não encontrado. Nada a fazer.")
                 return
-
             if _run_pip_command(venv_python, ['install', '-r', 'requirements.txt']):
                 click.echo(Fore.GREEN + Style.BRIGHT + "\nAmbiente sincronizado com sucesso.")
                 logger.add_finding("INFO", "Ambiente sincronizado.", category="PIP")
             else:
                 logger.add_finding("ERROR", "Falha na sincronização via pip.", category="PIP")
             return
-
         # MODO DE INSTALAÇÃO
         click.echo(Fore.CYAN + f"--- Instalando pacote(s): {', '.join(packages)} ---")
-
         for package_name in packages:
             installed_version = _get_installed_version(package_name)
             if installed_version:
                 click.echo(Fore.YELLOW + f"[AVISO] Pacote '{package_name}' já está instalado (versão {installed_version}).")
-
         if not _run_pip_command(venv_python, ['install'] + list(packages)):
             logger.add_finding("ERROR", "Falha na instalação via pip.", category="PIP")
             return
-
         click.echo(Fore.CYAN + "\n--- Atualizando requirements.txt ---")
         for package_name in packages:
             new_version = _get_installed_version(package_name)

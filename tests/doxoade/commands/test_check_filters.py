@@ -2,7 +2,6 @@
 import pytest
 import os
 from doxoade.commands.check_filters import filter_and_inject_findings
-
 def test_filter_noqa_silencing(tmp_path):
     """Garante que erros em linhas com # noqa sejam removidos."""
     file_p = tmp_path / "app.py"
@@ -18,7 +17,6 @@ def test_filter_noqa_silencing(tmp_path):
     # Com # noqa, a lista deve vir vazia
     result = filter_and_inject_findings(findings, str(file_p))
     assert len(result) == 0
-
 def test_facade_file_logic(tmp_path):
     """Verifica se avisos de 'unused' são ignorados em arquivos de fachada."""
     file_p = tmp_path / "shared_tools.py" # Arquivo na whitelist
@@ -32,7 +30,6 @@ def test_facade_file_logic(tmp_path):
     
     result = filter_and_inject_findings(findings, str(file_p))
     assert len(result) == 0
-
 def test_todo_injection(tmp_path):
     """Valida se comentários TODO viram achados INFO."""
     file_p = tmp_path / "logic.py"

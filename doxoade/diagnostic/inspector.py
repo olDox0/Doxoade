@@ -10,7 +10,6 @@ from ..tools.git import (
     _get_last_commit_info
 )
 #from doxoade.tools.git import (
-
 class SystemInspector:
     
     def check_environment(self):
@@ -26,7 +25,6 @@ class SystemInspector:
         
         # Determina o caminho do Venv para exibição
         venv_path = env_venv if env_venv else (sys.prefix if sys_venv else sys.executable)
-
         # 3. Fallback: Se não detectou, mas o executável está dentro de uma pasta 'venv' local
         if not is_venv:
             # Normaliza caminhos para evitar problemas de case no Windows
@@ -36,7 +34,6 @@ class SystemInspector:
             if cwd_lower in exe_lower and ("venv" in exe_lower or "scripts" in exe_lower):
                 is_venv = True
                 venv_path = sys.prefix
-
         # Detecta gerenciador de pacotes
         pkg_manager = "pip"
         if shutil.which("poetry"): pkg_manager = "poetry"
@@ -52,14 +49,12 @@ class SystemInspector:
             "cwd": os.getcwd(),
             "package_manager": pkg_manager
         }
-
     def check_git_health(self, detailed: bool = False, show_code: bool = False, target_path: str = None):
         """Verifica o repositório com suporte a foco em path específico."""
         try:
             # Verifica se é repo
             is_repo = _run_git_command(['rev-parse', '--is-inside-work-tree'], capture_output=True, silent_fail=True)
             if not is_repo or is_repo.strip() != 'true': return {"is_git_repo": False}
-
             branch = _run_git_command(['branch', '--show-current'], capture_output=True, silent_fail=True)
             
             # Status filtrado por path se fornecido
@@ -74,16 +69,13 @@ class SystemInspector:
                 "pending_count": len(status.splitlines()) if status else 0,
                 "last_commit_info": _get_last_commit_info()
             }
-
             if detailed and git_data['dirty_tree']:
                 git_data['changes'] = _get_detailed_diff_stats(show_code=show_code, target_path=target_path)
             else:
                 git_data['pending_files'] = [l.strip() for l in status.splitlines()] if status else []
-
             return git_data
         except Exception as e:
             return {"is_git_repo": False, "error": str(e)}
-
     def verify_core_modules(self):
         """Verifica a integridade dos módulos principais."""
         modules = [
@@ -105,7 +97,6 @@ class SystemInspector:
             except Exception as e:
                 results[mod] = f"CRASH ({e})"
         return results
-
     def run_full_diagnosis(self, detailed: bool = False, show_code: bool = False, target_path: str = None):
         return {
             "environment": self.check_environment(),

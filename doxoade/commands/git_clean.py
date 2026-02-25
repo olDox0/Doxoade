@@ -2,14 +2,10 @@
 import os
 import sys
 import fnmatch
-
 import click
-from colorama import Fore
-
+from doxoade.tools.doxcolors import Fore
 from ..shared_tools import ExecutionLogger, _run_git_command
-
 __version__ = "37.3 Alfa (Hardening)"
-
 def _read_gitignore(path, logger):
     """Lê e processa os padrões do arquivo .gitignore."""
     gitignore_path = os.path.join(path, '.gitignore')
@@ -22,7 +18,6 @@ def _read_gitignore(path, logger):
     except IOError as e:
         logger.add_finding('error', f"Não foi possível ler o .gitignore: {e}")
         return None
-
 def _find_mismatched_files(ignore_patterns, logger):
     """Encontra arquivos rastreados pelo Git que correspondem aos padrões ignorados."""
     tracked_files_str = _run_git_command(['ls-files'], capture_output=True)
@@ -37,7 +32,6 @@ def _find_mismatched_files(ignore_patterns, logger):
         matches = fnmatch.filter(tracked_files, normalized_pattern)
         files_to_remove.update(matches)
     return sorted(list(files_to_remove))
-
 def _untrack_files(files_to_remove, logger):
     """Executa 'git rm --cached' para cada arquivo e verifica o sucesso."""
     click.echo(Fore.CYAN + "Removendo arquivos do índice do Git...")
@@ -55,7 +49,6 @@ def _untrack_files(files_to_remove, logger):
         logger.add_finding('error', "Ocorreu um erro ao remover um ou mais arquivos do índice.")
         click.echo(Fore.RED + "[ERRO] Falha ao remover um ou mais arquivos.")
         return False
-
 @click.command('git-clean')
 @click.pass_context
 def git_clean(ctx):
@@ -67,10 +60,8 @@ def git_clean(ctx):
         
         ignore_patterns = _read_gitignore(path, logger)
         if ignore_patterns is None: sys.exit(1)
-
         files_to_remove = _find_mismatched_files(ignore_patterns, logger)
         if files_to_remove is None: sys.exit(1)
-
         if not files_to_remove:
             click.echo(Fore.GREEN + "[OK] Nenhum arquivo rastreado indevidamente encontrado."); return
     

@@ -5,7 +5,6 @@ import os
 import json
 import traceback
 import types
-
 def _bootstrap(script_path):
     """Detecta a raiz do projeto e o nome correto do pacote (Aegis Ready)."""
     abs_path = os.path.abspath(script_path)
@@ -39,14 +38,12 @@ def _bootstrap(script_path):
         print(f"\033[31m ■ Exception type: {e} ■ Exception value: {exc_obj}\n")
         exc_trace(exc_tb)
         return None
-
 def safe_serialize(obj, depth=0):
     if depth > 2: return "..."
     if isinstance(obj, (str, int, float, bool, type(None))): return obj
     if isinstance(obj, (list, tuple)): return [safe_serialize(x, depth+1) for x in obj[:5]]
     if isinstance(obj, dict): return {str(k): safe_serialize(v, depth+1) for k, v in list(obj.items())[:5]}
     return str(type(obj).__name__)
-
 def _capture_locals(globs):
     """Resgata variáveis do escopo após a execução (Aegis Shield)."""
     captured = {}
@@ -55,19 +52,16 @@ def _capture_locals(globs):
         if not k.startswith('__') and not isinstance(v, types.ModuleType):
             captured[k] = safe_serialize(v)
     return captured
-
 def run_debug(script_path):
     abs_path = os.path.abspath(script_path)
 # [DOX-UNUSED]     package_name = _bootstrap(abs_path)
     
     debug_data = {'status': 'unknown', 'variables': {}, 'error': None}
-
     globs = {
         '__name__': '__main__',
         '__file__': abs_path,
         '__package__': None, # package_name,
     }
-
     try:
         sys.stdout.write("\n--- BOOTING AEGIS SANDBOX ---\n")
         sys.stdout.flush() 
@@ -75,7 +69,6 @@ def run_debug(script_path):
 #        with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
         with open(abs_path, 'r', encoding='utf-8') as f:
             content = f.read()
-
         # Execução via Aegis com permissão de import para depuração de infra
         restricted_safe_exec(content, globs, allow_imports=True)
         
@@ -89,7 +82,6 @@ def run_debug(script_path):
                     import logging as _dox_log
                     _dox_log.error(f"[INFRA] run_debug: {e}")
                     continue
-
     except Exception as e:
         import sys as exc_sys
         from traceback import print_tb as exc_trace
@@ -106,10 +98,8 @@ def run_debug(script_path):
         for k, v in frame.f_locals.items():
             if not k.startswith('__'):
                  debug_data['variables'][k] = safe_serialize(v)
-
     print("\n---DOXOADE-DEBUG-DATA---")
     print(json.dumps(debug_data, ensure_ascii=False))
-
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         run_debug(sys.argv[1])

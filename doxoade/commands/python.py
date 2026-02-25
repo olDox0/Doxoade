@@ -4,13 +4,10 @@ import os
 import subprocess
 import webbrowser
 import click
-from colorama import Fore, Style
-
+from doxoade.tools.doxcolors import Fore, Style
 from ..shared_tools import ExecutionLogger
-
 # URL oficial para a versão específica do Python.
 PYTHON_WINDOWS_URL = "https://www.python.org/downloads/release/python-3124/"
-
 def _install_for_termux(logger):
     """Executa os comandos de instalação do Python para o ambiente Termux."""
     click.echo(Fore.CYAN + "Ambiente Termux detectado. Iniciando a instalação do Python...")
@@ -36,7 +33,6 @@ def _install_for_termux(logger):
         logger.add_finding("INFO", "Python instalado com sucesso via pkg.", category="INSTALL", details=install_result.stdout)
         click.echo(Fore.GREEN + Style.BRIGHT + "\n[SUCESSO] Python e Pip foram instalados no Termux.")
         click.echo(Fore.WHITE + "Reinicie o Termux e execute 'python --version' para confirmar.")
-
     except FileNotFoundError:
         msg = "'pkg' não encontrado. Este comando parece não estar rodando em um ambiente Termux padrão."
         logger.add_finding("ERROR", msg, category="INSTALL")
@@ -49,8 +45,6 @@ def _install_for_termux(logger):
     except Exception as e:
         logger.add_finding("CRITICAL", "Um erro inesperado ocorreu durante a instalação.", category="INSTALL", details=str(e))
         click.echo(Fore.RED + f"[ERRO INESPERADO] {e}")
-
-
 @click.command('python')
 @click.pass_context
 def python(ctx):
@@ -70,7 +64,6 @@ def python(ctx):
             except Exception as e:
                 logger.add_finding("ERROR", "Não foi possível abrir o navegador.", category="INSTALL", details=str(e))
                 click.echo(Fore.RED + f"[ERRO] Não foi possível abrir o navegador. Por favor, acesse manualmente:\n{PYTHON_WINDOWS_URL}")
-
         # Lógica para Termux/Linux
         elif 'linux' in sys.platform or 'android' in sys.platform:
             # A variável de ambiente 'TERMUX_VERSION' é um indicador confiável

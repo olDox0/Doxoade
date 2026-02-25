@@ -3,15 +3,12 @@ import sys
 import os
 #import click
 from click.testing import CliRunner
-
 # Adiciona a raiz do projeto ao path para imports relativos funcionarem
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
 sys.path.insert(0, project_root)
-
 # Importa a CLI principal para acessar os comandos
 from doxoade.cli import cli
-
 def run_internal_command(command_name, args):
     """
     Simula a execução de um comando interno do Doxoade para análise de Flow.
@@ -33,7 +30,6 @@ def run_internal_command(command_name, args):
         print("[WRAPPER SUCCESS] Comando finalizado.")
         # O output do comando é capturado pelo runner, então imprimimos manualmente
         print(result.output)
-
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Uso: python command_wrapper.py <comando> [args...]")

@@ -3,13 +3,11 @@
 Testes de Regressão - Classificação Semântica
 ==============================================
 Garante que a lógica de classificação nunca seja perdida novamente.
-
 Execute:
     pytest tests/test_classification_regression.py -v
 """
 import pytest
 from doxoade.analysis.semantic_classifier import classify_finding, enrich_findings
-
 class TestSemanticClassification:
     """Testes de classificação básica."""
     
@@ -48,7 +46,6 @@ class TestSemanticClassification:
         result = classify_finding("Some unknown error message")
         assert result['category'] == 'UNCATEGORIZED'
         assert result['severity'] == 'WARNING'
-
 class TestEnrichFindings:
     """Testes de enriquecimento em batch."""
     
@@ -87,7 +84,6 @@ class TestEnrichFindings:
         assert enriched[0]['category'] == 'DEADCODE'
         assert enriched[1]['category'] == 'RUNTIME-RISK'
         assert enriched[2]['category'] == 'SYNTAX'
-
 class TestCriticalRegressions:
     """
     Casos que causaram regressões no passado.
@@ -135,7 +131,6 @@ class TestCriticalRegressions:
             result = classify_finding(msg)
             assert result['severity'] in ['CRITICAL', 'ERROR'], \
                 f"Mensagem '{msg}' foi incorretamente classificada como {result['severity']}"
-
 class TestEdgeCases:
     """Casos extremos e boundary conditions."""
     
@@ -159,7 +154,6 @@ class TestEdgeCases:
         msg = "Error on line 1\nCaused by: something"
         result = classify_finding(msg)
         assert result is not None
-
 # === FIXTURES DE TESTE ===
 @pytest.fixture
 def sample_findings():
@@ -181,7 +175,6 @@ def sample_findings():
             'line': 10
         }
     ]
-
 @pytest.fixture
 def expected_categories():
     """Mapeamento esperado de categorias."""
@@ -190,7 +183,6 @@ def expected_categories():
         "undefined name 'foo'": 'RUNTIME-RISK',
         "f-string is missing placeholders": 'STYLE'
     }
-
 # === TESTES DE INTEGRAÇÃO ===
 class TestIntegrationWithEngine:
     """Testes de integração com o Engine (se disponível)."""
@@ -227,7 +219,6 @@ test.py:15:1: f-string is missing placeholders"""
         for line in lines:
             match = re.match(r'(.+?):(\d+):(\d+):\s(.+)', line)
             assert match is not None, f"Linha inválida: {line}"
-
 # === TESTES DE PERFORMANCE ===
 class TestPerformance:
     """Garante que a classificação não degrada performance."""
@@ -240,7 +231,6 @@ class TestPerformance:
         """Enriquecimento de 100 findings deve ser < 10ms."""
         findings = [{'message': f"Error {i}"} for i in range(100)]
         benchmark(enrich_findings, findings)
-
 # === DOCUMENTAÇÃO DOS TESTES ===
 """
 COBERTURA DE TESTES:
@@ -251,23 +241,17 @@ COBERTURA DE TESTES:
 ✅ Edge cases (4 casos extremos)
 ✅ Integração com Engine (2 casos)
 ✅ Performance (2 benchmarks)
-
 TOTAL: 20 testes
-
 COMO EXECUTAR:
 --------------
 # Todos os testes
 pytest tests/test_classification_regression.py -v
-
 # Apenas regressões críticas
 pytest tests/test_classification_regression.py::TestCriticalRegressions -v
-
 # Com cobertura
 pytest tests/test_classification_regression.py --cov=doxoade.analysis.semantic_classifier
-
 # Benchmarks de performance
 pytest tests/test_classification_regression.py --benchmark-only
-
 ADICIONANDO NOVOS TESTES:
 --------------------------
 Quando descobrir uma nova regressão:

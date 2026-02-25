@@ -3,20 +3,15 @@ import os
 import sys
 import subprocess
 import re
-
 import click
-from colorama import Fore
-
+from doxoade.tools.doxcolors import Fore
 # Importa as ferramentas necessárias do módulo compartilhado
 from ..shared_tools import (
     ExecutionLogger,
     _run_git_command
 )
-
 #init(autoreset=True)
-
 __version__ = "34.0 Alfa"
-
 @click.command('init')
 @click.pass_context
 @click.argument('project_name', required=False)
@@ -25,7 +20,6 @@ def init(ctx, project_name, remote):
     """Cria a estrutura de um novo projeto e, opcionalmente, o publica no GitHub."""
     arguments = ctx.params
     path = '.' # O comando 'init' opera a partir do diretório atual
-
     with ExecutionLogger('init', path, arguments) as logger:
         click.echo(Fore.CYAN + "--- [INIT] Assistente de Criação de Novo Projeto ---")
         if not project_name:
@@ -53,10 +47,8 @@ def init(ctx, project_name, remote):
             
             click.echo("   > Criando ambiente virtual 'venv'...")
             subprocess.run([sys.executable, "-m", "venv", os.path.join(project_path, "venv")], check=True, capture_output=True)
-
             click.echo("   > Criando arquivo .gitignore...")
             gitignore_content = (f"# {project_name} .gitignore\n\nvenv/\n__pycache__/\n*.py[cod]\nbuild/\ndist/\n*.egg-info/\n.vscode/\n.idea/\n.env\n\n# --- Arquivos de Cache do Python ---\n\n__pycache__/\n*.py[cod]\n*.pyc\n*.pyo\n*.pyd\n\n# --- Arquivos de Ambiente Virtual ---\n\nvenv/\n.venv/\nenv/\n.env\n\n# --- Arquivos de Build e Distribuição (para PyInstaller) ---\n\nbuild/\ndist/\n*.egg-info/\n*.spec\n\n# --- ARQUIVOS SENSÍVEIS E DE USUÁRIO (NUNCA COMPARTILHAR) ---\n\n*.json\n*.log\n*.old\n*.txt\n*.bkp\n*.bak\n*.dox\n*.nppBackup\n\nExemplo/\ntmp/\n\n# --- Arquivos de Configuração de IDE ---\n\n.vscode/\n.idea/\n\n# --- Arquivos de sistema do Windows ---\n\ndesktop.ini\nThumbs.db\n# --- BACKUPS E ARQUIVOS TEMPORÁRIOS ---\n\nVers/\n\n*.mak\n*.log\n\n# --- Doxoade cache files\n\n.doxoade_cache/\n.dox_agent_workspace/\n.dox_lab/\ndoxoade/opt/\n\n# Exceções (Auto-fixed pelo Doxoade)\n\n!requirements.txt\n")
-
             with open(os.path.join(project_path, ".gitignore"), "w", encoding="utf-8") as f: f.write(gitignore_content)
             
             click.echo("   > Criando arquivo requirements.txt...")
@@ -65,15 +57,12 @@ def init(ctx, project_name, remote):
             click.echo("   > Criando arquivo main.py inicial...")
             main_py_content = (f"def main():\n    print(\"Bem-vindo ao {project_name}!\")\n\nif __name__ == '__main__':\n    main()\n")
             with open(os.path.join(project_path, "main.py"), "w", encoding="utf-8") as f: f.write(main_py_content)
-
             click.echo("   > Inicializando repositório Git...")
             os.chdir(project_path)
             if not _run_git_command(['init', '-b', 'main']):
                 logger.add_finding('error', "Falha ao inicializar o repositório Git.")
                 sys.exit(1)
-
             click.echo(Fore.GREEN + "\n[OK] Estrutura local do projeto criada com sucesso!")
-
             # --- LÓGICA DE PUBLICAÇÃO AUTOMÁTICA ---
             if remote:
                 click.echo(Fore.CYAN + "\n--- Publicando projeto no repositório remoto ---")
@@ -87,26 +76,22 @@ def init(ctx, project_name, remote):
                 if not _run_git_command(['add', '.']):
                     logger.add_finding('error', "Falha ao executar 'git add .'.")
                     sys.exit(1)
-
                 commit_message = f"Commit inicial: Estrutura do projeto {project_name}"
                 click.echo(f"   > Criando commit inicial com a mensagem: '{commit_message}'...")
                 if not _run_git_command(['commit', '-m', commit_message]):
                     logger.add_finding('error', "Falha ao executar 'git commit'.")
                     sys.exit(1)
-
                 click.echo("   > Enviando para o branch 'main' no remote 'origin' (git push)...")
                 if not _run_git_command(['push', '--set-upstream', 'origin', 'main']):
                     msg = "Falha ao enviar. Verifique a URL, suas permissões e se o repositório remoto está VAZIO."
                     logger.add_finding('error', msg)
                     click.echo(Fore.RED + f"[ERRO] {msg}")
                     sys.exit(1)
-
                 click.echo(Fore.GREEN + "\n[OK] Projeto publicado com sucesso!")
                 click.echo(f"   > Veja seu repositório em: {remote}")
             
             else:
                 click.echo(Fore.YELLOW + "\nLembrete: Este é um projeto local. Para publicá-lo mais tarde, use 'doxoade git-new'.")
-
         except Exception as e:
             logger.add_finding('fatal_error', f"Ocorreu um erro inesperado durante a inicialização: {e}")
             click.echo(Fore.RED + f"[ERRO] Ocorreu um erro inesperado: {e}")

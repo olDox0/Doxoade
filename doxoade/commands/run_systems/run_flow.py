@@ -2,9 +2,8 @@
 """Especialista de Rastro Nexus Flow (PASC 8.5)."""
 import os
 import click
-from colorama import Fore
+from doxoade.tools.doxcolors import Fore
 from ...probes import flow_runner
-
 def execute_flow(path: str, **kwargs):
     """Orquestra a execução com rastro visual Matrix."""
     abs_path = os.path.abspath(path)

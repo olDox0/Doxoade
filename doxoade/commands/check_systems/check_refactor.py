@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 """Motor de Sugestão de Refatoração (PASC 1.0)."""
-
 from .check_state import CheckState
-
 def analyze_refactor_opportunities(state: CheckState):
     """Varre achados em busca de gatilhos para o AutoFixer."""
     for f in state.findings:
@@ -13,10 +11,8 @@ def analyze_refactor_opportunities(state: CheckState):
         
         elif "except:" in msg or ("except" in msg and ":" in msg and "exception" not in msg):
             f['suggestion_action'] = "RESTRICT_EXCEPTION"
-
         elif "imported but unused" in msg:
             f['suggestion_action'] = "FIX_UNUSED_IMPORT"
-
         elif "assigned to but never used" in msg:
             # Proteção contra Multiple Assignment (MPoT-8)
             # A lógica de segurança permanece no genesis.py/fixer.py

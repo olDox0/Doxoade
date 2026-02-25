@@ -2,7 +2,7 @@
 import subprocess
 import os
 import re
-from colorama import Fore
+from doxoade.tools.doxcolors import Fore
 
 def _run_git_command(args, capture_output=False, silent_fail=False):
     """Executa um comando git de forma segura e codificada."""

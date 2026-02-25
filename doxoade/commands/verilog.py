@@ -3,9 +3,8 @@ import click
 import os
 import subprocess
 import re
-from colorama import Fore
+from doxoade.tools.doxcolors import Fore
 from ..shared_tools import ExecutionLogger, _get_project_config, _get_code_snippet
-
 def check_iverilog_installed():
     """Verifica se o Icarus Verilog está no PATH."""
     try:
@@ -13,7 +12,6 @@ def check_iverilog_installed():
         return True
     except (FileNotFoundError, subprocess.CalledProcessError):
         return False
-
 def find_verilog_library_dirs(root_path, ignore_dirs):
     """Encontra diretórios que contêm arquivos Verilog."""
     lib_dirs = set()
@@ -22,7 +20,6 @@ def find_verilog_library_dirs(root_path, ignore_dirs):
         if any(f.endswith(('.v', '.sv')) for f in files):
             lib_dirs.add(root)
     return list(lib_dirs)
-
 def parse_iverilog_output(output):
     """Minera o output do iverilog."""
     findings = []
@@ -50,7 +47,6 @@ def parse_iverilog_output(output):
             elif 'already declared' in msg_lower:
                 category = 'DUPLICATE'
                 severity = 'CRITICAL'
-
             findings.append({
                 'file': match.group('file'),
                 'line': int(match.group('line')),
@@ -59,7 +55,6 @@ def parse_iverilog_output(output):
                 'category': category
             })
     return findings
-
 def scan_verilog_files(path, ignore_set):
     """Coleta arquivos alvo."""
     verilog_files = []
@@ -69,7 +64,6 @@ def scan_verilog_files(path, ignore_set):
             if file.endswith(('.v', '.sv')):
                 verilog_files.append(os.path.join(root, file))
     return verilog_files
-
 @click.command('verilog')
 @click.pass_context
 @click.argument('path', type=click.Path(exists=True), default='.')
@@ -84,7 +78,6 @@ def verilog(ctx, path, entrypoint, no_libs):
         
         if not check_iverilog_installed():
             click.echo(Fore.RED + "[ERRO] 'iverilog' não encontrado no PATH."); return
-
         config = _get_project_config(logger, start_path=path)
         ignore_list = set(config.get('ignore', [])) | {'venv', '.git', 'build', 'sim', 'Vers', 'bkp', 'tmp', '__pycache__'}
         
@@ -100,19 +93,15 @@ def verilog(ctx, path, entrypoint, no_libs):
         else:
             target_files = scan_verilog_files(path, ignore_list)
             click.echo(f"   > Verificando {len(target_files)} arquivos...")
-
         if not target_files:
             click.echo(Fore.YELLOW + "Nenhum arquivo Verilog encontrado."); return
-
         files_with_errors = 0
         
         # Define a lista de execução
         # Se entrypoint, roda só ele. Se não, roda todos.
         run_list = [entrypoint] if entrypoint else target_files
-
         for v_file in run_list:
             if not v_file: continue # Segurança
-
             cmd = ['iverilog', '-t', 'null', '-g2012', '-Wall']
             
             for d in lib_dirs:
@@ -124,7 +113,6 @@ def verilog(ctx, path, entrypoint, no_libs):
                     cmd.extend(['-y', d])
             
             cmd.append(v_file)
-
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
                 output = result.stderr + result.stdout
@@ -138,11 +126,9 @@ def verilog(ctx, path, entrypoint, no_libs):
                         for f in findings:
                             # Ignora avisos de linkagem se não estamos no modo entrypoint e nem no modo libs
                             if not entrypoint and f['category'] == 'LINKING': pass
-
                             if not has_printed_header:
                                 files_with_errors += 1
                                 has_printed_header = True
-
                             severity_color = Fore.RED if f['severity'] in ['CRITICAL', 'ERROR'] else Fore.YELLOW
                             click.echo(severity_color + f"[{f['severity']}][{f['category']}] {f['message']}")
                             click.echo(Fore.WHITE + f"   > Em '{f['file']}:{f['line']}'")
@@ -155,10 +141,8 @@ def verilog(ctx, path, entrypoint, no_libs):
                                     click.echo(l_color + f"{prefix}{lnum:4}: {text}")
                             
                             logger.add_finding(**f)
-
             except Exception as e:
                 click.echo(Fore.RED + f"[CRASH] Falha ao analisar {v_file}: {e}")
-
         if files_with_errors == 0:
             click.echo(Fore.GREEN + "\n[OK] Hardware validado com sucesso.")
         else:

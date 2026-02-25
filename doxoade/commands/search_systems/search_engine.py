@@ -3,37 +3,29 @@
 import os
 # [DOX-UNUSED] import subprocess
 from pathlib import Path
-
 from .search_state import SearchState
 from ...tools.streamer import ufs
 from ...tools.vulcan.bridge import vulcan_bridge
-
 def run_search_engine(state: SearchState, filters: dict):
     """Orquestra a busca multidimensional (v91.1)."""
     q = state.query
     limit = state.limit
     # Normalização de path para SQL no Windows
     path_filter = os.getcwd().replace('\\', '/').lower() if filters.get('here') else None
-
     # 1. Código Local
     if filters.get('run_code'):
         state.matches = _search_code_logic(Path(state.root), q, limit)
-
     # 2. Timeline
     if filters.get('run_time'):
         state.timeline = _search_timeline_logic(q, limit, path_filter)
-
     # 3. Banco de Dados
     if filters.get('run_db'):
         state.db_results = _search_database_logic(q, limit, path_filter)
-
     # 4. Git
     if filters.get('commits'):
         from .search_utils import _handle_git_search
         state.git_results = _handle_git_search(q, limit)
-
 # --- MOTORES PRIVADOS ---
-
 def _search_code_logic(root: Path, query: str, limit: int) -> list:
     matches = []
     q_lower = query.lower()
@@ -44,7 +36,6 @@ def _search_code_logic(root: Path, query: str, limit: int) -> list:
     # Busca por acelerador Vulcano específico para busca
     # O Bridge agora busca por assinaturas de "vulcan_search"
     v_mod = vulcan_bridge.get_optimized_module("vulcan_search")
-
     for r, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if d not in QUARANTINE]
         for filename in files:
@@ -84,7 +75,6 @@ def _search_code_logic(root: Path, query: str, limit: int) -> list:
                 print(f"\033[0;33m _search_code_logic - Exception: {e}")
                 continue
     return matches
-
 def _search_database_logic(query, limit, path_filter) -> dict:
     from ...database import get_db_connection
     from sqlite3 import Row
@@ -126,7 +116,6 @@ def _search_database_logic(query, limit, path_filter) -> dict:
         exc_trace(exc_tb)
     finally: conn.close()
     return res
-
 def _search_timeline_logic(query, limit, path_filter) -> list:
     from ...database import get_db_connection
     from sqlite3 import Row

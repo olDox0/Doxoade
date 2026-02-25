@@ -4,16 +4,13 @@ Módulo de Inteligência de Engenharia (Dashboard).
 Consolida métricas de erros e tendências utilizando dados do banco Sapiens.
 Versão compatível com auditoria de segurança Bandit e MPoT.
 """
-
 import click
 import sqlite3
 from collections import Counter
 from rich.console import Console
 from rich.table import Table
-
 # Importa a conexão centralizada
 from ..database import get_db_connection
-
 def _display_error_trend_db(cursor: sqlite3.Cursor):
     """
     Exibe o número de erros por comando de forma visual com Rich.
@@ -27,7 +24,6 @@ def _display_error_trend_db(cursor: sqlite3.Cursor):
     table = Table(title="📊 Tendência de Erros por Comando", title_style="bold cyan")
     table.add_column("Comando", style="white")
     table.add_column("Erros/Críticos", justify="right", style="red")
-
     try:
         cursor.execute("""
             SELECT e.command, COUNT(f.id) as total
@@ -49,7 +45,6 @@ def _display_error_trend_db(cursor: sqlite3.Cursor):
         console.print(table)
     except sqlite3.Error as e:
         console.print(f"[yellow]Aviso: Falha ao gerar tendência de erros: {e}[/yellow]")
-
 def _display_common_issues_db(cursor: sqlite3.Cursor):
     """
     Agrupa e exibe os 5 padrões de erro mais frequentes.
@@ -72,22 +67,17 @@ def _display_common_issues_db(cursor: sqlite3.Cursor):
         if not rows:
             console.print("[dim]Nenhum problema comum catalogado.[/dim]")
             return
-
         messages = [row['message'].split("'")[0].strip() for row in rows]
         counts = Counter(messages).most_common(5)
-
         table = Table(show_header=True, header_style="bold magenta")
         table.add_column("Frequência", justify="center", style="dim")
         table.add_column("Padrão de Erro")
-
         for msg, freq in counts:
             table.add_row(f"{freq}x", msg)
         
         console.print(table)
-
     except sqlite3.Error as e:
         console.print(f"[red]Erro na análise de recorrência: {e}[/red]")
-
 @click.command('dashboard')
 @click.option('--project', default=None, help="Filtra o dashboard para um projeto específico.")
 def dashboard(project):
@@ -107,10 +97,8 @@ def dashboard(project):
             
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-
         _display_error_trend_db(cursor)
         _display_common_issues_db(cursor)
-
     except Exception as e:
         console.print(f"[bold red]\nErro inesperado no Dashboard: {e}[/bold red]")
     finally:

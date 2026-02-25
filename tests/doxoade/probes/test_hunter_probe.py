@@ -2,9 +2,7 @@ import sys
 import subprocess
 import os
 import json
-
 PROBE_PATH = os.path.join("doxoade", "probes", "hunter_probe.py")
-
 def test_hunter_detects_eval(tmp_path):
     """Verifica se uso de eval é detectado como CRITICAL SECURITY."""
     f = tmp_path / "risky.py"
@@ -21,7 +19,6 @@ def test_hunter_detects_eval(tmp_path):
     # Procura o finding específico
     found = any(f['category'] == 'SECURITY' and 'eval' in f['message'] for f in data)
     assert found, "Hunter não detectou 'eval'"
-
 def test_hunter_detects_mutable_arg(tmp_path):
     """Verifica argumento mutável."""
     f = tmp_path / "mutable.py"

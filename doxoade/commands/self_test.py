@@ -4,9 +4,8 @@ import subprocess
 import tempfile
 import shutil
 import click
-from colorama import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style
 from ..shared_tools import ExecutionLogger
-
 TEST_CASES = {
     "check": {
         "filename": "broken_code.py",
@@ -19,7 +18,6 @@ TEST_CASES = {
         "expected_finding": "Link quebrado para 'pagina_inexistente.html'"
     }
 }
-
 def _setup_test_env(project_dir):
     """Cria um venv e instala o pyflakes nele para um teste realista."""
     try:
@@ -29,7 +27,6 @@ def _setup_test_env(project_dir):
     except (subprocess.CalledProcessError, FileNotFoundError):
         # Permite que o teste continue e falhe no diagnóstico, o que é informativo.
         pass
-
 def _run_doxoade_in_sandbox(command_to_test, sandbox_path):
     runner_path = shutil.which("doxoade.bat") or shutil.which("doxoade")
     if not runner_path:
@@ -43,7 +40,6 @@ def _run_doxoade_in_sandbox(command_to_test, sandbox_path):
         return result.returncode, result.stdout + result.stderr
     except Exception as e:
         return -1, f"Ocorreu um erro inesperado: {e}"
-
 @click.command('self-test')
 @click.argument('command_name', type=click.Choice(list(TEST_CASES.keys())), default='check')
 @click.option('--debug', is_flag=True, help="Exibe a saída completa do comando analisado.")

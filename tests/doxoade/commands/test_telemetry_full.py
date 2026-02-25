@@ -5,7 +5,6 @@ import json
 from click.testing import CliRunner
 from doxoade.commands.telemetry import telemetry
 from doxoade.database import get_db_connection
-
 @pytest.fixture
 def mock_db(monkeypatch, tmp_path):
     """Cria um DB temporário para o teste."""
@@ -45,7 +44,6 @@ def mock_db(monkeypatch, tmp_path):
     
     conn.commit()
     return db_file
-
 def test_telemetry_basic(mock_db):
     runner = CliRunner()
     result = runner.invoke(telemetry, ['-n', '10'])
@@ -53,14 +51,12 @@ def test_telemetry_basic(mock_db):
     assert "CHECK" in result.output
     assert "RUN" in result.output 
     assert "45.5%" in result.output
-
 def test_telemetry_stats(mock_db):
     runner = CliRunner()
     result = runner.invoke(telemetry, ['--stats'])
     assert result.exit_code == 0
     assert "MÉTRICAS DE PERFORMANCE" in result.output
     assert "CHECK" in result.output
-
 def test_telemetry_case_insensitive_filter(mock_db):
     runner = CliRunner()
     # Busca 'check' minúsculo, deve achar 'CHECK' maiúsculo
@@ -68,7 +64,6 @@ def test_telemetry_case_insensitive_filter(mock_db):
     assert result.exit_code == 0
     assert "CHECK" in result.output
     assert "run" not in result.output # Não deve mostrar o outro
-
 def test_telemetry_verbose_null_safe(mock_db):
     """Testa se o modo verbose crasha com dados nulos."""
     runner = CliRunner()

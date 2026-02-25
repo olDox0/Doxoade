@@ -4,10 +4,9 @@ Diagnostic: Security Suite Integrity Test.
 Validates Aegis Sandbox and Hashing Consistency.
 """
 import os
-from colorama import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style
 from ..tools.security_utils import calculate_integrity_hash, restricted_safe_exec
 from pathlib import Path
-
 def run_security_diagnose():
     print(f"{Fore.CYAN}--- [DIAGNOSTIC] Security & Hacking Integrity ---{Style.RESET_ALL}")
     
@@ -21,7 +20,6 @@ def run_security_diagnose():
         print(f"   {Fore.GREEN}✔ Hash Determinism: OK ({hash_1[:8]})")
     else:
         print(f"   {Fore.RED}✘ Hash Determinism: FAILED (Non-deterministic output)")
-
     # TESTE 2: Efetividade do Sandbox Aegis
     print(f"\n2. Testing Aegis Sandbox (Attack Simulation)...")
     
@@ -37,7 +35,6 @@ def run_security_diagnose():
             print(f"     {Style.DIM}Reason: {e}{Style.RESET_ALL}")
         else:
             print(f"   {Fore.YELLOW}⚠ Sandbox Warning: Unexpected Error ({e})")
-
     # TESTE 3: Bloqueio de Introspecção
     print(f"\n3. Testing Introspection Block (dunder access)...")
     dunder_code = "x = [].__class__.__base__"
@@ -46,8 +43,6 @@ def run_security_diagnose():
         print(f"   {Fore.RED}✘ Introspection Defense: FAILED (Dunder access allowed!)")
     except RuntimeError:
         print(f"   {Fore.GREEN}✔ Introspection Defense: OK (Blocked __ access)")
-
     print(f"\n{Fore.CYAN}--- Security Diagnosis Complete ---{Style.RESET_ALL}")
-
 if __name__ == "__main__":
     run_security_diagnose()

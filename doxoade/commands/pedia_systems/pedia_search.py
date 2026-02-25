@@ -1,13 +1,11 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/pedia_systems/pedia_search.py
 from typing import Dict, List
-
 class PediaSearch:
     """Motor de Busca Semântica Simples (Thoth)."""
     
     def __init__(self, articles_db: Dict):
         self.db = articles_db
-
     def rank_articles(self, query: str, limit: int = 10) -> List:
         query = query.lower().strip()
         query_words = set(query.split())

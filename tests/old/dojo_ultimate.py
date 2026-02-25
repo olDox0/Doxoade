@@ -3,9 +3,7 @@ import sys
 import re  # [DEADCODE] Import não usado
 import hashlib
 import subprocess
-
 # [STYLE] Falta docstring do módulo aqui
-
 def funcao_caotica():
     # [STYLE] Falta docstring da função
     
@@ -42,7 +40,6 @@ def funcao_caotica():
     estado_global = 1
     
     return x
-
 def funcao_gigante_mpt_regra_4():
     """Esta função testa a regra de coesão (>60 linhas)."""
     print("Linha 1")

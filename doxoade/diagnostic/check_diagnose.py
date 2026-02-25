@@ -5,16 +5,13 @@ import json
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
-
 from ..commands.check import run_check_logic, _get_probe_path
 from ..probes.manager import ProbeManager
 #from ..dnm import DNM
 from ..shared_tools import _get_venv_python_executable
-
 def verificar_integridade_sondas():
     console = Console()
     console.print(Panel.fit("🔍 [bold cyan]Doxoade Omnisciente: Diagnóstico de Escala Total (Gold)[/bold cyan]"))
-
     # Caminhos
     diag_dir = os.path.dirname(__file__)
     exame_1 = os.path.abspath(os.path.join(diag_dir, "check_exame.py"))
@@ -23,7 +20,6 @@ def verificar_integridade_sondas():
     python_exe = _get_venv_python_executable() or sys.executable
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(exame_1)))
     manager = ProbeManager(python_exe, project_root)
-
     # --- FASE 1: INFRAESTRUTURA DE DISPARO ---
     console.print("\n[bold]Fase 1: Bateria de Disparo (Manager Isolation)[/bold]")
     sondas = [
@@ -35,7 +31,6 @@ def verificar_integridade_sondas():
     table_infra.add_column("Sonda")
     table_infra.add_column("Execução")
     table_infra.add_column("Payload")
-
     infra_ok = True
     for s in sondas:
         p_path = _get_probe_path(s)
@@ -52,9 +47,7 @@ def verificar_integridade_sondas():
         pay_type = "JSON" if payload else "FILE"
         table_infra.add_row(s, status, pay_type)
         if not res['success']: infra_ok = False
-
     console.print(table_infra)
-
 # --- FASE 2: SENSIBILIDADE CRUZADA ---
     console.print("\n[bold]Fase 2: Sensibilidade Cruzada (Multi-File Check)[/bold]")
     
@@ -77,29 +70,23 @@ def verificar_integridade_sondas():
     console.print(f"  - Total de problemas detectados: [bold white]{len(findings)}[/bold white]")
     if len(findings) == 0:
         console.print("  [red]⚠ ALERTA: O pipeline retornou ZERO problemas. Verifique se o loop de arquivos rodou.[/red]")
-
     check_map = {
         "SINTAXE/REGRAS": "unused" in report_raw or "eval" in report_raw,
         "DUPLICATION (Clones)": "duplicada" in report_raw or "clone" in report_raw,
         "ORPHAN (Código Inútil)": "não é chamada" in report_raw or "orphan" in report_raw,
         "XREF (Assinatura)": "argumentos" in report_raw or "signature" in report_raw
     }
-
     if not all(check_map.values()):
         console.print("\n[bold yellow]--- DEBUG DE CEGUEIRA ---[/bold yellow]")
         console.print(f"  Arquivos alvo: {len([exame_1, exame_2])}")
         # Mostra os primeiros 100 caracteres dos findings para ver se há lixo ou erro de path
         console.print(f"  Amostra de Findings: {str(findings)[:200]}...")
-
     table_intel = Table(show_header=True, header_style="bold magenta")
     table_intel.add_column("Capacidade de Detecção")
     table_intel.add_column("Resultado")
-
     for cap, detectado in check_map.items():
         table_intel.add_row(cap, "[green]CONVERGENTE[/green]" if detectado else "[red]CEGO[/red]")
-
     console.print(table_intel)
-
     # --- CONCLUSÃO ---
     if infra_ok and all(check_map.values()):
         console.print("\n[bold green]✅ SISTEMA GOLD: O Doxoade atingiu maturidade total de auditoria.[/bold green]")

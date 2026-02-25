@@ -2,9 +2,7 @@ import sys
 import subprocess
 import os
 import json
-
 PROBE_PATH = os.path.join("doxoade", "probes", "style_probe.py")
-
 def test_style_probe_detects_long_function(tmp_path):
     """Verifica se função > 60 linhas gera alerta de COMPLEXITY."""
     f = tmp_path / "long.py"
@@ -24,7 +22,6 @@ def test_style_probe_detects_long_function(tmp_path):
     data = json.loads(result.stdout)
     found = any(f['category'] == 'COMPLEXITY' for f in data)
     assert found, "Style Probe ignorou função longa"
-
 def test_style_probe_detects_missing_docstring(tmp_path):
     """Verifica falta de docstring em função pública."""
     f = tmp_path / "undocumented.py"

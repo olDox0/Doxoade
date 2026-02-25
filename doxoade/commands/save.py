@@ -1,11 +1,9 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/save.py
-
 """
 Comando Save - v80.1 Gold.
 Gatekeeper Ma'at (Produção) & Anúbis (Infraestrutura).
 """
-
 import sys
 import sqlite3 # noqa
 import re
@@ -14,9 +12,8 @@ import click
 from datetime import datetime, timezone
 from typing import Dict, Any, Tuple, Set
 from rich.console import Console
-from colorama import Fore
+from doxoade.tools.doxcolors import Fore
 import subprocess
-
 from ..database import get_db_connection
 from ..shared_tools import (
     ExecutionLogger, 
@@ -24,9 +21,7 @@ from ..shared_tools import (
     _present_results
 )
 from .check import run_check_logic
-
 __version__ = "63.3 Alfa (Gold Standard)"
-
 def _get_staged_python_files(git_root):
     """Filtra o Stage contra lixo e arquivos deletados (PASC 3.0)."""
     # AMR: Added, Modified, Renamed. Ignora Deletados.
@@ -42,7 +37,6 @@ def _get_staged_python_files(git_root):
         if os.path.isfile(p) and not dnm.is_ignored(p):
             valid.append(p)
     return valid
-
 def _process_finding_for_learning(cursor: sqlite3.Cursor, finding: sqlite3.Row, 
                                  modified_files: Set[str], new_commit_hash: str, 
                                  project_path: str) -> bool:
@@ -52,7 +46,6 @@ def _process_finding_for_learning(cursor: sqlite3.Cursor, finding: sqlite3.Row,
     """
     if cursor is None or finding is None or modified_files is None:
         raise ValueError("Parâmetros de banco ou dados de commit inválidos.")
-
     file_path = finding['file']
     if not file_path:
         return False
@@ -78,7 +71,6 @@ def _process_finding_for_learning(cursor: sqlite3.Cursor, finding: sqlite3.Row,
          datetime.now(timezone.utc).isoformat(), file_path, finding['message'], finding['line'])
     )
     return True
-
 def _learn_solutions_from_commit(new_commit_hash: str, project_path: str):
     """
     Orquestra o aprendizado de soluções a partir de um commit recém-criado.
@@ -100,7 +92,6 @@ def _learn_solutions_from_commit(new_commit_hash: str, project_path: str):
         
         if not modified_files:
             return
-
         # Busca findings recentes (24h) ativos antes deste commit
         cursor.execute("""
             SELECT DISTINCT f.finding_hash, f.file, f.line, f.message, f.category
@@ -120,13 +111,11 @@ def _learn_solutions_from_commit(new_commit_hash: str, project_path: str):
                 learned_count += 1
                 console.print(f"   [green]> Solução aprendida:[/green] {f['message'][:50]}...")
                 _abstract_and_learn_template(cursor, {'message': f['message'], 'category': f['category']})
-
         conn.commit()
         if learned_count > 0:
             console.print(f"[bold green][GÊNESE] {learned_count} nova(s) solução(ões) integrada(s).[/bold green]")
     finally:
         if conn: conn.close()
-
 def _get_template_for_message(message: str) -> Tuple[str, str, str]:
     """
     Mapeia mensagens de erro para padrões de templates.
@@ -134,7 +123,6 @@ def _get_template_for_message(message: str) -> Tuple[str, str, str]:
     """
     if not message:
         return ("", "", "")
-
     rules = [
         (r"'(.+?)' imported but unused", "'<MODULE>' imported but unused", "FIX_UNUSED_IMPORT", "DEADCODE"),
         (r"redefinition of unused '(.+?)' from line \d+", "redefinition of unused '<VAR>' from line <LINE>", "REMOVE_LINE", "DEADCODE"),
@@ -148,20 +136,16 @@ def _get_template_for_message(message: str) -> Tuple[str, str, str]:
             return (pattern, template, category)
             
     return ("", "", "") # Retorno consistente
-
 def _abstract_and_learn_template(cursor: sqlite3.Cursor, concrete_finding: Dict[str, Any]) -> bool:
     """Extrai e persiste padrões abstratos de solução no banco de dados."""
     if cursor is None:
         raise ValueError("Cursor do banco de dados é obrigatório.")
-
     pattern, template, category = _get_template_for_message(concrete_finding.get('message', ''))
     
     if not pattern: # Se o retorno for a tupla vazia
         return False
-
     cursor.execute("SELECT id, confidence FROM solution_templates WHERE problem_pattern = ?", (pattern,))
     existing = cursor.fetchone()
-
     if existing:
         cursor.execute("UPDATE solution_templates SET confidence = ? WHERE id = ?", 
                        (existing['confidence'] + 1, existing['id']))
@@ -171,7 +155,6 @@ def _abstract_and_learn_template(cursor: sqlite3.Cursor, concrete_finding: Dict[
             (pattern, template, category, datetime.now(timezone.utc).isoformat())
         )
     return True
-
 @click.command('save')
 @click.argument('message', required=False)
 @click.option('--archives', '-a', help="Lista arquivos de um commit.")
@@ -185,7 +168,6 @@ def save(ctx, message, archives, remove_commit, force):
     
     # MPoT-5: Inicialização explícita de estado para evitar NameError
 # [DOX-UNUSED]     fix_applied = False 
-
     # --- A. OPERAÇÕES DE HISTÓRICO (OSIRIS) ---
     if remove_commit or archives:
         from .git_systems.git_archivist import GitArchivist
@@ -201,10 +183,8 @@ def save(ctx, message, archives, remove_commit, force):
                 for item in sorted(data, key=lambda x: x['size'], reverse=True):
                     click.echo(f"  {item['size']:>7.1f} KB │ {item['path']}")
             return
-
     if not message:
         click.echo(Fore.RED + "Erro: Mensagem obrigatória para save."); return
-
     with ExecutionLogger('save', project_path, ctx.params):
         _run_git_command(['add', '.'])
         git_root = _run_git_command(['rev-parse', '--show-toplevel'], capture_output=True)
@@ -227,7 +207,6 @@ def save(ctx, message, archives, remove_commit, force):
                     subprocess.run(['git', 'rm', '--cached', os.path.join(git_root, l)], capture_output=True)
                 # RE-SINCRONIZA: Atualiza a lista após a limpeza
                 staged_prod = _get_staged_python_files(git_root)
-
         # --- TRIBUNAL DE MA'AT ---
         if staged_prod and not force:
             console.print("   > [MA'AT] Julgando integridade da produção...")
@@ -246,11 +225,10 @@ def save(ctx, message, archives, remove_commit, force):
                     _present_results('text', {'summary': results['summary'], 'findings': blocking})
                 
                 if maat_findings:
-                    console.print(f"\n[bold yellow]⚖  ACHADOS DE MA'AT:[/bold yellow]")
+                    console.print("\n[bold yellow]⚖  ACHADOS DE MA'AT:[/bold yellow]")
                     for mf in maat_findings:
                         console.print(f"   [red]✘[/red] {mf['message']} ({os.path.basename(mf['file'])})")
                 sys.exit(1)
-
         # --- D. SEPULTAMENTO (COMMIT) ---
         if _run_git_command(['commit', '-m', message]):
             console.print("[bold green]✔ Alfa 80.1: Conhecimento sepultado com sucesso.[/bold green]")
@@ -258,7 +236,6 @@ def save(ctx, message, archives, remove_commit, force):
         
         if new_hash:
             _learn_solutions_from_commit(new_hash, project_path)
-
         console.print("[bold green]\n[OK] Alfa 71.10: Commit finalizado e Gênese atualizada.[/bold green]")
         
 def _verify_succession_integrity():

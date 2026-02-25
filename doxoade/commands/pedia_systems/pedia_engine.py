@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/pedia_systems/pedia_engine.py
 import click
-from colorama import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style
 from .pedia_io import KnowledgeBaseIO
 from .pedia_search import PediaSearch
 from .pedia_utils import MarkdownRenderer, safe_emoji
 from .pedia_json import SemanticJSONRenderer # <--- NOVO IMPORT
-
 class PediaEngine:
     """Motor central de Inteligência Documental (Atena/Thoth)."""
     
@@ -16,7 +15,6 @@ class PediaEngine:
         self.searcher = PediaSearch(self.articles)
         self.md_renderer = MarkdownRenderer()
         self.json_renderer = SemanticJSONRenderer() # <--- NOVA INSTÂNCIA
-
     def read_article(self, topic: str):
         topic_clean = topic.lower().strip()
         
@@ -29,18 +27,15 @@ class PediaEngine:
             if results and results[0]['score'] > 50:
                 article = results[0]['article']
                 click.echo(f"{Fore.YELLOW}Artigo exato '{topic}' não encontrado. Exibindo o mais próximo: '{article.key}'{Style.RESET_ALL}\n")
-
         if not article:
             click.echo(f"{Fore.RED}✘ Nenhum artigo encontrado para '{topic}'.{Style.RESET_ALL}")
             return
-
         self._render_article_header(article)
         
         # 3. DECISÃO INTELIGENTE DE RENDERIZAÇÃO
         # Tenta renderizar como JSON Semântico. Se falhar (retornar False), usa Markdown.
         if not self.json_renderer.try_render(article.content):
             self.md_renderer.render(article.content)
-
     def search_knowledge(self, query: str, limit: int):
         click.echo(f"{Fore.CYAN}{Style.BRIGHT}🔍 Buscando por: '{query}'...{Style.RESET_ALL}\n")
         
@@ -61,7 +56,6 @@ class PediaEngine:
             click.echo(f"{color}{source_icon} {art.key:<30} {Style.DIM}| Score: {score:>3} | Cat: {art.category}{Style.RESET_ALL}")
             click.echo(f"   {Fore.WHITE}Title: {art.title}{Style.RESET_ALL}")
             click.echo(f"   {Style.DIM}Source: {art.source}{Style.RESET_ALL}\n")
-
     def list_articles(self):
         click.echo(f"{Fore.CYAN}{Style.BRIGHT}📚 ACERVO DA DOXOADEPÉDIA ({len(self.articles)} documentos){Style.RESET_ALL}\n")
         
@@ -83,7 +77,6 @@ class PediaEngine:
                 targets = [source]
             else:
                 continue
-
             for src_key in targets:
                 display_source = "DOXOADE CORE (SISTEMA)" if "CORE" in src_key else "PROJETO ATUAL (LOCAL)"
                 click.echo(f"{Fore.MAGENTA}{Style.BRIGHT}=== {display_source} ==={Style.RESET_ALL}")
@@ -94,7 +87,6 @@ class PediaEngine:
                     for art in sorted(cats[cat_name], key=lambda x: x.key):
                         click.echo(f"  • {Fore.CYAN}{art.key:<25} {Fore.WHITE}{art.title}{Style.RESET_ALL}")
                 click.echo("")
-
     def _render_article_header(self, article):
         icon = safe_emoji("🏛️", "") if "CORE" in article.source else safe_emoji("🏠", "")
         click.echo(f"{Fore.CYAN}{Style.BRIGHT}{'='*60}")

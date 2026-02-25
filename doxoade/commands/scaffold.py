@@ -1,7 +1,6 @@
 import click
 import os
-from colorama import Fore
-
+from doxoade.tools.doxcolors import Fore
 @click.command('scaffold')
 @click.argument('component_path')
 @click.option('--type', type=click.Choice(['page', 'component']), default='page', help="Tipo de estrutura.")
@@ -24,7 +23,6 @@ def scaffold(component_path, type):
     else:
         # Se passou apenas o nome, usa o padrão
         base_dir = "src/ui" if type == 'page' else "src/components"
-
     # Prepara nomes
     name_snake = component_name.lower().replace(' ', '_')
     class_name = component_name.replace('_', ' ').title().replace(' ', '')
@@ -37,9 +35,7 @@ def scaffold(component_path, type):
     if os.path.exists(file_path):
         click.echo(Fore.RED + f"[ERRO] Arquivo '{file_path}' já existe.")
         return
-
     content = f'''from nicegui import ui
-
 class {class_name}:
     """
     Componente: {class_name}
@@ -47,16 +43,13 @@ class {class_name}:
     """
     def __init__(self):
         self.build()
-
     def build(self):
         with ui.card().classes('w-full p-4'):
             ui.label('{class_name}').classes('text-xl font-bold')
             # TODO: Implementar lógica visual aqui
             ui.button('Ação', on_click=self.on_action)
-
     def on_action(self):
         ui.notify('{class_name} Action Triggered!')
-
 def create():
     return {class_name}()
 '''

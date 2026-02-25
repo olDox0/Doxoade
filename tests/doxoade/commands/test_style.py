@@ -4,7 +4,6 @@ import os
 import json
 from click.testing import CliRunner
 from doxoade.cli import cli
-
 def test_style_check_long_function():
     """Garante que o style detecta funções que violam o MPoT-4 (tamanho)."""
     runner = CliRunner()
@@ -20,7 +19,6 @@ def test_style_check_long_function():
         result = runner.invoke(cli, ['style', 'heavy.py'])
         assert result.exit_code == 0
         assert "tamanho" in result.output.lower() or "linhas" in result.output.lower()
-
 def test_style_documentation_mode():
     """Verifica se o modo --comment ignora lógica e foca em docstrings."""
     runner = CliRunner()
@@ -35,7 +33,6 @@ def test_style_documentation_mode():
         result = runner.invoke(cli, ['style', 'no_doc.py', '--comment'])
         assert result.exit_code == 0
         assert "documentação" in result.output.lower() or "docstring" in result.output.lower()
-
 def test_style_valid_code():
     """Garante que código limpo retorna [OK]."""
     runner = CliRunner()

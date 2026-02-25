@@ -1,7 +1,6 @@
 # tests/matrix_demo.py
 import time
 import random
-
 def reactor_core(power_level):
     temperature = 100
     status = "STABLE"
@@ -25,7 +24,6 @@ def reactor_core(power_level):
         time.sleep(0.1) 
         
     return status, temperature
-
 def main():
     system_ready = True
     initial_power = 10
@@ -33,6 +31,5 @@ def main():
     if system_ready:
         final_status, final_temp = reactor_core(initial_power)
         print(f"Final Report: {final_status} at {final_temp} degrees.")
-
 if __name__ == "__main__":
     main()

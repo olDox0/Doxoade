@@ -6,11 +6,10 @@ Orquestrador de Execução Híbrida com Suporte a Sniper Lens.
 """
 import os
 import click
-from colorama import Fore
+from doxoade.tools.doxcolors import Fore
 from ..shared_tools import ExecutionLogger
 from .run_systems.run_flow import execute_flow
 from .run_systems.run_vulcan import apply_vulcan_turbo
-
 @click.command('run')
 @click.argument('script', type=click.Path(exists=True))
 @click.option('--flow', '-fl', is_flag=True, help="Rastro de linhas.")
@@ -30,7 +29,6 @@ def run(ctx, script: str, **kwargs): # FIX: Adicionada a vírgula faltante
     sniper_target = kwargs.get('file_target') or kwargs.get('target_target')
     if sniper_target:
         kwargs['target'] = sniper_target
-
     with ExecutionLogger('run', abs_path, ctx.params):
         from ..tools.security_utils import validate_execution_context
         
@@ -59,7 +57,6 @@ def run(ctx, script: str, **kwargs): # FIX: Adicionada a vírgula faltante
             print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
             exc_trace(exc_tb)
             raise e
-
 def _execute_hybrid_engine(script_path: str, use_vulcan: bool):
     abs_path = os.path.abspath(script_path)
     from ..tools.security_utils import restricted_safe_exec
@@ -68,13 +65,10 @@ def _execute_hybrid_engine(script_path: str, use_vulcan: bool):
     # Mas para a UI, mostramos HYBRID se a tentativa de injeção for autorizada
     label = "HYBRID" if use_vulcan else "PYTHON"
     color = Fore.CYAN if use_vulcan else Fore.WHITE
-
     globs = {'__name__': '__main__', '__file__': abs_path}
-
     if use_vulcan:
         # Tenta injetar. Se for stale, a função não fará nada (PASC-2)
         apply_vulcan_turbo(abs_path, globs)
-
     try:
         click.echo(color + f"--- [RUN:{label}] Executing: {os.path.basename(abs_path)} ---")
         with open(abs_path, 'r', encoding='utf-8') as f:
@@ -83,7 +77,6 @@ def _execute_hybrid_engine(script_path: str, use_vulcan: bool):
         restricted_safe_exec(content, globs, allow_imports=True, filename=abs_path)
     except Exception as e:
         raise e
-
 @click.command('flow')
 @click.argument('script', type=click.Path(exists=True))
 @click.pass_context

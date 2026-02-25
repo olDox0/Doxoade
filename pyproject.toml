@@ -46,3 +46,15 @@ packages = ["doxoade", "doxoade.commands", "doxoade.tools", "doxoade.probes", "d
 addopts = "-v"
 filterwarnings = [ "ignore::DeprecationWarning",]
 norecursedirs = "Vers doxoade.egg-info .pytest_cache pytest_temp_dir tmp regression_tests"
+
+[tool.doxoade.vulcan-ignore]
+patterns = [
+    "tests/",
+    "docs/",
+    "examples/",
+    "old/",
+    "**/test_*.py",
+    "**/*_test.py",
+    "setup.py",
+    "conftest.py"
+]

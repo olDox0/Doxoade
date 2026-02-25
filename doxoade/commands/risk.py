@@ -3,30 +3,25 @@
 Módulo de Gestão de Risco Operacional (v4.4 - Gold Fortress).
 Calcula estabilidade baseada no PASC e na integridade sintática absoluta.
 """
-
 import click
 import sqlite3
 import os
 from typing import Dict, Any, List
-from colorama import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style
 from ..database import get_db_connection
 from ..dnm import DNM
-
 __version__ = "4.4 Alfa (Gold Fortress Edition)"
-
 def _get_project_metrics(cursor: sqlite3.Cursor, project_path: str) -> Dict[str, Any]:
     """Coleta métricas base e violações de peso PASC 1.3."""
     dnm = DNM(project_path)
     all_files = dnm.scan(extensions=['.py'])
     total_count = len(all_files) or 1
-
     metrics = {
         'total_files': total_count, 
         'affected_files': 0, 
         'by_category': {},
         'overweight_files': 0
     }
-
     # PASC 1.3: Verificação de peso e tamanho
     for f in all_files:
         try:
@@ -39,7 +34,6 @@ def _get_project_metrics(cursor: sqlite3.Cursor, project_path: str) -> Dict[str,
                     if len(fp.readlines()) > 500:
                         metrics['overweight_files'] += 1
         except OSError: continue
-
     # Coleta incidentes estruturados
     cursor.execute("""
         SELECT category, COUNT(DISTINCT file_path) as file_count
@@ -49,11 +43,9 @@ def _get_project_metrics(cursor: sqlite3.Cursor, project_path: str) -> Dict[str,
     for row in cursor.fetchall():
         cat = (row['category'] or 'UNCATEGORIZED').upper()
         metrics['by_category'][cat] = row['file_count']
-
     cursor.execute("SELECT COUNT(DISTINCT file_path) FROM open_incidents WHERE project_path = ?", (project_path,))
     metrics['affected_files'] = cursor.fetchone()[0]
     return metrics
-
 def calculate_density_penalty(metrics: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Cálculo de penalidade realinhado com o PASC v2026."""
     total = metrics['total_files']
@@ -62,7 +54,6 @@ def calculate_density_penalty(metrics: Dict[str, Any]) -> List[Dict[str, Any]]:
         'SYNTAX': 150, 'CRITICAL': 120, 'SECURITY': 100, 
         'RUNTIME-RISK': 60, 'COMPLEXITY': 50, 'STYLE': 20, 'DEADCODE': 15
     }
-
     results = []
     # 1. Penalidades por Incidentes
     for cat, count in metrics['by_category'].items():
@@ -75,7 +66,6 @@ def calculate_density_penalty(metrics: Dict[str, Any]) -> List[Dict[str, Any]]:
             'name': cat, 'penalty': round(penalty, 1),
             'density_pct': round(density * 100, 1), 'count': count
         })
-
     # 2. Penalidade PASC 1.3 (Estrutural)
     if metrics['overweight_files'] > 0:
         overweight_pct = (metrics['overweight_files'] / total) * 100
@@ -83,9 +73,7 @@ def calculate_density_penalty(metrics: Dict[str, Any]) -> List[Dict[str, Any]]:
             'name': 'PASC-WEIGHT', 'penalty': round(min(15, overweight_pct * 2), 1),
             'density_pct': round(overweight_pct, 1), 'count': metrics['overweight_files']
         })
-
     return results
-
 def _get_engineering_directive(score: float, test_pen: int) -> str:
     """Diretrizes baseadas no PASC 3 (Progressividade)."""
     if score < 40:
@@ -95,7 +83,6 @@ def _get_engineering_directive(score: float, test_pen: int) -> str:
     if score < 75:
         return f"{Fore.YELLOW}🧹 MODO FAXINA (Lei 1): Priorize modularização e Expert-Split."
     return f"{Fore.GREEN}🚀 ESTADO GOLD: Infraestrutura sólida (MPoT Compliance)."
-
 @click.command('risk')
 def risk():
     """Auditoria de Risco v4.4: Conformidade PASC e Densidade Técnica."""
@@ -103,7 +90,6 @@ def risk():
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-
     try:
         project_path = os.getcwd()
         metrics = _get_project_metrics(cursor, project_path)
@@ -118,12 +104,10 @@ def risk():
         
         # UI Rendering (Nexus Standard)
         _display_report(final_score, metrics, penalties, test_penalty)
-
     except Exception as e:
         click.echo(Fore.RED + f"[ERRO] Falha no cálculo Fortress: {e}")
     finally:
         conn.close()
-
 def _display_report(score: float, metrics: dict, penalties: list, test_pen: int):
     """Renderizador Chief-Gold unificado."""
     # (Lógica de estilo mantida e refinada para maior contraste)
@@ -133,19 +117,15 @@ def _display_report(score: float, metrics: dict, penalties: list, test_pen: int)
     
     af_pct = (metrics['affected_files'] / metrics['total_files']) * 100
     click.echo(Fore.WHITE + f"Base: {metrics['total_files']} arquivos | Afetados: {metrics['affected_files']} ({af_pct:.1f}%)")
-
     click.echo("\nVetores de Impacto PASC:")
     for p in sorted(penalties, key=lambda x: x['penalty'], reverse=True):
         p_col = Fore.RED if p['penalty'] >= 15 else (Fore.YELLOW if p['penalty'] >= 5 else Fore.WHITE)
         click.echo(f"   [{p['name']:<15}] {p_col}-{p['penalty']:>5}{Style.RESET_ALL} | "
                    f"Impacto: {p['density_pct']}% ({p['count']} un)")
-
     if test_pen > 0:
         click.echo(f"   [{'TEST-REGRESSION':<15}] {Fore.RED}-{test_pen:>5}{Style.RESET_ALL} | Status: FALHA")
-
     click.echo(f"\n{Style.BRIGHT}Diretriz Técnica:{Style.NORMAL}")
     click.echo(f"   {_get_engineering_directive(score, test_pen)}\n")
-
 def _get_risk_styling(score: float):
     if score >= 90: return "GOLD", Fore.GREEN, "🏆"
     if score >= 80: return "STABLE", Fore.GREEN, "🟢"

@@ -7,14 +7,11 @@ import ast
 import json
 from typing import List, Dict, Any
 from click import progressbar
-
 from .check_state import CheckState
 from ...tools.analysis import _get_code_snippet
-
 def run_audit_engine(state: CheckState, io_manager, **kwargs):
     from ...probes.manager import ProbeManager
     from ...tools.memory_pool import finding_arena
-
     manager = ProbeManager(sys.executable, state.root)
     files = io_manager.resolve_files(kwargs.get('target_files'))
     cache = {} if kwargs.get('no_cache') else io_manager.load_cache()
@@ -40,13 +37,10 @@ def run_audit_engine(state: CheckState, io_manager, **kwargs):
                 
                 if mtime > 0 and not any(f.get('category') == 'SYSTEM' for f in results):
                     cache[cache_key] = {'mtime': mtime, 'size': size, 'findings': results}
-
     if kwargs.get('clones'):
         _run_clone_detection(files, manager, state)
-
     if not kwargs.get('no_cache'):
         io_manager.save_cache(cache)
-
 def _scan_single_file(fp, manager, kwargs):
     """Executa as sondas respeitando o Full Power."""
     from ...tools.governor import governor
@@ -61,7 +55,6 @@ def _scan_single_file(fp, manager, kwargs):
     if not kwargs.get('fast'):
         findings.extend(_run_style_check(fp))
     return findings
-
 def _run_syntax_check(f, manager):
     from ..check import _get_probe_path
     from ...tools.analysis import _get_code_snippet
@@ -77,7 +70,6 @@ def _run_syntax_check(f, manager):
             'snippet': _get_code_snippet(f, line_n) # Injeção de snippet imediata para erros fatais
         }]
     return []
-
 def _run_style_check(f):
     from radon.visitors import ComplexityVisitor
     from ...tools.streamer import ufs
@@ -87,7 +79,6 @@ def _run_style_check(f):
         return [{'severity': 'WARNING', 'category': 'COMPLEXITY', 'message': f"Função '{func.name}' complexa (CC: {func.complexity}).", 'file': f, 'line': func.lineno} 
                 for func in v.functions if func.complexity > 12]
     except Exception: return []
-
 def _run_static_probes(f, manager):
     from ..check import _get_probe_path
     results = []
@@ -109,7 +100,6 @@ def _run_static_probes(f, manager):
         print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
         exc_trace(exc_tb)
     return results
-
 def _filter_by_cache(files, cache, io_manager, state, force_no_cache):
     to_scan = []
     for fp in files:
@@ -161,7 +151,6 @@ def run_check_logic(path: str, **kwargs):
     from .check_io import CheckIO
     from .check_filters import apply_filters
     from .check_refactor import analyze_refactor_opportunities
-
     # 1. Setup via novo GPS
     io = CheckIO(path)
     state = CheckState(
@@ -169,14 +158,11 @@ def run_check_logic(path: str, **kwargs):
         target_path=io.target_abs, 
         is_full_power=kwargs.get('full_power', False)
     )
-
     # 2. Execução do Motor Modular
     run_audit_engine(state, io, **kwargs)
-
     # 3. Inteligência e Crivo
     apply_filters(state, **kwargs)
     analyze_refactor_opportunities(state)
-
     # 4. Retorno no formato de dicionário esperado pelos comandos legados
     return {
         'summary': state.summary,

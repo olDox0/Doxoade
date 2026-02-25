@@ -1,7 +1,6 @@
 # doxoade/probes/syntax_probe.py
 import sys
 import ast
-
 def analyze(file_path):
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -16,7 +15,6 @@ def analyze(file_path):
     except Exception as e:
         sys.stderr.write(f"ProbeInternalError:{file_path}:1:{type(e).__name__}: {str(e)}")
         return 1
-
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         sys.exit(analyze(sys.argv[1]))

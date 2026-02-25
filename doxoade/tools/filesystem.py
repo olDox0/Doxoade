@@ -4,7 +4,7 @@ import os
 # [DOX-UNUSED] import sys
 import toml
 from pathlib import Path
-# [DOX-UNUSED] from colorama import Fore
+# [DOX-UNUSED] from doxoade.tools.doxcolors import Fore
 
 # Fonte Única da Verdade para Exclusões (OSL-17)
 SYSTEM_IGNORES = {

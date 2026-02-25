@@ -2,39 +2,32 @@
 # doxoade/commands/check_utils.py
 import os
 from click import echo
-from colorama import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style
 from collections import defaultdict
 from typing import List, Dict, Any
 from .check_state import CheckState
-
 def render_archived_view(state: CheckState):
     """Renderiza o Dossiê Consolidado (PASC 8.2)."""
     if not state.findings:
         echo(f"\n{Fore.GREEN}{Style.BRIGHT}✔ [ESTADO DE OURO]{Fore.WHITE} Nenhum problema encontrado!")
         return
-
     # Agrupamento Único (MPoT-4)
     grouped = defaultdict(list)
     for f in state.findings:
         if f.get('category') != 'SYSTEM':
             grouped[f.get('file', 'unknown')].append(f)
-
     if not grouped: return
     echo(f"\n{Fore.BLUE}{Style.BRIGHT}--- 📂 DOSSIÊ DE DÍVIDA TÉCNICA ({len(grouped)} arquivos) ---{Style.RESET_ALL}")
-
     for file_path, file_findings in sorted(grouped.items()):
         # Especialista de Arquivo
         _render_single_file_dossier(file_path, file_findings)
-
     # Sumário Final de Rodapé
     summary = state.summary
     echo(f"{Fore.BLUE}{Style.BRIGHT}─" * 75 + Style.RESET_ALL)
     echo(f"  {Fore.WHITE}SOMA TOTAL: {Fore.RED}{summary.get('errors', 0)} Erros{Fore.WHITE} | {Fore.YELLOW}{summary.get('warnings', 0)} Avisos")
     echo(f"{Fore.BLUE}{Style.BRIGHT}─" * 75 + Style.RESET_ALL)
-
     if state.alb_files:
         _render_alb_report(state.alb_files)
-
 def _render_alb_report(alb_files: List[str]):
     # FIX: Subindo 3 níveis para chegar em doxoade/tools
     from ...tools.governor import governor
@@ -45,7 +38,6 @@ def _render_alb_report(alb_files: List[str]):
     names = [os.path.basename(f) for f in alb_files]
     display_str = ", ".join(names[:10]) + (f" ... e mais {len(names)-10}" if len(names) > 10 else "")
     echo(f"   Alvos       : {Fore.WHITE}{display_str}")
-
 def _render_issue_summary(findings: list, **kwargs):
     """Sumário Estatístico Consolidado (v84.3)."""
     from click import echo # FIX: Importação movida para fora do bloco IF
@@ -61,7 +53,6 @@ def _render_issue_summary(findings: list, **kwargs):
     
     id_map = {"unused-import": "FIX_UNUSED_IMPORT", "bare-except": "RESTRICT_EXCEPTION", 
               "unused-variable": "REPLACE_WITH_UNDERSCORE", "f-string": "REMOVE_F_PREFIX"}
-
     for cat in sorted(stats.keys()):
         sub_types = sorted(stats[cat].items(), key=lambda x: (x[0] == "geral", x[0]))
         for sub, count in sub_types:
@@ -72,7 +63,6 @@ def _render_issue_summary(findings: list, **kwargs):
     
     echo(f"{Fore.CYAN}{Style.DIM}─" * 85 + Style.RESET_ALL)
     _render_resource_report(kwargs.get('full_power'))
-
 def _render_resource_report(full_power):
     # FIX: Subindo 3 níveis para chegar em doxoade/tools
     from ...tools.memory_pool import finding_arena
@@ -89,7 +79,6 @@ def _render_resource_report(full_power):
     echo(f"   Reciclagem de Memória : {Fore.GREEN}{finding_arena._ptr} objetos reutilizados")
     echo(f"   Economia de Disco     : {Fore.GREEN}{ufs.reads_saved} aberturas evitadas")
     echo(f"{Fore.CYAN}{Style.DIM}─" * 85 + Style.RESET_ALL)
-
 def _finalize_log(findings, logger, root, excludes):
     """Bridge de Compatibilidade para o ExecutionLogger legado."""
     from ...tools.analysis import _get_code_snippet
@@ -133,7 +122,6 @@ def _render_single_file_dossier(file_path, findings):
         key = (f.get('line', 0), f.get('message', ''))
         if key not in seen:
             unique_findings.append(f); seen.add(key)
-
     count = len(unique_findings)
     header_color = Fore.BLUE if count < 5 else (Fore.YELLOW if count < 10 else Fore.RED)
     echo(f"\n{header_color}{Style.BRIGHT}[  {count:03}  ]{Fore.WHITE} {file_path}{Style.RESET_ALL}")
@@ -143,7 +131,6 @@ def _render_single_file_dossier(file_path, findings):
         'SECURITY': Fore.MAGENTA + Style.BRIGHT, 'SYNTAX': Fore.LIGHTRED_EX + Style.BRIGHT, 
         'DEADCODE': Fore.CYAN, 'STYLE': Fore.YELLOW, 'QA-REMINDER': Fore.GREEN
     }
-
     for f in unique_findings:
         cat = f.get('category', 'STYLE').upper()
         line_err = f.get('line', 0)

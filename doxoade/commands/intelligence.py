@@ -7,7 +7,6 @@ from rich.console import Console
 from ..shared_tools import ExecutionLogger, _find_project_root
 from ..dnm import DNM
 from .intelligence_utils import get_ignore_spec
-
 @click.group('intelligence', invoke_without_command=True)
 @click.option('--output', '-o', default='chief_dossier.json', help="Saída do dossiê.")
 @click.option('--docs', '-d', is_flag=True, help="Extrai docstrings.")
@@ -18,7 +17,6 @@ def intelligence(ctx, output, docs, source, concatenate):
     """Módulo de Inteligência Topológica (v94.3)."""
     if ctx.invoked_subcommand is None:
         _run_dossier_scan(output, docs, source, concatenate, ctx)
-
 @intelligence.command('recover')
 @click.option('--dir', 'backup_path', required=True, help="Pasta de backup do NPP.")
 @click.option('--out', 'output_path', default='recovery_zone', help="Destino.")
@@ -29,7 +27,6 @@ def recover(backup_path, output_path):
     success, msg = run_recovery_mission(backup_path, output_path)
     if success: click.echo(f"\033[92m✅ {msg}\033[0m")
     else: click.echo(f"\033[91m✘ {msg}\033[0m")
-
 def _run_dossier_scan(output, include_docs, include_source, concat, ctx):
     from .intelligence_systems.intelligence_engine import analyze_file_chief
 #    from .intelligence_systems.intelligence_logic import analyze_file_chief
@@ -46,7 +43,6 @@ def _run_dossier_scan(output, include_docs, include_source, concat, ctx):
         # Coleta inicial
         all_files = dnm.scan()
         filtered_files = []
-
         for f in all_files:
             # Normalização crucial: Pathspec exige '/' mesmo no Windows
             rel_path = os.path.relpath(f, root).replace('\\', '/')
@@ -56,7 +52,6 @@ def _run_dossier_scan(output, include_docs, include_source, concat, ctx):
                 continue
             
             filtered_files.append(f)
-
         dossier_files = []
         with click.progressbar(filtered_files, label='Analizando Código') as bar:
             for f in bar:
@@ -71,7 +66,6 @@ def _run_dossier_scan(output, include_docs, include_source, concat, ctx):
                     line_number = exc_tb.tb_lineno
                     print(f"\033[0m \033[1m ■ Exception: {e}\nFilename: {fname}   ■ Line: {line_number} \033[31m ■ Exception type: {exc_type} ■ Exception value: {exc_obj} \033[0m")
         _save_report(dossier_files, output, root, concat, console)
-
 def _save_report(files, output, root, concat, console):
     from datetime import datetime, timezone
     
@@ -95,7 +89,6 @@ def _save_report(files, output, root, concat, console):
         json.dump(report, f, indent=None if concat else 2, ensure_ascii=False)
     
     console.print(f"\n[bold green]✅ Dossiê NEXUS Gerado: {output}[/bold green]")
-
 def _calculate_distribution(files):
     dist = {}
     for f in files:

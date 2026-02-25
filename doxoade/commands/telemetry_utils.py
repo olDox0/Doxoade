@@ -5,7 +5,6 @@ Focado em precisão de I/O e análise de vazão.
 """
 import json
 # [DOX-UNUSED] import os
-
 def parse_json_safe(data):
     if not data: return {}
     try: return json.loads(data)
@@ -17,14 +16,12 @@ def parse_json_safe(data):
         print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: parse_json_safe\033[0m")
         print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
         return {}
-
 def format_bytes(size_mb):
     """Converte MB para a unidade mais legível (PASC-6.4)."""
     bytes_val = size_mb * 1024 * 1024
     if bytes_val < 1024: return f"{bytes_val:.0f} B"
     if bytes_val < 1024 * 1024: return f"{bytes_val/1024:.1f} KB"
     return f"{size_mb:.1f} MB"
-
 def get_resource_status(cpu, ram, io_total):
     status = {"cpu": "Ocioso", "ram": "Leve", "io": "Baixo"}
     if cpu > 80: status["cpu"] = "Crítico"

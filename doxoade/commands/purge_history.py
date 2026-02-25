@@ -1,9 +1,8 @@
 # doxoade/commands/purge_history.py
 import click
 import os
-from colorama import Fore, Style, Back
+from doxoade.tools.doxcolors import Fore, Style, Back
 from ..shared_tools import ExecutionLogger, _find_project_root
-
 @click.command('purge-history')
 @click.argument('patterns', nargs=-1, required=True)
 @click.option('--dry-run', is_flag=True, help="Apenas analisa o impacto sem deletar.")
@@ -24,7 +23,6 @@ def purge_history(ctx, patterns, dry_run, yes_i_know_what_i_am_doing):
         
         if not click.confirm(Fore.CYAN + "\nVocê possui um backup físico e deseja prosseguir?"):
             return
-
     with ExecutionLogger('purge-history', root, ctx.params) as _:
         from .git_systems.git_archivist import GitArchivist
         archivist = GitArchivist(root)

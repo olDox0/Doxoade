@@ -5,10 +5,9 @@ Refatorado para Expert-Split para eliminar hibridismo UI/SYS.
 """
 import os
 from click import progressbar, echo
-from colorama import Fore
+from doxoade.tools.doxcolors import Fore
 from .check_state import CheckState
 from ..security_utils import get_tool_path, SEVERITY_MAP, batch_list
-
 def analyze_security(state: CheckState):
     """Orquestrador da Auditoria de Segurança (CC: 2)."""
     # 1. Auditoria de Código (SAST)
@@ -16,14 +15,12 @@ def analyze_security(state: CheckState):
     
     # 2. Auditoria de Dependências (SCA)
     _audit_sca_integration(state)
-
 def _audit_sast_integration(state: CheckState):
     """Especialista em processamento Bandit com ProgressBar."""
     from ..security import _run_bandit_engine
     
     if not get_tool_path('bandit') or not state.target_files:
         return
-
     batches = list(batch_list(state.target_files, 10))
     with progressbar(batches, label='Escudo Aegis (SAST)') as bar:
         for batch in bar:
@@ -38,7 +35,6 @@ def _audit_sast_integration(state: CheckState):
                         'line': res['line'],
                         'details': f"Fragmento: {res.get('code', 'N/A')}"
                     })
-
 def _audit_sca_integration(state: CheckState):
     """Especialista em processamento Safety."""
     from ..security import _run_safety_engine
@@ -49,7 +45,6 @@ def _audit_sca_integration(state: CheckState):
         sca_results = _run_safety_engine(state.root, None)
         for res in (sca_results or []):
             state.register_finding(res)
-
 def _is_security_relevant(res: dict, root: str) -> bool:
     """Filtro de Relevância Aegis (Silencia ruído de infra no Core)."""
     msg = res['message'].lower()

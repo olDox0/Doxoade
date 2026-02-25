@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 # tests/vulcan_sandbox/heavy_core.py
 import math
-
 def compute_chunk(iterations):
     """Função alvo para otimização nativa."""
     res = 0.0

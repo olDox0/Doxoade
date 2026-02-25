@@ -2,12 +2,10 @@
 import subprocess
 import sys
 import click
-from colorama import Fore, Style
-
+from doxoade.tools.doxcolors import Fore, Style
 class DependencyGuard:
     def __init__(self, root):
         self.root = root
-
     def check_health(self, auto_fix=False):
         print(f"{Fore.CYAN}🛡  [DEPENDABOT-LOCAL] Analisando suprimentos...{Style.RESET_ALL}")
         
@@ -22,7 +20,6 @@ class DependencyGuard:
                 print(Style.DIM + res.stdout)
             else:
                 print(Fore.GREEN + "   ✔ Nenhuma vulnerabilidade conhecida detectada.")
-
             # 2. Verifica pacotes desatualizados (Outdated)
             print("\n   > Verificando versões obsoletas...")
             res_out = subprocess.run([python_exe, '-m', 'pip', 'list', '--outdated'], 
@@ -35,10 +32,8 @@ class DependencyGuard:
                     self._perform_rebuild_protocol()
             else:
                 print(Fore.GREEN + "   ✔ Todas as dependências estão no Estado de Ouro.")
-
         except Exception as e:
             print(Fore.RED + f"   ✘ Falha no diagnóstico de dependências: {e}")
-
     def _perform_rebuild_protocol(self):
 # [DOX-UNUSED]         from click import confirm
         """Aciona o Protocolo Fênix para cura total."""

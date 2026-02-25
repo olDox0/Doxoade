@@ -7,12 +7,10 @@ Mineração de objetos órfãos e reconstrução de material volátil.
 import os
 import subprocess
 import datetime
-from colorama import Fore, Style
-
+from doxoade.tools.doxcolors import Fore, Style
 class Scavenger:
     def __init__(self, root):
         self.root = root
-
     def find_dangling_blobs(self):
         """Busca conteúdos de arquivos que ficaram órfãos no banco do Git."""
         print(f"{Fore.YELLOW}🔍 Vasculhando o abismo de objetos órfãos (git fsck)...{Style.RESET_ALL}")
@@ -25,7 +23,6 @@ class Scavenger:
             lost_dir = os.path.join(self.root, '.git', 'lost-found', 'other')
             if not os.path.exists(lost_dir):
                 return []
-
             recovered = []
             for blob_hash in os.listdir(lost_dir):
                 path = os.path.join(lost_dir, blob_hash)
@@ -43,7 +40,6 @@ class Scavenger:
         except Exception as e:
             print(f"{Fore.RED}Erro no fsck: {e}{Style.RESET_ALL}")
             return []
-
     def scan_npp_backups(self):
         """Varre pastas nppBackup em busca de versões recentes antes do reset."""
         found = []
@@ -74,7 +70,6 @@ class Scavenger:
             return res.stdout.strip().splitlines()
         except Exception:
             return []
-
     def recover_from_npp_session(self):
         """Tenta localizar o arquivo de sessão do Notepad++ que guarda arquivos não salvos."""
         import os

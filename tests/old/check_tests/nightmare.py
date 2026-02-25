@@ -4,10 +4,8 @@ import hashlib
 import subprocess
 import pickle
 import modulo_fantasma_xyz  # [DEPENDENCY] Import que não existe
-
 # [STYLE] Variável global
 SENHA_MESTRE = "admin123"  # [SECURITY] Senha Hardcoded
-
 def funcao_perigosa(dados=[]):  # [RISK-MUTABLE] Argumento padrão mutável
     # [DOCS] Falta docstring
     
@@ -17,7 +15,6 @@ def funcao_perigosa(dados=[]):  # [RISK-MUTABLE] Argumento padrão mutável
     # [STYLE] Comparação com None
     if dados == None:
         return
-
     # [RISK-EXCEPTION] Except genérico
     try:
         # [SECURITY] Execução arbitrária
@@ -34,14 +31,11 @@ def funcao_perigosa(dados=[]):  # [RISK-MUTABLE] Argumento padrão mutável
         
     except:
         pass
-
     # [ABDUÇÃO] 'math' e 'random' não foram importados
     print(math.pi)
     print(random.randint(1, 10))
-
     # [STYLE] Recursão
     funcao_perigosa(dados)
-
 def funcao_gigante_e_complexa():
     # [COMPLEXITY] Função muito longa (MPoT)
     print("Linha 1")

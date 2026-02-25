@@ -1,7 +1,6 @@
 # doxoade/diagnostic/check_exame.py
 import os  # [DEADCODE]
 import sys # [DEADCODE]
-
 def funcao_complexa(a):
     """Gera aviso de complexidade se houver muitos desvios."""
     if a > 1:
@@ -10,15 +9,12 @@ def funcao_complexa(a):
                 for i in range(a):
                     while True: break
     return a
-
 def risco_seguranca():
     # [SECURITY]
     eval("print('vulneravel')")
-
 def erro_runtime():
     # [RUNTIME-RISK]
     return variavel_inexistente + 10
-
 def argumento_mutavel(lista=[]): # [RISK-MUTABLE]
     return lista
     

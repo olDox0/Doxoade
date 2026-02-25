@@ -8,8 +8,7 @@ Responsabilidade: Detecção automática de JSON e formatação rica.
 import json
 import textwrap
 import click
-from colorama import Fore, Style
-
+from doxoade.tools.doxcolors import Fore, Style
 # Paleta Semântica para chaves conhecidas
 STYLE_MAP = {
     # Críticos
@@ -28,7 +27,6 @@ STYLE_MAP = {
     "IMPACT": (Fore.YELLOW + Style.BRIGHT, "💥"),
     "DESCRIPTION": (Fore.WHITE, "📝"),
 }
-
 class SemanticJSONRenderer:
     def try_render(self, content: str) -> bool:
         """
@@ -38,14 +36,12 @@ class SemanticJSONRenderer:
         stripped = content.strip()
         if not (stripped.startswith('{') or stripped.startswith('[')):
             return False
-
         try:
             data = json.loads(content)
             self._render_semantic_card(data)
             return True
         except json.JSONDecodeError:
             return False
-
     def _render_semantic_card(self, data):
         """Renderiza o objeto JSON como um Card de Interface."""
         if isinstance(data, list):
@@ -53,26 +49,21 @@ class SemanticJSONRenderer:
                 self._render_semantic_card(item)
                 click.echo(Fore.CYAN + "─" * 40 + Fore.RESET)
             return
-
         if not isinstance(data, dict):
             # Se for uma string JSONificada simples, imprime normal
             click.echo(data)
             return
-
         click.echo("") # Espaço inicial
-
         # 1. Tenta renderizar campos prioritários primeiro (Severity, Title)
         priority_keys = ['severity', 'status', 'type']
         for key in priority_keys:
             if key in data:
                 self._render_field(key, data.pop(key))
-
         # 2. Renderiza o restante
         for key, value in data.items():
             self._render_field(key, value)
             
         click.echo("") # Espaço final
-
     def _render_field(self, key, value):
         upper_key = key.upper()
         style_cfg = STYLE_MAP.get(upper_key, (Fore.CYAN, "•"))

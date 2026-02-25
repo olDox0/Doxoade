@@ -7,10 +7,9 @@ Suporte a Diff Padrão e Auditoria de Funcionalidades Legadas (-l, -lc).
 import os
 import click
 from pathlib import Path
-from colorama import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style
 from ..shared_tools import ExecutionLogger, _run_git_command, _present_diff_output
 # [DOX-UNUSED] from .search import _search_in_code_stream
-
 @click.command('diff')
 @click.argument('path', type=click.Path(exists=True))
 @click.option('-v', '--revision', 'revision_hash', help="Hash do commit para comparação.")
@@ -21,13 +20,11 @@ from ..shared_tools import ExecutionLogger, _run_git_command, _present_diff_outp
 def diff(path, revision_hash, show_legacy, limit, show_legacy_code, search_moved):
     """Analisa diferenças de código e regressões de funcionalidade."""
     params = {'revision': revision_hash, 'legacy': show_legacy, 'lc': show_legacy_code}
-
     with ExecutionLogger('diff', path, params):
         git_root = _run_git_command(['rev-parse', '--show-toplevel'], capture_output=True, silent_fail=True)
         if not git_root:
             click.echo(Fore.RED + "[ERRO] Este diretório não é um repositório Git.")
             return
-
         # FIX: Sincronização do rel_path para uso nas funções internas
         rel_path = os.path.relpath(os.path.abspath(path), git_root.strip()).replace('\\', '/')
         
@@ -36,7 +33,6 @@ def diff(path, revision_hash, show_legacy, limit, show_legacy_code, search_moved
             _run_legacy_audit(rel_path, limit, show_legacy_code, search_moved)
         else:
             _run_standard_diff(rel_path, revision_hash)
-
 def _run_standard_diff(rel_path: str, revision: str):
     """Executa o diff tradicional do Git."""
     target = revision if revision else "HEAD"
@@ -48,7 +44,6 @@ def _run_standard_diff(rel_path: str, revision: str):
     else:
         click.echo(Fore.CYAN + f"--- Diferenças em '{rel_path}' vs {target} ---")
         _present_diff_output(result)
-
 def _run_legacy_audit(rel_path: str, limit: int, show_code: bool, search_moved: bool):
     """Analisa a evolução semântica (Fix v88.1)."""
     from ..tools.git import _get_file_history_metadata, _get_historical_content
@@ -56,7 +51,6 @@ def _run_legacy_audit(rel_path: str, limit: int, show_code: bool, search_moved: 
     from .search import _search_in_code_stream 
 #    from .search_systems.search_engine import _search_code_logic as _search_in_code_stream
     from ..shared_tools import _find_project_root
-
     current_content = ""
     project_root = Path(_find_project_root(os.getcwd()))
     click.echo(f"{Fore.CYAN}{Style.BRIGHT}--- [LEGACY AUDIT] Regressões em '{rel_path}' ---{Style.RESET_ALL}")
@@ -70,7 +64,6 @@ def _run_legacy_audit(rel_path: str, limit: int, show_code: bool, search_moved: 
     except Exception as e:
         click.echo(f"{Fore.RED}[ERRO] Leitura falhou: {e}{Style.RESET_ALL}")
         return
-
     # 2. Varredura Temporal
     history = _get_file_history_metadata(rel_path, limit=limit)
     for commit in history:
@@ -112,7 +105,6 @@ def _run_legacy_audit(rel_path: str, limit: int, show_code: bool, search_moved: 
                                 loc_str = f"{h_path}:{h['line']}"
                                 if loc_str not in found_locations:
                                     found_locations.append(loc_str)
-
                     if found_locations:
                         for loc in found_locations:
                             tag = "➔ RENOMEADA/REFERENCIADA EM:" if loc.startswith(rel_path) else "➔ MIGRADA PARA:"

@@ -4,26 +4,22 @@ Doxoade Maestro - v71.1 Gold.
 Interpretador de automação (.dox) para pipelines portáveis.
 ESTRATÉGIA: Instruction Dispatcher para conformidade MPoT-v71 (Redução de CC: 59 -> 6).
 """
-
 import click
 import subprocess
 import os
 import re
 import shlex
-from colorama import Fore, Style
-
+from doxoade.tools.doxcolors import Fore, Style
 class MaestroInterpreter:
     def __init__(self):
         self.variables = {}
         self.lines = []
         self.ip = 0 
         self.loop_stack = []
-
     def _resolve_vars(self, text):
         for key, val in self.variables.items():
             text = text.replace(f"{{{key}}}", str(val))
         return text
-
     def execute_file(self, filepath):
         if not os.path.exists(filepath):
             click.echo(Fore.RED + f"[MAESTRO] Arquivo não encontrado: {filepath}")
@@ -32,9 +28,7 @@ class MaestroInterpreter:
             self.lines = [l.strip() for l in f.readlines()]
         self.ip = 0
         self.run()
-
     # --- DESPACHANTES DE COMANDO (MODULARIZAÇÃO MPoT-17) ---
-
     def _cmd_print(self, line):
         colors = {
             'PRINT-RED ': (Fore.RED + Style.BRIGHT),
@@ -47,7 +41,6 @@ class MaestroInterpreter:
                 msg = self._resolve_vars(line[len(prefix):].strip().strip('"'))
                 click.echo(color + f"[MAESTRO] {msg}")
                 return
-
     def _cmd_vars(self, line):
         if line.startswith('SET '):
             parts = line[4:].split('=')
@@ -57,7 +50,6 @@ class MaestroInterpreter:
             var = line[4:].strip()
             if var in self.variables and isinstance(self.variables[var], int):
                 self.variables[var] += 1
-
     def _cmd_io(self, line):
         if line.startswith('READ_LINES '):
             parts = line[11:].split('->')
@@ -66,7 +58,6 @@ class MaestroInterpreter:
                 with open(fname, 'r', encoding='utf-8', errors='ignore') as f:
                     self.variables[var] = [l.strip() for l in f.readlines()]
             else: self.variables[var] = []
-
     def _cmd_execution(self, line):
         if line.startswith('BATCH '):
             parts = line[6:].split('->')
@@ -79,7 +70,6 @@ class MaestroInterpreter:
                 if not target_var: print(output, end='')
                 else: self.variables[target_var] = output.strip()
             except Exception as e: click.echo(Fore.RED + f"[MAESTRO BATCH ERROR] {e}")
-
         elif line.startswith('RUN '):
             parts = line[4:].split('->')
             cmd_str, target_var = self._resolve_vars(parts[0].strip()), (parts[1].strip() if len(parts) > 1 else None)
@@ -91,7 +81,6 @@ class MaestroInterpreter:
                 if not target_var or res.returncode != 0: click.echo(output)
                 if target_var: self.variables[target_var] = output.strip()
             except Exception as e: click.echo(Fore.RED + f"[MAESTRO ERROR] Falha ao executar '{cmd_str}': {e}")
-
     def _cmd_filesystem(self, line):
         if line.startswith('FIND '):
             parts = line[5:].split('->')
@@ -102,7 +91,6 @@ class MaestroInterpreter:
             files = glob.glob(full_p, recursive=True)
             if target_var: self.variables[target_var] = "\n".join(files)
             click.echo(Fore.CYAN + f"   > Encontrados {len(files)} arquivos.")
-
     def _cmd_fast_utils(self, line):
         if line.startswith("FIND_LINE_NUMBER"):
             parts = line.split(" ")
@@ -113,7 +101,6 @@ class MaestroInterpreter:
                     for idx, l in enumerate(f):
                         if term in l: found = str(idx); break
             self.variables[dest] = found
-
         elif line.startswith("DELETE_BLOCK_TREE"):
             parts = line.split(" ")
             idx, fpath = int(self._resolve_vars(parts[2])), self._resolve_vars(parts[4].strip('"\''))
@@ -129,7 +116,6 @@ class MaestroInterpreter:
                     new.extend(lines[i:])
                     with open(fpath, 'w') as f: f.writelines(new)
                     click.echo(Fore.GREEN + "   > [MAESTRO FAST] Bloco removido.")
-
     def _cmd_logic(self, line):
         if line.startswith('IF '):
             res = self._resolve_vars(line)
@@ -159,7 +145,6 @@ class MaestroInterpreter:
         elif line == 'BREAK' and self.loop_stack:
             self.loop_stack.pop()
             self._skip_block(break_loop=True)
-
     def _skip_block(self, break_loop=False):
         nesting = 1
         while self.ip < len(self.lines):
@@ -170,9 +155,7 @@ class MaestroInterpreter:
                 nesting -= 1
                 if nesting == 0: return
             elif line == 'ELSE' and nesting == 1 and not break_loop: return
-
     # --- ORQUESTRADOR (COMPLEXIDADE REDUZIDA) ---
-
     def run(self):
         """Loop de execução principal (Dispatcher)."""
         while self.ip < len(self.lines):
@@ -181,7 +164,6 @@ class MaestroInterpreter:
             self.ip += 1 
             
             if not line or line.startswith('#'): continue
-
             # Roteamento de comandos (agora com a linha limpa)
             self._cmd_print(line)
             self._cmd_vars(line)
@@ -190,7 +172,6 @@ class MaestroInterpreter:
             self._cmd_filesystem(line)
             self._cmd_fast_utils(line)
             self._cmd_logic(line)
-
 # (O resto das constantes TEMPLATES e a def maestro permanecem idênticos ao original)
 TEMPLATES = {
     "ci-padrao": """
@@ -217,7 +198,6 @@ ELSE
 END
 """
 }
-
 @click.command('maestro')
 @click.argument('workflow_file', required=False, type=click.Path())
 @click.option('--list', 'show_list', is_flag=True, help="Lista templates de workflow disponíveis.")

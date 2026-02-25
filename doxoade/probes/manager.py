@@ -4,7 +4,6 @@ import sys
 import os
 import json
 from typing import Optional, Dict, Any
-
 class ProbeManager:
     """Gerenciador Central de Execução de Sondas (Protocolo Aegis)."""
     def __init__(self, python_exe: str, project_root: str):
@@ -13,14 +12,12 @@ class ProbeManager:
         self.env = os.environ.copy()
         # Garante que as sondas achem o pacote doxoade
         self.env["PYTHONPATH"] = str(project_root) + os.pathsep + self.env.get("PYTHONPATH", "")
-
     def execute(self, probe_script_path: str, target_file: Optional[str] = None, 
                 payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Executa uma sonda e garante integridade absoluta do retorno."""
         cmd = [self.python_exe, probe_script_path]
         if target_file:
             cmd.append(target_file)
-
         # Prepara o ambiente para o subprocesso
         env_for_probe = self.env.copy()
         sys_path_clean = [p for p in sys.path if 'site-packages' not in p.lower() and self.project_root.lower() in p.lower()]
@@ -29,7 +26,6 @@ class ProbeManager:
         # Limpa o PYTHONPATH para o subprocesso não herdar lixo (MPoT-15)
         if "PYTHONPATH" in env_for_probe:
             del env_for_probe["PYTHONPATH"] # Evita que a sonda importe de lugares estranhos
-
         input_str = json.dumps(payload) if payload else "" 
         for attempt in range(2):
             try:

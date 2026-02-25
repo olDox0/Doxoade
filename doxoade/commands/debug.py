@@ -7,11 +7,10 @@ import click
 import subprocess
 import sys
 import json
-from colorama import Fore
+from doxoade.tools.doxcolors import Fore
 from .debug_utils import get_debug_env, build_probe_command
 from .debug_io import print_debug_header, render_variable_table, report_crash
 from ..shared_tools import _get_venv_python_executable
-
 @click.command('debug')
 @click.argument('script', type=click.Path(exists=True))
 @click.option('--watch', help='Monitora uma variável em tempo real.')
@@ -34,12 +33,10 @@ def debug(script, watch, bottleneck, threshold, args):
         except KeyboardInterrupt:
             click.echo(f"\n{click.style('[!]', fg='yellow')} Monitoramento encerrado.")
         return
-
     # --- MODO AUTÓPSIA (Debug Probe) ---
     from ..probes import debug_probe
     print_debug_header(script)
     cmd = build_probe_command(python_exe, debug_probe.__file__, script, args=args)
-
     try:
         # Mudamos de .run (que espera o fim) para .Popen (que monitora em tempo real)
         process = subprocess.Popen(
@@ -70,7 +67,6 @@ def debug(script, watch, bottleneck, threshold, args):
             click.secho("\n📡 [ SERVIDOR ATIVO ] Loop detectado. O rastro está em background.", fg='cyan')
             click.echo(Fore.WHITE + "   > Para servidores, use 'doxoade run --flow' para ver as rotas em real-time.")
             return
-
         # Se o processo terminou em menos de 5s, houve um erro ou o script era curto
         if "---DOXOADE-DEBUG-DATA---" in stdout:
             parts = stdout.split("---DOXOADE-DEBUG-DATA---")
@@ -85,7 +81,6 @@ def debug(script, watch, bottleneck, threshold, args):
             click.secho("\n🚨 [ FALHA DE BOOTSTRAP ]", fg='red', bold=True)
             if stderr: click.echo(f"{Fore.RED}{stderr}")
             if stdout: click.echo(stdout)
-
     except Exception as e:
         import sys as exc_sys
         from traceback import print_tb as exc_trace

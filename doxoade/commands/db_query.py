@@ -1,11 +1,9 @@
 # doxoade/commands/db_query.py
 import click
-from colorama import Fore
+from doxoade.tools.doxcolors import Fore
 import json
-
 from ..database import get_db_connection
 from ..shared_tools import ExecutionLogger
-
 @click.command('db-query')
 @click.pass_context
 @click.argument('sql_query', required=True)
@@ -25,13 +23,11 @@ def db_query(ctx, sql_query):
             if not rows:
                 click.echo(Fore.GREEN + "Query executada com sucesso. Nenhum resultado retornado.")
                 return
-
             # Converte as linhas do banco de dados para dicionários
             results = [dict(row) for row in rows]
             
             # Imprime como um JSON legível
             click.echo(json.dumps(results, indent=2, ensure_ascii=False))
-
         except Exception as e:
             logger.add_finding("ERROR", "Falha na execução da query SQL.", details=str(e))
             click.echo(Fore.RED + f"Erro ao executar a query: {e}")

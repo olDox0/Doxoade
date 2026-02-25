@@ -4,20 +4,15 @@ import sys
 import os
 import click
 # [DOX-UNUSED] import shlex
-from colorama import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style
 from ..shared_tools import ExecutionLogger
-
 __version__ = "37.0 Alfa (Interactive Pipelines)"
-
 def _execute_command(command_string: str, env: dict, inputs: list = None):
     import subprocess
     import shlex
-
     click.echo(Fore.YELLOW + f"   > Executando: {command_string}")
-
     args = shlex.split(command_string)
     input_str = "\n".join(inputs) + "\n" if inputs else None
-
     try:
         process = subprocess.Popen(
             args,
@@ -30,23 +25,17 @@ def _execute_command(command_string: str, env: dict, inputs: list = None):
             env=env,
             shell=False
         )
-
         if input_str:
             process.communicate(input=input_str)
         else:
             process.wait()
-
         return process.returncode
-
     except FileNotFoundError:
         click.echo(Fore.RED + f"   > Comando não encontrado: {args[0]}")
         return 127
-
     except Exception as e:
         click.echo(Fore.RED + f"   > Erro ao executar comando: {e}")
         return 1
-
-
 @click.command('auto')
 @click.argument('prompt', required=False)
 @click.option('--file', '-f', 'filepath', multiple=True, help="Arquivos de contexto para a IA.")
@@ -59,7 +48,6 @@ def auto(ctx, prompt, filepath):
     # --- PARSER DA NOVA SINTAXE DE PIPELINE ---
     pipeline_steps = []
     source_lines = []
-
     if filepath:
         try:
             # PASC-8.12: Garantindo leitura segura
@@ -75,7 +63,6 @@ def auto(ctx, prompt, filepath):
             print(f"\033[0m \033[1m Filename: {fname}   ■ Line: {line_number} \033[31m ■ Exception type: {e} ■ Exception value: {exc_obj} \033[0m")
     elif commands:
         source_lines = list(commands)
-
     temp_inputs = []
     for line in source_lines:
         line = line.strip()
@@ -89,21 +76,17 @@ def auto(ctx, prompt, filepath):
             pipeline_steps.append({'type': 'command', 'value': line, 'inputs': temp_inputs})
             temp_inputs = []
     # --- FIM DO PARSER ---
-
     with ExecutionLogger('auto', '.', arguments) as logger:
         if not pipeline_steps:
             click.echo(Fore.YELLOW + "Nenhum comando para executar."); return
-
         click.echo(Fore.CYAN + Style.BRIGHT + f"--- [AUTO] Iniciando pipeline de {len(pipeline_steps)} passo(s) ---")
         
         results = []
         final_success = True
-
         for i, step in enumerate(pipeline_steps, 1):
             if step['type'] == 'echo':
                 click.echo(Fore.MAGENTA + Style.BRIGHT + f"\n--- [AUTO] {step['value']} ---")
                 continue
-
             command_str = step['value']
             inputs = step['inputs']
             

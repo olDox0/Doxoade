@@ -2,9 +2,7 @@ import sys
 import subprocess
 import os
 import json
-
 PROBE_PATH = os.path.join("doxoade", "probes", "xref_probe.py")
-
 def test_xref_probe_detects_broken_import(tmp_path):
     """Verifica se import de símbolo inexistente é detectado."""
     # Cria arquivo A (biblioteca)
@@ -28,7 +26,6 @@ def test_xref_probe_detects_broken_import(tmp_path):
     data = json.loads(result.stdout)
     found = any(f['category'] == 'BROKEN-LINK' and 'nao_existe' in f['message'] for f in data)
     assert found, "XRef Probe falhou em detectar import quebrado"
-
 def test_xref_probe_detects_signature_mismatch(tmp_path):
     """Verifica se chamada com argumentos errados é detectada."""
     f = tmp_path / "sig.py"
@@ -50,6 +47,5 @@ def test_xref_probe_detects_signature_mismatch(tmp_path):
         print(f"STDOUT INVÁLIDO: {result.stdout}")
         print(f"STDERR: {result.stderr}")
         raise
-
     found = any(f['category'] == 'SIGNATURE-MISMATCH' for f in data)
     assert found, f"XRef Probe falhou. Findings encontrados: {data}"

@@ -10,8 +10,7 @@ import os
 import doxoade
 from pathlib import Path
 from dataclasses import dataclass
-from colorama import Fore
-
+# [DOX-UNUSED] from tools.doxcolors import Fore
 @dataclass
 class Article:
     key: str
@@ -20,13 +19,11 @@ class Article:
     source: str
     category: str
     date: str = ""
-
 class KnowledgeBaseIO:
     def __init__(self, project_root: str):
         self.user_root = Path(project_root)
         self.system_docs = Path(doxoade.__file__).parent / 'docs'
         self.user_docs = self._locate_user_docs()
-
     def _locate_user_docs(self) -> Path:
         candidates = [
             self.user_root / 'docs',
@@ -37,7 +34,6 @@ class KnowledgeBaseIO:
             if c.exists() and c.is_dir():
                 return c
         return self.user_root / 'docs'
-
     def load_all_knowledge(self) -> dict:
         articles = {}
         if self.system_docs.exists():
@@ -45,14 +41,12 @@ class KnowledgeBaseIO:
         if self.user_docs.exists():
             articles.update(self._scan_tree(self.user_docs, source="local"))
         return articles
-
     def _scan_tree(self, root_path: Path, source: str) -> dict:
         loaded = {}
         ignore_dirs = {'.git', '__pycache__', '_build', 'site', 'node_modules', 'venv'}
         
         # EXTENSÕES PERMITIDAS (Whitelist)
         valid_exts = {'.json', '.md', '.txt', '.dox'}
-
         for current_dir, dirs, files in os.walk(root_path):
             dirs[:] = [d for d in dirs if d not in ignore_dirs]
             
@@ -62,7 +56,6 @@ class KnowledgeBaseIO:
                 # [FIX] Ignora arquivos que não sejam de documentação
                 if file_path.suffix.lower() not in valid_exts:
                     continue
-
                 try:
                     rel_parent = file_path.parent.relative_to(root_path)
                     category = str(rel_parent).replace('\\', '/')
@@ -76,7 +69,6 @@ class KnowledgeBaseIO:
                     art = self._parse_markdown(file_path, source, category)
                     if art: loaded[art.key] = art
         return loaded
-
     def _parse_json(self, path: Path, source: str, category: str) -> dict:
         content = self._read_robust(path)
         batch = {}
@@ -89,7 +81,6 @@ class KnowledgeBaseIO:
                     title = key
                     date = ""
                     body = ""
-
                     if isinstance(val, dict):
                         title = val.get('title', key)
                         date = val.get('date', '')
@@ -100,7 +91,6 @@ class KnowledgeBaseIO:
                             target_data = clean_val
                         else:
                             target_data = raw_content
-
                         if isinstance(target_data, str):
                             body = target_data
                         elif isinstance(target_data, (dict, list)):
@@ -109,13 +99,11 @@ class KnowledgeBaseIO:
                             body = str(target_data)
                     else:
                         body = str(val)
-
                     final_cat = category if category != "Geral" else path.stem.title()
                     clean_key = key.lower().strip()
                     batch[clean_key] = Article(clean_key, title, body, source, final_cat, date)
         except json.JSONDecodeError: pass
         return batch
-
     def _parse_markdown(self, path: Path, source: str, category: str) -> Article:
         content = self._read_robust(path)
         if not content: return None
@@ -130,9 +118,7 @@ class KnowledgeBaseIO:
         
         date_match = re.search(r'(?:Data|Date|Atualizado):\s*(\d{4}-\d{2}-\d{2})', content)
         date = date_match.group(1) if date_match else ''
-
         return Article(path.stem.lower(), title, content, source, category, date)
-
     def _read_robust(self, filepath: Path) -> str:
         for enc in ['utf-8', 'cp1252', 'latin-1']:
             try: return filepath.read_text(encoding=enc)

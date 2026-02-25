@@ -5,14 +5,12 @@ WeightGuard - Vigilante PASC 1.3 & OSL 16.
 Monitora o crescimento físico dos arquivos para evitar 'Overflat'.
 """
 import os
-from ...database import get_db_connection
-
+# [DOX-UNUSED] from ...database import get_db_connection
 class WeightGuard:
     def __init__(self, root):
         self.root = root
         self.MAX_KB = 20
         self.MAX_LINES = 500
-
     def audit(self, files: list):
         findings = []
         for f in files:
@@ -26,13 +24,11 @@ class WeightGuard:
                     'message': f"Arquivo obeso: {os.path.basename(f)} ({size_kb:.1f}KB)",
                     'file': f, 'line': 1
                 })
-
             # 2. Checagem de Direcionalidade (PASC 8.6)
             illegal = self._check_illegal_imports(f)
             if illegal: findings.append(illegal)
             
         return findings
-
     def _check_illegal_imports(self, file_path):
         """Verifica imports proibidos, respeitando o silenciador # noqa."""
         try:

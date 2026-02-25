@@ -2,16 +2,14 @@
 # doxoade/commands/impact_systems/impact_utils.py
 import os
 import json
-# [DOX-UNUSED] from colorama import Fore
+# [DOX-UNUSED] from tools.doxcolors import Fore
 from pathlib import Path
-
 def get_file_metadata(fp: str) -> tuple:
     """Retorna (mtime, size) para validação de cache."""
     try:
         st = os.stat(fp)
         return int(st.st_mtime), st.st_size
     except Exception: return 0, 0
-
 def load_impact_cache(root_path: str) -> dict:
     """Carrega o índice persistido (PASC-8.3)."""
     cache_file = Path(root_path) / ".doxoade_cache" / "impact_index.json"
@@ -20,7 +18,6 @@ def load_impact_cache(root_path: str) -> dict:
         with open(cache_file, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception: return {}
-
 def save_impact_cache(root_path: str, data: dict):
     """Persiste o índice no disco."""
     cache_dir = Path(root_path) / ".doxoade_cache"
@@ -47,7 +44,6 @@ def path_to_module_name(file_path: str, search_path: str) -> str:
         return base.replace(os.sep, '.').replace('/', '.')
     except Exception:
         return "unknown"
-
 def resolve_relative_import(module: str, level: int, current_module: str) -> str:
     """Resolve a hierarquia de imports como 'from ..tools import x'."""
     if level == 0: return module
@@ -58,10 +54,9 @@ def resolve_relative_import(module: str, level: int, current_module: str) -> str
     if module:
         target_parts.append(module)
     return ".".join(target_parts)
-
 def get_coupling_status(fan_out: int, fan_in: int):
     """Calcula métrica de acoplamento (Atena Architecture)."""
-    from colorama import Fore
+    from doxoade.tools.doxcolors import Fore
     total = fan_out + fan_in
     if total == 0: return 0.0, (Fore.GREEN, "Independente")
     

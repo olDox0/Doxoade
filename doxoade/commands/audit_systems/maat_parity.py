@@ -4,17 +4,14 @@
 ParityGuard v1.2 - O Dinamômetro de Ma'at.
 Garante paridade lógica e ganho de performance real (PASC 6.4).
 """
-
 import time
 import random
 import string
-from colorama import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style
 from ...tools.vulcan.bridge import vulcan_bridge
-
 class ParityGuard:
     def __init__(self, root):
         self.root = root
-
     def audit(self, files: list):
         findings = []
         for f in files:
@@ -25,7 +22,6 @@ class ParityGuard:
                     #findings.extend(self._run_simd_shadow_test(f, v_mod))
                     findings.extend(self._audit_module_parity(f, v_mod))
         return findings
-
     def _run_simd_shadow_test(self, file_path, v_mod):
         """Shadow Test: confronta a lógica Python vs Silício (Ares vs Apolo)."""
         findings = []
@@ -52,7 +48,6 @@ class ParityGuard:
                 native_hits_list = v_mod.scan_buffer_with_lines(test_content.encode('utf-8'), needle.encode('utf-8'))
                 native_hits = len(native_hits_list) if native_hits_list else 0
                 v_time = time.perf_counter() - t1
-
                 # 3. O Julgamento de Ma'at
                 if expected_hits != native_hits:
                     findings.append({
@@ -73,7 +68,6 @@ class ParityGuard:
                     })
                 else:
                     print(f"   {Fore.GREEN}⚡ [VULCAN-POWER] {v_mod.__name__} validado: {speedup:.1f}x mais rápido.{Style.RESET_ALL}")
-
             except Exception as e:
                 findings.append({
                     'severity': 'CRITICAL',
@@ -83,7 +77,6 @@ class ParityGuard:
                 })
         
         return findings
-
     def _perform_shadow_battle(self, func_name, v_func):
         """Realiza o Shadow Test com inputs de estresse (Ares)."""
         # 1. Preparação de Dados de Estresse (Foco em busca/SIMD)

@@ -4,7 +4,6 @@
 Doxoade Vulcan Stress Test - Bitwise Cipher.
 Simula complexidade de baixo nível para forçar ignição do Autopilot.
 """
-
 def heavy_bitwise_process(n, seed):
     """Algoritmo de crunching de bits para teste de performance nativa."""
     # Variáveis que o Forge deve tipar como 'long'
@@ -24,7 +23,6 @@ def heavy_bitwise_process(n, seed):
             result = (result - 1) & 0xFFFFFFFF
             
     return result
-
 if __name__ == "__main__":
     # 10 milhões de iterações para gerar calor nítido
     ITERACOES = 10000000

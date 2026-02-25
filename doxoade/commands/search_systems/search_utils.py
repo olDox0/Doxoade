@@ -4,10 +4,8 @@
 import os
 import subprocess
 from click import echo
-from colorama import Fore, Style
-
+from doxoade.tools.doxcolors import Fore, Style
 from .search_state import SearchState
-
 def render_search_results(state: 'SearchState'):
     """Interface Forense Unificada (Chief-Style)."""
     if state.matches:
@@ -29,7 +27,6 @@ def render_search_results(state: 'SearchState'):
                         echo(f"    {s_color}{line}{Style.RESET_ALL}")
                     echo("")
                     continue
-
             # Fallback para Snippet Normal
             from ...tools.analysis import _get_code_snippet
             snippet = _get_code_snippet(os.path.join(state.root, m['file']), m['line'])
@@ -38,14 +35,12 @@ def render_search_results(state: 'SearchState'):
                 prefix = "      > " if is_target else "        "
                 s_color = Fore.WHITE + Style.BRIGHT if is_target else Fore.WHITE + Style.DIM
                 echo(f"{s_color}{prefix}{snip_line:4}: {snip_text}{Style.RESET_ALL}")
-
     # 2. Banco de Dados
     if state.db_results['incidents']:
         echo(f"{Fore.RED}{Style.BRIGHT}\n╔═══ Incidentes Ativos ═══╗{Style.RESET_ALL}")
         for inc in state.db_results['incidents']:
             echo(f"{Fore.YELLOW}[{inc['category']}] {Fore.WHITE}{inc['message']}{Style.RESET_ALL}")
             echo(f"  Em: {inc['file']}:{inc['line']}")
-
     # 3. Timeline Chronos
     if state.timeline:
         echo(f"{Fore.MAGENTA}{Style.BRIGHT}\n╔═══ Timeline (Chronos) ═══╗{Style.RESET_ALL}")
@@ -59,7 +54,6 @@ def render_search_results(state: 'SearchState'):
                       state.git_results])
     if not has_results:
         echo(f"\n{Fore.YELLOW}   [!] Nenhum resultado encontrado para '{state.query}' nos filtros ativos.{Style.RESET_ALL}")
-
 def extract_function_block(file_path: str, match_line: int) -> str:
     """Extrai o bloco lógico (def/class) escaneando para cima e para baixo (PASC-8.10)."""
     try:
@@ -68,7 +62,6 @@ def extract_function_block(file_path: str, match_line: int) -> str:
         
         match_idx = match_line - 1
         if match_idx >= len(lines): return ""
-
         # 1. SCAN UP: Encontra o início da função/classe
         start_idx = match_idx
         while start_idx > 0:
@@ -97,7 +90,6 @@ def extract_function_block(file_path: str, match_line: int) -> str:
             
         return "\n".join(block)
     except Exception: return "Erro ao extrair bloco."
-
 def search_git_history_content(query: str, limit: int = 5) -> list:
     """Busca quando uma string foi adicionada ou removida no passado (Pickaxe Search)."""
     # -S busca por mudanças no número de ocorrências da string (perfeito para funções)
@@ -113,7 +105,6 @@ def search_git_history_content(query: str, limit: int = 5) -> list:
                 commits.append({'hash': parts[0], 'msg': parts[1]})
         return commits
     except Exception: return []
-
 def get_code_from_commit(commit_hash: str, query: str) -> list:
     """Busca cirúrgica no Git com tratamento de múltiplas linhas (MPoT-7)."""
     import subprocess
@@ -158,14 +149,12 @@ def extract_block_from_git(commit_hash: str, file_path: str, start_line: int) ->
         # Aqui aplicaríamos a mesma lógica de Scan Up/Down nos 'lines' se necessário
         target_idx = int(start_line) - 1
         if target_idx < 0 or target_idx >= len(lines): return ""
-
         # 2. Lógica de Indentação Industrial (MPoT-4)
         base_line = lines[target_idx]
         # Se a linha não for um início de bloco (def/class), tenta achar o início acima
         if not any(base_line.strip().startswith(x) for x in ['def ', 'class ', '@']):
              # Apenas mostra a linha se não for um bloco lógico
              return f"    {base_line.strip()}"
-
         indent = len(base_line) - len(base_line.lstrip())
         block = [base_line]
         

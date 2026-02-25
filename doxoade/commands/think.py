@@ -1,9 +1,8 @@
 # doxoade/commands/think.py
 import click
 import time
-from colorama import Fore
+from doxoade.tools.doxcolors import Fore
 from ..thinking.core import ThinkingCore
-
 @click.command('think')
 @click.argument('query', nargs=-1, required=True)
 @click.option('--context', '-c', help='Arquivo de contexto para análise.')
@@ -27,7 +26,6 @@ def think(query, context):
                     file_content = f.read()
             except Exception as e:
                 click.echo(Fore.RED + f"[ERRO] Não foi possível ler o contexto: {e}")
-
         # O Grande Processamento
         result = brain.process_thought(user_input, file_context=file_content)
         

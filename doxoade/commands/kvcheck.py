@@ -2,8 +2,7 @@
 import os
 import re
 import click
-#from colorama import Fore
-
+#from tools.doxcolors import Fore
 # Importações de shared_tools corrigidas para usar as funções modernas
 from ..shared_tools import (
     ExecutionLogger,
@@ -11,7 +10,6 @@ from ..shared_tools import (
     _get_project_config,  # <-- USA A FUNÇÃO CORRETA
     _get_code_snippet
 )
-
 @click.command('kvcheck')
 @click.pass_context
 @click.argument('path', type=click.Path(exists=True, dir_okay=True, file_okay=True), default='.')
@@ -28,7 +26,6 @@ def kvcheck(ctx, path, ignore):
         if not config.get('search_path_valid'):
             _present_results('text', logger.results)
             return
-
         files_to_check = []
         if os.path.isfile(path) and path.endswith('.kv'):
             files_to_check.append(path)
@@ -40,16 +37,12 @@ def kvcheck(ctx, path, ignore):
                 for file in files:
                     if file.endswith('.kv'):
                         files_to_check.append(os.path.join(root, file))
-
         if not files_to_check:
             logger.add_finding('INFO', "Nenhum arquivo .kv encontrado para análise.")
         else:
             for file_path in files_to_check:
                 _analyze_kv_file(file_path, logger)
-
         _present_results('text', logger.results)
-
-
 def _analyze_kv_file(file_path, logger):
     """Executa a análise em um único arquivo .kv."""
     try:
@@ -58,11 +51,9 @@ def _analyze_kv_file(file_path, logger):
     except IOError as e:
         logger.add_finding('ERROR', f"Não foi possível ler o arquivo: {e}", file=file_path)
         return
-
     # Regex para identificar ids duplicados
     id_pattern = re.compile(r'^\s+id:\s*(\w+)')
     ids_found = {}
-
     for line_num, line in enumerate(lines, 1):
         # Checagem de ID duplicado
         match = id_pattern.match(line)

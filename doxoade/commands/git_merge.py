@@ -3,17 +3,15 @@ import click
 #import os
 #import sys
 #import re
-from colorama import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style
 from ..shared_tools import ExecutionLogger, _run_git_command #, _get_code_snippet
 from .check import run_check_logic
-
 def _get_conflicted_files():
     """Retorna lista de arquivos marcados como 'Unmerged' pelo Git."""
     output = _run_git_command(['diff', '--name-only', '--diff-filter=U'], capture_output=True)
     if not output:
         return []
     return [f.strip() for f in output.splitlines()]
-
 def _parse_and_resolve_file(filepath):
     """
     Lê um arquivo com conflitos, identifica os blocos <<<<<<< ... >>>>>>>
@@ -25,7 +23,6 @@ def _parse_and_resolve_file(filepath):
     except IOError:
         click.echo(Fore.RED + f"[ERRO] Não foi possível ler '{filepath}'.")
         return False
-
     new_content = []
     i = 0
     resolved_count = 0
@@ -36,7 +33,6 @@ def _parse_and_resolve_file(filepath):
     # =======
     # ...
     # >>>>>>> BranchName (Theirs)
-
     while i < len(lines):
         line = lines[i]
         
@@ -104,13 +100,11 @@ def _parse_and_resolve_file(filepath):
             new_content.append(line)
         
         i += 1
-
     # Salva o arquivo resolvido
     with open(filepath, 'w', encoding='utf-8') as f:
         f.writelines(new_content)
         
     return resolved_count > 0
-
 @click.command('merge')
 @click.pass_context
 @click.argument('branch', required=False)
@@ -131,7 +125,6 @@ def merge(ctx, branch, abort, check_only):
             else:
                 click.echo(Fore.RED + "[ERRO] Não há merge para abortar ou falha no git.")
             return
-
         # 2. Verificar Estado Atual
         conflicted_files = _get_conflicted_files()
         
@@ -155,18 +148,15 @@ def merge(ctx, branch, abort, check_only):
             else:
                 click.echo(Fore.GREEN + "[OK] Merge realizado com sucesso (Fast-forward ou Auto-merge).")
                 return
-
         # 3. Resolver Conflitos (Se houver)
         if not conflicted_files:
             click.echo(Fore.GREEN + "Nenhum arquivo em estado de conflito.")
             return
-
         click.echo(Fore.CYAN + f"\n--- [RESOLVER] Existem {len(conflicted_files)} arquivo(s) com conflito ---")
         
         if check_only:
             for f in conflicted_files: click.echo(f"  - {f}")
             return
-
         files_resolved = []
         
         for fpath in conflicted_files:
@@ -190,7 +180,6 @@ def merge(ctx, branch, abort, check_only):
                     files_resolved.append(fpath)
             else:
                 click.echo(Fore.YELLOW + f"   > '{fpath}' pulado ou sem marcadores padrão.")
-
         # 4. Conclusão
         remaining = len(conflicted_files) - len(files_resolved)
         if remaining == 0:

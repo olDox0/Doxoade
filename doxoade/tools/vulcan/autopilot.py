@@ -1,66 +1,188 @@
 # -*- coding: utf-8 -*-
-# doxoade/tools/vulcan/autopilot.py (v97.5 Platinum Batch)
+# doxoade/tools/vulcan/autopilot.py  (patch v6)
+import hashlib
 import os
 import sys
+import signal
 from pathlib import Path
-from colorama import Fore, Style
-from concurrent.futures import ThreadPoolExecutor # PASC 6.4
+from doxoade.tools.doxcolors import Fore
+from concurrent.futures import as_completed
+# [DOX-UNUSED] from multiprocessing import Manager
 
 from .environment import VulcanEnvironment
 from .advisor import VulcanAdvisor
-from .forge import VulcanForge
+# [DOX-UNUSED] from .forge import VulcanForge
 from .compiler import VulcanCompiler
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+def _forge_worker(task: dict) -> dict:
+    """
+    Worker isolado — roda em processo separado com silo próprio.
+
+    CTRL+C FIX:
+    O worker ignora SIGINT (SIG_IGN) — não imprime ruído.
+    O pai captura KeyboardInterrupt, usa _kill_registry() para matar
+    os PIDs gcc/python registrados, e encerra o executor limpo.
+    """
+    try:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except (OSError, ValueError):
+        pass
+
+    file_path    = task['file_path']
+    foundry_str  = task['foundry']
+    bin_str      = task['bin_dir']
+    pid_registry = task['pid_registry']   # Manager().dict() compartilhado
+    abs_path     = Path(file_path).resolve()
+
+    # Pula arquivos do próprio Vulcan (imports relativos quebram no silo)
+    from .forge import VulcanForge
+    if VulcanForge.is_self_referential(str(abs_path)):
+        return {'name': abs_path.name, 'ok': False,
+                'err': 'vulcan self-file: pulado', 'skip': True}
+
+    path_hash   = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
+    module_name = f"v_{abs_path.stem}_{path_hash}"
+
+    try:
+        sys.stdout.write(f"   [VULCAN:FORGE] {abs_path.name}...\n")
+        sys.stdout.flush()
+
+        forge    = VulcanForge(str(abs_path))
+        pyx_code = forge.generate_source(str(abs_path))
+
+        if not pyx_code:
+            return {'name': abs_path.name, 'ok': False, 'err': 'pyx_code vazio'}
+
+        foundry = Path(foundry_str)
+        bin_dir = Path(bin_str)
+
+        (foundry / f"{module_name}.pyx").write_text(pyx_code, encoding='utf-8')
+
+        from .environment import VulcanEnvironment
+        from .compiler    import VulcanCompiler
+
+        env          = object.__new__(VulcanEnvironment)
+        env.root     = foundry.parent.parent
+        env.work_dir = foundry.parent
+        env.foundry  = foundry
+        env.bin_dir  = bin_dir
+        env.logs     = foundry.parent / "audit.log"
+
+        # Passa o registry para o compiler registrar o PID do Popen(gcc)
+        compiler = VulcanCompiler(env, pid_registry=pid_registry)
+        ok, err  = compiler.compile(module_name)
+        return {'name': abs_path.name, 'ok': ok, 'err': err or None}
+
+    except Exception as e:
+        return {'name': abs_path.name, 'ok': False, 'err': str(e)[:80]}
+
+
+def _kill_registry(pid_registry: dict):
+    """
+    Mata toda a árvore de processos gcc/python registrados.
+    Chamado pelo pai imediatamente no KeyboardInterrupt.
+    """
+    try:
+        import psutil
+        for key, pid in list(pid_registry.items()):
+            try:
+                proc = psutil.Process(pid)
+                for child in proc.children(recursive=True):
+                    child.kill()
+                proc.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+    except ImportError:
+        # Fallback sem psutil
+        for key, pid in list(pid_registry.items()):
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except Exception:
+                pass
+    finally:
+        pid_registry.clear()
+
 
 class VulcanAutopilot:
     def __init__(self, project_root: str):
         self.root = Path(project_root).resolve()
         self.env = VulcanEnvironment(self.root)
         self.advisor = VulcanAdvisor(self.root)
-        self.compiler = VulcanCompiler(self.env)
+        self._pid_registry: dict = {}
+        self.compiler = VulcanCompiler(self.env, pid_registry=self._pid_registry)
 
-    def scan_and_optimize(self):
-        """Orquestração em Batch para alta performance de ignição."""
-        print(f"{Fore.CYAN}🚀 [VULCAN-BATCH] Iniciando Varredura e Forja Paralela...{Fore.RESET}")
-        
-        candidates = self.advisor.get_optimization_candidates()
+    def scan_and_optimize(self, candidates=None, force_recompile=False):
         if not candidates:
-            print(f"   {Fore.WHITE}Nenhum Hot-Path detectado.{Fore.RESET}")
-            return
-
-        print(f"   {Fore.YELLOW}Candidatos identificados: {len(candidates)}")
-        print(f"   {Fore.MAGENTA}🔥 Ativando múltiplos núcleos para compilação...{Fore.RESET}")
-
-        # PASC 6.4: Limita a carga para não travar o PC do usuário (Cores - 1)
-        max_workers = max(1, (os.cpu_count() or 2) - 1)
+            print(f"{Fore.CYAN}   > Consultando telemetria...{Fore.RESET}")
+            candidates = self.advisor.get_optimization_candidates(force=force_recompile)
         
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Dispara a forja para todos os candidatos em paralelo
-            results = list(executor.map(lambda c: self._process_target(c['file']), candidates))
+        if not candidates:
+            print(f"   {Fore.WHITE}Nenhum candidato para otimização.{Fore.RESET}"); return
 
-        optimized_count = sum(1 for r in results if r)
-        if optimized_count > 0:
-            print(f"\n{Fore.GREEN}{Style.BRIGHT}✔ [IGNIÇÃO CONCLUÍDA] {optimized_count} módulos nativos prontos.{Fore.RESET}")
+        print(f"   {Fore.YELLOW}Alvos para compilação: {len(candidates)}{Fore.RESET}")
+        # FIX: cpu_count()//2 numa máquina de 2 cores dá 1 thread (sequencial).
+        # Compilação Cython é CPU+IO bound mas cada worker chama um subprocess
+        # separado (gcc), então N workers = N gcc simultâneos sem GIL contention.
+        # Usamos todos os cores disponíveis com mínimo de 2.
+        max_workers = max(2, os.cpu_count() or 2)
+        print(f"   {Fore.MAGENTA}🔥 Ativando {max_workers} threads...{Fore.RESET}")
 
-    def _process_target(self, file_path: str) -> bool:
-        abs_path = Path(file_path).resolve()
-        module_name = f"v_{abs_path.stem}"
-        
+        success_count = 0
+        executor = None
         try:
-            # Feedback visual imediato (MPoT-4)
-            sys.stdout.write(f"\033[90m   [VULCAN:FORGE] {abs_path.name}...\033[0m\n")
-            
-            forge = VulcanForge(str(abs_path))
-            pyx_code = forge.generate_source(str(abs_path))
-            
-            pyx_file = self.env.foundry / f"{module_name}.pyx"
-            pyx_file.write_text(pyx_code, encoding='utf-8')
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_file = {executor.submit(self._process_target, c['file']): c['file'] for c in candidates}
+                
+                for future in as_completed(future_to_file):
+                    file_path = future_to_file[future]
+                    try:
+                        success, error_msg = future.result()
+                        if success:
+                            success_count += 1
+                            print(f"   {Fore.GREEN}✔ {Path(file_path).name:<30}{Fore.RESET}")
+                        else:
+                            # Trunca o erro para não poluir o terminal com stderr completo
+                            short_err = (error_msg or "falha desconhecida")[:120].replace('\n', ' ')
+                            print(f"   {Fore.RED}✘ {Path(file_path).name:<30} [{short_err}]{Fore.RESET}")
+                    except Exception as e:
+                        import sys as exc_sys
+                        import os as exc_os
+                        _, exc_obj, exc_tb = exc_sys.exc_info()
+                        fname = exc_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1] if exc_tb else "autopilot.py"
+                        line_number = exc_tb.tb_lineno
+                        print(f"\033[0m \033[1m \nFilename: {fname}   \n■ Line: {line_number} \033[31m \n■ Exception type: {e} . . .  \n■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))} \033[0m")
+                        print(f"   {Fore.RED}✘ {Path(file_path).name:<30} [ERRO CRÍTICO: {e}]{Fore.RESET}")
 
-            if self.compiler.compile(module_name):
-                # PROVA DE SUCESSO
-                print(f"   \033[92m● {abs_path.name:<25} [METALIZADO]\033[0m")
-                return True
-            return False
-        except Exception as e:
-            print(f"   \033[31m✘ {abs_path.name:<25} [ERRO: {type(e).__name__}]\033[0m")
-            return False
-        return False
+            if success_count > 0:
+                print(f"\n{Fore.GREEN}✔ {success_count} de {len(candidates)} módulos forjados e validados.{Fore.RESET}")
+            else:
+                print(f"\n{Fore.RED}✘ Nenhum módulo pôde ser compilado.{Fore.RESET}")
+            
+            self.compiler.save_telemetry_report(self.root)
+        except KeyboardInterrupt:
+            print(f"\n{Fore.YELLOW}⚠ Interrompendo... matando processos em andamento.{Fore.RESET}")
+            _kill_registry(self._pid_registry)
+            if executor:
+                executor.shutdown(wait=False, cancel_futures=True)
+            print(f"{Fore.YELLOW}[VULCAN] Forja cancelada pelo usuário.{Fore.RESET}")
+            # FIX: sys.exit(130) levanta SystemExit(BaseException), que o vulcan_cmd.py
+            # captura como erro recuperável, imprime "Comando interrompido. Saindo..." e
+            # CONTINUA a execução. Re-raise propaga o KeyboardInterrupt naturalmente
+            # até o handler do CLI sem efeitos colaterais.
+            raise
+
+        finally:
+            if executor:
+                executor.shutdown(wait=False)
+
+    def _process_target(self, file_path: str) -> tuple[bool, str | None]:
+        """Forja um único arquivo via _forge_worker e retorna (ok, erro)."""
+        result = _forge_worker({
+            'file_path':    file_path,
+            'foundry':      str(self.env.foundry),
+            'bin_dir':      str(self.env.bin_dir),
+            'pid_registry': self._pid_registry,
+        })
+        return result['ok'], result.get('err')

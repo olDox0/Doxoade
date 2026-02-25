@@ -7,11 +7,10 @@ Compliance: MPoT-1, PASC-1. Deepcheck Score 100.
 import click
 import sqlite3 # noqa
 import json
-from colorama import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style
 from ..database import get_db_connection
 from . import telemetry_utils as utils
 from . import telemetry_io as io
-
 @click.command('telemetry')
 @click.option('--limit', '-n', default=10, help="Número de registros.")
 @click.option('--command', '-c')
@@ -22,7 +21,6 @@ def telemetry(limit, command, stats, verbose):
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-
     try:
         cursor.execute("SELECT * FROM command_history ORDER BY id DESC LIMIT ?", (limit,))
         rows = cursor.fetchall()
@@ -32,7 +30,6 @@ def telemetry(limit, command, stats, verbose):
             _render_entry(row, verbose)
     finally:
         conn.close()
-
 def _handle_stats_view(cursor, command_filter):
     query = "SELECT * FROM command_history"
     if command_filter:
@@ -40,7 +37,6 @@ def _handle_stats_view(cursor, command_filter):
     cursor.execute(query)
     stats = utils.aggregate_command_stats(cursor.fetchall())
     io.render_stats_table(stats)
-
 def _handle_history_view(cursor, command_filter, limit, verbose):
     query = "SELECT * FROM command_history WHERE 1=1"
     params = []
@@ -51,11 +47,9 @@ def _handle_history_view(cursor, command_filter, limit, verbose):
     cursor.execute(query, params)
     rows = cursor.fetchall()
     if not rows: return click.echo("Nenhum dado encontrado.")
-
     click.echo(Fore.CYAN + Style.BRIGHT + "\n=== 📊 DOXOADE NEXUS TELEMETRY ===")
     for row in rows:
         _render_nexus_card(row, verbose)
-
 def _render_nexus_card(row, verbose):
     """Ponto de Renderização Blindado."""
     status_sym = Fore.GREEN + "✔" if row['exit_code'] == 0 else Fore.RED + "✘"
@@ -67,12 +61,10 @@ def _render_nexus_card(row, verbose):
     read_mb, write_mb = row['io_read_mb'] or 0, row['io_write_mb'] or 0
     
     st = utils.get_resource_status(cpu, ram, read_mb + write_mb)
-
     # UI Dinâmica (PASC-10)
     io.render_resource_line("PROCESS", cpu, f"{cpu:.1f}%", Fore.YELLOW, 100, st["cpu"])
     io.render_resource_line("MEMORY", ram, f"{ram:.1f} MB", Fore.MAGENTA, 512, st["ram"])
     io.render_disk_detail(read_mb, write_mb, st["io"])
-
     if verbose:
         io.render_hot_lines(utils.parse_json_safe(row['line_profile_data']))
         sys = utils.parse_json_safe(row['system_info'])

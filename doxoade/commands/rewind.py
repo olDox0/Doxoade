@@ -5,9 +5,8 @@ import os
 import sys
 import subprocess
 from datetime import datetime
-from colorama import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style
 from ..shared_tools import _run_git_command
-
 @click.command('rewind')
 @click.argument('file_path', required=False, type=click.Path(exists=False))
 @click.option('--commit', '-c', help='Hash do commit alvo para onde voltar.')
@@ -40,18 +39,15 @@ def rewind(file_path, commit, show_list):
         except subprocess.CalledProcessError:
             click.echo(Fore.RED + "[ERRO] Falha ao ler histórico do Git.")
         return
-
     # --- MODO REWIND (Validações) ---
     if not file_path:
         click.echo(Fore.RED + "[ERRO] Você precisa especificar um arquivo para rebobinar.")
         click.echo("Uso: doxoade rewind <arquivo> -c <hash>")
         sys.exit(1)
-
     if not commit:
         click.echo(Fore.RED + "[ERRO] Você precisa especificar o hash do commit alvo (-c).")
         click.echo(f"Dica: Use 'doxoade rewind {file_path} --list' para ver os hashes.")
         sys.exit(1)
-
     if not os.path.exists(file_path):
         click.echo(Fore.YELLOW + f"[AVISO] O arquivo '{file_path}' não existe atualmente no disco.")
         if not click.confirm("Deseja tentar recuperá-lo do histórico mesmo assim?"):
@@ -59,7 +55,6 @@ def rewind(file_path, commit, show_list):
     
     # --- MODO REWIND (Execução) ---
     click.echo(Fore.CYAN + f"--- [REWIND] Iniciando reversão de '{file_path}' ---")
-
     # 1. Backup de Segurança (Trava Anti-Burrice)
     if os.path.exists(file_path):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -73,7 +68,6 @@ def rewind(file_path, commit, show_list):
             sys.exit(1)
     else:
         click.echo(Fore.WHITE + "   > Arquivo atual não existe, pulando backup.")
-
     # 2. Executar o Checkout do Git
     # git checkout <commit> -- <arquivo>
     click.echo(Fore.YELLOW + f"   > Revertendo para o commit {commit}...")
@@ -87,13 +81,11 @@ def rewind(file_path, commit, show_list):
             # Mas se o arquivo não existia e o script falhar aqui, tudo bem.
             # Se o arquivo existia, o backup tá lá.
             sys.exit(1)
-
         # Executa a reversão
         result = subprocess.run(
             ['git', 'checkout', commit, '--', file_path],
             capture_output=True, text=True, encoding='utf-8', errors='replace'
         )
-
         if result.returncode == 0:
             click.echo(Fore.GREEN + Style.BRIGHT + "[SUCESSO] Arquivo revertido com sucesso.")
             click.echo(Fore.WHITE + "   > O arquivo no disco agora é a versão antiga.")
@@ -105,6 +97,5 @@ def rewind(file_path, commit, show_list):
             if os.path.exists(backup_path) and os.path.exists(file_path):
                  # Se o git corrompeu o arquivo, poderíamos restaurar, mas git checkout é atômico geralmente.
                  pass
-
     except Exception as e:
         click.echo(Fore.RED + f"[ERRO CRÍTICO] {e}")

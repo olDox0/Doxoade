@@ -8,7 +8,6 @@ import click
 import os
 from .audit_systems.maat_engine import MaatEngine
 from ..shared_tools import ExecutionLogger, _find_project_root
-
 @click.command('audit')
 @click.argument('path', type=click.Path(exists=True), default='.')
 @click.pass_context

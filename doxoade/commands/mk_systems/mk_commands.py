@@ -2,10 +2,9 @@
 # doxoade/commands/mk_systems/mk_commands.py
 import click
 import os
-from colorama import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style
 from .mk_engine import MkEngine
 from ...shared_tools import _find_project_root
-
 def register_mk_options(f):
     """Decorator para centralizar opções do MK."""
     f = click.option('--architecture', '-a', type=click.Path(exists=True), 
@@ -13,7 +12,6 @@ def register_mk_options(f):
     f = click.option('--learning', '-l', type=click.Path(exists=True), 
                      help="Cria estrutura baseada em arquivo de aprendizado (Gênese).")(f)
     return f
-
 def execute_mk_logic(base_path, items, architecture, tree):
     engine = MkEngine(base_path)
     root = _find_project_root(base_path)
@@ -26,13 +24,11 @@ def execute_mk_logic(base_path, items, architecture, tree):
             click.echo(line)
         click.echo(Fore.CYAN + "------------------------------------------")
         return
-
     if architecture:
         click.echo(Fore.CYAN + f"--- [MK-ARCH] Construindo a partir de: {architecture} ---")
         for path, kind in engine.parse_architecture_file(architecture):
             click.echo(Fore.GREEN + f"[OK] {kind:<10}: {path}")
         return
-
     if items:
         click.echo(Fore.CYAN + f"--- [MK-ITEMS] Criando itens em: {base_path} ---")
         for item in items:

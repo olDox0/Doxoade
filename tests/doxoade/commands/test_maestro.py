@@ -3,16 +3,12 @@ import pytest
 import os
 from unittest.mock import MagicMock, patch
 from doxoade.commands.maestro import MaestroInterpreter
-
 # --- FIXTURES ---
-
 @pytest.fixture
 def maestro():
     """Instância limpa do intérprete Maestro."""
     return MaestroInterpreter()
-
 # --- TESTES DE LÓGICA E VARIÁVEIS ---
-
 def test_maestro_variable_assignment_and_resolution(maestro):
     """Testa se SET e a resolução de variáveis {{var}} funcionam."""
     maestro.lines = [
@@ -26,13 +22,11 @@ def test_maestro_variable_assignment_and_resolution(maestro):
     
     resolved = maestro._resolve_vars("Ola {name}, v{version}")
     assert resolved == "Ola Dox, v71"
-
 def test_maestro_increment(maestro):
     """Testa o comando INC."""
     maestro.variables['count'] = 10
     maestro._cmd_vars("INC count")
     assert maestro.variables['count'] == 11
-
 def test_maestro_if_logic_true(maestro):
     """Testa se o bloco IF é executado quando a condição é verdadeira."""
     maestro.variables['status'] = "OK"
@@ -43,7 +37,6 @@ def test_maestro_if_logic_true(maestro):
     ]
     maestro.run()
     assert maestro.variables['outcome'] == "success"
-
 def test_maestro_if_logic_false(maestro):
     """Testa se o Maestro pula o bloco IF quando a condição é falsa."""
     maestro.variables['status'] = "ERROR"
@@ -56,7 +49,6 @@ def test_maestro_if_logic_false(maestro):
     maestro.run()
     assert 'outcome' not in maestro.variables
     assert maestro.variables['final'] == "done"
-
 def test_maestro_for_loop(maestro):
     """Testa iteração com o comando FOR."""
     maestro.variables['items'] = ["a", "b", "c"]
@@ -70,9 +62,7 @@ def test_maestro_for_loop(maestro):
     maestro.run()
     # Ao final do loop, a variável 'last' deve ser o último item
     assert maestro.variables['last'] == "c"
-
 # --- TESTES DE COMANDOS DE SISTEMA (MOCKS) ---
-
 @patch('subprocess.run')
 def test_maestro_run_command(mock_sub, maestro):
     """Verifica se o comando RUN chama o subprocesso corretamente (sem shell)."""
@@ -87,7 +77,6 @@ def test_maestro_run_command(mock_sub, maestro):
     assert kwargs['shell'] is False
     assert "echo" in args[0]
     assert maestro.variables['RESULT'] == "Success Output"
-
 def test_maestro_find_line_number(maestro, tmp_path):
     """Testa o utilitário rápido de localização de linha."""
     test_file = tmp_path / "test.txt"
@@ -98,7 +87,6 @@ def test_maestro_find_line_number(maestro, tmp_path):
     
     # Índice 1 (segunda linha)
     assert maestro.variables['POS'] == "1"
-
 @patch('click.echo')
 def test_maestro_print_colors(mock_echo, maestro):
     """Garante que o despacho de cores no PRINT funciona."""

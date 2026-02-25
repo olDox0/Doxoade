@@ -2,10 +2,8 @@
 """
 Doxoade Mobile IDE - Interface de desenvolvimento multiplataforma
 Arquivo: doxoade/commands/mobile_ide.py
-
 Compatível com: Windows, Linux, macOS, Termux
 """
-
 import os
 import sys
 import subprocess
@@ -14,7 +12,6 @@ from typing import List, Optional
 from datetime import datetime  # ← ADICIONE ESTA LINHA
 from rich.console import Console
 from rich.prompt import Confirm
-
 try:
     from rich.panel import Panel
     from rich.table import Table
@@ -29,23 +26,17 @@ except ImportError:
     from rich.panel import Panel
     from rich.table import Table
     from rich.syntax import Syntax
-
 console = Console()
-
 # DETECTOR DE AMBIENTE
-
 def is_termux():
     """Detecta se está rodando no Termux"""
     return os.path.exists('/data/data/com.termux')
-
 def get_best_editor():
     """Retorna o editor escolhido pelo usuário ou o melhor disponível"""
-
     # 1. Se o usuário definiu EDITOR no sistema, respeita
     env_editor = os.environ.get("EDITOR")
     if env_editor:
         return env_editor
-
     # 2. Se estiver no Termux, prioriza micro > nano > vim
     if is_termux():
         editors = ['micro', 'nano', 'vim', 'vi']
@@ -54,7 +45,6 @@ def get_best_editor():
             editors = ['notepad++.exe', 'code', 'notepad.exe']
         else:
             editors = ['code', 'gedit', 'nano', 'vim']
-
     for editor in editors:
         try:
             subprocess.run(
@@ -65,11 +55,8 @@ def get_best_editor():
             return editor
         except Exception:
             continue
-
     return 'nano'
-
 # COMANDOS TERMUX-SPECIFIC
-
 def termux_share_file(file_path: Path):
     """Compartilha arquivo usando o Termux API"""
     if not is_termux():
@@ -81,7 +68,6 @@ def termux_share_file(file_path: Path):
         console.print(f"[green]✓ Compartilhando: {file_path.name}[/green]")
     except FileNotFoundError:
         console.print("[red]Instale termux-api: pkg install termux-api[/red]")
-
 def termux_clipboard_copy(text: str):
     """Copia texto para área de transferência (Termux)"""
     if not is_termux():
@@ -93,7 +79,6 @@ def termux_clipboard_copy(text: str):
         console.print("[green]✓ Copiado para área de transferência[/green]")
     except FileNotFoundError:
         console.print("[red]Instale termux-api: pkg install termux-api[/red]")
-
 def termux_toast(message: str):
     """Mostra notificação toast (Termux)"""
     if is_termux():
@@ -101,7 +86,6 @@ def termux_toast(message: str):
             subprocess.run(['termux-toast', message])
         except Exception:
             pass
-
 def setup_micro_split_workflow():
     """Configura atalho Alt-d no micro para workflow de split."""
     import json
@@ -124,9 +108,7 @@ def setup_micro_split_workflow():
     bindings_file.write_text(json.dumps(current_bindings, indent=4))
     console.print("[green]✓ Workflow 'Alt-d' configurado no Micro![/green]")
     console.print("   > Abra um arquivo e pressione Alt+d para abrir o painel de rascunho.")
-
 # NOVOS COMANDOS PARA A IDE
-
 def show_file_info(file_path: Path):
     """Mostra informações detalhadas do arquivo"""
     stat = file_path.stat()
@@ -143,7 +125,6 @@ def show_file_info(file_path: Path):
     
     console.print(table)
     input("\nPressione Enter...")
-
 def git_status_visual():
     """Mostra status do Git de forma visual"""
     try:
@@ -163,7 +144,6 @@ def git_status_visual():
         console.print("[red]Git não instalado[/red]")
     
     input("\nPressione Enter...")
-
 def quick_search_in_files(directory: Path, term: str):
     """Busca rápida em arquivos"""
     console.print(f"\n[cyan]🔍 Buscando '{term}'...[/cyan]")
@@ -195,10 +175,7 @@ def quick_search_in_files(directory: Path, term: str):
         console.print("[yellow]Nenhum resultado encontrado[/yellow]")
     
     input("\nPressione Enter...")
-
-
 # MENU ESTENDIDO PARA A IDE
-
 def show_extended_menu(ide_instance):
     """Menu com comandos avançados"""
     while True:
@@ -247,7 +224,6 @@ def show_extended_menu(ide_instance):
             clean_python_cache(ide_instance.start_path)
         elif choice == "7":
             break
-
 def clean_python_cache(directory: Path):
     """Remove arquivos __pycache__ e .pyc"""
     import shutil
@@ -269,10 +245,7 @@ def clean_python_cache(directory: Path):
     
     console.print(f"[green]✓ {removed} arquivo(s)/pasta(s) removido(s)[/green]")
     input("\nPressione Enter...")
-
-
 # INSTALAÇÃO AUTOMÁTICA DE EDITORES (TERMUX)
-
 def setup_termux_editors():
     """Instala os melhores editores para Termux"""
     if not is_termux():
@@ -293,8 +266,6 @@ def setup_termux_editors():
             subprocess.run(['pkg', 'install', '-y', editor])
     
     console.print("\n[green]✓ Configuração concluída![/green]")
-
-
 class MobileIDE:
     """IDE simplificada e multiplataforma"""
     
@@ -601,15 +572,12 @@ class MobileIDE:
             # Carrega e edita arquivo
             if self.load_file(selected_file):
                 self.edit_file()
-
-
 def mobile_ide_main(start_path: str = ".", file: Optional[str] = None, editor: Optional[str] = None):
     """Função principal"""
     try:
         ide = MobileIDE(start_path)
         if editor:
             os.environ["EDITOR"] = editor
-
         
         # Se arquivo especificado, abre diretamente
         if file:
@@ -629,8 +597,6 @@ def mobile_ide_main(start_path: str = ".", file: Optional[str] = None, editor: O
         console.print(f"[red]❌ Erro fatal: {e}[/red]")
         import traceback
         traceback.print_exc()
-
-
 # === INTEGRAÇÃO COM DOXOADE CLI ===
 if __name__ == '__main__':
     path = sys.argv[1] if len(sys.argv) > 1 else "."
@@ -643,7 +609,6 @@ else:
     @click.option('--file', help='Abrir arquivo específico')
     @click.option('--editor', help='Forçar editor (micro, nano, vim, code, etc)')
     def ide(path, file, editor):
-
         """
         🚀 IDE móvel multiplataforma (Windows/Linux/Termux)
         

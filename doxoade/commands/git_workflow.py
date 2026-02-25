@@ -1,12 +1,9 @@
 # doxoade/commands/git_workflow.py
 import sys
 import click
-from colorama import Fore, Style
-
+from doxoade.tools.doxcolors import Fore, Style
 from ..shared_tools import ExecutionLogger, _run_git_command
-
 __version__ = "34.2 Alfa (Safe Sync)"
-
 def _format_git_status(status_line):
     """Formata a linha de status do git diff --name-status para exibição amigável."""
     if not status_line.strip(): return ""
@@ -23,7 +20,6 @@ def _format_git_status(status_line):
     if code == 'R': return f"{Fore.CYAN}[RENOMEADO] {file}{Style.RESET_ALL}"
     
     return f"[{code}] {file}"
-
 def _analyze_impact(remote, branch):
     """
     Realiza uma análise forense do que vai acontecer se o sync prosseguir.
@@ -61,7 +57,6 @@ def _analyze_impact(remote, branch):
             if '[DELETADO]' in formatted: has_danger = True
     else:
         click.echo(Fore.WHITE + Style.DIM + "   (Nenhuma alteração vinda do servidor)")
-
     # --- RELATÓRIO OUTGOING ---
     click.echo(Fore.MAGENTA + "\n📤 [OUTGOING] O que VOCÊ fará no Servidor (Push):")
     if outgoing_changes and outgoing_changes.strip():
@@ -71,7 +66,6 @@ def _analyze_impact(remote, branch):
             if '[DELETADO]' in formatted: has_danger = True
     else:
         click.echo(Fore.WHITE + Style.DIM + "   (Nenhuma alteração local para enviar)")
-
     # Alerta de Regressão/Deleção
     if has_danger:
         click.echo(Fore.RED + Style.BRIGHT + "\n🚨 ALERTA: Existem arquivos marcados para DELEÇÃO!")
@@ -82,7 +76,6 @@ def _analyze_impact(remote, branch):
     if click.confirm(Fore.YELLOW + "Deseja aplicar estas alterações (Pull + Push)?"):
         return True
     return False
-
 @click.command('release')
 @click.pass_context
 @click.argument('version')
@@ -102,7 +95,6 @@ def release(ctx, version, message, remote):
             click.echo(Fore.GREEN + f"[OK] Tag '{version}' enviada para o remote '{remote}'.")
         else:
             logger.add_finding('warning', f"Falha ao enviar a tag para o remote '{remote}'.")
-
 @click.command('sync')
 @click.pass_context
 @click.option('--remote', default='origin', help='Nome do remote Git.')
@@ -112,7 +104,6 @@ def sync(ctx, remote, force, safe):
     """Sincroniza o branch local atual com o branch remoto (git pull && git push)."""
     with ExecutionLogger('sync', '.', ctx.params) as logger:
         click.echo(Fore.CYAN + f"--- [SYNC] Sincronizando branch com o remote '{remote}' ---")
-
         current_branch = _run_git_command(['branch', '--show-current'], capture_output=True)
         if not current_branch:
             # Fallback para ambientes CI/CD ou detecção manual
@@ -123,13 +114,11 @@ def sync(ctx, remote, force, safe):
             sys.exit(1)
         
         current_branch = current_branch.strip()
-
         # --- MODO SAFE: Análise Prévia ---
         if safe:
             if not _analyze_impact(remote, current_branch):
                 click.echo(Fore.YELLOW + "\n[SYNC] Operação cancelada pelo usuário.")
                 sys.exit(0)
-
         # Passo 1: Pull
         click.echo(Fore.YELLOW + "\nPasso 1: Puxando as últimas alterações (git pull)...")
         # Mesmo com force push, tentamos atualizar o local primeiro para reduzir conflitos,
@@ -143,7 +132,6 @@ def sync(ctx, remote, force, safe):
                 click.echo(Fore.YELLOW + "   > Ignorando falha no pull devido à flag --force.")
         else:
             click.echo(Fore.GREEN + "[OK] Repositório local atualizado.")
-
         # Passo 2: Push
         click.echo(Fore.YELLOW + "\nPasso 2: Enviando alterações locais (git push)...")
         
@@ -156,7 +144,6 @@ def sync(ctx, remote, force, safe):
             push_args = ['push', '--force', remote, current_branch]
         else:
             push_args = ['push', remote, current_branch]
-
         # Lógica de execução
         if not is_ahead and not force and "behind" not in status_output:
             click.echo(Fore.GREEN + "[OK] Nenhum commit local novo para enviar.")

@@ -6,11 +6,10 @@ Orquestrador de Sondas e Especialistas (Resgatado via Protocolo Osíris).
 Compliance: OSL-5, PASC-8.1.
 """
 import sys
-import os
+# [DOX-UNUSED] import os
 from .check_engine import _run_clone_detection
 from click import progressbar
 from ...tools.memory_pool import finding_arena 
-
 #def run_audit_engine_logic(state: CheckState, io_manager, **kwargs):
 def run_audit_engine_logic(state, io_manager, **kwargs):
     """Execução central sem dependências de CLI."""
@@ -39,13 +38,10 @@ def run_audit_engine_logic(state, io_manager, **kwargs):
                 
                 if mtime > 0 and not any(f.get('category') == 'SYSTEM' for f in results):
                     cache[cache_key] = {'mtime': mtime, 'size': size, 'findings': results}
-
     if kwargs.get('clones'):
         _run_clone_detection(files, manager, state)
-
     if not kwargs.get('no_cache'):
         io_manager.save_cache(cache)
-
 def _scan_core(fp, manager, kwargs):
     # Lógica de triagem movida do engine.py para cá...
     return [] # Placeholder para a lógica real
@@ -75,11 +71,9 @@ def run_check_logic(path: str, **kwargs):
     cache = {} if kwargs.get('no_cache') else io.load_cache()
     to_scan = _filter_by_cache(files, cache, io, state, kwargs.get('no_cache'))
     
-
     
     if not to_scan and not kwargs.get('clones'):
         return {'summary': state.summary, 'findings': []}
-
     # 4. Ciclo de Execução JIT
     from click import progressbar
     from ...tools.memory_pool import finding_arena
@@ -102,11 +96,9 @@ def run_check_logic(path: str, **kwargs):
                 # Atualização de Cache (PASC-2)
                 if mtime > 0 and not any(f.get('category') == 'SYSTEM' for f in results):
                     cache[cache_key] = {'mtime': mtime, 'size': size, 'findings': results}
-
     # 5. Detecção Dry (Hefesto/Vulcan)
     if kwargs.get('clones'):
         _run_clone_detection(files, manager, state)
-
     # 6. Finalização e Persistência
     if not kwargs.get('no_cache'):
         io.save_cache(cache)

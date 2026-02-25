@@ -2,7 +2,6 @@
 """SearchState - Contrato de Interface Nexus (PASC 8.7)."""
 from dataclasses import dataclass, field
 from typing import List, Dict, Any
-
 @dataclass
 class SearchState:
     root: str

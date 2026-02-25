@@ -9,12 +9,10 @@ import os
 import click
 from ..shared_tools import ExecutionLogger, _find_project_root
 from .pedia_systems.pedia_engine import PediaEngine
-
 def _get_engine():
     """Factory para instanciar a Engine com o contexto correto."""
     root = _find_project_root(os.getcwd())
     return PediaEngine(root)
-
 @click.group('pedia', invoke_without_command=True)
 @click.pass_context
 @click.option('--search', '-s', help="Atalho para busca rápida.")
@@ -27,7 +25,6 @@ def pedia(ctx, search, show_list):
     # Se um subcomando foi chamado (ex: 'doxoade pedia read'), passa direto
     if ctx.invoked_subcommand is not None:
         return
-
     # Se nenhum subcomando foi chamado, executa a lógica padrão do grupo
     root = _find_project_root(os.getcwd())
     
@@ -41,14 +38,12 @@ def pedia(ctx, search, show_list):
         else:
             # Comportamento padrão: Ajuda ou Lista
             click.echo(click.get_current_context().get_help())
-
 @pedia.command('read')
 @click.argument('topic')
 def read_article(topic):
     """Lê um artigo completo pelo nome ou chave."""
     with ExecutionLogger('pedia-read', '.', {'topic': topic}):
         _get_engine().read_article(topic)
-
 @pedia.command('search')
 @click.argument('query')
 @click.option('--limit', '-n', default=10, help="Limite de resultados.")
@@ -56,13 +51,11 @@ def search_cmd(query, limit):
     """Busca semântica no acervo de conhecimento."""
     with ExecutionLogger('pedia-search', '.', {'query': query}):
         _get_engine().search_knowledge(query, limit)
-
 @pedia.command('list')
 def list_cmd():
     """Lista todos os artigos disponíveis no índice."""
     with ExecutionLogger('pedia-list', '.', {}):
         _get_engine().list_articles()
-
 @pedia.command('refresh')
 def refresh_cmd():
     """Força a reindexação da base de conhecimento (Cache Busting)."""

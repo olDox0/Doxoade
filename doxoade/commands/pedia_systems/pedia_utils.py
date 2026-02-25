@@ -8,15 +8,13 @@ import re
 import sys
 import click
 import textwrap
-from colorama import Fore, Style, Back
-
+from doxoade.tools.doxcolors import Fore, Style, Back
 def safe_emoji(emoji_char: str, fallback: str) -> str:
     try:
         emoji_char.encode(sys.stdout.encoding or 'ascii')
         return emoji_char
     except UnicodeEncodeError:
         return fallback
-
 class MarkdownRenderer:
     """Renderizador Markdown estilo 'Terminal Gold'."""
     
@@ -27,7 +25,6 @@ class MarkdownRenderer:
     
     def __init__(self):
         self.in_code_block = False
-
     def render(self, content: str):
         self.in_code_block = False
         click.echo("") # Espaço inicial
@@ -37,7 +34,6 @@ class MarkdownRenderer:
             self._render_line(line, lines, i)
             
         click.echo("") # Quebra final
-
     def _render_line(self, line: str, all_lines: list, idx: int):
         stripped = line.strip()
         
@@ -51,7 +47,6 @@ class MarkdownRenderer:
         if self.in_code_block:
             click.echo(f"{Fore.LIGHTBLACK_EX}│ {Fore.GREEN}{line}{Fore.RESET}")
             return
-
         # --- CABEÇALHOS (HEADERS) ---
         if stripped.startswith('# '):
             title = stripped[2:].strip().upper()
@@ -65,7 +60,6 @@ class MarkdownRenderer:
             title = stripped[4:].strip()
             self._render_h3(title)
             return
-
         # --- LISTAS ---
         # Detecta '- ', '* ', ou '• '
         if re.match(r'^[\-\*\•]\s+', stripped):
@@ -79,7 +73,6 @@ class MarkdownRenderer:
         if re.match(r'^\d+\.\s+', stripped):
             click.echo(f"  {Fore.YELLOW}{stripped}{Style.RESET_ALL}")
             return
-
         # --- TEXTO NORMAL ---
         if stripped:
             formatted = self._apply_inline_formatting(stripped)
@@ -88,23 +81,19 @@ class MarkdownRenderer:
             click.echo(wrapped)
         else:
             click.echo("") 
-
     def _render_h1(self, text):
         """Header Nível 1: Caixa Sólida / Destaque Máximo."""
         click.echo("")
         click.echo(f"{Fore.CYAN}{Style.BRIGHT}╔{'═'*(len(text)+4)}╗")
         click.echo(f"║  {Fore.WHITE}{text}  {Fore.CYAN}║")
         click.echo(f"╚{'═'*(len(text)+4)}╝{Style.RESET_ALL}")
-
     def _render_h2(self, text):
         """Header Nível 2: Sublinhado e Cor Quente."""
         click.echo(f"\n{Fore.MAGENTA}{Style.BRIGHT}■ {text.upper()}{Style.RESET_ALL}")
         click.echo(f"{Fore.MAGENTA}{'─'*50}{Style.RESET_ALL}")
-
     def _render_h3(self, text):
         """Header Nível 3: Texto Simples Colorido."""
         click.echo(f"\n{Fore.YELLOW}{Style.BRIGHT}>>> {text}{Style.RESET_ALL}")
-
     def _apply_inline_formatting(self, text: str) -> str:
         # Bold (**texto**)
         text = self.BOLD.sub(f"{Fore.WHITE}{Style.BRIGHT}\\1{Style.NORMAL}{Fore.RESET}", text)

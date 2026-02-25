@@ -2,11 +2,9 @@
 import ast
 import sys
 import json
-
 class RiskHunter(ast.NodeVisitor):
     def __init__(self):
         self.findings = []
-
     def add_finding(self, node, severity, category, message):
         self.findings.append({
             'severity': severity,
@@ -14,7 +12,6 @@ class RiskHunter(ast.NodeVisitor):
             'message': message,
             'line': node.lineno
         })
-
     def visit_FunctionDef(self, node):
         # REGRA 1: Argumentos Padrão Mutáveis (Lista ou Dic)
         for default in node.args.defaults:
@@ -25,7 +22,6 @@ class RiskHunter(ast.NodeVisitor):
                     "Isso retém estado entre chamadas. Use 'None' como padrão."
                 )
         self.generic_visit(node)
-
     def visit_ExceptHandler(self, node):
         # REGRA 2: Except Genérico (Bare Except)
         if node.type is None:
@@ -35,7 +31,6 @@ class RiskHunter(ast.NodeVisitor):
                 "Isso captura interrupções de sistema. Use 'except Exception:'."
             )
         self.generic_visit(node)
-
     def visit_Compare(self, node):
         # REGRA 3: Comparação com None usando ==
         # Estrutura: left [ops] comparators
@@ -48,7 +43,6 @@ class RiskHunter(ast.NodeVisitor):
                     
                     self.add_finding(node, 'WARNING', 'STYLE', msg)
         self.generic_visit(node)
-
     def visit_Call(self, node):
         # REGRA 4: Funções Perigosas
         if isinstance(node.func, ast.Name):
@@ -58,7 +52,6 @@ class RiskHunter(ast.NodeVisitor):
                     f"Uso de '{node.func.id}' detectado. Alto risco de segurança."
                 )
         self.generic_visit(node)
-
 def hunt(file_path):
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -75,7 +68,6 @@ def hunt(file_path):
         # Se falhar, retorna erro estruturado
         error = [{'severity': 'ERROR', 'category': 'INTERNAL', 'message': str(e), 'line': 1}]
         print(json.dumps(error))
-
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         sys.exit(1)

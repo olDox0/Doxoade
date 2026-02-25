@@ -1,28 +1,23 @@
 # doxoade/indexer/code_indexer.py
 """
 Indexador de Código Python via AST.
-
 Responsabilidades:
 - Parsear arquivos Python
 - Extrair definições (funções, classes) e docstrings
 - Mapear chamadas de função (Call Graph)
 - Extrair comentários
-
 Filosofia MPoT:
 - Classes coesas
 - Métodos pequenos
 - Tratamento explícito de erros
 """
-
 import ast
 import os
 import click
 from pathlib import Path
 from typing import List, Set, Optional
 from collections import defaultdict
-from colorama import Fore
-
-
+from doxoade.tools.doxcolors import Fore
 class CodeIndexer:
     """
     Indexador de código Python.
@@ -159,7 +154,6 @@ class CodeIndexer:
             rel_path = str(file_path.relative_to(self.project_root))
         except ValueError:
             rel_path = str(file_path)
-
         comments = []
         
         for i, line in enumerate(content.splitlines(), 1):

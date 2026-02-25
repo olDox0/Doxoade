@@ -2,7 +2,6 @@
 import pytest
 from unittest.mock import MagicMock, patch
 from doxoade.chronos import ResourceMonitor
-
 def test_resource_monitor_tree_sum():
     """Testa se o monitor soma corretamente os recursos da árvore de processos."""
     
@@ -34,7 +33,6 @@ def test_resource_monitor_tree_sum():
     assert cpu_total == 20.0
     # RAM: 100 + 50 + 50 = 200 MB
     assert mem_mb_total == 200.0
-
 def test_resource_monitor_io_sum():
     """Testa se o monitor soma I/O da árvore."""
     parent = MagicMock()
@@ -52,7 +50,6 @@ def test_resource_monitor_io_sum():
     
     assert r == 2000
     assert w == 1000
-
 def test_monitor_daemon_property():
     """Garante que a thread é Daemon (não trava o terminal)."""
     monitor = ResourceMonitor(1234)

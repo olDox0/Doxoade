@@ -11,11 +11,9 @@ import time
 import click
 import traceback
 from importlib import import_module
-from colorama import init as colorama_init, Fore, Style
+from doxoade.tools.doxcolors import Fore, Style
 #from ._version import __version__
-
 # --- BOOTSTRAP DE AMBIENTE (OSL-10) ---
-colorama_init(autoreset=True)
 if sys.stdout.encoding != 'utf-8':
     try: sys.stdout.reconfigure(encoding='utf-8')
     except Exception as e:
@@ -26,10 +24,7 @@ if sys.stdout.encoding != 'utf-8':
         line_number = exc_tb.tb_lineno
         print(f"\033[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
         exc_trace(exc_tb)
-
-
 # --- MOTOR DE CARREGAMENTO DIFERIDO (LAZY ENGINE) ---
-
 class DoxoadeLazyGroup(click.Group):
     """
     Despachante de Comandos (PASC-6.7).
@@ -73,6 +68,7 @@ class DoxoadeLazyGroup(click.Group):
             'log': 'doxoade.commands.utils:log',
             'maestro': 'doxoade.commands.maestro:maestro',
             'merge': 'doxoade.commands.git_merge:merge',
+            'migrate-colors': 'doxoade.commands.migrate_colors:migrate_colors',
             'migrate-db': 'doxoade.commands.migrate_db:migrate_db',
             'mirror': 'doxoade.commands.mirror:mirror',
             'mk': 'doxoade.commands.utils:mk',
@@ -104,10 +100,8 @@ class DoxoadeLazyGroup(click.Group):
             'vulcan': 'doxoade.commands.vulcan_cmd:vulcan_group',
             'webcheck': 'doxoade.commands.webcheck:webcheck',
         }
-
     def list_commands(self, ctx):
         return sorted(self._lazy_map.keys())
-
     def get_command(self, ctx, name):
         if name not in self._lazy_map: return None
         module_path, attr_name = self._lazy_map[name].split(':')
@@ -124,14 +118,11 @@ class DoxoadeLazyGroup(click.Group):
             exc_trace(exc_tb)
             self._print_fatal_import(name, e)
             return None
-
     def _print_fatal_import(self, cmd_name, e):
         print(f"\033[31m\n[ FATAL ] Erro ao carregar comando '{cmd_name}'")
         print(f"   ■ Causa: {e}\033[0m")
         if '--debug' in sys.argv: traceback.print_exc()
-
 # --- ORQUESTRADOR PRINCIPAL ---
-
 @click.group(cls=DoxoadeLazyGroup, invoke_without_command=True)
 @click.option('--guard', is_flag=True, help="Verificação de integridade Aegis.")
 @click.pass_context
@@ -156,7 +147,6 @@ def cli(ctx, guard):
         print(f"\033[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
         exc_trace(exc_tb)
         sys.exit(1)
-
     # 3. Telemetria (Chronos)
     if ctx.invoked_subcommand:
         from doxoade.chronos import chronos_recorder
@@ -164,7 +154,6 @@ def cli(ctx, guard):
         chronos_recorder.start_command(ctx)
     else:
         click.echo(ctx.get_help())
-
 @cli.result_callback()
 def process_result(result, **kwargs):
     """Sela a execução e finaliza telemetria (PASC-8.20)."""
@@ -183,10 +172,7 @@ def process_result(result, **kwargs):
             line_number = exc_tb.tb_lineno
             print(f"\033[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
             exc_trace(exc_tb)
-
-
 # --- FUNÇÃO DE ENTRADA (BOOTSTRAP) ---
-
 def main():
     """Wrapper blindado com Injeção Vulcan (Hefesto)."""
     
@@ -195,7 +181,6 @@ def main():
     vulcan_bin = os.path.join(project_root, ".doxoade", "vulcan", "bin")
     if os.path.exists(vulcan_bin) and vulcan_bin not in sys.path:
         sys.path.insert(0, vulcan_bin)
-
     try:
         cli(obj={})
     except KeyboardInterrupt:
@@ -223,6 +208,5 @@ def main():
     finally:
         from doxoade.tools.db_utils import stop_persistence_worker
         stop_persistence_worker()
-
 if __name__ == "__main__":
     main()

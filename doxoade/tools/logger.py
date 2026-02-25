@@ -5,7 +5,7 @@ import os
 import sys
 import hashlib
 from datetime import datetime
-from colorama import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style
 import click
 from .db_utils import _log_execution
 
@@ -66,8 +66,8 @@ class ExecutionLogger:
         # 1. Registro Obrigatório no Chronos (Independente de erro)
         try:
             _log_execution(self.command_name, self.path, self.results, self.arguments, execution_time_ms)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"\033[0;33m logger - __exit__ - Exception: {e}")
 
         # 2. Tratamento de Erros Fatais do Doxoade
         if exc_type and not isinstance(exc_val, SystemExit):
@@ -83,3 +83,4 @@ class ExecutionLogger:
             # Cores dinâmicas baseadas na latência
             color = Fore.GREEN if duration < 1.5 else (Fore.YELLOW if duration < 4.0 else Fore.RED)
             click.echo(f"{color}{Style.DIM}[{self.command_name}] Tempo total: {duration:.3f}s{Style.RESET_ALL}")
+        return None

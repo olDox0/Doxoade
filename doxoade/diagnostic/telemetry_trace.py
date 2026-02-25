@@ -4,7 +4,6 @@ import sys
 import sqlite3
 from doxoade.database import get_db_connection
 from doxoade.chronos import chronos_recorder
-
 def trace_telemetry_flow():
     print("🔬 [DIAGNOSTICO] Iniciando rastreio de fluxo de telemetria...")
     
@@ -21,7 +20,6 @@ def trace_telemetry_flow():
         # 2. Verificar contagem atual
         count_before = conn.execute("SELECT COUNT(*) FROM command_history").fetchone()[0]
         print(f"   [INFO] Registros antes do teste: {count_before}")
-
         # 3. Simular ciclo de vida do Chronos
         print("   [DEBUG] Simulando start_command...")
         class MockCtx:
@@ -45,6 +43,5 @@ def trace_telemetry_flow():
         print(f"   [ERRO CRITICO] Falha no rastreio: {e}")
     finally:
         conn.close()
-
 if __name__ == "__main__":
     trace_telemetry_flow()

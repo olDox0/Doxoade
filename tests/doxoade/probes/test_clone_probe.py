@@ -2,9 +2,7 @@ import sys
 import subprocess
 import os
 import json
-
 PROBE_PATH = os.path.join("doxoade", "probes", "clone_probe.py")
-
 def test_clone_probe_detects_duplication(tmp_path):
     """Verifica se detecta lógica idêntica com nomes diferentes."""
     f1 = tmp_path / "a.py"
@@ -12,7 +10,6 @@ def test_clone_probe_detects_duplication(tmp_path):
 def calc_area(width, height):
     return width * height
 """, encoding="utf-8")
-
     f2 = tmp_path / "b.py"
     f2.write_text("""
 def get_size(x, y):

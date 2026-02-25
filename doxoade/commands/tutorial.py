@@ -8,20 +8,15 @@ import shlex
 import subprocess
 import tempfile
 import shutil
-from colorama import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style
 from pathlib import Path
-
 from ..shared_tools import ExecutionLogger
-
 __version__ = "34.0 Alfa"
-
 @click.group('tutorial')
 def tutorial_group():
     """Comandos para aprender o workflow do doxoade."""
     pass
-
 # A função _find_project_root() foi REMOVIDA.
-
 @tutorial_group.command('main')
 @click.pass_context
 def tutorial(ctx):
@@ -29,7 +24,6 @@ def tutorial(ctx):
     with ExecutionLogger('tutorial-main', '.', ctx.params):
         click.echo(Fore.CYAN + Style.BRIGHT + "--- Guia Completo do Workflow Doxoade ---")
         click.echo(Fore.WHITE + "Este guia mostra os dois principais workflows da doxoade.")
-
         click.echo(Fore.MAGENTA + Style.BRIGHT + "\n\n--- Workflow A: Iniciando um Projeto NOVO do Zero ---")
         click.echo(Fore.WHITE + "Use este workflow para criar projetos saudáveis desde o primeiro dia.")
         
@@ -50,10 +44,8 @@ def tutorial(ctx):
         click.echo(Fore.CYAN + '        (venv) > doxoade save "Implementada a classe Usuario"\n')
         click.echo(Fore.GREEN + "   4. Ao final do dia, sincronize seus commits com o remoto usando 'doxoade sync'.")
         click.echo(Fore.CYAN + '        (venv) > doxoade sync')
-
         click.echo(Fore.MAGENTA + Style.BRIGHT + "\n\n--- Workflow B: Diagnosticando e Reparando um Projeto EXISTENTE ---")
         click.echo(Fore.WHITE + "Use este workflow para projetos antigos, clonados ou de terceiros.")
-
         click.echo(Fore.YELLOW + "\n--- B.1: A Regra de Ouro - Chame o Doutor! ---")
         click.echo(Fore.GREEN + "   1. Navegue para a pasta raiz do projeto que você quer 'curar'.")
         click.echo(Fore.CYAN + '        $ cd C:\\Caminho\\Para\\ProjetoAntigo\n')
@@ -64,15 +56,12 @@ def tutorial(ctx):
         click.echo(Fore.WHITE + "        - Verificar se as dependências do 'requirements.txt' estão instaladas e se oferecer para instalá-las.")
         click.echo(Fore.WHITE + "        - Verificar se o ambiente está isolado e não contaminado.")
         click.echo(Fore.GREEN + "\n   Ao final, o 'doctor' garantirá que o ambiente do projeto está SAUDÁVEL.")
-
         click.echo(Fore.YELLOW + "\n--- B.2: Inicie o Ciclo de Desenvolvimento ---")
         click.echo(Fore.GREEN + "   Uma vez que o projeto foi 'curado' pelo 'doctor', você pode seguir o ciclo normal:")
         click.echo(Fore.CYAN + '        $ .\\venv\\Scripts\\activate')
         click.echo(Fore.CYAN + '        (venv) > doxoade save "Refatorada a classe legada"')
         click.echo(Fore.CYAN + '        (venv) > doxoade sync')
-
         click.echo(Fore.YELLOW + Style.BRIGHT + "\n\n--- Fim do Guia ---\n")
-
 @tutorial_group.command('simulation')
 @click.pass_context
 def tutorial_simulation(ctx):
@@ -107,7 +96,6 @@ def tutorial_simulation(ctx):
             finally:
                 os.chdir(original_dir)
                 click.echo(Fore.CYAN + Style.BRIGHT + "\n--- Fim da Simulação ---")
-
 @tutorial_group.command('interactive')
 @click.pass_context
 def tutorial_interactive(ctx):
@@ -116,7 +104,6 @@ def tutorial_interactive(ctx):
         click.echo(Fore.CYAN + Style.BRIGHT + "--- Bem-vindo ao Laboratório Prático Doxoade ---")
         if not click.confirm(Fore.YELLOW + "Podemos começar?"):
             return
-
         # LÓGICA CORRIGIDA
         runner_path = shutil.which("doxoade.bat") or shutil.which("doxoade")
         if not runner_path:
@@ -151,7 +138,6 @@ def tutorial_interactive(ctx):
             finally:
                 os.chdir(original_dir)
                 click.echo(Fore.MAGENTA + "[SIMULAÇÃO] Sandbox destruído.")
-
 def _run_sim_command(command_str, runner_path):
     """Função auxiliar para exibir, pausar e executar um comando na simulação."""
     click.echo(Fore.GREEN + "\nExecutando o comando:")
@@ -167,7 +153,6 @@ def _run_sim_command(command_str, runner_path):
         print(line, end='')
     process.wait()
     click.echo(Fore.WHITE + Style.DIM + "--- Fim da Saída ---\n")
-
 def _prompt_and_run_sim_command(prompt, expected_command, runner_path):
     """Pede ao usuário para digitar um comando, valida, e então o executa."""
     click.echo(Fore.GREEN + f"\nOBJETIVO: {prompt}")
@@ -178,12 +163,10 @@ def _prompt_and_run_sim_command(prompt, expected_command, runner_path):
             click.echo(Fore.YELLOW + "Simulação encerrada."); return False
         if user_input.lower() in ['ajuda', 'hint', 'help']:
             click.echo(Fore.YELLOW + f"O comando correto é: {expected_command}"); continue
-
         if user_input.strip() == expected_command.strip():
             click.echo(Fore.GREEN + "Correto!"); break
         else:
             click.echo(Fore.RED + "Comando incorreto. Tente novamente.");
-
     click.echo(Fore.WHITE + Style.DIM + "--- Saída do Comando ---")
     
     args = shlex.split(user_input)

@@ -3,10 +3,9 @@ import os
 import shutil
 import click
 from pathlib import Path
-from colorama import Fore
+from doxoade.tools.doxcolors import Fore
 import uuid
 from ..shared_tools import ExecutionLogger
-
 @click.command('clean')
 def clean():
     """Limpa artefatos temporários, caches e builds do projeto."""
@@ -43,17 +42,14 @@ def clean():
                     p = root / pattern
                     if p.exists():
                         found_items.append(p)
-
         if not found_items:
             click.echo(Fore.GREEN + "   Nenhum lixo encontrado. O projeto está limpo.")
             return
-
         click.echo(f"Encontrados {len(found_items)} itens para remover:")
         for item in found_items[:10]:
             click.echo(f"  - {item}")
         if len(found_items) > 10:
             click.echo(f"  - ... e mais {len(found_items) - 10}")
-
         if click.confirm(Fore.YELLOW + "\nRemover permanentemente estes itens?", default=True):
             count = 0
             for item in found_items:

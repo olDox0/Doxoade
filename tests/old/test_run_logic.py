@@ -3,7 +3,6 @@
 import os
 # Removido pytest (não usado explicitamente, o runner 'pytest' injeta asserts)
 from doxoade.commands.run import _build_execution_command, _smart_find_script, _get_flow_probe_path
-
 def test_get_flow_probe_path_exists():
     """Teste simples para cobrir o _get_flow_probe_path."""
     try:
@@ -13,7 +12,6 @@ def test_get_flow_probe_path_exists():
     except FileNotFoundError:
         # Se rodar fora do contexto de pacote instalado, pode falhar, mas o teste deve ser robusto
         pass
-
 def test_smart_find_script_resolves_py_extension():
     """Testa se o resolvedor adiciona .py automaticamente."""
     # Setup: cria um arquivo dummy
@@ -33,7 +31,6 @@ def test_smart_find_script_resolves_py_extension():
     finally:
         if os.path.exists(dummy_name):
             os.remove(dummy_name)
-
 def test_build_execution_command_normal():
     """Testa a construção do comando normal."""
     python = "python.exe"
@@ -41,7 +38,6 @@ def test_build_execution_command_normal():
     cmd = _build_execution_command(script, python, flow=False)
     
     assert cmd == [python, script]
-
 def test_build_execution_command_with_flow():
     """Testa se o modo Flow injeta a sonda corretamente."""
     python = "python.exe"
@@ -53,7 +49,6 @@ def test_build_execution_command_with_flow():
     assert cmd[0] == python
     assert "flow_runner.py" in cmd[1] # A sonda
     assert cmd[2] == script
-
 def test_build_execution_command_with_args():
     """Testa passagem de argumentos extras."""
     cmd = _build_execution_command("main.py", "py", flow=False, args=["--verbose", "input.txt"])

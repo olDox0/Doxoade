@@ -3,11 +3,10 @@ import click
 import subprocess
 import sys
 import os
-from colorama import Fore
+from doxoade.tools.doxcolors import Fore
 from ..shared_tools import ExecutionLogger, _get_venv_python_executable
 from ..database import get_db_connection
 from datetime import datetime, timezone
-
 def _register_test_failure(node_id, error_message):
     """Registra falha de teste no banco de dados."""
     try:
@@ -38,7 +37,6 @@ def _register_test_failure(node_id, error_message):
         conn.commit()
         conn.close()
     except Exception: pass
-
 @click.command('test')
 @click.argument('target', default='tests/', required=False)
 @click.option('-v', '--verbose', is_flag=True, help="Saída detalhada.")
@@ -64,7 +62,6 @@ def test(target, verbose, watch):
                 cmd.append('-v')
             # Força cores no output
             cmd.append('--color=yes')
-
         try:
             # Rodamos com stream para o usuário ver em tempo real
             # Mas precisamos capturar o resultado final. 
@@ -83,7 +80,6 @@ def test(target, verbose, watch):
                 # Numa versão futura (V2), podemos usar um plugin do pytest para 
                 # alimentar o banco do Doxoade com precisão JSON.
                 # Por enquanto, confiamos no exit code.
-
         except KeyboardInterrupt:
             click.echo(Fore.YELLOW + "\n[TEST] Interrompido.")
         except Exception as e:

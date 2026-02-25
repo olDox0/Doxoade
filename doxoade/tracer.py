@@ -3,10 +3,8 @@ import json
 import time
 import runpy
 import sys
-
 # Armazena a função original para não entrarmos em um loop infinito
 _original_on_press = None
-
 def _traced_on_press(self, *args):
     """Nossa versão substituída do on_press."""
     # Tenta obter um id ou, como fallback, o texto do botão
@@ -24,7 +22,6 @@ def _traced_on_press(self, *args):
     # Chama a função on_press original que salvamos
     if _original_on_press:
         return _original_on_press(self, *args)
-
 def instrument_kivy():
     """Aplica o monkey-patching na biblioteca Kivy."""
     global _original_on_press
@@ -40,7 +37,6 @@ def instrument_kivy():
     except Exception:
         # Falha no patching, registramos o erro
         print(json.dumps({'ts': time.time(), 'stream': 'tracer', 'data': 'Falha ao aplicar instrumentação Kivy.'}))
-
 if __name__ == '__main__':
     # O tracer é o novo ponto de entrada
     

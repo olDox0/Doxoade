@@ -6,12 +6,10 @@ Analisa incidentes resolvidos e cria templates de correção.
 import re
 #import difflib
 from datetime import datetime, timezone
-from colorama import Fore
-
+from doxoade.tools.doxcolors import Fore
 class LearningEngine:
     def __init__(self, cursor):
         self.cursor = cursor
-
     def learn_from_incident(self, incident, corrected_content, original_content):
         """
         Ponto de entrada do aprendizado.
@@ -20,17 +18,14 @@ class LearningEngine:
         # [MPoT-5] Contrato: Dados mínimos necessários
         if not incident or not incident.get('message'):
             return False
-
         # 1. Estratégia Rápida: Regras conhecidas
         if self._learn_hardcoded_rules(incident):
             return True
-
         # 2. Estratégia Profunda: Análise de Diff (Requer conteúdo original)
         if corrected_content and original_content:
             return self._learn_from_diff(incident, original_content, corrected_content)
             
         return False
-
     def _learn_hardcoded_rules(self, incident):
         """Aplica regras pré-definidas para erros comuns."""
         msg = incident['message']
@@ -58,14 +53,12 @@ class LearningEngine:
         if pattern and template:
             return self._save_template(pattern, template, category)
         return False
-
     def _learn_from_diff(self, incident, original, corrected):
         """
         (Gênese V8/V15) Tenta induzir uma regra observando a mudança.
         """
         line_num = incident.get('line')
         if not line_num: return False
-
         # Extrai as linhas relevantes
         orig_lines = original.splitlines()
         corr_lines = corrected.splitlines()
@@ -90,7 +83,6 @@ class LearningEngine:
             return self._save_template(pattern, "REMOVE_LINE", incident['category'])
             
         return False
-
     def _abstract_message_dynamic(self, message):
         """Transforma mensagem concreta em padrão abstrato (Regex)."""
         # Substitui nomes entre aspas por <VAR>
@@ -101,14 +93,12 @@ class LearningEngine:
         pattern = re.sub(r"line \d+", "line <LINE>", pattern)
         
         return pattern
-
     def _save_template(self, pattern, template, category):
         """Persiste o conhecimento no banco de dados."""
         try:
             # Verifica existência
             self.cursor.execute("SELECT id, confidence FROM solution_templates WHERE problem_pattern = ?", (pattern,))
             existing = self.cursor.fetchone()
-
             if existing:
                 new_conf = existing['confidence'] + 1
                 self.cursor.execute("UPDATE solution_templates SET confidence = ? WHERE id = ?", (new_conf, existing['id']))

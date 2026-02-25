@@ -2,12 +2,11 @@
 # doxoade/commands/impact_analysis.py
 import os
 import click
-from colorama import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style
 from ..shared_tools import ExecutionLogger, _get_project_config, _find_project_root
 from .impact_systems.impact_logic import build_project_index, get_external_consumers
 from .impact_systems.impact_state import ImpactState
 from .impact_systems.impact_utils import path_to_module_name, get_coupling_status, load_impact_cache, save_impact_cache
-
 @click.command('impact-analysis')
 @click.argument('file_path_arg', type=click.Path(exists=True, dir_okay=False, resolve_path=True))
 @click.option('--path', 'project_path', type=click.Path(exists=True), default='.', help="Raiz do projeto.")
@@ -41,7 +40,6 @@ def impact_analysis(ctx, file_path_arg, project_path, tracking, internal, extern
             
         state = ImpactState(target_module=target_mod, project_root=root, 
                             search_path=search_path, index=idx)
-
         # --- DESPACHO DE VISUALIZAÇÃO ---
         if internal:
             click.echo(Fore.CYAN + f"\n[INTERNAL] Fluxo de '{target_mod}':")
@@ -52,7 +50,6 @@ def impact_analysis(ctx, file_path_arg, project_path, tracking, internal, extern
                 prefix = Fore.GREEN + f"  ƒ {f_name}()"
                 if calls: click.echo(f"{prefix} chama: " + Fore.WHITE + f"{', '.join(set(calls))}")
                 else: click.echo(f"{prefix} " + Style.DIM + "[Folha]")
-
         if external:
             click.echo(Fore.MAGENTA + f"\n[EXTERNAL] Consumidores de '{target_mod}':")
             consumers = get_external_consumers(state, func_filter=func)
@@ -60,7 +57,6 @@ def impact_analysis(ctx, file_path_arg, project_path, tracking, internal, extern
                 click.echo(Fore.YELLOW + f"  ▼ {c['path']}")
                 click.echo(Fore.WHITE + f"    └── usa: {', '.join(c['calls'])}")
             if not consumers: click.echo("  (Nenhum uso externo detectado)")
-
         if tracking or (not internal and not external and not graph):
             data = idx[target_mod]
             fan_out = len(data['imports'])

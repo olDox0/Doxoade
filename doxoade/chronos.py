@@ -12,15 +12,13 @@ import io
 import cProfile
 import collections
 from datetime import datetime, timezone
-from colorama import Fore
+from doxoade.tools.doxcolors import Fore
 from .database import get_db_connection
-
 try:
     import psutil
     HAS_PSUTIL = True
 except ImportError:
     HAS_PSUTIL = False
-
 class ResourceMonitor(threading.Thread):
     def __init__(self, pid):
         super().__init__()
@@ -35,7 +33,6 @@ class ResourceMonitor(threading.Thread):
             'io_read_max': 0,
             'io_write_max': 0
         }
-
     def _update_tree_metrics(self, parent_proc):
         """Varre a árvore e acumula métricas de I/O e picos de RAM (MPoT-12)."""
         cpu_total = 0.0
@@ -61,7 +58,6 @@ class ResourceMonitor(threading.Thread):
                     continue
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
-
         # Atualiza Picos de CPU/RAM
         if cpu_total > self.peaks['cpu_percent']: self.peaks['cpu_percent'] = cpu_total
         if (mem_total / (1024*1024)) > self.peaks['memory_mb']: 
@@ -70,7 +66,6 @@ class ResourceMonitor(threading.Thread):
         # Atualiza Máximos de I/O (Estratégia de Retenção)
         if r_tree > self.peaks['io_read_max']: self.peaks['io_read_max'] = r_tree
         if w_tree > self.peaks['io_write_max']: self.peaks['io_write_max'] = w_tree
-
     def _get_process_tree_stats(self, parent_proc):
         """[NOVO] Soma recursos da árvore de processos (Pai + Filhos)."""
         cpu_total = 0.0
@@ -81,7 +76,6 @@ class ResourceMonitor(threading.Thread):
             cpu_total += parent_proc.cpu_percent(interval=None) 
             mem_total += parent_proc.memory_info().rss
         except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError): pass
-
         # Inclui os filhos (recursivo)
         try:
             children = parent_proc.children(recursive=True)
@@ -93,7 +87,6 @@ class ResourceMonitor(threading.Thread):
         except (psutil.NoSuchProcess, psutil.AccessDenied): pass
         
         return cpu_total, mem_total / (1024 * 1024)
-
     def _get_tree_io(self, parent_proc):
         """[NOVO] Soma I/O da árvore."""
         r = 0
@@ -101,7 +94,6 @@ class ResourceMonitor(threading.Thread):
         procs = [parent_proc]
         try: procs.extend(parent_proc.children(recursive=True))
         except (psutil.NoSuchProcess, psutil.AccessDenied): pass
-
         for p in procs:
             try:
                 io = p.io_counters()
@@ -109,7 +101,6 @@ class ResourceMonitor(threading.Thread):
                 w += io.write_bytes
             except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError): pass
         return r, w
-
     def run(self):
         if not HAS_PSUTIL: return
         
@@ -129,7 +120,6 @@ class ResourceMonitor(threading.Thread):
                 line_n = exc_tb.tb_lineno
                 print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: run\033[0m")
                 print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
-
             while self.running:
                 self._update_tree_metrics(parent)
                 time.sleep(0.3)
@@ -142,13 +132,10 @@ class ResourceMonitor(threading.Thread):
             r_end, w_end = self._get_tree_io(parent)
             self.peaks['io_read_end'] = r_end
             self.peaks['io_write_end'] = w_end
-
         except (psutil.NoSuchProcess, Exception):
             pass
-
     def stop(self):
         self.running = False
-
     def get_stats(self):
         """Calcula o delta real de I/O processado."""
         # O delta é o maior valor de I/O visto menos o ponto de partida
@@ -161,7 +148,6 @@ class ResourceMonitor(threading.Thread):
             'read': round(read_bytes / (1024*1024), 3), # Precisão aumentada
             'write': round(write_bytes / (1024*1024), 3)
         }
-
     def _check_memory_safety(self, mem_mb):
         """Aegis Guard: Impede que o Doxoade devore a RAM do usuário (Leak protection)."""
         RAM_SAFETY_THRESHOLD = 1024.0 # 1GB limite rígido para o processo Doxoade
@@ -170,7 +156,6 @@ class ResourceMonitor(threading.Thread):
             print(f"\n🚨 {Fore.RED}[AEGIS MEMORY GUARD]{Fore.RESET} Doxoade excedeu limite de segurança (1GB).")
             print("   > Abortando tarefa para evitar instabilidade no Windows.")
             os._exit(1) # Fail-Stop Mensurável (MPoT-15)
-
 class CodeSampler(threading.Thread):
     def __init__(self, interval=0.01):
         super().__init__(daemon=True)
@@ -178,7 +163,6 @@ class CodeSampler(threading.Thread):
         self.running = True
         self.samples = collections.defaultdict(int)
         self.main_thread_id = threading.main_thread().ident
-
     def run(self):
         # Localiza diretórios para filtragem de ruído
         lib_path = os.path.dirname(os.__file__).lower().replace('\\', '/')
@@ -205,11 +189,9 @@ class CodeSampler(threading.Thread):
                 fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
                 line_number = exc_tb.tb_lineno
                 print(f"\033[0m \033[1m Filename: {fname}   ■ Line: {line_number} \033[31m ■ Exception type: {e} ■ Exception value: {exc_obj} \033[0m")
-
     def stop(self): self.running = False
     def get_hot_lines(self, limit=10):
         return sorted(self.samples.items(), key=lambda item: item[1], reverse=True)[:limit]
-
 class ChronosRecorder:
     def __init__(self):
         self.session_uuid = str(uuid.uuid4())
@@ -223,7 +205,6 @@ class ChronosRecorder:
             self.cmd_name = ctx.invoked_subcommand
         else:
             self.cmd_name = ctx.command.name if ctx else "unknown"
-
         self.system_context = {
             "os": platform.system(),
             "release": platform.release(),
@@ -232,7 +213,6 @@ class ChronosRecorder:
             "processor": platform.processor(),
             "cores": psutil.cpu_count() if HAS_PSUTIL else 1
         }
-
         self.monitor = ResourceMonitor(os.getpid())
         self.monitor.start()
         
@@ -245,10 +225,8 @@ class ChronosRecorder:
         self.start_timestamp = datetime.now(timezone.utc).isoformat()
         self.full_cmd = " ".join(sys.argv)
         self.work_dir = os.getcwd()
-
     def end_command(self, exit_code, duration_ms):
         if not self.monitor: return
-
         self.monitor.stop()
         self.sampler.stop()
         
@@ -265,11 +243,9 @@ class ChronosRecorder:
         for line in profile_text.splitlines():
             if "(" in line and ")" in line and os.getcwd() in line:
                 top_funcs.append(line.strip())
-
         line_profile_data = []
         for (fname, lineno), hits in hot_lines:
             line_profile_data.append({"file": fname.replace('\\', '/'), "line": lineno, "hits": hits})
-
         try:
             conn = get_db_connection()
             conn.execute("""
@@ -291,11 +267,9 @@ class ChronosRecorder:
             fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
             line_number = exc_tb.tb_lineno
             print(f"\033[0m \033[1m Filename: {fname}   ■ Line: {line_number} \033[31m ■ Exception type: {e} ■ Exception value: {exc_obj} \033[0m")
-
     def check_vulcan_efficiency(self, func_name, py_time, native_time):
         gain = py_time / native_time
         if gain < 1.1: # Ganho insignificante
             # Recomenda reversão por custo-benefício de risco
             pass
-
 chronos_recorder = ChronosRecorder()

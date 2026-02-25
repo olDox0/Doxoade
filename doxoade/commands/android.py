@@ -5,12 +5,10 @@ import shutil
 import sys
 import subprocess
 from datetime import datetime
-from colorama import Fore
+from doxoade.tools.doxcolors import Fore
 from ..shared_tools import ExecutionLogger
-
 def is_termux():
     return "com.termux" in os.environ.get("PREFIX", "") or os.path.exists("/data/data/com.termux")
-
 def ensure_storage_access():
     """Verifica e solicita acesso ao armazenamento compartilhado."""
     storage_path = os.path.expanduser("~/storage")
@@ -24,7 +22,6 @@ def ensure_storage_access():
              click.echo(Fore.RED + "[ERRO] Comando 'termux-setup-storage' não encontrado.")
              return False
     return os.path.exists(storage_path) or os.path.exists(os.path.expanduser("~/storage/shared"))
-
 def get_android_download_dir():
     """Retorna o caminho para Downloads no Android."""
     options = [
@@ -36,13 +33,11 @@ def get_android_download_dir():
         if os.path.exists(path):
             return path
     return None
-
 @click.group('android')
 def android_group():
     """Ferramentas de integração Termux/Android."""
     if not is_termux():
         click.echo(Fore.YELLOW + "[AVISO] Este comando foi projetado para o ambiente Termux (Android).")
-
 @android_group.command('export')
 @click.argument('target', default='.')
 @click.option('--zip', '-z', is_flag=True, help="Exporta como arquivo ZIP.")
@@ -53,21 +48,17 @@ def export_to_android(target, zip, name):
     with ExecutionLogger('android-export', target, {}) as _:
         if not ensure_storage_access():
             click.echo(Fore.RED + "[FALHA] Sem acesso ao armazenamento."); sys.exit(1)
-
         dest_root = get_android_download_dir()
         if not dest_root:
             click.echo(Fore.RED + "[FALHA] Pasta de Downloads não encontrada."); sys.exit(1)
-
         project_name = name or os.path.basename(os.path.abspath(target))
         export_folder = os.path.join(dest_root, "DoxoadeExports")
         os.makedirs(export_folder, exist_ok=True)
-
         # Lista expandida de ignorados para evitar erros de cópia
         ignore_list = shutil.ignore_patterns(
             'venv', '.git', '__pycache__', 'pytest_temp_dir', 
             '.doxoade_cache', 'tmp', '*.pyc', '.pytest_cache'
         )
-
         if zip:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             zip_name = f"{project_name}_{timestamp}"
@@ -96,7 +87,6 @@ def export_to_android(target, zip, name):
                 click.echo(Fore.YELLOW + f"[AVISO] Alguns arquivos não foram copiados: {e}")
             except Exception as e:
                 click.echo(Fore.RED + f"[ERRO] Falha na cópia: {e}")
-
 @android_group.command('import')
 @click.argument('filename')
 def import_from_android(filename):
@@ -118,7 +108,6 @@ def import_from_android(filename):
     if not src_path:
         click.echo(Fore.RED + f"[ERRO] '{filename}' não encontrado em Downloads.")
         return
-
     click.echo(Fore.CYAN + f"Importando '{src_path}'...")
     
     try:

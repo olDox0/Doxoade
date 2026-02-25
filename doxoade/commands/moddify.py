@@ -2,29 +2,23 @@
 import click
 #import os
 import shutil
-from colorama import Fore
-
+from doxoade.tools.doxcolors import Fore
 from ..chronos import chronos_recorder
-
 def _backup_file(file_path):
     shutil.copy2(file_path, f"{file_path}.bak")
-
 def _read_lines(file_path):
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
         return f.readlines()
-
 def _write_lines(file_path, lines):
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             old_content = f.read()
     except FileNotFoundError:
         old_content = ""
-
     new_content = "".join(lines)
     
     # REGISTRA NO CHRONOS
     chronos_recorder.log_file_change(file_path, old_content, new_content, operation='MODIFY')
-
 def _parse_line_range(range_str, max_lines):
     """Converte '1-10' ou '1,3,5' em um set de inteiros."""
     lines = set()
@@ -39,12 +33,10 @@ def _parse_line_range(range_str, max_lines):
     
     # Filtra linhas válidas (1-based)
     return {l for l in lines if 1 <= l <= max_lines}
-
 @click.group('moddify')
 def moddify():
     """Ferramentas de modificação cirúrgica de arquivos."""
     pass
-
 @moddify.command('show')
 @click.argument('file_path', type=click.Path(exists=True))
 @click.option('--search', '-s', help="Filtra linhas contendo este texto.")
@@ -73,7 +65,6 @@ def mod_show(file_path, search, part):
             display_line = display_line.replace(search, Fore.RED + search + Fore.WHITE)
             
         click.echo(f"{Fore.BLUE}{line_num:4}:{Fore.WHITE} {display_line}")
-
 @moddify.command('replace')
 @click.argument('file_path', type=click.Path(exists=True))
 @click.argument('pairs', nargs=-1)
@@ -86,19 +77,16 @@ def mod_replace(file_path, pairs, line):
     if len(pairs) % 2 != 0:
         click.echo(Fore.RED + "Erro: O número de argumentos de substituição deve ser par (velho novo).")
         return
-
     _backup_file(file_path)
     lines = _read_lines(file_path)
     
     target_lines = None
     if line:
         target_lines = _parse_line_range(line, len(lines))
-
     # Constrói dicionário de trocas
     replacements = []
     for i in range(0, len(pairs), 2):
         replacements.append((pairs[i], pairs[i+1]))
-
     new_lines = []
     count = 0
     
@@ -116,10 +104,8 @@ def mod_replace(file_path, pairs, line):
                 current_line = current_line.replace(old, new)
                 count += 1
         new_lines.append(current_line)
-
     _write_lines(file_path, new_lines)
     click.echo(Fore.GREEN + f"[MODDIFY] Realizadas {count} substituições em {file_path}.")
-
 @moddify.command('remove')
 @click.argument('file_path', type=click.Path(exists=True))
 @click.option('--line', '-l', help="Linhas para remover (ex: '10', '1-5', '1,3').")
@@ -152,7 +138,6 @@ def mod_remove(file_path, line, content):
             
     _write_lines(file_path, new_lines)
     click.echo(Fore.GREEN + f"[MODDIFY] Removidas {removed_count} linha(s).")
-
 @moddify.command('add')
 @click.argument('file_path', type=click.Path(exists=True))
 @click.argument('content')

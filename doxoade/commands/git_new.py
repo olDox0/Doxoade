@@ -1,16 +1,13 @@
 # doxoade/commands/git_new.py
 import sys
 import click
-from colorama import Fore, Style
-
+from doxoade.tools.doxcolors import Fore, Style
 # Importa as ferramentas necessárias do módulo compartilhado
 from ..shared_tools import (
     ExecutionLogger,
     _run_git_command
 )
-
 __version__ = "34.1 Alfa (Auto-Reconcile)"
-
 @click.command('git-new')
 @click.pass_context
 @click.argument('message')
@@ -22,7 +19,6 @@ def git_new(ctx, message, remote_url):
     """
     path = '.'
     arguments = ctx.params
-
     with ExecutionLogger('git-new', path, arguments) as logger:
         click.echo(Fore.CYAN + "--- [GIT-NEW] Publicando novo projeto no GitHub ---")
         
@@ -77,7 +73,6 @@ def git_new(ctx, message, remote_url):
             click.echo(Fore.GREEN + Style.BRIGHT + "\n[GIT-NEW] SUCESSO! Projeto publicado.")
             click.echo(f"Acesse: {remote_url}")
             return
-
         # SE FALHAR: Tenta Reconciliação (Históricos não relacionados)
         click.echo(Fore.RED + "\n[ALERTA] Push rejeitado. O repositório remoto não está vazio (possui README/License?).")
         click.echo(Fore.CYAN + "   > Iniciando protocolo de reconciliação (Pull --rebase --allow-unrelated)...")

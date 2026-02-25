@@ -4,21 +4,19 @@ import subprocess
 import os
 import json
 import click
-from colorama import Fore
+from doxoade.tools.doxcolors import Fore
 from ..shared_tools import (
     ExecutionLogger, 
     _get_venv_python_executable, 
     _present_results,
     _get_project_config
 )
-
 # Tenta importar Radon do ambiente do Doxoade (Batteries Included)
 try:
     from radon.visitors import ComplexityVisitor
     RADON_AVAILABLE = True
 except ImportError:
     RADON_AVAILABLE = False
-
 @click.command('health')
 @click.pass_context
 @click.argument('path', type=click.Path(exists=True, file_okay=False, resolve_path=True), default='.')
@@ -32,7 +30,6 @@ def health(ctx, path, ignore, output_format, complexity_threshold, min_coverage)
     
     with ExecutionLogger('health', path, arguments) as logger:
         if output_format == 'text': click.echo(Fore.CYAN + "[HEALTH] Iniciando check-up do projeto...")
-
         # 1. Análise Estática (Radon) - Usa ambiente do Doxoade
         findings = _analyze_complexity(path, list(ignore), complexity_threshold)
         
@@ -45,10 +42,8 @@ def health(ctx, path, ignore, output_format, complexity_threshold, min_coverage)
         else:
             if output_format == 'text': 
                 click.echo(Fore.YELLOW + "   > [SKIP] Coverage pulado (venv do projeto não detectado).")
-
         # 3. Análise de Dependências
         findings.extend(_analyze_requirements_quality(path))
-
         for f in findings:
             logger.add_finding(
                 f.get('severity', 'WARNING'), 
@@ -57,23 +52,19 @@ def health(ctx, path, ignore, output_format, complexity_threshold, min_coverage)
                 file=f.get('file'), 
                 line=f.get('line')
             )
-
         _present_results(output_format, logger.results)
         
         if logger.results['summary'].get('critical', 0) > 0:
             sys.exit(1)
-
 def _analyze_complexity(project_path, ignore, threshold):
     """Analisa a complexidade ciclomática usando o Radon do Doxoade."""
     if not RADON_AVAILABLE:
         return [{'severity': 'WARNING', 'message': "Radon não encontrado no Doxoade. Instale 'doxoade' completo."}]
-
     findings = []
     # Lógica de coleta simplificada (usa os ignores)
     config = _get_project_config(None, start_path=project_path)
     config_ignore = [item.strip('/') for item in config.get('ignore', [])]
     folders_to_ignore = set([item.lower() for item in config_ignore + ignore] + ['venv', 'build', 'dist', '.git', '__pycache__'])
-
     for root, dirs, files in os.walk(project_path):
         dirs[:] = [d for d in dirs if d.lower() not in folders_to_ignore]
         for file in files:
@@ -94,7 +85,6 @@ def _analyze_complexity(project_path, ignore, threshold):
                             })
                 except Exception: pass
     return findings
-
 def _analyze_test_coverage(project_path, venv_python, min_coverage):
     """
     Tenta rodar coverage no venv do usuário.
@@ -105,7 +95,6 @@ def _analyze_test_coverage(project_path, venv_python, min_coverage):
         subprocess.run([venv_python, '-m', 'coverage', '--version'], capture_output=True, check=True)
     except subprocess.CalledProcessError:
         return [{'severity': 'INFO', 'message': "Ferramenta 'coverage' não instalada no projeto. Testes pulados."}]
-
     # Roda os testes
     try:
         # Usa module coverage run para garantir que usa o coverage do venv
@@ -135,14 +124,12 @@ def _analyze_test_coverage(project_path, venv_python, min_coverage):
         return [{'severity': 'WARNING', 'message': "Falha ao executar suite de testes para cobertura (verifique 'doxoade test')."}]
     
     return []
-
 def _analyze_requirements_quality(project_path):
     """Analisa o requirements.txt em busca de boas práticas (pinagem de versão)."""
     findings = []
     requirements_file = os.path.join(project_path, 'requirements.txt')
     if not os.path.exists(requirements_file):
         return findings
-
         CRITICAL_PACKAGES = {'numpy', 'packaging', 'click', 'rich'}
         #HEAVY_PACKAGES_WARNING = {'pandas', 'torch', 'tensorflow', 'scikit-learn', 'lxml'}
     

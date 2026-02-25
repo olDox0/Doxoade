@@ -10,11 +10,9 @@ import re
 import sys
 import json
 from typing import List, Dict, Any
-
 # Padrões de IO para busca via AST
 IO_KEYWORDS = {'open', 'read', 'write', 'load', 'dump', 'print', 'input', 'get', 'post', 'request'}
 IO_MODULES = {'os', 'sys', 'pathlib', 'shutil', 'subprocess', 'socket', 'requests', 'json', 'toml'}
-
 def get_ignore_spec(root: str):
     """
     Carrega especificações de ignorar do pyproject.toml ou defaults (PASC 8.13/10).
@@ -31,7 +29,6 @@ def get_ignore_spec(root: str):
     
     config_path = os.path.join(root, "pyproject.toml")
     patterns = default_patterns.copy()
-
     if os.path.exists(config_path):
         try:
             config = toml.load(config_path)
@@ -41,9 +38,7 @@ def get_ignore_spec(root: str):
                 patterns.extend(toml_patterns)
         except Exception as e:
             _print_forensic("get_ignore_spec_toml", e)
-
     return pathspec.PathSpec.from_lines('gitwildmatch', patterns)
-
 class ChiefInsightVisitor(ast.NodeVisitor):
     def __init__(self):
         self.stats = {
@@ -51,7 +46,6 @@ class ChiefInsightVisitor(ast.NodeVisitor):
             "imports": {"stdlib": [], "external": []},
             "complexities": [], "mpot_4_violations": 0, "docstrings": {}
         }
-
     def _detect_io_calls(self, node: ast.AST) -> List[str]:
         """Rastreia chamadas de IO dentro da função (PASC 8.2)."""
         io_found = set()
@@ -65,7 +59,6 @@ class ChiefInsightVisitor(ast.NodeVisitor):
                     if isinstance(child.func.value, ast.Name) and child.func.value.id in IO_MODULES:
                         io_found.add(f"{child.func.value.id}.{child.func.attr}")
         return list(io_found)
-
     def _analyze_func(self, node):
         line_count = (node.end_lineno - node.lineno) if node.end_lineno else 0
         if line_count > 60: self.stats["mpot_4_violations"] += 1
@@ -80,7 +73,6 @@ class ChiefInsightVisitor(ast.NodeVisitor):
             "args": len(node.args.args),
             "io_flow": self._detect_io_calls(node) # Novo: Rastreio de Fluxo
         })
-
     def visit_FunctionDef(self, node):
         doc = ast.get_docstring(node) or ""
         self.stats["functions"].append(node.name)
@@ -95,25 +87,20 @@ class ChiefInsightVisitor(ast.NodeVisitor):
         if len(node.body) > 60:
             self.stats["mpot_4_violations"] += 1
         self.generic_visit(node)
-
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
         self._analyze_func(node)
         self.generic_visit(node)
-
     # REINTEGRANDO LOGICA RESGATADA DO DOSSIER (22/01)
     def visit_ClassDef(self, node):
         methods = [n.name for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
         self.stats['classes'].append({'name': node.name, 'methods_count': len(methods)})
         self.generic_visit(node)
-
     def visit_Import(self, node):
         for alias in node.names:
             self._sort_import(alias.name)
-
     def visit_ImportFrom(self, node):
         if node.module:
             self._sort_import(node.module)
-
     def _sort_import(self, name):
         """Separa stdlib de externos (PASC 6.1)."""
         root_mod = name.split('.')[0]
@@ -121,7 +108,6 @@ class ChiefInsightVisitor(ast.NodeVisitor):
             self.stats["imports"]["stdlib"].append(name)
         else:
             self.stats["imports"]["external"].append(name)
-
 def analyze_document(file_path: str, ext: str) -> Dict[str, Any]:
     """Extrai dados ricos de documentação (PASC 3.2 / 8.3)."""
     try:
@@ -141,7 +127,6 @@ def analyze_document(file_path: str, ext: str) -> Dict[str, Any]:
         exc_trace(exc_tb)
         return {"error": str(e)}
     return {}
-
 def find_debt_tags(content: str) -> List[Dict[str, Any]]:
     debt = []
     patterns = r'#\s*(TODO|FIXME|BUG|HACK|ADTI)\b[:\s]*(.*)'
@@ -149,7 +134,6 @@ def find_debt_tags(content: str) -> List[Dict[str, Any]]:
         m = re.search(patterns, line, re.IGNORECASE)
         if m: debt.append({"line": i, "tag": m.group(1).upper(), "msg": m.group(2).strip()})
     return debt
-
 def _print_forensic(func_name: str, e: Exception):
     import os as _dox_os
     _, _, exc_tb = sys.exc_info()
@@ -172,7 +156,6 @@ class SemanticAnalyzer:
             print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: __init__\033[0m")
             print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
             self.tree = None
-
     def get_map(self):
         if not self.tree: return {"role": "CORRUPT_SOURCE"}
         
@@ -185,13 +168,11 @@ class SemanticAnalyzer:
             "exported_symbols": [n.name for n in ast.walk(self.tree) if isinstance(n, ast.FunctionDef) if not n.name.startswith('_')],
             "complexity_index": len([n for n in ast.walk(self.tree) if isinstance(n, (ast.If, ast.For, ast.While))])
         }
-
     def _infer_role(self, imports):
         if 'click' in imports: return "ZEUS_CLI"
         if 'socket' in imports or 'requests' in imports: return "POSEIDON_NET"
         if 'sqlite3' in imports: return "HADES_DB"
         return "GENERIC_LOGIC"
-
     def get_summary(self):
         """Retorna um mapa simplificado da 'alma' do arquivo."""
         if not self.tree: 
@@ -203,7 +184,6 @@ class SemanticAnalyzer:
             "functions": [n.name for n in ast.walk(self.tree) if isinstance(n, ast.FunctionDef)],
             "complexity": len([n for n in ast.walk(self.tree) if isinstance(n, (ast.If, ast.For, ast.While))])
         }
-
     def get_docstrings(self):
         """Mapeia docstrings a símbolos para entendimento contextual."""
         docs = {}
@@ -225,7 +205,6 @@ class NexusThothMapper:
         "Atena": {"keywords": ["logic", "architecture", "nexus"], "imports": ["abc"]},
         "Anúbis": {"keywords": ["check", "security", "audit"], "imports": ["hashlib", "re"]}
     }
-
     @classmethod
     def identify(cls, file_path, imports):
         name = file_path.lower()

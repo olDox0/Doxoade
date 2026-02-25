@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 from dataclasses import dataclass, field
 from typing import List, Dict, Any
-
 @dataclass
 class CheckState:
     root: str
@@ -12,7 +11,6 @@ class CheckState:
     summary: Dict[str, int] = field(default_factory=lambda: {"errors": 0, "warnings": 0, "critical": 0})
     is_full_power: bool = False
     clones_active: bool = False
-
     def register_finding(self, f: Dict[str, Any]):
         self.findings.append(f)
         sev = f.get('severity', 'WARNING').upper()

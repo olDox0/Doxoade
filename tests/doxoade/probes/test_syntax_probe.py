@@ -2,10 +2,8 @@ import sys
 import subprocess
 import os
 from pathlib import Path
-
 # Caminho para a sonda
 PROBE_PATH = os.path.join("doxoade", "probes", "syntax_probe.py")
-
 def test_syntax_probe_valid_file(tmp_path):
     """Verifica se código válido passa com exit code 0."""
     f = tmp_path / "good.py"
@@ -17,7 +15,6 @@ def test_syntax_probe_valid_file(tmp_path):
     )
     assert result.returncode == 0
     assert result.stderr == ""
-
 def test_syntax_probe_invalid_file(tmp_path):
     """Verifica se erro de sintaxe retorna exit code 1 e mensagem formatada."""
     f = tmp_path / "bad.py"

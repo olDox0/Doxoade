@@ -5,9 +5,7 @@ import sys
 import click
 from .check_systems.check_state import CheckState
 from .check_systems.check_engine import run_check_logic
-
 __all__ = ['check', 'run_check_logic']
-
 @click.command('check')
 @click.argument('path', type=click.Path(exists=True), default='.')
 @click.option('--archives', '-a', is_flag=True, help="Modo Dossiê.")
@@ -42,28 +40,23 @@ def check(ctx, path: str, **kwargs):
         # 1. Motor de Auditoria (Passa 'fast', 'clones', 'no_cache', 'full_power')
         from .check_systems.check_engine import run_audit_engine
         run_audit_engine(state, io, **kwargs)
-
         # 2. Segurança Aegis (Passa 'security')
         if kwargs.get('security'):
             from .check_systems.check_security import analyze_security
             analyze_security(state)
-
         # 3. Crivos e Refatoração (Passa 'exclude' e 'only')
         from .check_systems.check_filters import apply_filters
         apply_filters(state, **kwargs) # <--- AGORA COM KWARGS
         from .check_systems.check_refactor import analyze_refactor_opportunities
         analyze_refactor_opportunities(state)
-
         # 4. Lógica de AUTO-FIX (Restaurada)
         if kwargs.get('fix') or kwargs.get('fix_specify'):
             _apply_modular_fixes(state, kwargs.get('fix_specify'))
-
         # 5. NPP Integration
         if kwargs.get('npp'):
             from .check_notepadpp import run_npp_workflow
             run_npp_workflow(path, **kwargs)
             return
-
         # 6. Sincronização e Saída
         from ..shared_tools import _update_open_incidents
         _update_open_incidents(state.findings, state.target_path)
@@ -72,12 +65,10 @@ def check(ctx, path: str, **kwargs):
             logger.add_finding(f['severity'], f['message'], f.get('category'), f.get('file'), f.get('line'))
         
         _render_output(state, kwargs)
-
     # Limpeza de Memória
     from ..tools.streamer import ufs
     ufs.clear()
     if state.summary['critical'] > 0: sys.exit(1)
-
 def _render_output(state: CheckState, kwargs: dict):
     """Despachante de Interface Único (PASC 8.5)."""
     from .check_systems.check_utils import render_archived_view, _render_issue_summary
@@ -86,7 +77,6 @@ def _render_output(state: CheckState, kwargs: dict):
         import json
         click.echo(json.dumps({'summary': state.summary, 'findings': state.findings}, indent=2))
         return
-
     if kwargs.get('archives'):
         render_archived_view(state)
     else:
@@ -96,12 +86,10 @@ def _render_output(state: CheckState, kwargs: dict):
     
     # O sumário por tipo sempre aparece no fim (Nexus Gold)
     _render_issue_summary(state.findings, **kwargs)
-
 def _apply_modular_fixes(state, fix_specify):
     """Integra o AutoFixer ao novo CheckState."""
     from .check_systems.check_fixer import apply_fixes_to_state
     apply_fixes_to_state(state, fix_specify)
-
 def _get_probe_path(probe_name):
     curr = os.path.dirname(os.path.abspath(__file__))
     return os.path.normpath(os.path.join(curr, "..", "probes", probe_name))
