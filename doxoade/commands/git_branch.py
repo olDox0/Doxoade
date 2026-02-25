@@ -17,6 +17,24 @@ def _get_default_base_branch():
     return 'main'
 
 
+def _render_branches_table():
+    """Renderiza lista de branches locais de forma previsível e legível."""
+    fmt = '%(if)%(HEAD)%(then)*%(else) %(end)%(refname:short)\t%(upstream:short)\t%(objectname:short)\t%(contents:subject)'
+    raw = _run_git_command(['for-each-ref', 'refs/heads', f'--format={fmt}'], capture_output=True) or ''
+    if not raw.strip():
+        click.echo('(sem branches)')
+        return
+
+    click.echo(Fore.WHITE + Style.BRIGHT + 'HEAD Branch                 Upstream                      Hash     Subject' + Style.RESET_ALL)
+    for line in raw.splitlines():
+        parts = line.split('\t')
+        branch_col = parts[0] if len(parts) > 0 else ''
+        upstream_col = parts[1] if len(parts) > 1 and parts[1] else '-'
+        hash_col = parts[2] if len(parts) > 2 else '-'
+        subject_col = parts[3] if len(parts) > 3 else '-'
+        click.echo(f"{branch_col:<28} {upstream_col:<29} {hash_col:<8} {subject_col}")
+
+
 @click.command('branch')
 @click.pass_context
 @click.option('--list', 'list_branches', is_flag=True, help='Lista branches locais com rastreamento.')
@@ -33,9 +51,8 @@ def branch(ctx, list_branches, create, switch_to, delete_branch, force_delete, c
     with ExecutionLogger('branch', '.', ctx.params) as logger:
         if list_branches:
             click.echo(Fore.CYAN + '--- [BRANCH] Status das branches locais ---')
-            _run_git_command(['fetch', '--all', '--prune'], silent_fail=True)
-            data = _run_git_command(['branch', '-vv'], capture_output=True) or ''
-            click.echo(data if data.strip() else '(sem branches)')
+            _run_git_command(['fetch', '--all', '--prune'], capture_output=True, silent_fail=True)
+            _render_branches_table()
             return
 
         if create:

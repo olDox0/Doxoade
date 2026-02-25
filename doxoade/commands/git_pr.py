@@ -28,6 +28,18 @@ def _build_compare_url(remote_url, branch, base):
     return f'{base_url}/compare/{base}...{branch}?expand=1'
 
 
+def _resolve_base_branch(base):
+    """Valida branch base local. Faz fallback para main/master quando necessário."""
+    if _run_git_command(['rev-parse', '--verify', base], capture_output=True, silent_fail=True):
+        return base
+    for fallback in ('main', 'master'):
+        if fallback != base and _run_git_command(['rev-parse', '--verify', fallback], capture_output=True, silent_fail=True):
+            click.echo(Fore.YELLOW + f"[AVISO] Base '{base}' não encontrada localmente. Usando '{fallback}'.")
+            return fallback
+    click.echo(Fore.YELLOW + f"[AVISO] Base '{base}' não encontrada. Mantendo valor informado para comparação remota.")
+    return base
+
+
 @click.command('pr')
 @click.pass_context
 @click.option('--status', 'show_status', is_flag=True, help='Mostra status do branch para abertura de PR.')
@@ -42,6 +54,8 @@ def pr(ctx, show_status, push, open_url, base, template):
         if not branch:
             click.echo(Fore.RED + '[ERRO] Não foi possível detectar o branch atual.')
             return
+
+        base = _resolve_base_branch(base)
 
         remote = _remote_url('origin')
         tracking = _run_git_command(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], capture_output=True, silent_fail=True)
