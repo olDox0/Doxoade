@@ -201,8 +201,16 @@ def save(ctx, message, archives, remove_commit, branch_target, merge_target, upd
             click.echo(Fore.RED + "Erro: Mensagem obrigatória para save (ou use --merge/--branch para gerar automático).")
             return
 
+        pre_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True)
         _run_git_command(['add', '.'])
         git_root = _run_git_command(['rev-parse', '--show-toplevel'], capture_output=True)
+
+        status_after_add = _run_git_command(['status', '--porcelain'], capture_output=True, silent_fail=True) or ''
+        if not status_after_add.strip():
+            console.print("[bold yellow][SAVE] Nada para salvar (working tree clean).[/bold yellow]")
+            if final_merge_target:
+                _auto_merge_local(current_branch, final_merge_target, force=force)
+            return
         
         # --- REFRESH DE SINCRO (Ação de Zeus) ---
         # Usamos a função auxiliar que já filtra arquivos DELETADOS (AMR)
@@ -245,11 +253,14 @@ def save(ctx, message, archives, remove_commit, branch_target, merge_target, upd
                         console.print(f"   [red]✘[/red] {mf['message']} ({os.path.basename(mf['file'])})")
                 sys.exit(1)
         # --- D. SEPULTAMENTO (COMMIT) ---
-        if _run_git_command(['commit', '-m', message]):
-            console.print("[bold green]✔ Alfa 80.1: Conhecimento sepultado com sucesso.[/bold green]")
-        new_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True)
-        
-        if new_hash:
+        if not _run_git_command(['commit', '-m', message]):
+            click.echo(Fore.RED + "[ERRO] Falha ao executar 'git commit'.")
+            sys.exit(1)
+
+        console.print("[bold green]✔ Alfa 80.1: Conhecimento sepultado com sucesso.[/bold green]")
+        new_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True)
+
+        if new_hash and new_hash != pre_hash:
             _learn_solutions_from_commit(new_hash, project_path)
 
         if final_merge_target:
