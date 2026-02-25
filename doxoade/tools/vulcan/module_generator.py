@@ -14,7 +14,15 @@ Este arquivo é autocontido para funcionar em projetos que NÃO possuem
 
 Uso típico no __main__.py:
 
-    from .doxoade.vulcan.runtime import activate_vulcan
+    import sys
+    from pathlib import Path
+
+    ROOT = Path(__file__).resolve().parents[1]
+    LOCAL_DOXOADE = ROOT / ".doxoade"
+    if LOCAL_DOXOADE.exists() and str(LOCAL_DOXOADE) not in sys.path:
+        sys.path.insert(0, str(LOCAL_DOXOADE))
+
+    from vulcan.runtime import activate_vulcan
     activate_vulcan(globals(), __file__)
 """
 
@@ -28,6 +36,25 @@ from pathlib import Path
 
 def _binary_ext() -> str:
     return ".pyd" if os.name == "nt" else ".so"
+
+
+def install_local_vulcan_path(source_file):
+    """Adiciona `<root>/.doxoade` no sys.path para permitir `from vulcan.runtime`.
+
+    Retorna True quando o caminho foi encontrado (e inserido ou já presente).
+    """
+    root = find_vulcan_project_root(source_file)
+    if not root:
+        return False
+
+    local_doxoade = root / ".doxoade"
+    if not local_doxoade.exists():
+        return False
+
+    path_str = str(local_doxoade)
+    if path_str not in sys.path:
+        sys.path.insert(0, path_str)
+    return True
 
 
 def find_vulcan_project_root(start):

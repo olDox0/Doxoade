@@ -18,6 +18,7 @@ def test_generate_local_vulcan_module_creates_runtime(tmp_path: Path):
     assert created is True
     assert runtime_path.exists()
     assert "activate_vulcan" in runtime_path.read_text(encoding="utf-8")
+    assert "install_local_vulcan_path" in runtime_path.read_text(encoding="utf-8")
 
 
 def test_generate_local_vulcan_module_respects_force(tmp_path: Path):

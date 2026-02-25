@@ -111,7 +111,13 @@ def vulcan_module(project_path, force):
 
     click.echo(f"{Fore.GREEN}✅ [VULCAN] Módulo local criado:{Fore.RESET} {runtime_path}")
     click.echo("   > No seu __main__.py use:")
-    click.echo("     from .doxoade.vulcan.runtime import activate_vulcan")
+    click.echo("     import sys")
+    click.echo("     from pathlib import Path")
+    click.echo("     ROOT = Path(__file__).resolve().parents[1]")
+    click.echo("     LOCAL_DOXOADE = ROOT / '.doxoade'")
+    click.echo("     if LOCAL_DOXOADE.exists() and str(LOCAL_DOXOADE) not in sys.path:")
+    click.echo("         sys.path.insert(0, str(LOCAL_DOXOADE))")
+    click.echo("     from vulcan.runtime import activate_vulcan")
     click.echo("     activate_vulcan(globals(), __file__)")
 
 def _print_vulcan_forensic(scope: str, e: Exception):

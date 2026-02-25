@@ -92,7 +92,15 @@ Use este workflow para projetos antigos, clonados ou de terceiros para garantir 
 *   No `__main__.py` do seu projeto, use o runtime local gerado:
 
 ```python
-from .doxoade.vulcan.runtime import activate_vulcan
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+LOCAL_DOXOADE = ROOT / ".doxoade"
+if LOCAL_DOXOADE.exists() and str(LOCAL_DOXOADE) not in sys.path:
+    sys.path.insert(0, str(LOCAL_DOXOADE))
+
+from vulcan.runtime import activate_vulcan
 
 # injeta símbolos *_vulcan_optimized sobre os nomes originais
 activate_vulcan(globals(), __file__)
