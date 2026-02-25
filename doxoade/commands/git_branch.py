@@ -1,0 +1,123 @@
+import sys
+import click
+from doxoade.tools.doxcolors import Fore, Style
+from doxoade.tools.logger import ExecutionLogger
+from doxoade.tools.git import _run_git_command
+
+
+def _get_current_branch():
+    branch = _run_git_command(['branch', '--show-current'], capture_output=True)
+    return (branch or '').strip()
+
+
+def _get_default_base_branch():
+    for candidate in ('main', 'master'):
+        if _run_git_command(['rev-parse', '--verify', candidate], capture_output=True, silent_fail=True):
+            return candidate
+    return 'main'
+
+
+@click.command('branch')
+@click.pass_context
+@click.option('--list', 'list_branches', is_flag=True, help='Lista branches locais com rastreamento.')
+@click.option('--create', help='Cria uma branch e já faz checkout nela.')
+@click.option('--switch', 'switch_to', help='Troca para uma branch existente.')
+@click.option('--delete', 'delete_branch', help='Remove uma branch local.')
+@click.option('--force-delete', is_flag=True, help='Força remoção da branch local (--delete).')
+@click.option('--cleanup-merged', is_flag=True, help='Remove branches já mergeadas no branch base.')
+@click.option('--base', default=None, help='Branch base para análises de merge (padrão: main/master).')
+@click.option('--drop-commits', type=int, help='Apaga os últimos N commits da branch atual (reset --hard HEAD~N).')
+@click.option('--yes', is_flag=True, help='Não pede confirmação em operações destrutivas.')
+def branch(ctx, list_branches, create, switch_to, delete_branch, force_delete, cleanup_merged, base, drop_commits, yes):
+    """Gerencia branches e histórico local de forma assistida."""
+    with ExecutionLogger('branch', '.', ctx.params) as logger:
+        if list_branches:
+            click.echo(Fore.CYAN + '--- [BRANCH] Status das branches locais ---')
+            _run_git_command(['fetch', '--all', '--prune'], silent_fail=True)
+            data = _run_git_command(['branch', '-vv'], capture_output=True) or ''
+            click.echo(data if data.strip() else '(sem branches)')
+            return
+
+        if create:
+            click.echo(Fore.CYAN + f"Criando branch '{create}'...")
+            if not _run_git_command(['checkout', '-b', create]):
+                logger.add_finding('error', 'Falha ao criar branch.')
+                sys.exit(1)
+            click.echo(Fore.GREEN + f"[OK] Branch '{create}' criada e selecionada.")
+            return
+
+        if switch_to:
+            click.echo(Fore.CYAN + f"Trocando para branch '{switch_to}'...")
+            if not _run_git_command(['checkout', switch_to]):
+                logger.add_finding('error', 'Falha ao trocar de branch.')
+                sys.exit(1)
+            click.echo(Fore.GREEN + '[OK] Branch ativa atualizada.')
+            return
+
+        if delete_branch:
+            current = _get_current_branch()
+            if delete_branch == current:
+                click.echo(Fore.RED + '[ERRO] Não é permitido remover a branch atual.')
+                sys.exit(1)
+
+            if not yes and not click.confirm(Fore.YELLOW + f"Confirma remoção da branch local '{delete_branch}'?"):
+                click.echo(Fore.YELLOW + '[BRANCH] Operação cancelada.')
+                return
+
+            delete_flag = '-D' if force_delete else '-d'
+            if not _run_git_command(['branch', delete_flag, delete_branch]):
+                logger.add_finding('error', f'Falha ao remover branch {delete_branch}.')
+                sys.exit(1)
+            click.echo(Fore.GREEN + f"[OK] Branch '{delete_branch}' removida.")
+            return
+
+        if cleanup_merged:
+            base_branch = base or _get_default_base_branch()
+            click.echo(Fore.CYAN + f"Limpando branches já mergeadas em '{base_branch}'...")
+            merged = _run_git_command(['branch', '--merged', base_branch], capture_output=True) or ''
+            candidates = []
+            current = _get_current_branch()
+            for line in merged.splitlines():
+                branch_name = line.replace('*', '').strip()
+                if branch_name and branch_name not in {base_branch, current}:
+                    candidates.append(branch_name)
+
+            if not candidates:
+                click.echo(Fore.GREEN + '[OK] Nenhuma branch mergeada para limpar.')
+                return
+
+            click.echo(Fore.YELLOW + 'Branches candidatas: ' + ', '.join(candidates))
+            if not yes and not click.confirm('Deseja remover todas essas branches locais?'):
+                click.echo(Fore.YELLOW + '[BRANCH] Operação cancelada.')
+                return
+
+            removed = 0
+            for name in candidates:
+                if _run_git_command(['branch', '-d', name], silent_fail=True):
+                    removed += 1
+            click.echo(Fore.GREEN + f'[OK] {removed} branch(es) removida(s).')
+            return
+
+        if drop_commits is not None:
+            if drop_commits <= 0:
+                click.echo(Fore.RED + '[ERRO] --drop-commits precisa ser maior que zero.')
+                sys.exit(1)
+
+            current = _get_current_branch() or 'HEAD'
+            click.echo(Fore.RED + Style.BRIGHT + f"Modo destrutivo: apagar {drop_commits} commit(s) da branch '{current}'.")
+            preview = _run_git_command(['log', '--oneline', f'-{drop_commits}'], capture_output=True, silent_fail=True) or ''
+            if preview:
+                click.echo(Fore.YELLOW + 'Commits que serão descartados:')
+                click.echo(preview)
+
+            if not yes and not click.confirm('Confirma reset --hard? Esta ação não pode ser desfeita facilmente.'):
+                click.echo(Fore.YELLOW + '[BRANCH] Operação cancelada.')
+                return
+
+            if not _run_git_command(['reset', '--hard', f'HEAD~{drop_commits}']):
+                logger.add_finding('error', 'Falha ao apagar commits com reset --hard.')
+                sys.exit(1)
+            click.echo(Fore.GREEN + '[OK] Histórico local reescrito com sucesso.')
+            return
+
+        click.echo(ctx.get_help())
