@@ -63,6 +63,7 @@ def _render_git(git: dict, detailed: bool, show_all: bool, show_max: bool,
     echo(f"   Branch:   {Fore.GREEN}{git['branch']}{Style.RESET_ALL}")
     _render_git_status_logic(git, detailed, show_all, show_max, show_code, only_comments)
     _render_last_commit(git.get('last_commit_info'))
+    _render_origin_delta(git.get('origin_main_delta'))
 def _render_git_status_logic(git, detailed, show_all, show_max, show_code, only_comments):
     """Encapsula a lógica de decisão do status Git (Reduz CC)."""
     if git['dirty_tree']:
@@ -169,3 +170,31 @@ def _render_integrity(core: dict):
         clean_name = mod.replace("doxoade.", "")
         icon = f"{Fore.GREEN}✔ OK" if status == "OK" else f"{Fore.RED}✘ {status}"
         echo(f"   {clean_name:<20} {icon}{Style.RESET_ALL}")
+
+def _render_origin_delta(delta: dict):
+    """Mostra diferenças entre origin/main e o HEAD atual."""
+    if not delta:
+        return
+
+    base_ref = delta.get('base_ref', 'origin/main')
+    ahead = delta.get('ahead', 0)
+    behind = delta.get('behind', 0)
+
+    echo(f"\n   {Fore.CYAN}Comparação ({base_ref} ↔ HEAD):{Style.RESET_ALL}")
+    echo(f"      Ahead:  {Fore.GREEN}{ahead}{Style.RESET_ALL} commit(s) | Behind: {Fore.YELLOW}{behind}{Style.RESET_ALL} commit(s)")
+
+    updates = delta.get('updates') or []
+    if updates:
+        echo(f"      {Fore.WHITE}Atualizações no branch atual (vs {base_ref}):{Style.RESET_ALL}")
+        for line in updates[:8]:
+            echo(f"         {Fore.GREEN}•{Style.RESET_ALL} {line}")
+        if len(updates) > 8:
+            echo(f"         {Style.DIM}... e mais {len(updates)-8} commit(s).{Style.RESET_ALL}")
+
+    changed = delta.get('changed_files') or []
+    if changed:
+        echo(f"      {Fore.WHITE}Arquivos alterados (top):{Style.RESET_ALL}")
+        for line in changed[:8]:
+            echo(f"         {Fore.CYAN}•{Style.RESET_ALL} {line}")
+        if len(changed) > 8:
+            echo(f"         {Style.DIM}... e mais {len(changed)-8} arquivo(s).{Style.RESET_ALL}")

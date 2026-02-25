@@ -73,9 +73,38 @@ class SystemInspector:
                 git_data['changes'] = _get_detailed_diff_stats(show_code=show_code, target_path=target_path)
             else:
                 git_data['pending_files'] = [l.strip() for l in status.splitlines()] if status else []
+
+            if not target_path:
+                git_data['origin_main_delta'] = self._get_origin_main_delta(git_data['branch'])
+
             return git_data
         except Exception as e:
             return {"is_git_repo": False, "error": str(e)}
+
+
+    def _get_origin_main_delta(self, branch_name: str):
+        """Coleta diferença entre origin/main e branch atual."""
+        _run_git_command(['fetch', 'origin', 'main'], capture_output=True, silent_fail=True)
+
+        base_ref = 'origin/main'
+        ahead = _run_git_command(['rev-list', '--count', f'{base_ref}..HEAD'], capture_output=True, silent_fail=True) or '0'
+        behind = _run_git_command(['rev-list', '--count', f'HEAD..{base_ref}'], capture_output=True, silent_fail=True) or '0'
+
+        updates_raw = _run_git_command(['log', '--oneline', f'{base_ref}..HEAD'], capture_output=True, silent_fail=True) or ''
+        updates = [line.strip() for line in updates_raw.splitlines() if line.strip()]
+
+        changed_raw = _run_git_command(['diff', '--name-status', f'{base_ref}..HEAD'], capture_output=True, silent_fail=True) or ''
+        changed = [line.strip() for line in changed_raw.splitlines() if line.strip()]
+
+        return {
+            'base_ref': base_ref,
+            'branch': branch_name or 'HEAD',
+            'ahead': int(ahead) if str(ahead).isdigit() else 0,
+            'behind': int(behind) if str(behind).isdigit() else 0,
+            'updates': updates[:20],
+            'changed_files': changed[:30]
+        }
+
     def verify_core_modules(self):
         """Verifica a integridade dos módulos principais."""
         modules = [

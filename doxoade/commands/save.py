@@ -161,9 +161,10 @@ def _abstract_and_learn_template(cursor: sqlite3.Cursor, concrete_finding: Dict[
 @click.option('--remove-commit', '-rc', help="Apaga o último commit.")
 @click.option('--branch', 'branch_target', help="Após salvar, faz merge local da branch atual para a branch alvo.")
 @click.option('--merge', 'merge_target', help="Alias de --branch (ex.: --merge main).")
+@click.option('--update-base', default='origin/main', show_default=True, help="Base usada para gerar resumo automático de atualização.")
 @click.option('--force', is_flag=True, help="Força o commit ignorando erros de qualidade.")
 @click.pass_context
-def save(ctx, message, archives, remove_commit, branch_target, merge_target, force):
+def save(ctx, message, archives, remove_commit, branch_target, merge_target, update_base, force):
     """Executa commit seguro com aprendizado automatizado."""
     console = Console()
     project_path = os.getcwd()
@@ -185,14 +186,20 @@ def save(ctx, message, archives, remove_commit, branch_target, merge_target, for
                 for item in sorted(data, key=lambda x: x['size'], reverse=True):
                     click.echo(f"  {item['size']:>7.1f} KB │ {item['path']}")
             return
-    if not message:
-        click.echo(Fore.RED + "Erro: Mensagem obrigatória para save."); return
     with ExecutionLogger('save', project_path, ctx.params):
         current_branch = (_run_git_command(['branch', '--show-current'], capture_output=True) or '').strip()
         final_merge_target = merge_target or branch_target
         if branch_target and merge_target and branch_target != merge_target:
             click.echo(Fore.RED + "Erro: use apenas um alvo entre --branch e --merge (ou o mesmo valor em ambos).")
             sys.exit(1)
+
+        if not message and final_merge_target:
+            message = _build_update_message(current_branch or 'HEAD', final_merge_target, update_base)
+            console.print(f"[bold cyan][SAVE] Mensagem automática gerada:[/bold cyan] {message}")
+
+        if not message:
+            click.echo(Fore.RED + "Erro: Mensagem obrigatória para save (ou use --merge/--branch para gerar automático).")
+            return
 
         _run_git_command(['add', '.'])
         git_root = _run_git_command(['rev-parse', '--show-toplevel'], capture_output=True)
@@ -250,6 +257,28 @@ def save(ctx, message, archives, remove_commit, branch_target, merge_target, for
 
         console.print("[bold green]\n[OK] Alfa 71.10: Commit finalizado e Gênese atualizada.[/bold green]")
         
+
+
+def _build_update_message(source_branch: str, target_branch: str, base_ref: str = 'origin/main') -> str:
+    """Gera mensagem de commit resumindo atualização desde a base."""
+    logs = _run_git_command(['log', '--oneline', f'{base_ref}..HEAD'], capture_output=True, silent_fail=True) or ''
+    subjects = []
+    for line in logs.splitlines():
+        clean = line.strip()
+        if not clean:
+            continue
+        parts = clean.split(' ', 1)
+        subjects.append(parts[1] if len(parts) > 1 else clean)
+
+    if not subjects:
+        return f"sync(save): atualização de {source_branch} para {target_branch}"
+
+    title = f"sync(save): merge {source_branch} -> {target_branch} ({len(subjects)} atualização(ões))"
+    body = ' | '.join(subjects[:4])
+    if len(subjects) > 4:
+        body += f" | +{len(subjects)-4} adicionais"
+    return f"{title} :: {body}"
+
 def _verify_succession_integrity():
     """Garante que as tecnologias citadas no save v94 existam de fato."""
 # [DOX-UNUSED]     from ..tools.vulcan.bridge import vulcan_bridge
