@@ -159,9 +159,11 @@ def _abstract_and_learn_template(cursor: sqlite3.Cursor, concrete_finding: Dict[
 @click.argument('message', required=False)
 @click.option('--archives', '-a', help="Lista arquivos de um commit.")
 @click.option('--remove-commit', '-rc', help="Apaga o último commit.")
+@click.option('--branch', 'branch_target', help="Após salvar, faz merge local da branch atual para a branch alvo.")
+@click.option('--merge', 'merge_target', help="Alias de --branch (ex.: --merge main).")
 @click.option('--force', is_flag=True, help="Força o commit ignorando erros de qualidade.")
 @click.pass_context
-def save(ctx, message, archives, remove_commit, force):
+def save(ctx, message, archives, remove_commit, branch_target, merge_target, force):
     """Executa commit seguro com aprendizado automatizado."""
     console = Console()
     project_path = os.getcwd()
@@ -186,6 +188,12 @@ def save(ctx, message, archives, remove_commit, force):
     if not message:
         click.echo(Fore.RED + "Erro: Mensagem obrigatória para save."); return
     with ExecutionLogger('save', project_path, ctx.params):
+        current_branch = (_run_git_command(['branch', '--show-current'], capture_output=True) or '').strip()
+        final_merge_target = merge_target or branch_target
+        if branch_target and merge_target and branch_target != merge_target:
+            click.echo(Fore.RED + "Erro: use apenas um alvo entre --branch e --merge (ou o mesmo valor em ambos).")
+            sys.exit(1)
+
         _run_git_command(['add', '.'])
         git_root = _run_git_command(['rev-parse', '--show-toplevel'], capture_output=True)
         
@@ -236,6 +244,10 @@ def save(ctx, message, archives, remove_commit, force):
         
         if new_hash:
             _learn_solutions_from_commit(new_hash, project_path)
+
+        if final_merge_target:
+            _auto_merge_local(current_branch, final_merge_target, force=force)
+
         console.print("[bold green]\n[OK] Alfa 71.10: Commit finalizado e Gênese atualizada.[/bold green]")
         
 def _verify_succession_integrity():
@@ -250,3 +262,38 @@ def _verify_succession_integrity():
         return False, "Regressão detectada: Ma'at Engine perdido."
         
     return True, "Integridade de Sucessão confirmada."
+
+
+def _auto_merge_local(source_branch: str, target_branch: str, force: bool = False) -> bool:
+    """Faz merge local assistido de source -> target e retorna para source."""
+    console = Console()
+    if not source_branch or not target_branch:
+        console.print("[bold yellow][SAVE] Merge automático ignorado: branch inválida.[/bold yellow]")
+        return False
+
+    if source_branch == target_branch:
+        console.print(f"[bold yellow][SAVE] Branch de origem e destino são iguais: {source_branch}.[/bold yellow]")
+        return False
+
+    if not _run_git_command(['rev-parse', '--verify', target_branch], capture_output=True, silent_fail=True):
+        console.print(f"[bold red][SAVE] Branch alvo '{target_branch}' não existe localmente.[/bold red]")
+        return False
+
+    if not force and not click.confirm(f"Aplicar merge local de '{source_branch}' em '{target_branch}' agora?"):
+        console.print("[bold yellow][SAVE] Merge automático cancelado.[/bold yellow]")
+        return False
+
+    console.print(f"[bold cyan][SAVE] Merge local automático: {source_branch} -> {target_branch}[/bold cyan]")
+    if not _run_git_command(['checkout', target_branch]):
+        console.print(f"[bold red][SAVE] Falha ao trocar para '{target_branch}'.[/bold red]")
+        return False
+
+    merge_ok = _run_git_command(['merge', '--no-edit', source_branch])
+    if not merge_ok:
+        console.print("[bold red][SAVE] Merge automático falhou. Use 'doxoade merge <branch>' para resolver conflitos.[/bold red]")
+        _run_git_command(['checkout', source_branch], silent_fail=True)
+        return False
+
+    _run_git_command(['checkout', source_branch], silent_fail=True)
+    console.print("[bold green][SAVE] Merge local concluído com sucesso.[/bold green]")
+    return True
