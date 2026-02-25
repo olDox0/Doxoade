@@ -1,5 +1,6 @@
 # doxoade/commands/git_new.py
 import sys
+import os
 import click
 from doxoade.tools.doxcolors import Fore, Style
 # Importa as ferramentas necessárias do módulo compartilhado
@@ -21,6 +22,24 @@ def git_new(ctx, message, remote_url):
     arguments = ctx.params
     with ExecutionLogger('git-new', path, arguments) as logger:
         click.echo(Fore.CYAN + "--- [GIT-NEW] Publicando novo projeto no GitHub ---")
+
+        # Pré-checagem: este comando precisa ser executado DENTRO de um repositório Git.
+        in_repo = _run_git_command(['rev-parse', '--is-inside-work-tree'], capture_output=True, silent_fail=True)
+        if in_repo != 'true':
+            child_repos = []
+            for entry in os.listdir('.'):
+                if os.path.isdir(entry) and os.path.isdir(os.path.join(entry, '.git')):
+                    child_repos.append(entry)
+
+            msg = "Diretório atual não é um repositório Git. Entre na pasta do projeto antes de usar 'git-new'."
+            logger.add_finding('error', msg)
+            click.echo(Fore.RED + f"[ERRO] {msg}")
+            if child_repos:
+                click.echo(Fore.YELLOW + "Sugestão: Repositórios encontrados aqui:")
+                for repo_dir in sorted(child_repos):
+                    click.echo(Fore.YELLOW + f"   - {repo_dir}")
+            click.echo(Fore.CYAN + "Exemplo: cd <pasta-do-projeto> && doxoade git-new \"Mensagem\" <URL>")
+            sys.exit(1)
         
         # Passo 1: Adicionar o repositório remoto
         click.echo(Fore.YELLOW + f"Passo 1: Adicionando remote 'origin' -> {remote_url}")
