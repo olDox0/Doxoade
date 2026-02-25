@@ -82,6 +82,21 @@ Use este workflow para projetos antigos, clonados ou de terceiros para garantir 
 *   `python`: Ajuda na instalação do Python, abrindo a página de download no Windows ou executando o instalador no Termux.
 *   `rebuild`: [DESTRUTIVO] Recria completamente o ambiente virtual de um projeto.
 
+
+
+#### Integração Vulcan em `__main__.py` de outros projetos
+*   Use `doxoade vulcan ignite` para forjar os binários na pasta `.doxoade/vulcan/bin` do projeto alvo.
+*   No `__main__.py` do seu projeto, ative o bridge de runtime:
+
+```python
+from doxoade.tools.vulcan.runtime import activate_vulcan
+
+# injeta símbolos *_vulcan_optimized sobre os nomes originais
+activate_vulcan(globals(), __file__)
+```
+
+Isso permite que projetos como o OIA carreguem automaticamente os `.pyd/.so` gerados pelo sistema Vulcan.
+
 #### Workflow Diário
 *   `save "<MSG>"`: Executa um "commit seguro", validando o código com `check` antes de commitar.
 *   `sync`: Sincroniza o branch atual com o remoto (`pull` e `push`).
