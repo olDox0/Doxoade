@@ -11,11 +11,12 @@ import click
 from colorama import Fore, Style
 
 from ..shared_tools import ExecutionLogger, _find_project_root
+from ..tools.vulcan.module_generator import generate_local_vulcan_module
 # [DOX-UNUSED] from .run_systems.run_vulcan import apply_vulcan_turbo
 
 __version__ = "82.1 Omega (Forge-Core)"
 
-# Certifique-se de que o grupo e o comando estão aqui
+
 @click.group('vulcan')
 def vulcan_group():
     """🔥 Projeto Vulcano: Alta Performance Nativa (C/Cython)."""
@@ -93,6 +94,25 @@ def vulcan_purge():
     if click.confirm(f"{Fore.RED}Deseja realmente limpar a foundry Vulcano?{Fore.RESET}"):
         env.purge_unstable()
         click.echo(f"{Fore.GREEN}Foundry purificada.{Fore.RESET}")
+
+
+@vulcan_group.command('module')
+@click.option('--path', 'project_path', default='.', type=click.Path(file_okay=False, resolve_path=True),
+              help="Raiz do projeto alvo (onde será criado .doxoade/vulcan/runtime.py).")
+@click.option('--force', is_flag=True, help="Sobrescreve o módulo local caso já exista.")
+def vulcan_module(project_path, force):
+    """Gera módulo local de runtime Vulcan para projetos externos ao `doxoade run`."""
+    root = _find_project_root(project_path)
+    created, runtime_path = generate_local_vulcan_module(root, force=force)
+    if not created:
+        click.echo(f"{Fore.YELLOW}[SKIP]{Fore.RESET} Módulo já existe: {runtime_path}")
+        click.echo("       Use --force para sobrescrever.")
+        return
+
+    click.echo(f"{Fore.GREEN}✅ [VULCAN] Módulo local criado:{Fore.RESET} {runtime_path}")
+    click.echo("   > No seu __main__.py use:")
+    click.echo("     from .doxoade.vulcan.runtime import activate_vulcan")
+    click.echo("     activate_vulcan(globals(), __file__)")
 
 def _print_vulcan_forensic(scope: str, e: Exception):
     """Interface Forense para falhas de metalurgia (MPoT-5.3)."""

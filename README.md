@@ -85,17 +85,20 @@ Use este workflow para projetos antigos, clonados ou de terceiros para garantir 
 
 
 #### Integração Vulcan em `__main__.py` de outros projetos
-*   Use `doxoade vulcan ignite` para forjar os binários na pasta `.doxoade/vulcan/bin` do projeto alvo.
-*   No `__main__.py` do seu projeto, ative o bridge de runtime:
+*   Gere o módulo local autocontido no projeto alvo:
+    * `doxoade vulcan module`
+*   Forje os binários na pasta `.doxoade/vulcan/bin`:
+    * `doxoade vulcan ignite`
+*   No `__main__.py` do seu projeto, use o runtime local gerado:
 
 ```python
-from doxoade.tools.vulcan.runtime import activate_vulcan
+from .doxoade.vulcan.runtime import activate_vulcan
 
 # injeta símbolos *_vulcan_optimized sobre os nomes originais
 activate_vulcan(globals(), __file__)
 ```
 
-Isso permite que projetos como o OIA carreguem automaticamente os `.pyd/.so` gerados pelo sistema Vulcan.
+Esse fluxo evita depender de `doxoade` instalado no `venv` do projeto consumidor (ex.: OIA/ORN).
 
 #### Workflow Diário
 *   `save "<MSG>"`: Executa um "commit seguro", validando o código com `check` antes de commitar.
