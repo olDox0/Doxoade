@@ -7,6 +7,7 @@ Interface de Ignição para Otimização Nativa (C/Cython).
 
 import os
 import sys
+import signal
 import click
 from colorama import Fore, Style
 
@@ -17,10 +18,48 @@ from ..tools.vulcan.module_generator import generate_local_vulcan_module
 __version__ = "82.1 Omega (Forge-Core)"
 
 
+def _sigint_handler(signum, frame):
+    click.echo(f"\n{Fore.RED}Comando interrompido. Saindo...{Style.RESET_ALL}")
+    sys.exit(130)
+
+
 @click.group('vulcan')
 def vulcan_group():
     """🔥 Projeto Vulcano: Alta Performance Nativa (C/Cython)."""
     pass
+
+
+@vulcan_group.command('doctor')
+@click.option('--module', 'module_name', help='Nome do módulo Python a tentar reparar (ex: pacote.modulo).')
+@click.option('--srcdir', help='Caminho para o código-fonte do módulo (opcional).')
+@click.option('--retries', default=1, type=int, show_default=True)
+def vulcan_doctor(module_name, srcdir, retries):
+    """Executa diagnóstico Vulcan e tenta autorreparo quando disponível."""
+    project_root = _find_project_root(os.getcwd())
+    from ..tools.vulcan.diagnostic import VulcanDiagnostic
+
+    diag = VulcanDiagnostic(project_root)
+    ok, results = diag.check_environment()
+    compiler_ok = results.get('compiler') if isinstance(results, dict) else None
+    cython_ok = results.get('cython') if isinstance(results, dict) else None
+    click.echo(f"Diagnostic: compiler_ok={compiler_ok} cython={cython_ok}")
+
+    if not module_name:
+        click.echo("Use --module para tentar reparo automático de um alvo específico.")
+        return
+
+    try:
+        from ..tools.vulcan.auto_repair import auto_repair_module
+    except Exception:
+        click.echo(f"{Fore.YELLOW}[VULCAN-DOCTOR]{Fore.RESET} Auto-repair não disponível nesta build.")
+        return
+
+    try:
+        result = auto_repair_module(project_root, module_name, module_src_dir=srcdir, retries=retries)
+        click.echo(result)
+    except Exception as e:
+        _print_vulcan_forensic("DOCTOR", e)
+        sys.exit(1)
 
 #@vulcan_group.command('auto') # O registro acontece AQUI, dentro do módulo
 #def vulcan_auto():
@@ -29,10 +68,12 @@ def vulcan_group():
 #    vulcan_autopilot.scan_and_optimize()
 
 @vulcan_group.command('ignite')
+@click.argument('path', required=False, type=click.Path(exists=True))
 @click.option('--force', is_flag=True, help="Força a re-compilação de todos os Hot-Paths.")
 @click.pass_context
-def ignite(ctx, force):
+def ignite(ctx, path, force):
     """Transforma Hot-Paths detectados em binários de alta velocidade."""
+    signal.signal(signal.SIGINT, _sigint_handler)
     root = _find_project_root(os.getcwd())
     
     with ExecutionLogger('vulcan_ignite', root, ctx.params) as _:
@@ -52,14 +93,30 @@ def ignite(ctx, force):
         # O Autopilot lê o Advisor (8.833 hits) e chama o Forge + Compiler
         from ..tools.vulcan.autopilot import VulcanAutopilot
         autopilot = VulcanAutopilot(root)
-        
+
+        candidates = []
+        mode = "AUTOMÁTICO (baseado em telemetria)"
+        if path:
+            abs_path = os.path.abspath(path)
+            if os.path.isfile(abs_path):
+                mode = f"MANUAL (arquivo: {os.path.basename(abs_path)})"
+                candidates = [{'file': abs_path}]
+            elif os.path.isdir(abs_path):
+                mode = f"MANUAL (diretório: {os.path.basename(abs_path)})"
+                for root_dir, _, files in os.walk(abs_path):
+                    for filename in files:
+                        if filename.endswith('.py'):
+                            candidates.append({'file': os.path.join(root_dir, filename)})
+
         try:
-            click.echo(f"{Fore.CYAN}   > Analisando rastro do Chronos (Lookup: Hot-Paths)...{Fore.RESET}")
-            autopilot.scan_and_optimize()
+            click.echo(f"{Fore.CYAN}   > Modo de operação: {mode}{Fore.RESET}")
+            autopilot.scan_and_optimize(candidates=candidates, force_recompile=force)
             
             click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}✅ [VULCAN] Forja concluída com sucesso.{Fore.RESET}")
             click.echo("   > Próxima execução com 'doxoade run' usará modo turbo.")
             
+        except KeyboardInterrupt:
+            _sigint_handler(None, None)
         except Exception as e:
             _print_vulcan_forensic("IGNITE", e)
             sys.exit(1)

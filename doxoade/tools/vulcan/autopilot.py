@@ -27,12 +27,22 @@ class VulcanAutopilot:
         self.compiler = VulcanCompiler(self.env)
         self.candidates = []
 
-    def scan_and_optimize(self):
-        """Varre o projeto em busca de candidatos."""
+    def scan_and_optimize(self, candidates=None, force_recompile=False):
+        """Varre o projeto em busca de candidatos.
+
+        Args:
+            candidates: lista opcional de candidatos manuais no formato
+                ``[{"file": "/abs/path/alvo.py"}]``.
+            force_recompile: compatibilidade de assinatura com o CLI.
+        """
         print(f"{Fore.CYAN}🚀 [VULCAN-AUTOPILOT] Iniciando varredura de Hot-Paths...{Fore.RESET}")
-        
-        # [FIX] A atribuição deve vir antes de qualquer uso ou print
-        candidates = self.advisor.get_optimization_candidates()
+
+        # `force_recompile` é aceito para contrato de CLI, mantendo
+        # comportamento retrocompatível do Autopilot atual.
+        _ = force_recompile
+
+        if candidates is None:
+            candidates = self.advisor.get_optimization_candidates()
         
         if not candidates:
             print(f"   {Fore.WHITE}Nenhum Hot-Path detectado para otimização nativa no momento.{Fore.RESET}")
@@ -87,7 +97,8 @@ class VulcanAutopilot:
         except Exception as e:
             from traceback import print_tb as exc_trace
             _, exc_obj, exc_tb = sys.exc_info()
-            print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+            exc_val = str(exc_obj).replace("'", "")
+            print(f"\033[31m ■ Exception type: {type(e).__name__} . . .  ■ Exception value: {exc_val}\n")
             exc_trace(exc_tb)
             print(f"   {Fore.RED}❌ Erro crítico no pipeline Autopilot: {e}{Fore.RESET}")
             return False
