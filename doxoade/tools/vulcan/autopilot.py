@@ -181,9 +181,9 @@ class VulcanAutopilot:
                             success_count += 1
                             print(f"   {Fore.GREEN}✔ {Path(file_path).name:<30}{Fore.RESET}")
                         else:
-                            # Trunca o erro para não poluir o terminal com stderr completo
-                            short_err = (error_msg or "falha desconhecida")[:120].replace('\n', ' ')
-                            print(f"   {Fore.RED}✘ {Path(file_path).name:<30} [{short_err}]{Fore.RESET}")
+                            full_err = (error_msg or "falha desconhecida").strip()
+                            print(f"   {Fore.RED}✘ {Path(file_path).name:<30}{Fore.RESET}")
+                            print(f"      {Fore.RED}└─ {full_err.replace(chr(10), chr(10) + '      ')}{Fore.RESET}")
                     except Exception as e:
                         import sys as exc_sys
                         import os as exc_os

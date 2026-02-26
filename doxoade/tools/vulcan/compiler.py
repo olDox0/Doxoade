@@ -36,6 +36,24 @@ class VulcanCompiler:
         VulcanCompiler._cached_env = env
         return env
 
+    @staticmethod
+    def _format_verbose_build_error(module_name: str, cmd: list[str], returncode: int, stdout: str, stderr: str) -> str:
+        """Gera diagnóstico verboso para falhas de compilação Cython."""
+
+        def _tail(text: str, n: int = 25) -> str:
+            lines = [ln for ln in (text or "").splitlines() if ln.strip()]
+            if not lines:
+                return "(vazio)"
+            return "\n".join(lines[-n:])
+
+        cmd_str = " ".join(cmd)
+        return (
+            f"Build failed for {module_name} (exit={returncode})\n"
+            f"CMD: {cmd_str}\n"
+            f"--- STDERR (tail) ---\n{_tail(stderr)}\n"
+            f"--- STDOUT (tail) ---\n{_tail(stdout)}"
+        )
+
     def compile(self, module_name: str) -> tuple[bool, str | None]:
         """
         Compila o módulo e retorna uma tupla (sucesso, erro).
@@ -88,10 +106,14 @@ setup(ext_modules=cythonize(ext, language_level=3, quiet=True))
             )
 
             if res.returncode != 0:
-                # Extrai só a última linha útil do stderr para não poluir o log
-                stderr_lines = [l.strip() for l in (res.stderr or "").splitlines() if l.strip()]
-                error_summary = stderr_lines[-1] if stderr_lines else f"Exit code {res.returncode}"
-                return False, error_summary
+                verbose_error = self._format_verbose_build_error(
+                    module_name=module_name,
+                    cmd=cmd,
+                    returncode=res.returncode,
+                    stdout=res.stdout or "",
+                    stderr=res.stderr or "",
+                )
+                return False, verbose_error
 
             if self._promote_binary(module_name):
                 return True, None
