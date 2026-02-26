@@ -178,8 +178,18 @@ class VulcanAutopilot:
 
         return filtered
 
+    @staticmethod
+    def _limit_auto_candidates(candidates: list[dict]) -> tuple[list[dict], int]:
+        """Aplica limite em modo automático para reduzir picos de memória/tempo."""
+        raw_limit = os.environ.get("DOXOADE_VULCAN_AUTO_TARGET_CAP", "12").strip()
+        limit = int(raw_limit) if raw_limit.isdigit() and int(raw_limit) > 0 else 12
+        if len(candidates) <= limit:
+            return candidates, 0
+        return candidates[:limit], len(candidates) - limit
+
     def scan_and_optimize(self, candidates=None, force_recompile=False, max_workers: int | None = None):
-        if not candidates:
+        auto_mode = not candidates
+        if auto_mode:
             print(f"{Fore.CYAN}   > Consultando telemetria...{Fore.RESET}")
             candidates = self.advisor.get_optimization_candidates(force=force_recompile)
         
@@ -189,6 +199,16 @@ class VulcanAutopilot:
         total_before = len(candidates)
         candidates = self._filter_candidates(candidates, force_recompile=force_recompile)
         skipped = total_before - len(candidates)
+
+        auto_trimmed = 0
+        if auto_mode and candidates:
+            candidates, auto_trimmed = self._limit_auto_candidates(candidates)
+            if auto_trimmed:
+                print(
+                    f"   {Fore.BLUE}↷ Modo automático: limitando lote para {len(candidates)} alvos "
+                    f"(restantes: {auto_trimmed}){Fore.RESET}"
+                )
+
         if not candidates:
             print(f"   {Fore.WHITE}Nenhum candidato elegível para forja (skips={skipped}).{Fore.RESET}")
             return

@@ -91,6 +91,7 @@ cli           = _Stub()
 
 _SKIP_FILENAMES = frozenset({'__init__.py', '__main__.py'})
 _RISKY_IMPORTS = frozenset({'ctypes', 'socket', 'subprocess', 'threading', 'multiprocessing', 'asyncio', 'llama_cpp'})
+_CYTHON_RESERVED_IDENTIFIERS = frozenset({'include'})
 
 
 def assess_file_for_vulcan(file_path: str) -> tuple[bool, str | None]:
@@ -139,6 +140,13 @@ class VulcanForge(ast.NodeTransformer):
         self.original_imports: list = []
         self.blacklist: Set[str] = _BLACKLIST
         self._blacklisted_names: Set[str] = set()
+        self._name_rewrites: list[dict[str, str]] = []
+
+    @staticmethod
+    def _sanitize_identifier(name: str) -> str:
+        if name in _CYTHON_RESERVED_IDENTIFIERS:
+            return f"_{name}"
+        return name
 
     @staticmethod
     def is_self_referential(file_path: str) -> bool:
@@ -196,6 +204,13 @@ class VulcanForge(ast.NodeTransformer):
 
     def visit_arg(self, node):
         node.annotation = None
+        if isinstance(node.arg, str):
+            node.arg = self._sanitize_identifier(node.arg)
+        return node
+
+    def visit_Name(self, node):
+        if self._name_rewrites and node.id in self._name_rewrites[-1]:
+            node.id = self._name_rewrites[-1][node.id]
         return node
 
     def visit_AnnAssign(self, node):
@@ -210,9 +225,30 @@ class VulcanForge(ast.NodeTransformer):
     def visit_FunctionDef(self, node):
         node.returns = None
         node.decorator_list = []
+
+        name_map: dict[str, str] = {}
+        args = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
+        if node.args.vararg:
+            args.append(node.args.vararg)
+        if node.args.kwarg:
+            args.append(node.args.kwarg)
+        for arg in args:
+            rewritten = self._sanitize_identifier(arg.arg)
+            if rewritten != arg.arg:
+                name_map[arg.arg] = rewritten
+
+        if name_map:
+            self._name_rewrites.append(name_map)
+
         if not node.name.endswith('_vulcan_optimized'):
             node.name = f"{node.name}_vulcan_optimized"
-        self.generic_visit(node)
+
+        try:
+            self.generic_visit(node)
+        finally:
+            if name_map:
+                self._name_rewrites.pop()
+
         return node
 
     def generate_source(self, file_path: str) -> str:

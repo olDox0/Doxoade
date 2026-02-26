@@ -95,3 +95,18 @@ def test_process_target_passes_prevalidated_flag(monkeypatch):
     out = ap._process_target({"file": "a.py", "__vulcan_validated": True})
     assert out["ok"] is True
     assert captured.get("prevalidated") is True
+
+
+def test_limit_auto_candidates_caps_by_default():
+    candidates = [{"file": f"f{i}.py"} for i in range(20)]
+    limited, trimmed = VulcanAutopilot._limit_auto_candidates(candidates)
+    assert len(limited) == 12
+    assert trimmed == 8
+
+
+def test_limit_auto_candidates_can_be_configured(monkeypatch):
+    monkeypatch.setenv("DOXOADE_VULCAN_AUTO_TARGET_CAP", "5")
+    candidates = [{"file": f"f{i}.py"} for i in range(9)]
+    limited, trimmed = VulcanAutopilot._limit_auto_candidates(candidates)
+    assert [c["file"] for c in limited] == [f"f{i}.py" for i in range(5)]
+    assert trimmed == 4
