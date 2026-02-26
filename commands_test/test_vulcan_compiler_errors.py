@@ -32,3 +32,20 @@ def test_format_verbose_build_error_includes_dynamic_setup_script_name():
         stderr="boom",
     )
     assert "setup_v_mod.py" in msg
+
+
+def test_run_command_streaming_returns_tails(tmp_path):
+    cmd = [
+        sys.executable,
+        "-c",
+        "import sys; print('o1'); print('o2'); print('e1', file=sys.stderr)",
+    ]
+    code, out_tail, err_tail = VulcanCompiler._run_command_streaming(
+        cmd,
+        cwd=str(tmp_path),
+        env={},
+        max_tail_lines=10,
+    )
+    assert code == 0
+    assert "o2" in out_tail
+    assert "e1" in err_tail
