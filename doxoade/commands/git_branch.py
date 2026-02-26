@@ -1,4 +1,5 @@
 import sys
+import re
 import click
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.logger import ExecutionLogger
@@ -45,8 +46,9 @@ def _render_branches_table():
 @click.option('--cleanup-merged', is_flag=True, help='Remove branches já mergeadas no branch base.')
 @click.option('--base', default=None, help='Branch base para análises de merge (padrão: main/master).')
 @click.option('--drop-commits', type=int, help='Apaga os últimos N commits da branch atual (reset --hard HEAD~N).')
+@click.option('--origin', 'origin_guard', help='Publica HEAD em origin/<base> com guarda de hash remoto (ex.: --origin b935a7f).')
 @click.option('--yes', is_flag=True, help='Não pede confirmação em operações destrutivas.')
-def branch(ctx, list_branches, create, switch_to, delete_branch, force_delete, cleanup_merged, base, drop_commits, yes):
+def branch(ctx, list_branches, create, switch_to, delete_branch, force_delete, cleanup_merged, base, drop_commits, origin_guard, yes):
     """Gerencia branches e histórico local de forma assistida."""
     with ExecutionLogger('branch', '.', ctx.params) as logger:
         if list_branches:
@@ -135,6 +137,75 @@ def branch(ctx, list_branches, create, switch_to, delete_branch, force_delete, c
                 logger.add_finding('error', 'Falha ao apagar commits com reset --hard.')
                 sys.exit(1)
             click.echo(Fore.GREEN + '[OK] Histórico local reescrito com sucesso.')
+            return
+
+        if origin_guard:
+            base_branch = base or _get_default_base_branch()
+
+            local_branch_ref = f"refs/heads/{base_branch}"
+            remote_branch_ref = f"refs/remotes/origin/{base_branch}"
+            has_local_base = bool(_run_git_command(['show-ref', '--verify', '--quiet', local_branch_ref], silent_fail=True))
+            has_remote_base = bool(_run_git_command(['show-ref', '--verify', '--quiet', remote_branch_ref], silent_fail=True))
+
+            if not (has_local_base or has_remote_base):
+                if re.fullmatch(r'[0-9a-fA-F]{7,40}', base_branch):
+                    click.echo(Fore.RED + "[ERRO] '--base' espera nome de branch, não hash de commit.")
+                    click.echo(Fore.YELLOW + "Exemplo correto: doxoade branch --base main --origin <hash_remoto>")
+                else:
+                    click.echo(Fore.RED + f"[ERRO] Branch base '{base_branch}' não existe (local/remoto).")
+                sys.exit(1)
+
+            remote_ref = f"origin/{base_branch}"
+            click.echo(Fore.CYAN + f"Sincronização segura: HEAD -> {remote_ref} (guard={origin_guard})")
+
+            _run_git_command(['fetch', 'origin', base_branch], capture_output=True, silent_fail=True)
+            remote_hash = _run_git_command(['rev-parse', remote_ref], capture_output=True, silent_fail=True)
+            if not remote_hash:
+                logger.add_finding('error', f'Falha ao ler hash remoto de {remote_ref}.')
+                click.echo(Fore.RED + f"[ERRO] Não foi possível obter o hash atual de {remote_ref}.")
+                sys.exit(1)
+
+            remote_hash = remote_hash.strip()
+            guard = origin_guard.strip().lower()
+            guard_matches_remote = remote_hash.lower().startswith(guard)
+            guard_is_local_anchor = False
+
+            if not guard_matches_remote:
+                guard_commit = _run_git_command(['rev-parse', '--verify', guard], capture_output=True, silent_fail=True)
+                if guard_commit:
+                    guard_commit = guard_commit.strip()
+                    guard_is_local_anchor = bool(
+                        _run_git_command(['merge-base', '--is-ancestor', guard_commit, 'HEAD'], silent_fail=True)
+                    )
+
+            if not guard_matches_remote and not guard_is_local_anchor:
+                click.echo(Fore.RED + f"[ERRO] Guarda não confere com remoto nem com âncora local válida. Remoto atual: {remote_hash[:12]}")
+                click.echo(Fore.YELLOW + "Dica 1: use o hash remoto atual: 'git log origin/{base} -n 1 --oneline'.".format(base=base_branch))
+                click.echo(Fore.YELLOW + "Dica 2: ou informe um commit local ancestral de HEAD como âncora de segurança.")
+                sys.exit(1)
+
+            if guard_is_local_anchor and not guard_matches_remote:
+                click.echo(Fore.YELLOW + "[BRANCH] Guarda interpretada como âncora local de HEAD (não como hash remoto atual).")
+
+            if not yes:
+                try:
+                    if not click.confirm(f"Confirmar push seguro para origin/{base_branch} usando --force-with-lease?"):
+                        click.echo(Fore.YELLOW + '[BRANCH] Operação cancelada.')
+                        return
+                except click.Abort:
+                    click.echo(Fore.YELLOW + "[BRANCH] Confirmação abortada (modo não interativo?). Use --yes para prosseguir.")
+                    return
+
+            lease = f"refs/heads/{base_branch}:{remote_hash}"
+            if not _run_git_command([
+                'push', '--force-with-lease=' + lease,
+                'origin', f'HEAD:refs/heads/{base_branch}'
+            ]):
+                logger.add_finding('error', 'Falha no push seguro para origin.')
+                click.echo(Fore.RED + '[ERRO] Push seguro falhou. O remoto pode ter mudado.')
+                sys.exit(1)
+
+            click.echo(Fore.GREEN + f"[OK] origin/{base_branch} atualizado com segurança.")
             return
 
         click.echo(ctx.get_help())

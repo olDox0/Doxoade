@@ -4,7 +4,7 @@ import sys
 import subprocess
 import re
 import click
-from doxoade.tools.doxcolors import Fore
+from doxoade.tools.doxcolors import Fore, Style
 # Importa as ferramentas necessárias do módulo compartilhado
 from ..shared_tools import (
     ExecutionLogger,
@@ -83,15 +83,51 @@ def init(ctx, project_name, remote):
                     sys.exit(1)
                 click.echo("   > Enviando para o branch 'main' no remote 'origin' (git push)...")
                 if not _run_git_command(['push', '--set-upstream', 'origin', 'main']):
-                    msg = "Falha ao enviar. Verifique a URL, suas permissões e se o repositório remoto está VAZIO."
-                    logger.add_finding('error', msg)
-                    click.echo(Fore.RED + f"[ERRO] {msg}")
-                    sys.exit(1)
+                    click.echo(Fore.RED + "[ALERTA] Push rejeitado. Tentando reconciliação automática...")
+                    pull_success = _run_git_command([
+                        'pull', 'origin', 'main',
+                        '--rebase',
+                        '--allow-unrelated-histories'
+                    ])
+
+                    if pull_success:
+                        click.echo(Fore.GREEN + "   > [OK] Históricos reconciliados. Tentando push novamente...")
+                        if not _run_git_command(['push', '--set-upstream', 'origin', 'main']):
+                            msg = "Falha final no push após reconciliação automática."
+                            logger.add_finding('error', msg)
+                            click.echo(Fore.RED + f"[ERRO] {msg}")
+                            sys.exit(1)
+                    else:
+                        msg = "Falha ao reconciliar com o remoto. Verifique conflitos e permissões do repositório."
+                        logger.add_finding('error', msg)
+                        click.echo(Fore.RED + f"[ERRO] {msg}")
+                        sys.exit(1)
                 click.echo(Fore.GREEN + "\n[OK] Projeto publicado com sucesso!")
-                click.echo(f"   > Veja seu repositório em: {remote}")
+                click.echo(Style.BRIGHT + f"   > Veja seu repositório em: {remote}")
             
             else:
                 click.echo(Fore.YELLOW + "\nLembrete: Este é um projeto local. Para publicá-lo mais tarde, use 'doxoade git-new'.")
+
+            # Pós-init: abre automaticamente um shell com venv e elevação (best effort).
+            click.echo(Fore.CYAN + "\n--- Ativação automática do ambiente (venv-up --admin) ---")
+            try:
+                os.chdir(project_path)
+                launch_result = subprocess.run(
+                    ['doxoade', 'venv-up', '--admin'],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    encoding='utf-8',
+                    errors='replace'
+                )
+                if launch_result.returncode == 0:
+                    click.echo(Fore.GREEN + "[OK] Solicitação de shell administrativo enviada com sucesso.")
+                else:
+                    click.echo(Fore.YELLOW + "[AVISO] Não foi possível iniciar 'doxoade venv-up --admin' automaticamente.")
+                    logger.add_finding('warning', 'Falha ao executar venv-up --admin automaticamente.')
+            except Exception as launch_error:
+                click.echo(Fore.YELLOW + f"[AVISO] Falha ao disparar venv-up automático: {launch_error}")
+                logger.add_finding('warning', f"Falha ao disparar venv-up automático: {launch_error}")
         except Exception as e:
             logger.add_finding('fatal_error', f"Ocorreu um erro inesperado durante a inicialização: {e}")
             click.echo(Fore.RED + f"[ERRO] Ocorreu um erro inesperado: {e}")

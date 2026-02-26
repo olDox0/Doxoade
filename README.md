@@ -55,10 +55,11 @@ Use este workflow para criar projetos que são saudáveis e robustos desde o pri
 
 1.  **`doxoade init <nome-do-projeto>`**: Cria um novo diretório de projeto com `venv`, `.gitignore` e repositório Git inicializado com o ramo `main`.
 2.  **`cd <nome-do-projeto>`**: Entre no diretório.
-3.  **`doxoade git-new "Commit inicial" <url-remota>`**: Publica seu projeto pela primeira vez em um repositório remoto **vazio**.
-4.  **`.\venv\Scripts\activate`** (ou `source venv/bin/activate`): Ative o ambiente virtual.
-5.  **`doxoade save "Sua mensagem"`**: Durante o desenvolvimento, use `save` para fazer commits seguros. Ele executa `doxoade check` primeiro e aborta se encontrar erros, protegendo a integridade do seu repositório.
-6.  **`doxoade sync`**: Ao final do dia, use `sync` para sincronizar seu trabalho com o repositório remoto (`git pull && git push`).
+3.  **`doxoade git-new "Commit inicial" <url-remota>`**: Publica seu projeto pela primeira vez. Se o remoto já tiver histórico (ex.: README inicial), o comando tenta reconciliação automática antes de reenviar.
+4.  **Ativação rápida opcional:** após o `init`, a `doxoade` tenta disparar `doxoade venv-up --admin` automaticamente (best effort) para acelerar o início do trabalho.
+5.  **`.\venv\Scripts\activate`** (ou `source venv/bin/activate`): Ative o ambiente virtual (caso ainda necessário no seu terminal atual).
+6.  **`doxoade save "Sua mensagem"`**: Durante o desenvolvimento, use `save` para fazer commits seguros. Ele executa `doxoade check` primeiro e aborta se encontrar erros, protegendo a integridade do seu repositório.
+7.  **`doxoade sync`**: Ao final do dia, use `sync` para sincronizar seu trabalho com o repositório remoto (`git pull && git push`).
 
 ### Protocolo B: Reparando um Projeto EXISTENTE ("Fênix")
 
@@ -83,7 +84,7 @@ Use este workflow para projetos antigos, clonados ou de terceiros para garantir 
 *   `rebuild`: [DESTRUTIVO] Recria completamente o ambiente virtual de um projeto.
 
 #### Workflow Diário
-*   `save "<MSG>"`: Executa um "commit seguro", validando o código com `check` antes de commitar.
+*   `save "<MSG>"`: Executa um "commit seguro", validando o código com `check` antes de commitar. Com `--merge <branch>`, pode fazer merge local assistido ao final.
 *   `sync`: Sincroniza o branch atual com o remoto (`pull` e `push`).
 *   `run <SCRIPT>`: Executa um script Python usando o `venv` do projeto, com suporte a interatividade.
 *   `auto --file <ARQUIVO>`: Executa uma sequência de comandos de um arquivo como um pipeline automatizado, com suporte a inputs programados.
@@ -103,7 +104,8 @@ Use este workflow para projetos antigos, clonados ou de terceiros para garantir 
 
 #### Gerenciamento do Projeto e Git
 *   `init [NOME]`: Cria a estrutura de um novo projeto Python.
-*   `git-new "<MSG>" <URL>`: Publica um projeto local pela primeira vez em um repositório remoto vazio.
+*   `git-new "<MSG>" <URL>`: Publica um projeto local pela primeira vez e tenta reconciliar quando o remoto não estiver vazio.
+*   `branch --origin <HASH> [--base main] [--yes]`: Atualiza `origin/<base>` com proteção (`--force-with-lease`) e guarda por hash (remoto atual ou âncora local válida).
 *   `git-clean`: Remove do rastreamento do Git arquivos que foram commitados por engano.
 *   `release <VERSAO> "<MSG>"`: Cria e publica uma tag Git para formalizar uma nova versão.
 
