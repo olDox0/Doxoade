@@ -14,8 +14,7 @@ Funções principais:
 from pathlib import Path
 import shutil
 import subprocess
-import os
-import json
+import os, sys, json
 import time
 
 LOG_NAME = "artifacts.log"

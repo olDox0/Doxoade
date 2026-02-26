@@ -3,6 +3,7 @@ import sys
 import os
 import subprocess
 import tempfile
+import traceback
 
 def _early_setup(project_root: str):
     """Garante diretórios e executa o Portão ABI."""
