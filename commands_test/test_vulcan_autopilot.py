@@ -77,3 +77,21 @@ def test_resolve_max_workers_limits_when_memory_medium(monkeypatch):
     monkeypatch.setattr("doxoade.tools.vulcan.autopilot.os.cpu_count", lambda: 8)
     monkeypatch.setattr(VulcanAutopilot, "_available_mem_mb", staticmethod(lambda: 4096))
     assert VulcanAutopilot._resolve_max_workers(None) == 3
+
+
+def test_process_target_passes_prevalidated_flag(monkeypatch):
+    ap = object.__new__(VulcanAutopilot)
+    ap.env = type("E", (), {"foundry": "/tmp/foundry", "bin_dir": "/tmp/bin"})()
+    ap._pid_registry = {}
+
+    captured = {}
+
+    def fake_worker(task):
+        captured.update(task)
+        return {"ok": True, "err": None}
+
+    monkeypatch.setattr("doxoade.tools.vulcan.autopilot._forge_worker", fake_worker)
+
+    out = ap._process_target({"file": "a.py", "__vulcan_validated": True})
+    assert out["ok"] is True
+    assert captured.get("prevalidated") is True

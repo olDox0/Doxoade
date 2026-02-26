@@ -35,16 +35,18 @@ def _forge_worker(task: dict) -> dict:
     bin_str      = task['bin_dir']
     pid_registry = task['pid_registry']   # Manager().dict() compartilhado
     abs_path     = Path(file_path).resolve()
+    prevalidated = bool(task.get('prevalidated'))
 
     # Pula arquivos do próprio Vulcan e alvos de alto risco para Cython.
     from .forge import VulcanForge, assess_file_for_vulcan
-    if VulcanForge.is_self_referential(str(abs_path)):
-        return {'name': abs_path.name, 'ok': False,
-                'err': 'vulcan self-file: pulado', 'skip': True}
+    if not prevalidated:
+        if VulcanForge.is_self_referential(str(abs_path)):
+            return {'name': abs_path.name, 'ok': False,
+                    'err': 'vulcan self-file: pulado', 'skip': True}
 
-    eligible, reason = assess_file_for_vulcan(str(abs_path))
-    if not eligible:
-        return {'name': abs_path.name, 'ok': False, 'err': f'pulado: {reason}', 'skip': True}
+        eligible, reason = assess_file_for_vulcan(str(abs_path))
+        if not eligible:
+            return {'name': abs_path.name, 'ok': False, 'err': f'pulado: {reason}', 'skip': True}
 
     path_hash   = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
     module_name = f"v_{abs_path.stem}_{path_hash}"
@@ -165,6 +167,7 @@ class VulcanAutopilot:
                 skip_reasons["binário já atualizado"] += 1
                 continue
 
+            c["__vulcan_validated"] = True
             filtered.append(c)
 
         total_skips = sum(skip_reasons.values())
@@ -202,10 +205,11 @@ class VulcanAutopilot:
         executor = None
         try:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                file_paths = [c['file'] for c in candidates]
-                for file_path, result in zip(file_paths, executor.map(self._process_target, file_paths)):
+                for result in executor.map(self._process_target, candidates):
                     try:
-                        success, error_msg = result
+                        file_path = result['file']
+                        success = result['ok']
+                        error_msg = result.get('err')
                         if success:
                             success_count += 1
                             print(f"   {Fore.GREEN}✔ {Path(file_path).name:<30}{Fore.RESET}")
@@ -221,7 +225,7 @@ class VulcanAutopilot:
                         line_number = exc_tb.tb_lineno
                         exc_value = '\n  >>>   '.join(str(exc_obj).split("'"))
                         print(f"\033[0m \033[1m \nFilename: {fname}   \n■ Line: {line_number} \033[31m \n■ Exception type: {e} . . .  \n■ Exception value: {exc_value} \033[0m")
-                        print(f"   {Fore.RED}✘ {Path(file_path).name:<30} [ERRO CRÍTICO: {e}]{Fore.RESET}")
+                        print(f"   {Fore.RED}✘ [ERRO CRÍTICO: {e}]{Fore.RESET}")
 
             if success_count > 0:
                 print(f"\n{Fore.GREEN}✔ {success_count} de {len(candidates)} módulos forjados e validados.{Fore.RESET}")
@@ -245,12 +249,14 @@ class VulcanAutopilot:
             if executor:
                 executor.shutdown(wait=False)
 
-    def _process_target(self, file_path: str) -> tuple[bool, str | None]:
-        """Forja um único arquivo via _forge_worker e retorna (ok, erro)."""
+    def _process_target(self, candidate: dict) -> dict:
+        """Forja um único arquivo via _forge_worker e retorna dict de resultado."""
+        file_path = candidate['file']
         result = _forge_worker({
             'file_path':    file_path,
             'foundry':      str(self.env.foundry),
             'bin_dir':      str(self.env.bin_dir),
             'pid_registry': self._pid_registry,
+            'prevalidated': bool(candidate.get('__vulcan_validated')),
         })
-        return result['ok'], result.get('err')
+        return {'file': file_path, 'ok': result['ok'], 'err': result.get('err')}
