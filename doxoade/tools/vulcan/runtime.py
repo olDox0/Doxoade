@@ -14,12 +14,51 @@ carrega ``v_<nome_do_arquivo>.pyd|.so`` e injeta funções
 
 from __future__ import annotations
 
+import importlib.abc
 import importlib.util
 import os
 import sys
 from pathlib import Path
 from types import ModuleType
 from typing import MutableMapping, Optional
+
+
+class VulcanBinaryFinder(importlib.abc.MetaPathFinder):
+    """Finder que prioriza binários Vulcan durante imports Python.
+
+    Convenções aceitas para ``engine.cli``:
+      - ``v_engine_cli.<ext>``
+      - ``v_cli.<ext>``
+    """
+
+    def __init__(self, project_root: str | Path):
+        self.project_root = Path(project_root).resolve()
+        self.bin_dir = self.project_root / ".doxoade" / "vulcan" / "bin"
+
+    def _candidates(self, fullname: str) -> list[str]:
+        parts = fullname.split(".")
+        joined = "_".join(parts)
+        names = [f"v_{joined}"]
+        if parts:
+            names.append(f"v_{parts[-1]}")
+        # preserva ordem e remove duplicados
+        return list(dict.fromkeys(names))
+
+    def find_spec(self, fullname: str, path=None, target=None):
+        if fullname.startswith("doxoade."):
+            return None
+        if not self.bin_dir.exists():
+            return None
+
+        ext = _binary_ext()
+        for base_name in self._candidates(fullname):
+            candidate = self.bin_dir / f"{base_name}{ext}"
+            if not candidate.exists():
+                continue
+            spec = importlib.util.spec_from_file_location(fullname, str(candidate))
+            if spec and spec.loader:
+                return spec
+        return None
 
 
 def _binary_ext() -> str:
@@ -97,7 +136,18 @@ def activate_vulcan(
     if not root:
         return False
 
-    source_name = Path(source_file).stem
+    source_path = Path(source_file)
+    source_name = source_path.stem
+    if source_name == "__main__":
+        source_name = source_path.parent.name
+
+    finder = VulcanBinaryFinder(root)
+    if not any(
+        isinstance(existing, VulcanBinaryFinder) and existing.project_root == finder.project_root
+        for existing in sys.meta_path
+    ):
+        sys.meta_path.insert(0, finder)
+
     module = load_vulcan_binary(f"{prefix}{source_name}", root)
     if not module:
         return False
