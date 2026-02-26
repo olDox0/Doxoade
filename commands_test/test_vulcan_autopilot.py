@@ -46,3 +46,13 @@ def test_filter_candidates_keeps_compiled_when_forced(monkeypatch):
     )
 
     assert [c["file"] for c in result] == ["a.py", "b.py"]
+
+
+def test_resolve_max_workers_prefers_explicit_value(monkeypatch):
+    monkeypatch.setenv("DOXOADE_VULCAN_JOBS", "7")
+    assert VulcanAutopilot._resolve_max_workers(3) == 3
+
+
+def test_resolve_max_workers_uses_env(monkeypatch):
+    monkeypatch.setenv("DOXOADE_VULCAN_JOBS", "5")
+    assert VulcanAutopilot._resolve_max_workers(None) == 5

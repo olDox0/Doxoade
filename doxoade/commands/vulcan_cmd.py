@@ -72,8 +72,9 @@ def doctor(module, srcdir, retries):
 @vulcan_group.command('ignite')
 @click.argument('path', required=False, type=click.Path(exists=True))
 @click.option('--force', is_flag=True, help="Força a re-compilação de todos os alvos.")
+@click.option('--jobs', type=int, default=None, help="Número de workers de compilação (sobrescreve auto).")
 @click.pass_context
-def ignite(ctx, path, force):
+def ignite(ctx, path, force, jobs):
     """Transforma código Python em binários de alta velocidade."""
     signal.signal(signal.SIGINT, _sigint_handler)
     root = _find_project_root(os.getcwd())
@@ -109,7 +110,7 @@ def ignite(ctx, path, force):
         click.echo(f"{Fore.CYAN}   > Modo de Operação: {mode}{Style.RESET_ALL}")
 
         try:
-            autopilot.scan_and_optimize(candidates=candidates, force_recompile=force)
+            autopilot.scan_and_optimize(candidates=candidates, force_recompile=force, max_workers=jobs)
             click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}✅ [VULCAN] Forja concluída.{Style.RESET_ALL}")
         except KeyboardInterrupt:
             _sigint_handler(None, None)

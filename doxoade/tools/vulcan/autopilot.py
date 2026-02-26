@@ -117,6 +117,19 @@ class VulcanAutopilot:
         self._pid_registry: dict = {}
         self.compiler = VulcanCompiler(self.env, pid_registry=self._pid_registry)
 
+    @staticmethod
+    def _resolve_max_workers(max_workers: int | None = None) -> int:
+        """Resolve número de workers com prioridade: arg > env > default."""
+        if isinstance(max_workers, int) and max_workers > 0:
+            return max_workers
+
+        env_jobs = os.environ.get("DOXOADE_VULCAN_JOBS", "").strip()
+        if env_jobs.isdigit() and int(env_jobs) > 0:
+            return int(env_jobs)
+
+        # Limite superior evita oversubscription agressiva em hosts grandes.
+        return max(2, min(8, os.cpu_count() or 2))
+
     def _filter_candidates(self, candidates: list[dict], force_recompile: bool) -> list[dict]:
         from .forge import assess_file_for_vulcan
 
@@ -144,7 +157,7 @@ class VulcanAutopilot:
 
         return filtered
 
-    def scan_and_optimize(self, candidates=None, force_recompile=False):
+    def scan_and_optimize(self, candidates=None, force_recompile=False, max_workers: int | None = None):
         if not candidates:
             print(f"{Fore.CYAN}   > Consultando telemetria...{Fore.RESET}")
             candidates = self.advisor.get_optimization_candidates(force=force_recompile)
@@ -164,7 +177,7 @@ class VulcanAutopilot:
         # Compilação Cython é CPU+IO bound mas cada worker chama um subprocess
         # separado (gcc), então N workers = N gcc simultâneos sem GIL contention.
         # Usamos todos os cores disponíveis com mínimo de 2.
-        max_workers = max(2, os.cpu_count() or 2)
+        max_workers = self._resolve_max_workers(max_workers)
         print(f"   {Fore.MAGENTA}🔥 Ativando {max_workers} threads...{Fore.RESET}")
 
         success_count = 0
