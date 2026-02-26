@@ -6,7 +6,6 @@ import sys
 import signal
 from pathlib import Path
 from doxoade.tools.doxcolors import Fore
-from concurrent.futures import as_completed
 # [DOX-UNUSED] from multiprocessing import Manager
 
 from .environment import VulcanEnvironment
@@ -14,6 +13,7 @@ from .advisor import VulcanAdvisor
 # [DOX-UNUSED] from .forge import VulcanForge
 from .compiler import VulcanCompiler
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import Counter
 
 
 def _forge_worker(task: dict) -> dict:
@@ -66,7 +66,6 @@ def _forge_worker(task: dict) -> dict:
 
         from .environment import VulcanEnvironment
         from .compiler    import VulcanCompiler
-        from .forge       import assess_file_for_vulcan
 
         env          = object.__new__(VulcanEnvironment)
         env.root     = foundry.parent.parent
@@ -118,6 +117,33 @@ class VulcanAutopilot:
         self._pid_registry: dict = {}
         self.compiler = VulcanCompiler(self.env, pid_registry=self._pid_registry)
 
+    def _filter_candidates(self, candidates: list[dict], force_recompile: bool) -> list[dict]:
+        from .forge import assess_file_for_vulcan
+
+        filtered: list[dict] = []
+        skip_reasons: Counter[str] = Counter()
+
+        for c in candidates:
+            file_path = c['file']
+            eligible, reason = assess_file_for_vulcan(file_path)
+            if not eligible:
+                skip_reasons[f"heurística: {reason}"] += 1
+                continue
+
+            if not force_recompile and self.advisor._is_already_compiled(file_path):
+                skip_reasons["binário já atualizado"] += 1
+                continue
+
+            filtered.append(c)
+
+        total_skips = sum(skip_reasons.values())
+        if total_skips:
+            print(f"   {Fore.BLUE}↷ Pulos inteligentes: {total_skips}{Fore.RESET}")
+            for reason, count in skip_reasons.most_common():
+                print(f"      - {count:>2}x {reason}")
+
+        return filtered
+
     def scan_and_optimize(self, candidates=None, force_recompile=False):
         if not candidates:
             print(f"{Fore.CYAN}   > Consultando telemetria...{Fore.RESET}")
@@ -126,18 +152,9 @@ class VulcanAutopilot:
         if not candidates:
             print(f"   {Fore.WHITE}Nenhum candidato para otimização.{Fore.RESET}"); return
 
-        from .forge import assess_file_for_vulcan
-        filtered = []
-        skipped = 0
-        for c in candidates:
-            eligible, reason = assess_file_for_vulcan(c['file'])
-            if eligible:
-                filtered.append(c)
-            else:
-                skipped += 1
-                print(f"   {Fore.BLUE}↷ {Path(c['file']).name:<30} [pulado: {reason}]{Fore.RESET}")
-
-        candidates = filtered
+        total_before = len(candidates)
+        candidates = self._filter_candidates(candidates, force_recompile=force_recompile)
+        skipped = total_before - len(candidates)
         if not candidates:
             print(f"   {Fore.WHITE}Nenhum candidato elegível para forja (skips={skipped}).{Fore.RESET}")
             return
