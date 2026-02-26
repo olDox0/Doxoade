@@ -209,7 +209,7 @@ def save(ctx, message, archives, remove_commit, branch_target, merge_target, upd
         if not status_after_add.strip():
             console.print("[bold yellow][SAVE] Nada para salvar (working tree clean).[/bold yellow]")
             if final_merge_target:
-                _auto_merge_local(current_branch, final_merge_target, force=force)
+                _auto_merge_local(current_branch, final_merge_target, merge_message=message, force=force)
             return
         
         # --- REFRESH DE SINCRO (Ação de Zeus) ---
@@ -264,7 +264,7 @@ def save(ctx, message, archives, remove_commit, branch_target, merge_target, upd
             _learn_solutions_from_commit(new_hash, project_path)
 
         if final_merge_target:
-            _auto_merge_local(current_branch, final_merge_target, force=force)
+            _auto_merge_local(current_branch, final_merge_target, merge_message=message, force=force)
 
         console.print("[bold green]\n[OK] Alfa 71.10: Commit finalizado e Gênese atualizada.[/bold green]")
         
@@ -304,7 +304,7 @@ def _verify_succession_integrity():
     return True, "Integridade de Sucessão confirmada."
 
 
-def _auto_merge_local(source_branch: str, target_branch: str, force: bool = False) -> bool:
+def _auto_merge_local(source_branch: str, target_branch: str, merge_message: str = None, force: bool = False) -> bool:
     """Faz merge local assistido de source -> target e retorna para source."""
     console = Console()
     if not source_branch or not target_branch:
@@ -315,7 +315,16 @@ def _auto_merge_local(source_branch: str, target_branch: str, force: bool = Fals
         console.print(f"[bold yellow][SAVE] Branch de origem e destino são iguais: {source_branch}.[/bold yellow]")
         return False
 
-    if not _run_git_command(['rev-parse', '--verify', target_branch], capture_output=True, silent_fail=True):
+    remote_names = (_run_git_command(['remote'], capture_output=True, silent_fail=True) or '').splitlines()
+    if target_branch in [name.strip() for name in remote_names if name.strip()]:
+        console.print(
+            f"[bold red][SAVE] Alvo '{target_branch}' é um remote, não uma branch local. "
+            "Use uma branch local (ex.: --merge main).[/bold red]"
+        )
+        return False
+
+    local_ref = f"refs/heads/{target_branch}"
+    if not _run_git_command(['show-ref', '--verify', '--quiet', local_ref], silent_fail=True):
         console.print(f"[bold red][SAVE] Branch alvo '{target_branch}' não existe localmente.[/bold red]")
         return False
 
@@ -328,7 +337,14 @@ def _auto_merge_local(source_branch: str, target_branch: str, force: bool = Fals
         console.print(f"[bold red][SAVE] Falha ao trocar para '{target_branch}'.[/bold red]")
         return False
 
-    merge_ok = _run_git_command(['merge', '--no-edit', source_branch])
+    merge_args = ['merge', '--no-ff']
+    if merge_message:
+        merge_args.extend(['-m', merge_message])
+    else:
+        merge_args.append('--no-edit')
+    merge_args.append(source_branch)
+
+    merge_ok = _run_git_command(merge_args)
     if not merge_ok:
         console.print("[bold red][SAVE] Merge automático falhou. Use 'doxoade merge <branch>' para resolver conflitos.[/bold red]")
         _run_git_command(['checkout', source_branch], silent_fail=True)
