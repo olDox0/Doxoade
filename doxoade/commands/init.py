@@ -107,6 +107,27 @@ def init(ctx, project_name, remote):
             
             else:
                 click.echo(Fore.YELLOW + "\nLembrete: Este é um projeto local. Para publicá-lo mais tarde, use 'doxoade git-new'.")
+
+            # Pós-init: abre automaticamente um shell com venv e elevação (best effort).
+            click.echo(Fore.CYAN + "\n--- Ativação automática do ambiente (venv-up --admin) ---")
+            try:
+                os.chdir(project_path)
+                launch_result = subprocess.run(
+                    ['doxoade', 'venv-up', '--admin'],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    encoding='utf-8',
+                    errors='replace'
+                )
+                if launch_result.returncode == 0:
+                    click.echo(Fore.GREEN + "[OK] Solicitação de shell administrativo enviada com sucesso.")
+                else:
+                    click.echo(Fore.YELLOW + "[AVISO] Não foi possível iniciar 'doxoade venv-up --admin' automaticamente.")
+                    logger.add_finding('warning', 'Falha ao executar venv-up --admin automaticamente.')
+            except Exception as launch_error:
+                click.echo(Fore.YELLOW + f"[AVISO] Falha ao disparar venv-up automático: {launch_error}")
+                logger.add_finding('warning', f"Falha ao disparar venv-up automático: {launch_error}")
         except Exception as e:
             logger.add_finding('fatal_error', f"Ocorreu um erro inesperado durante a inicialização: {e}")
             click.echo(Fore.RED + f"[ERRO] Ocorreu um erro inesperado: {e}")
