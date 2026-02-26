@@ -1,4 +1,5 @@
 import sys
+import re
 import click
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.logger import ExecutionLogger
@@ -140,6 +141,20 @@ def branch(ctx, list_branches, create, switch_to, delete_branch, force_delete, c
 
         if origin_guard:
             base_branch = base or _get_default_base_branch()
+
+            local_branch_ref = f"refs/heads/{base_branch}"
+            remote_branch_ref = f"refs/remotes/origin/{base_branch}"
+            has_local_base = bool(_run_git_command(['show-ref', '--verify', '--quiet', local_branch_ref], silent_fail=True))
+            has_remote_base = bool(_run_git_command(['show-ref', '--verify', '--quiet', remote_branch_ref], silent_fail=True))
+
+            if not (has_local_base or has_remote_base):
+                if re.fullmatch(r'[0-9a-fA-F]{7,40}', base_branch):
+                    click.echo(Fore.RED + "[ERRO] '--base' espera nome de branch, não hash de commit.")
+                    click.echo(Fore.YELLOW + "Exemplo correto: doxoade branch --base main --origin <hash_remoto>")
+                else:
+                    click.echo(Fore.RED + f"[ERRO] Branch base '{base_branch}' não existe (local/remoto).")
+                sys.exit(1)
+
             remote_ref = f"origin/{base_branch}"
             click.echo(Fore.CYAN + f"Sincronização segura: HEAD -> {remote_ref} (guard={origin_guard})")
 
@@ -157,11 +172,14 @@ def branch(ctx, list_branches, create, switch_to, delete_branch, force_delete, c
                 click.echo(Fore.YELLOW + "Dica: rode 'git log origin/{base} -n 1 --oneline' e tente novamente.".format(base=base_branch))
                 sys.exit(1)
 
-            if not yes and not click.confirm(
-                f"Confirmar push seguro para origin/{base_branch} usando --force-with-lease?"
-            ):
-                click.echo(Fore.YELLOW + '[BRANCH] Operação cancelada.')
-                return
+            if not yes:
+                try:
+                    if not click.confirm(f"Confirmar push seguro para origin/{base_branch} usando --force-with-lease?"):
+                        click.echo(Fore.YELLOW + '[BRANCH] Operação cancelada.')
+                        return
+                except click.Abort:
+                    click.echo(Fore.YELLOW + "[BRANCH] Confirmação abortada (modo não interativo?). Use --yes para prosseguir.")
+                    return
 
             lease = f"refs/heads/{base_branch}:{remote_hash}"
             if not _run_git_command([
