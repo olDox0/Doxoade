@@ -127,8 +127,10 @@ class VulcanAutopilot:
         if env_jobs.isdigit() and int(env_jobs) > 0:
             return int(env_jobs)
 
-        # Limite superior evita oversubscription agressiva em hosts grandes.
-        return max(2, min(8, os.cpu_count() or 2))
+        # Auto-tuning: +1 worker para amortizar IO/latência do subprocess do compilador.
+        # Em 2 cores, tende a performar melhor com 3 workers do que 2 fixos.
+        cpu = os.cpu_count() or 2
+        return max(2, min(8, cpu + 1))
 
     def _filter_candidates(self, candidates: list[dict], force_recompile: bool) -> list[dict]:
         from .forge import assess_file_for_vulcan
