@@ -17,6 +17,7 @@ from __future__ import annotations
 import importlib.abc
 import importlib.util
 import os
+import struct
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -44,6 +45,16 @@ class VulcanBinaryFinder(importlib.abc.MetaPathFinder):
         # preserva ordem e remove duplicados
         return list(dict.fromkeys(names))
 
+    def _resolve_source_for_fullname(self, fullname: str) -> Path | None:
+        rel = Path(*fullname.split('.'))
+        py_file = self.project_root / f"{rel}.py"
+        if py_file.exists():
+            return py_file
+        init_file = self.project_root / rel / "__init__.py"
+        if init_file.exists():
+            return init_file
+        return None
+
     def find_spec(self, fullname: str, path=None, target=None):
         if fullname.startswith("doxoade."):
             return None
@@ -55,6 +66,9 @@ class VulcanBinaryFinder(importlib.abc.MetaPathFinder):
             candidate = self.bin_dir / f"{base_name}{ext}"
             if not candidate.exists():
                 continue
+            source_path = self._resolve_source_for_fullname(fullname)
+            if not _is_binary_valid_for_host(candidate) or not _is_binary_fresh(candidate, source_path):
+                continue
             spec = importlib.util.spec_from_file_location(fullname, str(candidate))
             if spec and spec.loader:
                 return spec
@@ -63,6 +77,43 @@ class VulcanBinaryFinder(importlib.abc.MetaPathFinder):
 
 def _binary_ext() -> str:
     return ".pyd" if os.name == "nt" else ".so"
+
+
+def _is_binary_valid_for_host(bin_path: Path) -> bool:
+    """Validação mínima de integridade/arquitetura do binário nativo."""
+    try:
+        if not bin_path.exists() or bin_path.stat().st_size < 4096:
+            return False
+        with bin_path.open('rb') as f:
+            head = f.read(64)
+        if os.name == 'nt':
+            if not head.startswith(b'MZ'):
+                return False
+            with bin_path.open('rb') as f:
+                f.seek(0x3C)
+                e_lfanew = struct.unpack('<I', f.read(4))[0]
+                f.seek(e_lfanew + 4)
+                machine = struct.unpack('<H', f.read(2))[0]
+            host_bits = struct.calcsize('P') * 8
+            if host_bits == 64 and machine != 0x8664:
+                return False
+            if host_bits == 32 and machine != 0x014c:
+                return False
+        else:
+            if not head.startswith(b'ELF'):
+                return False
+        return True
+    except Exception:
+        return False
+
+
+def _is_binary_fresh(bin_path: Path, source_path: Path | None) -> bool:
+    if not source_path or not source_path.exists():
+        return True
+    try:
+        return bin_path.stat().st_mtime >= source_path.stat().st_mtime
+    except OSError:
+        return False
 
 
 def find_vulcan_project_root(start: str | Path) -> Optional[Path]:
@@ -84,7 +135,7 @@ def load_vulcan_binary(module_name: str, project_root: str | Path) -> Optional[M
     """
     root = Path(project_root).resolve()
     bin_path = root / ".doxoade" / "vulcan" / "bin" / f"{module_name}{_binary_ext()}"
-    if not bin_path.exists():
+    if not bin_path.exists() or not _is_binary_valid_for_host(bin_path):
         return None
 
     old_path = sys.path.copy()
@@ -147,6 +198,10 @@ def activate_vulcan(
         for existing in sys.meta_path
     ):
         sys.meta_path.insert(0, finder)
+
+    bin_candidate = root / ".doxoade" / "vulcan" / "bin" / f"{prefix}{source_name}{_binary_ext()}"
+    if bin_candidate.exists() and not _is_binary_fresh(bin_candidate, source_path):
+        return False
 
     module = load_vulcan_binary(f"{prefix}{source_name}", root)
     if not module:
