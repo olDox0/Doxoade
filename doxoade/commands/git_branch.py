@@ -45,8 +45,9 @@ def _render_branches_table():
 @click.option('--cleanup-merged', is_flag=True, help='Remove branches já mergeadas no branch base.')
 @click.option('--base', default=None, help='Branch base para análises de merge (padrão: main/master).')
 @click.option('--drop-commits', type=int, help='Apaga os últimos N commits da branch atual (reset --hard HEAD~N).')
+@click.option('--origin', 'origin_guard', help='Publica HEAD em origin/<base> com guarda de hash remoto (ex.: --origin b935a7f).')
 @click.option('--yes', is_flag=True, help='Não pede confirmação em operações destrutivas.')
-def branch(ctx, list_branches, create, switch_to, delete_branch, force_delete, cleanup_merged, base, drop_commits, yes):
+def branch(ctx, list_branches, create, switch_to, delete_branch, force_delete, cleanup_merged, base, drop_commits, origin_guard, yes):
     """Gerencia branches e histórico local de forma assistida."""
     with ExecutionLogger('branch', '.', ctx.params) as logger:
         if list_branches:
@@ -135,6 +136,43 @@ def branch(ctx, list_branches, create, switch_to, delete_branch, force_delete, c
                 logger.add_finding('error', 'Falha ao apagar commits com reset --hard.')
                 sys.exit(1)
             click.echo(Fore.GREEN + '[OK] Histórico local reescrito com sucesso.')
+            return
+
+        if origin_guard:
+            base_branch = base or _get_default_base_branch()
+            remote_ref = f"origin/{base_branch}"
+            click.echo(Fore.CYAN + f"Sincronização segura: HEAD -> {remote_ref} (guard={origin_guard})")
+
+            _run_git_command(['fetch', 'origin', base_branch], capture_output=True, silent_fail=True)
+            remote_hash = _run_git_command(['rev-parse', remote_ref], capture_output=True, silent_fail=True)
+            if not remote_hash:
+                logger.add_finding('error', f'Falha ao ler hash remoto de {remote_ref}.')
+                click.echo(Fore.RED + f"[ERRO] Não foi possível obter o hash atual de {remote_ref}.")
+                sys.exit(1)
+
+            remote_hash = remote_hash.strip()
+            guard = origin_guard.strip().lower()
+            if not remote_hash.lower().startswith(guard):
+                click.echo(Fore.RED + f"[ERRO] Guarda não confere. Remoto atual: {remote_hash[:12]}")
+                click.echo(Fore.YELLOW + "Dica: rode 'git log origin/{base} -n 1 --oneline' e tente novamente.".format(base=base_branch))
+                sys.exit(1)
+
+            if not yes and not click.confirm(
+                f"Confirmar push seguro para origin/{base_branch} usando --force-with-lease?"
+            ):
+                click.echo(Fore.YELLOW + '[BRANCH] Operação cancelada.')
+                return
+
+            lease = f"refs/heads/{base_branch}:{remote_hash}"
+            if not _run_git_command([
+                'push', '--force-with-lease=' + lease,
+                'origin', f'HEAD:refs/heads/{base_branch}'
+            ]):
+                logger.add_finding('error', 'Falha no push seguro para origin.')
+                click.echo(Fore.RED + '[ERRO] Push seguro falhou. O remoto pode ter mudado.')
+                sys.exit(1)
+
+            click.echo(Fore.GREEN + f"[OK] origin/{base_branch} atualizado com segurança.")
             return
 
         click.echo(ctx.get_help())
