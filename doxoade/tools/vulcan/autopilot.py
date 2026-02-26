@@ -36,11 +36,15 @@ def _forge_worker(task: dict) -> dict:
     pid_registry = task['pid_registry']   # Manager().dict() compartilhado
     abs_path     = Path(file_path).resolve()
 
-    # Pula arquivos do próprio Vulcan (imports relativos quebram no silo)
-    from .forge import VulcanForge
+    # Pula arquivos do próprio Vulcan e alvos de alto risco para Cython.
+    from .forge import VulcanForge, assess_file_for_vulcan
     if VulcanForge.is_self_referential(str(abs_path)):
         return {'name': abs_path.name, 'ok': False,
                 'err': 'vulcan self-file: pulado', 'skip': True}
+
+    eligible, reason = assess_file_for_vulcan(str(abs_path))
+    if not eligible:
+        return {'name': abs_path.name, 'ok': False, 'err': f'pulado: {reason}', 'skip': True}
 
     path_hash   = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
     module_name = f"v_{abs_path.stem}_{path_hash}"
@@ -62,6 +66,7 @@ def _forge_worker(task: dict) -> dict:
 
         from .environment import VulcanEnvironment
         from .compiler    import VulcanCompiler
+        from .forge       import assess_file_for_vulcan
 
         env          = object.__new__(VulcanEnvironment)
         env.root     = foundry.parent.parent
@@ -121,7 +126,23 @@ class VulcanAutopilot:
         if not candidates:
             print(f"   {Fore.WHITE}Nenhum candidato para otimização.{Fore.RESET}"); return
 
-        print(f"   {Fore.YELLOW}Alvos para compilação: {len(candidates)}{Fore.RESET}")
+        from .forge import assess_file_for_vulcan
+        filtered = []
+        skipped = 0
+        for c in candidates:
+            eligible, reason = assess_file_for_vulcan(c['file'])
+            if eligible:
+                filtered.append(c)
+            else:
+                skipped += 1
+                print(f"   {Fore.BLUE}↷ {Path(c['file']).name:<30} [pulado: {reason}]{Fore.RESET}")
+
+        candidates = filtered
+        if not candidates:
+            print(f"   {Fore.WHITE}Nenhum candidato elegível para forja (skips={skipped}).{Fore.RESET}")
+            return
+
+        print(f"   {Fore.YELLOW}Alvos para compilação: {len(candidates)} (pulos inteligentes: {skipped}){Fore.RESET}")
         # FIX: cpu_count()//2 numa máquina de 2 cores dá 1 thread (sequencial).
         # Compilação Cython é CPU+IO bound mas cada worker chama um subprocess
         # separado (gcc), então N workers = N gcc simultâneos sem GIL contention.
@@ -152,7 +173,8 @@ class VulcanAutopilot:
                         _, exc_obj, exc_tb = exc_sys.exc_info()
                         fname = exc_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1] if exc_tb else "autopilot.py"
                         line_number = exc_tb.tb_lineno
-                        print(f"\033[0m \033[1m \nFilename: {fname}   \n■ Line: {line_number} \033[31m \n■ Exception type: {e} . . .  \n■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))} \033[0m")
+                        exc_value = '\n  >>>   '.join(str(exc_obj).split("'"))
+                        print(f"\033[0m \033[1m \nFilename: {fname}   \n■ Line: {line_number} \033[31m \n■ Exception type: {e} . . .  \n■ Exception value: {exc_value} \033[0m")
                         print(f"   {Fore.RED}✘ {Path(file_path).name:<30} [ERRO CRÍTICO: {e}]{Fore.RESET}")
 
             if success_count > 0:

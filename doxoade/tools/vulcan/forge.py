@@ -88,6 +88,49 @@ cli           = _Stub()
 '''
 
 
+
+_SKIP_FILENAMES = frozenset({'__init__.py', '__main__.py'})
+_RISKY_IMPORTS = frozenset({'ctypes', 'socket', 'subprocess', 'threading', 'multiprocessing', 'asyncio', 'llama_cpp'})
+
+
+def assess_file_for_vulcan(file_path: str) -> tuple[bool, str | None]:
+    """Heurística de elegibilidade para reduzir compilações desfuncionais.
+
+    Retorna (True, None) quando o arquivo é bom candidato para forja.
+    """
+    from pathlib import Path
+
+    p = Path(file_path)
+    if p.name in _SKIP_FILENAMES:
+        return False, f"arquivo de entrada/namespace ({p.name})"
+
+    if VulcanForge.is_self_referential(str(p)):
+        return False, "módulo interno do Vulcan"
+
+    try:
+        source = p.read_text(encoding='utf-8', errors='ignore')
+        tree = ast.parse(source)
+    except Exception as e:
+        return False, f"AST inválida ({type(e).__name__})"
+
+    node_count = sum(1 for _ in ast.walk(tree))
+    if node_count > 2400:
+        return False, f"complexidade alta (nodes={node_count})"
+
+    risky_hits = 0
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            risky_hits += sum(1 for a in node.names if a.name.split('.')[0] in _RISKY_IMPORTS)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            if node.module.split('.')[0] in _RISKY_IMPORTS:
+                risky_hits += 1
+
+    if risky_hits >= 2 and node_count > 900:
+        return False, f"arquivo complexo com APIs sensíveis (risk={risky_hits}, nodes={node_count})"
+
+    return True, None
+
+
 class VulcanForge(ast.NodeTransformer):
     """Transpilador Estrutural: Converte Python moderno em C-Style limpo."""
 
