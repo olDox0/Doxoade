@@ -21,3 +21,14 @@ def test_format_verbose_build_error_contains_context():
     assert "err2" in msg
     assert "--- STDOUT (tail) ---" in msg
     assert "line2" in msg
+
+
+def test_format_verbose_build_error_includes_dynamic_setup_script_name():
+    msg = VulcanCompiler._format_verbose_build_error(
+        module_name="v_mod",
+        cmd=["python", "setup_v_mod.py", "build_ext", "--inplace"],
+        returncode=1,
+        stdout="",
+        stderr="boom",
+    )
+    assert "setup_v_mod.py" in msg

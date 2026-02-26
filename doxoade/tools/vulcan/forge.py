@@ -171,6 +171,11 @@ class VulcanForge(ast.NodeTransformer):
         return node
 
     def visit_ImportFrom(self, node):
+        # __future__ precisa estar no topo absoluto; após inserir header do Vulcan
+        # ele quebraria a compilação Cython. Removemos por segurança.
+        if node.module == '__future__':
+            return None
+
         if node.module and self._is_blacklisted(node.module):
             for alias in node.names:
                 self._blacklisted_names.add(alias.asname or alias.name)

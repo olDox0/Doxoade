@@ -60,7 +60,7 @@ class VulcanCompiler:
         Sincronizado com a API do Autopilot v83.1+.
         """
         foundry_path = self.env.foundry.resolve()
-        setup_path   = foundry_path / "setup_tmp.py"
+        setup_path   = foundry_path / f"setup_{module_name}.py"
         build_env    = self._prepare_pitstop_env()
 
         # FIX 1: numpy era importado incondicionalmente — quebrava 100% das
@@ -95,7 +95,7 @@ setup(ext_modules=cythonize(ext, language_level=3, quiet=True))
         doxo_python = (core_root / "venv" / "Scripts" / "python.exe"
                        if os.name == 'nt' else sys.executable)
 
-        cmd = [str(doxo_python), "setup_tmp.py", "build_ext", "--inplace"]
+        cmd = [str(doxo_python), setup_path.name, "build_ext", "--inplace"]
         if os.name == 'nt':
             cmd.append("--compiler=mingw32")
 
@@ -128,6 +128,11 @@ setup(ext_modules=cythonize(ext, language_level=3, quiet=True))
             return False, "Interrompido (KeyboardInterrupt no worker)"
         except Exception as e:
             return False, str(e)
+        finally:
+            try:
+                setup_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     def _promote_to_staging(self, module_name: str) -> Path | None:
         """Move o binário compilado para o diretório de staging."""
