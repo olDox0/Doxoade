@@ -12,7 +12,7 @@ from .environment import VulcanEnvironment
 from .advisor import VulcanAdvisor
 # [DOX-UNUSED] from .forge import VulcanForge
 from .compiler import VulcanCompiler
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from collections import Counter
 
 
@@ -118,7 +118,16 @@ class VulcanAutopilot:
         self.compiler = VulcanCompiler(self.env, pid_registry=self._pid_registry)
 
     @staticmethod
-    def _resolve_max_workers(max_workers: int | None = None) -> int:
+    def _available_mem_mb() -> int | None:
+        """Memória disponível em MB (best-effort)."""
+        try:
+            import psutil
+            return int(psutil.virtual_memory().available / (1024 * 1024))
+        except Exception:
+            return None
+
+    @classmethod
+    def _resolve_max_workers(cls, max_workers: int | None = None) -> int:
         """Resolve número de workers com prioridade: arg > env > default."""
         if isinstance(max_workers, int) and max_workers > 0:
             return max_workers
@@ -127,10 +136,17 @@ class VulcanAutopilot:
         if env_jobs.isdigit() and int(env_jobs) > 0:
             return int(env_jobs)
 
-        # Auto-tuning: +1 worker para amortizar IO/latência do subprocess do compilador.
-        # Em 2 cores, tende a performar melhor com 3 workers do que 2 fixos.
         cpu = os.cpu_count() or 2
-        return max(2, min(8, cpu + 1))
+        tuned = max(2, min(8, cpu + 1))
+
+        avail_mb = cls._available_mem_mb()
+        if avail_mb is not None:
+            if avail_mb < 3072:
+                return 2
+            if avail_mb < 6144:
+                return min(tuned, 3)
+
+        return tuned
 
     def _filter_candidates(self, candidates: list[dict], force_recompile: bool) -> list[dict]:
         from .forge import assess_file_for_vulcan
@@ -186,12 +202,10 @@ class VulcanAutopilot:
         executor = None
         try:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_to_file = {executor.submit(self._process_target, c['file']): c['file'] for c in candidates}
-                
-                for future in as_completed(future_to_file):
-                    file_path = future_to_file[future]
+                file_paths = [c['file'] for c in candidates]
+                for file_path, result in zip(file_paths, executor.map(self._process_target, file_paths)):
                     try:
-                        success, error_msg = future.result()
+                        success, error_msg = result
                         if success:
                             success_count += 1
                             print(f"   {Fore.GREEN}✔ {Path(file_path).name:<30}{Fore.RESET}")

@@ -62,3 +62,17 @@ def test_resolve_max_workers_auto_tunes_with_cpu_plus_one(monkeypatch):
     monkeypatch.delenv("DOXOADE_VULCAN_JOBS", raising=False)
     monkeypatch.setattr("doxoade.tools.vulcan.autopilot.os.cpu_count", lambda: 2)
     assert VulcanAutopilot._resolve_max_workers(None) == 3
+
+
+def test_resolve_max_workers_limits_when_memory_low(monkeypatch):
+    monkeypatch.delenv("DOXOADE_VULCAN_JOBS", raising=False)
+    monkeypatch.setattr("doxoade.tools.vulcan.autopilot.os.cpu_count", lambda: 8)
+    monkeypatch.setattr(VulcanAutopilot, "_available_mem_mb", staticmethod(lambda: 2048))
+    assert VulcanAutopilot._resolve_max_workers(None) == 2
+
+
+def test_resolve_max_workers_limits_when_memory_medium(monkeypatch):
+    monkeypatch.delenv("DOXOADE_VULCAN_JOBS", raising=False)
+    monkeypatch.setattr("doxoade.tools.vulcan.autopilot.os.cpu_count", lambda: 8)
+    monkeypatch.setattr(VulcanAutopilot, "_available_mem_mb", staticmethod(lambda: 4096))
+    assert VulcanAutopilot._resolve_max_workers(None) == 3
