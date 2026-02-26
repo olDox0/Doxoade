@@ -9,7 +9,7 @@ from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
 from ..shared_tools import ExecutionLogger, _find_project_root
 
-__version__ = "83.2 Omega (Module Bootstrap)"
+__version__ = "83.3 Omega (Module Bootstrap Fix)"
 
 _BOOTSTRAP_START = "# --- DOXOADE_VULCAN_BOOTSTRAP:START ---"
 _BOOTSTRAP_END = "# --- DOXOADE_VULCAN_BOOTSTRAP:END ---"
@@ -17,14 +17,18 @@ _BOOTSTRAP_BLOCK = f'''{_BOOTSTRAP_START}
 from pathlib import Path as _doxo_path
 import importlib.util as _doxo_importlib_util
 
-_doxo_runtime_file = _doxo_path(__file__).resolve().parents[1] / ".doxoade" / "vulcan" / "runtime.py"
 _doxo_activate_vulcan = None
-if _doxo_runtime_file.exists():
+for _doxo_base in [_doxo_path(__file__).resolve(), *_doxo_path(__file__).resolve().parents]:
+    _doxo_runtime_file = _doxo_base / ".doxoade" / "vulcan" / "runtime.py"
+    if not _doxo_runtime_file.exists():
+        continue
     _doxo_spec = _doxo_importlib_util.spec_from_file_location("_doxoade_vulcan_runtime", str(_doxo_runtime_file))
-    if _doxo_spec and _doxo_spec.loader:
-        _doxo_mod = _doxo_importlib_util.module_from_spec(_doxo_spec)
-        _doxo_spec.loader.exec_module(_doxo_mod)
-        _doxo_activate_vulcan = getattr(_doxo_mod, "activate_vulcan", None)
+    if not (_doxo_spec and _doxo_spec.loader):
+        continue
+    _doxo_mod = _doxo_importlib_util.module_from_spec(_doxo_spec)
+    _doxo_spec.loader.exec_module(_doxo_mod)
+    _doxo_activate_vulcan = getattr(_doxo_mod, "activate_vulcan", None)
+    break
 
 if callable(_doxo_activate_vulcan):
     _doxo_activate_vulcan(globals(), __file__)
@@ -174,10 +178,28 @@ def _iter_project_main_files(project_root: Path):
 
 
 def _inject_bootstrap(main_file: Path) -> bool:
-    content = main_file.read_text(encoding="utf-8", errors="replace")
-    if _BOOTSTRAP_START in content:
+    original = main_file.read_text(encoding="utf-8", errors="replace")
+    content = original
+
+    # Remove bootstrap anterior para permitir atualização de lógica sem duplicar bloco.
+    if _BOOTSTRAP_START in content and _BOOTSTRAP_END in content:
+        start = content.index(_BOOTSTRAP_START)
+        end = content.index(_BOOTSTRAP_END) + len(_BOOTSTRAP_END)
+        content = (content[:start] + content[end:]).lstrip("\n")
+
+    # Remove legado quebrado inserido manualmente em alguns projetos externos.
+    legacy_lines = {
+        "from .doxoade.vulcan.runtime import activate_vulcan",
+        "activate_vulcan(globals(), __file__)",
+    }
+    content_lines = [line for line in content.splitlines() if line.strip() not in legacy_lines]
+    sanitized = "\n".join(content_lines).lstrip("\n")
+    updated = f"{_BOOTSTRAP_BLOCK}\n{sanitized}"
+
+    if updated == original:
         return False
-    main_file.write_text(f"{_BOOTSTRAP_BLOCK}\n{content}", encoding="utf-8")
+
+    main_file.write_text(updated, encoding="utf-8")
     return True
 
 
