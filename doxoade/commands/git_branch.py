@@ -167,10 +167,25 @@ def branch(ctx, list_branches, create, switch_to, delete_branch, force_delete, c
 
             remote_hash = remote_hash.strip()
             guard = origin_guard.strip().lower()
-            if not remote_hash.lower().startswith(guard):
-                click.echo(Fore.RED + f"[ERRO] Guarda não confere. Remoto atual: {remote_hash[:12]}")
-                click.echo(Fore.YELLOW + "Dica: rode 'git log origin/{base} -n 1 --oneline' e tente novamente.".format(base=base_branch))
+            guard_matches_remote = remote_hash.lower().startswith(guard)
+            guard_is_local_anchor = False
+
+            if not guard_matches_remote:
+                guard_commit = _run_git_command(['rev-parse', '--verify', guard], capture_output=True, silent_fail=True)
+                if guard_commit:
+                    guard_commit = guard_commit.strip()
+                    guard_is_local_anchor = bool(
+                        _run_git_command(['merge-base', '--is-ancestor', guard_commit, 'HEAD'], silent_fail=True)
+                    )
+
+            if not guard_matches_remote and not guard_is_local_anchor:
+                click.echo(Fore.RED + f"[ERRO] Guarda não confere com remoto nem com âncora local válida. Remoto atual: {remote_hash[:12]}")
+                click.echo(Fore.YELLOW + "Dica 1: use o hash remoto atual: 'git log origin/{base} -n 1 --oneline'.".format(base=base_branch))
+                click.echo(Fore.YELLOW + "Dica 2: ou informe um commit local ancestral de HEAD como âncora de segurança.")
                 sys.exit(1)
+
+            if guard_is_local_anchor and not guard_matches_remote:
+                click.echo(Fore.YELLOW + "[BRANCH] Guarda interpretada como âncora local de HEAD (não como hash remoto atual).")
 
             if not yes:
                 try:
