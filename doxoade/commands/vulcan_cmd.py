@@ -71,11 +71,18 @@ def doctor(module, srcdir, retries):
 
 @vulcan_group.command('ignite')
 @click.argument('path', required=False, type=click.Path(exists=True))
-@click.option('--force', is_flag=True, help="Força a re-compilação de todos os alvos.")
-@click.option('--jobs', type=int, default=None, help="Número de workers de compilação (sobrescreve auto).")
+@click.option('--force',        is_flag=True,  help="Força a re-compilação de todos os alvos.")
+@click.option('--jobs',         type=int, default=None, help="Número de workers (sobrescreve auto).")
+@click.option('--no-pitstop',   is_flag=True,  help="Usa compilação legada (1 processo por módulo).")
+@click.option('--streaming',    is_flag=True,  help="Forge e compilação em paralelo (melhor para > 15 módulos).")
 @click.pass_context
-def ignite(ctx, path, force, jobs):
-    """Transforma código Python em binários de alta velocidade."""
+def ignite(ctx, path, force, jobs, no_pitstop, streaming):
+    """Transforma código Python em binários de alta velocidade.
+
+    Por padrão usa o PitStop Engine (batch compile + warm-up cache).
+    Use --no-pitstop para o comportamento legado.
+    Use --streaming para sobrepor forge e compilação (lotes grandes).
+    """
     signal.signal(signal.SIGINT, _sigint_handler)
     root = _find_project_root(os.getcwd())
 
@@ -107,16 +114,63 @@ def ignite(ctx, path, force, jobs):
                 py_files = dnm.scan(extensions=['py'])
                 candidates = [{'file': f} for f in py_files]
 
-        click.echo(f"{Fore.CYAN}   > Modo de Operação: {mode}{Style.RESET_ALL}")
+        engine_label = (
+            f"{Fore.YELLOW}LEGADO{Style.RESET_ALL}"
+            if no_pitstop
+            else f"{Fore.GREEN}PITSTOP{Style.RESET_ALL}"
+            + (f" {Fore.CYAN}+streaming{Style.RESET_ALL}" if streaming else "")
+        )
+        click.echo(f"{Fore.CYAN}   > Modo de Operação : {mode}{Style.RESET_ALL}")
+        click.echo(f"{Fore.CYAN}   > Engine          : {engine_label}{Style.RESET_ALL}")
 
         try:
-            autopilot.scan_and_optimize(candidates=candidates, force_recompile=force, max_workers=jobs)
+            autopilot.scan_and_optimize(
+                candidates=candidates,
+                force_recompile=force,
+                max_workers=jobs,
+                use_pitstop=not no_pitstop,
+                streaming=streaming,
+            )
             click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}✅ [VULCAN] Forja concluída.{Style.RESET_ALL}")
         except KeyboardInterrupt:
             _sigint_handler(None, None)
         except Exception as e:
             _print_vulcan_forensic("IGNITE", e)
             sys.exit(1)
+
+
+@vulcan_group.command('pitstop')
+@click.option('--clear-cache', is_flag=True, help="Apaga o WarmupCache (força recompilação total na próxima vez).")
+def vulcan_pitstop(clear_cache):
+    """Informações e controle do PitStop Engine (cache + warm-up)."""
+    root = _find_project_root(os.getcwd())
+
+    from ..tools.vulcan.environment import VulcanEnvironment
+    from ..tools.vulcan.pitstop import PitstopEngine
+
+    env = VulcanEnvironment(root)
+    engine = PitstopEngine(env)
+    info = engine.warmup_info()
+
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}  PITSTOP ENGINE INFO:{Style.RESET_ALL}")
+    click.echo(f"   Python    : {info['python_exe']}")
+    click.echo(f"   Foundry   : {info['foundry']}")
+    click.echo(f"   Bin       : {info['bin_dir']}")
+    click.echo(f"   Workers   : {info['workers']} processos GCC paralelos")
+    click.echo(f"   Estratégia: {info['parallel_strategy']}")
+    click.echo(f"   Batch size: {info['batch_size']}")
+    click.echo(f"   Cache     : {info['cache']['entries']} entrada(s) em {info['cache']['path']}")
+
+    if info['build_env_keys']:
+        click.echo(f"   Env extras: {', '.join(info['build_env_keys'])}")
+
+    if clear_cache:
+        cache_path = Path(info['cache']['path'])
+        if cache_path.exists():
+            cache_path.unlink()
+            click.echo(f"\n{Fore.GREEN}[OK]{Fore.RESET} WarmupCache apagado. Próximo ignite recompila tudo.")
+        else:
+            click.echo(f"\n{Fore.YELLOW}[INFO]{Fore.RESET} Cache já estava vazio.")
 
 
 @vulcan_group.command('status')
