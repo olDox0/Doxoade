@@ -52,6 +52,7 @@ class DoxoadeLazyGroup(click.Group):
             'diff': 'doxoade.commands.diff:diff',
             'doctor': 'doxoade.commands.doctor:doctor',
             'encoding': 'doxoade.commands.encoding:encoding',
+#            'experimental': 'doxoade.commands.experimental:experimental',
             'flow': 'doxoade.commands.run:flow_command',
             'git-clean': 'doxoade.commands.git_clean:git_clean',
             'git-new': 'doxoade.commands.git_new:git_new',

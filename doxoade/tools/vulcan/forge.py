@@ -106,7 +106,7 @@ def assess_file_for_vulcan(file_path: str) -> tuple[bool, str | None]:
         return False, f"arquivo de entrada/namespace ({p.name})"
 
     if VulcanForge.is_self_referential(str(p)):
-        return False, "módulo interno do Vulcan"
+        return True, "módulo interno do Vulcan"
 
     try:
         source = p.read_text(encoding='utf-8', errors='ignore')
@@ -126,7 +126,7 @@ def assess_file_for_vulcan(file_path: str) -> tuple[bool, str | None]:
             if node.module.split('.')[0] in _RISKY_IMPORTS:
                 risky_hits += 1
 
-    if risky_hits >= 2 and node_count > 900:
+    if risky_hits >= 3 and node_count > 3750:
         return False, f"arquivo complexo com APIs sensíveis (risk={risky_hits}, nodes={node_count})"
 
     return True, None

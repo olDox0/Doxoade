@@ -1,0 +1,106 @@
+{
+  "experiment": {
+    "name": "optimizer_systems",
+    "title": "Automatic Execution Optimizer",
+    "description": "System for generating execution-optimized variants of Python code without modifying original sources.",
+    "domain": "code-optimization",
+    "language": "python",
+    "created_at": "2026-02-27",
+    "status": "incubation"
+  },
+
+  "goals": {
+    "primary": [
+      "Generate optimized execution artifacts without altering original code",
+      "Measure real execution performance differences",
+      "Preserve semantic equivalence"
+    ],
+    "secondary": [
+      "Enable AST-based transformations",
+      "Detect hot paths automatically",
+      "Support benchmark-driven decisions"
+    ]
+  },
+
+  "constraints": {
+    "must_not": [
+      "Modify original source files",
+      "Introduce behavioral changes",
+      "Depend on external compilers",
+      "Require user interaction during runs"
+    ],
+    "must": [
+      "Produce reproducible results",
+      "Store artifacts in isolated directories",
+      "Allow full rollback",
+      "Fail explicitly on ambiguity"
+    ]
+  },
+
+  "inputs": {
+    "source_code": {
+      "type": "python_file",
+      "required": true
+    },
+    "iterations": {
+      "type": "integer",
+      "default": 30,
+      "min": 5,
+      "max": 1000
+    }
+  },
+
+  "outputs": {
+    "artifacts": [
+      "optimized_source",
+      "benchmark_report",
+      "diff_summary",
+      "ast_snapshot"
+    ],
+    "formats": [
+      ".py",
+      ".json",
+      ".txt"
+    ]
+  },
+
+  "metrics": {
+    "performance": [
+      "execution_time",
+      "cpu_usage"
+    ],
+    "correctness": [
+      "output_equivalence"
+    ],
+    "stability": [
+      "variance_between_runs"
+    ]
+  },
+
+  "execution_policy": {
+    "mode": "non_interactive",
+    "deterministic": true,
+    "parallelism": "optional"
+  },
+
+  "lifecycle": {
+    "stage": "incubation",
+    "next_stage": "experimental",
+    "promotion_criteria": [
+      ">=10% performance improvement",
+      "zero semantic divergence",
+      "stable results across 5 runs"
+    ]
+  },
+
+  "safety": {
+    "sandboxed": true,
+    "filesystem_access": "restricted",
+    "network_access": false
+  },
+
+  "ownership": {
+    "project": "doxoade",
+    "maintainer": "experimental"
+  }
+}

@@ -1,55 +1,139 @@
 # -*- coding: utf-8 -*-
-# doxoade/commands/intelligence_systems/recovery_engine.py
-"""Motor de Recuperação Forense - Janela Segura (PASC 1.1 / Ma'at)."""
+# doxoade/commands/intelligence_systems/intelligence_engine.py
 import os
-import re
-import shutil
+import ast
 from datetime import datetime
-# [DOX-UNUSED] from pathlib import Path
-def run_recovery_mission(backup_dir: str, output_dir: str):
-    """Resgate travado antes da regressão de 14/02."""
-    if not os.path.exists(backup_dir):
-        return False, f"Caminho não encontrado: {backup_dir}"
-    # Janela Segura: Fev/2026 até o último minuto de 13/02
-    LIMIT_DATE = datetime(2026, 2, 20, 0, 0, 0)
-# [DOX-UNUSED]     start_dt = datetime(2026, 2, 9, 0, 0, 0)
-# [DOX-UNUSED]     end_dt = datetime(2026, 2, 14, 21, 0, 0)
-    latest_versions = {}
-    ts_pattern = re.compile(r"(.+)\.(\d{4}-\d{2}-\d{2}_\d{6})\.bak$")
-    files = os.listdir(backup_dir)
+# Import find_debt_tags
+from ..intelligence_utils import SemanticAnalyzer, NexusThothMapper, ChiefInsightVisitor, find_debt_tags
+
+CRITICAL_THRESHOLD = datetime(2026, 2, 14, 21, 0, 0)
+
+def analyze_file_chief(file_path: str, project_root: str, docs=False, source=False) -> dict:
+    """Motor de Scan Nexus v100.1 (PASC 1.3 Compliance)."""
+    rel_path = os.path.relpath(file_path, project_root).replace('\\', '/')
     
-    for file in files:
-        file_path = os.path.join(backup_dir, file)
-        file_dt = None
-        original_name = None
-        match = ts_pattern.match(file)
-        if match:
-            original_name = match.group(1)
-            try:
-                file_dt = datetime.strptime(match.group(2), "%Y-%m-%d_%H%M%S")
-            except Exception as e:
-                import sys as _dox_sys, os as _dox_os
-                exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
-                f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-                line_n = exc_tb.tb_lineno
-                print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: run_recovery_mission\033[0m")
-                print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
+    data = {
+        "path": rel_path,
+        "size": os.path.getsize(file_path),
+        "god_assignment": "Unknown"
+    }
+    if not file_path.endswith('.py'):
+        return data # Only process Python files for deep analysis
+
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
         
-        if not file_dt and file.endswith('.bak'):
-            original_name = file.replace('.bak', '')
-            file_dt = datetime.fromtimestamp(os.path.getmtime(file_path))
-        if original_name in latest_versions:
-            current_best_dt, _ = latest_versions[original_name]
-            if file_dt > current_best_dt and file_dt < LIMIT_DATE:
-                latest_versions[original_name] = (file_dt, file_path)
-        elif file_dt < LIMIT_DATE:
-            latest_versions[original_name] = (file_dt, file_path)
-    if not latest_versions:
-        return False, "Nenhum material estável encontrado antes de 14/02."
-    os.makedirs(output_dir, exist_ok=True)
-    for name, (dt, path) in latest_versions.items():
-        dest = os.path.join(output_dir, name)
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
-        shutil.copy2(path, dest)
+        # 1. Análise Semântica
+        sem = SemanticAnalyzer(content)
+        summary_data = sem.get_summary() 
+        data.update(summary_data) 
+
+        # Extract docstring intent from module level
+        if docs:
+            module_docs = sem.get_docstrings().get("module_root")
+            if module_docs:
+                data["docstring_intent"] = module_docs.get("intent", "No module docstring found")
+            else:
+                data["docstring_intent"] = "No module docstring found"
+        
+        # 2. Análise detalhada com ChiefInsightVisitor
+        if sem.tree: 
+            visitor = ChiefInsightVisitor()
+            visitor.visit(sem.tree)
+            
+            all_imports = visitor.stats["imports"]["stdlib"] + visitor.stats["imports"]["external"]
+            data["god_assignment"] = NexusThothMapper.identify(rel_path, all_imports)
+            
+            # Add specific visitor stats to data
+            data["mpot_4_violations"] = visitor.stats["mpot_4_violations"]
+            data["functions_details"] = visitor.stats["functions"] 
+            data["classes_details"] = visitor.stats["classes"] 
+            data["imports_details"] = visitor.stats["imports"] 
+            data["complexity_metrics"] = visitor.stats["complexities"] # Raw complexity list from visitor
+        else:
+            data["god_assignment"] = "CORRUPT_SOURCE" 
+            data["mpot_4_violations"] = 0
+            data["functions_details"] = []
+            data["classes_details"] = []
+            data["imports_details"] = {"stdlib": [], "external": []}
+            data["complexity_metrics"] = []
+
+
+        # 3. Dívida Técnica (Tech Debt)
+        data["debt_tags"] = find_debt_tags(content)
+
+        # 4. Arqueologia de 3 Camadas (Protocolo Osíris)
+        backups = _get_safe_backups(file_path)
+        if backups:
+            data["archaeology_layers"] = _perform_triple_diff(content, backups)
+        
+        if source: data["source_minified"] = content[:5000] # Token Optimization
+        
+    except Exception as e:
+        data["error"] = str(e)
     
-    return True, f"Sucesso: {len(latest_versions)} arquivos estáveis resgatados em: {output_dir}"
+    return data
+
+def _get_safe_backups(file_path, count=3):
+    """Localiza os backups mais recentes dentro da zona de segurança (Janela Ma'at)."""
+    candidates = []
+    # Busca .bak e nppBackup
+    potentials = [file_path + ".bak"]
+    npp_dir = os.path.join(os.path.dirname(file_path), 'nppBackup')
+    if os.path.exists(npp_dir):
+        base = os.path.basename(file_path)
+        potentials.extend([os.path.join(npp_dir, f) for f in os.listdir(npp_dir) if f.startswith(base)])
+    for p in potentials:
+        if os.path.exists(p):
+            mtime = datetime.fromtimestamp(os.path.getmtime(p))
+            # Só aceita se for ANTES do incidente
+            if mtime < CRITICAL_THRESHOLD:
+                candidates.append((mtime, p))
+    
+    # Retorna os 'count' mais recentes da zona segura
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return [c[1] for c in candidates[:count]]
+#    return [] # Implementação detalhada enviada no bloco anterior
+def _perform_triple_diff(current_code, backup_list):
+    """Compara o código atual com até 3 backups (Protocolo Osíris)."""
+    diff_report = []
+    try:
+        curr_tree = ast.parse(current_code)
+        curr_funcs = {n.name: ast.unparse(n) for n in ast.walk(curr_tree) if isinstance(n, ast.FunctionDef)}
+        for i, b_path in enumerate(backup_list):
+            layer = _analyze_layer(i + 1, b_path, curr_funcs)
+            if layer:
+                diff_report.append(layer)
+    except Exception: pass
+    return diff_report
+
+def _analyze_layer(level, b_path, curr_funcs):
+    """Analisa uma única camada de backup contra o código atual."""
+    try:
+        with open(b_path, 'r', encoding='utf-8', errors='ignore') as f:
+            b_code = f.read()
+        
+        b_tree = ast.parse(b_code)
+        b_funcs = {n.name: ast.unparse(n) for n in ast.walk(b_tree) if isinstance(n, ast.FunctionDef)}
+        
+        mtime = os.path.getmtime(b_path)
+        report = {
+            "layer": level,
+            "date": datetime.fromtimestamp(mtime).isoformat(),
+            "lost_logic": []
+        }
+        # Detecta o que foi removido (Logic Loss)
+        for name, code in b_funcs.items():
+            if name not in curr_funcs and not name.startswith('_'):
+                report["lost_logic"].append({"function": name, "raw_code": code})
+        
+        return report if report["lost_logic"] else None
+    except Exception as e:
+        import sys as _dox_sys, os as _dox_os
+        exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
+        f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        line_n = exc_tb.tb_lineno
+        print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: _analyze_layer\033[0m")
+        print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
+        return None

@@ -5,7 +5,6 @@ Vulcan PitStop Engine — v1.0 Warm-Up Streaming Compiler
 =========================================================
 
 Pipeline de compilação em 3 fases sobrepostas:
-
   Phase 1  [Forge Stream]   : .py → .pyx em ThreadPool (puro AST, zero subprocess)
   Phase 2  [Batch Compile]  : N .pyx → N binários em UMA única chamada setup.py
   Phase 3  [Promote Stream] : move binários para bin/ com resultado incremental
@@ -18,49 +17,39 @@ Ganhos em relação ao sistema anterior (1 subprocess por módulo):
   • Forge e compilação se sobrepõem via fila produtor-consumidor
 
 Variáveis de ambiente:
-  DOXOADE_PITSTOP_BATCH   tamanho do lote (padrão: 8)
+  DOXOADE_PITSTOP_BATCH     tamanho do lote (padrão: 8)
   DOXOADE_PITSTOP_NTHREADS  threads de forge (padrão: auto)
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
-import os
-import shutil
-import subprocess
-import sys
-import threading
-import time
-from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import hashlib, json, os, shutil, subprocess, sys, threading, time
+
+from concurrent.futures import ThreadPoolExecutor as TPE, as_completed
 from pathlib import Path
 from queue import Empty, Queue
 from typing import Callable
 
 from .artifact_manager import ensure_dirs
-from .environment import VulcanEnvironment
-from .forge import VulcanForge, assess_file_for_vulcan
+from .environment import VulcanEnvironment as VulEnv
+from .forge import VulcanForge as VForge, assess_file_for_vulcan as AFVul
 
+# ------------ Constantes ------------
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  Constantes
-# ─────────────────────────────────────────────────────────────────────────────
 _BATCH_SIZE: int = int(os.environ.get("DOXOADE_PITSTOP_BATCH", "8"))
 _BATCH_TIMEOUT: int = 360           # segundos por lote
 _QUEUE_SENTINEL = object()          # token de encerramento de fila
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  WarmupCache  —  hash de conteúdo para pular recompilações
-# ─────────────────────────────────────────────────────────────────────────────
+# ------------ WarmupCache ------------
+
 class WarmupCache:
     """
     Cache persistente baseado em SHA-256 do conteúdo do arquivo.
 
     Diferença em relação ao mtime check do VulcanAdvisor:
-      • Mtime muda ao tocar o arquivo mesmo sem alteração real → recompila
-      • Hash de conteúdo é imutável enquanto o código não muda → pula
+      • Mtime muda ao tocar arquivo mesmo sem alteração real → recompila
+      • Hash de conteúdo é imutável enquanto código não muda → pula
     """
 
     def __init__(self, cache_path: Path) -> None:
@@ -68,13 +57,12 @@ class WarmupCache:
         self._data: dict[str, dict] = self._load()
         self._lock = threading.Lock()
 
-    # ── Persistência ──────────────────────────────────────────────────────────
+    # --------- Persistência ---------
     def _load(self) -> dict:
         try:
             if self._path.exists():
                 return json.loads(self._path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+        except Exception e: print(f"\033[31m ■ Erro: {e}"); traceback.print_tb(e.__traceback__)
         return {}
 
     def save(self) -> None:
@@ -84,26 +72,22 @@ class WarmupCache:
                 self._path.write_text(
                     json.dumps(self._data, indent=2), encoding="utf-8"
                 )
-        except Exception:
-            pass
+        except Exception e: print(f"\033[31m ■ Erro: {e}"); traceback.print_tb(e.__traceback__)
 
-    # ── Verificação ───────────────────────────────────────────────────────────
+    # --------- Verificação ---------
     def _content_hash(self, path: Path) -> str | None:
         try:
             return hashlib.sha256(path.read_bytes()).hexdigest()[:20]
-        except OSError:
-            return None
+        except OSError: return None
 
     def is_stale(self, py_path: str, bin_dir: Path) -> bool:
         """True  → arquivo mudou ou binário ausente → precisa recompilar."""
         abs_path = Path(py_path).resolve()
         content_hash = self._content_hash(abs_path)
-        if content_hash is None:
-            return True
+        if content_hash is None: return True
 
         entry = self._data.get(str(abs_path), {})
-        if entry.get("hash") != content_hash:
-            return True
+        if entry.get("hash") != content_hash: return True
 
         # Binário ainda deve existir em disco
         path_hash = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
@@ -113,8 +97,7 @@ class WarmupCache:
     def mark_compiled(self, py_path: str) -> None:
         abs_path = Path(py_path).resolve()
         content_hash = self._content_hash(abs_path)
-        if content_hash is None:
-            return
+        if content_hash is None: return
         with self._lock:
             self._data[str(abs_path)] = {
                 "hash": content_hash,
@@ -129,14 +112,13 @@ class WarmupCache:
         return {"entries": len(self._data), "path": str(self._path)}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  Phase 1 — Forge worker  (puro Python/AST, sem subprocess)
-# ─────────────────────────────────────────────────────────────────────────────
+# --------- Phase 1 — Forge worker  (puro Python/AST, sem subprocess) ---------
+
 def _forge_to_pyx(task: dict) -> dict:
     """
-    Transforma um arquivo .py em .pyx usando VulcanForge.
+    Transforma um arquivo .py em .pyx usando VForge.
 
-    Roda dentro de uma thread do ThreadPoolExecutor — sem custo de startup
+    Roda dentro de uma thread do TPE — sem custo de startup
     de subprocesso. É a operação mais leve do pipeline.
     """
     file_path = Path(task["file_path"])
@@ -149,7 +131,7 @@ def _forge_to_pyx(task: dict) -> dict:
 
     try:
         # Verifica elegibilidade antes de gastar CPU no AST
-        eligible, reason = assess_file_for_vulcan(str(abs_path))
+        eligible, reason = AFVul(str(abs_path))
         if not eligible:
             return {
                 "ok": False, "skip": True,
@@ -157,7 +139,7 @@ def _forge_to_pyx(task: dict) -> dict:
                 "err": f"pulado: {reason}",
             }
 
-        forge = VulcanForge(str(abs_path))
+        forge = VForge(str(abs_path))
         pyx_code = forge.generate_source(str(abs_path))
         if not pyx_code:
             return {
@@ -186,9 +168,9 @@ def _batch_setup_content(entries: list[dict], extra_args: list[str], nthreads: i
     """
     Gera um setup.py temporário que compila N extensões em paralelo.
 
-    nthreads controla o paralelismo interno do Cython (transpilação .pyx → .c).
-    O GCC compila cada .c de forma independente; setuptools usa -j automaticamente
-    nas versões modernas, e MAKEFLAGS pode forçar o valor.
+    nthreads controla paralelismo interno do Cython (transpilação .pyx → .c).
+    GCC compila cada .c de forma independente; setuptools usa -j automaticamente
+    nas versões modernas, e MAKEFLAGS pode forçar valor.
     """
     ext_lines = []
     for entry in entries:
@@ -226,7 +208,7 @@ def _tail(text: str, n: int = 12) -> str:
 
 def _extract_real_error(stderr: str, stdout: str, module_name: str) -> str:
     """
-    Extrai o erro real de GCC/Cython do stderr, descartando ruído de setuptools.
+    Extrai erro real de GCC/Cython do stderr, descartando ruído de setuptools.
 
     Problemas conhecidos descartados:
       - "return fut.result(timeout)" — internal setuptools/concurrent.futures
@@ -244,7 +226,7 @@ def _extract_real_error(stderr: str, stdout: str, module_name: str) -> str:
 
     lines = (stderr or "").splitlines() + (stdout or "").splitlines()
 
-    # 1. Linhas que mencionam o módulo diretamente
+    # 1. Linhas que mencionam módulo diretamente
     module_lines = [
         ln for ln in lines
         if module_name in ln and ln.strip() and not any(p in ln for p in NOISE_PATTERNS)
@@ -337,19 +319,15 @@ def _compile_single(
             return name, False, f"exit=0 mas binário ausente: {name}"
         else:
             return name, False, _extract_real_error(proc.stderr, proc.stdout, name)
-    except _subprocess.TimeoutExpired:
-        return name, False, "Timeout (>180s)"
-    except Exception as exc:
-        return name, False, f"Exceção: {exc}"
+    except _subprocess.TimeoutExpired: return name, False, "Timeout (>180s)"
+    except Exception as exc: return name, False, f"Exceção: {exc}"
     finally:
         try:
             setup_path.unlink(missing_ok=True)
-        except Exception:
-            pass
+        except Exception as e: print(f"\033[31m ■ Erro: {e}"); traceback.print_tb(e.__traceback__)
         try:
             _shutil.rmtree(str(build_tmp), ignore_errors=True)
-        except Exception:
-            pass
+        except Exception e: print(f"\033[31m ■ Erro: {e}"); traceback.print_tb(e.__traceback__)
 
 
 def _parallel_compile(
@@ -400,30 +378,23 @@ def _parallel_compile(
                 print(f"      {mark} {mod_name}")
     except KeyboardInterrupt:
         raise
-
     return results
 
-
-def compile_batch(
-    entries: list[dict],
-    foundry_path: Path,
-    bin_dir: Path,
-    build_env: dict,
-    python_exe: str,
-    max_gcc_jobs: int = 0,
-) -> dict[str, tuple[bool, str | None]]:
+def compile_batch(entries: list[dict],    foundry_path: Path,
+                  bin_dir: Path,          build_env: dict,
+                  python_exe: str,        max_gcc_jobs: int = 0,
+                  ) -> dict[str, tuple[bool, str | None]]:
     """
     Estratégia adaptativa de compilação:
 
-    • Windows / mingw32 : pula o batch (sempre falha com múltiplas extensões)
+    • Windows / mingw32 : pula batch (sempre falha com múltiplas extensões)
       → vai direto ao ProcessPoolExecutor paralelo.
     • Linux / macOS     : tenta batch primeiro; se exit != 0, resgata binários
-      já gerados e usa ProcessPoolExecutor para os restantes.
+      já gerados, usa ProcessPoolExecutor para os restantes.
 
     Retorna: { module_name → (ok, error_msg) }
     """
-    if not entries:
-        return {}
+    if not entries: return {}
 
     n_workers = max(1, max_gcc_jobs) if max_gcc_jobs > 0 else max(1, os.cpu_count() or 2)
     ext = ".pyd" if os.name == "nt" else ".so"
@@ -472,8 +443,7 @@ def compile_batch(
     finally:
         try:
             setup_path.unlink(missing_ok=True)
-        except Exception:
-            pass
+        except Exception e: print(f"\033[31m ■ Erro: {e}"); traceback.print_tb(e.__traceback__)
 
     # Resgata binários já gerados mesmo com exit != 0
     rescued: set[str] = set()
@@ -521,7 +491,7 @@ def _parse_batch_errors(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  PitStop Engine  —  orquestra o pipeline completo
+#  PitStop Engine  —  orquestra pipeline completo
 # ─────────────────────────────────────────────────────────────────────────────
 class PitstopEngine:
     """
@@ -533,13 +503,13 @@ class PitstopEngine:
         stats  = engine.run(candidates, on_result=lambda f, ok, err: print(f, ok))
         print(stats)
 
-    O callback ``on_result`` é chamado assim que cada módulo é processado,
+    callback ``on_result`` é chamado assim que cada módulo é processado,
     permitindo exibição incremental de progresso (streaming).
     """
 
     def __init__(
         self,
-        env: VulcanEnvironment,
+        env: VulEnv,
         pid_registry: dict | None = None,
     ) -> None:
         self.env = env
@@ -586,12 +556,12 @@ class PitstopEngine:
         on_result: Callable[[str, bool, str | None], None] | None = None,
     ) -> dict:
         """
-        Executa o pipeline PitStop completo.
+        Executa pipeline PitStop completo.
 
         Parâmetros:
             candidates      lista de dicts com chave 'file'
             max_workers     threads de forge (None = auto)
-            force_recompile ignora o WarmupCache
+            force_recompile ignora WarmupCache
             on_result       callback(file_path, success, error_msg) por módulo
         """
         ensure_dirs(str(self.root))
@@ -683,11 +653,11 @@ class PitstopEngine:
         on_result: Callable[[str, bool, str | None], None] | None = None,
     ) -> dict:
         """
-        Variante streaming: forge e compilação se sobrepõem via fila.
+        Variante streaming: forge, compilação se sobrepõem via fila.
 
-        Enquanto o ThreadPool gera .pyx, o compilador consome lotes assim
-        que BATCH_SIZE itens estiverem prontos — sem esperar o forge completo.
-        Útil para lotes grandes (> 20 módulos) onde a sobreposição compensa.
+        Enquanto ThreadPool gera .pyx, compilador consome lotes assim
+        que BATCH_SIZE itens estiverem prontos — sem esperar forge completo.
+        Útil para lotes grandes (> 20 módulos) onde sobreposição compensa.
         """
         ensure_dirs(str(self.root))
         self.env.foundry.mkdir(parents=True, exist_ok=True)
@@ -720,7 +690,7 @@ class PitstopEngine:
         compile_results_store: dict = {}
         compile_lock = threading.Lock()
 
-        # Compilador consumidor: drena a fila em lotes e compila
+        # Compilador consumidor: drena fila em lotes e compila
         def _compile_consumer() -> None:
             batch: list[dict] = []
             t_compile_acc = 0.0
@@ -772,11 +742,11 @@ class PitstopEngine:
         compiler_thread = threading.Thread(target=_compile_consumer, daemon=True)
         compiler_thread.start()
 
-        # Forge producer: gera .pyx em paralelo e enfileira para compilação
+        # Forge producer: gera .pyx em paralelo, enfileira para compilação
         t_forge = time.perf_counter()
         forge_tasks = [{"file_path": c["file"], "foundry": str(self.env.foundry)} for c in stale]
 
-        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+        with TPE(max_workers=n_workers) as executor:
             futures = {executor.submit(_forge_to_pyx, task): task for task in forge_tasks}
             for future in as_completed(futures):
                 try:
@@ -852,7 +822,7 @@ class PitstopEngine:
         results: list[dict] = []
         tasks = [{"file_path": c["file"], "foundry": str(self.env.foundry)} for c in candidates]
 
-        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+        with TPE(max_workers=n_workers) as executor:
             futures = {executor.submit(_forge_to_pyx, t): t for t in tasks}
             for future in as_completed(futures):
                 try:
@@ -873,7 +843,7 @@ class PitstopEngine:
 
         No Windows vai direto ao ProcessPoolExecutor paralelo (via compile_batch).
         No Linux/macOS tenta batch único primeiro, paralelo como fallback.
-        O feedback por módulo é impresso inline por _parallel_compile — não
+        feedback por módulo é impresso inline por _parallel_compile — não
         repetimos aqui para evitar saída duplicada.
         """
         all_results: dict[str, tuple[bool, str | None]] = {}
@@ -897,7 +867,7 @@ class PitstopEngine:
             all_results.update(res)
 
             # No Linux com batch success, _parallel_compile não roda →
-            # imprimimos o feedback aqui (sem duplicar no Windows).
+            # imprimimos feedback aqui (sem duplicar no Windows).
             if os.name != "nt":
                 for name, (ok, err) in res.items():
                     mark = "\033[32m✔\033[0m" if ok else "\033[31m✘\033[0m"
@@ -927,10 +897,8 @@ class PitstopEngine:
         """Diagnóstico do estado do motor."""
         n = self._resolve_workers(None)
         return {
-            "python_exe": self._python_exe,
-            "foundry": str(self.env.foundry),
-            "bin_dir": str(self.env.bin_dir),
-            "batch_size": _BATCH_SIZE,
+            "python_exe": self._python_exe,     "foundry": str(self.env.foundry),
+            "bin_dir": str(self.env.bin_dir),   "batch_size": _BATCH_SIZE,
             "workers": n,
             "parallel_strategy": "ProcessPoolExecutor (Windows)" if os.name == "nt" else "batch+fallback (Linux/macOS)",
             "cache": self.cache.stats(),
