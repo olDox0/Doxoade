@@ -104,7 +104,7 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
         self.bin_dir = self.project_root / ".doxoade" / "vulcan" / "bin"
         self._spec_cache: dict[str, object] = {}
         self._ext = ".pyd" if os.name == 'nt' else ".so"
-#        print(f"\033[96m[VULCAN DEBUG] MetaFinder v5.0 Initialized. Watching for imports...\033[0m", file=sys.stderr)
+        #print(f"\033[96m[VULCAN DEBUG] MetaFinder v5.0 Initialized. Watching for imports...\033[0m", file=sys.stderr)
 
     def find_spec(self, fullname: str, path, target=None):
         # 🔒 REGRA DE SEGURANÇA: Vulcan só acelera o próprio domínio
@@ -121,7 +121,7 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
                 module_part = fullname.split('.')[-1]
                 pattern = f"v_{module_part}_*{self._ext}"
                 
-#                print(f"\033[96m[VULCAN DEBUG] Searching for library '{fullname}' with pattern '{pattern}'\033[0m", file=sys.stderr)
+                #print(f"\033[96m[VULCAN DEBUG] Searching for library '{fullname}' with pattern '{pattern}'\033[0m", file=sys.stderr)
                 
                 candidates = list(self.lib_bin_dir.glob(pattern))
 
@@ -135,7 +135,7 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
 
                     if self.is_binary_valid_for_host(bin_path):
                         print(
-#                            f"\033[92m[VULCAN DEBUG] ACCEPTED binary: {bin_path.name}\033[0m",
+                            f"\033[92m[VULCAN DEBUG] ACCEPTED binary: {bin_path.name}\033[0m",
                             file=sys.stderr
                         )
                         return self._make_spec(fullname, None, str(bin_path))

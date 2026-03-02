@@ -9,7 +9,10 @@ from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
 from ..shared_tools import ExecutionLogger, _find_project_root
 
-__version__ = "83.3 Omega (Module Bootstrap Fix)"
+__version__ = "85.0 Omega (Self-Guard + Redirect Fix + Probe)"
+
+
+# ================== Vulcan Embedded probes ==================
 
 _BOOTSTRAP_START = "# --- DOXOADE_VULCAN_BOOTSTRAP:START ---"
 _BOOTSTRAP_END = "# --- DOXOADE_VULCAN_BOOTSTRAP:END ---"
@@ -18,6 +21,9 @@ from pathlib import Path as _doxo_path
 import importlib.util as _doxo_importlib_util
 
 _doxo_activate_vulcan = None
+_doxo_install_meta_finder = None
+_doxo_project_root = None
+
 for _doxo_base in [_doxo_path(__file__).resolve(), *_doxo_path(__file__).resolve().parents]:
     _doxo_runtime_file = _doxo_base / ".doxoade" / "vulcan" / "runtime.py"
     if not _doxo_runtime_file.exists():
@@ -28,14 +34,329 @@ for _doxo_base in [_doxo_path(__file__).resolve(), *_doxo_path(__file__).resolve
     _doxo_mod = _doxo_importlib_util.module_from_spec(_doxo_spec)
     _doxo_spec.loader.exec_module(_doxo_mod)
     _doxo_activate_vulcan = getattr(_doxo_mod, "activate_vulcan", None)
+    _doxo_install_meta_finder = getattr(_doxo_mod, "install_meta_finder", None)
+    _doxo_project_root = str(_doxo_base)
     break
 
+# 1. Instala MetaFinder primeiro — redireciona imports Python → PYD automaticamente
+if callable(_doxo_install_meta_finder) and _doxo_project_root:
+    _doxo_install_meta_finder(_doxo_project_root)
+
+# 2. Injeta funções otimizadas do __main__ específico
 if callable(_doxo_activate_vulcan):
     _doxo_activate_vulcan(globals(), __file__)
 {_BOOTSTRAP_END}
 '''
 
+_VULCAN_EMBEDDED_CONTENT = r'''# -*- coding: utf-8 -*-
+"""vulcan_embedded.py — safe loader gerado pelo doxoade (opt-in).
 
+Este arquivo é INERTE até que o projeto o importe explicitamente:
+
+    try:
+        from .doxoade.vulcan.vulcan_embedded import activate_embedded
+        activate_embedded(globals(), __file__)
+    except Exception:
+        pass
+
+Design:
+- safe_call: wrapper universal que tenta (ctx, no-ctx, fallback)
+- inject_optimized: injeta funções *_vulcan_optimized via wrapper
+- activate_embedded: tenta localizar .pyd relativo ao source_file e injeta no scope
+"""
+
+from functools import wraps
+from pathlib import Path
+import sys
+import os
+import importlib.util
+import importlib.machinery
+
+# ---------- ExecutionContext ----------
+class ExecutionContext:
+    __slots__ = ("argv", "env", "cwd", "project_root")
+
+    def __init__(self):
+        self.argv = sys.argv
+        self.env = dict(os.environ)
+        self.cwd = Path.cwd()
+        main = sys.modules.get("__main__")
+        self.project_root = getattr(main, "__file__", None)
+
+# ---------- safe_call ----------
+def safe_call(native_fn, fallback_fn=None):
+    """Tenta: native(ctx, *a, **k) -> native(*a, **k) -> fallback(*a, **k)."""
+    @wraps(fallback_fn or native_fn)
+    def wrapper(*args, **kwargs):
+        # 1) com contexto
+        try:
+            return native_fn(ExecutionContext(), *args, **kwargs)
+        except TypeError:
+            pass
+        except Exception:
+            # se nativo falhar com outro erro, tente fallback (mais seguro)
+            if callable(fallback_fn):
+                return fallback_fn(*args, **kwargs)
+            raise
+
+        # 2) sem contexto
+        try:
+            return native_fn(*args, **kwargs)
+        except TypeError:
+            pass
+        except Exception:
+            if callable(fallback_fn):
+                return fallback_fn(*args, **kwargs)
+            raise
+
+        # 3) fallback python
+        if callable(fallback_fn):
+            return fallback_fn(*args, **kwargs)
+
+        raise RuntimeError(f"[vulcan_embedded] assinatura incompatível: {getattr(native_fn,'__name__',str(native_fn))}")
+
+    return wrapper
+
+# ---------- injection helper ----------
+_OPTIMIZED_SUFFIX = "_vulcan_optimized"
+
+def inject_optimized(module, native_module, suffix=_OPTIMIZED_SUFFIX):
+    """
+    Injeta funções otimizadas do native_module para module usando safe_call.
+    Retorna lista de símbolos injetados.
+    """
+    import inspect
+
+    injected = []
+    skipped = []
+
+    for attr in dir(native_mod):
+        if not attr.endswith(_OPTIMIZED_SUFFIX):
+            continue
+
+        orig_name = attr[:-len(_OPTIMIZED_SUFFIX)]
+
+        if not hasattr(module, orig_name):
+            continue
+
+        py_func = getattr(module, orig_name)
+        native_func = getattr(native_mod, attr)
+
+        # 🔒 Guard 1 — callable
+        if not callable(py_func) or not callable(native_func):
+            skipped.append(orig_name)
+            continue
+
+        # 🔒 Guard 2 — assinatura compatível
+        try:
+            py_sig = inspect.signature(py_func)
+            native_sig = inspect.signature(native_func)
+            if py_sig.parameters != native_sig.parameters:
+                skipped.append(orig_name)
+                continue
+        except (ValueError, TypeError):
+            # Se não der pra inspecionar, NÃO injeta
+            skipped.append(orig_name)
+            continue
+
+        setattr(module, orig_name, native_func)
+        injected.append(orig_name)
+
+    if injected:
+        _vlog(f"OK   {module.__name__} ← {self._bin_path.name} ({', '.join(injected)})")
+
+    if skipped:
+        _vlog(f"SKIP {module.__name__} ← incompatível ({', '.join(skipped)})")
+
+# ---------- minimal pyd locator & loader ----------
+def _binary_ext():
+    return ".pyd" if os.name == "nt" else ".so"
+
+def _find_pyd_for_source(bin_dir: Path, source_path: Path):
+    """
+    Procurar por v_{stem}_{hash}* ou v_{stem}* — devolve Path ou None.
+    """
+    stem = source_path.stem
+    ext = _binary_ext()
+    # hash-exato
+    try:
+        import hashlib
+        abs_hash = hashlib.sha256(str(source_path.resolve()).encode()).hexdigest()[:6]
+        candidate = bin_dir / f"v_{stem}_{abs_hash}{ext}"
+        if candidate.exists():
+            return candidate
+    except Exception:
+        pass
+
+    # glob mais recente
+    matches = sorted(bin_dir.glob(f"v_{stem}_*{ext}"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if matches:
+        return matches[0]
+
+    # fallback v_stem*
+    matches2 = sorted(bin_dir.glob(f"v_{stem}*"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if matches2:
+        return matches2[0]
+    return None
+
+def _is_binary_valid_for_host(bin_path: Path) -> bool:
+    """
+    Validação leve: existe e tamanho mínimo.
+    Não tenta parse ELF/PE aqui (mantemos simples).
+    """
+    try:
+        return bin_path.exists() and bin_path.stat().st_size > 4096
+    except Exception:
+        return False
+
+def _load_extension_from_path(module_name: str, bin_path: Path):
+    """
+    Carrega um extension module a partir do arquivo binário sem alterar sys.path permanentemente.
+    Retorna o módulo ou None.
+    """
+    try:
+        spec = importlib.util.spec_from_file_location(module_name, str(bin_path))
+        if not spec or not spec.loader:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = mod
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:
+        sys.modules.pop(module_name, None)
+        return None
+
+# ---------- API pública (opt-in) ----------
+def activate_embedded(globs: dict, source_file: str, project_root: str | None = None, suffix=_OPTIMIZED_SUFFIX):
+    """
+    Ativa (opcional) otimizações do .doxoade/vulcan/bin para o módulo definido por source_file.
+    - globs: normalmente globals() do __main__.py
+    - source_file: __file__ do __main__ (string)
+    - project_root: se None, procura o diretório ancestor que contenha .doxoade/vulcan/bin
+    """
+    try:
+        src = Path(source_file).resolve()
+        root = Path(project_root).resolve() if project_root else None
+        if not root:
+            # sobe procurando .doxoade/vulcan/bin
+            cur = src.parent
+            while True:
+                candidate = cur / ".doxoade" / "vulcan" / "bin"
+                if candidate.exists():
+                    root = cur
+                    break
+                if cur == cur.parent:
+                    break
+                cur = cur.parent
+        if not root:
+            return False
+
+        bin_dir = Path(root) / ".doxoade" / "vulcan" / "bin"
+        if not bin_dir.exists():
+            return False
+
+        source_path = src if src.exists() else None
+        if not source_path:
+            return False
+
+        pyd_path = _find_pyd_for_source(bin_dir, source_path)
+        if not pyd_path or not _is_binary_valid_for_host(pyd_path):
+            return False
+
+        # nome nativo simplificado (stem sem tag)
+        native_name = pyd_path.stem.split(".")[0]
+
+        native_mod = _load_extension_from_path(native_name, pyd_path)
+        if not native_mod:
+            return False
+
+        # injetar em globs — globs geralmente representam __main__ namespace
+        injected = 0
+        for attr in dir(native_mod):
+            if not attr.endswith(suffix):
+                continue
+            base = attr[: -len(suffix)]
+            if base in globs:
+                try:
+                    native_obj = getattr(native_mod, attr)
+                    py_obj = globs.get(base)
+                    if callable(native_obj):
+                        globs[base] = safe_call(native_obj, py_obj)
+                    else:
+                        globs[base] = native_obj
+                    injected += 1
+                except Exception:
+                    continue
+
+        return injected > 0
+    except Exception:
+        return False
+'''
+
+def generate_vulcan_stub() -> str:
+    return '''# -*- coding: utf-8 -*-
+"""
+Stub Vulcan embutido no projeto.
+
+Este arquivo é gerenciado automaticamente pelo doxoade.
+Pode ser versionado com o projeto.
+"""
+
+VULCAN_STUB_VERSION = 2
+
+def activate():
+    """
+    Ativa Vulcan de forma explícita.
+    Uso recomendado no __main__.py do projeto.
+    """
+    try:
+        from doxoade.tools.vulcan.runtime import (
+            install_meta_finder,
+            find_vulcan_project_root,
+        )
+        import __main__
+        root = find_vulcan_project_root(__file__)
+        if root:
+            install_meta_finder(root)
+        return True
+    except Exception:
+        return False
+'''
+
+VULCAN_STUB_VERSION = 3
+
+from pathlib import Path
+import re
+
+def read_stub_version(stub_path: Path) -> int | None:
+    if not stub_path.exists():
+        return None
+
+    try:
+        text = stub_path.read_text(encoding="utf-8", errors="ignore")
+        m = re.search(r"VULCAN_STUB_VERSION\s*=\s*(\d+)", text)
+        if m:
+            return int(m.group(1))
+    except Exception:
+        return None
+
+    return None
+
+# ================== Detecção de auto-aplicação ==================
+
+def _is_doxoade_project(path: Path) -> bool:
+    """
+    Retorna True se o caminho alvo é o próprio projeto doxoade.
+    O doxoade já possui MetaFinder nativo — injetar bootstrap seria redundante
+    e causaria conflito de finders no sys.meta_path.
+    """
+    # Marcadores exclusivos da infraestrutura interna do doxoade
+    markers = [
+        path / "doxoade" / "tools" / "vulcan" / "meta_finder.py",
+        path / "doxoade" / "tools" / "vulcan" / "runtime.py",
+    ]
+    return any(m.exists() for m in markers)
+    
 def _sigint_handler(signum, frame):
     click.echo(f"\n{Fore.RED}Comando interrompido. Saindo...{Style.RESET_ALL}")
     sys.exit(130)
@@ -448,9 +769,18 @@ def vulcan_purge():
 
 
 def _copy_runtime_module(project_root: Path) -> Path:
+    """
+    Copia o runtime 'oficial' (doxoade/tools/vulcan/runtime.py) para
+    .doxoade/vulcan/runtime.py **e** gera um vulcan_embedded.py com o
+    safe_loader minimal e auto-compatível.
+
+    Retorna o path do runtime (runtime_dst).
+    """
     runtime_src = Path(__file__).resolve().parents[1] / "tools" / "vulcan" / "runtime.py"
     vulcan_dir = project_root / ".doxoade" / "vulcan"
     vulcan_dir.mkdir(parents=True, exist_ok=True)
+
+    # --- copia runtime original (manter compatibilidade) ---
     runtime_dst = vulcan_dir / "runtime.py"
     runtime_dst.write_text(runtime_src.read_text(encoding="utf-8"), encoding="utf-8")
 
@@ -462,6 +792,12 @@ def _copy_runtime_module(project_root: Path) -> Path:
         "__all__ = [\"activate_vulcan\", \"find_vulcan_project_root\", \"load_vulcan_binary\"]\n",
         encoding="utf-8",
     )
+
+    # --- gera vulcan_embedded.py (safe loader auto-gerenciado) ---
+    embedded_dst = vulcan_dir / "vulcan_embedded.py"
+    if not embedded_dst.exists():
+        embedded_dst.write_text(_VULCAN_EMBEDDED_CONTENT, encoding="utf-8")
+
     return runtime_dst
 
 
@@ -505,9 +841,60 @@ def _inject_bootstrap(main_file: Path) -> bool:
 @click.option('--main', 'main_files', multiple=True, type=click.Path(exists=True, dir_okay=False),
               help='Arquivo __main__.py específico para injetar bootstrap (pode repetir).')
 @click.option('--auto-main', is_flag=True, help='Detecta e injeta em todos os __main__.py do projeto alvo.')
-def vulcan_module(target_path, main_files, auto_main):
+@click.option('--force-stub', is_flag=True, help="Recria o stub Vulcan mesmo se já existir.")
+def vulcan_module(target_path, main_files, auto_main, force_stub):
     """Instala módulo de acionamento Vulcan em projetos externos."""
     project_root = Path(target_path).resolve()
+
+    stub_path = project_root / ".doxoade" / "vulcan_embedded.py"
+
+    current_version = read_stub_version(stub_path)
+
+    should_write = (
+        force_stub
+        or current_version is None
+        or current_version != VULCAN_STUB_VERSION
+    )
+
+    if should_write:
+        stub_path.parent.mkdir(parents=True, exist_ok=True)
+        stub_path.write_text(generate_vulcan_stub(), encoding="utf-8")
+
+        if force_stub:
+            click.echo(f"{Fore.GREEN}[OK]{Style.RESET_ALL} Stub Vulcan recriado (--force-stub).")
+        elif current_version is None:
+            click.echo(f"{Fore.GREEN}[OK]{Style.RESET_ALL} Stub Vulcan criado.")
+        else:
+            click.echo(f"{Fore.GREEN}[OK]{Style.RESET_ALL} Stub Vulcan atualizado.")
+    else:
+        click.echo(f"{Fore.YELLOW}[INFO]{Style.RESET_ALL} Stub Vulcan já está atualizado.")
+
+    # ── GUARDA DE AUTO-APLICAÇÃO ──────────────────────────────────────────────
+    # O doxoade já possui MetaFinder nativo (meta_finder.py) e VulcanBinaryFinder
+    # (runtime.py). Injetar o bootstrap seria redundante e causaria conflito de
+    # finders duplicados no sys.meta_path durante a execução.
+    if _is_doxoade_project(project_root):
+        click.echo(
+            f"\n{Fore.RED}[ERRO] vulcan module não pode ser aplicado ao próprio projeto doxoade.{Style.RESET_ALL}"
+        )
+        click.echo(
+            f"{Fore.YELLOW}[INFO] O doxoade já possui MetaFinder nativo em "
+            f"doxoade/tools/vulcan/meta_finder.py — o redirecionamento PYD "
+            f"é ativado automaticamente pelo runtime interno.{Style.RESET_ALL}"
+        )
+        click.echo(
+            f"{Fore.CYAN}[DICA] Para compilar módulos do doxoade, use: "
+            f"doxoade vulcan ignite{Style.RESET_ALL}"
+        )
+        return
+        
+    click.echo(
+        f"{Fore.GREEN}[OK]{Style.RESET_ALL} "
+        f"Stub Vulcan embutido criado em {stub_path}"
+    )
+    
+    # ─────────────────────────────────────────────────────────────────────────
+
     runtime_dst = _copy_runtime_module(project_root)
     click.echo(f"{Fore.GREEN}[OK]{Fore.RESET} Runtime instalado em: {runtime_dst}")
 
@@ -523,9 +910,13 @@ def vulcan_module(target_path, main_files, auto_main):
                 changed.append(p)
 
     if changed:
-        click.echo(f"{Fore.GREEN}[OK]{Fore.RESET} Bootstrap injetado em:")
+        click.echo(f"{Fore.GREEN}[OK]{Fore.RESET} Bootstrap v2 injetado em:")
         for p in changed:
             click.echo(f"  - {p}")
+        click.echo(
+            f"\n{Fore.CYAN}[INFO] Bootstrap v2 instala MetaFinder automaticamente — "
+            f"todos os imports do projeto serão redirecionados para PYD quando disponível.{Style.RESET_ALL}"
+        )
     elif main_files or auto_main:
         click.echo(f"{Fore.YELLOW}[INFO]{Fore.RESET} Nenhum __main__.py precisou de alteração.")
     else:
@@ -533,6 +924,146 @@ def vulcan_module(target_path, main_files, auto_main):
             f"{Fore.CYAN}[DICA]{Fore.RESET} Use --auto-main para injetar automaticamente nos __main__.py do projeto, "
             "ou --main <arquivo> para alvo específico."
         )
+        
+        
+@vulcan_group.command('probe')
+@click.option('--path', 'target_path', default='.', type=click.Path(exists=True, file_okay=False, dir_okay=True),
+              show_default=True, help='Projeto alvo a inspecionar.')
+@click.option('--verbose', '-v', is_flag=True, help='Mostra detalhes de hash e paths.')
+def vulcan_probe(target_path, verbose):
+    """Verifica quais módulos estão ativos e seriam redirecionados para PYD.
+
+    Para cada binário em .doxoade/vulcan/bin/, resolve o .py de origem e
+    reporta o status: ATIVO, STALE (PYD desatualizado) ou ÓRFÃO (sem .py).
+    """
+    import hashlib
+
+    project_root = Path(target_path).resolve()
+    bin_dir = project_root / ".doxoade" / "vulcan" / "bin"
+
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}  VULCAN PROBE — {project_root.name}{Style.RESET_ALL}")
+
+    if not bin_dir.exists():
+        click.echo(f"  {Fore.RED}Nenhuma foundry encontrada em {bin_dir}{Fore.RESET}")
+        return
+
+    ext = ".pyd" if os.name == "nt" else ".so"
+    binaries = sorted(bin_dir.glob(f"*{ext}"))
+
+    if not binaries:
+        click.echo(f"  {Fore.YELLOW}Nenhum binário ativo.{Fore.RESET}")
+        return
+
+    # Índice: stem_hash → [py_path] para busca reversa
+    # Varre a árvore do projeto para mapear todos os .py existentes
+    skip = {".git", "venv", ".venv", "__pycache__", "build", "dist", ".doxoade"}
+    py_files: list[Path] = []
+    for root, dirs, files in os.walk(project_root):
+        dirs[:] = [d for d in dirs if d not in skip]
+        for f in files:
+            if f.endswith(".py"):
+                py_files.append(Path(root) / f)
+
+    # Monta índice hash(abs_path)[:6] → py_path
+    hash_index: dict[str, Path] = {}
+    for py in py_files:
+        h = hashlib.sha256(str(py.resolve()).encode()).hexdigest()[:6]
+        hash_index[h] = py
+
+    # Tabela de status
+    active, stale, orphan = [], [], []
+
+    for bin_path in binaries:
+        stem = bin_path.stem  # ex: v_cli_a7a05c.cp312-win_amd64
+        # Extrai o hash: último segmento antes do primeiro ponto extra
+        # Formato: v_{name}_{hash6}.cpXXX-...
+        base = stem.split(".")[0]          # v_cli_a7a05c
+        parts = base.split("_")
+        pyd_hash = parts[-1] if len(parts) >= 3 else None
+        pyd_stem = "_".join(parts[1:-1]) if pyd_hash else "_".join(parts[1:])
+
+        source = hash_index.get(pyd_hash) if pyd_hash else None
+
+        # Fallback: procura por stem exato se hash não bater
+        if not source:
+            for py in py_files:
+                if py.stem == pyd_stem:
+                    source = py
+                    break
+
+        if not source:
+            orphan.append((bin_path, pyd_stem, pyd_hash))
+            continue
+
+        try:
+            py_mtime = source.stat().st_mtime
+            pyd_mtime = bin_path.stat().st_mtime
+            is_stale = py_mtime > pyd_mtime
+        except OSError:
+            is_stale = True
+
+        rel_src = source.relative_to(project_root)
+        if is_stale:
+            stale.append((bin_path, rel_src, source))
+        else:
+            active.append((bin_path, rel_src, source))
+
+    # ── Relatório ─────────────────────────────────────────────────────────────
+    click.echo(f"\n  {Fore.GREEN}{Style.BRIGHT}✔ ATIVOS ({len(active)}):{Style.RESET_ALL}")
+    if active:
+        for bin_path, rel_src, source in active:
+            size_kb = bin_path.stat().st_size / 1024
+            click.echo(
+                f"    {Fore.GREEN}✔{Fore.RESET} {str(rel_src):<45} "
+                f"{Fore.WHITE}{size_kb:>6.1f} KB{Fore.RESET}"
+            )
+            if verbose:
+                click.echo(f"       {Fore.CYAN}PYD:{Fore.RESET} {bin_path.name}")
+                click.echo(f"       {Fore.CYAN}SRC:{Fore.RESET} {source}")
+    else:
+        click.echo(f"    {Fore.YELLOW}(nenhum){Fore.RESET}")
+
+    if stale:
+        click.echo(f"\n  {Fore.YELLOW}{Style.BRIGHT}⚠ STALE — .py mais recente que o PYD ({len(stale)}):{Style.RESET_ALL}")
+        for bin_path, rel_src, source in stale:
+            click.echo(
+                f"    {Fore.YELLOW}⚠{Fore.RESET} {str(rel_src):<45} "
+                f"{Fore.YELLOW}[recompile: doxoade vulcan ignite]{Fore.RESET}"
+            )
+            if verbose:
+                import time as _time
+                py_t = _time.strftime('%Y-%m-%d %H:%M:%S', _time.localtime(source.stat().st_mtime))
+                pyd_t = _time.strftime('%Y-%m-%d %H:%M:%S', _time.localtime(bin_path.stat().st_mtime))
+                click.echo(f"       .py  modificado: {py_t}")
+                click.echo(f"       .pyd compilado:  {pyd_t}")
+
+    if orphan:
+        click.echo(f"\n  {Fore.RED}{Style.BRIGHT}✘ ÓRFÃOS — .py de origem não encontrado ({len(orphan)}):{Style.RESET_ALL}")
+        for bin_path, pyd_stem, pyd_hash in orphan:
+            click.echo(
+                f"    {Fore.RED}✘{Fore.RESET} {bin_path.name}"
+                + (f"  {Fore.YELLOW}(hash buscado: {pyd_hash}){Fore.RESET}" if pyd_hash else "")
+            )
+
+    # ── Resumo ────────────────────────────────────────────────────────────────
+    total = len(binaries)
+    click.echo(f"\n  {Fore.CYAN}{'─' * 55}{Fore.RESET}")
+    click.echo(
+        f"  Total: {total}  │  "
+        f"{Fore.GREEN}Ativos: {len(active)}{Fore.RESET}  │  "
+        f"{Fore.YELLOW}Stale: {len(stale)}{Fore.RESET}  │  "
+        f"{Fore.RED}Órfãos: {len(orphan)}{Fore.RESET}"
+    )
+
+    if len(active) == total:
+        click.echo(f"\n  {Fore.GREEN}{Style.BRIGHT}✅ 100% dos módulos estão sendo redirecionados para PYD.{Style.RESET_ALL}")
+    elif len(active) > 0:
+        pct = (len(active) / total) * 100
+        click.echo(f"\n  {Fore.YELLOW}⚡ {pct:.0f}% dos módulos ativos. Use 'doxoade vulcan ignite' para recompilar os stale.{Fore.RESET}")
+    else:
+        click.echo(f"\n  {Fore.RED}Nenhum módulo ativo. Execute 'doxoade vulcan ignite' no projeto alvo.{Fore.RESET}")
+
+    click.echo()
 
 
 def _print_vulcan_forensic(scope: str, e: Exception):
