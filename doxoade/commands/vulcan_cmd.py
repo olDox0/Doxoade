@@ -9,7 +9,7 @@ from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
 from ..shared_tools import ExecutionLogger, _find_project_root
 
-__version__ = "84.1 Diagnostic Traceback"
+__version__ = "83.3 Omega (Module Bootstrap Fix)"
 
 _BOOTSTRAP_START = "# --- DOXOADE_VULCAN_BOOTSTRAP:START ---"
 _BOOTSTRAP_END = "# --- DOXOADE_VULCAN_BOOTSTRAP:END ---"
@@ -96,20 +96,14 @@ def ignite(ctx, path, force, jobs, no_pitstop, streaming, hybrid, scan_only):
 
     # ── Modo Híbrido ──────────────────────────────────────────────────────────
     if hybrid:
+        from ..tools.vulcan.hybrid_forge import hybrid_ignite, hybrid_scan_file
+
         click.echo(f"{Fore.YELLOW}{Style.BRIGHT}⬡ [VULCAN-HYBRID] v{__version__}...{Style.RESET_ALL}")
 
         if scan_only:
             # Modo diagnóstico: só mostra o que seria compilado
             click.echo(f"{Fore.CYAN}   > Modo: SCAN ONLY (sem compilação){Style.RESET_ALL}")
-            click.echo(f"{Fore.CYAN}   > Alvo : {target}{Style.RESET_ALL}")
-            with ExecutionLogger('vulcan_hybrid', root, ctx.params) as _:
-                try:
-                    _run_hybrid_with_optimizer(target, root, force, scan_only=True)
-                except KeyboardInterrupt:
-                    _sigint_handler(None, None)
-                except Exception as e:
-                    _print_vulcan_forensic("HYBRID", e)
-                    sys.exit(1)
+            _run_hybrid_with_optimizer(target, root)
             return
 
         click.echo(f"{Fore.CYAN}   > Alvo : {target}{Style.RESET_ALL}")
@@ -117,7 +111,12 @@ def ignite(ctx, path, force, jobs, no_pitstop, streaming, hybrid, scan_only):
 
         with ExecutionLogger('vulcan_hybrid', root, ctx.params) as _:
             try:
-                _run_hybrid_with_optimizer(target, root, force, scan_only=False)
+                hybrid_ignite(
+                    project_root = root,
+                    target       = target,
+                    force        = force,
+                    on_progress  = click.echo,
+                )
             except KeyboardInterrupt:
                 _sigint_handler(None, None)
             except Exception as e:
@@ -179,22 +178,14 @@ def ignite(ctx, path, force, jobs, no_pitstop, streaming, hybrid, scan_only):
             sys.exit(1)
             
             
-def _run_hybrid_with_optimizer(target, root, force, scan_only=False):
+def _run_hybrid_with_optimizer(target, root, force):
     """
     Versão atualizada do ignite --hybrid com optimizer integrado.
-    scan_only=True → exibe candidatos mas não compila nem gera .pyx.
+    Substitui o bloco interno do comando ignite quando --hybrid é passado.
     """
-    import traceback as _tb
-    from ..tools.vulcan.hybrid_forge import HybridIgnite
+    from ..tools.vulcan.hybrid_forge     import HybridIgnite
+    from ..tools.vulcan.hybrid_optimizer import optimize_pyx_file
     from pathlib import Path
-
-    # Import opcional do optimizer — não bloqueia se não instalado
-    try:
-        from ..tools.vulcan.hybrid_optimizer import optimize_pyx_file as _optimize_pyx_file
-        _has_optimizer = True
-    except ImportError:
-        _has_optimizer = False
-        _optimize_pyx_file = None
 
     ignite = HybridIgnite(root)
     files  = HybridIgnite._collect_files(Path(target).resolve())
@@ -217,36 +208,16 @@ def _run_hybrid_with_optimizer(target, root, force, scan_only=False):
                 f"({', '.join(f.reasons[:3])})"
             )
 
-        # Gera .pyx raw — só se não for scan-only
-        if scan_only:
-            click.echo(
-                f"   {Fore.CYAN}  [scan-only]{Style.RESET_ALL} "
-                f"score acumulado={scan.total_score}"
-            )
-            continue
-
-        pyx_path = None  # inicialização explícita para evitar UnboundLocalError
-        try:
-            pyx_path = ignite._forge.generate(scan)
-        except Exception as _gen_err:
-            click.echo(f"   {Fore.RED}✘{Style.RESET_ALL} {fname}: forge.generate falhou: {_gen_err}")
-            click.echo(f"   {Fore.RED}   {_tb.format_exc()}{Style.RESET_ALL}")
-            continue
-
+        # Gera .pyx raw
+        pyx_path = ignite._forge.generate(scan)
         if not pyx_path:
-            click.echo(f"   {Fore.RED}✘{Style.RESET_ALL} {fname}: forge falhou (None)")
+            click.echo(f"   {Fore.RED}✘{Style.RESET_ALL} {fname}: forge falhou")
             continue
 
-        # Enriquece com optimizer (se disponível)
-        opt_report = None
-        if _has_optimizer:
-            try:
-                pyx_path, opt_report = _optimize_pyx_file(pyx_path)
-            except Exception as _opt_err:
-                click.echo(f"   {Fore.YELLOW}⚠ optimizer falhou: {_opt_err}{Style.RESET_ALL}")
+        # Enriquece com optimizer
+        pyx_path, opt_report = optimize_pyx_file(pyx_path)
 
-        if opt_report and opt_report.transformations and \
-                not opt_report.transformations[0].startswith('revertido'):
+        if opt_report.transformations and not opt_report.transformations[0].startswith('revertido'):
             opt_summary.append(opt_report)
             n_cdefs = len(opt_report.transformations)
             click.echo(
@@ -317,24 +288,83 @@ def vulcan_pitstop(clear_cache):
             click.echo(f"\n{Fore.GREEN}[OK]{Fore.RESET} WarmupCache apagado. Próximo ignite recompila tudo.")
         else:
             click.echo(f"\n{Fore.YELLOW}[INFO]{Fore.RESET} Cache já estava vazio.")
+            
+            
+@vulcan_group.command('lib')
+@click.option('--analyze', is_flag=True, help="Lista dependências 'quentes' candidatas à compilação.")
+@click.option('--target', help="Compila uma biblioteca específica de requirements.txt.")
+@click.option('--auto', is_flag=True, help="Compila automaticamente os melhores candidatos da análise.")
+@click.option('--run-tests', is_flag=True, default=True, help="Executa a suíte de testes após a compilação para validar.")
+@click.pass_context
+def vulcan_lib(ctx, analyze, target, auto, run_tests):
+    """Compila dependências de terceiros para performance nativa."""
+    root = _find_project_root(os.getcwd())
+    
+    with ExecutionLogger('vulcan_lib', root, ctx.params) as logger:
+        
+        # --- Fase 1: Análise e Identificação ---
+        if analyze:
+            click.echo(f"{Fore.CYAN}{Style.BRIGHT}--- [VULCAN LIB] Analisando Telemetria de Dependências ---{Style.RESET_ALL}")
+            from ..tools.vulcan.advisor import VulcanAdvisor
+            advisor = VulcanAdvisor(root)
+            
+            # Precisamos de um novo método no Advisor para isso
+            hot_deps = advisor.get_hot_dependencies()
+            
+            if not hot_deps:
+                click.echo(Fore.YELLOW + "Nenhuma dependência 'quente' encontrada na telemetria recente.")
+                return
+
+            click.echo(f"{'BIBLIOTECA':<25} | {'PONTOS DE CALOR (HITS)'}")
+            click.echo("-" * 50)
+            for dep, hits in hot_deps.items():
+                click.echo(f"{Fore.WHITE}{dep:<25}{Style.RESET_ALL} | {Fore.RED}{hits}{Style.RESET_ALL}")
+            return
+
+        if target:
+            click.echo(f"{Fore.CYAN}{Style.BRIGHT}--- [VULCAN LIB] Forjando: {target} ---{Style.RESET_ALL}")
+            from ..tools.vulcan.lib_forge import LibForge
+            
+            forge = LibForge(root)
+            success, result_message = forge.compile_library(target)
+            
+            if success:
+                click.echo(f"{Fore.GREEN}{Style.BRIGHT}\n[SUCESSO] {result_message}{Style.RESET_ALL}")
+            else:
+                click.echo(f"{Fore.RED}{Style.BRIGHT}\n[FALHA] {result_message}{Style.RESET_ALL}")
+            
+            # TODO: Adicionar lógica para rodar testes e validar
+            return
+
+        elif auto:
+            click.echo(f"{Fore.YELLOW}Funcionalidade '--auto' em desenvolvimento.{Style.RESET_ALL}")
+            
+        else:
+            click.echo(ctx.get_help())
 
 
 @vulcan_group.command('benchmark')
 @click.argument('path', required=False, type=click.Path(exists=True))
-@click.option('--runs',  default=200, type=int, show_default=True,
+@click.option('--runs',       default=200, type=int, show_default=True,
               help='Número de execuções por função para calcular média.')
-@click.option('--json',  'output_json', is_flag=True,
+@click.option('--json',       'output_json', is_flag=True,
               help='Saída em JSON (para integração com CI).')
-def vulcan_benchmark(path, runs, output_json):
+@click.option('--min-speedup', default=1.1, type=float, show_default=True,
+              help='Speedup mínimo para considerar ganho real (regressões abaixo são marcadas).')
+@click.option('--save',       is_flag=True,
+              help='Salva resultado em .doxoade/vulcan/bench_results.json (feedback loop).')
+def vulcan_benchmark(path, runs, output_json, min_speedup, save):
     """Mede speedup real Python vs Cython das funções compiladas.
 
     Compara execução das funções originais Python com os binários
     gerados pelo --hybrid, exibindo speedup real por função.
+    Funções com speedup < --min-speedup são marcadas como REGRESSÃO.
 
     Exemplos:
       doxoade vulcan benchmark doxoade/tools/
       doxoade vulcan benchmark doxoade/tools/analysis.py --runs 500
       doxoade vulcan benchmark doxoade/tools/ --json > bench.json
+      doxoade vulcan benchmark doxoade/tools/ --save --min-speedup 1.2
     """
     root   = _find_project_root(os.getcwd())
     target = path or root
@@ -351,12 +381,34 @@ def vulcan_benchmark(path, runs, output_json):
 
     try:
         from ..tools.vulcan.hybrid_benchmark import run_benchmark
-        run_benchmark(
+        results = run_benchmark(
             project_root = root,
             target       = target,
             runs         = runs,
             output_json  = output_json,
+            min_speedup  = min_speedup,
         )
+
+        if save and results:
+            import json as _json
+            bench_path = (
+                Path(_find_project_root(os.getcwd()))
+                / ".doxoade" / "vulcan" / "bench_results.json"
+            )
+            bench_path.parent.mkdir(parents=True, exist_ok=True)
+            # Serializa results (lista de FileBenchResult dataclasses)
+            import dataclasses
+            serializable = _json.loads(
+                _json.dumps(results, default=lambda o: dataclasses.asdict(o) if dataclasses.is_dataclass(o) else str(o))
+            )
+            bench_path.write_text(_json.dumps(serializable, indent=2), encoding='utf-8')
+            click.echo(
+                f"\n{Fore.GREEN}  ✔ Resultados salvos em {bench_path}{Style.RESET_ALL}"
+            )
+            click.echo(
+                f"{Fore.CYAN}  Dica: use estes dados para excluir regressões no próximo --hybrid{Style.RESET_ALL}"
+            )
+
     except Exception as e:
         _print_vulcan_forensic("BENCHMARK", e)
         sys.exit(1)
@@ -485,7 +537,7 @@ def vulcan_module(target_path, main_files, auto_main):
 
 def _print_vulcan_forensic(scope: str, e: Exception):
     """Interface Forense para falhas de metalurgia (MPoT-5.3)."""
-    import sys as exc_sys, os as exc_os, traceback as exc_tb_mod
+    import sys as exc_sys, os as exc_os
     _, exc_obj, exc_tb = exc_sys.exc_info()
     f_name = exc_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1] if exc_tb else "vulcan_cmd.py"
     line_n = exc_tb.tb_lineno if exc_tb else 0
@@ -493,10 +545,3 @@ def _print_vulcan_forensic(scope: str, e: Exception):
     click.echo(f"\n\033[1;34m\n[ ■ FORENSIC:VULCAN:{scope} ]\033[0m \033[1m\n ■ File: {f_name} | L: {line_n}\033[0m")
     exc_value = '\n  >>>   '.join(str(exc_obj).split("'"))
     click.echo(f"\033[31m\n ■ Tipo: {type(e).__name__} \n ■ Exception value: {exc_value} \n ■ Valor: {e}\n\033[0m")
-
-    # Traceback completo — mostra a linha REAL do erro
-    click.echo("\033[33m ■ Traceback completo:\033[0m")
-    tb_lines = exc_tb_mod.format_exception(type(e), e, exc_tb)
-    for line in tb_lines:
-        for subline in line.rstrip().splitlines():
-            click.echo(f"   \033[2m{subline}\033[0m")

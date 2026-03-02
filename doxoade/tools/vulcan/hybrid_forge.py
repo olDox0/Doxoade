@@ -2,46 +2,64 @@
 # doxoade/tools/vulcan/hybrid_forge.py
 """
 Vulcan HybridForge — Compilação Seletiva por Função.
-=================================================================================================================
+=====================================================
 
-Visão: arquivos pode ser impuro mas conter funções puras.
-Compilar função isolada captura ganho sem o risco do arquivo inteiro.
+Visão: um arquivo pode ser impuro mas conter funções puras.
+Compilar a função isolada captura o ganho sem o risco do arquivo inteiro.
 
 Pipeline:
-  .py  →  [HybridScanner]           →  funções elegíveis
-       →  [HybridForge]             →  mini .pyx por arquivo
-       →  [VulcanCompiler]          →  binário .pyd/.so
-       →  [bridge.apply_turbo()]    → hot-swap automático
+  .py  →  [HybridScanner]  →  funções elegíveis
+       →  [HybridForge]    →  mini .pyx por arquivo
+       →  [VulcanCompiler] →  binário .pyd/.so
+       →  [bridge.apply_turbo()] → hot-swap automático
 
 IMPORTANTE — Separação de responsabilidades:
-  HybridForge.generate() → só gera .pyx, NUNCA chama o optimizer.
-  optimizer é chamado pelo vulcan_cmd._run_hybrid_with_optimizer()
-  após receber Path de .pyx. Isso elimina qualquer risco de
+  HybridForge.generate() → só gera o .pyx, NUNCA chama o optimizer.
+  O optimizer é chamado pelo vulcan_cmd._run_hybrid_with_optimizer()
+  após receber o Path do .pyx. Isso elimina qualquer risco de
   UnboundLocalError por conflito de escopo de variável.
+
+Compliance:
+  OSL-4 : cada classe tem responsabilidade única
+  OSL-5 : score nunca lança exceção — retorna 0 em caso de dúvida
+  OSL-7 : retornos tipados e verificados pelo chamador
+  MPoT-3: sem alocação desnecessária no loop de scoring
+  PASC-6: fail-graceful em qualquer etapa
 """
 
 from __future__ import annotations
-import ast, hashlib, os
+
+import ast
+import hashlib
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-# =========================== Constantes de scoring ===========================
+# ---------------------------------------------------------------------------
+# Constantes de scoring
+# ---------------------------------------------------------------------------
 
-_SCORE_FOR_LOOP          = 3;   _SCORE_COMPREHENSION     = 2
-_SCORE_ARITHMETIC_LOOP   = 3;   _SCORE_AST_WALK          = 2
+_SCORE_FOR_LOOP          = 3
+_SCORE_COMPREHENSION     = 2
+_SCORE_ARITHMETIC_LOOP   = 3
+_SCORE_AST_WALK          = 2
 _SCORE_COLLECTION_ACCESS = 1
 
-_PENALTY_IO              = -999;    _PENALTY_SUBPROCESS      = -999
-_PENALTY_ASYNC           = -999;    _PENALTY_GLOBAL_MUTÁVEL  = -3
+_PENALTY_IO              = -999
+_PENALTY_SUBPROCESS      = -999
+_PENALTY_ASYNC           = -999
+_PENALTY_GLOBAL_MUTÁVEL  = -3
 
 _MIN_SCORE = 4
 
 _IO_NAMES = frozenset({
-    'open','socket','connect','send','recv','read','write',
-    'readline','readlines','urlopen','urlretrieve','requests',
-    'subprocess','Popen','run','call','check_output',
-    'sleep','Thread','Process','Queue','print','input',
+    'open', 'socket', 'connect', 'send', 'recv',
+    'read', 'write', 'readline', 'readlines',
+    'urlopen', 'urlretrieve', 'requests',
+    'subprocess', 'Popen', 'run', 'call', 'check_output',
+    'sleep', 'Thread', 'Process', 'Queue',
+    'print', 'input',
 })
 
 _BAD_DECORATORS = frozenset({
@@ -61,9 +79,8 @@ import ast as _ast
 import json as _json
 try:
     from typing import *
-except Exception as e:
-    print(f"\033[31m ■ Erro: {e}")
-    traceback.print_tb(e.__traceback__)
+except Exception:
+    pass
 """
 
 _PYX_STUB = """\
@@ -77,13 +94,18 @@ class _Stub:
     def __bool__(self): return False
 """
 
-# =========================== Estruturas de dados ===========================
+
+# ---------------------------------------------------------------------------
+# Estruturas de dados
+# ---------------------------------------------------------------------------
 
 @dataclass
 class FunctionScore:
     """Resultado do scoring de uma função individual."""
-    name:       str;    lineno:     int
-    score:      int;    eligible:   bool
+    name:       str
+    lineno:     int
+    score:      int
+    eligible:   bool
     reasons:    list[str] = field(default_factory=list)
     source:     str       = ""
 
@@ -91,14 +113,23 @@ class FunctionScore:
 @dataclass
 class FileScanResult:
     """Resultado do scan de um arquivo .py completo."""
-    file_path:   str;   total_score: int
+    file_path:   str
+    total_score: int
     candidates:  list[FunctionScore] = field(default_factory=list)
     skipped:     list[FunctionScore] = field(default_factory=list)
 
-# =========================== HybridScanner ===========================
+
+# ---------------------------------------------------------------------------
+# HybridScanner
+# ---------------------------------------------------------------------------
 
 class HybridScanner:
-    """ Analisa arquivo .py via AST e retorna score de cada função definida no nível de módulo. """
+    """
+    Analisa um arquivo .py via AST e retorna o score de elegibilidade
+    de cada função definida no nível de módulo.
+
+    OSL-5: nenhum método levanta exceção para o chamador.
+    """
 
     def scan(self, file_path: str) -> FileScanResult:
         """Entry-point principal. Retorna FileScanResult mesmo em erro de parse."""
@@ -118,23 +149,87 @@ class HybridScanner:
         lines = source.splitlines()
 
         for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)): continue
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
             fs = self._score_function(node, lines)
             if fs.eligible:
-                result.candidates.append(fs);    result.total_score += fs.score
+                result.candidates.append(fs)
+                result.total_score += fs.score
             else:
                 result.skipped.append(fs)
 
         result.candidates.sort(key=lambda f: f.score, reverse=True)
         return result
 
+    @staticmethod
+    def _has_unbound_locals(node: ast.FunctionDef) -> list[str]:
+        """
+        Detecta variáveis usadas antes de qualquer atribuição na função.
+        Cython é mais estrito que Python — trata isso como erro de compilação.
+
+        Usa traversal ordenado por (lineno, col_offset) para detectar corretamente
+        casos como: `if not x: x = default` (x Load vem antes de x Store na mesma linha).
+
+        Retorna lista de nomes problemáticos (vazia = função OK).
+        """
+        # Coleta todos os nós Name com posição, ordenados por (linha, coluna)
+        all_names: list = []
+        for child in ast.walk(node):
+            if isinstance(child, ast.Name):
+                all_names.append((
+                    child.lineno,
+                    child.col_offset,
+                    child.id,
+                    type(child.ctx).__name__,  # 'Load', 'Store', 'Del'
+                ))
+        all_names.sort()  # ordena por (linha, col) — garante ordem de execução
+
+        # Nomes já definidos ao entrar na função: argumentos + builtins
+        builtins_names: set = set(dir(__builtins__) if not isinstance(__builtins__, dict)
+                                  else __builtins__.keys())
+        defined: set = builtins_names | {'True', 'False', 'None', 'self', 'cls'}
+
+        for arg in (node.args.args + node.args.posonlyargs +
+                    node.args.kwonlyargs + node.args.kw_defaults):
+            if isinstance(arg, ast.arg):
+                defined.add(arg.arg)
+        if node.args.vararg: defined.add(node.args.vararg.arg)
+        if node.args.kwarg:  defined.add(node.args.kwarg.arg)
+
+        problems: list = []
+
+        for _line, _col, name, ctx in all_names:
+            if ctx == 'Store':
+                defined.add(name)
+            elif ctx == 'Load':
+                if name not in defined:
+                    # Verifica se há um Store posterior para este nome
+                    # (confirma que era intenção ser local, não global/builtin)
+                    has_later_store = any(
+                        n == name and c == 'Store' and (l, co) > (_line, _col)
+                        for l, co, n, c in all_names
+                    )
+                    if has_later_store and name not in problems:
+                        problems.append(name)
+
+        return problems
+
     def _score_function(self, node: ast.FunctionDef, lines: list[str]) -> FunctionScore:
         """Calcula o score de uma função e decide elegibilidade."""
-        score   = 0;     reasons = []
+        score   = 0
+        reasons = []
 
         if isinstance(node, ast.AsyncFunctionDef):
             return FunctionScore(node.name, node.lineno, _PENALTY_ASYNC,
                                  False, ["async: inelegível"])
+
+        # Verificação de UnboundLocalError antes de qualquer outra coisa
+        unbound = self._has_unbound_locals(node)
+        if unbound:
+            return FunctionScore(
+                node.name, node.lineno, 0, False,
+                [f"unbound local(s): {', '.join(unbound[:3])} — corrigir antes de compilar"]
+            )
 
         for dec in node.decorator_list:
             dec_name = self._dec_name(dec)
@@ -142,8 +237,10 @@ class HybridScanner:
                 return FunctionScore(node.name, node.lineno, _PENALTY_IO,
                                      False, [f"decorator inelegível: {dec_name}"])
 
-        has_loop    = False;   inner_arith = False
-        inner_ast   = False;   inner_coll  = False
+        has_loop    = False
+        inner_arith = False
+        inner_ast   = False
+        inner_coll  = False
 
         for child in ast.walk(node):
             if isinstance(child, ast.Call):
@@ -153,7 +250,7 @@ class HybridScanner:
                                          False, [f"I/O detectado: {fname}"])
 
             if isinstance(child, (ast.For, ast.While)):
-                has_loop = True;
+                has_loop = True
                 score   += _SCORE_FOR_LOOP
                 reasons.append("for/while loop")
 
@@ -192,9 +289,12 @@ class HybridScanner:
         src = self._extract_source(node, lines)
 
         return FunctionScore(
-            name     = node.name,   lineno   = node.lineno,
-            score    = score,       eligible = eligible,
-            reasons  = reasons,     source   = src,
+            name     = node.name,
+            lineno   = node.lineno,
+            score    = score,
+            eligible = eligible,
+            reasons  = reasons,
+            source   = src,
         )
 
     @staticmethod
@@ -207,9 +307,8 @@ class HybridScanner:
                 obj      = func.value
                 obj_name = obj.id if isinstance(obj, ast.Name) else ''
                 return f"{obj_name}.{func.attr}" if obj_name else func.attr
-        except Exception as e:
-            print(f"\033[31m ■ Erro: {e}")
-            traceback.print_tb(e.__traceback__)
+        except Exception:
+            pass
         return None
 
     @staticmethod
@@ -221,10 +320,8 @@ class HybridScanner:
                 return node.attr
             if isinstance(node, ast.Call):
                 return HybridScanner._dec_name(node.func)
-        except Exception as e:
-            print(f"\033[31m ■ Erro: {e}")
-            traceback.print_tb(e.__traceback__)
-
+        except Exception:
+            pass
         return None
 
     @staticmethod
@@ -236,12 +333,18 @@ class HybridScanner:
         except Exception:
             return ""
 
-# =========================== HybridForge ===========================
+
+# ---------------------------------------------------------------------------
+# HybridForge
+# ---------------------------------------------------------------------------
 
 class HybridForge:
     """
     A partir de um FileScanResult, gera um arquivo .pyx contendo
     apenas as funções elegíveis, transformadas para Cython.
+
+    OSL-4: generate() tem UMA responsabilidade — gerar o .pyx.
+           O optimizer NÃO é chamado aqui. Fica em vulcan_cmd.py.
     """
 
     def __init__(self, foundry_dir: str | Path):
@@ -251,10 +354,13 @@ class HybridForge:
     def generate(self, scan_result: FileScanResult) -> Optional[Path]:
         """
         Gera o .pyx para as funções elegíveis do arquivo escaneado.
+
         Retorna o Path do .pyx gerado, ou None em falha.
         NÃO chama optimize_pyx_file — sem risco de UnboundLocalError.
+        PASC-6: nunca levanta exceção para o chamador.
         """
-        if not scan_result.candidates: return None
+        if not scan_result.candidates:
+            return None
 
         abs_path    = Path(scan_result.file_path).resolve()
         path_hash   = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
@@ -295,12 +401,15 @@ class HybridForge:
         """
         Transforma o source Python para forma compatível com Cython.
         Remove anotações de tipo, decoradores, renomeia com _vulcan_optimized.
+        PASC-6: retorna None em qualquer falha.
         """
-        if not fs.source: return None
+        if not fs.source:
+            return None
 
         try:
             tree = ast.parse(fs.source)
-        except SyntaxError: return None
+        except SyntaxError:
+            return None
 
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -312,9 +421,10 @@ class HybridForge:
                         *node.args.posonlyargs,
                         *node.args.kwonlyargs):
                 arg.annotation = None
-                
-            if node.args.vararg:    node.args.vararg.annotation = None
-            if node.args.kwarg:     node.args.kwarg.annotation  = None
+            if node.args.vararg:
+                node.args.vararg.annotation = None
+            if node.args.kwarg:
+                node.args.kwarg.annotation  = None
 
             if not node.name.endswith('_vulcan_optimized'):
                 node.name = f"{node.name}_vulcan_optimized"
@@ -323,18 +433,25 @@ class HybridForge:
 
             try:
                 code = ast.unparse(node)
-            except Exception: return None
+            except Exception:
+                return None
 
             header = (f"# origem: {fs.name}  |  score: {fs.score}  "
                       f"|  razões: {', '.join(fs.reasons)}")
             return f"{header}\n{code}"
+
         return None
 
-# =========================== HybridIgnite ===========================
+
+# ---------------------------------------------------------------------------
+# HybridIgnite
+# ---------------------------------------------------------------------------
 
 class HybridIgnite:
-    """ Entry-point de alto nível para compilação híbrida via hybrid_ignite().
-    O optimizer NÃO é invocado aqui — fica em vulcan_cmd._run_hybrid_with_optimizer. """
+    """
+    Entry-point de alto nível para compilação híbrida via hybrid_ignite().
+    O optimizer NÃO é invocado aqui — fica em vulcan_cmd._run_hybrid_with_optimizer.
+    """
 
     def __init__(self, project_root: str | Path):
         self.root    = Path(project_root).resolve()
@@ -357,11 +474,13 @@ class HybridIgnite:
         files       = self._collect_files(target_path)
 
         report = {
-            "files_scanned":       0,    "files_with_hits":     0,
-            "functions_compiled":  0,   "functions_skipped":   0,
+            "files_scanned":       0,
+            "files_with_hits":     0,
+            "functions_compiled":  0,
+            "functions_skipped":   0,
             "total_score":         0,
-            
-            "modules_generated":   [],  "errors":              [],
+            "modules_generated":   [],
+            "errors":              [],
         }
 
         for py_file in files:
@@ -388,6 +507,7 @@ class HybridIgnite:
             report["modules_generated"].append(module_name)
 
             ok, err = self._compile(module_name)
+
             if ok:
                 self._log(on_progress,
                     f"   \033[32m✔\033[0m {py_file.name} → {module_name} "
@@ -403,9 +523,11 @@ class HybridIgnite:
         return report
 
     def _compile(self, module_name: str) -> tuple[bool, Optional[str]]:
+        """PASC-6: retorna (False, erro) em vez de levantar exceção."""
         try:
             from .environment import VulcanEnvironment
             from .compiler    import VulcanCompiler
+
             env      = VulcanEnvironment(self.root)
             compiler = VulcanCompiler(env)
             return compiler.compile(module_name)
@@ -415,12 +537,16 @@ class HybridIgnite:
     @staticmethod
     def _collect_files(target: Path) -> list[Path]:
         _IGNORE = frozenset({
-            '__init__', '__main__', 'setup', 'forge', 'compiler', 'autopilot',
+            '__init__', '__main__', 'setup',
+            'forge', 'compiler', 'autopilot',
             'bridge', 'advisor', 'environment', 'core', 'pitstop',
             'diagnostic', 'guards', 'lab', 'sentinel', 'meta_finder',
             'runtime', 'auto_repair', 'artifact_manager', 'compiler_safe',
         })
-        _IGNORE_DIRS = frozenset({'venv','.git','__pycache__','build','dist','.doxoade','tests','pytest_temp_dir',})
+        _IGNORE_DIRS = frozenset({
+            'venv', '.git', '__pycache__', 'build', 'dist',
+            '.doxoade', 'tests', 'pytest_temp_dir',
+        })
 
         if target.is_file() and target.suffix == '.py':
             return [target] if target.stem not in _IGNORE else []
@@ -429,7 +555,8 @@ class HybridIgnite:
         for root, dirs, filenames in os.walk(str(target)):
             dirs[:] = [d for d in dirs if d not in _IGNORE_DIRS]
             for fname in filenames:
-                if not fname.endswith('.py'): continue
+                if not fname.endswith('.py'):
+                    continue
                 stem = Path(fname).stem
                 if stem in _IGNORE:
                     continue
@@ -458,19 +585,20 @@ class HybridIgnite:
             print(msg)
 
     @staticmethod
-    def _print_summary(repr: dict, callback):
+    def _print_summary(report: dict, callback):
         lines = [
-            "\n\033[36m{'─' * 55}\033[0m", f"  \033[1mHYBRIDFORGE — RESUMO\033[0m",
-            f"  Arquivos escaneados  : {repr['files_scanned']}",
-            f"  Arquivos com ganho   : {repr['files_with_hits']}",
-            f"  Funções compiladas   : {repr['functions_compiled']}",
-            f"  Funções ignoradas    : {repr['functions_skipped']}",
-            f"  Score acumulado      : {repr['total_score']}",
-            f"  Módulos gerados      : {len(repr['modules_generated'])}",
+            f"\n\033[36m{'─' * 55}\033[0m",
+            f"  \033[1mHYBRIDFORGE — RESUMO\033[0m",
+            f"  Arquivos escaneados  : {report['files_scanned']}",
+            f"  Arquivos com ganho   : {report['files_with_hits']}",
+            f"  Funções compiladas   : {report['functions_compiled']}",
+            f"  Funções ignoradas    : {report['functions_skipped']}",
+            f"  Score acumulado      : {report['total_score']}",
+            f"  Módulos gerados      : {len(report['modules_generated'])}",
         ]
-        if repr["errors"]:
-            lines.append(f"  Erros                : {len(repr['errors'])}")
-            for e in repr["errors"][:5]:
+        if report["errors"]:
+            lines.append(f"  Erros                : {len(report['errors'])}")
+            for e in report["errors"][:5]:
                 lines.append(f"    └─ {e}")
         lines.append(f"\033[36m{'─' * 55}\033[0m")
         msg = '\n'.join(lines)
@@ -479,15 +607,21 @@ class HybridIgnite:
         else:
             print(msg)
 
-# =========================== API pública ===========================
+
+# ---------------------------------------------------------------------------
+# API pública
+# ---------------------------------------------------------------------------
 
 def hybrid_scan_file(file_path: str) -> FileScanResult:
     """Escaneia um arquivo e retorna o relatório de scoring. Sem efeito colateral."""
     return HybridScanner().scan(file_path)
 
+
 def hybrid_ignite(
-    project_root: str | Path,       target:       str | Path,
-    force:        bool = False,     on_progress        = None,
+    project_root: str | Path,
+    target:       str | Path,
+    force:        bool = False,
+    on_progress        = None,
 ) -> dict:
     """Entry-point legado — chama HybridIgnite.run() SEM optimizer."""
     return HybridIgnite(project_root).run(target, force=force, on_progress=on_progress)

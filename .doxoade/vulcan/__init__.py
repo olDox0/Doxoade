@@ -1,2 +1,4 @@
-# VULCAN QUARANTINE ZONE
-raise ImportError('Direct import blocked by Aegis Rule 19.')
+# -*- coding: utf-8 -*-
+from .runtime import activate_vulcan, find_vulcan_project_root, load_vulcan_binary
+
+__all__ = ["activate_vulcan", "find_vulcan_project_root", "load_vulcan_binary"]

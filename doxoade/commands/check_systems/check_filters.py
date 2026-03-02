@@ -16,11 +16,13 @@ QA_TAGS: Dict[str, str] = {
     'TODO': 'INFO', 'FIXME': 'WARNING', 'BUG': 'ERROR', 
     'HACK': 'WARNING', 'ADTI': 'CRITICAL'
 }
-def apply_filters(state: 'CheckState', **kwargs):
+def apply_filters(state: 'CheckState', *args, **kwargs):
+    if state is None or not hasattr(state, "findings"):
+        return
     """Crivo Industrial Nexus v100.8 (Aegis Shield)."""
     raw_findings = state.findings
     state.findings = []
-    
+
     for f in raw_findings:
         file_path = f.get('file', '').replace('\\', '/')
         line_num = f.get('line', 0)
@@ -43,7 +45,8 @@ def apply_filters(state: 'CheckState', **kwargs):
         state.register_finding(f)
     
     state.sync_summary()
-def _should_silence(finding: dict, exclude_cats: set) -> bool:
+def _should_silence(finding: dict, exclude_cats: set | None = None) -> bool:
+    exclude_cats = exclude_cats or set()
     """Centraliza a lógica de silenciamento técnico (MPoT-1)."""
     msg = finding.get('message', '').lower()
     file_path = finding.get('file', '').replace('\\', '/')

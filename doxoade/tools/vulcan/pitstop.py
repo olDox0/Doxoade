@@ -23,7 +23,7 @@ Variáveis de ambiente:
 
 from __future__ import annotations
 
-import hashlib, json, os, shutil, subprocess, sys, threading, time
+import hashlib, json, os, shutil, subprocess, sys, threading, time, traceback
 
 from concurrent.futures import ThreadPoolExecutor as TPE, as_completed
 from pathlib import Path
@@ -62,7 +62,7 @@ class WarmupCache:
         try:
             if self._path.exists():
                 return json.loads(self._path.read_text(encoding="utf-8"))
-        except Exception e: print(f"\033[31m ■ Erro: {e}"); traceback.print_tb(e.__traceback__)
+        except Exception as e: print(f"\033[31m ■ Erro: {e}"); traceback.print_tb(e.__traceback__)
         return {}
 
     def save(self) -> None:
@@ -72,7 +72,7 @@ class WarmupCache:
                 self._path.write_text(
                     json.dumps(self._data, indent=2), encoding="utf-8"
                 )
-        except Exception e: print(f"\033[31m ■ Erro: {e}"); traceback.print_tb(e.__traceback__)
+        except Exception as e: print(f"\033[31m ■ Erro: {e}"); traceback.print_tb(e.__traceback__)
 
     # --------- Verificação ---------
     def _content_hash(self, path: Path) -> str | None:
@@ -327,7 +327,7 @@ def _compile_single(
         except Exception as e: print(f"\033[31m ■ Erro: {e}"); traceback.print_tb(e.__traceback__)
         try:
             _shutil.rmtree(str(build_tmp), ignore_errors=True)
-        except Exception e: print(f"\033[31m ■ Erro: {e}"); traceback.print_tb(e.__traceback__)
+        except Exception as e: print(f"\033[31m ■ Erro: {e}"); traceback.print_tb(e.__traceback__)
 
 
 def _parallel_compile(
@@ -443,7 +443,7 @@ def compile_batch(entries: list[dict],    foundry_path: Path,
     finally:
         try:
             setup_path.unlink(missing_ok=True)
-        except Exception e: print(f"\033[31m ■ Erro: {e}"); traceback.print_tb(e.__traceback__)
+        except Exception as e: print(f"\033[31m ■ Erro: {e}"); traceback.print_tb(e.__traceback__)
 
     # Resgata binários já gerados mesmo com exit != 0
     rescued: set[str] = set()

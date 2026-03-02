@@ -234,7 +234,7 @@ def save(ctx, message, archives, remove_commit, branch_target, merge_target, upd
         if staged_prod and not force:
             console.print("   > [MA'AT] Julgando integridade da produção...")
             # Check Logic agora só vê o que existe no disco
-            results = run_check_logic(path='.', fix=False, fast=True, target_files=staged_prod)
+            results = run_check_logic(path='.', fix=False, fast=True, target_files=staged_prod, state=None)
             
             from .audit_systems.maat_engine import MaatEngine
             maat = MaatEngine(project_path)

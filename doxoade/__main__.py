@@ -38,9 +38,11 @@ def main():
         # FASE 2: Import e execução normal do CLI
         from doxoade.cli import cli
         cli()
-    except Exception:
-        # FASE 3: Protocolo de Resgate em caso de falha catastrófica
+    except Exception as e:
         import traceback
+        print(f"\033[31m ■ Erro: {e}")
+        traceback.print_tb(e.__traceback__)
+        # FASE 3: Protocolo de Resgate em caso de falha catastrófica
         err_msg = traceback.format_exc()
 
         current_dir = os.path.dirname(os.path.abspath(__file__))

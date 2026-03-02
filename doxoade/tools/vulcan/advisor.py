@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 # doxoade/tools/vulcan/advisor.py
+import re
 import os, json, hashlib
+
 from pathlib import Path
+from collections import defaultdict
+
 from ...database import get_db_connection
 
 class VulcanAdvisor:
@@ -54,3 +58,40 @@ class VulcanAdvisor:
         
         latest_bin_mtime = max(os.path.getmtime(b) for b in bins)
         return os.path.getmtime(py_path) <= latest_bin_mtime
+        
+    def get_hot_dependencies(self) -> dict:
+        """Analisa a telemetria e retorna um dict de bibliotecas de terceiros com mais 'hits'."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        query = "SELECT line_profile_data, working_dir FROM command_history WHERE line_profile_data IS NOT NULL ORDER BY id DESC LIMIT 200"
+        
+        hot_libs = defaultdict(int)
+        
+        try:
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            
+            for profile_json, db_work_dir in rows:
+                try:
+                    for item in json.loads(profile_json):
+                        f_raw = item['file'].replace('\\\\', '/')
+                        
+                        # Foco total: apenas arquivos dentro de 'site-packages'
+                        if "site-packages" not in f_raw:
+                            continue
+
+                        # Usa uma expressão regular para extrair o nome da biblioteca de forma segura
+                        # Ex: .../venv/Lib/site-packages/requests/api.py -> extrai 'requests'
+                        match = re.search(r"site-packages[\\\\/]([^\\\\/]+)", f_raw)
+                        if match:
+                            lib_name = match.group(1)
+                            # Ignora módulos que são parte de outros (ex: _pytest)
+                            if not lib_name.startswith('_'):
+                                hot_libs[lib_name] += item['hits']
+                except (json.JSONDecodeError, KeyError):
+                    continue
+        finally:
+            conn.close()
+            
+        # Retorna o dicionário ordenado por 'hits'
+        return dict(sorted(hot_libs.items(), key=lambda item: item[1], reverse=True))

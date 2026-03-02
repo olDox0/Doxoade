@@ -1,10 +1,21 @@
 # doxoade/dnm.py
 import os
-import pathspec
-from pathlib import Path
-from typing import List, Optional
-from doxoade.tools.filesystem import _get_project_config
 import logging 
+
+from typing import List, Optional
+from pathlib import Path
+from doxoade.tools.filesystem import _get_project_config
+
+try:
+    import pathspec
+except ImportError as e:
+    # log e fallback: força usar versão pure-python instalada
+    import importlib
+    try:
+        pathspec = importlib.import_module("pathspec")
+    except Exception:
+        raise
+
 class DNM:
     """
     Directory Navigation Module.

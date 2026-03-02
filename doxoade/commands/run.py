@@ -10,6 +10,8 @@ from doxoade.tools.doxcolors import Fore
 from ..shared_tools import ExecutionLogger
 from .run_systems.run_flow import execute_flow
 from .run_systems.run_vulcan import apply_vulcan_turbo
+from ..rescue_systems.execution_context import ExecutionContext, ExecutionMode
+
 @click.command('run')
 @click.argument('script', type=click.Path(exists=True))
 @click.option('--flow', '-fl', is_flag=True, help="Rastro de linhas.")
@@ -24,6 +26,10 @@ from .run_systems.run_vulcan import apply_vulcan_turbo
 def run(ctx, script: str, **kwargs): # FIX: Adicionada a vírgula faltante
     """Executor Universal v83.3: Decisão Única de Fluxo."""
     abs_path = os.path.abspath(script)
+
+    context = ExecutionContext.detect(
+        mode=ExecutionMode.SANDBOX
+    )
     
     # Consolida o alvo do Sniper Lens (-f ou -t)
     sniper_target = kwargs.get('file_target') or kwargs.get('target_target')

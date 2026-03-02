@@ -12,16 +12,17 @@ class VulcanEnvironment:
     def __init__(self, project_root):
         self.root     = Path(project_root)
         self.work_dir = self.root / ".doxoade" / "vulcan"
-        self.foundry  = self.work_dir / "foundry"  # Onde o C nasce
+        self.foundry  = self.work_dir / "foundry"   # Onde o C nasce
         self.bin_dir  = self.work_dir / "bin"       # Onde o .so/.pyd vive
-        self.logs     = self.work_dir / "audit.log"
-        self.staging = self.work_dir / "staging" # Adicione esta linha
+        self.lib_dir  = self.work_dir / "lib_bin"   #
+        self.logs     = self.work_dir / "audit.log" # Compilação das libs
+        self.staging = self.work_dir / "staging"    # Adicione esta linha
 
         self._setup_structure()
 
     def _setup_structure(self):
         """Cria os silos de isolamento."""
-        for folder in [self.foundry, self.bin_dir, self.staging]:
+        for folder in [self.foundry, self.bin_dir, self.staging, self.lib_dir]:
             folder.mkdir(parents=True, exist_ok=True)
 
         # PASC-19.1: Bloqueia importações diretas da quarentena
@@ -40,7 +41,7 @@ class VulcanEnvironment:
         (sem hash, ex: autopilot.pyd, compiler.pyd) no bin/ após um purge.
         Agora ambos são limpos, alinhando o comportamento com 'vulcan purge'.
         """
-        for target in [self.foundry, self.bin_dir]:
+        for target in [self.foundry, self.bin_dir, self.lib_dir]:
             if target.exists():
                 shutil.rmtree(target)
         self._setup_structure()

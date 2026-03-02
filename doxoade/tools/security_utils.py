@@ -10,10 +10,12 @@ import ast
 import sys
 import logging
 import os  # FIX: Adicionado import global essencial
-# [DOX-UNUSED] from doxoade.tools.doxcolors import Fore
+import builtins
 from pathlib import Path
 from typing import List, Dict
 from .filesystem import _find_project_root
+
+from .vulcan.meta_finder import install as vulcan_install
 
 __all__ = ['calculate_integrity_hash', 'restricted_safe_exec', 'simulate_taint_analysis', 'generate_exploit_poc', 'validate_execution_context']
 
@@ -117,26 +119,48 @@ def generate_exploit_poc(function_name: str) -> str:
     """Generates a canary payload to prove vulnerability."""
     return "print('--- AEGIS BYPASS ATTEMPT ---')" if function_name in ['eval', 'exec'] else "whoami"
 
-def restricted_safe_exec(code_str, globals_dict=None, allow_imports=False, filename="<sandbox>"):
-    import builtins
+def restricted_safe_exec(code_str: str, globals_dict: dict = None, allow_imports: bool = False, filename: str = "<sandbox>"):
+    """
+    Executa código em um ambiente restrito (sandbox) com ativação do motor Vulcano.
+
+    Esta é a função central para o comando 'doxoade run'. Ela garante:
+    1.  **Ativação do Vulcano:** Instala o VulcanMetaFinder para que o código executado
+        utilize passivamente os binários compilados (.pyd/.so).
+    2.  **Soberania de Caminho:** Muda o diretório de trabalho para a raiz do projeto
+        alvo, resolvendo problemas de importação relativa e acesso a arquivos.
+    3.  **Segurança:** Valida a AST para prevenir padrões de código perigosos.
+    4.  **Performance:** Utiliza um cache para evitar re-parse e re-validação da AST
+        do mesmo código.
+    5.  **Isolamento:** Controla quais funções built-in são expostas ao código.
+    """
+    if not code_str.strip():
+        return
+
     abs_path = os.path.abspath(filename)
     code_hash = hashlib.sha256(code_str.encode("utf-8")).hexdigest()
     
-    # 1. LOCALIZAÇÃO DA ÂNCORA (PASC 8.4)
-    # Em vez de pegar apenas o diretório do arquivo, buscamos a raiz do projeto
+    # 1. Localiza a raiz do projeto para servir como âncora de execução
     project_anchor = _find_project_root(os.path.dirname(abs_path))
     old_cwd = os.getcwd()
 
     try:
-        # SOBERANIA: Move o processo para a raiz do projeto antes de executar
-        # Isso resolve o erro de 'ia_core/' e também o 'index.html' do Flask
+        # 2. Move o processo para a raiz do projeto para garantir que caminhos relativos funcionem
         os.chdir(project_anchor)
         
+        # 3. ATIVAÇÃO DO VULCANO: Instala o gancho de importação no ambiente do sandbox
+        # Este é o passo crucial para garantir o uso passivo dos binários.
+        try:
+            vulcan_install(project_anchor)
+        except Exception as e:
+            # Se a ativação do Vulcano falhar, não quebra a execução.
+            # Apenas registra e continua em modo Python puro.
+            logging.debug(f"VulcanMetaFinder injection failed in sandbox: {e}")
+
+        # 4. Configura os built-ins e globais seguros para o sandbox
         if allow_imports:
             _inject_target_environment(filename)
             safe_builtins = builtins.__dict__.copy()
         else:
-            # (Builtins restritos mantidos...)
             essential = ['__import__', 'print', 'len', 'range', 'dict', 'list', 'set', 'tuple', 'str', 'int', 'float', 'bool', 'Exception', 'type', 'isinstance', 'open', 'getattr', 'setattr', 'hasattr']
             safe_builtins = {k: getattr(builtins, k) for k in essential if hasattr(builtins, k)}
             safe_builtins['sys'], safe_builtins['os'] = sys, os
@@ -147,28 +171,32 @@ def restricted_safe_exec(code_str, globals_dict=None, allow_imports=False, filen
             "__package__": None,
             "__name__": "__main__"
         }
-        if globals_dict: safe_globals.update(globals_dict)
+        if globals_dict:
+            safe_globals.update(globals_dict)
 
+        # 5. Validação e compilação da AST com cache
         cache_key = (code_hash, allow_imports)
-
         if cache_key in _AST_VALIDATION_CACHE:
             compiled = _AST_VALIDATION_CACHE[cache_key]
         else:
-            tree = ast.parse(code_str)
+            tree = ast.parse(code_str, filename=filename)
             _validate_ast_safety(tree, allow_imports)
             compiled = compile(tree, filename=filename, mode="exec")
             _AST_VALIDATION_CACHE[cache_key] = compiled
 
-        exec(compiled, safe_globals) # noqa: B102
+        # 6. Execução final do código dentro do sandbox configurado
+        exec(compiled, safe_globals)
         
     except Exception as e:
-        # PASC-8.9: Se for FileNotFoundError, reportamos de forma amigável
+        # Tratamento de erros amigável
         if isinstance(e, FileNotFoundError):
-             print("\033[33m   [!] Erro de Caminho: O script tentou acessar um arquivo que não existe na raiz.")
-             print(f"       Raiz Atual: {project_anchor}")
-             print(f"       Alvo: {e.filename}\033[0m")
-        _handle_sandbox_exception(e)
+             print("\033[33m   [!] Erro de Caminho: O script tentou acessar um arquivo que não existe.")
+             print(f"       Raiz de Execução: {project_anchor}")
+             print(f"       Alvo do Erro: {e.filename}\033[0m")
+        _handle_sandbox_exception(e, filename)
+        raise
     finally:
+        # Garante que o diretório de trabalho original seja restaurado, não importa o que aconteça
         os.chdir(old_cwd)
         
 def _inject_target_environment(file_path: str):

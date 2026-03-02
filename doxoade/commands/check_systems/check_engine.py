@@ -143,7 +143,7 @@ def _calculate_incident_stats(findings: List[Dict[str, Any]]) -> dict:
         stats[cat][sub] += 1
     return stats
     
-def run_check_logic(path: str, **kwargs):
+def run_check_logic(path: str, state, *_args, **kwargs):
     """
     Bridge de Compatibilidade v93.0 (PASC-Omega).
     Permite que comandos externos (save, merge) usem o motor modular.
@@ -169,3 +169,6 @@ def run_check_logic(path: str, **kwargs):
         'findings': state.findings,
         'alb_files': state.alb_files
     }
+    
+if __name__ == "__main__":
+    main()

@@ -46,7 +46,8 @@ def _scan_core(fp, manager, kwargs):
     # Lógica de triagem movida do engine.py para cá...
     return [] # Placeholder para a lógica real
     
-def run_check_logic(path: str, **kwargs):
+#def run_check_logic(path: str, state, *_args, **_kwargs):
+def run_check_logic(path: str, state=None, *_args, **kwargs):
     """
     [RESGATADO] Coordena os especialistas de Auditoria. 
     Designado como Atena-Logic no Panteão.
