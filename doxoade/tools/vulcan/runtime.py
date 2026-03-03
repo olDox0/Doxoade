@@ -527,3 +527,27 @@ def activate_vulcan(
         injected += 1
 
     return injected > 0
+
+
+def probe_embedded(project_root: str | Path | None = None) -> dict:
+    """Probe leve para depurar estado do runtime embedded no processo atual."""
+    root = Path(project_root).resolve() if project_root else None
+    if root is None:
+        main = sys.modules.get("__main__")
+        main_file = getattr(main, "__file__", None)
+        root = find_vulcan_project_root(main_file) if main_file else None
+
+    bin_dir = (root / ".doxoade" / "vulcan" / "bin") if root else None
+    lib_dir = (root / ".doxoade" / "vulcan" / "lib_bin") if root else None
+
+    state = {
+        "project_root": str(root) if root else None,
+        "finder_installed": any(isinstance(f, VulcanBinaryFinder) for f in sys.meta_path),
+        "meta_path": [type(f).__name__ for f in sys.meta_path],
+        "bin_dir": str(bin_dir) if bin_dir else None,
+        "bin_exists": bool(bin_dir and bin_dir.exists()),
+        "lib_bin_dir": str(lib_dir) if lib_dir else None,
+        "lib_bin_exists": bool(lib_dir and lib_dir.exists()),
+    }
+
+    return state
