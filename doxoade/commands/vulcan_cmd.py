@@ -872,217 +872,14 @@ def _write_safe_runtime(project_root: Path) -> Path:
     (project_root / ".doxoade" / "__init__.py").write_text("# marker package for doxoade\n", encoding="utf-8")
     (vulcan_dir / "__init__.py").write_text("# marker package for doxoade.vulcan\n", encoding="utf-8")
 
-    # runtime.py content: SafeExtensionLoader + VulcanBinaryFinder + install_meta_finder + probe_embedded
-    runtime_content = textwrap.dedent(r'''
-    # -*- coding: utf-8 -*-
-    # minimal safe runtime injected by doxoade vulcan module
-    import importlib.abc
-    import importlib.machinery
-    import importlib.util
-    import sys
-    import os
-    import types
-    from pathlib import Path
-
-    def _vlog(*_args, **_k): 
-        # keep silent by default; replace with prints for debugging
-        return None
-
-    class SafeExtensionLoader(importlib.machinery.ExtensionFileLoader):
-        """Loader que tenta carregar o .pyd e, em caso de erro, cai para o .py de fallback."""
-        def __init__(self, fullname: str, path: str, py_fallback: str | None = None):
-            super().__init__(fullname, path)
-            self._py_fallback = py_fallback
-
-        def exec_module(self, module: types.ModuleType) -> None:
-            try:
-                return super().exec_module(module)
-            except Exception:
-                # remove loaded module and fallback to .py if available
-                sys.modules.pop(module.__name__, None)
-                if self._py_fallback and os.path.exists(self._py_fallback):
-                    spec = importlib.util.spec_from_file_location(module.__name__, self._py_fallback)
-                    if not spec or not spec.loader:
-                        raise
-                    py_mod = importlib.util.module_from_spec(spec)
-                    sys.modules[module.__name__] = py_mod
-                    spec.loader.exec_module(py_mod)
-                    return
-                # re-raise original error if no fallback
-                raise
-
-    class VulcanBinaryFinder(importlib.abc.MetaPathFinder):
-        """Procura por binários compilados na foundry e retorna um spec com SafeExtensionLoader."""
-        def __init__(self, project_root: str):
-            self.project_root = Path(project_root).resolve()
-            self.bin_dir = (self.project_root / ".doxoade" / "vulcan" / "bin")
-            self._py_index = None
-
-        def _find_source_py(self, fullname: str):
-            rel = fullname.replace(".", os.sep) + ".py"
-            candidate = self.project_root / rel
-            if candidate.exists():
-                return candidate
-            # fallback: index by stem
-            if self._py_index is None:
-                self._py_index = {}
-                skip = {".git", "venv", ".venv", "__pycache__", "build", "dist", ".doxoade"}
-                for root, dirs, files in os.walk(self.project_root):
-                    dirs[:] = [d for d in dirs if d not in skip]
-                    for f in files:
-                        if f.endswith(".py"):
-                            p = Path(root) / f
-                            self._py_index[p.stem] = p
-            return self._py_index.get(fullname.split(".")[-1])
-
-        def _find_pyd_for_source(self, source_py: Path):
-            if not self.bin_dir.exists() or not source_py:
-                return None
-            stem = source_py.stem
-            ext = ".pyd" if os.name == "nt" else ".so"
-            try:
-                import hashlib
-                h = hashlib.sha256(str(source_py.resolve()).encode()).hexdigest()[:6]
-                candidate = self.bin_dir / f"v_{stem}_{h}{ext}"
-                if candidate.exists():
-                    return candidate
-            except Exception:
-                pass
-            matches = sorted(self.bin_dir.glob(f"v_{stem}_*{ext}"), key=lambda p: p.stat().st_mtime, reverse=True)
-            if matches:
-                return matches[0]
-            matches2 = sorted(self.bin_dir.glob(f"v_{stem}*{ext}"), key=lambda p: p.stat().st_mtime, reverse=True)
-            if matches2:
-                return matches2[0]
-            return None
-
-        def find_spec(self, fullname, path, target=None):
-            try:
-                src_py = self._find_source_py(fullname)
-            except Exception:
-                src_py = None
-
-            pyd_path = None
-            if src_py:
-                pyd_path = self._find_pyd_for_source(src_py)
-            else:
-                stem = fullname.split(".")[-1]
-                ext = ".pyd" if os.name == "nt" else ".so"
-                candidates = list(self.bin_dir.glob(f"v_{stem}_*{ext}")) + list(self.bin_dir.glob(f"v_{stem}*{ext}"))
-                matches = sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True) if candidates else []
-                pyd_path = matches[0] if matches else None
-
-            if not pyd_path:
-                return None
-
-            loader = SafeExtensionLoader(fullname, str(pyd_path), py_fallback=str(src_py) if src_py else None)
-            spec = importlib.util.spec_from_file_location(fullname, str(pyd_path), loader=loader)
-            return spec
-
-    def install_meta_finder(project_root: str):
-        """Instala o VulcanBinaryFinder no sys.meta_path (se não estiver presente)."""
-        root = str(Path(project_root).resolve())
-        for f in list(sys.meta_path):
-            if isinstance(f, VulcanBinaryFinder):
-                return True
-        finder = VulcanBinaryFinder(root)
-        sys.meta_path.insert(0, finder)
-        _vlog("VulcanBinaryFinder installed for", root)
-        return True
-
-    def probe_embedded():
-        """Probe rápido para verificar estado do runtime dentro do processo atual."""
-        import sys, inspect
-        print("\n🔬 VULCAN EMBEDDED RUNTIME PROBE\n")
-        print("[meta_path order]")
-        for i, f in enumerate(sys.meta_path):
-            print(f" {i:02d} -> {f}")
-        try:
-            import engine.cli as ec
-            print("\nengine.cli ->", getattr(ec, '__file__', None))
-            cli_obj = getattr(ec, 'cli', None)
-            print("cli object:", type(cli_obj), cli_obj)
-            try:
-                print("cli signature:", inspect.signature(cli_obj))
-            except Exception as e:
-                print("sig error:", e)
-        except Exception as e:
-            print("engine.cli import failed:", e)
-        print("\n✅ probe done\n")
-    ''').lstrip()
+    runtime_src = Path(__file__).resolve().parents[1] / "tools" / "vulcan" / "runtime.py"
+    runtime_content = runtime_src.read_text(encoding="utf-8")
 
     runtime_dst = vulcan_dir / "runtime.py"
     runtime_dst.write_text(runtime_content, encoding="utf-8")
 
-    # vulcan_embedded.py (simple safe loader) — keep minimal safe_call + inject_optimized
-    vulcan_embedded = textwrap.dedent(r'''
-    # -*- coding: utf-8 -*-
-    from functools import wraps
-    from pathlib import Path
-    import sys, os, importlib.util
+    (vulcan_dir / "vulcan_embedded.py").write_text(_VULCAN_EMBEDDED_CONTENT.lstrip(), encoding="utf-8")
 
-    class ExecutionContext:
-        __slots__ = ("argv","env","cwd","project_root")
-        def __init__(self):
-            import sys
-            import os
-            self.argv = sys.argv
-            self.env = dict(os.environ)
-            self.cwd = Path.cwd()
-            main = sys.modules.get("__main__")
-            self.project_root = getattr(main, "__file__", None)
-
-    def safe_call(native_fn, fallback_fn=None):
-        @wraps(fallback_fn or native_fn)
-        def wrapper(*args, **kwargs):
-            try:
-                return native_fn(ExecutionContext(), *args, **kwargs)
-            except TypeError:
-                pass
-            except Exception:
-                if callable(fallback_fn):
-                    return fallback_fn(*args, **kwargs)
-                raise
-            try:
-                return native_fn(*args, **kwargs)
-            except TypeError:
-                pass
-            except Exception:
-                if callable(fallback_fn):
-                    return fallback_fn(*args, **kwargs)
-                raise
-            if callable(fallback_fn):
-                return fallback_fn(*args, **kwargs)
-            raise RuntimeError("signature incompatible")
-        return wrapper
-
-    def inject_optimized(module, native_module, suffix="_vulcan_optimized"):
-        import inspect
-        injected, skipped = [], []
-        for attr in dir(native_module):
-            if not attr.endswith(suffix): continue
-            orig = attr[:-len(suffix)]
-            if not hasattr(module, orig): continue
-            py_func = getattr(module, orig)
-            native_func = getattr(native_module, attr)
-            if not callable(py_func) or not callable(native_func):
-                skipped.append(orig); continue
-            try:
-                py_sig = inspect.signature(py_func)
-                native_sig = inspect.signature(native_func)
-                if py_sig.parameters != native_sig.parameters:
-                    skipped.append(orig); continue
-            except Exception:
-                skipped.append(orig); continue
-            try:
-                setattr(module, orig, safe_call(native_func, py_func))
-                injected.append(orig)
-            except Exception:
-                skipped.append(orig)
-        return injected, skipped
-    ''').lstrip()
-
-    (vulcan_dir / "vulcan_embedded.py").write_text(vulcan_embedded, encoding="utf-8")
 
     return runtime_dst
 
@@ -1097,37 +894,21 @@ def _iter_project_main_files(project_root: Path):
 
 def _inject_bootstrap(main_file: Path) -> bool:
     original = main_file.read_text(encoding="utf-8", errors="replace")
-    # novo bootstrap (executa o install_meta_finder o mais cedo possível)
-    bootstrap = '''# --- DOXOADE_VULCAN_BOOTSTRAP:START ---
-from pathlib import Path as _doxo_path
-try:
-    # runtime importável do projeto alvo (.doxoade/vulcan/runtime.py)
-    import importlib.util as _doxo_importlib_util
-    _rt = _doxo_path(__file__).resolve().parents[0]
-    # sobe até encontrar .doxoade (caso o __main__ esteja em subpackage)
-    cur = _doxo_path(__file__).resolve().parent
-    while True:
-        candidate = cur / ".doxoade" / "vulcan" / "runtime.py"
-        if candidate.exists():
-            spec = _doxo_importlib_util.spec_from_file_location("_doxoade_vulcan_runtime", str(candidate))
-            mod = _doxo_importlib_util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            try:
-                mod.install_meta_finder(str(cur))
-            except Exception:
-                pass
-            break
-        if cur == cur.parent:
-            break
-        cur = cur.parent
-except Exception:
-    pass
-# --- DOXOADE_VULCAN_BOOTSTRAP:END ---
 
-'''
-    if bootstrap in original:
-        return False
-    updated = bootstrap + original
+    content = original
+    while True:
+        start = content.find(_BOOTSTRAP_START)
+        if start < 0:
+            break
+        end = content.find(_BOOTSTRAP_END, start)
+        if end < 0:
+            break
+        end += len(_BOOTSTRAP_END)
+        if end < len(content) and content[end] == "\n":
+            end += 1
+        content = content[:start] + content[end:]
+
+    updated = _BOOTSTRAP_BLOCK + content
     if updated == original:
         return False
     main_file.write_text(updated, encoding="utf-8")
