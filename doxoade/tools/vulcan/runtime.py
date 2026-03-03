@@ -41,7 +41,7 @@ _OPTIMIZED_SUFFIX = "_vulcan_optimized"
 _BINARY_EXT = ".pyd" if os.name == "nt" else ".so"
 
 # Ativa logging de redirecionamento: set VULCAN_VERBOSE=1 antes de executar.
-_VERBOSE = os.environ.get("VULCAN_VERBOSE", "").strip() == "0"
+_VERBOSE = os.environ.get("VULCAN_VERBOSE", "").strip() == "1"
 
 
 def _vlog(msg: str) -> None:

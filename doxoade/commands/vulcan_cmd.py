@@ -5,6 +5,7 @@ import textwrap
 import sys
 import signal
 import os
+import subprocess
 import click
 from pathlib import Path
 
@@ -724,10 +725,26 @@ def vulcan_lib(ctx, analyze, target, auto, run_tests):
             
             if success:
                 click.echo(f"{Fore.GREEN}{Style.BRIGHT}\n[SUCESSO] {result_message}{Style.RESET_ALL}")
+                if run_tests:
+                    click.echo(f"{Fore.CYAN}   > Validando estabilidade com suíte de testes (pytest)...{Style.RESET_ALL}")
+                    test_cmd = [sys.executable, "-m", "pytest", "-q"]
+                    try:
+                        proc = subprocess.run(test_cmd, cwd=str(root), check=False)
+                        if proc.returncode == 0:
+                            click.echo(f"{Fore.GREEN}[OK]{Style.RESET_ALL} Testes passaram após compilação da lib.")
+                        else:
+                            click.echo(
+                                f"{Fore.YELLOW}[AVISO]{Style.RESET_ALL} Testes falharam após compilação "
+                                f"(exit={proc.returncode}). Recomendado rollback da lib em .doxoade/vulcan/lib_bin/."
+                            )
+                    except FileNotFoundError:
+                        click.echo(
+                            f"{Fore.YELLOW}[AVISO]{Style.RESET_ALL} pytest não está disponível no ambiente; "
+                            "validação de testes foi ignorada."
+                        )
             else:
                 click.echo(f"{Fore.RED}{Style.BRIGHT}\n[FALHA] {result_message}{Style.RESET_ALL}")
-            
-            # TODO: Adicionar lógica para rodar testes e validar
+
             return
 
         elif auto:
