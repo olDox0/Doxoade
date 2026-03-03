@@ -5,6 +5,9 @@ Cria a 'Sandbox' de compilação fora da árvore de execução principal.
 Compliance: MPoT-19 (Quarantine), PASC-3.
 """
 import shutil
+import os
+import stat
+import time
 from pathlib import Path
 
 
@@ -43,8 +46,38 @@ class VulcanEnvironment:
         """
         for target in [self.foundry, self.bin_dir, self.lib_dir]:
             if target.exists():
-                shutil.rmtree(target)
+                self._safe_rmtree(target)
         self._setup_structure()
+
+    @staticmethod
+    def _safe_rmtree(target: Path) -> None:
+        """Remove diretório com fallback robusto para travas no Windows (.pyd em uso)."""
+
+        def _onerror(func, path, _exc_info):
+            try:
+                os.chmod(path, stat.S_IWRITE)
+                func(path)
+            except Exception:
+                # Se ainda falhar (arquivo bloqueado em runtime), ignoramos aqui
+                # e tratamos no fallback de rename abaixo.
+                return
+
+        try:
+            shutil.rmtree(target, onerror=_onerror)
+            return
+        except Exception:
+            pass
+
+        # Fallback: evita crash do comando de purge quando .pyd está carregado.
+        try:
+            suffix = int(time.time())
+            parked = target.with_name(f"{target.name}.purge_pending_{suffix}")
+            if parked.exists():
+                shutil.rmtree(parked, ignore_errors=True)
+            target.rename(parked)
+        except Exception:
+            # último fallback: não interrompe fluxo do CLI
+            return
 
     # Alias explícito para uso pelo CLI (semântica clara)
     purge_all = purge_unstable

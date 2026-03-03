@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-# doxoade/tools/vulcan/meta_finder.py (v5.0 - Final Fix & Instrumented)
+# doxoade/tools/vulcan/meta_finder.py (v6.0 - Context-Forced)
 """
 VulcanMetaFinder - Hook Transparente de Importação.
-v5.0:
+v6.0:
 - Lógica de busca por padrão para bibliotecas (lib_bin), resolvendo a
   falha de incompatibilidade de hash entre compilação e execução.
-- Adicionada instrumentação com print() para depuração visível no terminal.
+- Debug controlado por variável de ambiente (VULCAN_META_DEBUG=1).
 """
 
 import time
@@ -101,7 +101,7 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
         self.bin_dir = self.project_root / ".doxoade" / "vulcan" / "bin"
         self._spec_cache: dict[str, object] = {}
         self._ext = ".pyd" if os.name == 'nt' else ".so"
-        #print(f"\033[96m[VULCAN DEBUG] MetaFinder v5.0 Initialized. Watching for imports...\033[0m", file=sys.stderr)
+        self._dlog("[VULCAN DEBUG] MetaFinder initialized.")
 
     @staticmethod
     def _debug_enabled() -> bool:
