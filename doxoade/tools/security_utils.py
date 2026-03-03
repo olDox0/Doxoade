@@ -193,7 +193,7 @@ def restricted_safe_exec(code_str: str, globals_dict: dict = None, allow_imports
              print("\033[33m   [!] Erro de Caminho: O script tentou acessar um arquivo que não existe.")
              print(f"       Raiz de Execução: {project_anchor}")
              print(f"       Alvo do Erro: {e.filename}\033[0m")
-        _handle_sandbox_exception(e, filename)
+        _handle_sandbox_exception(e)
         raise
     finally:
         # Garante que o diretório de trabalho original seja restaurado, não importa o que aconteça
@@ -245,7 +245,7 @@ def _validate_ast_safety(tree: ast.AST, allow_imports: bool):
             if node.attr in forbidden:
                 raise RuntimeError("Sandbox Breach: Private access blocked.")
 
-def _handle_sandbox_exception(e: Exception):
+def _handle_sandbox_exception(e, filename=None):
     """Dispatcher Forense."""
     if isinstance(e, (NameError, ImportError, ModuleNotFoundError, SyntaxError)):
         raise e

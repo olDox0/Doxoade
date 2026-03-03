@@ -126,7 +126,9 @@ def _forge_to_pyx(task: dict) -> dict:
     abs_path = file_path.resolve()
 
     path_hash = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
-    module_name = f"v_{abs_path.stem}_{path_hash}"
+    import re
+    _safe_stem = re.sub(r'[^a-zA-Z0-9_]', '_', abs_path.stem)
+    module_name = f"v_{_safe_stem}_{path_hash}"
     pyx_path = foundry / f"{module_name}.pyx"
 
     try:

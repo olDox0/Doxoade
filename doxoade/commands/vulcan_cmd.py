@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/vulcan_cmd.py
-import os
+
+import textwrap
 import sys
-import click
 import signal
+import os
+import click
 from pathlib import Path
 
 from doxoade.tools.doxcolors import Fore, Style
@@ -40,11 +42,72 @@ for _doxo_base in [_doxo_path(__file__).resolve(), *_doxo_path(__file__).resolve
 
 # 1. Instala MetaFinder primeiro — redireciona imports Python → PYD automaticamente
 if callable(_doxo_install_meta_finder) and _doxo_project_root:
-    _doxo_install_meta_finder(_doxo_project_root)
+    try:
+        _doxo_install_meta_finder(_doxo_project_root)
+    except Exception:
+        # não falha a execução do bootstrap — metas podem já estar instalados
+        pass
 
-# 2. Injeta funções otimizadas do __main__ específico
+# 2. Tenta usar o loader "embedded" (safe wrapper com safe_call + checagem de assinatura)
+try:
+    if _doxo_project_root:
+        _embedded_path = _doxo_path(_doxo_project_root) / ".doxoade" / "vulcan" / "vulcan_embedded.py"
+        if _embedded_path.exists():
+            _doxo_spec2 = _doxo_importlib_util.spec_from_file_location("_doxoade_vulcan_embedded", str(_embedded_path))
+            if _doxo_spec2 and _doxo_spec2.loader:
+                _doxo_mod2 = _doxo_importlib_util.module_from_spec(_doxo_spec2)
+                _doxo_spec2.loader.exec_module(_doxo_mod2)
+                _doxo_activate_embedded = getattr(_doxo_mod2, "activate_embedded", None)
+                _doxo_safe_call = getattr(_doxo_mod2, "safe_call", None)
+                if callable(_doxo_activate_embedded):
+                    try:
+                        # activate_embedded aplica safe_call e valida assinaturas — preferível
+                        _doxo_activate_embedded(globals(), __file__, _doxo_project_root)
+                    except Exception:
+                        pass
+
+                # Se safe_call está exposto, aplicamos um pass de segurança a MÓDULOS JÁ CARREGADOS
+                # Isso resolve o caso em que o .pyd já foi importado antes do bootstrap
+                if callable(_doxo_safe_call):
+                    try:
+                        import sys as _d_sys
+                        _bin_dir = _doxo_path(_doxo_project_root) / ".doxoade" / "vulcan" / "bin"
+                        for mname, mod in list(_d_sys.modules.items()):
+                            try:
+                                mfile = getattr(mod, "__file__", "")
+                                if not mfile:
+                                    continue
+                                mpath = _doxo_path(mfile)
+                                # só módulos que residem na foundry bin
+                                if _bin_dir in mpath.parents:
+                                    # iterar sobre atributos nativos e aplicar safe_call
+                                    for attr in dir(mod):
+                                        if not attr.endswith("_vulcan_optimized"):
+                                            continue
+                                        native_obj = getattr(mod, attr, None)
+                                        if not callable(native_obj):
+                                            continue
+                                        base = attr[: -len("_vulcan_optimized")]
+                                        try:
+                                            setattr(mod, base, _doxo_safe_call(native_obj, getattr(mod, base, None)))
+                                        except Exception:
+                                            # não falha a importação; continuamos
+                                            continue
+                            except Exception:
+                                continue
+                    except Exception:
+                        pass
+except Exception:
+    pass
+
+# 3. Fallback: runtime.activate_vulcan (mantém compatibilidade retroativa)
+# Chamamos em try/except para não interromper o fluxo caso o runtime injete de forma insegura.
 if callable(_doxo_activate_vulcan):
-    _doxo_activate_vulcan(globals(), __file__)
+    try:
+        _doxo_activate_vulcan(globals(), __file__)
+    except Exception:
+        # não propaga erro — se falhar, o projeto seguirá com implementações Python originais
+        pass
 {_BOOTSTRAP_END}
 '''
 
@@ -71,6 +134,11 @@ import sys
 import os
 import importlib.util
 import importlib.machinery
+
+# ---------- pequeno logger interno (silencioso por padrão) ----------
+def _vlog(*args, **kwargs):
+    # Implementar logging se necessário. Mantido leve para evitar poluição do __main__.
+    return None
 
 # ---------- ExecutionContext ----------
 class ExecutionContext:
@@ -130,24 +198,24 @@ def inject_optimized(module, native_module, suffix=_OPTIMIZED_SUFFIX):
     injected = []
     skipped = []
 
-    for attr in dir(native_mod):
-        if not attr.endswith(_OPTIMIZED_SUFFIX):
+    for attr in dir(native_module):
+        if not attr.endswith(suffix):
             continue
 
-        orig_name = attr[:-len(_OPTIMIZED_SUFFIX)]
+        orig_name = attr[:-len(suffix)]
 
         if not hasattr(module, orig_name):
             continue
 
         py_func = getattr(module, orig_name)
-        native_func = getattr(native_mod, attr)
+        native_func = getattr(native_module, attr)
 
         # 🔒 Guard 1 — callable
         if not callable(py_func) or not callable(native_func):
             skipped.append(orig_name)
             continue
 
-        # 🔒 Guard 2 — assinatura compatível
+        # 🔒 Guard 2 — assinatura compatível (checagem conservadora)
         try:
             py_sig = inspect.signature(py_func)
             native_sig = inspect.signature(native_func)
@@ -159,14 +227,18 @@ def inject_optimized(module, native_module, suffix=_OPTIMIZED_SUFFIX):
             skipped.append(orig_name)
             continue
 
-        setattr(module, orig_name, native_func)
-        injected.append(orig_name)
+        try:
+            setattr(module, orig_name, safe_call(native_func, py_func))
+            injected.append(orig_name)
+        except Exception:
+            skipped.append(orig_name)
+            continue
 
     if injected:
-        _vlog(f"OK   {module.__name__} ← {self._bin_path.name} ({', '.join(injected)})")
+        _vlog(f"OK   {getattr(module, '__name__', str(module))} ← ({', '.join(injected)})")
 
     if skipped:
-        _vlog(f"SKIP {module.__name__} ← incompatível ({', '.join(skipped)})")
+        _vlog(f"SKIP {getattr(module, '__name__', str(module))} ← incompatível ({', '.join(skipped)})")
 
 # ---------- minimal pyd locator & loader ----------
 def _binary_ext():
@@ -292,6 +364,7 @@ def activate_embedded(globs: dict, source_file: str, project_root: str | None = 
     except Exception:
         return False
 '''
+
 
 def generate_vulcan_stub() -> str:
     return '''# -*- coding: utf-8 -*-
@@ -737,23 +810,30 @@ def vulcan_benchmark(path, runs, output_json, min_speedup, save):
 
 @vulcan_group.command('status')
 def vulcan_status():
-    """Lista m?dulos otimizados e ganhos de performance."""
+    """Lista módulos otimizados e ganhos de performance."""
     root = _find_project_root(os.getcwd())
-    bin_dir = os.path.join(root, ".doxoade", "vulcan", "bin")
+    bin_dir     = os.path.join(root, ".doxoade", "vulcan", "bin")
+    lib_bin_dir = os.path.join(root, ".doxoade", "vulcan", "lib_bin")  # ← adicionar
 
     click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}  ESTADO DA FOUNDRY VULCAN:{Style.RESET_ALL}")
 
-    if not os.path.exists(bin_dir):
-        click.echo("   Nenhum m?dulo forjado para este projeto.")
-        return
+    for label, directory in [("Projeto", bin_dir), ("Libs", lib_bin_dir)]:
+        if not os.path.exists(directory):
+            continue
+        binaries = [f for f in os.listdir(directory) if f.endswith(('.pyd', '.so'))]
+        if binaries:
+            click.echo(f"\n  {Fore.YELLOW}[{label}]{Style.RESET_ALL}")
+            for b in binaries:
+                size = os.path.getsize(os.path.join(directory, b)) / 1024
+                click.echo(f"   {Fore.GREEN}{b:<40} {Fore.WHITE}| {size:>6.1f} KB {Fore.YELLOW}[ATIVO]")
 
-    binaries = [f for f in os.listdir(bin_dir) if f.endswith(('.pyd', '.so'))]
-    if not binaries:
-        click.echo("   Nenhum bin?rio ativo encontrado.")
-    else:
-        for b in binaries:
-            size = os.path.getsize(os.path.join(bin_dir, b)) / 1024
-            click.echo(f"   {Fore.GREEN}{b:<25} {Fore.WHITE}| {size:>6.1f} KB {Fore.YELLOW}[ATIVO]")
+    # fallback se nenhum binário encontrado em nenhuma pasta
+    all_bins = []
+    for d in [bin_dir, lib_bin_dir]:
+        if os.path.exists(d):
+            all_bins += [f for f in os.listdir(d) if f.endswith(('.pyd', '.so'))]
+    if not all_bins:
+        click.echo("   Nenhum binário ativo encontrado.")
 
 
 @vulcan_group.command('purge')
@@ -768,35 +848,241 @@ def vulcan_purge():
         click.echo(f"{Fore.GREEN}Foundry purificada.{Fore.RESET}")
 
 
-def _copy_runtime_module(project_root: Path) -> Path:
-    """
-    Copia o runtime 'oficial' (doxoade/tools/vulcan/runtime.py) para
-    .doxoade/vulcan/runtime.py **e** gera um vulcan_embedded.py com o
-    safe_loader minimal e auto-compatível.
+def _copy_runtime_module(*_, **__):
+    raise RuntimeError(
+        "_copy_runtime_module foi removida. "
+        "Use _write_safe_runtime(project_root)."
+    )
 
+
+def _write_safe_runtime(project_root: Path) -> Path:
+    """
+    Escreve no projeto alvo:
+      - .doxoade/__init__.py
+      - .doxoade/vulcan/__init__.py
+      - .doxoade/vulcan/runtime.py   (SafeExtensionLoader + VulcanBinaryFinder + install_meta_finder + probe_embedded)
+      - .doxoade/vulcan/vulcan_embedded.py (safe loader)
     Retorna o path do runtime (runtime_dst).
     """
-    runtime_src = Path(__file__).resolve().parents[1] / "tools" / "vulcan" / "runtime.py"
+    project_root = Path(project_root).resolve()
     vulcan_dir = project_root / ".doxoade" / "vulcan"
     vulcan_dir.mkdir(parents=True, exist_ok=True)
 
-    # --- copia runtime original (manter compatibilidade) ---
+    # Ensure package markers for importability
+    (project_root / ".doxoade" / "__init__.py").write_text("# marker package for doxoade\n", encoding="utf-8")
+    (vulcan_dir / "__init__.py").write_text("# marker package for doxoade.vulcan\n", encoding="utf-8")
+
+    # runtime.py content: SafeExtensionLoader + VulcanBinaryFinder + install_meta_finder + probe_embedded
+    runtime_content = textwrap.dedent(r'''
+    # -*- coding: utf-8 -*-
+    # minimal safe runtime injected by doxoade vulcan module
+    import importlib.abc
+    import importlib.machinery
+    import importlib.util
+    import sys
+    import os
+    import types
+    from pathlib import Path
+
+    def _vlog(*_args, **_k): 
+        # keep silent by default; replace with prints for debugging
+        return None
+
+    class SafeExtensionLoader(importlib.machinery.ExtensionFileLoader):
+        """Loader que tenta carregar o .pyd e, em caso de erro, cai para o .py de fallback."""
+        def __init__(self, fullname: str, path: str, py_fallback: str | None = None):
+            super().__init__(fullname, path)
+            self._py_fallback = py_fallback
+
+        def exec_module(self, module: types.ModuleType) -> None:
+            try:
+                return super().exec_module(module)
+            except Exception:
+                # remove loaded module and fallback to .py if available
+                sys.modules.pop(module.__name__, None)
+                if self._py_fallback and os.path.exists(self._py_fallback):
+                    spec = importlib.util.spec_from_file_location(module.__name__, self._py_fallback)
+                    if not spec or not spec.loader:
+                        raise
+                    py_mod = importlib.util.module_from_spec(spec)
+                    sys.modules[module.__name__] = py_mod
+                    spec.loader.exec_module(py_mod)
+                    return
+                # re-raise original error if no fallback
+                raise
+
+    class VulcanBinaryFinder(importlib.abc.MetaPathFinder):
+        """Procura por binários compilados na foundry e retorna um spec com SafeExtensionLoader."""
+        def __init__(self, project_root: str):
+            self.project_root = Path(project_root).resolve()
+            self.bin_dir = (self.project_root / ".doxoade" / "vulcan" / "bin")
+            self._py_index = None
+
+        def _find_source_py(self, fullname: str):
+            rel = fullname.replace(".", os.sep) + ".py"
+            candidate = self.project_root / rel
+            if candidate.exists():
+                return candidate
+            # fallback: index by stem
+            if self._py_index is None:
+                self._py_index = {}
+                skip = {".git", "venv", ".venv", "__pycache__", "build", "dist", ".doxoade"}
+                for root, dirs, files in os.walk(self.project_root):
+                    dirs[:] = [d for d in dirs if d not in skip]
+                    for f in files:
+                        if f.endswith(".py"):
+                            p = Path(root) / f
+                            self._py_index[p.stem] = p
+            return self._py_index.get(fullname.split(".")[-1])
+
+        def _find_pyd_for_source(self, source_py: Path):
+            if not self.bin_dir.exists() or not source_py:
+                return None
+            stem = source_py.stem
+            ext = ".pyd" if os.name == "nt" else ".so"
+            try:
+                import hashlib
+                h = hashlib.sha256(str(source_py.resolve()).encode()).hexdigest()[:6]
+                candidate = self.bin_dir / f"v_{stem}_{h}{ext}"
+                if candidate.exists():
+                    return candidate
+            except Exception:
+                pass
+            matches = sorted(self.bin_dir.glob(f"v_{stem}_*{ext}"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if matches:
+                return matches[0]
+            matches2 = sorted(self.bin_dir.glob(f"v_{stem}*{ext}"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if matches2:
+                return matches2[0]
+            return None
+
+        def find_spec(self, fullname, path, target=None):
+            try:
+                src_py = self._find_source_py(fullname)
+            except Exception:
+                src_py = None
+
+            pyd_path = None
+            if src_py:
+                pyd_path = self._find_pyd_for_source(src_py)
+            else:
+                stem = fullname.split(".")[-1]
+                ext = ".pyd" if os.name == "nt" else ".so"
+                candidates = list(self.bin_dir.glob(f"v_{stem}_*{ext}")) + list(self.bin_dir.glob(f"v_{stem}*{ext}"))
+                matches = sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True) if candidates else []
+                pyd_path = matches[0] if matches else None
+
+            if not pyd_path:
+                return None
+
+            loader = SafeExtensionLoader(fullname, str(pyd_path), py_fallback=str(src_py) if src_py else None)
+            spec = importlib.util.spec_from_file_location(fullname, str(pyd_path), loader=loader)
+            return spec
+
+    def install_meta_finder(project_root: str):
+        """Instala o VulcanBinaryFinder no sys.meta_path (se não estiver presente)."""
+        root = str(Path(project_root).resolve())
+        for f in list(sys.meta_path):
+            if isinstance(f, VulcanBinaryFinder):
+                return True
+        finder = VulcanBinaryFinder(root)
+        sys.meta_path.insert(0, finder)
+        _vlog("VulcanBinaryFinder installed for", root)
+        return True
+
+    def probe_embedded():
+        """Probe rápido para verificar estado do runtime dentro do processo atual."""
+        import sys, inspect
+        print("\n🔬 VULCAN EMBEDDED RUNTIME PROBE\n")
+        print("[meta_path order]")
+        for i, f in enumerate(sys.meta_path):
+            print(f" {i:02d} -> {f}")
+        try:
+            import engine.cli as ec
+            print("\nengine.cli ->", getattr(ec, '__file__', None))
+            cli_obj = getattr(ec, 'cli', None)
+            print("cli object:", type(cli_obj), cli_obj)
+            try:
+                print("cli signature:", inspect.signature(cli_obj))
+            except Exception as e:
+                print("sig error:", e)
+        except Exception as e:
+            print("engine.cli import failed:", e)
+        print("\n✅ probe done\n")
+    ''').lstrip()
+
     runtime_dst = vulcan_dir / "runtime.py"
-    runtime_dst.write_text(runtime_src.read_text(encoding="utf-8"), encoding="utf-8")
+    runtime_dst.write_text(runtime_content, encoding="utf-8")
 
-    init_dst = vulcan_dir / "__init__.py"
-    init_dst.write_text(
-        "# -*- coding: utf-8 -*-\n"
-        "from .runtime import activate_vulcan, find_vulcan_project_root, load_vulcan_binary\n"
-        "\n"
-        "__all__ = [\"activate_vulcan\", \"find_vulcan_project_root\", \"load_vulcan_binary\"]\n",
-        encoding="utf-8",
-    )
+    # vulcan_embedded.py (simple safe loader) — keep minimal safe_call + inject_optimized
+    vulcan_embedded = textwrap.dedent(r'''
+    # -*- coding: utf-8 -*-
+    from functools import wraps
+    from pathlib import Path
+    import sys, os, importlib.util
 
-    # --- gera vulcan_embedded.py (safe loader auto-gerenciado) ---
-    embedded_dst = vulcan_dir / "vulcan_embedded.py"
-    if not embedded_dst.exists():
-        embedded_dst.write_text(_VULCAN_EMBEDDED_CONTENT, encoding="utf-8")
+    class ExecutionContext:
+        __slots__ = ("argv","env","cwd","project_root")
+        def __init__(self):
+            import sys
+            import os
+            self.argv = sys.argv
+            self.env = dict(os.environ)
+            self.cwd = Path.cwd()
+            main = sys.modules.get("__main__")
+            self.project_root = getattr(main, "__file__", None)
+
+    def safe_call(native_fn, fallback_fn=None):
+        @wraps(fallback_fn or native_fn)
+        def wrapper(*args, **kwargs):
+            try:
+                return native_fn(ExecutionContext(), *args, **kwargs)
+            except TypeError:
+                pass
+            except Exception:
+                if callable(fallback_fn):
+                    return fallback_fn(*args, **kwargs)
+                raise
+            try:
+                return native_fn(*args, **kwargs)
+            except TypeError:
+                pass
+            except Exception:
+                if callable(fallback_fn):
+                    return fallback_fn(*args, **kwargs)
+                raise
+            if callable(fallback_fn):
+                return fallback_fn(*args, **kwargs)
+            raise RuntimeError("signature incompatible")
+        return wrapper
+
+    def inject_optimized(module, native_module, suffix="_vulcan_optimized"):
+        import inspect
+        injected, skipped = [], []
+        for attr in dir(native_module):
+            if not attr.endswith(suffix): continue
+            orig = attr[:-len(suffix)]
+            if not hasattr(module, orig): continue
+            py_func = getattr(module, orig)
+            native_func = getattr(native_module, attr)
+            if not callable(py_func) or not callable(native_func):
+                skipped.append(orig); continue
+            try:
+                py_sig = inspect.signature(py_func)
+                native_sig = inspect.signature(native_func)
+                if py_sig.parameters != native_sig.parameters:
+                    skipped.append(orig); continue
+            except Exception:
+                skipped.append(orig); continue
+            try:
+                setattr(module, orig, safe_call(native_func, py_func))
+                injected.append(orig)
+            except Exception:
+                skipped.append(orig)
+        return injected, skipped
+    ''').lstrip()
+
+    (vulcan_dir / "vulcan_embedded.py").write_text(vulcan_embedded, encoding="utf-8")
 
     return runtime_dst
 
@@ -811,26 +1097,39 @@ def _iter_project_main_files(project_root: Path):
 
 def _inject_bootstrap(main_file: Path) -> bool:
     original = main_file.read_text(encoding="utf-8", errors="replace")
-    content = original
+    # novo bootstrap (executa o install_meta_finder o mais cedo possível)
+    bootstrap = '''# --- DOXOADE_VULCAN_BOOTSTRAP:START ---
+from pathlib import Path as _doxo_path
+try:
+    # runtime importável do projeto alvo (.doxoade/vulcan/runtime.py)
+    import importlib.util as _doxo_importlib_util
+    _rt = _doxo_path(__file__).resolve().parents[0]
+    # sobe até encontrar .doxoade (caso o __main__ esteja em subpackage)
+    cur = _doxo_path(__file__).resolve().parent
+    while True:
+        candidate = cur / ".doxoade" / "vulcan" / "runtime.py"
+        if candidate.exists():
+            spec = _doxo_importlib_util.spec_from_file_location("_doxoade_vulcan_runtime", str(candidate))
+            mod = _doxo_importlib_util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            try:
+                mod.install_meta_finder(str(cur))
+            except Exception:
+                pass
+            break
+        if cur == cur.parent:
+            break
+        cur = cur.parent
+except Exception:
+    pass
+# --- DOXOADE_VULCAN_BOOTSTRAP:END ---
 
-    # Remove bootstrap anterior para permitir atualização de lógica sem duplicar bloco.
-    if _BOOTSTRAP_START in content and _BOOTSTRAP_END in content:
-        start = content.index(_BOOTSTRAP_START)
-        end = content.index(_BOOTSTRAP_END) + len(_BOOTSTRAP_END)
-        content = (content[:start] + content[end:]).lstrip("\n")
-
-    # Remove legado quebrado inserido manualmente em alguns projetos externos.
-    legacy_lines = {
-        "from .doxoade.vulcan.runtime import activate_vulcan",
-        "activate_vulcan(globals(), __file__)",
-    }
-    content_lines = [line for line in content.splitlines() if line.strip() not in legacy_lines]
-    sanitized = "\n".join(content_lines).lstrip("\n")
-    updated = f"{_BOOTSTRAP_BLOCK}\n{sanitized}"
-
+'''
+    if bootstrap in original:
+        return False
+    updated = bootstrap + original
     if updated == original:
         return False
-
     main_file.write_text(updated, encoding="utf-8")
     return True
 
@@ -895,7 +1194,7 @@ def vulcan_module(target_path, main_files, auto_main, force_stub):
     
     # ─────────────────────────────────────────────────────────────────────────
 
-    runtime_dst = _copy_runtime_module(project_root)
+    runtime_dst = _write_safe_runtime(project_root)
     click.echo(f"{Fore.GREEN}[OK]{Fore.RESET} Runtime instalado em: {runtime_dst}")
 
     changed = []

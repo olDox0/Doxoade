@@ -46,7 +46,9 @@ def _forge_worker(task: dict) -> dict:
             return {'name': abs_path.name, 'ok': False, 'err': f'pulado: {reason}', 'skip': True}
 
     path_hash   = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
-    module_name = f"v_{abs_path.stem}_{path_hash}"
+    import re
+    _safe_stem = re.sub(r'[^a-zA-Z0-9_]', '_', abs_path.stem)
+    module_name = f"v_{_safe_stem}_{path_hash}"
 
     try:
         sys.stdout.write(f"   [VULCAN:FORGE] {abs_path.name}...\n")

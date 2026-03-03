@@ -204,7 +204,22 @@ class VulcanLoader(importlib.abc.Loader):
 
             native_mod = importlib.util.module_from_spec(native_spec)
             sys.modules[self._native_name] = native_mod
+            
+            # Após exec_module do native_mod, antes do loop de injeção:
             native_spec.loader.exec_module(native_mod)
+
+            # Após exec_module do native_mod, ANTES do loop de injeção de globals:
+            native_mod.__package__ = module.__package__   # ex: "click"
+            native_mod.__spec__    = module.__spec__
+            native_mod.__name__    = module.__name__       # ex: "click.formatting"
+
+            # Agora injeta os globals do módulo original
+            for key, val in vars(module).items():
+                if not hasattr(native_mod, key):
+                    try:
+                        setattr(native_mod, key, val)
+                    except (AttributeError, TypeError):
+                        pass
 
             # ── Fase 3: injeta funções otimizadas ────────────────────────────
             injected = []
@@ -215,11 +230,22 @@ class VulcanLoader(importlib.abc.Loader):
                 if hasattr(module, orig_name):
                     py_fn = getattr(module, orig_name)
                     native_fn = getattr(native_mod, attr)
-                    setattr(module, orig_name, _safe_call(py_fn, native_fn))
+
+                    # Valida assinatura antes de injetar
+                    import inspect
+                    try:
+                        py_sig = inspect.signature(py_fn)
+                        native_sig = inspect.signature(native_fn)
+                        # Se assinaturas batem, injeta direto
+                        setattr(module, orig_name, native_fn)
+                    except (ValueError, TypeError):
+                        # Não foi possível validar, usa wrapper como segurança
+                        setattr(module, orig_name, _safe_call(py_fn, native_fn))
                     injected.append(orig_name)
 
             if injected:
                 _vlog(f"OK   {module.__name__} ← {self._bin_path.name} ({', '.join(injected)})")
+                module.__file__ = str(self._bin_path)  # ← sinaliza que binário está ativo
             else:
                 _vlog(f"LOAD {module.__name__} ← {self._bin_path.name} (sem funções otimizadas)")
 

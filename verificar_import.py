@@ -23,3 +23,29 @@ try:
 
 except Exception as e:
     print(f"\n\033[91m[ERRO] Falha ao tentar importar ou inspecionar o submódulo: {e}\033[0m")
+
+    
+import click.formatting
+import time
+
+# Verifica origem real da função
+print(f"wrap_text.__module__: {click.formatting.wrap_text.__module__}")
+print(f"wrap_text qualname:   {getattr(click.formatting.wrap_text, '__qualname__', 'N/A')}")
+
+# Vê o que existe no namespace do .pyd carregado como módulo nativo
+import sys
+native = sys.modules.get('v_formatting_da684d')
+if native:
+    print(f"\nNativo encontrado em sys.modules:")
+    for name in dir(native):
+        if 'wrap' in name or 'iter' in name:
+            print(f"  {name}: {type(getattr(native, name)).__name__}")
+else:
+    print("\nNativo NÃO está em sys.modules — injeção não ocorreu")
+
+# Timing simples
+t0 = time.perf_counter()
+for _ in range(10000):
+    click.formatting.wrap_text("Hello world this is a test string for wrapping", width=40)
+elapsed = time.perf_counter() - t0
+print(f"\n10k execuções: {elapsed*1000:.1f}ms")

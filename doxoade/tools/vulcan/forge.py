@@ -7,7 +7,7 @@ from typing import Set
 _BLACKLIST = frozenset({
     'click', 'rich', 'colorama', 'progressbar', 'prompt_toolkit', 'curses',
     'ansi', 'ansitowin32', 'initialise', 'win32', 'winterm', '_winconsole',
-    'psutil', 'sqlite3', 'radon', 'pathspec',
+    'psutil', 'sqlite3', 'radon', 'pathspec', '__main__',
     'doxcolors', 'termui',
 })
 
@@ -43,6 +43,11 @@ class _Stub:
 click = colorama = rich = progressbar = prompt_toolkit = psutil = _Stub()
 Fore = Back = Style = echo = secho = prompt = confirm = _Stub()
 argument = option = command = group = pass_context = Context = cli = _Stub()
+import os
+import sys
+import re
+import os as _os
+import sys as _sys
 '''
 
 _SKIP_FILENAMES   = frozenset({'__init__.py', '__main__.py'})

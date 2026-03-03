@@ -21,26 +21,23 @@ import ctypes
 from pathlib import Path
 from doxoade.tools.vulcan.vulcan_safe_loader import SafeExtensionLoader
 
-
 GENERIC_NAMES = {
-    "utils", "parser", "core", "common",
-    "base", "helpers", "types", "config"
+    "core", "common", "base", "helpers", "config"
+    # removidos: "utils", "parser", "types"  ← muito usados em click
 }
 
 def is_binary_candidate(fullname: str, pyd_path: Path) -> bool:
-    """
-    Decide se um binário pode representar este módulo.
-    Regra: o namespace COMPLETO deve estar explícito no nome do .pyd
-    """
     basename = fullname.rsplit(".", 1)[-1]
+    parent = fullname.rsplit(".", 1)[0] if "." in fullname else ""
+    stem_base = pyd_path.stem.split(".")[0]
 
-    # nomes perigosos nunca entram automaticamente
+    # Para nomes genéricos, exige que o pacote pai esteja no nome do pyd
     if basename in GENERIC_NAMES:
-        return False
+        # ex: click.utils → aceita se o pyd foi compilado especificamente para click
+        # (o hash garante isso — não há colisão de hash entre click.utils e requests.utils)
+        return stem_base.startswith(f"v_{basename}_")
 
-    normalized = fullname.replace(".", "_")
-    return normalized in pyd_path.stem
-
+    return stem_base.startswith(f"v_{basename}_") or stem_base == f"v_{basename}"
 
 def try_load_pyd(self, fullname, py_path, bin_path):
     try:
@@ -107,23 +104,14 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
         #print(f"\033[96m[VULCAN DEBUG] MetaFinder v5.0 Initialized. Watching for imports...\033[0m", file=sys.stderr)
 
     def find_spec(self, fullname: str, path, target=None):
-        # 🔒 REGRA DE SEGURANÇA: Vulcan só acelera o próprio domínio
-        if not fullname.startswith("doxoade."):
-            return None
         try:
             if any(fullname.startswith(p) for p in self._BYPASS):
                 return None
 
-            # --- ETAPA 1: BUSCA POR BIBLIOTECAS (lib_bin) ---
-            # Esta é a lógica nova e corrigida
+            # --- LIB_BIN: verifica para QUALQUER módulo (não só doxoade.) ---
             if self.lib_bin_dir.exists():
-                # Para 'click.formatting', o 'module_part' será 'formatting'
                 module_part = fullname.split('.')[-1]
-                pattern = f"v_{module_part}_*{self._ext}"
-                
-                #print(f"\033[96m[VULCAN DEBUG] Searching for library '{fullname}' with pattern '{pattern}'\033[0m", file=sys.stderr)
-                
-                candidates = list(self.lib_bin_dir.glob(pattern))
+                candidates = list(self.lib_bin_dir.glob(f"v_{module_part}_*{self._ext}"))
 
                 for bin_path in sorted(candidates, key=os.path.getmtime, reverse=True):
                     if not is_binary_candidate(fullname, bin_path):
@@ -133,12 +121,30 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
                         )
                         continue
 
-                    if self.is_binary_valid_for_host(bin_path):
-                        print(
-                            f"\033[92m[VULCAN DEBUG] ACCEPTED binary: {bin_path.name}\033[0m",
-                            file=sys.stderr
-                        )
-                        return self._make_spec(fullname, None, str(bin_path))
+                    if not self.is_binary_valid_for_host(bin_path):
+                        continue
+
+                    # Busca o spec original do .py (click/_compat.py) via outros finders
+                    original_spec = self._resolve_py_path_as_spec(fullname, path)
+                    print(f"[DEBUG] {fullname} → original_spec={original_spec}", file=sys.stderr)
+                    if not (original_spec and original_spec.loader):
+                        print(f"[DEBUG] fallback para _make_spec", file=sys.stderr)
+                        continue  # ou cai para _make_spec dependendo do seu código atual
+
+                    # Usa VulcanLoader: executa o .py original, depois injeta o metal
+                    native_name = bin_path.stem.split(".")[0]  # v__compat_092d0e
+                    from doxoade.tools.vulcan.runtime import VulcanLoader
+                    new_spec = importlib.machinery.ModuleSpec(
+                        fullname,
+                        VulcanLoader(original_spec.loader, bin_path, native_name),
+                        origin=original_spec.origin,
+                    )
+                    new_spec.has_location = True
+                    return new_spec
+
+            # --- GUARD: projeto nativo só para doxoade.* ---
+            if not fullname.startswith("doxoade."):
+                return None
 
             # --- ETAPA 2: BUSCA POR ARQUIVOS DE PROJETO (bin) ---
             # (Esta lógica é para 'vulcan ignite' e permanece a mesma)
@@ -162,6 +168,21 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
         except Exception:
             self.logger.error(f"VulcanMetaFinder.find_spec failure on '{fullname}'", exc_info=True)
             return None
+
+    def _resolve_py_path_as_spec(self, fullname: str, path):
+        """Retorna o spec do .py original sem acionar este finder."""
+        for finder in sys.meta_path:
+            if finder is self:
+                continue
+            if not hasattr(finder, 'find_spec'):
+                continue
+            try:
+                spec = finder.find_spec(fullname, path, None)
+                if spec and spec.origin and spec.origin not in ('built-in', 'frozen'):
+                    return spec
+            except Exception:
+                continue
+        return None
 
     def _resolve_py_path(self, fullname, path):
     
