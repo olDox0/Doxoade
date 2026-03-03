@@ -138,6 +138,16 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
                         self._dlog("[DEBUG] fallback para _make_spec")
                         continue  # ou cai para _make_spec dependendo do seu código atual
 
+                    # Guard para pacotes: não mapear __init__.py para um .pyd de submódulo,
+                    # pois isso quebra imports relativos do pacote (ex: pathspec.__init__).
+                    try:
+                        origin_name = Path(str(original_spec.origin)).name
+                    except Exception:
+                        origin_name = ""
+                    if origin_name == "__init__.py":
+                        self._dlog(f"[DEBUG] skip package root for {fullname}")
+                        continue
+
                     # Usa VulcanLoader: executa o .py original, depois injeta o metal
                     native_name = bin_path.stem.split(".")[0]  # v__compat_092d0e
                     from doxoade.tools.vulcan.runtime import VulcanLoader
@@ -146,6 +156,8 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
                         VulcanLoader(original_spec.loader, bin_path, native_name),
                         origin=original_spec.origin,
                     )
+                    if getattr(original_spec, "submodule_search_locations", None) is not None:
+                        new_spec.submodule_search_locations = original_spec.submodule_search_locations
                     new_spec.has_location = True
                     return new_spec
 
