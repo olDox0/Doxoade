@@ -14,3 +14,9 @@ def test_bootstrap_registers_runtime_alias_module():
 def test_bootstrap_registers_embedded_alias_module():
     src = _load_bootstrap_source()
     assert '_doxo_sys.modules["_doxoade_vulcan_embedded"] = _doxo_mod2' in src
+
+
+def test_bootstrap_exposes_probe_and_optional_diag():
+    src = _load_bootstrap_source()
+    assert '_doxo_probe_embedded = getattr(_doxo_mod, "probe_embedded", None)' in src
+    assert '__doxoade_vulcan_probe__ = _doxo_probe_embedded(_doxo_project_root)' in src

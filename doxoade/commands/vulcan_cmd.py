@@ -26,6 +26,7 @@ import sys as _doxo_sys
 
 _doxo_activate_vulcan = None
 _doxo_install_meta_finder = None
+_doxo_probe_embedded = None
 _doxo_project_root = None
 
 for _doxo_base in [_doxo_path(__file__).resolve(), *_doxo_path(__file__).resolve().parents]:
@@ -40,6 +41,7 @@ for _doxo_base in [_doxo_path(__file__).resolve(), *_doxo_path(__file__).resolve
     _doxo_spec.loader.exec_module(_doxo_mod)
     _doxo_activate_vulcan = getattr(_doxo_mod, "activate_vulcan", None)
     _doxo_install_meta_finder = getattr(_doxo_mod, "install_meta_finder", None)
+    _doxo_probe_embedded = getattr(_doxo_mod, "probe_embedded", None)
     _doxo_project_root = str(_doxo_base)
     break
 
@@ -111,6 +113,20 @@ if callable(_doxo_activate_vulcan):
         _doxo_activate_vulcan(globals(), __file__)
     except Exception:
         # não propaga erro — se falhar, o projeto seguirá com implementações Python originais
+        pass
+
+# 4. Diagnóstico opcional (útil para startup lento em servidores externos)
+if callable(_doxo_probe_embedded):
+    try:
+        __doxoade_vulcan_probe__ = _doxo_probe_embedded(_doxo_project_root)
+        if _doxo_sys.environ.get("VULCAN_DIAG", "").strip() == "1":
+            _doxo_sys.stderr.write(
+                "[VULCAN:DIAG] "
+                f"finder_count={__doxoade_vulcan_probe__.get('finder_count', 0)} "
+                f"bin={__doxoade_vulcan_probe__.get('bin_count', 0)} "
+                f"lib_bin={__doxoade_vulcan_probe__.get('lib_bin_count', 0)}\\n"
+            )
+    except Exception:
         pass
 {_BOOTSTRAP_END}
 '''

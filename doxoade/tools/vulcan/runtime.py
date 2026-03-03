@@ -544,15 +544,25 @@ def probe_embedded(project_root: str | Path | None = None) -> dict:
 
     bin_dir = (root / ".doxoade" / "vulcan" / "bin") if root else None
     lib_dir = (root / ".doxoade" / "vulcan" / "lib_bin") if root else None
+    bin_count = len(list(bin_dir.glob(f"*{_binary_ext()}"))) if (bin_dir and bin_dir.exists()) else 0
+    lib_count = len(list(lib_dir.glob(f"*{_binary_ext()}"))) if (lib_dir and lib_dir.exists()) else 0
+
+    vulcan_finders = [
+        f for f in sys.meta_path
+        if getattr(f, "_VULCAN_FINDER_MARKER", False)
+    ]
 
     state = {
         "project_root": str(root) if root else None,
-        "finder_installed": any(isinstance(f, VulcanBinaryFinder) for f in sys.meta_path),
+        "finder_installed": bool(vulcan_finders),
+        "finder_count": len(vulcan_finders),
         "meta_path": [type(f).__name__ for f in sys.meta_path],
         "bin_dir": str(bin_dir) if bin_dir else None,
         "bin_exists": bool(bin_dir and bin_dir.exists()),
+        "bin_count": bin_count,
         "lib_bin_dir": str(lib_dir) if lib_dir else None,
         "lib_bin_exists": bool(lib_dir and lib_dir.exists()),
+        "lib_bin_count": lib_count,
     }
 
     return state
