@@ -768,7 +768,7 @@ def vulcan_lib(ctx, analyze, target, auto, integrity, benchmark, benchmark_runs,
                         f"{Fore.CYAN}[BENCH]{Style.RESET_ALL} {bench['library']} | "
                         f"python={bench['mean_import_seconds_python']:.6f}s "
                         f"vulcan={bench['mean_import_seconds_vulcan']:.6f}s "
-                        f"speedup={bench['speedup']:.2f}x"
+                        f"speedup={bench['speedup']:.2f}x redirected={bench.get('redirected_modules', 0)}"
                     )
                 else:
                     click.echo(f"{Fore.YELLOW}[AVISO]{Style.RESET_ALL} Benchmark não executado: {bench.get('error', 'erro desconhecido')}")
@@ -808,7 +808,8 @@ def vulcan_lib(ctx, analyze, target, auto, integrity, benchmark, benchmark_runs,
                 if bench.get("ok"):
                     click.echo(
                         f"  - {bench['library']}: python={bench['mean_import_seconds_python']:.6f}s "
-                        f"vulcan={bench['mean_import_seconds_vulcan']:.6f}s speedup={bench['speedup']:.2f}x"
+                        f"vulcan={bench['mean_import_seconds_vulcan']:.6f}s speedup={bench['speedup']:.2f}x "
+                        f"redirected={bench.get('redirected_modules', 0)}"
                     )
                 else:
                     details = bench.get("details") or {}

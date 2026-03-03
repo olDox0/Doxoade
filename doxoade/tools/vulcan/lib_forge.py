@@ -1,5 +1,6 @@
 # doxoade/tools/vulcan/lib_forge.py
 import json
+import statistics
 import os
 import re
 import shutil
@@ -136,27 +137,10 @@ class LibForge:
         if not package:
             return {"ok": False, "error": "Nome de biblioteca inválido para benchmark."}
 
-        script = (
-            "import importlib, os, sys, time\n"
-            "from doxoade.tools.vulcan.meta_finder import install\n"
-            "root = sys.argv[1]\n"
-            "pkg = sys.argv[2]\n"
-            "runs = int(sys.argv[3])\n"
-            "install(root)\n"
-            "times = []\n"
-            "for _ in range(runs):\n"
-            "  importlib.invalidate_caches()\n"
-            "  if pkg in sys.modules: del sys.modules[pkg]\n"
-            "  t0 = time.perf_counter()\n"
-            "  importlib.import_module(pkg)\n"
-            "  times.append(time.perf_counter() - t0)\n"
-            "print(sum(times)/len(times))\n"
-        )
+        base_samples = self._run_bench_samples(package, runs, disable_lib_bin=True)
+        vulcan_samples = self._run_bench_samples(package, runs, disable_lib_bin=False)
 
-        base = self._run_bench_subprocess(script, package, runs, disable_lib_bin=True)
-        vulcan = self._run_bench_subprocess(script, package, runs, disable_lib_bin=False)
-
-        if base is None or vulcan is None:
+        if not base_samples or not vulcan_samples:
             return {
                 "ok": False,
                 "error": "Falha ao executar benchmark de importação para a biblioteca.",
@@ -167,6 +151,10 @@ class LibForge:
                 },
             }
 
+        base = statistics.mean([s["elapsed"] for s in base_samples])
+        vulcan = statistics.mean([s["elapsed"] for s in vulcan_samples])
+        redirected = max([s.get("redirected", 0) for s in vulcan_samples])
+
         speedup = (base / vulcan) if vulcan > 0 else 0.0
         return {
             "ok": True,
@@ -175,12 +163,39 @@ class LibForge:
             "mean_import_seconds_python": base,
             "mean_import_seconds_vulcan": vulcan,
             "speedup": speedup,
+            "redirected_modules": redirected,
         }
 
-    def _run_bench_subprocess(self, script: str, package: str, runs: int, disable_lib_bin: bool) -> float | None:
+    def _run_bench_samples(self, package: str, runs: int, disable_lib_bin: bool) -> list[dict]:
+        samples: list[dict] = []
+        for _ in range(max(1, runs)):
+            row = self._run_bench_subprocess(package, disable_lib_bin=disable_lib_bin)
+            if row is None:
+                return []
+            samples.append(row)
+        return samples
+
+    def _run_bench_subprocess(self, package: str, disable_lib_bin: bool) -> dict | None:
         env = os.environ.copy()
         env["VULCAN_DISABLE_LIB_BIN"] = "1" if disable_lib_bin else "0"
-        cmd = [sys.executable, "-c", script, str(self.root), package, str(runs)]
+        script = (
+            "import importlib, json, sys, time\n"
+            "from doxoade.tools.vulcan.meta_finder import install\n"
+            "root = sys.argv[1]\n"
+            "pkg = sys.argv[2]\n"
+            "install(root)\n"
+            "t0 = time.perf_counter()\n"
+            "importlib.import_module(pkg)\n"
+            "elapsed = time.perf_counter() - t0\n"
+            "lib_bin = (root + '/.doxoade/vulcan/lib_bin').replace('\\\\','/')\n"
+            "redirected = 0\n"
+            "for m in list(sys.modules.values()):\n"
+            "  f = getattr(m, '__file__', '') or ''\n"
+            "  if f and lib_bin in f.replace('\\\\','/'):\n"
+            "    redirected += 1\n"
+            "print(json.dumps({'elapsed': elapsed, 'redirected': redirected}))\n"
+        )
+        cmd = [sys.executable, "-c", script, str(self.root), package]
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, env=env, check=False, cwd=str(self.root))
             if proc.returncode != 0:
@@ -190,7 +205,12 @@ class LibForge:
                 else:
                     self._last_bench_error_vulcan = err
                 return None
-            return float((proc.stdout or "").strip().splitlines()[-1])
+            line = (proc.stdout or "").strip().splitlines()[-1]
+            payload = json.loads(line)
+            return {
+                "elapsed": float(payload.get("elapsed", 0.0)),
+                "redirected": int(payload.get("redirected", 0)),
+            }
         except Exception:
             return None
 

@@ -45,28 +45,31 @@ def test_benchmark_library_success(monkeypatch, tmp_path):
 
     calls = []
 
-    def fake_run(script, package, runs, disable_lib_bin):
+    def fake_samples(package, runs, disable_lib_bin):
         calls.append((package, runs, disable_lib_bin))
-        return 2.0 if disable_lib_bin else 1.0
+        if disable_lib_bin:
+            return [{"elapsed": 2.0, "redirected": 0}] * runs
+        return [{"elapsed": 1.0, "redirected": 3}] * runs
 
-    monkeypatch.setattr(forge, "_run_bench_subprocess", fake_run)
+    monkeypatch.setattr(forge, "_run_bench_samples", fake_samples)
 
     result = forge.benchmark_library("Click==8.1.7", runs=4)
     assert result["ok"] is True
     assert result["library"] == "click"
     assert result["speedup"] == 2.0
+    assert result["redirected_modules"] == 3
     assert calls == [("click", 4, True), ("click", 4, False)]
 
 
 def test_benchmark_library_failure_includes_details(monkeypatch, tmp_path):
     forge = LibForge(tmp_path)
 
-    def fake_run(script, package, runs, disable_lib_bin):
+    def fake_samples(package, runs, disable_lib_bin):
         forge._last_bench_error_base = "base err"
         forge._last_bench_error_vulcan = "vulcan err"
-        return None
+        return []
 
-    monkeypatch.setattr(forge, "_run_bench_subprocess", fake_run)
+    monkeypatch.setattr(forge, "_run_bench_samples", fake_samples)
     result = forge.benchmark_library("rich", runs=2)
 
     assert result["ok"] is False
