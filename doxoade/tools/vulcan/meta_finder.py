@@ -103,6 +103,15 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
         self._ext = ".pyd" if os.name == 'nt' else ".so"
         #print(f"\033[96m[VULCAN DEBUG] MetaFinder v5.0 Initialized. Watching for imports...\033[0m", file=sys.stderr)
 
+    @staticmethod
+    def _debug_enabled() -> bool:
+        return os.environ.get("VULCAN_META_DEBUG", "").strip() == "1"
+
+    @classmethod
+    def _dlog(cls, msg: str) -> None:
+        if cls._debug_enabled():
+            print(msg, file=sys.stderr)
+
     def find_spec(self, fullname: str, path, target=None):
         try:
             if any(fullname.startswith(p) for p in self._BYPASS):
@@ -115,10 +124,7 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
 
                 for bin_path in sorted(candidates, key=os.path.getmtime, reverse=True):
                     if not is_binary_candidate(fullname, bin_path):
-                        print(
-                            f"\033[90m[VULCAN SKIP] {bin_path.name} ≠ {fullname}\033[0m",
-                            file=sys.stderr
-                        )
+                        self._dlog(f"\033[90m[VULCAN SKIP] {bin_path.name} ≠ {fullname}\033[0m")
                         continue
 
                     if not self.is_binary_valid_for_host(bin_path):
@@ -126,9 +132,9 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
 
                     # Busca o spec original do .py (click/_compat.py) via outros finders
                     original_spec = self._resolve_py_path_as_spec(fullname, path)
-                    print(f"[DEBUG] {fullname} → original_spec={original_spec}", file=sys.stderr)
+                    self._dlog(f"[DEBUG] {fullname} → original_spec={original_spec}")
                     if not (original_spec and original_spec.loader):
-                        print(f"[DEBUG] fallback para _make_spec", file=sys.stderr)
+                        self._dlog("[DEBUG] fallback para _make_spec")
                         continue  # ou cai para _make_spec dependendo do seu código atual
 
                     # Usa VulcanLoader: executa o .py original, depois injeta o metal

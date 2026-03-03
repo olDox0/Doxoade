@@ -686,10 +686,10 @@ def vulcan_pitstop(clear_cache):
             
             
 @vulcan_group.command('lib')
-@click.option('--analyze', is_flag=True, help="Lista dependências 'quentes' candidatas à compilação.")
+@click.option('--analyze', '--analyse', 'analyze', is_flag=True, help="Lista dependências 'quentes' candidatas à compilação.")
 @click.option('--target', help="Compila uma biblioteca específica de requirements.txt.")
 @click.option('--auto', is_flag=True, help="Compila automaticamente os melhores candidatos da análise.")
-@click.option('--run-tests', is_flag=True, default=True, help="Executa a suíte de testes após a compilação para validar.")
+@click.option('--run-tests/--no-run-tests', default=False, help="Executa smoke tests do Vulcan após a compilação para validar.")
 @click.pass_context
 def vulcan_lib(ctx, analyze, target, auto, run_tests):
     """Compila dependências de terceiros para performance nativa."""
@@ -726,15 +726,22 @@ def vulcan_lib(ctx, analyze, target, auto, run_tests):
             if success:
                 click.echo(f"{Fore.GREEN}{Style.BRIGHT}\n[SUCESSO] {result_message}{Style.RESET_ALL}")
                 if run_tests:
-                    click.echo(f"{Fore.CYAN}   > Validando estabilidade com suíte de testes (pytest)...{Style.RESET_ALL}")
-                    test_cmd = [sys.executable, "-m", "pytest", "-q"]
+                    click.echo(f"{Fore.CYAN}   > Validando estabilidade com smoke tests do Vulcan...{Style.RESET_ALL}")
+                    test_cmd = [
+                        sys.executable,
+                        "-m",
+                        "pytest",
+                        "-q",
+                        "commands_test/test_vulcan_lib_forge.py",
+                        "commands_test/test_vulcan_compiler_errors.py",
+                    ]
                     try:
                         proc = subprocess.run(test_cmd, cwd=str(root), check=False)
                         if proc.returncode == 0:
-                            click.echo(f"{Fore.GREEN}[OK]{Style.RESET_ALL} Testes passaram após compilação da lib.")
+                            click.echo(f"{Fore.GREEN}[OK]{Style.RESET_ALL} Smoke tests do Vulcan passaram após compilação da lib.")
                         else:
                             click.echo(
-                                f"{Fore.YELLOW}[AVISO]{Style.RESET_ALL} Testes falharam após compilação "
+                                f"{Fore.YELLOW}[AVISO]{Style.RESET_ALL} Smoke tests do Vulcan falharam "
                                 f"(exit={proc.returncode}). Recomendado rollback da lib em .doxoade/vulcan/lib_bin/."
                             )
                     except FileNotFoundError:
