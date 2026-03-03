@@ -122,9 +122,9 @@ if callable(_doxo_probe_embedded):
         if _doxo_sys.environ.get("VULCAN_DIAG", "").strip() == "1":
             _doxo_sys.stderr.write(
                 "[VULCAN:DIAG] "
-                f"finder_count={__doxoade_vulcan_probe__.get('finder_count', 0)} "
-                f"bin={__doxoade_vulcan_probe__.get('bin_count', 0)} "
-                f"lib_bin={__doxoade_vulcan_probe__.get('lib_bin_count', 0)}\\n"
+                + "finder_count=" + str(__doxoade_vulcan_probe__.get("finder_count", 0)) + " "
+                + "bin=" + str(__doxoade_vulcan_probe__.get("bin_count", 0)) + " "
+                + "lib_bin=" + str(__doxoade_vulcan_probe__.get("lib_bin_count", 0)) + "\\n"
             )
     except Exception:
         pass
