@@ -53,12 +53,13 @@ class LibForge:
             from .hybrid_forge import HybridIgnite
 
             ignite = HybridIgnite(self.root)
+            forge_target = self._select_forge_target(source_path, lib_name)
 
             bin_dir = self.root / ".doxoade" / "vulcan" / "bin"
             ext = ".pyd" if os.name == "nt" else ".so"
             before = {p.name for p in bin_dir.glob(f"*{ext}")}
 
-            report = ignite.run(target=source_path)
+            report = ignite.run(target=forge_target)
 
             if not report.get("modules_generated"):
                 if report.get("errors"):
@@ -82,11 +83,14 @@ class LibForge:
                     return False, f"Falha ao mover o binário '{binary.name}': {e}"
 
             if moved_count > 0:
-                self._write_manifest(lib_name, moved_files)
-                return True, (
+                self._write_manifest(lib_name, moved_files, errors=report.get("errors") or [])
+                msg = (
                     f"{moved_count} módulo(s) da biblioteca '{lib_name}' foram compilados "
                     "e instalados com validação de arquitetura."
                 )
+                if report.get("errors"):
+                    msg += f" Aviso: {len(report['errors'])} módulo(s) falharam na compilação e ficaram em fallback Python."
+                return True, msg
 
             return False, (
                 "Compilação ocorreu, mas nenhum binário novo/compatível foi encontrado para instalar."
@@ -258,14 +262,40 @@ class LibForge:
         except Exception:
             return {"libraries": {}}
 
-    def _write_manifest(self, lib_name: str, binaries: list[str]) -> None:
+    def _write_manifest(self, lib_name: str, binaries: list[str], errors: list | None = None) -> None:
         manifest = self.lib_bin_dir / "manifest.json"
         data = self._load_manifest()
         data.setdefault("libraries", {})[lib_name] = {
             "compiled_at": int(time.time()),
             "binaries": sorted(binaries),
+            "errors": list(errors or []),
         }
         manifest.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    def _select_forge_target(self, source_path: Path, lib_name: str) -> Path:
+        """Prioriza pacote funcional e evita benchmark/tests quando possível."""
+        pkg = self._extract_package_name(lib_name).replace("-", "_")
+        direct = source_path / pkg
+        if direct.exists() and (direct / "__init__.py").exists():
+            return direct
+
+        candidates = []
+        for item in source_path.iterdir():
+            if not item.is_dir():
+                continue
+            if item.name.lower() in {"tests", "test", "bench", "benchmark", "benchmarks", "docs", "examples"}:
+                continue
+            if (item / "__init__.py").exists():
+                candidates.append(item)
+
+        if not candidates:
+            return source_path
+
+        # melhor match por nome de pacote, senão primeiro candidato válido
+        for c in candidates:
+            if c.name.lower() == pkg.lower():
+                return c
+        return sorted(candidates)[0]
 
     def _download_source(self, lib_name: str, dest: Path) -> Path | None:
         """Baixa o sdist de uma biblioteca usando pip."""

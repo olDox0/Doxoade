@@ -40,6 +40,25 @@ def test_integrity_report_detects_missing_files(tmp_path):
     assert report["libraries_checked"] == 1
 
 
+def test_select_forge_target_prefers_package_dir(tmp_path):
+    forge = LibForge(tmp_path)
+    src = tmp_path / "srcpkg"
+    src.mkdir()
+    (src / "pathspec").mkdir()
+    (src / "pathspec" / "__init__.py").write_text("", encoding="utf-8")
+    (src / "benchmarks").mkdir()
+
+    target = forge._select_forge_target(src, "pathspec")
+    assert target == (src / "pathspec")
+
+
+def test_write_manifest_persists_errors(tmp_path):
+    forge = LibForge(tmp_path)
+    forge._write_manifest("pathspec", ["v_x.pyd"], errors=["e1"])
+    data = forge._load_manifest()
+    assert data["libraries"]["pathspec"]["errors"] == ["e1"]
+
+
 def test_benchmark_library_success(monkeypatch, tmp_path):
     forge = LibForge(tmp_path)
 
