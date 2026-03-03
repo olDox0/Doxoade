@@ -130,17 +130,19 @@ class LibForge:
         return report
 
     def benchmark_library(self, lib_name: str, runs: int = 8) -> dict:
+        self._last_bench_error_base = None
+        self._last_bench_error_vulcan = None
         package = self._extract_package_name(lib_name)
         if not package:
             return {"ok": False, "error": "Nome de biblioteca inválido para benchmark."}
 
         script = (
             "import importlib, os, sys, time\n"
-            "from doxoade.tools.vulcan.meta_finder import install_vulcan_meta_finder\n"
+            "from doxoade.tools.vulcan.meta_finder import install\n"
             "root = sys.argv[1]\n"
             "pkg = sys.argv[2]\n"
             "runs = int(sys.argv[3])\n"
-            "install_vulcan_meta_finder(root)\n"
+            "install(root)\n"
             "times = []\n"
             "for _ in range(runs):\n"
             "  importlib.invalidate_caches()\n"
@@ -159,6 +161,10 @@ class LibForge:
                 "ok": False,
                 "error": "Falha ao executar benchmark de importação para a biblioteca.",
                 "library": package,
+                "details": {
+                    "python_baseline_error": getattr(self, "_last_bench_error_base", None),
+                    "vulcan_error": getattr(self, "_last_bench_error_vulcan", None),
+                },
             }
 
         speedup = (base / vulcan) if vulcan > 0 else 0.0
@@ -176,8 +182,13 @@ class LibForge:
         env["VULCAN_DISABLE_LIB_BIN"] = "1" if disable_lib_bin else "0"
         cmd = [sys.executable, "-c", script, str(self.root), package, str(runs)]
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, env=env, check=False)
+            proc = subprocess.run(cmd, capture_output=True, text=True, env=env, check=False, cwd=str(self.root))
             if proc.returncode != 0:
+                err = (proc.stderr or proc.stdout or "").strip()
+                if disable_lib_bin:
+                    self._last_bench_error_base = err
+                else:
+                    self._last_bench_error_vulcan = err
                 return None
             return float((proc.stdout or "").strip().splitlines()[-1])
         except Exception:

@@ -38,3 +38,37 @@ def test_integrity_report_detects_missing_files(tmp_path):
     assert report["ok"] is False
     assert report["missing_files"] == 1
     assert report["libraries_checked"] == 1
+
+
+def test_benchmark_library_success(monkeypatch, tmp_path):
+    forge = LibForge(tmp_path)
+
+    calls = []
+
+    def fake_run(script, package, runs, disable_lib_bin):
+        calls.append((package, runs, disable_lib_bin))
+        return 2.0 if disable_lib_bin else 1.0
+
+    monkeypatch.setattr(forge, "_run_bench_subprocess", fake_run)
+
+    result = forge.benchmark_library("Click==8.1.7", runs=4)
+    assert result["ok"] is True
+    assert result["library"] == "click"
+    assert result["speedup"] == 2.0
+    assert calls == [("click", 4, True), ("click", 4, False)]
+
+
+def test_benchmark_library_failure_includes_details(monkeypatch, tmp_path):
+    forge = LibForge(tmp_path)
+
+    def fake_run(script, package, runs, disable_lib_bin):
+        forge._last_bench_error_base = "base err"
+        forge._last_bench_error_vulcan = "vulcan err"
+        return None
+
+    monkeypatch.setattr(forge, "_run_bench_subprocess", fake_run)
+    result = forge.benchmark_library("rich", runs=2)
+
+    assert result["ok"] is False
+    assert result["library"] == "rich"
+    assert "details" in result

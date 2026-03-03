@@ -789,6 +789,33 @@ def vulcan_lib(ctx, analyze, target, auto, integrity, benchmark, benchmark_runs,
                        f"invalid_host={report.get('invalid_host', 0)}")
             return
 
+        if benchmark:
+            from ..tools.vulcan.lib_forge import LibForge
+
+            forge = LibForge(root)
+            manifest = forge._load_manifest()
+            libs = sorted((manifest.get("libraries") or {}).keys())
+            if not libs:
+                click.echo(
+                    f"{Fore.YELLOW}[INFO]{Style.RESET_ALL} Nenhuma lib registrada em manifest para benchmark. "
+                    "Compile com --target <lib> antes."
+                )
+                return
+
+            click.echo(f"{Fore.CYAN}[BENCH]{Style.RESET_ALL} Rodando benchmark para {len(libs)} lib(s) do manifest...")
+            for lib in libs:
+                bench = forge.benchmark_library(lib, runs=benchmark_runs)
+                if bench.get("ok"):
+                    click.echo(
+                        f"  - {bench['library']}: python={bench['mean_import_seconds_python']:.6f}s "
+                        f"vulcan={bench['mean_import_seconds_vulcan']:.6f}s speedup={bench['speedup']:.2f}x"
+                    )
+                else:
+                    details = bench.get("details") or {}
+                    detail_msg = details.get("vulcan_error") or details.get("python_baseline_error") or bench.get("error")
+                    click.echo(f"  - {lib}: {Fore.YELLOW}[AVISO]{Style.RESET_ALL} benchmark falhou ({detail_msg})")
+            return
+
         elif auto:
             click.echo(f"{Fore.YELLOW}Funcionalidade '--auto' em desenvolvimento.{Style.RESET_ALL}")
             
