@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import importlib.util
 from pathlib import Path
 
 
@@ -136,6 +137,16 @@ class LibForge:
         package = self._extract_package_name(lib_name)
         if not package:
             return {"ok": False, "error": "Nome de biblioteca inválido para benchmark."}
+
+        if importlib.util.find_spec(package) is None:
+            return {
+                "ok": False,
+                "error": (
+                    f"Biblioteca '{package}' não está importável no ambiente atual. "
+                    "Instale-a no venv/projeto alvo antes de benchmark."
+                ),
+                "library": package,
+            }
 
         base_samples = self._run_bench_samples(package, runs, disable_lib_bin=True)
         vulcan_samples = self._run_bench_samples(package, runs, disable_lib_bin=False)

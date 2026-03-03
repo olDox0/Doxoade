@@ -771,7 +771,15 @@ def vulcan_lib(ctx, analyze, target, auto, integrity, benchmark, benchmark_runs,
                         f"speedup={bench['speedup']:.2f}x redirected={bench.get('redirected_modules', 0)}"
                     )
                 else:
-                    click.echo(f"{Fore.YELLOW}[AVISO]{Style.RESET_ALL} Benchmark não executado: {bench.get('error', 'erro desconhecido')}")
+                    details = bench.get("details") or {}
+                    detail_msg = details.get("vulcan_error") or details.get("python_baseline_error")
+                    if detail_msg:
+                        click.echo(
+                            f"{Fore.YELLOW}[AVISO]{Style.RESET_ALL} Benchmark não executado: "
+                            f"{bench.get('error', 'erro desconhecido')} | detalhe: {detail_msg}"
+                        )
+                    else:
+                        click.echo(f"{Fore.YELLOW}[AVISO]{Style.RESET_ALL} Benchmark não executado: {bench.get('error', 'erro desconhecido')}")
 
             return
 

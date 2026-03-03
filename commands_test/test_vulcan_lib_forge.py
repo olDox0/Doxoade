@@ -63,6 +63,7 @@ def test_benchmark_library_success(monkeypatch, tmp_path):
 
 def test_benchmark_library_failure_includes_details(monkeypatch, tmp_path):
     forge = LibForge(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda _name: object())
 
     def fake_samples(package, runs, disable_lib_bin):
         forge._last_bench_error_base = "base err"
@@ -75,3 +76,13 @@ def test_benchmark_library_failure_includes_details(monkeypatch, tmp_path):
     assert result["ok"] is False
     assert result["library"] == "rich"
     assert "details" in result
+
+
+def test_benchmark_library_requires_importable_package(monkeypatch, tmp_path):
+    forge = LibForge(tmp_path)
+
+    monkeypatch.setattr("importlib.util.find_spec", lambda _name: None)
+    result = forge.benchmark_library("pathspec", runs=3)
+
+    assert result["ok"] is False
+    assert "não está importável" in result["error"]
