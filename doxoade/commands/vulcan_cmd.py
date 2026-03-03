@@ -689,9 +689,12 @@ def vulcan_pitstop(clear_cache):
 @click.option('--analyze', '--analyse', 'analyze', is_flag=True, help="Lista dependências 'quentes' candidatas à compilação.")
 @click.option('--target', help="Compila uma biblioteca específica de requirements.txt.")
 @click.option('--auto', is_flag=True, help="Compila automaticamente os melhores candidatos da análise.")
+@click.option('--integrity', is_flag=True, help="Executa análise de integridade dos binários de libs compiladas.")
+@click.option('--benchmark', is_flag=True, help="Executa benchmark de import da biblioteca alvo (Python x Vulcan lib_bin).")
+@click.option('--benchmark-runs', default=8, type=int, show_default=True, help="Número de execuções para benchmark de import.")
 @click.option('--run-tests/--no-run-tests', default=False, help="Executa smoke tests do Vulcan após a compilação para validar.")
 @click.pass_context
-def vulcan_lib(ctx, analyze, target, auto, run_tests):
+def vulcan_lib(ctx, analyze, target, auto, integrity, benchmark, benchmark_runs, run_tests):
     """Compila dependências de terceiros para performance nativa."""
     root = _find_project_root(os.getcwd())
     
@@ -752,6 +755,38 @@ def vulcan_lib(ctx, analyze, target, auto, run_tests):
             else:
                 click.echo(f"{Fore.RED}{Style.BRIGHT}\n[FALHA] {result_message}{Style.RESET_ALL}")
 
+            if success and integrity:
+                report = forge.integrity_report(target)
+                status = f"{Fore.GREEN}[OK]{Style.RESET_ALL}" if report.get("ok") else f"{Fore.YELLOW}[AVISO]{Style.RESET_ALL}"
+                click.echo(f"{status} Integridade lib '{target}': {len(report.get('entries', []))} binários, "
+                           f"missing={report.get('missing_files', 0)}, invalid_host={report.get('invalid_host', 0)}")
+
+            if success and benchmark:
+                bench = forge.benchmark_library(target, runs=benchmark_runs)
+                if bench.get("ok"):
+                    click.echo(
+                        f"{Fore.CYAN}[BENCH]{Style.RESET_ALL} {bench['library']} | "
+                        f"python={bench['mean_import_seconds_python']:.6f}s "
+                        f"vulcan={bench['mean_import_seconds_vulcan']:.6f}s "
+                        f"speedup={bench['speedup']:.2f}x"
+                    )
+                else:
+                    click.echo(f"{Fore.YELLOW}[AVISO]{Style.RESET_ALL} Benchmark não executado: {bench.get('error', 'erro desconhecido')}")
+
+            return
+
+        if integrity:
+            from ..tools.vulcan.lib_forge import LibForge
+
+            forge = LibForge(root)
+            report = forge.integrity_report(None)
+            if not report.get("entries"):
+                click.echo(f"{Fore.YELLOW}[INFO]{Style.RESET_ALL} Nenhum binário de lib compilada encontrado em .doxoade/vulcan/lib_bin")
+                return
+            status = f"{Fore.GREEN}[OK]{Style.RESET_ALL}" if report.get("ok") else f"{Fore.YELLOW}[AVISO]{Style.RESET_ALL}"
+            click.echo(f"{status} Integridade geral: libs={report.get('libraries_checked', 0)} "
+                       f"binários={len(report.get('entries', []))} missing={report.get('missing_files', 0)} "
+                       f"invalid_host={report.get('invalid_host', 0)}")
             return
 
         elif auto:

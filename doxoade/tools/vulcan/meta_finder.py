@@ -118,7 +118,8 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
                 return None
 
             # --- LIB_BIN: verifica para QUALQUER módulo (não só doxoade.) ---
-            if self.lib_bin_dir.exists():
+            lib_bin_enabled = os.environ.get("VULCAN_DISABLE_LIB_BIN", "0").strip() != "1"
+            if lib_bin_enabled and self.lib_bin_dir.exists():
                 module_part = fullname.split('.')[-1]
                 candidates = list(self.lib_bin_dir.glob(f"v_{module_part}_*{self._ext}"))
 

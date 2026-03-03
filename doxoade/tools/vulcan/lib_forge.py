@@ -90,6 +90,104 @@ class LibForge:
                 "Compilação ocorreu, mas nenhum binário novo/compatível foi encontrado para instalar."
             )
 
+    def integrity_report(self, lib_name: str | None = None) -> dict:
+        manifest = self._load_manifest()
+        libs = manifest.get("libraries", {})
+        if lib_name:
+            norm = self._extract_package_name(lib_name)
+            libs = {k: v for k, v in libs.items() if self._extract_package_name(k) == norm}
+
+        report = {
+            "library": lib_name or "*",
+            "libraries_checked": len(libs),
+            "entries": [],
+            "missing_files": 0,
+            "invalid_host": 0,
+            "ok": True,
+        }
+
+        for l_name, info in libs.items():
+            binaries = info.get("binaries", []) if isinstance(info, dict) else []
+            for bname in binaries:
+                p = self.lib_bin_dir / bname
+                exists = p.exists()
+                valid_host = exists and self._is_binary_valid_for_host(p)
+                entry = {
+                    "library": l_name,
+                    "binary": bname,
+                    "exists": exists,
+                    "valid_host": valid_host,
+                    "size_kb": round(p.stat().st_size / 1024, 1) if exists else 0,
+                }
+                report["entries"].append(entry)
+                if not exists:
+                    report["missing_files"] += 1
+                    report["ok"] = False
+                elif not valid_host:
+                    report["invalid_host"] += 1
+                    report["ok"] = False
+
+        return report
+
+    def benchmark_library(self, lib_name: str, runs: int = 8) -> dict:
+        package = self._extract_package_name(lib_name)
+        if not package:
+            return {"ok": False, "error": "Nome de biblioteca inválido para benchmark."}
+
+        script = (
+            "import importlib, os, sys, time\n"
+            "from doxoade.tools.vulcan.meta_finder import install_vulcan_meta_finder\n"
+            "root = sys.argv[1]\n"
+            "pkg = sys.argv[2]\n"
+            "runs = int(sys.argv[3])\n"
+            "install_vulcan_meta_finder(root)\n"
+            "times = []\n"
+            "for _ in range(runs):\n"
+            "  importlib.invalidate_caches()\n"
+            "  if pkg in sys.modules: del sys.modules[pkg]\n"
+            "  t0 = time.perf_counter()\n"
+            "  importlib.import_module(pkg)\n"
+            "  times.append(time.perf_counter() - t0)\n"
+            "print(sum(times)/len(times))\n"
+        )
+
+        base = self._run_bench_subprocess(script, package, runs, disable_lib_bin=True)
+        vulcan = self._run_bench_subprocess(script, package, runs, disable_lib_bin=False)
+
+        if base is None or vulcan is None:
+            return {
+                "ok": False,
+                "error": "Falha ao executar benchmark de importação para a biblioteca.",
+                "library": package,
+            }
+
+        speedup = (base / vulcan) if vulcan > 0 else 0.0
+        return {
+            "ok": True,
+            "library": package,
+            "runs": runs,
+            "mean_import_seconds_python": base,
+            "mean_import_seconds_vulcan": vulcan,
+            "speedup": speedup,
+        }
+
+    def _run_bench_subprocess(self, script: str, package: str, runs: int, disable_lib_bin: bool) -> float | None:
+        env = os.environ.copy()
+        env["VULCAN_DISABLE_LIB_BIN"] = "1" if disable_lib_bin else "0"
+        cmd = [sys.executable, "-c", script, str(self.root), package, str(runs)]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, env=env, check=False)
+            if proc.returncode != 0:
+                return None
+            return float((proc.stdout or "").strip().splitlines()[-1])
+        except Exception:
+            return None
+
+    @staticmethod
+    def _extract_package_name(requirement: str) -> str:
+        requirement = (requirement or "").strip()
+        return re.split(r"[<>=!~]", requirement, maxsplit=1)[0].strip().lower()
+
     @staticmethod
     def _is_safe_requirement(lib_name: str) -> bool:
         if not lib_name or len(lib_name) > 128:
@@ -106,14 +204,21 @@ class LibForge:
         except Exception:
             return False
 
+    def _load_manifest(self) -> dict:
+        manifest = self.lib_bin_dir / "manifest.json"
+        if not manifest.exists():
+            return {"libraries": {}}
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return {"libraries": {}}
+            return data
+        except Exception:
+            return {"libraries": {}}
+
     def _write_manifest(self, lib_name: str, binaries: list[str]) -> None:
         manifest = self.lib_bin_dir / "manifest.json"
-        data = {"libraries": {}}
-        if manifest.exists():
-            try:
-                data = json.loads(manifest.read_text(encoding="utf-8"))
-            except Exception:
-                data = {"libraries": {}}
+        data = self._load_manifest()
         data.setdefault("libraries", {})[lib_name] = {
             "compiled_at": int(time.time()),
             "binaries": sorted(binaries),
