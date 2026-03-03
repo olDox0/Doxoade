@@ -275,6 +275,7 @@ class VulcanBinaryFinder(importlib.abc.MetaPathFinder):
         "doxoade.", "encodings.", "codecs.", "_", "builtins",
         "importlib", "sys", "os", "pathlib", "abc",
     )
+    _VULCAN_FINDER_MARKER = True
 
     def __init__(self, project_root: str | Path):
         self.project_root = Path(project_root).resolve()
@@ -286,6 +287,10 @@ class VulcanBinaryFinder(importlib.abc.MetaPathFinder):
         """Obtém o spec do .py original sem acionar este finder recursivamente."""
         for finder in sys.meta_path:
             if finder is self:
+                continue
+            # Evita recursão entre múltiplos runtimes Vulcan carregados no mesmo processo
+            # (ex.: runtime do projeto + runtime embutido do doxoade no host).
+            if getattr(finder, "_VULCAN_FINDER_MARKER", False):
                 continue
             if not hasattr(finder, "find_spec"):
                 continue
@@ -381,8 +386,8 @@ def install_meta_finder(project_root: str | Path) -> VulcanBinaryFinder:
     root_str = str(Path(project_root).resolve())
 
     for existing in sys.meta_path:
-        if isinstance(existing, VulcanBinaryFinder):
-            if str(existing.project_root) == root_str:
+        if isinstance(existing, VulcanBinaryFinder) or getattr(existing, "_VULCAN_FINDER_MARKER", False):
+            if str(getattr(existing, "project_root", "")) == root_str:
                 return existing
 
     finder = VulcanBinaryFinder(root_str)
