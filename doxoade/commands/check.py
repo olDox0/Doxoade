@@ -22,6 +22,7 @@ __all__ = ['check', 'run_check_logic']
 @click.option('--npp-clear', '-nppc', is_flag=True, help="Limpa marcações no editor.")
 @click.option('--only', '-o', type=str, help="Filtra apenas uma categoria.")
 @click.option('--security', '-s', is_flag=True, help="Ativa auditoria Aegis (Bandit/Safety).")
+@click.option('--structural-risk/--no-structural-risk', default=True, show_default=True, help="Classifica risco estrutural Python (dinamismo/import hooks).")
 @click.pass_context
 def check(ctx, path: str, **kwargs):
     """🔍 Auditoria de Qualidade Modular v85.2 (Full Power)."""
@@ -44,6 +45,11 @@ def check(ctx, path: str, **kwargs):
         if kwargs.get('security'):
             from .check_systems.check_security import analyze_security
             analyze_security(state)
+        # 2.1 Risco estrutural (diagnóstico preventivo)
+        if kwargs.get('structural_risk', True):
+            from .check_systems.check_structural import analyze_structural_risk
+            analyze_structural_risk(state, io, **kwargs)
+
         # 3. Crivos e Refatoração (Passa 'exclude' e 'only')
         from .check_systems.check_filters import apply_filters
         apply_filters(state, **kwargs) # <--- AGORA COM KWARGS
