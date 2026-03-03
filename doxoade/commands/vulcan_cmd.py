@@ -22,6 +22,7 @@ _BOOTSTRAP_END = "# --- DOXOADE_VULCAN_BOOTSTRAP:END ---"
 _BOOTSTRAP_BLOCK = f'''{_BOOTSTRAP_START}
 from pathlib import Path as _doxo_path
 import importlib.util as _doxo_importlib_util
+import sys as _doxo_sys
 
 _doxo_activate_vulcan = None
 _doxo_install_meta_finder = None
@@ -35,6 +36,7 @@ for _doxo_base in [_doxo_path(__file__).resolve(), *_doxo_path(__file__).resolve
     if not (_doxo_spec and _doxo_spec.loader):
         continue
     _doxo_mod = _doxo_importlib_util.module_from_spec(_doxo_spec)
+    _doxo_sys.modules["_doxoade_vulcan_runtime"] = _doxo_mod
     _doxo_spec.loader.exec_module(_doxo_mod)
     _doxo_activate_vulcan = getattr(_doxo_mod, "activate_vulcan", None)
     _doxo_install_meta_finder = getattr(_doxo_mod, "install_meta_finder", None)
@@ -57,6 +59,7 @@ try:
             _doxo_spec2 = _doxo_importlib_util.spec_from_file_location("_doxoade_vulcan_embedded", str(_embedded_path))
             if _doxo_spec2 and _doxo_spec2.loader:
                 _doxo_mod2 = _doxo_importlib_util.module_from_spec(_doxo_spec2)
+                _doxo_sys.modules["_doxoade_vulcan_embedded"] = _doxo_mod2
                 _doxo_spec2.loader.exec_module(_doxo_mod2)
                 _doxo_activate_embedded = getattr(_doxo_mod2, "activate_embedded", None)
                 _doxo_safe_call = getattr(_doxo_mod2, "safe_call", None)
