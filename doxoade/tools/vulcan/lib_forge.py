@@ -1,340 +1,313 @@
 # doxoade/tools/vulcan/lib_forge.py
-import json
-import statistics
+"""
+LibForge — Compilação de bibliotecas de terceiros já instaladas no venv.
+
+Fluxo:
+  1. Localiza a biblioteca no site-packages do Python atual (nunca baixa).
+  2. Copia SOMENTE os fontes .py para um diretório temporário de trabalho.
+     O original no venv nunca é tocado.
+  3. [NOVO] LibOptimizer: aplica dead code elimination, remoção de imports
+     não usados, remoção de docstrings e minificação de variáveis locais
+     na cópia. Transformações revertidas por arquivo em caso de falha.
+  4. HybridIgnite na cópia otimizada — só compila funções com score >= limiar
+     e que passem em todas as verificações de elegibilidade.
+  5. Move os binários aprovados para .doxoade/vulcan/lib_bin/.
+     Arquivos não compilados permanecem otimizados na cópia (que é descartada
+     com o tempdir — apenas os binários persistem).
+
+Segurança:
+  - Trabalha sempre com a cópia temporária (tempfile.TemporaryDirectory).
+  - O venv original NUNCA é modificado.
+  - Cada arquivo da cópia tem revert independente se a otimização falhar.
+  - HybridIgnite filtra arquivos e funções inelegíveis antes de compilar.
+  - Binários só chegam ao lib_bin após compilação bem-sucedida.
+"""
+
 import os
-import re
 import shutil
-import subprocess
 import sys
 import tempfile
-import time
-import importlib.util
 from pathlib import Path
-
-
-_PACKAGE_RE = re.compile(r"^[A-Za-z0-9_.-]+([<>=!~]=[^\s,;]+)?$")
 
 
 class LibForge:
     """
-    Orquestrador para compilação de bibliotecas de terceiros.
-    Fases:
-    1. Download do código-fonte (sdist).
-    2. Compilação seletiva via HybridIgnite.
-    3. Mover o binário para o diretório de bibliotecas do Vulcan.
+    Orquestrador de compilação + otimização de bibliotecas do venv.
+
+    Nunca altera o ambiente Python original — trabalha com uma cópia isolada
+    dos fontes .py da biblioteca alvo.
     """
 
-    def __init__(self, project_root):
+    def __init__(self, project_root: str):
         self.root = Path(project_root)
         self.lib_bin_dir = self.root / ".doxoade" / "vulcan" / "lib_bin"
         self.lib_bin_dir.mkdir(parents=True, exist_ok=True)
 
-    def compile_library(self, lib_name: str) -> (bool, str):
-        lib_name = (lib_name or "").strip()
-        if not self._is_safe_requirement(lib_name):
-            return False, (
-                "Nome de biblioteca inválido/inseguro. Use formato simples, "
-                "ex: pacote ou pacote==1.2.3"
-            )
+    # ── Entry-point público ────────────────────────────────────────────────────
 
-        with tempfile.TemporaryDirectory(prefix=f"vulcan_lib_build_{lib_name.split('=')[0]}_") as temp_dir:
-            build_zone = Path(temp_dir)
+    def compile_library(self, lib_name: str) -> tuple[bool, str]:
+        """
+        Localiza, copia, otimiza e compila funções elegíveis da biblioteca.
 
-            # Fase 1: Aquisição da Fonte
-            print(f"   > Baixando código-fonte para '{lib_name}'...")
-            source_path = self._download_source(lib_name, build_zone)
+        Retorna (sucesso, mensagem).
+        """
+        with tempfile.TemporaryDirectory(prefix=f"vulcan_lib_{lib_name}_") as temp_dir:
+            work_dir = Path(temp_dir)
+
+            # ── Fase 1: Localizar no venv ──────────────────────────────────────
+            print(f"   > Localizando '{lib_name}' no site-packages...")
+            source_path = self._find_in_venv(lib_name)
+
             if not source_path:
-                return False, "Falha ao baixar o código-fonte (sdist)."
+                return False, (
+                    f"Biblioteca '{lib_name}' não encontrada no site-packages. "
+                    f"Instale primeiro com: pip install {lib_name}"
+                )
 
-            print(f"   > Código-fonte extraído em: {source_path}")
+            print(f"   > Encontrada em: {source_path}")
 
-            # Fase 2: Forja Híbrida
-            print("   > Analisando e compilando funções 'quentes'...")
+            # ── Fase 2: Copiar fontes para área isolada ────────────────────────
+            print(f"   > Copiando fontes .py para área temporária de trabalho...")
+            try:
+                work_copy = self._copy_sources(source_path, work_dir)
+            except Exception as e:
+                return False, f"Falha ao copiar fontes: {e}"
+
+            py_count = sum(1 for _ in work_copy.rglob("*.py"))
+            print(f"   > {py_count} arquivo(s) .py copiado(s) para análise.")
+
+            if py_count == 0:
+                return False, (
+                    f"'{lib_name}' não possui arquivos .py copiáveis "
+                    f"(pode ser uma extensão C pura)."
+                )
+
+            # ── Fase 3: Otimizar fontes da cópia ──────────────────────────────
+            print(f"   > Otimizando fontes (dead code, imports, minificação local)...")
+            opt_stats = self._optimize_sources(work_copy)
+            self._print_opt_summary(opt_stats)
+
+            # ── Fase 4: HybridIgnite na cópia otimizada ────────────────────────
+            print(f"   > Analisando candidatos com HybridScanner...")
             from .hybrid_forge import HybridIgnite
 
             ignite = HybridIgnite(self.root)
-            forge_target = self._select_forge_target(source_path, lib_name)
-
-            bin_dir = self.root / ".doxoade" / "vulcan" / "bin"
-            ext = ".pyd" if os.name == "nt" else ".so"
-            before = {p.name for p in bin_dir.glob(f"*{ext}")}
-
-            report = ignite.run(target=forge_target)
+            report = ignite.run(target=work_copy, on_progress=print)
 
             if not report.get("modules_generated"):
-                if report.get("errors"):
-                    return False, f"Compilação falhou. Erros: {report['errors']}"
-                return False, "Nenhuma função elegível para compilação foi encontrada na biblioteca."
+                skipped = report.get("functions_skipped", 0)
+                errors  = report.get("errors", [])
 
-            # Fase 3: mover apenas artefatos novos para lib_bin
-            produced = [p for p in bin_dir.glob(f"*{ext}") if p.name not in before]
-            moved_count = 0
-            moved_files = []
-            for binary in produced:
-                if not self._is_binary_valid_for_host(binary):
-                    continue
-                dst = self.lib_bin_dir / binary.name
-                try:
-                    shutil.move(str(binary), str(dst))
-                    print(f"   > Binário otimizado '{binary.name}' instalado com sucesso.")
-                    moved_count += 1
-                    moved_files.append(binary.name)
-                except Exception as e:
-                    return False, f"Falha ao mover o binário '{binary.name}': {e}"
-
-            if moved_count > 0:
-                self._write_manifest(lib_name, moved_files, errors=report.get("errors") or [])
-                msg = (
-                    f"{moved_count} módulo(s) da biblioteca '{lib_name}' foram compilados "
-                    "e instalados com validação de arquitetura."
+                if errors:
+                    return False, (
+                        f"Compilação falhou em todos os módulos. "
+                        f"Erros ({len(errors)}): {errors[:3]}"
+                    )
+                return False, (
+                    f"Nenhuma função elegível encontrada em '{lib_name}' "
+                    f"({skipped} função(ões) descartada(s) pelo scanner). "
+                    f"A biblioteca pode ser C-only, usar I/O intensivo ou "
+                    f"não ter loops computacionais suficientes para ganho real."
                 )
-                if report.get("errors"):
-                    msg += f" Aviso: {len(report['errors'])} módulo(s) falharam na compilação e ficaram em fallback Python."
-                return True, msg
 
-            return False, (
-                "Compilação ocorreu, mas nenhum binário novo/compatível foi encontrado para instalar."
+            # ── Fase 5: Mover binários aprovados para lib_bin/ ────────────────
+            bin_dir = self.root / ".doxoade" / "vulcan" / "bin"
+            moved, failed = self._promote_to_lib_bin(bin_dir, report["modules_generated"])
+
+            func_count = report.get("functions_compiled", 0)
+            summary = (
+                f"{moved} módulo(s) de '{lib_name}' instalados em lib_bin/ "
+                f"({func_count} função(ões) otimizadas, "
+                f"{report.get('functions_skipped', 0)} descartadas pelo scanner, "
+                f"{opt_stats['bytes_saved']:,} bytes economizados pelo optimizer)."
             )
+            if failed:
+                summary += f" Falhas ao mover: {'; '.join(failed[:3])}"
 
-    def integrity_report(self, lib_name: str | None = None) -> dict:
-        manifest = self._load_manifest()
-        libs = manifest.get("libraries", {})
-        if lib_name:
-            norm = self._extract_package_name(lib_name)
-            libs = {k: v for k, v in libs.items() if self._extract_package_name(k) == norm}
+            return True, summary
 
-        report = {
-            "library": lib_name or "*",
-            "libraries_checked": len(libs),
-            "entries": [],
-            "missing_files": 0,
-            "invalid_host": 0,
-            "ok": True,
+    # ── Localização no venv ───────────────────────────────────────────────────
+
+    def _find_in_venv(self, lib_name: str) -> Path | None:
+        """
+        Busca a pasta da biblioteca no site-packages do Python atual.
+
+        Tenta variações comuns de nome (hífens ↔ underscores, capitalização)
+        e verifica se é um pacote real (possui __init__.py).
+        """
+        site_dirs = self._get_site_packages_dirs()
+
+        base = lib_name.lower()
+        name_variants = {
+            lib_name,
+            base,
+            base.replace("-", "_"),
+            base.replace("_", "-"),
+            lib_name.replace("-", "_"),
+            lib_name.replace("_", "-"),
         }
 
-        for l_name, info in libs.items():
-            binaries = info.get("binaries", []) if isinstance(info, dict) else []
-            for bname in binaries:
-                p = self.lib_bin_dir / bname
-                exists = p.exists()
-                valid_host = exists and self._is_binary_valid_for_host(p)
-                entry = {
-                    "library": l_name,
-                    "binary": bname,
-                    "exists": exists,
-                    "valid_host": valid_host,
-                    "size_kb": round(p.stat().st_size / 1024, 1) if exists else 0,
-                }
-                report["entries"].append(entry)
-                if not exists:
-                    report["missing_files"] += 1
-                    report["ok"] = False
-                elif not valid_host:
-                    report["invalid_host"] += 1
-                    report["ok"] = False
+        for sp in site_dirs:
+            sp_path = Path(sp)
+            if not sp_path.is_dir():
+                continue
 
-        return report
+            # 1. Tentativa direta
+            for variant in name_variants:
+                candidate = sp_path / variant
+                if candidate.is_dir() and (candidate / "__init__.py").exists():
+                    return candidate
 
-    def benchmark_library(self, lib_name: str, runs: int = 8) -> dict:
-        self._last_bench_error_base = None
-        self._last_bench_error_vulcan = None
-        package = self._extract_package_name(lib_name)
-        if not package:
-            return {"ok": False, "error": "Nome de biblioteca inválido para benchmark."}
+            # 2. Varredura case-insensitive (Pillow → PIL, SQLAlchemy → sqlalchemy)
+            try:
+                for item in sp_path.iterdir():
+                    if not item.is_dir():
+                        continue
+                    if item.name.lower() not in {v.lower() for v in name_variants}:
+                        continue
+                    if (item / "__init__.py").exists():
+                        return item
+            except PermissionError:
+                continue
 
-        if importlib.util.find_spec(package) is None:
+        return None
+
+    @staticmethod
+    def _get_site_packages_dirs() -> list[str]:
+        """Coleta todos os diretórios site-packages acessíveis pelo Python atual."""
+        import site
+
+        dirs: list[str] = []
+
+        try:
+            dirs.extend(site.getsitepackages())
+        except AttributeError:
+            pass
+
+        try:
+            user_sp = site.getusersitepackages()
+            if user_sp and user_sp not in dirs:
+                dirs.append(user_sp)
+        except AttributeError:
+            pass
+
+        for p in sys.path:
+            if ("site-packages" in p or "dist-packages" in p) and p not in dirs:
+                dirs.append(p)
+
+        return dirs
+
+    # ── Cópia segura dos fontes ───────────────────────────────────────────────
+
+    @staticmethod
+    def _copy_sources(source_path: Path, work_dir: Path) -> Path:
+        """
+        Copia apenas os .py da biblioteca para o diretório de trabalho.
+
+        Exclui:
+          - __pycache__/ e *.pyc/.pyo
+          - *.pyd / *.so  (binários já compilados)
+          - tests/ / test_*/ (suítes de teste)
+          - *.pyx / *.pxd / *.c / *.h (código C/Cython — não misturar com forge)
+        """
+        dest = work_dir / source_path.name
+
+        _SKIP_DIRS = frozenset({
+            "__pycache__", "tests", "test", "testing",
+            "docs", "doc", "examples", "benchmarks",
+        })
+        _SKIP_SUFFIXES = frozenset({
+            ".pyc", ".pyo", ".pyd", ".so",
+            ".pyx", ".pxd", ".c", ".h", ".cpp",
+        })
+
+        def _ignore(dir_: str, names: list[str]) -> set[str]:
+            ignored: set[str] = set()
+            for name in names:
+                p = Path(dir_) / name
+                if p.is_dir() and (name in _SKIP_DIRS
+                                   or name.startswith("test_")
+                                   or name.endswith("_test")):
+                    ignored.add(name)
+                elif p.is_file() and p.suffix in _SKIP_SUFFIXES:
+                    ignored.add(name)
+            return ignored
+
+        shutil.copytree(str(source_path), str(dest), ignore=_ignore)
+        return dest
+
+    # ── Otimização dos fontes da cópia ────────────────────────────────────────
+
+    @staticmethod
+    def _optimize_sources(work_copy: Path) -> dict:
+        """
+        Aplica LibOptimizer em todos os .py da cópia.
+        Cada arquivo tem revert independente — falhas são silenciosas.
+        """
+        try:
+            from .lib_optimizer import LibOptimizer
+            optimizer = LibOptimizer()
+            return optimizer.optimize_directory(work_copy)
+        except Exception as exc:
+            # Nunca quebra o fluxo principal
+            print(f"   > [WARN] Optimizer falhou ({exc}) — continuando sem otimização de fonte.")
             return {
-                "ok": False,
-                "error": (
-                    f"Biblioteca '{package}' não está importável no ambiente atual. "
-                    "Instale-a no venv/projeto alvo antes de benchmark."
-                ),
-                "library": package,
+                'files_processed': 0, 'files_optimized': 0, 'files_skipped': 0,
+                'bytes_saved': 0, 'docstrings_removed': 0, 'dead_branches': 0,
+                'imports_removed': 0, 'locals_minified': 0,
             }
 
-        base_samples = self._run_bench_samples(package, runs, disable_lib_bin=True)
-        vulcan_samples = self._run_bench_samples(package, runs, disable_lib_bin=False)
+    @staticmethod
+    def _print_opt_summary(stats: dict):
+        """Exibe resumo da otimização de forma compacta."""
+        if stats['files_optimized'] == 0 and stats['files_skipped'] == stats['files_processed']:
+            print(f"   > [OPT] Sem transformações aplicadas ({stats['files_skipped']} arquivo(s) ignorados).")
+            return
 
-        if not base_samples or not vulcan_samples:
-            return {
-                "ok": False,
-                "error": "Falha ao executar benchmark de importação para a biblioteca.",
-                "library": package,
-                "details": {
-                    "python_baseline_error": getattr(self, "_last_bench_error_base", None),
-                    "vulcan_error": getattr(self, "_last_bench_error_vulcan", None),
-                },
-            }
+        parts = []
+        if stats['docstrings_removed']:
+            parts.append(f"{stats['docstrings_removed']} docstrings")
+        if stats['dead_branches']:
+            parts.append(f"{stats['dead_branches']} dead branches")
+        if stats['imports_removed']:
+            parts.append(f"{stats['imports_removed']} imports não usados")
+        if stats['locals_minified']:
+            parts.append(f"{stats['locals_minified']} vars locais minificadas")
 
-        base = statistics.mean([s["elapsed"] for s in base_samples])
-        vulcan = statistics.mean([s["elapsed"] for s in vulcan_samples])
-        redirected = max([s.get("redirected", 0) for s in vulcan_samples])
+        detail = f"({', '.join(parts)})" if parts else ""
+        saved_kb = stats['bytes_saved'] / 1024
 
-        speedup = (base / vulcan) if vulcan > 0 else 0.0
-        return {
-            "ok": True,
-            "library": package,
-            "runs": runs,
-            "mean_import_seconds_python": base,
-            "mean_import_seconds_vulcan": vulcan,
-            "speedup": speedup,
-            "redirected_modules": redirected,
-        }
-
-    def _run_bench_samples(self, package: str, runs: int, disable_lib_bin: bool) -> list[dict]:
-        samples: list[dict] = []
-        for _ in range(max(1, runs)):
-            row = self._run_bench_subprocess(package, disable_lib_bin=disable_lib_bin)
-            if row is None:
-                return []
-            samples.append(row)
-        return samples
-
-    def _run_bench_subprocess(self, package: str, disable_lib_bin: bool) -> dict | None:
-        env = os.environ.copy()
-        env["VULCAN_DISABLE_LIB_BIN"] = "1" if disable_lib_bin else "0"
-        script = (
-            "import importlib, json, sys, time\n"
-            "from doxoade.tools.vulcan.meta_finder import install\n"
-            "root = sys.argv[1]\n"
-            "pkg = sys.argv[2]\n"
-            "install(root)\n"
-            "t0 = time.perf_counter()\n"
-            "importlib.import_module(pkg)\n"
-            "elapsed = time.perf_counter() - t0\n"
-            "lib_bin = (root + '/.doxoade/vulcan/lib_bin').replace('\\\\','/')\n"
-            "redirected = 0\n"
-            "for m in list(sys.modules.values()):\n"
-            "  f = getattr(m, '__file__', '') or ''\n"
-            "  if f and lib_bin in f.replace('\\\\','/'):\n"
-            "    redirected += 1\n"
-            "print(json.dumps({'elapsed': elapsed, 'redirected': redirected}))\n"
+        print(
+            f"   > [OPT] {stats['files_optimized']}/{stats['files_processed']} arquivo(s) "
+            f"otimizados — {saved_kb:.1f} KB economizados {detail}"
         )
-        cmd = [sys.executable, "-c", script, str(self.root), package]
-        try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, env=env, check=False, cwd=str(self.root))
-            if proc.returncode != 0:
-                err = (proc.stderr or proc.stdout or "").strip()
-                if disable_lib_bin:
-                    self._last_bench_error_base = err
-                else:
-                    self._last_bench_error_vulcan = err
-                return None
-            line = (proc.stdout or "").strip().splitlines()[-1]
-            payload = json.loads(line)
-            return {
-                "elapsed": float(payload.get("elapsed", 0.0)),
-                "redirected": int(payload.get("redirected", 0)),
-            }
-        except Exception:
-            return None
+        if stats['files_skipped']:
+            print(f"   > [OPT] {stats['files_skipped']} arquivo(s) ignorado(s) (parse error / revertido).")
 
-    @staticmethod
-    def _extract_package_name(requirement: str) -> str:
-        requirement = (requirement or "").strip()
-        return re.split(r"[<>=!~]", requirement, maxsplit=1)[0].strip().lower()
+    # ── Promoção para lib_bin/ ────────────────────────────────────────────────
 
-    @staticmethod
-    def _is_safe_requirement(lib_name: str) -> bool:
-        if not lib_name or len(lib_name) > 128:
-            return False
-        return bool(_PACKAGE_RE.fullmatch(lib_name))
+    def _promote_to_lib_bin(
+        self,
+        bin_dir: Path,
+        module_names: list[str],
+    ) -> tuple[int, list[str]]:
+        """
+        Move os binários gerados de bin/ para lib_bin/.
+        Retorna (qtd_movidos, lista_de_erros).
+        """
+        moved   = 0
+        failed: list[str] = []
 
-    @staticmethod
-    def _is_binary_valid_for_host(bin_path: Path) -> bool:
-        # Reuso do guardião de integridade/arquitetura já existente no runtime.
-        try:
-            from .runtime import _is_binary_valid_for_host as _runtime_is_valid
-
-            return _runtime_is_valid(bin_path)
-        except Exception:
-            return False
-
-    def _load_manifest(self) -> dict:
-        manifest = self.lib_bin_dir / "manifest.json"
-        if not manifest.exists():
-            return {"libraries": {}}
-        try:
-            data = json.loads(manifest.read_text(encoding="utf-8"))
-            if not isinstance(data, dict):
-                return {"libraries": {}}
-            return data
-        except Exception:
-            return {"libraries": {}}
-
-    def _write_manifest(self, lib_name: str, binaries: list[str], errors: list | None = None) -> None:
-        manifest = self.lib_bin_dir / "manifest.json"
-        data = self._load_manifest()
-        data.setdefault("libraries", {})[lib_name] = {
-            "compiled_at": int(time.time()),
-            "binaries": sorted(binaries),
-            "errors": list(errors or []),
-        }
-        manifest.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-
-    def _select_forge_target(self, source_path: Path, lib_name: str) -> Path:
-        """Prioriza pacote funcional e evita benchmark/tests quando possível."""
-        pkg = self._extract_package_name(lib_name).replace("-", "_")
-        direct = source_path / pkg
-        if direct.exists() and (direct / "__init__.py").exists():
-            return direct
-
-        candidates = []
-        for item in source_path.iterdir():
-            if not item.is_dir():
-                continue
-            if item.name.lower() in {"tests", "test", "bench", "benchmark", "benchmarks", "docs", "examples"}:
-                continue
-            if (item / "__init__.py").exists():
-                candidates.append(item)
-
-        if not candidates:
-            return source_path
-
-        # melhor match por nome de pacote, senão primeiro candidato válido
-        for c in candidates:
-            if c.name.lower() == pkg.lower():
-                return c
-        return sorted(candidates)[0]
-
-    def _download_source(self, lib_name: str, dest: Path) -> Path | None:
-        """Baixa o sdist de uma biblioteca usando pip."""
-        try:
-            cmd = [
-                sys.executable,
-                "-m",
-                "pip",
-                "download",
-                lib_name,
-                "--no-binary",
-                ":all:",
-                "--no-deps",
-                "--dest",
-                str(dest),
-            ]
-            proc = subprocess.run(cmd, check=True, capture_output=True, text=True)
-            if proc.stderr:
-                print(proc.stderr.strip())
-
-            for archive in dest.iterdir():
-                if archive.name.endswith((".tar.gz", ".zip", ".tar", ".tgz")):
-                    shutil.unpack_archive(archive, dest)
-
-            candidates = [
-                item
-                for item in dest.iterdir()
-                if item.is_dir() and ((item / "pyproject.toml").exists() or (item / "setup.py").exists())
-            ]
-            if not candidates:
-                # fallback: retorna primeiro diretório extraído
-                candidates = [item for item in dest.iterdir() if item.is_dir()]
-
-            for item in sorted(candidates):
-                try:
-                    item.resolve().relative_to(dest.resolve())
-                    return item
-                except Exception:
+        for module_name in module_names:
+            for binary in list(bin_dir.glob(f"{module_name}*")):
+                if binary.suffix not in (".pyd", ".so"):
                     continue
-            return None
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            return None
+                try:
+                    dst = self.lib_bin_dir / binary.name
+                    shutil.move(str(binary), str(dst))
+                    print(f"   > ✔ {binary.name} instalado em lib_bin/")
+                    moved += 1
+                except Exception as e:
+                    failed.append(f"{binary.name}: {e}")
+
+        return moved, failed

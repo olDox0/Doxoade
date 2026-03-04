@@ -727,148 +727,289 @@ def vulcan_pitstop(clear_cache):
             
             
 @vulcan_group.command('lib')
-@click.option('--analyze', '--analyse', 'analyze', is_flag=True, help="Lista dependências 'quentes' candidatas à compilação.")
-@click.option('--target', help="Compila uma biblioteca específica de requirements.txt.")
+@click.option('--analyze', is_flag=True, help="Lista dependências 'quentes' candidatas à compilação.")
+@click.option('--target', help="Nome da biblioteca instalada no venv a compilar (ex: requests, pydantic).")
 @click.option('--auto', is_flag=True, help="Compila automaticamente os melhores candidatos da análise.")
-@click.option('--integrity', is_flag=True, help="Executa análise de integridade dos binários de libs compiladas.")
-@click.option('--benchmark', is_flag=True, help="Executa benchmark de import da biblioteca alvo (Python x Vulcan lib_bin).")
-@click.option('--benchmark-runs', default=8, type=int, show_default=True, help="Número de execuções para benchmark de import.")
-@click.option('--run-tests/--no-run-tests', default=False, help="Executa smoke tests do Vulcan após a compilação para validar.")
+@click.option('--list-installed', is_flag=True, help="Lista libs instaladas no site-packages com contagem de .py.")
+@click.option('--optimize', is_flag=True, help="Apenas otimiza os fontes da biblioteca em cópia isolada. NÃO compila, NÃO gera binários.(exige --target)")
+@click.option('--keep-temp', is_flag=True, help="Mantém a cópia temporária da lib para inspeção/debug.")
 @click.pass_context
-def vulcan_lib(ctx, analyze, target, auto, integrity, benchmark, benchmark_runs, run_tests):
-    """Compila dependências de terceiros para performance nativa."""
+def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, keep_temp):
+    """Compila funções elegíveis de dependências já instaladas no venv.
+
+    Trabalha sempre com uma CÓPIA isolada dos fontes — o venv original
+    nunca é modificado. Só compila funções que passem no HybridScanner
+    (score >= limiar, sem I/O, sem async, sem unbound locals).
+
+    Exemplos:
+
+      doxoade vulcan lib --target requests
+
+      doxoade vulcan lib --target pydantic
+
+      doxoade vulcan lib --analyze
+
+      doxoade vulcan lib --list-installed
+    """
     root = _find_project_root(os.getcwd())
-    
+
     with ExecutionLogger('vulcan_lib', root, ctx.params) as logger:
-        
-        # --- Fase 1: Análise e Identificação ---
+
+        # ── Listar libs instaladas ─────────────────────────────────────────────
+        if list_installed:
+            click.echo(
+                f"{Fore.CYAN}{Style.BRIGHT}"
+                f"--- [VULCAN LIB] Libs instaladas no site-packages ---"
+                f"{Style.RESET_ALL}"
+            )
+            import site
+            site_dirs = []
+            try:
+                site_dirs.extend(site.getsitepackages())
+            except AttributeError:
+                pass
+            for p in sys.path:
+                if ("site-packages" in p or "dist-packages" in p) and p not in site_dirs:
+                    site_dirs.append(p)
+
+            rows = []
+            for sp in site_dirs:
+                sp_path = Path(sp)
+                if not sp_path.is_dir():
+                    continue
+                for item in sorted(sp_path.iterdir()):
+                    if not item.is_dir():
+                        continue
+                    if not (item / "__init__.py").exists():
+                        continue
+                    py_files = list(item.rglob("*.py"))
+                    if py_files:
+                        rows.append((item.name, len(py_files), str(item)))
+
+            if not rows:
+                click.echo(f"{Fore.YELLOW}Nenhum pacote encontrado.{Style.RESET_ALL}")
+                return
+
+            rows.sort(key=lambda r: r[1], reverse=True)
+            click.echo(f"  {'BIBLIOTECA':<30} {'ARQUIVOS .PY':>14}")
+            click.echo(f"  {'-'*30} {'-'*14}")
+            for name, count, path in rows[:40]:
+                click.echo(
+                    f"  {Fore.WHITE}{name:<30}{Style.RESET_ALL} "
+                    f"{Fore.CYAN}{count:>14}{Style.RESET_ALL}"
+                )
+            if len(rows) > 40:
+                click.echo(
+                    f"  {Style.DIM}... e mais {len(rows) - 40} pacote(s){Style.RESET_ALL}"
+                )
+            return
+
+        # ── Análise de telemetria ──────────────────────────────────────────────
         if analyze:
-            click.echo(f"{Fore.CYAN}{Style.BRIGHT}--- [VULCAN LIB] Analisando Telemetria de Dependências ---{Style.RESET_ALL}")
+            click.echo(
+                f"{Fore.CYAN}{Style.BRIGHT}"
+                f"--- [VULCAN LIB] Analisando telemetria de dependências ---"
+                f"{Style.RESET_ALL}"
+            )
             from ..tools.vulcan.advisor import VulcanAdvisor
             advisor = VulcanAdvisor(root)
-            
-            # Precisamos de um novo método no Advisor para isso
             hot_deps = advisor.get_hot_dependencies()
-            
+
             if not hot_deps:
-                click.echo(Fore.YELLOW + "Nenhuma dependência 'quente' encontrada na telemetria recente.")
-                return
-
-            click.echo(f"{'BIBLIOTECA':<25} | {'PONTOS DE CALOR (HITS)'}")
-            click.echo("-" * 50)
-            for dep, hits in hot_deps.items():
-                click.echo(f"{Fore.WHITE}{dep:<25}{Style.RESET_ALL} | {Fore.RED}{hits}{Style.RESET_ALL}")
-            return
-
-        if target:
-            click.echo(f"{Fore.CYAN}{Style.BRIGHT}--- [VULCAN LIB] Forjando: {target} ---{Style.RESET_ALL}")
-            from ..tools.vulcan.lib_forge import LibForge
-            
-            forge = LibForge(root)
-            success, result_message = forge.compile_library(target)
-            
-            if success:
-                click.echo(f"{Fore.GREEN}{Style.BRIGHT}\n[SUCESSO] {result_message}{Style.RESET_ALL}")
-                if run_tests:
-                    click.echo(f"{Fore.CYAN}   > Validando estabilidade com smoke tests do Vulcan...{Style.RESET_ALL}")
-                    test_cmd = [
-                        sys.executable,
-                        "-m",
-                        "pytest",
-                        "-q",
-                        "commands_test/test_vulcan_lib_forge.py",
-                        "commands_test/test_vulcan_compiler_errors.py",
-                    ]
-                    try:
-                        proc = subprocess.run(test_cmd, cwd=str(root), check=False)
-                        if proc.returncode == 0:
-                            click.echo(f"{Fore.GREEN}[OK]{Style.RESET_ALL} Smoke tests do Vulcan passaram após compilação da lib.")
-                        else:
-                            click.echo(
-                                f"{Fore.YELLOW}[AVISO]{Style.RESET_ALL} Smoke tests do Vulcan falharam "
-                                f"(exit={proc.returncode}). Recomendado rollback da lib em .doxoade/vulcan/lib_bin/."
-                            )
-                    except FileNotFoundError:
-                        click.echo(
-                            f"{Fore.YELLOW}[AVISO]{Style.RESET_ALL} pytest não está disponível no ambiente; "
-                            "validação de testes foi ignorada."
-                        )
-            else:
-                click.echo(f"{Fore.RED}{Style.BRIGHT}\n[FALHA] {result_message}{Style.RESET_ALL}")
-
-            if success and integrity:
-                report = forge.integrity_report(target)
-                status = f"{Fore.GREEN}[OK]{Style.RESET_ALL}" if report.get("ok") else f"{Fore.YELLOW}[AVISO]{Style.RESET_ALL}"
-                click.echo(f"{status} Integridade lib '{target}': {len(report.get('entries', []))} binários, "
-                           f"missing={report.get('missing_files', 0)}, invalid_host={report.get('invalid_host', 0)}")
-
-            if success and benchmark:
-                bench = forge.benchmark_library(target, runs=benchmark_runs)
-                if bench.get("ok"):
-                    click.echo(
-                        f"{Fore.CYAN}[BENCH]{Style.RESET_ALL} {bench['library']} | "
-                        f"python={bench['mean_import_seconds_python']:.6f}s "
-                        f"vulcan={bench['mean_import_seconds_vulcan']:.6f}s "
-                        f"speedup={bench['speedup']:.2f}x redirected={bench.get('redirected_modules', 0)}"
-                    )
-                else:
-                    details = bench.get("details") or {}
-                    detail_msg = details.get("vulcan_error") or details.get("python_baseline_error")
-                    if detail_msg:
-                        click.echo(
-                            f"{Fore.YELLOW}[AVISO]{Style.RESET_ALL} Benchmark não executado: "
-                            f"{bench.get('error', 'erro desconhecido')} | detalhe: {detail_msg}"
-                        )
-                    else:
-                        click.echo(f"{Fore.YELLOW}[AVISO]{Style.RESET_ALL} Benchmark não executado: {bench.get('error', 'erro desconhecido')}")
-
-            return
-
-        if integrity:
-            from ..tools.vulcan.lib_forge import LibForge
-
-            forge = LibForge(root)
-            report = forge.integrity_report(None)
-            if not report.get("entries"):
-                click.echo(f"{Fore.YELLOW}[INFO]{Style.RESET_ALL} Nenhum binário de lib compilada encontrado em .doxoade/vulcan/lib_bin")
-                return
-            status = f"{Fore.GREEN}[OK]{Style.RESET_ALL}" if report.get("ok") else f"{Fore.YELLOW}[AVISO]{Style.RESET_ALL}"
-            click.echo(f"{status} Integridade geral: libs={report.get('libraries_checked', 0)} "
-                       f"binários={len(report.get('entries', []))} missing={report.get('missing_files', 0)} "
-                       f"invalid_host={report.get('invalid_host', 0)}")
-            return
-
-        if benchmark:
-            from ..tools.vulcan.lib_forge import LibForge
-
-            forge = LibForge(root)
-            manifest = forge._load_manifest()
-            libs = sorted((manifest.get("libraries") or {}).keys())
-            if not libs:
                 click.echo(
-                    f"{Fore.YELLOW}[INFO]{Style.RESET_ALL} Nenhuma lib registrada em manifest para benchmark. "
-                    "Compile com --target <lib> antes."
+                    f"{Fore.YELLOW}Nenhuma dependência 'quente' encontrada na telemetria recente.{Style.RESET_ALL}"
                 )
                 return
 
-            click.echo(f"{Fore.CYAN}[BENCH]{Style.RESET_ALL} Rodando benchmark para {len(libs)} lib(s) do manifest...")
-            for lib in libs:
-                bench = forge.benchmark_library(lib, runs=benchmark_runs)
-                if bench.get("ok"):
-                    click.echo(
-                        f"  - {bench['library']}: python={bench['mean_import_seconds_python']:.6f}s "
-                        f"vulcan={bench['mean_import_seconds_vulcan']:.6f}s speedup={bench['speedup']:.2f}x "
-                        f"redirected={bench.get('redirected_modules', 0)}"
-                    )
+            click.echo(f"  {'BIBLIOTECA':<28} {'HITS':>8}  COMANDO")
+            click.echo(f"  {'-'*28} {'-'*8}  {'-'*35}")
+            for dep, hits in list(hot_deps.items())[:20]:
+                click.echo(
+                    f"  {Fore.WHITE}{dep:<28}{Style.RESET_ALL} "
+                    f"{Fore.RED}{hits:>8}{Style.RESET_ALL}  "
+                    f"{Style.DIM}doxoade vulcan lib --target {dep}{Style.RESET_ALL}"
+                )
+            return
+
+        # ── Apenas otimizar (novo modo) ───────────────────────────────────────
+        
+        if optimize and not target:
+            click.echo(
+                f"{Fore.YELLOW}[ERRO] --optimize exige --target.{Style.RESET_ALL}\n"
+                f"{Fore.CYAN}Exemplo:{Style.RESET_ALL}\n"
+                f"  doxoade vulcan lib --optimize --target click\n\n"
+                f"{Fore.CYAN}Dica:{Style.RESET_ALL} use --list-installed para ver libs disponíveis."
+            )
+            return
+        
+        if optimize and (target or auto):
+            click.echo(f"{Fore.CYAN}   > Modo: OPTIMIZE-ONLY (nenhuma compilação será executada){Style.RESET_ALL}")
+            # exige --target para evitar otimizar tudo por engano
+            if not target:
+                click.echo(
+                    f"{Fore.YELLOW}[ERROR] --optimize exige --target. "
+                    f"Use --list-installed para ver nomes disponíveis.{Style.RESET_ALL}"
+                )
+                return
+
+            click.echo(
+                f"{Fore.CYAN}{Style.BRIGHT}"
+                f"--- [VULCAN LIB] Otimizando (apenas) a biblioteca: {target} ---"
+                f"{Style.RESET_ALL}"
+            )
+            click.echo(f"{Fore.CYAN}  > Criando cópia isolada dos fontes e executando LibOptimizer{Style.RESET_ALL}")
+
+            # implementa sem importar o pacote (usa find_spec)
+            import importlib.util
+            import shutil
+            import tempfile
+            from pathlib import Path
+
+            try:
+                spec = importlib.util.find_spec(target)
+                if spec is None:
+                    click.echo(f"{Fore.RED}[FALHA] Não foi possível localizar a biblioteca '{target}' no venv.{Style.RESET_ALL}")
+                    click.echo(f"{Fore.YELLOW}[DICA] Verifique o nome ou use --list-installed.{Style.RESET_ALL}")
+                    return
+
+                # determina caminho da biblioteca sem executar seu código
+                if spec.submodule_search_locations:
+                    pkg_path = Path(next(iter(spec.submodule_search_locations)))
                 else:
-                    details = bench.get("details") or {}
-                    detail_msg = details.get("vulcan_error") or details.get("python_baseline_error") or bench.get("error")
-                    click.echo(f"  - {lib}: {Fore.YELLOW}[AVISO]{Style.RESET_ALL} benchmark falhou ({detail_msg})")
+                    # pacote simples (module.py) → usa pasta do arquivo
+                    if not spec.origin:
+                        click.echo(f"{Fore.RED}[FALHA] Espec não contém origem para '{target}'.{Style.RESET_ALL}")
+                        return
+                    pkg_path = Path(spec.origin).parent
+
+                if not pkg_path.exists():
+                    click.echo(f"{Fore.RED}[FALHA] Caminho da lib não existe: {pkg_path}{Style.RESET_ALL}")
+                    return
+
+                # cria tempdir explicitamente (não usar 'with' para permitir cleanup condicional)
+                tmp_ctx = tempfile.TemporaryDirectory(prefix=f"vulcan_opt_{target}_")
+                tmp = tmp_ctx.name
+                dest = Path(tmp) / pkg_path.name
+
+                try:
+                    # copytree requer que dest não exista
+                    shutil.copytree(pkg_path, dest, dirs_exist_ok=False)
+
+                    # executa LibOptimizer na cópia
+                    from ..tools.vulcan.lib_optimizer import LibOptimizer
+                    optimizer = LibOptimizer()
+                    stats = optimizer.optimize_directory(dest)
+
+                    # grava artifact JSON via ExecutionLogger (se possível)
+                    try:
+                        logger.write_artifact(
+                            name=f"vulcan_lib_opt_{target}.json",
+                            data=stats
+                        )
+                    except Exception:
+                        # não bloquear execução por falha de logger
+                        pass
+
+                    # resumo amigável — usa get() para robustez
+                    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}--- [VULCAN LIB] Resumo da Otimização ---{Style.RESET_ALL}")
+                    click.echo(f"  Arquivos processados : {stats.get('files_processed', 0)}")
+                    click.echo(f"  Arquivos otimizados  : {stats.get('files_optimized', 0)}")
+                    click.echo(f"  Arquivos ignorados   : {stats.get('files_skipped', 0)}")
+                    click.echo(f"  Docstrings removidas : {stats.get('docstrings_removed', 0)}")
+                    click.echo(f"  Dead branches        : {stats.get('dead_branches', 0)}")
+                    click.echo(f"  Imports removidos    : {stats.get('imports_removed', 0)}")
+                    click.echo(f"  Locals minificados   : {stats.get('locals_minified', 0)}")
+                    bytes_saved = stats.get('bytes_saved', 0)
+                    click.echo(f"  Bytes economizados   : {bytes_saved} ({bytes_saved/1024:.1f} KiB)")
+                    click.echo(f"\n{Fore.GREEN}[SUCESSO] Otimização concluída na cópia: {dest}{Style.RESET_ALL}")
+                    click.echo(f"{Fore.CYAN}[DICA] Se quiser compilar após otimizar, rode: doxoade vulcan lib --target {target}{Style.RESET_ALL}")
+
+                finally:
+                    # cleanup condicional do tempdir
+                    if keep_temp:
+                        click.echo(
+                            f"{Fore.YELLOW}[INFO] --keep-temp ativo. Diretório preservado:{Style.RESET_ALL}\n"
+                            f"  {Path(tmp)}"
+                        )
+                    else:
+                        try:
+                            tmp_ctx.cleanup()
+                        except Exception:
+                            pass
+
+                return
+
+                click.echo(
+                    f"{Fore.CYAN}[INFO] Este modo NÃO compila código.{Style.RESET_ALL}\n"
+                    f"{Fore.CYAN}[INFO] Para compilar a lib otimizada, execute manualmente:{Style.RESET_ALL}\n"
+                    f"  doxoade vulcan lib --target {target}"
+                )
+
+            except Exception as exc:
+                click.echo(f"{Fore.RED}[FALHA] Erro durante otimização: {exc}{Style.RESET_ALL}")
+                return
+
+        # ── Compilação de biblioteca específica ───────────────────────────────
+        if target:
+            click.echo(
+                f"{Fore.CYAN}{Style.BRIGHT}"
+                f"--- [VULCAN LIB] Forjando: {target} ---"
+                f"{Style.RESET_ALL}"
+            )
+            click.echo(
+                f"{Fore.CYAN}"
+                f"   > Modo: VENV LOCAL (sem download — cópia isolada dos fontes)"
+                f"{Style.RESET_ALL}"
+            )
+
+            from ..tools.vulcan.lib_forge import LibForge
+
+            forge = LibForge(root)
+            success, result_message = forge.compile_library(target)
+
+            if success:
+                click.echo(
+                    f"{Fore.GREEN}{Style.BRIGHT}\n[SUCESSO] {result_message}{Style.RESET_ALL}"
+                )
+                click.echo(
+                    f"{Fore.CYAN}[DICA] Use 'doxoade vulcan status' para ver os binários ativos.{Style.RESET_ALL}"
+                )
+            else:
+                click.echo(
+                    f"{Fore.RED}{Style.BRIGHT}\n[FALHA] {result_message}{Style.RESET_ALL}"
+                )
+                click.echo(
+                    f"{Fore.YELLOW}[DICA] Use --list-installed para ver libs disponíveis no venv.{Style.RESET_ALL}"
+                )
             return
 
         elif auto:
-            click.echo(f"{Fore.YELLOW}Funcionalidade '--auto' em desenvolvimento.{Style.RESET_ALL}")
-            
+            click.echo(
+                f"{Fore.YELLOW}[INFO] --auto: compila as top-3 libs da telemetria automaticamente.{Style.RESET_ALL}"
+            )
+            from ..tools.vulcan.advisor import VulcanAdvisor
+            from ..tools.vulcan.lib_forge import LibForge
+
+            advisor = VulcanAdvisor(root)
+            hot_deps = advisor.get_hot_dependencies()
+
+            if not hot_deps:
+                click.echo(
+                    f"{Fore.YELLOW}Sem dados de telemetria para --auto.{Style.RESET_ALL}"
+                )
+                return
+
+            forge = LibForge(root)
+            top = list(hot_deps.keys())[:3]
+            for lib in top:
+                click.echo(f"\n{Fore.CYAN}  → Compilando: {lib}{Style.RESET_ALL}")
+                success, msg = forge.compile_library(lib)
+                if success:
+                    click.echo(f"{Fore.GREEN}  ✔ {msg}{Style.RESET_ALL}")
+                else:
+                    click.echo(f"{Fore.YELLOW}  ↷ {msg}{Style.RESET_ALL}")
+            return
+
         else:
             click.echo(ctx.get_help())
 
