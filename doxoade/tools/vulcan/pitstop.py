@@ -23,7 +23,7 @@ Variáveis de ambiente:
 
 from __future__ import annotations
 
-import hashlib, json, os, shutil, subprocess, sys, threading, time, traceback
+import hashlib, json, os, shutil, subprocess, sys, threading, time, traceback, re
 
 from concurrent.futures import ThreadPoolExecutor as TPE, as_completed
 from pathlib import Path
@@ -116,51 +116,85 @@ class WarmupCache:
 
 def _forge_to_pyx(task: dict) -> dict:
     """
-    Transforma um arquivo .py em .pyx usando VForge.
+    Transforma um arquivo .py em:
+      1. ``.pyx``    — para compilação Cython (Camada 1)
+      2. ``opt_.py`` — Python otimizado via LibOptimizer (Camada 2)
 
-    Roda dentro de uma thread do TPE — sem custo de startup
-    de subprocesso. É a operação mais leve do pipeline.
+    Roda dentro de uma thread do ThreadPoolExecutor — sem custo de startup
+    de subprocesso. Ambas as operações são puras Python/AST.
+
+    Falhas na geração do opt_py são silenciosas — a Camada 2 simplesmente
+    não estará disponível para este módulo até o próximo ``ignite``.
     """
     file_path = Path(task["file_path"])
-    foundry = Path(task["foundry"])
-    abs_path = file_path.resolve()
+    foundry   = Path(task["foundry"])
+    abs_path  = file_path.resolve()
 
-    path_hash = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
-    import re
-    _safe_stem = re.sub(r'[^a-zA-Z0-9_]', '_', abs_path.stem)
+    path_hash   = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
+    _safe_stem  = re.sub(r'[^a-zA-Z0-9_]', '_', abs_path.stem)
     module_name = f"v_{_safe_stem}_{path_hash}"
-    pyx_path = foundry / f"{module_name}.pyx"
+    pyx_path    = foundry / f"{module_name}.pyx"
 
-    try:
-        # Verifica elegibilidade antes de gastar CPU no AST
-        eligible, reason = AFVul(str(abs_path))
-        if not eligible:
-            return {
-                "ok": False, "skip": True,
-                "file": str(file_path), "module_name": module_name,
-                "err": f"pulado: {reason}",
-            }
-
-        forge = VForge(str(abs_path))
-        pyx_code = forge.generate_source(str(abs_path))
-        if not pyx_code:
-            return {
-                "ok": True, "file": str(file_path),
-                "module_name": module_name, "err": "pyx_code vazio",
-            }
-
-        pyx_path.write_text(pyx_code, encoding="utf-8")
+    # ── Fase A: Verifica elegibilidade ────────────────────────────────────────
+    eligible, reason = AFVul(str(abs_path))
+    if not eligible:
         return {
-            "ok": True,
-            "file": str(file_path),
-            "module_name": module_name,
-            "pyx_path": str(pyx_path),
+            "ok": False, "skip": True,
+            "file": str(file_path), "module_name": module_name,
+            "err": f"pulado: {reason}",
         }
+
+    # ── Fase B: Gera .pyx (Camada 1) ─────────────────────────────────────────
+    pyx_ok = False
+    try:
+        forge    = VForge(str(abs_path))
+        pyx_code = forge.generate_source(str(abs_path))
+        if pyx_code:
+            pyx_path.write_text(pyx_code, encoding="utf-8")
+            pyx_ok = True
     except Exception as exc:
         return {
             "ok": False, "file": str(file_path),
             "module_name": module_name, "err": str(exc)[:160],
         }
+
+    # ── Fase C: Gera opt_py (Camada 2) — best-effort, nunca bloqueia ─────────
+    # Tenta localizar a raiz do projeto a partir do task (se disponível)
+    # ou subindo a árvore a partir do arquivo fonte.
+    try:
+        from doxoade.tools.vulcan.opt_cache import generate_opt_py
+
+        project_root_str = task.get("project_root")
+        if project_root_str:
+            project_root = Path(project_root_str)
+        else:
+            # Sobe buscando .doxoade/vulcan
+            cur = abs_path.parent
+            project_root = None
+            while cur != cur.parent:
+                if (cur / ".doxoade" / "vulcan").exists():
+                    project_root = cur
+                    break
+                cur = cur.parent
+
+        if project_root:
+            generate_opt_py(project_root, abs_path)
+            # Falha silenciosa — opt_py é opcional
+    except Exception:
+        pass
+
+    if not pyx_ok:
+        return {
+            "ok": True, "file": str(file_path),
+            "module_name": module_name, "err": "pyx_code vazio",
+        }
+
+    return {
+        "ok": True,
+        "file": str(file_path),
+        "module_name": module_name,
+        "pyx_path": str(pyx_path),
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────

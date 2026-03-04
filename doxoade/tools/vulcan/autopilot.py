@@ -20,9 +20,7 @@ from collections import Counter
 def _forge_worker(task: dict) -> dict:
     """
     Worker isolado — roda em thread separada com silo próprio.
-
-    CTRL+C FIX: ignora SIGINT no worker; o pai captura KeyboardInterrupt,
-    usa _kill_registry() para matar os PIDs registrados e encerra limpo.
+    Agora repassa project_root para que _forge_to_pyx possa gerar opt_py.
     """
     try:
         signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -33,6 +31,7 @@ def _forge_worker(task: dict) -> dict:
     foundry_str  = task['foundry']
     bin_str      = task['bin_dir']
     pid_registry = task['pid_registry']
+    project_root = task.get('project_root', '')   # ← NOVO
     abs_path     = Path(file_path).resolve()
     prevalidated = bool(task.get('prevalidated'))
 
@@ -47,7 +46,7 @@ def _forge_worker(task: dict) -> dict:
 
     path_hash   = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
     import re
-    _safe_stem = re.sub(r'[^a-zA-Z0-9_]', '_', abs_path.stem)
+    _safe_stem  = re.sub(r'[^a-zA-Z0-9_]', '_', abs_path.stem)
     module_name = f"v_{_safe_stem}_{path_hash}"
 
     try:
@@ -62,6 +61,17 @@ def _forge_worker(task: dict) -> dict:
         foundry = Path(foundry_str)
         bin_dir = Path(bin_str)
         (foundry / f"{module_name}.pyx").write_text(pyx_code, encoding='utf-8')
+
+        # ── Gera opt_py (Camada 2) — best-effort ─────────────────────────────
+        if project_root:
+            try:
+                from doxoade.tools.vulcan.opt_cache import generate_opt_py
+                generate_opt_py(Path(project_root), abs_path)
+            except Exception:
+                pass
+
+        from .environment import VulcanEnvironment
+        from .compiler import VulcanCompiler
 
         env          = object.__new__(VulcanEnvironment)
         env.root     = foundry.parent.parent
@@ -356,5 +366,6 @@ class VulcanAutopilot:
             'bin_dir':      str(self.env.bin_dir),
             'pid_registry': self._pid_registry,
             'prevalidated': bool(candidate.get('__vulcan_validated')),
+            'project_root': str(self.root),        # ← NOVO: repassa raiz do projeto
         })
         return {'file': file_path, 'ok': result['ok'], 'err': result.get('err')}

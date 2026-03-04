@@ -1,5 +1,28 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/vulcan_cmd.py
+"""
+Patch para adicionar 'doxoade vulcan opt-bench' ao vulcan_cmd.py.
+
+Cole este bloco APÓS a definição do comando 'opt' existente:
+
+    @vulcan_group.command("opt-bench")
+    ...
+
+E adicione ao topo do arquivo, junto com os outros imports:
+    from .tools.vulcan.opt_benchmark import run_opt_bench, render_results
+
+──────────────────────────────────────────────────────────────────────
+INTEGRAÇÃO (vulcan_cmd.py):
+
+1. Imports (no topo, junto com os outros):
+
+    from .tools.vulcan.opt_benchmark import run_opt_bench, render_results
+
+2. Comando (após o comando 'opt'):
+
+    [cole o bloco abaixo]
+──────────────────────────────────────────────────────────────────────
+"""
 
 import textwrap
 import sys
@@ -1085,16 +1108,224 @@ def vulcan_benchmark(path, runs, output_json, min_speedup, save):
         sys.exit(1)
 
 
+@vulcan_group.command('opt')
+@click.argument('path', required=False, type=click.Path(exists=True))
+@click.option('--force', is_flag=True, help='Regenera mesmo arquivos já otimizados.')
+@click.option('--stats', is_flag=True, help='Mostra estatísticas de economia por arquivo.')
+def vulcan_opt(path, force, stats):
+    """Gera camada de Python Otimizado (Tier 2) sem compilar.
+
+    Aplica DocstringRemover, DeadBranchEliminator, UnusedImportRemover
+    e LocalNameMinifier em cópia isolada de cada .py elegível.
+
+    Os arquivos otimizados ficam em .doxoade/vulcan/opt_py/ e são usados
+    automaticamente como fallback quando o binário (.pyd/.so) não está
+    disponível ou falhou ao carregar.
+
+    Exemplos:
+
+      doxoade vulcan opt
+
+      doxoade vulcan opt myapp/
+
+      doxoade vulcan opt myapp/core.py --stats
+    """
+    root   = _find_project_root(os.getcwd())
+    target = Path(path).resolve() if path else Path(root)
+
+    click.echo(
+        f"\n{Fore.CYAN}{Style.BRIGHT}"
+        f"  ⬡ [VULCAN OPT] Gerando camada de Python Otimizado (Tier 2)..."
+        f"{Style.RESET_ALL}"
+    )
+    click.echo(f"{Fore.CYAN}   > Alvo   : {target}{Style.RESET_ALL}")
+    click.echo(f"{Fore.CYAN}   > Raiz   : {root}{Style.RESET_ALL}")
+
+    try:
+        from doxoade.tools.vulcan.opt_cache import (
+            generate_opt_py,
+            find_opt_py,
+            opt_dir,
+        )
+
+        skip_dirs = frozenset({
+            '.git', 'venv', '.venv', '__pycache__', 'build', 'dist',
+            '.doxoade', 'tests',
+        })
+        skip_stems = frozenset({
+            '__init__', '__main__', 'setup',
+            'forge', 'compiler', 'autopilot', 'bridge', 'advisor',
+            'environment', 'core', 'pitstop', 'diagnostic', 'guards',
+            'meta_finder', 'runtime', 'auto_repair', 'artifact_manager',
+            'compiler_safe', 'opt_cache',
+        })
+
+        if target.is_file():
+            py_files = [target] if target.suffix == '.py' else []
+        else:
+            py_files = []
+            for r, dirs, files in os.walk(str(target)):
+                dirs[:] = [d for d in dirs if d not in skip_dirs]
+                for f in files:
+                    p = Path(r) / f
+                    if p.suffix == '.py' and p.stem not in skip_stems:
+                        py_files.append(p)
+
+        total = ok_count = skip_count = 0
+        total_saved = 0
+
+        for py_file in py_files:
+            total += 1
+
+            # Pula se já está atualizado (a não ser que --force)
+            if not force:
+                cached = find_opt_py(Path(root), py_file)
+                if cached:
+                    skip_count += 1
+                    click.echo(
+                        f"   {Fore.BLUE}↷{Style.RESET_ALL} "
+                        f"{py_file.relative_to(target) if py_file.is_relative_to(target) else py_file.name}"
+                        f"  {Style.DIM}(cache){Style.RESET_ALL}"
+                    )
+                    continue
+
+            result = generate_opt_py(Path(root), py_file)
+            if result:
+                ok_count += 1
+                orig_size = py_file.stat().st_size
+                opt_size  = result.stat().st_size
+                saved     = max(0, orig_size - opt_size)
+                total_saved += saved
+
+                rel = py_file.relative_to(target) if py_file.is_relative_to(target) else py_file.name
+
+                if stats and saved > 0:
+                    click.echo(
+                        f"   {Fore.GREEN}✔{Style.RESET_ALL} {rel}"
+                        f"  {Fore.CYAN}{saved:>6} bytes{Style.RESET_ALL}"
+                    )
+                else:
+                    click.echo(f"   {Fore.GREEN}✔{Style.RESET_ALL} {rel}")
+            else:
+                click.echo(
+                    f"   {Fore.YELLOW}↷{Style.RESET_ALL} "
+                    f"{py_file.relative_to(target) if py_file.is_relative_to(target) else py_file.name}"
+                    f"  {Style.DIM}(sem ganho){Style.RESET_ALL}"
+                )
+
+        # Resumo
+        d = opt_dir(Path(root))
+        opt_count = len(list(d.glob("opt_*.py")))
+
+        click.echo(f"\n{Fore.CYAN}{'─' * 55}{Style.RESET_ALL}")
+        click.echo(
+            f"  {Fore.GREEN}✔ {ok_count} gerado(s){Style.RESET_ALL}  "
+            f"{Fore.BLUE}↷ {skip_count} cache(s){Style.RESET_ALL}  "
+            f"{Fore.CYAN}Total opt_py: {opt_count}{Style.RESET_ALL}"
+        )
+        if total_saved > 0:
+            click.echo(
+                f"  {Fore.GREEN}⚡ {total_saved:,} bytes economizados "
+                f"({total_saved / 1024:.1f} KiB){Style.RESET_ALL}"
+            )
+        click.echo(
+            f"\n{Fore.CYAN}[INFO] Tier 2 ativo. Quando binário falhar, "
+            f"o Python otimizado será usado automaticamente.{Style.RESET_ALL}"
+        )
+        click.echo(f"{Fore.CYAN}{'─' * 55}{Style.RESET_ALL}")
+
+    except Exception as e:
+        from doxoade.commands.vulcan_cmd import _print_vulcan_forensic
+        _print_vulcan_forensic("OPT", e)
+        sys.exit(1)
+
+@vulcan_group.command('opt-bench')
+@click.argument('target', default='.')
+@click.option('--rounds',  '-r', default=3,   show_default=True,
+              help='Repetições de benchmark por callable.')
+@click.option('--calls',   '-c', default=100, show_default=True,
+              help='Chamadas por round (melhor de N rounds).')
+@click.option('--verbose', '-v', is_flag=True,
+              help='Detalha cada callable individualmente.')
+@click.option('--csv',     '-o', default=None, metavar='ARQUIVO',
+              help='Exporta resultado em CSV.')
+@click.pass_context
+def opt_bench(ctx, target, rounds, calls, verbose, csv):
+    """
+    Benchmark Tier 3 (Python Puro) vs Tier 2 (Python Otimizado).
+
+    Mede ganho real de carregamento e execução de callables após
+    aplicar as transformações do LibOptimizer.
+
+    Exemplos::
+
+    \b
+      doxoade vulcan opt-bench doxoade/commands/check_systems/
+      doxoade vulcan opt-bench mymodule.py --rounds 5 --calls 500
+      doxoade vulcan opt-bench . --verbose --csv resultado.csv
+    """
+    import os
+    from ..tools.vulcan.opt_benchmark import run_opt_bench, render_results
+
+    project_root = Path(os.getcwd()).resolve()
+    target_path  = (project_root / target).resolve()
+
+    if not target_path.exists():
+        click.echo(f"\033[31m ■ Alvo não encontrado: {target_path}\033[0m")
+        ctx.exit(1)
+        return
+
+    print(f"\n  \033[36m⬡\033[0m Alvo   : {target_path}")
+    print(f"  \033[36m⬡\033[0m Raiz   : {project_root}")
+    print(f"  \033[36m⬡\033[0m Rounds : {rounds} × {calls} chamadas por callable")
+    print()
+
+    try:
+        results = run_opt_bench(
+            target_path,
+            project_root,
+            rounds=rounds,
+            calls=calls,
+        )
+    except Exception as exc:
+        click.echo(f"\033[31m ■ Erro ao executar benchmark: {exc}\033[0m")
+        ctx.exit(1)
+        return
+
+    if not results:
+        click.echo(
+            "\033[33m ⚠ Nenhum arquivo .py encontrado no alvo.\033[0m\n"
+            "   Dica: use 'doxoade vulcan opt <alvo>' para gerar Tier 2 primeiro."
+        )
+        return
+
+    csv_path = Path(csv).resolve() if csv else None
+
+    render_results(
+        results,
+        verbose=verbose,
+        show_funcs=True,
+        csv_out=csv_path,
+    )
+
+
+# ============================================================================
+#  Patch para vulcan_status — exibe também opt_py
+# ============================================================================
+# SUBSTITUIR o comando vulcan_status existente por este:
+
 @vulcan_group.command('status')
 def vulcan_status():
-    """Lista módulos otimizados e ganhos de performance."""
-    root = _find_project_root(os.getcwd())
+    """Lista módulos otimizados e camadas ativas (binário + opt_py)."""
+    root        = _find_project_root(os.getcwd())
     bin_dir     = os.path.join(root, ".doxoade", "vulcan", "bin")
-    lib_bin_dir = os.path.join(root, ".doxoade", "vulcan", "lib_bin")  # ← adicionar
+    lib_bin_dir = os.path.join(root, ".doxoade", "vulcan", "lib_bin")
+    opt_py_dir  = os.path.join(root, ".doxoade", "vulcan", "opt_py")
 
     click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}  ESTADO DA FOUNDRY VULCAN:{Style.RESET_ALL}")
 
-    for label, directory in [("Projeto", bin_dir), ("Libs", lib_bin_dir)]:
+    # Tier 1: Binários compilados
+    for label, directory in [("Projeto (Tier 1)", bin_dir), ("Libs (Tier 1)", lib_bin_dir)]:
         if not os.path.exists(directory):
             continue
         binaries = [f for f in os.listdir(directory) if f.endswith(('.pyd', '.so'))]
@@ -1102,15 +1333,49 @@ def vulcan_status():
             click.echo(f"\n  {Fore.YELLOW}[{label}]{Style.RESET_ALL}")
             for b in binaries:
                 size = os.path.getsize(os.path.join(directory, b)) / 1024
-                click.echo(f"   {Fore.GREEN}{b:<40} {Fore.WHITE}| {size:>6.1f} KB {Fore.YELLOW}[ATIVO]")
+                click.echo(
+                    f"   {Fore.GREEN}{b:<40} "
+                    f"{Fore.WHITE}| {size:>6.1f} KB {Fore.YELLOW}[ATIVO]{Style.RESET_ALL}"
+                )
 
-    # fallback se nenhum binário encontrado em nenhuma pasta
+    # Tier 2: Python Otimizado
+    if os.path.exists(opt_py_dir):
+        opt_files = [f for f in os.listdir(opt_py_dir) if f.endswith('.py')]
+        if opt_files:
+            click.echo(f"\n  {Fore.MAGENTA}[Python Otimizado (Tier 2)]{Style.RESET_ALL}")
+            for f in opt_files:
+                size = os.path.getsize(os.path.join(opt_py_dir, f)) / 1024
+                click.echo(
+                    f"   {Fore.MAGENTA}{f:<40} "
+                    f"{Fore.WHITE}| {size:>6.1f} KB {Fore.CYAN}[OPT]{Style.RESET_ALL}"
+                )
+
+    # Verificação global
     all_bins = []
     for d in [bin_dir, lib_bin_dir]:
         if os.path.exists(d):
             all_bins += [f for f in os.listdir(d) if f.endswith(('.pyd', '.so'))]
-    if not all_bins:
-        click.echo("   Nenhum binário ativo encontrado.")
+
+    all_opts = []
+    if os.path.exists(opt_py_dir):
+        all_opts = [f for f in os.listdir(opt_py_dir) if f.endswith('.py')]
+
+    if not all_bins and not all_opts:
+        click.echo(
+            f"   {Fore.YELLOW}Nenhum módulo ativo. "
+            f"Execute 'doxoade vulcan ignite' ou 'doxoade vulcan opt'.{Style.RESET_ALL}"
+        )
+    else:
+        click.echo(f"\n  {Fore.CYAN}Resumo:{Style.RESET_ALL}")
+        click.echo(
+            f"   {Fore.GREEN}Tier 1 (Binários) : {len(all_bins)} módulo(s){Style.RESET_ALL}"
+        )
+        click.echo(
+            f"   {Fore.MAGENTA}Tier 2 (Opt Python): {len(all_opts)} módulo(s){Style.RESET_ALL}"
+        )
+        click.echo(
+            f"   {Fore.WHITE}Tier 3 (Python Puro): sempre disponível{Style.RESET_ALL}"
+        )
 
 
 @vulcan_group.command('purge')
