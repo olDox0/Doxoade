@@ -154,10 +154,6 @@ def generate_opt_py(project_root: Path, source_path: Path) -> Optional[Path]:
             optimizer = LibOptimizer()
             optimizer.optimize_file(tmp_file)
             
-            optimized_code = ast.unparse(tree)
-            optimized_code = compact_lines_safely(optimized_code)
-            # Salva no opt_py
-
             # report.skipped=True → LibOptimizer reverteu para o original
             # Nesse caso tmp_file ainda contém o original — válido de qualquer forma
             shutil.copy2(str(tmp_file), str(dest))

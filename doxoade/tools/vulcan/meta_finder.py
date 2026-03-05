@@ -117,7 +117,12 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
             if any(fullname.startswith(p) for p in self._BYPASS):
                 return None
 
-            # --- LIB_BIN: verifica para QUALQUER módulo (não só doxoade.) ---
+            # ── Cache unificado (lib_bin + bin) ─────────────────────────────────
+            cached = self._spec_cache.get(fullname)
+            if cached is not None:
+                return cached if cached is not False else None
+
+            # ── LIB_BIN: qualquer módulo externo ────────────────────────────────
             lib_bin_enabled = os.environ.get("VULCAN_DISABLE_LIB_BIN", "0").strip() != "1"
             if lib_bin_enabled and self.lib_bin_dir.exists():
                 module_part = fullname.split('.')[-1]
@@ -131,15 +136,26 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
                     if not self.is_binary_valid_for_host(bin_path):
                         continue
 
-                    # Busca o spec original do .py (click/_compat.py) via outros finders
+                    # Resolve o .py original do fullname via outros finders
                     original_spec = self._resolve_py_path_as_spec(fullname, path)
                     self._dlog(f"[DEBUG] {fullname} → original_spec={original_spec}")
                     if not (original_spec and original_spec.loader):
-                        self._dlog("[DEBUG] fallback para _make_spec")
-                        continue  # ou cai para _make_spec dependendo do seu código atual
+                        continue
 
-                    # Guard para pacotes: não mapear __init__.py para um .pyd de submódulo,
-                    # pois isso quebra imports relativos do pacote (ex: pathspec.__init__).
+                    # ── GUARD HASH: garante que o PYD pertence a este .py ────────
+                    # O hash no nome do PYD é SHA256[:6] do path absoluto do .py
+                    # original. Se não bater, é colisão de stem (ex: click/parser.py
+                    # vs esprima/parser.py) e o PYD é ignorado.
+                    expected_hash = self._get_path_hash(original_spec.origin)
+                    actual_hash = bin_path.stem.split(".")[0].rsplit("_", 1)[-1]
+                    if actual_hash != expected_hash:
+                        self._dlog(
+                            f"[VULCAN SKIP] hash mismatch {fullname}: "
+                            f"esperado={expected_hash}, pyd={actual_hash} ({bin_path.name})"
+                        )
+                        continue
+
+                    # ── GUARD PACKAGE: nunca redirecionar __init__.py ────────────
                     try:
                         origin_name = Path(str(original_spec.origin)).name
                     except Exception:
@@ -148,8 +164,8 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
                         self._dlog(f"[DEBUG] skip package root for {fullname}")
                         continue
 
-                    # Usa VulcanLoader: executa o .py original, depois injeta o metal
-                    native_name = bin_path.stem.split(".")[0]  # v__compat_092d0e
+                    # ── Cria spec com VulcanLoader ───────────────────────────────
+                    native_name = bin_path.stem.split(".")[0]  # ex: v__compat_382560
                     from doxoade.tools.vulcan.runtime import VulcanLoader
                     new_spec = importlib.machinery.ModuleSpec(
                         fullname,
@@ -159,17 +175,22 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
                     if getattr(original_spec, "submodule_search_locations", None) is not None:
                         new_spec.submodule_search_locations = original_spec.submodule_search_locations
                     new_spec.has_location = True
+
+                    self._spec_cache[fullname] = new_spec   # ← cache HIT
                     return new_spec
 
-            # --- GUARD: projeto nativo só para doxoade.* ---
+                # Nenhum candidato válido em lib_bin — cacheia miss para não repetir glob
+                # Só cacheia False se não for doxoade.* (que ainda pode ter bin/ abaixo)
+                if not fullname.startswith("doxoade."):
+                    self._spec_cache[fullname] = False
+                    return None
+
+            # ── GUARD: bin/ só para doxoade.* ───────────────────────────────────
             if not fullname.startswith("doxoade."):
+                self._spec_cache[fullname] = False
                 return None
 
-            # --- ETAPA 2: BUSCA POR ARQUIVOS DE PROJETO (bin) ---
-            # (Esta lógica é para 'vulcan ignite' e permanece a mesma)
-            cached = self._spec_cache.get(fullname)
-            if cached is False: return None
-            
+            # ── BIN: arquivos de projeto compilados com vulcan ignite ───────────
             py_path = self._resolve_py_path(fullname, path)
             if not py_path:
                 self._spec_cache[fullname] = False
@@ -178,8 +199,9 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
             bin_path = self._find_project_binary(py_path)
             if bin_path and self.is_binary_valid_for_host(bin_path) and not self._is_stale(py_path, str(bin_path)):
                 self.logger.info(f"VULCAN HIT: Mapping project file '{fullname}' -> '{bin_path}'")
-                self._spec_cache[fullname] = (py_path, str(bin_path))
-                return self._make_spec(fullname, py_path, str(bin_path))
+                spec = self._make_spec(fullname, py_path, str(bin_path))
+                self._spec_cache[fullname] = spec      # ← cache HIT
+                return spec
 
             self._spec_cache[fullname] = False
             return None
@@ -187,6 +209,7 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
         except Exception:
             self.logger.error(f"VulcanMetaFinder.find_spec failure on '{fullname}'", exc_info=True)
             return None
+            
 
     def _resolve_py_path_as_spec(self, fullname: str, path):
         """Retorna o spec do .py original sem acionar este finder."""

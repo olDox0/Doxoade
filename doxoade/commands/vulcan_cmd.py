@@ -794,7 +794,7 @@ def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, keep_temp):
             for p in sys.path:
                 if ("site-packages" in p or "dist-packages" in p) and p not in site_dirs:
                     site_dirs.append(p)
-
+            from pathlib import Path
             rows = []
             for sp in site_dirs:
                 sp_path = Path(sp)
