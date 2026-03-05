@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import gc
 import importlib.util
-import os
+# [DOX-UNUSED] import os
 import sys
 import time
 import ast
@@ -352,7 +352,7 @@ def _speedup_label(speedup: float) -> str:
         return f"\033[32m▲ {gain:.1f}% mais rápido\033[0m"
     if gain < -0.5:
         return f"\033[31m▼ {abs(gain):.1f}% mais lento\033[0m"
-    return f"\033[90m≈ sem diferença significativa\033[0m"
+    return "\033[90m≈ sem diferença significativa\033[0m"
 
 
 def _render_file_entry(r: "FileResult", *, verbose: bool, show_funcs: bool) -> list[float]:
@@ -492,9 +492,8 @@ def _write_csv(results: list[FileResult], path: Path) -> None:
         writer.writeheader()
         writer.writerows(rows)
         
-    optimized_code = ast.unparse(tree)
-    optimized_code = compact_lines_safely(optimized_code)
-    # Salva no opt_py
+#    optimized_code = ast.unparse(tree)
+#    optimized_code = compact_lines_safely(optimized_code)
         
 class SafeLocalNameMinifier(ast.NodeTransformer):
     """

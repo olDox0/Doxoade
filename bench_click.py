@@ -1,7 +1,7 @@
 # bench_click.py
 import time
-import sys
-import importlib
+# [DOX-UNUSED] import sys
+# [DOX-UNUSED] import importlib
 
 ROUNDS = 10_000
 

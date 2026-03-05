@@ -129,7 +129,7 @@ def auto_repair_module(project_root: str, module_name: str, module_src_dir: str 
                 # build into staging
                 step["actions"].append(f"compile {candidate} -> staging")
                 try:
-                    moved = compile_module(candidate, _staging_dir(project_root), project_root=Path(project_root))
+                    moved = compile_module(candidate, _staging_dir(project_root), project_root=Path(project_root)) #noqa
                 except Exception as e:
                     print(f"\033[31m ■ Erro: {e}")
                     step["exception"] = f"compile_failed: {e}"

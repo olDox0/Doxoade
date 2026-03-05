@@ -28,7 +28,7 @@ GENERIC_NAMES = {
 
 def is_binary_candidate(fullname: str, pyd_path: Path) -> bool:
     basename = fullname.rsplit(".", 1)[-1]
-    parent = fullname.rsplit(".", 1)[0] if "." in fullname else ""
+# [DOX-UNUSED]     parent = fullname.rsplit(".", 1)[0] if "." in fullname else ""
     stem_base = pyd_path.stem.split(".")[0]
 
     # Para nomes genéricos, exige que o pacote pai esteja no nome do pyd
@@ -41,7 +41,7 @@ def is_binary_candidate(fullname: str, pyd_path: Path) -> bool:
 
 def try_load_pyd(self, fullname, py_path, bin_path):
     try:
-        bin_stem = Path(bin_path).stem
+# [DOX-UNUSED]         bin_stem = Path(bin_path).stem
 
         loader = SafeExtensionLoader(
             fullname,
@@ -185,16 +185,6 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
                     self._spec_cache[fullname] = False
                     return None
 
-            # ── GUARD: bin/ só para doxoade.* ───────────────────────────────────
-            bin_path = self._find_project_binary(py_path)
-            if bin_path and self.is_binary_valid_for_host(bin_path) and not self._is_stale(...):
-                spec = self._make_spec(fullname, py_path, str(bin_path))
-                return spec
-                
-#            if not fullname.startswith("doxoade."):
-#                self._spec_cache[fullname] = False
-#                return None
-
             # ── BIN: arquivos de projeto compilados com vulcan ignite ───────────
             py_path = self._resolve_py_path(fullname, path)
             if not py_path:
@@ -205,7 +195,7 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
             if bin_path and self.is_binary_valid_for_host(bin_path) and not self._is_stale(py_path, str(bin_path)):
                 self.logger.info(f"VULCAN HIT: Mapping project file '{fullname}' -> '{bin_path}'")
                 spec = self._make_spec(fullname, py_path, str(bin_path))
-                self._spec_cache[fullname] = spec      # ← cache HIT
+                self._spec_cache[fullname] = spec
                 return spec
 
             self._spec_cache[fullname] = False

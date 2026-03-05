@@ -314,9 +314,10 @@ def _compile_single(
     ext = ".pyd" if _os.name == "nt" else ".so"
     extra_args = ["-O2"] if _os.name == "nt" else ["-O3", "-ffast-math"]
 
-    # Diretório de build isolado por worker — evita colisão em paralelo
-    build_tmp = foundry_path / f"_build_w{worker_id}"
-    build_tmp.mkdir(parents=True, exist_ok=True)
+    # Diretório de build em %TEMP% — caminho curto, evita MAX_PATH no Windows
+    import tempfile as _tf
+    build_tmp = _Path(_tf.gettempdir()) / f"vk_{worker_id}"
+    (build_tmp / "Release").mkdir(parents=True, exist_ok=True)
 
     setup_name = f"_solo_{name}_w{worker_id}_setup.py"
     setup_path = foundry_path / setup_name

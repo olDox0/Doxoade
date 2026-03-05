@@ -27,7 +27,7 @@ def run(ctx, script: str, **kwargs): # FIX: Adicionada a vírgula faltante
     """Executor Universal v83.3: Decisão Única de Fluxo."""
     abs_path = os.path.abspath(script)
 
-    context = ExecutionContext.detect(
+    context = ExecutionContext.detect( #noqa
         mode=ExecutionMode.SANDBOX
     )
     

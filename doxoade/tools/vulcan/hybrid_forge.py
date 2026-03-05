@@ -595,7 +595,7 @@ class HybridIgnite:
     def _print_summary(report: dict, callback):
         lines = [
             f"\n\033[36m{'─' * 55}\033[0m",
-            f"  \033[1mHYBRIDFORGE — RESUMO\033[0m",
+            "  \033[1mHYBRIDFORGE — RESUMO\033[0m",
             f"  Arquivos escaneados  : {report['files_scanned']}",
             f"  Arquivos com ganho   : {report['files_with_hits']}",
             f"  Funções compiladas   : {report['functions_compiled']}",

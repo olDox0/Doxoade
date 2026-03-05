@@ -53,7 +53,7 @@ def compile_module(module_dir: Path, out_dir: Path, project_root: Path | None = 
     try:
         if (setup_dir / "setup.py").exists():
             cmd = [sys.executable, "setup.py", "build_ext", "--inplace"]
-            proc = subprocess.run(cmd, cwd=str(setup_dir), check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+# [DOX-UNUSED]             proc = subprocess.run(cmd, cwd=str(setup_dir), check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         else:
             # fallback para pyproject: python -m build (requer 'build' package)
             cmd = [sys.executable, "-m", "build", "--wheel", "--outdir", str(out_dir)]

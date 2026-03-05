@@ -4,7 +4,7 @@
 Crivo de Qualidade e Injeção de Dívida Técnica (PASC 8.5 / MPoT-3).
 Responsável por filtrar silenciadores (# noqa) e injetar lembretes.
 """
-# [DOX-UNUSED] import os
+# [DOX-UNUSED] import os 
 from typing import List, Dict, Any, Set
 from ...tools.streamer import ufs
 from ...shared_tools import _get_code_snippet

@@ -24,11 +24,11 @@ INTEGRAÇÃO (vulcan_cmd.py):
 ──────────────────────────────────────────────────────────────────────
 """
 
-import textwrap
+# [DOX-UNUSED] import textwrap
 import sys
 import signal
 import os
-import subprocess
+# [DOX-UNUSED] import subprocess
 import click
 from pathlib import Path
 
@@ -555,7 +555,7 @@ def ignite(ctx, path, force, jobs, no_pitstop, streaming, hybrid, scan_only):
 
     # ── Modo Híbrido ──────────────────────────────────────────────────────────
     if hybrid:
-        from ..tools.vulcan.hybrid_forge import hybrid_ignite, hybrid_scan_file
+        from ..tools.vulcan.hybrid_forge import hybrid_ignite
 
         click.echo(f"{Fore.YELLOW}{Style.BRIGHT}⬡ [VULCAN-HYBRID] v{__version__}...{Style.RESET_ALL}")
 
@@ -1398,32 +1398,32 @@ def _copy_runtime_module(*_, **__):
 
 
 def _write_safe_runtime(project_root: Path) -> Path:
-    """
-    Escreve no projeto alvo:
-      - .doxoade/__init__.py
-      - .doxoade/vulcan/__init__.py
-      - .doxoade/vulcan/runtime.py   (SafeExtensionLoader + VulcanBinaryFinder + install_meta_finder + probe_embedded)
-      - .doxoade/vulcan/vulcan_embedded.py (safe loader)
-    Retorna o path do runtime (runtime_dst).
-    """
     project_root = Path(project_root).resolve()
-    vulcan_dir = project_root / ".doxoade" / "vulcan"
+    vulcan_dir   = project_root / ".doxoade" / "vulcan"
     vulcan_dir.mkdir(parents=True, exist_ok=True)
 
-    # Ensure package markers for importability
-    (project_root / ".doxoade" / "__init__.py").write_text("# marker package for doxoade\n", encoding="utf-8")
-    (vulcan_dir / "__init__.py").write_text("# marker package for doxoade.vulcan\n", encoding="utf-8")
+    (project_root / ".doxoade" / "__init__.py").write_text(
+        "# doxoade vulcan marker\n", encoding="utf-8"
+    )
+    (vulcan_dir / "__init__.py").write_text(
+        "# doxoade vulcan marker\n", encoding="utf-8"
+    )
 
-    runtime_src = Path(__file__).resolve().parents[1] / "tools" / "vulcan" / "runtime.py"
-    runtime_content = runtime_src.read_text(encoding="utf-8")
+    vulcan_src = Path(__file__).resolve().parents[1] / "tools" / "vulcan"
 
-    runtime_dst = vulcan_dir / "runtime.py"
-    runtime_dst.write_text(runtime_content, encoding="utf-8")
+    # Implanta os 3 módulos necessários para operação autônoma
+    for fname in ("runtime.py", "opt_cache.py", "lib_optimizer.py"):
+        src_file = vulcan_src / fname
+        if src_file.exists():
+            (vulcan_dir / fname).write_text(
+                src_file.read_text(encoding="utf-8"), encoding="utf-8"
+            )
 
-    (vulcan_dir / "vulcan_embedded.py").write_text(_VULCAN_EMBEDDED_CONTENT.lstrip(), encoding="utf-8")
+    (vulcan_dir / "vulcan_embedded.py").write_text(
+        _VULCAN_EMBEDDED_CONTENT.lstrip(), encoding="utf-8"
+    )
 
-
-    return runtime_dst
+    return vulcan_dir / "runtime.py"
 
 
 def _iter_project_main_files(project_root: Path):
@@ -1687,6 +1687,178 @@ def vulcan_probe(target_path, verbose):
 
     click.echo()
 
+@vulcan_group.command('verify')
+@click.argument('target_path', default='.', type=click.Path(exists=True))
+@click.option('--verbose', '-v', is_flag=True)
+def vulcan_verify(target_path, verbose):
+    """Verifica se o redirecionamento PYD está funcional em projeto externo.
+
+    Testa em subprocess isolado se o MetaFinder intercepta corretamente
+    os imports e redireciona para os binários compilados.
+    """
+    import subprocess
+    import json
+    import hashlib
+
+    project_root = Path(target_path).resolve()
+    bin_dir      = project_root / ".doxoade" / "vulcan" / "bin"
+    runtime_py   = project_root / ".doxoade" / "vulcan" / "runtime.py"
+
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}  ⬡ VULCAN VERIFY — {project_root.name}{Style.RESET_ALL}")
+
+    # ── Pré-checks estruturais ────────────────────────────────────────────────
+    checks = {
+        "runtime.py presente":        runtime_py.exists(),
+        "bin/ presente":               bin_dir.exists(),
+        "vulcan_embedded.py presente": (project_root / ".doxoade" / "vulcan" / "vulcan_embedded.py").exists(),
+    }
+
+    # Bootstrap injetado em algum __main__.py?
+    main_files = list(project_root.rglob("__main__.py"))
+    bootstrap_found = any(
+        _BOOTSTRAP_START in p.read_text(encoding="utf-8", errors="ignore")
+        for p in main_files
+        if ".doxoade" not in str(p)
+    )
+    checks["bootstrap em __main__.py"] = bootstrap_found
+
+    ext = ".pyd" if os.name == "nt" else ".so"
+    binaries = list(bin_dir.glob(f"*{ext}")) if bin_dir.exists() else []
+    checks[f"binários {ext} presentes"] = bool(binaries)
+
+    all_ok = True
+    for label, ok in checks.items():
+        icon  = f"{Fore.GREEN}✔" if ok else f"{Fore.RED}✘"
+        all_ok = all_ok and ok
+        click.echo(f"   {icon}{Style.RESET_ALL} {label}")
+
+    if not all_ok:
+        click.echo(
+            f"\n{Fore.YELLOW}  ⚠ Pré-checks falharam. "
+            f"Execute 'doxoade vulcan module --path {target_path} --auto-main' primeiro.{Style.RESET_ALL}"
+        )
+        return
+
+    # ── Teste de redirecionamento em subprocess isolado ───────────────────────
+    click.echo(f"\n{Fore.CYAN}  ⬡ Testando redirecionamento em subprocess isolado...{Style.RESET_ALL}")
+
+    # Monta mapa stem → hash esperado para cada binário
+    skip = {".git", "venv", ".venv", "__pycache__", "build", "dist", ".doxoade"}
+    py_index: dict[str, Path] = {}
+    for r, dirs, files in os.walk(project_root):
+        dirs[:] = [d for d in dirs if d not in skip]
+        for f in files:
+            if f.endswith(".py"):
+                p = Path(r) / f
+                h = hashlib.sha256(str(p.resolve()).encode()).hexdigest()[:6]
+                py_index[h] = p
+
+    results = []
+    for bin_path in binaries[:10]:  # limita a 10 para não demorar
+        base  = bin_path.stem.split(".")[0]   # v_cli_a7a05c
+        parts = base.split("_")
+        phash = parts[-1] if len(parts) >= 3 else None
+        src   = py_index.get(phash)
+
+        if not src:
+            results.append({"bin": bin_path.name, "status": "ÓRFÃO", "src": None})
+            continue
+
+        # Calcula modname no processo pai (evita problema de \ no Windows)
+        try:
+            modname = str(
+                src.with_suffix("").relative_to(project_root)
+            ).replace(os.sep, ".")
+        except ValueError:
+            modname = src.stem
+
+        probe_script = f"""
+import sys, importlib, json
+sys.path.insert(0, r'{project_root}')
+
+import importlib.util as _u
+_spec = _u.spec_from_file_location('_rt', r'{runtime_py}')
+_mod  = _u.module_from_spec(_spec)
+_spec.loader.exec_module(_mod)
+_mod.install_meta_finder(r'{project_root}')
+
+modname = '{modname}'
+try:
+    mod  = importlib.import_module(modname)
+    file = getattr(mod, '__file__', '') or ''
+    loader_name = type(getattr(mod, '__loader__', None)).__name__
+    # Redirecionado se: arquivo está no bin/ OU loader é VulcanLoader
+    redirected = (
+        '.doxoade' in file.replace('\\\\\\\\', '/')
+        or loader_name == 'VulcanLoader'
+    )
+    print(json.dumps({{"stem": modname, "file": file, "loader": loader_name, "redirected": redirected}}))
+except Exception as e:
+    print(json.dumps({{"stem": modname, "file": "", "redirected": False, "error": str(e)}}))
+"""
+
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-c", probe_script],
+                capture_output=True, text=True, timeout=10,
+                cwd=str(project_root),
+            )
+            output = proc.stdout.strip().splitlines()
+            for line in output:
+                try:
+                    data = json.loads(line)
+                    data["bin"] = bin_path.name
+                    data["src"] = str(src.relative_to(project_root))
+                    results.append(data)
+                except Exception:
+                    pass
+        except subprocess.TimeoutExpired:
+            results.append({"bin": bin_path.name, "status": "TIMEOUT", "src": str(src)})
+        except Exception as exc:
+            results.append({"bin": bin_path.name, "status": f"ERRO: {exc}", "src": str(src)})
+
+    # ── Relatório ─────────────────────────────────────────────────────────────
+    redirected = [r for r in results if r.get("redirected")]
+    not_redir  = [r for r in results if not r.get("redirected") and r.get("src")]
+    orphans    = [r for r in results if r.get("status") == "ÓRFÃO"]
+
+    click.echo(f"\n{Fore.CYAN}  {'─' * 55}{Style.RESET_ALL}")
+
+    if redirected:
+        click.echo(f"  {Fore.GREEN}{Style.BRIGHT}✔ REDIRECIONADOS ({len(redirected)}):{Style.RESET_ALL}")
+        for r in redirected:
+            click.echo(f"   {Fore.GREEN}✔{Style.RESET_ALL} {r['src']}")
+            if verbose:
+                click.echo(f"     → {Fore.CYAN}{r.get('file','')}{Style.RESET_ALL}")
+
+    if not_redir:
+        click.echo(f"\n  {Fore.YELLOW}{Style.BRIGHT}⚠ NÃO REDIRECIONADOS ({len(not_redir)}):{Style.RESET_ALL}")
+        for r in not_redir:
+            err = r.get("error", "import retornou .py original")
+            click.echo(f"   {Fore.YELLOW}⚠{Style.RESET_ALL} {r['src']}  {Style.DIM}({err}){Style.RESET_ALL}")
+
+    if orphans:
+        click.echo(f"\n  {Fore.RED}{Style.BRIGHT}✘ ÓRFÃOS ({len(orphans)}):{Style.RESET_ALL}")
+        for r in orphans:
+            click.echo(f"   {Fore.RED}✘{Style.RESET_ALL} {r['bin']}")
+
+    total = len(results)
+    pct   = (len(redirected) / total * 100) if total else 0
+    click.echo(f"\n  {Fore.CYAN}Total testado: {total}  │  "
+               f"{Fore.GREEN}Redirecionados: {len(redirected)} ({pct:.0f}%){Fore.RESET}  │  "
+               f"{Fore.YELLOW}Falhos: {len(not_redir)}{Fore.RESET}  │  "
+               f"{Fore.RED}Órfãos: {len(orphans)}{Style.RESET_ALL}")
+
+    if pct == 100:
+        click.echo(f"\n  {Fore.GREEN}{Style.BRIGHT}✅ Redirecionamento 100% funcional.{Style.RESET_ALL}")
+    elif pct > 0:
+        click.echo(f"\n  {Fore.YELLOW}⚡ Redirecionamento parcial. "
+                   f"Verifique se o bootstrap está no __main__.py e rode 'vulcan ignite'.{Style.RESET_ALL}")
+    else:
+        click.echo(f"\n  {Fore.RED}✘ Nenhum redirecionamento ativo. "
+                   f"Execute 'doxoade vulcan module --path {target_path} --auto-main'.{Style.RESET_ALL}")
+    click.echo()
+    
 
 def _print_vulcan_forensic(scope: str, e: Exception):
     """Interface Forense para falhas de metalurgia (MPoT-5.3)."""

@@ -23,7 +23,7 @@ Segurança:
   - Binários só chegam ao lib_bin após compilação bem-sucedida.
 """
 
-import os
+# [DOX-UNUSED] import os
 import shutil
 import sys
 import tempfile
@@ -67,7 +67,7 @@ class LibForge:
             print(f"   > Encontrada em: {source_path}")
 
             # ── Fase 2: Copiar fontes para área isolada ────────────────────────
-            print(f"   > Copiando fontes .py para área temporária de trabalho...")
+            print("   > Copiando fontes .py para área temporária de trabalho...")
             try:
                 work_copy = self._copy_sources(source_path, work_dir)
             except Exception as e:
@@ -83,12 +83,12 @@ class LibForge:
                 )
 
             # ── Fase 3: Otimizar fontes da cópia ──────────────────────────────
-            print(f"   > Otimizando fontes (dead code, imports, minificação local)...")
+            print("   > Otimizando fontes (dead code, imports, minificação local)...")
             opt_stats = self._optimize_sources(work_copy)
             self._print_opt_summary(opt_stats)
 
             # ── Fase 4: HybridIgnite na cópia otimizada ────────────────────────
-            print(f"   > Analisando candidatos com HybridScanner...")
+            print("   > Analisando candidatos com HybridScanner...")
             from .hybrid_forge import HybridIgnite
 
             ignite = HybridIgnite(self.root)

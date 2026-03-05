@@ -1,16 +1,18 @@
 # -*- coding: utf-8 -*-
+# doxoade/commands/check_systems/check_fixer.py
 import os
 from click import echo
 from doxoade.tools.doxcolors import Fore
-from .check_state import CheckState
-def apply_fixes_to_state(state):
+# [DOX-UNUSED] from .check_state import CheckState
+def apply_fixes_to_state(state, fix_specify=None):
     if not state or not hasattr(state, "findings"):
         return
     if state is None or not hasattr(state, "findings"):
         return None
-    if not fix_specify: fix_specify = None
+#    if not fix_specify: fix_specify = None
     """Aplica correções nos achados presentes no estado."""
-    from doxoade.commands.check_systems.check_fixer import AutoFixer
+    from .fixer import AutoFixer
+#    from doxoade.commands.check_systems.check_fixer import AutoFixer
     from ...shared_tools import ExecutionLogger
     from collections import defaultdict
     files_map = defaultdict(list)

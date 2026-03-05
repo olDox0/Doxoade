@@ -169,6 +169,3 @@ def run_check_logic(path: str, state, *_args, **kwargs):
         'findings': state.findings,
         'alb_files': state.alb_files
     }
-    
-if __name__ == "__main__":
-    main()

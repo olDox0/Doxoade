@@ -28,7 +28,7 @@ import hashlib
 import importlib.util
 import json
 import os
-import sys
+# [DOX-UNUSED] import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -407,7 +407,7 @@ class HybridBenchmark:
         package_name = f"_bench_pkg_{py_file.parent.name}"
         bench_name   = f"{package_name}.{py_file.stem}"
 
-        old_sys_path = list(_sys.path)
+# [DOX-UNUSED]         old_sys_path = list(_sys.path)
         added_paths  = []
         created_init = False
 
@@ -497,7 +497,7 @@ class HybridBenchmark:
         raw_stem    = binary.stem
         module_name = raw_stem.split(".")[0]       # v_check_fixer_1d4165
 
-        old_modules_snapshot = {}
+# [DOX-UNUSED]         old_modules_snapshot = {}
         try:
             spec = importlib.util.spec_from_file_location(module_name, str(binary))
             if not spec or not spec.loader:
@@ -766,7 +766,7 @@ class FunctionProber:
         if n == 'state' or ann_name in ('CheckState',):
             # Gera um CheckState mínimo com findings populados
             try:
-                from dataclasses import dataclass, field as dc_field
+# [DOX-UNUSED]  from dataclasses import field as dc_field
                 # Cria dinamicamente sem precisar importar do projeto
                 state_obj = type('CheckState', (), {
                     'root': '.',

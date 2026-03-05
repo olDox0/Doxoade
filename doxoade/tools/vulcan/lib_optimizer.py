@@ -35,7 +35,7 @@ from __future__ import annotations
 import ast
 import string
 import itertools
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -93,9 +93,6 @@ class LibOptimizer:
 #                                   'dir', 'inspect'})
 
     def _uses_structural_meta(self, tree: ast.AST) -> bool:
-        """
-        Detecta metaprogramação estrutural incompatível com otimização agressiva.
-        """
         for n in ast.walk(tree):
             if isinstance(n, ast.Attribute) and n.attr in {
                 '_fields',
@@ -111,10 +108,13 @@ class LibOptimizer:
                 }:
                     return True
 
-            if isinstance(n, ast.Decorator):
-                return True
+            # ← REMOVER este bloco inteiro
+            # if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            #     if n.decorator_list:
+            #         return True
 
         return False
+
 
     def optimize_file(self, path: Path) -> FileOptReport:
         """
@@ -201,7 +201,7 @@ class LibOptimizer:
 
         except Exception as exc:
             # Revert: restaura o fonte original
-            import traceback
+# [DOX-UNUSED]             import traceback
             print(f"\033[33m[DEBUG] Fallback ativado em {path.name}: {exc}\033[0m")
             try:
                 path.write_text(source, encoding='utf-8')
@@ -385,9 +385,12 @@ class _ImportTransformer(ast.NodeTransformer):
 
 class ImportCombiner(ast.NodeTransformer):
     def _combine(self, body):
-        new_body =[]
+        new_body = []
         curr_import = None
         for stmt in body:
+            if not isinstance(stmt, ast.AST):   # ← ignora strings e outros não-nós
+                new_body.append(stmt)
+                continue
             if type(stmt) is ast.Import:
                 if curr_import is None:
                     curr_import = stmt

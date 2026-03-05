@@ -9,7 +9,9 @@ from doxoade.tools.filesystem import _get_project_config
 try:
     import pathspec
 except ImportError as e:
-    # log e fallback: força usar versão pure-python instalada
+    import traceback
+    print(f"\033[31m ■ Erro: {e}")
+    traceback.print_tb(e.__traceback__)
     import importlib
     try:
         pathspec = importlib.import_module("pathspec")

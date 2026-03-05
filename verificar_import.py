@@ -1,6 +1,6 @@
 # verificar_import.py (Versão Corrigida para Submódulos)
 import click
-import os
+# [DOX-UNUSED] import os
 
 # O 'import click' inicial carrega o pacote. É DENTRO dele que a mágica acontece.
 # Agora, vamos acessar um submódulo que sabemos que foi compilado.
@@ -11,7 +11,7 @@ try:
 
     caminho_do_submodulo = formatting.__file__
 
-    print(f"O submódulo 'click.formatting' está sendo carregado de:")
+    print("O submódulo 'click.formatting' está sendo carregado de:")
     print(f"  -> {caminho_do_submodulo}")
 
     if '.doxoade' in caminho_do_submodulo and 'vulcan' in caminho_do_submodulo:
@@ -36,7 +36,7 @@ print(f"wrap_text qualname:   {getattr(click.formatting.wrap_text, '__qualname__
 import sys
 native = sys.modules.get('v_formatting_da684d')
 if native:
-    print(f"\nNativo encontrado em sys.modules:")
+    print("\nNativo encontrado em sys.modules:")
     for name in dir(native):
         if 'wrap' in name or 'iter' in name:
             print(f"  {name}: {type(getattr(native, name)).__name__}")

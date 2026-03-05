@@ -55,6 +55,23 @@ def _vlog(msg: str) -> None:
     if _VERBOSE:
         sys.stderr.write(f"[VULCAN:REDIRECT] {msg}\n")
 
+def _load_local_module(path: Path, name: str) -> Optional[ModuleType]:
+    """Carrega módulo de arquivo local sem alterar sys.path permanentemente."""
+    if not path.exists():
+        return None
+    try:
+        if name in sys.modules:
+            return sys.modules[name]
+        spec = importlib.util.spec_from_file_location(name, str(path))
+        if not spec or not spec.loader:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:
+        sys.modules.pop(name, None)
+        return None
 
 # ---------------------------------------------------------------------------
 # Helpers de binário
@@ -103,17 +120,12 @@ def _is_binary_stale(bin_path: Path, source_path: Optional[Path]) -> bool:
 
 
 def _find_pyd_for_source(bin_dir: Path, source_path: Path) -> Optional[Path]:
-    """
-    Localiza o PYD correspondente a um .py.
+    stem     = source_path.stem
+    ext      = _binary_ext()
+#    abs_hash = hashlib.sha256(str(source_path.resolve()).encode()).hexdigest()[:6]
+    abs_hash = hashlib.sha256(str(source_path.resolve()).lower().encode()).hexdigest()[:6]
 
-    Ordem de busca:
-      1. Hash do path absoluto  (padrão PitStop atual)
-      2. Glob ``v_{stem}_*.pyd`` — qualquer hash para este stem (mais recente)
-      3. ``v_{stem}.pyd``        — legado sem hash
-    """
-    stem    = source_path.stem
-    ext     = _binary_ext()
-    abs_hash = hashlib.sha256(str(source_path.resolve()).encode()).hexdigest()[:6]
+    _vlog(f"LOOKUP {stem} hash={abs_hash} in {bin_dir}")  # ← adicionar
 
     candidate = bin_dir / f"v_{stem}_{abs_hash}{ext}"
     if candidate.exists():
@@ -168,13 +180,7 @@ class VulcanLoader(importlib.abc.Loader):
     O módulo final sempre tem o fullname correto e as APIs Python preservadas.
     """
 
-    def __init__(
-        self,
-        original_loader:    importlib.abc.Loader,
-        bin_path:           Path,
-        native_module_name: str,
-        opt_py_path:        Optional[Path] = None,
-    ):
+    def __init__(self, original_loader, bin_path, native_module_name, opt_py_path=None):
         self._original_loader = original_loader
         self._bin_path        = bin_path
         self._native_name     = native_module_name
@@ -212,31 +218,17 @@ class VulcanLoader(importlib.abc.Loader):
     # ── Tier 2 ────────────────────────────────────────────────────────────────
 
     def _overlay_opt_py(self, module: ModuleType) -> None:
-        """
-        Carrega o módulo otimizado em namespace isolado e substitui
-        callables de mesmo nome no módulo alvo.
-
-        Conservador: só substitui funções com assinatura idêntica.
-        Falha silenciosa em qualquer ponto.
-        """
         try:
             opt_name = f"_vulcan_opt_{module.__name__}"
-            spec = importlib.util.spec_from_file_location(
-                opt_name, str(self._opt_py_path)
-            )
+            spec = importlib.util.spec_from_file_location(opt_name, str(self._opt_py_path))
             if not spec or not spec.loader:
                 return
 
             opt_mod = importlib.util.module_from_spec(spec)
-            # Propaga globals do módulo original → imports relativos resolvem
-            for k, v in vars(module).items():
-                try:
-                    setattr(opt_mod, k, v)
-                except (AttributeError, TypeError):
-                    pass
+            # ← NÃO propagar vars antes do exec (corrompem __spec__ e __loader__)
+            spec.loader.exec_module(opt_mod)  # executa limpo primeiro
 
-            spec.loader.exec_module(opt_mod)
-
+            # Agora sobrepõe callables no módulo original
             replaced = 0
             for attr in dir(opt_mod):
                 if attr.startswith("__"):
@@ -247,7 +239,6 @@ class VulcanLoader(importlib.abc.Loader):
                     continue
                 if not (callable(opt_obj) and callable(orig_obj)):
                     continue
-                # Valida assinatura conservadoramente
                 try:
                     if inspect.isfunction(opt_obj) and inspect.isfunction(orig_obj):
                         if (set(inspect.signature(orig_obj).parameters)
@@ -258,12 +249,10 @@ class VulcanLoader(importlib.abc.Loader):
                 setattr(module, attr, opt_obj)
                 replaced += 1
 
-            _vlog(
-                f"OPT  {module.__name__} ← {Path(self._opt_py_path).name} "
-                f"({replaced} funcs)"
-            )
+            _vlog(f"OPT  {module.__name__} ← {Path(self._opt_py_path).name} ({replaced} funcs)")
         except Exception as exc:
             _vlog(f"OPT-FAIL {module.__name__} — {exc}")
+
 
     # ── Tier 1 ────────────────────────────────────────────────────────────────
 
@@ -383,14 +372,14 @@ class VulcanBinaryFinder(importlib.abc.MetaPathFinder):
         if not self.bin_dir.exists():
             return None
 
-        # ── Cache hit ─────────────────────────────────────────────────────────
+        # Cache hit
         if fullname in self._cache:
             cached = self._cache[fullname]
             if cached is None:
                 return None
-            bin_path = Path(cached[0])
-            native   = cached[1]
-            opt_path = Path(cached[2]) if cached[2] else None
+            bin_path  = Path(cached[0])
+            native    = cached[1]
+            opt_path  = Path(cached[2]) if cached[2] else None
             original_spec = self._resolve_original_spec(fullname, path)
             if not original_spec or not original_spec.loader:
                 del self._cache[fullname]
@@ -399,19 +388,17 @@ class VulcanBinaryFinder(importlib.abc.MetaPathFinder):
             if (bin_path.exists()
                     and _is_binary_valid_for_host(bin_path)
                     and not _is_binary_stale(bin_path, source)):
-                return self._make_vulcan_spec(
-                    fullname, original_spec, bin_path, native, opt_path
-                )
+                return self._make_vulcan_spec(fullname, original_spec, bin_path, native, opt_path)
             del self._cache[fullname]
 
-        # ── Resolve spec original ─────────────────────────────────────────────
+        # Resolve spec original
         original_spec = self._resolve_original_spec(fullname, path)
         if not original_spec or not original_spec.loader:
             return None
 
         source_path = Path(original_spec.origin)
 
-        # ── Localiza PYD (requisito para interceptar) ─────────────────────────
+        # Localiza PYD
         bin_path = _find_pyd_for_source(self.bin_dir, source_path)
         if not bin_path or not _is_binary_valid_for_host(bin_path):
             self._cache[fullname] = None
@@ -421,9 +408,7 @@ class VulcanBinaryFinder(importlib.abc.MetaPathFinder):
             return None
 
         native_name = bin_path.stem.split(".")[0]
-
-        # ── Localiza/gera opt_py para Tier 2 (best-effort) ───────────────────
-        opt_path = self._find_or_generate_opt(source_path)
+        opt_path    = self._find_or_generate_opt(source_path)
 
         self._cache[fullname] = (
             str(bin_path),
@@ -431,14 +416,8 @@ class VulcanBinaryFinder(importlib.abc.MetaPathFinder):
             str(opt_path) if opt_path else None,
         )
 
-        _vlog(
-            f"INTERCEPT {fullname} → {bin_path.name}"
-            + (" + OPT" if opt_path else "")
-        )
-
-        return self._make_vulcan_spec(
-            fullname, original_spec, bin_path, native_name, opt_path
-        )
+        _vlog(f"INTERCEPT {fullname} → {bin_path.name}" + (" + OPT" if opt_path else ""))
+        return self._make_vulcan_spec(fullname, original_spec, bin_path, native_name, opt_path)
 
     def _make_vulcan_spec(
         self,
@@ -463,21 +442,34 @@ class VulcanBinaryFinder(importlib.abc.MetaPathFinder):
         return new_spec
 
     def _find_or_generate_opt(self, source_path: Path) -> Optional[Path]:
-        """
-        Tenta localizar o opt_py no cache; se ausente, gera on-demand.
-        Silencioso em qualquer falha — Tier 2 é sempre opcional.
-        """
+        """Tier 2: tenta local primeiro, depois doxoade como fallback."""
         try:
+            # 1. Tenta opt_cache local (implantado pelo vulcan module)
+            local_oc = _load_local_module(
+                self.project_root / ".doxoade" / "vulcan" / "opt_cache.py",
+                "_vulcan_local_opt_cache",
+            )
+            if local_oc:
+                root = (
+                    getattr(local_oc, "find_project_root_for", lambda _: None)(source_path)
+                    or self.project_root
+                )
+                find   = getattr(local_oc, "find_opt_py", None)
+                gen    = getattr(local_oc, "generate_opt_py", None)
+                cached = find(root, source_path) if find else None
+                if cached:
+                    return cached
+                return gen(root, source_path) if gen else None
+        except Exception:
+            pass
+
+        try:
+            # 2. Fallback: doxoade instalado no venv do projeto externo
             from doxoade.tools.vulcan.opt_cache import (
-                find_opt_py,
-                generate_opt_py,
-                find_project_root_for,
+                find_opt_py, generate_opt_py, find_project_root_for,
             )
             root = find_project_root_for(source_path) or self.project_root
-            cached = find_opt_py(root, source_path)
-            if cached:
-                return cached
-            return generate_opt_py(root, source_path)
+            return find_opt_py(root, source_path) or generate_opt_py(root, source_path)
         except Exception:
             return None
 
@@ -605,14 +597,32 @@ def load_vulcan_binary(
 # ---------------------------------------------------------------------------
 
 def _resolve_opt_path(source_path: Path, root: Path) -> Optional[Path]:
-    """Localiza ou gera o opt_py para ``source_path``. Retorna None em falha."""
-    from doxoade.tools.vulcan.opt_cache import (
-        find_opt_py,
-        find_project_root_for,
-        generate_opt_py,
-    )
-    opt_root = find_project_root_for(source_path) or root
-    return find_opt_py(opt_root, source_path) or generate_opt_py(opt_root, source_path)
+    """Localiza/gera opt_py — local primeiro, doxoade como fallback."""
+    try:
+        local_oc = _load_local_module(
+            root / ".doxoade" / "vulcan" / "opt_cache.py",
+            "_vulcan_local_opt_cache",
+        )
+        if local_oc:
+            find = getattr(local_oc, "find_opt_py", None)
+            gen  = getattr(local_oc, "generate_opt_py", None)
+            fpr  = getattr(local_oc, "find_project_root_for", None)
+            opt_root = (fpr(source_path) if fpr else None) or root
+            cached = find(opt_root, source_path) if find else None
+            if cached:
+                return cached
+            return gen(opt_root, source_path) if gen else None
+    except Exception:
+        pass
+
+    try:
+        from doxoade.tools.vulcan.opt_cache import (
+            find_opt_py, find_project_root_for, generate_opt_py,
+        )
+        opt_root = find_project_root_for(source_path) or root
+        return find_opt_py(opt_root, source_path) or generate_opt_py(opt_root, source_path)
+    except Exception:
+        return None
 
 
 def _load_opt_module(

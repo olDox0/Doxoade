@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # remove_vulcan_bootstrap.py
-import sys
+# [DOX-UNUSED] import sys
 from pathlib import Path
 import re
 

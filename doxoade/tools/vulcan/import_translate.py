@@ -1,5 +1,5 @@
 # vulcan/import_translate.py
-import sys
+# [DOX-UNUSED] import sys
 import importlib.util
 from pathlib import Path
 
