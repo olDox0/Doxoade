@@ -430,7 +430,6 @@ def activate_embedded(globs: dict, source_file: str, project_root: str | None = 
         return False
 '''
 
-
 def generate_vulcan_stub() -> str:
     return '''# -*- coding: utf-8 -*-
 """
@@ -559,10 +558,25 @@ def ignite(ctx, path, force, jobs, no_pitstop, streaming, hybrid, scan_only):
 
         click.echo(f"{Fore.YELLOW}{Style.BRIGHT}⬡ [VULCAN-HYBRID] v{__version__}...{Style.RESET_ALL}")
 
+        # Carrega RegressionRegistry automaticamente (silencioso se vazio)
+        registry = None
+        try:
+            from ..tools.vulcan.regression_registry import RegressionRegistry
+            registry = RegressionRegistry(root)
+            r        = registry.report()
+            if r["total"]:
+                click.echo(
+                    f"{Fore.MAGENTA}   > Registry: "
+                    f"{Fore.RED}{r['excluded']} excluída(s){Style.RESET_ALL}  "
+                    f"{Fore.YELLOW}{r['retry_aggressive']} retry-agressivo{Style.RESET_ALL}"
+                )
+        except Exception:
+            registry = None
+
         if scan_only:
             # Modo diagnóstico: só mostra o que seria compilado
             click.echo(f"{Fore.CYAN}   > Modo: SCAN ONLY (sem compilação){Style.RESET_ALL}")
-            _run_hybrid_with_optimizer(target, root)
+            _run_hybrid_with_optimizer(target, root, force, registry=registry)
             return
 
         click.echo(f"{Fore.CYAN}   > Alvo : {target}{Style.RESET_ALL}")
@@ -570,11 +584,11 @@ def ignite(ctx, path, force, jobs, no_pitstop, streaming, hybrid, scan_only):
 
         with ExecutionLogger('vulcan_hybrid', root, ctx.params) as _:
             try:
-                hybrid_ignite(
-                    project_root = root,
-                    target       = target,
-                    force        = force,
-                    on_progress  = click.echo,
+                _run_hybrid_with_optimizer(
+                    target   = target,
+                    root     = root,
+                    force    = force,
+                    registry = registry,
                 )
             except KeyboardInterrupt:
                 _sigint_handler(None, None)
@@ -636,11 +650,79 @@ def ignite(ctx, path, force, jobs, no_pitstop, streaming, hybrid, scan_only):
             _print_vulcan_forensic("IGNITE", e)
             sys.exit(1)
             
-            
-def _run_hybrid_with_optimizer(target, root, force):
+def _load_registry_for_ignite(root, no_registry=False):
     """
-    Versão atualizada do ignite --hybrid com optimizer integrado.
-    Substitui o bloco interno do comando ignite quando --hybrid é passado.
+    Carrega o RegressionRegistry automaticamente para o ignite.
+    Retorna None se --no-registry for passado ou se falhar.
+    """
+    if no_registry:
+        return None
+    try:
+        from ..tools.vulcan.regression_registry import RegressionRegistry
+        return RegressionRegistry(root)
+    except Exception:
+        return None
+
+
+@vulcan_group.command('regression')
+@click.option('--reset',         is_flag=True, help='Remove funções excluídas (nova tentativa).')
+@click.option('--reset-all',     is_flag=True, help='Limpa todo o registry.')
+@click.option('--purge-missing', is_flag=True, help='Remove arquivos que não existem mais.')
+@click.option('--json',          'output_json', is_flag=True, help='Saída em JSON.')
+def vulcan_regression(reset, reset_all, purge_missing, output_json):
+    """Gerencia o RegressionRegistry — histórico de regressões de performance.
+
+    O registry é alimentado automaticamente pelos comandos:
+        doxoade vulcan benchmark --learn
+        doxoade vulcan ignite --hybrid
+
+    Exemplos:
+        doxoade vulcan regression
+        doxoade vulcan regression --reset
+        doxoade vulcan regression --json
+    """
+    root = _find_project_root(os.getcwd())
+
+    try:
+        from ..tools.vulcan.regression_registry import RegressionRegistry
+        registry = RegressionRegistry(root)
+
+        if reset_all:
+            n = registry.clear_all()
+            click.echo(f"{Fore.GREEN}[OK]{Style.RESET_ALL} Registry limpo ({n} entrada(s)).")
+            return
+
+        if reset:
+            n = registry.clear_excluded()
+            click.echo(
+                f"{Fore.GREEN}[OK]{Style.RESET_ALL} {n} função(ões) excluída(s) removida(s).\n"
+                f"{Fore.CYAN}[INFO] Serão recompiladas no próximo ignite.{Style.RESET_ALL}"
+            )
+            return
+
+        if purge_missing:
+            n = registry.purge_missing_files()
+            click.echo(f"{Fore.GREEN}[OK]{Style.RESET_ALL} {n} entrada(s) de arquivos inexistentes removidas.")
+            return
+
+        if output_json:
+            import json as _json
+            click.echo(_json.dumps(registry.report(), indent=2, ensure_ascii=False))
+        else:
+            registry.render_cli()
+
+    except Exception as e:
+        _print_vulcan_forensic("REGRESSION", e)
+        sys.exit(1)
+
+def _run_hybrid_with_optimizer(target, root, force, registry=None):
+    """
+    Compilação híbrida com optimizer integrado e suporte ao RegressionRegistry.
+
+    Com registry:
+      • Funções 'excluded'         → removidas antes de compilar
+      • Funções 'retry_aggressive' → compiladas com header Cython agressivo
+      • Após compilação bem-sucedida → PerformanceWatcher mede e atualiza registry
     """
     from ..tools.vulcan.hybrid_forge     import HybridIgnite
     from ..tools.vulcan.hybrid_optimizer import optimize_pyx_file
@@ -649,10 +731,43 @@ def _run_hybrid_with_optimizer(target, root, force):
     ignite = HybridIgnite(root)
     files  = HybridIgnite._collect_files(Path(target).resolve())
 
-    opt_summary = []   # acumula relatórios do optimizer
+    opt_summary       = []
+    total_excluded    = 0
+    total_aggressive  = 0
+    total_regressions = 0
+    total_promoted    = 0
 
     for py_file in files:
         scan = ignite._scanner.scan(str(py_file))
+        if not scan.candidates:
+            continue
+
+        # ── Filtragem via RegressionRegistry ─────────────────────────────────
+        aggressive_funcs = frozenset()
+
+        if registry is not None:
+            excluded_names   = registry.excluded_funcs_for_file(str(py_file))
+            aggressive_funcs = registry.aggressive_funcs_for_file(str(py_file))
+
+            before          = len(scan.candidates)
+            scan.candidates = [c for c in scan.candidates if c.name not in excluded_names]
+            excl_n          = before - len(scan.candidates)
+            total_excluded += excl_n
+
+            agg_active        = aggressive_funcs & {c.name for c in scan.candidates}
+            total_aggressive += len(agg_active)
+
+            if excl_n:
+                click.echo(
+                    f"   {Fore.RED}↷ {py_file.name}: "
+                    f"{excl_n} função(ões) excluída(s) pelo registry{Style.RESET_ALL}"
+                )
+            if agg_active:
+                click.echo(
+                    f"   {Fore.MAGENTA}⬡ {py_file.name}: "
+                    f"retry-agressivo → {', '.join(sorted(agg_active))}{Style.RESET_ALL}"
+                )
+
         if not scan.candidates:
             continue
 
@@ -662,13 +777,14 @@ def _run_hybrid_with_optimizer(target, root, force):
             f"{len(scan.candidates)} candidato(s):"
         )
         for f in scan.candidates:
+            tag = f"{Fore.MAGENTA}[AGG]{Style.RESET_ALL}" if f.name in aggressive_funcs else "     "
             click.echo(
-                f"     • {f.name:<35} score={f.score:>2}  "
+                f"     {tag} • {f.name:<35} score={f.score:>2}  "
                 f"({', '.join(f.reasons[:3])})"
             )
 
-        # Gera .pyx raw
-        pyx_path = ignite._forge.generate(scan)
+        # Gera .pyx passando funções em modo agressivo
+        pyx_path = ignite._forge.generate(scan, aggressive_funcs=aggressive_funcs)
         if not pyx_path:
             click.echo(f"   {Fore.RED}✘{Style.RESET_ALL} {fname}: forge falhou")
             continue
@@ -694,8 +810,36 @@ def _run_hybrid_with_optimizer(target, root, force):
                 f"   {Fore.GREEN}✔{Style.RESET_ALL} {fname} → {module_name} "
                 f"({len(scan.candidates)} funcs, score={scan.total_score})"
             )
+            # ── Avaliação pós-compilação ──────────────────────────────────────
+            if registry is not None:
+                try:
+                    from ..tools.vulcan.performance_watcher import PerformanceWatcher
+                    watcher = PerformanceWatcher(
+                        project_root = root,
+                        foundry      = ignite.foundry,   # .pyx intermediários
+                        bin_dir      = ignite.bin_dir,   # .so/.pyd compilados
+                    )
+                    wr = watcher.evaluate(py_file, module_name, update_registry=True)
+                    wr.render_cli()
+                    total_regressions += len(wr.regressions)
+                    total_promoted    += wr.registry_summary.get("promoted", 0)
+                except Exception:
+                    pass
         else:
             click.echo(f"   {Fore.RED}✘{Style.RESET_ALL} {fname}: {str(err)[:80]}")
+
+    # ── Resumo final ──────────────────────────────────────────────────────────
+    if registry is not None and (total_excluded or total_aggressive or total_regressions):
+        click.echo(f"\n{Fore.MAGENTA}  ⬡ REGRESSION REGISTRY — resumo desta compilação:{Style.RESET_ALL}")
+        if total_excluded:
+            click.echo(f"    {Fore.RED}Funções excluídas (permanente)  : {total_excluded}{Style.RESET_ALL}")
+        if total_aggressive:
+            click.echo(f"    {Fore.YELLOW}Funções retry-agressivo         : {total_aggressive}{Style.RESET_ALL}")
+        if total_regressions:
+            click.echo(f"    {Fore.RED}Novas regressões detectadas     : {total_regressions}{Style.RESET_ALL}")
+        if total_promoted:
+            click.echo(f"    {Fore.GREEN}Funções promovidas (recuperadas): {total_promoted}{Style.RESET_ALL}")
+        click.echo(f"    {Fore.CYAN}Gerencie com: doxoade vulcan regression{Style.RESET_ALL}")
 
     # Resumo do optimizer
     if opt_summary:
@@ -1047,15 +1191,24 @@ def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, keep_temp):
               help='Speedup mínimo para considerar ganho real (regressões abaixo são marcadas).')
 @click.option('--save',       is_flag=True,
               help='Salva resultado em .doxoade/vulcan/bench_results.json (feedback loop).')
-def vulcan_benchmark(path, runs, output_json, min_speedup, save):
+@click.option('--learn',      is_flag=True,
+              help='Atualiza o RegressionRegistry com regressões detectadas. '
+                   'O próximo ignite --hybrid compilará com estratégia alternativa '
+                   'ou excluirá funções que regrediram repetidamente.')
+def vulcan_benchmark(path, runs, output_json, min_speedup, save, learn):
     """Mede speedup real Python vs Cython das funções compiladas.
 
     Compara execução das funções originais Python com os binários
     gerados pelo --hybrid, exibindo speedup real por função.
     Funções com speedup < --min-speedup são marcadas como REGRESSÃO.
 
+    Com --learn, regressões são registradas automaticamente:
+      1ª regressão → retry com mais directives Cython no próximo ignite
+      2ª regressão → função excluída permanentemente da compilação
+
     Exemplos:
       doxoade vulcan benchmark doxoade/tools/
+      doxoade vulcan benchmark doxoade/tools/ --learn --min-speedup 1.15
       doxoade vulcan benchmark doxoade/tools/analysis.py --runs 500
       doxoade vulcan benchmark doxoade/tools/ --json > bench.json
       doxoade vulcan benchmark doxoade/tools/ --save --min-speedup 1.2
@@ -1090,7 +1243,6 @@ def vulcan_benchmark(path, runs, output_json, min_speedup, save):
                 / ".doxoade" / "vulcan" / "bench_results.json"
             )
             bench_path.parent.mkdir(parents=True, exist_ok=True)
-            # Serializa results (lista de FileBenchResult dataclasses)
             import dataclasses
             serializable = _json.loads(
                 _json.dumps(results, default=lambda o: dataclasses.asdict(o) if dataclasses.is_dataclass(o) else str(o))
@@ -1102,6 +1254,31 @@ def vulcan_benchmark(path, runs, output_json, min_speedup, save):
             click.echo(
                 f"{Fore.CYAN}  Dica: use estes dados para excluir regressões no próximo --hybrid{Style.RESET_ALL}"
             )
+
+        # ── Integração com RegressionRegistry ────────────────────────────────
+        if learn and results:
+            from ..tools.vulcan.regression_registry import RegressionRegistry
+            registry = RegressionRegistry(root)
+            summary  = registry.update_from_benchmark(results, min_speedup=min_speedup)
+
+            click.echo(
+                f"\n{Fore.MAGENTA}{Style.BRIGHT}  ⬡ REGRESSION REGISTRY atualizado{Style.RESET_ALL}"
+            )
+            click.echo(
+                f"  {Fore.RED}Excluídas      : {summary['excluded']}{Style.RESET_ALL}  "
+                f"{Fore.YELLOW}Retry-Agressivo: {summary['retry_aggressive']}{Style.RESET_ALL}  "
+                f"{Fore.GREEN}Promovidas     : {summary['promoted']}{Style.RESET_ALL}"
+            )
+            if summary["excluded"]:
+                click.echo(
+                    f"\n  {Fore.RED}⚠ {summary['excluded']} função(ões) permanentemente excluída(s).{Style.RESET_ALL}"
+                    f"\n  {Fore.CYAN}  Para resetar: doxoade vulcan regression --reset{Style.RESET_ALL}"
+                )
+            if summary["retry_aggressive"]:
+                click.echo(
+                    f"\n  {Fore.YELLOW}⬡ {summary['retry_aggressive']} função(ões) marcadas para retry-agressivo.{Style.RESET_ALL}"
+                    f"\n  {Fore.CYAN}  Execute: doxoade vulcan ignite --hybrid{Style.RESET_ALL}"
+                )
 
     except Exception as e:
         _print_vulcan_forensic("BENCHMARK", e)

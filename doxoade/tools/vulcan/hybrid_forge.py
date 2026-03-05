@@ -83,6 +83,22 @@ except Exception:
     pass
 """
 
+_PYX_HEADER_AGGRESSIVE = """\
+# cython: language_level=3, boundscheck=False, wraparound=False
+# cython: initializedcheck=False, cdivision=True, nonecheck=False
+# cython: overflowcheck=False, infer_types=True, embedsignature=False
+# --- VULCAN RETRY-AGGRESSIVE: compilação com máximas otimizações Cython ---
+import sys as _sys
+import os as _os
+import re as _re
+import ast as _ast
+import json as _json
+try:
+    from typing import *
+except Exception:
+    pass
+"""
+
 _PYX_STUB = """\
 class _Stub:
     def __init__(self, *a, **kw): pass
@@ -351,61 +367,84 @@ class HybridForge:
         self.foundry = Path(foundry_dir)
         self.foundry.mkdir(parents=True, exist_ok=True)
 
-    def generate(self, scan_result: FileScanResult) -> Optional[Path]:
+    def generate(self, scan_result, aggressive_funcs=None):
         """
-        Gera o .pyx para as funções elegíveis do arquivo escaneado.
+        Gera o .pyx para as funções candidatas do arquivo escaneado.
 
-        Retorna o Path do .pyx gerado, ou None em falha.
-        NÃO chama optimize_pyx_file — sem risco de UnboundLocalError.
-        PASC-6: nunca levanta exceção para o chamador.
+        Com aggressive_funcs, funções presentes nesse conjunto recebem
+        directives Cython extras que desabilitam checagens de runtime.
+
+        Retorna Path do .pyx gerado, ou None em falha.
         """
+        import re
+        import hashlib
+        from pathlib import Path
+
         if not scan_result.candidates:
             return None
 
         abs_path    = Path(scan_result.file_path).resolve()
         path_hash   = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
-        
-        import re
-        _safe_stem = re.sub(r'[^a-zA-Z0-9_]', '_', abs_path.stem)
-        module_name = f"v_{_safe_stem}_{path_hash}"
-
-        # Nome de variável diferente de 'pyx_path' para zero ambiguidade
+        safe_stem   = re.sub(r'[^a-zA-Z0-9_]', '_', abs_path.stem)
+        module_name = f"v_{safe_stem}_{path_hash}"
         output_file = self.foundry / f"{module_name}.pyx"
 
         try:
-            pyx_content = self._build_pyx(scan_result.candidates, module_name)
-            output_file.write_text(pyx_content, encoding='utf-8')
-            return output_file   # retorna Path limpo
+            pyx_content = self._build_pyx(
+                scan_result.candidates,
+                module_name,
+                aggressive_funcs=aggressive_funcs or frozenset(),
+            )
+            output_file.write_text(pyx_content, encoding="utf-8")
+            return output_file
         except Exception as exc:
-            print(f"\033[31m[HYBRIDFORGE] Erro ao gerar .pyx para "
-                  f"{abs_path.name}: {exc}\033[0m")
+            print(f"\033[31m[HYBRIDFORGE] Erro ao gerar .pyx para {abs_path.name}: {exc}\033[0m")
             return None
 
-    def _build_pyx(self, candidates: list[FunctionScore], module_name: str) -> str:
-        """Monta o conteúdo completo do .pyx."""
+
+    def _build_pyx(self, candidates, module_name, aggressive_funcs=frozenset()):
+        """
+        Constrói o conteúdo completo do .pyx.
+
+        Se qualquer candidato está em aggressive_funcs, o header global
+        usa _PYX_HEADER_AGGRESSIVE (máximas otimizações).
+        Cada função marcada recebe também uma tag de comentário [AGGRESSIVE].
+        """
+        has_aggressive = bool(aggressive_funcs & {f.name for f in candidates})
+        header         = _PYX_HEADER_AGGRESSIVE if has_aggressive else _PYX_HEADER
+
         sections = [
-            _PYX_HEADER,
+            header,
             _PYX_STUB,
-            f"# Módulo: {module_name}",
-            f"# Funções compiladas: {len(candidates)}",
-            f"# Scores: {', '.join(f'{f.name}={f.score}' for f in candidates)}",
+            f"# Módulo     : {module_name}",
+            f"# Compilados : {len(candidates)}",
+            f"# Agressivos : {', '.join(aggressive_funcs & {f.name for f in candidates}) or 'nenhum'}",
             "",
         ]
 
-        for func_score in candidates:
-            transformed = self._transform_function(func_score)
+        for fs in candidates:
+            is_aggressive = fs.name in aggressive_funcs
+            transformed   = self._transform_function(fs, aggressive=is_aggressive)
             if transformed:
                 sections.append(transformed)
                 sections.append("")
 
-        return '\n'.join(sections)
+        return "\n".join(sections)
 
-    def _transform_function(self, fs: FunctionScore) -> Optional[str]:
+
+    def _transform_function(self, fs, aggressive=False):
         """
-        Transforma o source Python para forma compatível com Cython.
-        Remove anotações de tipo, decoradores, renomeia com _vulcan_optimized.
-        PASC-6: retorna None em qualquer falha.
+        Converte source Python em Cython.
+
+        Com aggressive=True:
+          - Adiciona comentário [AGGRESSIVE] no header da função
+          - cdivision e nonecheck já estão cobertos pelo header de módulo
+          - (expansão futura: injetar `cdef` nos locais numéricos)
+
+        Retorna None em qualquer falha (PASC-6 safe).
         """
+        import ast
+
         if not fs.source:
             return None
 
@@ -418,18 +457,22 @@ class HybridForge:
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
 
+            # Remove decoradores e anotações (Cython não aceita alguns)
             node.decorator_list = []
             node.returns        = None
-            for arg in (*node.args.args,
-                        *node.args.posonlyargs,
-                        *node.args.kwonlyargs):
+
+            for arg in (
+                *node.args.args,
+                *node.args.posonlyargs,
+                *node.args.kwonlyargs,
+            ):
                 arg.annotation = None
             if node.args.vararg:
                 node.args.vararg.annotation = None
             if node.args.kwarg:
                 node.args.kwarg.annotation  = None
 
-            if not node.name.endswith('_vulcan_optimized'):
+            if not node.name.endswith("_vulcan_optimized"):
                 node.name = f"{node.name}_vulcan_optimized"
 
             ast.fix_missing_locations(node)
@@ -439,11 +482,16 @@ class HybridForge:
             except Exception:
                 return None
 
-            header = (f"# origem: {fs.name}  |  score: {fs.score}  "
-                      f"|  razões: {', '.join(fs.reasons)}")
-            return f"{header}\n{code}"
+            mode_tag = "[AGGRESSIVE]" if aggressive else "[STANDARD]"
+            comment  = (
+                f"# {fs.name}  score={fs.score}  {mode_tag}  "
+                f"razões: {', '.join(fs.reasons)}"
+            )
+
+            return f"{comment}\n{code}"
 
         return None
+
 
 
 # ---------------------------------------------------------------------------
@@ -468,27 +516,77 @@ class HybridIgnite:
 
     def run(
         self,
-        target:      str | Path,
-        force:       bool = False,
-        on_progress       = None,
-    ) -> dict:
-        """Escaneia target, compila funções elegíveis sem optimizer."""
+        target,
+        force      = False,
+        on_progress = None,
+        registry   = None,    # RegressionRegistry | None
+        watch      = True,    # True = mede performance após compilar
+    ):
+        """
+        Escaneia target e compila funções elegíveis.
+
+        registry (RegressionRegistry):
+          • Funções com status 'excluded'         → removidas dos candidatos
+          • Funções com status 'retry_aggressive' → compiladas com header agressivo
+          • Após compilar cada módulo             → PerformanceWatcher mede e
+                                                    atualiza o registry
+
+        watch (bool):
+          Se True, chama _post_compile_watch() após cada compilação bem-sucedida.
+        """
+        from pathlib import Path
+
         target_path = Path(target).resolve()
         files       = self._collect_files(target_path)
 
         report = {
-            "files_scanned":       0,
-            "files_with_hits":     0,
-            "functions_compiled":  0,
-            "functions_skipped":   0,
-            "total_score":         0,
-            "modules_generated":   [],
-            "errors":              [],
+            "files_scanned":        0,
+            "files_with_hits":      0,
+            "functions_compiled":   0,
+            "functions_skipped":    0,
+            "functions_excluded":   0,
+            "functions_aggressive": 0,
+            "total_score":          0,
+            "modules_generated":    [],
+            "errors":               [],
+            "watch_results":        [],
         }
 
         for py_file in files:
             report["files_scanned"] += 1
             scan = self._scanner.scan(str(py_file))
+
+            if not scan.candidates:
+                report["functions_skipped"] += len(scan.skipped)
+                continue
+
+            # ── Filtra via registry ───────────────────────────────────────────────
+            aggressive_funcs = frozenset()
+
+            if registry is not None:
+                excluded         = registry.excluded_funcs_for_file(str(py_file))
+                aggressive_funcs = registry.aggressive_funcs_for_file(str(py_file))
+
+                before          = len(scan.candidates)
+                scan.candidates = [c for c in scan.candidates if c.name not in excluded]
+                excl_n          = before - len(scan.candidates)
+
+                report["functions_excluded"]  += excl_n
+                report["functions_aggressive"] += len(
+                    [c for c in scan.candidates if c.name in aggressive_funcs]
+                )
+
+                if excl_n:
+                    self._log(on_progress,
+                        f"   \033[31m↷ {py_file.name}: "
+                        f"{excl_n} função(ões) excluída(s) pelo registry\033[0m"
+                    )
+                agg_active = aggressive_funcs & {c.name for c in scan.candidates}
+                if agg_active:
+                    self._log(on_progress,
+                        f"   \033[35m⬡ {py_file.name}: "
+                        f"retry-agressivo → {', '.join(sorted(agg_active))}\033[0m"
+                    )
 
             if not scan.candidates:
                 report["functions_skipped"] += len(scan.skipped)
@@ -501,7 +599,8 @@ class HybridIgnite:
 
             self._log_progress(on_progress, scan)
 
-            generated = self._forge.generate(scan)   # retorna Path ou None
+            # ── Gera e compila .pyx ───────────────────────────────────────────────
+            generated = self._forge.generate(scan, aggressive_funcs=aggressive_funcs)
             if not generated:
                 report["errors"].append(f"forge falhou: {py_file.name}")
                 continue
@@ -509,10 +608,6 @@ class HybridIgnite:
             module_name = generated.stem
             report["modules_generated"].append(module_name)
 
-            from .optimizer_pyx import optimize_pyx_file
-            optimized_pyx = optimize_pyx_file(generated)
-
-            module_name = optimized_pyx.stem
             ok, err = self._compile(module_name)
 
             if ok:
@@ -520,6 +615,11 @@ class HybridIgnite:
                     f"   \033[32m✔\033[0m {py_file.name} → {module_name} "
                     f"({len(scan.candidates)} funcs, score={scan.total_score})"
                 )
+                # ── Avaliação pós-compilação ──────────────────────────────────────
+                if watch and registry is not None:
+                    wr = self._post_compile_watch(py_file, module_name, registry)
+                    if wr:
+                        report["watch_results"].append(wr)
             else:
                 report["errors"].append(f"{module_name}: {err}")
                 self._log(on_progress,
@@ -528,6 +628,28 @@ class HybridIgnite:
 
         self._print_summary(report, on_progress)
         return report
+
+
+    def _post_compile_watch(self, py_file, module_name, registry):
+        """
+        Chama o PerformanceWatcher para medir a performance real
+        após uma compilação bem-sucedida e atualizar o registry.
+
+        Retorna WatchResult ou None em caso de erro.
+        """
+        try:
+            from .performance_watcher import PerformanceWatcher
+
+            watcher = PerformanceWatcher(
+                project_root = self.root,
+                foundry      = self.foundry,   # .pyx intermediários
+                bin_dir      = self.bin_dir,   # .so/.pyd compilados
+            )
+            wr = watcher.evaluate(py_file, module_name, update_registry=True)
+            return wr
+        except Exception:
+            return None
+
 
     def _compile(self, module_name: str) -> tuple[bool, Optional[str]]:
         """PASC-6: retorna (False, erro) em vez de levantar exceção."""
