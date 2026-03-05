@@ -186,9 +186,14 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
                     return None
 
             # ── GUARD: bin/ só para doxoade.* ───────────────────────────────────
-            if not fullname.startswith("doxoade."):
-                self._spec_cache[fullname] = False
-                return None
+            bin_path = self._find_project_binary(py_path)
+            if bin_path and self.is_binary_valid_for_host(bin_path) and not self._is_stale(...):
+                spec = self._make_spec(fullname, py_path, str(bin_path))
+                return spec
+                
+#            if not fullname.startswith("doxoade."):
+#                self._spec_cache[fullname] = False
+#                return None
 
             # ── BIN: arquivos de projeto compilados com vulcan ignite ───────────
             py_path = self._resolve_py_path(fullname, path)

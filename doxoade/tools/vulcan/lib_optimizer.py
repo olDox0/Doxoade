@@ -12,8 +12,22 @@ Transformações (ordenadas do mais para o menos seguro):
   2. DeadBranchEliminator    — elimina `if False/True/0/1:`, `while False:`
   3. UnusedImportRemover     — remove `import X` nunca referenciado
   4. ImportCombiner          — funde imports consecutivos numa única instrução
-  5. GlobalImportAliaser     — aplica alias (as Ia1) em imports de nomes longos
+  5. GlobalImportAliaser     — aplica alias (as _I1) em imports de nomes longos
   6. SafeLocalNameMinifier   — renomeia variáveis e aliases de forma segura
+
+Regras de segurança:
+  - Nunca renomeia nomes públicos (nível de módulo)
+  - Nunca renomeia parâmetros de função
+  - Nunca renomeia se a função usa locals()/vars()/exec()/eval()
+  - Nunca renomeia nomes que aparecem como string literal na mesma função
+    (proteção contra getattr(obj, 'varname'))
+  - Nunca entra em funções aninhadas ao minificar
+  - Revert automático se o resultado falhar no parse de validação
+
+Compliance:
+  OSL-4: cada classe tem responsabilidade única
+  OSL-5: optimize_file() nunca levanta exceção — revert em falha
+  PASC-6: fail-graceful em qualquer etapa
 """
 
 from __future__ import annotations
@@ -27,7 +41,7 @@ from typing import Optional
 
 try:
     _ast_unparse = ast.unparse
-except AttributeError:
+except AttributeError:  # Python < 3.9
     try:
         import astor
         _ast_unparse = astor.to_source
@@ -40,6 +54,7 @@ except AttributeError:
 
 @dataclass
 class FileOptReport:
+    """Resultado da otimização de um arquivo .py."""
     path:                str
     original_bytes:      int   = 0
     final_bytes:         int   = 0
@@ -64,9 +79,50 @@ class FileOptReport:
 # ---------------------------------------------------------------------------
 
 class LibOptimizer:
+    """
+    Aplica pipeline de otimizações AST em todos os .py de um diretório.
+
+    Uso:
+        optimizer = LibOptimizer()
+        stats = optimizer.optimize_directory(work_copy_path)
+    """
+
+    # Chamadas que acessam escopo local por nome → tornam renomeação insegura
     _SCOPE_ACCESSORS = frozenset({'locals', 'vars', 'exec', 'eval', 'globals', 'dir', 'inspect'})
+#    _SCOPE_ACCESSORS = frozenset({'locals', 'vars', 'exec', 'eval', 'globals',
+#                                   'dir', 'inspect'})
+
+    def _uses_structural_meta(self, tree: ast.AST) -> bool:
+        """
+        Detecta metaprogramação estrutural incompatível com otimização agressiva.
+        """
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Attribute) and n.attr in {
+                '_fields',
+                '__dataclass_fields__',
+                '__slots__',
+            }:
+                return True
+
+            if isinstance(n, ast.Call):
+                if isinstance(n.func, ast.Name) and n.func.id in {
+                    'namedtuple',
+                    'dataclass',
+                }:
+                    return True
+
+            if isinstance(n, ast.Decorator):
+                return True
+
+        return False
 
     def optimize_file(self, path: Path) -> FileOptReport:
+        """
+        Otimiza um único arquivo .py in-place (cópia de trabalho).
+
+        PASC-6: nunca levanta exceção. Em qualquer falha, o arquivo
+        original é restaurado e o relatório marca skipped=True.
+        """
         report = FileOptReport(path=str(path))
 
         try:
@@ -85,7 +141,13 @@ class LibOptimizer:
             report.skip_reason = f"parse error: {exc}"
             return report
 
+        # Detecta uso de acessores de escopo (desativa LocalNameMinifier)
         has_scope_access = self._has_scope_accessor(tree)
+
+        uses_structural_meta = any(
+            isinstance(n, ast.Attribute) and n.attr == "_fields"
+            for n in ast.walk(tree)
+        )
 
         try:
             # 1. Remove docstrings
@@ -103,42 +165,44 @@ class LibOptimizer:
             tree = ui.process(tree)
             report.imports_removed = ui.count
 
-            # 4. Combina imports consecutivos
-            tree = ImportCombiner().visit(tree)
+            # 4. Minifica nomes locais (se seguro)
+            if not uses_structural_meta:
+                tree = ImportCombiner().visit(tree)
 
-            # 5. Minifica nomes globais de imports
-            tree = GlobalImportAliaser().visit(tree)
+            # 5. Minifica nomes globais de imports (APENAS SE SEGURO)
+            if not uses_structural_meta:
+                tree = GlobalImportAliaser().visit(tree)
 
-            # 6. Minifica nomes locais de forma 100% segura
-            if not has_scope_access:
-                mn = SafeLocalNameMinifier()
+            # 6. Minifica nomes locais (se seguro)
+            uses_structural_meta = self._uses_structural_meta(tree)
+
+            if not has_scope_access and not uses_structural_meta:
+                mn = LocalNameMinifier()
                 tree = mn.visit(tree)
                 report.locals_minified = mn.count
 
             ast.fix_missing_locations(tree)
 
+            # Valida o resultado antes de sobrescrever
             if not _ast_unparse:
                 raise RuntimeError("ast.unparse indisponível.")
 
+            # Gera o texto otimizado
             optimized = _ast_unparse(tree)
-
-            # 7. Fusão Horizontal Blindada (Se falhar, degrada graciosamente)
-            try:
-                compacted = self.compact_lines_safely(optimized)
-                ast.parse(compacted)  # Valida sintaxe antes de confirmar
-                optimized = compacted
-            except SyntaxError as e:
-                print(f"\n\033[33m[DEBUG] Compactação horizontal ignorada em {path.name}: {e}\033[0m")
             
-            # Validação final de segurança
+            # 7. Aplica a compactação horizontal segura
+            optimized = self.compact_lines_safely(optimized)
+
+            # Valida o código string final — se falhar, vai pro except e restaura original
             ast.parse(optimized)  
 
             path.write_text(optimized, encoding='utf-8')
             report.final_bytes = len(optimized.encode('utf-8'))
 
         except Exception as exc:
+            # Revert: restaura o fonte original
             import traceback
-            print(f"\n\033[31m[ERRO CRÍTICO] Falha total em {path.name}: {exc}\033[0m")
+            print(f"\033[33m[DEBUG] Fallback ativado em {path.name}: {exc}\033[0m")
             try:
                 path.write_text(source, encoding='utf-8')
             except Exception:
@@ -150,7 +214,17 @@ class LibOptimizer:
         return report
 
     def optimize_directory(self, directory: Path) -> dict:
-        reports =[self.optimize_file(py_file) for py_file in sorted(directory.rglob('*.py'))]
+        """
+        Otimiza todos os .py do diretório recursivamente.
+        Retorna dicionário de estatísticas agregadas e lista de relatórios por arquivo.
+
+        Compatibilidade: retorna as chaves top-level esperadas por código legado
+        (files_processed, files_optimized, ...) e também um sub-dicionário 'summary'
+        e a lista detalhada 'files'.
+        """
+#        reports: list[FileOptReport] = []
+        reports = [self.optimize_file(py_file)
+                   for py_file in sorted(directory.rglob('*.py'))]
 
         summary = {
             'files_processed':   len(reports),
@@ -165,7 +239,10 @@ class LibOptimizer:
 
         return {**summary, 'summary': summary, 'files': [r.__dict__ for r in reports]}
 
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
     def _has_scope_accessor(self, tree: ast.AST) -> bool:
+        """True se o módulo usa calls que acessam locals por nome."""
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
                 name = _call_name(node)
@@ -175,22 +252,34 @@ class LibOptimizer:
 
     @staticmethod
     def compact_lines_safely(code: str) -> str:
+        """
+        Agrupa instruções simples na mesma linha com ';' 
+        aproveitando a previsibilidade absoluta do ast.unparse().
+        """
         lines = code.split('\n')
         if not lines: return ""
         
-        out_lines =[]
+        out_lines = []
         current_line = lines[0]
+        
         def get_indent(s): return len(s) - len(s.lstrip())
             
+        # Palavras que quebram o fluxo de mesma linha em Python
         compound_keywords = (
             'if ', 'for ', 'while ', 'def ', 'class ', 'try:', 'with ', 
             'elif ', 'else:', 'except', 'finally:', '@', 'async ', 'match ', 'case '
         )
         
+        in_multiline = False
+        
         for i in range(1, len(lines)):
             nxt = lines[i]
             if not nxt.strip():
                 continue
+                
+            # Guarda contra fatiamento de strings de multiplas linhas (docstrings etc)
+            if nxt.count('"""') % 2 != 0 or nxt.count("'''") % 2 != 0:
+                in_multiline = not in_multiline
                 
             curr_indent = get_indent(current_line)
             nxt_indent = get_indent(nxt)
@@ -199,13 +288,12 @@ class LibOptimizer:
             is_compound_nxt = nxt.lstrip().startswith(compound_keywords)
             ends_with_colon = current_line.rstrip().endswith(':')
             
-            # PROTEÇÃO ABSOLUTA: Ignora a concatenação se a linha envolver QUALQUER aspas.
-            # Evita fatiar docstrings ou strings multilinhas.
-            has_quotes = "'" in current_line or '"' in current_line or "'" in nxt or '"' in nxt
-            
-            if (curr_indent == nxt_indent and curr_indent > 0 and 
-                not has_quotes and not ends_with_colon and 
-                not is_compound_curr and not is_compound_nxt):
+            # O Motor de Fusão Segura
+            has_triple = '"""' in current_line or "'''" in current_line or '"""' in nxt or "'''" in nxt
+            if (curr_indent == nxt_indent and curr_indent > 0 and
+                not has_triple and not ends_with_colon and
+                not is_compound_curr and not is_compound_nxt and
+                curr_indent <= 8):
                 current_line = current_line + "; " + nxt.lstrip()
             else:
                 out_lines.append(current_line)
@@ -213,10 +301,10 @@ class LibOptimizer:
                 
         out_lines.append(current_line)
         return "\n".join(out_lines)
-
+        
 
 # ---------------------------------------------------------------------------
-# Visitantes AST
+# 1. DocstringRemover
 # ---------------------------------------------------------------------------
 
 class DocstringRemover(ast.NodeTransformer):
@@ -235,6 +323,10 @@ class DocstringRemover(ast.NodeTransformer):
     def visit_ClassDef(self, node): self.generic_visit(node); return self._strip(node)
 
 
+# ---------------------------------------------------------------------------
+# 2. DeadBranchEliminator
+# ---------------------------------------------------------------------------
+
 class DeadBranchEliminator(ast.NodeTransformer):
     def __init__(self): self.count = 0
     def _always_false(self, test): return isinstance(test, ast.Constant) and not bool(test.value) and test.value is not True
@@ -249,6 +341,10 @@ class DeadBranchEliminator(ast.NodeTransformer):
         if self._always_false(node.test): self.count += 1; return None
         return node
 
+
+# ---------------------------------------------------------------------------
+# 3. UnusedImportRemover
+# ---------------------------------------------------------------------------
 
 class UnusedImportRemover:
     _SIDE_EFFECT_KEEP = frozenset({'__future__', 'logging', 'warnings', 'traceback', 'atexit', 'signal', 'site', 'antigravity', 'this'})
@@ -265,8 +361,12 @@ class UnusedImportRemover:
         for node in ast.walk(tree):
             if isinstance(node, ast.Name): names.add(node.id)
             elif isinstance(node, ast.Attribute): names.add(node.attr)
-            elif isinstance(node, ast.Constant) and isinstance(node.value, str): names.add(node.value)
+            elif (isinstance(node, ast.Constant)
+                  and isinstance(node.value, str)
+                  and node.value.isidentifier()):
+                names.add(node.value)
         return names
+
 
 class _ImportTransformer(ast.NodeTransformer):
     def __init__(self, used_names, side_effects):
@@ -282,7 +382,6 @@ class _ImportTransformer(ast.NodeTransformer):
         if not kept: return None
         node.names = kept
         return node
-
 
 class ImportCombiner(ast.NodeTransformer):
     def _combine(self, body):
@@ -308,6 +407,178 @@ class ImportCombiner(ast.NodeTransformer):
                 setattr(node, field, self.visit(old_value))
         return node
 
+# ---------------------------------------------------------------------------
+# 4. LocalNameMinifier
+# ---------------------------------------------------------------------------
+
+class LocalNameMinifier(ast.NodeTransformer):
+    """
+    Minifica nomes de variáveis locais em funções simples (sem escopo aninhado).
+
+    Critérios de elegibilidade da função:
+      - Não contém FunctionDef / AsyncFunctionDef / Lambda aninhados
+      - Não usa chamadas que acessam locals() pelo nome (verificado no orquestrador)
+
+    Critérios de elegibilidade da variável:
+      - Tem contexto Store dentro da função (é local)
+      - Não é parâmetro da função
+      - Não é `self` / `cls` / dunder
+      - Nome original tem > 2 caracteres (nomes curtos já são "minificados")
+      - Não aparece como string literal dentro da função
+        (ex: getattr(obj, 'var_name') ficaria quebrado)
+
+    Nomes gerados: _a, _b, ..., _z, _aa, _ab, ..., _az, _ba, ...
+    """
+
+    # Builtins e nomes especiais que NUNCA devem ser sombreados
+    _PROTECTED = frozenset({
+        'self', 'cls', 'True', 'False', 'None',
+        'len', 'range', 'enumerate', 'zip', 'map', 'filter', 'sorted',
+        'reversed', 'sum', 'min', 'max', 'abs', 'round', 'any', 'all',
+        'isinstance', 'issubclass', 'type', 'id', 'hash', 'repr', 'str',
+        'int', 'float', 'bool', 'list', 'dict', 'set', 'tuple', 'bytes',
+        'bytearray', 'memoryview', 'object', 'super',
+        'hasattr', 'getattr', 'setattr', 'delattr', 'vars', 'dir',
+        'open', 'print', 'input', 'format', 'bin', 'hex', 'oct',
+        'chr', 'ord', 'iter', 'next', 'callable',
+        'Exception', 'ValueError', 'TypeError', 'KeyError', 'IndexError',
+        'AttributeError', 'StopIteration', 'RuntimeError', 'OSError',
+        'IOError', 'FileNotFoundError', 'ImportError', 'NameError',
+        'NotImplementedError', 'OverflowError', 'ZeroDivisionError',
+        'BaseException', 'GeneratorExit', 'SystemExit', 'KeyboardInterrupt',
+    })
+
+    def __init__(self):
+        self.count = 0
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
+        # Processa funções aninhadas primeiro (com seu próprio escopo)
+        self.generic_visit(node)
+        # Tenta minificar esta função
+        self._minify(node)
+        return node
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+    def _minify(self, func: ast.FunctionDef):
+        # Guard: não minifica funções que contêm escopo aninhado
+        for child in ast.walk(func):
+            if child is func:
+                continue
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                   ast.Lambda)):
+                return
+
+        # Coleta nomes protegidos: parâmetros + constantes de classe
+        protected = set(self._PROTECTED)
+        for arg in (func.args.args + func.args.posonlyargs
+                    + func.args.kwonlyargs):
+            protected.add(arg.arg)
+        if func.args.vararg:
+            protected.add(func.args.vararg.arg)
+        if func.args.kwarg:
+            protected.add(func.args.kwarg.arg)
+
+        # Nomes que aparecem como strings literais na função
+        # → renomear quebraria getattr(obj, 'name')
+        string_refs: set[str] = set()
+        for child in ast.walk(func):
+            if isinstance(child, ast.Constant) and isinstance(child.value, str):
+                string_refs.add(child.value)
+
+        # Coleta variáveis locais elegíveis para renomeação
+        candidates: set[str] = set()
+        for child in ast.walk(func):
+            if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store):
+                name = child.id
+                if (name not in protected
+                        and not name.startswith('_')      # evita vars "já curtas"
+                        and not name.startswith('__')
+                        and name not in string_refs
+                        and len(name) > 2):
+                    candidates.add(name)
+
+        if not candidates:
+            return
+
+        # Gera mapeamento deterministico (sorted → builds are reproducible)
+        existing_names = self._all_names_in(func)
+        mapping: dict[str, str] = {}
+        counter = 0
+        for original in sorted(candidates):
+            new = self._gen_name(counter)
+            # Evita colisão com nomes já existentes
+            while new in existing_names or new in protected:
+                counter += 1
+                new = self._gen_name(counter)
+            mapping[original] = new
+            existing_names.add(new)
+            counter += 1
+
+        if not mapping:
+            return
+
+        # Aplica renomeação DENTRO da função (generic_visit desce direto
+        # no corpo sem acionar visit_FunctionDef no nó raiz, que retornaria
+        # sem processar filhos — os nós aninhados ainda são protegidos pelo
+        # visit_FunctionDef do renamer).
+        _NameRenamer(mapping).generic_visit(func)
+        self.count += len(mapping)
+
+    @staticmethod
+    def _all_names_in(func: ast.FunctionDef) -> set[str]:
+        """Coleta todos os nomes referenciados na função (para evitar colisão)."""
+        names: set[str] = set()
+        for child in ast.walk(func):
+            if isinstance(child, ast.Name):
+                names.add(child.id)
+            elif isinstance(child, ast.arg):
+                names.add(child.arg)
+        return names
+
+    @staticmethod
+    def _gen_name(n: int) -> str:
+        """
+        Gera nomes curtos com prefixo underscore:
+          0 → _a, 1 → _b, ..., 25 → _z, 26 → _aa, 27 → _ab, ...
+        O underscore evita conflito com builtins de letra única (e, f, i…).
+        """
+        chars = 'abcdefghijklmnopqrstuvwxyz'
+        result = ''
+        n += 1
+        while n > 0:
+            n -= 1
+            result = chars[n % 26] + result
+            n //= 26
+        return f'_{result}'
+
+
+class _NameRenamer(ast.NodeTransformer):
+    """
+    Visitor que renomeia Name nodes de acordo com um mapeamento.
+    Não descende em FunctionDef/Lambda aninhados (escopo separado).
+    """
+
+    def __init__(self, mapping: dict[str, str]):
+        self._m = mapping
+
+    def visit_Name(self, node: ast.Name) -> ast.Name:
+        if node.id in self._m:
+            node.id = self._m[node.id]
+        return node
+
+    def visit_arg(self, node: ast.arg) -> ast.arg:
+        # Parâmetros não são renomeados — já protegidos pelo minifier
+        return node
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
+        # Não desce em funções aninhadas (escopo próprio)
+        return node
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+    def visit_Lambda(self, node: ast.Lambda) -> ast.Lambda:
+        return node
 
 class GlobalImportAliaser(ast.NodeTransformer):
     def __init__(self):
@@ -320,10 +591,15 @@ class GlobalImportAliaser(ast.NodeTransformer):
         return alias
 
     def visit_ImportFrom(self, node):
+        # NÃO aliasar imports em módulos de framework
+        if getattr(node, "_framework_safe", False):
+            return node
+
         for alias in node.names:
-            if alias.name == '*': continue
+            if alias.name == '*':
+                continue
             orig = alias.asname or alias.name
-            if len(orig) > 4: 
+            if len(orig) > 6:
                 new_alias = self._get_alias()
                 alias.asname = new_alias
                 self.import_map[orig] = new_alias
@@ -339,10 +615,13 @@ class GlobalImportAliaser(ast.NodeTransformer):
         return node
 
     def visit_Name(self, node):
+        # NÃO reescrever Name se estiver em modo framework-safe
+        if getattr(node, "_framework_safe", False):
+            return node
+
         if node.id in self.import_map:
             node.id = self.import_map[node.id]
         return node
-
 
 class SafeLocalNameMinifier(ast.NodeTransformer):
     def __init__(self):
@@ -391,71 +670,17 @@ class SafeLocalNameMinifier(ast.NodeTransformer):
                     if name not in self.excluded:
                         self.local_vars.add(name)
 
-        def visit_FunctionDef(self, node): pass
-        def visit_AsyncFunctionDef(self, node): pass
-        def visit_ClassDef(self, node): pass
-        def visit_Lambda(self, node): pass
-        def visit_GeneratorExp(self, node): pass
-        def visit_ListComp(self, node): pass
-        def visit_DictComp(self, node): pass
-        def visit_SetComp(self, node): pass
-
-    def visit_FunctionDef(self, node):
-        excluded = set()
-        args = node.args
-        for arg in args.args + getattr(args, 'kwonlyargs',[]) + getattr(args, 'posonlyargs',[]):
-            excluded.add(arg.arg)
-        if args.vararg: excluded.add(args.vararg.arg)
-        if args.kwarg: excluded.add(args.kwarg.arg)
-
-        collector = self._VarCollector(excluded)
-        for stmt in node.body:
-            collector.visit(stmt)
-
-        rename_map = {}
-        if not collector.is_unsafe:
-            safe_targets = collector.local_vars - collector.globals_nonlocals
-            for var in sorted(safe_targets):
-                rename_map[var] = next(self._name_generator)
-            self.count += len(rename_map)
-
-        self.scope_maps.append(rename_map)
-        node.body =[self.visit(stmt) for stmt in node.body]
-        self.scope_maps.pop()
-        return node
-
-    visit_AsyncFunctionDef = visit_FunctionDef
-
-    def visit_Name(self, node):
-        if self.scope_maps:
-            current_map = self.scope_maps[-1]
-            if node.id in current_map:
-                node.id = current_map[node.id]
-        return node
-
-    def visit_Import(self, node):
-        if self.scope_maps:
-            current_map = self.scope_maps[-1]
-            for alias in node.names:
-                orig_name = alias.asname or alias.name
-                if orig_name in current_map and '.' not in alias.name:
-                    alias.asname = current_map[orig_name]
-        return node
-
-    def visit_ImportFrom(self, node):
-        if self.scope_maps:
-            current_map = self.scope_maps[-1]
-            for alias in node.names:
-                orig_name = alias.asname or alias.name
-                if orig_name in current_map:
-                    alias.asname = current_map[orig_name]
-        return node
-
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _call_name(node: ast.Call) -> Optional[str]:
+    """Extrai o nome de uma chamada de função de forma segura."""
     try:
-        if isinstance(node.func, ast.Name): return node.func.id
-        if isinstance(node.func, ast.Attribute): return node.func.attr
+        if isinstance(node.func, ast.Name):
+            return node.func.id
+        if isinstance(node.func, ast.Attribute):
+            return node.func.attr
     except Exception:
         pass
     return None

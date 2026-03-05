@@ -509,6 +509,10 @@ class HybridIgnite:
             module_name = generated.stem
             report["modules_generated"].append(module_name)
 
+            from .optimizer_pyx import optimize_pyx_file
+            optimized_pyx = optimize_pyx_file(generated)
+
+            module_name = optimized_pyx.stem
             ok, err = self._compile(module_name)
 
             if ok:
