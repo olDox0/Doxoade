@@ -1183,7 +1183,7 @@ def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, keep_temp):
 
 @vulcan_group.command('benchmark')
 @click.argument('path', required=False, type=click.Path(exists=True))
-@click.option('--runs',       default=200, type=int, show_default=True,
+@click.option('--runs',       default=10, type=int, show_default=True,
               help='Número de execuções por função para calcular média.')
 @click.option('--json',       'output_json', is_flag=True,
               help='Saída em JSON (para integração com CI).')
@@ -1191,10 +1191,8 @@ def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, keep_temp):
               help='Speedup mínimo para considerar ganho real (regressões abaixo são marcadas).')
 @click.option('--save',       is_flag=True,
               help='Salva resultado em .doxoade/vulcan/bench_results.json (feedback loop).')
-@click.option('--learn',      is_flag=True,
-              help='Atualiza o RegressionRegistry com regressões detectadas. '
-                   'O próximo ignite --hybrid compilará com estratégia alternativa '
-                   'ou excluirá funções que regrediram repetidamente.')
+@click.option('--learn/--no-learn', default=True,
+              help="Atualiza RegressionRegistry automaticamente (padrão: ativo).")
 def vulcan_benchmark(path, runs, output_json, min_speedup, save, learn):
     """Mede speedup real Python vs Cython das funções compiladas.
 

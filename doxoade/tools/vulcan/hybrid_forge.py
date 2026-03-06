@@ -304,6 +304,23 @@ class HybridScanner:
         eligible = score >= _MIN_SCORE
         src = self._extract_source(node, lines)
 
+        # Funções que são puro os.path.* / string ops não ganham com Cython
+        _PATH_ONLY_CALLS = frozenset({
+            'dirname', 'abspath', 'normpath', 'join', 'basename',
+            'splitext', 'exists', 'isfile', 'isdir',
+        })
+        path_calls = sum(
+            1 for child in ast.walk(node)
+            if isinstance(child, ast.Call)
+            and self._call_name(child) in _PATH_ONLY_CALLS
+        )
+        total_calls = sum(1 for child in ast.walk(node) if isinstance(child, ast.Call))
+
+        # Se >60% das calls são os.path.*, penaliza abaixo do limiar
+        if total_calls > 0 and path_calls / total_calls > 0.6:
+            return FunctionScore(node.name, node.lineno, 0, False,
+                                 ["os.path-heavy: já é C, sem ganho"])
+
         return FunctionScore(
             name     = node.name,
             lineno   = node.lineno,

@@ -3,7 +3,11 @@
 import os
 import ast
 from datetime import datetime
-from ..intelligence_utils import SemanticAnalyzer, NexusThothMapper, ChiefInsightVisitor
+try:
+    from ..intelligence_utils import SemanticAnalyzer, NexusThothMapper, ChiefInsightVisitor
+except ImportError:
+    from doxoade.commands.intelligence_utils import SemanticAnalyzer, NexusThothMapper, ChiefInsightVisitor
+
 CRITICAL_THRESHOLD = datetime(2026, 2, 14, 21, 0, 0)
 def analyze_file_chief(file_path: str, project_root: str, docs=False, source=False) -> dict:
     """Motor de Scan Nexus v100.1 (PASC 1.3 Compliance)."""
@@ -93,9 +97,8 @@ def _analyze_layer(level, b_path, curr_funcs):
         return report if report["lost_logic"] else None
     except Exception as e:
         import sys as _dox_sys, os as _dox_os
-        exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
-        f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        line_n = exc_tb.tb_lineno
+        _, _, exc_tb = _dox_sys.exc_info()
+        f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1] if exc_tb else "Unknown"
+        line_n = exc_tb.tb_lineno if exc_tb else 0
         print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: _analyze_layer\033[0m")
         print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
-        return None

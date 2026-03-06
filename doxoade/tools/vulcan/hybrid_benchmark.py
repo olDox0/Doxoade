@@ -13,7 +13,8 @@ Uso via CLI:
     doxoade vulcan benchmark doxoade/tools/ --json > bench_results.json
 
 Saída:
-    Tabela com: arquivo | função | Python ms | Cython ms | speedup | status
+    Tabela com: arquivo | função | Pythodoxoade vulcan ignite doxoade/commands/intelligence_systems/intelligence_engine.py
+doxoade vulcan benchmark doxoade/commands/intelligence_systems/n ms | Cython ms | speedup | status
 
 Compliance:
     OSL-4  : única responsabilidade — só mede, não compila
@@ -27,6 +28,7 @@ import ast
 import hashlib
 import importlib.util
 import json
+import re
 import os
 # [DOX-UNUSED] import sys
 import time
@@ -122,14 +124,22 @@ class HybridBenchmark:
         """
         target_path = Path(target).resolve()
         py_files    = self._collect_py_files(target_path)
-        all_results: list[FileBenchResult] = []
+        all_results: list[FileBenchResult] =[]
 
         for py_file in py_files:
             binary = self._find_binary(py_file)
             if not binary:
-                continue   # sem binário → não foi compilado, pula silencioso
-
-            file_result = self._benchmark_file(py_file, binary)
+                continue
+            try:
+                file_result = self._benchmark_file(py_file, binary)
+            except BaseException as exc:          # catches SystemExit, KeyboardInterrupt, etc.
+                file_result = FileBenchResult(file_path=str(py_file))
+                file_result.functions.append(FunctionBenchResult(
+                    file_name=py_file.name,
+                    func_name="<crash>",
+                    status="ERROR",
+                    error=f"benchmark abortado: {type(exc).__name__}: {exc}",
+                ))
             if file_result.functions:
                 all_results.append(file_result)
 
@@ -254,6 +264,7 @@ class HybridBenchmark:
 
         # Warmup (Cython precisa de JIT-warmup para ser justo)
         # Se cy_func rejeita o fixture com TypeError de args, tenta recortar.
+        # warmup block
         try:
             with _SuppressIO():
                 for _ in range(3):
@@ -267,10 +278,15 @@ class HybridBenchmark:
                             cy_func(*fixture[:1])  # tenta só o primeiro arg
                         else:
                             raise
+        except SystemExit:                        # ← add BEFORE except Exception
+            result.status = "WARMUP_FAIL"
+            result.error  = "função encerra processo (click/sys.exit)"
+            return result
         except Exception as e:
             result.status = "WARMUP_FAIL"
             result.error  = f"warmup: {e}"
             return result
+
 
         # Ajusta fixture para cy_func se necessário (descobre na medição)
         cy_fixture = fixture
@@ -288,6 +304,10 @@ class HybridBenchmark:
                 for _ in range(self.runs):
                     py_func(*fixture)
                 result.py_ms = (time.perf_counter() - t0) * 1000 / self.runs
+        except SystemExit:                        # ← add
+            result.status = "ERROR"
+            result.error  = "python exec: sys.exit durante medição"
+            return result
         except Exception as e:
             result.status = "ERROR"
             result.error  = f"python exec: {e}"
@@ -300,9 +320,9 @@ class HybridBenchmark:
                 for _ in range(self.runs):
                     cy_func(*cy_fixture)
                 result.cy_ms = (time.perf_counter() - t0) * 1000 / self.runs
-        except Exception as e:
+        except SystemExit:
             result.status = "ERROR"
-            result.error  = f"cython exec: {e}"
+            result.error  = "cython exec: sys.exit durante medição"
             return result
 
         # Speedup
@@ -342,13 +362,16 @@ class HybridBenchmark:
 
         # Fallback: busca só pelo stem sem hash (caso o path tenha mudado)
         for ext in (".pyd", ".so"):
-            candidates = list(self.bin_dir.glob(f"v_{stem}*{ext}"))
+            candidates = [
+                p for p in self.bin_dir.glob(f"v_{stem}_*{ext}")
+                # garante que o próximo char após o stem é '_' (hash) não letras de outro nome
+                if re.match(rf"v_{re.escape(stem)}_[0-9a-f]{{6}}", p.stem.split('.')[0])
+            ]
             if candidates:
                 return max(candidates, key=lambda p: p.stat().st_mtime)
 
         return None
 
-    @staticmethod
     @staticmethod
     def _load_py_module(py_file: Path):
         """
@@ -370,6 +393,16 @@ class HybridBenchmark:
         """
         import sys as _sys
 
+        # Injeta raiz do projeto imediatamente
+        project_markers = {"pyproject.toml", "setup.py", "setup.cfg"}
+        root = py_file.parent
+        while root != root.parent:
+            if any((root / m).exists() for m in project_markers):
+                if str(root) not in _sys.path:
+                    _sys.path.insert(0, str(root))
+                break
+            root = root.parent
+            
         # ── Tentativa 1: import pelo nome do módulo no pacote real ──────────────
         # Deriva o nome do módulo a partir do caminho relativo à raiz do projeto.
         # Ex: .../doxoade/commands/check_systems/check_engine.py
@@ -400,14 +433,13 @@ class HybridBenchmark:
                 import importlib as _il
                 return _il.import_module(mod_name)
             except Exception:
-                pass  # tenta próxima estratégia
+                import traceback; traceback.print_exc()
+                pass
 
         # ── Tentativa 2: spec com __package__ e raiz no sys.path ────────────────
         package_dir  = py_file.parent
         package_name = f"_bench_pkg_{py_file.parent.name}"
         bench_name   = f"{package_name}.{py_file.stem}"
-
-# [DOX-UNUSED]         old_sys_path = list(_sys.path)
         added_paths  = []
         created_init = False
 
@@ -497,7 +529,6 @@ class HybridBenchmark:
         raw_stem    = binary.stem
         module_name = raw_stem.split(".")[0]       # v_check_fixer_1d4165
 
-# [DOX-UNUSED]         old_modules_snapshot = {}
         try:
             spec = importlib.util.spec_from_file_location(module_name, str(binary))
             if not spec or not spec.loader:
@@ -557,7 +588,12 @@ class HybridBenchmark:
 
     @staticmethod
     def _print_table(results: list[FileBenchResult], min_speedup: float = 1.1):
+
         if not results:
+            # Replace ANSI-colored print with plain fallback
+            print("\n  [VULCAN] Nenhuma funcao benchmarkada.")
+            print("  Dica: execute '--hybrid' antes do benchmark.")
+
             # Diagnóstico: mostra o que existe no bin_dir
             import inspect
             bin_dir_path = None
@@ -599,6 +635,7 @@ class HybridBenchmark:
         )
         print(f"{DIM}  {'─'*20} {'─'*35} {'─'*7} {'─'*7} {'─'*8}  {'─'*12}{RESET}")
 
+        regressions = 0
         total_speedup = 0.0
         total_ok      = 0
 
@@ -766,7 +803,6 @@ class FunctionProber:
         if n == 'state' or ann_name in ('CheckState',):
             # Gera um CheckState mínimo com findings populados
             try:
-# [DOX-UNUSED]  from dataclasses import field as dc_field
                 # Cria dinamicamente sem precisar importar do projeto
                 state_obj = type('CheckState', (), {
                     'root': '.',
@@ -838,6 +874,8 @@ class FunctionProber:
             return ['.py']
         if n in ('exclude_dirs', 'skip_dirs'):
             return []
+        if n.endswith(('_name', '_key', '_label', '_tag', '_id', '_slug')):
+            return "sample"
 
         # Fallback: string vazia ou 0
         if annotation == str:
