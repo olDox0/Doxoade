@@ -133,7 +133,7 @@ class VulcanBridge:
         for root, _, files in os.walk(package_path):
             for f in files:
                 if f.endswith('.py') and not f.startswith('__'):
-                    mod_name = f[:-3]
+                    mod_name = f[:-3]  # OBJ-REDUCE: slice→memoryview
                     # Tenta injetar metal silenciosamente
                     self.apply_turbo(mod_name, {})
         

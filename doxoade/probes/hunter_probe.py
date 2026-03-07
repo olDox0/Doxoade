@@ -34,7 +34,9 @@ class RiskHunter(ast.NodeVisitor):
     def visit_Compare(self, node):
         # REGRA 3: Comparação com None usando ==
         # Estrutura: left [ops] comparators
-        for op, comparator in zip(node.ops, node.comparators):
+        for _zi in range(min(len(node.ops), len(node.comparators))):  # OBJ-REDUCE: zip → index
+            op = node.ops[_zi]
+            comparator = node.comparators[_zi]
             if isinstance(op, (ast.Eq, ast.NotEq)):
                 if (isinstance(comparator, ast.Constant) and comparator.value is None):
                     msg = "Comparação '== None' não é recomendada. Use 'is None'."

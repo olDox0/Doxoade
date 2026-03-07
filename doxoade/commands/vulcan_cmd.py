@@ -636,19 +636,21 @@ def _simd_debug_report():
 
 @vulcan_group.command("alloc")
 @click.argument("target", default=".")
-@click.option("--verbose", "-v", is_flag=True, help="Mostra snippet de código e estratégia detalhada.")
-@click.option("--fix",           is_flag=True, help="Aplica transformações automáticas nos arquivos.")
-@click.option("--dry-run",       is_flag=True, help="Com --fix: mostra mudanças sem sobrescrever.")
-@click.option("--pyx",           is_flag=True, help="Escaneia .pyx em vez de .py (foundry).")
-def vulcan_alloc(target, verbose, fix, dry_run, pyx):
+@click.option("--verbose", "-v",      is_flag=True, help="Mostra snippet de código e estratégia detalhada.")
+@click.option("--fix",                is_flag=True, help="Aplica transformações automáticas nos arquivos.")
+@click.option("--dry-run",            is_flag=True, help="Com --fix: mostra mudanças sem sobrescrever.")
+@click.option("--pyx",                is_flag=True, help="Escaneia .pyx em vez de .py (foundry).")
+@click.option("--clean-backups",      is_flag=True, help="Remove todos os arquivos .bak_*.py gerados pelo --fix.")
+def vulcan_alloc(target, verbose, fix, dry_run, pyx, clean_backups):
     """
     Detecta e reduz criação de objetos temporários.
 
     Escaneia arquivos Python/.pyx e mostra onde objetos temporários
-    estão sendo criados desnecessariamente (boxing numérico, zip/enumerate
-    em loop, str += em loop, slices copiando memória, etc.)
+    estao sendo criados desnecessariamente (boxing numerico, zip/enumerate
+    em loop, str += em loop, slices copiando memoria, etc.)
 
-    Com --fix aplica as transformações seguras automaticamente.
+    Com --fix aplica as transformacoes seguras automaticamente.
+    Com --clean-backups remove os arquivos .bak_*.py criados pelo --fix.
 
     Exemplos::
 
@@ -657,29 +659,56 @@ def vulcan_alloc(target, verbose, fix, dry_run, pyx):
       doxoade vulcan alloc requests --verbose
       doxoade vulcan alloc models.py --fix --dry-run
       doxoade vulcan alloc foundry/ --pyx --fix
+      doxoade vulcan alloc --clean-backups
     """
     if not _OBJREDUCE_AVAILABLE:
         click.echo(
-            f"{Fore.RED}[ERRO] Módulos de redução de objetos não encontrados.{Style.RESET_ALL}\n"
+            f"{Fore.RED}[ERRO] Modulos de reducao de objetos nao encontrados.{Style.RESET_ALL}\n"
             f"Verifique: object_allocation_scanner.py e object_reduction.py"
         )
         return
 
     from pathlib import Path
-    import os
+    import os, re as _re
 
     root = Path(target).resolve()
 
-    # Coleta arquivos
+    # ── Modo limpeza de backups ────────────────────────────────────────────────
+    if clean_backups:
+        _bak_re = _re.compile(r"\.bak_\d{8}_\d{6}")
+        search_root = root if root.is_dir() else root.parent
+        bak_files = [
+            f for f in search_root.rglob("*.py")
+            if _bak_re.search(f.stem)
+        ]
+        if not bak_files:
+            click.echo(f"{Fore.GREEN}Nenhum arquivo de backup encontrado em: {search_root}{Style.RESET_ALL}")
+            return
+        click.echo(
+            f"\n{Fore.CYAN}{Style.BRIGHT}  Vulcan Alloc - Limpeza de Backups{Style.RESET_ALL}"
+        )
+        click.echo(f"  {'─' * 55}")
+        removed = 0
+        for bak in sorted(bak_files):
+            rel = bak.relative_to(search_root) if bak.is_relative_to(search_root) else bak.name
+            click.echo(f"  {Fore.YELLOW}[del]{Style.RESET_ALL} {rel}")
+            bak.unlink()
+            removed += 1
+        click.echo(f"\n  {Fore.GREEN}✔ {removed} arquivo(s) de backup removido(s).{Style.RESET_ALL}\n")
+        return
+
+    # Coleta arquivos — exclui backups gerados pelo --fix (.bak_YYYYMMDD_HHMMSS)
+    _bak_pat = _re.compile(r"\.bak_\d{8}_\d{6}")
     ext = ".pyx" if pyx else ".py"
     if root.is_file():
         files = [root] if root.suffix == ext else []
     else:
         files = list(root.rglob(f"*{ext}"))
-        # Exclui __pycache__, .git, venv
+        # Exclui __pycache__, .git, venv, e arquivos .bak_*
         files = [
             f for f in files
             if not any(p in f.parts for p in ("__pycache__", ".git", "venv", ".venv", "node_modules"))
+            and not _bak_pat.search(f.stem)
         ]
 
     if not files:
@@ -705,7 +734,7 @@ def vulcan_alloc(target, verbose, fix, dry_run, pyx):
             if report.total_score == 0:
                 continue
 
-            _buf_hot_files.append(1)  # OBJ-REDUCE: str→buffer
+            hot_files   += 1
             total_score += report.total_score
 
             rel = fpath.relative_to(root) if fpath.is_relative_to(root) else fpath.name
@@ -728,6 +757,11 @@ def vulcan_alloc(target, verbose, fix, dry_run, pyx):
                 result = reduce_source(source, fpath, level=2, is_pyx=pyx)
                 if result.has_changes:
                     if not dry_run:
+                        # Backup de segurança antes de sobrescrever
+                        import shutil, datetime as _dt
+                        _ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        _bak = fpath.with_name(f"{fpath.stem}.bak_{_ts}{fpath.suffix}")
+                        shutil.copy2(fpath, _bak)
                         fpath.write_text(result.transformed, encoding="utf-8")
                     for change in result.changes:
                         prefix = Fore.YELLOW + "  [dry]" if dry_run else Fore.GREEN + "  [fix]"

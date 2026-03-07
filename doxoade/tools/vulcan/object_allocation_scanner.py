@@ -28,6 +28,7 @@ Padrões detectados:
 from __future__ import annotations
 
 import ast
+import re
 import textwrap
 from dataclasses import dataclass, field
 from enum import Enum
@@ -257,9 +258,34 @@ class ObjectAllocationScanner(ast.NodeVisitor):
                       cost=2, confidence="high", auto_fix=True)
         self.generic_visit(node)
 
+    # Nomes de variáveis que quase certamente são numéricas — não marcar como STR_CONCAT.
+    # Padrão: score, total_*, count_*, n_*, num_*, sum_*, acc_*, idx_*, *_n, *_count, etc.
+    _NUMERIC_VAR_RE = re.compile(
+        r'^(?:'
+        r'score|total|count|num|n|idx|size|len|sum|acc|result|'
+        r'alloc|cost|hits|weight|rate|delta|offset|pos|step|'
+        r'total_\w+|\w+_count|\w+_n|\w+_score|\w+_total|'
+        r'[ijk]|[ijk]\d*'
+        r')$',
+        re.IGNORECASE,
+    )
+
     # ── Pattern: AugAssign str += "..." ──────────────────────────────────────
     def visit_AugAssign(self, node: ast.AugAssign):
         if not (isinstance(node.op, ast.Add) and self._in_loop()):
+            self.generic_visit(node)
+            return
+
+        # Target name — se for claramente numérico, não marcar como STR_CONCAT
+        target_name = ""
+        if isinstance(node.target, ast.Name):
+            target_name = node.target.id
+        if self._NUMERIC_VAR_RE.match(target_name):
+            self.generic_visit(node)
+            return
+
+        # RHS é número literal → aritmética escalar, nunca string concat
+        if isinstance(node.value, ast.Constant) and not isinstance(node.value.value, str):
             self.generic_visit(node)
             return
 
@@ -269,16 +295,18 @@ class ObjectAllocationScanner(ast.NodeVisitor):
             and isinstance(node.value.value, str)
         )
         is_fstring = isinstance(node.value, ast.JoinedStr)
-        # Concatenação de variável a string: s += other_str_var (não pode inferir tipo)
-        # Só marca como auto_fix se RHS for literal string ou f-string — seguro
         if is_str_literal or is_fstring:
             self._add(node, AllocPattern.STR_CONCAT, ReduceStrategy.BYTEARRAY_BUFFER,
                       cost=2, confidence="high", auto_fix=False)
         elif isinstance(node.value, ast.Name):
-            # s += var — pode ser string, mas não temos certeza; baixa confiança, sem auto_fix
+            # s += var — só marca se o RHS também não parecer numérico
+            rhs_name = node.value.id
+            if self._NUMERIC_VAR_RE.match(rhs_name):
+                self.generic_visit(node)
+                return
             self._add(node, AllocPattern.STR_CONCAT, ReduceStrategy.BYTEARRAY_BUFFER,
                       cost=2, confidence="low", auto_fix=False)
-        # int/float += 1  →  NÃO marcar (não é alocação de objeto, é aritmética escalar)
+        # int/float += 1  →  NÃO marcar (aritmética escalar)
         self.generic_visit(node)
 
     # ── Pattern: BOXED_NUMERIC int(x) float(x) em loop ───────────────────────
@@ -325,8 +353,28 @@ class ObjectAllocationScanner(ast.NodeVisitor):
             if isinstance(node.value, ast.Subscript):
                 sl = node.value.slice
                 if isinstance(sl, ast.Slice):
-                    self._add(node, AllocPattern.SLICE_COPY, ReduceStrategy.TYPED_MEMORYVIEW,
-                              cost=2, confidence="high", auto_fix=True)
+                    # Exclui slices sobre resultados de métodos que retornam str:
+                    # hexdigest()[:n], .name[:n], .stem[:n], decode()[:n], etc.
+                    # Também exclui slices com step negativo (ex: s[::-1] — reversão de string).
+                    value_node = node.value.value
+                    is_str_method_result = (
+                        isinstance(value_node, ast.Call)
+                        and isinstance(value_node.func, ast.Attribute)
+                        and value_node.func.attr in (
+                            "hexdigest", "digest", "decode", "encode",
+                            "strip", "lstrip", "rstrip", "lower", "upper",
+                            "replace", "split", "join", "format",
+                        )
+                    )
+                    is_attr_access = (
+                        isinstance(value_node, ast.Attribute)
+                        and value_node.attr in ("name", "stem", "suffix", "parent")
+                    )
+                    # Step negativo → reversão de sequência, não cópia de buffer
+                    has_step = sl.step is not None
+                    if not (is_str_method_result or is_attr_access or has_step):
+                        self._add(node, AllocPattern.SLICE_COPY, ReduceStrategy.TYPED_MEMORYVIEW,
+                                  cost=2, confidence="high", auto_fix=True)
         self.generic_visit(node)
 
     # ── Pattern: LIST_COMP retornada ──────────────────────────────────────────
@@ -398,6 +446,11 @@ def scan_source(source: str, path: Path | None = None) -> ModuleAllocReport:
         scanner.visit(tree)
         report.functions = list(scanner._func_reports.values())
     except SyntaxError:
+        pass
+    except Exception:
+        # Arquivo pode referenciar variáveis de runtime (ex: _buf_hot_files do
+        # PitStop Engine) que não existem no contexto de análise estática.
+        # Retorna relatório vazio em vez de propagar o erro.
         pass
     return report
 

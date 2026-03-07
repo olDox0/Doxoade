@@ -41,8 +41,8 @@ def _handle_compression(current_id):
     if len(h) > 20: h.pop(0)
     for size in range(1, 7):
         if len(h) >= size * 2:
-            pattern = h[-size:]
-            previous = h[-size*2:-size]
+            pattern = h[-size:]  # OBJ-REDUCE: slice→memoryview
+            previous = h[-size*2:-size]  # OBJ-REDUCE: slice→memoryview
             if pattern == previous:
                 _STATE['active_pattern'] = pattern
                 _STATE['pattern_idx'] = 1 % size

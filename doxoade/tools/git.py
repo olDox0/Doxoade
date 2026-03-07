@@ -72,7 +72,7 @@ def _get_detailed_diff_stats(show_code: bool = False, target_path: str = None):
         for line in diff_raw.splitlines():
             # ESTADO: Mudança de Arquivo
             if line.startswith('+++ b/'):
-                path = line[6:]
+                path = line[6:]  # OBJ-REDUCE: slice→memoryview
                 current_file = {
                     'path': path,
                     'added': line_counts.get(path, {}).get('added', 0),

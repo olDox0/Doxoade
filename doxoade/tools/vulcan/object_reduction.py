@@ -27,7 +27,9 @@ Cada transformação produz um `TransformResult` com:
 from __future__ import annotations
 
 import ast
+import datetime
 import re
+import shutil
 import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -44,6 +46,25 @@ from .object_allocation_scanner import (
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Backup de segurança
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _backup_file(path: Path) -> Path:
+    """
+    Cria cópia de segurança do arquivo antes de qualquer transformação.
+
+    Nome gerado: <stem>.bak_YYYYMMDD_HHMMSS<ext>
+    Exemplo:     models.bak_20250310_142301.py
+
+    Retorna o caminho do backup criado.
+    """
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = path.with_name(f"{path.stem}.bak_{ts}{path.suffix}")
+    shutil.copy2(path, backup_path)
+    return backup_path
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Resultado de transformação
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -55,6 +76,7 @@ class TransformResult:
     changes:         list[str]   = field(default_factory=list)
     allocs_removed:  int         = 0
     level:           int         = 1    # 1=AST, 2=Cython
+    backup_path:     Optional[Path] = None   # caminho do backup criado, se houver
 
     @property
     def has_changes(self) -> bool:
@@ -63,9 +85,10 @@ class TransformResult:
     def summary(self) -> str:
         if not self.changes:
             return "sem transformações"
+        bak = f" | backup → {self.backup_path.name}" if self.backup_path else ""
         return (
             f"{len(self.changes)} transformação(ões), "
-            f"~{self.allocs_removed} alloc(s) eliminada(s)"
+            f"~{self.allocs_removed} alloc(s) eliminada(s){bak}"
         )
 
 
@@ -85,6 +108,7 @@ class _TextTransformer:
         self.sites   = sorted(sites, key=lambda s: s.lineno)
         self.changes: list[str] = []
         self.allocs_removed = 0
+        self._is_pyx = is_pyx   # guarda para proteger transforms que geram sintaxe Cython
 
     def transform(self) -> str:
         """Aplica todas as transformações auto_fix em sequência."""
@@ -93,10 +117,13 @@ class _TextTransformer:
                 continue
             try:
                 if site.pattern == AllocPattern.BOXED_NUMERIC:
-                    self._fix_boxed_numeric(site)
+                    # <int>(x) / <double>(x) são sintaxe Cython — só aplica em .pyx
+                    if self._is_pyx:
+                        self._fix_boxed_numeric(site)
                 elif site.pattern == AllocPattern.RANGE_ENUMERATE:
                     self._fix_enumerate_range(site)
                 elif site.pattern == AllocPattern.ZIP_TEMP:
+                    # zip → index loop é Python puro — seguro em qualquer arquivo
                     self._fix_zip(site)
                 elif site.pattern == AllocPattern.STR_CONCAT:
                     self._fix_str_concat(site)
@@ -402,7 +429,7 @@ def reduce_file(
     all_sites = [s for f in report.functions for s in f.sites]
 
     # Nível 1: transformações de texto
-    transformer = _TextTransformer(source, all_sites)
+    transformer = _TextTransformer(source, all_sites, is_pyx=is_pyx)
     transformed = transformer.transform()
     changes     = transformer.changes[:]
     allocs      = transformer.allocs_removed
@@ -424,6 +451,7 @@ def reduce_file(
     )
 
     if not dry_run and result.has_changes:
+        result.backup_path = _backup_file(path)
         path.write_text(transformed, encoding="utf-8")
 
     return result
@@ -441,7 +469,7 @@ def reduce_source(
     report = scan_pyx(source, path) if is_pyx else scan_source(source, path)
     all_sites = [s for f in report.functions for s in f.sites]
 
-    transformer = _TextTransformer(source, all_sites)
+    transformer = _TextTransformer(source, all_sites, is_pyx=is_pyx)
     transformed = transformer.transform()
     changes     = transformer.changes[:]
     allocs      = transformer.allocs_removed
