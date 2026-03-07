@@ -139,11 +139,11 @@ class VulcanForge(ast.NodeTransformer):
             return f"_{name}"
         return name
 
-    @staticmethod
-    def is_self_referential(file_path: str) -> bool:
-        from pathlib import Path
-        stem = Path(file_path).stem.lower()
-        return stem in _VULCAN_SELF
+#    @staticmethod
+#    def is_self_referential(file_path: str) -> bool:
+#        from pathlib import Path
+#        stem = Path(file_path).stem.lower()
+#        return stem in _VULCAN_SELF
 
     def _is_blacklisted(self, module: str) -> bool:
         if not module:

@@ -37,6 +37,39 @@ from ..shared_tools import ExecutionLogger, _find_project_root
 
 __version__ = "85.0 Omega (Self-Guard + Redirect Fix + Probe)"
 
+# ================== Imports SIMD ==================
+
+try:
+    from doxoade.tools.vulcan.simd_detector import detect as _detect_simd
+    from doxoade.tools.vulcan.simd_compiler import (
+        SIMDContext,
+        SIMDForge,
+        SIMDEnvironment,
+        estimate_gain,
+        get_simd_report,
+    )
+    _SIMD_AVAILABLE = True
+except ImportError:
+    _SIMD_AVAILABLE = False
+
+try:
+    from doxoade.tools.vulcan.object_allocation_scanner import (
+        scan_source, scan_pyx, render_report as _render_alloc_report,
+        ModuleAllocReport,
+    )
+    from doxoade.tools.vulcan.object_reduction import (
+        reduce_source, reduce_pyx_file, TransformResult,
+    )
+    _OBJREDUCE_AVAILABLE = True
+except ImportError:
+    _OBJREDUCE_AVAILABLE = False
+
+
+def _simd_context_or_none(simd: bool, simd_level: str) -> "SIMDContext | None":
+    """Cria SIMDContext se --simd ativo e módulos disponíveis."""
+    if not simd or not _SIMD_AVAILABLE:
+        return None
+    return SIMDContext(level_cap=simd_level)
 
 # ================== Vulcan Embedded probes ==================
 
@@ -462,7 +495,6 @@ def activate():
 
 VULCAN_STUB_VERSION = 3
 
-from pathlib import Path
 import re
 
 def read_stub_version(stub_path: Path) -> int | None:
@@ -478,6 +510,8 @@ def read_stub_version(stub_path: Path) -> int | None:
         return None
 
     return None
+
+
 
 # ================== Detecção de auto-aplicação ==================
 
@@ -527,8 +561,368 @@ def doctor(module, srcdir, retries):
         click.echo("Use --module to attempt to repair a specific module.")
 
 
-# PATCH vulcan_cmd.py — adicionar ao comando ignite existente
-# Substitua o decorador + função ignite atual por este bloco completo.
+def _simd_debug_report():
+    """Executa cada estratégia de detecção individualmente e mostra resultados."""
+    import shutil
+    from doxoade.tools.vulcan import simd_detector as _sd
+
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}  ⬡ VULCAN SIMD — DIAGNÓSTICO DE DETECÇÃO{Style.RESET_ALL}")
+    click.echo(f"  {'─' * 55}")
+
+    strategies = [
+        ("py-cpuinfo",      _sd._detect_cpuinfo),
+        ("/proc/cpuinfo",   _sd._detect_proc_cpuinfo),
+        ("kernel32",        _sd._detect_windows_kernel32),
+        ("sysctl",          _sd._detect_sysctl),
+        ("cpuid-probe",     _sd._detect_cpuid),
+        ("model-string",    lambda: (
+            _sd._refine_via_model_string(_sd._detect_fallback())
+            if hasattr(_sd, '_refine_via_model_string') else None
+        )),
+    ]
+
+    results = []
+    for name, fn in strategies:
+        try:
+            caps = fn()
+            if caps is not None:
+                level = caps.best.upper()
+                avx_str = (
+                    f"avx={caps.avx} avx2={caps.avx2} avx512={caps.avx512f} "
+                    f"fma={caps.fma}"
+                )
+                color = Fore.GREEN if caps.level >= 4 else (Fore.YELLOW if caps.level >= 2 else Fore.WHITE)
+                click.echo(
+                    f"  {Fore.CYAN}{name:<20}{Style.RESET_ALL} "
+                    f"{color}{level:<10}{Style.RESET_ALL} "
+                    f"{Style.DIM}{avx_str}{Style.RESET_ALL}"
+                )
+                results.append((name, caps))
+            else:
+                click.echo(
+                    f"  {Fore.CYAN}{name:<20}{Style.RESET_ALL} "
+                    f"{Fore.RED}N/A{Style.RESET_ALL}"
+                )
+        except Exception as e:
+            click.echo(
+                f"  {Fore.CYAN}{name:<20}{Style.RESET_ALL} "
+                f"{Fore.RED}ERRO: {str(e)[:50]}{Style.RESET_ALL}"
+            )
+
+    # Compiladores disponíveis
+    click.echo(f"\n  {Fore.CYAN}Compiladores no PATH:{Style.RESET_ALL}")
+    for compiler in ["gcc", "x86_64-w64-mingw32-gcc", "cl", "clang"]:
+        path = shutil.which(compiler)
+        if path:
+            click.echo(f"  {Fore.GREEN}[OK]{Style.RESET_ALL} {compiler:<35} {Style.DIM}{path}{Style.RESET_ALL}")
+        else:
+            click.echo(f"  {Fore.RED}[--]{Style.RESET_ALL} {compiler}")
+
+    # Model string
+    try:
+        model = _sd._get_cpu_model_name()
+        click.echo(f"\n  {Fore.CYAN}Model string:{Style.RESET_ALL} {model}")
+    except Exception:
+        pass
+
+    # Vencedor
+    if results:
+        best = max(results, key=lambda x: x[1].level)
+        click.echo(
+            f"\n  {Fore.GREEN}{Style.BRIGHT}Melhor resultado: {best[0]} → {best[1].best.upper()}{Style.RESET_ALL}"
+        )
+    click.echo()
+
+
+@vulcan_group.command("alloc")
+@click.argument("target", default=".")
+@click.option("--verbose", "-v", is_flag=True, help="Mostra snippet de código e estratégia detalhada.")
+@click.option("--fix",           is_flag=True, help="Aplica transformações automáticas nos arquivos.")
+@click.option("--dry-run",       is_flag=True, help="Com --fix: mostra mudanças sem sobrescrever.")
+@click.option("--pyx",           is_flag=True, help="Escaneia .pyx em vez de .py (foundry).")
+def vulcan_alloc(target, verbose, fix, dry_run, pyx):
+    """
+    Detecta e reduz criação de objetos temporários.
+
+    Escaneia arquivos Python/.pyx e mostra onde objetos temporários
+    estão sendo criados desnecessariamente (boxing numérico, zip/enumerate
+    em loop, str += em loop, slices copiando memória, etc.)
+
+    Com --fix aplica as transformações seguras automaticamente.
+
+    Exemplos::
+
+    \b
+      doxoade vulcan alloc .
+      doxoade vulcan alloc requests --verbose
+      doxoade vulcan alloc models.py --fix --dry-run
+      doxoade vulcan alloc foundry/ --pyx --fix
+    """
+    if not _OBJREDUCE_AVAILABLE:
+        click.echo(
+            f"{Fore.RED}[ERRO] Módulos de redução de objetos não encontrados.{Style.RESET_ALL}\n"
+            f"Verifique: object_allocation_scanner.py e object_reduction.py"
+        )
+        return
+
+    from pathlib import Path
+    import os
+
+    root = Path(target).resolve()
+
+    # Coleta arquivos
+    ext = ".pyx" if pyx else ".py"
+    if root.is_file():
+        files = [root] if root.suffix == ext else []
+    else:
+        files = list(root.rglob(f"*{ext}"))
+        # Exclui __pycache__, .git, venv
+        files = [
+            f for f in files
+            if not any(p in f.parts for p in ("__pycache__", ".git", "venv", ".venv", "node_modules"))
+        ]
+
+    if not files:
+        click.echo(f"{Fore.YELLOW}Nenhum arquivo {ext} encontrado em: {root}{Style.RESET_ALL}")
+        return
+
+    click.echo(
+        f"\n{Fore.CYAN}{Style.BRIGHT}  ⬡ VULCAN ALLOC — Detecção de Objetos Temporários{Style.RESET_ALL}"
+    )
+    click.echo(f"  {'─' * 55}")
+    click.echo(f"  Arquivos: {len(files)} {ext}  |  Modo: {'fix' if fix else 'scan'}\n")
+
+    total_score   = 0
+    total_fixed   = 0
+    total_allocs  = 0
+    hot_files     = 0
+
+    for fpath in sorted(files):
+        try:
+            source = fpath.read_text(encoding="utf-8", errors="ignore")
+            report = scan_pyx(source, fpath) if pyx else scan_source(source, fpath)
+
+            if report.total_score == 0:
+                continue
+
+            _buf_hot_files.append(1)  # OBJ-REDUCE: str→buffer
+            total_score += report.total_score
+
+            rel = fpath.relative_to(root) if fpath.is_relative_to(root) else fpath.name
+            color = (
+                Fore.RED    if report.total_score >= 20 else
+                Fore.YELLOW if report.total_score >= 8  else
+                Fore.CYAN
+            )
+            auto_n = len(report.all_auto_fixable)
+            click.echo(
+                f"  {color}{str(rel):<40}{Style.RESET_ALL} "
+                f"score={Style.BRIGHT}{report.total_score:<4}{Style.RESET_ALL} "
+                f"{Fore.GREEN}{auto_n} auto{Style.RESET_ALL}"
+            )
+
+            if verbose:
+                _render_alloc_report(report, verbose=True)
+
+            if fix:
+                result = reduce_source(source, fpath, level=2, is_pyx=pyx)
+                if result.has_changes:
+                    if not dry_run:
+                        fpath.write_text(result.transformed, encoding="utf-8")
+                    for change in result.changes:
+                        prefix = Fore.YELLOW + "  [dry]" if dry_run else Fore.GREEN + "  [fix]"
+                        click.echo(f"{prefix}{Style.RESET_ALL} {change}")
+                    total_fixed  += len(result.changes)
+                    total_allocs += result.allocs_removed
+
+        except Exception as e:
+            click.echo(f"  {Fore.RED}[ERRO]{Style.RESET_ALL} {fpath.name}: {e}")
+
+    # Resumo
+    click.echo(f"\n  {'─' * 55}")
+    click.echo(f"  Arquivos com alocações críticas : {hot_files}")
+    click.echo(f"  Score total                     : {total_score}")
+    if fix:
+        action = "simuladas" if dry_run else "aplicadas"
+        click.echo(f"  Transformações {action:<14}: {total_fixed}")
+        click.echo(f"  Allocs eliminadas (estimativa)  : ~{total_allocs}")
+    else:
+        fixable = sum(len(r.all_auto_fixable) for f in files
+                      for r in [scan_source(f.read_text(encoding="utf-8", errors="ignore"), f)]
+                      if r.total_score > 0)
+        click.echo(
+            f"\n  {Fore.GREEN}Dica:{Style.RESET_ALL} "
+            f"use {Fore.CYAN}--fix{Style.RESET_ALL} para aplicar transformações automáticas, "
+            f"ou {Fore.CYAN}--fix --dry-run{Style.RESET_ALL} para preview."
+        )
+    click.echo()
+
+
+@vulcan_group.command("simd")
+@click.option("--bench",        is_flag=True,  help="Executa micro-benchmark SIMD no numpy.")
+@click.option("--json",  "out_json", is_flag=True,  help="Saída em JSON.")
+@click.option("--level", "cap_level", default="auto",
+              type=click.Choice(["auto", "native", "sse2", "avx", "avx2", "avx512f"]),
+              show_default=True,
+              help="Nível SIMD máximo a usar (sobrescreve detecção).")
+@click.option("--debug", is_flag=True,
+              help="Mostra qual estratégia foi usada e o resultado de cada uma.")
+def vulcan_simd(bench, out_json, cap_level, debug):
+    """
+    Exibe capacidades SIMD da CPU e flags de compilação recomendadas.
+
+    Detecta automaticamente SSE2 / AVX / AVX2 / AVX-512 / NEON e
+    mostra os flags GCC/MSVC que o Vulcan usará ao compilar com --simd.
+
+    Exemplos::
+
+    \b
+      doxoade vulcan simd
+      doxoade vulcan simd --bench
+      doxoade vulcan simd --debug
+      doxoade vulcan simd --level avx2
+      doxoade vulcan simd --json
+    """
+    if not _SIMD_AVAILABLE:
+        click.echo(
+            f"{Fore.RED}[ERRO] Módulos SIMD não encontrados.{Style.RESET_ALL}\n"
+            f"{Fore.CYAN}Instale: pip install py-cpuinfo{Style.RESET_ALL}"
+        )
+        return
+
+    # -- Debug: mostra cada estratégia -----------------------------------------
+    if debug:
+        _simd_debug_report()
+        return
+
+    caps = _detect_simd()
+    ctx  = SIMDContext(caps=caps, level_cap=cap_level)
+    eff  = ctx.effective_caps()
+    report = get_simd_report(eff)
+
+    if out_json:
+        import json
+        click.echo(json.dumps(report, indent=2, ensure_ascii=False))
+        return
+
+    # -- Relatório visual ------------------------------------------------------
+    _LEVEL_COLORS = {
+        "avx512f": Fore.GREEN,
+        "avx2":    Fore.GREEN,
+        "avx":     Fore.CYAN,
+        "sse4.2":  Fore.YELLOW,
+        "sse4.1":  Fore.YELLOW,
+        "sse2":    Fore.WHITE,
+        "neon":    Fore.CYAN,
+        "none":    Fore.RED,
+    }
+    level_color = _LEVEL_COLORS.get(eff.best, Fore.WHITE)
+
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}  ? VULCAN SIMD — Capacidades da CPU{Style.RESET_ALL}")
+    click.echo(f"  {'-' * 52}")
+    click.echo(f"  Arquitetura : {Fore.WHITE}{eff.arch}{Style.RESET_ALL}")
+    click.echo(f"  Vendor      : {Fore.WHITE}{eff.vendor or '(desconhecido)'}{Style.RESET_ALL}")
+    click.echo(
+        f"  Nível SIMD  : {level_color}{Style.BRIGHT}{eff.best.upper()}{Style.RESET_ALL}"
+        + (f"  {Fore.YELLOW}(cap: {cap_level}){Style.RESET_ALL}" if cap_level != "auto" else "")
+    )
+    click.echo(f"  Ganho est.  : {Fore.GREEN}{report['estimated_gain']}{Style.RESET_ALL}")
+    click.echo(f"\n  {Fore.CYAN}Extensões detectadas:{Style.RESET_ALL}")
+
+    ext_map = [
+        ("SSE2",    eff.sse2),
+        ("SSE4.1",  eff.sse4_1),
+        ("SSE4.2",  eff.sse4_2),
+        ("AVX",     eff.avx),
+        ("AVX2",    eff.avx2),
+        ("AVX-512F",eff.avx512f),
+        ("FMA",     eff.fma),
+        ("BMI1",    eff.bmi1),
+        ("BMI2",    eff.bmi2),
+        ("POPCNT",  eff.popcnt),
+        ("NEON",    eff.neon),
+    ]
+    for name, ok in ext_map:
+        icon = f"{Fore.GREEN}?" if ok else f"{Fore.RED}?"
+        click.echo(f"    {icon}{Style.RESET_ALL} {name}")
+
+    click.echo(f"\n  {Fore.CYAN}Flags de compilação ({('GCC/Clang' if os.name != 'nt' else 'MSVC')}):{Style.RESET_ALL}")
+    flags = eff.gcc_flags if os.name != "nt" else eff.msvc_flags
+    for f in flags:
+        click.echo(f"    {Fore.YELLOW}{f}{Style.RESET_ALL}")
+
+    click.echo(f"\n  {Fore.CYAN}Diretivas Cython recomendadas:{Style.RESET_ALL}")
+    for k, v in eff.cython_directives.items():
+        click.echo(f"    {Fore.MAGENTA}{k}{Style.RESET_ALL} = {v}")
+
+    click.echo(f"\n  {Fore.CYAN}Como usar:{Style.RESET_ALL}")
+    click.echo(f"    {Style.DIM}doxoade vulcan ignite --simd{Style.RESET_ALL}")
+    click.echo(f"    {Style.DIM}doxoade vulcan ignite --simd --simd-level avx2{Style.RESET_ALL}")
+    click.echo(f"    {Style.DIM}doxoade vulcan lib --target requests --simd{Style.RESET_ALL}")
+    click.echo(f"    {Style.DIM}doxoade vulcan ignite --hybrid --simd{Style.RESET_ALL}")
+    click.echo()
+
+    # -- Micro-benchmark -------------------------------------------------------
+    if bench:
+        _run_simd_bench(eff)
+
+
+def _run_simd_bench(caps) -> None:
+    """Micro-benchmark SIMD: numpy ops com/sem flags de compilação ativas."""
+    click.echo(f"\n  {Fore.CYAN}{Style.BRIGHT}? SIMD MICRO-BENCHMARK{Style.RESET_ALL}")
+    click.echo(f"  {Fore.CYAN}(mede operações numpy — compiladas com seus flags SIMD){Style.RESET_ALL}\n")
+
+    try:
+        import numpy as np
+        import time
+
+        N = 10_000_000
+        a = np.random.rand(N).astype(np.float64)
+        b = np.random.rand(N).astype(np.float64)
+
+        benchmarks = [
+            ("add",       lambda: np.add(a, b, out=b)),
+            ("multiply",  lambda: np.multiply(a, b, out=b)),
+            ("sqrt",      lambda: np.sqrt(a)),
+            ("dot",       lambda: np.dot(a, b)),
+            ("sum",       lambda: np.sum(a)),
+        ]
+
+        click.echo(f"  {'Operação':<20} {'N':>12}  {'Tempo (ms)':>12}  {'GB/s':>8}")
+        click.echo(f"  {'-'*20} {'-'*12}  {'-'*12}  {'-'*8}")
+
+        for name, fn in benchmarks:
+            # warm-up
+            fn()
+            # measure
+            REPS = 10
+            t0 = time.perf_counter()
+            for _ in range(REPS):
+                fn()
+            elapsed_ms = (time.perf_counter() - t0) / REPS * 1000
+            # throughput estimado (leitura + escrita de dois arrays)
+            bytes_transferred = N * 8 * 2
+            gbs = (bytes_transferred / (elapsed_ms / 1000)) / 1e9
+
+            click.echo(
+                f"  {Fore.WHITE}{name:<20}{Style.RESET_ALL} "
+                f"{N:>12,}  "
+                f"{Fore.GREEN}{elapsed_ms:>10.2f} ms{Style.RESET_ALL}  "
+                f"{Fore.CYAN}{gbs:>6.1f} GB/s{Style.RESET_ALL}"
+            )
+
+        click.echo(
+            f"\n  {Fore.YELLOW}Nota: NumPy usa SIMD automaticamente se compilado com suporte.{Style.RESET_ALL}"
+        )
+        click.echo(
+            f"  {Fore.CYAN}O benefício do --simd é em SEUS módulos Cython compilados.{Style.RESET_ALL}"
+        )
+
+    except ImportError:
+        click.echo(f"  {Fore.YELLOW}NumPy não instalado — benchmark pulado.{Style.RESET_ALL}")
+    except Exception as e:
+        click.echo(f"  {Fore.RED}Benchmark falhou: {e}{Style.RESET_ALL}")
+
 
 @vulcan_group.command('ignite')
 @click.argument('path', required=False, type=click.Path(exists=True))
@@ -538,32 +932,62 @@ def doctor(module, srcdir, retries):
 @click.option('--streaming',    is_flag=True,  help="Forge e compilação em paralelo (melhor para > 15 módulos).")
 @click.option('--hybrid',       is_flag=True,  help="Compilação seletiva por função (HybridForge).")
 @click.option('--scan-only',    is_flag=True,  help="Com --hybrid: mostra candidatos sem compilar.")
+@click.option('--simd',         is_flag=True,  help="Ativa otimizações SIMD (AVX/SSE) na compilação.")
+@click.option('--simd-level',   default="auto",
+              type=click.Choice(["auto", "native", "sse2", "avx", "avx2", "avx512f"]),
+              show_default=True,
+              help="Nível SIMD máximo (padrão: auto-detecta).")
 @click.pass_context
-def ignite(ctx, path, force, jobs, no_pitstop, streaming, hybrid, scan_only):
+def ignite(ctx, path, force, jobs, no_pitstop, streaming, hybrid, scan_only, simd, simd_level):
     """Transforma código Python em binários de alta velocidade.
 
     Modos:
-      padrão   → PitStop Engine (batch compile + warm-up cache)
-      --hybrid → HybridForge (seletivo por função, arquivos impuros aceitos)
+      padrão       ? PitStop Engine
+      --hybrid     ? HybridForge (seletivo por função)
+      --simd       ? injeta flags AVX/SSE2/NEON na compilação
 
-    Use --scan-only com --hybrid para ver candidatos antes de compilar.
+    Exemplos::
+
+    \b
+      doxoade vulcan ignite --simd
+      doxoade vulcan ignite --hybrid --simd --simd-level avx2
+      doxoade vulcan ignite --simd --simd-level sse2
     """
     signal.signal(signal.SIGINT, _sigint_handler)
-    root = _find_project_root(os.getcwd())
+    root   = _find_project_root(os.getcwd())
     target = path or root
 
-    # ── Modo Híbrido ──────────────────────────────────────────────────────────
+    # Constrói SIMDContext se --simd ativo
+    simd_ctx = _simd_context_or_none(simd, simd_level)
+
+    # Exibe info SIMD se ativo
+    if simd_ctx and _SIMD_AVAILABLE:
+        eff = simd_ctx.effective_caps()
+        click.echo(
+            f"\n  {Fore.MAGENTA}? SIMD:{Style.RESET_ALL} "
+            f"{Fore.GREEN}{eff.best.upper()}{Style.RESET_ALL}  "
+            f"{Fore.CYAN}est. {estimate_gain(eff)}{Style.RESET_ALL}"
+        )
+        click.echo(
+            f"  {Fore.MAGENTA}  flags:{Style.RESET_ALL} "
+            f"{Style.DIM}{' '.join(eff.cflags)}{Style.RESET_ALL}\n"
+        )
+    elif simd and not _SIMD_AVAILABLE:
+        click.echo(
+            f"  {Fore.YELLOW}? --simd ignorado: módulos SIMD não disponíveis.{Style.RESET_ALL}"
+        )
+
+    # -- Modo Híbrido ----------------------------------------------------------
     if hybrid:
-        from ..tools.vulcan.hybrid_forge import hybrid_ignite
+        from doxoade.tools.vulcan.hybrid_forge import hybrid_ignite
 
-        click.echo(f"{Fore.YELLOW}{Style.BRIGHT}⬡ [VULCAN-HYBRID] v{__version__}...{Style.RESET_ALL}")
+        click.echo(f"{Fore.YELLOW}{Style.BRIGHT}? [VULCAN-HYBRID] ...{Style.RESET_ALL}")
 
-        # Carrega RegressionRegistry automaticamente (silencioso se vazio)
         registry = None
         try:
-            from ..tools.vulcan.regression_registry import RegressionRegistry
+            from doxoade.tools.vulcan.regression_registry import RegressionRegistry
             registry = RegressionRegistry(root)
-            r        = registry.report()
+            r = registry.report()
             if r["total"]:
                 click.echo(
                     f"{Fore.MAGENTA}   > Registry: "
@@ -574,22 +998,22 @@ def ignite(ctx, path, force, jobs, no_pitstop, streaming, hybrid, scan_only):
             registry = None
 
         if scan_only:
-            # Modo diagnóstico: só mostra o que seria compilado
             click.echo(f"{Fore.CYAN}   > Modo: SCAN ONLY (sem compilação){Style.RESET_ALL}")
             _run_hybrid_with_optimizer(target, root, force, registry=registry)
             return
 
         click.echo(f"{Fore.CYAN}   > Alvo : {target}{Style.RESET_ALL}")
-        click.echo(f"{Fore.CYAN}   > Modo : HÍBRIDO (seletivo por função){Style.RESET_ALL}")
+        click.echo(f"{Fore.CYAN}   > Modo : HÍBRIDO{Style.RESET_ALL}")
 
-        with ExecutionLogger('vulcan_hybrid', root, ctx.params) as _:
+        # Injeta SIMD context no ambiente se ativo
+        _env_ctx = SIMDEnvironment(simd_ctx) if simd_ctx else _NullContext()
+
+        with ExecutionLogger("vulcan_hybrid", root, ctx.params) as _:
             try:
-                _run_hybrid_with_optimizer(
-                    target   = target,
-                    root     = root,
-                    force    = force,
-                    registry = registry,
-                )
+                with _env_ctx:
+                    _run_hybrid_with_optimizer(
+                        target=target, root=root, force=force, registry=registry
+                    )
             except KeyboardInterrupt:
                 _sigint_handler(None, None)
             except Exception as e:
@@ -597,34 +1021,33 @@ def ignite(ctx, path, force, jobs, no_pitstop, streaming, hybrid, scan_only):
                 sys.exit(1)
         return
 
-    # ── Modo Padrão (PitStop / Legado) — não alterado ─────────────────────────
-    with ExecutionLogger('vulcan_ignite', root, ctx.params) as _:
-        click.echo(f"{Fore.YELLOW}{Style.BRIGHT}🔥 [VULCAN-IGNITION] v{__version__}...{Style.RESET_ALL}")
+    # -- Modo Padrão (PitStop) -------------------------------------------------
+    with ExecutionLogger("vulcan_ignite", root, ctx.params) as _:
+        click.echo(f"{Fore.YELLOW}{Style.BRIGHT}?? [VULCAN-IGNITION] ...{Style.RESET_ALL}")
 
-        from ..tools.vulcan.diagnostic import VulcanDiagnostic
+        from doxoade.tools.vulcan.diagnostic import VulcanDiagnostic
         diag = VulcanDiagnostic(root)
         ok, _ = diag.check_environment()
-
         if not ok:
             diag.render_report()
             sys.exit(1)
 
-        from ..tools.vulcan.autopilot import VulcanAutopilot
+        from doxoade.tools.vulcan.autopilot import VulcanAutopilot
         autopilot = VulcanAutopilot(root)
 
-        candidates, mode = [], "AUTOMÁTICO (baseado em telemetria)"
+        candidates, mode = [], "AUTOMÁTICO"
 
         if path:
             abs_path = os.path.abspath(path)
             if os.path.isfile(abs_path):
                 mode = f"MANUAL (arquivo: {os.path.basename(abs_path)})"
-                candidates.append({'file': abs_path})
+                candidates.append({"file": abs_path})
             elif os.path.isdir(abs_path):
                 mode = f"MANUAL (diretório: {os.path.basename(abs_path)})"
-                from ..dnm import DNM
+                from doxoade.dnm import DNM
                 dnm = DNM(abs_path)
-                py_files = dnm.scan(extensions=['py'])
-                candidates = [{'file': f} for f in py_files]
+                py_files = dnm.scan(extensions=["py"])
+                candidates = [{"file": f} for f in py_files]
 
         engine_label = (
             f"{Fore.YELLOW}LEGADO{Style.RESET_ALL}"
@@ -632,18 +1055,26 @@ def ignite(ctx, path, force, jobs, no_pitstop, streaming, hybrid, scan_only):
             else f"{Fore.GREEN}PITSTOP{Style.RESET_ALL}"
             + (f" {Fore.CYAN}+streaming{Style.RESET_ALL}" if streaming else "")
         )
-        click.echo(f"{Fore.CYAN}   > Modo de Operação : {mode}{Style.RESET_ALL}")
-        click.echo(f"{Fore.CYAN}   > Engine          : {engine_label}{Style.RESET_ALL}")
+        click.echo(f"{Fore.CYAN}   > Modo : {mode}{Style.RESET_ALL}")
+        click.echo(f"{Fore.CYAN}   > Engine: {engine_label}{Style.RESET_ALL}")
+
+        _env_ctx = SIMDEnvironment(simd_ctx) if simd_ctx else _NullContext()
 
         try:
-            autopilot.scan_and_optimize(
-                candidates    = candidates,
-                force_recompile = force,
-                max_workers   = jobs,
-                use_pitstop   = not no_pitstop,
-                streaming     = streaming,
-            )
-            click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}✅ [VULCAN] Forja concluída.{Style.RESET_ALL}")
+            with _env_ctx:
+                autopilot.scan_and_optimize(
+                    candidates      = candidates,
+                    force_recompile = force,
+                    max_workers     = jobs,
+                    use_pitstop     = not no_pitstop,
+                    streaming       = streaming,
+                )
+            click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}? [VULCAN] Forja concluída.{Style.RESET_ALL}")
+            if simd_ctx:
+                click.echo(
+                    f"   {Fore.MAGENTA}? SIMD {simd_ctx.effective_caps().best.upper()} "
+                    f"aplicado.{Style.RESET_ALL}"
+                )
         except KeyboardInterrupt:
             _sigint_handler(None, None)
         except Exception as e:
@@ -731,11 +1162,12 @@ def _run_hybrid_with_optimizer(target, root, force, registry=None):
     ignite = HybridIgnite(root)
     files  = HybridIgnite._collect_files(Path(target).resolve())
 
-    opt_summary       = []
-    total_excluded    = 0
-    total_aggressive  = 0
-    total_regressions = 0
-    total_promoted    = 0
+    opt_summary        = []
+    obj_reduce_summary = []
+    total_excluded     = 0
+    total_aggressive   = 0
+    total_regressions  = 0
+    total_promoted     = 0
 
     for py_file in files:
         scan = ignite._scanner.scan(str(py_file))
@@ -801,6 +1233,20 @@ def _run_hybrid_with_optimizer(target, root, force, registry=None):
                 f"{Fore.GREEN}{opt_report.estimated_gain}{Style.RESET_ALL}"
             )
 
+        # Redução de objetos temporários
+        if _OBJREDUCE_AVAILABLE and pyx_path.exists():
+            try:
+                _, red_result = reduce_pyx_file(pyx_path, level=2)
+                if red_result.has_changes:
+                    obj_reduce_summary.append(red_result)
+                    click.echo(
+                        f"   {Fore.CYAN}  ⬡ obj-reduce{Style.RESET_ALL}: "
+                        f"{len(red_result.changes)} transformação(ões), "
+                        f"~{red_result.allocs_removed} alloc(s) eliminada(s)"
+                    )
+            except Exception:
+                pass
+
         # Compila
         module_name = pyx_path.stem
         ok, err = ignite._compile(module_name)
@@ -853,10 +1299,18 @@ def _run_hybrid_with_optimizer(target, root, force, registry=None):
             click.echo(
                 f"    {r.module_name:<30} → {Fore.GREEN}{r.estimated_gain}{Style.RESET_ALL}"
             )
-            for t in r.transformations[:5]:
-                click.echo(f"      {Style.DIM}• {t}{Style.RESET_ALL}")
-            if len(r.transformations) > 5:
-                click.echo(f"      {Style.DIM}  (+{len(r.transformations)-5} mais){Style.RESET_ALL}")
+
+    # Resumo obj-reduce
+    if obj_reduce_summary:
+        total_allocs = sum(r.allocs_removed for r in obj_reduce_summary)
+        total_changes = sum(len(r.changes) for r in obj_reduce_summary)
+        click.echo(
+            f"\n{Fore.CYAN}"
+            f"  ⬡ OBJ-REDUCE: {total_changes} transformação(ões) em "
+            f"{len(obj_reduce_summary)} módulo(s), "
+            f"~{total_allocs} alloc(s) eliminada(s)"
+            f"{Style.RESET_ALL}"
+        )
 
 
 @vulcan_group.command('pitstop')
@@ -900,8 +1354,13 @@ def vulcan_pitstop(clear_cache):
 @click.option('--list-installed', is_flag=True, help="Lista libs instaladas no site-packages com contagem de .py.")
 @click.option('--optimize', is_flag=True, help="Apenas otimiza os fontes da biblioteca em cópia isolada. NÃO compila, NÃO gera binários.(exige --target)")
 @click.option('--keep-temp', is_flag=True, help="Mantém a cópia temporária da lib para inspeção/debug.")
+@click.option('--simd',         is_flag=True,  help="Ativa otimizações SIMD (AVX/SSE) na compilação.")
+@click.option('--simd-level',   default="auto",
+              type=click.Choice(["auto", "native", "sse2", "avx", "avx2", "avx512f"]),
+              show_default=True,
+              help="Nível SIMD máximo (padrão: auto-detecta).")
 @click.pass_context
-def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, keep_temp):
+def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, keep_temp, simd, simd_level):
     """Compila funções elegíveis de dependências já instaladas no venv.
 
     Trabalha sempre com uma CÓPIA isolada dos fontes — o venv original
@@ -1132,7 +1591,14 @@ def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, keep_temp):
             from ..tools.vulcan.lib_forge import LibForge
 
             forge = LibForge(root)
-            success, result_message = forge.compile_library(target)
+            simd_ctx = _simd_context_or_none(simd, simd_level)
+
+            if simd_ctx:
+                eff = simd_ctx.effective_caps()
+                click.echo(f"  {Fore.MAGENTA}? SIMD:{Style.RESET_ALL} {eff.best.upper()} — {estimate_gain(eff)}")
+
+            success, result_message = _lib_compile_with_simd(target, root, simd_ctx)
+#            success, result_message = forge.compile_library(target)
 
             if success:
                 click.echo(
@@ -1179,6 +1645,24 @@ def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, keep_temp):
 
         else:
             click.echo(ctx.get_help())
+
+def _lib_compile_with_simd(
+    target: str,
+    root: str,
+    simd_ctx: "SIMDContext | None",
+) -> tuple[bool, str]:
+    """
+    Compila uma lib com ou sem SIMD.
+    Encapsula a decisão para uso no comando `lib`.
+    """
+    if simd_ctx and _SIMD_AVAILABLE:
+        forge = SIMDForge(root, simd_ctx)
+        return forge.compile_library(target)
+
+    # Fallback: compilação normal via LibForge
+    from doxoade.tools.vulcan.lib_forge import LibForge
+    forge = LibForge(root)
+    return forge.compile_library(target)
 
 
 @vulcan_group.command('benchmark')
@@ -1764,7 +2248,7 @@ def vulcan_probe(target_path, verbose):
     # Monta índice hash(abs_path)[:6] → py_path
     hash_index: dict[str, Path] = {}
     for py in py_files:
-        h = hashlib.sha256(str(py.resolve()).encode()).hexdigest()[:6]
+        h = hashlib.sha256(str(py.resolve()).encode()).hexdigest()[:6]  # OBJ-REDUCE: slice→memoryview
         hash_index[h] = py
 
     # Tabela de status
@@ -1925,7 +2409,7 @@ def vulcan_verify(target_path, verbose):
         for f in files:
             if f.endswith(".py"):
                 p = Path(r) / f
-                h = hashlib.sha256(str(p.resolve()).encode()).hexdigest()[:6]
+                h = hashlib.sha256(str(p.resolve()).encode()).hexdigest()[:6]  # OBJ-REDUCE: slice→memoryview
                 py_index[h] = p
 
     results = []
@@ -2033,7 +2517,35 @@ except Exception as e:
         click.echo(f"\n  {Fore.RED}✘ Nenhum redirecionamento ativo. "
                    f"Execute 'doxoade vulcan module --path {target_path} --auto-main'.{Style.RESET_ALL}")
     click.echo()
-    
+
+
+# ----------------------------------------------------------------------------
+# Utilitários internos
+# ----------------------------------------------------------------------------
+
+class _NullContext:
+    """Context manager inerte — substitui SIMDEnvironment quando --simd não ativo."""
+    def __enter__(self): return self
+    def __exit__(self, *_): pass
+
+
+def _sigint_handler(signum, frame):
+    click.echo(f"\n{Fore.RED}Comando interrompido.{Style.RESET_ALL}")
+    sys.exit(130)
+
+
+def _print_vulcan_forensic(scope: str, e: Exception):
+    import traceback
+    tb = traceback.extract_tb(e.__traceback__)
+    last = tb[-1] if tb else None
+    fname = last.filename.split(os.sep)[-1] if last else "?"
+    lineno = last.lineno if last else 0
+    click.echo(
+        f"\n\033[1;34m[ ¦ FORENSIC:VULCAN:{scope} ]\033[0m "
+        f"\033[1m¦ {fname}:{lineno}\033[0m"
+    )
+    click.echo(f"\033[31m ¦ {type(e).__name__}: {e}\n\033[0m")
+
 
 def _print_vulcan_forensic(scope: str, e: Exception):
     """Interface Forense para falhas de metalurgia (MPoT-5.3)."""

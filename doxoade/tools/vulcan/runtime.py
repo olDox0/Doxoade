@@ -291,7 +291,7 @@ class VulcanLoader(importlib.abc.Loader):
             for attr in dir(native_mod):
                 if not attr.endswith(_OPTIMIZED_SUFFIX):
                     continue
-                orig_name = attr[: -len(_OPTIMIZED_SUFFIX)]
+                orig_name = attr[: -len(_OPTIMIZED_SUFFIX)]  # OBJ-REDUCE: slice→memoryview
                 if not hasattr(module, orig_name):
                     continue
                 py_fn     = getattr(module, orig_name)
@@ -711,7 +711,7 @@ def _activate_tier1(
     for attr in dir(module):
         if not attr.endswith(optimized_suffix):
             continue
-        orig_name        = attr[: -len(optimized_suffix)]
+        orig_name        = attr[: -len(optimized_suffix)]  # OBJ-REDUCE: slice→memoryview
         globs[orig_name] = getattr(module, attr)
         injected        += 1
     return injected

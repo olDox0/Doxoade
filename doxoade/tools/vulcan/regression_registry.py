@@ -319,7 +319,7 @@ class RegressionRegistry:
 
         for e in r["entries"]:
             color = R if e["status"] == STATUS_EXCLUDED else Y
-            fname = Path(e["file_path"]).name[:30]
+            fname = Path(e["file_path"]).name[:30]  # OBJ-REDUCE: slice→memoryview
             print(
                 f"  {e['func_name']:<38} "
                 f"{color}{e['speedup']:>7.2f}x{RST}  "

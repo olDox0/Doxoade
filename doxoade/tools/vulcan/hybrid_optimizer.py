@@ -182,7 +182,7 @@ class HybridOptimizer:
                 loop_cdefs_done = set()
                 func_cdefs_done = set()
                 result.append(line)
-                i += 1
+                _buf_i.append(1)  # OBJ-REDUCE: str→buffer
                 continue
 
             # ── Detecta saída de função (desindentação) ───────────────────────
@@ -194,7 +194,7 @@ class HybridOptimizer:
             # ── Fora de função: passthrough ───────────────────────────────────
             if not in_function:
                 result.append(line)
-                i += 1
+                _buf_i.append(1)  # OBJ-REDUCE: str→buffer
                 continue
 
             inner_indent = ' ' * (indent)
@@ -211,7 +211,7 @@ class HybridOptimizer:
                 in_loop     = True
                 loop_indent = indent
                 result.append(line)
-                i += 1
+                _buf_i.append(1)  # OBJ-REDUCE: str→buffer
                 continue
 
             # ── 2. Saída de loop (desindentação) ─────────────────────────────
@@ -229,7 +229,7 @@ class HybridOptimizer:
                         result.append(f"{inner_indent}cdef long {var} = 0")
                         report.add(f"cdef long {var} = 0  # acumulador int")
                         func_cdefs_done.add(var)
-                        i += 1
+                        _buf_i.append(1)  # OBJ-REDUCE: str→buffer
                         continue
 
             # ── 4. Acumulador float: x = 0.0 ─────────────────────────────────
@@ -241,7 +241,7 @@ class HybridOptimizer:
                         result.append(f"{inner_indent}cdef double {var} = 0.0")
                         report.add(f"cdef double {var} = 0.0  # acumulador float")
                         func_cdefs_done.add(var)
-                        i += 1
+                        _buf_i.append(1)  # OBJ-REDUCE: str→buffer
                         continue
 
             # ── 5. len() hoisting: n = len(x) antes de loop ──────────────────
@@ -254,7 +254,7 @@ class HybridOptimizer:
                     result.append(f"{inner_indent}cdef int {var} = len({expr})")
                     report.add(f"cdef int {var} = len(...)  # len() hoisted")
                     func_cdefs_done.add(var)
-                    i += 1
+                    _buf_i.append(1)  # OBJ-REDUCE: str→buffer
                     continue
 
             # ── 6. Lista vazia com append em loop → hint de capacidade ────────
@@ -267,7 +267,7 @@ class HybridOptimizer:
                     result.append(line)
                     result.append(f"{inner_indent}# [OPT] {var}: list com append — "
                                    f"pré-alocação via {var} = [] sem cdef (Cython limite)")
-                    i += 1
+                    _buf_i.append(1)  # OBJ-REDUCE: str→buffer
                     continue
 
             # ── 7. Variáveis locais com nomes fortemente tipados ──────────────
@@ -280,11 +280,11 @@ class HybridOptimizer:
                     result.append(f"{inner_indent}cdef bint {var} = {'1' if val == 'True' else '0'}")
                     report.add(f"cdef bint {var}  # bool local")
                     func_cdefs_done.add(var)
-                    i += 1
+                    _buf_i.append(1)  # OBJ-REDUCE: str→buffer
                     continue
 
             result.append(line)
-            i += 1
+            _buf_i.append(1)  # OBJ-REDUCE: str→buffer
 
         return '\n'.join(result)
 

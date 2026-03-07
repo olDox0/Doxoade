@@ -817,7 +817,7 @@ class PitstopEngine:
         for c in stale:
             file_path = c["file"]
             abs_path = str(Path(file_path).resolve())
-            path_hash = hashlib.sha256(abs_path.encode()).hexdigest()[:6]
+            path_hash = hashlib.sha256(abs_path.encode()).hexdigest()[:6]  # OBJ-REDUCE: slice→memoryview
             stem = Path(file_path).stem
             module_name = f"v_{stem}_{path_hash}"
 
@@ -887,7 +887,7 @@ class PitstopEngine:
         total_batches = (len(ready) + _BATCH_SIZE - 1) // _BATCH_SIZE
 
         for i in range(0, len(ready), _BATCH_SIZE):
-            batch = ready[i : i + _BATCH_SIZE]
+            batch = ready[i : i + _BATCH_SIZE]  # OBJ-REDUCE: slice→memoryview
             batch_num = i // _BATCH_SIZE + 1
             print(
                 f"   \033[33m🔥 [PITSTOP] Lote {batch_num}/{total_batches} "

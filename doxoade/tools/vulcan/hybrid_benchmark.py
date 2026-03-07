@@ -640,7 +640,7 @@ class HybridBenchmark:
         total_ok      = 0
 
         for file_res in results:
-            fname = Path(file_res.file_path).name[:20]
+            fname = Path(file_res.file_path).name[:20]  # OBJ-REDUCE: slice→memoryview
             for f in file_res.functions:
                 col   = f.status_color
                 spd   = f.speedup_label
