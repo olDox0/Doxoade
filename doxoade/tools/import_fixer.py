@@ -21,6 +21,44 @@ class FixResult:
     details: list[str]
 
 
+def _detect_replacements(src: str, modules: set[str]) -> tuple[dict[ast.stmt, str], list[str]]:
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return {}, []
+
+    replacements: dict[ast.stmt, str] = {}
+    messages: list[str] = []
+
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Import, ast.ImportFrom)):
+            continue
+
+        repl: dict[str, str] = {}
+
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if _module_exists(a.name, modules):
+                    continue
+                cand = _best_candidate(a.name, modules)
+                if cand:
+                    repl[a.name] = cand
+                    messages.append(f"{a.name} -> {cand}")
+
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            if not _module_exists(node.module, modules):
+                cand = _best_candidate(node.module, modules)
+                if cand:
+                    repl[node.module] = cand
+                    messages.append(f"{node.module} -> {cand}")
+
+        new_stmt = _build_import_stmt(node, repl)
+        if new_stmt:
+            replacements[node] = new_stmt
+
+    return replacements, messages
+
+
 def _iter_python_files(root: Path):
     for p in root.rglob("*.py"):
         if any(part in _IGNORED_DIRS for part in p.parts):
@@ -110,39 +148,7 @@ def _replace_segment(src: str, node: ast.stmt, new_stmt: str) -> str:
 
 def fix_imports_in_file(file_path: Path, modules: set[str]) -> tuple[bool, int, list[str]]:
     src = file_path.read_text(encoding="utf-8")
-    try:
-        tree = ast.parse(src)
-    except SyntaxError:
-        return False, 0, []
-
-    replacements: dict[ast.stmt, str] = {}
-    messages: list[str] = []
-
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.Import, ast.ImportFrom)):
-            continue
-
-        repl: dict[str, str] = {}
-
-        if isinstance(node, ast.Import):
-            for a in node.names:
-                if _module_exists(a.name, modules):
-                    continue
-                cand = _best_candidate(a.name, modules)
-                if cand:
-                    repl[a.name] = cand
-                    messages.append(f"{a.name} -> {cand}")
-
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            if not _module_exists(node.module, modules):
-                cand = _best_candidate(node.module, modules)
-                if cand:
-                    repl[node.module] = cand
-                    messages.append(f"{node.module} -> {cand}")
-
-        new_stmt = _build_import_stmt(node, repl)
-        if new_stmt:
-            replacements[node] = new_stmt
+    replacements, messages = _detect_replacements(src, modules)
 
     if not replacements:
         return False, 0, []
@@ -173,3 +179,22 @@ def fix_project_imports(root: Path) -> FixResult:
                 details.append(f"{py}: {m}")
 
     return FixResult(files_changed=files_changed, imports_changed=imports_changed, details=details)
+
+
+def verify_project_imports(root: Path) -> FixResult:
+    """Analisa imports locais que parecem desatualizados sem alterar arquivos."""
+    modules = collect_local_modules(root)
+    files_with_issues = 0
+    imports_flagged = 0
+    details: list[str] = []
+
+    for py in _iter_python_files(root):
+        src = py.read_text(encoding="utf-8")
+        replacements, messages = _detect_replacements(src, modules)
+        if replacements:
+            files_with_issues += 1
+            imports_flagged += len(replacements)
+            for m in messages:
+                details.append(f"{py}: {m}")
+
+    return FixResult(files_changed=files_with_issues, imports_changed=imports_flagged, details=details)
