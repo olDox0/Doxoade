@@ -21,7 +21,21 @@ class FixResult:
     details: list[str]
 
 
-def _detect_replacements(src: str, modules: set[str], package_depth: int) -> tuple[dict[ast.stmt, str], list[str]]:
+def _resolve_relative_module(package_name: str, level: int, module: str) -> str | None:
+    parts = package_name.split(".") if package_name else []
+    up = level - 1
+    if up > len(parts):
+        return None
+    base = parts[:len(parts) - up]
+    return ".".join(base + [module]) if module else ".".join(base)
+
+
+def _detect_replacements(
+    src: str,
+    modules: set[str],
+    package_depth: int,
+    package_name: str,
+) -> tuple[dict[ast.stmt, str], list[str]]:
     try:
         tree = ast.parse(src)
     except SyntaxError:
@@ -53,8 +67,12 @@ def _detect_replacements(src: str, modules: set[str], package_depth: int) -> tup
                         repl[node.module] = cand
                         messages.append(f"{node.module} -> {cand}")
             else:
+                resolved = _resolve_relative_module(package_name, node.level, node.module)
+                if resolved and _module_exists(resolved, modules) and node.level >= 3:
+                    repl[node.module] = resolved
+                    messages.append(f"{'.' * node.level}{node.module} -> {resolved}")
                 # Import relativo que sobe além da profundidade do pacote é inválido.
-                if node.level > package_depth:
+                elif node.level > package_depth:
                     suffix = node.module
                     candidates = [m for m in modules if m == suffix or m.endswith("." + suffix)]
                     if len(candidates) == 1:
@@ -170,7 +188,9 @@ def _package_depth_for_file(root: Path, file_path: Path) -> int:
 def fix_imports_in_file(root: Path, file_path: Path, modules: set[str]) -> tuple[bool, int, list[str]]:
     src = file_path.read_text(encoding="utf-8")
     package_depth = _package_depth_for_file(root, file_path)
-    replacements, messages = _detect_replacements(src, modules, package_depth)
+    module_name = _module_name_for_path(root, file_path)
+    package_name = module_name.rsplit('.', 1)[0] if '.' in module_name else ''
+    replacements, messages = _detect_replacements(src, modules, package_depth, package_name)
 
     if not replacements:
         return False, 0, []
@@ -213,7 +233,9 @@ def verify_project_imports(root: Path) -> FixResult:
     for py in _iter_python_files(root):
         src = py.read_text(encoding="utf-8")
         package_depth = _package_depth_for_file(root, py)
-        replacements, messages = _detect_replacements(src, modules, package_depth)
+        module_name = _module_name_for_path(root, py)
+        package_name = module_name.rsplit('.', 1)[0] if '.' in module_name else ''
+        replacements, messages = _detect_replacements(src, modules, package_depth, package_name)
         if replacements:
             files_with_issues += 1
             imports_flagged += len(replacements)

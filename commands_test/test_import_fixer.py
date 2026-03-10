@@ -73,3 +73,26 @@ def test_fix_imports_rewrites_invalid_relative_to_absolute_module(tmp_path):
 
     assert result.imports_changed == 1
     assert f.read_text(encoding="utf-8") == "from doxoade.tools.memory_pool import finding_arena\n"
+
+
+def test_verify_flags_deep_relative_import_for_canonical_absolute(tmp_path):
+    root = tmp_path
+    (root / "doxoade" / "commands" / "check_systems").mkdir(parents=True)
+    (root / "doxoade" / "tools").mkdir(parents=True)
+    (root / "doxoade" / "__init__.py").write_text("")
+    (root / "doxoade" / "commands" / "__init__.py").write_text("")
+    (root / "doxoade" / "commands" / "check_systems" / "__init__.py").write_text("")
+    (root / "doxoade" / "tools" / "__init__.py").write_text("")
+    (root / "doxoade" / "tools" / "memory_pool.py").write_text("def finding_arena():\n    return 1\n")
+
+    f = root / "doxoade" / "commands" / "check_systems" / "check_engine.py"
+    original = "from ...tools.memory_pool import finding_arena\n"
+    f.write_text(original, encoding="utf-8")
+
+    verify = verify_project_imports(root)
+    assert verify.imports_changed == 1
+    assert f.read_text(encoding="utf-8") == original
+
+    fixed = fix_project_imports(root)
+    assert fixed.imports_changed == 1
+    assert f.read_text(encoding="utf-8") == "from doxoade.tools.memory_pool import finding_arena\n"
