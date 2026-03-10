@@ -4,7 +4,7 @@ import os
 import re
 from doxoade.tools.doxcolors import Fore
 
-def _run_git_command(args, capture_output=False, silent_fail=False):
+def _run_git_command(args, capture_output=False, silent_fail=False, cwd=None):
     """Executa um comando git de forma segura e codificada."""
     try:
         env = os.environ.copy()
@@ -13,7 +13,7 @@ def _run_git_command(args, capture_output=False, silent_fail=False):
         
         result = subprocess.run(
             command, capture_output=capture_output, text=True, check=True,
-            encoding='utf-8', errors='replace', env=env
+            encoding='utf-8', errors='replace', env=env, cwd=cwd
         )
         return result.stdout.strip() if capture_output else True
     except (FileNotFoundError, subprocess.CalledProcessError):
@@ -35,7 +35,7 @@ def _get_git_commit_hash(path):
     finally: 
         os.chdir(original_dir)
         
-def _get_detailed_diff_stats(show_code: bool = False, target_path: str = None):
+def _get_detailed_diff_stats(show_code: bool = False, target_path: str = None, cwd: str = None):
     """
     Parser de Estados Estrito (MPoT-1). 
     Garante que metadados do Git não vazem para o relatório semântico.
@@ -45,19 +45,22 @@ def _get_detailed_diff_stats(show_code: bool = False, target_path: str = None):
     # 1. Coleta de estatísticas brutas
     num_args = ["diff", "--numstat"]
     if target_path: num_args.extend(["--", target_path])
-    numstat_raw = _run_git_command(num_args, capture_output=True, silent_fail=True)
+    numstat_raw = _run_git_command(num_args, capture_output=True, silent_fail=True, cwd=cwd)
     
     line_counts = {}
     if numstat_raw:
         for line in numstat_raw.splitlines():
             parts = line.split()
             if len(parts) >= 3:
-                line_counts[parts[2]] = {'added': int(parts[0]), 'removed': int(parts[1])}
+                # Arquivos binários podem vir como '-' no numstat.
+                added = int(parts[0]) if parts[0].isdigit() else 0
+                removed = int(parts[1]) if parts[1].isdigit() else 0
+                line_counts[parts[2]] = {'added': added, 'removed': removed}
 
     # 2. Execução do Diff com controle de contexto
     diff_args = ["diff", "-U1" if show_code else "-U0", "--no-color"]
     if target_path: diff_args.extend(["--", target_path])
-    diff_raw = _run_git_command(diff_args, capture_output=True, silent_fail=True)
+    diff_raw = _run_git_command(diff_args, capture_output=True, silent_fail=True, cwd=cwd)
     
     changes = []
     current_file = None
@@ -150,10 +153,10 @@ def _get_detailed_diff_stats(show_code: bool = False, target_path: str = None):
         
     return changes
     
-def _get_last_commit_info():
+def _get_last_commit_info(cwd: str = None):
     """Retorna informações detalhadas do último commit (Chief-Style)."""
     fmt = "%h|%an|%as|%s" # hash | author | date | subject
-    raw = _run_git_command(['log', '-1', f'--format={fmt}'], capture_output=True, silent_fail=True)
+    raw = _run_git_command(['log', '-1', f'--format={fmt}'], capture_output=True, silent_fail=True, cwd=cwd)
     if not raw: return None
     parts = raw.strip().split('|')
     if len(parts) < 4: return None

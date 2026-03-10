@@ -11,6 +11,19 @@ from ..tools.git import (
 )
 #from doxoade.tools.git import (
 class SystemInspector:
+
+    @staticmethod
+    def _resolve_git_cwd(target_path: str = None):
+        """Resolve diretório-base para comandos git em diagnose por caminho."""
+        if not target_path:
+            return None
+
+        p = os.path.abspath(target_path)
+        if os.path.isdir(p):
+            return p
+        if os.path.isfile(p):
+            return os.path.dirname(p)
+        return None
     
     def check_environment(self):
         """Coleta dados vitais do ambiente de execução."""
@@ -52,25 +65,41 @@ class SystemInspector:
     def check_git_health(self, detailed: bool = False, show_code: bool = False, target_path: str = None):
         """Verifica o repositório com suporte a foco em path específico."""
         try:
+            git_cwd = self._resolve_git_cwd(target_path)
+
             # Verifica se é repo
-            is_repo = _run_git_command(['rev-parse', '--is-inside-work-tree'], capture_output=True, silent_fail=True)
+            is_repo = _run_git_command(
+                ['rev-parse', '--is-inside-work-tree'],
+                capture_output=True,
+                silent_fail=True,
+                cwd=git_cwd,
+            )
             if not is_repo or is_repo.strip() != 'true': return {"is_git_repo": False}
-            branch = _run_git_command(['branch', '--show-current'], capture_output=True, silent_fail=True)
+            branch = _run_git_command(
+                ['branch', '--show-current'],
+                capture_output=True,
+                silent_fail=True,
+                cwd=git_cwd,
+            )
             
             # Status filtrado por path se fornecido
             status_cmd = ['status', '--porcelain']
             if target_path: status_cmd.extend(['--', target_path])
-            status = _run_git_command(status_cmd, capture_output=True, silent_fail=True)
+            status = _run_git_command(status_cmd, capture_output=True, silent_fail=True, cwd=git_cwd)
             
             git_data = {
                 "is_git_repo": True,
                 "branch": branch.strip() if branch else "HEAD",
                 "dirty_tree": bool(status and status.strip()),
                 "pending_count": len(status.splitlines()) if status else 0,
-                "last_commit_info": _get_last_commit_info()
+                "last_commit_info": _get_last_commit_info(cwd=git_cwd)
             }
             if detailed and git_data['dirty_tree']:
-                git_data['changes'] = _get_detailed_diff_stats(show_code=show_code, target_path=target_path)
+                git_data['changes'] = _get_detailed_diff_stats(
+                    show_code=show_code,
+                    target_path=target_path,
+                    cwd=git_cwd,
+                )
             else:
                 git_data['pending_files'] = [l.strip() for l in status.splitlines()] if status else []
 
