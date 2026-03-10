@@ -21,7 +21,7 @@ class FixResult:
     details: list[str]
 
 
-def _detect_replacements(src: str, modules: set[str]) -> tuple[dict[ast.stmt, str], list[str]]:
+def _detect_replacements(src: str, modules: set[str], package_depth: int) -> tuple[dict[ast.stmt, str], list[str]]:
     try:
         tree = ast.parse(src)
     except SyntaxError:
@@ -45,12 +45,21 @@ def _detect_replacements(src: str, modules: set[str]) -> tuple[dict[ast.stmt, st
                     repl[a.name] = cand
                     messages.append(f"{a.name} -> {cand}")
 
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            if not _module_exists(node.module, modules):
-                cand = _best_candidate(node.module, modules)
-                if cand:
-                    repl[node.module] = cand
-                    messages.append(f"{node.module} -> {cand}")
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            if node.level == 0:
+                if not _module_exists(node.module, modules):
+                    cand = _best_candidate(node.module, modules)
+                    if cand:
+                        repl[node.module] = cand
+                        messages.append(f"{node.module} -> {cand}")
+            else:
+                # Import relativo que sobe além da profundidade do pacote é inválido.
+                if node.level > package_depth:
+                    suffix = node.module
+                    candidates = [m for m in modules if m == suffix or m.endswith("." + suffix)]
+                    if len(candidates) == 1:
+                        repl[node.module] = candidates[0]
+                        messages.append(f"{'.' * node.level}{node.module} -> {candidates[0]}")
 
         new_stmt = _build_import_stmt(node, repl)
         if new_stmt:
@@ -124,7 +133,7 @@ def _build_import_stmt(node: ast.stmt, repl: dict[str, str]) -> str | None:
             return None
         return "import " + ", ".join(names)
 
-    if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+    if isinstance(node, ast.ImportFrom) and node.module:
         new_mod = repl.get(node.module, node.module)
         if new_mod == node.module:
             return None
@@ -146,9 +155,22 @@ def _replace_segment(src: str, node: ast.stmt, new_stmt: str) -> str:
     return src[:s] + indent + new_stmt + src[e:]
 
 
-def fix_imports_in_file(file_path: Path, modules: set[str]) -> tuple[bool, int, list[str]]:
+def _package_depth_for_file(root: Path, file_path: Path) -> int:
+    rel = file_path.relative_to(root)
+    parts = list(rel.parts)
+    if not parts:
+        return 0
+    if parts[-1] == "__init__.py":
+        parts = parts[:-1]
+    else:
+        parts = parts[:-1]
+    return len(parts)
+
+
+def fix_imports_in_file(root: Path, file_path: Path, modules: set[str]) -> tuple[bool, int, list[str]]:
     src = file_path.read_text(encoding="utf-8")
-    replacements, messages = _detect_replacements(src, modules)
+    package_depth = _package_depth_for_file(root, file_path)
+    replacements, messages = _detect_replacements(src, modules, package_depth)
 
     if not replacements:
         return False, 0, []
@@ -171,7 +193,7 @@ def fix_project_imports(root: Path) -> FixResult:
     details: list[str] = []
 
     for py in _iter_python_files(root):
-        changed, n, msgs = fix_imports_in_file(py, modules)
+        changed, n, msgs = fix_imports_in_file(root, py, modules)
         if changed:
             files_changed += 1
             imports_changed += n
@@ -190,7 +212,8 @@ def verify_project_imports(root: Path) -> FixResult:
 
     for py in _iter_python_files(root):
         src = py.read_text(encoding="utf-8")
-        replacements, messages = _detect_replacements(src, modules)
+        package_depth = _package_depth_for_file(root, py)
+        replacements, messages = _detect_replacements(src, modules, package_depth)
         if replacements:
             files_with_issues += 1
             imports_flagged += len(replacements)

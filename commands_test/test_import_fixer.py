@@ -55,3 +55,21 @@ def test_verify_project_imports_detects_without_rewrite(tmp_path):
     assert result.files_changed == 1
     assert result.imports_changed == 1
     assert app.read_text(encoding="utf-8") == original
+
+
+def test_fix_imports_rewrites_invalid_relative_to_absolute_module(tmp_path):
+    root = tmp_path
+    (root / "doxoade" / "commands").mkdir(parents=True)
+    (root / "doxoade" / "tools").mkdir(parents=True)
+    (root / "doxoade" / "__init__.py").write_text("")
+    (root / "doxoade" / "commands" / "__init__.py").write_text("")
+    (root / "doxoade" / "tools" / "__init__.py").write_text("")
+    (root / "doxoade" / "tools" / "memory_pool.py").write_text("def finding_arena():\n    return 1\n")
+
+    f = root / "doxoade" / "commands" / "sample.py"
+    f.write_text("from ...tools.memory_pool import finding_arena\n", encoding="utf-8")
+
+    result = fix_project_imports(root)
+
+    assert result.imports_changed == 1
+    assert f.read_text(encoding="utf-8") == "from doxoade.tools.memory_pool import finding_arena\n"

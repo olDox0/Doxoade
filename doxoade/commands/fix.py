@@ -10,12 +10,14 @@ from ..tools.import_fixer import fix_project_imports, verify_project_imports
 @click.command('fix')
 @click.option('--imports', 'fix_imports', is_flag=True, help='Corrige imports quebrados por arquivos/módulos movidos.')
 @click.option('--import-verify', 'import_verify', is_flag=True, help='Apenas verifica imports suspeitos sem modificar arquivos.')
+@click.option('--imports-verify', 'import_verify_alias', is_flag=True, hidden=True)
 @click.argument('path', required=False, type=click.Path(exists=True, file_okay=True, dir_okay=True, path_type=Path))
-def fix(fix_imports: bool, import_verify: bool, path: Path | None):
+def fix(fix_imports: bool, import_verify: bool, import_verify_alias: bool, path: Path | None):
     """Sistema de auto-correção do projeto."""
     target = (path or Path('.')).resolve()
     root = target if target.is_dir() else target.parent
 
+    import_verify = import_verify or import_verify_alias
     params = {"imports": fix_imports, "import_verify": import_verify, "path": str(target)}
     with ExecutionLogger('fix', str(root), params):
         if not fix_imports and not import_verify:
