@@ -13,12 +13,12 @@ Subcomandos de compilação/forja do Vulcan.
 import os
 import sys
 import signal
-import site
 import click
 from pathlib import Path
 
 from doxoade.tools.doxcolors import Fore, Style
 from ..shared_tools import ExecutionLogger, _find_project_root
+from ..tools.vulcan.site_packages import site_packages_dirs_for_listing
 from .vulcan_cmd import (
     _sigint_handler, _print_vulcan_forensic, _patch_vulcan_forge,
     _simd_context_or_none, _NullContext,
@@ -50,45 +50,6 @@ def _load_registry_for_ignite(root, no_registry=False):
     except Exception:
         return None
 
-
-def _site_packages_dirs_for_listing() -> list[str]:
-    """Resolve diretórios de libs priorizando o venv ativo no terminal."""
-    dirs: list[str] = []
-
-    venv = os.environ.get("VIRTUAL_ENV")
-    if venv:
-        venv_path = Path(venv)
-        win_site = venv_path / "Lib" / "site-packages"
-        if win_site.is_dir():
-            dirs.append(str(win_site))
-
-        lib_path = venv_path / "lib"
-        if lib_path.is_dir():
-            for p in sorted(lib_path.glob("python*/site-packages")):
-                if p.is_dir():
-                    dirs.append(str(p))
-
-    if dirs:
-        return dirs
-
-    try:
-        dirs.extend(site.getsitepackages())
-    except AttributeError:
-        pass
-
-    try:
-        user_sp = site.getusersitepackages()
-        if user_sp:
-            dirs.append(user_sp)
-    except AttributeError:
-        pass
-
-    for p in sys.path:
-        if "site-packages" in p or "dist-packages" in p:
-            dirs.append(p)
-
-    seen = set()
-    return [d for d in dirs if d and not (d in seen or seen.add(d))]
 
 
 def _lib_compile_with_simd(
@@ -515,7 +476,7 @@ def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, no_optimize
                 f"--- [VULCAN LIB] Libs instaladas no site-packages ---"
                 f"{Style.RESET_ALL}"
             )
-            site_dirs = _site_packages_dirs_for_listing()
+            site_dirs = site_packages_dirs_for_listing()
             rows = []
             for sp in site_dirs:
                 sp_path = Path(sp)
