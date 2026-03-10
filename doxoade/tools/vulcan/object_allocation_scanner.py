@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# doxoade\tools\vulcan\object_allocation_scanner.py
 """
 doxoade/tools/vulcan/object_allocation_scanner.py
 ──────────────────────────────────────────────────────────────────────────────

@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-# doxoade/tools/vulcan/autopilot.py  (patch pitstop v1)
+# doxoade/tools/vulcan/autopilot.py  (patch pitstop v2)
 import hashlib
 import os
+import re
 import sys
 import signal
+import threading
 from pathlib import Path
 from doxoade.tools.doxcolors import Fore
 
@@ -14,24 +16,32 @@ from concurrent.futures import ThreadPoolExecutor
 from collections import Counter
 
 
+# Threshold a partir do qual o modo streaming (forge ∥ compile) é ativado
+_STREAMING_THRESHOLD = 15
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  Legacy forge worker  (mantido como fallback e para compatibilidade)
 # ─────────────────────────────────────────────────────────────────────────────
 def _forge_worker(task: dict) -> dict:
     """
     Worker isolado — roda em thread separada com silo próprio.
-    Agora repassa project_root para que _forge_to_pyx possa gerar opt_py.
+    Repassa project_root para que _forge_to_pyx possa gerar opt_py.
     """
-    try:
-        signal.signal(signal.SIGINT, signal.SIG_IGN)
-    except (OSError, ValueError):
-        pass
+    # FIX #6: verifica thread principal antes de chamar signal.signal()
+    # signal.signal() lança ValueError em threads não-principais — verificar
+    # explicitamente é mais claro do que suprimir a exceção silenciosamente.
+    if threading.current_thread() is threading.main_thread():
+        try:
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+        except OSError:
+            pass
 
     file_path    = task['file_path']
     foundry_str  = task['foundry']
     bin_str      = task['bin_dir']
     pid_registry = task['pid_registry']
-    project_root = task.get('project_root', '')   # ← NOVO
+    project_root = task.get('project_root', '')
     abs_path     = Path(file_path).resolve()
     prevalidated = bool(task.get('prevalidated'))
 
@@ -45,7 +55,7 @@ def _forge_worker(task: dict) -> dict:
             return {'name': abs_path.name, 'ok': False, 'err': f'pulado: {reason}', 'skip': True}
 
     path_hash   = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
-    import re
+    # FIX #3: re importado no topo do módulo — removida a importação local
     _safe_stem  = re.sub(r'[^a-zA-Z0-9_]', '_', abs_path.stem)
     module_name = f"v_{_safe_stem}_{path_hash}"
 
@@ -70,9 +80,8 @@ def _forge_worker(task: dict) -> dict:
             except Exception:
                 pass
 
-        from .environment import VulcanEnvironment
-        from .compiler import VulcanCompiler
-
+        # FIX #4: VulcanEnvironment e VulcanCompiler já importados no topo —
+        # removidas as reimportações redundantes que estavam aqui.
         env          = object.__new__(VulcanEnvironment)
         env.root     = foundry.parent.parent
         env.work_dir = foundry.parent
@@ -186,14 +195,15 @@ class VulcanAutopilot:
         candidates=None,
         force_recompile=False,
         max_workers: int | None = None,
-        use_pitstop: bool = True,     # ← novo: ativa o PitstopEngine
-        streaming: bool = True,      # ← novo: ativa sobreposição forge+compile
+        use_pitstop: bool = True,
+        streaming: bool = True,
     ):
         """
-        Parâmetros novos:
+        Parâmetros:
             use_pitstop  True  → usa PitstopEngine (batch compile, warm-up cache)
                          False → comportamento legado (1 subprocess por módulo)
-            streaming    True  → forge e compilação se sobrepõem (para lotes > 20)
+            streaming    True  → forge e compilação se sobrepõem
+                                 (ativado apenas para lotes > _STREAMING_THRESHOLD)
         """
         auto_mode = not candidates
         if auto_mode:
@@ -223,11 +233,9 @@ class VulcanAutopilot:
 
         max_workers = self._resolve_max_workers(max_workers)
 
-        # ── PitstopEngine (padrão) ────────────────────────────────────────────
         if use_pitstop:
             self._run_pitstop(candidates, force_recompile, max_workers, streaming)
         else:
-            # ── Fallback legado ───────────────────────────────────────────────
             self._run_legacy(candidates, max_workers)
 
         self.compiler.save_telemetry_report(self.root)
@@ -262,7 +270,8 @@ class VulcanAutopilot:
                 print(f"      {Fore.RED}└─ {full_err[:120]}{Fore.RESET}")
 
         try:
-            if streaming and len(candidates) > 15:
+            # FIX #8: _STREAMING_THRESHOLD substitui magic number 15
+            if streaming and len(candidates) > _STREAMING_THRESHOLD:
                 print(f"   {Fore.CYAN}   > Modo streaming ativado "
                       f"(forge ∥ compile){Fore.RESET}")
                 stats = engine.run_streaming(
@@ -286,6 +295,10 @@ class VulcanAutopilot:
             _kill_registry(self._pid_registry)
             raise
 
+        # FIX #7: finally garante cleanup de processos órfãos em qualquer exceção
+        finally:
+            _kill_registry(self._pid_registry)
+
     def _print_pitstop_summary(self, stats: dict) -> None:
         s, f, c = stats["success"], stats["failed"], stats["cached"]
         t_total = stats.get("total_time", 0.0)
@@ -304,7 +317,6 @@ class VulcanAutopilot:
             f"total: {t_total:.2f}s{Fore.RESET}"
         )
 
-        # Dica de speedup: mostra estimativa da economia
         if s > 0:
             # ~2.5s por módulo no método legado (startup Python + Cython import)
             legacy_estimate = s * 2.5
@@ -320,8 +332,12 @@ class VulcanAutopilot:
     def _run_legacy(self, candidates: list[dict], max_workers: int) -> None:
         print(f"   {Fore.YELLOW}[LEGADO] Ativando {max_workers} threads...{Fore.RESET}")
         success_count = 0
-        executor = None
+
         try:
+            # FIX #2: removidos os shutdown() manuais redundantes — o context
+            # manager `with` já garante shutdown(wait=True) no __exit__.
+            # O KeyboardInterrupt propaga naturalmente após o raise, e o __exit__
+            # cuida do encerramento sem chamar shutdown() duas ou três vezes.
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 for result in executor.map(self._process_target, candidates):
                     try:
@@ -335,11 +351,14 @@ class VulcanAutopilot:
                             full_err = (error_msg or "falha desconhecida").strip()
                             print(f"   {Fore.RED}✘ {Path(file_path).name:<30}{Fore.RESET}")
                             print(f"      {Fore.RED}└─ {full_err[:120]}{Fore.RESET}")
+
                     except Exception as e:
-                        import sys as exc_sys, os as exc_os
-                        _, exc_obj, exc_tb = exc_sys.exc_info()
-                        fname = exc_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1] if exc_tb else "autopilot.py"
-                        print(f"\033[31m ■ {fname}:{exc_tb.tb_lineno} {e}\033[0m")
+                        # FIX #5: sys e os já importados no topo — removidos aliases
+                        # FIX #1: lineno protegido com guard de None (exc_tb pode ser None)
+                        _, _exc_obj, exc_tb = sys.exc_info()
+                        fname  = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1] if exc_tb else "autopilot.py"
+                        lineno = exc_tb.tb_lineno if exc_tb else "?"
+                        print(f"\033[31m ■ {fname}:{lineno} {e}\033[0m")
 
             if success_count > 0:
                 print(f"\n{Fore.GREEN}✔ {success_count} de {len(candidates)} módulos forjados.{Fore.RESET}")
@@ -349,13 +368,8 @@ class VulcanAutopilot:
         except KeyboardInterrupt:
             print(f"\n{Fore.YELLOW}⚠ Interrompendo... matando processos.{Fore.RESET}")
             _kill_registry(self._pid_registry)
-            if executor:
-                executor.shutdown(wait=False, cancel_futures=True)
             print(f"{Fore.YELLOW}[VULCAN] Forja cancelada.{Fore.RESET}")
             raise
-        finally:
-            if executor:
-                executor.shutdown(wait=False)
 
     def _process_target(self, candidate: dict) -> dict:
         """Forja um único arquivo via _forge_worker (modo legado)."""
@@ -366,6 +380,6 @@ class VulcanAutopilot:
             'bin_dir':      str(self.env.bin_dir),
             'pid_registry': self._pid_registry,
             'prevalidated': bool(candidate.get('__vulcan_validated')),
-            'project_root': str(self.root),        # ← NOVO: repassa raiz do projeto
+            'project_root': str(self.root),
         })
         return {'file': file_path, 'ok': result['ok'], 'err': result.get('err')}

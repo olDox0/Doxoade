@@ -47,14 +47,14 @@ class VulcanDiagnostic:
         if shutil.which("gcc") or shutil.which("cl.exe"):
             return True
             
-        internal_gcc = self.core_dir / "opt" / "w64devkit" / "bin" / "gcc.exe"
+        internal_gcc = self.core_dir / "thirdparty" / "w64devkit" / "bin" / "gcc.exe"
         if internal_gcc.exists():
             bin_path = str(internal_gcc.parent)
             if bin_path not in os.environ["PATH"]:
                 os.environ["PATH"] = bin_path + os.pathsep + os.environ["PATH"]
             return True
             
-        self.issues.append(f"Compilador não encontrado. Instale o w64devkit em: {self.core_dir / 'opt'}")
+        self.issues.append(f"Compilador não encontrado. Instale o w64devkit em: {self.core_dir / 'thirdparty'}")
         return False
 
     def _check_internal_dependency(self, package_name):

@@ -564,7 +564,7 @@ class PitstopEngine:
     # ── Configuração ──────────────────────────────────────────────────────────
     def _prepare_build_env(self) -> dict:
         core_root = Path(__file__).resolve().parents[3]
-        gcc_exe = core_root / "opt" / "w64devkit" / "bin" / "gcc.exe"
+        gcc_exe = core_root / "thirdparty" / "w64devkit" / "bin" / "gcc.exe"
         env = os.environ.copy()
         if gcc_exe.exists():
             bin_dir = str(gcc_exe.parent)

@@ -17,7 +17,7 @@ class VulcanCompiler:
         if VulcanCompiler._cached_env is not None:
             return VulcanCompiler._cached_env
         core_root = Path(__file__).resolve().parents[3]
-        gcc_exe   = core_root / "opt" / "w64devkit" / "bin" / "gcc.exe"
+        gcc_exe   = core_root / "trirdparty" / "w64devkit" / "bin" / "gcc.exe"
         env = os.environ.copy()
         if gcc_exe.exists():
             bin_dir = str(gcc_exe.parent)

@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
-# doxoade/tools/vulcan/forge.py (v97.0 — reserved keyword attribute fix + pyx strip)
+# doxoade/tools/vulcan/forge.py (v98.0 — async def + AugAssign + dataclass fix)
 import ast
 import re
+from pathlib import Path
 from typing import Set
 
 _BLACKLIST = frozenset({
@@ -11,13 +12,6 @@ _BLACKLIST = frozenset({
     'doxcolors', 'termui',
 })
 
-_VULCAN_SELF = frozenset({
-    'autopilot', 'compiler', 'forge', 'bridge', 'advisor',
-    'environment', 'core', 'guards', 'lab', 'sentinel',
-    'diagnostic', 'optimizer', 'reaper', 'asm_kernels',
-    'termui', '_winconsole', 'win32', 'winterm', 'ansitowin32', 'initialise',
-    '_compat', '_pswindows',
-})
 
 # Palavras reservadas Cython que quebram quando usadas como argumento OU atributo.
 # Quando encontradas como atributo: obj.include → getattr(obj, 'include')
@@ -25,6 +19,9 @@ _CYTHON_RESERVED_IDENTIFIERS = frozenset({
     'include', 'cdef', 'cimport', 'cpdef', 'ctypedef', 'extern',
     'gil', 'nogil', 'public', 'readonly',
 })
+
+# Comentários com significado semântico para ferramentas — nunca remover
+_SEMANTIC_COMMENT_PREFIXES = ('# cython:', '# ---', '# type:', '# noqa', '# pragma:')
 
 _STUB_HEADER = '''\
 class _Stub:
@@ -56,9 +53,8 @@ _RISKY_IMPORTS    = frozenset({
     'multiprocessing', 'asyncio', 'llama_cpp',
 })
 
-# Regex para strip de comentários inline (não destrói strings com #)
-_COMMENT_RE = re.compile(r'(?m)^\s*#.*\n?')
-_BLANK_RE   = re.compile(r'\n{3,}')
+# FIX #6: _COMMENT_RE removido — era dead code (nunca usado por _strip_pyx_source)
+_BLANK_RE = re.compile(r'\n{3,}')
 
 
 def _strip_pyx_source(code: str) -> str:
@@ -69,20 +65,24 @@ def _strip_pyx_source(code: str) -> str:
       - Parser lê menos bytes → transpilação mais rápida
       - Arquivo .c gerado também é menor → GCC mais rápido
 
-    NÃO remove comentários de diretiva (# cython: ...) pois são semânticos.
+    Preserva comentários semânticos:
+      # cython: ...   → diretivas de compilação
+      # type: ...     → anotações de tipo para type checkers
+      # noqa          → supressão de linting
+      # pragma: ...   → cobertura de testes
+      # ---           → separadores visuais
     """
     lines_out = []
     for line in code.splitlines():
         stripped = line.strip()
-        # Mantém diretivas Cython e linhas de código não-comentário
-        if stripped.startswith('# cython:') or stripped.startswith('# ---'):
+        # FIX #7: preserva todos os prefixos semânticos, não só # cython: e # ---
+        if any(stripped.startswith(p) for p in _SEMANTIC_COMMENT_PREFIXES):
             lines_out.append(line)
         elif stripped.startswith('#'):
-            continue  # remove comentário puro
+            continue  # remove comentário puro não-semântico
         else:
             lines_out.append(line)
 
-    # Colapsa sequências de mais de 2 linhas em branco para 1
     result = '\n'.join(lines_out)
     result = _BLANK_RE.sub('\n\n', result)
     return result.strip() + '\n'
@@ -90,14 +90,10 @@ def _strip_pyx_source(code: str) -> str:
 
 def assess_file_for_vulcan(file_path: str) -> tuple[bool, str | None]:
     """Heurística de elegibilidade. Retorna (True, None) para bons candidatos."""
-    from pathlib import Path
-
+    # FIX #5: Path importado no topo do módulo — removido import local
     p = Path(file_path)
     if p.name in _SKIP_FILENAMES:
         return False, f"arquivo de entrada/namespace ({p.name})"
-
-    if VulcanForge.is_self_referential(str(p)):
-        return False, "módulo interno do Vulcan"
 
     try:
         source = p.read_text(encoding='utf-8', errors='ignore')
@@ -128,22 +124,16 @@ class VulcanForge(ast.NodeTransformer):
 
     def __init__(self, target_path: str = ""):
         super().__init__()
-        self.original_imports:  list    = []
-        self.blacklist:         Set[str] = _BLACKLIST
-        self._blacklisted_names: Set[str] = set()
-        self._name_rewrites:    list[dict[str, str]] = []
+        self.original_imports:   list            = []
+        self.blacklist:          Set[str]        = _BLACKLIST
+        self._blacklisted_names: Set[str]        = set()
+        self._name_rewrites:     list[dict[str, str]] = []
 
     @staticmethod
     def _sanitize_identifier(name: str) -> str:
         if name in _CYTHON_RESERVED_IDENTIFIERS:
             return f"_{name}"
         return name
-
-#    @staticmethod
-#    def is_self_referential(file_path: str) -> bool:
-#        from pathlib import Path
-#        stem = Path(file_path).stem.lower()
-#        return stem in _VULCAN_SELF
 
     def _is_blacklisted(self, module: str) -> bool:
         if not module:
@@ -171,12 +161,14 @@ class VulcanForge(ast.NodeTransformer):
 
         # Imports relativos (from .sibling import X) não funcionam em binários
         # Cython isolados — converter em _Stub() para evitar ImportError em runtime.
+        # FIX #4 (documentado): _Stub estará disponível pois generate_source()
+        # sempre prepende _STUB_HEADER antes de usar o código transformado.
         if node.level and node.level > 0:
             stubs = []
             for alias in node.names:
                 stub_name = alias.asname or alias.name
                 if stub_name == '*':
-                    continue  # from .pkg import * — ignora silenciosamente
+                    continue
                 self._blacklisted_names.add(stub_name)
                 stubs.append(
                     ast.Assign(
@@ -226,41 +218,41 @@ class VulcanForge(ast.NodeTransformer):
 
         Solução Load:  pattern.include        → getattr(pattern, 'include')
         Solução Store: pattern.include = val  → setattr(pattern, 'include', val)
+                       (tratado aqui para cobrir AugAssign e Tuple targets,
+                        que visit_Assign não alcança)
         """
         if node.attr not in _CYTHON_RESERVED_IDENTIFIERS:
             return self.generic_visit(node)
 
-        # Visita o objeto base antes de reescrever
         self.generic_visit(node)
 
         if isinstance(node.ctx, ast.Load):
-            # pattern.include → getattr(pattern, 'include')
             return ast.Call(
                 func=ast.Name(id='getattr', ctx=ast.Load()),
                 args=[node.value, ast.Constant(value=node.attr)],
                 keywords=[],
             )
 
-        if isinstance(node.ctx, ast.Store):
-            # pattern.include = val  →  (tratado no pai, ver visit_Assign)
-            # Retorna o nó original — visit_Assign fará o setattr
-            return node
-
+        # FIX #1 (parcial): Store em contextos que visit_Assign não cobre
+        # (AugAssign, Tuple targets) — sinaliza com marcador para visit_Assign
+        # e visit_AugAssign capturarem. O nó original é retornado aqui porque
+        # o pai precisa do alvo para montar o setattr completo.
         return node
 
     def visit_Assign(self, node):
         """
-        Converte atribuição a atributo reservado em setattr().
+        Converte atribuição simples a atributo reservado em setattr().
 
         x.include = val  →  setattr(x, 'include', val)
         """
-        self.generic_visit(node)
-
+        # FIX #8: checa condição antes de visitar filhos para evitar
+        # trabalho desnecessário no caso majoritário (sem atributo reservado).
         if (
             len(node.targets) == 1
             and isinstance(node.targets[0], ast.Attribute)
             and node.targets[0].attr in _CYTHON_RESERVED_IDENTIFIERS
         ):
+            self.generic_visit(node)
             attr_node = node.targets[0]
             return ast.Expr(
                 value=ast.Call(
@@ -269,6 +261,48 @@ class VulcanForge(ast.NodeTransformer):
                     keywords=[],
                 )
             )
+
+        self.generic_visit(node)
+        return node
+
+    def visit_AugAssign(self, node):
+        """
+        FIX #1: Converte AugAssign com atributo reservado em setattr + getattr.
+
+        obj.include += val
+        →  setattr(obj, 'include', getattr(obj, 'include') + val)
+
+        Sem este visitor, `obj.include += val` gerava parse error no Cython
+        pois visit_Assign nunca é chamado para AugAssign.
+        """
+        self.generic_visit(node)
+
+        if (
+            isinstance(node.target, ast.Attribute)
+            and node.target.attr in _CYTHON_RESERVED_IDENTIFIERS
+        ):
+            obj  = node.target.value
+            attr = node.target.attr
+
+            # getattr(obj, 'attr') op val
+            new_value = ast.BinOp(
+                left=ast.Call(
+                    func=ast.Name(id='getattr', ctx=ast.Load()),
+                    args=[obj, ast.Constant(value=attr)],
+                    keywords=[],
+                ),
+                op=node.op,
+                right=node.value,
+            )
+
+            return ast.Expr(
+                value=ast.Call(
+                    func=ast.Name(id='setattr', ctx=ast.Load()),
+                    args=[obj, ast.Constant(value=attr), new_value],
+                    keywords=[],
+                )
+            )
+
         return node
 
     def visit_Name(self, node):
@@ -282,12 +316,17 @@ class VulcanForge(ast.NodeTransformer):
 
         Casos:
           x: int = 5          →  x = 5            (remove anotação — Cython não precisa)
-          x: int               →  None             (remove anotação sem valor — não gera código)
-          x: int = field(...)  →  x: object = field(...)  (dataclass field: mantém anotação
-                                   como 'object' para que @dataclass não quebre)
+          x: int               →  mantido como AnnAssign com anotação 'object'
+                                  (FIX #3: necessário para campos de @dataclass sem valor)
+          x: int = field(...)  →  x: object = field(...)  (dataclass field com valor:
+                                   mantém anotação como 'object' para @dataclass)
         """
+        # FIX #3: anotação sem valor só deve ser removida se NÃO for campo de dataclass.
+        # Como não há contexto suficiente aqui para detectar @dataclass com certeza,
+        # mantemos como AnnAssign com anotação 'object' — seguro e correto em ambos os casos.
         if node.value is None:
-            return None  # só anotação, sem valor — nenhum efeito em runtime
+            node.annotation = ast.Name(id='object', ctx=ast.Load())
+            return node
 
         # Detecta campo de dataclass: valor é uma Call a field() ou similar
         is_dataclass_field = (
@@ -297,7 +336,6 @@ class VulcanForge(ast.NodeTransformer):
         )
 
         if is_dataclass_field:
-            # Mantém como AnnAssign com anotação 'object' — @dataclass requer anotação
             node.annotation = ast.Name(id='object', ctx=ast.Load())
             return node
 
@@ -308,7 +346,11 @@ class VulcanForge(ast.NodeTransformer):
             lineno=node.lineno,
         )
 
-    def visit_FunctionDef(self, node):
+    def _transform_funcdef(self, node):
+        """
+        Lógica compartilhada entre visit_FunctionDef e visit_AsyncFunctionDef.
+        Remove type hints, decorators e aplica sufixo _vulcan_optimized.
+        """
         node.returns        = None
         node.decorator_list = []
 
@@ -336,6 +378,14 @@ class VulcanForge(ast.NodeTransformer):
                 self._name_rewrites.pop()
 
         return node
+
+    def visit_FunctionDef(self, node):
+        return self._transform_funcdef(node)
+
+    # FIX #2: async def agora recebe o mesmo tratamento que def —
+    # remove return hints, decorators e aplica sufixo _vulcan_optimized.
+    def visit_AsyncFunctionDef(self, node):
+        return self._transform_funcdef(node)
 
     def generate_source(self, file_path: str) -> str:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:

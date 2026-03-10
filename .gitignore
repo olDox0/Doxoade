@@ -64,8 +64,10 @@ Vers/
 .doxoade/vulcan/foundry/
 
 # Exceções (Auto-fixed pelo Doxoade)
-!requirements.txt
-!PipelineHelp.txt
 
 # terceirizados
-opt/w64devkit/
+thirdparty/w64devkit/
+
+# Exceções (Auto-fixed pelo Doxoade)
+!requirements.txt
+!PipelineHelp.txt

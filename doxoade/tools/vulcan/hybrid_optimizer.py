@@ -10,19 +10,10 @@ Posição no pipeline:
 Objetivo: passar de ~2× Python para 10-100× Python via inferência de tipos
 estáticos e eliminação de overhead do interpretador em loops críticos.
 
-Transformações aplicadas:
-  1. Loop hoisting      : cdef int i / cdef Py_ssize_t i em for range()
-  2. Acumulador         : cdef double/long para variáveis acc em loops
-  3. len() hoisting     : cdef int _n = len(x) antes do loop
-  4. Variáveis locais   : cdef tipado para atribuições inferíveis
-  5. isinstance cache   : pré-resolve referência de tipo em loops ast.walk
-  6. list capacity hint : comentário informativo (Cython não expõe direto)
-
-Compliance:
-  OSL-4  : única responsabilidade — só transforma .pyx, não compila
-  OSL-5  : nunca levanta exceção para o chamador — retorna source original em falha
-  MPoT-3 : zero alocação desnecessária no parse de linhas
-  PASC-6 : fail-graceful — se a transformação produz código inválido, reverte
+Estratégia (Nova Arquitetura AST-Hoisting):
+  Faz parse da AST para identificar variáveis tipáveis (contadores, flags, 
+  ranges, int(), float()) e injeta as declarações `cdef` no topo
+  da função, com indentação cirurgicamente clonada da própria assinatura.
 """
 
 from __future__ import annotations
@@ -113,9 +104,7 @@ class OptimizationReport:
 class HybridOptimizer:
     """
     Recebe o conteúdo de um .pyx gerado pelo HybridForge e injeta
-    declarações `cdef` para maximizar a velocidade de compilação Cython.
-
-    OSL-5: optimize() nunca levanta exceção — retorna source original em falha.
+    declarações `cdef` no topo das funções para maximizar a compilação Cython.
     """
 
     def optimize(
@@ -123,30 +112,135 @@ class HybridOptimizer:
         pyx_source: str,
         module_name: str = "unknown",
     ) -> tuple[str, OptimizationReport]:
-        """
-        Entry-point principal.
-
-        Retorna (pyx_enriquecido, relatório).
-        Se a transformação produz Python inválido, retorna (source_original, relatório_vazio).
-        """
         report = OptimizationReport(module_name=module_name)
 
         try:
-            enriched = self._process_source(pyx_source, report)
+            # 1. Parse da AST do Python
+            tree = ast.parse(pyx_source)
+            source_lines = pyx_source.splitlines()
+            
+            # lineno -> list de (indent, ctype, var)
+            insertions: dict[int, list[tuple[str, str, str]]] = {}
 
-            # Validação: o .pyx enriquecido ainda deve ser parseável
-            # (Cython é um superset — o cdef não é Python, mas as partes
-            # Python precisam estar corretas)
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    if not node.body:
+                        continue
+                        
+                    first_stmt = node.body[0]
+                    
+                    # Ignora funções one-liner (dificuldade de injetar cdef com segurança)
+                    if first_stmt.lineno == node.lineno:
+                        continue
+
+                    # Isola argumentos (não podem receber cdef local pois já foram declarados)
+                    args = set()
+                    for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs:
+                        args.add(arg.arg)
+                    if node.args.vararg: args.add(node.args.vararg.arg)
+                    if node.args.kwarg: args.add(node.args.kwarg.arg)
+
+                    # Isola globais/nonlocals (não podem receber cdef local)
+                    globals_nonlocals = set()
+                    for child in ast.walk(node):
+                        if isinstance(child, (ast.Global, ast.Nonlocal)):
+                            for name in child.names:
+                                globals_nonlocals.add(name)
+
+                    blocked_names = args | globals_nonlocals
+
+                    cdefs = {}
+                    for child in ast.walk(node):
+                        # a) for var in range(...)
+                        if isinstance(child, ast.For) and isinstance(child.iter, ast.Call):
+                            if isinstance(child.iter.func, ast.Name) and child.iter.func.id in ('range', 'xrange'):
+                                if isinstance(child.target, ast.Name) and child.target.id not in blocked_names:
+                                    cdefs[child.target.id] = 'Py_ssize_t'
+                        
+                        # b) var = ...
+                        if isinstance(child, ast.Assign) and len(child.targets) == 1:
+                            target = child.targets[0]
+                            if isinstance(target, ast.Name) and target.id not in blocked_names:
+                                var = target.id
+                                val = child.value
+                                
+                                # Constantes numéricas/booleanas
+                                if isinstance(val, ast.Constant):
+                                    if type(val.value) is int and val.value == 0:
+                                        if var in _INT_HINTS or var.startswith('count') or var.endswith('_count') or var.startswith('total') or var.endswith('_total'):
+                                            cdefs[var] = 'long'
+                                    elif type(val.value) is float and val.value == 0.0:
+                                        if var in _FLOAT_HINTS or var.endswith('_s') or var.endswith('_ms') or var.endswith('_pct'):
+                                            cdefs[var] = 'double'
+                                    elif type(val.value) is bool:
+                                        if var in _BOOL_HINTS:
+                                            cdefs[var] = 'bint'
+                                            
+                                elif isinstance(val, ast.Call) and isinstance(val.func, ast.Name):
+                                    if val.func.id == 'len':
+                                        if var in _INT_HINTS | {'n', 'total', 'count', 'size', 'length'}:
+                                            cdefs[var] = 'Py_ssize_t'
+                                    elif val.func.id == 'float':
+                                        cdefs[var] = 'double'
+                                    elif val.func.id == 'int':
+                                        cdefs[var] = 'long'
+                    if cdefs:
+                        def_line_str = source_lines[node.lineno - 1]
+                        base_indent = def_line_str[:len(def_line_str) - len(def_line_str.lstrip())]
+                        body_indent = base_indent + "    "
+                        stmt_line_str = source_lines[first_stmt.lineno - 1]
+#                        body_indent = stmt_line_str[:len(stmt_line_str) - len(stmt_line_str.lstrip())]
+                        if not body_indent:
+                            body_indent = "    "
+                            
+                        # Determina a linha de injeção (após a docstring se existir)
+                        if ast.get_docstring(node):
+                            insert_lineno = getattr(first_stmt, 'end_lineno', first_stmt.lineno) + 1
+                        else:
+                            insert_lineno = first_stmt.lineno
+                            
+                        if insert_lineno not in insertions:
+                            insertions[insert_lineno] =[]
+                            
+                        for var, ctype in cdefs.items():
+                            insertions[insert_lineno].append((body_indent, ctype, var))
+
+            if not insertions:
+                report.finalize()
+                return pyx_source, report
+
+            # 3. Injeta cdefs (percorrendo de trás para frente para não bagunçar os índices)
+            out_lines = source_lines[:]
+            for lineno in sorted(insertions.keys(), reverse=True):
+                idx = max(0, min(lineno - 1, len(out_lines)))
+                for indent, ctype, var in insertions[lineno]:
+                    out_lines.insert(idx, f"{indent}cdef {ctype} {var}")
+                    report.add(f"cdef {ctype} {var}")
+
+            enriched = "\n".join(out_lines) + "\n"
+
+            # 4. Validação de Sanidade (Parseia removendo cdef para confirmar integridade)
             self._validate(enriched)
 
             report.finalize()
             return enriched, report
 
         except Exception as exc:
-            # Fail-graceful: reverte para o source original
+            # Fail-graceful
             report.transformations = [f"revertido: {exc}"]
             report.estimated_gain  = "~2× (fallback)"
             return pyx_source, report
+
+    @staticmethod
+    def _validate(source: str) -> None:
+        lines =[]
+        for line in source.splitlines():
+            stripped = line.lstrip()
+            if stripped.startswith('cdef ') or stripped.startswith('# cython:'):
+                continue
+            lines.append(line)
+        ast.parse("\n".join(lines))
+
 
     # ── Processamento principal ───────────────────────────────────────────────
 
@@ -317,16 +411,13 @@ class HybridOptimizer:
 def optimize_pyx_file(pyx_path: Path) -> tuple[Path, OptimizationReport]:
     """
     Lê um .pyx, enriquece com cdef e sobrescreve o arquivo.
-
     Chamado pelo HybridForge.generate() após escrever o .pyx raw.
-    Retorna (pyx_path, relatório).
-    OSL-5: nunca levanta exceção.
     """
     optimizer = HybridOptimizer()
     module_name = pyx_path.stem
 
     try:
-        source   = pyx_path.read_text(encoding='utf-8')
+        source = pyx_path.read_text(encoding='utf-8')
         enriched, report = optimizer.optimize(source, module_name)
 
         if enriched != source:
@@ -336,6 +427,6 @@ def optimize_pyx_file(pyx_path: Path) -> tuple[Path, OptimizationReport]:
 
     except Exception as exc:
         report = OptimizationReport(module_name=module_name)
-        report.transformations = [f"optimize_pyx_file falhou: {exc}"]
+        report.transformations =[f"optimize_pyx_file falhou: {exc}"]
         report.estimated_gain  = "~2× (fallback)"
         return pyx_path, report

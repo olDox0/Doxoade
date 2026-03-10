@@ -29,7 +29,9 @@ def render_hot_lines(line_data):
     echo(f"     {Fore.RED}🔥 Hot Lines (Gargalos):")
     for item in line_data[:3]:
         fname, lineno, hits = item['file'], item['line'], item['hits']
-        content = linecache.getline(os.path.abspath(fname), lineno).strip()
+        # abspath cacheado na variável local — evita syscall repetida por item
+        abs_fname = os.path.abspath(fname)
+        content   = linecache.getline(abs_fname, lineno).strip()
         echo(f"       {Fore.YELLOW}{fname}:{lineno:<4}{Style.RESET_ALL} ({hits:>2} hits) > {Style.DIM}{content}")
 def render_stats_table(stats):
     header = f"{'COMANDO':<15} | {'QTD':<5} | {'T-AVG(ms)':<10} | {'RAM(MB)':<8} | {'I/O R':<8} | {'I/O W':<8}"

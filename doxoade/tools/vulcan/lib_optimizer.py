@@ -22,7 +22,8 @@ Regras de segurança:
   - Nunca renomeia nomes que aparecem como string literal na mesma função
     (proteção contra getattr(obj, 'varname'))
   - Nunca entra em funções aninhadas ao minificar
-  - Revert automático se o resultado falhar no parse de validação
+  - Smart Unparsing: Pula a rescrita em disco se a AST não foi modificada.
+  - Thread-Local Pool: ThreadPoolExecutor com instâncias reutilizadas por thread.
 
 Compliance:
   OSL-4: cada classe tem responsabilidade única
@@ -33,8 +34,10 @@ Compliance:
 from __future__ import annotations
 
 import ast
+import os
 import string
 import itertools
+import concurrent.futures
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -73,6 +76,29 @@ class FileOptReport:
     def was_changed(self) -> bool:
         return not self.skipped and self.bytes_saved > 0
 
+# ---------------------------------------------------------------------------
+# Worker para ThreadPoolExecutor com Thread-Local Pool
+# ---------------------------------------------------------------------------
+
+# Pool de instâncias LibOptimizer por thread — evita criar O(N_arquivos) instâncias.
+# Com ThreadPoolExecutor, cada worker-thread reutiliza a mesma instância durante
+# toda a execução do optimize_directory. Reduz de N_arquivos → N_CPU instâncias.
+_opt_thread_local = __import__('threading').local()
+
+def _worker_optimize_file(path: Path) -> FileOptReport:
+    """
+    Otimiza um arquivo usando a instância LibOptimizer da thread atual.
+
+    Thread-Local Pool: a instância é criada na primeira chamada de cada
+    worker-thread e reutilizada para todos os arquivos seguintes.
+    Isso elimina o overhead de instanciação O(N_arquivos) que o modelo
+    original com ProcessPoolExecutor tinha por design (pickle exigia
+    instâncias frescas — com threads, reutilização é segura).
+    """
+    if not hasattr(_opt_thread_local, 'optimizer'):
+        _opt_thread_local.optimizer = LibOptimizer()
+    return _opt_thread_local.optimizer.optimize_file(path)
+
 
 # ---------------------------------------------------------------------------
 # LibOptimizer — orquestrador
@@ -89,8 +115,6 @@ class LibOptimizer:
 
     # Chamadas que acessam escopo local por nome → tornam renomeação insegura
     _SCOPE_ACCESSORS = frozenset({'locals', 'vars', 'exec', 'eval', 'globals', 'dir', 'inspect'})
-#    _SCOPE_ACCESSORS = frozenset({'locals', 'vars', 'exec', 'eval', 'globals',
-#                                   'dir', 'inspect'})
 
     def _uses_structural_meta(self, tree: ast.AST) -> bool:
         for n in ast.walk(tree):
@@ -107,14 +131,7 @@ class LibOptimizer:
                     'dataclass',
                 }:
                     return True
-
-            # ← REMOVER este bloco inteiro
-            # if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            #     if n.decorator_list:
-            #         return True
-
         return False
-
 
     def optimize_file(self, path: Path) -> FileOptReport:
         """
@@ -149,41 +166,55 @@ class LibOptimizer:
             for n in ast.walk(tree)
         )
 
+        total_mutations = 0  # Controle de Smart Unparsing
+
         try:
             # 1. Remove docstrings
             ds = DocstringRemover()
             tree = ds.visit(tree)
             report.docstrings_removed = ds.count
+            total_mutations += ds.count
 
             # 2. Elimina dead branches
             db = DeadBranchEliminator()
             tree = db.visit(tree)
             report.dead_branches = db.count
+            total_mutations += db.count
 
             # 3. Remove imports não usados
             ui = UnusedImportRemover()
             tree = ui.process(tree)
             report.imports_removed = ui.count
+            total_mutations += ui.count
 
-            # 4. Minifica nomes locais (se seguro)
+            # 4. Import Combiner
             if not uses_structural_meta:
-                tree = ImportCombiner().visit(tree)
+                ic = ImportCombiner()
+                tree = ic.visit(tree)
+                total_mutations += ic.count
 
             # 5. Minifica nomes globais de imports (APENAS SE SEGURO)
             if not uses_structural_meta:
-                tree = GlobalImportAliaser().visit(tree)
+                ga = GlobalImportAliaser()
+                tree = ga.visit(tree)
+                total_mutations += len(ga.import_map)
 
             # 6. Minifica nomes locais (se seguro)
             uses_structural_meta = self._uses_structural_meta(tree)
-
             if not has_scope_access and not uses_structural_meta:
                 mn = LocalNameMinifier()
                 tree = mn.visit(tree)
                 report.locals_minified = mn.count
+                total_mutations += mn.count
 
             ast.fix_missing_locations(tree)
 
-            # Valida o resultado antes de sobrescrever
+            # --- REGRA DE OURO: SMART UNPARSING ---
+            # Se a AST não sofreu nenhuma mutação significativa, nem toque no unparse
+            if total_mutations == 0:
+                report.final_bytes = report.original_bytes
+                return report
+
             if not _ast_unparse:
                 raise RuntimeError("ast.unparse indisponível.")
 
@@ -200,9 +231,8 @@ class LibOptimizer:
             report.final_bytes = len(optimized.encode('utf-8'))
 
         except Exception as exc:
-            # Revert: restaura o fonte original
-# [DOX-UNUSED]             import traceback
-            print(f"\033[33m[DEBUG] Fallback ativado em {path.name}: {exc}\033[0m")
+            # Revert: restaura o fonte original (comentado o print para não floodar os logs em multiprocessing)
+            # print(f"\033[33m[DEBUG] Fallback ativado em {path.name}: {exc}\033[0m")
             try:
                 path.write_text(source, encoding='utf-8')
             except Exception:
@@ -216,28 +246,71 @@ class LibOptimizer:
     def optimize_directory(self, directory: Path) -> dict:
         """
         Otimiza todos os .py do diretório recursivamente.
-        Retorna dicionário de estatísticas agregadas e lista de relatórios por arquivo.
 
-        Compatibilidade: retorna as chaves top-level esperadas por código legado
-        (files_processed, files_optimized, ...) e também um sub-dicionário 'summary'
-        e a lista detalhada 'files'.
+        Cirurgias aplicadas vs versão original:
+          1. ProcessPoolExecutor → ThreadPoolExecutor:
+             No Windows, ProcessPool faz 'spawn' de um novo interpretador Python
+             completo para cada worker. Para libs pequenas (ex: click com 17 .py),
+             o overhead de spawn supera o trabalho real. ThreadPool elimina isso
+             e ainda compartilha o mesmo espaço de memória (sem pickle de args).
+             As operações de AST (ast.parse, ast.walk) são majoritariamente
+             código Python — o GIL não é o gargalo aqui, e sim o I/O de disco.
+
+          2. Thread-Local Pool via _opt_thread_local:
+             Cada worker-thread cria UMA instância de LibOptimizer e reutiliza
+             para todos os arquivos daquela thread. N_CPU instâncias em vez de
+             N_arquivos instâncias.
+
+          3. Streaming summary com as_completed:
+             Em vez de materializar todos os FileOptReport em RAM simultaneamente
+             com list(executor.map(...)), acumula apenas os contadores numéricos.
+             Para libs grandes (centenas de .py), isso reduz o pico de RAM.
         """
-#        reports: list[FileOptReport] = []
-        reports = [self.optimize_file(py_file)
-                   for py_file in sorted(directory.rglob('*.py'))]
+        files      = sorted(directory.rglob('*.py'))
+        max_workers = min(os.cpu_count() or 2, len(files)) if files else 1
+
+        # Acumuladores — streaming: nunca mantém todos os reports em RAM
+        files_processed   = 0
+        files_optimized   = 0
+        files_skipped     = 0
+        bytes_saved       = 0
+        docstrings_removed = 0
+        dead_branches     = 0
+        imports_removed   = 0
+        locals_minified   = 0
+
+        # ThreadPoolExecutor: sem spawn, sem pickle, sem overhead de processo
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(_worker_optimize_file, f): f for f in files}
+
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    r: FileOptReport = future.result()
+                except Exception:
+                    files_skipped += 1
+                    files_processed += 1
+                    continue
+
+                files_processed   += 1
+                files_optimized   += 1 if r.was_changed else 0
+                files_skipped     += 1 if r.skipped     else 0
+                bytes_saved       += r.bytes_saved
+                docstrings_removed += r.docstrings_removed
+                dead_branches     += r.dead_branches
+                imports_removed   += r.imports_removed
+                locals_minified   += r.locals_minified
 
         summary = {
-            'files_processed':   len(reports),
-            'files_optimized':   sum(1 for r in reports if r.was_changed),
-            'files_skipped':     sum(1 for r in reports if r.skipped),
-            'bytes_saved':       sum(r.bytes_saved for r in reports),
-            'docstrings_removed': sum(r.docstrings_removed for r in reports),
-            'dead_branches':     sum(r.dead_branches for r in reports),
-            'imports_removed':   sum(r.imports_removed for r in reports),
-            'locals_minified':   sum(r.locals_minified for r in reports),
+            'files_processed':    files_processed,
+            'files_optimized':    files_optimized,
+            'files_skipped':      files_skipped,
+            'bytes_saved':        bytes_saved,
+            'docstrings_removed': docstrings_removed,
+            'dead_branches':      dead_branches,
+            'imports_removed':    imports_removed,
+            'locals_minified':    locals_minified,
         }
-
-        return {**summary, 'summary': summary, 'files': [r.__dict__ for r in reports]}
+        return {**summary, 'summary': summary}
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -384,8 +457,11 @@ class _ImportTransformer(ast.NodeTransformer):
         return node
 
 class ImportCombiner(ast.NodeTransformer):
+    def __init__(self):
+        self.count = 0
+
     def _combine(self, body):
-        new_body = []
+        new_body =[]
         curr_import = None
         for stmt in body:
             if not isinstance(stmt, ast.AST):   # ← ignora strings e outros não-nós
@@ -397,6 +473,7 @@ class ImportCombiner(ast.NodeTransformer):
                     new_body.append(curr_import)
                 else:
                     curr_import.names.extend(stmt.names)
+                    self.count += 1
             else:
                 curr_import = None
                 new_body.append(self.visit(stmt))
@@ -417,23 +494,8 @@ class ImportCombiner(ast.NodeTransformer):
 class LocalNameMinifier(ast.NodeTransformer):
     """
     Minifica nomes de variáveis locais em funções simples (sem escopo aninhado).
-
-    Critérios de elegibilidade da função:
-      - Não contém FunctionDef / AsyncFunctionDef / Lambda aninhados
-      - Não usa chamadas que acessam locals() pelo nome (verificado no orquestrador)
-
-    Critérios de elegibilidade da variável:
-      - Tem contexto Store dentro da função (é local)
-      - Não é parâmetro da função
-      - Não é `self` / `cls` / dunder
-      - Nome original tem > 2 caracteres (nomes curtos já são "minificados")
-      - Não aparece como string literal dentro da função
-        (ex: getattr(obj, 'var_name') ficaria quebrado)
-
-    Nomes gerados: _a, _b, ..., _z, _aa, _ab, ..., _az, _ba, ...
     """
 
-    # Builtins e nomes especiais que NUNCA devem ser sombreados
     _PROTECTED = frozenset({
         'self', 'cls', 'True', 'False', 'None',
         'len', 'range', 'enumerate', 'zip', 'map', 'filter', 'sorted',
