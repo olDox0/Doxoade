@@ -3,9 +3,10 @@
 """
 Subcomandos de instalação e verificação do bootstrap Vulcan.
 
-  module → instala módulo de acionamento Vulcan em projetos externos
-  probe  → verifica status dos binários (.pyd/.so) ativos
-  verify → testa redirecionamento PYD em subprocess isolado
+  module             → instala módulo de acionamento Vulcan em projetos externos
+  probe              → verifica status dos binários (.pyd/.so) ativos
+  verify             → testa redirecionamento PYD em subprocess isolado
+  telemetry-bridge   → exibe telemetria de projetos externos bootstrapados
 """
 
 import os
@@ -20,6 +21,9 @@ from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
 from ..shared_tools import _find_project_root
 from .vulcan_cmd import _print_vulcan_forensic, _is_doxoade_project
+# Template isolado para evitar que o CodeSampler registre linhas do literal
+# de string como hot lines em vulcan_cmd_bootstrap.py (falso positivo).
+from ._vulcan_embedded_template import VULCAN_EMBEDDED_CONTENT as _VULCAN_EMBEDDED_CONTENT
 
 
 # ── Constantes de bootstrap ───────────────────────────────────────────────────
@@ -41,7 +45,7 @@ _doxo_install_ms = 0
 _doxo_embedded_ms = 0
 _doxo_fallback_ms = 0
 
-for _doxo_base in [_doxo_path(__file__).resolve(), *_doxo_path(__file__).resolve().parents]:
+for _doxo_base in[_doxo_path(__file__).resolve(), *_doxo_path(__file__).resolve().parents]:
     _doxo_runtime_file = _doxo_base / ".doxoade" / "vulcan" / "runtime.py"
     if not _doxo_runtime_file.exists():
         continue
@@ -69,7 +73,7 @@ if callable(_doxo_install_meta_finder) and _doxo_project_root:
 
 # 2. Tenta usar o loader "embedded"
 try:
-    _doxo_t = _doxo_time.monotonic()   # inicializado ANTES do if — evita NameError no finally
+    _doxo_t = _doxo_time.monotonic()
     if _doxo_project_root:
         _embedded_path = _doxo_path(_doxo_project_root) / ".doxoade" / "vulcan" / "vulcan_embedded.py"
         if _embedded_path.exists():
@@ -89,14 +93,13 @@ try:
                     try:
                         import sys as _d_sys
                         _bin_dir = _doxo_path(_doxo_project_root) / ".doxoade" / "vulcan" / "bin"
-                        # sys.intern no sufixo — a comparação endswith é feita N_módulos×N_attrs vezes
                         _vulcan_suffix = _d_sys.intern("_vulcan_optimized")
                         _suffix_len    = len(_vulcan_suffix)
                         for mname, mod in list(_d_sys.modules.items()):
                             try:
                                 mfile = getattr(mod, "__file__", None)
                                 if not mfile:
-                                    continue  # saída antecipada — evita construir Path para módulos builtin
+                                    continue
                                 mpath = _doxo_path(mfile)
                                 if _bin_dir not in mpath.parents:
                                     continue
@@ -147,176 +150,23 @@ if callable(_doxo_probe_embedded):
                 + "boot_ms=" + str(__doxoade_vulcan_probe__.get("boot_ms", 0)) + " "
                 + "install_ms=" + str(__doxoade_vulcan_probe__.get("install_meta_ms", 0)) + " "
                 + "embedded_ms=" + str(__doxoade_vulcan_probe__.get("embedded_load_ms", 0)) + " "
-                + "fallback_ms=" + str(__doxoade_vulcan_probe__.get("fallback_ms", 0)) + "\n"
+                + "fallback_ms=" + str(__doxoade_vulcan_probe__.get("fallback_ms", 0)) + "\\n"
             )
     except Exception:
         pass
 {_BOOTSTRAP_END}
 '''
 
-_VULCAN_EMBEDDED_CONTENT = r'''# -*- coding: utf-8 -*-
-"""vulcan_embedded.py — safe loader gerado pelo doxoade (opt-in)."""
+# ── Conteúdo do vulcan_embedded.py gerado ────────────────────────────────────
+# Importado de _vulcan_embedded_template.py (edite esse arquivo para modificar).
+# Isolado para evitar que o CodeSampler registre linhas do literal de string
+# como hot lines aqui durante 'doxoade vulcan module' (falso positivo).
+#
+# Chronos Lite v2: click_context | lib_usage | disk_snapshot | vulcan_stats
+# Opt-out: VULCAN_TELEMETRY_SYNC=0   Debug: VULCAN_TELEMETRY=1
 
-from functools import wraps
-from pathlib import Path
-import sys
-import os
-import importlib.util
-import importlib.machinery
-
-def _vlog(*args, **kwargs):
-    return None
-
-class ExecutionContext:
-    __slots__ = ("argv", "env", "cwd", "project_root")
-    def __init__(self):
-        self.argv = sys.argv
-        self.env  = dict(os.environ)
-        self.cwd  = Path.cwd()
-        main = sys.modules.get("__main__")
-        self.project_root = getattr(main, "__file__", None)
-
-def safe_call(native_fn, fallback_fn=None):
-    @wraps(fallback_fn or native_fn)
-    def wrapper(*args, **kwargs):
-        try:
-            return native_fn(ExecutionContext(), *args, **kwargs)
-        except TypeError:
-            pass
-        except Exception:
-            if callable(fallback_fn):
-                return fallback_fn(*args, **kwargs)
-            raise
-        try:
-            return native_fn(*args, **kwargs)
-        except TypeError:
-            pass
-        except Exception:
-            if callable(fallback_fn):
-                return fallback_fn(*args, **kwargs)
-            raise
-        if callable(fallback_fn):
-            return fallback_fn(*args, **kwargs)
-        raise RuntimeError(f"[vulcan_embedded] assinatura incompatível: {getattr(native_fn,'__name__',str(native_fn))}")
-    return wrapper
-
-_OPTIMIZED_SUFFIX = "_vulcan_optimized"
-
-def inject_optimized(module, native_module, suffix=_OPTIMIZED_SUFFIX):
-    import inspect
-    injected = []
-    skipped  = []
-    for attr in dir(native_module):
-        if not attr.endswith(suffix):
-            continue
-        orig_name   = attr[:-len(suffix)]
-        if not hasattr(module, orig_name):
-            continue
-        py_func     = getattr(module, orig_name)
-        native_func = getattr(native_module, attr)
-        if not callable(py_func) or not callable(native_func):
-            skipped.append(orig_name)
-            continue
-        try:
-            if inspect.signature(py_func).parameters != inspect.signature(native_func).parameters:
-                skipped.append(orig_name)
-                continue
-        except (ValueError, TypeError):
-            skipped.append(orig_name)
-            continue
-        try:
-            setattr(module, orig_name, safe_call(native_func, py_func))
-            injected.append(orig_name)
-        except Exception:
-            skipped.append(orig_name)
-
-def _binary_ext():
-    return ".pyd" if os.name == "nt" else ".so"
-
-def _find_pyd_for_source(bin_dir, source_path):
-    stem = source_path.stem
-    ext  = _binary_ext()
-    try:
-        import hashlib
-        abs_hash  = hashlib.sha256(str(source_path.resolve()).encode()).hexdigest()[:6]
-        candidate = bin_dir / f"v_{stem}_{abs_hash}{ext}"
-        if candidate.exists():
-            return candidate
-    except Exception:
-        pass
-    matches = sorted(bin_dir.glob(f"v_{stem}_*{ext}"), key=lambda p: p.stat().st_mtime, reverse=True)
-    if matches:
-        return matches[0]
-    matches2 = sorted(bin_dir.glob(f"v_{stem}*"), key=lambda p: p.stat().st_mtime, reverse=True)
-    return matches2[0] if matches2 else None
-
-def _is_binary_valid_for_host(bin_path):
-    try:
-        return bin_path.exists() and bin_path.stat().st_size > 4096
-    except Exception:
-        return False
-
-def _load_extension_from_path(module_name, bin_path):
-    try:
-        spec = importlib.util.spec_from_file_location(module_name, str(bin_path))
-        if not spec or not spec.loader:
-            return None
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = mod
-        spec.loader.exec_module(mod)
-        return mod
-    except Exception:
-        sys.modules.pop(module_name, None)
-        return None
-
-def activate_embedded(globs, source_file, project_root=None, suffix=_OPTIMIZED_SUFFIX):
-    try:
-        src  = Path(source_file).resolve()
-        root = Path(project_root).resolve() if project_root else None
-        if not root:
-            cur = src.parent
-            while True:
-                candidate = cur / ".doxoade" / "vulcan" / "bin"
-                if candidate.exists():
-                    root = cur
-                    break
-                if cur == cur.parent:
-                    break
-                cur = cur.parent
-        if not root:
-            return False
-        bin_dir = Path(root) / ".doxoade" / "vulcan" / "bin"
-        if not bin_dir.exists():
-            return False
-        source_path = src if src.exists() else None
-        if not source_path:
-            return False
-        pyd_path = _find_pyd_for_source(bin_dir, source_path)
-        if not pyd_path or not _is_binary_valid_for_host(pyd_path):
-            return False
-        native_name = pyd_path.stem.split(".")[0]
-        native_mod  = _load_extension_from_path(native_name, pyd_path)
-        if not native_mod:
-            return False
-        injected = 0
-        for attr in dir(native_mod):
-            if not attr.endswith(suffix):
-                continue
-            base = attr[: -len(suffix)]
-            if base in globs:
-                try:
-                    native_obj = getattr(native_mod, attr)
-                    py_obj     = globs.get(base)
-                    globs[base] = safe_call(native_obj, py_obj) if callable(native_obj) else native_obj
-                    injected += 1
-                except Exception:
-                    continue
-        return injected > 0
-    except Exception:
-        return False
-'''
-
-VULCAN_STUB_VERSION = 3
+# Versão 10: Chronos Lite v4 — LibCodeSampler (lib hot lines) + full_command_line
+VULCAN_STUB_VERSION = 10
 
 
 def generate_vulcan_stub() -> str:
@@ -410,13 +260,35 @@ def _inject_bootstrap(main_file: Path) -> bool:
               help='Arquivo __main__.py específico para injetar bootstrap.')
 @click.option('--auto-main', is_flag=True, help='Detecta e injeta em todos os __main__.py do projeto.')
 @click.option('--force-stub', is_flag=True, help="Recria o stub Vulcan mesmo se já existir.")
-def vulcan_module(target_path, main_files, auto_main, force_stub):
-    """Instala módulo de acionamento Vulcan em projetos externos."""
+@click.option('--no-telemetry', is_flag=True,
+              help="Não injeta Chronos Lite. O projeto não reportará métricas ao índice doxoade.")
+def vulcan_module(target_path, main_files, auto_main, force_stub, no_telemetry):
+    """Instala módulo de acionamento Vulcan em projetos externos.
+
+    \b
+    O Chronos Lite v2 é embutido por padrão no vulcan_embedded.py gerado.
+    Coleta automaticamente:
+      • Comando Click executado + arquivo físico (argv[0])
+      • CPU, RAM e I/O (bytes e número de operações)
+      • Uso da partição do disco do projeto
+      • Libs de terceiros carregadas + versões
+
+    Tudo reportado para ~/.doxoade/doxoade.db e visível em:
+      doxoade vulcan telemetry-bridge
+
+    Use --no-telemetry ou defina VULCAN_TELEMETRY_SYNC=0 para desativar.
+    """
     project_root = Path(target_path).resolve()
     stub_path    = project_root / ".doxoade" / "vulcan_embedded.py"
 
+    if no_telemetry:
+        click.echo(f"{Fore.YELLOW}[INFO]{Style.RESET_ALL} Chronos Lite desativado (--no-telemetry).")
+        click.echo(
+            f"  {Style.DIM}Para desativar no ambiente: defina VULCAN_TELEMETRY_SYNC=0.{Style.RESET_ALL}"
+        )
+
     current_version = read_stub_version(stub_path)
-    should_write = force_stub or current_version is None or current_version != VULCAN_STUB_VERSION
+    should_write    = force_stub or current_version is None or current_version != VULCAN_STUB_VERSION
 
     if should_write:
         stub_path.parent.mkdir(parents=True, exist_ok=True)
@@ -424,11 +296,14 @@ def vulcan_module(target_path, main_files, auto_main, force_stub):
         if force_stub:
             click.echo(f"{Fore.GREEN}[OK]{Style.RESET_ALL} Stub Vulcan recriado (--force-stub).")
         elif current_version is None:
-            click.echo(f"{Fore.GREEN}[OK]{Style.RESET_ALL} Stub Vulcan criado.")
+            click.echo(f"{Fore.GREEN}[OK]{Style.RESET_ALL} Stub Vulcan criado (v{VULCAN_STUB_VERSION}).")
         else:
-            click.echo(f"{Fore.GREEN}[OK]{Style.RESET_ALL} Stub Vulcan atualizado.")
+            click.echo(
+                f"{Fore.GREEN}[OK]{Style.RESET_ALL} Stub Vulcan atualizado "
+                f"v{current_version} → v{VULCAN_STUB_VERSION}."
+            )
     else:
-        click.echo(f"{Fore.YELLOW}[INFO]{Style.RESET_ALL} Stub Vulcan já está atualizado.")
+        click.echo(f"{Fore.YELLOW}[INFO]{Style.RESET_ALL} Stub Vulcan já está na versão {VULCAN_STUB_VERSION}.")
 
     if _is_doxoade_project(project_root):
         click.echo(f"\n{Fore.RED}[ERRO] vulcan module não pode ser aplicado ao próprio projeto doxoade.{Style.RESET_ALL}")
@@ -444,6 +319,12 @@ def vulcan_module(target_path, main_files, auto_main, force_stub):
     runtime_dst = _write_safe_runtime(project_root)
     click.echo(f"{Fore.GREEN}[OK]{Fore.RESET} Runtime instalado em: {runtime_dst}")
 
+    if not no_telemetry:
+        click.echo(
+            f"{Fore.MAGENTA}[⚡ Chronos Lite v4]{Style.RESET_ALL} "
+            f"Click + HotLines + Libs + Disco + Vulcan stats → ~/.doxoade/doxoade.db"
+        )
+
     changed = []
     if main_files:
         for item in main_files:
@@ -456,12 +337,10 @@ def vulcan_module(target_path, main_files, auto_main, force_stub):
                 changed.append(p)
 
     if changed:
-        click.echo(f"{Fore.GREEN}[OK]{Fore.RESET} Bootstrap v2 injetado em:")
+        click.echo(f"{Fore.GREEN}[OK]{Fore.RESET} Bootstrap injetado em:")
         for p in changed:
             click.echo(f"  - {p}")
-        click.echo(
-            f"\n{Fore.CYAN}[INFO] Bootstrap v2 instala MetaFinder automaticamente.{Style.RESET_ALL}"
-        )
+        click.echo(f"\n{Fore.CYAN}[INFO] Bootstrap instala MetaFinder automaticamente.{Style.RESET_ALL}")
     elif main_files or auto_main:
         click.echo(f"{Fore.YELLOW}[INFO]{Fore.RESET} Nenhum __main__.py precisou de alteração.")
     else:
@@ -596,8 +475,7 @@ def vulcan_verify(target_path, verbose):
     \b
     Separa dois tipos de binário:
       bin/     → binários do PROJETO (rastreáveis por hash ao .py de origem)
-      lib_bin/ → binários de LIBS EXTERNAS (compilados de site-packages,
-                 não rastreáveis ao projeto — mostrados como seção separada)
+      lib_bin/ → binários de LIBS EXTERNAS (compilados de site-packages)
     """
     project_root = Path(target_path).resolve()
     bin_dir      = project_root / ".doxoade" / "vulcan" / "bin"
@@ -606,16 +484,26 @@ def vulcan_verify(target_path, verbose):
 
     click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}  ⬡ VULCAN VERIFY — {project_root.name}{Style.RESET_ALL}")
 
-    # ── Pré-checks ────────────────────────────────────────────────────────────
-    ext         = ".pyd" if os.name == "nt" else ".so"
-    proj_bins   = list(bin_dir.glob(f"*{ext}"))     if bin_dir.exists()     else []
-    lib_bins    = list(lib_bin_dir.glob(f"*{ext}")) if lib_bin_dir.exists() else []
-    any_bins    = bool(proj_bins or lib_bins)
+    ext       = ".pyd" if os.name == "nt" else ".so"
+    proj_bins = list(bin_dir.glob(f"*{ext}"))     if bin_dir.exists()     else []
+    lib_bins  = list(lib_bin_dir.glob(f"*{ext}")) if lib_bin_dir.exists() else []
+    any_bins  = bool(proj_bins or lib_bins)
+
+    # Verifica se Chronos Lite v2 está presente (pelo coletor mais específico)
+    embedded_path   = project_root / ".doxoade" / "vulcan" / "vulcan_embedded.py"
+    chronos_lite_ok = False
+    if embedded_path.exists():
+        try:
+            txt = embedded_path.read_text(encoding="utf-8", errors="ignore")
+            chronos_lite_ok = "_LibCodeSampler" in txt and "_ExternalCodeSampler" in txt
+        except Exception:
+            pass
 
     checks = {
-        "runtime.py presente":        runtime_py.exists(),
-        "bin/ presente":               bin_dir.exists(),
-        "vulcan_embedded.py presente": (project_root / ".doxoade" / "vulcan" / "vulcan_embedded.py").exists(),
+        "runtime.py presente":          runtime_py.exists(),
+        "bin/ presente":                 bin_dir.exists(),
+        "vulcan_embedded.py presente":   embedded_path.exists(),
+        "Chronos Lite v4 integrado":     chronos_lite_ok,
     }
 
     main_files      = list(project_root.rglob("__main__.py"))
@@ -624,8 +512,8 @@ def vulcan_verify(target_path, verbose):
         for p in main_files
         if ".doxoade" not in str(p)
     )
-    checks["bootstrap em __main__.py"] = bootstrap_found
-    checks[f"binários {ext} presentes (bin/ + lib_bin/)"] = any_bins
+    checks["bootstrap em __main__.py"]          = bootstrap_found
+    checks[f"binários {ext} (bin/ + lib_bin/)"] = any_bins
 
     all_ok = True
     for label, ok in checks.items():
@@ -633,7 +521,6 @@ def vulcan_verify(target_path, verbose):
         all_ok = all_ok and ok
         click.echo(f"   {icon}{Style.RESET_ALL} {label}")
 
-    # Mostra contagem de lib_bin mesmo durante pré-checks
     if lib_bins:
         total_kb = sum(p.stat().st_size for p in lib_bins) / 1024
         click.echo(
@@ -644,31 +531,30 @@ def vulcan_verify(target_path, verbose):
     if not all_ok:
         click.echo(
             f"\n{Fore.YELLOW}  ⚠ Pré-checks falharam. "
-            f"Execute 'doxoade vulcan module --path {target_path} --auto-main' primeiro.{Style.RESET_ALL}"
+            f"Execute 'doxoade vulcan module --path {target_path} --auto-main'.{Style.RESET_ALL}"
         )
+        if not chronos_lite_ok:
+            click.echo(
+                f"  {Fore.MAGENTA}  → Chronos Lite v2 ausente: execute "
+                f"'doxoade vulcan module --path {target_path} --force-stub' "
+                f"para atualizar para stub v{VULCAN_STUB_VERSION}.{Style.RESET_ALL}"
+            )
         return
 
-    # ── Seção 1: lib_bin/ — libs externas (sem teste de redirecionamento) ─────
+    # ── Seção 1: lib_bin/ ─────────────────────────────────────────────────────
     if lib_bins:
         click.echo(f"\n{Fore.MAGENTA}{Style.BRIGHT}  ⬡ LIBS EXTERNAS COMPILADAS (lib_bin/) — {len(lib_bins)} binário(s){Style.RESET_ALL}")
-        click.echo(
-            f"  {Style.DIM}Estes binários são carregados pelo MetaFinder quando a lib "
-            f"é importada.\n  O hash no nome refere-se ao caminho temporário de compilação "
-            f"— isso é esperado.{Style.RESET_ALL}"
-        )
-        # Agrupa por prefixo de nome (ex: formatting, parser, ...)
         lib_by_stem: dict[str, list] = {}
         for bp in sorted(lib_bins):
-            parts = bp.stem.split(".")[0].split("_")          # v_formatting_1779ae
+            parts = bp.stem.split(".")[0].split("_")
             stem  = "_".join(parts[1:-1]) if len(parts) >= 3 else bp.stem
             lib_by_stem.setdefault(stem, []).append(bp)
 
         for stem, paths in sorted(lib_by_stem.items()):
-            # Mostra apenas o mais recente se houver múltiplas versões
-            newest   = max(paths, key=lambda p: p.stat().st_mtime)
-            size_kb  = newest.stat().st_size / 1024
-            n_extra  = len(paths) - 1
-            extra    = f"  {Style.DIM}(+{n_extra} versão(ões) antiga(s)){Style.RESET_ALL}" if n_extra else ""
+            newest  = max(paths, key=lambda p: p.stat().st_mtime)
+            size_kb = newest.stat().st_size / 1024
+            n_extra = len(paths) - 1
+            extra   = f"  {Style.DIM}(+{n_extra} antiga(s)){Style.RESET_ALL}" if n_extra else ""
             click.echo(
                 f"   {Fore.MAGENTA}⬡{Style.RESET_ALL} {stem:<30} "
                 f"{Fore.WHITE}{size_kb:>6.1f} KB{Style.RESET_ALL}{extra}"
@@ -678,33 +564,26 @@ def vulcan_verify(target_path, verbose):
                     age = "← atual" if p is newest else "← antiga"
                     click.echo(f"       {Fore.CYAN}{p.name}{Style.RESET_ALL}  {Style.DIM}{age}{Style.RESET_ALL}")
 
-        # Aviso sobre versões antigas acumuladas
         n_old = sum(len(v) - 1 for v in lib_by_stem.values())
         if n_old > 0:
             click.echo(
-                f"\n  {Fore.YELLOW}⚠ {n_old} binário(s) antigo(s) em lib_bin/ "
-                f"(recompilações anteriores).{Style.RESET_ALL}\n"
-                f"  {Fore.CYAN}  Limpe com: doxoade vulcan purge{Style.RESET_ALL}"
+                f"\n  {Fore.YELLOW}⚠ {n_old} binário(s) antigo(s). "
+                f"Limpe com: doxoade vulcan purge{Style.RESET_ALL}"
             )
 
-    # ── Seção 2: bin/ — binários do projeto (teste de redirecionamento) ────────
+    # ── Seção 2: bin/ ─────────────────────────────────────────────────────────
     if not proj_bins:
-        if lib_bins:
-            click.echo(
-                f"\n{Fore.CYAN}  ℹ bin/ vazio — nenhum binário de projeto para testar.{Style.RESET_ALL}\n"
-                f"  Execute 'doxoade vulcan ignite' para compilar o projeto."
-            )
-        else:
-            click.echo(
-                f"\n{Fore.RED}  ✘ Nenhum binário encontrado em bin/ ou lib_bin/.{Style.RESET_ALL}\n"
-                f"  Execute 'doxoade vulcan ignite' ou 'doxoade vulcan lib --target <lib>'."
-            )
+        msg = (
+            f"\n{Fore.CYAN}  ℹ bin/ vazio.{Style.RESET_ALL}\n  Execute 'doxoade vulcan ignite'."
+            if lib_bins else
+            f"\n{Fore.RED}  ✘ Nenhum binário.{Style.RESET_ALL}\n  Execute 'doxoade vulcan ignite'."
+        )
+        click.echo(msg)
         click.echo()
         return
 
     click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}  ⬡ PROJETO (bin/) — testando redirecionamento...{Style.RESET_ALL}")
 
-    # Índice hash → .py do PROJETO (não de site-packages)
     skip     = {".git", "venv", ".venv", "__pycache__", "build", "dist", ".doxoade"}
     py_index : dict[str, Path] = {}
     for r, dirs, files in os.walk(project_root):
@@ -785,25 +664,18 @@ except Exception as e:
     if not_redir:
         click.echo(f"\n  {Fore.YELLOW}{Style.BRIGHT}⚠ NÃO REDIRECIONADOS ({len(not_redir)}):{Style.RESET_ALL}")
         for r in not_redir:
-            err = r.get("error", "import retornou .py original")
-            click.echo(f"   {Fore.YELLOW}⚠{Style.RESET_ALL} {r['src']}  {Style.DIM}({err}){Style.RESET_ALL}")
+            click.echo(f"   {Fore.YELLOW}⚠{Style.RESET_ALL} {r['src']}  {Style.DIM}({r.get('error', '')}){Style.RESET_ALL}")
 
     if orphans:
-        click.echo(
-            f"\n  {Fore.RED}{Style.BRIGHT}✘ ÓRFÃOS — hash não encontrado no projeto ({len(orphans)}):{Style.RESET_ALL}"
-        )
+        click.echo(f"\n  {Fore.RED}{Style.BRIGHT}✘ ÓRFÃOS ({len(orphans)}):{Style.RESET_ALL}")
         for r in orphans:
             click.echo(f"   {Fore.RED}✘{Style.RESET_ALL} {r['bin']}")
-        click.echo(
-            f"  {Style.DIM}Estes binários podem ser de uma compilação antiga "
-            f"(arquivos .py movidos/renomeados).{Style.RESET_ALL}\n"
-            f"  {Fore.CYAN}  Limpe com: doxoade vulcan purge{Style.RESET_ALL}"
-        )
+        click.echo(f"  {Fore.CYAN}  Limpe com: doxoade vulcan purge{Style.RESET_ALL}")
 
     total = len(results)
     pct   = (len(redirected) / total * 100) if total else 0
     click.echo(
-        f"\n  {Fore.CYAN}Projeto — Total: {total}  │  "
+        f"\n  {Fore.CYAN}Total: {total}  │  "
         f"{Fore.GREEN}Redirecionados: {len(redirected)} ({pct:.0f}%){Fore.RESET}  │  "
         f"{Fore.YELLOW}Falhos: {len(not_redir)}{Fore.RESET}  │  "
         f"{Fore.RED}Órfãos: {len(orphans)}{Style.RESET_ALL}"
@@ -812,13 +684,300 @@ except Exception as e:
     if pct == 100 and total > 0:
         click.echo(f"\n  {Fore.GREEN}{Style.BRIGHT}✅ Redirecionamento 100% funcional.{Style.RESET_ALL}")
     elif pct > 0:
-        click.echo(
-            f"\n  {Fore.YELLOW}⚡ Redirecionamento parcial. "
-            f"Verifique se o bootstrap está no __main__.py e rode 'vulcan ignite'.{Style.RESET_ALL}"
-        )
+        click.echo(f"\n  {Fore.YELLOW}⚡ Redirecionamento parcial. Verifique bootstrap e rode 'vulcan ignite'.{Style.RESET_ALL}")
     elif total > 0:
         click.echo(
             f"\n  {Fore.RED}✘ Nenhum redirecionamento ativo. "
             f"Execute 'doxoade vulcan module --path {target_path} --auto-main'.{Style.RESET_ALL}"
         )
+    click.echo()
+
+
+@click.command('telemetry-bridge')
+@click.option('--limit', '-n', default=20, help='Número de registros a exibir.')
+@click.option('--project', '-p', default=None,
+              help='Filtra por nome/caminho do projeto (substring de working_dir).')
+@click.option('--since', default=None, metavar='YYYY-MM-DD',
+              help='Exibe apenas registros a partir desta data.')
+@click.option('--stats', '-s', is_flag=True,
+              help='Tabela agregada por projeto (CPU/RAM/I/O médios).')
+@click.option('--libs', '-l', is_flag=True,
+              help='Mapa de libs de terceiros detectadas por projeto.')
+@click.option('--verbose', '-v', is_flag=True,
+              help='Expande cada registro: arquivo, disco (partição + ops), top-3 Vulcan, libs.')
+def vulcan_telemetry_bridge(limit, project, since, stats, libs, verbose):
+    """Exibe telemetria de projetos externos bootstrapados pelo Vulcan.
+
+    \b
+    Lê registros 'vulcan_ext_*' gravados pelo Chronos Lite v2.
+    Cada registro contém:
+      • Comando Click e arquivo executado
+      • CPU / RAM (picos)
+      • I/O em bytes (read/write MB) e em operações (syscall count)
+      • Uso da partição do disco
+      • Libs de terceiros carregadas + versões
+      • Vulcan stats (timing de funções otimizadas)
+
+    Requer bootstrap:
+      doxoade vulcan module --path <projeto> --auto-main
+    """
+    from ..database import get_db_connection
+    import sqlite3 as _sqlite3
+
+    conn = get_db_connection()
+    conn.row_factory = _sqlite3.Row
+    cursor = conn.cursor()
+
+    try:
+        conditions = ["command_name LIKE 'vulcan_ext_%'"]
+        params: list = []
+
+        if project:
+            conditions.append("(working_dir LIKE ? OR command_name LIKE ?)")
+            params += [f"%{project}%", f"%{project}%"]
+        if since:
+            conditions.append("timestamp >= ?")
+            params.append(since)
+
+        where = " AND ".join(conditions)
+
+        if stats:
+            _render_bridge_stats(cursor, where, params)
+            return
+        if libs:
+            _render_bridge_libs(cursor, where, params)
+            return
+
+        params.append(limit)
+        cursor.execute(
+            f"SELECT * FROM command_history WHERE {where} ORDER BY id DESC LIMIT ?",
+            params,
+        )
+        rows = cursor.fetchall()
+
+        if not rows:
+            click.echo(
+                f"\n{Fore.YELLOW}  Nenhum projeto externo no índice.{Style.RESET_ALL}\n"
+                f"  {Fore.CYAN}Instrumente com: "
+                f"doxoade vulcan module --path <projeto> --auto-main{Style.RESET_ALL}"
+            )
+            return
+
+        click.echo(
+            f"\n{Fore.CYAN}{Style.BRIGHT}"
+            f"  ⬡ TELEMETRIA DE PROJETOS EXTERNOS  (Chronos Lite v2 — {len(rows)} registro(s))"
+            f"{Style.RESET_ALL}"
+        )
+        click.echo(
+            f"  {Style.DIM}--stats para agregação  │  "
+            f"--libs para dependências  │  "
+            f"--verbose para detalhes{Style.RESET_ALL}\n"
+        )
+
+        last_project = None
+        for row in rows:
+            cwd     = row['working_dir'] or ''
+            proj_id = Path(cwd).name if cwd else 'desconhecido'
+
+            if proj_id != last_project:
+                click.echo(
+                    f"  {Fore.YELLOW}{Style.BRIGHT}◈ {proj_id}{Style.RESET_ALL}  "
+                    f"{Style.DIM}{cwd}{Style.RESET_ALL}"
+                )
+                last_project = proj_id
+
+            ts   = (row['timestamp'] or '')[:19].replace('T', ' ')
+            cmd  = (row['command_name'] or '').replace('vulcan_ext_', '').replace('_', ' ')
+            dur  = row['duration_ms']    or 0.0
+            cpu  = row['cpu_percent']    or 0.0
+            ram  = row['peak_memory_mb'] or 0.0
+            io_r = row['io_read_mb']     or 0.0
+            io_w = row['io_write_mb']    or 0.0
+
+            cpu_color = Fore.RED if cpu > 80 else (Fore.YELLOW if cpu > 40 else Fore.GREEN)
+
+            click.echo(
+                f"    {Fore.WHITE}{ts}{Style.RESET_ALL} "
+                f"│ {Fore.CYAN}{cmd:<22}{Style.RESET_ALL} "
+                f"│ {dur:>7.0f}ms "
+                f"│ CPU {cpu_color}{cpu:>5.1f}%{Style.RESET_ALL} "
+                f"│ RAM {Fore.MAGENTA}{ram:>6.1f}MB{Style.RESET_ALL} "
+                f"│ I/O R:{io_r:.2f} W:{io_w:.2f}MB"
+            )
+
+            if verbose and row['system_info']:
+                try:
+                    si = json.loads(row['system_info'])
+
+                    # Arquivo executado
+                    sf = si.get('script_file', '')
+                    if sf:
+                        click.echo(f"      {Style.DIM}arquivo : {sf}{Style.RESET_ALL}")
+
+                    # Disco: partição + contagem de syscalls
+                    disk = si.get('disk', {})
+                    if disk:
+                        dtotal = disk.get('disk_total_gb', 0)
+                        dused  = disk.get('disk_used_gb',  0)
+                        dpct   = disk.get('disk_used_pct', 0)
+                        io_rc  = disk.get('io_read_count',  0)
+                        io_wc  = disk.get('io_write_count', 0)
+                        click.echo(
+                            f"      {Fore.BLUE}disco   {Style.RESET_ALL}: "
+                            f"{dused:.1f}/{dtotal:.1f}GB ({dpct}%)  "
+                            f"ops R:{io_rc:,}  W:{io_wc:,}"
+                        )
+
+                    # Top-3 funções Vulcan (vulcan_stats preservado integralmente)
+                    vs = si.get('vulcan_stats', {})
+                    if vs:
+                        top3 = sorted(
+                            vs.items(),
+                            key=lambda x: x[1].get('total_ms', 0),
+                            reverse=True,
+                        )[:3]
+                        for fn, data in top3:
+                            hits = data.get('hits', 0)
+                            avg  = data['total_ms'] / hits if hits > 0 else 0
+                            fb   = data.get('fallbacks', 0)
+                            fb_s = (f"{Fore.RED}{fb}fb{Style.RESET_ALL}"
+                                    if fb else f"{Fore.GREEN}0fb{Style.RESET_ALL}")
+                            fn_d = (fn[:35] + "..") if len(fn) > 37 else fn
+                            click.echo(
+                                f"      {Fore.MAGENTA}⬡{Style.RESET_ALL} "
+                                f"{fn_d:<38} {hits:>4}×  avg {avg:.3f}ms  {fb_s}"
+                            )
+
+                    # Libs (resumo de 5 no --verbose; use --libs para o mapa completo)
+                    lib_map = si.get('libs', {})
+                    if lib_map:
+                        sample  = list(lib_map.items())[:5]
+                        lib_str = '  '.join(f"{k}({v})" if v else k for k, v in sample)
+                        extra   = f"  +{len(lib_map)-5} mais" if len(lib_map) > 5 else ""
+                        click.echo(
+                            f"      {Fore.CYAN}libs    {Style.RESET_ALL}: "
+                            f"{lib_str}{Style.DIM}{extra}{Style.RESET_ALL}"
+                        )
+
+                except Exception:
+                    pass
+
+        click.echo()
+
+    finally:
+        conn.close()
+
+
+def _render_bridge_stats(cursor, where: str, params: list):
+    """Tabela agregada de performance por projeto externo."""
+    cursor.execute(
+        f"""
+        SELECT working_dir,
+               COUNT(*)            AS execucoes,
+               AVG(duration_ms)    AS avg_dur,
+               MAX(duration_ms)    AS max_dur,
+               AVG(cpu_percent)    AS avg_cpu,
+               AVG(peak_memory_mb) AS avg_ram,
+               SUM(io_read_mb)     AS total_io_r,
+               SUM(io_write_mb)    AS total_io_w
+        FROM command_history
+        WHERE {where}
+        GROUP BY working_dir
+        ORDER BY avg_dur DESC
+        """,
+        params,
+    )
+    rows = cursor.fetchall()
+
+    if not rows:
+        click.echo(f"\n{Fore.YELLOW}  Nenhum dado para agregar.{Style.RESET_ALL}")
+        return
+
+    click.echo(
+        f"\n{Fore.CYAN}{Style.BRIGHT}"
+        f"  ⬡ PERFORMANCE AGREGADA — PROJETOS EXTERNOS"
+        f"{Style.RESET_ALL}"
+    )
+    hdr = (
+        f"  {'PROJETO':<25} │ {'Exec':>5} │ {'Avg(ms)':>8} │ {'Max(ms)':>8} │ "
+        f"{'CPU%':>6} │ {'RAM MB':>7} │ {'IO_R MB':>8} │ {'IO_W MB':>8}"
+    )
+    click.echo(f"\n{Fore.WHITE}{hdr}{Style.RESET_ALL}")
+    click.echo("  " + "─" * (len(hdr) - 2))
+
+    for row in rows:
+        proj = Path(row['working_dir']).name[:25] if row['working_dir'] else 'desconhecido'
+        click.echo(
+            f"  {Fore.CYAN}{proj:<25}{Style.RESET_ALL} │ "
+            f"{int(row['execucoes']):>5} │ "
+            f"{row['avg_dur']:>8.0f} │ "
+            f"{row['max_dur']:>8.0f} │ "
+            f"{(row['avg_cpu']    or 0):>6.1f} │ "
+            f"{(row['avg_ram']    or 0):>7.1f} │ "
+            f"{(row['total_io_r'] or 0):>8.2f} │ "
+            f"{(row['total_io_w'] or 0):>8.2f}"
+        )
+    click.echo()
+
+
+def _render_bridge_libs(cursor, where: str, params: list):
+    """
+    Mapa de libs de terceiros detectadas por projeto.
+
+    Agrega todos os registros do projeto e exibe:
+      • Frequência de detecção (em quantos registros a lib apareceu)
+      • Versões observadas (pode haver mais de uma se o projeto mudou)
+    Ordenado por frequência descendente.
+    """
+    cursor.execute(
+        f"SELECT working_dir, system_info FROM command_history WHERE {where} ORDER BY id DESC",
+        params,
+    )
+    rows = cursor.fetchall()
+
+    if not rows:
+        click.echo(f"\n{Fore.YELLOW}  Nenhum dado disponível.{Style.RESET_ALL}")
+        return
+
+    # Agrega: projeto → lib → {count, versions}
+    agg: dict[str, dict[str, dict]] = {}
+    for row in rows:
+        proj = Path(row['working_dir']).name if row['working_dir'] else 'desconhecido'
+        if not row['system_info']:
+            continue
+        try:
+            si = json.loads(row['system_info'])
+            for name, ver in si.get('libs', {}).items():
+                agg.setdefault(proj, {}).setdefault(name, {'count': 0, 'versions': set()})
+                agg[proj][name]['count'] += 1
+                if ver:
+                    agg[proj][name]['versions'].add(ver)
+        except Exception:
+            continue
+
+    if not agg:
+        click.echo(
+            f"\n{Fore.YELLOW}  Nenhuma lib detectada. "
+            f"Verifique se stub v{VULCAN_STUB_VERSION} está instalado.{Style.RESET_ALL}"
+        )
+        return
+
+    click.echo(
+        f"\n{Fore.CYAN}{Style.BRIGHT}"
+        f"  ⬡ MAPA DE LIBS — PROJETOS EXTERNOS"
+        f"{Style.RESET_ALL}"
+    )
+
+    for proj, lib_map in sorted(agg.items()):
+        click.echo(
+            f"\n  {Fore.YELLOW}{Style.BRIGHT}◈ {proj}{Style.RESET_ALL}  "
+            f"{Style.DIM}({len(lib_map)} lib(s) distintas){Style.RESET_ALL}"
+        )
+        for name, data in sorted(lib_map.items(), key=lambda x: x[1]['count'], reverse=True):
+            ver_str = ', '.join(sorted(data['versions'])) if data['versions'] else '—'
+            click.echo(
+                f"    {Fore.CYAN}{name:<25}{Style.RESET_ALL} "
+                f"v{ver_str:<18} "
+                f"{Style.DIM}{data['count']}× detectada{Style.RESET_ALL}"
+            )
     click.echo()

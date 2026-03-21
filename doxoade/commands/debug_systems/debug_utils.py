@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 # doxoade/probes/debug_probe.py
 """
-Debug Probe v2.0 - Aegis Forensic Engine.
-Modo autópsia + modo perfil profundo (line-timer + cProfile + tracemalloc).
+Debug Utils v2.1 - PASC-1.2 & MPoT-17.
+Environment anchoring and probe orchestration.
+
+Dois construtores de comando separados para evitar contaminação de argv:
+  build_probe_command → debug_probe.py  (entende: script mode [args])
+  build_flow_command  → flow_runner.py  (entende: --target --base --val etc.)
 """
 import sys
 import os
@@ -16,42 +20,35 @@ import tracemalloc
 import linecache
 import io
 
+from ...shared_tools import _find_project_root
 
 # ─── BOOTSTRAP ───────────────────────────────────────────────────────────────
 
-def _resolve_package(abs_path: str):
-    """
-    Detecta o nome do pacote e a raiz do projeto para qualquer script Python.
-
-    Sobe a árvore de diretórios enquanto __init__.py existir, construindo o
-    nome do pacote (ex: 'doxoade.commands') e identificando o project_root
-    (o diretório acima do pacote de nível mais alto).
-
-    Retorna (package_name, project_root):
-      - package_name : string dotted ou None se o script é standalone
-      - project_root : diretório que deve entrar em sys.path
-
-    Exemplos:
-      doxoade/commands/debug.py    → ('doxoade.commands', '/…/doxoade_root')
-      ORN/engine/core/executive.py → ('engine.core',      '/…/ORN')
-      /tmp/standalone.py           → (None,               '/tmp')
-    """
-    parts   = []
-    current = os.path.dirname(abs_path)
-
-    while os.path.exists(os.path.join(current, '__init__.py')):
-        parts.insert(0, os.path.basename(current))
-        parent = os.path.dirname(current)
-        if parent == current:
-            break
-        current = parent
-
-    project_root = current
-    if project_root not in sys.path:
-        sys.path.insert(0, project_root)
-
-    package_name = '.'.join(parts) if parts else None
-    return package_name, project_root
+def _bootstrap(script_path):
+    """Detecta a raiz do projeto e o nome correto do pacote (Aegis Ready)."""
+    abs_path = os.path.abspath(script_path)
+    parts    = abs_path.replace('\\', '/').split('/')
+    try:
+        idx          = parts.index('doxoade')
+        project_root = "/".join(parts[:idx])
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        package_parts = []
+        current = os.path.dirname(abs_path)
+        while os.path.exists(os.path.join(current, '__init__.py')):
+            package_parts.insert(0, os.path.basename(current))
+            current = os.path.dirname(current)
+            if os.path.basename(current) == 'doxoade':
+                package_parts.insert(0, 'doxoade')
+                break
+        return ".".join(package_parts) if package_parts else None
+    except ValueError as e:
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        print(f"\033[31m ■ Exception type: {e} ■ Exception value: {exc_obj}\n")
+        exc_trace(exc_tb)
+        return None
 
 
 # ─── SERIALIZAÇÃO ────────────────────────────────────────────────────────────
@@ -230,12 +227,11 @@ def _extract_memory_stats(snapshot, target_file: str, limit: int = 10) -> dict:
 
 def run_debug(script_path: str):
     abs_path   = os.path.abspath(script_path)
-    pkg_name, _ = _resolve_package(abs_path)
     debug_data = {'status': 'unknown', 'variables': {}, 'error': None}
     globs      = {
         '__name__':    '__main__',
         '__file__':    abs_path,
-        '__package__': pkg_name,
+        '__package__': None,
     }
     try:
         sys.stdout.write("\n--- BOOTING AEGIS SANDBOX ---\n")
@@ -276,6 +272,38 @@ def run_debug(script_path: str):
     print(json.dumps(debug_data, ensure_ascii=False))
 
 
+# ─── AMBIENTE ────────────────────────────────────────────────────────────────
+
+def get_debug_env(script_path: str) -> dict:
+    target_abs   = os.path.abspath(script_path)
+    project_root = _find_project_root(target_abs)
+    doxo_dir     = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    )
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join([
+        doxo_dir,
+        os.path.dirname(project_root) if project_root else os.path.dirname(target_abs),
+        env.get("PYTHONPATH", ""),
+    ])
+    env["PYTHONIOENCODING"] = "utf-8"
+    return env
+
+
+# ─── COMANDO PARA debug_probe.py ─────────────────────────────────────────────
+
+def build_probe_command(python_exe: str, probe_file: str, script: str,
+                        mode: str = 'debug', args: str = None) -> list:
+    """
+    Protocolo:  python debug_probe.py <script_abs> <mode> [args...]
+    mode: 'debug' | 'profile'
+    """
+    cmd = [python_exe, os.path.abspath(probe_file), os.path.abspath(script), mode]
+    if args:
+        cmd.extend(args.split())
+    return cmd
+
+    
 # ─── MODO PERFIL PROFUNDO ─────────────────────────────────────────────────────
 
 def run_profile(script_path: str):
@@ -289,7 +317,6 @@ def run_profile(script_path: str):
     Emite ---DOXOADE-PROFILE-DATA--- com o JSON completo ao fim.
     """
     abs_path = os.path.abspath(script_path)
-    pkg_name, _ = _resolve_package(abs_path)
     profile_data = {
         'status':    'unknown',
         'variables': {},
@@ -299,7 +326,7 @@ def run_profile(script_path: str):
     globs = {
         '__name__':    '__main__',
         '__file__':    abs_path,
-        '__package__': pkg_name,
+        '__package__': None,
     }
 
     line_timer = _LineTimer()
@@ -381,6 +408,39 @@ def run_profile(script_path: str):
     print(json.dumps(profile_data, ensure_ascii=False))
 
 
+
+# ─── COMANDO PARA flow_runner.py ─────────────────────────────────────────────
+
+def build_flow_command(python_exe: str, runner_file: str, script: str,
+                       watch: str = None, bottleneck: bool = False,
+                       no_compress: bool = False, args: str = None) -> list:
+    """
+    Protocolo nativo do flow_runner (argparse):
+        flow_runner.py [--base] [--val] [--no-compress] [--target TARGET] script
+
+    --watch   → --target + --val
+    --bottleneck → --base
+    --no-compress → --no-compress  (desativa Iron Gate no flow_runner)
+    """
+    cmd = [python_exe, os.path.abspath(runner_file)]
+
+    if watch:
+        cmd.extend(["--target", watch])
+        cmd.append("--val")
+    elif bottleneck:
+        cmd.append("--base")
+
+    if no_compress:
+        cmd.append("--no-compress")
+
+    cmd.append(os.path.abspath(script))
+
+    if args:
+        cmd.extend(args.split())
+
+    return cmd
+    
+    
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

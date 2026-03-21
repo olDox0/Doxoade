@@ -127,12 +127,14 @@ def _register_subcommands():
     )
     from .vulcan_cmd_bootstrap import (
         vulcan_module, vulcan_probe, vulcan_verify,
+        vulcan_telemetry_bridge,          # ← NOVO
     )
 
     for cmd in (
         ignite, vulcan_regression, vulcan_lib, vulcan_benchmark, vulcan_pitstop,
         vulcan_alloc, vulcan_simd, vulcan_opt, opt_bench,
         vulcan_module, vulcan_probe, vulcan_verify,
+        vulcan_telemetry_bridge,          # ← NOVO
     ):
         vulcan_group.add_command(cmd)
 

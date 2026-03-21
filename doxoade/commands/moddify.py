@@ -16,9 +16,17 @@ def _write_lines(file_path, lines):
     except FileNotFoundError:
         old_content = ""
     new_content = "".join(lines)
-    
-    # REGISTRA NO CHRONOS
-    chronos_recorder.log_file_change(file_path, old_content, new_content, operation='MODIFY')
+
+    # Escreve de fato
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(new_content)
+
+    # REGISTRA NO CHRONOS (seguro)
+    if hasattr(chronos_recorder, "log_file_change"):
+        chronos_recorder.log_file_change(
+            file_path, old_content, new_content, operation='MODIFY'
+        )
+
 def _parse_line_range(range_str, max_lines):
     """Converte '1-10' ou '1,3,5' em um set de inteiros."""
     lines = set()

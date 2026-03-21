@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # doxoade/cli.py
 """
-Ponto de Entrada Principal (Core Router) - v85.0 Platinum.
+Ponto de Entrada Principal (Core Router) - v85.1 Platinum.
 Orquestrador Zeus: Gerenciamento de Comandos e Ciclo de Vida.
 Compliance: OSL-1, PASC-6.1 (Lazy Loading), PASC-8.4.
 """
@@ -12,7 +12,7 @@ import click
 import traceback
 from importlib import import_module
 from doxoade.tools.doxcolors import Fore, Style
-#from ._version import __version__
+
 # --- BOOTSTRAP DE AMBIENTE (OSL-10) ---
 if sys.stdout.encoding != 'utf-8':
     try: sys.stdout.reconfigure(encoding='utf-8')
@@ -22,8 +22,10 @@ if sys.stdout.encoding != 'utf-8':
         _, exc_obj, exc_tb = exc_sys.exc_info()
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         line_number = exc_tb.tb_lineno
-        print(f"\033[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+        print(f"\033[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {chr(10).join([''] + str(exc_obj).split(chr(39)))}\n")
         exc_trace(exc_tb)
+
+
 # --- MOTOR DE CARREGAMENTO DIFERIDO (LAZY ENGINE) ---
 class DoxoadeLazyGroup(click.Group):
     """
@@ -52,7 +54,6 @@ class DoxoadeLazyGroup(click.Group):
             'diff': 'doxoade.commands.diff:diff',
             'doctor': 'doxoade.commands.doctor:doctor',
             'encoding': 'doxoade.commands.encoding:encoding',
-#            'experimental': 'doxoade.commands.experimental:experimental',
             'fix': 'doxoade.commands.fix:fix',
             'flow': 'doxoade.commands.run:flow_command',
             'git-clean': 'doxoade.commands.git_clean:git_clean',
@@ -104,8 +105,10 @@ class DoxoadeLazyGroup(click.Group):
             'vulcan': 'doxoade.commands.vulcan_cmd:vulcan_group',
             'webcheck': 'doxoade.commands.webcheck:webcheck',
         }
+
     def list_commands(self, ctx):
         return sorted(self._lazy_map.keys())
+
     def get_command(self, ctx, name):
         if name not in self._lazy_map: return None
         module_path, attr_name = self._lazy_map[name].split(':')
@@ -118,14 +121,17 @@ class DoxoadeLazyGroup(click.Group):
             _, exc_obj, exc_tb = exc_sys.exc_info()
             fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
             line_number = exc_tb.tb_lineno
-            print(f"\033[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+            print(f"\033[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {chr(10).join([''] + str(exc_obj).split(chr(39)))}\n")
             exc_trace(exc_tb)
             self._print_fatal_import(name, e)
             return None
+
     def _print_fatal_import(self, cmd_name, e):
         print(f"\033[31m\n[ FATAL ] Erro ao carregar comando '{cmd_name}'")
         print(f"   ■ Causa: {e}\033[0m")
         if '--debug' in sys.argv: traceback.print_exc()
+
+
 # --- ORQUESTRADOR PRINCIPAL ---
 @click.group(cls=DoxoadeLazyGroup, invoke_without_command=True)
 @click.option('--guard', is_flag=True, help="Verificação de integridade Aegis.")
@@ -133,11 +139,11 @@ class DoxoadeLazyGroup(click.Group):
 def cli(ctx, guard):
     """olDox222 Advanced Development Environment (doxoade)."""
     ctx.ensure_object(dict)
-    
+
     # 1. Persistência (Osíris)
     from doxoade.tools.db_utils import start_persistence_worker
     start_persistence_worker()
-    
+
     # 2. Banco de Dados (Ma'at)
     from doxoade.database import init_db
     try: init_db()
@@ -148,23 +154,35 @@ def cli(ctx, guard):
         _, exc_obj, exc_tb = exc_sys.exc_info()
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         line_number = exc_tb.tb_lineno
-        print(f"\033[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+        print(f"\033[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {chr(10).join([''] + str(exc_obj).split(chr(39)))}\n")
         exc_trace(exc_tb)
         sys.exit(1)
+
     # 3. Telemetria (Chronos)
+    # Registrada para QUALQUER subcomando invocado — o atexit no ChronosRecorder
+    # garante que end_command seja chamado mesmo se sys.exit() vier antes do
+    # result_callback (comportamento padrão do Click standalone_mode=True).
     if ctx.invoked_subcommand:
         from doxoade.chronos import chronos_recorder
         ctx.obj['start_time'] = time.perf_counter()
         chronos_recorder.start_command(ctx)
     else:
         click.echo(ctx.get_help())
+
+
 @cli.result_callback()
 def process_result(result, **kwargs):
-    """Sela a execução e finaliza telemetria (PASC-8.20)."""
+    """
+    Sela a execução e finaliza telemetria (PASC-8.20).
+
+    Caminho feliz: chamado pelo Click antes do sys.exit(0) do standalone_mode.
+    Caminho de emergência: se nunca for chamado, o atexit em ChronosRecorder
+    garante que end_command seja executado com o exit_code inferido.
+    """
     ctx = click.get_current_context()
     if ctx.obj and 'start_time' in ctx.obj:
         duration_ms = (time.perf_counter() - ctx.obj['start_time']) * 1000
-        exit_code = 0 if sys.exc_info()[0] is None else 1
+        exit_code   = 0 if sys.exc_info()[0] is None else 1
         from doxoade.chronos import chronos_recorder
         try:
             chronos_recorder.end_command(exit_code, duration_ms)
@@ -174,43 +192,51 @@ def process_result(result, **kwargs):
             _, exc_obj, exc_tb = exc_sys.exc_info()
             fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
             line_number = exc_tb.tb_lineno
-            print(f"\033[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+            print(f"\033[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {chr(10).join([''] + str(exc_obj).split(chr(39)))}\n")
             exc_trace(exc_tb)
+
+
 # --- FUNÇÃO DE ENTRADA (BOOTSTRAP) ---
 def main():
     """Wrapper blindado com Injeção Vulcan (Hefesto)."""
-    
+
     # 1. Prioridade Vulcan (PASC-6.4)
     project_root = os.getcwd()
-    vulcan_bin = os.path.join(project_root, ".doxoade", "vulcan", "bin")
+    vulcan_bin   = os.path.join(project_root, ".doxoade", "vulcan", "bin")
     if os.path.exists(vulcan_bin) and vulcan_bin not in sys.path:
         sys.path.insert(0, vulcan_bin)
+
+    _exit_code = 0
     try:
         cli(obj={})
+
     except KeyboardInterrupt:
         click.secho("\n[!] Operação cancelada pelo usuário.", fg='yellow')
-        sys.exit(130)
-# [DOX-UNUSED]     except Exception as e:
-        # PASC-1.1: Captura o rastro completo antes de enviar para o resgate
-        import traceback
-        err_full_text = traceback.format_exc() 
-        
-        from doxoade.rescue import analyze_crash
-        print(f"\n{Fore.RED}{Style.BRIGHT}[ NUCLEUS CRASH ]")
-        
-        # Correção: Passa o texto formatado, não o objeto de exceção
-        analyze_crash(err_full_text) 
-        sys.exit(1)
+        _exit_code = 130
+
+    except SystemExit as se:
+        # Click standalone_mode levanta SystemExit após cada comando.
+        # Capturamos aqui para passar o exit_code correto ao end_command
+        # ANTES de o processo encerrar, complementando o atexit.
+        _exit_code = se.code if isinstance(se.code, int) else (1 if se.code else 0)
+        if _exit_code not in (0, 130):
+            # Re-levanta para não engolir erros reais (ex: sys.exit(1) de init_db)
+            raise
+
     except Exception as e:
         import sys as exc_sys
         from traceback import print_tb as exc_trace
         _, exc_obj, exc_tb = exc_sys.exc_info()
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        fname       = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         line_number = exc_tb.tb_lineno
-        print(f"\033[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+        print(f"\033[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {chr(10).join([''] + str(exc_obj).split(chr(39)))}\n")
         exc_trace(exc_tb)
+        _exit_code = 1
+
     finally:
         from doxoade.tools.db_utils import stop_persistence_worker
         stop_persistence_worker()
+
+
 if __name__ == "__main__":
     main()

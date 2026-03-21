@@ -16,6 +16,7 @@ _STATE = {
     'indent_level': 0,
     'flow_base': False, 'flow_val': False, 'flow_import': False, 'flow_func': False,
     'history': [], 'active_pattern': None, 'pattern_idx': 0, 'hidden_count': 0,
+    'no_compress': False,   # Iron Gate desativado quando True
 }
 # --- LÓGICA DE COMPRESSÃO (IRON GATE) ---
 def _flush_iron_gate():
@@ -57,8 +58,8 @@ def static_trace_calls(frame, event, arg):
     # 1. Noise Gate (Filtro de Sistema e Sniper)
     if _should_skip_trace(filename):
         return None
-    # 2. Iron Gate (Compressão de Loops)
-    if event == 'line' and _handle_compression((filename, lineno)):
+    # 2. Iron Gate (Compressão de Loops) — desativado com --no-compress
+    if event == 'line' and not _STATE['no_compress'] and _handle_compression((filename, lineno)):
         return static_trace_calls
     # 3. UI Dispatcher (A função que estava faltando!)
     _render_trace_event(frame, event)
@@ -113,7 +114,7 @@ def _render_trace_event(frame, event):
         loc = f"{'  '*_STATE['indent_level']}{os.path.basename(filename)}:{lineno}".ljust(25)
         print(f"{C_BORDER}│{C_RESET} {ms:7.1f}ms {SEP} {C_WHITE}{loc}{SEP} {line[:50].ljust(50)} {SEP} {', '.join(diffs)}")
 # --- BOOTSTRAP E AUXILIARES ---
-def run_flow(script_path, base, val, imp, func, target_file=None):
+def run_flow(script_path, base, val, imp, func, target_file=None, no_compress=False):
     abs_p = os.path.abspath(script_path)
     pkg_name, project_root = _bootstrap_package(abs_p)
     
@@ -121,7 +122,8 @@ def run_flow(script_path, base, val, imp, func, target_file=None):
         'project_root': project_root.replace('\\', '/'),
         'target_file': os.path.abspath(target_file).replace('\\', '/') if target_file else None,
         'flow_base': base, 'flow_val': val, 'flow_import': imp, 'flow_func': func,
-        'last_time': time.perf_counter()
+        'last_time': time.perf_counter(),
+        'no_compress': no_compress,
     })
     
     globs = {
@@ -173,5 +175,8 @@ if __name__ == "__main__":
     p.add_argument("--import", dest="imp", action="store_true")
     p.add_argument("--func", action="store_true")
     p.add_argument("--target", default=None)
+    p.add_argument("--no-compress", dest="no_compress", action="store_true",
+                   help="Desativa compressão de loops (Iron Gate).")
     args = p.parse_args()
-    run_flow(args.script, args.base, args.val, args.imp, args.func, args.target)
+    run_flow(args.script, args.base, args.val, args.imp, args.func,
+             args.target, no_compress=args.no_compress)

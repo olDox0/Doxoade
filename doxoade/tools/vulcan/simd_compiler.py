@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
+# doxoade/tools/vulcan/simd_compiler.py
+
 """
-doxoade/tools/vulcan/simd_compiler.py
 ──────────────────────────────────────────────────────────────────────────────
 Compilação SIMD-aware para o pipeline Vulcan.
 
@@ -31,11 +32,26 @@ import subprocess
 import sys
 import textwrap
 import tempfile
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from doxoade.tools.vulcan.cpu_flags import simd_compile_flags
 from .simd_detector import SIMDCapabilities, detect as detect_simd
+
+# Mapeamento entre SIMDCapabilities.best e o formato esperado por simd_compile_flags.
+# Necessário porque os dois módulos usam convenções de nomes distintas.
+_BEST_TO_CPU_LEVEL: dict[str, str] = {
+    "avx512f": "AVX512",
+    "avx2":    "AVX2",
+    "avx":     "AVX",
+    "sse4.2":  "SSE4",
+    "sse4.1":  "SSE4",
+    "sse2":    "SSE2",
+    "neon":    "SCALAR",   # cpu_flags.py não cobre ARM — usa SIMDCapabilities diretamente
+    "none":    "SCALAR",
+}
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SIMDContext
@@ -88,7 +104,34 @@ class SIMDContext:
         return self.effective_caps().msvc_flags
 
     def cflags(self) -> list[str]:
-        return self.effective_caps().cflags
+        """
+        Flags de compilação para a plataforma atual.
+
+        Pipeline:
+          1. cpu_flags.simd_compile_flags  — fonte primária (lê suporte real da CPU)
+          2. SIMDCapabilities.{gcc,msvc}_flags — acrescenta extras finos:
+               GCC: -funroll-loops, -mpopcnt, -mbmi/-mbmi2 condicionais
+               MSVC: /GL (whole-program opt), /Gy (function-level linking)
+          Flags já presentes na base não são duplicadas.
+        """
+        eff = self.effective_caps()
+
+        if self.level_cap == "native":
+            return eff.native_flags
+
+        # ── Base: flags verificadas no hardware via cpu_flags.py ─────────────
+        level_str = _BEST_TO_CPU_LEVEL.get(eff.best, "SCALAR")
+        base: list[str] = list(simd_compile_flags(level_str))
+
+        # ── Extras: flags finas que SIMDCapabilities gera condicionalmente ───
+        caps_flags = eff.msvc_flags if os.name == "nt" else eff.gcc_flags
+        seen = set(base)
+        for f in caps_flags:
+            if f not in seen:
+                base.append(f)
+                seen.add(f)
+
+        return base
 
 
 # ──────────────────────────────────────────────────────────────────────────────

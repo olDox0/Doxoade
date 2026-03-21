@@ -50,6 +50,88 @@ def _load_registry_for_ignite(root, no_registry=False):
     except Exception:
         return None
 
+def _find_venv_python() -> "str | None":
+    """
+    Retorna o executável Python do venv ativo no terminal.
+    """
+    from pathlib import Path as _P
+    from ..tools.vulcan.site_packages import _find_active_venv_site_packages
+
+    sp_dirs = _find_active_venv_site_packages()
+    if not sp_dirs:
+        return None
+
+    sp = _P(sp_dirs[0])
+
+    # Windows: <venv>/Lib/site-packages → Scripts/python.exe
+    scripts = sp.parent.parent / "Scripts" / "python.exe"
+    if scripts.exists():
+        return str(scripts)
+
+    # Linux/macOS: <venv>/lib/pythonX.Y/site-packages → bin/python
+    bin_py = sp.parent.parent.parent / "bin" / "python"
+    if bin_py.exists():
+        return str(bin_py)
+
+    return None
+
+
+def _ensure_gcc_in_path() -> "str | None":
+    """
+    Garante que gcc está no PATH para compilação com --compiler=mingw32.
+
+    Estratégia:
+      1. Varre os.environ["PATH"] entrada por entrada procurando gcc.exe
+         (mais confiável que shutil.which em Windows com caminhos com espaços)
+      2. Busca w64devkit em caminhos relativos ao doxoade e ao projeto
+      3. Tenta MinGW em caminhos padrão
+
+    Retorna o diretório injetado (para log) ou None se já estava no PATH.
+    """
+    import shutil
+    from pathlib import Path as _P
+
+    # ── 1. Varredura manual de os.environ["PATH"] ─────────────────────────────
+    # shutil.which pode falhar em Windows com paths contendo espaços não-quoted
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        entry = entry.strip().strip('"')
+        if not entry:
+            continue
+        gcc_candidate = _P(entry) / "gcc.exe"
+        if gcc_candidate.exists():
+            return None  # já está no PATH e funciona — nada a injetar
+
+    # gcc não encontrado no PATH atual — tenta localizar e injetar
+    # ── 2. Caminhos relativos ao doxoade (instalação corrente) ────────────────
+    # Descobre o diretório do doxoade a partir do módulo vulcan_cmd_forge
+    try:
+        import doxoade
+        doxoade_root = _P(doxoade.__file__).parent.parent  # raiz do projeto doxoade
+        relative_candidates = [
+            doxoade_root / "opt"        / "w64devkit" / "bin",
+            doxoade_root / "thirdparty" / "w64devkit" / "bin",
+            doxoade_root / "tools"      / "w64devkit" / "bin",
+        ]
+    except Exception:
+        relative_candidates = []
+
+    # ── 3. Caminhos padrão absolutos ──────────────────────────────────────────
+    standard_candidates = [
+        _P(r"C:\w64devkit\bin"),
+        _P(r"C:\mingw64\bin"),
+        _P(r"C:\mingw32\bin"),
+        _P(r"C:\MinGW\bin"),
+        _P(r"C:\msys64\mingw64\bin"),
+        _P(r"C:\msys64\ucrt64\bin"),
+    ]
+
+    for candidate in relative_candidates + standard_candidates:
+        if (candidate / "gcc.exe").exists():
+            injected = str(candidate)
+            os.environ["PATH"] = injected + os.pathsep + os.environ.get("PATH", "")
+            return injected
+
+    return None  # gcc não encontrado
 
 
 def _lib_compile_with_simd(
@@ -61,17 +143,238 @@ def _lib_compile_with_simd(
     """
     Ponto de entrada único para compilação de libs.
 
-    Sempre usa LibForge — que aplica optimizer + SIMD de forma integrada:
-      1. LibOptimizer nos fontes da cópia  (se run_optimizer=True)
-      2. HybridIgnite paralelo com SIMD flags  (se simd_ctx não for None)
+    Pré-voo:
+      1. gcc: varre os.environ["PATH"] manualmente (robusto a caminhos com espaços)
+         e injeta w64devkit se necessário.
+      2. Python: LibForge pode capturar sys.executable no import. Para garantir
+         que setup.py rode com o Python do venv ativo, usamos monkey-patching de
+         subprocess — intercepta qualquer chamada que use o Python errado e
+         substitui pelo Python correto do venv.
 
-    O SIMDForge foi removido deste fluxo: LibForge já injeta os flags
-    diretamente no _compile de cada módulo via extra_cflags.
+    Sempre usa LibForge — que aplica optimizer + SIMD de forma integrada.
     """
-    _patch_vulcan_forge()
-    from doxoade.tools.vulcan.lib_forge import LibForge
-    forge = LibForge(root)
-    return forge.compile_library(target, run_optimizer=run_optimizer, simd_ctx=simd_ctx)
+    import subprocess as _subprocess
+    import sys as _sys
+
+    # ── 1. Garante gcc no PATH ────────────────────────────────────────────────
+    gcc_injected = _ensure_gcc_in_path()
+    if gcc_injected:
+        click.echo(
+            f"{Fore.YELLOW}  ⬡ gcc injetado no PATH: {gcc_injected}{Style.RESET_ALL}"
+        )
+
+    # ── 2. Corrige Python via monkey-patch de subprocess ─────────────────────
+    # LibForge pode ter capturado sys.executable antes do nosso patch.
+    # Interceptar subprocess.run/Popen é a única forma confiável de redirecionar.
+    venv_python = _find_venv_python()
+    _orig_run   = _subprocess.run
+    _orig_popen = _subprocess.Popen
+    _patched    = False
+
+    if venv_python and os.path.normcase(venv_python) != os.path.normcase(_sys.executable):
+        click.echo(
+            f"{Fore.CYAN}  ⬡ Python do venv: "
+            f"{os.path.basename(os.path.dirname(venv_python))}"
+            f"\\Scripts\\python.exe{Style.RESET_ALL}"
+        )
+        _bad_python = os.path.normcase(_sys.executable)
+
+        def _fix_args(args):
+            """Substitui o Python errado pelo Python do venv em qualquer argv."""
+            if isinstance(args, (list, tuple)) and args:
+                first = os.path.normcase(str(args[0]))
+                if first == _bad_python:
+                    return [venv_python] + list(args[1:])
+            return args
+
+        def _patched_run(args=None, *a, **kw):
+            return _orig_run(_fix_args(args), *a, **kw)
+
+        def _patched_popen(args=None, *a, **kw):
+            return _orig_popen(_fix_args(args), *a, **kw)
+
+        _subprocess.run   = _patched_run
+        _subprocess.Popen = _patched_popen
+        _patched = True
+
+    try:
+        _patch_vulcan_forge()
+        from doxoade.tools.vulcan.lib_forge import LibForge
+        forge = LibForge(root)
+        return forge.compile_library(target, run_optimizer=run_optimizer, simd_ctx=simd_ctx)
+    finally:
+        if _patched:
+            _subprocess.run   = _orig_run
+            _subprocess.Popen = _orig_popen
+
+
+def _resolve_pkg_info(name: str) -> "tuple[str, Path] | None":
+    """
+    Localiza o pacote `name` — robusto ao caso onde doxoade roda com Python
+    global mas $VIRTUAL_ENV aponta para o venv ativo.
+
+    Estratégia (em ordem):
+      1. Filesystem direto via $VIRTUAL_ENV  — sem importlib, sem ambiguidade.
+         Testa: <VIRTUAL_ENV>/Lib/site-packages/<name>  (Windows)
+                <VIRTUAL_ENV>/lib/pythonX.Y/site-packages/<name>  (Linux/macOS)
+         Aceita variantes de nome (hífen ↔ underscore).
+      2. importlib.util.find_spec — funciona quando doxoade e o pacote estão
+         no mesmo ambiente (ex: instalação com pip no venv).
+      3. importlib.metadata alias pip→import  (ex: llama_cpp_python → llama_cpp)
+      4. Scan por todos os site-packages de site_packages_dirs_for_listing()
+         — fallback final para instalações não-convencionais.
+
+    Efeito colateral: injeta o site-packages encontrado em sys.path para que
+    LibForge também enxergue o pacote.
+    """
+    import importlib.util as _iutil
+    from pathlib import Path as _P
+
+    # Variantes de nome a testar (ex: "llama-cpp" e "llama_cpp")
+    name_variants: list[str] = sorted({
+        name,
+        name.replace("-", "_"),
+        name.replace("_", "-"),
+    })
+
+    def _try_dir(pkg_candidate: "_P") -> "tuple[str, _P] | None":
+        """Valida um diretório candidato: precisa ter .py ou .pyd/.so."""
+        if not pkg_candidate.is_dir():
+            return None
+        has_py  = any(pkg_candidate.rglob("*.py"))
+        has_ext = any(pkg_candidate.rglob("*.pyd")) or any(pkg_candidate.rglob("*.so"))
+        if has_py or has_ext:
+            return (pkg_candidate.name, pkg_candidate)
+        return None
+
+    def _inject(pkg_dir: "_P") -> None:
+        """Injeta o site-packages pai em sys.path para que LibForge ache o pacote."""
+        sp = str(pkg_dir.parent)
+        if sp not in sys.path:
+            sys.path.insert(0, sp)
+
+    # ── 1. Filesystem direto via venv ativo ──────────────────────────────────
+    # Usa _find_active_venv_site_packages() que valida VIRTUAL_ENV e faz
+    # fallback relativo ao projeto — robusto a VIRTUAL_ENV obsoleto.
+    from ..tools.vulcan.site_packages import _find_active_venv_site_packages
+    for sp_str in _find_active_venv_site_packages():
+        sp = _P(sp_str)
+        for variant in name_variants:
+            result = _try_dir(sp / variant)
+            if result:
+                _inject(result[1])
+                return result
+
+    # ── 2. importlib.util.find_spec (mesmo ambiente) ──────────────────────────
+    def _spec_to_path(spec) -> "_P | None":
+        if spec is None:
+            return None
+        if spec.submodule_search_locations:
+            locs = list(spec.submodule_search_locations)
+            return _P(locs[0]) if locs else None
+        if spec.origin:
+            return _P(spec.origin).parent
+        return None
+
+    for variant in name_variants:
+        try:
+            pkg_dir = _spec_to_path(_iutil.find_spec(variant))
+        except (ModuleNotFoundError, ValueError):
+            pkg_dir = None
+        if pkg_dir and pkg_dir.exists():
+            _inject(pkg_dir)
+            return (variant, pkg_dir)
+
+    # ── 3. importlib.metadata: alias pip→import ───────────────────────────────
+    try:
+        import importlib.metadata as _meta
+        dist_map = _meta.packages_distributions()
+        for import_name, dist_names in dist_map.items():
+            if any(
+                name.lower().replace("-", "_") == d.lower().replace("-", "_")
+                for d in dist_names
+            ):
+                try:
+                    pkg_dir = _spec_to_path(_iutil.find_spec(import_name))
+                except (ModuleNotFoundError, ValueError):
+                    pkg_dir = None
+                if pkg_dir and pkg_dir.exists():
+                    _inject(pkg_dir)
+                    return (import_name, pkg_dir)
+    except Exception:
+        pass
+
+    # ── 4. Scan por todos os site-packages conhecidos ─────────────────────────
+    for sp_dir in site_packages_dirs_for_listing():
+        sp_path = _P(sp_dir)
+        if not sp_path.is_dir():
+            continue
+        for variant in name_variants:
+            result = _try_dir(sp_path / variant)
+            if result:
+                if sp_dir not in sys.path:
+                    sys.path.insert(0, sp_dir)
+                return result
+
+    return None
+
+
+def _list_installed_importable() -> list[tuple[str, int, str]]:
+    """
+    Lista pacotes importáveis via importlib.metadata.packages_distributions.
+
+    Apenas pacotes cujo diretório pai seja um diretório de site-packages
+    (nome termina com 'site-packages' ou 'dist-packages') são incluídos.
+    Isso evita capturar módulos stdlib ou outros paths espúrios em sys.path
+    quando doxoade roda com Python global mas o venv já está em sys.path.
+    """
+    try:
+        import importlib.metadata as _meta
+        import importlib.util    as _iutil
+
+        # Conjunto de site-packages conhecidos para filtrar
+        known_sp = {
+            p for p in sys.path
+            if p.endswith("site-packages") or p.endswith("dist-packages")
+        }
+
+        pkg_dist = _meta.packages_distributions()
+        rows: list[tuple[str, int, str]] = []
+        seen: set[str] = set()
+
+        for import_name in sorted(pkg_dist.keys()):
+            if import_name in seen or import_name.startswith("_"):
+                continue
+            try:
+                spec = _iutil.find_spec(import_name)
+            except (ModuleNotFoundError, ValueError):
+                continue
+            if spec is None:
+                continue
+
+            if spec.submodule_search_locations:
+                locs = list(spec.submodule_search_locations)
+                pkg_dir = Path(locs[0]) if locs else None
+            elif spec.origin:
+                pkg_dir = Path(spec.origin).parent
+            else:
+                continue
+
+            if pkg_dir is None or not pkg_dir.is_dir():
+                continue
+
+            # Filtra: o pai do pkg_dir deve ser um site-packages reconhecido
+            parent_str = str(pkg_dir.parent)
+            if parent_str not in known_sp:
+                continue
+
+            py_count = len(list(pkg_dir.rglob("*.py")))
+            rows.append((import_name, py_count, str(pkg_dir)))
+            seen.add(import_name)
+
+        return rows
+    except Exception:
+        return []
 
 
 def _run_hybrid_with_optimizer(target, root, force, registry=None):
@@ -292,7 +595,7 @@ def ignite(ctx, path, force, jobs, no_pitstop, streaming, hybrid, scan_only, sim
         click.echo(f"  {Fore.YELLOW}⚠ --simd ignorado: módulos SIMD não disponíveis.{Style.RESET_ALL}")
 
     if hybrid:
-        from doxoade.tools.vulcan.hybrid_forge import hybrid_ignite
+        from doxoade.tools.vulcan.hybrid_forge import HybridIgnite
         _patch_vulcan_forge()
         click.echo(f"{Fore.YELLOW}{Style.BRIGHT}⬡ [VULCAN-HYBRID] ...{Style.RESET_ALL}")
 
@@ -446,8 +749,9 @@ def vulcan_regression(reset, reset_all, purge_missing, output_json):
 @click.option('--simd-level',     default="auto",
               type=click.Choice(["auto", "native", "sse2", "avx", "avx2", "avx512f"]),
               show_default=True, help="Nível SIMD máximo (padrão: auto-detecta).")
+@click.option('--probe',          help="Diagnóstico: mostra como o pacote é (ou não é) encontrado.")
 @click.pass_context
-def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, no_optimize, keep_temp, simd, simd_level):
+def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, no_optimize, keep_temp, simd, simd_level, probe):
     """Compila funções elegíveis de dependências já instaladas no venv.
 
     Pipeline padrão (--target):
@@ -470,39 +774,121 @@ def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, no_optimize
 
     with ExecutionLogger('vulcan_lib', root, ctx.params) as logger:
 
+        # ── Diagnóstico de resolução de pacote ────────────────────────────────
+        if probe:
+            import importlib.util as _iutil
+            pkg = probe
+            click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}  ⬡ VULCAN LIB PROBE: '{pkg}'{Style.RESET_ALL}")
+            click.echo(f"  {'─'*55}")
+            click.echo(f"  sys.executable : {sys.executable}")
+            venv_val = os.environ.get('VIRTUAL_ENV', '<não definido>')
+            click.echo(f"  VIRTUAL_ENV    : {venv_val}")
+
+            # Site-packages do venv via _find_active_venv_site_packages
+            from ..tools.vulcan.site_packages import _find_active_venv_site_packages
+            active_sp = _find_active_venv_site_packages()
+            click.echo(f"  Venv ativo SP  : {active_sp or '<não encontrado>'}")
+            for sp_str in active_sp:
+                from pathlib import Path as _P
+                pkg_dir = _P(sp_str) / pkg
+                click.echo(f"  Pkg dir        : {pkg_dir}  exists={pkg_dir.exists()}")
+                if pkg_dir.exists():
+                    py_files  = list(pkg_dir.rglob("*.py"))
+                    pyd_files = list(pkg_dir.rglob("*.pyd"))
+                    so_files  = list(pkg_dir.rglob("*.so"))
+                    click.echo(f"    .py files    : {len(py_files)}")
+                    click.echo(f"    .pyd files   : {len(pyd_files)}")
+                    click.echo(f"    .so files    : {len(so_files)}")
+                    click.echo(f"    Top entries  :")
+                    for e in sorted(pkg_dir.iterdir())[:10]:
+                        click.echo(f"      {e.name}")
+
+            # find_spec
+            try:
+                spec = _iutil.find_spec(pkg)
+                click.echo(f"  find_spec      : {spec}")
+            except Exception as e:
+                click.echo(f"  find_spec      : ERRO — {e}")
+
+            # _resolve_pkg_info
+            result = _resolve_pkg_info(pkg)
+            if result:
+                click.echo(f"  {Fore.GREEN}_resolve result : {result[0]}  →  {result[1]}{Style.RESET_ALL}")
+            else:
+                click.echo(f"  {Fore.RED}_resolve result : None{Style.RESET_ALL}")
+
+            # Compilador e Python do venv
+            # Varredura manual: shutil.which falha em Windows com paths com espaços
+            gcc_found = None
+            for _entry in os.environ.get("PATH", "").split(os.pathsep):
+                _entry = _entry.strip().strip('"')
+                if _entry and (Path(_entry) / "gcc.exe").exists():
+                    gcc_found = str(Path(_entry) / "gcc.exe")
+                    break
+            click.echo(f"  gcc in PATH    : {gcc_found or (Fore.RED + 'NÃO ENCONTRADO' + Style.RESET_ALL)}")
+            gcc_inject = _ensure_gcc_in_path()
+            if gcc_inject:
+                click.echo(f"  {Fore.YELLOW}gcc encontrado em: {gcc_inject}{Style.RESET_ALL}")
+            venv_py = _find_venv_python()
+            click.echo(f"  Venv Python    : {venv_py or (Fore.RED + 'não encontrado' + Style.RESET_ALL)}")
+            click.echo()
+            return
+
         if list_installed:
             click.echo(
                 f"{Fore.CYAN}{Style.BRIGHT}"
                 f"--- [VULCAN LIB] Libs instaladas no site-packages ---"
                 f"{Style.RESET_ALL}"
             )
-            site_dirs = site_packages_dirs_for_listing()
-            rows = []
-            for sp in site_dirs:
+            rows: list[tuple[str, int, str]] = []
+            seen_names: set[str] = set()
+
+            from ..tools.vulcan.site_packages import _find_active_venv_site_packages
+            venv_sp_dirs = _find_active_venv_site_packages()
+            scan_dirs = venv_sp_dirs or site_packages_dirs_for_listing()
+
+            # ── Scan por diretório ─────────────────────────────────────────────
+            for sp in scan_dirs:
                 sp_path = Path(sp)
                 if not sp_path.is_dir():
                     continue
+                # Sanidade: o diretório precisa ser chamado site-packages
+                if not (sp_path.name == "site-packages" or sp_path.name == "dist-packages"):
+                    continue
                 for item in sorted(sp_path.iterdir()):
-                    if not item.is_dir() or not (item / "__init__.py").exists():
+                    if not item.is_dir():
+                        continue
+                    # Exclui diretórios de dist-info e outros artefatos
+                    if item.name.endswith((".dist-info", ".egg-info", "__pycache__")):
                         continue
                     py_files = list(item.rglob("*.py"))
-                    if py_files:
-                        rows.append((item.name, len(py_files), str(item)))
+                    if not py_files:
+                        ext_files = list(item.rglob("*.pyd")) + list(item.rglob("*.so"))
+                        if not ext_files:
+                            continue
+                    rows.append((item.name, len(py_files), str(item)))
+                    seen_names.add(item.name)
+
+            # ── Fallback: importlib (pacotes não-convencionais) ────────────────
+            for import_name, py_count, pkg_path_str in _list_installed_importable():
+                if import_name not in seen_names:
+                    rows.append((import_name, py_count, pkg_path_str))
+                    seen_names.add(import_name)
 
             if not rows:
                 click.echo(f"{Fore.YELLOW}Nenhum pacote encontrado.{Style.RESET_ALL}")
                 return
 
             rows.sort(key=lambda r: r[1], reverse=True)
-            click.echo(f"  {'BIBLIOTECA':<30} {'ARQUIVOS .PY':>14}")
-            click.echo(f"  {'-'*30} {'-'*14}")
-            for name, count, _ in rows[:40]:
+            click.echo(f"  {'BIBLIOTECA':<19} {'ARQUIVOS .PY':>12}")
+            click.echo(f"  {'-'*19} {'-'*12}")
+            for name_r, count, _ in rows[:100]:
                 click.echo(
-                    f"  {Fore.WHITE}{name:<30}{Style.RESET_ALL} "
-                    f"{Fore.CYAN}{count:>14}{Style.RESET_ALL}"
+                    f"  {Fore.WHITE}{name_r:<19}{Style.RESET_ALL} "
+                    f"{Fore.CYAN}{count:>5}{Style.RESET_ALL}"
                 )
-            if len(rows) > 40:
-                click.echo(f"  {Style.DIM}... e mais {len(rows) - 40} pacote(s){Style.RESET_ALL}")
+            if len(rows) > 100:
+                click.echo(f"  {Style.DIM}... e mais {len(rows) - 25} pacote(s){Style.RESET_ALL}")
             return
 
         if analyze:
@@ -627,6 +1013,31 @@ def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, no_optimize
         if target:
             run_optimizer = not no_optimize
             simd_ctx      = _simd_context_or_none(simd, simd_level)
+
+            # ── Resolução antecipada do pacote via importlib ───────────────────
+            # LibForge usa site_packages_dirs_for_listing() internamente; se o
+            # venv não estiver nessa lista, o pacote não é encontrado. A chamada
+            # abaixo injeta o site-packages correto em sys.path antes que LibForge
+            # execute, garantindo que qualquer mecanismo de scan que ele use
+            # (importlib, os.listdir, etc.) consiga localizar o pacote.
+            pkg_info = _resolve_pkg_info(target)
+            if pkg_info is None:
+                # Pacote genuinamente não instalado — aborta com dica útil
+                click.echo(
+                    f"{Fore.RED}[FALHA] '{target}' não está instalado no venv ativo.\n"
+                    f"{Style.RESET_ALL}"
+                    f"{Fore.YELLOW}  Python : {sys.executable}\n"
+                    f"  Use --list-installed para ver pacotes disponíveis.{Style.RESET_ALL}"
+                )
+                return
+            resolved_name, pkg_dir = pkg_info
+            if resolved_name != target:
+                # Nome do import difere do argumento (ex: llama_cpp_python → llama_cpp)
+                click.echo(
+                    f"{Fore.CYAN}  ⬡ Resolvido: '{target}' "
+                    f"→ importável como '{resolved_name}' ({pkg_dir}){Style.RESET_ALL}"
+                )
+                target = resolved_name
 
             mode_parts = []
             if run_optimizer:

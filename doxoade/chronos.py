@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# doxoade/chronos.py (v94.6 Platinum)
+# doxoade/chronos.py (v94.7 Platinum)
 import uuid
 import time
 import threading
@@ -11,6 +11,7 @@ import json
 import io
 import cProfile
 import collections
+import atexit
 from datetime import datetime, timezone
 from doxoade.tools.doxcolors import Fore
 from .database import get_db_connection
@@ -19,6 +20,7 @@ try:
     HAS_PSUTIL = True
 except ImportError:
     HAS_PSUTIL = False
+
 class ResourceMonitor(threading.Thread):
     def __init__(self, pid):
         super().__init__()
@@ -66,6 +68,7 @@ class ResourceMonitor(threading.Thread):
                 continue
 
         return cpu_total, mem_total / (1024 * 1024), r_total, w_total
+
     def run(self):
         if not HAS_PSUTIL: return
         
@@ -88,7 +91,6 @@ class ResourceMonitor(threading.Thread):
 
             while self.running:
                 # Cirurgia: uma única traversal por ciclo em vez de duas.
-                # _scan_tree coleta CPU + RAM + I/O em uma única passagem pela árvore.
                 cpu, mem, r_tree, w_tree = self._scan_tree(parent)
 
                 if cpu   > self.peaks['cpu_percent']: self.peaks['cpu_percent'] = cpu
@@ -103,32 +105,34 @@ class ResourceMonitor(threading.Thread):
             self.peaks['io_write_end'] = w_end
         except (psutil.NoSuchProcess, Exception):
             pass
+
     def stop(self):
         self.running = False
+
     def get_stats(self):
         """Calcula o delta real de I/O processado."""
-        # O delta é o maior valor de I/O visto menos o ponto de partida
-        read_bytes = max(0, self.peaks['io_read_max'] - self.peaks['io_read_start'])
+        read_bytes  = max(0, self.peaks['io_read_max']  - self.peaks['io_read_start'])
         write_bytes = max(0, self.peaks['io_write_max'] - self.peaks['io_write_start'])
         
         return {
-            'cpu': round(self.peaks['cpu_percent'], 1),
-            'ram': round(self.peaks['memory_mb'], 1),
-            'read': round(read_bytes / (1024*1024), 3), # Precisão aumentada
-            'write': round(write_bytes / (1024*1024), 3)
+            'cpu':   round(self.peaks['cpu_percent'], 1),
+            'ram':   round(self.peaks['memory_mb'], 1),
+            'read':  round(read_bytes  / (1024 * 1024), 3),
+            'write': round(write_bytes / (1024 * 1024), 3),
         }
+
     def _check_memory_safety(self, mem_mb):
         """Aegis Guard: Impede que o Doxoade devore a RAM do usuário (Leak protection)."""
-        RAM_SAFETY_THRESHOLD = 1024.0 # 1GB limite rígido para o processo Doxoade
+        RAM_SAFETY_THRESHOLD = 1024.0
         
         if mem_mb > RAM_SAFETY_THRESHOLD:
             print(f"\n🚨 {Fore.RED}[AEGIS MEMORY GUARD]{Fore.RESET} Doxoade excedeu limite de segurança (1GB).")
             print("   > Abortando tarefa para evitar instabilidade no Windows.")
-            os._exit(1) # Fail-Stop Mensurável (MPoT-15)
+            os._exit(1)
+
+
 class CodeSampler(threading.Thread):
     # Cirurgia: filtro movido para constante de classe (frozenset).
-    # Antes: lista literal recriada e varrida linearmente a cada amostra (100x/s).
-    # Agora: frozenset com lookup O(1) — criado uma única vez na definição da classe.
     _NOISE_SUFFIXES = frozenset({"<frozen", "chronos.py", "threading.py"})
 
     def __init__(self, interval=0.01):
@@ -137,9 +141,10 @@ class CodeSampler(threading.Thread):
         self.running = True
         self.samples = collections.defaultdict(int)
         self.main_thread_id = threading.main_thread().ident
+
     def run(self):
-        lib_path     = os.path.dirname(os.__file__).lower().replace('\\', '/')
-        noise_check  = self._NOISE_SUFFIXES  # referência local — evita lookup de atributo no hot loop
+        lib_path    = os.path.dirname(os.__file__).lower().replace('\\', '/')
+        noise_check = self._NOISE_SUFFIXES
 
         while self.running:
             time.sleep(self.interval)
@@ -149,7 +154,6 @@ class CodeSampler(threading.Thread):
                     filename  = frame.f_code.co_filename
                     norm_file = filename.lower().replace('\\', '/')
 
-                    # PASC-8.12: Filtro de Ruído — O(1) com frozenset em vez de any() sobre lista
                     if (any(x in norm_file for x in noise_check)
                             or norm_file.startswith(lib_path)):
                         frame = frame.f_back
@@ -163,75 +167,129 @@ class CodeSampler(threading.Thread):
                 fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
                 line_number = exc_tb.tb_lineno
                 print(f"\033[0m \033[1m Filename: {fname}   ■ Line: {line_number} \033[31m ■ Exception type: {e} ■ Exception value: {exc_obj} \033[0m")
+
     def stop(self): self.running = False
+
     def get_hot_lines(self, limit=10):
         return sorted(self.samples.items(), key=lambda item: item[1], reverse=True)[:limit]
+
+
 class ChronosRecorder:
     def __init__(self):
-        self.session_uuid = str(uuid.uuid4())
-        self.monitor = None
-        self.profiler = None
-        self.sampler = None
+        self.session_uuid   = str(uuid.uuid4())
+        self.monitor        = None
+        self.profiler       = None
+        self.sampler        = None
         self.system_context = {}
-        
+        self._ended         = False          # guarda contra double-record
+        self._perf_start    = None           # perf_counter no inicio — usado pelo atexit
+
     def start_command(self, ctx):
         if ctx.invoked_subcommand:
             self.cmd_name = ctx.invoked_subcommand
         else:
             self.cmd_name = ctx.command.name if ctx else "unknown"
+
         self.system_context = {
-            "os": platform.system(),
-            "release": platform.release(),
-            "arch": platform.machine(),
-            "python": platform.python_version(),
+            "os":        platform.system(),
+            "release":   platform.release(),
+            "arch":      platform.machine(),
+            "python":    platform.python_version(),
             "processor": platform.processor(),
-            "cores": psutil.cpu_count() if HAS_PSUTIL else 1
+            "cores":     psutil.cpu_count() if HAS_PSUTIL else 1,
         }
+
         self.monitor = ResourceMonitor(os.getpid())
         self.monitor.start()
-        
+
         self.profiler = cProfile.Profile()
         self.profiler.enable()
-        
+
         self.sampler = CodeSampler(interval=0.01)
         self.sampler.start()
-        
+
         self.start_timestamp = datetime.now(timezone.utc).isoformat()
-        self.full_cmd = " ".join(sys.argv)
-        self.work_dir = os.getcwd()
+        self.full_cmd        = " ".join(sys.argv)
+        self.work_dir        = os.getcwd()
+        self._perf_start     = time.perf_counter()
+        self._ended          = False
+
+        # ── Garantia atexit ────────────────────────────────────────────────────
+        # Click standalone_mode chama sys.exit() ANTES que result_callback
+        # consiga persistir. O atexit é a rede de segurança que garante que
+        # QUALQUER comando seja gravado, independente de como o processo encerra.
+        # Se end_command já foi chamado antes (via result_callback), _ended=True
+        # e o atexit se torna no-op — sem double-record.
+        atexit.register(self._atexit_flush)
+
+    def _atexit_flush(self):
+        """
+        Rede de segurança: chamada pelo atexit se end_command não foi invocado.
+        Calcula duration_ms a partir de _perf_start para precisão real.
+        exit_code = 0 (SystemExit(0)) na maioria dos casos de saída limpa do Click.
+        """
+        if self._ended or self._perf_start is None:
+            return
+        duration_ms = (time.perf_counter() - self._perf_start) * 1000
+        self.end_command(exit_code=0, duration_ms=duration_ms)
+
     def end_command(self, exit_code, duration_ms):
-        if not self.monitor: return
+        # Guarda idempotência: se já foi chamado (via result_callback ou atexit),
+        # retorna imediatamente para evitar gravar o mesmo comando duas vezes.
+        if self._ended:
+            return
+        self._ended = True
+
+        if not self.monitor:
+            return
+
         self.monitor.stop()
         self.sampler.stop()
-        
+
         resources = self.monitor.get_stats()
         hot_lines = self.sampler.get_hot_lines()
-        
+
         self.profiler.disable()
-        s = io.StringIO()
+        s  = io.StringIO()
         ps = pstats.Stats(self.profiler, stream=s).sort_stats('cumulative')
         ps.print_stats(15)
         profile_text = s.getvalue()
-        
+
         top_funcs = []
         for line in profile_text.splitlines():
             if "(" in line and ")" in line and os.getcwd() in line:
                 top_funcs.append(line.strip())
+
         line_profile_data = []
         for (fname, lineno), hits in hot_lines:
             line_profile_data.append({"file": fname.replace('\\', '/'), "line": lineno, "hits": hits})
+
+        # Captura os stats do Vulcan para o system_info
+        if hasattr(self, 'vulcan_stats'):
+            self.system_context['vulcan_stats'] = self.vulcan_stats
+
         try:
             conn = get_db_connection()
             conn.execute("""
                 INSERT INTO command_history 
-                (session_uuid, timestamp, command_name, full_command_line, working_dir, exit_code, duration_ms, 
-                 cpu_percent, peak_memory_mb, io_read_mb, io_write_mb, line_profile_data, system_info)
+                (session_uuid, timestamp, command_name, full_command_line, working_dir,
+                 exit_code, duration_ms, cpu_percent, peak_memory_mb,
+                 io_read_mb, io_write_mb, line_profile_data, system_info)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                self.session_uuid, datetime.now(timezone.utc).isoformat(), self.cmd_name,
-                " ".join(sys.argv), os.getcwd(), exit_code, duration_ms,
-                resources['cpu'], resources['ram'], resources['read'], resources['write'],
-                json.dumps(line_profile_data), json.dumps(self.system_context)
+                self.session_uuid,
+                datetime.now(timezone.utc).isoformat(),
+                self.cmd_name,
+                " ".join(sys.argv),
+                os.getcwd(),
+                exit_code,
+                duration_ms,
+                resources['cpu'],
+                resources['ram'],
+                resources['read'],
+                resources['write'],
+                json.dumps(line_profile_data),
+                json.dumps(self.system_context),
             ))
             conn.commit()
             conn.close()
@@ -241,9 +299,11 @@ class ChronosRecorder:
             fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
             line_number = exc_tb.tb_lineno
             print(f"\033[0m \033[1m Filename: {fname}   ■ Line: {line_number} \033[31m ■ Exception type: {e} ■ Exception value: {exc_obj} \033[0m")
+
     def check_vulcan_efficiency(self, func_name, py_time, native_time):
         gain = py_time / native_time
-        if gain < 1.1: # Ganho insignificante
-            # Recomenda reversão por custo-benefício de risco
+        if gain < 1.1:
             pass
+
+
 chronos_recorder = ChronosRecorder()

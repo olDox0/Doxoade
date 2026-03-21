@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
+# doxoade/tools/vulcan/simd_detector.py
+
 """
-doxoade/tools/vulcan/simd_detector.py
 ──────────────────────────────────────────────────────────────────────────────
 Detecção de capacidades SIMD do processador atual.
 
