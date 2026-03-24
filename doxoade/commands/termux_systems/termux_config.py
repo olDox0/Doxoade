@@ -20,7 +20,7 @@ TERMUX_BEGIN = "# >>> doxoade-termux-config"
 TERMUX_END = "# <<< doxoade-termux-config"
 
 TERMUX_COLOR_BODY = "\n".join([
-    "background=#000000",
+    "background=#0a331a",
     "foreground=#ffffff",
     "cursor=#26bc5f",
     "color2=#26bc5f",
@@ -157,12 +157,13 @@ def apply_micro_settings() -> None:
     settings.update({
         "colorscheme": "default",
         "syntax": True,
+        "filetype": "python",
         "cursorline": True,
         "truecolor": True,
-        "autoindent": True,
+        "autoindent": False,
+        "smartpaste": True,
         "tabstospaces": True,
         "tabsize": 4,
-        "smartpaste": False,
         "diffgutter": True,
         "savehistory": True,
         "ruler": True,
