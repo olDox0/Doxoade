@@ -26,8 +26,6 @@ TERMUX_COLOR_BODY = "\n".join([
     "color2=#26bc5f",
 ])
 
-MICRO_THEME_CONTENT = 'color-link cursor-line ",#e05a00"\n'
-
 MICRO_SETTINGS_PATH = HOME / ".config" / "micro" / "settings.json"
 MICRO_BINDINGS_PATH = HOME / ".config" / "micro" / "bindings.json"
 MICRO_THEME_PATH = HOME / ".config" / "micro" / "colorschemes" / "meutema.micro"
@@ -105,8 +103,13 @@ def save_json(path: Path, data: Dict[str, Any]) -> None:
 
 def apply_nanorc() -> None:
     path = HOME / ".nanorc"
+    body = "\n".join([
+        "set linenumbers",
+        "set tabsize 4",
+        "set tabstospaces",
+    ])
     text = read_text(path)
-    text = replace_or_append_block(text, NANO_BEGIN, NANO_END, "set linenumbers")
+    text = replace_or_append_block(text, NANO_BEGIN, NANO_END, body)
     write_text(path, text)
 
 
@@ -137,8 +140,10 @@ def remove_termux_colors() -> None:
 
 
 def apply_micro_theme() -> None:
-    backup_file(MICRO_THEME_PATH)
-    write_text(MICRO_THEME_PATH, MICRO_THEME_CONTENT)
+    # Não criamos tema custom agora, porque isso estava quebrando a coloração do código.
+    # O Micro já possui colorscheme default embutido.
+    if MICRO_THEME_PATH.exists():
+        restore_file(MICRO_THEME_PATH)
 
 
 def remove_micro_theme() -> None:
@@ -150,7 +155,8 @@ def apply_micro_settings() -> None:
 
     settings = load_json(MICRO_SETTINGS_PATH)
     settings.update({
-        "colorscheme": "meutema",
+        "colorscheme": "default",
+        "syntax": True,
         "cursorline": True,
         "truecolor": True,
         "autoindent": True,
@@ -180,7 +186,7 @@ def apply_micro_bindings() -> None:
         "Alt-v": "VSplit",
         "Ctrl-w": "NextSplit",
         "Alt-w": "NextSplit",
-        "Tab": "IndentSelection|InsertTab",
+        "Tab": "Autocomplete|IndentSelection|InsertTab",
         "Backtab": "OutdentSelection|OutdentLine",
         "Ctrl-z": "Undo",
         "Ctrl-y": "Redo",
