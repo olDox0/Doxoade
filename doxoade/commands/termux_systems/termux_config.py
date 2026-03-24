@@ -8,10 +8,9 @@ import os
 import re
 import shutil
 from pathlib import Path
-from typing import Any, Dict
+from typing import Dict, Any
 
 HOME = Path.home()
-STATE_FILE = HOME / ".doxoade_termux_config_state.json"
 BACKUP_DIR = HOME / ".doxoade" / "backups" / "termux_config"
 
 NANO_BEGIN = "## >>> doxoade-termux-config"
@@ -28,14 +27,9 @@ TERMUX_COLOR_BODY = "\n".join([
 ])
 
 MICRO_THEME_CONTENT = 'color-link cursor-line ",#e05a00"\n'
-MICRO_SETTINGS_TARGETS = {
-    "colorscheme": "meutema",
-    "cursorline": True,
-    "truecolor": True,
-    "autoindent": False,
-    "smartpaste": False,
-}
+
 MICRO_SETTINGS_PATH = HOME / ".config" / "micro" / "settings.json"
+MICRO_BINDINGS_PATH = HOME / ".config" / "micro" / "bindings.json"
 MICRO_THEME_PATH = HOME / ".config" / "micro" / "colorschemes" / "meutema.micro"
 
 
@@ -52,35 +46,20 @@ def write_text(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def load_state() -> Dict[str, Any]:
-    if not STATE_FILE.exists():
-        return {}
-    try:
-        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return {}
-
-
-def save_state(state: Dict[str, Any]) -> None:
-    ensure_parent(STATE_FILE)
-    STATE_FILE.write_text(
-        json.dumps(state, indent=4, ensure_ascii=False),
-        encoding="utf-8",
-    )
-
-
 def backup_path_for(path: Path) -> Path:
-    rel = str(path).replace(":", "").lstrip("/\\").replace("\\", "/")
-    return BACKUP_DIR / f"{rel}.bak"
+    resolved = path.resolve(strict=False).as_posix().lstrip("/")
+    safe = resolved.replace(":", "")
+    return BACKUP_DIR / f"{safe}.bak"
 
 
 def backup_file(path: Path) -> None:
     if not path.exists():
         return
     backup = backup_path_for(path)
+    if backup.exists():
+        return
     ensure_parent(backup)
-    if not backup.exists():
-        shutil.copy2(path, backup)
+    shutil.copy2(path, backup)
 
 
 def restore_file(path: Path) -> None:
@@ -108,11 +87,25 @@ def remove_block(content: str, begin: str, end: str) -> str:
     return re.sub(pattern, "", content)
 
 
+def load_json(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def save_json(path: Path, data: Dict[str, Any]) -> None:
+    ensure_parent(path)
+    path.write_text(json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8")
+
+
 def apply_nanorc() -> None:
     path = HOME / ".nanorc"
     text = read_text(path)
-    new_text = replace_or_append_block(text, NANO_BEGIN, NANO_END, "set linenumbers")
-    write_text(path, new_text)
+    text = replace_or_append_block(text, NANO_BEGIN, NANO_END, "set linenumbers")
+    write_text(path, text)
 
 
 def remove_nanorc() -> None:
@@ -151,64 +144,51 @@ def remove_micro_theme() -> None:
 
 
 def apply_micro_settings() -> None:
-    state = load_state()
-    json_backups = state.setdefault("json_backups", {})
-    key = str(MICRO_SETTINGS_PATH)
-    path_state = json_backups.setdefault(key, {})
+    backup_file(MICRO_SETTINGS_PATH)
 
-    data: Dict[str, Any] = {}
-    if MICRO_SETTINGS_PATH.exists():
-        try:
-            data = json.loads(MICRO_SETTINGS_PATH.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            data = {}
+    settings = load_json(MICRO_SETTINGS_PATH)
+    settings.update({
+        "colorscheme": "meutema",
+        "cursorline": True,
+        "truecolor": True,
+        "autoindent": True,
+        "tabstospaces": True,
+        "tabsize": 4,
+        "smartpaste": False,
+        "diffgutter": True,
+        "savehistory": True,
+        "ruler": True,
+        "relativeruler": False,
+    })
 
-    for setting_key, desired in MICRO_SETTINGS_TARGETS.items():
-        if setting_key not in path_state:
-            path_state[setting_key] = data.get(setting_key, "__MISSING__")
-        data[setting_key] = desired
-
-    ensure_parent(MICRO_SETTINGS_PATH)
-    MICRO_SETTINGS_PATH.write_text(
-        json.dumps(data, indent=4, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    save_state(state)
+    save_json(MICRO_SETTINGS_PATH, settings)
 
 
 def remove_micro_settings() -> None:
-    state = load_state()
-    json_backups = state.get("json_backups", {})
-    key = str(MICRO_SETTINGS_PATH)
-    path_state = json_backups.get(key, {})
+    restore_file(MICRO_SETTINGS_PATH)
 
-    if not MICRO_SETTINGS_PATH.exists() and not path_state:
-        return
 
-    data: Dict[str, Any] = {}
-    if MICRO_SETTINGS_PATH.exists():
-        try:
-            data = json.loads(MICRO_SETTINGS_PATH.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            data = {}
+def apply_micro_bindings() -> None:
+    backup_file(MICRO_BINDINGS_PATH)
 
-    for setting_key, previous in path_state.items():
-        if previous == "__MISSING__":
-            data.pop(setting_key, None)
-        else:
-            data[setting_key] = previous
+    bindings = load_json(MICRO_BINDINGS_PATH)
+    bindings.update({
+        "Alt-s": "HSplit",
+        "Alt-v": "VSplit",
+        "Ctrl-w": "NextSplit",
+        "Alt-w": "NextSplit",
+        "Tab": "IndentSelection|InsertTab",
+        "Backtab": "OutdentSelection|OutdentLine",
+        "Ctrl-z": "Undo",
+        "Ctrl-y": "Redo",
+        "Alt-d": "command:diff",
+    })
 
-    ensure_parent(MICRO_SETTINGS_PATH)
-    MICRO_SETTINGS_PATH.write_text(
-        json.dumps(data, indent=4, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    save_json(MICRO_BINDINGS_PATH, bindings)
 
-    if key in json_backups:
-        del json_backups[key]
-    if not json_backups:
-        state.pop("json_backups", None)
-    save_state(state)
+
+def remove_micro_bindings() -> None:
+    restore_file(MICRO_BINDINGS_PATH)
 
 
 def reload_termux_settings() -> None:
@@ -216,6 +196,7 @@ def reload_termux_settings() -> None:
         from doxoade.tools.exec_safe import run_safe
     except Exception:
         return
+
     run_safe("termux-reload-settings")
 
 
@@ -224,6 +205,7 @@ def apply() -> None:
     apply_termux_colors()
     apply_micro_theme()
     apply_micro_settings()
+    apply_micro_bindings()
     reload_termux_settings()
     print("✔️  Configuração aplicada/atualizada com sucesso.")
 
@@ -233,6 +215,7 @@ def remove() -> None:
     remove_termux_colors()
     remove_micro_theme()
     remove_micro_settings()
+    remove_micro_bindings()
     reload_termux_settings()
     print("✔️  Configuração removida e restaurada com sucesso.")
 

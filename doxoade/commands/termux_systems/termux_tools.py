@@ -5,8 +5,15 @@ Ferramentas de modificação de arquivos de configuração (Micro e Termux).
 Arquétipo: Hefesto (Engenharia e Construção).
 """
 import os
+import json
+import re
+import shutil
 
 from doxoade.tools.error_info import handle_error
+from doxoade.commands.termux_systems.termux_tools import (
+    setup_micro_settings,
+    setup_micro_bindings,
+)
 
 def setup_extra_keys():
     """Configura o teclado do Termux limpando comentários antigos e forçando a aplicação."""
@@ -44,67 +51,63 @@ def setup_extra_keys():
 
 
 def setup_micro_settings():
-    """Configurações gerais do Micro garantindo a numeração da linha e réguas."""
+    """Configurações gerais do Micro com indentação em espaços."""
     micro_dir = os.path.expanduser("~/.config/micro")
     settings_file = os.path.join(micro_dir, "settings.json")
     os.makedirs(micro_dir, exist_ok=True)
-    
-    import json
+
     settings = {}
     if os.path.exists(settings_file):
         try:
             with open(settings_file, "r", encoding="utf-8") as f:
                 settings = json.load(f)
-        except json.JSONDecodeError as e:
-            handle_error(e, context="settings.json corrompido")
+        except json.JSONDecodeError:
             settings = {}
-        except Exception as e:
-            handle_error(e, context="carregando settings.json")
-            
-    # Força configurações amigáveis de edição (ruler = Numeração de linha lateral)
-    settings["ruler"] = True
-    settings["relativeruler"] = False
-    settings["tabsize"] = 4
-    settings["tabstospaces"] = True
-    settings["autoindent"] = True
-    settings["diffgutter"] = True
-    settings["savehistory"] = True
-    
+
+    settings.update({
+        "colorscheme": "meutema",
+        "cursorline": True,
+        "truecolor": True,
+        "autoindent": True,
+        "tabstospaces": True,
+        "tabsize": 4,
+        "smartpaste": False,
+        "diffgutter": True,
+        "savehistory": True,
+        "relativeruler": False,
+        "ruler": True,
+    })
+
     with open(settings_file, "w", encoding="utf-8") as f:
         json.dump(settings, f, indent=4)
 
 
 def setup_micro_bindings():
-    """Injeta ações (CamelCase) corretas do Micro com fallback em Pipes."""
+    """Bindings do Micro, preservando inserção de espaços no Tab."""
     micro_dir = os.path.expanduser("~/.config/micro")
     bindings_file = os.path.join(micro_dir, "bindings.json")
     os.makedirs(micro_dir, exist_ok=True)
-    
-    import json
+
     bindings = {}
     if os.path.exists(bindings_file):
         try:
             with open(bindings_file, "r", encoding="utf-8") as f:
                 bindings = json.load(f)
-        except Exception as e:
-            handle_error(e, context="Carregando bindings.json")
-            
-    # 3. Telas Divididas (Ações corretas da API nativa do Micro: HSplit, VSplit, NextSplit)
+        except json.JSONDecodeError:
+            bindings = {}
+
     bindings["Alt-s"] = "HSplit"
     bindings["Alt-v"] = "VSplit"
     bindings["Ctrl-w"] = "NextSplit"
-    bindings["Alt-w"] = "NextSplit"  # Adiciona fallback secundário caso o Android intercepte o Ctrl-W
-    
-    # 4. Indentação Inteligente (O Micro exige '|' ao invés de ',' para opções secundárias)
+    bindings["Alt-w"] = "NextSplit"
+
+    # Com tabstospaces=True, InsertTab insere espaços em vez de TAB real
     bindings["Tab"] = "IndentSelection|InsertTab"
     bindings["Backtab"] = "OutdentSelection|OutdentLine"
-    
-    # 5. Desfazer e Refazer
+
     bindings["Ctrl-z"] = "Undo"
     bindings["Ctrl-y"] = "Redo"
-    
-    # 6. Diff (Comandos CLI injetados)
     bindings["Alt-d"] = "command:diff"
-    
+
     with open(bindings_file, "w", encoding="utf-8") as f:
         json.dump(bindings, f, indent=4)
