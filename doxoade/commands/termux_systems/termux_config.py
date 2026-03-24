@@ -48,9 +48,18 @@ def main():
     with open(colors_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
-    # Remove qualquer linha antiga de background e adiciona a nova
-    lines = [line for line in lines if not line.startswith("background=")]
-    lines.append("background=#197b3f\n")
+    # Remove configs antigas relevantes
+    keys_to_replace = ("background=", "foreground=", "cursor=", "color2=")
+
+    lines = [line for line in lines if not line.startswith(keys_to_replace)]
+
+    # Novo tema
+    lines.extend([
+        "background=#0a331a\n",
+        "foreground=#ffffff\n",
+        "cursor=#26bc5f\n",
+        "color2=#26bc5f\n"
+    ])
 
     with open(colors_path, "w", encoding="utf-8") as f:
         f.writelines(lines)
