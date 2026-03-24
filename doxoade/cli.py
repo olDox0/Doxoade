@@ -98,7 +98,7 @@ class DoxoadeLazyGroup(click.Group):
             'style': 'doxoade.commands.style:style',
             'sync': 'doxoade.commands.git_workflow:sync',
             'telemetry': 'doxoade.commands.telemetry:telemetry',
-            'termux-config': 'doxoade.commands.termux_config:termux_config',
+            'termux-config': 'doxoade.commands.termux_command:termux_config',
             'test': 'doxoade.commands.test:test',
             'timeline': 'doxoade.commands.timeline:timeline',
             'venv-up': 'doxoade.commands.venv_up:venv_up',

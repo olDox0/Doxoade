@@ -5,9 +5,8 @@ Ferramentas de modificação de arquivos de configuração (Micro e Termux).
 Arquétipo: Hefesto (Engenharia e Construção).
 """
 import os
-import json
-import re
-import subprocess
+
+from doxoade.tools.error_info import handle_error
 
 def setup_extra_keys():
     """Configura o teclado do Termux limpando comentários antigos e forçando a aplicação."""
@@ -22,6 +21,7 @@ def setup_extra_keys():
         with open(prop_file, "r", encoding="utf-8") as f:
             lines = f.readlines()
             
+    import re
     # Remove qualquer linha antiga que defina extra-keys (comentada ou não)
     new_lines =[line for line in lines if not re.match(r'^\s*#?\s*extra-keys\s*=', line)]
             
@@ -34,10 +34,13 @@ def setup_extra_keys():
         f.writelines(new_lines)
         
     # Recarrega as configurações diretamente na API do Termux
+    from subprocess import run as subprorun
     try:
-        subprocess.run(["termux-reload-settings"], check=True, capture_output=True)
+        subprorun(["termux-reload-settings"], check=True, capture_output=True)
     except FileNotFoundError:
         pass # Silencia se rodar fora do ambiente mobile original
+    except Exception as e:
+        handle_error(e, context="termux-reload-settings")
 
 
 def setup_micro_settings():
@@ -46,13 +49,17 @@ def setup_micro_settings():
     settings_file = os.path.join(micro_dir, "settings.json")
     os.makedirs(micro_dir, exist_ok=True)
     
+    import json
     settings = {}
     if os.path.exists(settings_file):
         try:
             with open(settings_file, "r", encoding="utf-8") as f:
                 settings = json.load(f)
-        except Exception:
-            pass
+        except json.JSONDecodeError as e:
+            handle_error(e, context="settings.json corrompido")
+            settings = {}
+        except Exception as e:
+            handle_error(e, context="carregando settings.json")
             
     # Força configurações amigáveis de edição (ruler = Numeração de linha lateral)
     settings["ruler"] = True
@@ -73,13 +80,14 @@ def setup_micro_bindings():
     bindings_file = os.path.join(micro_dir, "bindings.json")
     os.makedirs(micro_dir, exist_ok=True)
     
+    import json
     bindings = {}
     if os.path.exists(bindings_file):
         try:
             with open(bindings_file, "r", encoding="utf-8") as f:
                 bindings = json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            handle_error(e, context="Carregando bindings.json")
             
     # 3. Telas Divididas (Ações corretas da API nativa do Micro: HSplit, VSplit, NextSplit)
     bindings["Alt-s"] = "HSplit"

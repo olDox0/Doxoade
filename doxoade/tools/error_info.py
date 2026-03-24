@@ -1,34 +1,35 @@
 # -*- coding: utf-8 -*-
-"""
-Simple error information renderer for doxoade.
-Human-readable, low-noise, zero dependency.
-"""
+# doxoade/tools/error_info.py
 
-import os
-import sys
-from traceback import print_tb
+def handle_error(
+    err: Exception,
+    context: str = "",
+    silent: bool = False,
+    debug: bool = False
+):
+    """
+    Manipulador padrão de erros do Doxoade.
 
-class DoxoadeError(Exception):
-    """Base error for doxoade."""
+    :param err: exceção capturada
+    :param context: contexto da operação (ex: "carregando settings.json")
+    :param silent: não exibe nada
+    :param debug: exibe traceback completo
+    """
 
-    def show_error(exc: Exception, title: str = "ERROR") -> None:
-        _, exc_obj, exc_tb = sys.exc_info()
+    if silent:
+        return
 
-        if exc_tb is None:
-            print(f"\033[31m[{title}] {exc}\033[0m")
-            return
+    err_type = type(err).__name__
+    msg = str(err)
 
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        line_number = exc_tb.tb_lineno
+    prefix = "⚠️ [DOXOADE ERROR]"
 
-        print(
-            f"\033[31m"
-            f" ■ {title}\n"
-            f" ■ File: {fname} | line: {line_number}\n"
-            f" ■ Exception type: {type(exc).__name__}\n"
-            f" ■ Exception value:\n"
-            f"   >>> {'\n   >>> '.join(str(exc_obj).split())}\n"
-            f"\033[0m"
-        )
-
-        print_tb(exc_tb)
+    if context:
+        print(f"{prefix} ({context}) -> {err_type}: {msg}")
+    else:
+        print(f"{prefix} {err_type}: {msg}")
+        
+    from traceback import print_exc
+    if debug:
+        print("---- TRACEBACK ----")
+        print_exc()
