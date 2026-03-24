@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 # doxoade/probes/debug_probe.py
 """
-Debug Probe v2.0 - Aegis Forensic Engine.
-Modo autópsia + modo perfil profundo (line-timer + cProfile + tracemalloc).
+Debug Probe v2.5 - Aegis Forensic Engine (Noise Gate Ativo).
+Modo autópsia + modo perfil profundo com isolamento cirúrgico de projeto.
 """
 import sys
 import os
@@ -20,23 +20,7 @@ import io
 # ─── BOOTSTRAP ───────────────────────────────────────────────────────────────
 
 def _resolve_package(abs_path: str):
-    """
-    Detecta o nome do pacote e a raiz do projeto para qualquer script Python.
-
-    Sobe a árvore de diretórios enquanto __init__.py existir, construindo o
-    nome do pacote (ex: 'doxoade.commands') e identificando o project_root
-    (o diretório acima do pacote de nível mais alto).
-
-    Retorna (package_name, project_root):
-      - package_name : string dotted ou None se o script é standalone
-      - project_root : diretório que deve entrar em sys.path
-
-    Exemplos:
-      doxoade/commands/debug.py    → ('doxoade.commands', '/…/doxoade_root')
-      ORN/engine/core/executive.py → ('engine.core',      '/…/ORN')
-      /tmp/standalone.py           → (None,               '/tmp')
-    """
-    parts   = []
+    parts   =[]
     current = os.path.dirname(abs_path)
 
     while os.path.exists(os.path.join(current, '__init__.py')):
@@ -75,31 +59,36 @@ def _capture_locals(globs: dict) -> dict:
 # ─── LINE TIMER (sys.settrace) ────────────────────────────────────────────────
 
 class _LineTimer:
-    """
-    Profiler de linha baseado em sys.settrace. Zero dependências externas.
+    __slots__ = ('data', '_last', 'target_file', 'project_root')
 
-    Para cada frame, registra o timestamp no evento 'call'/'line'.
-    No próximo evento do mesmo frame, computa o delta e acumula em data[].
-
-    data: {(norm_file, lineno): {'hits': int, 'total_ns': int}}
-    """
-    __slots__ = ('data', '_last')
-
-    def __init__(self):
+    def __init__(self, target_file: str, project_root: str):
         self.data: dict = {}
-        self._last: dict = {}   # {frame_id: (norm_file, lineno, ts_ns)}
-
-    def _commit(self, frame_id: int, now_ns: int):
-        if frame_id not in self._last:
-            return
-        prev_file, prev_line, prev_ts = self._last[frame_id]
-        key   = (prev_file, prev_line)
-        entry = self.data.setdefault(key, {'hits': 0, 'total_ns': 0})
-        entry['hits']     += 1
-        entry['total_ns'] += now_ns - prev_ts
+        self._last: dict = {}
+        self.target_file = os.path.normcase(os.path.abspath(target_file))
+        self.project_root = os.path.normcase(os.path.abspath(project_root))
 
     def tracer(self, frame, event, arg):
-        fname    = os.path.normcase(os.path.abspath(frame.f_code.co_filename))
+        raw_fname = frame.f_code.co_filename
+        
+        # Traduz compilações em memória (exec) para o arquivo alvo
+        if raw_fname in ('<sandbox>', '<string>'):
+            raw_fname = self.target_file
+        elif raw_fname == '~' or raw_fname.startswith('<frozen'):
+            return self.tracer
+
+        fname = os.path.normcase(os.path.abspath(raw_fname))
+        
+        # --- NOISE GATE ---
+        is_target = (fname == self.target_file)
+        if not is_target:
+            # Rejeita arquivos fora da raiz do projeto (ex: stdlib queue.py, ast.py)
+            if not fname.startswith(self.project_root):
+                return self.tracer
+            # Rejeita componentes internos do motor
+            skip = ('security_utils', 'debug_probe', 'doxoade', 'site-packages', 'lib\\python', 'lib/python')
+            if any(s in fname for s in skip):
+                return self.tracer
+
         lineno   = frame.f_lineno
         now_ns   = time.perf_counter_ns()
         frame_id = id(frame)
@@ -120,20 +109,18 @@ class _LineTimer:
 
         return self.tracer
 
-    def top_lines(self, target_file: str, limit: int = 20) -> list:
-        """
-        Retorna as linhas mais lentas do arquivo alvo + de qualquer arquivo
-        do projeto (excluindo stdlib e site-packages), ordenadas por total_ns.
-        """
-        norm_target = os.path.normcase(os.path.abspath(target_file))
-        skip        = ('site-packages', 'dist-packages', 'lib\\python', 'lib/python')
+    def _commit(self, frame_id: int, now_ns: int):
+        if frame_id not in self._last:
+            return
+        prev_file, prev_line, prev_ts = self._last[frame_id]
+        key   = (prev_file, prev_line)
+        entry = self.data.setdefault(key, {'hits': 0, 'total_ns': 0})
+        entry['hits']     += 1
+        entry['total_ns'] += now_ns - prev_ts
 
-        results = []
+    def top_lines(self, limit: int = 20) -> list:
+        results =[]
         for (fname, lineno), stat in self.data.items():
-            is_target   = fname == norm_target
-            is_stdlib   = any(s in fname for s in skip)
-            if not is_target and is_stdlib:
-                continue
             content = linecache.getline(fname, lineno).strip()
             results.append({
                 'file':       fname,
@@ -143,35 +130,42 @@ class _LineTimer:
                 'per_hit_ms': round(stat['total_ns'] / max(1, stat['hits']) / 1_000_000, 4),
                 'content':    content,
             })
-
         results.sort(key=lambda x: x['total_ms'], reverse=True)
         return results[:limit]
 
 
 # ─── FUNÇÃO STATS (cProfile) ─────────────────────────────────────────────────
 
-def _extract_function_stats(profiler: cProfile.Profile, target_file: str,
-                            limit: int = 15) -> list:
-    """
-    Extrai estatísticas de função do cProfile como lista de dicts,
-    priorizando funções do arquivo alvo e do projeto.
-    """
+def _extract_function_stats(profiler: cProfile.Profile, target_file: str, project_root: str, limit: int = 15) -> list:
     stream = io.StringIO()
     ps     = pstats.Stats(profiler, stream=stream)
     ps.sort_stats('cumulative')
 
-    # Acessa os dados internos sem depender do formato de texto
-    stats_dict = ps.stats   # {(file, lineno, name): (cc, nc, tt, ct, callers)}
-
+    stats_dict  = ps.stats
     norm_target = os.path.normcase(os.path.abspath(target_file))
-    skip        = ('site-packages', 'dist-packages', 'lib\\python', 'lib/python',
-                   '<frozen', '<string>', '{built-in', '{method')
+    norm_root   = os.path.normcase(os.path.abspath(project_root))
+    
+    skip = ('site-packages', 'dist-packages', 'lib\\python', 'lib/python',
+            '{built-in', '{method', 'security_utils', 'debug_probe', 'doxoade')
 
-    results = []
+    results =[]
     for (fname, lineno, func_name), (prim_calls, total_calls, tt, ct, _callers) in stats_dict.items():
-        norm_fname  = os.path.normcase(os.path.abspath(fname)) if fname not in ('<string>', '<frozen importlib._bootstrap>') else fname
-        is_target   = norm_fname == norm_target
-        is_noise    = any(s in fname for s in skip) and not is_target
+        if fname in ('<sandbox>', '<string>'):
+            fname = target_file
+
+        if fname == '~' or fname.startswith('<frozen'):
+            continue
+
+        norm_fname = os.path.normcase(os.path.abspath(fname))
+        is_target  = (norm_fname == norm_target)
+        
+        is_noise = False
+        if not is_target:
+            if not norm_fname.startswith(norm_root):
+                is_noise = True
+            if any(s in fname or s in norm_fname for s in skip):
+                is_noise = True
+
         if is_noise:
             continue
 
@@ -192,26 +186,39 @@ def _extract_function_stats(profiler: cProfile.Profile, target_file: str,
 
 # ─── MEMORY STATS (tracemalloc) ──────────────────────────────────────────────
 
-def _extract_memory_stats(snapshot, target_file: str, limit: int = 10) -> dict:
-    """
-    Extrai pico de memória e top alocações do tracemalloc snapshot.
-    """
+def _extract_memory_stats(snapshot, target_file: str, project_root: str, limit: int = 10) -> dict:
     norm_target = os.path.normcase(os.path.abspath(target_file))
+    norm_root   = os.path.normcase(os.path.abspath(project_root))
     skip        = ('site-packages', 'dist-packages', 'lib\\python', 'lib/python',
-                   '<frozen', '<string>')
+                   'security_utils', 'debug_probe', 'doxoade')
 
     stats = snapshot.statistics('lineno')
-    top   = []
+    top   =[]
     for stat in stats:
-        fname = os.path.normcase(str(stat.traceback[0].filename))
-        lineno = stat.traceback[0].lineno
-        is_target = fname == norm_target
-        is_noise  = any(s in fname for s in skip) and not is_target
+        raw_fname = str(stat.traceback[0].filename)
+        if raw_fname in ('<sandbox>', '<string>'):
+            raw_fname = target_file
+            
+        if raw_fname == '~' or raw_fname.startswith('<frozen'):
+            continue
+
+        fname = os.path.normcase(os.path.abspath(raw_fname))
+        is_target = (fname == norm_target)
+        
+        is_noise = False
+        if not is_target:
+            if not fname.startswith(norm_root):
+                is_noise = True
+            if any(s in raw_fname or s in fname for s in skip):
+                is_noise = True
+
         if is_noise:
             continue
-        content = linecache.getline(str(stat.traceback[0].filename), lineno).strip()
+
+        lineno  = stat.traceback[0].lineno
+        content = linecache.getline(raw_fname, lineno).strip()
         top.append({
-            'file':     str(stat.traceback[0].filename),
+            'file':     raw_fname,
             'line':     lineno,
             'size_kb':  round(stat.size / 1024, 2),
             'count':    stat.count,
@@ -221,7 +228,7 @@ def _extract_memory_stats(snapshot, target_file: str, limit: int = 10) -> dict:
             break
 
     return {
-        'peak_mb': 0.0,   # preenchido pelo caller com tracemalloc.get_traced_memory()
+        'peak_mb': 0.0,
         'top_allocs': top,
     }
 
@@ -279,17 +286,9 @@ def run_debug(script_path: str):
 # ─── MODO PERFIL PROFUNDO ─────────────────────────────────────────────────────
 
 def run_profile(script_path: str):
-    """
-    Executa o script com três camadas de instrumentação simultâneas:
-
-      1. _LineTimer (sys.settrace) — tempo por linha, hits, ms/hit
-      2. cProfile               — calls, total_time, cumulative por função
-      3. tracemalloc             — alocações de memória por linha
-
-    Emite ---DOXOADE-PROFILE-DATA--- com o JSON completo ao fim.
-    """
     abs_path = os.path.abspath(script_path)
-    pkg_name, _ = _resolve_package(abs_path)
+    pkg_name, project_root = _resolve_package(abs_path)
+    
     profile_data = {
         'status':    'unknown',
         'variables': {},
@@ -302,7 +301,7 @@ def run_profile(script_path: str):
         '__package__': pkg_name,
     }
 
-    line_timer = _LineTimer()
+    line_timer = _LineTimer(abs_path, project_root)
     profiler   = cProfile.Profile()
 
     try:
@@ -313,7 +312,6 @@ def run_profile(script_path: str):
         with open(abs_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
-        # ── Ativa as três camadas ────────────────────────────────────────────
         tracemalloc.start()
         sys.settrace(line_timer.tracer)
         profiler.enable()
@@ -329,18 +327,16 @@ def run_profile(script_path: str):
             tracemalloc.stop()
         elapsed_ms = (time.perf_counter() - t0) * 1000
 
-        # ── Coleta variáveis ─────────────────────────────────────────────────
         profile_data['status']    = 'success'
         profile_data['variables'] = _capture_locals(globs)
 
-        # ── Monta bloco de perfil ────────────────────────────────────────────
-        mem_stats              = _extract_memory_stats(mem_snapshot, abs_path)
+        mem_stats              = _extract_memory_stats(mem_snapshot, abs_path, project_root)
         mem_stats['peak_mb']   = round(peak / 1024 / 1024, 4)
 
         profile_data['profile'] = {
             'total_ms':  round(elapsed_ms, 2),
-            'lines':     line_timer.top_lines(abs_path),
-            'functions': _extract_function_stats(profiler, abs_path),
+            'lines':     line_timer.top_lines(),
+            'functions': _extract_function_stats(profiler, abs_path, project_root),
             'memory':    mem_stats,
         }
 
@@ -368,13 +364,11 @@ def run_profile(script_path: str):
                 if not k.startswith('__'):
                     profile_data['variables'][k] = safe_serialize(v)
 
-        # Emite o que foi coletado até o crash
-        elapsed_end = time.perf_counter()
         profile_data['profile'] = {
             'total_ms':  0,
-            'lines':     line_timer.top_lines(abs_path),
-            'functions': [],
-            'memory':    {'peak_mb': 0.0, 'top_allocs': []},
+            'lines':     line_timer.top_lines(),
+            'functions':[],
+            'memory':    {'peak_mb': 0.0, 'top_allocs':[]},
         }
 
     print("\n---DOXOADE-PROFILE-DATA---")
@@ -390,7 +384,6 @@ if __name__ == "__main__":
     script_to_run = sys.argv[1]
     mode          = sys.argv[2] if len(sys.argv) > 2 else 'debug'
 
-    # Injeta os argumentos corretamente no sys.argv global
     sys.argv = [script_to_run] + sys.argv[3:]
 
     if mode == 'profile':

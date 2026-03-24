@@ -27,7 +27,7 @@ import json
 import time
 from collections import Counter
 from pathlib import Path
-from typing import Dict, FrozenSet, List, Optional
+from typing import Dict, FrozenSet, Optional
 
 # ── Status ───────────────────────────────────────────────────────────────────
 

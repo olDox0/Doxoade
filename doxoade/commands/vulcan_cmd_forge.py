@@ -26,7 +26,7 @@ from .vulcan_cmd import (
 )
 
 try:
-    from doxoade.tools.vulcan.simd_compiler import (
+ from doxoade.tools.vulcan.simd_compiler import (
         SIMDContext, SIMDForge, SIMDEnvironment, estimate_gain,
     )
 except ImportError:
@@ -88,7 +88,7 @@ def _ensure_gcc_in_path() -> "str | None":
 
     Retorna o diretório injetado (para log) ou None se já estava no PATH.
     """
-    import shutil
+# [DOX-UNUSED]     import shutil
     from pathlib import Path as _P
 
     # ── 1. Varredura manual de os.environ["PATH"] ─────────────────────────────
@@ -595,7 +595,7 @@ def ignite(ctx, path, force, jobs, no_pitstop, streaming, hybrid, scan_only, sim
         click.echo(f"  {Fore.YELLOW}⚠ --simd ignorado: módulos SIMD não disponíveis.{Style.RESET_ALL}")
 
     if hybrid:
-        from doxoade.tools.vulcan.hybrid_forge import HybridIgnite
+# [DOX-UNUSED]         from doxoade.tools.vulcan.hybrid_forge import HybridIgnite
         _patch_vulcan_forge()
         click.echo(f"{Fore.YELLOW}{Style.BRIGHT}⬡ [VULCAN-HYBRID] ...{Style.RESET_ALL}")
 

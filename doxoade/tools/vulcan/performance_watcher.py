@@ -21,13 +21,13 @@ Compatível com Python 3.8+. Sem dependências externas.
 
 from __future__ import annotations
 
-import ast
+# [DOX-UNUSED] import ast
 import importlib
 import importlib.util
 import inspect
 import sys
 import timeit
-import traceback
+# [DOX-UNUSED] import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple

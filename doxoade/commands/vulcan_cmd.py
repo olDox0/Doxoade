@@ -12,21 +12,21 @@ Estrutura modular:
 
 import sys
 import os
-import re                       # FIX #4: movido do meio do arquivo para o topo
-import signal
-import subprocess               # FIX #3: era marcado [DOX-UNUSED] mas é usado em vulcan_verify
+# [DOX-UNUSED] import re                       # FIX #4: movido do meio do arquivo para o topo
+# [DOX-UNUSED] import signal
+# [DOX-UNUSED] import subprocess               # FIX #3: era marcado [DOX-UNUSED] mas é usado em vulcan_verify
 import click
 from pathlib import Path
 
 from doxoade.tools.doxcolors import Fore, Style
-from ..shared_tools import ExecutionLogger, _find_project_root
+from ..shared_tools import _find_project_root
 
 __version__ = "86.0 Omega (modular split)"
 
 # ── Imports SIMD (opcionais) ──────────────────────────────────────────────────
 
 try:
-    from doxoade.tools.vulcan.simd_detector import detect as _detect_simd
+    from doxoade.tools.vulcan.simd_detector import detect
     from doxoade.tools.vulcan.simd_compiler import (
         SIMDContext,
         SIMDForge,
@@ -129,12 +129,14 @@ def _register_subcommands():
         vulcan_module, vulcan_probe, vulcan_verify,
         vulcan_telemetry_bridge,          # ← NOVO
     )
+    from .vulcan_cmd_lazy      import vulcan_lazy
 
     for cmd in (
         ignite, vulcan_regression, vulcan_lib, vulcan_benchmark, vulcan_pitstop,
         vulcan_alloc, vulcan_simd, vulcan_opt, opt_bench,
         vulcan_module, vulcan_probe, vulcan_verify,
         vulcan_telemetry_bridge,          # ← NOVO
+        vulcan_lazy,
     ):
         vulcan_group.add_command(cmd)
 

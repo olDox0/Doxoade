@@ -23,11 +23,11 @@ from __future__ import annotations
 
 import os
 import platform
-import struct
+# [DOX-UNUSED] import struct
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import lru_cache
-from typing import FrozenSet
+# [DOX-UNUSED] from typing import FrozenSet
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Dataclass de capacidades
@@ -291,7 +291,7 @@ def _cpuid(leaf: int, subleaf: int = 0) -> tuple[int, int, int, int]:
         # shellcode CPUID: mov eax,leaf; mov ecx,subleaf; cpuid; (armazena via ponteiros)
         # Abordagem: compilar pequeno helper C em tempo de execução é pesado.
         # Usamos struct + array de bytes para chamar via mmap (Linux/macOS).
-        import mmap
+# [DOX-UNUSED]         import mmap
 
         # Código de máquina x86_64 para:
         #   push rbx

@@ -11,7 +11,7 @@ import time
 import click
 import traceback
 from importlib import import_module
-from doxoade.tools.doxcolors import Fore, Style
+# [DOX-UNUSED] from doxoade.tools.doxcolors import Style
 
 # --- BOOTSTRAP DE AMBIENTE (OSL-10) ---
 if sys.stdout.encoding != 'utf-8':
@@ -98,6 +98,7 @@ class DoxoadeLazyGroup(click.Group):
             'style': 'doxoade.commands.style:style',
             'sync': 'doxoade.commands.git_workflow:sync',
             'telemetry': 'doxoade.commands.telemetry:telemetry',
+            'termux-config': 'doxoade.commands.termux_config:termux_config',
             'test': 'doxoade.commands.test:test',
             'timeline': 'doxoade.commands.timeline:timeline',
             'venv-up': 'doxoade.commands.venv_up:venv_up',

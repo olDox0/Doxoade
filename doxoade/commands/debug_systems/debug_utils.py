@@ -50,6 +50,32 @@ def _bootstrap(script_path):
         exc_trace(exc_tb)
         return None
 
+def _try_activate_lazy(script_path: str) -> None:
+    """
+    Ativa VulcanLazyFinder no subprocess do debug antes de restricted_safe_exec.
+
+    Busca lazy_policy.json + lazy_loader.py em .doxoade/vulcan/ do projeto alvo.
+    Silencioso em caso de ausência ou erro — nunca bloqueia o debug.
+    """
+    import importlib.util as _ilu
+    from pathlib import Path as _P
+    root = _find_project_root(os.path.abspath(script_path))
+    if not root:
+        return
+    lazy_policy = _P(root) / ".doxoade" / "vulcan" / "lazy_policy.json"
+    lazy_src    = _P(root) / ".doxoade" / "vulcan" / "lazy_loader.py"
+    if not (lazy_policy.exists() and lazy_src.exists()):
+        return
+    try:
+        spec = _ilu.spec_from_file_location("_doxoade_vulcan_lazy", str(lazy_src))
+        if not (spec and spec.loader):
+            return
+        ll = _ilu.module_from_spec(spec)
+        sys.modules["_doxoade_vulcan_lazy"] = ll
+        spec.loader.exec_module(ll)
+        ll.install(ll.load_policy(lazy_policy))
+    except Exception:
+        pass
 
 # ─── SERIALIZAÇÃO ────────────────────────────────────────────────────────────
 
@@ -80,20 +106,12 @@ class _LineTimer:
 
     data: {(norm_file, lineno): {'hits': int, 'total_ns': int}}
     """
-    __slots__ = ('data', '_last')
+    __slots__ = ('data', '_last', '_seen_calls')
 
     def __init__(self):
-        self.data: dict = {}
-        self._last: dict = {}   # {frame_id: (norm_file, lineno, ts_ns)}
-
-    def _commit(self, frame_id: int, now_ns: int):
-        if frame_id not in self._last:
-            return
-        prev_file, prev_line, prev_ts = self._last[frame_id]
-        key   = (prev_file, prev_line)
-        entry = self.data.setdefault(key, {'hits': 0, 'total_ns': 0})
-        entry['hits']     += 1
-        entry['total_ns'] += now_ns - prev_ts
+        self.data        = {}
+        self._last       = {}
+        self._seen_calls = set()   # ← ADD: (fname, lineno) de calls já registrados
 
     def tracer(self, frame, event, arg):
         fname    = os.path.normcase(os.path.abspath(frame.f_code.co_filename))
@@ -102,17 +120,24 @@ class _LineTimer:
         frame_id = id(frame)
 
         if event == 'call':
-            self._last[frame_id] = (fname, lineno, now_ns)
-            return self.tracer
-
-        if event == 'line':
-            self._commit(frame_id, now_ns)
+            call_key = (fname, lineno)
+            if call_key in self._seen_calls:   # ← ADD: ignora call duplicado
+                return self.tracer             #    (artefato cProfile coexistindo)
+            self._seen_calls.add(call_key)     # ← ADD
             self._last[frame_id] = (fname, lineno, now_ns)
             return self.tracer
 
         if event in ('return', 'exception'):
             self._commit(frame_id, now_ns)
             self._last.pop(frame_id, None)
+            call_key = (fname, lineno)         # ← ADD: libera o slot para re-entradas legítimas
+            self._seen_calls.discard(call_key) # ← ADD
+            return self.tracer
+
+        # evento 'line' — inalterado
+        if event == 'line':
+            self._commit(frame_id, now_ns)
+            self._last[frame_id] = (fname, lineno, now_ns)
             return self.tracer
 
         return self.tracer
@@ -239,7 +264,12 @@ def run_debug(script_path: str):
         from doxoade.tools.security_utils import restricted_safe_exec
         with open(abs_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        restricted_safe_exec(content, globs, allow_imports=True)
+            
+        _try_activate_lazy(abs_path)
+        try:
+            restricted_safe_exec(content, globs, allow_imports=True)
+        except (KeyboardInterrupt, SystemExit):
+            pass
 
         debug_data['status']    = 'success'
         debug_data['variables'] = _capture_locals(globs)
@@ -332,6 +362,12 @@ def run_profile(script_path: str):
     line_timer = _LineTimer()
     profiler   = cProfile.Profile()
 
+    # Controle de estado para uso no finally
+    t0 = time.perf_counter()
+    elapsed_ms = 0.0
+    mem_snapshot = None
+    peak = 0
+
     try:
         sys.stdout.write("\n--- BOOTING AEGIS PROFILE ENGINE ---\n")
         sys.stdout.flush()
@@ -339,6 +375,8 @@ def run_profile(script_path: str):
         from doxoade.tools.security_utils import restricted_safe_exec
         with open(abs_path, 'r', encoding='utf-8') as f:
             content = f.read()
+            
+        _try_activate_lazy(abs_path)
 
         # ── Ativa as três camadas ────────────────────────────────────────────
         tracemalloc.start()
@@ -346,66 +384,55 @@ def run_profile(script_path: str):
         profiler.enable()
 
         t0 = time.perf_counter()
+        
+        # Execução com captura total de BaseException (KeyboardInterrupt, SystemExit, etc)
         try:
             restricted_safe_exec(content, globs, allow_imports=True)
-        finally:
-            profiler.disable()
-            sys.settrace(None)
-            _, peak = tracemalloc.get_traced_memory()
-            mem_snapshot = tracemalloc.take_snapshot()
-            tracemalloc.stop()
-        elapsed_ms = (time.perf_counter() - t0) * 1000
+            profile_data['status'] = 'success'
+        except BaseException as be:
+            if not isinstance(be, (KeyboardInterrupt, SystemExit)):
+                profile_data['status'] = 'error'
+                profile_data['error']  = str(be)
+                profile_data['traceback'] = traceback.format_exc()
+            else:
+                profile_data['status'] = 'success'
 
-        # ── Coleta variáveis ─────────────────────────────────────────────────
-        profile_data['status']    = 'success'
-        profile_data['variables'] = _capture_locals(globs)
-
-        # ── Monta bloco de perfil ────────────────────────────────────────────
-        mem_stats              = _extract_memory_stats(mem_snapshot, abs_path)
-        mem_stats['peak_mb']   = round(peak / 1024 / 1024, 4)
-
-        profile_data['profile'] = {
-            'total_ms':  round(elapsed_ms, 2),
-            'lines':     line_timer.top_lines(abs_path),
-            'functions': _extract_function_stats(profiler, abs_path),
-            'memory':    mem_stats,
-        }
-
-    except Exception as e:
-        profiler.disable()
-        sys.settrace(None)
-        if tracemalloc.is_tracing():
-            tracemalloc.stop()
-
-        import sys as exc_sys
-        from traceback import print_tb as exc_trace
-        _, exc_obj, exc_tb = exc_sys.exc_info()
-        print(f"\033[31m ■ Exception type: {e} ■ Exception value: {exc_obj}\n")
-        exc_trace(exc_tb)
-
+    except BaseException as e:
         profile_data['status']    = 'error'
         profile_data['error']     = str(e)
-        _, _, tb                  = sys.exc_info()
-        if tb:
-            while tb.tb_next: tb  = tb.tb_next
-            frame                 = tb.tb_frame
-            profile_data['traceback'] = traceback.format_exc()
-            profile_data['line']      = tb.tb_lineno
-            for k, v in frame.f_locals.items():
-                if not k.startswith('__'):
-                    profile_data['variables'][k] = safe_serialize(v)
+        profile_data['traceback'] = traceback.format_exc()
 
-        # Emite o que foi coletado até o crash
-        elapsed_end = time.perf_counter()
-        profile_data['profile'] = {
-            'total_ms':  0,
-            'lines':     line_timer.top_lines(abs_path),
-            'functions': [],
-            'memory':    {'peak_mb': 0.0, 'top_allocs': []},
-        }
+    finally:
+        # Ignora sinais no processo de shutdown e formatação final
+        import signal
+        try: signal.signal(signal.SIGINT, signal.SIG_IGN)
+        except Exception: pass
 
-    print("\n---DOXOADE-PROFILE-DATA---")
-    print(json.dumps(profile_data, ensure_ascii=False))
+        try:
+            profiler.disable()
+            sys.settrace(None)
+            if tracemalloc.is_tracing():
+                _, peak = tracemalloc.get_traced_memory()
+                mem_snapshot = tracemalloc.take_snapshot()
+                tracemalloc.stop()
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+
+            profile_data['variables'] = _capture_locals(globs)
+            mem_stats = _extract_memory_stats(mem_snapshot, abs_path) if mem_snapshot else {'peak_mb': 0.0, 'top_allocs': []}
+            mem_stats['peak_mb'] = round(peak / 1024 / 1024, 4) if peak else 0.0
+
+            profile_data['profile'] = {
+                'total_ms':  round(elapsed_ms, 2),
+                'lines':     line_timer.top_lines(abs_path),
+                'functions': _extract_function_stats(profiler, abs_path),
+                'memory':    mem_stats,
+            }
+        except BaseException as fe:
+            profile_data['error'] = f"Erro na formatação do perfil: {fe}"
+
+        print("\n---DOXOADE-PROFILE-DATA---")
+        print(json.dumps(profile_data, ensure_ascii=False))
+        sys.stdout.flush()
 
 
 

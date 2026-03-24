@@ -19,8 +19,8 @@ import click
 from pathlib import Path
 
 from doxoade.tools.doxcolors import Fore, Style
-from ..shared_tools import _find_project_root
-from .vulcan_cmd import _print_vulcan_forensic, _is_doxoade_project
+# [DOX-UNUSED] from ..shared_tools import _find_project_root
+from .vulcan_cmd import _is_doxoade_project
 # Template isolado para evitar que o CodeSampler registre linhas do literal
 # de string como hot lines em vulcan_cmd_bootstrap.py (falso positivo).
 from ._vulcan_embedded_template import VULCAN_EMBEDDED_CONTENT as _VULCAN_EMBEDDED_CONTENT
@@ -41,6 +41,27 @@ _doxo_install_meta_finder = None
 _doxo_probe_embedded = None
 _doxo_project_root = None
 _doxo_boot_t0 = _doxo_time.monotonic()
+
+# --- Lazy-loader --- 
+_doxo_lazy_mod = None
+try:
+    if _doxo_project_root:
+        _doxo_lazy_policy_f = _doxo_path(_doxo_project_root) / ".doxoade" / "vulcan" / "lazy_policy.json"
+        _doxo_lazy_src_f    = _doxo_path(_doxo_project_root) / ".doxoade" / "vulcan" / "lazy_loader.py"
+        if _doxo_lazy_policy_f.exists() and _doxo_lazy_src_f.exists():
+            _doxo_lazy_spec = _doxo_importlib_util.spec_from_file_location(
+                "_doxoade_vulcan_lazy", str(_doxo_lazy_src_f)
+            )
+            if _doxo_lazy_spec and _doxo_lazy_spec.loader:
+                _doxo_lazy_mod = _doxo_importlib_util.module_from_spec(_doxo_lazy_spec)
+                _doxo_sys.modules["_doxoade_vulcan_lazy"] = _doxo_lazy_mod
+                _doxo_lazy_spec.loader.exec_module(_doxo_lazy_mod)
+                _doxo_lazy_mod.install(
+                    _doxo_lazy_mod.load_policy(_doxo_lazy_policy_f)
+                )
+except Exception:
+    pass
+
 _doxo_install_ms = 0
 _doxo_embedded_ms = 0
 _doxo_fallback_ms = 0
@@ -166,7 +187,7 @@ if callable(_doxo_probe_embedded):
 # Opt-out: VULCAN_TELEMETRY_SYNC=0   Debug: VULCAN_TELEMETRY=1
 
 # Versão 10: Chronos Lite v4 — LibCodeSampler (lib hot lines) + full_command_line
-VULCAN_STUB_VERSION = 10
+VULCAN_STUB_VERSION = 11
 
 
 def generate_vulcan_stub() -> str:
@@ -213,7 +234,7 @@ def _write_safe_runtime(project_root: Path) -> Path:
     (vulcan_dir / "__init__.py").write_text("# doxoade vulcan marker\n", encoding="utf-8")
 
     vulcan_src = Path(__file__).resolve().parents[1] / "tools" / "vulcan"
-    for fname in ("runtime.py", "opt_cache.py", "lib_optimizer.py"):
+    for fname in ("runtime.py", "opt_cache.py", "lib_optimizer.py", "lazy_loader.py",):
         src_file = vulcan_src / fname
         if src_file.exists():
             (vulcan_dir / fname).write_text(src_file.read_text(encoding="utf-8"), encoding="utf-8")

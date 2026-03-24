@@ -31,7 +31,7 @@ Compliance:
 from __future__ import annotations
 
 import ast
-import hashlib
+# [DOX-UNUSED] import hashlib
 import os
 import sys
 from dataclasses import dataclass, field

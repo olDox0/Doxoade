@@ -26,11 +26,11 @@ Cada transformação produz um `TransformResult` com:
 
 from __future__ import annotations
 
-import ast
+# [DOX-UNUSED] import ast
 import datetime
 import re
 import shutil
-import textwrap
+# [DOX-UNUSED] import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional

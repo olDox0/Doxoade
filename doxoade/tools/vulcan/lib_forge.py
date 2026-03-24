@@ -20,7 +20,7 @@ Segurança:
 
 import shutil
 import sys
-import site
+# [DOX-UNUSED] import site
 import tempfile
 import os
 import concurrent.futures

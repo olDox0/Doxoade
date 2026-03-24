@@ -177,6 +177,10 @@ if __name__ == "__main__":
     p.add_argument("--target", default=None)
     p.add_argument("--no-compress", dest="no_compress", action="store_true",
                    help="Desativa compressão de loops (Iron Gate).")
-    args = p.parse_args()
+    
+    args, remaining = p.parse_known_args()
+    # Injeta os argumentos restantes no sys.argv para que o script alvo consiga lê-los
+    sys.argv =[os.path.abspath(args.script)] + remaining
+    
     run_flow(args.script, args.base, args.val, args.imp, args.func,
              args.target, no_compress=args.no_compress)

@@ -30,11 +30,11 @@ from __future__ import annotations
 
 import ast
 import re
-import textwrap
+# [DOX-UNUSED] import textwrap
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+# [DOX-UNUSED] from typing import Optional
 
 
 # ──────────────────────────────────────────────────────────────────────────────

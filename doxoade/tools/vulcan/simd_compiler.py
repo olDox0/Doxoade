@@ -31,11 +31,11 @@ import shutil
 import subprocess
 import sys
 import textwrap
-import tempfile
+# [DOX-UNUSED] import tempfile
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+# [DOX-UNUSED] from typing import Optional
 
 from doxoade.tools.vulcan.cpu_flags import simd_compile_flags
 from .simd_detector import SIMDCapabilities, detect as detect_simd

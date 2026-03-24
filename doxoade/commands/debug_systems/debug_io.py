@@ -5,7 +5,7 @@ Renderização de autópsia, perfil profundo, hotspots e call chain.
 """
 import os
 import re
-import linecache
+# [DOX-UNUSED] import linecache
 from click import echo
 from doxoade.tools.doxcolors import Fore, Style
 

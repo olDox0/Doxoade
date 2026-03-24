@@ -96,9 +96,34 @@ def _stream_and_capture(process: subprocess.Popen, marker: str) -> str:
                 sys.stdout.flush()
         process.wait()
     except KeyboardInterrupt:
-        click.secho("\n[!] Interrupção manual (Ctrl+C). Encerrando sonda...", fg='yellow')
-        process.terminate()
-        process.wait()
+        click.secho("\n[!] Interrupção manual (Ctrl+C). Compilando dados (pode levar alguns segundos)...", fg='yellow')
+        try:
+            for line in iter(process.stdout.readline, ''):
+                if marker in line:
+                    capturing = True
+                    parts = line.split(marker)
+                    if parts[0]:
+                        sys.stdout.write(parts[0])
+                        sys.stdout.flush()
+                    data_str += parts[1] if len(parts) > 1 else ""
+                    continue
+                if capturing:
+                    data_str += line
+                else:
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+            process.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            click.secho("\n[!] Tempo limite esgotado aguardando a sonda. Forçando encerramento...", fg='red')
+            process.terminate()
+            process.wait()
+        except KeyboardInterrupt:
+            click.secho("\n[!] Cancelamento forçado (Duplo Ctrl+C). Sonda abortada.", fg='red')
+            import signal
+            try: signal.signal(signal.SIGINT, signal.SIG_IGN)
+            except Exception: pass
+            process.terminate()
+            process.wait()
     return data_str.strip()
 
 
@@ -146,6 +171,9 @@ def _stream_live(process: subprocess.Popen,
         process.wait()
     except KeyboardInterrupt:
         click.secho("\n[!] Interrupção manual (Ctrl+C). Encerrando monitoramento...", fg='yellow')
+        import signal
+        try: signal.signal(signal.SIGINT, signal.SIG_IGN)
+        except Exception: pass
         process.terminate()
         process.wait()
 
@@ -213,9 +241,9 @@ def _run_autopsy(python_exe, script, args, env):
         else:
             rc = process.returncode
             if rc is not None and rc != 0:
-                click.secho(f"\n🚨[ FALHA DE BOOTSTRAP ] Processo encerrou com código {rc}", fg='red', bold=True)
+                click.secho(f"\n🚨[ FALHA OU ABORTO ] Processo encerrou com código {rc}", fg='red', bold=True)
             else:
-                click.secho("\n📡 [ FINALIZADO ] Processo encerrou sem emitir dados.", fg='cyan')
+                click.secho("\n📡 [ FINALIZADO ] Processo encerrou sem emitir dados.", fg='cyan')    
     except Exception as e:
         import sys as _s; from traceback import print_tb as _t
         _, _o, _tb = _s.exc_info()

@@ -234,7 +234,7 @@ def vulcan_simd(bench, out_json, cap_level, debug):
         click.echo(f"{Fore.RED}[ERRO] Módulos SIMD não disponíveis.{Style.RESET_ALL}")
         return
 
-    from doxoade.tools.vulcan.simd_detector import detect as _detect_simd
+# [DOX-UNUSED]     from doxoade.tools.vulcan.simd_detector import detect as _detect_simd
     from doxoade.tools.vulcan.simd_compiler import SIMDContext, estimate_gain, get_simd_report
 
     if debug:
