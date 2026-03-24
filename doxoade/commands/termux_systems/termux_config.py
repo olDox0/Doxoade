@@ -32,6 +32,8 @@ MICRO_SETTINGS_PATH = HOME / ".config" / "micro" / "settings.json"
 MICRO_BINDINGS_PATH = HOME / ".config" / "micro" / "bindings.json"
 MICRO_THEME_PATH = HOME / ".config" / "micro" / "colorschemes" / "meutema.micro"
 
+STATE_FILE = HOME / ".doxoade_termux_config_state.json"
+
 
 def ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -159,6 +161,7 @@ def apply_micro_settings() -> None:
         "savehistory": True,
         "ruler": True,
         "relativeruler": False,
+        "ftoptions": False,
     })
 
     save_json(MICRO_SETTINGS_PATH, settings)
@@ -196,7 +199,6 @@ def reload_termux_settings() -> None:
         from doxoade.tools.exec_safe import run_safe
     except Exception:
         return
-
     run_safe("termux-reload-settings")
 
 
@@ -220,9 +222,21 @@ def remove() -> None:
     print("✔️  Configuração removida e restaurada com sucesso.")
 
 
+def reset() -> None:
+    remove()
+    for path in [STATE_FILE]:
+        if path.exists():
+            path.unlink()
+    if BACKUP_DIR.exists():
+        shutil.rmtree(BACKUP_DIR, ignore_errors=True)
+    print("✔️  Reset concluído. Agora pode reaplicar do zero.")
+
+
 def main(mode: str = "apply") -> None:
     if mode == "remove":
         remove()
+    elif mode == "reset":
+        reset()
     else:
         apply()
 
