@@ -1,130 +1,248 @@
 #!/usr/bin/env python3
-# doxoade\commands\termux_systems\termux_config.py
+# doxoade/commands/termux_systems/termux_config.py
+
+from __future__ import annotations
+
+import json
 import os
+import re
+import shutil
+from pathlib import Path
+from typing import Any, Dict
 
-HOME = os.path.expanduser("~")
-# Arquivo de registro para garantir que o script rode apenas uma vez
-FLAG_FILE = os.path.join(HOME, ".doxoade_termux_configured")
+HOME = Path.home()
+STATE_FILE = HOME / ".doxoade_termux_config_state.json"
+BACKUP_DIR = HOME / ".doxoade" / "backups" / "termux_config"
 
-def ensure_file(path):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    if not os.path.exists(path):
-        with open(path, "w", encoding="utf-8"):
-            pass
+NANO_BEGIN = "## >>> doxoade-termux-config"
+NANO_END = "## <<< doxoade-termux-config"
 
-def main():
-    # Verifica se já foi executado anteriormente
-    if os.path.exists(FLAG_FILE):
-        print("✔️  O ambiente Termux já foi configurado anteriormente. Ignorando...")
+TERMUX_BEGIN = "# >>> doxoade-termux-config"
+TERMUX_END = "# <<< doxoade-termux-config"
+
+TERMUX_COLOR_BODY = "\n".join([
+    "background=#000000",
+    "foreground=#ffffff",
+    "cursor=#26bc5f",
+    "color2=#26bc5f",
+])
+
+MICRO_THEME_CONTENT = 'color-link cursor-line ",#e05a00"\n'
+MICRO_SETTINGS_TARGETS = {
+    "colorscheme": "meutema",
+    "cursorline": True,
+    "truecolor": True,
+    "autoindent": False,
+    "smartpaste": False,
+}
+MICRO_SETTINGS_PATH = HOME / ".config" / "micro" / "settings.json"
+MICRO_THEME_PATH = HOME / ".config" / "micro" / "colorschemes" / "meutema.micro"
+
+
+def ensure_parent(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+def write_text(path: Path, content: str) -> None:
+    ensure_parent(path)
+    path.write_text(content, encoding="utf-8")
+
+
+def load_state() -> Dict[str, Any]:
+    if not STATE_FILE.exists():
+        return {}
+    try:
+        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def save_state(state: Dict[str, Any]) -> None:
+    ensure_parent(STATE_FILE)
+    STATE_FILE.write_text(
+        json.dumps(state, indent=4, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def backup_path_for(path: Path) -> Path:
+    rel = str(path).replace(":", "").lstrip("/\\").replace("\\", "/")
+    return BACKUP_DIR / f"{rel}.bak"
+
+
+def backup_file(path: Path) -> None:
+    if not path.exists():
+        return
+    backup = backup_path_for(path)
+    ensure_parent(backup)
+    if not backup.exists():
+        shutil.copy2(path, backup)
+
+
+def restore_file(path: Path) -> None:
+    backup = backup_path_for(path)
+    if backup.exists():
+        ensure_parent(path)
+        shutil.copy2(backup, path)
+        backup.unlink(missing_ok=True)
+    elif path.exists():
+        path.unlink()
+
+
+def replace_or_append_block(content: str, begin: str, end: str, body: str) -> str:
+    block = f"{begin}\n{body.rstrip()}\n{end}\n"
+    pattern = rf"(?ms)^{re.escape(begin)}\n.*?^{re.escape(end)}\n?"
+    if re.search(pattern, content):
+        return re.sub(pattern, block, content)
+    if content and not content.endswith("\n"):
+        content += "\n"
+    return content + block
+
+
+def remove_block(content: str, begin: str, end: str) -> str:
+    pattern = rf"(?ms)^{re.escape(begin)}\n.*?^{re.escape(end)}\n?"
+    return re.sub(pattern, "", content)
+
+
+def apply_nanorc() -> None:
+    path = HOME / ".nanorc"
+    text = read_text(path)
+    new_text = replace_or_append_block(text, NANO_BEGIN, NANO_END, "set linenumbers")
+    write_text(path, new_text)
+
+
+def remove_nanorc() -> None:
+    path = HOME / ".nanorc"
+    if not path.exists():
+        return
+    text = read_text(path)
+    text = remove_block(text, NANO_BEGIN, NANO_END)
+    write_text(path, text)
+
+
+def apply_termux_colors() -> None:
+    path = HOME / ".termux" / "colors.properties"
+    text = read_text(path)
+    text = remove_block(text, TERMUX_BEGIN, TERMUX_END)
+    text = replace_or_append_block(text, TERMUX_BEGIN, TERMUX_END, TERMUX_COLOR_BODY)
+    write_text(path, text)
+
+
+def remove_termux_colors() -> None:
+    path = HOME / ".termux" / "colors.properties"
+    if not path.exists():
+        return
+    text = read_text(path)
+    text = remove_block(text, TERMUX_BEGIN, TERMUX_END)
+    write_text(path, text)
+
+
+def apply_micro_theme() -> None:
+    backup_file(MICRO_THEME_PATH)
+    write_text(MICRO_THEME_PATH, MICRO_THEME_CONTENT)
+
+
+def remove_micro_theme() -> None:
+    restore_file(MICRO_THEME_PATH)
+
+
+def apply_micro_settings() -> None:
+    state = load_state()
+    json_backups = state.setdefault("json_backups", {})
+    key = str(MICRO_SETTINGS_PATH)
+    path_state = json_backups.setdefault(key, {})
+
+    data: Dict[str, Any] = {}
+    if MICRO_SETTINGS_PATH.exists():
+        try:
+            data = json.loads(MICRO_SETTINGS_PATH.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            data = {}
+
+    for setting_key, desired in MICRO_SETTINGS_TARGETS.items():
+        if setting_key not in path_state:
+            path_state[setting_key] = data.get(setting_key, "__MISSING__")
+        data[setting_key] = desired
+
+    ensure_parent(MICRO_SETTINGS_PATH)
+    MICRO_SETTINGS_PATH.write_text(
+        json.dumps(data, indent=4, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    save_state(state)
+
+
+def remove_micro_settings() -> None:
+    state = load_state()
+    json_backups = state.get("json_backups", {})
+    key = str(MICRO_SETTINGS_PATH)
+    path_state = json_backups.get(key, {})
+
+    if not MICRO_SETTINGS_PATH.exists() and not path_state:
         return
 
-    print("⚙️  Iniciando a configuração inteligente do Termux...")
-
-    # ==========================================
-    # 1. Configurando o NANO
-    # ==========================================
-    nanorc_path = os.path.join(HOME, ".nanorc")
-    ensure_file(nanorc_path)
-
-    with open(nanorc_path, "r+", encoding="utf-8") as f:
-        content = f.read()
-        if "set linenumbers" not in content:
-            if content and not content.endswith("\n"):
-                f.write("\n")
-            f.write("set linenumbers\n")
-            print("✔️  Números de linha ativados no Nano.")
-        else:
-            print("✔️  Nano já estava configurado.")
-
-    # ==========================================
-    # 2. Configurando Cores do TERMUX
-    # ==========================================
-    termux_dir = os.path.join(HOME, ".termux")
-    colors_path = os.path.join(termux_dir, "colors.properties")
-
-    os.makedirs(termux_dir, exist_ok=True)
-    ensure_file(colors_path)
-
-    with open(colors_path, "r", encoding="utf-8") as f:
-        lines = f.readlines()
-
-    # Remove configs antigas relevantes
-    keys_to_replace = ("background=", "foreground=", "cursor=", "color2=")
-
-    lines = [line for line in lines if not line.startswith(keys_to_replace)]
-
-    # Novo tema
-    lines.extend([
-        "background=#0a331a\n",
-        "foreground=#ffffff\n",
-        "cursor=#26bc5f\n",
-        "color2=#26bc5f\n"
-    ])
-
-    with open(colors_path, "w", encoding="utf-8") as f:
-        f.writelines(lines)
-
-    # Aplica as cores imediatamente via Python
-    #from subprocess import run as subprorun
-    import shutil
-    from doxoade.tools.exec_safe import run_safe
-
-    cmd = shutil.which("termux-reload-settings")
-
-    if cmd:
-        run_safe("termux-reload-settings") #subprorun([cmd], check=True)
-    else:
-        print("⚠️ termux-reload-settings não encontrado.")
-
-    # ==========================================
-    # 3. Configurando o MICRO (Cores e Indentação inteligente)
-    # ==========================================
-    micro_colors_dir = os.path.join(HOME, ".config/micro/colorschemes")
-    micro_settings_dir = os.path.join(HOME, ".config/micro")
-
-    os.makedirs(micro_colors_dir, exist_ok=True)
-    os.makedirs(micro_settings_dir, exist_ok=True)
-
-    # Cria o Tema
-    theme_path = os.path.join(micro_colors_dir, "meutema.micro")
-    with open(theme_path, "w", encoding="utf-8") as f:
-        f.write('color-link cursor-line ",#e05a00"\n')
-
-    # Configuração via JSON para não quebrar configurações existentes
-    import json
-    settings_path = os.path.join(micro_settings_dir, "settings.json")
-    settings = {}
-    
-    if os.path.exists(settings_path):
+    data: Dict[str, Any] = {}
+    if MICRO_SETTINGS_PATH.exists():
         try:
-            with open(settings_path, "r", encoding="utf-8") as f:
-                settings = json.load(f)
+            data = json.loads(MICRO_SETTINGS_PATH.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
-            # Se o arquivo existir mas estiver corrompido, começamos do zero
-            pass
+            data = {}
 
-    # Atualiza apenas os valores necessários
-    settings.update({
-        "colorscheme": "meutema",
-        "cursorline": True,
-        "truecolor": True,
-        "autoindent": False,
-        "smartpaste": False
-    })
+    for setting_key, previous in path_state.items():
+        if previous == "__MISSING__":
+            data.pop(setting_key, None)
+        else:
+            data[setting_key] = previous
 
-    with open(settings_path, "w", encoding="utf-8") as f:
-        json.dump(settings, f, indent=4)
+    ensure_parent(MICRO_SETTINGS_PATH)
+    MICRO_SETTINGS_PATH.write_text(
+        json.dumps(data, indent=4, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
-    print("✔️  Micro configurado (Linha do cursor laranja + Correção de colar código).")
+    if key in json_backups:
+        del json_backups[key]
+    if not json_backups:
+        state.pop("json_backups", None)
+    save_state(state)
 
-    # ==========================================
-    # 4. Finalização e Registro
-    # ==========================================
-    # Cria o arquivo de flag para registrar que a configuração já foi feita
-    with open(FLAG_FILE, "w", encoding="utf-8") as f:
-        f.write("Configuração executada com sucesso.\n")
 
-    print("🚀 Tudo pronto! Configuração finalizada com sucesso e registrada.")
+def reload_termux_settings() -> None:
+    try:
+        from doxoade.tools.exec_safe import run_safe
+    except Exception:
+        return
+    run_safe("termux-reload-settings")
+
+
+def apply() -> None:
+    apply_nanorc()
+    apply_termux_colors()
+    apply_micro_theme()
+    apply_micro_settings()
+    reload_termux_settings()
+    print("✔️  Configuração aplicada/atualizada com sucesso.")
+
+
+def remove() -> None:
+    remove_nanorc()
+    remove_termux_colors()
+    remove_micro_theme()
+    remove_micro_settings()
+    reload_termux_settings()
+    print("✔️  Configuração removida e restaurada com sucesso.")
+
+
+def main(mode: str = "apply") -> None:
+    if mode == "remove":
+        remove()
+    else:
+        apply()
+
 
 if __name__ == "__main__":
     main()
