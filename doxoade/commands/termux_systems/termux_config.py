@@ -160,7 +160,7 @@ def apply_micro_settings() -> None:
         "cursorline": True,
         "truecolor": "auto",
         "autoindent": False,
-        "smartpaste": True,
+        "smartpaste": False,
         "tabstospaces": True,
         "tabsize": 4,
         "diffgutter": True,
@@ -185,13 +185,11 @@ def apply_micro_bindings() -> None:
         "Alt-v": "VSplit",
         "Ctrl-w": "NextSplit",
         "Alt-w": "NextSplit",
-        "Tab": "Insert \"    \"",
         "Backtab": "OutdentSelection|OutdentLine",
         "Ctrl-z": "Undo",
         "Ctrl-y": "Redo",
         "Alt-d": "command:diff",
     })
-
     save_json(MICRO_BINDINGS_PATH, bindings)
 
 
