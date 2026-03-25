@@ -3,10 +3,8 @@
 
 from __future__ import annotations
 
-import json
-import os
-import re
-import shutil
+#import os
+
 from pathlib import Path
 from typing import Dict, Any
 
@@ -53,6 +51,7 @@ def backup_path_for(path: Path) -> Path:
 
 
 def backup_file(path: Path) -> None:
+    import shutil
     if not path.exists():
         return
     backup = backup_path_for(path)
@@ -63,6 +62,7 @@ def backup_file(path: Path) -> None:
 
 
 def restore_file(path: Path) -> None:
+    import shutil
     backup = backup_path_for(path)
     if backup.exists():
         ensure_parent(path)
@@ -73,6 +73,7 @@ def restore_file(path: Path) -> None:
 
 
 def replace_or_append_block(content: str, begin: str, end: str, body: str) -> str:
+    import re
     block = f"{begin}\n{body.rstrip()}\n{end}\n"
     pattern = rf"(?ms)^{re.escape(begin)}\n.*?^{re.escape(end)}\n?"
     if re.search(pattern, content):
@@ -83,11 +84,13 @@ def replace_or_append_block(content: str, begin: str, end: str, body: str) -> st
 
 
 def remove_block(content: str, begin: str, end: str) -> str:
+    import re
     pattern = rf"(?ms)^{re.escape(begin)}\n.*?^{re.escape(end)}\n?"
     return re.sub(pattern, "", content)
 
 
 def load_json(path: Path) -> Dict[str, Any]:
+    import json
     if not path.exists():
         return {}
     try:
@@ -97,6 +100,7 @@ def load_json(path: Path) -> Dict[str, Any]:
 
 
 def save_json(path: Path, data: Dict[str, Any]) -> None:
+    import json
     ensure_parent(path)
     path.write_text(json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8")
 
@@ -162,6 +166,7 @@ def apply_micro_settings() -> None:
         "autoindent": False,
         "smartpaste": False,
         "softwrap": False,
+        "autoclose": False,
         "wordwrap": False,
         "smartindent": False,
         "tabstospaces": True,
@@ -229,6 +234,7 @@ def remove() -> None:
 
 
 def reset() -> None:
+    import shutil
     remove()
 
     reset_micro_full()
@@ -236,13 +242,14 @@ def reset() -> None:
     for path in [STATE_FILE]:
         if path.exists():
             path.unlink()
-
+    
     if BACKUP_DIR.exists():
         shutil.rmtree(BACKUP_DIR, ignore_errors=True)
 
     print("✔️  Reset TOTAL concluído.")
 
 def reset_micro_full():
+    import shutil
     micro_dir = HOME / ".config" / "micro"
 
     if micro_dir.exists():
