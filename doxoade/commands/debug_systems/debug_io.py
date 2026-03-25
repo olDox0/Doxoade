@@ -341,3 +341,45 @@ def render_profile_report(data: dict, script: str):
 
     if data.get('variables'):
         render_variable_table(data['variables'])
+        
+
+# ─── DEBUG DE MEMÓRIA ─────────────────────────────────────────────────────────────────
+def render_memory_forensics(data: dict, script: str):
+    """Renderiza a autópsia completa de Memória (Composição e Tracebacks)."""
+    mem_data = data.get('memory', {})
+    if not mem_data:
+        return
+
+    peak_mb = mem_data.get('peak_mb', 0)
+    comp = mem_data.get('composition', [])
+    tracebacks = mem_data.get('tracebacks',[])
+
+    echo(f"\n{Fore.BLUE}{Style.BRIGHT}=== 🧠 AUTÓPSIA DE MEMÓRIA: {os.path.basename(script)} ==={Style.RESET_ALL}")
+    echo(f"   {Style.BRIGHT}Pico Máximo de RAM:{Style.RESET_ALL} {Fore.YELLOW}{peak_mb:.3f} MB{Style.RESET_ALL}")
+
+    if data.get('status') == 'error':
+        report_crash(data, script)
+
+    # --- TABELA DE COMPOSIÇÃO ---
+    echo(f"\n   {Fore.CYAN}📦 Composição de Tipos (Top 15 mais pesados):{Style.RESET_ALL}")
+    echo(f"   {Style.BRIGHT}{'TIPO (OBJETO)'.ljust(30)} {'QUANTIDADE'.rjust(12)} {'TAMANHO'.rjust(15)}{Style.RESET_ALL}")
+    echo(f"   {Style.DIM}{'─' * 60}{Style.RESET_ALL}")
+    
+    max_size = comp[0]['size_kb'] if comp else 1
+    for item in comp:
+        bar = _bar(item['size_kb'], max_size, 10, Fore.BLUE)
+        echo(
+            f"   {Fore.YELLOW}{item['type'].ljust(30)}{Style.RESET_ALL} "
+            f"{str(item['count']).rjust(12)}x "
+            f"{bar} {Fore.WHITE}{item['size_kb']:>8.2f} KB{Style.RESET_ALL}"
+        )
+
+    # --- TABELA DE TRACEBACKS (ORIGEM) ---
+    if tracebacks:
+        echo(f"\n   {Fore.MAGENTA}🌳 Árvore de Origem (Onde os maiores blocos nasceram):{Style.RESET_ALL}")
+        for idx, tb in enumerate(tracebacks, 1):
+            echo(f"\n   {Style.BRIGHT}{Fore.RED}[ {idx} ] Bloco de {tb['size_kb']} KB ({tb['count']} objetos){Style.RESET_ALL}")
+            for step in tb['traceback']:
+                short_path = _short_path(step['file'])
+                colored_code = _colorize(step['code'][:50])
+                echo(f"       {Style.DIM}↳ {short_path}:{step['line']}{Style.RESET_ALL}  {colored_code}")

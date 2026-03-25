@@ -375,6 +375,69 @@ def run_profile(script_path: str):
     print(json.dumps(profile_data, ensure_ascii=False))
 
 
+# ─── MODO AUTÓPSIA DE MEMÓRIA ──────────────────────────────────────────────────
+
+def run_memory(script_path: str):
+    """Executa o script isolando a autópsia profunda de memória."""
+    # ATENÇÃO: Importação corrigida com caminho absoluto!
+    from doxoade.commands.debug_systems.debug_memory import get_memory_composition, get_allocation_tracebacks
+    import tracemalloc
+    import json
+    import traceback
+    
+    abs_path = os.path.abspath(script_path)
+    pkg_name, project_root = _resolve_package(abs_path)  # <--- INJETA A RESOLUÇÃO DA ÁRVORE
+    mem_data = {'status': 'unknown', 'error': None, 'memory': {}}
+    globs = {'__name__': '__main__', '__file__': abs_path, '__package__': pkg_name} # <--- INJETA O PACOTE
+
+    try:
+        sys.stdout.write("\n--- BOOTING AEGIS MEMORY FORENSICS ---\n")
+        sys.stdout.flush()
+
+        from doxoade.tools.security_utils import restricted_safe_exec
+        with open(abs_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            
+        # Inicia o rastreador de memória com capacidade para salvar a árvore de chamadas (frames = 10)
+        tracemalloc.start(10)
+        
+        try:
+            restricted_safe_exec(content, globs, allow_imports=True)
+            mem_data['status'] = 'success'
+        except BaseException as be:
+            if not isinstance(be, (KeyboardInterrupt, SystemExit)):
+                mem_data['status'] = 'error'
+                mem_data['error']  = str(be)
+            else:
+                mem_data['status'] = 'success'
+
+    except BaseException as e:
+        mem_data['status'] = 'error'
+        mem_data['error']  = str(e)
+
+    finally:
+        import signal
+        try: signal.signal(signal.SIGINT, signal.SIG_IGN)
+        except Exception: pass
+
+        try:
+            snapshot = tracemalloc.take_snapshot()
+            _, peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+
+            mem_data['memory'] = {
+                'peak_mb': round(peak / 1024 / 1024, 4) if peak else 0.0,
+                'composition': get_memory_composition(limit=15),
+                'tracebacks': get_allocation_tracebacks(snapshot, limit=5)
+            }
+        except BaseException as fe:
+            mem_data['error'] = f"Erro na formatação da memória: {fe}"
+
+        print("\n---DOXOADE-MEMORY-DATA---")
+        print(json.dumps(mem_data, ensure_ascii=False))
+        sys.stdout.flush()
+
+
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -384,9 +447,12 @@ if __name__ == "__main__":
     script_to_run = sys.argv[1]
     mode          = sys.argv[2] if len(sys.argv) > 2 else 'debug'
 
+    # Injeta os argumentos corretamente no sys.argv global
     sys.argv = [script_to_run] + sys.argv[3:]
 
     if mode == 'profile':
         run_profile(script_to_run)
+    elif mode == 'memory':          # <-- O SEGREDO ESTÁ AQUI
+        run_memory(script_to_run)   # Chama a nova função de memória
     else:
-        run_debug(script_to_run)
+        run_debug(script_to_run)    # Cai aqui se não for profile nem memory

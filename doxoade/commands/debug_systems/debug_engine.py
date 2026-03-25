@@ -321,12 +321,37 @@ def _run_live(python_exe, script, watch, bottleneck,
         print(f"\033[31m ■ {e} ■ {_o}\n"); _t(_tb)
         click.secho(f"\n❌ Erro no modo live: {e}", fg='red')
 
+def _run_memory(python_exe, script, args, env):
+    from ...probes import debug_probe
+    from .debug_io import render_memory_forensics
+    print_debug_header(script, "MEMÓRIA")
+    cmd = build_probe_command(python_exe, debug_probe.__file__, script,
+                              mode='memory', args=args)
+    try:
+        process = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding='utf-8', bufsize=1, env=env,
+        )
+        click.echo(Fore.BLUE + "   > Raio-X ativo: Coletando Garbage Collector e Árvores de Alocação...\n" + Fore.RESET)
+        data_str = _stream_and_capture(process, "---DOXOADE-MEMORY-DATA---")
+
+        if data_str:
+            try:
+                data = json.loads(data_str)
+                render_memory_forensics(data, script)
+            except json.JSONDecodeError:
+                click.secho("\n🚨 [ FALHA ] Não foi possível decodificar os dados de memória.", fg='red', bold=True)
+                click.echo(data_str)
+        else:
+            click.secho("\n📡[ FINALIZADO ] Processo encerrou sem emitir dados.", fg='cyan')    
+    except Exception as e:
+        click.secho(f"\n❌ Erro no Orquestrador (memória): {e}", fg='red')
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────
 
 def execute_debug(script: str, watch: str, bottleneck: bool,
                   threshold: float, no_compress: bool,
-                  args: str, profile: bool = False):
+                  args: str, profile: bool = False, memory: bool = False): # <-- Adicione memory
     """
     Roteamento:
       -p            → perfil profundo
@@ -335,21 +360,22 @@ def execute_debug(script: str, watch: str, bottleneck: bool,
       -nc           → desativa Iron Gate (qualquer modo live)
       (nenhum)      → autópsia de variáveis
     """
-    if profile and (watch or bottleneck):
-        click.secho(
-            "\n❌ --profile (-p) é incompatível com --watch e --bottleneck.\n"
-            "   Use -p para análise pós-execução ou -b/--watch para tempo real.",
-            fg='red', bold=True,
-        )
+    # Validação de incompatibilidade...
+    if (profile or memory) and (watch or bottleneck):
+        click.secho("\n❌ Modos profundos (-p, -m) incompatíveis com tempo real (-b, --watch).", fg='red')
+        return
+    if profile and memory:
+        click.secho("\n❌ Use -p (CPU) ou -m (Memória) separadamente para evitar interferência.", fg='red')
         return
 
     python_exe = _get_venv_python_executable() or sys.executable
     env        = get_debug_env(script)
 
     if watch or bottleneck:
-        _run_live(python_exe, script, watch, bottleneck,
-                  threshold, no_compress, args, env)
+        _run_live(python_exe, script, watch, bottleneck, threshold, no_compress, args, env)
     elif profile:
         _run_profile(python_exe, script, args, env)
+    elif memory:
+        _run_memory(python_exe, script, args, env)  # <-- Adicione este roteamento
     else:
         _run_autopsy(python_exe, script, args, env)
