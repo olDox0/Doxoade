@@ -161,7 +161,7 @@ def apply_micro_settings() -> None:
         "cursorline": True,
         "truecolor": True,
         "autoindent": False,
-        "smartpaste": True,
+        "smartpaste": False,
         "tabstospaces": True,
         "tabsize": 4,
         "diffgutter": True,
@@ -231,13 +231,25 @@ def remove() -> None:
 
 def reset() -> None:
     remove()
+
+    reset_micro_full()
+
     for path in [STATE_FILE]:
         if path.exists():
             path.unlink()
+
     if BACKUP_DIR.exists():
         shutil.rmtree(BACKUP_DIR, ignore_errors=True)
-    print("✔️  Reset concluído. Agora pode reaplicar do zero.")
 
+    print("✔️  Reset TOTAL concluído.")
+
+def reset_micro_full():
+    micro_dir = HOME / ".config" / "micro"
+
+    if micro_dir.exists():
+        shutil.rmtree(micro_dir, ignore_errors=True)
+
+    print("✔️  Micro resetado completamente.")
 
 def main(mode: str = "apply") -> None:
     if mode == "remove":
