@@ -157,11 +157,10 @@ def apply_micro_settings() -> None:
     settings.update({
         "colorscheme": "default",
         "syntax": True,
-        "filetype": "python",
         "cursorline": True,
-        "truecolor": True,
+        "truecolor": "auto",
         "autoindent": False,
-        "smartpaste": False,
+        "smartpaste": True,
         "tabstospaces": True,
         "tabsize": 4,
         "diffgutter": True,
@@ -172,7 +171,6 @@ def apply_micro_settings() -> None:
     })
 
     save_json(MICRO_SETTINGS_PATH, settings)
-
 
 def remove_micro_settings() -> None:
     restore_file(MICRO_SETTINGS_PATH)
@@ -187,7 +185,7 @@ def apply_micro_bindings() -> None:
         "Alt-v": "VSplit",
         "Ctrl-w": "NextSplit",
         "Alt-w": "NextSplit",
-        "Tab": "Autocomplete|IndentSelection|InsertTab",
+        "Tab": "Insert \"    \"",
         "Backtab": "OutdentSelection|OutdentLine",
         "Ctrl-z": "Undo",
         "Ctrl-y": "Redo",
