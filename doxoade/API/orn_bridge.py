@@ -79,7 +79,15 @@ def _run_orn_cli(command: list[str], timeout_s: int, workdir: str | None = None)
         return False, err or f"exit={proc.returncode}"
 
     out = (proc.stdout or "").strip()
-    return True, out.splitlines()[-1] if out else "ok"
+    if not out:
+        return False, "sem stdout"
+
+    # Evita falso-positivo de sucesso com retorno genérico.
+    if out.lower() == "ok":
+        return False, "resposta genérica 'ok' (sem conteúdo da IA)"
+
+    preview = " ".join(line.strip() for line in out.splitlines() if line.strip())
+    return True, preview[:180]
 
 
 def _query_orn_server_tcp(prompt: str, max_tokens: int, timeout_s: int) -> tuple[bool, str]:
@@ -297,11 +305,8 @@ def dispatch_check_errors_to_orn(*, path: str, summary: dict[str, int], findings
     prompt = _build_prompt(path, summary, findings)
     timeout_s = int(os.environ.get("DOXOADE_ORN_TIMEOUT", "25"))
 
-    # 1) canal servidor: tenta TCP direto primeiro (rápido, sem overhead de CLI)
+    # 1) canal servidor: TCP direto (estado real do servidor).
     ok, detail = _query_orn_server_tcp(prompt, max_tokens=220, timeout_s=timeout_s)
-    if not ok:
-        server_cmd = [*orn_target.command, "server", "ask", prompt, "--tokens", "220"]
-        ok, detail = _run_orn_cli(server_cmd, timeout_s, workdir=orn_target.workdir)
     attempts.append(BridgeAttempt(mode="server", ok=ok, detail=detail))
 
     direct_cmd = [*orn_target.command, "think", prompt, "--direct", "--tokens", "220"]
