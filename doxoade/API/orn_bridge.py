@@ -39,6 +39,7 @@ def _build_prompt(path: str, summary: dict[str, int], findings: list[dict[str, A
     findings_text: list[str] = []
     for item in top_findings:
         file_name = Path(str(item.get("file") or "")).name or Path(path).name
+        file_path = Path(str(item.get("file") or path))
         line = item.get("line") or "?"
         raw = str(item.get("message", "")).strip()
         err_match = re.search(r"(SyntaxError|TypeError|ValueError|NameError|ImportError|ModuleNotFoundError)", raw)
@@ -46,16 +47,31 @@ def _build_prompt(path: str, summary: dict[str, int], findings: list[dict[str, A
         snippet = raw.replace("\n", " ")
         if len(snippet) > 160:
             snippet = snippet[:160] + "..."
-        findings_text.append(f'{err_name} em {file_name} linha {line}: "{snippet}"')
+        line_ctx = _line_context(file_path, int(line) if str(line).isdigit() else None)
+        findings_text.append(f'{err_name} em {file_name} linha {line}: "{snippet}"{line_ctx}')
 
     findings_block = "\n".join(f"- {x}" for x in findings_text) if findings_text else "- sem detalhes"
     return (
-        "ORN, analise os erros abaixo e retorne plano curto de correção priorizado.\n"
-        "Formato da resposta: causa raiz + patch objetivo por item.\n"
+        "ORN, responda de forma direta e curta.\n"
+        "Formato: 1) causa raiz 2) patch exato.\n"
         f"Alvo: {Path(path).name}\n"
         f"Resumo: critical={summary.get('critical', 0)} errors={summary.get('errors', 0)}\n"
         f"Erros:\n{findings_block}"
     )
+
+
+def _line_context(file_path: Path, line: int | None) -> str:
+    if not line or line < 1:
+        return ""
+    try:
+        lines = file_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    idx = line - 1
+    prev_line = lines[idx - 1].strip() if idx - 1 >= 0 and idx - 1 < len(lines) else ""
+    curr_line = lines[idx].strip() if idx >= 0 and idx < len(lines) else ""
+    next_line = lines[idx + 1].strip() if idx + 1 < len(lines) else ""
+    return f' | contexto: prev="{prev_line[:120]}" curr="{curr_line[:120]}" next="{next_line[:120]}"'
 
 
 def _run_orn_cli(command: list[str], timeout_s: int, workdir: str | None = None) -> tuple[bool, str]:

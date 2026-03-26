@@ -22,6 +22,7 @@ __all__ = ['check', 'run_check_logic']
 @click.option(  '--only',              '-o',      type=str,     help="Filtra apenas uma categoria.")
 @click.option(  '--security',          '-s',      is_flag=True, help="Ativa auditoria Aegis (Bandit/Safety).")
 @click.option(  '--structural-risk',   '-sr',     default=False, show_default=True, help="Classifica risco estrutural Python (dinamismo/import hooks).")
+@click.option(  '--ai/--no-ai',                    default=False, show_default=True, help="Aciona ponte IA (ORN) quando houver achados bloqueantes.")
 @click.option(  '--format',            'out_fmt', type=click.Choice(['text', 'json']), default='text')
 @click.pass_context
 def check(ctx, path: str, **kwargs):
@@ -77,7 +78,7 @@ def check(ctx, path: str, **kwargs):
 
         _render_output(state, kwargs)
 
-        if _has_blocking_findings(state):
+        if kwargs.get('ai') and _has_blocking_findings(state):
             from ..API.orn_bridge import dispatch_check_errors_to_orn
             attempts = dispatch_check_errors_to_orn(
                 path=state.target_path,
