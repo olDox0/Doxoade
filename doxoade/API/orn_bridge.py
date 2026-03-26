@@ -74,15 +74,55 @@ def _run_orn_cli(command: list[str], timeout_s: int) -> tuple[bool, str]:
     return True, out.splitlines()[-1] if out else "ok"
 
 
+def _command_from_path(path: Path) -> list[str] | None:
+    """Converte caminho conhecido (arquivo/pasta ORN) em comando executável."""
+    p = path.expanduser().resolve()
+
+    if p.is_dir():
+        dir_candidates = [
+            p / "orn",
+            p / "orn.exe",
+            p / "orn.py",
+            p / "engine" / "cli.py",
+        ]
+        for candidate in dir_candidates:
+            cmd = _command_from_path(candidate)
+            if cmd:
+                return cmd
+        return None
+
+    if not p.exists():
+        return None
+
+    if p.suffix.lower() == ".py":
+        return [sys.executable, str(p)]
+    return [str(p)]
+
+
 def _resolve_from_env_cmd() -> tuple[list[str] | None, str]:
     raw_cmd = os.environ.get("ORN_CMD", "").strip()
     if not raw_cmd:
         return None, ""
+
+    # Compatível com `set ORN_CMD=C:\...\ORN` no CMD/PowerShell.
+    direct_path = Path(raw_cmd.strip().strip('"'))
+    cmd_from_path = _command_from_path(direct_path)
+    if cmd_from_path:
+        return cmd_from_path, "env:ORN_CMD(path)"
+
+    # Comando composto: respeita parse da plataforma.
     try:
-        parsed = shlex.split(raw_cmd)
+        parsed = shlex.split(raw_cmd, posix=(os.name != "nt"))
     except ValueError:
         return None, ""
-    return (parsed if parsed else None), "env:ORN_CMD"
+    if not parsed:
+        return None, ""
+
+    token_path = _command_from_path(Path(parsed[0].strip('"')))
+    if token_path:
+        return [*token_path, *parsed[1:]], "env:ORN_CMD(cmd+path)"
+
+    return parsed, "env:ORN_CMD"
 
 
 def _resolve_from_env_bin() -> tuple[list[str] | None, str]:
@@ -90,10 +130,9 @@ def _resolve_from_env_bin() -> tuple[list[str] | None, str]:
     if not raw_bin:
         return None, ""
 
-    if Path(raw_bin).exists():
-        if raw_bin.lower().endswith(".py"):
-            return [sys.executable, raw_bin], "env:ORN_BIN(py)"
-        return [raw_bin], "env:ORN_BIN(path)"
+    cmd_from_path = _command_from_path(Path(raw_bin.strip().strip('"')))
+    if cmd_from_path:
+        return cmd_from_path, "env:ORN_BIN(path)"
 
     resolved = shutil.which(raw_bin)
     if resolved:
