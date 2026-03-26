@@ -22,6 +22,12 @@ class BridgeAttempt:
     detail: str
 
 
+@dataclass
+class ResolvedOrnCommand:
+    command: list[str]
+    workdir: str | None = None
+
+
 def _bridge_enabled() -> bool:
     return os.environ.get("DOXOADE_ORN_BRIDGE", "1") not in {"0", "false", "False"}
 
@@ -54,7 +60,7 @@ def _build_prompt(path: str, summary: dict[str, int], findings: list[dict[str, A
     )
 
 
-def _run_orn_cli(command: list[str], timeout_s: int) -> tuple[bool, str]:
+def _run_orn_cli(command: list[str], timeout_s: int, workdir: str | None = None) -> tuple[bool, str]:
     try:
         proc = subprocess.run(
             command,
@@ -62,6 +68,7 @@ def _run_orn_cli(command: list[str], timeout_s: int) -> tuple[bool, str]:
             text=True,
             timeout=max(5, timeout_s),
             check=False,
+            cwd=workdir,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return False, str(exc)
@@ -74,7 +81,15 @@ def _run_orn_cli(command: list[str], timeout_s: int) -> tuple[bool, str]:
     return True, out.splitlines()[-1] if out else "ok"
 
 
-def _command_from_path(path: Path) -> list[str] | None:
+def _infer_workdir_for_path(path: Path) -> str | None:
+    """Define cwd ideal para execução do ORN."""
+    p = path.resolve()
+    if p.name.lower() == "cli.py" and p.parent.name.lower() == "engine":
+        return str(p.parent.parent)
+    return str(p.parent)
+
+
+def _command_from_path(path: Path) -> ResolvedOrnCommand | None:
     """Converte caminho conhecido (arquivo/pasta ORN) em comando executável."""
     p = path.expanduser().resolve()
 
@@ -95,11 +110,14 @@ def _command_from_path(path: Path) -> list[str] | None:
         return None
 
     if p.suffix.lower() == ".py":
-        return [sys.executable, str(p)]
-    return [str(p)]
+        return ResolvedOrnCommand(
+            command=[sys.executable, str(p)],
+            workdir=_infer_workdir_for_path(p),
+        )
+    return ResolvedOrnCommand(command=[str(p)], workdir=str(p.parent))
 
 
-def _resolve_from_env_cmd() -> tuple[list[str] | None, str]:
+def _resolve_from_env_cmd() -> tuple[ResolvedOrnCommand | None, str]:
     raw_cmd = os.environ.get("ORN_CMD", "").strip()
     if not raw_cmd:
         return None, ""
@@ -120,12 +138,15 @@ def _resolve_from_env_cmd() -> tuple[list[str] | None, str]:
 
     token_path = _command_from_path(Path(parsed[0].strip('"')))
     if token_path:
-        return [*token_path, *parsed[1:]], "env:ORN_CMD(cmd+path)"
+        return ResolvedOrnCommand(
+            command=[*token_path.command, *parsed[1:]],
+            workdir=token_path.workdir,
+        ), "env:ORN_CMD(cmd+path)"
 
-    return parsed, "env:ORN_CMD"
+    return ResolvedOrnCommand(command=parsed), "env:ORN_CMD"
 
 
-def _resolve_from_env_bin() -> tuple[list[str] | None, str]:
+def _resolve_from_env_bin() -> tuple[ResolvedOrnCommand | None, str]:
     raw_bin = os.environ.get("ORN_BIN", "").strip()
     if not raw_bin:
         return None, ""
@@ -136,7 +157,7 @@ def _resolve_from_env_bin() -> tuple[list[str] | None, str]:
 
     resolved = shutil.which(raw_bin)
     if resolved:
-        return [resolved], "env:ORN_BIN(which)"
+        return ResolvedOrnCommand(command=[resolved], workdir=str(Path(resolved).parent)), "env:ORN_BIN(which)"
     return None, ""
 
 
@@ -147,12 +168,12 @@ def _candidate_bases() -> list[Path]:
     return bases
 
 
-def _resolve_from_common_paths() -> tuple[list[str] | None, str]:
+def _resolve_from_common_paths() -> tuple[ResolvedOrnCommand | None, str]:
     names = ("orn", "orn.exe")
     for name in names:
         found = shutil.which(name)
         if found:
-            return [found], f"path:{name}"
+            return ResolvedOrnCommand(command=[found], workdir=str(Path(found).parent)), f"path:{name}"
 
     rel_candidates = [
         Path("ORN") / "orn",
@@ -169,13 +190,16 @@ def _resolve_from_common_paths() -> tuple[list[str] | None, str]:
             if not candidate.exists():
                 continue
             if candidate.suffix.lower() == ".py":
-                return [sys.executable, str(candidate)], f"scan:{candidate}"
-            return [str(candidate)], f"scan:{candidate}"
+                return ResolvedOrnCommand(
+                    command=[sys.executable, str(candidate)],
+                    workdir=_infer_workdir_for_path(candidate),
+                ), f"scan:{candidate}"
+            return ResolvedOrnCommand(command=[str(candidate)], workdir=str(candidate.parent)), f"scan:{candidate}"
 
     return None, ""
 
 
-def _resolve_orn_command() -> tuple[list[str] | None, str]:
+def _resolve_orn_command() -> tuple[ResolvedOrnCommand | None, str]:
     for resolver in (_resolve_from_env_cmd, _resolve_from_env_bin, _resolve_from_common_paths):
         command, source = resolver()
         if command:
@@ -183,14 +207,15 @@ def _resolve_orn_command() -> tuple[list[str] | None, str]:
     return None, ""
 
 
-def _register_orn_location(command: list[str], source: str) -> None:
+def _register_orn_location(command: ResolvedOrnCommand, source: str) -> None:
     reg_dir = Path(".doxoade")
     reg_dir.mkdir(parents=True, exist_ok=True)
     reg_file = reg_dir / "orn_registry.json"
     payload = {
         "updated_at_unix": int(time.time()),
         "source": source,
-        "command": command,
+        "command": command.command,
+        "workdir": command.workdir,
     }
     reg_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
@@ -206,8 +231,8 @@ def dispatch_check_errors_to_orn(*, path: str, summary: dict[str, int], findings
     if total_errors <= 0:
         return [BridgeAttempt(mode="skipped", ok=True, detail="sem erros")]
 
-    orn_cmd, source = _resolve_orn_command()
-    if not orn_cmd:
+    orn_target, source = _resolve_orn_command()
+    if not orn_target:
         return [
             BridgeAttempt(
                 mode="unavailable",
@@ -216,18 +241,19 @@ def dispatch_check_errors_to_orn(*, path: str, summary: dict[str, int], findings
             )
         ]
 
-    _register_orn_location(orn_cmd, source)
-    attempts.append(BridgeAttempt(mode="locator", ok=True, detail=f"{source} -> {' '.join(orn_cmd)}"))
+    _register_orn_location(orn_target, source)
+    wd = f" (cwd={orn_target.workdir})" if orn_target.workdir else ""
+    attempts.append(BridgeAttempt(mode="locator", ok=True, detail=f"{source} -> {' '.join(orn_target.command)}{wd}"))
 
     prompt = _build_prompt(path, summary, findings)
     timeout_s = int(os.environ.get("DOXOADE_ORN_TIMEOUT", "25"))
 
-    server_cmd = [*orn_cmd, "server", "ask", prompt, "--tokens", "220"]
-    ok, detail = _run_orn_cli(server_cmd, timeout_s)
+    server_cmd = [*orn_target.command, "server", "ask", prompt, "--tokens", "220"]
+    ok, detail = _run_orn_cli(server_cmd, timeout_s, workdir=orn_target.workdir)
     attempts.append(BridgeAttempt(mode="server", ok=ok, detail=detail))
 
-    direct_cmd = [*orn_cmd, "think", prompt, "--direct", "--tokens", "220"]
-    ok, detail = _run_orn_cli(direct_cmd, timeout_s)
+    direct_cmd = [*orn_target.command, "think", prompt, "--direct", "--tokens", "220"]
+    ok, detail = _run_orn_cli(direct_cmd, timeout_s, workdir=orn_target.workdir)
     attempts.append(BridgeAttempt(mode="direct", ok=ok, detail=detail))
 
     _persist_bridge_log(path=path, summary=summary, attempts=attempts)
