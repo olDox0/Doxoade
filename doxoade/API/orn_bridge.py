@@ -109,6 +109,13 @@ def _command_from_path(path: Path) -> ResolvedOrnCommand | None:
     if not p.exists():
         return None
 
+    if p.name.lower() == "cli.py" and p.parent.name.lower() == "engine":
+        project_root = p.parent.parent
+        return ResolvedOrnCommand(
+            command=[sys.executable, "-m", "engine.cli"],
+            workdir=str(project_root),
+        )
+
     if p.suffix.lower() == ".py":
         return ResolvedOrnCommand(
             command=[sys.executable, str(p)],
