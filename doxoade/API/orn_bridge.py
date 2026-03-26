@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
 import socket
@@ -35,29 +36,25 @@ def _bridge_enabled() -> bool:
 
 def _build_prompt(path: str, summary: dict[str, int], findings: list[dict[str, Any]]) -> str:
     top_findings = findings[:3]
-    findings_text = []
+    findings_text: list[str] = []
     for item in top_findings:
-        findings_text.append(
-            {
-                "severity": item.get("severity"),
-                "category": item.get("category"),
-                "file": item.get("file"),
-                "line": item.get("line"),
-                "message": str(item.get("message", ""))[:180],
-            }
-        )
+        file_name = Path(str(item.get("file") or "")).name or Path(path).name
+        line = item.get("line") or "?"
+        raw = str(item.get("message", "")).strip()
+        err_match = re.search(r"(SyntaxError|TypeError|ValueError|NameError|ImportError|ModuleNotFoundError)", raw)
+        err_name = err_match.group(1) if err_match else (str(item.get("category") or "Erro") or "Erro")
+        snippet = raw.replace("\n", " ")
+        if len(snippet) > 160:
+            snippet = snippet[:160] + "..."
+        findings_text.append(f'{err_name} em {file_name} linha {line}: "{snippet}"')
 
-    payload = {
-        "source": "doxoade-check",
-        "path": path,
-        "summary": summary,
-        "findings": findings_text,
-        "timestamp": int(time.time()),
-    }
+    findings_block = "\n".join(f"- {x}" for x in findings_text) if findings_text else "- sem detalhes"
     return (
-        "ORN, analise o diagnóstico do doxoade check e retorne plano curto de correção priorizado.\n"
-        "Responda em português com passos objetivos.\n"
-        f"DADOS_JSON: {json.dumps(payload, ensure_ascii=False)}"
+        "ORN, analise os erros abaixo e retorne plano curto de correção priorizado.\n"
+        "Formato da resposta: causa raiz + patch objetivo por item.\n"
+        f"Alvo: {Path(path).name}\n"
+        f"Resumo: critical={summary.get('critical', 0)} errors={summary.get('errors', 0)}\n"
+        f"Erros:\n{findings_block}"
     )
 
 
