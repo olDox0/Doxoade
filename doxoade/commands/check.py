@@ -77,7 +77,7 @@ def check(ctx, path: str, **kwargs):
 
         _render_output(state, kwargs)
 
-        if state.summary.get('critical', 0) > 0 or state.summary.get('errors', 0) > 0:
+        if _has_blocking_findings(state):
             from ..API.orn_bridge import dispatch_check_errors_to_orn
             attempts = dispatch_check_errors_to_orn(
                 path=state.target_path,
@@ -92,7 +92,7 @@ def check(ctx, path: str, **kwargs):
     from ..tools.streamer import ufs 
     ufs.clear() # Limpeza de Memória
     import sys
-    if state.summary['critical'] > 0 or state.summary['errors'] > 0: sys.exit(1)
+    if _has_blocking_findings(state): sys.exit(1)
 
 
 def _render_output(state: CheckState, kwargs: dict):
@@ -120,6 +120,23 @@ def _apply_modular_fixes(state, fix_specify):
     """Integra o AutoFixer ao novo CheckState."""
     from .check_systems.check_fixer import apply_fixes_to_state
     apply_fixes_to_state(state, fix_specify)
+
+
+def _has_blocking_findings(state: CheckState) -> bool:
+    """Define se o check deve falhar/acionar ORN.
+
+    Compatibilidade: alguns findings de sintaxe podem não refletir no sumário legado.
+    """
+    if state.summary.get('critical', 0) > 0 or state.summary.get('errors', 0) > 0:
+        return True
+
+    for finding in state.findings:
+        sev = str(finding.get('severity', '')).upper()
+        if sev in {'ERROR', 'CRITICAL'}:
+            return True
+        if str(finding.get('category', '')).upper() == 'SYNTAX':
+            return True
+    return False
 
 
 def _get_probe_path(probe_name):
