@@ -34,7 +34,7 @@ def _bridge_enabled() -> bool:
 
 
 def _build_prompt(path: str, summary: dict[str, int], findings: list[dict[str, Any]]) -> str:
-    top_findings = findings[:6]
+    top_findings = findings[:3]
     findings_text = []
     for item in top_findings:
         findings_text.append(
@@ -43,7 +43,7 @@ def _build_prompt(path: str, summary: dict[str, int], findings: list[dict[str, A
                 "category": item.get("category"),
                 "file": item.get("file"),
                 "line": item.get("line"),
-                "message": item.get("message"),
+                "message": str(item.get("message", ""))[:180],
             }
         )
 
@@ -79,8 +79,14 @@ def _run_orn_cli(command: list[str], timeout_s: int, workdir: str | None = None)
         return False, err or f"exit={proc.returncode}"
 
     out = (proc.stdout or "").strip()
+    err_out = (proc.stderr or "").strip()
+    if not out and err_out:
+        low = err_out.lower()
+        if "traceback" in low or "error" in low:
+            return False, err_out[:180]
+        return True, err_out[:180]
     if not out:
-        return False, "sem stdout"
+        return False, "sem stdout/stderr"
 
     # Evita falso-positivo de sucesso com retorno genérico.
     if out.lower() == "ok":
@@ -304,12 +310,15 @@ def dispatch_check_errors_to_orn(*, path: str, summary: dict[str, int], findings
 
     prompt = _build_prompt(path, summary, findings)
     timeout_s = int(os.environ.get("DOXOADE_ORN_TIMEOUT", "25"))
+    max_tokens = int(os.environ.get("DOXOADE_ORN_MAX_TOKENS", "96"))
 
     # 1) canal servidor: TCP direto (estado real do servidor).
-    ok, detail = _query_orn_server_tcp(prompt, max_tokens=220, timeout_s=timeout_s)
+    ok, detail = _query_orn_server_tcp(prompt, max_tokens=max_tokens, timeout_s=timeout_s)
+    if (not ok) and ("exceed context window" in detail.lower() or "context window" in detail.lower()):
+        ok, detail = _query_orn_server_tcp(prompt, max_tokens=48, timeout_s=timeout_s)
     attempts.append(BridgeAttempt(mode="server", ok=ok, detail=detail))
 
-    direct_cmd = [*orn_target.command, "think", prompt, "--direct", "--tokens", "220"]
+    direct_cmd = [*orn_target.command, "think", prompt, "--direct", "--tokens", str(max_tokens)]
     ok, detail = _run_orn_cli(direct_cmd, timeout_s, workdir=orn_target.workdir)
     attempts.append(BridgeAttempt(mode="direct", ok=ok, detail=detail))
 
