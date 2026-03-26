@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -72,6 +74,88 @@ def _run_orn_cli(command: list[str], timeout_s: int) -> tuple[bool, str]:
     return True, out.splitlines()[-1] if out else "ok"
 
 
+def _resolve_from_env_cmd() -> tuple[list[str] | None, str]:
+    raw_cmd = os.environ.get("ORN_CMD", "").strip()
+    if not raw_cmd:
+        return None, ""
+    try:
+        parsed = shlex.split(raw_cmd)
+    except ValueError:
+        return None, ""
+    return (parsed if parsed else None), "env:ORN_CMD"
+
+
+def _resolve_from_env_bin() -> tuple[list[str] | None, str]:
+    raw_bin = os.environ.get("ORN_BIN", "").strip()
+    if not raw_bin:
+        return None, ""
+
+    if Path(raw_bin).exists():
+        if raw_bin.lower().endswith(".py"):
+            return [sys.executable, raw_bin], "env:ORN_BIN(py)"
+        return [raw_bin], "env:ORN_BIN(path)"
+
+    resolved = shutil.which(raw_bin)
+    if resolved:
+        return [resolved], "env:ORN_BIN(which)"
+    return None, ""
+
+
+def _candidate_bases() -> list[Path]:
+    bases = [Path.cwd()]
+    for parent in Path.cwd().parents:
+        bases.append(parent)
+    return bases
+
+
+def _resolve_from_common_paths() -> tuple[list[str] | None, str]:
+    names = ("orn", "orn.exe")
+    for name in names:
+        found = shutil.which(name)
+        if found:
+            return [found], f"path:{name}"
+
+    rel_candidates = [
+        Path("ORN") / "orn",
+        Path("ORN") / "orn.exe",
+        Path("ORN") / "orn.py",
+        Path("orn.py"),
+        Path("engine") / "cli.py",
+        Path("ORN") / "engine" / "cli.py",
+    ]
+
+    for base in _candidate_bases():
+        for rel in rel_candidates:
+            candidate = (base / rel).resolve()
+            if not candidate.exists():
+                continue
+            if candidate.suffix.lower() == ".py":
+                return [sys.executable, str(candidate)], f"scan:{candidate}"
+            return [str(candidate)], f"scan:{candidate}"
+
+    return None, ""
+
+
+def _resolve_orn_command() -> tuple[list[str] | None, str]:
+    for resolver in (_resolve_from_env_cmd, _resolve_from_env_bin, _resolve_from_common_paths):
+        command, source = resolver()
+        if command:
+            return command, source
+    return None, ""
+
+
+def _register_orn_location(command: list[str], source: str) -> None:
+    reg_dir = Path(".doxoade")
+    reg_dir.mkdir(parents=True, exist_ok=True)
+    reg_file = reg_dir / "orn_registry.json"
+    payload = {
+        "updated_at_unix": int(time.time()),
+        "source": source,
+        "command": command,
+    }
+    reg_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def dispatch_check_errors_to_orn(*, path: str, summary: dict[str, int], findings: list[dict[str, Any]]) -> list[BridgeAttempt]:
     """Encaminha erros do check ao ORN em dois modos: servidor e direto."""
     attempts: list[BridgeAttempt] = []
@@ -83,18 +167,27 @@ def dispatch_check_errors_to_orn(*, path: str, summary: dict[str, int], findings
     if total_errors <= 0:
         return [BridgeAttempt(mode="skipped", ok=True, detail="sem erros")]
 
-    orn_bin = shutil.which(os.environ.get("ORN_BIN", "orn"))
-    if not orn_bin:
-        return [BridgeAttempt(mode="unavailable", ok=False, detail="binário 'orn' não encontrado")]
+    orn_cmd, source = _resolve_orn_command()
+    if not orn_cmd:
+        return [
+            BridgeAttempt(
+                mode="unavailable",
+                ok=False,
+                detail="ORN não localizado (defina ORN_CMD ou ORN_BIN, ou deixe 'orn' no PATH)",
+            )
+        ]
+
+    _register_orn_location(orn_cmd, source)
+    attempts.append(BridgeAttempt(mode="locator", ok=True, detail=f"{source} -> {' '.join(orn_cmd)}"))
 
     prompt = _build_prompt(path, summary, findings)
     timeout_s = int(os.environ.get("DOXOADE_ORN_TIMEOUT", "25"))
 
-    server_cmd = [orn_bin, "server", "ask", prompt, "--tokens", "220"]
+    server_cmd = [*orn_cmd, "server", "ask", prompt, "--tokens", "220"]
     ok, detail = _run_orn_cli(server_cmd, timeout_s)
     attempts.append(BridgeAttempt(mode="server", ok=ok, detail=detail))
 
-    direct_cmd = [orn_bin, "think", prompt, "--direct", "--tokens", "220"]
+    direct_cmd = [*orn_cmd, "think", prompt, "--direct", "--tokens", "220"]
     ok, detail = _run_orn_cli(direct_cmd, timeout_s)
     attempts.append(BridgeAttempt(mode="direct", ok=ok, detail=detail))
 
