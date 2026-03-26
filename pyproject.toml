@@ -40,7 +40,7 @@ ignore = [ "commands_test/", "tests/", "regression_tests/", "Canone_Test/", "Ver
 exclude_categories = ["STYLE", "DOCS"]
 
 [tool.setuptools]
-packages = ["doxoade", "doxoade.commands", "doxoade.tools", "doxoade.probes", "doxoade.diagnostic"]
+packages = ["doxoade", "doxoade.API", "doxoade.commands", "doxoade.tools", "doxoade.probes", "doxoade.diagnostic"]
 
 [tool.pytest.ini_options]
 addopts = "-v"

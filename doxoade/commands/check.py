@@ -77,10 +77,22 @@ def check(ctx, path: str, **kwargs):
 
         _render_output(state, kwargs)
 
+        if state.summary.get('critical', 0) > 0 or state.summary.get('errors', 0) > 0:
+            from ..API.orn_bridge import dispatch_check_errors_to_orn
+            attempts = dispatch_check_errors_to_orn(
+                path=state.target_path,
+                summary=state.summary,
+                findings=state.findings,
+            )
+            if kwargs.get('out_fmt') == 'text':
+                for item in attempts:
+                    status = 'OK' if item.ok else 'FALHA'
+                    click.echo(f"[ORN-BRIDGE:{item.mode}] {status} - {item.detail}")
+
     from ..tools.streamer import ufs 
     ufs.clear() # Limpeza de Memória
     import sys
-    if state.summary['critical'] > 0: sys.exit(1)
+    if state.summary['critical'] > 0 or state.summary['errors'] > 0: sys.exit(1)
 
 
 def _render_output(state: CheckState, kwargs: dict):
