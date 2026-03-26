@@ -7,6 +7,7 @@ import json
 import os
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -79,6 +80,45 @@ def _run_orn_cli(command: list[str], timeout_s: int, workdir: str | None = None)
 
     out = (proc.stdout or "").strip()
     return True, out.splitlines()[-1] if out else "ok"
+
+
+def _query_orn_server_tcp(prompt: str, max_tokens: int, timeout_s: int) -> tuple[bool, str]:
+    """Consulta ORN server por TCP direto (compatível com engine/tools/server_client.py)."""
+    host = os.environ.get("ORN_SERVER_HOST", "127.0.0.1")
+    port = int(os.environ.get("ORN_SERVER_PORT", "8371"))
+    payload = (json.dumps({"prompt": prompt, "max_tokens": max_tokens}) + "\n").encode("utf-8")
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(max(2.0, float(timeout_s)))
+            s.connect((host, port))
+            s.sendall(payload)
+
+            data = bytearray()
+            while True:
+                chunk = s.recv(65536)
+                if not chunk:
+                    break
+                data.extend(chunk)
+                if data.endswith(b"\n"):
+                    break
+    except OSError as exc:
+        return False, f"tcp:{host}:{port} {exc}"
+
+    try:
+        resp = json.loads(data.decode("utf-8").strip())
+    except Exception as exc:
+        return False, f"tcp resposta inválida: {exc}"
+
+    if not isinstance(resp, dict):
+        return False, "tcp resposta não-dict"
+    if resp.get("error"):
+        return False, str(resp.get("error"))
+
+    output = str(resp.get("output", "")).strip()
+    if not output:
+        return True, "ok"
+    return True, output[:160].replace("\n", " ")
 
 
 def _infer_workdir_for_path(path: Path) -> str | None:
@@ -255,8 +295,11 @@ def dispatch_check_errors_to_orn(*, path: str, summary: dict[str, int], findings
     prompt = _build_prompt(path, summary, findings)
     timeout_s = int(os.environ.get("DOXOADE_ORN_TIMEOUT", "25"))
 
-    server_cmd = [*orn_target.command, "server", "ask", prompt, "--tokens", "220"]
-    ok, detail = _run_orn_cli(server_cmd, timeout_s, workdir=orn_target.workdir)
+    # 1) canal servidor: tenta TCP direto primeiro (rápido, sem overhead de CLI)
+    ok, detail = _query_orn_server_tcp(prompt, max_tokens=220, timeout_s=timeout_s)
+    if not ok:
+        server_cmd = [*orn_target.command, "server", "ask", prompt, "--tokens", "220"]
+        ok, detail = _run_orn_cli(server_cmd, timeout_s, workdir=orn_target.workdir)
     attempts.append(BridgeAttempt(mode="server", ok=ok, detail=detail))
 
     direct_cmd = [*orn_target.command, "think", prompt, "--direct", "--tokens", "220"]
