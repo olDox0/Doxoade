@@ -52,8 +52,8 @@ def _build_prompt(path: str, summary: dict[str, int], findings: list[dict[str, A
 
     findings_block = "\n".join(f"- {x}" for x in findings_text) if findings_text else "- sem detalhes"
     return (
-        "ORN, responda de forma direta e curta.\n"
-        "Formato: 1) causa raiz 2) patch exato.\n"
+        "ORN, responda com sugestão de solução direta.\n"
+        "Formato obrigatório: 1) causa raiz 2) patch exato (o que editar).\n"
         f"Alvo: {Path(path).name}\n"
         f"Resumo: critical={summary.get('critical', 0)} errors={summary.get('errors', 0)}\n"
         f"Erros:\n{findings_block}"
@@ -72,6 +72,35 @@ def _line_context(file_path: Path, line: int | None) -> str:
     curr_line = lines[idx].strip() if idx >= 0 and idx < len(lines) else ""
     next_line = lines[idx + 1].strip() if idx + 1 < len(lines) else ""
     return f' | contexto: prev="{prev_line[:120]}" curr="{curr_line[:120]}" next="{next_line[:120]}"'
+
+
+def _fallback_solution(findings: list[dict[str, Any]]) -> str:
+    if not findings:
+        return "Sugestão: revisar o arquivo alvo e corrigir o trecho apontado pelo check."
+    f = findings[0]
+    file_name = Path(str(f.get("file") or "")).name or "arquivo"
+    line = f.get("line") or "?"
+    msg = str(f.get("message") or "")
+    curr_hint = _line_context(Path(str(f.get("file") or "")), int(line) if str(line).isdigit() else None)
+    if "unexpected indent" in msg.lower():
+        return (
+            f"Sugestão: remover a indentação extra em {file_name}:{line}. "
+            f"Garanta que `def` esteja alinhado ao decorator imediatamente acima.{curr_hint}"
+        )
+    return f"Sugestão: corrigir {file_name}:{line} com base no erro reportado: {msg[:140]}."
+
+
+def _ensure_solution_text(text: str, findings: list[dict[str, Any]]) -> str:
+    t = (text or "").strip()
+    if not t:
+        return _fallback_solution(findings)
+    low = t.lower()
+    generic = ("patch exato: syntaxerror" in low) or ("causa raiz: syntaxerror" in low and len(t) < 120)
+    if generic:
+        return _fallback_solution(findings)
+    if "sugest" not in low and "patch" not in low:
+        return f"Sugestão: {t}"
+    return t
 
 
 def _run_orn_cli(command: list[str], timeout_s: int, workdir: str | None = None) -> tuple[bool, str]:
@@ -329,10 +358,14 @@ def dispatch_check_errors_to_orn(*, path: str, summary: dict[str, int], findings
     ok, detail = _query_orn_server_tcp(prompt, max_tokens=max_tokens, timeout_s=timeout_s)
     if (not ok) and ("exceed context window" in detail.lower() or "context window" in detail.lower()):
         ok, detail = _query_orn_server_tcp(prompt, max_tokens=48, timeout_s=timeout_s)
+    if ok:
+        detail = _ensure_solution_text(detail, findings)
     attempts.append(BridgeAttempt(mode="server", ok=ok, detail=detail))
 
     direct_cmd = [*orn_target.command, "think", prompt, "--direct", "--tokens", str(max_tokens)]
     ok, detail = _run_orn_cli(direct_cmd, timeout_s, workdir=orn_target.workdir)
+    if ok:
+        detail = _ensure_solution_text(detail, findings)
     attempts.append(BridgeAttempt(mode="direct", ok=ok, detail=detail))
 
     _persist_bridge_log(path=path, summary=summary, attempts=attempts)
