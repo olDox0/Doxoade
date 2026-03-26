@@ -95,7 +95,12 @@ def _ensure_solution_text(text: str, findings: list[dict[str, Any]]) -> str:
     if not t:
         return _fallback_solution(findings)
     low = t.lower()
-    generic = ("patch exato: syntaxerror" in low) or ("causa raiz: syntaxerror" in low and len(t) < 120)
+    generic = (
+        ("patch exato: syntaxerror" in low)
+        or ("causa raiz: syntaxerror" in low and len(t) < 120)
+        or ("```" in t)  # evita sugestão genérica de reescrever bloco inteiro
+        or ("pass" in low and "def " in low)
+    )
     if generic:
         return _fallback_solution(findings)
     if "sugest" not in low and "patch" not in low:
