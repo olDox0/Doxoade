@@ -90,8 +90,10 @@ def _query_orn_server_tcp(prompt: str, max_tokens: int, timeout_s: int) -> tuple
 
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(max(2.0, float(timeout_s)))
+            # Timeout curto só para conectar; leitura pode levar mais sem estourar.
+            s.settimeout(max(1.0, min(5.0, float(timeout_s))))
             s.connect((host, port))
+            s.settimeout(None)
             s.sendall(payload)
 
             data = bytearray()
