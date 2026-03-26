@@ -5,6 +5,8 @@ import click
 from .check_systems.check_state import CheckState
 from .check_systems.check_engine import run_check_logic
 
+from doxoade.tools.doxcolors import Fore
+
 __all__ = ['check', 'run_check_logic']
 @click.command('check')
 @click.argument('path',                           type=click.Path(exists=True), default='.')
@@ -88,7 +90,7 @@ def check(ctx, path: str, **kwargs):
             if kwargs.get('out_fmt') == 'text':
                 for item in attempts:
                     status = 'OK' if item.ok else 'FALHA'
-                    click.echo(f"[ORN-BRIDGE:{item.mode}] {status} - {item.detail}")
+                    click.echo(Fore.CYAN + f"[ORN-BRIDGE:{item.mode}] {status} - {item.detail}")
 
     from ..tools.streamer import ufs 
     ufs.clear() # Limpeza de Memória

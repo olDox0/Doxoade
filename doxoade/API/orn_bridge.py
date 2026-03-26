@@ -52,8 +52,7 @@ def _build_prompt(path: str, summary: dict[str, int], findings: list[dict[str, A
 
     findings_block = "\n".join(f"- {x}" for x in findings_text) if findings_text else "- sem detalhes"
     return (
-        "ORN, responda com sugestão de solução direta.\n"
-        "Formato obrigatório: 1) causa raiz 2) patch exato (o que editar).\n"
+        "ORN, responda com sugestão de solução direta com codigo.\n"
         f"Alvo: {Path(path).name}\n"
         f"Resumo: critical={summary.get('critical', 0)} errors={summary.get('errors', 0)}\n"
         f"Erros:\n{findings_block}"
@@ -84,10 +83,10 @@ def _fallback_solution(findings: list[dict[str, Any]]) -> str:
     curr_hint = _line_context(Path(str(f.get("file") or "")), int(line) if str(line).isdigit() else None)
     if "unexpected indent" in msg.lower():
         return (
-            f"Sugestão: remover a indentação extra em {file_name}:{line}. "
-            f"Garanta que `def` esteja alinhado ao decorator imediatamente acima.{curr_hint}"
+            f"Sugestão: Veja {file_name}:{line}. "
+            f"Analise bem a indentação.{curr_hint}"
         )
-    return f"Sugestão: corrigir {file_name}:{line} com base no erro reportado: {msg[:140]}."
+    return f"Codigo: {file_name}:{line}  -  {msg[:140]}."
 
 
 def _ensure_solution_text(text: str, findings: list[dict[str, Any]]) -> str:
