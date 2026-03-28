@@ -82,6 +82,25 @@ for _doxo_base in[_doxo_path(__file__).resolve(), *_doxo_path(__file__).resolve(
     _doxo_project_root = str(_doxo_base)
     break
 
+# 0. Lazy import de doxoade (adia exec de doxoade/__init__.py até primeiro acesso)
+#    Deve rodar antes do MetaFinder para que o proxy já esteja em sys.modules
+#    quando o código do host fizer `import doxoade`.
+#    install_vulcan=False: MetaFinder já é instalado no step 1 via runtime.py.
+try:
+    if _doxo_project_root and "doxoade" not in _doxo_sys.modules:
+        _doxo_el_src = _doxo_path(_doxo_project_root) / ".doxoade" / "vulcan" / "embedded_lazy.py"
+        if _doxo_el_src.exists():
+            _doxo_el_spec = _doxo_importlib_util.spec_from_file_location(
+                "_doxoade_vulcan_embedded_lazy", str(_doxo_el_src)
+            )
+            if _doxo_el_spec and _doxo_el_spec.loader:
+                _doxo_el_mod = _doxo_importlib_util.module_from_spec(_doxo_el_spec)
+                _doxo_sys.modules["_doxoade_vulcan_embedded_lazy"] = _doxo_el_mod
+                _doxo_el_spec.loader.exec_module(_doxo_el_mod)
+                _doxo_el_mod.install(install_vulcan=False)
+except Exception:
+    pass
+
 # 1. Instala MetaFinder primeiro
 if callable(_doxo_install_meta_finder) and _doxo_project_root:
     _doxo_t = _doxo_time.monotonic()
@@ -234,7 +253,7 @@ def _write_safe_runtime(project_root: Path) -> Path:
     (vulcan_dir / "__init__.py").write_text("# doxoade vulcan marker\n", encoding="utf-8")
 
     vulcan_src = Path(__file__).resolve().parents[1] / "tools" / "vulcan"
-    for fname in ("runtime.py", "opt_cache.py", "lib_optimizer.py", "lazy_loader.py",):
+    for fname in ("runtime.py", "opt_cache.py", "lib_optimizer.py", "lazy_loader.py", "embedded_lazy.py",):
         src_file = vulcan_src / fname
         if src_file.exists():
             (vulcan_dir / fname).write_text(src_file.read_text(encoding="utf-8"), encoding="utf-8")

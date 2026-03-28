@@ -20,7 +20,7 @@ def get_memory_composition(limit: int = 20) -> list:
         try:
             obj_type = type(obj).__name__
             # Ignora os módulos e funções do próprio interpretador para focar nos dados
-            if obj_type in ('module', 'function', 'builtin_function_or_method', 'wrapper_descriptor', 'method_descriptor'):
+            if obj_type in ('module', 'function', 'builtin_function_or_method', 'wrapper_descriptor', 'method_descriptor', 'frame', 'code'):
                 continue
             
             stats[obj_type]["count"] += 1
@@ -44,13 +44,15 @@ def get_allocation_tracebacks(snapshot: tracemalloc.Snapshot, limit: int = 5) ->
     """Obtém a árvore genealógica (Call Chain) das maiores alocações."""
     top_stats = snapshot.statistics('traceback')
     
-    results = []
+    results =[]
     for stat in top_stats[:limit]:
         trace_chain =[]
         for frame in stat.traceback:
             fname = frame.filename
-            # Filtra o próprio sistema de importação do Python para limpar a saída
-            if "<frozen" in fname or "importlib" in fname:
+            norm_fname = fname.lower().replace('\\', '/')
+            
+            # Filtra o próprio sistema de importação do Python e a sonda do Doxoade
+            if "<frozen" in fname or "importlib" in fname or "doxoade" in norm_fname or "<sandbox>" in fname:
                 continue
                 
             code_line = linecache.getline(fname, frame.lineno).strip()
