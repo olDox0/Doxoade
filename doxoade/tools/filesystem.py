@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 # doxoade/tools/filesystem.py
 import os
-# [DOX-UNUSED] import sys
-import toml
 from pathlib import Path
-# [DOX-UNUSED] from doxoade.tools.doxcolors import Fore
+
+try:
+    import tomllib as toml  # Python 3.11+
+except ModuleNotFoundError:
+    import toml  # fallback
 
 # Fonte Única da Verdade para Exclusões (OSL-17)
 SYSTEM_IGNORES = {
@@ -115,15 +117,18 @@ def collect_files_to_analyze(config, cmd_line_ignore=None):
     files_to_check = []
     abs_search_path = os.path.abspath(search_path)
 
+    VALID_EXTS = ('.py', '.c', '.cpp', '.h', '.hpp')
+
     for root, dirs, files in os.walk(abs_search_path, topdown=True):
-        dirs[:] = [d for d in dirs if not d.startswith('.') and d.lower() not in folders_to_ignore]
+        dirs[:] =[d for d in dirs if not d.startswith('.') and d.lower() not in folders_to_ignore]
         
         rel_root = os.path.relpath(root, abs_search_path)
         if any(part.lower() in folders_to_ignore for part in rel_root.split(os.sep)):
             continue
 
         for file in files:
-            if file.endswith('.py'):
+            # Substitua o .endswith('.py') por:
+            if file.endswith(VALID_EXTS):
                 files_to_check.append(os.path.join(root, file))
                 
     return files_to_check
@@ -143,16 +148,14 @@ def is_ignored(path: str, project_root: str, extra_patterns: set = None) -> bool
     return any(part in combined_ignores for part in parts)
 
 def collect_project_files(search_path: str, project_root: str, extra_ignores: set = None):
-    """
-    Iterador Industrial de Arquivos (PASC-6.4).
-    Otimiza o os.walk cortando diretórios ignorados na raiz da recursão.
-    """
+    """Iterador Industrial de Arquivos (PASC-6.4)."""
     combined_ignores = SYSTEM_IGNORES.union(extra_ignores or set())
+    VALID_EXTS = ('.py', '.c', '.cpp', '.h', '.hpp')
     
     for root, dirs, files in os.walk(search_path, topdown=True):
-        # Otimização Crítica: Modificar dirs in-place impede o walk de entrar nelas
-        dirs[:] = [d for d in dirs if d.lower() not in combined_ignores and not d.startswith('.')]
+        dirs[:] =[d for d in dirs if d.lower() not in combined_ignores and not d.startswith('.')]
         
         for file in files:
-            if file.endswith('.py'):
+            # Substitua o .endswith('.py') por:
+            if file.endswith(VALID_EXTS):
                 yield os.path.join(root, file)

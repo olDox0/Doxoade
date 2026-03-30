@@ -101,6 +101,10 @@ def _analyze_function_flow(tree, content):
 
 def analyze_file_structure(file_path):
     """Analisa a estrutura via AST usando o buffer do UFS."""
+    
+    if file_path.endswith(('.c', '.cpp', '.h', '.hpp')):
+        return {'functions':[]} # Fallback seguro
+        
     lines = ufs.get_lines(file_path)
     if not lines: return {}
     

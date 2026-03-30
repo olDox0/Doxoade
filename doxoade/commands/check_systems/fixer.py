@@ -37,11 +37,10 @@ class AutoFixer:
                 return self._save_file(abs_path, new_lines)
             return False
         except Exception as e:
-            import sys as dox_exc_sys
-            _, exc_obj, exc_tb = dox_exc_sys.exc_info()
-            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            line_number = exc_tb.tb_lineno
-            print(f"\033[0m \033[1m Filename: {fname}   ■ Line: {line_number} \033[31m ■ Exception type: {e} ■ Exception value: {exc_obj} \033[0m")
+            from doxoade.tools.error_info import handle_error
+            handle_error(e, context=f"AutoFixer.apply_fix ({os.path.basename(file_path)}:{line_number})", debug=True)
+            return False
+
     def _apply_remove_f_prefix(self, lines, idx):
         line = lines[idx]
         new_line = re.sub(r'f(["\'])', r'\1', line, count=1)
@@ -136,9 +135,6 @@ class AutoFixer:
             with open(file_path, 'w', encoding='utf-8') as f: f.writelines(lines)
             return True
         except IOError as e:
-            import sys as dox_exc_sys
-            _, exc_obj, exc_tb = dox_exc_sys.exc_info()
-            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            line_number = exc_tb.tb_lineno
-            print(f"\033[0m \033[1m Filename: {fname}   ■ Line: {line_number} \033[31m ■ Exception type: {e} ■ Exception value: {exc_obj} \033[0m")
+            from doxoade.tools.error_info import handle_error
+            handle_error(e, context=f"AutoFixer._save_file ({os.path.basename(file_path)})", debug=True)
             return False

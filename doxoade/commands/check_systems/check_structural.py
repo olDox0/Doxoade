@@ -18,7 +18,9 @@ _LEVELS = {
 
 def analyze_structural_risk(state, io_manager, **kwargs):
     """Avalia risco estrutural e injeta achado no estado do check."""
-    files = io_manager.resolve_files(kwargs.get("target_files"))
+    # Filtra rigorosamente apenas para Python (.py)
+    files =[f for f in io_manager.resolve_files(kwargs.get("target_files")) if f.endswith('.py')]
+    
     findings = defaultdict(int)
     per_file = defaultdict(lambda: defaultdict(int))
 

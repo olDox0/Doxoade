@@ -19,6 +19,7 @@ dist/
 
 # --- ARQUIVOS SENSÍVEIS E DE USUÁRIO (NUNCA COMPARTILHAR) ---
 chief_dossier.json
+chief_dossier_llm.md
 doxoade_report.json
 Exemplo/
 tmp/

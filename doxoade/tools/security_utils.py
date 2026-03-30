@@ -41,7 +41,7 @@ def calculate_integrity_hash(root_path: Path) -> str:
             import sys as exc_sys
             from traceback import print_tb as exc_trace
             _, exc_obj, exc_tb = exc_sys.exc_info()
-            print(f"\033[31m ■ Exception type: {e} ■ Exception value: {exc_obj}\n")
+            print(f"\033[31m ■ Exception type: {e} ■ Exception value: {exc_obj}\033[0\n")
             exc_trace(exc_tb)
             continue
             
@@ -79,7 +79,7 @@ def simulate_taint_analysis(file_path: str) -> List[Dict]:
         import sys as exc_sys
         from traceback import print_tb as exc_trace
         _, exc_obj, exc_tb = exc_sys.exc_info()
-        print(f"\033[31m ■ Exception type: {e} ■ Exception value: {exc_obj}\n")
+        print(f"\033[31m ■ Exception type: {e} ■ Exception value: {exc_obj}\033[0m\n")
         exc_trace(exc_tb)
         logging.debug(f"\nTaint Analysis Skip {file_path}: {e}")
         return []
@@ -185,6 +185,8 @@ def restricted_safe_exec(code_str: str, globals_dict: dict = None, allow_imports
             _AST_VALIDATION_CACHE[cache_key] = compiled
 
         # 6. Execução final do código dentro do sandbox configurado
+        import sys
+        sys.path.insert(0, project_anchor)
         exec(compiled, safe_globals)
         
     except Exception as e:

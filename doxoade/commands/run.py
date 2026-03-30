@@ -63,7 +63,7 @@ def run(ctx, script: str, **kwargs):
             import sys as exc_sys
             from traceback import print_tb as exc_trace
             _, exc_obj, exc_tb = exc_sys.exc_info()
-            print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
+            print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\033[0\n")
             exc_trace(exc_tb)
             raise e
 
@@ -82,7 +82,7 @@ def _execute_hybrid_engine(script_path: str, use_vulcan: bool):
         
     from ..tools.security_utils import restricted_safe_exec
     try:
-        click.echo(color + f"--- [RUN:{label}] Executing: {os.path.basename(abs_path)} ---")
+        click.echo(color + f"--- [RUN:{label}] Executing: {os.path.basename(abs_path)} ---\033[0m")
         with open(abs_path, 'r', encoding='utf-8') as f:
             content = f.read()
 

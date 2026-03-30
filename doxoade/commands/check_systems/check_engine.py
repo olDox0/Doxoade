@@ -6,9 +6,12 @@ import re
 import ast
 import json
 from typing import List, Dict, Any
-from click import progressbar
-from .check_state import CheckState
+from click  import progressbar
+
+from .check_state      import CheckState
+from .check_utils      import _calculate_incident_stats
 from ...tools.analysis import _get_code_snippet
+
 def run_audit_engine(state: CheckState, io_manager, **kwargs):
     from ...probes.manager import ProbeManager
     from ...tools.memory_pool import finding_arena
@@ -41,12 +44,16 @@ def run_audit_engine(state: CheckState, io_manager, **kwargs):
         _run_clone_detection(files, manager, state)
     if not kwargs.get('no_cache'):
         io_manager.save_cache(cache)
+
 def _scan_single_file(fp, manager, kwargs):
     """Executa as sondas respeitando o Full Power."""
     from ...tools.governor import governor
-    # FIX: governor agora é visível aqui
     if governor.pace(file_path=fp, force=kwargs.get('full_power')):
-        return [{'severity': 'INFO', 'category': 'SYSTEM', 'message': 'ALB_REDUCED', 'file': fp, 'line': 0}]
+        return[{'severity': 'INFO', 'category': 'SYSTEM', 'message': 'ALB_REDUCED', 'file': fp, 'line': 0}]
+    
+    # --- NOVO: Desvio C/C++ Integrado ao w64devkit ---
+    if fp.endswith(('.c', '.cpp', '.h', '.hpp')):
+        return _run_c_cpp_checks(fp)
     
     findings = _run_syntax_check(fp, manager)
     if findings: return findings
@@ -55,6 +62,7 @@ def _scan_single_file(fp, manager, kwargs):
     if not kwargs.get('fast'):
         findings.extend(_run_style_check(fp))
     return findings
+    
 def _run_syntax_check(f, manager):
     from ..check import _get_probe_path
     from ...tools.analysis import _get_code_snippet
@@ -95,10 +103,8 @@ def _run_static_probes(f, manager):
             d['file'] = f
             results.append(d)
     except Exception as e:
-        from traceback import print_tb as exc_trace
-        _, exc_obj, exc_tb = sys.exc_info()
-        print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
-        exc_trace(exc_tb)
+        from doxoade.tools.error_info import handle_error
+        handle_error(e, context=f"Static Probes (Hunter) -> {os.path.basename(f)}", debug=True)
     return results
 def _filter_by_cache(files, cache, io_manager, state, force_no_cache):
     to_scan = []
@@ -121,28 +127,9 @@ def _run_clone_detection(files, manager, state):
             clones = json.loads(res["stdout"])
             for c in clones: state.register_finding(c)
         except Exception as e:
-            from traceback import print_tb as exc_trace
-            _, exc_obj, exc_tb = sys.exc_info()
-            print(f"\033[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split('\''))}\n")
-            exc_trace(exc_tb)
+            from doxoade.tools.error_info import handle_error
+            handle_error(e, context="Clone Detection JSON Parse", debug=True)
             
-def _calculate_incident_stats(findings: List[Dict[str, Any]]) -> dict:
-    """Especialista de contagem estatística (Expert-Split)."""
-    from collections import defaultdict
-    stats = defaultdict(lambda: defaultdict(int))
-    for f in findings:
-        cat = f.get('category', 'UNCATEGORIZED').upper()
-        if cat == 'SYSTEM': continue
-        
-        msg = f.get('message', '').lower()
-        sub = "geral"
-        if "f-string" in msg: sub = "f-string"
-        elif "imported but unused" in msg: sub = "unused-import"
-        elif "assigned to but never used" in msg: sub = "unused-variable"
-        elif "except:" in msg or ("except" in msg and ":" in msg and "exception" not in msg): sub = "bare-except"
-        stats[cat][sub] += 1
-    return stats
-    
 def run_check_logic(path: str, state, *_args, **kwargs):
     """
     Bridge de Compatibilidade v93.0 (PASC-Omega).
@@ -169,3 +156,102 @@ def run_check_logic(path: str, state, *_args, **kwargs):
         'findings': state.findings,
         'alb_files': state.alb_files
     }
+
+def _run_c_cpp_checks(fp):
+    """Auditoria de nível industrial para C/C++ usando w64devkit (GCC/G++) (PASC 8.17)."""
+    import subprocess
+    import re
+    import os
+    from ...shared_tools import _find_project_root
+    
+    findings =[]
+    
+    # Define o compilador
+    is_cpp = fp.endswith(('.cpp', '.hpp'))
+    compiler = 'g++' if is_cpp else 'gcc'
+    
+    # --- NOVO: Inteligência de Include Paths (-I) ---
+    file_dir = os.path.dirname(os.path.abspath(fp))
+    project_root = _find_project_root(file_dir)
+    
+    includes =[f"-I{file_dir}"] # Busca na própria pasta do arquivo
+    
+    if project_root:
+        includes.append(f"-I{project_root}") # Busca na raiz do projeto
+        
+        # Busca nas pastas globais do projeto
+        for folder in ['include', 'src', 'inc']:
+            p = os.path.join(project_root, folder)
+            if os.path.isdir(p):
+                includes.append(f"-I{p}")
+                
+        # Busca em módulos relativos (Ex: DXLearn/src lendo de DXLearn/include)
+        parent_dir = os.path.dirname(file_dir)
+        if parent_dir and parent_dir != project_root:
+            includes.append(f"-I{parent_dir}")
+            for folder in ['include', 'src', 'inc']:
+                p = os.path.join(parent_dir, folder)
+                if os.path.isdir(p):
+                    includes.append(f"-I{p}")
+
+    # Monta o comando final com todos os caminhos de include
+    cmd = [compiler, '-fsyntax-only', '-Wall', '-Wextra', '-Wpedantic'] + includes + [fp]
+    
+    try:
+        # Executa silenciosamente...
+        result = subprocess.run(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+            text=True, encoding='utf-8', errors='ignore'
+        )
+        
+        output = result.stderr
+        
+        if output:
+            gcc_pattern = re.compile(r'^(.+?):(\d+):(?:\d+:)?\s*(error|warning|note|fatal error):\s*(.*)$', re.MULTILINE)
+            
+            for match in gcc_pattern.finditer(output):
+                file_path_gcc = match.group(1)
+                line_n = int(match.group(2))
+                sev_str = match.group(3).lower()
+                msg = match.group(4).strip()
+                
+                if 'error' in sev_str:
+                    severity = 'CRITICAL'
+                    category = 'SYNTAX'
+                elif 'warning' in sev_str:
+                    severity = 'WARNING'
+                    category = 'C-LINT'
+                else:
+                    severity = 'INFO'
+                    category = 'STYLE'
+                    
+                findings.append({
+                    'severity': severity,
+                    'category': category,
+                    'message': f"[{compiler}] {msg}",
+                    'file': fp,
+                    'line': line_n
+                })
+                
+        # Heurística de Complexidade
+        with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+            logic_branches = re.findall(r'\b(?:if|for|while|catch|case)\b', content)
+            complexity = len(logic_branches) + 1
+            if complexity > 15:
+                findings.append({
+                    'severity': 'WARNING', 'category': 'COMPLEXITY', 
+                    'message': f"Arquivo excede limite de complexidade (CC Estimado: {complexity}).", 
+                    'file': fp, 'line': 1
+                })
+
+    except Exception as e:
+        from doxoade.tools.error_info import handle_error
+        handle_error(e, context="Ponte w64devkit C/C++", silent=True)
+        findings.append({
+            'severity': 'ERROR', 'category': 'SYSTEM', 
+            'message': f"Falha ao executar {compiler}. w64devkit está ativo?", 
+            'file': fp, 'line': 0
+        })
+        
+    return findings

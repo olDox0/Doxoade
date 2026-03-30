@@ -4,10 +4,12 @@ Security Bridge - v81.7 Gold.
 Refatorado para Expert-Split para eliminar hibridismo UI/SYS.
 """
 import os
-from click import progressbar, echo
+from click                   import progressbar, echo
+
 from doxoade.tools.doxcolors import Fore
-from .check_state import CheckState
-from ..security_utils import get_tool_path, SEVERITY_MAP, batch_list
+from .check_state            import CheckState
+from ..security_utils        import get_tool_path, SEVERITY_MAP, batch_list
+
 def analyze_security(state: CheckState):
     """Orquestrador da Auditoria de Segurança (CC: 2)."""
     # 1. Auditoria de Código (SAST)
@@ -15,13 +17,20 @@ def analyze_security(state: CheckState):
     
     # 2. Auditoria de Dependências (SCA)
     _audit_sca_integration(state)
+    
 def _audit_sast_integration(state: CheckState):
     """Especialista em processamento Bandit com ProgressBar."""
     from ..security import _run_bandit_engine
+    from ...dnm import DNM
     
-    if not get_tool_path('bandit') or not state.target_files:
+    # Extrai os arquivos Python (Fallback para DNM se a lista via kwargs for vazia)
+    target_files = state.target_files or DNM(state.target_path).scan(extensions=['py'])
+    py_files =[f for f in target_files if f.endswith('.py')]
+    
+    if not get_tool_path('bandit') or not py_files:
         return
-    batches = list(batch_list(state.target_files, 10))
+        
+    batches = list(batch_list(py_files, 10))
     with progressbar(batches, label='Escudo Aegis (SAST)') as bar:
         for batch in bar:
             results = _run_bandit_engine(batch, set())
@@ -35,6 +44,7 @@ def _audit_sast_integration(state: CheckState):
                         'line': res['line'],
                         'details': f"Fragmento: {res.get('code', 'N/A')}"
                     })
+                    
 def _audit_sca_integration(state: CheckState):
     """Especialista em processamento Safety."""
     from ..security import _run_safety_engine
