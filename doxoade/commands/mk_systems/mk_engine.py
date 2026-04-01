@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/mk_systems/mk_engine.py (v94.9 Platinum)
 import os
+import shutil
 # [DOX-UNUSED] from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
 # [DOX-UNUSED] from ...tools.filesystem import is_ignored
@@ -29,8 +30,15 @@ class MkEngine:
             self.stack.append((indent, full_path))
             return full_path, "Diretório"
         else:
-            # Garante que a pasta pai do arquivo exista
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
+            
+            # [MOVE-ARCH] Se não há conteúdo explícito, procura arquivo existente para mover
+            if not content:
+                existing = self._find_existing_file(os.path.basename(full_path))
+                if existing and existing != full_path:
+                    shutil.move(existing, full_path)
+                    return full_path, "Movido"
+            
             with open(full_path, 'w', encoding='utf-8') as f:
                 f.write(content)
             return full_path, "Arquivo"
@@ -80,3 +88,11 @@ class MkEngine:
             if is_dir:
                 new_prefix = prefix + ("    " if is_last else TREE_INDENT)
                 yield from self.render_tree(full_path, project_root, new_prefix)
+                
+    def _find_existing_file(self, filename: str) -> str | None:
+        """Busca recursiva por arquivo com mesmo basename na árvore do projeto."""
+        for dirpath, _, filenames in os.walk(self.base_path):
+            if filename in filenames:
+                candidate = os.path.normpath(os.path.join(dirpath, filename))
+                return candidate
+        return None

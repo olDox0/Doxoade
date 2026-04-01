@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Doxoade | Impact Nexus</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+  <style>
+    /* Injetado do impact_style.css */
+    {{STYLE_CSS}}
+  </style>
+</head>
+<body>
+  <header>
+    <h1> Doxoade Impact Analysis</h1>
+    <div class="legend">
+      <span><i class="dot" style="background: var(--target);"></i> Alvo (Focus)</span>
+      <span><i class="dot" style="background: var(--accent-dark); border: 1px solid var(--accent-primary);"></i> Interno (Esmeralda)</span>
+      <span><i class="dot" style="background: var(--panel); border: 1px solid var(--text-muted);"></i> Externo/Stdlib</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="graph-container"><div id="graph-view"></div></div>
+    <div class="sidebar" id="sidebar"></div>
+  </main>
+
+  <div id="raw-mermaid" style="display:none;">
+{{GRAPH}}
+  </div>
+
+  <script>
+    // Injetado do Python
+    window.BACKEND_DATA = {{DATA_JSON}};
+  </script>
+  <script>
+    /* Injetado do impact_app.js */
+    {{APP_JS}}
+  </script>
+</body>
+</html>

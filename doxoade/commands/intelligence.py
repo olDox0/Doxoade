@@ -9,18 +9,23 @@ from ..dnm import DNM
 from .intelligence_utils import get_ignore_spec
 
 @click.group('intelligence', invoke_without_command=True)
-@click.option('--docs',       '-d', is_flag=True,                 help="Extrai docstrings.")
-@click.option('--source',     '-s', is_flag=True,                 help="Inclui código fonte completo.")
-@click.option('--concatenate','-c', is_flag=True,                 help="Minifica o JSON.")
-@click.option('--output',     '-o', default='chief_dossier.json', help="Saída do dossiê.")
-@click.option('--focus',      '-f', type=click.Choice(['vulcan', 'check', 'economic'], case_sensitive=False), 
+#@click.argument('path', type=click.Path(exists=True), default='.')  # <-- NOVO
+@click.argument('paths', nargs=-1, type=click.Path(exists=True))
+@click.option(  '--docs',       '-d', is_flag=True,                 help="Extrai docstrings.")
+@click.option(  '--source',     '-s', is_flag=True,                 help="Inclui código fonte completo.")
+@click.option(  '--concatenate','-c', is_flag=True,                 help="Minifica o JSON.")
+@click.option(  '--output',     '-o', default='chief_dossier.json', help="Saída do dossiê.")
+@click.option(  '--focus',      '-f', type=click.Choice(['vulcan', 'check', 'economic'], case_sensitive=False), 
               help="Filtra e sumariza o relatório para um foco específico (e.g., 'vulcan' para segurança).")
 @click.option('--ai-export',  '-ai',is_flag=True,                 help="Gera um dossiê otimizado em XML/Markdown para altíssima absorção por IAs (LLMs).")
 @click.pass_context
-def intelligence(ctx, output, docs, source, concatenate, focus, ai_export):
+#def intelligence(ctx, path, output, docs, source, concatenate, focus, ai_export):
+def intelligence(ctx, paths, output, docs, source, concatenate, focus, ai_export):
     """Módulo de Inteligência Topológica (v94.3)."""
     if ctx.invoked_subcommand is None:
-        _run_dossier_scan(output, docs, source, concatenate, focus, ai_export, ctx)
+        # Se nenhum path passado, usa '.' como padrão
+        scan_paths = paths if paths else ('.',)
+        _run_dossier_scan(scan_paths, output, docs, source, concatenate, focus, ai_export, ctx)
 
 @intelligence.command('recover')
 @click.option('--dir', 'backup_path', required=True, help="Pasta de backup do NPP.")
@@ -34,26 +39,42 @@ def recover(backup_path, output_path):
     if success: click.echo(f"\033[92m✅ {msg}\033[0m")
     else: click.echo(f"\033[91m✘ {msg}\033[0m")
 
-def _run_dossier_scan(output, include_docs, include_source, concat, focus, ai_export, ctx):
+def _run_dossier_scan(scan_paths, output, include_docs, include_source, concat, focus, ai_export, ctx):
     from .intelligence_systems.intelligence_engine import analyze_file_chief
-    from ..tools.filesystem import collect_project_files, _get_project_config # Importando o motor que suporta C/C++
-    
-    root = _find_project_root(os.getcwd())
+    from ..tools.filesystem import collect_project_files, _get_project_config
+
+    root    = _find_project_root(os.getcwd())
     console = Console()
-    
+
     with ExecutionLogger('intelligence', root, ctx.params):
         console.print("[bold gold3]🧐 Doxoade Chief Insight v94.5 (LLM-Ready)[/bold gold3]")
-        
-        spec = get_ignore_spec(root)
-        
-        # --- NOVO: Bypassa o DNM e usa o FileSystem Industrial ---
-        config = _get_project_config(logger=None, start_path=root)
-        ignores_config = {p.strip('/\\').lower() for p in config.get('ignore',[])}
-        
-        # Busca nativa englobando '.py', '.c', '.cpp', '.h', '.hpp'
-        all_files = list(collect_project_files(root, root, extra_ignores=ignores_config))
-        
-        filtered_files =[]
+
+        spec           = get_ignore_spec(root)
+        config         = _get_project_config(logger=None, start_path=root)
+        ignores_config = {p.strip('/\\').lower() for p in config.get('ignore', [])}
+
+        # Coleta arquivos de todos os paths informados
+        all_files = []
+        seen      = set()  # evita duplicatas se paths se sobrepõem
+
+        for raw_path in scan_paths:
+            scan_dir = os.path.abspath(raw_path)
+
+            if os.path.isfile(scan_dir):
+                # Path direto para um arquivo
+                candidates = [scan_dir]
+            else:
+                # Diretório: varre recursivamente
+                candidates = list(collect_project_files(scan_dir, root, extra_ignores=ignores_config))
+                if len(scan_paths) > 1:
+                    console.print(f"[dim]📂 {os.path.relpath(scan_dir, root)}[/dim]")
+
+            for f in candidates:
+                if f not in seen:
+                    seen.add(f)
+                    all_files.append(f)
+
+        filtered_files = []
         for f in all_files:
             rel_path = os.path.relpath(f, root).replace('\\', '/')
             if spec and spec.match_file(rel_path):
@@ -180,7 +201,7 @@ def _save_report(files, output, root, concat, focus, ai_export, console):
     
     # NOVO: Desvio de Formatação para Inteligência Artificial
     if ai_export:
-        ai_output = output.replace('.json', '') + "_llm.md" if output.endswith('.json') else output + "_llm.md"
+        ai_output = output.replace('.json', '') + "_llm.xml" if output.endswith('.json') else output + "_llm.xml"
         _save_llm_report(report, ai_output, console)
     else:
         # PASC 6.3: UTF-8 Sem BOM (Padrão JSON Original)

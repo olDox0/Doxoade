@@ -16,38 +16,40 @@ SYSTEM_IGNORES = {
 }
 
 def _find_project_root(start_path='.'):
-    """Encontra a raiz do projeto (pyproject.toml ou .git)."""
     current_path = Path(start_path).resolve()
-    if (current_path / 'pyproject.toml').is_file(): return str(current_path)
-    
-    # Sobe até achar a raiz ou o topo
+    if current_path.is_file():          # ← FIX: se for arquivo, sobe para a pasta
+        current_path = current_path.parent
+
     search_path = current_path
     while search_path != search_path.parent:
-        if (search_path / '.git').is_dir(): return str(search_path)
+        if (search_path / 'pyproject.toml').is_file():  # ← FIX: checar ao subir também
+            return str(search_path)
+        if (search_path / '.git').is_dir():
+            return str(search_path)
         search_path = search_path.parent
     return str(current_path)
 
-def _get_project_config(logger=None, start_path='.'):
-    """
-    Fonte Única da Verdade para Configuração (PASC 8.3).
-    Garante que o retorno seja sempre uma tupla previsível.
-    """
-    root_path = _find_project_root(start_path)
-    config = {'ignore': [], 'source_dir': '.', 'root_path': root_path}
+def _get_project_config(logger=None, start_path='.', override_search_path=None):
+    start_path = os.path.abspath(start_path)         # ← FIX: definir antes de usar
+    root_path  = _find_project_root(start_path)
+    config = {'ignore': [], 'source_dir': '.', 'root_path': root_path}  # ← FIX: inicializar aqui
+
     config_path = os.path.join(root_path, 'pyproject.toml')
-    
     if os.path.exists(config_path):
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
                 data = toml.load(f)
-                dox_config = data.get('tool', {}).get('doxoade', {})
-                config.update(dox_config)
+                config.update(data.get('tool', {}).get('doxoade', {}))
         except Exception as e:
             if logger: logger.add_finding("WARNING", f"Erro no TOML: {e}")
 
-    # Normalização OSL: search_path é obrigatório e absoluto
-    source_dir = config.get('source_dir', '.')
-    config['search_path'] = os.path.abspath(os.path.join(root_path, source_dir))
+    # ← FIX: search_path definido uma única vez, no lugar certo
+    if override_search_path:
+        config['search_path'] = os.path.abspath(override_search_path)
+    else:
+        source_dir = config.get('source_dir', '.')
+        config['search_path'] = os.path.abspath(os.path.join(root_path, source_dir))
+
     return config
 
 def get_file_metadata(file_path: str):
@@ -83,8 +85,7 @@ def _get_venv_python_executable(start_path='.'):
     return None
 
 def _is_path_ignored(file_path, project_path):
-    """Verifica se um arquivo deve ser ignorado baseado na config."""
-    config = _get_project_config(None, start_path=project_path)
+    config = _get_project_config(None, start_path=project_path)  # ← usa os parâmetros da função
     
     # Normalização robusta
     ignore_list = {p.strip('/\\').lower() for p in config.get('ignore', [])}

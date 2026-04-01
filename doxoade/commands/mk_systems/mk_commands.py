@@ -27,7 +27,8 @@ def execute_mk_logic(base_path, items, architecture, tree):
     if architecture:
         click.echo(Fore.CYAN + f"--- [MK-ARCH] Construindo a partir de: {architecture} ---")
         for path, kind in engine.parse_architecture_file(architecture):
-            click.echo(Fore.GREEN + f"[OK] {kind:<10}: {path}")
+            color = Fore.YELLOW if kind == "Movido" else Fore.GREEN
+            click.echo(color + f"[{kind.upper():<10}]: {path}")
         return
     if items:
         click.echo(Fore.CYAN + f"--- [MK-ITEMS] Criando itens em: {base_path} ---")

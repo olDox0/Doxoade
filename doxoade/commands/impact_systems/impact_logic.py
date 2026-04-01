@@ -4,9 +4,7 @@ import os
 import ast
 import click
 from typing import Dict, List
-# [DOX-UNUSED] from tools.doxcolors import Fore
 from ...tools.streamer import ufs
-# [DOX-UNUSED] from ...tools.filesystem import collect_project_files
 from .impact_utils import path_to_module_name, resolve_relative_import, get_file_metadata
 from .impact_state import ImpactState
 class ImpactVisitor(ast.NodeTransformer):
@@ -92,7 +90,16 @@ def build_project_index(search_path: str, ignore_patterns: set, old_index: dict)
                     "defines": list(v.defines.keys()),
                     "metadata": v.defines
                 }
-            except Exception: continue
+            except Exception as e:
+                new_index[mod_name] = {
+                    "path": os.path.relpath(fp, search_path),
+                    "error": str(e),
+                    "imports": [],
+                    "calls": [],
+                    "defines": [],
+                    "metadata": {}
+                }
+                continue
                 
     return new_index
 def get_external_consumers(state: ImpactState, func_filter: str = None) -> List[Dict]:

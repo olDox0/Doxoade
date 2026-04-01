@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/check_systems/check_engine.py
 """Motor de Auditoria - Casa de Máquinas (PASC 8.5)."""
+import os
 import sys
 import re
 import ast

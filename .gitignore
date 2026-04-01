@@ -21,6 +21,8 @@ dist/
 chief_dossier.json
 chief_dossier_llm.md
 doxoade_report.json
+graph.html
+chief_dossier_llm.xml
 Exemplo/
 tmp/
 .dox_agent_workspace/
