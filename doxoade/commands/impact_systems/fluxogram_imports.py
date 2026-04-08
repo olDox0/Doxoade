@@ -28,8 +28,16 @@ def to_mermaid(graph: 'FluxGraph', highlight_cycles: bool = True, target_module:
             return f"{parts[-2]}.{parts[-1]}"
         return mod
 
+    # 1. Configuração do Mermaid (Linhas Suaves/Arredondadas com curva 'basis')
     lines = [
-        "%%{init: {'flowchart': {'nodeSpacing': 80, 'rankSpacing': 250}}}%%",
+        "%%{init: {",
+        "  'flowchart': {",
+        "    'curve': 'basis',",         # Curvatura fluída
+        "    'nodeSpacing': 80,",
+        "    'rankSpacing': 150,",
+        "    'padding': 20",
+        "  }",
+        "}}%%",
         "flowchart TD"
     ]
 
@@ -39,29 +47,28 @@ def to_mermaid(graph: 'FluxGraph', highlight_cycles: bool = True, target_module:
         for i in range(len(cycle) - 1):
             cycle_edges.add((cycle[i], cycle[i + 1]))
 
-    # Declara nós com Cores Forçadas e OnClick Nativo
+    # 2. Declara Nós usando a paleta Dark Pastel
     for mod, attrs in graph.nodes.items():
-        node_id = _id(mod)
+        node_id   = _id(mod)
         short_mod = _short_name(mod)
-        
-        # Decide classes e garante o contraste da fonte injetando CSS inline
+
         if mod == target_module:
             node_class = "targetNode"
-            text_color = "#ffffff"  # Branco sobre Laranja
         elif attrs.get('external'):
             node_class = "externalNode"
-            text_color = "#5e5c5e"  # Cinza discreto (Piano Black 0)
         else:
             node_class = "internalNode"
-            text_color = "#ffffff"  # Branco sobre Esmeralda (RESOLVE O BUG DO TEXTO OCULTO)
 
-        # A MÁGICA DO CLIQUE: O evento onclick do HTML puro chama o JS direto da fonte!
-        label = f'<div onclick="window.NexusApp.UI.Sidebar.renderModule(\'{mod}\')" style="color:{text_color}; padding:8px 12px; cursor:pointer; font-weight:bold; height:100%; display:flex; align-items:center; justify-content:center;">{short_mod}</div>'
-        
-        lines.append(f'    {node_id}["{label}"]')
+        # Label simples — sem foreignObject, sem HTML inline.
+        # O click é capturado pela diretiva nativa do Mermaid abaixo.
+        lines.append(f'    {node_id}["{short_mod}"]')
         lines.append(f'    class {node_id} {node_class}')
 
-    # Declara arestas (Setas Coloridas)
+        # Diretiva de click nativa do Mermaid (securityLevel: loose).
+        # Chama window.nexusNodeClick com o nome completo do módulo.
+        lines.append(f'    click {node_id} call nexusNodeClick("{mod}")')
+
+    # 3. Declara Arestas (Setas)
     for edge in graph.edges:
         src, dst = _id(edge.src), _id(edge.dst)
         is_target_related = (edge.src == target_module or edge.dst == target_module)
@@ -76,15 +83,22 @@ def to_mermaid(graph: 'FluxGraph', highlight_cycles: bool = True, target_module:
         else:
             lines.append(f'    {src} --> {dst}:::internalEdge')
 
-    # Definições de Cores
-    lines.append("classDef cycleEdge stroke:#c81576,stroke-width:4px;")
-    lines.append("classDef targetNode fill:#ff6700,stroke:#e05a00,stroke-width:3px;")
-    lines.append("classDef internalNode fill:#197b3f,stroke:#d2dce6,stroke-width:2px;")
-    lines.append("classDef externalNode fill:#19171a,stroke:#5e5c5e,stroke-width:1px,stroke-dasharray: 5 5;")
+    # 4. Injeção da Paleta de Cores (Estilo Dark UI c/ Borda "Neon")
     
-    lines.append("classDef targetEdge stroke:#e05a00,stroke-width:3px,color:#d2dce6;")
-    lines.append("classDef internalEdge stroke:#197b3f,stroke-width:2px,color:#d2dce6;")
-    lines.append("classDef externalEdge stroke:#4c4552,stroke-width:1px,stroke-dasharray: 5 5,color:#4c4552;")
+    # Ciclos (Erros/Warnings): Tons de Rosa
+    lines.append("classDef cycleEdge stroke:#CE699E,stroke-width:4px;")
+    
+    # Target (Alvo): Fundo dark-pastel-orange com borda pastel-orange
+    lines.append("classDef targetNode fill:#5a3821,stroke:#E38D53,stroke-width:2px,rx:8,ry:8;")
+    lines.append("classDef targetEdge stroke:#E38D53,stroke-width:3px,color:#E38D53;")
+
+    # Internos: Fundo dark-pastel-blue com borda pastel-blue
+    lines.append("classDef internalNode fill:#1e395c,stroke:#4D91E8,stroke-width:2px,rx:8,ry:8;")
+    lines.append("classDef internalEdge stroke:#4D91E8,stroke-width:2px,color:#4D91E8;")
+
+    # Externos: Fundo Piano Black 2 com borda text-muted
+    lines.append("classDef externalNode fill:#19171a,stroke:#5e5c5e,stroke-width:1px,stroke-dasharray: 4 4,rx:8,ry:8;")
+    lines.append("classDef externalEdge stroke:#5e5c5e,stroke-width:1.5px,stroke-dasharray: 4 4,color:#5e5c5e;")
 
     return "\n".join(lines)
 

@@ -18,29 +18,76 @@ def _get_icon(emoji, fallback):
 ICON_LIGHTBULB = _get_icon("💡", "[!]")
 ICON_WRENCH = _get_icon("🛠", "->")
 
-def _present_results(output_format, results):
+def _present_results(output_format, results, max_issues=50, verbose=False):
     findings = results.get('findings', [])
     summary = results.get('summary', {})
-    
+
+    # ---------------------------
+    # JSON permanece intacto
+    # ---------------------------
+    if output_format == 'json':
+        import json
+        click.echo(json.dumps(results, indent=2, ensure_ascii=False))
+        return
+
+    # ---------------------------
+    # SEM RESULTADOS
+    # ---------------------------
     if not findings:
         click.echo(Fore.GREEN + Style.BRIGHT + "\n[OK] Nenhum problema encontrado! \\o/")
         return
 
-    click.echo(Fore.CYAN + Style.BRIGHT + "\n--- ANÁLISE COMPLETA ---")
-    
-    for finding in findings:
-        _print_finding_details(finding)
-        print() 
-
-    # Resumo Final
-    click.echo(Fore.WHITE + "-" * 40)
-    total = len(findings)
+    # ---------------------------
+    # RESUMO NO TOPO (novo, leve)
+    # ---------------------------
     critical = summary.get('critical', 0)
     errors = summary.get('errors', 0)
-    
-    if critical > 0: click.echo(f"{Fore.MAGENTA}[CRÍTICO] {critical} Erro(s) crítico(s).")
-    elif errors > 0: click.echo(f"{Fore.RED}[ERRO] {errors} Erro(s).")
-    else: click.echo(f"[FIM] {total} Aviso(s).")
+    warnings = summary.get('warnings', 0)
+
+    click.echo(Fore.CYAN + Style.BRIGHT + "\n--- ANÁLISE ---")
+    click.echo(
+        Fore.WHITE +
+        f"?? {critical} | ? {errors} | ?? {warnings} | ?? {len(findings)} total"
+    )
+
+    # ---------------------------
+    # LIMITADOR (anti-spam)
+    # ---------------------------
+    total = len(findings)
+    if total > max_issues:
+        findings = findings[:max_issues]
+        click.echo(Fore.YELLOW + f"\n[!] Mostrando {max_issues}/{total} resultados (use --max-issues para expandir)")
+
+    # ---------------------------
+    # AGRUPAMENTO POR ARQUIVO (sem quebrar estrutura)
+    # ---------------------------
+    grouped = {}
+    for f in findings:
+        file = f.get('file') or 'GLOBAL'
+        grouped.setdefault(file, []).append(f)
+
+    # ---------------------------
+    # PRINT ORGANIZADO
+    # ---------------------------
+    for file, issues in grouped.items():
+        click.echo(Fore.WHITE + Style.BRIGHT + f"\n?? {file}")
+
+        for finding in issues:
+            _print_finding_details(finding)
+            print()
+
+    # ---------------------------
+    # RESUMO FINAL (mantido, mas limpo)
+    # ---------------------------
+    click.echo(Fore.WHITE + "-" * 40)
+
+    if critical > 0:
+        click.echo(f"{Fore.MAGENTA}[CRÍTICO] {critical} problema(s) crítico(s).")
+    elif errors > 0:
+        click.echo(f"{Fore.RED}[ERRO] {errors} erro(s).")
+    else:
+        click.echo(f"{Fore.YELLOW}[AVISO] {warnings} aviso(s).")
+
     print(Style.RESET_ALL)
 
 def _print_finding_details(finding):

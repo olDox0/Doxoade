@@ -10,6 +10,8 @@ import re
 import sys
 import json
 from typing import List, Dict, Any
+from html.parser import HTMLParser
+
 # Padrões de IO para busca via AST
 IO_KEYWORDS = {'open', 'read', 'write', 'load', 'dump', 'print', 'input', 'get', 'post', 'request'}
 IO_MODULES = {'os', 'sys', 'pathlib', 'shutil', 'subprocess', 'socket', 'requests', 'json', 'toml'}
@@ -25,7 +27,8 @@ def get_ignore_spec(root: str):
     default_patterns = [
         '.git/', '__pycache__/', 'venv/', '.venv/', 
         '*.pyc', '.vscode/', '.idea/', 'dist/', 'build/',
-        '*.bak', 'recovery_zone/', 'chief_dossier.json'
+        '*.bak', 'recovery_zone/', 'chief_dossier.json',
+        'node_modules/'  # <--- ADICIONAR ESTA LINHA (CRÍTICO)
     ]
     
     config_path = os.path.join(root, "pyproject.toml")
@@ -260,3 +263,50 @@ class CSemanticAnalyzer:
         if blocks:
             docs["c_cpp_comments"] = {"intent": "Extracted block comments", "full_doc": "\n".join(blocks[:3])}
         return docs
+        
+class _HTMLStatsParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.tags = {}
+        self.scripts = 0
+        self.styles = 0
+        self.complexity = 0
+        
+    def handle_starttag(self, tag, attrs):
+        self.complexity += 1
+        self.tags[tag] = self.tags.get(tag, 0) + 1
+        if tag == 'script':
+            self.scripts += 1
+        elif tag == 'style':
+            self.styles += 1
+
+class HTMLSemanticAnalyzer:
+    """Analisador Semântico para arquivos HTML (PASC Compliance)."""
+    def __init__(self, content: str):
+        self.content = content
+        self.parser = _HTMLStatsParser()
+        self.lines_of_code = 0
+        self._parse()
+        
+    def _parse(self):
+        try:
+            self.lines_of_code = len(self.content.splitlines())
+            self.parser.feed(self.content)
+        except Exception as e:
+            from doxoade.tools.error_info import handle_error
+            handle_error(e, context="HTMLSemanticAnalyzer._parse", silent=True)
+            
+    def get_summary(self):
+        # Seleciona as 5 tags mais usadas para compor o profile do arquivo
+        top_tags = dict(sorted(self.parser.tags.items(), key=lambda item: item[1], reverse=True)[:5])
+        
+        return {
+            "lines": self.lines_of_code,
+            "complexity": self.parser.complexity,  # Complexidade baseada em volume de nós/tags
+            "html_stats": {
+                "unique_tags": len(self.parser.tags),
+                "embedded_scripts": self.parser.scripts,
+                "embedded_styles": self.parser.styles,
+                "top_tags": top_tags
+            }
+        }

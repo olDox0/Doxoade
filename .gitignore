@@ -41,6 +41,7 @@ config.json
 *.dox
 *.pyx
 *.old_trash
+*.xml
 .nppBackup
 nppBackup/
 ./nppBackup/

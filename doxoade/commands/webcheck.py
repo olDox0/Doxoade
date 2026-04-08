@@ -15,8 +15,10 @@ import cssutils
 from bs4 import BeautifulSoup
 import click
 from doxoade.tools.doxcolors import Fore
-from ..probes.web_probe import WebAuditProbe
-from ..shared_tools import ExecutionLogger, _present_results, _get_project_config
+from doxoade.probes.web_probe import WebAuditProbe
+from doxoade.tools.logger import ExecutionLogger
+from doxoade.tools.filesystem import _get_project_config
+from doxoade.tools.display import _present_results
 try:
     import requests
 except ImportError:

@@ -41,33 +41,46 @@ def recover(backup_path, output_path):
 
 def _run_dossier_scan(scan_paths, output, include_docs, include_source, concat, focus, ai_export, ctx):
     from .intelligence_systems.intelligence_engine import analyze_file_chief
-    from ..tools.filesystem import collect_project_files, _get_project_config
+    from ..tools.filesystem import _get_project_config # Removido o collect_project_files
 
     root    = _find_project_root(os.getcwd())
     console = Console()
 
     with ExecutionLogger('intelligence', root, ctx.params):
-        console.print("[bold gold3]🧐 Doxoade Chief Insight v94.5 (LLM-Ready)[/bold gold3]")
+        console.print("[bold gold3]?? Doxoade Chief Insight v94.5 (Fullstack LLM-Ready)[/bold gold3]")
 
         spec           = get_ignore_spec(root)
         config         = _get_project_config(logger=None, start_path=root)
         ignores_config = {p.strip('/\\').lower() for p in config.get('ignore', [])}
 
-        # Coleta arquivos de todos os paths informados
         all_files = []
-        seen      = set()  # evita duplicatas se paths se sobrepõem
+        seen      = set()
+        
+        # DEFINIMOS AS EXTENSÕES SUPORTADAS AQUI NA COLETA
+        valid_exts = ('.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx')
 
         for raw_path in scan_paths:
             scan_dir = os.path.abspath(raw_path)
 
             if os.path.isfile(scan_dir):
-                # Path direto para um arquivo
                 candidates = [scan_dir]
             else:
-                # Diretório: varre recursivamente
-                candidates = list(collect_project_files(scan_dir, root, extra_ignores=ignores_config))
+                candidates = []
+                # Varredura customizada Fullstack
+                for dirpath, dirnames, filenames in os.walk(scan_dir):
+                    # Poda (remove) diretórios que batem com a lista de ignorados (ex: node_modules, .git)
+                    # Isso evita que o os.walk perca tempo entrando em pastas gigantes
+                    dirnames[:] = [
+                        d for d in dirnames 
+                        if not spec.match_file(os.path.relpath(os.path.join(dirpath, d), root).replace('\\', '/') + '/')
+                    ]
+                    
+                    for fname in filenames:
+                        if fname.endswith(valid_exts):
+                            candidates.append(os.path.join(dirpath, fname))
+                            
                 if len(scan_paths) > 1:
-                    console.print(f"[dim]📂 {os.path.relpath(scan_dir, root)}[/dim]")
+                    console.print(f"[dim]?? {os.path.relpath(scan_dir, root)}[/dim]")
 
             for f in candidates:
                 if f not in seen:
@@ -86,7 +99,8 @@ def _run_dossier_scan(scan_paths, output, include_docs, include_source, concat, 
             for f in bar:
                 try:
                     res = analyze_file_chief(f, root, docs=include_docs, source=include_source)
-                    if res and isinstance(res, dict):
+                    # Só adiciona ao dossiê se retornou algo válido e tem os dados estruturados
+                    if res and isinstance(res, dict) and 'size' in res:
                         dossier_files.append(res)
                 except Exception as e:
                     from doxoade.tools.error_info import handle_error

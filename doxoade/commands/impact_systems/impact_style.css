@@ -1,20 +1,30 @@
 /* impact_style.css */
 :root { 
-    --bg-dark: #0f0d0f;       /* Piano Black 3 */
-    --panel: #19171a;         /* Piano Black 2 */
-    --panel-light: #2f2e30;   /* Piano Black 1 */
-    --border: #4c4552;        /* Mortar */
+    --bg-dark:            #0f0d0f; /* Piano Black 3 */
+    --panel:              #19171a; /* Piano Black 2 */
+    --panel-light:        #2f2e30; /* Piano Black 1 */
+    --border:             #4c4552; /* Mortar */
     
-    --text-main: #d2dce6;     /* Nordic Breeze */
-    --text-muted: #5e5c5e;    /* Piano Black 0 */
+    --text-main:          #d2dce6; /* Nordic Breeze */
+    --text-muted:         #5e5c5e; /* Piano Black 0 */
     
-    --accent-primary: #26bc5f;    /* Esmeralda */
-    --accent-dark: #197b3f;       /* Esmeralda Escuro */
-    --target: #ff6700;            /* Laranja Blaze */
-    --target-dark: #e05a00;       /* Laranja Escuro */
-    --secondary-hover: #006cff;   /* Brandeis Blue */
-    --warning: #e8aa00;           /* Urobilin Yellow */
-    --term-bg: #0a331a;           /* Fundo Terminal */
+    --accent-primary:     #26bc5f; /* Esmeralda */
+    --accent-dark:        #197b3f; /* Esmeralda Escuro */
+    --target:             #ff6700; /* Laranja Blaze */
+    --target-dark:        #e05a00; /* Laranja Escuro */
+    --secondary-hover:    #006cff; /* Brandeis Blue */
+    --warning:            #e8aa00; /* Urobilin Yellow */
+    --term-bg:            #0a331a; /* Fundo Terminal */
+
+    --pastel-orange:      #E38D53; /* fluxo grama cor 1 */
+    --pastel-pink:        #CE699E; /* fluxo grama cor 2 */
+    --pastel-blue:        #4D91E8; /* fluxo grama cor 3 */
+    --pastel-green:       #57B87C; /* fluxo grama cor 3 */
+        
+    --dark-pastel-orange: #5a3821; /* fluxo grama cor 1 */
+    --dark-pastel-pink:   #52293f; /* fluxo grama cor 2 */
+    --dark-pastel-blue:   #1e395c; /* fluxo grama cor 3 */
+    --dark-pastel-green:  #224931; /* fluxo grama cor 3 */
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -35,6 +45,8 @@ h1 { color: var(--target); font-size: 1.2rem; text-shadow: 0 0 10px rgba(255,103
 
 main { display: flex; flex: 1; overflow: hidden; }
 
+
+
 .graph-container { flex: 3; position: relative; background: var(--bg-dark); overflow: hidden; }
 #graph-view { width: 100%; height: 100%; cursor: grab; }
 #graph-view:active { cursor: grabbing; }
@@ -45,6 +57,9 @@ main { display: flex; flex: 1; overflow: hidden; }
     display: flex; flex-direction: column; 
     box-shadow: -5px 0 15px rgba(0,0,0,0.3); z-index: 5;
 }
+
+
+
 
 .sidebar-header { padding: 20px; border-bottom: 2px solid var(--border); }
 .sidebar-header h2 { color: var(--accent-primary); font-size: 1.1rem; word-break: break-all; }
@@ -60,6 +75,8 @@ main { display: flex; flex: 1; overflow: hidden; }
     border-bottom: 1px solid var(--panel-light); padding-bottom: 5px;
 }
 
+
+
 ul.item-list { list-style: none; font-size: 0.85rem; }
 ul.item-list li { 
     padding: 6px 8px; border-bottom: 1px dashed var(--panel-light); 
@@ -68,6 +85,8 @@ ul.item-list li {
 ul.item-list li:hover { color: var(--secondary-hover); padding-left: 12px; background: rgba(0, 108, 255, 0.05); }
 ul.item-list li:last-child { border-bottom: none; }
 
+
+
 .empty-state { color: var(--text-muted); font-size: 0.9rem; font-style: italic; text-align: center; margin-top: 50px; }
 .file-path { background: var(--term-bg); color: var(--accent-primary); padding: 8px; border-radius: 4px; font-size: 0.8rem; border: 1px solid var(--accent-dark); word-break: break-all; margin-top: 10px; }
 
@@ -75,27 +94,27 @@ ul.item-list li:last-child { border-bottom: none; }
 .tag-internal { background: var(--accent-dark); color: #fff; border: 1px solid var(--accent-primary); }
 .tag-external { background: var(--panel); color: var(--text-muted); border: 1px solid var(--text-muted); }
 
-g.node { cursor: pointer; transition: opacity 0.2s; pointer-events: none; }
+
+
+g.node { cursor: pointer; transition: all 0.3s ease; }
 g.node:hover { opacity: 0.8; }
 
-g.node foreignObject {
-    overflow: visible; /* Garante que a div preencha o espaço todo */
+g.node foreignObject { overflow: visible; }
+g.node foreignObject div { transition: all 0.15s ease-in-out; border-radius: 4px; pointer-events: all; }
+g.node foreignObject div:hover { filter: brightness(1.2); transform: scale(1.05); }
+g.node foreignObject div:active { transform: scale(0.95); }
+
+/* Ocultação Profunda (Botão Esquerdo) */
+.nexus-hidden-node {
+    opacity: 0.03 !important; /* Faz o nó praticamente sumir */
+    transform: scale(0.8);
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.nexus-hidden-node:hover {
+    opacity: 0.5 !important; /* Aparece um pouco se passar o mouse por cima do fantasma */
+    transform: scale(0.95);
 }
 
-/* Efeito de hover e clique em qualquer div injetada como rótulo */
-g.node foreignObject div {
-    transition: all 0.15s ease-in-out;
-    border-radius: 4px;
-}
-
-g.node foreignObject div:hover {
-    background-color: rgba(255, 255, 255, 0.15); /* Um brilho suave ao passar o mouse */
-    transform: scale(1.05);
-}
-
-g.node foreignObject div:active {
-    transform: scale(0.95); /* Animação de botão sendo pressionado */
-}
 
 .click-target {
     pointer-events: all; /* IMPORTANTE: Força a captura do clique aqui */
@@ -123,4 +142,63 @@ g.node foreignObject div:active {
 
 .mermaid .externalNode text {
     fill: #cccccc !important;
+}
+
+
+/* ── Painel Expansível de Imports ─────────────────────────────── */
+
+/* Linha do item: módulo + badge contador lado a lado */
+.nexus-imp-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+}
+
+/* Badge com a contagem de nomes importados */
+.nexus-imp-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--panel-light);
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    padding: 1px 7px;
+    border-radius: 10px;
+    min-width: 22px;
+    flex-shrink: 0;
+    transition: background 0.2s;
+}
+ul.item-list li:hover .nexus-imp-count {
+    background: var(--dark-pastel-blue);
+    color: var(--pastel-blue);
+}
+
+/* Painel colapsável — oculto por padrão */
+.nexus-imp-detail {
+    display: none;
+    flex-direction: column;
+    gap: 3px;
+    margin-top: 8px;
+    padding: 6px 10px;
+    border-left: 2px solid var(--pastel-blue);
+    background: rgba(77, 145, 232, 0.05);
+    border-radius: 0 4px 4px 0;
+}
+
+/* Aberto quando tem a classe .nexus-open */
+.nexus-imp-detail.nexus-open {
+    display: flex;
+}
+
+/* Cada nome Python dentro do painel */
+.nexus-imp-name {
+    color: var(--pastel-blue);
+    font-size: 0.78rem;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    padding: 2px 0;
+    border-bottom: 1px dashed rgba(77, 145, 232, 0.15);
+}
+.nexus-imp-name:last-child {
+    border-bottom: none;
 }

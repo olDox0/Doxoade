@@ -4,14 +4,18 @@ import os
 import ast
 from datetime import datetime
 try:
-    from ..intelligence_utils import SemanticAnalyzer, CSemanticAnalyzer, NexusThothMapper, ChiefInsightVisitor,find_debt_tags
+    from ..intelligence_utils import SemanticAnalyzer, CSemanticAnalyzer, HTMLSemanticAnalyzer, NexusThothMapper, ChiefInsightVisitor, find_debt_tags
+    from .intelligence_css import CSSSemanticAnalyzer
+    from .intelligence_js import JSSemanticAnalyzer  # <-- NOVO
 except ImportError:
-    from doxoade.commands.intelligence_utils import SemanticAnalyzer, CSemanticAnalyzer, NexusThothMapper, ChiefInsightVisitor, find_debt_tags
+    from doxoade.commands.intelligence_utils import SemanticAnalyzer, CSemanticAnalyzer, HTMLSemanticAnalyzer, NexusThothMapper, ChiefInsightVisitor, find_debt_tags
+    from doxoade.commands.intelligence_systems.intelligence_css import CSSSemanticAnalyzer
+    from doxoade.commands.intelligence_systems.intelligence_js import JSSemanticAnalyzer  # <-- NOVO
 
 CRITICAL_THRESHOLD = datetime(2026, 2, 14, 21, 0, 0)
 
 def analyze_file_chief(file_path: str, project_root: str, docs=False, source=False) -> dict:
-    """Motor de Scan Nexus v100.1 (PASC 1.3 Compliance com suporte C/C++)."""
+    """Motor de Scan Nexus v100.1 (PASC 1.3 Compliance c/ C/C++, HTML, CSS, JS/TS)."""
     rel_path = os.path.relpath(file_path, project_root).replace('\\', '/')
     
     data = {
@@ -20,8 +24,9 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
         "god_assignment": "Unknown"
     }
     
-    # Adicionado suporte a extensões C e C++
-    if not file_path.endswith(('.py', '.c', '.cpp', '.h', '.hpp')):
+    # ADICIONADO: '.js', '.jsx', '.ts', '.tsx' na lista
+    valid_exts = ('.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx')
+    if not file_path.endswith(valid_exts):
         return data
         
     try:
@@ -29,6 +34,9 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
             content = f.read()
             
         is_python = file_path.endswith('.py')
+        is_html = file_path.endswith('.html')
+        is_css = file_path.endswith('.css')
+        is_js = file_path.endswith(('.js', '.jsx', '.ts', '.tsx')) # Engloba ecossistema JS
         
         if is_python:
             sem = SemanticAnalyzer(content)
@@ -40,7 +48,6 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
             all_imports = visitor.stats["imports"]["stdlib"] + visitor.stats["imports"]["external"]
             data["god_assignment"] = NexusThothMapper.identify(rel_path, all_imports)
 
-            # BUG FIX: salvar os dados do visitor no relatório
             data["mpot_4_violations"] = visitor.stats["mpot_4_violations"]
             data["debt_tags"]         = find_debt_tags(content)
 
@@ -48,16 +55,38 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
             if backups:
                 data["archaeology_layers"] = _perform_triple_diff(content, backups)
 
+        elif is_html:
+            sem_html = HTMLSemanticAnalyzer(content)
+            data.update(sem_html.get_summary())
+            data["god_assignment"] = NexusThothMapper.identify(rel_path, [])
+            data["mpot_4_violations"] = 0 
+            data["debt_tags"]         = find_debt_tags(content)
+
+        elif is_css:
+            sem_css = CSSSemanticAnalyzer(content)
+            data.update(sem_css.get_summary())
+            data["god_assignment"] = NexusThothMapper.identify(rel_path, [])
+            data["mpot_4_violations"] = 0 
+            data["debt_tags"]         = find_debt_tags(content) 
+
+        elif is_js:
+            # NOVO: FLUXO JS/TS
+            sem_js = JSSemanticAnalyzer(content)
+            data.update(sem_js.get_summary())
+            # Envia as dependências mapeadas para tentar inferir Deus Regente (ex: front vs back)
+            data["god_assignment"] = NexusThothMapper.identify(rel_path, sem_js.imports)
+            data["mpot_4_violations"] = 0 
+            data["debt_tags"]         = find_debt_tags(content) # Suporta // TODO e /* TODO */ nativamente
+
         else:
             sem_c = CSemanticAnalyzer(content)
             data.update(sem_c.get_summary())
             data["god_assignment"]    = NexusThothMapper.identify(rel_path, sem_c.includes)
-            # BUG FIX: C/C++ também precisa de debt_tags (comentários TODO/FIXME)
             data["mpot_4_violations"] = 0
             data["debt_tags"]         = find_debt_tags(content)
             
         if source: 
-            data["source_minified"] = content[:5000] # Token Optimization
+            data["source_minified"] = content[:5000]
         
     except Exception as e:
         data["error"] = str(e)
