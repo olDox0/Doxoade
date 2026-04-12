@@ -7,22 +7,20 @@ from pathlib import Path
 from typing import Iterable, Iterator
 
 
+try:
+    from doxoade.tools.filesystem import SYSTEM_IGNORES as _SYSTEM_IGNORES
+except ImportError:
+    _SYSTEM_IGNORES: set[str] = set()
+
 SKIP_DIRS = {
-    ".git",
-    ".hg",
-    ".svn",
+    ".git", ".hg", ".svn",
     "__pycache__",
     "node_modules",
-    ".mypy_cache",
-    ".pytest_cache",
-    ".ruff_cache",
+    ".mypy_cache", ".pytest_cache", ".ruff_cache",
     ".tox",
-    ".venv",
-    "venv",
-    "env",
-    "build",
-    "dist",
-}
+    ".venv", "venv", "env",
+    "build", "dist",
+} | {s.lower() for s in _SYSTEM_IGNORES}
 
 
 @dataclass(frozen=True)

@@ -2,12 +2,10 @@
 # doxoade/commands/refactor_systems/refactor_verify.py
 from __future__ import annotations
 
-import os
 import ast
-
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 
 @dataclass(frozen=True)
@@ -27,13 +25,19 @@ class VerifyResult:
 
 
 def _iter_py_files(root: Path):
+    try:
+        from doxoade.tools.filesystem import SYSTEM_IGNORES
+        skip = {s.lower() for s in SYSTEM_IGNORES}
+    except ImportError:
+        skip = {"__pycache__", ".doxoade", ".doxoade_cache", ".dox_agent_workspace", ".git", ".venv", "venv", "env", "node_modules"}
+
     for p in root.rglob("*.py"):
-        if "__pycache__" in p.parts:
+        if any(part.lower() in skip or part.startswith(".") for part in p.parts):
             continue
         yield p
 
 
-def _parse_file(path: Path):
+def _parse_file(path: Path) -> Tuple[ast.AST | None, List[str]]:
     try:
         text = path.read_text(encoding="utf-8", errors="ignore")
         return ast.parse(text), text.splitlines()
@@ -43,202 +47,197 @@ def _parse_file(path: Path):
 
 def _find_function_usages(tree: ast.AST, function_name: str) -> List[int]:
     lines = []
-
     class Visitor(ast.NodeVisitor):
-        def visit_Call(self, node: ast.Call):
-            if isinstance(node.func, ast.Name) and node.func.id == function_name:
-                lines.append(node.lineno)
-            elif isinstance(node.func, ast.Attribute):
-                if node.func.attr == function_name:
-                    lines.append(node.lineno)
+        def visit_Name(self, node: ast.Name):
+            if node.id == function_name and isinstance(getattr(node, "ctx", None), ast.Load):
+                lines.append(getattr(node, "lineno", 0))
             self.generic_visit(node)
-
+        def visit_Attribute(self, node: ast.Attribute):
+            if node.attr == function_name and isinstance(getattr(node, "ctx", None), ast.Load):
+                lines.append(getattr(node, "lineno", 0))
+            self.generic_visit(node)
     Visitor().visit(tree)
-    return lines
+    return sorted(list(set(l for l in lines if l > 0)))
 
 
-def _find_imports(tree: ast.AST, function_name: str):
+def _find_imports(tree: ast.AST, function_name: str) -> List[Tuple[str, str, int]]:
     imports = []
-
-    for node in getattr(tree, "body", []):
+    for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             for alias in node.names:
-                if alias.name == function_name:
-                    imports.append((
-                        node.module,
-                        alias.name,
-                        getattr(node, "lineno", 0)
-                    ))
-
+                if alias.name == function_name or getattr(alias, "asname", None) == function_name:
+                    imports.append((node.module or "", alias.name, getattr(node, "lineno", 0)))
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == function_name or getattr(alias, "asname", None) == function_name:
+                    imports.append((alias.name, getattr(alias, "asname", None) or alias.name, getattr(node, "lineno", 0)))
     return imports
+
+
+def _is_function_defined(tree: ast.AST, function_name: str) -> bool:
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if node.name == function_name:
+                return True
+    return False
 
 
 def verify_imports(root: Path, function_name: str, expected_module: str) -> VerifyResult:
     root = root.resolve()
     expected_import = f"from {expected_module} import {function_name}"
-
     issues: List[VerifyIssue] = []
 
     for file_path in _iter_py_files(root):
-        tree, lines = _parse_file(file_path)
+        tree, _ = _parse_file(file_path)
         if tree is None:
             continue
 
         usages = _find_function_usages(tree, function_name)
-        if not usages:
-            continue
-
+        defined_here = _is_function_defined(tree, function_name)
         imports = _find_imports(tree, function_name)
 
-        # Nenhum import encontrado
-        if not imports:
-            for line in usages:
-                issues.append(VerifyIssue(
-                    file=file_path,
-                    line=line,
-                    kind="MISSING_IMPORT",
-                    detail="Função usada sem import"
-                ))
+        if defined_here:
+            if imports:
+                for module, _, lineno in imports:
+                    issues.append(VerifyIssue(file_path, lineno, "WRONG_IMPORT", "Import desnecessário na própria fonte"))
             continue
 
-        # Vários imports conflitantes
+        if not usages:
+            if imports:
+                for module, _, lineno in imports:
+                    if module != expected_module:
+                        issues.append(VerifyIssue(file_path, lineno, "WRONG_IMPORT", "Import antigo em arquivo sem uso"))
+                    else:
+                        if file_path.name != "__init__.py":
+                            issues.append(VerifyIssue(file_path, lineno, "WRONG_IMPORT", "Import sem uso"))
+            continue
+
+        if not imports:
+            for line in usages:
+                issues.append(VerifyIssue(file_path, line, "MISSING_IMPORT", "Função usada sem import"))
+            continue
+
         if len(imports) > 1:
             for module, _, lineno in imports:
-                issues.append(VerifyIssue(
-                    file=file_path,
-                    line=lineno,
-                    kind="MULTIPLE_IMPORTS",
-                    detail=f"Import múltiplo de {function_name} ({module})"
-                ))
+                issues.append(VerifyIssue(file_path, lineno, "MULTIPLE_IMPORTS", f"Import múltiplo de {function_name} ({module})"))
             continue
 
         module, _, lineno = imports[0]
 
-        # Import errado
         if module != expected_module:
-            issues.append(VerifyIssue(
-                file=file_path,
-                line=lineno,
-                kind="WRONG_IMPORT",
-                detail=f"Importando de {module}, esperado {expected_module}"
-            ))
+            issues.append(VerifyIssue(file_path, lineno, "WRONG_IMPORT", f"Importando de '{module}', esperado '{expected_module}'"))
             continue
 
-        # OK
-        issues.append(VerifyIssue(
-            file=file_path,
-            line=lineno,
-            kind="OK",
-            detail="Import correto"
-        ))
+        issues.append(VerifyIssue(file_path, lineno, "OK", "Import correto"))
 
-    return VerifyResult(
-        root=root,
-        function_name=function_name,
-        expected_import=expected_import,
-        issues=issues
-    )
+    return VerifyResult(root, function_name, expected_import, issues)
+
+
+def find_import_insertion_point(tree: ast.AST) -> int:
+    insert_line = 0
+    body = getattr(tree, "body", [])
+    if not body:
+        return 0
+
+    idx = 0
+    if isinstance(body[idx], ast.Expr) and isinstance(getattr(body[idx].value, "value", None), str):
+        insert_line = getattr(body[idx], "end_lineno", 1)
+        idx += 1
+
+    while idx < len(body):
+        node = body[idx]
+        if isinstance(node, ast.ImportFrom) and getattr(node, "module", "") == "__future__":
+            insert_line = getattr(node, "end_lineno", insert_line)
+            idx += 1
+        else:
+            break
+
+    last_import_line = insert_line
+    # Limita apenas a nós Globais (top-level)
+    for node in body[idx:]:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            last_import_line = max(last_import_line, getattr(node, "end_lineno", last_import_line))
+        else:
+            break
+
+    return last_import_line
+
+
+def fix_imports(file_path: Path, target: str, expected_module: str):
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+    try:
+        tree = ast.parse(text)
+    except Exception:
+        return  # O arquivo já possui erros de sintaxe graves, não arriscamos modificar.
+
+    defined_here = _is_function_defined(tree, target)
+    expected_import = f"from {expected_module} import {target}"
+    usages = _find_function_usages(tree, target)
     
+    nodes_to_replace = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if any(alias.name == target for alias in node.names):
+                nodes_to_replace.append(node)
+        elif isinstance(node, ast.Import):
+            if any(alias.name == target for alias in node.names):
+                nodes_to_replace.append(node)
 
-def fix_imports(file_path: Path, target: str, expected_import: str):
-    """
-    Corrige imports de uma função dentro de um arquivo.
-    """
-    lines = file_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    had_import = len(nodes_to_replace) > 0
+    is_init = file_path.name == "__init__.py"
+    
+    # Apenas injeta se há usos e se não é onde a função reside.
+    needs_import = (not defined_here) and (len(usages) > 0 or (is_init and had_import))
 
-    new_lines = []
-    has_correct_import = False
-    has_any_import = False
+    lines = text.splitlines()
+    nodes_to_replace.sort(key=lambda n: getattr(n, 'lineno', 1), reverse=True)
 
-    for line in lines:
-        stripped = line.strip()
-
-        # Detecta import da função
-        if stripped.startswith("from ") and f"import {target}" in stripped:
-            has_any_import = True
-
-            if stripped == expected_import:
-                has_correct_import = True
-                new_lines.append(line)
+    for node in nodes_to_replace:
+        start = node.lineno - 1
+        end = getattr(node, 'end_lineno', node.lineno)
+        
+        if isinstance(node, ast.ImportFrom):
+            new_aliases = [alias for alias in node.names if alias.name != target]
+            if not new_aliases:
+                del lines[start:end]
             else:
-                # Corrige import errado
-                new_lines.append(expected_import)
-        else:
-            new_lines.append(line)
+                indent = lines[start][:len(lines[start]) - len(lines[start].lstrip())]
+                alias_strs = [a.name + (f" as {a.asname}" if getattr(a, "asname", None) else "") for a in new_aliases]
+                mod = node.module or ""
+                level = getattr(node, "level", 0)
+                prefix = "." * level
+                new_stmt = f"{indent}from {prefix}{mod} import {', '.join(alias_strs)}"
+                lines[start:end] = [new_stmt]
+                
+        elif isinstance(node, ast.Import):
+            new_aliases = [alias for alias in node.names if alias.name != target]
+            if not new_aliases:
+                del lines[start:end]
+            else:
+                indent = lines[start][:len(lines[start]) - len(lines[start].lstrip())]
+                alias_strs = [a.name + (f" as {a.asname}" if getattr(a, "asname", None) else "") for a in new_aliases]
+                new_stmt = f"{indent}import {', '.join(alias_strs)}"
+                lines[start:end] = [new_stmt]
 
-    # Se usa a função mas não tem import correto → inserir
-    file_content = "\n".join(lines)
-    uses_function = target in file_content
-
-    if uses_function and not has_correct_import:
-        insert_index = find_import_insertion_point(new_lines)
-        new_lines.insert(insert_index, expected_import)
-
-    file_path.write_text("\n".join(new_lines), encoding="utf-8")
-
-
-def find_import_insertion_point(lines):
-    """
-    Encontra onde inserir imports (após bloco de imports).
-    """
-    last_import = -1
-
-    for i, line in enumerate(lines):
-        if line.strip().startswith(("import ", "from ")):
-            last_import = i
-
-    return last_import + 1
-
-
-def verify_and_fix(root: Path, target: str, source_module: str, apply_fix=False):
-    """
-    Verifica e opcionalmente corrige imports.
-    """
-    expected_import = f"from {source_module} import {target}"
-
-    ok = 0
-    missing = 0
-    wrong = 0
-
-    for file in root.rglob("*.py"):
+    if needs_import:
+        text_without_target = "\n".join(lines)
         try:
-            content = file.read_text(encoding="utf-8", errors="ignore")
+            tree2 = ast.parse(text_without_target)
+            insert_idx = find_import_insertion_point(tree2)
         except Exception:
-            continue
+            insert_idx = 0
+            
+        if expected_import not in lines:
+            lines.insert(insert_idx, expected_import)
 
-        if target not in content:
-            continue
+    file_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-        lines = content.splitlines()
 
-        has_correct = False
-        has_import = False
-
-        for line in lines:
-            if f"import {target}" in line:
-                has_import = True
-                if expected_import in line:
-                    has_correct = True
-
-        if has_correct:
-            ok += 1
-            print(f"[OK] {file}")
-        elif has_import:
-            wrong += 1
-            print(f"[WRONG] {file}")
-
-            if apply_fix:
-                fix_imports(file, target, expected_import)
-                print(f"  [FIXED]")
-        else:
-            missing += 1
-            print(f"[MISS] {file}")
-
-            if apply_fix:
-                fix_imports(file, target, expected_import)
-                print(f"  [FIXED]")
-
-    print("\n[RESUMO]")
-    print(f"  OK: {ok}")
-    print(f"  MISSING_IMPORT: {missing}")
-    print(f"  WRONG_IMPORT: {wrong}")
+def verify_and_fix(root: Path, function_name: str, expected_module: str) -> VerifyResult:
+    result = verify_imports(root, function_name, expected_module)
+    files_to_fix = {issue.file for issue in result.issues if issue.kind != "OK"}
+    
+    for file_path in files_to_fix:
+        fix_imports(file_path, function_name, expected_module)
+        
+    return verify_imports(root, function_name, expected_module)
