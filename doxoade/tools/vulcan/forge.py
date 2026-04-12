@@ -102,7 +102,7 @@ def assess_file_for_vulcan(file_path: str) -> tuple[bool, str | None]:
         return False, f"AST inválida ({type(e).__name__})"
 
     node_count = sum(1 for _ in ast.walk(tree))
-    if node_count > 2400:
+    if node_count > 3000:
         return False, f"complexidade alta (nodes={node_count})"
 
     risky_hits = 0
@@ -113,7 +113,7 @@ def assess_file_for_vulcan(file_path: str) -> tuple[bool, str | None]:
             if node.module.split('.')[0] in _RISKY_IMPORTS:
                 risky_hits += 1
 
-    if risky_hits >= 2 and node_count > 900:
+    if risky_hits >= 2 and node_count > 1000:
         return False, f"arquivo complexo com APIs sensíveis (risk={risky_hits}, nodes={node_count})"
 
     return True, None

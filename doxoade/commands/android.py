@@ -5,10 +5,11 @@ import shutil
 import sys
 import subprocess
 from datetime import datetime
+
 from doxoade.tools.doxcolors import Fore
-from ..shared_tools import ExecutionLogger
-def is_termux():
-    return "com.termux" in os.environ.get("PREFIX", "") or os.path.exists("/data/data/com.termux")
+from doxoade.shared_tools import ExecutionLogger
+from doxoade.tools.system_utils import is_termux
+
 def ensure_storage_access():
     """Verifica e solicita acesso ao armazenamento compartilhado."""
     storage_path = os.path.expanduser("~/storage")

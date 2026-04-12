@@ -82,7 +82,6 @@ class DoxoadeLazyGroup(click.Group):
             'pr': 'doxoade.commands.git_pr:pr',
             'python': 'doxoade.commands.python:python',
             'rebuild': 'doxoade.commands.rebuild:rebuild',
-            'refactor':'doxoade.commands.refactor_systems.refactor_command:refactor_group',
             'regression-test': 'doxoade.commands.regression_test:regression_test',
             'release': 'doxoade.commands.git_workflow:release',
             'rescue': 'doxoade.commands.rescue_cmd:rescue',

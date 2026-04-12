@@ -37,7 +37,7 @@ from .forge import VulcanForge as VForge, assess_file_for_vulcan as AFVul
 # ------------ Constantes ------------
 
 _BATCH_SIZE: int = int(os.environ.get("DOXOADE_PITSTOP_BATCH", "8"))
-_BATCH_TIMEOUT: int = 360           # segundos por lote
+_BATCH_TIMEOUT: int = 300           # segundos por lote
 _QUEUE_SENTINEL = object()          # token de encerramento de fila
 
 

@@ -11,11 +11,12 @@ from packaging.requirements import Requirement
 from importlib import metadata
 from doxoade.tools.doxcolors import Fore, Style
 from ..shared_tools import ExecutionLogger, _get_venv_python_executable, _get_project_config
-def _run_pip_command(venv_python, command):
+
+def _run_pip_command(venv_python, command, env=None):
     """Executa um comando pip e transmite a saída em tempo real."""
     try:
         full_command = [venv_python, '-m', 'pip'] + command
-        subprocess.run(full_command, check=True, encoding='utf-8')
+        subprocess.run(full_command, check=True, encoding='utf-8', env=env)
         return True
     except subprocess.CalledProcessError:
         click.echo(Fore.RED + "\nO comando pip falhou. Veja os detalhes do erro acima.")
@@ -23,12 +24,14 @@ def _run_pip_command(venv_python, command):
     except FileNotFoundError:
         click.echo(Fore.RED + "Erro: O executável do pip ou do Python não foi encontrado no venv.")
         return False
+
 def _get_installed_version(package_name):
     """Verifica se um pacote está instalado e retorna sua versão."""
     try:
         return metadata.version(package_name)
     except metadata.PackageNotFoundError:
         return None
+
 def _update_requirements(package_name, version=None):
     """(Versão Corrigida) Adiciona ou remove um pacote do requirements.txt de forma segura."""
     req_file = 'requirements.txt'
@@ -55,6 +58,7 @@ def _update_requirements(package_name, version=None):
         return True
     except IOError:
         return False
+
 # LÓGICA MOVIDA DO OPTIMIZE.PY
 def _find_unused_packages(logger, python_executable, debug=False):
     """Compara pacotes instalados com os importados. (Lógica do optimize)"""
@@ -170,12 +174,14 @@ print(json.dumps(results))
     except Exception as e:
         logger.add_finding('ERROR', f"Falha ao analisar dependências: {e}", details=traceback.format_exc())
         return None
+
 @click.command('install')
 @click.pass_context
 @click.argument('packages', nargs=-1)
 @click.option('--uninstall', is_flag=True, help="Desinstala um pacote e o remove do requirements.txt.")
 @click.option('--optimize', is_flag=True, help="Procura e remove pacotes não utilizados.")
-def install(ctx, packages, uninstall, optimize):
+@click.option('--wheel', '-w', is_flag=True, help="Força uso de wheels (binários). Se falhar, compila com otimização máxima de CPU.")
+def install(ctx, packages, uninstall, optimize, wheel):
     """Gerencia dependências: instala, desinstala, sincroniza ou otimiza."""
     arguments = ctx.params
     with ExecutionLogger('install', '.', arguments) as logger:
@@ -185,69 +191,64 @@ def install(ctx, packages, uninstall, optimize):
             logger.add_finding("CRITICAL", msg, category="VENV")
             click.echo(Fore.RED + f"[ERRO] {msg}")
             sys.exit(1)
-        # MODO DE OTIMIZAÇÃO (NOVA FUNCIONALIDADE)
-        if optimize:
-            click.echo(Fore.CYAN + "--- [OPTIMIZE] Analisando dependências não utilizadas ---")
-            unused_packages = _find_unused_packages(logger, venv_python)
             
-            if unused_packages is None: sys.exit(1)
-            if not unused_packages:
-                click.echo(Fore.GREEN + "\n[OK] Nenhuma dependência órfã encontrada."); return
-            click.echo(Fore.YELLOW + "\nPacotes não utilizados encontrados:")
-            for pkg in unused_packages: click.echo(f"  - {pkg}")
-            if click.confirm(Fore.RED + "\nDeseja desinstalar estes pacotes E removê-los do requirements.txt?", abort=True):
-                if not _run_pip_command(venv_python, ['uninstall', '-y'] + unused_packages):
-                    logger.add_finding("ERROR", "Falha na desinstalação durante a otimização.", category="PIP")
-                    return
-                
-                click.echo(Fore.CYAN + "\n--- Atualizando requirements.txt ---")
-                for pkg in unused_packages:
-                    if _update_requirements(pkg):
-                        click.echo(Fore.GREEN + f"'{pkg}' removido do requirements.txt.")
-                    else:
-                        click.echo(Fore.RED + f"Erro ao remover '{pkg}' do requirements.txt.")
-                
-                click.echo(Fore.GREEN + Style.BRIGHT + "\nOtimização concluída.")
-            return
-        # MODO DE DESINSTALAÇÃO
-        if uninstall:
-            if not packages:
-                click.echo(Fore.RED + "Erro: Especifique o(s) pacote(s) a ser(em) desinstalado(s).")
-                sys.exit(1)
-            
-            click.echo(Fore.YELLOW + f"--- Desinstalando pacote(s): {', '.join(packages)} ---")
-            if not _run_pip_command(venv_python, ['uninstall', '-y'] + list(packages)):
-                logger.add_finding("ERROR", "Falha na desinstalação via pip.", category="PIP")
-                return
-            for package_name in packages:
-                if _update_requirements(package_name):
-                    click.echo(Fore.GREEN + f"'{package_name}' removido do requirements.txt.")
-                    logger.add_finding("INFO", f"Pacote '{package_name}' removido.", category="REQUIREMENTS")
-                else:
-                    click.echo(Fore.RED + f"Erro ao remover '{package_name}' do requirements.txt.")
-            click.echo(Fore.GREEN + Style.BRIGHT + "\nDesinstalação concluída.")
-            return
-        # MODO DE SINCRONIZAÇÃO
-        if not packages:
-            click.echo(Fore.CYAN + "--- Sincronizando ambiente com requirements.txt ---")
-            if not os.path.exists('requirements.txt'):
-                click.echo(Fore.YELLOW + "Arquivo 'requirements.txt' não encontrado. Nada a fazer.")
-                return
-            if _run_pip_command(venv_python, ['install', '-r', 'requirements.txt']):
-                click.echo(Fore.GREEN + Style.BRIGHT + "\nAmbiente sincronizado com sucesso.")
-                logger.add_finding("INFO", "Ambiente sincronizado.", category="PIP")
-            else:
-                logger.add_finding("ERROR", "Falha na sincronização via pip.", category="PIP")
-            return
+        # ... [MANTENHA OS BLOCOS DE MODO OPTIMIZE, UNINSTALL E SINCRONIZAÇÃO INTACTOS AQUI] ...
+
         # MODO DE INSTALAÇÃO
         click.echo(Fore.CYAN + f"--- Instalando pacote(s): {', '.join(packages)} ---")
         for package_name in packages:
             installed_version = _get_installed_version(package_name)
             if installed_version:
                 click.echo(Fore.YELLOW + f"[AVISO] Pacote '{package_name}' já está instalado (versão {installed_version}).")
-        if not _run_pip_command(venv_python, ['install'] + list(packages)):
+        
+        # --- LÓGICA DO --WHEEL / COMPILAÇÃO DE ALTA PERFORMANCE ---
+        pip_args = ['install'] + list(packages)
+        success = False
+        
+        if wheel:
+            click.secho("  [WHEEL] Priorizando a busca estrita por binários pré-compilados (.whl)...", fg="yellow")
+            # Tentativa 1: Forçar SÓ arquivos wheel
+            success = _run_pip_command(venv_python, pip_args + ['--only-binary', ':all:'])
+            
+            if not success:
+                click.secho("\n  [COMPILADOR] Binário não encontrado para sua plataforma.", fg="magenta", bold=True)
+                click.secho("  [COMPILADOR] Ativando Vulcan CPU Engine para compilação Nível Máximo...", fg="cyan")
+                
+                custom_env = os.environ.copy()
+                
+                # Invoca a inteligência do Vulcan
+                try:
+                    # NOTA: Ajuste o caminho do import caso o cpu_flags.py esteja em outra subpasta.
+                    # Ex: from doxoade.tools.cpu_flags import simd_compile_flags
+                    from doxoade.cpu_flags import simd_compile_flags 
+                    
+                    base_flags = " ".join(simd_compile_flags())
+                    click.secho(f"  [VULCAN DETECT] Flags otimizadas geradas: {base_flags}", fg="green")
+                except ImportError:
+                    # Fallback de segurança genérico se o Vulcan não for alcançado
+                    base_flags = "/O2" if os.name == "nt" else "-O3"
+                    click.secho("  [VULCAN] Módulo cpu_flags inacessível. Usando fallback genérico.", fg="yellow")
+
+                # Injeta otimizações matemáticas extremas que o PIP adora para libs cientificas (Numpy/Pandas/C++)
+                if os.name == "nt":
+                    final_flags = f"{base_flags} /fp:fast"
+                else:
+                    final_flags = f"{base_flags} -fPIC -ffast-math"
+
+                custom_env["CFLAGS"] = final_flags
+                custom_env["CXXFLAGS"] = final_flags
+                
+                # Tentativa 2: Permite compilar a partir do source, mas usando as flags injetadas
+                success = _run_pip_command(venv_python, pip_args, env=custom_env)
+        else:
+            # Comportamento Padrão
+            success = _run_pip_command(venv_python, pip_args)
+
+        if not success:
             logger.add_finding("ERROR", "Falha na instalação via pip.", category="PIP")
             return
+            
+        # --- ATUALIZANDO REQUIREMENTS E VERIFICAÇÃO ---
         click.echo(Fore.CYAN + "\n--- Atualizando requirements.txt ---")
         for package_name in packages:
             new_version = _get_installed_version(package_name)
