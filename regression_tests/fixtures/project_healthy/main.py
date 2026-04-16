@@ -1,4 +1,5 @@
+# doxoade/regression_tests/fixtures/project_healthy/main.py
 def main():
-    print("Este projeto é saudável.")
-if __name__ == "__main__":
+    print('Este projeto é saudável.')
+if __name__ == '__main__':
     main()

@@ -1,4 +1,4 @@
-# doxoade/indexer/__init__.py
+# doxoade/doxoade/indexer/__init__.py
 """
 Sistema de Indexação de Código Python.
 Módulos:

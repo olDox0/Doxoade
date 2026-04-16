@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-# doxoade/tools/vulcan/lazy_loader.py
+# doxoade/doxoade/tools/vulcan/lazy_loader.py
 """
 VulcanLazyLoader — redirecionamento com lazy import, cache e fail-safe.
 
@@ -24,9 +23,7 @@ Segurança
   _SafetyAnalyzer       — detecta atexit/signal/thread/monkey-patch
                           antes de adicionar à política
 """
-
 from __future__ import annotations
-
 import ast
 import fnmatch
 import importlib.abc
@@ -37,9 +34,6 @@ import threading
 import time
 from pathlib import Path
 from typing import Optional
-
-
-# ── _LoadGuard ────────────────────────────────────────────────────────────────
 
 class _LoadGuard:
     """
@@ -70,7 +64,7 @@ class _LoadGuard:
         self._local = threading.local()
 
     def _set(self) -> set[str]:
-        if not hasattr(self._local, "loading"):
+        if not hasattr(self._local, 'loading'):
             self._local.loading = set()
         return self._local.loading
 
@@ -87,29 +81,23 @@ class _LoadGuard:
 
     def is_loading(self, name: str) -> bool:
         return name in self._set()
-
-
 _load_guard = _LoadGuard()
 
-
-# ── _SafetyAnalyzer ────────────────────────────────────────────────────────────
-
 class SafetyResult:
-    SAFE    = "safe"
-    WARNING = "warning"
-    UNSAFE  = "unsafe"
+    SAFE = 'safe'
+    WARNING = 'warning'
+    UNSAFE = 'unsafe'
 
     def __init__(self, level: str, reasons: list[str]) -> None:
-        self.level   = level
+        self.level = level
         self.reasons = reasons
-        self.safe    = level == self.SAFE
+        self.safe = level == self.SAFE
 
     def __bool__(self) -> bool:
         return self.safe
 
     def __repr__(self) -> str:
-        return f"SafetyResult({self.level!r}, {self.reasons!r})"
-
+        return f'SafetyResult({self.level!r}, {self.reasons!r})'
 
 class _SafetyAnalyzer:
     """
@@ -133,103 +121,56 @@ class _SafetyAnalyzer:
     Análise puramente sintática.  Efeitos colaterais dentro de funções
     chamadas no import-time não são detectados.  Cobre os padrões mais comuns.
     """
+    _UNSAFE_CALLS: frozenset[tuple[str, str]] = frozenset({('atexit', 'register'), ('signal', 'signal'), ('signal', 'set_wakeup_fd'), ('sys', 'setprofile'), ('sys', 'settrace'), ('faulthandler', 'enable'), ('faulthandler', 'register')})
+    _WARNING_CALLS: frozenset[tuple[str, str]] = frozenset({('threading', 'Thread'), ('threading', 'Timer'), ('multiprocessing', 'Process'), ('concurrent.futures', 'ThreadPoolExecutor'), ('concurrent.futures', 'ProcessPoolExecutor')})
 
-    _UNSAFE_CALLS: frozenset[tuple[str, str]] = frozenset({
-        ("atexit",       "register"),
-        ("signal",       "signal"),
-        ("signal",       "set_wakeup_fd"),
-        ("sys",          "setprofile"),
-        ("sys",          "settrace"),
-        ("faulthandler", "enable"),
-        ("faulthandler", "register"),
-    })
-
-    _WARNING_CALLS: frozenset[tuple[str, str]] = frozenset({
-        ("threading",           "Thread"),
-        ("threading",           "Timer"),
-        ("multiprocessing",     "Process"),
-        ("concurrent.futures",  "ThreadPoolExecutor"),
-        ("concurrent.futures",  "ProcessPoolExecutor"),
-    })
-
-    def analyze_source(self, source: str, filename: str = "<unknown>") -> SafetyResult:
+    def analyze_source(self, source: str, filename: str='<unknown>') -> SafetyResult:
         try:
             tree = ast.parse(source, filename=filename)
         except SyntaxError as e:
-            return SafetyResult(
-                SafetyResult.WARNING,
-                [f"SyntaxError ao parsear ({e}) — análise incompleta"],
-            )
-
+            return SafetyResult(SafetyResult.WARNING, [f'SyntaxError ao parsear ({e}) — análise incompleta'])
         reasons: list[str] = []
-
         for node in ast.iter_child_nodes(tree):
             self._check_stmt(node, reasons)
-
-        # sys.modules[...] = ...
         for node in ast.walk(tree):
             if isinstance(node, ast.Assign):
                 for target in node.targets:
-                    if (isinstance(target, ast.Subscript)
-                            and isinstance(target.value, ast.Attribute)
-                            and isinstance(target.value.value, ast.Name)
-                            and target.value.value.id == "sys"
-                            and target.value.attr == "modules"):
-                        reasons.append(
-                            f"L{node.lineno}: sys.modules[...] = ... "
-                            "[UNSAFE — monkey-patch direto]"
-                        )
-
-        # sys.meta_path.insert/append/remove
+                    if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Attribute) and isinstance(target.value.value, ast.Name) and (target.value.value.id == 'sys') and (target.value.attr == 'modules'):
+                        reasons.append(f'L{node.lineno}: sys.modules[...] = ... [UNSAFE — monkey-patch direto]')
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
                 fn = node.func
-                if (fn.attr in ("insert", "append", "remove")
-                        and isinstance(fn.value, ast.Attribute)
-                        and isinstance(fn.value.value, ast.Name)
-                        and fn.value.value.id == "sys"
-                        and fn.value.attr == "meta_path"):
-                    reasons.append(
-                        f"L{node.lineno}: sys.meta_path.{fn.attr}() "
-                        "[UNSAFE — modifica import machinery]"
-                    )
-
+                if fn.attr in ('insert', 'append', 'remove') and isinstance(fn.value, ast.Attribute) and isinstance(fn.value.value, ast.Name) and (fn.value.value.id == 'sys') and (fn.value.attr == 'meta_path'):
+                    reasons.append(f'L{node.lineno}: sys.meta_path.{fn.attr}() [UNSAFE — modifica import machinery]')
         level = SafetyResult.SAFE
         for r in reasons:
-            if "UNSAFE" in r:
+            if 'UNSAFE' in r:
                 level = SafetyResult.UNSAFE
                 break
-            if "WARNING" in r and level == SafetyResult.SAFE:
+            if 'WARNING' in r and level == SafetyResult.SAFE:
                 level = SafetyResult.WARNING
-
         return SafetyResult(level, reasons)
 
     def analyze_file(self, path: Path) -> SafetyResult:
         try:
-            source = path.read_text(encoding="utf-8", errors="replace")
+            source = path.read_text(encoding='utf-8', errors='replace')
         except OSError as e:
-            return SafetyResult(SafetyResult.WARNING, [f"Não foi possível ler {path}: {e}"])
+            return SafetyResult(SafetyResult.WARNING, [f'Não foi possível ler {path}: {e}'])
         return self.analyze_source(source, str(path))
 
     def _check_stmt(self, node: ast.AST, reasons: list[str]) -> None:
-        # Não desce dentro de funções/classes (efeitos ali são diferidos de qualquer forma)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             return
-
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
             self._check_call(node.value, node.lineno, reasons)
-
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
-            value = getattr(node, "value", None)
+            value = getattr(node, 'value', None)
             if value and isinstance(value, ast.Call):
-                self._check_call(value, getattr(node, "lineno", 0), reasons)
-
-        # Desce em if/try/with mas ignora `if __name__ == "__main__":`
+                self._check_call(value, getattr(node, 'lineno', 0), reasons)
         if isinstance(node, ast.If):
             if not self._is_main_guard(node.test):
                 for child in ast.iter_child_nodes(node):
                     self._check_stmt(child, reasons)
-
         if isinstance(node, (ast.Try, ast.With)):
             for child in ast.iter_child_nodes(node):
                 self._check_stmt(child, reasons)
@@ -239,110 +180,60 @@ class _SafetyAnalyzer:
         if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
             pair = (func.value.id, func.attr)
             if pair in self._UNSAFE_CALLS:
-                reasons.append(
-                    f"L{lineno}: {func.value.id}.{func.attr}() [UNSAFE]"
-                )
+                reasons.append(f'L{lineno}: {func.value.id}.{func.attr}() [UNSAFE]')
                 return
             if pair in self._WARNING_CALLS:
-                reasons.append(
-                    f"L{lineno}: {func.value.id}.{func.attr}() [WARNING — objeto criado em módulo level]"
-                )
-
-        # threading.Thread(...).start() — encadeado
-        if (isinstance(func, ast.Attribute)
-                and func.attr == "start"
-                and isinstance(func.value, ast.Call)):
+                reasons.append(f'L{lineno}: {func.value.id}.{func.attr}() [WARNING — objeto criado em módulo level]')
+        if isinstance(func, ast.Attribute) and func.attr == 'start' and isinstance(func.value, ast.Call):
             inner = func.value.func
             if isinstance(inner, ast.Attribute) and isinstance(inner.value, ast.Name):
                 if (inner.value.id, inner.attr) in self._WARNING_CALLS:
-                    reasons.append(
-                        f"L{lineno}: {inner.value.id}.{inner.attr}(...).start() "
-                        "[WARNING — thread iniciada em módulo level]"
-                    )
+                    reasons.append(f'L{lineno}: {inner.value.id}.{inner.attr}(...).start() [WARNING — thread iniciada em módulo level]')
 
     @staticmethod
     def _is_main_guard(node: ast.expr) -> bool:
-        return (
-            isinstance(node, ast.Compare)
-            and len(node.ops) == 1
-            and isinstance(node.ops[0], ast.Eq)
-            and isinstance(node.left, ast.Name)
-            and node.left.id == "__name__"
-            and len(node.comparators) == 1
-            and isinstance(node.comparators[0], ast.Constant)
-            and node.comparators[0].value == "__main__"
-        )
-
-
+        return isinstance(node, ast.Compare) and len(node.ops) == 1 and isinstance(node.ops[0], ast.Eq) and isinstance(node.left, ast.Name) and (node.left.id == '__name__') and (len(node.comparators) == 1) and isinstance(node.comparators[0], ast.Constant) and (node.comparators[0].value == '__main__')
 _safety_analyzer = _SafetyAnalyzer()
 
-
-def analyze_module_safety(
-    module_name: str,
-    search_paths: list[Path] | None = None,
-    project_root: Path | None = None,   # ← ADD
-) -> SafetyResult:
-    # Resolve caminho de arquivo direto (ex: "engine/thinking/drawer_router.py")
-    if project_root and (module_name.endswith(".py")           # ← ADD bloco
-                         or "/" in module_name
-                         or "\\" in module_name):
+def analyze_module_safety(module_name: str, search_paths: list[Path] | None=None, project_root: Path | None=None) -> SafetyResult:
+    if project_root and (module_name.endswith('.py') or '/' in module_name or '\\' in module_name):
         candidate = (project_root / module_name).resolve()
         if candidate.exists():
             return _safety_analyzer.analyze_file(candidate)
-        return SafetyResult(SafetyResult.WARNING,
-                            [f"Arquivo não encontrado: {candidate}"])
-
-    # Tentativa via importlib (pacotes instalados)
+        return SafetyResult(SafetyResult.WARNING, [f'Arquivo não encontrado: {candidate}'])
     try:
         spec = importlib.util.find_spec(module_name)
         if spec and spec.origin:
-            if spec.origin.endswith(".py"):
+            if spec.origin.endswith('.py'):
                 return _safety_analyzer.analyze_file(Path(spec.origin))
-            # Extensão C (.pyd/.so) — sem exec_module, LazyLoader não atua
-            if spec.origin.endswith((".pyd", ".so", ".dll")):
-                return SafetyResult(
-                    SafetyResult.SAFE,
-                    ["Extensão C — LazyLoader não intercepta (sem exec_module)."],
-                )
+            if spec.origin.endswith(('.pyd', '.so', '.dll')):
+                return SafetyResult(SafetyResult.SAFE, ['Extensão C — LazyLoader não intercepta (sem exec_module).'])
     except (ModuleNotFoundError, ValueError, AttributeError):
         pass
-
-    # Busca manual — inclui project_root como primeiro candidato  ← ADD
-    parts = module_name.split(".")
-    rel   = (
-        Path(*parts[:-1]) / (parts[-1] + ".py")
-        if len(parts) > 1
-        else Path(parts[0] + ".py")
-    )
+    parts = module_name.split('.')
+    rel = Path(*parts[:-1]) / (parts[-1] + '.py') if len(parts) > 1 else Path(parts[0] + '.py')
     roots = []
-    if project_root:                                             # ← ADD
+    if project_root:
         roots.append(project_root)
     roots.extend(search_paths or [Path(p) for p in sys.path if p])
-
     for base in roots:
         candidate = base / rel
         if candidate.exists():
             return _safety_analyzer.analyze_file(candidate)
-
-    return SafetyResult(SafetyResult.WARNING,
-                        ["Arquivo .py não encontrado — análise impossível"])
-
-
-# ── AccessPolicy ──────────────────────────────────────────────────────────────
+    return SafetyResult(SafetyResult.WARNING, ['Arquivo .py não encontrado — análise impossível'])
 
 class ValidationResult:
-    STATUS_OK        = "ok"
-    STATUS_PROTECTED = "protected"
-    STATUS_INACTIVE  = "inactive"
+    STATUS_OK = 'ok'
+    STATUS_PROTECTED = 'protected'
+    STATUS_INACTIVE = 'inactive'
 
-    def __init__(self, status: str, reason: str = "") -> None:
+    def __init__(self, status: str, reason: str='') -> None:
         self.status = status
         self.reason = reason
-        self.ok     = status == self.STATUS_OK
+        self.ok = status == self.STATUS_OK
 
     def __repr__(self) -> str:
-        return f"ValidationResult({self.status!r}, {self.reason!r})"
-
+        return f'ValidationResult({self.status!r}, {self.reason!r})'
 
 class AccessPolicy:
     """
@@ -358,18 +249,13 @@ class AccessPolicy:
     "numpy"    → "numpy" + "numpy.*"
     "myapp.*"  → apenas subpacotes (não "myapp" em si)
     """
+    MODE_WHITELIST = 'whitelist'
+    MODE_BLACKLIST = 'blacklist'
 
-    MODE_WHITELIST = "whitelist"
-    MODE_BLACKLIST = "blacklist"
-
-    def __init__(
-        self,
-        mode: str = MODE_WHITELIST,
-        patterns: list[str] | None = None,
-    ) -> None:
-        self.mode     = mode
+    def __init__(self, mode: str=MODE_WHITELIST, patterns: list[str] | None=None) -> None:
+        self.mode = mode
         self.patterns = list(patterns or [])
-        self._lock    = threading.Lock()
+        self._lock = threading.Lock()
 
     def add(self, pattern: str) -> bool:
         with self._lock:
@@ -392,77 +278,26 @@ class AccessPolicy:
         _NEVER_LAZY_PREFIXES — o finder o ignora mesmo que esteja na política.
         """
         if pattern in _NEVER_LAZY:
-            return ValidationResult(
-                ValidationResult.STATUS_PROTECTED,
-                f"'{pattern}' está em _NEVER_LAZY (módulo crítico). "
-                "O finder ignora este módulo independentemente da política.",
-            )
+            return ValidationResult(ValidationResult.STATUS_PROTECTED, f"'{pattern}' está em _NEVER_LAZY (módulo crítico). O finder ignora este módulo independentemente da política.")
         for prefix in _NEVER_LAZY_PREFIXES:
-            if (pattern == prefix
-                    or pattern.startswith(prefix + ".")
-                    or pattern.startswith(prefix + "_")):
-                return ValidationResult(
-                    ValidationResult.STATUS_PROTECTED,
-                    f"'{pattern}' tem prefixo protegido '{prefix}'. "
-                    "O finder ignora este módulo independentemente da política.",
-                )
+            if pattern == prefix or pattern.startswith(prefix + '.') or pattern.startswith(prefix + '_'):
+                return ValidationResult(ValidationResult.STATUS_PROTECTED, f"'{pattern}' tem prefixo protegido '{prefix}'. O finder ignora este módulo independentemente da política.")
         return ValidationResult(ValidationResult.STATUS_OK)
 
     def allows(self, module_name: str) -> bool:
         with self._lock:
             patterns = self.patterns
-        matched = any(
-            module_name == p
-            or module_name.startswith(p + ".")
-            or fnmatch.fnmatchcase(module_name, p)
-            for p in patterns
-        )
+        matched = any((module_name == p or module_name.startswith(p + '.') or fnmatch.fnmatchcase(module_name, p) for p in patterns))
         return matched if self.mode == self.MODE_WHITELIST else not matched
 
     def to_dict(self) -> dict:
-        return {"mode": self.mode, "patterns": list(self.patterns)}
+        return {'mode': self.mode, 'patterns': list(self.patterns)}
 
     @classmethod
-    def from_dict(cls, d: dict) -> "AccessPolicy":
-        return cls(
-            mode     = d.get("mode", cls.MODE_WHITELIST),
-            patterns = d.get("patterns", []),
-        )
-
-
-# ── Conjuntos de exclusão ─────────────────────────────────────────────────────
-
-_NEVER_LAZY: frozenset[str] = frozenset({
-    "sys", "builtins", "_thread", "_io", "_abc", "_warnings",
-    "_codecs", "_signal", "_collections", "_functools", "_operator",
-    "_heapq", "_bisect", "_random", "_struct", "_datetime",
-    "_weakref", "_weakrefset", "_sre", "_locale",
-    "importlib", "importlib.abc", "importlib.machinery", "importlib.util",
-    "importlib._bootstrap", "importlib._bootstrap_external",
-    "_frozen_importlib", "_frozen_importlib_external",
-    "abc", "types", "warnings", "codecs", "io", "os", "os.path",
-    "posixpath", "ntpath", "genericpath",
-    "pathlib", "threading", "functools", "operator",
-    "contextlib", "collections", "collections.abc",
-    "fnmatch", "json", "re", "ast", "dis",
-    "_doxoade_vulcan_runtime", "_doxoade_vulcan_embedded", "_doxoade_vulcan_lazy",
-    "click", "click.core", "click.decorators", "click.exceptions",
-    "click.formatting", "click.globals", "click.termui", "click.types",
-    "click.utils",
-    "logging", "logging.handlers",
-})
-
-_NEVER_LAZY_PREFIXES: tuple[str, ...] = (
-    "_frozen",
-    "encodings",
-    "importlib",
-    "_doxoade",
-    "doxoade",
-    "_collections_abc",
-)
-
-
-# ── _LoadGuardedLoader ────────────────────────────────────────────────────────
+    def from_dict(cls, d: dict) -> 'AccessPolicy':
+        return cls(mode=d.get('mode', cls.MODE_WHITELIST), patterns=d.get('patterns', []))
+_NEVER_LAZY: frozenset[str] = frozenset({'sys', 'builtins', '_thread', '_io', '_abc', '_warnings', '_codecs', '_signal', '_collections', '_functools', '_operator', '_heapq', '_bisect', '_random', '_struct', '_datetime', '_weakref', '_weakrefset', '_sre', '_locale', 'importlib', 'importlib.abc', 'importlib.machinery', 'importlib.util', 'importlib._bootstrap', 'importlib._bootstrap_external', '_frozen_importlib', '_frozen_importlib_external', 'abc', 'types', 'warnings', 'codecs', 'io', 'os', 'os.path', 'posixpath', 'ntpath', 'genericpath', 'pathlib', 'threading', 'functools', 'operator', 'contextlib', 'collections', 'collections.abc', 'fnmatch', 'json', 're', 'ast', 'dis', '_doxoade_vulcan_runtime', '_doxoade_vulcan_embedded', '_doxoade_vulcan_lazy', 'click', 'click.core', 'click.decorators', 'click.exceptions', 'click.formatting', 'click.globals', 'click.termui', 'click.types', 'click.utils', 'logging', 'logging.handlers'})
+_NEVER_LAZY_PREFIXES: tuple[str, ...] = ('_frozen', 'encodings', 'importlib', '_doxoade', 'doxoade', '_collections_abc')
 
 class _LoadGuardedLoader(importlib.abc.Loader):
     """
@@ -479,17 +314,11 @@ class _LoadGuardedLoader(importlib.abc.Loader):
 
     def exec_module(self, module) -> None:
         if not _load_guard.acquire(self._name):
-            # Reentrada: este thread já está em exec_module para este módulo.
-            # Retorna sem re-executar — o chamador usará o estado atual de
-            # sys.modules[name] (proxy ou módulo parcial).
             return
         try:
             self._lazy.exec_module(module)
         finally:
             _load_guard.release(self._name)
-
-
-# ── VulcanLazyFinder ──────────────────────────────────────────────────────────
 
 class VulcanLazyFinder(importlib.abc.MetaPathFinder):
     """
@@ -504,9 +333,9 @@ class VulcanLazyFinder(importlib.abc.MetaPathFinder):
     """
 
     def __init__(self, policy: AccessPolicy) -> None:
-        self.policy  = policy
+        self.policy = policy
         self._active = True
-        self._lock   = threading.Lock()
+        self._lock = threading.Lock()
         self._stats: dict[str, dict] = {}
 
     def _should_lazy(self, fullname: str) -> bool:
@@ -515,9 +344,7 @@ class VulcanLazyFinder(importlib.abc.MetaPathFinder):
         if fullname in _NEVER_LAZY:
             return False
         for prefix in _NEVER_LAZY_PREFIXES:
-            if (fullname == prefix
-                    or fullname.startswith(prefix + ".")
-                    or fullname.startswith(prefix + "_")):
+            if fullname == prefix or fullname.startswith(prefix + '.') or fullname.startswith(prefix + '_'):
                 return False
         if _load_guard.is_loading(fullname):
             return False
@@ -528,36 +355,28 @@ class VulcanLazyFinder(importlib.abc.MetaPathFinder):
             return None
         if not self._should_lazy(fullname):
             return None
-
-        t0   = time.monotonic()
+        t0 = time.monotonic()
         spec = self._delegate(fullname, path, target)
-        dt   = (time.monotonic() - t0) * 1000
-
+        dt = (time.monotonic() - t0) * 1000
         if spec is None or spec.loader is None:
             return None
-        if not hasattr(spec.loader, "exec_module"):
-            # ExtensionFileLoader (.pyd/.so) — já redirecionado pelo MetaFinder
+        if not hasattr(spec.loader, 'exec_module'):
             return None
-
         try:
             inner = importlib.util.LazyLoader(spec.loader)
             spec.loader = _LoadGuardedLoader(inner, fullname)
         except Exception:
             return None
-
         with self._lock:
-            e = self._stats.setdefault(fullname, {
-                "hits": 0, "loaded": False, "defer_ms": 0.0, "load_ms": 0.0,
-            })
-            e["hits"]     += 1
-            e["defer_ms"] += dt
-
+            e = self._stats.setdefault(fullname, {'hits': 0, 'loaded': False, 'defer_ms': 0.0, 'load_ms': 0.0})
+            e['hits'] += 1
+            e['defer_ms'] += dt
         return spec
 
     def invalidate_caches(self) -> None:
         for f in sys.meta_path:
             if f is not self:
-                fn = getattr(f, "invalidate_caches", None)
+                fn = getattr(f, 'invalidate_caches', None)
                 if callable(fn):
                     try:
                         fn()
@@ -568,7 +387,7 @@ class VulcanLazyFinder(importlib.abc.MetaPathFinder):
         for finder in sys.meta_path:
             if finder is self:
                 continue
-            fn = getattr(finder, "find_spec", None)
+            fn = getattr(finder, 'find_spec', None)
             if not callable(fn):
                 continue
             try:
@@ -585,27 +404,19 @@ class VulcanLazyFinder(importlib.abc.MetaPathFinder):
     def resume(self) -> None:
         self._active = True
 
-    def mark_loaded(self, module_name: str, load_ms: float = 0.0) -> None:
+    def mark_loaded(self, module_name: str, load_ms: float=0.0) -> None:
         with self._lock:
             if module_name in self._stats:
-                self._stats[module_name]["loaded"]   = True
-                self._stats[module_name]["load_ms"] += load_ms
+                self._stats[module_name]['loaded'] = True
+                self._stats[module_name]['load_ms'] += load_ms
 
     def get_stats(self) -> dict[str, dict]:
         with self._lock:
             return {k: dict(v) for k, v in self._stats.items()}
-
-
-# ── API pública ────────────────────────────────────────────────────────────────
-
 _installed_finder: Optional[VulcanLazyFinder] = None
 _install_lock = threading.Lock()
 
-
-def install(
-    policy: Optional[AccessPolicy] = None,
-    position: int = 0,
-) -> VulcanLazyFinder:
+def install(policy: Optional[AccessPolicy]=None, position: int=0) -> VulcanLazyFinder:
     global _installed_finder
     with _install_lock:
         if _installed_finder is not None and _installed_finder in sys.meta_path:
@@ -614,7 +425,6 @@ def install(
         sys.meta_path.insert(position, finder)
         _installed_finder = finder
         return finder
-
 
 def uninstall() -> bool:
     global _installed_finder
@@ -628,31 +438,23 @@ def uninstall() -> bool:
         _installed_finder = None
         return True
 
-
 def get_finder() -> Optional[VulcanLazyFinder]:
     return _installed_finder
-
 
 def load_policy(config_path: Path) -> AccessPolicy:
     import json
     try:
         if config_path.exists():
-            return AccessPolicy.from_dict(
-                json.loads(config_path.read_text(encoding="utf-8"))
-            )
+            return AccessPolicy.from_dict(json.loads(config_path.read_text(encoding='utf-8')))
     except Exception:
         pass
     return AccessPolicy()
-
 
 def save_policy(policy: AccessPolicy, config_path: Path) -> bool:
     import json
     try:
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(
-            json.dumps(policy.to_dict(), indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        config_path.write_text(json.dumps(policy.to_dict(), indent=2, ensure_ascii=False), encoding='utf-8')
         return True
     except Exception:
         return False

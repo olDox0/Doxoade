@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-# doxoade/tools/vulcan/embedded_lazy.py
+# doxoade/doxoade/tools/vulcan/embedded_lazy.py
 """
 EmbeddedDoxoadeLazy — Lazy bootstrap de doxoade para projetos que o embarcam.
 ==============================================================================
@@ -51,18 +50,13 @@ Compatibilidade
 - Idempotente: ``install()`` é no-op se doxoade já estiver em sys.modules.
 - ``uninstall()`` remove o proxy se ainda não foi resolvido (útil em testes).
 """
-
 from __future__ import annotations
-
 import importlib.abc
 import importlib.util
 import sys
 import threading
 from pathlib import Path
 from typing import Callable, Optional, Union
-
-
-# ── _PostExecLoader ───────────────────────────────────────────────────────────
 
 class _PostExecLoader(importlib.abc.Loader):
     """
@@ -75,15 +69,11 @@ class _PostExecLoader(importlib.abc.Loader):
     exec_module for chamado por threads concorrentes (improvável, mas seguro).
     """
 
-    def __init__(
-        self,
-        inner: importlib.abc.Loader,
-        callback: Callable,
-    ) -> None:
-        self._inner    = inner
-        self._cb       = callback
-        self._cb_done  = False
-        self._lock     = threading.Lock()
+    def __init__(self, inner: importlib.abc.Loader, callback: Callable) -> None:
+        self._inner = inner
+        self._cb = callback
+        self._cb_done = False
+        self._lock = threading.Lock()
 
     def create_module(self, spec):
         return self._inner.create_module(spec)
@@ -96,10 +86,7 @@ class _PostExecLoader(importlib.abc.Loader):
                 try:
                     self._cb(module)
                 except Exception:
-                    pass   # Falha no callback não deve derrubar o import
-
-
-# ── Callbacks de bootstrap ────────────────────────────────────────────────────
+                    pass
 
 def _make_vulcan_callback(project_root: str) -> Callable:
     """
@@ -109,6 +96,7 @@ def _make_vulcan_callback(project_root: str) -> Callable:
     Silencia qualquer exceção — se o VulcanMetaFinder não estiver disponível
     (ambiente sem compilação), o import de doxoade ainda funciona normalmente.
     """
+
     def _cb(_module) -> None:
         try:
             from doxoade.tools.vulcan import meta_finder
@@ -118,14 +106,7 @@ def _make_vulcan_callback(project_root: str) -> Callable:
             pass
     return _cb
 
-
-# ── API pública ────────────────────────────────────────────────────────────────
-
-def install(
-    project_root: Optional[Union[str, Path]] = None,
-    *,
-    install_vulcan: bool = True,
-) -> bool:
+def install(project_root: Optional[Union[str, Path]]=None, *, install_vulcan: bool=True) -> bool:
     """
     Registra doxoade como módulo lazy em sys.modules.
 
@@ -154,50 +135,22 @@ def install(
     ImportError
         Se doxoade não for localizável no ambiente (não instalado, não no path).
     """
-    if "doxoade" in sys.modules:
-        # Já importado (real) ou já é proxy lazy — ambos são casos corretos.
+    if 'doxoade' in sys.modules:
         return False
-
-    spec = importlib.util.find_spec("doxoade")
+    spec = importlib.util.find_spec('doxoade')
     if spec is None or spec.loader is None:
-        raise ImportError(
-            "[EmbeddedDoxoadeLazy] 'doxoade' não encontrado. "
-            "Verifique se o pacote está instalado ou no sys.path do projeto host."
-        )
-
-    # ── Monta a cadeia de loaders ──────────────────────────────────────────────
-    # Cadeia (interno → externo):
-    #   spec.loader original          ← executa doxoade/__init__.py
-    #   → _PostExecLoader (opcional)  ← instala VulcanMetaFinder pós-exec
-    #   → importlib.util.LazyLoader   ← adia tudo até primeiro acesso
-
+        raise ImportError("[EmbeddedDoxoadeLazy] 'doxoade' não encontrado. Verifique se o pacote está instalado ou no sys.path do projeto host.")
     loader = spec.loader
-
     if install_vulcan and project_root is not None:
-        root_str = str(Path(project_root).resolve()
-                       if not Path(project_root).is_dir()
-                       else Path(project_root).resolve())
+        root_str = str(Path(project_root).resolve() if not Path(project_root).is_dir() else Path(project_root).resolve())
         loader = _PostExecLoader(loader, _make_vulcan_callback(root_str))
-
-    # LazyLoader exige que o loader interno implemente exec_module.
-    # ExtensionFileLoader (pyd/so) não o implementa — fallback sem lazy.
-    if not hasattr(loader, "exec_module"):
-        raise ImportError(
-            "[EmbeddedDoxoadeLazy] O loader de 'doxoade' não suporta "
-            "exec_module — lazy loading não é possível para extensões C puras."
-        )
-
+    if not hasattr(loader, 'exec_module'):
+        raise ImportError("[EmbeddedDoxoadeLazy] O loader de 'doxoade' não suporta exec_module — lazy loading não é possível para extensões C puras.")
     spec.loader = importlib.util.LazyLoader(loader)
-
-    # module_from_spec popula __name__, __path__, __package__, __spec__, etc.
-    # antes de exec_module. Por isso subimports (doxoade.tools.*) funcionam
-    # mesmo antes do módulo ser resolvido.
     module = importlib.util.module_from_spec(spec)
-    sys.modules["doxoade"] = module
-    spec.loader.exec_module(module)   # No-op agora — LazyLoader adia para depois
-
+    sys.modules['doxoade'] = module
+    spec.loader.exec_module(module)
     return True
-
 
 def uninstall() -> bool:
     """
@@ -214,9 +167,8 @@ def uninstall() -> bool:
     """
     if not is_lazy():
         return False
-    sys.modules.pop("doxoade", None)
+    sys.modules.pop('doxoade', None)
     return True
-
 
 def is_lazy() -> bool:
     """
@@ -234,11 +186,10 @@ def is_lazy() -> bool:
     ``__getattribute__``.  ``type(mod).__name__`` acessa o nome da *classe*,
     não um atributo do módulo — portanto é seguro.
     """
-    mod = sys.modules.get("doxoade")
+    mod = sys.modules.get('doxoade')
     if mod is None:
         return False
-    return type(mod).__name__ == "_LazyModule"
-
+    return type(mod).__name__ == '_LazyModule'
 
 def force_load() -> None:
     """
@@ -249,13 +200,10 @@ def force_load() -> None:
 
     Se doxoade não estiver em sys.modules ou já estiver carregado, é no-op.
     """
-    mod = sys.modules.get("doxoade")
+    mod = sys.modules.get('doxoade')
     if mod is None or not is_lazy():
         return
-    # Acessar qualquer atributo fora dos dunders reservados pelo LazyLoader
-    # (_LazyModule.__getattribute__ chama exec_module antes de resolver o attr).
-    # _force_load_trigger não existe → AttributeError após o load real — silenciado.
     try:
-        _ = mod._embedded_lazy_force_trigger  # type: ignore[attr-defined]
+        _ = mod._embedded_lazy_force_trigger
     except AttributeError:
-        pass  # Esperado — o importante é que exec_module já rodou
+        pass

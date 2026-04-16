@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-# doxoade/tools/vulcan/opt_cache.py
+# doxoade/doxoade/tools/vulcan/opt_cache.py
 """
 OptCache — Cache de Python Otimizado para o sistema Vulcan de 3 camadas.
 =========================================================================
@@ -30,28 +29,19 @@ Compliance:
     OSL-5 : generate_opt_py() nunca levanta exceção — retorna None em falha
     PASC-6: falhas de otimização resultam em cópia do original (sempre válido)
 """
-
 from __future__ import annotations
-
 import hashlib
 import shutil
 import tempfile
 from pathlib import Path
 from typing import Optional
-
-_OPT_SUBDIR = "opt_py"
-
-
-# ---------------------------------------------------------------------------
-# Helpers de path
-# ---------------------------------------------------------------------------
+_OPT_SUBDIR = 'opt_py'
 
 def opt_dir(project_root: Path) -> Path:
     """Retorna (e cria) o diretório opt_py do projeto."""
-    d = Path(project_root) / ".doxoade" / "vulcan" / _OPT_SUBDIR
+    d = Path(project_root) / '.doxoade' / 'vulcan' / _OPT_SUBDIR
     d.mkdir(parents=True, exist_ok=True)
     return d
-
 
 def opt_module_name(source_path: Path) -> str:
     """
@@ -61,8 +51,7 @@ def opt_module_name(source_path: Path) -> str:
         opt_{stem}_{sha256(abs_path)[:6]}
     """
     abs_hash = hashlib.sha256(str(source_path.resolve()).encode()).hexdigest()[:6]
-    return f"opt_{source_path.stem}_{abs_hash}"
-
+    return f'opt_{source_path.stem}_{abs_hash}'
 
 def is_opt_stale(opt_path: Path, source_path: Path) -> bool:
     """True se o .py fonte foi modificado depois do .py otimizado."""
@@ -71,11 +60,6 @@ def is_opt_stale(opt_path: Path, source_path: Path) -> bool:
     except OSError:
         return True
 
-
-# ---------------------------------------------------------------------------
-# Busca
-# ---------------------------------------------------------------------------
-
 def find_opt_py(project_root: Path, source_path: Path) -> Optional[Path]:
     """
     Localiza o Python otimizado para ``source_path`` no cache do projeto.
@@ -83,19 +67,15 @@ def find_opt_py(project_root: Path, source_path: Path) -> Optional[Path]:
     Retorna o Path do .py otimizado se existir e estiver atualizado,
     ou None se ausente/stale.
     """
-    d = Path(project_root) / ".doxoade" / "vulcan" / _OPT_SUBDIR
+    d = Path(project_root) / '.doxoade' / 'vulcan' / _OPT_SUBDIR
     if not d.exists():
         return None
-
-    candidate = d / f"{opt_module_name(source_path)}.py"
+    candidate = d / f'{opt_module_name(source_path)}.py'
     if not candidate.exists():
         return None
-
     if is_opt_stale(candidate, source_path):
         return None
-
     return candidate
-
 
 def find_project_root_for(source_path: Path) -> Optional[Path]:
     """
@@ -104,17 +84,12 @@ def find_project_root_for(source_path: Path) -> Optional[Path]:
     """
     cur = Path(source_path).resolve().parent
     while True:
-        if (cur / ".doxoade" / "vulcan").exists():
+        if (cur / '.doxoade' / 'vulcan').exists():
             return cur
         parent = cur.parent
         if parent == cur:
             return None
         cur = parent
-
-
-# ---------------------------------------------------------------------------
-# Geração
-# ---------------------------------------------------------------------------
 
 def generate_opt_py(project_root: Path, source_path: Path) -> Optional[Path]:
     """
@@ -133,36 +108,23 @@ def generate_opt_py(project_root: Path, source_path: Path) -> Optional[Path]:
     """
     try:
         from doxoade.tools.vulcan.lib_optimizer import LibOptimizer
-
         src = Path(source_path).resolve()
         if not src.exists():
             return None
-
-        # Verificação de frescor — não re-otimiza se o cache está válido
         d = opt_dir(Path(project_root))
-        name = f"{opt_module_name(src)}.py"
+        name = f'{opt_module_name(src)}.py'
         dest = d / name
-
-        if dest.exists() and not is_opt_stale(dest, src):
-            return dest  # cache quente
-
-        # Copia para área temporária, otimiza, move para cache
-        with tempfile.TemporaryDirectory(prefix="vulcan_opt_") as tmp:
+        if dest.exists() and (not is_opt_stale(dest, src)):
+            return dest
+        with tempfile.TemporaryDirectory(prefix='vulcan_opt_') as tmp:
             tmp_file = Path(tmp) / src.name
             shutil.copy2(str(src), str(tmp_file))
-
             optimizer = LibOptimizer()
             optimizer.optimize_file(tmp_file)
-
-            # Copia TMP → DEST: usar copy (sem metadados)
-            # dest recebe o timestamp atual (now >= src.mtime) → staleness funciona corretamente
-            shutil.copy(str(tmp_file), str(dest))   # ← era copy2, causa do bug
-
+            shutil.copy(str(tmp_file), str(dest))
         return dest
-
     except Exception:
         return None
-
 
 def generate_opt_py_batch(project_root: Path, source_paths: list[Path]) -> dict[str, Optional[Path]]:
     """

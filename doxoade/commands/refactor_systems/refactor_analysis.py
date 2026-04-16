@@ -1,15 +1,8 @@
+# doxoade/doxoade/commands/refactor_systems/refactor_analysis.py
 from __future__ import annotations
-
 from dataclasses import dataclass, field
 from pathlib import Path
-
-from .refactor_utils import (
-    FunctionHit,
-    ReferenceHit,
-    find_functions_in_path,
-    find_references_in_path,
-)
-
+from .refactor_utils import FunctionHit, ReferenceHit, find_functions_in_path, find_references_in_path
 
 @dataclass
 class RefactorSearchResult:
@@ -30,7 +23,6 @@ class RefactorSearchResult:
                 out[name] = items[0]
         return out
 
-
 @dataclass
 class RefUsageResult:
     root: Path
@@ -40,16 +32,14 @@ class RefUsageResult:
     def missing(self) -> list[str]:
         return [name for name, items in self.refs.items() if not items]
 
-
 def search_targets(path: Path, targets: list[str]) -> RefactorSearchResult:
     path = path.resolve()
-    clean_targets = tuple(dict.fromkeys(t.strip() for t in targets if t.strip()))
+    clean_targets = tuple(dict.fromkeys((t.strip() for t in targets if t.strip())))
     hits = find_functions_in_path(path, clean_targets)
     return RefactorSearchResult(root=path, targets=clean_targets, hits=hits)
 
-
 def search_references(path: Path, targets: list[str]) -> RefUsageResult:
     path = path.resolve()
-    clean_targets = tuple(dict.fromkeys(t.strip() for t in targets if t.strip()))
+    clean_targets = tuple(dict.fromkeys((t.strip() for t in targets if t.strip())))
     refs = find_references_in_path(path, clean_targets)
     return RefUsageResult(root=path, targets=clean_targets, refs=refs)

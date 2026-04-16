@@ -1,0 +1,11 @@
+# tests/test_async_log.py ajustado
+import time
+from doxoade.tools.doxcolors import colors
+
+with colors.UI.loader("loading_nexus.nxa", interval=0.1) as anim:
+    anim.print("<YELLOW>[SISTEMA]<RESET> Iniciando...")
+    time.sleep(2)
+    anim.print("<SUCCESS>[OK]<RESET> Finalizado.")
+
+# O Context Manager 'with' agora garante que o AsyncAnimation._animate finalize 
+# e mova o cursor para baixo ANTES do doxoade imprimir o "Tempo total".

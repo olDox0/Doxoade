@@ -1,22 +1,20 @@
+# doxoade/doxoade/commands/git_branch.py
 import sys
 import re
 import click
 from doxoade.tools.doxcolors import Fore, Style
-from doxoade.tools.logger import ExecutionLogger
 from doxoade.tools.git import _run_git_command
-
+from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 
 def _get_current_branch():
     branch = _run_git_command(['branch', '--show-current'], capture_output=True)
     return (branch or '').strip()
-
 
 def _get_default_base_branch():
     for candidate in ('main', 'master'):
         if _run_git_command(['rev-parse', '--verify', candidate], capture_output=True, silent_fail=True):
             return candidate
     return 'main'
-
 
 def _render_branches_table():
     """Renderiza lista de branches locais de forma previsível e legível."""
@@ -25,7 +23,6 @@ def _render_branches_table():
     if not raw.strip():
         click.echo('(sem branches)')
         return
-
     click.echo(Fore.WHITE + Style.BRIGHT + 'HEAD Branch                 Upstream                      Hash     Subject' + Style.RESET_ALL)
     for line in raw.splitlines():
         parts = line.split('\t')
@@ -33,8 +30,7 @@ def _render_branches_table():
         upstream_col = parts[1] if len(parts) > 1 and parts[1] else '-'
         hash_col = parts[2] if len(parts) > 2 else '-'
         subject_col = parts[3] if len(parts) > 3 else '-'
-        click.echo(f"{branch_col:<28} {upstream_col:<29} {hash_col:<8} {subject_col}")
-
+        click.echo(f'{branch_col:<28} {upstream_col:<29} {hash_col:<8} {subject_col}')
 
 @click.command('branch')
 @click.pass_context
@@ -56,7 +52,6 @@ def branch(ctx, list_branches, create, switch_to, delete_branch, force_delete, c
             _run_git_command(['fetch', '--all', '--prune'], capture_output=True, silent_fail=True)
             _render_branches_table()
             return
-
         if create:
             click.echo(Fore.CYAN + f"Criando branch '{create}'...")
             if not _run_git_command(['checkout', '-b', create]):
@@ -64,7 +59,6 @@ def branch(ctx, list_branches, create, switch_to, delete_branch, force_delete, c
                 sys.exit(1)
             click.echo(Fore.GREEN + f"[OK] Branch '{create}' criada e selecionada.")
             return
-
         if switch_to:
             click.echo(Fore.CYAN + f"Trocando para branch '{switch_to}'...")
             if not _run_git_command(['checkout', switch_to]):
@@ -72,24 +66,20 @@ def branch(ctx, list_branches, create, switch_to, delete_branch, force_delete, c
                 sys.exit(1)
             click.echo(Fore.GREEN + '[OK] Branch ativa atualizada.')
             return
-
         if delete_branch:
             current = _get_current_branch()
             if delete_branch == current:
                 click.echo(Fore.RED + '[ERRO] Não é permitido remover a branch atual.')
                 sys.exit(1)
-
-            if not yes and not click.confirm(Fore.YELLOW + f"Confirma remoção da branch local '{delete_branch}'?"):
+            if not yes and (not click.confirm(Fore.YELLOW + f"Confirma remoção da branch local '{delete_branch}'?")):
                 click.echo(Fore.YELLOW + '[BRANCH] Operação cancelada.')
                 return
-
             delete_flag = '-D' if force_delete else '-d'
             if not _run_git_command(['branch', delete_flag, delete_branch]):
                 logger.add_finding('error', f'Falha ao remover branch {delete_branch}.')
                 sys.exit(1)
             click.echo(Fore.GREEN + f"[OK] Branch '{delete_branch}' removida.")
             return
-
         if cleanup_merged:
             base_branch = base or _get_default_base_branch()
             click.echo(Fore.CYAN + f"Limpando branches já mergeadas em '{base_branch}'...")
@@ -100,112 +90,87 @@ def branch(ctx, list_branches, create, switch_to, delete_branch, force_delete, c
                 branch_name = line.replace('*', '').strip()
                 if branch_name and branch_name not in {base_branch, current}:
                     candidates.append(branch_name)
-
             if not candidates:
                 click.echo(Fore.GREEN + '[OK] Nenhuma branch mergeada para limpar.')
                 return
-
             click.echo(Fore.YELLOW + 'Branches candidatas: ' + ', '.join(candidates))
-            if not yes and not click.confirm('Deseja remover todas essas branches locais?'):
+            if not yes and (not click.confirm('Deseja remover todas essas branches locais?')):
                 click.echo(Fore.YELLOW + '[BRANCH] Operação cancelada.')
                 return
-
             removed = 0
             for name in candidates:
                 if _run_git_command(['branch', '-d', name], silent_fail=True):
                     removed += 1
             click.echo(Fore.GREEN + f'[OK] {removed} branch(es) removida(s).')
             return
-
         if drop_commits is not None:
             if drop_commits <= 0:
                 click.echo(Fore.RED + '[ERRO] --drop-commits precisa ser maior que zero.')
                 sys.exit(1)
-
             current = _get_current_branch() or 'HEAD'
             click.echo(Fore.RED + Style.BRIGHT + f"Modo destrutivo: apagar {drop_commits} commit(s) da branch '{current}'.")
             preview = _run_git_command(['log', '--oneline', f'-{drop_commits}'], capture_output=True, silent_fail=True) or ''
             if preview:
                 click.echo(Fore.YELLOW + 'Commits que serão descartados:')
                 click.echo(preview)
-
-            if not yes and not click.confirm('Confirma reset --hard? Esta ação não pode ser desfeita facilmente.'):
+            if not yes and (not click.confirm('Confirma reset --hard? Esta ação não pode ser desfeita facilmente.')):
                 click.echo(Fore.YELLOW + '[BRANCH] Operação cancelada.')
                 return
-
             if not _run_git_command(['reset', '--hard', f'HEAD~{drop_commits}']):
                 logger.add_finding('error', 'Falha ao apagar commits com reset --hard.')
                 sys.exit(1)
             click.echo(Fore.GREEN + '[OK] Histórico local reescrito com sucesso.')
             return
-
         if origin_guard:
             base_branch = base or _get_default_base_branch()
-
-            local_branch_ref = f"refs/heads/{base_branch}"
-            remote_branch_ref = f"refs/remotes/origin/{base_branch}"
+            local_branch_ref = f'refs/heads/{base_branch}'
+            remote_branch_ref = f'refs/remotes/origin/{base_branch}'
             has_local_base = bool(_run_git_command(['show-ref', '--verify', '--quiet', local_branch_ref], silent_fail=True))
             has_remote_base = bool(_run_git_command(['show-ref', '--verify', '--quiet', remote_branch_ref], silent_fail=True))
-
             if not (has_local_base or has_remote_base):
-                if re.fullmatch(r'[0-9a-fA-F]{7,40}', base_branch):
+                if re.fullmatch('[0-9a-fA-F]{7,40}', base_branch):
                     click.echo(Fore.RED + "[ERRO] '--base' espera nome de branch, não hash de commit.")
-                    click.echo(Fore.YELLOW + "Exemplo correto: doxoade branch --base main --origin <hash_remoto>")
+                    click.echo(Fore.YELLOW + 'Exemplo correto: doxoade branch --base main --origin <hash_remoto>')
                 else:
                     click.echo(Fore.RED + f"[ERRO] Branch base '{base_branch}' não existe (local/remoto).")
                 sys.exit(1)
-
-            remote_ref = f"origin/{base_branch}"
-            click.echo(Fore.CYAN + f"Sincronização segura: HEAD -> {remote_ref} (guard={origin_guard})")
-
+            remote_ref = f'origin/{base_branch}'
+            click.echo(Fore.CYAN + f'Sincronização segura: HEAD -> {remote_ref} (guard={origin_guard})')
             _run_git_command(['fetch', 'origin', base_branch], capture_output=True, silent_fail=True)
             remote_hash = _run_git_command(['rev-parse', remote_ref], capture_output=True, silent_fail=True)
             if not remote_hash:
                 logger.add_finding('error', f'Falha ao ler hash remoto de {remote_ref}.')
-                click.echo(Fore.RED + f"[ERRO] Não foi possível obter o hash atual de {remote_ref}.")
+                click.echo(Fore.RED + f'[ERRO] Não foi possível obter o hash atual de {remote_ref}.')
                 sys.exit(1)
-
             remote_hash = remote_hash.strip()
             guard = origin_guard.strip().lower()
             guard_matches_remote = remote_hash.lower().startswith(guard)
             guard_is_local_anchor = False
-
             if not guard_matches_remote:
                 guard_commit = _run_git_command(['rev-parse', '--verify', guard], capture_output=True, silent_fail=True)
                 if guard_commit:
                     guard_commit = guard_commit.strip()
-                    guard_is_local_anchor = bool(
-                        _run_git_command(['merge-base', '--is-ancestor', guard_commit, 'HEAD'], silent_fail=True)
-                    )
-
-            if not guard_matches_remote and not guard_is_local_anchor:
-                click.echo(Fore.RED + f"[ERRO] Guarda não confere com remoto nem com âncora local válida. Remoto atual: {remote_hash[:12]}")
+                    guard_is_local_anchor = bool(_run_git_command(['merge-base', '--is-ancestor', guard_commit, 'HEAD'], silent_fail=True))
+            if not guard_matches_remote and (not guard_is_local_anchor):
+                click.echo(Fore.RED + f'[ERRO] Guarda não confere com remoto nem com âncora local válida. Remoto atual: {remote_hash[:12]}')
                 click.echo(Fore.YELLOW + "Dica 1: use o hash remoto atual: 'git log origin/{base} -n 1 --oneline'.".format(base=base_branch))
-                click.echo(Fore.YELLOW + "Dica 2: ou informe um commit local ancestral de HEAD como âncora de segurança.")
+                click.echo(Fore.YELLOW + 'Dica 2: ou informe um commit local ancestral de HEAD como âncora de segurança.')
                 sys.exit(1)
-
-            if guard_is_local_anchor and not guard_matches_remote:
-                click.echo(Fore.YELLOW + "[BRANCH] Guarda interpretada como âncora local de HEAD (não como hash remoto atual).")
-
+            if guard_is_local_anchor and (not guard_matches_remote):
+                click.echo(Fore.YELLOW + '[BRANCH] Guarda interpretada como âncora local de HEAD (não como hash remoto atual).')
             if not yes:
                 try:
-                    if not click.confirm(f"Confirmar push seguro para origin/{base_branch} usando --force-with-lease?"):
+                    if not click.confirm(f'Confirmar push seguro para origin/{base_branch} usando --force-with-lease?'):
                         click.echo(Fore.YELLOW + '[BRANCH] Operação cancelada.')
                         return
                 except click.Abort:
-                    click.echo(Fore.YELLOW + "[BRANCH] Confirmação abortada (modo não interativo?). Use --yes para prosseguir.")
+                    click.echo(Fore.YELLOW + '[BRANCH] Confirmação abortada (modo não interativo?). Use --yes para prosseguir.')
                     return
-
-            lease = f"refs/heads/{base_branch}:{remote_hash}"
-            if not _run_git_command([
-                'push', '--force-with-lease=' + lease,
-                'origin', f'HEAD:refs/heads/{base_branch}'
-            ]):
+            lease = f'refs/heads/{base_branch}:{remote_hash}'
+            if not _run_git_command(['push', '--force-with-lease=' + lease, 'origin', f'HEAD:refs/heads/{base_branch}']):
                 logger.add_finding('error', 'Falha no push seguro para origin.')
                 click.echo(Fore.RED + '[ERRO] Push seguro falhou. O remoto pode ter mudado.')
                 sys.exit(1)
-
-            click.echo(Fore.GREEN + f"[OK] origin/{base_branch} atualizado com segurança.")
+            click.echo(Fore.GREEN + f'[OK] origin/{base_branch} atualizado com segurança.')
             return
-
         click.echo(ctx.get_help())

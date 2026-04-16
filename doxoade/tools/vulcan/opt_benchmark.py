@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-# doxoade/tools/vulcan/lib_optimizer.py
+# doxoade/doxoade/tools/vulcan/opt_benchmark.py
 """
 LibOptimizer — Otimizador AST seguro para cópias de fontes de bibliotecas.
 ==========================================================================
@@ -15,12 +14,9 @@ Transformações (ordenadas do mais para o menos seguro):
   5. GlobalImportAliaser     — aplica alias (as _I1) em imports de nomes longos
   6. SafeLocalNameMinifier   — renomeia variáveis e aliases de forma segura
 """
-
 from __future__ import annotations
-
 import gc
 import importlib.util
-# [DOX-UNUSED] import os
 import sys
 import time
 import ast
@@ -29,34 +25,28 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-
-# ---------------------------------------------------------------------------
-# Estruturas de dados
-# ---------------------------------------------------------------------------
-
 @dataclass
 class FuncResult:
-    name:       str
-    pure_ns:    float        # nanosegundos — média por chamada
-    opt_ns:     float
-    speedup:    float        # opt_ns / pure_ns  (<1 = opt é mais rápido)
-    gain_pct:   float        # (1 - speedup) * 100
-    calls:      int
-    error:      Optional[str] = None
-
+    name: str
+    pure_ns: float
+    opt_ns: float
+    speedup: float
+    gain_pct: float
+    calls: int
+    error: Optional[str] = None
 
 @dataclass
 class FileResult:
-    path:           Path
-    opt_path:       Optional[Path]
-    pure_load_ns:   float
-    opt_load_ns:    float
-    load_speedup:   float
-    pure_size_b:    int
-    opt_size_b:     int
-    size_saved_b:   int
-    funcs:          list[FuncResult] = field(default_factory=list)
-    error:          Optional[str]    = None
+    path: Path
+    opt_path: Optional[Path]
+    pure_load_ns: float
+    opt_load_ns: float
+    load_speedup: float
+    pure_size_b: int
+    opt_size_b: int
+    size_saved_b: int
+    funcs: list[FuncResult] = field(default_factory=list)
+    error: Optional[str] = None
 
     @property
     def callable_count(self) -> int:
@@ -70,12 +60,7 @@ class FileResult:
     @property
     def max_speedup(self) -> float:
         valid = [f.speedup for f in self.funcs if f.error is None and f.speedup > 0]
-        return min(valid) if valid else 1.0  # min speedup ratio = max gain
-
-
-# ---------------------------------------------------------------------------
-# Loader helpers
-# ---------------------------------------------------------------------------
+        return min(valid) if valid else 1.0
 
 def _timed_load(py_path: Path, mod_name: str) -> tuple[object, float]:
     """
@@ -84,13 +69,9 @@ def _timed_load(py_path: Path, mod_name: str) -> tuple[object, float]:
     """
     spec = importlib.util.spec_from_file_location(mod_name, str(py_path))
     if not spec or not spec.loader:
-        raise ImportError(f"Não foi possível criar spec para {py_path}")
-
+        raise ImportError(f'Não foi possível criar spec para {py_path}')
     mod = importlib.util.module_from_spec(spec)
-    
-    # Adiciona ao sys.modules antes de executar, para imports relativos funcionarem
     sys.modules[mod_name] = mod
-    
     gc.collect()
     gc.disable()
     try:
@@ -100,42 +81,22 @@ def _timed_load(py_path: Path, mod_name: str) -> tuple[object, float]:
     finally:
         gc.enable()
         sys.modules.pop(mod_name, None)
-        
-    return mod, elapsed
-
+    return (mod, elapsed)
 
 def _callable_pairs(pure_mod, opt_mod) -> list[tuple[str, object, object]]:
     """Retorna lista de (nome, fn_pure, fn_opt) para callables em comum."""
     pairs = []
     for attr in dir(pure_mod):
-        if attr.startswith("_"):
+        if attr.startswith('_'):
             continue
         p = getattr(pure_mod, attr, None)
         o = getattr(opt_mod, attr, None)
-        if callable(p) and callable(o) and p is not o:
+        if callable(p) and callable(o) and (p is not o):
             pairs.append((attr, p, o))
     return pairs
+_PROBE_ARGS: dict[int, tuple] = {0: (), 1: (None,), 2: (None, None), 3: (None, None, None)}
 
-
-# ---------------------------------------------------------------------------
-# Benchmark de funções
-# ---------------------------------------------------------------------------
-
-_PROBE_ARGS: dict[int, tuple] = {
-    0: (),
-    1: (None,),
-    2: (None, None),
-    3: (None, None, None),
-}
-
-
-def _bench_callable(
-    name: str,
-    pure_fn,
-    opt_fn,
-    rounds: int,
-    calls: int,
-) -> FuncResult:
+def _bench_callable(name: str, pure_fn, opt_fn, rounds: int, calls: int) -> FuncResult:
     """
     Chama pure_fn e opt_fn ``rounds * calls`` vezes cada e mede o tempo médio.
 
@@ -145,25 +106,15 @@ def _bench_callable(
       - Captura TypeError e retorna erro — não trava o benchmark.
     """
     import inspect
-
-    # Descobre quantidade de args obrigatórios
     try:
-        sig  = inspect.signature(pure_fn)
-        nreq = sum(
-            1 for p in sig.parameters.values()
-            if p.default is inspect.Parameter.empty
-            and p.kind not in (
-                inspect.Parameter.VAR_POSITIONAL,
-                inspect.Parameter.VAR_KEYWORD,
-            )
-        )
+        sig = inspect.signature(pure_fn)
+        nreq = sum((1 for p in sig.parameters.values() if p.default is inspect.Parameter.empty and p.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)))
     except (ValueError, TypeError):
         nreq = 0
-
-    args = _PROBE_ARGS.get(nreq, tuple(None for _ in range(nreq)))
+    args = _PROBE_ARGS.get(nreq, tuple((None for _ in range(nreq))))
 
     def _run(fn) -> float:
-        best = float("inf")
+        best = float('inf')
         for _ in range(rounds):
             gc.disable()
             t0 = time.perf_counter_ns()
@@ -175,110 +126,45 @@ def _bench_callable(
             elapsed = time.perf_counter_ns() - t0
             gc.enable()
             best = min(best, elapsed)
-        return best / calls  # ns por chamada (melhor round)
-
+        return best / calls
     try:
         pure_ns = _run(pure_fn)
-        opt_ns  = _run(opt_fn)
+        opt_ns = _run(opt_fn)
         speedup = opt_ns / pure_ns if pure_ns > 0 else 1.0
-        return FuncResult(
-            name      = name,
-            pure_ns   = pure_ns,
-            opt_ns    = opt_ns,
-            speedup   = speedup,
-            gain_pct  = (1.0 - speedup) * 100.0,
-            calls     = calls * rounds,
-        )
+        return FuncResult(name=name, pure_ns=pure_ns, opt_ns=opt_ns, speedup=speedup, gain_pct=(1.0 - speedup) * 100.0, calls=calls * rounds)
     except Exception as exc:
-        return FuncResult(
-            name=name, pure_ns=0, opt_ns=0,
-            speedup=1.0, gain_pct=0.0, calls=0,
-            error=str(exc),
-        )
+        return FuncResult(name=name, pure_ns=0, opt_ns=0, speedup=1.0, gain_pct=0.0, calls=0, error=str(exc))
 
-
-# ---------------------------------------------------------------------------
-# Benchmark de arquivo
-# ---------------------------------------------------------------------------
-
-def bench_file(
-    py_path: Path,
-    opt_path: Optional[Path],
-    project_root: Path,
-    *,
-    rounds: int = 3,
-    calls:  int = 100,
-) -> FileResult:
+def bench_file(py_path: Path, opt_path: Optional[Path], project_root: Path, *, rounds: int=3, calls: int=100) -> FileResult:
     """Executa benchmark completo (load + callables) para um arquivo."""
     pure_size = py_path.stat().st_size if py_path.exists() else 0
-    opt_size  = opt_path.stat().st_size if (opt_path and opt_path.exists()) else 0
-
+    opt_size = opt_path.stat().st_size if opt_path and opt_path.exists() else 0
     if not opt_path or not opt_path.exists():
-        return FileResult(
-            path=py_path, opt_path=None,
-            pure_load_ns=0, opt_load_ns=0, load_speedup=1.0,
-            pure_size_b=pure_size, opt_size_b=0, size_saved_b=0,
-            error="opt_py não encontrado — execute 'doxoade vulcan opt' antes",
-        )
-
-    # Resolve o nome do pacote para suportar imports relativos (ex: from . import xyz)
+        return FileResult(path=py_path, opt_path=None, pure_load_ns=0, opt_load_ns=0, load_speedup=1.0, pure_size_b=pure_size, opt_size_b=0, size_saved_b=0, error="opt_py não encontrado — execute 'doxoade vulcan opt' antes")
     try:
         rel = py_path.relative_to(project_root)
         parent_parts = list(rel.parent.parts)
-        pkg_name = ".".join(parent_parts)
+        pkg_name = '.'.join(parent_parts)
     except ValueError:
-        pkg_name = ""
-
+        pkg_name = ''
     stem = py_path.stem
     if pkg_name:
-        pure_mod_name = f"{pkg_name}._bench_pure_{stem}"
-        opt_mod_name  = f"{pkg_name}._bench_opt_{stem}"
+        pure_mod_name = f'{pkg_name}._bench_pure_{stem}'
+        opt_mod_name = f'{pkg_name}._bench_opt_{stem}'
     else:
-        pure_mod_name = f"_bench_pure_{stem}"
-        opt_mod_name  = f"_bench_opt_{stem}"
-
-    # Garante que project_root está no path para resolver as dependências
+        pure_mod_name = f'_bench_pure_{stem}'
+        opt_mod_name = f'_bench_opt_{stem}'
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
-
-    # ── Medição de carregamento ───────────────────────────────────────────────
     try:
         pure_mod, pure_load = _timed_load(py_path, pure_mod_name)
-        opt_mod,  opt_load  = _timed_load(opt_path, opt_mod_name)
+        opt_mod, opt_load = _timed_load(opt_path, opt_mod_name)
     except Exception as exc:
-        return FileResult(
-            path=py_path, opt_path=opt_path,
-            pure_load_ns=0, opt_load_ns=0, load_speedup=1.0,
-            pure_size_b=pure_size, opt_size_b=opt_size,
-            size_saved_b=pure_size - opt_size,
-            error=f"Erro de carregamento: {exc}",
-        )
-
+        return FileResult(path=py_path, opt_path=opt_path, pure_load_ns=0, opt_load_ns=0, load_speedup=1.0, pure_size_b=pure_size, opt_size_b=opt_size, size_saved_b=pure_size - opt_size, error=f'Erro de carregamento: {exc}')
     load_speedup = opt_load / pure_load if pure_load > 0 else 1.0
-
-    # ── Medição de callables ──────────────────────────────────────────────────
     pairs = _callable_pairs(pure_mod, opt_mod)
-    func_results =[
-        _bench_callable(name, p, o, rounds, calls)
-        for name, p, o in pairs
-    ]
-
-    return FileResult(
-        path         = py_path,
-        opt_path     = opt_path,
-        pure_load_ns = pure_load,
-        opt_load_ns  = opt_load,
-        load_speedup = load_speedup,
-        pure_size_b  = pure_size,
-        opt_size_b   = opt_size,
-        size_saved_b = pure_size - opt_size,
-        funcs        = func_results,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Coleta de alvos
-# ---------------------------------------------------------------------------
+    func_results = [_bench_callable(name, p, o, rounds, calls) for name, p, o in pairs]
+    return FileResult(path=py_path, opt_path=opt_path, pure_load_ns=pure_load, opt_load_ns=opt_load, load_speedup=load_speedup, pure_size_b=pure_size, opt_size_b=opt_size, size_saved_b=pure_size - opt_size, funcs=func_results)
 
 def _collect_targets(target: Path, project_root: Path) -> list[tuple[Path, Optional[Path]]]:
     """
@@ -289,234 +175,141 @@ def _collect_targets(target: Path, project_root: Path) -> list[tuple[Path, Optio
 
     def _pair(p: Path):
         root = find_project_root_for(p) or project_root
-        return p, find_opt_py(root, p)
-
-    if target.is_file() and target.suffix == ".py":
+        return (p, find_opt_py(root, p))
+    if target.is_file() and target.suffix == '.py':
         return [_pair(target)]
-
     if target.is_dir():
-        return [
-            _pair(p)
-            for p in sorted(target.rglob("*.py"))
-            if not p.name.startswith("_")
-        ]
-
+        return [_pair(p) for p in sorted(target.rglob('*.py')) if not p.name.startswith('_')]
     return []
 
-
-# ---------------------------------------------------------------------------
-# Ponto de entrada programático
-# ---------------------------------------------------------------------------
-
-def run_opt_bench(
-    target:       Path | str,
-    project_root: Path | str,
-    *,
-    rounds: int = 3,
-    calls:  int = 100,
-) -> list[FileResult]:
+def run_opt_bench(target: Path | str, project_root: Path | str, *, rounds: int=3, calls: int=100) -> list[FileResult]:
     """
     Executa benchmark para todos os .py em ``target``.
     Retorna lista de FileResult prontos para renderização.
     """
-    target       = Path(target).resolve()
+    target = Path(target).resolve()
     project_root = Path(project_root).resolve()
-    pairs        = _collect_targets(target, project_root)
-    return[bench_file(py, opt, project_root=project_root, rounds=rounds, calls=calls) for py, opt in pairs]
-
-
-# ---------------------------------------------------------------------------
-# Renderização CLI
-# ---------------------------------------------------------------------------
+    pairs = _collect_targets(target, project_root)
+    return [bench_file(py, opt, project_root=project_root, rounds=rounds, calls=calls) for py, opt in pairs]
 
 def _ns(ns: float) -> str:
-    if ns < 1_000:
-        return f"{ns:.0f} ns"
-    if ns < 1_000_000:
-        return f"{ns/1_000:.1f} µs"
-    return f"{ns/1_000_000:.2f} ms"
+    if ns < 1000:
+        return f'{ns:.0f} ns'
+    if ns < 1000000:
+        return f'{ns / 1000:.1f} µs'
+    return f'{ns / 1000000:.2f} ms'
 
-
-def _bar(ratio: float, width: int = 20) -> str:
+def _bar(ratio: float, width: int=20) -> str:
     """Barra comparativa: verde = ganho, vermelho = regressão."""
     gain = 1.0 - ratio
     fill = min(width, max(0, int(abs(gain) * width)))
     if gain > 0:
-        return f"\033[32m{'█' * fill}\033[90m{'░' * (width - fill)}\033[0m"
-    return f"\033[31m{'█' * fill}\033[90m{'░' * (width - fill)}\033[0m"
-
+        return f'\x1b[32m{'█' * fill}\x1b[90m{'░' * (width - fill)}\x1b[0m'
+    return f'\x1b[31m{'█' * fill}\x1b[90m{'░' * (width - fill)}\x1b[0m'
 
 def _speedup_label(speedup: float) -> str:
     gain = (1.0 - speedup) * 100
     if gain > 0:
-        return f"\033[32m▲ {gain:.1f}% mais rápido\033[0m"
+        return f'\x1b[32m▲ {gain:.1f}% mais rápido\x1b[0m'
     if gain < -0.5:
-        return f"\033[31m▼ {abs(gain):.1f}% mais lento\033[0m"
-    return "\033[90m≈ sem diferença significativa\033[0m"
+        return f'\x1b[31m▼ {abs(gain):.1f}% mais lento\x1b[0m'
+    return '\x1b[90m≈ sem diferença significativa\x1b[0m'
 
-
-def _render_file_entry(r: "FileResult", *, verbose: bool, show_funcs: bool) -> list[float]:
+def _render_file_entry(r: 'FileResult', *, verbose: bool, show_funcs: bool) -> list[float]:
     """Renderiza uma entrada de arquivo. Retorna lista de speedups coletados."""
     name = r.path.name
-    print(f"\n  \033[1m{name}\033[0m")
-
+    print(f'\n  \x1b[1m{name}\x1b[0m')
     if r.error:
-        print(f"    \033[31m✘ {r.error}\033[0m")
+        print(f'    \x1b[31m✘ {r.error}\x1b[0m')
         return []
-
-    pct_saved = (r.size_saved_b / r.pure_size_b * 100) if r.pure_size_b else 0
-    print(
-        f"    Tamanho   : {r.pure_size_b:>6} B  →  {r.opt_size_b:>6} B"
-        f"   \033[32m(-{r.size_saved_b} B, -{pct_saved:.1f}%)\033[0m"
-    )
-    print(
-        f"    Carga     : {_ns(r.pure_load_ns):>10}  →  {_ns(r.opt_load_ns):>10}"
-        f"   {_bar(r.load_speedup)}  {_speedup_label(r.load_speedup)}"
-    )
-
+    pct_saved = r.size_saved_b / r.pure_size_b * 100 if r.pure_size_b else 0
+    print(f'    Tamanho   : {r.pure_size_b:>6} B  →  {r.opt_size_b:>6} B   \x1b[32m(-{r.size_saved_b} B, -{pct_saved:.1f}%)\x1b[0m')
+    print(f'    Carga     : {_ns(r.pure_load_ns):>10}  →  {_ns(r.opt_load_ns):>10}   {_bar(r.load_speedup)}  {_speedup_label(r.load_speedup)}')
     valid_funcs = [f for f in r.funcs if f.error is None]
     if not valid_funcs:
-        print("    Callables : nenhum callable testável encontrado")
+        print('    Callables : nenhum callable testável encontrado')
         return []
-
-    print(
-        f"    Callables : {r.callable_count:>3} medidos"
-        f"   ganho médio: {_speedup_label(r.avg_speedup)}"
-    )
+    print(f'    Callables : {r.callable_count:>3} medidos   ganho médio: {_speedup_label(r.avg_speedup)}')
     if show_funcs and verbose:
         for fn in sorted(valid_funcs, key=lambda x: x.speedup):
-            print(
-                f"      {fn.name:<30} "
-                f"puro={_ns(fn.pure_ns):>10}  "
-                f"opt={_ns(fn.opt_ns):>10}  "
-                f"{_bar(fn.speedup)}  {_speedup_label(fn.speedup)}"
-            )
+            print(f'      {fn.name:<30} puro={_ns(fn.pure_ns):>10}  opt={_ns(fn.opt_ns):>10}  {_bar(fn.speedup)}  {_speedup_label(fn.speedup)}')
     return [f.speedup for f in valid_funcs]
 
-
-def _render_summary(
-    results: list["FileResult"],
-    all_speedups: list[float],
-    total_pure: int,
-    total_opt: int,
-    total_saved: int,
-    sep: str,
-    head: str,
-    rst: str,
-) -> None:
+def _render_summary(results: list['FileResult'], all_speedups: list[float], total_pure: int, total_opt: int, total_saved: int, sep: str, head: str, rst: str) -> None:
     """Renderiza o bloco de resumo global."""
-    print(f"\n{sep}")
-    print(f"{head}  RESUMO{rst}")
-
+    print(f'\n{sep}')
+    print(f'{head}  RESUMO{rst}')
     if total_pure:
-        pct = (total_saved / total_pure * 100) if total_pure else 0
-        print(
-            f"  Código     : {total_pure:>7} B  →  {total_opt:>7} B"
-            f"   \033[32m(-{total_saved} B, -{pct:.1f}%)\033[0m"
-        )
-
+        pct = total_saved / total_pure * 100 if total_pure else 0
+        print(f'  Código     : {total_pure:>7} B  →  {total_opt:>7} B   \x1b[32m(-{total_saved} B, -{pct:.1f}%)\x1b[0m')
     if all_speedups:
-        global_avg  = sum(all_speedups) / len(all_speedups)
+        global_avg = sum(all_speedups) / len(all_speedups)
         global_best = min(all_speedups)
-        print(
-            f"  Speedup    : médio {_speedup_label(global_avg)}"
-            f"   melhor {_speedup_label(global_best)}"
-        )
-
-    files_ok  = sum(1 for r in results if not r.error)
+        print(f'  Speedup    : médio {_speedup_label(global_avg)}   melhor {_speedup_label(global_best)}')
+    files_ok = sum((1 for r in results if not r.error))
     files_err = len(results) - files_ok
-    print(f"  Arquivos   : {files_ok} ok  {files_err} erro(s)")
+    print(f'  Arquivos   : {files_ok} ok  {files_err} erro(s)')
     if files_err:
-        print(
-            f"\n  \033[33m⚠  {files_err} arquivo(s) sem opt_py — "
-            f"execute 'doxoade vulcan opt <alvo>' para gerar.\033[0m"
-        )
+        print(f"\n  \x1b[33m⚠  {files_err} arquivo(s) sem opt_py — execute 'doxoade vulcan opt <alvo>' para gerar.\x1b[0m")
     print(sep)
 
-
-def render_results(
-    results:      list[FileResult],
-    *,
-    verbose:      bool = False,
-    show_funcs:   bool = True,
-    csv_out:      Optional[Path] = None,
-) -> None:
+def render_results(results: list[FileResult], *, verbose: bool=False, show_funcs: bool=True, csv_out: Optional[Path]=None) -> None:
     """Renderiza resultados no terminal com estilo Vulcan."""
-    SEP  = "\033[36m" + "─" * 62 + "\033[0m"
-    HEAD = "\033[1;36m"
-    RST  = "\033[0m"
-
-    print(f"\n{HEAD}  ⬡ VULCAN OPT-BENCH — Python Puro vs Otimizado{RST}")
+    SEP = '\x1b[36m' + '─' * 62 + '\x1b[0m'
+    HEAD = '\x1b[1;36m'
+    RST = '\x1b[0m'
+    print(f'\n{HEAD}  ⬡ VULCAN OPT-BENCH — Python Puro vs Otimizado{RST}')
     print(SEP)
-
-    all_speedups  = []
+    all_speedups = []
     total_pure = total_opt = total_saved = 0
-
     for r in results:
         speedups = _render_file_entry(r, verbose=verbose, show_funcs=show_funcs)
         all_speedups.extend(speedups)
         if not r.error:
-            total_pure  += r.pure_size_b
-            total_opt   += r.opt_size_b
+            total_pure += r.pure_size_b
+            total_opt += r.opt_size_b
             total_saved += r.size_saved_b
-
     _render_summary(results, all_speedups, total_pure, total_opt, total_saved, SEP, HEAD, RST)
-
     if csv_out:
         _write_csv(results, csv_out)
-        print(f"  CSV salvo em: {csv_out}")
-
+        print(f'  CSV salvo em: {csv_out}')
 
 def _write_csv(results: list[FileResult], path: Path) -> None:
     import csv
     rows = []
     for r in results:
         if r.error:
-            rows.append({
-                "file": r.path.name, "func": "", "pure_ns": "", "opt_ns": "",
-                "speedup": "", "gain_pct": "", "error": r.error,
-            })
+            rows.append({'file': r.path.name, 'func': '', 'pure_ns': '', 'opt_ns': '', 'speedup': '', 'gain_pct': '', 'error': r.error})
             continue
         for f in r.funcs:
-            rows.append({
-                "file":     r.path.name,
-                "func":     f.name,
-                "pure_ns":  f"{f.pure_ns:.2f}",
-                "opt_ns":   f"{f.opt_ns:.2f}",
-                "speedup":  f"{f.speedup:.4f}",
-                "gain_pct": f"{f.gain_pct:.2f}",
-                "error":    f.error or "",
-            })
-    with path.open("w", newline="", encoding="utf-8") as fh:
+            rows.append({'file': r.path.name, 'func': f.name, 'pure_ns': f'{f.pure_ns:.2f}', 'opt_ns': f'{f.opt_ns:.2f}', 'speedup': f'{f.speedup:.4f}', 'gain_pct': f'{f.gain_pct:.2f}', 'error': f.error or ''})
+    with path.open('w', newline='', encoding='utf-8') as fh:
         writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()) if rows else [])
         writer.writeheader()
         writer.writerows(rows)
-        
-#    optimized_code = ast.unparse(tree)
-#    optimized_code = compact_lines_safely(optimized_code)
-        
+
 class SafeLocalNameMinifier(ast.NodeTransformer):
     """
     Minifica variáveis locais de forma segura.
     Ignora parâmetros, globals, nonlocals e funções que usam introspecção.
     """
-    
+
     def __init__(self):
         super().__init__()
         self._name_generator = self._short_name_generator()
-        self.scope_maps =[] # Pilha de mapas de renomeação para lidar com escopos aninhados
+        self.scope_maps = []
 
     def _short_name_generator(self):
         """Gera nomes curtos: _a, _b ... _z, _aa, _ab..."""
         chars = string.ascii_lowercase
-        # Usamos um prefixo '_' para evitar colisão com 'i', 'x', etc., que o dev já usou
-        yield from (f"_{c}" for c in chars)
+        yield from (f'_{c}' for c in chars)
         import itertools
         for length in itertools.count(2):
             for p in itertools.product(chars, repeat=length):
-                yield f"_{''.join(p)}"
+                yield f'_{''.join(p)}'
 
     class _VarCollector(ast.NodeVisitor):
+
         def __init__(self, excluded_names):
             self.local_vars = set()
             self.excluded = set(excluded_names)
@@ -528,14 +321,16 @@ class SafeLocalNameMinifier(ast.NodeTransformer):
                 self.is_unsafe = True
             self.generic_visit(node)
 
-        def visit_Global(self, node): self.globals_nonlocals.update(node.names)
-        def visit_Nonlocal(self, node): self.globals_nonlocals.update(node.names)
+        def visit_Global(self, node):
+            self.globals_nonlocals.update(node.names)
+
+        def visit_Nonlocal(self, node):
+            self.globals_nonlocals.update(node.names)
 
         def visit_Name(self, node):
             if isinstance(node.ctx, ast.Store) and node.id not in self.excluded:
                 self.local_vars.add(node.id)
 
-        # 🚀 NOVO: Coletar imports para minificação!
         def visit_Import(self, node):
             for alias in node.names:
                 if alias.name != '*':
@@ -550,15 +345,17 @@ class SafeLocalNameMinifier(ast.NodeTransformer):
                     if name not in self.excluded:
                         self.local_vars.add(name)
 
-        def visit_FunctionDef(self, node): pass
-        def visit_ClassDef(self, node): pass
+        def visit_FunctionDef(self, node):
+            pass
+
+        def visit_ClassDef(self, node):
+            pass
 
     def visit_Import(self, node):
         if self.scope_maps:
             current_map = self.scope_maps[-1]
             for alias in node.names:
                 orig_name = alias.asname or alias.name
-                # Evita mexer em imports complexos com ponto se não for From (ex: import os.path)
                 if orig_name in current_map and '.' not in alias.name:
                     alias.asname = current_map[orig_name]
         return node
@@ -573,89 +370,64 @@ class SafeLocalNameMinifier(ast.NodeTransformer):
         return node
 
     def visit_FunctionDef(self, node):
-        # 1. Coleta os parâmetros da função para EXCLUÍ-LOS da minificação
         excluded = set()
         args = node.args
-        for arg in args.args + getattr(args, 'kwonlyargs',[]) + getattr(args, 'posonlyargs',[]):
+        for arg in args.args + getattr(args, 'kwonlyargs', []) + getattr(args, 'posonlyargs', []):
             excluded.add(arg.arg)
-        if args.vararg: excluded.add(args.vararg.arg)
-        if args.kwarg: excluded.add(args.kwarg.arg)
-
-        # 2. Varredura isolada para este escopo
+        if args.vararg:
+            excluded.add(args.vararg.arg)
+        if args.kwarg:
+            excluded.add(args.kwarg.arg)
         collector = self._VarCollector(excluded)
         for stmt in node.body:
             collector.visit(stmt)
-
         rename_map = {}
-        # 3. Só aplica se for seguro
         if not collector.is_unsafe:
             safe_targets = collector.local_vars - collector.globals_nonlocals
-            for var in sorted(safe_targets): # Sort para determinismo
+            for var in sorted(safe_targets):
                 rename_map[var] = next(self._name_generator)
-
-        # 4. Empilha o mapa deste escopo e visita o corpo
         self.scope_maps.append(rename_map)
-        
-        # Visita os filhos mantendo a assinatura da função intacta
         node.body = [self.visit(stmt) for stmt in node.body]
-        
         self.scope_maps.pop()
         return node
 
     def visit_Name(self, node):
-        # Substitui o nome se ele existir no mapa do escopo atual
         if self.scope_maps:
             current_map = self.scope_maps[-1]
             if node.id in current_map:
                 node.id = current_map[node.id]
         return node
-        
+
 def compact_lines_safely(code: str) -> str:
     """
     Agrupa instruções simples na mesma linha com ';' 
     aproveitando a previsibilidade absoluta do ast.unparse().
     """
     lines = code.split('\n')
-    if not lines: return ""
-    
+    if not lines:
+        return ''
     out_lines = []
     current_line = lines[0]
-    
-    def get_indent(s): return len(s) - len(s.lstrip())
-        
-    # Palavras que quebram o fluxo de mesma linha em Python
-    compound_keywords = (
-        'if ', 'for ', 'while ', 'def ', 'class ', 'try:', 'with ', 
-        'elif ', 'else:', 'except', 'finally:', '@', 'async ', 'match ', 'case '
-    )
-    
+
+    def get_indent(s):
+        return len(s) - len(s.lstrip())
+    compound_keywords = ('if ', 'for ', 'while ', 'def ', 'class ', 'try:', 'with ', 'elif ', 'else:', 'except', 'finally:', '@', 'async ', 'match ', 'case ')
     in_multiline = False
-    
     for i in range(1, len(lines)):
         nxt = lines[i]
         if not nxt.strip():
             continue
-            
-        # Guarda contra fatiamento de strings de multiplas linhas (docstrings etc)
         if nxt.count('"""') % 2 != 0 or nxt.count("'''") % 2 != 0:
             in_multiline = not in_multiline
-            
         curr_indent = get_indent(current_line)
         nxt_indent = get_indent(nxt)
-        
         is_compound_curr = current_line.lstrip().startswith(compound_keywords)
         is_compound_nxt = nxt.lstrip().startswith(compound_keywords)
         ends_with_colon = current_line.rstrip().endswith(':')
-        
-        # O Motor de Fusão Segura
-        if (curr_indent == nxt_indent and curr_indent > 0 and 
-            not in_multiline and not ends_with_colon and 
-            not is_compound_curr and not is_compound_nxt):
-            current_line = current_line + "; " + nxt.lstrip()
+        if curr_indent == nxt_indent and curr_indent > 0 and (not in_multiline) and (not ends_with_colon) and (not is_compound_curr) and (not is_compound_nxt):
+            current_line = current_line + '; ' + nxt.lstrip()
         else:
             out_lines.append(current_line)
             current_line = nxt
-            
     out_lines.append(current_line)
-    return "\n".join(out_lines)
-    
+    return '\n'.join(out_lines)

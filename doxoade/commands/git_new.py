@@ -1,129 +1,91 @@
-# doxoade/commands/git_new.py
+# doxoade/doxoade/commands/git_new.py
 import sys
 import os
 import click
 from doxoade.tools.doxcolors import Fore, Style
-# Importa as ferramentas necessárias do módulo compartilhado
-from ..shared_tools import (
-    ExecutionLogger,
-    _run_git_command
-)
-__version__ = "34.1 Alfa (Auto-Reconcile)"
+from doxoade.tools.git import _run_git_command
+from doxoade.tools.telemetry_tools.logger import ExecutionLogger
+__version__ = '34.2 Guardian (Auto-Audit)'
+
+def _check_large_files(threshold_mb=99):
+    """Procura por arquivos que excedem o limite do GitHub (>100MB)."""
+    large_files = []
+    for root, dirs, files in os.walk('.'):
+        if '.git' in root:
+            continue
+        for f in files:
+            fp = os.path.join(root, f)
+            try:
+                size_mb = os.path.getsize(fp) / (1024 * 1024)
+                if size_mb > threshold_mb:
+                    large_files.append((fp, size_mb))
+            except OSError:
+                continue
+    return large_files
+
 @click.command('git-new')
 @click.pass_context
 @click.argument('message')
 @click.argument('remote_url')
 def git_new(ctx, message, remote_url):
     """
-    Automatiza a publicação de um novo projeto local em um repositório remoto.
+    Automatiza a publicação de um projeto com auditoria de arquivos grandes.
     Tenta reconciliar automaticamente se o remoto não estiver vazio.
     """
     path = '.'
     arguments = ctx.params
     with ExecutionLogger('git-new', path, arguments) as logger:
-        click.echo(Fore.CYAN + "--- [GIT-NEW] Publicando novo projeto no GitHub ---")
-
-        # Pré-checagem: este comando precisa ser executado DENTRO de um repositório Git.
+        click.echo(Fore.CYAN + f'--- [GIT-NEW v{__version__}] Publicando no GitHub ---')
         in_repo = _run_git_command(['rev-parse', '--is-inside-work-tree'], capture_output=True, silent_fail=True)
         if in_repo != 'true':
-            child_repos = []
-            for entry in os.listdir('.'):
-                if os.path.isdir(entry) and os.path.isdir(os.path.join(entry, '.git')):
-                    child_repos.append(entry)
-
+            child_repos = [d for d in os.listdir('.') if os.path.isdir(os.path.join(d, '.git'))]
             if len(child_repos) == 1:
-                target_repo = child_repos[0]
-                os.chdir(target_repo)
-                click.echo(Fore.CYAN + f"[AUTO] Repositório detectado em subpasta única: {target_repo}")
-                click.echo(Fore.CYAN + "       Prosseguindo automaticamente a partir desse diretório...")
+                os.chdir(child_repos[0])
+                click.echo(Fore.CYAN + f'[AUTO] Entrando em: {child_repos[0]}')
             else:
-                msg = "Diretório atual não é um repositório Git. Entre na pasta do projeto antes de usar 'git-new'."
-                logger.add_finding('error', msg)
-                click.echo(Fore.RED + f"[ERRO] {msg}")
-                if child_repos:
-                    click.echo(Fore.YELLOW + "Sugestão: Repositórios encontrados aqui:")
-                    for repo_dir in sorted(child_repos):
-                        click.echo(Fore.YELLOW + f"   - {repo_dir}")
-                click.echo(Fore.CYAN + "Exemplo: cd <pasta-do-projeto> && doxoade git-new \"Mensagem\" <URL>")
-                sys.exit(1)
-        
-        # Passo 1: Adicionar o repositório remoto
-        click.echo(Fore.YELLOW + f"Passo 1: Adicionando remote 'origin' -> {remote_url}")
-        # Remove origin antigo se existir para garantir que estamos apontando para o lugar certo
+                click.echo(Fore.YELLOW + '[INFO] Inicializando novo repositório Git local...')
+                _run_git_command(['init'])
+        click.echo(Fore.CYAN + 'Passo 0: Auditando arquivos para o GitHub...')
+        big_files = _check_large_files()
+        if big_files:
+            click.echo(Fore.RED + Style.BRIGHT + '\n[ALERTA] Arquivos gigantes detectados (Limite GitHub = 100MB):')
+            for f, size in big_files:
+                click.echo(Fore.RED + f'  - {f} ({size:.2f} MB)')
+            click.echo(Fore.YELLOW + '\nSugestão: Adicione-os ao .gitignore antes de prosseguir.')
+            if click.confirm(Fore.CYAN + 'Deseja que eu limpe o índice (git rm --cached) para forçar o .gitignore?', default=True):
+                _run_git_command(['rm', '-r', '--cached', '.'], silent_fail=True)
+                click.echo(Fore.GREEN + '[OK] Índice limpo. Agora certifique-se de que o .gitignore está correto.')
+            else:
+                click.echo(Fore.YELLOW + '[AVISO] Prosseguindo por conta e risco... O push pode falhar.')
+        click.echo(Fore.YELLOW + f"\nPasso 1: Configurando remote 'origin' -> {remote_url}")
         _run_git_command(['remote', 'remove', 'origin'], capture_output=True, silent_fail=True)
-        
         if not _run_git_command(['remote', 'add', 'origin', remote_url]):
-            msg = "Falha ao adicionar o remote."
-            logger.add_finding('error', msg)
-            click.echo(Fore.RED + f"[ERRO] {msg}")
+            click.echo(Fore.RED + '[ERRO] Falha ao adicionar remote.')
             sys.exit(1)
-        click.echo(Fore.GREEN + "[OK] Remote configurado.")
-    
-        # Passo 2: Adicionar todos os arquivos ao staging
-        click.echo(Fore.YELLOW + "\nPasso 2: Preparando arquivos (git add)...")
-        if not _run_git_command(['add', '.']):
-            logger.add_finding('error', "Falha ao executar 'git add .'.")
-            sys.exit(1)
-        
-        # Passo 3: Fazer o commit inicial (se necessário)
-        # Verifica se já existe commit para não duplicar ou falhar se nada mudou
+        click.echo(Fore.YELLOW + 'Passo 2: Preparando arquivos (git add)...')
+        _run_git_command(['add', '.'])
         has_commits = _run_git_command(['rev-parse', '--verify', 'HEAD'], capture_output=True, silent_fail=True)
-        
         if not has_commits:
-            click.echo(Fore.YELLOW + f"\nPasso 3: Criando commit inicial: '{message}'...")
-            if not _run_git_command(['commit', '-m', message]):
-                logger.add_finding('error', "Falha ao executar 'git commit'.")
-                sys.exit(1)
-            click.echo(Fore.GREEN + "[OK] Commit criado.")
+            click.echo(Fore.YELLOW + f'Passo 3: Criando commit inicial...')
+            _run_git_command(['commit', '-m', message])
         else:
-            # Se já tem commit, apenas verifica se há mudanças pendentes para commitar
             status = _run_git_command(['status', '--porcelain'], capture_output=True)
             if status and status.strip():
-                click.echo(Fore.YELLOW + "\nPasso 3: Commitando alterações pendentes...")
+                click.echo(Fore.YELLOW + 'Passo 3: Commitando alterações pendentes...')
                 _run_git_command(['commit', '-m', message])
-                click.echo(Fore.GREEN + "[OK] Alterações commitadas.")
             else:
-                click.echo(Fore.GREEN + "\nPasso 3: [PULADO] Nada a commitar (tree clean).")
-    
-        # Passo 4: Push com Auto-Reconciliação
-        current_branch = _run_git_command(['branch', '--show-current'], capture_output=True) or "main"
+                click.echo(Fore.GREEN + 'Passo 3: [PULADO] Nada a commitar.')
+        current_branch = _run_git_command(['branch', '--show-current'], capture_output=True) or 'master'
         current_branch = current_branch.strip()
-        
-        click.echo(Fore.YELLOW + f"\nPasso 4: Enviando para '{remote_url}' (Branch: {current_branch})...")
-        
-        # Tenta o push normal primeiro
-        if _run_git_command(['push', '--set-upstream', 'origin', current_branch]):
-            # SUCESSO NO PRIMEIRO PUSH
-            logger.add_finding('info', f"Projeto publicado com sucesso em {remote_url}")
-            click.echo(Fore.GREEN + Style.BRIGHT + "\n[GIT-NEW] SUCESSO! Projeto publicado.")
-            click.echo(f"Acesse: {remote_url}")
+        click.echo(Fore.YELLOW + f"\nPasso 4: Enviando para '{remote_url}'...")
+        if _run_git_command(['push', '-u', 'origin', current_branch]):
+            click.echo(Fore.GREEN + Style.BRIGHT + '\n[GIT-NEW] SUCESSO! Projeto publicado.')
             return
-        # SE FALHAR: Tenta Reconciliação (Históricos não relacionados)
-        click.echo(Fore.RED + "\n[ALERTA] Push rejeitado. O repositório remoto não está vazio (possui README/License?).")
-        click.echo(Fore.CYAN + "   > Iniciando protocolo de reconciliação (Pull --rebase --allow-unrelated)...")
-        
-        # Pull com flag para permitir misturar históricos
-        pull_success = _run_git_command([
-            'pull', 'origin', current_branch, 
-            '--rebase', 
-            '--allow-unrelated-histories'
-        ])
-        
-        if pull_success:
-            click.echo(Fore.GREEN + "   > [OK] Históricos fundidos com sucesso.")
-            click.echo(Fore.YELLOW + "   > Tentando push novamente...")
-            
-            if _run_git_command(['push', '--set-upstream', 'origin', current_branch]):
-                click.echo(Fore.GREEN + Style.BRIGHT + "\n[GIT-NEW] SUCESSO! Projeto publicado (reconciliado).")
-                click.echo(f"Acesse: {remote_url}")
+        click.echo(Fore.CYAN + '   > Tentando reconciliação (Pull --rebase)...')
+        if _run_git_command(['pull', 'origin', current_branch, '--rebase', '--allow-unrelated-histories']):
+            if _run_git_command(['push', '-u', 'origin', current_branch]):
+                click.echo(Fore.GREEN + Style.BRIGHT + '\n[GIT-NEW] SUCESSO! (Reconciliado).')
             else:
-                msg = "Falha final no push após reconciliação."
-                logger.add_finding('error', msg)
-                click.echo(Fore.RED + f"[ERRO FATAL] {msg}")
-                sys.exit(1)
+                click.echo(Fore.RED + '[ERRO FATAL] Push falhou mesmo após reconciliação.')
         else:
-            msg = "Falha na reconciliação (Conflito de arquivos?)."
-            logger.add_finding('error', msg)
-            click.echo(Fore.RED + f"[ERRO] {msg}")
-            click.echo(Fore.YELLOW + "Sugestão: Use 'doxoade sync --safe' ou resolva os conflitos manualmente.")
-            sys.exit(1)
+            click.echo(Fore.RED + '[ERRO] Falha na fusão de históricos.')

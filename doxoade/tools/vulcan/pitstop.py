@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-# doxoade/tools/vulcan/pitstop.py
+# doxoade/doxoade/tools/vulcan/pitstop.py
 """
 Vulcan PitStop Engine — v1.0 Warm-Up Streaming Compiler
 =========================================================
@@ -20,28 +19,18 @@ Variáveis de ambiente:
   DOXOADE_PITSTOP_BATCH     tamanho do lote (padrão: 8)
   DOXOADE_PITSTOP_NTHREADS  threads de forge (padrão: auto)
 """
-
 from __future__ import annotations
-
 import hashlib, json, os, shutil, subprocess, sys, threading, time, traceback, re
-
 from concurrent.futures import ThreadPoolExecutor as TPE, as_completed
 from pathlib import Path
 from queue import Empty, Queue
 from typing import Callable
-
 from .artifact_manager import ensure_dirs
 from .environment import VulcanEnvironment as VulEnv
 from .forge import VulcanForge as VForge, assess_file_for_vulcan as AFVul
-
-# ------------ Constantes ------------
-
-_BATCH_SIZE: int = int(os.environ.get("DOXOADE_PITSTOP_BATCH", "8"))
-_BATCH_TIMEOUT: int = 300           # segundos por lote
-_QUEUE_SENTINEL = object()          # token de encerramento de fila
-
-
-# ------------ WarmupCache ------------
+_BATCH_SIZE: int = int(os.environ.get('DOXOADE_PITSTOP_BATCH', '8'))
+_BATCH_TIMEOUT: int = 300
+_QUEUE_SENTINEL = object()
 
 class WarmupCache:
     """
@@ -57,62 +46,59 @@ class WarmupCache:
         self._data: dict[str, dict] = self._load()
         self._lock = threading.Lock()
 
-    # --------- Persistência ---------
     def _load(self) -> dict:
         try:
             if self._path.exists():
-                return json.loads(self._path.read_text(encoding="utf-8"))
-        except Exception as e: print(f"\033[31m ■ Erro: {e}"); traceback.print_tb(e.__traceback__)
+                return json.loads(self._path.read_text(encoding='utf-8'))
+        except Exception as e:
+            print(f'\x1b[31m ■ Erro: {e}')
+            traceback.print_tb(e.__traceback__)
         return {}
 
     def save(self) -> None:
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             with self._lock:
-                self._path.write_text(
-                    json.dumps(self._data, indent=2), encoding="utf-8"
-                )
-        except Exception as e: print(f"\033[31m ■ Erro: {e}"); traceback.print_tb(e.__traceback__)
+                self._path.write_text(json.dumps(self._data, indent=2), encoding='utf-8')
+        except Exception as e:
+            print(f'\x1b[31m ■ Erro: {e}')
+            traceback.print_tb(e.__traceback__)
 
-    # --------- Verificação ---------
     def _content_hash(self, path: Path) -> str | None:
+        """Hash de conteúdo ultra-rápido."""
         try:
-            return hashlib.sha256(path.read_bytes()).hexdigest()[:20]
-        except OSError: return None
+            with open(path, 'rb', buffering=1024 * 1024) as f:
+                return hashlib.sha256(f.read()).hexdigest()[:20]
+        except OSError:
+            return None
 
     def is_stale(self, py_path: str, bin_dir: Path) -> bool:
         """True  → arquivo mudou ou binário ausente → precisa recompilar."""
         abs_path = Path(py_path).resolve()
         content_hash = self._content_hash(abs_path)
-        if content_hash is None: return True
-
+        if content_hash is None:
+            return True
         entry = self._data.get(str(abs_path), {})
-        if entry.get("hash") != content_hash: return True
-
-        # Binário ainda deve existir em disco
+        if entry.get('hash') != content_hash:
+            return True
         path_hash = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
-        ext = ".pyd" if os.name == "nt" else ".so"
-        return not (bin_dir / f"v_{abs_path.stem}_{path_hash}{ext}").exists()
+        ext = '.pyd' if os.name == 'nt' else '.so'
+        return not (bin_dir / f'v_{abs_path.stem}_{path_hash}{ext}').exists()
 
     def mark_compiled(self, py_path: str) -> None:
         abs_path = Path(py_path).resolve()
         content_hash = self._content_hash(abs_path)
-        if content_hash is None: return
+        if content_hash is None:
+            return
         with self._lock:
-            self._data[str(abs_path)] = {
-                "hash": content_hash,
-                "compiled_at": time.time(),
-            }
+            self._data[str(abs_path)] = {'hash': content_hash, 'compiled_at': time.time()}
 
     def invalidate(self, py_path: str) -> None:
         with self._lock:
             self._data.pop(str(Path(py_path).resolve()), None)
 
     def stats(self) -> dict:
-        return {"entries": len(self._data), "path": str(self._path)}
-
-
-# --------- Phase 1 — Forge worker  (puro Python/AST, sem subprocess) ---------
+        return {'entries': len(self._data), 'path': str(self._path)}
 
 def _forge_to_pyx(task: dict) -> dict:
     """
@@ -126,80 +112,46 @@ def _forge_to_pyx(task: dict) -> dict:
     Falhas na geração do opt_py são silenciosas — a Camada 2 simplesmente
     não estará disponível para este módulo até o próximo ``ignite``.
     """
-    file_path = Path(task["file_path"])
-    foundry   = Path(task["foundry"])
-    abs_path  = file_path.resolve()
-
-    path_hash   = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
-    _safe_stem  = re.sub(r'[^a-zA-Z0-9_]', '_', abs_path.stem)
-    module_name = f"v_{_safe_stem}_{path_hash}"
-    pyx_path    = foundry / f"{module_name}.pyx"
-
-    # ── Fase A: Verifica elegibilidade ────────────────────────────────────────
+    file_path = Path(task['file_path'])
+    foundry = Path(task['foundry'])
+    abs_path = file_path.resolve()
+    path_hash = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
+    _safe_stem = re.sub('[^a-zA-Z0-9_]', '_', abs_path.stem)
+    module_name = f'v_{_safe_stem}_{path_hash}'
+    pyx_path = foundry / f'{module_name}.pyx'
     eligible, reason = AFVul(str(abs_path))
     if not eligible:
-        return {
-            "ok": False, "skip": True,
-            "file": str(file_path), "module_name": module_name,
-            "err": f"pulado: {reason}",
-        }
-
-    # ── Fase B: Gera .pyx (Camada 1) ─────────────────────────────────────────
+        return {'ok': False, 'skip': True, 'file': str(file_path), 'module_name': module_name, 'err': f'pulado: {reason}'}
     pyx_ok = False
     try:
-        forge    = VForge(str(abs_path))
+        forge = VForge(str(abs_path))
         pyx_code = forge.generate_source(str(abs_path))
         if pyx_code:
-            pyx_path.write_text(pyx_code, encoding="utf-8")
+            pyx_path.write_text(pyx_code, encoding='utf-8')
             pyx_ok = True
     except Exception as exc:
-        return {
-            "ok": False, "file": str(file_path),
-            "module_name": module_name, "err": str(exc)[:160],
-        }
-
-    # ── Fase C: Gera opt_py (Camada 2) — best-effort, nunca bloqueia ─────────
-    # Tenta localizar a raiz do projeto a partir do task (se disponível)
-    # ou subindo a árvore a partir do arquivo fonte.
+        return {'ok': False, 'file': str(file_path), 'module_name': module_name, 'err': str(exc)[:160]}
     try:
         from doxoade.tools.vulcan.opt_cache import generate_opt_py
-
-        project_root_str = task.get("project_root")
+        project_root_str = task.get('project_root')
         if project_root_str:
             project_root = Path(project_root_str)
         else:
-            # Sobe buscando .doxoade/vulcan
             cur = abs_path.parent
             project_root = None
             while cur != cur.parent:
-                if (cur / ".doxoade" / "vulcan").exists():
+                if (cur / '.doxoade' / 'vulcan').exists():
                     project_root = cur
                     break
                 cur = cur.parent
-
         if project_root:
             generate_opt_py(project_root, abs_path)
-            # Falha silenciosa — opt_py é opcional
     except Exception:
         pass
-
     if not pyx_ok:
-        return {
-            "ok": True, "file": str(file_path),
-            "module_name": module_name, "err": "pyx_code vazio",
-        }
+        return {'ok': True, 'file': str(file_path), 'module_name': module_name, 'err': 'pyx_code vazio'}
+    return {'ok': True, 'file': str(file_path), 'module_name': module_name, 'pyx_path': str(pyx_path)}
 
-    return {
-        "ok": True,
-        "file": str(file_path),
-        "module_name": module_name,
-        "pyx_path": str(pyx_path),
-    }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  Phase 2 — Batch compiler  (N módulos → 1 subprocess)
-# ─────────────────────────────────────────────────────────────────────────────
 def _batch_setup_content(entries: list[dict], extra_args: list[str], nthreads: int) -> str:
     """
     Gera um setup.py temporário que compila N extensões em paralelo.
@@ -210,37 +162,14 @@ def _batch_setup_content(entries: list[dict], extra_args: list[str], nthreads: i
     """
     ext_lines = []
     for entry in entries:
-        name = entry["module_name"]
-        ext_lines.append(
-            f'    Extension("{name}", ["{name}.pyx"], '
-            f"extra_compile_args={extra_args!r}, include_dirs=_incdirs),"
-        )
-    exts_block = "\n".join(ext_lines)
+        name = entry['module_name']
+        ext_lines.append(f'    Extension("{name}", ["{name}.pyx"], extra_compile_args={extra_args!r}, include_dirs=_incdirs),')
+    exts_block = '\n'.join(ext_lines)
+    return f'# -*- coding: utf-8 -*- — GERADO PELO PITSTOP ENGINE\nfrom setuptools import setup, Extension\nfrom Cython.Build import cythonize\ntry:\n    import numpy as np; _incdirs = [np.get_include()]\nexcept ImportError:\n    _incdirs = []\n_exts = [\n{exts_block}\n]\nsetup(\n    ext_modules=cythonize(\n        _exts,\n        nthreads={nthreads},\n        language_level=3,\n        quiet=True,\n    )\n)\n'
 
-    return (
-        "# -*- coding: utf-8 -*- — GERADO PELO PITSTOP ENGINE\n"
-        "from setuptools import setup, Extension\n"
-        "from Cython.Build import cythonize\n"
-        "try:\n"
-        "    import numpy as np; _incdirs = [np.get_include()]\n"
-        "except ImportError:\n"
-        "    _incdirs = []\n"
-        f"_exts = [\n{exts_block}\n]\n"
-        "setup(\n"
-        "    ext_modules=cythonize(\n"
-        "        _exts,\n"
-        f"        nthreads={nthreads},\n"
-        "        language_level=3,\n"
-        "        quiet=True,\n"
-        "    )\n"
-        ")\n"
-    )
-
-
-def _tail(text: str, n: int = 12) -> str:
-    lines = [ln for ln in (text or "").splitlines() if ln.strip()]
-    return "\n".join(lines[-n:]) if lines else "(vazio)"
-
+def _tail(text: str, n: int=12) -> str:
+    lines = [ln for ln in (text or '').splitlines() if ln.strip()]
+    return '\n'.join(lines[-n:]) if lines else '(vazio)'
 
 def _extract_real_error(stderr: str, stdout: str, module_name: str) -> str:
     """
@@ -251,49 +180,17 @@ def _extract_real_error(stderr: str, stdout: str, module_name: str) -> str:
       - "Traceback (most recent call last)" sem relevância ao módulo
       - Linhas vazias / só espaço
     """
-    NOISE_PATTERNS = (
-        "return fut.result(",
-        "concurrent.futures",
-        "Future.result",
-        "_base.py",
-        "raise exception",
-        "if self._exception",
-    )
-
-    lines = (stderr or "").splitlines() + (stdout or "").splitlines()
-
-    # 1. Linhas que mencionam módulo diretamente
-    module_lines = [
-        ln for ln in lines
-        if module_name in ln and ln.strip() and not any(p in ln for p in NOISE_PATTERNS)
-    ]
-
-    # 2. Linhas de erro GCC/Cython genuínas (error:, warning:, fatal error:)
-    error_lines = [
-        ln for ln in lines
-        if any(kw in ln for kw in ("error:", "fatal error:", "undefined", "cannot find"))
-        and not any(p in ln for p in NOISE_PATTERNS)
-        and ln.strip()
-    ]
-
-    # Prioriza erros específicos do módulo, depois erros genéricos, depois tail do stderr
+    NOISE_PATTERNS = ('return fut.result(', 'concurrent.futures', 'Future.result', '_base.py', 'raise exception', 'if self._exception')
+    lines = (stderr or '').splitlines() + (stdout or '').splitlines()
+    module_lines = [ln for ln in lines if module_name in ln and ln.strip() and (not any((p in ln for p in NOISE_PATTERNS)))]
+    error_lines = [ln for ln in lines if any((kw in ln for kw in ('error:', 'fatal error:', 'undefined', 'cannot find'))) and (not any((p in ln for p in NOISE_PATTERNS))) and ln.strip()]
     best = module_lines[:6] or error_lines[:6] or []
     if best:
-        return "\n".join(best)
+        return '\n'.join(best)
+    clean = [ln for ln in lines if ln.strip() and (not any((p in ln for p in NOISE_PATTERNS)))]
+    return '\n'.join(clean[-8:]) if clean else '(sem saída de erro)'
 
-    # Último recurso: tail do stderr sem as linhas de ruído
-    clean = [ln for ln in lines if ln.strip() and not any(p in ln for p in NOISE_PATTERNS)]
-    return "\n".join(clean[-8:]) if clean else "(sem saída de erro)"
-
-
-def _compile_single(
-    name: str,
-    foundry_str: str,
-    bin_dir_str: str,
-    build_env: dict,
-    python_exe: str,
-    worker_id: int = 0,
-) -> tuple[str, bool, str | None]:
+def _compile_single(name: str, foundry_str: str, bin_dir_str: str, build_env: dict, python_exe: str, worker_id: int=0) -> tuple[str, bool, str | None]:
     """
     Compila UM único módulo em subprocesso isolado.
 
@@ -308,74 +205,48 @@ def _compile_single(
     import shutil as _shutil
     import subprocess as _subprocess
     from pathlib import Path as _Path
-
     foundry_path = _Path(foundry_str)
     bin_dir = _Path(bin_dir_str)
-    ext = ".pyd" if _os.name == "nt" else ".so"
-    extra_args = ["-O2"] if _os.name == "nt" else ["-O3", "-ffast-math"]
-
-    # Diretório de build em %TEMP% — caminho curto, evita MAX_PATH no Windows
+    ext = '.pyd' if _os.name == 'nt' else '.so'
+    extra_args = ['-O2'] if _os.name == 'nt' else ['-O3', '-ffast-math']
     import tempfile as _tf
-    build_tmp = _Path(_tf.gettempdir()) / f"vk_{worker_id}"
-    (build_tmp / "Release").mkdir(parents=True, exist_ok=True)
-
-    setup_name = f"_solo_{name}_w{worker_id}_setup.py"
+    build_tmp = _Path(_tf.gettempdir()) / f'vk_{worker_id}'
+    (build_tmp / 'Release').mkdir(parents=True, exist_ok=True)
+    setup_name = f'_solo_{name}_w{worker_id}_setup.py'
     setup_path = foundry_path / setup_name
-    setup_content = (
-        "from setuptools import setup, Extension\n"
-        "from Cython.Build import cythonize\n"
-        "try:\n"
-        "    import numpy as np; _incdirs = [np.get_include()]\n"
-        "except ImportError:\n"
-        "    _incdirs = []\n"
-        f'ext = Extension("{name}", ["{name}.pyx"], '
-        f"extra_compile_args={extra_args!r}, include_dirs=_incdirs)\n"
-        "setup(ext_modules=cythonize(ext, language_level=3, quiet=True))\n"
-    )
-    setup_path.write_text(setup_content, encoding="utf-8")
-
-    cmd = [
-        python_exe, setup_name, "build_ext", "--inplace",
-        "--build-temp", str(build_tmp),
-    ]
-    if _os.name == "nt":
-        cmd.append("--compiler=mingw32")
-
+    setup_content = f'from setuptools import setup, Extension\nfrom Cython.Build import cythonize\ntry:\n    import numpy as np; _incdirs = [np.get_include()]\nexcept ImportError:\n    _incdirs = []\next = Extension("{name}", ["{name}.pyx"], extra_compile_args={extra_args!r}, include_dirs=_incdirs)\nsetup(ext_modules=cythonize(ext, language_level=3, quiet=True))\n'
+    setup_path.write_text(setup_content, encoding='utf-8')
+    cmd = [python_exe, setup_name, 'build_ext', '--inplace', '--build-temp', str(build_tmp)]
+    if _os.name == 'nt':
+        cmd.append('--compiler=mingw32')
     try:
-        proc = _subprocess.run(
-            cmd, cwd=str(foundry_path), env=build_env,
-            capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=180,
-        )
+        proc = _subprocess.run(cmd, cwd=str(foundry_path), env=build_env, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=180)
         if proc.returncode == 0:
-            bin_file = next(foundry_path.glob(f"{name}*{ext}"), None)
+            bin_file = next(foundry_path.glob(f'{name}*{ext}'), None)
             if bin_file:
                 dst = bin_dir / bin_file.name
                 _shutil.move(str(bin_file), str(dst))
-                return name, True, None
-            return name, False, f"exit=0 mas binário ausente: {name}"
+                return (name, True, None)
+            return (name, False, f'exit=0 mas binário ausente: {name}')
         else:
-            return name, False, _extract_real_error(proc.stderr, proc.stdout, name)
-    except _subprocess.TimeoutExpired: return name, False, "Timeout (>180s)"
-    except Exception as exc: return name, False, f"Exceção: {exc}"
+            return (name, False, _extract_real_error(proc.stderr, proc.stdout, name))
+    except _subprocess.TimeoutExpired:
+        return (name, False, 'Timeout (>180s)')
+    except Exception as exc:
+        return (name, False, f'Exceção: {exc}')
     finally:
         try:
             setup_path.unlink(missing_ok=True)
-        except Exception as e: print(f"\033[31m ■ Erro: {e}"); traceback.print_tb(e.__traceback__)
+        except Exception as e:
+            print(f'\x1b[31m ■ Erro: {e}')
+            traceback.print_tb(e.__traceback__)
         try:
             _shutil.rmtree(str(build_tmp), ignore_errors=True)
-        except Exception as e: print(f"\033[31m ■ Erro: {e}"); traceback.print_tb(e.__traceback__)
+        except Exception as e:
+            print(f'\x1b[31m ■ Erro: {e}')
+            traceback.print_tb(e.__traceback__)
 
-
-def _parallel_compile(
-    entries: list[dict],
-    foundry_path: Path,
-    bin_dir: Path,
-    build_env: dict,
-    python_exe: str,
-    n_workers: int,
-    label: str = "paralelo",
-) -> dict[str, tuple[bool, str | None]]:
+def _parallel_compile(entries: list[dict], foundry_path: Path, bin_dir: Path, build_env: dict, python_exe: str, n_workers: int, label: str='paralelo') -> dict[str, tuple[bool, str | None]]:
     """
     Compila N módulos em paralelo usando ProcessPoolExecutor.
 
@@ -383,44 +254,28 @@ def _parallel_compile(
     Usa diretórios de build isolados por worker_id para evitar conflito no Windows.
     """
     from concurrent.futures import ProcessPoolExecutor, as_completed as _as_completed
-
     results: dict[str, tuple[bool, str | None]] = {}
     foundry_str = str(foundry_path)
     bin_dir_str = str(bin_dir)
-
-    print(
-        f"      \033[33m⚡ [{label}] {len(entries)} módulo(s) × {n_workers} processo(s) GCC...\033[0m"
-    )
-
-    # Atribui worker_id único a cada entry (round-robin sobre n_workers)
-    tasks = [
-        (e["module_name"], foundry_str, bin_dir_str, build_env, python_exe, i % n_workers)
-        for i, e in enumerate(entries)
-    ]
-
+    print(f'      \x1b[33m⚡ [{label}] {len(entries)} módulo(s) × {n_workers} processo(s) GCC...\x1b[0m')
+    tasks = [(e['module_name'], foundry_str, bin_dir_str, build_env, python_exe, i % n_workers) for i, e in enumerate(entries)]
     try:
         with ProcessPoolExecutor(max_workers=n_workers) as pool:
-            futures = {
-                pool.submit(_compile_single, *task): task[0]
-                for task in tasks
-            }
+            futures = {pool.submit(_compile_single, *task): task[0] for task in tasks}
             for future in _as_completed(futures):
                 try:
                     mod_name, ok, err = future.result(timeout=200)
                 except Exception as exc:
                     mod_name = futures[future]
-                    ok, err = False, f"Worker crash: {exc}"
+                    ok, err = (False, f'Worker crash: {exc}')
                 results[mod_name] = (ok, err)
-                mark = "\033[32m✔\033[0m" if ok else "\033[31m✘\033[0m"
-                print(f"      {mark} {mod_name}")
+                mark = '\x1b[32m✔\x1b[0m' if ok else '\x1b[31m✘\x1b[0m'
+                print(f'      {mark} {mod_name}')
     except KeyboardInterrupt:
         raise
     return results
 
-def compile_batch(entries: list[dict],    foundry_path: Path,
-                  bin_dir: Path,          build_env: dict,
-                  python_exe: str,        max_gcc_jobs: int = 0,
-                  ) -> dict[str, tuple[bool, str | None]]:
+def compile_batch(entries: list[dict], foundry_path: Path, bin_dir: Path, build_env: dict, python_exe: str, max_gcc_jobs: int=0) -> dict[str, tuple[bool, str | None]]:
     """
     Estratégia adaptativa de compilação:
 
@@ -431,105 +286,72 @@ def compile_batch(entries: list[dict],    foundry_path: Path,
 
     Retorna: { module_name → (ok, error_msg) }
     """
-    if not entries: return {}
-
+    if not entries:
+        return {}
     n_workers = max(1, max_gcc_jobs) if max_gcc_jobs > 0 else max(1, os.cpu_count() or 2)
-    ext = ".pyd" if os.name == "nt" else ".so"
-
-    # ── Windows: pula batch, vai direto ao paralelo ───────────────────────────
-    # mingw32 falha consistentemente com múltiplas extensões no mesmo setup.py
-    # (colisão de artefatos intermediários + bug de lock no linker).
-    if os.name == "nt":
-        return _parallel_compile(
-            entries, foundry_path, bin_dir, build_env, python_exe, n_workers,
-            label="PITSTOP:PARALLEL"
-        )
-
-    # ── Linux/macOS: tenta batch único primeiro ───────────────────────────────
-    extra_args = ["-O3", "-ffast-math"]
+    ext = '.pyd' if os.name == 'nt' else '.so'
+    if os.name == 'nt':
+        return _parallel_compile(entries, foundry_path, bin_dir, build_env, python_exe, n_workers, label='PITSTOP:PARALLEL')
+    extra_args = ['-O3', '-ffast-math']
     nthreads = max(1, min(len(entries), os.cpu_count() or 2))
-
-    setup_path = foundry_path / "_pitstop_batch_setup.py"
-    setup_path.write_text(
-        _batch_setup_content(entries, extra_args, nthreads), encoding="utf-8"
-    )
-    cmd = [python_exe, setup_path.name, "build_ext", "--inplace"]
+    setup_path = foundry_path / '_pitstop_batch_setup.py'
+    setup_path.write_text(_batch_setup_content(entries, extra_args, nthreads), encoding='utf-8')
+    cmd = [python_exe, setup_path.name, 'build_ext', '--inplace']
     env = build_env.copy()
     if n_workers > 0:
-        env["MAKEFLAGS"] = f"-j{n_workers}"
-
+        env['MAKEFLAGS'] = f'-j{n_workers}'
     results: dict[str, tuple[bool, str | None]] = {}
     batch_exit = 1
-
     try:
-        proc = subprocess.run(
-            cmd, cwd=str(foundry_path), env=env,
-            capture_output=True, text=True,
-            encoding="utf-8", errors="replace",
-            timeout=_BATCH_TIMEOUT,
-        )
+        proc = subprocess.run(cmd, cwd=str(foundry_path), env=env, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=_BATCH_TIMEOUT)
         batch_exit = proc.returncode
     except subprocess.TimeoutExpired:
         for entry in entries:
-            results[entry["module_name"]] = (False, "Timeout no lote de compilação")
+            results[entry['module_name']] = (False, 'Timeout no lote de compilação')
         return results
     except Exception as exc:
         for entry in entries:
-            results[entry["module_name"]] = (False, f"Exceção no batch: {exc}")
+            results[entry['module_name']] = (False, f'Exceção no batch: {exc}')
         return results
     finally:
         try:
             setup_path.unlink(missing_ok=True)
-        except Exception as e: print(f"\033[31m ■ Erro: {e}"); traceback.print_tb(e.__traceback__)
-
-    # Resgata binários já gerados mesmo com exit != 0
+        except Exception as e:
+            print(f'\x1b[31m ■ Erro: {e}')
+            traceback.print_tb(e.__traceback__)
     rescued: set[str] = set()
     for entry in entries:
-        name = entry["module_name"]
-        bin_file = next(foundry_path.glob(f"{name}*{ext}"), None)
+        name = entry['module_name']
+        bin_file = next(foundry_path.glob(f'{name}*{ext}'), None)
         if bin_file:
             try:
                 shutil.move(str(bin_file), str(bin_dir / bin_file.name))
                 results[name] = (True, None)
                 rescued.add(name)
             except Exception as e:
-                results[name] = (False, f"Move: {e}")
-
+                results[name] = (False, f'Move: {e}')
     if batch_exit == 0:
         for entry in entries:
-            if entry["module_name"] not in results:
-                results[entry["module_name"]] = (False, "Binário não encontrado")
+            if entry['module_name'] not in results:
+                results[entry['module_name']] = (False, 'Binário não encontrado')
         return results
-
-    # Fallback paralelo para os não resgatados
-    needs_retry = [e for e in entries if e["module_name"] not in rescued]
+    needs_retry = [e for e in entries if e['module_name'] not in rescued]
     if needs_retry:
-        parallel_res = _parallel_compile(
-            needs_retry, foundry_path, bin_dir, build_env, python_exe, n_workers,
-            label=f"fallback batch exit={batch_exit}"
-        )
+        parallel_res = _parallel_compile(needs_retry, foundry_path, bin_dir, build_env, python_exe, n_workers, label=f'fallback batch exit={batch_exit}')
         results.update(parallel_res)
-
     return results
 
-
-def _parse_batch_errors(
-    stderr: str, stdout: str, entries: list[dict]
-) -> dict[str, tuple[bool, str | None]]:
+def _parse_batch_errors(stderr: str, stdout: str, entries: list[dict]) -> dict[str, tuple[bool, str | None]]:
     """Mantido por compatibilidade (usado apenas em código externo legado)."""
     results: dict[str, tuple[bool, str | None]] = {}
     stderr_lines = stderr.splitlines()
     for entry in entries:
-        name = entry["module_name"]
+        name = entry['module_name']
         relevant = [ln for ln in stderr_lines if name in ln]
         if relevant:
-            results[name] = (False, "\n".join(relevant[-6:]))
+            results[name] = (False, '\n'.join(relevant[-6:]))
     return results
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  PitStop Engine  —  orquestra pipeline completo
-# ─────────────────────────────────────────────────────────────────────────────
 class PitstopEngine:
     """
     Motor de compilação pré-aquecida com streaming em 3 fases.
@@ -544,54 +366,28 @@ class PitstopEngine:
     permitindo exibição incremental de progresso (streaming).
     """
 
-    def __init__(
-        self,
-        env: VulEnv,
-        pid_registry: dict | None = None,
-    ) -> None:
+    def __init__(self, env: VulEnv, pid_registry: dict | None=None) -> None:
         self.env = env
         self.root = env.root
         self._pid_registry: dict = pid_registry or {}
-
-        # Cache de conteúdo persistente
-        cache_path = self.root / ".doxoade" / "vulcan" / "pitstop_cache.json"
+        cache_path = self.root / '.doxoade' / 'vulcan' / 'pitstop_cache.json'
         self.cache = WarmupCache(cache_path)
-
-        # Ambiente GCC pré-aquecido (equivalente ao VulcanCompiler._prepare_pitstop_env)
         self._build_env: dict = self._prepare_build_env()
         self._python_exe: str = self._resolve_python()
 
-    # ── Configuração ──────────────────────────────────────────────────────────
-    def _prepare_build_env(self) -> dict:
-        core_root = Path(__file__).resolve().parents[3]
-        gcc_exe = core_root / "thirdparty" / "w64devkit" / "bin" / "gcc.exe"
-        env = os.environ.copy()
-        if gcc_exe.exists():
-            bin_dir = str(gcc_exe.parent)
-            env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
-            env["CC"] = "gcc"
-            env["CXX"] = "g++"
-            env["DISTUTILS_USE_SDK"] = "1"
-            env["PY_VULCAN_PITSTOP"] = "1"
-        return env
+    def _prepare_build_env(self):
+        """Warm-up do ambiente de compilação."""
+        from .compiler import VulcanCompiler
+        compiler = VulcanCompiler(self.env)
+        compiler._ensure_pch()
+        return compiler._prepare_pitstop_env()
 
     def _resolve_python(self) -> str:
         core_root = Path(__file__).resolve().parents[3]
-        candidate = (
-            core_root / "venv" / "Scripts" / "python.exe"
-            if os.name == "nt"
-            else sys.executable
-        )
+        candidate = core_root / 'venv' / 'Scripts' / 'python.exe' if os.name == 'nt' else sys.executable
         return str(candidate) if Path(candidate).exists() else sys.executable
 
-    # ── Pipeline principal ────────────────────────────────────────────────────
-    def run(
-        self,
-        candidates: list[dict],
-        max_workers: int | None = None,
-        force_recompile: bool = False,
-        on_result: Callable[[str, bool, str | None], None] | None = None,
-    ) -> dict:
+    def run(self, candidates: list[dict], max_workers: int | None=None, force_recompile: bool=False, on_result: Callable[[str, bool, str | None], None] | None=None) -> dict:
         """
         Executa pipeline PitStop completo.
 
@@ -604,91 +400,59 @@ class PitstopEngine:
         ensure_dirs(str(self.root))
         self.env.foundry.mkdir(parents=True, exist_ok=True)
         self.env.bin_dir.mkdir(parents=True, exist_ok=True)
-
         n_workers = self._resolve_workers(max_workers)
-        stats: dict = {
-            "total": len(candidates),
-            "cached": 0,
-            "stale": 0,
-            "success": 0,
-            "failed": 0,
-            "skipped": 0,
-            "forge_time": 0.0,
-            "compile_time": 0.0,
-            "total_time": 0.0,
-        }
+        stats: dict = {'total': len(candidates), 'cached': 0, 'stale': 0, 'success': 0, 'failed': 0, 'skipped': 0, 'forge_time': 0.0, 'compile_time': 0.0, 'total_time': 0.0}
         t_start = time.perf_counter()
-
-        # ── 0. Filtragem por WarmupCache ──────────────────────────────────────
         if not force_recompile:
             stale, cached_count = self._filter_stale(candidates)
-            stats["cached"] = cached_count
+            stats['cached'] = cached_count
         else:
             stale = candidates
-        stats["stale"] = len(stale)
-
+        stats['stale'] = len(stale)
         if not stale:
-            stats["total_time"] = time.perf_counter() - t_start
+            stats['total_time'] = time.perf_counter() - t_start
             return stats
-
-        # ── Phase 1: Forge Stream ─────────────────────────────────────────────
-        # .py → .pyx em threads paralelas (sem subprocesso)
         t_forge = time.perf_counter()
         forge_out = self._phase_forge(stale, n_workers)
-        stats["forge_time"] = round(time.perf_counter() - t_forge, 3)
-
+        stats['forge_time'] = round(time.perf_counter() - t_forge, 3)
         ready: list[dict] = []
         for r in forge_out:
-            if r.get("skip"):
-                stats["skipped"] += 1
+            if r.get('skip'):
+                stats['skipped'] += 1
                 if on_result:
-                    on_result(r["file"], False, r.get("err"))
-            elif not r["ok"]:
-                stats["failed"] += 1
+                    on_result(r['file'], False, r.get('err'))
+            elif not r['ok']:
+                stats['failed'] += 1
                 if on_result:
-                    on_result(r["file"], False, r.get("err"))
+                    on_result(r['file'], False, r.get('err'))
             else:
                 ready.append(r)
-
         if not ready:
             self.cache.save()
-            stats["total_time"] = round(time.perf_counter() - t_start, 3)
+            stats['total_time'] = round(time.perf_counter() - t_start, 3)
             return stats
-
-        # ── Phase 2: Batch Compile ────────────────────────────────────────────
-        # N .pyx → N binários em UMA única chamada setup.py
         t_compile = time.perf_counter()
         compile_results = self._phase_batch_compile(ready, n_workers)
-        stats["compile_time"] = round(time.perf_counter() - t_compile, 3)
-
-        # ── Phase 3: Promote + Report ─────────────────────────────────────────
+        stats['compile_time'] = round(time.perf_counter() - t_compile, 3)
         for entry in ready:
-            name = entry["module_name"]
-            file_path = entry["file"]
-            ok, err = compile_results.get(name, (False, "Resultado ausente"))
+            name = entry['module_name']
+            file_path = entry['file']
+            ok, err = compile_results.get(name, (False, 'Resultado ausente'))
             if ok:
-                stats["success"] += 1
+                stats['success'] += 1
                 self.cache.mark_compiled(file_path)
                 if on_result:
                     on_result(file_path, True, None)
             else:
-                stats["failed"] += 1
+                stats['failed'] += 1
                 self.cache.invalidate(file_path)
                 if on_result:
                     on_result(file_path, False, err)
-
-        stats["total_time"] = round(time.perf_counter() - t_start, 3)
+        stats['total_time'] = round(time.perf_counter() - t_start, 3)
         self.cache.save()
         return stats
 
-    # ── Streaming produtor-consumidor ─────────────────────────────────────────
-    def run_streaming(
-        self,
-        candidates: list[dict],
-        max_workers: int | None = None,
-        force_recompile: bool = False,
-        on_result: Callable[[str, bool, str | None], None] | None = None,
-    ) -> dict:
+    def run_streaming(self, candidates: list[dict], max_workers: int | None=None, force_recompile: bool=False, on_result: Callable[[str, bool, str | None], None] | None=None) -> dict:
         """
         Variante streaming: forge, compilação se sobrepõem via fila.
 
@@ -699,90 +463,56 @@ class PitstopEngine:
         ensure_dirs(str(self.root))
         self.env.foundry.mkdir(parents=True, exist_ok=True)
         self.env.bin_dir.mkdir(parents=True, exist_ok=True)
-
         n_workers = self._resolve_workers(max_workers)
-
         if not force_recompile:
             stale, cached_count = self._filter_stale(candidates)
         else:
-            stale, cached_count = candidates, 0
-
-        stats: dict = {
-            "total": len(candidates),
-            "cached": cached_count,
-            "stale": len(stale),
-            "success": 0,
-            "failed": 0,
-            "skipped": 0,
-            "forge_time": 0.0,
-            "compile_time": 0.0,
-            "total_time": 0.0,
-        }
-
+            stale, cached_count = (candidates, 0)
+        stats: dict = {'total': len(candidates), 'cached': cached_count, 'stale': len(stale), 'success': 0, 'failed': 0, 'skipped': 0, 'forge_time': 0.0, 'compile_time': 0.0, 'total_time': 0.0}
         if not stale:
             return stats
-
         t_start = time.perf_counter()
         forge_queue: Queue[dict | object] = Queue()
         compile_results_store: dict = {}
         compile_lock = threading.Lock()
 
-        # Compilador consumidor: drena fila em lotes e compila
         def _compile_consumer() -> None:
             batch: list[dict] = []
             t_compile_acc = 0.0
-
             while True:
                 try:
                     item = forge_queue.get(timeout=0.3)
                 except Empty:
-                    # Flush parcial se há itens esperando
                     if batch:
                         t0 = time.perf_counter()
-                        res = compile_batch(
-                            batch, self.env.foundry, self.env.bin_dir,
-                            self._build_env, self._python_exe, n_workers,
-                        )
+                        res = compile_batch(batch, self.env.foundry, self.env.bin_dir, self._build_env, self._python_exe, n_workers)
                         t_compile_acc += time.perf_counter() - t0
                         with compile_lock:
                             compile_results_store.update(res)
                         batch = []
                     continue
-
                 if item is _QUEUE_SENTINEL:
-                    # Flush final
                     if batch:
                         t0 = time.perf_counter()
-                        res = compile_batch(
-                            batch, self.env.foundry, self.env.bin_dir,
-                            self._build_env, self._python_exe, n_workers,
-                        )
+                        res = compile_batch(batch, self.env.foundry, self.env.bin_dir, self._build_env, self._python_exe, n_workers)
                         t_compile_acc += time.perf_counter() - t0
                         with compile_lock:
                             compile_results_store.update(res)
                     with compile_lock:
-                        compile_results_store["__compile_time__"] = t_compile_acc
+                        compile_results_store['__compile_time__'] = t_compile_acc
                     break
-
                 batch.append(item)
                 if len(batch) >= _BATCH_SIZE:
                     t0 = time.perf_counter()
-                    res = compile_batch(
-                        batch, self.env.foundry, self.env.bin_dir,
-                        self._build_env, self._python_exe, n_workers,
-                    )
+                    res = compile_batch(batch, self.env.foundry, self.env.bin_dir, self._build_env, self._python_exe, n_workers)
                     t_compile_acc += time.perf_counter() - t0
                     with compile_lock:
                         compile_results_store.update(res)
                     batch = []
-
         compiler_thread = threading.Thread(target=_compile_consumer, daemon=True)
         compiler_thread.start()
-
-        # Forge producer: gera .pyx em paralelo, enfileira para compilação
         t_forge = time.perf_counter()
-        forge_tasks = [{"file_path": c["file"], "foundry": str(self.env.foundry)} for c in stale]
-
+        forge_tasks = [{'file_path': c['file'], 'foundry': str(self.env.foundry)} for c in stale]
         with TPE(max_workers=n_workers) as executor:
             futures = {executor.submit(_forge_to_pyx, task): task for task in forge_tasks}
             for future in as_completed(futures):
@@ -790,75 +520,56 @@ class PitstopEngine:
                     result = future.result()
                 except Exception as exc:
                     task = futures[future]
-                    result = {
-                        "ok": False, "file": task["file_path"],
-                        "module_name": "", "err": str(exc),
-                    }
-
-                if result.get("skip") or not result["ok"]:
-                    key = "skipped" if result.get("skip") else "failed"
+                    result = {'ok': False, 'file': task['file_path'], 'module_name': '', 'err': str(exc)}
+                if result.get('skip') or not result['ok']:
+                    key = 'skipped' if result.get('skip') else 'failed'
                     stats[key] += 1
                     if on_result:
-                        on_result(result["file"], False, result.get("err"))
+                        on_result(result['file'], False, result.get('err'))
                 else:
                     forge_queue.put(result)
-
-        stats["forge_time"] = round(time.perf_counter() - t_forge, 3)
-
-        # Sinaliza fim ao compilador e aguarda
+        stats['forge_time'] = round(time.perf_counter() - t_forge, 3)
         forge_queue.put(_QUEUE_SENTINEL)
         compiler_thread.join(timeout=_BATCH_TIMEOUT + 30)
-
-        # Coleta resultados e reporta
-        stats["compile_time"] = round(
-            compile_results_store.pop("__compile_time__", 0.0), 3
-        )
-
+        stats['compile_time'] = round(compile_results_store.pop('__compile_time__', 0.0), 3)
         for c in stale:
-            file_path = c["file"]
+            file_path = c['file']
             abs_path = str(Path(file_path).resolve())
-            path_hash = hashlib.sha256(abs_path.encode()).hexdigest()[:6]  # OBJ-REDUCE: slice→memoryview
+            path_hash = hashlib.sha256(abs_path.encode()).hexdigest()[:6]
             stem = Path(file_path).stem
-            module_name = f"v_{stem}_{path_hash}"
-
+            module_name = f'v_{stem}_{path_hash}'
             ok, err = compile_results_store.get(module_name, (False, None))
             if ok:
-                stats["success"] += 1
+                stats['success'] += 1
                 self.cache.mark_compiled(file_path)
                 if on_result:
                     on_result(file_path, True, None)
             elif module_name not in compile_results_store:
-                pass  # Provavelmente caiu no skip/failed da forge phase
+                pass
             else:
-                stats["failed"] += 1
+                stats['failed'] += 1
                 self.cache.invalidate(file_path)
                 if on_result:
                     on_result(file_path, False, err)
-
-        stats["total_time"] = round(time.perf_counter() - t_start, 3)
+        stats['total_time'] = round(time.perf_counter() - t_start, 3)
         self.cache.save()
         return stats
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
     def _filter_stale(self, candidates: list[dict]) -> tuple[list[dict], int]:
-        stale, cached = [], 0
+        stale, cached = ([], 0)
         for c in candidates:
-            if self.cache.is_stale(c["file"], self.env.bin_dir):
+            if self.cache.is_stale(c['file'], self.env.bin_dir):
                 stale.append(c)
             else:
                 cached += 1
         if cached:
-            print(
-                f"   \033[36m↷ PitStop cache quente: "
-                f"{cached} módulo(s) sem mudança → ignorado(s)\033[0m"
-            )
-        return stale, cached
+            print(f'   \x1b[36m↷ PitStop cache quente: {cached} módulo(s) sem mudança → ignorado(s)\x1b[0m')
+        return (stale, cached)
 
     def _phase_forge(self, candidates: list[dict], n_workers: int) -> list[dict]:
         """Phase 1: gera todos os .pyx em paralelo (puro AST, sem subprocess)."""
         results: list[dict] = []
-        tasks = [{"file_path": c["file"], "foundry": str(self.env.foundry)} for c in candidates]
-
+        tasks = [{'file_path': c['file'], 'foundry': str(self.env.foundry)} for c in candidates]
         with TPE(max_workers=n_workers) as executor:
             futures = {executor.submit(_forge_to_pyx, t): t for t in tasks}
             for future in as_completed(futures):
@@ -866,15 +577,10 @@ class PitstopEngine:
                     results.append(future.result())
                 except Exception as exc:
                     t = futures[future]
-                    results.append({
-                        "ok": False, "file": t["file_path"],
-                        "module_name": "", "err": str(exc),
-                    })
+                    results.append({'ok': False, 'file': t['file_path'], 'module_name': '', 'err': str(exc)})
         return results
 
-    def _phase_batch_compile(
-        self, ready: list[dict], n_workers: int
-    ) -> dict[str, tuple[bool, str | None]]:
+    def _phase_batch_compile(self, ready: list[dict], n_workers: int) -> dict[str, tuple[bool, str | None]]:
         """
         Phase 2: compila em lotes.
 
@@ -885,31 +591,16 @@ class PitstopEngine:
         """
         all_results: dict[str, tuple[bool, str | None]] = {}
         total_batches = (len(ready) + _BATCH_SIZE - 1) // _BATCH_SIZE
-
         for i in range(0, len(ready), _BATCH_SIZE):
-            batch = ready[i : i + _BATCH_SIZE]  # OBJ-REDUCE: slice→memoryview
+            batch = ready[i:i + _BATCH_SIZE]
             batch_num = i // _BATCH_SIZE + 1
-            print(
-                f"   \033[33m🔥 [PITSTOP] Lote {batch_num}/{total_batches} "
-                f"({len(batch)} módulos × {n_workers} workers)...\033[0m"
-            )
-            res = compile_batch(
-                entries=batch,
-                foundry_path=self.env.foundry,
-                bin_dir=self.env.bin_dir,
-                build_env=self._build_env,
-                python_exe=self._python_exe,
-                max_gcc_jobs=n_workers,
-            )
+            print(f'   \x1b[33m🔥 [PITSTOP] Lote {batch_num}/{total_batches} ({len(batch)} módulos × {n_workers} workers)...\x1b[0m')
+            res = compile_batch(entries=batch, foundry_path=self.env.foundry, bin_dir=self.env.bin_dir, build_env=self._build_env, python_exe=self._python_exe, max_gcc_jobs=n_workers)
             all_results.update(res)
-
-            # No Linux com batch success, _parallel_compile não roda →
-            # imprimimos feedback aqui (sem duplicar no Windows).
-            if os.name != "nt":
+            if os.name != 'nt':
                 for name, (ok, err) in res.items():
-                    mark = "\033[32m✔\033[0m" if ok else "\033[31m✘\033[0m"
-                    print(f"      {mark} {name}")
-
+                    mark = '\x1b[32m✔\x1b[0m' if ok else '\x1b[31m✘\x1b[0m'
+                    print(f'      {mark} {name}')
         return all_results
 
     @staticmethod
@@ -923,23 +614,13 @@ class PitstopEngine:
         """
         if isinstance(max_workers, int) and max_workers > 0:
             return max_workers
-        env_val = os.environ.get("DOXOADE_PITSTOP_NTHREADS", "").strip()
+        env_val = os.environ.get('DOXOADE_PITSTOP_NTHREADS', '').strip()
         if env_val.isdigit() and int(env_val) > 0:
             return int(env_val)
         cpu = os.cpu_count() or 2
-        # Usa todos os cores disponíveis (cap em 8 para evitar thrashing de I/O)
         return max(2, min(8, cpu))
 
     def warmup_info(self) -> dict:
         """Diagnóstico do estado do motor."""
         n = self._resolve_workers(None)
-        return {
-            "python_exe": self._python_exe,     "foundry": str(self.env.foundry),
-            "bin_dir": str(self.env.bin_dir),   "batch_size": _BATCH_SIZE,
-            "workers": n,
-            "parallel_strategy": "ProcessPoolExecutor (Windows)" if os.name == "nt" else "batch+fallback (Linux/macOS)",
-            "cache": self.cache.stats(),
-            "build_env_keys": sorted(
-                k for k in self._build_env if k not in os.environ
-            ),
-        }
+        return {'python_exe': self._python_exe, 'foundry': str(self.env.foundry), 'bin_dir': str(self.env.bin_dir), 'batch_size': _BATCH_SIZE, 'workers': n, 'parallel_strategy': 'ProcessPoolExecutor (Windows)' if os.name == 'nt' else 'batch+fallback (Linux/macOS)', 'cache': self.cache.stats(), 'build_env_keys': sorted((k for k in self._build_env if k not in os.environ))}

@@ -1,5 +1,6 @@
+# doxoade/doxoade/commands/venvkeeper_systems/cli.py
 # -*- coding: utf-8 -*-
-# doxoade/cli.py
+# doxoade/doxoade/commands/venvkeeper_systems/cli.py
 """
 Ponto de Entrada Principal (Core Router) - v85.1 Platinum.
 Orquestrador Zeus: Gerenciamento de Comandos e Ciclo de Vida.
@@ -72,7 +73,7 @@ class DoxoadeLazyGroup(click.Group):
             'log': 'doxoade.commands.utils:log',
             'maestro': 'doxoade.commands.maestro:maestro',
             'merge': 'doxoade.commands.git_merge:merge',
-            'migrate-colors': 'doxoade.commands.migrate_colors:migrate_colors',
+            'migrate-colors': 'doxoade.commands.doxcolors_systems.colors_command:migrate_colors',
             'migrate-db': 'doxoade.commands.migrate_db:migrate_db',
             'mirror': 'doxoade.commands.mirror:mirror',
             'mk': 'doxoade.commands.utils:mk',
@@ -91,7 +92,7 @@ class DoxoadeLazyGroup(click.Group):
             'save': 'doxoade.commands.save:save',
             'scaffold': 'doxoade.commands.scaffold:scaffold',
             'search': 'doxoade.commands.search:search',
-            'security': 'doxoade.commands.security:security',
+            'security': 'doxoade.commands.security_systems.security_cmd:security',
             'self-test': 'doxoade.commands.self_test:self_test',
             'setup-health': 'doxoade.commands.utils:setup_health_cmd',
             'show-trace': 'doxoade.commands.utils:show_trace',

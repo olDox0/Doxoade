@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Doxoade | Impact Nexus</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+  <style>
+    /* Injetado do impact_style.css */
+    /* impact_style.css */
+:root { 
+    --bg-dark:            #0f0d0f; /* Piano Black 3 */
+    --panel:              #19171a; /* Piano Black 2 */
+    --panel-light:        #2f2e30; /* Piano Black 1 */
+    --border:             #4c4552; /* Mortar */
+    
+    --text-main:          #d2dce6; /* Nordic Breeze */
+    --text-muted:         #5e5c5e; /* Piano Black 0 */
+    
+    --accent-primary:     #26bc5f; /* Esmeralda */
+    --accent-dark:        #197b3f; /* Esmeralda Escuro */
+    --target:             #ff6700; /* Laranja Blaze */
+    --target-dark:        #e05a00; /* Laranja Escuro */
+    --secondary-hover:    #006cff; /* Brandeis Blue */
+    --warning:            #e8aa00; /* Urobilin Yellow */
+    --term-bg:            #0a331a; /* Fundo Terminal */
+
+    --pastel-orange:      #E38D53; /* fluxo grama cor 1 */
+    --pastel-pink:        #CE699E; /* fluxo grama cor 2 */
+    --pastel-blue:        #4D91E8; /* fluxo grama cor 3 */
+    --pastel-green:       #57B87C; /* fluxo grama cor 3 */
+        
+    --dark-pastel-orange: #5a3821; /* fluxo grama cor 1 */
+    --dark-pastel-pink:   #52293f; /* fluxo grama cor 2 */
+    --dark-pastel-blue:   #1e395c; /* fluxo grama cor 3 */
+    --dark-pastel-green:  #224931; /* fluxo grama cor 3 */
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { 
+    font-family: 'Cascadia Code', 'Fira Code', monospace; 
+    background: var(--bg-dark); color: var(--text-main); 
+    height: 100vh; display: flex; flex-direction: column; overflow: hidden; 
+}
+
+header { 
+    background: var(--panel); border-bottom: 1px solid var(--border); 
+    padding: 15px 20px; display: flex; justify-content: space-between; 
+    align-items: center; box-shadow: 0 2px 10px rgba(0,0,0,0.5); z-index: 10;
+}
+h1 { color: var(--target); font-size: 1.2rem; text-shadow: 0 0 10px rgba(255,103,0,0.2); }
+.legend span { margin-left: 15px; font-size: 0.85rem; color: var(--text-main); }
+.legend .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: middle;}
+
+main { display: flex; flex: 1; overflow: hidden; }
+
+
+
+.graph-container { flex: 3; position: relative; background: var(--bg-dark); overflow: hidden; }
+#graph-view { width: 100%; height: 100%; cursor: grab; }
+#graph-view:active { cursor: grabbing; }
+
+.sidebar { 
+    flex: 1; min-width: 400px; max-width: 500px; 
+    background: var(--panel); border-left: 1px solid var(--border); 
+    display: flex; flex-direction: column; 
+    box-shadow: -5px 0 15px rgba(0,0,0,0.3); z-index: 5;
+}
+
+
+
+
+.sidebar-header { padding: 20px; border-bottom: 2px solid var(--border); }
+.sidebar-header h2 { color: var(--accent-primary); font-size: 1.1rem; word-break: break-all; }
+.sidebar-content { padding: 20px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 20px; }
+
+.panel-section { 
+    background: var(--bg-dark); border: 1px solid var(--border); 
+    border-radius: 6px; padding: 15px; box-shadow: inset 0 0 10px rgba(0,0,0,0.2);
+}
+.panel-section h3 { 
+    font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px; 
+    text-transform: uppercase; letter-spacing: 0.1em; 
+    border-bottom: 1px solid var(--panel-light); padding-bottom: 5px;
+}
+
+
+
+ul.item-list { list-style: none; font-size: 0.85rem; }
+ul.item-list li { 
+    padding: 6px 8px; border-bottom: 1px dashed var(--panel-light); 
+    color: var(--text-main); cursor: pointer; transition: all 0.2s ease; border-radius: 4px;
+}
+ul.item-list li:hover { color: var(--secondary-hover); padding-left: 12px; background: rgba(0, 108, 255, 0.05); }
+ul.item-list li:last-child { border-bottom: none; }
+
+
+
+.empty-state { color: var(--text-muted); font-size: 0.9rem; font-style: italic; text-align: center; margin-top: 50px; }
+.file-path { background: var(--term-bg); color: var(--accent-primary); padding: 8px; border-radius: 4px; font-size: 0.8rem; border: 1px solid var(--accent-dark); word-break: break-all; margin-top: 10px; }
+
+.tag { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+.tag-internal { background: var(--accent-dark); color: #fff; border: 1px solid var(--accent-primary); }
+.tag-external { background: var(--panel); color: var(--text-muted); border: 1px solid var(--text-muted); }
+
+
+
+g.node { cursor: pointer; transition: all 0.3s ease; }
+g.node:hover { opacity: 0.8; }
+
+g.node foreignObject { overflow: visible; }
+g.node foreignObject div { transition: all 0.15s ease-in-out; border-radius: 4px; pointer-events: all; }
+g.node foreignObject div:hover { filter: brightness(1.2); transform: scale(1.05); }
+g.node foreignObject div:active { transform: scale(0.95); }
+
+/* Ocultação Profunda (Botão Esquerdo) */
+.nexus-hidden-node {
+    opacity: 0.03 !important; /* Faz o nó praticamente sumir */
+    transform: scale(0.8);
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.nexus-hidden-node:hover {
+    opacity: 0.5 !important; /* Aparece um pouco se passar o mouse por cima do fantasma */
+    transform: scale(0.95);
+}
+
+
+.click-target {
+    pointer-events: all; /* IMPORTANTE: Força a captura do clique aqui */
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 5px 10px;
+}
+
+.mermaid .node text {
+    fill: #ffffff !important;
+    font-weight: bold;
+}
+
+.mermaid .internalNode text {
+    fill: #ffffff !important;
+}
+
+.mermaid .targetNode text {
+    fill: #ffffff !important;
+}
+
+.mermaid .externalNode text {
+    fill: #cccccc !important;
+}
+
+
+/* ── Painel Expansível de Imports ─────────────────────────────── */
+
+/* Linha do item: módulo + badge contador lado a lado */
+.nexus-imp-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+}
+
+/* Badge com a contagem de nomes importados */
+.nexus-imp-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--panel-light);
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    padding: 1px 7px;
+    border-radius: 10px;
+    min-width: 22px;
+    flex-shrink: 0;
+    transition: background 0.2s;
+}
+ul.item-list li:hover .nexus-imp-count {
+    background: var(--dark-pastel-blue);
+    color: var(--pastel-blue);
+}
+
+/* Painel colapsável — oculto por padrão */
+.nexus-imp-detail {
+    display: none;
+    flex-direction: column;
+    gap: 3px;
+    margin-top: 8px;
+    padding: 6px 10px;
+    border-left: 2px solid var(--pastel-blue);
+    background: rgba(77, 145, 232, 0.05);
+    border-radius: 0 4px 4px 0;
+}
+
+/* Aberto quando tem a classe .nexus-open */
+.nexus-imp-detail.nexus-open {
+    display: flex;
+}
+
+/* Cada nome Python dentro do painel */
+.nexus-imp-name {
+    color: var(--pastel-blue);
+    font-size: 0.78rem;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    padding: 2px 0;
+    border-bottom: 1px dashed rgba(77, 145, 232, 0.15);
+}
+.nexus-imp-name:last-child {
+    border-bottom: none;
+}
+  </style>
+</head>
+<body>
+  <header>
+    <h1> Doxoade Impact Analysis</h1>
+    <div class="legend">
+      <span><i class="dot" style="background: var(--target);"></i> Alvo (Focus)</span>
+      <span><i class="dot" style="background: var(--accent-dark); border: 1px solid var(--accent-primary);"></i> Interno (Esmeralda)</span>
+      <span><i class="dot" style="background: var(--panel); border: 1px solid var(--text-muted);"></i> Externo/Stdlib</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="graph-container"><div id="graph-view"></div></div>
+    <div class="sidebar" id="sidebar"></div>
+  </main>
+
+  <div id="raw-mermaid" style="display:none;">
+%%{init: {
+  'flowchart': {
+    'curve': 'basis',
+    'nodeSpacing': 80,
+    'rankSpacing': 150,
+    'padding': 20
+  }
+}}%%
+flowchart TD
+    n_doxoade_commands_refactor_systems_refactor_engine["refactor_systems.refactor_engine"]
+    class n_doxoade_commands_refactor_systems_refactor_engine targetNode
+    click n_doxoade_commands_refactor_systems_refactor_engine call nexusNodeClick("doxoade.commands.refactor_systems.refactor_engine")
+    n_shutil["shutil"]
+    class n_shutil externalNode
+    click n_shutil call nexusNodeClick("shutil")
+    n_doxoade_tools_filesystem["tools.filesystem"]
+    class n_doxoade_tools_filesystem internalNode
+    click n_doxoade_tools_filesystem call nexusNodeClick("doxoade.tools.filesystem")
+    n_ast["ast"]
+    class n_ast externalNode
+    click n_ast call nexusNodeClick("ast")
+    n_doxoade_commands_refactor_systems_refactor_command["refactor_systems.refactor_command"]
+    class n_doxoade_commands_refactor_systems_refactor_command internalNode
+    click n_doxoade_commands_refactor_systems_refactor_command call nexusNodeClick("doxoade.commands.refactor_systems.refactor_command")
+    n_pathlib["pathlib"]
+    class n_pathlib externalNode
+    click n_pathlib call nexusNodeClick("pathlib")
+    n_os["os"]
+    class n_os externalNode
+    click n_os call nexusNodeClick("os")
+    n_re["re"]
+    class n_re externalNode
+    click n_re call nexusNodeClick("re")
+    n_doxoade_commands_refactor_systems_refactor_verify["refactor_systems.refactor_verify"]
+    class n_doxoade_commands_refactor_systems_refactor_verify internalNode
+    click n_doxoade_commands_refactor_systems_refactor_verify call nexusNodeClick("doxoade.commands.refactor_systems.refactor_verify")
+    n_doxoade_commands_refactor_systems_refactor_verify --> n_pathlib:::externalEdge
+    n_doxoade_commands_refactor_systems_refactor_verify --> n_ast:::externalEdge
+    n_doxoade_commands_refactor_systems_refactor_verify --> n_doxoade_tools_filesystem:::internalEdge
+    n_doxoade_tools_filesystem --> n_pathlib:::externalEdge
+    n_doxoade_tools_filesystem --> n_os:::externalEdge
+    n_doxoade_commands_refactor_systems_refactor_command --> n_doxoade_commands_refactor_systems_refactor_engine:::targetEdge
+    n_doxoade_commands_refactor_systems_refactor_command --> n_pathlib:::externalEdge
+    n_doxoade_commands_refactor_systems_refactor_command --> n_doxoade_commands_refactor_systems_refactor_verify:::internalEdge
+    n_doxoade_commands_refactor_systems_refactor_engine --> n_shutil:::targetEdge
+    n_doxoade_commands_refactor_systems_refactor_engine --> n_doxoade_tools_filesystem:::targetEdge
+    n_doxoade_commands_refactor_systems_refactor_engine --> n_ast:::targetEdge
+    n_doxoade_commands_refactor_systems_refactor_engine --> n_pathlib:::targetEdge
+    n_doxoade_commands_refactor_systems_refactor_engine --> n_os:::targetEdge
+    n_doxoade_commands_refactor_systems_refactor_engine --> n_re:::targetEdge
+    n_doxoade_commands_refactor_systems_refactor_engine --> n_doxoade_commands_refactor_systems_refactor_verify:::targetEdge
+classDef cycleEdge stroke:#CE699E,stroke-width:4px;
+classDef targetNode fill:#5a3821,stroke:#E38D53,stroke-width:2px,rx:8,ry:8;
+classDef targetEdge stroke:#E38D53,stroke-width:3px,color:#E38D53;
+classDef internalNode fill:#1e395c,stroke:#4D91E8,stroke-width:2px,rx:8,ry:8;
+classDef internalEdge stroke:#4D91E8,stroke-width:2px,color:#4D91E8;
+classDef externalNode fill:#19171a,stroke:#5e5c5e,stroke-width:1px,stroke-dasharray: 4 4,rx:8,ry:8;
+classDef externalEdge stroke:#5e5c5e,stroke-width:1.5px,stroke-dasharray: 4 4,color:#5e5c5e;
+  </div>
+
+  <script>
+    // Injetado do Python
+    window.BACKEND_DATA = {
+  "stats": {
+    "nodes": 9,
+    "edges": 15,
+    "incoming": {
+      "doxoade.commands.refactor_systems.refactor_engine": 1,
+      "shutil": 1,
+      "doxoade.tools.filesystem": 2,
+      "ast": 2,
+      "doxoade.commands.refactor_systems.refactor_command": 0,
+      "pathlib": 4,
+      "os": 2,
+      "re": 1,
+      "doxoade.commands.refactor_systems.refactor_verify": 2
+    },
+    "outgoing": {
+      "doxoade.commands.refactor_systems.refactor_engine": 7,
+      "shutil": 0,
+      "doxoade.tools.filesystem": 2,
+      "ast": 0,
+      "doxoade.commands.refactor_systems.refactor_command": 3,
+      "pathlib": 0,
+      "os": 0,
+      "re": 0,
+      "doxoade.commands.refactor_systems.refactor_verify": 3
+    },
+    "isolated": []
+  },
+  "alerts": []
+};
+  </script>
+  <script>
+    /* Injetado do impact_app.js */
+    // impact_app.js
+
+// ── Callback global chamado pelo Mermaid (click nodeId callbackName) ──────────
+// Mermaid 10 passa o ID do nó (ex: "n_doxoade_commands_impact_analysis")
+// como primeiro argumento, não o nome do módulo diretamente.
+window.nexusNodeClick = function(nodeId) {
+    const modName = window.NexusApp.Graph._nodeIdToModule(nodeId);
+    if (modName) window.NexusApp.UI.Sidebar.renderModule(modName);
+};
+
+// Chamado pelo botão "👁 Ocultar" dentro do painel lateral.
+window.nexusNodeToggleHide = function(modName) {
+    const targetId = 'n_' + modName.replace(/\./g, '_').replace(/-/g, '_');
+    document.querySelectorAll('g.node').forEach(g => {
+        if (g.id && g.id.includes(targetId)) {
+            g.classList.toggle('nexus-hidden-node');
+        }
+    });
+};
+
+// ── Aplicação principal ───────────────────────────────────────────────────────
+window.NexusApp = {
+    data: window.BACKEND_DATA,
+    elements: {
+        graphContainer: document.getElementById('graph-view'),
+        sidebar:        document.getElementById('sidebar'),
+        rawMermaid:     document.getElementById('raw-mermaid')
+    },
+    panZoomInstance: null,
+
+    async init() {
+        this.UI.Sidebar.renderSummary();
+        await this.Graph.render();
+    },
+
+    // ── Grafo ─────────────────────────────────────────────────────────────────
+    Graph: {
+
+        /**
+         * Converte o ID do nó Mermaid (ex: "flowchart-n_doxoade_commands-12")
+         * de volta para o nome do módulo Python (ex: "doxoade.commands").
+         * Usa os dados já embutidos no HTML via BACKEND_DATA.
+         */
+        _nodeIdToModule(rawId) {
+            for (const node of window.NexusApp.data.nodes) {
+                const expected = 'n_' + node.id.replace(/\./g, '_').replace(/-/g, '_');
+                if (rawId === expected || rawId.includes(expected)) {
+                    return node.id;
+                }
+            }
+            return null;
+        },
+
+        async render() {
+            const graphDef = window.NexusApp.elements.rawMermaid.textContent.trim();
+
+            mermaid.initialize({
+                startOnLoad: false,
+                theme: 'base',
+                themeVariables: { lineColor: '#5e5c5e', primaryTextColor: '#d2dce6' },
+                securityLevel: 'loose',
+                maxTextSize: 900000
+            });
+
+            try {
+                const { svg } = await mermaid.render('the-mermaid-svg', graphDef);
+                window.NexusApp.elements.graphContainer.innerHTML = svg;
+
+                const svgEl = document.getElementById('the-mermaid-svg');
+                svgEl.style.maxWidth = 'none';
+                svgEl.style.width    = '100%';
+                svgEl.style.height   = '100%';
+
+                window.NexusApp.panZoomInstance = svgPanZoom(svgEl, {
+                    zoomEnabled: true, controlIconsEnabled: true,
+                    fit: true, center: true, minZoom: 0.1, maxZoom: 10
+                });
+
+                // ── Listener no CONTAINER (div), não no svgEl ─────────────────
+                // O svg-pan-zoom opera dentro do SVG; eventos do SVG ainda sobem
+                // normalmente até o div pai. Ouvindo aqui evitamos qualquer
+                // interferência do svg-pan-zoom com cliques nos nós.
+                window.NexusApp.elements.graphContainer.addEventListener('click', (e) => {
+                    const gNode = e.target.closest('g.node');
+                    if (gNode) {
+                        const modName = window.NexusApp.Graph._nodeIdToModule(gNode.id);
+                        if (modName) window.NexusApp.UI.Sidebar.renderModule(modName);
+                    } else {
+                        window.NexusApp.UI.Sidebar.renderSummary();
+                    }
+                });
+
+                // Botão direito no nó → oculta/exibe
+                window.NexusApp.elements.graphContainer.addEventListener('contextmenu', (e) => {
+                    const gNode = e.target.closest('g.node');
+                    if (gNode) {
+                        e.preventDefault();
+                        const modName = window.NexusApp.Graph._nodeIdToModule(gNode.id);
+                        if (modName) window.nexusNodeToggleHide(modName);
+                    }
+                });
+
+            } catch (err) {
+                window.NexusApp.elements.graphContainer.innerHTML =
+                    `<div style="color:var(--target);padding:20px;">[FATAL ERROR] Falha no Grafo:<br>${err}</div>`;
+            }
+        },
+    },
+
+    // ── UI ────────────────────────────────────────────────────────────────────
+    UI: {
+        Sidebar: {
+
+            renderModule(moduleName) {
+                const node = window.NexusApp.data.nodes.find(n => n.id === moduleName);
+                if (!node) return;
+
+                const isExternal = node.external;
+                const tagClass   = isExternal ? 'tag-external' : 'tag-internal';
+                const typeLabel  = isExternal ? 'Externa / Stdlib' : 'Módulo Interno';
+
+                const imports    = window.NexusApp.data.edges.filter(e => e.source === node.id).map(e => e.target);
+                const importedBy = window.NexusApp.data.edges.filter(e => e.target === node.id).map(e => e.source);
+
+                const buildExpandableList = (moduleList, icon, dir) => {
+                    if (!moduleList || moduleList.length === 0) {
+                        return `<div style="color:var(--text-muted);font-size:0.8rem;padding-top:5px;">Nenhuma dependência</div>`;
+                    }
+                    return `<ul class="item-list">` + moduleList.sort().map(modId => {
+                        const edge = window.NexusApp.data.edges.find(e =>
+                            dir === 'out'
+                                ? (e.source === node.id && e.target === modId)
+                                : (e.source === modId  && e.target === node.id)
+                        );
+                        const importNames = (edge && edge.imports && edge.imports.length > 0) ? edge.imports : [];
+                        const safeId      = `nexus-imp-${dir}-${modId.replace(/[.\-]/g, '_')}`;
+
+                        return `
+                        <li onclick="const d=document.getElementById('${safeId}');if(d)d.classList.toggle('nexus-open')"
+                            title="Clique para ver os nomes importados">
+                            <span class="nexus-imp-row">
+                                <span>${icon} ${modId}</span>
+                                ${importNames.length > 0
+                                    ? `<span class="nexus-imp-count">${importNames.length}</span>`
+                                    : ''}
+                            </span>
+                            ${importNames.length > 0
+                                ? `<div id="${safeId}" class="nexus-imp-detail">
+                                       ${importNames.map(n => `<span class="nexus-imp-name">ƒ ${n}</span>`).join('')}
+                                   </div>`
+                                : ''}
+                        </li>`;
+                    }).join('') + `</ul>`;
+                };
+
+                let functionsHtml = '';
+                if (node.metadata && Object.keys(node.metadata).length > 0) {
+                    const funcItems = Object.entries(node.metadata)
+                        .sort((a, b) => a[1].line - b[1].line)
+                        .map(([fName, meta]) => {
+                            const callCount = meta.calls ? meta.calls.length : 0;
+                            return `<li>
+                                <span style="color:var(--target);font-weight:bold;">Linha ${meta.line}</span>
+                                <span style="color:var(--text-muted)"> | </span>
+                                <b>${fName}()</b>
+                                <div style="font-size:0.7rem;color:var(--text-muted);margin-top:3px;padding-left:5px;">
+                                    ${callCount > 0
+                                        ? '↳ Dispara ' + callCount + ' chamadas'
+                                        : '· Sem chamadas aninhadas'}
+                                </div>
+                            </li>`;
+                        }).join('');
+                    functionsHtml = `
+                        <div class="panel-section">
+                            <h3>Estrutura Interna (Linhas)</h3>
+                            <ul class="item-list">${funcItems}</ul>
+                        </div>`;
+                } else if (!isExternal) {
+                    functionsHtml = `<div class="panel-section"><h3 style="color:var(--text-muted)">Nenhuma função extraída</h3></div>`;
+                }
+
+                window.NexusApp.elements.sidebar.innerHTML = `
+                    <div class="sidebar-header">
+                        <h2>${node.id}</h2>
+                        <div style="margin-top:8px;display:flex;align-items:center;gap:10px;">
+                            <span class="tag ${tagClass}">${typeLabel}</span>
+                            <button
+                                onclick="window.nexusNodeToggleHide('${node.id}')"
+                                title="Ocultar / Exibir este nó no grafo"
+                                style="background:var(--panel-light);border:1px solid var(--border);
+                                       color:var(--text-muted);border-radius:4px;padding:3px 10px;
+                                       cursor:pointer;font-size:0.75rem;transition:all 0.2s;"
+                                onmouseover="this.style.color='var(--warning)';this.style.borderColor='var(--warning)'"
+                                onmouseout ="this.style.color='var(--text-muted)';this.style.borderColor='var(--border)'"
+                            >👁 Ocultar no grafo</button>
+                        </div>
+                        ${node.path ? `<div class="file-path">📄 ${node.path}</div>` : ''}
+                    </div>
+                    <div class="sidebar-content">
+                        <div class="panel-section">
+                            <h3 style="color:var(--pastel-blue)">Importa / Consome (${imports.length})</h3>
+                            ${buildExpandableList(imports, '→', 'out')}
+                        </div>
+                        <div class="panel-section">
+                            <h3 style="color:var(--pastel-orange)">Usado por / Dependentes (${importedBy.length})</h3>
+                            ${buildExpandableList(importedBy, '←', 'in')}
+                        </div>
+                        ${functionsHtml}
+                    </div>
+                `;
+            },
+
+            renderSummary() {
+                if (!window.NexusApp.data || !window.NexusApp.data.stats) return;
+                const s = window.NexusApp.data.stats;
+                window.NexusApp.elements.sidebar.innerHTML = `
+                    <div class="sidebar-header">
+                        <h2 style="color:var(--accent-primary);">Ecossistema Global</h2>
+                    </div>
+                    <div class="sidebar-content">
+                        <div class="panel-section">
+                            <h3>Métricas de Acoplamento</h3>
+                            <ul class="item-list">
+                                <li style="cursor:default;">Total de Módulos:
+                                    <strong style="color:var(--pastel-blue)">${s.nodes}</strong></li>
+                                <li style="cursor:default;">Conexões (Imports):
+                                    <strong style="color:var(--pastel-orange)">${s.edges}</strong></li>
+                                <li style="cursor:default;">Módulos Isolados:
+                                    <strong style="color:var(--warning)">${s.isolated.length}</strong></li>
+                            </ul>
+                        </div>
+                        <div class="empty-state">
+                            <span style="font-size:2rem;">🔍</span><br><br>
+                            <b>Clique esquerdo</b> em um nó para analisar.<br>
+                            <b>Clique direito</b> para ocultar/exibir o nó.<br><br>
+                            <span style="font-size:0.8rem;color:var(--text-muted)">
+                                Botão 👁 no painel também oculta o nó.
+                            </span>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+    }
+};
+
+// ── Inicialização ─────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => window.NexusApp.init());
+  </script>
+</body>
+</html>

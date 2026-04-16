@@ -1,4 +1,4 @@
-# doxoade/indexer/text_matcher.py
+# doxoade/doxoade/indexer/text_matcher.py
 """
 Matcher de Texto Inteligente.
 Responsabilidades:
@@ -12,6 +12,7 @@ Filosofia MPoT:
 """
 from typing import Set
 from difflib import SequenceMatcher
+
 class TextMatcher:
     """
     Matcher de texto com fuzzy matching e normalização.
@@ -29,16 +30,8 @@ class TextMatcher:
         found = TextMatcher.match_text('database', 'conectando ao db...')
         # True ('db' é sinônimo de 'database')
     """
-    
-    # Mapa de sinônimos programáticos
-    NORMALIZATIONS = {
-        'postmortems': ['post-mortems', 'postmortem', 'post_mortems'],
-        'database': ['db', 'banco', 'bd'],
-        'function': ['func', 'funcao', 'função'],
-        'class': ['classe'],
-        'error': ['erro', 'exception'],
-    }
-    
+    NORMALIZATIONS = {'postmortems': ['post-mortems', 'postmortem', 'post_mortems'], 'database': ['db', 'banco', 'bd'], 'function': ['func', 'funcao', 'função'], 'class': ['classe'], 'error': ['erro', 'exception']}
+
     @staticmethod
     def normalize_term(term: str) -> Set[str]:
         """
@@ -53,27 +46,19 @@ class TextMatcher:
         Raises:
             AssertionError: Se term estiver vazio
         """
-        assert term, "Termo não pode estar vazio"
-        
+        assert term, 'Termo não pode estar vazio'
         variations = {term.lower()}
-        
-        # Remove hífens e underscores
         variations.add(term.replace('-', '').replace('_', ''))
-        
-        # Substitui por espaços
         variations.add(term.replace('-', ' ').replace('_', ' '))
-        
-        # Adiciona sinônimos
         term_lower = term.lower()
         for canonical, aliases in TextMatcher.NORMALIZATIONS.items():
             if term_lower == canonical or term_lower in aliases:
                 variations.add(canonical)
                 variations.update(aliases)
-        
         return variations
-    
+
     @staticmethod
-    def fuzzy_match(query: str, target: str, threshold: float = 0.6) -> bool:
+    def fuzzy_match(query: str, target: str, threshold: float=0.6) -> bool:
         """
         Verifica se query é similar a target.
         
@@ -88,14 +73,13 @@ class TextMatcher:
         Raises:
             AssertionError: Se parâmetros inválidos
         """
-        assert query and target, "Query e target não podem estar vazios"
-        assert 0.0 <= threshold <= 1.0, "Threshold deve estar entre 0.0 e 1.0"
-        
+        assert query and target, 'Query e target não podem estar vazios'
+        assert 0.0 <= threshold <= 1.0, 'Threshold deve estar entre 0.0 e 1.0'
         ratio = SequenceMatcher(None, query.lower(), target.lower()).ratio()
         return ratio >= threshold
-    
+
     @staticmethod
-    def match_text(query: str, text: str, fuzzy: bool = False) -> bool:
+    def match_text(query: str, text: str, fuzzy: bool=False) -> bool:
         """
         Verifica se query está presente em text.
         
@@ -112,24 +96,17 @@ class TextMatcher:
         Returns:
             True se houver match
         """
-        assert query is not None and text is not None, "Query e text não podem ser None"
-        
+        assert query is not None and text is not None, 'Query e text não podem ser None'
         if not query or not text:
             return False
-        
-        # Match exato (após normalização)
         query_variations = TextMatcher.normalize_term(query)
         text_lower = text.lower()
-        
         for variation in query_variations:
             if variation in text_lower:
                 return True
-        
-        # Fuzzy match (opcional)
         if fuzzy:
             words = text_lower.split()
             for word in words:
                 if TextMatcher.fuzzy_match(query, word):
                     return True
-        
         return False

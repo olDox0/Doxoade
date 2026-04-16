@@ -1,2 +1,2 @@
 # doxoade/doxoade/_version.py
-__version__ = "45.0"
+__version__ = '45.0'

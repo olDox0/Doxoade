@@ -1,5 +1,4 @@
-# doxoade/commands/mobile_ide_terms.py
-
+# doxoade/doxoade/tools/system_utils.py
 import os
 
 def is_termux():

@@ -27,6 +27,7 @@ Exemplo/
 tmp/
 .dox_agent_workspace/
 .dox_lab/
+data/
 tests/
 regression_tests/canon/
 recovery_zone/
@@ -34,6 +35,7 @@ credentials.json
 token.json
 config.json
 #doxoade.bat
+*.db
 *.log
 *.txt
 *.bkp

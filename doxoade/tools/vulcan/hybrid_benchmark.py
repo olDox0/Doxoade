@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-# doxoade/tools/vulcan/hybrid_benchmark.py
+# doxoade/doxoade/tools/vulcan/hybrid_benchmark.py
 """
 Vulcan HybridBenchmark — Medição de ganho real Python vs Cython.
 =================================================================
@@ -21,59 +20,50 @@ Compliance:
     OSL-5  : falhas de import/execução são capturadas e reportadas como N/A
     PASC-6 : função sem binário é relatada como "não compilada"
 """
-
 from __future__ import annotations
-
 import ast
 import hashlib
 import importlib.util
 import json
 import re
 import os
-# [DOX-UNUSED] import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-
-# ---------------------------------------------------------------------------
-# Estruturas de resultado
-# ---------------------------------------------------------------------------
-
 @dataclass
 class FunctionBenchResult:
     """Resultado do benchmark de uma função individual."""
-    file_name:     str
-    func_name:     str
-    py_ms:         Optional[float]  = None   # tempo Python (médio, ms)
-    cy_ms:         Optional[float]  = None   # tempo Cython (médio, ms)
-    speedup:       Optional[float]  = None   # py_ms / cy_ms
-    error:         Optional[str]    = None
-    status:        str              = "OK"   # OK | NO_BINARY | ERROR | WARMUP_FAIL
+    file_name: str
+    func_name: str
+    py_ms: Optional[float] = None
+    cy_ms: Optional[float] = None
+    speedup: Optional[float] = None
+    error: Optional[str] = None
+    status: str = 'OK'
 
     @property
     def speedup_label(self) -> str:
         if self.speedup is None:
-            return "N/A"
-        return f"{self.speedup:.2f}×"
+            return 'N/A'
+        return f'{self.speedup:.2f}×'
 
     @property
     def status_color(self) -> str:
-        if self.status != "OK":
-            return "\033[33m"   # amarelo
+        if self.status != 'OK':
+            return '\x1b[33m'
         if self.speedup and self.speedup >= 5.0:
-            return "\033[32m"   # verde
+            return '\x1b[32m'
         if self.speedup and self.speedup >= 1.5:
-            return "\033[36m"   # cyan
-        return "\033[37m"       # branco
-
+            return '\x1b[36m'
+        return '\x1b[37m'
 
 @dataclass
 class FileBenchResult:
     """Resultado do benchmark de um arquivo."""
-    file_path:  str
-    functions:  list[FunctionBenchResult] = field(default_factory=list)
+    file_path: str
+    functions: list[FunctionBenchResult] = field(default_factory=list)
 
     @property
     def best_speedup(self) -> Optional[float]:
@@ -84,11 +74,6 @@ class FileBenchResult:
     def avg_speedup(self) -> Optional[float]:
         valids = [f.speedup for f in self.functions if f.speedup is not None]
         return sum(valids) / len(valids) if valids else None
-
-
-# ---------------------------------------------------------------------------
-# HybridBenchmark
-# ---------------------------------------------------------------------------
 
 class HybridBenchmark:
     """
@@ -102,169 +87,96 @@ class HybridBenchmark:
       5. Calcula speedup e reporta
     """
 
-    def __init__(self, project_root: str | Path, runs: int = 200):
-        self.root     = Path(project_root).resolve()
-        self.bin_dir  = self.root / ".doxoade" / "vulcan" / "bin"
-        self.runs     = runs
-        self._ext     = ".pyd" if os.name == "nt" else ".so"
-        self._prober  = FunctionProber()
+    def __init__(self, project_root: str | Path, runs: int=200):
+        self.root = Path(project_root).resolve()
+        self.bin_dir = self.root / '.doxoade' / 'vulcan' / 'bin'
+        self.runs = runs
+        self._ext = '.pyd' if os.name == 'nt' else '.so'
+        self._prober = FunctionProber()
 
-    # ── Entry-point ───────────────────────────────────────────────────────────
-
-    def run(
-        self,
-        target:      str | Path,
-        output_json: bool  = False,
-        min_speedup: float = 1.1,
-    ) -> list[FileBenchResult]:
+    def run(self, target: str | Path, output_json: bool=False, min_speedup: float=1.1) -> list[FileBenchResult]:
         """
         Benchmarka todas as funções compiladas no target (arquivo ou dir).
         Retorna lista de FileBenchResult.
         min_speedup: speedup mínimo para não ser marcado como REGRESSÃO.
         """
         target_path = Path(target).resolve()
-        py_files    = self._collect_py_files(target_path)
-        all_results: list[FileBenchResult] =[]
-
+        py_files = self._collect_py_files(target_path)
+        all_results: list[FileBenchResult] = []
         for py_file in py_files:
             binary = self._find_binary(py_file)
             if not binary:
                 continue
             try:
                 file_result = self._benchmark_file(py_file, binary)
-            except BaseException as exc:          # catches SystemExit, KeyboardInterrupt, etc.
+            except BaseException as exc:
                 file_result = FileBenchResult(file_path=str(py_file))
-                file_result.functions.append(FunctionBenchResult(
-                    file_name=py_file.name,
-                    func_name="<crash>",
-                    status="ERROR",
-                    error=f"benchmark abortado: {type(exc).__name__}: {exc}",
-                ))
+                file_result.functions.append(FunctionBenchResult(file_name=py_file.name, func_name='<crash>', status='ERROR', error=f'benchmark abortado: {type(exc).__name__}: {exc}'))
             if file_result.functions:
                 all_results.append(file_result)
-
         if output_json:
             self._print_json(all_results)
         else:
             self._print_table(all_results, min_speedup=min_speedup)
-
         return all_results
-
-    # ── Benchmark de um arquivo ───────────────────────────────────────────────
 
     def _benchmark_file(self, py_file: Path, binary: Path) -> FileBenchResult:
         result = FileBenchResult(file_path=str(py_file))
-
-        # Carrega o módulo Python original
         py_module = self._load_py_module(py_file)
         if py_module is None:
-            result.functions.append(FunctionBenchResult(
-                file_name=py_file.name,
-                func_name="<module>",
-                status="ERROR",
-                error="falha ao carregar módulo Python",
-            ))
+            result.functions.append(FunctionBenchResult(file_name=py_file.name, func_name='<module>', status='ERROR', error='falha ao carregar módulo Python'))
             return result
-
-        # Carrega o módulo binário Cython
         cy_module, load_err = self._load_binary(binary)
         if cy_module is None:
-            result.functions.append(FunctionBenchResult(
-                file_name=py_file.name,
-                func_name="<binary>",
-                status="ERROR",
-                error=f"falha ao carregar {binary.name}: {load_err[:200]}",
-            ))
+            result.functions.append(FunctionBenchResult(file_name=py_file.name, func_name='<binary>', status='ERROR', error=f'falha ao carregar {binary.name}: {load_err[:200]}'))
             return result
-
-        # Injeta globals do módulo Python original no módulo Cython
-        # (replica o que apply_turbo() faz em produção — fornece _find_project_root etc.)
         for attr_name in dir(py_module):
             if not hasattr(cy_module, attr_name):
                 try:
                     setattr(cy_module, attr_name, getattr(py_module, attr_name))
                 except (AttributeError, TypeError):
                     pass
-
-        # Injeta tipos e módulos comuns que o .pyx pode referenciar mas não importar
-        _common_injections = {
-            'Path': __import__('pathlib').Path,
-            'os':   __import__('os'),
-            're':   __import__('re'),
-            'ast':  __import__('ast'),
-            'json': __import__('json'),
-            'sys':  __import__('sys'),
-        }
+        _common_injections = {'Path': __import__('pathlib').Path, 'os': __import__('os'), 're': __import__('re'), 'ast': __import__('ast'), 'json': __import__('json'), 'sys': __import__('sys')}
         for _k, _v in _common_injections.items():
             if not hasattr(cy_module, _k):
                 try:
                     setattr(cy_module, _k, _v)
                 except (AttributeError, TypeError):
                     pass
-
-        # Descobre funções disponíveis no binário
-        cy_funcs = {
-            name.replace('_vulcan_optimized', ''): getattr(cy_module, name)
-            for name in dir(cy_module)
-            if name.endswith('_vulcan_optimized') and callable(getattr(cy_module, name))
-        }
-
+        cy_funcs = {name.replace('_vulcan_optimized', ''): getattr(cy_module, name) for name in dir(cy_module) if name.endswith('_vulcan_optimized') and callable(getattr(cy_module, name))}
         for orig_name, cy_func in cy_funcs.items():
             py_func = getattr(py_module, orig_name, None)
             if py_func is None or not callable(py_func):
-                result.functions.append(FunctionBenchResult(
-                    file_name=py_file.name,
-                    func_name=orig_name,
-                    status="NO_BINARY",
-                    error="função Python não encontrada no módulo original",
-                ))
+                result.functions.append(FunctionBenchResult(file_name=py_file.name, func_name=orig_name, status='NO_BINARY', error='função Python não encontrada no módulo original'))
                 continue
-
             bench = self._bench_pair(py_file.name, orig_name, py_func, cy_func)
             result.functions.append(bench)
-
         return result
 
-    # ── Medição de par Python/Cython ─────────────────────────────────────────
-
-    def _bench_pair(
-        self,
-        file_name: str,
-        func_name: str,
-        py_func:   Callable,
-        cy_func:   Callable,
-    ) -> FunctionBenchResult:
+    def _bench_pair(self, file_name: str, func_name: str, py_func: Callable, cy_func: Callable) -> FunctionBenchResult:
         """Mede py_func vs cy_func com fixtures geradas automaticamente."""
         result = FunctionBenchResult(file_name=file_name, func_name=func_name)
-
-        # Gera fixture de entrada
         try:
             fixture = self._prober.generate_fixture(py_func)
         except Exception as e:
-            result.status = "WARMUP_FAIL"
-            result.error  = f"fixture: {e}"
+            result.status = 'WARMUP_FAIL'
+            result.error = f'fixture: {e}'
             return result
-
-        # ── Contexto de silenciamento ────────────────────────────────────────────
-        # Funções como render_archived_view / _render_single_file_dossier chamam
-        # click.echo() a cada execução. Sem redirecionamento, 200 iterações
-        # inundam o terminal. Suprimimos stdout E stderr durante as medições.
         import io as _io, sys as _sys
+
         class _SuppressIO:
             """Context manager que silencia stdout e stderr."""
+
             def __enter__(self):
                 self._old_stdout = _sys.stdout
                 self._old_stderr = _sys.stderr
                 _sys.stdout = _io.StringIO()
                 _sys.stderr = _io.StringIO()
                 return self
+
             def __exit__(self, *_):
                 _sys.stdout = self._old_stdout
                 _sys.stderr = self._old_stderr
-
-        # Warmup (Cython precisa de JIT-warmup para ser justo)
-        # Se cy_func rejeita o fixture com TypeError de args, tenta recortar.
-        # warmup block
         try:
             with _SuppressIO():
                 for _ in range(3):
@@ -273,47 +185,39 @@ class HybridBenchmark:
                         cy_func(*fixture)
                     except TypeError as te:
                         te_msg = str(te)
-                        # Cython wrapper pode ter assinatura diferente: tenta sem kwargs extras
-                        if "argument" in te_msg and "given" in te_msg and len(fixture) > 1:
-                            cy_func(*fixture[:1])  # tenta só o primeiro arg
+                        if 'argument' in te_msg and 'given' in te_msg and (len(fixture) > 1):
+                            cy_func(*fixture[:1])
                         else:
                             raise
-        except SystemExit:                        # ← add BEFORE except Exception
-            result.status = "WARMUP_FAIL"
-            result.error  = "função encerra processo (click/sys.exit)"
+        except SystemExit:
+            result.status = 'WARMUP_FAIL'
+            result.error = 'função encerra processo (click/sys.exit)'
             return result
         except Exception as e:
-            result.status = "WARMUP_FAIL"
-            result.error  = f"warmup: {e}"
+            result.status = 'WARMUP_FAIL'
+            result.error = f'warmup: {e}'
             return result
-
-
-        # Ajusta fixture para cy_func se necessário (descobre na medição)
         cy_fixture = fixture
         try:
             with _SuppressIO():
                 cy_func(*fixture)
         except TypeError as te:
-            if "argument" in str(te) and "given" in str(te) and len(fixture) > 1:
-                cy_fixture = fixture[:len(fixture)-1]
-
-        # Medição Python
+            if 'argument' in str(te) and 'given' in str(te) and (len(fixture) > 1):
+                cy_fixture = fixture[:len(fixture) - 1]
         try:
             with _SuppressIO():
                 t0 = time.perf_counter()
                 for _ in range(self.runs):
                     py_func(*fixture)
                 result.py_ms = (time.perf_counter() - t0) * 1000 / self.runs
-        except SystemExit:                        # ← add
-            result.status = "ERROR"
-            result.error  = "python exec: sys.exit durante medição"
+        except SystemExit:
+            result.status = 'ERROR'
+            result.error = 'python exec: sys.exit durante medição'
             return result
         except Exception as e:
-            result.status = "ERROR"
-            result.error  = f"python exec: {e}"
+            result.status = 'ERROR'
+            result.error = f'python exec: {e}'
             return result
-
-        # Medição Cython
         try:
             with _SuppressIO():
                 t0 = time.perf_counter()
@@ -321,21 +225,16 @@ class HybridBenchmark:
                     cy_func(*cy_fixture)
                 result.cy_ms = (time.perf_counter() - t0) * 1000 / self.runs
         except SystemExit:
-            result.status = "ERROR"
-            result.error  = "cython exec: sys.exit durante medição"
+            result.status = 'ERROR'
+            result.error = 'cython exec: sys.exit durante medição'
             return result
-
-        # Speedup
         if result.cy_ms and result.cy_ms > 0:
             result.speedup = result.py_ms / result.cy_ms
         else:
             result.speedup = None
-            result.status  = "ERROR"
-            result.error   = "cy_ms = 0"
-
+            result.status = 'ERROR'
+            result.error = 'cy_ms = 0'
         return result
-
-    # ── Utilitários ───────────────────────────────────────────────────────────
 
     def _find_binary(self, py_file: Path) -> Optional[Path]:
         """
@@ -345,31 +244,20 @@ class HybridBenchmark:
         e nomes simples (v_filesystem_ad611b.pyd / .so).
         Usa glob para encontrar qualquer variante — solução para Windows.
         """
-        abs_path  = py_file.resolve()
+        abs_path = py_file.resolve()
         path_hash = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
-        stem      = abs_path.stem
-        prefix    = f"v_{stem}_{path_hash}"
-
+        stem = abs_path.stem
+        prefix = f'v_{stem}_{path_hash}'
         if not self.bin_dir.exists():
             return None
-
-        # Busca qualquer binário com o prefixo correto (.pyd ou .so, com ou sem tag CPython)
-        for ext in (".pyd", ".so"):
-            candidates = list(self.bin_dir.glob(f"{prefix}*{ext}"))
-            if candidates:
-                # Prefere o mais recente se houver mais de um
-                return max(candidates, key=lambda p: p.stat().st_mtime)
-
-        # Fallback: busca só pelo stem sem hash (caso o path tenha mudado)
-        for ext in (".pyd", ".so"):
-            candidates = [
-                p for p in self.bin_dir.glob(f"v_{stem}_*{ext}")
-                # garante que o próximo char após o stem é '_' (hash) não letras de outro nome
-                if re.match(rf"v_{re.escape(stem)}_[0-9a-f]{{6}}", p.stem.split('.')[0])
-            ]
+        for ext in ('.pyd', '.so'):
+            candidates = list(self.bin_dir.glob(f'{prefix}*{ext}'))
             if candidates:
                 return max(candidates, key=lambda p: p.stat().st_mtime)
-
+        for ext in ('.pyd', '.so'):
+            candidates = [p for p in self.bin_dir.glob(f'v_{stem}_*{ext}') if re.match(f'v_{re.escape(stem)}_[0-9a-f]{{6}}', p.stem.split('.')[0])]
+            if candidates:
+                return max(candidates, key=lambda p: p.stat().st_mtime)
         return None
 
     @staticmethod
@@ -392,21 +280,15 @@ class HybridBenchmark:
         Retorna o módulo ou None em falha.
         """
         import sys as _sys
-
-        # Injeta raiz do projeto imediatamente
-        project_markers = {"pyproject.toml", "setup.py", "setup.cfg"}
+        project_markers = {'pyproject.toml', 'setup.py', 'setup.cfg'}
         root = py_file.parent
         while root != root.parent:
-            if any((root / m).exists() for m in project_markers):
+            if any(((root / m).exists() for m in project_markers)):
                 if str(root) not in _sys.path:
                     _sys.path.insert(0, str(root))
                 break
             root = root.parent
-            
-        # ── Tentativa 1: import pelo nome do módulo no pacote real ──────────────
-        # Deriva o nome do módulo a partir do caminho relativo à raiz do projeto.
-        # Ex: .../doxoade/commands/check_systems/check_engine.py
-        #   → doxoade.commands.check_systems.check_engine
+
         def _derive_module_name(p):
             """Sobe no filesystem procurando doxoade/ e monta o dotted name."""
             parts = []
@@ -415,67 +297,51 @@ class HybridBenchmark:
                 parts.insert(0, cur.stem if cur == p else cur.name)
                 parent = cur.parent
                 if parent == cur:
-                    return None  # chegou na raiz do fs sem achar o pacote
-                # Procura __init__.py para confirmar que é um pacote Python
+                    return None
                 if not (parent / '__init__.py').exists():
-                    # parent não tem __init__ → é a raiz do projeto
-                    # Checa se o diretório raiz está no sys.path
-                    if str(parent) in _sys.path or any(
-                        Path(sp) == parent for sp in _sys.path
-                    ):
+                    if str(parent) in _sys.path or any((Path(sp) == parent for sp in _sys.path)):
                         return '.'.join(parts)
                     return None
                 cur = parent
-
         mod_name = _derive_module_name(py_file)
         if mod_name:
             try:
                 import importlib as _il
                 return _il.import_module(mod_name)
             except Exception:
-                import traceback; traceback.print_exc()
+                import traceback
+                traceback.print_exc()
                 pass
-
-        # ── Tentativa 2: spec com __package__ e raiz no sys.path ────────────────
-        package_dir  = py_file.parent
-        package_name = f"_bench_pkg_{py_file.parent.name}"
-        bench_name   = f"{package_name}.{py_file.stem}"
-        added_paths  = []
+        package_dir = py_file.parent
+        package_name = f'_bench_pkg_{py_file.parent.name}'
+        bench_name = f'{package_name}.{py_file.stem}'
+        added_paths = []
         created_init = False
-
         try:
-            # Localiza a raiz do projeto (diretório que contém doxoade/ ou tem pyproject.toml)
+
             def _find_pkg_root(p):
-                markers = {"pyproject.toml", "setup.py", "setup.cfg"}
+                markers = {'pyproject.toml', 'setup.py', 'setup.cfg'}
                 for parent in [p, *p.parents]:
-                    if any((parent / m).exists() for m in markers):
+                    if any(((parent / m).exists() for m in markers)):
                         return parent
-                    # Heurística: diretório com __init__.py que contém o módulo
                     if (parent / '__init__.py').exists() and parent.parent != parent:
                         continue
                     if not (parent / '__init__.py').exists():
                         return parent
                 return p.parent
-
             pkg_root = _find_pkg_root(py_file)
             for inject_dir in [str(pkg_root), str(package_dir.parent), str(package_dir)]:
                 if inject_dir not in _sys.path:
                     _sys.path.insert(0, inject_dir)
                     added_paths.append(inject_dir)
-
-            # __init__.py temporário para que o Python aceite como pacote
-            init_file = package_dir / "__init__.py"
+            init_file = package_dir / '__init__.py'
             if not init_file.exists():
                 try:
-                    init_file.write_text("", encoding="utf-8")
+                    init_file.write_text('', encoding='utf-8')
                     created_init = True
                 except Exception:
                     pass
-
-            spec = importlib.util.spec_from_file_location(
-                bench_name, str(py_file),
-                submodule_search_locations=[str(package_dir)],
-            )
+            spec = importlib.util.spec_from_file_location(bench_name, str(py_file), submodule_search_locations=[str(package_dir)])
             if spec and spec.loader:
                 module = importlib.util.module_from_spec(spec)
                 module.__package__ = package_name
@@ -489,28 +355,24 @@ class HybridBenchmark:
                 finally:
                     _sys.modules.pop(bench_name, None)
                     _sys.modules.pop(package_name, None)
-
-            # ── Tentativa 3: carregamento direto sem pacote ──────────────────────
-            spec2 = importlib.util.spec_from_file_location(
-                f"_bench_py_{py_file.stem}", str(py_file)
-            )
+            spec2 = importlib.util.spec_from_file_location(f'_bench_py_{py_file.stem}', str(py_file))
             if spec2 and spec2.loader:
                 m2 = importlib.util.module_from_spec(spec2)
                 spec2.loader.exec_module(m2)
                 return m2
-
         except Exception:
             return None
-
         finally:
-            # Restaura sys.path original
             for p in added_paths:
-                try: _sys.path.remove(p)
-                except ValueError: pass
+                try:
+                    _sys.path.remove(p)
+                except ValueError:
+                    pass
             if created_init:
-                try: init_file.unlink(missing_ok=True)
-                except Exception: pass
-
+                try:
+                    init_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
         return None
 
     @staticmethod
@@ -526,53 +388,35 @@ class HybridBenchmark:
         v_filesystem_ad611b.cp312-win_amd64.pyd → PyInit_v_filesystem_ad611b
         """
         import sys as _sys
-        raw_stem    = binary.stem
-        module_name = raw_stem.split(".")[0]       # v_check_fixer_1d4165
-
+        raw_stem = binary.stem
+        module_name = raw_stem.split('.')[0]
         try:
             spec = importlib.util.spec_from_file_location(module_name, str(binary))
             if not spec or not spec.loader:
-                return None, "spec_from_file_location retornou None"
-
+                return (None, 'spec_from_file_location retornou None')
             module = importlib.util.module_from_spec(spec)
             _sys.modules[module_name] = module
             spec.loader.exec_module(module)
-            return module, None
-
+            return (module, None)
         except (ImportError, ModuleNotFoundError) as e:
             err_msg = str(e)
-            if "relative import" in err_msg or "attempted relative" in err_msg:
-                return None, (
-                    "binário desatualizado — imports relativos embutidos. "
-                    "Recompile: --hybrid --force"
-                )
-            return None, f"{type(e).__name__}: {e}"
-
+            if 'relative import' in err_msg or 'attempted relative' in err_msg:
+                return (None, 'binário desatualizado — imports relativos embutidos. Recompile: --hybrid --force')
+            return (None, f'{type(e).__name__}: {e}')
         except TypeError as e:
             err_msg = str(e)
-            if "is a field but has no type annotation" in err_msg:
-                return None, (
-                    "binário desatualizado — dataclass field sem anotação (forge antigo). "
-                    "Recompile: --hybrid --force"
-                )
-            return None, f"TypeError: {e}"
-
+            if 'is a field but has no type annotation' in err_msg:
+                return (None, 'binário desatualizado — dataclass field sem anotação (forge antigo). Recompile: --hybrid --force')
+            return (None, f'TypeError: {e}')
         except Exception as e:
-            return None, f"{type(e).__name__}: {e}"
-
+            return (None, f'{type(e).__name__}: {e}')
         finally:
             _sys.modules.pop(module_name, None)
 
     @staticmethod
     def _collect_py_files(target: Path) -> list[Path]:
-        _IGNORE_DIRS = frozenset({
-            'venv', '.git', '__pycache__', 'build', 'dist', '.doxoade',
-        })
-        _IGNORE_STEMS = frozenset({
-            '__init__', '__main__', 'setup',
-            'hybrid_forge', 'hybrid_optimizer', 'hybrid_benchmark',
-            'forge', 'compiler', 'autopilot', 'bridge', 'advisor',
-        })
+        _IGNORE_DIRS = frozenset({'venv', '.git', '__pycache__', 'build', 'dist', '.doxoade'})
+        _IGNORE_STEMS = frozenset({'__init__', '__main__', 'setup', 'hybrid_forge', 'hybrid_optimizer', 'hybrid_benchmark', 'forge', 'compiler', 'autopilot', 'bridge', 'advisor'})
         if target.is_file():
             return [target] if target.stem not in _IGNORE_STEMS else []
         files = []
@@ -584,138 +428,87 @@ class HybridBenchmark:
                     files.append(p)
         return files
 
-    # ── Output ────────────────────────────────────────────────────────────────
-
     @staticmethod
-    def _print_table(results: list[FileBenchResult], min_speedup: float = 1.1):
-
+    def _print_table(results: list[FileBenchResult], min_speedup: float=1.1):
         if not results:
-            # Replace ANSI-colored print with plain fallback
-            print("\n  [VULCAN] Nenhuma funcao benchmarkada.")
+            print('\n  [VULCAN] Nenhuma funcao benchmarkada.')
             print("  Dica: execute '--hybrid' antes do benchmark.")
-
-            # Diagnóstico: mostra o que existe no bin_dir
             import inspect
             bin_dir_path = None
             try:
                 frame = inspect.currentframe()
                 outer = frame.f_back.f_locals if frame and frame.f_back else {}
-                self_obj = outer.get("self")
-                if self_obj and hasattr(self_obj, "bin_dir"):
+                self_obj = outer.get('self')
+                if self_obj and hasattr(self_obj, 'bin_dir'):
                     bin_dir_path = self_obj.bin_dir
             except Exception:
                 pass
-
-            print("\n\033[33m  Nenhuma função benchmarkada. Execute --hybrid primeiro.\033[0m")
+            print('\n\x1b[33m  Nenhuma função benchmarkada. Execute --hybrid primeiro.\x1b[0m')
             if bin_dir_path:
                 if bin_dir_path.exists():
-                    binaries = list(bin_dir_path.glob("*.pyd")) + list(bin_dir_path.glob("*.so"))
+                    binaries = list(bin_dir_path.glob('*.pyd')) + list(bin_dir_path.glob('*.so'))
                     if binaries:
-                        print(f"\033[36m  Binários encontrados em {bin_dir_path}:\033[0m")
+                        print(f'\x1b[36m  Binários encontrados em {bin_dir_path}:\x1b[0m')
                         for b in sorted(binaries)[:10]:
-                            print(f"    {b.name}")
-                        print("\033[33m  (hash do path não coincide — tente passar o diretório raiz)\033[0m")
+                            print(f'    {b.name}')
+                        print('\x1b[33m  (hash do path não coincide — tente passar o diretório raiz)\x1b[0m')
                     else:
-                        print(f"\033[33m  bin_dir vazio: {bin_dir_path}\033[0m")
+                        print(f'\x1b[33m  bin_dir vazio: {bin_dir_path}\x1b[0m')
                 else:
-                    print(f"\033[33m  bin_dir não existe: {bin_dir_path}\033[0m")
+                    print(f'\x1b[33m  bin_dir não existe: {bin_dir_path}\x1b[0m')
             return
-
-        RESET = "\033[0m"
-        BOLD  = "\033[1m"
-        CYAN  = "\033[36m"
-        DIM   = "\033[2m"
-
-        print(f"\n{CYAN}{'─'*70}{RESET}")
-        print(f"{BOLD}  VULCAN HYBRID BENCHMARK{RESET}")
-        print(f"{CYAN}{'─'*70}{RESET}")
-        print(
-            f"  {'Arquivo':<20} {'Função':<35} "
-            f"{'Py ms':>7} {'Cy ms':>7} {'Speedup':>8}  Status"
-        )
-        print(f"{DIM}  {'─'*20} {'─'*35} {'─'*7} {'─'*7} {'─'*8}  {'─'*12}{RESET}")
-
+        RESET = '\x1b[0m'
+        BOLD = '\x1b[1m'
+        CYAN = '\x1b[36m'
+        DIM = '\x1b[2m'
+        print(f'\n{CYAN}{'─' * 70}{RESET}')
+        print(f'{BOLD}  VULCAN HYBRID BENCHMARK{RESET}')
+        print(f'{CYAN}{'─' * 70}{RESET}')
+        print(f'  {'Arquivo':<20} {'Função':<35} {'Py ms':>7} {'Cy ms':>7} {'Speedup':>8}  Status')
+        print(f'{DIM}  {'─' * 20} {'─' * 35} {'─' * 7} {'─' * 7} {'─' * 8}  {'─' * 12}{RESET}')
         regressions = 0
         total_speedup = 0.0
-        total_ok      = 0
-
+        total_ok = 0
         for file_res in results:
-            fname = Path(file_res.file_path).name[:20]  # OBJ-REDUCE: slice→memoryview
+            fname = Path(file_res.file_path).name[:20]
             for f in file_res.functions:
-                col   = f.status_color
-                spd   = f.speedup_label
-                py_s  = f"{f.py_ms:.3f}" if f.py_ms is not None else "N/A"
-                cy_s  = f"{f.cy_ms:.3f}" if f.cy_ms is not None else "N/A"
-                err   = f" ({f.error[:120]})" if f.error else ""
-                print(
-                    f"  {fname:<20} {f.func_name:<35} "
-                    f"{py_s:>7} {cy_s:>7} "
-                    f"{col}{spd:>8}{RESET}  {f.status}{DIM}{err}{RESET}"
-                )
+                col = f.status_color
+                spd = f.speedup_label
+                py_s = f'{f.py_ms:.3f}' if f.py_ms is not None else 'N/A'
+                cy_s = f'{f.cy_ms:.3f}' if f.cy_ms is not None else 'N/A'
+                err = f' ({f.error[:120]})' if f.error else ''
+                print(f'  {fname:<20} {f.func_name:<35} {py_s:>7} {cy_s:>7} {col}{spd:>8}{RESET}  {f.status}{DIM}{err}{RESET}')
                 if f.speedup:
                     total_speedup += f.speedup
-                    total_ok      += 1
-                    # Marca regressão: Cython mais lento que Python
-                    if f.speedup < min_speedup and f.status == "OK":
-                        print(
-                            f"  {DIM}{'':20} {'':35} {'':7} {'':7} "
-                            f"\033[33m{'':>8}  ⚠ REGRESSÃO: speedup {f.speedup:.2f}× < {min_speedup}× — candidato a exclusão{RESET}"
-                        )
-
-        print(f"{CYAN}{'─'*70}{RESET}")
+                    total_ok += 1
+                    if f.speedup < min_speedup and f.status == 'OK':
+                        print(f'  {DIM}{'':20} {'':35} {'':7} {'':7} \x1b[33m{'':>8}  ⚠ REGRESSÃO: speedup {f.speedup:.2f}× < {min_speedup}× — candidato a exclusão{RESET}')
+        print(f'{CYAN}{'─' * 70}{RESET}')
         if total_ok > 0:
             avg = total_speedup / total_ok
             bar = _speedup_bar(avg)
-            regressions = sum(
-                1 for fr in results
-                for f in fr.functions
-                if f.speedup and f.speedup < min_speedup and f.status == "OK"
-            )
-            print(f"  {BOLD}Speedup médio : {avg:.2f}×  {bar}{RESET}")
-            print(f"  Funções OK    : {total_ok}")
+            regressions = sum((1 for fr in results for f in fr.functions if f.speedup and f.speedup < min_speedup and (f.status == 'OK')))
+            print(f'  {BOLD}Speedup médio : {avg:.2f}×  {bar}{RESET}')
+            print(f'  Funções OK    : {total_ok}')
             if regressions:
-                print(f"  \033[33m⚠ Regressões  : {regressions} função(ões) abaixo de {min_speedup}×{RESET}")
-                print(f"  \033[33m  Use --save para persistir e excluir do próximo --hybrid{RESET}")
-
-        # Detecta binários desatualizados (forge antigo)
-        stale_bins = [
-            f"{Path(fr.file_path).name}"
-            for fr in results
-            for f in fr.functions
-            if f.status == "ERROR" and f.error and (
-                "desatualizado" in (f.error or "") or
-                "Recompile" in (f.error or "")
-            )
-        ]
+                print(f'  \x1b[33m⚠ Regressões  : {regressions} função(ões) abaixo de {min_speedup}×{RESET}')
+                print(f'  \x1b[33m  Use --save para persistir e excluir do próximo --hybrid{RESET}')
+        stale_bins = [f'{Path(fr.file_path).name}' for fr in results for f in fr.functions if f.status == 'ERROR' and f.error and ('desatualizado' in (f.error or '') or 'Recompile' in (f.error or ''))]
         if stale_bins:
             unique_stale = sorted(set(stale_bins))
-            print(f"  \033[33m⚠ Binários desatualizados: {len(unique_stale)} arquivo(s){RESET}")
+            print(f'  \x1b[33m⚠ Binários desatualizados: {len(unique_stale)} arquivo(s){RESET}')
             for s in unique_stale[:5]:
-                print(f"    \033[33m└─ {s}{RESET}")
-            print(f"  \033[36m  → doxoade vulcan ignite <path> --hybrid --force{RESET}")
-
-        print(f"{CYAN}{'─'*70}{RESET}\n")
+                print(f'    \x1b[33m└─ {s}{RESET}')
+            print(f'  \x1b[36m  → doxoade vulcan ignite <path> --hybrid --force{RESET}')
+        print(f'{CYAN}{'─' * 70}{RESET}\n')
 
     @staticmethod
     def _print_json(results: list[FileBenchResult]):
         data = []
         for file_res in results:
             for f in file_res.functions:
-                data.append({
-                    "file":    file_res.file_path,
-                    "func":    f.func_name,
-                    "py_ms":   f.py_ms,
-                    "cy_ms":   f.cy_ms,
-                    "speedup": f.speedup,
-                    "status":  f.status,
-                    "error":   f.error,
-                })
+                data.append({'file': file_res.file_path, 'func': f.func_name, 'py_ms': f.py_ms, 'cy_ms': f.cy_ms, 'speedup': f.speedup, 'status': f.status, 'error': f.error})
         print(json.dumps(data, indent=2, ensure_ascii=False))
-
-
-# ---------------------------------------------------------------------------
-# FunctionProber — gera fixtures de entrada automaticamente
-# ---------------------------------------------------------------------------
 
 class FunctionProber:
     """
@@ -730,28 +523,8 @@ class FunctionProber:
       - lines → lista de strings
       - defaults numéricos e bool para o restante
     """
-
-    # Código Python de amostra usado como fixture de análise AST
-    _SAMPLE_CODE = (
-        "import os\nimport sys\n"
-        "def hello(name: str) -> str:\n"
-        "    return f'hello {name}'\n"
-        "class Foo:\n"
-        "    def __init__(self):\n"
-        "        self.x = 0\n"
-        "    def bar(self, n):\n"
-        "        total = 0\n"
-        "        for i in range(n):\n"
-        "            total += i\n"
-        "        return total\n"
-    )
-
-    _SAMPLE_FINDINGS = [
-        {'severity': 'WARNING', 'category': 'UNUSED', 'message': 'unused var x',
-         'file': 'test.py', 'line': 10, 'finding_hash': 'abc123'},
-        {'severity': 'ERROR', 'category': 'SYNTAX', 'message': 'invalid syntax',
-         'file': 'test.py', 'line': 20, 'finding_hash': 'def456'},
-    ]
+    _SAMPLE_CODE = "import os\nimport sys\ndef hello(name: str) -> str:\n    return f'hello {name}'\nclass Foo:\n    def __init__(self):\n        self.x = 0\n    def bar(self, n):\n        total = 0\n        for i in range(n):\n            total += i\n        return total\n"
+    _SAMPLE_FINDINGS = [{'severity': 'WARNING', 'category': 'UNUSED', 'message': 'unused var x', 'file': 'test.py', 'line': 10, 'finding_hash': 'abc123'}, {'severity': 'ERROR', 'category': 'SYNTAX', 'message': 'invalid syntax', 'file': 'test.py', 'line': 20, 'finding_hash': 'def456'}]
 
     def generate_fixture(self, func: Callable) -> tuple:
         """
@@ -760,18 +533,15 @@ class FunctionProber:
         """
         import inspect
         try:
-            sig    = inspect.signature(func)
+            sig = inspect.signature(func)
             params = list(sig.parameters.values())
         except (ValueError, TypeError):
             return ()
-
         args = []
         for p in params:
-            # Ignora self/cls e parâmetros variádicos (*args, **kwargs)
             if p.name in ('self', 'cls'):
                 continue
-            if p.kind in (inspect.Parameter.VAR_POSITIONAL,   # *args
-                          inspect.Parameter.VAR_KEYWORD):      # **kwargs
+            if p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
                 continue
             args.append(self._infer_arg(p.name, p.annotation, p.default))
         return tuple(args)
@@ -779,49 +549,26 @@ class FunctionProber:
     def _infer_arg(self, name: str, annotation, default) -> Any:
         """Infere valor adequado pelo nome do parâmetro."""
         import inspect
-
-        # Se tem default, usa ele (mais seguro)
         if default is not inspect.Parameter.empty:
             return default
-
         import inspect as _insp
-
         n = name.lower()
 
-        # Extrai o nome da classe da anotação de forma robusta.
-        # Funciona para: classe real (type), string forward ref, ou ausente.
         def _ann_class_name(ann) -> str:
             if ann is _insp.Parameter.empty or ann is None:
-                return ""
-            if isinstance(ann, type):        # anotação resolvida: list, str, CheckState
+                return ''
+            if isinstance(ann, type):
                 return ann.__name__
-            s = str(ann).strip().strip("'\"<>")
-            return s.split(".")[-1].strip("'\"<> ")
-
+            s = str(ann).strip().strip('\'"<>')
+            return s.split('.')[-1].strip('\'"<> ')
         ann_name = _ann_class_name(annotation)
-
         if n == 'state' or ann_name in ('CheckState',):
-            # Gera um CheckState mínimo com findings populados
             try:
-                # Cria dinamicamente sem precisar importar do projeto
-                state_obj = type('CheckState', (), {
-                    'root': '.',
-                    'target_path': '.',
-                    'target_files': [],
-                    'findings': list(self._SAMPLE_FINDINGS),
-                    'alb_files': [],
-                    'summary': {"errors": 1, "warnings": 1, "critical": 0},
-                    'is_full_power': False,
-                    'clones_active': False,
-                    'register_finding': lambda self_inner, f: self_inner.findings.append(f),
-                    'sync_summary': lambda self_inner: None,
-                })()
+                state_obj = type('CheckState', (), {'root': '.', 'target_path': '.', 'target_files': [], 'findings': list(self._SAMPLE_FINDINGS), 'alb_files': [], 'summary': {'errors': 1, 'warnings': 1, 'critical': 0}, 'is_full_power': False, 'clones_active': False, 'register_finding': lambda self_inner, f: self_inner.findings.append(f), 'sync_summary': lambda self_inner: None})()
                 state_obj.findings = list(self._SAMPLE_FINDINGS)
                 return state_obj
             except Exception:
                 pass
-
-        # AST types
         if n in ('tree', 'node', 'module'):
             return ast.parse(self._SAMPLE_CODE)
         if 'func_node' in n or n == 'func':
@@ -829,23 +576,17 @@ class FunctionProber:
             for node in ast.walk(tree):
                 if isinstance(node, ast.FunctionDef):
                     return node
-            return ast.parse("def f(): pass").body[0]
-
-        # Strings de código/conteúdo
+            return ast.parse('def f(): pass').body[0]
         if n in ('content', 'source', 'code', 'text', 'pyx_code', 'pyx_source'):
             return self._SAMPLE_CODE
         if n in ('file_path', 'path', 'src', 'filename', 'file'):
-            return __file__   # path deste arquivo — existe em disco
-
-        # Coleções
+            return __file__
         if n in ('findings', 'items', 'results', 'all_findings'):
             return list(self._SAMPLE_FINDINGS)
         if n in ('lines', 'content_lines', 'file_lines'):
             return self._SAMPLE_CODE.splitlines()
         if n in ('templates',):
             return []
-
-        # Numéricos e flags
         if n in ('line_number', 'lineno', 'line', 'line_num'):
             return 5
         if n in ('context_lines', 'context'):
@@ -856,18 +597,10 @@ class FunctionProber:
             return False
         if n in ('project_root', 'project_path', 'root_path'):
             return str(Path(__file__).resolve().parents[3])
-
-        # Dicts de configuração
         if n in ('taint_map', 'tainted', 'imports'):
             return {'x': 'input', 'y': 'sys.argv'}
         if 'config' in n or n.endswith('_cfg') or n.endswith('_conf'):
-            return {
-                'ignore_patterns': [],
-                'extensions': ['.py'],
-                'exclude_dirs': [],
-                'max_file_size': 1048576,
-                'project_root': str(Path(__file__).resolve().parents[0]),
-            }
+            return {'ignore_patterns': [], 'extensions': ['.py'], 'exclude_dirs': [], 'max_file_size': 1048576, 'project_root': str(Path(__file__).resolve().parents[0])}
         if n in ('ignore_patterns', 'patterns'):
             return []
         if n in ('extensions', 'exts'):
@@ -875,11 +608,9 @@ class FunctionProber:
         if n in ('exclude_dirs', 'skip_dirs'):
             return []
         if n.endswith(('_name', '_key', '_label', '_tag', '_id', '_slug')):
-            return "sample"
-
-        # Fallback: string vazia ou 0
+            return 'sample'
         if annotation == str:
-            return ""
+            return ''
         if annotation == int:
             return 0
         if annotation == bool:
@@ -888,38 +619,21 @@ class FunctionProber:
             return []
         if annotation == dict:
             return {}
-
-        return None   # último recurso
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+        return None
 
 def _speedup_bar(speedup: float) -> str:
     """Barra visual de speedup."""
     filled = min(int(speedup * 2), 20)
-    bar    = "█" * filled + "░" * (20 - filled)
+    bar = '█' * filled + '░' * (20 - filled)
     if speedup >= 10:
-        color = "\033[32m"   # verde
+        color = '\x1b[32m'
     elif speedup >= 3:
-        color = "\033[36m"   # cyan
+        color = '\x1b[36m'
     else:
-        color = "\033[37m"   # branco
-    return f"{color}[{bar}]\033[0m"
+        color = '\x1b[37m'
+    return f'{color}[{bar}]\x1b[0m'
 
-
-# ---------------------------------------------------------------------------
-# API pública (chamada pelo vulcan_cmd.py)
-# ---------------------------------------------------------------------------
-
-def run_benchmark(
-    project_root: str | Path,
-    target:       str | Path,
-    runs:         int   = 200,
-    output_json:  bool  = False,
-    min_speedup:  float = 1.1,
-) -> list[FileBenchResult]:
+def run_benchmark(project_root: str | Path, target: str | Path, runs: int=200, output_json: bool=False, min_speedup: float=1.1) -> list[FileBenchResult]:
     """Entry-point chamado pelo vulcan_cmd benchmark."""
     bench = HybridBenchmark(project_root=project_root, runs=runs)
     return bench.run(target=target, output_json=output_json, min_speedup=min_speedup)

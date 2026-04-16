@@ -1,276 +1,211 @@
-# -*- coding: utf-8 -*-
-# doxoade/commands/save.py
+# doxoade/doxoade/commands/save.py
 """
 Comando Save - v80.1 Gold.
 Gatekeeper Ma'at (Produção) & Anúbis (Infraestrutura).
 """
 import sys
-import sqlite3 # noqa
+import sqlite3
 import re
 import os
 import click
+import subprocess
+
 from datetime import datetime, timezone
 from typing import Dict, Any, Tuple, Set
 from rich.console import Console
-from doxoade.tools.doxcolors import Fore
-import subprocess
-from ..database import get_db_connection
-from ..shared_tools import (
-    ExecutionLogger, 
-    _run_git_command, 
-    _present_results
-)
+
 from .check import run_check_logic
-__version__ = "63.3 Alfa (Gold Standard)"
+
+from doxoade.database         import get_db_connection
+from doxoade.tools.display    import _present_results
+from doxoade.tools.doxcolors  import Fore
+from doxoade.tools.git        import _run_git_command
+from doxoade.tools.filesystem import is_ignored
+from doxoade.tools.telemetry_tools.logger import ExecutionLogger
+
+__version__ = '63.3 Alfa (Gold Standard)'
+
 def _get_staged_python_files(git_root):
-    """Filtra o Stage contra lixo e arquivos deletados (PASC 3.0)."""
-    # AMR: Added, Modified, Renamed. Ignora Deletados.
+    """Filtra o Stage contra lixo, testes e arquivos deletados."""
     res = _run_git_command(['diff', '--name-only', '--cached', '--diff-filter=AMR', '--', '*.py'], capture_output=True)
-    if not res: return []
+    if not res:
+        return []
     
-    from ..dnm import DNM
-    dnm = DNM(git_root)
     valid = []
     for f in res.splitlines():
         p = os.path.normpath(os.path.join(git_root, f.strip())).replace('\\', '/')
-        # Só envia para o tribunal se o arquivo EXISTIR fisicamente
-        if os.path.isfile(p) and not dnm.is_ignored(p):
-            valid.append(p)
+        
+        # Só permite arquivos que não estão no ignore e não são testes/diagnósticos
+        if os.path.isfile(p) and not is_ignored(p, git_root):
+            if not any(x in p for x in ['regression_tests', 'diagnostic', 'fixtures']):
+                valid.append(p)
     return valid
-def _process_finding_for_learning(cursor: sqlite3.Cursor, finding: sqlite3.Row, 
-                                 modified_files: Set[str], new_commit_hash: str, 
-                                 project_path: str) -> bool:
+
+def _process_finding_for_learning(cursor: sqlite3.Cursor, finding: sqlite3.Row, modified_files: Set[str], new_commit_hash: str, project_path: str) -> bool:
     """
     Analisa um finding individual e, se resolvido no commit, registra a solução.
     MPoT-5: Contratos de validação de entrada implementados.
     """
     if cursor is None or finding is None or modified_files is None:
-        raise ValueError("Parâmetros de banco ou dados de commit inválidos.")
+        raise ValueError('Parâmetros de banco ou dados de commit inválidos.')
     file_path = finding['file']
     if not file_path:
         return False
-        
     normalized_path = file_path.replace('\\', '/')
     if normalized_path not in modified_files:
         return False
-    
-    # Obtém o conteúdo corrigido (Estado Desejado)
-    corrected_content = _run_git_command(
-        ['show', f"{new_commit_hash}:{normalized_path}"],
-        capture_output=True, silent_fail=True
-    )
-    
+    corrected_content = _run_git_command(['show', f'{new_commit_hash}:{normalized_path}'], capture_output=True, silent_fail=True)
     if not corrected_content:
         return False
-    
-    cursor.execute(
-        """INSERT OR REPLACE INTO solutions 
-           (finding_hash, stable_content, commit_hash, project_path, timestamp, file_path, message, error_line) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (finding['finding_hash'], corrected_content, new_commit_hash, project_path, 
-         datetime.now(timezone.utc).isoformat(), file_path, finding['message'], finding['line'])
-    )
+    cursor.execute('INSERT OR REPLACE INTO solutions \n           (finding_hash, stable_content, commit_hash, project_path, timestamp, file_path, message, error_line) \n           VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (finding['finding_hash'], corrected_content, new_commit_hash, project_path, datetime.now(timezone.utc).isoformat(), file_path, finding['message'], finding['line']))
     return True
+
 def _learn_solutions_from_commit(new_commit_hash: str, project_path: str):
     """
     Orquestra o aprendizado de soluções a partir de um commit recém-criado.
     Removido parâmetro 'logger' não utilizado (Fix Deepcheck).
     """
     console = Console()
-    console.print("\n[bold cyan]--- [LEARN] Buscando soluções para aprender... ---[/bold cyan]")
-    
+    console.print('\n[bold cyan]--- [LEARN] Buscando soluções para aprender... ---[/bold cyan]')
     conn = get_db_connection()
     try:
-        conn.row_factory = sqlite3.Row 
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        
-        modified_files_str = _run_git_command(
-            ['diff-tree', '--no-commit-id', '--name-only', '-r', new_commit_hash],
-            capture_output=True, silent_fail=True
-        ) or ""
-        modified_files = set(f.strip().replace('\\', '/') for f in modified_files_str.splitlines())
-        
+        modified_files_str = _run_git_command(['diff-tree', '--no-commit-id', '--name-only', '-r', new_commit_hash], capture_output=True, silent_fail=True) or ''
+        modified_files = set((f.strip().replace('\\', '/') for f in modified_files_str.splitlines()))
         if not modified_files:
             return
-        # Busca findings recentes (24h) ativos antes deste commit
-        cursor.execute("""
-            SELECT DISTINCT f.finding_hash, f.file, f.line, f.message, f.category
-            FROM findings f
-            JOIN events e ON f.event_id = e.id
-            WHERE e.project_path = ?
-            AND f.severity IN ('CRITICAL', 'ERROR')
-            AND datetime(e.timestamp) > datetime('now', '-1 day')
-            AND f.finding_hash NOT IN (SELECT finding_hash FROM solutions WHERE project_path = ?)
-        """, (project_path, project_path))
-        
+        cursor.execute("\n            SELECT DISTINCT f.finding_hash, f.file, f.line, f.message, f.category\n            FROM findings f\n            JOIN events e ON f.event_id = e.id\n            WHERE e.project_path = ?\n            AND f.severity IN ('CRITICAL', 'ERROR')\n            AND datetime(e.timestamp) > datetime('now', '-1 day')\n            AND f.finding_hash NOT IN (SELECT finding_hash FROM solutions WHERE project_path = ?)\n        ", (project_path, project_path))
         findings = cursor.fetchall()
         learned_count = 0
-        
         for f in findings:
             if _process_finding_for_learning(cursor, f, modified_files, new_commit_hash, project_path):
                 learned_count += 1
-                console.print(f"   [green]> Solução aprendida:[/green] {f['message'][:50]}...")
+                console.print(f'   [green]> Solução aprendida:[/green] {f['message'][:50]}...')
                 _abstract_and_learn_template(cursor, {'message': f['message'], 'category': f['category']})
         conn.commit()
         if learned_count > 0:
-            console.print(f"[bold green][GÊNESE] {learned_count} nova(s) solução(ões) integrada(s).[/bold green]")
+            console.print(f'[bold green][GÊNESE] {learned_count} nova(s) solução(ões) integrada(s).[/bold green]')
     finally:
-        if conn: conn.close()
+        if conn:
+            conn.close()
+
 def _get_template_for_message(message: str) -> Tuple[str, str, str]:
     """
     Mapeia mensagens de erro para padrões de templates.
     MPoT-7: Retorna tupla de strings vazias em vez de None para consistência.
     """
     if not message:
-        return ("", "", "")
-    rules = [
-        (r"'(.+?)' imported but unused", "'<MODULE>' imported but unused", "FIX_UNUSED_IMPORT", "DEADCODE"),
-        (r"redefinition of unused '(.+?)' from line \d+", "redefinition of unused '<VAR>' from line <LINE>", "REMOVE_LINE", "DEADCODE"),
-        (r"f-string is missing placeholders", "f-string is missing placeholders", "REMOVE_F_PREFIX", "STYLE"),
-        (r"undefined name '(.+?)'", "undefined name '<VAR>'", "ADD_IMPORT_OR_DEFINE", "RUNTIME-RISK"),
-        (r"Uso de 'except:' genérico", "Uso de 'except:' genérico detectado", "FIX_BARE_EXCEPT", "SECURITY")
-    ]
-    
+        return ('', '', '')
+    rules = [("'(.+?)' imported but unused", "'<MODULE>' imported but unused", 'FIX_UNUSED_IMPORT', 'DEADCODE'), ("redefinition of unused '(.+?)' from line \\d+", "redefinition of unused '<VAR>' from line <LINE>", 'REMOVE_LINE', 'DEADCODE'), ('f-string is missing placeholders', 'f-string is missing placeholders', 'REMOVE_F_PREFIX', 'STYLE'), ("undefined name '(.+?)'", "undefined name '<VAR>'", 'ADD_IMPORT_OR_DEFINE', 'RUNTIME-RISK'), ("Uso de 'except:' genérico", "Uso de 'except:' genérico detectado", 'FIX_BARE_EXCEPT', 'SECURITY')]
     for regex, pattern, template, category in rules:
         if re.search(regex, message):
             return (pattern, template, category)
-            
-    return ("", "", "") # Retorno consistente
+    return ('', '', '')
+
 def _abstract_and_learn_template(cursor: sqlite3.Cursor, concrete_finding: Dict[str, Any]) -> bool:
     """Extrai e persiste padrões abstratos de solução no banco de dados."""
     if cursor is None:
-        raise ValueError("Cursor do banco de dados é obrigatório.")
+        raise ValueError('Cursor do banco de dados é obrigatório.')
     pattern, template, category = _get_template_for_message(concrete_finding.get('message', ''))
-    
-    if not pattern: # Se o retorno for a tupla vazia
+    if not pattern:
         return False
-    cursor.execute("SELECT id, confidence FROM solution_templates WHERE problem_pattern = ?", (pattern,))
+    cursor.execute('SELECT id, confidence FROM solution_templates WHERE problem_pattern = ?', (pattern,))
     existing = cursor.fetchone()
     if existing:
-        cursor.execute("UPDATE solution_templates SET confidence = ? WHERE id = ?", 
-                       (existing['confidence'] + 1, existing['id']))
+        cursor.execute('UPDATE solution_templates SET confidence = ? WHERE id = ?', (existing['confidence'] + 1, existing['id']))
     else:
-        cursor.execute(
-            "INSERT INTO solution_templates (problem_pattern, solution_template, category, created_at) VALUES (?, ?, ?, ?)",
-            (pattern, template, category, datetime.now(timezone.utc).isoformat())
-        )
+        cursor.execute('INSERT INTO solution_templates (problem_pattern, solution_template, category, created_at) VALUES (?, ?, ?, ?)', (pattern, template, category, datetime.now(timezone.utc).isoformat()))
     return True
+
 @click.command('save')
 @click.argument('message', required=False)
-@click.option('--archives', '-a', help="Lista arquivos de um commit.")
-@click.option('--remove-commit', '-rc', help="Apaga o último commit.")
-@click.option('--branch', 'branch_target', help="Após salvar, faz merge local da branch atual para a branch alvo.")
-@click.option('--merge', 'merge_target', help="Alias de --branch (ex.: --merge main).")
-@click.option('--update-base', default='origin/main', show_default=True, help="Base usada para gerar resumo automático de atualização.")
-@click.option('--force', is_flag=True, help="Força o commit ignorando erros de qualidade.")
+@click.option('--archives', '-a', help='Lista arquivos de um commit.')
+@click.option('--remove-commit', '-rc', help='Apaga o último commit.')
+@click.option('--branch', 'branch_target', help='Após salvar, faz merge local da branch atual para a branch alvo.')
+@click.option('--merge', 'merge_target', help='Alias de --branch (ex.: --merge main).')
+@click.option('--update-base', default='origin/main', show_default=True, help='Base usada para gerar resumo automático de atualização.')
+@click.option('--force', is_flag=True, help='Força o commit ignorando erros de qualidade.')
 @click.pass_context
 def save(ctx, message, archives, remove_commit, branch_target, merge_target, update_base, force):
     """Executa commit seguro com aprendizado automatizado."""
     console = Console()
     project_path = os.getcwd()
-    
-    # MPoT-5: Inicialização explícita de estado para evitar NameError
-# [DOX-UNUSED]     fix_applied = False 
-    # --- A. OPERAÇÕES DE HISTÓRICO (OSIRIS) ---
     if remove_commit or archives:
         from .git_systems.git_archivist import GitArchivist
         archivist = GitArchivist(project_path)
         if remove_commit:
-            if click.confirm(f"{Fore.RED}⚠️ APAGAR commit {remove_commit}?"):
+            if click.confirm(f'{Fore.RED}⚠️ APAGAR commit {remove_commit}?'):
                 success, err = archivist.delete_commit(remove_commit)
-                click.echo(Fore.GREEN + "✔ OK" if success else Fore.RED + f"✘ {err}")
+                click.echo(Fore.GREEN + '✔ OK' if success else Fore.RED + f'✘ {err}')
             return
         if archives:
             success, data = archivist.list_commit_assets(archives)
             if success:
                 for item in sorted(data, key=lambda x: x['size'], reverse=True):
-                    click.echo(f"  {item['size']:>7.1f} KB │ {item['path']}")
+                    click.echo(f'  {item['size']:>7.1f} KB │ {item['path']}')
             return
     with ExecutionLogger('save', project_path, ctx.params):
         current_branch = (_run_git_command(['branch', '--show-current'], capture_output=True) or '').strip()
         final_merge_target = merge_target or branch_target
-        if branch_target and merge_target and branch_target != merge_target:
-            click.echo(Fore.RED + "Erro: use apenas um alvo entre --branch e --merge (ou o mesmo valor em ambos).")
+        if branch_target and merge_target and (branch_target != merge_target):
+            click.echo(Fore.RED + 'Erro: use apenas um alvo entre --branch e --merge (ou o mesmo valor em ambos).')
             sys.exit(1)
-
         if not message and final_merge_target:
             message = _build_update_message(current_branch or 'HEAD', final_merge_target, update_base)
-            console.print(f"[bold cyan][SAVE] Mensagem automática gerada:[/bold cyan] {message}")
-
+            console.print(f'[bold cyan][SAVE] Mensagem automática gerada:[/bold cyan] {message}')
         if not message:
-            click.echo(Fore.RED + "Erro: Mensagem obrigatória para save (ou use --merge/--branch para gerar automático).")
+            click.echo(Fore.RED + 'Erro: Mensagem obrigatória para save (ou use --merge/--branch para gerar automático).')
             return
-
         pre_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True)
         _run_git_command(['add', '.'])
         git_root = _run_git_command(['rev-parse', '--show-toplevel'], capture_output=True)
-
         status_after_add = _run_git_command(['status', '--porcelain'], capture_output=True, silent_fail=True) or ''
         if not status_after_add.strip():
-            console.print("[bold yellow][SAVE] Nada para salvar (working tree clean).[/bold yellow]")
+            console.print('[bold yellow][SAVE] Nada para salvar (working tree clean).[/bold yellow]')
             if final_merge_target:
                 _auto_merge_local(current_branch, final_merge_target, merge_message=message, force=force)
             return
-        
-        # --- REFRESH DE SINCRO (Ação de Zeus) ---
-        # Usamos a função auxiliar que já filtra arquivos DELETADOS (AMR)
         staged_prod = _get_staged_python_files(git_root)
-        
-        from ..dnm import DNM
+        from doxoade.dnm import DNM
         dnm = DNM(project_path)
-        
-        # Filtro de Leaks (Anúbis)
         leaks = [os.path.relpath(f, git_root) for f in staged_prod if dnm.is_ignored(f)]
-        
-        if leaks and not force:
-            console.print("\n[bold yellow]⚖  [ANÚBIS] Vazamento de Infra detectado![/bold yellow]")
-            for l in leaks: console.print(f"   {Fore.RED}✘ {l}")
-            if click.confirm("\nPurificar stage automaticamente?"):
-                for l in leaks: 
+        if leaks and (not force):
+            console.print('\n[bold yellow]⚖  [ANÚBIS] Vazamento de Infra detectado![/bold yellow]')
+            for l in leaks:
+                console.print(f'   {Fore.RED}✘ {l}')
+            if click.confirm('\nPurificar stage automaticamente?'):
+                for l in leaks:
                     subprocess.run(['git', 'rm', '--cached', os.path.join(git_root, l)], capture_output=True)
-                # RE-SINCRONIZA: Atualiza a lista após a limpeza
                 staged_prod = _get_staged_python_files(git_root)
-        # --- TRIBUNAL DE MA'AT ---
-        if staged_prod and not force:
+        if staged_prod and (not force):
             console.print("   > [MA'AT] Julgando integridade da produção...")
-            # Check Logic agora só vê o que existe no disco
             results = run_check_logic(path='.', fix=False, fast=True, target_files=staged_prod, state=None)
-            
             from .audit_systems.maat_engine import MaatEngine
             maat = MaatEngine(project_path)
             is_stable, maat_findings = maat.run_full_audit(staged_prod)
-            
             blocking = [f for f in results.get('findings', []) if f['severity'] in ['CRITICAL', 'ERROR']]
             if blocking or not is_stable:
-                console.print("\n[bold red]🛑 BLOQUEIO: Regressões detectadas![/bold red]")
-                # FEEDBACK DETALHADO (Solicitado pelo Chefe)
+                console.print('\n[bold red]🛑 BLOQUEIO: Regressões detectadas![/bold red]')
                 if blocking:
                     _present_results('text', {'summary': results['summary'], 'findings': blocking})
-                
                 if maat_findings:
                     console.print("\n[bold yellow]⚖  ACHADOS DE MA'AT:[/bold yellow]")
                     for mf in maat_findings:
-                        console.print(f"   [red]✘[/red] {mf['message']} ({os.path.basename(mf['file'])})")
+                        console.print(f'   [red]✘[/red] {mf['message']} ({os.path.basename(mf['file'])})')
                 sys.exit(1)
-        # --- D. SEPULTAMENTO (COMMIT) ---
         if not _run_git_command(['commit', '-m', message]):
             click.echo(Fore.RED + "[ERRO] Falha ao executar 'git commit'.")
             sys.exit(1)
-
-        console.print("[bold green]✔ Alfa 80.1: Conhecimento sepultado com sucesso.[/bold green]")
+        console.print('[bold green]✔ Alfa 80.1: Conhecimento sepultado com sucesso.[/bold green]')
         new_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True)
-
         if new_hash and new_hash != pre_hash:
             _learn_solutions_from_commit(new_hash, project_path)
-
         if final_merge_target:
             _auto_merge_local(current_branch, final_merge_target, merge_message=message, force=force)
+        console.print('[bold green]\n[OK] Alfa 71.10: Commit finalizado e Gênese atualizada.[/bold green]')
 
-        console.print("[bold green]\n[OK] Alfa 71.10: Commit finalizado e Gênese atualizada.[/bold green]")
-        
-
-
-def _build_update_message(source_branch: str, target_branch: str, base_ref: str = 'origin/main') -> str:
+def _build_update_message(source_branch: str, target_branch: str, base_ref: str='origin/main') -> str:
     """Gera mensagem de commit resumindo atualização desde a base."""
     logs = _run_git_command(['log', '--oneline', f'{base_ref}..HEAD'], capture_output=True, silent_fail=True) or ''
     subjects = []
@@ -280,76 +215,57 @@ def _build_update_message(source_branch: str, target_branch: str, base_ref: str 
             continue
         parts = clean.split(' ', 1)
         subjects.append(parts[1] if len(parts) > 1 else clean)
-
     if not subjects:
-        return f"sync(save): atualização de {source_branch} para {target_branch}"
-
-    title = f"sync(save): merge {source_branch} -> {target_branch} ({len(subjects)} atualização(ões))"
+        return f'sync(save): atualização de {source_branch} para {target_branch}'
+    title = f'sync(save): merge {source_branch} -> {target_branch} ({len(subjects)} atualização(ões))'
     body = ' | '.join(subjects[:4])
     if len(subjects) > 4:
-        body += f" | +{len(subjects)-4} adicionais"
-    return f"{title} :: {body}"
+        body += f' | +{len(subjects) - 4} adicionais'
+    return f'{title} :: {body}'
 
 def _verify_succession_integrity():
     """Garante que as tecnologias citadas no save v94 existam de fato."""
-# [DOX-UNUSED]     from ..tools.vulcan.bridge import vulcan_bridge
-    # 1. Verifica se o Vulcan está operando no Core
-    if not any(f.endswith('.pyd') for f in os.listdir('.doxoade/vulcan/bin')):
-        return False, "Regressão detectada: Binários Vulcan ausentes."
-    
-    # 2. Verifica se o Tribunal de Ma'at está no ar
+    if not any((f.endswith('.pyd') for f in os.listdir('.doxoade/vulcan/bin'))):
+        return (False, 'Regressão detectada: Binários Vulcan ausentes.')
     if not os.path.exists('doxoade/commands/audit_systems/maat_engine.py'):
-        return False, "Regressão detectada: Ma'at Engine perdido."
-        
-    return True, "Integridade de Sucessão confirmada."
+        return (False, "Regressão detectada: Ma'at Engine perdido.")
+    return (True, 'Integridade de Sucessão confirmada.')
 
-
-def _auto_merge_local(source_branch: str, target_branch: str, merge_message: str = None, force: bool = False) -> bool:
+def _auto_merge_local(source_branch: str, target_branch: str, merge_message: str=None, force: bool=False) -> bool:
     """Faz merge local assistido de source -> target e retorna para source."""
     console = Console()
     if not source_branch or not target_branch:
-        console.print("[bold yellow][SAVE] Merge automático ignorado: branch inválida.[/bold yellow]")
+        console.print('[bold yellow][SAVE] Merge automático ignorado: branch inválida.[/bold yellow]')
         return False
-
     if source_branch == target_branch:
-        console.print(f"[bold yellow][SAVE] Branch de origem e destino são iguais: {source_branch}.[/bold yellow]")
+        console.print(f'[bold yellow][SAVE] Branch de origem e destino são iguais: {source_branch}.[/bold yellow]')
         return False
-
     remote_names = (_run_git_command(['remote'], capture_output=True, silent_fail=True) or '').splitlines()
     if target_branch in [name.strip() for name in remote_names if name.strip()]:
-        console.print(
-            f"[bold red][SAVE] Alvo '{target_branch}' é um remote, não uma branch local. "
-            "Use uma branch local (ex.: --merge main).[/bold red]"
-        )
+        console.print(f"[bold red][SAVE] Alvo '{target_branch}' é um remote, não uma branch local. Use uma branch local (ex.: --merge main).[/bold red]")
         return False
-
-    local_ref = f"refs/heads/{target_branch}"
+    local_ref = f'refs/heads/{target_branch}'
     if not _run_git_command(['show-ref', '--verify', '--quiet', local_ref], silent_fail=True):
         console.print(f"[bold red][SAVE] Branch alvo '{target_branch}' não existe localmente.[/bold red]")
         return False
-
-    if not force and not click.confirm(f"Aplicar merge local de '{source_branch}' em '{target_branch}' agora?"):
-        console.print("[bold yellow][SAVE] Merge automático cancelado.[/bold yellow]")
+    if not force and (not click.confirm(f"Aplicar merge local de '{source_branch}' em '{target_branch}' agora?")):
+        console.print('[bold yellow][SAVE] Merge automático cancelado.[/bold yellow]')
         return False
-
-    console.print(f"[bold cyan][SAVE] Merge local automático: {source_branch} -> {target_branch}[/bold cyan]")
+    console.print(f'[bold cyan][SAVE] Merge local automático: {source_branch} -> {target_branch}[/bold cyan]')
     if not _run_git_command(['checkout', target_branch]):
         console.print(f"[bold red][SAVE] Falha ao trocar para '{target_branch}'.[/bold red]")
         return False
-
     merge_args = ['merge', '--no-ff']
     if merge_message:
         merge_args.extend(['-m', merge_message])
     else:
         merge_args.append('--no-edit')
     merge_args.append(source_branch)
-
     merge_ok = _run_git_command(merge_args)
     if not merge_ok:
         console.print("[bold red][SAVE] Merge automático falhou. Use 'doxoade merge <branch>' para resolver conflitos.[/bold red]")
         _run_git_command(['checkout', source_branch], silent_fail=True)
         return False
-
     _run_git_command(['checkout', source_branch], silent_fail=True)
-    console.print("[bold green][SAVE] Merge local concluído com sucesso.[/bold green]")
+    console.print('[bold green][SAVE] Merge local concluído com sucesso.[/bold green]')
     return True
