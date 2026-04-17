@@ -10,7 +10,7 @@ Filosofia MPoT:
 - Assertions em pontos críticos
 - Fail loudly
 """
-import sqlite3
+import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
 import hashlib
 from pathlib import Path
 from typing import Dict, List, Optional

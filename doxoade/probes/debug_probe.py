@@ -50,58 +50,83 @@ def _capture_locals(globs: dict) -> dict:
     return captured
 
 class _LineTimer:
-    __slots__ = ('data', '_last', 'target_file', 'project_root')
+    __slots__ = ('data', '_last', 'target_file', 'project_root', 'internal_mode', 'live_flow')
 
-    def __init__(self, target_file: str, project_root: str):
+    def __init__(self, target_file: str, project_root: str, internal_mode: bool = False, live_flow: bool = True):
         self.data: dict = {}
         self._last: dict = {}
-        self.target_file = os.path.normcase(os.path.abspath(target_file))
+        # Normaliza caminhos para evitar erros de comparação no Windows
+        self.target_file = os.path.normcase(os.path.abspath(target_file)) if target_file != "internal_cmd" else target_file
         self.project_root = os.path.normcase(os.path.abspath(project_root))
+        self.internal_mode = internal_mode
+        self.live_flow = live_flow
 
     def tracer(self, frame, event, arg):
-        raw_fname = frame.f_code.co_filename
-        if raw_fname in ('<sandbox>', '<string>'):
-            raw_fname = self.target_file
-        elif raw_fname == '~' or raw_fname.startswith('<frozen'):
+        if event != 'line': return self.tracer
+
+        fname = os.path.normcase(os.path.abspath(frame.f_code.co_filename))
+        
+        # Ignora arquivos de rastro e bibliotecas Python
+        if any(x in fname for x in ['debug_probe.py', 'flow_runner.py', 'Lib', 'importlib']):
             return self.tracer
+
+        # Obtém o caminho do arquivo atual
+        raw_fname = frame.f_code.co_filename
+        if raw_fname.startswith('<'): return self.tracer # Ignora <string>, <frozen>, etc.
+        
         fname = os.path.normcase(os.path.abspath(raw_fname))
-        is_target = fname == self.target_file
-        if not is_target:
-            if not fname.startswith(self.project_root):
-                return self.tracer
-            skip = ('security_utils', 'debug_probe', 'doxoade', 'site-packages', 'lib\\python', 'lib/python')
-            if any((s in fname for s in skip)):
-                return self.tracer
+        
+        # --- NOISE GATE (Filtro de Ruído) ---
+        # Se não estiver na pasta do projeto, ignore (evita mostrar threading.py, enum.py, etc.)
+        if not fname.startswith(self.project_root):
+            return self.tracer
+            
+        # Filtra pastas de sistema comuns dentro do projeto (como venv)
+        if any(x in fname for x in ['site-packages', 'Lib', 'importlib']):
+            return self.tracer
+
         lineno = frame.f_lineno
+        content = linecache.getline(fname, lineno).strip()
+        
+        if not content: return self.tracer
+
+        # Exibição em Tempo Real (Estilo Matrix)
+        if self.live_flow:
+            from doxoade.tools.doxcolors import Fore, Style
+            f_short = os.path.basename(fname)
+            # Rastro elegante: ARQUIVO | LINHA | CÓDIGO
+            sys.stdout.write(f"{Fore.GREEN}{f_short:<18}{Style.RESET_ALL} {Fore.DIM}│{Style.RESET_ALL} {Fore.YELLOW}{lineno:<4}{Style.RESET_ALL} {Fore.DIM}│{Style.RESET_ALL} {content}\n")
+            sys.stdout.flush()
+
+        # Coleta de métricas
         now_ns = time.perf_counter_ns()
         frame_id = id(frame)
-        if event == 'call':
-            self._last[frame_id] = (fname, lineno, now_ns)
-            return self.tracer
-        if event == 'line':
-            self._commit(frame_id, now_ns)
-            self._last[frame_id] = (fname, lineno, now_ns)
-            return self.tracer
-        if event in ('return', 'exception'):
-            self._commit(frame_id, now_ns)
-            self._last.pop(frame_id, None)
-            return self.tracer
+        self._commit(frame_id, now_ns)
+        self._last[frame_id] = (fname, lineno, now_ns)
+        
         return self.tracer
 
     def _commit(self, frame_id: int, now_ns: int):
-        if frame_id not in self._last:
-            return
+        if frame_id not in self._last: return
         prev_file, prev_line, prev_ts = self._last[frame_id]
         key = (prev_file, prev_line)
         entry = self.data.setdefault(key, {'hits': 0, 'total_ns': 0})
         entry['hits'] += 1
         entry['total_ns'] += now_ns - prev_ts
 
-    def top_lines(self, limit: int=20) -> list:
+    def top_lines(self, limit: int = 20) -> list:
+        """Retorna as linhas que mais consumiram tempo (MÉTODO FALTANTE)."""
         results = []
         for (fname, lineno), stat in self.data.items():
             content = linecache.getline(fname, lineno).strip()
-            results.append({'file': fname, 'line': lineno, 'hits': stat['hits'], 'total_ms': round(stat['total_ns'] / 1000000, 4), 'per_hit_ms': round(stat['total_ns'] / max(1, stat['hits']) / 1000000, 4), 'content': content})
+            results.append({
+                'file': fname,
+                'line': lineno,
+                'hits': stat['hits'],
+                'total_ms': round(stat['total_ns'] / 1_000_000, 4),
+                'content': content
+            })
+        # Ordena pelo tempo total decrescente
         results.sort(key=lambda x: x['total_ms'], reverse=True)
         return results[:limit]
 

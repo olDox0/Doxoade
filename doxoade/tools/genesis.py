@@ -7,7 +7,7 @@ Evolução: MPoT-Aware, Detecção de Complexidade e Blindagem de Caminhos.
 import re
 import ast
 import os
-import sqlite3
+import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
 from typing import List, Dict, Any
 STDLIB_MODULES = {'sys': ['exit', 'path', 'argv', 'stdout', 'stderr', 'stdin', 'version', 'modules'], 'os': ['path', 'getcwd', 'chdir', 'listdir', 'mkdir', 'environ', 'name', 'walk', 'stat'], 'math': ['ceil', 'floor', 'sqrt', 'pi', 'pow', 'cos', 'sin', 'tan'], 'random': ['randint', 'choice', 'shuffle', 'random', 'seed'], 're': ['match', 'search', 'findall', 'sub', 'compile', 'fullmatch', 'escape'], 'json': ['dumps', 'loads', 'dump', 'load', 'JSONDecodeError'], 'datetime': ['datetime', 'date', 'time', 'timedelta', 'timezone'], 'time': ['sleep', 'time', 'monotonic', 'perf_counter'], 'hashlib': ['md5', 'sha256', 'sha1'], 'subprocess': ['run', 'Popen', 'PIPE', 'CalledProcessError'], 'pathlib': ['Path', 'PurePath'], 'ast': ['parse', 'walk', 'NodeVisitor', 'unparse'], 'shutil': ['copy', 'copy2', 'rmtree', 'move'], 'collections': ['Counter', 'defaultdict', 'deque', 'namedtuple']}
 COMMON_THIRD_PARTY = {'colorama': ['Fore', 'Back', 'Style', 'init'], 'rich': ['console', 'table', 'panel', 'progress'], 'pytest': ['fixture', 'mark', 'raises']}

@@ -8,7 +8,7 @@ import sys
 import re
 
 from subprocess import run, PIPE
-from click      import command, argument, option, pass_context, Choice
+from click      import command, argument, option, pass_context, Choice, echo, secho
 
 from doxoade.commands.doxcolors_systems.colors_command import config
 from doxoade.commands.security_systems.security_utils  import get_tool_path, batch_list, get_essential_ignores, SEVERITY_MAP, batch_list
@@ -57,11 +57,29 @@ def _run_security_logic(ctx_params, target, level, logger):
 @command('security')
 @argument('target', default='.')
 @option('--level', '-l', type=Choice(['LOW', 'MEDIUM', 'HIGH']), default='LOW')
+@option('--fix-db', is_flag=True, help='Migra sqlite3 para Nexus Safe DB (Aegis Layer).') # NOVA FLAG
 @pass_context
-def security(ctx, target, level):
-    """Auditoria de Segurança (MPoT-5)."""
+def security(ctx, target, level, fix_db):
+    """Auditoria de Segurança e Proteção de Dados (Aegis)."""
     with ExecutionLogger('security', target, ctx.params) as logger:
+        if fix_db:
+            _run_db_migration(target)
+            return
         _run_security_logic(ctx.params, target, level, logger)
+
+def _run_db_migration(target):
+    """Orquestra a injeção e refatoração do banco de dados."""
+    from doxoade.commands.security_systems.db_migrator import NexusDBMigrator
+
+    secho("--- [AEGIS DB] Iniciando Migração de Banco de Dados ---", fg="cyan", bold=True)
+    
+    migrator = NexusDBMigrator(target)
+    # 1. Injeta o arquivo físico (Embedded)
+    migrator.inject_wrapper()
+    # 2. Atualiza os imports no projeto
+    migrator.refactor_imports()
+    
+    secho("\n[OK] Projeto agora utiliza Nexus Safe DB (Anti-Injection Layer).", fg="green", bold=True)
 
 def _run_bandit_engine(file_list, ignore_set):
     import json

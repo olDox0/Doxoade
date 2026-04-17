@@ -59,10 +59,16 @@ def _search_code_logic(root: Path, query: str, limit: int) -> list:
 
 def _search_database_logic(query, limit, path_filter) -> dict:
     from doxoade.database import get_db_connection
-    from sqlite3 import Row
+    from doxoade.tools.aegis.nexus_db import Row  # noqa
     res = {'incidents': [], 'solutions': []}
     conn = get_db_connection()
-    conn.row_factory = Row
+    
+    # CORREÇÃO AEGIS: Aplica o row_factory na conexão real embutida
+    if hasattr(conn, '_conn'):
+        conn._conn.row_factory = Row
+    else:
+        conn.row_factory = Row
+        
     sql_q = f'%{query}%'
     try:
         cursor = conn.cursor()
@@ -72,23 +78,28 @@ def _search_database_logic(query, limit, path_filter) -> dict:
             inc_sql += ' AND project_path LIKE ?'
             params.append(f'%{path_filter}%')
         cursor.execute(inc_sql + ' LIMIT ?', params + [limit])
+        
         for row in cursor.fetchall():
             res['incidents'].append({'file': row['file_path'], 'line': row['line'], 'message': row['message'], 'category': row['category']})
+            
         sol_sql = 'SELECT * FROM solutions WHERE (message LIKE ? OR file_path LIKE ?)'
         sol_params = [sql_q, sql_q]
         if path_filter:
             sol_sql += ' AND project_path LIKE ?'
             sol_params.append(f'%{path_filter}%')
         cursor.execute(sol_sql + ' LIMIT ?', sol_params + [limit])
+        
         for row in cursor.fetchall():
             res['solutions'].append({'file': row['file_path'], 'message': row['message']})
+            
     except Exception as e:
+        # Seu bloco de tratamento de exceções robusto continua aqui...
         import sys as exc_sys
         from traceback import print_tb as exc_trace
         _, exc_obj, exc_tb = exc_sys.exc_info()
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         line_number = exc_tb.tb_lineno
-        print(f'\x1b[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n')
+        print(f'\x1b[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {" ".join(str(exc_obj).splitlines())}\n')
         exc_trace(exc_tb)
     finally:
         conn.close()
@@ -96,10 +107,16 @@ def _search_database_logic(query, limit, path_filter) -> dict:
 
 def _search_timeline_logic(query, limit, path_filter) -> list:
     from doxoade.database import get_db_connection
-    from sqlite3 import Row
+    from doxoade.tools.aegis.nexus_db import Row  # noqa
     results = []
     conn = get_db_connection()
-    conn.row_factory = Row
+    
+    # CORREÇÃO AEGIS: Aplica o row_factory na conexão real embutida
+    if hasattr(conn, '_conn'):
+        conn._conn.row_factory = Row
+    else:
+        conn.row_factory = Row
+        
     sql_q = f'%{query}%'
     q = 'SELECT * FROM command_history WHERE full_command_line LIKE ?'
     params = [sql_q]

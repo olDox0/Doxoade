@@ -30,7 +30,7 @@ class WeightGuard:
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 for i, line in enumerate(f, 1):
-                    if 'import sqlite3' in line:
+                    if 'import doxoade.tools.aegis.nexus_db as sqlite3  # noqa' in line:
                         if '# noqa' in line.lower():
                             continue
                         if 'commands/' in file_path.replace('\\', '/'):

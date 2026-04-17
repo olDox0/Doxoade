@@ -4,7 +4,7 @@ Comando Save - v80.1 Gold.
 Gatekeeper Ma'at (Produção) & Anúbis (Infraestrutura).
 """
 import sys
-import sqlite3
+import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
 import re
 import os
 import click

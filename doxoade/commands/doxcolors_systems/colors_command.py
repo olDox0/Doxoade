@@ -7,7 +7,7 @@ import shutil
 import time
 from pathlib import Path
 import doxoade.tools as dox_tools
-from doxoade.tools.doxcolors import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style,AsyncAnimation
 
 # Localização do arquivo fonte para injeção
 DOXCOLORS_SOURCE_PATH = Path(dox_tools.__file__).parent / 'doxcolors.py'
@@ -179,13 +179,46 @@ def create_anim_template(name):
 @doxcolors_cmd.command('load')
 @click.argument('file', type=click.Path(exists=True))
 @click.option('--seconds', '-s', default=3)
-def load_test_command(file, seconds):
-    """Testa uma animação assíncrona com proteção contra crash."""
+@click.option('--interval', '-i', default=0.1)
+@click.option('--debug', '-d', is_flag=True, help="Habilita moldura de debug.")
+def load_test_command(file, seconds, interval, debug):
+    """Testa uma animação assíncrona com proteção contra ghosting."""
     from doxoade.tools.doxcolors import colors
     
-    # O 'with' garante que anim.stop() seja chamado mesmo se der erro dentro do bloco
-    with colors.UI.loader(file, interval=0.15) as anim:
-        # Aqui simulamos o trabalho real
-        time.sleep(seconds)
+    click.secho(f"[*] Testando: {os.path.basename(file)}", fg="cyan")
+    
+    # CORREÇÃO: Usar o loader da UI que agora suporta debug
+    try:
+        with colors.UI.loader(file, interval=interval, debug=debug) as anim:
+            time.sleep(seconds)
+    except KeyboardInterrupt:
+        pass
         
-    click.secho("\n[OK] Trabalho finalizado com sucesso!", fg="green")
+    click.secho("\n[OK] Teste finalizado.", fg="green")
+    
+@doxcolors_cmd.command('play')
+@click.argument('file', type=click.Path(exists=True))
+@click.option('--interval', '-i', default=0.1)
+@click.option('--loops', '-l', default=1)
+@click.option('--ping-pong', '-pp', is_flag=True, help="Efeito ida e volta.")
+def play_animation_command(file, interval, loops, ping_pong):
+    from doxoade.tools.doxcolors import colors
+    frames = colors.UI.load_animation(file)
+    # Usamos a classe diretamente para suportar loops no play estático
+    # (Ou podemos usar o loader se preferir assíncrono)
+    colors.UI.play_animation(frames, interval=interval, loops=loops)
+
+@doxcolors_cmd.command('load')
+@click.argument('file', type=click.Path(exists=True))
+@click.option('--seconds', '-s', default=3)
+@click.option('--interval', '-i', default=0.1)
+@click.option('--debug', '-d', is_flag=True)
+@click.option('--ping-pong', '-pp', is_flag=True, help="Efeito ida e volta.")
+def load_test_command(file, seconds, interval, debug, ping_pong):
+    from doxoade.tools.doxcolors import colors
+    click.secho(f"[*] Modo {'Ping-Pong' if ping_pong else 'Linear'}: {os.path.basename(file)}", fg="cyan")
+    
+    with colors.UI.loader(file, interval=interval, debug=debug, ping_pong=ping_pong) as anim:
+        time.sleep(seconds)
+    
+    click.secho("\n[OK] Teste finalizado.", fg="green")

@@ -6,6 +6,7 @@ Suporte a Diff Padrão e Auditoria de Funcionalidades Legadas (-l, -lc).
 import os
 import click
 from pathlib import Path
+
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.git import _run_git_command
 from doxoade.tools.display import _present_diff_output
@@ -49,6 +50,7 @@ def _run_legacy_audit(rel_path: str, limit: int, show_code: bool, search_moved: 
     from doxoade.tools.git import _get_file_history_metadata, _get_historical_content
     from doxoade.tools.analysis import _extract_function_signatures, _get_function_source
     from .search import _search_in_code_stream
+    
     current_content = ''
     project_root = Path(_find_project_root(os.getcwd()))
     click.echo(f"{Fore.CYAN}{Style.BRIGHT}--- [LEGACY AUDIT] Regressões em '{rel_path}' ---{Style.RESET_ALL}")

@@ -1,10 +1,15 @@
 # doxoade/doxoade/dnm.py
 import os
 import logging
+
 from typing import List, Optional
 from pathlib import Path
+
 from doxoade.commands.doxcolors_systems.colors_command import config
+
+from doxoade.tools.filesystem import is_ignored as central_is_ignored
 from doxoade.tools.filesystem import _get_project_config
+
 try:
     import pathspec
 except ImportError as e:
@@ -17,12 +22,18 @@ except ImportError as e:
     except Exception:
         raise
 
+
 class DNM:
     """
     Directory Navigation Module.
     Autoridade central para rastreamento de arquivos e aplicação de regras de ignore.
     """
-    SYSTEM_IGNORES = {'__pycache__', '.git', '.hg', '.svn', '.tox', '.venv', 'venv', 'pytest_temp_dir', 'foundry', 'bin', 'recovery_zone', 'tmp', 'env', 'node_modules', '.idea', '.vscode', '.doxoade_cache', 'dist', 'build', 'doxoade.egg-info', 'htmlcov', '.pytest_cache'}
+    SYSTEM_IGNORES = {
+        '__pycache__', '.git', '.hg', '.svn', '.tox', '.venv', '.doxoade',
+        'venv', 'pytest_temp_dir', 'foundry', 'bin', 'recovery_zone',
+        'tmp', 'env', 'node_modules', '.idea', '.vscode', '.doxoade_cache',
+        'dist', 'build', 'doxoade.egg-info', 'htmlcov', '.pytest_cache',
+    }
 
     def __init__(self, root_path: str='.'):
         self.root = Path(root_path).resolve()
@@ -50,28 +61,22 @@ class DNM:
         return pathspec.PathSpec.from_lines('gitwildmatch', patterns)
 
     def is_ignored(self, file_path) -> bool:
-        try:
-            abs_p = os.path.abspath(file_path).replace('\\', '/')
-            if any((x in abs_p for x in ['nppBackup', '.bak', 'pytest_temp_dir'])):
-                return True
-            rel_p = os.path.relpath(abs_p, self.root).replace('\\', '/')
-            for part in rel_p.split('/'):
-                if part in self.SYSTEM_IGNORES:
-                    return True
-            return self.ignore_spec.match_file(rel_p)
-        except Exception as e:
-            logging.info(f' is_ignored - Exception: {e}')
-            return False
-        for part in rel_p.parts:
-            if part in self.SYSTEM_IGNORES:
-                return True
-        return self.ignore_spec.match_file(str(rel_p).replace(os.sep, '/'))
+        """Usa a autoridade central de filtragem do Doxoade."""
+        abs_p = os.path.abspath(file_path).replace('\\', '/')
+        
+        # 1. Filtro Central (Respeita SYSTEM_IGNORES e pyproject.toml)
+        # Passamos a raiz do DNM como project_root para o cálculo de caminhos relativos
+        if central_is_ignored(abs_p, str(self.root)):
+            return True
+            
+        # 2. Filtro de Segurança Aegis (Não auditar cache do Vulcan ou Backups)
+        # Mesmo se include_internal estiver ativo, nunca queremos arquivos gerados
+        if any(x in abs_p for x in ['.doxoade', 'nppBackup', '.bak', 'pytest_temp_dir']):
+            return True
+            
+        return False
 
     def scan(self, extensions: Optional[List[str]]=None, include_internal: bool = False) -> List[str]:
-        """
-        Varre o sistema de arquivos. 
-        Se include_internal for True, ignora as travas de 'internal folders' (diagnostics/tests).
-        """
         valid_files = []
         if extensions:
             extensions = {e.lower() if e.startswith('.') else f'.{e.lower()}' for e in extensions}
@@ -79,12 +84,14 @@ class DNM:
         for root, dirs, files in os.walk(str(self.root)):
             root_path = Path(root)
             
-            # Poda Inteligente
+            # Poda de Diretórios Inteligente
             if include_internal:
-                # No modo interno, ignoramos apenas lixo técnico pesado
-                technical_junk = {'.git', 'venv', '.venv', '__pycache__', 'node_modules', '.doxoade_cache'}
-                dirs[:] = [d for d in dirs if d not in technical_junk]
+                # No modo interno, ignoramos APENAS o que é lixo absoluto de infra/cache
+                # Nunca queremos auditar a pasta .doxoade (cache do vulcan)
+                absolute_trash = {'.git', 'venv', '.venv', '__pycache__', 'node_modules', '.doxoade'}
+                dirs[:] = [d for d in dirs if d not in absolute_trash]
             else:
+                # No modo padrão, usa a autoridade do filesystem.py + SYSTEM_IGNORES
                 dirs[:] = [d for d in dirs if not self.is_ignored(root_path / d)]
 
             for file in files:
@@ -92,16 +99,17 @@ class DNM:
                 if extensions and file_path.suffix.lower() not in extensions:
                     continue
                 
-                # Validação de ignore
-                if include_internal:
-                    # No modo internal, permitimos tudo que não seja lixo técnico
-                    if any(x in str(file_path) for x in ['.git', 'venv', '__pycache__']):
-                        continue
-                elif self.is_ignored(file_path):
+                # Verificação final de arquivo
+                if self.is_ignored(file_path) and not include_internal:
+                    continue
+                
+                # Proteção extra: Mesmo em include_internal, não ler binários ou cache
+                if '.doxoade' in str(file_path) or 'nppBackup' in str(file_path):
                     continue
                     
                 canonical_path = str(file_path.absolute()).replace('\\', '/')
                 valid_files.append(canonical_path)
+                
         return sorted(valid_files)
 
 try:

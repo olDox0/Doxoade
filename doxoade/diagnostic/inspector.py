@@ -75,17 +75,29 @@ class SystemInspector:
         return {'base_ref': base_ref, 'branch': branch_name or 'HEAD', 'ahead': int(ahead) if str(ahead).isdigit() else 0, 'behind': int(behind) if str(behind).isdigit() else 0, 'updates': updates[:20], 'changed_files': changed[:30]}
 
     def verify_core_modules(self):
-        """Verifica a integridade dos módulos principais."""
-        modules = ['doxoade.cli', 'doxoade.database', 'doxoade.chronos', 'doxoade.tools.git', 'doxoade.tools.logger', 'doxoade.tools.filesystem', 'doxoade.tools.analysis']
+        """Verifica a integridade dos módulos principais (Mapeamento Nexus)."""
+        # Mapeamos o "Nome de Exibição" para o "Caminho Real do Módulo"
+        # Isso garante que a UI continue limpa enquanto o motor busca o caminho novo.
+        modules_map = {
+            'doxoade.cli': 'doxoade.cli',
+            'doxoade.database': 'doxoade.database',
+            'doxoade.chronos': 'doxoade.chronos',
+            'doxoade.tools.git': 'doxoade.tools.git',
+            'doxoade.tools.logger': 'doxoade.tools.telemetry_tools.logger', # <-- CORREÇÃO AQUI
+            'doxoade.tools.filesystem': 'doxoade.tools.filesystem',
+            'doxoade.tools.analysis': 'doxoade.tools.analysis'
+        }
+        
         results = {}
-        for mod in modules:
+        for display_name, real_path in modules_map.items():
             try:
-                importlib.import_module(mod)
-                results[mod] = 'OK'
+                # Tenta importar o caminho real
+                importlib.import_module(real_path)
+                results[display_name] = 'OK'
             except ImportError as e:
-                results[mod] = f'MISSING ({e})'
+                results[display_name] = f'MISSING ({e})'
             except Exception as e:
-                results[mod] = f'CRASH ({e})'
+                results[display_name] = f'CRASH ({e})'
         return results
 
     def run_full_diagnosis(self, detailed: bool=False, show_code: bool=False, target_path: str=None):

@@ -1,12 +1,14 @@
 # doxoade/doxoade/commands/search.py
 import os
 import click
-from doxoade.tools.doxcolors import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style, colors # Importado colors para o loader
 from .search_systems.search_state import SearchState
 from .search_systems.search_engine import run_search_engine
-from doxoade.commands.search_systems.search_utils import render_search_results
-from doxoade.commands.search_systems.search_utils import get_code_from_commit
-from doxoade.commands.search_systems.search_utils import extract_block_from_git
+from doxoade.commands.search_systems.search_utils import (
+    render_search_results, 
+    get_code_from_commit, 
+    extract_block_from_git
+)
 from doxoade.tools.filesystem import _find_project_root
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 
@@ -25,38 +27,71 @@ def search(ctx, query, **kwargs):
     """🔍 Busca Nexus v4.7.1: Modularidade e Aceleração Vulcano."""
     root = _find_project_root(os.getcwd())
     search_q = query if query else '%' if kwargs.get('here') else ''
+    
     if not search_q and (not kwargs.get('here')):
         click.echo(Fore.RED + 'Erro: Forneça um termo de busca ou use --here.')
         return
-    state = SearchState(root=root, query=search_q, limit=kwargs.get('limit'), is_full_mode=kwargs.get('full'))
+
+    state = SearchState(
+        root=root, 
+        query=search_q, 
+        limit=kwargs.get('limit'), 
+        is_full_mode=kwargs.get('full')
+    )
+
+    # Caminho do Asset de Animação
+    asset_path = os.path.join(root, "assets", "search_loading.nxa")
+
     with ExecutionLogger('search', root, ctx.params):
         ctx_tag = f' em {os.path.basename(os.getcwd())}' if kwargs.get('here') else ''
         click.echo(f"{Fore.CYAN}{Style.BRIGHT}╔═══ Nexus Search: '{query}'{ctx_tag} ═══╗{Style.RESET_ALL}")
+
+        # Caso 1: Busca em Commit Específico (Arqueologia)
         if kwargs.get('specify_commit'):
-            _handle_historic_search(state, kwargs['specify_commit'])
+            # Ativado ping_pong=True para a arqueologia
+            #with colors.UI.loader(asset_path, interval=0.08, ping_pong=True) as anim:
+            with colors.UI.loader(asset_path, interval=0.05, ping_pong=True, color=Fore.CYAN + Style.BRIGHT) as anim:
+                _handle_historic_search(state, kwargs['specify_commit'])
             return
+
+        # Caso 2: Busca Multidimensional (Engine)
         filters = kwargs
-        is_default = not any([kwargs.get('code'), kwargs.get('commits'), kwargs.get('incidents'), kwargs.get('timeline')])
+        is_default = not any([
+            kwargs.get('code'), kwargs.get('commits'), 
+            kwargs.get('incidents'), kwargs.get('timeline')
+        ])
+        
         filters['run_code'] = kwargs.get('code') or is_default
         filters['run_db'] = kwargs.get('incidents') or is_default or kwargs.get('here')
         filters['run_time'] = kwargs.get('timeline') or is_default or kwargs.get('here')
-        run_search_engine(state, filters)
+
+        # --- ATIVAÇÃO DA ANIMAÇÃO ASYNC ---
+        # O bloco 'with' garante que a animação pare assim que run_search_engine terminar
+        with colors.UI.loader(asset_path, interval=0.05, ping_pong=True, color=Fore.CYAN + Style.BRIGHT) as anim:
+        #with colors.UI.loader(asset_path, interval=0.08, ping_pong=True) as anim:
+            run_search_engine(state, filters)
+        
         render_search_results(state)
 
 def _handle_historic_search(state, commit):
-    click.echo(f'{Fore.YELLOW}⏳ Consultando snapshot do commit: {commit}...{Style.RESET_ALL}')
+    # Nota: Como o loader está ativo no nível acima, 
+    # se quisermos imprimir algo aqui sem quebrar a animação, 
+    # teríamos que passar o objeto 'anim' para cá. 
+    # Caso contrário, o texto sairá após o término.
     raw_results = get_code_from_commit(commit, state.query)
     results = raw_results[:state.limit]
+    
     if not results:
         click.echo(f'   {Fore.RED}Nenhum match encontrado no commit {commit}.{Style.RESET_ALL}')
         return
-    print(f'{Fore.BLUE}{Style.BRIGHT}\n[ARQUEOLOGIA: COMMIT {commit}]{Style.RESET_ALL}')
+
+    click.echo(f'{Fore.BLUE}{Style.BRIGHT}\n[ARQUEOLOGIA: COMMIT {commit}]{Style.RESET_ALL}')
     for r in results:
         click.echo(Fore.CYAN + '─' * 65 + Style.RESET_ALL)
-        click.echo(f'{Fore.BLUE}[HISTORIC] {r['file']}:{r['line']}{Style.RESET_ALL}')
+        click.echo(f"{Fore.BLUE}[HISTORIC] {r['file']}:{r['line']}{Style.RESET_ALL}")
         if state.is_full_mode:
             block = extract_block_from_git(commit, r['file'], r['line'])
             click.echo(f'{Style.DIM}{block}{Style.RESET_ALL}')
         else:
-            click.echo(f'    > {r['text']}')
+            click.echo(f"    > {r['text']}")
     click.echo(Fore.CYAN + '─' * 65 + Style.RESET_ALL)

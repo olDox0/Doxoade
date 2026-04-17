@@ -7,7 +7,7 @@ Compliance: MPoT-4, MPoT-5, PASC-6, Aegis Protocol.
 import sys
 import os
 import json
-import sqlite3
+import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
 import hashlib
 import datetime
 import logging

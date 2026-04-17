@@ -12,6 +12,8 @@ import random
 import string
 import math
 import threading
+import itertools
+import shutil
 
 # --- CORE ENGINE ---
 
@@ -45,10 +47,10 @@ class Back: # Adicionado para corrigir o NameError
     CYAN = AnsiCode('46');   WHITE = AnsiCode('47'); RESET = AnsiCode('49')
 
 class Fore:
-    BLACK = AnsiCode('30');        RED = AnsiCode('31');         GREEN = AnsiCode('32')
-    YELLOW = AnsiCode('33');       BLUE = AnsiCode('34');        MAGENTA = AnsiCode('35')
-    CYAN = AnsiCode('36');         WHITE = AnsiCode('37');       RESET = AnsiCode('0')
-    LIGHTBLUE_EX = AnsiCode('94'); LIGHTCYAN_EX = AnsiCode('96')
+    BLACK = AnsiCode('30');        RED = AnsiCode('31');          GREEN = AnsiCode('32')
+    YELLOW = AnsiCode('33');       BLUE = AnsiCode('34');         MAGENTA = AnsiCode('35')
+    CYAN = AnsiCode('36');         WHITE = AnsiCode('37');        RESET = AnsiCode('0')
+    LIGHTBLUE_EX = AnsiCode('94'); LIGHTCYAN_EX = AnsiCode('96'); DIM = AnsiCode('2') 
     # Nexus Semantic Colors
 
     PRIMARY  = AnsiCode('38;2;0;108;255')   # Azul Nexus
@@ -147,60 +149,33 @@ class NexusUI:
 
     @staticmethod
     def apply_tags(text):
-        """
-        Traduz tags humanas para códigos ANSI.
-        Ex: "<BLUE>Texto" -> "\x1b[34mTexto"
-        """
-        # Mapeamento automático de Fore, Back e Style
         import re
-        
-        # Procura por padrões <NOME>
+        from .doxcolors import Fore, Style, Back
         tags = re.findall(r'<(.*?)>', text)
-        
         for tag in tags:
             tag_upper = tag.upper()
             replacement = ""
-            
-            # 1. Tenta buscar em Fore (Cores de fonte)
-            if hasattr(Fore, tag_upper):
-                replacement = getattr(Fore, tag_upper)
-            # 2. Tenta buscar em Style (Reset, Bold, etc)
-            elif hasattr(Style, tag_upper):
-                replacement = getattr(Style, tag_upper)
-            # 3. Tenta buscar em Back (Fundo)
-            elif hasattr(Back, tag_upper):
-                replacement = getattr(Back, tag_upper)
-            
-            # Se encontrou uma correspondência, substitui no texto
-            if replacement:
-                text = text.replace(f"<{tag}>", replacement)
-        
-        # Garante que <RESET> seja sempre o padrão caso o usuário esqueça
+            if hasattr(Fore, tag_upper): replacement = getattr(Fore, tag_upper)
+            elif hasattr(Style, tag_upper): replacement = getattr(Style, tag_upper)
+            elif hasattr(Back, tag_upper): replacement = getattr(Back, tag_upper)
+            if replacement: text = text.replace(f"<{tag}>", replacement)
         return text.replace("<RESET>", Style.RESET_ALL)
 
     @staticmethod
     def load_animation(file_path, separator="===FRAME==="):
-        """Carrega e TRADUZ as tags do arquivo automaticamente."""
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            
-            # Aplica a tradução de tags em todo o conteúdo do arquivo
             content = NexusUI.apply_tags(content)
-            
-            frames = [frame.strip('\n') for frame in content.split(separator) if frame.strip()]
-            return frames
-        except Exception as e:
-            print(f"Erro ao carregar animação: {e}")
-            return []
+            import re
+            raw_parts = re.split(re.escape(separator), content)
+            return [p.strip('\r\n') for p in raw_parts if p.strip()]
+        except: return []
 
     @staticmethod
-    def loader(file_path, interval=0.1):
-        """Retorna um objeto AsyncAnimation carregado de um arquivo."""
+    def loader(file_path, interval=0.1, debug=False, ping_pong=False, color=""):
         frames = NexusUI.load_animation(file_path)
-        return AsyncAnimation(frames, interval)
-
-
+        return AsyncAnimation(frames, interval, debug=debug, ping_pong=ping_pong, base_color=color)
 
 class Spinner:
     """Braille Loading Spinner."""
@@ -236,78 +211,138 @@ class ProgressBar:
         sys.stdout.flush()
 
 class AsyncAnimation:
-    def __init__(self, frames, interval=0.1):
-        self.frames = frames
+    def __init__(self, frames, interval=0.1, debug=False, ping_pong=False, base_color=""):
         self.interval = interval
-        self.running = False
-        self._thread = None
+        self.running = threading.Event()
         self.lock = threading.Lock()
-        self.current_height = 0 # Rastreia a altura real do frame atual
+        self.ping_pong = ping_pong
+        self.debug = debug
+        self.base_color = base_color
+        self.canvas_height = 0
+        self.atomic_frames = [] 
+        self._force_redraw = False
+
+        if frames:
+            term_width = shutil.get_terminal_size().columns
+            # 1. Geometria Fixa: Calcula altura real do canvas
+            self.canvas_height = max(len(f.split('\n')) for f in frames)
+            
+            for f in frames:
+                lines = f.split('\n')
+                # Normaliza todos os quadros para a mesma altura exata
+                while len(lines) < self.canvas_height:
+                    lines.append("")
+                
+                frame_buffer = ""
+                for i, line in enumerate(lines):
+                    clean_line = line.rstrip()
+                    # Blindagem de largura (margem maior para segurança)
+                    safe_line = clean_line[:term_width - 15]
+                    
+                    prefix = f"\x1b[90m{i+1:02} |\x1b[0m " if self.debug else ""
+                    
+                    # \r (Home) + Cor + Conteúdo + \x1b[K (Limpa rastro)
+                    frame_buffer += f"\r{prefix}{self.base_color}{safe_line}\x1b[0m\x1b[K"
+                    
+                    # Adiciona nova linha exceto na última do canvas (Proteção de Stacking)
+                    if i < self.canvas_height - 1:
+                        frame_buffer += "\n"
+                
+                self.atomic_frames.append(frame_buffer)
 
     def _animate(self):
-        sys.stdout.write("\x1b[?25l") # Esconde cursor
-        try:
-            while self.running:
-                for frame in self.frames:
-                    if not self.running: break
+        if hasattr(sys, '_doxoade_current_tracer'):
+            sys.settrace(sys._doxoade_current_tracer)
+
+        # Esconde o cursor
+        sys.stdout.write("\x1b[?25l")
+        sys.stdout.flush()
+        
+        idx = 0
+        step = 1
+        count = len(self.atomic_frames)
+        is_first_draw = True
+        
+        # Pre-calcula o comando de subida (Altura - 1)
+        # Usamos \x1b[A porque é o mais compatível universalmente
+        up_cmd = f"\x1b[{self.canvas_height - 1}A" if self.canvas_height > 1 else ""
+
+        while self.running.is_set():
+            frame_data = self.atomic_frames[idx]
+            t_start = time.perf_counter()
+            
+            try:
+                with self.lock:
+                    # REPOSICIONAMENTO NEXUS
+                    if not is_first_draw and not self._force_redraw:
+                        sys.stdout.write(up_cmd)
                     
-                    with self.lock:
-                        # 1. Limpa o que foi desenhado no frame anterior
-                        if self.current_height > 0:
-                            sys.stdout.write(f"\x1b[{self.current_height}A")
-                        
-                        # 2. Desenha o novo frame
-                        lines = frame.strip('\n').split('\n')
-                        for line in lines:
-                            sys.stdout.write("\r\x1b[2K" + line + "\n")
-                        
-                        self.current_height = len(lines)
-                        sys.stdout.flush()
+                    # Escrita Atômica
+                    sys.stdout.write(frame_data)
+                    sys.stdout.flush()
                     
-                    time.sleep(self.interval)
-        finally:
-            with self.lock:
-                # 3. FAXINA DE SAÍDA: Apaga a animação e deixa o cursor pronto para o próximo texto
-                if self.current_height > 0:
-                    sys.stdout.write(f"\x1b[{self.current_height}A")
-                    for _ in range(self.current_height):
-                        sys.stdout.write("\x1b[2K\x1b[B")
-                    sys.stdout.write(f"\x1b[{self.current_height}A")
-                
+                    is_first_draw = False
+                    self._force_redraw = False
+            except:
+                break
+            
+            # Lógica Ping-Pong
+            if self.ping_pong and count > 1:
+                idx += step
+                if idx >= count - 1 or idx <= 0: step *= -1
+            else:
+                idx = (idx + 1) % count
+            
+            # Velocidade Dinâmica (usa self.interval atualizado)
+            t_elapsed = time.perf_counter() - t_start
+            time.sleep(max(0, self.interval - t_elapsed))
+
+        self._cleanup_display()
+
+    def _cleanup_display(self):
+        """Faxina total via subida relativa."""
+        with self.lock:
+            try:
+                if self.canvas_height > 0:
+                    # Volta ao topo do canvas
+                    sys.stdout.write(f"\r\x1b[{self.canvas_height - 1}A")
+                    # Limpa todas as linhas
+                    for i in range(self.canvas_height):
+                        sys.stdout.write("\x1b[2K")
+                        if i < self.canvas_height - 1:
+                            sys.stdout.write("\n")
+                    # Deixa o cursor no topo limpo
+                    sys.stdout.write(f"\r\x1b[{self.canvas_height - 1}A")
                 sys.stdout.write("\x1b[?25h") # Mostra cursor
                 sys.stdout.flush()
-
-    def print(self, text):
-        """Imprime logs coloridos empurrando a animação para baixo."""
-        from .doxcolors import colors
-        formatted = colors.UI.apply_tags(text)
-        
-        with self.lock:
-            # 1. Se a animação está na tela, sobe e apaga ela temporariamente
-            if self.current_height > 0:
-                sys.stdout.write(f"\x1b[{self.current_height}A")
-                for _ in range(self.current_height):
-                    sys.stdout.write("\x1b[2K\x1b[B")
-                sys.stdout.write(f"\x1b[{self.current_height}A")
-            
-            # 2. Imprime o log de verdade
-            sys.stdout.write(f"\r{formatted}\n")
-            sys.stdout.flush()
-            
-            # 3. Reseta o height para 0 para que o loop de animação 
-            # saiba que deve redesenhar do ponto atual
-            self.current_height = 0
+            except: pass
 
     def start(self):
-        if not self.frames: return
-        self.running = True
-        self._thread = threading.Thread(target=self._animate, daemon=True)
+        if not self.atomic_frames: return
+        self.running.set()
+        # Thread não-daemon para permitir cleanup no join
+        self._thread = threading.Thread(target=self._animate)
         self._thread.start()
 
     def stop(self):
-        self.running = False
-        if self._thread:
-            self._thread.join(timeout=1.0)
+        if self.running.is_set():
+            self.running.clear()
+            if self._thread and self._thread.is_alive():
+                self._thread.join(timeout=1.0)
+
+    def print(self, text):
+        """Injeta log movendo a animação."""
+        from .doxcolors import NexusUI
+        formatted = NexusUI.apply_tags(text)
+        with self.lock:
+            if self.canvas_height > 0:
+                sys.stdout.write(f"\r\x1b[{self.canvas_height - 1}A")
+                for _ in range(self.canvas_height):
+                    sys.stdout.write("\x1b[2K\x1b[B")
+                sys.stdout.write(f"\r\x1b[{self.canvas_height}A")
+            sys.stdout.write(f"{formatted}\n")
+            sys.stdout.flush()
+            self._force_redraw = True
 
     def __enter__(self):
         self.start()
@@ -328,4 +363,5 @@ builtins.print = safe_print
 class DoxColors:
     Fore = Fore; Back = Back; Style = Style; UI = NexusUI
     rgb = staticmethod(rgb); hex = staticmethod(hex_to_ansi)
+    AsyncAnimation = AsyncAnimation
 colors = DoxColors

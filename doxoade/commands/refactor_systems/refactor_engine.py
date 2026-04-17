@@ -610,3 +610,49 @@ class RefactorEngine:
             return self._path_to_module(py_file)
             
         return None
+        
+    def secure_sqlite_migration(self):
+        """Troca 'import sqlite3' por 'import doxoade.tools.aegis.nexus_db as sqlite3'"""
+        all_files = list(iter_python_files(self.root))
+        for fpath in all_files:
+            content = fpath.read_text(encoding='utf-8')
+            if 'import sqlite3' in content or 'from sqlite3' in content:
+                # Substituição estratégica para manter compatibilidade de código
+                new_content = content.replace('import sqlite3', 'import doxoade.tools.aegis.nexus_db as sqlite3 # noqa')
+                fpath.write_text(new_content, encoding='utf-8')
+                yield fpath.name
+                
+    def migrate_to_nexus_db(self, dry_run=False):
+        """
+        Substitui o uso inseguro de sqlite3 pelo Nexus Safe DB.
+        """
+        all_files = list(self.root.rglob("*.py"))
+        modified = []
+        
+        for fpath in all_files:
+            if _is_path_ignored(fpath): continue
+            
+            content = fpath.read_text(encoding='utf-8')
+            new_content = content
+            
+            # 1. Troca import sqlite3
+            if "import sqlite3" in new_content and "nexus_db" not in new_content:
+                new_content = new_content.replace(
+                    "import sqlite3", 
+                    "import doxoade.tools.aegis.nexus_db as sqlite3  # noqa"
+                )
+            
+            # 2. Troca from doxoade.tools.aegis.nexus_db import ...  # noqa
+            if "from sqlite3 import" in new_content:
+                new_content = re.sub(
+                    r"from doxoade.tools.aegis.nexus_db import (.*)",   # noqa
+                    r"from doxoade.tools.aegis.nexus_db import \1  # noqa", 
+                    new_content
+                )
+
+            if new_content != content:
+                modified.append(fpath.name)
+                if not dry_run:
+                    fpath.write_text(new_content, encoding='utf-8')
+        
+        return modified

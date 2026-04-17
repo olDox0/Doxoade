@@ -150,7 +150,10 @@ def restricted_safe_exec(code_str: str, globals_dict: dict=None, allow_imports: 
             _AST_VALIDATION_CACHE[cache_key] = compiled
         import sys
         sys.path.insert(0, project_anchor)
-        exec(compiled, safe_globals)
+        
+        from doxoade.tools.aegis.aegis_core import nexus_exec
+        nexus_exec(compiled, safe_globals)
+#        exec(compiled, safe_globals)
     except Exception as e:
         if isinstance(e, FileNotFoundError):
             print('\x1b[33m   [!] Erro de Caminho: O script tentou acessar um arquivo que não existe.')

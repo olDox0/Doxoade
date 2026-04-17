@@ -4,7 +4,7 @@ MaxTelemetry v3.9 - Nexus Gold Edition.
 Compliance: MPoT-1, PASC-1. Deepcheck Score 100.
 """
 import click
-import sqlite3
+import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
 import json
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.database import get_db_connection

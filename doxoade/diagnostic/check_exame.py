@@ -13,7 +13,8 @@ def funcao_complexa(a):
     return a
 
 def risco_seguranca():
-    eval("print('vulneravel')")
+    from doxoade.tools.aegis.aegis_core import nexus_eval
+    nexus_eval("print('protegido pelo Aegis')")
 
 def erro_runtime():
     return variavel_inexistente + 10

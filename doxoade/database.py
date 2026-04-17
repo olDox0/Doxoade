@@ -4,7 +4,7 @@ Módulo de Persistência (Sapiens/Chronos) - v71.1.
 Gerencia o ciclo de vida do banco de dados e migrações de esquema.
 ESTRATÉGIA: Migration Dispatcher para conformidade MPoT-4/17.
 """
-import sqlite3
+import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
 from pathlib import Path
 import click
 DB_FILE = Path.home() / '.doxoade' / 'doxoade.db'

@@ -8,7 +8,7 @@ import sys
 import re
 import json
 import textwrap
-import sqlite3
+import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
 import click
 from pathlib import Path
 from datetime import datetime

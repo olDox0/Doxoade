@@ -410,7 +410,7 @@ def vulcan_telemetry_bridge(limit, project, since, stats, libs, verbose):
       doxoade vulcan module --path <projeto> --auto-main
     """
     from doxoade.database import get_db_connection
-    import sqlite3 as _sqlite3
+    import doxoade.tools.aegis.nexus_db as sqlite3  # noqa as _sqlite3
     conn = get_db_connection()
     conn.row_factory = _sqlite3.Row
     cursor = conn.cursor()

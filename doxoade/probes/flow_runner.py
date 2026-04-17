@@ -2,6 +2,7 @@
 import sys, os, time, argparse, warnings, linecache
 from doxoade.tools.doxcolors import Fore
 from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
+from .debug_probe import _LineTimer
 warnings.filterwarnings('ignore', category=RuntimeWarning)
 C_RESET = '\x1b[0m'
 C_CYAN, C_YELLOW, C_WHITE = ('\x1b[96m', '\x1b[93m', '\x1b[97m')
@@ -100,27 +101,28 @@ def _render_trace_event(frame, event):
         loc = f'{'  ' * _STATE['indent_level']}{os.path.basename(filename)}:{lineno}'.ljust(25)
         print(f'{C_BORDER}│{C_RESET} {ms:7.1f}ms {SEP} {C_WHITE}{loc}{SEP} {line[:50].ljust(50)} {SEP} {', '.join(diffs)}')
 
-def run_flow(script_path, base, val, imp, func, target_file=None, no_compress=False):
-    abs_p = os.path.abspath(script_path)
-    pkg_name, project_root = _bootstrap_package(abs_p)
-    _STATE.update({'project_root': project_root.replace('\\', '/'), 'target_file': os.path.abspath(target_file).replace('\\', '/') if target_file else None, 'flow_base': base, 'flow_val': val, 'flow_import': imp, 'flow_func': func, 'last_time': time.perf_counter(), 'no_compress': no_compress})
-    globs = {'__name__': '__main__', '__file__': abs_p, '__package__': pkg_name, '__path__': [os.path.dirname(abs_p)] if pkg_name else None}
-    print(f'{C_BORDER}{'─' * 115}{C_RESET}')
-    print(f'{C_CYAN}{C_BOLD} DOXOADE NEXUS FLOW v4.1 (Stability Fix){C_RESET} | {os.path.basename(abs_p)}')
-    print(f'{C_BORDER}┌{'─' * 11}┬{'─' * 25}┬{'─' * 50}┬{'─' * 25}┐{C_RESET}')
+def run_flow(path, **kwargs):
+    """Execução de rastro para ARQUIVOS externos (.py)."""
+    abs_path = os.path.abspath(path)
+    project_root = os.path.dirname(abs_path)
+    
+    # Prepara o ambiente de execução (Simula o script original)
+    with open(abs_path, 'r', encoding='utf-8') as f:
+        code = f.read()
+    
+    # Instancia o timer em modo normal (Noise Gate Ativo)
+    timer = _LineTimer(target_file=abs_path, project_root=project_root, internal_mode=False)
+    
+    # Injeta a sonda
+    sys.settrace(timer.tracer)
+    from doxoade.tools.aegis.aegis_core import nexus_exec
     try:
-        with open(abs_p, 'r', encoding='utf-8') as f:
-            content = f.read()
-        sys.settrace(static_trace_calls)
-        try:
-            restricted_safe_exec(content, globs, allow_imports=True, filename=abs_p)
-            _flush_iron_gate()
-        finally:
-            sys.settrace(None)
-    except Exception as e:
-        exc_type, exc_val, _ = sys.exc_info()
-        print(f'\n{Fore.RED}[CRASH FLOW] {(exc_type.__name__ if exc_type else 'Error')}: {exc_val}{C_RESET}')
-        raise e
+        # Executa o código no escopo global
+        globs = {'__file__': abs_path, '__name__': '__main__'}
+        nexus_exec(code, globs)
+    finally:
+        sys.settrace(None)
+        _render_flow_results(timer)
 
 def _bootstrap_package(script_path):
     abs_path = os.path.abspath(script_path)
@@ -157,3 +159,40 @@ if __name__ == '__main__':
     args, remaining = p.parse_known_args()
     sys.argv = [os.path.abspath(args.script)] + remaining
     run_flow(args.script, args.base, args.val, args.imp, args.func, args.target, no_compress=args.no_compress)
+
+def run_flow_internal(callback):
+    import sys, os
+    from .debug_probe import _LineTimer
+    
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    
+    timer = _LineTimer(
+        target_file="internal_cmd", 
+        project_root=project_root, 
+        internal_mode=True, 
+        live_flow=True # Habilita o Matrix Style
+    )
+    
+    # PONTE PARA A THREAD DA ANIMAÇÃO
+    sys._doxoade_current_tracer = timer.tracer
+    
+    sys.settrace(timer.tracer)
+    try:
+        callback()
+    finally:
+        sys.settrace(None)
+        if hasattr(sys, '_doxoade_current_tracer'):
+            del sys._doxoade_current_tracer
+
+def _render_flow_results(timer):
+    from doxoade.tools.doxcolors import Fore, Style
+    # Agora o método top_lines existe!
+    stats = timer.top_lines(limit=15)
+    
+    print(f"\n{Fore.MAGENTA}{Style.BRIGHT}🌊 NEXUS FLOW: Tabela de Performance (Top 15){Style.RESET_ALL}")
+    print(f"{Fore.WHITE}{'MS TOTAL':>10} | {'LOCALIZAÇÃO':<30} | {'CONTEÚDO'}{Style.RESET_ALL}")
+    
+    for s in stats:
+        file_short = os.path.basename(s['file'])
+        t_color = Fore.RED if s['total_ms'] > 50 else Fore.CYAN
+        print(f"{t_color}{s['total_ms']:>8.2f}ms {Fore.WHITE}│ {Fore.YELLOW}{file_short}:{s['line']:<25} {Fore.WHITE}│ {s['content'][:60]}{Style.RESET_ALL}")

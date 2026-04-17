@@ -5,7 +5,7 @@ Consolida métricas de erros e tendências utilizando dados do banco Sapiens.
 Versão compatível com auditoria de segurança Bandit e MPoT.
 """
 import click
-import sqlite3
+import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
 from collections import Counter
 from rich.console import Console
 from rich.table import Table

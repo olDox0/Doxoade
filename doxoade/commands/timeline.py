@@ -1,6 +1,6 @@
 # doxoade/doxoade/commands/timeline.py
 import click
-import sqlite3
+import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.database import get_db_connection
 

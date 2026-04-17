@@ -4,7 +4,7 @@ Módulo de Gestão de Risco Operacional (v4.4 - Gold Fortress).
 Calcula estabilidade baseada no PASC e na integridade sintática absoluta.
 """
 import click
-import sqlite3
+import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
 import os
 from typing import Dict, Any, List
 from doxoade.tools.doxcolors import Fore, Style
