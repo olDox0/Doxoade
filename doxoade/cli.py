@@ -40,6 +40,7 @@ class DoxoadeLazyGroup(click.Group):
         'canonize': 'doxoade.commands.canonize:canonize', 
         'check': 'doxoade.commands.check:check', 
         'clean': 'doxoade.commands.clean:clean', 
+        'compress': 'doxoade.commands.compress_systems.compress_cmd:compress_cmd',
         'config': 'doxoade.commands.config:config_group', 
         'create-pipeline': 'doxoade.commands.utils:create_pipeline', 
         'dashboard': 'doxoade.commands.dashboard:dashboard', 
@@ -66,6 +67,7 @@ class DoxoadeLazyGroup(click.Group):
         'install': 'doxoade.commands.install:install', 
         'intelligence': 'doxoade.commands.intelligence:intelligence', 
         'kvcheck': 'doxoade.commands.kvcheck:kvcheck', 
+        'linux': 'doxoade.commands.linux_systems.linux_cmd:linux_group',
         'log': 'doxoade.commands.utils:log', 
         'maestro': 'doxoade.commands.maestro:maestro', 
         'merge': 'doxoade.commands.git_merge:merge', 
@@ -94,13 +96,15 @@ class DoxoadeLazyGroup(click.Group):
         'style': 'doxoade.commands.style:style', 
         'sync': 'doxoade.commands.git_workflow:sync', 
         'telemetry': 'doxoade.commands.telemetry:telemetry', 
+        'terminal': 'doxoade.commands.shell_systems.shell_cmd:terminal', 
         'termux-config': 'doxoade.commands.termux_command:termux_config', 'test': 'doxoade.commands.test:test', 
         'timeline': 'doxoade.commands.timeline:timeline', 
         'venvkeeper': 'doxoade.commands.venvkeeper_systems.venvkeeper:venvkeeper', 
-        'venv-up': 'doxoade.commands.venv_up:venv_up', 
+        'venv': 'doxoade.commands.venv_cmd:venv_cmd',#        'venv-up': 'doxoade.commands.venv_up:venv_up', 
         'verilog': 'doxoade.commands.verilog:verilog', 
         'vulcan': 'doxoade.commands.vulcan_cmd:vulcan_group', 
-        'webcheck': 'doxoade.commands.webcheck:webcheck'
+        'webcheck': 'doxoade.commands.webcheck:webcheck',
+        'wsl': 'doxoade.commands.shell_systems.shell_cmd:wsl_shell',
         }
 
     def list_commands(self, ctx):
@@ -113,14 +117,18 @@ class DoxoadeLazyGroup(click.Group):
         try:
             mod = import_module(module_path)
             return getattr(mod, attr_name)
-        except Exception as e:
-            import sys as exc_sys
-            from traceback import print_tb as exc_trace
-            _, exc_obj, exc_tb = exc_sys.exc_info()
-            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            line_number = exc_tb.tb_lineno
-            print(f'\x1b[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {chr(10).join([''] + str(exc_obj).split(chr(39)))}\n')
-            exc_trace(exc_tb)
+        except (ImportError, ModuleNotFoundError) as e:
+            missing_module = str(e).split("'")[-2] if "'" in str(e) else str(e)
+            
+            # --- CRÍTICO: Filtro Anti-Poluição ---
+            # Se o erro for em um módulo interno ou se o auto-reparo não for desejado
+            if missing_module.startswith('doxoade') or ".commands." in module_path:
+                self._print_fatal_import(name, e)
+                return None
+
+            # Auto-reparo apenas para bibliotecas externas conhecidas
+            click.secho(f"[*] Dependência externa '{missing_module}' ausente. Tentar auto-reparo? [y/N]", fg='yellow')
+            # Aqui você poderia colocar um input(), mas por segurança vamos apenas logar o erro
             self._print_fatal_import(name, e)
             return None
 
@@ -184,7 +192,21 @@ def process_result(result, **kwargs):
             exc_trace(exc_tb)
 
 def main():
-    """Wrapper blindado com Injeção Vulcan (Hefesto)."""
+    """Wrapper blindado com:
+    Injeção Vulcan e Auto-VENV."""
+    # === usa o venv ===
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    venv_libs = os.path.join(project_root, 'venv', 'Lib', 'site-packages')
+    if os.path.exists(venv_libs):
+        sys.path.insert(0, venv_libs)
+    # === auto venv ===
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    venv_site_packages = os.path.join(base_dir, 'venv', 'Lib', 'site-packages')
+    if os.path.exists(venv_site_packages):
+        if venv_site_packages not in sys.path:
+            sys.path.insert(0, venv_site_packages)
+    # === vulcan execution inject ===
     project_root = os.getcwd()
     vulcan_bin = os.path.join(project_root, '.doxoade', 'vulcan', 'bin')
     if os.path.exists(vulcan_bin) and vulcan_bin not in sys.path:

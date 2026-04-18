@@ -53,12 +53,18 @@ class Fore:
     LIGHTBLUE_EX = AnsiCode('94'); LIGHTCYAN_EX = AnsiCode('96'); DIM = AnsiCode('2') 
     # Nexus Semantic Colors
 
-    PRIMARY  = AnsiCode('38;2;0;108;255')   # Azul Nexus
-    SUCCESS  = AnsiCode('38;2;38;188;95')   # Verde Estável
-    ERROR    = AnsiCode('38;2;255;103;0')   # Laranja Erro
-    WARNING  = AnsiCode('38;2;232;170;0')   # Amarelo Alerta
-    STABLE   = AnsiCode('38;2;176;176;176') # Cinza (Código antigo/estável)
-    VOLATILE = AnsiCode('38;2;255;0;255')   # Magenta (Código sendo alterado)
+    ORANGE      = AnsiCode('38;2;255;100;0')   # ORANGE
+    LIGHTYELLOW = AnsiCode('38;2;255;255;100')   # LIGHTYELLOW
+    GREY        = AnsiCode('38;2;100;100;100')   # LIGHTYELLOW
+
+    PRIMARY     = AnsiCode('38;2;0;108;255')   # Azul Nexus
+    SUCCESS     = AnsiCode('38;2;38;188;95')   # Verde Estável
+    ERROR       = AnsiCode('38;2;255;103;0')   # Laranja Erro
+    WARNING     = AnsiCode('38;2;232;170;0')   # Amarelo Alerta
+    STABLE      = AnsiCode('38;2;176;176;176') # Cinza (Código antigo/estável)
+    VOLATILE    = AnsiCode('38;2;255;0;255')   # Magenta (Código sendo alterado)
+    
+    XYZ          = AnsiCode('38;2;255;155;0')   # ORANGE
 
 class Style:
     DIM = AnsiCode('2'); NORMAL = AnsiCode('22'); BRIGHT = AnsiCode('1')

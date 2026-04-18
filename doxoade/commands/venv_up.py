@@ -1,7 +1,7 @@
 # doxoade/doxoade/commands/venv_up.py
 import os
 import click
-from ..tools.vulcan.bridge import vulcan_bridge
+from doxoade.tools.vulcan.bridge import vulcan_bridge
 from doxoade.tools.filesystem import _get_venv_python_executable
 
 @click.command('venv-up')
