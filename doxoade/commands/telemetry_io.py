@@ -12,7 +12,7 @@ from doxoade.tools.doxcolors import Fore, Style
 def draw_bar(value, max_val, width=10, color=Fore.GREEN):
     percent = min(1.0, value / max_val) if max_val > 0 else 0
     fill = int(width * percent)
-    return f'{color}{'█' * fill}{Style.DIM}{'░' * (width - fill)}{Style.RESET_ALL}'
+    return f"{color}{'█' * fill}{Style.DIM}{'░' * (width - fill)}{Style.RESET_ALL}"
 
 def render_resource_line(label, val, formatted_val, bar_color, max_ref, status):
     bar = draw_bar(val, max_ref, 10, bar_color)
@@ -24,7 +24,7 @@ def render_disk_detail(read_mb, write_mb, status):
     bar = draw_bar(total, 50, 10, Fore.BLUE)
     r_str = f'{Fore.CYAN}R:{format_bytes(read_mb)}{Fore.RESET}'
     w_str = f'{Fore.YELLOW}W:{format_bytes(write_mb)}{Fore.RESET}'
-    echo(f'   {Style.BRIGHT}{'DISK I/O':<10}{Style.NORMAL} {bar} {r_str} / {w_str} │ {status}')
+    echo(f"   {Style.BRIGHT}{'DISK I/O':<10}{Style.NORMAL} {bar} {r_str} / {w_str} │ {status}")
 
 def _lib_short(fname: str) -> str:
     norm = fname.replace('\\', '/')
@@ -193,7 +193,7 @@ def _render_predecessor_block(fname: str, lineno: int, hits: int, layer: str, in
         for i, text in next_lines:
             colored = _colorize_line(text)
             echo(f'{indent}{Style.DIM}│  {i:4} │{Style.RESET_ALL} {colored}')
-    echo(f'{indent}{Style.DIM}└{'─' * 48}{Style.RESET_ALL}')
+    echo(f"{indent}{Style.DIM}└{'─' * 48}{Style.RESET_ALL}")
 
 def render_flow_map(flow_data: dict, io_read_mb: float=0.0, io_write_mb: float=0.0):
     from .telemetry_utils import bottleneck_score, format_bytes
@@ -209,20 +209,20 @@ def render_flow_map(flow_data: dict, io_read_mb: float=0.0, io_write_mb: float=0
             bar = draw_bar(stat['hits'], total_hits, 10, Fore.GREEN)
             short = _proj_short(fname)
             score = bottleneck_score(stat)
-            echo(f'   {Style.DIM}│{Style.RESET_ALL}  {Fore.GREEN}{short:<20}{Style.RESET_ALL} {bar} {stat['hits']:>5} hits  {Style.DIM}score:{score:.0f}{Style.RESET_ALL}')
+            echo(f"   {Style.DIM}│{Style.RESET_ALL}  {Fore.GREEN}{short:<20}{Style.RESET_ALL} {bar} {stat['hits']:>5} hits  {Style.DIM}score:{score:.0f}{Style.RESET_ALL}")
         echo(f'   {Style.DIM}└{SEP}┘{Style.RESET_ALL}')
     if proj and libs:
         io_label = ''
         if io_read_mb > 0 or io_write_mb > 0:
             io_label = f'  {Style.DIM}(I/O  {Fore.CYAN}R:{format_bytes(io_read_mb)}{Style.RESET_ALL}{Style.DIM} / {Fore.YELLOW}W:{format_bytes(io_write_mb)}{Style.RESET_ALL}{Style.DIM}){Style.RESET_ALL}'
-        echo(f'   {'':>24}{Fore.YELLOW}▼ chama{Style.RESET_ALL}{io_label}')
+        echo(f"   {'':>24}{Fore.YELLOW}▼ chama{Style.RESET_ALL}{io_label}")
     if libs:
         echo(f'   {Style.DIM}┌─ LIBS {SEP[:BOX_W - 7]}┐{Style.RESET_ALL}')
         for fname, stat in sorted(libs.items(), key=lambda x: x[1]['hits'], reverse=True)[:5]:
             bar = draw_bar(stat['hits'], total_hits, 10, Fore.BLUE)
             short = _lib_short(fname)
             score = bottleneck_score(stat)
-            echo(f'   {Style.DIM}│{Style.RESET_ALL}  {Fore.BLUE}{short:<20}{Style.RESET_ALL} {bar} {stat['hits']:>5} hits  {Style.DIM}score:{score:.0f}{Style.RESET_ALL}')
+            echo(f"   {Style.DIM}│{Style.RESET_ALL}  {Fore.BLUE}{short:<20}{Style.RESET_ALL} {bar} {stat['hits']:>5} hits  {Style.DIM}score:{score:.0f}{Style.RESET_ALL}")
         echo(f'   {Style.DIM}└{SEP}┘{Style.RESET_ALL}')
     proj_hits = flow_data.get('proj_hits', 0)
     lib_hits = flow_data.get('lib_hits', 0)
@@ -254,17 +254,17 @@ def render_critical_chain(chain: list, context_before: int=3, context_after: int
             current_layer = layer
             layer_label = 'PROJ' if layer == 'proj' else 'LIB'
             layer_color = Fore.GREEN if layer == 'proj' else Fore.BLUE
-            echo(f'\n   {layer_color}{Style.BRIGHT}[{layer_label}]{Style.RESET_ALL}{Style.DIM} {'─' * 40}{Style.RESET_ALL}')
+            echo(f"\n   {layer_color}{Style.BRIGHT}[{layer_label}]{Style.RESET_ALL}{Style.DIM} {'─' * 40}{Style.RESET_ALL}")
         _render_predecessor_block(fname, lineno, hits, layer, indent='     ', context_before=context_before, context_after=context_after)
         echo('')
 
 def render_stats_table(stats):
-    header = f'{'COMANDO':<15} | {'QTD':<5} | {'T-AVG(ms)':<10} | {'RAM(MB)':<8} | {'I/O R':<8} | {'I/O W':<8}'
+    header = f"{'COMANDO':<15} | {'QTD':<5} | {'T-AVG(ms)':<10} | {'RAM(MB)':<8} | {'I/O R':<8} | {"I/O W":<8}"
     echo(Fore.CYAN + Style.BRIGHT + '\n=== 📈 DASHBOARD DE PERFORMANCE INDUSTRIAL ===')
     echo(header + '\n' + '-' * len(header))
     for cmd, data in sorted(stats.items(), key=lambda x: sum(x[1]['dur']) / len(x[1]['dur']), reverse=True):
         avg = lambda x: sum(x) / len(x) if x else 0
-        echo(f'{Fore.WHITE}{cmd:<15}{Style.RESET_ALL} | {len(data['dur']):<5} | {avg(data['dur']):<10.0f} | {avg(data['ram']):<8.1f} | {avg(data['io_r']):<8.2f} | {avg(data['io_w']):<8.2f}')
+        echo(f"{Fore.WHITE}{cmd:<15}{Style.RESET_ALL} | {len(data['dur']):<5} | {avg(data['dur']):<10.0f} | {avg(data['ram']):<8.1f} | {avg(data['io_r']):<8.2f} | {avg(data['io_w']):<8.2f}")
 
 def render_vulcan_stats(stats, verbose=False):
     if not stats:

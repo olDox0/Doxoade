@@ -27,10 +27,10 @@ def think(query, context):
         duration = (time.perf_counter() - start) * 1000
         click.echo(Fore.GREEN + f'\n[CONCLUSÃO] ({duration:.1f}ms)')
         click.echo(Fore.YELLOW + '🔎 Foco de Atenção:')
-        click.echo(f'   {', '.join(result['focus'])}')
+        click.echo(f"   {', '.join(result['focus'])}")
         click.echo(Fore.MAGENTA + '🕸️  Associações (Memória Parietal):')
         if result['associations']:
-            click.echo(f'   {', '.join(result['associations'])}')
+            click.echo(f"   {', '.join(result['associations'])}")
         else:
             click.echo('   (Nenhuma associação prévia forte encontrada)')
         click.echo(Fore.CYAN + '📋 Estratégia Executiva (Plano):')

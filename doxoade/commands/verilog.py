@@ -120,7 +120,7 @@ def verilog(ctx, path, entrypoint, no_libs):
                                 files_with_errors += 1
                                 has_printed_header = True
                             severity_color = Fore.RED if f['severity'] in ['CRITICAL', 'ERROR'] else Fore.YELLOW
-                            click.echo(severity_color + f'[{f['severity']}][{f['category']}] {f['message']}')
+                            click.echo(severity_color + f"[{f['severity']}][{f['category']}] {f['message']}")
                             click.echo(Fore.WHITE + f"   > Em '{f['file']}:{f['line']}'")
                             snippet = _get_code_snippet(f['file'], f['line'])
                             if snippet:

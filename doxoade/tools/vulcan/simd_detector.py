@@ -162,7 +162,7 @@ class SIMDCapabilities:
 
     def __str__(self) -> str:
         active = [k for k, v in self.to_dict()['flags'].items() if v]
-        return f'SIMDCapabilities(arch={self.arch}, best={self.best}, active=[{', '.join(active)}])'
+        return f"SIMDCapabilities(arch={self.arch}, best={self.best}, active=[{', '.join(active)}])"
 
 def _detect_cpuinfo() -> SIMDCapabilities | None:
     """Usa py-cpuinfo se disponível."""

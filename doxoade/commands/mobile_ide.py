@@ -205,7 +205,7 @@ class MobileIDE:
         try:
             result = subprocess.run([sys.executable, str(file_path)], cwd=file_path.parent, capture_output=False, text=True)
             console.print('=' * 60)
-            console.print(f'\n[{('green' if result.returncode == 0 else 'red')}]Código de saída: {result.returncode}[/]')
+            console.print(f"\n[{('green' if result.returncode == 0 else 'red')}]Código de saída: {result.returncode}[/]")
         except Exception as e:
             console.print(f'[red]❌ Erro: {e}[/red]')
         input('\nPressione Enter para continuar...')

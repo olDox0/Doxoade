@@ -16,16 +16,32 @@ def timeline(limit, full):
     events = cursor.fetchall()
     click.echo(Fore.CYAN + Style.BRIGHT + f'--- Timeline do Doxoade (Últimos {limit}) ---')
     for evt in reversed(events):
-        status_color = Fore.GREEN if evt['exit_code'] == 0 else Fore.RED
-        status_icon = '✔' if evt['exit_code'] == 0 else '✘'
-        click.echo(f'\n{Style.DIM}{evt['timestamp']} {status_color}{status_icon} {Style.BRIGHT}{evt['full_command_line']}')
-        click.echo(f'{Style.DIM}   Dir: {evt['working_dir']} | Tempo: {evt['duration_ms']}ms')
+        # Normalização: converte tupla para dicionário se necessário
+        if isinstance(evt, tuple):
+            # Baseado na ordem padrão do seu log de eventos:
+            # 0: timestamp, 1: full_command, 2: working_dir, 3: duration, 4: exit_code
+            d = {
+                'timestamp': evt[0],
+                'full_command_line': evt[1],
+                'working_dir': evt[2],
+                'duration_ms': evt[3],
+                'exit_code': evt[4]
+            }
+        else:
+            d = evt
+
+        exit_code = d.get('exit_code', 0)
+        status_color = Fore.GREEN if exit_code == 0 else Fore.RED
+        status_icon = '✔' if exit_code == 0 else '✘'
+        
+        click.echo(f"\n{Style.DIM}{d['timestamp']} {status_color}{status_icon} {Style.BRIGHT}{d['full_command_line']}")
+        click.echo(f"{Style.DIM}   Dir: {d['working_dir']} | Tempo: {d['duration_ms']}ms")
         cursor.execute('SELECT * FROM file_audit WHERE command_id = ?', (evt['id'],))
         changes = cursor.fetchall()
         if changes:
             for change in changes:
                 op_color = Fore.YELLOW if change['operation_type'] == 'MODIFY' else Fore.GREEN
-                click.echo(f'   {op_color}[{change['operation_type']}] {change['file_path']}')
+                click.echo(f"   {op_color}[{change['operation_type']}] {change['file_path']}")
                 if full and change['diff_content']:
                     diff_view = '\n'.join(['      ' + l for l in change['diff_content'].splitlines()])
                     click.echo(Fore.WHITE + Style.DIM + diff_view)

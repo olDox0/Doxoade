@@ -70,7 +70,7 @@ class DeepAnalyzer(ast.NodeVisitor):
             import sys as exc_sys
             from traceback import print_tb as exc_trace
             _, exc_obj, exc_tb = exc_sys.exc_info()
-            print(f'\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n')
+            print(f"\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n")
             exc_trace(exc_tb)
         self.generic_visit(node)
 
@@ -95,11 +95,11 @@ class DeepAnalyzer(ast.NodeVisitor):
 def _render_variable_analysis(visitor):
     """Renderiza a tabela de variáveis com a nova estética Chief-Gold."""
     echo(f'\n   {Fore.BLUE}[ INSPEÇÃO DE VARIÁVEIS E MEMÓRIA ST ]{Style.RESET_ALL}')
-    echo(f'      {Style.RESET_ALL}{'NOME':<27} │ {'TIPO':<10} │ {'ENDEREÇO':<12} │ {'ESCOPO':<8} │ {'PROPÓSITO'}{Style.RESET_ALL}')
-    echo(f'      {Style.RESET_ALL}{'─' * 28}┼{'─' * 12}┼{'─' * 14}┼{'─' * 10}┼{'─' * 15}{Style.RESET_ALL}')
+    echo(f"      {Style.RESET_ALL}{'NOME':<27} │ {'TIPO':<10} │ {'ENDEREÇO':<12} │ {'ESCOPO':<8} │ {'PROPÓSITO'}{Style.RESET_ALL}")
+    echo(f"      {Style.RESET_ALL}{'─' * 28}┼{'─' * 12}┼{'─' * 14}┼{'─' * 10}┼{'─' * 15}{Style.RESET_ALL}")
     for n, m in sorted(visitor.vars_meta.items()):
         p_str = ' '.join([globals().get(f'P_{p}', p) for p in m['purpose']])
-        echo(f'      {Fore.WHITE}{n:<27} {Style.RESET_ALL}│{Style.NORMAL} {Fore.GREEN}{m['type']:<10} {Style.RESET_ALL}│{Style.NORMAL} {Fore.YELLOW}{m['addr']:<12} {Style.RESET_ALL}│{Style.NORMAL} {Fore.CYAN}{m['scope']:<8} {Style.RESET_ALL}│{Style.NORMAL} {p_str}')
+        echo(f"      {Fore.WHITE}{n:<27} {Style.RESET_ALL}│{Style.NORMAL} {Fore.GREEN}{m['type']:<10} {Style.RESET_ALL}│{Style.NORMAL} {Fore.YELLOW}{m['addr']:<12} {Style.RESET_ALL}│{Style.NORMAL} {Fore.CYAN}{m['scope']:<8} {Style.RESET_ALL}│{Style.NORMAL} {p_str}")
 
 def calculate_architectural_score(visitor, cc):
     score, penalties = (100, [])
@@ -142,11 +142,11 @@ def _render_deep_report(visitor, name, cc, as_json=False, show_vars=False, show_
     echo(f'   Complexidade Ciclomática : {cc} {Style.RESET_ALL}(Limite: 12){Style.RESET_ALL}')
     if show_vars:
         echo(f'\n   {Fore.BLUE}[ INSPEÇÃO DE VARIÁVEIS E MEMÓRIA ST ]{Style.RESET_ALL}')
-        echo(f'      {Style.RESET_ALL}{'NOME':<27} │ {'TIPO':<10} │ {'ENDEREÇO':<12} │ {'ESCOPO':<8} │ {'PROPÓSITO'}{Style.RESET_ALL}')
-        echo(f'      {Style.RESET_ALL}{Style.RESET_ALL}{'─' * 28}┼{'─' * 12}┼{'─' * 14}┼{'─' * 10}┼{'─' * 15}{Style.RESET_ALL}')
+        echo(f"      {Style.RESET_ALL}{'NOME':<27} │ {'TIPO':<10} │ {'ENDEREÇO':<12} │ {'ESCOPO':<8} │ {'PROPÓSITO'}{Style.RESET_ALL}")
+        echo(f"      {Style.RESET_ALL}{Style.RESET_ALL}{'─' * 28}┼{'─' * 12}┼{'─' * 14}┼{'─' * 10}┼{'─' * 15}{Style.RESET_ALL}")
         for n, m in sorted(visitor.vars_meta.items()):
             p_str = ' '.join([globals().get(f'P_{p}', p) for p in m['purpose']])
-            echo(f'      {Fore.WHITE}{n:<27} {Style.RESET_ALL}{Style.RESET_ALL}{Style.RESET_ALL}│{Style.NORMAL} {Fore.GREEN}{m['type']:<10} {Style.RESET_ALL}│{Style.NORMAL} {Fore.YELLOW}{m['addr']:<12} {Style.RESET_ALL}│{Style.NORMAL} {Fore.CYAN}{m['scope']:<8} {Style.RESET_ALL}│{Style.NORMAL} {p_str:>2}')
+            echo(f"      {Fore.WHITE}{n:<27} {Style.RESET_ALL}{Style.RESET_ALL}{Style.RESET_ALL}│{Style.NORMAL} {Fore.GREEN}{m['type']:<10} {Style.RESET_ALL}│{Style.NORMAL} {Fore.YELLOW}{m['addr']:<12} {Style.RESET_ALL}│{Style.NORMAL} {Fore.CYAN}{m['scope']:<8} {Style.RESET_ALL}│{Style.NORMAL} {p_str:>2}")
     if show_flow:
         echo(f'\n   {Fore.BLUE}[ RASTREIO DE TRANSFORMAÇÕES SEQUENCIAIS ]{Style.RESET_ALL}')
         for orig, action, dest in visitor.flow_map:

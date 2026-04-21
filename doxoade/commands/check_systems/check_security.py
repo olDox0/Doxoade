@@ -31,7 +31,7 @@ def _audit_sast_integration(state: CheckState):
             results = _run_bandit_engine(batch, set())
             for res in results:
                 if _is_security_relevant(res, state.root):
-                    state.register_finding({'severity': res['severity'], 'category': 'SECURITY', 'message': f'[{res['tool']}] {res['message']}', 'file': res['file'], 'line': res['line'], 'details': f'Fragmento: {res.get('code', 'N/A')}'})
+                    state.register_finding({'severity': res['severity'], 'category': 'SECURITY', 'message': f"[{res['tool']}] {res['message']}", 'file': res['file'], 'line': res['line'], 'details': f"Fragmento: {res.get('code', 'N/A')}"})
 
 def _audit_sca_integration(state: CheckState):
     """Especialista em processamento Safety."""

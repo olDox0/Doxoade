@@ -1,30 +1,9 @@
 # doxoade/doxoade/commands/refactor_systems/refactor_command.py
-"""
-─────────────────────────────────────────────────────────────
-  MODO ORQUESTRADO  (pipeline automático)
-─────────────────────────────────────────────────────────────
-  Análise:
-    doxoade refactor <FONTE> -t <FUNC1> [-t <FUNC2> ...]
-    Executa: path → refs
-
-  Move + revisão completa:
-    doxoade refactor <FONTE> <DESTINO> -t <FUNC>
-    Executa: path → refs → move → verify → fix
-
-─────────────────────────────────────────────────────────────
-  SUBCOMANDOS GRANULARES  (uso avançado)
-─────────────────────────────────────────────────────────────
-    doxoade refactor path   <arquivo_ou_pasta> -t <func>
-    doxoade refactor refs   <projeto_ou_pasta> -t <func>
-    doxoade refactor move   <origem.py> <destino.py> -t <func> --root .
-    doxoade refactor verify <projeto_ou_pasta> -t <func> --from modulo.novo
-    doxoade refactor verify <projeto_ou_pasta> -t <func> --from modulo.novo --fix
-    doxoade refactor rename <modulo_antigo> <modulo_novo> --root . --apply
-"""
 from __future__ import annotations
 from pathlib import Path
 import click
 from .refactor_engine import RefactorEngine
+from .refactor_utils import iter_python_files
 
 def _find_project_root(path: Path) -> Path:
     """Sobe a árvore até encontrar um marcador de projeto."""
@@ -76,7 +55,7 @@ def _run_analyze(source: Path, targets: list[str]) -> None:
     source = source.resolve()
     _sep()
     click.secho(f' ANALYZE  {source}', fg='cyan', bold=True)
-    click.secho(f' funções: {', '.join(targets)}', fg='cyan')
+    click.secho(f" funções: {', '.join(targets)}", fg='cyan')
     _sep()
     click.secho('\n[1/2] Localizando definições…', fg='blue', bold=True)
     path_result = search_targets(source, targets)
@@ -249,7 +228,7 @@ def refactor_path(target_path: Path, targets: tuple[str, ...]) -> None:
     from .refactor_analysis import search_targets
     result = search_targets(target_path, list(targets))
     click.echo(f'[PATH] alvo: {result.root}')
-    click.echo(f'[PATH] funções: {', '.join(result.targets)}')
+    click.echo(f"[PATH] funções: {', '.join(result.targets)}")
     for name in result.targets:
         hits = result.hits.get(name, [])
         if not hits:
@@ -285,7 +264,7 @@ def refactor_refs(target_path: Path, targets: tuple[str, ...]) -> None:
     from .refactor_analysis import search_references
     result = search_references(target_path, list(targets))
     click.echo(f'[REFS] alvo: {result.root}')
-    click.echo(f'[REFS] funções: {', '.join(result.targets)}')
+    click.echo(f"[REFS] funções: {', '.join(result.targets)}")
     for name in result.targets:
         refs = result.refs.get(name, [])
         if not refs:
@@ -506,3 +485,298 @@ def refactor_audit(file_path: Path):
                 
     except Exception as e:
         click.secho(f"Erro ao analisar: {e}", fg="red")
+
+@refactor_group.command('syntax-fix')
+@click.argument('path', type=click.Path(exists=True, path_type=Path), default=Path('.'))
+@click.option('--dry-run', is_flag=True, help='Simula sem gravar arquivos.')
+@click.option('--verbose', '-v', is_flag=True, help='Exibe cada mudança linha a linha.')
+@click.option('--skip', 'extra_skip', multiple=True, metavar='PASTA',
+              help='Pasta adicional a ignorar (repetível). Ex: --skip mypkg_tests')
+@click.option('--include-tests', is_flag=True,
+              help='Inclui pastas de teste (tests/, fixtures/, etc.) na varredura.')
+def refactor_syntax_fix(
+    path: Path,
+    dry_run: bool,
+    verbose: bool,
+    extra_skip: tuple[str, ...],
+    include_tests: bool,
+) -> None:
+    """Repara erros de sintaxe em f-strings causados pelo refactor AST.
+
+    \\x08
+    Por padrão ignora: tests/, regression_tests/, fixtures/, venv/, etc.
+    Use --include-tests para incluí-las (útil para validar fixtures).
+
+    \\x08
+    Estratégias aplicadas (em ordem):
+      1. Desfaz escapes chr(10) introduzidos pelo fix anterior
+      2. f\\' → f\\"  (single para double)
+      3. f\\" → f\\' (double para single)
+      4. f\\' → f\\'\\'\\'... (eleva para triple quotes)
+
+    \\x08
+    Exemplos:
+      doxoade refactor syntax-fix .
+      doxoade refactor syntax-fix . --dry-run --verbose
+      doxoade refactor syntax-fix . --skip mypkg_tests --skip proto
+      doxoade refactor syntax-fix . --include-tests
+    """
+    from .refactor_syntax import (
+        _default_skip, classify_issue, repair_all, repair_file, scan_syntax_errors,
+    )
+
+    _sep("SYNTAX FIX", color="cyan")
+    target = Path(path).resolve()
+    click.secho(f" Alvo:    {target}", fg='cyan')
+    click.secho(f" Modo:    {'DRY-RUN' if dry_run else 'APPLY'}", fg='yellow' if dry_run else 'green')
+
+    # Monta o conjunto de exclusão
+    if include_tests:
+        exclude = frozenset(extra_skip) if extra_skip else frozenset()
+        click.secho(" Filtro:  incluindo pastas de teste", fg='yellow')
+    else:
+        base = _default_skip()
+        exclude = base | frozenset(s.strip() for s in extra_skip)
+        click.secho(
+            f" Filtro:  {len(exclude)} pasta(s) ignorada(s)"
+            f"{'  [use --include-tests para incluir tests/]' if not include_tests else ''}",
+            fg='cyan',
+        )
+
+    # --- Modo arquivo único ---
+    if target.is_file():
+        result = repair_file(target, dry_run=dry_run)
+        if result.strategy == 'already_valid':
+            click.secho("\\n[OK] Arquivo sem erros de sintaxe.", fg='green')
+            return
+        if result.fixed:
+            prefix = "[DRY]" if dry_run else "[FIXED]"
+            click.secho(f"\\n{prefix} {target.name}  estratégia: {result.strategy}", fg='yellow' if dry_run else 'green')
+            if (verbose or dry_run) and result.changes:
+                for ln, old, new in result.changes:
+                    click.secho(f"  L{ln}: - {old.strip()}", fg='red')
+                    click.secho(f"  L{ln}: + {new.strip()}", fg='green')
+        else:
+            err = result.remaining_error or result.original_error
+            click.secho("\\n[MANUAL] Não foi possível reparar automaticamente.", fg='red', bold=True)
+            if err:
+                click.secho(f"  L{err.line}: {err.message}", fg='red')
+                if err.text:
+                    click.echo(f"  > {err.text.strip()}")
+        return
+
+    # --- Modo diretório ---
+    click.echo("\\nEscaneando erros de sintaxe...")
+    broken = list(scan_syntax_errors(target, exclude_dirs=exclude))
+
+    if not broken:
+        click.secho("\\n[OK] Nenhum erro de sintaxe encontrado.", fg='green', bold=True)
+        _sep()
+        return
+
+    by_category: dict[str, int] = {}
+    for issue in broken:
+        cat = classify_issue(issue)
+        by_category[cat] = by_category.get(cat, 0) + 1
+
+    click.secho(f"\\n[SCAN] {len(broken)} arquivo(s) com erro:", fg='yellow', bold=True)
+    for cat, count in sorted(by_category.items(), key=lambda x: -x[1]):
+        click.echo(f"  {cat:20s}  {count}")
+
+    click.echo("\\nAplicando reparos...")
+    results = repair_all(target, dry_run=dry_run, exclude_dirs=exclude)
+
+    fixed_count = sum(1 for r in results if r.fixed and r.strategy != 'already_valid')
+    manual = [
+        (r.file, r.remaining_error or r.original_error)
+        for r in results if not r.fixed
+    ]
+
+    for result in results:
+        if result.fixed and result.strategy != 'already_valid':
+            prefix = "[DRY]" if dry_run else "[FIXED]"
+            click.secho(f"  {prefix} {result.file.name}  ({result.strategy})", fg='yellow' if dry_run else 'green')
+            if verbose and result.changes:
+                for ln, old, new in result.changes:
+                    click.secho(f"      L{ln}: - {old.strip()}", fg='red')
+                    click.secho(f"      L{ln}: + {new.strip()}", fg='green')
+
+    _sep()
+    click.secho(
+        f" DONE  {fixed_count} reparado(s) / {len(manual)} revisão manual",
+        fg='cyan', bold=True,
+    )
+
+    if manual:
+        click.secho("\\n[MANUAL] Arquivos que precisam de revisão:", fg='red', bold=True)
+        for fpath, err in manual:
+            msg = err.message if err else 'erro desconhecido'
+            line = err.line if err else 0
+            click.secho(f"  {fpath.name}:{line}  {msg}", fg='red')
+            if err and err.text:
+                click.echo(f"    > {err.text.strip()}")
+    _sep()
+
+
+@refactor_group.command('verify-cli')
+@click.argument('path', type=click.Path(exists=True, path_type=Path), default=Path('.'))
+def refactor_verify_cli(path: Path):
+    """Análise de Integridade Pós-Refactor (Smoke Test)."""
+    _sep("NEXUS INTEGRITY CHECK")
+    import importlib.util
+    import sys
+    
+    # IMPORTANTE: Resolvemos a raiz real do projeto para o filtro funcionar
+    project_root = Path(_find_project_root(path)).resolve()
+    
+    # Filtramos os arquivos ANTES de começar a barra de progresso
+    click.echo(f"🔍 Mapeando arquivos em: {project_root.name}...")
+    files = [f for f in iter_python_files(project_root)]
+    
+    broken = 0
+    passed = 0
+    
+    if not files:
+        click.secho("[!] Nenhum arquivo Python encontrado para análise.", fg="yellow")
+        return
+
+    click.echo(f"\n{click.style('🚀 Verificando importabilidade...', fg='magenta')}\n")
+
+    with click.progressbar(files, label="Nexus Progress") as bar:
+        for fpath in bar:
+            # Ignora arquivos de teste do refactor para não entrar em loop
+            if "refactor_systems" in str(fpath):
+                continue
+                
+            module_name = fpath.stem
+            try:
+                # O spec_from_file_location é o teste definitivo de sintaxe
+                spec = importlib.util.spec_from_file_location(module_name, fpath)
+                if spec is None or spec.loader is None:
+                    continue 
+
+                module = importlib.util.module_from_spec(spec)
+                # O segredo aqui: não precisamos dar exec_module em tudo, 
+                # basta o compile do loader para detectar SyntaxError sem rodar o código
+                with open(fpath, 'rb') as f:
+                    source = f.read()
+                compile(source, fpath, 'exec')
+                
+                passed += 1
+            except SyntaxError as e:
+                click.secho(f"\n[ERRO SINTAXE] {fpath.relative_to(project_root)}", fg="red", bold=True)
+                click.echo(f"  L{e.lineno}: {e.text.strip() if e.text else 'Erro de citação/f-string'}")
+                broken += 1
+            except Exception:
+                continue
+
+@refactor_group.command('syntax-scan')
+@click.argument('path', type=click.Path(exists=True, path_type=Path), default=Path('.'))
+@click.option('--category', '-c', 'filter_cat', default=None,
+              help='Filtra por categoria: fstring, unclosed_block, indentation, other.')
+@click.option('--skip', 'extra_skip', multiple=True, metavar='PASTA',
+              help='Pasta adicional a ignorar (repetível).')
+@click.option('--include-tests', is_flag=True,
+              help='Inclui pastas de teste na varredura.')
+@click.option('--json', 'as_json', is_flag=True,
+              help='Saída em JSON para integração com outras ferramentas.')
+def refactor_syntax_scan(
+    path: Path,
+    filter_cat: str | None,
+    extra_skip: tuple[str, ...],
+    include_tests: bool,
+    as_json: bool,
+) -> None:
+    """Escaneia o projeto e lista TODOS os erros de sintaxe. Não altera nada.
+
+    \\x08
+    Por padrão ignora: tests/, regression_tests/, fixtures/, venv/, __pycache__/, etc.
+    Use --include-tests para incluir as pastas de teste na varredura.
+
+    \\x08
+    Categorias detectadas:
+      fstring        — f-strings com aspas conflitantes
+      unclosed_block — blocos não fechados (parênteses, colchetes)
+      indentation    — erros de indentação
+      other          — demais erros de sintaxe
+
+    \\x08
+    Exemplos:
+      doxoade refactor syntax-scan .
+      doxoade refactor syntax-scan . --include-tests
+      doxoade refactor syntax-scan . -c fstring
+      doxoade refactor syntax-scan . --json > broken.json
+    """
+    import json as _json
+    from .refactor_syntax import _default_skip, classify_issue, scan_syntax_errors
+
+    target = Path(path).resolve()
+
+    if include_tests:
+        exclude = frozenset(extra_skip) if extra_skip else frozenset()
+    else:
+        base = _default_skip()
+        exclude = base | frozenset(s.strip() for s in extra_skip)
+
+    issues = list(scan_syntax_errors(target, exclude_dirs=exclude))
+
+    if filter_cat:
+        issues = [i for i in issues if classify_issue(i) == filter_cat]
+
+    if as_json:
+        data = [
+            {
+                'file': str(i.file),
+                'line': i.line,
+                'col': i.col,
+                'category': classify_issue(i),
+                'message': i.message,
+                'text': i.text,
+            }
+            for i in issues
+        ]
+        click.echo(_json.dumps(data, indent=2, ensure_ascii=False))
+        return
+
+    if not issues:
+        note = '' if include_tests else '  (tests/ excluído — use --include-tests para incluir)'
+        click.secho(f"[OK] Nenhum erro de sintaxe encontrado.{note}", fg='green', bold=True)
+        return
+
+    _sep(f"SYNTAX SCAN — {len(issues)} erro(s)")
+    if not include_tests:
+        click.secho("  [filtro ativo: tests/ e fixtures/ excluídos]", fg='cyan', dim=True)
+
+    by_cat: dict[str, list] = {}
+    for issue in issues:
+        cat = classify_issue(issue)
+        by_cat.setdefault(cat, []).append(issue)
+
+    for cat, cat_issues in sorted(by_cat.items(), key=lambda x: -len(x[1])):
+        click.secho(f"\\n[{cat.upper()}] {len(cat_issues)} arquivo(s):", fg='yellow', bold=True)
+        for issue in cat_issues:
+            try:
+                rel = issue.file.relative_to(target)
+            except ValueError:
+                rel = issue.file
+            click.secho(f"  {rel}:{issue.line}", fg='red', nl=False)
+            click.echo(f"  {issue.message}")
+            if issue.text:
+                click.echo(f"    > {issue.text.strip()}")
+
+    _sep()
+    click.secho(
+        f" Total: {len(issues)} erro(s) em {len({i.file for i in issues})} arquivo(s).",
+        fg='cyan', bold=True,
+    )
+    _sep()
+
+def _parse_skip(skip_tuple: tuple[str, ...]) -> frozenset[str]:
+    """Converte a tupla de --skip em frozenset para passar ao módulo."""
+    from .refactor_syntax import _default_skip
+    if not skip_tuple:
+        return _default_skip()
+    # O usuário pode usar --skip tests --skip regression_tests OU --no-default-skip
+    base = _default_skip()
+    extra = frozenset(s.strip() for s in skip_tuple if s.strip())
+    return base | extra

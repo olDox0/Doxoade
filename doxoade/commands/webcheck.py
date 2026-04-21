@@ -58,7 +58,7 @@ def webcheck(ctx, path, ignore, format):
         except Exception as e:
             from traceback import print_tb as exc_trace
             _, exc_obj, exc_tb = sys.exc_info()
-            print(f'\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n')
+            print(f"\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n")
             exc_trace(exc_tb)
             logger.add_finding('CRITICAL', 'Falha inesperada no webcheck.', details=str(e))
             sys.exit(1)
@@ -91,7 +91,7 @@ def _analyze_html_file(file_path: str):
     except Exception as e:
         from traceback import print_tb as exc_trace
         _, exc_obj, exc_tb = sys.exc_info()
-        print(f'\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n')
+        print(f"\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n")
         exc_trace(exc_tb)
         return [{'type': 'error', 'message': f'Erro de leitura HTML: {e}', 'file': file_path}]
 
@@ -103,7 +103,7 @@ def _analyze_css_file(file_path: str):
     except Exception as e:
         from traceback import print_tb as exc_trace
         _, exc_obj, exc_tb = sys.exc_info()
-        print(f'\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n')
+        print(f"\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n")
         exc_trace(exc_tb)
         return [{'type': 'error', 'message': f'Erro de leitura CSS: {e}', 'file': file_path}]
 
@@ -116,13 +116,13 @@ def _analyze_js_file(file_path: str):
     except esprima.Error as e:
         from traceback import print_tb as exc_trace
         _, exc_obj, exc_tb = sys.exc_info()
-        print(f'\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n')
+        print(f"\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n")
         exc_trace(exc_tb)
         return [{'type': 'error', 'message': f'Sintaxe JS Inválida: {e.message}', 'file': file_path, 'line': e.lineNumber}]
     except Exception as e:
         from traceback import print_tb as exc_trace
         _, exc_obj, exc_tb = sys.exc_info()
-        print(f'\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n')
+        print(f"\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n")
         exc_trace(exc_tb)
         return [{'type': 'warning', 'message': f'Falha no parser JS: {str(e)}', 'file': file_path}]
 
@@ -164,7 +164,7 @@ def _analyze_py_web_content(file_path: str):
     except Exception as e:
         from traceback import print_tb as exc_trace
         _, exc_obj, exc_tb = sys.exc_info()
-        print(f'\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n')
+        print(f"\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n")
         exc_trace(exc_tb)
         logging.debug(f'Falha ao analisar AST web em {file_path}: {e}')
     return findings
@@ -182,7 +182,7 @@ def _validate_html_content(content: str, file_path: str, line_offset: int=0):
     except Exception as e:
         from traceback import print_tb as exc_trace
         _, exc_obj, exc_tb = sys.exc_info()
-        print(f'\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n')
+        print(f"\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n")
         exc_trace(exc_tb)
         findings.append({'type': 'error', 'message': f'HTML Inválido: {e}', 'file': file_path, 'line': line_offset})
     return findings
@@ -216,7 +216,7 @@ def _validate_css_content(content: str, file_path: str, line_offset: int=0, is_f
     except Exception as e:
         from traceback import print_tb as exc_trace
         _, exc_obj, exc_tb = sys.exc_info()
-        print(f'\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n')
+        print(f"\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n")
         exc_trace(exc_tb)
         findings.append({'type': 'error', 'message': f'Sintaxe CSS Fatal: {str(e)}', 'file': file_path, 'line': line_offset})
     finally:

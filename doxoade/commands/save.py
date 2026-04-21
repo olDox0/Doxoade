@@ -81,7 +81,7 @@ def _learn_solutions_from_commit(new_commit_hash: str, project_path: str):
         for f in findings:
             if _process_finding_for_learning(cursor, f, modified_files, new_commit_hash, project_path):
                 learned_count += 1
-                console.print(f'   [green]> Solução aprendida:[/green] {f['message'][:50]}...')
+                console.print(f"   [green]> Solução aprendida:[/green] {f['message'][:50]}...")
                 _abstract_and_learn_template(cursor, {'message': f['message'], 'category': f['category']})
         conn.commit()
         if learned_count > 0:
@@ -143,7 +143,7 @@ def save(ctx, message, archives, remove_commit, branch_target, merge_target, upd
             success, data = archivist.list_commit_assets(archives)
             if success:
                 for item in sorted(data, key=lambda x: x['size'], reverse=True):
-                    click.echo(f'  {item['size']:>7.1f} KB │ {item['path']}')
+                    click.echo(f"  {item['size']:>7.1f} KB │ {item['path']}")
             return
     with ExecutionLogger('save', project_path, ctx.params):
         current_branch = (_run_git_command(['branch', '--show-current'], capture_output=True) or '').strip()
@@ -192,7 +192,7 @@ def save(ctx, message, archives, remove_commit, branch_target, merge_target, upd
                 if maat_findings:
                     console.print("\n[bold yellow]⚖  ACHADOS DE MA'AT:[/bold yellow]")
                     for mf in maat_findings:
-                        console.print(f'   [red]✘[/red] {mf['message']} ({os.path.basename(mf['file'])})')
+                        console.print(f"   [red]✘[/red] {mf['message']} ({os.path.basename(mf['file'])})")
                 sys.exit(1)
         if not _run_git_command(['commit', '-m', message]):
             click.echo(Fore.RED + "[ERRO] Falha ao executar 'git commit'.")

@@ -32,7 +32,7 @@ def _log(project_root: str, msg: str):
     logs = base / 'logs'
     logs.mkdir(parents=True, exist_ok=True)
     with open(logs / 'auto_repair.log', 'a', encoding='utf-8') as f:
-        f.write(f'{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n')
+        f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n")
 
 def _promote(proj_root: str, pyd_path: Path):
     bin_dir = _bin_dir(proj_root)
@@ -138,11 +138,11 @@ def auto_repair_module(project_root: str, module_name: str, module_src_dir: str=
                 step['probe'] = probe_res
                 res = probe_and_promote(project_root, module_name, Path(str(chosen)), python_exe=python_exe, timeout=12)
                 if res.get('ok'):
-                    _log(project_root, f'auto_repair: promoted {res.get('path')}')
+                    _log(project_root, f"auto_repair: promoted {res.get('path')}")
                     report['final'] = {'status': 'ok', 'chosen': Path(res.get('path')).name, 'probe': res.get('probe')}
                     return report
                 else:
-                    _log(project_root, f'auto_repair: artifact quarantined reason={res.get('probe')}')
+                    _log(project_root, f"auto_repair: artifact quarantined reason={res.get('probe')}")
             except Exception as e:
                 print(f'\x1b[31m ■ Erro: {e}')
                 step['exception'] = str(e)

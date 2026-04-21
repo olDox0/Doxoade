@@ -38,6 +38,6 @@ def load_snapshot(file_path: str) -> dict:
 def render_lineage_summary(visitor):
     echo(f'\n   {Fore.BLUE}[ LINHAGEM DE DADOS: RESUMO EXECUTIVO ]{Style.RESET_ALL}')
     inputs = [f'{Fore.MAGENTA}{p}{Fore.RESET}' for p in visitor.params.keys()]
-    echo(f'      {Fore.WHITE}FONTES (Inputs)  : {(', '.join(inputs) if inputs else 'Nenhuma')}')
-    outputs = [f'{Fore.GREEN}{r['value']}{Fore.RESET}' for r in visitor.returns]
-    echo(f'      {Fore.WHITE}DESTINO (Output) : {(', '.join(outputs) if outputs else 'Void')}')
+    echo(f"      {Fore.WHITE}FONTES (Inputs)  : {(', '.join(inputs) if inputs else 'Nenhuma')}")
+    outputs = [f"{Fore.GREEN}{r['value']}{Fore.RESET}" for r in visitor.returns]
+    echo(f"      {Fore.WHITE}DESTINO (Output) : {(', '.join(outputs) if outputs else 'Void')}")

@@ -331,7 +331,7 @@ def render_report(report: ModuleAllocReport, verbose: bool=False) -> None:
     CYAN, GREEN, YELLOW, RED, DIM, RESET = ('\x1b[36m', '\x1b[32m', '\x1b[33m', '\x1b[31m', '\x1b[2m', '\x1b[0m')
     BOLD = '\x1b[1m'
     print(f'\n{CYAN}{BOLD}  ⬡ OBJECT ALLOCATION REPORT — {report.path.name}{RESET}')
-    print(f'  {'─' * 55}')
+    print(f"  {'─' * 55}")
     if not report.hot_functions:
         print(f'  {GREEN}✔ Nenhuma alocação crítica detectada.{RESET}\n')
         return

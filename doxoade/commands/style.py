@@ -55,7 +55,7 @@ def _render_findings(findings: list, logger: ExecutionLogger):
     for f in findings:
         logger.add_finding(severity=f['severity'], category=f['category'], message=f['message'], file=f['file'], line=f['line'], snippet=_get_code_snippet(f['file'], f['line']))
         rel_file = os.path.relpath(f['file'], os.getcwd())
-        table.add_row(f'{rel_file}:{f['line']}', f['category'], f['message'])
+        table.add_row(f"{rel_file}:{f['line']}", f['category'], f['message'])
     console.print(table)
     console.print(f'\n[bold cyan]Resumo:[/bold cyan] [bold yellow]{len(findings)}[/bold yellow] aviso(s).')
 

@@ -58,14 +58,14 @@ def _print_finding_details(finding):
     color_map = {'CRITICAL': Fore.MAGENTA, 'ERROR': Fore.RED, 'WARNING': Fore.YELLOW, 'INFO': Fore.CYAN}
     color = color_map.get(severity, Fore.WHITE)
     tag = f'[{severity}][{category}]'
-    click.echo(color + f'{tag} {finding.get('message', 'Mensagem não encontrada.')}')
+    click.echo(color + f"{tag} {finding.get('message', 'Mensagem não encontrada.')}")
     if finding.get('file'):
         location = f"   > Em '{finding.get('file')}'"
         if finding.get('line'):
-            location += f' (linha {finding.get('line')})'
+            location += f" (linha {finding.get('line')})"
         click.echo(location)
     if finding.get('details'):
-        click.echo(Fore.CYAN + f'   > {finding.get('details')}')
+        click.echo(Fore.CYAN + f"   > {finding.get('details')}")
     snippet = finding.get('snippet')
     error_line = finding.get('line')
     if snippet and isinstance(snippet, dict):
@@ -76,16 +76,16 @@ def _print_finding_details(finding):
             click.echo(line_color + f'{prefix}{line_num:4}: {code_line}')
     if finding.get('import_suggestion'):
         click.echo(Fore.CYAN + Style.BRIGHT + '\n   > [ABDUÇÃO]')
-        click.echo(Fore.GREEN + f'   {ICON_LIGHTBULB} SUGESTÃO:\n   > {finding.get('import_suggestion')}')
+        click.echo(Fore.GREEN + f"   {ICON_LIGHTBULB} SUGESTÃO:\n   > {finding.get('import_suggestion')}")
         return
     if finding.get('suggestion_content') or finding.get('suggestion_action'):
         source = finding.get('suggestion_source', 'GÊNESE')
         click.echo(Fore.CYAN + Style.BRIGHT + f'\n   {ICON_LIGHTBULB} SOLUÇÃO CONHECIDA:')
         click.echo(Fore.GREEN + f'   > Fonte: {source}')
         if finding.get('suggestion_action'):
-            click.echo(Fore.YELLOW + f'   {ICON_WRENCH}  AÇÃO: {finding.get('suggestion_action')}')
+            click.echo(Fore.YELLOW + f"   {ICON_WRENCH}  AÇÃO: {finding.get('suggestion_action')}")
         if finding.get('suggestion_content'):
-            click.echo(Fore.GREEN + f'   > Sugestão: {finding['suggestion_content'].strip()}')
+            click.echo(Fore.GREEN + f"   > Sugestão: {finding['suggestion_content'].strip()}")
         if snippet and finding.get('suggestion_line') and finding.get('suggestion_content'):
             suggestion_line = finding.get('suggestion_line')
             suggestion_snippet = _get_code_snippet_from_string(finding['suggestion_content'], suggestion_line, context_lines=2)
@@ -104,7 +104,7 @@ def _print_summary(results, ignored_count):
     category_counts = Counter((f['category'] for f in display_findings))
     if category_counts:
         click.echo(Fore.CYAN + '📊 Distribuição e Filtros:')
-        click.echo(Fore.WHITE + f'{'CATEGORIA':<20} | {'QTD':<5} | {'AÇÃO SUGERIDA'}')
+        click.echo(Fore.WHITE + f"{'CATEGORIA':<20} | {'QTD':<5} | {'AÇÃO SUGERIDA'}")
         click.echo(Fore.WHITE + '-' * 60)
         CRITICAL_CATS = {'SECURITY', 'CRITICAL', 'SYNTAX', 'RISK-MUTABLE'}
         for category, count in sorted(category_counts.items(), key=lambda x: x[1], reverse=True):
@@ -153,5 +153,5 @@ def _print_maat_summary(findings, score):
     from doxoade.tools.doxcolors import Fore, Style, Back
     print('\n' + Back.WHITE + Fore.BLACK + f" ⚖  SENTENÇA DE MA'AT: {score}/100 " + Style.RESET_ALL)
     for f in findings:
-        prefix = f'{Fore.RED}[REGRESSÃO]{Fore.RESET}' if f['severity'] == 'CRITICAL' else f'{Fore.YELLOW}[ALERTA]{Fore.RESET}'
-        print(f'  {prefix} {f['category']}: {f['message']}')
+        prefix = f"{Fore.RED}[REGRESSÃO]{Fore.RESET}" if f['severity'] == 'CRITICAL' else f"{Fore.YELLOW}[ALERTA]{Fore.RESET}"
+        print(f"  {prefix} {f['category']}: {f['message']}")

@@ -201,15 +201,15 @@ class RegressionRegistry:
         RST = '\x1b[0m'
         r = self.report()
         print(f'\n{B}{C}  ⬡ VULCAN — REGRESSION REGISTRY{RST}')
-        print(f'  Arquivo : {DIM}{r['registry_path']}{RST}')
-        print(f'  Total   : {r['total']} entrada(s)   {R}Excluídas: {r['excluded']}{RST}   {Y}Retry-Agressivo: {r['retry_aggressive']}{RST}')
+        print(f"  Arquivo : {DIM}{r['registry_path']}{RST}")
+        print(f"  Total   : {r['total']} entrada(s)   {R}Excluídas: {r['excluded']}{RST}   {Y}Retry-Agressivo: {r['retry_aggressive']}{RST}")
         if not r['entries']:
             print(f'\n  {G}✔ Nenhuma regressão registrada.{RST}\n')
             return
-        print(f'\n  {'FUNÇÃO':<38} {'SPEEDUP':>8}  {'STATUS':<20} {'TENTATIVAS':>10}  ARQUIVO')
-        print(f'  {'─' * 38} {'─' * 8}  {'─' * 20} {'─' * 10}  {'─' * 30}')
+        print(f"\n  {'FUNÇÃO':<38} {'SPEEDUP':>8}  {'STATUS':<20} {'TENTATIVAS':>10}  ARQUIVO")
+        print(f"  {'─' * 38} {'─' * 8}  {'─' * 20} {'─' * 10}  {'─' * 30}")
         for e in r['entries']:
             color = R if e['status'] == STATUS_EXCLUDED else Y
             fname = Path(e['file_path']).name[:30]
-            print(f'  {e['func_name']:<38} {color}{e['speedup']:>7.2f}x{RST}  {color}{e['status']:<20}{RST} {e['attempts']:>10}  {DIM}{fname}{RST}')
+            print(f"  {e['func_name']:<38} {color}{e['speedup']:>7.2f}x{RST}  {color}{e['status']:<20}{RST} {e['attempts']:>10}  {DIM}{fname}{RST}")
         print()

@@ -74,18 +74,18 @@ def _render_trace_event(frame, event):
         if event == 'call':
             _flush_iron_gate()
             func = frame.f_code.co_name
-            print(f'{C_BORDER}│{C_RESET} {'  ' * _STATE['indent_level']}{C_MAGENTA}➔ CALL: {C_BOLD}{func}{C_RESET}')
+            print(f"{C_BORDER}│{C_RESET} {'  ' * _STATE['indent_level']}{C_MAGENTA}➔ CALL: {C_BOLD}{func}{C_RESET}")
             _STATE['indent_level'] += 1
             return
         elif event == 'return':
             _flush_iron_gate()
             _STATE['indent_level'] = max(0, _STATE['indent_level'] - 1)
-            print(f'{C_BORDER}│{C_RESET} {'  ' * _STATE['indent_level']}{C_GREEN}⇠ RETN: {C_BOLD}{frame.f_code.co_name}{C_RESET}')
+            print(f"{C_BORDER}│{C_RESET} {'  ' * _STATE['indent_level']}{C_GREEN}⇠ RETN: {C_BOLD}{frame.f_code.co_name}{C_RESET}")
             return
     if event != 'line':
         return
     if _STATE['flow_import'] and ('import ' in line or 'from ' in line):
-        print(f'{C_BORDER}│{C_RESET} {' ' * 7}ms {SEP} {C_YELLOW}[ MÓDULO ] {C_WHITE}{os.path.basename(filename)}:{lineno}{SEP} {line}')
+        print(f"{C_BORDER}│{C_RESET} {' ' * 7}ms {SEP} {C_YELLOW}[ MÓDULO ] {C_WHITE}{os.path.basename(filename)}:{lineno}{SEP} {line}")
     if _STATE['flow_base'] or _STATE['flow_val']:
         now = time.perf_counter()
         ms = (now - _STATE['last_time']) * 1000
@@ -98,8 +98,8 @@ def _render_trace_event(frame, event):
                 if _STATE['last_locals'].get(k) != v:
                     diffs.append(f'{C_CYAN}{k}{C_DIM}={C_YELLOW}{_safe_to_string(v)}{C_RESET}')
             _STATE['last_locals'] = frame.f_locals.copy()
-        loc = f'{'  ' * _STATE['indent_level']}{os.path.basename(filename)}:{lineno}'.ljust(25)
-        print(f'{C_BORDER}│{C_RESET} {ms:7.1f}ms {SEP} {C_WHITE}{loc}{SEP} {line[:50].ljust(50)} {SEP} {', '.join(diffs)}')
+        loc = f"{'  ' * _STATE['indent_level']}{os.path.basename(filename)}:{lineno}".ljust(25)
+        print(f"{C_BORDER}│{C_RESET} {ms:7.1f}ms {SEP} {C_WHITE}{loc}{SEP} {line[:50].ljust(50)} {SEP} {', '.join(diffs)}")
 
 def run_flow(path, **kwargs):
     """Execução de rastro para ARQUIVOS externos (.py)."""

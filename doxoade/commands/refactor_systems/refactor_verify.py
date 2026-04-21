@@ -169,7 +169,7 @@ def fix_imports(file_path: Path, target: str, expected_module: str):
                 mod = node.module or ''
                 level = getattr(node, 'level', 0)
                 prefix = '.' * level
-                new_stmt = f'{indent}from {prefix}{mod} import {', '.join(alias_strs)}'
+                new_stmt = f"{indent}from {prefix}{mod} import {', '.join(alias_strs)}"
                 lines[start:end] = [new_stmt]
         elif isinstance(node, ast.Import):
             new_aliases = [alias for alias in node.names if alias.name != target]
@@ -178,7 +178,7 @@ def fix_imports(file_path: Path, target: str, expected_module: str):
             else:
                 indent = lines[start][:len(lines[start]) - len(lines[start].lstrip())]
                 alias_strs = [a.name + (f' as {a.asname}' if getattr(a, 'asname', None) else '') for a in new_aliases]
-                new_stmt = f'{indent}import {', '.join(alias_strs)}'
+                new_stmt = f"{indent}import {', '.join(alias_strs)}"
                 lines[start:end] = [new_stmt]
     if needs_import:
         text_without_target = '\n'.join(lines)

@@ -14,12 +14,12 @@ def render_search_results(state: 'SearchState'):
         for m in state.matches:
             is_py = m['type'] == '.py'
             color = Fore.BLUE if is_py else Fore.MAGENTA
-            echo(f'{color} [{m['type'].upper()}] {m['file']}:{m['line']}{Style.RESET_ALL}')
+            echo(f"{color} [{m['type'].upper()}] {m['file']}:{m['line']}{Style.RESET_ALL}")
             if state.is_full_mode and is_py:
                 block = extract_function_block(os.path.join(state.root, m['file']), m['line'])
                 if block:
                     for line in block.splitlines():
-                        is_target = f':{m['line']}:' in f':{(line.split(':')[0] if ':' in line else '')}:'
+                        is_target = f":{m['line']}:" in f":{(line.split(':')[0] if ':' in line else '')}:"
                         s_color = Fore.WHITE + Style.BRIGHT if is_target else Style.DIM
                         echo(f'    {s_color}{line}{Style.RESET_ALL}')
                     echo('')
@@ -34,13 +34,13 @@ def render_search_results(state: 'SearchState'):
     if state.db_results['incidents']:
         echo(f'{Fore.RED}{Style.BRIGHT}\n╔═══ Incidentes Ativos ═══╗{Style.RESET_ALL}')
         for inc in state.db_results['incidents']:
-            echo(f'{Fore.YELLOW}[{inc['category']}] {Fore.WHITE}{inc['message']}{Style.RESET_ALL}')
-            echo(f'  Em: {inc['file']}:{inc['line']}')
+            echo(f"{Fore.YELLOW}[{inc['category']}] {Fore.WHITE}{inc['message']}{Style.RESET_ALL}")
+            echo(f"  Em: {inc['file']}:{inc['line']}")
     if state.timeline:
         echo(f'{Fore.MAGENTA}{Style.BRIGHT}\n╔═══ Timeline (Chronos) ═══╗{Style.RESET_ALL}')
         for t in state.timeline:
             status = f'{Fore.GREEN}✔' if t['exit_code'] == 0 else f'{Fore.RED}✘'
-            echo(f' {status} {Fore.WHITE}{t['timestamp'][:19]} | {Fore.CYAN}{t['full_line']}{Style.RESET_ALL}')
+            echo(f" {status} {Fore.WHITE}{t['timestamp'][:19]} | {Fore.CYAN}{t['full_line']}{Style.RESET_ALL}")
     has_results = any([state.matches, state.timeline, state.db_results['incidents'], state.db_results['solutions'], state.git_results])
     if not has_results:
         echo(f"\n{Fore.YELLOW}   [!] Nenhum resultado encontrado para '{state.query}' nos filtros ativos.{Style.RESET_ALL}")
@@ -144,5 +144,5 @@ def extract_block_from_git(commit_hash: str, file_path: str, start_line: int) ->
         _, exc_obj, exc_tb = exc_sys.exc_info()
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         line_number = exc_tb.tb_lineno
-        print(f'\x1b[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n')
+        print(f"\x1b[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n")
         exc_trace(exc_tb)

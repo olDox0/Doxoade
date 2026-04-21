@@ -19,7 +19,12 @@ if sys.stdout.encoding != 'utf-8':
         _, exc_obj, exc_tb = exc_sys.exc_info()
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         line_number = exc_tb.tb_lineno
-        print(f'\x1b[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {chr(10).join([''] + str(exc_obj).split(chr(39)))}\n')
+        
+        # Lógica simplificada para evitar erro de aspas no f-string
+        exc_val = str(exc_obj).replace("'", "")
+        print(f"\x1b[31m ■ Archive: {fname} - line: {line_number}")
+        print(f" ■ Exception type: {type(e).__name__}")
+        print(f" ■ Exception value: {exc_val}\x1b[0m")
         exc_trace(exc_tb)
 
 class DoxoadeLazyGroup(click.Group):
@@ -67,6 +72,7 @@ class DoxoadeLazyGroup(click.Group):
         'install': 'doxoade.commands.install:install', 
         'intelligence': 'doxoade.commands.intelligence:intelligence', 
         'kvcheck': 'doxoade.commands.kvcheck:kvcheck', 
+        'lab': 'doxoade.commands.lab:lab_group',
         'linux': 'doxoade.commands.linux_systems.linux_cmd:linux_group',
         'log': 'doxoade.commands.utils:log', 
         'maestro': 'doxoade.commands.maestro:maestro', 
@@ -75,6 +81,7 @@ class DoxoadeLazyGroup(click.Group):
         'mirror': 'doxoade.commands.mirror:mirror', 
         'mk': 'doxoade.commands.utils:mk', 
         'moddify': 'doxoade.commands.moddify:moddify', 
+        'panel':  'doxoade.commands.panel_command:panel_command',
         'pedia': 'doxoade.commands.pedia:pedia', 
         'purge-history': 'doxoade.commands.purge_history:purge_history', 
         'pr': 'doxoade.commands.git_pr:pr', 
@@ -156,7 +163,12 @@ def cli(ctx, guard):
         _, exc_obj, exc_tb = exc_sys.exc_info()
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         line_number = exc_tb.tb_lineno
-        print(f'\x1b[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {chr(10).join([''] + str(exc_obj).split(chr(39)))}\n')
+        
+        # Lógica simplificada para evitar erro de aspas no f-string
+        exc_val = str(exc_obj).replace("'", "")
+        print(f"\x1b[31m ■ Archive: {fname} - line: {line_number}")
+        print(f" ■ Exception type: {type(e).__name__}")
+        print(f" ■ Exception value: {exc_val}\x1b[0m")
         exc_trace(exc_tb)
         sys.exit(1)
     if ctx.invoked_subcommand:
@@ -188,7 +200,12 @@ def process_result(result, **kwargs):
             _, exc_obj, exc_tb = exc_sys.exc_info()
             fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
             line_number = exc_tb.tb_lineno
-            print(f'\x1b[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {chr(10).join([''] + str(exc_obj).split(chr(39)))}\n')
+            
+            # Lógica simplificada para evitar erro de aspas no f-string
+            exc_val = str(exc_obj).replace("'", "")
+            print(f"\x1b[31m ■ Archive: {fname} - line: {line_number}")
+            print(f" ■ Exception type: {type(e).__name__}")
+            print(f" ■ Exception value: {exc_val}\x1b[0m")
             exc_trace(exc_tb)
 
 def main():
@@ -227,7 +244,12 @@ def main():
         _, exc_obj, exc_tb = exc_sys.exc_info()
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         line_number = exc_tb.tb_lineno
-        print(f'\x1b[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {chr(10).join([''] + str(exc_obj).split(chr(39)))}\n')
+        
+        # Lógica simplificada para evitar erro de aspas no f-string
+        exc_val = str(exc_obj).replace("'", "")
+        print(f"\x1b[31m ■ Archive: {fname} - line: {line_number}")
+        print(f" ■ Exception type: {type(e).__name__}")
+        print(f" ■ Exception value: {exc_val}\x1b[0m")
         exc_trace(exc_tb)
         _exit_code = 1
     finally:

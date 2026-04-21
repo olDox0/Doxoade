@@ -46,15 +46,15 @@ def impact_analysis(ctx, file_path_arg, project_path, tracking, internal, extern
                 calls = [c for c in info['calls'] if c in meta and c != f_name]
                 prefix = Fore.GREEN + f'  ƒ {f_name}()'
                 if calls:
-                    click.echo(f'{prefix} chama: ' + Fore.WHITE + f'{', '.join(set(calls))}')
+                    click.echo(f'{prefix} chama: ' + Fore.WHITE + f"{', '.join(set(calls))}")
                 else:
                     click.echo(f'{prefix} ' + Style.DIM + '[Folha]')
         if external:
             click.echo(Fore.MAGENTA + f"\n[EXTERNAL] Consumidores de '{target_mod}':")
             consumers = get_external_consumers(state, func_filter=func)
             for c in consumers:
-                click.echo(Fore.YELLOW + f'  ▼ {c['path']}')
-                click.echo(Fore.WHITE + f'    └── usa: {', '.join(c['calls'])}')
+                click.echo(Fore.YELLOW + f"  ▼ {c['path']}")
+                click.echo(Fore.WHITE + f"    └── usa: {', '.join(c['calls'])}")
             if not consumers:
                 click.echo('  (Nenhum uso externo detectado)')
         if tracking or (not internal and (not external) and (not show_graph) and (not html) and (not xml)):

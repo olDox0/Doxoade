@@ -50,7 +50,7 @@ class SemanticJSONRenderer:
         upper_key = key.upper()
         style_cfg = STYLE_MAP.get(upper_key, (Fore.CYAN, '•'))
         color, icon = style_cfg
-        click.echo(f' {icon} {color}{upper_key.replace('_', ' ')}:{Style.RESET_ALL}')
+        click.echo(f" {icon} {color}{upper_key.replace('_', ' ')}:{Style.RESET_ALL}")
         if isinstance(value, list):
             for item in value:
                 click.echo(f'    {Fore.WHITE}- {item}{Fore.RESET}')

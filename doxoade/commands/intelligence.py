@@ -158,19 +158,19 @@ def _save_llm_report(report_data, output_path, console):
             break
     if meta:
         lines.append(f'# DOXOADE NEXUS INTELLIGENCE REPORT')
-        lines.append(f'**Target Project:** {meta.get('target_project')}')
-        lines.append(f'**Generated At:** {meta.get('generated_at')}')
-        lines.append(f'**Focus Applied:** {meta.get('focus_applied')}\n')
+        lines.append(f"**Target Project:** {meta.get('target_project')}")
+        lines.append(f"**Generated At:** {meta.get('generated_at')}")
+        lines.append(f"**Focus Applied:** {meta.get('focus_applied')}\n")
     lines.append('```xml')
     eco = report_data.get('economic_summary', {})
     lines.append('<project_summary>')
-    lines.append(f'  <total_files_scanned>{eco.get('total_files_scanned', 0)}</total_files_scanned>')
-    lines.append(f'  <total_files_in_report>{eco.get('total_files_in_report', 0)}</total_files_in_report>')
-    lines.append(f'  <average_complexity>{eco.get('average_complexity_in_report', 0):.2f}</average_complexity>')
-    lines.append(f'  <total_debt_tags>{eco.get('total_debt_tags_in_report', 0)}</total_debt_tags>')
+    lines.append(f"  <total_files_scanned>{eco.get('total_files_scanned', 0)}</total_files_scanned>")
+    lines.append(f"  <total_files_in_report>{eco.get('total_files_in_report', 0)}</total_files_in_report>")
+    lines.append(f"  <average_complexity>{eco.get('average_complexity_in_report', 0):.2f}</average_complexity>")
+    lines.append(f"  <total_debt_tags>{eco.get('total_debt_tags_in_report', 0)}</total_debt_tags>")
     lines.append('  <god_distribution>')
     for god, count in eco.get('god_distribution_in_report', {}).items():
-        lines.append(f'    <{god.lower().replace('ú', 'u')}>{count}</{god.lower().replace('ú', 'u')}>')
+        lines.append(f"    <{god.lower().replace('ú', 'u')}>{count}</{god.lower().replace('ú', 'u')}>")
     lines.append('  </god_distribution>')
     lines.append('</project_summary>\n')
     lines.append('<codebase_map>')
@@ -182,7 +182,7 @@ def _save_llm_report(report_data, output_path, console):
         lines.append(f'\n  <file path="{path}" role="{god}" complexity="{comp}" status="{status}">')
         classes = f.get('classes', [])
         if classes:
-            lines.append(f'    <classes>{', '.join(classes)}</classes>')
+            lines.append(f"    <classes>{', '.join(classes)}</classes>")
         funcs = f.get('functions', [])
         if funcs:
             funcs_str = []
@@ -193,7 +193,7 @@ def _save_llm_report(report_data, output_path, console):
                     funcs_str.append(str(fn.get('name', 'unknown')))
                 else:
                     funcs_str.append(str(getattr(fn, 'name', fn)))
-            lines.append(f'    <functions>{', '.join(funcs_str)}</functions>')
+            lines.append(f"    <functions>{', '.join(funcs_str)}</functions>")
         debt = f.get('debt_tags_count', len(f.get('debt_tags', [])))
         mpot = f.get('mpot_violations_count', f.get('mpot_4_violations', 0))
         if debt > 0 or mpot > 0:

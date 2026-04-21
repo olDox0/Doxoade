@@ -41,6 +41,6 @@ class WeightGuard:
             _, exc_obj, exc_tb = exc_sys.exc_info()
             fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
             line_number = exc_tb.tb_lineno
-            print(f'\x1b[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n')
+            print(f"\x1b[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n")
             exc_trace(exc_tb)
         return None

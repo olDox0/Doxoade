@@ -132,7 +132,7 @@ class HybridScanner:
             return FunctionScore(node_name, node.lineno, _PENALTY_ASYNC, False, [sys.intern('async: inelegível')])
         unbound = self._has_unbound_locals(node)
         if unbound:
-            return FunctionScore(node_name, node.lineno, 0, False, [f'unbound local(s): {', '.join(unbound[:3])} — corrigir antes de compilar'])
+            return FunctionScore(node_name, node.lineno, 0, False, [f"unbound local(s): {', '.join(unbound[:3])} — corrigir antes de compilar"])
         for dec in node.decorator_list:
             dec_name = self._dec_name(dec)
             if dec_name and dec_name.split('.')[0] in _BAD_DECORATORS:
@@ -253,7 +253,7 @@ class HybridForge:
     def _build_pyx(self, candidates, module_name, aggressive_funcs=frozenset()):
         has_aggressive = bool(aggressive_funcs & {f.name for f in candidates})
         header = _PYX_HEADER_AGGRESSIVE if has_aggressive else _PYX_HEADER
-        sections = [header, _PYX_STUB, f'# Módulo     : {module_name}', f'# Compilados : {len(candidates)}', f'# Agressivos : {', '.join(aggressive_funcs & {f.name for f in candidates}) or 'nenhum'}', '']
+        sections = [header, _PYX_STUB, f'# Módulo     : {module_name}', f'# Compilados : {len(candidates)}', f"# Agressivos : {', '.join(aggressive_funcs & {f.name for f in candidates}) or 'nenhum'}', '']
         for fs in candidates:
             is_aggressive = fs.name in aggressive_funcs
             transformed = self._transform_function(fs, aggressive=is_aggressive)
@@ -289,7 +289,7 @@ class HybridForge:
             except Exception:
                 return None
             mode_tag = '[AGGRESSIVE]' if aggressive else '[STANDARD]'
-            comment = f'# {fs.name}  score={fs.score}  {mode_tag}  razões: {', '.join(fs.reasons)}'
+            comment = f"# {fs.name}  score={fs.score}  {mode_tag}  razões: {', '.join(fs.reasons)}"
             return f'{comment}\n{code}'
         return None
 
@@ -331,7 +331,7 @@ class HybridIgnite:
                     self._log(on_progress, f'   \x1b[31m↷ {py_file.name}: {excl_n} função(ões) excluída(s) pelo registry\x1b[0m')
                 agg_active = aggressive_funcs & {c.name for c in scan.candidates}
                 if agg_active:
-                    self._log(on_progress, f'   \x1b[35m⬡ {py_file.name}: retry-agressivo → {', '.join(sorted(agg_active))}\x1b[0m')
+                    self._log(on_progress, f"   \x1b[35m⬡ {py_file.name}: retry-agressivo → {', '.join(sorted(agg_active))}\x1b[0m")
             if not scan.candidates:
                 report['functions_skipped'] += len(scan.skipped)
                 continue
@@ -403,7 +403,7 @@ class HybridIgnite:
         path = Path(scan.file_path).name
         lines = [f'   \x1b[33m[HYBRID]\x1b[0m {path} — {len(scan.candidates)} candidato(s):']
         for f in scan.candidates:
-            lines.append(f'     • {f.name:<35} score={f.score:>2}  ({', '.join(f.reasons[:3])})')
+            lines.append(f"     • {f.name:<35} score={f.score:>2}  ({', '.join(f.reasons[:3])})")
         callback('\n'.join(lines))
 
     @staticmethod
@@ -415,9 +415,9 @@ class HybridIgnite:
 
     @staticmethod
     def _print_summary(report: dict, callback):
-        lines = [f'\n\x1b[36m{'─' * 55}\x1b[0m', '  \x1b[1mHYBRIDFORGE — RESUMO\x1b[0m', f'  Arquivos escaneados  : {report['files_scanned']}', f'  Arquivos com ganho   : {report['files_with_hits']}', f'  Funções compiladas   : {report['functions_compiled']}', f'  Funções ignoradas    : {report['functions_skipped']}', f'  Score acumulado      : {report['total_score']}', f'  Módulos gerados      : {len(report['modules_generated'])}']
+        lines = [f"\n\x1b[36m{'─' * 55}\x1b[0m", '  \x1b[1mHYBRIDFORGE — RESUMO\x1b[0m', f"  Arquivos escaneados  : {report['files_scanned']}", f"  Arquivos com ganho   : {report['files_with_hits']}", f"  Funções compiladas   : {report['functions_compiled']}", f"  Funções ignoradas    : {report['functions_skipped']}", f"  Score acumulado      : {report['total_score']}", f"  Módulos gerados      : {len(report['modules_generated'])}"]
         if report['errors']:
-            lines.append(f'  Erros                : {len(report['errors'])}')
+            lines.append(f"  Erros                : {len(report['errors'])}")
             for e in report['errors'][:5]:
                 lines.append(f'    └─ {e}')
-        lines.append(f'\x1b[36m{'─' * 55}\x1b')
+        lines.append(f"\x1b[36m{'─' * 55}\x1b")

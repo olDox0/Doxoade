@@ -30,7 +30,7 @@ def _log(project_root: str, msg: str):
     """Registra uma ação no log de artefatos."""
     logs_dir = _base(project_root) / 'logs'
     with open(logs_dir / 'artifacts.log', 'a', encoding='utf-8') as f:
-        f.write(f'{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n')
+        f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n")
 
 def promote_to_bin(project_root: str, pyd_path: Path):
     """Move um binário do staging para o diretório bin final."""
@@ -66,7 +66,7 @@ def _run_probe_subprocess(project_root: str, module_name: str) -> dict:
         import sys as exc_sys
         from traceback import print_tb as exc_trace
         _, exc_obj, exc_tb = exc_sys.exc_info()
-        print(f'\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))} \x1b[0m')
+        print(f"\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))} \x1b[0m")
         exc_trace(exc_tb)
         return {'ok': False, 'error': f'Probe execution failed: {type(e).__name__}'}
 

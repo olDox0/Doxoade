@@ -52,7 +52,7 @@ class LibForge:
                     caps = simd_ctx.effective_caps()
                     _simd_cflags = list(caps.cflags)
                     _simd_label = caps.best.upper()
-                    print(f'   > [SIMD] {_simd_label} — flags: {' '.join(_simd_cflags)}')
+                    print(f"   > [SIMD] {_simd_label} — flags: {' '.join(_simd_cflags)}")
                 except Exception as exc:
                     print(f'   > [SIMD] Falha ao resolver caps ({exc}) — compilando sem SIMD.')
                     _simd_cflags = []
@@ -286,20 +286,20 @@ class LibForge:
     @staticmethod
     def _print_opt_summary(stats: dict) -> None:
         if stats['files_optimized'] == 0:
-            print(f'   > [OPT] Sem transformações aplicadas ({stats['files_skipped']} arquivo(s) sem ganho).')
+            print(f"   > [OPT] Sem transformações aplicadas ({stats['files_skipped']} arquivo(s) sem ganho).")
             return
         parts = []
         if stats['docstrings_removed']:
-            parts.append(f'{stats['docstrings_removed']} docstrings')
+            parts.append(f"{stats['docstrings_removed']} docstrings")
         if stats['dead_branches']:
-            parts.append(f'{stats['dead_branches']} dead branches')
+            parts.append(f"{stats['dead_branches']} dead branches")
         if stats['imports_removed']:
-            parts.append(f'{stats['imports_removed']} imports não usados')
+            parts.append(f"{stats['imports_removed']} imports não usados")
         if stats['locals_minified']:
-            parts.append(f'{stats['locals_minified']} vars locais')
-        detail = f'({', '.join(parts)})' if parts else ''
+            parts.append(f"{stats['locals_minified']} vars locais")
+        detail = f"({', '.join(parts)})" if parts else ''
         saved_kb = stats['bytes_saved'] / 1024
-        print(f'   > [OPT] {stats['files_optimized']}/{stats['files_processed']} arquivo(s) otimizados — {saved_kb:.1f} KB economizados {detail}')
+        print(f"   > [OPT] {stats['files_optimized']}/{stats['files_processed']} arquivo(s) otimizados — {saved_kb:.1f} KB economizados {detail}")
 
     def _promote_to_lib_bin(self, bin_dir: Path, modules: list[str]) -> tuple[list, list]:
         moved, failed = ([], [])

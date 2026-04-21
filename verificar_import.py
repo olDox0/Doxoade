@@ -17,7 +17,7 @@ except Exception as e:
 import click.formatting
 import time
 print(f'wrap_text.__module__: {click.formatting.wrap_text.__module__}')
-print(f'wrap_text qualname:   {getattr(click.formatting.wrap_text, '__qualname__', 'N/A')}')
+print(f"wrap_text qualname:   {getattr(click.formatting.wrap_text, '__qualname__', 'N/A')}")
 import sys
 native = sys.modules.get('v_formatting_da684d')
 if native:

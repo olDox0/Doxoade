@@ -302,36 +302,28 @@ class RefactorEngine:
             
             return True, "Simulação de movimentação e reparo concluída."
 
-        # --- MODO 2: MIGRAÇÃO CIRÚRGICA (Via AST) ---
-        with open(src_path, 'r', encoding='utf-8') as f:
-            src_tree = ast.parse(f.read())
+        # --- MODO 2: MIGRAÇÃO CIRÚRGICA (linha-a-linha, SEM ast.unparse) ---
+        # ast.unparse() foi removido pois destruía f-strings e formatação.
+        # Agora usa extração baseada em span de linhas (igual ao assembler).
+        from .refactor_assembler import prepare_move_plan, move_function as _move_fn
 
-        nodes_to_move = []
-        new_src_body = []
-        
-        for node in src_tree.body:
-            if isinstance(node, (ast.FunctionDef, ast.ClassDef, ast.AsyncFunctionDef)) and node.name in targets:
-                nodes_to_move.append(node)
-            else:
-                new_src_body.append(node)
+        project_root = self.root
+        for target_name in targets:
+            plan = prepare_move_plan(project_root, src_path, target_name, dest_path)
+            if plan is None:
+                click.secho(f"  [MISS] '{target_name}' não encontrado em {src_path.name}", fg='yellow')
+                continue
+            if dry_run:
+                click.secho(f"  [DRY] moveria '{target_name}': {src_path.name} → {dest_path.name}", fg='yellow')
+                continue
+            result = _move_fn(plan)
+            if not result.source_updated:
+                notes = ', '.join(result.notes)
+                click.secho(f"  [ERRO] '{target_name}': {notes}", fg='red')
+                return False, f"Falha ao mover '{target_name}': {notes}"
 
-        if not nodes_to_move:
+        if not targets:
             return False, "Nenhum dos itens especificados foi encontrado."
-
-        if not dry_run:
-            # Atualização do Destino (AST)
-            if dest_path.exists() and not overwrite:
-                with open(dest_path, 'r', encoding='utf-8') as f:
-                    dest_tree = ast.parse(f.read())
-            else:
-                dest_tree = ast.Module(body=[], type_ignores=[])
-            
-            dest_tree.body.extend(nodes_to_move)
-
-            # Regrava arquivos
-            src_path.write_text(ast.unparse(ast.Module(body=new_src_body, type_ignores=[])), encoding='utf-8')
-            dest_path.parent.mkdir(parents=True, exist_ok=True)
-            dest_path.write_text(ast.unparse(dest_tree), encoding='utf-8')
 
         # Atualização Global das referências das funções
         for name in targets:
@@ -656,3 +648,72 @@ class RefactorEngine:
                     fpath.write_text(new_content, encoding='utf-8')
         
         return modified
+        
+    def fix_fstring_syntax(self, target_path, dry_run=False):
+        """
+        Repara erros de sintaxe em f-strings usando compile() como oráculo.
+
+        Delega para refactor_syntax.repair_all(), que aplica estratégias
+        iterativas sem usar ast.unparse() — o culpado original dos 260 arquivos
+        quebrados.
+        """
+        from .refactor_syntax import repair_all, scan_syntax_errors
+
+        target = Path(target_path)
+
+        # Modo arquivo único
+        if target.is_file():
+            from .refactor_syntax import repair_file
+            result = repair_file(target, dry_run=dry_run)
+            if result.fixed and result.strategy != 'already_valid':
+                if dry_run:
+                    click.secho(f"[DRY] {target.name} — reparável ({result.strategy})", fg='yellow')
+                    for ln, old, new in result.changes:
+                        click.secho(f"  L{ln}: - {old.strip()}", fg='red')
+                        click.secho(f"  L{ln}: + {new.strip()}", fg='green')
+                else:
+                    click.secho(f"  [FIXED] {target.name} ({result.strategy})", fg='green')
+                return 1
+            elif not result.fixed and result.remaining_error:
+                err = result.remaining_error
+                click.secho(f"  [MANUAL] {target.name}:{err.line} — {err.message}", fg='red')
+            return 0
+
+        # Modo diretório
+        modified_count = 0
+        manual_review = []
+
+        # Primeira passagem: conta erros
+        broken = list(scan_syntax_errors(target))
+        if not broken:
+            click.echo("Nenhum erro de sintaxe encontrado.")
+            return 0
+
+        click.secho(f"[SCAN] {len(broken)} arquivo(s) com erro de sintaxe.", fg='yellow')
+
+        results = repair_all(target, dry_run=dry_run)
+
+        for result in results:
+            if result.fixed and result.strategy != 'already_valid':
+                modified_count += 1
+                if dry_run:
+                    click.secho(f"[DRY] {result.file.name} — reparável ({result.strategy})", fg='yellow')
+                    for ln, old, new in result.changes:
+                        click.secho(f"  L{ln}: - {old.strip()}", fg='red')
+                        click.secho(f"  L{ln}: + {new.strip()}", fg='green')
+                else:
+                    click.secho(f"  [FIXED] {result.file.name} ({result.strategy})", fg='green')
+            elif not result.fixed:
+                err = result.remaining_error or result.original_error
+                if err:
+                    manual_review.append((result.file, err))
+
+        if manual_review:
+            click.secho(f"\\n[MANUAL] {len(manual_review)} arquivo(s) precisam de revisão manual:", fg='red', bold=True)
+            for fpath, err in manual_review:
+                click.secho(f"  {fpath.name}:{err.line} — {err.message}", fg='red')
+                if err.text:
+                    click.echo(f"    > {err.text.strip()}")
+
+        return modified_count
+

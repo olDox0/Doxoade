@@ -130,7 +130,7 @@ class TestMapper:
             funcs = [n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and (not n.name.startswith('_'))]
             classes = [n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
             module_import = str(source_path).replace('.py', '').replace(os.sep, '.').replace('/', '.')
-            lines = [f'# TEST-TARGET: {str(source_path).replace(os.sep, '/')}', 'import pytest', f'from {module_import} import *', '', '# Teste gerado automaticamente pelo Doxoade']
+            lines = [f"# TEST-TARGET: {str(source_path).replace(os.sep, '/')}", 'import pytest', f'from {module_import} import *', '', '# Teste gerado automaticamente pelo Doxoade']
             if not classes and (not funcs):
                 lines.append('def test_smoke():')
                 lines.append('    # Teste de fumaça (importação)')
@@ -168,11 +168,11 @@ def test_map(ctx, generate):
                 stats[status] = stats.get(status, 0) + 1
                 click.echo(f'  └── {icon} {t} ({status})')
         if matrix['orphans']:
-            click.echo(Fore.YELLOW + f'\n--- Arquivos Órfãos (Sem Teste: {len(matrix['orphans'])}) ---')
+            click.echo(Fore.YELLOW + f"\n--- Arquivos Órfãos (Sem Teste: {len(matrix['orphans'])}) ---")
             for src in matrix['orphans'][:20]:
                 click.echo(f'{Fore.RED}✘ {src}')
             if len(matrix['orphans']) > 20:
-                click.echo(f'{Fore.RED}... e mais {len(matrix['orphans']) - 20}')
+                click.echo(f"{Fore.RED}... e mais {len(matrix['orphans']) - 20}")
             if generate:
                 click.echo(Fore.WHITE + '\nGerando testes...')
                 for src in matrix['orphans']:
@@ -195,6 +195,6 @@ def test_map(ctx, generate):
         click.echo(f'  Arquivos Fonte: {total_src}')
         click.echo(f'  Cobertos:       {real_covered} ({coverage_pct:.1f}%)')
         click.echo(Fore.WHITE + '  Status dos Testes:')
-        click.echo(f'    💀 Esqueletos:   {stats['SKELETON']}')
-        click.echo(f'    🚧 Em Progresso: {stats['WIP']}')
-        click.echo(f'    ✅ Reais:        {stats['REAL']}')
+        click.echo(f"    💀 Esqueletos:   {stats['SKELETON']}")
+        click.echo(f"    🚧 Em Progresso: {stats['WIP']}")
+        click.echo(f"    ✅ Reais:        {stats['REAL']}")

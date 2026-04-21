@@ -153,7 +153,7 @@ class VulcanCompiler:
         """Salva o relatório de telemetria da compilação."""
         if not COMPILATION_TELEMETRY:
             return
-        report_path = Path(project_root) / '.doxoade' / 'vulcan' / 'logs' / f'compile_telemetry_{time.strftime('%Y%m%d_%H%M%S')}.json'
+        report_path = Path(project_root) / '.doxoade' / 'vulcan' / 'logs' / f"compile_telemetry_{time.strftime('%Y%m%d_%H%M%S')}.json"
         report_path.parent.mkdir(parents=True, exist_ok=True)
         summary = {'total': len(COMPILATION_TELEMETRY), 'success': sum((1 for r in COMPILATION_TELEMETRY if r['status'] == 'OK')), 'failed': sum((1 for r in COMPILATION_TELEMETRY if r['status'] not in ['OK', 'QUARANTINED'])), 'quarantined': sum((1 for r in COMPILATION_TELEMETRY if r['status'] == 'QUARANTINED')), 'total_time': sum((r['duration'] for r in COMPILATION_TELEMETRY))}
         full_report = {'summary': summary, 'details': COMPILATION_TELEMETRY}

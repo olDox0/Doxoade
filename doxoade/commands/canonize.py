@@ -46,6 +46,6 @@ def canonize(all_project: bool, run_tests: bool):
 def _render_canon_summary(data: dict):
     """Exibe evidências do que foi salvo (MPoT-4)."""
     echo(f"\n{Fore.GREEN}{Style.BRIGHT}✔ Snapshot 'Gold' Consolidado!")
-    echo(f'   {Fore.WHITE}Commit:   {Fore.YELLOW}{data['git_hash'][:7]}')
-    echo(f'   {Fore.WHITE}Lint:     {Fore.YELLOW}{len(data['static_analysis'].get('findings', []))} problemas conhecidos.')
-    echo(f'   {Fore.WHITE}Testes:   [{data['test_execution']['status']}] {data['test_execution'].get('summary')}')
+    echo(f"   {Fore.WHITE}Commit:   {Fore.YELLOW}{data['git_hash'][:7]}")
+    echo(f"   {Fore.WHITE}Lint:     {Fore.YELLOW}{len(data['static_analysis'].get('findings', []))} problemas conhecidos.")
+    echo(f"   {Fore.WHITE}Testes:   [{data['test_execution']['status']}] {data['test_execution'].get('summary')}")

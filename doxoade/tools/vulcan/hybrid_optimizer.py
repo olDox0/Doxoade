@@ -256,7 +256,7 @@ class HybridOptimizer:
                 var = bool_match.group(2)
                 if var in _BOOL_HINTS and var not in func_cdefs_done:
                     val = bool_match.group(3)
-                    result.append(f'{inner_indent}cdef bint {var} = {('1' if val == 'True' else '0')}')
+                    result.append(f"{inner_indent}cdef bint {var} = {('1' if val == 'True' else '0')}")
                     report.add(f'cdef bint {var}  # bool local')
                     func_cdefs_done.add(var)
                     _buf_i.append(1)

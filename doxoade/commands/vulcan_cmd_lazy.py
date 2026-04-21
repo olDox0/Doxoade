@@ -295,12 +295,12 @@ def lazy_status(verbose, target_path):
             click.echo(f'\n  Intercepcões : {len(stats)} módulos')
             click.echo(f'   {Fore.YELLOW}Pendentes (lazy): {n_lazy}{Style.RESET_ALL}   {Fore.GREEN}Carregados: {n_loaded}{Style.RESET_ALL}   Total hits: {total_h}')
             if verbose:
-                click.echo(f'\n  {Fore.CYAN}{'Módulo':<45} {'Hits':>5}  {'Defer(ms)':>9}  {'Load(ms)':>8}  Estado{Style.RESET_ALL}')
+                click.echo(f"\n  {Fore.CYAN}{'Módulo':<45} {'Hits':>5}  {'Defer(ms)':>9}  {'Load(ms)':>8}  Estado{Style.RESET_ALL}")
                 click.echo('  ' + '─' * 82)
                 for name, data in sorted(stats.items(), key=lambda x: x[1]['hits'], reverse=True)[:30]:
                     sc = f'{Fore.GREEN}loaded{Style.RESET_ALL}' if data['loaded'] else f'{Fore.YELLOW}lazy{Style.RESET_ALL}'
                     short = name[:42] + '...' if len(name) > 45 else name
-                    click.echo(f'  {short:<45} {data['hits']:>5}  {data['defer_ms']:>9.2f}  {data['load_ms']:>8.2f}  {sc}')
+                    click.echo(f"  {short:<45} {data['hits']:>5}  {data['defer_ms']:>9.2f}  {data['load_ms']:>8.2f}  {sc}")
     click.echo()
     if pp.exists():
         click.echo(f'  {Style.DIM}Política em disco: {pp}{Style.RESET_ALL}')

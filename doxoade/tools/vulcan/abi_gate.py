@@ -4,7 +4,7 @@ from pathlib import Path
 
 def _host_info():
     """Retorna informações da arquitetura do sistema hospedeiro."""
-    return {'os': os.name, 'bits': struct.calcsize('P') * 8, 'py_arch': f'{struct.calcsize('P') * 8}-bit'}
+    return {'os': os.name, 'bits': struct.calcsize('P') * 8, 'py_arch': f"{struct.calcsize('P') * 8}-bit"}
 
 def _is_valid_pyd(path: Path) -> tuple[bool, str]:
     """Valida a ABI de um arquivo .pyd (Windows PE Header)."""
@@ -34,7 +34,7 @@ def run_abi_gate(project_root: str) -> dict:
     base = Path(project_root) / '.doxoade' / 'vulcan'
     staging = base / 'staging'
     report = {'timestamp': time.time(), 'host': _host_info(), 'approved': [], 'quarantined': []}
-    for pyd in staging.glob(f'*.{('pyd' if os.name == 'nt' else 'so')}'):
+    for pyd in staging.glob(f"*.{('pyd' if os.name == 'nt' else 'so')}"):
         is_ok, reason = (True, 'OK')
         if os.name == 'nt':
             is_ok, reason = _is_valid_pyd(pyd)

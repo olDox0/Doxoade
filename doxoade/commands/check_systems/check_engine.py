@@ -59,7 +59,7 @@ def _run_syntax_check(f, manager):
         import re
         m = re.search('(?:line |:)(\\d+)', res['error'])
         line_n = int(m.group(1)) if m else 1
-        return [{'severity': 'CRITICAL', 'category': 'SYNTAX', 'message': f'Sintaxe: {res['error']}', 'file': f, 'line': line_n, 'snippet': _get_code_snippet(f, line_n)}]
+        return [{'severity': 'CRITICAL', 'category': 'SYNTAX', 'message': f"Sintaxe: {res['error']}", 'file': f, 'line': line_n, 'snippet': _get_code_snippet(f, line_n)}]
     return []
 
 def _run_style_check(f):

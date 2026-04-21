@@ -204,8 +204,8 @@ def _bar(ratio: float, width: int=20) -> str:
     gain = 1.0 - ratio
     fill = min(width, max(0, int(abs(gain) * width)))
     if gain > 0:
-        return f'\x1b[32m{'█' * fill}\x1b[90m{'░' * (width - fill)}\x1b[0m'
-    return f'\x1b[31m{'█' * fill}\x1b[90m{'░' * (width - fill)}\x1b[0m'
+        return f"\x1b[32m{'█' * fill}\x1b[90m{'░' * (width - fill)}\x1b[0m"
+    return f"\x1b[31m{'█' * fill}\x1b[90m{'░' * (width - fill)}\x1b[0m"
 
 def _speedup_label(speedup: float) -> str:
     gain = (1.0 - speedup) * 100
@@ -306,7 +306,7 @@ class SafeLocalNameMinifier(ast.NodeTransformer):
         import itertools
         for length in itertools.count(2):
             for p in itertools.product(chars, repeat=length):
-                yield f'_{''.join(p)}'
+                yield f"_{''.join(p)}"
 
     class _VarCollector(ast.NodeVisitor):
 

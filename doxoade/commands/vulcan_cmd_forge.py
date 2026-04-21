@@ -332,14 +332,14 @@ def _run_hybrid_with_optimizer(target, root, force, registry=None):
             if excl_n:
                 click.echo(f'   {Fore.RED}↷ {py_file.name}: {excl_n} função(ões) excluída(s) pelo registry{Style.RESET_ALL}')
             if agg_active:
-                click.echo(f'   {Fore.MAGENTA}⬡ {py_file.name}: retry-agressivo → {', '.join(sorted(agg_active))}{Style.RESET_ALL}')
+                click.echo(f"   {Fore.MAGENTA}⬡ {py_file.name}: retry-agressivo → {', '.join(sorted(agg_active))}{Style.RESET_ALL}")
         if not scan.candidates:
             continue
         fname = py_file.name
         click.echo(f'   {Fore.YELLOW}[HYBRID]{Style.RESET_ALL} {fname} — {len(scan.candidates)} candidato(s):')
         for f in scan.candidates:
             tag = f'{Fore.MAGENTA}[AGG]{Style.RESET_ALL}' if f.name in aggressive_funcs else '     '
-            click.echo(f'     {tag} • {f.name:<35} score={f.score:>2}  ({', '.join(f.reasons[:3])})')
+            click.echo(f"     {tag} • {f.name:<35} score={f.score:>2}  ({', '.join(f.reasons[:3])})")
         pyx_path = ignite._forge.generate(scan, aggressive_funcs=aggressive_funcs)
         if not pyx_path:
             click.echo(f'   {Fore.RED}✘{Style.RESET_ALL} {fname}: forge falhou')
@@ -446,7 +446,7 @@ def ignite(ctx, path, force, jobs, no_pitstop, streaming, hybrid, scan_only, sim
     if simd_ctx and _SIMD_AVAILABLE:
         eff = simd_ctx.effective_caps()
         click.echo(f'\n  {Fore.MAGENTA}⬡ SIMD:{Style.RESET_ALL} {Fore.GREEN}{eff.best.upper()}{Style.RESET_ALL}  {Fore.CYAN}est. {estimate_gain(eff)}{Style.RESET_ALL}')
-        click.echo(f'  {Fore.MAGENTA}  flags:{Style.RESET_ALL} {Style.DIM}{' '.join(eff.cflags)}{Style.RESET_ALL}\n')
+        click.echo(f"  {Fore.MAGENTA}  flags:{Style.RESET_ALL} {Style.DIM}{' '.join(eff.cflags)}{Style.RESET_ALL}\n")
     elif simd and (not _SIMD_AVAILABLE):
         click.echo(f'  {Fore.YELLOW}⚠ --simd ignorado: módulos SIMD não disponíveis.{Style.RESET_ALL}')
     if hybrid:
@@ -458,7 +458,7 @@ def ignite(ctx, path, force, jobs, no_pitstop, streaming, hybrid, scan_only, sim
             registry = RegressionRegistry(root)
             r = registry.report()
             if r['total']:
-                click.echo(f'{Fore.MAGENTA}   > Registry: {Fore.RED}{r['excluded']} excluída(s){Style.RESET_ALL}  {Fore.YELLOW}{r['retry_aggressive']} retry-agressivo{Style.RESET_ALL}')
+                click.echo(f"{Fore.MAGENTA}   > Registry: {Fore.RED}{r['excluded']} excluída(s){Style.RESET_ALL}  {Fore.YELLOW}{r['retry_aggressive']} retry-agressivo{Style.RESET_ALL}")
         except Exception:
             registry = None
         if scan_only:
@@ -601,13 +601,13 @@ def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, no_optimize
             import importlib.util as _iutil
             pkg = probe
             click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}  ⬡ VULCAN LIB PROBE: '{pkg}'{Style.RESET_ALL}")
-            click.echo(f'  {'─' * 55}')
+            click.echo(f"  {'─' * 55}")
             click.echo(f'  sys.executable : {sys.executable}')
             venv_val = os.environ.get('VIRTUAL_ENV', '<não definido>')
             click.echo(f'  VIRTUAL_ENV    : {venv_val}')
             from doxoade.tools.vulcan.site_packages import _find_active_venv_site_packages
             active_sp = _find_active_venv_site_packages()
-            click.echo(f'  Venv ativo SP  : {active_sp or '<não encontrado>'}')
+            click.echo(f"  Venv ativo SP  : {active_sp or '<não encontrado>'}")
             for sp_str in active_sp:
                 from pathlib import Path as _P
                 pkg_dir = _P(sp_str) / pkg
@@ -638,12 +638,12 @@ def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, no_optimize
                 if _entry and (Path(_entry) / 'gcc.exe').exists():
                     gcc_found = str(Path(_entry) / 'gcc.exe')
                     break
-            click.echo(f'  gcc in PATH    : {gcc_found or Fore.RED + 'NÃO ENCONTRADO' + Style.RESET_ALL}')
+            click.echo(f"  gcc in PATH    : {gcc_found or Fore.RED + 'NÃO ENCONTRADO' + Style.RESET_ALL}")
             gcc_inject = _ensure_gcc_in_path()
             if gcc_inject:
                 click.echo(f'  {Fore.YELLOW}gcc encontrado em: {gcc_inject}{Style.RESET_ALL}')
             venv_py = _find_venv_python()
-            click.echo(f'  Venv Python    : {venv_py or Fore.RED + 'não encontrado' + Style.RESET_ALL}')
+            click.echo(f"  Venv Python    : {venv_py or Fore.RED + 'não encontrado' + Style.RESET_ALL}")
             click.echo()
             return
         if list_installed:
@@ -679,8 +679,8 @@ def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, no_optimize
                 click.echo(f'{Fore.YELLOW}Nenhum pacote encontrado.{Style.RESET_ALL}')
                 return
             rows.sort(key=lambda r: r[1], reverse=True)
-            click.echo(f'  {'BIBLIOTECA':<19} {'ARQUIVOS .PY':>12}')
-            click.echo(f'  {'-' * 19} {'-' * 12}')
+            click.echo(f"  {'BIBLIOTECA':<19} {'ARQUIVOS .PY':>12}")
+            click.echo(f"  {'-' * 19} {'-' * 12}")
             for name_r, count, _ in rows[:100]:
                 click.echo(f'  {Fore.WHITE}{name_r:<19}{Style.RESET_ALL} {Fore.CYAN}{count:>5}{Style.RESET_ALL}')
             if len(rows) > 100:
@@ -694,8 +694,8 @@ def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, no_optimize
             if not hot_deps:
                 click.echo(f"{Fore.YELLOW}Nenhuma dependência 'quente' encontrada na telemetria recente.{Style.RESET_ALL}")
                 return
-            click.echo(f'  {'BIBLIOTECA':<28} {'HITS':>8}  COMANDO')
-            click.echo(f'  {'-' * 28} {'-' * 8}  {'-' * 35}')
+            click.echo(f"  {'BIBLIOTECA':<28} {'HITS':>8}  COMANDO")
+            click.echo(f"  {'-' * 28} {'-' * 8}  {'-' * 35}")
             for dep, hits in list(hot_deps.items())[:20]:
                 click.echo(f'  {Fore.WHITE}{dep:<28}{Style.RESET_ALL} {Fore.RED}{hits:>8}{Style.RESET_ALL}  {Style.DIM}doxoade vulcan lib --target {dep}{Style.RESET_ALL}')
             return
@@ -737,13 +737,13 @@ def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, no_optimize
                     except Exception:
                         pass
                     click.echo(f'\n{Fore.CYAN}{Style.BRIGHT}--- [VULCAN LIB] Resumo da Otimização ---{Style.RESET_ALL}')
-                    click.echo(f'  Arquivos processados : {stats.get('files_processed', 0)}')
-                    click.echo(f'  Arquivos otimizados  : {stats.get('files_optimized', 0)}')
-                    click.echo(f'  Arquivos ignorados   : {stats.get('files_skipped', 0)}')
-                    click.echo(f'  Docstrings removidas : {stats.get('docstrings_removed', 0)}')
-                    click.echo(f'  Dead branches        : {stats.get('dead_branches', 0)}')
-                    click.echo(f'  Imports removidos    : {stats.get('imports_removed', 0)}')
-                    click.echo(f'  Locals minificados   : {stats.get('locals_minified', 0)}')
+                    click.echo(f"  Arquivos processados : {stats.get('files_processed', 0)}")
+                    click.echo(f"  Arquivos otimizados  : {stats.get('files_optimized', 0)}")
+                    click.echo(f"  Arquivos ignorados   : {stats.get('files_skipped', 0)}")
+                    click.echo(f"  Docstrings removidas : {stats.get('docstrings_removed', 0)}")
+                    click.echo(f"  Dead branches        : {stats.get('dead_branches', 0)}")
+                    click.echo(f"  Imports removidos    : {stats.get('imports_removed', 0)}")
+                    click.echo(f"  Locals minificados   : {stats.get('locals_minified', 0)}")
                     bytes_saved = stats.get('bytes_saved', 0)
                     click.echo(f'  Bytes economizados   : {bytes_saved} ({bytes_saved / 1024:.1f} KiB)')
                     click.echo(f'\n{Fore.GREEN}[SUCESSO] Otimização concluída na cópia: {dest}{Style.RESET_ALL}')
@@ -845,11 +845,11 @@ def vulcan_benchmark(path, runs, output_json, min_speedup, save, learn):
             registry = RegressionRegistry(root)
             summary = registry.update_from_benchmark(results, min_speedup=min_speedup)
             click.echo(f'\n{Fore.MAGENTA}{Style.BRIGHT}  ⬡ REGRESSION REGISTRY atualizado{Style.RESET_ALL}')
-            click.echo(f'  {Fore.RED}Excluídas      : {summary['excluded']}{Style.RESET_ALL}  {Fore.YELLOW}Retry-Agressivo: {summary['retry_aggressive']}{Style.RESET_ALL}  {Fore.GREEN}Promovidas     : {summary['promoted']}{Style.RESET_ALL}')
+            click.echo(f"  {Fore.RED}Excluídas      : {summary['excluded']}{Style.RESET_ALL}  {Fore.YELLOW}Retry-Agressivo: {summary['retry_aggressive']}{Style.RESET_ALL}  {Fore.GREEN}Promovidas     : {summary['promoted']}{Style.RESET_ALL}")
             if summary['excluded']:
-                click.echo(f'\n  {Fore.RED}⚠ {summary['excluded']} função(ões) permanentemente excluída(s).{Style.RESET_ALL}\n  {Fore.CYAN}  Para resetar: doxoade vulcan regression --reset{Style.RESET_ALL}')
+                click.echo(f"\n  {Fore.RED}⚠ {summary['excluded']} função(ões) permanentemente excluída(s).{Style.RESET_ALL}\n  {Fore.CYAN}  Para resetar: doxoade vulcan regression --reset{Style.RESET_ALL}")
             if summary['retry_aggressive']:
-                click.echo(f'\n  {Fore.YELLOW}⬡ {summary['retry_aggressive']} função(ões) marcadas para retry-agressivo.{Style.RESET_ALL}')
+                click.echo(f"\n  {Fore.YELLOW}⬡ {summary['retry_aggressive']} função(ões) marcadas para retry-agressivo.{Style.RESET_ALL}")
     except Exception as e:
         _print_vulcan_forensic('BENCHMARK', e)
         sys.exit(1)
@@ -865,15 +865,15 @@ def vulcan_pitstop(clear_cache):
     engine = PitstopEngine(env)
     info = engine.warmup_info()
     click.echo(f'\n{Fore.CYAN}{Style.BRIGHT}  PITSTOP ENGINE INFO:{Style.RESET_ALL}')
-    click.echo(f'   Python    : {info['python_exe']}')
-    click.echo(f'   Foundry   : {info['foundry']}')
-    click.echo(f'   Bin       : {info['bin_dir']}')
-    click.echo(f'   Workers   : {info['workers']} processos GCC paralelos')
-    click.echo(f'   Estratégia: {info['parallel_strategy']}')
-    click.echo(f'   Batch size: {info['batch_size']}')
-    click.echo(f'   Cache     : {info['cache']['entries']} entrada(s) em {info['cache']['path']}')
+    click.echo(f"   Python    : {info['python_exe']}")
+    click.echo(f"   Foundry   : {info['foundry']}")
+    click.echo(f"   Bin       : {info['bin_dir']}")
+    click.echo(f"   Workers   : {info['workers']} processos GCC paralelos")
+    click.echo(f"   Estratégia: {info['parallel_strategy']}")
+    click.echo(f"   Batch size: {info['batch_size']}")
+    click.echo(f"   Cache     : {info['cache']['entries']} entrada(s) em {info['cache']['path']}")
     if info['build_env_keys']:
-        click.echo(f'   Env extras: {', '.join(info['build_env_keys'])}')
+        click.echo(f"   Env extras: {', '.join(info['build_env_keys'])}")
     if clear_cache:
         cache_path = Path(info['cache']['path'])
         if cache_path.exists():

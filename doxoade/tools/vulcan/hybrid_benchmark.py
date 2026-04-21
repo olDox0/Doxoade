@@ -461,11 +461,11 @@ class HybridBenchmark:
         BOLD = '\x1b[1m'
         CYAN = '\x1b[36m'
         DIM = '\x1b[2m'
-        print(f'\n{CYAN}{'─' * 70}{RESET}')
+        print(f"\n{CYAN}{'─' * 70}{RESET}")
         print(f'{BOLD}  VULCAN HYBRID BENCHMARK{RESET}')
-        print(f'{CYAN}{'─' * 70}{RESET}')
-        print(f'  {'Arquivo':<20} {'Função':<35} {'Py ms':>7} {'Cy ms':>7} {'Speedup':>8}  Status')
-        print(f'{DIM}  {'─' * 20} {'─' * 35} {'─' * 7} {'─' * 7} {'─' * 8}  {'─' * 12}{RESET}')
+        print(f"{CYAN}{'─' * 70}{RESET}")
+        print(f"  {'Arquivo':<20} {'Função':<35} {'Py ms':>7} {'Cy ms':>7} {'Speedup':>8}  Status")
+        print(f"{DIM}  {'─' * 20} {'─' * 35} {'─' * 7} {'─' * 7} {'─' * 8}  {'─' * 12}{RESET}")
         regressions = 0
         total_speedup = 0.0
         total_ok = 0
@@ -482,8 +482,8 @@ class HybridBenchmark:
                     total_speedup += f.speedup
                     total_ok += 1
                     if f.speedup < min_speedup and f.status == 'OK':
-                        print(f'  {DIM}{'':20} {'':35} {'':7} {'':7} \x1b[33m{'':>8}  ⚠ REGRESSÃO: speedup {f.speedup:.2f}× < {min_speedup}× — candidato a exclusão{RESET}')
-        print(f'{CYAN}{'─' * 70}{RESET}')
+                        print(f"  {DIM}{'':20} {'':35} {'':7} {'':7} \x1b[33m{'':>8}  ⚠ REGRESSÃO: speedup {f.speedup:.2f}× < {min_speedup}× — candidato a exclusão{RESET}")
+        print(f"{CYAN}{'─' * 70}{RESET}")
         if total_ok > 0:
             avg = total_speedup / total_ok
             bar = _speedup_bar(avg)
@@ -500,7 +500,7 @@ class HybridBenchmark:
             for s in unique_stale[:5]:
                 print(f'    \x1b[33m└─ {s}{RESET}')
             print(f'  \x1b[36m  → doxoade vulcan ignite <path> --hybrid --force{RESET}')
-        print(f'{CYAN}{'─' * 70}{RESET}\n')
+        print(f"{CYAN}{'─' * 70}{RESET}\n")
 
     @staticmethod
     def _print_json(results: list[FileBenchResult]):

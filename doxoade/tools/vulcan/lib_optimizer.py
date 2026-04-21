@@ -567,7 +567,7 @@ class SafeLocalNameMinifier(ast.NodeTransformer):
         yield from (f'_{c}' for c in chars)
         for length in itertools.count(2):
             for p in itertools.product(chars, repeat=length):
-                yield f'_{''.join(p)}'
+                yield f"_{''.join(p)}"
 
     class _VarCollector(ast.NodeVisitor):
 

@@ -8,6 +8,7 @@ from typing import Iterable, Iterator
 from doxoade.tools.filesystem import SYSTEM_IGNORES
 
 try:
+    from doxoade.tools.filesystem import collect_project_files, _is_path_ignored
     from doxoade.tools.filesystem import SYSTEM_IGNORES as _SYSTEM_IGNORES
 except ImportError:
     _SYSTEM_IGNORES: set[str] = set()
@@ -43,15 +44,15 @@ def is_python_file(path: Path) -> bool:
     return path.is_file() and path.suffix == '.py'
 
 def iter_python_files(root: Path) -> Iterator[Path]:
-    root = root.resolve()
-    for current, dirs, files in os.walk(root):
-        # PODA AGRESSIVA: Impede o os.walk de entrar nessas pastas
-        dirs[:] = [d for d in dirs if d.lower() not in ALL_SKIP and not d.startswith('.')]
-        
-        current_path = Path(current)
-        for filename in files:
-            if filename.endswith('.py'):
-                yield current_path / filename
+    """
+    Usa o Iterador Industrial do filesystem.py para garantir 
+    que pastas como venv/ e .git/ sejam ignoradas imediatamente.
+    """
+    root_resolved = root.resolve()
+    # O collect_project_files já faz a poda agressiva de diretórios
+    for f_path in collect_project_files(str(root_resolved), str(root_resolved)):
+        if f_path.endswith('.py'):
+            yield Path(f_path)
 
 def read_text_safe(path: Path) -> str:
     try:

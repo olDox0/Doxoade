@@ -28,7 +28,7 @@ def render_findings(findings: list, min_level: int, severity_map: dict):
     echo(Fore.RED + Style.BRIGHT + f'\n[ALERTA] {len(visible)} Vulnerabilidades Encontradas:')
     for f in visible:
         color = Fore.RED if f['severity'] in ['HIGH', 'CRITICAL'] else Fore.YELLOW
-        echo(f'\n{color}■ [{f['tool']}] {f['severity']}: {f['message']}')
-        echo(Fore.WHITE + f'  Local: {f['file']}:{f['line']}')
+        echo(f"\n{color}■ [{f['tool']}] {f['severity']}: {f['message']}")
+        echo(Fore.WHITE + f"  Local: {f['file']}:{f['line']}")
         if f.get('code'):
-            echo(Fore.BLUE + f'  Trecho: {f['code'][:200]}...')
+            echo(Fore.BLUE + f"  Trecho: {f['code'][:200]}...")

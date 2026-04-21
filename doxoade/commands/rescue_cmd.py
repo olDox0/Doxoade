@@ -25,7 +25,7 @@ def rescue(ctx, scavenge, backups, deep, npp):
         backups = scav.recover_from_npp_session()
         click.echo(f'\n{Fore.MAGENTA}Recuperação de Sessão Notepad++ (%APPDATA%):{Style.RESET_ALL}')
         for b in backups[:15]:
-            click.echo(f'  {Fore.CYAN}{b['time']} {Fore.WHITE}│ {b['name']}')
+            click.echo(f"  {Fore.CYAN}{b['time']} {Fore.WHITE}│ {b['name']}")
     if scavenge:
         blobs = scav.find_dangling_blobs()
         if not blobs:
@@ -33,8 +33,8 @@ def rescue(ctx, scavenge, backups, deep, npp):
             return
         click.echo(f'\n{Fore.GREEN}Encontrados {len(blobs)} fragmentos no abismo:{Style.RESET_ALL}')
         for i, b in enumerate(blobs):
-            click.echo(f'[{i}] {Fore.CYAN}{b['hash']}{Fore.WHITE} ({b['date']})')
-            click.echo(f'    > {Style.DIM}{b['preview']}...{Style.RESET_ALL}')
+            click.echo(f"[{i}] {Fore.CYAN}{b['hash']}{Fore.WHITE} ({b['date']})")
+            click.echo(f"    > {Style.DIM}{b['preview']}...{Style.RESET_ALL}")
         idx = click.prompt("\nDeseja restaurar algum fragmento? (número ou 'n')", default='n')
         if idx.isdigit() and int(idx) < len(blobs):
             target = blobs[int(idx)]
@@ -46,4 +46,4 @@ def rescue(ctx, scavenge, backups, deep, npp):
         files = scav.scan_npp_backups()
         click.echo(f'\n{Fore.YELLOW}Backups do Notepad++ encontrados:{Style.RESET_ALL}')
         for f in files[:10]:
-            click.echo(f'  {Fore.CYAN}{f['date']} {Fore.WHITE}│ {f['name']}')
+            click.echo(f"  {Fore.CYAN}{f['date']} {Fore.WHITE}│ {f['name']}")

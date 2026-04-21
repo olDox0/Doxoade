@@ -167,7 +167,7 @@ def doctor(ctx, path):
             return
         status_env = _verify_environment(path)
         color = Fore.GREEN if status_env['status'] == 'ok' else Fore.RED
-        click.echo(color + f'   > [{status_env['status'].upper()}] {status_env['message']}')
+        click.echo(color + f"   > [{status_env['status'].upper()}] {status_env['message']}")
         _verify_gitignore_logic(path, logger)
         _verify_and_guide_path(logger)
         _repair_dependencies(abs_path, logger)

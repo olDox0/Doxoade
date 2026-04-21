@@ -35,9 +35,9 @@ def check_termux_environment() -> bool:
         required_tools = ['clang', 'cmake', 'ninja']
         missing = [tool for tool in required_tools if not shutil.which(tool)]
         if missing:
-            print(Fore.RED + f'[CRÍTICO] Ferramentas de build ausentes: {', '.join(missing)}')
+            print(Fore.RED + f"[CRÍTICO] Ferramentas de build ausentes: {', '.join(missing)}")
             print(Fore.YELLOW + 'Para corrigir, execute:')
-            print(Fore.CYAN + f'    pkg install {' '.join(missing)} ndk-sysroot python-numpy')
+            print(Fore.CYAN + f"    pkg install {' '.join(missing)} ndk-sysroot python-numpy")
             print_error('Instalação abortada para prevenir falha de compilação em ARM.')
         print_success('Ferramentas de build nativas detectadas.')
     return is_termux

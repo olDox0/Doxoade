@@ -191,8 +191,8 @@ class VulcanAutopilot:
         from .pitstop import PitstopEngine
         engine = PitstopEngine(self.env, pid_registry=self._pid_registry)
         info = engine.warmup_info()
-        print(f'   {Fore.MAGENTA}🔥 [PITSTOP] Engine warm-up — batch={info['batch_size']}, workers={max_workers}{Fore.RESET}')
-        print(f'   {Fore.CYAN}   > cache: {info['cache']['entries']} entradas em {info['cache']['path']}{Fore.RESET}')
+        print(f"   {Fore.MAGENTA}🔥 [PITSTOP] Engine warm-up — batch={info['batch_size']}, workers={max_workers}{Fore.RESET}")
+        print(f"   {Fore.CYAN}   > cache: {info['cache']['entries']} entradas em {info['cache']['path']}{Fore.RESET}")
 
         def _on_result(file_path: str, ok: bool, err: str | None) -> None:
             name = Path(file_path).name
@@ -223,7 +223,7 @@ class VulcanAutopilot:
         t_total = stats.get('total_time', 0.0)
         t_forge = stats.get('forge_time', 0.0)
         t_comp = stats.get('compile_time', 0.0)
-        print(f'\n{Fore.CYAN}{'─' * 55}{Fore.RESET}')
+        print(f"\n{Fore.CYAN}{'─' * 55}{Fore.RESET}")
         print(f'  {Fore.GREEN}✔ {s} compilado(s){Fore.RESET}  {Fore.YELLOW}✘ {f} falha(s){Fore.RESET}  {Fore.CYAN}↷ {c} cache(s){Fore.RESET}')
         print(f'  {Fore.WHITE}forge: {t_forge:.2f}s  compile: {t_comp:.2f}s  total: {t_total:.2f}s{Fore.RESET}')
         if s > 0:
@@ -231,7 +231,7 @@ class VulcanAutopilot:
             saving = max(0.0, legacy_estimate - t_comp)
             if saving > 1.0:
                 print(f'  {Fore.GREEN}⚡ PitStop economizou ~{saving:.1f}s vs compilação individual{Fore.RESET}')
-        print(f'{Fore.CYAN}{'─' * 55}{Fore.RESET}')
+        print(f"{Fore.CYAN}{'─' * 55}{Fore.RESET}")
 
     def _run_legacy(self, candidates: list[dict], max_workers: int) -> None:
         print(f'   {Fore.YELLOW}[LEGADO] Ativando {max_workers} threads...{Fore.RESET}')

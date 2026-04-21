@@ -64,7 +64,7 @@ def _run_legacy_audit(rel_path: str, limit: int, show_code: bool, search_moved: 
     history = _get_file_history_metadata(rel_path, limit=limit)
     for commit in history:
         h_hash = commit['hash']
-        click.echo(f'\n{Fore.WHITE}{Style.BRIGHT}Commit: {h_hash} ({commit['date']}) - {commit['subject']}{Style.RESET_ALL}')
+        click.echo(f"\n{Fore.WHITE}{Style.BRIGHT}Commit: {h_hash} ({commit['date']}) - {commit['subject']}{Style.RESET_ALL}")
         past_content = _get_historical_content(rel_path, h_hash)
         past_signatures = _extract_function_signatures(past_content)
         found_regression = False
@@ -79,7 +79,7 @@ def _run_legacy_audit(rel_path: str, limit: int, show_code: bool, search_moved: 
                             click.echo(f'     {Fore.RED}| {line}')
                         click.echo(f'     ----------------------{Style.RESET_ALL}')
                 else:
-                    click.echo(f'     {Style.DIM}> Contrato: ({', '.join(info['args'])}){Style.RESET_ALL}')
+                    click.echo(f"     {Style.DIM}> Contrato: ({', '.join(info['args'])}){Style.RESET_ALL}")
                 found_regression = True
                 if search_moved:
                     click.echo(f'     {Fore.YELLOW}🔍 Rastreando migração...{Style.RESET_ALL}')
@@ -90,7 +90,7 @@ def _run_legacy_audit(rel_path: str, limit: int, show_code: bool, search_moved: 
                         if hits:
                             for h in hits:
                                 h_path = h['file'].replace('\\', '/')
-                                loc_str = f'{h_path}:{h['line']}'
+                                loc_str = f"{h_path}:{h['line']}"
                                 if loc_str not in found_locations:
                                     found_locations.append(loc_str)
                     if found_locations:
@@ -103,8 +103,8 @@ def _run_legacy_audit(rel_path: str, limit: int, show_code: bool, search_moved: 
                         click.echo(f'     {Fore.YELLOW}{Style.DIM}   > Provável causa: Absorção por classe ou refatoração inline.{Style.RESET_ALL}')
             elif current_signatures[name]['args'] != info['args']:
                 click.echo(f'   {Fore.YELLOW}⚠ CONTRATO ALTERADO: {Style.BRIGHT}{name}{Style.RESET_ALL}')
-                click.echo(f'     {Fore.RED}- Antigo: ({', '.join(info['args'])}){Style.RESET_ALL}')
-                click.echo(f'     {Fore.GREEN}+ Novo:   ({', '.join(current_signatures[name]['args'])}){Style.RESET_ALL}')
+                click.echo(f"     {Fore.RED}- Antigo: ({', '.join(info['args'])}){Style.RESET_ALL}")
+                click.echo(f"     {Fore.GREEN}+ Novo:   ({', '.join(current_signatures[name]['args'])}){Style.RESET_ALL}")
                 found_regression = True
         if not found_regression:
             click.echo(f'   {Fore.GREEN}✔ Estrutura preservada.{Style.RESET_ALL}')

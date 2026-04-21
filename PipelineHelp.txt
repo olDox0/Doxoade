@@ -1,67 +1,75 @@
-# Pipeline gerado pelo doxoade em: 2025-11-05 23:29:24
-doxoade --help
+doxoade android --help
 doxoade apicheck --help
+doxoade audit --help
 doxoade auto --help
+doxoade branch --help
 doxoade canonize --help
-doxoade canonize
 doxoade check --help
-doxoade check . --ignore vers
 doxoade clean --help
-doxoade clean
-> n
+doxoade compress --help
 doxoade config --help
 doxoade create-pipeline --help
-doxoade create-pipeline Exemplo.txt "doxoade intelligence"
-doxoade auto --file Exemplo.txt
 doxoade dashboard --help
-doxoade dashboard
+doxoade db-query --help
+doxoade debug --help
 doxoade deepcheck --help
-doxoade deepcheck ./doxoade/commands/auto.py
+doxoade diagnose --help
+doxoade diff --help
 doxoade doctor --help
-doxoade doctor
-doxoade diff install.py
+doxoade doxcolors --help
 doxoade encoding --help
-doxoade encoding *.txt UTF8
+doxoade fix --help
+doxoade flow --help
 doxoade git-clean --help
-doxoade git-clean
 doxoade git-new --help
 doxoade global-health --help
-doxoade global-health
 doxoade guicheck --help
+doxoade hack --help
 doxoade health --help
-doxoade health
+doxoade history --help
+doxoade ide --help
 doxoade impact-analysis --help
-doxoade impact-analysis doxoade/shared_tools.py
-doxoade install --help
 doxoade init --help
+doxoade install --help
 doxoade intelligence --help
-doxoade intelligence
 doxoade kvcheck --help
+doxoade lab --help
+doxoade linux --help
 doxoade log --help
-doxoade log -n 1 -s
+doxoade maestro --help
+doxoade merge --help
+doxoade migrate-db --help
+doxoade mirror --help
 doxoade mk --help
-doxoade mk Exemplo/{exemplo.py,exemplow.py}
-doxoade optimize --help
-doxoade pythob --help
+doxoade moddify --help
+doxoade pedia --help
+doxoade pr --help
+doxoade purge-history --help
+doxoade python --help
 doxoade rebuild --help
+doxoade refactor --help
 doxoade regression-test --help
-doxoade regression-test
 doxoade release --help
+doxoade rescue --help
+doxoade rewind --help
+doxoade risk --help
 doxoade run --help
 doxoade save --help
+doxoade search --help
+doxoade security --help
 doxoade self-test --help
-doxoade self-test
 doxoade setup-health --help
-doxoade setup-health
-> .
-doxoade setup-regression --help
-doxoade setup-regression
 doxoade show-trace --help
+doxoade style --help
 doxoade sync --help
-doxoade tutorial --help
-doxoade tutorial main
-doxoade tutorial interactive
-> n
-doxoade tutorial simulation
-> n
+doxoade telemetry --help
+doxoade terminal --help
+doxoade termux-config --help
+doxoade test --help
+doxoade timeline --help
+doxoade venv --help
+doxoade venvkeeper --help
+doxoade verilog --help
+doxoade vulcan --help
 doxoade webcheck --help
+doxoade wsl --help

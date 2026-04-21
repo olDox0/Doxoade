@@ -86,7 +86,7 @@ def _inject_qa_reminders(state: 'CheckState', lines: List[str], file_path: str):
         if tag in QA_TAGS:
             if 'ignore-todo' in comment_part.lower():
                 continue
-            state.register_finding({'severity': QA_TAGS[tag], 'category': 'QA-REMINDER', 'message': f'[{tag}] {comment_part[len(tag):].strip().lstrip(':').strip()}', 'file': file_path, 'line': i + 1, 'snippet': _get_code_snippet(file_path, i + 1)})
+            state.register_finding({'severity': QA_TAGS[tag], 'category': 'QA-REMINDER', 'message': f"[{tag}] {comment_part[len(tag):].strip().lstrip(':').strip()}", 'file': file_path, 'line': i + 1, 'snippet': _get_code_snippet(file_path, i + 1)})
 
 def filter_and_inject_findings(findings: list, project_root: str) -> list:
     """Bridge de Compatibilidade: Conecta o motor legado à nova lógica (v84.2)."""

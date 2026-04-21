@@ -109,7 +109,7 @@ def _run_safety_engine(target, logger):
         print(f'\x1b[31m   [!] Erro crítico no motor SCA: {e}\x1b[0m')
         from traceback import print_tb as exc_trace
         _, exc_obj, exc_tb = sys.exc_info()
-        print(f'\x1b[31m ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n')
+        print(f"\x1b[31m ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n")
         exc_trace(exc_tb)
         return []
 
@@ -129,11 +129,11 @@ def _parse_safety_output(raw_stdout: str) -> list:
         vulns = data.get('vulnerabilities', []) if isinstance(data, dict) else data
         if not isinstance(vulns, list):
             vulns = []
-        return [{'tool': 'SAFETY', 'severity': 'HIGH', 'message': f'Vulnerabilidade: {v.get('package_name')} -> {v.get('advisory', 'risco detectado')}', 'file': 'requirements.txt', 'line': 0} for v in vulns]
+        return [{'tool': 'SAFETY', 'severity': 'HIGH', 'message': f"Vulnerabilidade: {v.get('package_name')} -> {v.get('advisory', 'risco detectado')}", 'file': 'requirements.txt', 'line': 0} for v in vulns]
     except Exception as e:
         from traceback import print_tb as exc_trace
         _, exc_obj, exc_tb = sys.exc_info()
-        print(f'\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n')
+        print(f"\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n")
         exc_trace(exc_tb)
         return []
 

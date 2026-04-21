@@ -242,7 +242,7 @@ class VulcanLoader(importlib.abc.Loader):
                     setattr(module, orig_name, _safe_call(py_fn, native_fn))
                 injected.append(orig_name)
             if injected:
-                _vlog(f'OK   {module.__name__} ← {self._bin_path.name} ({', '.join(injected)})')
+                _vlog(f"OK   {module.__name__} ← {self._bin_path.name} ({', '.join(injected)})")
                 module.__file__ = str(self._bin_path)
             else:
                 _vlog(f'LOAD {module.__name__} ← {self._bin_path.name} (sem funções otimizadas)')

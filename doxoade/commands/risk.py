@@ -88,13 +88,13 @@ def _display_report(score: float, metrics: dict, penalties: list, test_pen: int)
     click.echo(Fore.CYAN + Style.BRIGHT + f'\n--- [RISK] Fortress Audit v{__version__} ---')
     click.echo(f'Score de Saúde: {color}{Style.BRIGHT}{int(score)}/100 ({level} {icon})')
     af_pct = metrics['affected_files'] / metrics['total_files'] * 100
-    click.echo(Fore.WHITE + f'Base: {metrics['total_files']} arquivos | Afetados: {metrics['affected_files']} ({af_pct:.1f}%)')
+    click.echo(Fore.WHITE + f"Base: {metrics['total_files']} arquivos | Afetados: {metrics['affected_files']} ({af_pct:.1f}%)")
     click.echo('\nVetores de Impacto PASC:')
     for p in sorted(penalties, key=lambda x: x['penalty'], reverse=True):
         p_col = Fore.RED if p['penalty'] >= 15 else Fore.YELLOW if p['penalty'] >= 5 else Fore.WHITE
-        click.echo(f'   [{p['name']:<15}] {p_col}-{p['penalty']:>5}{Style.RESET_ALL} | Impacto: {p['density_pct']}% ({p['count']} un)')
+        click.echo(f"   [{p['name']:<15}] {p_col}-{p['penalty']:>5}{Style.RESET_ALL} | Impacto: {p['density_pct']}% ({p['count']} un)")
     if test_pen > 0:
-        click.echo(f'   [{'TEST-REGRESSION':<15}] {Fore.RED}-{test_pen:>5}{Style.RESET_ALL} | Status: FALHA')
+        click.echo(f"   [{'TEST-REGRESSION':<15}] {Fore.RED}-{test_pen:>5}{Style.RESET_ALL} | Status: FALHA")
     click.echo(f'\n{Style.BRIGHT}Diretriz Técnica:{Style.NORMAL}')
     click.echo(f'   {_get_engineering_directive(score, test_pen)}\n')
 

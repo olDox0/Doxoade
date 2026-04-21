@@ -48,7 +48,7 @@ class VulcanBridge:
     def is_binary_stale(self, script_path: str) -> bool:
         abs_path = Path(script_path).resolve()
         path_hash = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
-        v_path = self.bin_dir / f'v_{abs_path.stem}_{path_hash}{('.pyd' if os.name == 'nt' else '.so')}'
+        v_path = self.bin_dir / f"v_{abs_path.stem}_{path_hash}{('.pyd' if os.name == 'nt' else '.so')}"
         if not v_path.exists():
             return True
         return os.path.getmtime(script_path) > os.path.getmtime(v_path)
@@ -86,7 +86,7 @@ class VulcanBridge:
                         target_globals[orig] = getattr(v_mod, attr)
                         injected.append(orig)
             if injected:
-                msg = f'\x1b[94m [VULCAN:ACTIVE] {mod_name} ({', '.join(injected)}) -> NATIVE\n\x1b[0m'
+                msg = f"\x1b[94m [VULCAN:ACTIVE] {mod_name} ({', '.join(injected)}) -> NATIVE\n\x1b[0m"
                 sys.stdout.write(msg)
             return True
         else:

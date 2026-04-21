@@ -135,7 +135,7 @@ def _report_global_health(logger):
     if protected_found:
         click.echo(Fore.GREEN + '   > Protegidas encontradas:')
         for inst in protected_found:
-            click.echo(Fore.GREEN + f'     - {inst['name']} {inst['version']} @ {inst['root']}')
+            click.echo(Fore.GREEN + f"     - {inst['name']} {inst['version']} @ {inst['root']}")
     if not duplicates:
         click.echo(Fore.GREEN + '   > Nenhuma duplicação óbvia encontrada.')
     else:
@@ -143,8 +143,8 @@ def _report_global_health(logger):
         for name, installs in duplicates:
             click.echo(Fore.RED + f'     - {name}:')
             for inst in installs:
-                click.echo(Fore.RED + f'       - {inst['name']} {inst['version']} @ {inst['root']}')
-            logger.add_finding('warning', f'Distribuição duplicada: {name}', category='GLOBAL-DUPLICATE', details='; '.join((f'{i['version']} @ {i['root']}' for i in installs)))
+                click.echo(Fore.RED + f"       - {inst['name']} {inst['version']} @ {inst['root']}")
+            logger.add_finding('warning', f'Distribuição duplicada: {name}', category='GLOBAL-DUPLICATE', details='; '.join((f"{i['version']} @ {i['root']}" for i in installs)))
     return len(duplicates) == 0
 
 def _check_pip_health(logger):

@@ -104,7 +104,7 @@ def merge(ctx, branch, abort, check_only):
         if branch:
             if conflicted_files:
                 click.echo(Fore.RED + '[ERRO] Você já tem conflitos pendentes. Resolva-os antes de iniciar outro merge.')
-                click.echo(f'Arquivos: {', '.join(conflicted_files)}')
+                click.echo(f"Arquivos: {', '.join(conflicted_files)}")
                 return
             click.echo(Fore.CYAN + f"--- [MERGE] Iniciando merge com '{branch}' ---")
             result = _run_git_command(['merge', branch], capture_output=True) or ''

@@ -75,7 +75,7 @@ class PediaEngine:
 
     def _render_article_header(self, article):
         icon = safe_emoji('🏛️', '') if 'CORE' in article.source else safe_emoji('🏠', '')
-        click.echo(f'{Fore.CYAN}{Style.BRIGHT}{'=' * 60}')
+        click.echo(f"{Fore.CYAN}{Style.BRIGHT}{'=' * 60}")
         click.echo(f'{icon}  {article.title.upper()}')
         click.echo(f'    {Style.DIM}Chave: {article.key} | Categoria: {article.category}')
-        click.echo(f'{Fore.CYAN}{'=' * 60}{Style.RESET_ALL}')
+        click.echo(f"{Fore.CYAN}{'=' * 60}{Style.RESET_ALL}")

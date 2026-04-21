@@ -51,7 +51,7 @@ def validate_contract(contract: dict) -> None:
 
 def create_run_environment(contract: dict) -> Path:
     RUNS_DIR.mkdir(exist_ok=True)
-    run_id = f'run_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}'
+    run_id = f"run_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
     run_dir = RUNS_DIR / run_id
     run_dir.mkdir(parents=True)
     (run_dir / 'artifacts').mkdir()

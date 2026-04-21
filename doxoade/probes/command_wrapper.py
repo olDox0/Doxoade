@@ -11,7 +11,7 @@ def run_internal_command(command_name, args):
     """
     Simula a execução de um comando interno do Doxoade para análise de Flow.
     """
-    print(f'--- [WRAPPER] Preparando para rodar: doxoade {command_name} {' '.join(args)} ---')
+    print(f"--- [WRAPPER] Preparando para rodar: doxoade {command_name} {' '.join(args)} ---")
     runner = CliRunner()
     result = runner.invoke(cli, [command_name] + args)
     if result.exit_code != 0:

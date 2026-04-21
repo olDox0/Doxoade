@@ -33,7 +33,7 @@ def encoding(ctx, targets):
                 if p.is_file():
                     files_to_process.add(p)
         if not files_to_process:
-            logger.add_finding('warning', f'Nenhum arquivo encontrado para os alvos: {', '.join(input_targets)}')
+            logger.add_finding('warning', f"Nenhum arquivo encontrado para os alvos: {', '.join(input_targets)}")
             click.echo(Fore.YELLOW + 'Nenhum arquivo correspondente encontrado.')
             return
         success_count, skipped_count, error_count = (0, 0, 0)

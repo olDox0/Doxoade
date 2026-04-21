@@ -76,7 +76,7 @@ def to_json(graph: FluxGraph, *, indent: int=2) -> str:
 def summarize(graph: FluxGraph) -> str:
     from doxoade.commands.impact_systems.impact_fluxogram import graph_stats
     stats = graph_stats(graph)
-    return f'nodes={stats['nodes']} edges={stats['edges']} isolated={len(stats['isolated'])}'
+    return f"nodes={stats['nodes']} edges={stats['edges']} isolated={len(stats['isolated'])}"
 
 def to_xml(graph: FluxGraph, *, include_cycles: bool=True) -> str:
     import xml.etree.ElementTree as ET

@@ -85,8 +85,8 @@ class WatchResult:
         if not self.functions:
             print(f'  {DIM}Nenhuma função avaliada.{RST}\n')
             return
-        print(f'\n  {'FUNÇÃO':<38} {'PY (μs)':>10} {'CY (μs)':>10} {'SPEEDUP':>9}  STATUS')
-        print(f'  {'─' * 38} {'─' * 10} {'─' * 10} {'─' * 9}  {'─' * 20}')
+        print(f"\n  {'FUNÇÃO':<38} {'PY (μs)':>10} {'CY (μs)':>10} {'SPEEDUP':>9}  STATUS")
+        print(f"  {'─' * 38} {'─' * 10} {'─' * 10} {'─' * 9}  {'─' * 20}")
         for m in sorted(self.functions, key=lambda x: x.speedup or 0):
             if m.speedup is None:
                 color = DIM
@@ -101,7 +101,7 @@ class WatchResult:
             print(f'  {m.name:<38} {DIM}{py_s}{RST} {DIM}{cy_s}{RST} {color}{spd_s}{RST}  {color}{m.status:<20}{RST}' + (f'  {DIM}{m.note}{RST}' if m.note else ''))
         if self.registry_summary:
             rs = self.registry_summary
-            print(f'\n  {B}Registry atualizado:{RST}  {R}Excluídas: {rs.get('excluded', 0)}{RST}  {Y}Retry-Agressivo: {rs.get('retry_aggressive', 0)}{RST}  {G}Promovidas: {rs.get('promoted', 0)}{RST}')
+            print(f"\n  {B}Registry atualizado:{RST}  {R}Excluídas: {rs.get('excluded', 0)}{RST}  {Y}Retry-Agressivo: {rs.get('retry_aggressive', 0)}{RST}  {G}Promovidas: {rs.get('promoted', 0)}{RST}")
         print()
 
 class PerformanceWatcher:

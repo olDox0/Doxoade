@@ -63,7 +63,7 @@ def get_code_context(filepath: str, linenum: int, source_type: str='local') -> O
     try:
         if source_type == 'git':
             rel_path = os.path.relpath(filepath, os.getcwd()).replace('\\', '/')
-            content = run_git_command(['show', f'HEAD:{rel_path}'])
+            content = run_git_command(['show', f"HEAD:{rel_path}"])
         else:
             with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
@@ -89,11 +89,11 @@ def perform_post_mortem(info: Dict[str, Any]):
         raise ValueError('Invalid crash info for autopsy.')
     print(f'\n{Fore.CYAN}[DOXOADE] 🔬 Performing digital autopsy...')
     rel_path = os.path.relpath(info['file'], os.getcwd()).replace('\\', '/')
-    stable_content = run_git_command(['show', f'HEAD:{rel_path}'])
+    stable_content = run_git_command(['show', f"HEAD:{rel_path}"])
     if not stable_content:
         print(f'{Fore.YELLOW}   > [WARNING] Stable version unreachable.{Style.RESET_ALL}')
         return
-    unique_str = f'{info['error']}:{info['line']}:{rel_path}'
+    unique_str = f"{info['error']}:{info['line']}:{rel_path}"
     crash_hash = hashlib.sha256(unique_str.encode('utf-8')).hexdigest()
     _save_crash_to_db(crash_hash, stable_content, rel_path, info)
 
@@ -103,7 +103,7 @@ def _save_crash_to_db(crash_hash: str, content: str, rel_path: str, info: dict):
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-        cursor.execute('INSERT OR REPLACE INTO solutions (finding_hash, stable_content, commit_hash, project_path, timestamp, file_path, message, error_line) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (crash_hash, content, 'RESCUE_REVERT', os.getcwd(), datetime.datetime.now(datetime.timezone.utc).isoformat(), rel_path, f'[CRASH] {info['error']}', info['line']))
+        cursor.execute('INSERT OR REPLACE INTO solutions (finding_hash, stable_content, commit_hash, project_path, timestamp, file_path, message, error_line) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (crash_hash, content, 'RESCUE_REVERT', os.getcwd(), datetime.datetime.now(datetime.timezone.utc).isoformat(), rel_path, f"[CRASH] {info['error']}", info['line']))
         conn.commit()
         conn.close()
         print(f'   {Fore.GREEN}> [MEMORY] Incident recorded for Genesis.{Style.RESET_ALL}')
@@ -112,28 +112,41 @@ def _save_crash_to_db(crash_hash: str, content: str, rel_path: str, info: dict):
 
 def activate_protocol(error_text: str):
     """Main entry point for Lazarus Protocol (PASC-10)."""
-    if error_text is None:
-        raise ValueError("activate_protocol: str 'error_text' não pode ser None.")
     if not error_text:
         return
+        
     print('\n' + Fore.RED + Style.BRIGHT + '!' * 60)
     print('   [FATAL SYSTEM CRASH DETECTED]')
     print('!' * 60 + Style.RESET_ALL)
+    
     info = analyze_crash(error_text)
-    if info['file']:
+    if info.get('file'):
         _render_dual_forensic_report(info)
+    
+    # --- FIX CRÍTICO: MODO NÃO-INTERATIVO ---
+    if not sys.stdin.isatty():
+        print(f"\n{Fore.YELLOW}[INFO] Lab/Modo Automático detectado. Pulando menu de resgate.{Style.RESET_ALL}")
+        print(f"\n{Fore.RED}--- ERRO ORIGINAL ---{Style.RESET_ALL}")
+        print(error_text)
+        return
+
     print(f'\n{Fore.WHITE}{Style.BRIGHT}--- RESCUE OPTIONS ---{Style.RESET_ALL}')
     print(f'{Fore.YELLOW}1.{Style.RESET_ALL} [GIT] Revert file to {Fore.GREEN}STABLE{Style.RESET_ALL} version.')
     print(f'{Fore.YELLOW}2.{Style.RESET_ALL} [EDIT] Open editor to fix manually.')
     print(f'{Fore.YELLOW}3.{Style.RESET_ALL} [INFO] View full traceback.')
-    _handle_user_choice(input(f'\n{Fore.CYAN}Choice (1-3): {Style.RESET_ALL}').strip(), info, error_text)
+    
+    try:
+        choice = input(f'\n{Fore.CYAN}Choice (1-3): {Style.RESET_ALL}').strip()
+        _handle_user_choice(choice, info, error_text)
+    except (EOFError, KeyboardInterrupt):
+        print(f"\n{Fore.YELLOW}Saindo...{Style.RESET_ALL}")
 
 def _render_dual_forensic_report(info: dict):
     """Renders visual contrast between broken and stable code (Chief-Gold UI)."""
     if info is None:
         raise ValueError("_render_dual_forensic_report: dict 'info' não pode ser None.")
-    print(f'{Fore.RED}{Style.BRIGHT}REASON: {info['error']}{Style.RESET_ALL}')
-    print(f'{Fore.WHITE}LOC:    {info['file']}:{info['line']}{Style.RESET_ALL}')
+    print(f"{Fore.RED}{Style.BRIGHT}REASON: {info['error']}{Style.RESET_ALL}")
+    print(f"{Fore.WHITE}LOC:    {info['file']}:{info['line']}{Style.RESET_ALL}")
     print(f'\n{Fore.RED}{Style.BRIGHT}--- BROKEN CONTEXT (Local File) ---{Style.RESET_ALL}')
     local_ctx = get_code_context(info['file'], info['line'], source_type='local')
     print(local_ctx if local_ctx else '   [!] Could not read local file.')
@@ -145,7 +158,7 @@ def _handle_user_choice(choice: str, info: dict, original_error: str):
     """Executes the chosen rescue action (MPoT-4)."""
     if choice == '1' and info['file']:
         perform_post_mortem(info)
-        print(f'{Fore.YELLOW}Reverting {info['file']}...{Style.RESET_ALL}')
+        print(f"{Fore.YELLOW}Reverting {info['file']}...{Style.RESET_ALL}")
         run_git_command(['checkout', info['file']])
         print(f'{Fore.GREEN}Reversion complete.{Style.RESET_ALL}')
         save_crash_memory(info, 'REVERTED')
@@ -164,7 +177,7 @@ def _open_best_editor(filepath: str, line: int):
     if os.name != 'nt':
         for ed in ['micro', 'nano', 'vim', 'vi']:
             if find_executable(ed):
-                args = [abs_filepath + f':{line}'] if ed == 'micro' else [f'+{line}', abs_filepath]
+                args = [abs_filepath + f":{line}"] if ed == 'micro' else [f"+{line}", abs_filepath]
                 sub_run([ed] + args, shell=False)
                 return
     else:
@@ -202,7 +215,7 @@ def get_git_context(filepath, linenum):
     """
     try:
         rel_path = os.path.relpath(filepath, os.getcwd()).replace('\\', '/')
-        content_old = run_git_command(['show', f'HEAD:{rel_path}'])
+        content_old = run_git_command(['show', f"HEAD:{rel_path}"])
         if not content_old:
             return None
         lines = content_old.splitlines()

@@ -96,10 +96,10 @@ def _process_file_for_hashes(file_path: str, hashes: dict):
         pass
 
 def _generate_clone_findings(h_val, occurrences):
-    return [{'severity': 'INFO', 'category': 'DUPLICATION', 'message': f'Lógica duplicada (Hash {h_val[:6]}). Funções: {o['name']}', 'file': o['file'], 'line': o['line']} for o in occurrences]
+    return [{'severity': 'INFO', 'category': 'DUPLICATION', 'message': f"Lógica duplicada (Hash {h_val[:6]}). Funções: {o['name']}", 'file': o['file'], 'line': o['line']} for o in occurrences]
 
 def _format_results(results_list):
-    return [{'severity': 'INFO', 'category': 'DUPLICATION', 'message': f'Match Vulcan: {a['name']} == {b['name']}', 'file': a['file'], 'line': a['line']} for a, b in results_list]
+    return [{'severity': 'INFO', 'category': 'DUPLICATION', 'message': f"Match Vulcan: {a['name']} == {b['name']}", 'file': a['file'], 'line': a['line']} for a, b in results_list]
 if __name__ == '__main__':
     try:
         raw_in = sys.stdin.read().strip()

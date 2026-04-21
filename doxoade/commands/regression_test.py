@@ -45,11 +45,11 @@ def _render_final_verdict(ev: dict):
     if not ev:
         raise ValueError('Evidence data required for rendering.')
     if ev['new_lint_errors']:
-        echo(f'\n{Fore.RED}✘ REGRESSÃO ESTÁTICA: {len(ev['new_lint_errors'])} novos bugs detectados.')
+        echo(f"\n{Fore.RED}✘ REGRESSÃO ESTÁTICA: {len(ev['new_lint_errors'])} novos bugs detectados.")
         for h in ev['new_lint_errors'][:3]:
             echo(f'   > Hash: {h}')
     else:
-        echo(f'\n{Fore.GREEN}✔ Estabilidade Estática: Nenhuma regressão ({ev['lint_total']} ativos).')
+        echo(f"\n{Fore.GREEN}✔ Estabilidade Estática: Nenhuma regressão ({ev['lint_total']} ativos).")
     status_map = {0: 'PASS', 1: 'FAIL', 2: 'ERROR', 5: 'NO_TESTS'}
     curr_status = status_map.get(ev['test_exit_code'], 'UNKNOWN')
     canon_status = status_map.get(ev['canon_test_exit'], 'UNKNOWN')
@@ -59,7 +59,7 @@ def _render_final_verdict(ev: dict):
     else:
         echo(f'{Fore.RED}✘ REGRESSÃO DE TESTES: O sistema PIOROU! [{curr_status}] (Era: {canon_status})')
         if ev['verbose']:
-            echo(f'\n{ev['test_output']}')
+            echo(f"\n{ev['test_output']}")
     echo('-' * 50)
     is_unstable = ev['new_lint_errors'] or (ev['test_exit_code'] != 0 and ev['test_exit_code'] > ev['canon_test_exit'])
     if is_unstable:

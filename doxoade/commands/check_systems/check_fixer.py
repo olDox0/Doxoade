@@ -26,4 +26,4 @@ def apply_fixes_to_state(state, fix_specify=None):
             for f in file_findings:
                 var_name = f.get('message', '').split("'")[1] if "'" in f.get('message', '') else None
                 if fixer.apply_fix(f['file'], f['line'], f.get('suggestion_action'), {'var_name': var_name}):
-                    echo(f'{Fore.GREEN}   [ FIX-OK ] {Fore.WHITE}{os.path.basename(f['file'])}:{f['line']}')
+                    echo(f"{Fore.GREEN}   [ FIX-OK ] {Fore.WHITE}{os.path.basename(f['file'])}:{f['line']}")

@@ -96,7 +96,7 @@ def doctor(module, srcdir, retries):
     from doxoade.tools.vulcan.diagnostic import VulcanDiagnostic
     diag = VulcanDiagnostic(project_root)
     ok, results = diag.check_environment()
-    click.echo(f'Diagnostic: compiler_ok={results.get('compiler')} cython={results.get('cython')}')
+    click.echo(f"Diagnostic: compiler_ok={results.get('compiler')} cython={results.get('cython')}")
     from doxoade.tools.vulcan.abi_gate import run_abi_gate
     run_abi_gate(project_root)
     if module:

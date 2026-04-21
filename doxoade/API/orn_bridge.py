@@ -44,7 +44,7 @@ def _build_prompt(path: str, summary: dict[str, int], findings: list[dict[str, A
         line_ctx = _line_context(file_path, int(line) if str(line).isdigit() else None)
         findings_text.append(f'{err_name} em {file_name} linha {line}: "{snippet}"{line_ctx}')
     findings_block = '\n'.join((f'- {x}' for x in findings_text)) if findings_text else '- sem detalhes'
-    return f'ORN, responda com sugestão de solução direta com codigo.\nAlvo: {Path(path).name}\nResumo: critical={summary.get('critical', 0)} errors={summary.get('errors', 0)}\nErros:\n{findings_block}'
+    return f"ORN, responda com sugestão de solução direta com codigo.\nAlvo: {Path(path).name}\nResumo: critical={summary.get('critical', 0)} errors={summary.get('errors', 0)}\nErros:\n{findings_block}"
 
 def _line_context(file_path: Path, line: int | None) -> str:
     if not line or line < 1:
@@ -246,7 +246,7 @@ def dispatch_check_errors_to_orn(*, path: str, summary: dict[str, int], findings
         return [BridgeAttempt(mode='unavailable', ok=False, detail="ORN não localizado (defina ORN_CMD ou ORN_BIN, ou deixe 'orn' no PATH)")]
     _register_orn_location(orn_target, source)
     wd = f' (cwd={orn_target.workdir})' if orn_target.workdir else ''
-    attempts.append(BridgeAttempt(mode='locator', ok=True, detail=f'{source} -> {' '.join(orn_target.command)}{wd}'))
+    attempts.append(BridgeAttempt(mode='locator', ok=True, detail=f"{source} -> {' '.join(orn_target.command)}{wd}"))
     prompt = _build_prompt(path, summary, findings)
     timeout_s = int(os.environ.get('DOXOADE_ORN_TIMEOUT', '25'))
     max_tokens = int(os.environ.get('DOXOADE_ORN_MAX_TOKENS', '96'))

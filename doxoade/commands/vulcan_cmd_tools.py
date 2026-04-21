@@ -26,7 +26,7 @@ def _simd_debug_report():
     import shutil
     from doxoade.tools.vulcan import simd_detector as _sd
     click.echo(f'\n{Fore.CYAN}{Style.BRIGHT}  ⬡ VULCAN SIMD — DIAGNÓSTICO DE DETECÇÃO{Style.RESET_ALL}')
-    click.echo(f'  {'-' * 55}')
+    click.echo(f"  {'-' * 55}")
     strategies = [('py-cpuinfo', _sd._detect_cpuinfo), ('/proc/cpuinfo', _sd._detect_proc_cpuinfo), ('kernel32', _sd._detect_windows_kernel32), ('sysctl', _sd._detect_sysctl), ('cpuid-probe', _sd._detect_cpuid), ('model-string', lambda: _sd._refine_via_model_string(_sd._detect_fallback()) if hasattr(_sd, '_refine_via_model_string') else None)]
     results = []
     for name, fn in strategies:
@@ -80,7 +80,7 @@ def vulcan_alloc(target, verbose, fix, dry_run, pyx, clean_backups):
             click.echo(f'{Fore.GREEN}Nenhum arquivo de backup encontrado em: {search_root}{Style.RESET_ALL}')
             return
         click.echo(f'\n{Fore.CYAN}{Style.BRIGHT}  Vulcan Alloc - Limpeza de Backups{Style.RESET_ALL}')
-        click.echo(f'  {'─' * 55}')
+        click.echo(f"  {'─' * 55}")
         removed = 0
         for bak in sorted(bak_files):
             rel = bak.relative_to(search_root) if bak.is_relative_to(search_root) else bak.name
@@ -98,8 +98,8 @@ def vulcan_alloc(target, verbose, fix, dry_run, pyx, clean_backups):
         click.echo(f'{Fore.YELLOW}Nenhum arquivo {ext} encontrado em: {root}{Style.RESET_ALL}')
         return
     click.echo(f'\n{Fore.CYAN}{Style.BRIGHT}  ⬡ VULCAN ALLOC — Detecção de Objetos Temporários{Style.RESET_ALL}')
-    click.echo(f'  {'─' * 55}')
-    click.echo(f'  Arquivos: {len(files)} {ext}  |  Modo: {('fix' if fix else 'scan')}\n')
+    click.echo(f"  {'─' * 55}")
+    click.echo(f"  Arquivos: {len(files)} {ext}  |  Modo: {('fix' if fix else 'scan')}\n")
     total_score = total_fixed = total_allocs = hot_files = 0
     for fpath in sorted(files):
         try:
@@ -130,7 +130,7 @@ def vulcan_alloc(target, verbose, fix, dry_run, pyx, clean_backups):
                     total_allocs += result.allocs_removed
         except Exception as e:
             click.echo(f'  {Fore.RED}[ERRO]{Style.RESET_ALL} {fpath.name}: {e}')
-    click.echo(f'\n  {'─' * 55}')
+    click.echo(f"\n  {'─' * 55}")
     click.echo(f'  Arquivos com alocações críticas : {hot_files}')
     click.echo(f'  Score total                     : {total_score}')
     if fix:
@@ -162,13 +162,13 @@ def vulcan_simd(bench, out_json, cap_level, debug):
         click.echo(_json.dumps(get_simd_report(caps), indent=2))
         return
     click.echo(f'\n{Fore.CYAN}{Style.BRIGHT}  ⬡ VULCAN SIMD — CPU Capabilities{Style.RESET_ALL}')
-    click.echo(f'  {'-' * 55}')
+    click.echo(f"  {'-' * 55}")
     click.echo(f'  Nível         : {Fore.GREEN}{caps.best.upper()}{Style.RESET_ALL}')
     click.echo(f'  AVX           : {(Fore.GREEN if caps.avx else Fore.RED)}{caps.avx}{Style.RESET_ALL}')
     click.echo(f'  AVX2          : {(Fore.GREEN if caps.avx2 else Fore.RED)}{caps.avx2}{Style.RESET_ALL}')
     click.echo(f'  AVX-512F      : {(Fore.GREEN if caps.avx512f else Fore.RED)}{caps.avx512f}{Style.RESET_ALL}')
     click.echo(f'  FMA           : {(Fore.GREEN if caps.fma else Fore.RED)}{caps.fma}{Style.RESET_ALL}')
-    click.echo(f'  CFLAGS        : {Style.DIM}{' '.join(caps.cflags)}{Style.RESET_ALL}')
+    click.echo(f"  CFLAGS        : {Style.DIM}{' '.join(caps.cflags)}{Style.RESET_ALL}")
     click.echo(f'  Ganho estimado: {Fore.CYAN}{estimate_gain(caps)}{Style.RESET_ALL}')
     if bench:
         click.echo(f'\n{Fore.CYAN}  ⬡ Micro-benchmark (numpy){Style.RESET_ALL}')
@@ -178,8 +178,8 @@ def vulcan_simd(bench, out_json, cap_level, debug):
             a = np.random.rand(N)
             b = np.random.rand(N)
             benchmarks = [('add', lambda: np.add(a, b, out=np.empty(N))), ('mul', lambda: np.multiply(a, b, out=np.empty(N))), ('sqrt', lambda: np.sqrt(a, out=np.empty(N)))]
-            click.echo(f'\n  {'Operação':<20} {'N':>12}  {'Média':>12}  {'GB/s':>8}')
-            click.echo(f'  {'-' * 20} {'-' * 12}  {'-' * 12}  {'-' * 8}')
+            click.echo(f"\n  {'Operação':<20} {'N':>12}  {'Média':>12}  {'GB/s':>8}")
+            click.echo(f"  {'-' * 20} {'-' * 12}  {'-' * 12}  {'-' * 8}")
             for name, fn in benchmarks:
                 fn()
                 REPS = 10
@@ -244,12 +244,12 @@ def vulcan_opt(path, force, stats):
                 click.echo(f'   {Fore.YELLOW}↷{Style.RESET_ALL} {(py_file.relative_to(target) if py_file.is_relative_to(target) else py_file.name)}  {Style.DIM}(sem ganho){Style.RESET_ALL}')
         d = opt_dir(Path(root))
         opt_count = len(list(d.glob('opt_*.py')))
-        click.echo(f'\n{Fore.CYAN}{'─' * 55}{Style.RESET_ALL}')
+        click.echo(f"\n{Fore.CYAN}{'─' * 55}{Style.RESET_ALL}")
         click.echo(f'  {Fore.GREEN}✔ {ok_count} gerado(s){Style.RESET_ALL}  {Fore.BLUE}↷ {skip_count} cache(s){Style.RESET_ALL}  {Fore.CYAN}Total opt_py: {opt_count}{Style.RESET_ALL}')
         if total_saved > 0:
             click.echo(f'  {Fore.GREEN}⚡ {total_saved:,} bytes economizados ({total_saved / 1024:.1f} KiB){Style.RESET_ALL}')
         click.echo(f'\n{Fore.CYAN}[INFO] Tier 2 ativo. Quando binário falhar, o Python otimizado será usado automaticamente.{Style.RESET_ALL}')
-        click.echo(f'{Fore.CYAN}{'─' * 55}{Style.RESET_ALL}')
+        click.echo(f"{Fore.CYAN}{'─' * 55}{Style.RESET_ALL}")
     except Exception as e:
         _print_vulcan_forensic('OPT', e)
         sys.exit(1)

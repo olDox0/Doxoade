@@ -51,13 +51,13 @@ def _detect_replacements(src: str, modules: set[str], package_depth: int, packag
                 resolved = _resolve_relative_module(package_name, node.level, node.module)
                 if resolved and _module_exists(resolved, modules) and (node.level >= 3):
                     repl[node.module] = resolved
-                    messages.append(f'{'.' * node.level}{node.module} -> {resolved}')
+                    messages.append(f"{'.' * node.level}{node.module} -> {resolved}")
                 elif node.level > package_depth:
                     suffix = node.module
                     candidates = [m for m in modules if m == suffix or m.endswith('.' + suffix)]
                     if len(candidates) == 1:
                         repl[node.module] = candidates[0]
-                        messages.append(f'{'.' * node.level}{node.module} -> {candidates[0]}')
+                        messages.append(f"{'.' * node.level}{node.module} -> {candidates[0]}")
         new_stmt = _build_import_stmt(node, repl)
         if new_stmt:
             replacements[node] = new_stmt

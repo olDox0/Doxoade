@@ -74,14 +74,14 @@ class MarkdownRenderer:
     def _render_h1(self, text):
         """Header Nível 1: Caixa Sólida / Destaque Máximo."""
         click.echo('')
-        click.echo(f'{Fore.CYAN}{Style.BRIGHT}╔{'═' * (len(text) + 4)}╗')
+        click.echo(f"{Fore.CYAN}{Style.BRIGHT}╔{'═' * (len(text) + 4)}╗")
         click.echo(f'║  {Fore.WHITE}{text}  {Fore.CYAN}║')
-        click.echo(f'╚{'═' * (len(text) + 4)}╝{Style.RESET_ALL}')
+        click.echo(f"╚{'═' * (len(text) + 4)}╝{Style.RESET_ALL}")
 
     def _render_h2(self, text):
         """Header Nível 2: Sublinhado e Cor Quente."""
         click.echo(f'\n{Fore.MAGENTA}{Style.BRIGHT}■ {text.upper()}{Style.RESET_ALL}')
-        click.echo(f'{Fore.MAGENTA}{'─' * 50}{Style.RESET_ALL}')
+        click.echo(f"{Fore.MAGENTA}{'─' * 50}{Style.RESET_ALL}")
 
     def _render_h3(self, text):
         """Header Nível 3: Texto Simples Colorido."""

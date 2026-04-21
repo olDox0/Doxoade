@@ -20,7 +20,7 @@ def kill_process_tree(pid):
         import sys as exc_sys
         from traceback import print_tb as exc_trace
         _, exc_obj, exc_tb = exc_sys.exc_info()
-        print(f'\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n')
+        print(f"\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n")
         exc_trace(exc_tb)
         pass
 

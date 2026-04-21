@@ -236,7 +236,7 @@ def vulcan_probe(target_path, verbose):
         for bin_path, pyd_stem, pyd_hash in orphan:
             click.echo(f'    {Fore.RED}✘{Fore.RESET} {bin_path.name}' + (f'  {Fore.YELLOW}(hash: {pyd_hash}){Fore.RESET}' if pyd_hash else ''))
     total = len(binaries)
-    click.echo(f'\n  {Fore.CYAN}{'─' * 55}{Fore.RESET}')
+    click.echo(f"\n  {Fore.CYAN}{'─' * 55}{Fore.RESET}")
     click.echo(f'  Total: {total}  │  {Fore.GREEN}Ativos: {len(active)}{Fore.RESET}  │  {Fore.YELLOW}Stale: {len(stale)}{Fore.RESET}  │  {Fore.RED}Órfãos: {len(orphan)}{Fore.RESET}')
     if len(active) == total:
         click.echo(f'\n  {Fore.GREEN}{Style.BRIGHT}✅ 100% dos módulos redirecionados para PYD.{Style.RESET_ALL}')
@@ -359,21 +359,21 @@ def vulcan_verify(target_path, verbose):
     redirected = [r for r in results if r.get('redirected')]
     not_redir = [r for r in results if not r.get('redirected') and r.get('src')]
     orphans = [r for r in results if r.get('status') == 'ÓRFÃO']
-    click.echo(f'\n{Fore.CYAN}  {'─' * 55}{Style.RESET_ALL}')
+    click.echo(f"\n{Fore.CYAN}  {'─' * 55}{Style.RESET_ALL}")
     if redirected:
         click.echo(f'  {Fore.GREEN}{Style.BRIGHT}✔ REDIRECIONADOS ({len(redirected)}):{Style.RESET_ALL}')
         for r in redirected:
-            click.echo(f'   {Fore.GREEN}✔{Style.RESET_ALL} {r['src']}')
+            click.echo(f"   {Fore.GREEN}✔{Style.RESET_ALL} {r['src']}")
             if verbose:
-                click.echo(f'     → {Fore.CYAN}{r.get('file', '')}{Style.RESET_ALL}')
+                click.echo(f"     → {Fore.CYAN}{r.get('file', '')}{Style.RESET_ALL}")
     if not_redir:
         click.echo(f'\n  {Fore.YELLOW}{Style.BRIGHT}⚠ NÃO REDIRECIONADOS ({len(not_redir)}):{Style.RESET_ALL}')
         for r in not_redir:
-            click.echo(f'   {Fore.YELLOW}⚠{Style.RESET_ALL} {r['src']}  {Style.DIM}({r.get('error', '')}){Style.RESET_ALL}')
+            click.echo(f"   {Fore.YELLOW}⚠{Style.RESET_ALL} {r['src']}  {Style.DIM}({r.get('error', '')}){Style.RESET_ALL}")
     if orphans:
         click.echo(f'\n  {Fore.RED}{Style.BRIGHT}✘ ÓRFÃOS ({len(orphans)}):{Style.RESET_ALL}')
         for r in orphans:
-            click.echo(f'   {Fore.RED}✘{Style.RESET_ALL} {r['bin']}')
+            click.echo(f"   {Fore.RED}✘{Style.RESET_ALL} {r['bin']}")
         click.echo(f'  {Fore.CYAN}  Limpe com: doxoade vulcan purge{Style.RESET_ALL}')
     total = len(results)
     pct = len(redirected) / total * 100 if total else 0
@@ -498,12 +498,12 @@ def _render_bridge_stats(cursor, where: str, params: list):
         click.echo(f'\n{Fore.YELLOW}  Nenhum dado para agregar.{Style.RESET_ALL}')
         return
     click.echo(f'\n{Fore.CYAN}{Style.BRIGHT}  ⬡ PERFORMANCE AGREGADA — PROJETOS EXTERNOS{Style.RESET_ALL}')
-    hdr = f'  {'PROJETO':<25} │ {'Exec':>5} │ {'Avg(ms)':>8} │ {'Max(ms)':>8} │ {'CPU%':>6} │ {'RAM MB':>7} │ {'IO_R MB':>8} │ {'IO_W MB':>8}'
+    hdr = f"  {'PROJETO':<25} │ {'Exec':>5} │ {'Avg(ms)':>8} │ {'Max(ms)':>8} │ {'CPU%':>6} │ {'RAM MB':>7} │ {'IO_R MB':>8} │ {'IO_W MB':>8}"
     click.echo(f'\n{Fore.WHITE}{hdr}{Style.RESET_ALL}')
     click.echo('  ' + '─' * (len(hdr) - 2))
     for row in rows:
         proj = Path(row['working_dir']).name[:25] if row['working_dir'] else 'desconhecido'
-        click.echo(f'  {Fore.CYAN}{proj:<25}{Style.RESET_ALL} │ {int(row['execucoes']):>5} │ {row['avg_dur']:>8.0f} │ {row['max_dur']:>8.0f} │ {row['avg_cpu'] or 0:>6.1f} │ {row['avg_ram'] or 0:>7.1f} │ {row['total_io_r'] or 0:>8.2f} │ {row['total_io_w'] or 0:>8.2f}')
+        click.echo(f"  {Fore.CYAN}{proj:<25}{Style.RESET_ALL} │ {int(row['execucoes']):>5} │ {row['avg_dur']:>8.0f} │ {row['max_dur']:>8.0f} │ {row['avg_cpu'] or 0:>6.1f} │ {row['avg_ram'] or 0:>7.1f} │ {row['total_io_r'] or 0:>8.2f} │ {row['total_io_w'] or 0:>8.2f}")
     click.echo()
 
 def _render_bridge_libs(cursor, where: str, params: list):
@@ -542,5 +542,5 @@ def _render_bridge_libs(cursor, where: str, params: list):
         click.echo(f'\n  {Fore.YELLOW}{Style.BRIGHT}◈ {proj}{Style.RESET_ALL}  {Style.DIM}({len(lib_map)} lib(s) distintas){Style.RESET_ALL}')
         for name, data in sorted(lib_map.items(), key=lambda x: x[1]['count'], reverse=True):
             ver_str = ', '.join(sorted(data['versions'])) if data['versions'] else '—'
-            click.echo(f'    {Fore.CYAN}{name:<25}{Style.RESET_ALL} v{ver_str:<18} {Style.DIM}{data['count']}× detectada{Style.RESET_ALL}')
+            click.echo(f"    {Fore.CYAN}{name:<25}{Style.RESET_ALL} v{ver_str:<18} {Style.DIM}{data['count']}× detectada{Style.RESET_ALL}")
     click.echo()

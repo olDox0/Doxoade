@@ -37,7 +37,7 @@ def _render_entry(row, verbose: bool, flow: bool, context: int, after: int):
     status = Fore.GREEN + '✔' if row['exit_code'] == 0 else Fore.RED + '✘'
     ts = row['timestamp'][:19].replace('T', ' ')
     cmd = row['command_name'].upper()
-    click.echo(f'\n{status} {Fore.WHITE}{ts} | {cmd} ({row['duration_ms']:.0f}ms)')
+    click.echo(f"\n{status} {Fore.WHITE}{ts} | {cmd} ({row['duration_ms']:.0f}ms)")
     if cmd.startswith('VULCAN_EXT_'):
         full_cmd = row['full_command_line'] or ''
         if full_cmd:
@@ -45,8 +45,8 @@ def _render_entry(row, verbose: bool, flow: bool, context: int, after: int):
             exe = parts[0].replace('\\', '/').split('/')[-1]
             args = parts[1] if len(parts) > 1 else ''
             click.echo(f'   {Style.DIM}cmd: {Fore.CYAN}{exe}{Style.RESET_ALL}{Style.DIM} {args}{Style.RESET_ALL}')
-    io.render_resource_line('PROCESS', row['cpu_percent'], f'{row['cpu_percent']:.1f}%', Fore.YELLOW, 100, '')
-    io.render_resource_line('MEMORY', row['peak_memory_mb'], f'{row['peak_memory_mb']:.1f} MB', Fore.MAGENTA, 512, '')
+    io.render_resource_line('PROCESS', row['cpu_percent'], f"{row['cpu_percent']:.1f}%", Fore.YELLOW, 100, '')
+    io.render_resource_line('MEMORY', row['peak_memory_mb'], f"{row['peak_memory_mb']:.1f} MB", Fore.MAGENTA, 512, '')
     if row['system_info']:
         try:
             sys_info = json.loads(row['system_info'])

@@ -37,7 +37,7 @@ def log(limit, snippets):
             return
         for row in reversed(findings):
             f_dict = dict(row)
-            f_dict['details'] = f'CMD: {f_dict.get('command')} | Data: {f_dict.get('timestamp')}'
+            f_dict['details'] = f"CMD: {f_dict.get('command')} | Data: {f_dict.get('timestamp')}"
             if snippets and f_dict.get('file') and f_dict.get('line'):
                 full_p = os.path.join(f_dict.get('project_path', ''), f_dict['file'])
                 if os.path.exists(full_p):
@@ -59,7 +59,7 @@ def _build_log_query(search_term, command, file, category, severity, after, befo
         params.append(f'%{command}%')
     if file:
         clauses.append('f.file LIKE ?')
-        params.append(f'%{file.replace('\\', '/')}%')
+        params.append(f"%{file.replace('\\', '/')}%")
     if category:
         clauses.append('f.category = ?')
         params.append(category.upper())
@@ -79,7 +79,7 @@ def _build_log_query(search_term, command, file, category, severity, after, befo
 
 def _render_log_entry(f_dict, show_snippets):
     """Especialista em UI de Log."""
-    f_dict['details'] = f'CMD: {f_dict.get('command')} | Data: {f_dict.get('timestamp')}'
+    f_dict['details'] = f"CMD: {f_dict.get('command')} | Data: {f_dict.get('timestamp')}"
     if show_snippets and f_dict.get('file') and f_dict.get('line'):
         full_p = os.path.join(f_dict.get('project_path', ''), f_dict['file'])
         if os.path.exists(full_p):
@@ -148,7 +148,7 @@ def create_pipeline(ctx, filename, commands):
     click.echo(Fore.CYAN + f'--- [CREATE-PIPELINE] Criando arquivo de pipeline: {filename} ---')
     try:
         with open(filename, 'w', encoding='utf-8') as f:
-            f.write(f'# Pipeline gerado pelo doxoade em: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n')
+            f.write(f"# Pipeline gerado pelo doxoade em: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             for command in commands:
                 f.write(f'{command}\n')
         click.echo(Fore.GREEN + f"[OK] Pipeline '{filename}' criado com sucesso com {len(commands)} passo(s).")
@@ -163,9 +163,9 @@ def _display_log_entry(cursor, event, index, total, show_snippets=False):
     ts_local = event['timestamp']
     header = f'--- Entrada de Log #{index}/{total} ({ts_local}) ---'
     click.echo(Fore.CYAN + Style.BRIGHT + header)
-    click.echo(Fore.WHITE + f'Comando: {event['command']} (Doxoade v{event['doxoade_version']})')
-    click.echo(Fore.WHITE + f'Projeto: {event['project_path']}')
-    click.echo(Fore.WHITE + Style.DIM + f'Tempo: {event['execution_time_ms']:.2f}ms')
+    click.echo(Fore.WHITE + f"Comando: {event['command']} (Doxoade v{event['doxoade_version']})")
+    click.echo(Fore.WHITE + f"Projeto: {event['project_path']}")
+    click.echo(Fore.WHITE + Style.DIM + f"Tempo: {event['execution_time_ms']:.2f}ms")
     cursor.execute('SELECT * FROM findings WHERE event_id = ?', (event['id'],))
     findings = cursor.fetchall()
     if not findings:

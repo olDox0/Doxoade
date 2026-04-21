@@ -112,7 +112,7 @@ def _print_summary(total_ms: float, max_ms: float, max_line: str, count: int, th
         return
     total_color = _ms_color(total_ms)
     max_color = _ms_color(max_ms)
-    sep = f'{Style.DIM}{'─' * 80}{_RESET}'
+    sep = f"{Style.DIM}{'─' * 80}{_RESET}"
     click.echo(f'\n{sep}')
     click.echo(f'   {Style.BRIGHT}Sumário do Fluxo{_RESET}  {Style.DIM}({count} linhas exibidas' + (f', filtro ≥ {threshold_ms} ms' if threshold_ms > 0 else '') + f'){_RESET}')
     click.echo(f'   {Style.BRIGHT}Total acumulado:{_RESET}  {total_color}{total_ms:.1f} ms{_RESET}')

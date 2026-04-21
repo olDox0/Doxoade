@@ -71,7 +71,7 @@ def auto(ctx, prompt, filepath):
         final_success = True
         for i, step in enumerate(pipeline_steps, 1):
             if step['type'] == 'echo':
-                click.echo(Fore.MAGENTA + Style.BRIGHT + f'\n--- [AUTO] {step['value']} ---')
+                click.echo(Fore.MAGENTA + Style.BRIGHT + f"\n--- [AUTO] {step['value']} ---")
                 continue
             command_str = step['value']
             inputs = step['inputs']
@@ -85,9 +85,9 @@ def auto(ctx, prompt, filepath):
         click.echo(Fore.CYAN + Style.BRIGHT + '\n--- [AUTO] Sumário do Pipeline ---')
         for res in results:
             if res['status'] == 'sucesso':
-                click.echo(Fore.GREEN + f'[OK] Sucesso -> {res['command']}')
+                click.echo(Fore.GREEN + f"[OK] Sucesso -> {res['command']}")
             else:
-                click.echo(Fore.RED + f'[ERRO] Falha (código {res['returncode']}) -> {res['command']}')
+                click.echo(Fore.RED + f"[ERRO] Falha (código {res['returncode']}) -> {res['command']}")
         click.echo('-' * 40)
         if final_success:
             click.echo(Fore.GREEN + Style.BRIGHT + '[SUCESSO] Pipeline concluído com sucesso!')

@@ -105,12 +105,12 @@ def _render_pentest_results(file_path: str, vulns: list, show_real: bool):
     for v in vulns:
         is_high = v['status'] == 'EXPLOITABLE'
         color = Fore.RED if is_high else Fore.CYAN
-        echo(f'\n{color}[ {v['status']} ] {file_path}:{v['line']}')
-        echo(f'   Sink: {v['function']}() | Impact: {v['impact']}')
+        echo(f"\n{color}[ {v['status']} ] {file_path}:{v['line']}")
+        echo(f"   Sink: {v['function']}() | Impact: {v['impact']}")
         if is_high:
             t = v['trigger']
             echo(f'   {Fore.RED}{Style.BRIGHT}VULNERABILITY CONFIRMED!')
-            echo(f'   Path: {t['origin']}() -> {t['var']} -> {v['function']}()')
+            echo(f"   Path: {t['origin']}() -> {t['var']} -> {v['function']}()")
             if show_real:
                 poc = generate_exploit_poc(v['function'])
                 echo(f'   [!] PoC Payload: {Fore.WHITE}{poc}')

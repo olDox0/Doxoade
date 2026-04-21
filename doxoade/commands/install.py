@@ -144,7 +144,7 @@ def install(ctx, packages, uninstall, optimize, wheel):
             logger.add_finding('CRITICAL', msg, category='VENV')
             click.echo(Fore.RED + f'[ERRO] {msg}')
             sys.exit(1)
-        click.echo(Fore.CYAN + f'--- Instalando pacote(s): {', '.join(packages)} ---')
+        click.echo(Fore.CYAN + f"--- Instalando pacote(s): {', '.join(packages)} ---")
         for package_name in packages:
             installed_version = _get_installed_version(venv_python, package_name)
             if installed_version:

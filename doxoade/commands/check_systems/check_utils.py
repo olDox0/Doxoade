@@ -22,7 +22,7 @@ def render_archived_view(state: CheckState):
         _render_single_file_dossier(file_path, file_findings)
     summary = state.summary
     echo(f'{Fore.BLUE}{Style.BRIGHT}─' * 75 + Style.RESET_ALL)
-    echo(f'  {Fore.WHITE}SOMA TOTAL: {Fore.RED}{summary.get('errors', 0)} Erros{Fore.WHITE} | {Fore.YELLOW}{summary.get('warnings', 0)} Avisos')
+    echo(f"  {Fore.WHITE}SOMA TOTAL: {Fore.RED}{summary.get('errors', 0)} Erros{Fore.WHITE} | {Fore.YELLOW}{summary.get('warnings', 0)} Avisos")
     echo(f'{Fore.BLUE}{Style.BRIGHT}─' * 75 + Style.RESET_ALL)
     if state.alb_files:
         _render_alb_report(state.alb_files)
@@ -117,7 +117,7 @@ def _render_single_file_dossier(file_path, findings):
         cat = f.get('category', 'STYLE').upper()
         line_err = f.get('line', 0)
         color = cat_colors.get(cat, Fore.YELLOW)
-        echo(f'   {color}■{Fore.WHITE}{Style.DIM} [ L-{str(line_err).ljust(4)}] {Style.NORMAL}{color}{cat:<15}{Fore.WHITE}: {f['message']}{Style.RESET_ALL}')
+        echo(f"   {color}■{Fore.WHITE}{Style.DIM} [ L-{str(line_err).ljust(4)}] {Style.NORMAL}{color}{cat:<15}{Fore.WHITE}: {f['message']}{Style.RESET_ALL}")
         snippet = f.get('snippet')
         if snippet:
             for snip_line, snip_text in sorted(snippet.items()):
@@ -126,4 +126,4 @@ def _render_single_file_dossier(file_path, findings):
                 s_color = Fore.WHITE + Style.BRIGHT if is_target else Fore.WHITE + Style.DIM
                 echo(f'{s_color}{prefix}{snip_line:4}: {snip_text}{Style.RESET_ALL}')
         if f.get('suggestion_action'):
-            echo(f'      {Fore.CYAN}💡 AÇÃO SUGERIDA: {Fore.GREEN}{Style.BRIGHT}{f['suggestion_action']}{Style.RESET_ALL}')
+            echo(f"      {Fore.CYAN}💡 AÇÃO SUGERIDA: {Fore.GREEN}{Style.BRIGHT}{f['suggestion_action']}{Style.RESET_ALL}")

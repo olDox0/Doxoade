@@ -39,7 +39,7 @@ class VulcanDiagnostic:
             if bin_path not in os.environ['PATH']:
                 os.environ['PATH'] = bin_path + os.pathsep + os.environ['PATH']
             return True
-        self.issues.append(f'Compilador não encontrado. Instale o w64devkit em: {self.core_dir / 'thirdparty'}')
+        self.issues.append(f"Compilador não encontrado. Instale o w64devkit em: {self.core_dir / 'thirdparty'}")
         return False
 
     def _check_internal_dependency(self, package_name):
@@ -52,7 +52,7 @@ class VulcanDiagnostic:
             import sys as exc_sys
             from traceback import print_tb as exc_trace
             _, exc_obj, exc_tb = exc_sys.exc_info()
-            print(f'\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n')
+            print(f"\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\n")
             exc_trace(exc_tb)
         self.issues.append(f'Dependência interna faltando: {package_name}. (Rode: pip install {package_name})')
         return False
