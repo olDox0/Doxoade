@@ -16,16 +16,16 @@ def timeline(limit, full):
     events = cursor.fetchall()
     click.echo(Fore.CYAN + Style.BRIGHT + f'--- Timeline do Doxoade (Últimos {limit}) ---')
     for evt in reversed(events):
-        # Normalização: converte tupla para dicionário se necessário
+        # Mapeamento Real das Colunas do Doxoade (ID, UUID, Timestamp, CMD, Exit, Dir, MS)
         if isinstance(evt, tuple):
-            # Baseado na ordem padrão do seu log de eventos:
-            # 0: timestamp, 1: full_command, 2: working_dir, 3: duration, 4: exit_code
             d = {
-                'timestamp': evt[0],
-                'full_command_line': evt[1],
-                'working_dir': evt[2],
-                'duration_ms': evt[3],
-                'exit_code': evt[4]
+                'id': evt[0],
+                'uuid': evt[1],
+                'timestamp': evt[2],
+                'full_command_line': evt[3],
+                'exit_code': evt[4],
+                'working_dir': evt[5],
+                'duration_ms': evt[6]
             }
         else:
             d = evt
@@ -34,9 +34,12 @@ def timeline(limit, full):
         status_color = Fore.GREEN if exit_code == 0 else Fore.RED
         status_icon = '✔' if exit_code == 0 else '✘'
         
+        # Uso do dicionário 'd' em vez de 'evt' para evitar o erro de tupla
         click.echo(f"\n{Style.DIM}{d['timestamp']} {status_color}{status_icon} {Style.BRIGHT}{d['full_command_line']}")
         click.echo(f"{Style.DIM}   Dir: {d['working_dir']} | Tempo: {d['duration_ms']}ms")
-        cursor.execute('SELECT * FROM file_audit WHERE command_id = ?', (evt['id'],))
+        
+        # LINHA 39 CORRIGIDA:
+        cursor.execute('SELECT * FROM file_audit WHERE command_id = ?', (d['id'],))
         changes = cursor.fetchall()
         if changes:
             for change in changes:

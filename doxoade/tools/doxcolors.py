@@ -8,12 +8,9 @@ import os
 import sys
 import builtins
 import time
-import random
-import string
 import math
 import threading
 import itertools
-import shutil
 
 # --- CORE ENGINE ---
 
@@ -42,15 +39,37 @@ class AnsiCode(str):
         return str.__new__(cls, f'\x1b[{code}m')
 
 class Back: # Adicionado para corrigir o NameError
-    BLACK = AnsiCode('40');  RED = AnsiCode('41');   GREEN = AnsiCode('42')
-    YELLOW = AnsiCode('43'); BLUE = AnsiCode('44');  MAGENTA = AnsiCode('45')
-    CYAN = AnsiCode('46');   WHITE = AnsiCode('47'); RESET = AnsiCode('49')
+    BLACK   = AnsiCode('40')
+    BLUE    = AnsiCode('44')
+    CYAN    = AnsiCode('46')
+    GREEN   = AnsiCode('42')
+    MAGENTA = AnsiCode('45')
+    RED     = AnsiCode('41')
+    RESET   = AnsiCode('49')
+    WHITE   = AnsiCode('47')
+    YELLOW  = AnsiCode('43')
 
 class Fore:
-    BLACK = AnsiCode('30');        RED = AnsiCode('31');          GREEN = AnsiCode('32')
-    YELLOW = AnsiCode('33');       BLUE = AnsiCode('34');         MAGENTA = AnsiCode('35')
-    CYAN = AnsiCode('36');         WHITE = AnsiCode('37');        RESET = AnsiCode('0')
-    LIGHTBLUE_EX = AnsiCode('94'); LIGHTCYAN_EX = AnsiCode('96'); DIM = AnsiCode('2') 
+    BLACK   = AnsiCode('30')
+    BLUE    = AnsiCode('34')
+    CYAN    = AnsiCode('36')
+    DIM     = AnsiCode('2') 
+    GREEN   = AnsiCode('32')
+    MAGENTA = AnsiCode('35')
+    RED     = AnsiCode('31')
+    RESET   = AnsiCode('0')
+    WHITE   = AnsiCode('37')
+    YELLOW  = AnsiCode('33')
+    
+    LIGHTBLUE_EX    = AnsiCode('94')
+    LIGHTCYAN_EX    = AnsiCode('96')
+    LIGHTBLACK_EX   = AnsiCode('90')
+    LIGHTRED_EX     = AnsiCode('91')
+    LIGHTGREEN_EX   = AnsiCode('92')
+    LIGHTYELLOW_EX  = AnsiCode('93')
+    LIGHTMAGENTA_EX = AnsiCode('95')
+    LIGHTWHITE_EX   = AnsiCode('97')
+
     # Nexus Semantic Colors
 
     ORANGE      = AnsiCode('38;2;255;100;0')   # ORANGE
@@ -103,6 +122,9 @@ class NexusUI:
     @staticmethod
     def decode_effect(target_text, duration=1.0):
         """Efeito de decodificação 'Matrix' para revelar texto."""
+        import string
+        import random
+
         chars = string.ascii_letters + string.digits + "!@#$%^&*"
         start_time = time.time()
         while time.time() - start_time < duration:
@@ -218,6 +240,8 @@ class ProgressBar:
 
 class AsyncAnimation:
     def __init__(self, frames, interval=0.1, debug=False, ping_pong=False, base_color=""):
+        import shutil
+
         self.interval = interval
         self.running = threading.Event()
         self.lock = threading.Lock()

@@ -780,3 +780,103 @@ def _parse_skip(skip_tuple: tuple[str, ...]) -> frozenset[str]:
     base = _default_skip()
     extra = frozenset(s.strip() for s in skip_tuple if s.strip())
     return base | extra
+    
+@refactor_group.command('sandbox')
+@click.option('--distro', default='alpine', help='Nome da distro WSL.')
+@click.option('--rebuild', is_flag=True, help='Força reinstalação de dependências.')
+def refactor_sandbox(distro, rebuild):
+    """Executa Auditoria de Integridade em ambiente isolado (WSL/Alpine)."""
+    _sep(f"NEXUS SANDBOX: {distro.upper()}")
+    
+    # 1. Verificar se o WSL está disponível
+    try:
+        import subprocess
+        click.echo("🔍 Verificando ambiente WSL...")
+        subprocess.run(['wsl', '--status'], check=True, capture_output=True)
+    except:
+        raise click.ClickException("WSL não detectado ou não configurado.")
+
+    # 2. Preparar o script de bootstrap (rodará dentro do Alpine)
+    # Precisamos de python, pip e build-base para o Vulcan/Cython
+    bootstrap_cmd = (
+        "apk add --no-cache python3 py3-pip build-base python3-dev && "
+        "python3 -m venv /tmp/dox_sandbox && "
+        "/tmp/dox_sandbox/bin/pip install click colorama" # Adicione outras deps aqui
+    )
+
+    if rebuild:
+        click.echo("🛠️  Limpando e reconstruindo ambiente...")
+        subprocess.run(['wsl', '-d', distro, '-u', 'root', 'sh', '-c', bootstrap_cmd])
+
+    # 3. Sincronizar e Executar
+    # Usamos o caminho do Windows montado no /mnt/c/
+    project_root = _find_project_root(Path('.')).absolute().as_posix()
+    # Converte C:/Users/... para /mnt/c/Users/...
+    wsl_path = "/" + project_root.replace(":", "").lower()
+    
+    click.secho(f"🚀 Iniciando Smoke Test no {distro}...", fg="magenta")
+    
+    test_cmd = (
+        f"export PYTHONPATH={wsl_path} && "
+        f"/tmp/dox_sandbox/bin/python3 -m doxoade panel"
+    )
+    
+    result = subprocess.run(['wsl', '-d', distro, 'sh', '-c', test_cmd], capture_output=True, text=True)
+    
+    if result.returncode == 0:
+        click.secho("\n✅ PASSOU: O doxoade está saudável no Alpine Linux!", fg="green", bold=True)
+        click.echo(result.stdout)
+    else:
+        click.secho("\n❌ FALHOU: Erros detectados no ambiente Linux:", fg="red", bold=True)
+        click.echo(result.stderr or result.stdout)
+        # Aqui o desenvolvedor verá quais comandos (import/help) quebraram no Linux
+
+@refactor_group.command('sandbox')
+@click.option('--distro', default='alpine', help='Nome da distro WSL.')
+@click.option('--rebuild', is_flag=True, help='Força reinstalação de dependências.')
+def refactor_sandbox(distro, rebuild):
+    """Executa Auditoria de Integridade em ambiente isolado (WSL/Alpine)."""
+    _sep(f"NEXUS SANDBOX: {distro.upper()}")
+    
+    # 1. Verificar se o WSL está disponível
+    try:
+        import subprocess
+        click.echo("🔍 Verificando ambiente WSL...")
+        subprocess.run(['wsl', '--status'], check=True, capture_output=True)
+    except:
+        raise click.ClickException("WSL não detectado ou não configurado.")
+
+    # 2. Preparar o script de bootstrap (rodará dentro do Alpine)
+    # Precisamos de python, pip e build-base para o Vulcan/Cython
+    bootstrap_cmd = (
+        "apk add --no-cache python3 py3-pip build-base python3-dev && "
+        "python3 -m venv /tmp/dox_sandbox && "
+        "/tmp/dox_sandbox/bin/pip install click colorama" # Adicione outras deps aqui
+    )
+
+    if rebuild:
+        click.echo("🛠️  Limpando e reconstruindo ambiente...")
+        subprocess.run(['wsl', '-d', distro, '-u', 'root', 'sh', '-c', bootstrap_cmd])
+
+    # 3. Sincronizar e Executar
+    # Usamos o caminho do Windows montado no /mnt/c/
+    project_root = _find_project_root(Path('.')).absolute().as_posix()
+    # Converte C:/Users/... para /mnt/c/Users/...
+    wsl_path = "/" + project_root.replace(":", "").lower()
+    
+    click.secho(f"🚀 Iniciando Smoke Test no {distro}...", fg="magenta")
+    
+    test_cmd = (
+        f"export PYTHONPATH={wsl_path} && "
+        f"/tmp/dox_sandbox/bin/python3 -m doxoade panel"
+    )
+    
+    result = subprocess.run(['wsl', '-d', distro, 'sh', '-c', test_cmd], capture_output=True, text=True)
+    
+    if result.returncode == 0:
+        click.secho("\n✅ PASSOU: O doxoade está saudável no Alpine Linux!", fg="green", bold=True)
+        click.echo(result.stdout)
+    else:
+        click.secho("\n❌ FALHOU: Erros detectados no ambiente Linux:", fg="red", bold=True)
+        click.echo(result.stderr or result.stdout)
+        # Aqui o desenvolvedor verá quais comandos (import/help) quebraram no Linux

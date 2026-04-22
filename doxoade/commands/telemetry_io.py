@@ -259,7 +259,7 @@ def render_critical_chain(chain: list, context_before: int=3, context_after: int
         echo('')
 
 def render_stats_table(stats):
-    header = f"{'COMANDO':<15} | {'QTD':<5} | {'T-AVG(ms)':<10} | {'RAM(MB)':<8} | {'I/O R':<8} | {"I/O W":<8}"
+    header = f"""{'COMANDO':<15} | {'QTD':<5} | {'T-AVG(ms)':<10} | {'RAM(MB)':<8} | {'I/O R':<8} | {"I/O W":<8}"""
     echo(Fore.CYAN + Style.BRIGHT + '\n=== 📈 DASHBOARD DE PERFORMANCE INDUSTRIAL ===')
     echo(header + '\n' + '-' * len(header))
     for cmd, data in sorted(stats.items(), key=lambda x: sum(x[1]['dur']) / len(x[1]['dur']), reverse=True):

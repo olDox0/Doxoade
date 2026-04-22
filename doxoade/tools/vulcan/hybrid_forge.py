@@ -253,7 +253,15 @@ class HybridForge:
     def _build_pyx(self, candidates, module_name, aggressive_funcs=frozenset()):
         has_aggressive = bool(aggressive_funcs & {f.name for f in candidates})
         header = _PYX_HEADER_AGGRESSIVE if has_aggressive else _PYX_HEADER
-        sections = [header, _PYX_STUB, f'# Módulo     : {module_name}', f'# Compilados : {len(candidates)}', f"# Agressivos : {', '.join(aggressive_funcs & {f.name for f in candidates}) or 'nenhum'}', '']
+        sections =[
+            header,
+            _PYX_STUB,
+            f"# Módulo     : {module_name}",
+            f"# Compilados : {len(candidates)}",
+            f"# Agressivos : {', '.join(aggressive_funcs & {f.name for f in candidates}) or 'nenhum'}",
+            "",
+        ]
+#        sections = [header, _PYX_STUB, f'# Módulo     : {module_name}', f'# Compilados : {len(candidates)}', f"# Agressivos : {', '.join(aggressive_funcs & {f.name for f in candidates}) or 'nenhum'}', '']
         for fs in candidates:
             is_aggressive = fs.name in aggressive_funcs
             transformed = self._transform_function(fs, aggressive=is_aggressive)

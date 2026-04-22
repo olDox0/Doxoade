@@ -198,20 +198,21 @@ def _strategy_normalize_ast_unparse_artifacts(line: str) -> list[str]:
 
 def _strategy_upgrade_to_triple_quotes(line: str) -> list[str]:
     """
-    Converte f-strings problemáticas para aspas triplas (f'''...''' ou f\"\"\"...\"\"\").
-    Isso resolve conflitos de aspas internas no Python 3.12.
+    Estratégia Nuclear: Converte f-strings com aspas ou chaves complexas 
+    para aspas triplas, permitindo lógica interna sem quebrar o parser.
     """
-    # Se a linha parece uma f-string com conflito de aspas
+    # Se encontrar uma f-string que parece complexa (compreensões ou aspas)
     if 'f"' in line or "f'" in line:
-        # Tenta converter aspas duplas para triplas duplas
-        c1 = re.sub(r'f"(.+?)"', r'f"""\1"""', line)
-        # Tenta converter aspas simples para triplas simples
-        c2 = re.sub(r"f'(.+?)'", r"f'''\1'''", line)
+        # Regex que captura f"..." ou f'...' e substitui por f"""...""" ou f'''...'''
+        # Tratando o caso de aspas simples
+        c1 = re.sub(r"f'(.+)'", r"f'''\1'''", line)
+        # Tratando o caso de aspas duplas
+        c2 = re.sub(r'f"(.+)"', r'f"""\1"""', line)
         
-        res = []
-        if c1 != line: res.append(c1)
-        if c2 != line: res.append(c2)
-        return res
+        candidates = []
+        if c1 != line: candidates.append(c1)
+        if c2 != line: candidates.append(c2)
+        return candidates
     return []
 
 def _strategy_fix_nested_quotes(line: str) -> list[str]:
@@ -231,10 +232,46 @@ def _strategy_fix_nested_quotes(line: str) -> list[str]:
         return [c1]
     return []
 
-# Pipeline em ordem crescente de agressividade
-_STRATEGIES: list[Callable[[str], list[str]]] = [
+def _strategy_clean_broken_fstring(line: str) -> list[str]:
+    """Tenta fechar aspas que ficaram órfãs após o refactor AST."""
+    if line.count("'") % 2 != 0:
+        return [line + "'"]
+    if line.count('"') % 2 != 0:
+        return [line + '"']
+    return []
+
+def _strategy_downgrade_to_format(line: str) -> list[str]:
+    """
+    Downgrade automático para Python 3.11.
+    Converte f-strings com backslashes ou lógica complexa de join/split para .format()
+    """
+    # 1. Detecta o crime: Backslash dentro de chaves (f"{... \ ...}")
+    # 2. Detecta o crime: Aspas aninhadas complexas (f"{...join(...split("'"))}")
+    
+    if re.search(r"f['\"].*\{.*[\\].*\}.*['\"]", line) or (".join(" in line and "split(" in line):
+        # Captura os componentes: prefixo f" , conteúdo antes { , a expressão } , conteúdo depois "
+        match = re.search(r"f(['\"])(.*?)\{(.*?)\}(.*?)\1", line)
+        if match:
+            quote = match.group(1)   # " ou '
+            prefix = match.group(2)  # Texto antes da chave
+            expr = match.group(3)    # A lógica complexa (replace, join, etc)
+            suffix = match.group(4)  # Texto depois da chave
+            
+            # Reconstrói como string normal + .format()
+            new_line = quote + prefix + "{}" + suffix + quote + ".format(" + expr + ")"
+            
+            # Mantém a indentação original
+            indent = line[:len(line) - len(line.lstrip())]
+            return [indent + new_line]
+            
+    return []
+
+# Não esqueça de incluir na lista _STRATEGIES:
+_STRATEGIES = [
     _strategy_unescape_backslash_in_expr,
-    _strategy_upgrade_to_triple_quotes,  # <--- Adicione aqui
+    _strategy_downgrade_to_format,
+    _strategy_upgrade_to_triple_quotes,
+    _strategy_clean_broken_fstring, # <--- Nova
     _strategy_normalize_ast_unparse_artifacts,
     _strategy_flip_single_to_double,
     _strategy_flip_double_to_single,
