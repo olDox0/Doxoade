@@ -64,7 +64,7 @@ class Fore:
     LIGHTBLUE_EX    = AnsiCode('94')
     LIGHTCYAN_EX    = AnsiCode('96')
     LIGHTBLACK_EX   = AnsiCode('90')
-    LIGHTRED_EX     = AnsiCode('91')
+    RED     = AnsiCode('91')
     LIGHTGREEN_EX   = AnsiCode('92')
     LIGHTYELLOW_EX  = AnsiCode('93')
     LIGHTMAGENTA_EX = AnsiCode('95')

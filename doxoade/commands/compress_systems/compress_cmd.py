@@ -2,11 +2,16 @@ import click
 import os
 from .compress_utils import uncompress_zst_to_targz
 
-@click.command()
+@click.group('compress', no_args_is_help=True)
+def compress_group():
+    """Utilitário de compressão Doxoade (PASC-8.4)."""
+    pass
+
+@click.command('compress')
 @click.argument('file_path')
 @click.option('--uncompress', is_flag=True, help='Descomprime e normaliza RootFS.')
-def compress_cmd(file_path, uncompress):
-    """Utilitário de compressão Doxoade (PASC-8.4)."""
+def compress_file_cmd(file_path, uncompress):
+    """Comprime ou descomprime um arquivo específico."""
     if uncompress and file_path.endswith('.zst'):
         output = file_path.replace('.tar.zst', '-final.tar.gz')
         click.echo(f"[*] Convertendo {file_path} para {output}...")

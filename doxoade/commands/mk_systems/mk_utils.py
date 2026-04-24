@@ -1,6 +1,9 @@
 # doxoade/doxoade/commands/mk_systems/mk_utils.py
 import os
 import re
+import subprocess
+
+
 TREE_BRANCH = '├── '
 TREE_LAST = '└── '
 TREE_INDENT = '│   '
@@ -10,13 +13,14 @@ def get_tree_icon(is_dir: bool) -> str:
     return '📁 ' if is_dir else '📄 '
 
 def is_directory(path_name: str) -> bool:
-    """Detecta se o alvo é diretório. Pastas terminam com / ou não possuem extensão."""
+    """Detecta se o alvo é diretório de forma mais conservadora."""
     clean_name = path_name.strip().replace('\\', '/').rstrip(' ')
     basename = os.path.basename(clean_name.rstrip('/'))
-    if basename.lower() in ['__init__.py', '.gitignore', 'readme.md', 'requirements.txt', 'setup.py']:
+    if clean_name.endswith('/'): return True
+    
+    known_files = ['Dockerfile', 'Makefile', 'LICENSE', 'PROCFILE', 'README', 'CHANGELOG', '.env']
+    if basename.upper() in known_files or basename.startswith('.'):
         return False
-    if clean_name.endswith('/'):
-        return True
     return '.' not in basename
 
 def clean_path_and_content(line: str):
@@ -37,6 +41,38 @@ def expand_braces(text: str) -> list:
     prefix, content, suffix = match.groups()
     parts = [p.strip() for p in content.split(',')]
     return [f'{prefix}{p}{suffix}' for p in parts]
+
+def open_in_notepadpp(file_paths: list):
+    """Abre arquivos no Notepad++, tentando encontrar o executável se não estiver no PATH."""
+    if not file_paths:
+        return
+    
+    # Lista de possíveis locais do executável
+    npp_candidates = [
+        'notepad++', # Tenta o PATH primeiro
+        r"C:\Program Files\Notepad++\notepad++.exe",
+        r"C:\Program Files (x86)\Notepad++\notepad++.exe"
+    ]
+    
+    executable = None
+    for candidate in npp_candidates:
+        # Se for apenas o nome, o shutil.which verifica o PATH
+        import shutil
+        if shutil.which(candidate) or os.path.exists(candidate):
+            executable = candidate
+            break
+
+    if not executable:
+        print("[-] Erro: Notepad++ não encontrado no PATH ou nos locais padrão.")
+        return
+
+    try:
+        files = list(dict.fromkeys([os.path.abspath(f) for f in file_paths if os.path.isfile(f)]))
+        if files:
+            # Usa subprocess.Popen para não travar o terminal
+            subprocess.Popen([executable, *files])
+    except Exception as e:
+        print(f"[-] Erro ao disparar editor: {e}")
 
 def get_indent_level(line: str) -> int:
     """Calcula o nível de indentação convertendo tabs em 4 espaços (PASC 6.3)."""

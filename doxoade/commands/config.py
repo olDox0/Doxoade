@@ -7,7 +7,7 @@ from doxoade.commands.doxcolors_systems.colors_command import config
 from doxoade.tools.filesystem import _get_project_config
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 
-@click.group('config')
+@click.group('config', no_args_is_help=True)
 def config_group():
     """Gerencia a configuração do doxoade para o projeto."""
     pass

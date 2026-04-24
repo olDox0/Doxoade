@@ -1,10 +1,12 @@
+# -*- coding: utf-8 -*-
 # doxoade/doxoade/commands/run.py
 """
-Comando Run - v83.3 Omega.
-Orquestrador de Execução Híbrida com Suporte a Sniper Lens.
+Comando Run - v83.5 Platinum.
+Orquestrador de Execução Híbrida com Suporte a Sniper Lens e Warden Limits.
 """
 import os
 import click
+from doxoade.tools.aegis.warden import apply_resource_limits
 from doxoade.tools.aegis.aegis_utils import validate_execution_context
 from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
@@ -18,28 +20,49 @@ from doxoade.tools.doxcolors import Fore, Style
 @click.option('--flow-func', is_flag=True, help='Rastro de funções.')
 @click.option('--file', '-f', 'file_target', type=click.Path(exists=True), help='Sniper Lens: Foca rastro neste arquivo.')
 @click.option('--target', '-t', 'target_target', help='Alias para --file.')
+@click.option('--processing-limiter', '-pl', type=float, help='Limite de CPU em % (ex: 0.5 para 50%).')
+@click.option('--ram-limiter', '-rl', type=str, help='Limite de RAM (ex: 512mb, 1gb).')
+@click.option('--disk-limiter', '-dl', type=str, help='Limite de escrita em disco (ex: 100mb).')
 @click.option('--no-vulcan', is_flag=True, help='Desativa o Turbo Nativo.')
 @click.option('--test-mode', is_flag=True, help='Autoriza scripts de teste.')
 @click.pass_context
 def run(ctx, script: str, **kwargs):
-    """Executor Universal v83.3: Decisão Única de Fluxo."""
+    """Executor Universal v83.5: Decisão Única de Fluxo com Controle de Célula de Carga."""
     from ..rescue_systems.execution_context import ExecutionContext, ExecutionMode
     abs_path = os.path.abspath(script)
+    
+    # 1. Organiza os limites para o Warden
+    limits = {
+        'cpu': kwargs.get('processing_limiter'),
+        'ram': kwargs.get('ram_limiter'),
+        'disk': kwargs.get('disk_limiter')
+    }
+    
     context = ExecutionContext.detect(mode=ExecutionMode.SANDBOX)
     sniper_target = kwargs.get('file_target') or kwargs.get('target_target')
     if sniper_target:
         kwargs['target'] = sniper_target
+
     with ExecutionLogger('run', abs_path, ctx.params):
         from .run_systems.run_flow import execute_flow
         from .run_systems.run_c_lang import maybe_run_c_lang
         try:
             validate_execution_context(abs_path, kwargs.get('test_mode', False))
             os.environ['DOXOADE_AUTHORIZED_RUN'] = '1'
-            if maybe_run_c_lang(abs_path):
+
+            # 2. Tenta execução como C/C++ (Warden aplicado internamente no subprocesso)
+            if maybe_run_c_lang(abs_path, limits=limits, flow=kwargs.get('flow')):
                 return
+
+            # 3. Se houver flags de flow para Python
             if any([kwargs.get('flow'), kwargs.get('flow_val'), kwargs.get('flow_import'), kwargs.get('flow_func'), sniper_target]):
                 execute_flow(script, **kwargs)
-            _execute_hybrid_engine(abs_path, not kwargs.get('no_vulcan'))
+                # Nota: O flow runner Python atualmente ignora limites de recursos nativos
+                return
+
+            # 4. Execução Híbrida padrão (Python/Vulcan)
+            _execute_hybrid_engine(abs_path, not kwargs.get('no_vulcan'), limits)
+
         except Exception as e:
             import sys as exc_sys
             from traceback import print_tb as exc_trace
@@ -48,15 +71,24 @@ def run(ctx, script: str, **kwargs):
             exc_trace(exc_tb)
             raise e
 
-def _execute_hybrid_engine(script_path: str, use_vulcan: bool):
+def _execute_hybrid_engine(script_path: str, use_vulcan: bool, limits: dict):
     abs_path = os.path.abspath(script_path)
-    from doxoade.tools.doxcolors import Fore
+    
+    # Proteção Anti-Binário: Verifica se o arquivo parece texto
+    if abs_path.endswith('.exe'):
+        raise click.ClickException(f"O motor Python não pode executar o binário '{os.path.basename(abs_path)}'. Use o fluxo C.")
+
+    apply_resource_limits(limits)
+    
+    abs_path = os.path.abspath(script_path)
     label = 'HYBRID' if use_vulcan else 'PYTHON'
     color = Fore.CYAN if use_vulcan else Fore.WHITE
     globs = {'__name__': '__main__', '__file__': abs_path}
+    
     if use_vulcan:
         from .run_systems.run_vulcan import apply_vulcan_turbo
         apply_vulcan_turbo(abs_path, globs)
+        
     try:
         click.echo(color + f'--- [RUN:{label}] Executing: {os.path.basename(abs_path)} ---\x1b[0m')
         with open(abs_path, 'r', encoding='utf-8') as f:

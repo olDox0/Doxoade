@@ -26,7 +26,7 @@ except ImportError:
 __version__ = '36.1 Alfa (Termux-Safe)'
 cssutils.log.setLevel(logging.CRITICAL)
 
-@click.command('webcheck')
+@click.command('webcheck', no_args_is_help=True)
 @click.pass_context
 @click.argument('path', type=click.Path(exists=True, file_okay=True), default='.')
 @click.option('--ignore', multiple=True, help='Ignores specific folders.')

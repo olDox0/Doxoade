@@ -16,7 +16,9 @@ import tempfile
 from pathlib import Path
 from typing import Final
 import click
+
 C_SOURCE_EXTS: Final[dict[str, dict[str, object]]] = {'.c': {'compiler': 'gcc', 'std_flag': '-std=c11'}, '.cpp': {'compiler': 'g++', 'std_flag': '-std=c++17'}, '.cc': {'compiler': 'g++', 'std_flag': '-std=c++17'}, '.cxx': {'compiler': 'g++', 'std_flag': '-std=c++17'}}
+BIN_EXTS = {'.exe', '.bin', '.out'}
 
 def is_c_family_source(script_path: str | os.PathLike[str]) -> bool:
     """Retorna True se o arquivo for C/C++ suportado."""
@@ -52,41 +54,59 @@ def compile_c_family_source(script_path):
         raise click.ClickException(proc.stderr)
     return output_path
 
-def execute_binary(binary_path: str | os.PathLike[str]) -> None:
-    """Executa o binário gerado."""
-    binary = Path(binary_path).resolve()
-    if not binary.exists():
-        raise click.ClickException(f'Executável não encontrado: {binary}')
-    proc = subprocess.run([str(binary)], cwd=str(binary.parent))
+def execute_binary(binary_path, limits: dict = None) -> None:
+    """Executa o binário nativo com proteção do Warden."""
+    from doxoade.tools.aegis.warden import apply_resource_limits
+    import subprocess
+    
+    click.echo(f'\x1b[36m--- [RUN:C/C++] {os.path.basename(binary_path)} ---\x1b[0m')
+    
+    # Função para injetar limites antes do processo nativo começar (apenas Unix)
+    def preexec():
+        if limits:
+            apply_resource_limits(limits)
+
+    # No Windows, preexec_fn não é suportado, então o Warden apenas emite o aviso
+    if os.name == 'nt':
+        apply_resource_limits(limits)
+        proc = subprocess.run([str(binary_path)])
+    else:
+        proc = subprocess.run([str(binary_path)], preexec_fn=preexec)
+    
     if proc.returncode != 0:
-        raise click.ClickException(f'Execução terminou com código {proc.returncode}: {binary.name}')
+        click.echo(f"\x1b[31m[EXIT] O processo terminou com erro: {proc.returncode}\x1b[0m")
 
-def run_c_lang(script_path):
-    source = Path(script_path).resolve()
-    build_dir = get_build_dir(source)
-    exe_path = build_dir / (source.stem + '.exe')
-    import time
-    t0 = time.time()
-    if needs_recompile(source, exe_path):
-        t_build0 = time.time()
-        click.echo('[BUILD] Compilando...')
-        exe_path = compile_c_family_source(script_path)
-        click.echo(f'[BUILD] Tempo: {time.time() - t_build0:.3f}s')
-    t_exec0 = time.time()
-    execute_binary(exe_path)
-    click.echo(f'[EXEC] Tempo: {time.time() - t_exec0:.3f}s')
-    click.echo(f'[TOTAL] {time.time() - t0:.3f}s')
-    click.echo(f'\x1b[36m--- [RUN:C/C++] {exe_path.name} ---\x1b[0m')
-    execute_binary(exe_path)
+def run_c_lang(script_path, limits: dict = None, flow: bool = False):
+    source_or_bin = Path(script_path).resolve()
+    suffix = source_or_bin.suffix.lower()
 
-def maybe_run_c_lang(script_path: str | os.PathLike[str]) -> bool:
-    """
-    Se for C/C++, executa e retorna True.
-    Caso contrário, retorna False.
-    """
-    if not is_c_family_source(script_path):
+    # Caso 1: É um executável já pronto
+    if suffix in BIN_EXTS or (suffix == '' and os.access(source_or_bin, os.X_OK)):
+        exe_path = source_or_bin
+    else:
+        # Caso 2: É código fonte, precisa compilar
+        build_dir = get_build_dir(source_or_bin)
+        exe_path = build_dir / (source_or_bin.stem + ('.exe' if os.name == 'nt' else ''))
+        if needs_recompile(source_or_bin, exe_path):
+            click.echo('\x1b[33m[BUILD] Compilando fonte...\x1b[0m')
+            compile_c_family_source(script_path)
+
+    # Execução
+    if flow:
+        run_c_with_flow(exe_path, limits)
+    else:
+        execute_binary(exe_path, limits)
+
+def is_c_family_target(script_path: str) -> bool:
+    """Detecta se é fonte C ou um binário nativo."""
+    suffix = Path(script_path).suffix.lower()
+    # Se não tem extensão e é executável (Linux) ou se tem extensão binária/fonte
+    return suffix in C_SOURCE_EXTS or suffix in BIN_EXTS or (suffix == '' and os.access(script_path, os.X_OK))
+
+def maybe_run_c_lang(script_path: str, limits: dict = None, flow: bool = False) -> bool:
+    if not is_c_family_target(script_path):
         return False
-    run_c_lang(script_path)
+    run_c_lang(script_path, limits=limits, flow=flow)
     return True
 
 def needs_recompile(src_path: Path, exe_path: Path):
@@ -98,3 +118,24 @@ def get_build_dir(source_path: Path) -> Path:
     build_dir = source_path.parent / '.doxoade' / 'c_lang_build'
     build_dir.mkdir(parents=True, exist_ok=True)
     return build_dir
+    
+def run_c_with_flow(exe_path, limits):
+    """🌊 Nexus Flow para Binários: Rastro de chamadas de sistema."""
+    from doxoade.tools.aegis.warden import apply_resource_limits
+    import shutil
+    
+    click.echo(f"\x1b[34m🌊 Injetando Sonda Nexus Flow em Binário Nativo...\x1b[0m")
+    apply_resource_limits(limits)
+
+    # Verifica se há strace (Linux) ou gdb (Windows) para fazer o rastro
+    if shutil.which("strace"):
+        cmd = ["strace", "-e", "trace=memory,write,read,openat", str(exe_path)]
+        subprocess.run(cmd)
+    elif shutil.which("gdb"):
+        # Modo batch do GDB para ver o rastro de execução básico no Windows
+        cmd = ["gdb", "-batch", "-ex", "run", "-ex", "bt", "--args", str(exe_path)]
+        subprocess.run(cmd)
+    else:
+        click.echo("\x1b[33m⚠️  Ferramentas de rastro (strace/gdb) não encontradas. Execução padrão.\x1b[0m")
+        subprocess.run([str(exe_path)])
+

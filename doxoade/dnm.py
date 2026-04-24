@@ -12,16 +12,21 @@ from doxoade.tools.filesystem import _get_project_config
 
 try:
     import pathspec
-except ImportError as e:
-    import traceback
-    print(f'\x1b[31m ■ Erro: {e}')
-    traceback.print_tb(e.__traceback__)
+except ImportError: # Fallback seguro para quando a lib não está instalada
+    pathspec = None
+    logging.warning("Módulo 'pathspec' não encontrado. O DNM usará filtragem simplificada.")
     import importlib
     try:
         pathspec = importlib.import_module('pathspec')
-    except Exception:
+    except Exception as e:
+        import traceback
+        print(f'\x1b[31m ■ Erro: {e}')
+        traceback.print_tb(e.__traceback__)
         raise
-
+try:
+    import msvcrt # Exemplo
+except ImportError:
+    msvcrt = None # Mock para Linux
 
 class DNM:
     """
@@ -39,7 +44,8 @@ class DNM:
         self.root = Path(root_path).resolve()
         self.ignore_spec = self._load_ignore_spec()
 
-    def _load_ignore_spec(self) -> pathspec.PathSpec:
+    def _load_ignore_spec(self) -> Optional[pathspec.PathSpec]:
+#    def _load_ignore_spec(self) -> pathspec.PathSpec:
         """Carrega regras de ignore com fallback para Modo Genérico."""
         patterns = list(self.SYSTEM_IGNORES)
         try:
@@ -58,6 +64,8 @@ class DNM:
         if len(patterns) == len(self.SYSTEM_IGNORES):
             patterns.append('*.pyc')
             patterns.append('__pycache__/')
+        if pathspec is None:
+            return None
         return pathspec.PathSpec.from_lines('gitwildmatch', patterns)
 
     def is_ignored(self, file_path) -> bool:

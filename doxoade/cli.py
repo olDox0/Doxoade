@@ -45,7 +45,7 @@ class DoxoadeLazyGroup(click.Group):
         'canonize': 'doxoade.commands.canonize:canonize', 
         'check': 'doxoade.commands.check:check', 
         'clean': 'doxoade.commands.clean:clean', 
-        'compress': 'doxoade.commands.compress_systems.compress_cmd:compress_cmd',
+        'compress': 'doxoade.commands.compress_systems.compress_cmd:compress_file_cmd',
         'config': 'doxoade.commands.config:config_group', 
         'create-pipeline': 'doxoade.commands.utils:create_pipeline', 
         'dashboard': 'doxoade.commands.dashboard:dashboard', 
@@ -211,6 +211,22 @@ def process_result(result, **kwargs):
 def main():
     """Wrapper blindado com:
     Injeção Vulcan e Auto-VENV."""
+    # 1. Forçar encoding UTF-8
+    if sys.stdout.encoding != 'utf-8':
+        try: sys.stdout.reconfigure(encoding='utf-8')
+        except: pass
+    # 2. Injetar o VENV (mesma lógica do __main__)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    # Procura site-packages
+    venv_candidates = [
+        os.path.join(project_root, 'venv', 'Lib', 'site-packages'),
+        os.path.join(project_root, 'venv', 'lib', 'site-packages'), # Linux fallback
+    ]
+    for venv_path in venv_candidates:
+        if os.path.exists(venv_path) and venv_path not in sys.path:
+            sys.path.insert(0, venv_path)
+            break
     # === usa o venv ===
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(script_dir)

@@ -2,7 +2,10 @@
 import os
 import shutil
 from doxoade.tools.doxcolors import Fore, Style
-from .mk_utils import get_indent_level, is_directory, clean_path_and_content, expand_braces, TREE_BRANCH, TREE_LAST, TREE_INDENT, get_tree_icon
+from .mk_utils import (
+    get_indent_level, is_directory, clean_path_and_content, 
+    expand_braces, TREE_BRANCH, TREE_LAST, TREE_INDENT, get_tree_icon
+)
 from doxoade.tools.filesystem import is_ignored
 
 class MkEngine:
@@ -13,57 +16,90 @@ class MkEngine:
         self.base_path = os.path.abspath(base_path)
         self.stack = [(-1, self.base_path)]
         self.consumed_sources = set()
+        self.affected_files = []
+
+    def _create_init_py(self, directory_path):
+        """Cria um __init__.py vazio se não existir, subindo até a base."""
+        # Não cria se estiver fora do base_path (segurança)
+        if not directory_path.startswith(self.base_path):
+            return
+
+        current = directory_path
+        # Sobe criando __init__.py até chegar na base do projeto
+        while current and current != self.base_path and len(current) > len(self.base_path):
+            init_file = os.path.join(current, '__init__.py')
+            if not os.path.exists(init_file):
+                # Se for um projeto C (como o seu), talvez não queira __init__.py
+                # Mas como você solicitou a automação:
+                with open(init_file, 'w', encoding='utf-8') as f:
+                    f.write('')
+            current = os.path.dirname(current)
 
     def _process_single_item(self, indent, raw_name):
-        """Gerencia a pilha de diretórios com proteção de escopo (OSL-1)."""
         while len(self.stack) > 1 and self.stack[-1][0] >= indent:
             self.stack.pop()
+        
         name, content = clean_path_and_content(raw_name)
         parent_path = self.stack[-1][1]
         if os.path.isfile(parent_path):
             self.stack.pop()
             parent_path = self.stack[-1][1]
+        
         full_path = os.path.normpath(os.path.join(parent_path, name))
+
         if is_directory(name):
-            if os.path.exists(full_path) and (not os.path.isdir(full_path)):
-                os.remove(full_path)
             os.makedirs(full_path, exist_ok=True)
+            self._create_init_py(full_path) # Agora garante na pasta e acima
             self.stack.append((indent, full_path))
             return (full_path, 'Diretório')
         else:
-            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+            # Para arquivos:
+            parent_dir = os.path.dirname(full_path)
+            os.makedirs(parent_dir, exist_ok=True)
+            self._create_init_py(parent_dir) # Garante __init__.py na pasta do arquivo
+            
+            # Caso o destino seja uma pasta onde deveria ser arquivo
+            if os.path.exists(full_path) and os.path.isdir(full_path):
+                return (full_path, 'ERRO: Pasta existe')
+
+            # Se arquivo já existe, mantemos e adicionamos ao --up
             if os.path.exists(full_path) and os.path.isfile(full_path):
+                if full_path not in self.affected_files:
+                    self.affected_files.append(full_path)
                 return (full_path, 'Mantido')
+
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+
+            # Lógica de Movimentação (apenas se não tiver conteúdo explícito)
             if not content:
                 filename = os.path.basename(full_path)
                 if filename not in self.MOVE_BLACKLIST:
                     existing = self._find_existing_file(filename)
                     if existing and existing != full_path and (existing not in self.consumed_sources):
-                        if os.path.isdir(full_path):
-                            shutil.rmtree(full_path)
                         try:
                             shutil.move(existing, full_path)
                             self.consumed_sources.add(existing)
+                            self.affected_files.append(full_path)
                             return (full_path, 'Movido')
-                        except Exception:
-                            pass
-            if os.path.isdir(full_path):
-                shutil.rmtree(full_path)
+                        except: pass
+
+            # Criação de novo arquivo
             with open(full_path, 'w', encoding='utf-8') as f:
                 f.write(content)
+            
+            if full_path not in self.affected_files:
+                self.affected_files.append(full_path)
             return (full_path, 'Arquivo')
 
     def parse_architecture_file(self, filepath: str):
         with open(filepath, 'r', encoding='utf-8') as f:
             for line in f:
-                if not line.strip() or line.strip().startswith('#'):
-                    continue
+                if not line.strip() or line.strip().startswith('#'): continue
                 indent = get_indent_level(line)
                 for expanded in expand_braces(line.strip()):
                     yield self._process_single_item(indent, expanded)
 
     def _expand_and_create(self, indent, item):
-        """[FIX] Método solicitado pela mk_commands para expansão de chaves."""
         for expanded in expand_braces(item):
             path, kind = self._process_single_item(indent, expanded)
             yield f'{kind:<10}: {path}'

@@ -21,8 +21,9 @@ from . import telemetry_io as io
 @click.option('--after', '-a', default=2, help='Linhas de contexto DEPOIS da hot-line (padrão: 2).')
 def telemetry(limit, command, stats, verbose, flow, context, after):
     """Análise profunda de Recursos (MPoT-12)."""
+    import sqlite3 as py_sqlite3 # Importa o original para o Row factory
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
+    conn.row_factory = py_sqlite3.Row # Usa o factory padrão do Python
     cursor = conn.cursor()
     try:
         cursor.execute('SELECT * FROM command_history ORDER BY id DESC LIMIT ?', (limit,))
@@ -34,7 +35,8 @@ def telemetry(limit, command, stats, verbose, flow, context, after):
         conn.close()
 
 def _render_entry(row, verbose: bool, flow: bool, context: int, after: int):
-    status = Fore.GREEN + '✔' if row['exit_code'] == 0 else Fore.RED + '✘'
+    status = Fore.GREEN + '✔' if row[3] == 0 else Fore.RED + '✘'
+#    status = Fore.GREEN + '✔' if row['exit_code'] == 0 else Fore.RED + '✘'
     ts = row['timestamp'][:19].replace('T', ' ')
     cmd = row['command_name'].upper()
     click.echo(f"\n{status} {Fore.WHITE}{ts} | {cmd} ({row['duration_ms']:.0f}ms)")

@@ -18,6 +18,7 @@ from doxoade.tools.analysis import _get_code_snippet
 from doxoade.tools.git import _run_git_command
 from doxoade.database import get_db_connection
 from doxoade.tools.filesystem import _find_project_root
+from .mk_systems.mk_commands import register_mk_options
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 __version__ = '34.0 Alfa'
 
@@ -131,12 +132,12 @@ def show_trace(ctx, filepath):
 @click.command('mk')
 @click.argument('items', nargs=-1)
 @click.option('--path', '-p', 'base_path', default='.', type=click.Path(exists=True))
-@click.option('--architecture', '-a', type=click.Path(exists=True))
 @click.option('--tree', '-t', is_flag=True)
-def mk(base_path, items, architecture, tree):
+@register_mk_options  # Deixe que o decorator cuide do -a, -l e --up
+def mk(base_path, items, architecture, learning, tree, up): # Adicione 'learning' e 'up' aqui
     """🔨 Construtor de Topologia e Visualizador Nexus."""
     from .mk_systems.mk_commands import execute_mk_logic
-    execute_mk_logic(base_path, items, architecture, tree)
+    execute_mk_logic(base_path, items, architecture, tree, up)
 
 @click.command('create-pipeline')
 @click.pass_context

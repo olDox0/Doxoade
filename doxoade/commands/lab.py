@@ -2,16 +2,26 @@
 import click
 import subprocess
 import os
-import sys
 import base64
-import json
 import time
 from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.filesystem import _find_project_root
 
-# --- HELPERS ---
+# --- CONFIGURAÇÃO DE VETORES PARA EXECUÇÃO REAL ---
+VETORES_REAIS = {
+    "check": "doxoade/cli.py --fast",
+    # O segredo: usamos -- para dizer "os caminhos acabaram, agora vem o comando"
+    "intelligence": "-- . list", 
+    "intelligence recover": "-- .",
+    "config fix": "--help",
+    "compress": "--help", 
+    "webcheck": "--help",
+    "audit": ".",
+    "vulcan doctor": "",
+}
 
+# --- HELPERS ---
 def _sep(label: str = "", width: int = 60, color: str = "cyan") -> None:
     line = f"─{'─' * (width - 2)}─"
     if label:
@@ -19,184 +29,99 @@ def _sep(label: str = "", width: int = 60, color: str = "cyan") -> None:
         line = f"─ {label} {'─' * pad}"
     click.secho(line, fg=color)
 
-def get_click_commands(group, prefix="", ctx=None):
-    cmds = []
-    if ctx is None: ctx = click.Context(group)
-    try:
-        for name in group.list_commands(ctx):
-            full_name = f"{prefix} {name}".strip()
-            cmds.append(full_name)
-            sub_cmd = group.get_command(ctx, name)
-            if isinstance(sub_cmd, click.Group):
-                cmds.extend(get_click_commands(sub_cmd, full_name, ctx))
-    except: pass
-    return cmds
-
-# --- CORE ---
-
+# --- CORE ENGINE ---
 class NexusLab:
     def __init__(self, distro="doxlinux"):
         self.distro = distro
         self.project_root_win = _find_project_root(os.getcwd())
-        self.project_root_linux = self._get_linux_path(self.project_root_win)
+        self.project_root_linux = "/tmp/nexus_audit"
+        self.wsl_path = self._get_wsl_path(self.project_root_win)
 
-    def _get_linux_path(self, win_path):
+    def _get_wsl_path(self, win_path):
         try:
-            return subprocess.check_output(
-                ['wsl', '-d', self.distro, 'wslpath', '-a', str(win_path).replace('\\', '/')], 
-                text=True, encoding='utf-8'
-            ).strip()
+            return subprocess.check_output(['wsl', '-d', self.distro, 'wslpath', '-a', str(win_path).replace('\\', '/')], text=True).strip()
         except: return None
 
-    def sync_sandbox(self):
-        """Sincronização de alta performance com Barra de Progresso Real."""
-        ignores = ['venv', '.git', '__pycache__', '.pytest_cache', 'build', 'dist', '*.egg-info', '.doxoade_cache']
-        exclude_args = " ".join([f'--exclude="{p}"' for p in ignores])
+    def sync(self):
+        ignores = ['venv', '.git', '__pycache__', '.pytest_cache', 'dist', '*.egg-info']
+        excl = " ".join([f'--exclude="{p}"' for p in ignores])
+        cmd = f"mkdir -p {self.project_root_linux} && rsync -am --delete {excl} '{self.wsl_path}/' {self.project_root_linux}/"
+        subprocess.run(["wsl", "-d", self.distro, "sh", "-c", cmd], check=True)
 
-        # 1. Limpeza inicial silenciosa
-        subprocess.run(["wsl", "-d", self.distro, "-u", "root", "sh", "-c", 
-                       "rm -rf /usr/lib/python3*/site-packages/doxoade* /tmp/nexus_audit"], capture_output=True)
-
-        click.secho(f"📦 Preparando Snapshot Nexus...", fg="cyan")
-        
-        # 2. Comando para contar arquivos (para a barra de progresso ser real)
-        count_cmd = f'find "{self.project_root_linux}/" -type f | wc -l'
+    def run(self, cmd_args, timeout=40):
+        full_cmd = f"cd {self.project_root_linux} && export PYTHONPATH=. && python3 -m doxoade {cmd_args}"
+        enc = base64.b64encode(full_cmd.encode()).decode()
         try:
-            total_files = int(subprocess.check_output(["wsl", "-d", self.distro, "sh", "-c", count_cmd], text=True).strip())
-        except:
-            total_files = 1000 # Fallback
-
-        # 3. RSYNC com captura de progresso
-        # Usamos -i para listar cada arquivo sincronizado
-        sync_cmd = f'mkdir -p /tmp/nexus_audit && rsync -amvi --delete {exclude_args} "{self.project_root_linux}/" /tmp/nexus_audit/'
-        
-        process = subprocess.Popen(["wsl", "-d", self.distro, "sh", "-c", sync_cmd], 
-                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
-
-        with click.progressbar(length=total_files, label="🚀 Sincronizando", 
-                               fill_char="█", empty_char="░", color="cyan") as bar:
-            for line in process.stdout:
-                # O rsync com -vi imprime o nome do arquivo quando ele é transferido/checado
-                if any(x in line for x in ['<', '>', 'f', 'd']):
-                    bar.update(1)
-            process.wait()
-
-        click.secho(f"✔ Snapshot estabilizado em /tmp/nexus_audit.", fg="green")
-        time.sleep(0.5) # Pausa para o kernel assentar
-
-    def verify_sync(self):
-        """Verificação robusta sem base64 (evita problemas de aspas no shell)."""
-        # Testamos o import diretamente via PYTHONPATH
-        # O segredo: usamos aspas simples externas e duplas internas no shell do Linux
-        check_cmd = (
-            "export PYTHONPATH=/tmp/nexus_audit && "
-            "python3 -c 'import sys, os; sys.path.insert(0, \"/tmp/nexus_audit\"); "
-            "import doxoade; print(\"OK|\" + os.path.realpath(doxoade.__file__))'"
-        )
-        
-        try:
-            res = subprocess.run(["wsl", "-d", self.distro, "sh", "-c", check_cmd], 
-                                 capture_output=True, text=True, encoding='utf-8', timeout=10)
-            
-            if "OK|" in res.stdout:
-                return True, res.stdout.split('|')[1].strip()
-            
-            error_detail = res.stderr if res.stderr else res.stdout
-            return False, error_detail.strip() if error_detail else "Caminho não encontrado no PYTHONPATH"
-        except subprocess.TimeoutExpired:
-            return False, "Timeout na resposta do Linux"
-
-    def bootstrap(self, force=False):
-        """Garante rsync e dependências."""
-        check_cmd = "rsync --version > /dev/null 2>&1"
-        if subprocess.run(["wsl", "-d", self.distro, "sh", "-c", check_cmd]).returncode != 0 or force:
-            click.echo(f"{Fore.YELLOW}🔧 Provisionando ambiente de auditoria (rsync)...{Style.RESET_ALL}")
-            pkgs = ["rsync", "python3", "py3-pip", "build-base", "py3-click", "py3-colorama", "py3-psutil", "py3-rich", "py3-yaml"]
-            repo = "--repository=http://dl-cdn.alpinelinux.org/alpine/v3.20/main --repository=http://dl-cdn.alpinelinux.org/alpine/v3.20/community"
-            subprocess.run(["wsl", "-d", self.distro, "-u", "root", "sh", "-c", f"apk add --no-cache {repo} {' '.join(pkgs)}"])
+            res = subprocess.run(["wsl", "-d", self.distro, "sh", "-c", f"echo {enc} | base64 -d | sh"], 
+                                 capture_output=True, text=True, timeout=timeout, encoding='utf-8', errors='replace')
+            return res.returncode, res.stdout, res.stderr
+        except Exception as e:
+            return -1, "", str(e)
 
 # --- CLI COMMANDS ---
-
 @click.group('lab')
 def lab_group():
-    """🧪 Nexus Lab: Sandbox de alta segurança."""
+    """🧪 Nexus Lab: Auditoria de Massa em Sandbox."""
     pass
 
-@lab_group.command('audit-all')
+@lab_group.command('bulk-test')
 @click.option('--distro', default='doxlinux')
-@click.option('--output', type=click.Path(), help='Salva o relatório em JSON.')
-def lab_audit_all(distro, output):
-    """🔍 Auditoria Total: Executa todos os comandos no Sandbox Linux."""
-    from doxoade.cli import cli 
-    
-    lab = NexusLab(distro)
-    lab.bootstrap()
-    
-    _sep("NEXUS SANDBOX SYNC")
-    lab.sync_sandbox()
-    
-    ok, path = lab.verify_sync()
-    if not ok:
-        click.secho(f"\n❌ ERRO DE SINCRONIA!", fg="red", bold=True)
-        click.echo(f"O Linux está carregando: {Fore.YELLOW}{path}{Style.RESET_ALL}")
-        click.echo("Tente rodar: doxoade lab bootstrap --force")
+@click.option('--limit', default=139)
+def lab_bulk_test(distro, limit):
+    """🚀 Varredura em Massa: Testa a lógica real de TODOS os comandos."""
+    try:
+        from doxoade.cli import cli
+    except Exception as e:
+        click.secho(f"FATAL: {e}", fg="red")
         return
-    
-    click.secho(f"✅ Sincronia Ativa: {path}", fg="green")
-    
-    all_cmds = get_click_commands(cli)
-    _sep("NEXUS INTEGRITY AUDIT")
-    click.echo(f"📋 Testando {len(all_cmds)} comandos...\n")
 
+    lab = NexusLab(distro)
+    click.echo("🔄 Sincronizando Snapshot...")
+    lab.sync()
+
+    all_cmds = []
+    def collect(group, prefix=""):
+        ctx = click.Context(group)
+        try:
+            for name in group.list_commands(ctx):
+                full = f"{prefix} {name}".strip()
+                all_cmds.append(full)
+                sub = group.get_command(ctx, name)
+                if isinstance(sub, click.Group): collect(sub, full)
+        except: pass
+    collect(cli)
+    all_cmds = all_cmds[:limit]
+
+    _sep(f"EXECUTANDO {len(all_cmds)} TESTES NO ALPINE")
+    
     results = []
-    passed = 0
-    
-    with click.progressbar(all_cmds, label="Processando Auditoria", 
-                           fill_char="█", empty_char="░", color="magenta") as bar:
+    with click.progressbar(all_cmds, label="Auditando") as bar:
         for cmd_name in bar:
-            t0 = time.time()
-            shell_cmd = f"cd /tmp/nexus_audit && export PYTHONPATH=. && python3 -m doxoade {cmd_name} --help"
-            enc_cmd = base64.b64encode(shell_cmd.encode('utf-8')).decode()
-            wsl_exec = ["wsl", "-d", distro, "sh", "-c", f"echo {enc_cmd} | base64 -d | sh"]
-            
-            try:
-                proc = subprocess.run(wsl_exec, capture_output=True, text=True, 
-                                      encoding='utf-8', errors='replace', timeout=15)
-                
-                status = "OK" if proc.returncode == 0 else "FAIL"
-                if proc.returncode == 0: passed += 1
-                
-                results.append({
-                    "command": cmd_name,
-                    "status": status,
-                    "duration": (time.time() - t0) * 1000,
-                    "error": proc.stderr if status == "FAIL" else ""
-                })
-            except Exception:
-                results.append({"command": cmd_name, "status": "TIMEOUT", "duration": 15000, "error": "Timeout"})
+            args = VETORES_REAIS.get(cmd_name, "--help")
+            code, out, err = lab.run(f"{cmd_name} {args}")
+            sample = (out.strip() if out else err.strip()).replace('\n', ' ')[:50]
+            results.append({"cmd": cmd_name, "code": code, "sample": sample, "err": err})
 
-    # --- RELATÓRIO FINAL ---
-    click.echo("\n" + "─"*60)
-    for res in results:
-        if res['status'] == "OK":
-            click.echo(f"{Fore.GREEN}✔ {res['command'].ljust(35)}{Style.RESET_ALL} | {res['duration']:6.0f}ms")
+    for r in results:
+        if r['code'] == 0:
+            click.echo(f"{Fore.GREEN}✔ {r['cmd'].ljust(30)}{Style.RESET_ALL} | {r['sample']}...")
         else:
-            click.echo(f"{Fore.RED}✘ {res['command'].ljust(35)}{Style.RESET_ALL} | {res['duration']:6.0f}ms")
-            err = res['error'].split('\n')[0][:70] if res['error'] else "Erro desconhecido"
-            click.echo(f"   {Fore.YELLOW}└─ {err}{Style.RESET_ALL}")
+            err_line = r['err'].strip().splitlines()[-1] if r['err'] else "Erro"
+            click.echo(f"{Fore.RED}✘ {r['cmd'].ljust(30)}{Style.RESET_ALL} | {Fore.YELLOW}{err_line[:60]}{Style.RESET_ALL}")
 
-    _sep("RESULTADO FINAL")
-    score_color = Fore.GREEN if passed == len(all_cmds) else Fore.RED
-    click.echo(f"Saúde: {score_color}{passed}/{len(all_cmds)} comandos operacionais{Style.RESET_ALL}")
-    
-    if output:
-        with open(output, 'w', encoding='utf-8') as f:
-            json.dump(results, f, indent=4, ensure_ascii=False)
+    passed = sum(1 for r in results if r['code'] == 0)
+    _sep(f"SAÚDE FINAL: {passed}/{len(all_cmds)}")
 
 @lab_group.command('bootstrap')
 @click.option('--distro', default='doxlinux')
-@click.option('--force', is_flag=True)
-def lab_bootstrap_cmd(distro, force):
-    """Instala rsync e pacotes base no Alpine."""
+def lab_bootstrap(distro):
     lab = NexusLab(distro)
-    lab.bootstrap(force=force)
+    pkgs = "rsync python3 py3-pip build-base py3-click py3-colorama py3-psutil py3-rich py3-yaml py3-pathspec"
+    repo = "--repository=http://dl-cdn.alpinelinux.org/alpine/v3.20/main --repository=http://dl-cdn.alpinelinux.org/alpine/v3.20/community"
+    subprocess.run(["wsl", "-d", distro, "-u", "root", "sh", "-c", f"apk add --no-cache {repo} {pkgs}"])
+
+@lab_group.command('deep-test')
+@click.option('--distro', default='doxlinux')
+def lab_deep_test_legacy(distro):
+    ctx = click.get_current_context()
+    ctx.invoke(lab_bulk_test, distro=distro)

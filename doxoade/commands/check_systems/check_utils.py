@@ -112,7 +112,7 @@ def _render_single_file_dossier(file_path, findings):
     count = len(unique_findings)
     header_color = Fore.BLUE if count < 5 else Fore.YELLOW if count < 10 else Fore.RED
     echo(f'\n{header_color}{Style.BRIGHT}[  {count:03}  ]{Fore.WHITE} {file_path}{Style.RESET_ALL}')
-    cat_colors = {'COMPLEXITY': Fore.RED, 'RUNTIME-RISK': Fore.RED + Style.BRIGHT, 'SECURITY': Fore.MAGENTA + Style.BRIGHT, 'SYNTAX': Fore.LIGHTRED_EX + Style.BRIGHT, 'DEADCODE': Fore.CYAN, 'STYLE': Fore.YELLOW, 'QA-REMINDER': Fore.GREEN}
+    cat_colors = {'COMPLEXITY': Fore.RED, 'RUNTIME-RISK': Fore.RED + Style.BRIGHT, 'SECURITY': Fore.MAGENTA + Style.BRIGHT, 'SYNTAX': Fore.RED + Style.BRIGHT, 'DEADCODE': Fore.CYAN, 'STYLE': Fore.YELLOW, 'QA-REMINDER': Fore.GREEN}
     for f in unique_findings:
         cat = f.get('category', 'STYLE').upper()
         line_err = f.get('line', 0)
