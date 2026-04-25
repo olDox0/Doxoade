@@ -1,17 +1,19 @@
-# doxoade/doxoade/commands/doxcolors_systems/colors_command.py
-
+# -*- coding: utf-8 -*-
 import click
 import os
 import re
 import shutil
 import time
-from pathlib import Path
-import doxoade.tools as dox_tools
-from doxoade.tools.doxcolors import Fore, Style,AsyncAnimation
 
-# Localização do arquivo fonte para injeção
+from datetime import datetime
+from pathlib import Path
+
+import doxoade.tools as dox_tools
+
+# Localização do motor no Doxoade
 DOXCOLORS_SOURCE_PATH = Path(dox_tools.__file__).parent / 'doxcolors.py'
-#COLORS_CONF_TEMPLATE = '\n# Arquivo de Paleta de Cores do Doxcolors\n# Formatos: NOME = #RRGGBB ou NOME = Código;ANSI\n[SUCCESS] = #26bc5f\n[ERROR] = #FF6700\n[WARNING] = #E8AA00\n[INFO] = #006CFF\n[HIGHLIGHT] = 1;36\n'.strip()
+
+# Template de configuração
 COLORS_CONF_TEMPLATE = """
 # Padrão Nexus de Identidade Visual
 [PRIMARY]   = #006CFF
@@ -24,124 +26,136 @@ COLORS_CONF_TEMPLATE = """
 """.strip()
 
 class ColorMigrator:
-    def __init__(self, target_path, dry_run=True, package_name='doxoade'):
+    def __init__(self, target_path, apply=False, module_prefix='utils'):
         self.target_path = Path(target_path).resolve()
-        self.dry_run = dry_run
+        self.apply = apply
         self.modifications = 0
-        self.package_name = package_name
-        self.init_call_pattern = re.compile(r'^\s*init\(.*\)\s*$', re.MULTILINE)
-        self.colorama_import_pattern = re.compile(r'from\s+colorama\s+import\s+(.*)')
+        self.module_prefix = module_prefix
+        self.target_module = f"{module_prefix}.doxcolors"
 
-    def run_migration(self):
-        """Orquestra o processo de migração."""
-        label = "SIMULANDO" if self.dry_run else "EXECUTANDO"
-        click.secho(f"--- {label} MIGRAÇÃO: {self.target_path.name} ---", fg="cyan", bold=True)
+    def run(self):
+        label = "AUDITORIA (DRY-RUN)" if not self.apply else "MIGRAÇÃO REAL"
+        click.secho(f"🎨 Doxcolors Embedded Migration: {label}", fg="cyan", bold=True)
         
-        self._inject_doxcolors()
+        dest_dir = self._find_best_dest()
+        
+        if self.apply:
+            self._inject_file(dest_dir)
+        else:
+            click.echo(f"📍 Destino planejado: {dest_dir.relative_to(self.target_path)}/doxcolors.py")
+
         self._scan_and_refactor()
         
-        click.echo('\n' + Fore.CYAN + '--- Resumo ---')
-        if self.modifications == 0:
-            click.secho('Nenhuma modificação necessária.', fg="green")
-        else:
-            click.secho(f'Detectadas {self.modifications} modificações.', fg="yellow")
+        click.echo('\n' + '─' * 60)
+        status = "seriam alterados" if not self.apply else "foram modificados"
+        click.secho(f"✔ Resumo: {self.modifications} arquivo(s) {status}.", fg="green", bold=True)
 
-    def _inject_doxcolors(self):
-        """Injeta o doxcolors.py no projeto alvo."""
-        project_root = self.target_path if self.target_path.is_dir() else self.target_path.parent
-        tools_dir = project_root / self.package_name / 'tools'
-        target_file = tools_dir / 'doxcolors.py'
+    def _find_best_dest(self) -> Path:
+        for name in [self.module_prefix, 'utils', 'tools']:
+            candidate = self.target_path / name
+            if candidate.exists() and candidate.is_dir():
+                return candidate
+        return self.target_path
 
-        if self.dry_run:
-            if not target_file.exists():
-                click.secho(f"    [DRY] Injetaria: {target_file.relative_to(project_root)}", fg="yellow")
+    def _inject_file(self, dest_dir: Path):
+        """Injeta o motor doxcolors.py com Header de Identidade Nexus."""
+        target_file = dest_dir / 'doxcolors.py'
+        
+        if not DOXCOLORS_SOURCE_PATH.exists():
+            click.secho(f"   [FALHA] Fonte não encontrada em {DOXCOLORS_SOURCE_PATH}", fg="red")
             return
 
-        if not target_file.exists():
-            tools_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(DOXCOLORS_SOURCE_PATH, target_file)
-            click.secho(f"    [OK] Injetado: {target_file.name}", fg="green")
+        # 1. Lê o conteúdo original do motor
+        source_content = DOXCOLORS_SOURCE_PATH.read_text(encoding='utf-8')
+
+        # 2. Gera o Header dinâmico
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        header = (
+            f"# -*- coding: utf-8 -*-\n"
+            f"# {'─' * 60}\n"
+            f"# NEXUS UI ENGINE (Embedded Version)\n"
+            f"# Sincronizado por: Doxoade Control\n"
+            f"# Data: {timestamp}\n"
+            f"# Projeto Alvo: {self.target_path.name}\n"
+            f"# Compliance: MPoT-1, PASC-6.4 (High-Performance UI)\n"
+            f"# {'─' * 60}\n\n"
+        )
+
+        # 3. Limpeza: Remove headers de desenvolvimento originais se existirem
+        # Evita duplicar a linha de coding: utf-8
+        clean_content = re.sub(r'^# -\*- coding: utf-8 -\*-\n', '', source_content)
+        
+        # 4. Combina e salva
+        final_code = header + clean_content
+        
+        try:
+            target_file.write_text(final_code, encoding='utf-8')
+            click.secho(f"   [OK] Motor Nexus injetado e atualizado em: {target_file.name}", fg="green")
+        except Exception as e:
+            click.secho(f"   [ERRO] Falha na escrita do motor: {e}", fg="red")
 
     def _scan_and_refactor(self):
-        """Varre os arquivos .py para refatoração."""
-        if self.target_path.is_file():
-            self._refactor_file(self.target_path)
-        else:
-            ignore_dirs = {'venv', '.git', '__pycache__', 'build', 'dist'}
-            for root, dirs, files in os.walk(self.target_path):
-                dirs[:] = [d for d in dirs if d not in ignore_dirs and not d.startswith('.')]
-                for file in files:
-                    if file.endswith('.py'):
-                        self._refactor_file(Path(root) / file)
-
-    def _sub_colorama_import(self, match):
-        """Converte import do colorama para doxcolors."""
-        imported_names_str = match.group(1).strip().replace('(', '').replace(')', '')
-        names = [name.strip() for name in imported_names_str.split(',')]
-        filtered_names = [name for name in names if not name.startswith('init')]
-        if not filtered_names:
-            return ''
-        return f'from {self.package_name}.tools.doxcolors import {", ".join(filtered_names)}'
+        ignore_dirs = {'.git', 'venv', '__pycache__', 'build', 'dist', 'sysutils.egg-info'}
+        for root, dirs, files in os.walk(self.target_path):
+            dirs[:] = [d for d in dirs if d not in ignore_dirs]
+            for file in files:
+                if file.endswith('.py') and file != 'doxcolors.py':
+                    self._refactor_file(Path(root) / file)
 
     def _refactor_file(self, file_path: Path):
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-            
-            new_lines, made_change, file_diff = [], False, []
+            content = file_path.read_text(encoding='utf-8', errors='ignore')
+            if "colorama" not in content: return
+
+            lines = content.splitlines(keepends=True)
+            new_lines, made_change, diff_log = [], False, []
 
             for i, line in enumerate(lines):
                 new_line = line
-                stripped = line.strip()
-
-                # 1. Caso: init(...)
-                if self.init_call_pattern.search(line):
-                    new_line, made_change = "", True
-                
-                # 2. Caso: from colorama import ...
-                elif "from colorama import" in line:
-                    match = self.colorama_import_pattern.search(line)
-                    if match:
-                        replacement = self._sub_colorama_import(match)
-                        new_line, made_change = (replacement + "\n") if replacement else "", True
-                
-                # 3. Caso: import colorama (NOVO: Para legados)
-                elif stripped == "import colorama":
-                    new_line = f"import {self.package_name}.tools.doxcolors as colorama\n"
-                    made_change = True
+                if "from colorama" in line:
+                    new_line = line.replace("colorama", self.target_module)
+                elif "import colorama" in line:
+                    new_line = line.replace("import colorama", f"import {self.target_module} as colorama")
+                elif "colorama.init(" in line:
+                    new_line = ""
 
                 if new_line != line:
-                    file_diff.append((i + 1, line.strip(), new_line.strip()))
-                
-                if new_line or not line.strip():
-                    new_lines.append(new_line)
+                    made_change = True
+                    diff_log.append((i + 1, line.strip(), new_line.strip()))
+                    if new_line == "": continue
+                new_lines.append(new_line)
 
             if made_change:
                 self.modifications += 1
-                if self.dry_run:
-                    click.secho(f"\n[INSIGHT] {file_path.name}", fg="bright_cyan", bold=True)
-                    for ln, old, new in file_diff:
-                        click.echo(f"  L{ln}: ", nl=False)
-                        click.secho(f"- {old}", fg="red", nl=False)
+                click.secho(f"\n📝 {file_path.relative_to(self.target_path)}", fg="white", bold=True)
+                for ln, old, new in diff_log:
+                    click.echo(f"   L{ln}: ", nl=False)
+                    click.secho(f"- {old}", fg="red", nl=False)
+                    if new:
                         click.echo("  ->  ", nl=False)
                         click.secho(new, fg="green")
-                else:
-                    with open(file_path, 'w', encoding='utf-8') as f:
-                        f.writelines(new_lines)
-                    click.secho(f"  [FIXED] {file_path.name}", fg="green")
-        except Exception as e:
-            click.secho(f"  [ERRO] {file_path.name}: {e}", fg="red")
+                    else:
+                        click.secho(" (REMOVIDO)", fg="yellow")
 
-@click.group(name='doxcolors', invoke_without_command=True)
+                if self.apply:
+                    shutil.copy2(file_path, file_path.with_suffix('.py.bak'))
+                    file_path.write_text("".join(new_lines), encoding='utf-8')
+                    click.secho("   [SALVO]", fg="green")
+        except Exception as e:
+            click.echo(f"   [ERRO] {file_path.name}: {e}")
+
+# --- GRUPO CLI ---
+
+@click.group('doxcolors', invoke_without_command=True)
 @click.option('--path', '-p', default='.', type=click.Path(exists=True))
 @click.option('--apply', is_flag=True, help='Aplica as mudanças.')
-@click.option('--package-name', default='doxoade')
-def doxcolors_cmd(path, apply, package_name):
-    """Refatoração Colorama -> Doxcolors."""
-    ctx = click.get_current_context()
+@click.option('--prefix', default='utils', help='Pasta/Módulo onde o motor será injetado.')
+@click.pass_context
+def doxcolors_cmd(ctx, path, apply, prefix):
+    """Refatoração Colorama -> Doxcolors Embedded."""
     if ctx.invoked_subcommand is None:
-        migrator = ColorMigrator(target_path=path, dry_run=not apply, package_name=package_name)
-        migrator.run_migration()
+        migrator = ColorMigrator(target_path=path, apply=apply, module_prefix=prefix)
+        migrator.run()
 
 @doxcolors_cmd.command('config')
 def config():

@@ -3,12 +3,12 @@ import os
 import json
 import click
 from rich.console import Console
+
 from doxoade.dnm import DNM
 from .intelligence_utils import get_ignore_spec
-from doxoade.commands.doxcolors_systems.colors_command import config
-from doxoade.tools.filesystem import _find_project_root
-from doxoade.tools.filesystem import _get_project_config
+from doxoade.tools.filesystem             import _find_project_root, _get_project_config
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
+from doxoade.commands.doxcolors_systems.colors_command import config
 
 @click.group('intelligence', invoke_without_command=True)
 @click.argument('paths', nargs=-1, type=click.Path(exists=True))
@@ -16,11 +16,11 @@ from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 @click.option('--source', '-s', is_flag=True, help='Inclui código fonte completo.')
 @click.option('--concatenate', '-c', is_flag=True, help='Minifica o JSON.')
 @click.option('--output', '-o', default='chief_dossier.json', help='Saída do dossiê.')
-@click.option('--focus', '-f', type=click.Choice(['vulcan', 'check', 'economic'], case_sensitive=False), help="Filtra e sumariza o relatório para um foco específico (e.g., 'vulcan' para segurança).")
-@click.option('--ai-export', '-ai', is_flag=True, help='Gera um dossiê otimizado em XML/Markdown para altíssima absorção por IAs (LLMs).')
+@click.option('--focus', '-f', type=click.Choice(['vulcan', 'check', 'economic'], case_sensitive=False))
+@click.option('--ai-export', '-ai', is_flag=True, help='Gera um dossiê otimizado em XML/Markdown.')
 @click.pass_context
 def intelligence(ctx, paths, output, docs, source, concatenate, focus, ai_export):
-    """Módulo de Inteligência Topológica (v94.3)."""
+    """Módulo de Inteligência Topológica (v94.5)."""
     if ctx.invoked_subcommand is None:
         scan_paths = paths if paths else ('.',)
         _run_dossier_scan(scan_paths, output, docs, source, concatenate, focus, ai_export, ctx)

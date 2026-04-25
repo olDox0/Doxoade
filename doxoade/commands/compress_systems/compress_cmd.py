@@ -1,15 +1,16 @@
+# doxoade/doxoade/commands/compress_systems/compress_cmd.py
 import click
 import os
 from .compress_utils import uncompress_zst_to_targz
 
 @click.group('compress', no_args_is_help=True)
 def compress_group():
-    """Utilitário de compressão Doxoade (PASC-8.4)."""
+    """Utilitário de compressão Doxoade."""
     pass
 
-@click.command('compress')
+@compress_group.command('file')
 @click.argument('file_path')
-@click.option('--uncompress', is_flag=True, help='Descomprime e normaliza RootFS.')
+@click.option('--uncompress', is_flag=True)
 def compress_file_cmd(file_path, uncompress):
     """Comprime ou descomprime um arquivo específico."""
     if uncompress and file_path.endswith('.zst'):

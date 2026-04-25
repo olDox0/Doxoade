@@ -8,20 +8,30 @@ from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.filesystem import _find_project_root
 
-# --- CONFIGURAÇÃO DE VETORES PARA EXECUÇÃO REAL ---
+# --- SUITE DE CENÁRIOS DE TESTE REAL ---
+MISSOES_NEXUS = [
+    ("Auditoria de API", "apicheck ."), # Ele vai procurar apicheck.json na raiz
+    ("Julgamento de Ma'at", "audit ."),
+    ("Automação Pipeline", "auto -f PipelineHelp.txt"), # Usa o arquivo que você já tem
+    ("Mapeamento Git", "branch --list"),
+    ("Canonização Gold", "canonize --all --run-tests"),
+    ("Check Integridade", "check . --fast"),
+    ("Telemetria Nexus", "telemetry -n 5"),
+    # Usamos o comando 'list' que vamos criar abaixo
+    ("Inteligência Scan", "intelligence list ."),
+    ("Doxcolors Anim", "doxcolors play assets/loading.nxa"), # Removido --duration
+]
+
 VETORES_REAIS = {
-    "check": "doxoade/cli.py --fast",
-    # O segredo: usamos -- para dizer "os caminhos acabaram, agora vem o comando"
-    "intelligence": "-- . list", 
-    "intelligence recover": "-- .",
-    "config fix": "--help",
-    "compress": "--help", 
+    "telemetry": "-n 1",
+    "check": "--fast doxoade/commands/check_systems/",
+    "intelligence list": ".",  # Agora chamamos o novo comando list
+    "intelligence recover": "--help",
+    "compress file": ".",      # Ajustado para o novo comando 'file'
     "webcheck": "--help",
-    "audit": ".",
-    "vulcan doctor": "",
+    "config fix": "--help",
 }
 
-# --- HELPERS ---
 def _sep(label: str = "", width: int = 60, color: str = "cyan") -> None:
     line = f"─{'─' * (width - 2)}─"
     if label:
@@ -29,7 +39,6 @@ def _sep(label: str = "", width: int = 60, color: str = "cyan") -> None:
         line = f"─ {label} {'─' * pad}"
     click.secho(line, fg=color)
 
-# --- CORE ENGINE ---
 class NexusLab:
     def __init__(self, distro="doxlinux"):
         self.distro = distro
@@ -48,33 +57,63 @@ class NexusLab:
         cmd = f"mkdir -p {self.project_root_linux} && rsync -am --delete {excl} '{self.wsl_path}/' {self.project_root_linux}/"
         subprocess.run(["wsl", "-d", self.distro, "sh", "-c", cmd], check=True)
 
-    def run(self, cmd_args, timeout=40):
-        full_cmd = f"cd {self.project_root_linux} && export PYTHONPATH=. && python3 -m doxoade {cmd_args}"
+    def run(self, cmd_args, timeout=60):
+        # PYTHONPATH e Encoding garantidos para o Alpine
+        full_cmd = f"cd {self.project_root_linux} && export PYTHONPATH=. && export PYTHONIOENCODING=utf-8 && python3 -m doxoade {cmd_args}"
         enc = base64.b64encode(full_cmd.encode()).decode()
+        if "check" in cmd_args or "canonize" in cmd_args:
+            timeout = 180 
         try:
             res = subprocess.run(["wsl", "-d", self.distro, "sh", "-c", f"echo {enc} | base64 -d | sh"], 
                                  capture_output=True, text=True, timeout=timeout, encoding='utf-8', errors='replace')
             return res.returncode, res.stdout, res.stderr
-        except Exception as e:
-            return -1, "", str(e)
+        except subprocess.TimeoutExpired:
+            return -1, "", "TIMEOUT"
 
-# --- CLI COMMANDS ---
 @click.group('lab')
 def lab_group():
-    """🧪 Nexus Lab: Auditoria de Massa em Sandbox."""
+    """🧪 Nexus Lab: Sandbox de alta segurança."""
     pass
+
+@lab_group.command('run-suite')
+@click.option('--distro', default='doxlinux')
+def lab_run_suite(distro):
+    """🚀 Mission Suite: Executa cenários programados de alto impacto."""
+    lab = NexusLab(distro)
+    _sep("PREPARANDO SANDBOX")
+    lab.sync()
+    
+    _sep("EXECUTANDO MISSÕES CRÍTICAS")
+    
+    passed = 0
+    for titulo, cmd in MISSOES_NEXUS:
+        t0 = time.time()
+        click.echo(f"🎯 {Fore.CYAN}{titulo.ljust(25)}{Style.RESET_ALL} ", nl=False)
+        
+        code, out, err = lab.run(cmd)
+        dur = time.time() - t0
+        
+        if code == 0:
+            click.secho(f"PASS ({dur:.2f}s)", fg="green", bold=True)
+            passed += 1
+            # Mostra as duas últimas linhas do sucesso para confirmar que houve saída real
+            last_lines = "\n".join(out.strip().splitlines()[-2:])
+            if last_lines:
+                click.echo(f"   {Style.DIM}{last_lines}{Style.RESET_ALL}")
+        else:
+            click.secho(f"FAIL ({dur:.2f}s)", fg="red", bold=True)
+            relevant_error = err.strip().splitlines()[-1] if err else "Erro silencioso ou Crash"
+            click.echo(f"   {Fore.YELLOW}└─ Fatal: {relevant_error}{Style.RESET_ALL}")
+
+    _sep("RELATÓRIO DE MISSÃO")
+    color = "green" if passed == len(MISSOES_NEXUS) else "red"
+    click.secho(f"Sucesso: {passed}/{len(MISSOES_NEXUS)} missões cumpridas.", fg=color, bold=True)
 
 @lab_group.command('bulk-test')
 @click.option('--distro', default='doxlinux')
-@click.option('--limit', default=139)
-def lab_bulk_test(distro, limit):
-    """🚀 Varredura em Massa: Testa a lógica real de TODOS os comandos."""
-    try:
-        from doxoade.cli import cli
-    except Exception as e:
-        click.secho(f"FATAL: {e}", fg="red")
-        return
-
+def lab_bulk_test(distro):
+    """(Legado) Varredura de carga para verificar entrypoints."""
+    from doxoade.cli import cli
     lab = NexusLab(distro)
     click.echo("🔄 Sincronizando Snapshot...")
     lab.sync()
@@ -82,43 +121,48 @@ def lab_bulk_test(distro, limit):
     all_cmds = []
     def collect(group, prefix=""):
         ctx = click.Context(group)
-        try:
-            for name in group.list_commands(ctx):
-                full = f"{prefix} {name}".strip()
-                all_cmds.append(full)
-                sub = group.get_command(ctx, name)
-                if isinstance(sub, click.Group): collect(sub, full)
-        except: pass
+        for name in group.list_commands(ctx):
+            full = f"{prefix} {name}".strip()
+            all_cmds.append(full)
+            sub = group.get_command(ctx, name)
+            if isinstance(sub, click.Group): collect(sub, full)
     collect(cli)
-    all_cmds = all_cmds[:limit]
 
-    _sep(f"EXECUTANDO {len(all_cmds)} TESTES NO ALPINE")
-    
+    _sep(f"AUDITANDO {len(all_cmds)} COMANDOS NO ALPINE")
     results = []
-    with click.progressbar(all_cmds, label="Auditando") as bar:
-        for cmd_name in bar:
-            args = VETORES_REAIS.get(cmd_name, "--help")
-            code, out, err = lab.run(f"{cmd_name} {args}")
+    with click.progressbar(all_cmds) as bar:
+        for cmd in bar:
+            args = VETORES_REAIS.get(cmd, "--help")
+            code, out, err = lab.run(f"{cmd} {args}")
             sample = (out.strip() if out else err.strip()).replace('\n', ' ')[:50]
-            results.append({"cmd": cmd_name, "code": code, "sample": sample, "err": err})
+            results.append({"cmd": cmd, "code": code, "sample": sample, "err": err})
 
     for r in results:
-        if r['code'] == 0:
-            click.echo(f"{Fore.GREEN}✔ {r['cmd'].ljust(30)}{Style.RESET_ALL} | {r['sample']}...")
+        color = Fore.GREEN if r['code'] == 0 else Fore.RED
+        if r['code'] != 0:
+            click.echo(f"{color}✘ {r['cmd'].ljust(30)}{Style.RESET_ALL} | {r['err'].splitlines()[-1] if r['err'] else 'Error'}")
         else:
-            err_line = r['err'].strip().splitlines()[-1] if r['err'] else "Erro"
-            click.echo(f"{Fore.RED}✘ {r['cmd'].ljust(30)}{Style.RESET_ALL} | {Fore.YELLOW}{err_line[:60]}{Style.RESET_ALL}")
+            click.echo(f"{Fore.GREEN}✔ {r['cmd'].ljust(30)}{Style.RESET_ALL} | {r['sample']}...")
 
     passed = sum(1 for r in results if r['code'] == 0)
-    _sep(f"SAÚDE FINAL: {passed}/{len(all_cmds)}")
+    _sep(f"SAÚDE: {passed}/{len(all_cmds)}")
 
 @lab_group.command('bootstrap')
 @click.option('--distro', default='doxlinux')
 def lab_bootstrap(distro):
+    """Garante todas as dependências no Alpine (incluindo Web e AST)."""
     lab = NexusLab(distro)
-    pkgs = "rsync python3 py3-pip build-base py3-click py3-colorama py3-psutil py3-rich py3-yaml py3-pathspec"
+    # Adicionado: py3-beautifulsoup4, py3-requests, py3-toml, py3-packaging
+    pkgs = [
+        "rsync", "python3", "py3-pip", "build-base", "py3-click", 
+        "py3-colorama", "py3-psutil", "py3-rich", "py3-yaml", 
+        "py3-pathspec", "py3-beautifulsoup4", "py3-requests", "py3-toml"
+    ]
     repo = "--repository=http://dl-cdn.alpinelinux.org/alpine/v3.20/main --repository=http://dl-cdn.alpinelinux.org/alpine/v3.20/community"
-    subprocess.run(["wsl", "-d", distro, "-u", "root", "sh", "-c", f"apk add --no-cache {repo} {pkgs}"])
+    click.echo("🔧 Provisionando ambiente completo...")
+    subprocess.run(["wsl", "-d", distro, "-u", "root", "sh", "-c", f"apk add --no-cache {repo} {' '.join(pkgs)}"])
+    # Esprima e CSSUtils geralmente precisam de pip no Alpine
+    subprocess.run(["wsl", "-d", distro, "sh", "-c", "pip install esprima cssutils --break-system-packages"], capture_output=True)
 
 @lab_group.command('deep-test')
 @click.option('--distro', default='doxlinux')

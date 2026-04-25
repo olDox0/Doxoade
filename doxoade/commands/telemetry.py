@@ -4,7 +4,7 @@ MaxTelemetry v3.9 - Nexus Gold Edition.
 Compliance: MPoT-1, PASC-1. Deepcheck Score 100.
 """
 import click
-import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
+import doxoade.tools.aegis.nexus_db as sqlite3 # noqa
 import json
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.database import get_db_connection
@@ -21,24 +21,30 @@ from . import telemetry_io as io
 @click.option('--after', '-a', default=2, help='Linhas de contexto DEPOIS da hot-line (padrão: 2).')
 def telemetry(limit, command, stats, verbose, flow, context, after):
     """Análise profunda de Recursos (MPoT-12)."""
-    import sqlite3 as py_sqlite3 # Importa o original para o Row factory
     conn = get_db_connection()
-    conn.row_factory = py_sqlite3.Row # Usa o factory padrão do Python
     cursor = conn.cursor()
     try:
-        cursor.execute('SELECT * FROM command_history ORDER BY id DESC LIMIT ?', (limit,))
+        cursor.execute("SELECT * FROM command_history ORDER BY id DESC LIMIT ?", (limit,))
+        
+        # FIX: Mapeamento manual de colunas para suportar NexusDB (Aegis)
+        columns = [column[0] for column in cursor.description]
         rows = cursor.fetchall()
-        click.echo(f'{Fore.CYAN}{Style.BRIGHT}=== 📊 DOXOADE NEXUS TELEMETRY ==={Style.RESET_ALL}')
+
+        click.echo(f"{Fore.CYAN}{Style.BRIGHT}=== 📊 DOXOADE NEXUS TELEMETRY ==={Style.RESET_ALL}")
+        
         for row in rows:
-            _render_entry(row, verbose, flow, context, after)
+            # Converte tupla em dicionário para garantir compatibilidade
+            row_dict = dict(zip(columns, row))
+            _render_entry(row_dict, verbose, flow, context, after)
     finally:
         conn.close()
 
 def _render_entry(row, verbose: bool, flow: bool, context: int, after: int):
-    status = Fore.GREEN + '✔' if row[3] == 0 else Fore.RED + '✘'
-#    status = Fore.GREEN + '✔' if row['exit_code'] == 0 else Fore.RED + '✘'
+    # Agora row['exit_code'] e row['timestamp'] funcionam 100%
+    status = Fore.GREEN + '✔' if row['exit_code'] == 0 else Fore.RED + '✘'
     ts = row['timestamp'][:19].replace('T', ' ')
     cmd = row['command_name'].upper()
+    
     click.echo(f"\n{status} {Fore.WHITE}{ts} | {cmd} ({row['duration_ms']:.0f}ms)")
     if cmd.startswith('VULCAN_EXT_'):
         full_cmd = row['full_command_line'] or ''

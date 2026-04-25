@@ -1,10 +1,10 @@
 doxoade android --help
 doxoade apicheck --help
-doxoade audit --help
+doxoade audit
 doxoade auto --help
-doxoade branch --help
-doxoade canonize --help
-doxoade check --help
+doxoade branch --list
+doxoade canonize --all
+doxoade check -a -fp doxoade/commands/check_systems/
 doxoade clean --help
 doxoade compress --help
 doxoade config --help
