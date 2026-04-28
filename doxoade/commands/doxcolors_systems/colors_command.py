@@ -112,12 +112,20 @@ class ColorMigrator:
 
             for i, line in enumerate(lines):
                 new_line = line
-                if "from colorama" in line:
-                    new_line = line.replace("colorama", self.target_module)
+                # Caso A: from colorama import Fore, Style, init
+                if "from colorama import" in line:
+                    # Remove o 'init' da lista de nomes e limpa vírgulas extras
+                    clean_names = line.replace("from colorama import", "").strip()
+                    names = [n.strip() for n in clean_names.split(",") if n.strip() != "init"]
+                    new_line = f"from {self.target_module} import {', '.join(names)}\n"
+                
+                # Caso B: import colorama
                 elif "import colorama" in line:
-                    new_line = line.replace("import colorama", f"import {self.target_module} as colorama")
-                elif "colorama.init(" in line:
-                    new_line = ""
+                    new_line = f"import {self.target_module} as colorama\n"
+                
+                # Caso C: chamada de função init() isolada
+                elif "init(" in line and "colorama" in line:
+                    new_line = "" # Remove a linha completamente
 
                 if new_line != line:
                     made_change = True

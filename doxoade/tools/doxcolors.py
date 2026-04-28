@@ -11,6 +11,26 @@ import time
 import math
 import threading
 import itertools
+import atexit
+
+def _force_reset():
+    """Envia o sinal de reset global de forma agressiva."""
+    # O código \033[0m reseta cores de fundo, frente e estilos (negrito, etc)
+    # Enviamos para stdout e stderr para garantir que o terminal receba
+    if os.name == 'nt':
+        # No Windows, às vezes o flush do Python não atinge o buffer do console a tempo
+        os.system('') # Truque para forçar o processamento de ANSI no CMD/Powershell
+    
+    sys.stdout.write('\033[0m')
+    sys.stdout.flush()
+    sys.stderr.write('\033[0m')
+    sys.stderr.flush()
+
+class AnsiCode(str):
+    __slots__ = ()
+    def __new__(cls, code: str):
+        if not ANSI_ENABLED: return str.__new__(cls, '')
+        return str.__new__(cls, f'\x1b[{code}m')
 
 # --- CORE ENGINE ---
 
@@ -395,3 +415,21 @@ class DoxColors:
     rgb = staticmethod(rgb); hex = staticmethod(hex_to_ansi)
     AsyncAnimation = AsyncAnimation
 colors = DoxColors
+
+def init(autoreset=True):
+    """
+    Inicializa o motor de cores.
+    Se autoreset=True, registra a limpeza automática ao sair do programa.
+    """
+    if os.name == 'nt' and ANSI_ENABLED:
+        # Ativa suporte ANSI no Windows 10+
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetStdHandle(-11)
+        mode = ctypes.c_ulong()
+        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            kernel32.SetConsoleMode(handle, mode.value | 4)
+
+    if autoreset:
+        # Registra a função de limpeza automática
+        atexit.register(_force_reset)

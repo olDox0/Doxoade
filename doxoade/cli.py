@@ -10,6 +10,8 @@ import time
 import click
 import traceback
 from importlib import import_module
+from doxoade.tools.doxcolors import init as init_colors
+
 if sys.stdout.encoding != 'utf-8':
     try:
         sys.stdout.reconfigure(encoding='utf-8')
@@ -111,7 +113,8 @@ class DoxoadeLazyGroup(click.Group):
         'verilog': 'doxoade.commands.verilog:verilog', 
         'vulcan': 'doxoade.commands.vulcan_cmd:vulcan_group', 
         'webcheck': 'doxoade.commands.webcheck:webcheck',
-        'wsl': 'doxoade.commands.shell_systems.shell_cmd:wsl_shell',
+#        'wsl': 'doxoade.commands.shell_systems.shell_cmd:wsl_shell',
+        'wsl': 'doxoade.commands.linux_systems.linux_cmd:linux_group',
         }
 
     def list_commands(self, ctx):
@@ -150,6 +153,7 @@ class DoxoadeLazyGroup(click.Group):
 @click.pass_context
 def cli(ctx, guard):
     """olDox222 Advanced Development Environment (doxoade)."""
+    init_colors(autoreset=True)
     ctx.ensure_object(dict)
     from doxoade.tools.db_utils import start_persistence_worker
     start_persistence_worker()

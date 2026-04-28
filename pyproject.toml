@@ -31,6 +31,7 @@ legacy = ["pandas<2.3", "lxml", "pyyaml"]
 
 [project.scripts]
 doxoade = 'doxoade.__main__:main'
+dox = "doxoade.__main__:main"
 #doxoade = "doxoade.doxoade:cli"
 
 [tool.doxoade]

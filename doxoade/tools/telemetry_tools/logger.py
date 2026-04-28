@@ -50,7 +50,18 @@ class ExecutionLogger:
         """Finaliza a execução e sela o log no banco de dados (Osíris)."""
         execution_time_ms = (time.monotonic() - self.start_time) * 1000
         try:
+            # Tenta importação no modo Global (Núcleo Doxoade)
+            try:
+                from doxoade.tools.db_utils import _log_execution, stop_persistence_worker
+            # Se falhar, tenta o modo Embarcado (Pasta utils/ flat)
+            except ImportError:
+                from .db_utils import _log_execution, stop_persistence_worker
+
             _log_execution(self.command_name, self.path, self.results, self.arguments, execution_time_ms)
+            
+            # Se não estiver rodando via CLI principal do doxoade, força o flush síncrono
+            if not any('doxoade' in arg for arg in [sys.argv[0], sys.executable]):
+                 stop_persistence_worker()
         except Exception as e:
             print(f'\x1b[0;33m logger - __exit__ - Exception: {e}')
         if exc_type and (not isinstance(exc_val, SystemExit)):

@@ -6,6 +6,7 @@ doxoade branch --list
 doxoade canonize --all
 doxoade check -a -fp doxoade/commands/check_systems/
 doxoade clean --help
+doxoade clean 
 doxoade compress --help
 doxoade config --help
 doxoade create-pipeline --help

@@ -1,9 +1,16 @@
+# -*- coding: utf-8 -*-
 import click
 import subprocess
 import os
 import sys
 import threading
 import time
+import winreg
+import tempfile
+import ctypes
+from pathlib import Path
+
+from doxoade.tools.doxcolors import Fore, Style, colors
 from doxoade.tools.doxcolors import colors
 
 PS_BASE = ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command']
@@ -22,11 +29,38 @@ def run_win_cmd(cmd_list):
     except:
         return proc.stdout.decode('utf-8', errors='replace').strip()
 
-# --- DEFINIÇÃO DO GRUPO (O que causou o erro) ---
-@click.group()
-def linux_group():
-    """Gerenciamento de subsistemas Linux (Doxoade Core)."""
-    pass
+def get_vhdx_path(distro_name):
+    """Localiza o caminho do VHDX no Registro do Windows."""
+    try:
+        lxss_path = r"Software\Microsoft\Windows\CurrentVersion\Lxss"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, lxss_path) as key:
+            for i in range(winreg.QueryInfoKey(key)[0]):
+                guid = winreg.EnumKey(key, i)
+                with winreg.OpenKey(key, guid) as subkey:
+                    try:
+                        name, _ = winreg.QueryValueEx(subkey, "DistributionName")
+                        if name.lower() == distro_name.lower():
+                            base_path, _ = winreg.QueryValueEx(subkey, "BasePath")
+                            return os.path.join(base_path, "ext4.vhdx")
+                    except: continue
+    except: return None
+
+def run_elevated_diskpart(script_path):
+    """Executa o diskpart elevando via CMD (Evita erro de RemoteApp)."""
+    # Usamos o ShellExecute no CMD para carregar o ambiente local do sistema
+    # O diretório de trabalho é essencial para evitar o 'dummy-entry'
+    work_dir = os.path.dirname(script_path)
+    params = f'/c "diskpart.exe /s \\"{script_path}\\""'
+    ret = ctypes.windll.shell32.ShellExecuteW(
+        None, "runas", "cmd.exe", params, work_dir, 1
+    )
+    return ret > 32
+
+def run_diskpart_elevated(script_path):
+    """Executa o diskpart elevando privilégios via ShellExecuteW."""
+    params = f'/s "{script_path}"'
+    ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", "diskpart.exe", params, None, 1)
+    return ret > 32
 
 class DeployUI(threading.Thread):
     """Thread de animação para o Deploy WSL."""
@@ -57,51 +91,94 @@ class DeployUI(threading.Thread):
         sys.stdout.write(f"\x1b[{self.canvas_height}A\x1b[?25h")
         sys.stdout.flush()
 
-@linux_group.command(name="wsl")
-@click.argument('tar_gz_path')
-@click.option('--name', default='ArchDev')
-@click.option('--path', default='') # Vamos deixar vazio para o padrão ser o home
-def wsl_import(tar_gz_path, name, path):
-    """Importa a distro com captura total de logs."""
+@click.group('wsl', invoke_without_command=True)
+@click.option('--distro', '-d', default='doxlinux')
+@click.pass_context
+def linux_group(ctx, distro):
+    if ctx.invoked_subcommand is None:
+        os.system(f'start wsl.exe -d {distro}')
+
+@linux_group.command('open')
+@click.option('--distro', '-d', default='doxlinux')
+def wsl_open(distro):
+    """Abre o terminal da distro em uma nova janela."""
+    click.echo(f"[*] Invocando terminal {distro}...")
+    os.system(f'start wsl.exe -d {distro}')
+
+@linux_group.command('optimize')
+@click.option('--name', '-n', default='doxlinux', help='Nome da distro.')
+@click.option('--aggressive', is_flag=True, help='Zera blocos vazios para reduzir o VHDX ao máximo.')
+def wsl_optimize(name, aggressive):
+    """🚀 Otimização Nexus: Redução física real do arquivo VHDX."""
     
-    # Se não passou path, cria uma pasta segura nos documentos do usuário
-    if not path:
-        path = os.path.join(os.environ['USERPROFILE'], 'Documents', 'WSL', name)
-    
-    if not os.path.exists(path):
-        os.makedirs(path, exist_ok=True)
+    click.secho(f"--- [NEXUS WSL OPTIMIZER] Mantendo {name} ---", fg="cyan", bold=True)
+
+    # 1. Zeragem (Fase Crítica)
+    if aggressive:
+        click.echo(f"[*] {Fore.YELLOW}Fase 1: Zerando setores órfãos (Modo Turbo)...{Style.RESET_ALL}")
+        # O SEGREDO: cat /dev/zero é muito mais rápido que dd no Alpine.
+        # SEM capture_output para não travar a RAM do Python.
+        wipe_cmd = "cat /dev/zero > /wipefile; sync; rm -f /wipefile"
         
-    abs_tar = os.path.abspath(tar_gz_path)
+        from doxoade.tools.doxcolors import colors
+        with colors.UI.loader(None, interval=0.1) as anim:
+            anim.message = "Limpando disco virtual"
+            # Rodamos sem capturar saída para o Windows gerenciar o I/O direto
+            subprocess.run(["wsl", "-d", name, "-u", "root", "sh", "-c", wipe_cmd], 
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        click.echo(f"[*] {Fore.YELLOW}Fase 1: Descartando blocos (Trim)...{Style.RESET_ALL}")
+        subprocess.run(["wsl", "-d", name, "-u", "root", "fstrim", "-v", "/"], 
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # 2. Localização do VHDX
+    vhdx_path = get_vhdx_path(name)
+    if not vhdx_path or not os.path.exists(vhdx_path):
+        click.secho("❌ Erro: VHDX não localizado.", fg="red")
+        return
+
+    size_before = os.path.getsize(vhdx_path) / (1024**3)
+    click.echo(f"[*] Disco físico: {size_before:.2f} GB")
+
+    # 3. Shutdown (Sincronizado)
+    click.echo(f"[*] {Fore.YELLOW}Fase 2: Encerrando instâncias e liberando arquivo...{Style.RESET_ALL}")
+    subprocess.run(["wsl", "--terminate", name], capture_output=True)
+    subprocess.run(["wsl", "--shutdown"], capture_output=True)
+    time.sleep(5) # Tempo para o Windows soltar o lock
+
+    # 4. Compactação (PowerShell Admin)
+    click.echo(f"[*] {Fore.YELLOW}Fase 3: Compactação física (Diskpart)...{Style.RESET_ALL}")
     
-    click.echo(f"[*] Tentando registro: {name}")
-    click.echo(f"[*] Origem: {abs_tar}")
-    click.echo(f"[*] Destino: {path}")
-    
-    # Comando formatado como string para shell=True (Mais estável no Windows)
-    cmd = f'wsl.exe --import {name} "{path}" "{abs_tar}" --version 2'
+    script_content = f'select vdisk file="{vhdx_path}"\nattach vdisk readonly\ncompact vdisk\ndetach vdisk\nexit\n'
+    script_path = os.path.join(os.environ['TEMP'], 'dox_compact.txt')
+    with open(script_path, 'w') as f: f.write(script_content)
+
+    ps_cmd = f'Start-Process diskpart.exe -ArgumentList "/s {script_path}" -Verb RunAs -Wait'
     
     try:
-        # Usamos stderr=subprocess.STDOUT para mesclar as saídas e não perder mensagens
-        result = subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True)
-        click.echo(result.stdout)
-        click.secho(f"[OK] Distro {name} registrada!", fg='green')
-    except subprocess.CalledProcessError as e:
-        # Agora o erro NÃO vira vazio
-        full_error = e.output if e.output else e.stderr
-        click.secho(f"\n[FALHA NO WINDOWS KERNEL]", fg='red', bold=True)
-        click.echo(full_error)
-        
-        # Dica de ouro para o usuário
-        if "0x80070005" in full_error:
-            click.secho("DICA: Erro de Acesso Negado. Tente rodar como Administrador.", fg='yellow')
-        elif "0x80040324" in full_error:
-             click.secho("DICA: O WSL2 requer virtualização habilitada na BIOS.", fg='yellow')
-        elif "HCS_E_SERVICE_NOT_AVAILABLE" in full_error or "0x80040324" in full_error:
-                    click.secho("[-] Erro de Serviço HCS: O motor de virtualização não responde.", fg='yellow')
-                    click.echo("    SOLUÇÃO: Execute 'wsl --shutdown' e reinicie o seu computador.")
-                    click.echo("    Certifique-se que a 'Virtualização' está ativa na BIOS.")
-        
-        
+        # Bypass de execução para evitar erro de política de script do Windows
+        subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd], check=True)
+    except Exception as e:
+        click.secho(f"❌ Falha no Diskpart: {e}", fg="red")
+        return
+    finally:
+        if os.path.exists(script_path): os.remove(script_path)
+
+    # 5. Resultado Final
+    click.echo("[*] Validando nova geometria...")
+    time.sleep(2)
+    size_after = os.path.getsize(vhdx_path) / (1024**3)
+    saved_mb = (size_before - size_after) * 1024
+    
+    click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}✔ Otimização Concluída!{Style.RESET_ALL}")
+    click.echo(f"   Original : {size_before:.2f} GB")
+    click.echo(f"   Final    : {size_after:.2f} GB")
+    
+    if saved_mb > 5:
+        click.secho(f"   Recuperado: {saved_mb:.2f} MB", fg="cyan", bold=True)
+    else:
+        click.secho("   O disco já estava no limite físico de dados.", fg="white", dim=True)
+
 @linux_group.command(name="setup-dev")
 @click.option('--name', required=True)
 @click.option('--user', default='doxdev')
