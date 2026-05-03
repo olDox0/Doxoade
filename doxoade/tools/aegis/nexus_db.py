@@ -43,6 +43,21 @@ class AegisConnection:
     def __init__(self, conn):
         self._conn = conn
 
+    # Permite que o row_factory seja definido na conexão real
+    @property
+    def row_factory(self):
+        return self._conn.row_factory
+    
+    @row_factory.setter
+    def row_factory(self, value):
+        self._conn.row_factory = value
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
     def cursor(self):
         return AegisCursor(self._conn.cursor())
 

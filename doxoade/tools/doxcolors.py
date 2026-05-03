@@ -84,7 +84,7 @@ class Fore:
     LIGHTBLUE_EX    = AnsiCode('94')
     LIGHTCYAN_EX    = AnsiCode('96')
     LIGHTBLACK_EX   = AnsiCode('90')
-    RED     = AnsiCode('91')
+    LIGHTRED_EX   = AnsiCode('91')
     LIGHTGREEN_EX   = AnsiCode('92')
     LIGHTYELLOW_EX  = AnsiCode('93')
     LIGHTMAGENTA_EX = AnsiCode('95')
@@ -94,6 +94,7 @@ class Fore:
 
     ORANGE      = AnsiCode('38;2;255;100;0')   # ORANGE
     LIGHTYELLOW = AnsiCode('38;2;255;255;100')   # LIGHTYELLOW
+    EMERALD     = AnsiCode('38;2;38;188;95')   # Verde Estável
     GREY        = AnsiCode('38;2;100;100;100')   # LIGHTYELLOW
 
     PRIMARY     = AnsiCode('38;2;0;108;255')   # Azul Nexus

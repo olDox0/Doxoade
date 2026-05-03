@@ -1,5 +1,6 @@
 # doxoade/doxoade/tools/vulcan/forge.py
 import ast
+import os
 import re
 from pathlib import Path
 from typing import Set
@@ -10,6 +11,11 @@ _STUB_HEADER = "class _Stub:\n    RESET = RESET_ALL = BRIGHT = DIM = NORMAL = ''
 _SKIP_FILENAMES = frozenset({'__init__.py', '__main__.py'})
 _RISKY_IMPORTS = frozenset({'ctypes', 'socket', 'subprocess', 'threading', 'multiprocessing', 'asyncio', 'llama_cpp'})
 _BLANK_RE = re.compile('\\n{3,}')
+
+def enrich_pyx(source_code):
+    tree = ast.parse(source_code)
+    enricher = SmartEnricher()
+    enricher.visit(tree)
 
 def _strip_pyx_source(code: str) -> str:
     """
@@ -63,7 +69,7 @@ def assess_file_for_vulcan(file_path: str) -> tuple[bool, str | None]:
         return (False, f'arquivo complexo com APIs sensíveis (risk={risky_hits}, nodes={node_count})')
     return (True, None)
 
-class VulcanForge(ast.NodeTransformer):
+class VulcanForge:
     """Transpilador Estrutural: Converte Python moderno em C-Style limpo."""
 
     def __init__(self, target_path: str=''):
@@ -72,6 +78,9 @@ class VulcanForge(ast.NodeTransformer):
         self.blacklist: Set[str] = _BLACKLIST
         self._blacklisted_names: Set[str] = set()
         self._name_rewrites: list[dict[str, str]] = []
+        self.target_path = target_path
+        self.blacklist = {'click', 'rich', 'colorama', 'progressbar', 'click_echo'}
+        self.hot_names = {'n', 'i', 'j', 'k', 'idx', 'count', 'size', 'offset', 'delta', 'last_id', 'current_id', 'doc_id'}
 
     @staticmethod
     def _sanitize_identifier(name: str) -> str:
@@ -245,15 +254,201 @@ class VulcanForge(ast.NodeTransformer):
     def visit_AsyncFunctionDef(self, node):
         return self._transform_funcdef(node)
 
-    def generate_source(self, file_path: str) -> str:
+    def generate_source(self, file_path):
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            source = f.read()
-        tree = ast.parse(source)
-        transformed = self.visit(tree)
-        ast.fix_missing_locations(transformed)
-        header = '# cython: language_level=3, boundscheck=False, wraparound=False\n'
-        header += 'import sys, os, json\n'
-        header += 'try: from typing import *\nexcept: pass\n\n'
-        header += _STUB_HEADER
-        raw = header + ast.unparse(transformed)
-        return _strip_pyx_source(raw)
+            content = f.read()
+        
+        tree = ast.parse(content)
+        
+        # [INTELLIGENCE] Coleta nomes que serão stubbed (fantasiados)
+        stub_targets = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module in self.blacklist:
+                for alias in node.names:
+                    stub_targets.add(alias.asname or alias.name)
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name in self.blacklist:
+                        stub_targets.add(alias.asname or alias.name)
+
+        # [INTELLIGENCE] Só injeta o link nativo se a função 'encode_varint' estiver presente
+        needs_nexus_math = "def encode_varint" in content
+        
+        pyx_lines = [
+            "# cython: language_level=3",
+            "# cython: boundscheck=False",
+            "# cython: wraparound=True",
+            "# cython: cdivision=True",
+            "import sys, os, json, struct",
+            "from libc.stdint cimport int64_t"
+        ]
+
+        if needs_nexus_math:
+            # Localiza o caminho absoluto do kernel no Core do Doxoade
+            import doxoade.tools.vulcan as v_mod
+            kernel_path = os.path.join(os.path.dirname(v_mod.__file__), 'nexus_math.c')
+            kernel_path = kernel_path.replace("\\", "/") # Normaliza para o Cython
+            
+            pyx_lines.append("\n# --- NATIVE KERNEL LINK (Tier 1) ---")
+            # O SEGREDO: Usamos o caminho absoluto. O GCC não terá como errar.
+            pyx_lines.append(f"cdef extern from '{kernel_path}' nogil:")
+            pyx_lines.append("    int nexus_encode_varint_branchless(unsigned long n, unsigned char* out)")
+
+        pyx_lines.append("class _Stub:\n    def __getattr__(self, _): return _Stub()\n    def __call__(self, *a, **kw): return _Stub()")
+        
+        # Injeta os fantasmas para as libs de UI
+        for name in stub_targets.union(self.blacklist):
+            pyx_lines.append(f"{name} = _Stub()")
+
+        optimized_functions = []
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef):
+                optimized_functions.append(node.name)
+                pyx_lines.append(self._forge_node(node))
+            elif isinstance(node, ast.ClassDef):
+                pyx_lines.append(f"class {node.name}:")
+                for sub in node.body:
+                    if isinstance(sub, ast.FunctionDef):
+                        pyx_lines.append(self._forge_node(sub, indent="    "))
+                    else:
+                        pyx_lines.append("    " + ast.unparse(sub).replace("\n", "\n    "))
+            else:
+                # Pula imports originais que estão na blacklist
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    if hasattr(node, 'module') and node.module in self.blacklist: continue
+                pyx_lines.append(ast.unparse(node))
+
+        pyx_lines.append("\n# --- INTERNAL NEXUS LINKS ---")
+        for func_name in optimized_functions:
+            pyx_lines.append(f"{func_name} = {func_name}_vulcan_optimized")
+
+        return "\n".join(pyx_lines)
+
+    def _forge_node(self, node, indent=""):
+        name = node.name if indent else f"{node.name}_vulcan_optimized"
+        hot_vars = self._identify_hot_vars(node)
+        
+        # Bloqueia tipagem de argumentos e nomes reservados
+        forbidden = {'kwargs', 'args', 'self', 'cls'}
+        arg_names = {a.arg for a in node.args.args}
+        if node.args.vararg: arg_names.add(node.args.vararg.arg)
+        if node.args.kwarg: arg_names.add(node.args.kwarg.arg)
+
+        # Limpeza de anotações complexas
+        for arg in node.args.args: arg.annotation = None
+        node.returns = None
+
+        args_str = ast.unparse(node.args)
+        
+        if node.name == "encode_varint":
+            return "\n".join([f"{indent}def {name}(long n):", f"{indent}    cdef unsigned char[10] buf", f"{indent}    cdef int length = nexus_encode_varint_branchless(n, buf)", f"{indent}    return bytearray(buf[:length])"])
+
+        code = [f"{indent}def {name}({args_str}):"]
+        if hot_vars:
+            code.append(f"{indent}    # --- VULCAN HOT VARS ---")
+            for var, ctype in hot_vars.items():
+                if var not in arg_names and var not in forbidden:
+                    code.append(f"{indent}    cdef {ctype} {var}")
+        
+        for stmt in node.body:
+            if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant): continue
+            line = ast.unparse(stmt).replace("\n", "\n" + indent + "    ")
+            code.append(f"{indent}    {line}")
+        return "\n".join(code)
+
+    def _forge_function(self, node):
+        """Transforma uma função Python em uma função C-Enhanced."""
+        func_name = f"{node.name}_vulcan_optimized"
+        
+        # Identifica variáveis para tipagem automática
+        hot_vars = self._identify_hot_vars(node)
+        
+        # Reconstrói a assinatura
+        args = ast.unparse(node.args)
+        
+        lines = [f"def {func_name}({args}):"]
+        
+        # Injeta as declarações cdef (Nervos de Aço)
+        if hot_vars:
+            lines.append("    # --- VULCAN TYPE INJECTION ---")
+            for var, ctype in hot_vars.items():
+                lines.append(f"    cdef {ctype} {var}")
+        
+        # Extrai o corpo da função e remove o 'def' original
+        body_code = ""
+        for stmt in node.body:
+            # Pula docstrings para economizar bytes e parsing
+            if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
+                continue
+            body_code += "    " + ast.unparse(stmt).replace("\n", "\n    ") + "\n"
+        
+        lines.append(body_code)
+        return "\n".join(lines)
+        
+    def _identify_hot_vars(self, node):
+        vars_found = {}
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Assign):
+                for target in sub.targets:
+                    if isinstance(target, ast.Name) and target.id in self.hot_names:
+                        vars_found[target.id] = "long"
+        return vars_found
+
+    @staticmethod
+    def is_self_referential(path):
+        return "doxoade/tools/vulcan" in path.replace("\\", "/")
+        
+class SmartEnricher(ast.NodeVisitor):
+    """Analista Semântico: Transforma intenção Python em Tipos C."""
+    def __init__(self):
+        self.vars_to_type = {} # nome -> tipo C
+
+    def visit_FunctionDef(self, node):
+        # 1. Heurística de Nomes (Padrão de Engenharia)
+        integers = {'n', 'i', 'j', 'k', 'idx', 'count', 'size', 'length', 'offset', 'delta'}
+        
+        # Analisa Argumentos
+        for arg in node.args.args:
+            if arg.arg.lower() in integers:
+                self.vars_to_type[arg.arg] = "long"
+
+        # 2. Varredura de Atribuições
+        for child in ast.walk(node):
+            if isinstance(child, ast.Assign):
+                # Se x = 0 ou x = 1, tratamos como long
+                if isinstance(child.value, ast.Constant) and type(child.value.value) is int:
+                    for target in child.targets:
+                        if isinstance(target, ast.Name):
+                            self.vars_to_type[target.id] = "long"
+            
+            # Se for alvo de range, é obrigatoriamente um índice (Py_ssize_t)
+            if isinstance(child, ast.For):
+                if isinstance(child.target, ast.Name):
+                    self.vars_to_type[child.target.id] = "Py_ssize_t"
+
+    def get_cdef_block(self):
+        """Gera as linhas de declaração C."""
+        return [f"    cdef {ctype} {name}" for name, ctype in self.vars_to_type.items()]
+
+def transform_to_optimized_pyx(source_code):
+    tree = ast.parse(source_code)
+    
+    # Adicionamos diretivas de ALTA PERFORMANCE no topo do arquivo
+    header = [
+        "# cython: language_level=3",
+        "# cython: boundscheck=False",   # Desativa check de limite de lista (Velocidade!)
+        "# cython: wraparound=False",    # Desativa índices negativos (Velocidade!)
+        "# cython: cdivision=True",     # Divisão em C puro (Branchless-friendly)",
+        "# cython: initializedcheck=False",
+        "import sys, os",
+        "from libc.stdint cimport int64_t"
+    ]
+
+    # Para cada função, rodamos o Enricher
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            enricher = SmartEnricher()
+            enricher.visit(node)
+            # Aqui injetamos as declarações cdef no início do corpo da função
+            # (Essa lógica será feita durante a reconstrução do texto)
+    

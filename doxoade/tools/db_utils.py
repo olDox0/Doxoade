@@ -55,17 +55,46 @@ def stop_persistence_worker():
         _WORKER_THREAD.join(timeout=3.0)
         _WORKER_THREAD = None
 
-def _log_execution(command_name, path, results, arguments, execution_time_ms):
-    """Sela o log no banco de dados (Sincronia Osíris)."""
+def _log_execution(command_name, path, results, arguments, execution_time_ms, exit_code=0):
+    """
+    Sincroniza o log com a tabela command_history (Protocolo Chronos).
+    """
+    start_persistence_worker() 
+    
     from datetime import datetime, timezone
+    import json
+    import uuid
+    import sys
+
     _ts = datetime.now(timezone.utc).isoformat()
     _p_abs = os.path.abspath(path)
-    _query = '\n        INSERT INTO events (timestamp, doxoade_version, command, project_path, execution_time_ms, status)\n        VALUES (?, ?, ?, ?, ?, ?)\n    '
-    _params = (_ts, '98.5', command_name, _p_abs, execution_time_ms, 'completed')
+    _session = uuid.uuid4().hex
+    
+    # Consolida metadados para a coluna system_info
+    sys_info_dict = {
+        "args": arguments,
+        "summary": results.get('summary', {}),
+        "shell": os.environ.get('SHELL', 'cmd.exe' if os.name == 'nt' else 'unknown')
+    }
+    _sys_info = json.dumps(sys_info_dict)
+
+    # Query para a tabela command_history (a que o timeline realmente lê)
+    _query = '''
+        INSERT INTO command_history 
+        (session_uuid, timestamp, command_name, full_command_line, working_dir, exit_code, duration_ms, system_info)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    '''
+    
+    # Tenta capturar a linha de comando completa do sistema
+    _full_cmd = " ".join(sys.argv)
+    
+    _params = (
+        _session, _ts, command_name, _full_cmd, 
+        _p_abs, exit_code, execution_time_ms, _sys_info
+    )
+    
+    # Envia para a fila de persistência do Hades
     _LOG_QUEUE.put((_query, _params))
-    if results and 'findings' in results:
-        for f in results['findings']:
-            pass
 
 def _update_open_incidents(findings, project_path):
     """
@@ -91,3 +120,15 @@ def _update_open_incidents(findings, project_path):
         cursor.execute('\n            INSERT OR REPLACE INTO open_incidents \n            (finding_hash, file_path, line, message, severity, category, project_path, timestamp)\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n        ', (f['finding_hash'], f.get('file'), f.get('line'), f.get('message'), f.get('severity'), f.get('category'), project_path_abs, datetime.now(timezone.utc).isoformat()))
     conn.commit()
     conn.close()
+    
+def encrypt_payload(data_bytes, password):
+    # Lógica simplificada de XOR com Hash para manter Silo sem dependências externas (como cryptography)
+    # Para segurança máxima profissional, o ideal seria 'pip install cryptography'
+    key = hashlib.sha256(password.encode()).digest()
+    return bytes([b ^ key[i % len(key)] for i, b in enumerate(data_bytes)])
+
+# No momento de gravar:
+#if vault_is_active:
+#    final_blob = encrypt_payload(compressed_data, current_session_password)
+#else:
+#    final_blob = compressed_data # Ou bloqueia a gravação

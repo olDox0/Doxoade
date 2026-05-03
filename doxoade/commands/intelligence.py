@@ -6,11 +6,16 @@ from rich.console import Console
 
 from doxoade.dnm import DNM
 from .intelligence_utils import get_ignore_spec
-from doxoade.tools.filesystem             import _find_project_root, _get_project_config
+from doxoade.tools.filesystem import _find_project_root, _get_project_config
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
-from doxoade.commands.doxcolors_systems.colors_command import config
 
-@click.group('intelligence', invoke_without_command=True)
+@click.group('intelligence')
+@click.pass_context
+def intelligence(ctx):
+    """Módulo de Inteligência Topológica (v94.6)."""
+    pass
+
+@intelligence.command('scan') # Novo comando para o scan de dossiê
 @click.argument('paths', nargs=-1, type=click.Path(exists=True))
 @click.option('--docs', '-d', is_flag=True, help='Extrai docstrings.')
 @click.option('--source', '-s', is_flag=True, help='Inclui código fonte completo.')
@@ -19,20 +24,26 @@ from doxoade.commands.doxcolors_systems.colors_command import config
 @click.option('--focus', '-f', type=click.Choice(['vulcan', 'check', 'economic'], case_sensitive=False))
 @click.option('--ai-export', '-ai', is_flag=True, help='Gera um dossiê otimizado em XML/Markdown.')
 @click.pass_context
-def intelligence(ctx, paths, output, docs, source, concatenate, focus, ai_export):
-    """Módulo de Inteligência Topológica (v94.5)."""
-    if ctx.invoked_subcommand is None:
-        scan_paths = paths if paths else ('.',)
-        _run_dossier_scan(scan_paths, output, docs, source, concatenate, focus, ai_export, ctx)
+def scan_cmd(ctx, paths, output, docs, source, concatenate, focus, ai_export):
+    """Gera o Dossiê Chief Insight (Scan de Código)."""
+    scan_paths = paths if paths else ('.',)
+    _run_dossier_scan(scan_paths, output, docs, source, concatenate, focus, ai_export, ctx)
 
 @intelligence.command('recover')
-@click.option('--dir', 'backup_path', required=True, help='Pasta de backup do NPP.')
+@click.argument('backup_path', type=click.Path(exists=True))
 @click.option('--out', 'output_path', default='recovery_zone', help='Destino.')
-def recover(backup_path, output_path):
-    """Resgata versões estáveis (Protocolo Ma'at - Pré 14/02)."""
+@click.option('--date', '-d', help='Data limite (YYYY.MM.DD). Ex: 2026.04.29')
+@click.option('--time', '-t', help='Hora limite (HHMM). Ex: 1500')
+def recover(backup_path, output_path, date, time):
+    """Resgata versões estáveis (Protocolo Ma'at - Janela Customizável)."""
     from .intelligence_systems.recovery_engine import run_recovery_mission
-    click.echo("\x1b[93m🧐 Iniciando Resgate: Material Estável (Janela Ma'at)\x1b[0m")
-    success, msg = run_recovery_mission(backup_path, output_path)
+    
+    limit_display = f"{date} {time}" if date else "Janela Ma'at (Pré 14/02)"
+    click.echo(f"\x1b[93m🧐 Iniciando Resgate: Material Estável até {limit_display}\x1b[0m")
+    
+    # Repassa para o motor
+    success, msg = run_recovery_mission(backup_path, output_path, date, time)
+    
     if success:
         click.echo(f'\x1b[92m✅ {msg}\x1b[0m')
     else:

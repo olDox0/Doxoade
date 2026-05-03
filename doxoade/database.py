@@ -4,11 +4,16 @@ Módulo de Persistência (Sapiens/Chronos) - v71.1.
 Gerencia o ciclo de vida do banco de dados e migrações de esquema.
 ESTRATÉGIA: Migration Dispatcher para conformidade MPoT-4/17.
 """
-import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
-from pathlib import Path
+
 import click
+import zlib
+import json
+
+from pathlib import Path
+import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
+
 DB_FILE = Path.home() / '.doxoade' / 'doxoade.db'
-DB_VERSION = 18
+DB_VERSION = 19
 
 def get_db_connection():
     """Mantida Original: Abre conexão persistente com Row Factory."""
@@ -37,6 +42,31 @@ def _m_v15_chronos(cursor):
     cursor.execute('\n    CREATE TABLE IF NOT EXISTS file_audit (\n        id INTEGER PRIMARY KEY AUTOINCREMENT, command_id INTEGER NOT NULL,\n        file_path TEXT NOT NULL, operation_type TEXT NOT NULL,\n        diff_content TEXT, backup_path TEXT,\n        FOREIGN KEY (command_id) REFERENCES command_history (id)\n    );')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_cmd_hist_ts ON command_history(timestamp);')
 
+def _m_v19_payloads(cursor):
+    """Protocolo de Expansão de Memória: Armazena inputs e outputs comprimidos."""
+    try:
+        cursor.execute('ALTER TABLE command_history ADD COLUMN compressed_payload BLOB;')
+    except: pass # Já existe
+
+def _m_v20_nexus_vault(cursor):
+    """Cria a infraestrutura do Cofre de Sessão."""
+    # Guarda o hash da senha
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS vault_config (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            salt TEXT
+        );
+    ''')
+    # Guarda o status da sessão atual
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS vault_session (
+            id INTEGER PRIMARY KEY,
+            unlocked_until TEXT, -- Timestamp de expiração
+            session_key TEXT
+        );
+    ''')
+
 def _apply_incremental_patches(cursor, current_version):
     """Aplica alterações de colunas em tabelas existentes (Resiliência)."""
     alterations = [(2, 'ALTER TABLE findings ADD COLUMN category TEXT;'), (6, "ALTER TABLE solutions ADD COLUMN message TEXT NOT NULL DEFAULT '';"), (12, 'ALTER TABLE open_incidents ADD COLUMN category TEXT;')]
@@ -46,6 +76,45 @@ def _apply_incremental_patches(cursor, current_version):
                 cursor.execute(sql)
             except sqlite3.OperationalError:
                 pass
+
+def _log_execution(command_name, path, results, arguments, execution_time_ms, exit_code=0):
+    start_persistence_worker()
+    from datetime import datetime, timezone
+    import uuid
+
+    # 1. Prepara o Payload Denso (Input + Output real)
+    payload_data = {
+        "input": {
+            "cwd": os.path.abspath(path),
+            "args": arguments,
+            "full_argv": sys.argv
+        },
+        "output": {
+            "findings": results.get('findings', []), # Guarda TODOS os problemas, não só o resumo
+            "summary": results.get('summary', {})
+        }
+    }
+    
+    # 2. Compactação Nexus (Nível 6 - Equilíbrio CPU/Tamanho)
+    json_bytes = json.dumps(payload_data).encode('utf-8')
+    compressed = zlib.compress(json_bytes, level=6)
+
+    # 3. Inserção no Banco
+    _ts = datetime.now(timezone.utc).isoformat()
+    _session = uuid.uuid4().hex
+    
+    _query = '''
+        INSERT INTO command_history 
+        (session_uuid, timestamp, command_name, full_command_line, working_dir, exit_code, duration_ms, compressed_payload)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    '''
+    
+    _params = (
+        _session, _ts, command_name, " ".join(sys.argv), 
+        os.path.abspath(path), exit_code, execution_time_ms, compressed
+    )
+    
+    _LOG_QUEUE.put((_query, _params))
 
 def init_db():
     """Inicia o banco e despacha migrações de forma granular."""
@@ -66,6 +135,8 @@ def init_db():
             _m_v10_v14_genesis(cursor)
         if current_version < 18:
             _m_v15_chronos(cursor)
+        if current_version < 19:
+            _m_v19_payloads(cursor)
         _apply_incremental_patches(cursor, current_version)
         cursor.execute('DELETE FROM schema_version;')
         cursor.execute('INSERT INTO schema_version (version) VALUES (?);', (DB_VERSION,))

@@ -244,3 +244,25 @@ def load_test_command(file, seconds, interval, debug, ping_pong):
         time.sleep(seconds)
     
     click.secho("\n[OK] Teste finalizado.", fg="green")
+    
+@doxcolors_cmd.command('probe')
+def probe_colors():
+    """Testa e exibe a capacidade cromática do terminal atual."""
+    support = DoxColors.detect_support()
+    level_map = {0: "Nenhum", 4: "ANSI 16", 8: "ANSI 256", 24: "TrueColor (24-bit)"}
+    
+    click.echo(f"🔍 [PROBE] Nível de Suporte: {Fore.PRIMARY}{level_map.get(support)}{Style.RESET_ALL}")
+    
+    # Teste de Gradiente
+    test_text = "NEXUS PERFORMANCE UI"
+    if support == 24:
+        click.echo("🎨 Teste TrueColor: " + NexusUI.gradient_text(test_text))
+    else:
+        click.echo("🎨 Teste Fallback: " + Fore.PRIMARY + test_text + Style.RESET_ALL)
+
+    # Exibe a paleta atual do colors.conf
+    click.echo("\n📋 Paleta Ativa (colors.conf):")
+    for color_name in ['PRIMARY', 'SUCCESS', 'ERROR', 'WARNING', 'STABLE', 'EMERALD', 'ORANGE']:
+        if hasattr(Fore, color_name):
+            c = getattr(Fore, color_name)
+            click.echo(f"  • {color_name:<10}: {c}██████{Style.RESET_ALL} (Code: {c.replace(chr(27),'ESC')})")

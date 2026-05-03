@@ -21,6 +21,8 @@ Variáveis de ambiente:
 """
 from __future__ import annotations
 import hashlib, json, os, shutil, subprocess, sys, threading, time, traceback, re
+import concurrent.futures
+from doxoade.tools.doxcolors import Fore, Style
 from concurrent.futures import ThreadPoolExecutor as TPE, as_completed
 from pathlib import Path
 from queue import Empty, Queue
@@ -374,6 +376,179 @@ class PitstopEngine:
         self.cache = WarmupCache(cache_path)
         self._build_env: dict = self._prepare_build_env()
         self._python_exe: str = self._resolve_python()
+
+    def _load_cache(self):
+        if self.cache_path.exists():
+            try: return json.loads(self.cache_path.read_text(encoding='utf-8'))
+            except: return {}
+        return {}
+
+    def save_cache(self):
+        self.cache_file.write_text(json.dumps(self.cache, indent=2))
+
+    def get_content_hash(self, path):
+        """Hash ultra-rápido para detecção de mudança de código."""
+        try:
+            with open(path, 'rb') as f:
+                return hashlib.sha256(f.read()).hexdigest()[:16]
+        except: return None
+
+    def run_ignition(self, targets, compiler):
+        import shutil
+        import doxoade.tools.vulcan as vulcan_core
+        
+        # Localiza o nexus_math.c no coração do Doxoade
+        core_dir = Path(vulcan_core.__file__).parent
+        kernel_src = core_dir / 'nexus_math.c'
+        kernel_dst = self.env.foundry / 'nexus_math.c'
+        
+        # [FORCE COPY]
+        if kernel_src.exists():
+            shutil.copy2(kernel_src, kernel_dst)
+            print(f"   [LOGISTICS] Kernel {kernel_src.name} entregue à foundry.")
+        else:
+            # Fallback se o arquivo sumiu do HD
+            kernel_dst.write_text("#include <stdint.h>\nint nexus_encode_varint_branchless(uint64_t n, uint8_t* out){...}")
+        
+        click_echo(f"{Fore.CYAN}[DIAG] Core Path: {core_dir}{Style.RESET_ALL}")
+        print(f"\x1b[94m[*] [LOGISTICS] Provisionando kernel: {kernel_src.name}\x1b[0m")
+        
+        if kernel_src.exists():
+            shutil.copy2(kernel_src, kernel_dst)
+            click_echo(f"{Fore.GREEN}   ✔ Kernel provisionado em: {kernel_dst}{Style.RESET_ALL}")
+        else:
+            raise FileNotFoundError(f"Erro Crítico: Kernel não encontrado no Core: {kernel_src}")
+            # Se falhar aqui, sabemos que o arquivo não está na pasta do Doxoade
+#            click_echo(f"{Fore.RED}   ✘ FALHA CRÍTICA: Kernel não encontrado em {kernel_src}{Style.RESET_ALL}")
+#            return False
+        
+        click_echo(f"{Fore.CYAN}🚀 [NEXUS WARP] Iniciando Forja Paralela (N2808 Optimized)...{Style.RESET_ALL}")
+        
+        stale_modules = []
+        start_time = time.time()
+
+        # FASE 1: Forge em Paralelo (Usa as 2 threads do Atom para processar AST)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            future_to_file = {executor.submit(self._forge_task, t): t for t in targets}
+            
+            for future in concurrent.futures.as_completed(future_to_file):
+                f_path = future_to_file[future]
+                res = future.result()
+                
+                if res['status'] == 'FORGED':
+                    stale_modules.append(res['module_name'])
+                    click_echo(f"   {Fore.YELLOW}• {Path(f_path).name} -> Pyx gerado.{Style.RESET_ALL}")
+                elif res['status'] == 'ERROR':
+                    click_echo(f"   {Fore.RED}✘ Falha no Forge: {Path(f_path).name} ({res['msg']}){Style.RESET_ALL}")
+
+        # FASE 2: Compilação em Lote (Batch Ignition)
+        if stale_modules:
+            click_echo(f"\n{Fore.CYAN}🔨 [HAMMER] Compilando {len(stale_modules)} módulos em lote único...{Style.RESET_ALL}")
+            if compiler.compile_batch(stale_modules):
+                self.cache_path.write_text(json.dumps(self.cache, indent=2))
+                duration = time.time() - start_time
+                click_echo(f"{Fore.SUCCESS}✅ Warp concluído em {duration:.2f}s.{Style.RESET_ALL}")
+                return True
+        else:
+            click_echo(f"{Fore.GREEN}✨ Todos os binários estão sincronizados (Cache Hit).{Style.RESET_ALL}")
+            return True
+        return False
+        
+    def _forge_task(self, file_path):
+        from .forge import VulcanForge
+        abs_path = os.path.abspath(file_path)
+        c_hash = self.get_content_hash(abs_path)
+        
+        # Só forja se o hash mudou ou binário sumiu
+        if self.cache.get(abs_path) == c_hash:
+            # Verifica se o arquivo .pyd/.so correspondente ainda existe
+            return {'status': 'CACHED'}
+
+        try:
+            forge = VulcanForge(abs_path)
+            pyx_code = forge.generate_source(abs_path)
+            
+            # Salva o .pyx para o lote
+            module_name = f"v_{Path(file_path).stem}_{c_hash[:6]}"
+            from .environment import VulcanEnvironment
+            env = VulcanEnvironment('.')
+            (env.foundry / f"{module_name}.pyx").write_text(pyx_code, encoding='utf-8')
+            
+            self.cache[abs_path] = c_hash
+            return {'status': 'FORGED', 'module_name': module_name}
+        except Exception as e:
+            return {'status': 'ERROR', 'msg': str(e)}
+
+    def process_parallel(self, targets, compiler):
+        """Fase 1: Forge Paralelo (Multi-threading)."""
+        from .forge import VulcanForge
+        
+        click_echo = __import__('click').echo
+        click_echo(f"{Fore.CYAN}🚀 [NEXUS WARP] Sincronizando Forja...{Style.RESET_ALL}")
+        
+        to_compile = []
+        
+        # Uso de ThreadPool para processar AST sem travar o I/O
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            future_to_file = {executor.submit(self._forge_task, t): t for t in targets}
+            
+            for future in concurrent.futures.as_completed(future_to_file):
+                file_path = future_to_file[future]
+                try:
+                    res = future.result()
+                    if res['status'] == 'STALE':
+                        to_compile.append(res['module_name'])
+                        click_echo(f"   {Fore.YELLOW}• {Path(file_path).name} -> Metal fundido.{Style.RESET_ALL}")
+                    else:
+                        click_echo(f"   {Fore.STABLE}• {Path(file_path).name} -> Mantido em Cache.{Style.RESET_ALL}")
+                except Exception as e:
+                    click_echo(f"   {Fore.RED}✘ Erro no Forge: {file_path} ({e}){Style.RESET_ALL}")
+        
+        # Fase 2: Batch Hammer (Compilação em Lote)
+        if to_compile:
+            click_echo(f"\n{Fore.CYAN}🔨 [BATCH HAMMER] Fundindo {len(to_compile)} módulos em lote único...{Style.RESET_ALL}")
+            success = compiler.compile_batch(to_compile)
+            if success:
+                self.save_cache()
+                return True
+        return False
+
+    def _forge_task(self, file_path):
+        """Tarefa individual de thread."""
+        from .forge import VulcanForge
+        abs_path = os.path.abspath(file_path)
+        current_hash = self.get_content_hash(abs_path)
+        
+        # Verifica se o binário já existe e o código é o mesmo
+        if self.cache.get(abs_path) == current_hash:
+            return {'status': 'CACHED', 'module_name': None}
+        
+        # Roda a forja
+        forge = VulcanForge(abs_path)
+        pyx_code = forge.generate_source(abs_path)
+        
+        # Salva o .pyx na foundry para o GCC
+        module_name = f"v_{Path(file_path).stem}"
+        from .environment import VulcanEnvironment
+        env = VulcanEnvironment('.')
+        (env.foundry / f"{module_name}.pyx").write_text(pyx_code, encoding='utf-8')
+        
+        self.cache[abs_path] = current_hash
+        return {'status': 'STALE', 'module_name': module_name}
+
+    def run_warp_drive(self, targets):
+        click_echo = __import__('click').echo
+        click_echo(f"{Fore.CYAN}🚀 [NEXUS WARP] Iniciando Forja Paralela...{Style.RESET_ALL}")
+        
+        # 1. Forge em Paralelo (Usa as 2 threads do N2808 para processar AST)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(self._forge_task, t) for t in targets]
+            for future in concurrent.futures.as_completed(futures):
+                res = future.result()
+                # Feedback incremental
+        
+        # 2. Compilação em Bloco
+        # Reduz o tempo de boot do GCC de N vezes para 1 vez.
 
     def _prepare_build_env(self):
         """Warm-up do ambiente de compilação."""

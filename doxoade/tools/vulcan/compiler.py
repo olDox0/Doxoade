@@ -3,6 +3,8 @@ import os, sys, subprocess, shutil, time, json, threading
 from collections import deque
 from pathlib import Path
 from doxoade.tools.doxcolors import Fore
+from Cython.Build import cythonize
+
 COMPILATION_TELEMETRY = []
 
 class VulcanCompiler:
@@ -172,4 +174,38 @@ class VulcanCompiler:
             shutil.move(str(src_file), str(dest_file))
             return True
         except Exception:
+            return False
+
+    def compile_batch(self, modules_list):
+        from Cython.Build import cythonize
+        from setuptools import Extension, setup
+        import sys
+
+        foundry_path = self.env.foundry.resolve()
+        
+        ext_list = []
+        for m in modules_list:
+            # Agora sources contém apenas o .pyx, o .c é puxado pelo include absoluto
+            ext = Extension(
+                m, 
+                sources=[str(foundry_path / f"{m}.pyx")],
+                extra_compile_args=['-O3', '-msse4.1']
+            )
+            ext_list.append(ext)
+        
+        try:
+            # Cythonize com força total (nthreads=2)
+            ext_modules = cythonize(ext_list, nthreads=2, quiet=True)
+            
+            old_argv = sys.argv
+            sys.argv = ['setup.py', 'build_ext', '--inplace']
+            setup(
+                name="NexusBuild", 
+                ext_modules=ext_modules, 
+                script_args=['build_ext', '--inplace', f'--build-lib={str(self.env.bin_dir)}']
+            )
+            sys.argv = old_argv
+            return True
+        except Exception as e:
+            print(f"🚨 [VULCAN FAIL] {e}")
             return False

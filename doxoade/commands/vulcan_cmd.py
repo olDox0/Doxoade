@@ -77,6 +77,55 @@ def vulcan_group():
     """🔥 Projeto Vulcano: Alta Performance Nativa (C/Cython)."""
     pass
 
+@vulcan_group.command('forge')
+@click.argument('target', type=click.Path(exists=True))
+@click.option('--view', '-v', is_flag=True, help='Exibe o código .pyx no terminal.')
+@click.option('--save', '-s', is_flag=True, help='Salva os fontes .pyx e .c na pasta foundry.')
+def vulcan_forge(target, view, save):
+    """🛠️  Metalurgia: Gera e analisa a qualidade da tradução C."""
+    from doxoade.tools.vulcan.forge import VulcanForge
+    from rich.syntax import Syntax
+    from rich.console import Console
+
+    click.echo(f"{Fore.CYAN}--- [VULCAN FORGE] Analisando: {target} ---{Style.RESET_ALL}")
+    
+    forge = VulcanForge(target)
+    pyx_code = forge.generate_source(target)
+    
+    if view:
+        console = Console()
+        syntax = Syntax(pyx_code, "python", theme="monokai", line_numbers=True)
+        console.print(syntax)
+    
+    if save:
+        # Caminho para análise profunda em .doxoade/vulcan/foundry
+        from doxoade.tools.vulcan.environment import VulcanEnvironment
+        env = VulcanEnvironment('.')
+        out_file = env.foundry / f"{Path(target).stem}.pyx"
+        out_file.write_text(pyx_code, encoding='utf-8')
+        click.echo(f"{Fore.GREEN}✅ Fonte Pyx guardado em: {out_file}{Style.RESET_ALL}")
+        
+    # Relatório de "Pureza de Metal"
+    _analyze_forge_quality(pyx_code)
+
+def _analyze_forge_quality(code):
+    """Novo Laudo: Detecta Pureza C e Eficiência de Hardware."""
+    cdefs = code.count("cdef ") + code.count("cpdef ")
+    # Verifica se há o 'Passaporte C' (cdivision=True)
+    fast_math = "cdivision=True" in code 
+    
+    click.echo(f"\n{Fore.WHITE}{Style.BRIGHT}Laudo de Metalurgia v2 (N2808 Optimized):{Style.RESET_ALL}")
+    
+    if cdefs > 0:
+        click.echo(f"   {Fore.SUCCESS}✔ Pureza: {cdefs} variáveis tipadas no hardware.{Style.RESET_ALL}")
+    else:
+        click.echo(f"   {Fore.RED}✘ Impuro: Código 100% dependente do interpretador Python.{Style.RESET_ALL}")
+        
+    if fast_math:
+        click.echo(f"   {Fore.SUCCESS}✔ Math: Branchless division bypass ativo.{Style.RESET_ALL}")
+    else:
+            click.echo(f"   {Fore.YELLOW}⚠ Math: Checagem de erro Python ativa (Lento).{Style.RESET_ALL}")
+
 def _register_subcommands():
     from .vulcan_cmd_forge import ignite, vulcan_regression, vulcan_lib, vulcan_benchmark, vulcan_pitstop
     from .vulcan_cmd_tools import vulcan_alloc, vulcan_simd, vulcan_opt, opt_bench

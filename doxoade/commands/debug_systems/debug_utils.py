@@ -236,13 +236,30 @@ def run_debug(script_path: str):
     print('\n---DOXOADE-DEBUG-DATA---')
     print(json.dumps(debug_data, ensure_ascii=False))
 
-def get_debug_env(script_path: str) -> dict:
-    target_abs = os.path.abspath(script_path)
-    project_root = _find_project_root(target_abs)
-    doxo_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+def get_debug_env(script_path):
+    """Sela o ambiente para a sonda com visibilidade total do core."""
+    import os
     env = os.environ.copy()
-    env['PYTHONPATH'] = os.pathsep.join([doxo_dir, os.path.dirname(project_root) if project_root else os.path.dirname(target_abs), env.get('PYTHONPATH', '')])
+    
+    # 1. Localiza a raiz do 'Projeto OADE' (onde a pasta doxoade reside)
+    # Subimos: debug_utils.py -> debug_systems -> commands -> doxoade (pacote) -> OADE (root)
+    doxoade_pkg = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    doxoade_root = os.path.dirname(doxoade_pkg)
+    
+    # 2. Prepara o PYTHONPATH com: Root do Doxoade + Pasta do Projeto Alvo
+    current_project_root = os.getcwd()
+    existing_pp = env.get('PYTHONPATH', '')
+    
+    new_paths = [doxoade_root, current_project_root]
+    if existing_pp:
+        new_paths.append(existing_pp)
+        
+    env['PYTHONPATH'] = os.pathsep.join(new_paths)
+    
+    # 3. Trava o encoding para evitar crash de pipe no Windows
     env['PYTHONIOENCODING'] = 'utf-8'
+    env['DOXOADE_AUTHORIZED_RUN'] = '1'
+    
     return env
 
 def build_probe_command(python_exe: str, probe_file: str, script: str, mode: str='debug', args: str=None) -> list:

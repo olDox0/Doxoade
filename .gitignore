@@ -1,40 +1,33 @@
-# Arquivos de Cache do Python
+# ====== Arquivos de Cache do Python
 __pycache__/
 *.py[cod]
 *.pyc
 *.pyo
 *.pyd
 
-# Arquivos de Ambiente Virtual
+
+# ====== Arquivos de Ambiente Virtual ======
 venv/
 .venv/
 env/
 .env
 
-# Arquivos de Build e Distribuição (para PyInstaller)
+
+# ====== Arquivos de Build e Distribuição (para PyInstaller) ======
+pytest_temp_dir/
 build/
 dist/
 *.egg-info/
 *.spec
 
-# --- ARQUIVOS SENSÍVEIS E DE USUÁRIO (NUNCA COMPARTILHAR) ---
+
+# ====== SENSÍVEIS ======
 chief_dossier.json
 chief_dossier_llm.md
 doxoade_report.json
 graph.html
 chief_dossier_llm.xml
-Exemplo/
-tmp/
-.dox_agent_workspace/
-.dox_lab/
-data/
-tests/
-regression_tests/canon/
-recovery_zone/
-credentials.json
-token.json
-config.json
-#doxoade.bat
+
 *.db
 *.log
 *.txt
@@ -44,35 +37,56 @@ config.json
 *.pyx
 *.old_trash
 *.xml
-.nppBackup
-nppBackup/
-./nppBackup/
-pytest_temp_dir/
-.doxoade/vulcan/foundry/
 
-# --- Arquivos de Configuração de IDE ---
+
+# ====== Arquivos de Configuração de IDE ======
 .vscode/
 .idea/
 
-# Arquivos de sistema do Windows
+
+# ====== Arquivos de sistema do Windows ======
 desktop.ini
 Thumbs.db
 
-# --- BACKUPS E ARQUIVOS TEMPORÁRIOS ---
+
+# ====== BACKUPS E ARQUIVOS TEMPORÁRIOS ======
+regression_tests/canon/
+recovery_zone/
+credentials.json
+token.json
+config.json
+
+.nppBackup
+nppBackup/
+./nppBackup/
+
+tmp/
 Vers/
 
 *.mak
 *.log
 
-# Doxoade cache files
+data/
+test/
+tests/
+teste/
+testes/
+
+
+# ====== Doxoade cache files ======
 .doxoade_cache/
 .doxoade/
 .doxoade/vulcan/foundry/
+.doxoade/vulcan/opt_py/
+.dox_agent_workspace/
+.dox_lab/
 
-# Exceções (Auto-fixed pelo Doxoade)
 
-# terceirizados
+# ====== terceirizados ======
 thirdparty/w64devkit/
+
+
+# ====== Exceções ======
 
 # Exceções (Auto-fixed pelo Doxoade)
 !requirements.txt

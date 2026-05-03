@@ -519,10 +519,17 @@ def ignite(ctx, path, force, jobs, no_pitstop, streaming, hybrid, scan_only, sim
         engine_label = f'{Fore.YELLOW}LEGADO{Style.RESET_ALL}' if no_pitstop else f'{Fore.GREEN}PITSTOP{Style.RESET_ALL}' + (f' {Fore.CYAN}+streaming{Style.RESET_ALL}' if streaming else '')
         click.echo(f'{Fore.CYAN}   > Modo  : {mode}{Style.RESET_ALL}')
         click.echo(f'{Fore.CYAN}   > Engine: {engine_label}{Style.RESET_ALL}')
-        _env_ctx = SIMDEnvironment(simd_ctx) if simd_ctx else _NullContext()
+        _env_ctx = SIMDEnvironment(simd_ctx) if (simd_ctx and _SIMD_AVAILABLE) else _NullContext()
         try:
             with _env_ctx:
-                autopilot.scan_and_optimize(candidates=candidates, force_recompile=force, max_workers=jobs, use_pitstop=not no_pitstop, streaming=streaming)
+                # Agora a variável está associada corretamente
+                autopilot.scan_and_optimize(
+                    candidates=candidates, 
+                    force_recompile=force, 
+                    max_workers=jobs, 
+                    use_pitstop=not no_pitstop, 
+                    streaming=streaming
+                )
             click.echo(f'\n{Fore.GREEN}{Style.BRIGHT}✔ [VULCAN] Forja concluída.{Style.RESET_ALL}')
             if simd_ctx:
                 click.echo(f'   {Fore.MAGENTA}⬡ SIMD {simd_ctx.effective_caps().best.upper()} aplicado.{Style.RESET_ALL}')

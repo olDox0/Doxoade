@@ -5,24 +5,33 @@ import sys
 import re
 import shutil
 import click
-from pathlib import Path
+import subprocess
+
+from pathlib  import Path
 from datetime import datetime
-from doxoade.tools.doxcolors import Fore, Style
+from doxoade.tools.doxcolors              import Fore, Style
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 
 # --- CONFIGURAÇÃO DE FONTES DO NÚCLEO (DNA DO SISTEMA) ---
 DOXOADE_ROOT = Path(__file__).resolve().parents[2]
 CORE_TOOLS = {
-    'doxcolors.py':   DOXOADE_ROOT / 'doxoade' / 'tools' / 'doxcolors.py',
-    'error_info.py':  DOXOADE_ROOT / 'doxoade' / 'tools' / 'error_info.py',
-    'rescue.py':      DOXOADE_ROOT / 'doxoade' / 'rescue.py',
-    'telemetry.py':   DOXOADE_ROOT / 'doxoade' / 'tools' / 'telemetry_tools' / 'logger.py',
-    'db_utils.py':    DOXOADE_ROOT / 'doxoade' / 'tools' / 'db_utils.py',
-    'database.py':    DOXOADE_ROOT / 'doxoade' / 'database.py',
-    'nexus_db.py':    DOXOADE_ROOT / 'doxoade' / 'tools' / 'aegis' / 'nexus_db.py', # NOVO
-    'aegis_core.py':  DOXOADE_ROOT / 'doxoade' / 'tools' / 'aegis' / 'aegis_core.py',
-    'warden.py':      DOXOADE_ROOT / 'doxoade' / 'tools' / 'aegis' / 'warden.py',
-    'nexus.py':       DOXOADE_ROOT / 'doxoade' / 'tools' / 'templates' / 'embedded' / 'nexus.py',
+    'doxcolors.py':     DOXOADE_ROOT / 'doxoade' / 'tools' / 'doxcolors.py',
+    'error_info.py':    DOXOADE_ROOT / 'doxoade' / 'tools' / 'error_info.py',
+    'rescue.py':        DOXOADE_ROOT / 'doxoade' / 'rescue.py',
+    'telemetry.py':     DOXOADE_ROOT / 'doxoade' / 'tools' / 'telemetry_tools' / 'logger.py',
+    'db_utils.py':      DOXOADE_ROOT / 'doxoade' / 'tools' / 'db_utils.py',
+    'database.py':      DOXOADE_ROOT / 'doxoade' / 'database.py',
+    'nexus_db.py':      DOXOADE_ROOT / 'doxoade' / 'tools' / 'aegis' / 'nexus_db.py',
+    'aegis_core.py':    DOXOADE_ROOT / 'doxoade' / 'tools' / 'aegis' / 'aegis_core.py',
+    'warden.py':        DOXOADE_ROOT / 'doxoade' / 'tools' / 'aegis' / 'warden.py',
+    'nexus.py':         DOXOADE_ROOT / 'doxoade' / 'tools' / 'templates' / 'embedded' / 'nexus.py',
+    
+    # MOTORES VULCAN SILO EMBEDDED
+    'runtime.py':       DOXOADE_ROOT / 'doxoade' / 'tools' / 'vulcan' / 'runtime.py',
+    'meta_finder.py':   DOXOADE_ROOT / 'doxoade' / 'tools' / 'vulcan' / 'meta_finder.py',
+    'opt_cache.py':     DOXOADE_ROOT / 'doxoade' / 'tools' / 'vulcan' / 'opt_cache.py',
+    'lib_optimizer.py': DOXOADE_ROOT / 'doxoade' / 'tools' / 'vulcan' / 'lib_optimizer.py',
+    'safe_loader.py':   DOXOADE_ROOT / 'doxoade' / 'tools' / 'vulcan' / 'vulcan_safe_loader.py',
 }
 
 def generate_silo_header(project_name, module_name):
@@ -30,117 +39,130 @@ def generate_silo_header(project_name, module_name):
     return (
         f"# -*- coding: utf-8 -*-\n"
         f"# {'=' * 60}\n"
-        f"# SILO INDEPENDENTE: {project_name.upper()}\n# MÓDULO: {module_name}\n"
-        f"# SYNC: {ts}\n# {'=' * 60}\n\n"
+        f"# SILO INDEPENDENTE: {project_name.upper()}\n"
+        f"# MÓDULO: {module_name}\n"
+        f"# SYNC: {ts} / Nexus v3\n"
+        f"# {'=' * 60}\n\n"
     )
 
 def _refactor_to_silo(content):
-    """Refatorador Nexus v2: Colapsa a hierarquia para modo flat."""
-    # 1. Redireciona o Wrapper de Banco de Dados (Aegis Shield)
+    """Ajusta imports para funcionarem dentro da pasta utils/ de forma relativa."""
+    # 1. Aegis & Hades
     content = content.replace('import doxoade.tools.aegis.nexus_db as sqlite3', 'from . import nexus_db as sqlite3')
-    content = content.replace('from doxoade.tools.aegis.nexus_db import', 'from .nexus_db import')
-    
-    # 2. Redireciona a conexão principal
     content = content.replace('from doxoade.database import', 'from .database import')
-    
-    # 3. Redireciona Ferramentas e Telemetria
+    # 2. Vulcan Core Flattening (O segredo da soberania nativa)
+    content = content.replace('from doxoade.tools.vulcan.runtime import', 'from .runtime import')
+    content = content.replace('from doxoade.tools.vulcan.opt_cache import', 'from .opt_cache import')
+    content = content.replace('from doxoade.tools.vulcan.vulcan_safe_loader import', 'from .safe_loader import')
+    content = content.replace('from doxoade.tools.vulcan import', 'from . import')
+    # 3. Telemetria e Resgate
     content = content.replace('from doxoade.tools.telemetry_tools.logger import', 'from .telemetry import')
-    content = content.replace('from doxoade.tools.telemetry_tools import logger', 'from . import telemetry as logger')
     content = content.replace('from doxoade.rescue import', 'from .rescue import')
-    
-    # 4. Transforma ferramentas de ferramentas em ferramentas locais
-    content = re.sub(r'from doxoade\.tools\.(\w+) import', r'from .\1 import', content)
-    content = re.sub(r'from doxoade\.tools import (\w+)', r'from . import \1', content)
-    
-    # 5. Fix de imports diretos (Fallback except)
-    content = re.sub(r'(?m)^(\s*)import (doxcolors|error_info|telemetry|rescue|database|nexus_db)(\b)', r'\1from . import \2\3', content)
-    
+    # 4. Ferramentas Genéricas
+    content = re.sub(r'from doxoade\.tools\.(\w+)', r'from .\1', content)
+    content = re.sub(r'from doxoade\.tools import (\w+)', r'from . import \1', content) # content = re.sub(r'from doxoade\.tools import', 'from . import', content)
+    # 5. Fix de imports diretos (Fallback except) e Prevenção de duplicados
+    content = re.sub(r'(?m)^(\s*)import (doxcolors|error_info|telemetry|rescue|database|nexus_db|runtime|meta_finder|opt_cache|safe_loader)(\b)', r'\1from . import \2\3', content)
     return content
 
 @click.command('init')
 @click.argument('project_name', required=False)
+@click.option('--remote', help='URL para publicação automática no GitHub.')
 @click.pass_context
-def init(ctx, project_name):
+def init(ctx, project_name, remote):
+    """🚀 Nexus Project Genesis: Cria um Silo Soberano Chief-Gold."""
+    
     if not project_name: project_name = click.prompt('Nome do novo projeto')
-    
+    if not re.match('^[a-zA-Z0-9_-]+$', project_name):
+        click.secho("[ERRO] Nome inválido.", fg="red"); sys.exit(1)
+
     project_path = Path(os.getcwd()) / project_name
-    
-    # 1. Criação da Topologia
-    utils_path = project_path / 'utils'
-    utils_path.mkdir(parents=True, exist_ok=True)
-    (project_path / 'tests').mkdir(exist_ok=True)
-    (project_path / 'docs').mkdir(exist_ok=True)
+    if project_path.exists():
+        click.secho(f"[ERRO] O diretório '{project_name}' já existe.", fg="red"); sys.exit(1)
 
     with ExecutionLogger('init', '.', ctx.params) as _:
-        click.echo(f"[*] {Fore.YELLOW}Injetando Motores Silo em {utils_path}...{Style.RESET_ALL}")
+        click.echo(f"{Fore.CYAN}{Style.BRIGHT}--- [NEXUS PROJECT GENESIS] ---{Style.RESET_ALL}")
         
+        # 1. TOPOLOGIA INDUSTRIAL
+        utils_path = project_path / 'utils'
+        utils_path.mkdir(parents=True)
+        (project_path / 'tests').mkdir(); (project_path / 'docs').mkdir()
+        (project_path / '.doxoade' / 'vulcan' / 'bin').mkdir(parents=True)
+        (project_path / '.doxoade' / 'vulcan' / 'foundry').mkdir()
+        (project_path / '.doxoade' / 'vulcan' / 'opt_py').mkdir()
+
+        # 2. INJEÇÃO DE MOTORES (SILO DNA)
+        click.echo(f"[*] {Fore.YELLOW}Injetando Motores de Soberania...{Style.RESET_ALL}")
         for filename, source_path in CORE_TOOLS.items():
             dest_path = utils_path / filename
             if source_path.exists():
-                raw_code = source_path.read_text(encoding='utf-8')
-                silo_code = _refactor_to_silo(raw_code)
-                
-                # Patch de Path do Banco para histórico centralizado
-                db_path = str(Path.home() / '.doxoade' / 'doxoade.db').replace('\\', '/')
-                silo_code = silo_code.replace('Path.home() / ".doxoade" / "doxoade.db"', f'"{db_path}"')
-
-                header = generate_silo_header(project_name, filename)
-                dest_path.write_text(header + silo_code, encoding='utf-8')
-                click.echo(f"   [✔] {filename}")
-
-        # 3. Garantia de Pacote e Main
-        (utils_path / '__init__.py').write_text("# Nexus Silo Package\n", encoding='utf-8')
+                raw = source_path.read_text(encoding='utf-8', errors='ignore')
+                silo_code = _refactor_to_silo(raw)
+                db_p = str(Path.home() / '.doxoade' / 'doxoade.db').replace('\\', '/')
+                silo_code = silo_code.replace('Path.home() / ".doxoade" / "doxoade.db"', f'"{db_p}"')
+                dest_path.write_text(generate_silo_header(project_name, filename) + silo_code, encoding='utf-8')
         
-        # CORREÇÃO AQUI: Usamos f-string para injetar o valor de project_name no texto, 
-        # mas escapamos as chaves do Fore/Style com {{ }} para que elas fiquem no arquivo final.
-        main_template = (
-            "from utils.nexus import monitor, ignite\n\n"
-            "Fore, Style = ignite()\n\n"
-            "@monitor\n"
-            "def main():\n"
-            f"    print(f'{{Fore.GREEN}}✔ Silo {project_name} ativo e protegido!{{Style.RESET_ALL}}')\n\n"
-            "if __name__ == '__main__':\n"
-            "    main()\n"
-        )
-        (project_path / 'main.py').write_text(main_template, encoding='utf-8')
+        (utils_path / '__init__.py').write_text("# Silo Package\n", encoding='utf-8')
 
-    click.secho(f"\n✨ Projeto '{project_name}' pronto!", fg="green", bold=True)
-    click.echo(f"Caminho: {project_path}")
-    click.echo(f"Dica: Execute 'python main.py' para testar os motores embarcados.")
+        # 3. IDENTIDADE E DOCUMENTAÇÃO (VOLUME 1)
+        click.echo(f"[*] {Fore.YELLOW}Gerando Delimitação de Escopo (indentity.md)...{Style.RESET_ALL}")
+        (project_path / 'indentity.md').write_text(TEMPLATE_IDENTITY.format(project_name=project_name), encoding='utf-8')
+        (project_path / 'README.md').write_text(TEMPLATE_README.format(project_name=project_name), encoding='utf-8')
+        (project_path / 'pyproject.toml').write_text(TEMPLATE_PYPROJECT.format(project_name=project_name), encoding='utf-8')
+        (project_path / '.gitignore').write_text(TEMPLATE_GITIGNORE.format(project_name=project_name), encoding='utf-8')
 
-# --- TEMPLATES NEXUS GOLD ---
+        # 4. CRIAÇÃO DO MAIN (TIER 1 READY)
+        main_content = TEMPLATE_MAIN.format(project_name=project_name)
+        (project_path / 'main.py').write_text(main_content, encoding='utf-8')
 
-TEMPLATE_MAIN_PY = """# -*- coding: utf-8 -*-
-import sys
+        # 5. REPOSITÓRIO E PUBLICAÇÃO
+        click.echo(f"[*] {Fore.YELLOW}Inicializando Git Local...{Style.RESET_ALL}")
+        os.chdir(project_path)
+        subprocess.run(['git', 'init', '-b', 'main'], capture_output=True)
+        
+        if remote:
+            click.echo(f"[*] {Fore.CYAN}Publicando em {remote}...{Style.RESET_ALL}")
+            subprocess.run(['git', 'remote', 'add', 'origin', remote])
+            subprocess.run(['git', 'add', '.'])
+            subprocess.run(['git', 'commit', '-m', f'Genesis: {project_name} Silo initialized'])
+            subprocess.run(['git', 'push', '-u', 'origin', 'main'])
+
+    click.secho(f"\n✔ Silo '{project_name}' criado com sucesso!", fg="green", bold=True)
+    click.echo(f"Dica: Execute 'python main.py' para testar a soberania Vulcan.")
+
+# --- TEMPLATES NEXUS ---
+
+TEMPLATE_MAIN = """# -*- coding: utf-8 -*-
+from utils.nexus import monitor, ignite
+from utils.runtime import install_meta_finder, activate_vulcan
 import os
 
-# Ativa o reconhecimento do pacote 'utils' local
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'utils')))
+# Inicializa UI e Aceleração
+Fore, Style = ignite()
+install_meta_finder(os.getcwd())
 
-from utils.telemetry import ExecutionLogger
-from utils.vulcan_link import VulcanBridge
-
-def run_logic():
-    \"\"\"Lógica de Negócio Nexus Gold.\"\"\"
-    print("🚀 {project_name} operando via Nexus Engine.")
-
+@monitor
 def main():
-    # 1. Ativa ponte de aceleração Vulcan (Embedded)
-    vb = VulcanBridge(os.getcwd())
-    vb.apply_turbo('main', globals())
-
-    # 2. Telemetria Síncrona (Garante registro em 0.000s)
-    with ExecutionLogger('{project_name}', os.getcwd(), sys.argv) as logger:
-        run_logic()
+    # Injeta binários nativos se existirem
+    activate_vulcan(globals(), __file__)
+    print(f'{{Fore.GREEN}}✔ Silo {project_name} operando via Nexus Engine.{{Style.RESET_ALL}}')
 
 if __name__ == '__main__':
-    try:
-        main()
-    except Exception:
-        from utils.rescue import activate_protocol
-        import traceback
-        activate_protocol(traceback.format_exc())
-        sys.exit(1)
+    main()
+"""
+
+TEMPLATE_IDENTITY = """# 📄 Identidade e Escopo: {project_name}
+
+## 1️⃣ Existência (POR QUÊ?)
+1. Qual problema real {project_name} resolve?
+2. O que acontece se {project_name} não existir?
+
+## 2️⃣ Usuário Real (QUEM?)
+3. Quem usa?
+4. O que o usuário mais erra hoje?
+
+## 🧠 Regra de Ouro
+> **Projeto bom não é o que faz tudo. É o que sabe exatamente o que não faz.**
 """
 
 TEMPLATE_PYPROJECT = """
@@ -156,38 +178,108 @@ ignore = ["venv", ".git", "__pycache__", "build", "dist"]
 enabled = true
 """
 
-TEMPLATE_VOL1 = """# 📄 Volume 1: Identidade e Escopo ({project_name})
-
-## 1️⃣ Existência (POR QUÊ?)
-1. Qual problema real {project_name} resolve?
-2. O que acontece se ele não existir?
-
-## 2️⃣ Usuário Real (QUEM?)
-3. Quem usa?
-4. O que o usuário mais erra hoje?
-
-## 🧠 Regra de Ouro
-> **Projeto bom não é o que faz tudo. É o que sabe exatamente o que não faz.**
-"""
-
-TEMPLATE_VOL2 = """# 🏗️ Volume 2: Arquitetura e Motores
-
-## 🛡️ utils/rescue.py
-Proteção automática contra crash com interface forense.
-
-## 📊 utils/telemetry.py
-Grava CPU/RAM no banco de dados central (~/.doxoade/doxoade.db).
-
-## 🔥 utils/vulcan_link.py
-Suporte nativo para carregar binários .pyd/.so de alta performance.
-"""
-
 TEMPLATE_README = """# {project_name}
 
-Projeto desenvolvido sob os padrões de excelência **Chief-Gold**.
+Silo Independente desenvolvido sob o padrão **Chief-Gold**.
 
-## 🛠 Comandos Úteis
-- Rodar: `python main.py`
-- Auditar: `dox check .`
-- Performance: `dox telemetry -c {project_name}`
+## 🛠 Motores Embarcados (utils/)
+- **Aegis Shield**: Segurança e Anti-Injeção.
+- **Lazarus Protocol**: Resgate automático de crash.
+- **Vulcan Runtime**: Aceleração nativa Tier 1/2.
+- **Chronos Telemetry**: Log industrial de performance.
+"""
+
+TEMPLATE_GITIGNORE = """
+# ====== Arquivos de Cache do Python
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+
+
+# ====== Arquivos de Ambiente Virtual ======
+venv/
+.venv/
+env/
+.env
+
+
+# ====== Arquivos de Build e Distribuição (para PyInstaller) ======
+pytest_temp_dir/
+build/
+dist/
+*.egg-info/
+*.spec
+
+
+# ====== SENSÍVEIS ======
+chief_dossier.json
+chief_dossier_llm.md
+doxoade_report.json
+graph.html
+chief_dossier_llm.xml
+
+*.db
+*.log
+*.txt
+*.bkp
+*.bak
+*.dox
+*.pyx
+*.old_trash
+*.xml
+
+
+# ====== Arquivos de Configuração de IDE ======
+.vscode/
+.idea/
+
+
+# ====== Arquivos de sistema do Windows ======
+desktop.ini
+Thumbs.db
+
+
+# ====== BACKUPS E ARQUIVOS TEMPORÁRIOS ======
+regression_tests/canon/
+recovery_zone/
+credentials.json
+token.json
+config.json
+
+.nppBackup
+nppBackup/
+./nppBackup/
+
+tmp/
+Vers/
+
+*.mak
+*.log
+
+data/
+test/
+tests/
+teste/
+testes/
+
+
+# ====== Doxoade cache files ======
+.doxoade_cache/
+.doxoade/
+.doxoade/vulcan/foundry/
+.doxoade/vulcan/opt_py/
+.dox_agent_workspace/
+.dox_lab/
+
+
+# ====== terceirizados ======
+thirdparty/w64devkit/
+
+
+# ====== Exceções ======
+!requirements.txt
+!PipelineHelp.txt
+
 """

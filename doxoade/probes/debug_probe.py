@@ -5,6 +5,14 @@ Modo autópsia + modo perfil profundo com isolamento cirúrgico de projeto.
 """
 import sys
 import os
+
+try:
+    from doxoade.probes.debug_probe import _LineTimer
+except ImportError:
+    # Fallback se rodar como script direto
+    if '' not in sys.path:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import json
 import time
 import types
@@ -15,6 +23,10 @@ import tracemalloc
 import linecache
 import io
 from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
 
 def _resolve_package(abs_path: str):
     parts = []

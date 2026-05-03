@@ -52,6 +52,7 @@ class DoxoadeLazyGroup(click.Group):
         'create-pipeline': 'doxoade.commands.utils:create_pipeline', 
         'dashboard': 'doxoade.commands.dashboard:dashboard', 
         'db-query': 'doxoade.commands.db_query:db_query', 
+        'db': 'doxoade.commands.db_cmd:db_group',
         'debug': 'doxoade.commands.debug:debug', 
         'deepcheck': 'doxoade.commands.deepcheck:deepcheck', 
         'diagnose': 'doxoade.commands.diagnose:diagnose', 
