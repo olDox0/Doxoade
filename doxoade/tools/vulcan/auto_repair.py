@@ -57,13 +57,14 @@ def _validate_import_in_subprocess(project_root: str, module_name: str, python_e
         proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, timeout=timeout, text=True)
         out = (proc.stdout or '').strip()
         try:
-            j = json.loads(out) if out else {}
+            # MUDANÇA: j -> res_json
+            res_json = json.loads(out) if out else {}
         except Exception as e:
-            print(f'\x1b[31m ■ Erro: {e}')
-            j = {'ok': False, 'error': 'invalid_probe_output', 'stdout': out, 'stderr': proc.stderr}
-        j['_returncode'] = proc.returncode
-        j['_stderr'] = proc.stderr
-        return j
+            res_json = {'ok': False, 'error': 'invalid_probe_output', 'stdout': out, 'stderr': proc.stderr}
+        
+        res_json['_returncode'] = proc.returncode
+        res_json['_stderr'] = proc.stderr
+        return res_json
     except subprocess.TimeoutExpired as e:
         print(f'\x1b[31m ■ Erro: {e}')
         return {'ok': False, 'error': 'timeout', 'details': str(e)}

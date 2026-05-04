@@ -167,6 +167,7 @@ class HybridOptimizer:
         """
         lines = source.splitlines()
         result = []
+        _buf_i = []
         in_function = False
         func_indent = 0
         in_loop = False

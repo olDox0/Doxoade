@@ -1,19 +1,39 @@
 # doxoade/doxoade/tools/vulcan/compiler.py
 import os, sys, subprocess, shutil, time, json, threading
+import sysconfig
+import subprocess
+import concurrent.futures
+
 from collections import deque
 from pathlib import Path
 from doxoade.tools.doxcolors import Fore
 from Cython.Build import cythonize
+
+from doxoade.tools.doxcolors import Fore, Style
 
 COMPILATION_TELEMETRY = []
 
 class VulcanCompiler:
     _cached_env = None
 
-    def __init__(self, env, pid_registry: dict=None):
+    def __init__(self, env, pid_registry=None): # [FIX] Adicionado pid_registry
         self.env = env
-        self._pid_registry: dict = pid_registry if pid_registry is not None else {}
-        self._registry_key: str = ''
+        # Mantém compatibilidade com o sistema de monitoramento de processos
+        self._pid_registry = pid_registry if pid_registry is not None else {}
+        self.detailed_telemetry = {}
+        # Cache de caminhos do sistema (Otimização N2808)
+        self.py_include = sysconfig.get_path('include')
+        self.py_libs = os.path.join(sysconfig.get_config_var('installed_base'), "libs")
+        
+        # Detecta a versão do Python instalada
+        py_ver = sysconfig.get_config_var('VERSION')
+        if py_ver:
+            py_ver = py_ver.replace('.', '')
+        else:
+            # Fallback manual se o config_var falhar
+            py_ver = f"{sys.version_info.major}{sys.version_info.minor}"
+            
+        self.py_link_lib = f"-lpython{py_ver}"
 
     def _prepare_pitstop_env(self):
         """Prepara o toolkit GCC apenas uma vez (Hefesto)."""
@@ -67,26 +87,47 @@ class VulcanCompiler:
         t_err.join(timeout=2)
         return (code, '\n'.join(out_tail), '\n'.join(err_tail))
 
-    def _ensure_pch(self):
-        """Gera o Precompiled Header (.gch) para o Python.h se necessário."""
-        foundry = self.env.foundry
-        pch_header = foundry / 'vulcan_pch.h'
-        pch_compiled = foundry / 'vulcan_pch.h.gch'
-        if pch_compiled.exists():
-            return True
-        content = '#include <Python.h>\n#include <structmember.h>\n'
-        pch_header.write_text(content)
-        build_env = self._prepare_pitstop_env()
-        doxo_python = self._get_doxo_python()
-        cmd = ['gcc', '-x', 'c-header', str(pch_header), '-o', str(pch_compiled)]
-        import sysconfig
-        py_include = sysconfig.get_path('include')
-        cmd += [f'-I{py_include}']
+    def transpile_batch(self, modules_list):
+        import time
+        from Cython.Build import cythonize
+        
+        t0 = time.perf_counter()
+        foundry_path = self.env.foundry.resolve()
+        sources = [str(foundry_path / f"{m}.pyx") for m in modules_list]
+        
         try:
-            subprocess.run(cmd, env=build_env, check=True, capture_output=True)
+            cythonize(sources, nthreads=2, quiet=True, 
+                      compiler_directives={'language_level': "3", 'boundscheck': False, 'wraparound': True})
+            
+            # --- CÁLCULO DE TELEMETRIA ---
+            duration_ms = (time.perf_counter() - t0) * 1000
+            avg_ms = duration_ms / len(modules_list)
+            
+            for m in modules_list:
+                # Injeta a média do Cython para cada arquivo no dicionário de telemetria
+                self.detailed_telemetry.setdefault(m, {})['transpile_ms'] = avg_ms
+                
             return True
-        except Exception:
+        except Exception as e:
+            print(f"   {Fore.RED}✘ Erro no Cython: {e}{Fore.RESET}")
             return False
+
+    def _ensure_pch(self):
+        """Gera o cabeçalho pré-compilado (Python.h.gch) se não existir."""
+        pch_file = self.env.foundry / "vulcan_headers.h"
+        gch_file = self.env.foundry / "vulcan_headers.h.gch"
+        
+        if not gch_file.exists():
+            print(f"   {Fore.YELLOW}❄ Preparando Criogenia de Cabeçalhos (PCH)...{Fore.RESET}")
+            # Criamos um cabeçalho que inclui as bases mais usadas
+            content = "#include <Python.h>\n#include <structmember.h>\n"
+            pch_file.write_text(content)
+            
+            # Compilamos o cabeçalho em si (isso é feito apenas uma vez)
+            cmd = f'gcc -x c-header "{str(pch_file)}" -I{self.py_include} -o "{str(gch_file)}"'
+            import subprocess
+            subprocess.run(cmd, shell=True, capture_output=True)
+        return pch_file
 
     def _get_doxo_python(self):
         core_root = Path(__file__).resolve().parents[3]
@@ -178,34 +219,97 @@ class VulcanCompiler:
 
     def compile_batch(self, modules_list):
         from Cython.Build import cythonize
-        from setuptools import Extension, setup
-        import sys
+        import time
+        import traceback # Necessário para o detalhamento que você pediu
+
+        # Sensor de Início
+        t_batch_start = time.perf_counter()
+        metrics = {}
 
         foundry_path = self.env.foundry.resolve()
+        sources = [str(foundry_path / f"{m}.pyx") for m in modules_list]
         
-        ext_list = []
-        for m in modules_list:
-            # Agora sources contém apenas o .pyx, o .c é puxado pelo include absoluto
-            ext = Extension(
-                m, 
-                sources=[str(foundry_path / f"{m}.pyx")],
-                extra_compile_args=['-O3', '-msse4.1']
-            )
-            ext_list.append(ext)
-        
+        # --- FASE 1: CYTHON CORE (TRANSPILLING) ---
+        t0 = time.perf_counter()
         try:
-            # Cythonize com força total (nthreads=2)
-            ext_modules = cythonize(ext_list, nthreads=2, quiet=True)
+            # O Cython gera os arquivos .c a partir dos .pyx
+            cythonize(sources, nthreads=2, quiet=True, 
+                      compiler_directives={'language_level': "3", 'boundscheck': False})
+            metrics['cython_core_ms'] = (time.perf_counter() - t0) * 1000
+        except Exception as e:
+            # --- DETALHAMENTO DE FALHA NA FASE 1 ---
+            print(f"\n{Fore.RED}✘ [ERRO CRÍTICO CYTHON]{Style.RESET_ALL}")
+            print(f"{Fore.YELLOW}Causa:{Style.RESET_ALL} {e}")
+            print(f"{Style.DIM}{traceback.format_exc()}{Style.RESET_ALL}")
+            return False
+
+        # --- FASE 2: GCC LINKING (BINARY GENERATION) ---
+        t1 = time.perf_counter()
+        success = True
+        gcc_times = []
+        
+        print(f"\n{Fore.CYAN}{Style.BRIGHT}📦 RELATÓRIO DE FUNDIÇÃO DO LOTE:{Style.RESET_ALL}")
+        print(f"{'MÓDULO':<30} │ {'RESULTADO':<10} │ {'TEMPO'}")
+        print("─" * 55)
+        
+        for i, m in enumerate(modules_list):
+            status = f"{Fore.GREEN}OK{Fore.RESET}" if i < len(gcc_times) else f"{Fore.RED}FALHA{Fore.RESET}"
+            t_str = f"{gcc_times[i]:.0f}ms" if i < len(gcc_times) else "-"
+            print(f"{m:<30} │ {status:<10} │ {t_str}")
+
+        metrics['gcc_avg_ms'] = sum(gcc_times) / len(gcc_times) if gcc_times else 0
+        metrics['gcc_total_ms'] = (time.perf_counter() - t1) * 1000
+        metrics['total_ms'] = (time.perf_counter() - t_batch_start) * 1000
+        
+        # [TELEMETRY PUSH] Registra globalmente para o relatório final
+        global COMPILATION_TELEMETRY
+        COMPILATION_TELEMETRY.append(metrics)
+        
+        # REMOVIDO: O bloco 'if result.returncode' que causava o NameError.
+        # A variável 'success' já rastreia o estado da fundição.
+        
+        if not success:
+            print(f"\n{Fore.RED}⚠ Atenção: O lote terminou com falhas parciais.{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}O Vulcan tentará o fallback para Tier 2 (Python Otimizado) onde o Tier 1 falhou.{Style.RESET_ALL}")
+
+        return success
+        
+    def _run_gcc_direct(self, module_name: str) -> bool:
+        import subprocess
+        import time
+        t_start = time.perf_counter() # Inicia o sensor imediatamente
+        t0 = time.perf_counter()
+        c_file = self.env.foundry / f"{module_name}.c"
+        obj_file = self.env.bin_dir / f"{module_name}.pyd"
+        
+        # Localização dos Kernels de Elite
+        native_dir = Path(__file__).parent / "native"
+        core_c = native_dir / "nexus_kernels.c"
+        core_s = native_dir / "nexus_asm.s"
+#        core_c = native_dir / "nexus_core.c"
+#        warp_s = native_dir / "warp_math.s"
+
+        # COMANDO DE FUNDIÇÃO HÍBRIDA (C + ASM + CYTHON)
+        cmd = [
+            'gcc', '-O3', '-shared', '-g',
+            f'-I{self.py_include}',
+            f'-L{self.py_libs}',
+            f'"{str(c_file)}"',      # Cython Transpiled
+            f'"{str(core_c)}"',      # C Pure Kernel
+            f'"{str(core_s)}"',      # Assembly SSE4.2 Kernel
+            '-o', f'"{str(obj_file)}"',
+            self.py_link_lib, '-Wall'
+        ]
+        try:
+            res = subprocess.run(" ".join(cmd), capture_output=True, text=True, shell=True)
+            elapsed = (time.perf_counter() - t_start) * 1000
+            self.detailed_telemetry.setdefault(module_name, {})['link_ms'] = elapsed
             
-            old_argv = sys.argv
-            sys.argv = ['setup.py', 'build_ext', '--inplace']
-            setup(
-                name="NexusBuild", 
-                ext_modules=ext_modules, 
-                script_args=['build_ext', '--inplace', f'--build-lib={str(self.env.bin_dir)}']
-            )
-            sys.argv = old_argv
+            if res.returncode != 0:
+                print(f"\n{Fore.RED}✘ Erro no GCC ({module_name}): {res.stderr}...{Fore.RESET}")
+                return False
             return True
         except Exception as e:
-            print(f"🚨 [VULCAN FAIL] {e}")
+            # Garante que mesmo em crash de sistema, o tempo (mesmo que 0) seja registrado
+            self.detailed_telemetry.setdefault(module_name, {})['link_ms'] = 0
             return False

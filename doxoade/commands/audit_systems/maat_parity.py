@@ -20,7 +20,8 @@ class ParityGuard:
             if not vulcan_bridge.is_binary_stale(f):
                 v_mod = vulcan_bridge.get_optimized_module(f)
                 if v_mod:
-                    findings.extend(self._audit_module_parity(f, v_mod))
+                    #findings.extend(self._audit_module_parity(f, v_mod))
+                    findings.extend(self._run_simd_shadow_test(f, v_mod))
         return findings
 
     def _run_simd_shadow_test(self, file_path, v_mod):

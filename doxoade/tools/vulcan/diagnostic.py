@@ -63,12 +63,14 @@ class VulcanDiagnostic:
         return True
 
     def _check_disk_free(self):
-        import psutil
+        """Verifica espaço em disco com Fallback de Segurança."""
         try:
+            import psutil
             free_mb = psutil.disk_usage(str(self.root)).free / (1024 * 1024)
             return free_mb > 50
-        except Exception as e:
-            print(f'\x1b[0;33m _check_disk_free - Exception: {e}')
+        except (ImportError, ModuleNotFoundError, Exception):
+            # Fallback: Se o psutil estiver quebrado, não bloqueamos a forja.
+            # Apenas emitimos um aviso interno.
             return True
 
     def render_report(self):

@@ -5,8 +5,9 @@ import re
 import sys
 import signal
 import threading
+import click
 from pathlib import Path
-from doxoade.tools.doxcolors import Fore
+from doxoade.tools.doxcolors import Fore, Style
 from .environment import VulcanEnvironment
 from .advisor import VulcanAdvisor
 from .compiler import VulcanCompiler
@@ -127,23 +128,32 @@ class VulcanAutopilot:
     def _filter_candidates(self, candidates: list[dict], force_recompile: bool) -> list[dict]:
         from .forge import assess_file_for_vulcan
         filtered: list[dict] = []
-        skip_reasons: Counter[str] = Counter()
+        skip_reasons = {} # Alterado para dicionário de listas
+        
         for c in candidates:
             file_path = c['file']
             eligible, reason = assess_file_for_vulcan(file_path)
+            
             if not eligible:
-                skip_reasons[f'heurística: {reason}'] += 1
+                fname = os.path.basename(file_path)
+                if reason not in skip_reasons: skip_reasons[reason] = []
+                skip_reasons[reason].append(fname)
                 continue
+            
             if not force_recompile and self.advisor._is_already_compiled(file_path):
-                skip_reasons['binário já atualizado'] += 1
                 continue
+            
             c['__vulcan_validated'] = True
             filtered.append(c)
-        total_skips = sum(skip_reasons.values())
-        if total_skips:
-            print(f'   {Fore.BLUE}↷ Pulos inteligentes: {total_skips}{Fore.RESET}')
-            for reason, count in skip_reasons.most_common():
-                print(f'      - {count:>2}x {reason}')
+
+        # --- NOVA SEÇÃO DE RELATÓRIO DETALHADO ---
+        if skip_reasons:
+            click.echo(f"\n{Fore.YELLOW}📂 RELATÓRIO DE COMPLEXIDADE (Pulos Inteligentes):{Style.RESET_ALL}")
+            for reason, files in skip_reasons.items():
+                click.echo(f"   {Fore.RED}✘ {reason}:{Style.RESET_ALL}")
+                # Lista os arquivos em grupos de 4 para não inundar o terminal
+                for i in range(0, len(files), 4):
+                    click.echo(f"      {Fore.WHITE}{', '.join(files[i:i+4])}{Style.RESET_ALL}")
         return filtered
 
     @staticmethod
@@ -182,7 +192,18 @@ class VulcanAutopilot:
             return
         max_workers = self._resolve_max_workers(max_workers)
         if use_pitstop:
-            self._run_pitstop(candidates, force_recompile, max_workers, streaming)
+            from .pitstop import PitstopEngine
+            engine = PitstopEngine(self.env, pid_registry=self._pid_registry)
+            
+            # [STABILITY FIX] Contrato estrito com o Pitstop
+            stats = engine.run(
+                candidates=candidates, 
+                max_workers=max_workers, 
+                force_recompile=force_recompile,
+                on_result=None # O CLI tratará os resultados através do objeto stats
+            )
+            self._print_pitstop_summary(stats)
+            return stats
         else:
             self._run_legacy(candidates, max_workers)
         self.compiler.save_telemetry_report(self.root)
@@ -193,7 +214,7 @@ class VulcanAutopilot:
         info = engine.warmup_info()
         print(f"   {Fore.MAGENTA}🔥 [PITSTOP] Engine warm-up — batch={info['batch_size']}, workers={max_workers}{Fore.RESET}")
         print(f"   {Fore.CYAN}   > cache: {info['cache']['entries']} entradas em {info['cache']['path']}{Fore.RESET}")
-
+        status = task.get('status', 'UNKNOWN')
         def _on_result(file_path: str, ok: bool, err: str | None) -> None:
             name = Path(file_path).name
             if ok:
@@ -219,6 +240,7 @@ class VulcanAutopilot:
             _kill_registry(self._pid_registry)
 
     def _print_pitstop_summary(self, stats: dict) -> None:
+        from .compiler import COMPILATION_TELEMETRY
         s, f, c = (stats['success'], stats['failed'], stats['cached'])
         t_total = stats.get('total_time', 0.0)
         t_forge = stats.get('forge_time', 0.0)
@@ -232,6 +254,16 @@ class VulcanAutopilot:
             if saving > 1.0:
                 print(f'  {Fore.GREEN}⚡ PitStop economizou ~{saving:.1f}s vs compilação individual{Fore.RESET}')
         print(f"{Fore.CYAN}{'─' * 55}{Fore.RESET}")
+        if COMPILATION_TELEMETRY:
+            m = COMPILATION_TELEMETRY[0]
+            click.echo(f"\n{Fore.MAGENTA}🔬 [DIAGNÓSTICO HADES: VULCAN INTERNAL]{Style.RESET_ALL}")
+            click.echo(f"   • Transformação Cython : {Fore.YELLOW}{m['cython_core_ms']:.0f}ms{Style.RESET_ALL}")
+            click.echo(f"   • Fusão GCC (Média/Arq): {Fore.YELLOW}{m['gcc_avg_ms']:.0f}ms{Style.RESET_ALL}")
+            click.echo(f"   • Fusão GCC (Total)     : {Fore.YELLOW}{m['gcc_total_ms']:.0f}ms{Style.RESET_ALL}")
+            
+            # Cálculo de Overhead (Tempo perdido com logística do Windows)
+            overhead = m['total_ms'] - (m['cython_core_ms'] + m['gcc_total_ms'])
+            click.echo(f"   • Logística de Sistema : {Fore.RED}{overhead:.0f}ms{Style.RESET_ALL}")
 
     def _run_legacy(self, candidates: list[dict], max_workers: int) -> None:
         print(f'   {Fore.YELLOW}[LEGADO] Ativando {max_workers} threads...{Fore.RESET}')

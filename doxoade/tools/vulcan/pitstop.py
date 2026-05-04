@@ -104,41 +104,66 @@ class WarmupCache:
 
 def _forge_to_pyx(task: dict) -> dict:
     """
-    Transforma um arquivo .py em:
-      1. ``.pyx``    — para compilação Cython (Camada 1)
-      2. ``opt_.py`` — Python otimizado via LibOptimizer (Camada 2)
-
-    Roda dentro de uma thread do ThreadPoolExecutor — sem custo de startup
-    de subprocesso. Ambas as operações são puras Python/AST.
-
-    Falhas na geração do opt_py são silenciosas — a Camada 2 simplesmente
-    não estará disponível para este módulo até o próximo ``ignite``.
+    Transforma um arquivo .py em .pyx (Tier 1) e opt_.py (Tier 2).
+    Versão Forense: Captura falhas de tradução com rastro completo.
     """
+    import traceback
+    import hashlib
+    import re
+    from pathlib import Path
+    from .forge import VulcanForge as VForge, assess_file_for_vulcan as AFVul
+    import time
+    t_start = time.perf_counter()
+    
     file_path = Path(task['file_path'])
     foundry = Path(task['foundry'])
     abs_path = file_path.resolve()
+    
+    # Gerador de Assinatura Única
     path_hash = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
     _safe_stem = re.sub('[^a-zA-Z0-9_]', '_', abs_path.stem)
     module_name = f'v_{_safe_stem}_{path_hash}'
     pyx_path = foundry / f'{module_name}.pyx'
+    
+    # 1. Check de Elegibilidade
     eligible, reason = AFVul(str(abs_path))
     if not eligible:
-        return {'ok': False, 'skip': True, 'file': str(file_path), 'module_name': module_name, 'err': f'pulado: {reason}'}
+        return {
+            'ok': False, 
+            'skip': True, 
+            'file': str(file_path), 
+            'module_name': module_name, 
+            'err': f'pulado: {reason}'
+        }
+
     pyx_ok = False
     try:
+        # 2. Forja do Código Nativo (Tier 1)
         forge = VForge(str(abs_path))
         pyx_code = forge.generate_source(str(abs_path))
         if pyx_code:
             pyx_path.write_text(pyx_code, encoding='utf-8')
             pyx_ok = True
-    except Exception as exc:
-        return {'ok': False, 'file': str(file_path), 'module_name': module_name, 'err': str(exc)[:160]}
+    except Exception as e:
+        # --- CORREÇÃO: ok deve ser FALSE aqui ---
+        error_detail = traceback.format_exc() 
+        return {
+            'ok': False, # <--- MUDADO PARA FALSE
+            'module_name': module_name,
+            'err': str(e), 
+            'traceback': error_detail,
+            'name': file_path.name,
+            'file_path': str(file_path)
+        }
+
+    # 3. Geração da Camada de Fallback (Tier 2 - Python Otimizado)
     try:
         from doxoade.tools.vulcan.opt_cache import generate_opt_py
         project_root_str = task.get('project_root')
         if project_root_str:
             project_root = Path(project_root_str)
         else:
+            # Auto-ancoragem de root se não fornecido
             cur = abs_path.parent
             project_root = None
             while cur != cur.parent:
@@ -146,13 +171,29 @@ def _forge_to_pyx(task: dict) -> dict:
                     project_root = cur
                     break
                 cur = cur.parent
+        
         if project_root:
             generate_opt_py(project_root, abs_path)
     except Exception:
-        pass
+        pass # Tier 2 é opcional, se falhar o Tier 3 assume
+
+    # 4. Resultado Final da Missão
     if not pyx_ok:
-        return {'ok': True, 'file': str(file_path), 'module_name': module_name, 'err': 'pyx_code vazio'}
-    return {'ok': True, 'file': str(file_path), 'module_name': module_name, 'pyx_path': str(pyx_path)}
+        return {
+            'ok': False, # <--- MUDADO PARA FALSE
+            'file': str(file_path), 
+            'module_name': module_name, 
+            'err': 'pyx_code vazio'
+        }
+        
+    duration_ms = (time.perf_counter() - t_start) * 1000
+    return {
+        'ok': True, 
+        'file': str(file_path), 
+        'module_name': module_name, 
+        'pyx_path': str(pyx_path),
+        'forge_ms': duration_ms # <--- INJEÇÃO DO DADO REAL
+    }
 
 def _batch_setup_content(entries: list[dict], extra_args: list[str], nthreads: int) -> str:
     """
@@ -255,14 +296,16 @@ def _parallel_compile(entries: list[dict], foundry_path: Path, bin_dir: Path, bu
     Cada worker é um processo Python independente → múltiplos GCC simultâneos.
     Usa diretórios de build isolados por worker_id para evitar conflito no Windows.
     """
-    from concurrent.futures import ProcessPoolExecutor, as_completed as _as_completed
+    from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
+    #from concurrent.futures import ProcessPoolExecutor, as_completed as _as_completed
     results: dict[str, tuple[bool, str | None]] = {}
     foundry_str = str(foundry_path)
     bin_dir_str = str(bin_dir)
     print(f'      \x1b[33m⚡ [{label}] {len(entries)} módulo(s) × {n_workers} processo(s) GCC...\x1b[0m')
     tasks = [(e['module_name'], foundry_str, bin_dir_str, build_env, python_exe, i % n_workers) for i, e in enumerate(entries)]
     try:
-        with ProcessPoolExecutor(max_workers=n_workers) as pool:
+        with ThreadPoolExecutor(max_workers=n_workers) as pool:
+#        with ProcessPoolExecutor(max_workers=n_workers) as pool:
             futures = {pool.submit(_compile_single, *task): task[0] for task in tasks}
             for future in _as_completed(futures):
                 try:
@@ -564,32 +607,36 @@ class PitstopEngine:
 
     def run(self, candidates: list[dict], max_workers: int | None=None, force_recompile: bool=False, on_result: Callable[[str, bool, str | None], None] | None=None) -> dict:
         """
-        Executa pipeline PitStop completo.
-
-        Parâmetros:
-            candidates      lista de dicts com chave 'file'
-            max_workers     threads de forge (None = auto)
-            force_recompile ignora WarmupCache
-            on_result       callback(file_path, success, error_msg) por módulo
+        Executa pipeline PitStop completo com telemetria multidimensional.
         """
         ensure_dirs(str(self.root))
         self.env.foundry.mkdir(parents=True, exist_ok=True)
         self.env.bin_dir.mkdir(parents=True, exist_ok=True)
         n_workers = self._resolve_workers(max_workers)
+        
+        # [MUDANÇA CRÍTICA 1] Instanciamos o compilador aqui para ele ser o dono da telemetria
+        from .compiler import VulcanCompiler
+        compiler = VulcanCompiler(self.env, pid_registry=self._pid_registry)
+        
         stats: dict = {'total': len(candidates), 'cached': 0, 'stale': 0, 'success': 0, 'failed': 0, 'skipped': 0, 'forge_time': 0.0, 'compile_time': 0.0, 'total_time': 0.0}
         t_start = time.perf_counter()
+        
         if not force_recompile:
             stale, cached_count = self._filter_stale(candidates)
             stats['cached'] = cached_count
         else:
             stale = candidates
+            
         stats['stale'] = len(stale)
         if not stale:
             stats['total_time'] = time.perf_counter() - t_start
             return stats
+
+        # --- FASE 1: FORGE (AST) ---
         t_forge = time.perf_counter()
         forge_out = self._phase_forge(stale, n_workers)
         stats['forge_time'] = round(time.perf_counter() - t_forge, 3)
+        
         ready: list[dict] = []
         for r in forge_out:
             if r.get('skip'):
@@ -598,31 +645,61 @@ class PitstopEngine:
                     on_result(r['file'], False, r.get('err'))
             elif not r['ok']:
                 stats['failed'] += 1
-                if on_result:
-                    on_result(r['file'], False, r.get('err'))
+                fname = r.get('name', 'desconhecido')
+                erro = r.get('err', 'Erro não especificado')
+                print(f"   {Fore.RED}✘ Falha no Forge [{fname}]: {erro}{Fore.RESET}")
+                if 'traceback' in r:
+                    print(f"{Style.DIM}{r['traceback']}{Style.RESET_ALL}")
             else:
                 ready.append(r)
+
         if not ready:
             self.cache.save()
             stats['total_time'] = round(time.perf_counter() - t_start, 3)
             return stats
+
+        # --- FASE 2: BATCH COMPILE (Linkagem) ---
         t_compile = time.perf_counter()
-        compile_results = self._phase_batch_compile(ready, n_workers)
+        # [MUDANÇA CRÍTICA 2] Passamos o objeto 'compiler' para a função
+        compile_results = self._phase_batch_compile(ready, n_workers, compiler)
         stats['compile_time'] = round(time.perf_counter() - t_compile, 3)
+
+        # --- RELATÓRIO DE GARGALOS (O Coração do Diagnóstico) ---
+        print(f"\n{Fore.CYAN}{Style.BRIGHT}🔬 ANALISE DE GARGALOS VULCAN (PER-MODULE):{Style.RESET_ALL}")
+        header = f"{'MÓDULO':<25} │ {'FORGE':>7} │ {'TRANS':>7} │ {'LINK':>7} │ {'TOTAL'}"
+        print(header)
+        print("─" * 65)
+
         for entry in ready:
             name = entry['module_name']
             file_path = entry['file']
-            ok, err = compile_results.get(name, (False, 'Resultado ausente'))
+            
+            # Agora 'compiler' existe neste escopo!
+            m = compiler.detailed_telemetry.get(name, {})
+            f_ms = entry.get('forge_ms', 0)
+            t_ms = m.get('transpile_ms', 0)
+            l_ms = m.get('link_ms', 0)
+            total_ms = f_ms + t_ms + l_ms
+            
+            color = Fore.RED if total_ms > 30000 else Fore.WHITE
+            print(f"{color}{name[:25]:<25}{Style.RESET_ALL} │ "
+                  f"{f_ms:6.0f}ms │ {t_ms:6.0f}ms │ {l_ms:6.0f}ms │ "
+                  f"{Fore.YELLOW}{total_ms/1000:6.1f}s{Fore.RESET}")
+            
+            # Processamento de resultados
+            res_pair = compile_results.get(name)
+            ok = res_pair[0] if res_pair else False
+            err = res_pair[1] if res_pair else "Falha na fundição"
+
             if ok:
                 stats['success'] += 1
                 self.cache.mark_compiled(file_path)
-                if on_result:
-                    on_result(file_path, True, None)
             else:
                 stats['failed'] += 1
                 self.cache.invalidate(file_path)
                 if on_result:
                     on_result(file_path, False, err)
+
         stats['total_time'] = round(time.perf_counter() - t_start, 3)
         self.cache.save()
         return stats
@@ -742,41 +819,59 @@ class PitstopEngine:
         return (stale, cached)
 
     def _phase_forge(self, candidates: list[dict], n_workers: int) -> list[dict]:
-        """Phase 1: gera todos os .pyx em paralelo (puro AST, sem subprocess)."""
+        import click
         results: list[dict] = []
         tasks = [{'file_path': c['file'], 'foundry': str(self.env.foundry)} for c in candidates]
+        
         with TPE(max_workers=n_workers) as executor:
-            futures = {executor.submit(_forge_to_pyx, t): t for t in tasks}
-            for future in as_completed(futures):
-                try:
+            # Mapeamos os nomes para a barra
+            futures = {executor.submit(_forge_to_pyx, t): Path(t['file_path']).name for t in tasks}
+            
+            with click.progressbar(as_completed(futures), 
+                                 length=len(tasks),
+                                 label='  [VULCAN:FORGE]',
+                                 show_pos=True, # Mostra (1/29)
+                                 item_show_func=lambda f: futures.get(f, '') if f else '') as bar:
+                for future in bar:
                     results.append(future.result())
-                except Exception as exc:
-                    t = futures[future]
-                    results.append({'ok': False, 'file': t['file_path'], 'module_name': '', 'err': str(exc)})
         return results
 
-    def _phase_batch_compile(self, ready: list[dict], n_workers: int) -> dict[str, tuple[bool, str | None]]:
-        """
-        Phase 2: compila em lotes.
+    def _phase_batch_compile(self, ready, n_workers, compiler):
+        """Fase 2: Fundição Paralela usando o compilador injetado."""
+        import click
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        # REMOVA ou COMENTE a linha abaixo se ela existir, 
+        # pois agora usamos o compilador que veio de fora:
+        # compiler = VulcanCompiler(self.env, pid_registry=self._pid_registry)
 
-        No Windows vai direto ao ProcessPoolExecutor paralelo (via compile_batch).
-        No Linux/macOS tenta batch único primeiro, paralelo como fallback.
-        feedback por módulo é impresso inline por _parallel_compile — não
-        repetimos aqui para evitar saída duplicada.
-        """
-        all_results: dict[str, tuple[bool, str | None]] = {}
-        total_batches = (len(ready) + _BATCH_SIZE - 1) // _BATCH_SIZE
-        for i in range(0, len(ready), _BATCH_SIZE):
-            batch = ready[i:i + _BATCH_SIZE]
-            batch_num = i // _BATCH_SIZE + 1
-            print(f'   \x1b[33m🔥 [PITSTOP] Lote {batch_num}/{total_batches} ({len(batch)} módulos × {n_workers} workers)...\x1b[0m')
-            res = compile_batch(entries=batch, foundry_path=self.env.foundry, bin_dir=self.env.bin_dir, build_env=self._build_env, python_exe=self._python_exe, max_gcc_jobs=n_workers)
-            all_results.update(res)
-            if os.name != 'nt':
-                for name, (ok, err) in res.items():
-                    mark = '\x1b[32m✔\x1b[0m' if ok else '\x1b[31m✘\x1b[0m'
-                    print(f'      {mark} {name}')
-        return all_results
+        module_names = [r['module_name'] for r in ready]
+
+        # --- PASSO 1: TRANSPILE ---
+        print(f"   {Fore.YELLOW}⚙ Gerando fontes C (Cython Core)...{Fore.RESET}")
+        compiler.transpile_batch(module_names) 
+
+        # --- PASSO 2: LINKAGEM PARALELA (GCC) ---
+        results = {}
+        max_linkers = 2 # Ideal para o seu N2808
+        
+        print(f"   {Fore.CYAN}🚀 [WARP DRIVE] Fundindo {len(ready)} binários em {max_linkers} núcleos...{Fore.RESET}")
+        
+        with ThreadPoolExecutor(max_workers=max_linkers) as executor:
+            # Iniciamos as threads de linkagem usando o objeto centralizado
+            future_to_mod = {executor.submit(compiler._run_gcc_direct, r['module_name']): r['module_name'] for r in ready}
+            
+            with click.progressbar(length=len(ready), label='  [VULCAN:LINK ]') as bar:
+                for future in as_completed(future_to_mod):
+                    mod_name = future_to_mod[future]
+                    try:
+                        ok = future.result()
+                        results[mod_name] = (ok, None if ok else "Falha no GCC")
+                    except Exception as e:
+                        results[mod_name] = (False, str(e))
+                    bar.update(1)
+                    
+        return results
 
     @staticmethod
     def _resolve_workers(max_workers: int | None) -> int:

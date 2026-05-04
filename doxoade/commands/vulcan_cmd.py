@@ -74,7 +74,13 @@ def _is_doxoade_project(path: Path) -> bool:
 
 @click.group('vulcan')
 def vulcan_group():
-    """🔥 Projeto Vulcano: Alta Performance Nativa (C/Cython)."""
+    """🔥 Projeto Vulcano: Alta Performance Nativa (C/Cython).
+    
+    DEBUG DE REDIRECIONAMENTO:
+      Para analisar o desvio de imports em tempo real, use:
+      $ set VULCAN_VERBOSE=1 && python main.py (Windows)
+      $ VULCAN_VERBOSE=1 python3 main.py      (Linux/Termux)
+    """
     pass
 
 @vulcan_group.command('forge')
@@ -157,42 +163,43 @@ def doctor(module, srcdir, retries):
 
 @vulcan_group.command('status')
 def vulcan_status():
-    """Lista módulos otimizados e camadas ativas (binário + opt_py)."""
-    root = _find_project_root(os.getcwd())
-    bin_dir = os.path.join(root, '.doxoade', 'vulcan', 'bin')
-    lib_bin_dir = os.path.join(root, '.doxoade', 'vulcan', 'lib_bin')
-    opt_py_dir = os.path.join(root, '.doxoade', 'vulcan', 'opt_py')
-    click.echo(f'\n{Fore.CYAN}{Style.BRIGHT}  ESTADO DA FOUNDRY VULCAN:{Style.RESET_ALL}')
-    for label, directory in [('Projeto (Tier 1)', bin_dir), ('Libs (Tier 1)', lib_bin_dir)]:
-        if not os.path.exists(directory):
+    """Dashboard de Sincronia: Original (Tier 3) vs Nativo (Tier 1)."""
+    from pathlib import Path
+    import hashlib, os, time
+
+    root = Path(_find_project_root(os.getcwd()))
+    bin_dir = root / '.doxoade' / 'vulcan' / 'bin'
+    
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}📊 DASHBOARD DE INTEGRIDADE VULCAN{Style.RESET_ALL}")
+    
+    # Cabeçalho
+    click.echo(f"{'MÓDULO':<35} │ {'TIER 1 (BIN)':<14} │ {'STATUS'}")
+    click.echo("─" * 65)
+
+    from doxoade.dnm import DNM
+    py_files = DNM(str(root)).scan(extensions=['py'])
+
+    for py_f in py_files:
+        p = Path(py_f)
+        if p.name.startswith('__') or 'tests' in str(p): continue
+        
+        # Calcula o hash de vinculação do binário
+        path_hash = hashlib.sha256(str(p.resolve()).encode()).hexdigest()[:6]
+        v_pattern = f"v_{p.stem}_{path_hash}"
+        binary = list(bin_dir.glob(f"{v_pattern}*.pyd")) or list(bin_dir.glob(f"{v_pattern}*.so"))
+        
+        rel_path = os.path.relpath(p, root)
+        
+        if not binary:
+            click.echo(f"{Fore.WHITE}{rel_path[:35]:<35}{Style.RESET_ALL} │ {Style.DIM}{'no binary':<14}{Style.RESET_ALL} │ {Style.DIM}Tier 3")
             continue
-        binaries = [f for f in os.listdir(directory) if f.endswith(('.pyd', '.so'))]
-        if binaries:
-            click.echo(f'\n  {Fore.YELLOW}[{label}]{Style.RESET_ALL}')
-            for b in binaries:
-                size = os.path.getsize(os.path.join(directory, b)) / 1024
-                click.echo(f'   {Fore.GREEN}{b:<40} {Fore.WHITE}| {size:>6.1f} KB {Fore.YELLOW}[ATIVO]{Style.RESET_ALL}')
-    if os.path.exists(opt_py_dir):
-        opt_files = [f for f in os.listdir(opt_py_dir) if f.endswith('.py')]
-        if opt_files:
-            click.echo(f'\n  {Fore.MAGENTA}[Python Otimizado (Tier 2)]{Style.RESET_ALL}')
-            for f in opt_files:
-                size = os.path.getsize(os.path.join(opt_py_dir, f)) / 1024
-                click.echo(f'   {Fore.MAGENTA}{f:<40} {Fore.WHITE}| {size:>6.1f} KB {Fore.CYAN}[OPT]{Style.RESET_ALL}')
-    all_bins = []
-    for d in [bin_dir, lib_bin_dir]:
-        if os.path.exists(d):
-            all_bins += [f for f in os.listdir(d) if f.endswith(('.pyd', '.so'))]
-    all_opts = []
-    if os.path.exists(opt_py_dir):
-        all_opts = [f for f in os.listdir(opt_py_dir) if f.endswith('.py')]
-    if not all_bins and (not all_opts):
-        click.echo(f"   {Fore.YELLOW}Nenhum módulo ativo. Execute 'doxoade vulcan ignite' ou 'doxoade vulcan opt'.{Style.RESET_ALL}")
-    else:
-        click.echo(f'\n  {Fore.CYAN}Resumo:{Style.RESET_ALL}')
-        click.echo(f'   {Fore.GREEN}Tier 1 (Binários)  : {len(all_bins)} módulo(s){Style.RESET_ALL}')
-        click.echo(f'   {Fore.MAGENTA}Tier 2 (Opt Python): {len(all_opts)} módulo(s){Style.RESET_ALL}')
-        click.echo(f'   {Fore.WHITE}Tier 3 (Python Puro): sempre disponível{Style.RESET_ALL}')
+            
+        # Verifica se o binário é "Stale" (código mudou e binário é antigo)
+        is_stale = p.stat().st_mtime > binary[0].stat().st_mtime
+        status_txt = f"{Fore.RED}STALE (Re-ignite){Fore.RESET}" if is_stale else f"{Fore.GREEN}SYNCED (Nativo){Fore.RESET}"
+        size = binary[0].stat().st_size / 1024
+        
+        click.echo(f"{Fore.CYAN}{rel_path[:35]:<35}{Style.RESET_ALL} │ {Fore.YELLOW}{size:>7.1f} KB{Style.RESET_ALL}    │ {status_txt}")
 
 @vulcan_group.command('purge')
 def vulcan_purge():

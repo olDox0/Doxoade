@@ -7,10 +7,16 @@ from typing import Set
 _BLACKLIST = frozenset({'click', 'rich', 'colorama', 'progressbar', 'prompt_toolkit', 'curses', 'ansi', 'ansitowin32', 'initialise', 'win32', 'winterm', '_winconsole', 'psutil', 'sqlite3', 'radon', 'pathspec', '__main__', 'doxcolors', 'termui'})
 _CYTHON_RESERVED_IDENTIFIERS = frozenset({'include', 'cdef', 'cimport', 'cpdef', 'ctypedef', 'extern', 'gil', 'nogil', 'public', 'readonly'})
 _SEMANTIC_COMMENT_PREFIXES = ('# cython:', '# ---', '# type:', '# noqa', '# pragma:')
-_STUB_HEADER = "class _Stub:\n    RESET = RESET_ALL = BRIGHT = DIM = NORMAL = ''\n    RED = GREEN = YELLOW = BLUE = MAGENTA = CYAN = WHITE = ''\n    def __init__(self, *a, **kw): pass\n    def __call__(self, *a, **kw):\n        if len(a) == 1 and callable(a[0]) and not kw: return a[0]\n        return _Stub()\n    def __getattr__(self, _): return _Stub()\n    def __add__(self, o): return o if isinstance(o, str) else _Stub()\n    def __radd__(self, o): return o if isinstance(o, str) else _Stub()\n    def __str__(self): return ''\n    def __repr__(self): return ''\n    def __bool__(self): return False\nclick = colorama = rich = progressbar = prompt_toolkit = psutil = _Stub()\nFore = Back = Style = echo = secho = prompt = confirm = _Stub()\nargument = option = command = group = pass_context = Context = cli = _Stub()\nimport os\nimport sys\nimport re\nimport os as _os\nimport sys as _sys\n"
+#_STUB_HEADER = "class _Stub:\n    RESET = RESET_ALL = BRIGHT = DIM = NORMAL = ''\n    RED = GREEN = YELLOW = BLUE = MAGENTA = CYAN = WHITE = ''\n    def __init__(self, *a, **kw): pass\n    def __call__(self, *a, **kw):\n        if len(a) == 1 and callable(a[0]) and not kw: return a[0]\n        return _Stub()\n    def __getattr__(self, _): return _Stub()\n    def __add__(self, o): return o if isinstance(o, str) else _Stub()\n    def __radd__(self, o): return o if isinstance(o, str) else _Stub()\n    def __str__(self): return ''\n    def __repr__(self): return ''\n    def __bool__(self): return False\nclick = colorama = rich = progressbar = prompt_toolkit = psutil = _Stub()\nFore = Back = Style = echo = secho = prompt = confirm = _Stub()\nargument = option = command = group = pass_context = Context = cli = _Stub()\nimport os\nimport sys\nimport re\nimport os as _os\nimport sys as _sys\n"
+_STUB_HEADER = """
+class _Stub:
+    def __getattr__(self, _): return _Stub()
+    def __call__(self, *a, **kw): return _Stub()
+"""
 _SKIP_FILENAMES = frozenset({'__init__.py', '__main__.py'})
 _RISKY_IMPORTS = frozenset({'ctypes', 'socket', 'subprocess', 'threading', 'multiprocessing', 'asyncio', 'llama_cpp'})
 _BLANK_RE = re.compile('\\n{3,}')
+_PYX_HEADER = '# cython: language_level=3, boundscheck=False, wraparound=False\n# cython: initializedcheck=False, cdivision=True\n'
 
 def enrich_pyx(source_code):
     tree = ast.parse(source_code)
@@ -255,10 +261,23 @@ class VulcanForge:
         return self._transform_funcdef(node)
 
     def generate_source(self, file_path):
+        p = Path(file_path)
+        raw_source = p.read_text(encoding='utf-8', errors='ignore')
+        
+        # Extração de Future Imports
+        future_imports = re.findall(r'^(from\s+__future__\s+import\s+.+)$', raw_source, re.M)
+        clean_source = re.sub(r'^(from\s+__future__\s+import\s+.+)$', '', raw_source, flags=re.M)
+        
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
         
-        tree = ast.parse(content)
+        tree = ast.parse(clean_source)
+        
+        header = "\n".join(future_imports) + "\n" if future_imports else ""
+        header += _PYX_HEADER + _STUB_HEADER
+        
+        local_functions = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
+        self._local_funcs = local_functions
         
         # [INTELLIGENCE] Coleta nomes que serão stubbed (fantasiados)
         stub_targets = set()
@@ -274,14 +293,33 @@ class VulcanForge:
         # [INTELLIGENCE] Só injeta o link nativo se a função 'encode_varint' estiver presente
         needs_nexus_math = "def encode_varint" in content
         
+        pyx_lines = []
+        if future_imports:
+            pyx_lines.extend(future_imports)
+        
         pyx_lines = [
             "# cython: language_level=3",
             "# cython: boundscheck=False",
-            "# cython: wraparound=True",
+            "# cython: wraparound=True", # Volte para True para evitar avisos de [-1]
             "# cython: cdivision=True",
             "import sys, os, json, struct",
-            "from libc.stdint cimport int64_t"
+            "from libc.stdint cimport int64_t",
+            "",
+            # Definição única da classe _Stub
+            "class _Stub:",
+            "    def __getattr__(self, _): return _Stub()",
+            "    def __call__(self, *a, **kw): return _Stub()"
         ]
+
+        pyx_lines.append("\n# --- NEXUS NATIVE KERNELS (Tier 1 Elite) ---")
+        pyx_lines.append("cdef extern nogil:")
+        pyx_lines.append("    int64_t nexus_raw_search(const unsigned char* haystack, long h_len, const unsigned char* needle, long n_len)")
+        pyx_lines.append("    long nexus_asm_popcount(long value)")
+
+        for name in self.blacklist:
+            pyx_lines.append(f"{name} = _Stub()")
+       
+        pyx_lines.append(_STUB_HEADER)
 
         if needs_nexus_math:
             # Localiza o caminho absoluto do kernel no Core do Doxoade
@@ -333,6 +371,18 @@ class VulcanForge:
         arg_names = {a.arg for a in node.args.args}
         if node.args.vararg: arg_names.add(node.args.vararg.arg)
         if node.args.kwarg: arg_names.add(node.args.kwarg.arg)
+
+        class InternalCallFixer(ast.NodeTransformer):
+            def __init__(self, locals): self.locals = locals
+            def visit_Call(self, n):
+                if isinstance(n.func, ast.Name) and n.func.id in self.locals:
+                    # Redireciona para a versão otimizada se estiver no mesmo módulo
+                    n.func.id = f"{n.func.id}_vulcan_optimized"
+                return n
+
+        # Aplica a correção antes de dar unparse
+        fixer = InternalCallFixer(self._local_funcs)
+        node = fixer.visit(node)
 
         # Limpeza de anotações complexas
         for arg in node.args.args: arg.annotation = None
@@ -390,8 +440,10 @@ class VulcanForge:
         for sub in ast.walk(node):
             if isinstance(sub, ast.Assign):
                 for target in sub.targets:
-                    if isinstance(target, ast.Name) and target.id in self.hot_names:
-                        vars_found[target.id] = "long"
+                    if isinstance(target, ast.Name):
+                        # PROTEÇÃO: Ignora qualquer variável que comece com '_'
+                        if target.id in self.hot_names and not target.id.startswith('_'):
+                            vars_found[target.id] = "long"
         return vars_found
 
     @staticmethod
@@ -405,7 +457,7 @@ class SmartEnricher(ast.NodeVisitor):
 
     def visit_FunctionDef(self, node):
         # 1. Heurística de Nomes (Padrão de Engenharia)
-        integers = {'n', 'i', 'j', 'k', 'idx', 'count', 'size', 'length', 'offset', 'delta'}
+        integers = {'n', 'i', 'j', 'k', 'idx', 'count', 'size', 'length', 'offset', 'delta', 'attempt', 'retries'}
         
         # Analisa Argumentos
         for arg in node.args.args:
