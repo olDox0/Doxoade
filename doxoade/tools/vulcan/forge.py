@@ -17,7 +17,13 @@ _SKIP_FILENAMES = frozenset({'__init__.py', '__main__.py'})
 _RISKY_IMPORTS = frozenset({'ctypes', 'socket', 'subprocess', 'threading', 'multiprocessing', 'asyncio', 'llama_cpp'})
 _BLANK_RE = re.compile('\\n{3,}')
 _PYX_HEADER = '# cython: language_level=3, boundscheck=False, wraparound=False\n# cython: initializedcheck=False, cdivision=True\n'
-
+NATIVE_KERNELS = {
+    'nexus_raw_search', 'nexus_asm_vec_search', 'nexus_asm_cmov', 
+    'nexus_asm_popcount', 'nexus_path_normalize', 'nexus_get_filename' }
+NATIVE_RESERVED = {
+    'nexus_asm_cmov', 'nexus_asm_popcount', 'nexus_asm_vec_search', 
+    'nexus_asm_crc32', 'nexus_raw_search', 'nexus_path_normalize' }
+    
 def enrich_pyx(source_code):
     tree = ast.parse(source_code)
     enricher = SmartEnricher()
@@ -62,7 +68,7 @@ def assess_file_for_vulcan(file_path: str) -> tuple[bool, str | None]:
     except Exception as e:
         return (False, f'AST inválida ({type(e).__name__})')
     node_count = sum((1 for _ in ast.walk(tree)))
-    if node_count > 3000:
+    if node_count > 10000:
         return (False, f'complexidade alta (nodes={node_count})')
     risky_hits = 0
     for node in ast.walk(tree):
@@ -71,9 +77,48 @@ def assess_file_for_vulcan(file_path: str) -> tuple[bool, str | None]:
         elif isinstance(node, ast.ImportFrom) and node.module:
             if node.module.split('.')[0] in _RISKY_IMPORTS:
                 risky_hits += 1
-    if risky_hits >= 2 and node_count > 1000:
+    if risky_hits >= 2 and node_count > 3000:
         return (False, f'arquivo complexo com APIs sensíveis (risk={risky_hits}, nodes={node_count})')
     return (True, None)
+
+class BodyPurityScanner(ast.NodeVisitor):
+    """Analista de Segurança Estrita: Protege o GIL contra código de logística."""
+    def __init__(self):
+        self.is_pure_c = True
+        # Nódulos que SEMPRE exigem o interpretador Python (GIL)
+        self.forbidden_nodes = (
+            ast.Dict, ast.List, ast.Set, ast.Str, ast.JoinedStr, 
+            ast.Yield, ast.YieldFrom, ast.Await, ast.With,
+            ast.Constant # No 3.12, strings são Constants
+        )
+
+    def visit_Constant(self, node):
+        # Se houver qualquer string ou valor que não seja um número, exige GIL
+        if isinstance(node.value, (str, bytes, dict, list, tuple)):
+            self.is_pure_c = False
+        self.generic_visit(node)
+
+    def visit_BinOp(self, node):
+        # O operador '/' do pathlib é veneno para o NOGIL
+        self.is_pure_c = False
+        self.generic_visit(node)
+
+    def visit_Call(self, node):
+        # Praticamente qualquer chamada de função Python exige GIL
+        self.is_pure_c = False
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node):
+        # obj.attr exige o sistema de introspecção do Python
+        self.is_pure_c = False
+        self.generic_visit(node)
+
+    def visit_Return(self, node):
+        # Se retornar algo que não seja um número simples, exige GIL
+        if node.value and not isinstance(node.value, ast.Num):
+            if not (isinstance(node.value, ast.Constant) and isinstance(node.value.value, (int, float))):
+                self.is_pure_c = False
+        self.generic_visit(node)
 
 class VulcanForge:
     """Transpilador Estrutural: Converte Python moderno em C-Style limpo."""
@@ -117,29 +162,54 @@ class VulcanForge:
     def visit_ImportFrom(self, node):
         if node.module == '__future__':
             return None
+
+        # [ALVO OMEGA] Conversão de Import Relativo para Absoluto
         if node.level and node.level > 0:
+            try:
+                # 1. Detecta a posição do arquivo (ex: doxoade/tools/analysis.py)
+                p = Path(self.target_path).resolve()
+                parts = list(p.parts)
+                
+                # 2. Localiza a âncora 'doxoade' no caminho do Windows
+                if 'doxoade' in parts:
+                    idx = parts.index('doxoade')
+                    # Pega a hierarquia de pacotes: ['doxoade', 'tools']
+                    pkg_hierarchy = parts[idx:-1]
+                    
+                    # Sobe níveis se for .. ou ...
+                    for _ in range(node.level - 1):
+                        if pkg_hierarchy: pkg_hierarchy.pop()
+                    
+                    base_prefix = ".".join(pkg_hierarchy)
+                    
+                    # 3. Reescreve o módulo (ex: doxoade.tools.streamer)
+                    if node.module:
+                        node.module = f"{base_prefix}.{node.module}"
+                    else:
+                        node.module = base_prefix
+                    
+                    node.level = 0 # Agora o binário é SOBERANO (Import Absoluto)
+            except Exception:
+                pass # Fallback para stubs se a lógica de path falhar
+
+        # [CONTINUIDADE] Lógica de Blacklist e Stubs
+        if node.level and node.level > 0:
+            # Se ainda sobrou algum ponto, vira stub por segurança
             stubs = []
             for alias in node.names:
                 stub_name = alias.asname or alias.name
-                if stub_name == '*':
-                    continue
+                if stub_name == '*': continue
                 self._blacklisted_names.add(stub_name)
-                stubs.append(ast.Assign(targets=[ast.Name(id=stub_name, ctx=ast.Store())], value=ast.Call(func=ast.Name(id='_Stub', ctx=ast.Load()), args=[], keywords=[]), lineno=node.lineno))
+                stubs.append(ast.Assign(
+                    targets=[ast.Name(id=stub_name, ctx=ast.Store())], 
+                    value=ast.Call(func=ast.Name(id='_Stub', ctx=ast.Load()), args=[], keywords=[]), 
+                    lineno=node.lineno))
             return stubs if stubs else None
+
         if node.module and self._is_blacklisted(node.module):
-            for alias in node.names:
-                self._blacklisted_names.add(alias.asname or alias.name)
+            for alias in node.names: self._blacklisted_names.add(alias.asname or alias.name)
             return None
-        if node.names:
-            kept = []
-            for alias in node.names:
-                if alias.name in self.blacklist:
-                    self._blacklisted_names.add(alias.asname or alias.name)
-                else:
-                    kept.append(alias)
-            if not kept:
-                return None
-            node.names = kept
+
         if node.module:
             self.original_imports.append(ast.unparse(node))
         return node
@@ -153,22 +223,18 @@ class VulcanForge:
 
     def visit_Attribute(self, node):
         """
-        Converte acesso a atributo reservado Cython para getattr/setattr.
-
-        Problema: `pattern.include` → Cython parse error
-                  `Expected an identifier` porque `include` é reservado.
-
-        Solução Load:  pattern.include        → getattr(pattern, 'include')
-        Solução Store: pattern.include = val  → setattr(pattern, 'include', val)
-                       (tratado aqui para cobrir AugAssign e Tuple targets,
-                        que visit_Assign não alcança)
+        TRANSFORMAÇÃO DE ELITE:
+        Detecta: pyd_path.name
+        Gera: nexus_get_filename(pyd_path)
         """
-        if node.attr not in _CYTHON_RESERVED_IDENTIFIERS:
-            return self.generic_visit(node)
-        self.generic_visit(node)
-        if isinstance(node.ctx, ast.Load):
-            return ast.Call(func=ast.Name(id='getattr', ctx=ast.Load()), args=[node.value, ast.Constant(value=node.attr)], keywords=[])
-        return node
+        if node.attr == 'name':
+            # Se for um atributo .name, desviamos para o Kernel C
+            return ast.Call(
+                func=ast.Name(id='nexus_get_filename', ctx=ast.Load()),
+                args=[node.value], # O objeto original (que será convertido em string)
+                keywords=[]
+            )
+        return self.generic_visit(node)
 
     def visit_Assign(self, node):
         """
@@ -260,87 +326,80 @@ class VulcanForge:
     def visit_AsyncFunctionDef(self, node):
         return self._transform_funcdef(node)
 
-    def generate_source(self, file_path):
+    def generate_source(self, file_path: str) -> str:
         p = Path(file_path)
         raw_source = p.read_text(encoding='utf-8', errors='ignore')
         
-        # Extração de Future Imports
+        # 1. Extração Estrita de Future Imports
         future_imports = re.findall(r'^(from\s+__future__\s+import\s+.+)$', raw_source, re.M)
         clean_source = re.sub(r'^(from\s+__future__\s+import\s+.+)$', '', raw_source, flags=re.M)
         
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
-        
         tree = ast.parse(clean_source)
+        self._local_funcs = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
         
-        header = "\n".join(future_imports) + "\n" if future_imports else ""
-        header += _PYX_HEADER + _STUB_HEADER
-        
-        local_functions = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
-        self._local_funcs = local_functions
-        
-        # [INTELLIGENCE] Coleta nomes que serão stubbed (fantasiados)
-        stub_targets = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module in self.blacklist:
-                for alias in node.names:
-                    stub_targets.add(alias.asname or alias.name)
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    if alias.name in self.blacklist:
-                        stub_targets.add(alias.asname or alias.name)
-
-        # [INTELLIGENCE] Só injeta o link nativo se a função 'encode_varint' estiver presente
-        needs_nexus_math = "def encode_varint" in content
-        
+        # 2. Ordem de Ouro do Cabeçalho (PASC-Compliant)
         pyx_lines = []
         if future_imports:
             pyx_lines.extend(future_imports)
-        
-        pyx_lines = [
+            
+        pyx_lines.extend([
             "# cython: language_level=3",
             "# cython: boundscheck=False",
-            "# cython: wraparound=True", # Volte para True para evitar avisos de [-1]
+            "# cython: wraparound=True",
             "# cython: cdivision=True",
+            "# cython: initializedcheck=False",
             "import sys, os, json, struct",
-            "from libc.stdint cimport int64_t",
+            "from libc.stdint cimport int64_t, uint8_t",
             "",
-            # Definição única da classe _Stub
             "class _Stub:",
             "    def __getattr__(self, _): return _Stub()",
-            "    def __call__(self, *a, **kw): return _Stub()"
-        ]
-
-        pyx_lines.append("\n# --- NEXUS NATIVE KERNELS (Tier 1 Elite) ---")
-        pyx_lines.append("cdef extern nogil:")
-        pyx_lines.append("    int64_t nexus_raw_search(const unsigned char* haystack, long h_len, const unsigned char* needle, long n_len)")
-        pyx_lines.append("    long nexus_asm_popcount(long value)")
+            "    def __call__(self, *a, **kw): return _Stub()",
+            "",
+            "Fore = _Stub()",
+            "Style = _Stub()",
+            "Back = _Stub()"
+        ])
 
         for name in self.blacklist:
-            pyx_lines.append(f"{name} = _Stub()")
-       
-        pyx_lines.append(_STUB_HEADER)
+            if name not in {'Fore', 'Style', 'Back'}:
+                pyx_lines.append(f"{name} = _Stub()")
 
-        if needs_nexus_math:
-            # Localiza o caminho absoluto do kernel no Core do Doxoade
-            import doxoade.tools.vulcan as v_mod
-            kernel_path = os.path.join(os.path.dirname(v_mod.__file__), 'nexus_math.c')
-            kernel_path = kernel_path.replace("\\", "/") # Normaliza para o Cython
-            
-            pyx_lines.append("\n# --- NATIVE KERNEL LINK (Tier 1) ---")
-            # O SEGREDO: Usamos o caminho absoluto. O GCC não terá como errar.
-            pyx_lines.append(f"cdef extern from '{kernel_path}' nogil:")
-            pyx_lines.append("    int nexus_encode_varint_branchless(unsigned long n, unsigned char* out)")
-
-        pyx_lines.append("class _Stub:\n    def __getattr__(self, _): return _Stub()\n    def __call__(self, *a, **kw): return _Stub()")
+        # 3. Injeção de Stubs Única (Evita Redundância)
+        pyx_lines.append("class _Stub:")
+        pyx_lines.append("    def __getattr__(self, _): return _Stub()")
+        pyx_lines.append("    def __call__(self, *a, **kw): return _Stub()")
         
-        # Injeta os fantasmas para as libs de UI
-        for name in stub_targets.union(self.blacklist):
+        # Coleta nomes para stubbing dinâmico
+        stub_targets = set(self.blacklist)
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                mod = getattr(node, 'module', '') or ''
+                if mod in self.blacklist or any(n.name in self.blacklist for n in node.names):
+                    for alias in node.names:
+                        stub_targets.add(alias.asname or alias.name)
+
+        for name in stub_targets:
             pyx_lines.append(f"{name} = _Stub()")
 
+        # 4. Linkagem de Kernels de Elite (C, ASM e NOGIL)
+        # Usamos aspas duplas para o extern from, o Cython lida melhor com isso
+        pyx_lines.append('\n# --- NEXUS NATIVE KERNELS (Tier 1 Elite) ---')
+        pyx_lines.append('cdef extern from "nexus_asm.h" nogil:')
+        pyx_lines.append('    int64_t nexus_asm_cmov(int64_t selector, int64_t val_true, int64_t val_false)')
+        pyx_lines.append('    long nexus_asm_popcount(long value)')
+        pyx_lines.append('    int64_t nexus_asm_vec_search(const uint8_t* buf, int64_t len, int64_t target)')
+        
+        pyx_lines.append('\ncdef extern from "nexus_kernels.h" nogil:')
+        pyx_lines.append('    int64_t nexus_raw_search(const uint8_t* h, int64_t hl, const uint8_t* n, int64_t nl)')
+        pyx_lines.append('    void nexus_path_normalize(char* path)')
+        pyx_lines.append('    const char* nexus_get_filename(const char* path)')
+
+        # 5. Transformação de Corpo
         optimized_functions = []
         for node in tree.body:
             if isinstance(node, ast.FunctionDef):
+                if node.name in NATIVE_KERNELS:
+                    continue 
                 optimized_functions.append(node.name)
                 pyx_lines.append(self._forge_node(node))
             elif isinstance(node, ast.ClassDef):
@@ -350,52 +409,131 @@ class VulcanForge:
                         pyx_lines.append(self._forge_node(sub, indent="    "))
                     else:
                         pyx_lines.append("    " + ast.unparse(sub).replace("\n", "\n    "))
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                # Pula imports que já viraram stubs
+                is_black = hasattr(node, 'module') and node.module in self.blacklist
+                if not is_black:
+                    pyx_lines.append(ast.unparse(node))
             else:
-                # Pula imports originais que estão na blacklist
-                if isinstance(node, (ast.Import, ast.ImportFrom)):
-                    if hasattr(node, 'module') and node.module in self.blacklist: continue
                 pyx_lines.append(ast.unparse(node))
 
+        # 6. Sincronia de Assinatura
         pyx_lines.append("\n# --- INTERNAL NEXUS LINKS ---")
         for func_name in optimized_functions:
             pyx_lines.append(f"{func_name} = {func_name}_vulcan_optimized")
 
+        node_count = sum(1 for _ in ast.walk(tree))
+        self.last_node_count = node_count 
+
         return "\n".join(pyx_lines)
 
+    def _optimize_branchless(self, node):
+        """
+        Detecta ternários: x = val_a if condition else val_b
+        E converte para: x = nexus_asm_cmov(condition, val_a, val_b)
+        """
+        if isinstance(node, ast.IfExp):
+            # Apenas para tipos compatíveis com 64-bit (inteiros/bools)
+            return ast.Call(
+                func=ast.Name(id='nexus_asm_cmov', ctx=ast.Load()),
+                args=[node.test, node.body, node.orelse],
+                keywords=[]
+            )
+        return node
+
     def _forge_node(self, node, indent=""):
+        """Orquestrador de Tradução: Decisões de Nível 1 (Nativo) e Nível 2 (Híbrido)."""
         name = node.name if indent else f"{node.name}_vulcan_optimized"
         hot_vars = self._identify_hot_vars(node)
         
-        # Bloqueia tipagem de argumentos e nomes reservados
+        # 1. Preparação de Argumentos
         forbidden = {'kwargs', 'args', 'self', 'cls'}
         arg_names = {a.arg for a in node.args.args}
         if node.args.vararg: arg_names.add(node.args.vararg.arg)
         if node.args.kwarg: arg_names.add(node.args.kwarg.arg)
 
-        class InternalCallFixer(ast.NodeTransformer):
-            def __init__(self, locals): self.locals = locals
-            def visit_Call(self, n):
-                if isinstance(n.func, ast.Name) and n.func.id in self.locals:
-                    # Redireciona para a versão otimizada se estiver no mesmo módulo
-                    n.func.id = f"{n.func.id}_vulcan_optimized"
+        # 2. Transformação de Lógica (Branchless)
+        class BranchlessTransformer(ast.NodeTransformer):
+            def _is_numeric_constant(self, n):
+                """Verifica se o valor é compatível com o CMOV de hardware."""
+                if isinstance(n, ast.Constant):
+                    # Somente números e booleanos cabem no registrador do ASM
+                    return isinstance(n.value, (int, bool, float))
+                return False
+
+            def visit_IfExp(self, n):
+                # SÓ transforma em ASM se ambos os lados forem numéricos
+                if self._is_numeric_constant(n.body) and self._is_numeric_constant(n.orelse):
+                    return ast.Call(
+                        func=ast.Name(id='nexus_asm_cmov', ctx=ast.Load()),
+                        args=[n.test, n.body, n.orelse],
+                        keywords=[]
+                    )
+                # Se for string (como no analysis.py), mantém o ternário original do Python
                 return n
+        
+        node = BranchlessTransformer().visit(node)
 
-        # Aplica a correção antes de dar unparse
-        fixer = InternalCallFixer(self._local_funcs)
-        node = fixer.visit(node)
-
-        # Limpeza de anotações complexas
+        # 3. Limpeza de Metadados Python
         for arg in node.args.args: arg.annotation = None
         node.returns = None
-
         args_str = ast.unparse(node.args)
         
+        # 4. Caso Especial: Varint (Bypass Total)
         if node.name == "encode_varint":
-            return "\n".join([f"{indent}def {name}(long n):", f"{indent}    cdef unsigned char[10] buf", f"{indent}    cdef int length = nexus_encode_varint_branchless(n, buf)", f"{indent}    return bytearray(buf[:length])"])
+            return "\n".join([
+                f"{indent}def {name}(long n):", 
+                f"{indent}    cdef unsigned char[10] buf", 
+                f"{indent}    cdef int length = nexus_encode_varint_branchless(n, buf)", 
+                f"{indent}    return bytearray(buf[:length])"
+            ])
 
+        # 5. DETECÇÃO DE BUSCA ATÔMICA (Identificação antes da geração)
+        is_search_loop = False
+        for child in ast.walk(node):
+            if isinstance(child, ast.Compare):
+                if isinstance(child.left, ast.Subscript):
+                    is_search_loop = True
+                    break
+
+        # 6. Geração de Código Especializado (NOGIL Atomic Search)
+        if is_search_loop and len(node.args.args) >= 2:
+            arg_data = node.args.args[0].arg
+            arg_pat = node.args.args[1].arg
+            
+            # [INTELIGÊNCIA DEhardware] Decide se usa SIMD (1 byte) ou Memmem (N bytes)
+            # Nota: Esta decisão ocorre em tempo de transpilação!
+            # Se não pudermos determinar o tamanho agora, o código gerado fará o check no C.
+            
+            search_code = [
+                f"{indent}def {name}({args_str}):",
+                f"{indent}    cdef long pos = -1",
+                f"{indent}    cdef const uint8_t* ptr_data = <const uint8_t*> {arg_data}", # Cast explícito
+                f"{indent}    cdef long len_data = len({arg_data})",
+                f"{indent}    cdef const uint8_t* ptr_pat = <const uint8_t*> {arg_pat}", # Cast explícito
+                f"{indent}    cdef long len_pat = len({arg_pat})",
+                f"{indent}    with nogil:",
+                f"{indent}        if len_pat == 1:",
+                # Usamos a desreferência direta de ponteiro C para evitar o GIL
+                f"{indent}            pos = nexus_asm_vec_search(ptr_data, len_data, <int64_t>ptr_pat[0])",
+                f"{indent}        else:",
+                f"{indent}            pos = nexus_raw_search(ptr_data, len_data, ptr_pat, len_pat)",
+                f"{indent}    return pos"
+            ]
+            return "\n".join(search_code)
+
+        # 7. Caso Geral (Python Híbrido Otimizado)
+        scanner = BodyPurityScanner()
+        scanner.visit(node)
+        is_nogil_candidate = scanner.is_pure_c and not any(arg.arg in {'self', 'cls'} for arg in node.args.args)
+        
         code = [f"{indent}def {name}({args_str}):"]
+        
+        if is_nogil_candidate:
+            code.append(f"{indent}    with nogil:")
+            indent += "    "
+            
         if hot_vars:
-            code.append(f"{indent}    # --- VULCAN HOT VARS ---")
             for var, ctype in hot_vars.items():
                 if var not in arg_names and var not in forbidden:
                     code.append(f"{indent}    cdef {ctype} {var}")
@@ -404,6 +542,7 @@ class VulcanForge:
             if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant): continue
             line = ast.unparse(stmt).replace("\n", "\n" + indent + "    ")
             code.append(f"{indent}    {line}")
+            
         return "\n".join(code)
 
     def _forge_function(self, node):
@@ -455,19 +594,26 @@ class SmartEnricher(ast.NodeVisitor):
     def __init__(self):
         self.vars_to_type = {} # nome -> tipo C
 
+    def visit_For(self, node):
+        # Sempre que virmos um 'for i in range', o 'i' deve ser C puro.
+        if isinstance(node.target, ast.Name):
+            self.vars_to_type[node.target.id] = "Py_ssize_t" 
+        self.generic_visit(node)
+
     def visit_FunctionDef(self, node):
         # 1. Heurística de Nomes (Padrão de Engenharia)
         integers = {'n', 'i', 'j', 'k', 'idx', 'count', 'size', 'length', 'offset', 'delta', 'attempt', 'retries'}
+        # Variáveis de loop e tentativa (Sempre Ints de C)
+        infra_counters = {'attempt', 'retries', 'attempt_no', 'timeout', 'returncode', 'step'}
         
-        # Analisa Argumentos
+        # 2. Modificação na visitação
         for arg in node.args.args:
-            if arg.arg.lower() in integers:
-                self.vars_to_type[arg.arg] = "long"
+            if arg.arg.lower() in infra_counters:
+                self.vars_to_type[arg.arg] = "int" # Usa int de C puro
 
         # 2. Varredura de Atribuições
         for child in ast.walk(node):
             if isinstance(child, ast.Assign):
-                # Se x = 0 ou x = 1, tratamos como long
                 if isinstance(child.value, ast.Constant) and type(child.value.value) is int:
                     for target in child.targets:
                         if isinstance(target, ast.Name):

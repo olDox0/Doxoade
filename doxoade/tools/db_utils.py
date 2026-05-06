@@ -6,6 +6,8 @@ Resolve o gargalo de latência (Hot Line) via Async Buffer Pattern.
 import threading
 import queue
 import os
+import sys
+import hashlib
 _LOG_QUEUE = queue.Queue()
 _WORKER_THREAD = None
 _STOP_EVENT = threading.Event()
@@ -55,10 +57,8 @@ def stop_persistence_worker():
         _WORKER_THREAD.join(timeout=3.0)
         _WORKER_THREAD = None
 
-def _log_execution(command_name, path, results, arguments, execution_time_ms, exit_code=0):
-    """
-    Sincroniza o log com a tabela command_history (Protocolo Chronos).
-    """
+def _log_execution(command_name, path, results, arguments, execution_time_ms, exit_code=0, payload=None):
+    """Gravador Mestre: Sincroniza Findings (Events) e Timeline (History)."""
     start_persistence_worker() 
     
     from datetime import datetime, timezone
@@ -69,32 +69,29 @@ def _log_execution(command_name, path, results, arguments, execution_time_ms, ex
     _ts = datetime.now(timezone.utc).isoformat()
     _p_abs = os.path.abspath(path)
     _session = uuid.uuid4().hex
-    
-    # Consolida metadados para a coluna system_info
-    sys_info_dict = {
-        "args": arguments,
-        "summary": results.get('summary', {}),
-        "shell": os.environ.get('SHELL', 'cmd.exe' if os.name == 'nt' else 'unknown')
-    }
-    _sys_info = json.dumps(sys_info_dict)
+    _full_cmd = "doxoade " + " ".join(sys.argv[1:])
 
-    # Query para a tabela command_history (a que o timeline realmente lê)
-    _query = '''
-        INSERT INTO command_history 
-        (session_uuid, timestamp, command_name, full_command_line, working_dir, exit_code, duration_ms, system_info)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    # 1. Grava na tabela EVENTS (Para o sistema de Findings/History)
+    # Retornamos o ID para que o findings_arena ou logger possa associar
+    _query_events = '''
+        INSERT INTO events (timestamp, doxoade_version, command, project_path, execution_time_ms, status)
+        VALUES (?, ?, ?, ?, ?, ?)
     '''
+    _params_events = (_ts, "85.2", command_name, _p_abs, execution_time_ms, "completed")
     
-    # Tenta capturar a linha de comando completa do sistema
-    _full_cmd = " ".join(sys.argv)
-    
-    _params = (
-        _session, _ts, command_name, _full_cmd, 
-        _p_abs, exit_code, execution_time_ms, _sys_info
-    )
-    
-    # Envia para a fila de persistência do Hades
-    _LOG_QUEUE.put((_query, _params))
+    # 2. Grava na tabela COMMAND_HISTORY (Para a Timeline/Arqueologia)
+    _query_hist = '''
+        INSERT INTO command_history 
+        (session_uuid, timestamp, command_name, full_command_line, working_dir, 
+         exit_code, duration_ms, system_info, compressed_payload)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    '''
+    _sys_info = json.dumps({"args": arguments, "summary": results.get('summary', {})})
+    _params_hist = (_session, _ts, command_name, _full_cmd, _p_abs, exit_code, execution_time_ms, _sys_info, payload)
+
+    # Envia ambos para a fila de persistência
+    _LOG_QUEUE.put((_query_events, _params_events))
+    _LOG_QUEUE.put((_query_hist, _params_hist))
 
 def _update_open_incidents(findings, project_path):
     """

@@ -109,6 +109,7 @@ class DoxoadeLazyGroup(click.Group):
         'terminal': 'doxoade.commands.shell_systems.shell_cmd:terminal', 
         'termux-config': 'doxoade.commands.termux_command:termux_config', 'test': 'doxoade.commands.test:test', 
         'timeline': 'doxoade.commands.timeline:timeline', 
+        'vault': 'doxoade.commands.vault_cmd:vault_group',
         'venvkeeper': 'doxoade.commands.venvkeeper_systems.venvkeeper:venvkeeper', 
         'venv': 'doxoade.commands.venv_cmd:venv_cmd',#        'venv-up': 'doxoade.commands.venv_up:venv_up', 
         'verilog': 'doxoade.commands.verilog:verilog', 

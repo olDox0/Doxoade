@@ -1,117 +1,63 @@
 # doxoade/doxoade/commands/history.py
 import click
-import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
-import os
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.database import get_db_connection
-from doxoade.tools.display import _format_timestamp
-from doxoade.tools.telemetry_tools.logger import ExecutionLogger
+from datetime import datetime, timezone  # <--- ADICIONE ESTA LINHA
+import doxoade.tools.aegis.nexus_db as sqlite3 # noqa
 
-def _render_context(content, target_line, context_lines, header_title, header_color):
-    """Renderiza um bloco de código com destaque."""
-    click.echo(f'\n{header_color}--- {header_title} ---{Style.RESET_ALL}')
-    if not content:
-        click.echo(f'{Style.DIM}(Conteúdo não disponível){Style.RESET_ALL}')
-        return
-    lines = content.splitlines()
-    if not lines:
-        return
-    t_line = target_line if target_line and target_line > 0 else 1
-    start = max(0, t_line - context_lines - 1)
-    end = min(len(lines), t_line + context_lines)
-    for i in range(start, end):
-        line_num = i + 1
-        prefix = ' >> ' if line_num == t_line else '    '
-        if line_num == t_line:
-            line_style = header_color + Style.BRIGHT
+def _format_local_timestamp(ts_str: str) -> str:
+    """Detecta o fuso horário do sistema e converte o carimbo UTC do banco."""
+    if not ts_str:
+        return ""
+    try:
+        clean_ts = ts_str.replace('Z', '+00:00')
+        if '+' not in clean_ts and '-' not in clean_ts[10:]:
+            dt_utc = datetime.fromisoformat(clean_ts).replace(tzinfo=timezone.utc)
         else:
-            line_style = Fore.WHITE + Style.DIM
-        click.echo(f'{line_style}{prefix}{line_num:4}: {lines[i]}{Style.RESET_ALL}')
+            dt_utc = datetime.fromisoformat(clean_ts)
+        dt_local = dt_utc.astimezone()
+        return dt_local.strftime('%Y-%m-%d %H:%M:%S')
+    except Exception:
+        return ts_str[:19].replace('T', ' ')
 
 @click.command('history')
-@click.pass_context
-@click.option('--hash', 'finding_hash', help='Filtra por hash específico.')
-@click.option('--message', '-m', help='Filtra por texto na mensagem.')
-@click.option('--file', '-f', help='Filtra por nome de arquivo.')
-@click.option('--category', '-c', help='Filtra por categoria (ex: SYNTAX, SECURITY, DEADCODE).')
-@click.option('--limit', '-n', default=20, help='Quantidade de resultados.')
-@click.option('--context', default=3, help='Linhas de contexto de código.')
-@click.option('--unsolved', is_flag=True, help='Mostra incidentes ABERTOS (O problema atual) em vez de soluções.')
-def history(ctx, finding_hash, message, file, category, limit, context, unsolved):
-    """
-    Inteligência Forense: Consulta histórico de soluções e incidentes ativos.
-    """
-    with ExecutionLogger('history', '.', ctx.params) as logger:
-        conn = get_db_connection()
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        if unsolved:
-            table = 'open_incidents'
-            date_col = 'timestamp'
-            title_mode = 'INCIDENTE ATIVO (PROBLEMA)'
-            color_mode = Fore.RED
-        else:
-            table = 'solutions'
-            date_col = 'timestamp'
-            title_mode = 'SOLUÇÃO APRENDIDA (RESOLVIDO)'
-            color_mode = Fore.GREEN
-        table_map = {'unsolved': 'open_incidents', 'solved': 'solutions'}
-        table = table_map.get('unsolved' if unsolved else 'solved')
-        query = f'SELECT * FROM {table} WHERE 1=1'
-        params = []
-        if finding_hash:
-            query += ' AND finding_hash LIKE ?'
-            params.append(f'%{finding_hash}%')
-        if message:
-            query += ' AND message LIKE ?'
-            params.append(f'%{message}%')
-        if file:
-            query += ' AND file_path LIKE ?'
-            params.append(f'%{file}%')
-        if category and 'category' in [i[1] for i in cursor.execute(f'PRAGMA table_info({table})')]:
-            query += ' AND category LIKE ?'
-            params.append(f'%{category}%')
-        query += f' ORDER BY {date_col} DESC LIMIT ?'
-        params.append(limit)
-        try:
-            cursor.execute(query, params)
-            results = cursor.fetchall()
-            if not results:
-                click.echo(Fore.YELLOW + 'Nenhum registro encontrado para os filtros aplicados.')
-                return
-            click.echo(Fore.CYAN + f"--- Encontrados {len(results)} registros em '{table}' ---")
-            for row in results:
-                f_hash = row['finding_hash']
-                msg = row['message']
-                f_path = row['file_path']
-                line = row['line'] if 'line' in row.keys() else row['error_line'] if 'error_line' in row.keys() else 0
-                cat = row['category'] if 'category' in row.keys() else 'UNKNOWN'
-                ts = _format_timestamp(row[date_col])
-                click.echo(Style.BRIGHT + f'\n[{title_mode}]')
-                click.echo(f'  Mensagem:  {Fore.WHITE}{msg}{Style.RESET_ALL}')
-                click.echo(f'  Categoria: {Fore.CYAN}{cat}{Style.RESET_ALL}')
-                click.echo(f'  Arquivo:   {Fore.YELLOW}{f_path}:{line}{Style.RESET_ALL}')
-                click.echo(f'  Hash:      {Style.DIM}{f_hash}{Style.RESET_ALL}')
-                click.echo(f'  Data:      {ts}')
-                code_content = ''
-                header_text = ''
-                if unsolved:
-                    if os.path.exists(f_path):
-                        try:
-                            with open(f_path, 'r', encoding='utf-8', errors='ignore') as f:
-                                code_content = f.read()
-                            header_text = 'Estado Atual (Com Erro)'
-                        except Exception:
-                            code_content = '(Erro ao ler arquivo do disco)'
-                    else:
-                        code_content = '(Arquivo não encontrado no disco)'
-                else:
-                    code_content = row['stable_content']
-                    header_text = 'Estado Estável (Pós-Correção)'
-                _render_context(code_content, line, context, header_text, color_mode)
-                click.echo(Fore.MAGENTA + '-' * 60 + Style.RESET_ALL)
-        except Exception as e:
-            logger.add_finding('ERROR', 'Falha na query forense.', details=str(e))
-            click.echo(Fore.RED + f'Erro SQL/Lógica: {e}')
-        finally:
-            conn.close()
+@click.option('-m', '--message', help='Busca no erro.')
+@click.option('-n', '--limit', default=10)
+def history(message, limit):
+    """🧠 Hub de Inteligência: Busca erros e soluções no registro Nexus."""
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    query = '''
+        SELECT f.*, e.command, e.timestamp 
+        FROM findings f 
+        JOIN events e ON f.event_id = e.id 
+        WHERE 1=1
+    '''
+    params = []
+    if message:
+        query += " AND (f.message LIKE ? OR f.category LIKE ?)"
+        params.extend([f"%{message}%", f"%{message}%"])
+    
+    query += " ORDER BY e.timestamp DESC LIMIT ?"
+    params.append(limit)
+    
+    rows = cursor.execute(query, params).fetchall()
+    
+    if not rows:
+        click.secho("\n[-] Nenhuma evidência encontrada no histórico findings.", fg='yellow')
+        return
+
+    click.secho(f"\n--- 🧠 MEMÓRIA SEMÂNTICA ({len(rows)} registros) ---", fg='cyan', bold=True)
+    
+    for r in rows:
+        sev = r['severity'].upper()
+        color = Fore.RED if sev in ['ERROR', 'CRITICAL'] else Fore.YELLOW
+        
+        # CONVERSÃO PARA FUSO HORÁRIO LOCAL
+        local_ts = _format_local_timestamp(r.get('timestamp', ''))
+        
+        click.echo(f"\n{Style.DIM}{local_ts} {color}■ [{r['category']}] {r['message']}")
+        click.echo(f"   {Fore.WHITE}Comando: {Fore.CYAN}doxoade {r['command']}")
+        click.echo(f"   {Fore.WHITE}Local:   {Fore.YELLOW}{r['file']}:{r['line']}")

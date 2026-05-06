@@ -199,45 +199,75 @@ def _extract_memory_stats(snapshot, target_file: str, project_root: str, limit: 
             break
     return {'peak_mb': 0.0, 'top_allocs': top}
 
-def run_debug(script_path: str):
+def run_debug(script_path, mode='debug', args=None):
+    import shlex
+    import os
+    import sys
+    import json
+    import traceback
+    import types
+
     abs_path = os.path.abspath(script_path)
-    pkg_name, _ = _resolve_package(abs_path)
+    # Detecta se é o wrapper de comando interno do Doxoade
+    is_internal = "command_wrapper.py" in script_path.replace('\\', '/')
+    
     debug_data = {'status': 'unknown', 'variables': {}, 'error': None}
-    globs = {'__name__': '__main__', '__file__': abs_path, '__package__': pkg_name}
+    globs = {'__name__': '__main__', '__file__': abs_path}
+    
     try:
-        sys.stdout.write('\n--- BOOTING AEGIS SANDBOX ---\n')
+        sys.stdout.write(f'\n--- BOOTING AEGIS SANDBOX [{"INTERNAL" if is_internal else "FILE"}] ---\n')
         sys.stdout.flush()
-        with open(abs_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        restricted_safe_exec(content, globs, allow_imports=True)
+
+        if is_internal:
+            # --- MODO INTERNO (SELF-DEBUG) ---
+            os.environ['DOXOADE_DISABLE_VULCAN'] = '1'
+            os.environ['VULCAN_DISABLE_LIB_BIN'] = '1'
+            
+            from doxoade.cli import cli
+            cmd_args = shlex.split(args) if args else []
+            
+            # Patch do sys.argv para o Click interno ler os comandos corretamente
+            old_argv = sys.argv.copy()
+            sys.argv = ['doxoade'] + cmd_args
+            
+            try:
+                # Executa o CLI do Doxoade. Como o profiler está ativo no processo pai, 
+                # ele capturará todo o custo de CPU/RAM daqui para baixo.
+                cli(standalone_mode=False) 
+            finally:
+                sys.argv = old_argv
+        else:
+            # --- MODO NORMAL (SCRIPT EXTERNO) ---
+            with open(abs_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            restricted_safe_exec(content, globs, allow_imports=True)
+
         debug_data['status'] = 'success'
         debug_data['variables'] = _capture_locals(globs)
-        for k, v in globs.items():
-            if not k.startswith('__') and (not isinstance(v, types.ModuleType)):
-                try:
-                    debug_data['variables'][k] = safe_serialize(v)
-                except Exception as exc:
-                    import logging as _log
-                    _log.error(f'[INFRA] run_debug: {exc}')
+
     except Exception as e:
-        import sys as exc_sys
-        from traceback import print_tb as exc_trace
-        _, exc_obj, exc_tb = exc_sys.exc_info()
-        print(f'\x1b[31m ■ Exception type: {e} ■ Exception value: {exc_obj}\n')
-        exc_trace(exc_tb)
+        # Relatório Forense em caso de Crash
+        exc_type, exc_obj, exc_tb = sys.exc_info()
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print(f'\x1b[31m ■ Exception type: {type(e).__name__} ■ Archive: {fname} ■ Line: {exc_tb.tb_lineno}\n')
+        
         debug_data['status'] = 'error'
         debug_data['error'] = str(e)
-        _, _, tb = sys.exc_info()
-        while tb.tb_next:
-            tb = tb.tb_next
-        frame = tb.tb_frame
         debug_data['traceback'] = traceback.format_exc()
-        debug_data['line'] = tb.tb_lineno
-        for k, v in frame.f_locals.items():
-            if not k.startswith('__'):
-                debug_data['variables'][k] = safe_serialize(v)
+        debug_data['line'] = exc_tb.tb_lineno
+        
+        # Tenta capturar variáveis do frame onde ocorreu o erro
+        tb = exc_tb
+        while tb.tb_next: tb = tb.tb_next
+        frame = tb.tb_frame
+        debug_data['variables'] = _capture_locals(frame.f_locals)
+
+    # Transmite o dossiê JSON para o processo pai (CLI)
     print('\n---DOXOADE-DEBUG-DATA---')
-    print(json.dumps(debug_data, ensure_ascii=False))
+    sys.stdout.write(f"\n{_MARKER_DEBUG}\n") # Use a constante definida no topo ou a string direta
+    sys.stdout.write(json.dumps(debug_data, ensure_ascii=False))
+    sys.stdout.write("\n")
+    sys.stdout.flush()
 
 def run_profile(script_path: str):
     abs_path = os.path.abspath(script_path)

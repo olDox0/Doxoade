@@ -2,90 +2,83 @@
 import zlib
 import json
 import click
+from datetime import datetime, timezone  # <--- ADICIONE ESTA LINHA
 
 from doxoade.tools.doxcolors   import Fore, Style
 from doxoade.tools.aegis.vault import NexusVault
 from doxoade.database          import get_db_connection
-
 import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
 
-#@click.command('timeline')
-#@click.option('--unlock', prompt=True, hide_input=True, help="Senha do Cofre Nexus")
-#def timeline(unlock):
-#    if not verify_vault(unlock):
-#        click.secho(" [!] Acesso Negado: Senha do Cofre Incorreta.", fg='red')
-#        return
-#    # Prossegue com a descompactação e exibição...
-
-if NexusVault.is_unlocked():
-    # Mostra os dados detalhados, descompacta o payload, etc.
-    render_full_payload(d['compressed_payload'])
-else:
-    # Mostra apenas que os dados estão protegidos
-    click.echo(f"   {Style.DIM}[🔒 PAYLOAD PROTEGIDO - Use 'doxoade vault --open']{Style.RESET_ALL}")
+def _format_local_timestamp(ts_str: str) -> str:
+    """Detecta o fuso horário do sistema e converte o carimbo UTC do banco."""
+    if not ts_str:
+        return ""
+    try:
+        # Normaliza o sufixo Z para o padrão ISO offsets (+00:00)
+        clean_ts = ts_str.replace('Z', '+00:00')
+        # Se não houver indicador de fuso, assume que está gravado em UTC
+        if '+' not in clean_ts and '-' not in clean_ts[10:]:
+            dt_utc = datetime.fromisoformat(clean_ts).replace(tzinfo=timezone.utc)
+        else:
+            dt_utc = datetime.fromisoformat(clean_ts)
+        
+        # O SEGREDO: astimezone() sem argumentos converte automaticamente para o fuso local do OS!
+        dt_local = dt_utc.astimezone()
+        return dt_local.strftime('%Y-%m-%d %H:%M:%S')
+    except Exception:
+        # Fallback de segurança em caso de string corrompida
+        return ts_str[:19].replace('T', ' ')
 
 @click.command('timeline')
 @click.option('-n', '--limit', default=10, help='Número de eventos.')
-@click.option('--full', is_flag=True, help='Mostra o diff completo das alterações.')
+@click.option('--full', is_flag=True, help='Mostra os detalhes do Payload.')
 def timeline(limit, full):
     """Exibe o histórico cronológico de ações e alterações."""
     conn = get_db_connection()
-    # PASC-8.7: Uso obrigatório de Row Factory para integridade de colunas
     conn.row_factory = sqlite3.Row 
-    cursor = conn.cursor()
+    events = conn.execute('SELECT * FROM command_history ORDER BY id DESC LIMIT ?', (limit,)).fetchall()
     
-    cursor.execute('SELECT * FROM command_history ORDER BY id DESC LIMIT ?', (limit,))
-    events = cursor.fetchall()
-    
-    click.echo(Fore.CYAN + Style.BRIGHT + f'--- Timeline do Doxoade (Últimos {limit}) ---')
+    click.echo(f"{Fore.CYAN}{Style.BRIGHT}--- Timeline do Doxoade (Últimos {limit}) ---{Style.RESET_ALL}")
     
     for d in reversed(events):
-        # Agora o acesso é por NOME, independente da ordem no banco
-        exit_code = d['exit_code']
-        duration = d['duration_ms']
-        payload_raw = d.get('compressed_payload')
+        ev = dict(d)
+        status_color = Fore.GREEN if ev['exit_code'] == 0 else Fore.RED
         
-        click.echo(f"\n{Style.DIM}{d['timestamp'][:19]} {status_color}{status_icon} {Style.BRIGHT}{d['command_name']}")
-        click.echo(f"{Style.DIM}   Tempo: {Fore.WHITE}{duration:.0f}ms")
+        # CONVERSÃO PARA FUSO HORÁRIO LOCAL
+        local_ts = _format_local_timestamp(ev.get('timestamp', ''))
         
-        # Se houver dados compactados e a flag --full estiver ativa
-        if full and payload_raw:
-            try:
-                # Descompactação On-the-fly
-                decompressed = zlib.decompress(payload_raw)
-                data = json.loads(decompressed)
-                
-                # Exibe Achados (Findings)
-                findings = data['output'].get('findings', [])
-                if findings:
-                    click.echo(f"   {Fore.CYAN}Achados: {len(findings)} ocorrência(s)")
-                    for f in findings[:5]: # Mostra os 5 primeiros
-                        click.echo(f"     - [{f['severity']}] {f['message'][:60]}")
-                
-                # Exibe Detalhes do Input
-                args = data['input'].get('args', {})
-                if args:
-                    clean_args = {k: v for k, v in args.items() if v}
-                    click.echo(f"   {Fore.YELLOW}Inputs: {clean_args}")
-                    
-            except Exception as e:
-                click.echo(f"   {Fore.RED}Erro ao ler payload: {e}")
-        
-        status_color = Fore.GREEN if exit_code == 0 else Fore.RED
-        status_icon = '✔' if exit_code == 0 else '✘'
-        
-        click.echo(f"\n{Style.DIM}{d['timestamp'][:19]} {status_color}{status_icon} {Style.BRIGHT}{d['command_name']}")
-        click.echo(f"{Style.DIM}   Dir: {d['working_dir']}")
-        click.echo(f"{Style.DIM}   Tempo: {Fore.WHITE}{duration:.0f}ms")
-        
-        # LINHA 39 CORRIGIDA:
-        cursor.execute('SELECT * FROM file_audit WHERE command_id = ?', (d['id'],))
-        changes = cursor.fetchall()
-        if changes:
-            for change in changes:
-                op_color = Fore.YELLOW if change['operation_type'] == 'MODIFY' else Fore.GREEN
-                click.echo(f"   {op_color}[{change['operation_type']}] {change['file_path']}")
-                if full and change['diff_content']:
-                    diff_view = '\n'.join(['      ' + l for l in change['diff_content'].splitlines()])
-                    click.echo(Fore.WHITE + Style.DIM + diff_view)
+        click.echo(f"\n{Style.DIM}{local_ts} {status_color}● {Style.BRIGHT}{ev['command_name']}")
+        if ev.get('full_command_line'):
+            click.echo(f"   {Fore.WHITE}❯ {ev['full_command_line']}{Style.RESET_ALL}")
+            
+        if full:
+            _render_payload_details(ev)
     conn.close()
+
+def _render_payload_details(ev):
+    payload_raw = ev.get('compressed_payload')
+    if not payload_raw:
+        click.echo(f"   {Style.DIM}Status: Registro de telemetria simples.{Style.RESET_ALL}")
+        return
+
+    if not NexusVault.is_unlocked():
+        click.echo(f"   {Fore.YELLOW}🔒 [PAYLOAD PROTEGIDO] Use 'doxoade vault --open'{Style.RESET_ALL}")
+        return
+
+    try:
+        data = json.loads(zlib.decompress(payload_raw))
+        args = data.get('input', {}).get('args', {})
+        if args:
+            clean_args = {k:v for k,v in args.items() if v is not None and v is not False}
+            if clean_args:
+                click.echo(f"   {Fore.YELLOW}Inputs: {clean_args}")
+        
+        findings = data.get('output', {}).get('findings', [])
+        if findings:
+            click.echo(f"   {Fore.CYAN}Achados: {len(findings)} ocorrência(s)")
+            for f in findings[:3]:
+                click.echo(f"     - [{f['severity']}] {f['message'][:70]}")
+        else:
+            click.echo(f"   {Fore.GREEN}Status: Operação limpa (Zero incidentes).{Style.RESET_ALL}")
+    except Exception as e:
+        click.echo(f"   {Fore.RED}Erro na leitura: {e}")

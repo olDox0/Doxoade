@@ -110,16 +110,18 @@ def _forge_to_pyx(task: dict) -> dict:
     import traceback
     import hashlib
     import re
+    import ast
+    import time
+    import sys
     from pathlib import Path
     from .forge import VulcanForge as VForge, assess_file_for_vulcan as AFVul
-    import time
-    t_start = time.perf_counter()
     
+    t_start = time.perf_counter()
     file_path = Path(task['file_path'])
     foundry = Path(task['foundry'])
     abs_path = file_path.resolve()
     
-    # Gerador de Assinatura Única
+    # Gerador de Assinatura Única (Doxoade Standard)
     path_hash = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
     _safe_stem = re.sub('[^a-zA-Z0-9_]', '_', abs_path.stem)
     module_name = f'v_{_safe_stem}_{path_hash}'
@@ -128,72 +130,66 @@ def _forge_to_pyx(task: dict) -> dict:
     # 1. Check de Elegibilidade
     eligible, reason = AFVul(str(abs_path))
     if not eligible:
-        return {
-            'ok': False, 
-            'skip': True, 
-            'file': str(file_path), 
-            'module_name': module_name, 
-            'err': f'pulado: {reason}'
-        }
+        return {'ok': False, 'skip': True, 'file': str(file_path), 'err': f'pulado: {reason}'}
 
-    pyx_ok = False
     try:
-        # 2. Forja do Código Nativo (Tier 1)
+        # 2. Análise de Carga AST
+        with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
+            tree = ast.parse(f.read())
+        node_count = sum(1 for _ in ast.walk(tree))
+        
+        # LOG LIVE: Informa o início do processamento deste arquivo específico
+        sys.stdout.write(f"   [FORGE] {file_path.name:<25} | Densidade: {node_count:>4} nodes...")
+        sys.stdout.flush()
+
+        # 3. Forja do Código Nativo (Tier 1)
         forge = VForge(str(abs_path))
         pyx_code = forge.generate_source(str(abs_path))
-        if pyx_code:
-            pyx_path.write_text(pyx_code, encoding='utf-8')
-            pyx_ok = True
-    except Exception as e:
-        # --- CORREÇÃO: ok deve ser FALSE aqui ---
-        error_detail = traceback.format_exc() 
-        return {
-            'ok': False, # <--- MUDADO PARA FALSE
-            'module_name': module_name,
-            'err': str(e), 
-            'traceback': error_detail,
-            'name': file_path.name,
-            'file_path': str(file_path)
-        }
+        
+        if not pyx_code:
+             return {'ok': False, 'file': str(file_path), 'err': 'pyx_code vazio'}
 
-    # 3. Geração da Camada de Fallback (Tier 2 - Python Otimizado)
-    try:
-        from doxoade.tools.vulcan.opt_cache import generate_opt_py
-        project_root_str = task.get('project_root')
-        if project_root_str:
-            project_root = Path(project_root_str)
-        else:
-            # Auto-ancoragem de root se não fornecido
+        pyx_path.write_text(pyx_code, encoding='utf-8')
+        
+        # 4. Geração do Fallback (Tier 2) - Python Otimizado
+        # Tenta localizar o root se não fornecido para o opt_cache
+        project_root = task.get('project_root')
+        if not project_root:
             cur = abs_path.parent
-            project_root = None
             while cur != cur.parent:
                 if (cur / '.doxoade' / 'vulcan').exists():
-                    project_root = cur
-                    break
+                    project_root = cur; break
                 cur = cur.parent
-        
-        if project_root:
-            generate_opt_py(project_root, abs_path)
-    except Exception:
-        pass # Tier 2 é opcional, se falhar o Tier 3 assume
 
-    # 4. Resultado Final da Missão
-    if not pyx_ok:
+        if project_root:
+            try:
+                from doxoade.tools.vulcan.opt_cache import generate_opt_py
+                generate_opt_py(Path(project_root), abs_path)
+            except: pass
+
+        duration_ms = (time.perf_counter() - t_start) * 1000
+        
+        # Completa a linha de log com o tempo
+        sys.stdout.write(f" [{duration_ms:.1f}ms]\n")
+        sys.stdout.flush()
+
         return {
-            'ok': False, # <--- MUDADO PARA FALSE
+            'ok': True, 
             'file': str(file_path), 
             'module_name': module_name, 
-            'err': 'pyx_code vazio'
+            'nodes': node_count,
+            'forge_ms': duration_ms
         }
-        
-    duration_ms = (time.perf_counter() - t_start) * 1000
-    return {
-        'ok': True, 
-        'file': str(file_path), 
-        'module_name': module_name, 
-        'pyx_path': str(pyx_path),
-        'forge_ms': duration_ms # <--- INJEÇÃO DO DADO REAL
-    }
+
+    except Exception as e:
+        sys.stdout.write(f" [ERRO]\n")
+        return {
+            'ok': False, 
+            'module_name': module_name,
+            'err': str(e), 
+            'traceback': traceback.format_exc(),
+            'file': str(file_path)
+        }
 
 def _batch_setup_content(entries: list[dict], extra_args: list[str], nthreads: int) -> str:
     """
@@ -664,41 +660,52 @@ class PitstopEngine:
         compile_results = self._phase_batch_compile(ready, n_workers, compiler)
         stats['compile_time'] = round(time.perf_counter() - t_compile, 3)
 
-        # --- RELATÓRIO DE GARGALOS (O Coração do Diagnóstico) ---
-        print(f"\n{Fore.CYAN}{Style.BRIGHT}🔬 ANALISE DE GARGALOS VULCAN (PER-MODULE):{Style.RESET_ALL}")
-        header = f"{'MÓDULO':<25} │ {'FORGE':>7} │ {'TRANS':>7} │ {'LINK':>7} │ {'TOTAL'}"
+        # --- MAPA DA DOR VULCAN V4 (Industrial) ---
+        print(f"\n{Fore.CYAN}{Style.BRIGHT}🌡️  MAPA DE CALOR: CUSTO DE FUNDIÇÃO (N2808){Style.RESET_ALL}")
+        header = f"{'MÓDULO':<25} │ {'NODES':>6} │ {'TRANS':>8} │ {'LINK':>8} │ {'VELOCIDADE'}"
         print(header)
-        print("─" * 65)
+        print("─" * 70)
 
-        for entry in ready:
+        # Ordenamos pela "dor" total (TRANS + LINK)
+        sorted_ready = sorted(ready, key=lambda x: (
+            compiler.detailed_telemetry.get(x['module_name'], {}).get('transpile_ms', 0) +
+            compiler.detailed_telemetry.get(x['module_name'], {}).get('link_ms', 0)
+        ), reverse=True)
+
+        for entry in sorted_ready:
             name = entry['module_name']
-            file_path = entry['file']
-            
-            # Agora 'compiler' existe neste escopo!
+            file_ptr = entry.get('file', 'desconhecido') 
             m = compiler.detailed_telemetry.get(name, {})
+            
+            nodes = entry.get('nodes', 0)
             f_ms = entry.get('forge_ms', 0)
             t_ms = m.get('transpile_ms', 0)
-            l_ms = m.get('link_ms', 0)
-            total_ms = f_ms + t_ms + l_ms
+            l_ms = m.get('link_ms', 0) # Se falhou, será 0 ou o tempo até a falha
             
-            color = Fore.RED if total_ms > 30000 else Fore.WHITE
+            total_s = (f_ms + t_ms + l_ms) / 1000
+            v_fundicao = (nodes / total_s) if total_s > 0 else 0
+
+            # Exibição do Mapa de Calor
+            color = Fore.WHITE
+            if total_s > 30: color = Fore.RED + Style.BRIGHT
+            elif total_s > 10: color = Fore.YELLOW
+            v_color = Fore.GREEN if v_fundicao > 100 else Fore.RED
+
             print(f"{color}{name[:25]:<25}{Style.RESET_ALL} │ "
-                  f"{f_ms:6.0f}ms │ {t_ms:6.0f}ms │ {l_ms:6.0f}ms │ "
-                  f"{Fore.YELLOW}{total_ms/1000:6.1f}s{Fore.RESET}")
+                  f"{nodes:6d} │ {t_ms:7.0f}ms │ {l_ms:7.0f}ms │ "
+                  f"{v_color}{v_fundicao:5.1f} n/s{Fore.RESET}")
             
-            # Processamento de resultados
+            # --- PROCESSAMENTO HONESTO DE RESULTADOS ---
             res_pair = compile_results.get(name)
             ok = res_pair[0] if res_pair else False
             err = res_pair[1] if res_pair else "Falha na fundição"
 
             if ok:
                 stats['success'] += 1
-                self.cache.mark_compiled(file_path)
+                self.cache.mark_compiled(file_ptr) # Sincronizado
             else:
                 stats['failed'] += 1
-                self.cache.invalidate(file_path)
-                if on_result:
-                    on_result(file_path, False, err)
+                self.cache.invalidate(file_ptr) # Invalida se o GCC falhou
 
         stats['total_time'] = round(time.perf_counter() - t_start, 3)
         self.cache.save()
@@ -858,18 +865,22 @@ class PitstopEngine:
         print(f"   {Fore.CYAN}🚀 [WARP DRIVE] Fundindo {len(ready)} binários em {max_linkers} núcleos...{Fore.RESET}")
         
         with ThreadPoolExecutor(max_workers=max_linkers) as executor:
-            # Iniciamos as threads de linkagem usando o objeto centralizado
             future_to_mod = {executor.submit(compiler._run_gcc_direct, r['module_name']): r['module_name'] for r in ready}
             
             with click.progressbar(length=len(ready), label='  [VULCAN:LINK ]') as bar:
-                for future in as_completed(future_to_mod):
-                    mod_name = future_to_mod[future]
-                    try:
-                        ok = future.result()
-                        results[mod_name] = (ok, None if ok else "Falha no GCC")
-                    except Exception as e:
-                        results[mod_name] = (False, str(e))
-                    bar.update(1)
+                # [MUDANÇA] Em vez de as_completed puro, usamos um loop com timeout
+                while future_to_mod:
+                    for future in list(future_to_mod.keys()):
+                        if future.done():
+                            mod_name = future_to_mod.pop(future)
+                            try:
+                                ok = future.result()
+                                results[mod_name] = (ok, None if ok else "Falha no GCC")
+                            except Exception as e:
+                                results[mod_name] = (False, str(e))
+                            bar.update(1)
+                    # [VITAL] Sleep de 50ms evita que o CPU fique em 100% apenas esperando
+                    time.sleep(0.05)
                     
         return results
 

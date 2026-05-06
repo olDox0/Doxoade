@@ -126,31 +126,40 @@ class HybridBenchmark:
         if py_module is None:
             result.functions.append(FunctionBenchResult(file_name=py_file.name, func_name='<module>', status='ERROR', error='falha ao carregar módulo Python'))
             return result
+            
         cy_module, load_err = self._load_binary(binary)
         if cy_module is None:
             result.functions.append(FunctionBenchResult(file_name=py_file.name, func_name='<binary>', status='ERROR', error=f'falha ao carregar {binary.name}: {load_err[:200]}'))
             return result
-        for attr_name in dir(py_module):
-            if not hasattr(cy_module, attr_name):
-                try:
-                    setattr(cy_module, attr_name, getattr(py_module, attr_name))
-                except (AttributeError, TypeError):
-                    pass
-        _common_injections = {'Path': __import__('pathlib').Path, 'os': __import__('os'), 're': __import__('re'), 'ast': __import__('ast'), 'json': __import__('json'), 'sys': __import__('sys')}
-        for _k, _v in _common_injections.items():
-            if not hasattr(cy_module, _k):
-                try:
-                    setattr(cy_module, _k, _v)
-                except (AttributeError, TypeError):
-                    pass
-        cy_funcs = {name.replace('_vulcan_optimized', ''): getattr(cy_module, name) for name in dir(cy_module) if name.endswith('_vulcan_optimized') and callable(getattr(cy_module, name))}
+
+        # Identificação de funções otimizadas
+        cy_funcs = {name.replace('_vulcan_optimized', ''): getattr(cy_module, name) 
+                   for name in dir(cy_module) 
+                   if name.endswith('_vulcan_optimized') and callable(getattr(cy_module, name))}
+
         for orig_name, cy_func in cy_funcs.items():
             py_func = getattr(py_module, orig_name, None)
             if py_func is None or not callable(py_func):
-                result.functions.append(FunctionBenchResult(file_name=py_file.name, func_name=orig_name, status='NO_BINARY', error='função Python não encontrada no módulo original'))
                 continue
-            bench = self._bench_pair(py_file.name, orig_name, py_func, cy_func)
-            result.functions.append(bench)
+
+            try:
+                # Tenta executar o par de funções
+                bench = self._bench_pair(py_file.name, orig_name, py_func, cy_func)
+                result.functions.append(bench)
+            except Exception as e:
+                import traceback
+                # --- O QUE VOCÊ PEDIU: INFORMAÇÃO DETALHADA ---
+                print(f"\n{Fore.RED}🚨 [DEBUG INTERNO: BENCHMARK]{Style.RESET_ALL}")
+                print(f"Falha na função: {Fore.CYAN}{orig_name}{Fore.RESET}")
+                print(f"{Fore.YELLOW}Rastro do Erro:{Style.RESET_ALL}")
+                print(traceback.format_exc()) # Cospe o erro real na tela
+                
+                result.functions.append(FunctionBenchResult(
+                    file_name=py_file.name, func_name=orig_name, 
+                    status='WARMUP_FAIL', error=str(e)
+                ))
+                continue
+
         return result
 
     def _bench_pair(self, file_name: str, func_name: str, py_func: Callable, cy_func: Callable) -> FunctionBenchResult:
@@ -244,9 +253,9 @@ class HybridBenchmark:
         e nomes simples (v_filesystem_ad611b.pyd / .so).
         Usa glob para encontrar qualquer variante — solução para Windows.
         """
-        abs_path = py_file.resolve()
-        path_hash = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
-        stem = abs_path.stem
+        abs_path = str(py_file.resolve()).replace("\\", "/")
+        path_hash = hashlib.sha256(abs_path.encode()).hexdigest()[:6]
+        stem = py_file.stem
         prefix = f'v_{stem}_{path_hash}'
         if not self.bin_dir.exists():
             return None
@@ -525,6 +534,11 @@ class FunctionProber:
     """
     _SAMPLE_CODE = "import os\nimport sys\ndef hello(name: str) -> str:\n    return f'hello {name}'\nclass Foo:\n    def __init__(self):\n        self.x = 0\n    def bar(self, n):\n        total = 0\n        for i in range(n):\n            total += i\n        return total\n"
     _SAMPLE_FINDINGS = [{'severity': 'WARNING', 'category': 'UNUSED', 'message': 'unused var x', 'file': 'test.py', 'line': 10, 'finding_hash': 'abc123'}, {'severity': 'ERROR', 'category': 'SYNTAX', 'message': 'invalid syntax', 'file': 'test.py', 'line': 20, 'finding_hash': 'def456'}]
+    NATIVE_RESERVED = {
+        'nexus_asm_cmov', 'nexus_asm_popcount', 
+        'nexus_raw_search', 'nexus_path_normalize', 'nexus_get_filename'
+    }
+
 
     def generate_fixture(self, func: Callable) -> tuple:
         """
@@ -546,79 +560,135 @@ class FunctionProber:
             args.append(self._infer_arg(p.name, p.annotation, p.default))
         return tuple(args)
 
-    def _infer_arg(self, name: str, annotation, default) -> Any:
+    def _infer_arg(self, param_name, name=None, annotation=None, default=None) -> Any:
         """Infere valor adequado pelo nome do parâmetro."""
-        import inspect
-        if default is not inspect.Parameter.empty:
-            return default
         import inspect as _insp
+        import ast
+        from pathlib import Path
+        
+        if _insp.isclass(annotation):
+            ann_str = annotation.__name__.lower()
+        else:
+            ann_str = str(annotation).lower()
+        
+        if default is not None and default is not _insp.Parameter.empty: return default
+        
+        p_name = str(param_name).lower()
+        n_name = str(name).lower() if name else p_name
+        
+        if p_name in {'iterations', 'n', 'count', 'total', 'limit', 'retries', 'size', 'len', 'length'}:
+            return 1000 # Valor numérico seguro
+            
+        ann_str = ""
+        if annotation:
+            if _insp.isclass(annotation):
+                ann_str = annotation.__name__.lower()
+            else:
+                ann_str = str(annotation).lower()
+
+        if 'bytes' in ann_str or p_name in {'data', 'pattern', 'buf', 'buffer'}:
+            # Retorna um buffer real para o teste de hardware não falhar
+            return b"nexus_test_sample_data_standard_buffer_elite"
+
+        # 4. Mocks de Objetos Complexos (Corrigida Indentação)
+        if 'state' in p_name or 'state' in ann_str:
+            return type('MockState', (), {
+                'findings': [], 'summary': {}, 
+                'register_finding': lambda *a: None,
+                'sync_summary': lambda *a: None
+            })()
+        
+        if p_name in ('tree', 'node', 'module', 'func_node', 'func'):
+            return ast.parse("def mock(): pass").body[0]
+            
+        if p_name == 'state' or 'state' in str(annotation).lower():
+            return type('MockState', (), {'findings': [], 'summary': {}, 'register_finding': lambda *a: None})()
+        
+#        if p_name in ('tree', 'node', 'module', 'func_node'):
+#            return ast.parse("def mock(): pass").body[0]
+            
         n = name.lower()
 
         def _ann_class_name(ann) -> str:
-            if ann is _insp.Parameter.empty or ann is None:
-                return ''
-            if isinstance(ann, type):
-                return ann.__name__
+            if ann is _insp.Parameter.empty or ann is None: return ''
+            if isinstance(ann, type): return ann.__name__
             s = str(ann).strip().strip('\'"<>')
             return s.split('.')[-1].strip('\'"<> ')
         ann_name = _ann_class_name(annotation)
+        
         if n == 'state' or ann_name in ('CheckState',):
             try:
                 state_obj = type('CheckState', (), {'root': '.', 'target_path': '.', 'target_files': [], 'findings': list(self._SAMPLE_FINDINGS), 'alb_files': [], 'summary': {'errors': 1, 'warnings': 1, 'critical': 0}, 'is_full_power': False, 'clones_active': False, 'register_finding': lambda self_inner, f: self_inner.findings.append(f), 'sync_summary': lambda self_inner: None})()
                 state_obj.findings = list(self._SAMPLE_FINDINGS)
                 return state_obj
-            except Exception:
-                pass
-        if n in ('tree', 'node', 'module'):
-            return ast.parse(self._SAMPLE_CODE)
+            except Exception: pass
+            
+        if n in ('tree', 'node', 'module'): return ast.parse(self._SAMPLE_CODE)
+        
         if 'func_node' in n or n == 'func':
-            tree = ast.parse(self._SAMPLE_CODE)
-            for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef):
-                    return node
+            import ast
             return ast.parse('def f(): pass').body[0]
+            
         if n in ('content', 'source', 'code', 'text', 'pyx_code', 'pyx_source'):
             return self._SAMPLE_CODE
+            
         if n in ('file_path', 'path', 'src', 'filename', 'file'):
             return __file__
+            
         if n in ('findings', 'items', 'results', 'all_findings'):
             return list(self._SAMPLE_FINDINGS)
+            
         if n in ('lines', 'content_lines', 'file_lines'):
             return self._SAMPLE_CODE.splitlines()
+            
         if n in ('templates',):
             return []
+            
         if n in ('line_number', 'lineno', 'line', 'line_num'):
             return 5
+            
         if n in ('context_lines', 'context'):
             return 2
+            
         if n in ('complexity', 'hits', 'count', 'n', 'size'):
             return 10
+            
         if n in ('is_test_mode', 'allow_imports', 'force', 'show_code'):
             return False
+            
         if n in ('project_root', 'project_path', 'root_path'):
             return str(Path(__file__).resolve().parents[3])
+            
         if n in ('taint_map', 'tainted', 'imports'):
             return {'x': 'input', 'y': 'sys.argv'}
+            
         if 'config' in n or n.endswith('_cfg') or n.endswith('_conf'):
             return {'ignore_patterns': [], 'extensions': ['.py'], 'exclude_dirs': [], 'max_file_size': 1048576, 'project_root': str(Path(__file__).resolve().parents[0])}
+            
         if n in ('ignore_patterns', 'patterns'):
             return []
+            
         if n in ('extensions', 'exts'):
             return ['.py']
+            
         if n in ('exclude_dirs', 'skip_dirs'):
             return []
+            
         if n.endswith(('_name', '_key', '_label', '_tag', '_id', '_slug')):
             return 'sample'
-        if annotation == str:
-            return ''
-        if annotation == int:
-            return 0
-        if annotation == bool:
-            return False
-        if annotation == list:
-            return []
-        if annotation == dict:
-            return {}
+            
+        if 'int'   in ann_str: return 0
+        if 'float' in ann_str: return 0.0
+#        if 'bytes' in ann_str: return b"nexus_sample_data"
+        if 'bytes' in ann_str or p_name in {'data', 'pattern', 'buf', 'buffer'}:
+            return b"nexus_test_buffer_sample_data"
+        if 'str'   in ann_str: return "nexus_sample_text"
+        if 'list'  in ann_str: return []
+        if 'dict'  in ann_str: return {}
+        
+        if p_name in {'data', 'pattern', 'buf', 'buffer'}:
+            return b"nexus_test_buffer_data"
+            
         return None
 
 def _speedup_bar(speedup: float) -> str:

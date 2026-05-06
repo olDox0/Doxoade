@@ -22,24 +22,20 @@ class CheckIO:
         from doxoade.dnm import DNM
         return DNM(self.target_abs).scan(extensions=['py', 'c', 'cpp', 'h', 'hpp'])
 
-    def load_cache(self) -> Dict:
-        if not self.cache_file.is_file():
+    def load_cache(self) -> dict:
+        """Carrega o banco de dados de escaneamentos anteriores."""
+        if not self.cache_file.exists():
             return {}
         try:
             with open(self.cache_file, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except Exception:
-            return {}
+        except: return {}
 
-    def save_cache(self, data: Dict):
-        if not data:
-            return
-        try:
-            self.cache_dir.mkdir(exist_ok=True)
-            with open(self.cache_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2)
-        except Exception:
-            pass
+    def save_cache(self, data: dict):
+        """Persiste os resultados para o próximo check."""
+        self.cache_dir.mkdir(exist_ok=True)
+        with open(self.cache_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f)
 
     def get_file_metadata(self, fp: str) -> tuple:
         try:

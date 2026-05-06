@@ -89,27 +89,52 @@ class VulcanCompiler:
 
     def transpile_batch(self, modules_list):
         import time
+        import os
+        import shutil
+        import click
         from Cython.Build import cythonize
+        from pathlib import Path
         
-        t0 = time.perf_counter()
+        # 1. Setup de Ambiente
+        project_root = Path(self.env.root).resolve()
+        native_dir = project_root / "doxoade" / "tools" / "vulcan" / "native"
         foundry_path = self.env.foundry.resolve()
+        
+        # Injeção de Headers OMEGA
+        for h_file in native_dir.glob("*.h"):
+            shutil.copy2(h_file, foundry_path / h_file.name)
+
         sources = [str(foundry_path / f"{m}.pyx") for m in modules_list]
         
+        t_start = time.perf_counter()
+        click.echo(f"   [LINK] Iniciando Metalurgia em {len(modules_list)} módulos...")
+        
         try:
-            cythonize(sources, nthreads=2, quiet=True, 
-                      compiler_directives={'language_level': "3", 'boundscheck': False, 'wraparound': True})
+            # Mostra cada kernel sendo enviado para o GCC/MSVC
+            for m in modules_list:
+                click.echo(f"     ⚙️  Vincular: {m}")
+                
+            # Execução do núcleo Cython
+            cythonize(
+                sources, 
+                nthreads=os.cpu_count() or 2, 
+                quiet=True, 
+                include_path=[str(foundry_path)], 
+                compiler_directives={'language_level': "3", 'boundscheck': False, 'wraparound': True}
+            )
             
-            # --- CÁLCULO DE TELEMETRIA ---
-            duration_ms = (time.perf_counter() - t0) * 1000
+            duration_ms = (time.perf_counter() - t_start) * 1000
             avg_ms = duration_ms / len(modules_list)
             
             for m in modules_list:
-                # Injeta a média do Cython para cada arquivo no dicionário de telemetria
                 self.detailed_telemetry.setdefault(m, {})['transpile_ms'] = avg_ms
                 
+            click.secho(f"   ✔ Sucesso: Lote finalizado em {duration_ms/1000:.2f}s", fg='green')
             return True
+
         except Exception as e:
-            print(f"   {Fore.RED}✘ Erro no Cython: {e}{Fore.RESET}")
+            from doxoade.tools.error_info import handle_error
+            handle_error(e, context="transpile_batch", debug=True)
             return False
 
     def _ensure_pch(self):
@@ -274,42 +299,95 @@ class VulcanCompiler:
 
         return success
         
+    def _prepare_native_objects(self):
+        """Compila os kernels para arquivos objeto (.o) uma única vez."""
+        native_dir = Path(self.env.root) / "doxoade" / "tools" / "vulcan" / "native"
+        obj_dir = self.env.foundry / "static_objs"
+        obj_dir.mkdir(exist_ok=True)
+        
+        core_c = native_dir / "nexus_kernels.c"
+        core_s = native_dir / "nexus_asm.s"
+        
+        c_obj = obj_dir / "nexus_kernels.o"
+        s_obj = obj_dir / "nexus_asm.o"
+
+        # Compila C e ASM para objeto (sem linkar)
+        if not c_obj.exists():
+            subprocess.run(f'gcc -O3 -c "{core_c}" -o "{c_obj}"', shell=True)
+        if not s_obj.exists():
+            subprocess.run(f'gcc -c "{core_s}" -o "{s_obj}"', shell=True)
+            
+        return c_obj, s_obj
+
+    def _prepare_static_lib(self):
+        """Fundição Suprema: Cria a biblioteca libnexus.a (Industrial)."""
+        import subprocess
+        native_dir = Path(self.env.root) / "doxoade" / "tools" / "vulcan" / "native"
+        foundry_path = self.env.foundry.resolve()
+        lib_file = foundry_path / "libnexus.a"
+        
+        if not lib_file.exists():
+            print(f"   {Fore.YELLOW}📦 Forjando Biblioteca Estática Nexus...{Fore.RESET}")
+            # 1. Compila C e ASM para objetos .o
+            subprocess.run(f'gcc -O3 -c "{native_dir / "nexus_kernels.c"}" -o "{foundry_path / "k.o"}"', shell=True)
+            subprocess.run(f'gcc -c "{native_dir / "nexus_asm.s"}" -o "{foundry_path / "a.o"}"', shell=True)
+            
+            # 2. Funde os objetos em um Archive (.a)
+            # O utilitário 'ar' é o bibliotecário do GCC
+            subprocess.run(f'ar rcs "{lib_file}" "{foundry_path / "k.o"}" "{foundry_path / "a.o"}"', shell=True)
+            
+        return lib_file
+
     def _run_gcc_direct(self, module_name: str) -> bool:
         import subprocess
         import time
-        t_start = time.perf_counter() # Inicia o sensor imediatamente
-        t0 = time.perf_counter()
+        t_start = time.perf_counter()
+        
         c_file = self.env.foundry / f"{module_name}.c"
         obj_file = self.env.bin_dir / f"{module_name}.pyd"
         
-        # Localização dos Kernels de Elite
-        native_dir = Path(__file__).parent / "native"
-        core_c = native_dir / "nexus_kernels.c"
-        core_s = native_dir / "nexus_asm.s"
-#        core_c = native_dir / "nexus_core.c"
-#        warp_s = native_dir / "warp_math.s"
+        # 1. Garante que os metais estáticos (.a) existam
+        self._prepare_static_lib()
+        lib_path = (self.env.foundry / "libnexus.a").resolve()
+        
+        # 2. Inteligência de Carga (Otimização para o N2808)
+        # Trocamos -O3 por -O2 (Muito menos RAM) e -Os para infra (Rápido)
+        is_infra = any(x in module_name for x in ['compiler', 'pitstop', 'forge', 'benchmark', 'probe', 'optimizer'])
+        opt_level = '-Os' if is_infra else '-O2'
 
-        # COMANDO DE FUNDIÇÃO HÍBRIDA (C + ASM + CYTHON)
+        # 3. Construtor de Comando de Baixo Consumo
+        # ggc-min-expand=5 e ggc-min-heapsize=16384 forçam o GCC a limpar a RAM 
+        # assim que o uso sobe 5%, mantendo o consumo abaixo de 100MB por thread.
         cmd = [
-            'gcc', '-O3', '-shared', '-g',
-            f'-I{self.py_include}',
-            f'-L{self.py_libs}',
-            f'"{str(c_file)}"',      # Cython Transpiled
-            f'"{str(core_c)}"',      # C Pure Kernel
-            f'"{str(core_s)}"',      # Assembly SSE4.2 Kernel
-            '-o', f'"{str(obj_file)}"',
-            self.py_link_lib, '-Wall'
+            'gcc', opt_level, '-shared', '-g',
+            '--param', 'ggc-min-expand=5',
+            '--param', 'ggc-min-heapsize=16384',
+            f'-I"{str(self.env.foundry).replace("\\", "/")}"',
+            f'-I"{str(Path(self.env.root)/"doxoade/tools/vulcan/native").replace("\\", "/")}"',
+            f'-I"{self.py_include.replace("\\", "/")}"',
+            f'-L"{self.py_libs.replace("\\", "/")}"',
+            f'"{str(c_file).replace("\\", "/")}"',
+            f'"{str(lib_path).replace("\\", "/")}"', # Linkagem direta do arquivo físico
+            '-o', f'"{str(obj_file).replace("\\", "/")}"',
+            self.py_link_lib, 
+            '-Wall'
         ]
+
         try:
-            res = subprocess.run(" ".join(cmd), capture_output=True, text=True, shell=True)
+            # shell=True é vital aqui para o Windows ler o PATH corretamente
+            res = subprocess.run(" ".join(cmd), capture_output=True, text=True, encoding='utf-8', errors='replace', shell=True)
+            
             elapsed = (time.perf_counter() - t_start) * 1000
             self.detailed_telemetry.setdefault(module_name, {})['link_ms'] = elapsed
             
             if res.returncode != 0:
-                print(f"\n{Fore.RED}✘ Erro no GCC ({module_name}): {res.stderr}...{Fore.RESET}")
+                print(f"\n{Fore.RED}✘ Falha no Linker ({module_name}):{Fore.RESET}")
+                # Se falhar no Python.h, mostramos o diagnóstico do sistema
+                if "Python.h" in res.stderr:
+                    print(f"   {Fore.YELLOW}[!] DICA: Verifique se o Python development headers está instalado.{Fore.RESET}")
+                print(res.stderr)
                 return False
             return True
         except Exception as e:
-            # Garante que mesmo em crash de sistema, o tempo (mesmo que 0) seja registrado
             self.detailed_telemetry.setdefault(module_name, {})['link_ms'] = 0
             return False

@@ -46,36 +46,43 @@ class ExecutionLogger:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Finaliza a execução e sela o log com tempo e exit_code reais."""
+        import json
+        import zlib
+        
         execution_time_ms = (time.monotonic() - self.start_time) * 1000
         
-        # Determina o status real da execução
         exit_code = 0
         if exc_type is not None:
             if issubclass(exc_type, SystemExit):
                 exit_code = exc_val.code if hasattr(exc_val, 'code') else 0
             else:
-                exit_code = 1 # Crash por exceção
+                exit_code = 1
                 self.add_finding('CRITICAL', f'Crash: {exc_type.__name__}', details=str(exc_val))
 
+        # --- GERAÇÃO DE PAYLOAD CHIEF-GOLD ---
+        compressed_payload = None
         try:
-            # Importação dinâmica para suporte Core/Silo
-            try:
-                from doxoade.tools.db_utils import _log_execution, stop_persistence_worker
-            except ImportError:
-                from .db_utils import _log_execution, stop_persistence_worker
+            payload_data = {
+                "input": {"args": self.arguments},
+                "output": {
+                    "summary": self.results['summary'],
+                    "findings": self.results['findings'][:100] # Limite para evitar DB gigante
+                }
+            }
+            raw_payload = json.dumps(payload_data, ensure_ascii=False).encode('utf-8')
+            compressed_payload = zlib.compress(raw_payload)
+        except Exception: pass
 
-            # Gravação de Ouro
+        try:
+            from doxoade.tools.db_utils import _log_execution, stop_persistence_worker
+            # Envia para o banco
             _log_execution(
                 self.command_name, self.path, self.results, 
-                self.arguments, execution_time_ms, exit_code=exit_code
+                self.arguments, execution_time_ms, 
+                exit_code=exit_code, payload=compressed_payload
             )
-            
-            # PASC-8.4: Garante que o SQLite finalize a escrita antes do CLI morrer
             stop_persistence_worker()
-            
-        except Exception:
-            pass # Proteção para não quebrar o fluxo principal em falhas de log
+        except Exception: pass
 
         if not self.is_json_output:
             from doxoade.tools.doxcolors import Fore, Style

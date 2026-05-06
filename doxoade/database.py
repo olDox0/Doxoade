@@ -13,7 +13,7 @@ from pathlib import Path
 import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
 
 DB_FILE = Path.home() / '.doxoade' / 'doxoade.db'
-DB_VERSION = 19
+DB_VERSION = 120
 
 def get_db_connection():
     """Mantida Original: Abre conexão persistente com Row Factory."""
@@ -137,9 +137,12 @@ def init_db():
             _m_v15_chronos(cursor)
         if current_version < 19:
             _m_v19_payloads(cursor)
+        if current_version < 20:
+            _m_v20_nexus_vault(cursor)
         _apply_incremental_patches(cursor, current_version)
         cursor.execute('DELETE FROM schema_version;')
         cursor.execute('INSERT INTO schema_version (version) VALUES (?);', (DB_VERSION,))
+        cursor.execute('ALTER TABLE command_history ADD COLUMN compressed_payload BLOB;')
         conn.commit()
         click.echo(f'✅ Banco de dados sincronizado (Versão {DB_VERSION}).')
     finally:

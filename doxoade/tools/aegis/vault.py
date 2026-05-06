@@ -1,7 +1,7 @@
 import hashlib
 import os
 from datetime import datetime, timedelta
-from ..database import get_db_connection
+from doxoade.database import get_db_connection
 
 class NexusVault:
     @staticmethod
@@ -35,19 +35,23 @@ class NexusVault:
     @staticmethod
     def is_unlocked():
         """Verifica se o cofre está aberto no momento."""
-        conn = get_db_connection()
-        # Se não houver senha definida, está sempre "aberto"
-        has_pwd = conn.execute("SELECT 1 FROM vault_config WHERE key='master_pwd'").fetchone()
-        if not has_pwd: return True
-        
-        session = conn.execute("SELECT unlocked_until FROM vault_session").fetchone()
-        if not session: return False
-        
-        if session['unlocked_until'] == "NEVER": return True
-        
-        # Verifica se expirou
-        expiry = datetime.fromisoformat(session['unlocked_until'])
-        return datetime.now() < expiry
+        try:
+            conn = get_db_connection()
+            # Se não houver senha definida, está sempre "aberto"
+            has_pwd = conn.execute("SELECT 1 FROM vault_config WHERE key='master_pwd'").fetchone()
+            if not has_pwd: return True
+            
+            session = conn.execute("SELECT unlocked_until FROM vault_session").fetchone()
+            if not session: return False
+            
+            if session['unlocked_until'] == "NEVER": return True
+            
+            # Verifica se expirou
+            expiry = datetime.fromisoformat(session['unlocked_until'])
+            return datetime.now() < expiry
+        except sqlite3.OperationalError:
+            # Se a tabela não existe, o sistema ainda não foi protegido.
+            return True
 
     @staticmethod
     def lock():
