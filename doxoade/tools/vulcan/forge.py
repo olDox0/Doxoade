@@ -84,6 +84,10 @@ def assess_file_for_vulcan(file_path: str) -> tuple[bool, str | None]:
 class BodyPurityScanner(ast.NodeVisitor):
     """Analista de Segurança Estrita: Protege o GIL contra código de logística."""
     def __init__(self):
+        self.score = 100
+        self.details = []
+        self.c_calls = 0
+        self.py_objs = 0
         self.is_pure_c = True
         # Nódulos que SEMPRE exigem o interpretador Python (GIL)
         self.forbidden_nodes = (
@@ -106,6 +110,17 @@ class BodyPurityScanner(ast.NodeVisitor):
     def visit_Call(self, node):
         # Praticamente qualquer chamada de função Python exige GIL
         self.is_pure_c = False
+        func_name = ""
+        if isinstance(node.func, ast.Name):
+            func_name = node.func.id
+        
+        if func_name.startswith('nexus_'):
+            self.c_calls += 1
+            self.details.append(f"   [+] Kernel Nativo: {func_name} (Otimização Tier 1)")
+        else:
+            self.py_objs += 1
+            self.score -= 5
+            self.details.append(f"   [-] Chamada Python: {func_name} (Causa overhead de GIL)")
         self.generic_visit(node)
 
     def visit_Attribute(self, node):
@@ -118,6 +133,67 @@ class BodyPurityScanner(ast.NodeVisitor):
         if node.value and not isinstance(node.value, ast.Num):
             if not (isinstance(node.value, ast.Constant) and isinstance(node.value.value, (int, float))):
                 self.is_pure_c = False
+        self.generic_visit(node)
+
+    def get_purity_report(self):
+        bonus = self.c_calls * 10
+        malus = self.py_objs * 5
+        final_score = min(100, max(0, 50 + bonus - malus))
+        rank = "LIXO"
+        color = "\x1b[31m" # Vermelho
+        if self.score > 90: rank = "ADAMANTIUM"; color = "\x1b[35m" # Magenta
+        elif self.score > 75: rank = "AÇO VALIRIANO"; color = "\x1b[34m" # Azul
+        elif self.score > 50: rank = "BRONZE"; color = "\x1b[33m" # Amarelo
+        
+        return {
+            'score': max(0, self.score),
+            'rank': rank,
+            'color': color,
+            'details': self.details
+        }
+
+class VulcanAutoTyper(ast.NodeVisitor):
+    """Motor Hefesto v3.1: Unificado e Blindado."""
+    def __init__(self, hot_names):
+        self.suggestions = {} 
+        self.hot_names = hot_names
+
+    def visit_FunctionDef(self, node):
+        args = {arg.arg for arg in node.args.args}
+        if node.args.vararg: args.add(node.args.vararg.arg)
+        if node.args.kwarg: args.add(node.args.kwarg.arg)
+        
+        promoted = {} 
+        for child in ast.walk(node):
+            if isinstance(child, ast.For) and isinstance(child.target, ast.Name):
+                var = child.target.id
+                is_range = (isinstance(child.iter, ast.Call) and 
+                            getattr(child.iter.func, 'id', '') == 'range')
+                if is_range and var not in args and var != "self":
+                    promoted[var] = "int"
+            
+            if isinstance(child, ast.Assign) and isinstance(child.value, ast.Constant):
+                for target in child.targets:
+                    if isinstance(target, ast.Name):
+                        var = target.id
+                        if var not in args and var != "self" and var not in promoted:
+                            val = child.value.value
+                            if isinstance(val, bool): continue
+                            if isinstance(val, int) or var in self.hot_names:
+                                promoted[var] = "long"
+        
+        self.suggestions[node.name] = promoted
+        self.generic_visit(node)
+
+class PurityMeter(ast.NodeVisitor):
+    """Calcula a nota de metalurgia do código."""
+    def __init__(self):
+        self.py_calls = 0
+        self.c_kernels = 0
+    def visit_Call(self, node):
+        name = ast.unparse(node.func)
+        if 'nexus_' in name: self.c_kernels += 1
+        else: self.py_calls += 1
         self.generic_visit(node)
 
 class VulcanForge:
@@ -330,15 +406,26 @@ class VulcanForge:
         p = Path(file_path)
         raw_source = p.read_text(encoding='utf-8', errors='ignore')
         
-        # 1. Extração Estrita de Future Imports
+        # 1. Extração de Future Imports
         future_imports = re.findall(r'^(from\s+__future__\s+import\s+.+)$', raw_source, re.M)
         clean_source = re.sub(r'^(from\s+__future__\s+import\s+.+)$', '', raw_source, flags=re.M)
         
         tree = ast.parse(clean_source)
+        
+        # [HEFESTO] Análise Preventiva
+        typer = VulcanAutoTyper(self.hot_names)
+        typer.visit(tree)
+        meter = PurityMeter()
+        meter.visit(tree)
+        
         self._local_funcs = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
         
-        # 2. Ordem de Ouro do Cabeçalho (PASC-Compliant)
+        # 2. Cabeçalho de Performance Máxima
         pyx_lines = []
+        p_score = 100 - (meter.py_calls * 5) + (meter.c_kernels * 10)
+        p_score = max(0, min(100, p_score))
+        pyx_lines.append(f"# VULCAN_PURITY_SCORE: {p_score}")
+        
         if future_imports:
             pyx_lines.extend(future_imports)
             
@@ -346,30 +433,18 @@ class VulcanForge:
             "# cython: language_level=3",
             "# cython: boundscheck=False",
             "# cython: wraparound=True",
-            "# cython: cdivision=True",
-            "# cython: initializedcheck=False",
             "import sys, os, json, struct",
-            "from libc.stdint cimport int64_t, uint8_t",
             "",
             "class _Stub:",
             "    def __getattr__(self, _): return _Stub()",
             "    def __call__(self, *a, **kw): return _Stub()",
             "",
-            "Fore = _Stub()",
-            "Style = _Stub()",
+            "Fore = _Stub()", # Sempre injeta Fore
+            "Style = _Stub()", # Sempre injeta Style
             "Back = _Stub()"
         ])
 
-        for name in self.blacklist:
-            if name not in {'Fore', 'Style', 'Back'}:
-                pyx_lines.append(f"{name} = _Stub()")
-
-        # 3. Injeção de Stubs Única (Evita Redundância)
-        pyx_lines.append("class _Stub:")
-        pyx_lines.append("    def __getattr__(self, _): return _Stub()")
-        pyx_lines.append("    def __call__(self, *a, **kw): return _Stub()")
-        
-        # Coleta nomes para stubbing dinâmico
+        # 3. Injeção de Stubs Única (Removi a duplicata da sua versão)
         stub_targets = set(self.blacklist)
         for node in ast.walk(tree):
             if isinstance(node, (ast.Import, ast.ImportFrom)):
@@ -378,41 +453,60 @@ class VulcanForge:
                     for alias in node.names:
                         stub_targets.add(alias.asname or alias.name)
 
-        for name in stub_targets:
-            pyx_lines.append(f"{name} = _Stub()")
+        for name in self.blacklist:
+            if name not in {'Fore', 'Style', 'Back'}:
+                pyx_lines.append(f"{name} = _Stub()")
 
-        # 4. Linkagem de Kernels de Elite (C, ASM e NOGIL)
-        # Usamos aspas duplas para o extern from, o Cython lida melhor com isso
+        # 4. Linkagem de Kernels de Elite (Resolução definitiva de tipos)
         pyx_lines.append('\n# --- NEXUS NATIVE KERNELS (Tier 1 Elite) ---')
-        pyx_lines.append('cdef extern from "nexus_asm.h" nogil:')
+        pyx_lines.append('cdef extern from "nexus_kernels.h" nogil:')
+        pyx_lines.append('    ctypedef unsigned char uint8_t')
+        pyx_lines.append('    ctypedef unsigned long long uint64_t')
+        pyx_lines.append('    ctypedef long long int64_t')
         pyx_lines.append('    int64_t nexus_asm_cmov(int64_t selector, int64_t val_true, int64_t val_false)')
         pyx_lines.append('    long nexus_asm_popcount(long value)')
+        pyx_lines.append('    int nexus_encode_varint_branchless(uint64_t n, uint8_t* out)')
         pyx_lines.append('    int64_t nexus_asm_vec_search(const uint8_t* buf, int64_t len, int64_t target)')
-        
-        pyx_lines.append('\ncdef extern from "nexus_kernels.h" nogil:')
         pyx_lines.append('    int64_t nexus_raw_search(const uint8_t* h, int64_t hl, const uint8_t* n, int64_t nl)')
         pyx_lines.append('    void nexus_path_normalize(char* path)')
         pyx_lines.append('    const char* nexus_get_filename(const char* path)')
 
-        # 5. Transformação de Corpo
+        # 5. Transformação de Corpo com Hefesto v3
         optimized_functions = []
         for node in tree.body:
             if isinstance(node, ast.FunctionDef):
-                if node.name in NATIVE_KERNELS:
-                    continue 
+                func_code = self._forge_node(node)
+                
+                # Hefesto injeta os cdefs aqui, UMA ÚNICA VEZ
+                if node.name in typer.suggestions:
+                    decls = [f"    cdef {ctype} {name}" for name, ctype in typer.suggestions[node.name].items()]
+                    lines = func_code.split('\n')
+                    for idx, line in enumerate(lines):
+                        if "def " in line:
+                            func_code = "\n".join(lines[:idx+1] + decls + lines[idx+1:])
+                            break
+                
                 optimized_functions.append(node.name)
-                pyx_lines.append(self._forge_node(node))
+                pyx_lines.append(func_code)
+                
             elif isinstance(node, ast.ClassDef):
+                # Mantém a lógica de classe que você implementou
                 pyx_lines.append(f"class {node.name}:")
                 for sub in node.body:
                     if isinstance(sub, ast.FunctionDef):
-                        pyx_lines.append(self._forge_node(sub, indent="    "))
+                        m_code = self._forge_node(sub, indent="    ")
+                        if sub.name in typer.suggestions:
+                            decls = [f"        cdef {t} {v}" for v, t in typer.suggestions[sub.name].items()]
+                            lines = m_code.split('\n')
+                            for idx, line in enumerate(lines):
+                                if "def " in line:
+                                    m_code = "\n".join(lines[:idx+1] + decls + lines[idx+1:])
+                                    break
+                        pyx_lines.append(m_code)
                     else:
                         pyx_lines.append("    " + ast.unparse(sub).replace("\n", "\n    "))
             elif isinstance(node, (ast.Import, ast.ImportFrom)):
-                # Pula imports que já viraram stubs
-                is_black = hasattr(node, 'module') and node.module in self.blacklist
-                if not is_black:
+                if not (hasattr(node, 'module') and node.module in self.blacklist):
                     pyx_lines.append(ast.unparse(node))
             else:
                 pyx_lines.append(ast.unparse(node))
@@ -421,9 +515,6 @@ class VulcanForge:
         pyx_lines.append("\n# --- INTERNAL NEXUS LINKS ---")
         for func_name in optimized_functions:
             pyx_lines.append(f"{func_name} = {func_name}_vulcan_optimized")
-
-        node_count = sum(1 for _ in ast.walk(tree))
-        self.last_node_count = node_count 
 
         return "\n".join(pyx_lines)
 
@@ -444,7 +535,7 @@ class VulcanForge:
     def _forge_node(self, node, indent=""):
         """Orquestrador de Tradução: Decisões de Nível 1 (Nativo) e Nível 2 (Híbrido)."""
         name = node.name if indent else f"{node.name}_vulcan_optimized"
-        hot_vars = self._identify_hot_vars(node)
+        #hot_vars = self._identify_hot_vars(node)
         
         # 1. Preparação de Argumentos
         forbidden = {'kwargs', 'args', 'self', 'cls'}
@@ -533,10 +624,10 @@ class VulcanForge:
             code.append(f"{indent}    with nogil:")
             indent += "    "
             
-        if hot_vars:
-            for var, ctype in hot_vars.items():
-                if var not in arg_names and var not in forbidden:
-                    code.append(f"{indent}    cdef {ctype} {var}")
+#        if hot_vars:
+#            for var, ctype in hot_vars.items():
+#                if var not in arg_names and var not in forbidden:
+#                    code.append(f"{indent}    cdef {ctype} {var}")
         
         for stmt in node.body:
             if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant): continue

@@ -20,8 +20,15 @@ Variáveis de ambiente:
   DOXOADE_PITSTOP_NTHREADS  threads de forge (padrão: auto)
 """
 from __future__ import annotations
-import hashlib, json, os, shutil, subprocess, sys, threading, time, traceback, re
+import sys
+import time
+import os
+import hashlib
+import json
+
+import re
 import concurrent.futures
+
 from doxoade.tools.doxcolors import Fore, Style
 from concurrent.futures import ThreadPoolExecutor as TPE, as_completed
 from pathlib import Path
@@ -30,6 +37,7 @@ from typing import Callable
 from .artifact_manager import ensure_dirs
 from .environment import VulcanEnvironment as VulEnv
 from .forge import VulcanForge as VForge, assess_file_for_vulcan as AFVul
+
 _BATCH_SIZE: int = int(os.environ.get('DOXOADE_PITSTOP_BATCH', '8'))
 _BATCH_TIMEOUT: int = 300
 _QUEUE_SENTINEL = object()
@@ -44,6 +52,7 @@ class WarmupCache:
     """
 
     def __init__(self, cache_path: Path) -> None:
+        import threading
         self._path = cache_path
         self._data: dict[str, dict] = self._load()
         self._lock = threading.Lock()
@@ -107,7 +116,6 @@ def _forge_to_pyx(task: dict) -> dict:
     Transforma um arquivo .py em .pyx (Tier 1) e opt_.py (Tier 2).
     Versão Forense: Captura falhas de tradução com rastro completo.
     """
-    import traceback
     import hashlib
     import re
     import ast
@@ -182,6 +190,7 @@ def _forge_to_pyx(task: dict) -> dict:
         }
 
     except Exception as e:
+        import traceback
         sys.stdout.write(f" [ERRO]\n")
         return {
             'ok': False, 
@@ -192,19 +201,21 @@ def _forge_to_pyx(task: dict) -> dict:
         }
 
 def _batch_setup_content(entries: list[dict], extra_args: list[str], nthreads: int) -> str:
-    """
-    Gera um setup.py temporário que compila N extensões em paralelo.
-
-    nthreads controla paralelismo interno do Cython (transpilação .pyx → .c).
-    GCC compila cada .c de forma independente; setuptools usa -j automaticamente
-    nas versões modernas, e MAKEFLAGS pode forçar valor.
-    """
     ext_lines = []
     for entry in entries:
         name = entry['module_name']
-        ext_lines.append(f'    Extension("{name}", ["{name}.pyx"], extra_compile_args={extra_args!r}, include_dirs=_incdirs),')
+        # Compilamos apenas o .c gerado pelo Cython. O .h será incluído automaticamente.
+        ext_lines.append(
+            f'    Extension("{name}", ["{name}.c"], extra_compile_args={extra_args!r}, include_dirs=["."]),'
+        )
     exts_block = '\n'.join(ext_lines)
-    return f'# -*- coding: utf-8 -*- — GERADO PELO PITSTOP ENGINE\nfrom setuptools import setup, Extension\nfrom Cython.Build import cythonize\ntry:\n    import numpy as np; _incdirs = [np.get_include()]\nexcept ImportError:\n    _incdirs = []\n_exts = [\n{exts_block}\n]\nsetup(\n    ext_modules=cythonize(\n        _exts,\n        nthreads={nthreads},\n        language_level=3,\n        quiet=True,\n    )\n)\n'
+    
+    return f'''# -*- coding: utf-8 -*-
+from setuptools import setup, Extension
+setup(ext_modules=[
+{exts_block}
+])
+'''
 
 def _tail(text: str, n: int=12) -> str:
     lines = [ln for ln in (text or '').splitlines() if ln.strip()]
@@ -277,11 +288,13 @@ def _compile_single(name: str, foundry_str: str, bin_dir_str: str, build_env: di
         try:
             setup_path.unlink(missing_ok=True)
         except Exception as e:
+            import traceback
             print(f'\x1b[31m ■ Erro: {e}')
             traceback.print_tb(e.__traceback__)
         try:
             _shutil.rmtree(str(build_tmp), ignore_errors=True)
         except Exception as e:
+            import traceback
             print(f'\x1b[31m ■ Erro: {e}')
             traceback.print_tb(e.__traceback__)
 
@@ -343,6 +356,7 @@ def compile_batch(entries: list[dict], foundry_path: Path, bin_dir: Path, build_
         env['MAKEFLAGS'] = f'-j{n_workers}'
     results: dict[str, tuple[bool, str | None]] = {}
     batch_exit = 1
+    import subprocess
     try:
         proc = subprocess.run(cmd, cwd=str(foundry_path), env=env, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=_BATCH_TIMEOUT)
         batch_exit = proc.returncode
@@ -358,9 +372,11 @@ def compile_batch(entries: list[dict], foundry_path: Path, bin_dir: Path, build_
         try:
             setup_path.unlink(missing_ok=True)
         except Exception as e:
+            import traceback
             print(f'\x1b[31m ■ Erro: {e}')
             traceback.print_tb(e.__traceback__)
     rescued: set[str] = set()
+    import shutil
     for entry in entries:
         name = entry['module_name']
         bin_file = next(foundry_path.glob(f'{name}*{ext}'), None)
@@ -719,6 +735,7 @@ class PitstopEngine:
         que BATCH_SIZE itens estiverem prontos — sem esperar forge completo.
         Útil para lotes grandes (> 20 módulos) onde sobreposição compensa.
         """
+        import threading
         ensure_dirs(str(self.root))
         self.env.foundry.mkdir(parents=True, exist_ok=True)
         self.env.bin_dir.mkdir(parents=True, exist_ok=True)
@@ -768,6 +785,7 @@ class PitstopEngine:
                     with compile_lock:
                         compile_results_store.update(res)
                     batch = []
+        import threading
         compiler_thread = threading.Thread(target=_compile_consumer, daemon=True)
         compiler_thread.start()
         t_forge = time.perf_counter()

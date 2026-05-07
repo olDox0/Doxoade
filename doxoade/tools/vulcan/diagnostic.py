@@ -82,3 +82,52 @@ class VulcanDiagnostic:
             print(f'   {Fore.RED}✘ [ERRO] Maleta incompleta:{Fore.RESET}')
             for issue in self.issues:
                 print(f'     ■ {issue}')
+
+    def extract_c_body(c_file_path, py_func_name):
+        """Extrai o corpo real da função C, pulando o boilerplate do Cython."""
+        if not os.path.exists(c_file_path): return "Arquivo não encontrado."
+        
+        with open(c_file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Procura a função de implementação real (geralmente sem o prefixo __pyx_pf)
+        # ou o bloco de código que contém a lógica da linha do .pyx
+        import re
+        # Busca o bloco que o Cython marca com o nome da função
+        pattern = rf"/\* Python function \*/\s+.*?{py_func_name}.*?{{(.*?)}}"
+        match = re.search(pattern, content, re.DOTALL)
+        
+        if match:
+            body = match.group(1)
+            # Limpa o excesso de macros do Cython para ficar legível
+            body = re.sub(r'__Pyx_.*?\(.*?\);', '', body)
+            return body.strip()
+        return "Lógica interna não mapeada."
+
+def extract_c_snippet(c_file_path, py_func_name):
+    """
+    Busca no arquivo .c a implementação da função Cython correspondente.
+    O Cython marca as funções com comentários: /* "filename.pyx":line_num */
+    """
+    if not os.path.exists(c_file_path):
+        return "Arquivo C não encontrado."
+
+    with open(c_file_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    snippet = []
+    found = False
+    # Padrão de busca: o Cython gera nomes como __pyx_pf_..._nome_da_funcao
+    pattern = f"__pyx_pf_" 
+    
+    for i, line in enumerate(lines):
+        if pattern in line and py_func_name in line and "static PyObject" in line:
+            found = True
+            # Pega as próximas 30 linhas ou até fechar a chave
+            for j in range(i, min(i + 50, len(lines))):
+                snippet.append(lines[j])
+                if lines[j].startswith("}"):
+                    break
+            break
+    
+    return "".join(snippet) if found else "Código C da função não localizado."

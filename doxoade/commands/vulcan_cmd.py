@@ -82,6 +82,48 @@ def vulcan_group():
       $ VULCAN_VERBOSE=1 python3 main.py      (Linux/Termux)
     """
     pass
+    
+@vulcan_group.command('inspect')
+@click.argument('path')
+@click.option('--c-code', is_flag=True, help='Mostra o código C gerado')
+def vulcan_inspect(path, c_code):
+    """Inspeciona a Pureza de Metal e o código gerado."""
+    from doxoade.tools.vulcan.forge import assess_file_for_vulcan, BodyPurityScanner
+    from doxoade.tools.vulcan.diagnostic import extract_c_snippet
+    import ast
+    
+    click.echo(f"🔍 [INSPECT] Analisando metalurgia de: {path}")
+    
+    with open(path, 'r', encoding='utf-8') as f:
+        source = f.read()
+        tree = ast.parse(source)
+
+    scanner = BodyPurityScanner()
+    scanner.visit(tree)
+    report = scanner.get_purity_report()
+
+    # Exibe Score de Pureza
+    click.echo(f"\nPureza de Metal: {report['color']}{report['score']}% - {report['rank']}\x1b[0m")
+    for detail in report['details']:
+        click.echo(detail)
+
+    if c_code:
+        # Tenta localizar o .c na foundry
+        file_name = os.path.basename(path)
+        # Lógica simplificada para achar o .c (pode usar o hash que já temos)
+        foundry_dir = ".doxoade/vulcan/foundry/"
+        c_files = [f for f in os.listdir(foundry_dir) if f.endswith('.c') and file_name.split('.')[0] in f]
+        
+        if c_files:
+            latest_c = os.path.join(foundry_dir, c_files[0])
+            click.echo(f"\n{Fore.YELLOW}--- AMOSTRA DE C (Core Implementation) ---{Style.RESET_ALL}")
+            # Extrai a primeira função encontrada para exemplo
+            functions = [node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
+            if functions:
+                snippet = extract_c_snippet(latest_c, functions[0])
+                click.echo(f"\x1b[2m{snippet}\x1b[0m")
+        else:
+            click.echo("\n[!] Arquivo .c não encontrado na foundry. Execute ignite primeiro.")
 
 @vulcan_group.command('forge')
 @click.argument('target', type=click.Path(exists=True))

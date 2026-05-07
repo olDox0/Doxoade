@@ -1,14 +1,10 @@
 # doxoade/doxoade/tools/vulcan/compiler.py
-import os, sys, subprocess, shutil, time, json, threading
-import sysconfig
-import subprocess
+import os
+import sys
+import time
 import concurrent.futures
-
-from collections import deque
 from pathlib import Path
-from doxoade.tools.doxcolors import Fore
-from Cython.Build import cythonize
-
+from setuptools import Extension
 from doxoade.tools.doxcolors import Fore, Style
 
 COMPILATION_TELEMETRY = []
@@ -17,6 +13,8 @@ class VulcanCompiler:
     _cached_env = None
 
     def __init__(self, env, pid_registry=None): # [FIX] Adicionado pid_registry
+        
+        import sysconfig
         self.env = env
         # Mantém compatibilidade com o sistema de monitoramento de processos
         self._pid_registry = pid_registry if pid_registry is not None else {}
@@ -67,17 +65,21 @@ class VulcanCompiler:
     @staticmethod
     def _run_command_streaming(cmd: list[str], cwd: str, env: dict, *, max_tail_lines: int=80) -> tuple[int, str, str]:
         """Executa comando com coleta incremental de stdout/stderr (baixo uso de memória)."""
+        from collections import deque
+        import subprocess
         proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace', bufsize=1)
         out_tail: deque[str] = deque(maxlen=max_tail_lines)
         err_tail: deque[str] = deque(maxlen=max_tail_lines)
 
         def _drain(pipe, target: deque[str]):
+            from collections import deque
             try:
                 for line in iter(pipe.readline, ''):
                     if line:
                         target.append(line.rstrip('\n'))
             finally:
                 pipe.close()
+        import threading
         t_out = threading.Thread(target=_drain, args=(proc.stdout, out_tail), daemon=True)
         t_err = threading.Thread(target=_drain, args=(proc.stderr, err_tail), daemon=True)
         t_out.start()
@@ -91,37 +93,68 @@ class VulcanCompiler:
         import time
         import os
         import shutil
-        import click
-        from Cython.Build import cythonize
         from pathlib import Path
+        import doxoade 
+        from setuptools import Extension # Import local para segurança
         
         # 1. Setup de Ambiente
         project_root = Path(self.env.root).resolve()
-        native_dir = project_root / "doxoade" / "tools" / "vulcan" / "native"
+        core_path = Path(doxoade.__file__).resolve().parent
+        core_native_dir = core_path / "tools" / "vulcan" / "native"
         foundry_path = self.env.foundry.resolve()
         
-        # Injeção de Headers OMEGA
-        for h_file in native_dir.glob("*.h"):
-            shutil.copy2(h_file, foundry_path / h_file.name)
+        # Injeção de Headers e Fontes C do CORE
+        if core_native_dir.exists():
+            for f_file in list(core_native_dir.glob("*.h")): # Copia apenas os headers
+            #for f_file in list(core_native_dir.glob("*.h")) + list(core_native_dir.glob("*.c")):
+                shutil.copy2(f_file, foundry_path / f_file.name)
 
-        sources = [str(foundry_path / f"{m}.pyx") for m in modules_list]
+
+        # Entrar na pasta para isolar o contexto de build
+        old_cwd = os.getcwd()
+        os.chdir(str(foundry_path))
+        
+        # --- MUDANÇA CRÍTICA: Criar objetos Extension para forçar o nome do módulo ---
+        # Isso impede que o Cython tente inferir o nome do pacote a partir do path '.doxoade'
+        extensions = []
+        for m in modules_list:
+            extensions.append(
+                Extension(
+                    name=m, 
+                    sources=[f"{m}.pyx"], 
+                    include_dirs=["."]
+                )
+            )
         
         t_start = time.perf_counter()
-        click.echo(f"   [LINK] Iniciando Metalurgia em {len(modules_list)} módulos...")
+        print(f"   [LINK] Iniciando Metalurgia em {len(modules_list)} módulos...")
         
+        from Cython.Build import cythonize
         try:
-            # Mostra cada kernel sendo enviado para o GCC/MSVC
             for m in modules_list:
-                click.echo(f"     ⚙️  Vincular: {m}")
+                print(f"     ⚙️  Vincular: {m}")
                 
-            # Execução do núcleo Cython
+            # Passamos a lista de objetos Extension em vez de strings
+            extensions = [Extension(m, [f"{m}.pyx"]) for m in modules_list]
+            
+            t_start = time.perf_counter()
+            print(f"   [LINK] Iniciando Metalurgia em {len(modules_list)} módulos...")
+            
             cythonize(
-                sources, 
+                extensions, 
                 nthreads=os.cpu_count() or 2, 
                 quiet=True, 
-                include_path=[str(foundry_path)], 
-                compiler_directives={'language_level': "3", 'boundscheck': False, 'wraparound': True}
+                include_path=["."],
+                compiler_directives={
+                    'language_level': "3",
+                    'boundscheck': False,
+                    'wraparound': False,
+                    'cdivision': True
+                }
             )
+            
+            # Volta para o diretório original
+            os.chdir(old_cwd)
             
             duration_ms = (time.perf_counter() - t_start) * 1000
             avg_ms = duration_ms / len(modules_list)
@@ -129,10 +162,11 @@ class VulcanCompiler:
             for m in modules_list:
                 self.detailed_telemetry.setdefault(m, {})['transpile_ms'] = avg_ms
                 
-            click.secho(f"   ✔ Sucesso: Lote finalizado em {duration_ms/1000:.2f}s", fg='green')
+            print(f"   ✔ Sucesso: Lote finalizado em {duration_ms/1000:.2f}s")
             return True
 
         except Exception as e:
+            os.chdir(old_cwd)
             from doxoade.tools.error_info import handle_error
             handle_error(e, context="transpile_batch", debug=True)
             return False
@@ -155,6 +189,7 @@ class VulcanCompiler:
         return pch_file
 
     def _get_doxo_python(self):
+        
         core_root = Path(__file__).resolve().parents[3]
         return core_root / 'venv' / 'Scripts' / 'python.exe' if os.name == 'nt' else sys.executable
 
@@ -213,12 +248,14 @@ class VulcanCompiler:
             return None
         dest_dir = self.env.staging
         dest_file = dest_dir / src_file.name
+        import shutil
         shutil.move(str(src_file), str(dest_file))
         return dest_file
 
     @staticmethod
     def save_telemetry_report(project_root: str):
         """Salva o relatório de telemetria da compilação."""
+        import json
         if not COMPILATION_TELEMETRY:
             return
         report_path = Path(project_root) / '.doxoade' / 'vulcan' / 'logs' / f"compile_telemetry_{time.strftime('%Y%m%d_%H%M%S')}.json"
@@ -234,6 +271,7 @@ class VulcanCompiler:
         src_file = next(self.env.foundry.glob(f'{module_name}*{ext}'), None)
         if not src_file:
             return False
+        import shutil
         try:
             dest_dir = self.env.staging if to_staging else self.env.bin_dir
             dest_file = dest_dir / src_file.name
@@ -313,20 +351,22 @@ class VulcanCompiler:
 
         # Compila C e ASM para objeto (sem linkar)
         if not c_obj.exists():
+            import subprocess
             subprocess.run(f'gcc -O3 -c "{core_c}" -o "{c_obj}"', shell=True)
         if not s_obj.exists():
+            import subprocess
             subprocess.run(f'gcc -c "{core_s}" -o "{s_obj}"', shell=True)
             
         return c_obj, s_obj
 
     def _prepare_static_lib(self):
         """Fundição Suprema: Cria a biblioteca libnexus.a (Industrial)."""
-        import subprocess
         native_dir = Path(self.env.root) / "doxoade" / "tools" / "vulcan" / "native"
         foundry_path = self.env.foundry.resolve()
         lib_file = foundry_path / "libnexus.a"
         
         if not lib_file.exists():
+            import subprocess
             print(f"   {Fore.YELLOW}📦 Forjando Biblioteca Estática Nexus...{Fore.RESET}")
             # 1. Compila C e ASM para objetos .o
             subprocess.run(f'gcc -O3 -c "{native_dir / "nexus_kernels.c"}" -o "{foundry_path / "k.o"}"', shell=True)
