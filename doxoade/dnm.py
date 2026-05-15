@@ -38,6 +38,7 @@ class DNM:
         'venv', 'pytest_temp_dir', 'foundry', 'bin', 'recovery_zone',
         'tmp', 'env', 'node_modules', '.idea', '.vscode', '.doxoade_cache',
         'dist', 'build', 'doxoade.egg-info', 'htmlcov', '.pytest_cache',
+        'thirdparty',
     }
 
     def __init__(self, root_path: str='.'):

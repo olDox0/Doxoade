@@ -6,7 +6,12 @@ try:
     import tomllib as toml
 except ModuleNotFoundError:
     import toml
-SYSTEM_IGNORES = {'venv', '.git', '__pycache__', 'build', 'dist', '.doxoade', '.doxoade_cache', 'node_modules', '.vscode', '.idea', 'pytest_temp_dir', '.dox_agent_workspace'}
+SYSTEM_IGNORES = {
+    '__init__.py', '.gitignore', 'pyproject.toml', 'README.md', 'LICENSE',
+    'venv', '.git', '__pycache__', 'build', 'dist', '.doxoade', '.doxoade_cache', 
+    'node_modules', '.vscode', '.idea', 'pytest_temp_dir', '.dox_agent_workspace',
+    'thirdparty', 'w64devkit',
+}
 
 def _find_project_root(start_path='.'):
     current_path = Path(start_path).resolve()

@@ -416,6 +416,7 @@ def _is_critical_cli_file(file_path):
 
 @click.command('ignite')
 @click.argument('path', required=False, type=click.Path(exists=True))
+@click.option('--soteria', is_flag=True, help='Ativa o escudo Sotéria (Rescue para C) com Traceback nativo.') # NOVO
 @click.option('--force', is_flag=True, help='Força a re-compilação de todos os alvos.')
 @click.option('--jobs', type=int, default=None, help='Número de workers (sobrescreve auto).')
 @click.option('--no-pitstop', is_flag=True, help='Usa compilação legada (1 processo por módulo).')
@@ -425,7 +426,7 @@ def _is_critical_cli_file(file_path):
 @click.option('--simd', is_flag=True, help='Ativa otimizações SIMD (AVX/SSE) na compilação.')
 @click.option('--simd-level', default='auto', type=click.Choice(['auto', 'native', 'sse2', 'avx', 'avx2', 'avx512f']), show_default=True, help='Nível SIMD máximo (padrão: auto-detecta).')
 @click.pass_context
-def ignite(ctx, path, force, jobs, no_pitstop, streaming, hybrid, scan_only, simd, simd_level):
+def ignite(ctx, path, soteria, force, jobs, no_pitstop, streaming, hybrid, scan_only, simd, simd_level):
     """Transforma código Python em binários de alta velocidade.
 
     Modos:
@@ -480,6 +481,8 @@ def ignite(ctx, path, force, jobs, no_pitstop, streaming, hybrid, scan_only, sim
         return
     with ExecutionLogger('vulcan_ignite', root, ctx.params) as _:
         click.echo(f'{Fore.YELLOW}{Style.BRIGHT}🔥 [VULCAN-IGNITION] ...{Style.RESET_ALL}')
+        if soteria:
+            click.echo(f'   {Fore.GREEN}🛡️  Sotéria: Escudo de Resgate Nativo ATIVADO.{Style.RESET_ALL}')
         from doxoade.tools.vulcan.diagnostic import VulcanDiagnostic
         diag = VulcanDiagnostic(root)
         ok, _ = diag.check_environment()
@@ -528,7 +531,8 @@ def ignite(ctx, path, force, jobs, no_pitstop, streaming, hybrid, scan_only, sim
                     force_recompile=force, 
                     max_workers=jobs, 
                     use_pitstop=not no_pitstop, 
-                    streaming=streaming
+                    streaming=streaming,
+                    use_soteria=soteria
                 )
             click.echo(f'\n{Fore.GREEN}{Style.BRIGHT}✔ [VULCAN] Forja concluída.{Style.RESET_ALL}')
             if simd_ctx:

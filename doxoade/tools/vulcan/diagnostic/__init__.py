@@ -1,3 +1,4 @@
+# Soteria Diagnostic Package 
 # doxoade/doxoade/tools/vulcan/diagnostic.py
 import os
 import shutil

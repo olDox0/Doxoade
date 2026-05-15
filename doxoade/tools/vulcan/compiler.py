@@ -5,6 +5,10 @@ import time
 import concurrent.futures
 from pathlib import Path
 from setuptools import Extension
+
+from .diagnostic.soteria.scribe import SoteriaScribe
+from .diagnostic.soteria.engine import SoteriaForensic 
+
 from doxoade.tools.doxcolors import Fore, Style
 
 COMPILATION_TELEMETRY = []
@@ -19,6 +23,12 @@ class VulcanCompiler:
         # Mantém compatibilidade com o sistema de monitoramento de processos
         self._pid_registry = pid_registry if pid_registry is not None else {}
         self.detailed_telemetry = {}
+        # --- [SOTÉRIA PATHS] ---
+        self.soteria_dir = Path(__file__).resolve().parent / "diagnostic" / "soteria"
+        self.soteria_include = self.soteria_dir / "include"
+        self.soteria_src = self.soteria_dir / "src" / "soteria.c"
+        self.scribe = SoteriaScribe()
+        self.forensic = SoteriaForensic()
         # Cache de caminhos do sistema (Otimização N2808)
         self.py_include = sysconfig.get_path('include')
         self.py_libs = os.path.join(sysconfig.get_config_var('installed_base'), "libs")
@@ -89,41 +99,44 @@ class VulcanCompiler:
         t_err.join(timeout=2)
         return (code, '\n'.join(out_tail), '\n'.join(err_tail))
 
-    def transpile_batch(self, modules_list):
-        import time
-        import os
-        import shutil
+    def transpile_batch(self, modules_list, use_soteria=True):
+        import time, os, shutil
         from pathlib import Path
         import doxoade 
-        from setuptools import Extension # Import local para segurança
+        from setuptools import Extension 
         
         # 1. Setup de Ambiente
         project_root = Path(self.env.root).resolve()
-        core_path = Path(doxoade.__file__).resolve().parent
-        core_native_dir = core_path / "tools" / "vulcan" / "native"
         foundry_path = self.env.foundry.resolve()
         
-        # Injeção de Headers e Fontes C do CORE
-        if core_native_dir.exists():
-            for f_file in list(core_native_dir.glob("*.h")): # Copia apenas os headers
-            #for f_file in list(core_native_dir.glob("*.h")) + list(core_native_dir.glob("*.c")):
-                shutil.copy2(f_file, foundry_path / f_file.name)
+        # PASC 8.13: Define a base de busca inicial (resiliente)
+        original_src = project_root / "src"
+        if not original_src.exists():
+            original_src = project_root # Recua para a raiz se não houver 'src'
 
+        # --- [ESTRATÉGIA SOTÉRIA 2.0: SHADOW PYX] ---
+        if use_soteria:
+            base_source_dir = foundry_path / "shadow_pyx"
+            print(f"   🔮 [SOTÉRIA] Projetando sombra de segurança em: {base_source_dir.name}")
+            self.scribe.generate_shadow(str(original_src), str(base_source_dir))
+            
+            # Copia header para o Cython enxergar na foundry
+            soteria_h = self.soteria_include / "soteria.h"
+            if soteria_h.exists():
+                shutil.copy2(soteria_h, foundry_path / "soteria.h")
+        else:
+            base_source_dir = original_src
 
-        # Entrar na pasta para isolar o contexto de build
-        old_cwd = os.getcwd()
-        os.chdir(str(foundry_path))
-        
-        # --- MUDANÇA CRÍTICA: Criar objetos Extension para forçar o nome do módulo ---
-        # Isso impede que o Cython tente inferir o nome do pacote a partir do path '.doxoade'
+        # 2. Configuração das Extensões (PASC 8.7)
         extensions = []
         for m in modules_list:
+            source_file = base_source_dir / f"{m}.pyx"
+            # Se não estiver na sombra/src, tenta na foundry local
+            if not source_file.exists():
+                source_file = foundry_path / f"{m}.pyx"
+
             extensions.append(
-                Extension(
-                    name=m, 
-                    sources=[f"{m}.pyx"], 
-                    include_dirs=["."]
-                )
+                Extension(name=m, sources=[str(source_file)], include_dirs=["."])
             )
         
         t_start = time.perf_counter()
@@ -131,44 +144,24 @@ class VulcanCompiler:
         
         from Cython.Build import cythonize
         try:
-            for m in modules_list:
-                print(f"     ⚙️  Vincular: {m}")
-                
-            # Passamos a lista de objetos Extension em vez de strings
-            extensions = [Extension(m, [f"{m}.pyx"]) for m in modules_list]
-            
-            t_start = time.perf_counter()
-            print(f"   [LINK] Iniciando Metalurgia em {len(modules_list)} módulos...")
-            
             cythonize(
                 extensions, 
                 nthreads=os.cpu_count() or 2, 
                 quiet=True, 
                 include_path=["."],
-                compiler_directives={
-                    'language_level': "3",
-                    'boundscheck': False,
-                    'wraparound': False,
-                    'cdivision': True
-                }
+                compiler_directives={'language_level': "3", 'cdivision': True}
             )
             
-            # Volta para o diretório original
-            os.chdir(old_cwd)
-            
             duration_ms = (time.perf_counter() - t_start) * 1000
-            avg_ms = duration_ms / len(modules_list)
-            
             for m in modules_list:
-                self.detailed_telemetry.setdefault(m, {})['transpile_ms'] = avg_ms
+                self.detailed_telemetry.setdefault(m, {})['transpile_ms'] = duration_ms / len(modules_list)
                 
             print(f"   ✔ Sucesso: Lote finalizado em {duration_ms/1000:.2f}s")
             return True
 
         except Exception as e:
-            os.chdir(old_cwd)
             from doxoade.tools.error_info import handle_error
-            handle_error(e, context="transpile_batch", debug=True)
+            handle_error(e, context="transpile_batch_soteria", debug=True)
             return False
 
     def _ensure_pch(self):
@@ -378,56 +371,53 @@ class VulcanCompiler:
             
         return lib_file
 
-    def _run_gcc_direct(self, module_name: str) -> bool:
-        import subprocess
-        import time
+    def _run_gcc_direct(self, module_name: str, use_soteria: bool = True) -> bool:
+        import subprocess, time
         t_start = time.perf_counter()
         
+        # 1. Localização Dinâmica do Alvo (PASC 8.14)
+        # Tenta achar o .c na sombra (Sotéria) ou na foundry normal
         c_file = self.env.foundry / f"{module_name}.c"
+        if use_soteria:
+            shadow_c = self.env.foundry / "shadow_pyx" / f"{module_name}.c"
+            if shadow_c.exists():
+                c_file = shadow_c
+
         obj_file = self.env.bin_dir / f"{module_name}.pyd"
         
-        # 1. Garante que os metais estáticos (.a) existam
+        # 2. Garante metais estáticos
         self._prepare_static_lib()
         lib_path = (self.env.foundry / "libnexus.a").resolve()
         
-        # 2. Inteligência de Carga (Otimização para o N2808)
-        # Trocamos -O3 por -O2 (Muito menos RAM) e -Os para infra (Rápido)
+        # 3. Configuração de Otimização
         is_infra = any(x in module_name for x in ['compiler', 'pitstop', 'forge', 'benchmark', 'probe', 'optimizer'])
         opt_level = '-Os' if is_infra else '-O2'
 
-        # 3. Construtor de Comando de Baixo Consumo
-        # ggc-min-expand=5 e ggc-min-heapsize=16384 forçam o GCC a limpar a RAM 
-        # assim que o uso sobe 5%, mantendo o consumo abaixo de 100MB por thread.
+        # 4. Comando de Linkagem Sotéria
         cmd = [
             'gcc', opt_level, '-shared', '-g',
-            '--param', 'ggc-min-expand=5',
-            '--param', 'ggc-min-heapsize=16384',
+            f'-I"{str(self.soteria_include).replace("\\", "/")}"',
             f'-I"{str(self.env.foundry).replace("\\", "/")}"',
-            f'-I"{str(Path(self.env.root)/"doxoade/tools/vulcan/native").replace("\\", "/")}"',
+            f'-I"{str(self.env.foundry / "shadow_pyx").replace("\\", "/")}"', # Include para a sombra
             f'-I"{self.py_include.replace("\\", "/")}"',
             f'-L"{self.py_libs.replace("\\", "/")}"',
             f'"{str(c_file).replace("\\", "/")}"',
-            f'"{str(lib_path).replace("\\", "/")}"', # Linkagem direta do arquivo físico
+            f'"{str(self.soteria_src).replace("\\", "/")}"',
+            f'"{str(lib_path).replace("\\", "/")}"',
             '-o', f'"{str(obj_file).replace("\\", "/")}"',
-            self.py_link_lib, 
-            '-Wall'
+            self.py_link_lib, '-ldbghelp', '-lpsapi', '-Wall'
         ]
 
         try:
-            # shell=True é vital aqui para o Windows ler o PATH corretamente
             res = subprocess.run(" ".join(cmd), capture_output=True, text=True, encoding='utf-8', errors='replace', shell=True)
-            
             elapsed = (time.perf_counter() - t_start) * 1000
             self.detailed_telemetry.setdefault(module_name, {})['link_ms'] = elapsed
             
             if res.returncode != 0:
-                print(f"\n{Fore.RED}✘ Falha no Linker ({module_name}):{Fore.RESET}")
-                # Se falhar no Python.h, mostramos o diagnóstico do sistema
-                if "Python.h" in res.stderr:
-                    print(f"   {Fore.YELLOW}[!] DICA: Verifique se o Python development headers está instalado.{Fore.RESET}")
+                print(f"\n{Fore.RED}✘ Falha na Linkagem Sotéria ({module_name}):{Fore.RESET}")
                 print(res.stderr)
                 return False
             return True
         except Exception as e:
-            self.detailed_telemetry.setdefault(module_name, {})['link_ms'] = 0
+            print(f"🚨 Erro no GCC: {e}")
             return False

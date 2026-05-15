@@ -48,11 +48,30 @@ def _sigint_handler(signum, frame):
     sys.exit(130)
 
 def _print_vulcan_forensic(scope: str, e: Exception):
-    """Interface Forense para falhas de metalurgia (MPoT-5.3)."""
+    """Interface Forense Dual: Python Traceback + Sotéria Native Rescue (PASC 8.19)."""
+    
+    # 1. TENTA O RESGATE NATIVO (Sotéria Mode)
+    # PASC 6.6: Importação localizada para economizar RAM no N2808
+    from .diagnostic.soteria.engine import SoteriaForensic
+    forensic = SoteriaForensic()
+    
+    # Captura saída de erro se o processo crashou (ex: CalledProcessError)
+    output = ""
+    if hasattr(e, 'stdout') and e.stdout: output += e.stdout
+    if hasattr(e, 'stderr') and e.stderr: output += e.stderr
+    
+    # Se a Sotéria encontrar suas marcas no log, ela gera o relatório e encerra
+    if output and forensic.process_pipe(output):
+        return
+
+    # 2. FALLBACK: RELATÓRIO DE ERRO PADRÃO (Python Mode)
     _, exc_obj, exc_tb = sys.exc_info()
     f_name = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1] if exc_tb else 'vulcan_cmd.py'
     line_n = exc_tb.tb_lineno if exc_tb else 0
+    
     click.echo(f'\n\x1b[1;34m\n[ ■ FORENSIC:VULCAN:{scope} ]\x1b[0m \x1b[1m\n ■ File: {f_name} | L: {line_n}\x1b[0m')
+    
+    # PASC 6.3: Sanitização contra Unicode Plague
     exc_value = '\n  >>>   '.join(str(exc_obj).split("'"))
     click.echo(f'\x1b[31m\n ■ Tipo: {type(e).__name__} \n ■ Exception value: {exc_value} \n ■ Valor: {e}\n\x1b[0m')
 

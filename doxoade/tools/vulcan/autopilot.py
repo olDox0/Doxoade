@@ -164,8 +164,9 @@ class VulcanAutopilot:
             return (candidates, 0)
         return (candidates[:limit], len(candidates) - limit)
 
-    def scan_and_optimize(self, candidates=None, force_recompile=False, max_workers: int | None=None, use_pitstop: bool=True, streaming: bool=True):
-        """
+    def scan_and_optimize(self, candidates=None, force_recompile=False, max_workers: int | None=None,
+                          use_pitstop: bool=True, streaming: bool=True, use_soteria=False):
+            """
         Parâmetros:
             use_pitstop  True  → usa PitstopEngine (batch compile, warm-up cache)
                          False → comportamento legado (1 subprocess por módulo)
@@ -193,19 +194,22 @@ class VulcanAutopilot:
         max_workers = self._resolve_max_workers(max_workers)
         if use_pitstop:
             from .pitstop import PitstopEngine
+            # PASC 8.13: O Pitstop agora recebe a diretriz de segurança Sotéria
             engine = PitstopEngine(self.env, pid_registry=self._pid_registry)
             
-            # [STABILITY FIX] Contrato estrito com o Pitstop
             stats = engine.run(
                 candidates=candidates, 
                 max_workers=max_workers, 
                 force_recompile=force_recompile,
-                on_result=None # O CLI tratará os resultados através do objeto stats
+                use_soteria=use_soteria, # NOVO: Ativa Shadow Build + Traceback
+                on_result=None 
             )
             self._print_pitstop_summary(stats)
             return stats
         else:
-            self._run_legacy(candidates, max_workers)
+            # Modo legado também deve suportar a proteção (PASC 2)
+            self._run_legacy(candidates, max_workers, use_soteria=use_soteria)
+            
         self.compiler.save_telemetry_report(self.root)
 
     def _run_pitstop(self, candidates: list[dict], force_recompile: bool, max_workers: int, streaming: bool) -> None:
