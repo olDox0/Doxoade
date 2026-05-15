@@ -1,90 +1,122 @@
+#define SOTERIA_CORE
 #include "../include/soteria.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h> 
 #include <dbghelp.h> 
-#include <psapi.h> 
 
-static char g_cmd_line[512] = "OADE_INTERNAL";
-//static char g_last_mark[256] = "Nenhum marco registrado.";
-static char g_last_msg[256] = "Nenhum marco";
-static char g_last_file[512] = "N/A";
-static int  g_last_line = 0;
+// 1. ESTADO INTERNO ÚNICO (PASC 8.12)
+typedef struct { 
+    void* ptr; 
+    size_t size; 
+    const char* file; 
+    int line; 
+    int is_live; 
+} mem_rec_t;
 
-void soteria_mark(const char* step, const char* file, int line) {
-    if (!step || !file) return;
-    strncpy(g_last_msg, step, 255);
-    strncpy(g_last_file, file, 511);
-    g_last_line = line;
-}
+static mem_rec_t g_mem_db[512];
+static int g_mem_ptr = 0;
+static const char* g_n_stack[16];
+static const char* g_n_files[16];
+static int g_n_lines[16];
+static int g_s_ptr = 0;
+static unsigned long g_cached_pid = 0;
+static char g_cached_cmd[512] = "N/A";
 
-LONG WINAPI soteria_exception_handler(struct _EXCEPTION_POINTERS *info) {
-    HANDLE process = GetCurrentProcess();
-    SymRefreshModuleList(process);
-
-    void* stack[15];
-    unsigned short frames = CaptureStackBackTrace(2, 10, stack, NULL);
-    
-    // CORREÇÃO: Usando 'info' que é o nome do parâmetro
-    void* fault_addr = info->ExceptionRecord->ExceptionAddress;
-    
+// 2. EMISSOR DE EVIDÊNCIAS (Apolo/Hórus)
+void soteria_payload(const char* level, const char* motive, const char* detail, const char* file, int line, const char* func) {
     printf("\n@SOTERIA_BEGIN@\n");
-    printf("TAG_LEVEL: FATAL\n");
+    printf("TAG_LEVEL: %s\n", level);
     printf("TAG_PID: %lu\n", GetCurrentProcessId());
-    printf("TAG_DETAIL: EXCECAO 0x%lx em %p\n", info->ExceptionRecord->ExceptionCode, fault_addr);
+    printf("TAG_COMMAND: %s\n", GetCommandLineA());
+    printf("TAG_MOTIVO: %s\n", motive);
+    printf("TAG_DETAIL: %s\n", detail);
+    printf("TAG_LOCAL: %s:%d\n", file, line);
+    printf("TAG_FUNC: %s\n", func);
 
-    SYMBOL_INFO* sym = (SYMBOL_INFO*)calloc(sizeof(SYMBOL_INFO) + 256, 1);
-    sym->MaxNameLen = 255; sym->SizeOfStruct = sizeof(SYMBOL_INFO);
-    IMAGEHLP_LINE64 line_info = { .SizeOfStruct = sizeof(IMAGEHLP_LINE64) };
-    DWORD disp = 0;
-
-    // Localização Geográfica do Impacto
-    if (SymGetLineFromAddr64(process, (DWORD64)fault_addr, &disp, &line_info)) {
-        printf("TAG_LOCAL: %s:%lu\n", line_info.FileName, line_info.LineNumber);
-    } else {
-        printf("TAG_LOCAL: 0x%p\n", fault_addr);
+    // Pilha de Software (Traceback Nativo do Scribe)
+    for (int i = g_s_ptr - 1; i >= 0; i--) {
+        printf("TAG_FRAME: %d | %s | %s:%d\n", i, g_n_stack[i], g_n_files[i], g_n_lines[i]);
     }
 
-    // Peças do Quebra-Cabeça (Stack)
-    for (int i = 0; i < frames; i++) {
-        const char* fn = (SymFromAddr(process, (DWORD64)stack[i], 0, sym)) ? sym->Name : "???";
-        if (SymGetLineFromAddr64(process, (DWORD64)stack[i], &disp, &line_info)) {
-            printf("TAG_FRAME: %d | %s | %s:%lu\n", i, fn, line_info.FileName, line_info.LineNumber);
-        } else {
-            printf("TAG_FRAME: %d | %s | (externo)\n", i, fn);
+    // Marca para triangulação do Python
+    if (g_s_ptr > 0) {
+        printf("TAG_RASTRO_MSG: TRACEBACK: %s\n", g_n_stack[g_s_ptr-1]);
+        printf("TAG_RASTRO_LOC: %s:%d\n", g_n_files[g_s_ptr-1], g_n_lines[g_s_ptr-1]);
+    }
+    printf("@SOTERIA_END@\n");
+    fflush(stdout);
+}
+
+// 3. GESTÃO DE MEMÓRIA (Anúbis Mode)
+void* soteria_malloc(size_t size, const char* file, int line) {
+    void* p = (malloc)(size);
+    if (p && g_mem_ptr < 512) {
+        g_mem_db[g_mem_ptr++] = (mem_rec_t){p, size, file, line, 1};
+    }
+    return p;
+}
+
+void soteria_free(void* ptr, const char* file, int line) {
+    if (!ptr) return;
+    for (int i = 0; i < g_mem_ptr; i++) {
+        if (g_mem_db[i].ptr == ptr) {
+            if (!g_mem_db[i].is_live) 
+                soteria_dispatch(SOTERIA_FATAL, SOT_ERR_MEM, "DOUBLE_FREE", "Tentativa de liberar memoria ja morta.", file, line, "free");
+            
+            memset(ptr, 0xCC, g_mem_db[i].size); // Poisoning
+            g_mem_db[i].is_live = 0;
+            (free)(ptr); return;
         }
     }
-
-    printf("TAG_RASTRO_MSG: %s\n", g_last_msg);
-    printf("TAG_RASTRO_LOC: %s:%d\n", g_last_file, g_last_line);
-    printf("@SOTERIA_END@\n");
-    
-    fflush(stdout);
-    free(sym);
-    exit(1);
+    (free)(ptr);
 }
 
-void soteria_init(int argc, char** argv) {
-    HANDLE process = GetCurrentProcess();
-    SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
-    
-    char path[MAX_PATH];
-    GetModuleFileNameA(NULL, path, MAX_PATH);
-    char* last_slash = strrchr(path, '\\');
-    if (last_slash) *last_slash = '\0';
+void soteria_validate(void* ptr, const char* file, int line) {
+    for (int i = 0; i < g_mem_ptr; i++) {
+        if (g_mem_db[i].ptr == ptr && !g_mem_db[i].is_live)
+            soteria_dispatch(SOTERIA_FATAL, SOT_ERR_MEM, "DANGLING_POINTER", "Acesso a ponteiro solto (memoria liberada).", file, line, "validate");
+    }
+}
 
-    SymInitialize(process, path, TRUE); 
-    AddVectoredExceptionHandler(1, soteria_exception_handler);
+// 4. RASTREIO E HANDLERS
+void soteria_push(const char* func, const char* file, int line) {
+    if (g_s_ptr < 16) {
+        g_n_stack[g_s_ptr] = func; g_n_files[g_s_ptr] = file; g_n_lines[g_s_ptr] = line;
+        g_s_ptr++;
+    }
 }
 
 void soteria_dispatch(soteria_level_t level, soteria_err_t reason, const char* context, 
                      const char* detail, const char* file, int line, const char* func) {
-    static const char* R_STR[] = {"MEMORIA", "LOGIC", "SINAL", "VULCAN"};
-    printf("\n@SOTERIA_BEGIN@\nTAG_LEVEL: %s\nTAG_COMMAND: %s\nTAG_FUNC: %s\nTAG_MOTIVO: %s\nTAG_SUBSIS: %s\nTAG_DETAIL: %s\nTAG_LOCAL: %s:%d\nTAG_RASTRO_MSG: %s\nTAG_RASTRO_LOC: %s:%d\n@SOTERIA_END@\n",
-           (level == SOTERIA_FATAL) ? "FATAL" : "AVISO", g_cmd_line, func, R_STR[reason], context, detail, file, line, g_last_msg, g_last_file, g_last_line);
-    fflush(stdout);
+    const char* lvl = (level == SOTERIA_FATAL) ? "FATAL" : "WARNING";
+    soteria_payload(lvl, context, detail, file, line, func);
     if (level == SOTERIA_FATAL) exit(1);
 }
 
+LONG WINAPI soteria_exception_handler(struct _EXCEPTION_POINTERS *info) {
+    char det[128];
+    sprintf(det, "Falha Critica 0x%lx em %p", info->ExceptionRecord->ExceptionCode, info->ExceptionRecord->ExceptionAddress);
+    soteria_payload("FATAL", "SIGNAL", det, "N/A", 0, "KERNEL");
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+void soteria_init(int argc, char** argv) {
+    g_cached_pid = GetCurrentProcessId();
+    strncpy(g_cached_cmd, GetCommandLineA(), 511);
+    AddVectoredExceptionHandler(1, soteria_exception_handler);
+}
+
 __attribute__((constructor)) void soteria_auto_ignite() { soteria_init(0, NULL); }
+
+__attribute__((destructor)) void soteria_check_leaks() {
+    int leaks = 0;
+    for (int i = 0; i < g_mem_ptr; i++) if (g_mem_db[i].is_live) leaks++;
+    if (leaks == 0) return;
+    printf("\n@SOTERIA_BEGIN@\nTAG_LEVEL: WARNING\nTAG_MOTIVO: MEMORY_LEAK\nTAG_DETAIL: %d blocos orfaos.\n", leaks);
+    for (int i = 0; i < g_mem_ptr; i++)
+        if (g_mem_db[i].is_live) printf("TAG_LEAK: %zu bytes em %s:%d\n", g_mem_db[i].size, g_mem_db[i].file, g_mem_db[i].line);
+    printf("@SOTERIA_END@\n");
+    fflush(stdout);
+}

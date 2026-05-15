@@ -21,7 +21,7 @@ class SoteriaForensic:
         nx = match.group(1)
         def get_tag(t): return (re.findall(rf"TAG_{t}:\s*(.*)", nx, re.IGNORECASE) or ["N/A"])[0].strip()
 
-        print(f"\n{self.red}" + "!" * 65 + f"\n SOTÉRIA: RESGATE DE EXECUÇÃO ATIVO\n" + "!" * 65 + self.reset)
+        print(f"{self.red}" + "!" * 65 + f"\n SOTÉRIA: RESGATE DE EXECUÇÃO ATIVO\n" + "!" * 65 + self.reset)
         
         # 1. Rastro de Símbolos (A Pilha)
         frames = re.findall(r"TAG_FRAME:\s*(.*)", nx)
