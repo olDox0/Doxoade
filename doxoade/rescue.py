@@ -1,220 +1,212 @@
+# -*- coding: utf-8 -*-
 # doxoade/doxoade/rescue.py
 """
-Rescue System - Lazarus Protocol v41.7.
-Forensic UI, emergency recovery and state reversion.
-Compliance: MPoT-4, MPoT-5, PASC-6, Aegis Protocol.
+Rescue System - Lazarus Protocol v43.0 Platinum Gold.
+Agregador Forense: Sotéria (Nativo) + Aegis (Sandbox) + Lazarus (Triangulação).
 """
 import sys
 import os
-import json
-import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
-import hashlib
+import re
 import datetime
+import hashlib
 import logging
+import subprocess
 from pathlib import Path
 from typing import Dict, Any, Optional
-from subprocess import run as sub_run, Popen as sub_popen
+from subprocess import Popen as sub_popen
 from shutil import which as find_executable
-from doxoade.tools.doxcolors import Fore, Style
+
+# Importação protegida
+try:
+    import doxoade.tools.aegis.nexus_db as sqlite3 # noqa
+except ImportError:
+    sqlite3 = None
+
+from doxoade.tools.doxcolors import Fore, Style, Back
+
 __all__ = ['activate_protocol', 'analyze_crash']
 
 def run_git_command(args: list) -> Optional[str]:
-    """Executes git commands with UTF-8 enforcement (Aegis)."""
-    if not args:
-        return None
+    """Executa comandos git de forma segura."""
+    if not args: return None
     try:
         env = os.environ.copy()
         env['PYTHONIOENCODING'] = 'utf-8'
-        result = sub_run(['git'] + args, capture_output=True, text=True, encoding='utf-8', errors='replace', env=env, shell=False)
+        result = subprocess.run(['git'] + args, capture_output=True, text=True, encoding='utf-8', errors='replace', env=env, shell=False)
         return result.stdout.strip()
-    except Exception as e:
-        logging.debug(f'Git command failed: {e}')
-        return None
-
-def analyze_crash(traceback_text: str) -> Dict[str, Any]:
-    """Extracts forensic metadata from traceback (MPoT-5)."""
-    if not traceback_text:
-        logging.debug('Lazarus Failure: Traceback text is required.')
-        return {}
-    if not isinstance(traceback_text, str):
-        traceback_text = str(traceback_text)
-    lines = traceback_text.splitlines()
-    crash_info = {'file': None, 'line': None, 'error': lines[-1] if lines else 'Unknown Error'}
-    for line in reversed(lines):
-        if 'File "' in line and 'doxoade' in line:
-            parts = line.split('"')
-            if len(parts) >= 2:
-                crash_info['file'] = parts[1]
-                try:
-                    line_part = line.split('line ')[1].split(',')[0]
-                    crash_info['line'] = int(line_part)
-                except (IndexError, ValueError):
-                    pass
-            break
-    return crash_info
-
-def get_code_context(filepath: str, linenum: int, source_type: str='local') -> Optional[str]:
-    """
-    Retrieves code context (PASC-1.1).
-    Restores the 'lost' git context functionality.
-    """
-    if not filepath or not os.path.exists(filepath):
-        return None
-    try:
-        if source_type == 'git':
-            rel_path = os.path.relpath(filepath, os.getcwd()).replace('\\', '/')
-            content = run_git_command(['show', f'HEAD:{rel_path}'])
-        else:
-            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
-        if not content:
-            return None
-        lines = content.splitlines()
-        start = max(0, linenum - 3)
-        end = min(len(lines), linenum + 2)
-        context_str = ''
-        for i in range(start, end):
-            is_target = i == linenum - 1
-            marker = ' >> ' if is_target else '    '
-            color = Fore.RED if is_target and source_type == 'local' else Fore.GREEN if is_target else ''
-            context_str += f'{color}{marker}{i + 1:4} | {lines[i]}{Style.RESET_ALL}\n'
-        return context_str.rstrip()
-    except Exception as e:
-        logging.error(f'Context retrieval failed ({source_type}): {e}')
-        return None
-
-def perform_post_mortem(info: Dict[str, Any]):
-    """Collects forensic data and persists to DB (MPoT-5)."""
-    if not info or not info.get('file'):
-        raise ValueError('Invalid crash info for autopsy.')
-    print(f'\n{Fore.CYAN}[DOXOADE] 🔬 Performing digital autopsy...')
-    rel_path = os.path.relpath(info['file'], os.getcwd()).replace('\\', '/')
-    stable_content = run_git_command(['show', f'HEAD:{rel_path}'])
-    if not stable_content:
-        print(f'{Fore.YELLOW}   > [WARNING] Stable version unreachable.{Style.RESET_ALL}')
-        return
-    unique_str = f'{info['error']}:{info['line']}:{rel_path}'
-    crash_hash = hashlib.sha256(unique_str.encode('utf-8')).hexdigest()
-    _save_crash_to_db(crash_hash, stable_content, rel_path, info)
-
-def _save_crash_to_db(crash_hash: str, content: str, rel_path: str, info: dict):
-    """Internal DB persistence for Genesis engine (MPoT-17)."""
-    db_path = Path.home() / '.doxoade' / 'doxoade.db'
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        cursor.execute('INSERT OR REPLACE INTO solutions (finding_hash, stable_content, commit_hash, project_path, timestamp, file_path, message, error_line) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (crash_hash, content, 'RESCUE_REVERT', os.getcwd(), datetime.datetime.now(datetime.timezone.utc).isoformat(), rel_path, f'[CRASH] {info['error']}', info['line']))
-        conn.commit()
-        conn.close()
-        print(f'   {Fore.GREEN}> [MEMORY] Incident recorded for Genesis.{Style.RESET_ALL}')
-    except Exception as e:
-        logging.error(f'Autopsy DB write failed: {e}')
-
-def activate_protocol(error_text: str):
-    """Main entry point for Lazarus Protocol (PASC-10)."""
-    if error_text is None:
-        raise ValueError("activate_protocol: str 'error_text' não pode ser None.")
-    if not error_text:
-        return
-    print('\n' + Fore.RED + Style.BRIGHT + '!' * 60)
-    print('   [FATAL SYSTEM CRASH DETECTED]')
-    print('!' * 60 + Style.RESET_ALL)
-    info = analyze_crash(error_text)
-    if info['file']:
-        _render_dual_forensic_report(info)
-    print(f'\n{Fore.WHITE}{Style.BRIGHT}--- RESCUE OPTIONS ---{Style.RESET_ALL}')
-    print(f'{Fore.YELLOW}1.{Style.RESET_ALL} [GIT] Revert file to {Fore.GREEN}STABLE{Style.RESET_ALL} version.')
-    print(f'{Fore.YELLOW}2.{Style.RESET_ALL} [EDIT] Open editor to fix manually.')
-    print(f'{Fore.YELLOW}3.{Style.RESET_ALL} [INFO] View full traceback.')
-    _handle_user_choice(input(f'\n{Fore.CYAN}Choice (1-3): {Style.RESET_ALL}').strip(), info, error_text)
-
-def _render_dual_forensic_report(info: dict):
-    """Renders visual contrast between broken and stable code (Chief-Gold UI)."""
-    if info is None:
-        raise ValueError("_render_dual_forensic_report: dict 'info' não pode ser None.")
-    print(f'{Fore.RED}{Style.BRIGHT}REASON: {info['error']}{Style.RESET_ALL}')
-    print(f'{Fore.WHITE}LOC:    {info['file']}:{info['line']}{Style.RESET_ALL}')
-    print(f'\n{Fore.RED}{Style.BRIGHT}--- BROKEN CONTEXT (Local File) ---{Style.RESET_ALL}')
-    local_ctx = get_code_context(info['file'], info['line'], source_type='local')
-    print(local_ctx if local_ctx else '   [!] Could not read local file.')
-    print(f'\n{Fore.GREEN}{Style.BRIGHT}--- STABLE CONTEXT (Git HEAD) ---{Style.RESET_ALL}')
-    git_ctx = get_code_context(info['file'], info['line'], source_type='git')
-    print(git_ctx if git_ctx else '   [!] No Git history available.')
-
-def _handle_user_choice(choice: str, info: dict, original_error: str):
-    """Executes the chosen rescue action (MPoT-4)."""
-    if choice == '1' and info['file']:
-        perform_post_mortem(info)
-        print(f'{Fore.YELLOW}Reverting {info['file']}...{Style.RESET_ALL}')
-        run_git_command(['checkout', info['file']])
-        print(f'{Fore.GREEN}Reversion complete.{Style.RESET_ALL}')
-        save_crash_memory(info, 'REVERTED')
-    elif choice == '2' and info['file']:
-        _open_best_editor(info['file'], info['line'])
-    else:
-        print(f'\n{Fore.RED}--- ORIGINAL TRACEBACK ---{Style.RESET_ALL}')
-        print(original_error)
+    except Exception: return None
 
 def _open_best_editor(filepath: str, line: int):
-    """
-    Opens the best available editor (PASC-6.5).
-    Exhaustive search for Notepad++ on Windows.
-    """
-    abs_filepath = os.path.abspath(filepath)
-    if os.name != 'nt':
-        for ed in ['micro', 'nano', 'vim', 'vi']:
-            if find_executable(ed):
-                args = [abs_filepath + f':{line}'] if ed == 'micro' else [f'+{line}', abs_filepath]
-                sub_run([ed] + args, shell=False)
-                return
-    else:
-        npp_candidates = [find_executable('notepad++'), find_executable('notepad++.exe'), 'C:\\Program Files\\Notepad++\\notepad++.exe', 'C:\\Program Files (x86)\\Notepad++\\notepad++.exe']
-        npp_bin = next((p for p in npp_candidates if p and os.path.exists(p)), None)
+    """Abre o Notepad++ no Windows (Gold Standard) ou Micro/Vim no Linux."""
+    abs_path = os.path.abspath(filepath)
+    if os.name == 'nt':
+        # Localização exaustiva do Notepad++
+        npp_paths = [
+            find_executable('notepad++'),
+            r"C:\Program Files\Notepad++\notepad++.exe",
+            r"C:\Program Files (x86)\Notepad++\notepad++.exe"
+        ]
+        npp_bin = next((p for p in npp_paths if p and os.path.exists(p)), None)
+        
         if npp_bin:
-            sub_popen([npp_bin, '-n' + str(line), '-nosession', abs_filepath], shell=False)
-            print(f'   > [INFO] Opening Notepad++ at line {line}...')
+            print(f"   {Fore.CYAN}> [EDITOR] Invocando Notepad++ na linha {line}...{Style.RESET_ALL}")
+            sub_popen([npp_bin, f"-n{line}", "-nosession", abs_path], shell=False)
             return
-        print(f'{Fore.YELLOW}   > [AVISO] Notepad++ não encontrado. Usando Notepad padrão.')
-        sub_popen(['notepad.exe', abs_filepath], shell=False)
+        sub_popen(['notepad.exe', abs_path], shell=False)
+    else:
+        for ed in ['micro', 'nano', 'vim']:
+            if find_executable(ed):
+                args = [abs_path + f':{line}'] if ed == 'micro' else [f'+{line}', abs_path]
+                subprocess.run([ed] + args)
+                return
 
-def save_crash_memory(info: dict, action: str):
-    """Saves a local JSON crash report."""
-    cache_dir = Path(os.getcwd()) / '.doxoade_cache'
-    cache_dir.mkdir(exist_ok=True)
-    report = {'timestamp': datetime.datetime.now().isoformat(), 'file': info['file'], 'error': info['error'], 'action_taken': action}
+def get_code_context(filepath: str, linenum: int) -> Optional[str]:
+    """Recupera contexto de código local para o Dossiê."""
+    if not filepath or not os.path.exists(filepath): return None
     try:
-        with open(cache_dir / 'fatal_crash_report.json', 'w') as f:
-            json.dump(report, f, indent=2)
-    except Exception as e:
-        logging.error(f'Crash report save failed: {e}')
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+            lines = f.readlines()
+        start = max(0, linenum - 3)
+        end = min(len(lines), linenum + 2)
+        ctx = ""
+        for i in range(start, end):
+            is_target = (i == linenum - 1)
+            marker = " >> " if is_target else "    "
+            color = Fore.RED if is_target else Style.DIM
+            ctx += f"    {color}{marker}{i+1:4} | {lines[i].strip()}{Style.RESET_ALL}\n"
+        return ctx.rstrip()
+    except: return None
+
+def _render_platinum_dossier(d: dict, raw_tb: str):
+    """Interface Suprema de Auditoria - Cores e Detalhes de Alta Definição."""
+    w = 95
+    C, M, Y, R, W, G, RST = (Fore.CYAN+Style.BRIGHT, Fore.MAGENTA+Style.BRIGHT, 
+                             Fore.YELLOW+Style.BRIGHT, Fore.RED+Style.BRIGHT, 
+                             Fore.WHITE+Style.BRIGHT, Fore.GREEN+Style.BRIGHT, Style.RESET_ALL)
+
+    print(f"\n{C} " + "═" * (w-2) + " ")
+    print(f" {W}             DOSSIÊ CHIEF INSIGHT: RELATÓRIO DE INCIDENTE CRÍTICO               ")
+    print(f"{C} " + "═" * (w-2) + " " + RST)
+
+    # --- SEÇÃO 1: INFRAESTRUTURA ---
+    print(f"  {W}ID EVENTO  : {Y}{d['id']:<10}{W}      POSTURA : {d['posture']}")
+    print(f"  {W}HORÁRIO    : {Fore.BLUE}{d['timestamp']:<20}{W} ERRO    : {R}{d['technical_error']}{RST}")
+    print(f"  {W}CLASSE     : {Y}{d['error_type']}{RST}")
+
+    # --- SEÇÃO 2: HARDWARE (Sotéria) ---
+    if d['soteria']:
+        s = d['soteria']
+        print(f"\n  {M}■ TRIANGULAÇÃO DA SOTÉRIA (Hardware Audit):{RST}")
+        print(f"    {W}FALHA      : {R}{s.get('LEVEL', 'FATAL')}{RST} | {W}PID: {Y}{s.get('PID')}")
+        print(f"    {W}MOTIVO     : {R}{s.get('MOTIVO')}{RST} ({s.get('DETAIL', 'Signal Intercepted')})")
+
+    # --- SEÇÃO 3: EVIDÊNCIAS (Lazarus) ---
+    print(f"\n  {G}■ TRIANGULAÇÃO DE EVIDÊNCIAS (Lazarus Protocol):{RST}")
+    print(f"    {W}ALVO       : {Y}{os.path.basename(d['file'])}{RST}")
+    print(f"    {W}LOCALIZAÇÃO: {C}{d['file']}:{d['line']}{RST}\n")
+    
+    # Chama a função de contexto definida no mesmo arquivo
+    context = get_code_context(d['file'], d['line'])
+    if context: print(context)
+
+    # --- SEÇÃO 4: SEGURANÇA (Aegis) ---
+    if "AEGIS" in raw_tb:
+        print(f"\n  {R}🛡️  [AEGIS] Contexto de Intervenção:{RST}")
+        aegis_msg = re.search(r"Exception: (.*)", raw_tb)
+        if aegis_msg:
+            print(f"    {W}DETALHE    : {Style.DIM}{aegis_msg.group(1)}{RST}")
+
+    print(f"\n{C} " + "═" * (w-2) + " " + RST)
+def analyze_crash(traceback_text: str) -> Dict[str, Any]:
+    """Agregador Forense v43.2: Triangulação de Precisão e Extração de Erro."""
+    
+    # 1. Busca dados da Sotéria na Caixa Preta (Hardware)
+    sot_tags = {}
+    sot_file = Path(".doxoade/vulcan/last_crash.sot")
+    if sot_file.exists():
+        try:
+            content = sot_file.read_text(encoding='utf-8')
+            sot_tags = dict(re.findall(r"TAG_(.*?):\s*(.*)", content))
+            sot_file.unlink() 
+        except: pass
+
+    # 2. Extração do Nome Técnico do Erro
+    # Procura padrões como "OSError:", "ValueError:", etc no final do rastro
+    tech_error = "HARDWARE_SIGNAL" if sot_tags else "SYSTEM_FAULT"
+    tb_lines = [line.strip() for line in traceback_text.splitlines() if line.strip()]
+    
+    for line in reversed(tb_lines):
+        if ":" in line and not line.startswith("File"):
+            candidate = line.split(":")[0].strip()
+            if "Error" in candidate or "Exception" in candidate or "Violation" in candidate:
+                tech_error = candidate
+                break
+
+    # Se a Sotéria pegou um sinal específico de memória no Windows
+    if sot_tags.get('DETAIL') and "0xc0000005" in sot_tags['DETAIL']:
+        tech_error = "AccessViolation (Memory)"
+
+    # 3. Triangulação de Localização (Cena do Crime)
+    # PRIORIDADE 1: Rastro do Scribe (PRE-CALL) - Onde o código tentou entrar no abismo
+    # PRIORIDADE 2: Local reportado pela Sotéria
+    # PRIORIDADE 3: Traceback do Python
+    loc_raw = sot_tags.get('RASTRO_LOC') or sot_tags.get('LOCAL')
+    
+    if loc_raw and ":" in loc_raw and "N/A" not in loc_raw:
+        file_path, line = loc_raw.rsplit(':', 1)
+    else:
+        py_match = re.findall(r'File "(.*?)", line (\d+)', traceback_text)
+        user_frames = [f for f in py_match if "site-packages" not in f[0] and "Lib" not in f[0]]
+        file_path, line = user_frames[-1] if user_frames else py_match[-1] if py_match else ("N/A", 0)
+
+    dossier = {
+        'id': hashlib.md5(traceback_text.encode()).hexdigest()[:8].upper(),
+        'timestamp': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        'file': file_path.replace("\\", "/"),
+        'line': int(line),
+        'technical_error': tech_error,
+        'error_type': "VULCAN_NATIVE_SIGNAL" if sot_tags else "PYTHON_EXCEPTION",
+        'posture': "🛡️ HARDENED (Aegis Active)" if "AEGIS" in traceback_text else "STANDARD",
+        'soteria': sot_tags,
+        'raw_tb': traceback_text
+    }
+    
+    _render_platinum_dossier(dossier, traceback_text)
+    return dossier
+
+def activate_protocol(error_text: str):
+    """Ponto de entrada principal."""
+    if not error_text: return
+    
+    print('\n' + Fore.WHITE + Back.RED + '!' * 95 + Style.RESET_ALL)
+    print(Fore.WHITE + Back.RED + '   [FATAL SYSTEM CRASH DETECTED]'.center(95) + Style.RESET_ALL)
+    print(Fore.WHITE + Back.RED + '!' * 95 + Style.RESET_ALL)
+    
+    info = analyze_crash(error_text)
+    
+    print(f'\n{Fore.WHITE}{Style.BRIGHT}--- RESCUE OPTIONS ---{Style.RESET_ALL}')
+    print(f'{Fore.YELLOW}1.{Style.RESET_ALL} [GIT] Revert file to {Fore.GREEN}STABLE{Style.RESET_ALL} version.')
+    print(f'{Fore.YELLOW}2.{Style.RESET_ALL} [EDIT] Open {Fore.CYAN}Notepad++{Style.RESET_ALL} at error line.')
+    print(f'{Fore.YELLOW}3.{Style.RESET_ALL} [INFO] View full raw traceback.')
+    print(f'{Fore.YELLOW}0.{Style.RESET_ALL} [EXIT] Abort and do nothing.')
+    
+    choice = input(f'\n{Fore.CYAN}Choice (0-3): {Style.RESET_ALL}').strip()
+    
+    if choice == '1':
+        print(f'{Fore.YELLOW}Reverting {info["file"]}...{Style.RESET_ALL}')
+        run_git_command(['checkout', info['file']])
+    elif choice == '2':
+        _open_best_editor(info['file'], info['line'])
+    elif choice == '3':
+        print(f'\n{Fore.RED}--- RAW TRACEBACK ---{Style.RESET_ALL}')
+        print(error_text)
+    else:
+        print(f'{Fore.DIM}Sessão encerrada sem modificações.{Style.RESET_ALL}')
+
 if __name__ == '__main__':
     if len(sys.argv) > 1:
         try:
             with open(sys.argv[1], 'r', encoding='utf-8', errors='replace') as _f:
                 activate_protocol(_f.read())
         except Exception as _e:
-            logging.error(f'Rescue system entry failure: {_e}')
-
-def get_git_context(filepath, linenum):
-    """
-    Recupera o contexto 'estável' (HEAD) do arquivo via Git.
-    Isso mostra como o código era antes de quebrar.
-    """
-    try:
-        rel_path = os.path.relpath(filepath, os.getcwd()).replace('\\', '/')
-        content_old = run_git_command(['show', f'HEAD:{rel_path}'])
-        if not content_old:
-            return None
-        lines = content_old.splitlines()
-        total_lines = len(lines)
-        start = max(0, linenum - 2)
-        end = min(total_lines, linenum + 1)
-        context_str = ''
-        for i in range(start, end):
-            prefix = '>>' if i == linenum - 1 else '  '
-            context_str += f'   {prefix} {i + 1:4}: {lines[i]}\n'
-        return context_str.rstrip()
-    except Exception:
-        return None
-    finally:
-        print('.', end='', flush=True)
+            logging.error(f'Lazarus fatal: {_e}')

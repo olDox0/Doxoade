@@ -9,17 +9,38 @@ class SoteriaScribe:
         self.c_func_regex = re.compile(r'^(\w+[\s\*]+)(\w+)\s*\(([^)]*)\)\s*\{', re.MULTILINE)
         self.blacklist = {'soteria_mark', 'soteria_dispatch', 'soteria_init', 'main', 'PyInit', 'soteria_auto_ignite'}
 
+    def _get_indent(self, line: str) -> str:
+        """Calcula a indentação de uma linha para manter a gramática Python."""
+        return line[:len(line) - len(line.lstrip())]
+
+
     def instrument_pyx(self, content, filename):
-        """Injeta rastro nativo no Cython (PASC 8.18)."""
+        """Injeta rastro nativo no Cython protegendo contra caminhos Windows e one-liners."""
+        # [OURO] Normaliza o caminho para evitar a "Unicode Escape Plague" (\U)
+        safe_filename = filename.replace("\\", "/")
+        
         lines = content.splitlines()
-        new_lines = ['cdef extern from "soteria.h":', '    void soteria_mark(char* msg, char* file, int line)', '']
+#        new_lines = ['cdef extern from "soteria.h":', '    void soteria_mark(char* msg, char* file, int line)', '']
+        new_lines = [
+            'cdef extern from "soteria.h":', 
+            '    void soteria_mark(const char* msg, const char* file, int line)', 
+            ''
+        ]
         for i, line in enumerate(lines):
+            if "ctypes." in line:
+                indent = self._get_indent(line)
+                new_lines.append(f'{indent}soteria_mark("PRE-CALL: Chamada externa perigosa", "{safe_filename}", {i+1})')
             new_lines.append(line)
             match = self.pyx_func_regex.match(line)
             if match:
+                # Proteção contra one-liners
+                if ":" in line and line.split(":", 1)[1].strip():
+                    continue
+                
                 name = match.group('name')
                 indent = match.group('indent') + "    "
-                new_lines.append(f'{indent}soteria_mark("TRACEBACK: {name}", "{filename}", {i+1})')
+                # Usa o safe_filename aqui
+                new_lines.append(f'{indent}soteria_mark("TRACEBACK: {name}", "{safe_filename}", {i+1})')
         return "\n".join(new_lines)
 
     def instrument_code(self, content, filename):

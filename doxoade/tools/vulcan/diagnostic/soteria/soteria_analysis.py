@@ -1,7 +1,32 @@
 # -*- coding: utf-8 -*-
+# doxoade\tools\vulcan\diagnostic\soteria\soteria_analysis.py
 import os, sys, re
 
+def archive_crash_to_hades(nx_data):
+    """Salva a evidência do crash nativo para o motor Gênese aprender."""
+    try:
+        from doxoade.database import get_db_connection
+        import json
+        
+        conn = get_db_connection()
+        # Registra na tabela de incidentes para que a IA analise a causa raiz no futuro
+        conn.execute('''
+            INSERT INTO open_incidents (finding_hash, file_path, line, message, category, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (
+            nx_data.get('hash'),
+            nx_data.get('LOCAL'),
+            nx_data.get('LINE', 0),
+            f"[NATIVE_CRASH] {nx_data.get('DETAIL')}",
+            "VULCAN-MEMORY-PROBE",
+            datetime.datetime.now().isoformat()
+        ))
+        conn.commit()
+    except:
+        pass
+
 class SoteriaForensic:
+    """Analisador Forense Alfa-Gold do Doxoade."""
     def __init__(self):
         self.reset = "\033[0m"; self.red = "\033[1;31m"; self.cyan = "\033[1;36m"
         self.ylw = "\033[1;33m"; self.gray = "\033[90m"; self.grn = "\033[1;32m"; self.white = "\033[1;37m"
@@ -64,6 +89,10 @@ class SoteriaForensic:
                 if pts: print(self.get_code_context(pts[0][0], pts[0][1], window=0, title="ORIGEM"))
 
         # 4. ÁRVORE DE CHAMADAS
+        if pyx_file:
+            # CORREÇÃO: Removido o 'grn}' que causava o SyntaxError
+            print(f"  ARQUIVO: \033[1;32m{pyx_file}\033[0m | LINHA: \033[1;32m{pyx_line}\033[0m")
+            print(self.get_code_context(pyx_path, pyx_line, title="CÓDIGO ORIGINAL (.PYX)"))
         frames = re.findall(r"TAG_FRAME:\s*(.*)", nx)
         if frames:
             print(f"\n{self.cyan}■ CADEIA DE ENVOLVIMENTO (COMO CHEGAMOS AQUI):{self.reset}")

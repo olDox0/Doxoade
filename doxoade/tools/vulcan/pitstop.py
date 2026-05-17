@@ -114,7 +114,7 @@ class WarmupCache:
 def _forge_to_pyx(task: dict) -> dict:
     """
     Transforma um arquivo .py em .pyx (Tier 1) e opt_.py (Tier 2).
-    Versão Forense: Captura falhas de tradução com rastro completo.
+    Versão Corrigida: Resolve o erro de Closed File e variável indefinida.
     """
     import hashlib
     import re
@@ -129,46 +129,51 @@ def _forge_to_pyx(task: dict) -> dict:
     foundry = Path(task['foundry'])
     abs_path = file_path.resolve()
     
-    # Gerador de Assinatura Única (Doxoade Standard)
+    # 1. Gerador de Assinatura Única
     path_hash = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
     _safe_stem = re.sub('[^a-zA-Z0-9_]', '_', abs_path.stem)
     module_name = f'v_{_safe_stem}_{path_hash}'
     pyx_path = foundry / f'{module_name}.pyx'
     
-    # 1. Check de Elegibilidade
+    # 2. Check de Elegibilidade
     eligible, reason = AFVul(str(abs_path))
     if not eligible:
         return {'ok': False, 'skip': True, 'file': str(file_path), 'err': f'pulado: {reason}'}
 
     try:
-        # 2. Análise de Carga AST
+        # 3. Leitura e Análise AST (CORRIGIDO: uma única leitura)
         with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
-            tree = ast.parse(f.read())
+            content = f.read()
+        
+        tree = ast.parse(content) # Usa a string já lida
         node_count = sum(1 for _ in ast.walk(tree))
         
-        # LOG LIVE: Informa o início do processamento deste arquivo específico
         sys.stdout.write(f"   [FORGE] {file_path.name:<25} | Densidade: {node_count:>4} nodes...")
         sys.stdout.flush()
 
-        # 3. Forja do Código Nativo (Tier 1)
+        # 4. Forja do Código Nativo (Tier 1)
         forge = VForge(str(abs_path))
         pyx_code = forge.generate_source(str(abs_path))
         
         if not pyx_code:
              return {'ok': False, 'file': str(file_path), 'err': 'pyx_code vazio'}
 
+        # 5. Proteção Sotéria (Injetada no momento certo)
+        use_soteria = task.get('use_soteria', False)
+        if use_soteria:
+            try:
+                from .diagnostic.soteria.scribe import SoteriaScribe
+                scribe = SoteriaScribe()
+                # CORRIGIDO: Usa pyx_code (a string gerada pelo forge)
+                pyx_code = scribe.instrument_pyx(pyx_code, str(file_path))
+            except Exception as se:
+                sys.stdout.write(f" [Scribe Error: {se}]")
+
+        # Salva o arquivo .pyx final
         pyx_path.write_text(pyx_code, encoding='utf-8')
         
-        # 4. Geração do Fallback (Tier 2) - Python Otimizado
-        # Tenta localizar o root se não fornecido para o opt_cache
+        # 6. Geração do Fallback (Tier 2)
         project_root = task.get('project_root')
-        if not project_root:
-            cur = abs_path.parent
-            while cur != cur.parent:
-                if (cur / '.doxoade' / 'vulcan').exists():
-                    project_root = cur; break
-                cur = cur.parent
-
         if project_root:
             try:
                 from doxoade.tools.vulcan.opt_cache import generate_opt_py
@@ -176,14 +181,13 @@ def _forge_to_pyx(task: dict) -> dict:
             except: pass
 
         duration_ms = (time.perf_counter() - t_start) * 1000
-        
-        # Completa a linha de log com o tempo
         sys.stdout.write(f" [{duration_ms:.1f}ms]\n")
         sys.stdout.flush()
 
         return {
             'ok': True, 
             'file': str(file_path), 
+            'file_path': str(abs_path), # Vital para evitar o erro de NoneType no cache
             'module_name': module_name, 
             'nodes': node_count,
             'forge_ms': duration_ms
@@ -197,7 +201,8 @@ def _forge_to_pyx(task: dict) -> dict:
             'module_name': module_name,
             'err': str(e), 
             'traceback': traceback.format_exc(),
-            'file': str(file_path)
+            'file': str(file_path),
+            'file_path': str(abs_path) # Retorno seguro
         }
 
 def _batch_setup_content(entries: list[dict], extra_args: list[str], nthreads: int) -> str:
@@ -617,18 +622,18 @@ class PitstopEngine:
         candidate = core_root / 'venv' / 'Scripts' / 'python.exe' if os.name == 'nt' else sys.executable
         return str(candidate) if Path(candidate).exists() else sys.executable
 
-    def run(self, candidates: list[dict], max_workers: int | None=None, force_recompile: bool=False, on_result: Callable[[str, bool, str | None], None] | None=None) -> dict:
-        """
-        Executa pipeline PitStop completo com telemetria multidimensional.
-        """
+    def run(self, candidates, force_recompile=False, max_workers=None, streaming=False, use_soteria=False, on_result=None):
+        """ Executa pipeline PitStop com telemetria. Adicionado suporte use_soteria. """
         ensure_dirs(str(self.root))
         self.env.foundry.mkdir(parents=True, exist_ok=True)
         self.env.bin_dir.mkdir(parents=True, exist_ok=True)
+        
+        self.use_soteria = use_soteria
         n_workers = self._resolve_workers(max_workers)
         
-        # [MUDANÇA CRÍTICA 1] Instanciamos o compilador aqui para ele ser o dono da telemetria
         from .compiler import VulcanCompiler
         compiler = VulcanCompiler(self.env, pid_registry=self._pid_registry)
+        compiler.use_soteria = self.use_soteria
         
         stats: dict = {'total': len(candidates), 'cached': 0, 'stale': 0, 'success': 0, 'failed': 0, 'skipped': 0, 'forge_time': 0.0, 'compile_time': 0.0, 'total_time': 0.0}
         t_start = time.perf_counter()
@@ -646,22 +651,20 @@ class PitstopEngine:
 
         # --- FASE 1: FORGE (AST) ---
         t_forge = time.perf_counter()
-        forge_out = self._phase_forge(stale, n_workers)
+        # Repassamos a flag soteria para a fase de forge
+        forge_out = self._phase_forge(stale, n_workers) 
         stats['forge_time'] = round(time.perf_counter() - t_forge, 3)
         
         ready: list[dict] = []
         for r in forge_out:
+            file_path = r.get('file_path', 'unknown')
             if r.get('skip'):
                 stats['skipped'] += 1
-                if on_result:
-                    on_result(r['file'], False, r.get('err'))
+                if on_result: on_result(file_path, True, "Ignorado (Smart Skip)")
             elif not r['ok']:
                 stats['failed'] += 1
-                fname = r.get('name', 'desconhecido')
-                erro = r.get('err', 'Erro não especificado')
-                print(f"   {Fore.RED}✘ Falha no Forge [{fname}]: {erro}{Fore.RESET}")
-                if 'traceback' in r:
-                    print(f"{Style.DIM}{r['traceback']}{Style.RESET_ALL}")
+                if on_result: on_result(file_path, False, f"Falha no Forge: {r.get('err')}")
+                print(f"   {Fore.RED}✘ Falha no Forge [{r.get('name')}]: {r.get('err')}{Fore.RESET}")
             else:
                 ready.append(r)
 
@@ -672,7 +675,6 @@ class PitstopEngine:
 
         # --- FASE 2: BATCH COMPILE (Linkagem) ---
         t_compile = time.perf_counter()
-        # [MUDANÇA CRÍTICA 2] Passamos o objeto 'compiler' para a função
         compile_results = self._phase_batch_compile(ready, n_workers, compiler)
         stats['compile_time'] = round(time.perf_counter() - t_compile, 3)
 
@@ -690,18 +692,17 @@ class PitstopEngine:
 
         for entry in sorted_ready:
             name = entry['module_name']
-            file_ptr = entry.get('file', 'desconhecido') 
+            file_ptr = entry.get('file_path') or entry.get('file') 
             m = compiler.detailed_telemetry.get(name, {})
             
             nodes = entry.get('nodes', 0)
             f_ms = entry.get('forge_ms', 0)
             t_ms = m.get('transpile_ms', 0)
-            l_ms = m.get('link_ms', 0) # Se falhou, será 0 ou o tempo até a falha
+            l_ms = m.get('link_ms', 0)
             
             total_s = (f_ms + t_ms + l_ms) / 1000
             v_fundicao = (nodes / total_s) if total_s > 0 else 0
 
-            # Exibição do Mapa de Calor
             color = Fore.WHITE
             if total_s > 30: color = Fore.RED + Style.BRIGHT
             elif total_s > 10: color = Fore.YELLOW
@@ -711,17 +712,21 @@ class PitstopEngine:
                   f"{nodes:6d} │ {t_ms:7.0f}ms │ {l_ms:7.0f}ms │ "
                   f"{v_color}{v_fundicao:5.1f} n/s{Fore.RESET}")
             
-            # --- PROCESSAMENTO HONESTO DE RESULTADOS ---
+            # --- PROCESSAMENTO DE RESULTADOS ---
             res_pair = compile_results.get(name)
             ok = res_pair[0] if res_pair else False
             err = res_pair[1] if res_pair else "Falha na fundição"
 
             if ok:
                 stats['success'] += 1
-                self.cache.mark_compiled(file_ptr) # Sincronizado
+                if file_ptr: # TRAVA DE SEGURANÇA CONTRA NoneType
+                    self.cache.mark_compiled(file_ptr)
+                if on_result: on_result(file_ptr, True, f"OK ({v_fundicao:.1f} n/s)")
             else:
                 stats['failed'] += 1
-                self.cache.invalidate(file_ptr) # Invalida se o GCC falhou
+                if file_ptr: # TRAVA DE SEGURANÇA CONTRA NoneType
+                    self.cache.invalidate(file_ptr)
+                if on_result: on_result(file_ptr, False, err)
 
         stats['total_time'] = round(time.perf_counter() - t_start, 3)
         self.cache.save()
@@ -846,7 +851,11 @@ class PitstopEngine:
     def _phase_forge(self, candidates: list[dict], n_workers: int) -> list[dict]:
         import click
         results: list[dict] = []
-        tasks = [{'file_path': c['file'], 'foundry': str(self.env.foundry)} for c in candidates]
+        tasks = [{
+            'file_path': c['file'],
+            'foundry': str(self.env.foundry),
+            'use_soteria': self.use_soteria
+        } for c in candidates]
         
         with TPE(max_workers=n_workers) as executor:
             # Mapeamos os nomes para a barra

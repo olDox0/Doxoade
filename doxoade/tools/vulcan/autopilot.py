@@ -166,7 +166,7 @@ class VulcanAutopilot:
 
     def scan_and_optimize(self, candidates=None, force_recompile=False, max_workers: int | None=None,
                           use_pitstop: bool=True, streaming: bool=True, use_soteria=False):
-            """
+        """
         Parâmetros:
             use_pitstop  True  → usa PitstopEngine (batch compile, warm-up cache)
                          False → comportamento legado (1 subprocess por módulo)

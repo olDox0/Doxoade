@@ -49,12 +49,16 @@ def _sigint_handler(signum, frame):
 
 def _print_vulcan_forensic(scope: str, e: Exception):
     """Interface Forense Dual: Python Traceback + Sotéria Native Rescue (PASC 8.19)."""
-    
     # 1. TENTA O RESGATE NATIVO (Sotéria Mode)
     # PASC 6.6: Importação localizada para economizar RAM no N2808
-    from .diagnostic.soteria.engine import SoteriaForensic
-    forensic = SoteriaForensic()
-    
+    try:
+        from doxoade.tools.vulcan.soteria_engine import SoteriaForensic
+        forensic = SoteriaForensic()
+    except ImportError:
+        # Fallback se o motor não estiver no path
+        click.echo(f"{Fore.RED}[!] Erro Crítico: Motor Sotéria não localizado.{Style.RESET_ALL}")
+        forensic = None
+        
     # Captura saída de erro se o processo crashou (ex: CalledProcessError)
     output = ""
     if hasattr(e, 'stdout') and e.stdout: output += e.stdout

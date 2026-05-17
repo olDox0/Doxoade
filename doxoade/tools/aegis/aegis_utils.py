@@ -12,8 +12,11 @@ import os
 import builtins
 from pathlib import Path
 from typing import List, Dict
+
 from doxoade.tools.vulcan.meta_finder import install as vulcan_install
+from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.filesystem import _find_project_root
+
 __all__ = ['calculate_integrity_hash', 'restricted_safe_exec', 'simulate_taint_analysis', 'generate_exploit_poc', 'validate_execution_context']
 SOURCES = {'input', 'sys.argv', 'environ', 'get_json', 'args', 'read'}
 SINKS = {'eval', 'exec', 'os.system', 'subprocess.run', 'sub_run', 'sub_popen'}
@@ -201,6 +204,9 @@ def _validate_ast_safety(tree: ast.AST, allow_imports: bool):
 
 def _handle_sandbox_exception(e, filename=None):
     """Dispatcher Forense."""
+    if isinstance(e, OSError) and "access violation" in str(e).lower():
+        sys.stderr.write(f"\n{Fore.RED}🛡️  [AEGIS] Bloqueio de Segurança: Violação Proibida.{Style.RESET_ALL}\n")
+        return # Deixa o sinal fluir para o Lazarus
     if isinstance(e, (NameError, ImportError, ModuleNotFoundError, SyntaxError)):
         raise e
     import os as _os

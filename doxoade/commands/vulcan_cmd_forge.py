@@ -416,33 +416,34 @@ def _is_critical_cli_file(file_path):
 
 @click.command('ignite')
 @click.argument('path', required=False, type=click.Path(exists=True))
-@click.option('--soteria', is_flag=True, help='Ativa o escudo Sotéria (Rescue para C) com Traceback nativo.') # NOVO
-@click.option('--force', is_flag=True, help='Força a re-compilação de todos os alvos.')
-@click.option('--jobs', type=int, default=None, help='Número de workers (sobrescreve auto).')
-@click.option('--no-pitstop', is_flag=True, help='Usa compilação legada (1 processo por módulo).')
-@click.option('--streaming', is_flag=True, help='Forge e compilação em paralelo (melhor para > 15 módulos).')
-@click.option('--hybrid', is_flag=True, help='Compilação seletiva por função (HybridForge).')
-@click.option('--scan-only', is_flag=True, help='Com --hybrid: mostra candidatos sem compilar.')
-@click.option('--simd', is_flag=True, help='Ativa otimizações SIMD (AVX/SSE) na compilação.')
-@click.option('--simd-level', default='auto', type=click.Choice(['auto', 'native', 'sse2', 'avx', 'avx2', 'avx512f']), show_default=True, help='Nível SIMD máximo (padrão: auto-detecta).')
+@click.option(  '--soteria',    '-sot', is_flag=True, 
+              help="🛡️ Ativa o escudo Sotéria (Rescue para C) com Traceback nativo.")
+@click.option(  '--force',      '-f',   is_flag=True, 
+              help="Força a re-compilação de todos os alvos.")
+@click.option(  '--jobs',       '-j',   type=int, default=None, 
+              help="Número de workers (sobrescreve auto).")
+@click.option(  '--no-pitstop', '-np',  is_flag=True, 
+              help="Usa compilação legada (1 processo por módulo).")
+@click.option(  '--streaming',  '-st',  is_flag=True, 
+              help="Forge e compilação em paralelo (melhor para > 15 módulos).")
+@click.option(  '--hybrid',     '-h',   is_flag=True, 
+              help="Compilação seletiva por função (HybridForge).")
+@click.option(  '--scan-only',  '-so',  is_flag=True, 
+              help="Com --hybrid: mostra candidatos sem compilar.")
+@click.option(  '--simd',               is_flag=True, 
+              help="Ativa otimizações SIMD (AVX/SSE) na compilação.")
+@click.option(  '--simd-level', '-sil', default='auto', type=click.Choice(['auto', 'native', 'sse2', 'avx', 'avx2', 'avx512f']), show_default=True, 
+              help="Nível SIMD máximo (padrão: auto-detecta).")
 @click.pass_context
-def ignite(ctx, path, soteria, force, jobs, no_pitstop, streaming, hybrid, scan_only, simd, simd_level):
-    """Transforma código Python em binários de alta velocidade.
-
-    Modos:
-      padrão   → PitStop Engine
-      --hybrid → HybridForge (seletivo por função)
-      --simd   → injeta flags AVX/SSE2/NEON na compilação
-
-    Exemplos::
-
-    \x08
-      doxoade vulcan ignite --simd
-      doxoade vulcan ignite --hybrid --simd --simd-level avx2
-    """
+def ignite(ctx, path, soteria, force, jobs, no_pitstop, streaming, hybrid, scan_only,
+           simd, simd_level):
+    """Transforma código Python em binários de alta velocidade (Vulcan Core)."""
+    
     signal.signal(signal.SIGINT, _sigint_handler)
     root = _find_project_root(os.getcwd())
     target = path or root
+    
+    # 1. Configuração SIMD
     simd_ctx = _simd_context_or_none(simd, simd_level)
     if simd_ctx and _SIMD_AVAILABLE:
         eff = simd_ctx.effective_caps()
@@ -450,9 +451,12 @@ def ignite(ctx, path, soteria, force, jobs, no_pitstop, streaming, hybrid, scan_
         click.echo(f"  {Fore.MAGENTA}  flags:{Style.RESET_ALL} {Style.DIM}{' '.join(eff.cflags)}{Style.RESET_ALL}\n")
     elif simd and (not _SIMD_AVAILABLE):
         click.echo(f'  {Fore.YELLOW}⚠ --simd ignorado: módulos SIMD não disponíveis.{Style.RESET_ALL}')
+
+    # 2. Fluxo Híbrido (Seletivo por função)
     if hybrid:
         _patch_vulcan_forge()
-        click.echo(f'{Fore.YELLOW}{Style.BRIGHT}⬡ [VULCAN-HYBRID] ...{Style.RESET_ALL}')
+        click.echo(f'{Fore.YELLOW}{Style.BRIGHT}⬡ [VULCAN-HYBRID] Iniciando análise por função...{Style.RESET_ALL}')
+        
         registry = None
         try:
             from doxoade.tools.vulcan.regression_registry import RegressionRegistry
@@ -462,16 +466,16 @@ def ignite(ctx, path, soteria, force, jobs, no_pitstop, streaming, hybrid, scan_
                 click.echo(f"{Fore.MAGENTA}   > Registry: {Fore.RED}{r['excluded']} excluída(s){Style.RESET_ALL}  {Fore.YELLOW}{r['retry_aggressive']} retry-agressivo{Style.RESET_ALL}")
         except Exception:
             registry = None
+
         if scan_only:
-            click.echo(f'{Fore.CYAN}   > Modo: SCAN ONLY (sem compilação){Style.RESET_ALL}')
             _run_hybrid_with_optimizer(target, root, force, registry=registry)
             return
-        click.echo(f'{Fore.CYAN}   > Alvo : {target}{Style.RESET_ALL}')
-        click.echo(f'{Fore.CYAN}   > Modo : HÍBRIDO{Style.RESET_ALL}')
+
         _env_ctx = SIMDEnvironment(simd_ctx) if simd_ctx else _NullContext()
         with ExecutionLogger('vulcan_hybrid', root, ctx.params) as _:
             try:
                 with _env_ctx:
+                    # [TODO] Implementar suporte a Sotéria no HybridForge futuramente
                     _run_hybrid_with_optimizer(target=target, root=root, force=force, registry=registry)
             except KeyboardInterrupt:
                 _sigint_handler(None, None)
@@ -479,20 +483,29 @@ def ignite(ctx, path, soteria, force, jobs, no_pitstop, streaming, hybrid, scan_
                 _print_vulcan_forensic('HYBRID', e)
                 sys.exit(1)
         return
+
+    # 3. Fluxo Padrão (Full Module Ignition)
     with ExecutionLogger('vulcan_ignite', root, ctx.params) as _:
         click.echo(f'{Fore.YELLOW}{Style.BRIGHT}🔥 [VULCAN-IGNITION] ...{Style.RESET_ALL}')
+        
         if soteria:
-            click.echo(f'   {Fore.GREEN}🛡️  Sotéria: Escudo de Resgate Nativo ATIVADO.{Style.RESET_ALL}')
+            click.echo(f'   {Fore.MAGENTA}🛡️  Sotéria: Escudo de Resgate Nativo ATIVADO.{Style.RESET_ALL}')
+
+        # Validação de Ambiente
         from doxoade.tools.vulcan.diagnostic import VulcanDiagnostic
         diag = VulcanDiagnostic(root)
         ok, _ = diag.check_environment()
         if not ok:
             diag.render_report()
             sys.exit(1)
+
         from doxoade.tools.vulcan.autopilot import VulcanAutopilot
         _patch_vulcan_forge()
         autopilot = VulcanAutopilot(root)
+        
         candidates, mode = ([], 'AUTOMÁTICO')
+        
+        # Resolução de Alvos
         if path:
             abs_path = os.path.abspath(path)
             if os.path.isfile(abs_path):
@@ -504,42 +517,39 @@ def ignite(ctx, path, soteria, force, jobs, no_pitstop, streaming, hybrid, scan_
                 dnm = DNM(abs_path)
                 py_files = [str(f) for f in dnm.scan(extensions=['py'])]
                 critical_files = _batch_is_critical_cli(py_files)
+                
                 candidates = []
-                cli_skips = 0
-                internal_skips = 0
                 for f in py_files:
-                    if '.doxoade' in f or '.dnm' in f:
-                        internal_skips += 1
-                        continue
-                    if f in critical_files:
-                        cli_skips += 1
-                        continue
+                    if '.doxoade' in f or '.dnm' in f: continue
+                    if f in critical_files: continue
                     candidates.append({'file': f})
-                if internal_skips > 0:
-                    click.echo(f'   {Fore.CYAN}↷ {internal_skips} arquivo(s) internos (.doxoade) ignorados.{Style.RESET_ALL}')
-                if cli_skips > 0:
-                    click.echo(f'   {Fore.YELLOW}↷ {cli_skips} arquivo(s) CLI/Skip ignorados para preservar introspecção.{Style.RESET_ALL}')
-        engine_label = f'{Fore.YELLOW}LEGADO{Style.RESET_ALL}' if no_pitstop else f'{Fore.GREEN}PITSTOP{Style.RESET_ALL}' + (f' {Fore.CYAN}+streaming{Style.RESET_ALL}' if streaming else '')
+        
+        engine_label = f'{Fore.GREEN}PITSTOP{Style.RESET_ALL}' if not no_pitstop else f'{Fore.YELLOW}LEGADO{Style.RESET_ALL}'
         click.echo(f'{Fore.CYAN}   > Modo  : {mode}{Style.RESET_ALL}')
         click.echo(f'{Fore.CYAN}   > Engine: {engine_label}{Style.RESET_ALL}')
+
         _env_ctx = SIMDEnvironment(simd_ctx) if (simd_ctx and _SIMD_AVAILABLE) else _NullContext()
+        
         try:
             with _env_ctx:
-                # Agora a variável está associada corretamente
                 autopilot.scan_and_optimize(
                     candidates=candidates, 
                     force_recompile=force, 
                     max_workers=jobs, 
                     use_pitstop=not no_pitstop, 
                     streaming=streaming,
-                    use_soteria=soteria
+                    use_soteria=soteria # <-- A MÁGICA ACONTECE AQUI
                 )
+            
             click.echo(f'\n{Fore.GREEN}{Style.BRIGHT}✔ [VULCAN] Forja concluída.{Style.RESET_ALL}')
             if simd_ctx:
-                click.echo(f'   {Fore.MAGENTA}⬡ SIMD {simd_ctx.effective_caps().best.upper()} aplicado.{Style.RESET_ALL}')
+                click.echo(f'   {Fore.CYAN}⬡ SIMD {simd_ctx.effective_caps().best.upper()} aplicado.{Style.RESET_ALL}')
+        
         except KeyboardInterrupt:
             _sigint_handler(None, None)
         except Exception as e:
+            from doxoade.tools.error_info import handle_error
+            handle_error(e, context="ignite, erro no contrati com o autopilot", debug=True)
             _print_vulcan_forensic('IGNITE', e)
             sys.exit(1)
 
@@ -572,6 +582,8 @@ def vulcan_regression(reset, reset_all, purge_missing, output_json):
         else:
             registry.render_cli()
     except Exception as e:
+        from doxoade.tools.error_info import handle_error
+        handle_error(e, context="Erro no contrato com o regression_registry", debug=True)
         _print_vulcan_forensic('REGRESSION', e)
         sys.exit(1)
 
@@ -862,6 +874,8 @@ def vulcan_benchmark(path, runs, output_json, min_speedup, save, learn):
             if summary['retry_aggressive']:
                 click.echo(f"\n  {Fore.YELLOW}⬡ {summary['retry_aggressive']} função(ões) marcadas para retry-agressivo.{Style.RESET_ALL}")
     except Exception as e:
+        from doxoade.tools.error_info import handle_error
+        handle_error(e, context="erro no contrato com o hybrid_benchmark", debug=True)
         _print_vulcan_forensic('BENCHMARK', e)
         sys.exit(1)
 

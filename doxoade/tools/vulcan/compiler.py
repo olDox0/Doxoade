@@ -7,8 +7,8 @@ from pathlib import Path
 from setuptools import Extension
 
 from .diagnostic.soteria.scribe import SoteriaScribe
-from .diagnostic.soteria.engine import SoteriaForensic 
-
+from .diagnostic.soteria.soteria_analysis import SoteriaForensic
+from .buildcraft.dedalo_engine import DedaloEngine
 from doxoade.tools.doxcolors import Fore, Style
 
 COMPILATION_TELEMETRY = []
@@ -23,16 +23,17 @@ class VulcanCompiler:
         # Mantém compatibilidade com o sistema de monitoramento de processos
         self._pid_registry = pid_registry if pid_registry is not None else {}
         self.detailed_telemetry = {}
-        # --- [SOTÉRIA PATHS] ---
+        # soteria e DedaloEngine
         self.soteria_dir = Path(__file__).resolve().parent / "diagnostic" / "soteria"
         self.soteria_include = self.soteria_dir / "include"
-        self.soteria_src = self.soteria_dir / "src" / "soteria.c"
+#        self.soteria_src = self.soteria_dir / "src" / "soteria.c"
+        self.soteria_src_dir = self.soteria_dir / "src"
         self.scribe = SoteriaScribe()
         self.forensic = SoteriaForensic()
+        self.buildcraft = DedaloEngine(env.root)
         # Cache de caminhos do sistema (Otimização N2808)
         self.py_include = sysconfig.get_path('include')
         self.py_libs = os.path.join(sysconfig.get_config_var('installed_base'), "libs")
-        
         # Detecta a versão do Python instalada
         py_ver = sysconfig.get_config_var('VERSION')
         if py_ver:
@@ -116,6 +117,8 @@ class VulcanCompiler:
 
         # --- [ESTRATÉGIA SOTÉRIA 2.0: SHADOW PYX] ---
         if use_soteria:
+#            soteria_files = list(self.soteria_src_dir.glob("*.c"))
+#            sources.extend([str(f) for f in soteria_files])
             base_source_dir = foundry_path / "shadow_pyx"
             print(f"   🔮 [SOTÉRIA] Projetando sombra de segurança em: {base_source_dir.name}")
             self.scribe.generate_shadow(str(original_src), str(base_source_dir))
@@ -372,42 +375,49 @@ class VulcanCompiler:
         return lib_file
 
     def _run_gcc_direct(self, module_name: str, use_soteria: bool = True) -> bool:
+        """Executa linkagem direta via GCC com suporte a Sotéria."""
         import subprocess, time
         t_start = time.perf_counter()
         
-        # 1. Localização Dinâmica do Alvo (PASC 8.14)
-        # Tenta achar o .c na sombra (Sotéria) ou na foundry normal
+        # 1. Localização do arquivo C gerado pelo Cython
         c_file = self.env.foundry / f"{module_name}.c"
-        if use_soteria:
+        if getattr(self, 'use_soteria', False):
             shadow_c = self.env.foundry / "shadow_pyx" / f"{module_name}.c"
             if shadow_c.exists():
                 c_file = shadow_c
 
+        # Inicializa a lista de fontes com o arquivo principal
+        sources = [str(c_file)]
+
+        # 2. Injeta arquivos da Sotéria se o escudo estiver ativo
+        if getattr(self, 'use_soteria', False):
+            # Procura todos os .c na pasta de diagnóstico
+            soteria_files = list(self.soteria_src_dir.glob("*.c"))
+            sources.extend([str(f) for f in soteria_files])
+
         obj_file = self.env.bin_dir / f"{module_name}.pyd"
-        
-        # 2. Garante metais estáticos
         self._prepare_static_lib()
         lib_path = (self.env.foundry / "libnexus.a").resolve()
         
-        # 3. Configuração de Otimização
-        is_infra = any(x in module_name for x in ['compiler', 'pitstop', 'forge', 'benchmark', 'probe', 'optimizer'])
+        is_infra = any(x in module_name for x in ['compiler', 'pitstop', 'forge'])
         opt_level = '-Os' if is_infra else '-O2'
 
-        # 4. Comando de Linkagem Sotéria
+        # 3. Montagem do Comando (Usa a lista 'sources' de forma dinâmica)
+        # Convertemos a lista sources em uma lista de strings formatadas para o shell
+        formatted_sources = [f'"{s.replace("\\", "/")}"' for s in sources]
+        
         cmd = [
             'gcc', opt_level, '-shared', '-g',
             f'-I"{str(self.soteria_include).replace("\\", "/")}"',
             f'-I"{str(self.env.foundry).replace("\\", "/")}"',
-            f'-I"{str(self.env.foundry / "shadow_pyx").replace("\\", "/")}"', # Include para a sombra
+            f'-I"{str(self.env.foundry / "shadow_pyx").replace("\\", "/")}"',
             f'-I"{self.py_include.replace("\\", "/")}"',
-            f'-L"{self.py_libs.replace("\\", "/")}"',
-            f'"{str(c_file).replace("\\", "/")}"',
-            f'"{str(self.soteria_src).replace("\\", "/")}"',
+            f'-L"{self.py_libs.replace("\\", "/")}"'
+        ] + formatted_sources + [  # <--- INJEÇÃO ATÔMICA DOS FONTES
             f'"{str(lib_path).replace("\\", "/")}"',
             '-o', f'"{str(obj_file).replace("\\", "/")}"',
-            self.py_link_lib, '-ldbghelp', '-lpsapi', '-Wall'
         ]
-
+        cmd.extend([self.py_link_lib, '-ldbghelp', '-lpsapi', '-lkernel32', '-Wall'])
         try:
             res = subprocess.run(" ".join(cmd), capture_output=True, text=True, encoding='utf-8', errors='replace', shell=True)
             elapsed = (time.perf_counter() - t_start) * 1000
