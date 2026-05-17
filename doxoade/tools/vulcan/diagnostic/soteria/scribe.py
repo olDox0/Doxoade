@@ -44,21 +44,37 @@ class SoteriaScribe:
         return "\n".join(new_lines)
 
     def instrument_code(self, content, filename):
-        if 'soteria.h' not in content:
-            content = f'#include "soteria.h"\n{content}'
+        """Instrumentação v45.2: Injeção Linear (Pre-Statement) e Segura."""
+        safe_fn = filename.replace("\\", "/")
+        # Captura apenas linhas que REALMENTE executam operações de risco
+        risk_regex = re.compile(r'^\s*(\*[\w\d_]+\s*=|memset|memcpy|ctypes|string_at)', re.MULTILINE)
         
-        # Regex para capturar funções C e Cython
-        func_regex = re.compile(r'^((?:static\s+)?[a-zA-Z_]\w*[\s\*]+)([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*\{', re.MULTILINE)
+        lines = content.splitlines()
+        new_lines = []
+        
+        # Injeta headers necessários no topo
+        if "soteria.h" not in content:
+            new_lines.append('#include "soteria.h"\n#include <stdio.h>')
 
-        def _inject(match):
-            head, name, args = match.group(1), match.group(2), match.group(3)
-            if any(x in name for x in self.blacklist) or name.startswith('__Pyx'):
-                return match.group(0)
+        for i, line in enumerate(lines):
+            # 1. Entrada de Função
+            func_match = self.c_func_regex.match(line)
+            if func_match:
+                new_lines.append(line)
+                new_lines.append(f'    SOTERIA_ENTER("{func_match.group(2)}");')
+                continue
             
-            # Injeta o rastreador de pilha
-            return f'{head}{name}({args}) {{\n    SOTERIA_ENTER("{name}");'
-
-        return func_regex.sub(_inject, content)
+            # 2. Ponto de Risco (Injeção na linha ANTERIOR para garantir captura)
+            if risk_regex.search(line) and "soteria_mark" not in line:
+                indent = self._get_indent(line)
+                # Injetamos o rastro como uma instrução separada antes do comando
+                # Isso evita quebrar a sintaxe do C e garante o flush
+                new_lines.append(f'{indent}soteria_mark("CRITICAL_OP", "{safe_fn}", {i+1}); fflush(stdout);')
+                new_lines.append(line)
+            else:
+                new_lines.append(line)
+            
+        return "\n".join(new_lines)
 
     def generate_shadow(self, src_dir, shadow_dir):
         """Cria sombra instrumentada (PASC 8.17)."""

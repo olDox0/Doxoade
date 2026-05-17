@@ -60,14 +60,22 @@ def _open_best_editor(filepath: str, line: int):
                 subprocess.run([ed] + args)
                 return
 
+def _find_production_source(filename: str) -> Optional[Path]:
+    """Caçador de Fontes: Localiza o arquivo original no projeto."""
+    if not filename or filename == "N/A": return None
+    p = Path(filename)
+    if p.exists(): return p
+    # Busca recursiva ignorando lixo
+    candidates = [c for c in Path('.').rglob(p.name) if not any(x in str(c).lower() for x in ['.doxoade', 'venv', 'build'])]
+    return candidates[0] if candidates else None
+
 def get_code_context(filepath: str, linenum: int) -> Optional[str]:
-    """Recupera contexto de código local para o Dossiê."""
-    if not filepath or not os.path.exists(filepath): return None
+    """Extrai snippet de código com precisão Chief-Gold."""
+    path = _find_production_source(filepath)
+    if not path: return None
     try:
-        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-            lines = f.readlines()
-        start = max(0, linenum - 3)
-        end = min(len(lines), linenum + 2)
+        lines = path.read_text(encoding='utf-8', errors='ignore').splitlines()
+        start, end = max(0, linenum - 3), min(len(lines), linenum + 2)
         ctx = ""
         for i in range(start, end):
             is_target = (i == linenum - 1)
@@ -78,130 +86,85 @@ def get_code_context(filepath: str, linenum: int) -> Optional[str]:
     except: return None
 
 def _render_platinum_dossier(d: dict, raw_tb: str):
-    """Interface Suprema de Auditoria - Cores e Detalhes de Alta Definição."""
+    """Interface de Auditoria de Platina - O Laudo Final."""
     w = 95
     C, M, Y, R, W, G, RST = (Fore.CYAN+Style.BRIGHT, Fore.MAGENTA+Style.BRIGHT, 
                              Fore.YELLOW+Style.BRIGHT, Fore.RED+Style.BRIGHT, 
                              Fore.WHITE+Style.BRIGHT, Fore.GREEN+Style.BRIGHT, Style.RESET_ALL)
 
-    print(f"\n{C} " + "═" * (w-2) + " ")
+    print(f"\n " + "═" * (w-2) + " ")
     print(f" {W}             DOSSIÊ CHIEF INSIGHT: RELATÓRIO DE INCIDENTE CRÍTICO               ")
-    print(f"{C} " + "═" * (w-2) + " " + RST)
+    print(f" " + "═" * (w-2) + " " + RST)
 
-    # --- SEÇÃO 1: INFRAESTRUTURA ---
     print(f"  {W}ID EVENTO  : {Y}{d['id']:<10}{W}      POSTURA : {d['posture']}")
+    print(f"  {W}INVOCAÇÃO  : {C}{d['invocation']}{RST}")
     print(f"  {W}HORÁRIO    : {Fore.BLUE}{d['timestamp']:<20}{W} ERRO    : {R}{d['technical_error']}{RST}")
     print(f"  {W}CLASSE     : {Y}{d['error_type']}{RST}")
 
-    # --- SEÇÃO 2: HARDWARE (Sotéria) ---
+    if d.get('insight'):
+        print(f"\n  {Y}💡 [INSIGHT DE ENGENHARIA]:{RST}\n    {Style.DIM}{d['insight']}{RST}")
+
     if d['soteria']:
         s = d['soteria']
         print(f"\n  {M}■ TRIANGULAÇÃO DA SOTÉRIA (Hardware Audit):{RST}")
-        print(f"    {W}FALHA      : {R}{s.get('LEVEL', 'FATAL')}{RST} | {W}PID: {Y}{s.get('PID')}")
-        print(f"    {W}MOTIVO     : {R}{s.get('MOTIVO')}{RST} ({s.get('DETAIL', 'Signal Intercepted')})")
+        print(f"    {W}FALHA      : {R}{s.get('LEVEL', 'FATAL')}{RST} | {W}PID: {Y}{s.get('PID', 'N/A')}")
+        print(f"    {W}MOTIVO     : {R}{s.get('MOTIVO', 'SIGNAL')}{RST} ({s.get('DETAIL', 'No Detail')})")
 
-    # --- SEÇÃO 3: EVIDÊNCIAS (Lazarus) ---
     print(f"\n  {G}■ TRIANGULAÇÃO DE EVIDÊNCIAS (Lazarus Protocol):{RST}")
-    print(f"    {W}ALVO       : {Y}{os.path.basename(d['file'])}{RST}")
-    print(f"    {W}LOCALIZAÇÃO: {C}{d['file']}:{d['line']}{RST}\n")
+    actual_path = _find_production_source(d['file'])
+    display_path = str(actual_path) if actual_path else d['file']
+    print(f"    {W}ALVO       : {Y}{os.path.basename(display_path)}{RST}")
+    print(f"    {W}LOCALIZAÇÃO: {C}{display_path}:{d['line']}{RST}\n")
     
-    # Chama a função de contexto definida no mesmo arquivo
     context = get_code_context(d['file'], d['line'])
     if context: print(context)
+    print(f"\n " + "═" * (w-2) + " " + RST)
 
-    # --- SEÇÃO 4: SEGURANÇA (Aegis) ---
-    if "AEGIS" in raw_tb:
-        print(f"\n  {R}🛡️  [AEGIS] Contexto de Intervenção:{RST}")
-        aegis_msg = re.search(r"Exception: (.*)", raw_tb)
-        if aegis_msg:
-            print(f"    {W}DETALHE    : {Style.DIM}{aegis_msg.group(1)}{RST}")
-
-    print(f"\n{C} " + "═" * (w-2) + " " + RST)
-def analyze_crash(traceback_text: str) -> Dict[str, Any]:
-    """Agregador Forense v43.2: Triangulação de Precisão e Extração de Erro."""
-    
-    # 1. Busca dados da Sotéria na Caixa Preta (Hardware)
+def analyze_crash(traceback_text: str, exit_code: int = None) -> Dict[str, Any]:
+    """Agregador Forense Principal."""
     sot_tags = {}
-    sot_file = Path(".doxoade/vulcan/last_crash.sot")
-    if sot_file.exists():
-        try:
-            content = sot_file.read_text(encoding='utf-8')
-            sot_tags = dict(re.findall(r"TAG_(.*?):\s*(.*)", content))
-            sot_file.unlink() 
-        except: pass
+    sot_match = re.search(r"@SOTERIA_BEGIN@(.*?)@SOTERIA_END@", traceback_text, re.DOTALL)
+    if sot_match: sot_tags = dict(re.findall(r"TAG_(.*?):\s*(.*)", sot_match.group(1)))
 
-    # 2. Extração do Nome Técnico do Erro
-    # Procura padrões como "OSError:", "ValueError:", etc no final do rastro
-    tech_error = "HARDWARE_SIGNAL" if sot_tags else "SYSTEM_FAULT"
-    tb_lines = [line.strip() for line in traceback_text.splitlines() if line.strip()]
-    
-    for line in reversed(tb_lines):
-        if ":" in line and not line.startswith("File"):
-            candidate = line.split(":")[0].strip()
-            if "Error" in candidate or "Exception" in candidate or "Violation" in candidate:
-                tech_error = candidate
-                break
+    WIN_SIGNALS = {3221225477: "AccessViolation", 3221225621: "StackOverflow", 3221225481: "DivideByZero"}
+    tech_error = "PYTHON_EXCEPTION"
+    if exit_code in WIN_SIGNALS:
+        tech_error = WIN_SIGNALS[exit_code]
+        if not sot_tags: sot_tags['MOTIVO'] = f"SIGNAL_{hex(exit_code)}"
 
-    # Se a Sotéria pegou um sinal específico de memória no Windows
-    if sot_tags.get('DETAIL') and "0xc0000005" in sot_tags['DETAIL']:
-        tech_error = "AccessViolation (Memory)"
+    py_match = re.findall(r'File "(.*?)", line (\d+)', traceback_text)
+    user_frames = [f for f in py_match if not any(x in f[0] for x in ["site-packages", "Lib"])]
+    file_path, line = user_frames[-1] if user_frames else py_match[-1] if py_match else ("N/A", 0)
 
-    # 3. Triangulação de Localização (Cena do Crime)
-    # PRIORIDADE 1: Rastro do Scribe (PRE-CALL) - Onde o código tentou entrar no abismo
-    # PRIORIDADE 2: Local reportado pela Sotéria
-    # PRIORIDADE 3: Traceback do Python
-    loc_raw = sot_tags.get('RASTRO_LOC') or sot_tags.get('LOCAL')
-    
-    if loc_raw and ":" in loc_raw and "N/A" not in loc_raw:
-        file_path, line = loc_raw.rsplit(':', 1)
-    else:
-        py_match = re.findall(r'File "(.*?)", line (\d+)', traceback_text)
-        user_frames = [f for f in py_match if "site-packages" not in f[0] and "Lib" not in f[0]]
-        file_path, line = user_frames[-1] if user_frames else py_match[-1] if py_match else ("N/A", 0)
+    # Resolve rastro Sotéria para localização se disponível
+    if sot_tags.get('RASTRO_LOC') and "N/A" not in sot_tags['RASTRO_LOC']:
+        file_path, line = sot_tags['RASTRO_LOC'].rsplit(':', 1)
 
     dossier = {
         'id': hashlib.md5(traceback_text.encode()).hexdigest()[:8].upper(),
         'timestamp': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        'file': file_path.replace("\\", "/"),
-        'line': int(line),
+        'invocation': f"doxoade {' '.join(sys.argv[1:])}",
+        'file': file_path, 'line': int(line),
         'technical_error': tech_error,
-        'error_type': "VULCAN_NATIVE_SIGNAL" if sot_tags else "PYTHON_EXCEPTION",
-        'posture': "🛡️ HARDENED (Aegis Active)" if "AEGIS" in traceback_text else "STANDARD",
-        'soteria': sot_tags,
-        'raw_tb': traceback_text
+        'error_type': "VULCAN_NATIVE_SIGNAL" if (sot_tags or exit_code) else "PYTHON_EXCEPTION",
+        'posture': "🛡️  HARDENED" if "AEGIS" in traceback_text else "STANDARD",
+        'insight': None, 'soteria': sot_tags
     }
-    
     _render_platinum_dossier(dossier, traceback_text)
     return dossier
 
-def activate_protocol(error_text: str):
-    """Ponto de entrada principal."""
+def activate_protocol(error_text: str, exit_code: int = None):
     if not error_text: return
-    
-    print('\n' + Fore.WHITE + Back.RED + '!' * 95 + Style.RESET_ALL)
-    print(Fore.WHITE + Back.RED + '   [FATAL SYSTEM CRASH DETECTED]'.center(95) + Style.RESET_ALL)
-    print(Fore.WHITE + Back.RED + '!' * 95 + Style.RESET_ALL)
-    
-    info = analyze_crash(error_text)
-    
-    print(f'\n{Fore.WHITE}{Style.BRIGHT}--- RESCUE OPTIONS ---{Style.RESET_ALL}')
-    print(f'{Fore.YELLOW}1.{Style.RESET_ALL} [GIT] Revert file to {Fore.GREEN}STABLE{Style.RESET_ALL} version.')
-    print(f'{Fore.YELLOW}2.{Style.RESET_ALL} [EDIT] Open {Fore.CYAN}Notepad++{Style.RESET_ALL} at error line.')
-    print(f'{Fore.YELLOW}3.{Style.RESET_ALL} [INFO] View full raw traceback.')
-    print(f'{Fore.YELLOW}0.{Style.RESET_ALL} [EXIT] Abort and do nothing.')
-    
+    print('\n' + Back.RED + '!' * 95 + Style.RESET_ALL)
+    print(Back.RED + '[FATAL SYSTEM CRASH DETECTED]'.center(95) + Style.RESET_ALL)
+    print(Back.RED + '!' * 95 + Style.RESET_ALL)
+    info = analyze_crash(error_text, exit_code=exit_code)
+    print(f'\n{Fore.WHITE}--- RESCUE OPTIONS ---\n{Fore.YELLOW}1. [GIT] Revert  2. [EDIT] Notepad++  3. [INFO] Traceback  0. [EXIT]{Style.RESET_ALL}')
     choice = input(f'\n{Fore.CYAN}Choice (0-3): {Style.RESET_ALL}').strip()
-    
-    if choice == '1':
-        print(f'{Fore.YELLOW}Reverting {info["file"]}...{Style.RESET_ALL}')
-        run_git_command(['checkout', info['file']])
+    if choice == '1': subprocess.run(['git', 'checkout', info['file']])
     elif choice == '2':
-        _open_best_editor(info['file'], info['line'])
-    elif choice == '3':
-        print(f'\n{Fore.RED}--- RAW TRACEBACK ---{Style.RESET_ALL}')
-        print(error_text)
-    else:
-        print(f'{Fore.DIM}Sessão encerrada sem modificações.{Style.RESET_ALL}')
+        npp = next((p for p in [r"C:\Program Files\Notepad++\notepad++.exe", "notepad++.exe"] if os.path.exists(p) or __import__('shutil').which(p)), 'notepad.exe')
+        subprocess.Popen([npp, f"-n{info['line']}", os.path.abspath(info['file'])], shell=False)
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:

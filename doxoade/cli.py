@@ -80,7 +80,7 @@ class DoxoadeLazyGroup(click.Group):
         'log': 'doxoade.commands.utils:log', 
         'maestro': 'doxoade.commands.maestro:maestro', 
         'merge': 'doxoade.commands.git_merge:merge', 
-        'migrate-db': 'doxoade.commands.migrate_db:migrate_db', 
+        'metal': 'doxoade.commands.metalcraft:metal_group',
         'mirror': 'doxoade.commands.mirror:mirror', 
         'mk': 'doxoade.commands.utils:mk', 
         'moddify': 'doxoade.commands.moddify:moddify', 

@@ -1,0 +1,17 @@
+# Nexus Metalcraft Configuration
+[project]
+name = "doxoade"
+version = "1.0.0"
+type = "executable"
+
+[compiler]
+engine = "gcc"
+std = "c11"
+opt = "O2"
+shield = true         # Ativa Sotéria (Resgate Nativo)
+incremental = true    # Recompila apenas mudanças
+
+[paths]
+sources = ["src/*.c"]
+headers = ["include/"]
+output  = "bin/"
