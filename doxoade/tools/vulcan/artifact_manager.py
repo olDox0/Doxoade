@@ -48,9 +48,11 @@ def quarantine(project_root: str, pyd_path: Path, reason: str):
     _log(project_root, f'QUARANTINED {pyd_path.name} (Reason: {reason})')
     return dst
 
-def _run_probe_subprocess(project_root: str, module_name: str) -> dict:
+#def _run_probe_subprocess(project_root: str, module_name: str) -> dict:
+def _run_probe_subprocess(project_root: str, module_name: str, python_exe: str=None, timeout: int=10) -> dict:
     """Executa a sonda de importação em um subprocesso seguro."""
     python_exe = sys.executable
+    exe = python_exe or sys.executable
     probe_script = Path(__file__).resolve().parent / 'probe_import.py'
     if not probe_script.exists():
         return {'ok': False, 'error': 'probe_script_not_found'}
@@ -70,12 +72,16 @@ def _run_probe_subprocess(project_root: str, module_name: str) -> dict:
         exc_trace(exc_tb)
         return {'ok': False, 'error': f'Probe execution failed: {type(e).__name__}'}
 
-def probe_and_promote(project_root: str, module_name: str, pyd_path: Path):
+def probe_and_promote(project_root: str, module_name: str, pyd_path: Path, python_exe: str=None, timeout: int=10):
     """
-    Roda a sonda no binário. Se passar, promove para 'bin'. Se falhar, para 'quarantine'.
+    Roda a sonda no binário. Se passar, promove para 'bin'.
+    [FIX] Adicionado python_exe e timeout para compatibilidade com auto_repair.
     """
     promoted_path = promote_to_bin(project_root, pyd_path)
-    probe_result = _run_probe_subprocess(project_root, module_name)
+    
+    # Passa o python_exe se fornecido, senão usa o padrão
+    probe_result = _run_probe_subprocess(project_root, module_name, python_exe=python_exe, timeout=timeout)
+    
     if probe_result.get('ok'):
         _log(project_root, f'PROBE-OK: {module_name} is valid.')
         return {'ok': True, 'action': 'promoted', 'path': str(promoted_path)}

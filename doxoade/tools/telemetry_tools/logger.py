@@ -3,10 +3,30 @@ import time
 import os
 import sys
 import hashlib
+import json
 from datetime import datetime
 import click
 
-# PASC-6.6: Imports movidos para dentro do __exit__ para evitar circularidade e acelerar boot
+def chief_heartbeat(subsystem: str, action: str, details: dict):
+    """Registra uma operação atômica para auditoria de correção."""
+    try:
+        # Garante que o diretório de logs existe na raiz do projeto
+        log_dir = os.path.join(os.getcwd(), '.doxoade', 'logs')
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, 'chief_operations.jsonl')
+        
+        entry = {
+            "ts": datetime.now().isoformat(),
+            "sys": subsystem.upper(),
+            "act": action.upper(),
+            "data": details,
+            "pid": os.getpid()
+        }
+        
+        with open(log_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+    except Exception:
+        pass # Nunca deve travar o sistema principal
 
 class ExecutionLogger:
     def __init__(self, command_name, path, arguments):

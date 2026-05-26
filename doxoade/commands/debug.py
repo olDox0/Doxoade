@@ -4,19 +4,34 @@ Debug Suite v2.1 - Chief Gold Orchestrator.
 Compliance: MPoT-1, PASC-1.
 """
 import click
+import os
+from doxoade.tools.doxcolors import Fore, Style
 
 @click.command('debug')
-@click.argument('script', required=False) # Agora script é opcional se usar --intern
-@click.option(  '--args',  help='Args do script.')
-@click.option(  '--watch', help='Monitora uma variável em tempo real.')
-@click.option(  '--intern',      '-i',                help='Executa e depura um comando interno. Ex: --intern "check ."')
-@click.option(  '--bottleneck',  '-b',  is_flag=True, help='Exibe linhas com tempo por linha.')
-@click.option(  '--no-compress', '-nc', is_flag=True, help='Desativa compressão de loops repetidos.')
-@click.option(  '--profile',     '-p',  is_flag=True, help='Perfil de CPU (tempo).')
-@click.option(  '--memory',      '-m',  is_flag=True, help='Autópsia profunda de Memória (GC + Tracebacks).')
-@click.option(  '--threshold',   '-t',  type=float, default=0.0, help='Filtra linhas abaixo de N ms.')
-def debug(script, intern, **kwargs):
-# def debug(script, args, watch, bottleneck, no_compress, profile, memory, threshold):
+@click.argument('script', required=False)
+@click.option(  '--args', 'target_args',
+                help="Args do script.")
+@click.option(  '--watch', 
+                help="Monitora uma variável em tempo real.")
+@click.option(  '--intern',      '-i',                
+                help="Executa e depura um comando interno. Ex: --intern 'check .'")
+@click.option(  '--bottleneck',  '-b',  is_flag=True, 
+                help="Exibe linhas com tempo por linha.")
+@click.option(  '--no-compress', '-nc', is_flag=True, 
+                help="Desativa compressão de loops repetidos.")
+@click.option(  '--profile',     '-p',  is_flag=True, 
+                help="Perfil de CPU (tempo).")
+@click.option(  '--memory',      '-m',  is_flag=True, 
+                help="Autópsia profunda de Memória (GC + Tracebacks).")
+@click.option(  '--threshold',   '-t',  type=float, default=0.0, 
+                help="Filtra linhas abaixo de N ms.")
+@click.option(  '--sniff',                            
+                help="Monitora I/O e Variáveis de um arquivo específico ao vivo.")
+@click.option('--audit-rescue', is_flag=True, 
+                help="Executa necropsia completa no sistema de resgate.")
+@click.option('--meta-analysis', is_flag=True, 
+                help="Executa meta diagnostico sob o sistema lazarus.")
+def debug(script, intern, audit_rescue, meta_analysis, **kwargs):
     """🩺 Autópsia Forense, Monitoramento, CPU ou Memória (MPoT-5)."""
     from .debug_systems.debug_engine import execute_debug
     
@@ -25,6 +40,32 @@ def debug(script, intern, **kwargs):
     
     if not target:
         click.echo(Fore.RED + "Erro: Forneça um script ou use --intern 'comando'.")
+        return
+
+    if sniff:
+        from ..probes.sniper_probe import run_sniping
+        click.echo(f"{Fore.PRIMARY}🎯 [SNIPER LENS] Focando em: {sniff}{Style.RESET_ALL}")
+        run_sniping(script, sniff, args_str=target_args)
+        return
+
+    if audit_rescue or meta_analysis:
+        flag = "--audit-rescue" if audit_rescue else "--meta-analysis"
+        # PASC 6.6: Localiza o script de diagnótico
+        diag_script = "soteria_diagnose.py" if audit_rescue else "meta_analysis.py"
+        path = os.path.join(os.path.dirname(__file__), "..", "tools", "vulcan", "diagnostic", "soteria", diag_script)
+        import subprocess
+        subprocess.run([sys.executable, path], check=False)
+        return
+
+    if not script and not intern:
+        click.echo(Fore.RED + "Erro: Forneça um script ou use uma flag de auditoria.")
+        return
+
+    if meta_analysis:
+        # PASC 6.6: Caminho dinâmico
+        path = os.path.join(os.path.dirname(__file__), "..", "tools", "vulcan", "diagnostic", "soteria", "meta_analysis.py")
+        import subprocess
+        subprocess.run([sys.executable, path], check=False)
         return
 
     execute_debug(target, is_internal=is_internal, **kwargs)

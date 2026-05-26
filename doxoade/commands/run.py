@@ -14,6 +14,7 @@ from doxoade.tools.doxcolors import Fore, Style
 
 @click.command('run')
 @click.argument('script', type=click.Path(exists=True))
+@click.argument('args', nargs=-1, type=click.UNPROCESSED) # <--- ADICIONE ESTA LINHA
 @click.option('--flow', '-fl', is_flag=True, help='Rastro de linhas.')
 @click.option('--flow-val', is_flag=True, help='Inspeção de variáveis.')
 @click.option('--flow-import', is_flag=True, help='Rastro de I/O.')
@@ -26,7 +27,7 @@ from doxoade.tools.doxcolors import Fore, Style
 @click.option('--no-vulcan', is_flag=True, help='Desativa o Turbo Nativo.')
 @click.option('--test-mode', is_flag=True, help='Autoriza scripts de teste.')
 @click.pass_context
-def run(ctx, script: str, **kwargs):
+def run(ctx, script, args, **kwargs):
     """Executor Universal v83.5: Decisão Única de Fluxo com Controle de Célula de Carga."""
     from ..rescue_systems.execution_context import ExecutionContext, ExecutionMode
     abs_path = os.path.abspath(script)
@@ -51,7 +52,7 @@ def run(ctx, script: str, **kwargs):
             os.environ['DOXOADE_AUTHORIZED_RUN'] = '1'
 
             # 2. Tenta execução como C/C++ (Warden aplicado internamente no subprocesso)
-            if maybe_run_c_lang(abs_path, limits=limits, flow=kwargs.get('flow')):
+            if maybe_run_c_lang(abs_path, limits=limits, flow=kwargs.get('flow'), extra_args=list(args)):
                 return
 
             # 3. Se houver flags de flow para Python

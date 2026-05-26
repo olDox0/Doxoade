@@ -1,57 +1,92 @@
+// doxoade\tools\vulcan\diagnostic\soteria\src\soteria_trace.c
 #define SOTERIA_CORE
 #include "../include/soteria.h"
 #include <stdio.h>
 #include <string.h>
 #include <windows.h>
 
-static const char* g_n_stack[16];
-static const char* g_n_files[16];
-static int g_n_lines[16];
-static int g_s_ptr = 0;
-static unsigned long g_cached_pid = 0;
-static char g_cached_cmd[512] = "N/A";
+// --- ESTADO ISOLADO POR THREAD (Pilha de Software) ---
+#ifdef _MSC_VER
+    static __declspec(thread) const char* g_n_stack[16];
+    static __declspec(thread) const char* g_n_files[16];
+    static __declspec(thread) int         g_n_lines[16];
+    static __declspec(thread) int         g_s_ptr = 0;
+    __declspec(thread) char g_last_loc[256] = "N/A";
+    static __declspec(thread) char g_last_var[128] = "N/A";
+    static __declspec(thread) char g_last_var_snap[128] = "N/A";
+#else
+    static __thread const char* g_n_stack[16];
+    static __thread const char* g_n_files[16];
+    static __thread int         g_n_lines[16];
+    static __thread int         g_s_ptr = 0;
+    __thread char g_last_loc[256] = "N/A";
+    static __thread char g_last_var[128] = "N/A";
+    static __thread char g_last_var_snap[128] = "N/A";
+#endif
 
-// Captura a identidade no início (PASC 8.19 Fix)
-void soteria_capture_identity() {
-    if (g_cached_pid != 0) return;
-    g_cached_pid = GetCurrentProcessId();
-    strncpy(g_cached_cmd, GetCommandLineA(), 511);
+// Estrutura de frame expandida
+typedef struct {
+    const char* func;
+    const char* file;
+    int line;
+    char var_name[32];
+    long long var_val;
+} sot_frame_t;
+
+// Função chamada pelo Scribe quando encontra um ponto de risco com variável
+void soteria_mark_var(const char* var_name, long long value, const char* file, int line) {
+    // Salva o estado da variável no buffer da thread
+    snprintf(g_last_var_snap, 127, "%s = %lld (0x%llx)", var_name, value, value);
+    // Atualiza o local do rastro para precisão
+    snprintf(g_last_loc, 255, "%s:%d", file, line);
 }
 
 void soteria_push(const char* func, const char* file, int line) {
+    #ifdef _MSC_VER
+        static __declspec(thread) int in_soteria = 0;
+    #else
+        static __thread int in_soteria = 0;
+    #endif
+
+    if (in_soteria) return; 
+    in_soteria = 1;
+
+    // Apenas gravação em memória. Zero I/O de disco/terminal aqui.
     if (g_s_ptr < 16) {
-        g_n_stack[g_s_ptr] = func; g_n_files[g_s_ptr] = file; g_n_lines[g_s_ptr] = line;
+        g_n_stack[g_s_ptr] = func;
+        g_n_files[g_s_ptr] = file;
+        g_n_lines[g_s_ptr] = line;
         g_s_ptr++;
     }
+
+    in_soteria = 0;
 }
 
-void soteria_payload(const char* level, const char* motive, const char* detail, const char* file, int line, const char* func) {
-    if (g_cached_pid == 0) {
-        g_cached_pid = GetCurrentProcessId();
-        strncpy(g_cached_cmd, GetCommandLineA(), 511);
-    }
-
-    printf("\n@SOTERIA_BEGIN@\n");
-    
-    FILE *f = fopen(".doxoade/vulcan/last_crash.sot", "w");
-    if (f) {
-        fprintf(f, "TAG_LEVEL: %s\nTAG_PID: %lu\nTAG_MOTIVO: %s\nTAG_DETAIL: %s\nTAG_LOCAL: %s:%d\nTAG_FUNC: %s\n", 
-                level, g_cached_pid, motive, detail, file, line, func);
-        fclose(f);
-    }
-
-    for (int i = g_s_ptr - 1; i >= 0; i--) {
-        printf("TAG_FRAME: %d | %s | %s:%d\n", i, g_n_stack[i], g_n_files[i], g_n_lines[i]);
-    }
-    
-    if (g_s_ptr > 0) {
-        printf("TAG_RASTRO_MSG: TRACEBACK: %s\nTAG_RASTRO_LOC: %s:%d\n", g_n_stack[g_s_ptr-1], g_n_files[g_s_ptr-1], g_n_lines[g_s_ptr-1]);
-    }
-    printf("@SOTERIA_END@\n");
-    fflush(stdout);
-}
-
+// Certifique-se de que a variável g_last_loc está sendo preenchida:
 void soteria_mark(const char* msg, const char* file, int line) {
-    // Reutiliza a lógica de push para registrar o rastro no topo da pilha
-    soteria_push(msg, file, line);
+    if (!file) return;
+    // Salva o local exato na memória (Thread Safe)
+    snprintf(g_last_loc, 255, "%s:%d", file, line);
+    
+    // Opcional: empilha no rastro se for um marco importante
+   // soteria_push(msg, file, line);
+}
+
+// Na função de dump, garanta a impressão da tag:
+void soteria_dump_stack_trace() {
+    if (g_s_ptr > 0) {
+        fprintf(stdout, "TAG_RASTRO_LOC: %s\n", g_last_loc);
+        for (int i = g_s_ptr - 1; i >= 0; i--) {
+            fprintf(stdout, "TAG_FRAME: %d | %s | %s:%d\n", i, g_n_stack[i], g_n_files[i], g_n_lines[i]);
+            // Se for o frame do topo (onde o erro ocorreu), envia o valor da variável
+            if (i == g_s_ptr - 1 && strcmp(g_last_var_snap, "N/A") != 0) {
+                fprintf(stdout, "TAG_FRAME_VAR_%d: %s\n", i, g_last_var_snap);
+            }
+        }
+    }
+    // No dump_stack_trace, imprimir a variável se ela existir:
+    if (g_n_stack[i].var_val != 0) {
+        fprintf(stdout, "TAG_FRAME_VAR: %s = %lld (0x%llx)\n", 
+                g_n_stack[i].var_name, g_n_stack[i].var_val, g_n_stack[i].var_val);
+    }
 }

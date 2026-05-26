@@ -34,13 +34,16 @@ class DNM:
     Autoridade central para rastreamento de arquivos e aplicação de regras de ignore.
     """
     SYSTEM_IGNORES = {
-        '__pycache__', '.git', '.hg', '.svn', '.tox', '.venv', '.doxoade',
-        'venv', 'pytest_temp_dir', 'foundry', 'bin', 'recovery_zone',
-        'tmp', 'env', 'node_modules', '.idea', '.vscode', '.doxoade_cache',
+        '__pycache__', '.git', '.hg', '.svn', '.tox', '.venv',
+        'venv', 'pytest_temp_dir', 'recovery_zone',
+        'tmp', 'env', 'node_modules', '.idea', '.vscode',
         'dist', 'build', 'doxoade.egg-info', 'htmlcov', '.pytest_cache',
-        'thirdparty',
+        'thirdparty', 'nppBackup'
     }
-
+    FORGE_JUNK = {
+        'foundry', 'opt_py', 'staging', 'lib_bin', 
+        '.doxoade_cache', 'c_lang_build', 'obj'
+    }
     def __init__(self, root_path: str='.'):
         self.root = Path(root_path).resolve()
         self.ignore_spec = self._load_ignore_spec()
@@ -70,50 +73,45 @@ class DNM:
         return pathspec.PathSpec.from_lines('gitwildmatch', patterns)
 
     def is_ignored(self, file_path) -> bool:
-        """Usa a autoridade central de filtragem do Doxoade."""
         abs_p = os.path.abspath(file_path).replace('\\', '/')
         
-        # 1. Filtro Central (Respeita SYSTEM_IGNORES e pyproject.toml)
-        # Passamos a raiz do DNM como project_root para o cálculo de caminhos relativos
-        if central_is_ignored(abs_p, str(self.root)):
+        # 1. Filtro de Pastas de Fundição (Vulcan Junk)
+        # Se qualquer parte do caminho estiver na lista de lixo, ignora.
+        path_parts = set(abs_p.lower().split('/'))
+        if not path_parts.isdisjoint(self.FORGE_JUNK):
+            return True
+
+        # 2. Filtro de Segurança Aegis (Backups e temporários)
+        if any(x in abs_p for x in ['nppBackup', '.bak', 'pytest_temp_dir']):
             return True
             
-        # 2. Filtro de Segurança Aegis (Não auditar cache do Vulcan ou Backups)
-        # Mesmo se include_internal estiver ativo, nunca queremos arquivos gerados
-        if any(x in abs_p for x in ['.doxoade', 'nppBackup', '.bak', 'pytest_temp_dir']):
+        # 3. Filtro Central (SYSTEM_IGNORES e pyproject.toml)
+        if central_is_ignored(abs_p, str(self.root)):
             return True
             
         return False
 
     def scan(self, extensions: Optional[List[str]]=None, include_internal: bool = False) -> List[str]:
         valid_files = []
+        # Normaliza extensões
         if extensions:
             extensions = {e.lower() if e.startswith('.') else f'.{e.lower()}' for e in extensions}
             
         for root, dirs, files in os.walk(str(self.root)):
-            root_path = Path(root)
-            
-            # Poda de Diretórios Inteligente
-            if include_internal:
-                # No modo interno, ignoramos APENAS o que é lixo absoluto de infra/cache
-                # Nunca queremos auditar a pasta .doxoade (cache do vulcan)
-                absolute_trash = {'.git', 'venv', '.venv', '__pycache__', 'node_modules', '.doxoade'}
-                dirs[:] = [d for d in dirs if d not in absolute_trash]
-            else:
-                # No modo padrão, usa a autoridade do filesystem.py + SYSTEM_IGNORES
-                dirs[:] = [d for d in dirs if not self.is_ignored(root_path / d)]
+            # PODA AGRESSIVA DE DIRETÓRIOS (Chief-Gold Optimization)
+            # Isso impede que o os.walk sequer entre nas pastas proibidas
+            dirs[:] = [d for d in dirs if d.lower() not in self.FORGE_JUNK and not self.is_ignored(Path(root) / d)]
+#            dirs[:] = [d for d in dirs if not self.is_ignored(Path(root) / d)]
 
             for file in files:
-                file_path = root_path / file
+                file_path = Path(root) / file
+                
+                # Verifica extensão
                 if extensions and file_path.suffix.lower() not in extensions:
                     continue
                 
-                # Verificação final de arquivo
+                # Filtro final de arquivo
                 if self.is_ignored(file_path) and not include_internal:
-                    continue
-                
-                # Proteção extra: Mesmo em include_internal, não ler binários ou cache
-                if '.doxoade' in str(file_path) or 'nppBackup' in str(file_path):
                     continue
                     
                 canonical_path = str(file_path.absolute()).replace('\\', '/')

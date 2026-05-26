@@ -12,7 +12,7 @@ def main():
         importlib.import_module(module_to_probe)
         result['ok'] = True
     except Exception as e:
-        print(f'\x1b[31m ■ Erro: {e}')
+        print(f'\x1b[31m [!] Erro: {e}') #print(f'\x1b[31m ■ Erro: {e}')
         result['error'] = {'type': type(e).__name__, 'message': str(e), 'traceback': traceback.format_exc()}
     sys.stdout.write(json.dumps(result))
     sys.stdout.flush()

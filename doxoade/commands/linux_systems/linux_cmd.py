@@ -244,3 +244,60 @@ def check_health():
     else:
         click.secho("[!] Hypervisor Launch Type: NÃO CONFIGURADO", fg='yellow')
         click.echo("      -> Execute: bcdedit /set hypervisorlaunchtype auto")
+
+@linux_group.command('list')
+def wsl_list():
+    """Lista todas as instâncias WSL e seus estados."""
+    click.secho("📋 [WSL] Instâncias instaladas:", fg="cyan", bold=True)
+    
+    # Executa o comando nativo do Windows
+    res = subprocess.run(['wsl', '--list', '--verbose'], capture_output=True, text=True)
+    
+    if res.returncode == 0:
+        click.echo(res.stdout)
+    else:
+        # Se o código for diferente de zero, provavelmente não há distros
+        err_msg = res.stderr or res.stdout
+        if "não possui distribuições instaladas" in err_msg or "no installed distributions" in err_msg.lower():
+            click.secho("   > Nenhuma distribuição Linux detectada no subsistema.", fg="yellow")
+        else:
+            click.secho("❌ Erro ao acessar WSL:", fg="red")
+            click.echo(err_msg)
+
+@linux_group.command('stop')
+@click.option('--name', '-n', default='doxlinux', help='Nome da distro para encerrar.')
+def wsl_stop(name):
+    """Encerra a execução da distro (Shutdown). Libera memória RAM."""
+    click.echo(f"[*] Encerrando instância '{name}'...")
+    try:
+        # --terminate desliga a distro específica sem afetar outras
+        subprocess.run(['wsl', '--terminate', name], check=True)
+        click.secho(f"✅ Instância '{name}' foi desligada com sucesso.", fg="green")
+    except subprocess.CalledProcessError:
+        click.secho(f"⚠️  Não foi possível desligar '{name}'. Ela pode já estar parada.", fg="yellow")
+
+@linux_group.command('purge')
+@click.option('--name', '-n', default='doxlinux', help='Distro a ser removida.')
+@click.option('--yes', is_flag=True, help='Pula confirmação.')
+def wsl_unregister(name, yes):
+    """☢ [NUCLEAR] Remove a distro do sistema e DELETA todos os arquivos dela."""
+    if not yes:
+        click.secho(f"❗ AVISO: Isso removerá permanentemente o '{name}' e todos os dados dentro dele!", fg="red", bold=True)
+        if not click.confirm("Deseja prosseguir com a destruição?"):
+            click.echo("Operação cancelada.")
+            return
+
+    click.echo(f"[*] Desregistrando '{name}' do Windows...")
+    try:
+        # --unregister apaga o VHDX e a entrada no registro
+        subprocess.run(['wsl', '--unregister', name], check=True)
+        click.secho(f"🔥 Distro '{name}' removida completamente.", fg="green", bold=True)
+    except subprocess.CalledProcessError as e:
+        click.secho(f"❌ Erro ao remover distro: {e}", fg="red")
+
+@linux_group.command('shutdown')
+def wsl_shutdown_global():
+    """Desliga TODO o subsistema WSL (todas as distros)."""
+    if click.confirm("Isso desligará TODAS as instâncias Linux ativas. Confirmar?"):
+        subprocess.run(['wsl', '--shutdown'], check=True)
+        click.secho("🛑 WSL Global Shutdown concluído.", fg="yellow", bold=True)

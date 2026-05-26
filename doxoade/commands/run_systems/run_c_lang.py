@@ -46,37 +46,86 @@ def compile_c_family_source(script_path):
     source_path = Path(script_path).resolve()
     build_dir = get_build_dir(source_path)
     output_path = build_dir / (source_path.stem + '.exe')
+    
+    # Localiza caminhos internos do sistema de resgate
+    core_dir = Path(__file__).resolve().parents[3]
+    soteria_inc = core_dir / "doxoade" / "tools" / "vulcan" / "diagnostic" / "soteria" / "include"
+    soteria_src = core_dir / "doxoade" / "tools" / "vulcan" / "diagnostic" / "soteria" / "src"
+    
+    # Coleta todas as fontes da Sotéria
+    diag_sources = [str(f).replace("\\", "/") for f in soteria_src.glob("*.c")]
+    
     ext = source_path.suffix.lower()
     compiler, std_flag = _resolve_toolchain(ext)
-    cmd = [compiler, str(source_path), std_flag, '-O2', '-Wall', '-Wextra', '-o', str(output_path)]
-    proc = subprocess.run(cmd, cwd=str(source_path.parent), capture_output=True, text=True)
+    
+    # --- ORDEM DE METALURGIA NEXUS ---
+    cmd = [
+        compiler, 
+        str(source_path).replace("\\", "/"), # Fonte do usuário
+        std_flag, "-O0", "-g",
+        f"-I{soteria_inc}",                  # Header da Sotéria
+    ] 
+    
+    # Injeta as fontes da Sotéria no build
+    cmd += diag_sources 
+    
+    # Finaliza com o Output e as Bibliotecas do Windows (O Linker as exige no fim)
+    cmd += [
+        "-o", str(output_path).replace("\\", "/"),
+        "-lpsapi", "-ldbghelp" # <--- AS BIBLIOTECAS DEVEM FICAR AQUI
+    ]
+    
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
     if proc.returncode != 0:
-        raise click.ClickException(proc.stderr)
+        raise click.ClickException(f"Falha na Metalurgia Vulcan:\n{proc.stderr}")
     return output_path
 
-def execute_binary(binary_path, limits: dict = None) -> None:
-    """Executa o binário nativo com proteção do Warden."""
+def execute_binary(binary_path, limits: dict = None, extra_args: list = None):
+    """Executa o binário nativo e aciona o Resgate se houver falha."""
     from doxoade.tools.aegis.warden import apply_resource_limits
-    import subprocess
+    from doxoade.rescue import activate_protocol # <--- IMPORTANTE
     
     click.echo(f'\x1b[36m--- [RUN:C/C++] {os.path.basename(binary_path)} ---\x1b[0m')
     
-    # Função para injetar limites antes do processo nativo começar (apenas Unix)
-    def preexec():
-        if limits:
-            apply_resource_limits(limits)
-
-    # No Windows, preexec_fn não é suportado, então o Warden apenas emite o aviso
-    if os.name == 'nt':
-        apply_resource_limits(limits)
-        proc = subprocess.run([str(binary_path)])
-    else:
-        proc = subprocess.run([str(binary_path)], preexec_fn=preexec)
+    cmd = [str(binary_path)] + (extra_args or [])
+    proc = subprocess.run(
+#        [str(binary_path)], 
+        cmd,
+        capture_output=True, 
+        text=True, 
+        encoding='utf-8', 
+        errors='replace'
+    )
+    
+    # Exibe a saída para o usuário ver o progresso
+    output = proc.stdout + proc.stderr
+    for line in proc.stdout.splitlines():
+        if not any(tag in line for tag in ["@SOTERIA_", "TAG_", "@NEXUS_"]):
+            print(line)
+            
+    if proc.stderr:
+        for line in proc.stderr.splitlines():
+            if not any(tag in line for tag in ["@SOTERIA_", "TAG_", "@NEXUS_"]):
+                print(line)
+    
+    # Se houver tags ou erro, aciona o Lazarus
+    if "@SOTERIA_BEGIN@" in output or proc.returncode != 0:
+        from doxoade.rescue import activate_protocol
+#        activate_protocol(output, exit_code=proc.returncode)
+        # Se houve erro ou se o log contém falhas detectadas pela Sotéria
+        if proc.returncode != 0 or "FATAL" in output or "CORRUPTION" in output:
+            activate_protocol(output, exit_code=proc.returncode)
+    elif proc.returncode != 0:
+        from doxoade.rescue import activate_protocol
+        activate_protocol(output, exit_code=proc.returncode)
     
     if proc.returncode != 0:
         click.echo(f"\x1b[31m[EXIT] O processo terminou com erro: {proc.returncode}\x1b[0m")
+        # --- ACIONAMENTO DO LAZARUS ---
+        # Ele vai ler as tags que o C imprimiu acima
+        activate_protocol(proc.stdout + proc.stderr, exit_code=proc.returncode)
 
-def run_c_lang(script_path, limits: dict = None, flow: bool = False):
+def run_c_lang(script_path, limits: dict = None, flow: bool = False, extra_args: list = None):
     source_or_bin = Path(script_path).resolve()
     suffix = source_or_bin.suffix.lower()
 
@@ -93,9 +142,9 @@ def run_c_lang(script_path, limits: dict = None, flow: bool = False):
 
     # Execução
     if flow:
-        run_c_with_flow(exe_path, limits)
+        run_c_with_flow(exe_path, limits, extra_args=extra_args)
     else:
-        execute_binary(exe_path, limits)
+        execute_binary(exe_path, limits, extra_args=extra_args)
 
 def is_c_family_target(script_path: str) -> bool:
     """Detecta se é fonte C ou um binário nativo."""
@@ -103,10 +152,10 @@ def is_c_family_target(script_path: str) -> bool:
     # Se não tem extensão e é executável (Linux) ou se tem extensão binária/fonte
     return suffix in C_SOURCE_EXTS or suffix in BIN_EXTS or (suffix == '' and os.access(script_path, os.X_OK))
 
-def maybe_run_c_lang(script_path: str, limits: dict = None, flow: bool = False) -> bool:
+def maybe_run_c_lang(script_path, limits=None, flow=False, extra_args=None):
     if not is_c_family_target(script_path):
         return False
-    run_c_lang(script_path, limits=limits, flow=flow)
+    run_c_lang(script_path, limits=limits, flow=flow, extra_args=extra_args)
     return True
 
 def needs_recompile(src_path: Path, exe_path: Path):

@@ -11,37 +11,37 @@ def metal_group():
     pass
 
 @metal_group.command('build')
-@click.option('--force', '-f', is_flag=True, help="Ignora o cache e reforja tudo.")
+@click.option('--release', is_flag=True)
+@click.option('--soteria/--no-soteria', default=True)
+@click.option('--force', '-f', is_flag=True)
 @click.pass_context
-def metal_build(ctx, force):
-    """Transforma fontes C em binários Gold Standard."""
-    from doxoade.tools.metalcraft.metal_engine import NexusMetalEngine
-    
-    with ExecutionLogger('metal_build', '.', ctx.params):
+def metal_build(ctx, release, soteria, force):
+    """Forja os fontes em binários executáveis."""
+    # O status deve ser capturado fora do 'with' para ser retornado
+    success = False
+    with ExecutionLogger('metal_build', os.getcwd(), ctx.params) as logger:
+        from doxoade.tools.metalcraft.metal_engine import NexusMetalEngine
         engine = NexusMetalEngine(os.getcwd())
-        click.echo(f"{Fore.CYAN}{Style.BRIGHT}--- [HEFESTO FORGE] ---{Style.RESET_ALL}")
-        success = engine.build()
-        
-        if success:
-            click.secho("✔ Metalurgia concluída.", fg="green")
+        success = engine.build(release=release, use_soteria=soteria, force=force)
+    
+    return success # <--- [VITAL] O segredo da continuidade está aqui!
 
-@metal_group.command('run')
+@metal_group.command('run', context_settings=dict(ignore_unknown_options=True))
 @click.argument('target', required=False)
+@click.argument('args', nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
-def metal_run(ctx, target):
-    """Compila (se necessário) e executa o binário."""
-    # 1. Garante que o sistema está atualizado
-    # O invoke garante que o ExecutionLogger e o SSA sejam rodados
-    ctx.invoke(metal_build)
+def metal_run(ctx, target, args):
+    """Compila e executa o binário."""
+    # 1. Invoca o build e recebe o veredito
+    build_ok = ctx.invoke(metal_build)
     
-    # 2. Se o build anterior falhou, o clique vai parar aqui.
-    # Caso contrário, pegamos o motor e rodamos o binário.
-    from doxoade.tools.metalcraft.metal_engine import NexusMetalEngine
-    engine = NexusMetalEngine(os.getcwd())
-    
-    # Espaço visual para o output do programa
-    click.echo("")
-    engine.run_binary(target_name=target)
+    if build_ok:
+        from doxoade.tools.metalcraft.metal_engine import NexusMetalEngine
+        engine = NexusMetalEngine(os.getcwd())
+        # 2. Só agora Hefesto abre os portões!
+        engine.run_binary(target_name=target, extra_args=list(args))
+    else:
+        click.secho("\n[!] Execução cancelada: O build falhou.", fg="yellow")
 
 @metal_group.command('init')
 @click.argument('name', required=False)
@@ -96,7 +96,7 @@ int main(int argc, char** argv) {
 @click.pass_context # <--- ADICIONE ISSO PARA PODER ACESSAR O CONTEXTO
 def metal_build(ctx, release, soteria, force): # <--- ADICIONE O 'force' AQUI
     """Forja os fontes em binários executáveis."""
-    # O ExecutionLogger precisa dos params (ctx.params)
+    success = False
     with ExecutionLogger('metal_build', os.getcwd(), ctx.params) as logger:
         from doxoade.tools.metalcraft.metal_engine import NexusMetalEngine
         
@@ -110,3 +110,20 @@ def metal_build(ctx, release, soteria, force): # <--- ADICIONE O 'force' AQUI
             click.secho("\n✔ Binário fundido com sucesso!", fg="green", bold=True)
         else:
             click.secho("\n✘ Falha na fundição. Chame o Lazarus para necropsia.", fg="red", bold=True)
+    return success
+
+@metal_group.command('embedded')
+@click.argument('target_path', type=click.Path(exists=True, file_okay=False))
+@click.option('--soteria/--no-soteria', default=True, help="Embarca o escudo nativo.")
+def metal_embedded(target_path, soteria):
+    """🚢 Transplanta o DNA do Doxoade para um projeto externo (Modo Silo)."""
+    from doxoade.tools.metalcraft.metal_engine import NexusMetalEngine
+    
+    # [VITAL] Passamos o diretório atual do sistema (o alvo)
+    engine = NexusMetalEngine(target_path) 
+    click.echo(f"{Fore.CYAN}{Style.BRIGHT}🚢 [EMBARQUE] Iniciando transplante...{Style.RESET_ALL}")
+    
+    if engine.deploy_embedded(target_path, use_soteria=soteria):
+        click.echo(f"\n   {Fore.GREEN}✔ DNA Nexus embarcado em: {target_path}{Style.RESET_ALL}")
+    else:
+        click.echo(f"\n   {Fore.RED}❌ Falha no transplante logístico.{Style.RESET_ALL}")

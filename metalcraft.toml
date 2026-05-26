@@ -15,3 +15,9 @@ incremental = true    # Recompila apenas mudanças
 sources = ["src/*.c"]
 headers = ["include/"]
 output  = "bin/"
+
+# Adicione este target ao seu arquivo existente
+[[targets]]
+name = "gordian_test"
+sources = ["doxoade/experiments/soteria_lab/gordian_lab.c"]
+output = "bin/gordian_test.exe"

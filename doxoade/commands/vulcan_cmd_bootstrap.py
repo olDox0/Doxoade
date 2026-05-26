@@ -409,8 +409,9 @@ def vulcan_telemetry_bridge(limit, project, since, stats, libs, verbose):
     Requer bootstrap:
       doxoade vulcan module --path <projeto> --auto-main
     """
+    import doxoade.tools.aegis.nexus_db as _sqlite3 # noqa
     from doxoade.database import get_db_connection
-    import doxoade.tools.aegis.nexus_db as sqlite3  # noqa as _sqlite3
+
     conn = get_db_connection()
     conn.row_factory = _sqlite3.Row
     cursor = conn.cursor()

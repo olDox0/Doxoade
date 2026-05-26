@@ -15,7 +15,7 @@ def intelligence(ctx):
     """Módulo de Inteligência Topológica (v94.6)."""
     pass
 
-@intelligence.command('scan') # Novo comando para o scan de dossiê
+@intelligence.command('scan')
 @click.argument('paths', nargs=-1, type=click.Path(exists=True))
 @click.option('--docs', '-d', is_flag=True, help='Extrai docstrings.')
 @click.option('--source', '-s', is_flag=True, help='Inclui código fonte completo.')
@@ -25,9 +25,41 @@ def intelligence(ctx):
 @click.option('--ai-export', '-ai', is_flag=True, help='Gera um dossiê otimizado em XML/Markdown.')
 @click.pass_context
 def scan_cmd(ctx, paths, output, docs, source, concatenate, focus, ai_export):
-    """Gera o Dossiê Chief Insight (Scan de Código)."""
-    scan_paths = paths if paths else ('.',)
-    _run_dossier_scan(scan_paths, output, docs, source, concatenate, focus, ai_export, ctx)
+    """Gera o Dossiê Chief Insight (Scan Inteligente - Silo Aware)."""
+    from .intelligence_systems.intelligence_engine import analyze_file_chief
+    from doxoade.dnm import DNM
+    from doxoade.tools.filesystem import _find_project_root
+    
+    # 1. ANCORAGEM DO ROOT (Resolve o NameError)
+    root = _find_project_root(os.getcwd())
+    console = Console()
+    
+    # 2. INÍCIO DA TELEMETRIA
+    with ExecutionLogger('intelligence', root, ctx.params):
+        console.print('[bold gold3]🔍 Doxoade Chief Insight v96.1 (Silo-Aware Scan)[/bold gold3]')
+        
+        # 3. NAVEGAÇÃO VIA DNM (Aproveita a exclusão da fundição do DNM anterior)
+        navigator = DNM(root)
+        valid_exts = ('.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx')
+        
+        # Escaneia incluindo arquivos internos (.doxoade/vulcan/bootstrap.py por exemplo)
+        # O DNM já foi configurado para ignorar pastas 'foundry', 'opt_py', etc.
+        all_files = navigator.scan(extensions=list(valid_exts), include_internal=True)
+        
+        dossier_files = []
+        with click.progressbar(all_files, label='Processando Grafo de Conhecimento') as bar:
+            for f in bar:
+                try:
+                    # Passamos o root para o analyze para cálculo de caminhos relativos
+                    res = analyze_file_chief(f, root, docs=docs, source=source)
+                    if res:
+                        dossier_files.append(res)
+                except Exception as e:
+                    from doxoade.tools.error_info import handle_error
+                    handle_error(e, context=f'Dossier Scan -> {os.path.basename(f)}', debug=True)
+        
+        # 4. SALVAMENTO
+        _save_report(dossier_files, output, root, concatenate, focus, ai_export, console)
 
 @intelligence.command('recover')
 @click.argument('backup_path', type=click.Path(exists=True))
@@ -51,49 +83,48 @@ def recover(backup_path, output_path, date, time):
 
 def _run_dossier_scan(scan_paths, output, include_docs, include_source, concat, focus, ai_export, ctx):
     from .intelligence_systems.intelligence_engine import analyze_file_chief
+    from doxoade.dnm import DNM # Importa o navegador central
+    
     root = _find_project_root(os.getcwd())
     console = Console()
+    
     with ExecutionLogger('intelligence', root, ctx.params):
-        console.print('[bold gold3]?? Doxoade Chief Insight v94.5 (Fullstack LLM-Ready)[/bold gold3]')
-        spec = get_ignore_spec(root)
-        config = _get_project_config(logger=None, start_path=root)
-        ignores_config = {p.strip('/\\').lower() for p in config.get('ignore', [])}
+        console.print('[bold gold3]🔍 Doxoade Chief Insight v95.0 (Optimized Scan)[/bold gold3]')
+        
+        valid_exts = ['.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx']
         all_files = []
-        seen = set()
-        valid_exts = ('.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx')
+        
         for raw_path in scan_paths:
-            scan_dir = os.path.abspath(raw_path)
-            if os.path.isfile(scan_dir):
-                candidates = [scan_dir]
+            abs_scan_path = os.path.abspath(raw_path)
+            
+            if os.path.isfile(abs_scan_path):
+                # Se for um arquivo específico, apenas adiciona
+                all_files.append(abs_scan_path)
             else:
-                candidates = []
-                for dirpath, dirnames, filenames in os.walk(scan_dir):
-                    dirnames[:] = [d for d in dirnames if not spec.match_file(os.path.relpath(os.path.join(dirpath, d), root).replace('\\', '/') + '/')]
-                    for fname in filenames:
-                        if fname.endswith(valid_exts):
-                            candidates.append(os.path.join(dirpath, fname))
-                if len(scan_paths) > 1:
-                    console.print(f'[dim]?? {os.path.relpath(scan_dir, root)}[/dim]')
-            for f in candidates:
-                if f not in seen:
-                    seen.add(f)
-                    all_files.append(f)
-        filtered_files = []
-        for f in all_files:
-            rel_path = os.path.relpath(f, root).replace('\\', '/')
-            if spec and spec.match_file(rel_path):
-                continue
-            filtered_files.append(f)
+                # Se for um diretório, usa o DNM para uma varredura limpa e rápida
+                # O DNM já cuida de ignorar .git, venv e o famigerado .doxoade
+                navigator = DNM(abs_scan_path)
+                found = navigator.scan(extensions=valid_exts)
+                all_files.extend(found)
+        
+        # Remove duplicatas mantendo a ordem
+        unique_files = list(dict.fromkeys(all_files))
+        
         dossier_files = []
-        with click.progressbar(filtered_files, label='Analizando Código') as bar:
+        with click.progressbar(unique_files, label='Analizando Código') as bar:
             for f in bar:
                 try:
+                    # Proteção redundante contra arquivos de fundição/cache
+                    if '.doxoade' in f or 'foundry' in f:
+                        continue
+                        
                     res = analyze_file_chief(f, root, docs=include_docs, source=include_source)
                     if res and isinstance(res, dict) and ('size' in res):
                         dossier_files.append(res)
                 except Exception as e:
                     from doxoade.tools.error_info import handle_error
                     handle_error(e, context=f'Dossier Scan -> {os.path.basename(f)}', debug=True)
+        
         _save_report(dossier_files, output, root, concat, focus, ai_export, console)
 
 def _save_report(files, output, root, concat, focus, ai_export, console):
