@@ -19,6 +19,15 @@ static int g_arena_idx = 0;
 void soteria_arena_report_alloc(const char* arena_name, const char* obj_type, size_t size);
 void soteria_dump_arena_inventory();
 
+void soteria_validate_alignment(void* ptr, const char* msg) {
+    uintptr_t addr = (uintptr_t)ptr;
+    if (addr % 16 != 0) {
+        fprintf(stdout, "TAG_LEVEL: WARNING\n");
+        fprintf(stdout, "TAG_MOTIVO: SIMD_ALIGNMENT_RISK\n");
+        fprintf(stdout, "TAG_DETAIL: Ponteiro %p nao alinhado em 16 bytes. Instrucoes MOVAPS podem causar crash.\n", ptr);
+    }
+}
+
 void soteria_arena_report_alloc(const char* arena_name, const char* obj_type, size_t size) {
     // Registro circular ultra-rápido
     strncpy(g_arena_log[g_arena_idx].type, obj_type, 31);
@@ -27,11 +36,12 @@ void soteria_arena_report_alloc(const char* arena_name, const char* obj_type, si
 }
 
 void soteria_dump_arena_inventory() {
-    // [PLATINA] Apenas as tags puras. O dispatch cuidará dos marcadores.
+    char buf[256];
     for (int i = 0; i < 20; i++) {
         if (g_arena_log[i].size > 0) {
-            fprintf(stdout, "TAG_ARENA_OBJ: %s | %zu bytes\n", 
-                    g_arena_log[i].type, g_arena_log[i].size);
+            snprintf(buf, 255, "TAG_ARENA_OBJ: %s | %zu bytes\n", 
+                     g_arena_log[i].type, g_arena_log[i].size);
+            soteria_print_raw(buf);
         }
     }
 }

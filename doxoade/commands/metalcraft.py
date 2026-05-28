@@ -127,3 +127,69 @@ def metal_embedded(target_path, soteria):
         click.echo(f"\n   {Fore.GREEN}✔ DNA Nexus embarcado em: {target_path}{Style.RESET_ALL}")
     else:
         click.echo(f"\n   {Fore.RED}❌ Falha no transplante logístico.{Style.RESET_ALL}")
+        
+@metal_group.command('audit-bin')
+@click.argument('target_exe', required=False)
+def metal_audit_bin(target_exe):
+    """🔬 Necropsia de Binário: Valida o DNA Sotéria e Assembly."""
+    import shutil
+    import subprocess
+    
+    exe_name = target_exe or "gordian_test.exe"
+    # Procura nos locais prováveis de build
+    candidates = [
+        os.path.join("bin", exe_name),
+        os.path.join(".doxoade", "metalcraft", "bin", exe_name)
+    ]
+    
+    exe_path = next((c for c in candidates if os.path.exists(c)), None)
+
+    if not exe_path:
+        click.secho(f"   [!] Erro: Binário '{exe_name}' não localizado.", fg="red")
+        return
+
+    click.echo(f"{Fore.CYAN}🔬 [NECROPSIA] Analisando DNA de: {exe_name}{Style.RESET_ALL}")
+    
+    nm = shutil.which("nm") or shutil.which("nm.exe")
+    if not nm:
+        click.secho("   [!] Erro: nm.exe não encontrado no PATH.", fg="red")
+        return
+
+    try:
+        res = subprocess.run([nm, exe_path], capture_output=True, text=True)
+        symbols = res.stdout
+        # Lista de Símbolos Críticos que provam a metalurgia correta
+        dna = {
+            "CORE": "soteria_init", 
+            "VACCINE": "soteria_mark_var", 
+            "ASM_ENGINE": "soteria_dump_hardware_state"
+        }
+        
+        for label, sym in dna.items():
+            status = f"{Fore.GREEN}✅" if sym in symbols else f"{Fore.RED}❌"
+            click.echo(f"   • {label:<12}: {status} {sym}{Style.RESET_ALL}")
+    except Exception as e:
+        click.echo(f"   [!] Falha na necropsia: {e}")
+
+@metal_group.command('setup-tools')
+@click.pass_context
+def metal_setup_tools(ctx):
+    """🛠️  Provisionamento Automático: Baixa e instala o GCC/Toolchain."""
+    from doxoade.tools.metalcraft.provisioner import download_w64devkit
+    from pathlib import Path
+    
+    core_root = Path(__file__).resolve().parents[2]
+    target_dir = core_root / "thirdparty" / "w64devkit"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    
+    click.echo(f"{Fore.CYAN}⚒️  Doxoade Metalcraft: Iniciando Configuração de Toolchain{Style.RESET_ALL}")
+    
+    if (target_dir / "bin" / "gcc.exe").exists():
+        if not click.confirm(f"   {Fore.YELLOW}Compilador já detectado. Deseja reinstalar?{Style.RESET_ALL}"):
+            return
+
+    if download_w64devkit(target_dir):
+        click.secho("\n✅ Toolchain pronto! GCC, Make e BusyBox instalados.", fg="green", bold=True)
+        click.echo(f"   Local: {target_dir}")
+    else:
+        click.secho("\n❌ Erro ao configurar ambiente.", fg="red", bold=True)

@@ -8,25 +8,29 @@ from datetime import datetime
 import click
 
 def chief_heartbeat(subsystem: str, action: str, details: dict):
-    """Registra uma operação atômica para auditoria de correção."""
+    """Registra pulsação no banco de dados com auto-pruning."""
     try:
-        # Garante que o diretório de logs existe na raiz do projeto
-        log_dir = os.path.join(os.getcwd(), '.doxoade', 'logs')
-        os.makedirs(log_dir, exist_ok=True)
-        log_path = os.path.join(log_dir, 'chief_operations.jsonl')
+        from doxoade.database import get_db_connection
+        import json
+        conn = get_db_connection()
         
-        entry = {
-            "ts": datetime.now().isoformat(),
-            "sys": subsystem.upper(),
-            "act": action.upper(),
-            "data": details,
-            "pid": os.getpid()
-        }
+        # 1. Inserção
+        conn.execute('''
+            INSERT INTO operational_logs (timestamp, subsystem, action, data, pid)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (datetime.now().isoformat(), subsystem.upper(), action.upper(), 
+              json.dumps(details, ensure_ascii=False), os.getpid()))
         
-        with open(log_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+        # 2. Auto-Pruning: Mantém apenas os últimos 50 eventos operacionais
+        conn.execute('''
+            DELETE FROM operational_logs 
+            WHERE id NOT IN (SELECT id FROM operational_logs ORDER BY id DESC LIMIT 50)
+        ''')
+        
+        conn.commit()
+        conn.close()
     except Exception:
-        pass # Nunca deve travar o sistema principal
+        pass
 
 class ExecutionLogger:
     def __init__(self, command_name, path, arguments):

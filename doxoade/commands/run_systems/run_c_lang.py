@@ -80,50 +80,54 @@ def compile_c_family_source(script_path):
         raise click.ClickException(f"Falha na Metalurgia Vulcan:\n{proc.stderr}")
     return output_path
 
-def execute_binary(binary_path, limits: dict = None, extra_args: list = None):
+def execute_binary(binary_path, limits=None, extra_args=None):
     """Executa o binário nativo e aciona o Resgate se houver falha."""
+    import subprocess
     from doxoade.tools.aegis.warden import apply_resource_limits
-    from doxoade.rescue import activate_protocol # <--- IMPORTANTE
+    from doxoade.rescue import activate_protocol 
+    from doxoade.tools.telemetry_tools.logger import chief_heartbeat # <--- GARANTA ESTE IMPORT
     
     click.echo(f'\x1b[36m--- [RUN:C/C++] {os.path.basename(binary_path)} ---\x1b[0m')
     
     cmd = [str(binary_path)] + (extra_args or [])
-    proc = subprocess.run(
-#        [str(binary_path)], 
+    proc = subprocess.Popen(
         cmd,
-        capture_output=True, 
-        text=True, 
-        encoding='utf-8', 
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding='utf-8',
         errors='replace'
     )
     
-    # Exibe a saída para o usuário ver o progresso
-    output = proc.stdout + proc.stderr
-    for line in proc.stdout.splitlines():
-        if not any(tag in line for tag in ["@SOTERIA_", "TAG_", "@NEXUS_"]):
-            print(line)
-            
-    if proc.stderr:
-        for line in proc.stderr.splitlines():
+    # --- [VITAL] O communicate() captura o que o C "gritou" no Sleep(100) ---
+    stdout_data, stderr_data = proc.communicate()
+    output = (stdout_data or "") + (stderr_data or "")
+
+    if stdout_data:
+        for line in stdout_data.splitlines(): # Agora funciona!
             if not any(tag in line for tag in ["@SOTERIA_", "TAG_", "@NEXUS_"]):
                 print(line)
-    
-    # Se houver tags ou erro, aciona o Lazarus
+            
+    if stderr_data:
+        for line in stderr_data.splitlines():
+            if not any(tag in line for tag in ["@SOTERIA_", "TAG_", "@NEXUS_"]):
+                print(line)
+
+    # REGISTRO NO HEARTBEAT (Para vermos se passou de 757 bytes)
+    from doxoade.tools.telemetry_tools.logger import chief_heartbeat
+    chief_heartbeat("PIPELINE", "BINARY_OUTPUT_CAPTURE", {
+        "size": len(output),
+        "exit_code": proc.returncode
+    })
+
+    # Se houver indício de pânico nas tags ou erro de sistema
     if "@SOTERIA_BEGIN@" in output or proc.returncode != 0:
-        from doxoade.rescue import activate_protocol
-#        activate_protocol(output, exit_code=proc.returncode)
         # Se houve erro ou se o log contém falhas detectadas pela Sotéria
         if proc.returncode != 0 or "FATAL" in output or "CORRUPTION" in output:
             activate_protocol(output, exit_code=proc.returncode)
-    elif proc.returncode != 0:
-        from doxoade.rescue import activate_protocol
-        activate_protocol(output, exit_code=proc.returncode)
     
     if proc.returncode != 0:
         click.echo(f"\x1b[31m[EXIT] O processo terminou com erro: {proc.returncode}\x1b[0m")
-        # --- ACIONAMENTO DO LAZARUS ---
-        # Ele vai ler as tags que o C imprimiu acima
-        activate_protocol(proc.stdout + proc.stderr, exit_code=proc.returncode)
 
 def run_c_lang(script_path, limits: dict = None, flow: bool = False, extra_args: list = None):
     source_or_bin = Path(script_path).resolve()

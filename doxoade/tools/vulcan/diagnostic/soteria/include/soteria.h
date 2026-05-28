@@ -50,13 +50,16 @@ void soteria_push(const char* func, const char* file, int line);
 // API de Sentinela (Race Condition)
 void soteria_access_probe(void* addr, const char* file, int line, int is_write);
 
-// [OURO] Função para imprimir a pilha no momento do desastre
+// Função para imprimir a pilha no momento do desastre
 void soteria_dump_stack_trace();
 void soteria_payload(const char* level, const char* motive, const char* detail, const char* file, int line, const char* func);
 void soteria_arena_report_alloc(const char* arena_name, const char* obj_type, size_t size);
 void soteria_validate(void* ptr, const char* file, int line);
-void soteria_dump_arena_inventory(); // <--- ADICIONE ESTA LINHA
+void soteria_dump_arena_inventory();
+void soteria_dump_hardware_state();
 void soteria_mark_var(const char* var_name, long long value, const char* file, int line);
+void soteria_io_trace(const char* op, const char* file, int line);
+void soteria_print_raw(const char* msg);
 
 #ifndef SOTERIA_CORE
     #define malloc(sz) soteria_malloc(sz, __FILE__, __LINE__)

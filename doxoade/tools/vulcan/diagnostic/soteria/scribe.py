@@ -10,10 +10,13 @@ class SoteriaScribe:
         # PASC 8.15: Definição centralizada de padrões e restrições
         self.pyx_func_regex = re.compile(r'^(?P<indent>\s*)(?P<type>def|cdef|cpdef)\s+(?P<name>\w+)\s*\(', re.MULTILINE)
 #        self.c_func_regex = re.compile(r'^(\w+[\s\*]+)(\w+)\s*\(([^)]*)\)\s*\{', re.MULTILINE)
-        self.risk_regex = re.compile(r'(\*[\w\d_]+\s*=|[\w\d_]+\+\+|[\w\d_]+--|malloc|free|exit\(|Sleep\(|CX_DIE)')
+#        self.risk_regex = re.compile(r'(\*[\w\d_]+\s*=|[\w\d_]+\+\+|[\w\d_]+--|malloc|free|exit\(|Sleep\(|CX_DIE)')
+        self.risk_regex = re.compile(r'(\*[\w\d_]+\s*=|malloc|free|soteria_validate|exit\(|CX_DIE)')
         self.c_func_regex = re.compile(r'^([\w\s\*]+?)\s*(\w+)\s*\(([^)]*)\)\s*\{', re.MULTILINE)
         self.var_capture_regex = re.compile(r'([a-zA-Z_]\w*)\s*=[^=]')
         self.assignment_regex = re.compile(r'([a-zA-Z_]\w*)\s*=[^=]')
+#        self.io_regex = re.compile(r'\b(fopen|fclose|fwrite|fread|printf|fprintf|sprintf|system|remove|rename)\s*\(')
+        self.io_regex = re.compile(r'\b(fopen|fclose|fwrite|fread|printf|fprintf|soteria_mark|malloc|free)\s*\(')
         self.blacklist = {
             'soteria_mark', 'soteria_dispatch', 'soteria_init', 'main', 
             'soteria_push', 'soteria_malloc', 'soteria_free', 'soteria_validate',
@@ -64,77 +67,42 @@ class SoteriaScribe:
         return "\n".join(new_lines)
 
     def instrument_code(self, content, filename):
-        if "SOTERIA_ENTER" in content or "soteria_mark" in content:
+        # [ALFA 412] Bloqueia re-vax se já estiver completo
+        if "soteria_io_trace" in content:
             return content
+
         safe_fn = filename.replace("\\", "/")
-        assignment_regex = re.compile(r'([a-zA-Z_]\w*)\s*=[^=]')
-        risk_regex = re.compile(r'(\*[\w\d_]+\s*=|malloc|dx_arena_alloc|free|exit\(|CX_DIE|if.*arena->offset)')
-#        risk_regex = re.compile(r'(\*[\w\d_]+\s*=|memset|memcpy|malloc|dx_arena_alloc|free|CX_DIE|exit\()')
+        # Regex para IO_Debug: foca em funções que alteram o estado do sistema
+        io_re = re.compile(r'\b(fopen|fclose|fwrite|printf|fprintf|malloc|free|CreateThread|dx_arena_alloc)\s*\(')
+        
         lines = content.splitlines()
         new_lines = []
-        
-        if "soteria.h" not in content:
-            new_lines.append('#include "soteria.h"\n#include <stdio.h>\n')
+        stats = {"io": 0, "func": 0, "var": 0}
 
         for i, line in enumerate(lines):
             stripped = line.strip()
-            if not stripped or stripped.startswith(("//", "/*")) or "soteria_" in line:
+            if not stripped or "soteria_" in line:
                 new_lines.append(line); continue
 
-            # 1. Marcos de Entrada (Pilha)
+            indent = self._get_indent(line)
+
+            # 1. RASTRO DE IO (Antes da execução da função)
+            io_match = io_re.search(line)
+            if io_match:
+                stats["io"] += 1
+                new_lines.append(f'{indent}soteria_io_trace("{io_match.group(1)}", "{safe_fn}", {i+1});')
+
+            # 2. ENTRADA DE FUNÇÃO
             func_match = self.c_func_regex.match(line)
             if func_match:
-                name = func_match.group(2)
+                stats["func"] += 1
                 new_lines.append(line)
-                if not name.startswith('__Pyx') and name not in self.blacklist:
-                    new_lines.append(f'    SOTERIA_ENTER("{name}");')
+                new_lines.append(f'    SOTERIA_ENTER("{func_match.group(2)}");')
                 continue
-                
-            match_var = self.var_capture_regex.search(line)
-            if match_var:
-                var_name = match_var.group(1)
-                # Injeta um log que tenta imprimir o valor da variável (se for int/ptr)
-                new_lines.append(f'{indent}soteria_mark_ext("VAR_SNAPSHOT", "{safe_fn}", {i+1}, "{var_name}", (long long){var_name});')
 
-
-            # 2. FIX: MARCO DE LINHA (Breadcrumbs)
-            # Injeta o rastro ANTES da linha de risco para capturar o exato local do OOM
-            is_indented = line.startswith((" ", "\t"))
-            #if stripped.startswith((" ", "\t")) and risk_regex.search(line):
-            if line.startswith((" ", "\t")) and self.risk_regex.search(line):
-                indent = self._get_indent(line)
-                # Tenta identificar qual variável está sendo manipulada
-                match_var = assignment_regex.search(line)
-                if match_var:
-                    v_name = match_var.group(1)
-                    # Injeta o capturador de valor
-                    new_lines.append(f'{indent}soteria_mark_var("{v_name}", (long long){v_name}, "{safe_fn}", {i+1});')
-                else:
-                    new_lines.append(f'{indent}soteria_mark("OP_RISCO", "{safe_fn}", {i+1});')
-            
             new_lines.append(line)
 
-        vacinadas = content.count("SOTERIA_ENTER")
-        marcos = content.count("soteria_mark")
-        # Auditoria visível no metal_build
-        if vacinadas > 0:
-            print(f"      💉 [SCRIBE] {filename}: {vacinadas} funções e {marcos} marcos injetados.")
-        
-        final_content = "\n".join(new_lines)
-        
-        # [META-AUDIT] Conta as injeções no conteúdo FINAL
-        v_count = final_content.count("SOTERIA_ENTER")
-        m_count = final_content.count("soteria_mark")
-        
-        if v_count > 0 or m_count > 0:
-            print(f"      💉 [SCRIBE] {filename}: {v_count} funções e {m_count} marcos injetados.")
-            
-        chief_heartbeat("SCRIBE", "VACCINATION_SUMMARY", {
-            "file": filename,
-            "hooks_injected": vacinadas,
-            "marks_injected": marcos,
-            "has_soteria_h": "soteria.h" in content
-        })
+        chief_heartbeat("SCRIBE", "IO_DEBUG_INJECTED", {"file": filename, "stats": stats})
         return "\n".join(new_lines)
 
     def generate_shadow(self, src_dir, shadow_dir):

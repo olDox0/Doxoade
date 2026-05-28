@@ -85,10 +85,19 @@ def _render_tactical_dossier(d: dict):
     
     # Análise Especial do Chief para NULL Pointers ou Corrupções
     sot = d.get('soteria', {})
-    if sot.get('REG_RAX') == '0x0' or '0x00000000' in str(sot.get('TAG_FAULT_ADDR')):
-        print(f"    {Y}🎯 ANALYST-INSIGHT: Falha de endereçamento base confirmada (NULL Reference).{RST}")
+    if sot.get('REG_RAX'):
+        print(f"\n  {M}■ EVIDÊNCIAS DE HARDWARE (CPU Snapshot):{RST}")
+        # Exibe os 4 registradores principais
+        print(f"    RAX: {Y}{sot.get('REG_RAX', 'N/A')}{RST} | RBX: {Y}{sot.get('REG_RBX', 'N/A')}{RST}")
+        print(f"    RCX: {Y}{sot.get('REG_RCX', 'N/A')}{RST} | RDX: {Y}{sot.get('REG_RDX', 'N/A')}{RST}")
 
-    # --- SEÇÃO 3: EVIDÊNCIAS DE HARDWARE (Se houver) ---
+    # --- SEÇÃO 3: EVIDÊNCIAS DE HARDWARE ---
+    if sot.get('RIP'):
+        print(f"\n  {M}■ EVIDÊNCIAS DE HARDWARE (CPU Snapshot):{RST}")
+        # Formatação em grid para leitura rápida
+        print(f"    RIP: {Y}{sot.get('RIP'):<18}{RST} | RSP: {Y}{sot.get('RSP', 'N/A')}{RST}")
+        print(f"    RAX: {Y}{sot.get('RAX', '0x0'):<18}{RST} | RBX: {Y}{sot.get('RBX', '0x0')}{RST}")
+        print(f"    RCX: {Y}{sot.get('RCX', '0x0'):<18}{RST} | RDX: {Y}{sot.get('RDX', '0x0')}{RST}")
     if sot.get('REG_RIP'):
         print(f"\n  {M}■ EVIDÊNCIAS DE HARDWARE (CPU Snapshot):{RST}")
         print(f"    {W}RAX (Acumulador) : {Y}{sot.get('REG_REG_RAX', 'N/A')}{RST}")
@@ -124,33 +133,24 @@ def _render_tactical_dossier(d: dict):
     else:
         print(f"    {DIM}(O código-fonte original não pôde ser resgatado para este frame){RST}")
 
-    # --- SEÇÃO 6: CADEIA DE ENVOLVIMENTO (Timeline Forense) ---
+    # --- SEÇÃO 6: CADEIA DE ENVOLVIMENTO ---
     if d.get('chain'):
         print(f"\n  {C}■ CADEIA DE ENVOLVIMENTO (Anatomia da Queda):{RST}")
         for idx, (func_name, loc) in enumerate(d['chain']):
-            # rsplit(':', 1) isola apenas o último ':' (a linha), ignorando o 'C:'
             parts = loc.rsplit(':', 1)
             if len(parts) < 2: continue
+            print(f"\n    {DIM}[{idx}]{RST} ↳ {G}{func_name:<25}{RST} ({os.path.basename(parts[0])}:{parts[1]})")
             
-            file_p, line_p = parts
-            f_short = os.path.basename(file_p)
-            
-            print(f"\n    {DIM}[{idx}]{RST} ↳ {G}{func_name:<25}{RST} ({f_short}:{line_p})")
-            
-            # Tenta mostrar o código deste ponto da cadeia
-            snippet = get_code_context(file_p, int(line_p))
-            if snippet:
-                print(f"{snippet}")
-            
-            # Mostra variáveis capturadas para este frame específico (vinda da Sotéria)
-            # A Sotéria enviará TAG_FRAME_VAR_{idx}
+            # Mostra variável capturada para este frame
             var_info = d.get('soteria', {}).get(f'FRAME_VAR_{idx}')
             if var_info:
                 print(f"        {Y}➔ ESTADO NO MOMENTO: {var_info}{RST}")
-                
-            var_data = d.get('soteria', {}).get(f'FRAME_VAR_{idx}')
-            if var_data:
-                print(f"        {Y}➔ ESTADO NO MOMENTO: {var_data}{RST}")
+
+    # --- SEÇÃO 7: IO_DEBUG ---
+    if d.get('io_history'):
+        print(f"\n  {C}■ RASTRO DE OPERAÇÕES (Linha do Tempo IO_Debug):{RST}")
+        for ev in d['io_history'][-10:]: # Últimas 10 ações
+            print(f"    {W}➔ {ev}{RST}")
 
     # --- FOOTER ---
     print(f"\n{C}╚" + "═" * (w-2) + "╝" + RST)
@@ -186,6 +186,7 @@ def activate_protocol(error_text: str, exit_code: int = None):
         
     print(f'  {Back.RED}2.{RST} {Fore.CYAN} [EDIT] Abrir Notepad++ na linha {Y}{info["line"]}{RST}')
     print(f'  {Back.RED}3.{RST} {Fore.RED} [INFO] Ver logs brutos (Traceback Completo){RST}')
+    print(f'  {Back.RED}4.{RST} {Fore.YELLOW} [DEBUG] Ver Diagnóstico de Pipeline{RST}')
     print(f'  {Back.RED}0.{RST} {Fore.LIGHTMAGENTA_EX} [EXIT] Aceitar falha e encerrar sessão{RST}')
     
     try:
@@ -224,6 +225,18 @@ def activate_protocol(error_text: str, exit_code: int = None):
             print(f"{Style.DIM}{clean_log}{RST}")
             print(f'{R}--- [ FIM DO LOG ] ---{RST}')
 #            input(f'\n{Style.DIM}Pressione Enter para prosseguir para a saída...{RST}')
+        elif choice == '4':
+            print(f"\n{C}🔬 [PIPELINE PROBE] Últimos Batimentos de Coração (Hades Engine):{RST}")
+            try:
+                from doxoade.database import get_db_connection
+                conn = get_db_connection()
+                rows = conn.execute('SELECT timestamp, subsystem, action, data FROM operational_logs ORDER BY id DESC LIMIT 10').fetchall()
+                for r in reversed(rows):
+                    ts = r['timestamp'][11:19]
+                    print(f"  {Style.DIM}[{ts}]{RST} {Y}{r['subsystem']}{RST} | {C}{r['action']}{RST} ➔ {r['data']}")
+                conn.close()
+            except Exception as e:
+                print(f"  {R}✘ Falha no DB: {e}{RST}")
 
     except KeyboardInterrupt:
         print(f'\n  {Y}[!] Intervenção abortada pelo usuário.{RST}')

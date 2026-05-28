@@ -11,25 +11,22 @@ class NexusToolchain:
         self.type = None # gcc | clang | msvc
 
     def detect(self):
-        """Busca exaustiva pelo melhor compilador disponível."""
-        # 1. Tenta GCC (Padrão Doxoade via w64devkit)
+        # 1. Tenta o GCC global
         gcc = shutil.which("gcc")
         if gcc:
             self.compiler_path = gcc
-            self.type = "gcc"
             return True
             
-        # 2. Busca interna no Doxoade (w64devkit embarcado)
-        # Sobe ate a raiz do doxoade para procurar em thirdparty
+        # 2. Busca na estrutura industrial do Doxoade
         core_root = Path(__file__).resolve().parents[3]
+        # O provisionador coloca o bin logo abaixo da pasta w64devkit
         internal_gcc = core_root / "thirdparty" / "w64devkit" / "bin" / "gcc.exe"
+        
         if internal_gcc.exists():
             self.compiler_path = str(internal_gcc)
-            self.type = "gcc"
-            # Injeta no PATH para os subprocessos
+            # Injeta o bin no PATH para que o GCC ache o 'as' (assembler) e o 'ld' (linker)
             os.environ["PATH"] = str(internal_gcc.parent) + os.pathsep + os.environ.get("PATH", "")
             return True
-            
         return False
 
     def get_version(self):

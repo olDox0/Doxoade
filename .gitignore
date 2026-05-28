@@ -89,5 +89,7 @@ thirdparty/w64devkit/
 # ====== Exceções ======
 
 # Exceções (Auto-fixed pelo Doxoade)
+
+# Exceções (Auto-fixed pelo Doxoade)
 !requirements.txt
 !PipelineHelp.txt

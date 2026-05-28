@@ -37,45 +37,86 @@ class CrashProcessor:
 
     def process(self, raw_text: str, exit_code: int = None) -> Dict[str, Any]:
         import sys
-
-        # 1. Normalização de Protocolos
+        
+        # 1. Normalização e Isolação do Bloco
         raw = raw_text.replace("@NEXUS_END@", "@SOTERIA_END@").replace("@NEXUS_BEGIN@", "@SOTERIA_BEGIN@")
         invocation_str = f"doxoade {' '.join(sys.argv[1:])}"
+        start_marker = "@SOTERIA_BEGIN@"
+        if start_marker in raw:
+            raw = raw[raw.rfind(start_marker):] # Foca no último pânico ocorrido
 
-        chief_heartbeat("LAZARUS", "CRASH_DATA_RECEIVED", {
-            "raw_chars": len(raw_text),
-            "exit_code": exit_code
+        # --- [VITAL] EXTRAÇÃO ANTECIPADA (Ordem de Percepção) ---
+        blocks = re.findall(r"@SOTERIA_BEGIN@(.*?)@SOTERIA_END@", raw, re.DOTALL)
+        inner = blocks[-1] if blocks else raw
+        all_tags = re.findall(r"TAG_(\w+):\s*(.*)", inner)
+        io_history = [val for key, val in all_tags if key.upper() == "IO_EVENT"]
+        found_tags = [key.upper() for key, val in all_tags]
+        
+        # Inicialização das listas para o Pipeline
+        tags = {}
+        inventory = []
+        io_history = []
+        steps = []
+        
+        for key, val in all_tags:
+            k_up = key.upper()
+            if k_up == "STEP": steps.append(val)
+            elif k_up == "IO_EVENT": io_history.append(val)
+            elif k_up == "ARENA_OBJ": inventory.append(val)
+            elif k_up.startswith("REG_"): tags[k_up.replace("REG_", "")] = val
+            else: tags[k_up] = val
+
+        # Auditoria de Integridade para o Heartbeat
+        expected = ["MOTIVO", "RASTRO_LOC", "LEVEL"]
+        missing = [t for t in expected if t not in tags]
+        
+        chief_heartbeat("PIPELINE", "LAZARUS_PERCEPTION", {
+            "raw_size": len(raw_text),
+            "steps_count": len(steps),
+            "has_hardware": "RIP" in tags,
+            "last_step": steps[-1] if steps else "NONE"
         })
 
         dossier = {
             'id': hashlib.md5(raw.encode()).hexdigest()[:8].upper(),
             'timestamp': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'invocation': invocation_str, # <--- ADICIONADO: Corrige o erro de Key
+            'invocation': invocation_str,
             'technical_error': "SYSTEM_FAULT",
             'explanation': "Falha não classificada.",
             'file': "NATIVO", 'line': 0, 
-            'soteria': {}, 'chain': [], 'inventory': [],
-            'meta_diag': [] # Log interno de suporte
+            'soteria': tags, 'chain': [], 
+            'inventory_raw': inventory, 'io_history': io_history,
+            'pipeline_steps': steps # <--- FIX: Agora 'steps' está definido
         }
 
-        # 2. Extração de Tags (Foca no último evento ocorrido)
-        blocks = re.findall(r"@SOTERIA_BEGIN@(.*?)@SOTERIA_END@", raw, re.DOTALL)
-        inner = blocks[-1] if blocks else raw
+        # ... resto do código (Oráculo de Causa Raiz e Triangulação) ...
+        # (Mantenha sua lógica de "if 'CORRUPTION' in motivo" abaixo)
         
-        # FIX: Captura TODAS as ocorrências de TAG_
-        all_tags = re.findall(r"TAG_(\w+):\s*(.*)", inner)
-        
+        # [RE-VITAL] Garanta que o motivo e detail sejam lidos de 'tags'
+        motivo = tags.get('MOTIVO', '').upper()
+        detail = tags.get('DETAIL', '').upper()
+
+
+        # 2. Distribuição de Dados
         tags = {}
         inventory = []
+        io_history = []
+        
         for key, val in all_tags:
-            k_upper = key.upper()
-            if k_upper == "ARENA_OBJ":
+            k_up = key.upper()
+            if k_up == "IO_EVENT":
+                io_history.append(val)
+            elif k_up == "ARENA_OBJ":
                 inventory.append(val)
+            elif k_up.startswith("REG_"):
+                tags[k_up.replace("REG_", "")] = val
             else:
-                tags[k_upper] = val
+                tags[k_up] = val
 
+        dossier['io_history'] = io_history # Entrega a linha do tempo
         dossier['soteria'] = tags
         dossier['inventory_raw'] = inventory
+        dossier['pipeline_steps'] = steps # Para o rescue.py mostrar
 
         # 3. Oráculo de Causa Raiz
         motivo = tags.get('MOTIVO', '').upper()

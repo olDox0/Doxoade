@@ -16,10 +16,29 @@ DB_FILE = Path.home() / '.doxoade' / 'doxoade.db'
 DB_VERSION = 120
 
 def get_db_connection():
-    """Mantida Original: Abre conexão persistente com Row Factory."""
+    """Abre conexão e garante a existência da infraestrutura operacional."""
     DB_FILE.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    
+    # [ALFA 412] AUTO-REPAIR: Cria a tabela de logs se estiver ausente
+    try:
+        conn.execute("SELECT 1 FROM operational_logs LIMIT 1")
+    except sqlite3.OperationalError:
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS operational_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                subsystem TEXT NOT NULL,
+                action TEXT NOT NULL,
+                data TEXT,
+                pid INTEGER
+            );
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_op_logs_ts ON operational_logs(timestamp);')
+        conn.commit()
+        
     return conn
 
 def _m_v1_v3_core(cursor):
@@ -66,6 +85,20 @@ def _m_v20_nexus_vault(cursor):
             session_key TEXT
         );
     ''')
+
+def _m_v21_operational_logs(cursor):
+    """Cria a infraestrutura de logs operacionais (Heartbeat)."""
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS operational_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            subsystem TEXT NOT NULL,
+            action TEXT NOT NULL,
+            data TEXT,
+            pid INTEGER
+        );
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_op_logs_ts ON operational_logs(timestamp);')
 
 def _apply_incremental_patches(cursor, current_version):
     """Aplica alterações de colunas em tabelas existentes (Resiliência)."""
@@ -139,6 +172,8 @@ def init_db():
             _m_v19_payloads(cursor)
         if current_version < 20:
             _m_v20_nexus_vault(cursor)
+        if current_version < 21:
+            _m_v21_operational_logs(cursor)
         _apply_incremental_patches(cursor, current_version)
         cursor.execute('DELETE FROM schema_version;')
         cursor.execute('INSERT INTO schema_version (version) VALUES (?);', (DB_VERSION,))

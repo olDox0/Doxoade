@@ -2,8 +2,11 @@
 # doxoade/doxoade/tools/metalcraft/metal_engine.py
 import os, subprocess, toml, hashlib, json, re, shutil
 from pathlib import Path
+
 from doxoade.tools.vulcan.diagnostic.soteria.scribe import SoteriaScribe
 from doxoade.tools.doxcolors import Fore, Style
+from doxoade.tools.telemetry_tools.logger import chief_heartbeat
+
 from .metal_toolchain import NexusToolchain
 
 class NexusMetalEngine:
@@ -455,6 +458,12 @@ class NexusMetalEngine:
             cmd += [f"-l{lib}" for lib in libs]
             cmd += ["-lm"] # Lib Math sempre inclusa
             cmd += l_flags
+
+            chief_heartbeat("METAL", "LINKER_CHECK", {
+                "libs": libs,
+                "flags": l_flags,
+                "target": t_name,  # <--- MUDAR DE target_name PARA t_name
+            })
 
             out_file.parent.mkdir(parents=True, exist_ok=True)
             print(f"      🔨 Fundindo {len(src_files)} módulos...")
