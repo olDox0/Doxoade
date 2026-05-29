@@ -67,42 +67,49 @@ class SoteriaScribe:
         return "\n".join(new_lines)
 
     def instrument_code(self, content, filename):
-        # [ALFA 412] Bloqueia re-vax se já estiver completo
-        if "soteria_io_trace" in content:
-            return content
-
-        safe_fn = filename.replace("\\", "/")
-        # Regex para IO_Debug: foca em funções que alteram o estado do sistema
-        io_re = re.compile(r'\b(fopen|fclose|fwrite|printf|fprintf|malloc|free|CreateThread|dx_arena_alloc)\s*\(')
+        #if "soteria_io_trace" in content: return content
+        if "soteria_io_trace" in content and "const char*" in content: return content
         
+        safe_fn = filename.replace("\\", "/")
+        # Regex para capturar funções de sistema
+#        io_re = re.compile(r'\b(fopen|printf|fprintf|malloc|free|CreateThread)\s*\(')
+        io_re = re.compile(r'\b(fopen|printf|fprintf|malloc|free|CreateThread)\b\s*\(')        
         lines = content.splitlines()
         new_lines = []
-        stats = {"io": 0, "func": 0, "var": 0}
+        if "soteria.h" not in content: new_lines.append('#include "soteria.h"\n')
 
+        stats = {"io": 0, "func": 0}
         for i, line in enumerate(lines):
             stripped = line.strip()
-            if not stripped or "soteria_" in line:
+            if not stripped or "soteria_" in line or stripped.startswith(("//", "/*")):
                 new_lines.append(line); continue
 
             indent = self._get_indent(line)
 
-            # 1. RASTRO DE IO (Antes da execução da função)
+            # --- VACCINE: IO_SNIFFER ---
             io_match = io_re.search(line)
             if io_match:
                 stats["io"] += 1
-                new_lines.append(f'{indent}soteria_io_trace("{io_match.group(1)}", "{safe_fn}", {i+1});')
+                func = io_match.group(1)
+                # Tenta pegar o primeiro argumento para o rastro de conteúdo
+                arg_match = re.search(rf'{func}\s*\(\s*([^,)]+)', line)
+                payload = arg_match.group(1).replace('"', "'") if arg_match else "N/A"
+#                new_lines.append(f'{indent}soteria_io_trace("{func}", "{payload}", "{safe_fn}", {i+1});')
+                new_lines.append(f'{indent}soteria_io_trace("{func}", (const char*)"{payload}", "{safe_fn}", {i+1});')
 
-            # 2. ENTRADA DE FUNÇÃO
+            # --- VACCINE: ENTER_FUNC ---
             func_match = self.c_func_regex.match(line)
             if func_match:
                 stats["func"] += 1
                 new_lines.append(line)
-                new_lines.append(f'    SOTERIA_ENTER("{func_match.group(2)}");')
+                if func_match.group(2) not in self.blacklist:
+                    new_lines.append(f'    SOTERIA_ENTER("{func_match.group(2)}");')
                 continue
 
             new_lines.append(line)
-
-        chief_heartbeat("SCRIBE", "IO_DEBUG_INJECTED", {"file": filename, "stats": stats})
+        
+        from doxoade.tools.telemetry_tools.logger import chief_heartbeat
+        chief_heartbeat("SCRIBE", "VACCINATION", {"file": filename, "stats": stats})
         return "\n".join(new_lines)
 
     def generate_shadow(self, src_dir, shadow_dir):

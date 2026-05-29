@@ -15,30 +15,19 @@ LONG WINAPI soteria_exception_handler(struct _EXCEPTION_POINTERS *info);
 static volatile long g_panic_lock = 0;
 static char g_command_line[512] = "doxoade_task";
 
-// Protótipo interno
+// Substitua soteria_dump_hardware_state para usar o NOVO Assembly Total
 void soteria_dump_hardware_state() {
     unsigned long long r_ax, r_bx, r_cx, r_dx, r_sp, r_ip;
-
-    // [CHIEF-GOLD] Captura atômica via Registradores Reais
+    // volatile impede que o compilador ignore a leitura dos registros
     __asm__ volatile (
-        "movq %%rax, %0\n\t"
-        "movq %%rbx, %1\n\t"
-        "movq %%rcx, %2\n\t"
-        "movq %%rdx, %3\n\t"
-        "movq %%rsp, %4\n\t"
-        "leaq (%%rip), %5\n\t"
+        "movq %%rax, %0\n\t" "movq %%rbx, %1\n\t" "movq %%rcx, %2\n\t"
+        "movq %%rdx, %3\n\t" "movq %%rsp, %4\n\t" "leaq (%%rip), %5\n\t"
         : "=r"(r_ax), "=r"(r_bx), "=r"(r_cx), "=r"(r_dx), "=r"(r_sp), "=r"(r_ip)
     );
-
     char h_buf[512];
-    // Enviamos com o prefixo TAG_REG_ para o analyze_crash.py capturar
-    snprintf(h_buf, 511, 
-             "TAG_REG_RAX: 0x%llx\nTAG_REG_RBX: 0x%llx\n"
-             "TAG_REG_RCX: 0x%llx\nTAG_REG_RDX: 0x%llx\n"
-             "TAG_REG_RSP: 0x%llx\nTAG_REG_RIP: 0x%llx\n", 
+    snprintf(h_buf, 511, "TAG_REG_RAX: 0x%llx\nTAG_REG_RBX: 0x%llx\nTAG_REG_RCX: 0x%llx\nTAG_REG_RDX: 0x%llx\nTAG_REG_RSP: 0x%llx\nTAG_REG_RIP: 0x%llx\n", 
              r_ax, r_bx, r_cx, r_dx, r_sp, r_ip);
-    
-    soteria_print_raw(h_buf); // Grito direto via WinAPI
+    soteria_print_raw(h_buf);
 }
 
 // Chame soteria_dump_hardware_state() dentro da soteria_dispatch
@@ -102,7 +91,7 @@ LONG WINAPI soteria_exception_handler(struct _EXCEPTION_POINTERS *info) {
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
-// Escrita atômica que ignora o buffer do C-Runtime
+// [PLATINA] Escrita atômica no console (ignora buffers do C)
 void soteria_print_raw(const char* msg) {
     HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
     if (hOut != INVALID_HANDLE_VALUE) {
@@ -111,9 +100,11 @@ void soteria_print_raw(const char* msg) {
     }
 }
 
-void soteria_io_trace(const char* op, const char* file, int line) {
-    char buf[256];
-    snprintf(buf, 255, "TAG_IO_EVENT: %s em %s:%d\n", op, file, line);
+void soteria_io_trace(const char* op, const char* payload, const char* file, int line) {
+    char buf[1024];
+    // Sniffer: Mostra o que estava sendo feito e o dado envolvido
+    snprintf(buf, 1023, "TAG_IO_EVENT: %s | Data: \"%.48s\" | Loc: %s:%d\n", 
+             op, (payload ? payload : "N/A"), file, line);
     soteria_print_raw(buf);
 }
 
@@ -121,24 +112,27 @@ void soteria_dispatch(soteria_level_t level, soteria_err_t reason, const char* c
                      const char* detail, const char* file, int line, const char* func) {
     
     soteria_print_raw("\n@SOTERIA_BEGIN@\n");
+    soteria_print_raw("TAG_STEP: 1_DISPATCH_START\n");
 
-    // 1. Hardware Snapshot (A única fonte da verdade)
+    // 1. HARDWARE (ASM) - Agora sairá com RSP e RBX reais
     soteria_dump_hardware_state();
+    soteria_print_raw("TAG_STEP: 2_HARDWARE_DONE\n");
 
-    // 2. Metadados
+    // 2. METADADOS (Via WinAPI)
     char meta[512];
-    snprintf(meta, 511, "TAG_MOTIVO: %s\nTAG_LEVEL: %s\nTAG_DETAIL: %s\nTAG_RASTRO_LOC: %s:%d\n", 
-             context, (level == SOTERIA_FATAL ? "FATAL" : "WARN"), detail, file, line);
+    snprintf(meta, 511, "TAG_LEVEL: %s\nTAG_MOTIVO: %s\nTAG_DETAIL: %s\nTAG_RASTRO_LOC: %s:%d\n", 
+             (level == SOTERIA_FATAL ? "FATAL" : "WARN"), context, detail, file, line);
     soteria_print_raw(meta);
 
-    // 3. Inventário e Pilha
+    // 3. ARENA E STACK
     soteria_dump_arena_inventory();
     soteria_dump_stack_trace();
 
+    soteria_print_raw("TAG_STEP: 3_FULL_DUMP_DONE\n");
     soteria_print_raw("@SOTERIA_END@\n");
 
     if (level == SOTERIA_FATAL) {
-        Sleep(200); // Dá tempo ao Python para ler o pipe
+        Sleep(300); // [VITAL] Tempo para o Lazarus capturar os 1500+ bytes
         TerminateProcess(GetCurrentProcess(), 1);
     }
 }

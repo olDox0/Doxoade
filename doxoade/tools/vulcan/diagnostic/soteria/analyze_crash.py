@@ -40,6 +40,7 @@ class CrashProcessor:
         
         # 1. Normalização e Isolação do Bloco
         raw = raw_text.replace("@NEXUS_END@", "@SOTERIA_END@").replace("@NEXUS_BEGIN@", "@SOTERIA_BEGIN@")
+        clean_raw = raw_text.encode('ascii', 'ignore').decode('ascii')
         invocation_str = f"doxoade {' '.join(sys.argv[1:])}"
         start_marker = "@SOTERIA_BEGIN@"
         if start_marker in raw:
@@ -63,7 +64,9 @@ class CrashProcessor:
             if k_up == "STEP": steps.append(val)
             elif k_up == "IO_EVENT": io_history.append(val)
             elif k_up == "ARENA_OBJ": inventory.append(val)
-            elif k_up.startswith("REG_"): tags[k_up.replace("REG_", "")] = val
+            elif k_up.startswith("REG_"): 
+                reg_name = k_up.replace("REG_", "")
+                tags[reg_name] = val
             else: tags[k_up] = val
 
         # Auditoria de Integridade para o Heartbeat
@@ -109,7 +112,9 @@ class CrashProcessor:
             elif k_up == "ARENA_OBJ":
                 inventory.append(val)
             elif k_up.startswith("REG_"):
-                tags[k_up.replace("REG_", "")] = val
+                reg_name = k_up.replace("REG_", "")
+                tags[reg_name] = val
+#                tags[k_up.replace("REG_", "")] = val
             else:
                 tags[k_up] = val
 

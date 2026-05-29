@@ -148,8 +148,9 @@ def _render_tactical_dossier(d: dict):
 
     # --- SEÇÃO 7: IO_DEBUG ---
     if d.get('io_history'):
-        print(f"\n  {C}■ RASTRO DE OPERAÇÕES (Linha do Tempo IO_Debug):{RST}")
-        for ev in d['io_history'][-10:]: # Últimas 10 ações
+        print(f"\n  {C}■ RASTRO DE OPERAÇÕES (Enriquecido com IO_Content):{RST}")
+        for ev in d['io_history'][-10:]:
+            # Exemplo de saída: ➔ Operation: printf | Data: "Corrompendo a Zona..."
             print(f"    {W}➔ {ev}{RST}")
 
     # --- FOOTER ---
@@ -176,72 +177,92 @@ def activate_protocol(error_text: str, exit_code: int = None):
     info = analyze_crash(error_text, exit_code)
     
     # 3. Painel de Controle de Resgate (UX de Alta Resolução)
-    print(f'\n  {W}--- 🛠  OPÇÕES DE INTERVENÇÃO (Chief-Gold) ---{RST}')
-    
-    file_label = os.path.basename(info["file"])
-    if file_label == "NATIVO":
-        print(f'  {Style.DIM}[1] [GIT]  (Indisponível para falha puramente nativa){RST}')
-    else:
-        print(f'  {Back.RED}1.{RST} {Fore.GREEN} [GIT]  Reverter alterações estáveis em {Y}{file_label}{RST}')
+    while True:
+        # Re-renderiza o dossiê tático (Elegante)
+#        _render_tactical_dossier(info)
         
-    print(f'  {Back.RED}2.{RST} {Fore.CYAN} [EDIT] Abrir Notepad++ na linha {Y}{info["line"]}{RST}')
-    print(f'  {Back.RED}3.{RST} {Fore.RED} [INFO] Ver logs brutos (Traceback Completo){RST}')
-    print(f'  {Back.RED}4.{RST} {Fore.YELLOW} [DEBUG] Ver Diagnóstico de Pipeline{RST}')
-    print(f'  {Back.RED}0.{RST} {Fore.LIGHTMAGENTA_EX} [EXIT] Aceitar falha e encerrar sessão{RST}')
-    
-    try:
-        # Prompt Estilizado
-        choice = input(f'\n  {C}Sua decisão (0-3): {RST}').strip()
+        print(f'\n  {W}--- 🛠  OPÇÕES DE INTERVENÇÃO (Chief-Gold) ---{RST}')
         
-        if choice == '1' and file_label != "NATIVO":
-            print(f'  {Y}[*] Executando Rollback via Git...{RST}')
-            # Tenta reverter o arquivo para o último estado salvo (SAFE-MODE)
-            res = subprocess.run(['git', 'checkout', '--', info['file']], capture_output=True)
-            if res.returncode == 0:
-                print(f'  {G}✔ Sucesso: {file_label} restaurado para a versão estável.{RST}')
-            else:
-                print(f'  {R}✘ Falha: Este arquivo não está sob controle do Git ou está em conflito.{RST}')
-                
-        elif choice == '2':
-            # Localização Industrial do Notepad++ (Evita 'file not found' no Windows)
-            import shutil
-            npp_candidates = [
-                r"C:\Program Files\Notepad++\notepad++.exe",
-                r"C:\Program Files (x86)\Notepad++\notepad++.exe",
-                "notepad++.exe"
-            ]
-            npp_bin = next((p for p in npp_candidates if os.path.exists(p) or shutil.which(p)), 'notepad.exe')
+        file_label = os.path.basename(info["file"])
+        if file_label == "NATIVO":
+            print(f'  {Style.DIM}[1] [GIT]  (Indisponível para falha puramente nativa){RST}')
+        else:
+            print(f'  {Back.RED}1.{RST} {Fore.GREEN} [GIT]  Reverter alterações estáveis em {Y}{file_label}{RST}')
             
-            print(f'  {C}[*] Invocando editor...{RST}')
-            # Flag -n pula direto para a linha do erro no Notepad++
-            target_abs = os.path.abspath(info['file'])
-            subprocess.Popen([npp_bin, f"-n{info['line']}", "-nosession", target_abs], shell=False)
-            print(f'  {G}✔ Editor aberto em {file_label} L{info["line"]}.{RST}')
-            
-        elif choice == '3':
-            # Exibição do log sem as tags Sotéria para limpeza visual
-            clean_log = error_text.replace("@SOTERIA_BEGIN@", "").replace("@SOTERIA_END@", "")
-            print(f'\n{R}--- [ INÍCIO DO LOG BRUTO ] ---{RST}')
-            print(f"{Style.DIM}{clean_log}{RST}")
-            print(f'{R}--- [ FIM DO LOG ] ---{RST}')
-#            input(f'\n{Style.DIM}Pressione Enter para prosseguir para a saída...{RST}')
-        elif choice == '4':
-            print(f"\n{C}🔬 [PIPELINE PROBE] Últimos Batimentos de Coração (Hades Engine):{RST}")
-            try:
-                from doxoade.database import get_db_connection
-                conn = get_db_connection()
-                rows = conn.execute('SELECT timestamp, subsystem, action, data FROM operational_logs ORDER BY id DESC LIMIT 10').fetchall()
-                for r in reversed(rows):
-                    ts = r['timestamp'][11:19]
-                    print(f"  {Style.DIM}[{ts}]{RST} {Y}{r['subsystem']}{RST} | {C}{r['action']}{RST} ➔ {r['data']}")
-                conn.close()
-            except Exception as e:
-                print(f"  {R}✘ Falha no DB: {e}{RST}")
+        print(f'  {Back.RED}2.{RST} {Fore.CYAN} [EDIT] Abrir Notepad++ na linha {Y}{info["line"]}{RST}')
+        print(f'  {Back.RED}3.{RST} {Fore.RED} [INFO] Ver logs brutos (Traceback Completo){RST}')
+        print(f'  {Back.RED}4.{RST} {Fore.YELLOW} [DEBUG] Ver Diagnóstico de Pipeline{RST}')
+        print(f'  {Back.RED}0.{RST} {Fore.LIGHTMAGENTA_EX} [EXIT] Aceitar falha e encerrar sessão{RST}')
+        
+        choices = input(f"\n  Sua decisão (ex: 34): ").strip()
+        if '0' in choices: break
 
-    except KeyboardInterrupt:
-        print(f'\n  {Y}[!] Intervenção abortada pelo usuário.{RST}')
-    except Exception as e:
-        print(f'\n  {R}[!] Erro no Protocolo Lazarus: {e}{RST}')
+        try:
+            # Processa cada escolha em sequência
+            for choice in choices:
+                if choice == '1' and file_label != "NATIVO":
+                    print(f'  {Y}[*] Executando Rollback via Git...{RST}')
+                    # Tenta reverter o arquivo para o último estado salvo (SAFE-MODE)
+                    res = subprocess.run(['git', 'checkout', '--', info['file']], capture_output=True)
+                    if res.returncode == 0:
+                        print(f'  {G}✔ Sucesso: {file_label} restaurado para a versão estável.{RST}')
+                    else:
+                        print(f'  {R}✘ Falha: Este arquivo não está sob controle do Git ou está em conflito.{RST}')
+                        
+                if choice == '2':
+                    # Localização Industrial do Notepad++ (Evita 'file not found' no Windows)
+                    import shutil
+                    npp_candidates = [
+                        r"C:\Program Files\Notepad++\notepad++.exe",
+                        r"C:\Program Files (x86)\Notepad++\notepad++.exe",
+                        "notepad++.exe"
+                    ]
+                    npp_bin = next((p for p in npp_candidates if os.path.exists(p) or shutil.which(p)), 'notepad.exe')
+                    
+                    print(f'  {C}[*] Invocando editor...{RST}')
+                    # Flag -n pula direto para a linha do erro no Notepad++
+                    target_abs = os.path.abspath(info['file'])
+                    subprocess.Popen([npp_bin, f"-n{info['line']}", "-nosession", target_abs], shell=False)
+                    print(f'  {G}✔ Editor aberto em {file_label} L{info["line"]}.{RST}')
+                    
+                if choice == '3':
+                    # Exibição do log sem as tags Sotéria para limpeza visual
+                    clean_log = error_text.replace("@SOTERIA_BEGIN@", "").replace("@SOTERIA_END@", "")
+                    print(f'\n{R}--- [ INÍCIO DO LOG BRUTO ] ---{RST}')
+                    print(f"{Style.DIM}{clean_log}{RST}")
+                    print(f'{R}--- [ FIM DO LOG ] ---{RST}')
+        #            input(f'\n{Style.DIM}Pressione Enter para prosseguir para a saída...{RST}')
+                if choice == '4':
+                    print(f"\n{C}🔬 [PIPELINE PROBE] Batimentos de Coração (Hades Engine):{RST}")
+                    try:
+                        from doxoade.database import get_db_connection
+                        import json
+                        conn = get_db_connection()
+                        rows = conn.execute('SELECT timestamp, subsystem, action, data FROM operational_logs ORDER BY id DESC LIMIT 15').fetchall()
+                        for r in reversed(rows):
+                            # FIX: Corrigido de 's11' para '[11:19]'
+                            ts = r['timestamp'][11:19] 
+                            sys_label = f"{r['subsystem']:<10}"
+                            act_label = f"{r['action']:<22}"
+                            try:
+                                d_obj = json.loads(r['data'])
+                                # Limpa a visualização do JSON para o terminal
+                                d_str = ", ".join([f'"{k}": {v}' for k, v in d_obj.items()])
+                            except: d_str = r['data']
+                            
+                            print(f"  {Style.DIM}[{ts}]{RST} {Y}{sys_label}{RST} │ {C}{act_label}{RST} ➔ {W}{d_str}{RST}")
+                        conn.close()
+                    except Exception as e:
+                        print(f"  {R}✘ Falha ao consultar Hades: {e}{RST}")
+
+            break
+
+        except KeyboardInterrupt:
+            print(f'\n  {Y}[!] Intervenção abortada pelo usuário.{RST}')
+        except Exception as e:
+            print(f'\n  {R}[!] Erro no Protocolo Lazarus: {e}{RST}')
+
+ #        input(f"\n  {Style.DIM}Pressione ENTER para voltar ao menu...{RST}")
         
     # Encerra o processo de qualquer forma para evitar loops de erro
     sys.exit(1)

@@ -58,7 +58,7 @@ void soteria_validate(void* ptr, const char* file, int line);
 void soteria_dump_arena_inventory();
 void soteria_dump_hardware_state();
 void soteria_mark_var(const char* var_name, long long value, const char* file, int line);
-void soteria_io_trace(const char* op, const char* file, int line);
+void soteria_io_trace(const char* op, const char* payload, const char* file, int line); //void soteria_io_trace(const char* op, const char* file, int line);
 void soteria_print_raw(const char* msg);
 
 #ifndef SOTERIA_CORE
