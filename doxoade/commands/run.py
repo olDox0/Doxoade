@@ -5,7 +5,10 @@ Comando Run - v83.5 Platinum.
 Orquestrador de Execução Híbrida com Suporte a Sniper Lens e Warden Limits.
 """
 import os
+import sys
 import click
+import traceback
+from doxoade.rescue import activate_protocol
 from doxoade.tools.aegis.warden import apply_resource_limits
 from doxoade.tools.aegis.aegis_utils import validate_execution_context
 from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
@@ -64,13 +67,16 @@ def run(ctx, script, args, **kwargs):
             # 4. Execução Híbrida padrão (Python/Vulcan)
             _execute_hybrid_engine(abs_path, not kwargs.get('no_vulcan'), limits)
 
-        except Exception as e:
-            import sys as exc_sys
-            from traceback import print_tb as exc_trace
-            _, exc_obj, exc_tb = exc_sys.exc_info()
-            print(f"\x1b[31m ■ Exception type: {e} . . .  ■ Exception value: {'\n  >>>   '.join(str(exc_obj).split("'"))}\x1b[0\n")
-            exc_trace(exc_tb)
+        except SystemExit as e:
+            if e.code != 0:
+                # Se o script deu exit(1) ou crashou, Lazarus assume
+                activate_protocol(traceback.format_exc())
             raise e
+        except Exception:
+            # Qualquer erro não tratado no script Python aciona o Dossiê
+            err_data = traceback.format_exc()
+            activate_protocol(err_data)
+            sys.exit(1)
 
 def _execute_hybrid_engine(script_path: str, use_vulcan: bool, limits: dict):
     abs_path = os.path.abspath(script_path)

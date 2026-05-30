@@ -126,27 +126,40 @@ class DoxoadeLazyGroup(click.Group):
         if name not in self._lazy_map:
             return None
         module_path, attr_name = self._lazy_map[name].split(':')
+        
+        import importlib.util
+        from doxoade.rescue import activate_protocol
+        import traceback
+
+        # --- ORÁCULO DE SINTAXE (Shadow Check) ---
+        try:
+            spec = importlib.util.find_spec(module_path)
+            if spec and spec.origin:
+                with open(spec.origin, 'r', encoding='utf-8') as f:
+                    # Tenta compilar o bytecode. Se houver erro de sintaxe, explode aqui.
+                    compile(f.read(), spec.origin, 'exec')
+        except SyntaxError:
+            # Se o arquivo estiver quebrado, o Lazarus assume o controle ANTES do crash
+            from doxoade.rescue import activate_protocol
+            import traceback
+            activate_protocol(traceback.format_exc())
+            return None
+        except Exception: pass 
+
+        # --- LOADER REAL (Lazy Load) ---
         try:
             mod = import_module(module_path)
             return getattr(mod, attr_name)
-        except (ImportError, ModuleNotFoundError) as e:
-            missing_module = str(e).split("'")[-2] if "'" in str(e) else str(e)
-            
-            # --- CRÍTICO: Filtro Anti-Poluição ---
-            # Se o erro for em um módulo interno ou se o auto-reparo não for desejado
-            if missing_module.startswith('doxoade') or ".commands." in module_path:
-                self._print_fatal_import(name, e)
-                return None
-
-            # Auto-reparo apenas para bibliotecas externas conhecidas
-            click.secho(f"[*] Dependência externa '{missing_module}' ausente. Tentar auto-reparo? [y/N]", fg='yellow')
-            # Aqui você poderia colocar um input(), mas por segurança vamos apenas logar o erro
+        except Exception as e:
             self._print_fatal_import(name, e)
             return None
 
     def _print_fatal_import(self, cmd_name, e):
-        print(f"\x1b[31m\n[ FATAL ] Erro ao carregar comando '{cmd_name}'")
-        print(f'   ■ Causa: {e}\x1b[0m')
+        # Estética Sotéria/Rescue para erros de boot
+        print(f"\033[1;31m\n[ FATAL ] Erro na Matriz de Comando: '{cmd_name}'\033[0m")
+        print(f"\033[1;34m ■ SUBSISTEMA :\033[0m Intelligence Router")
+        print(f"\033[1;34m ■ CAUSA      :\033[0m {e}")
+        print(f"\033[1;34m ■ DIAGNÓSTICO:\033[0m Verifique se o módulo 'telemetry_tools.logger' foi movido.")
         if '--debug' in sys.argv:
             traceback.print_exc()
 
@@ -155,6 +168,8 @@ class DoxoadeLazyGroup(click.Group):
 @click.pass_context
 def cli(ctx, guard):
     """olDox222 Advanced Development Environment (doxoade)."""
+    from doxoade.tools.system_utils import auto_vaccinate_env
+    auto_vaccinate_env()
     init_colors(autoreset=True)
     ctx.ensure_object(dict)
     from doxoade.tools.db_utils import start_persistence_worker

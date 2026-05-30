@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # doxoade/doxoade/commands/debug.py
 """
 Debug Suite v2.1 - Chief Gold Orchestrator.
@@ -5,37 +6,59 @@ Compliance: MPoT-1, PASC-1.
 """
 import click
 import os
+import sys
+import traceback
+from doxoade.rescue import activate_protocol
 from doxoade.tools.doxcolors import Fore, Style
 
 @click.command('debug')
 @click.argument('script', required=False)
-@click.option(  '--args', 'target_args',
+@click.option('--args', 'target_args',
                 help="Args do script.")
-@click.option(  '--watch', 
+@click.option('--watch', 
                 help="Monitora uma variável em tempo real.")
-@click.option(  '--intern',      '-i',                
+@click.option('--intern',      '-i',                
                 help="Executa e depura um comando interno. Ex: --intern 'check .'")
-@click.option(  '--bottleneck',  '-b',  is_flag=True, 
+@click.option('--flow-val', is_flag=True, 
+                help="Inspeção de variáveis no rastro.")
+@click.option('--flow-import', is_flag=True, 
+                help="Rastro de I/O e imports.")
+@click.option('--flow-func', is_flag=True, 
+                help="Rastro de chamadas de funções.")
+@click.option('--bottleneck',  '-b',  is_flag=True, 
                 help="Exibe linhas com tempo por linha.")
-@click.option(  '--no-compress', '-nc', is_flag=True, 
+@click.option('--no-compress', '-nc', is_flag=True, 
                 help="Desativa compressão de loops repetidos.")
-@click.option(  '--profile',     '-p',  is_flag=True, 
+@click.option('--processing-limiter', '-pl', type=float, 
+                help="Limite de CPU %.")
+@click.option('--ram-limiter', '-rl', type=str, 
+                help="Limite de RAM (ex: 512mb).")
+@click.option('--disk-limiter', '-dl', type=str, 
+                help="Limite de escrita em disco.")
+@click.option('--no-vulcan', is_flag=True, 
+                help="Desativa o Turbo Nativo.")
+@click.option('--profile',     '-p',  is_flag=True, 
                 help="Perfil de CPU (tempo).")
-@click.option(  '--memory',      '-m',  is_flag=True, 
+@click.option('--memory',      '-m',  is_flag=True, 
                 help="Autópsia profunda de Memória (GC + Tracebacks).")
-@click.option(  '--threshold',   '-t',  type=float, default=0.0, 
+@click.option('--threshold',   '-t',  type=float, default=0.0, 
                 help="Filtra linhas abaixo de N ms.")
-@click.option(  '--sniff',                            
+@click.option('--sniff',                            
                 help="Monitora I/O e Variáveis de um arquivo específico ao vivo.")
 @click.option('--audit-rescue', is_flag=True, 
                 help="Executa necropsia completa no sistema de resgate.")
 @click.option('--meta-analysis', is_flag=True, 
                 help="Executa meta diagnostico sob o sistema lazarus.")
-def debug(script, intern, audit_rescue, meta_analysis, **kwargs):
+def debug(script, intern, **kwargs):
+#def debug(script, intern, audit_rescue, sniff, meta_analysis, **kwargs):
     """🩺 Autópsia Forense, Monitoramento, CPU ou Memória (MPoT-5)."""
     from .debug_systems.debug_engine import execute_debug
     
-    target = intern if intern else script
+    audit_rescue = kwargs.get('audit_rescue')
+    meta_analysis = kwargs.get('meta_analysis')
+    sniff = kwargs.get('sniff')
+    target_args = kwargs.get('target_args')
+    target      = intern if intern else script
     is_internal = True if intern else False
     
     if not target:
@@ -45,7 +68,8 @@ def debug(script, intern, audit_rescue, meta_analysis, **kwargs):
     if sniff:
         from ..probes.sniper_probe import run_sniping
         click.echo(f"{Fore.PRIMARY}🎯 [SNIPER LENS] Focando em: {sniff}{Style.RESET_ALL}")
-        run_sniping(script, sniff, args_str=target_args)
+#        run_sniping(script, sniff, args_str=target_args)
+        run_sniping(target, sniff, args_str=target_args)
         return
 
     if audit_rescue or meta_analysis:

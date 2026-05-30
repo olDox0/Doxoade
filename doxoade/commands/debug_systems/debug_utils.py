@@ -18,6 +18,8 @@ import traceback
 import tracemalloc
 import linecache
 import io
+from pathlib import Path
+
 from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
 from doxoade.tools.filesystem import _find_project_root
 
@@ -339,7 +341,8 @@ def run_profile(script_path: str):
         print(json.dumps(profile_data, ensure_ascii=False))
         sys.stdout.flush()
 
-def build_flow_command(python_exe: str, runner_file: str, script: str, watch: str=None, bottleneck: bool=False, no_compress: bool=False, args: str=None) -> list:
+def build_flow_command(python_exe, runner_file, script, watch=None, bottleneck=False, no_compress=False, args=None, **kwargs):
+#def build_flow_command(python_exe, runner_file, script, watch: str=None, bottleneck: bool=False, no_compress: bool=False, args: str=None, kwargs) #-> list:
     """
     Protocolo nativo do flow_runner (argparse):
         flow_runner.py [--base] [--val] [--no-compress] [--target TARGET] script
@@ -348,7 +351,9 @@ def build_flow_command(python_exe: str, runner_file: str, script: str, watch: st
     --bottleneck → --base
     --no-compress → --no-compress  (desativa Iron Gate no flow_runner)
     """
-    cmd = [python_exe, os.path.abspath(runner_file)]
+    base_dir = Path(__file__).resolve().parents[2] 
+    probe_path = base_dir / "probes" / "flow_runner.py"
+    cmd = [python_exe, str(probe_path), os.path.abspath(script)]
     if watch:
         cmd.extend(['--target', watch])
         cmd.append('--val')
@@ -359,6 +364,17 @@ def build_flow_command(python_exe: str, runner_file: str, script: str, watch: st
     cmd.append(os.path.abspath(script))
     if args:
         cmd.extend(args.split())
+    # Mapeamento de flags do CLI para o Probe
+    if kwargs.get('is_internal'): cmd.append("--internal")
+    if kwargs.get('flow_val'):    cmd.append("--val")
+    if kwargs.get('flow_import'): cmd.append("--imp")
+    if kwargs.get('flow_func'):   cmd.append("--func")
+    if kwargs.get('no_vulcan'):   cmd.append("--no-vulcan")
+    if kwargs.get('no_compress'): cmd.append("--no-compress")
+    
+    if args:
+        cmd.extend(["--args", args])
+        
     return cmd
 
 def run_memory(script_path: str):

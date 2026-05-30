@@ -28,6 +28,8 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
+_MARKER_DEBUG = '---DOXOADE-DEBUG-DATA---' # Garantir que está no topo
+
 def _resolve_package(abs_path: str):
     parts = []
     current = os.path.dirname(abs_path)
@@ -200,15 +202,10 @@ def _extract_memory_stats(snapshot, target_file: str, project_root: str, limit: 
     return {'peak_mb': 0.0, 'top_allocs': top}
 
 def run_debug(script_path, mode='debug', args=None):
-    import shlex
-    import os
-    import sys
-    import json
-    import traceback
-    import types
-
+    import shlex, os, sys, json, traceback, types
+    # Removido os prints do topo!
+    
     abs_path = os.path.abspath(script_path)
-    # Detecta se é o wrapper de comando interno do Doxoade
     is_internal = "command_wrapper.py" in script_path.replace('\\', '/')
     
     debug_data = {'status': 'unknown', 'variables': {}, 'error': None}
@@ -219,52 +216,36 @@ def run_debug(script_path, mode='debug', args=None):
         sys.stdout.flush()
 
         if is_internal:
-            # --- MODO INTERNO (SELF-DEBUG) ---
-            os.environ['DOXOADE_DISABLE_VULCAN'] = '1'
-            os.environ['VULCAN_DISABLE_LIB_BIN'] = '1'
-            
             from doxoade.cli import cli
             cmd_args = shlex.split(args) if args else []
-            
-            # Patch do sys.argv para o Click interno ler os comandos corretamente
             old_argv = sys.argv.copy()
             sys.argv = ['doxoade'] + cmd_args
-            
             try:
-                # Executa o CLI do Doxoade. Como o profiler está ativo no processo pai, 
-                # ele capturará todo o custo de CPU/RAM daqui para baixo.
                 cli(standalone_mode=False) 
             finally:
                 sys.argv = old_argv
         else:
-            # --- MODO NORMAL (SCRIPT EXTERNO) ---
             with open(abs_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            restricted_safe_exec(content, globs, allow_imports=True)
+            restricted_safe_exec(content, globs, allow_imports=True, filename=abs_path)
 
         debug_data['status'] = 'success'
         debug_data['variables'] = _capture_locals(globs)
 
     except Exception as e:
-        # Relatório Forense em caso de Crash
-        exc_type, exc_obj, exc_tb = sys.exc_info()
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print(f'\x1b[31m ■ Exception type: {type(e).__name__} ■ Archive: {fname} ■ Line: {exc_tb.tb_lineno}\n')
-        
         debug_data['status'] = 'error'
         debug_data['error'] = str(e)
         debug_data['traceback'] = traceback.format_exc()
-        debug_data['line'] = exc_tb.tb_lineno
-        
-        # Tenta capturar variáveis do frame onde ocorreu o erro
+        # Captura o frame real do erro
+        _, _, exc_tb = sys.exc_info()
         tb = exc_tb
-        while tb.tb_next: tb = tb.tb_next
-        frame = tb.tb_frame
-        debug_data['variables'] = _capture_locals(frame.f_locals)
+        while tb and tb.tb_next: tb = tb.tb_next
+        if tb:
+            debug_data['line'] = tb.tb_lineno
+            debug_data['variables'] = _capture_locals(tb.tb_frame.f_locals)
 
-    # Transmite o dossiê JSON para o processo pai (CLI)
-    print('\n---DOXOADE-DEBUG-DATA---')
-    sys.stdout.write(f"\n{_MARKER_DEBUG}\n") # Use a constante definida no topo ou a string direta
+    # --- TRANSMISSÃO FINAL (Protocolo Chief-Gold) ---
+    sys.stdout.write(f"\n{_MARKER_DEBUG}\n") # <--- O marcador deve ser este
     sys.stdout.write(json.dumps(debug_data, ensure_ascii=False))
     sys.stdout.write("\n")
     sys.stdout.flush()

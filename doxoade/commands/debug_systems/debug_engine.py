@@ -9,12 +9,15 @@ Novidades:
 import re
 import sys
 import subprocess
+import os
 import json
 import click
 from doxoade.tools.doxcolors import Fore, Style
 from .debug_utils import get_debug_env, build_probe_command, build_flow_command
 from .debug_io import print_debug_header, render_variable_table, report_crash, render_profile_report
 from doxoade.tools.filesystem import _get_venv_python_executable
+from doxoade.tools.aegis.warden import apply_resource_limits
+
 _MARKER_DEBUG = '---DOXOADE-DEBUG-DATA---'
 _MARKER_PROFILE = '---DOXOADE-PROFILE-DATA---'
 _RE_ANSI = re.compile('\\033\\[[0-9;]*m')
@@ -244,10 +247,40 @@ def _run_memory(python_exe, script, args, env):
         click.secho(f'\n❌ Erro no Orquestrador (memória): {e}', fg='red')
 
 def execute_debug(script, is_internal=False, **kwargs):
-    """Orquestrador Nexus v8.1 - Estabilizado e Verboso."""
+    """Orquestrador de Debug v95.5."""
     import os
     import sys
     from doxoade.tools.filesystem import _get_venv_python_executable
+    from doxoade.tools.aegis.warden import apply_resource_limits
+
+    # 1. Aplica Célula de Carga (Warden)
+    limits = {
+        'cpu': kwargs.get('processing_limiter'),
+        'ram': kwargs.get('ram_limiter'),
+        'disk': kwargs.get('disk_limiter')
+    }
+    apply_resource_limits(limits)
+
+    # 2. Prepara Ambiente e Interpretador
+    python_exe = _get_venv_python_executable() or sys.executable
+    env_raw = get_debug_env(script)
+    env = {str(k): str(v) for k, v in env_raw.items()}
+
+    # 3. Decisao de Motor de Rastro (Prioridade ao Flow)
+    is_flow = any([kwargs.get('flow_val'), kwargs.get('flow_import'), kwargs.get('flow_func')])
+
+    if is_flow:
+        _run_flow_mode_v2(python_exe, script, is_internal, env, kwargs)
+        return
+    if any([kwargs.get('flow_val'), kwargs.get('flow_import'), kwargs.get('flow_func')]):
+        _run_flow_mode_v2(python_exe, script, is_internal, env, kwargs)
+        return # Garante que o retorno do flow-mode encerre o comando pai limpo
+    if kwargs.get('profile'):
+        _run_profile(python_exe, script, kwargs.get('target_args'), env)
+    elif kwargs.get('memory'):
+        _run_memory(python_exe, script, kwargs.get('target_args'), env)
+    else:
+        _run_autopsy(python_exe, script, kwargs.get('target_args'), env)
 
     # 1. ALVO (Prioridade Zero: Define antes de usar!)
     if is_internal:
@@ -294,3 +327,29 @@ def execute_debug(script, is_internal=False, **kwargs):
         _run_live(python_exe, script_to_probe, args_str, env, watch, bottleneck, threshold, no_compress)
     else:
         _run_autopsy(python_exe, script_to_probe, args_str, env)
+        
+def _run_flow_mode_v2(python_exe, script, is_internal, env, kwargs):
+    """Executa o rastro e aciona Lazarus no PAI se o FILHO crashar."""
+    from .debug_io import print_debug_header
+    from doxoade.rescue import activate_protocol
+    
+    print_debug_header(script, mode="NEXUS FLOW")
+    kwargs['is_internal'] = is_internal
+    cmd = build_flow_command(python_exe, None, script, args=kwargs.get('target_args'), **kwargs)
+    
+    process = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
+        text=True, encoding='utf-8', errors='replace', env=env, bufsize=1
+    )
+    
+    full_output = []
+    for line in iter(process.stdout.readline, ''):
+        full_output.append(line)
+        sys.stdout.write(line)
+        sys.stdout.flush()
+    
+    process.wait()
+    
+    # Se o processo filho crashou, o PAI assume o Lazarus com o log capturado
+    if process.returncode != 0:
+        activate_protocol("".join(full_output))

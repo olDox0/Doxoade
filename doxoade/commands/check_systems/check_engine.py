@@ -10,8 +10,7 @@ from click import progressbar
 from .check_state import CheckState
 from .check_utils import _calculate_incident_stats
 from doxoade.tools.analysis import _get_code_snippet
-from doxoade.tools.filesystem import _find_project_root
-from doxoade.tools.filesystem import get_file_metadata
+from doxoade.tools.filesystem import _find_project_root, get_file_metadata
 
 def run_audit_engine(state: CheckState, io_manager, **kwargs):
     from ...probes.manager import ProbeManager

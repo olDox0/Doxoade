@@ -4,7 +4,8 @@
 Rescue System - Lazarus Protocol v61.0 Platinum Gold.
 Agregador Forense: Sotéria + Aegis + Lazarus (Consolidado).
 """
-import sys, os
+import sys, os, re
+import subprocess
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -26,20 +27,21 @@ WIN_SIGNALS = {
 # --- AUXILIARES ---
 
 def _find_production_source(filename: str) -> Optional[Path]:
-    """Caçador de Fontes: Localiza o arquivo original, ignorando caches."""
-    if not filename or len(filename) < 3 or filename == "N/A": return None
+    if not filename or len(filename) < 3 or filename in ["N/A", "NATIVO"]: return None
     p = Path(filename)
     if p.exists(): return p
-    candidates = [c for c in Path('.').rglob(p.name) if not any(x in str(c).lower() for x in ['.doxoade', 'venv', 'build', 'shadow'])]
-    return candidates[0] if candidates else None
+    try:
+        candidates = [c for c in Path('.').rglob(p.name) if not any(x in str(c).lower() for x in ['.doxoade', 'venv', 'build', 'shadow'])]
+        return candidates[0] if candidates else None
+    except: return None
 
-def get_code_context(filepath: str, linenum: int) -> Optional[str]:
-    """Extrai snippet de código com precisão Chief-Gold."""
+def get_code_context(filepath: str, linenum: int, context_lines: int = 2) -> Optional[str]:
     path = _find_production_source(filepath)
-    if not path: return None
+    if not path or linenum <= 0: return None
     try:
         lines = path.read_text(encoding='utf-8', errors='ignore').splitlines()
-        start, end = max(0, linenum - 3), min(len(lines), linenum + 2)
+        start = max(0, linenum - context_lines - 1)
+        end = min(len(lines), linenum + context_lines)
         ctx = ""
         for i in range(start, end):
             is_target = (i == linenum - 1)
@@ -53,12 +55,8 @@ def get_code_context(filepath: str, linenum: int) -> Optional[str]:
 
 def analyze_crash(traceback_text: str, exit_code: int = None) -> Dict[str, Any]:
     from .tools.vulcan.diagnostic.soteria.analyze_crash import CrashProcessor
-    
     processor = CrashProcessor(project_root=".")
-    dossier = processor.process(traceback_text, exit_code)
-    _render_tactical_dossier(dossier) # Renderiza dossiê
-    
-    return dossier
+    return processor.process(traceback_text, exit_code)
 
 def _render_tactical_dossier(d: dict):
     """Interface de Auditoria de Diamante - Renderização Pura."""
@@ -139,12 +137,14 @@ def _render_tactical_dossier(d: dict):
         for idx, (func_name, loc) in enumerate(d['chain']):
             parts = loc.rsplit(':', 1)
             if len(parts) < 2: continue
-            print(f"\n    {DIM}[{idx}]{RST} ↳ {G}{func_name:<25}{RST} ({os.path.basename(parts[0])}:{parts[1]})")
             
-            # Mostra variável capturada para este frame
-            var_info = d.get('soteria', {}).get(f'FRAME_VAR_{idx}')
-            if var_info:
-                print(f"        {Y}➔ ESTADO NO MOMENTO: {var_info}{RST}")
+            f_path, l_num = parts[0], (int(parts[1]) if parts[1].isdigit() else 0)
+            print(f"\n    {DIM}[{idx}]{RST} ↳ {G}{func_name:<25}{RST} ({os.path.basename(f_path)}:{l_num})")
+            
+            # INJEÇÃO DE SNIPPET DE SEGURANÇA (1 linha de contexto)
+            snip = get_code_context(f_path, l_num, context_lines=0)
+            if snip:
+                print(f"{snip}")
 
     # --- SEÇÃO 7: IO_DEBUG ---
     if d.get('io_history'):
@@ -157,48 +157,40 @@ def _render_tactical_dossier(d: dict):
     print(f"\n{C}╚" + "═" * (w-2) + "╝" + RST)
 
 def activate_protocol(error_text: str, exit_code: int = None):
-    """Protocolo Lazarus: Menu de Intervenção Imediata após falha catastrófica."""
+    """Protocolo Lazarus: Menu de Intervenção Imediata."""
     if not error_text: return
 
-    import subprocess
+    # 1. Percepção Silenciosa
+    info = analyze_crash(error_text, exit_code)
+    if info.get('technical_error') == "NORMAL_EXIT": return
 
-    chief_heartbeat("CHIEF", "RESCUE_ACTIVATED", {
-        "reason": "Process Crash or Signal",
-        "exit_code": exit_code
-    })
+    chief_heartbeat("CHIEF", "RESCUE_ACTIVATED", {"reason": "Process Crash", "exit_code": exit_code})
     
-    # 1. Alerta Visual de Impacto
+    # 2. Alerta Visual
     print('\n' + Back.RED + Style.BRIGHT + '!' * 110 + RST)
     print(Back.RED + Style.BRIGHT + '[FATAL SYSTEM CRASH DETECTED]'.center(110) + RST)
     print(Back.RED + Style.BRIGHT + '!' * 110 + RST)
     
-    # 2. Executa a análise profunda e gera o Dossiê
-    # O analyze_crash agora retorna o dicionário 'dossier' vindo do CrashProcessor
-    info = analyze_crash(error_text, exit_code)
+    _render_tactical_dossier(info)
     
-    # 3. Painel de Controle de Resgate (UX de Alta Resolução)
+    # 3. Loop de Intervenção
     while True:
-        # Re-renderiza o dossiê tático (Elegante)
-#        _render_tactical_dossier(info)
-        
         print(f'\n  {W}--- 🛠  OPÇÕES DE INTERVENÇÃO (Chief-Gold) ---{RST}')
-        
         file_label = os.path.basename(info["file"])
         if file_label == "NATIVO":
             print(f'  {Style.DIM}[1] [GIT]  (Indisponível para falha puramente nativa){RST}')
         else:
-            print(f'  {Back.RED}1.{RST} {Fore.GREEN} [GIT]  Reverter alterações estáveis em {Y}{file_label}{RST}')
+            print(f'  {Back.RED}1.{RST} {Fore.GREEN} [GIT]  Reverter alterações em {Y}{file_label}{RST}')
             
         print(f'  {Back.RED}2.{RST} {Fore.CYAN} [EDIT] Abrir Notepad++ na linha {Y}{info["line"]}{RST}')
         print(f'  {Back.RED}3.{RST} {Fore.RED} [INFO] Ver logs brutos (Traceback Completo){RST}')
         print(f'  {Back.RED}4.{RST} {Fore.YELLOW} [DEBUG] Ver Diagnóstico de Pipeline{RST}')
         print(f'  {Back.RED}0.{RST} {Fore.LIGHTMAGENTA_EX} [EXIT] Aceitar falha e encerrar sessão{RST}')
         
-        choices = input(f"\n  Sua decisão (ex: 34): ").strip()
+        choices = input(f"\n  Sua decisão: ").strip()
         if '0' in choices: break
 
         try:
-            # Processa cada escolha em sequência
             for choice in choices:
                 if choice == '1' and file_label != "NATIVO":
                     print(f'  {Y}[*] Executando Rollback via Git...{RST}')
@@ -254,15 +246,9 @@ def activate_protocol(error_text: str, exit_code: int = None):
                         conn.close()
                     except Exception as e:
                         print(f"  {R}✘ Falha ao consultar Hades: {e}{RST}")
-
             break
+        except: pass
 
-        except KeyboardInterrupt:
-            print(f'\n  {Y}[!] Intervenção abortada pelo usuário.{RST}')
-        except Exception as e:
-            print(f'\n  {R}[!] Erro no Protocolo Lazarus: {e}{RST}')
-
- #        input(f"\n  {Style.DIM}Pressione ENTER para voltar ao menu...{RST}")
-        
-    # Encerra o processo de qualquer forma para evitar loops de erro
-    sys.exit(1)
+    # --- O SELO FINAL ---
+    # os._exit garante que o Lazarus não tente se auto-diagnosticar ao fechar
+    os._exit(1)
