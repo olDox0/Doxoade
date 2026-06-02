@@ -16,7 +16,15 @@ class _Stub:
 _SKIP_FILENAMES = frozenset({'__init__.py', '__main__.py'})
 _RISKY_IMPORTS = frozenset({'ctypes', 'socket', 'subprocess', 'threading', 'multiprocessing', 'asyncio', 'llama_cpp'})
 _BLANK_RE = re.compile('\\n{3,}')
-_PYX_HEADER = '# cython: language_level=3, boundscheck=False, wraparound=False\n# cython: initializedcheck=False, cdivision=True\n'
+#_PYX_HEADER = '# cython: language_level=3, boundscheck=False, wraparound=False\n# cython: initializedcheck=False, cdivision=True\n'
+_PYX_HEADER = """
+# cython: language_level=3, boundscheck=False, wraparound=False
+# cython: initializedcheck=False, cdivision=True
+import sys
+import os
+import datetime
+import json
+"""
 NATIVE_KERNELS = {
     'nexus_raw_search', 'nexus_asm_vec_search', 'nexus_asm_cmov', 
     'nexus_asm_popcount', 'nexus_path_normalize', 'nexus_get_filename' }
@@ -57,29 +65,47 @@ def _strip_pyx_source(code: str) -> str:
     result = _BLANK_RE.sub('\n\n', result)
     return result.strip() + '\n'
 
-def assess_file_for_vulcan(file_path: str) -> tuple[bool, str | None]:
-    """Heurística de elegibilidade. Retorna (True, None) para bons candidatos."""
+def assess_file_for_vulcan(file_path: str) -> tuple[bool, str, list[str]]:
+    """Auditoria de Elegibilidade Chief-Gold (v95.8)."""
     p = Path(file_path)
     if p.name in _SKIP_FILENAMES:
-        return (False, f'arquivo de entrada/namespace ({p.name})')
+        return (False, 'Arquivo de entrada/namespace', [f"O arquivo {p.name} é reservado para o interpretador."])
+    
     try:
         source = p.read_text(encoding='utf-8', errors='ignore')
         tree = ast.parse(source)
     except Exception as e:
-        return (False, f'AST inválida ({type(e).__name__})')
-    node_count = sum((1 for _ in ast.walk(tree)))
-    if node_count > 10000:
-        return (False, f'complexidade alta (nodes={node_count})')
-    risky_hits = 0
+        return (False, 'Falha de AST', [str(e)])
+
+    node_count = sum(1 for _ in ast.walk(tree))
+    found_risky = []
+    
+    # Mapeia quais APIs sensíveis estão sendo usadas
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            risky_hits += sum((1 for a in node.names if a.name.split('.')[0] in _RISKY_IMPORTS))
+            for a in node.names:
+                mod = a.name.split('.')[0]
+                if mod in _RISKY_IMPORTS: found_risky.append(mod)
         elif isinstance(node, ast.ImportFrom) and node.module:
-            if node.module.split('.')[0] in _RISKY_IMPORTS:
-                risky_hits += 1
+            mod = node.module.split('.')[0]
+            if mod in _RISKY_IMPORTS: found_risky.append(mod)
+
+    found_risky = sorted(list(set(found_risky)))
+    risky_hits = len(found_risky)
+
+    # Lógica de Veto Industrial
     if risky_hits >= 2 and node_count > 3000:
-        return (False, f'arquivo complexo com APIs sensíveis (risk={risky_hits}, nodes={node_count})')
-    return (True, None)
+        return (False, 'ALTO RISCO ESTRUTURAL', [
+            f"Densidade Lógica: {node_count} nodes (Limite para APIs sensíveis: 3000)",
+            f"Vetores de Risco: {', '.join(found_risky)}",
+            "Diagnóstico: Módulos que gerenciam processos ou threads (subprocess/threading) "
+            "em arquivos grandes podem causar Deadlocks Nativo se vulcanizados."
+        ])
+    
+    if node_count > 10000:
+        return (False, 'COMPLEXIDADE EXTREMA', [f"O arquivo possui {node_count} nodes (Máximo: 10000)"])
+
+    return (True, "Elegível", [])
 
 class BodyPurityScanner(ast.NodeVisitor):
     """Analista de Segurança Estrita: Protege o GIL contra código de logística."""
@@ -445,15 +471,26 @@ class VulcanForge:
         ])
 
         # 3. Injeção de Stubs Única (Removi a duplicata da sua versão)
-        stub_targets = set(self.blacklist)
+        stub_targets = set(self.blacklist) # Começa com os módulos (click, rich...)
+        
         for node in ast.walk(tree):
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                mod = getattr(node, 'module', '') or ''
-                if mod in self.blacklist or any(n.name in self.blacklist for n in node.names):
-                    for alias in node.names:
+            # Procura por: from click import echo, secho
+            if isinstance(node, ast.ImportFrom) and node.module in self.blacklist:
+                for alias in node.names:
+                    stub_targets.add(alias.asname or alias.name)
+            # Procura por: import click (já está no set, mas garante aliases)
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name in self.blacklist:
                         stub_targets.add(alias.asname or alias.name)
 
-        for name in self.blacklist:
+        pyx_lines.append("\n# --- VULCAN SECURITY STUBS ---")
+        pyx_lines.append("class _Stub:")
+        pyx_lines.append("    def __getattr__(self, _): return _Stub()")
+        pyx_lines.append("    def __call__(self, *a, **kw): return _Stub()")
+        
+        for name in sorted(stub_targets):
+            # Não sobrescreve constantes de cor se já estiverem lá
             if name not in {'Fore', 'Style', 'Back'}:
                 pyx_lines.append(f"{name} = _Stub()")
 

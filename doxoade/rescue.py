@@ -4,7 +4,10 @@
 Rescue System - Lazarus Protocol v61.0 Platinum Gold.
 Agregador Forense: Sotéria + Aegis + Lazarus (Consolidado).
 """
-import sys, os, re
+import sys
+import os
+import re
+import json
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -25,6 +28,16 @@ WIN_SIGNALS = {
 }
 
 # --- AUXILIARES ---
+
+def _view_align(text, width):
+    """Alinha o texto compensando os caracteres invisíveis de cor ANSI."""
+    import re
+    # Regex que remove os códigos ANSI para contar o tamanho real visível
+    ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+    clean_text = ansi_escape.sub('', text)
+    padding = width - len(clean_text)
+    return text + (" " * max(0, padding))
+
 
 def _find_production_source(filename: str) -> Optional[Path]:
     if not filename or len(filename) < 3 or filename in ["N/A", "NATIVO"]: return None
@@ -67,17 +80,25 @@ def _render_tactical_dossier(d: dict):
 
     DIM = Style.DIM
     
-    # HEADER - Note que usamos ╠ no final para manter a caixa aberta para os dados
-    print(f"\n{C}╔" + "═" * (w-2) + "╗")
-    print(f"║{W}                    DOSSIÊ CHIEF INSIGHT: RELATÓRIO DE INTELIGÊNCIA TÁTICA                     {C}║")
-    print(f"╠" + "═" * (w-2) + f"╣{RST}") # <--- CORRIGIDO: f-string para o RST funcionar
+    # --- [CÁLCULO DE FORMATAÇÃO DO EXIT CODE] ---
+    exit_raw = d.get('exit_code')
+    is_nt_error = exit_raw is not None and (exit_raw > 255 or exit_raw < -1)
+    if is_nt_error:
+        # Se for erro de hardware, brilha em Vermelho
+        exit_display = f"{Fore.RED}0x{exit_raw & 0xFFFFFFFF:08X}{RST}"
+    else:
+        exit_display = f"{Fore.YELLOW}{exit_raw}{RST}"
 
-    # Use .get() para evitar crashes se o processador falhar
-    print(f"  {W}🆔 ID EVENTO   : {Y}{d.get('id', 'N/A'):<20} {W}📅 HORÁRIO : {Fore.BLUE}{d.get('timestamp', 'N/A')}")
-    print(f"  {W}🚀 INVOCAÇÃO   : {C}{d.get('invocation', 'doxoade')}{RST}")
+    print('\n' + Fore.CYAN + Style.BRIGHT + '_' * 110 + RST)
+    print(Fore.CYAN + Style.BRIGHT + '[RELATÓRIO SOB ERRO]'.center(110) + RST + '\n')
+    
+    # Linha 1 do Header
+    print(f"  {W}🆔 ID EVENTO   : {RST}{Fore.YELLOW}{d.get('id', 'N/A'):<20} {W}📅 HORÁRIO : {RST}{Fore.YELLOW}{d.get('timestamp', 'N/A')}")
+    # Linha 2 do Header (Invocação + Exit Code)
+    print(f"  {W}🚀 INVOCAÇÃO   : {RST}{Fore.YELLOW}{d.get('invocation', 'doxoade'):<20} {W}🚪 EXIT CODE : {RST}{Fore.YELLOW}{exit_display}{RST}")
 
     # --- SEÇÃO 2: DIAGNÓSTICO TÉCNICO ---
-    print(f"\n  {R}■ CAUSA RAIZ (Necropsia de Sistema):{RST}")
+    print(f"\n  {C}■ CAUSA RAIZ (Necropsia de Sistema):{RST}")
     print(f"    {W}STATUS : {R}{d.get('technical_error', 'SYSTEM_FAULT')}{RST}")
     print(f"    {W}LAUDO  : {W}{d.get('explanation', 'Sem detalhes técnicos disponíveis.')}{RST}")
     
@@ -120,10 +141,10 @@ def _render_tactical_dossier(d: dict):
             print(f"    {W}• {item}{RST}")
 
     # --- SEÇÃO 5: CENA DO CRIME (Lazarus Protocol) ---
-    print(f"\n  {G}■ CENA DO CRIME (Triangulação de Código):{RST}")
+    print(f"\n  {C}■ CENA DO CRIME (Triangulação de Código):{RST}")
     file_path = d.get('file', 'NATIVO')
     line_num = d.get('line', 0)
-    print(f"    {W}ALVO FONTE  : {G}{os.path.basename(file_path)}{RST} | {W}COORDENADA: {C}{file_path}:{line_num}{RST}\n")
+    print(f"    {W}ALVO FONTE  : {RST}{Fore.YELLOW}{os.path.basename(file_path)}{RST} | {W}COORDENADA: {RST}{Fore.YELLOW}{file_path}:{line_num}{RST}")
     
     context = get_code_context(file_path, line_num)
     if context: 
@@ -135,14 +156,15 @@ def _render_tactical_dossier(d: dict):
     if d.get('chain'):
         print(f"\n  {C}■ CADEIA DE ENVOLVIMENTO (Anatomia da Queda):{RST}")
         for idx, (func_name, loc) in enumerate(d['chain']):
-            parts = loc.rsplit(':', 1)
-            if len(parts) < 2: continue
+            f_p, l_n = loc.rsplit(':', 1)
+            is_py = ".py" in f_p.lower()
+            label = "[PY]" if is_py else "[C]"
+            color_f = Fore.YELLOW if is_py else G
             
-            f_path, l_num = parts[0], (int(parts[1]) if parts[1].isdigit() else 0)
-            print(f"\n    {DIM}[{idx}]{RST} ↳ {G}{func_name:<25}{RST} ({os.path.basename(f_path)}:{l_num})")
+            print(f"    {DIM}[{idx}]{RST} {M}{label}{RST} ↳ {color_f}{func_name:<25}{RST} ({os.path.basename(f_p)}:{l_n})")
             
-            # INJEÇÃO DE SNIPPET DE SEGURANÇA (1 linha de contexto)
-            snip = get_code_context(f_path, l_num, context_lines=0)
+            # [UPGRADE] Solicita 2 linhas de contexto para gerar o snippet de 5 linhas
+            snip = get_code_context(f_p, int(l_n), context_lines=2)
             if snip:
                 print(f"{snip}")
 
@@ -153,102 +175,142 @@ def _render_tactical_dossier(d: dict):
             # Exemplo de saída: ➔ Operation: printf | Data: "Corrompendo a Zona..."
             print(f"    {W}➔ {ev}{RST}")
 
-    # --- FOOTER ---
-    print(f"\n{C}╚" + "═" * (w-2) + "╝" + RST)
-
 def activate_protocol(error_text: str, exit_code: int = None):
     """Protocolo Lazarus: Menu de Intervenção Imediata."""
-    if not error_text: return
+    from .tools.telemetry_tools.logger import chief_heartbeat
+    import sys as _sys
+    import os as _os
+    import re
 
-    # 1. Percepção Silenciosa
-    info = analyze_crash(error_text, exit_code)
-    if info.get('technical_error') == "NORMAL_EXIT": return
+    if not error_text: 
+        return
 
-    chief_heartbeat("CHIEF", "RESCUE_ACTIVATED", {"reason": "Process Crash", "exit_code": exit_code})
+    # --- 1. RESOLUÇÃO DE CÓDIGO TÉCNICO ---
+    # Se o exit_code não foi passado pelo SO, tentamos extrair do log bruto da Sotéria
+    if exit_code is None:
+        match = re.search(r"TAG_MOTIVO:\s*(0x[0-9a-fA-F]+|\d+)", error_text)
+        if match:
+            val = match.group(1)
+            exit_code = int(val, 16) if val.startswith('0x') else int(val)
+        else:
+            exit_code = 1 # Fallback para erro genérico Python
+
+    # --- 2. NECROPSIA (Análise Única) ---
+    from .tools.vulcan.diagnostic.soteria.analyze_crash import CrashProcessor
+    processor = CrashProcessor(project_root=".")
+    # Processamos o erro uma única vez para obter todos os metadados
+    info = processor.process(error_text, exit_code)
     
-    # 2. Alerta Visual
-    print('\n' + Back.RED + Style.BRIGHT + '!' * 110 + RST)
-    print(Back.RED + Style.BRIGHT + '[FATAL SYSTEM CRASH DETECTED]'.center(110) + RST)
-    print(Back.RED + Style.BRIGHT + '!' * 110 + RST)
+    # Filtro de Aborto: Se for um encerramento normal, não fazemos nada
+    if info.get('technical_error') == "NORMAL_EXIT": 
+        return
+
+    # --- 3. TELEMETRIA ENRIQUECIDA (Hades Engine) ---
+    # Agora o log registra o VEREDITO real (ex: Memory Corruption) em vez de apenas "Process Crash"
+    chief_heartbeat("CHIEF", "RESCUE_ACTIVATED", {
+        "verdict": info.get('technical_error', 'Process Crash'),
+        "target": _os.path.basename(info.get('file', 'NATIVO')),
+        "exit_code": exit_code
+    })
+
+    # --- 4. INTERFACE VISUAL ---
+    print('\n' + Back.RED + '[SYSTEM CRASH DETECTED]'.center(110) + Style.RESET_ALL)
     
+    # Renderiza o dossiê tático (Aquele com as coordenadas do crime)
     _render_tactical_dossier(info)
     
     # 3. Loop de Intervenção
-    while True:
-        print(f'\n  {W}--- 🛠  OPÇÕES DE INTERVENÇÃO (Chief-Gold) ---{RST}')
-        file_label = os.path.basename(info["file"])
-        if file_label == "NATIVO":
-            print(f'  {Style.DIM}[1] [GIT]  (Indisponível para falha puramente nativa){RST}')
-        else:
-            print(f'  {Back.RED}1.{RST} {Fore.GREEN} [GIT]  Reverter alterações em {Y}{file_label}{RST}')
+    try:
+        while True:
+            print('\n' + Fore.CYAN + Style.BRIGHT + '_' * 110 + RST)
+            print(Fore.CYAN + Style.BRIGHT + '[OPÇÕES DE INTERVENÇÃO]'.center(110) + RST + '\n\n')
+            file_label   = _os.path.basename(info["file"])
             
-        print(f'  {Back.RED}2.{RST} {Fore.CYAN} [EDIT] Abrir Notepad++ na linha {Y}{info["line"]}{RST}')
-        print(f'  {Back.RED}3.{RST} {Fore.RED} [INFO] Ver logs brutos (Traceback Completo){RST}')
-        print(f'  {Back.RED}4.{RST} {Fore.YELLOW} [DEBUG] Ver Diagnóstico de Pipeline{RST}')
-        print(f'  {Back.RED}0.{RST} {Fore.LIGHTMAGENTA_EX} [EXIT] Aceitar falha e encerrar sessão{RST}')
-        
-        choices = input(f"\n  Sua decisão: ").strip()
-        if '0' in choices: break
+            opt1 = f"{Back.RED}1.{RST} {Fore.GREEN} [GIT]  Reverter {Y}{file_label}{RST}"
+            if file_label == "NATIVO":
+                opt1 = f"{Style.DIM}[1] [GIT]  (Indisponível p/ falha nativa){RST}"
 
-        try:
-            for choice in choices:
-                if choice == '1' and file_label != "NATIVO":
-                    print(f'  {Y}[*] Executando Rollback via Git...{RST}')
-                    # Tenta reverter o arquivo para o último estado salvo (SAFE-MODE)
-                    res = subprocess.run(['git', 'checkout', '--', info['file']], capture_output=True)
-                    if res.returncode == 0:
-                        print(f'  {G}✔ Sucesso: {file_label} restaurado para a versão estável.{RST}')
-                    else:
-                        print(f'  {R}✘ Falha: Este arquivo não está sob controle do Git ou está em conflito.{RST}')
+            opt2 = f"{Back.RED}2.{RST} {Fore.CYAN} [EDIT] Abrir Notepad++ Linha {Y}{info['line']}{RST}"
+            opt3 = f"{Back.RED}3.{RST} {Fore.RED} [INFO] Ver logs brutos{RST}"
+            opt4 = f"{Back.RED}4.{RST} {RST}{Fore.YELLOW} [DEBUG] Diagnóstico Pipeline{RST}"
+            opt0 = f"{Back.RED}0.{RST} {Fore.LIGHTMAGENTA_EX} [EXIT] Encerrar sessão{RST}"
+
+            # Renderização em Grade 2x2 usando o alinhador inteligente
+            # Largura de 55 para caber bem em telas padrão de 110/120 colunas
+            print(f"  {_view_align(opt1, 55)} {opt2}")
+            print(f"  {_view_align(opt3, 55)} {opt4}")
+            print(f"  {_view_align(opt0, 55)}")
+
+            choices = input(f"\n  Sua decisão (ex: 34): ").strip()
+            if '0' in choices: break
+
+            try:
+                for choice in choices:
+                    if choice == '1' and file_label != "NATIVO":
+                        subprocess.run(['git', 'checkout', '--', info['file']], capture_output=True)
+                        print(f'  {Fore.GREEN}✔ Sucesso: {file_label} restaurado.{Style.RESET_ALL}')
+                    if choice == '2':
+                        # Localização Industrial do Notepad++ (Evita 'file not found' no Windows)
+                        import shutil
+                        npp_candidates = [
+                            r"C:\Program Files\Notepad++\notepad++.exe",
+                            r"C:\Program Files (x86)\Notepad++\notepad++.exe",
+                            "notepad++.exe"
+                        ]
+                        npp_bin = next((p for p in npp_candidates if _os.path.exists(p) or shutil.which(p)), 'notepad.exe')
                         
-                if choice == '2':
-                    # Localização Industrial do Notepad++ (Evita 'file not found' no Windows)
-                    import shutil
-                    npp_candidates = [
-                        r"C:\Program Files\Notepad++\notepad++.exe",
-                        r"C:\Program Files (x86)\Notepad++\notepad++.exe",
-                        "notepad++.exe"
-                    ]
-                    npp_bin = next((p for p in npp_candidates if os.path.exists(p) or shutil.which(p)), 'notepad.exe')
-                    
-                    print(f'  {C}[*] Invocando editor...{RST}')
-                    # Flag -n pula direto para a linha do erro no Notepad++
-                    target_abs = os.path.abspath(info['file'])
-                    subprocess.Popen([npp_bin, f"-n{info['line']}", "-nosession", target_abs], shell=False)
-                    print(f'  {G}✔ Editor aberto em {file_label} L{info["line"]}.{RST}')
-                    
-                if choice == '3':
-                    # Exibição do log sem as tags Sotéria para limpeza visual
-                    clean_log = error_text.replace("@SOTERIA_BEGIN@", "").replace("@SOTERIA_END@", "")
-                    print(f'\n{R}--- [ INÍCIO DO LOG BRUTO ] ---{RST}')
-                    print(f"{Style.DIM}{clean_log}{RST}")
-                    print(f'{R}--- [ FIM DO LOG ] ---{RST}')
-        #            input(f'\n{Style.DIM}Pressione Enter para prosseguir para a saída...{RST}')
-                if choice == '4':
-                    print(f"\n{C}🔬 [PIPELINE PROBE] Batimentos de Coração (Hades Engine):{RST}")
-                    try:
-                        from doxoade.database import get_db_connection
-                        import json
-                        conn = get_db_connection()
-                        rows = conn.execute('SELECT timestamp, subsystem, action, data FROM operational_logs ORDER BY id DESC LIMIT 15').fetchall()
-                        for r in reversed(rows):
-                            # FIX: Corrigido de 's11' para '[11:19]'
-                            ts = r['timestamp'][11:19] 
-                            sys_label = f"{r['subsystem']:<10}"
-                            act_label = f"{r['action']:<22}"
-                            try:
-                                d_obj = json.loads(r['data'])
-                                # Limpa a visualização do JSON para o terminal
-                                d_str = ", ".join([f'"{k}": {v}' for k, v in d_obj.items()])
-                            except: d_str = r['data']
-                            
-                            print(f"  {Style.DIM}[{ts}]{RST} {Y}{sys_label}{RST} │ {C}{act_label}{RST} ➔ {W}{d_str}{RST}")
-                        conn.close()
-                    except Exception as e:
-                        print(f"  {R}✘ Falha ao consultar Hades: {e}{RST}")
-            break
-        except: pass
+                        print(f'  {C}[*] Invocando editor...{RST}')
+                        # Flag -n pula direto para a linha do erro no Notepad++
+                        target_abs = _os.path.abspath(info['file'])
+                        subprocess.Popen([npp_bin, f"-n{info['line']}", "-nosession", target_abs], shell=False)
+                        print(f'  {G}✔ Editor aberto em {file_label} L{info["line"]}.{RST}')
+                        
+                    if choice == '3':
+                        print('\n' + Fore.RED+Style.BRIGHT + '_' * 110 + RST)
+                        print(f"\n  {Fore.RED+Style.BRIGHT}■ [BRUTE LOG] Soteria Engine:{RST}\n")
+                        # Exibição do log sem as tags Sotéria para limpeza visual
+                        clean_log = error_text.replace("@SOTERIA_BEGIN@", "").replace("@SOTERIA_END@", "")
+                        print(f'\n{R}--- [ INÍCIO DO LOG BRUTO ] ---{RST}')
+                        print(f"{Style.DIM}{clean_log}{RST}")
+                        print(f'{R}--- [ FIM DO LOG ] ---{RST}')
+            #            input(f'\n{Style.DIM}Pressione Enter para prosseguir para a saída...{RST}')
+                    if choice == '4':
+                        print('\n' + Fore.RED+Style.BRIGHT + '_' * 110 + RST)
+                        print(f"\n  {Fore.RED+Style.BRIGHT}■ [PIPELINE PROBE] Hades Engine:{RST}\n")
+                        try:
+                            from doxoade.database import get_db_connection
+                            import json
+                            conn = get_db_connection()
+                            rows = conn.execute('SELECT timestamp, subsystem, action, data FROM operational_logs ORDER BY id DESC LIMIT 12').fetchall()
+                            for r in reversed(rows):
+                                # FIX: Corrigido de 's11' para '[11:19]'
+                                ts = r['timestamp'][11:19] 
+                                sys_label = f"{r['subsystem']:<10}"
+                                act_label = f"{r['action']:<22}"
+                                try:
+                                    d_obj = json.loads(r['data'])
+                                    # Limpa a visualização do JSON para o terminal
+                                    d_str = ", ".join([f'"{k}": {v}' for k, v in d_obj.items()])
+                                except:
+                                    d_str = r['data']
+                                
+                                print(f"  {Style.DIM}[{ts}]{RST} {Fore.YELLOW}{sys_label}{RST} │ {C}{act_label}{RST} >> {W}{d_str}{RST}")
+                            conn.close()
+                        except Exception as e:
+                            print(f"  {R}✘ Falha ao consultar Hades: {e}{RST}")
+                break
+            except Exception as e:
+                from doxoade.tools.error_info import handle_error
+                handle_error(e, context="activate_protocol", debug=True)
+    except Exception as e:
+        from doxoade.tools.error_info import handle_error
+        handle_error(e, context="activate_protocol", debug=True)
 
+    # --- FOOTER ---
+    print('\n' + Fore.CYAN + Style.BRIGHT + '_' * 110 + RST)
+    
     # --- O SELO FINAL ---
     # os._exit garante que o Lazarus não tente se auto-diagnosticar ao fechar
-    os._exit(1)
+    import os
+#    _os._exit(1) # obs: vejo que é melhor sys._exit.
+    _sys.exit(exit_code if exit_code is not None else 1)

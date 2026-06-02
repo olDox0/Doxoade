@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# doxoade\tools\vulcan\diagnostic\soteria\scribe.py
+# doxoade/tools/vulcan/diagnostic/soteria/scribe.py
 import re, os, shutil
 from pathlib import Path
 
@@ -17,6 +17,11 @@ class SoteriaScribe:
         self.assignment_regex = re.compile(r'([a-zA-Z_]\w*)\s*=[^=]')
 #        self.io_regex = re.compile(r'\b(fopen|fclose|fwrite|fread|printf|fprintf|sprintf|system|remove|rename)\s*\(')
         self.io_regex = re.compile(r'\b(fopen|fclose|fwrite|fread|printf|fprintf|soteria_mark|malloc|free)\s*\(')
+        
+        self.soteria_dir = Path(__file__).resolve().parent
+        self.soteria_src = self.soteria_dir / "src"
+        self.soteria_inc = self.soteria_dir / "include"
+        
         self.blacklist = {
             'soteria_mark', 'soteria_dispatch', 'soteria_init', 'main', 
             'soteria_push', 'soteria_malloc', 'soteria_free', 'soteria_validate',
@@ -113,15 +118,33 @@ class SoteriaScribe:
         return "\n".join(new_lines)
 
     def generate_shadow(self, src_dir, shadow_dir):
-        """Cria sombra instrumentada (PASC 8.17)."""
-        if os.path.exists(shadow_dir): shutil.rmtree(shadow_dir)
-        os.makedirs(shadow_dir, exist_ok=True)
-        for f in os.listdir(src_dir):
-            src_path = os.path.join(src_dir, f)
-            dest_path = os.path.join(shadow_dir, f)
-            if f.endswith('.pyx'):
-                data = self.instrument_pyx(open(src_path, 'r', encoding='utf-8').read(), f)
-                open(dest_path, 'w', encoding='utf-8').write(data)
-            elif f.endswith('.c'):
-                data = self.instrument_code(open(src_path, 'r', encoding='utf-8').read(), f)
-                open(dest_path, 'w', encoding='utf-8').write(data)
+        """Cria uma cópia vacinada do projeto em uma pasta paralela."""
+        from pathlib import Path
+        src_path_root = Path(src_dir)
+        dst_path_root = Path(shadow_dir)
+        
+        if not src_path_root.exists(): return
+
+        for py_file in src_path_root.rglob("*.py"):
+            # Pula pastas de sistema
+            if any(x in str(py_file) for x in ['venv', '.git', '__pycache__']):
+                continue
+                
+            rel_path = py_file.relative_to(src_path_root)
+            target_file = dst_path_root / rel_path
+            target_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            try:
+                # [FIX] LEITURA ROBUSTA: Tenta UTF-8, mas ignora erros de caractere
+                # Isso impede o crash se houver um 'é' ou 'ç' em comentário salvo em Latin-1
+                with open(py_file, 'r', encoding='utf-8', errors='ignore') as f_in:
+                    content = f_in.read()
+                
+                vacinado = self.instrument_code(content, py_file.name)
+                
+                with open(target_file, 'w', encoding='utf-8') as f_out:
+                    f_out.write(vacinado)
+            except Exception as e:
+                # Se falhar mesmo assim, logamos no Hades mas não paramos a forja
+                chief_heartbeat("SCRIBE", "SHADOW_FAIL", {"file": py_file.name, "error": str(e)})
+                continue

@@ -21,3 +21,21 @@ output  = "bin/"
 name = "gordian_test"
 sources = ["doxoade/experiments/soteria_lab/gordian_lab.c"]
 output = "bin/gordian_test.exe"
+[[targets]]
+name = "stress_test"
+sources = ["doxoade/experiments/soteria_lab/stress_native.c"]
+output = "bin/stress_native.exe"
+# FLAGS CRÍTICAS: 
+# -fno-stack-protector: Desativa o "Canário" do compilador
+# -z execstack: Permite execução na pilha (torna o ambiente vulnerável para o teste)
+flags = ["-fno-stack-protector", "-fno-asynchronous-unwind-tables"]
+opt = "O0"
+[[targets]]
+name = "final_strike.c"
+sources = ["tests/final_strike.c"]
+output = "bin/final_strike.exe"
+# FLAGS CRÍTICAS: 
+# -fno-stack-protector: Desativa o "Canário" do compilador
+# -z execstack: Permite execução na pilha (torna o ambiente vulnerável para o teste)
+flags = ["-fno-stack-protector", "-fno-asynchronous-unwind-tables"]
+opt = "O0"

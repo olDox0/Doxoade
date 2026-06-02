@@ -120,10 +120,15 @@ def _render_trace_event(frame, event):
         loc = f"{'  ' * _STATE['indent_level']}{os.path.basename(filename)}:{lineno}".ljust(25)
         print(f"{C_BORDER}│{C_RESET} {ms:7.1f}ms {SEP} {C_WHITE}{loc}{SEP} {line[:50].ljust(50)} {SEP} {', '.join(diffs)}")
 
-def run_flow(path, **kwargs):
+def run_flow(path, abs_path, **kwargs):
     """Execução de rastro para ARQUIVOS externos (.py)."""
     abs_path = os.path.abspath(path)
     project_root = os.path.dirname(abs_path)
+
+    if not os.path.exists(abs_path):
+        # Em vez de explodir com FileNotFoundError, gera um evento Lázaro limpo
+        raise ValueError(f"Alvo de rastro não localizado: {abs_path}")
+    
 
     with open(abs_path, 'r', encoding='utf-8') as f:
         code = f.read()

@@ -13,7 +13,8 @@ from .tools.git import (
 )
 # 2. FILESYSTEM & CONFIG
 
-from doxoade.tools.telemetry_tools.logger import (
+
+from doxoade.tools.filesystem import ( # <--- MUDADO DE telemetry_tools.logger
     _find_project_root, 
     _get_project_config, 
     _get_venv_python_executable, 
@@ -49,7 +50,7 @@ from .tools.db_utils import (
     _update_open_incidents
 )
 # 6. LOGGER (Core)
-from .tools.logger import ExecutionLogger
+from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 # 7. GÊNESE & ABDUÇÃO (Intelligence)
 from .tools.genesis import (
     _enrich_with_dependency_analysis,

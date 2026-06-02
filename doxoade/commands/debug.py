@@ -61,6 +61,11 @@ def debug(script, intern, **kwargs):
     target      = intern if intern else script
     is_internal = True if intern else False
     
+    if target and target.startswith('-'):
+        click.secho(f" [!] Erro: '{target}' não parece um script válido. "
+                    "Verifique se as flags precedem o alvo.", fg='red')
+        return
+
     if not target:
         click.echo(Fore.RED + "Erro: Forneça um script ou use --intern 'comando'.")
         return

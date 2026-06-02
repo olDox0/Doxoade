@@ -68,14 +68,15 @@ def run(ctx, script, args, **kwargs):
             _execute_hybrid_engine(abs_path, not kwargs.get('no_vulcan'), limits)
 
         except SystemExit as e:
-            if e.code != 0:
-                # Se o script deu exit(1) ou crashou, Lazarus assume
-                activate_protocol(traceback.format_exc())
+            # Captura o código real (0, 1, ou NTSTATUS)
+            code = e.code if isinstance(e.code, int) else 1 if e.code else 0
+            if code != 0:
+                activate_protocol(traceback.format_exc(), exit_code=code) # <--- FIX: Passar code
             raise e
         except Exception:
-            # Qualquer erro não tratado no script Python aciona o Dossiê
             err_data = traceback.format_exc()
-            activate_protocol(err_data)
+            # Para exceções Python puras, o código é 1
+            activate_protocol(err_data, exit_code=1) # <--- FIX: Passar 1
             sys.exit(1)
 
 def _execute_hybrid_engine(script_path: str, use_vulcan: bool, limits: dict):

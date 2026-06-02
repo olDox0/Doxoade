@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
-# doxoade\tools\vulcan\diagnostic\soteria\soteria_analysis.py
+# doxoade/tools/vulcan/diagnostic/soteria/soteria_analysis.py
 import os, sys, re
+import datetime
 
 def archive_crash_to_hades(nx_data):
     """Salva a evidência do crash nativo para o motor Gênese aprender."""
@@ -55,108 +56,105 @@ class SoteriaForensic:
 
     def process_pipe(self, text):
         """Analisa o fluxo de saída em busca de assinaturas Sotéria."""
-        match = re.search(r"@SOTERIA_BEGIN@(.*?)@SOTERIA_END@", text, re.DOTALL)
-        
-        if "@NEXUS_END@" in text:
-            text = text.replace("@NEXUS_END@", "@SOTERIA_END@")
-        if "@NEXUS_BEGIN@" in text:
-            text = text.replace("@NEXUS_BEGIN@", "@SOTERIA_BEGIN@")
+        if not text: return False
 
-        match = re.search(r"@SOTERIA_BEGIN@(.*?)@SOTERIA_END@", text, re.DOTALL)
-        text = text.replace("@NEXUS_END@", "@SOTERIA_END@").replace("@NEXUS_BEGIN@", "@SOTERIA_BEGIN@")
-        if "@SOTERIA_BEGIN@" not in text and "TAG_" in text:
-            nx = text
-        else:
-            match = re.search(r"@SOTERIA_BEGIN@(.*?)@SOTERIA_END@", text, re.DOTALL)
-            if not match: return False
-            nx = match.group(1)
-        else: nx = text.split("@SOTERIA_BEGIN@")[-1].split("@SOTERIA_END@")[0]
-        if not match: return False
-        parts = text.split("@SOTERIA_BEGIN@")
-        nx = parts[-1].split("@SOTERIA_END@")[0]
-#        nx = match.group(1)
-        pyx_file = None; pyx_line = 0; pyx_path = None
-        frames = re.findall(r"TAG_FRAME:\s*(.*)", nx)
-        def get_tag(t): return (re.findall(rf"TAG_{t}:\s*(.*)", nx, re.IGNORECASE) or ["N/A"])[0].strip()
+        # 1. Normalização
+        normalized = text.replace("@NEXUS_BEGIN@", "@SOTERIA_BEGIN@").replace("@NEXUS_END@", "@SOTERIA_END@")
+        normalized_text = text.replace("@NEXUS_BEGIN@", "@SOTERIA_BEGIN@").replace("@NEXUS_END@", "@SOTERIA_END@")
+#        normalized_text = text.replace("@NEXUS_BEGIN@", "@SOTERIA_BEGIN@") # <--- ADICIONE ESTA LINHA
+        blocks = re.findall(r"@SOTERIA_BEGIN@(.*?)@SOTERIA_END@", normalized_text, re.DOTALL)
+#        blocks = re.findall(r"@SOTERIA_BEGIN@(.*?)@SOTERIA_END@", normalized, re.DOTALL)
         
-        # 1. Coleta de Tags Brutas
-        level = get_tag('LEVEL')
-        motivo = get_tag('MOTIVO')
-        detail = get_tag('DETAIL').replace('@NEXUS_END@', '').strip()
-        pid = get_tag('PID')
-        comando = get_tag('COMMAND')
+        if blocks: nx = blocks[-1]
+        elif "TAG_" in normalized_text: nx = normalized_text
+        else: return False
+
+        # 2. Extração Atômica de Tags
+        tags = {m.group(1).upper(): m.group(2).strip() for m in re.finditer(r"TAG_(\w+):\s*(.*)", nx)}
+
+        def get_tag(t, default="N/A"):
+            return tags.get(t.upper(), default)
+
+        # 4. Oráculo de Causa Raiz (Tradução de NTSTATUS e Sinais)
+        level = get_tag('LEVEL', 'FATAL')
+        detail = tags.get('DETAIL', 'N/A').replace('@SOTERIA_END@', '').strip()
+        motivo = tags.get('MOTIVO', 'N/A')
         
-        if os.environ.get('VULCAN_DEBUG') == '1':
-             print(f"{color}!" * 65 + f"\n SOTÉRIA: RESGATE DE EXECUÇÃO ATIVO\n" + "!" * 65 + self.reset)
-        
-        # --- FIX 2: NEXUS HADES MAPPING (Tradução de Causa Raiz) ---
         if detail == "N/A":
-            if "0xc0000005" in motivo.lower():
-                detail = "Access Violation: Tentativa de leitura/escrita em endereço inválido (NULL Pointer)."
-            elif "0xc0000094" in motivo.lower():
-                detail = "Integer Division by Zero: O hardware detectou uma divisão por zero."
-            elif "0xc0000374" in motivo.lower():
-                detail = "Heap Corruption: O banco de memória nativo foi violado (Double Free detectado)."
-            else:
-                detail = f"Falha Nativa: {motivo}"
-
-        if detail == "N/A" and "OOM" in text:
-            detail = "Internal Arena Overflow: O TNSE esgotou sua memoria reservada."
-
-        # 2. Renderização do Cabeçalho
-        if level == "EXIT_AUDIT":
-            color = self.cyan
-            print(f"{color}?" * 65 + f"\n SOTÉRIA: RASTREIO DE ENCERRAMENTO LÓGICO\n" + "?" * 65 + self.reset)
-        else:
-            color = self.red if level == "FATAL" else self.ylw
-        print(f"{color}!" * 65 + f"\n SOTÉRIA: RELATÓRIO SUPREMO DE EVIDÊNCIAS ({level})\n" + "!" * 65 + self.reset)
+            if "0xc0000005" in motivo.lower(): detail = "Access Violation (Ponteiro Inválido)"
+            elif "0xc0000094" in motivo.lower(): detail = "Integer Division by Zero"
+            else: detail = f"Falha Nativa: {motivo}"
+            
+            hex_map = {
+                "0xc0000005": "Access Violation: Tentativa ilegal de acessar a RAM (NULL Pointer).",
+                "0xc0000094": "Integer Division by Zero: Divisão aritmética inválida detectada.",
+                "0xc0000374": "Heap Corruption: Banco de memória violado (Double Free ou Overflow).",
+                "0xc00000fd": "Stack Overflow: A pilha de recursão explodiu."
+            }
+            for code, msg in hex_map.items():
+                if code in motivo.lower():
+                    detail = msg
+                    break
+            
+            if detail == "N/A":
+                if "OOM" in normalized_text: detail = "Internal Arena Overflow: Memória Vulcan exaurida."
+                elif "Vocabulario" in normalized_text: detail = "Erro de Carga: Arquivo de regras ou cristal ausente."
+                else: detail = f"Falha Nativa Não Mapeada: {motivo}"
+        # 5. Renderização da Interface Tática
+        color = self.cyan if level == "EXIT_AUDIT" else (self.red if level == "FATAL" else self.ylw)
+        header_msg = "RASTREIO DE ENCERRAMENTO" if level == "EXIT_AUDIT" else f"RELATÓRIO SUPREMO DE EVIDÊNCIAS ({level})"
         
-        print(f"{self.cyan}■ INCIDENTE TÉCNICO:{self.reset}")
-        print(f"  DETALHE: {self.white}{detail}{self.reset}")
-        print(f"  PID: {self.white}{pid}{self.reset} | COMANDO: {self.gray}{comando}{self.reset}")
+        print(f"\n{color}" + "!" * 80)
+        print(f" SOTÉRIA: {header_msg} ".center(80))
+        print("!" * 80 + self.reset)
 
-        # 3. PONTO DE RUPTURA / TRIANGULAÇÃO
+        print(f"\n{self.cyan}■ INCIDENTE TÉCNICO:{self.reset}")
+#        print(f"  {self.white}LAUDO   :{self.reset} {self.white}{detail}{self.reset}")
+#        print(f"  {self.white}CONTEXTO:{self.reset} PID {get_tag('PID')} | CMD: {self.gray}{get_tag('COMMAND')}{self.reset}")
+        print(f"  {self.cyan}LAUDO   :{self.reset} {self.white}{detail}{self.reset}")
+        print(f"  {self.cyan}CONTEXTO:{self.reset} PID {tags.get('PID', '?')} | {tags.get('COMMAND', '?')}")
+
+        # 6. Triangulação de Precisão (Onde o sistema parou)
         loc = get_tag('LOCAL')
         r_loc = get_tag('RASTRO_LOC')
-        
-        if get_tag('MOTIVO') == "N/A" and "Vocabulario" in text:
-            detail = "Falha de Inicialização do Motor TNSE (Possível falta de arquivo de Cristal ou Regra)."
-        
-        # --- FIX 3: FALLBACK DE TRIANGULAÇÃO (Triangula via Pilha se necessário) ---
+        frames = re.findall(r"TAG_FRAME: \d+ \| (.*?) \| (.*)", nx)
+
+        # Fallback: Se o local exato sumiu no crash, tenta o topo da pilha (Frame 0)
         if ("N/A" in r_loc or not r_loc) and frames:
+            r_loc = frames[0][1]
+
+        print(f"\n{self.red}■ PONTO DE RUPTURA:{self.reset}")
+        
+        # Resolve se mostra local exato ou último marco conhecido
+        target_loc = loc if loc != "N/A" and "0x" not in loc else r_loc
+        label = "LOCAL DO CRIME" if loc == target_loc else "ÚLTIMO MARCO CONHECIDO"
+
+        if ":" in target_loc:
             try:
-                # Pega o local do primeiro frame (mais recente)
-                last_frame = frames[0]
-                r_loc = last_frame.split('|')[-1].strip()
-            except: pass
-
-        print(f"\n{self.red}■ PONTO DE RUPTURA (ONDE O SISTEMA PAROU):{self.reset}")
-        if "N/A" in loc or "0x" in loc:
-            print(f"  {self.ylw}💡 TRIANGULAÇÃO: Falha detectada logo após:{self.reset}")
-            if ":" in r_loc:
-                f, l = r_loc.rsplit(':', 1)
-                print(self.get_code_context(f, l, window=4, title="ULTIMO MARCO"))
+                f_path, l_num = target_loc.rsplit(':', 1)
+                # get_code_context deve ser o método que busca o arquivo e a linha
+                print(self.get_code_context(f_path, l_num, window=3, title=label))
+            except:
+                print(f"  {self.ylw}⚠️  Falha na leitura física de: {target_loc}{self.reset}")
         else:
-            print(f"  LOCALIZAÇÃO: {self.grn}{self.shorten_path(loc)}{self.reset}\n")
-            f, l = loc.rsplit(':', 1)
-            print(self.get_code_context(f, l, window=2, title="LOCAL DO CRIME"))
+            print(f"  {self.gray}Ponto de ruptura puramente nativo (sem rastro de código disponível).{self.reset}")
 
-        # 4. LEAKS E CADEIA DE CHAMADAS (O resto permanece o mesmo)
+        # 7. Cadeia de Envolvimento (Stack Trace)
+        if frames:
+            print(f"\n{self.cyan}■ CADEIA DE ENVOLVIMENTO (ANATOMIA DA QUEDA):{self.reset}")
+            for idx, (func_name, frame_loc) in enumerate(frames):
+                # Destaque verde para código do projeto, cinza para sistema
+                f_color = self.grn if any(x in frame_loc.lower() for x in ["src", "doxoade", self.root.lower()]) else self.gray
+                print(f"    {self.gray}[{idx}]{self.reset} {f_color}↳ {func_name:<25}{self.reset} {self.gray}({os.path.basename(frame_loc)}){self.reset}")
+
+        # 8. Vazamentos (Leaks)
         leaks = re.findall(r"TAG_LEAK:\s*(.*)", nx)
         if leaks:
-            print(f"\n{self.ylw}■ VAZAMENTOS DE MEMÓRIA (LEAKS):{self.reset}")
+            print(f"\n{self.ylw}■ VAZAMENTOS DE MEMÓRIA (DETECTOR HADES):{self.reset}")
             for l in leaks:
                 print(f"   ⚠️ {l}")
-        
-        if frames:
-            print(f"\n{self.cyan}■ CADEIA DE ENVOLVIMENTO (COMO CHEGAMOS AQUI):{self.reset}")
-            for f in frames:
-                pts = f.split('|')
-                name, frame_loc = pts[1].strip(), pts[2].strip()
-                color_f = self.grn if "src" in frame_loc.lower() else self.gray
-                print(f"   {color_f}↳ {name}{self.reset} {self.gray}({self.shorten_path(frame_loc)}){self.reset}")
 
-        print(f"\n{color}" + "─" * 65 + self.reset + "\n")
+        print(f"\n{color}" + "─" * 80 + self.reset + "\n")
         return True
 
 if __name__ == "__main__":

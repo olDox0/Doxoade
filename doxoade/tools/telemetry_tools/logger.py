@@ -1,32 +1,43 @@
 # -*- coding: utf-8 -*-
+# doxoade/tools/telemetry_tools/logger.py
 import time
 import os
 import sys
-import hashlib
 import json
-from datetime import datetime
 import click
+import hashlib
+import inspect
+from datetime import datetime
 
 def chief_heartbeat(subsystem: str, action: str, details: dict):
-    """Registra pulsação no banco de dados com auto-pruning."""
+    """Registra batimentos cardíacos com captura automática de contexto."""
     try:
+        # Tenta capturar quem chamou (Triangulação Híbrida)
+        if subsystem == "VULCAN" and "INVOCATION" in action:
+            frame = inspect.currentframe()
+            # Sobe 3 níveis: logger -> bridge -> executor
+            try:
+                caller = frame.f_back.f_back.f_back
+                details['caller_context'] = {
+                    'func': caller.f_code.co_name,
+                    'file': os.path.basename(caller.f_code.co_filename),
+                    'line': caller.f_lineno
+                }
+            except: pass
+
         from doxoade.database import get_db_connection
         import json
         conn = get_db_connection()
-        
-        # 1. Inserção
         conn.execute('''
             INSERT INTO operational_logs (timestamp, subsystem, action, data, pid)
             VALUES (?, ?, ?, ?, ?)
         ''', (datetime.now().isoformat(), subsystem.upper(), action.upper(), 
               json.dumps(details, ensure_ascii=False), os.getpid()))
-        
         # 2. Auto-Pruning: Mantém apenas os últimos 50 eventos operacionais
         conn.execute('''
             DELETE FROM operational_logs 
             WHERE id NOT IN (SELECT id FROM operational_logs ORDER BY id DESC LIMIT 50)
         ''')
-        
         conn.commit()
         conn.close()
     except Exception:
@@ -72,16 +83,21 @@ class ExecutionLogger:
     def __exit__(self, exc_type, exc_val, exc_tb):
         import json
         import zlib
+        import traceback
+        from doxoade.rescue import activate_protocol
         
         execution_time_ms = (time.monotonic() - self.start_time) * 1000
-        
         exit_code = 0
+
         if exc_type is not None:
             if issubclass(exc_type, SystemExit):
-                exit_code = exc_val.code if hasattr(exc_val, 'code') else 0
-            else:
-                exit_code = 1
-                self.add_finding('CRITICAL', f'Crash: {exc_type.__name__}', details=str(exc_val))
+                exit_code = exc_val.code if isinstance(exc_val.code, int) else (1 if exc_val.code else 0)
+            elif not issubclass(exc_type, KeyboardInterrupt):
+                exit_code = 1 # Erro de runtime Python
+
+        if exc_type is not None and not issubclass(exc_type, (SystemExit, KeyboardInterrupt)):
+            error_data = "".join(traceback.format_exception(exc_type, exc_val, exc_tb))
+            activate_protocol(error_data, exit_code=exit_code)
 
         # --- GERAÇÃO DE PAYLOAD CHIEF-GOLD ---
         compressed_payload = None
@@ -101,8 +117,8 @@ class ExecutionLogger:
             from doxoade.tools.db_utils import _log_execution, stop_persistence_worker
             # Envia para o banco
             _log_execution(
-                self.command_name, self.path, self.results, 
-                self.arguments, execution_time_ms, 
+                self.command_name, self.path, self.results,
+                self.arguments, execution_time_ms,
                 exit_code=exit_code, payload=compressed_payload
             )
             stop_persistence_worker()

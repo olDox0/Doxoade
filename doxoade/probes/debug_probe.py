@@ -4,14 +4,14 @@ Debug Probe v2.5 - Aegis Forensic Engine (Noise Gate Ativo).
 Modo autópsia + modo perfil profundo com isolamento cirúrgico de projeto.
 """
 import sys
-import os
+import os as _os
 
 try:
     from doxoade.probes.debug_probe import _LineTimer
 except ImportError:
     # Fallback se rodar como script direto
     if '' not in sys.path:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 
 import json
 import time
@@ -24,7 +24,7 @@ import linecache
 import io
 from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
+current_dir = _os.path.dirname(_os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
@@ -32,10 +32,10 @@ _MARKER_DEBUG = '---DOXOADE-DEBUG-DATA---' # Garantir que está no topo
 
 def _resolve_package(abs_path: str):
     parts = []
-    current = os.path.dirname(abs_path)
-    while os.path.exists(os.path.join(current, '__init__.py')):
-        parts.insert(0, os.path.basename(current))
-        parent = os.path.dirname(current)
+    current = _os.path.dirname(abs_path)
+    while _os.path.exists(_os.path.join(current, '__init__.py')):
+        parts.insert(0, _os.path.basename(current))
+        parent = _os.path.dirname(current)
         if parent == current:
             break
         current = parent
@@ -70,15 +70,15 @@ class _LineTimer:
         self.data: dict = {}
         self._last: dict = {}
         # Normaliza caminhos para evitar erros de comparação no Windows
-        self.target_file = os.path.normcase(os.path.abspath(target_file)) if target_file != "internal_cmd" else target_file
-        self.project_root = os.path.normcase(os.path.abspath(project_root))
+        self.target_file = _os.path.normcase(_os.path.abspath(target_file)) if target_file != "internal_cmd" else target_file
+        self.project_root = _os.path.normcase(_os.path.abspath(project_root))
         self.internal_mode = internal_mode
         self.live_flow = live_flow
 
     def tracer(self, frame, event, arg):
         if event != 'line': return self.tracer
 
-        fname = os.path.normcase(os.path.abspath(frame.f_code.co_filename))
+        fname = _os.path.normcase(_os.path.abspath(frame.f_code.co_filename))
         
         # Ignora arquivos de rastro e bibliotecas Python
         if any(x in fname for x in ['debug_probe.py', 'flow_runner.py', 'Lib', 'importlib']):
@@ -88,7 +88,7 @@ class _LineTimer:
         raw_fname = frame.f_code.co_filename
         if raw_fname.startswith('<'): return self.tracer # Ignora <string>, <frozen>, etc.
         
-        fname = os.path.normcase(os.path.abspath(raw_fname))
+        fname = _os.path.normcase(_os.path.abspath(raw_fname))
         
         # --- NOISE GATE (Filtro de Ruído) ---
         # Se não estiver na pasta do projeto, ignore (evita mostrar threading.py, enum.py, etc.)
@@ -107,7 +107,7 @@ class _LineTimer:
         # Exibição em Tempo Real (Estilo Matrix)
         if self.live_flow:
             from doxoade.tools.doxcolors import Fore, Style
-            f_short = os.path.basename(fname)
+            f_short = _os.path.basename(fname)
             # Rastro elegante: ARQUIVO | LINHA | CÓDIGO
             sys.stdout.write(f"{Fore.GREEN}{f_short:<18}{Style.RESET_ALL} {Fore.DIM}│{Style.RESET_ALL} {Fore.YELLOW}{lineno:<4}{Style.RESET_ALL} {Fore.DIM}│{Style.RESET_ALL} {content}\n")
             sys.stdout.flush()
@@ -149,8 +149,8 @@ def _extract_function_stats(profiler: cProfile.Profile, target_file: str, projec
     ps = pstats.Stats(profiler, stream=stream)
     ps.sort_stats('cumulative')
     stats_dict = ps.stats
-    norm_target = os.path.normcase(os.path.abspath(target_file))
-    norm_root = os.path.normcase(os.path.abspath(project_root))
+    norm_target = _os.path.normcase(_os.path.abspath(target_file))
+    norm_root = _os.path.normcase(_os.path.abspath(project_root))
     skip = ('site-packages', 'dist-packages', 'lib\\python', 'lib/python', '{built-in', '{method', 'security_utils', 'debug_probe', 'doxoade')
     results = []
     for (fname, lineno, func_name), (prim_calls, total_calls, tt, ct, _callers) in stats_dict.items():
@@ -158,7 +158,7 @@ def _extract_function_stats(profiler: cProfile.Profile, target_file: str, projec
             fname = target_file
         if fname == '~' or fname.startswith('<frozen'):
             continue
-        norm_fname = os.path.normcase(os.path.abspath(fname))
+        norm_fname = _os.path.normcase(_os.path.abspath(fname))
         is_target = norm_fname == norm_target
         is_noise = False
         if not is_target:
@@ -173,8 +173,8 @@ def _extract_function_stats(profiler: cProfile.Profile, target_file: str, projec
     return results[:limit]
 
 def _extract_memory_stats(snapshot, target_file: str, project_root: str, limit: int=10) -> dict:
-    norm_target = os.path.normcase(os.path.abspath(target_file))
-    norm_root = os.path.normcase(os.path.abspath(project_root))
+    norm_target = _os.path.normcase(_os.path.abspath(target_file))
+    norm_root = _os.path.normcase(_os.path.abspath(project_root))
     skip = ('site-packages', 'dist-packages', 'lib\\python', 'lib/python', 'security_utils', 'debug_probe', 'doxoade')
     stats = snapshot.statistics('lineno')
     top = []
@@ -184,7 +184,7 @@ def _extract_memory_stats(snapshot, target_file: str, project_root: str, limit: 
             raw_fname = target_file
         if raw_fname == '~' or raw_fname.startswith('<frozen'):
             continue
-        fname = os.path.normcase(os.path.abspath(raw_fname))
+        fname = _os.path.normcase(_os.path.abspath(raw_fname))
         is_target = fname == norm_target
         is_noise = False
         if not is_target:
@@ -205,7 +205,7 @@ def run_debug(script_path, mode='debug', args=None):
     import shlex, os, sys, json, traceback, types
     # Removido os prints do topo!
     
-    abs_path = os.path.abspath(script_path)
+    abs_path = _os.path.abspath(script_path)
     is_internal = "command_wrapper.py" in script_path.replace('\\', '/')
     
     debug_data = {'status': 'unknown', 'variables': {}, 'error': None}
@@ -251,7 +251,8 @@ def run_debug(script_path, mode='debug', args=None):
     sys.stdout.flush()
 
 def run_profile(script_path: str):
-    abs_path = os.path.abspath(script_path)
+    import os as _os
+    abs_path = _os.path.abspath(script_path)
     pkg_name, project_root = _resolve_package(abs_path)
     profile_data = {'status': 'unknown', 'variables': {}, 'error': None, 'profile': {}}
     globs = {'__name__': '__main__', '__file__': abs_path, '__package__': pkg_name}
@@ -312,7 +313,7 @@ def run_memory(script_path: str):
     import tracemalloc
     import json
     import traceback
-    abs_path = os.path.abspath(script_path)
+    abs_path = _os.path.abspath(script_path)
     pkg_name, project_root = _resolve_package(abs_path)
     mem_data = {'status': 'unknown', 'error': None, 'memory': {}}
     globs = {'__name__': '__main__', '__file__': abs_path, '__package__': pkg_name}

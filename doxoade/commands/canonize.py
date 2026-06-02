@@ -11,6 +11,8 @@ from doxoade.tools.doxcolors import Style, Fore
 from doxoade.tools.git import _get_git_commit_hash
 from doxoade.shared_tools import CANON_DIR
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
+from doxoade.tools.filesystem import _find_project_root
+
 __all__ = ['canonize']
 
 @command('canonize')

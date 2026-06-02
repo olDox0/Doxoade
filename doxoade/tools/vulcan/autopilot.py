@@ -1,4 +1,4 @@
-# doxoade/doxoade/tools/vulcan/autopilot.py
+# doxoade/tools/vulcan/autopilot.py
 import hashlib
 import os
 import re
@@ -7,13 +7,30 @@ import signal
 import threading
 import click
 from pathlib import Path
+
 from doxoade.tools.doxcolors import Fore, Style
 from .environment import VulcanEnvironment
 from .advisor import VulcanAdvisor
 from .compiler import VulcanCompiler
 from concurrent.futures import ThreadPoolExecutor
 from collections import Counter
+
 _STREAMING_THRESHOLD = 15
+_RECURSION_LIMIT = 10
+_call_depth = 0
+
+def recursion_guard(func):
+    def wrapper(*args, **kwargs):
+        global _call_depth
+        _call_depth += 1
+        if _call_depth > _RECURSION_LIMIT:
+            from doxoade.rescue import activate_protocol
+            activate_protocol("RecursionError: Limite de segurança do Autopilot atingido (Vetor de Loop Detectado)")
+        try:
+            return func(*args, **kwargs)
+        finally:
+            _call_depth -= 1
+    return wrapper
 
 def _forge_worker(task: dict) -> dict:
     """
@@ -36,7 +53,8 @@ def _forge_worker(task: dict) -> dict:
     if not prevalidated:
         if VulcanForge.is_self_referential(str(abs_path)):
             return {'name': abs_path.name, 'ok': False, 'err': 'vulcan self-file: pulado', 'skip': True}
-        eligible, reason = assess_file_for_vulcan(str(abs_path))
+        eligible, reason, _ = assess_file_for_vulcan(str(abs_path))
+#        eligible, reason = assess_file_for_vulcan(str(abs_path))
         if not eligible:
             return {'name': abs_path.name, 'ok': False, 'err': f'pulado: {reason}', 'skip': True}
     path_hash = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
@@ -125,19 +143,19 @@ class VulcanAutopilot:
                 return min(tuned, 3)
         return tuned
 
-    def _filter_candidates(self, candidates: list[dict], force_recompile: bool) -> list[dict]:
+    def _filter_candidates(self, candidates, force_recompile):
         from .forge import assess_file_for_vulcan
         filtered: list[dict] = []
-        skip_reasons = {} # Alterado para dicionário de listas
-        
+        skip_details = {} # Motivo -> [ {file: name, details: []} ]
+
         for c in candidates:
             file_path = c['file']
-            eligible, reason = assess_file_for_vulcan(file_path)
+            # Agora recebemos o laudo detalhado
+            eligible, reason, details = assess_file_for_vulcan(file_path)
             
             if not eligible:
-                fname = os.path.basename(file_path)
-                if reason not in skip_reasons: skip_reasons[reason] = []
-                skip_reasons[reason].append(fname)
+                if reason not in skip_details: skip_details[reason] = []
+                skip_details[reason].append({'name': os.path.basename(file_path), 'info': details})
                 continue
             
             if not force_recompile and self.advisor._is_already_compiled(file_path):
@@ -146,14 +164,14 @@ class VulcanAutopilot:
             c['__vulcan_validated'] = True
             filtered.append(c)
 
-        # --- NOVA SEÇÃO DE RELATÓRIO DETALHADO ---
-        if skip_reasons:
-            click.echo(f"\n{Fore.YELLOW}📂 RELATÓRIO DE COMPLEXIDADE (Pulos Inteligentes):{Style.RESET_ALL}")
-            for reason, files in skip_reasons.items():
-                click.echo(f"   {Fore.RED}✘ {reason}:{Style.RESET_ALL}")
-                # Lista os arquivos em grupos de 4 para não inundar o terminal
-                for i in range(0, len(files), 4):
-                    click.echo(f"      {Fore.WHITE}{', '.join(files[i:i+4])}{Style.RESET_ALL}")
+        if skip_details:
+            click.echo(f'\n{Fore.YELLOW}📂 LAUDO DE SEGURANÇA VULCAN (Aegis Shield):{Style.RESET_ALL}')
+            for reason, files in skip_details.items():
+                click.echo(f'   {Fore.RED}✘ {reason}:{Style.RESET_ALL}')
+                for f_data in files:
+                    click.echo(f'      • {Fore.WHITE}{f_data["name"]}{Style.RESET_ALL}')
+                    for detail in f_data['info']:
+                        click.echo(f'        {Style.DIM}↳ {detail}{Style.RESET_ALL}')
         return filtered
 
     @staticmethod
@@ -212,13 +230,14 @@ class VulcanAutopilot:
             
         self.compiler.save_telemetry_report(self.root)
 
+    @recursion_guard
     def _run_pitstop(self, candidates: list[dict], force_recompile: bool, max_workers: int, streaming: bool) -> None:
         from .pitstop import PitstopEngine
         engine = PitstopEngine(self.env, pid_registry=self._pid_registry)
         info = engine.warmup_info()
         print(f"   {Fore.MAGENTA}🔥 [PITSTOP] Engine warm-up — batch={info['batch_size']}, workers={max_workers}{Fore.RESET}")
         print(f"   {Fore.CYAN}   > cache: {info['cache']['entries']} entradas em {info['cache']['path']}{Fore.RESET}")
-        status = task.get('status', 'UNKNOWN')
+        #status = task.get('status', 'UNKNOWN')
         def _on_result(file_path: str, ok: bool, err: str | None) -> None:
             name = Path(file_path).name
             if ok:

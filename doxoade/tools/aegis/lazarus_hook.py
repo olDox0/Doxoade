@@ -4,24 +4,29 @@ import sys
 import traceback
 
 def lazarus_excepthook(etype, value, tb):
-    if issubclass(etype, (KeyboardInterrupt, SystemExit)):
+    if issubclass(etype, KeyboardInterrupt):
         sys.__excepthook__(etype, value, tb)
         return
 
     import os
-    # Se estivermos em um subprocesso capturado (VULCAN_META_DEBUG ou similar)
-    # Apenas despeja o erro para o pai capturar
     is_captured = os.environ.get('DOXOADE_AUTHORIZED_RUN') == '1'
+    
+    # --- [ CAPTURA DE PRECISÃO ] ---
+    # Se for um SystemExit (como sinais do SO ou sys.exit(n)), pegamos o código real
+    exit_code = 1
+    if issubclass(etype, SystemExit):
+        exit_code = value.code if isinstance(value.code, int) else (1 if value.code else 0)
 
     try:
         from doxoade.rescue import activate_protocol
+        import traceback
         error_data = "".join(traceback.format_exception(etype, value, tb))
         
         if is_captured:
-            # Não abre o menu, apenas garante que o rastro saia limpo
             sys.stderr.write(error_data)
         else:
-            activate_protocol(error_data)
+            # FIX: Agora passamos o exit_code capturado para o resgate
+            activate_protocol(error_data, exit_code=exit_code)
     except Exception:
         sys.__excepthook__(etype, value, tb)
 

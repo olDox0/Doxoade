@@ -110,6 +110,14 @@ class VulcanCompiler:
         project_root = Path(self.env.root).resolve()
         foundry_path = self.env.foundry.resolve()
         
+        vulcan_root = Path(__file__).resolve().parent
+        native_h = vulcan_root / "native" / "nexus_kernels.h"
+        soteria_h = vulcan_root / "diagnostic" / "soteria" / "include" / "soteria.h"
+        
+        import shutil
+        if native_h.exists(): shutil.copy2(native_h, foundry_path / "nexus_kernels.h")
+        if soteria_h.exists(): shutil.copy2(soteria_h, foundry_path / "soteria.h")
+        
         # PASC 8.13: Define a base de busca inicial (resiliente)
         original_src = project_root / "src"
         if not original_src.exists():
@@ -189,52 +197,98 @@ class VulcanCompiler:
         core_root = Path(__file__).resolve().parents[3]
         return core_root / 'venv' / 'Scripts' / 'python.exe' if os.name == 'nt' else sys.executable
 
-    def compile(self, module_name: str) -> tuple[bool, str | None]:
+    def compile(self, module_name):
         foundry_path = self.env.foundry.resolve()
         setup_path = foundry_path / f'setup_{module_name}.py'
+        
+        # 1. Localização e Relocação de Cabeçalhos (Ação Industrial)
+        vulcan_root = Path(__file__).resolve().parent
+        native_dir = (vulcan_root / "native").resolve()
+        soteria_inc = (vulcan_root / "diagnostic" / "soteria" / "include").resolve()
+#        native_h = vulcan_root / "native" / "nexus_kernels.h"
+#        soteria_h = vulcan_root / "diagnostic" / "soteria" / "include" / "soteria.h"
+        
+        # Copia os headers para a foundry para que o include "..." local funcione
+        import shutil
+        if native_h.exists():
+            shutil.copy2(native_h, foundry_path / "nexus_kernels.h")
+        if soteria_h.exists():
+            shutil.copy2(soteria_h, foundry_path / "soteria.h")
+        
         build_env = self._prepare_pitstop_env()
         has_pch = self._ensure_pch()
+        
         pch_flags = []
         if has_pch and os.name == 'nt':
-            pch_flags = [f'-I{foundry_path}', '-include', 'vulcan_pch.h', '-Winvalid-pch']
+            # Nota: foundry_path.as_posix() evita o bug de aspas no Windows
+            pch_flags = [f'-I{foundry_path.as_posix()}', '-include', 'vulcan_pch.h', '-Winvalid-pch']
+        
         _extra_args = ['-O2'] + pch_flags if os.name == 'nt' else ['-O3', '-ffast-math']
+        
         import uuid
         unique_id = uuid.uuid4().hex[:8]
         unique_work_dir = foundry_path / f'temp_{module_name}_{unique_id}'
         unique_work_dir.mkdir(parents=True, exist_ok=True)
-        (unique_work_dir / 'Release').mkdir(parents=True, exist_ok=True)
-        setup_content = f"""\nimport os, sys\n# Força isolamento de diretórios temporários para evitar conflitos de workers\nos.environ['TMP'] = r'{unique_work_dir}'\nos.environ['TEMP'] = r'{unique_work_dir}'\nos.environ['TMPDIR'] = r'{unique_work_dir}'\n\nfrom setuptools import setup, Extension\nfrom Cython.Build import cythonize\ntry:\n    import numpy as np\n    _include_dirs = [np.get_include()]\nexcept ImportError:\n    _include_dirs = []\n\next = Extension(\n    "{module_name}",\n    ["{module_name}.pyx"],\n    extra_compile_args={_extra_args},\n    include_dirs=_include_dirs + [r'{foundry_path}'],\n)\nsetup(ext_modules=cythonize(ext, language_level=3, quiet=True),\n      script_args=['build_ext', '--inplace', '--build-temp', r'{unique_work_dir}'])\n"""
+
+        # 2. Injeção de Headers no Blueprint (VITAL)
+        # Colocamos os diretórios na lista include_dirs do Extension
+        setup_content = f"""
+import os, sys
+from setuptools import setup, Extension
+from Cython.Build import cythonize
+
+_include_dirs = [
+    r'{foundry_path.as_posix()}',
+    r'{native_dir.as_posix()}',
+    r'{soteria_inc.as_posix()}',
+    r'{Path(self.py_include).as_posix()}'
+]
+
+ext = Extension(
+    "{module_name}",
+    ["{module_name}.pyx"],
+    extra_compile_args={_extra_args},
+    include_dirs=_include_dirs, # <--- O COMPILADOR ACHARÁ OS HEADERS AQUI
+)
+
+setup(
+    ext_modules=cythonize(ext, language_level=3, quiet=True),
+    script_args=['build_ext', '--inplace', '--build-temp', r'{unique_work_dir.as_posix()}']
+)
+"""
         setup_path.write_text(setup_content, encoding='utf-8')
+
+        # 3. Execução Limpa do Comando
         core_root = Path(__file__).resolve().parents[3]
         doxo_python = core_root / 'venv' / 'Scripts' / 'python.exe' if os.name == 'nt' else sys.executable
-        unique_work_dir = foundry_path / f'work_{module_name}'
-        unique_work_dir.mkdir(parents=True, exist_ok=True)
-        (unique_work_dir / 'Release').mkdir(parents=True, exist_ok=True)
+        
         build_env = build_env.copy()
         build_env['TMP'] = str(unique_work_dir)
         build_env['TEMP'] = str(unique_work_dir)
         build_env['TMPDIR'] = str(unique_work_dir)
+
+        # O comando agora não precisa de inc_flags, o setup.py já os tem
         cmd = [str(doxo_python), setup_path.name]
-        if os.name == 'nt':
+        if os.name == 'nt': 
             cmd.append('--compiler=mingw32')
+
         try:
+            # Executa com streaming para o Lazarus capturar qualquer erro
             returncode, stdout_tail, stderr_tail = self._run_command_streaming(cmd, cwd=str(foundry_path), env=build_env)
+            
             if returncode != 0:
                 verbose_error = self._format_verbose_build_error(module_name=module_name, cmd=cmd, returncode=returncode, stdout=stdout_tail, stderr=stderr_tail)
                 return (False, verbose_error)
+            
             if self._promote_binary(module_name):
                 return (True, None)
             else:
-                return (False, 'Binário compilado não encontrado após build (promote falhou).')
-        except KeyboardInterrupt:
-            return (False, 'Interrompido (KeyboardInterrupt no worker)')
+                return (False, 'Falha no Promote: Binário compilado não localizado.')
         except Exception as e:
             return (False, str(e))
         finally:
-            try:
-                setup_path.unlink(missing_ok=True)
-            except Exception:
-                pass
+            try: setup_path.unlink(missing_ok=True)
+            except: pass
 
     def _promote_to_staging(self, module_name: str) -> Path | None:
         """Move o binário compilado para o diretório de staging."""
@@ -365,7 +419,8 @@ class VulcanCompiler:
             import subprocess
             print(f"   {Fore.YELLOW}📦 Forjando Biblioteca Estática Nexus...{Fore.RESET}")
             # 1. Compila C e ASM para objetos .o
-            subprocess.run(f'gcc -O3 -c "{native_dir / "nexus_kernels.c"}" -o "{foundry_path / "k.o"}"', shell=True)
+#            subprocess.run(f'gcc -O3 -c "{native_dir / "nexus_kernels.c"}" -o "{foundry_path / "k.o"}"', shell=True)
+            subprocess.run(f'gcc -O3 -I"{native_dir}" -c "{native_dir / "nexus_kernels.c"}" -o "{foundry_path / "k.o"}"', shell=True)
             subprocess.run(f'gcc -c "{native_dir / "nexus_asm.s"}" -o "{foundry_path / "a.o"}"', shell=True)
             
             # 2. Funde os objetos em um Archive (.a)

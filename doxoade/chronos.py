@@ -181,15 +181,23 @@ class ChronosRecorder:
         atexit.register(self._atexit_flush)
 
     def _atexit_flush(self):
-        """
-        Rede de segurança: chamada pelo atexit se end_command não foi invocado.
-        Calcula duration_ms a partir de _perf_start para precisão real.
-        exit_code = 0 (SystemExit(0)) na maioria dos casos de saída limpa do Click.
-        """
+        """Rede de segurança: garante o registro mesmo em crash inesperado."""
         if self._ended or self._perf_start is None:
             return
+        
         duration_ms = (time.perf_counter() - self._perf_start) * 1000
-        self.end_command(exit_code=0, duration_ms=duration_ms)
+        
+        # Oráculo de Encerramento: detecta se o processo caiu
+        exc_type, exc_val, _ = sys.exc_info()
+        inferred_code = 0
+        
+        if exc_type is not None:
+            if issubclass(exc_type, SystemExit):
+                inferred_code = exc_val.code if isinstance(exc_val.code, int) else 1 if exc_val.code else 0
+            else:
+                inferred_code = 1 # Erro genérico/Crash
+        
+        self.end_command(exit_code=inferred_code, duration_ms=duration_ms)
 
     def end_command(self, exit_code, duration_ms):
         if self._ended:

@@ -11,20 +11,28 @@ def metal_group():
     pass
 
 @metal_group.command('build')
-@click.option('--release', is_flag=True)
-@click.option('--soteria/--no-soteria', default=True)
-@click.option('--force', '-f', is_flag=True)
+@click.option('--target', '-t', help="Foca a forja em um alvo específico do metalcraft.toml.") # <--- REGISTRO DA FLAG
+@click.option('--release', is_flag=True, help="Build de alta performance.")
+@click.option('--soteria/--no-soteria', default=True, help="Ativa/Desativa o escudo de resgate.")
+@click.option('--force', '-f', is_flag=True, help="Força a re-compilação.")
 @click.pass_context
-def metal_build(ctx, release, soteria, force):
-    """Forja os fontes em binários executáveis."""
-    # O status deve ser capturado fora do 'with' para ser retornado
+def metal_build(ctx, target, release, soteria, force): # <--- ADICIONADO 'target'
+    """Forja binários executáveis (Padrão Industrial)."""
     success = False
     with ExecutionLogger('metal_build', os.getcwd(), ctx.params) as logger:
         from doxoade.tools.metalcraft.metal_engine import NexusMetalEngine
         engine = NexusMetalEngine(os.getcwd())
-        success = engine.build(release=release, use_soteria=soteria, force=force)
-    
-    return success # <--- [VITAL] O segredo da continuidade está aqui!
+        
+        # Repassa o filtro para o motor
+        success = engine.build(target=target, release=release, use_soteria=soteria, force=force)
+#        success = engine.build(target_name=target, release=release, use_soteria=soteria, force=force)
+        
+        if success:
+            click.secho("\n✔ Fundição concluída com sucesso!", fg="green", bold=True)
+        else:
+            click.secho("\n✘ Falha na fundição.", fg="red", bold=True)
+            ctx.exit(1)
+    return success
 
 @metal_group.command('run', context_settings=dict(ignore_unknown_options=True))
 @click.argument('target', required=False)
@@ -88,29 +96,6 @@ int main(int argc, char** argv) {
     with open("src/main.c", "w") as f: f.write(main_c)
     click.secho("✅ Fundição pronta! Tente: doxoade metal build", fg="green")
     click.secho("✅ Estrutura de metalurgia pronta.", fg="green")
-
-@metal_group.command('build')
-@click.option('--release', is_flag=True, help="Build de alta performance.")
-@click.option('--soteria/--no-soteria', default=True, help="Ativa/Desativa o escudo de resgate.")
-@click.option('--force', '-f', is_flag=True, help="Força a re-compilação.") # <--- ADICIONE ESTA LINHA
-@click.pass_context # <--- ADICIONE ISSO PARA PODER ACESSAR O CONTEXTO
-def metal_build(ctx, release, soteria, force): # <--- ADICIONE O 'force' AQUI
-    """Forja os fontes em binários executáveis."""
-    success = False
-    with ExecutionLogger('metal_build', os.getcwd(), ctx.params) as logger:
-        from doxoade.tools.metalcraft.metal_engine import NexusMetalEngine
-        
-        click.echo(f"{Fore.YELLOW}{Style.BRIGHT}🔨 Iniciando Forja...{Style.RESET_ALL}")
-        engine = NexusMetalEngine(os.getcwd())
-        
-        # Passamos o force para o motor
-        success = engine.build(release=release, use_soteria=soteria, force=force)
-        
-        if success:
-            click.secho("\n✔ Binário fundido com sucesso!", fg="green", bold=True)
-        else:
-            click.secho("\n✘ Falha na fundição. Chame o Lazarus para necropsia.", fg="red", bold=True)
-    return success
 
 @metal_group.command('embedded')
 @click.argument('target_path', type=click.Path(exists=True, file_okay=False))

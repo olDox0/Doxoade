@@ -20,6 +20,7 @@ pytest==9.0.1
 radon==6.0.1
 requests==2.33.1
 rich==14.2.0
+setuptools==82.0.1
 toml==0.10.2
 zstandard==0.25.0
 zstd==1.5.7.3

@@ -88,137 +88,6 @@ class NexusMetalEngine:
         cmd_parts += ["-lm"] # Matemática é vital para Tensores
         cmd_parts += linker_flags
 
-    def build(self, release=False, use_soteria=True, force=False):
-        """
-        FORJA NATIVA INDUSTRIAL (v44.1).
-        Agora com suporte total a múltiplos argumentos e segurança SSA.
-        """
-        if not self.config:
-            # Se não houver TOML, criamos uma config padrão em memória
-            print(f"\n   {Fore.RED}✘ FALHA LOGÍSTICA: metalcraft.toml não localizado em:{Style.RESET_ALL}")
-            print(f"     > {self.root}")
-            print(f"     {Fore.CYAN}DICA: Rode 'doxoade metal init' para gerar o blueprint.{Style.RESET_ALL}")
-            return False
-
-        if not self.toolchain.detect():
-            print(f"\n   {Fore.RED}✘ FALHA DE TOOLCHAIN: Compilador GCC não localizado.{Style.RESET_ALL}")
-            print(f"     > Verifique se o w64devkit está na pasta 'thirdparty' ou no PATH.")
-            return False
-
-        # --- LÓGICA DE MULTI-TARGETS ---
-        targets = self.config.get('targets')
-        if not targets:
-            targets = [{
-                'name': self.config['project'].get('name', 'app'),
-                'sources': self.config['paths'].get('sources', ['src/*.c']),
-                'output': os.path.join(self.config['paths'].get('output', 'bin'), 
-                                     self.config['project'].get('name', 'app') + (".exe" if os.name == 'nt' else ""))
-            }]
-
-        tools_dir = Path(__file__).resolve().parents[1]
-        global_success = True
-
-        for target in targets:
-            t_name = target.get('name', 'unnamed') # t_name = target['name']
-            out_file = self.root / target['output']
-            
-            # 1. Coleta Fontes (Variável Local: src_files)
-            src_files = []
-            for pat in target['sources']:
-                src_files.extend(list(self.root.glob(pat)))
-            
-            if not src_files:
-                print(f"\n   {Fore.YELLOW}⚠️  ALVO [{t_name}]: Nenhum arquivo .c encontrado!{Style.RESET_ALL}")
-                print(f"      Padrões buscados: {target.get('sources')}")
-                print(f"      CWD: {os.getcwd()}")
-                global_success = False
-                continue
-
-            print(f"\n   [*] Fundição Alvo: {Fore.CYAN}{t_name}{self.RST}")
-
-            # 2. SSA: Sotéria Static Audit (Bloqueio de Segurança)
-            if not self._run_static_safety_audit(src_files):
-                print(f"      {Fore.RED}🛑 COMPILAÇÃO PARALISADA POR RISCO DE SEGURANÇA.{self.RST}")
-                global_success = False
-                continue
-
-            # 3. Check de Cache (Diferencial)
-            if not force and not self._is_stale(t_name, src_files, out_file):
-                print(f"      {Fore.GREEN}✔ Alvo sincronizado (Cache Hit).{self.RST}")
-                continue
-
-            # 4. Preparação e Vacinação
-            shadow_dir = self.root / ".doxoade" / "metalcraft" / "shadow" / t_name
-            shadow_dir.mkdir(parents=True, exist_ok=True)
-            
-            final_sources = []
-            shield_active = use_soteria and self.config['compiler'].get('shield', True)
-            
-            if shield_active:
-                print(f"      💉 Injetando rastro Sotéria em {len(src_files)} módulos...")
-                for src in src_files:
-                    dst = shadow_dir / src.name
-                    # Vacinação Hórus Scribe
-                    vacinado = self.scribe.instrument_code(src.read_text(errors='ignore'), src.name)
-                    dst.write_text(vacinado, encoding='utf-8')
-                    final_sources.append(dst)
-                
-                # Injeta os núcleos .c da Sotéria
-                sot_src = tools_dir / "vulcan" / "diagnostic" / "soteria" / "src"
-                if sot_src.exists():
-                    final_sources.extend(list(sot_src.glob("*.c")))
-            else:
-                final_sources = src_files
-
-            # 5. Linkagem e Forja Final (GCC)
-            opt = "O3" if release else self.config['compiler'].get('opt', 'O2')
-            
-            # Normalização de includes
-            inc_flags = [f'-I"{str(self.root / d).replace("\\", "/")}"' for d in self.config['paths']['headers']]
-            if shield_active:
-                sot_inc = (tools_dir / "vulcan" / "diagnostic" / "soteria" / "include").resolve()
-                local_inc = (self.root / ".doxoade" / "metalcraft" / "soteria" / "include").resolve()
-                if local_inc.exists():
-                    inc_flags.append(f'-I"{str(local_inc).replace("\\", "/")}"')
-                else:
-                    inc_flags.append(f'-I"{str(sot_inc).replace("\\", "/")}"')
-
-            # Montagem do comando industrial
-            cmd_parts = [
-                f'"{self.toolchain.compiler_path}"', 
-                f"-{opt}", "-g", "-fopenmp", 
-                "-fno-omit-frame-pointer", "-fstack-protector-strong"
-            ] + inc_flags
-            
-            cmd_parts += [f'"{str(s).replace("\\", "/")}"' for s in final_sources]
-            cmd_parts += ["-o", f'"{str(out_file).replace("\\", "/")}"', "-ldbghelp", "-lpsapi", "-Wall"]
-
-            print(f"      🔨 Fundindo {len(src_files)} módulos...")
-            
-            out_file.parent.mkdir(parents=True, exist_ok=True)
-            res = subprocess.run(" ".join(cmd_parts), shell=True, capture_output=True, text=True)
-
-            if res.returncode == 0:
-                print(f"      {Fore.GREEN}✅ {t_name} gerado com sucesso.{self.RST}")
-                self._update_cache(t_name, src_files)
-            else:
-                print(f"      {Fore.RED}❌ FALHA NA FUNDIÇÃO DE {t_name.upper()}{self.RST}")
-                
-                # [OURO] Formatador de Erros Hefesto
-                err_lines = res.stderr.splitlines()
-                for line in err_lines:
-                    if "error:" in line.lower():
-                        print(f"      {Fore.RED}● {line.strip()}{self.RST}")
-                    elif "undefined reference" in line.lower():
-                        func_name = re.findall(r"`(.*?)'", line)
-                        print(f"      {Fore.YELLOW}⚓ LINK-MISS: Função '{func_name[0] if func_name else '?'}' sem implementação.{self.RST}")
-                    elif "warning:" in line.lower():
-                        print(f"      {Style.DIM}⚠ {line.strip()}{self.RST}")
-                
-                global_success = False
-        
-        return global_success
-
     def _update_cache(self, target_name, sources):
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache = {}
@@ -375,105 +244,173 @@ class NexusMetalEngine:
             print(f"   [!] Falha no Transplante: {e}")
             return False
 
-    def build(self, release=False, use_soteria=True, force=False):
-        """FORJA NATIVA INDUSTRIAL v45.0 - Optimized for TNSE."""
+    def build(self, target=None, release=False, use_soteria=True, force=False):
+#    def build(self, target_name=None, release=False, use_soteria=True, force=False):
+        """
+        FORJA NATIVA INDUSTRIAL (v44.2).
+        Orquestrador de Metalurgia com suporte a Alvos Seletivos e Auditoria SSA.
+        """
         if not self.config:
-            print(f"\n   {Fore.RED}✘ ERRO DE COORDENADAS: metalcraft.toml não encontrado!{self.RST}")
-            print(f"     Diretório Atual: {os.getcwd()}")
-            print(f"     {Fore.CYAN}DICA: Rode 'doxoade metal init' ou entre na pasta do projeto C.{self.RST}")
+            print(f"\n   {Fore.RED}✘ FALHA LOGÍSTICA: metalcraft.toml não localizado.{Style.RESET_ALL}")
             return False
-        if not self.toolchain.detect(): return False
 
-        targets = self.config.get('targets')
-        if not targets:
-            targets = [{
+        if not self.toolchain.detect():
+            print(f"\n   {Fore.RED}✘ FALHA DE TOOLCHAIN: Compilador GCC não localizado.{Style.RESET_ALL}")
+            return False
+
+        # 1. RESOLUÇÃO DE ALVOS (Contrato vs CLI)
+        all_targets = self.config.get('targets', [])
+        
+        if target:
+            targets_to_forge = [t for t in all_targets if t.get('name') == target]
+        else:
+            targets_to_forge = all_targets
+        
+        # Fallback: Se não houver a seção [[targets]] no TOML, gera um alvo padrão
+        if not all_targets:
+            all_targets = [{
                 'name': self.config['project'].get('name', 'app'),
                 'sources': self.config['paths'].get('sources', ['src/*.c']),
                 'output': os.path.join(self.config['paths'].get('output', 'bin'), 
-                         self.config['project'].get('name', 'app') + (".exe" if os.name == 'nt' else ""))
+                                     self.config['project'].get('name', 'app') + (".exe" if os.name == 'nt' else ""))
             }]
 
+        # 2. FILTRAGEM SELETIVA (--target)
+        if target:
+            targets_to_forge = [t for t in all_targets if t.get('name') == target]
+            if not targets_to_forge:
+                print(f"   {Fore.RED}✘ Alvo '{target}' não localizado no metalcraft.toml.{Style.RESET_ALL}")
+                return False
+        else:
+            targets_to_forge = all_targets
+
         global_success = True
-        tools_dir = Path(__file__).resolve().parents[1]
 
-        for target in targets:
-            t_name = target['name']
-            out_file = self.root / target['output']
-            src_files = []
-            for pat in target['sources']:
-                src_files.extend(list(self.root.glob(pat)))
+        # 3. LOOP DE FUNDIÇÃO INDUSTRIAL
+        for t_cfg in targets_to_forge:
+            t_name = t_cfg.get('name', 'unnamed')
+            out_file = self.root / t_cfg['output']
             
-            if not src_files: continue
-            print(f"\n   [*] Fundição Alvo: {Fore.CYAN}{t_name}{self.RST}")
+            print(f"\n   [*] Fundição Alvo: {Fore.CYAN}{t_name}{Style.RESET_ALL}")
 
-            if not self._run_static_safety_audit(src_files):
-                print(f"      {Fore.RED}🛑 COMPILAÇÃO PARALISADA POR RISCO.{self.RST}")
-                global_success = False; continue
+            # a) Coleta e Resolução de Fontes (Suporte a Glob: *.c)
+            from glob import glob
+            raw_sources = t_cfg.get('sources', [])
+            final_sources = []
+            for pattern in raw_sources:
+                # Resolve o path absoluto para o glob
+                full_pattern = str(self.root / pattern)
+                matches = glob(full_pattern)
+                final_sources.extend([Path(m) for m in matches])
 
-            if not force and not self._is_stale(t_name, src_files, out_file):
-                print(f"      {Fore.GREEN}✔ Alvo sincronizado (Cache Hit).{self.RST}")
+            if not final_sources:
+                print(f"      {Fore.RED}✘ Nenhuma fonte localizada para o padrão: {raw_sources}{Style.RESET_ALL}")
+                global_success = False
                 continue
 
-            # --- SETUP DE DEFESA ---
-            shield_active = use_soteria and self.config['compiler'].get('shield', True)
-            final_sources = []
-            sot_inc_path = None
+            # b) Auditoria Estática de Segurança (SSA)
+            if not self._run_static_safety_audit(final_sources):
+                print(f"      {Fore.RED}✘ Alvo rejeitado pela Auditoria de Segurança Sotéria.{Style.RESET_ALL}")
+                global_success = False
+                continue
 
-            if shield_active:
-                local_sot_src = self.root / ".doxoade" / "metalcraft" / "soteria" / "src"
-                if local_sot_src.exists():
-                    sot_src = local_sot_src
-                    sot_inc_path = self.root / ".doxoade" / "metalcraft" / "soteria" / "include"
-                else:
-                    sot_src = tools_dir / "vulcan" / "diagnostic" / "soteria" / "src"
-                    sot_inc_path = tools_dir / "vulcan" / "diagnostic" / "soteria" / "include"
+            # c) Check de Staleness (Incremental Build)
+            if not force and not self._is_stale(t_name, final_sources, out_file):
+                print(f"      {Fore.GREEN}✔ Alvo sincronizado (Cache Hit).{Style.RESET_ALL}")
+                continue
 
-                shadow_dir = self.root / ".doxoade" / "metalcraft" / "shadow" / t_name
-                shadow_dir.mkdir(parents=True, exist_ok=True)
-                print(f"      💉 Vacinando módulos...")
-                for src in src_files:
-                    dst = shadow_dir / src.name
-                    vacinado = self.scribe.instrument_code(src.read_text(errors='ignore'), src.name)
-                    dst.write_text(vacinado, encoding='utf-8')
-                    final_sources.append(dst)
-                final_sources.extend(list(sot_src.glob("*.c")))
-            else:
-                final_sources = src_files
+            # d) Vacinação (Scribe) - Cria arquivos na sombra para não sujar o /src
+            shadow_dir = self.root / ".doxoade" / "metalcraft" / "shadow" / t_name
+            shadow_dir.mkdir(parents=True, exist_ok=True)
+            
+            vacinados = []
+            print(f"      💉 Vacinando módulos...")
+            for src in final_sources:
+                dest = shadow_dir / src.name
+                content = src.read_text(encoding='utf-8', errors='ignore')
+                # Injeta rastro nativo
+                vacinado = self.scribe.instrument_code(content, src.name)
+                dest.write_text(vacinado, encoding='utf-8')
+                vacinados.append(dest)
 
-            # --- MONTAGEM DO COMANDO GCC (TNSE SPEC) ---
-            opt = "O3" if release else self.config['compiler'].get('opt', 'O2')
-            inc_flags = [f'-I"{str(self.root / d).replace("\\", "/")}"' for d in self.config['paths']['headers']]
-            if sot_inc_path:
-                inc_flags.append(f'-I"{str(sot_inc_path).replace("\\", "/")}"')
-
-            # Bibliotecas e Flags do TNSE
-            libs = self.config.get('linker', {}).get('libs', ["dbghelp", "psapi", "kernel32", "gomp"])
-            l_flags = self.config.get('linker', {}).get('flags', ["-static"])
-
+            # e) Metalurgia (GCC)
+            opt = t_cfg.get('opt', self.config['compiler'].get('opt', 'O2'))
+            flags = t_cfg.get('flags', [])
+            
+            # Coleta fontes da Sotéria para linkagem
+            soteria_srcs = [f'"{str(f).replace("\\","/")}"' for f in self.scribe.soteria_src.glob("*.c")]
+            
             cmd = [
-                f'"{self.toolchain.compiler_path}"', f"-{opt}", "-g", "-fopenmp"
-            ] + inc_flags
-            cmd += [f'"{str(s).replace("\\", "/")}"' for s in final_sources]
-            cmd += ["-o", f'"{str(out_file).replace("\\", "/")}"']
-            cmd += [f"-l{lib}" for lib in libs]
-            cmd += ["-lm"] # Lib Math sempre inclusa
-            cmd += l_flags
+                f'"{self.toolchain.compiler_path}"', f"-{opt}", "-g",
+                f'-I"{str(self.scribe.soteria_inc).replace("\\","/")}"',
+                f'-I"{str(self.root / "include").replace("\\","/")}"'
+            ] 
+            
+            # Adiciona as fontes vacinadas
+            cmd += [f'"{str(v).replace("\\","/")}"' for v in vacinados]
+            # Adiciona o núcleo Sotéria
+            cmd += soteria_srcs
+            # Flags e Output
+            cmd += flags
+            cmd += [
+                f'-o "{str(out_file).replace("\\","/")}"',
+                "-ldbghelp", "-lpsapi", "-lkernel32"
+            ]
 
+            # Telemetria de Linkagem
             chief_heartbeat("METAL", "LINKER_CHECK", {
-                "libs": libs,
-                "flags": l_flags,
-                "target": t_name,  # <--- MUDAR DE target_name PARA t_name
+                "target": t_name, "opt": opt, "libs": ["dbghelp", "psapi"]
             })
 
-            out_file.parent.mkdir(parents=True, exist_ok=True)
-            print(f"      🔨 Fundindo {len(src_files)} módulos...")
-            res = subprocess.run(" ".join(cmd), shell=True, capture_output=True, text=True)
-
+            res = subprocess.run(" ".join(cmd), capture_output=True, text=True, shell=True)
+            
             if res.returncode == 0:
-                print(f"      {Fore.GREEN}✅ {t_name} gerado com sucesso.{self.RST}")
-                self._update_cache(t_name, src_files)
+                print(f"      {Fore.GREEN}✅ {t_name} gerado com sucesso.{Style.RESET_ALL}")
+                self._update_cache(t_name, final_sources)
             else:
-                print(f"      {Fore.RED}❌ Erro no GCC para {t_name}:{self.RST}\n{res.stderr}")
+                print(f"      {Fore.RED}❌ Falha na Metalurgia:\n{res.stderr}{Style.RESET_ALL}")
                 global_success = False
-        
+
         return global_success
+
+    def build_single_file(self, file_path, release=False, use_soteria=True):
+        """Build de emergência para arquivos de laboratório."""
+        src = Path(file_path).resolve()
+        if not src.exists():
+            print(f"   {Fore.RED}✘ Fonte não encontrada: {file_path}{self.RST}")
+            return False
+
+        # 1. Caminhos de Infraestrutura
+        shadow_dir = self.root / ".doxoade" / "metalcraft" / "shadow_src"
+        shadow_dir.mkdir(parents=True, exist_ok=True)
+        shadow_file = shadow_dir / src.name
+        
+        # 2. Vacinação Sotéria (Hórus Scribe)
+        print(f"   💉 Vacinando módulo isolado...")
+        vacinado = self.scribe.instrument_code(src.read_text(errors='ignore'), src.name)
+        shadow_file.write_text(vacinado, encoding='utf-8')
+
+        # 3. Preparação da Linkagem
+        opt = "O3" if release else "O0"
+        out_exe = self.root / (src.stem + (".exe" if os.name == "nt" else ""))
+        
+        # Localiza arquivos objeto da Sotéria no core do Doxoade
+        soteria_srcs = [f'"{str(f).replace("\\","/")}"' for f in self.scribe.soteria_src.glob("*.c")]
+        
+        # 4. Ordem de Metalurgia GCC
+        cmd = [
+            f'"{self.toolchain.compiler_path}"', f"-{opt}", "-g",
+            f'-I"{str(self.scribe.soteria_inc).replace("\\","/")}"',
+            f'"{str(shadow_file).replace("\\","/")}"'
+        ] + soteria_srcs + [
+            f'-o "{str(out_exe).replace("\\","/")}"',
+            "-ldbghelp", "-lpsapi"
+        ]
+
+        res = subprocess.run(" ".join(cmd), capture_output=True, text=True, shell=True)
+        if res.returncode == 0:
+            print(f"   ✅ [LAB-OK] Gerado: {out_exe.name}")
+            return True
+        else:
+            print(f"   ❌ [ERRO GCC]:\n{res.stderr}")
+            return False

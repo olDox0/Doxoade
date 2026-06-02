@@ -11,8 +11,39 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, List
 
-from doxoade.tools.telemetry_tools.logger import chief_heartbeat
 from .crash_signatures import WIN_SIGNALS, PYTHON_EXCEPTIONS, NATIVE_LOGIC_PATTERNS
+from doxoade.tools.telemetry_tools.logger import chief_heartbeat
+from .python_diagnostics import diagnose_python_error
+from .native_diagnostics import diagnose_native_error
+
+def archive_crash_to_hades_vulcan_optimized(nx_data):
+    """
+    Sincroniza o crash com a tabela de incidentes para que
+    'doxoade search' ou 'doxoade log' encontrem a falha.
+    """
+    from doxoade.database import get_db_connection
+    import datetime as _dt
+    
+    conn = get_db_connection()
+    # nx_data aqui contém o dossiê completo
+    verdict = nx_data.get('technical_error', 'NATIVE_FAULT')
+    explanation = nx_data.get('explanation', 'Crash detectado pela Sotéria.')
+    
+    conn.execute('''
+        INSERT OR REPLACE INTO open_incidents 
+        (finding_hash, file_path, line, message, category, timestamp, project_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        nx_data.get('id'), # Hash do Evento
+        nx_data.get('file'),
+        nx_data.get('line'),
+        f"[{verdict}] {explanation}",
+        "CRASH-FORENSIC",
+        _dt.datetime.now().isoformat(),
+        os.getcwd()
+    ))
+    conn.commit()
+    conn.close()
 
 class CrashProcessor:
     def __init__(self, project_root: str):
@@ -20,86 +51,64 @@ class CrashProcessor:
 
     def process(self, raw_text: str, exit_code: int = None) -> Dict[str, Any]:
         d = self._init_dossier(raw_text)
+        if exit_code is not None:
+            d['exit_code'] = exit_code
+            
+        if exit_code and (exit_code > 255 or exit_code < 0):
+             # O código em native_diagnostics já lida com hexadecimais
+             pass 
         
-        # 1. Filtro de Aborto: Se for SystemExit, não gera diagnóstico
-        if "SystemExit" in raw_text or (exit_code == 0):
-#        if "SystemExit:" in raw_text or "SystemExit" in raw_text:
+        if "SystemExit" in raw_text:
             d['technical_error'] = "NORMAL_EXIT"
             return d
-
-        # 2. Roteamento de Diagnóstico
-        if "@SOTERIA_BEGIN@" in raw_text or "@NEXUS_BEGIN@" in raw_text:
+        if "@SOTERIA_BEGIN@" in raw_text or "TAG_MOTIVO" in raw_text:
             self._parse_native(d, raw_text, exit_code)
         elif "Traceback" in raw_text:
             self._parse_python(d, raw_text)
-            
         return d
 
     def _parse_native(self, d: dict, raw: str, exit_code: int):
         match = re.search(r"@(SOTERIA|NEXUS)_BEGIN@(.*?)@(SOTERIA|NEXUS)_END@", raw, re.DOTALL)
         content = match.group(2) if match else raw
         tags = dict(re.findall(r"TAG_(\w+):\s*(.*)", content))
-        
-        d['technical_error'] = "NATIVE_FAULT"
-        d['soteria'] = {k.replace("REG_",""): v for k,v in tags.items() if k.startswith("REG_") or k in ["RIP", "RSP"]}
-        d['inventory_raw'] = re.findall(r"TAG_ARENA_OBJ:\s*(.*)", raw)
-        d['chain'] = re.findall(r"TAG_FRAME: \d+ \| (.*?) \| (.*)", raw)
-        
-        loc = tags.get('RASTRO_LOC', "")
-        if not loc and d['chain']:
-            # Se o rastro explodiu, pegamos o local do último frame válido (topo da pilha)
-            loc = d['chain'][0][1] # Pega o "arquivo.c:linha" do frame 0
-            
+        d['soteria'] = {k.replace("REG_",""): v for k,v in tags.items() if k.startswith("REG_") or k in ["RIP", "RSP", "RAX", "FAULT_ADDR"]}
+        d['technical_error'], d['explanation'] = diagnose_native_error(exit_code, tags)
+        loc = tags.get('RASTRO_LOC', "") or (re.findall(r"TAG_FRAME: 0 \| .*? \| (.*)", raw) or [""])[0]
         if loc and ":" in loc:
-            f, l = loc.rsplit(':', 1)
-            d['file'], d['line'] = self._find_source(f), (int(l) if l.isdigit() else 0)
-
-
-        # Oráculo Nativo
-        motivo = tags.get('MOTIVO', '').upper()
-        for entry in NATIVE_LOGIC_PATTERNS:
-            if entry[0] in motivo:
-                d['technical_error'], d['explanation'] = entry[1], entry[2]
-        
-        if exit_code in WIN_SIGNALS:
-            d['technical_error'], d['explanation'] = WIN_SIGNALS[exit_code]
+            f_path, line = loc.rsplit(':', 1)
+            # LIMPEZA CRÍTICA: Se for um arquivo da pasta .doxoade (shadow), 
+            # pegamos apenas o nome para o Lazarus achar o original no src/
+            if ".doxoade" in f_path.lower() or "shadow" in f_path.lower():
+                f_path = Path(f_path).name
+            d['file'] = self._find_source(f_path)
+            d['line'] = int(line) if line.isdigit() else 0
+        d['chain'] = re.findall(r"TAG_FRAME: \d+ \| (.*?) \| (.*)", content)
 
     def _parse_python(self, d: dict, raw: str):
+        """Especialista em Python: Unwrap Aegis."""
         lines = [l.strip() for l in raw.strip().splitlines() if l.strip()]
         if not lines: return
         
         last_line = lines[-1]
-        # Remove wrappers do Aegis para o laudo ficar limpo
         clean_msg = re.sub(r'.*?Aegis Sandbox Blocked:\s*', '', last_line).strip()
-        
-        # Identifica Erro Humano
-        from .crash_signatures import PYTHON_EXCEPTIONS
         exc_type = clean_msg.split(":")[0].strip()
-        
-        if exc_type in PYTHON_EXCEPTIONS:
-            d['technical_error'], d['explanation'] = PYTHON_EXCEPTIONS[exc_type]
-            d['explanation'] += f" ({clean_msg})"
-        else:
-            d['technical_error'], d['explanation'] = exc_type, clean_msg
+        msg_body = clean_msg.split(":", 1)[1].strip() if ":" in clean_msg else clean_msg
 
-        # Triangulação: Escavação de Pilha
+        # Delegado ao Especialista Python
+        d['technical_error'], d['explanation'] = diagnose_python_error(exc_type, msg_body)
+
+        # Triangulação Profunda (Escavação de Pilha)
         py_frames = re.findall(r'File "(.+?)", line (\d+), in (.+)', raw)
         if py_frames:
-            # Poda de infraestrutura: ignora o que não é código do projeto
             infra = ['aegis_utils.py', 'aegis_core.py', 'run.py', 'rescue.py', 'lazarus_hook.py']
-            
-            target = None
-            for frame in reversed(py_frames):
-                if not any(noise in frame[0] for noise in infra):
-                    target = frame
-                    break
-            
-            target = target or py_frames[-1]
-            d['file'] = self._find_source(target[0])
-            d['line'] = int(target[1])
-            
-            # Cadeia filtrada com injeção de rastro
+            target = next((f for f in reversed(py_frames) if not any(n in f[0] for n in infra)), py_frames[-1])
+            d['file'], d['line'] = self._find_source(target[0]), int(target[1])
             d['chain'] = [(f[2], f"{f[0]}:{f[1]}") for f in py_frames if not any(n in f[0] for n in infra)]
+
+        # Busca dica inteligente
+        hint = get_python_fix_hint(exc_type, msg_body)
+        if hint:
+            d['explanation'] = f"{d['explanation']}\n\n{hint}"
 
     def _parse_native_crash(self, d: dict, raw: str, exit_code: int):
         """Especialista em C/C++ (Sotéria Engine)."""
@@ -133,13 +142,11 @@ class CrashProcessor:
         from .crash_signatures import NATIVE_LOGIC_PATTERNS
         
         for entry in NATIVE_LOGIC_PATTERNS:
-            # Garante que temos pelo menos os 3 campos necessários
-            if len(entry) >= 3:
-                key, err, exp = entry[0], entry[1], entry[2]
-                if key in motivo or key in detail:
-                    d['technical_error'] = err
-                    d['explanation'] = exp
-                    return
+            key_tag = entry[0]
+            if key_tag in motivo or key_tag in detail:
+                d['technical_error'] = entry[1]
+                d['explanation'] = entry[2]
+                break
 
         # Fallback para sinais do Windows
         if exit_code in WIN_SIGNALS:
@@ -162,7 +169,9 @@ class CrashProcessor:
         try:
             code = int(str(exit_code), 16) if str(exit_code).startswith('0x') else int(exit_code)
             if code in WIN_SIGNALS:
-                d['technical_error'], d['explanation'] = WIN_SIGNALS[code]
+                status, expl = WIN_SIGNALS[code]
+                d['technical_error'] = status
+                d['explanation'] = expl
         except: pass
 
     def _parse_python(self, d: dict, raw: str):
@@ -298,20 +307,46 @@ class CrashProcessor:
 
     def _init_dossier(self, raw):
         return {
-            'id': hashlib.md5(raw.encode()).hexdigest()[:8].upper(),
-            'timestamp': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'technical_error': "SYSTEM_FAULT", 'explanation': "Falha não classificada.",
-            'file': "NATIVO", 'line': 0, 'soteria': {}, 'chain': [], 'inventory_raw': []
-        }
+                'id': hashlib.md5(raw.encode()).hexdigest()[:8].upper(),
+                'timestamp': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                'technical_error': "SYSTEM_FAULT",
+                'explanation': "Falha não classificada.",
+                'file': "NATIVO", 'line': 0, 'soteria': {}, 'chain': [], 'inventory_raw': [] }
 
     def _extract_regs(self, tags):
         return {k.replace("REG_",""): v for k,v in tags.items() if k.startswith("REG_") or k in ["RIP", "RSP"]}
 
     def _find_source(self, filename: str) -> str:
+        """Triangulação Lazarus: Resolve caminhos reais ocultando a infraestrutura."""
         if not filename or len(filename) < 3 or filename in ["N/A", "NATIVO"]: return "NATIVO"
+        if ".doxoade" in filename.replace("\\", "/"): filename = Path(filename).name
         p = Path(filename)
         if p.exists(): return str(p).replace("\\","/")
         try:
-            candidates = list(Path(self.root).rglob(p.name))
+            candidates = [c for c in Path(self.root).rglob(p.name) 
+                         if not any(x in str(c).lower() for x in ['.doxoade', 'venv', 'build'])]
             return str(candidates[0]).replace("\\","/") if candidates else filename
         except: return filename
+
+    def _cross_reference_hades(self, d: dict, pid: str):
+        """Busca no Hades quem foi o mestre Python deste processo."""
+        try:
+            from doxoade.database import get_db_connection
+            import json
+            conn = get_db_connection()
+            # Busca a última chamada VULCAN deste PID (limite de 10 segundos)
+            query = """
+                SELECT data FROM operational_logs 
+                WHERE pid = ? AND subsystem = 'VULCAN'
+                AND timestamp > datetime('now', '-10 seconds')
+                ORDER BY timestamp DESC LIMIT 1
+            """
+            row = conn.execute(query, (pid,)).fetchone()
+            conn.close()
+            if row:
+                ctx = json.loads(row['data']).get('caller_context')
+                if ctx:
+                    # Injeta o frame Python como origem da chain
+                    d['chain'].insert(0, (f"PYTHON_INVOKER: {ctx['func']}", f"{ctx['file']}:{ctx['line']}"))
+                    d['explanation'] += f"\n[BRIDGE] Acionado por: {ctx['func']}() em {ctx['file']}"
+        except: pass

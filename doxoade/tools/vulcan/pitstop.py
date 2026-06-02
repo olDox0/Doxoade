@@ -136,9 +136,11 @@ def _forge_to_pyx(task: dict) -> dict:
     pyx_path = foundry / f'{module_name}.pyx'
     
     # 2. Check de Elegibilidade
-    eligible, reason = AFVul(str(abs_path))
+    eligible, reason, _ = AFVul(str(abs_path)) 
+#    eligible, reason = AFVul(str(abs_path))
     if not eligible:
-        return {'ok': False, 'skip': True, 'file': str(file_path), 'err': f'pulado: {reason}'}
+        return {'name': abs_path.name, 'ok': False, 'err': f'pulado: {reason}', 'skip': True}
+#        return {'ok': False, 'skip': True, 'file': str(file_path), 'err': f'pulado: {reason}'}
 
     try:
         # 3. Leitura e Análise AST (CORRIGIDO: uma única leitura)

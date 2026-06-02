@@ -160,8 +160,9 @@ class DoxoadeLazyGroup(click.Group):
         print(f"\033[1;34m ■ SUBSISTEMA :\033[0m Intelligence Router")
         print(f"\033[1;34m ■ CAUSA      :\033[0m {e}")
         print(f"\033[1;34m ■ DIAGNÓSTICO:\033[0m Verifique se o módulo 'telemetry_tools.logger' foi movido.")
-        if '--debug' in sys.argv:
-            traceback.print_exc()
+        print(Fore.RED)
+        traceback.print_exc()
+        print(RESET_ALL)
 
 @click.group(cls=DoxoadeLazyGroup, invoke_without_command=True)
 @click.option('--guard', is_flag=True, help='Verificação de integridade Aegis.')
@@ -273,22 +274,24 @@ def main():
         _exit_code = 130
     except SystemExit as se:
         _exit_code = se.code if isinstance(se.code, int) else 1 if se.code else 0
-        if _exit_code not in (0, 130):
-            raise
-    except Exception as e:
-        import sys as exc_sys
-        from traceback import print_tb as exc_trace
-        _, exc_obj, exc_tb = exc_sys.exc_info()
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        line_number = exc_tb.tb_lineno
         
-        # Lógica simplificada para evitar erro de aspas no f-string
-        exc_val = str(exc_obj).replace("'", "")
-        print(f"\x1b[31m ■ Archive: {fname} - line: {line_number}")
-        print(f" ■ Exception type: {type(e).__name__}")
-        print(f" ■ Exception value: {exc_val}\x1b[0m")
-        exc_trace(exc_tb)
-        _exit_code = 1
+        # --- [VITAL] DISPARO DE EMERGÊNCIA PARA SYSTEM EXIT ---
+        if _exit_code not in (0, 130):
+            from doxoade.rescue import activate_protocol
+            # Tenta pegar o rastro, se não houver, envia o código
+            import traceback
+            error_data = traceback.format_exc()
+            if "NoneType" in error_data or not error_data.strip():
+                error_data = f"SystemExit: O comando encerrou prematuramente com código {_exit_code}"
+            
+            activate_protocol(error_data, exit_code=_exit_code)
+        
+        sys.exit(_exit_code)
+    except Exception as e:
+        from doxoade.rescue import activate_protocol
+        error_data = traceback.format_exc()
+        activate_protocol(error_data)
+        sys.exit(1)
     finally:
         from doxoade.tools.db_utils import stop_persistence_worker
         stop_persistence_worker()
