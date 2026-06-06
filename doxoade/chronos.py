@@ -170,7 +170,14 @@ class ChronosRecorder:
         self.monitor = ResourceMonitor(os.getpid())
         self.monitor.start()
         self.profiler = cProfile.Profile()
-        self.profiler.enable()
+        try:
+            self.profiler.enable()
+        except ValueError:
+            # ANTI-BLACKBOX: O Nexus Flow já está usando o rastro do Python.
+            # O Chronos recua para não crashar o sistema.
+            self.profiler = None
+            import sys as _sys
+            _sys.stderr.write(" \x1b[90m[CHRONOS] Profiler passivo (Flow Ativo).\x1b[0m\n")
         self.sampler = CodeSampler(interval=0.01)
         self.sampler.start()
         self.start_timestamp = datetime.now(timezone.utc).isoformat()
@@ -200,6 +207,8 @@ class ChronosRecorder:
         self.end_command(exit_code=inferred_code, duration_ms=duration_ms)
 
     def end_command(self, exit_code, duration_ms):
+        if self.profiler is None:
+            return
         if self._ended:
             return
         self._ended = True

@@ -8,11 +8,6 @@ import os
 import sys
 import click
 import traceback
-from doxoade.rescue import activate_protocol
-from doxoade.tools.aegis.warden import apply_resource_limits
-from doxoade.tools.aegis.aegis_utils import validate_execution_context
-from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
-from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 from doxoade.tools.doxcolors import Fore, Style
 
 @click.command('run')
@@ -33,6 +28,8 @@ from doxoade.tools.doxcolors import Fore, Style
 def run(ctx, script, args, **kwargs):
     """Executor Universal v83.5: Decisão Única de Fluxo com Controle de Célula de Carga."""
     from ..rescue_systems.execution_context import ExecutionContext, ExecutionMode
+    from doxoade.rescue import activate_protocol
+    from doxoade.tools.telemetry_tools.logger import ExecutionLogger
     abs_path = os.path.abspath(script)
     
     # 1. Organiza os limites para o Warden
@@ -48,8 +45,10 @@ def run(ctx, script, args, **kwargs):
         kwargs['target'] = sniper_target
 
     with ExecutionLogger('run', abs_path, ctx.params):
+        from doxoade.tools.aegis.aegis_utils import validate_execution_context
         from .run_systems.run_flow import execute_flow
         from .run_systems.run_c_lang import maybe_run_c_lang
+        
         try:
             validate_execution_context(abs_path, kwargs.get('test_mode', False))
             os.environ['DOXOADE_AUTHORIZED_RUN'] = '1'
@@ -80,6 +79,8 @@ def run(ctx, script, args, **kwargs):
             sys.exit(1)
 
 def _execute_hybrid_engine(script_path: str, use_vulcan: bool, limits: dict):
+    from doxoade.tools.aegis.warden import apply_resource_limits
+    from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
     abs_path = os.path.abspath(script_path)
     
     # Proteção Anti-Binário: Verifica se o arquivo parece texto
@@ -105,59 +106,51 @@ def _execute_hybrid_engine(script_path: str, use_vulcan: bool, limits: dict):
     except Exception as e:
         raise e
 
-@click.command('flow', context_settings=dict(
-    ignore_unknown_options=True, # Permite capturar -s, -i, etc
-    allow_extra_args=True,        # Permite argumentos extras
-))
-@click.argument('target_chain', nargs=-1, required=True) # Captura tudo como uma tupla
+@click.command('flow')
+@click.argument('script', required=True)
+#@click.argument('args', nargs=-1, type=click.UNPROCESSED)
+@click.argument('raw_args', nargs=-1, type=click.UNPROCESSED) # Renomeado de args para raw_args
 @click.pass_context
-def flow_command(ctx, target_chain):
-    """🌊 Nexus Flow: Rastro de execução para Scripts ou Comandos internos."""
-    from doxoade.tools.doxcolors import colors, Fore, Style
-    import os
-    import sys
+def flow_command(ctx, script, **kwargs):
+    import os, sys, shlex
+    from ..probes import flow_runner
+    from .run_systems.run_flow import execute_flow
 
-    # target_chain será algo como ('doxcolors', 'load', 'file.nxa', '-s', '5')
-    target_name = target_chain[0]
-    remaining_args = list(target_chain[1:])
+    # 1. ESTERILIZAÇÃO DE CAMINHO (v125.0)
+    # Trocamos \ por / para impedir que o Windows delete as barras
+    raw_input = script.strip('"\'').replace('\\', '/')
+    parts = shlex.split(raw_input)
+    target_name = parts[0]
+    internal_args = parts[1:]
 
-    # 1. Caso: É um arquivo .py existente
-    if os.path.exists(target_name) and target_name.endswith('.py'):
-        # Re-invoca o comando 'run' com as flags de flow
-        # Como o 'run' espera kwargs, passamos os argumentos via ctx
-        ctx.invoke(run, script=target_name, flow=True)
-        return
+    # 2. INJEÇÃO DE ESTADO ANTI-BLACKBOX
+    flow_runner._STATE['flow_base'] = True
+    flow_runner._STATE['core_trace'] = False 
 
-    # 2. Caso: É um comando interno do doxoade
-    # Pegamos o CLI principal (que é o pai do contexto atual)
-    main_cli = ctx.parent.command
-    cmd_obj = main_cli.get_command(ctx, target_name)
+    # Resolve se é arquivo ou comando
+    abs_path = os.path.abspath(target_name).replace('\\', '/')
+    is_file = os.path.exists(abs_path) and os.path.isfile(abs_path)
 
-    if not cmd_obj:
-        click.echo(f"{Fore.RED}✘ Comando ou arquivo '{target_name}' não encontrado.{Style.RESET_ALL}")
-        return
-
-    click.echo(f"{Fore.CYAN}🌊 Injetando Sonda Nexus Flow em: {Fore.YELLOW}{' '.join(target_chain)}{Style.RESET_ALL}")
-    
-    # Ativa o rastro interno (Noise Gate Open)
-    os.environ['DOXOADE_INTERNAL_FLOW'] = '1'
-    
-    # 3. Execução com Sonda Ativa
-    # Importamos o flow_runner apenas aqui para evitar carga desnecessária
-    from doxoade.probes import flow_runner
-    
-    # Criamos um wrapper para executar o comando click dentro do tracer
-    def internal_cmd_wrapper():
-        try:
-            # Executa o comando click com os argumentos restantes
-            # standalone_mode=False impede que o click dê sys.exit() ao terminar
-            cmd_obj.main(args=remaining_args, standalone_mode=False, parent=ctx)
-        except Exception as e:
-            raise e
-
-    # O flow_runner agora recebe o wrapper em vez de um path
     try:
-        # Precisamos de um pequeno ajuste no flow_runner para aceitar callable
-        flow_runner.run_flow_internal(internal_cmd_wrapper)
+        if not is_file:
+            from doxoade.cli import cli
+            cmd_obj = cli.get_command(ctx, target_name)
+            if cmd_obj:
+                def internal_cmd_wrapper():
+                    os.environ['PYTHONUNBUFFERED'] = '1'
+                    # v128.0: Incepção por Re-Parsing via cli.main (Evita colisão de nomes)
+                    new_argv = [target_name] + internal_args
+                    cli.main(args=new_argv, standalone_mode=False)
+                
+                flow_runner.run_flow_internal(internal_cmd_wrapper)
+                return
+
+        # EXECUÇÃO DE ARQUIVO
+        execute_flow(abs_path, **kwargs)
+
     except Exception as e:
-        click.echo(f"{Fore.RED}🚨 Falha na Sonda Interna: {e}{Style.RESET_ALL}")
+        import traceback
+        # ACIONA SOTÉRIA AUTOMATICAMENTE NO CRASH
+        from doxoade.rescue import activate_protocol
+        activate_protocol(traceback.format_exc(), exit_code=1)
+        sys.exit(1)

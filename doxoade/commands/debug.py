@@ -49,6 +49,8 @@ from doxoade.tools.doxcolors import Fore, Style
                 help="Executa necropsia completa no sistema de resgate.")
 @click.option('--meta-analysis', is_flag=True, 
                 help="Executa meta diagnostico sob o sistema lazarus.")
+@click.option('--status', is_flag=True,
+                help="Verifica a saúde operacional do motor de debug.")
 def debug(script, intern, **kwargs):
 #def debug(script, intern, audit_rescue, sniff, meta_analysis, **kwargs):
     """🩺 Autópsia Forense, Monitoramento, CPU ou Memória (MPoT-5)."""
@@ -60,6 +62,11 @@ def debug(script, intern, **kwargs):
     target_args = kwargs.get('target_args')
     target      = intern if intern else script
     is_internal = True if intern else False
+    
+    if kwargs.get('status'):
+        from ..diagnostic.debug_op_sentry import check_infra
+        check_infra()
+        return
     
     if target and target.startswith('-'):
         click.secho(f" [!] Erro: '{target}' não parece um script válido. "
@@ -95,6 +102,12 @@ def debug(script, intern, **kwargs):
         path = os.path.join(os.path.dirname(__file__), "..", "tools", "vulcan", "diagnostic", "soteria", "meta_analysis.py")
         import subprocess
         subprocess.run([sys.executable, path], check=False)
+        return
+
+    is_tracing = sys.gettrace() is not None
+    if is_tracing:
+        from .debug_systems.debug_engine import run_debug_in_process
+        run_debug_in_process(target, **kwargs)
         return
 
     execute_debug(target, is_internal=is_internal, **kwargs)

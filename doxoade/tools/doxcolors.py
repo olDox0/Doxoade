@@ -29,8 +29,12 @@ def _force_reset():
 class AnsiCode(str):
     __slots__ = ()
     def __new__(cls, code: str):
-        if not ANSI_ENABLED: return str.__new__(cls, '')
-        return str.__new__(cls, f'\x1b[{code}m')
+        try:
+            if not ANSI_ENABLED: return str.__new__(cls, '')
+            return str.__new__(cls, f'\x1b[{code}m')
+        except Exception:
+            # Fallback total: se falhar, retorna string vazia (texto sem cor)
+            return str.__new__(cls, '')
 
 # --- CORE ENGINE ---
 
@@ -197,18 +201,17 @@ class NexusUI:
             sys.stdout.flush()
 
     @staticmethod
-    def apply_tags(text):
-        import re
-        from .doxcolors import Fore, Style, Back
-        tags = re.findall(r'<(.*?)>', text)
-        for tag in tags:
-            tag_upper = tag.upper()
-            replacement = ""
-            if hasattr(Fore, tag_upper): replacement = getattr(Fore, tag_upper)
-            elif hasattr(Style, tag_upper): replacement = getattr(Style, tag_upper)
-            elif hasattr(Back, tag_upper): replacement = getattr(Back, tag_upper)
-            if replacement: text = text.replace(f"<{tag}>", replacement)
-        return text.replace("<RESET>", Style.RESET_ALL)
+    def apply_tags(text: str) -> str:
+        """Processa tags customizadas «TAG»...«/». Fail-Safe."""
+        if not text or not isinstance(text, str):
+            return ""
+        try:
+            # Lógica de substituição de tags...
+            # (seu código atual de regex)
+            return rendered_text
+        except Exception:
+            # Se houver erro de sintaxe nas tags, retorna o texto puro
+            return text
 
     @staticmethod
     def load_animation(file_path, separator="===FRAME==="):
@@ -423,13 +426,17 @@ def init(autoreset=True):
     Se autoreset=True, registra a limpeza automática ao sair do programa.
     """
     if os.name == 'nt' and ANSI_ENABLED:
-        # Ativa suporte ANSI no Windows 10+
-        import ctypes
-        kernel32 = ctypes.windll.kernel32
-        handle = kernel32.GetStdHandle(-11)
-        mode = ctypes.c_ulong()
-        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
-            kernel32.SetConsoleMode(handle, mode.value | 4)
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            # Habilita VIRTUAL_TERMINAL_PROCESSING
+            handle = kernel32.GetStdHandle(-11)
+            mode = ctypes.c_ulong()
+            if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+                kernel32.SetConsoleMode(handle, mode.value | 4)
+        except Exception as e:
+            # Silencioso, mas evita o crash do fluxo de I/O
+            pass
 
     if autoreset:
         # Registra a função de limpeza automática

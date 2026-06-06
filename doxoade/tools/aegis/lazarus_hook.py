@@ -1,34 +1,30 @@
 # -*- coding: utf-8 -*-
 # doxoade/tools/aegis/lazarus_hook.py
 import sys
-import traceback
+import os
 
-def lazarus_excepthook(etype, value, tb):
-    if issubclass(etype, KeyboardInterrupt):
-        sys.__excepthook__(etype, value, tb)
-        return
-
-    import os
-    is_captured = os.environ.get('DOXOADE_AUTHORIZED_RUN') == '1'
+def lazarus_crash_handler(etype, value, tb):
+    """Captura falhas fatais que o try/except normal não pegou."""
+    import traceback
+    error_data = "".join(traceback.format_exception(etype, value, tb))
     
-    # --- [ CAPTURA DE PRECISÃO ] ---
-    # Se for um SystemExit (como sinais do SO ou sys.exit(n)), pegamos o código real
-    exit_code = 1
-    if issubclass(etype, SystemExit):
-        exit_code = value.code if isinstance(value.code, int) else (1 if value.code else 0)
-
+    # Grava um log de emergência em texto puro (sem cores, sem frescura)
+    # caso o sistema de UI esteja quebrado.
+    with open("FATAL_CRASH_DUMP.txt", "w", encoding="utf-8") as f:
+        f.write(error_data)
+        
+    print(f"\n\x1b[41;1m 🔥 CRASH FATAL DETECTADO \x1b[0m")
+    print(f"Evidência salva em: {os.path.abspath('FATAL_CRASH_DUMP.txt')}")
+    
+    # Tenta acionar o Lazarus se ele estiver importável
     try:
         from doxoade.rescue import activate_protocol
-        import traceback
-        error_data = "".join(traceback.format_exception(etype, value, tb))
-        
-        if is_captured:
-            sys.stderr.write(error_data)
-        else:
-            # FIX: Agora passamos o exit_code capturado para o resgate
-            activate_protocol(error_data, exit_code=exit_code)
-    except Exception:
-        sys.__excepthook__(etype, value, tb)
+        activate_protocol(error_data)
+    except:
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        exc_trace(exc_tb)
 
-def install():
-    sys.excepthook = lazarus_excepthook
+def install_shield():
+    sys.excepthook = lazarus_crash_handler

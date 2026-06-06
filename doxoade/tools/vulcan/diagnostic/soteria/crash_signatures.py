@@ -55,4 +55,13 @@ def get_tactical_advice(exc_type, message):
         return "RECOMENDAÇÃO: Motor de compilação ausente. Rode: 'pip install Cython'"
     if "division by zero" in msg:
         return "RECOMENDAÇÃO: Proteja a operação com 'if divisor != 0:' ou um bloco try/except."
+
+    if "double_free" in msg or "double free" in msg:
+        return (
+            "• Verifique se a mesma variável está sendo passada para free() em caminhos lógicos diferentes.\n"
+            "• DICA: Após o free(ptr), defina 'ptr = NULL;' para evitar liberações duplas acidentais." )
+
+    if "access violation" in msg:
+        return "Verifique se o ponteiro foi inicializado ou se o array ultrapassou o tamanho alocado (index out of bounds)."
+
     return None

@@ -4,6 +4,7 @@
 Córtex Analítico Lazarus v77.2 - O Mapa da Verdade.
 Arquitetura: Multi-Language Dispatcher c/ Isolamento de Assinaturas.
 """
+import os  # [FIX] ausente: usado em archive_crash_to_hades_vulcan_optimized (os.getcwd)
 import re
 import hashlib
 import datetime
@@ -83,32 +84,17 @@ class CrashProcessor:
             d['file'] = self._find_source(f_path)
             d['line'] = int(line) if line.isdigit() else 0
         d['chain'] = re.findall(r"TAG_FRAME: \d+ \| (.*?) \| (.*)", content)
+        d['inventory'] = re.findall(r"TAG_ARENA_OBJ:\s*(.*?)\s*\|\s*(\d+)\s*bytes", raw)
+        # 2. Captura de IO (Tudo que foi trackeado pela Sotéria)s
+        # Buscamos tanto TAG_IO_EVENT quanto mensagens marcadas
+        d['io_history'] = re.findall(r"TAG_IO_EVENT:\s*(.*)", raw)
+        # Se o IO_EVENT estiver vazio, tentamos pegar linhas de rastro manual
+        if not d['io_history']:
+            d['io_history'] = re.findall(r"■\s*\[VETOR.*?\]\s*(.*)", raw)
 
-    def _parse_python(self, d: dict, raw: str):
-        """Especialista em Python: Unwrap Aegis."""
-        lines = [l.strip() for l in raw.strip().splitlines() if l.strip()]
-        if not lines: return
-        
-        last_line = lines[-1]
-        clean_msg = re.sub(r'.*?Aegis Sandbox Blocked:\s*', '', last_line).strip()
-        exc_type = clean_msg.split(":")[0].strip()
-        msg_body = clean_msg.split(":", 1)[1].strip() if ":" in clean_msg else clean_msg
-
-        # Delegado ao Especialista Python
-        d['technical_error'], d['explanation'] = diagnose_python_error(exc_type, msg_body)
-
-        # Triangulação Profunda (Escavação de Pilha)
-        py_frames = re.findall(r'File "(.+?)", line (\d+), in (.+)', raw)
-        if py_frames:
-            infra = ['aegis_utils.py', 'aegis_core.py', 'run.py', 'rescue.py', 'lazarus_hook.py']
-            target = next((f for f in reversed(py_frames) if not any(n in f[0] for n in infra)), py_frames[-1])
-            d['file'], d['line'] = self._find_source(target[0]), int(target[1])
-            d['chain'] = [(f[2], f"{f[0]}:{f[1]}") for f in py_frames if not any(n in f[0] for n in infra)]
-
-        # Busca dica inteligente
-        hint = get_python_fix_hint(exc_type, msg_body)
-        if hint:
-            d['explanation'] = f"{d['explanation']}\n\n{hint}"
+    # [FIX] _parse_python estava definido duas vezes. Python usava silenciosamente
+    # apenas a segunda definição (linha ~185), tornando esta letra morta.
+    # A versão completa foi mantida abaixo. Esta foi removida.
 
     def _parse_native_crash(self, d: dict, raw: str, exit_code: int):
         """Especialista em C/C++ (Sotéria Engine)."""
@@ -123,6 +109,7 @@ class CrashProcessor:
         d['soteria'] = self._map_registers(tags)
         d['io_history'] = [v for k,v in re.findall(r"TAG_(\w+):\s*(.*)", content) if k == "IO_EVENT"]
         d['inventory'] = re.findall(r"TAG_ARENA_OBJ:\s*(.*?)\s*\|\s*(\d+)\s*bytes", raw)
+        d['io_history'] = [v for k,v in re.findall(r"TAG_(\w+):\s*(.*)", raw) if k == "IO_EVENT"]
         
         # Triangulação de Código
         loc = tags.get('RASTRO_LOC', "")
@@ -138,41 +125,27 @@ class CrashProcessor:
         """Aplica as regras definidas no crash_signatures.py."""
         motivo = tags.get('MOTIVO', '').upper()
         detail = tags.get('DETAIL', '').upper()
-        
+
         from .crash_signatures import NATIVE_LOGIC_PATTERNS
-        
-        for entry in NATIVE_LOGIC_PATTERNS:
-            key_tag = entry[0]
-            if key_tag in motivo or key_tag in detail:
-                d['technical_error'] = entry[1]
-                d['explanation'] = entry[2]
+
+        # NATIVE_LOGIC_PATTERNS são tuplas: (keyword_str, error_label, explanation)
+        # [FIX] Bloco anterior tentava acessar pattern['keywords'], pattern['error'],
+        # pattern['id'] como dict — crashava com TypeError. Removido.
+        for key_str, error_label, explanation in NATIVE_LOGIC_PATTERNS:
+            if key_str in motivo or key_str in detail:
+                d['technical_error'] = error_label
+                d['explanation'] = explanation
                 break
 
-        # Fallback para sinais do Windows
-        if exit_code in WIN_SIGNALS:
-            d['technical_error'], d['explanation'] = WIN_SIGNALS[exit_code]
-        
-        # 1. Verifica Padrões Vulcan/Sotéria
-        for pattern in NATIVE_LOGIC_PATTERNS:
-            if any(k in motivo or k in detail for k in pattern['keywords']):
-                d['technical_error'] = pattern['error']
-                d['explanation'] = pattern['explanation']
-                
-                # Caso especial para OOM (extração dinâmica de bytes)
-                if pattern['id'] == "ARENA_OOM":
-                    v_match = re.search(r"Pedido (\d+) bytes", detail, re.IGNORECASE)
-                    if v_match: d['explanation'] += f" Falha ao alocar {v_match.group(1)} bytes."
-                return
-
-        # 2. Se não for Vulcan, verifica Sinais de Hardware (OS)
-        # Converte exit_code para int se for string hex
+        # Fallback: Sinais de Hardware Windows (exit_code numérico ou hex)
         try:
             code = int(str(exit_code), 16) if str(exit_code).startswith('0x') else int(exit_code)
             if code in WIN_SIGNALS:
                 status, expl = WIN_SIGNALS[code]
                 d['technical_error'] = status
                 d['explanation'] = expl
-        except: pass
+        except Exception:
+            pass
 
     def _parse_python(self, d: dict, raw: str):
         """Especialista em Python: Desembrulha Aegis e Triangula o Alvo Real."""
@@ -287,15 +260,8 @@ class CrashProcessor:
             d['file'] = self._find_source(target[0])
             d['line'] = int(target[1])
 
-    def _initialize_dossier(self, raw_text: str) -> Dict[str, Any]:
-        return {
-            'id': hashlib.md5(raw_text.encode()).hexdigest()[:8].upper(),
-            'timestamp': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'technical_error': "UNKNOWN_FAULT",
-            'explanation': "Falha não classificada.",
-            'file': "NATIVO", 'line': 0, 
-            'soteria': {}, 'chain': [], 'inventory': [], 'io_history': []
-        }
+    # [FIX] _initialize_dossier era dead code (nunca chamada — process() chama _init_dossier).
+    # Os campos extras que ela tinha (inventory, io_history) foram incorporados em _init_dossier.
 
     def _map_registers(self, tags: dict) -> dict:
         """Isola dados de CPU."""
@@ -305,13 +271,19 @@ class CrashProcessor:
                 regs[k.replace("REG_", "")] = v
         return regs
 
-    def _init_dossier(self, raw):
+    def _init_dossier(self, raw: str) -> Dict[str, Any]:
+        """Cria o dossiê inicial com todos os campos esperados pelos parsers."""
         return {
-                'id': hashlib.md5(raw.encode()).hexdigest()[:8].upper(),
-                'timestamp': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                'technical_error': "SYSTEM_FAULT",
-                'explanation': "Falha não classificada.",
-                'file': "NATIVO", 'line': 0, 'soteria': {}, 'chain': [], 'inventory_raw': [] }
+            'id': hashlib.md5(raw.encode()).hexdigest()[:8].upper(),
+            'timestamp': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'technical_error': "SYSTEM_FAULT",
+            'explanation': "Falha não classificada.",
+            'file': "NATIVO", 'line': 0,
+            'soteria': {}, 'chain': [],
+            # [FIX] inventory_raw renomeado para inventory (usado por _parse_native e rescue.py)
+            # io_history adicionado (ausente na versão antiga de _init_dossier)
+            'inventory': [], 'io_history': [],
+        }
 
     def _extract_regs(self, tags):
         return {k.replace("REG_",""): v for k,v in tags.items() if k.startswith("REG_") or k in ["RIP", "RSP"]}

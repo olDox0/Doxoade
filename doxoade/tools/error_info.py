@@ -52,3 +52,39 @@ def _extract_function_signatures(content: str) -> dict:
         from doxoade.tools.error_info import handle_error
         handle_error(e, context='analysis._extract_function_signatures', silent=True)
         return {}
+        
+def validate_command_bridge(ctx):
+    """
+    Verifica se um comando está tentando invocar outro e se o 
+    fluxo de I/O está desobstruído.
+    """
+    if ctx.parent and ctx.parent.command.name == 'flow':
+        # Se viemos do flow, o stdout deve ser direto, sem buffers agressivos
+        import os
+        os.environ['PYTHONUNBUFFERED'] = '1'
+        
+def print_forensic_exception():
+    """O 'exc_tb' definitivo: Extrai a verdade do sistema."""
+    import sys
+    import os
+    from traceback import print_tb
+    
+    exc_type, exc_obj, exc_tb = sys.exc_info()
+    if not exc_tb:
+        return
+        
+    # Pega o frame mais profundo (onde o erro realmente ocorreu)
+    curr_tb = exc_tb
+    while curr_tb.tb_next:
+        curr_tb = curr_tb.tb_next
+        
+    fname = os.path.split(curr_tb.tb_frame.f_code.co_filename)[1]
+    line_n = curr_tb.tb_lineno
+    
+    print(f"\n\x1b[41;1m 🔥 CRASH FORENSE \x1b[0m")
+    print(f"\x1b[31m ■ Local : {fname}:{line_n}")
+    print(f" ■ Tipo  : {exc_type.__name__}")
+    print(f" ■ Valor : {str(exc_obj)}\x1b[0m")
+    print("\x1b[90m--- CADEIA DE EVENTOS ---")
+    print_tb(exc_tb)
+    print("-------------------------\x1b[0m")

@@ -31,6 +31,10 @@ class SoteriaForensic:
     def __init__(self):
         self.reset = "\033[0m"; self.red = "\033[1;31m"; self.cyan = "\033[1;36m"
         self.ylw = "\033[1;33m"; self.gray = "\033[90m"; self.grn = "\033[1;32m"; self.white = "\033[1;37m"
+        # [FIX] self.root era usado em process_pipe (cadeia de frames) mas nunca definido.
+        # Usa o CWD como raiz padrão — o mesmo critério de CrashProcessor.
+        import os as _os
+        self.root = _os.getcwd()
 
     def shorten_path(self, path):
         if not path or path == "N/A": return "N/A"

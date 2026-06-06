@@ -47,6 +47,21 @@ def compile_c_family_source(script_path):
     build_dir = get_build_dir(source_path)
     output_path = build_dir / (source_path.stem + '.exe')
     
+    try:
+        # Tenta import absoluto (se rodando como pacote)
+        from doxoade.diagnostic.soteria.scribe import SoteriaScribe
+    except (ImportError, ModuleNotFoundError):
+        # Tenta rastro relativo: run_systems -> commands -> doxoade -> diagnostic
+#        from ...diagnostic.soteria.scribe import SoteriaScribe
+        from doxoade.tools.vulcan.diagnostic.soteria.scribe import SoteriaScribe
+
+    scribe = SoteriaScribe() # <--- Garanta que esta linha tenha EXATAMENTE 4 espaços
+    
+    shadow_src = build_dir / f"{source_path.stem}_vax.c"
+    content = source_path.read_text(encoding='utf-8', errors='ignore')
+    vax_content = scribe.instrument_code(content, source_path.name)
+    shadow_src.write_text(vax_content, encoding='utf-8')
+    
     # Localiza caminhos internos do sistema de resgate
     core_dir = Path(__file__).resolve().parents[3]
     soteria_inc = core_dir / "doxoade" / "tools" / "vulcan" / "diagnostic" / "soteria" / "include"
@@ -61,7 +76,8 @@ def compile_c_family_source(script_path):
     # --- ORDEM DE METALURGIA NEXUS ---
     cmd = [
         compiler, 
-        str(source_path).replace("\\", "/"), # Fonte do usuário
+        str(shadow_src).replace("\\", "/"),
+#        str(source_path).replace("\\", "/"), # Fonte do usuário
         std_flag, "-O0", "-g",
         f"-I{soteria_inc}",                  # Header da Sotéria
     ] 
@@ -151,10 +167,21 @@ def run_c_lang(script_path, limits: dict = None, flow: bool = False, extra_args:
         execute_binary(exe_path, limits, extra_args=extra_args)
 
 def is_c_family_target(script_path: str) -> bool:
-    """Detecta se é fonte C ou um binário nativo."""
-    suffix = Path(script_path).suffix.lower()
-    # Se não tem extensão e é executável (Linux) ou se tem extensão binária/fonte
-    return suffix in C_SOURCE_EXTS or suffix in BIN_EXTS or (suffix == '' and os.access(script_path, os.X_OK))
+    """
+    Garante que só tentaremos rodar como C se for um arquivo real 
+    com as extensões corretas.
+    """
+    path = Path(script_path)
+    # Bloqueia se for apenas um comando (como 'doxoade' ou 'pip')
+    if not path.exists():
+        return False
+        
+    valid_exts = {'.c', '.cpp', '.cc', '.cxx', '.h', '.hpp'}
+    # Se não tiver extensão de C e não for um .exe real, não é alvo C
+    if path.suffix.lower() not in valid_exts and path.suffix.lower() != '.exe':
+        return False
+        
+    return True
 
 def maybe_run_c_lang(script_path, limits=None, flow=False, extra_args=None):
     if not is_c_family_target(script_path):

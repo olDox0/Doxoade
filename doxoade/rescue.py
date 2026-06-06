@@ -4,16 +4,16 @@
 Rescue System - Lazarus Protocol v61.0 Platinum Gold.
 Agregador Forense: Sotéria + Aegis + Lazarus (Consolidado).
 """
-import sys
 import os
-import re
-import json
 import subprocess
+import re
 from pathlib import Path
 from typing import Dict, Any, Optional
 
 from doxoade.tools.telemetry_tools.logger import chief_heartbeat
 from doxoade.tools.doxcolors import Fore, Style, Back
+
+from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
 
 # --- CONSTANTES TÁTICAS (Chief-Gold Standard) ---
 C, M, Y, R, W, G, RST = (Fore.CYAN+Style.BRIGHT, Fore.MAGENTA+Style.BRIGHT, 
@@ -68,8 +68,86 @@ def get_code_context(filepath: str, linenum: int, context_lines: int = 2) -> Opt
 
 def analyze_crash(traceback_text: str, exit_code: int = None) -> Dict[str, Any]:
     from .tools.vulcan.diagnostic.soteria.analyze_crash import CrashProcessor
+
+    if "Errno 2" in traceback_text and " " in os.getcwd():
+        info['explanation'] += (
+            "\n\n\x1b[43;1m ⚠ ALERTA DE ROOT PLAGUE \x1b[0m\n"
+            "Detectado espaço no caminho do projeto e falha de localização de arquivo.\n"
+            "Sugestão: Use aspas duplas ou verifique o mapeamento de volumes no Warden." )
+
     processor = CrashProcessor(project_root=".")
     return processor.process(traceback_text, exit_code)
+
+def _interactive_inspection(d: dict):
+    from doxoade.tools.doxcolors import Fore, Style
+    print(f"\n\x1b[42;1m 💻 CONSOLE INTERATIVO LAZARUS v2.0 \x1b[0m")
+    print(f"{Style.DIM}Snapshot 'info' ativo. Dica: Use ':' no final para blocos multilinhas.")
+    print(f"Use 'exit' para voltar.{Style.RESET_ALL}")
+    
+    context = {
+        'info': d, 'vars': d.get('variables', {}), 'chain': d.get('chain', []),
+        'io': d.get('io_history', []), 'print': print, 'hex': hex, 'len': len
+    }
+    
+    def show_keys():
+        print(f"Chaves em 'info': {list(d.keys())}")
+    context['keys'] = show_keys
+    
+    while True:
+        try:
+            line = input(f"{Fore.GREEN}inspect>{Style.RESET_ALL} ").strip()
+            if line.lower() in ['exit', 'quit', '0']: break
+            if not line: continue
+
+            # --- [ MODO MULTILINHAS ] ---
+            if line.endswith(':'):
+                lines = [line]
+                while True:
+                    next_line = input(f"{Fore.BLUE}...{Style.RESET_ALL} ")
+                    if not next_line: break # Linha vazia finaliza o bloco
+                    lines.append(next_line)
+                user_code = "\n".join(lines)
+            else:
+                user_code = line
+
+            # Execução do bloco ou linha única
+            restricted_safe_exec(user_code, context, allow_imports=True)
+#            restricted_safe_exec(user_code, {"__builtins__": __builtins__}, context)
+            
+        except Exception as e:
+            print(f"{Fore.RED}Erro no comando: {e}{Style.RESET_ALL}")
+
+def _render_io_analysis(d: dict):
+    """Renderizador especializado para inspeção de Variáveis e I/O (Opção 5)."""
+    C, M, Y, R, W, G, RST = (Fore.CYAN+Style.BRIGHT, Fore.MAGENTA+Style.BRIGHT,
+                             Fore.YELLOW+Style.BRIGHT, Fore.RED+Style.BRIGHT,
+                             Fore.WHITE+Style.BRIGHT, Fore.GREEN+Style.BRIGHT, Style.RESET_ALL)
+    
+    print('\n' + Fore.MAGENTA + Style.BRIGHT + '_' * 110 + RST)
+    print(f"{M}■ ANÁLISE DE ESTADO E I/O (Soteria-Link):{RST}")
+
+    # 1. Variáveis Python (Snapshot do momento do erro)
+    if d.get('variables'):
+        print(f"\n    {C}Variable Table (Snapshot Python):{RST}")
+        for k, v in d['variables'].items():
+            val_str = str(v)
+            if len(val_str) > 60: val_str = val_str[:57] + "..."
+            print(f"      {Fore.BLUE}{k:<18} {W}│ {Style.DIM}{val_str}")
+
+    # 2. Histórico de I/O Nativo (C/C++)
+    if d.get('io_history'):
+        print(f"\n    {Y}Native IO Trace (Fluxo de Dados):{RST}")
+        for ev in d['io_history']:
+            print(f"      {W}➔ {ev}")
+
+    # 3. Inventário de Memória (Hades Arena)
+    if d.get('inventory'):
+        print(f"\n    {G}Memory Inventory (Alocações Ativas):{RST}")
+        for obj, size in d['inventory']:
+            print(f"      {W}● {obj:<25} {M}{size:>8} bytes")
+    
+    if not any([d.get('variables'), d.get('io_history'), d.get('inventory')]):
+        print(f"\n    {Style.DIM}(Nenhum dado de estado ou I/O capturado para este incidente){RST}")
 
 def _render_tactical_dossier(d: dict):
     """Interface de Auditoria de Diamante - Renderização Pura."""
@@ -221,24 +299,30 @@ def activate_protocol(error_text: str, exit_code: int = None):
     
     # 3. Loop de Intervenção
     try:
+        from .tools.vulcan.diagnostic.soteria.analyze_crash import CrashProcessor
+        processor = CrashProcessor(project_root=".")
+        info = processor.process(error_text, exit_code)
+        
         while True:
             print('\n' + Fore.CYAN + Style.BRIGHT + '_' * 110 + RST)
             print(Fore.CYAN + Style.BRIGHT + '[OPÇÕES DE INTERVENÇÃO]'.center(110) + RST + '\n\n')
             file_label   = _os.path.basename(info["file"])
             
-            opt1 = f"{Back.RED}1.{RST} {Fore.GREEN} [GIT]  Reverter {Y}{file_label}{RST}"
-            if file_label == "NATIVO":
-                opt1 = f"{Style.DIM}[1] [GIT]  (Indisponível p/ falha nativa){RST}"
+            opt1                            = f"{Back.RED}1.{RST} {Fore.GREEN} [GIT]  Reverter {Y}{file_label}{RST}"
+            if file_label == "NATIVO": opt1 = f"{Style.DIM}[1] [GIT]  (Indisponível p/ falha nativa){RST}"
 
             opt2 = f"{Back.RED}2.{RST} {Fore.CYAN} [EDIT] Abrir Notepad++ Linha {Y}{info['line']}{RST}"
             opt3 = f"{Back.RED}3.{RST} {Fore.RED} [INFO] Ver logs brutos{RST}"
             opt4 = f"{Back.RED}4.{RST} {RST}{Fore.YELLOW} [DEBUG] Diagnóstico Pipeline{RST}"
+            opt5 = f"{Back.RED}5.{RST} {Fore.MAGENTA} [IO]    Analisar Dados e Memória{RST}"
+            opt6 = f"{Back.RED}6.{RST} {Fore.GREEN} [CODE]  Console Interativo{RST}"
             opt0 = f"{Back.RED}0.{RST} {Fore.LIGHTMAGENTA_EX} [EXIT] Encerrar sessão{RST}"
 
             # Renderização em Grade 2x2 usando o alinhador inteligente
             # Largura de 55 para caber bem em telas padrão de 110/120 colunas
             print(f"  {_view_align(opt1, 55)} {opt2}")
             print(f"  {_view_align(opt3, 55)} {opt4}")
+            print(f"  {_view_align(opt5, 55)} {opt6}") # <--- Injeção na Grade
             print(f"  {_view_align(opt0, 55)}")
 
             choices = input(f"\n  Sua decisão (ex: 34): ").strip()
@@ -249,7 +333,8 @@ def activate_protocol(error_text: str, exit_code: int = None):
                     if choice == '1' and file_label != "NATIVO":
                         subprocess.run(['git', 'checkout', '--', info['file']], capture_output=True)
                         print(f'  {Fore.GREEN}✔ Sucesso: {file_label} restaurado.{Style.RESET_ALL}')
-                    if choice == '2':
+                        
+                    elif choice == '2':
                         # Localização Industrial do Notepad++ (Evita 'file not found' no Windows)
                         import shutil
                         npp_candidates = [
@@ -265,7 +350,7 @@ def activate_protocol(error_text: str, exit_code: int = None):
                         subprocess.Popen([npp_bin, f"-n{info['line']}", "-nosession", target_abs], shell=False)
                         print(f'  {G}✔ Editor aberto em {file_label} L{info["line"]}.{RST}')
                         
-                    if choice == '3':
+                    elif choice == '3':
                         print('\n' + Fore.RED+Style.BRIGHT + '_' * 110 + RST)
                         print(f"\n  {Fore.RED+Style.BRIGHT}■ [BRUTE LOG] Soteria Engine:{RST}\n")
                         # Exibição do log sem as tags Sotéria para limpeza visual
@@ -274,7 +359,8 @@ def activate_protocol(error_text: str, exit_code: int = None):
                         print(f"{Style.DIM}{clean_log}{RST}")
                         print(f'{R}--- [ FIM DO LOG ] ---{RST}')
             #            input(f'\n{Style.DIM}Pressione Enter para prosseguir para a saída...{RST}')
-                    if choice == '4':
+            
+                    elif choice == '4':
                         print('\n' + Fore.RED+Style.BRIGHT + '_' * 110 + RST)
                         print(f"\n  {Fore.RED+Style.BRIGHT}■ [PIPELINE PROBE] Hades Engine:{RST}\n")
                         try:
@@ -298,13 +384,27 @@ def activate_protocol(error_text: str, exit_code: int = None):
                             conn.close()
                         except Exception as e:
                             print(f"  {R}✘ Falha ao consultar Hades: {e}{RST}")
+                            
+                    elif '5' in choices:
+                        _render_io_analysis(info)
+                    elif '6' in choices:
+                        _interactive_inspection(info)
                 break
             except Exception as e:
                 from doxoade.tools.error_info import handle_error
                 handle_error(e, context="activate_protocol", debug=True)
     except Exception as e:
-        from doxoade.tools.error_info import handle_error
-        handle_error(e, context="activate_protocol", debug=True)
+        # --- [ MODO DE EMERGÊNCIA: SOTÉRIA OFFLINE ] ---
+        print(f"\n\x1b[41m[ CRITICAL ] O Motor de Diagnóstico Sotéria falhou!\x1b[0m")
+        print(f"\x1b[33mCausa: {e}\x1b[0m")
+        # Criamos um dossiê mínimo para não quebrar a UI
+        info = {
+            'technical_error': "DIAGNOSTIC_ENGINE_FAILURE",
+            'explanation': f"Ocorreu um erro interno no Doxoade ao analisar esta falha.",
+            'file': "DESCONHECIDO", 'line': 0, 'exit_code': exit_code, 'chain': []
+        }
+#        from doxoade.tools.error_info import handle_error
+ #       handle_error(e, context="activate_protocol", debug=True)
 
     # --- FOOTER ---
     print('\n' + Fore.CYAN + Style.BRIGHT + '_' * 110 + RST)

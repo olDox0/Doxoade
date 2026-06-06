@@ -1,0 +1,11 @@
+IMPORT {
+    acervo quicksort_python: quicksort as SORT
+}
+TREE {
+    data/
+    bricks/
+}
+raw_data = [5, 2, 9]
+SORT:
+    input = raw_data
+    output = final

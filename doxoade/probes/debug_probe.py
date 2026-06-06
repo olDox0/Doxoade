@@ -74,6 +74,9 @@ class _LineTimer:
         self.project_root = _os.path.normcase(_os.path.abspath(project_root))
         self.internal_mode = internal_mode
         self.live_flow = live_flow
+        self.target_file = _os.path.normcase(_os.path.abspath(target_file)) if target_file != "internal_cmd" else "internal_cmd"
+        if self.internal_mode:
+            self.project_root = _os.path.dirname(self.project_root)
 
     def tracer(self, frame, event, arg):
         if event != 'line': return self.tracer

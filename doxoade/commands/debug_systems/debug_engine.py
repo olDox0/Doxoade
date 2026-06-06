@@ -163,28 +163,28 @@ def _run_autopsy(python_exe, script, args, env):
         click.secho(f'\n❌ Erro no Orquestrador: {e}', fg='red')
 
 def _run_profile(python_exe, script, args, env):
-    from ...probes import debug_probe
-    print_debug_header(script, 'PERFIL')
-    cmd = build_probe_command(python_exe, debug_probe.__file__, script, mode='profile', args=args)
+    """Perfil com blindagem de aspas para caminhos com espaço."""
+    from .debug_io import render_profile_report
+    # v97.0: Garantimos aspas duplas no executável e no script para o Windows
+    clean_script = script.strip('"\'')
+    cmd = [python_exe, clean_script]
+    
+    if args:
+        import shlex
+        cmd.extend(shlex.split(args))
+
     try:
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', bufsize=1, env=env)
-        click.echo(Fore.YELLOW + '   > Instrumentando com line-timer + cProfile + tracemalloc...\n' + Fore.RESET)
+        # shell=False é VITAL aqui para o Windows não concatenar errado
+        process = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
+            text=True, encoding='utf-8', env=env, shell=False
+        )
+        click.echo(Fore.YELLOW + '   > Instrumentando performance (Aegis Profile Mode)...\n')
         data_str = _stream_and_capture(process, _MARKER_PROFILE)
         if data_str:
-            try:
-                data = json.loads(data_str)
-                render_profile_report(data, script)
-            except json.JSONDecodeError:
-                click.secho('\n🚨 [ FALHA ] Não foi possível decodificar o perfil.', fg='red', bold=True)
-                click.echo(data_str)
-        else:
-            rc = process.returncode
-            if rc is not None and rc != 0:
-                click.secho(f'\n🚨[ FALHA DE BOOTSTRAP ] Processo encerrou com código {rc}', fg='red', bold=True)
-            else:
-                click.secho('\n📡 [ FINALIZADO ] Processo encerrou sem emitir dados de perfil.', fg='cyan')
+            render_profile_report(json.loads(data_str), script)
     except Exception as e:
-        click.secho(f'\n❌ Erro no Orquestrador (perfil): {e}', fg='red')
+        click.secho(f'\n❌ Erro no Perfil: {e}', fg='red')
 
 def _run_live(python_exe, script, args, env, watch, bottleneck, threshold=0.0, no_compress=False):
     """Executa o monitoramento em tempo real com rastro visual (MATRIX MODE)."""
@@ -246,100 +246,89 @@ def _run_memory(python_exe, script, args, env):
     except Exception as e:
         click.secho(f'\n❌ Erro no Orquestrador (memória): {e}', fg='red')
 
-def execute_debug(script, is_internal=False, **kwargs):
-    """Orquestrador de Debug v95.5."""
-    import os
-    import sys
+def execute_debug(target: str, is_internal: bool=False, **kwargs):
+    """Orquestrador de Debug v98.5 - Zero-Quotes Edition."""
+    import os, sys, shlex, click
     from doxoade.tools.filesystem import _get_venv_python_executable
     from doxoade.tools.aegis.warden import apply_resource_limits
+    from .debug_utils import get_debug_env
 
-    # 1. Aplica Célula de Carga (Warden)
-    limits = {
-        'cpu': kwargs.get('processing_limiter'),
-        'ram': kwargs.get('ram_limiter'),
-        'disk': kwargs.get('disk_limiter')
-    }
-    apply_resource_limits(limits)
+    # 1. Warden Limits
+    apply_resource_limits({'cpu': kwargs.get('processing_limiter'), 'ram': kwargs.get('ram_limiter'), 'disk': kwargs.get('disk_limiter')})
 
-    # 2. Prepara Ambiente e Interpretador
+    # 2. Resolução Industrial (Sem aspas manuais!)
     python_exe = _get_venv_python_executable() or sys.executable
-    env_raw = get_debug_env(script)
-    env = {str(k): str(v) for k, v in env_raw.items()}
-
-    # 3. Decisao de Motor de Rastro (Prioridade ao Flow)
-    is_flow = any([kwargs.get('flow_val'), kwargs.get('flow_import'), kwargs.get('flow_func')])
-
-    if is_flow:
-        _run_flow_mode_v2(python_exe, script, is_internal, env, kwargs)
-        return
-    if any([kwargs.get('flow_val'), kwargs.get('flow_import'), kwargs.get('flow_func')]):
-        _run_flow_mode_v2(python_exe, script, is_internal, env, kwargs)
-        return # Garante que o retorno do flow-mode encerre o comando pai limpo
-    if kwargs.get('profile'):
-        _run_profile(python_exe, script, kwargs.get('target_args'), env)
-    elif kwargs.get('memory'):
-        _run_memory(python_exe, script, kwargs.get('target_args'), env)
-    else:
-        _run_autopsy(python_exe, script, kwargs.get('target_args'), env)
-
-    # 1. ALVO (Prioridade Zero: Define antes de usar!)
+    
+    # Normalizamos o path para usar barras normais, mas SEM aspas
+    target_clean = target.replace('\\', '/')
+    
     if is_internal:
         from ...probes import command_wrapper
-        script_to_probe = command_wrapper.__file__
-        args_str = script 
+        script_to_probe = command_wrapper.__file__.replace('\\', '/')
+        # Passamos o comando sem tentar ser "esperto" com aspas aqui
+        args_str = target_clean 
     else:
-        script_to_probe = script
-        args_str = kwargs.get('args', '')
+        script_to_probe = os.path.abspath(target_clean).replace('\\', '/')
+        args_str = kwargs.get('target_args', '')
 
-    # 2. AMBIENTE (Blindagem contra TypeError no Windows)
-    try:
-        env_raw = get_debug_env(script_to_probe)
-        if env_raw is None: 
-            env_raw = os.environ.copy()
-    except Exception:
-        env_raw = os.environ.copy()
-    
-    # Sanitização: Força tudo para String para evitar 'environment must be dictionary'
+    # 3. Ambiente
+    env_raw = get_debug_env(script_to_probe) or os.environ.copy()
     env = {str(k): str(v) for k, v in env_raw.items() if v is not None}
 
-    # 3. PARÂMETROS
+    # 4. Matriz de Decisão
     profile = kwargs.get('profile', False)
     memory = kwargs.get('memory', False)
-    watch = kwargs.get('watch')
-    bottleneck = kwargs.get('bottleneck', False)
-    raw_th = kwargs.get('threshold')
-    threshold = float(raw_th) if raw_th is not None else 0.0
-    no_compress = kwargs.get('no_compress', False)
-
-    # 4. VALIDAÇÃO DE CONFLITOS
-    if (profile or memory) and (watch or bottleneck):
-        click.secho('\n❌ Erro: Mistura de modos profundos e tempo real.', fg='red')
-        return
-
-    # 5. EXECUÇÃO
-    python_exe = _get_venv_python_executable() or sys.executable
-
-    if memory:
+    is_flow = any([kwargs.get('flow_val'), kwargs.get('flow_import'), kwargs.get('flow_func'), kwargs.get('bottleneck')])
+    
+    if is_flow:
+        _run_flow_mode_v2(python_exe, script_to_probe, is_internal, env, kwargs)
+    elif memory:
         _run_memory(python_exe, script_to_probe, args_str, env)
     elif profile:
         _run_profile(python_exe, script_to_probe, args_str, env)
-    elif watch or bottleneck:
-        _run_live(python_exe, script_to_probe, args_str, env, watch, bottleneck, threshold, no_compress)
     else:
         _run_autopsy(python_exe, script_to_probe, args_str, env)
-        
-def _run_flow_mode_v2(python_exe, script, is_internal, env, kwargs):
-    """Executa o rastro e aciona Lazarus no PAI se o FILHO crashar."""
-    from .debug_io import print_debug_header
+
+def build_probe_command(target: str, is_internal: bool, probe_name: str, **kwargs) -> list:
+    import os, sys, shlex
+    from pathlib import Path
+    
+    # v111.0: Caminhos sempre em POSIX (/)
+    probe_dir = Path(__file__).resolve().parents[2] / "probes"
+    probe_path = (probe_dir / probe_name).as_posix()
+
+    if is_internal:
+        wrapper_path = (probe_dir / "command_wrapper.py").as_posix()
+        # Passamos a lista. O Popen (com shell=False) vai proteger os espaços.
+        return [sys.executable, wrapper_path, target]
+    else:
+        # Modo arquivo normal
+        args_list = shlex.split(kwargs.get('target_args', ''))
+        return [sys.executable, probe_path, 'file', target] + args_list
+
+def _run_flow_mode_v2(python_exe, script, is_internal, env, kwargs, cmd_override=None):
+    from ...probes import flow_runner
+    from .debug_utils import build_flow_command # Garante o construtor correto
     from doxoade.rescue import activate_protocol
     
-    print_debug_header(script, mode="NEXUS FLOW")
-    kwargs['is_internal'] = is_internal
-    cmd = build_flow_command(python_exe, None, script, args=kwargs.get('target_args'), **kwargs)
+    # v109: NUNCA passe None para o runner_file
+    if cmd_override:
+        cmd = cmd_override
+    else:
+        cmd = build_flow_command(
+            python_exe, 
+            flow_runner.__file__, # Path real da sonda
+            script, 
+            args=kwargs.get('target_args')
+        )
+    
+    # Proteção de Sanidade: remove Nones e garante strings
+    cmd = cmd_override or build_flow_command(python_exe, flow_runner.__file__, script, **kwargs)
+    cmd = [str(a) for a in cmd if a is not None]
     
     process = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
-        text=True, encoding='utf-8', errors='replace', env=env, bufsize=1
+        text=True, encoding='utf-8', env=env, shell=False
     )
     
     full_output = []
@@ -353,3 +342,20 @@ def _run_flow_mode_v2(python_exe, script, is_internal, env, kwargs):
     # Se o processo filho crashou, o PAI assume o Lazarus com o log capturado
     if process.returncode != 0:
         activate_protocol("".join(full_output))
+        
+def run_debug_in_process(target, **kwargs):
+    """v125.0: In-Process Execution sem Alucinação de Path."""
+    import os, sys, shlex
+    from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
+
+    # Se o target tem espaços, é uma cadeia de comando da incepção
+    if " " in target.strip():
+        # Apenas ignoramos o open() e deixamos a incepção fluir pelo run.py
+        return 
+
+    # Se for um arquivo real, vacinamos e rodamos
+    abs_path = os.path.abspath(target).replace('\\', '/')
+    if os.path.exists(abs_path):
+        with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+        restricted_safe_exec(content, {'__name__': '__main__', '__file__': abs_path}, allow_imports=True)

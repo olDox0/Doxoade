@@ -93,37 +93,70 @@ void* soteria_malloc(size_t size, const char* file, int line) {
 }
 
 void soteria_validate(void* ptr, const char* file, int line) {
-    if (!ptr) return;
-    // DEIXA O RASTRO ANTES DE VALIDAR
-    soteria_mark("VALIDATING_MEMORY", file, line); 
+    if (!ptr) {
+        soteria_dispatch(SOTERIA_FATAL, SOT_ERR_MEM, "NULL_POINTER",
+                         "Crash Iminente: Tentativa de validar/usar ponteiro NULO.", 
+                         file, line, "Validate");
+        return;
+    }
 
+    // --- CAMADA 1: SENTINELA DE PILHA (STACK) ---
+    // Usamos o endereço de uma variável local como âncora do RSP atual
+    int stack_anchor; 
+    uintptr_t current_rsp = (uintptr_t)&stack_anchor;
+    uintptr_t target = (uintptr_t)ptr;
+    long long diff = (long long)(target - current_rsp);
+
+    // Heurística: Se o endereço está a menos de 1MB da âncora, ele pertence à Stack
+    if (diff > -1048576 && diff < 1048576) {
+        // No x64, a stack cresce para BAIXO. 
+        // Se o target for MAIOR que o RSP atual, ele aponta para um frame que já retornou.
+        if (target > current_rsp) {
+             soteria_dispatch(SOTERIA_FATAL, SOT_ERR_LOGIC, "DANGLING_STACK",
+                             "Corrupção de Escopo: Acesso a variável de função que já encerrou.", 
+                             file, line, "Validate");
+        }
+        return; // Endereço de pilha válido (abaixo do RSP)
+    }
+
+    // --- CAMADA 2: SENTINELA DE ARENA (HEAP / GHOSTS) ---
     for (int i = 0; i < g_mem_ptr; i++) {
         if (g_mem_db[i].user_ptr == ptr) {
-            unsigned char* real_p = (unsigned char*)g_mem_db[i].real_ptr;
-            if (*(unsigned long long*)real_p != NEXUS_CANARY) {
-                soteria_dispatch(SOTERIA_FATAL, SOT_ERR_MEM, "SILENT_CORRUPTION", 
-                                 "Zona de Guarda Violada! O canario de segurança foi alterado.", 
-                                 file, line, "Sentinel");
+            if (!g_mem_db[i].is_live) {
+                // BLOCO ENCONTRADO, MAS MARCADO COMO MORTO = USE-AFTER-FREE
+                soteria_dispatch(SOTERIA_FATAL, SOT_ERR_MEM, "USE_AFTER_FREE",
+                                 "Ponteiro Zumbi: Tentativa de usar memória já liberada pelo free().", 
+                                 file, line, "Validate");
             }
-            return;
+            return; // Bloco vivo e saudável na Arena
         }
     }
+
+    // --- CAMADA 3: SENTINELA DE ORIGEM DESCONHECIDA (WILD) ---
+    // Se não é Nulo, não é Stack e não está no nosso registro de Malloc...
+    soteria_dispatch(SOTERIA_WARN, SOT_ERR_MEM, "WILD_POINTER",
+                     "Ponteiro Ilegal: O endereço não pertence à Pilha nem à Arena monitorada.", 
+                     file, line, "Validate");
 }
 
 void soteria_free(void* ptr, const char* file, int line) {
     if (!ptr) return;
-
     for (int i = 0; i < g_mem_ptr; i++) {
         if (g_mem_db[i].user_ptr == ptr) {
             if (!g_mem_db[i].is_live) {
                 soteria_dispatch(SOTERIA_FATAL, SOT_ERR_MEM, "DOUBLE_FREE", 
-                                 "Corrupcao de Heap: Tentativa de liberar o mesmo bloco duas vezes.", file, line, "Free");
+                                 "Tentativa de liberar o mesmo bloco duas vezes.", file, line, "Free");
             }
-            g_mem_db[i].is_live = 0;
-            (free)(g_mem_db[i].real_ptr);
+            // --- [ UPGRADE: GHOST TRACKING ] ---
+            g_mem_db[i].is_live = 0; // O bloco agora é um Zumbi
+            // Marcamos o conteúdo com lixo para forçar erro se lido
+            memset(ptr, 0xDE, g_mem_db[i].user_size); 
+            // Não damos o free() real imediatamente (Opcional para debug extremo)
+            // (free)(g_mem_db[i].real_ptr); 
+            
+            soteria_io_trace("free_quarantine", "Ponteiro em quarentena", file, line);
             return;
         }
     }
-    // Caso o ponteiro não esteja no nosso mapa (estrangeiro)
     (free)(ptr);
 }

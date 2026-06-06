@@ -100,6 +100,22 @@ def _m_v21_operational_logs(cursor):
     ''')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_op_logs_ts ON operational_logs(timestamp);')
 
+def _m_v22_moduloid_acervo(cursor):
+    """Infraestrutura para o Acervo Global de Moduloids."""
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS moduloid_acervo (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            category TEXT,
+            filename TEXT,
+            docstring TEXT,
+            capabilities TEXT, -- JSON com lista de funções extraídas
+            version INTEGER DEFAULT 1,
+            last_updated DATETIME,
+            origin_project TEXT
+        );
+    ''')
+
 def _apply_incremental_patches(cursor, current_version):
     """Aplica alterações de colunas em tabelas existentes (Resiliência)."""
     alterations = [(2, 'ALTER TABLE findings ADD COLUMN category TEXT;'), (6, "ALTER TABLE solutions ADD COLUMN message TEXT NOT NULL DEFAULT '';"), (12, 'ALTER TABLE open_incidents ADD COLUMN category TEXT;')]
@@ -174,6 +190,8 @@ def init_db():
             _m_v20_nexus_vault(cursor)
         if current_version < 21:
             _m_v21_operational_logs(cursor)
+        if current_version < 22:    
+            _m_v22_moduloid_acervo
         _apply_incremental_patches(cursor, current_version)
         cursor.execute('DELETE FROM schema_version;')
         cursor.execute('INSERT INTO schema_version (version) VALUES (?);', (DB_VERSION,))

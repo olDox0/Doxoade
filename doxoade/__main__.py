@@ -50,12 +50,23 @@ def main():
     
     # 3. Setup de segurança
     _early_setup(package_root)
-    
+    try:
+        from doxoade.tools.aegis.lazarus_hook import install_shield
+        install_shield()
+    except Exception as e:
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        exc_trace(exc_tb)
     try:
         # 4. Importa o CLI apenas agora que o path está correto
         from doxoade.cli import cli
         cli()
     except Exception as e:
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        exc_trace(exc_tb)
         # Protocolo de resgate se houver crash fatal
         err_msg = traceback.format_exc()
         current_dir = os.path.dirname(os.path.abspath(__file__))

@@ -86,6 +86,15 @@ class SoteriaScribe:
         stats = {"io": 0, "func": 0}
         for i, line in enumerate(lines):
             stripped = line.strip()
+            
+            if "SOTERIA_ENTER" in stripped or "soteria_" in stripped:
+                new_lines.append(line)
+                continue
+            
+            if "soteria_" in stripped or (i+1 < len(lines) and "soteria_" in lines[i+1]):
+                new_lines.append(line)
+                continue
+                
             if not stripped or "soteria_" in line or stripped.startswith(("//", "/*")):
                 new_lines.append(line); continue
 

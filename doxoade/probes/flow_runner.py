@@ -76,13 +76,25 @@ def static_trace_calls(frame, event, arg):
     return static_trace_calls
 
 def _should_skip_trace(filename: str) -> bool:
-    """Verifica se o rastro deve ser ignorado (Noise Gate)."""
-    if filename.startswith('<') or any((x in filename for x in ['importlib', 'Lib', 'flow_runner'])):
+    """Filtro de Foco Nexus v130.0 - Silenciador de Infraestrutura."""
+    norm = filename.replace('\\', '/').lower()
+    
+    # 1. Bloqueio de Bibliotecas e Sistema (Ruído Branco)
+    noise = [
+        '<frozen', 'typing.py', 'contextlib.py', 'enum.py', 'abc.py',
+        'functools.py', 'inspect.py', 'traceback.py', 'linecache.py',
+        'shlex.py', 'sysconfig.py', 'click/core.py', 'click/decorators.py',
+        'importlib'
+    ]
+    if any(x in norm for x in noise):
         return True
-    abs_filename = os.path.abspath(filename).replace('\\', '/')
-    if _STATE['target_file'] and abs_filename != _STATE['target_file']:
-        return True
-    return not abs_filename.startswith(_STATE['project_root'])
+
+    # 2. Bloqueio de Core Doxoade (A menos que core_trace esteja ON)
+    if "doxoade/" in norm and not _STATE.get('core_trace', False):
+        # Permitimos apenas os "fiscais" para ver a incepção
+        if not any(x in norm for x in ['command_wrapper.py', 'flow_runner.py']):
+            return True
+    return False
 
 def _render_trace_event(frame, event):
     """Especialista de Renderização UI (PASC 8.5)."""
@@ -120,20 +132,25 @@ def _render_trace_event(frame, event):
         loc = f"{'  ' * _STATE['indent_level']}{os.path.basename(filename)}:{lineno}".ljust(25)
         print(f"{C_BORDER}│{C_RESET} {ms:7.1f}ms {SEP} {C_WHITE}{loc}{SEP} {line[:50].ljust(50)} {SEP} {', '.join(diffs)}")
 
-def run_flow(path, abs_path, **kwargs):
-    """Execução de rastro para ARQUIVOS externos (.py)."""
-    abs_path = os.path.abspath(path)
+def run_flow(target_path, shadow_src=None, **kwargs):
+    """Execução de rastro v130.0 - Prioridade Shadow."""
+    import os
+    abs_path = os.path.abspath(target_path.strip('"\' ')).replace('\\', '/')
     project_root = os.path.dirname(abs_path)
 
-    if not os.path.exists(abs_path):
-        # Em vez de explodir com FileNotFoundError, gera um evento Lázaro limpo
-        raise ValueError(f"Alvo de rastro não localizado: {abs_path}")
-    
+    # v130.0 Fix: Se temos Shadow, ignoramos o disco
+    if shadow_src:
+        code = shadow_src
+        # No rastro, o Shadow deve ser tratado como parte do projeto para não ser filtrado
+        target_id = abs_path 
+    else:
+        with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
+            code = f.read()
+        target_id = abs_path
 
-    with open(abs_path, 'r', encoding='utf-8') as f:
-        code = f.read()
-
-    timer = _LineTimer(target_file=abs_path, project_root=project_root)
+    # Inicia o timer
+    from .debug_probe import _LineTimer
+    timer = _LineTimer(target_file=target_id, project_root=project_root)
     
     # [FIX] Sincronia com o Escudo Aegis
     from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
@@ -175,10 +192,27 @@ def _safe_to_string(val):
         print(f'\x1b[0;33m _safe_to_string - Exception: {e}')
         return '<Error>'
 
-def run_flow(path, **kwargs):
-    """Orquestrador do rastro de execução."""
-    abs_path = os.path.abspath(path)
+def run_flow(target_path, shadow_src=None, **kwargs):
+    """
+    Orquestrador de rastro v100.0. 
+    Aceita path ou código fonte direto (Shadow).
+    """
+    import os
+    clean_path = str(target_path).strip('"\' ').replace('\\', '/')
+    abs_path = os.path.abspath(clean_path).replace('\\', '/')
     project_root = os.path.dirname(abs_path)
+
+    if shadow_src:
+        code = shadow_src
+    else:
+        if not os.path.exists(abs_path):
+            raise FileNotFoundError(f"Alvo não localizado: {abs_path}")
+        with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
+            code = f.read()
+
+    if not os.path.exists(abs_path):
+        # Tenta uma última vez resolver se o path veio concatenado errado
+        abs_path = abs_path.split('"')[-1] 
 
     with open(abs_path, 'r', encoding='utf-8') as f:
         code = f.read()
@@ -207,27 +241,26 @@ def _render_flow_results(timer):
         print(f"{t_color}{s['total_ms']:>8.2f}ms {Fore.WHITE}│ {Fore.YELLOW}{file_short}:{s['line']:<25} {Fore.WHITE}│ {s['content'][:60]}{Style.RESET_ALL}")
 
 def run_flow_internal(callback):
-    """Execução de rastro para comandos INTERNOS do Doxoade."""
+    """Execução de rastro v125.0 - Injeção Direta."""
     import sys, os
     from .debug_probe import _LineTimer
     
-    # Localiza o root do sistema para o rastro
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     
-    timer = _LineTimer(
+    # Criamos o timer e o tornamos acessível para o bloco finally
+    internal_timer = _LineTimer(
         target_file="internal_cmd",
         project_root=project_root,
-        internal_mode=True,
-        live_flow=True # Ativa o rastro estilo Matrix
+        internal_mode=True, live_flow=True
     )
 
-    sys.settrace(timer.tracer)
+    sys.settrace(static_trace_calls)
     try:
-        # Executa o comando do Doxoade que foi passado
         callback()
     finally:
         sys.settrace(None)
-        _render_flow_results(timer) # Mostra a tabela de performance final
+        # v125.0 FIX: Passagem obrigatória do objeto timer
+        _render_flow_results(internal_timer)
 
 if __name__ == '__main__':
     p = argparse.ArgumentParser()

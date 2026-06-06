@@ -184,7 +184,9 @@ def fix_imports(file_path: Path, target: str, expected_module: str):
         text_without_target = '\n'.join(lines)
         try:
             tree2 = ast.parse(text_without_target)
-            insert_idx = find_import_insertion_point(tree2)
+            # find_import_insertion_point retorna linha (1-based); converter para índice (0-based)
+            insert_line = find_import_insertion_point(tree2)
+            insert_idx = max(insert_line, 0)  # já é 0-based quando == 0; linha N → inserir após índice N
         except Exception:
             insert_idx = 0
         if expected_import not in lines:
