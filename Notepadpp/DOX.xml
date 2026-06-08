@@ -2,11 +2,11 @@
 <NotepadPlus>
     <UserLang name="DOX" ext="dox" udlVersion="2.1">
         <Settings>
-            <Global caseIgnored="yes" allowFoldOfComments="yes" foldCompact="no" forcePureLC="0" decimalSeparator="2" />
-            <Prefix Keywords1="no" Keywords2="no" Keywords3="yes" Keywords4="no" Keywords5="no" Keywords6="no" Keywords7="no" Keywords8="yes" />
+            <Global caseIgnored="yes" allowFoldOfComments="yes" foldCompact="no" forcePureLC="2" decimalSeparator="2" />
+            <Prefix Keywords1="yes" Keywords2="no" Keywords3="yes" Keywords4="yes" Keywords5="no" Keywords6="no" Keywords7="no" Keywords8="yes" />
         </Settings>
         <KeywordLists>
-            <Keywords name="Comments">00# 01 02# 03 04</Keywords>
+            <Keywords name="Comments">00# 01'" 02# 03 04</Keywords>
             <Keywords name="Numbers, prefix1"></Keywords>
             <Keywords name="Numbers, prefix2"></Keywords>
             <Keywords name="Numbers, extras1"></Keywords>
@@ -49,28 +49,84 @@ READ_LINES
 
 
 
-
-movq
+
+
+movq
+
 
 
 andq
 
 orq
-
-mov
-and
-shl
-pop
-or
-add
-jnz
-ret
-push
-xor
-andl
-orl
-movb
-</Keywords>
+
+
+mov
+
+and
+
+shl
+
+pop
+
+or
+
+add
+
+jnz
+
+ret
+
+push
+
+xor
+
+andl
+
+orl
+
+movb
+
+
+js
+
+dec
+
+crc32b
+
+
+jz
+
+jl
+
+crc32q
+
+sub
+
+cmp
+
+jge
+
+je 
+
+jmp
+
+pcmpeqb
+
+pmovmskb
+
+pxor
+
+pshufb
+
+bsf
+
+uint64_t
+
+long
+
+punpckl
+
+pshufd</Keywords>
             <Keywords name="Keywords2">doxoade
 
 check
@@ -99,7 +155,9 @@ read
 
 .section
 
-.text</Keywords>
+.text
+
+</Keywords>
             <Keywords name="Keywords3">RUN
 
 BREAK
@@ -134,11 +192,16 @@ DELETE_BLOCK_TREE
 
 
 
-%rax
-rcx
-cl
-r11
-r
+%rax
+
+rcx
+
+cl
+
+r11
+
+r
+
 </Keywords>
             <Keywords name="Keywords4">python
 
@@ -151,6 +214,8 @@ tree
 /f
 
 /a
+
+
 
 </Keywords>
             <Keywords name="Keywords5">--fix
@@ -186,6 +251,8 @@ tree
 
 *
 
+
+
 </Keywords>
             <Keywords name="Keywords7">BATCH
 
@@ -194,10 +261,14 @@ type
 del</Keywords>
             <Keywords name="Keywords8">$
 
-%
-.
-0x</Keywords>
-            <Keywords name="Delimiters">00{ 01 02} 03 04 05 06" 06' 07 08" 08' 09 10 11 12[ 12( 13 14] 14) 15 16 17 18 19 20 21 22 23</Keywords>
+%
+
+.
+
+0x
+
+@</Keywords>
+            <Keywords name="Delimiters">00{ 00( 01 02} 02) 03 04 05 06" 06' 07 08" 08' 09 10 11 12[ 12( 13 14] 14) 15 16 17 18 19 20 21 22 23</Keywords>
         </KeywordLists>
         <Styles>
             <WordsStyle name="DEFAULT" fgColor="FFFFFF" bgColor="FFFFFF" colorStyle="1" fontStyle="1" nesting="0" />
@@ -212,11 +283,11 @@ del</Keywords>
             <WordsStyle name="KEYWORDS6" fgColor="FFFF00" bgColor="FFFFFF" colorStyle="1" fontStyle="1" nesting="0" />
             <WordsStyle name="KEYWORDS7" fgColor="00FFFF" bgColor="FFFFFF" colorStyle="1" fontStyle="1" nesting="0" />
             <WordsStyle name="KEYWORDS8" fgColor="FFFF00" bgColor="FFFFFF" colorStyle="1" fontStyle="1" nesting="0" />
-            <WordsStyle name="OPERATORS" fgColor="FFFF00" bgColor="FFFFFF" colorStyle="1" fontStyle="1" nesting="0" />
+            <WordsStyle name="OPERATORS" fgColor="FF0080" bgColor="FFFFFF" colorStyle="1" fontStyle="1" nesting="0" />
             <WordsStyle name="FOLDER IN CODE1" fgColor="FF0000" bgColor="FF8000" colorStyle="1" fontStyle="1" nesting="0" />
             <WordsStyle name="FOLDER IN CODE2" fgColor="000000" bgColor="800000" colorStyle="1" fontStyle="7" nesting="0" />
             <WordsStyle name="FOLDER IN COMMENT" fgColor="FFFF00" bgColor="FF0000" colorStyle="1" fontStyle="7" nesting="0" />
-            <WordsStyle name="DELIMITERS1" fgColor="00FFFF" bgColor="FF0080" colorStyle="1" fontStyle="2" nesting="7" />
+            <WordsStyle name="DELIMITERS1" fgColor="00FFFF" bgColor="FF0080" colorStyle="1" fontStyle="2" nesting="4351" />
             <WordsStyle name="DELIMITERS2" fgColor="000000" bgColor="FFFFFF" colorStyle="0" fontStyle="7" nesting="0" />
             <WordsStyle name="DELIMITERS3" fgColor="93F400" bgColor="FFFFFF" colorStyle="1" fontStyle="3" nesting="3" />
             <WordsStyle name="DELIMITERS4" fgColor="000000" bgColor="FFFFFF" fontStyle="0" nesting="0" />

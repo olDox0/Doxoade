@@ -107,7 +107,8 @@ def generate_exploit_poc(function_name: str) -> str:
     """Generates a canary payload to prove vulnerability."""
     return "print('--- AEGIS BYPASS ATTEMPT ---')" if function_name in ['eval', 'exec'] else 'whoami'
 
-def restricted_safe_exec(code_str: str, globals_dict: dict=None, allow_imports: bool=False, filename: str='<sandbox>'):
+def restricted_safe_exec(code_str, globals_dict=None, allow_imports=False, filename='<sandbox>'):
+#def restricted_safe_exec(code_str: str, globals_dict: dict=None, allow_imports: bool=False, filename: str='<sandbox>'):
     """
     Executa código em um ambiente restrito (sandbox) com ativação do motor Vulcano.
 
@@ -139,7 +140,10 @@ def restricted_safe_exec(code_str: str, globals_dict: dict=None, allow_imports: 
         else:
             essential = ['__import__', 'print', 'len', 'range', 'dict', 'list', 'set', 'tuple', 'str', 'int', 'float', 'bool', 'Exception', 'type', 'isinstance', 'open', 'getattr', 'setattr', 'hasattr']
             safe_builtins = {k: getattr(builtins, k) for k in essential if hasattr(builtins, k)}
-            safe_builtins['sys'], safe_builtins['os'] = (sys, os)
+            import sys as _sys_global
+            import os as _os_global
+            safe_builtins['sys'] = _sys_global
+            safe_builtins['os'] = _os_global
         safe_globals = {'__builtins__': safe_builtins, '__file__': abs_path, '__package__': None, '__name__': '__main__'}
         if globals_dict:
             safe_globals.update(globals_dict)

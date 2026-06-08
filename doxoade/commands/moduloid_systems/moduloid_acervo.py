@@ -30,6 +30,15 @@ from doxoade.commands.security_systems.maat_engine_integration import run_intern
 
 from doxoade.commands.init import _refactor_to_silo
 
+try:
+    from rich.console import Console
+    from rich.syntax import Syntax
+    from rich.panel import Panel
+    HAS_RICH = True
+except ImportError:
+    print('❌ Dependência faltando. Instalando rich...')
+    HAS_RICH = False
+
 # Configuração de Caminhos
 ACERVO_BASE = Path.home() / ".doxoade" / "acervo"
 BRICKS_DIR = ACERVO_BASE / "bricks"
@@ -52,7 +61,12 @@ TAXONOMIA_OPERACIONAL = {
     "get":      "Extração de Buffer",
     "gather":   "Orquestração Paralela",
     "producer": "Gerador de Fluxo (Input Source)",
-    "consumer": "Processador de Fluxo (Output Sink)"
+    "consumer": "Processador de Fluxo (Output Sink)",
+    "math":      "Cálculo Numérico/IA",
+    "bridge":    "Conector Multilinguagem (Nativo)",
+    "sqlite":    "Persistência em Banco de Dados",
+    "pack":      "Compressão/Redução de Volume",
+    "compress":  "Otimização de Armazenamento"
 }
 
 MAPA_DE_TIPOS = {
@@ -73,10 +87,11 @@ DEDUCAO_POR_RELACAO = {
     ".read(":       "Conteúdo lido de Fluxo",
     ".pop()":       "Elemento removido de Coleção",
     "json.load":    "Objeto estruturado (JSON)",
-    "partition(":   "Índice de pivô (Inteiro)",
+    "partition(":   "Índice de pivô (Inteiro)", # CONSERTADO: ADICIONADA VÍRGULA
     "asyncio.Queue":"Instância de Fila (Buffer)",
     "bytearray(":   "Buffer de Memória Bruta",
-    "open(":        "Handle de Arquivo"
+    "open(":        "Handle de Arquivo",
+    "mergeSort(":   "Coleção Ordenada (Recursiva)" # Adicionado para o MergeSort
 }
 
 class AcervoEngine:
@@ -169,64 +184,89 @@ class AcervoEngine:
         return " | ".join(tags) if tags else "Módulo funcional genérico."
 
     def _analyze_brick(self, file_path):
-        """Analisa o Moduloid com proteção contra RecursionError (MergeSort Fix)."""
+        """DNA do Moduloid: Inteligência de Relação e Qualidade."""
         try:
             content = Path(file_path).read_text(encoding='utf-8', errors='ignore')
             tree = ast.parse(content)
             
-            visitor = ChiefInsightVisitor()
-            visitor.visit(tree)
-            
+            # 1. Identidade e Funções
+            visitor = ChiefInsightVisitor(); visitor.visit(tree)
             funcs = [f['name'] for f in visitor.stats['functions']]
             
-            # Tenta extrair IO, mas protege contra falhas no Deepcheck (Recursividade)
-            try:
-                in_n, out_n = self._extract_io_nuances(tree)
-            except Exception as io_err:
-                click.secho(f"   [!] Aviso de IO em {Path(file_path).name}: {io_err}", fg="yellow")
-                in_n, out_n = " [In: ?]", " [Out: ?]"
+            # 2. Nuances de IO (In/Out)
+            in_n, out_n = self._extract_io_nuances(tree)
             
-            tags = set()
-            for f in funcs:
-                for key, label in TAXONOMIA_OPERACIONAL.items():
-                    if key in f.lower(): tags.add(label)
-            
-            prop = (" | ".join(tags) if tags else "Moduloid.") + in_n + out_n
-            
-            # Executa Auditoria de Qualidade Corrigida
-            score, sec, health = self._audit_quality(file_path)
+            # 3. GERAÇÃO SEMÂNTICA (O Fim do 'Moduloid.')
+            doc = ast.get_docstring(tree)
+            if not doc:
+                tags = set()
+                # Varre o nome das funções e o nome do arquivo em busca de significado
+                for termo in (funcs + [Path(file_path).stem]):
+                    for key, label in TAXONOMIA_OPERACIONAL.items():
+                        if key in termo.lower():
+                            tags.add(label)
+                
+                # Constrói uma descrição baseada no que foi achado
+                if tags:
+                    doc = "Capacidades: " + " | ".join(sorted(tags))
+                else:
+                    doc = "Módulo funcional genérico."
 
+            # 4. Auditoria de Qualidade
+            score, sec_status, health = self._audit_quality(file_path)
+            
             return {
-                "doc": ast.get_docstring(tree) or prop,
-                "capabilities": json.dumps(funcs),
                 "name": Path(file_path).stem,
-                "score": score, "sec": sec, "health": json.dumps(health)
+                "doc": doc + in_n + out_n, # Une Propósito + Contrato
+                "capabilities": json.dumps(funcs),
+                "score": score,
+                "sec": sec_status,
+                "health": json.dumps(health)
             }
         except Exception:
-            click.secho(f"\n❌ ERRO NA ANÁLISE AST ({Path(file_path).name})", fg="red")
-            click.echo(traceback.format_exc())
             return None
 
     def _extract_io_nuances(self, tree):
-        all_ins, all_outs = set(), set()
+        """Dedução de IO por Linhagem: var -> origem (Padrão Maestro)."""
+        ins, outs = set(), set()
+        
         for node in [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
             analyzer = DeepAnalyzer()
             analyzer.visit(node)
+            
+            # 1. Mapa de Linhagem Local (Quem criou quem?)
+            mapa_linhagem = {}
+            for stmt in ast.walk(node):
+                if isinstance(stmt, ast.Assign):
+                    for target in stmt.targets:
+                        if isinstance(target, ast.Name):
+                            val_repr = ast.unparse(stmt.value)
+                            # Verifica se o valor atribuído vem de uma relação conhecida
+                            for pattern, label in DEDUCAO_POR_RELACAO.items():
+                                if pattern in val_repr:
+                                    mapa_linhagem[target.id] = label
+
+            # 2. Entradas (Argumentos)
             for param, meta in analyzer.params.items():
-                all_ins.add(f"{param}:{MAPA_DE_TIPOS.get(meta['type'], meta['type'])}")
+                tipo = MAPA_DE_TIPOS.get(meta['type'], meta['type'])
+                ins.add(f"{param}:{tipo}")
+
+            # 3. Saídas (Retorno com rastreio de origem)
             if not analyzer.returns:
-                all_outs.add("Procedimento (In-place)")
+                outs.add("Procedimento (In-place)")
             else:
                 for r in analyzer.returns:
-                    val = r['value']
-                    trad = "Dado Processado"
-                    for op, _, alvo in analyzer.flow_map:
-                        if alvo == val:
-                            for pat, lab in DEDUCAO_POR_RELACAO.items():
-                                if pat in op: trad = lab; break
-                    if val in ["True", "False"]: trad = "Sinalizador Lógico"
-                    all_outs.add(trad)
-        return f" [In: {', '.join(all_ins)}]" if all_ins else "", f" [Out: {' | '.join(all_outs)}]"
+                    val_id = r['value']
+                    # Se o que está no return (ex: "item") estiver no nosso mapa de linhagem
+                    if val_id in mapa_linhagem:
+                        outs.add(mapa_linhagem[val_id])
+                    else:
+                        # Fallback para tipos básicos
+                        outs.add(MAPA_DE_TIPOS.get(val_id, "Dado Processado"))
+
+        in_str = f" [In: {', '.join(ins)}]" if ins else ""
+        out_str = f" [Out: {' | '.join(outs)}]"
+        return in_str, out_str
 
     def _analyze_brick(self, file_path):
         try:
@@ -252,14 +292,26 @@ class AcervoEngine:
             }
         except: return None
 
-    def refresh_acervo(self):
-        """Refresh Total: Força o banco a espelhar a qualidade atual do disco."""
-        click.secho("[*] Sincronizando Qualidade e Score do Acervo...", fg="cyan")
+    def refresh_acervo(self, force=False):
+        """Sincronização Diferencial: Velocidade Industrial."""
+        click.secho("[*] Iniciando Smart Refresh (Diferencial)...", fg="cyan")
         conn = get_db_connection()
-        count = 0
+        conn.row_factory = __import__('sqlite3').Row
         
-        # Sincroniza via arquivo físico para garantir que tudo no cofre seja auditado
+        # Mapeia estado atual do banco {nome: ultima_atualizacao}
+        db_state = {r['name']: r['last_updated'] for r in conn.execute("SELECT name, last_updated FROM moduloid_acervo").fetchall()}
+        
+        count_upd, count_skip = 0, 0
+        
         for brick_file in BRICKS_DIR.glob("*.py"):
+            name = brick_file.stem
+            mtime = datetime.fromtimestamp(brick_file.stat().st_mtime).isoformat()
+            
+            # [MTIME-SHIELD] Só processa se o arquivo for mais novo que o registro ou se for 'force'
+            if not force and name in db_state and db_state[name] >= mtime:
+                count_skip += 1
+                continue
+            
             meta = self._analyze_brick(brick_file)
             if meta:
                 conn.execute('''
@@ -268,62 +320,97 @@ class AcervoEngine:
                         security_status = ?, health_report = ?, last_updated = ?
                     WHERE name = ?
                 ''', (meta['doc'], meta['capabilities'], meta['score'], 
-                      meta['sec'], meta['health'], datetime.now().isoformat(), meta['name']))
-                click.echo(f"   {Fore.GREEN}✔{Style.RESET_ALL} {meta['name']} -> Score: {meta['score']}")
-                count += 1
+                      meta['sec'], meta['health'], mtime, name))
+                click.echo(f"   {Fore.GREEN}↻{Style.RESET_ALL} {name} (Score: {meta['score']})")
+                count_upd += 1
         
-        conn.commit()
-        conn.close()
-        click.secho(f"✅ Qualidade sincronizada para {count} Moduloids.", fg="green", bold=True)
+        conn.commit(); conn.close()
+        click.secho(f"✅ Sincronia concluída. Atualizados: {count_upd} | Mantidos: {count_skip}", fg="green", bold=True)
+
+    def _sanitize_source(self, file_path):
+        """Limpeza Industrial: Prepara o código para o Estado de Ouro."""
+        try:
+            content = Path(file_path).read_text(encoding='utf-8', errors='ignore')
+            lines = content.splitlines()
+            # 1. Remove espaços à direita e 2. Filtra linhas vazias excessivas
+            clean_lines = [line.rstrip() for line in lines]
+            # 3. Garante uma única quebra de linha no final
+            final_code = "\n".join(clean_lines).strip() + "\n"
+            
+            Path(file_path).write_text(final_code, encoding='utf-8')
+            return True
+        except Exception as e:
+            click.echo(f"   [!] Aviso na sanitização: {e}")
+            return False
 
     def save_to_acervo(self, file_path, category="custom", custom_name=None):
-        """Salva ou atualiza um moduloid no cofre."""
+        """Salva o Moduloid aplicando a Limpeza Industrial (V40)."""
         file_path = Path(file_path)
-        if not file_path.exists():
-            click.secho(f"✘ Arquivo não encontrado: {file_path}", fg="red")
-            return
+        if not file_path.exists(): return click.secho(f"✘ Arquivo ausente.", fg="red")
 
-        click.echo(f"[*] Analisando Moduloid: {Fore.CYAN}{file_path.name}{Style.RESET_ALL}...")
+        # [NOVO] Limpeza de Pré-Arquivamento
+        click.echo(f"[*] Sanitizando Brick: {Fore.YELLOW}{file_path.name}{Style.RESET_ALL}...")
+        self._sanitize_source(file_path)
+
+        click.echo(f"[*] Analisando e Auditando: {Fore.CYAN}{file_path.name}{Style.RESET_ALL}...")
         meta = self._analyze_brick(file_path)
-        
-        if not meta:
-            click.secho("✘ Falha na análise AST do arquivo.", fg="red")
-            return
+        if not meta: return click.secho("✘ Falha crítica na análise.", fg="red")
 
-        # Define o nome: Nome customizado ou o nome do arquivo
         final_name = custom_name if custom_name else meta['name']
-        dest_filename = f"{final_name}.py"
-        dest_path = BRICKS_DIR / dest_filename
+        dest_path = BRICKS_DIR / f"{final_name}.py"
         
         conn = get_db_connection()
         try:
-            row = conn.execute("SELECT version, origin_project FROM moduloid_acervo WHERE name = ?", (final_name,)).fetchone()
-            
-            if row:
-                version = row[0] + 1
-                action_msg = f"atualizado para v{version}"
-            else:
-                version = 1
-                action_msg = "imortalizado (v1)"
+            row = conn.execute("SELECT version FROM moduloid_acervo WHERE name = ?", (final_name,)).fetchone()
+            version = (row[0] + 1) if row else 1
             
             conn.execute('''
                 INSERT OR REPLACE INTO moduloid_acervo 
-                (name, category, filename, docstring, capabilities, version, last_updated, origin_project)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (final_name, category, dest_filename, meta['doc'], meta['capabilities'], 
-                  version, datetime.now().isoformat(), os.getcwd()))
+                (name, category, filename, docstring, capabilities, version, last_updated, 
+                 origin_project, quality_score, security_status, health_report)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (final_name, category, f"{final_name}.py", meta['doc'], meta['capabilities'], 
+                  version, datetime.now().isoformat(), os.getcwd(), 
+                  meta['score'], meta['sec'], meta['health']))
             
             shutil.copy2(file_path, dest_path)
             conn.commit()
-            
-            click.secho(f"✅ Moduloid '{final_name}' {action_msg} no acervo!", fg="green", bold=True)
+            click.secho(f"✅ Moduloid '{final_name}' imortalizado com Score: {meta['score']}", fg="green", bold=True)
         finally:
             conn.close()
 
+    def show_health(self, name):
+        """Necropsia de Score: Explica por que o Brick não é 100."""
+        conn = get_db_connection()
+        row = conn.execute("SELECT health_report, quality_score, security_status FROM moduloid_acervo WHERE name = ?", (name,)).fetchone()
+        conn.close()
+
+        if not row: return click.secho(f"✘ Moduloid '{name}' não encontrado.", fg="red")
+
+        h = json.loads(row['health_report']) if row['health_report'] else {}
+        click.secho(f"\n--- 🩺 DIAGNÓSTICO DE SAÚDE: {name} ---", fg="magenta", bold=True)
+        click.echo(f"  Score Final: {row['quality_score']}/100 | Segurança: {row['security_status']}")
+        click.echo(f"  {Style.DIM}─" * 40)
+        
+        if h.get('issues', 0) > 0:
+            click.echo(f"  ⚠️  {Fore.YELLOW}{h['issues']} Avisos de Estilo{Style.RESET_ALL} (-{h['issues']*5} pontos)")
+        if h.get('security_vulns', 0) > 0:
+            click.echo(f"  🚨 {Fore.RED}{h['security_vulns']} Riscos de Segurança{Style.RESET_ALL} (-{h['security_vulns']*25} pontos)")
+        if h.get('lines', 0) > 200:
+            click.echo(f"  ⚖️  {Fore.RED}Arquivo Obeso: {h['lines']} linhas{Style.RESET_ALL} (-10 pontos)")
+        
+        if row['quality_score'] == 100:
+            click.secho("\n  🏆 ESTADO DE OURO: Brick em conformidade total.", fg="green")
+        else:
+            click.echo(f"\n  💡 Dica: Use 'doxoade moduloid view {name}' para revisar o código.")
+
+
     def list_acervo(self, search=None, func_filter=None):
+        """Lista o patrimônio com UI de Alta Visibilidade (V39)."""
         conn = get_db_connection()
         query = "SELECT * FROM moduloid_acervo"
         params = []
+        
         if search or func_filter:
             query += " WHERE "
             if search:
@@ -334,25 +421,35 @@ class AcervoEngine:
                 query += "capabilities LIKE ?"
                 params.append(f"%{func_filter}%")
         
-        rows = conn.execute(query, params).fetchall(); conn.close()
+        rows = conn.execute(query, params).fetchall()
+        conn.close()
+
         if not rows:
-            click.echo(Fore.YELLOW + "[-] Nada encontrado."); return
+            click.echo(Fore.YELLOW + "[-] Nada encontrado com esses critérios.")
+            return
 
         click.secho(f"\n--- 🏛️  ACERVO DE MODULOIDS ({len(rows)} Bricks) ---", fg="cyan", bold=True)
         for r in rows:
             funcs = json.loads(r['capabilities'])
             score = r['quality_score']
+            
+            # Definição de Cores Dinâmicas
             color_score = Fore.GREEN if score >= 80 else Fore.YELLOW if score >= 50 else Fore.RED
             color_sec = Fore.GREEN if r['security_status'] == "VERIFICADO" else Fore.RED
             
+            # --- CARD DO MODULOID ---
             click.echo(f"\n{Fore.GREEN}📦 {r['name']} {Fore.WHITE}(v{r['version']}) "
                        f"{color_score}[Score: {score}]{Style.RESET_ALL} "
                        f"{color_sec}[🛡️ {r['security_status']}]{Style.RESET_ALL}")
             
+            # EXIBIÇÃO DA CATEGORIA (Destaque Magenta)
+            click.echo(f"   {Fore.MAGENTA}🏷️  Categoria: {Style.BRIGHT}{r['category'].upper()}{Style.RESET_ALL}")
+
             if r['health_report']:
                 h = json.loads(r['health_report'])
-                click.echo(f"   {Style.DIM}⚖️ {h['size_kb']}KB | {h['lines']} linhas | ⚠️ {h['issues']} avisos")
+                click.echo(f"   {Style.DIM}⚖️ {h.get('size_kb')}KB | {h.get('lines')} linhas | ⚠️ {h.get('issues')} avisos")
             
+            # Tratamento da Descrição e IO
             proposito = r['docstring'].split(" [In:")[0]
             click.echo(f"   {Fore.CYAN}Propósito: {Style.RESET_ALL}{proposito}")
             
@@ -361,8 +458,10 @@ class AcervoEngine:
             out_m = re.search(r"\[Out: (.*?)\]", r['docstring'])
             if out_m: click.echo(f"       {Fore.LIGHTRED_EX}OUT ➔ {out_m.group(1)}{Style.RESET_ALL}")
             
+            # Funções Internas
             funcs_fmt = [f"{Fore.YELLOW}{Style.BRIGHT}{f}{Style.RESET_ALL}" if func_filter and func_filter.lower() in f.lower() else f for f in funcs]
             click.echo(f"   {Fore.WHITE}ƒ {Style.DIM}{', '.join(funcs_fmt[:8])}")
+        
         click.echo("")
 
     def pull_to_project(self, name, target_dir="utils", open_editor=False):
@@ -421,6 +520,50 @@ class AcervoEngine:
             click.secho(f"   [!] Falha no Diagnóstico de Qualidade: {e}", fg="red")
             return 0, "ERRO", {}
 
+    def view_brick_code(self, name):
+        """Dossiê Técnico Total: Exibe metadados, saúde e código (V40)."""
+        conn = get_db_connection()
+        conn.row_factory = __import__('sqlite3').Row
+        row = conn.execute("SELECT * FROM moduloid_acervo WHERE name = ?", (name,)).fetchone()
+        conn.close()
+
+        if not row: return click.secho(f"✘ Moduloid '{name}' não encontrado.", fg="red")
+
+        file_path = BRICKS_DIR / row['filename']
+        code = file_path.read_text(encoding='utf-8', errors='ignore')
+        h = json.loads(row['health_report']) if row['health_report'] else {}
+
+        if HAS_RICH:
+            console = Console()
+            # --- 1. CABEÇALHO DO DOSSIÊ ---
+            click.secho(f"\n--- 📑 DOSSIÊ TÉCNICO: {name.upper()} (v{row['version']}) ---", fg="cyan", bold=True)
+            
+            # Badges de Status
+            score = row['quality_score']
+            color_score = "green" if score >= 80 else "yellow" if score >= 50 else "red"
+            sec_color = "green" if row['security_status'] == "VERIFICADO" else "red"
+            
+            from rich.columns import Columns
+            from rich.text import Text
+            
+            badges = [
+                Panel(f"[bold {color_score}]Score: {score}[/]", padding=(0, 2)),
+                Panel(f"[bold {sec_color}]🛡️ {row['security_status']}[/]", padding=(0, 2)),
+                Panel(f"[bold magenta]🏷️ {row['category'].upper()}[/]", padding=(0, 2))
+            ]
+            console.print(Columns(badges))
+
+            # --- 2. METADADOS E IO ---
+            click.echo(f"   {Fore.CYAN}Propósito:{Style.RESET_ALL} {row['docstring']}")
+            click.echo(f"   {Fore.CYAN}Origem   :{Style.RESET_ALL} {Path(row['origin_project']).name}")
+            click.echo(f"   {Fore.CYAN}Métricas :{Style.RESET_ALL} {h.get('size_kb')}KB | {h.get('lines')} linhas")
+            
+            # --- 3. CÓDIGO FONTE ---
+            syntax = Syntax(code, "python", theme="monokai", line_numbers=True, word_wrap=True)
+            panel = Panel(syntax, title=f"[bold white]📄 {row['filename']}[/]", border_style="blue")
+            console.print(panel)
+        else:
+            click.echo(code) # Fallback simples
 
 # CLI REGISTRY
 @click.group('moduloid')
@@ -462,3 +605,15 @@ def moduloid_refresh():
 def moduloid_build(modules, build_dir):
     """Monta um sistema a partir de bricks do acervo para uso do Macrothon."""
     AcervoEngine().build_system(modules, build_dir)
+    
+@moduloid_group.command('view')
+@click.argument('name')
+def moduloid_view(name):
+    """Visualiza o código-fonte de um brick no acervo."""
+    AcervoEngine().view_brick_code(name)
+    
+@moduloid_group.command('health')
+@click.argument('name')
+def moduloid_health(name):
+    """Explica o Score de qualidade de um brick."""
+    AcervoEngine().show_health(name)

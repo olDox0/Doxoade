@@ -10,7 +10,7 @@ import time
 import click
 import traceback
 from importlib import import_module
-from doxoade.tools.doxcolors import init as init_colors
+from doxoade.tools.doxcolors import Fore, Style, init as init_colors
 
 if sys.stdout.encoding != 'utf-8':
     try:
@@ -161,10 +161,10 @@ class DoxoadeLazyGroup(click.Group):
         print(f"\033[1;31m\n[ FATAL ] Erro na Matriz de Comando: '{cmd_name}'\033[0m")
         print(f"\033[1;34m ■ SUBSISTEMA :\033[0m Intelligence Router")
         print(f"\033[1;34m ■ CAUSA      :\033[0m {e}")
-        print(f"\033[1;34m ■ DIAGNÓSTICO:\033[0m Verifique se o módulo 'telemetry_tools.logger' foi movido.")
+#        print(f"\033[1;34m ■ DIAGNÓSTICO:\033[0m Verifique se o módulo 'telemetry_tools.logger' foi movido.")
         print(Fore.RED)
         traceback.print_exc()
-        print(RESET_ALL)
+        print(Style.RESET_ALL)
 
 @click.group(cls=DoxoadeLazyGroup, invoke_without_command=True)
 @click.option('--guard', is_flag=True, help='Verificação de integridade Aegis.')

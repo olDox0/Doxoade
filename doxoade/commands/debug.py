@@ -51,11 +51,17 @@ from doxoade.tools.doxcolors import Fore, Style
                 help="Executa meta diagnostico sob o sistema lazarus.")
 @click.option('--status', is_flag=True,
                 help="Verifica a saúde operacional do motor de debug.")
+@click.option('--no-rescue', is_flag=True,
+                help="Desativa a interceptação forense da Sotéria/Lazarus.")
 def debug(script, intern, **kwargs):
 #def debug(script, intern, audit_rescue, sniff, meta_analysis, **kwargs):
     """🩺 Autópsia Forense, Monitoramento, CPU ou Memória (MPoT-5)."""
-    from .debug_systems.debug_engine import execute_debug
-    
+
+    if kwargs.get('no_rescue'):
+        os.environ['DOXOADE_RESCUE'] = '0'
+        click.secho("🛡️  [SOTERIA] Modo de Resgate DESATIVADO (Fluxo Bruto).", fg="yellow", dim=True)
+
+    from .debug_systems.debug_engine import execute_debug    
     audit_rescue = kwargs.get('audit_rescue')
     meta_analysis = kwargs.get('meta_analysis')
     sniff = kwargs.get('sniff')

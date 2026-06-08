@@ -95,7 +95,12 @@ class ExecutionLogger:
             elif not issubclass(exc_type, KeyboardInterrupt):
                 exit_code = 1 # Erro de runtime Python
 
+        # [MODO BRUTO] Se o resgate estiver desativado, não chama o Lazarus
+        if os.environ.get('DOXOADE_RESCUE') == '0':
+            return # Deixa o Python imprimir o traceback normal no console
+            
         if exc_type is not None and not issubclass(exc_type, (SystemExit, KeyboardInterrupt)):
+            # Só chama o Lazarus se o resgate estiver ATIVO (padrão)
             error_data = "".join(traceback.format_exception(exc_type, exc_val, exc_tb))
             activate_protocol(error_data, exit_code=exit_code)
 
@@ -130,3 +135,5 @@ class ExecutionLogger:
             color = Fore.GREEN if exit_code == 0 else Fore.RED
             label = "✔ Sucesso" if exit_code == 0 else "✘ Falha"
             click.echo(f'{color}{Style.DIM}[{self.command_name}] {label} em {duration:.3f}s{Style.RESET_ALL}')
+            
+            

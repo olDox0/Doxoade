@@ -24,9 +24,15 @@ from doxoade.tools.doxcolors import Fore, Style
 @click.option('--disk-limiter', '-dl', type=str, help='Limite de escrita em disco (ex: 100mb).')
 @click.option('--no-vulcan', is_flag=True, help='Desativa o Turbo Nativo.')
 @click.option('--test-mode', is_flag=True, help='Autoriza scripts de teste.')
+@click.option('--no-rescue', is_flag=True, help='Desativa o Protocolo Lazarus/Sotéria (Modo Bruto).')   
 @click.pass_context
 def run(ctx, script, args, **kwargs):
     """Executor Universal v83.5: Decisão Única de Fluxo com Controle de Célula de Carga."""
+    
+    if kwargs.get('no_rescue'):
+        os.environ['DOXOADE_RESCUE'] = '0'
+        click.secho("🛡️  [SOTERIA] Modo de Resgate DESATIVADO.", fg="yellow", dim=True)
+    
     from ..rescue_systems.execution_context import ExecutionContext, ExecutionMode
     from doxoade.rescue import activate_protocol
     from doxoade.tools.telemetry_tools.logger import ExecutionLogger
