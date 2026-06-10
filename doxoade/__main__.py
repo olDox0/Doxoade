@@ -5,6 +5,17 @@ import tempfile
 import subprocess
 import traceback
 
+if os.environ.get('DOXOADE_HORUS_ACTIVE') == '1':
+    try:
+        from doxoade.tools.horus_scribe import activate_horus_shadow
+        activate_horus_shadow()
+    except Exception as e:
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        exc_trace(exc_tb)
+#        traceback.print_exc()
+
 def _inject_internal_venv():
     """
     Localiza o venv interno do doxoade e o injeta no sys.path
@@ -39,7 +50,10 @@ def _early_setup(project_root: str):
         from doxoade.tools.vulcan.abi_gate import run_abi_gate
         run_abi_gate(project_root)
     except Exception as e:
-        pass # Silencioso se o Vulcan ainda não estiver pronto
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        exc_trace(exc_tb)
 
 def main():
     # 1. Configura o VENV primeiro de tudo
@@ -77,6 +91,11 @@ def main():
                 tmp.write(err_msg)
             # Tenta rodar o rescue.py
             subprocess.run([sys.executable, rescue_script, path], check=False)
+        except Exception as e:
+            import sys as exc_sys
+            from traceback import print_tb as exc_trace
+            _, exc_obj, exc_tb = exc_sys.exc_info()
+            exc_trace(exc_tb)
         finally:
             try:
                 os.remove(path)

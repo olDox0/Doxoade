@@ -5,34 +5,165 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <windows.h>
 
-// Assinatura secreta do Nexus (NEXUSOAD)
+// --- CONSTANTES DE SEGURANÇA ---
 #define NEXUS_CANARY 0x4E455855534F4144ULL 
 #define GUARD_SIZE 16
+#define MAX_MEM_RECORDS 1024
 
-typedef struct { void* user_ptr; void* real_ptr; size_t user_size; const char* file; int line; int is_live; } mem_rec_t;
-typedef struct { char type[32]; size_t size; } arena_snapshot_t;
-static mem_rec_t g_mem_db[512];
-static int g_mem_ptr = 0;
-static arena_snapshot_t g_arena_log[20]; // Rastreia as últimas 20 alocações
-static int g_arena_idx = 0;
+// --- PROTÓTIPOS INTERNOS (Evita warnings de declaração implícita) ---
 void soteria_arena_report_alloc(const char* arena_name, const char* obj_type, size_t size);
 void soteria_dump_arena_inventory();
+void _mem_lock();
+void _mem_unlock();
 
-void soteria_validate_alignment(void* ptr, const char* msg) {
-    uintptr_t addr = (uintptr_t)ptr;
-    if (addr % 16 != 0) {
-        fprintf(stdout, "TAG_LEVEL: WARNING\n");
-        fprintf(stdout, "TAG_MOTIVO: SIMD_ALIGNMENT_RISK\n");
-        fprintf(stdout, "TAG_DETAIL: Ponteiro %p nao alinhado em 16 bytes. Instrucoes MOVAPS podem causar crash.\n", ptr);
+// --- ESTRUTURAS HADES ---
+typedef struct { 
+    void* user_ptr; 
+    void* real_ptr; 
+    size_t user_size; 
+    int origin;         // ALLOC_MALLOC = 1, ALLOC_PYMEM = 2
+    const char* file; 
+    int line; 
+    int is_live; 
+} mem_rec_t;
+
+typedef struct { char type[32]; size_t size; } arena_snapshot_t;
+
+// --- ESTADO GLOBAL ---
+static mem_rec_t g_mem_db[MAX_MEM_RECORDS];
+static int g_mem_ptr = 0;
+static arena_snapshot_t g_arena_log[20]; 
+static int g_arena_idx = 0;
+static volatile long g_mem_lock = 0;
+
+// --- SINCRONIZAÇÃO ATÔMICA ---
+void _mem_lock() { while (InterlockedExchange(&g_mem_lock, 1)); }
+void _mem_unlock() { InterlockedExchange(&g_mem_lock, 0); }
+
+// --- MOTOR DE ALOCAÇÃO EXTENDIDA ---
+
+void* soteria_malloc_ext(size_t size, int origin, const char* file, int line) {
+    size_t total_size = size + (GUARD_SIZE * 2);
+    unsigned char* real_p = (unsigned char*)(malloc)(total_size);
+    if (!real_p) return NULL;
+
+    *(unsigned long long*)real_p = NEXUS_CANARY;
+    *(unsigned long long*)(real_p + GUARD_SIZE + size) = NEXUS_CANARY;
+
+    void* user_p = (void*)(real_p + GUARD_SIZE);
+
+    _mem_lock();
+    if (g_mem_ptr < MAX_MEM_RECORDS) {
+        g_mem_db[g_mem_ptr++] = (mem_rec_t){user_p, real_p, size, origin, file, line, 1};
     }
+    _mem_unlock();
+
+    soteria_arena_report_alloc("Hades_Arena", (origin == 2 ? "PyMem_Block" : "C_Malloc_Block"), size);
+    
+    return user_p;
+}
+
+void soteria_free_ext(void* ptr, int current_origin, const char* file, int line) {
+    if (!ptr) return;
+
+    _mem_lock();
+    for (int i = 0; i < g_mem_ptr; i++) {
+        if (g_mem_db[i].user_ptr == ptr) {
+            if (!g_mem_db[i].is_live) {
+                _mem_unlock();
+                soteria_dispatch(SOTERIA_FATAL, SOT_ERR_MEM, "DOUBLE_FREE",
+                                 "Tentativa de liberar memoria ja desalocada.", file, line, "Free");
+                return;
+            }
+            if (g_mem_db[i].origin != current_origin) {
+                char detail[128];
+                snprintf(detail, 127, "Conflito: Alocado via %s, liberado via %s.", 
+                         (g_mem_db[i].origin == 2 ? "PyMem" : "Malloc"),
+                         (current_origin == 2 ? "PyMem" : "Malloc"));
+                _mem_unlock();
+                soteria_dispatch(SOTERIA_FATAL, SOT_ERR_MEM, "MIXED_ALLOCATOR_USAGE",
+                                 detail, file, line, "Free");
+                return;
+            }
+            g_mem_db[i].is_live = 0;
+            void* real_p = g_mem_db[i].real_ptr;
+            size_t sz = g_mem_db[i].user_size;
+            _mem_unlock();
+
+            memset(ptr, 0xDE, sz); 
+            (free)(real_p);
+            return;
+        }
+    }
+    _mem_unlock();
+
+    soteria_dispatch(SOTERIA_FATAL, SOT_ERR_MEM, "INVALID_FREE",
+                     "O endereço nao foi retornado por um alocador rastreado.", file, line, "Free");
+}
+
+void soteria_dump_leaks() {
+    int leaks = 0;
+    size_t total_bytes = 0;
+    soteria_print_raw("\n@SOTERIA_BEGIN@\nTAG_MOTIVO: MEMORY_LEAK_REPORT\n");
+
+    for (int i = 0; i < g_mem_ptr; i++) {
+        if (g_mem_db[i].is_live) {
+            char buf[256];
+            snprintf(buf, 255, "TAG_LEAK_ENTRY: %s:%d | %zu bytes | Type: %d\n", 
+                     g_mem_db[i].file, g_mem_db[i].line, g_mem_db[i].user_size, g_mem_db[i].origin);
+            soteria_print_raw(buf);
+            leaks++;
+            total_bytes += g_mem_db[i].user_size;
+        }
+    }
+    if (leaks > 0) {
+        char summary[128];
+        snprintf(summary, 127, "TAG_DETAIL: Detectados %d vazamentos de memoria (%zu bytes).\n", leaks, total_bytes);
+        soteria_print_raw(summary);
+    }
+    soteria_print_raw("@SOTERIA_END@\n");
+}
+
+void soteria_validate(void* ptr, const char* file, int line) {
+    if (!ptr) {
+        soteria_dispatch(SOTERIA_FATAL, SOT_ERR_MEM, "NULL_POINTER",
+                         "Tentativa de usar ponteiro NULO.", file, line, "Validate");
+        return;
+    }
+    int stack_anchor; 
+    uintptr_t current_rsp = (uintptr_t)&stack_anchor;
+    uintptr_t target = (uintptr_t)ptr;
+    long long diff = (long long)(target - current_rsp);
+    if (diff > -2097152 && diff < 2097152) {
+        if (target > current_rsp) {
+             soteria_dispatch(SOTERIA_FATAL, SOT_ERR_LOGIC, "DANGLING_STACK",
+                             "Variavel de funcao ja encerrada sendo acessada.", file, line, "Validate");
+        }
+        return; 
+    }
+    _mem_lock();
+    for (int i = 0; i < g_mem_ptr; i++) {
+        if (g_mem_db[i].user_ptr == ptr) {
+            if (!g_mem_db[i].is_live) {
+                _mem_unlock();
+                soteria_dispatch(SOTERIA_FATAL, SOT_ERR_MEM, "USE_AFTER_FREE",
+                                 "Tentativa de usar memoria ja liberada (Ponteiro Zumbi).", file, line, "Validate");
+            }
+            _mem_unlock();
+            return; 
+        }
+    }
+    _mem_unlock();
 }
 
 void soteria_arena_report_alloc(const char* arena_name, const char* obj_type, size_t size) {
-    // Registro circular ultra-rápido
+    _mem_lock();
     strncpy(g_arena_log[g_arena_idx].type, obj_type, 31);
     g_arena_log[g_arena_idx].size = size;
     g_arena_idx = (g_arena_idx + 1) % 20;
+    _mem_unlock();
 }
 
 void soteria_dump_arena_inventory() {
@@ -47,20 +178,12 @@ void soteria_dump_arena_inventory() {
 }
 
 void soteria_access_probe(void* addr, const char* file, int line, int is_write) {
-    // [NEXUS ATOMIC SENTINEL]
     static volatile void* g_last_addr = NULL;
     static volatile unsigned long g_last_tid = 0;
-    
     unsigned long current_tid = GetCurrentThreadId();
-
-    // Se duas threads diferentes tocarem no MESMO endereço em um intervalo curto
     if (g_last_addr == addr && g_last_tid != current_tid) {
-        // Disparamos um alerta Freestyle que o Lazarus já sabe ler
         soteria_dispatch(SOTERIA_WARN, SOT_ERR_LOGIC, "CONCURRENCY_HAZARD", 
-                         "Detecção de Condição de Corrida: Múltiplas threads acessando a mesma RAM.", 
-                         file, line, "Sentinel");
-        
-        // Limpamos para não inundar o log
+                         "Condicao de Corrida detectada.", file, line, "Sentinel");
         g_last_addr = NULL; 
     } else {
         g_last_addr = addr;
@@ -69,94 +192,9 @@ void soteria_access_probe(void* addr, const char* file, int line, int is_write) 
 }
 
 void* soteria_malloc(size_t size, const char* file, int line) {
-    size_t total_size = size + (GUARD_SIZE * 2);
-    unsigned char* real_p = (unsigned char*)(malloc)(total_size);
-    if (!real_p) return NULL;
-
-    *(unsigned long long*)real_p = NEXUS_CANARY;
-    *(unsigned long long*)(real_p + GUARD_SIZE + size) = NEXUS_CANARY;
-
-    void* user_p = (void*)(real_p + GUARD_SIZE);
-
-//    soteria_arena_report_alloc("CORE_RUNTIME", "heap_block", size);
-    soteria_arena_report_alloc("Gordian_Lab", "heap_block", size);
-    fprintf(stdout, "TAG_ARENA_OBJ: heap_block | %zu bytes\n", size);
-
-    if (g_mem_ptr < 512) {
-        g_mem_db[g_mem_ptr++] = (mem_rec_t){user_p, real_p, size, file, line, 1};
-    }
-    
-    // --- NEXUS FIX: Registra o bloco no inventário para o Lazarus ---
-    soteria_arena_report_alloc("Soteria_Lab", "memory_block", size);
-    
-    return user_p;
-}
-
-void soteria_validate(void* ptr, const char* file, int line) {
-    if (!ptr) {
-        soteria_dispatch(SOTERIA_FATAL, SOT_ERR_MEM, "NULL_POINTER",
-                         "Crash Iminente: Tentativa de validar/usar ponteiro NULO.", 
-                         file, line, "Validate");
-        return;
-    }
-
-    // --- CAMADA 1: SENTINELA DE PILHA (STACK) ---
-    // Usamos o endereço de uma variável local como âncora do RSP atual
-    int stack_anchor; 
-    uintptr_t current_rsp = (uintptr_t)&stack_anchor;
-    uintptr_t target = (uintptr_t)ptr;
-    long long diff = (long long)(target - current_rsp);
-
-    // Heurística: Se o endereço está a menos de 1MB da âncora, ele pertence à Stack
-    if (diff > -1048576 && diff < 1048576) {
-        // No x64, a stack cresce para BAIXO. 
-        // Se o target for MAIOR que o RSP atual, ele aponta para um frame que já retornou.
-        if (target > current_rsp) {
-             soteria_dispatch(SOTERIA_FATAL, SOT_ERR_LOGIC, "DANGLING_STACK",
-                             "Corrupção de Escopo: Acesso a variável de função que já encerrou.", 
-                             file, line, "Validate");
-        }
-        return; // Endereço de pilha válido (abaixo do RSP)
-    }
-
-    // --- CAMADA 2: SENTINELA DE ARENA (HEAP / GHOSTS) ---
-    for (int i = 0; i < g_mem_ptr; i++) {
-        if (g_mem_db[i].user_ptr == ptr) {
-            if (!g_mem_db[i].is_live) {
-                // BLOCO ENCONTRADO, MAS MARCADO COMO MORTO = USE-AFTER-FREE
-                soteria_dispatch(SOTERIA_FATAL, SOT_ERR_MEM, "USE_AFTER_FREE",
-                                 "Ponteiro Zumbi: Tentativa de usar memória já liberada pelo free().", 
-                                 file, line, "Validate");
-            }
-            return; // Bloco vivo e saudável na Arena
-        }
-    }
-
-    // --- CAMADA 3: SENTINELA DE ORIGEM DESCONHECIDA (WILD) ---
-    // Se não é Nulo, não é Stack e não está no nosso registro de Malloc...
-    soteria_dispatch(SOTERIA_WARN, SOT_ERR_MEM, "WILD_POINTER",
-                     "Ponteiro Ilegal: O endereço não pertence à Pilha nem à Arena monitorada.", 
-                     file, line, "Validate");
+    return soteria_malloc_ext(size, 1, file, line);
 }
 
 void soteria_free(void* ptr, const char* file, int line) {
-    if (!ptr) return;
-    for (int i = 0; i < g_mem_ptr; i++) {
-        if (g_mem_db[i].user_ptr == ptr) {
-            if (!g_mem_db[i].is_live) {
-                soteria_dispatch(SOTERIA_FATAL, SOT_ERR_MEM, "DOUBLE_FREE", 
-                                 "Tentativa de liberar o mesmo bloco duas vezes.", file, line, "Free");
-            }
-            // --- [ UPGRADE: GHOST TRACKING ] ---
-            g_mem_db[i].is_live = 0; // O bloco agora é um Zumbi
-            // Marcamos o conteúdo com lixo para forçar erro se lido
-            memset(ptr, 0xDE, g_mem_db[i].user_size); 
-            // Não damos o free() real imediatamente (Opcional para debug extremo)
-            // (free)(g_mem_db[i].real_ptr); 
-            
-            soteria_io_trace("free_quarantine", "Ponteiro em quarentena", file, line);
-            return;
-        }
-    }
-    (free)(ptr);
+    soteria_free_ext(ptr, 1, file, line);
 }

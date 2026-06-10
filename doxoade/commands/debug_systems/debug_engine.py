@@ -12,12 +12,16 @@ import subprocess
 import os
 import json
 import click
-from doxoade.tools.doxcolors import Fore, Style
+
 from .debug_utils import get_debug_env, build_probe_command, build_flow_command
 from .debug_io import print_debug_header, render_variable_table, report_crash, render_profile_report
-from doxoade.tools.filesystem import _get_venv_python_executable
+
+from doxoade.tools.horus        import horus_trace
+from doxoade.tools.doxcolors    import Fore, Style
+from doxoade.tools.filesystem   import _get_venv_python_executable
 from doxoade.tools.aegis.warden import apply_resource_limits
 
+_MARKER_DATA = '---DOXOADE-DATA-BLOCK---' 
 _MARKER_DEBUG = '---DOXOADE-DEBUG-DATA---'
 _MARKER_PROFILE = '---DOXOADE-PROFILE-DATA---'
 _RE_ANSI = re.compile('\\033\\[[0-9;]*m')
@@ -46,59 +50,66 @@ def _colorize_ms_in_line(line: str, ms: float) -> str:
         return line
     return line[:idx] + color + target + _RESET + line[idx + len(target):]
 
-def _stream_and_capture(process: subprocess.Popen, marker: str) -> str:
-    """Captura a saída, exibe logs em tempo real e extrai o JSON final."""
-    import signal
+@horus_trace
+def _stream_and_capture(process, marker):
+    import json, sys
     data_buffer = []
+    full_log = [] # Captura tudo para caso de falha
     capturing = False
-    
-    # Shield para Ctrl+C
-    original_sigint = signal.getsignal(signal.SIGINT)
-    def sigint_handler(signum, frame):
-        signal.signal(signal.SIGINT, original_sigint)
-    signal.signal(signal.SIGINT, sigint_handler)
 
-    try:
-        for line in iter(process.stdout.readline, ''):
-            # Procura pelo marcador de início de dados
-            if marker in line:
-                capturing = True
-                # Captura o que estiver na mesma linha após o marcador
-                parts = line.split(marker)
-                if len(parts) > 1 and parts[1].strip():
-                    data_buffer.append(parts[1])
-                continue
+    while True:
+        line = process.stdout.readline()
+        if not line: break
+        full_log.append(line)
+        
+        if marker in line:
+            capturing = True
+            parts = line.split(marker)
+            if len(parts) > 1: data_buffer.append(parts[1])
+            continue
             
-            if capturing:
-                data_buffer.append(line)
-            else:
-                # Exibe a saída do comando interno (check, etc) para o usuário
-                sys.stdout.write(line)
-                sys.stdout.flush()
-                
-        process.wait()
-    except KeyboardInterrupt:
-        process.terminate()
-        process.wait()
-    finally:
-        signal.signal(signal.SIGINT, original_sigint)
+        if capturing:
+            data_buffer.append(line)
+        else:
+            sys.stdout.write(line)
+            sys.stdout.flush()
 
-    # Limpeza Forense: Isola o primeiro '{' e o último '}' para garantir JSON puro
-    raw_content = "".join(data_buffer).strip()
-    if "{" in raw_content and "}" in raw_content:
-        start_idx = raw_content.find("{")
-        end_idx = raw_content.rfind("}") + 1
-        return raw_content[start_idx:end_idx]
+    process.wait()
+    raw = "".join(data_buffer).strip()
     
-    return raw_content
+    if "{" in raw and "}" in raw:
+        try:
+            return json.loads(raw[raw.find("{"):raw.rfind("}")+1])
+        except: return None
+        
+    # [PLATINUM] Se não achou JSON, mas o processo deu erro, mostra o log de erro
+    if process.returncode != 0:
+        click.secho("\n✘ A sonda nativa colapsou durante a execução.", fg='red', bold=True)
+        # O Hórus FUNCTION_ERROR capturará os detalhes
+    return None
 
-def _stream_live(process: subprocess.Popen, threshold_ms: float, colorize: bool=True) -> None:
+def _stream_live(process, threshold_ms, colorize=True):
+#def _stream_live(process: subprocess.Popen, threshold_ms: float, colorize: bool=True) -> None:
     total_ms = 0.0
     max_ms = 0.0
     max_line = ''
     count = 0
+    captured_debug_data = None
     try:
         for line in iter(process.stdout.readline, ''):
+            # [CHIEF-GOLD] Interceptação de Dados Forenses em tempo real
+            if _MARKER_DEBUG in line:
+                try:
+                    raw_json = line.split(_MARKER_DEBUG)[1].strip()
+                    captured_debug_data = json.loads(raw_json)
+                    captured_data = json.loads(raw_json)
+                except Exception as e:
+                    import sys as exc_sys
+                    from traceback import print_tb as exc_trace
+                    _, exc_obj, exc_tb = exc_sys.exc_info()
+                    exc_trace(exc_tb)
+                continue
+
             ms = _line_ms(line)
             if ms is None:
                 sys.stdout.write(line)
@@ -119,8 +130,16 @@ def _stream_live(process: subprocess.Popen, threshold_ms: float, colorize: bool=
         click.secho('\n[!] Interrupção manual (Ctrl+C). Encerrando monitoramento...', fg='yellow')
         process.terminate()
         process.wait()
-    _print_summary(total_ms, max_ms, max_line, count, threshold_ms)
+    except Exception as e:
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        exc_trace(exc_tb)
 
+    _print_summary(total_ms, max_ms, max_line, count, threshold_ms)
+    if captured_debug_data and 'variables' in captured_debug_data:
+        render_variable_table(captured_debug_data['variables'])
+        
 def _print_summary(total_ms: float, max_ms: float, max_line: str, count: int, threshold_ms: float):
     if count == 0:
         click.echo(f'\n   {Style.DIM}(nenhuma linha acima de {threshold_ms} ms registrada){_RESET}')
@@ -153,6 +172,12 @@ def _run_autopsy(python_exe, script, args, env):
             except json.JSONDecodeError:
                 click.secho('\n🚨 [ FALHA ] Não foi possível decodificar os dados da sonda.', fg='red', bold=True)
                 click.echo(data_str)
+            except Exception as e:
+                import sys as exc_sys
+                from traceback import print_tb as exc_trace
+                _, exc_obj, exc_tb = exc_sys.exc_info()
+                exc_trace(exc_tb)
+
         else:
             rc = process.returncode
             if rc is not None and rc != 0:
@@ -161,31 +186,29 @@ def _run_autopsy(python_exe, script, args, env):
                 click.secho('\n📡 [ FINALIZADO ] Processo encerrou sem emitir dados.', fg='cyan')
     except Exception as e:
         click.secho(f'\n❌ Erro no Orquestrador: {e}', fg='red')
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        exc_trace(exc_tb)
 
-def _run_profile(python_exe, script, args, env):
-    """Perfil com blindagem de aspas para caminhos com espaço."""
-    from .debug_io import render_profile_report
-    # v97.0: Garantimos aspas duplas no executável e no script para o Windows
-    clean_script = script.strip('"\'')
-    cmd = [python_exe, clean_script]
+def _run_profile(python_exe, script_to_probe, args_str, env):
+    from .debug_utils import build_probe_command
+    from .debug_io import render_profile_report # [FIX] Importação local
     
-    if args:
-        import shlex
-        cmd.extend(shlex.split(args))
-
-    try:
-        # shell=False é VITAL aqui para o Windows não concatenar errado
-        process = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
-            text=True, encoding='utf-8', env=env, shell=False
-        )
-        click.echo(Fore.YELLOW + '   > Instrumentando performance (Aegis Profile Mode)...\n')
-        data_str = _stream_and_capture(process, _MARKER_PROFILE)
-        if data_str:
-            render_profile_report(json.loads(data_str), script)
-    except Exception as e:
-        click.secho(f'\n❌ Erro no Perfil: {e}', fg='red')
-
+    probe_script = os.path.join(os.path.dirname(__file__), "../../probes/debug_probe.py")
+    cmd = build_probe_command(python_exe, probe_script, script_to_probe, "profile", args_str)
+    
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
+                               text=True, encoding='utf-8', env=env, shell=False)
+    
+    data = _stream_and_capture(process, "---DOXOADE-PROFILE-DATA---")
+    
+    # [PLATINUM FIX] Sincronia de Argumentos (Data + Script)
+    if data and isinstance(data, dict) and data.get('status') == 'success':
+        render_profile_report(data, script_to_probe)
+    else:
+        click.echo(Fore.RED + f"✘ Perfil: Sonda falhou ou não retornou dados. ({data.get('error') if data else 'Vazio'})")
+        
 def _run_live(python_exe, script, args, env, watch, bottleneck, threshold=0.0, no_compress=False):
     """Executa o monitoramento em tempo real com rastro visual (MATRIX MODE)."""
     from ...probes import flow_runner
@@ -223,62 +246,76 @@ def _run_live(python_exe, script, args, env, watch, bottleneck, threshold=0.0, n
         click.secho(f'\n❌ Falha catastrófica ao iniciar subprocesso:', fg='red', bold=True)
         click.echo(f'Erro: {e}')
         click.echo('\n--- TRACEBACK DO ERRO ---')
-        click.echo(traceback.format_exc())
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        exc_trace(exc_tb)
+#        click.echo(traceback.format_exc())
 
-def _run_memory(python_exe, script, args, env):
-    from ...probes import debug_probe
-    from .debug_io import render_memory_forensics
-    print_debug_header(script, 'MEMÓRIA')
-    cmd = build_probe_command(python_exe, debug_probe.__file__, script, mode='memory', args=args)
-    try:
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', bufsize=1, env=env)
-        click.echo(Fore.BLUE + '   > Raio-X ativo: Coletando Garbage Collector e Árvores de Alocação...\n' + Fore.RESET)
-        data_str = _stream_and_capture(process, '---DOXOADE-MEMORY-DATA---')
-        if data_str:
-            try:
-                data = json.loads(data_str)
-                render_memory_forensics(data, script)
-            except json.JSONDecodeError:
-                click.secho('\n🚨[ FALHA ] Não foi possível decodificar os dados de memória.', fg='red', bold=True)
-                click.echo(data_str)
-        else:
-            click.secho('\n📡[ FINALIZADO ] Processo encerrou sem emitir dados.', fg='cyan')
-    except Exception as e:
-        click.secho(f'\n❌ Erro no Orquestrador (memória): {e}', fg='red')
+def _run_memory(python_exe, script_to_probe, args_str, env):
+    from .debug_utils import build_probe_command
+    from .debug_io import render_memory_forensics # [FIX] Função correta para modo -m
+    
+    probe_script = os.path.join(os.path.dirname(__file__), "../../probes/debug_probe.py")
+    cmd = build_probe_command(python_exe, probe_script, script_to_probe, "memory", args_str)
+    
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
+                               text=True, encoding='utf-8', env=env, shell=False)
+    
+    data = _stream_and_capture(process, "---DOXOADE-MEMORY-DATA---")
+    
+    # [PLATINUM FIX] Sincronia de Argumentos (Data + Script)
+    if data and isinstance(data, dict) and data.get('status') == 'success':
+        render_memory_forensics(data, script_to_probe)
+    else:
+        click.echo(Fore.RED + "✘ Memória: Sonda encerrou sem dados válidos.")
 
-def execute_debug(target: str, is_internal: bool=False, **kwargs):
-    """Orquestrador de Debug v98.5 - Zero-Quotes Edition."""
+def execute_debug(target, is_internal, test_mode=False, **kwargs):
+    """Orquestrador de Debug v98.6 - Estabilidade Aegis."""
     import os, sys, shlex, click
     from doxoade.tools.filesystem import _get_venv_python_executable
     from doxoade.tools.aegis.warden import apply_resource_limits
     from .debug_utils import get_debug_env
 
-    # 1. Warden Limits
-    apply_resource_limits({'cpu': kwargs.get('processing_limiter'), 'ram': kwargs.get('ram_limiter'), 'disk': kwargs.get('disk_limiter')})
-
-    # 2. Resolução Industrial (Sem aspas manuais!)
+    # 1. Resolução do Interpretador e Alvos
     python_exe = _get_venv_python_executable() or sys.executable
-    
-    # Normalizamos o path para usar barras normais, mas SEM aspas
     target_clean = target.replace('\\', '/')
     
     if is_internal:
         from ...probes import command_wrapper
         script_to_probe = command_wrapper.__file__.replace('\\', '/')
-        # Passamos o comando sem tentar ser "esperto" com aspas aqui
         args_str = target_clean 
     else:
         script_to_probe = os.path.abspath(target_clean).replace('\\', '/')
         args_str = kwargs.get('target_args', '')
 
-    # 3. Ambiente
-    env_raw = get_debug_env(script_to_probe) or os.environ.copy()
-    env = {str(k): str(v) for k, v in env_raw.items() if v is not None}
+    # 2. Construção Única do Ambiente (ENV)
+    # Pegamos o env base e injetamos as autorizações
+    env = get_debug_env(script_to_probe) or os.environ.copy()
+    
+    env['PYTHONIOENCODING'] = 'utf-8' 
+    
+    if test_mode:
+        env['DOXOADE_TEST_MODE'] = '1'
+        env['DOXOADE_AUTHORIZED_RUN'] = '1' 
+        # click.secho("🛡️ [AEGIS] Autorização de Teste ativa.", fg="cyan", dim=True)
 
-    # 4. Matriz de Decisão
+    # 3. Aplicação de Limites (Warden)
+    apply_resource_limits({
+        'cpu': kwargs.get('processing_limiter'), 
+        'ram': kwargs.get('ram_limiter'), 
+        'disk': kwargs.get('disk_limiter')
+    })
+
+    # 4. Matriz de Decisão de Execução
     profile = kwargs.get('profile', False)
     memory = kwargs.get('memory', False)
-    is_flow = any([kwargs.get('flow_val'), kwargs.get('flow_import'), kwargs.get('flow_func'), kwargs.get('bottleneck')])
+    is_flow = any([
+        kwargs.get('flow_val'), 
+        kwargs.get('flow_import'), 
+        kwargs.get('flow_func'), 
+        kwargs.get('bottleneck')
+    ])
     
     if is_flow:
         _run_flow_mode_v2(python_exe, script_to_probe, is_internal, env, kwargs)
@@ -306,43 +343,133 @@ def build_probe_command(target: str, is_internal: bool, probe_name: str, **kwarg
         args_list = shlex.split(kwargs.get('target_args', ''))
         return [sys.executable, probe_path, 'file', target] + args_list
 
-def _run_flow_mode_v2(python_exe, script, is_internal, env, kwargs, cmd_override=None):
-    from ...probes import flow_runner
-    from .debug_utils import build_flow_command # Garante o construtor correto
-    from doxoade.rescue import activate_protocol
+def _run_flow_mode_v2(python_exe, script_to_probe, is_internal, env, kwargs):
+    """Orquestrador de Fluxo Platinum - Resolve o Silêncio do Bottleneck."""
+    from .debug_utils import build_flow_command
+    import subprocess
     
-    # v109: NUNCA passe None para o runner_file
-    if cmd_override:
-        cmd = cmd_override
-    else:
-        cmd = build_flow_command(
-            python_exe, 
-            flow_runner.__file__, # Path real da sonda
-            script, 
-            args=kwargs.get('target_args')
+    # 1. Constrói o comando como lista (O SO cuida das aspas automaticamente)
+    cmd, _ = build_flow_command(script_to_probe, is_internal, kwargs)
+    
+    click.echo(Fore.CYAN + '   > Rastreando gargalos de performance (Bottleneck Mode)...\n')
+
+    try:
+        # [VITAL] shell=False garante que o Windows não quebre caminhos com espaços
+        process = subprocess.Popen(
+            cmd, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.STDOUT, 
+            text=True, 
+            encoding='utf-8', 
+            env=env, 
+            bufsize=1, 
+            shell=False
         )
-    
-    # Proteção de Sanidade: remove Nones e garante strings
-    cmd = cmd_override or build_flow_command(python_exe, flow_runner.__file__, script, **kwargs)
-    cmd = [str(a) for a in cmd if a is not None]
-    
-    process = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
-        text=True, encoding='utf-8', env=env, shell=False
-    )
-    
-    full_output = []
-    for line in iter(process.stdout.readline, ''):
-        full_output.append(line)
-        sys.stdout.write(line)
-        sys.stdout.flush()
-    
-    process.wait()
-    
-    # Se o processo filho crashou, o PAI assume o Lazarus com o log capturado
-    if process.returncode != 0:
-        activate_protocol("".join(full_output))
+
+        # 2. Captura os dados emitidos pelo flow_runner.py
+        data = _stream_and_capture(process, "---DOXOADE-DATA-BLOCK---")
         
+        if data and 'line_hotspots' in data:
+            from .debug_io import render_line_hotspots
+            # Aqui calculamos o tempo total real do rastro
+            total_ms = sum(s['total_ms'] for s in data['line_hotspots'])
+            render_line_hotspots(data['line_hotspots'], total_ms)
+        else:
+            # Se chegarmos aqui, o Hórus vai nos dizer o que o _stream_and_capture retornou
+            click.echo(Fore.YELLOW + "   [!] Sonda finalizada. Nenhum gargalo significativo detectado.")
+
+    except Exception as e:
+        click.echo(Fore.RED + f"✘ Falha ao iniciar rastro: {e}")
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        exc_trace(exc_tb)
+
+
+@horus_trace
+def _stream_and_capture(process, marker):
+    """Capturador Universal com Filtro de Ruído (Anti-Extra-Data)."""
+    import json, sys
+    data_buffer = []
+    capturing = False
+
+    while True:
+        line = process.stdout.readline()
+        if not line: break
+        
+        # [CHIEF-GOLD] Sincronia de Marcador e Dados na mesma linha
+        if marker in line:
+            capturing = True
+            parts = line.split(marker)
+            # Se houver JSON após o marcador na mesma linha, captura!
+            if len(parts) > 1 and "{" in parts[1]:
+                data_buffer.append(parts[1])
+            continue
+            
+        if capturing:
+            data_buffer.append(line)
+        else:
+            # Repassa logs normais para o usuário
+            sys.stdout.write(line)
+            sys.stdout.flush()
+
+    process.wait()
+    raw = "".join(data_buffer).strip()
+    
+    # [PLATINUM] Captura multilinhas do JSON
+    if "{" in raw and "}" in raw:
+        json_clean = raw[raw.find("{") : raw.rfind("}") + 1]
+        try:
+            return json.loads(json_clean)
+        except Exception as e:
+            # O Horus capturará este erro se o JSON estiver incompleto
+            raise RuntimeError(f"Erro no parser de stream: {e}")
+    return None
+
+def _stream_and_capture_multiple(process, marker):
+    """Captura Múltiplos blocos JSON do stdout."""
+    blobs = []
+    current_blob = []
+    capturing = False
+    
+    while True:
+        line = process.stdout.readline()
+        if not line: break
+
+        if marker in line:
+            if capturing: # Final de um bloco
+                try:
+                    blobs.append(json.loads("".join(current_blob)))
+                except Exception as e:
+                    import sys as exc_sys
+                    from traceback import print_tb as exc_trace
+                    _, exc_obj, exc_tb = exc_sys.exc_info()
+                    exc_trace(exc_tb)
+
+                current_blob = []
+            capturing = True
+            parts = line.split(marker)
+            if len(parts) > 1: current_blob.append(parts[1])
+            continue
+        
+        if capturing:
+            current_blob.append(line)
+        else:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            
+    if current_blob: # Pega o último bloco
+        try:
+            blobs.append(json.loads("".join(current_blob)))
+        except Exception as e:
+            import sys as exc_sys
+            from traceback import print_tb as exc_trace
+            _, exc_obj, exc_tb = exc_sys.exc_info()
+            exc_trace(exc_tb)
+
+    process.wait()
+    return blobs
+
 def run_debug_in_process(target, **kwargs):
     """v125.0: In-Process Execution sem Alucinação de Path."""
     import os, sys, shlex

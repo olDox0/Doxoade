@@ -1,5 +1,5 @@
 # doxoade/doxoade/probes/flow_runner.py
-import sys, os, time, argparse, warnings, linecache
+import sys, os, time, argparse, warnings, json, linecache
 
 try:
     import doxoade
@@ -8,6 +8,11 @@ except ImportError:
     _root = os.path.dirname(_candidate)
     if _root not in sys.path:
         sys.path.insert(0, _root)
+except Exception as e:
+    import sys as exc_sys
+    from traceback import print_tb as exc_trace
+    _, exc_obj, exc_tb = exc_sys.exc_info()
+    exc_trace(exc_tb)
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
@@ -15,12 +20,10 @@ if current_dir not in sys.path:
 
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
+import flow_utils as utils
 
 # Importação da peça do timer
-try:
-    from debug_probe import _LineTimer
-except ImportError:
-    from .debug_probe import _LineTimer
+from debug_probe import _LineTimer, _capture_locals, _MARKER_DEBUG
 
 warnings.filterwarnings('ignore', category=RuntimeWarning)
 C_RESET = '\x1b[0m'
@@ -132,41 +135,37 @@ def _render_trace_event(frame, event):
         loc = f"{'  ' * _STATE['indent_level']}{os.path.basename(filename)}:{lineno}".ljust(25)
         print(f"{C_BORDER}│{C_RESET} {ms:7.1f}ms {SEP} {C_WHITE}{loc}{SEP} {line[:50].ljust(50)} {SEP} {', '.join(diffs)}")
 
-def run_flow(target_path, shadow_src=None, **kwargs):
-    """Execução de rastro v130.0 - Prioridade Shadow."""
-    import os
-    abs_path = os.path.abspath(target_path.strip('"\' ')).replace('\\', '/')
+def run_flow(target_path, **kwargs):
+    """Orquestrador de rastro Platinum v136.0."""
+    abs_path = os.path.abspath(target_path).replace('\\', '/')
+    # Âncora de projeto resiliente
     project_root = os.path.dirname(abs_path)
-
-    # v130.0 Fix: Se temos Shadow, ignoramos o disco
-    if shadow_src:
-        code = shadow_src
-        # No rastro, o Shadow deve ser tratado como parte do projeto para não ser filtrado
-        target_id = abs_path 
-    else:
-        with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
-            code = f.read()
-        target_id = abs_path
-
-    # Inicia o timer
-    from .debug_probe import _LineTimer
-    timer = _LineTimer(target_file=target_id, project_root=project_root)
+    if 'tests' in abs_path: project_root = os.path.dirname(project_root)
     
-    # [FIX] Sincronia com o Escudo Aegis
-    from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
+    code = open(abs_path, 'r', encoding='utf-8', errors='ignore').read()
     
-    import threading
+    # Se for bottleneck, desativa o rastro Matrix para não poluir o tempo/pipe
+    is_b = kwargs.get('bottleneck', False)
+    timer = _LineTimer(abs_path, project_root, live_flow=not is_b)
+    
     sys.settrace(timer.tracer)
-    threading.settrace(timer.tracer) 
-    
     try:
         os.environ['DOXOADE_AUTHORIZED_RUN'] = '1'
-        globs = {'__file__': abs_path, '__name__': '__main__'}
-        restricted_safe_exec(code, globs, allow_imports=True, filename=abs_path)
+        restricted_safe_exec(code, {'__file__': abs_path, '__name__': '__main__'}, allow_imports=True)
+    except Exception as e:
+        # Captura forense em caso de crash
+        tb = sys.exc_info()[2]
+        while tb and tb.tb_next: tb = tb.tb_next
+        if tb:
+            data = {"error": str(e), "variables": _capture_locals(tb.tb_frame.f_locals), "line": tb.tb_lineno}
+            sys.stdout.write(f"\n{_MARKER_DEBUG}{json.dumps(data)}\n")
+        raise e
     finally:
         sys.settrace(None)
-        threading.settrace(None) # Desativa sensores
-        _render_flow_results(timer)
+        # EMISSÃO ÚNICA DE DADOS DE PERFORMANCE
+        stats = timer.top_lines(limit=15)
+        sys.stdout.write(f"\n---DOXOADE-DATA-BLOCK---\n{json.dumps({'line_hotspots': stats})}\n")
+        sys.stdout.flush()
 
 def _bootstrap_package(script_path):
     abs_path = os.path.abspath(script_path)
@@ -189,6 +188,11 @@ def _safe_to_string(val):
         s = str(val).replace('\n', ' ')
         return s[:25] + '...' if len(s) > 28 else s
     except Exception as e:
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        exc_trace(exc_tb)
+
         print(f'\x1b[0;33m _safe_to_string - Exception: {e}')
         return '<Error>'
 
@@ -225,20 +229,95 @@ def run_flow(target_path, shadow_src=None, **kwargs):
         os.environ['DOXOADE_AUTHORIZED_RUN'] = '1'
         globs = {'__file__': abs_path, '__name__': '__main__'}
         restricted_safe_exec(code, globs, allow_imports=True, filename=abs_path)
+    except Exception as e:
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        exc_trace(exc_tb)
     finally:
         sys.settrace(None)
         # Agora a função abaixo já foi definida e o Python a encontrará
         _render_flow_results(timer)
 
 def _render_flow_results(timer):
-    """Gera a tabela final de hotspots."""
     stats = timer.top_lines(limit=15)
     print(f"\n{Fore.MAGENTA}{Style.BRIGHT}🌊 NEXUS FLOW: Tabela de Performance (Top 15){Style.RESET_ALL}")
     print(f"{Fore.WHITE}{'MS TOTAL':>10} | {'LOCALIZAÇÃO':<30} | {'CONTEÚDO'}{Style.RESET_ALL}")
     for s in stats:
         file_short = os.path.basename(s['file'])
-        t_color = Fore.RED if s['total_ms'] > 20 else Fore.CYAN
+        t_color = Fore.RED if s['total_ms'] > 10 else Fore.CYAN
         print(f"{t_color}{s['total_ms']:>8.2f}ms {Fore.WHITE}│ {Fore.YELLOW}{file_short}:{s['line']:<25} {Fore.WHITE}│ {s['content'][:60]}{Style.RESET_ALL}")
+
+def run_flow(target_path, **kwargs):
+    abs_path = os.path.abspath(target_path).replace('\\', '/')
+    project_root = os.path.dirname(abs_path)
+    
+    with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
+        code = f.read()
+
+    # bottleneck mode desativa rastro Matrix para não interferir no tempo
+    timer = _LineTimer(abs_path, project_root, live_flow=not kwargs.get('bottleneck'))
+    
+    globs = {'__file__': abs_path, '__name__': '__main__'}
+    os.environ['DOXOADE_AUTHORIZED_RUN'] = '1'
+    
+    sys.settrace(timer.tracer)
+    try:
+        restricted_safe_exec(code, globs, allow_imports=True, filename=abs_path)
+    except Exception as e:
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        exc_trace(exc_tb)
+
+        # Captura forense de variáveis no momento do crash
+        tb = sys.exc_info()[2]
+        while tb.tb_next: tb = tb.tb_next
+        
+        debug_data = {
+            "error": str(e),
+            "variables": _capture_locals(tb.tb_frame.f_locals),
+            "line": tb.tb_lineno
+        }
+        sys.stdout.write(f"\n{_MARKER_DEBUG}{json.dumps(debug_data)}\n")
+        sys.stdout.flush()
+        raise e
+    finally:
+        sys.settrace(None)
+        _render_flow_results(timer)
+
+if __name__ == '__main__':
+    # [PLATINUM] Suporte a SpacePath e Flags
+    if len(sys.argv) < 2: sys.exit(1)
+    
+    script_to_run = sys.argv[1]
+    is_bottleneck = '--bottleneck' in sys.argv
+    
+    abs_path = os.path.abspath(script_to_run).replace('\\', '/')
+    project_root = os.path.dirname(abs_path)
+    
+    with open(abs_path, 'r', encoding='utf-8', errors='ignore') as f:
+        code = f.read()
+
+    # O timer agora é alimentado com o marcador unificado
+    timer = _LineTimer(abs_path, project_root, live_flow=not is_bottleneck)
+    sys.settrace(timer.tracer)
+    
+    try:
+        os.environ['DOXOADE_AUTHORIZED_RUN'] = '1'
+        restricted_safe_exec(code, {'__file__': abs_path, '__name__': '__main__'}, allow_imports=True)
+    except Exception as e:
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        exc_trace(exc_tb)
+    finally:
+        sys.settrace(None)
+        # EMITE O RESULTADO EM JSON PARA O PAI
+        stats = timer.top_lines(limit=15)
+        # O marcador deve ser o mesmo que o _stream_and_capture procura
+        print(f"\n---DOXOADE-DATA-BLOCK---\n{json.dumps({'line_hotspots': stats})}\n")
+        sys.stdout.flush()
 
 def run_flow_internal(callback):
     """Execução de rastro v125.0 - Injeção Direta."""
@@ -257,6 +336,11 @@ def run_flow_internal(callback):
     sys.settrace(static_trace_calls)
     try:
         callback()
+    except Exception as e:
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        exc_trace(exc_tb)
     finally:
         sys.settrace(None)
         # v125.0 FIX: Passagem obrigatória do objeto timer
@@ -271,15 +355,17 @@ if __name__ == '__main__':
     p.add_argument('--func', action='store_true')
     p.add_argument('--target', default=None)
     p.add_argument('--no-compress', dest='no_compress', action='store_true', help='Desativa compressão de loops (Iron Gate).')
-    args, remaining = p.parse_known_args()
+    p.add_argument('-b', '--bottleneck', action='store_true')
+    #args, remaining = p.parse_known_args()
+    args, _ = p.parse_known_args()
     sys.argv = [os.path.abspath(args.script)] + remaining
+
+    if len(sys.argv) < 2: sys.exit(1)
+    script_to_run = sys.argv[1]
+    is_bottleneck = '--bottleneck' in sys.argv or '-b' in sys.argv
+    #sys.argv = [script_to_run] + [arg for arg in sys.argv[2:] if not arg.startswith('-')]
     
-    run_flow(
-        args.script, 
-        base=args.base, 
-        val=args.val, 
-        imp=args.imp, 
-        func=args.func, 
-        target=args.target, 
-        no_compress=args.no_compress
-    )
+#    run_flow(args.script, **vars(args))
+    sys.argv = [args.script]
+    run_flow(args.script, bottleneck=args.bottleneck)
+    

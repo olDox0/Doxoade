@@ -14,6 +14,19 @@ def diagnose_native_error(exit_code: int, tags: dict) -> tuple:
         motivo = tags.get('MOTIVO', '').upper()
         fault_addr = tags.get('FAULT_ADDR', '').lower()
 
+        if "MIXED_ALLOCATOR_USAGE" in motivo: return (
+                "Mixed Allocator Violation",
+                f"FALHA CRÍTICA: {detail}. Memória alocada por uma API e liberada por outra. Isso corrompe as estruturas de controle do Heap."
+            )
+        if "INVALID_FREE" in motivo: return (
+                "Invalid Free Attempt",
+                "SEGURANÇA: O código tentou liberar (free) um endereço que não está no registro de alocações vivas. Pode ser um ponteiro para a Pilha ou um endereço corrompido."
+            )
+        if "MEMORY_LEAK_REPORT" in motivo: return (
+                "Resource Leak Detected",
+                "O processo encerrou com recursos órfãos. Verifique a lista de TAG_LEAK_ENTRY no dossiê para identificar as linhas de código que não liberaram a memória."
+            )
+
         if "DANGLING_STACK" in tags.get('MOTIVO', ''): return (
             "Dangling Pointer (Stack)", 
             "Risco de Corrupção de Dados: O programa tentou acessar uma memória que pertencia a uma função que já retornou." )

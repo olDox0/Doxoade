@@ -69,6 +69,7 @@ class DoxoadeLazyGroup(click.Group):
         'hack': 'doxoade.commands.hacking:hack', 
         'health': 'doxoade.commands.health:health', 
         'history': 'doxoade.commands.history:history', 
+        'horus': 'doxoade.commands.horus_cmd:horus_group',
         'ide': 'doxoade.commands.mobile_ide:ide', 
         'impact-analysis': 'doxoade.commands.impact_analysis:impact_analysis', 
         'init': 'doxoade.commands.init:init', 
@@ -140,13 +141,21 @@ class DoxoadeLazyGroup(click.Group):
                 with open(spec.origin, 'r', encoding='utf-8') as f:
                     # Tenta compilar o bytecode. Se houver erro de sintaxe, explode aqui.
                     compile(f.read(), spec.origin, 'exec')
-        except SyntaxError:
-            # Se o arquivo estiver quebrado, o Lazarus assume o controle ANTES do crash
+        except SyntaxError as e:
+            import sys as exc_sys
+            from traceback import print_tb as exc_trace
+            _, exc_obj, exc_tb = exc_sys.exc_info()
+            exc_trace(exc_tb)
+            
             from doxoade.rescue import activate_protocol
             import traceback
             activate_protocol(traceback.format_exc())
             return None
-        except Exception: pass 
+        except Exception as e:
+            import sys as exc_sys
+            from traceback import print_tb as exc_trace
+            _, exc_obj, exc_tb = exc_sys.exc_info()
+            exc_trace(exc_tb)
 
         # --- LOADER REAL (Lazy Load) ---
         try:
@@ -157,14 +166,18 @@ class DoxoadeLazyGroup(click.Group):
             return None
 
     def _print_fatal_import(self, cmd_name, e):
-        # Estética Sotéria/Rescue para erros de boot
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        exc_trace(exc_tb)
+        
         print(f"\033[1;31m\n[ FATAL ] Erro na Matriz de Comando: '{cmd_name}'\033[0m")
         print(f"\033[1;34m ■ SUBSISTEMA :\033[0m Intelligence Router")
         print(f"\033[1;34m ■ CAUSA      :\033[0m {e}")
 #        print(f"\033[1;34m ■ DIAGNÓSTICO:\033[0m Verifique se o módulo 'telemetry_tools.logger' foi movido.")
-        print(Fore.RED)
-        traceback.print_exc()
-        print(Style.RESET_ALL)
+#        print(Fore.RED)
+#        traceback.print_exc()
+#        print(Style.RESET_ALL)
 
 @click.group(cls=DoxoadeLazyGroup, invoke_without_command=True)
 @click.option('--guard', is_flag=True, help='Verificação de integridade Aegis.')

@@ -409,7 +409,12 @@ class AsyncAnimation:
 
 _original_print = builtins.print
 def safe_print(*args, **kwargs):
-    _original_print(*args, **kwargs)
+    try:
+        _original_print(*args, **kwargs)
+    except UnicodeEncodeError:
+        # Se falhar, converte para string e substitui caracteres impossíveis por '?'
+        clean_args = [str(arg).encode('ascii', 'replace').decode() for arg in args]
+        _original_print(*clean_args, **kwargs)
     if ANSI_ENABLED: _original_print('\x1b[0m', end='')
 builtins.print = safe_print
 

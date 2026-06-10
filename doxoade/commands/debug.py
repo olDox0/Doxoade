@@ -53,6 +53,8 @@ from doxoade.tools.doxcolors import Fore, Style
                 help="Verifica a saúde operacional do motor de debug.")
 @click.option('--no-rescue', is_flag=True,
                 help="Desativa a interceptação forense da Sotéria/Lazarus.")
+@click.option('--test-mode', is_flag=True, 
+                help="Autoriza a depuração de scripts em zonas de quarentena (tests/).")
 def debug(script, intern, **kwargs):
 #def debug(script, intern, audit_rescue, sniff, meta_analysis, **kwargs):
     """🩺 Autópsia Forense, Monitoramento, CPU ou Memória (MPoT-5)."""
@@ -116,4 +118,4 @@ def debug(script, intern, **kwargs):
         run_debug_in_process(target, **kwargs)
         return
 
-    execute_debug(target, is_internal=is_internal, **kwargs)
+    execute_debug(target, is_internal, **kwargs)

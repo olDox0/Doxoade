@@ -17,10 +17,20 @@ class SoteriaScribe:
         self.assignment_regex = re.compile(r'([a-zA-Z_]\w*)\s*=[^=]')
 #        self.io_regex = re.compile(r'\b(fopen|fclose|fwrite|fread|printf|fprintf|sprintf|system|remove|rename)\s*\(')
         self.io_regex = re.compile(r'\b(fopen|fclose|fwrite|fread|printf|fprintf|soteria_mark|malloc|free)\s*\(')
+        self.mem_regex = re.compile(r'\b(malloc|free|calloc|realloc|PyMem_Malloc|PyMem_Free)\b\s*\(')
         
         self.soteria_dir = Path(__file__).resolve().parent
         self.soteria_src = self.soteria_dir / "src"
         self.soteria_inc = self.soteria_dir / "include"
+        
+        self.alloc_map = {
+            "malloc":      "ALLOC_MALLOC",
+            "free":        "ALLOC_MALLOC",
+            "calloc":      "ALLOC_MALLOC",
+            "realloc":     "ALLOC_MALLOC",
+            "PyMem_Malloc":"ALLOC_PYMEM",
+            "PyMem_Free":  "ALLOC_PYMEM"
+        }
         
         self.blacklist = {
             'soteria_mark', 'soteria_dispatch', 'soteria_init', 'main', 
@@ -36,94 +46,115 @@ class SoteriaScribe:
         """Calcula a indentação de uma linha para manter a gramática Python."""
         return line[:len(line) - len(line.lstrip())]
 
-
     def instrument_pyx(self, content, filename):
-        """Injeta rastro nativo no Cython protegendo contra caminhos Windows e one-liners."""
-        # [OURO] Normaliza o caminho para evitar a "Unicode Escape Plague" (\U)
-        safe_filename = filename.replace("\\", "/")
+        if "soteria_malloc_ext" in content: return content
         
+        safe_filename = filename.replace("\\", "/")
         lines = content.splitlines()
-#        new_lines = ['cdef extern from "soteria.h":', '    void soteria_mark(char* msg, char* file, int line)', '']
+        
+        # Header de Definição para o Cython entender os símbolos C da Sotéria
         new_lines = [
-            'cdef extern from "soteria.h":', 
-            '    void soteria_mark(const char* msg, const char* file, int line)', 
+            '# --- SOTERIA VULCAN SHIELD ---',
+            'cdef extern from "soteria.h":',
+            '    void soteria_mark(const char* msg, const char* file, int line) nogil',
+            '    void* soteria_malloc_ext(size_t s, int origin, const char* f, int l) nogil',
+            '    void soteria_free_ext(void* p, int origin, const char* f, int l) nogil',
+            '    int ALLOC_MALLOC = 1',
+            '    int ALLOC_PYMEM = 2',
             ''
         ]
+
+        mem_pattern = re.compile(r'\b(malloc|free|PyMem_Malloc|PyMem_Free)\b\s*\((.*)\)')
+
         for i, line in enumerate(lines):
+            ln_num = i + 1
             stripped = line.strip()
+            
+            # Filtros de segurança do Cython
             prev_line = lines[i-1].strip() if i > 0 else ""
             if "switch" in prev_line and prev_line.endswith("{"):
                 new_lines.append(line)
                 continue
-            if "ctypes." in line:
-                indent = self._get_indent(line)
-                new_lines.append(f'{indent}soteria_mark("PRE-CALL: Chamada externa perigosa", "{safe_filename}", {i+1})')
-            new_lines.append(line)
-            match = self.pyx_func_regex.match(line)
-            if match:
-                # Proteção contra one-liners
-                if ":" in line and line.split(":", 1)[1].strip():
-                    continue
                 
+            current_line = line
+
+            # 1. Vacina de Memória no Cython
+            mem_match = mem_pattern.search(current_line)
+            if mem_match:
+                func_name = mem_match.group(1)
+                args = mem_match.group(2)
+                origin = "ALLOC_PYMEM" if "PyMem" in func_name else "ALLOC_MALLOC"
+                sot_func = "soteria_free_ext" if "free" in func_name.lower() else "soteria_malloc_ext"
+                
+                current_line = mem_pattern.sub(f'{sot_func}({args}, {origin}, "{safe_filename}", {ln_num})', current_line)
+
+            # 2. Rastro de Chamadas Externas
+            if "ctypes." in current_line:
+                indent = self._get_indent(current_line)
+                new_lines.append(f'{indent}soteria_mark("PRE-CALL: Ctypes", "{safe_filename}", {ln_num})')
+
+            # 3. Rastro de Funções Cython
+            match = self.pyx_func_regex.match(current_line)
+            if match and not (":" in current_line and current_line.split(":", 1)[1].strip()):
                 name = match.group('name')
                 indent = match.group('indent') + "    "
-                # Usa o safe_filename aqui
-                new_lines.append(f'{indent}soteria_mark("TRACEBACK: {name}", "{safe_filename}", {i+1})')
+                new_lines.append(current_line)
+                new_lines.append(f'{indent}soteria_mark("TRACEBACK: {name}", "{safe_filename}", {ln_num})')
+                continue
+
+            new_lines.append(current_line)
+
         return "\n".join(new_lines)
 
     def instrument_code(self, content, filename):
-        #if "soteria_io_trace" in content: return content
-        if "soteria_io_trace" in content and "const char*" in content: return content
-        
+        if "soteria_free_ext" in content or "soteria_malloc_ext" in content: 
+            return content
         safe_fn = filename.replace("\\", "/")
-        # Regex para capturar funções de sistema
-#        io_re = re.compile(r'\b(fopen|printf|fprintf|malloc|free|CreateThread)\s*\(')
-        io_re = re.compile(r'\b(fopen|printf|fprintf|malloc|free|CreateThread)\b\s*\(')        
         lines = content.splitlines()
         new_lines = []
         if "soteria.h" not in content: new_lines.append('#include "soteria.h"\n')
 
-        stats = {"io": 0, "func": 0}
+        stats = {"io": 0, "func": 0, "mem": 0}
+        mem_pattern = re.compile(r'\b(malloc|free|calloc|realloc|PyMem_Malloc|PyMem_Free)\b\s*\((.*)\)')
+        io_re = re.compile(r'\b(fopen|printf|fprintf|CreateThread)\b\s*\(')
+
         for i, line in enumerate(lines):
+            ln_num = i + 1
             stripped = line.strip()
-            
-            if "SOTERIA_ENTER" in stripped or "soteria_" in stripped:
+            if not stripped or "SOTERIA_ENTER" in stripped or "soteria_" in stripped:
                 new_lines.append(line)
                 continue
-            
-            if "soteria_" in stripped or (i+1 < len(lines) and "soteria_" in lines[i+1]):
+            if stripped.startswith(("//", "/*")):
                 new_lines.append(line)
                 continue
-                
-            if not stripped or "soteria_" in line or stripped.startswith(("//", "/*")):
-                new_lines.append(line); continue
-
             indent = self._get_indent(line)
+            current_line = line
+            mem_match = mem_pattern.search(current_line)
+            if mem_match:
+                stats["mem"] += 1
+                func_name = mem_match.group(1)
+                args = mem_match.group(2)
+                origin = self.alloc_map.get(func_name, "ALLOC_UNKNOWN")
+                sot_func = "soteria_free_ext" if "free" in func_name.lower() else "soteria_malloc_ext"
+                current_line = mem_pattern.sub(f'{sot_func}({args}, {origin}, "{safe_fn}", {ln_num})', current_line)
 
-            # --- VACCINE: IO_SNIFFER ---
-            io_match = io_re.search(line)
+            io_match = io_re.search(current_line)
             if io_match:
                 stats["io"] += 1
                 func = io_match.group(1)
-                # Tenta pegar o primeiro argumento para o rastro de conteúdo
-                arg_match = re.search(rf'{func}\s*\(\s*([^,)]+)', line)
-                payload = arg_match.group(1).replace('"', "'") if arg_match else "N/A"
-#                new_lines.append(f'{indent}soteria_io_trace("{func}", "{payload}", "{safe_fn}", {i+1});')
-                new_lines.append(f'{indent}soteria_io_trace("{func}", (const char*)"{payload}", "{safe_fn}", {i+1});')
+                new_lines.append(f'{indent}soteria_io_trace("{func}", "Chamada IO", "{safe_fn}", {ln_num});')
 
-            # --- VACCINE: ENTER_FUNC ---
-            func_match = self.c_func_regex.match(line)
+            func_match = self.c_func_regex.match(current_line)
             if func_match:
                 stats["func"] += 1
-                new_lines.append(line)
-                if func_match.group(2) not in self.blacklist:
-                    new_lines.append(f'    SOTERIA_ENTER("{func_match.group(2)}");')
+                new_lines.append(current_line)
+                func_name = func_match.group(2)
+                if func_name not in self.blacklist:
+                    new_lines.append(f'{indent}    SOTERIA_ENTER("{func_name}");')
                 continue
-
-            new_lines.append(line)
-        
-        from doxoade.tools.telemetry_tools.logger import chief_heartbeat
-        chief_heartbeat("SCRIBE", "VACCINATION", {"file": filename, "stats": stats})
+            new_lines.append(current_line)
+    
+        chief_heartbeat("SCRIBE", "VACCINATION_C", {"file": filename, "stats": stats})
         return "\n".join(new_lines)
 
     def generate_shadow(self, src_dir, shadow_dir):

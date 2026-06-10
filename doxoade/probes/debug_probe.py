@@ -1,18 +1,7 @@
+# -*- coding: utf-8 -*-
 # doxoade/doxoade/probes/debug_probe.py
-"""
-Debug Probe v2.5 - Aegis Forensic Engine (Noise Gate Ativo).
-Modo autópsia + modo perfil profundo com isolamento cirúrgico de projeto.
-"""
 import sys
 import os as _os
-
-try:
-    from doxoade.probes.debug_probe import _LineTimer
-except ImportError:
-    # Fallback se rodar como script direto
-    if '' not in sys.path:
-        sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
-
 import json
 import time
 import types
@@ -24,11 +13,9 @@ import linecache
 import io
 from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
 
-current_dir = _os.path.dirname(_os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
+_MARKER_DEBUG = '---DOXOADE-DEBUG-DATA---'
 
-_MARKER_DEBUG = '---DOXOADE-DEBUG-DATA---' # Garantir que está no topo
+# --- AUXILIARES TÁTICOS ---
 
 def _resolve_package(abs_path: str):
     parts = []
@@ -36,8 +23,7 @@ def _resolve_package(abs_path: str):
     while _os.path.exists(_os.path.join(current, '__init__.py')):
         parts.insert(0, _os.path.basename(current))
         parent = _os.path.dirname(current)
-        if parent == current:
-            break
+        if parent == current: break
         current = parent
     project_root = current
     if project_root not in sys.path:
@@ -46,323 +32,165 @@ def _resolve_package(abs_path: str):
     return (package_name, project_root)
 
 def safe_serialize(obj, depth=0):
-    if depth > 2:
-        return '...'
-    if isinstance(obj, (str, int, float, bool, type(None))):
-        return obj
-    if isinstance(obj, (list, tuple)):
-        return [safe_serialize(x, depth + 1) for x in obj[:5]]
-    if isinstance(obj, dict):
-        return {str(k): safe_serialize(v, depth + 1) for k, v in list(obj.items())[:5]}
+    if depth > 1: return str(type(obj).__name__)
+    if isinstance(obj, (str, int, float, bool, type(None))): return str(obj)
+    if isinstance(obj, (list, tuple)): return f"[{len(obj)} items]"
+    if isinstance(obj, dict): return f"{{ {len(obj)} keys }}"
     return str(type(obj).__name__)
 
-def _capture_locals(globs: dict) -> dict:
-    captured = {}
-    for k, v in globs.items():
-        if not k.startswith('__') and (not isinstance(v, types.ModuleType)):
-            captured[k] = safe_serialize(v)
-    return captured
+def _capture_locals(f_locals):
+    return {k: safe_serialize(v) for k, v in f_locals.items() if not k.startswith('__')}
+
+def _emit_data(marker, data_dict):
+    """Emissão Industrial com Marcadores Unificados."""
+    payload = json.dumps(data_dict, ensure_ascii=False)
+    sys.stdout.write(f"\n{marker}\n{payload}\n")
+    sys.stdout.flush()
+
+# --- MOTORES DE EXTRAÇÃO ---
+
+def _extract_function_stats(profiler, target_file, project_root):
+    stream = io.StringIO()
+    ps = pstats.Stats(profiler, stream=stream)
+    stats_dict = ps.stats
+    results = []
+    norm_target = _os.path.normcase(_os.path.abspath(target_file))
+    norm_root = _os.path.normcase(_os.path.abspath(project_root))
+    
+    for (fname, lineno, func_name), (prim_calls, total_calls, tt, ct, _) in stats_dict.items():
+        curr_fname = _os.path.normcase(_os.path.abspath(fname)) if _os.path.exists(fname) else fname
+        if not curr_fname.startswith(norm_root) and curr_fname != norm_target:
+            continue
+        results.append({
+            'name': func_name, 'file': fname, 'lineno': lineno, 
+            'calls': total_calls, 'total_ms': round(tt * 1000, 4),
+            'per_call_ms': round((tt / max(1, total_calls)) * 1000, 4),
+            'cum_ms': round(ct * 1000, 4)
+        })
+    return sorted(results, key=lambda x: x['cum_ms'], reverse=True)[:15]
+
+def _extract_memory_stats(snapshot, target_file, project_root):
+    stats = snapshot.statistics('lineno')
+    top = []
+    norm_root = _os.path.normcase(_os.path.abspath(project_root))
+    for stat in stats:
+        frame = stat.traceback[0]
+        fname = frame.filename
+        if not _os.path.normcase(_os.path.abspath(fname)).startswith(norm_root):
+            continue
+        top.append({
+            'file': fname, 'line': frame.lineno, 
+            'size_kb': round(stat.size / 1024, 2), 
+            'count': stat.count, 
+            'content': linecache.getline(fname, frame.lineno).strip()
+        })
+    return top[:10]
+
+# --- SENTINELA DE RASTRO ---
 
 class _LineTimer:
-    __slots__ = ('data', '_last', 'target_file', 'project_root', 'internal_mode', 'live_flow')
-
-    def __init__(self, target_file: str, project_root: str, internal_mode: bool = False, live_flow: bool = True):
-        self.data: dict = {}
-        self._last: dict = {}
-        # Normaliza caminhos para evitar erros de comparação no Windows
-        self.target_file = _os.path.normcase(_os.path.abspath(target_file)) if target_file != "internal_cmd" else target_file
-        self.project_root = _os.path.normcase(_os.path.abspath(project_root))
-        self.internal_mode = internal_mode
+    __slots__ = ('data', '_last', 'target_file', 'project_root', 'live_flow')
+    def __init__(self, target_file, project_root, live_flow=True):
+        self.data = {}
+        self._last = {}
+        self.target_file = _os.path.abspath(target_file).replace('\\', '/').lower()
+        self.project_root = _os.path.abspath(project_root).replace('\\', '/').lower()
         self.live_flow = live_flow
-        self.target_file = _os.path.normcase(_os.path.abspath(target_file)) if target_file != "internal_cmd" else "internal_cmd"
-        if self.internal_mode:
-            self.project_root = _os.path.dirname(self.project_root)
 
     def tracer(self, frame, event, arg):
         if event != 'line': return self.tracer
-
-        fname = _os.path.normcase(_os.path.abspath(frame.f_code.co_filename))
-        
-        # Ignora arquivos de rastro e bibliotecas Python
-        if any(x in fname for x in ['debug_probe.py', 'flow_runner.py', 'Lib', 'importlib']):
-            return self.tracer
-
-        # Obtém o caminho do arquivo atual
         raw_fname = frame.f_code.co_filename
-        if raw_fname.startswith('<'): return self.tracer # Ignora <string>, <frozen>, etc.
-        
-        fname = _os.path.normcase(_os.path.abspath(raw_fname))
-        
-        # --- NOISE GATE (Filtro de Ruído) ---
-        # Se não estiver na pasta do projeto, ignore (evita mostrar threading.py, enum.py, etc.)
-        if not fname.startswith(self.project_root):
+        if raw_fname.startswith('<'): return self.tracer
+        abs_fname = _os.path.abspath(raw_fname).replace('\\', '/')
+        if any(x in abs_fname.lower() for x in ['debug_probe', 'flow_runner', 'site-packages']):
             return self.tracer
-            
-        # Filtra pastas de sistema comuns dentro do projeto (como venv)
-        if any(x in fname for x in ['site-packages', 'Lib', 'importlib']):
-            return self.tracer
-
         lineno = frame.f_lineno
-        content = linecache.getline(fname, lineno).strip()
-        
-        if not content: return self.tracer
-
-        # Exibição em Tempo Real (Estilo Matrix)
-        if self.live_flow:
-            from doxoade.tools.doxcolors import Fore, Style
-            f_short = _os.path.basename(fname)
-            # Rastro elegante: ARQUIVO | LINHA | CÓDIGO
-            sys.stdout.write(f"{Fore.GREEN}{f_short:<18}{Style.RESET_ALL} {Fore.DIM}│{Style.RESET_ALL} {Fore.YELLOW}{lineno:<4}{Style.RESET_ALL} {Fore.DIM}│{Style.RESET_ALL} {content}\n")
-            sys.stdout.flush()
-
-        # Coleta de métricas
         now_ns = time.perf_counter_ns()
-        frame_id = id(frame)
-        self._commit(frame_id, now_ns)
-        self._last[frame_id] = (fname, lineno, now_ns)
-        
+        fid = id(frame)
+        if fid in self._last:
+            p_file, p_line, p_ts = self._last[fid]
+            entry = self.data.setdefault((p_file, p_line), {'hits': 0, 'total_ns': 0})
+            entry['hits'] += 1
+            entry['total_ns'] += (now_ns - p_ts)
+        self._last[fid] = (abs_fname, lineno, now_ns)
+        if self.live_flow:
+            from doxoade.tools.doxcolors import Fore
+            f_short = _os.path.basename(abs_fname)
+            sys.stdout.write(f"{Fore.GREEN}{f_short:<18}\x1b[0m │ \x1b[93m{lineno:<4}\x1b[0m │ {linecache.getline(raw_fname, lineno).strip()}\n")
         return self.tracer
 
-    def _commit(self, frame_id: int, now_ns: int):
-        if frame_id not in self._last: return
-        prev_file, prev_line, prev_ts = self._last[frame_id]
-        key = (prev_file, prev_line)
-        entry = self.data.setdefault(key, {'hits': 0, 'total_ns': 0})
-        entry['hits'] += 1
-        entry['total_ns'] += now_ns - prev_ts
+    def top_lines(self, limit=15):
+        res = []
+        for (f, l), s in self.data.items():
+            ms = s['total_ns'] / 1_000_000
+            res.append({'file': f, 'line': l, 'hits': s['hits'], 'total_ms': round(ms, 4), 'content': linecache.getline(f, l).strip()})
+        return sorted(res, key=lambda x: x['total_ms'], reverse=True)[:limit]
 
-    def top_lines(self, limit: int = 20) -> list:
-        """Retorna as linhas que mais consumiram tempo (MÉTODO FALTANTE)."""
-        results = []
-        for (fname, lineno), stat in self.data.items():
-            content = linecache.getline(fname, lineno).strip()
-            results.append({
-                'file': fname,
-                'line': lineno,
-                'hits': stat['hits'],
-                'total_ms': round(stat['total_ns'] / 1_000_000, 4),
-                'content': content
-            })
-        # Ordena pelo tempo total decrescente
-        results.sort(key=lambda x: x['total_ms'], reverse=True)
-        return results[:limit]
+# --- ENTRY POINTS ---
 
-def _extract_function_stats(profiler: cProfile.Profile, target_file: str, project_root: str, limit: int=15) -> list:
-    stream = io.StringIO()
-    ps = pstats.Stats(profiler, stream=stream)
-    ps.sort_stats('cumulative')
-    stats_dict = ps.stats
-    norm_target = _os.path.normcase(_os.path.abspath(target_file))
-    norm_root = _os.path.normcase(_os.path.abspath(project_root))
-    skip = ('site-packages', 'dist-packages', 'lib\\python', 'lib/python', '{built-in', '{method', 'security_utils', 'debug_probe', 'doxoade')
-    results = []
-    for (fname, lineno, func_name), (prim_calls, total_calls, tt, ct, _callers) in stats_dict.items():
-        if fname in ('<sandbox>', '<string>'):
-            fname = target_file
-        if fname == '~' or fname.startswith('<frozen'):
-            continue
-        norm_fname = _os.path.normcase(_os.path.abspath(fname))
-        is_target = norm_fname == norm_target
-        is_noise = False
-        if not is_target:
-            if not norm_fname.startswith(norm_root):
-                is_noise = True
-            if any((s in fname or s in norm_fname for s in skip)):
-                is_noise = True
-        if is_noise:
-            continue
-        results.append({'name': func_name, 'file': fname, 'lineno': lineno, 'calls': total_calls, 'prim_calls': prim_calls, 'total_ms': round(tt * 1000, 4), 'per_call_ms': round(tt / max(1, total_calls) * 1000, 4), 'cum_ms': round(ct * 1000, 4)})
-    results.sort(key=lambda x: x['cum_ms'], reverse=True)
-    return results[:limit]
-
-def _extract_memory_stats(snapshot, target_file: str, project_root: str, limit: int=10) -> dict:
-    norm_target = _os.path.normcase(_os.path.abspath(target_file))
-    norm_root = _os.path.normcase(_os.path.abspath(project_root))
-    skip = ('site-packages', 'dist-packages', 'lib\\python', 'lib/python', 'security_utils', 'debug_probe', 'doxoade')
-    stats = snapshot.statistics('lineno')
-    top = []
-    for stat in stats:
-        raw_fname = str(stat.traceback[0].filename)
-        if raw_fname in ('<sandbox>', '<string>'):
-            raw_fname = target_file
-        if raw_fname == '~' or raw_fname.startswith('<frozen'):
-            continue
-        fname = _os.path.normcase(_os.path.abspath(raw_fname))
-        is_target = fname == norm_target
-        is_noise = False
-        if not is_target:
-            if not fname.startswith(norm_root):
-                is_noise = True
-            if any((s in raw_fname or s in fname for s in skip)):
-                is_noise = True
-        if is_noise:
-            continue
-        lineno = stat.traceback[0].lineno
-        content = linecache.getline(raw_fname, lineno).strip()
-        top.append({'file': raw_fname, 'line': lineno, 'size_kb': round(stat.size / 1024, 2), 'count': stat.count, 'content': content})
-        if len(top) >= limit:
-            break
-    return {'peak_mb': 0.0, 'top_allocs': top}
-
-def run_debug(script_path, mode='debug', args=None):
-    import shlex, os, sys, json, traceback, types
-    # Removido os prints do topo!
-    
+def run_debug(script_path):
     abs_path = _os.path.abspath(script_path)
-    is_internal = "command_wrapper.py" in script_path.replace('\\', '/')
-    
-    debug_data = {'status': 'unknown', 'variables': {}, 'error': None}
     globs = {'__name__': '__main__', '__file__': abs_path}
-    
     try:
-        sys.stdout.write(f'\n--- BOOTING AEGIS SANDBOX [{"INTERNAL" if is_internal else "FILE"}] ---\n')
-        sys.stdout.flush()
-
-        if is_internal:
-            from doxoade.cli import cli
-            cmd_args = shlex.split(args) if args else []
-            old_argv = sys.argv.copy()
-            sys.argv = ['doxoade'] + cmd_args
-            try:
-                cli(standalone_mode=False) 
-            finally:
-                sys.argv = old_argv
-        else:
-            with open(abs_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            restricted_safe_exec(content, globs, allow_imports=True, filename=abs_path)
-
-        debug_data['status'] = 'success'
-        debug_data['variables'] = _capture_locals(globs)
-
+        restricted_safe_exec(open(abs_path).read(), globs, allow_imports=True, filename=abs_path)
+        _emit_data(_MARKER_DEBUG, {'status': 'success', 'variables': _capture_locals(globs)})
     except Exception as e:
-        debug_data['status'] = 'error'
-        debug_data['error'] = str(e)
-        debug_data['traceback'] = traceback.format_exc()
-        # Captura o frame real do erro
-        _, _, exc_tb = sys.exc_info()
-        tb = exc_tb
+        tb = sys.exc_info()[2]
         while tb and tb.tb_next: tb = tb.tb_next
-        if tb:
-            debug_data['line'] = tb.tb_lineno
-            debug_data['variables'] = _capture_locals(tb.tb_frame.f_locals)
+        _emit_data(_MARKER_DEBUG, {'status': 'error', 'error': str(e), 'variables': _capture_locals(tb.tb_frame.f_locals), 'line': tb.tb_lineno})
 
-    # --- TRANSMISSÃO FINAL (Protocolo Chief-Gold) ---
-    sys.stdout.write(f"\n{_MARKER_DEBUG}\n") # <--- O marcador deve ser este
-    sys.stdout.write(json.dumps(debug_data, ensure_ascii=False))
-    sys.stdout.write("\n")
-    sys.stdout.flush()
-
-def run_profile(script_path: str):
-    import os as _os
+def run_profile(script_path):
     abs_path = _os.path.abspath(script_path)
     pkg_name, project_root = _resolve_package(abs_path)
-    profile_data = {'status': 'unknown', 'variables': {}, 'error': None, 'profile': {}}
-    globs = {'__name__': '__main__', '__file__': abs_path, '__package__': pkg_name}
-    line_timer = _LineTimer(abs_path, project_root)
+    line_timer = _LineTimer(abs_path, project_root, live_flow=False)
     profiler = cProfile.Profile()
+    tracemalloc.start()
+    sys.settrace(line_timer.tracer)
+    profiler.enable()
+    t0 = time.perf_counter()
     try:
-        sys.stdout.write('\n--- BOOTING AEGIS PROFILE ENGINE ---\n')
-        sys.stdout.flush()
-        with open(abs_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        tracemalloc.start()
-        sys.settrace(line_timer.tracer)
-        profiler.enable()
-        t0 = time.perf_counter()
-        try:
-            restricted_safe_exec(content, globs, allow_imports=True)
-        finally:
-            profiler.disable()
-            sys.settrace(None)
-            _, peak = tracemalloc.get_traced_memory()
-            mem_snapshot = tracemalloc.take_snapshot()
-            tracemalloc.stop()
-        elapsed_ms = (time.perf_counter() - t0) * 1000
-        profile_data['status'] = 'success'
-        profile_data['variables'] = _capture_locals(globs)
-        mem_stats = _extract_memory_stats(mem_snapshot, abs_path, project_root)
-        mem_stats['peak_mb'] = round(peak / 1024 / 1024, 4)
-        profile_data['profile'] = {'total_ms': round(elapsed_ms, 2), 'lines': line_timer.top_lines(), 'functions': _extract_function_stats(profiler, abs_path, project_root), 'memory': mem_stats}
-    except Exception as e:
-        profiler.disable()
-        sys.settrace(None)
-        if tracemalloc.is_tracing():
-            tracemalloc.stop()
-        import sys as exc_sys
-        from traceback import print_tb as exc_trace
-        _, exc_obj, exc_tb = exc_sys.exc_info()
-        print(f'\x1b[31m ■ Exception type: {e} ■ Exception value: {exc_obj}\n')
-        exc_trace(exc_tb)
-        profile_data['status'] = 'error'
-        profile_data['error'] = str(e)
-        _, _, tb = sys.exc_info()
-        if tb:
-            while tb.tb_next:
-                tb = tb.tb_next
-            frame = tb.tb_frame
-            profile_data['traceback'] = traceback.format_exc()
-            profile_data['line'] = tb.tb_lineno
-            for k, v in frame.f_locals.items():
-                if not k.startswith('__'):
-                    profile_data['variables'][k] = safe_serialize(v)
-        profile_data['profile'] = {'total_ms': 0, 'lines': line_timer.top_lines(), 'functions': [], 'memory': {'peak_mb': 0.0, 'top_allocs': []}}
-    print('\n---DOXOADE-PROFILE-DATA---')
-    print(json.dumps(profile_data, ensure_ascii=False))
+        restricted_safe_exec(open(abs_path).read(), {'__name__': '__main__', '__file__': abs_path}, allow_imports=True)
+    except: pass
+    profiler.disable()
+    sys.settrace(None)
+    _, peak = tracemalloc.get_traced_memory()
+    snapshot = tracemalloc.take_snapshot()
+    tracemalloc.stop()
+    _emit_data('---DOXOADE-PROFILE-DATA---', {
+        'status': 'success',
+        'profile': {
+            'total_ms': round((time.perf_counter() - t0) * 1000, 2),
+            'lines': line_timer.top_lines(),
+            'functions': _extract_function_stats(profiler, abs_path, project_root),
+            'memory': {'peak_mb': round(peak/1048576, 3), 'top_allocs': _extract_memory_stats(snapshot, abs_path, project_root)}
+        }
+    })
 
-def run_memory(script_path: str):
-    """Executa o script isolando a autópsia profunda de memória."""
+def run_memory(script_path):
     from doxoade.commands.debug_systems.debug_memory import get_memory_composition, get_allocation_tracebacks
-    import tracemalloc
-    import json
-    import traceback
     abs_path = _os.path.abspath(script_path)
     pkg_name, project_root = _resolve_package(abs_path)
-    mem_data = {'status': 'unknown', 'error': None, 'memory': {}}
-    globs = {'__name__': '__main__', '__file__': abs_path, '__package__': pkg_name}
+    tracemalloc.start(10)
     try:
-        sys.stdout.write('\n--- BOOTING AEGIS MEMORY FORENSICS ---\n')
-        sys.stdout.flush()
-        with open(abs_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        tracemalloc.start(10)
-        try:
-            restricted_safe_exec(content, globs, allow_imports=True)
-            mem_data['status'] = 'success'
-        except BaseException as be:
-            if not isinstance(be, (KeyboardInterrupt, SystemExit)):
-                mem_data['status'] = 'error'
-                mem_data['error'] = str(be)
-            else:
-                mem_data['status'] = 'success'
-    except BaseException as e:
-        mem_data['status'] = 'error'
-        mem_data['error'] = str(e)
-    finally:
-        import signal
-        try:
-            signal.signal(signal.SIGINT, signal.SIG_IGN)
-        except Exception:
-            pass
-        try:
-            snapshot = tracemalloc.take_snapshot()
-            _, peak = tracemalloc.get_traced_memory()
-            tracemalloc.stop()
-            mem_data['memory'] = {'peak_mb': round(peak / 1024 / 1024, 4) if peak else 0.0, 'composition': get_memory_composition(limit=15), 'tracebacks': get_allocation_tracebacks(snapshot, limit=5)}
-        except BaseException as fe:
-            mem_data['error'] = f'Erro na formatação da memória: {fe}'
-        print('\n---DOXOADE-MEMORY-DATA---')
-        print(json.dumps(mem_data, ensure_ascii=False))
-        sys.stdout.flush()
+        restricted_safe_exec(open(abs_path).read(), {'__name__': '__main__', '__file__': abs_path}, allow_imports=True)
+    except: pass
+    snapshot = tracemalloc.take_snapshot()
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    _emit_data('---DOXOADE-MEMORY-DATA---', {
+        'status': 'success',
+        'memory': {
+            'peak_mb': round(peak/1048576, 3), 
+            'composition': get_memory_composition(), 
+            'tracebacks': get_allocation_tracebacks(snapshot)
+        }
+    })
+
 if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        sys.exit(1)
-    script_to_run = sys.argv[1]
+    if len(sys.argv) < 2: sys.exit(1)
+    script_to_run = _os.path.abspath(sys.argv[1])
     mode = sys.argv[2] if len(sys.argv) > 2 else 'debug'
     sys.argv = [script_to_run] + sys.argv[3:]
-    if mode == 'profile':
-        run_profile(script_to_run)
-    elif mode == 'memory':
-        run_memory(script_to_run)
-    else:
-        run_debug(script_to_run)
+    if mode == 'profile': run_profile(script_to_run)
+    elif mode == 'memory': run_memory(script_to_run)
+    else: run_debug(script_to_run)

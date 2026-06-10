@@ -20,8 +20,9 @@ import linecache
 import io
 from pathlib import Path
 
+from doxoade.tools.horus             import horus_trace
+from doxoade.tools.filesystem        import _find_project_root
 from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
-from doxoade.tools.filesystem import _find_project_root
 
 def _bootstrap(script_path):
     """Detecta a raiz do projeto e o nome correto do pacote (Aegis Ready)."""
@@ -238,41 +239,40 @@ def run_debug(script_path: str):
     print('\n---DOXOADE-DEBUG-DATA---')
     print(json.dumps(debug_data, ensure_ascii=False))
 
-def get_debug_env(script_path):
-    """Sela o ambiente para a sonda com visibilidade total do core."""
-    import os
+@horus_trace
+def get_debug_env(script_path=None):
+    """Garante um ambiente de execução íntegro (Anti-Void)."""
+    import os, sys
+    from doxoade.tools.filesystem import _find_project_root
+    
+    # 1. Pega a base atual
     env = os.environ.copy()
     
-    # 1. Localiza a raiz do 'Projeto OADE' (onde a pasta doxoade reside)
-    # Subimos: debug_utils.py -> debug_systems -> commands -> doxoade (pacote) -> OADE (root)
-    doxoade_pkg = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    doxoade_root = os.path.dirname(doxoade_pkg)
+    # 2. Tenta ancorar a raiz
+    root = _find_project_root(script_path or os.getcwd())
     
-    # 2. Prepara o PYTHONPATH com: Root do Doxoade + Pasta do Projeto Alvo
-    current_project_root = os.getcwd()
-    existing_pp = env.get('PYTHONPATH', '')
+    # [PLATINUM] Se achou a raiz, injeta no PYTHONPATH
+    if root:
+        root_abs = os.path.abspath(root).replace('\\', '/')
+        existing_pp = env.get('PYTHONPATH', '')
+        env['PYTHONPATH'] = f"{root_abs}{os.pathsep}{existing_pp}".strip(os.pathsep)
+        env['DOXOADE_PROJECT_ROOT'] = root_abs
+        # click.secho(f"   > Âncora detectada: {root_abs}", fg='blue', dim=True)
     
-    new_paths = [doxoade_root, current_project_root]
-    if existing_pp:
-        new_paths.append(existing_pp)
-        
-    env['PYTHONPATH'] = os.pathsep.join(new_paths)
-    
-    # 3. Trava o encoding para evitar crash de pipe no Windows
-    env['PYTHONIOENCODING'] = 'utf-8'
-    env['DOXOADE_AUTHORIZED_RUN'] = '1'
-    
+    # NUNCA retorne None. Se tudo falhar, retorna o env puro.
     return env
 
-def build_probe_command(python_exe: str, probe_file: str, script: str, mode: str='debug', args: str=None) -> list:
-    """
-    Protocolo:  python debug_probe.py <script_abs> <mode> [args...]
-    mode: 'debug' | 'profile'
-    """
-    cmd = [python_exe, os.path.abspath(probe_file), os.path.abspath(script), mode]
-    if args:
-        cmd.extend(args.split())
-    return cmd
+def build_probe_command(python_exe, probe_path, script_path, mode, args_str=None):
+    """Construtor de Comando Unificado (v4.0 Platinum)."""
+    import os
+    # [PLATINUM] Montagem como LISTA PURA para neutralizar a Space Path Plague
+    cmd = [str(python_exe), str(probe_path), os.path.abspath(script_path), mode]
+    
+    if args_str:
+        import shlex
+        cmd.extend(shlex.split(args_str))
+        
+    return cmd # NUNCA retorna None
 
 def run_profile(script_path: str):
     """
@@ -341,41 +341,32 @@ def run_profile(script_path: str):
         print(json.dumps(profile_data, ensure_ascii=False))
         sys.stdout.flush()
 
-def build_flow_command(python_exe, runner_file, script, watch=None, bottleneck=False, no_compress=False, args=None, **kwargs):
-#def build_flow_command(python_exe, runner_file, script, watch: str=None, bottleneck: bool=False, no_compress: bool=False, args: str=None, kwargs) #-> list:
-    """
-    Protocolo nativo do flow_runner (argparse):
-        flow_runner.py [--base] [--val] [--no-compress] [--target TARGET] script
-
-    --watch   → --target + --val
-    --bottleneck → --base
-    --no-compress → --no-compress  (desativa Iron Gate no flow_runner)
-    """
-    base_dir = Path(__file__).resolve().parents[2] 
-    probe_path = base_dir / "probes" / "flow_runner.py"
-    cmd = [python_exe, str(probe_path), os.path.abspath(script)]
-    if watch:
-        cmd.extend(['--target', watch])
-        cmd.append('--val')
-    elif bottleneck:
-        cmd.append('--base')
-    if no_compress:
-        cmd.append('--no-compress')
-    cmd.append(os.path.abspath(script))
-    if args:
-        cmd.extend(args.split())
-    # Mapeamento de flags do CLI para o Probe
-    if kwargs.get('is_internal'): cmd.append("--internal")
-    if kwargs.get('flow_val'):    cmd.append("--val")
-    if kwargs.get('flow_import'): cmd.append("--imp")
-    if kwargs.get('flow_func'):   cmd.append("--func")
-    if kwargs.get('no_vulcan'):   cmd.append("--no-vulcan")
-    if kwargs.get('no_compress'): cmd.append("--no-compress")
+@horus_trace
+def build_flow_command(script_path, is_internal, kwargs):
+    """Construtor de Comando Industrial (Anti-SpacePath)."""
+    import os, sys
+    from pathlib import Path
     
-    if args:
-        cmd.extend(["--args", args])
-        
-    return cmd
+    # Localiza o runner na pasta de probes
+    # parents[2] sobe de debug_systems -> commands -> doxoade
+    probe_path = Path(__file__).resolve().parents[2] / "probes" / "flow_runner.py"
+    
+    if not probe_path.exists():
+        # Fallback para execução via pacote
+        import doxoade.probes.flow_runner as fr
+        probe_path = Path(fr.__file__)
+
+    # Monta a lista (O SO protege espaços automaticamente)
+    cmd = [sys.executable, str(probe_path), os.path.abspath(script_path)]
+
+    # Adiciona as flags táticas
+    if kwargs.get('bottleneck'): cmd.append('--bottleneck')
+    if kwargs.get('flow_val'): cmd.append('--val')
+    if kwargs.get('flow_import'): cmd.append('--import')
+    if kwargs.get('flow_func'): cmd.append('--func')
+
+    # Retorna o comando e a string de args (vazia pois usamos lista)
+    return cmd, ""
 
 def run_memory(script_path: str):
     """Executa o script isolando a autópsia profunda de memória."""

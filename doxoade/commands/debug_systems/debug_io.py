@@ -103,7 +103,9 @@ def render_line_hotspots(lines: list, total_ms: float):
         bar = _bar(item['total_ms'], max_ms, _COL_BAR, Fore.RED)
         tot = f"{item['total_ms']:>8.2f}ms"
         hits = f"{item['hits']:>5}x"
-        phit = f"{item['per_hit_ms']:>8.3f}ms"
+        phit_val = item.get('per_hit_ms', item['total_ms'] / max(1, item['hits']))
+        phit = f"{phit_val:>8.3f}ms"
+#        phit = f"{item['per_hit_ms']:>8.3f}ms"
         code = item['content'][:40] if item['content'] else ''
         colored = _colorize(code)
         echo(f'   {Fore.YELLOW}{label}{Style.RESET_ALL} {bar}  {Fore.WHITE}{tot}{Style.RESET_ALL} {Style.DIM}{hits}{Style.RESET_ALL} {Style.DIM}{phit}{Style.RESET_ALL}  {colored}')

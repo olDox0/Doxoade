@@ -1,3 +1,4 @@
+// doxoade/tools/vulcan/diagnostic/soteria/src/soteria_core.c
 #define SOTERIA_CORE
 #include "../include/soteria.h"
 #include <stdio.h>
@@ -11,14 +12,17 @@
     extern __thread char g_last_loc[256];
 #endif
 
+// Protótipos das novas funções de memória (em soteria_mem.c)
+extern void soteria_dump_leaks();
+extern void soteria_dump_arena_inventory();
+
 LONG WINAPI soteria_exception_handler(struct _EXCEPTION_POINTERS *info);
 static volatile long g_panic_lock = 0;
 static char g_command_line[512] = "doxoade_task";
 
-// Substitua soteria_dump_hardware_state para usar o NOVO Assembly Total
+// Registro de Hardware via Assembly Total (x64)
 void soteria_dump_hardware_state() {
     unsigned long long r_ax, r_bx, r_cx, r_dx, r_sp, r_ip;
-    // volatile impede que o compilador ignore a leitura dos registros
     __asm__ volatile (
         "movq %%rax, %0\n\t" "movq %%rbx, %1\n\t" "movq %%rcx, %2\n\t"
         "movq %%rdx, %3\n\t" "movq %%rsp, %4\n\t" "leaq (%%rip), %5\n\t"
@@ -30,27 +34,31 @@ void soteria_dump_hardware_state() {
     soteria_print_raw(h_buf);
 }
 
-// Chame soteria_dump_hardware_state() dentro da soteria_dispatch
-// logo após o fprintf @SOTERIA_BEGIN@.
-
-// Chame esta função dentro do soteria_dispatch, antes do dump_stack_trace
-
+// Handler de encerramento: Onde os Memory Leaks são revelados
 void soteria_on_exit() {
     if (g_panic_lock == 0) {
-        // IonBF garante que não haverá resíduo no buffer
+        // 1. Executa a varredura de lixo na Arena Hades
+        soteria_dump_leaks();
+
+        // 2. Registro final de encerramento normal
         setvbuf(stdout, NULL, _IONBF, 0); 
-        fprintf(stdout, "\n@SOTERIA_BEGIN@\n");
-        fprintf(stdout, "TAG_LEVEL: EXIT_LOG\n");
-        fprintf(stdout, "TAG_COMMAND: %s\n", g_command_line);
-        fprintf(stdout, "TAG_RASTRO_LOC: %s\n", g_last_loc);
-        fprintf(stdout, "@SOTERIA_END@\n");
+        soteria_print_raw("\n@SOTERIA_BEGIN@\n");
+        soteria_print_raw("TAG_LEVEL: EXIT_LOG\n");
+        char cmd_buf[512];
+        snprintf(cmd_buf, 511, "TAG_COMMAND: %s\n", g_command_line);
+        soteria_print_raw(cmd_buf);
+        
+        char loc_buf[256];
+        snprintf(loc_buf, 255, "TAG_RASTRO_LOC: %s\n", g_last_loc);
+        soteria_print_raw(loc_buf);
+        
+        soteria_print_raw("@SOTERIA_END@\n");
         fflush(stdout);
-        // Removido o Sleep longo para evitar travas em loops de teste
     }
 }
 
 void soteria_init(int argc, char** argv) {
-    (void)argc; (void)argv; // Silencia C-LINT
+    (void)argc; (void)argv;
     setvbuf(stdout, NULL, _IONBF, 0); 
     setvbuf(stderr, NULL, _IONBF, 0);
     
@@ -59,7 +67,7 @@ void soteria_init(int argc, char** argv) {
 
     SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
     SymInitialize(GetCurrentProcess(), NULL, TRUE);
-    AddVectoredExceptionHandler(1, soteria_exception_handler);
+    AddVectoredExceptionHandler(1, (PVECTORED_EXCEPTION_HANDLER)soteria_exception_handler);
     atexit(soteria_on_exit);
 }
 
@@ -67,31 +75,41 @@ LONG WINAPI soteria_exception_handler(struct _EXCEPTION_POINTERS *info) {
     if (InterlockedExchange(&g_panic_lock, 1) == 1) return EXCEPTION_EXECUTE_HANDLER;
     PEXCEPTION_RECORD rec = info->ExceptionRecord;
     
-    fprintf(stdout, "\n@SOTERIA_BEGIN@\n");
-    fprintf(stdout, "TAG_LEVEL: FATAL\n");
-    fprintf(stdout, "TAG_PID: %lu\n", GetCurrentProcessId());
-    fprintf(stdout, "TAG_COMMAND: %s\n", g_command_line);
-    fprintf(stdout, "TAG_FAULT_ADDR: 0x%p\n", (void*)rec->ExceptionAddress);
-    fprintf(stdout, "TAG_MOTIVO: 0x%lx\n", rec->ExceptionCode);
+    soteria_print_raw("\n@SOTERIA_BEGIN@\n");
+    soteria_print_raw("TAG_LEVEL: FATAL\n");
     
-    // --- NEXUS FIX: MAPEAMENTO DE STACK SMASHING ---
-    if (rec->ExceptionCode == 0xc0000005 || rec->ExceptionCode == 0xC0000409) {
-        soteria_dump_arena_inventory(); }
-        
-    if (rec->ExceptionCode == 0xc0000005) 
-        fprintf(stdout, "TAG_DETAIL: Access Violation (Ponteiro Nulo ou Endereco Invalido)\n");
-    if (rec->ExceptionCode == 0xC0000409) 
-        fprintf(stdout, "TAG_DETAIL: Stack Buffer Overrun: A integridade da pilha foi violada.\n");
-    // -----------------------------------------------
+    char pid_buf[64];
+    snprintf(pid_buf, 63, "TAG_PID: %lu\n", GetCurrentProcessId());
+    soteria_print_raw(pid_buf);
 
+    soteria_print_raw("TAG_MOTIVO: CRITICAL_HARDWARE_EXCEPTION\n");
+    
+    char fault_buf[128];
+    snprintf(fault_buf, 127, "TAG_FAULT_ADDR: 0x%p\nTAG_MOTIVO_HEX: 0x%lx\n", 
+             (void*)rec->ExceptionAddress, rec->ExceptionCode);
+    soteria_print_raw(fault_buf);
+    
+    // Mapeamento de desastres físicos
+    if (rec->ExceptionCode == 0xc0000005) 
+        soteria_print_raw("TAG_DETAIL: Access Violation (Ponteiro Nulo ou Escrita Proibida)\n");
+    else if (rec->ExceptionCode == 0xC0000409) 
+        soteria_print_raw("TAG_DETAIL: Stack Buffer Overrun (Stack Smashing detectado)\n");
+    else if (rec->ExceptionCode == 0xc0000374)
+        soteria_print_raw("TAG_DETAIL: Heap Corruption (Erro critico no gerenciador de memoria)\n");
+
+    soteria_dump_hardware_state();
+    soteria_dump_arena_inventory();
     soteria_dump_stack_trace();
-    fprintf(stdout, "@SOTERIA_END@\n");
+
+    soteria_print_raw("@SOTERIA_END@\n");
     fflush(stdout); 
+
+    // Sleep para garantir que o buffer de saída seja capturado pelo processo pai (Doxoade)
+    Sleep(100);
     TerminateProcess(GetCurrentProcess(), rec->ExceptionCode);
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
-// [PLATINA] Escrita atômica no console (ignora buffers do C)
 void soteria_print_raw(const char* msg) {
     HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
     if (hOut != INVALID_HANDLE_VALUE) {
@@ -102,7 +120,6 @@ void soteria_print_raw(const char* msg) {
 
 void soteria_io_trace(const char* op, const char* payload, const char* file, int line) {
     char buf[1024];
-    // Sniffer: Mostra o que estava sendo feito e o dado envolvido
     snprintf(buf, 1023, "TAG_IO_EVENT: %s | Data: \"%.48s\" | Loc: %s:%d\n", 
              op, (payload ? payload : "N/A"), file, line);
     soteria_print_raw(buf);
@@ -111,30 +128,34 @@ void soteria_io_trace(const char* op, const char* payload, const char* file, int
 void soteria_dispatch(soteria_level_t level, soteria_err_t reason, const char* context, 
                      const char* detail, const char* file, int line, const char* func) {
     
+    // Evita reentrância se já estivermos em pânico
+    if (InterlockedExchange(&g_panic_lock, 1) == 1) return;
+
     soteria_print_raw("\n@SOTERIA_BEGIN@\n");
-    soteria_print_raw("TAG_STEP: 1_DISPATCH_START\n");
-
-    // 1. HARDWARE (ASM) - Agora sairá com RSP e RBX reais
+    
+    // 1. HARDWARE (ASM)
     soteria_dump_hardware_state();
-    soteria_print_raw("TAG_STEP: 2_HARDWARE_DONE\n");
 
-    // 2. METADADOS (Via WinAPI)
+    // 2. METADADOS DO ERRO LOGICO
     char meta[512];
-    snprintf(meta, 511, "TAG_LEVEL: %s\nTAG_MOTIVO: %s\nTAG_DETAIL: %s\nTAG_RASTRO_LOC: %s:%d\n", 
-             (level == SOTERIA_FATAL ? "FATAL" : "WARN"), context, detail, file, line);
+    snprintf(meta, 511, "TAG_LEVEL: %s\nTAG_MOTIVO: %s\nTAG_DETAIL: %s\nTAG_RASTRO_LOC: %s:%d\nTAG_CONTEXTO: %s\n", 
+             (level == SOTERIA_FATAL ? "FATAL" : "WARN"), context, detail, file, line, func);
     soteria_print_raw(meta);
 
-    // 3. ARENA E STACK
+    // 3. ARENA HADES E CALL STACK
     soteria_dump_arena_inventory();
     soteria_dump_stack_trace();
 
-    soteria_print_raw("TAG_STEP: 3_FULL_DUMP_DONE\n");
     soteria_print_raw("@SOTERIA_END@\n");
+    fflush(stdout);
 
     if (level == SOTERIA_FATAL) {
-        Sleep(300); // [VITAL] Tempo para o Lazarus capturar os 1500+ bytes
+        Sleep(200); 
         TerminateProcess(GetCurrentProcess(), 1);
     }
+    
+    // Se não for fatal, libera o lock para continuar a execução
+    InterlockedExchange(&g_panic_lock, 0);
 }
 
 __attribute__((constructor)) void soteria_auto_ignite() { soteria_init(0, NULL); }
