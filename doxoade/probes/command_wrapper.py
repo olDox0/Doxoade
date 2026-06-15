@@ -9,7 +9,10 @@ def get_real_windows_cmd():
         GetCommandLineW = ctypes.windll.kernel32.GetCommandLineW
         GetCommandLineW.restype = ctypes.c_wchar_p
         return GetCommandLineW()
-    except: return " ".join(sys.argv)
+    except Exception as e:
+        import logging as _dox_log
+        _dox_log.error(f"[INFRA] get_real_windows_cmd: {e}")
+        return " ".join(sys.argv)
 
 def run_internal_command(command_name, args):
     # Removido print ruidoso para não quebrar o rastro JSON do debug

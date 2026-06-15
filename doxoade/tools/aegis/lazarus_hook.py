@@ -6,6 +6,13 @@ import os
 def lazarus_crash_handler(etype, value, tb):
     """Captura falhas fatais que o try/except normal não pegou."""
     import traceback
+    
+    if "maximum recursion depth" in str(value):
+        # Se for recursão, o sistema de resgate padrão não pode ser usado
+        # pois ele dispararia mais recursão. Fazemos um dump bruto.
+        print("\x1b[31m[!] ERRO DE RECURSÃO NO MOTOR. BLOQUEANDO VIGILÂNCIA.\x1b[0m")
+        return 
+        
     error_data = "".join(traceback.format_exception(etype, value, tb))
     
     # Grava um log de emergência em texto puro (sem cores, sem frescura)
@@ -20,7 +27,9 @@ def lazarus_crash_handler(etype, value, tb):
     try:
         from doxoade.rescue import activate_protocol
         activate_protocol(error_data)
-    except:
+    except Exception as e:
+        import logging as _dox_log
+        _dox_log.error(f"[INFRA] lazarus_crash_handler: {e}")
         import sys as exc_sys
         from traceback import print_tb as exc_trace
         _, exc_obj, exc_tb = exc_sys.exc_info()

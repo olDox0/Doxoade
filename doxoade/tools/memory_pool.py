@@ -1,31 +1,29 @@
 # doxoade/doxoade/tools/memory_pool.py
-"""
-Doxoade Memory Arena - v1.0.
-Pre-allocated object pools para evitar fragmentação de RAM.
-Compliance: MPoT-3 (Controlled Allocation).
-"""
+import sys
 
 class FindingArena:
-    """Pool de dicionários para resultados do linter (Zero-Allocation Loop)."""
-
     def __init__(self, size=2000):
-        self._pool = [self._create_empty_slot() for _ in range(size)]
+        self._pool = [{'severity':None, 'message':None, 'finding_hash':None} for _ in range(size)]
         self._ptr = 0
-        self._size = size
-
-    def _create_empty_slot(self):
-        return {'severity': '', 'category': '', 'message': '', 'file': '', 'line': 0, 'finding_hash': '', 'suggestion_action': None}
+        self.recycled_count = 0 
 
     def rent(self, severity, category, message, file, line):
-        """Aluga um slot da arena em vez de criar um novo objeto."""
-        if self._ptr >= self._size:
-            return self._create_empty_slot()
+        if self._ptr >= 2000: return {'severity': severity, 'message': message}
         slot = self._pool[self._ptr]
+        # [PLATINUM] Detecta reuso real de espaço na RAM
+        if slot.get('message') is not None:
+            self.recycled_count += 1
         slot.update({'severity': severity, 'category': category, 'message': message, 'file': file, 'line': line})
         self._ptr += 1
         return slot
 
     def flush(self):
-        """Reseta o ponteiro para reutilizar a memória no próximo arquivo."""
         self._ptr = 0
-finding_arena = FindingArena()
+
+    def get_stats(self):
+        return self.recycled_count
+
+# --- ANCORAGEM GLOBAL ---
+if 'doxoade_arena_instance' not in sys.modules:
+    sys.modules['doxoade_arena_instance'] = FindingArena()
+finding_arena = sys.modules['doxoade_arena_instance']

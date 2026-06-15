@@ -9,39 +9,51 @@ import hashlib
 import inspect
 from datetime import datetime
 
+_CHIEF_CONN = None
+
 def chief_heartbeat(subsystem: str, action: str, details: dict):
-    """Registra batimentos cardíacos com captura automática de contexto."""
+    """Registra batimentos cardíacos com vazão otimizada para NSR."""
+    global _CHIEF_CONN
     try:
-        # Tenta capturar quem chamou (Triangulação Híbrida)
-        if subsystem == "VULCAN" and "INVOCATION" in action:
+        # 1. Triangulação Híbrida (VULCAN/SHADOW INVOCATION)
+        if (subsystem in ["VULCAN", "SHADOW"]) and ("IN" in action or "ENTER" in action):
             frame = inspect.currentframe()
-            # Sobe 3 níveis: logger -> bridge -> executor
             try:
+                # Sobe níveis para ignorar o rastro do próprio NSR/Logger
                 caller = frame.f_back.f_back.f_back
-                details['caller_context'] = {
-                    'func': caller.f_code.co_name,
-                    'file': os.path.basename(caller.f_code.co_filename),
-                    'line': caller.f_lineno
-                }
+                if caller:
+                    details['caller_context'] = {
+                        'func': caller.f_code.co_name,
+                        'file': os.path.basename(caller.f_code.co_filename),
+                        'line': caller.f_lineno
+                    }
             except: pass
 
-        from doxoade.database import get_db_connection
-        import json
-        conn = get_db_connection()
-        conn.execute('''
+        # 2. Singleton de Conexão (PASC 6.4 - Performance Pura)
+        if _CHIEF_CONN is None:
+            from doxoade.database import get_db_connection
+            _CHIEF_CONN = get_db_connection()
+
+        _CHIEF_CONN.execute('''
             INSERT INTO operational_logs (timestamp, subsystem, action, data, pid)
             VALUES (?, ?, ?, ?, ?)
         ''', (datetime.now().isoformat(), subsystem.upper(), action.upper(), 
               json.dumps(details, ensure_ascii=False), os.getpid()))
-        # 2. Auto-Pruning: Mantém apenas os últimos 50 eventos operacionais
-        conn.execute('''
-            DELETE FROM operational_logs 
-            WHERE id NOT IN (SELECT id FROM operational_logs ORDER BY id DESC LIMIT 50)
-        ''')
-        conn.commit()
-        conn.close()
-    except Exception:
-        pass
+
+        # 3. Auto-Pruning Controlado
+        # Executa a limpeza apenas em 5% das chamadas para economizar CPU
+        if os.getpid() % 20 == 0: 
+            _CHIEF_CONN.execute('''
+                DELETE FROM operational_logs 
+                WHERE id NOT IN (SELECT id FROM operational_logs ORDER BY id DESC LIMIT 2000)
+            ''')
+        
+        _CHIEF_CONN.commit()
+
+    except Exception as e:
+        _CHIEF_CONN = None # Força reconexão na próxima tentativa
+        if os.environ.get('VULCAN_VERBOSE') == '1':
+            print(f"\x1b[33m [LOG-FAIL] {subsystem}:{action} -> {e}\x1b[0m")
 
 class ExecutionLogger:
     def __init__(self, command_name, path, arguments):

@@ -197,13 +197,32 @@ def save(ctx, message, archives, remove_commit, branch_target, merge_target, upd
         if not _run_git_command(['commit', '-m', message]):
             click.echo(Fore.RED + "[ERRO] Falha ao executar 'git commit'.")
             sys.exit(1)
-        console.print('[bold green]✔ Alfa 80.1: Conhecimento sepultado com sucesso.[/bold green]')
+        console.print('[bold green]✔ Conhecimento sepultado com sucesso.[/bold green]')
+        
         new_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True)
         if new_hash and new_hash != pre_hash:
             _learn_solutions_from_commit(new_hash, project_path)
         if final_merge_target:
             _auto_merge_local(current_branch, final_merge_target, merge_message=message, force=force)
+
+        new_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True)
+        if new_hash:
+            _capture_delta_knowledge(new_hash.strip(), ".")
+
         console.print('[bold green]\n[OK] Alfa 71.10: Commit finalizado e Gênese atualizada.[/bold green]')
+
+    if commit_success:
+        # Pega o hash do commit que acabamos de fazer
+        new_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True)
+        
+        click.echo(Fore.CYAN + "   > [GÊNESE] Sincronizando soluções aprendidas com o Hades...")
+        try:
+            # Esta função cruza os erros antigos do banco com o novo código estável
+            from doxoade.tools.db_utils import _learn_solutions_from_commit
+            _learn_solutions_from_commit(new_hash, os.getcwd())
+            click.secho("   ✔ Conhecimento integrado ao Lexicon.", fg='green')
+        except Exception as e:
+            click.echo(f"   [!] Gênese offline: {e}")
 
 def _build_update_message(source_branch: str, target_branch: str, base_ref: str='origin/main') -> str:
     """Gera mensagem de commit resumindo atualização desde a base."""
@@ -269,3 +288,61 @@ def _auto_merge_local(source_branch: str, target_branch: str, merge_message: str
     _run_git_command(['checkout', source_branch], silent_fail=True)
     console.print('[bold green][SAVE] Merge local concluído com sucesso.[/bold green]')
     return True
+
+def _capture_delta_knowledge(new_commit_hash, project_path):
+    """
+    Minerador de Conhecimento em Tempo Real.
+    Cruza incidentes resolvidos com o diff do Git para criar o Acervo.
+    """
+    from doxoade.database import get_db_connection
+    import subprocess
+    
+    conn = get_db_connection()
+    # 1. Busca incidentes que estavam abertos neste projeto mas NÃO estão no commit atual
+    # (Ou seja, o que você acabou de consertar)
+    query = "SELECT * FROM open_incidents WHERE project_path = ?"
+    old_incidents = conn.execute(query, (os.path.abspath(project_path),)).fetchall()
+    
+    for inc in old_incidents:
+        f_hash = inc['finding_hash']
+        f_path = inc['file_path']
+        f_line = inc['line']
+        
+        # 2. Pergunta ao Git o que tinha ANTES e o que tem AGORA
+        try:
+            # Pega a linha no commit anterior (O Veneno)
+            cmd_before = ["git", "show", f"{new_commit_hash}^:{f_path}"]
+            res_before = subprocess.run(cmd_before, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+            
+            # Pega a linha no commit atual (O Remédio)
+            cmd_after = ["git", "show", f"{new_commit_hash}:{f_path}"]
+            res_after = subprocess.run(cmd_after, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+
+            if res_before.returncode == 0 and res_after.returncode == 0:
+                lines_before = res_before.stdout.splitlines()
+                lines_after = res_after.stdout.splitlines()
+                
+                # Extrai os snippets exatos
+                snippet_broken = lines_before[f_line-1].strip() if f_line <= len(lines_before) else None
+                snippet_fixed  = lines_after[f_line-1].strip() if f_line <= len(lines_after) else None
+                
+                if snippet_broken and snippet_fixed and snippet_broken != snippet_fixed:
+                    # 3. Alimenta o Acervo (Lexicon)
+                    conn.execute("""
+                        UPDATE knowledge_lexicon 
+                        SET snippet_broken = ?, snippet_fixed = ?, tags = 'AUTODIDATA'
+                        WHERE finding_hash = ?
+                    """, (snippet_broken, snippet_fixed, f_hash))
+        except Exception as e:
+            import sys as _dox_sys, os as _dox_os
+            from traceback import print_tb as exc_trace
+            exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
+            f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            line_n = exc_tb.tb_lineno
+            exc_trace(exc_tb)
+            print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: _capture_delta_knowledge\033[0m")
+            print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
+            continue
+        
+    conn.commit()
+    conn.close()

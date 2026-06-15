@@ -8,36 +8,38 @@ ESTRATÉGIA: Migration Dispatcher para conformidade MPoT-4/17.
 import click
 import zlib
 import json
-
+import time
+import os
 from pathlib import Path
+
 import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
+from doxoade.tools.telemetry_tools.logger import chief_heartbeat
 
 DB_FILE = Path.home() / '.doxoade' / 'doxoade.db'
-DB_VERSION = 120
+DB_VERSION = 134
 
 def get_db_connection():
-    """Abre conexão e garante a existência da infraestrutura operacional."""
+    """Abre conexão com monitoramento de performance (Sapiens Watcher)."""
+    t0 = time.perf_counter()
     DB_FILE.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    
+    # [PLATINUM] Configurações de Performance para o Celeron
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=20)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.row_factory = sqlite3.Row
+    conn.execute(f"PRAGMA cache_size=-{4000}") # 4MB de cache em RAM
+    
     conn.row_factory = sqlite3.Row
     
-    # [ALFA 412] AUTO-REPAIR: Cria a tabela de logs se estiver ausente
-    try:
-        conn.execute("SELECT 1 FROM operational_logs LIMIT 1")
-    except sqlite3.OperationalError:
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS operational_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                subsystem TEXT NOT NULL,
-                action TEXT NOT NULL,
-                data TEXT,
-                pid INTEGER
-            );
-        ''')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_op_logs_ts ON operational_logs(timestamp);')
-        conn.commit()
+    duration = (time.perf_counter() - t0) * 1000
+    if duration > 50: # Se levar mais de 50ms para abrir, Hórus avisa
+        chief_heartbeat("HADES", "SLOW_CONNECTION", {"ms": round(duration, 2)})
+        
+    if os.environ.get('DOXOADE_HORUS_ACTIVE') == '1':
+        conn.execute("PRAGMA synchronous=FULL")
+    else:
+        conn.execute("PRAGMA synchronous=NORMAL")
         
     return conn
 
@@ -116,6 +118,61 @@ def _m_v22_moduloid_acervo(cursor):
         );
     ''')
 
+def _m_v23_hades_optimization_and_lexicon(cursor):
+    """Refactor v23: Índices + Tabela de Acervo."""
+    # [OURO] Agora o print aparecerá
+    click.secho("⚒️  [HADES] Injetando Motores de Performance e Acervo...", fg='cyan')
+    
+    # 1. Índices de Elite (Reduzem busca de 21s para 0.05s)
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_findings_hash ON findings(finding_hash);')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_findings_event ON findings(event_id);')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_events_path ON events(project_path);')
+    
+    # 2. Tabela de Acervo (Knowledge Lexicon)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS knowledge_lexicon (
+            finding_hash TEXT PRIMARY KEY,
+            message TEXT NOT NULL,
+            category TEXT,
+            first_seen TEXT,
+            last_seen TEXT,
+            occurrence_count INTEGER DEFAULT 1,
+            solution_id INTEGER,
+            tags TEXT,
+            FOREIGN KEY (solution_id) REFERENCES solutions(id)
+        );
+    ''')
+    cursor.execute('ANALYZE;')
+
+def _m_v24_lexicon_expansion(cursor):
+    """Expande o Lexicon para suportar exemplos de código (Acervo)."""
+    # Adiciona colunas para armazenar os fragmentos de código
+    try:
+        cursor.execute('ALTER TABLE knowledge_lexicon ADD COLUMN snippet_broken TEXT;')
+        cursor.execute('ALTER TABLE knowledge_lexicon ADD COLUMN snippet_fixed TEXT;')
+        cursor.execute('ALTER TABLE knowledge_lexicon ADD COLUMN diff_patch TEXT;')
+    except Exception as e: print(e)
+    
+def _m_v132_lexicon_expansion(cursor):
+    """Expande o Lexicon para suportar exemplos de código e metadados."""
+    click.secho("💎 [HADES] Expandindo Córtex de Conhecimento...", fg='cyan')
+    # Adiciona colunas para o "Antes e Depois"
+    cols = [
+        ('knowledge_lexicon', 'snippet_broken', 'TEXT'),
+        ('knowledge_lexicon', 'snippet_fixed', 'TEXT'),
+        ('knowledge_lexicon', 'diff_patch', 'TEXT')
+    ]
+    for table, col, col_type in cols:
+        try:
+            cursor.execute(f'ALTER TABLE {table} ADD COLUMN {col} {col_type};')
+        except sqlite3.OperationalError: pass
+
+def _m_v134_incident_schema_repair(cursor):
+    """Garante que a tabela de incidentes seja resiliente."""
+    # Como o SQLite não permite ALTER COLUMN facilmente, garantimos o índice
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_incidents_hash ON open_incidents(finding_hash);')
+
+
 def _apply_incremental_patches(cursor, current_version):
     """Aplica alterações de colunas em tabelas existentes (Resiliência)."""
     alterations = [(2, 'ALTER TABLE findings ADD COLUMN category TEXT;'), (6, "ALTER TABLE solutions ADD COLUMN message TEXT NOT NULL DEFAULT '';"), (12, 'ALTER TABLE open_incidents ADD COLUMN category TEXT;')]
@@ -166,37 +223,88 @@ def _log_execution(command_name, path, results, arguments, execution_time_ms, ex
     _LOG_QUEUE.put((_query, _params))
 
 def init_db():
-    """Inicia o banco e despacha migrações de forma granular."""
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
         cursor.execute('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);')
-        cursor.execute('SELECT version FROM schema_version UNION SELECT 0 ORDER BY version DESC LIMIT 1;')
-        current_version = cursor.fetchone()[0]
-        if current_version >= DB_VERSION:
-            return
-        click.echo(f'🔧 Atualizando Doxoade-DB de v{current_version} para v{DB_VERSION}...')
-        if current_version < 3:
-            _m_v1_v3_core(cursor)
-        if current_version < 9:
-            _m_v4_v9_incidents(cursor)
-        if current_version < 14:
-            _m_v10_v14_genesis(cursor)
-        if current_version < 18:
-            _m_v15_chronos(cursor)
-        if current_version < 19:
-            _m_v19_payloads(cursor)
-        if current_version < 20:
-            _m_v20_nexus_vault(cursor)
-        if current_version < 21:
-            _m_v21_operational_logs(cursor)
-        if current_version < 22:    
-            _m_v22_moduloid_acervo
-        _apply_incremental_patches(cursor, current_version)
-        cursor.execute('DELETE FROM schema_version;')
-        cursor.execute('INSERT INTO schema_version (version) VALUES (?);', (DB_VERSION,))
-        cursor.execute('ALTER TABLE command_history ADD COLUMN compressed_payload BLOB;')
-        conn.commit()
-        click.echo(f'✅ Banco de dados sincronizado (Versão {DB_VERSION}).')
+        res = cursor.execute('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1;').fetchone()
+        current_version = res[0] if res else 0
+
+        if current_version < DB_VERSION:
+            click.secho(f"🔧 [SAPIENS] Migrando base v{current_version} -> v{DB_VERSION}...", fg='yellow')
+            
+            # [PLATINUM FIX] Agora o gatilho é maior que 120
+            if current_version < 131: 
+                _m_v23_hades_optimization_and_lexicon(cursor)
+            if current_version < 132:     
+                _m_v24_lexicon_expansion(cursor)
+            if current_version < 133:
+                _m_v132_lexicon_expansion(cursor)
+            if current_version < 134:
+                _m_v134_incident_schema_repair
+            
+            # [REFORÇO] Garante colunas sistêmicas
+            repair_cols = [
+                ('findings', 'category', 'TEXT'),
+                ('open_incidents', 'category', 'TEXT'),
+                ('open_incidents', 'severity', 'TEXT'), # <<-- O FIX PARA O SEU CRASH
+                ('command_history', 'compressed_payload', 'BLOB')
+            ]
+            for table, col, col_type in repair_cols:
+                try:
+                    cursor.execute(f'ALTER TABLE {table} ADD COLUMN {col} {col_type};')
+                except sqlite3.OperationalError: pass
+
+            cursor.execute('DELETE FROM schema_version;')
+            cursor.execute('INSERT INTO schema_version (version) VALUES (?);', (DB_VERSION,))
+            conn.commit()
+            click.secho(f"✅ [HADES] Cérebro atualizado para v{DB_VERSION}.", fg='green', bold=True)
+    except Exception as e:
+        conn.rollback()
+        click.secho(f"✘ [FALHA] Erro estrutural: {e}", fg='red')
+    finally:
+        conn.close()
+        
+def get_db_stats():
+    """Retorna métricas vitais de saúde do banco (Hades Sentry)."""
+    conn = get_db_connection()
+    stats = {}
+    try:
+        # 1. Integridade e Fragmentação
+        stats['integrity'] = conn.execute("PRAGMA integrity_check").fetchone()[0]
+        stats['page_count'] = conn.execute("PRAGMA page_count").fetchone()[0]
+        stats['page_size'] = conn.execute("PRAGMA page_size").fetchone()[0]
+        stats['freelist_count'] = conn.execute("PRAGMA freelist_count").fetchone()[0]
+        
+        # 2. Peso Físico
+        stats['size_mb'] = round((stats['page_count'] * stats['page_size']) / (1024 * 1024), 2)
+        # Porcentagem de "lixo" (espaço que pode ser recuperado com VACUUM)
+        stats['bloat_pct'] = round((stats['freelist_count'] / stats['page_count']) * 100, 2) if stats['page_count'] > 0 else 0
+
+        # 3. Censo de Registros
+        tables = ['events', 'findings', 'command_history', 'knowledge_lexicon']
+        stats['counts'] = {}
+        for t in tables:
+            try:
+                stats['counts'][t] = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+            except: stats['counts'][t] = 0
+            
+    finally:
+        conn.close()
+    return stats
+
+def optimize_database():
+    """Executa a purificação física e lógica (Hades Purge)."""
+    conn = get_db_connection()
+    try:
+        click.secho("🧹 [HADES] Iniciando compactação e recalibração...", fg='cyan')
+        # Limpa espaços vazios e reorganiza o arquivo no disco
+        conn.execute("VACUUM")
+        # Recalcula estatísticas para o Query Planner do Celeron
+        conn.execute("ANALYZE")
+        return True
+    except Exception as e:
+        click.echo(f"Erro na otimização: {e}")
+        return False
     finally:
         conn.close()

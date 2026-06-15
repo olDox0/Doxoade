@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 import traceback
 
-def _early_setup(project_root: str):
+def _early_setup(project_root):
     """Garante diretórios e executa o Portão ABI."""
     try:
         from doxoade.tools.vulcan.abi_gate import run_abi_gate
@@ -13,6 +13,32 @@ def _early_setup(project_root: str):
     except Exception as e:
         print(f'\x1b[31m ■ Erro: {e}')
         traceback.print_tb(e.__traceback__)
+
+    # Nexus shadow runtime
+    if "--pure" in sys.argv or os.environ.get('DOXOADE_SHADOW') == '0':
+        if "--pure" in sys.argv: sys.argv.remove("--pure")
+        return
+
+    try:
+        from doxoade.tools.vulcan.shadow_runtime import install_shadow_runtime
+        install_shadow_runtime(project_root)
+    except Exception as e:
+        # Se falhar aqui, o Doxoade ainda deve tentar rodar sem NSR
+        pass
+
+    from doxoade.tools.filesystem import _get_project_config
+    config = _get_project_config(start_path=project_root)
+    
+    # 1. Gerenciamento do Shadow Runtime
+    if config.get('shadow_runtime', True) and os.environ.get('DOXOADE_SHADOW') != '0':
+        try:
+            from doxoade.tools.vulcan.shadow_runtime import install_shadow_runtime
+            install_shadow_runtime(project_root)
+        except Exception: pass
+
+    # 2. Gerenciamento da Sotéria
+    if not config.get('soteria_active', True):
+        os.environ['DOXOADE_RESCUE'] = '0' # Desativa o Hook do Lazarus
 
 def _install_finder(project_root: str):
     """Instala o MetaFinder do Vulcan no sistema de importação do Python."""
@@ -24,7 +50,9 @@ def _install_finder(project_root: str):
         traceback.print_tb(e.__traceback__)
 
 def main():
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    package_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(package_dir)
+#    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     _early_setup(project_root)
     _install_finder(project_root)
     try:

@@ -80,9 +80,21 @@ class AutoFixer:
         if inline_stmt == 'pass':
             inline_stmt = ''
         if is_infra:
-            new_block = [f'{raw_indent}except Exception as e:\n', f'{raw_indent}{step}import logging as _dox_log\n', f'{raw_indent}{step}_dox_log.error(f"[INFRA] {func_name}: {{e}}")\n']
+            new_block = [
+                         f'{raw_indent}except Exception as e:\n',
+                         f'{raw_indent}{step}import logging as _dox_log\n',
+                         f'{raw_indent}{step}_dox_log.error(f"[INFRA] {func_name}: {{e}}")\n'
+                         ]
         else:
-            new_block = [f'{raw_indent}except Exception as e:\n', f'{raw_indent}{step}import sys as _dox_sys, os as _dox_os\n', f'{raw_indent}{step}exc_obj, exc_tb = _dox_sys.exc_info() #exc_type\n', f'{raw_indent}{step}f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]\n', f'{raw_indent}{step}line_n = exc_tb.tb_lineno\n', f'{raw_indent}{step}print(f"\\033[1;34m[ FORENSIC ]\\033[0m \\033[1mFile: {{f_name}} | L: {{line_n}} | Func: {func_name}\\033[0m")\n', f'{raw_indent}{step}print(f"\\033[31m  ■ Type: {{type(e).__name__}} | Value: {{e}}\\033[0m")\n']
+            new_block = [f'{raw_indent}except Exception as e:\n',
+                         f'{raw_indent}{step}import sys as _dox_sys, os as _dox_os\n',
+                         f'{raw_indent}{step}from traceback import print_tb as exc_trace\n',
+                         f'{raw_indent}{step}exc_obj, exc_tb = _dox_sys.exc_info()\n',
+                         f'{raw_indent}{step}f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]\n',
+                         f'{raw_indent}{step}line_n = exc_tb.tb_lineno\n',
+                         f'{raw_indent}{step}exc_trace(exc_tb)\n',
+                         f'{raw_indent}{step}print(f"\\033[1;34m[ FORENSIC ]\\033[0m \\033[1mFile: {{f_name}} | L: {{line_n}} | Func: {func_name}\\033[0m")\n', f'{raw_indent}{step}print(f"\\033[31m  ■ Type: {{type(e).__name__}} | Value: {{e}}\\033[0m")\n'
+                         ]
         if inline_stmt:
             new_block.append(f'{raw_indent}{step}{inline_stmt}\n')
         lines[idx] = ''.join(new_block)

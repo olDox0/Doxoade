@@ -21,43 +21,57 @@ def _format_local_timestamp(ts_str: str) -> str:
         return ts_str[:19].replace('T', ' ')
 
 @click.command('history')
-@click.option('-m', '--message', help='Busca no erro.')
+@click.option('-m', '--message', help='Busca no acervo.')
 @click.option('-n', '--limit', default=10)
 def history(message, limit):
-    """🧠 Hub de Inteligência: Busca erros e soluções no registro Nexus."""
+    """🧠 Hub de Inteligência: Diferencia Erros Ativos de Fantasmas do Passado."""
     conn = get_db_connection()
+    import sqlite3
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
-    query = '''
-        SELECT f.*, e.command, e.timestamp 
-        FROM findings f 
-        JOIN events e ON f.event_id = e.id 
-        WHERE 1=1
-    '''
+    # [PLATINUM] Query que cruza o Lexicon com Incidentes Abertos
+    query = """
+        SELECT 
+            l.*, 
+            (SELECT COUNT(*) FROM open_incidents i WHERE i.finding_hash = l.finding_hash) as is_active
+        FROM knowledge_lexicon l
+    """
     params = []
     if message:
-        query += " AND (f.message LIKE ? OR f.category LIKE ?)"
+        query += " WHERE l.message LIKE ? OR l.category LIKE ?"
         params.extend([f"%{message}%", f"%{message}%"])
     
-    query += " ORDER BY e.timestamp DESC LIMIT ?"
+    query += " ORDER BY l.last_seen DESC LIMIT ?"
     params.append(limit)
     
     rows = cursor.execute(query, params).fetchall()
+    conn.close()
     
     if not rows:
-        click.secho("\n[-] Nenhuma evidência encontrada no histórico findings.", fg='yellow')
+        click.secho("\n[-] Nada encontrado.", fg='yellow')
         return
 
-    click.secho(f"\n--- 🧠 MEMÓRIA SEMÂNTICA ({len(rows)} registros) ---", fg='cyan', bold=True)
+    click.secho(f"\n--- 📚 ACERVO DE INTELIGÊNCIA: TRIANGULAÇÃO HISTÓRICA ---", fg='cyan', bold=True)
     
     for r in rows:
-        sev = r['severity'].upper()
-        color = Fore.RED if sev in ['ERROR', 'CRITICAL'] else Fore.YELLOW
+        # 1. Definição de Status
+        if r['is_active'] > 0:
+            status = f"{Back.RED}{Fore.WHITE} [ ATIVO ] {Style.RESET_ALL}"
+            color = Fore.RED
+        else:
+            status = f"{Fore.GREEN} [ RESOLVIDO ] {Style.RESET_ALL}"
+            color = Fore.WHITE
+            
+        # 2. Formatação de Datas
+        last_date = r['last_seen'][:10] if r['last_seen'] else "N/A"
+        first_date = r['first_seen'][:10] if r['first_seen'] else "N/A"
         
-        # CONVERSÃO PARA FUSO HORÁRIO LOCAL
-        local_ts = _format_local_timestamp(r.get('timestamp', ''))
+        click.echo(f"\n{status} {color}{r['message']}")
+        click.echo(f"   {Style.DIM}Primeira vez: {first_date} | Última vez: {Fore.YELLOW}{last_date}{Style.RESET_ALL}")
+        click.echo(f"   {Style.DIM}Recorrência: {r['occurrence_count']} hits | ID: {r['finding_hash'][:12]}")
         
-        click.echo(f"\n{Style.DIM}{local_ts} {color}■ [{r['category']}] {r['message']}")
-        click.echo(f"   {Fore.WHITE}Comando: {Fore.CYAN}doxoade {r['command']}")
-        click.echo(f"   {Fore.WHITE}Local:   {Fore.YELLOW}{r['file']}:{r['line']}")
+        if r['snippet_fixed']:
+            click.echo(f"   {Fore.GREEN}🛠  SOLUÇÃO APLICADA: {Fore.WHITE}{r['snippet_fixed']}")
+        elif r['is_active'] > 0:
+            click.echo(f"   {Fore.MAGENTA}🔎 LOCALIZAR: Use 'doxoade search {r['finding_hash'][:8]}'")

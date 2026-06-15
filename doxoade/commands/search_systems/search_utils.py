@@ -45,6 +45,23 @@ def render_search_results(state: 'SearchState'):
     if not has_results:
         echo(f"\n{Fore.YELLOW}   [!] Nenhum resultado encontrado para '{state.query}' nos filtros ativos.{Style.RESET_ALL}")
 
+    if hasattr(state, 'db_results') and state.db_results.get('lexicon'):
+        echo(f'\n{Fore.CYAN}{Style.BRIGHT}🧠 [ ACERVO DE INTELIGÊNCIA HADES ]{Style.RESET_ALL}')
+        
+        for item in state.db_results['lexicon']:
+            echo(f"  {Fore.YELLOW}ID: {item['finding_hash'][:12]}{Fore.RESET} | {Fore.WHITE}{item['message']}")
+            
+            # [PLATINUM] Renderização de Delta (Antes vs Depois)
+            if item.get('snippet_fixed'):
+                broken = item.get('snippet_broken') or "[PADRÃO] " + item['message'].split('.')[0]
+                echo(f"    {Fore.RED}{Style.BRIGHT} [-] ANTES  : {Style.NORMAL}{Fore.RED}{broken}")
+                echo(f"    {Fore.GREEN}{Style.BRIGHT} [+] DEPOIS : {Style.NORMAL}{Fore.GREEN}{item['snippet_fixed']}")
+            else:
+                echo(f"    {Fore.MAGENTA} 💡 STATUS  : {Style.DIM}Padrão mapeado, mas sem solução registrada no histórico.{Style.RESET_ALL}")
+            
+            echo(f"    {Style.DIM}📊 Estatística: {item['occurrence_count']}x hits | Visto em: {item['last_seen'][:10]}")
+            echo(f"    {Style.DIM}" + "─" * 70)
+
 def extract_function_block(file_path: str, match_line: int) -> str:
     """Extrai o bloco lógico (def/class) escaneando para cima e para baixo (PASC-8.10)."""
     try:

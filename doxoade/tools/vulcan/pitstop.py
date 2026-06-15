@@ -180,7 +180,9 @@ def _forge_to_pyx(task: dict) -> dict:
             try:
                 from doxoade.tools.vulcan.opt_cache import generate_opt_py
                 generate_opt_py(Path(project_root), abs_path)
-            except: pass
+            except Exception as e:
+                import logging as _dox_log
+                _dox_log.error(f"[INFRA] _forge_to_pyx: {e}")
 
         duration_ms = (time.perf_counter() - t_start) * 1000
         sys.stdout.write(f" [{duration_ms:.1f}ms]\n")
@@ -442,7 +444,10 @@ class PitstopEngine:
     def _load_cache(self):
         if self.cache_path.exists():
             try: return json.loads(self.cache_path.read_text(encoding='utf-8'))
-            except: return {}
+            except Exception as e:
+                import logging as _dox_log
+                _dox_log.error(f"[INFRA] _load_cache: {e}")
+                return {}
         return {}
 
     def save_cache(self):
@@ -453,7 +458,10 @@ class PitstopEngine:
         try:
             with open(path, 'rb') as f:
                 return hashlib.sha256(f.read()).hexdigest()[:16]
-        except: return None
+        except Exception as e:
+            import logging as _dox_log
+            _dox_log.error(f"[INFRA] get_content_hash: {e}")
+            return None
 
     def run_ignition(self, targets, compiler):
         import shutil

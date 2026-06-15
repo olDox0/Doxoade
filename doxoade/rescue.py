@@ -66,6 +66,18 @@ def get_code_context(filepath: str, linenum: int, context_lines: int = 2) -> Opt
 
 # --- CORE ENGINE ---
 
+def _find_remedy_in_lexicon(error_msg):
+    """Busca no acervo tático um remédio para o erro atual."""
+    try:
+        from doxoade.database import get_db_connection
+        conn = get_db_connection()
+        # Busca semântica simples: o erro atual contém o padrão do acervo?
+        query = "SELECT snippet_fixed FROM knowledge_lexicon WHERE ? LIKE '%' || message || '%'"
+        res = conn.execute(query, (error_msg,)).fetchone()
+        conn.close()
+        return res[0] if res else None
+    except: return None
+
 def analyze_crash(traceback_text: str, exit_code: int = None) -> Dict[str, Any]:
     from .tools.vulcan.diagnostic.soteria.analyze_crash import CrashProcessor
 
@@ -253,12 +265,23 @@ def _render_tactical_dossier(d: dict):
             # Exemplo de saída: ➔ Operation: printf | Data: "Corrompendo a Zona..."
             print(f"    {W}➔ {ev}{RST}")
 
-def activate_protocol(error_text: str, exit_code: int = None):
-    """Protocolo Lazarus: Menu de Intervenção Imediata."""
+    error_raw = d.get('explanation', '')
+    remedy = _find_remedy_in_lexicon(error_raw)
+    if remedy:
+        print(f"\n  {G}💡 [ACERVO] SOLUÇÃO SUGERIDA:{RST}")
+        print(f"    {W}Baseado em correções anteriores, tente:{RST}")
+        print(f"    {Y}{remedy}{RST}")
+        print(f"    {Style.DIM}" + "─" * 40 + RST)
+
+def activate_protocol(error_text: str, exit_code: int = None, **kwargs): # <-- ADICIONADO **kwargs
+    """ Protocolo Lazarus: Menu de Intervenção Imediata. """
     from .tools.telemetry_tools.logger import chief_heartbeat
     import sys as _sys
     import os as _os
     import re
+
+    # Agora kwargs existe no escopo e esta linha não vai mais dar NameError
+    context_vars = kwargs.get('context', {})
 
     if not error_text: 
         return
@@ -316,14 +339,16 @@ def activate_protocol(error_text: str, exit_code: int = None):
             opt4 = f"{Back.RED}4.{RST} {RST}{Fore.YELLOW} [DEBUG] Diagnóstico Pipeline{RST}"
             opt5 = f"{Back.RED}5.{RST} {Fore.MAGENTA} [IO]    Analisar Dados e Memória{RST}"
             opt6 = f"{Back.RED}6.{RST} {Fore.GREEN} [CODE]  Console Interativo{RST}"
+            opt7 = f"{Back.RED}7.{RST} {Fore.CYAN} [HORUS] Ver Timeline NSR (Shadow){RST}" # <-- NOVA OPÇÃO
             opt0 = f"{Back.RED}0.{RST} {Fore.LIGHTMAGENTA_EX} [EXIT] Encerrar sessão{RST}"
 
             # Renderização em Grade 2x2 usando o alinhador inteligente
             # Largura de 55 para caber bem em telas padrão de 110/120 colunas
             print(f"  {_view_align(opt1, 55)} {opt2}")
             print(f"  {_view_align(opt3, 55)} {opt4}")
-            print(f"  {_view_align(opt5, 55)} {opt6}") # <--- Injeção na Grade
-            print(f"  {_view_align(opt0, 55)}")
+            print(f"  {_view_align(opt5, 55)} {opt6}")
+            print(f"  {_view_align(opt7, 55)} {opt0}")
+#            print(f"  {_view_align(opt0, 55)}")
 
             choices = input(f"\n  Sua decisão (ex: 34): ").strip()
             if '0' in choices: break
@@ -389,6 +414,18 @@ def activate_protocol(error_text: str, exit_code: int = None):
                         _render_io_analysis(info)
                     elif '6' in choices:
                         _interactive_inspection(info)
+                    elif '7' in choices:
+                        print('\n' + Fore.CYAN + Style.BRIGHT + '─' * 110 + RST)
+                        print(f"\n  {Fore.CYAN + Style.BRIGHT}👁️  INQUÉRITO HÓRUS: Rastro Próximo ao Incidente{RST}\n")
+                        try:
+                            from .commands.horus_cmd import run_horus_view_logic
+                            # Invocamos o visualizador focado no arquivo que falhou
+                            f_name = _os.path.basename(info.get('file', ''))
+                            if f_name == "<string>": f_name = None # Se for anônimo, mostra tudo
+                            
+                            run_horus_view_logic(limit=50, full=True, focus=f_name)
+                        except Exception as e:
+                            print(f"  {Fore.RED}✘ Falha ao recuperar rastro tático: {e}{RST}")
                 break
             except Exception as e:
                 from doxoade.tools.error_info import handle_error

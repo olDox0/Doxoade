@@ -80,7 +80,16 @@ def _stream_and_capture(process, marker):
     if "{" in raw and "}" in raw:
         try:
             return json.loads(raw[raw.find("{"):raw.rfind("}")+1])
-        except: return None
+        except Exception as e:
+            import sys as _dox_sys, os as _dox_os
+            from traceback import print_tb as exc_trace
+            exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
+            f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            line_n = exc_tb.tb_lineno
+            exc_trace(exc_tb)
+            print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: _stream_and_capture\033[0m")
+            print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
+            return None
         
     # [PLATINUM] Se não achou JSON, mas o processo deu erro, mostra o log de erro
     if process.returncode != 0:

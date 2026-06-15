@@ -298,7 +298,10 @@ class CrashProcessor:
             candidates = [c for c in Path(self.root).rglob(p.name) 
                          if not any(x in str(c).lower() for x in ['.doxoade', 'venv', 'build'])]
             return str(candidates[0]).replace("\\","/") if candidates else filename
-        except: return filename
+        except Exception as e:
+            import logging as _dox_log
+            _dox_log.error(f"[INFRA] _find_source: {e}")
+            return filename
 
     def _cross_reference_hades(self, d: dict, pid: str):
         """Busca no Hades quem foi o mestre Python deste processo."""
@@ -321,4 +324,6 @@ class CrashProcessor:
                     # Injeta o frame Python como origem da chain
                     d['chain'].insert(0, (f"PYTHON_INVOKER: {ctx['func']}", f"{ctx['file']}:{ctx['line']}"))
                     d['explanation'] += f"\n[BRIDGE] Acionado por: {ctx['func']}() em {ctx['file']}"
-        except: pass
+        except Exception as e:
+            import logging as _dox_log
+            _dox_log.error(f"[INFRA] _cross_reference_hades: {e}")

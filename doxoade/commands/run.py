@@ -25,9 +25,15 @@ from doxoade.tools.doxcolors import Fore, Style
 @click.option('--no-vulcan', is_flag=True, help='Desativa o Turbo Nativo.')
 @click.option('--test-mode', is_flag=True, help='Autoriza scripts de teste.')
 @click.option('--no-rescue', is_flag=True, help='Desativa o Protocolo Lazarus/Sotéria (Modo Bruto).')   
+@click.option('--shadow', is_flag=True, help='Ativa o Shadow Runtime com injeção automática de Try-Except e Sotéria.')
 @click.pass_context
-def run(ctx, script, args, **kwargs):
+def run(ctx, script, args, shadow, **kwargs):
     """Executor Universal v83.5: Decisão Única de Fluxo com Controle de Célula de Carga."""
+    
+    if shadow:
+        click.secho("🛡️  [AEGIS] Shadow Runtime Ativado. Vacinação em progresso...", fg='cyan', bold=True)
+        from doxoade.tools.vulcan.shadow_loader import ShadowFinder
+        sys.meta_path.insert(0, ShadowFinder())
     
     if kwargs.get('no_rescue'):
         os.environ['DOXOADE_RESCUE'] = '0'
@@ -113,18 +119,50 @@ def _execute_hybrid_engine(script_path: str, use_vulcan: bool, limits: dict):
         raise e
 
 @click.command('flow')
-@click.argument('script', required=True)
+@click.argument('script', required=False)
+#@click.argument('script', type=click.Path(exists=True))
+@click.option('--intern', '-i', help="Analisa a lógica de um comando interno. Ex: -i 'horus view'")
+@click.option('--val', 'watch_val', is_flag=True, help="Inspeção de mutação de variáveis.")
 #@click.argument('args', nargs=-1, type=click.UNPROCESSED)
 @click.argument('raw_args', nargs=-1, type=click.UNPROCESSED) # Renomeado de args para raw_args
 @click.pass_context
-def flow_command(ctx, script, **kwargs):
+def flow_command(ctx, script, intern, watch_val, **kwargs):
+#def flow_command(ctx, script, watch_val, **kwargs):
+#def flow_command(ctx, script, **kwargs):
+    """🌊 NEXUS FLOW: Análise de lógica pura do desenvolvedor."""
     import os, sys, shlex
     from ..probes import flow_runner
     from .run_systems.run_flow import execute_flow
+    from ..probes.flow_runner import run_flow_direct
+    target = intern if intern else script
+    if not target:
+        click.echo(Fore.RED + "Erro: Forneça um script ou use -i 'comando'.")
+        return
 
+    # Se for comando interno, usamos o wrapper de incepção
+    clean_target = target.strip('"\'') if target else ""
+    is_internal = True if intern else False
+    
+    click.secho(f"🚀 Iniciando rastro: {clean_target}", fg='cyan', bold=True)
+    
+    click.secho(f"🚀 Iniciando rastro de lógica: {target}", fg='cyan', bold=True)
+    try:
+        run_flow_direct(clean_target, watch_vars=watch_val, is_internal=is_internal)
+    except Exception as e:
+        click.secho(f"✘ Falha no motor de fluxo: {e}", fg='red')
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        exc_trace(exc_tb)
     # 1. ESTERILIZAÇÃO DE CAMINHO (v125.0)
     # Trocamos \ por / para impedir que o Windows delete as barras
-    raw_input = script.strip('"\'').replace('\\', '/')
+#    raw_input = script.strip('"\'').replace('\\', '/')
+    target_source = script or kwargs.get('intern')
+    if target_source is None:
+        click.secho(" [!] Erro: Nenhum alvo ou comando interno fornecido para o rastro.", fg='red')
+        return
+
+    raw_input = target_source.strip('"\'').replace('\\', '/')
     parts = shlex.split(raw_input)
     target_name = parts[0]
     internal_args = parts[1:]

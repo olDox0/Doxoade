@@ -8,6 +8,7 @@ from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger, chief_heartbeat
 from doxoade.commands.init import _refactor_to_silo
 from .macrothon_translator import MacrothonTranslator
+from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
 
 _MACRO_LOOP = asyncio.new_event_loop()
 
@@ -47,8 +48,16 @@ class MacrothonRuntime:
                 ln = ln.split('#')[0].strip()
                 if not ln: continue
                 if ln.startswith(("import ", "from ")):
-                    try: exec(ln, self.context)
-                    except: pass
+                    try: restricted_safe_exec(ln, self.context)
+                    except Exception as e:
+                        import sys as _dox_sys, os as _dox_os
+                        from traceback import print_tb as exc_trace
+                        exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
+                        f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                        line_n = exc_tb.tb_lineno
+                        exc_trace(exc_tb)
+                        print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: _sync_infra\033[0m")
+                        print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
                     continue
                 m = re.match(r"acervo\s+([\w\d_]+)\s*:\s*([\w\d_]+)\s+as\s+([\w\d_]+)", ln)
                 if m:

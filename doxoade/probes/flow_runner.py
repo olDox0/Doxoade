@@ -1,5 +1,5 @@
 # doxoade/doxoade/probes/flow_runner.py
-import sys, os, time, argparse, warnings, json, linecache
+import sys, os, time, argparse, warnings, json, linecache, shlex
 
 try:
     import doxoade
@@ -21,9 +21,23 @@ if current_dir not in sys.path:
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
 import flow_utils as utils
+#from .flow_utils import render_flow_table
+try:
+    import flow_utils as utils
+    from debug_probe import _LineTimer, _capture_locals, _MARKER_DEBUG
+except ImportError:
+    from doxoade.probes import flow_utils as utils
+    from doxoade.probes.debug_probe import _LineTimer, _capture_locals, _MARKER_DEBUG
 
-# Importação da peça do timer
-from debug_probe import _LineTimer, _capture_locals, _MARKER_DEBUG
+    import sys as exc_sys
+    from traceback import print_tb as exc_trace
+    _, exc_obj, exc_tb = exc_sys.exc_info()
+    exc_trace(exc_tb)
+    from doxoade.rescue import activate_protocol
+    import traceback
+    activate_protocol(traceback.format_exc())
+
+#from .debug_probe import _LineTimer, _capture_locals, _MARKER_DEBUG
 
 warnings.filterwarnings('ignore', category=RuntimeWarning)
 C_RESET = '\x1b[0m'
@@ -79,24 +93,22 @@ def static_trace_calls(frame, event, arg):
     return static_trace_calls
 
 def _should_skip_trace(filename: str) -> bool:
-    """Filtro de Foco Nexus v130.0 - Silenciador de Infraestrutura."""
+    """Filtro de Foco Nexus - Bloqueia Libs e foca no Projeto."""
     norm = filename.replace('\\', '/').lower()
     
-    # 1. Bloqueio de Bibliotecas e Sistema (Ruído Branco)
-    noise = [
-        '<frozen', 'typing.py', 'contextlib.py', 'enum.py', 'abc.py',
-        'functools.py', 'inspect.py', 'traceback.py', 'linecache.py',
-        'shlex.py', 'sysconfig.py', 'click/core.py', 'click/decorators.py',
-        'importlib'
-    ]
-    if any(x in norm for x in noise):
+    # 1. BLOQUEIO DE LIBS (O que você pediu)
+    if 'site-packages' in norm or 'dist-packages' in norm:
+        return True
+    
+    # 2. BLOQUEIO DE INTERNOS DO PYTHON
+    if '/lib/' in norm and 'doxoade' not in norm:
         return True
 
-    # 2. Bloqueio de Core Doxoade (A menos que core_trace esteja ON)
-    if "doxoade/" in norm and not _STATE.get('core_trace', False):
-        # Permitimos apenas os "fiscais" para ver a incepção
-        if not any(x in norm for x in ['command_wrapper.py', 'flow_runner.py']):
-            return True
+    # 3. LISTA DE RUÍDO SISTÊMICO
+    noise = ['<frozen', 'importlib', 'abc.py', 'typing.py', 'functools.py', 'glob.py', 'pathlib.py']
+    if any(x in norm for x in noise):
+        return True
+        
     return False
 
 def _render_trace_event(frame, event):
@@ -346,6 +358,49 @@ def run_flow_internal(callback):
         # v125.0 FIX: Passagem obrigatória do objeto timer
         _render_flow_results(internal_timer)
 
+def run_flow_direct(target, watch_vars=False, is_internal=False):
+    from .debug_probe import _LineTimer
+    from .flow_utils import render_flow_table
+    import os, sys, shlex
+
+    os.environ['DOXOADE_HORUS_ACTIVE'] = '0'
+    os.environ['DOXOADE_RESCUE'] = '0'
+    project_root = os.getcwd()
+    
+    if is_internal:
+        # [OURO] Rastro de Comando Interno
+        from doxoade.cli import cli
+        timer = _LineTimer("internal_cmd", project_root, live_flow=True, 
+                           watch_vars=watch_vars, internal_mode=True)
+        # Sincroniza argv para o comando interno
+        sys.argv = ['doxoade'] + shlex.split(target)
+        sys.settrace(timer.tracer)
+        try:
+            cli(standalone_mode=False)
+        except SystemExit: pass # Click chama exit(0) ao final, capturamos aqui
+        except Exception as e:
+            print(f"\n\x1b[31m✘ Falha no comando interno: {e}\x1b[0m")
+        finally:
+            sys.settrace(None)
+            render_flow_table(timer)
+    else:
+        # [OURO] Rastro de Arquivo .py
+        abs_path = os.path.abspath(target).replace('\\', '/')
+        if not os.path.exists(abs_path):
+            print(f"\x1b[31m✘ Erro: Arquivo não encontrado: {abs_path}\x1b[0m")
+            return
+            
+        timer = _LineTimer(abs_path, project_root, live_flow=True, watch_vars=watch_vars)
+        code = open(abs_path, 'r', encoding='utf-8', errors='ignore').read()
+        sys.settrace(timer.tracer)
+        from doxoade.tools.aegis.aegis_core import nexus_exec
+        
+        try:
+            nexus_exec(code, {'__name__': '__main__', '__file__': abs_path})
+        finally:
+            sys.settrace(None)
+            render_flow_table(timer)
+
 if __name__ == '__main__':
     p = argparse.ArgumentParser()
     p.add_argument('script')
@@ -361,6 +416,9 @@ if __name__ == '__main__':
     sys.argv = [os.path.abspath(args.script)] + remaining
 
     if len(sys.argv) < 2: sys.exit(1)
+    script = sys.argv[1]
+    is_val = '--val' in sys.argv
+    run_flow_direct(args.script, watch_vars=args.val, live_flow=not args.bottleneck)
     script_to_run = sys.argv[1]
     is_bottleneck = '--bottleneck' in sys.argv or '-b' in sys.argv
     #sys.argv = [script_to_run] + [arg for arg in sys.argv[2:] if not arg.startswith('-')]

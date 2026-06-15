@@ -17,10 +17,16 @@ def parse_size(size_str):
         if size_str.endswith(unit):
             try:
                 return int(size_str.replace(unit, '').strip()) * multiplier
-            except: return None
+            except Exception as e:
+                import logging as _dox_log
+                _dox_log.error(f"[INFRA] parse_size: {e}")
+                return None
     try:
         return int(size_str)
-    except: return None
+    except Exception as e:
+        import logging as _dox_log
+        _dox_log.error(f"[INFRA] parse_size: {e}")
+        return None
 
 def apply_resource_limits(limits: dict):
     """Aplica restrições de hardware. No Windows, emite aviso e prossegue."""

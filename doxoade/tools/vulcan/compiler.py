@@ -288,7 +288,9 @@ setup(
             return (False, str(e))
         finally:
             try: setup_path.unlink(missing_ok=True)
-            except: pass
+            except Exception as e:
+                import logging as _dox_log
+                _dox_log.error(f"[INFRA] compile: {e}")
 
     def _promote_to_staging(self, module_name: str) -> Path | None:
         """Move o binário compilado para o diretório de staging."""

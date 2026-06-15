@@ -52,7 +52,10 @@ class NexusMetalEngine:
         if self.cache_path.exists():
             try:
                 with open(self.cache_path, 'r') as f: cache = json.load(f)
-            except: return True
+            except Exception as e:
+                import logging as _dox_log
+                _dox_log.error(f"[INFRA] _is_stale: {e}")
+                return True
         return cache.get(target_name) != self._get_bundle_hash(sources)
 
     def _run_static_safety_audit(self, sources):
@@ -94,7 +97,9 @@ class NexusMetalEngine:
         if self.cache_path.exists():
             try:
                 with open(self.cache_path, 'r') as f: cache = json.load(f)
-            except: pass
+            except Exception as e:
+                import logging as _dox_log
+                _dox_log.error(f"[INFRA] _update_cache: {e}")
         cache[target_name] = self._get_bundle_hash(sources)
         with open(self.cache_path, 'w') as f: json.dump(cache, f, indent=2)
         

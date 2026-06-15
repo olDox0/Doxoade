@@ -1,10 +1,31 @@
 # doxoade/doxoade/tools/display.py
 import click
 import re, sys
-from datetime import datetime
-from doxoade.tools.doxcolors import Fore, Style
+import os
 from collections import Counter
+from datetime import datetime
+from doxoade.tools.doxcolors import Fore, Style, Back
+from doxoade.database import get_db_connection
 from .analysis import _get_code_snippet_from_string
+from .display_systems import display_elements as ui
+
+def _get_lexicon_remedy(f_hash, message=None):
+    """Consulta o Acervo Hades com busca dupla (Hash + Semântica)."""
+    try:
+        conn = get_db_connection()
+        # 1. Tenta por Hash exato
+        res = conn.execute("SELECT snippet_fixed FROM knowledge_lexicon WHERE finding_hash = ?", (f_hash,)).fetchone()
+        
+        # 2. Fallback: Tenta por similaridade de mensagem
+        if not res and message:
+            res = conn.execute("SELECT snippet_fixed FROM knowledge_lexicon WHERE message = ? LIMIT 1", (message,)).fetchone()
+            
+        conn.close()
+        return res[0] if res else None
+    except Exception as e:
+        import logging as _dox_log
+        _dox_log.error(f"[INFRA] _get_lexicon_remedy: {e}")
+        return None
 
 def _get_icon(emoji, fallback):
     try:
@@ -18,81 +39,64 @@ ICON_WRENCH = _get_icon('🛠', '->')
 def _present_results(output_format, results, max_issues=50, verbose=False):
     findings = results.get('findings', [])
     summary = results.get('summary', {})
+    
     if output_format == 'json':
         import json
-        click.echo(json.dumps(results, indent=2, ensure_ascii=False))
+        click.echo(json.dumps(results, indent=2))
         return
+
     if not findings:
-        click.echo(Fore.GREEN + Style.BRIGHT + '\n[OK] Nenhum problema encontrado! \\o/')
+        click.secho("\n✨ [ESTADO DE OURO] Excelência mantida.", fg='green', bold=True)
         return
-    critical = summary.get('critical', 0)
-    errors = summary.get('errors', 0)
-    warnings = summary.get('warnings', 0)
-    click.echo(Fore.CYAN + Style.BRIGHT + '\n--- ANÁLISE ---')
-    click.echo(Fore.WHITE + f'?? {critical} | ? {errors} | ?? {warnings} | ?? {len(findings)} total')
-    total = len(findings)
-    if total > max_issues:
-        findings = findings[:max_issues]
-        click.echo(Fore.YELLOW + f'\n[!] Mostrando {max_issues}/{total} resultados (use --max-issues para expandir)')
+
+    # Header Industrial
+    ui.sep(color=Fore.WHITE, dim=False)
+    click.echo(f"{Fore.CYAN}{Style.BRIGHT}🔍 RESULTADOS DA AUDITORIA{Style.RESET_ALL}")
+    click.echo(f"   Criticos: {summary.get('critical')} | Erros: {summary.get('errors')} | Avisos: {summary.get('warnings')}")
+    ui.sep(color=Fore.WHITE, dim=False)
+
     grouped = {}
     for f in findings:
-        file = f.get('file') or 'GLOBAL'
-        grouped.setdefault(file, []).append(f)
-    for file, issues in grouped.items():
-        click.echo(Fore.WHITE + Style.BRIGHT + f'\n?? {file}')
+        path = f.get('file') or 'GLOBAL'
+        grouped.setdefault(path, []).append(f)
+
+    for file_path, issues in grouped.items():
+        ui.file_panel(file_path)
         for finding in issues:
             _print_finding_details(finding)
-            print()
-    click.echo(Fore.WHITE + '-' * 40)
-    if critical > 0:
-        click.echo(f'{Fore.MAGENTA}[CRÍTICO] {critical} problema(s) crítico(s).')
-    elif errors > 0:
-        click.echo(f'{Fore.RED}[ERRO] {errors} erro(s).')
-    else:
-        click.echo(f'{Fore.YELLOW}[AVISO] {warnings} aviso(s).')
-    print(Style.RESET_ALL)
+    
+    ui.sep()
 
 def _print_finding_details(finding):
+    """Card de Auditoria Platinum Gold - Sincronizado."""
     severity = finding.get('severity', 'INFO').upper()
     category = (finding.get('category') or 'UNCATEGORIZED').upper()
-    color_map = {'CRITICAL': Fore.MAGENTA, 'ERROR': Fore.RED, 'WARNING': Fore.YELLOW, 'INFO': Fore.CYAN}
-    color = color_map.get(severity, Fore.WHITE)
-    tag = f'[{severity}][{category}]'
-    click.echo(color + f"{tag} {finding.get('message', 'Mensagem não encontrada.')}")
-    if finding.get('file'):
-        location = f"   > Em '{finding.get('file')}'"
-        if finding.get('line'):
-            location += f" (linha {finding.get('line')})"
-        click.echo(location)
-    if finding.get('details'):
-        click.echo(Fore.CYAN + f"   > {finding.get('details')}")
-    snippet = finding.get('snippet')
-    error_line = finding.get('line')
-    if snippet and isinstance(snippet, dict):
-        for line_num_str, code_line in snippet.items():
-            line_num = int(line_num_str)
-            prefix = '   > ' if line_num == error_line else '     '
-            line_color = Fore.WHITE + Style.BRIGHT if line_num == error_line else Fore.WHITE + Style.DIM
-            click.echo(line_color + f'{prefix}{line_num:4}: {code_line}')
-    if finding.get('import_suggestion'):
-        click.echo(Fore.CYAN + Style.BRIGHT + '\n   > [ABDUÇÃO]')
-        click.echo(Fore.GREEN + f"   {ICON_LIGHTBULB} SUGESTÃO:\n   > {finding.get('import_suggestion')}")
-        return
-    if finding.get('suggestion_content') or finding.get('suggestion_action'):
-        source = finding.get('suggestion_source', 'GÊNESE')
-        click.echo(Fore.CYAN + Style.BRIGHT + f'\n   {ICON_LIGHTBULB} SOLUÇÃO CONHECIDA:')
-        click.echo(Fore.GREEN + f'   > Fonte: {source}')
-        if finding.get('suggestion_action'):
-            click.echo(Fore.YELLOW + f"   {ICON_WRENCH}  AÇÃO: {finding.get('suggestion_action')}")
-        if finding.get('suggestion_content'):
-            click.echo(Fore.GREEN + f"   > Sugestão: {finding['suggestion_content'].strip()}")
-        if snippet and finding.get('suggestion_line') and finding.get('suggestion_content'):
-            suggestion_line = finding.get('suggestion_line')
-            suggestion_snippet = _get_code_snippet_from_string(finding['suggestion_content'], suggestion_line, context_lines=2)
-            if suggestion_snippet:
-                for line_num, code_line in suggestion_snippet.items():
-                    prefix = '   > ' if line_num == suggestion_line else '     '
-                    click.echo(Fore.GREEN + f'{prefix}{line_num:4}: {code_line}')
+    f_hash = finding.get('finding_hash') or finding.get('hash')
+    file_path = finding.get('file')
+    line_num = finding.get('line', 0)
+    
+    # 1. Badge Principal
+    click.echo(ui.badge(severity, category, finding.get('message')))
+    
+    # 2. Localização (↳)
+    click.echo(f"     {Style.DIM}↳ {Fore.CYAN}{file_path}:{line_num}{Style.RESET_ALL}")
+
+    # 3. Bloco de Código (Com auto-recuperação Platinum)
+    ui.code_block(file_path, line_num, finding.get('snippet'))
+
+    # 4. Inteligência HADES
+    from .display import _get_lexicon_remedy 
+    remedy_text = _get_lexicon_remedy(f_hash)
+    
+    broken_line = ""
+    line_num = finding.get('line')
+    if finding.get('snippet') and str(line_num) in finding['snippet']:
+        broken_line = finding['snippet'][str(line_num)].strip()
+
+    if remedy_text:
+        ui.remedy(remedy_text, is_historical=True)
+    elif finding.get('suggestion_action'):
+        ui.remedy(f"doxoade check --fix -fs {finding['suggestion_action']}", is_historical=False)
 
 def _print_summary(results, ignored_count):
     findings = results.get('findings', [])
@@ -140,18 +144,21 @@ def _present_diff_output(output, error_line_number=None):
 
 def _format_timestamp(iso_str):
     try:
-        dt_utc = datetime.fromisoformat(iso_str)
+        dt_utc = datetime.fromisoformat(iso_str.replace('Z', '+00:00'))
         dt_local = dt_utc.astimezone()
         return dt_local.strftime('%Y-%m-%d %H:%M:%S')
-    except Exception:
-        return iso_str
-    except ValueError:
+    except Exception as e:
+        import logging as _dox_log
+        _dox_log.error(f"[INFRA] _format_timestamp: {e}")
         return iso_str
 
-def _print_maat_summary(findings, score):
-    """Interface de Ma'at: O Peso do Coração contra a Pena."""
-    from doxoade.tools.doxcolors import Fore, Style, Back
-    print('\n' + Back.WHITE + Fore.BLACK + f" ⚖  SENTENÇA DE MA'AT: {score}/100 " + Style.RESET_ALL)
-    for f in findings:
-        prefix = f"{Fore.RED}[REGRESSÃO]{Fore.RESET}" if f['severity'] == 'CRITICAL' else f"{Fore.YELLOW}[ALERTA]{Fore.RESET}"
-        print(f"  {prefix} {f['category']}: {f['message']}")
+def _print_summary(results, ignored_count):
+    """Barra de sumário final com estatísticas de categorias."""
+    findings = results.get('findings', [])
+    if not findings: return
+    
+    category_counts = Counter((f['category'] for f in findings))
+    click.echo(Fore.CYAN + '📊 Distribuição e Filtros:')
+    for category, count in sorted(category_counts.items(), key=lambda x: x[1], reverse=True):
+        click.echo(f"   {Fore.WHITE}{category:<20} | {Fore.YELLOW}{count:<5}")
+    click.echo(Fore.WHITE + '-' * 60)

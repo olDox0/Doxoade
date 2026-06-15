@@ -290,7 +290,16 @@ class AcervoEngine:
                 "name": Path(file_path).stem,
                 "score": score, "sec": sec, "health": json.dumps(health)
             }
-        except: return None
+        except Exception as e:
+            import sys as _dox_sys, os as _dox_os
+            from traceback import print_tb as exc_trace
+            exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
+            f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            line_n = exc_tb.tb_lineno
+            exc_trace(exc_tb)
+            print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: _analyze_brick\033[0m")
+            print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
+            return None
 
     def refresh_acervo(self, force=False):
         """Sincronização Diferencial: Velocidade Industrial."""

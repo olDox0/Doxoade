@@ -120,6 +120,14 @@ class DoxoadeLazyGroup(click.Group):
         'webcheck': 'doxoade.commands.webcheck:webcheck',
 #        'wsl': 'doxoade.commands.shell_systems.shell_cmd:wsl_shell',
         'wsl': 'doxoade.commands.linux_systems.linux_cmd:linux_group',
+        
+        
+        # comandos de testes dinamico
+        'flow-diag': 'doxoade.diagnostic.flow_necropsy:run_flow_necropsy',
+        'test-shadow': 'doxoade.commands.test_shadow:test_shadow',
+        'stress-hades': 'doxoade.commands.stress_test:stress_hades', # Nome da função após os dois pontos
+        'stress-abyss': 'doxoade.commands.stress_test:stress_abyss',
+        
         }
 
     def list_commands(self, ctx):
@@ -162,6 +170,12 @@ class DoxoadeLazyGroup(click.Group):
             mod = import_module(module_path)
             return getattr(mod, attr_name)
         except Exception as e:
+            # SÓ aciona o Lázaro se NÃO estivermos apenas listando o help
+            if not ctx.resilient_parsing:
+                from doxoade.rescue import activate_protocol
+                import traceback
+                activate_protocol(traceback.format_exc(), exit_code=1)
+            
             self._print_fatal_import(name, e)
             return None
 

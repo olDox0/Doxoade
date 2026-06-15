@@ -23,7 +23,9 @@ def archive_crash_to_hades(nx_data):
             datetime.datetime.now().isoformat()
         ))
         conn.commit()
-    except:
+    except Exception as e:
+        import logging as _dox_log
+        _dox_log.error(f"[INFRA] archive_crash_to_hades: {e}")
         pass
 
 class SoteriaForensic:
@@ -56,7 +58,10 @@ class SoteriaForensic:
                 color = self.red if i == line-1 else self.gray
                 output += f"{color}{marker}{i+1:4} | {lines[i].rstrip()}{self.reset}\n"
             return output
-        except: return ""
+        except Exception as e:
+            import logging as _dox_log
+            _dox_log.error(f"[INFRA] get_code_context: {e}")
+            return ""
 
     def process_pipe(self, text):
         """Analisa o fluxo de saída em busca de assinaturas Sotéria."""
@@ -138,7 +143,9 @@ class SoteriaForensic:
                 f_path, l_num = target_loc.rsplit(':', 1)
                 # get_code_context deve ser o método que busca o arquivo e a linha
                 print(self.get_code_context(f_path, l_num, window=3, title=label))
-            except:
+            except Exception as e:
+                import logging as _dox_log
+                _dox_log.error(f"[INFRA] get_tag: {e}")
                 print(f"  {self.ylw}⚠️  Falha na leitura física de: {target_loc}{self.reset}")
         else:
             print(f"  {self.gray}Ponto de ruptura puramente nativo (sem rastro de código disponível).{self.reset}")

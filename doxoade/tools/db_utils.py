@@ -8,13 +8,20 @@ import queue
 import os
 import sys
 import hashlib
+
+from doxoade.database import get_db_connection
+from doxoade.tools.git import _get_git_commit_hash 
+
 _LOG_QUEUE = queue.Queue()
 _WORKER_THREAD = None
+_HADES_QUEUE = queue.Queue(maxsize=1000)
 _STOP_EVENT = threading.Event()
 
 def _db_worker():
     from doxoade.database import get_db_connection
     conn = get_db_connection()
+    conn.execute("PRAGMA busy_timeout = 10000") 
+#    conn.execute("PRAGMA busy_timeout = 20000") 
     cursor = conn.cursor()
     batch_buffer = []
     while not _STOP_EVENT.is_set() or not _LOG_QUEUE.empty():
@@ -94,27 +101,41 @@ def _log_execution(command_name, path, results, arguments, execution_time_ms, ex
     _LOG_QUEUE.put((_query_hist, _params_hist))
 
 def _update_open_incidents(findings, project_path):
-    """
-    Sincroniza o estado atual do linter com o banco de dados.
-    Corrigido: parâmetro renomeado para 'findings' para bater com o check.py.
-    """
-    if not isinstance(findings, list):
-        return
+    """Sincroniza o estado atual do linter com o banco de dados."""
+    if not isinstance(findings, list): return
+    
     from doxoade.database import get_db_connection
     conn = get_db_connection()
     cursor = conn.cursor()
     project_path_abs = os.path.abspath(project_path)
+    
+    # [PLATINUM] Captura o Hash atual para satisfazer a constraint do banco
+    current_git_hash = _get_git_commit_hash(project_path_abs) or "local"
+
     current_hashes = [f.get('finding_hash') for f in findings if isinstance(f, dict) and f.get('finding_hash')]
+    
+    # Limpa incidentes resolvidos
     if current_hashes:
         placeholders = ', '.join(['?'] * len(current_hashes))
         cursor.execute(f'DELETE FROM open_incidents WHERE project_path = ? AND finding_hash NOT IN ({placeholders})', (project_path_abs, *current_hashes))
     else:
         cursor.execute('DELETE FROM open_incidents WHERE project_path = ?', (project_path_abs,))
+
     from datetime import datetime, timezone
     for f in findings:
-        if not isinstance(f, dict) or not f.get('finding_hash'):
-            continue
-        cursor.execute('\n            INSERT OR REPLACE INTO open_incidents \n            (finding_hash, file_path, line, message, severity, category, project_path, timestamp)\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n        ', (f['finding_hash'], f.get('file'), f.get('line'), f.get('message'), f.get('severity'), f.get('category'), project_path_abs, datetime.now(timezone.utc).isoformat()))
+        if not isinstance(f, dict) or not f.get('finding_hash'): continue
+        
+        # [FIX] Query atualizada com commit_hash para evitar IntegrityError
+        cursor.execute('''
+            INSERT OR REPLACE INTO open_incidents 
+            (finding_hash, file_path, line, message, severity, category, project_path, timestamp, commit_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            f['finding_hash'], f.get('file'), f.get('line'), 
+            f.get('message'), f.get('severity'), f.get('category'), 
+            project_path_abs, datetime.now(timezone.utc).isoformat(),
+            current_git_hash
+        ))
     conn.commit()
     conn.close()
     
@@ -123,6 +144,68 @@ def encrypt_payload(data_bytes, password):
     # Para segurança máxima profissional, o ideal seria 'pip install cryptography'
     key = hashlib.sha256(password.encode()).digest()
     return bytes([b ^ key[i % len(key)] for i, b in enumerate(data_bytes)])
+
+def _hades_worker():
+    """Trabalhador de background que limpa o buffer de memória."""
+    while not _STOP_EVENT.is_set():
+        try:
+            # Pega um lote de até 50 registros para gravar de uma vez (Efficiency)
+            batch = []
+            try:
+                while len(batch) < 50:
+                    item = _HADES_QUEUE.get(timeout=1.0)
+                    if item is None: break
+                    batch.append(item)
+            except queue.Empty: pass
+
+            if batch:
+                conn = get_db_connection()
+                for sql, params in batch:
+                    conn.execute(sql, params)
+                conn.commit()
+                conn.close()
+        except Exception: pass
+
+# Inicia o worker automaticamente
+threading.Thread(target=_hades_worker, daemon=True).start()
+
+def async_db_exec(sql, params=()):
+    """Joga o comando no buffer e libera a CPU imediatamente."""
+    try:
+        _HADES_QUEUE.put_nowait((sql, params))
+    except queue.Full:
+        # Se o buffer lotar (disco muito lento), cai para modo síncrono
+        conn = get_db_connection()
+        conn.execute(sql, params)
+        conn.commit()
+        conn.close()
+
+def chief_heartbeat(subsystem: str, action: str, details: dict):
+    """Grava telemetria. Síncrono em modo HORUS para evitar perda de dados."""
+    import json, os
+    from datetime import datetime
+    from doxoade.database import get_db_connection
+    
+    data_payload = json.dumps(details, ensure_ascii=False)
+    
+    # [PLATINUM] Se o Horus está vigiando, grava imediatamente
+    if os.environ.get('DOXOADE_HORUS_ACTIVE') == '1' or subsystem == 'HORUS':
+        try:
+            conn = get_db_connection()
+            conn.execute('''
+                INSERT INTO operational_logs (timestamp, subsystem, action, data, pid)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (datetime.now().isoformat(), subsystem.upper(), action.upper(), data_payload, os.getpid()))
+            conn.commit()
+            conn.close()
+            return
+        except: pass
+
+    # Fluxo normal assíncrono
+    from .db_utils import _LOG_QUEUE # Referência circular guard
+    _query = 'INSERT INTO operational_logs (timestamp, subsystem, action, data, pid) VALUES (?, ?, ?, ?, ?)'
+    _params = (datetime.now().isoformat(), subsystem.upper(), action.upper(), data_payload, os.getpid())
+    _LOG_QUEUE.put((_query, _params))
 
 # No momento de gravar:
 #if vault_is_active:

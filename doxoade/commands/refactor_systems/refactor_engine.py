@@ -167,7 +167,16 @@ class RefactorEngine:
                         f.writelines(new_lines)
                     list(self.ensure_nexus_headers(fpath, force=True))
                     yield str(fpath), "Fixed"
-            except: continue
+            except Exception as e:
+                import sys as _dox_sys, os as _dox_os
+                from traceback import print_tb as exc_trace
+                exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
+                f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                line_n = exc_tb.tb_lineno
+                exc_trace(exc_tb)
+                print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: fix_facade_imports\033[0m")
+                print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
+                continue
 
     def _build_facade_map(self):
         if self._facade_cache:
@@ -189,7 +198,15 @@ class RefactorEngine:
                         mod_path = f'doxoade.{mod_path}'
                     for alias in node.names:
                         mapping[alias.name] = mod_path
-        except:
+        except Exception as e:
+            import sys as _dox_sys, os as _dox_os
+            from traceback import print_tb as exc_trace
+            exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
+            f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            line_n = exc_tb.tb_lineno
+            exc_trace(exc_tb)
+            print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: _build_facade_map\033[0m")
+            print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
             return {}
         self._facade_cache = mapping
         return mapping
@@ -408,7 +425,16 @@ class RefactorEngine:
                     lines = f.readlines()
                 try:
                     rel_path = fpath.absolute().relative_to(self.root.parent).as_posix()
-                except: rel_path = fpath.name
+                except Exception as e:
+                    import sys as _dox_sys, os as _dox_os
+                    from traceback import print_tb as exc_trace
+                    exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
+                    f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                    line_n = exc_tb.tb_lineno
+                    exc_trace(exc_tb)
+                    print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: ensure_nexus_headers\033[0m")
+                    print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
+                    rel_path = fpath.name
                 header = f"# {rel_path}\n"
                 changed = False
                 if not lines:
@@ -427,7 +453,16 @@ class RefactorEngine:
                     with open(fpath, 'w', encoding='utf-8') as f:
                         f.writelines(lines)
                     yield str(fpath), "OK"
-            except: continue
+            except Exception as e:
+                import sys as _dox_sys, os as _dox_os
+                from traceback import print_tb as exc_trace
+                exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
+                f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                line_n = exc_tb.tb_lineno
+                exc_trace(exc_tb)
+                print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: ensure_nexus_headers\033[0m")
+                print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
+                continue
 
     def _ensure_absolute_imports_in_file(self, file_path: Path):
         """Força que todos os imports internos do arquivo sejam absolutos."""
@@ -448,7 +483,15 @@ class RefactorEngine:
             if changed:
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.writelines(new_lines)
-        except: pass
+        except Exception as e:
+            import sys as _dox_sys, os as _dox_os
+            from traceback import print_tb as exc_trace
+            exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
+            f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            line_n = exc_tb.tb_lineno
+            exc_trace(exc_tb)
+            print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: _ensure_absolute_imports_in_file\033[0m")
+            print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
         
     def _convert_relative_to_absolute(self, line, current_module_path):
         """

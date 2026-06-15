@@ -43,7 +43,15 @@ class MacrothonTranslator:
                         f"{indent}_dur = (time.perf_counter() - _t0)*1000\n"
                         f"{indent}_MACRO_METRICS.append({{'block': '{name}', 'ms': _dur}})\n"
                         f"{indent}sys.stdout.flush()\n")
-            except:
+            except Exception as e:
+                import sys as _dox_sys, os as _dox_os
+                from traceback import print_tb as exc_trace
+                exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
+                f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                line_n = exc_tb.tb_lineno
+                exc_trace(exc_tb)
+                print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: replacer\033[0m")
+                print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
                 return f"\n{indent}print('{Fore.RED}   ✘ Erro de sintaxe no bloco {name}{Style.RESET_ALL}')\n"
 
         code = re.sub(r"(?m)^([ \t]*)(\w+):\s*\n((?:\1[ \t]+.*\n?)+)", replacer, code)

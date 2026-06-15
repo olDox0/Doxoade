@@ -26,7 +26,15 @@ def run_win_cmd(cmd_list):
     proc = subprocess.run(cmd_list, capture_output=True)
     try:
         return proc.stdout.decode('cp850').strip()
-    except:
+    except Exception as e:
+        import sys as _dox_sys, os as _dox_os
+        from traceback import print_tb as exc_trace
+        exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
+        f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        line_n = exc_tb.tb_lineno
+        exc_trace(exc_tb)
+        print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: run_win_cmd\033[0m")
+        print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
         return proc.stdout.decode('utf-8', errors='replace').strip()
 
 def get_vhdx_path(distro_name):
@@ -42,8 +50,26 @@ def get_vhdx_path(distro_name):
                         if name.lower() == distro_name.lower():
                             base_path, _ = winreg.QueryValueEx(subkey, "BasePath")
                             return os.path.join(base_path, "ext4.vhdx")
-                    except: continue
-    except: return None
+                    except Exception as e:
+                        import sys as _dox_sys, os as _dox_os
+                        from traceback import print_tb as exc_trace
+                        exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
+                        f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                        line_n = exc_tb.tb_lineno
+                        exc_trace(exc_tb)
+                        print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: get_vhdx_path\033[0m")
+                        print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
+                        continue
+    except Exception as e:
+        import sys as _dox_sys, os as _dox_os
+        from traceback import print_tb as exc_trace
+        exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
+        f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        line_n = exc_tb.tb_lineno
+        exc_trace(exc_tb)
+        print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: get_vhdx_path\033[0m")
+        print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
+        return None
 
 def run_elevated_diskpart(script_path):
     """Executa o diskpart elevando via CMD (Evita erro de RemoteApp)."""

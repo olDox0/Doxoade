@@ -9,96 +9,127 @@ def horus_group():
     """👁️  Hórus: Sistema de Observabilidade de Incepção (Black Box)."""
     pass
 
-@horus_group.command('view')
-@click.option('--limit', '-n', default=50)
-@click.option('--func', '-f')
-@click.option('--full', is_flag=True)
-def horus_view(limit, func, full):
+def run_horus_view_logic(limit=100, full=False, focus=None):
+    """Lógica de visualização NSR pura, invocável por outros sistemas."""
+    from doxoade.database import get_db_connection
+    import json
+    
     conn = get_db_connection()
-    rows = conn.execute("SELECT timestamp, action, data FROM operational_logs WHERE subsystem='HORUS' ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    query = """
+        SELECT timestamp, action, data, subsystem 
+        FROM operational_logs 
+        WHERE subsystem IN ('HORUS', 'SHADOW', 'AEGIS') 
+        ORDER BY id DESC LIMIT ?
+    """
+    rows = conn.execute(query, (limit,)).fetchall()
     conn.close()
 
-    click.secho(f"\n--- 👁️  OLHO DE HÓRUS: ANÁLISE DE FLUXO TÁTICO ---", fg='cyan', bold=True)
+    click.secho(f"\n--- 👁️  INQUÉRITO HÓRUS: TIMELINE DO INCIDENTE ---", fg='cyan', bold=True)
     
     stack_level = 0
     for r in reversed(rows):
-        data = json.loads(r['data'])
-        f_raw = data.get('func', '???')
-        f_name = f_raw.split('.')[-1]
-        
-        if r['action'] == 'FUNCTION_IN':
-            indent = "  " * stack_level
-            # Destaque em Ciano para entrada normal
-            click.echo(f"{Style.DIM}{indent}➔ {Fore.CYAN}{f_name}{Fore.WHITE} (IN)")
-            if full: 
-                click.echo(f"{Style.DIM}{indent}   Args: {Fore.WHITE}{data.get('input')}")
-            stack_level += 1
+        try:
+            data = json.loads(r['data'])
+            # Filtro de Foco inteligente
+            if focus and focus not in data.get('file', '') and focus not in data.get('f', ''):
+                continue
             
-        elif r['action'] == 'FUNCTION_OUT':
-            stack_level = max(0, stack_level - 1)
-            indent = "  " * stack_level
-            output_val = str(data.get('output', 'void'))
+            f_name = data.get('f', data.get('func', '???')).split('.')[-1]
+            sub = r['subsystem']
+            color = Fore.CYAN if sub == 'SHADOW' else Fore.MAGENTA
             
-            # --- LÓGICA DE SUSPEIÇÃO (UX DINÂMICA) ---
-            color = Fore.GREEN
-            alert = ""
-            
-            # Se a função deveria retornar algo mas veio vazio/None/void
-            is_empty = output_val in ['None', 'void', '[]', '{}', '""', "''"]
-            critical_keywords = ['build', 'capture', 'env', 'command', 'exec', 'stream']
-            
-            if is_empty:
-                if any(k in f_name.lower() for k in critical_keywords):
-                    color = Fore.YELLOW # Alerta: Retorno vazio suspeito
-                    alert = f" {Fore.YELLOW}[!] EMPTY RETURN"
-                else:
-                    color = Fore.WHITE # Retorno vazio normal (procedimento)
-            
-            click.echo(f"{Style.DIM}{indent}⇠ {color}{f_name}{Fore.WHITE} (OUT){alert}")
-            if full: 
-                click.echo(f"{Style.DIM}{indent}   Res: {color}{output_val}")
+            if r['action'] in ['ENTER', 'FUNCTION_IN']:
+                indent = "  " * stack_level
+                click.echo(f"{Style.DIM}{indent}{color}[{sub}] ➔ {f_name}{Style.RESET_ALL}")
+                if full and 'args' in data:
+                    click.echo(f"{Style.DIM}{indent}      Args: {Fore.YELLOW}{data['args']}{Style.RESET_ALL}")
+                stack_level += 1
+            elif r['action'] in ['EXIT', 'FUNCTION_OUT']:
+                stack_level = max(0, stack_level - 1)
+                indent = "  " * stack_level
+                status = data.get('status', 'SUCCESS')
+                s_color = Fore.GREEN if status == 'SUCCESS' else Fore.RED
+                click.echo(f"{Style.DIM}{indent}{color}[{sub}] ⇠ {f_name} {s_color}({status}){Style.RESET_ALL}")
+                if full and 'snapshot' in data:
+                    click.echo(f"{Style.DIM}{indent}      Snapshot: {data['snapshot']}")
+        except: continue
 
-        elif r['action'] == 'FUNCTION_ERROR':
-            stack_level = max(0, stack_level - 1)
-            indent = "  " * stack_level
-            # Erro em Vermelho/Magenta para atenção imediata
-            click.echo(f"{Fore.RED}{Style.BRIGHT}{indent}✘ {f_name} (FATAL ERROR)")
-            click.echo(f"{Fore.MAGENTA}{indent}   Motivo: {data.get('error')}")
-            click.echo(f"{Style.DIM}{indent}   " + "!" * 40)
+@horus_group.command('view')
+@click.option('--limit', '-n', default=100)
+@click.option('--full', is_flag=True)
+@click.option('--focus', help='Foca o rastro apenas em um arquivo')
+def horus_view(limit, full, focus):
+    run_horus_view_logic(limit, full, focus)
 
 @horus_group.command('purge')
 def horus_purge():
-    """Limpa o registro tático de IO."""
+    """Limpa o registro tático (HORUS, SHADOW e AEGIS)."""
     conn = get_db_connection()
-    conn.execute("DELETE FROM operational_logs WHERE subsystem='HORUS'")
+    # Limpa todos os subsistemas de rastro
+    conn.execute("DELETE FROM operational_logs WHERE subsystem IN ('HORUS', 'SHADOW', 'AEGIS', 'DIAG')")
     conn.commit()
     conn.close()
-    click.secho("[OK] Memória operacional de Hórus purificada.", fg='green')
+    click.secho("[OK] Memória operacional do Nexus purificada.", fg='green')
     
 @horus_group.command('run', context_settings=dict(ignore_unknown_options=True))
-@click.argument('cmd_string')
-def horus_run(cmd_string):
+@click.argument('cmd_args', nargs=-1, type=click.UNPROCESSED)
+def horus_run(cmd_args):
     """Executa um comando sob a vigilância total de Hórus."""
     import shlex
     import subprocess
     import os
     import sys
     
-    click.secho(f"👁️  [HORUS SHADOW] Iniciando vigilância em: {cmd_string}", fg='cyan', bold=True)
-    
-    # Prepara o ambiente para o processo filho ativar o Horus automaticamente
-    env = os.environ.copy()
-    env['DOXOADE_HORUS_ACTIVE'] = '1'
-    
-    # Dispara o comando como um subprocesso
-    args = shlex.split(cmd_string)
-    # Se o comando começar com 'doxoade', garantimos que use o interpretador atual
-    if args[0] == 'doxoade':
-        args = [sys.executable, "-m", "doxoade"] + args[1:]
-
+    if not cmd_args:
+        return
     try:
-        subprocess.run(args, env=env)
+        # [PLATINUM] Inteligência de Parsing:
+        # Se o usuário usou aspas: "doxoade check -fp" -> cmd_args é ('doxoade check -fp',)
+        # Se o usuário não usou aspas: doxoade check -fp -> cmd_args é ('doxoade', 'check', '-fp')
+        if len(cmd_args) == 1 and " " in cmd_args[0]:
+            full_cmd = shlex.split(cmd_args[0].replace('\\', '/'))
+        else:
+            full_cmd = list(cmd_args)
+            
+        # [FIX] Injeção de interpretador para evitar 'doxoade is not recognized' no Windows
+        if full_cmd[0] == 'doxoade':
+            full_cmd = [sys.executable, "-m", "doxoade"] + full_cmd[1:]
+            
+        click.secho(f"👁️  [HORUS SHADOW] Monitorando: {' '.join(full_cmd)}", fg='cyan', bold=True)
+        
+        env = os.environ.copy()
+        env['DOXOADE_HORUS_ACTIVE'] = '1' # Ativa o Horus Import Hook no processo filho
+        
+        # shell=False é mandatório para segurança e caminhos com espaços
+        subprocess.run(full_cmd, env=env, shell=False)
     except Exception as e:
         click.secho(f"✘ Falha ao orquestrar sombra: {e}", fg='red')
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        exc_trace(exc_tb)
 
     click.secho("\n[!] Vigilância encerrada. Use 'doxoade horus view' para ver o rastro.", fg='yellow')
+    
+@horus_group.command('db')
+def horus_db():
+    """Analisa a saúde e latência do subsistema de dados Hades."""
+    from doxoade.database import get_db_stats
+    try:
+        stats = get_db_stats()
+        
+        click.secho("\n--- 👁️  HÓRUS: MONITORAMENTO HADES ---", fg='cyan', bold=True)
+        click.echo(f"  Peso Físico: {Fore.YELLOW}{stats['size_mb']} MB")
+        click.echo(f"  Integridade: {Fore.GREEN}{stats['integrity']}")
+        
+        # Mostra a taxa de inchaço
+        if stats['bloat_pct'] > 10:
+            click.secho(f"  [!] Inchaço: {stats['bloat_pct']}% - Sugerido: doxoade db optimize", fg='red')
+        
+        click.echo(f"\n  Acervo Lexicon: {Fore.CYAN}{stats['counts']['knowledge_lexicon']} padrões")
+        click.echo(f"  Histórico Bruto: {Fore.WHITE}{stats['counts']['findings']} registros")
+    except Exception as e:
+        import sys as exc_sys
+        from traceback import print_tb as exc_trace
+        _, exc_obj, exc_tb = exc_sys.exc_info()
+        exc_trace(exc_tb)

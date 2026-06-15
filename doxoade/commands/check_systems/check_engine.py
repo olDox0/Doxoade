@@ -5,31 +5,58 @@ import sys
 import re
 import ast
 import json
+import hashlib
 from typing import List, Dict, Any
 from click import progressbar
 from .check_state import CheckState
 from .check_utils import _calculate_incident_stats
 from doxoade.tools.analysis import _get_code_snippet
 from doxoade.tools.filesystem import _find_project_root, get_file_metadata
+from doxoade.tools.memory_pool import finding_arena
 
-def run_audit_engine(state: CheckState, io_manager, **kwargs):
+def _run_integrity_check(files, project_root):
+    """Verifica se as chamadas de função em 'files' batem com as definições no projeto."""
     from ...probes.manager import ProbeManager
-    from doxoade.tools.memory_pool import finding_arena
+    from ..check import _get_probe_path
+    manager = ProbeManager(sys.executable, project_root)
+    # O xref_probe mapeia o projeto todo e detecta desvios de argumentos
+    res = manager.execute(_get_probe_path('xref_probe.py'), project_root, payload={'files': files})
+    return json.loads(res['stdout']) if res['success'] else []
+
+def run_audit_engine(state, io_manager, **kwargs):
+#def run_audit_engine(state: CheckState, io_manager, **kwargs):
+    from ...probes.manager import ProbeManager
+    
+    # [PLATINUM] Prepara a arena para reciclagem de RAM
+    finding_arena.flush() 
+    
     manager = ProbeManager(sys.executable, state.root)
     files = io_manager.resolve_files(kwargs.get('target_files'))
     cache = {} if kwargs.get('no_cache') else io_manager.load_cache()
     to_scan = _filter_by_cache(files, cache, io_manager, state, kwargs.get('no_cache'))
+    finding_arena.recycled_count = 0
+    
     if to_scan:
         with progressbar(to_scan, label='Auditando') as bar:
             for fp, cache_key, mtime, size in bar:
+                # [OURO] Flush por arquivo para ativar a reciclagem
+                finding_arena.flush() 
+                
                 results = _scan_single_file(fp, manager, kwargs)
                 for res in results:
-                    snip = _get_code_snippet(res['file'], res.get('line', 0))
-                    arena_res = finding_arena.rent(res['severity'], res['category'], res['message'], res['file'], res['line'])
-                    arena_res['snippet'] = snip
+                    # [VITAL] O Hash deve ser baseado na mensagem para bater com o Lexicon
+                    f_hash = hashlib.sha256(res['message'].encode('utf-8')).hexdigest()
+                    
+                    arena_res = finding_arena.rent(
+                        res['severity'], res['category'], res['message'], res['file'], res['line']
+                    )
+                    arena_res['finding_hash'] = f_hash
+                    arena_res['snippet'] = _get_code_snippet(res['file'], res.get('line', 0))
                     state.register_finding(arena_res)
+
                 if mtime > 0 and (not any((f.get('category') == 'SYSTEM' for f in results))):
                     cache[cache_key] = {'mtime': mtime, 'size': size, 'findings': results}
+    
     if kwargs.get('clones'):
         _run_clone_detection(files, manager, state)
     if not kwargs.get('no_cache'):
@@ -118,18 +145,28 @@ def _run_clone_detection(files, manager, state):
             handle_error(e, context='Clone Detection JSON Parse', debug=True)
 
 def run_check_logic(path: str, state, *_args, **kwargs):
-    """
-    Bridge de Compatibilidade v93.0 (PASC-Omega).
-    Permite que comandos externos (save, merge) usem o motor modular.
-    """
+    """Bridge de Compatibilidade Platinum."""
     from .check_io import CheckIO
     from .check_filters import apply_filters
     from .check_refactor import analyze_refactor_opportunities
+    # [VITAL] Import do Gênese
+    from doxoade.tools.genesis import _enrich_findings_with_solutions, _enrich_with_dependency_analysis
+    
     io = CheckIO(path)
     state = CheckState(root=io.project_root, target_path=io.target_abs, is_full_power=kwargs.get('full_power', False))
+    
+    # 1. Auditoria Base
     run_audit_engine(state, io, **kwargs)
+    
+    # 2. Inteligência Simbólica (Gênese)
+    # Aqui ele olha as mensagens e preenche o 'suggestion_content'
+    _enrich_findings_with_solutions(state.findings, state.root)
+    _enrich_with_dependency_analysis(state.findings, path)
+    
+    # 3. Filtros e Refatoração
     apply_filters(state, **kwargs)
     analyze_refactor_opportunities(state)
+    
     return {'summary': state.summary, 'findings': state.findings, 'alb_files': state.alb_files}
 
 def _run_c_cpp_checks(fp):

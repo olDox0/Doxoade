@@ -11,6 +11,18 @@ from .maat_weights            import WeightGuard
 from .maat_parity             import ParityGuard
 from doxoade.tools.filesystem import is_ignored
 
+def check_signatures(self, files):
+    """O Tribunal de Ma'at não tolera chamadas de função fantasmas."""
+    from ...probes.xref_probe import analyze_project_integrity
+    findings = analyze_project_integrity(self.root, files)
+    for f in findings:
+        if f['type'] == 'ARGUMENT_MISMATCH':
+            self.register_finding({
+                'severity': 'CRITICAL',
+                'message': f"Divergência de Contrato: {f['details']}",
+                'file': f['file']
+            })
+
 class MaatEngine:
     def __init__(self, root_path):
         self.root = root_path

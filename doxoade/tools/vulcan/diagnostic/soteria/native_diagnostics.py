@@ -49,7 +49,10 @@ def diagnose_native_error(exit_code: int, tags: dict) -> tuple:
             fault_addr, addr_str = tags.get('FAULT_ADDR', '0x0')
 
             try: addr_int = int(addr_str, 16)
-            except: addr_int = 0
+            except Exception as e:
+                import logging as _dox_log
+                _dox_log.error(f"[INFRA] diagnose_native_error: {e}")
+                addr_int = 0
 
             if addr_int < 0x1000: return (
                 "Null Pointer Dereference", 

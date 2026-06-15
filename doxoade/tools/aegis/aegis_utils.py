@@ -107,65 +107,79 @@ def generate_exploit_poc(function_name: str) -> str:
     """Generates a canary payload to prove vulnerability."""
     return "print('--- AEGIS BYPASS ATTEMPT ---')" if function_name in ['eval', 'exec'] else 'whoami'
 
-def restricted_safe_exec(code_str, globals_dict=None, allow_imports=False, filename='<sandbox>'):
-#def restricted_safe_exec(code_str: str, globals_dict: dict=None, allow_imports: bool=False, filename: str='<sandbox>'):
+def restricted_safe_exec(code_input, globals_dict=None, **kwargs):
     """
-    Executa código em um ambiente restrito (sandbox) com ativação do motor Vulcano.
+    Executa código em sandbox com suporte ao NSR (Shadow Runtime).
+    Garante que símbolos vacinados sejam exportados corretamente para o CLI.
+    """
+    import builtins as _builtins 
+    
+    # 1. Normalização de Parâmetros
+    allow_imports = kwargs.get('allow_imports', False)
+    filename = kwargs.get('filename', '<sandbox>')
+    
+    # [VITAL] target_context DEVE ser a referência direta ao dicionário do módulo
+    # para que getattr(mod, 'save') funcione no cli.py
+    if globals_dict is None:
+        target_context = {}
+    else:
+        target_context = globals_dict
 
-    Esta é a função central para o comando 'doxoade run'. Ela garante:
-    1.  **Ativação do Vulcano:** Instala o VulcanMetaFinder para que o código executado
-        utilize passivamente os binários compilados (.pyd/.so).
-    2.  **Soberania de Caminho:** Muda o diretório de trabalho para a raiz do projeto
-        alvo, resolvendo problemas de importação relativa e acesso a arquivos.
-    3.  **Segurança:** Valida a AST para prevenir padrões de código perigosos.
-    4.  **Performance:** Utiliza um cache para evitar re-parse e re-validação da AST
-        do mesmo código.
-    5.  **Isolamento:** Controla quais funções built-in são expostas ao código.
-    """
-    if not code_str.strip():
-        return
-    abs_path = os.path.abspath(filename)
-    code_hash = hashlib.sha256(code_str.encode('utf-8')).hexdigest()
-    project_anchor = _find_project_root(os.path.dirname(abs_path))
-    old_cwd = os.getcwd()
-    try:
-        os.chdir(project_anchor)
-        try:
-            vulcan_install(project_anchor)
-        except Exception as e:
-            logging.debug(f'VulcanMetaFinder injection failed in sandbox: {e}')
-        if allow_imports:
-            _inject_target_environment(filename)
-            safe_builtins = builtins.__dict__.copy()
+    # 2. Garantia de Builtins (Evita NameError: 'builtins' is not defined)
+    if '__builtins__' not in target_context:
+        if globals_dict is not None:
+            target_context['__builtins__'] = _builtins.__dict__
         else:
             essential = ['__import__', 'print', 'len', 'range', 'dict', 'list', 'set', 'tuple', 'str', 'int', 'float', 'bool', 'Exception', 'type', 'isinstance', 'open', 'getattr', 'setattr', 'hasattr']
-            safe_builtins = {k: getattr(builtins, k) for k in essential if hasattr(builtins, k)}
-            import sys as _sys_global
-            import os as _os_global
-            safe_builtins['sys'] = _sys_global
-            safe_builtins['os'] = _os_global
-        safe_globals = {'__builtins__': safe_builtins, '__file__': abs_path, '__package__': None, '__name__': '__main__'}
-        if globals_dict:
-            safe_globals.update(globals_dict)
+            target_context['__builtins__'] = {k: getattr(_builtins, k) for k in essential if hasattr(_builtins, k)}
+
+    compiled = None
+
+    # --- CAMADA A: TRATAMENTO DE STRINGS (FLUXO PADRÃO) ---
+    if isinstance(code_input, str):
+        if not code_input.strip(): 
+            return
+            
+        code_hash = hashlib.sha256(code_input.encode('utf-8')).hexdigest()
         cache_key = (code_hash, allow_imports)
+
         if cache_key in _AST_VALIDATION_CACHE:
             compiled = _AST_VALIDATION_CACHE[cache_key]
         else:
-            tree = ast.parse(code_str, filename=filename)
+            tree = ast.parse(code_input, filename=filename)
             _validate_ast_safety(tree, allow_imports)
             compiled = compile(tree, filename=filename, mode='exec')
             _AST_VALIDATION_CACHE[cache_key] = compiled
-        import sys
-        sys.path.insert(0, project_anchor)
+
+    # --- CAMADA B: TRATAMENTO DE CODE OBJECTS (FLUXO NSR/SHADOW) ---
+    else:
+        compiled = code_input
+
+    # --- CAMADA C: SETUP DE AMBIENTE E EXECUÇÃO ---
+    abs_path = os.path.abspath(filename)
+    project_anchor = _find_project_root(os.path.dirname(abs_path))
+    old_cwd = os.getcwd()
+
+    # Sincronia de Metadados
+    target_context.setdefault('__file__', abs_path)
+    target_context.setdefault('__name__', '__main__')
+
+    try:
+        os.chdir(project_anchor)
         
+        # Injeta a raiz no path para que o Shadow encontre os submódulos
+        import sys
+        if project_anchor not in sys.path:
+            sys.path.insert(0, project_anchor)
+        
+        # --- EXECUÇÃO FINAL (Aegis Core) ---
         from doxoade.tools.aegis.aegis_core import nexus_exec
-        nexus_exec(compiled, safe_globals)
-#        exec(compiled, safe_globals)
+        # NSR: Operamos diretamente no target_context para preencher o módulo
+        return nexus_exec(compiled, target_context)
+
     except Exception as e:
         if isinstance(e, FileNotFoundError):
-            print('\x1b[33m   [!] Erro de Caminho: O script tentou acessar um arquivo que não existe.')
-            print(f'       Raiz de Execução: {project_anchor}')
-            print(f'       Alvo do Erro: {e.filename}\x1b[0m')
+            print(f'\x1b[33m   [!] Erro de Caminho: {e.filename}\x1b[0m')
         _handle_sandbox_exception(e)
         raise
     finally:

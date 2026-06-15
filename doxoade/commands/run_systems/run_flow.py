@@ -4,6 +4,7 @@ import os
 import sys
 import ast
 import click
+import traceback
 from traceback import print_tb as exc_trace
 from doxoade.tools.doxcolors import Fore
 from ...probes import flow_runner
@@ -27,11 +28,11 @@ def execute_flow(path: str, **kwargs):
 
     # 2. DISPARO DO RASTRO (Transparência Total)
     try:
-        # Passamos o shadow_src para o runner não precisar ler o disco denovo
-        flow_runner.run_flow(abs_path, shadow_src=shadow_src, **kwargs)
+        flow_runner.run_flow_direct(path, watch_vars=kwargs.get('watch_val'))
     except Exception as e:
-        # SEU BLOCO FORENSE CLÁSSICO AQUI
+        import traceback
         from doxoade.rescue import activate_protocol
+        # Agora o traceback existe e o Lazarus vai brilhar
         activate_protocol(traceback.format_exc(), exit_code=1)
         
 class PythonShadowScribe(ast.NodeTransformer):

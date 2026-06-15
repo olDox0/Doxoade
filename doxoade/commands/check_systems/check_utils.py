@@ -64,7 +64,8 @@ def _render_resource_report(full_power):
     if governor.interventions > 0:
         echo(f'   Economia de CPU       : {Fore.GREEN}~{governor.get_savings_estimate()} poupados')
         echo(f'   Tarefas Adaptadas     : {Fore.YELLOW}{governor.interventions} arquivos omitidos')
-    echo(f'   Reciclagem de Memória : {Fore.GREEN}{finding_arena._ptr} objetos reutilizados')
+    recycled = finding_arena.get_stats()
+    echo(f'   Reciclagem de Memória : {Fore.GREEN}{recycled} objetos reutilizados')
     echo(f'   Economia de Disco     : {Fore.GREEN}{ufs.reads_saved} aberturas evitadas')
     echo(f'{Fore.CYAN}{Style.DIM}─' * 85 + Style.RESET_ALL)
 

@@ -60,8 +60,25 @@ def _search_code_logic(root: Path, query: str, limit: int) -> list:
 def _search_database_logic(query, limit, path_filter) -> dict:
     from doxoade.database import get_db_connection
     from doxoade.tools.aegis.nexus_db import Row  # noqa
-    res = {'incidents': [], 'solutions': []}
+    res = {'incidents': [], 'solutions': [], 'lexicon': []} # Adicionado lexicon
+#    res = {'incidents': [], 'solutions': []}
     conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    sql_q = f'%{query}%'
+    # [PLATINUM] Seleção explícita de colunas de inteligência
+    lex_sql = """
+        SELECT finding_hash, message, occurrence_count, last_seen, snippet_broken, snippet_fixed 
+        FROM knowledge_lexicon 
+        WHERE message LIKE ? OR finding_hash LIKE ? 
+        LIMIT ?
+    """
+    rows = cursor.execute(lex_sql, (sql_q, sql_q, limit)).fetchall()
+    for r in rows:
+        res['lexicon'].append(dict(r))
+    
+    conn.close()
+    return res
     
     # CORREÇÃO AEGIS: Aplica o row_factory na conexão real embutida
     if hasattr(conn, '_conn'):

@@ -222,7 +222,10 @@ class NexusUI:
             import re
             raw_parts = re.split(re.escape(separator), content)
             return [p.strip('\r\n') for p in raw_parts if p.strip()]
-        except: return []
+        except Exception as e:
+            import logging as _dox_log
+            _dox_log.error(f"[INFRA] load_animation: {e}")
+            return []
 
     @staticmethod
     def loader(file_path, interval=0.1, debug=False, ping_pong=False, color=""):
@@ -337,7 +340,9 @@ class AsyncAnimation:
                     
                     is_first_draw = False
                     self._force_redraw = False
-            except:
+            except Exception as e:
+                import logging as _dox_log
+                _dox_log.error(f"[INFRA] _animate: {e}")
                 break
             
             # Lógica Ping-Pong
@@ -369,7 +374,9 @@ class AsyncAnimation:
                     sys.stdout.write(f"\r\x1b[{self.canvas_height - 1}A")
                 sys.stdout.write("\x1b[?25h") # Mostra cursor
                 sys.stdout.flush()
-            except: pass
+            except Exception as e:
+                import logging as _dox_log
+                _dox_log.error(f"[INFRA] _cleanup_display: {e}")
 
     def start(self):
         if not self.atomic_frames: return
