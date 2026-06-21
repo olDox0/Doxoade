@@ -1,3 +1,4 @@
+from __future__ import annotations
 # doxoade/doxoade/tools/vulcan/pitstop.py
 """
 Vulcan PitStop Engine — v1.0 Warm-Up Streaming Compiler
@@ -19,14 +20,15 @@ Variáveis de ambiente:
   DOXOADE_PITSTOP_BATCH     tamanho do lote (padrão: 8)
   DOXOADE_PITSTOP_NTHREADS  threads de forge (padrão: auto)
 """
-from __future__ import annotations
+import traceback
+import click
 import sys
 import time
 import os
 import hashlib
 import json
 
-import re
+# [DOX-UNUSED] import re
 import concurrent.futures
 
 from doxoade.tools.doxcolors import Fore, Style
@@ -36,7 +38,7 @@ from queue import Empty, Queue
 from typing import Callable
 from .artifact_manager import ensure_dirs
 from .environment import VulcanEnvironment as VulEnv
-from .forge import VulcanForge as VForge, assess_file_for_vulcan as AFVul
+# [DOX-UNUSED] from .forge import assess_file_for_vulcan as AFVul
 
 _BATCH_SIZE: int = int(os.environ.get('DOXOADE_PITSTOP_BATCH', '8'))
 _BATCH_TIMEOUT: int = 300
@@ -199,7 +201,7 @@ def _forge_to_pyx(task: dict) -> dict:
 
     except Exception as e:
         import traceback
-        sys.stdout.write(f" [ERRO]\n")
+        sys.stdout.write(" [ERRO]\n")
         return {
             'ok': False, 
             'module_name': module_name,
@@ -480,19 +482,19 @@ class PitstopEngine:
             # Fallback se o arquivo sumiu do HD
             kernel_dst.write_text("#include <stdint.h>\nint nexus_encode_varint_branchless(uint64_t n, uint8_t* out){...}")
         
-        click_echo(f"{Fore.CYAN}[DIAG] Core Path: {core_dir}{Style.RESET_ALL}")
+        click.echo(f"{Fore.CYAN}[DIAG] Core Path: {core_dir}{Style.RESET_ALL}")
         print(f"\x1b[94m[*] [LOGISTICS] Provisionando kernel: {kernel_src.name}\x1b[0m")
         
         if kernel_src.exists():
             shutil.copy2(kernel_src, kernel_dst)
-            click_echo(f"{Fore.GREEN}   ✔ Kernel provisionado em: {kernel_dst}{Style.RESET_ALL}")
+            click.echo(f"{Fore.GREEN}   ✔ Kernel provisionado em: {kernel_dst}{Style.RESET_ALL}")
         else:
             raise FileNotFoundError(f"Erro Crítico: Kernel não encontrado no Core: {kernel_src}")
             # Se falhar aqui, sabemos que o arquivo não está na pasta do Doxoade
-#            click_echo(f"{Fore.RED}   ✘ FALHA CRÍTICA: Kernel não encontrado em {kernel_src}{Style.RESET_ALL}")
+#            click.echo(f"{Fore.RED}   ✘ FALHA CRÍTICA: Kernel não encontrado em {kernel_src}{Style.RESET_ALL}")
 #            return False
         
-        click_echo(f"{Fore.CYAN}🚀 [NEXUS WARP] Iniciando Forja Paralela (N2808 Optimized)...{Style.RESET_ALL}")
+        click.echo(f"{Fore.CYAN}🚀 [NEXUS WARP] Iniciando Forja Paralela (N2808 Optimized)...{Style.RESET_ALL}")
         
         stale_modules = []
         start_time = time.time()
@@ -507,20 +509,20 @@ class PitstopEngine:
                 
                 if res['status'] == 'FORGED':
                     stale_modules.append(res['module_name'])
-                    click_echo(f"   {Fore.YELLOW}• {Path(f_path).name} -> Pyx gerado.{Style.RESET_ALL}")
+                    click.echo(f"   {Fore.YELLOW}• {Path(f_path).name} -> Pyx gerado.{Style.RESET_ALL}")
                 elif res['status'] == 'ERROR':
-                    click_echo(f"   {Fore.RED}✘ Falha no Forge: {Path(f_path).name} ({res['msg']}){Style.RESET_ALL}")
+                    click.echo(f"   {Fore.RED}✘ Falha no Forge: {Path(f_path).name} ({res['msg']}){Style.RESET_ALL}")
 
         # FASE 2: Compilação em Lote (Batch Ignition)
         if stale_modules:
-            click_echo(f"\n{Fore.CYAN}🔨 [HAMMER] Compilando {len(stale_modules)} módulos em lote único...{Style.RESET_ALL}")
+            click.echo(f"\n{Fore.CYAN}🔨 [HAMMER] Compilando {len(stale_modules)} módulos em lote único...{Style.RESET_ALL}")
             if compiler.compile_batch(stale_modules):
                 self.cache_path.write_text(json.dumps(self.cache, indent=2))
                 duration = time.time() - start_time
-                click_echo(f"{Fore.SUCCESS}✅ Warp concluído em {duration:.2f}s.{Style.RESET_ALL}")
+                click.echo(f"{Fore.SUCCESS}✅ Warp concluído em {duration:.2f}s.{Style.RESET_ALL}")
                 return True
         else:
-            click_echo(f"{Fore.GREEN}✨ Todos os binários estão sincronizados (Cache Hit).{Style.RESET_ALL}")
+            click.echo(f"{Fore.GREEN}✨ Todos os binários estão sincronizados (Cache Hit).{Style.RESET_ALL}")
             return True
         return False
         
@@ -551,10 +553,10 @@ class PitstopEngine:
 
     def process_parallel(self, targets, compiler):
         """Fase 1: Forge Paralelo (Multi-threading)."""
-        from .forge import VulcanForge
+# [DOX-UNUSED]         from .forge import VulcanForge
         
-        click_echo = __import__('click').echo
-        click_echo(f"{Fore.CYAN}🚀 [NEXUS WARP] Sincronizando Forja...{Style.RESET_ALL}")
+        click.echo = __import__('click').echo
+        click.echo(f"{Fore.CYAN}🚀 [NEXUS WARP] Sincronizando Forja...{Style.RESET_ALL}")
         
         to_compile = []
         
@@ -568,53 +570,30 @@ class PitstopEngine:
                     res = future.result()
                     if res['status'] == 'STALE':
                         to_compile.append(res['module_name'])
-                        click_echo(f"   {Fore.YELLOW}• {Path(file_path).name} -> Metal fundido.{Style.RESET_ALL}")
+                        click.echo(f"   {Fore.YELLOW}• {Path(file_path).name} -> Metal fundido.{Style.RESET_ALL}")
                     else:
-                        click_echo(f"   {Fore.STABLE}• {Path(file_path).name} -> Mantido em Cache.{Style.RESET_ALL}")
+                        click.echo(f"   {Fore.STABLE}• {Path(file_path).name} -> Mantido em Cache.{Style.RESET_ALL}")
                 except Exception as e:
-                    click_echo(f"   {Fore.RED}✘ Erro no Forge: {file_path} ({e}){Style.RESET_ALL}")
+                    click.echo(f"   {Fore.RED}✘ Erro no Forge: {file_path} ({e}){Style.RESET_ALL}")
         
         # Fase 2: Batch Hammer (Compilação em Lote)
         if to_compile:
-            click_echo(f"\n{Fore.CYAN}🔨 [BATCH HAMMER] Fundindo {len(to_compile)} módulos em lote único...{Style.RESET_ALL}")
+            click.echo(f"\n{Fore.CYAN}🔨 [BATCH HAMMER] Fundindo {len(to_compile)} módulos em lote único...{Style.RESET_ALL}")
             success = compiler.compile_batch(to_compile)
             if success:
                 self.save_cache()
                 return True
         return False
 
-    def _forge_task(self, file_path):
-        """Tarefa individual de thread."""
-        from .forge import VulcanForge
-        abs_path = os.path.abspath(file_path)
-        current_hash = self.get_content_hash(abs_path)
-        
-        # Verifica se o binário já existe e o código é o mesmo
-        if self.cache.get(abs_path) == current_hash:
-            return {'status': 'CACHED', 'module_name': None}
-        
-        # Roda a forja
-        forge = VulcanForge(abs_path)
-        pyx_code = forge.generate_source(abs_path)
-        
-        # Salva o .pyx na foundry para o GCC
-        module_name = f"v_{Path(file_path).stem}"
-        from .environment import VulcanEnvironment
-        env = VulcanEnvironment('.')
-        (env.foundry / f"{module_name}.pyx").write_text(pyx_code, encoding='utf-8')
-        
-        self.cache[abs_path] = current_hash
-        return {'status': 'STALE', 'module_name': module_name}
-
     def run_warp_drive(self, targets):
-        click_echo = __import__('click').echo
-        click_echo(f"{Fore.CYAN}🚀 [NEXUS WARP] Iniciando Forja Paralela...{Style.RESET_ALL}")
+        click.echo = __import__('click').echo
+        click.echo(f"{Fore.CYAN}🚀 [NEXUS WARP] Iniciando Forja Paralela...{Style.RESET_ALL}")
         
         # 1. Forge em Paralelo (Usa as 2 threads do N2808 para processar AST)
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
             futures = [executor.submit(self._forge_task, t) for t in targets]
             for future in concurrent.futures.as_completed(futures):
-                res = future.result()
+                pass  # [DOX-UNUSED] res = future.result()
                 # Feedback incremental
         
         # 2. Compilação em Bloco
@@ -883,7 +862,7 @@ class PitstopEngine:
     def _phase_batch_compile(self, ready, n_workers, compiler):
         """Fase 2: Fundição Paralela usando o compilador injetado."""
         import click
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from concurrent.futures import ThreadPoolExecutor
         
         # REMOVA ou COMENTE a linha abaixo se ela existir, 
         # pois agora usamos o compilador que veio de fora:

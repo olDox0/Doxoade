@@ -1,7 +1,7 @@
 # doxoade/commands/macrothon_systems/macrothon_diag.py
 import re
 from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
-from doxoade.tools.doxcolors import Fore, Style
+from doxoade.tools.doxcolors import Fore
 
 # O Blueprint que você escreveu
 blueprint = """

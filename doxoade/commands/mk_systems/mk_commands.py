@@ -29,7 +29,7 @@ def execute_mk_logic(base_path, items, architecture, tree, up):
             click.echo(color + f'[{kind.upper():<10}]: {path}')
     
     elif items:
-        click.echo(Fore.CYAN + f'--- [MK-ITEMS] Criando itens ---')
+        click.echo(Fore.CYAN + '--- [MK-ITEMS] Criando itens ---')
         for item in items:
             for expanded in engine._expand_and_create(0, item):
                 click.echo(Fore.GREEN + f'[OK] {expanded}')

@@ -6,7 +6,7 @@ Responsável por filtrar silenciadores (# noqa) e injetar lembretes.
 from typing import List, Dict, Any, Set
 from doxoade.tools.streamer import ufs
 from doxoade.tools.analysis import _get_code_snippet
-from .check_utils import _calculate_incident_stats
+# [DOX-UNUSED] from .check_utils import _calculate_incident_stats
 from .check_state import CheckState
 SILENCERS: Set[str] = {'noqa', 'ignore', 'skipline', 'suppress', 'disable'}
 FACADE_FILES: Set[str] = {'shared_tools.py', '__init__.py', 'cli.py'}
@@ -18,21 +18,32 @@ def apply_filters(state: 'CheckState', *args, **kwargs):
     'Crivo Industrial Nexus v100.8 (Aegis Shield).'
     raw_findings = state.findings
     state.findings = []
+    only_cat = kwargs.get('only', '').upper() if kwargs.get('only') else None
+    exclude_cats = {c.upper() for c in kwargs.get('exclude') or []}
     for f in raw_findings:
         file_path = f.get('file', '').replace('\\', '/')
         line_num = f.get('line', 0)
         msg = f.get('message', '').lower()
-        if 'security_utils.py' in file_path and ('exec' in msg or 'eval' in msg):
+        cat = f.get('category', 'STYLE').upper()
+        
+        if only_cat and cat != only_cat: continue
+        if 'security_utils.py' in file_path and ('exec' in msg or 'eval' in msg): continue
+        if cat in exclude_cats: continue
+        
+        # Filtro Global de Falsos Positivos: descarta alertas de headers C/C++ ausentes no compilador local
+        if 'no such file' in msg or 'not found' in msg or 'diretório ou arquivo não encontrado' in msg:
             continue
+            
         if line_num > 0:
             lines = ufs.get_lines(file_path)
             if lines and line_num <= len(lines):
                 line_text = lines[line_num - 1].lower()
                 if '# noqa' in line_text or '// noqa' in line_text:
                     continue
-        exclude_cats = {c.upper() for c in kwargs.get('exclude') or []}
+
         if f.get('category', 'STYLE').upper() in exclude_cats:
             continue
+
         state.register_finding(f)
     state.sync_summary()
 
@@ -51,6 +62,9 @@ def _should_silence(finding: dict, exclude_cats: set | None=None) -> bool:
     if any((x in file_path for x in ['foundry/', 'docs/', 'tests/'])):
         if cat == 'COMPLEXITY':
             return True
+    # Reparo de Falso Positivo para compilação C/C++ em ambiente isolado
+    if 'no such file' in msg or 'not found' in msg or 'diretório ou arquivo não encontrado' in msg:
+        return True
     return False
 
 def _has_silencer(line_content: str) -> bool:

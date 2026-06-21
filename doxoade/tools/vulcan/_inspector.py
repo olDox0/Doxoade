@@ -11,7 +11,7 @@ OSL-18: Dependência exclusiva da stdlib (re, os, math).
 from __future__ import annotations
 import re
 import os
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 # Símbolos da C-API do Python que geram "Calor" (Fricção)
 # Se estes caras aparecem muito no seu .c, a tradução foi pesada.

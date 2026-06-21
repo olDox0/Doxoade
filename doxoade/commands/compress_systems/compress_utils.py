@@ -43,7 +43,7 @@ class NexusTranscodeUI(threading.Thread):
             ui = []
             ui.append(self.up_cmd)
             ui.append(f"\r\x1b[K Transcoding: {color}[{bar_str}] {perc}%{colors.Style.RESET_ALL}\n")
-            ui.append(f"\x1b[K\n") # Linha de respiro limpa
+            ui.append("\x1b[K\n") # Linha de respiro limpa
             
             if self.frames:
                 ui.append(self.frames[frame_idx] + "\n")
@@ -168,7 +168,7 @@ def _run_transcode_nexus(input_path, output_path, total_size, frames):
                             frame_idx = (frame_idx + 1) % num_frames
                             
         # Finalização limpa
-        sys.stdout.write(f"\r\x1b[K [OK] Transcoding 100% Completo.\n")
+        sys.stdout.write("\r\x1b[K [OK] Transcoding 100% Completo.\n")
         return True
     except Exception as e:
         click.secho(f"\n[ERRO] {e}", fg='red')

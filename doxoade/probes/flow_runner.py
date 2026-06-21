@@ -1,8 +1,8 @@
 # doxoade/doxoade/probes/flow_runner.py
-import sys, os, time, argparse, warnings, json, linecache, shlex
+import sys, os, time, argparse, warnings, json, linecache
 
 try:
-    import doxoade
+    pass  # [DOX-UNUSED] import doxoade
 except ImportError:
     _candidate = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     _root = os.path.dirname(_candidate)
@@ -23,10 +23,10 @@ from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
 import flow_utils as utils
 #from .flow_utils import render_flow_table
 try:
-    import flow_utils as utils
+    pass  # [DOX-UNUSED] import flow_utils as utils
     from debug_probe import _LineTimer, _capture_locals, _MARKER_DEBUG
 except ImportError:
-    from doxoade.probes import flow_utils as utils
+# [DOX-UNUSED]     from doxoade.probes import flow_utils as utils
     from doxoade.probes.debug_probe import _LineTimer, _capture_locals, _MARKER_DEBUG
 
     import sys as exc_sys

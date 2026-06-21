@@ -1,6 +1,6 @@
 # doxoade/doxoade/commands/vault_cmd.py
 import click
-from doxoade.tools.doxcolors import Fore, Style
+# [DOX-UNUSED] from doxoade.tools.doxcolors import Style
 from doxoade.tools.aegis.vault import NexusVault
 
 @click.group('vault')

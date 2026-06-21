@@ -1,6 +1,6 @@
 # doxoade/doxoade/commands/horus_cmd.py
 import click
-import json
+# [DOX-UNUSED] import json
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.database import get_db_connection
 
@@ -24,7 +24,7 @@ def run_horus_view_logic(limit=100, full=False, focus=None):
     rows = conn.execute(query, (limit,)).fetchall()
     conn.close()
 
-    click.secho(f"\n--- 👁️  INQUÉRITO HÓRUS: TIMELINE DO INCIDENTE ---", fg='cyan', bold=True)
+    click.secho("\n--- 👁️  INQUÉRITO HÓRUS: TIMELINE DO INCIDENTE ---", fg='cyan', bold=True)
     
     stack_level = 0
     for r in reversed(rows):
@@ -37,14 +37,15 @@ def run_horus_view_logic(limit=100, full=False, focus=None):
             f_name = data.get('f', data.get('func', '???')).split('.')[-1]
             sub = r['subsystem']
             color = Fore.CYAN if sub == 'SHADOW' else Fore.MAGENTA
+            action = r['action']
             
-            if r['action'] in ['ENTER', 'FUNCTION_IN']:
+            if action in ['ENTER', 'FUNCTION_IN']:
                 indent = "  " * stack_level
                 click.echo(f"{Style.DIM}{indent}{color}[{sub}] ➔ {f_name}{Style.RESET_ALL}")
                 if full and 'args' in data:
                     click.echo(f"{Style.DIM}{indent}      Args: {Fore.YELLOW}{data['args']}{Style.RESET_ALL}")
                 stack_level += 1
-            elif r['action'] in ['EXIT', 'FUNCTION_OUT']:
+            elif action in ['EXIT', 'FUNCTION_OUT']:
                 stack_level = max(0, stack_level - 1)
                 indent = "  " * stack_level
                 status = data.get('status', 'SUCCESS')
@@ -52,7 +53,21 @@ def run_horus_view_logic(limit=100, full=False, focus=None):
                 click.echo(f"{Style.DIM}{indent}{color}[{sub}] ⇠ {f_name} {s_color}({status}){Style.RESET_ALL}")
                 if full and 'snapshot' in data:
                     click.echo(f"{Style.DIM}{indent}      Snapshot: {data['snapshot']}")
-        except: continue
+            elif 'error' in action.lower() or 'fail' in action.lower():
+                # Destaca falhas funcionais e erros de subprocessos em vermelho no terminal
+                indent = "  " * max(0, stack_level - 1)
+                err_msg = data.get('error', data.get('stderr', 'Erro operacional ocultado.'))
+                click.echo(f"{indent}{Fore.RED}{Style.BRIGHT}❌ [{sub} ERROR] {action} em {f_name}: {err_msg}{Style.RESET_ALL}")
+                if full:
+                    # Imprime as coordenadas e o dicionário de telemetria completo
+                    click.echo(f"{indent}      Diagnostic Payload: {Fore.YELLOW}{data}{Style.RESET_ALL}")
+            else:
+                # Log operacional comum ou de outras categorias
+                indent = "  " * stack_level
+                click.echo(f"{Style.DIM}{indent}{color}[{sub} INFO] {action}: {f_name}{Style.RESET_ALL}")
+                if full:
+                    click.echo(f"{Style.DIM}{indent}      Payload: {Fore.YELLOW}{data}{Style.RESET_ALL}")
+        except Exception: continue
 
 @horus_group.command('view')
 @click.option('--limit', '-n', default=100)
@@ -65,7 +80,6 @@ def horus_view(limit, full, focus):
 def horus_purge():
     """Limpa o registro tático (HORUS, SHADOW e AEGIS)."""
     conn = get_db_connection()
-    # Limpa todos os subsistemas de rastro
     conn.execute("DELETE FROM operational_logs WHERE subsystem IN ('HORUS', 'SHADOW', 'AEGIS', 'DIAG')")
     conn.commit()
     conn.close()
@@ -79,28 +93,29 @@ def horus_run(cmd_args):
     import subprocess
     import os
     import sys
+    import shutil
     
     if not cmd_args:
         return
     try:
         # [PLATINUM] Inteligência de Parsing:
-        # Se o usuário usou aspas: "doxoade check -fp" -> cmd_args é ('doxoade check -fp',)
-        # Se o usuário não usou aspas: doxoade check -fp -> cmd_args é ('doxoade', 'check', '-fp')
         if len(cmd_args) == 1 and " " in cmd_args[0]:
             full_cmd = shlex.split(cmd_args[0].replace('\\', '/'))
         else:
             full_cmd = list(cmd_args)
             
-        # [FIX] Injeção de interpretador para evitar 'doxoade is not recognized' no Windows
+        # Injeção de interpretador para evitar 'doxoade is not recognized' no Windows
         if full_cmd[0] == 'doxoade':
             full_cmd = [sys.executable, "-m", "doxoade"] + full_cmd[1:]
+        elif not shutil.which(full_cmd[0]) and full_cmd[0] != sys.executable:
+            # Encaminha comandos não mapeados na raiz para o executável padrão
+            full_cmd = [sys.executable, "-m", "doxoade"] + full_cmd
             
         click.secho(f"👁️  [HORUS SHADOW] Monitorando: {' '.join(full_cmd)}", fg='cyan', bold=True)
         
         env = os.environ.copy()
-        env['DOXOADE_HORUS_ACTIVE'] = '1' # Ativa o Horus Import Hook no processo filho
+        env['DOXOADE_HORUS_ACTIVE'] = '1'
         
-        # shell=False é mandatório para segurança e caminhos com espaços
         subprocess.run(full_cmd, env=env, shell=False)
     except Exception as e:
         click.secho(f"✘ Falha ao orquestrar sombra: {e}", fg='red')
@@ -122,7 +137,6 @@ def horus_db():
         click.echo(f"  Peso Físico: {Fore.YELLOW}{stats['size_mb']} MB")
         click.echo(f"  Integridade: {Fore.GREEN}{stats['integrity']}")
         
-        # Mostra a taxa de inchaço
         if stats['bloat_pct'] > 10:
             click.secho(f"  [!] Inchaço: {stats['bloat_pct']}% - Sugerido: doxoade db optimize", fg='red')
         

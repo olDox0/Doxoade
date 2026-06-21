@@ -7,8 +7,8 @@ Compliance: MPoT-1, PASC-1.
 import click
 import os
 import sys
-import traceback
-from doxoade.rescue import activate_protocol
+# [DOX-UNUSED] import traceback
+# [DOX-UNUSED] from doxoade.rescue import activate_protocol
 from doxoade.tools.doxcolors import Fore, Style
 
 @click.command('debug')

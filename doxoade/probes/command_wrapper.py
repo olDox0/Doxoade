@@ -52,9 +52,9 @@ if __name__ == '__main__':
             if is_test_authorized:
                 sys.exit(0) # Autorizado! Sai com sucesso e deixa o interpretador seguir.
             else:
-                print(f"✘ [AEGIS] Bloqueio: Use --test-mode para depurar scripts em tests/")
+                print("✘ [AEGIS] Bloqueio: Use --test-mode para depurar scripts em tests/")
                 sys.exit(1)
 
     # Se chegou aqui e não identificou o fluxo
-    print(f"✘ [WRAPPER FATAL] Comando não autorizado ou ilegível.")
+    print("✘ [WRAPPER FATAL] Comando não autorizado ou ilegível.")
     sys.exit(1)

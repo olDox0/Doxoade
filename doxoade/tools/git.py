@@ -137,3 +137,146 @@ def _get_file_history_metadata(path: str, limit: int=10):
 def _get_historical_content(path: str, commit_hash: str) -> str:
     """Recupera o conteúdo de um arquivo em um ponto específico do tempo."""
     return _run_git_command(['show', f'{commit_hash}:{path}'], capture_output=True, silent_fail=True) or ''
+    
+def _get_line_history(file_path: str, line_num: int) -> dict:
+    """Escava a origem de uma linha específica via Git Blame (PASC 8.19)."""
+    import subprocess
+    import datetime
+    
+    if not file_path or line_num <= 0: return None
+    
+    try:
+        # porcelain retorna metadados fáceis de parsear
+        cmd = ['git', 'blame', '-L', f'{line_num},{line_num}', '--porcelain', file_path]
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+        
+        if res.returncode != 0: return None
+        
+        lines = res.stdout.splitlines()
+        if not lines: return None
+        
+        info = {
+            'hash': lines[0].split()[0],
+            'author': 'N/A',
+            'date_str': 'N/A',
+            'summary': 'N/A'
+        }
+        
+        for ln in lines:
+            if ln.startswith('author '): info['author'] = ln[7:].strip()
+            if ln.startswith('author-time '): 
+                ts = int(ln[12:].strip())
+                info['date_str'] = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M')
+            if ln.startswith('summary '): info['summary'] = ln[8:].strip()
+            
+        return info
+    except Exception:
+        return None
+        
+def _trace_symbol_death(file_path: str, symbol: str) -> dict:
+    """Procura o último commit onde o símbolo foi REMOVIDO (tornando-o órfão)."""
+    import subprocess
+    try:
+        # Busca commits que alteraram a quantidade de ocorrências da string
+        # O filtro -S do git detecta mudanças no conteúdo (Pickaxe)
+        cmd = ['git', 'log', '-S', symbol, '--pretty=format:%h|%ad|%s', '--date=short', '--', file_path]
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+        
+        if not res.stdout.strip(): return None
+        
+        # Pegamos o commit mais recente que mexeu no símbolo
+        last_change = res.stdout.splitlines()[0]
+        h, date, msg = last_change.split('|')
+        
+        return {'hash': h, 'date': date, 'msg': msg}
+    except Exception:
+        return None
+        
+def _get_symbol_attrition(file_path: str, symbol: str) -> list:
+    """Busca commits onde a ocorrência do símbolo diminuiu (morte de uso)."""
+    import subprocess
+    if not symbol or len(symbol) < 2: return []
+    
+    try:
+        # -S do git (Pickaxe) detecta mudanças na quantidade de ocorrências da string
+        cmd = ['git', 'log', '-S', symbol, '--pretty=format:%h|%ad|%s', '--date=short', '--', file_path]
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+        
+        history = []
+        if res.stdout.strip():
+            for line in res.stdout.splitlines():
+                h, date, msg = line.split('|', 2)
+                history.append({'hash': h, 'date': date, 'msg': msg})
+        
+        return history # O primeiro item é a mudança mais recente
+    except Exception:
+        return []
+        
+def _get_symbol_attrition_point(file_path: str, symbol: str) -> dict:
+    """Escava o histórico em busca do commit de 'morte' e das linhas deletadas."""
+    import subprocess
+    if not symbol or len(symbol) < 2: return None
+    
+    try:
+        # 1. Busca o commit onde a string mudou (-G detecta mudanças qualitativas)
+        cmd_log = ['git', 'log', '-G', symbol, '--pretty=format:%h|%ad|%s', '--date=short', '-n', '1', '--', file_path]
+        res_log = subprocess.run(cmd_log, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+        
+        if not res_log.stdout.strip(): return None
+        h, date, msg = res_log.stdout.split('|', 2)
+        
+        # 2. Extrai o diff de deleção desse commit
+        # Usamos -U0 para focar apenas nas linhas alteradas
+        cmd_show = ['git', 'show', '-U0', h, '--', file_path]
+        res_show = subprocess.run(cmd_show, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+        
+        evidence = []
+        if res_show.returncode == 0:
+            for line in res_show.stdout.splitlines():
+                # Captura linhas removidas (-) que não sejam o header do diff
+                if line.startswith('-') and not line.startswith('---') and symbol in line:
+                    # Se a linha removida for apenas um comentário de remoção do Doxoade, ignoramos
+                    if '[DOX-UNUSED]' in line: continue
+                    
+                    clean_line = line[1:].strip()
+                    if clean_line: evidence.append(clean_line)
+        
+        return {
+            'hash': h, 'date': date, 'msg': msg,
+            'evidence': evidence[:3] # Top 3 evidências
+        }
+    except Exception:
+        return None
+        
+def _find_symbol_crime_scene(file_path: str, symbol: str) -> dict:
+    """Escava o histórico para achar onde o uso do símbolo foi removido."""
+    import subprocess
+    if not symbol or len(symbol) < 2: return None
+    
+    try:
+        # 1. Localiza o último commit onde o conteúdo do símbolo mudou (-G)
+        cmd_log = ['git', 'log', '-G', symbol, '--pretty=format:%h|%ad|%s', '--date=short', '-n', '1', '--', file_path]
+        res_log = subprocess.run(cmd_log, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+        
+        if not res_log.stdout.strip(): return None
+        h, date, msg = res_log.stdout.split('|', 2)
+        
+        # 2. Extrai o rastro: linhas que foram APAGADAS (-) e que continham o símbolo
+        # O parâmetro -U0 garante que pegamos apenas a linha alterada, sem contexto extra.
+        cmd_show = ['git', 'show', '-U0', h, '--', file_path]
+        res_show = subprocess.run(cmd_show, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+        
+        evidence = []
+        if res_show.returncode == 0:
+            for line in res_show.stdout.splitlines():
+                # Captura linhas deletadas que citam o símbolo
+                if line.startswith('-') and not line.startswith('---') and symbol in line:
+                    clean_line = line[1:].strip()
+                    if clean_line: evidence.append(clean_line)
+        
+        return {
+            'hash': h, 'date': date, 'msg': msg,
+            'evidence': evidence[:3] # Retorna os 3 principais rastros
+        }
+    except Exception:
+        return None

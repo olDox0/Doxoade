@@ -1,6 +1,6 @@
 # doxoade/doxoade/diagnostic/check_exame.py
-import os
-import sys
+# [DOX-UNUSED] import os
+# [DOX-UNUSED] import sys
 
 def funcao_complexa(a):
     """Gera aviso de complexidade se houver muitos desvios."""
@@ -19,7 +19,9 @@ def risco_seguranca():
 def erro_runtime():
     return variavel_inexistente + 10
 
-def argumento_mutavel(lista=[]):
+def argumento_mutavel(lista=None):
+    if lista is None:
+        lista = []
     return lista
 
 def teste_contrato(valor):

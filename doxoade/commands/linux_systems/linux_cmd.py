@@ -6,9 +6,9 @@ import sys
 import threading
 import time
 import winreg
-import tempfile
+# [DOX-UNUSED] import tempfile
 import ctypes
-from pathlib import Path
+# [DOX-UNUSED] from pathlib import Path
 
 from doxoade.tools.doxcolors import Fore, Style, colors
 from doxoade.tools.doxcolors import colors

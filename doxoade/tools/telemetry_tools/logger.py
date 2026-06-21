@@ -27,7 +27,9 @@ def chief_heartbeat(subsystem: str, action: str, details: dict):
                         'file': os.path.basename(caller.f_code.co_filename),
                         'line': caller.f_lineno
                     }
-            except: pass
+            except Exception as e:
+                import logging as _dox_log
+                _dox_log.error(f"[INFRA] chief_heartbeat: {e}")
 
         # 2. Singleton de Conexão (PASC 6.4 - Performance Pura)
         if _CHIEF_CONN is None:

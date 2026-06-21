@@ -24,6 +24,7 @@ __all__ = ['check', 'run_check_logic']
 @click.option('--structural-risk', '-sr', default=False, show_default=True, help='Classifica risco estrutural Python (dinamismo/import hooks).')
 @click.option('--ai/--no-ai', default=False, show_default=True, help='Aciona ponte IA (ORN) quando houver achados bloqueantes.')
 @click.option('--format', 'out_fmt', type=click.Choice(['text', 'json']), default='text')
+@click.option('--archaeology', '--arc', is_flag=True, help='Investiga a origem histórica de cada achado (Git Blame).')
 @click.pass_context
 def check(ctx, path: str, **kwargs):
     """🔍 Auditoria de Qualidade Modular v85.2 (Full Power)."""
@@ -87,9 +88,11 @@ def _render_output(state: CheckState, kwargs: dict):
     _render_issue_summary(state.findings, **kwargs)
 
 def _apply_modular_fixes(state, fix_specify):
-    """Integra o AutoFixer ao novo CheckState."""
+    """Aplica os reparos e sincroniza o estado da auditoria."""
     from .check_systems.check_fixer import apply_fixes_to_state
-    apply_fixes_to_state(state, fix_specify)
+    count = apply_fixes_to_state(state, fix_specify)
+    if count > 0:
+        click.echo(Fore.GREEN + f"\n✨ Auto-reparo concluído: {count} incidentes resolvidos.")
 
 def _has_blocking_findings(state: CheckState) -> bool:
     """Define se o check deve falhar/acionar ORN.

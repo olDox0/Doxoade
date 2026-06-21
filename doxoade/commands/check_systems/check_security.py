@@ -20,8 +20,11 @@ def analyze_security(state: CheckState):
 
 def _audit_sast_integration(state: CheckState):
     """Especialista em processamento Bandit com ProgressBar."""
-    from doxoade.dnm import DNM
-    target_files = state.target_files or DNM(state.target_path).scan(extensions=['py'])
+    if os.path.isfile(state.target_path):
+        target_files = [state.target_path] if state.target_path.endswith('.py') else []
+    else:
+        from doxoade.dnm import DNM
+        target_files = state.target_files or DNM(state.target_path).scan(extensions=['py'])
     py_files = [f for f in target_files if f.endswith('.py')]
     if not get_tool_path('bandit') or not py_files:
         return

@@ -8,13 +8,13 @@ import os  # [FIX] ausente: usado em archive_crash_to_hades_vulcan_optimized (os
 import re
 import hashlib
 import datetime
-import sys
+# [DOX-UNUSED] import sys
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any
 
-from .crash_signatures import WIN_SIGNALS, PYTHON_EXCEPTIONS, NATIVE_LOGIC_PATTERNS
-from doxoade.tools.telemetry_tools.logger import chief_heartbeat
-from .python_diagnostics import diagnose_python_error
+from .crash_signatures import WIN_SIGNALS, PYTHON_EXCEPTIONS
+# [DOX-UNUSED] from doxoade.tools.telemetry_tools.logger import chief_heartbeat
+# [DOX-UNUSED] from .python_diagnostics import diagnose_python_error
 from .native_diagnostics import diagnose_native_error
 
 def archive_crash_to_hades_vulcan_optimized(nx_data):

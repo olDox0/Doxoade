@@ -21,7 +21,7 @@ Compliance:
     PASC-6 : função sem binário é relatada como "não compilada"
 """
 from __future__ import annotations
-import ast
+# [DOX-UNUSED] import ast
 import hashlib
 import importlib.util
 import json
@@ -31,6 +31,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
+from doxoade.tools.doxcolors import Fore, Style
 
 @dataclass
 class FunctionBenchResult:

@@ -16,14 +16,14 @@ from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.filesystem import _find_project_root
 __version__ = '86.0 Omega (modular split)'
 try:
-    from doxoade.tools.vulcan.simd_detector import detect
-    from doxoade.tools.vulcan.simd_compiler import SIMDContext, SIMDForge, SIMDEnvironment, estimate_gain, get_simd_report
+    pass  # [DOX-UNUSED] from doxoade.tools.vulcan.simd_detector import detect
+    from doxoade.tools.vulcan.simd_compiler import SIMDContext
     _SIMD_AVAILABLE = True
 except ImportError:
     _SIMD_AVAILABLE = False
 try:
-    from doxoade.tools.vulcan.object_allocation_scanner import scan_source, scan_pyx, render_report as _render_alloc_report, ModuleAllocReport
-    from doxoade.tools.vulcan.object_reduction import reduce_source, reduce_pyx_file, TransformResult
+# [DOX-UNUSED]  from doxoade.tools.vulcan.object_allocation_scanner import ModuleAllocReport
+# [DOX-UNUSED]  from doxoade.tools.vulcan.object_reduction import TransformResult
     _OBJREDUCE_AVAILABLE = True
 except ImportError:
     _OBJREDUCE_AVAILABLE = False
@@ -111,7 +111,7 @@ def vulcan_group():
 @click.option('--c-code', is_flag=True, help='Mostra o código C gerado')
 def vulcan_inspect(path, c_code):
     """Inspeciona a Pureza de Metal e o código gerado."""
-    from doxoade.tools.vulcan.forge import assess_file_for_vulcan, BodyPurityScanner
+    from doxoade.tools.vulcan.forge import BodyPurityScanner
     from doxoade.tools.vulcan.diagnostic import extract_c_snippet
     import ast
     
@@ -230,7 +230,7 @@ def doctor(module, srcdir, retries):
 def vulcan_status():
     """Dashboard de Sincronia: Original (Tier 3) vs Nativo (Tier 1)."""
     from pathlib import Path
-    import hashlib, os, time
+    import hashlib, os
 
     root = Path(_find_project_root(os.getcwd()))
     bin_dir = root / '.doxoade' / 'vulcan' / 'bin'

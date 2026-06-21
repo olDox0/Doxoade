@@ -6,7 +6,7 @@ import shutil
 import click
 from pathlib import Path
 
-from .constants import BASE, DUMP_DIR_NAMES, DUMP_FILE_SUFFIXES
+from .constants import DUMP_DIR_NAMES, DUMP_FILE_SUFFIXES
 from .manifest import load_manifest
 from .ops import scan_venvs
 from .utils import fmt_size, is_venv, manifest_key

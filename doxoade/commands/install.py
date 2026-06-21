@@ -7,9 +7,9 @@ import json
 import click
 import ast
 from packaging.requirements import Requirement
-from importlib import metadata
-from doxoade.tools.doxcolors import Fore, Style
-from doxoade.commands.doxcolors_systems.colors_command import config
+# [DOX-UNUSED] from importlib import metadata
+from doxoade.tools.doxcolors import Fore
+# [DOX-UNUSED] from doxoade.commands.doxcolors_systems.colors_command import config
 from doxoade.tools.filesystem import _get_project_config
 from doxoade.tools.filesystem import _get_venv_python_executable
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
@@ -186,7 +186,7 @@ def install(ctx, packages, uninstall, optimize, wheel):
                     click.echo(Fore.GREEN + f"'{package_name}=={new_version}' salvo em requirements.txt.")
                     logger.add_finding('INFO', f"Pacote '{package_name}=={new_version}' salvo.", category='REQUIREMENTS')
                 else:
-                    click.echo(Fore.RED + f'Erro ao atualizar requirements.txt.')
+                    click.echo(Fore.RED + 'Erro ao atualizar requirements.txt.')
             else:
                 click.echo(Fore.RED + f"[ERRO] Falha ao confirmar instalação de '{package_name}' no venv.")
         for pkg in packages:

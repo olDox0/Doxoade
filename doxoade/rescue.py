@@ -6,11 +6,11 @@ Agregador Forense: Sotéria + Aegis + Lazarus (Consolidado).
 """
 import os
 import subprocess
-import re
+# [DOX-UNUSED] import re
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from doxoade.tools.telemetry_tools.logger import chief_heartbeat
+# [DOX-UNUSED] from doxoade.tools.telemetry_tools.logger import chief_heartbeat
 from doxoade.tools.doxcolors import Fore, Style, Back
 
 from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
@@ -46,7 +46,15 @@ def _find_production_source(filename: str) -> Optional[Path]:
     try:
         candidates = [c for c in Path('.').rglob(p.name) if not any(x in str(c).lower() for x in ['.doxoade', 'venv', 'build', 'shadow'])]
         return candidates[0] if candidates else None
-    except: return None
+    except Exception as e:
+        import sys as _dox_sys, os as _dox_os
+        from traceback import print_tb as exc_trace
+        exc_obj, exc_tb = _dox_sys.exc_info()
+        f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        line_n = exc_tb.tb_lineno
+        exc_trace(exc_tb)
+        print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: _find_production_source\033[0m")
+        print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
 
 def get_code_context(filepath: str, linenum: int, context_lines: int = 2) -> Optional[str]:
     path = _find_production_source(filepath)
@@ -62,7 +70,15 @@ def get_code_context(filepath: str, linenum: int, context_lines: int = 2) -> Opt
             color = R if is_target else Style.DIM
             ctx += f"    {color}{marker}{i+1:4} | {lines[i].strip()}{RST}\n"
         return ctx.rstrip()
-    except: return None
+    except Exception as e:
+        import sys as _dox_sys, os as _dox_os
+        from traceback import print_tb as exc_trace
+        exc_obj, exc_tb = _dox_sys.exc_info()
+        f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        line_n = exc_tb.tb_lineno
+        exc_trace(exc_tb)
+        print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: get_code_context\033[0m")
+        print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
 
 # --- CORE ENGINE ---
 
@@ -76,7 +92,15 @@ def _find_remedy_in_lexicon(error_msg):
         res = conn.execute(query, (error_msg,)).fetchone()
         conn.close()
         return res[0] if res else None
-    except: return None
+    except Exception as e:
+        import sys as _dox_sys, os as _dox_os
+        from traceback import print_tb as exc_trace
+        exc_obj, exc_tb = _dox_sys.exc_info()
+        f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        line_n = exc_tb.tb_lineno
+        exc_trace(exc_tb)
+        print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: _find_remedy_in_lexicon\033[0m")
+        print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
 
 def analyze_crash(traceback_text: str, exit_code: int = None) -> Dict[str, Any]:
     from .tools.vulcan.diagnostic.soteria.analyze_crash import CrashProcessor
@@ -92,7 +116,7 @@ def analyze_crash(traceback_text: str, exit_code: int = None) -> Dict[str, Any]:
 
 def _interactive_inspection(d: dict):
     from doxoade.tools.doxcolors import Fore, Style
-    print(f"\n\x1b[42;1m 💻 CONSOLE INTERATIVO LAZARUS v2.0 \x1b[0m")
+    print("\n\x1b[42;1m 💻 CONSOLE INTERATIVO LAZARUS v2.0 \x1b[0m")
     print(f"{Style.DIM}Snapshot 'info' ativo. Dica: Use ':' no final para blocos multilinhas.")
     print(f"Use 'exit' para voltar.{Style.RESET_ALL}")
     
@@ -350,7 +374,7 @@ def activate_protocol(error_text: str, exit_code: int = None, **kwargs): # <-- A
             print(f"  {_view_align(opt7, 55)} {opt0}")
 #            print(f"  {_view_align(opt0, 55)}")
 
-            choices = input(f"\n  Sua decisão (ex: 34): ").strip()
+            choices = input("\n  Sua decisão (ex: 34): ").strip()
             if '0' in choices: break
 
             try:
@@ -402,7 +426,15 @@ def activate_protocol(error_text: str, exit_code: int = None, **kwargs): # <-- A
                                     d_obj = json.loads(r['data'])
                                     # Limpa a visualização do JSON para o terminal
                                     d_str = ", ".join([f'"{k}": {v}' for k, v in d_obj.items()])
-                                except:
+                                except Exception as e:
+                                    import sys as _dox_sys, os as _dox_os
+                                    from traceback import print_tb as exc_trace
+                                    exc_obj, exc_tb = _dox_sys.exc_info()
+                                    f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                                    line_n = exc_tb.tb_lineno
+                                    exc_trace(exc_tb)
+                                    print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: activate_protocol\033[0m")
+                                    print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
                                     d_str = r['data']
                                 
                                 print(f"  {Style.DIM}[{ts}]{RST} {Fore.YELLOW}{sys_label}{RST} │ {C}{act_label}{RST} >> {W}{d_str}{RST}")
@@ -432,12 +464,12 @@ def activate_protocol(error_text: str, exit_code: int = None, **kwargs): # <-- A
                 handle_error(e, context="activate_protocol", debug=True)
     except Exception as e:
         # --- [ MODO DE EMERGÊNCIA: SOTÉRIA OFFLINE ] ---
-        print(f"\n\x1b[41m[ CRITICAL ] O Motor de Diagnóstico Sotéria falhou!\x1b[0m")
+        print("\n\x1b[41m[ CRITICAL ] O Motor de Diagnóstico Sotéria falhou!\x1b[0m")
         print(f"\x1b[33mCausa: {e}\x1b[0m")
         # Criamos um dossiê mínimo para não quebrar a UI
         info = {
             'technical_error': "DIAGNOSTIC_ENGINE_FAILURE",
-            'explanation': f"Ocorreu um erro interno no Doxoade ao analisar esta falha.",
+            'explanation': "Ocorreu um erro interno no Doxoade ao analisar esta falha.",
             'file': "DESCONHECIDO", 'line': 0, 'exit_code': exit_code, 'chain': []
         }
 #        from doxoade.tools.error_info import handle_error
@@ -448,6 +480,6 @@ def activate_protocol(error_text: str, exit_code: int = None, **kwargs): # <-- A
     
     # --- O SELO FINAL ---
     # os._exit garante que o Lazarus não tente se auto-diagnosticar ao fechar
-    import os
+# [DOX-UNUSED]     import os
 #    _os._exit(1) # obs: vejo que é melhor sys._exit.
     _sys.exit(exit_code if exit_code is not None else 1)

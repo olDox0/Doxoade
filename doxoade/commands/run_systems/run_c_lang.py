@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import tempfile
+# [DOX-UNUSED] import tempfile
 from pathlib import Path
 from typing import Final
 import click
@@ -99,7 +99,7 @@ def compile_c_family_source(script_path):
 def execute_binary(binary_path, limits=None, extra_args=None):
     """Executa o binário nativo e aciona o Resgate se houver falha."""
     import subprocess
-    from doxoade.tools.aegis.warden import apply_resource_limits
+# [DOX-UNUSED]     from doxoade.tools.aegis.warden import apply_resource_limits
     from doxoade.rescue import activate_protocol 
     from doxoade.tools.telemetry_tools.logger import chief_heartbeat # <--- GARANTA ESTE IMPORT
     
@@ -204,7 +204,7 @@ def run_c_with_flow(exe_path, limits):
     from doxoade.tools.aegis.warden import apply_resource_limits
     import shutil
     
-    click.echo(f"\x1b[34m🌊 Injetando Sonda Nexus Flow em Binário Nativo...\x1b[0m")
+    click.echo("\x1b[34m🌊 Injetando Sonda Nexus Flow em Binário Nativo...\x1b[0m")
     apply_resource_limits(limits)
 
     # Verifica se há strace (Linux) ou gdb (Windows) para fazer o rastro

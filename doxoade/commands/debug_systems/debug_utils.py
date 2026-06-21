@@ -18,7 +18,7 @@ import traceback
 import tracemalloc
 import linecache
 import io
-from pathlib import Path
+# [DOX-UNUSED] from pathlib import Path
 
 from doxoade.tools.horus             import horus_trace
 from doxoade.tools.filesystem        import _find_project_root
@@ -242,7 +242,7 @@ def run_debug(script_path: str):
 @horus_trace
 def get_debug_env(script_path=None):
     """Garante um ambiente de execução íntegro (Anti-Void)."""
-    import os, sys
+    import os
     from doxoade.tools.filesystem import _find_project_root
     
     # 1. Pega a base atual
@@ -373,7 +373,7 @@ def run_memory(script_path: str):
     from .debug_memory import get_memory_composition, get_allocation_tracebacks
     import tracemalloc
     import json
-    import traceback
+# [DOX-UNUSED]     import traceback
     abs_path = os.path.abspath(script_path)
     mem_data = {'status': 'unknown', 'error': None, 'memory': {}}
     globs = {'__name__': '__main__', '__file__': abs_path, '__package__': None}

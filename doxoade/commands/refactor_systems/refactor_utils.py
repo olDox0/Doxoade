@@ -1,15 +1,15 @@
 # doxoade/doxoade/commands/refactor_systems/refactor_utils.py
 from __future__ import annotations
 import ast
-import os
+# [DOX-UNUSED] import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator
 from doxoade.tools.filesystem import SYSTEM_IGNORES
 
 try:
-    from doxoade.tools.filesystem import collect_project_files, _is_path_ignored
-    from doxoade.tools.filesystem import SYSTEM_IGNORES as _SYSTEM_IGNORES
+ from doxoade.tools.filesystem import collect_project_files
+ from doxoade.tools.filesystem import SYSTEM_IGNORES as _SYSTEM_IGNORES
 except ImportError:
     _SYSTEM_IGNORES: set[str] = set()
     

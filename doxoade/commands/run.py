@@ -8,7 +8,7 @@ import os
 import sys
 import click
 import traceback
-from doxoade.tools.doxcolors import Fore, Style
+from doxoade.tools.doxcolors import Fore
 
 @click.command('run')
 @click.argument('script', type=click.Path(exists=True))

@@ -8,12 +8,12 @@ import sys
 import subprocess
 from pathlib import Path
 from typing import List, Optional
-from datetime import datetime
+# [DOX-UNUSED] from datetime import datetime
 from rich.console import Console
 from rich.prompt import Confirm
 from doxoade.tools.system_utils import is_termux
-from doxoade.commands.mobile_termux import termux_share_file, termux_clipboard_copy, termux_toast, setup_micro_split_workflow
-from doxoade.commands.mobile_ux import show_file_info, git_status_visual
+from doxoade.commands.mobile_termux import setup_micro_split_workflow
+# [DOX-UNUSED] from doxoade.commands.mobile_ux import git_status_visual
 from doxoade.commands.mobile_ux import show_extended_menu
 from doxoade.commands.mobile_ux import get_best_editor
 try:

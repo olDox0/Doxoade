@@ -9,11 +9,11 @@ import ast
 import sys
 import logging
 import os
-import builtins
+# [DOX-UNUSED] import builtins
 from pathlib import Path
 from typing import List, Dict
 
-from doxoade.tools.vulcan.meta_finder import install as vulcan_install
+# [DOX-UNUSED] from doxoade.tools.vulcan.meta_finder import install as vulcan_install
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.filesystem import _find_project_root
 

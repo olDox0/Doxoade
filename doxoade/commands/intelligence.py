@@ -4,7 +4,7 @@ import os
 import json
 import click
 import traceback
-from pathlib import Path
+# [DOX-UNUSED] from pathlib import Path
 from rich.console import Console
 
 from doxoade.dnm import DNM
@@ -12,37 +12,34 @@ from doxoade.rescue import activate_protocol
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 from doxoade.tools.filesystem import _find_project_root
 
-@click.group('intelligence', invoke_without_command=True)
-@click.argument('paths', nargs=-1, type=click.Path(exists=True))
-@click.option(  '--docs',       '-d', is_flag=True, 
-                help="Extrai docstrings.")
-@click.option(  '--source',     '-s', is_flag=True, 
-                help="Inclui código fonte.")
-@click.option(  '--no-comments','-nc',is_flag=True, 
-                help="Remove comentários (Token Saver).")
-@click.option(  '--concatenate','-c', is_flag=True, 
-                help="Minifica o JSON.")
-@click.option(  '--ai-export',  '-ai',is_flag=True, 
-                help="Gera XML para LLMs.")
-@click.option(  '--output',     '-o', default='chief_dossier.json',
-                help="Saída do dossiê.")
+# PASC 10.1: Configuração para permitir flags APÓS os caminhos
+CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'], allow_interspersed_args=True)
+
+@click.group('intelligence', invoke_without_command=True, context_settings=CONTEXT_SETTINGS)
+@click.option(  '--docs',       '-d', is_flag=True, help="Extrai docstrings.")
+@click.option(  '--source',     '-s', is_flag=True, help="Inclui código fonte.")
+@click.option(  '--no-comments','-nc',is_flag=True, help="Remove comentários.")
+@click.option(  '--concatenate','-c', is_flag=True, help="Minifica o JSON.")
+@click.option(  '--ai-export',  '-ai',is_flag=True, help="Gera XML para LLMs.")
+@click.option(  '--output',     '-o', default='chief_dossier.json', help="Saída do dossiê.")
 @click.option(  '--focus',      '-f', type=click.Choice(['vulcan', 'check', 'economic']))
+@click.option(  '--exclude',    '-x', multiple=True, help="Pastas ou arquivos a ignorar.")
+@click.argument('paths', nargs=-1, type=click.Path(exists=True))
 @click.pass_context
-def intelligence(ctx, paths, output, docs, source, no_comments, concatenate, focus, ai_export):
-    """Módulo de Inteligência Topológica (v95.4)."""
+# ORDEM DOS PARÂMETROS DEVE SEGUIR A ORDEM DOS DECORADORES (Pilha: de cima para baixo)
+def intelligence(ctx, docs, source, no_comments, concatenate, ai_export, output, focus, exclude, paths):
+    """Módulo de Inteligência Topológica (v95.5)."""
     
     if ctx.invoked_subcommand is None:
         scan_paths = paths if paths else ('.',)
         
-        # --- LAZARUS SHIELD ---
         try:
-            # CORREÇÃO: Passando os 9 argumentos na ordem correta
+            # Passando os argumentos limpos para o motor
             _run_dossier_scan(
                 scan_paths, output, docs, source, 
-                no_comments, concatenate, focus, ai_export, ctx
+                no_comments, concatenate, focus, ai_export, ctx, exclude
             )
         except Exception:
-            # Se houver erro no Python, o Lazarus faz a necropsia
             error_data = traceback.format_exc()
             activate_protocol(error_data)
             ctx.exit(1)
@@ -50,59 +47,59 @@ def intelligence(ctx, paths, output, docs, source, no_comments, concatenate, foc
 @intelligence.command('recover')
 @click.option('--dir', 'backup_path', required=True, help="Pasta de backup do NPP.")
 @click.option('--out', 'output_path', default='recovery_zone', help="Destino.")
-
 def recover(backup_path, output_path):
-    """Resgata versões estáveis (Protocolo Ma'at - Pré 14/02)."""
+    """Resgata versões estáveis (Protocolo Ma'at)."""
     from .intelligence_systems.recovery_engine import run_recovery_mission
     click.echo("\033[93m🧐 Iniciando Resgate: Material Estável (Janela Ma'at)\033[0m")
     success, msg = run_recovery_mission(backup_path, output_path)
     if success: click.echo(f"\033[92m✅ {msg}\033[0m")
     else: click.echo(f"\033[91m✘ {msg}\033[0m")
 
-def _run_dossier_scan(scan_paths, output, include_docs, include_source, no_comments, concat, focus, ai_export, ctx):
+def _run_dossier_scan(scan_paths, output, include_docs, include_source, no_comments, concat, focus, ai_export, ctx, cli_excludes):
     from .intelligence_systems.intelligence_engine import analyze_file_chief
-    from .intelligence_utils import strip_comments
-    from .intelligence_systems.intelligence_engine import analyze_file_chief
-    from .intelligence_utils import strip_comments
+    from .intelligence_utils import strip_comments, get_ignore_spec # <-- IMPORTAR get_ignore_spec
     
     root = _find_project_root(os.getcwd())
     console = Console()
 
-    # Inicia Telemetria
-    with ExecutionLogger('intelligence', root, ctx.params):
-        console.print("[bold gold3]🔍 Doxoade Chief Insight v95.4 (Header Preservation Active)[/bold gold3]")
-        
-        valid_exts = ('.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx')
-        all_files = []
+    # Inicializa o filtro de exclusão (Lê TOML + CLI)
+    ignore_spec = get_ignore_spec(root, extra_patterns=list(cli_excludes))
 
-        # Navegação via DNM (Aplica Blacklist de pastas automaticamente)
+    with ExecutionLogger('intelligence', root, ctx.params):
+        console.print("[bold gold3]🔍 Doxoade Chief Insight v95.5 (Interspersed Args Active)[/bold gold3]")
+        
+        valid_exts = (
+            '.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx',
+            '.pyd', '.so'
+        )
+        all_files_raw = []
+
         for p in scan_paths:
             p_abs = os.path.abspath(p)
             if os.path.isfile(p_abs):
-                all_files.append(p_abs)
+                all_files_raw.append(p_abs)
             else:
                 nav = DNM(p_abs)
-                all_files.extend(nav.scan(extensions=list(valid_exts)))
+                all_files_raw.extend(nav.scan(extensions=list(valid_exts)))
 
-        unique_files = list(dict.fromkeys(all_files))
+        unique_files = []
+        for f in dict.fromkeys(all_files_raw):
+            rel_path = os.path.relpath(f, root).replace('\\', '/')
+            if not ignore_spec.match_file(rel_path):
+                unique_files.append(f)
+
         dossier_files = []
-
         with click.progressbar(unique_files, label='[VULCAN:INTEL]') as bar:
             for f in bar:
                 try:
                     res = analyze_file_chief(f, root, docs=include_docs, source=include_source)
-                    
                     if res and isinstance(res, dict) and 'size' in res:
-                        # TOKEN SAVER: Limpeza cirúrgica com preservação de header
                         if no_comments and res.get('source_minified'):
                             res['source_minified'] = strip_comments(res['source_minified'], f)
-                        
                         dossier_files.append(res)
                 except Exception:
                     continue
                     
-        # Delegar salvamento para o motor central
-        from .intelligence import _save_report 
         _save_report(dossier_files, output, root, concat, focus, ai_export, console)
 
 def _save_report(files, output, root, concat, focus, ai_export, console):
@@ -240,7 +237,7 @@ def _save_llm_report(report_data, output_path, console):
             break
     
     if meta:
-        lines.append(f"# DOXOADE NEXUS INTELLIGENCE REPORT")
+        lines.append("# DOXOADE NEXUS INTELLIGENCE REPORT")
         lines.append(f"**Target Project:** {meta.get('target_project')}")
         lines.append(f"**Generated At:** {meta.get('generated_at')}")
         lines.append(f"**Focus Applied:** {meta.get('focus_applied')}\n")

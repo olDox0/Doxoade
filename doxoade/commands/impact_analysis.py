@@ -6,7 +6,7 @@ from doxoade.tools.doxcolors import Fore, Style
 from doxoade.commands.impact_systems.impact_logic import build_project_index, get_external_consumers
 from doxoade.commands.impact_systems.impact_state import ImpactState
 from doxoade.commands.impact_systems.impact_utils import path_to_module_name, load_impact_cache, save_impact_cache
-from doxoade.commands.doxcolors_systems.colors_command import config
+# [DOX-UNUSED] from doxoade.commands.doxcolors_systems.colors_command import config
 from doxoade.tools.filesystem import _find_project_root
 from doxoade.tools.filesystem import _get_project_config
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
@@ -70,7 +70,7 @@ def impact_analysis(ctx, file_path_arg, project_path, tracking, internal, extern
             click.echo(Fore.YELLOW + f'  Usado por    : {fan_in} arquivos')
         if show_graph or xml or html:
             from doxoade.commands.impact_systems.impact_fluxogram import build_import_fluxogram, graph_stats, analyze_cycles
-            from doxoade.commands.impact_systems.fluxogram_imports import to_mermaid, to_json, to_payload, to_xml
+            from doxoade.commands.impact_systems.fluxogram_imports import to_mermaid, to_payload, to_xml
             flux_graph = build_import_fluxogram(idx, include_external=True, target_module=target_mod, depth=1)
             stats = graph_stats(flux_graph)
             cycles = analyze_cycles(flux_graph) if alerts else []

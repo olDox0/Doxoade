@@ -1,6 +1,6 @@
 # doxoade/doxoade/commands/mobile_termux.py
 from __future__ import annotations
-import os
+# [DOX-UNUSED] import os
 import subprocess
 from pathlib import Path
 from doxoade.tools.system_utils import is_termux

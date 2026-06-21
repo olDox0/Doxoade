@@ -48,7 +48,7 @@ def rename_module(root: Path, old_module: str, new_module: str, apply: bool=Fals
     if apply:
         new_path.parent.mkdir(parents=True, exist_ok=True)
         os.rename(old_path, new_path)
-        print(f'[MOVE] arquivo renomeado')
+        print('[MOVE] arquivo renomeado')
     print('\n[RESUMO]')
     print(f'  arquivos alterados: {files_changed}')
     print(f'  imports atualizados: {total_changes}')

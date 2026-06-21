@@ -1,15 +1,15 @@
 # doxoade/doxoade/commands/mobile_ux.py
 from __future__ import annotations
 import os
-import sys
+# [DOX-UNUSED] import sys
 import subprocess
 from pathlib import Path
-from typing import List, Optional
+# [DOX-UNUSED] from typing import Optional
 from datetime import datetime
-from rich.console import Console
-from rich.prompt import Confirm
+# [DOX-UNUSED] from rich.console import Console
+# [DOX-UNUSED] from rich.prompt import Confirm
 from doxoade.tools.system_utils import is_termux
-from doxoade.commands.mobile_termux import termux_share_file, termux_clipboard_copy, termux_toast, setup_micro_split_workflow
+from doxoade.commands.mobile_termux import termux_share_file, termux_clipboard_copy
 
 def show_file_info(file_path: Path):
     """Mostra informações detalhadas do arquivo"""

@@ -1,12 +1,12 @@
 # doxoade/doxoade/tools/display.py
 import click
 import re, sys
-import os
+# [DOX-UNUSED] import os
 from collections import Counter
 from datetime import datetime
-from doxoade.tools.doxcolors import Fore, Style, Back
+from doxoade.tools.doxcolors import Fore, Style
 from doxoade.database import get_db_connection
-from .analysis import _get_code_snippet_from_string
+# [DOX-UNUSED] from .analysis import _get_code_snippet_from_string
 from .display_systems import display_elements as ui
 
 def _get_lexicon_remedy(f_hash, message=None):
@@ -68,35 +68,48 @@ def _present_results(output_format, results, max_issues=50, verbose=False):
     ui.sep()
 
 def _print_finding_details(finding):
-    """Card de Auditoria Platinum Gold - Sincronizado."""
+    """Card de Auditoria Platinum Gold - Sincronizado com Prévias."""
     severity = finding.get('severity', 'INFO').upper()
     category = (finding.get('category') or 'UNCATEGORIZED').upper()
     f_hash = finding.get('finding_hash') or finding.get('hash')
     file_path = finding.get('file')
     line_num = finding.get('line', 0)
+    action = finding.get('suggestion_action')
     
-    # 1. Badge Principal
     click.echo(ui.badge(severity, category, finding.get('message')))
-    
-    # 2. Localização (↳)
     click.echo(f"     {Style.DIM}↳ {Fore.CYAN}{file_path}:{line_num}{Style.RESET_ALL}")
-
-    # 3. Bloco de Código (Com auto-recuperação Platinum)
+    
+    # Exibe o bloco de código
     ui.code_block(file_path, line_num, finding.get('snippet'))
-
-    # 4. Inteligência HADES
-    from .display import _get_lexicon_remedy 
+    
+    # Tenta obter remédio do histórico (Hades) ou sugestão do motor (Atena)
     remedy_text = _get_lexicon_remedy(f_hash)
     
-    broken_line = ""
-    line_num = finding.get('line')
-    if finding.get('snippet') and str(line_num) in finding['snippet']:
-        broken_line = finding['snippet'][str(line_num)].strip()
+    if action:
+        # Se for correção de bloco, a linha original que queremos mostrar no diff
+        # é a linha de cima (onde está o comentário)
+        orig_line_idx = line_num - 1 if action == 'FIX_BLOCK_SYNTAX' else line_num
+        
+        original_line = ""
+        if finding.get('snippet'):
+            original_line = finding['snippet'].get(str(orig_line_idx)) or finding['snippet'].get(orig_line_idx, "")
 
-    if remedy_text:
-        ui.remedy(remedy_text, is_historical=True)
-    elif finding.get('suggestion_action'):
-        ui.remedy(f"doxoade check --fix -fs {finding['suggestion_action']}", is_historical=False)
+        ui.remedy(
+            f"doxoade check --fix -fs {action}", 
+            is_historical=False,
+            fixed_content=finding.get('suggestion_content'),
+            original_content=original_line,
+            line_num=orig_line_idx
+        )
+    if finding.get('archaeology'):
+        arc = finding['archaeology']
+        attr = finding.get('attrition')
+        click.echo(f"     {Fore.BLUE}🏛️  ORIGEM: {Fore.WHITE}{arc['date_str']} ({arc['hash'][:7]})")
+        
+        if attr and attr.get('evidence'):
+            click.echo(f"     {Fore.MAGENTA}🥀 ATRIÇÃO: {Fore.WHITE}Uso removido em {attr['date']} ({attr['hash'][:7]})")
+            for line in attr['evidence']:
+                click.echo(f"      {Fore.RED}{Style.DIM} - {line[:70]}{Style.RESET_ALL}")
 
 def _print_summary(results, ignored_count):
     findings = results.get('findings', [])

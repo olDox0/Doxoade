@@ -19,7 +19,7 @@ from .vulcan_cmd import _sigint_handler, _print_vulcan_forensic, _patch_vulcan_f
 from doxoade.tools.filesystem import _find_project_root
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 try:
-    from doxoade.tools.vulcan.simd_compiler import SIMDContext, SIMDForge, SIMDEnvironment, estimate_gain
+ from doxoade.tools.vulcan.simd_compiler import SIMDContext, SIMDEnvironment, estimate_gain
 except ImportError:
     pass
 try:
@@ -642,7 +642,7 @@ def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, no_optimize
                     click.echo(f'    .py files    : {len(py_files)}')
                     click.echo(f'    .pyd files   : {len(pyd_files)}')
                     click.echo(f'    .so files    : {len(so_files)}')
-                    click.echo(f'    Top entries  :')
+                    click.echo('    Top entries  :')
                     for e in sorted(pkg_dir.iterdir())[:10]:
                         click.echo(f'      {e.name}')
             try:

@@ -1,13 +1,13 @@
 # doxoade/doxoade/commands/run_systems/run_flow.py
 """Especialista de Rastro Nexus Flow (PASC 8.5)."""
 import os
-import sys
+# [DOX-UNUSED] import sys
 import ast
 import click
-import traceback
-from traceback import print_tb as exc_trace
-from doxoade.tools.doxcolors import Fore
-from ...probes import flow_runner
+# [DOX-UNUSED] import traceback
+# [DOX-UNUSED] from traceback import print_tb as exc_trace
+# [DOX-UNUSED] from doxoade.tools.doxcolors import Fore
+# [DOX-UNUSED] from ...probes import flow_runner
 
 def execute_flow(path: str, **kwargs):
     """Orquestrador Nexus Flow com Injeção Ares Shadow."""

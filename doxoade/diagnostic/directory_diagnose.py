@@ -4,7 +4,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 from doxoade.dnm import DNM
-from doxoade.tools.filesystem import is_ignored
+# [DOX-UNUSED] from doxoade.tools.filesystem import is_ignored
 
 def auditar_percepcao_espacial(root_path: str):
     """

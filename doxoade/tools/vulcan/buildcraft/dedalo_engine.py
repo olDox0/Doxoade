@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # doxoade\tools\vulcan\buildcraft\dedalo_engine.py
-import os, sys, subprocess, time
+import subprocess, time
 from pathlib import Path
 from ..diagnostic.soteria.scribe import SoteriaScribe
 

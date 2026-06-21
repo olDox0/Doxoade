@@ -8,9 +8,9 @@ import os
 import sys
 import builtins
 import time
-import math
+# [DOX-UNUSED] import math
 import threading
-import itertools
+# [DOX-UNUSED] import itertools
 import atexit
 
 def _force_reset():

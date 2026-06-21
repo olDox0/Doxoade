@@ -1,7 +1,7 @@
 import subprocess
 import shutil
 import os
-from pathlib import Path
+# [DOX-UNUSED] from pathlib import Path
 
 def audit_binary_symbols(exe_path: str):
     """Verifica se o binário contém o DNA da Sotéria."""

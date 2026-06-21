@@ -3,7 +3,7 @@ import sys
 import os
 import tempfile
 import subprocess
-import traceback
+# [DOX-UNUSED] import traceback
 from doxoade.tools.filesystem import _get_project_config
 
 if os.environ.get('DOXOADE_HORUS_ACTIVE') == '1':
@@ -171,7 +171,15 @@ def main():
         finally:
             try:
                 os.remove(path)
-            except: pass
+            except Exception as e:
+                import sys as _dox_sys, os as _dox_os
+                from traceback import print_tb as exc_trace
+                exc_obj, exc_tb = _dox_sys.exc_info()
+                f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                line_n = exc_tb.tb_lineno
+                exc_trace(exc_tb)
+                print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: main\033[0m")
+                print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
         sys.exit(1)
 
 if __name__ == '__main__':

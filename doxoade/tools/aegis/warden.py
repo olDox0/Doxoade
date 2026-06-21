@@ -1,6 +1,6 @@
 # doxoade/tools/aegis/warden.py
-import os
-import sys
+# [DOX-UNUSED] import os
+# [DOX-UNUSED] import sys
 import click
 
 try:

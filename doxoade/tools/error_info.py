@@ -81,7 +81,7 @@ def print_forensic_exception():
     fname = os.path.split(curr_tb.tb_frame.f_code.co_filename)[1]
     line_n = curr_tb.tb_lineno
     
-    print(f"\n\x1b[41;1m 🔥 CRASH FORENSE \x1b[0m")
+    print("\n\x1b[41;1m 🔥 CRASH FORENSE \x1b[0m")
     print(f"\x1b[31m ■ Local : {fname}:{line_n}")
     print(f" ■ Tipo  : {exc_type.__name__}")
     print(f" ■ Valor : {str(exc_obj)}\x1b[0m")

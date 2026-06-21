@@ -3,7 +3,7 @@
 import os
 import sys
 import re
-import shutil
+# [DOX-UNUSED] import shutil
 import click
 import subprocess
 
@@ -128,7 +128,7 @@ def init(ctx, project_name, remote):
             subprocess.run(['git', 'push', '-u', 'origin', 'main'])
 
     click.secho(f"\n✔ Silo '{project_name}' criado com sucesso!", fg="green", bold=True)
-    click.echo(f"Dica: Execute 'python main.py' para testar a soberania Vulcan.")
+    click.echo("Dica: Execute 'python main.py' para testar a soberania Vulcan.")
 
 # --- TEMPLATES NEXUS ---
 

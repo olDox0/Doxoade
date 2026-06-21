@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, sys, re, json, difflib
+import json, difflib
 from pathlib import Path
 from datetime import datetime
 
@@ -59,7 +59,7 @@ class NexusAudit:
         if dossier['file'] == "main.c" or "src/main.c" in dossier['file']:
             self.log("OK", f"Caminho Windows resolvido: {dossier['file']} L{dossier['line']}")
         else:
-            self.log("FAIL", f"Corrupção de caminho detectada.", f"Entrada: {path_sujo}\nResultado no Dossiê: {dossier['file']}")
+            self.log("FAIL", "Corrupção de caminho detectada.", f"Entrada: {path_sujo}\nResultado no Dossiê: {dossier['file']}")
 
     def audit_oom_metrics(self):
         print(f"\n{self.ylw}🧪 [FASE 3] Auditoria de Métricas (OOM TNSE){self.reset}")

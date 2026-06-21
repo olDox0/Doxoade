@@ -2,7 +2,7 @@
 import sys
 import os
 from dataclasses import dataclass
-from doxoade.tools.doxcolors import Fore
+# [DOX-UNUSED] from doxoade.tools.doxcolors import Fore
 
 @dataclass
 class EngineStatus:

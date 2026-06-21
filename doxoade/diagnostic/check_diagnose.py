@@ -1,7 +1,7 @@
 # doxoade/doxoade/diagnostic/check_diagnose.py
 import os
 import sys
-import json
+# [DOX-UNUSED] import json
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -31,7 +31,7 @@ def verificar_integridade_sondas():
         payload = {'files': [exame_1, exame_2]} if is_global else None
         target = project_root if s == 'xref_probe.py' else exame_1 if not is_global else None
         res = manager.execute(p_path, target, payload=payload)
-        status = '[green]OK[/green]' if res['success'] else f'[red]FALHA[/red]'
+        status = '[green]OK[/green]' if res['success'] else '[red]FALHA[/red]'
         pay_type = 'JSON' if payload else 'FILE'
         table_infra.add_row(s, status, pay_type)
         if not res['success']:

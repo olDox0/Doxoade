@@ -6,7 +6,7 @@ from .mk_utils import (
     get_indent_level, is_directory, clean_path_and_content, 
     expand_braces, TREE_BRANCH, TREE_LAST, TREE_INDENT, get_tree_icon
 )
-from doxoade.tools.filesystem import is_ignored
+# [DOX-UNUSED] from doxoade.tools.filesystem import is_ignored
 
 class MkEngine:
     """Motor de Construção de Topologia (Nexus Edition)."""

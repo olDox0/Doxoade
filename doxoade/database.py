@@ -67,7 +67,15 @@ def _m_v19_payloads(cursor):
     """Protocolo de Expansão de Memória: Armazena inputs e outputs comprimidos."""
     try:
         cursor.execute('ALTER TABLE command_history ADD COLUMN compressed_payload BLOB;')
-    except: pass # Já existe
+    except Exception as e:
+        import sys as _dox_sys, os as _dox_os
+        from traceback import print_tb as exc_trace
+        exc_obj, exc_tb = _dox_sys.exc_info()
+        f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        line_n = exc_tb.tb_lineno
+        exc_trace(exc_tb)
+        print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: _m_v19_payloads\033[0m")
+        print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
 
 def _m_v20_nexus_vault(cursor):
     """Cria a infraestrutura do Cofre de Sessão."""
@@ -287,7 +295,15 @@ def get_db_stats():
         for t in tables:
             try:
                 stats['counts'][t] = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-            except: stats['counts'][t] = 0
+            except Exception as e:
+                import sys as _dox_sys, os as _dox_os
+                from traceback import print_tb as exc_trace
+                exc_obj, exc_tb = _dox_sys.exc_info()
+                f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                line_n = exc_tb.tb_lineno
+                exc_trace(exc_tb)
+                print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: get_db_stats\033[0m")
+                print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
             
     finally:
         conn.close()

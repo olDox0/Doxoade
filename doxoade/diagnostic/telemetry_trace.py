@@ -1,6 +1,6 @@
 # doxoade/doxoade/diagnostic/telemetry_trace.py
-import os
-import sys
+# [DOX-UNUSED] import os
+# [DOX-UNUSED] import sys
 import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
 from doxoade.database import get_db_connection
 from doxoade.chronos import chronos_recorder

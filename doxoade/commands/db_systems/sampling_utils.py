@@ -1,6 +1,6 @@
 # doxoade/doxoade/commands/db_systems/sampling_utils.py
 import sqlite3
-import shutil
+# [DOX-UNUSED] import shutil
 import os
 
 class DataSampler:

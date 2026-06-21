@@ -4,7 +4,7 @@ import sys
 import time
 import concurrent.futures
 from pathlib import Path
-from setuptools import Extension
+# [DOX-UNUSED] from setuptools import Extension
 
 from .diagnostic.soteria.scribe import SoteriaScribe
 from .diagnostic.soteria.soteria_analysis import SoteriaForensic
@@ -83,7 +83,7 @@ class VulcanCompiler:
         err_tail: deque[str] = deque(maxlen=max_tail_lines)
 
         def _drain(pipe, target: deque[str]):
-            from collections import deque
+# [DOX-UNUSED]             from collections import deque
             try:
                 for line in iter(pipe.readline, ''):
                     if line:
@@ -103,7 +103,7 @@ class VulcanCompiler:
     def transpile_batch(self, modules_list, use_soteria=True):
         import time, os, shutil
         from pathlib import Path
-        import doxoade 
+# [DOX-UNUSED]         import doxoade 
         from setuptools import Extension 
         
         # 1. Setup de Ambiente

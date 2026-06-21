@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from pathlib import Path
+# [DOX-UNUSED] from pathlib import Path
 
 from .constants import BASE, MANIFEST
 

@@ -3,7 +3,7 @@ import click
 import subprocess
 import os
 import sys
-from pathlib import Path
+# [DOX-UNUSED] from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.filesystem import _find_project_root
 

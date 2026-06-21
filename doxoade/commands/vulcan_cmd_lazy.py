@@ -138,7 +138,7 @@ def lazy_check(module_name, target_path):
     ll = _require_lazy('lazy check')
     root = _resolve_root(target_path)
     click.echo(f'\n{Fore.CYAN}{Style.BRIGHT}  ⚡ VULCAN LAZY CHECK — {module_name}{Style.RESET_ALL}\n')
-    from doxoade.tools.vulcan.lazy_loader import AccessPolicy, ValidationResult, analyze_module_safety
+    from doxoade.tools.vulcan.lazy_loader import ValidationResult, analyze_module_safety
     policy = ll.load_policy(_policy_path(root))
     vr = policy.validate(module_name)
     if vr.status == ValidationResult.STATUS_PROTECTED:

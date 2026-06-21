@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # doxoade/tools/vulcan/diagnostic/soteria/scribe.py
-import re, os, shutil
+import re
 from pathlib import Path
 
 from doxoade.tools.telemetry_tools.logger import chief_heartbeat

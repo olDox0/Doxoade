@@ -142,7 +142,7 @@ class NexusMetalEngine:
 
         # 3. PREPARAÇÃO DE AMBIENTE
         print(f"   🚀 {Style.BRIGHT}Invocando: {target['name']}{self.RST}")
-        print(f"   " + "─" * 65)
+        print("   " + "─" * 65)
         
         full_cmd = [str(out_exe)] + (extra_args or [])
         env = os.environ.copy()
@@ -169,7 +169,7 @@ class NexusMetalEngine:
                     print(f"      {clean}")
             
             process.wait()
-            print(f"   " + "─" * 65)
+            print("   " + "─" * 65)
             full_log = "".join(captured_output)
 
             # --- LAUDOS DE SAÍDA ---
@@ -329,7 +329,7 @@ class NexusMetalEngine:
             shadow_dir.mkdir(parents=True, exist_ok=True)
             
             vacinados = []
-            print(f"      💉 Vacinando módulos...")
+            print("      💉 Vacinando módulos...")
             for src in final_sources:
                 dest = shadow_dir / src.name
                 content = src.read_text(encoding='utf-8', errors='ignore')
@@ -391,7 +391,7 @@ class NexusMetalEngine:
         shadow_file = shadow_dir / src.name
         
         # 2. Vacinação Sotéria (Hórus Scribe)
-        print(f"   💉 Vacinando módulo isolado...")
+        print("   💉 Vacinando módulo isolado...")
         vacinado = self.scribe.instrument_code(src.read_text(errors='ignore'), src.name)
         shadow_file.write_text(vacinado, encoding='utf-8')
 

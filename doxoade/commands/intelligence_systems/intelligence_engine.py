@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/intelligence_systems/intelligence_engine.py
+# [DOX-UNUSED] import re
 import os
 import ast
 from datetime import datetime
@@ -25,11 +26,25 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
     }
     
     # ADICIONADO: '.js', '.jsx', '.ts', '.tsx' na lista
-    valid_exts = ('.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx')
+    valid_exts = ('.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx', '.pyd', '.so')
+#    valid_exts = ('.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx')
     if not file_path.endswith(valid_exts):
         return data
         
     try:
+        # --- NOVO: CAPTURA DE BINÁRIOS (VULCAN NATIVE) ---
+        if file_path.endswith(('.pyd', '.so')):
+            data.update({
+                "status": "native_compiled",
+                "complexity": 0,
+                "god_assignment": "Vulcan", # Binários são sempre filhos de Vulcan
+                "binary_info": {
+                    "last_modified": datetime.fromtimestamp(os.path.getmtime(file_path)).isoformat(),
+                    "type": "Windows DLL/PYD" if file_path.endswith('.pyd') else "Linux Shared Object"
+                }
+            })
+            return data # Retorna cedo, não tenta ler como texto
+
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
             
@@ -160,3 +175,4 @@ def _analyze_layer(level, b_path, curr_funcs):
         from doxoade.tools.error_info import handle_error
         handle_error(e, context="intelligence_engine._analyze_layer", silent=True)
         return None
+        

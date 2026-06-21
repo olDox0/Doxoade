@@ -26,7 +26,7 @@ import timeit
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
-from .regression_registry import RegressionRegistry, STATUS_AGGRESSIVE, STATUS_EXCLUDED, MIN_SPEEDUP_DEFAULT
+from .regression_registry import RegressionRegistry, STATUS_AGGRESSIVE, MIN_SPEEDUP_DEFAULT
 DEFAULT_RUNS = 500
 DEFAULT_WARMUP = 10
 MIN_RUNTIME_US = 0.5

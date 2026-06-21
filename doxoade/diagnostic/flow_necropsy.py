@@ -1,12 +1,12 @@
 # doxoade/doxoade/diagnostic/flow_necropsy.py
 import os
 import sys
-import time
+# [DOX-UNUSED] import time
 import click
-from pathlib import Path
+# [DOX-UNUSED] from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
-from doxoade.database import get_db_connection
-from doxoade.tools.telemetry_tools.logger import chief_heartbeat
+# [DOX-UNUSED] from doxoade.database import get_db_connection
+# [DOX-UNUSED] from doxoade.tools.telemetry_tools.logger import chief_heartbeat
 try:
     from doxoade.tools.engine_control import NexusEngineGuard # <-- VITAL
 except Exception as e:
@@ -21,9 +21,9 @@ except Exception as e:
 @click.command('flow-diag')
 def run_flow_necropsy():
     """Painel de Controle de Motores Nexus."""
-    click.secho(f"\n╔══════════════════════════════════════════════════════╗", fg='cyan')
-    click.secho(f"║       NEXUS SYSTEMS STATUS (VIGILÂNCIA ATIVA)        ║", fg='cyan', bold=True)
-    click.secho(f"╚══════════════════════════════════════════════════════╝", fg='cyan')
+    click.secho("\n╔══════════════════════════════════════════════════════╗", fg='cyan')
+    click.secho("║       NEXUS SYSTEMS STATUS (VIGILÂNCIA ATIVA)        ║", fg='cyan', bold=True)
+    click.secho("╚══════════════════════════════════════════════════════╝", fg='cyan')
 
     # 1. Mapeamento de MetaPath (Quem manda na importação)
     click.echo(f"\n{Fore.WHITE}■ BUS DE IMPORTAÇÃO (MetaPath):{Style.RESET_ALL}")
@@ -67,7 +67,7 @@ def run_flow_necropsy():
     if active_interference:
         click.secho(f"  ⚠  AMBIENTE POLUÍDO: {len(active_interference)} módulos de teste pré-carregados.", fg='yellow')
     else:
-        click.secho(f"  ✔  AMBIENTE PURO: Sem interferência externa.", fg='green')
+        click.secho("  ✔  AMBIENTE PURO: Sem interferência externa.", fg='green')
     
     states = NexusEngineGuard.get_engine_states(os.getcwd())
     

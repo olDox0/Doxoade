@@ -1,7 +1,7 @@
 import os
 import click
 import ctypes
-import subprocess
+# [DOX-UNUSED] import subprocess
 
 @click.group()
 def shell_group():

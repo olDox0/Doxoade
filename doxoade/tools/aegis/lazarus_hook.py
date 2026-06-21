@@ -20,7 +20,7 @@ def lazarus_crash_handler(etype, value, tb):
     with open("FATAL_CRASH_DUMP.txt", "w", encoding="utf-8") as f:
         f.write(error_data)
         
-    print(f"\n\x1b[41;1m 🔥 CRASH FATAL DETECTADO \x1b[0m")
+    print("\n\x1b[41;1m 🔥 CRASH FATAL DETECTADO \x1b[0m")
     print(f"Evidência salva em: {os.path.abspath('FATAL_CRASH_DUMP.txt')}")
     
     # Tenta acionar o Lazarus se ele estiver importável

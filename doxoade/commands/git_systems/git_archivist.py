@@ -8,7 +8,7 @@ import sys
 import os
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.filesystem import _get_venv_python_executable
-from doxoade.tools.filesystem import is_ignored
+# [DOX-UNUSED] from doxoade.tools.filesystem import is_ignored
 
 class GitArchivist:
 

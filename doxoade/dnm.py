@@ -5,7 +5,7 @@ import logging
 from typing import List, Optional
 from pathlib import Path
 
-from doxoade.commands.doxcolors_systems.colors_command import config
+# [DOX-UNUSED] from doxoade.commands.doxcolors_systems.colors_command import config
 
 from doxoade.tools.filesystem import is_ignored as central_is_ignored
 from doxoade.tools.filesystem import _get_project_config
@@ -38,7 +38,7 @@ class DNM:
         'venv', 'pytest_temp_dir', 'recovery_zone',
         'tmp', 'env', 'node_modules', '.idea', '.vscode',
         'dist', 'build', 'doxoade.egg-info', 'htmlcov', '.pytest_cache',
-        'thirdparty', 'nppBackup'
+        'thirdparty', 'nppBackup', 'tests', 'regression_tests'
     }
     FORGE_JUNK = {
         'foundry', 'opt_py', 'staging', 'lib_bin', 

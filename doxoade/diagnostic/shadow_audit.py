@@ -1,16 +1,16 @@
 # doxoade/diagnostic/shadow_audit.py
 import sys
-import os
+# [DOX-UNUSED] import os
 import ast
-import json
-from pathlib import Path
+# [DOX-UNUSED] import json
+# [DOX-UNUSED] from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
 
 def audit_the_watchmen():
     print(f"{Fore.CYAN}{Style.BRIGHT}🔬 [SHADOW AUDIT] Investigando o Motor de Rastro...{Style.RESET_ALL}")
     
     # 1. Verificar MetaPath
-    print(f"\n1. Localizando Finder no MetaPath:")
+    print("\n1. Localizando Finder no MetaPath:")
     finder = next((f for f in sys.meta_path if 'ShadowFinder' in str(type(f))), None)
     if finder:
         print(f"   {Fore.GREEN}✔ ShadowFinder está ativo no índice {sys.meta_path.index(finder)}.{Style.RESET_ALL}")
@@ -18,7 +18,7 @@ def audit_the_watchmen():
         print(f"   {Fore.RED}✘ ShadowFinder NÃO ENCONTRADO no sistema de importação.{Style.RESET_ALL}")
 
     # 2. Teste de Transpilação (A Cirurgia AST)
-    print(f"\n2. Testando Scribe (Vacinador):")
+    print("\n2. Testando Scribe (Vacinador):")
     try:
         from doxoade.tools.aegis.shadow_scribe import NexusShadowScribe
         test_code = "def target(): return 1 + 1"
@@ -40,7 +40,7 @@ def audit_the_watchmen():
         print(f"   {Fore.RED}✘ Erro ao invocar Scribe: {e}{Style.RESET_ALL}")
 
     # 3. Teste de Identidade de Compilação
-    print(f"\n3. Validando Identidade de Objeto (Code Object):")
+    print("\n3. Validando Identidade de Objeto (Code Object):")
     try:
         # O compile deve levar o filename para que o rastro seja rastreável
         filename = "diagnose_test.py"

@@ -1,7 +1,7 @@
 # doxoade/doxoade/tools/filesystem.py
 import os
 from pathlib import Path
-from doxoade.commands.doxcolors_systems.colors_command import config
+# [DOX-UNUSED] from doxoade.commands.doxcolors_systems.colors_command import config
 try:
     import tomllib as toml
 except ModuleNotFoundError:
@@ -10,7 +10,7 @@ SYSTEM_IGNORES = {
     '__init__.py', '.gitignore', 'pyproject.toml', 'README.md', 'LICENSE',
     'venv', '.git', '__pycache__', 'build', 'dist', '.doxoade', '.doxoade_cache', 
     'node_modules', '.vscode', '.idea', 'pytest_temp_dir', '.dox_agent_workspace',
-    'thirdparty', 'w64devkit',
+    'thirdparty', 'w64devkit', 'tests', 'regression_tests',
 }
 
 def _find_project_root(start_path='.'):
@@ -93,7 +93,10 @@ def collect_files_to_analyze(config, cmd_line_ignore=None):
     config_ignore = [p.strip('/\\').lower() for p in config.get('ignore', [])]
     cmd_line_ignore_list = [p.strip('/\\').lower() for p in list(cmd_line_ignore)]
     folders_to_ignore = set(config_ignore + cmd_line_ignore_list)
-    folders_to_ignore.update(['venv', 'build', 'dist', '.git', '__pycache__', '.doxoade_cache', 'pytest_temp_dir', '.dox_agent_workspace'])
+    folders_to_ignore.update([
+        'venv', 'build', 'dist', '.git', '__pycache__', '.doxoade_cache', 'pytest_temp_dir',
+        '.dox_agent_workspace', '.dox_agent_workspace', 'tests', 'regression_tests'
+    ])
     files_to_check = []
     abs_search_path = os.path.abspath(search_path)
     VALID_EXTS = ('.py', '.c', '.cpp', '.h', '.hpp')

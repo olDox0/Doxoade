@@ -1,5 +1,5 @@
 import subprocess
-import os
+# [DOX-UNUSED] import os
 
 def import_wsl_distro(distro_name, install_path, tar_gz_path):
     """Invoca o powershell.exe para importar a distro no Windows."""

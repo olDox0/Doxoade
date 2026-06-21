@@ -9,7 +9,7 @@ OSL-12: Telemetria de custo de tradução.
 """
 
 from __future__ import annotations
-from typing import Dict, Any
+# [DOX-UNUSED] from typing import Any
 
 class ThermalMapper:
     """Mapeia a dor do Vulcan através de calor e febre."""

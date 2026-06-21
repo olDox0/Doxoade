@@ -16,7 +16,7 @@ import click
 from doxoade.tools.doxcolors import Fore
 from doxoade.probes.web_probe import WebAuditProbe
 from doxoade.tools.display import _present_results
-from doxoade.commands.doxcolors_systems.colors_command import config
+# [DOX-UNUSED] from doxoade.commands.doxcolors_systems.colors_command import config
 from doxoade.tools.filesystem import _get_project_config
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 try:

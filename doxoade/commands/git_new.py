@@ -66,7 +66,7 @@ def git_new(ctx, message, remote_url):
         _run_git_command(['add', '.'])
         has_commits = _run_git_command(['rev-parse', '--verify', 'HEAD'], capture_output=True, silent_fail=True)
         if not has_commits:
-            click.echo(Fore.YELLOW + f'Passo 3: Criando commit inicial...')
+            click.echo(Fore.YELLOW + 'Passo 3: Criando commit inicial...')
             _run_git_command(['commit', '-m', message])
         else:
             status = _run_git_command(['status', '--porcelain'], capture_output=True)

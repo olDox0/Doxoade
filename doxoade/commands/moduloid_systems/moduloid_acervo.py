@@ -8,12 +8,12 @@ import ast
 import json
 import click
 import shutil
-import traceback
+# [DOX-UNUSED] import traceback
 
 from pathlib import Path
 from datetime import datetime
 
-from doxoade.tools.analysis import analyze_file_structure
+# [DOX-UNUSED] from doxoade.tools.analysis import analyze_file_structure
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.database import get_db_connection
 
@@ -21,7 +21,7 @@ from doxoade.commands.deepcheck_utils import DeepAnalyzer
 from doxoade.commands.intelligence_utils import ChiefInsightVisitor
 from doxoade.commands.mk_systems.mk_utils import open_in_notepadpp
 
-from doxoade.commands.check import run_check_logic
+# [DOX-UNUSED] from doxoade.commands.check import run_check_logic
 from doxoade.commands.check_systems.check_io import CheckIO
 from doxoade.commands.check_systems.check_state import CheckState
 from doxoade.commands.check_systems.check_engine import run_audit_engine
@@ -355,7 +355,7 @@ class AcervoEngine:
     def save_to_acervo(self, file_path, category="custom", custom_name=None):
         """Salva o Moduloid aplicando a Limpeza Industrial (V40)."""
         file_path = Path(file_path)
-        if not file_path.exists(): return click.secho(f"✘ Arquivo ausente.", fg="red")
+        if not file_path.exists(): return click.secho("✘ Arquivo ausente.", fg="red")
 
         # [NOVO] Limpeza de Pré-Arquivamento
         click.echo(f"[*] Sanitizando Brick: {Fore.YELLOW}{file_path.name}{Style.RESET_ALL}...")
@@ -553,7 +553,7 @@ class AcervoEngine:
             sec_color = "green" if row['security_status'] == "VERIFICADO" else "red"
             
             from rich.columns import Columns
-            from rich.text import Text
+# [DOX-UNUSED]             from rich.text import Text
             
             badges = [
                 Panel(f"[bold {color_score}]Score: {score}[/]", padding=(0, 2)),

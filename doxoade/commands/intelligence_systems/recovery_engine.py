@@ -3,7 +3,7 @@ import os
 import re
 import shutil
 from datetime import datetime
-from pathlib import Path
+# [DOX-UNUSED] from pathlib import Path
 
 def run_recovery_mission(project_dir: str, output_dir: str, limit_date: str = None, limit_time: str = None):
     """Resgate Lazarus v3.0: Varredura Total e Aproximação Máxima."""

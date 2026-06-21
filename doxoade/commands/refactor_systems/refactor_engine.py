@@ -3,11 +3,11 @@
 import os
 import ast
 import re
-import shutil
+# [DOX-UNUSED] import shutil
 import click
 from pathlib import Path
 
-from .refactor_verify         import verify_and_fix
+# [DOX-UNUSED] from .refactor_verify         import verify_and_fix
 from .refactor_utils          import iter_python_files, read_text_safe 
 from doxoade.tools.filesystem import _find_project_root
 
@@ -230,7 +230,7 @@ class RefactorEngine:
         if not dry_run:
             click.secho(f"[*] Purificando imports internos de {target_path.name}...", fg="cyan")
             if self._purify_file_internals(target_path):
-                click.secho(f"  [OK] Imports convertidos para Absoluto.", fg="green")
+                click.secho("  [OK] Imports convertidos para Absoluto.", fg="green")
 
         # --- FASE 1: MAPEAMENTOS CLI (Continua igual...) ---
         new_mod = self._path_to_module(target_path)

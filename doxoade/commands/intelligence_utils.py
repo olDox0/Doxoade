@@ -54,32 +54,36 @@ def strip_comments(code: str, filename: str) -> str:
     final_lines = header + [l for l in processed_body if l.strip()]
     return '\n'.join(final_lines)
 
-def get_ignore_spec(root: str):
+def get_ignore_spec(root: str, extra_patterns: list = None):
     """
-    Carrega especificações de ignorar do pyproject.toml ou defaults (PASC 8.13/10).
+    Carrega especificações de ignorar do intelligence.toml ou defaults.
     """
     import toml
     import pathspec
     
-    # Padrões obrigatórios de sobrevivência (Sempre ignorar)
-    default_patterns = [
+    # Defaults de segurança
+    patterns = [
         '.git/', '__pycache__/', 'venv/', '.venv/', 
         '*.pyc', '.vscode/', '.idea/', 'dist/', 'build/',
         '*.bak', 'recovery_zone/', 'chief_dossier.json',
-        'node_modules/'  # <--- ADICIONAR ESTA LINHA (CRÍTICO)
+        'node_modules/', 'doxoade.egg-info/'
     ]
     
-    config_path = os.path.join(root, "pyproject.toml")
-    patterns = default_patterns.copy()
+    # 1. Carrega do intelligence.toml se existir
+    config_path = os.path.join(root, "intelligence.toml")
     if os.path.exists(config_path):
         try:
             config = toml.load(config_path)
-            # Busca em tool.doxoade.ignore
-            toml_patterns = config.get("tool", {}).get("doxoade", {}).get("ignore", [])
+            toml_patterns = config.get("ignore", [])
             if toml_patterns:
                 patterns.extend(toml_patterns)
         except Exception as e:
-            _print_forensic("get_ignore_spec_toml", e)
+            _print_forensic("load_intelligence_toml", e)
+
+    # 2. Adiciona padrões vindos do CLI (-x)
+    if extra_patterns:
+        patterns.extend(extra_patterns)
+        
     return pathspec.PathSpec.from_lines('gitwildmatch', patterns)
 
 class ChiefInsightVisitor(ast.NodeVisitor):

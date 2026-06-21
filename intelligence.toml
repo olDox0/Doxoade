@@ -1,0 +1,16 @@
+# intelligence.toml na raiz do projeto
+ignore = [
+    "experiments/",        # Mata toda a pasta de experimentos
+    "Canone_Test/",        # Mata testes de canone
+    "commands_test/",      # Opcional: remove os testes do dossier
+    "build_soteria_test/", # Opcional: remove binários de teste
+    "diagnostic/__pycache___*/",
+    "doxoade.egg-info/",
+    "build/",
+    "dist/",
+    "*.bkp",
+    "*.txt",
+    "*.specpython",
+    "*.bat",
+    "*.sh"
+]

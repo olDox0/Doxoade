@@ -4,7 +4,7 @@ Meta-Análise Lazarus v1.0.
 Objetivo: Avaliar a 'Taxa de Visão' do sistema de resgate.
 Quem foi afetado, onde falhou e qual a precisão do diagnóstico.
 """
-import os, sys, re
+# [DOX-UNUSED] import re
 from doxoade.database import get_db_connection
 from doxoade.tools.doxcolors import Fore, Style
 

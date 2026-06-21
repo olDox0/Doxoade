@@ -2,7 +2,7 @@
 import os
 import sys
 import subprocess
-import shutil
+# [DOX-UNUSED] import shutil
 from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
 
@@ -11,7 +11,7 @@ def check_infra():
     
     # 1. Teste de Raiz e Espaços (The Root Plague)
     root = os.getcwd()
-    print(f"\n1. Verificando Caminho do Projeto:")
+    print("\n1. Verificando Caminho do Projeto:")
     print(f"   Path: {root}")
     if " " in root:
         print(f"   {Fore.YELLOW}⚠️  ALERTA: Espaços detectados. Pode causar falhas no Windows.{Style.RESET_ALL}")
@@ -19,7 +19,7 @@ def check_infra():
         print(f"   {Fore.GREEN}✅ Caminho limpo.{Style.RESET_ALL}")
 
     # 2. Verificação de Integridade dos Wrappers
-    print(f"\n2. Integridade dos Subsistemas:")
+    print("\n2. Integridade dos Subsistemas:")
     probes_dir = Path(__file__).resolve().parents[1] / "probes"
     subsystems = ['command_wrapper.py', 'flow_runner.py', 'debug_probe.py']
     
@@ -29,7 +29,7 @@ def check_infra():
         print(f"   • {sub:<20}: {status}{Style.RESET_ALL}")
 
     # 3. Teste de Invocação (Canary Test)
-    print(f"\n3. Teste de Permissão de Subprocesso (WinError 5 Check):")
+    print("\n3. Teste de Permissão de Subprocesso (WinError 5 Check):")
     try:
         # Tenta rodar um python -c simples para ver se o SO bloqueia
         res = subprocess.run([sys.executable, "-c", "print('canary_ok')"], 
@@ -42,7 +42,7 @@ def check_infra():
         print(f"   {Fore.RED}❌ ERRO DE PERMISSÃO: {e}{Style.RESET_ALL}")
 
     # 4. Verificação de Escopo de Ambiente
-    print(f"\n4. Sincronia de VENV:")
+    print("\n4. Sincronia de VENV:")
     venv = os.environ.get('VIRTUAL_ENV', 'NÃO DETECTADO')
     print(f"   VENV Ativo: {venv}")
     if venv == 'NÃO DETECTADO' or Path(sys.prefix).resolve() != Path(venv).resolve():
@@ -51,7 +51,7 @@ def check_infra():
         print(f"   {Fore.GREEN}✅ Ambiente isolado e consistente.{Style.RESET_ALL}")
 
 def check_syntax_integrity():
-    print(f"\n5. Verificando Integridade de Código (Syntax Check):")
+    print("\n5. Verificando Integridade de Código (Syntax Check):")
     core_files = [
         'doxoade/tools/doxcolors.py',
         'doxoade/tools/error_info.py',

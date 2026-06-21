@@ -8,13 +8,13 @@ import functools
 # Caso contrário, estamos no modo EMBEDDED.
 try:
     from doxoade.tools import doxcolors as colors
-    from doxoade.tools import error_info
+# [DOX-UNUSED]     from doxoade.tools import error_info
     from doxoade.tools.telemetry_tools import logger
     IS_CORE = True
 except ImportError:
     # Fallback para o modo Silo (Arquivos na mesma pasta utils/)
     import doxcolors as colors
-    import error_info
+# [DOX-UNUSED]     import error_info
     import telemetry as logger
     IS_CORE = False
 

@@ -13,13 +13,13 @@ import os
 import json
 import click
 
-from .debug_utils import get_debug_env, build_probe_command, build_flow_command
-from .debug_io import print_debug_header, render_variable_table, report_crash, render_profile_report
+from .debug_utils import build_probe_command, build_flow_command
+from .debug_io import print_debug_header, render_variable_table, report_crash
 
 from doxoade.tools.horus        import horus_trace
 from doxoade.tools.doxcolors    import Fore, Style
-from doxoade.tools.filesystem   import _get_venv_python_executable
-from doxoade.tools.aegis.warden import apply_resource_limits
+# [DOX-UNUSED] from doxoade.tools.filesystem   import _get_venv_python_executable
+# [DOX-UNUSED] from doxoade.tools.aegis.warden import apply_resource_limits
 
 _MARKER_DATA = '---DOXOADE-DATA-BLOCK---' 
 _MARKER_DEBUG = '---DOXOADE-DEBUG-DATA---'
@@ -226,15 +226,15 @@ def _run_live(python_exe, script, args, env, watch, bottleneck, threshold=0.0, n
 
     # --- BLOCO DE DIAGNÓSTICO VERBOSO (Aegis Shield) ---
     if not isinstance(env, dict):
-        click.secho(f"--- [ERRO CRÍTICO DE TIPO] ---", fg='red', bold=True)
+        click.secho("--- [ERRO CRÍTICO DE TIPO] ---", fg='red', bold=True)
         click.echo(f"O objeto 'env' não é um dicionário. Tipo atual: {type(env)}")
         return
 
     # Validação rigorosa de tipos para o Windows
     for k, v in env.items():
         if not isinstance(k, str) or not isinstance(v, str):
-             click.secho(f"--- [DETALHES DO ERRO DE AMBIENTE] ---", fg='red', bold=True)
-             click.echo(f"Chave/Valor inválido detectado no Windows Environment.")
+             click.secho("--- [DETALHES DO ERRO DE AMBIENTE] ---", fg='red', bold=True)
+             click.echo("Chave/Valor inválido detectado no Windows Environment.")
              click.echo(f"K: {k} ({type(k)}) | V: {v} ({type(v)})")
              return
 
@@ -251,8 +251,8 @@ def _run_live(python_exe, script, args, env, watch, bottleneck, threshold=0.0, n
         )
         _stream_live(process, threshold)
     except Exception as e:
-        import traceback
-        click.secho(f'\n❌ Falha catastrófica ao iniciar subprocesso:', fg='red', bold=True)
+# [DOX-UNUSED]         import traceback
+        click.secho('\n❌ Falha catastrófica ao iniciar subprocesso:', fg='red', bold=True)
         click.echo(f'Erro: {e}')
         click.echo('\n--- TRACEBACK DO ERRO ---')
         import sys as exc_sys
@@ -281,7 +281,7 @@ def _run_memory(python_exe, script_to_probe, args_str, env):
 
 def execute_debug(target, is_internal, test_mode=False, **kwargs):
     """Orquestrador de Debug v98.6 - Estabilidade Aegis."""
-    import os, sys, shlex, click
+    import os, sys
     from doxoade.tools.filesystem import _get_venv_python_executable
     from doxoade.tools.aegis.warden import apply_resource_limits
     from .debug_utils import get_debug_env
@@ -336,7 +336,7 @@ def execute_debug(target, is_internal, test_mode=False, **kwargs):
         _run_autopsy(python_exe, script_to_probe, args_str, env)
 
 def build_probe_command(target: str, is_internal: bool, probe_name: str, **kwargs) -> list:
-    import os, sys, shlex
+    import sys, shlex
     from pathlib import Path
     
     # v111.0: Caminhos sempre em POSIX (/)
@@ -481,7 +481,7 @@ def _stream_and_capture_multiple(process, marker):
 
 def run_debug_in_process(target, **kwargs):
     """v125.0: In-Process Execution sem Alucinação de Path."""
-    import os, sys, shlex
+    import os
     from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
 
     # Se o target tem espaços, é uma cadeia de comando da incepção

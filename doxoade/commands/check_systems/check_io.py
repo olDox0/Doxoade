@@ -3,14 +3,15 @@
 import os
 import json
 from pathlib import Path
-from typing import List, Dict
+from typing import List
 from doxoade.tools.filesystem import _find_project_root
 
 class CheckIO:
 
     def __init__(self, target_path: str):
         self.target_abs = os.path.abspath(target_path)
-        self.project_root = _find_project_root(self.target_abs)
+        root = _find_project_root(self.target_abs)
+        self.project_root = root if root else (os.path.dirname(self.target_abs) if os.path.isfile(self.target_abs) else self.target_abs)
         self.cache_dir = Path(self.project_root) / '.doxoade_cache'
         self.cache_file = self.cache_dir / 'check_cache.json'
 

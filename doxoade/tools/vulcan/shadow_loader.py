@@ -1,4 +1,4 @@
-import sys
+# [DOX-UNUSED] import sys
 import os
 import ast
 import importlib.abc

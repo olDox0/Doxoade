@@ -13,7 +13,7 @@ from .environment import VulcanEnvironment
 from .advisor import VulcanAdvisor
 from .compiler import VulcanCompiler
 from concurrent.futures import ThreadPoolExecutor
-from collections import Counter
+# [DOX-UNUSED] from collections import Counter
 
 _STREAMING_THRESHOLD = 15
 _RECURSION_LIMIT = 10

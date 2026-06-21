@@ -43,7 +43,7 @@ def diagnose_python_error(exc_type: str, message: str) -> tuple:
 
     # --- Lógica de Precisão: AttributeError ---
     if exc_type == "AttributeError":
-        explanation = f"O código tentou acessar algo que não existe no objeto. Verifique se o nome está correto ou se o objeto é 'None'."
+        explanation = "O código tentou acessar algo que não existe no objeto. Verifique se o nome está correto ou se o objeto é 'None'."
 
     advice = get_tactical_advice(exc_type, message)
     if advice:

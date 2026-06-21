@@ -5,7 +5,7 @@ import ast
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import List, Tuple
 
 from .refactor_utils import iter_python_files
 

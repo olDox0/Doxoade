@@ -52,7 +52,7 @@ def history(message, limit):
         click.secho("\n[-] Nada encontrado.", fg='yellow')
         return
 
-    click.secho(f"\n--- 📚 ACERVO DE INTELIGÊNCIA: TRIANGULAÇÃO HISTÓRICA ---", fg='cyan', bold=True)
+    click.secho("\n--- 📚 ACERVO DE INTELIGÊNCIA: TRIANGULAÇÃO HISTÓRICA ---", fg='cyan', bold=True)
     
     for r in rows:
         # 1. Definição de Status

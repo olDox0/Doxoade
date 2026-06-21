@@ -14,8 +14,11 @@ class CheckState:
     clones_active: bool = False
 
     def register_finding(self, f: Dict[str, Any]):
-        self.findings.append(f)
-        sev = f.get('severity', 'WARNING').upper()
+        # Solução de Colisão: Cria uma cópia do dicionário para evitar que o flush 
+        # da arena de memória sobrescreva os achados anteriores por referência de ponteiro
+        f_copy = dict(f)
+        self.findings.append(f_copy)
+        sev = f_copy.get('severity', 'WARNING').upper()
         if sev == 'CRITICAL':
             self.summary['critical'] += 1
         elif sev == 'ERROR':

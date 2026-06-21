@@ -1,8 +1,8 @@
 # doxoade/doxoade/tools/horus.py
 import functools
-import json
+# [DOX-UNUSED] import json
 import time
-import os
+# [DOX-UNUSED] import os
 from .telemetry_tools.logger import chief_heartbeat
 
 def horus_trace(func):
@@ -15,10 +15,17 @@ def horus_trace(func):
         # Nome qualificado para facilitar a busca
         func_name = f"{func.__name__}"
         
-        # Injetamos o rastro de entrada
+        # Combina args e kwargs de forma inteligível para a chave 'args' consumida pelo view
+        combined_args = f"args={args}" if args else ""
+        if kwargs:
+            combined_args += f" kwargs={kwargs}" if combined_args else f"kwargs={kwargs}"
+        if not combined_args:
+            combined_args = "()"
+        
+        # Injetamos o rastro de entrada utilizando a chave correta 'args'
         chief_heartbeat("HORUS", "FUNCTION_IN", {
             "func": func_name,
-            "input": str(args)[:150] # Captura tática
+            "args": combined_args[:200]  # Captura tática
         })
         
         t0 = time.perf_counter()

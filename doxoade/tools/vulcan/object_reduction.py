@@ -30,7 +30,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
-from .object_allocation_scanner import AllocPattern, AllocationSite, ModuleAllocReport, ReduceStrategy, scan_source, scan_pyx
+from .object_allocation_scanner import AllocPattern, AllocationSite, ModuleAllocReport, scan_source, scan_pyx
 
 def _backup_file(path: Path) -> Path:
     """

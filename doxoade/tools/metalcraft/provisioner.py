@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-import os
-import sys
+# [DOX-UNUSED] import os
+# [DOX-UNUSED] import sys
 import urllib.request
 import zipfile
 import shutil
@@ -15,7 +15,7 @@ def download_w64devkit(target_path: Path):
     
     chief_heartbeat("INFRA", "PROVISION_START", {"url": url, "target": str(target_path)})
     
-    print(f"   📥 Baixando Toolchain Industrial v1.21.0 (85MB)...")
+    print("   📥 Baixando Toolchain Industrial v1.21.0 (85MB)...")
     try:
         # Configura um User-Agent para evitar bloqueios do GitHub em scripts
         opener = urllib.request.build_opener()

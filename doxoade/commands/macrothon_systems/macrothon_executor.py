@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/macrothon_systems/macrothon_executor.py
-import os, sys, re, time, click, shutil, asyncio, inspect, builtins, importlib.util
+import os, re, time, click, shutil, asyncio, inspect, builtins, importlib.util
 from pathlib import Path
 from doxoade.database import get_db_connection
 from doxoade.tools.doxcolors import Fore, Style
@@ -117,7 +117,7 @@ class MacrothonRuntime:
                 restricted_safe_exec(header + code_final, self.context, allow_imports=True)
                 perf = self.context.get('_MACRO_METRICS', [])
                 chief_heartbeat("MACROTHON", "HOUSE_FINISHED", {"house": self.house_path.name, "blocks": perf})
-            click.secho(f"✔ House concluída.", fg="green")
+            click.secho("✔ House concluída.", fg="green")
         except Exception:
             from doxoade.rescue import activate_protocol
             import traceback; activate_protocol(traceback.format_exc())

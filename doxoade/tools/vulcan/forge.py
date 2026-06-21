@@ -1,6 +1,6 @@
 # doxoade/doxoade/tools/vulcan/forge.py
 import ast
-import os
+# [DOX-UNUSED] import os
 import re
 from pathlib import Path
 from typing import Set

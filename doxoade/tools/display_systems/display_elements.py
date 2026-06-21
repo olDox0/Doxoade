@@ -65,8 +65,15 @@ def diff_view(broken, fixed):
     click.echo(f"     {Fore.RED}{Style.DIM} [-] ATUAL  : {b}{Style.RESET_ALL}")
     click.echo(f"     {Fore.GREEN}{Style.BRIGHT} [+] FIX    : {f}{Style.RESET_ALL}")
 
-def remedy(text, is_historical=True):
-    """Sugestão tática limpa."""
+def remedy(text, is_historical=True, fixed_content=None, original_content=None, line_num=0):
+    """Sugestão tática limpa com prévia integrada."""
     label = "💡 ACERVO" if is_historical else "🔧 AÇÃO"
     color = Fore.GREEN if is_historical else Fore.YELLOW
     click.echo(f"     {color}{Style.BRIGHT}{label}:{Style.RESET_ALL} {Fore.WHITE}{text}{Style.RESET_ALL}")
+    
+    # Refinamento: Exibição elegante da prévia na UI normal
+    if fixed_content:
+        click.echo(f"     {Fore.CYAN}{Style.DIM}PREVIA:{Style.RESET_ALL}")
+        if original_content:
+            click.echo(f"      {Fore.RED}-{line_num:4} | {original_content.strip()}{Style.RESET_ALL}")
+        click.echo(f"      {Fore.GREEN}+{line_num:4} | {fixed_content.strip()}{Style.RESET_ALL}")

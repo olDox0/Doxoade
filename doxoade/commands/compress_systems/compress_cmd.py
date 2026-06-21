@@ -1,6 +1,6 @@
 # doxoade/doxoade/commands/compress_systems/compress_cmd.py
 import click
-import os
+# [DOX-UNUSED] import os
 from .compress_utils import uncompress_zst_to_targz
 
 @click.group('compress', no_args_is_help=True)

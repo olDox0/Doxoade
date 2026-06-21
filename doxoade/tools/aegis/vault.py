@@ -2,6 +2,7 @@ import hashlib
 import os
 from datetime import datetime, timedelta
 from doxoade.database import get_db_connection
+import doxoade.tools.aegis.nexus_db as sqlite3
 
 class NexusVault:
     @staticmethod

@@ -8,9 +8,9 @@ import sys
 import re
 
 from subprocess import run, PIPE
-from click      import command, argument, option, pass_context, Choice, echo, secho
+from click import command, argument, option, pass_context, Choice, secho
 
-from doxoade.commands.doxcolors_systems.colors_command import config
+# [DOX-UNUSED] from doxoade.commands.doxcolors_systems.colors_command import config
 from doxoade.commands.security_systems.security_utils  import get_tool_path, batch_list, get_essential_ignores, SEVERITY_MAP, batch_list
 from doxoade.commands.security_systems.security_io     import print_header, get_progress_bar, render_findings
 

@@ -420,7 +420,7 @@ def refactor_headers(path: Path, force: bool) -> None:
     _sep("NEXUS HEADERS")
     click.secho(f" Alvo: {path.resolve()}", fg="cyan")
     if force:
-        click.secho(f" Modo: FORÇADO (Substituição Agressiva)", fg="yellow")
+        click.secho(" Modo: FORÇADO (Substituição Agressiva)", fg="yellow")
     
     engine = RefactorEngine()
     count = 0
@@ -624,7 +624,7 @@ def refactor_verify_cli(path: Path):
     """Análise de Integridade Pós-Refactor (Smoke Test)."""
     _sep("NEXUS INTEGRITY CHECK")
     import importlib.util
-    import sys
+# [DOX-UNUSED]     import sys
     
     # IMPORTANTE: Resolvemos a raiz real do projeto para o filtro funcionar
     project_root = Path(_find_project_root(path)).resolve()

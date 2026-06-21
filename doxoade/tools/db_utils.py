@@ -6,7 +6,7 @@ Resolve o gargalo de latência (Hot Line) via Async Buffer Pattern.
 import threading
 import queue
 import os
-import sys
+# [DOX-UNUSED] import sys
 import hashlib
 
 from doxoade.database import get_db_connection
@@ -199,7 +199,9 @@ def chief_heartbeat(subsystem: str, action: str, details: dict):
             conn.commit()
             conn.close()
             return
-        except: pass
+        except Exception as e:
+            import logging as _dox_log
+            _dox_log.error(f"[INFRA] chief_heartbeat: {e}")
 
     # Fluxo normal assíncrono
     from .db_utils import _LOG_QUEUE # Referência circular guard
