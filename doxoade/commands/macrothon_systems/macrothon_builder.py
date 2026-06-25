@@ -122,3 +122,68 @@ def macrothon_list():
             click.echo(f"   {Fore.CYAN}Blueprint: {Style.RESET_ALL}{blueprint.name}")
         click.echo(f"   {Fore.WHITE}Status   : {bricks_count} Bricks injetados | {db_exists}")
     click.echo("")
+
+def run_sync_logic(project_root):
+    import hashlib
+    from doxoade.tools.filesystem import _get_project_config
+    from doxoade.core_database import get_db_connection
+    
+    config = _get_project_config(start_path=project_root)
+    bricks_to_sync = config.get('bricks', {}) # Pega do TOML
+
+    if not bricks_to_sync:
+        click.echo("[-] Nenhum brick vinculado neste projeto.")
+        return
+
+    conn = get_db_connection()
+    for name, local_path in bricks_to_sync.items():
+        # 1. Busca o arquivo original no Acervo
+        row = conn.execute("SELECT filename FROM moduloid_acervo WHERE name=?", (name,)).fetchone()
+        if not row:
+            click.echo(f"  [!] Brick '{name}' não encontrado no Acervo.")
+            continue
+            
+        from doxoade.commands.moduloid_systems.moduloid_acervo import BRICKS_DIR
+        source_path = BRICKS_DIR / row[0]
+        
+        # 2. Comparação por Hash (Zero I/O desnecessário)
+        if os.path.exists(local_path):
+            with open(local_path, 'rb') as f:
+                local_hash = hashlib.md5(f.read()).hexdigest()
+            with open(source_path, 'rb') as f:
+                remote_hash = hashlib.md5(f.read()).hexdigest()
+            
+            if local_hash == remote_hash:
+                continue # Estão em sincronia
+        
+        # 3. Sincronia Real
+        click.secho(f"   [SYNC] Atualizando {name} -> {local_path}", fg='cyan')
+        shutil.copy2(source_path, local_path)
+    conn.close()
+    
+@macrothon_group.command('sync')
+@click.option('--dry-run', is_flag=True)
+def macrothon_sync(dry_run):
+    """Sincroniza e Audita a integridade dos Bricks."""
+    from .macrothon_sync import run_silent_sync
+    click.secho("[*] Verificando DNA dos Bricks no Acervo...", fg="cyan")
+    
+    changes = run_silent_sync(os.getcwd(), dry_run=True)
+    
+    if not changes:
+        click.secho("   [OK] Todos os Bricks estão em conformidade e estáveis.", fg='green')
+        return
+
+    click.echo(f"\n{'BRICK':<15} | {'QUALIDADE ESTÁTICA':<25} | {'DESTINO'}")
+    click.echo("-" * 75)
+    
+    for c in changes:
+        q_color = "green" if "ESTÁVEL" in c['quality'] else "red" if "CRÍTICO" in c['quality'] else "yellow"
+        click.echo(f"{Fore.WHITE}{c['brick']:<15} | {click.style(c['quality'], fg=q_color):<34} | {c['path']}")
+
+    if dry_run:
+        click.secho("\n[MODO AUDITORIA] Nenhuma alteração foi feita.", fg='yellow', bold=True)
+    else:
+        if click.confirm("\nDeseja aplicar as atualizações nos Bricks estáveis?"):
+            run_silent_sync(os.getcwd(), dry_run=False)
+            click.secho("✅ Sincronia concluída.", fg='green', bold=True)

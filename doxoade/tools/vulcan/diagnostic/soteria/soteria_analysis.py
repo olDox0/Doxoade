@@ -6,12 +6,12 @@ import datetime
 def archive_crash_to_hades(nx_data):
     """Salva a evidência do crash nativo para o motor Gênese aprender."""
     try:
-        from doxoade.database import get_db_connection
+        from doxoade.core_database import get_db_connection
 # [DOX-UNUSED]         import json
         
         conn = get_db_connection()
         # Registra na tabela de incidentes para que a IA analise a causa raiz no futuro
-        conn.execute('''
+        alexandria_write('''
             INSERT INTO open_incidents (finding_hash, file_path, line, message, category, timestamp)
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (

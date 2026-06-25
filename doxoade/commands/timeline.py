@@ -6,7 +6,7 @@ from datetime import datetime, timezone  # <--- ADICIONE ESTA LINHA
 
 from doxoade.tools.doxcolors   import Fore, Style
 from doxoade.tools.aegis.vault import NexusVault
-from doxoade.database          import get_db_connection
+from doxoade.core_database import get_db_connection
 import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
 
 def _format_local_timestamp(ts_str: str) -> str:

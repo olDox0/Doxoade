@@ -1,6 +1,8 @@
+# -*- coding: utf-8 -*-
 # doxoade/doxoade/commands/vulcan_cmd_bootstrap.py
 """
 Subcomandos de instalação e verificação do bootstrap Vulcan.
+Adicionada funcionalidade de Auto-Sync de Bricks.
 
   module             → instala módulo de acionamento Vulcan em projetos externos
   probe              → verifica status dos binários (.pyd/.so) ativos
@@ -16,12 +18,25 @@ import hashlib
 import click
 from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
+from doxoade.core_database import DB_FILE
 from .vulcan_cmd import _is_doxoade_project
 from ._vulcan_embedded_template import VULCAN_EMBEDDED_CONTENT as _VULCAN_EMBEDDED_CONTENT
 _BOOTSTRAP_START = '# [DOXOADE:VULCAN]'
 _BOOTSTRAP_END = '# [/DOXOADE:VULCAN]'
 _BOOTSTRAP_BLOCK = f'{_BOOTSTRAP_START}\n# [VULCAN-SKIP] Proteção contra introspecção Click\nimport os, sys; _b = os.path.join(os.getcwd(), ".doxoade", "vulcan", "bootstrap.py")\nif os.path.exists(_b):\n    import importlib.util as _u; _s = _u.spec_from_file_location("_vb", _b)\n    _m = _u.module_from_spec(_s); _s.loader.exec_module(_m); _m.ignite(__file__, globals())\n{_BOOTSTRAP_END}\n'
-VULCAN_STUB_VERSION = 11
+VULCAN_STUB_VERSION = 12
+_SYNC_START = '# --- DOXOADE_NEXUS_SYNC:START ---'
+_SYNC_END   = '# --- DOXOADE_NEXUS_SYNC:END ---'
+_SYNC_HOOK  = f"""
+{_SYNC_START}
+try:
+    from doxoade.commands.macrothon_systems.macrothon_sync import run_silent_sync
+    import os
+    run_silent_sync(os.getcwd())
+except ImportError:
+    pass # Doxoade não instalado neste ambiente
+{_SYNC_END}
+"""
 
 def generate_vulcan_stub() -> str:
     return f'# -*- coding: utf-8 -*-\n"""\nStub Vulcan embutido no projeto.\nGerenciado automaticamente pelo doxoade.\n"""\n\nVULCAN_STUB_VERSION = {VULCAN_STUB_VERSION}\n\ndef activate():\n    try:\n        from doxoade.tools.vulcan.runtime import install_meta_finder, find_vulcan_project_root\n        import __main__\n        root = find_vulcan_project_root(__file__)\n        if root:\n            install_meta_finder(root)\n        return True\n    except Exception:\n        return False\n'
@@ -81,6 +96,7 @@ def _iter_project_main_files(project_root: Path):
                     continue
 
 def _inject_bootstrap(main_file: Path) -> bool:
+    # [Lógica original de injeção de bootstrap Vulcan preservada]
     original = main_file.read_text(encoding='utf-8', errors='replace')
     safety_tag = ''
     if '@click.' in original and '[VULCAN-SKIP]' not in original:
@@ -88,34 +104,35 @@ def _inject_bootstrap(main_file: Path) -> bool:
     content = original
     while True:
         start = content.find(_BOOTSTRAP_START)
-        if start < 0:
-            break
+        if start < 0: break
         end = content.find(_BOOTSTRAP_END, start)
-        if end < 0:
-            break
+        if end < 0: break
         end += len(_BOOTSTRAP_END)
-        if end < len(content) and content[end] == '\n':
-            end += 1
+        if end < len(content) and content[end] == '\n': end += 1
         content = content[:start] + content[end:]
     updated = _BOOTSTRAP_BLOCK + safety_tag + content
-    if updated == original:
-        return False
+    if updated == original: return False
     main_file.write_text(updated, encoding='utf-8')
     return True
 
 @click.command('module')
 @click.argument('target_path', default='.', type=click.Path(exists=True, file_okay=False, dir_okay=True), required=False)
 @click.option('--main', 'main_files', multiple=True, type=click.Path(exists=True, dir_okay=False), help='Arquivo específico para injetar bootstrap.')
+@click.option('--auto-sync', is_flag=True, help='Injeta sincronia automática de Bricks.') # <-- NOVA FLAG
 @click.option('--auto-main', is_flag=True, help='Detecta e injeta em pontos de entrada prováveis (main.py, cli.py, etc).')
 @click.option('--force-stub', is_flag=True, help='Recria o stub Vulcan mesmo se já existir.')
 @click.option('--no-telemetry', is_flag=True, help='Não injeta Chronos Lite.')
-def vulcan_module(target_path, main_files, auto_main, force_stub, no_telemetry):
+def vulcan_module(target_path, main_files, auto_main, auto_sync, force_stub, no_telemetry):
     """Instala módulo de acionamento Vulcan em projetos externos.
     
     TARGET_PATH: Raiz do projeto alvo (default: atual).
     """
     project_root = Path(target_path).resolve()
     stub_path = project_root / '.doxoade' / 'vulcan_embedded.py'
+    
+    if auto_sync:
+        ok, msg = _inject_nexus_sync(project_root)
+        click.echo(f'   {Fore.CYAN}[SYNC] {msg}{Style.RESET_ALL}')
     if no_telemetry:
         click.echo(f'{Fore.YELLOW}[INFO]{Style.RESET_ALL} Chronos Lite desativado (--no-telemetry).')
         click.echo(f'  {Style.DIM}Para desativar no ambiente: defina VULCAN_TELEMETRY_SYNC=0.{Style.RESET_ALL}')
@@ -161,7 +178,8 @@ def vulcan_module(target_path, main_files, auto_main, force_stub, no_telemetry):
         click.echo(f'{Fore.YELLOW}[AVISO]{Fore.RESET} Nenhum arquivo de entrada compatível encontrado para injeção.')
         click.echo(f'  {Style.DIM}Dica: Tente especificar manualmente com --main <caminho/arquivo.py>{Style.RESET_ALL}')
     else:
-        click.echo(f"{Fore.CYAN}[DICA]{Fore.RESET} Use --auto-main para injetar nos arquivos detectados, ou --main <arquivo> para o arquivo que contém seu '@click.group'.")
+        click.echo(f"{Fore.YELLOW}[⚡ Chronos Lite v4]{Style.RESET_ALL} Click + HotLines + Libs + Disco + Vulcan stats → {DB_FILE}")
+#        click.echo(f"{Fore.CYAN}[DICA]{Fore.RESET} Use --auto-main para injetar nos arquivos detectados, ou --main <arquivo> para o arquivo que contém seu '@click.group'.")
 
 @click.command('probe')
 @click.option('--path', 'target_path', default='.', type=click.Path(exists=True, file_okay=False, dir_okay=True), show_default=True, help='Projeto alvo a inspecionar.')
@@ -410,7 +428,7 @@ def vulcan_telemetry_bridge(limit, project, since, stats, libs, verbose):
       doxoade vulcan module --path <projeto> --auto-main
     """
     import doxoade.tools.aegis.nexus_db as _sqlite3 # noqa
-    from doxoade.database import get_db_connection
+    from doxoade.core_database import get_db_connection
 
     conn = get_db_connection()
     conn.row_factory = _sqlite3.Row
@@ -545,3 +563,44 @@ def _render_bridge_libs(cursor, where: str, params: list):
             ver_str = ', '.join(sorted(data['versions'])) if data['versions'] else '—'
             click.echo(f"    {Fore.CYAN}{name:<25}{Style.RESET_ALL} v{ver_str:<18} {Style.DIM}{data['count']}× detectada{Style.RESET_ALL}")
     click.echo()
+
+def _inject_sync_hook(project_root):
+    """Injeta o gancho de sincronia no topo do arquivo principal."""
+    from pathlib import Path
+    root = Path(project_root)
+    candidates = [root / "main.py", root / "cli" / "main.py", root / "app.py"]
+    target = next((c for c in candidates if c.exists()), None)
+    
+    if not target: return False, "Ponto de entrada não localizado."
+
+    hook = """
+# --- DOXOADE_NEXUS_SYNC:START ---
+try:
+    from doxoade.commands.macrothon_systems.macrothon_sync import run_silent_sync
+    import os
+    run_silent_sync(os.getcwd())
+except ImportError: pass
+# --- DOXOADE_NEXUS_SYNC:END ---
+"""
+    content = target.read_text(encoding='utf-8')
+    if "DOXOADE_NEXUS_SYNC" in content: return True, "Já sincronizado."
+
+    target.write_text(hook.strip() + "\n" + content, encoding='utf-8')
+    return True, f"Gancho injetado em {target.name}"
+    
+def _inject_nexus_sync(project_root):
+    """Localiza o main.py e injeta o gancho de sincronia automática."""
+    root = Path(project_root)
+    candidates = [root / "main.py", root / "cli" / "main.py", root / "app.py"]
+    target = next((c for c in candidates if c.exists()), None)
+    
+    if not target:
+        return False, "Nenhum arquivo principal localizado para injeção de sincronia."
+
+    content = target.read_text(encoding='utf-8', errors='replace')
+    if _SYNC_START in content:
+        return True, "Gancho de sincronia já presente."
+
+    # Injeta no topo absoluto para garantir que a sincronia ocorra antes dos imports locais
+    target.write_text(_SYNC_HOOK.strip() + "\n\n" + content, encoding='utf-8')
+    return True, f"Gancho de sincronia injetado em {target.name}"

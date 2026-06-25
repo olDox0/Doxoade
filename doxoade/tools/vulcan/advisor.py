@@ -3,7 +3,7 @@ import re
 import os, json, hashlib
 from pathlib import Path
 from collections import defaultdict
-from doxoade.database import get_db_connection
+from doxoade.core_database import get_db_connection
 
 class VulcanAdvisor:
 

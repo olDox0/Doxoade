@@ -17,12 +17,13 @@ from .crash_signatures import WIN_SIGNALS, PYTHON_EXCEPTIONS
 # [DOX-UNUSED] from .python_diagnostics import diagnose_python_error
 from .native_diagnostics import diagnose_native_error
 
+from doxoade.tools.alexandria.engine import alexandria_write
 def archive_crash_to_hades_vulcan_optimized(nx_data):
     """
     Sincroniza o crash com a tabela de incidentes para que
     'doxoade search' ou 'doxoade log' encontrem a falha.
     """
-    from doxoade.database import get_db_connection
+    from doxoade.core_database import get_db_connection
     import datetime as _dt
     
     conn = get_db_connection()
@@ -30,7 +31,7 @@ def archive_crash_to_hades_vulcan_optimized(nx_data):
     verdict = nx_data.get('technical_error', 'NATIVE_FAULT')
     explanation = nx_data.get('explanation', 'Crash detectado pela Sotéria.')
     
-    conn.execute('''
+    alexandria_write('''
         INSERT OR REPLACE INTO open_incidents 
         (finding_hash, file_path, line, message, category, timestamp, project_path)
         VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -306,7 +307,7 @@ class CrashProcessor:
     def _cross_reference_hades(self, d: dict, pid: str):
         """Busca no Hades quem foi o mestre Python deste processo."""
         try:
-            from doxoade.database import get_db_connection
+            from doxoade.core_database import get_db_connection
             import json
             conn = get_db_connection()
             # Busca a última chamada VULCAN deste PID (limite de 10 segundos)

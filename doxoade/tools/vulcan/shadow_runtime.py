@@ -107,8 +107,13 @@ class ShadowLoader(importlib.abc.Loader):
             
             # Correção Aegis Self-Block: Usar o built-in exec para módulos internos e confiáveis
             # do próprio sistema do Doxoade, prevenindo falsos positivos de sandbox.
-            nexus_exec(code, module.__dict__)
+            os.environ['DOXOADE_AUTHORIZED_RUN'] = '1' 
+            try:
+                nexus_exec(code, module.__dict__)
+            finally:
+                os.environ['DOXOADE_AUTHORIZED_RUN'] = '0' 
         except Exception:
+            os.environ['DOXOADE_AUTHORIZED_RUN'] = '0'
             nexus_exec(source, module.__dict__)
 
 def install_shadow_runtime(project_root):

@@ -21,12 +21,16 @@ class AresShadowScribe(ast.NodeTransformer):
         return node
 
 def generate_python_shadow(source_code, filename):
+    # Se o arquivo não tem definições de função, não precisa de vacina shadow
+    if "def " not in source_code and "async def " not in source_code:
+        return source_code
+        
     try:
         tree = ast.parse(source_code)
         scribe = AresShadowScribe(filename)
         vax_tree = scribe.visit(tree)
         ast.fix_missing_locations(vax_tree)
-        # Injeta import sys no topo para o Shadow funcionar
+        # unparse é caro, mas necessário para a transformação estrutural
         return "import sys\n" + ast.unparse(vax_tree)
     except Exception:
         return source_code

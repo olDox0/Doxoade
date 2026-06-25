@@ -5,7 +5,7 @@ import re, sys
 from collections import Counter
 from datetime import datetime
 from doxoade.tools.doxcolors import Fore, Style
-from doxoade.database import get_db_connection
+from doxoade.core_database import get_db_connection
 # [DOX-UNUSED] from .analysis import _get_code_snippet_from_string
 from .display_systems import display_elements as ui
 

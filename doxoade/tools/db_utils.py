@@ -8,8 +8,9 @@ import queue
 import os
 # [DOX-UNUSED] import sys
 import hashlib
+from pathlib import Path
 
-from doxoade.database import get_db_connection
+from doxoade.core_database import get_db_connection
 from doxoade.tools.git import _get_git_commit_hash 
 
 _LOG_QUEUE = queue.Queue()
@@ -18,8 +19,18 @@ _HADES_QUEUE = queue.Queue(maxsize=1000)
 _STOP_EVENT = threading.Event()
 
 def _db_worker():
-    from doxoade.database import get_db_connection
+    from doxoade.core_database import get_db_connection
+    import time
+    time.sleep(0.5) 
     conn = get_db_connection()
+    
+    try:
+        conn.execute("SELECT 1 FROM events LIMIT 1")
+    except Exception:
+        # Se as tabelas não existem, o worker aguarda ou encerra
+        conn.close()
+        return
+    
     conn.execute("PRAGMA busy_timeout = 10000") 
 #    conn.execute("PRAGMA busy_timeout = 20000") 
     cursor = conn.cursor()
@@ -104,7 +115,7 @@ def _update_open_incidents(findings, project_path):
     """Sincroniza o estado atual do linter com o banco de dados."""
     if not isinstance(findings, list): return
     
-    from doxoade.database import get_db_connection
+    from doxoade.core_database import get_db_connection
     conn = get_db_connection()
     cursor = conn.cursor()
     project_path_abs = os.path.abspath(project_path)
@@ -184,7 +195,7 @@ def chief_heartbeat(subsystem: str, action: str, details: dict):
     """Grava telemetria. Síncrono em modo HORUS para evitar perda de dados."""
     import json, os
     from datetime import datetime
-    from doxoade.database import get_db_connection
+    from doxoade.core_database import get_db_connection
     
     data_payload = json.dumps(details, ensure_ascii=False)
     
@@ -214,3 +225,9 @@ def chief_heartbeat(subsystem: str, action: str, details: dict):
 #    final_blob = encrypt_payload(compressed_data, current_session_password)
 #else:
 #    final_blob = compressed_data # Ou bloqueia a gravação
+
+def check_alexandria_compliance(file_path: Path):
+    """Gatilho silencioso: se o arquivo usa sqlite3 direto, dispara um aviso ou refatora."""
+    if is_violating_policy(file_path):
+        # Aqui podemos chamar o refactorer de forma inteligente
+        alexandria_refactor(file_path, dry_run=False)

@@ -1,9 +1,10 @@
 import hashlib
 import os
 from datetime import datetime, timedelta
-from doxoade.database import get_db_connection
+from doxoade.core_database import get_db_connection
 import doxoade.tools.aegis.nexus_db as sqlite3
 
+from doxoade.tools.alexandria.engine import alexandria_write
 class NexusVault:
     @staticmethod
     def set_password(password):
@@ -12,7 +13,7 @@ class NexusVault:
         pwd_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000).hex()
         
         conn = get_db_connection()
-        conn.execute("INSERT OR REPLACE INTO vault_config (key, value, salt) VALUES ('master_pwd', ?, ?)", (pwd_hash, salt))
+        alexandria_write("INSERT OR REPLACE INTO vault_config (key, value, salt) VALUES ('master_pwd', ?, ?)", (pwd_hash, salt))
         conn.commit()
 
     @staticmethod
@@ -27,8 +28,8 @@ class NexusVault:
         if check_hash == res['value']:
             # Define a expiração (None = Sempre Aberto)
             expiry = (datetime.now() + timedelta(hours=hours)).isoformat() if hours > 0 else "NEVER"
-            conn.execute("DELETE FROM vault_session")
-            conn.execute("INSERT INTO vault_session (unlocked_until) VALUES (?)", (expiry,))
+            alexandria_write("DELETE FROM vault_session")
+            alexandria_write("INSERT INTO vault_session (unlocked_until) VALUES (?)", (expiry,))
             conn.commit()
             return True
         return False
@@ -58,5 +59,5 @@ class NexusVault:
     def lock():
         """Fecha o cofre imediatamente."""
         conn = get_db_connection()
-        conn.execute("DELETE FROM vault_session")
+        alexandria_write("DELETE FROM vault_session")
         conn.commit()

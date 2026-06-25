@@ -15,21 +15,20 @@ from datetime import datetime
 
 # [DOX-UNUSED] from doxoade.tools.analysis import analyze_file_structure
 from doxoade.tools.doxcolors import Fore, Style
-from doxoade.database import get_db_connection
-
 from doxoade.commands.deepcheck_utils import DeepAnalyzer
 from doxoade.commands.intelligence_utils import ChiefInsightVisitor
 from doxoade.commands.mk_systems.mk_utils import open_in_notepadpp
-
 # [DOX-UNUSED] from doxoade.commands.check import run_check_logic
 from doxoade.commands.check_systems.check_io import CheckIO
 from doxoade.commands.check_systems.check_state import CheckState
 from doxoade.commands.check_systems.check_engine import run_audit_engine
-
 from doxoade.commands.security_systems.maat_engine_integration import run_internal_security_audit
-
 from doxoade.commands.init import _refactor_to_silo
 
+from doxoade.core_database import get_db_connection, get_active_db_path, DB_FILE
+
+
+from doxoade.tools.alexandria.engine import alexandria_write
 try:
     from rich.console import Console
     from rich.syntax import Syntax
@@ -100,14 +99,14 @@ class AcervoEngine:
         conn = get_db_connection()
         try:
             # Atualização da Tabela para métricas de qualidade
-            conn.execute('ALTER TABLE moduloid_acervo ADD COLUMN quality_score INTEGER DEFAULT 0;')
-            conn.execute('ALTER TABLE moduloid_acervo ADD COLUMN security_status TEXT DEFAULT "N/A";')
-            conn.execute('ALTER TABLE moduloid_acervo ADD COLUMN health_report TEXT;') # JSON com detalhes
+            alexandria_write('ALTER TABLE moduloid_acervo ADD COLUMN quality_score INTEGER DEFAULT 0;')
+            alexandria_write('ALTER TABLE moduloid_acervo ADD COLUMN security_status TEXT DEFAULT "N/A";')
+            alexandria_write('ALTER TABLE moduloid_acervo ADD COLUMN health_report TEXT;') # JSON com detalhes
         except Exception: pass # Colunas já existem
         
         # [AUTO-HEAL] Garante a tabela base
         try:
-            conn.execute('''
+            alexandria_write('''
                 CREATE TABLE IF NOT EXISTS moduloid_acervo (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL UNIQUE,
@@ -323,7 +322,7 @@ class AcervoEngine:
             
             meta = self._analyze_brick(brick_file)
             if meta:
-                conn.execute('''
+                alexandria_write('''
                     UPDATE moduloid_acervo 
                     SET docstring = ?, capabilities = ?, quality_score = ?, 
                         security_status = ?, health_report = ?, last_updated = ?
@@ -373,7 +372,7 @@ class AcervoEngine:
             row = conn.execute("SELECT version FROM moduloid_acervo WHERE name = ?", (final_name,)).fetchone()
             version = (row[0] + 1) if row else 1
             
-            conn.execute('''
+            alexandria_write('''
                 INSERT OR REPLACE INTO moduloid_acervo 
                 (name, category, filename, docstring, capabilities, version, last_updated, 
                  origin_project, quality_score, security_status, health_report)
@@ -626,3 +625,28 @@ def moduloid_view(name):
 def moduloid_health(name):
     """Explica o Score de qualidade de um brick."""
     AcervoEngine().show_health(name)
+    
+def get_active_acervo_base():
+    from doxoade.tools.filesystem import _find_project_root
+    try:
+        root = _find_project_root(os.getcwd())
+        local_acervo = Path(root) / "data" / "acervo"
+        
+        # Se a pasta data/ existir, usamos o acervo local
+        if (Path(root) / "data").is_dir():
+            return local_acervo
+    except Exception as e:
+        import sys as _dox_sys, os as _dox_os
+        from traceback import print_tb as exc_trace
+        exc_obj, exc_tb = _dox_sys.exc_info()
+        f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        line_n = exc_tb.tb_lineno
+        exc_trace(exc_tb)
+        print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: get_active_acervo_base\033[0m")
+        print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
+        pass
+    return Path.home() / ".doxoade" / "acervo"
+
+ACERVO_BASE = get_active_acervo_base()
+BRICKS_DIR = ACERVO_BASE / "bricks"
+DB_FILE = get_active_db_path()

@@ -871,7 +871,7 @@ class PitstopEngine:
         module_names = [r['module_name'] for r in ready]
 
         # --- PASSO 1: TRANSPILE ---
-        print(f"   {Fore.YELLOW}⚙ Gerando fontes C (Cython Core)...{Fore.RESET}")
+        print(f"   {Fore.YELLOW}⚙ Gerando fontes C (Cython Core)...{Fore.RESET}\n{module_names}")
         compiler.transpile_batch(module_names) 
 
         # --- PASSO 2: LINKAGEM PARALELA (GCC) ---

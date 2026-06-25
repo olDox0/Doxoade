@@ -1,60 +1,47 @@
 # -*- coding: utf-8 -*-
 # doxoade/tools/vulcan/diagnostic/soteria/scribe.py
 import re
+import os
+import ctypes
 from pathlib import Path
-
 from doxoade.tools.telemetry_tools.logger import chief_heartbeat
 
 class SoteriaScribe:
     def __init__(self):
-        # PASC 8.15: Definição centralizada de padrões e restrições
-        self.pyx_func_regex = re.compile(r'^(?P<indent>\s*)(?P<type>def|cdef|cpdef)\s+(?P<name>\w+)\s*\(', re.MULTILINE)
-#        self.c_func_regex = re.compile(r'^(\w+[\s\*]+)(\w+)\s*\(([^)]*)\)\s*\{', re.MULTILINE)
-#        self.risk_regex = re.compile(r'(\*[\w\d_]+\s*=|[\w\d_]+\+\+|[\w\d_]+--|malloc|free|exit\(|Sleep\(|CX_DIE)')
-        self.risk_regex = re.compile(r'(\*[\w\d_]+\s*=|malloc|free|soteria_validate|exit\(|CX_DIE)')
-        self.c_func_regex = re.compile(r'^([\w\s\*]+?)\s*(\w+)\s*\(([^)]*)\)\s*\{', re.MULTILINE)
-        self.var_capture_regex = re.compile(r'([a-zA-Z_]\w*)\s*=[^=]')
-        self.assignment_regex = re.compile(r'([a-zA-Z_]\w*)\s*=[^=]')
-#        self.io_regex = re.compile(r'\b(fopen|fclose|fwrite|fread|printf|fprintf|sprintf|system|remove|rename)\s*\(')
-        self.io_regex = re.compile(r'\b(fopen|fclose|fwrite|fread|printf|fprintf|soteria_mark|malloc|free)\s*\(')
-        self.mem_regex = re.compile(r'\b(malloc|free|calloc|realloc|PyMem_Malloc|PyMem_Free)\b\s*\(')
-        
         self.soteria_dir = Path(__file__).resolve().parent
         self.soteria_src = self.soteria_dir / "src"
         self.soteria_inc = self.soteria_dir / "include"
         
-        self.alloc_map = {
-            "malloc":      "ALLOC_MALLOC",
-            "free":        "ALLOC_MALLOC",
-            "calloc":      "ALLOC_MALLOC",
-            "realloc":     "ALLOC_MALLOC",
-            "PyMem_Malloc":"ALLOC_PYMEM",
-            "PyMem_Free":  "ALLOC_PYMEM"
-        }
+        self.dll_path = self.soteria_dir / "native" / "soteria_scribe_advance.dll"
+#        self.dll_path = Path(__file__).resolve().parent / "native" / "soteria_scribe_advance.dll"
+#        self.dll_path = Path(__file__).parent / "native" / "soteria_scribe_advance.dll"
+        self._lib = None
+        self.pyx_func_regex = re.compile(r'^\s*(def|cdef|cpdef)\s+(\w+)\s*\(')
+        self.c_func_regex = re.compile(r'^([\w\s\*]+?)\s*(\w+)\s*\(([^)]*)\)\s*\{')
+        self.mem_pattern = re.compile(r'\b(malloc|free|calloc|realloc|PyMem_Malloc|PyMem_Free)\b\s*\((.*)\)')
+        self.io_re = re.compile(r'\b(fopen|printf|fprintf|CreateThread)\b\s*\(')
         
+        #self.blacklist = {'main', 'if', 'while', 'for', 'return', 'else', 'switch'}
         self.blacklist = {
             'soteria_mark', 'soteria_dispatch', 'soteria_init', 'main', 
-            'soteria_push', 'soteria_malloc', 'soteria_free', 'soteria_validate',
-            'soteria_payload', 'soteria_capture_identity', 'soteria_dump_stack_trace',
-            'soteria_exception_handler', 'soteria_auto_ignite',
-            'dx_arena_alloc', 'dx_arena_init', 'dx_xorshift64', 
-            'dx_random_float', 'dx_random_normal',
-            'switch', 'if', 'while', 'for', 'return', 'else'
+            'if', 'while', 'for', 'return', 'else', 'switch'
+        }
+        
+        self.alloc_map = {
+            "malloc": "ALLOC_MALLOC", "free": "ALLOC_MALLOC",
+            "calloc": "ALLOC_MALLOC", "realloc": "ALLOC_MALLOC",
+            "PyMem_Malloc": "ALLOC_PYMEM", "PyMem_Free": "ALLOC_PYMEM"
         }
 
     def _get_indent(self, line: str) -> str:
-        """Calcula a indentação de uma linha para manter a gramática Python."""
         return line[:len(line) - len(line.lstrip())]
 
     def instrument_pyx(self, content, filename):
+        """Otimizado para Cython High-Throughput."""
         if "soteria_malloc_ext" in content: return content
         
-        safe_filename = filename.replace("\\", "/")
         lines = content.splitlines()
-        
-        # Header de Definição para o Cython entender os símbolos C da Sotéria
         new_lines = [
-            '# --- SOTERIA VULCAN SHIELD ---',
             'cdef extern from "soteria.h":',
             '    void soteria_mark(const char* msg, const char* file, int line) nogil',
             '    void* soteria_malloc_ext(size_t s, int origin, const char* f, int l) nogil',
@@ -64,127 +51,137 @@ class SoteriaScribe:
             ''
         ]
 
-        mem_pattern = re.compile(r'\b(malloc|free|PyMem_Malloc|PyMem_Free)\b\s*\((.*)\)')
+        safe_filename = filename.replace("\\", "/")
 
         for i, line in enumerate(lines):
-            ln_num = i + 1
             stripped = line.strip()
-            
-            # Filtros de segurança do Cython
-            prev_line = lines[i-1].strip() if i > 0 else ""
-            if "switch" in prev_line and prev_line.endswith("{"):
+            # SHORT-CIRCUIT: Se a linha for vazia ou comentário, pula Regex
+            if not stripped or stripped.startswith(("#", "'''", '"""')):
                 new_lines.append(line)
                 continue
-                
-            current_line = line
 
-            # 1. Vacina de Memória no Cython
-            mem_match = mem_pattern.search(current_line)
-            if mem_match:
-                func_name = mem_match.group(1)
-                args = mem_match.group(2)
-                origin = "ALLOC_PYMEM" if "PyMem" in func_name else "ALLOC_MALLOC"
-                sot_func = "soteria_free_ext" if "free" in func_name.lower() else "soteria_malloc_ext"
-                
-                current_line = mem_pattern.sub(f'{sot_func}({args}, {origin}, "{safe_filename}", {ln_num})', current_line)
+            ln_num = i + 1
+            
+            # Filtro rápido para funções e chamadas
+            if "(" in stripped:
+                # Vacina de Memória
+                if any(x in stripped for x in ["malloc", "free", "PyMem"]):
+                    line = self.mem_pattern.sub(
+                        lambda m: f'soteria_{"free" if "free" in m.group(1).lower() else "malloc"}_ext({m.group(2)}, {"ALLOC_PYMEM" if "PyMem" in m.group(1) else "ALLOC_MALLOC"}, "{safe_filename}", {ln_num})', 
+                        line
+                    )
 
-            # 2. Rastro de Chamadas Externas
-            if "ctypes." in current_line:
-                indent = self._get_indent(current_line)
-                new_lines.append(f'{indent}soteria_mark("PRE-CALL: Ctypes", "{safe_filename}", {ln_num})')
+                # Rastro de Funções
+                match = self.pyx_func_regex.match(line)
+                if match:
+                    name = match.group(2)
+                    indent = match.group(0).split(match.group(1))[0]
+                    new_lines.append(line)
+                    new_lines.append(f'{indent}    soteria_mark("TRACEBACK: {name}", "{safe_filename}", {ln_num})')
+                    continue
 
-            # 3. Rastro de Funções Cython
-            match = self.pyx_func_regex.match(current_line)
-            if match and not (":" in current_line and current_line.split(":", 1)[1].strip()):
-                name = match.group('name')
-                indent = match.group('indent') + "    "
-                new_lines.append(current_line)
-                new_lines.append(f'{indent}soteria_mark("TRACEBACK: {name}", "{safe_filename}", {ln_num})')
-                continue
+            if "ctypes." in stripped:
+                new_lines.append(f'{self._get_indent(line)}soteria_mark("PRE-CALL: Ctypes", "{safe_filename}", {ln_num})')
 
-            new_lines.append(current_line)
+            new_lines.append(line)
 
+        return "\n".join(new_lines)
+
+    def _load_lib(self):
+        if not self._lib and self.dll_path.exists():
+            self._lib = ctypes.CDLL(str(self.dll_path))
+            self._lib.vax_process_buffer.argtypes = [
+                ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_int
+            ]
+            self._lib.vax_process_buffer.restype = ctypes.c_int
+        return self._lib
+
+    def _load_native_kernel(self):
+        """Tenta carregar o acelerador em C."""
+        if self._lib: return self._lib
+        if self.dll_path.exists():
+            try:
+                self._lib = ctypes.CDLL(str(self.dll_path))
+                self._lib.vax_process_buffer.argtypes = [
+                    ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_int
+                ]
+                self._lib.vax_process_buffer.restype = ctypes.c_int
+                return self._lib
+            except Exception: return None
+        return None
+
+    def _legacy_python_instrumentation(self, content, filename):
+        """Fallback: Lógica original em Python (usada no bootstrap)."""
+        lines = content.splitlines()
+        new_lines = []
+        is_c = filename.endswith(('.c', '.cpp', '.h'))
+        
+        for i, line in enumerate(lines):
+            new_lines.append(line)
+            stripped = line.strip()
+            if not stripped or stripped.startswith(("//", "#", "/*")): continue
+            
+            match = self.c_func_regex.match(line) if is_c else self.pyx_func_regex.match(line)
+            if match:
+                name = match.group(2)
+                if name not in self.blacklist:
+                    tag = f'SOTERIA_ENTER("{name}");' if is_c else f'# TRACE: {name}'
+                    new_lines.append(f"    {tag}")
         return "\n".join(new_lines)
 
     def instrument_code(self, content, filename):
-        if "soteria_free_ext" in content or "soteria_malloc_ext" in content: 
-            return content
-        safe_fn = filename.replace("\\", "/")
-        lines = content.splitlines()
-        new_lines = []
-        if "soteria.h" not in content: new_lines.append('#include "soteria.h"\n')
+        """Orquestrador: Tenta C, senão cai para Python."""
+        kernel = self._load_native_kernel()
+        
+        if not kernel:
+            return self._legacy_python_instrumentation(content, filename)
 
-        stats = {"io": 0, "func": 0, "mem": 0}
-        mem_pattern = re.compile(r'\b(malloc|free|calloc|realloc|PyMem_Malloc|PyMem_Free)\b\s*\((.*)\)')
-        io_re = re.compile(r'\b(fopen|printf|fprintf|CreateThread)\b\s*\(')
-
-        for i, line in enumerate(lines):
-            ln_num = i + 1
-            stripped = line.strip()
-            if not stripped or "SOTERIA_ENTER" in stripped or "soteria_" in stripped:
-                new_lines.append(line)
-                continue
-            if stripped.startswith(("//", "/*")):
-                new_lines.append(line)
-                continue
-            indent = self._get_indent(line)
-            current_line = line
-            mem_match = mem_pattern.search(current_line)
-            if mem_match:
-                stats["mem"] += 1
-                func_name = mem_match.group(1)
-                args = mem_match.group(2)
-                origin = self.alloc_map.get(func_name, "ALLOC_UNKNOWN")
-                sot_func = "soteria_free_ext" if "free" in func_name.lower() else "soteria_malloc_ext"
-                current_line = mem_pattern.sub(f'{sot_func}({args}, {origin}, "{safe_fn}", {ln_num})', current_line)
-
-            io_match = io_re.search(current_line)
-            if io_match:
-                stats["io"] += 1
-                func = io_match.group(1)
-                new_lines.append(f'{indent}soteria_io_trace("{func}", "Chamada IO", "{safe_fn}", {ln_num});')
-
-            func_match = self.c_func_regex.match(current_line)
-            if func_match:
-                stats["func"] += 1
-                new_lines.append(current_line)
-                func_name = func_match.group(2)
-                if func_name not in self.blacklist:
-                    new_lines.append(f'{indent}    SOTERIA_ENTER("{func_name}");')
-                continue
-            new_lines.append(current_line)
-    
-        chief_heartbeat("SCRIBE", "VACCINATION_C", {"file": filename, "stats": stats})
-        return "\n".join(new_lines)
+        try:
+            in_bytes = content.encode('utf-8', errors='ignore')
+            out_buffer = ctypes.create_string_buffer(len(in_bytes) * 2)
+            is_c = 1 if filename.endswith(('.c', '.cpp', '.h')) else 0
+            
+            new_len = kernel.vax_process_buffer(in_bytes, out_buffer, len(in_bytes), is_c)
+            return out_buffer.raw[:new_len].decode('utf-8', errors='ignore')
+        except Exception:
+            return self._legacy_python_instrumentation(content, filename)
 
     def generate_shadow(self, src_dir, shadow_dir):
-        """Cria uma cópia vacinada do projeto em uma pasta paralela."""
+        """Cria cópia vacinada com Isolamento Industrial (Anti-Plague)."""
         from pathlib import Path
-        src_path_root = Path(src_dir)
-        dst_path_root = Path(shadow_dir)
+        src_root = Path(src_dir).resolve()
+        dst_root = Path(shadow_dir).resolve()
         
-        if not src_path_root.exists(): return
+        # PODA ESTRITA: Nunca entrar nessas pastas
+        FORBIDDEN = {'.doxoade', 'venv', '.git', '__pycache__', 'build', 'dist', 'logs'}
 
-        for py_file in src_path_root.rglob("*.py"):
-            # Pula pastas de sistema
-            if any(x in str(py_file) for x in ['venv', '.git', '__pycache__']):
-                continue
-                
-            rel_path = py_file.relative_to(src_path_root)
-            target_file = dst_path_root / rel_path
-            target_file.parent.mkdir(parents=True, exist_ok=True)
+        if not src_root.exists(): return
+
+        count = 0
+        for root, dirs, files in os.walk(src_root):
+            # Remove pastas proibidas do walk antes de descer
+            dirs[:] = [d for d in dirs if d not in FORBIDDEN and not d.startswith('.')]
             
-            try:
-                # [FIX] LEITURA ROBUSTA: Tenta UTF-8, mas ignora erros de caractere
-                # Isso impede o crash se houver um 'é' ou 'ç' em comentário salvo em Latin-1
-                with open(py_file, 'r', encoding='utf-8', errors='ignore') as f_in:
-                    content = f_in.read()
+            for file in files:
+                # SÓ vacina Bricks reais. Pula arquivos sintéticos/temporários
+                if not file.endswith(('.py', '.pyx', '.c', '.cpp', '.h')): continue
+                if 'shadow_exec' in file or 'vax' in file: continue
                 
-                vacinado = self.instrument_code(content, py_file.name)
+                f_path = Path(root) / file
+                rel = f_path.relative_to(src_root)
+                target = dst_root / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
                 
-                with open(target_file, 'w', encoding='utf-8') as f_out:
-                    f_out.write(vacinado)
-            except Exception as e:
-                # Se falhar mesmo assim, logamos no Hades mas não paramos a forja
-                chief_heartbeat("SCRIBE", "SHADOW_FAIL", {"file": py_file.name, "error": str(e)})
-                continue
+                try:
+                    content = f_path.read_text(encoding='utf-8', errors='ignore')
+                    if f_path.suffix == '.py':
+                        from .python_scribe import generate_python_shadow
+                        vacinado = generate_python_shadow(content, f_path.name)
+                    else:
+                        vacinado = self.instrument_code(content, f_path.name)
+                    
+                    target.write_text(vacinado, encoding='utf-8')
+                    count += 1
+                except Exception: continue
+
+        chief_heartbeat("SCRIBE", "SHADOW_STABILIZED", {"count": count})

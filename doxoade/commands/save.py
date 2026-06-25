@@ -16,13 +16,14 @@ from rich.console import Console
 
 from .check import run_check_logic
 
-from doxoade.database         import get_db_connection
+from doxoade.core_database import get_db_connection
 from doxoade.tools.display    import _present_results
 from doxoade.tools.doxcolors  import Fore
 from doxoade.tools.git        import _run_git_command
 from doxoade.tools.filesystem import is_ignored
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 
+from doxoade.tools.alexandria.engine import alexandria_write
 __version__ = '63.3 Alfa (Gold Standard)'
 
 def _get_staged_python_files(git_root):
@@ -57,7 +58,7 @@ def _process_finding_for_learning(cursor: sqlite3.Cursor, finding: sqlite3.Row, 
     corrected_content = _run_git_command(['show', f'{new_commit_hash}:{normalized_path}'], capture_output=True, silent_fail=True)
     if not corrected_content:
         return False
-    cursor.execute('INSERT OR REPLACE INTO solutions \n           (finding_hash, stable_content, commit_hash, project_path, timestamp, file_path, message, error_line) \n           VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (finding['finding_hash'], corrected_content, new_commit_hash, project_path, datetime.now(timezone.utc).isoformat(), file_path, finding['message'], finding['line']))
+    alexandria_write('INSERT OR REPLACE INTO solutions \n           (finding_hash, stable_content, commit_hash, project_path, timestamp, file_path, message, error_line) \n           VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (finding['finding_hash'], corrected_content, new_commit_hash, project_path, datetime.now(timezone.utc).isoformat(), file_path, finding['message'], finding['line']))
     return True
 
 def _learn_solutions_from_commit(new_commit_hash: str, project_path: str):
@@ -113,9 +114,9 @@ def _abstract_and_learn_template(cursor: sqlite3.Cursor, concrete_finding: Dict[
     cursor.execute('SELECT id, confidence FROM solution_templates WHERE problem_pattern = ?', (pattern,))
     existing = cursor.fetchone()
     if existing:
-        cursor.execute('UPDATE solution_templates SET confidence = ? WHERE id = ?', (existing['confidence'] + 1, existing['id']))
+        alexandria_write('UPDATE solution_templates SET confidence = ? WHERE id = ?', (existing['confidence'] + 1, existing['id']))
     else:
-        cursor.execute('INSERT INTO solution_templates (problem_pattern, solution_template, category, created_at) VALUES (?, ?, ?, ?)', (pattern, template, category, datetime.now(timezone.utc).isoformat()))
+        alexandria_write('INSERT INTO solution_templates (problem_pattern, solution_template, category, created_at) VALUES (?, ?, ?, ?)', (pattern, template, category, datetime.now(timezone.utc).isoformat()))
     return True
 
 @click.command('save')
@@ -294,7 +295,7 @@ def _capture_delta_knowledge(new_commit_hash, project_path):
     Minerador de Conhecimento em Tempo Real.
     Cruza incidentes resolvidos com o diff do Git para criar o Acervo.
     """
-    from doxoade.database import get_db_connection
+    from doxoade.core_database import get_db_connection
     import subprocess
     
     conn = get_db_connection()
@@ -328,7 +329,7 @@ def _capture_delta_knowledge(new_commit_hash, project_path):
                 
                 if snippet_broken and snippet_fixed and snippet_broken != snippet_fixed:
                     # 3. Alimenta o Acervo (Lexicon)
-                    conn.execute("""
+                    alexandria_write("""
                         UPDATE knowledge_lexicon 
                         SET snippet_broken = ?, snippet_fixed = ?, tags = 'AUTODIDATA'
                         WHERE finding_hash = ?

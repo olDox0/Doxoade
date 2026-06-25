@@ -148,7 +148,7 @@ def cli(ctx, guard):
     start_persistence_worker()
 
     # 2. Banco de Dados (Ma'at)
-    from doxoade.database import init_db
+    from doxoade.core_database import init_db
     try: init_db()
     except Exception as e:
         click.secho(f"Falha na integridade da base: {e}", fg='red')

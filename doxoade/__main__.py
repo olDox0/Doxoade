@@ -139,6 +139,11 @@ def main():
         from doxoade.cli import cli
         cli()
     except Exception as e:
+        
+        import click as _click
+        if isinstance(e, (_click.exceptions.Exit, _click.exceptions.Abort)):
+            sys.exit(getattr(e, 'exit_code', 0))
+        
         import traceback
         import sys as exc_sys
         from traceback import print_tb as exc_trace

@@ -4,7 +4,6 @@ ignore = [
     "Canone_Test/",        # Mata testes de canone
     "commands_test/",      # Opcional: remove os testes do dossier
     "build_soteria_test/", # Opcional: remove binários de teste
-    "diagnostic/__pycache___*/",
     "doxoade.egg-info/",
     "build/",
     "dist/",

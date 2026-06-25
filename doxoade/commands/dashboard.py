@@ -9,7 +9,7 @@ import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
 from collections import Counter
 from rich.console import Console
 from rich.table import Table
-from doxoade.database import get_db_connection
+from doxoade.core_database import get_db_connection
 
 def _display_error_trend_db(cursor: sqlite3.Cursor):
     """

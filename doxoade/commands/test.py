@@ -4,7 +4,7 @@ import subprocess
 import sys
 import os
 from doxoade.tools.doxcolors import Fore
-from doxoade.database import get_db_connection
+from doxoade.core_database import get_db_connection
 from datetime import datetime, timezone
 from doxoade.tools.filesystem import _get_venv_python_executable
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
@@ -17,7 +17,7 @@ def _register_test_failure(node_id, error_message):
         import hashlib
         file_path = node_id.split('::')[0] if '::' in node_id else 'unknown'
         f_hash = hashlib.sha256(f'{node_id}:{error_message}'.encode('utf-8')).hexdigest()
-        cursor.execute('\n            INSERT OR REPLACE INTO open_incidents \n            (finding_hash, file_path, line, message, category, commit_hash, timestamp, project_path)\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n        ', (f_hash, file_path, 0, f'Falha no teste: {error_message[:200]}...', 'UNIT-TEST', 'local', datetime.now(timezone.utc).isoformat(), os.getcwd()))
+        alexandria_write('\n            INSERT OR REPLACE INTO open_incidents \n            (finding_hash, file_path, line, message, category, commit_hash, timestamp, project_path)\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n        ', (f_hash, file_path, 0, f'Falha no teste: {error_message[:200]}...', 'UNIT-TEST', 'local', datetime.now(timezone.utc).isoformat(), os.getcwd()))
         conn.commit()
         conn.close()
     except Exception:

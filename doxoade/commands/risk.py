@@ -8,7 +8,7 @@ import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
 import os
 from typing import Dict, Any, List
 from doxoade.tools.doxcolors import Fore, Style
-from doxoade.database import get_db_connection
+from doxoade.core_database import get_db_connection
 from doxoade.dnm import DNM
 __version__ = '4.4 Alfa (Gold Fortress Edition)'
 

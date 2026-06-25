@@ -1,5 +1,6 @@
 # doxoade/doxoade/commands/search_systems/search_engine.py
 """Motor Nexus Search - Casa de Máquinas (MPoT-17)."""
+from doxoade.tools.alexandria.engine import alexandria_write
 import os
 from pathlib import Path
 from .search_state import SearchState
@@ -58,72 +59,68 @@ def _search_code_logic(root: Path, query: str, limit: int) -> list:
     return matches
 
 def _search_database_logic(query, limit, path_filter) -> dict:
-    from doxoade.database import get_db_connection
-    from doxoade.tools.aegis.nexus_db import Row  # noqa
-    res = {'incidents': [], 'solutions': [], 'lexicon': []} # Adicionado lexicon
-#    res = {'incidents': [], 'solutions': []}
+    from doxoade.core_database import get_db_connection
+    from doxoade.tools.aegis.nexus_db import Row
+    
+    res = {'incidents': [], 'solutions': [], 'lexicon': []}
     conn = get_db_connection()
-    cursor = conn.cursor()
     
-    sql_q = f'%{query}%'
-    # [PLATINUM] Seleção explícita de colunas de inteligência
-    lex_sql = """
-        SELECT finding_hash, message, occurrence_count, last_seen, snippet_broken, snippet_fixed 
-        FROM knowledge_lexicon 
-        WHERE message LIKE ? OR finding_hash LIKE ? 
-        LIMIT ?
-    """
-    rows = cursor.execute(lex_sql, (sql_q, sql_q, limit)).fetchall()
-    for r in rows:
-        res['lexicon'].append(dict(r))
-    
-    conn.close()
-    return res
-    
-    # CORREÇÃO AEGIS: Aplica o row_factory na conexão real embutida
+    # Configura o retorno para dicionários (Rows)
     if hasattr(conn, '_conn'):
         conn._conn.row_factory = Row
     else:
         conn.row_factory = Row
-        
+
+    cursor = conn.cursor()
     sql_q = f'%{query}%'
+    
     try:
-        cursor = conn.cursor()
+        # 1. Busca no Léxico
+        lex_sql = """
+            SELECT finding_hash, message, occurrence_count, last_seen, snippet_broken, snippet_fixed
+            FROM knowledge_lexicon
+            WHERE message LIKE ? OR finding_hash LIKE ?
+            LIMIT ?
+        """
+        # ✅ Corrigido: usando cursor.execute em vez de alexandria_write
+        rows = cursor.execute(lex_sql, (sql_q, sql_q, limit)).fetchall()
+        for r in rows:
+            res['lexicon'].append(dict(r))
+
+        # 2. Busca em Incidentes Abertos
         inc_sql = 'SELECT * FROM open_incidents WHERE (message LIKE ? OR file_path LIKE ?)'
         params = [sql_q, sql_q]
         if path_filter:
             inc_sql += ' AND project_path LIKE ?'
             params.append(f'%{path_filter}%')
+            
+        # ✅ Corrigido: usando cursor.execute
         cursor.execute(inc_sql + ' LIMIT ?', params + [limit])
-        
         for row in cursor.fetchall():
             res['incidents'].append({'file': row['file_path'], 'line': row['line'], 'message': row['message'], 'category': row['category']})
             
+        # 3. Busca em Soluções
         sol_sql = 'SELECT * FROM solutions WHERE (message LIKE ? OR file_path LIKE ?)'
         sol_params = [sql_q, sql_q]
         if path_filter:
             sol_sql += ' AND project_path LIKE ?'
             sol_params.append(f'%{path_filter}%')
+            
+        # ✅ Corrigido: usando cursor.execute
         cursor.execute(sol_sql + ' LIMIT ?', sol_params + [limit])
-        
         for row in cursor.fetchall():
-            res['solutions'].append({'file': row['file_path'], 'message': row['message']})
+            res['solutions'].append({'file': row['file_path'], 'line': row.get('error_line', 0), 'message': row['message']})
             
     except Exception as e:
-        # Seu bloco de tratamento de exceções robusto continua aqui...
-        import sys as exc_sys
-        from traceback import print_tb as exc_trace
-        _, exc_obj, exc_tb = exc_sys.exc_info()
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        line_number = exc_tb.tb_lineno
-        print(f'\x1b[31m ■ Archibe: {fname} - line: {line_number}  \n ■ Exception type: {e} . . .\n  ■ Exception value: {" ".join(str(exc_obj).splitlines())}\n')
-        exc_trace(exc_tb)
+        import logging
+        logging.error(f"[SEARCH_DB] Falha na busca: {e}")
     finally:
         conn.close()
+        
     return res
 
 def _search_timeline_logic(query, limit, path_filter) -> list:
-    from doxoade.database import get_db_connection
+    from doxoade.core_database import get_db_connection
     from doxoade.tools.aegis.nexus_db import Row  # noqa
     results = []
     conn = get_db_connection()
@@ -142,10 +139,10 @@ def _search_timeline_logic(query, limit, path_filter) -> list:
         params.append(f'%{path_filter}%')
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='command_history'")
+        alexandria_write("SELECT name FROM sqlite_master WHERE type='table' AND name='command_history'")
         if not cursor.fetchone():
             return []
-        cursor.execute(q + ' ORDER BY id DESC LIMIT ?', params + [limit])
+        alexandria_write(q + ' ORDER BY id DESC LIMIT ?', params + [limit])
         for row in cursor.fetchall():
             results.append({'full_line': row['full_command_line'], 'dir': row['working_dir'], 'timestamp': row['timestamp'], 'exit_code': row['exit_code']})
     except Exception as e:

@@ -20,7 +20,8 @@ class DataSampler:
         # Copia Schema
         src_curr.execute("SELECT sql, name FROM sqlite_master WHERE type='table';")
         for schema_sql, table_name in src_curr.fetchall():
-            if table_name == 'sqlite_sequence': continue
+            #if table_name == 'sqlite_sequence': continue
+            if table_name.startswith('sqlite_'): continue
             dest_curr.execute(schema_sql)
             
             # Copia Dados Limitados

@@ -3,7 +3,8 @@ import json
 import click
 from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
-from doxoade.database import get_db_connection
+from doxoade.core_database import get_db_connection
+from doxoade.tools.alexandria.engine import alexandria_write
 LOG_FILE = Path.home() / '.doxoade' / 'doxoade.log'
 
 def _map_severity(log_type_str):
@@ -44,11 +45,11 @@ def migrate_db(force):
                 except json.JSONDecodeError:
                     skipped_lines += 1
                     continue
-                cursor.execute('\n                    INSERT INTO events (timestamp, doxoade_version, command, project_path, execution_time_ms, status)\n                    VALUES (?, ?, ?, ?, ?, ?)\n                ', (data.get('timestamp'), data.get('doxoade_version', 'N/A'), data.get('command', 'unknown'), data.get('project_path', 'N/A'), data.get('execution_time_ms', 0), data.get('status', 'completed')))
+                alexandria_write('\n                    INSERT INTO events (timestamp, doxoade_version, command, project_path, execution_time_ms, status)\n                    VALUES (?, ?, ?, ?, ?, ?)\n                ', (data.get('timestamp'), data.get('doxoade_version', 'N/A'), data.get('command', 'unknown'), data.get('project_path', 'N/A'), data.get('execution_time_ms', 0), data.get('status', 'completed')))
                 event_id = cursor.lastrowid
                 migrated_events += 1
                 for finding in data.get('findings', []):
-                    cursor.execute('\n                        INSERT INTO findings (event_id, severity, category, message, details, file, line, finding_hash)\n                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n                    ', (event_id, _map_severity(finding.get('type')), finding.get('category', 'UNCATEGORIZED').upper(), finding.get('message', 'Mensagem ausente'), finding.get('details'), finding.get('file'), finding.get('line'), finding.get('hash')))
+                    alexandria_write('\n                        INSERT INTO findings (event_id, severity, category, message, details, file, line, finding_hash)\n                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n                    ', (event_id, _map_severity(finding.get('type')), finding.get('category', 'UNCATEGORIZED').upper(), finding.get('message', 'Mensagem ausente'), finding.get('details'), finding.get('file'), finding.get('line'), finding.get('hash')))
                     migrated_findings += 1
         conn.commit()
         click.echo(Fore.GREEN + '\n--- Migração Concluída ---')

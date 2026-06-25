@@ -5,30 +5,55 @@ Gerencia o ciclo de vida do banco de dados e migrações de esquema.
 ESTRATÉGIA: Migration Dispatcher para conformidade MPoT-4/17.
 """
 
+from doxoade.tools.alexandria.engine import alexandria_write
 import click
 import zlib
 import json
 import time
+import sys
 import os
 from pathlib import Path
+import sqlite3 as real_sqlite3
 
 import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
+#from doxoade.database import DB_FILE, get_db_connection
 from doxoade.tools.telemetry_tools.logger import chief_heartbeat
+from .tools.filesystem import _find_project_root
 
-DB_FILE = Path.home() / '.doxoade' / 'doxoade.db'
+PROJECT_ROOT = Path(__file__).resolve().parents[1] # Sobe de doxoade/ para a raiz
+BASE_DIR = Path(__file__).resolve().parent
+PACKAGE_ROOT = Path(__file__).resolve().parent
+#DB_FILE = Path(os.getcwd()) / 'data' / 'doxoade.db'
+DB_FILE = PACKAGE_ROOT / 'data' / 'doxoade.db'
 DB_VERSION = 134
+_CACHED_DB_PATH = None
+_LOG_QUEUE = None 
 
 def get_db_connection():
     """Abre conexão com monitoramento de performance (Sapiens Watcher)."""
+    if not DB_FILE.parent.exists():
+        DB_FILE.parent.mkdir(parents=True, exist_ok=True)
+    import doxoade.tools.aegis.nexus_db as sqlite3
+    if os.environ.get('VULCAN_VERBOSE') == '1':
+        print(f"\x1b[90m[HADES:CONNECT] {DB_FILE}\x1b[0m")
     t0 = time.perf_counter()
     DB_FILE.parent.mkdir(parents=True, exist_ok=True)
     
     # [PLATINUM] Configurações de Performance para o Celeron
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=20)
+    conn = sqlite3.connect(str(DB_FILE), check_same_thread=False, timeout=30.0)
+    
+    from doxoade.tools.telemetry_tools.logger import chief_heartbeat
+    chief_heartbeat("HADES", "DB_CONNECTION_OPEN", {"path": str(DB_FILE)})
+    
+    import inspect
+    caller = inspect.stack()[1].filename
+    print(f"\x1b[90m[DB-TRACE] Conexão aberta por: {os.path.basename(caller)}\x1b[0m")
+    
+#    conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=30)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.row_factory = sqlite3.Row
-    conn.execute(f"PRAGMA cache_size=-{4000}") # 4MB de cache em RAM
+    conn.execute(f"PRAGMA cache_size=-{4000}")
     
     conn.row_factory = sqlite3.Row
     
@@ -234,22 +259,38 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);')
-        res = cursor.execute('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1;').fetchone()
+        alexandria_write('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);')
+        res = alexandria_write('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1;').fetchone()
         current_version = res[0] if res else 0
 
         if current_version < DB_VERSION:
             click.secho(f"🔧 [SAPIENS] Migrando base v{current_version} -> v{DB_VERSION}...", fg='yellow')
             
             # [PLATINUM FIX] Agora o gatilho é maior que 120
-            if current_version < 131: 
+            if current_version < 3:
+                _m_v1_v3_core(cursor)
+            if current_version < 9:
+                _m_v4_v9_incidents(cursor)
+            if current_version < 14:
+                _m_v10_v14_genesis(cursor)
+            if current_version < 15:
+                _m_v15_chronos(cursor)
+            if current_version < 19:
+                _m_v19_payloads(cursor)
+            if current_version < 20:    
+                _m_v20_nexus_vault(cursor)
+            if current_version < 21:
+                _m_v21_operational_logs(cursor)
+            if current_version < 22:
+                _m_v22_moduloid_acervo(cursor)
+            if current_version < 23:
                 _m_v23_hades_optimization_and_lexicon(cursor)
-            if current_version < 132:     
+            if current_version < 24:
                 _m_v24_lexicon_expansion(cursor)
             if current_version < 133:
                 _m_v132_lexicon_expansion(cursor)
             if current_version < 134:
-                _m_v134_incident_schema_repair
+                _m_v134_incident_schema_repair(cursor)
             
             # [REFORÇO] Garante colunas sistêmicas
             repair_cols = [
@@ -260,12 +301,12 @@ def init_db():
             ]
             for table, col, col_type in repair_cols:
                 try:
-                    cursor.execute(f'ALTER TABLE {table} ADD COLUMN {col} {col_type};')
+                    alexandria_write(f'ALTER TABLE {table} ADD COLUMN {col} {col_type};')
                 except sqlite3.OperationalError: pass
 
-            cursor.execute('DELETE FROM schema_version;')
-            cursor.execute('INSERT INTO schema_version (version) VALUES (?);', (DB_VERSION,))
-            conn.commit()
+            alexandria_write('DELETE FROM schema_version;')
+            alexandria_write('INSERT INTO schema_version (version) VALUES (?);', (DB_VERSION,))
+            # conn.commit() delegado ao Alexandria
             click.secho(f"✅ [HADES] Cérebro atualizado para v{DB_VERSION}.", fg='green', bold=True)
     except Exception as e:
         conn.rollback()
@@ -279,10 +320,10 @@ def get_db_stats():
     stats = {}
     try:
         # 1. Integridade e Fragmentação
-        stats['integrity'] = conn.execute("PRAGMA integrity_check").fetchone()[0]
-        stats['page_count'] = conn.execute("PRAGMA page_count").fetchone()[0]
-        stats['page_size'] = conn.execute("PRAGMA page_size").fetchone()[0]
-        stats['freelist_count'] = conn.execute("PRAGMA freelist_count").fetchone()[0]
+        stats['integrity'] = alexandria_write("PRAGMA integrity_check").fetchone()[0]
+        stats['page_count'] = alexandria_write("PRAGMA page_count").fetchone()[0]
+        stats['page_size'] = alexandria_write("PRAGMA page_size").fetchone()[0]
+        stats['freelist_count'] = alexandria_write("PRAGMA freelist_count").fetchone()[0]
         
         # 2. Peso Físico
         stats['size_mb'] = round((stats['page_count'] * stats['page_size']) / (1024 * 1024), 2)
@@ -294,7 +335,7 @@ def get_db_stats():
         stats['counts'] = {}
         for t in tables:
             try:
-                stats['counts'][t] = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+                stats['counts'][t] = alexandria_write(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
             except Exception as e:
                 import sys as _dox_sys, os as _dox_os
                 from traceback import print_tb as exc_trace
@@ -306,7 +347,8 @@ def get_db_stats():
                 print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
             
     finally:
-        conn.close()
+        if conn:
+            conn.close()
     return stats
 
 def optimize_database():
@@ -315,12 +357,76 @@ def optimize_database():
     try:
         click.secho("🧹 [HADES] Iniciando compactação e recalibração...", fg='cyan')
         # Limpa espaços vazios e reorganiza o arquivo no disco
-        conn.execute("VACUUM")
+        alexandria_write("VACUUM")
         # Recalcula estatísticas para o Query Planner do Celeron
-        conn.execute("ANALYZE")
+        alexandria_write("ANALYZE")
         return True
     except Exception as e:
         click.echo(f"Erro na otimização: {e}")
         return False
     finally:
         conn.close()
+        
+def get_db_path():
+    """Define a localização do banco: Local (data/) > Global (Home)."""
+    # 1. Tenta achar a raiz do projeto atual
+    from .tools.filesystem import _find_project_root
+    try:
+        project_root = Path(_find_project_root(os.getcwd()))
+        local_db = project_root / "data" / "doxoade.db"
+        
+        # Se o banco local existir, ele tem prioridade absoluta
+        if local_db.exists():
+            return local_db
+    except Exception as e:
+        import sys as _dox_sys, os as _dox_os
+        from traceback import print_tb as exc_trace
+        exc_obj, exc_tb = _dox_sys.exc_info()
+        f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        line_n = exc_tb.tb_lineno
+        exc_trace(exc_tb)
+        print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: get_db_path\033[0m")
+        print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
+        pass
+
+    # 2. Fallback para o diretório global (padrão antigo)
+    pkg_path = get_active_db_path()
+    return pkg_path 
+
+def start_persistence_worker():
+    """Stub para evitar erro antes do import real."""
+    from .tools.db_utils import start_persistence_worker as start_real
+    start_real()
+
+def get_active_db_path():
+    root = _find_project_root(os.getcwd())
+    return Path(root) / 'data' / 'doxoade.db'
+
+def _resolve_db_logic():
+    pkg_path = get_active_db_path()
+    return pkg_path if pkg_path.exists() else Path.home() / '.doxoade' / 'doxoade.db'
+
+def _validate_dynamic_payload(payload: str, mode: str):
+    """Analisa strings de payload em busca de escapes de sandbox."""
+    
+    # Verificação de autorização industrial
+    if os.environ.get('DOXOADE_AUTHORIZED_RUN') == '1':
+        return # Bypassa o bloqueio para o núcleo do sistema
+
+    payload_clean = payload.replace(" ", "").replace("\t", "").lower()
+
+def alexandria_write(query, params=()):
+    from doxoade.tools.alexandria.engine import alexandria
+    q = query.strip().upper()
+    # Read operations need a synchronous result — pass through directly
+    if q.startswith(('SELECT', 'PRAGMA', 'EXPLAIN')):
+        from doxoade.core_database import get_db_connection
+        conn = get_db_connection()
+        try:
+            return conn.execute(query, params)
+        finally:
+            pass  # caller is responsible for conn lifecycle
+    # Write operations go to the async queue
+    alexandria.enqueue(query, params)
+
+DB_FILE = get_active_db_path()

@@ -8,6 +8,8 @@ from .mk_utils import (
 )
 # [DOX-UNUSED] from doxoade.tools.filesystem import is_ignored
 
+MOV_KEY = 0
+
 class MkEngine:
     """Motor de Construção de Topologia (Nexus Edition)."""
     MOVE_BLACKLIST = ['__init__.py', '.gitignore', 'pyproject.toml', 'README.md', 'LICENSE']
@@ -71,25 +73,26 @@ class MkEngine:
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
 
             # Lógica de Movimentação (apenas se não tiver conteúdo explícito)
-            if not content:
-                filename = os.path.basename(full_path)
-                if filename not in self.MOVE_BLACKLIST:
-                    existing = self._find_existing_file(filename)
-                    if existing and existing != full_path and (existing not in self.consumed_sources):
-                        try:
-                            shutil.move(existing, full_path)
-                            self.consumed_sources.add(existing)
-                            self.affected_files.append(full_path)
-                            return (full_path, 'Movido')
-                        except Exception as e:
-                            import sys as _dox_sys, os as _dox_os
-                            from traceback import print_tb as exc_trace
-                            exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
-                            f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-                            line_n = exc_tb.tb_lineno
-                            exc_trace(exc_tb)
-                            print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: _process_single_item\033[0m")
-                            print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
+            if MOV_KEY == '1':
+                if not content:
+                    filename = os.path.basename(full_path)
+                    if filename not in self.MOVE_BLACKLIST:
+                        existing = self._find_existing_file(filename)
+                        if existing and existing != full_path and (existing not in self.consumed_sources):
+                            try:
+                                shutil.move(existing, full_path)
+                                self.consumed_sources.add(existing)
+                                self.affected_files.append(full_path)
+                                return (full_path, 'Movido')
+                            except Exception as e:
+                                import sys as _dox_sys, os as _dox_os
+                                from traceback import print_tb as exc_trace
+                                exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
+                                f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                                line_n = exc_tb.tb_lineno
+                                exc_trace(exc_tb)
+                                print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: _process_single_item\033[0m")
+                                print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
 
             # Criação de novo arquivo
             with open(full_path, 'w', encoding='utf-8') as f:

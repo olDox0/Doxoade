@@ -2,7 +2,7 @@
 # [DOX-UNUSED] import os
 # [DOX-UNUSED] import sys
 import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
-from doxoade.database import get_db_connection
+from doxoade.core_database import get_db_connection
 from doxoade.chronos import chronos_recorder
 
 def trace_telemetry_flow():

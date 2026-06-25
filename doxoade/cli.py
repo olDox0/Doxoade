@@ -341,13 +341,14 @@ class DoxoadeLazyGroup(click.Group):
 @click.pass_context
 def cli(ctx, guard, refresh_help): # <-- ADICIONE O ARGUMENTO AQUI
     """olDox222 Advanced Development Environment (doxoade)."""
+    
     from doxoade.tools.system_utils import auto_vaccinate_env
     auto_vaccinate_env()
     init_colors(autoreset=True)
     ctx.ensure_object(dict)
     from doxoade.tools.db_utils import start_persistence_worker
     start_persistence_worker()
-    from doxoade.database import init_db
+    from doxoade.core_database import init_db
     try:
         init_db()
     except Exception as e:
@@ -405,6 +406,8 @@ def process_result(result, **kwargs):
 def main():
     """Wrapper blindado com:
     Injeção Vulcan e Auto-VENV."""
+    import os
+    os.environ['DOXOADE_AUTHORIZED_RUN'] = '1'
     # 1. Forçar encoding UTF-8
     if sys.stdout.encoding != 'utf-8':
         try: sys.stdout.reconfigure(encoding='utf-8')

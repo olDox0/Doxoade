@@ -103,7 +103,7 @@ class VulcanCompiler:
     def transpile_batch(self, modules_list, use_soteria=True):
         import time, os, shutil
         from pathlib import Path
-# [DOX-UNUSED]         import doxoade 
+        import doxoade 
         from setuptools import Extension 
         
         # 1. Setup de Ambiente

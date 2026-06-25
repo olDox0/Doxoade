@@ -43,3 +43,17 @@ name = "memory_chaos"
 sources = ["tests/memory_chaos_v4.c"]
 output = "bin/memory_chaos_v4.exe"
 opt = "O0"
+
+[[targets]]
+name = "soteria_scribe_advance"
+sources = ["doxoade/tools/vulcan/native/soteria_scribe_advance.c"]
+output = "doxoade/tools/vulcan/native/soteria_scribe_advance.dll"
+flags = ["-shared"]
+opt = "O3"
+
+[[targets]]
+name = "vls_scanner"
+sources = ["doxoade/tools/vulcan/native/vls_scanner.c"]
+output = "doxoade/tools/vulcan/native/vls_scanner.dll"
+flags = ["-shared"]
+opt = "O3"

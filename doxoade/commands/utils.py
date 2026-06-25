@@ -16,7 +16,7 @@ from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.display import _print_finding_details
 from doxoade.tools.analysis import _get_code_snippet
 from doxoade.tools.git import _run_git_command
-from doxoade.database import get_db_connection
+from doxoade.core_database import get_db_connection
 from doxoade.tools.filesystem import _find_project_root
 from .mk_systems.mk_commands import register_mk_options
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger

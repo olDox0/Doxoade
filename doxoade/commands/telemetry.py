@@ -7,7 +7,7 @@ import click
 import doxoade.tools.aegis.nexus_db as sqlite3 # noqa
 import json
 from doxoade.tools.doxcolors import Fore, Style
-from doxoade.database import get_db_connection
+from doxoade.core_database import get_db_connection
 from . import telemetry_utils as utils
 from . import telemetry_io as io
 

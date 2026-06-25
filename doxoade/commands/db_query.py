@@ -2,7 +2,7 @@
 import click
 from doxoade.tools.doxcolors import Fore
 import json
-from doxoade.database import get_db_connection
+from doxoade.core_database import get_db_connection
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 
 @click.command('db-query')

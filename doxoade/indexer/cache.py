@@ -17,6 +17,7 @@ from typing import Dict, List, Optional
 from collections import defaultdict
 from datetime import datetime
 
+from doxoade.tools.alexandria.engine import alexandria_write
 class IndexCache:
     """
     Cache persistente do índice usando SQLite.
@@ -42,12 +43,12 @@ class IndexCache:
         """Cria tabelas se não existirem."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        cursor.execute('\n            CREATE TABLE IF NOT EXISTS file_metadata (\n                file_path TEXT PRIMARY KEY,\n                checksum TEXT NOT NULL,\n                indexed_at TEXT NOT NULL\n            )\n        ')
-        cursor.execute('\n            CREATE TABLE IF NOT EXISTS functions (\n                id INTEGER PRIMARY KEY AUTOINCREMENT,\n                name TEXT NOT NULL,\n                file_path TEXT NOT NULL,\n                line_number INTEGER NOT NULL,\n                docstring TEXT\n            )\n        ')
-        cursor.execute('\n            CREATE TABLE IF NOT EXISTS comments (\n                id INTEGER PRIMARY KEY AUTOINCREMENT,\n                file_path TEXT NOT NULL,\n                line_number INTEGER NOT NULL,\n                text TEXT NOT NULL\n            )\n        ')
-        cursor.execute('\n            CREATE TABLE IF NOT EXISTS calls (\n                caller TEXT NOT NULL,\n                callee TEXT NOT NULL,\n                PRIMARY KEY (caller, callee)\n            )\n        ')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_func_name ON functions(name)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_calls_callee ON calls(callee)')
+        alexandria_write('\n            CREATE TABLE IF NOT EXISTS file_metadata (\n                file_path TEXT PRIMARY KEY,\n                checksum TEXT NOT NULL,\n                indexed_at TEXT NOT NULL\n            )\n        ')
+        alexandria_write('\n            CREATE TABLE IF NOT EXISTS functions (\n                id INTEGER PRIMARY KEY AUTOINCREMENT,\n                name TEXT NOT NULL,\n                file_path TEXT NOT NULL,\n                line_number INTEGER NOT NULL,\n                docstring TEXT\n            )\n        ')
+        alexandria_write('\n            CREATE TABLE IF NOT EXISTS comments (\n                id INTEGER PRIMARY KEY AUTOINCREMENT,\n                file_path TEXT NOT NULL,\n                line_number INTEGER NOT NULL,\n                text TEXT NOT NULL\n            )\n        ')
+        alexandria_write('\n            CREATE TABLE IF NOT EXISTS calls (\n                caller TEXT NOT NULL,\n                callee TEXT NOT NULL,\n                PRIMARY KEY (caller, callee)\n            )\n        ')
+        alexandria_write('CREATE INDEX IF NOT EXISTS idx_func_name ON functions(name)')
+        alexandria_write('CREATE INDEX IF NOT EXISTS idx_calls_callee ON calls(callee)')
         conn.commit()
         conn.close()
 
@@ -88,14 +89,14 @@ class IndexCache:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         try:
-            cursor.execute('DELETE FROM file_metadata')
-            cursor.execute('DELETE FROM functions')
-            cursor.execute('DELETE FROM comments')
-            cursor.execute('DELETE FROM calls')
+            alexandria_write('DELETE FROM file_metadata')
+            alexandria_write('DELETE FROM functions')
+            alexandria_write('DELETE FROM comments')
+            alexandria_write('DELETE FROM calls')
             now = datetime.now().isoformat()
             for file_path in files:
                 checksum = self._calculate_checksum(file_path)
-                cursor.execute('INSERT INTO file_metadata VALUES (?, ?, ?)', (str(file_path), checksum, now))
+                alexandria_write('INSERT INTO file_metadata VALUES (?, ?, ?)', (str(file_path), checksum, now))
             self._save_functions(cursor, indexer.index['functions'])
             self._save_comments(cursor, indexer.index['comments'])
             self._save_calls(cursor, indexer.index['calls'])
@@ -128,19 +129,19 @@ class IndexCache:
         """Salva funções no cache."""
         for func_name, locations in functions.items():
             for loc in locations:
-                cursor.execute('INSERT INTO functions (name, file_path, line_number, docstring) VALUES (?, ?, ?, ?)', (func_name, loc['file'], loc['line'], loc['docstring']))
+                alexandria_write('INSERT INTO functions (name, file_path, line_number, docstring) VALUES (?, ?, ?, ?)', (func_name, loc['file'], loc['line'], loc['docstring']))
 
     def _save_comments(self, cursor, comments: Dict) -> None:
         """Salva comentários no cache."""
         for file_path, comment_list in comments.items():
             for line_num, text in comment_list:
-                cursor.execute('INSERT INTO comments (file_path, line_number, text) VALUES (?, ?, ?)', (file_path, line_num, text))
+                alexandria_write('INSERT INTO comments (file_path, line_number, text) VALUES (?, ?, ?)', (file_path, line_num, text))
 
     def _save_calls(self, cursor, calls: Dict) -> None:
         """Salva call graph no cache."""
         for callee, callers in calls.items():
             for caller in callers:
-                cursor.execute('INSERT INTO calls (caller, callee) VALUES (?, ?)', (caller, callee))
+                alexandria_write('INSERT INTO calls (caller, callee) VALUES (?, ?)', (caller, callee))
 
     def _load_functions(self, cursor, index: Dict) -> None:
         """Carrega funções do cache."""

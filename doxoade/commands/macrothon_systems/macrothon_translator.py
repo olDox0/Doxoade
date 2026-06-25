@@ -3,6 +3,11 @@
 import re
 from doxoade.tools.doxcolors import Fore, Style
 
+PYTHON_RESERVED = {
+    'if', 'else', 'elif', 'try', 'except', 'finally', 
+    'for', 'while', 'with', 'def', 'class', 'match', 'case'
+}
+
 class MacrothonTranslator:
     """Especialista em Transformação Semântica (Córtex do Macrothon)."""
     
@@ -19,6 +24,11 @@ class MacrothonTranslator:
     def translate(self, context_keys):
         """Pipeline de tradução completo."""
         # 1. Limpa blocos de metadados
+        
+        header = "import time, sys\n"
+        header += "from doxoade.tools.telemetry_tools.logger import chief_heartbeat\n"
+        header += "if '_MACRO_METRICS' not in globals(): _MACRO_METRICS = []\n\n"
+        
         code = re.sub(r"IMPORT\s*\{[^}]*\}", "", self.raw, flags=re.DOTALL)
         code = re.sub(r"TREE\s*\{[^}]*\}", "", code, flags=re.DOTALL)
         
@@ -29,6 +39,10 @@ class MacrothonTranslator:
         # 3. Tradutor de Blocos Funcionais
         def replacer(match):
             indent, name, body = match.group(1), match.group(2), match.group(3)
+            
+            if name.lower() in PYTHON_RESERVED:
+                return match.group(0)
+            
             if name not in context_keys:
                 self.orphaned_blocks.append((name, self._find_line(name)))
                 return match.group(0)
@@ -55,4 +69,5 @@ class MacrothonTranslator:
                 return f"\n{indent}print('{Fore.RED}   ✘ Erro de sintaxe no bloco {name}{Style.RESET_ALL}')\n"
 
         code = re.sub(r"(?m)^([ \t]*)(\w+):\s*\n((?:\1[ \t]+.*\n?)+)", replacer, code)
-        return code.strip()
+        return header + code.strip()
+        #return code.strip()

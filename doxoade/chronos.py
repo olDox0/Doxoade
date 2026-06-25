@@ -13,7 +13,8 @@ import collections
 import atexit
 from datetime import datetime, timezone
 from doxoade.tools.doxcolors import Fore
-from doxoade.database import get_db_connection
+from doxoade.core_database import get_db_connection
+from doxoade.tools.alexandria.engine import alexandria_write
 try:
     import psutil
     HAS_PSUTIL = True
@@ -207,6 +208,7 @@ class ChronosRecorder:
         self.end_command(exit_code=inferred_code, duration_ms=duration_ms)
 
     def end_command(self, exit_code, duration_ms):
+        from doxoade.tools.alexandria.engine import alexandria_write
         if self.profiler is None:
             return
         if self._ended:
@@ -234,15 +236,37 @@ class ChronosRecorder:
             self.system_context['vulcan_stats'] = self.vulcan_stats
         try:
             conn = get_db_connection()
-            conn.execute('\n                INSERT INTO command_history \n                (session_uuid, timestamp, command_name, full_command_line, working_dir,\n                 exit_code, duration_ms, cpu_percent, peak_memory_mb,\n                 io_read_mb, io_write_mb, line_profile_data, system_info)\n                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n            ', (self.session_uuid, datetime.now(timezone.utc).isoformat(), self.cmd_name, ' '.join(sys.argv), os.getcwd(), exit_code, duration_ms, resources['cpu'], resources['ram'], resources['read'], resources['write'], json.dumps(line_profile_data), json.dumps(self.system_context)))
+            # Validação de integridade do esquema
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='command_history'")
+            if not cursor.fetchone():
+                conn.close()
+                return
+#
+            alexandria_write('''
+                INSERT INTO command_history 
+                (session_uuid, timestamp, command_name, full_command_line, working_dir,
+                 exit_code, duration_ms, cpu_percent, peak_memory_mb,
+                 io_read_mb, io_write_mb, line_profile_data, system_info)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                self.session_uuid, self.start_timestamp, self.cmd_name, self.full_cmd, self.work_dir,
+                exit_code, duration_ms, resources['cpu'], resources['ram'],
+                resources['read'], resources['write'], 
+                json.dumps(line_profile_data), json.dumps(self.system_context)
+            ))
             conn.commit()
             conn.close()
         except Exception as e:
+            from traceback import print_tb as exc_trace
             import sys as dox_exc_sys
+            dox_exc_sys.stderr.write(f"\n\x1b[31m[CHRONOS ERROR] Falha ao persistir telemetria: {e}\x1b[0m\n")
+#            dox_exc_sys.stderr.write(f"\n[CHRONOS] Aviso: Falha ao salvar telemetria ({e})\n")
             _, exc_obj, exc_tb = dox_exc_sys.exc_info()
             fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
             line_number = exc_tb.tb_lineno
             print(f'\x1b[0m \x1b[1m Filename: {fname}   ■ Line: {line_number} \x1b[31m ■ Exception type: {e} ■ Exception value: {exc_obj} \x1b[0m')
+            exc_trace(exc_tb)
 
     def check_vulcan_efficiency(self, func_name, py_time, native_time):
         gain = py_time / native_time

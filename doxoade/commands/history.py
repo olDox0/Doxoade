@@ -1,7 +1,7 @@
 # doxoade/doxoade/commands/history.py
 import click
 from doxoade.tools.doxcolors import Fore, Style
-from doxoade.database import get_db_connection
+from doxoade.core_database import get_db_connection
 from datetime import datetime, timezone  # <--- ADICIONE ESTA LINHA
 import doxoade.tools.aegis.nexus_db as sqlite3 # noqa
 
@@ -66,10 +66,12 @@ def history(message, limit):
         # 2. Formatação de Datas
         last_date = r['last_seen'][:10] if r['last_seen'] else "N/A"
         first_date = r['first_seen'][:10] if r['first_seen'] else "N/A"
+        f_hash = r['finding_hash'] if r['finding_hash'] else "N/A_HASH"
         
         click.echo(f"\n{status} {color}{r['message']}")
         click.echo(f"   {Style.DIM}Primeira vez: {first_date} | Última vez: {Fore.YELLOW}{last_date}{Style.RESET_ALL}")
-        click.echo(f"   {Style.DIM}Recorrência: {r['occurrence_count']} hits | ID: {r['finding_hash'][:12]}")
+        click.echo(f"   {Style.DIM}Recorrência: {r['occurrence_count']} hits | ID: {f_hash[:12]}")
+#        click.echo(f"   {Style.DIM}Recorrência: {r['occurrence_count']} hits | ID: {r['finding_hash'][:12]}")
         
         if r['snippet_fixed']:
             click.echo(f"   {Fore.GREEN}🛠  SOLUÇÃO APLICADA: {Fore.WHITE}{r['snippet_fixed']}")

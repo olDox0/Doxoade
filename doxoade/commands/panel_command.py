@@ -19,6 +19,7 @@ import importlib.util
 import subprocess
 import sys
 import time
+
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -104,7 +105,11 @@ def _check_help(command_name: str) -> tuple[bool, str]:
         
         result = subprocess.run(
             full_args,
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, 
+            text=True, 
+            timeout=10,
+            encoding='utf-8',       # <-- Adicione isso
+            errors='replace'        # <-- Adicione isso
         )
         if result.returncode == 0:
             return True, ''

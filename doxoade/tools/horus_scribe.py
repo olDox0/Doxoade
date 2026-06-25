@@ -13,6 +13,7 @@ HORUS_FORBIDDEN = {
     'doxoade.tools.horus',
     'doxoade.tools.doxcolors',
     'doxoade.tools.aegis.aegis_utils',
+    'doxoade.tools.aegis.aegis_core',
     'doxoade.rescue',
     'doxoade.tools.vulcan.shadow_runtime',
     'doxoade.tools.aegis.shadow_scribe',
@@ -74,23 +75,20 @@ class HorusLoader(importlib.abc.Loader):
             print(f"\x1b[31m [!] Falha Crítica no Horus Scribe ({module.__name__}): {e}\x1b[0m")
 
 class HorusFinder(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path, target=None):
-        if fullname in HORUS_FORBIDDEN:
-            return None
-        if not (fullname.startswith("doxoade.commands") or fullname.startswith("doxoade.tools")):
-            return None
-        if any(x in fullname for x in ["telemetry", "logger", "horus", "scribe"]):
-            return None
-        for finder in sys.meta_path:
-            if finder is self: continue
-            try:
-                spec = finder.find_spec(fullname, path, target)
-                if spec and spec.origin:
-                    spec.loader = HorusLoader(spec) # Injeta o loader estrutural do Hórus
-                    return spec
-            except Exception:
-                pass
-        return None
+    def find_spec(self, fullname, path, target=None):s
+    if fullname in HORUS_FORBIDDEN or "aegis_core" in fullname: return None
+    if not (fullname.startswith("doxoade.commands") or fullname.startswith("doxoade.tools")): return None
+    if any(x in fullname for x in ["telemetry", "logger", "horus", "scribe"]): return None
+    for finder in sys.meta_path:
+        if finder is self: continue
+        try:
+            spec = finder.find_spec(fullname, path, target)
+            if spec and spec.origin:
+                spec.loader = HorusLoader(spec) # Injeta o loader estrutural do Hórus
+                return spec
+        except Exception:
+            pass
+    return None
 
 def activate_horus_shadow():
     if not any(isinstance(f, HorusFinder) for f in sys.meta_path):

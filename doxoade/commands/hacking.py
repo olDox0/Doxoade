@@ -11,6 +11,7 @@ from doxoade.tools.aegis.aegis_utils import calculate_integrity_hash
 from doxoade.tools.aegis.aegis_utils import simulate_taint_analysis
 from doxoade.tools.aegis.aegis_utils import generate_exploit_poc
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
+from doxoade.tools.alexandria.engine import alexandria_write
 __all__ = ['hack']
 
 @group('hack')
@@ -22,7 +23,7 @@ def hack():
 @pass_context
 def baseline(ctx):
     """Generates and stores the Core Integrity Signature (The Truth)."""
-    from doxoade.database import get_db_connection
+    from doxoade.core_database import get_db_connection
     core_path = Path(__file__).parent.parent
     if not core_path.exists():
         raise RuntimeError('Core path missing.')
@@ -31,8 +32,8 @@ def baseline(ctx):
         h = calculate_integrity_hash(core_path)
         try:
             conn = get_db_connection()
-            conn.execute('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)')
-            conn.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ('core_integrity_hash', h))
+            alexandria_write('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)')
+            alexandria_write('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ('core_integrity_hash', h))
             conn.commit()
             conn.close()
             echo(f'{Fore.GREEN}✔ Baseline Gold established: {Fore.YELLOW}{h[:16]}...')
@@ -42,7 +43,7 @@ def baseline(ctx):
 @hack.command('verify')
 def verify():
     """Detects if Doxoade source code has been tampered with."""
-    from doxoade.database import get_db_connection
+    from doxoade.core_database import get_db_connection
     import sys
     core_path = Path(__file__).parent.parent
     if not core_path.is_dir():

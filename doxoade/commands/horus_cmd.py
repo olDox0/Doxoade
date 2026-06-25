@@ -2,8 +2,9 @@
 import click
 # [DOX-UNUSED] import json
 from doxoade.tools.doxcolors import Fore, Style
-from doxoade.database import get_db_connection
+from doxoade.core_database import get_db_connection
 
+from doxoade.tools.alexandria.engine import alexandria_write
 @click.group('horus')
 def horus_group():
     """👁️  Hórus: Sistema de Observabilidade de Incepção (Black Box)."""
@@ -11,7 +12,7 @@ def horus_group():
 
 def run_horus_view_logic(limit=100, full=False, focus=None):
     """Lógica de visualização NSR pura, invocável por outros sistemas."""
-    from doxoade.database import get_db_connection
+    from doxoade.core_database import get_db_connection
     import json
     
     conn = get_db_connection()
@@ -80,7 +81,7 @@ def horus_view(limit, full, focus):
 def horus_purge():
     """Limpa o registro tático (HORUS, SHADOW e AEGIS)."""
     conn = get_db_connection()
-    conn.execute("DELETE FROM operational_logs WHERE subsystem IN ('HORUS', 'SHADOW', 'AEGIS', 'DIAG')")
+    alexandria_write("DELETE FROM operational_logs WHERE subsystem IN ('HORUS', 'SHADOW', 'AEGIS', 'DIAG')")
     conn.commit()
     conn.close()
     click.secho("[OK] Memória operacional do Nexus purificada.", fg='green')
@@ -129,7 +130,7 @@ def horus_run(cmd_args):
 @horus_group.command('db')
 def horus_db():
     """Analisa a saúde e latência do subsistema de dados Hades."""
-    from doxoade.database import get_db_stats
+    from doxoade.core_database import get_db_stats
     try:
         stats = get_db_stats()
         

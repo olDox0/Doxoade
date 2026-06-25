@@ -7,6 +7,7 @@ import re
 from datetime import datetime, timezone
 from doxoade.tools.doxcolors import Fore
 
+from doxoade.tools.alexandria.engine import alexandria_write
 class LearningEngine:
 
     def __init__(self, cursor):
@@ -82,10 +83,10 @@ class LearningEngine:
             existing = self.cursor.fetchone()
             if existing:
                 new_conf = existing['confidence'] + 1
-                self.cursor.execute('UPDATE solution_templates SET confidence = ? WHERE id = ?', (new_conf, existing['id']))
+                alexandria_write('UPDATE solution_templates SET confidence = ? WHERE id = ?', (new_conf, existing['id']))
                 print(f"{Fore.CYAN}   > [GÊNESE] Template '{pattern}' reforçado (Conf: {new_conf})")
             else:
-                self.cursor.execute('INSERT INTO solution_templates (problem_pattern, solution_template, category, created_at, confidence) VALUES (?, ?, ?, ?, 1)', (pattern, template, category, datetime.now(timezone.utc).isoformat()))
+                alexandria_write('INSERT INTO solution_templates (problem_pattern, solution_template, category, created_at, confidence) VALUES (?, ?, ?, ?, 1)', (pattern, template, category, datetime.now(timezone.utc).isoformat()))
                 print(f"{Fore.CYAN}   > [GÊNESE] Novo template (HARDCODED): '{pattern}'")
             return True
         except Exception:

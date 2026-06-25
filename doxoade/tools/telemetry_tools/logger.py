@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 # doxoade/tools/telemetry_tools/logger.py
+from doxoade.tools.alexandria.engine import alexandria_write
 import time
 import os
 import sys
@@ -10,10 +11,13 @@ import inspect
 from datetime import datetime
 
 _CHIEF_CONN = None
+_HEARTBEAT_LOCK = False
 
 def chief_heartbeat(subsystem: str, action: str, details: dict):
     """Registra batimentos cardíacos com vazão otimizada para NSR."""
-    global _CHIEF_CONN
+    global _HEARTBEAT_LOCK, _CHIEF_CONN
+    if _HEARTBEAT_LOCK: return
+    _HEARTBEAT_LOCK = True
     try:
         # 1. Triangulação Híbrida (VULCAN/SHADOW INVOCATION)
         if (subsystem in ["VULCAN", "SHADOW"]) and ("IN" in action or "ENTER" in action):
@@ -33,10 +37,10 @@ def chief_heartbeat(subsystem: str, action: str, details: dict):
 
         # 2. Singleton de Conexão (PASC 6.4 - Performance Pura)
         if _CHIEF_CONN is None:
-            from doxoade.database import get_db_connection
+            from doxoade.core_database import get_db_connection
             _CHIEF_CONN = get_db_connection()
 
-        _CHIEF_CONN.execute('''
+        alexandria_write('''
             INSERT INTO operational_logs (timestamp, subsystem, action, data, pid)
             VALUES (?, ?, ?, ?, ?)
         ''', (datetime.now().isoformat(), subsystem.upper(), action.upper(), 
@@ -45,18 +49,20 @@ def chief_heartbeat(subsystem: str, action: str, details: dict):
         # 3. Auto-Pruning Controlado
         # Executa a limpeza apenas em 5% das chamadas para economizar CPU
         if os.getpid() % 20 == 0: 
-            _CHIEF_CONN.execute('''
+            alexandria_write('''
                 DELETE FROM operational_logs 
                 WHERE id NOT IN (SELECT id FROM operational_logs ORDER BY id DESC LIMIT 2000)
             ''')
         
-        _CHIEF_CONN.commit()
+        # _CHIEF_CONN.commit() delegado ao Alexandria
 
     except Exception as e:
         _CHIEF_CONN = None # Força reconexão na próxima tentativa
         if os.environ.get('VULCAN_VERBOSE') == '1':
             print(f"\x1b[33m [LOG-FAIL] {subsystem}:{action} -> {e}\x1b[0m")
-
+    finally:
+        _HEARTBEAT_LOCK = False
+        
 class ExecutionLogger:
     def __init__(self, command_name, path, arguments):
         self.command_name = command_name
@@ -97,6 +103,7 @@ class ExecutionLogger:
     def __exit__(self, exc_type, exc_val, exc_tb):
         import json
         import zlib
+        import click
         import traceback
         from doxoade.rescue import activate_protocol
         
@@ -113,10 +120,11 @@ class ExecutionLogger:
         if os.environ.get('DOXOADE_RESCUE') == '0':
             return # Deixa o Python imprimir o traceback normal no console
             
-        if exc_type is not None and not issubclass(exc_type, (SystemExit, KeyboardInterrupt)):
-            # Só chama o Lazarus se o resgate estiver ATIVO (padrão)
-            error_data = "".join(traceback.format_exception(exc_type, exc_val, exc_tb))
-            activate_protocol(error_data, exit_code=exit_code)
+        if exc_type is not None and (not issubclass(exc_type, (SystemExit, KeyboardInterrupt))):
+            if not issubclass(exc_type, (click.exceptions.Exit, click.exceptions.Abort)):
+                error_data = ''.join(traceback.format_exception(exc_type, exc_val, exc_tb))
+                from doxoade.rescue import activate_protocol
+                activate_protocol(error_data, exit_code=exit_code)
 
         # --- GERAÇÃO DE PAYLOAD CHIEF-GOLD ---
         compressed_payload = None
@@ -149,5 +157,3 @@ class ExecutionLogger:
             color = Fore.GREEN if exit_code == 0 else Fore.RED
             label = "✔ Sucesso" if exit_code == 0 else "✘ Falha"
             click.echo(f'{color}{Style.DIM}[{self.command_name}] {label} em {duration:.3f}s{Style.RESET_ALL}')
-            
-            

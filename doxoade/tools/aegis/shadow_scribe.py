@@ -79,9 +79,10 @@ class NexusShadowScribe(ast.NodeTransformer):
                 pass
             except Exception as _dox_err:
                 _dox_status = 'CRASHED'
-                import traceback as _tb
-                from doxoade.rescue import activate_protocol as _ap
-                _ap(_tb.format_exc(), context=locals())
+                if type(_dox_err).__name__ not in ('Exit', 'Abort'):
+                    import traceback as _tb
+                    from doxoade.rescue import activate_protocol as _ap
+                    _ap(_tb.format_exc(), context=locals())
                 raise _dox_err
             finally:
                 if not _dox_logged_exit:

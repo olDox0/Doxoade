@@ -85,7 +85,7 @@ def get_code_context(filepath: str, linenum: int, context_lines: int = 2) -> Opt
 def _find_remedy_in_lexicon(error_msg):
     """Busca no acervo tático um remédio para o erro atual."""
     try:
-        from doxoade.database import get_db_connection
+        from doxoade.core_database import get_db_connection
         conn = get_db_connection()
         # Busca semântica simples: o erro atual contém o padrão do acervo?
         query = "SELECT snippet_fixed FROM knowledge_lexicon WHERE ? LIKE '%' || message || '%'"
@@ -95,7 +95,7 @@ def _find_remedy_in_lexicon(error_msg):
     except Exception as e:
         import sys as _dox_sys, os as _dox_os
         from traceback import print_tb as exc_trace
-        exc_obj, exc_tb = _dox_sys.exc_info()
+        exc_type, exc_obj, exc_tb = _dox_sys.exc_info()
         f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         line_n = exc_tb.tb_lineno
         exc_trace(exc_tb)
@@ -413,7 +413,7 @@ def activate_protocol(error_text: str, exit_code: int = None, **kwargs): # <-- A
                         print('\n' + Fore.RED+Style.BRIGHT + '_' * 110 + RST)
                         print(f"\n  {Fore.RED+Style.BRIGHT}■ [PIPELINE PROBE] Hades Engine:{RST}\n")
                         try:
-                            from doxoade.database import get_db_connection
+                            from doxoade.core_database import get_db_connection
                             import json
                             conn = get_db_connection()
                             rows = conn.execute('SELECT timestamp, subsystem, action, data FROM operational_logs ORDER BY id DESC LIMIT 12').fetchall()

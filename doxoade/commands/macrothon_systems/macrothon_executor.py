@@ -2,7 +2,7 @@
 # doxoade/commands/macrothon_systems/macrothon_executor.py
 import os, re, time, click, shutil, asyncio, inspect, builtins, importlib.util
 from pathlib import Path
-from doxoade.database import get_db_connection
+from doxoade.core_database import get_db_connection
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger, chief_heartbeat
@@ -48,11 +48,14 @@ class MacrothonRuntime:
                 ln = ln.split('#')[0].strip()
                 if not ln: continue
                 if ln.startswith(("import ", "from ")):
-                    try: restricted_safe_exec(ln, self.context)
+                    try: 
+                        # Adicionamos allow_imports=True para o Aegis liberar os Bricks
+                        restricted_safe_exec(ln, self.context, allow_imports=True)
                     except Exception as e:
                         import sys as _dox_sys, os as _dox_os
                         from traceback import print_tb as exc_trace
-                        exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
+                        # CORRIGIDO: sys.exc_info() retorna 3 valores (type, obj, tb)
+                        exc_type, exc_obj, exc_tb = _dox_sys.exc_info() 
                         f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
                         line_n = exc_tb.tb_lineno
                         exc_trace(exc_tb)
@@ -94,6 +97,10 @@ class MacrothonRuntime:
         old_cwd = os.getcwd()
         os.chdir(abs_root)
 
+        import sys
+        if abs_root not in sys.path:
+            sys.path.insert(0, abs_root)
+
         blueprint_file = Path(f"{self.house_path.name.replace('_house', '')}.macrothon")
         if not blueprint_file.exists(): blueprint_file = Path("main.macrothon")
         
@@ -105,7 +112,17 @@ class MacrothonRuntime:
 
         if translator.orphaned_blocks:
             from doxoade.rescue import activate_protocol
-            activate_protocol(f"MacrothonArchitectureError: Bloco '{translator.orphaned_blocks[0][0]}' sem IMPORT.")
+            
+            # Cria um laudo técnico detalhado
+            report = [f"{Fore.RED}✘ [ERRO DE ARQUITETURA MACROTHON]{Style.RESET_ALL}"]
+            for name, line in translator.orphaned_blocks:
+                report.append(f"  • Bloco '{Fore.YELLOW}{name}:{Fore.RESET}' na linha {line} não possui vínculo.")
+            
+            report.append(f"\n{Fore.CYAN}💡 SOLUÇÃO:{Style.RESET_ALL}")
+            report.append("  1. Verifique se o nome está correto (Case-Sensitive).")
+            report.append("  2. Certifique-se de que o Brick está no bloco IMPORT { ... }.")
+            
+            activate_protocol("\n".join(report))
             return
 
         self._check_metalcraft_sync()
@@ -137,3 +154,40 @@ class MacrothonRuntime:
                 cmd = f"gcc -shared -O3 -o \"{bin_p}\" \"{src}\""
                 res = __import__('subprocess').run(cmd, shell=True, capture_output=True, text=True)
                 if res.returncode != 0: click.secho(f"      ✘ Falha: {res.stderr}", fg="red")
+                
+    def exec_module(self, module):
+        # Aegis Core deve rodar puro para evitar loops de recursão
+        from doxoade.tools.aegis.aegis_core import nexus_exec
+        origin = self.spec.origin
+        
+        if not origin or not os.path.exists(origin): return
+
+        # Se for um módulo de infraestrutura sensível, executa sem vacina
+        if module.__name__ in HORUS_FORBIDDEN or "aegis" in module.__name__:
+            with open(origin, 'r', encoding='utf-8', errors='ignore') as f:
+                nexus_exec(f.read(), module.__dict__)
+            return
+
+        try:
+            with open(origin, 'r', encoding='utf-8', errors='ignore') as f:
+                source = f.read()
+            
+            # Injeta a identidade e o batimento cardíaco
+            from doxoade.tools.telemetry_tools.logger import chief_heartbeat
+            module.__dict__['chief_heartbeat'] = chief_heartbeat
+            module.__dict__['__file__'] = origin
+
+            try:
+                tree = ast.parse(source)
+                from doxoade.tools.vulcan.shadow_scribe import NexusShadowScribe
+                vax = NexusShadowScribe(os.path.basename(origin))
+                vax.visit(tree)
+                ast.fix_missing_locations(tree)
+                code = compile(tree, origin, 'exec')
+                nexus_exec(code, module.__dict__)
+            except Exception:
+                # Fallback: Se a vacinação falhar, roda o código puro
+                nexus_exec(source, module.__dict__)
+        except Exception as e:
+            # Reporta erro de infraestrutura se o arquivo for ilegível
+            print(f"\x1b[33m [!] Horus Scribe Bypass ({module.__name__}): {e}\x1b[0m")

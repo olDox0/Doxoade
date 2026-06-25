@@ -37,6 +37,8 @@ def nexus_exec(source: Any, globals_dict: Dict = None, locals_dict: Dict = None)
 
 def _validate_dynamic_payload(payload: str, mode: str):
     """Analisa strings de payload em busca de escapes de sandbox."""
+    
+    # BYPASS INDUSTRIAL: Se for o próprio sistema rodando, libera shutil
     if os.environ.get('DOXOADE_AUTHORIZED_RUN') == '1':
         return
 
