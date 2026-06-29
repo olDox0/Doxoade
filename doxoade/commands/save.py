@@ -201,8 +201,8 @@ def save(ctx, message, archives, remove_commit, branch_target, merge_target, upd
         console.print('[bold green]✔ Conhecimento sepultado com sucesso.[/bold green]')
         
         new_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True)
-        if new_hash and new_hash != pre_hash:
-            _learn_solutions_from_commit(new_hash, project_path)
+#        if new_hash and new_hash != pre_hash:
+#            _learn_solutions_from_commit(new_hash, project_path)
         if final_merge_target:
             _auto_merge_local(current_branch, final_merge_target, merge_message=message, force=force)
 

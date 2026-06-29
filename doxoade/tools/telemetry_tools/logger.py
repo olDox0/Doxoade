@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # doxoade/tools/telemetry_tools/logger.py
-from doxoade.tools.alexandria.engine import alexandria_write
+
 import time
 import os
 import sys
@@ -8,22 +8,49 @@ import json
 import click
 import hashlib
 import inspect
+from threading import RLock
 from datetime import datetime
+from doxoade.tools.alexandria.engine import alexandria_write
 
 _CHIEF_CONN = None
-_HEARTBEAT_LOCK = False
+_HEARTBEAT_LOCK = RLock()
+#_HEARTBEAT_LOCK = False
+_HEARTBEAT_CACHE = {}
+_LOG_BUFFER = []
+_LAST_FLUSH_TIME = time.monotonic()
+BUFFER_SIZE_LIMIT = 50   # Descarrega ao acumular 50 logs
+BUFFER_TIME_LIMIT = 2.0  # Ou a cada 2 segundos no máximo
+THROTTLE_INTERVAL = 2.0
 
 def chief_heartbeat(subsystem: str, action: str, details: dict):
-    """Registra batimentos cardíacos com vazão otimizada para NSR."""
-    global _HEARTBEAT_LOCK, _CHIEF_CONN
-    if _HEARTBEAT_LOCK: return
-    _HEARTBEAT_LOCK = True
+    """Registra batimentos cardíacos com vazão otimizada via Throttling por Hash."""
+    from doxoade.tools.alexandria.engine import alexandria_write
+
+    global _CHIEF_CONN, _HEARTBEAT_CACHE
+
+    # Tenta adquirir o lock — se outro thread já está gravando, descarta este log
+    if not _HEARTBEAT_LOCK.acquire(blocking=False):
+        return
+
     try:
+        now_time = time.monotonic()
+        subsystem_upper = subsystem.upper()
+        action_upper = action.upper()
+
+        # --- FILTRAGEM DE ALTA VAZÃO (COMPLIANCE PASC 6.4) ---
+        cache_key = f"{subsystem_upper}:{action_upper}"
+        if cache_key in _HEARTBEAT_CACHE:
+            last_logged, last_details_hash = _HEARTBEAT_CACHE[cache_key]
+            if (now_time - last_logged) < THROTTLE_INTERVAL:
+                current_details_str = str(details.get('caller_context', '')) + str(details.get('category', ''))
+                current_hash = hashlib.md5(current_details_str.encode('utf-8', 'ignore')).hexdigest()
+                if current_hash == last_details_hash:
+                    return
+
         # 1. Triangulação Híbrida (VULCAN/SHADOW INVOCATION)
-        if (subsystem in ["VULCAN", "SHADOW"]) and ("IN" in action or "ENTER" in action):
+        if (subsystem_upper in ["VULCAN", "SHADOW"]) and ("IN" in action_upper or "ENTER" in action_upper):
             frame = inspect.currentframe()
             try:
-                # Sobe níveis para ignorar o rastro do próprio NSR/Logger
                 caller = frame.f_back.f_back.f_back
                 if caller:
                     details['caller_context'] = {
@@ -35,33 +62,33 @@ def chief_heartbeat(subsystem: str, action: str, details: dict):
                 import logging as _dox_log
                 _dox_log.error(f"[INFRA] chief_heartbeat: {e}")
 
-        # 2. Singleton de Conexão (PASC 6.4 - Performance Pura)
+        # Atualiza cache
+        details_str = str(details.get('caller_context', '')) + str(details.get('category', ''))
+        details_hash = hashlib.md5(details_str.encode('utf-8', 'ignore')).hexdigest()
+        _HEARTBEAT_CACHE[cache_key] = (now_time, details_hash)
+
+        # 2. Singleton de Conexão
         if _CHIEF_CONN is None:
             from doxoade.core_database import get_db_connection
             _CHIEF_CONN = get_db_connection()
 
-        alexandria_write('''
-            INSERT INTO operational_logs (timestamp, subsystem, action, data, pid)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (datetime.now().isoformat(), subsystem.upper(), action.upper(), 
-              json.dumps(details, ensure_ascii=False), os.getpid()))
+        alexandria_write(
+            'INSERT INTO operational_logs (timestamp, subsystem, action, data, pid) VALUES (?, ?, ?, ?, ?)',
+            (datetime.now().isoformat(), subsystem_upper, action_upper,
+             json.dumps(details, ensure_ascii=False), os.getpid())
+        )
 
-        # 3. Auto-Pruning Controlado
-        # Executa a limpeza apenas em 5% das chamadas para economizar CPU
-        if os.getpid() % 20 == 0: 
-            alexandria_write('''
-                DELETE FROM operational_logs 
-                WHERE id NOT IN (SELECT id FROM operational_logs ORDER BY id DESC LIMIT 2000)
-            ''')
-        
-        # _CHIEF_CONN.commit() delegado ao Alexandria
+        if os.getpid() % 100 == 0:
+            alexandria_write(
+                'DELETE FROM operational_logs WHERE id NOT IN (SELECT id FROM operational_logs ORDER BY id DESC LIMIT 2000)'
+            )
 
     except Exception as e:
-        _CHIEF_CONN = None # Força reconexão na próxima tentativa
+        _CHIEF_CONN = None
         if os.environ.get('VULCAN_VERBOSE') == '1':
             print(f"\x1b[33m [LOG-FAIL] {subsystem}:{action} -> {e}\x1b[0m")
     finally:
-        _HEARTBEAT_LOCK = False
+        _HEARTBEAT_LOCK.release()
         
 class ExecutionLogger:
     def __init__(self, command_name, path, arguments):

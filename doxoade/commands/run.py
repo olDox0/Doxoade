@@ -32,8 +32,10 @@ def run(ctx, script, args, shadow, **kwargs):
     
     if shadow:
         click.secho("🛡️  [AEGIS] Shadow Runtime Ativado. Vacinação em progresso...", fg='cyan', bold=True)
-        from doxoade.tools.vulcan.shadow_loader import ShadowFinder
-        sys.meta_path.insert(0, ShadowFinder())
+#        from doxoade.tools.vulcan.shadow_loader import ShadowFinder
+#        sys.meta_path.insert(0, ShadowFinder())
+        from doxoade.tools.vulcan.shadow_runtime import ShadowFinder
+        sys.meta_path.insert(0, ShadowFinder(os.getcwd()))
     
     if kwargs.get('no_rescue'):
         os.environ['DOXOADE_RESCUE'] = '0'
@@ -64,20 +66,22 @@ def run(ctx, script, args, shadow, **kwargs):
         try:
             validate_execution_context(abs_path, kwargs.get('test_mode', False))
             os.environ['DOXOADE_AUTHORIZED_RUN'] = '1'
-
-            # 2. Tenta execução como C/C++ (Warden aplicado internamente no subprocesso)
-            if maybe_run_c_lang(abs_path, limits=limits, flow=kwargs.get('flow'), extra_args=list(args)):
-                return
-
-            # 3. Se houver flags de flow para Python
-            if any([kwargs.get('flow'), kwargs.get('flow_val'), kwargs.get('flow_import'), kwargs.get('flow_func'), sniper_target]):
-                execute_flow(script, **kwargs)
-                # Nota: O flow runner Python atualmente ignora limites de recursos nativos
-                return
-
-            # 4. Execução Híbrida padrão (Python/Vulcan)
-            _execute_hybrid_engine(abs_path, not kwargs.get('no_vulcan'), limits)
-
+            
+            # Mascara o sys.argv global para evitar recursões acidentais no CLI
+            old_argv = sys.argv.copy()
+            sys.argv = [abs_path] + list(args)
+            
+            try:
+                if maybe_run_c_lang(abs_path, limits=limits, flow=kwargs.get('flow'), extra_args=list(args)):
+                    return
+                if any([kwargs.get('flow'), kwargs.get('flow_val'), kwargs.get('flow_import'), kwargs.get('flow_func'), sniper_target]):
+                    execute_flow(script, **kwargs)
+                    return
+                _execute_hybrid_engine(abs_path, not kwargs.get('no_vulcan'), limits)
+            finally:
+                # Restaura os argumentos originais do Doxoade ao terminar
+                sys.argv = old_argv
+                
         except SystemExit as e:
             # Captura o código real (0, 1, ou NTSTATUS)
             code = e.code if isinstance(e.code, int) else 1 if e.code else 0
@@ -104,7 +108,14 @@ def _execute_hybrid_engine(script_path: str, use_vulcan: bool, limits: dict):
     abs_path = os.path.abspath(script_path)
     label = 'HYBRID' if use_vulcan else 'PYTHON'
     color = Fore.CYAN if use_vulcan else Fore.WHITE
-    globs = {'__name__': '__main__', '__file__': abs_path}
+    
+    # Correção: Injeção dos escopos globais nativos para permitir carregamento de módulos aninhados
+    globs = {
+        '__name__': '__main__', 
+        '__file__': abs_path,
+        '__package__': None,
+        '__builtins__': __builtins__
+    }
     
     if use_vulcan:
         from .run_systems.run_vulcan import apply_vulcan_turbo

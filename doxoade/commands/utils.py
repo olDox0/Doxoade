@@ -133,11 +133,11 @@ def show_trace(ctx, filepath):
 @click.argument('items', nargs=-1)
 @click.option('--path', '-p', 'base_path', default='.', type=click.Path(exists=True))
 @click.option('--tree', '-t', is_flag=True)
-@register_mk_options  # Deixe que o decorator cuide do -a, -l e --up
-def mk(base_path, items, architecture, learning, tree, up): # Adicione 'learning' e 'up' aqui
+@register_mk_options
+def mk(base_path, items, architecture, learning, tree, up):
     """🔨 Construtor de Topologia e Visualizador Nexus."""
     from .mk_systems.mk_commands import execute_mk_logic
-    execute_mk_logic(base_path, items, architecture, tree, up)
+    execute_mk_logic(base_path, items, architecture, learning, tree, up)  # <-- learning added
 
 @click.command('create-pipeline')
 @click.pass_context

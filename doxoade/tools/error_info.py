@@ -8,6 +8,9 @@ handle_error(e, context="NomeDaFuncaoOndeEstaOErro", debug=True)
 except Exception as e:
     from doxoade.tools.error_info import handle_error
     handle_error(e, context="Clone Detection JSON Parse", debug=True)
+
+from doxoade.tools.error_info.py import formated_traceback
+format_traceback(e, "Encoding Reconfiguration")
 """
 
 def handle_error(err: Exception, context: str='', silent: bool=False, debug: bool=False):
@@ -88,3 +91,19 @@ def print_forensic_exception():
     print("\x1b[90m--- CADEIA DE EVENTOS ---")
     print_tb(exc_tb)
     print("-------------------------\x1b[0m")
+    
+def formated_traceback(e, title="Error"):
+    import sys as _sys, os as _os
+    from traceback import print_tb as _print_tb
+    
+    _, exc_obj, exc_tb = _sys.exc_info()
+    fname = _os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+    line_no = exc_tb.tb_lineno
+    exc_val = str(exc_obj).replace("'", "")
+    
+    print(f"\033[31m ■ {title}")
+    print(f" ■ Archive: {fname} - line: {line_no}")
+    print(f" ■ Exception type: {type(e).__name__}")
+    print(f" ■ Exception value: {exc_val}\033[0m")
+    _print_tb(exc_tb)
+    

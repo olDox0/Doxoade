@@ -7,6 +7,11 @@ import importlib.util
 
 HORUS_FORBIDDEN = {
     'doxoade.tools.telemetry_tools.logger',
+    'doxoade.tools.telemetry_tools',        # ← adicionar o pacote inteiro
+    'doxoade.tools.alexandria',              # ← adicionar
+    'doxoade.tools.alexandria.engine',       # ← adicionar
+    'doxoade.tools.filesystem',
+    'doxoade.tools.analysis',
     'doxoade.database',
     'doxoade.tools.aegis.nexus_db',
     'doxoade.tools.horus_scribe',
@@ -17,7 +22,9 @@ HORUS_FORBIDDEN = {
     'doxoade.rescue',
     'doxoade.tools.vulcan.shadow_runtime',
     'doxoade.tools.aegis.shadow_scribe',
-    'doxoade.tools.vulcan.shadow_scribe'
+    'doxoade.tools.vulcan.shadow_scribe',
+    'doxoade.tools.vulcan.opt_cache',        # ← adicionar — já causou erro no log
+    'doxoade.tools.command_metadata',        # ← adicionar — falhou por cascata
 }
 
 class HorusLoader(importlib.abc.Loader):
@@ -40,7 +47,7 @@ class HorusLoader(importlib.abc.Loader):
         if self.fullname in HORUS_FORBIDDEN or "aegis_utils" in self.fullname:
             with open(origin, 'r', encoding='utf-8', errors='ignore') as f:
                 source_code = f.read()
-                nexus_exec(f.read(), module.__dict__)
+            nexus_exec(source_code, module.__dict__)
             return
             
         try:
@@ -75,21 +82,43 @@ class HorusLoader(importlib.abc.Loader):
             print(f"\x1b[31m [!] Falha Crítica no Horus Scribe ({module.__name__}): {e}\x1b[0m")
 
 class HorusFinder(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path, target=None):s
-    if fullname in HORUS_FORBIDDEN or "aegis_core" in fullname: return None
-    if not (fullname.startswith("doxoade.commands") or fullname.startswith("doxoade.tools")): return None
-    if any(x in fullname for x in ["telemetry", "logger", "horus", "scribe"]): return None
-    for finder in sys.meta_path:
-        if finder is self: continue
-        try:
-            spec = finder.find_spec(fullname, path, target)
-            if spec and spec.origin:
-                spec.loader = HorusLoader(spec) # Injeta o loader estrutural do Hórus
-                return spec
-        except Exception:
-            pass
-    return None
+    def find_spec(self, fullname, path, target=None):
+        if fullname in HORUS_FORBIDDEN or "aegis_core" in fullname:
+            return None
+        _INFRA_PREFIXES = (
+            'doxoade.tools.telemetry_tools',
+            'doxoade.tools.alexandria',
+            'doxoade.tools.vulcan',
+            'doxoade.tools.aegis',
+            'doxoade.database',
+            'doxoade.rescue',
+        )
+        if any(fullname.startswith(p) for p in _INFRA_PREFIXES):
+            return None
+        if not (fullname.startswith("doxoade.commands") or fullname.startswith("doxoade.tools")):
+            return None
+        if any(x in fullname for x in ["telemetry", "logger", "horus", "scribe"]):
+            return None
+        for finder in sys.meta_path:
+            if finder is self:
+                continue
+            # Não sobrescreve specs do Vulcan — preserva o pipeline de 3 camadas
+            if getattr(finder, '_VULCAN_FINDER_MARKER', False) or "VulcanMetaFinder" in type(finder).__name__:
+                continue
+            try:
+                spec = finder.find_spec(fullname, path, target)
+                if spec and spec.origin:
+                    spec.loader = HorusLoader(spec)
+                    return spec
+            except Exception:
+                pass
+        return None
 
 def activate_horus_shadow():
     if not any(isinstance(f, HorusFinder) for f in sys.meta_path):
-        sys.meta_path.insert(0, HorusFinder())
+        # Insere após VulcanMetaFinder e ShadowFinder
+        insert_pos = 0
+        for i, f in enumerate(sys.meta_path):
+            if "VulcanMetaFinder" in type(f).__name__ or "ShadowFinder" in type(f).__name__:
+                insert_pos = i + 1
+        sys.meta_path.insert(insert_pos, HorusFinder())

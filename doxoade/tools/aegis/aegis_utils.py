@@ -41,7 +41,7 @@ def calculate_integrity_hash(root_path: Path) -> str:
             import sys as exc_sys
             from traceback import print_tb as exc_trace
             _, exc_obj, exc_tb = exc_sys.exc_info()
-            print(f'\x1b[31m ■ Exception type: {e} ■ Exception value: {exc_obj}\x1b[0\n')
+            print(f'\x1b[31m ■ Exception type: {e} ■ Exception value: {exc_obj}\x1b[0m\n')
             exc_trace(exc_tb)
             continue
     return hasher.hexdigest()

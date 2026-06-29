@@ -132,7 +132,9 @@ def _forge_to_pyx(task: dict) -> dict:
     abs_path = file_path.resolve()
     
     # 1. Gerador de Assinatura Única
-    path_hash = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
+    content_hash = abs_path.read_text(encoding='utf-8', errors='ignore').replace('\r\n', '\n')
+    path_hash = hashlib.sha256(content_hash.encode('utf-8')).hexdigest()[:6]
+#    path_hash = hashlib.sha256(str(abs_path).encode()).hexdigest()[:6]
     _safe_stem = re.sub('[^a-zA-Z0-9_]', '_', abs_path.stem)
     module_name = f'v_{_safe_stem}_{path_hash}'
     pyx_path = foundry / f'{module_name}.pyx'

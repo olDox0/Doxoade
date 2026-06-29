@@ -1,7 +1,7 @@
 # pyproject.toml
 [project]
 name = "doxoade"
-version = "75.0"
+version = "580.0"
 description = "olDox222 Advanced Development Environment - Chief Gold Edition"
 requires-python = ">=3.11"
 dependencies = [

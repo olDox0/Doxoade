@@ -10,3 +10,5 @@ def generate_vulcan_module(path: str):
         return False
     target.write_text(VULCAN_STUB, encoding='utf-8')
     return True
+
+# APAGUE QUALQUER COISA ABAIXO DISSO AQUI!

@@ -12,7 +12,7 @@ MOV_KEY = 0
 
 class MkEngine:
     """Motor de Construção de Topologia (Nexus Edition)."""
-    MOVE_BLACKLIST = ['__init__.py', '.gitignore', 'pyproject.toml', 'README.md', 'LICENSE']
+    MOVE_BLACKLIST = ['__init__.py', '__main__.py', '.gitignore', 'pyproject.toml', 'README.md', 'LICENSE', 'main.py']
 
     def __init__(self, base_path='.'):
         self.base_path = os.path.abspath(base_path)
@@ -21,20 +21,16 @@ class MkEngine:
         self.affected_files = []
 
     def _create_init_py(self, directory_path):
-        """Cria um __init__.py vazio se não existir, subindo até a base."""
-        # Não cria se estiver fora do base_path (segurança)
         if not directory_path.startswith(self.base_path):
             return
-
         current = directory_path
-        # Sobe criando __init__.py até chegar na base do projeto
         while current and current != self.base_path and len(current) > len(self.base_path):
             init_file = os.path.join(current, '__init__.py')
             if not os.path.exists(init_file):
-                # Se for um projeto C (como o seu), talvez não queira __init__.py
-                # Mas como você solicitou a automação:
                 with open(init_file, 'w', encoding='utf-8') as f:
                     f.write('')
+                if init_file not in self.affected_files:          # <-- linha nova
+                    self.affected_files.append(init_file)         # <-- linha nova
             current = os.path.dirname(current)
 
     def _process_single_item(self, indent, raw_name):
@@ -51,9 +47,9 @@ class MkEngine:
 
         if is_directory(name):
             os.makedirs(full_path, exist_ok=True)
-            self._create_init_py(full_path) # Agora garante na pasta e acima
+            self._create_init_py(full_path)
             self.stack.append((indent, full_path))
-            return (full_path, 'Diretório')
+            return (full_path, 'Diretório')   # <-- NÃO adiciona a affected_files, OK
         else:
             # Para arquivos:
             parent_dir = os.path.dirname(full_path)

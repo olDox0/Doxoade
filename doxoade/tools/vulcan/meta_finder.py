@@ -19,14 +19,17 @@ import hashlib
 import ctypes
 from pathlib import Path
 from doxoade.tools.vulcan.vulcan_safe_loader import SafeExtensionLoader
+
 GENERIC_NAMES = {'core', 'common', 'base', 'helpers', 'config'}
+_VULCAN_FINDER_INSTANCE = None
 
 def is_binary_candidate(fullname: str, pyd_path: Path) -> bool:
     basename = fullname.rsplit('.', 1)[-1]
+    safe_full = fullname.replace('.', '__')
     stem_base = pyd_path.stem.split('.')[0]
     if basename in GENERIC_NAMES:
-        return stem_base.startswith(f'v_{basename}_')
-    return stem_base.startswith(f'v_{basename}_') or stem_base == f'v_{basename}'
+        return stem_base.startswith(f'v_{basename}_') or stem_base.startswith(f'v_{safe_full}_')
+    return stem_base.startswith(f'v_{basename}_') or stem_base == f'v_{basename}' or stem_base.startswith(f'v_{safe_full}_') or stem_base == f'v_{safe_full}'
 
 def try_load_pyd(self, fullname, py_path, bin_path):
     try:
@@ -71,44 +74,108 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
         self._spec_cache: dict[str, object] = {}
         self._ext = '.pyd' if os.name == 'nt' else '.so'
         self._host_validity_cache: dict[str, bool] = {}
+        def fixed_get_path_hash(path_str: str) -> str:
+            if path_str in self._path_hash_cache:
+                return self._path_hash_cache[path_str]
+            try:
+                content = Path(path_str).read_text(encoding='utf-8', errors='ignore').replace('\r\n', '\n')
+                h = hashlib.sha256(content.encode('utf-8')).hexdigest()[:6]
+            except:
+                h = "000000"
+            self._path_hash_cache[path_str] = h
+            return h
+        self._get_path_hash = fixed_get_path_hash
+
+        original_find_project_binary = getattr(self, '_find_project_binary', None)
+        
+        def fixed_find_project_binary(py_path: str):
+            if not py_path: return None
+            abs_path = Path(py_path).resolve()
+            path_hash = self._get_path_hash(str(abs_path))
+            
+            # 1. Verifica binários forjados no projeto
+            candidate_name = f"v_{abs_path.stem}_{path_hash}{self._ext}"
+            if candidate_name in self._bin_files:
+                return self.bin_dir / candidate_name
+                
+            # 2. Verifica as bibliotecas forjadas externamente garantindo o sufixo hash
+            for name in self._lib_bin_files:
+                if name.endswith(f"_{path_hash}{self._ext}"):
+                    return self.lib_bin_dir / name
+                    
+            if original_find_project_binary:
+                return original_find_project_binary(py_path)
+            return None
+        self._find_project_binary = fixed_find_project_binary
+
         self._build_ram_index()
         self._dlog('[VULCAN DEBUG] MetaFinder initialized with RAM Cache.')
 
+    def _resolve_py_path(self, fullname, path):
+        for finder in sys.meta_path:
+            # Ignora a nós mesmos e o Shadow para evitar loops
+            if finder is self or "Vulcan" in str(finder) or "Shadow" in str(finder):
+                continue
+            
+            # Tenta usar o buscador (mesmo que seja uma classe nativa do Python)
+            if hasattr(finder, "find_spec"):
+                try:
+                    spec = finder.find_spec(fullname, path, None)
+                    if spec and spec.origin and spec.origin not in ('built-in', 'frozen'):
+                        return spec.origin
+                except Exception:
+                    continue
+        return None
+
     def _build_ram_index(self):
-        """
-        Lê os diretórios binários uma única vez e cria cache em RAM O(1).
-        Isso elimina a necessidade de fazer glob() e exists() massivos no disco
-        cada vez que o Python chama um 'import'.
-        """
+        """Lê os diretórios binários e cria cache em RAM O(1)."""
+        self._bin_files = []
+        if self.bin_dir.exists():
+            try:
+                for f in os.scandir(self.bin_dir):
+                    if f.name.endswith(self._ext):
+                        self._bin_files.append(f.name)
+            except Exception: pass
+
         self._lib_bin_files = []
         if self.lib_bin_dir.exists():
             try:
                 for f in os.scandir(self.lib_bin_dir):
                     if f.name.endswith(self._ext):
                         self._lib_bin_files.append(f.name)
-            except OSError:
-                pass
-        self._bin_files = set()
-        self._bin_stems = set()
-        if self.bin_dir.exists():
-            try:
-                for f in os.scandir(self.bin_dir):
-                    if f.name.endswith(self._ext):
-                        self._bin_files.add(f.name)
-                        if f.name.startswith('v_') and '_' in f.name[2:]:
-                            stem = f.name[2:].rsplit('_', 1)[0]
-                            self._bin_stems.add(stem)
-            except OSError:
-                pass
+            except Exception: pass
+            
+        # LOG CRÍTICO PARA O SEU CASO:
+        if os.environ.get("VULCAN_META_DEBUG") == "1":
+            print(f"[VULCAN INDEX] Binários detectados: {len(self._bin_files)} em {self.bin_dir}")
+            for b in self._bin_files:
+                print(f"   -> {b}")
+
+    def _find_project_binary(self, py_path: str) -> Path | None:
+        if not py_path or not py_path.endswith('.py'):
+            return None
+        
+        # MUDANÇA GOLD: Usar o hash do conteúdo para garantir o match com o Pitstop
+        try:
+            content = Path(py_path).read_text(encoding='utf-8', errors='ignore').replace('\r\n', '\n')
+            path_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()[:6]
+        except:
+            return None
+
+        v_name = f'v_{Path(py_path).stem}_{path_hash}{self._ext}'
+        
+        if v_name in self._bin_files:
+            return self.bin_dir / v_name
+        return None
 
     @staticmethod
     def _debug_enabled() -> bool:
-        return os.environ.get('VULCAN_META_DEBUG', '').strip() == '1'
+        return os.environ.get('VULCAN_META_DEBUG', '').strip() == '1' or os.environ.get('VULCAN_VERBOSE', '').strip() == '1'
 
     @classmethod
     def _dlog(cls, msg: str) -> None:
         if cls._debug_enabled():
-            print(msg, file=sys.stderr)
+            print(str(msg), file=sys.stderr)
 
     def find_spec(self, fullname: str, path, target=None):
         try:
@@ -155,15 +222,48 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
                         new_spec.has_location = True
                         self._spec_cache[fullname] = new_spec
                         return new_spec
-            if module_part in self._bin_stems:
-                py_path = self._resolve_py_path(fullname, path)
-                if py_path:
-                    bin_path = self._find_project_binary(py_path)
-                    if bin_path and self.is_binary_valid_for_host(bin_path) and (not self._is_stale(py_path, str(bin_path))):
-                        self.logger.info(f"VULCAN HIT: Mapping project file '{fullname}' -> '{bin_path}'")
-                        spec = self._make_spec(fullname, py_path, str(bin_path))
-                        self._spec_cache[fullname] = spec
-                        return spec
+            # Resolve primeiro.
+            py_path = self._resolve_py_path(fullname, path)
+            if py_path:
+                self._dlog(f"[RESOLVE] {fullname} -> {py_path}")
+                bin_path = self._find_project_binary(py_path)
+                self._dlog(f"[BINARY] {bin_path}")
+                if (
+                    bin_path
+                    and self.is_binary_valid_for_host(bin_path)
+                    and not self._is_stale(py_path, str(bin_path)) ):
+                    
+                    original_spec = self._resolve_py_path_as_spec(fullname, path)
+                    if original_spec and original_spec.loader:
+                        self.logger.info(
+                            f"VULCAN HIT: Mapping project file "
+                            f"'{fullname}' -> '{bin_path}'" )
+                        spec = self._make_spec(fullname, original_spec, Path(bin_path))
+
+                        if spec:
+                            self._spec_cache[fullname] = spec
+                            return spec
+            # Tier-2 only: sem binário mas com opt_py disponível
+            if py_path:
+                try:
+                    from doxoade.tools.vulcan.opt_cache import find_opt_py, find_project_root_for
+                    origin_path = Path(py_path)
+                    opt_root = find_project_root_for(origin_path) or self.project_root
+                    opt_path = find_opt_py(opt_root, origin_path)
+                    if opt_path and opt_path.exists():
+                        original_spec = self._resolve_py_path_as_spec(fullname, path)
+                        if original_spec and original_spec.loader:
+                            from doxoade.tools.vulcan.runtime import VulcanLoader
+                            loader = VulcanLoader(original_spec.loader, None, '', opt_path)
+                            t2_spec = importlib.machinery.ModuleSpec(
+                                fullname, loader, origin=original_spec.origin
+                            )
+                            t2_spec.has_location = True
+                            self._spec_cache[fullname] = t2_spec
+                            return t2_spec
+                except Exception:
+                    pass
+
             if not fullname.startswith('doxoade.'):
                 self._spec_cache[fullname] = False
             return None
@@ -187,16 +287,17 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
         return None
 
     def _resolve_py_path(self, fullname, path):
+        """Tenta encontrar o .py original ignorando finders corrompidos."""
         for finder in sys.meta_path:
-            if finder is self:
+            if finder is self or isinstance(finder, type):
                 continue
-            if hasattr(finder, 'find_spec'):
-                try:
-                    spec = finder.find_spec(fullname, path, None)
-                    if spec and spec.origin and (spec.origin not in ('built-in', 'frozen')):
-                        return spec.origin
-                except Exception:
-                    continue
+            try:
+                # O spec.origin nos dirá onde o arquivo .py está fisicamente
+                spec = finder.find_spec(fullname, path, None)
+                if spec and spec.origin and spec.origin not in ('built-in', 'frozen'):
+                    return spec.origin
+            except:
+                continue
         return None
 
     def _find_project_binary(self, py_path: str) -> Path | None:
@@ -241,12 +342,23 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
             self.logger.warning(f"STALE: '{Path(bin_path).name}' is older than '{Path(py_path).name}'.")
         return is_stale
 
-    def _make_spec(self, fullname: str, py_path, bin_path: str):
+    def _make_spec(self, fullname: str, original_spec, bin_path: Path):
         try:
-            loader = SafeExtensionLoader(fullname, bin_path, py_path)
-            spec = importlib.machinery.ModuleSpec(name=fullname, loader=loader, origin=bin_path, is_package=False)
-            if py_path:
-                spec.submodule_search_locations = [os.path.dirname(py_path)]
+            native_name = bin_path.stem.split('.')[0]
+            from doxoade.tools.vulcan.runtime import VulcanLoader
+
+            opt_path = None
+            try:
+                from doxoade.tools.vulcan.opt_cache import find_opt_py, find_project_root_for
+                origin_path = Path(original_spec.origin)
+                opt_root = find_project_root_for(origin_path) or self.project_root
+                opt_path = find_opt_py(opt_root, origin_path)
+            except Exception:
+                pass
+
+            loader = VulcanLoader(original_spec.loader, bin_path, native_name, opt_path)
+            spec = importlib.machinery.ModuleSpec(fullname, loader, origin=original_spec.origin)
+            spec.has_location = True
             return spec
         except Exception:
             self.logger.error(f"Failed to create SAFE spec for '{fullname}' at '{bin_path}'", exc_info=True)
@@ -296,18 +408,18 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
 _VULCAN_FINDER_INSTANCE = None
 
 def install(project_root: str):
-    """
-    Instala o VulcanMetaFinder para a raiz de projeto especificada.
-    Força a remoção de qualquer finder anterior para garantir o contexto correto.
-    """
+    """Instala a INSTÂNCIA do VulcanMetaFinder com segurança."""
     global _VULCAN_FINDER_INSTANCE
-    uninstall()
+    
+    # Remove Apenas duplicatas antigas do Vulcan
+    sys.meta_path = [f for f in sys.meta_path if "VulcanMetaFinder" not in str(f)]
+
     _ensure_vulcan_dirs(project_root)
     logfile = str(Path(project_root) / '.doxoade' / 'vulcan' / 'logs' / 'meta_finder.log')
     logger = _setup_logger(logfile)
+    
     _VULCAN_FINDER_INSTANCE = VulcanMetaFinder(project_root, logger)
     sys.meta_path.insert(0, _VULCAN_FINDER_INSTANCE)
-    logger.info(f'VulcanMetaFinder v6.1 (RAM Cached) instalado para: {project_root}')
 
 def uninstall():
     """Remove todas as instâncias do VulcanMetaFinder do sys.meta_path."""

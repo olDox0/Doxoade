@@ -20,7 +20,7 @@ CORE_TOOLS = {
     'rescue.py':        DOXOADE_ROOT / 'doxoade' / 'rescue.py',
     'telemetry.py':     DOXOADE_ROOT / 'doxoade' / 'tools' / 'telemetry_tools' / 'logger.py',
     'db_utils.py':      DOXOADE_ROOT / 'doxoade' / 'tools' / 'db_utils.py',
-    'database.py':      DOXOADE_ROOT / 'doxoade' / 'database.py',
+    'core_database.py': DOXOADE_ROOT / 'doxoade' / 'core_database.py',
     'nexus_db.py':      DOXOADE_ROOT / 'doxoade' / 'tools' / 'aegis' / 'nexus_db.py',
     'aegis_core.py':    DOXOADE_ROOT / 'doxoade' / 'tools' / 'aegis' / 'aegis_core.py',
     'warden.py':        DOXOADE_ROOT / 'doxoade' / 'tools' / 'aegis' / 'warden.py',

@@ -1,33 +1,10 @@
-# doxoade/doxoade/tools/vulcan/runtime.py
+# doxoade/tools/vulcan/runtime.py
 """
 Runtime bridge para consumir binários Vulcan em projetos externos.
-
 Pipeline de 3 Camadas (Tier):
   Tier 1 — Binário Nativo (.pyd/.so)
-      Cython compilado. Máxima performance.
-      Falha silenciosa → Tier 2.
-
-  Tier 2 — Python Otimizado (opt_cache)
-      Módulo pré-processado pelo LibOptimizer: sem docstrings, dead-code
-      eliminado, imports limpos, variáveis locais minificadas.
-      Falha silenciosa → Tier 3.
-
+  Tier 2 — Python Otimizado (.py)
   Tier 3 — Python Puro (source original)
-      Comportamento idêntico ao import normal. Sempre funciona.
-
-Uso rápido no ``__main__.py`` de outro projeto::
-
-    from doxoade.tools.vulcan.runtime import activate_vulcan, install_meta_finder
-
-    install_meta_finder(project_root)    # redirecionamento global de imports
-    activate_vulcan(globals(), __file__) # injeta funções do __main__ específico
-
-Arquitetura:
-  VulcanLoader usa padrão decorator de loader:
-    1. Executa o .py original (Tier 3 — base garantida).
-    2. Sobrepõe funções do opt_py se disponível (Tier 2).
-    3. Sobrepõe funções *_vulcan_optimized do PYD se disponível (Tier 1).
-  O módulo final tem o fullname correto e todas as APIs Python preservadas.
 """
 from __future__ import annotations
 import hashlib
@@ -41,38 +18,53 @@ import sys
 from pathlib import Path
 from types import ModuleType
 from typing import MutableMapping, Optional
+
 _OPTIMIZED_SUFFIX = '_vulcan_optimized'
 _BINARY_EXT = '.pyd' if os.name == 'nt' else '.so'
 _VERBOSE = os.environ.get('VULCAN_VERBOSE', '').strip() == '1'
 
 def _vlog(msg: str) -> None:
-    """Log de redirecionamento — ativo apenas com VULCAN_VERBOSE=1."""
     if _VERBOSE:
         sys.stderr.write(f'[VULCAN:REDIRECT] {msg}\n')
 
-def _load_local_module(path: Path, name: str) -> Optional[ModuleType]:
-    """Carrega módulo de arquivo local sem alterar sys.path permanentemente."""
+def _load_isolated_module(path: Path, native_name: str, package_name: str = "") -> Optional[ModuleType]:
+    """Carrega o módulo de forma isolada, respeitando a assinatura C do PyInit."""
     if not path.exists():
         return None
+        
     try:
-        if name in sys.modules:
-            return sys.modules[name]
-        spec = importlib.util.spec_from_file_location(name, str(path))
+        # Registramos com o prefixo do pacote para o Python se localizar
+        full_module_name = f"{package_name}.{native_name}" if package_name else native_name
+        
+        if full_module_name in sys.modules:
+            return sys.modules[full_module_name]
+
+        # Spec criado apontando pro .pyd ou opt_.py
+        spec = importlib.util.spec_from_file_location(full_module_name, str(path))
         if not spec or not spec.loader:
             return None
+            
         mod = importlib.util.module_from_spec(spec)
-        sys.modules[name] = mod
-        spec.loader.exec_module(mod)
+        mod.__package__ = package_name
+        
+        sys.modules[full_module_name] = mod
+        
+        try:
+            spec.loader.exec_module(mod)
+        except ImportError as e:
+            # Fallback gracioso: Se o Cython reclamar de import relativo, abortamos o Tier 1
+            sys.modules.pop(full_module_name, None)
+            raise RuntimeError(f"Constraint de import relativo do Cython: {e}")
+            
         return mod
-    except Exception:
-        sys.modules.pop(name, None)
-        return None
+    except Exception as e:
+        sys.modules.pop(full_module_name, None)
+        raise e
 
 def _binary_ext() -> str:
     return _BINARY_EXT
 
 def _is_binary_valid_for_host(bin_path: Path) -> bool:
-    """Validação mínima de integridade/arquitetura do binário nativo."""
     try:
         if not bin_path.exists() or bin_path.stat().st_size < 4096:
             return False
@@ -98,7 +90,6 @@ def _is_binary_valid_for_host(bin_path: Path) -> bool:
         return False
 
 def _is_binary_stale(bin_path: Path, source_path: Optional[Path]) -> bool:
-    """True se o .py foi modificado depois do .pyd (binário desatualizado)."""
     if not source_path or not source_path.exists():
         return False
     try:
@@ -109,11 +100,18 @@ def _is_binary_stale(bin_path: Path, source_path: Optional[Path]) -> bool:
 def _find_pyd_for_source(bin_dir: Path, source_path: Path) -> Optional[Path]:
     stem = source_path.stem
     ext = _binary_ext()
-    abs_hash = hashlib.sha256(str(source_path.resolve()).lower().encode()).hexdigest()[:6]
+    
+    try:
+        content = source_path.read_text(encoding='utf-8', errors='ignore').replace('\r\n', '\n')
+        abs_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()[:6]
+    except:
+        abs_hash = "000000"
+        
     _vlog(f'LOOKUP {stem} hash={abs_hash} in {bin_dir}')
     candidate = bin_dir / f'v_{stem}_{abs_hash}{ext}'
     if candidate.exists():
         return candidate
+        
     matches = sorted(bin_dir.glob(f'v_{stem}_*{ext}'), key=lambda p: p.stat().st_mtime, reverse=True)
     if matches:
         return matches[0]
@@ -123,8 +121,6 @@ def _find_pyd_for_source(bin_dir: Path, source_path: Path) -> Optional[Path]:
     return None
 
 def _safe_call(py_fn, native_fn):
-    """Tenta native_fn, cai para py_fn em TypeError ou qualquer exceção."""
-
     def wrapper(*args, **kwargs):
         try:
             return native_fn(*args, **kwargs)
@@ -137,17 +133,7 @@ def _safe_call(py_fn, native_fn):
     return wrapper
 
 class VulcanLoader(importlib.abc.Loader):
-    """
-    Loader em 3 camadas (Tier 3 → Tier 2 → Tier 1):
-
-      Tier 3: Python puro  (original_loader) — sempre executado, base garantida.
-      Tier 2: Sobreposição de funções do opt_py (LibOptimizer) — silenciosa.
-      Tier 1: Sobreposição de *_vulcan_optimized do PYD Cython   — silenciosa.
-
-    Qualquer falha em Tier 2 ou Tier 1 mantém o estado do tier anterior.
-    O módulo final sempre tem o fullname correto e as APIs Python preservadas.
-    """
-
+    """Loader que realiza o Hot-Swap de 3 camadas."""
     def __init__(self, original_loader, bin_path, native_module_name, opt_py_path=None):
         self._original_loader = original_loader
         self._bin_path = bin_path
@@ -161,79 +147,85 @@ class VulcanLoader(importlib.abc.Loader):
 
     def exec_module(self, module: ModuleType) -> None:
         if not getattr(module, '__file__', None):
-            origin = getattr(self._original_loader, 'path', None) or (callable(getattr(self._original_loader, 'get_filename', None)) and self._original_loader.get_filename()) or getattr(getattr(module, '__spec__', None), 'origin', None)
+            origin = getattr(module.__spec__, 'origin', None)
             if origin:
                 module.__file__ = str(origin)
+                
         if not getattr(module, '__loader__', None):
             module.__loader__ = self._original_loader
-        self._original_loader.exec_module(module)
-        if self._opt_py_path and self._opt_py_path.exists():
+            
+        # TIER 3 - Base Original
+        try:
+            self._original_loader.exec_module(module)
+        except Exception as e:
+            _vlog(f"FATAL: Falha na base Tier 3 para {module.__name__} - {e}")
+            raise
+
+        # TIER 2 - Python Otimizado
+        if self._opt_py_path and Path(self._opt_py_path).exists():
             self._overlay_opt_py(module)
-        self._inject_pyd(module)
+            
+        # TIER 1 - Binário Cython
+        if self._bin_path and Path(self._bin_path).exists():
+            self._inject_pyd(module)
 
     def _overlay_opt_py(self, module: ModuleType) -> None:
         try:
-            opt_name = f'_vulcan_opt_{module.__name__}'
-            spec = importlib.util.spec_from_file_location(opt_name, str(self._opt_py_path))
-            if not spec or not spec.loader:
-                return
-            opt_mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(opt_mod)
+            pkg = getattr(module, '__package__', '')
+            opt_stem = Path(self._opt_py_path).stem
+            
+            opt_mod = _load_isolated_module(Path(self._opt_py_path), opt_stem, package_name=pkg)
+            if not opt_mod: return
+
             replaced = 0
             for attr in dir(opt_mod):
-                if attr.startswith('__'):
-                    continue
+                if attr.startswith('__'): continue
+                
                 opt_obj = getattr(opt_mod, attr, None)
                 orig_obj = getattr(module, attr, None)
-                if opt_obj is None or orig_obj is None:
-                    continue
-                if not (callable(opt_obj) and callable(orig_obj)):
-                    continue
+                
+                if opt_obj is None or orig_obj is None: continue
+                if not (callable(opt_obj) and callable(orig_obj)): continue
+                
                 try:
                     if inspect.isfunction(opt_obj) and inspect.isfunction(orig_obj):
-                        if set(inspect.signature(orig_obj).parameters) != set(inspect.signature(opt_obj).parameters):
+                        def _required_params(fn):
+                            return {
+                                n for n, p in inspect.signature(fn).parameters.items()
+                                if p.default is inspect.Parameter.empty
+                                   and p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)
+                            }
+
+                        if _required_params(orig_obj) != _required_params(opt_obj):
                             continue
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError): pass
+                
                 setattr(module, attr, opt_obj)
                 replaced += 1
+                
             _vlog(f'OPT  {module.__name__} ← {Path(self._opt_py_path).name} ({replaced} funcs)')
         except Exception as exc:
             _vlog(f'OPT-FAIL {module.__name__} — {exc}')
 
     def _inject_pyd(self, module: ModuleType) -> None:
-        """
-        Carrega o .pyd/.so nativo e injeta funções ``*_vulcan_optimized``
-        sobre o que estiver no módulo (Tier 2 ou Tier 3).
-
-        Falha silenciosa em qualquer ponto.
-        """
         try:
-            native_spec = importlib.util.spec_from_file_location(self._native_name, str(self._bin_path))
-            if not (native_spec and native_spec.loader):
-                _vlog(f'SKIP {module.__name__} — spec inválido para {self._bin_path.name}')
+            pkg = getattr(module, '__package__', '')
+            
+            # MANTÉM o self._native_name para o PyInit_ satisfazer o Cython em C
+            native_mod = _load_isolated_module(Path(self._bin_path), self._native_name, package_name=pkg)
+            if not native_mod:
+                _vlog(f'SKIP {module.__name__} — não foi possível isolar.')
                 return
-            native_mod = importlib.util.module_from_spec(native_spec)
-            sys.modules[self._native_name] = native_mod
-            native_spec.loader.exec_module(native_mod)
-            native_mod.__package__ = module.__package__
-            native_mod.__spec__ = module.__spec__
-            native_mod.__name__ = module.__name__
-            for key, val in vars(module).items():
-                if not hasattr(native_mod, key):
-                    try:
-                        setattr(native_mod, key, val)
-                    except (AttributeError, TypeError):
-                        pass
+                
             injected = []
             for attr in dir(native_mod):
-                if not attr.endswith(_OPTIMIZED_SUFFIX):
-                    continue
+                if not attr.endswith(_OPTIMIZED_SUFFIX): continue
                 orig_name = attr[:-len(_OPTIMIZED_SUFFIX)]
-                if not hasattr(module, orig_name):
-                    continue
+                if not hasattr(module, orig_name): continue
+                    
                 py_fn = getattr(module, orig_name)
                 native_fn = getattr(native_mod, attr)
+                
                 try:
                     inspect.signature(py_fn)
                     inspect.signature(native_fn)
@@ -241,27 +233,30 @@ class VulcanLoader(importlib.abc.Loader):
                 except (ValueError, TypeError):
                     setattr(module, orig_name, _safe_call(py_fn, native_fn))
                 injected.append(orig_name)
+                
+            if not injected:
+                for attr in dir(native_mod):
+                    if not attr.startswith('_') and hasattr(module, attr):
+                        native_func = getattr(native_mod, attr)
+                        if callable(native_func):
+                            setattr(module, attr, native_func)
+                            injected.append(attr)
+
             if injected:
-                _vlog(f"OK   {module.__name__} ← {self._bin_path.name} ({', '.join(injected)})")
+                _vlog(f"HIT DIRECT {module.__name__} ← {Path(self._bin_path).name} ({len(injected)} funções)")
                 module.__file__ = str(self._bin_path)
             else:
-                _vlog(f'LOAD {module.__name__} ← {self._bin_path.name} (sem funções otimizadas)')
+                _vlog(f'LOAD {module.__name__} ← {Path(self._bin_path).name} (sem funções integradas)')
+                
         except Exception as exc:
-            _vlog(f'FAIL {module.__name__} ← {self._bin_path.name} — {exc}')
+            _vlog(f'FAIL {module.__name__} ← {Path(self._bin_path).name} — {exc}')
 
 class VulcanBinaryFinder(importlib.abc.MetaPathFinder):
-    """
-    MetaPathFinder para projetos externos com bootstrap Vulcan.
-
-    Envolve o loader original com VulcanLoader (3 camadas):
-      Tier 3 → Python puro  (via original_loader)
-      Tier 2 → Python otimizado (opt_cache, se disponível)
-      Tier 1 → Binário nativo PYD (se disponível e válido)
-
-    Só atua quando existe um PYD correspondente em .doxoade/vulcan/bin/.
-    O opt_py é opcional — se ausente, apenas Tier 3 + Tier 1 são ativos.
-    """
-    _BYPASS_PREFIXES = ('doxoade.', 'encodings.', 'codecs.', '_', 'builtins', 'importlib', 'sys', 'os', 'pathlib', 'abc')
+    _BYPASS_PREFIXES = (
+        'doxoade.tools.', 'doxoade.database.', 'doxoade.rescue',
+        'encodings.', 'codecs.', '_', 'builtins',
+        'importlib', 'sys', 'os', 'pathlib', 'abc',
+    )
     _VULCAN_FINDER_MARKER = True
 
     def __init__(self, project_root: str | Path):
@@ -270,87 +265,61 @@ class VulcanBinaryFinder(importlib.abc.MetaPathFinder):
         self._cache: dict[str, tuple | None] = {}
 
     def _resolve_original_spec(self, fullname: str, path):
-        """Obtém spec do .py original sem acionar este finder ou outros Vulcan."""
         for finder in sys.meta_path:
-            if finder is self:
+            if finder is self or getattr(finder, '_VULCAN_FINDER_MARKER', False) or "Shadow" in str(finder):
                 continue
-            if getattr(finder, '_VULCAN_FINDER_MARKER', False):
-                continue
-            if not hasattr(finder, 'find_spec'):
-                continue
-            try:
-                spec = finder.find_spec(fullname, path, None)
-                if spec and spec.origin and (spec.origin not in ('built-in', 'frozen')):
-                    if Path(spec.origin).suffix == '.py':
-                        return spec
-            except Exception:
-                continue
+            if hasattr(finder, 'find_spec'):
+                try:
+                    spec = finder.find_spec(fullname, path, None)
+                    if spec and spec.origin and (spec.origin not in ('built-in', 'frozen')):
+                        if str(spec.origin).endswith('.py'):
+                            return spec
+                except Exception:
+                    continue
         return None
 
     def find_spec(self, fullname: str, path, target=None):
-        if any((fullname.startswith(p) for p in self._BYPASS_PREFIXES)):
-            return None
-        if not self.bin_dir.exists():
-            return None
-        if fullname in self._cache:
-            cached = self._cache[fullname]
-            if cached is None:
-                return None
-            bin_path = Path(cached[0])
-            native = cached[1]
-            opt_path = Path(cached[2]) if cached[2] else None
-            original_spec = self._resolve_original_spec(fullname, path)
-            if not original_spec or not original_spec.loader:
-                del self._cache[fullname]
-                return None
-            source = Path(original_spec.origin)
-            if bin_path.exists() and _is_binary_valid_for_host(bin_path) and (not _is_binary_stale(bin_path, source)):
-                return self._make_vulcan_spec(fullname, original_spec, bin_path, native, opt_path)
-            del self._cache[fullname]
+        if any(fullname.startswith(p) for p in self._BYPASS_PREFIXES): return None
+        
         original_spec = self._resolve_original_spec(fullname, path)
-        if not original_spec or not original_spec.loader:
+        if not original_spec or not original_spec.loader: return None
+        
+        source = Path(original_spec.origin)
+        
+        bin_path = _find_pyd_for_source(self.bin_dir, source) if self.bin_dir.exists() else None
+        opt_path = self._find_or_generate_opt(source)
+        
+        if not bin_path and not opt_path:
             return None
-        source_path = Path(original_spec.origin)
-        bin_path = _find_pyd_for_source(self.bin_dir, source_path)
-        if not bin_path or not _is_binary_valid_for_host(bin_path):
-            self._cache[fullname] = None
-            return None
-        if _is_binary_stale(bin_path, source_path):
-            self._cache[fullname] = None
-            return None
-        native_name = bin_path.stem.split('.')[0]
-        opt_path = self._find_or_generate_opt(source_path)
-        self._cache[fullname] = (str(bin_path), native_name, str(opt_path) if opt_path else None)
-        _vlog(f'INTERCEPT {fullname} → {bin_path.name}' + (' + OPT' if opt_path else ''))
-        return self._make_vulcan_spec(fullname, original_spec, bin_path, native_name, opt_path)
-
-    def _make_vulcan_spec(self, fullname: str, original_spec, bin_path: Path, native_name: str, opt_path: Optional[Path]):
-        loader = VulcanLoader(original_loader=original_spec.loader, bin_path=bin_path, native_module_name=native_name, opt_py_path=opt_path)
+            
+        if bin_path:
+            if not _is_binary_valid_for_host(bin_path) or _is_binary_stale(bin_path, source):
+                bin_path = None
+                
+        native_name = bin_path.stem.split('.')[0] if bin_path else ""
+        
+        _vlog(f'INTERCEPT {fullname} → ' + (bin_path.name if bin_path else 'None') + (' + OPT' if opt_path else ''))
+        
+        loader = VulcanLoader(
+            original_loader=original_spec.loader,
+            bin_path=bin_path,
+            native_module_name=native_name,
+            opt_py_path=opt_path,
+        )
         new_spec = importlib.machinery.ModuleSpec(fullname, loader, origin=original_spec.origin)
         new_spec.has_location = True
         return new_spec
 
     def _find_or_generate_opt(self, source_path: Path) -> Optional[Path]:
-        """Tier 2: tenta local primeiro, depois doxoade como fallback."""
-        try:
-            local_oc = _load_local_module(self.project_root / '.doxoade' / 'vulcan' / 'opt_cache.py', '_vulcan_local_opt_cache')
-            if local_oc:
-                root = getattr(local_oc, 'find_project_root_for', lambda _: None)(source_path) or self.project_root
-                find = getattr(local_oc, 'find_opt_py', None)
-                gen = getattr(local_oc, 'generate_opt_py', None)
-                cached = find(root, source_path) if find else None
-                if cached:
-                    return cached
-                return gen(root, source_path) if gen else None
-        except Exception:
-            pass
         try:
             from doxoade.tools.vulcan.opt_cache import find_opt_py, generate_opt_py, find_project_root_for
             root = find_project_root_for(source_path) or self.project_root
             return find_opt_py(root, source_path) or generate_opt_py(root, source_path)
         except Exception:
             return None
+
 _installed_finders: dict[str, VulcanBinaryFinder] = {}
+
 
 def install_meta_finder(project_root: str | Path) -> VulcanBinaryFinder:
     """
@@ -369,14 +338,22 @@ def install_meta_finder(project_root: str | Path) -> VulcanBinaryFinder:
     _installed_finders[root_str] = finder
     return finder
 
-def uninstall_meta_finder(project_root: str | Path | None=None) -> None:
+
+def uninstall_meta_finder(project_root: str | Path | None = None) -> None:
     """Remove VulcanBinaryFinder(s) do sys.meta_path."""
     root_str = str(Path(project_root).resolve()) if project_root else None
-    sys.meta_path[:] = [f for f in sys.meta_path if not (isinstance(f, VulcanBinaryFinder) and (root_str is None or str(f.project_root) == root_str))]
+    sys.meta_path[:] = [
+        f for f in sys.meta_path
+        if not (
+            isinstance(f, VulcanBinaryFinder)
+            and (root_str is None or str(f.project_root) == root_str)
+        )
+    ]
     if root_str:
         _installed_finders.pop(root_str, None)
     else:
         _installed_finders.clear()
+
 
 def find_vulcan_project_root(start: str | Path) -> Optional[Path]:
     """Localiza a raiz de projeto com ``.doxoade/vulcan/bin``."""
@@ -387,6 +364,7 @@ def find_vulcan_project_root(start: str | Path) -> Optional[Path]:
         if (node / '.doxoade' / 'vulcan' / 'bin').exists():
             return node
     return None
+
 
 def load_vulcan_binary(module_name: str, project_root: str | Path) -> Optional[ModuleType]:
     """
@@ -400,7 +378,11 @@ def load_vulcan_binary(module_name: str, project_root: str | Path) -> Optional[M
     ext = _binary_ext()
     bin_path = bin_dir / f'{module_name}{ext}'
     if not bin_path.exists():
-        matches = sorted(bin_dir.glob(f'{module_name}*{ext}'), key=lambda p: p.stat().st_mtime, reverse=True)
+        matches = sorted(
+            bin_dir.glob(f'{module_name}*{ext}'),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
         if not matches:
             return None
         bin_path = matches[0]
@@ -434,10 +416,14 @@ def load_vulcan_binary(module_name: str, project_root: str | Path) -> Optional[M
     finally:
         sys.path = old_path
 
+
 def _resolve_opt_path(source_path: Path, root: Path) -> Optional[Path]:
     """Localiza/gera opt_py — local primeiro, doxoade como fallback."""
     try:
-        local_oc = _load_local_module(root / '.doxoade' / 'vulcan' / 'opt_cache.py', '_vulcan_local_opt_cache')
+        local_oc = _load_local_module(
+            root / '.doxoade' / 'vulcan' / 'opt_cache.py',
+            '_vulcan_local_opt_cache',
+        )
         if local_oc:
             find = getattr(local_oc, 'find_opt_py', None)
             gen = getattr(local_oc, 'generate_opt_py', None)
@@ -456,6 +442,7 @@ def _resolve_opt_path(source_path: Path, root: Path) -> Optional[Path]:
     except Exception:
         return None
 
+
 def _load_opt_module(opt_path: Path, source_path: Path, globs: MutableMapping) -> Optional[ModuleType]:
     """Carrega opt_py em namespace isolado com contexto de globs. None em falha."""
     spec = importlib.util.spec_from_file_location(f'_vulcan_opt_{source_path.stem}', str(opt_path))
@@ -470,6 +457,7 @@ def _load_opt_module(opt_path: Path, source_path: Path, globs: MutableMapping) -
     spec.loader.exec_module(opt_mod)
     return opt_mod
 
+
 def _inject_opt_callables(opt_mod: ModuleType, globs: MutableMapping) -> int:
     """Substitui callables de mesmo nome em globs pelo equivalente otimizado."""
     replaced = 0
@@ -482,6 +470,7 @@ def _inject_opt_callables(opt_mod: ModuleType, globs: MutableMapping) -> int:
             globs[attr] = opt_obj
             replaced += 1
     return replaced
+
 
 def _activate_tier2(globs: MutableMapping[str, object], source_path: Path, root: Path) -> int:
     """
@@ -500,7 +489,13 @@ def _activate_tier2(globs: MutableMapping[str, object], source_path: Path, root:
     except Exception:
         return 0
 
-def _activate_tier1(globs: MutableMapping[str, object], source_path: Path, root: Path, optimized_suffix: str) -> int:
+
+def _activate_tier1(
+    globs: MutableMapping[str, object],
+    source_path: Path,
+    root: Path,
+    optimized_suffix: str,
+) -> int:
     """
     Injeção de Tier 1 (Binário Nativo) em globs.
 
@@ -527,6 +522,7 @@ def _activate_tier1(globs: MutableMapping[str, object], source_path: Path, root:
         injected += 1
     return injected
 
+
 def _probe_resolve_root(project_root: Optional[str | Path]) -> Optional[Path]:
     """Resolve a raiz de projeto para probe_embedded."""
     if project_root:
@@ -535,13 +531,21 @@ def _probe_resolve_root(project_root: Optional[str | Path]) -> Optional[Path]:
     main_file = getattr(main, '__file__', None)
     return find_vulcan_project_root(main_file) if main_file else None
 
+
 def _probe_dir_count(directory: Optional[Path], pattern: str) -> int:
     """Conta arquivos em ``directory`` que batem com ``pattern``. Seguro."""
     if directory and directory.exists():
         return len(list(directory.glob(pattern)))
     return 0
 
-def activate_vulcan(globs: MutableMapping[str, object], source_file: str, *, project_root: str | Path | None=None, optimized_suffix: str=_OPTIMIZED_SUFFIX) -> bool:
+
+def activate_vulcan(
+    globs: MutableMapping[str, object],
+    source_file: str,
+    *,
+    project_root: str | Path | None = None,
+    optimized_suffix: str = _OPTIMIZED_SUFFIX,
+) -> bool:
     """
     Ativa funções otimizadas do Vulcan no escopo informado.
 
@@ -561,22 +565,38 @@ def activate_vulcan(globs: MutableMapping[str, object], source_file: str, *, pro
     injected += _activate_tier1(globs, source_path, root, optimized_suffix)
     return injected > 0
 
+
 def _probe_vulcan_dirs(root: Optional[Path]) -> tuple:
     """Resolve os 3 diretórios Vulcan a partir de root. Retorna (bin, lib, opt)."""
     if not root:
         return (None, None, None)
-    return (root / '.doxoade' / 'vulcan' / 'bin', root / '.doxoade' / 'vulcan' / 'lib_bin', root / '.doxoade' / 'vulcan' / 'opt_py')
+    return (
+        root / '.doxoade' / 'vulcan' / 'bin',
+        root / '.doxoade' / 'vulcan' / 'lib_bin',
+        root / '.doxoade' / 'vulcan' / 'opt_py',
+    )
+
 
 def _probe_finder_stats() -> dict:
     """Coleta info dos VulcanFinders ativos no sys.meta_path."""
     finders = [f for f in sys.meta_path if getattr(f, '_VULCAN_FINDER_MARKER', False)]
-    return {'finder_installed': bool(finders), 'finder_count': len(finders), 'meta_path': [type(f).__name__ for f in sys.meta_path]}
+    return {
+        'finder_installed': bool(finders),
+        'finder_count': len(finders),
+        'meta_path': [type(f).__name__ for f in sys.meta_path],
+    }
+
 
 def _probe_dir_entry(directory: Optional[Path], pattern: str, label: str) -> dict:
     """Gera o bloco de diagnóstico de um diretório Vulcan."""
-    return {f'{label}_dir': str(directory) if directory else None, f'{label}_exists': bool(directory and directory.exists()), f'{label}_count': _probe_dir_count(directory, pattern)}
+    return {
+        f'{label}_dir': str(directory) if directory else None,
+        f'{label}_exists': bool(directory and directory.exists()),
+        f'{label}_count': _probe_dir_count(directory, pattern),
+    }
 
-def probe_embedded(project_root: str | Path | None=None) -> dict:
+
+def probe_embedded(project_root: str | Path | None = None) -> dict:
     """Probe leve para depurar estado do runtime embedded no processo atual."""
     root = _probe_resolve_root(project_root)
     ext = _binary_ext()

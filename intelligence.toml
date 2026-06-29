@@ -11,5 +11,6 @@ ignore = [
     "*.txt",
     "*.specpython",
     "*.bat",
-    "*.sh"
+    "*.sh",
+    "*.xml"
 ]

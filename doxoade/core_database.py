@@ -1,11 +1,10 @@
-# doxoade/doxoade/database.py
+# doxoade/doxoade/core_database.py antigo database.py
 """
 Módulo de Persistência (Sapiens/Chronos) - v71.1.
 Gerencia o ciclo de vida do banco de dados e migrações de esquema.
 ESTRATÉGIA: Migration Dispatcher para conformidade MPoT-4/17.
 """
 
-from doxoade.tools.alexandria.engine import alexandria_write
 import click
 import zlib
 import json
@@ -16,56 +15,78 @@ from pathlib import Path
 import sqlite3 as real_sqlite3
 
 import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
-#from doxoade.database import DB_FILE, get_db_connection
+
+#from doxoade.tools.error_info.py import formated_traceback
+from doxoade.tools.alexandria.engine import alexandria_write
 from doxoade.tools.telemetry_tools.logger import chief_heartbeat
-from .tools.filesystem import _find_project_root
+from doxoade.tools.filesystem import _find_project_root
+
+#from doxoade.database import DB_FILE, get_db_connection
+
+DOXOADE_INSTALL_DIR = Path(__file__).resolve().parents[1]
+current_exec = os.environ.get("DOXOADE_PROJECT_ROOT", os.getcwd())
+TARGET_ROOT = Path(_find_project_root(current_exec))
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1] # Sobe de doxoade/ para a raiz
 BASE_DIR = Path(__file__).resolve().parent
 PACKAGE_ROOT = Path(__file__).resolve().parent
-#DB_FILE = Path(os.getcwd()) / 'data' / 'doxoade.db'
-DB_FILE = PACKAGE_ROOT / 'data' / 'doxoade.db'
+
+DB_DIR = TARGET_ROOT / ".doxoade" / "data"
+DB_FILE = DOXOADE_INSTALL_DIR / "data" / "doxoade.db"
+
 DB_VERSION = 134
 _CACHED_DB_PATH = None
 _LOG_QUEUE = None 
 
+click.echo(f"[DB-TRACE] Alvo absoluto travado em: {DB_FILE}")
+
 def get_db_connection():
-    """Abre conexão com monitoramento de performance (Sapiens Watcher)."""
+    """Abre conexão com monitoramento resiliente (Sapiens Watcher)."""
     if not DB_FILE.parent.exists():
         DB_FILE.parent.mkdir(parents=True, exist_ok=True)
+
     import doxoade.tools.aegis.nexus_db as sqlite3
-    if os.environ.get('VULCAN_VERBOSE') == '1':
+    import inspect
+
+    # 1. Identificação segura do chamador (Fix: UnboundLocalError)
+    try:
+        stack = inspect.stack()
+        caller_path = stack[1].filename if len(stack) > 1 else "unknown"
+        caller_name = os.path.basename(caller_path)
+    except Exception:
+        caller_name = "internal"
+
+    # 2. Silenciador de Boot (Respeita o DOXOADE_QUIET_BOOT do __main__.py)
+    if os.environ.get("DOXOADE_QUIET_BOOT") != "1":
+        print(f"\x1b[90m[DB-TRACE] Conexão aberta por: {caller_name}\x1b[0m")
+        if os.environ.get("VULCAN_VERBOSE") == "1":
+            print(f"\x1b[90m[DB-TRACE] Conexão: {caller_name}\x1b[0m")
+
+    # 3. Log de Verbose do Vulcan
+    if os.environ.get("VULCAN_VERBOSE") == "1":
+        print(f"\x1b[90m[DB-TRACE] Conexão: {caller_name}\x1b[0m")
         print(f"\x1b[90m[HADES:CONNECT] {DB_FILE}\x1b[0m")
+
     t0 = time.perf_counter()
-    DB_FILE.parent.mkdir(parents=True, exist_ok=True)
-    
-    # [PLATINUM] Configurações de Performance para o Celeron
     conn = sqlite3.connect(str(DB_FILE), check_same_thread=False, timeout=30.0)
     
-    from doxoade.tools.telemetry_tools.logger import chief_heartbeat
-    chief_heartbeat("HADES", "DB_CONNECTION_OPEN", {"path": str(DB_FILE)})
-    
-    import inspect
-    caller = inspect.stack()[1].filename
-    print(f"\x1b[90m[DB-TRACE] Conexão aberta por: {os.path.basename(caller)}\x1b[0m")
-    
-#    conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=30)
+    # 4. Telemetria (Chief Heartbeat)
+    try:
+        from doxoade.tools.telemetry_tools.logger import chief_heartbeat
+        chief_heartbeat("HADES", "DB_CONNECTION_OPEN", {"path": str(DB_FILE), "by": caller_name})
+    except Exception:
+        pass
+
+    # 5. Otimizações de Performance HADES (WAL Mode)
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.row_factory = sqlite3.Row
-    conn.execute(f"PRAGMA cache_size=-{4000}")
-    
-    conn.row_factory = sqlite3.Row
-    
-    duration = (time.perf_counter() - t0) * 1000
-    if duration > 50: # Se levar mais de 50ms para abrir, Hórus avisa
-        chief_heartbeat("HADES", "SLOW_CONNECTION", {"ms": round(duration, 2)})
-        
-    if os.environ.get('DOXOADE_HORUS_ACTIVE') == '1':
+    conn.execute("PRAGMA cache_size=-4000")
+
+    if os.environ.get("DOXOADE_HORUS_ACTIVE") == "1":
         conn.execute("PRAGMA synchronous=FULL")
     else:
         conn.execute("PRAGMA synchronous=NORMAL")
-        
+
+    conn.row_factory = sqlite3.Row
     return conn
 
 def _m_v1_v3_core(cursor):
@@ -256,61 +277,52 @@ def _log_execution(command_name, path, results, arguments, execution_time_ms, ex
     _LOG_QUEUE.put((_query, _params))
 
 def init_db():
+    """Inicializa o banco de dados de forma resiliente (Gênese)."""
     conn = get_db_connection()
     cursor = conn.cursor()
+    
     try:
-        alexandria_write('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);')
-        res = alexandria_write('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1;').fetchone()
-        current_version = res[0] if res else 0
-
-        if current_version < DB_VERSION:
-            click.secho(f"🔧 [SAPIENS] Migrando base v{current_version} -> v{DB_VERSION}...", fg='yellow')
+        # 1. Garante que a tabela mestre existe ANTES de consultar
+        cursor.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)")
+        
+        # 2. Verifica se é um banco virgem
+        cursor.execute("SELECT version FROM schema_version")
+        row = cursor.fetchone()
+        
+        if not row:
+            # BANCO NOVO: Começa do zero e aplica a topologia inteira
+            current_version = 0
+            cursor.execute("INSERT INTO schema_version (version) VALUES (0)")
             
-            # [PLATINUM FIX] Agora o gatilho é maior que 120
-            if current_version < 3:
-                _m_v1_v3_core(cursor)
-            if current_version < 9:
-                _m_v4_v9_incidents(cursor)
-            if current_version < 14:
-                _m_v10_v14_genesis(cursor)
-            if current_version < 15:
-                _m_v15_chronos(cursor)
-            if current_version < 19:
-                _m_v19_payloads(cursor)
-            if current_version < 20:    
-                _m_v20_nexus_vault(cursor)
-            if current_version < 21:
-                _m_v21_operational_logs(cursor)
-            if current_version < 22:
-                _m_v22_moduloid_acervo(cursor)
-            if current_version < 23:
-                _m_v23_hades_optimization_and_lexicon(cursor)
-            if current_version < 24:
-                _m_v24_lexicon_expansion(cursor)
-            if current_version < 133:
-                _m_v132_lexicon_expansion(cursor)
-            if current_version < 134:
-                _m_v134_incident_schema_repair(cursor)
+            _m_v1_v3_core(cursor)
+            _m_v4_v9_incidents(cursor)
+            _m_v10_v14_genesis(cursor)
+            _m_v15_chronos(cursor)
+            _m_v19_payloads(cursor)
+            _m_v20_nexus_vault(cursor)
+            _m_v21_operational_logs(cursor)
+            _m_v22_moduloid_acervo(cursor)
+            _m_v23_hades_optimization_and_lexicon(cursor)
+            _m_v24_lexicon_expansion(cursor)
+            _m_v132_lexicon_expansion(cursor)
+            _m_v134_incident_schema_repair(cursor)
             
-            # [REFORÇO] Garante colunas sistêmicas
-            repair_cols = [
-                ('findings', 'category', 'TEXT'),
-                ('open_incidents', 'category', 'TEXT'),
-                ('open_incidents', 'severity', 'TEXT'), # <<-- O FIX PARA O SEU CRASH
-                ('command_history', 'compressed_payload', 'BLOB')
-            ]
-            for table, col, col_type in repair_cols:
-                try:
-                    alexandria_write(f'ALTER TABLE {table} ADD COLUMN {col} {col_type};')
-                except sqlite3.OperationalError: pass
-
-            alexandria_write('DELETE FROM schema_version;')
-            alexandria_write('INSERT INTO schema_version (version) VALUES (?);', (DB_VERSION,))
-            # conn.commit() delegado ao Alexandria
-            click.secho(f"✅ [HADES] Cérebro atualizado para v{DB_VERSION}.", fg='green', bold=True)
+            # Sela a versão atual base
+            cursor.execute("UPDATE schema_version SET version = 134")
+            conn.commit()
+            current_version = 134
+        else:
+            # BANCO EXISTENTE: Lê a versão para saber se precisa de patches
+            current_version = row[0]
+            
+        # 3. Aplica patches incrementais se o banco já existia (passando a versão)
+        # Se a sua função exigir (conn, current_version), troque "cursor" por "conn" abaixo
+        _apply_incremental_patches(cursor, current_version)
+        conn.commit()
+        
     except Exception as e:
-        conn.rollback()
-        click.secho(f"✘ [FALHA] Erro estrutural: {e}", fg='red')
+        from doxoade.tools.error_info import formated_traceback
+        formated_traceback(e, "erro no database - init_db")
     finally:
         conn.close()
         

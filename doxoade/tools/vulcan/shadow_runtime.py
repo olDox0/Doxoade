@@ -23,15 +23,18 @@ except Exception as e:
  #   from .shadow_scribe import NexusShadowScribe
 
 SHADOW_BLACKLIST = {
-    'doxoade.tools.aegis.aegis_utils',
-    'doxoade.tools.vulcan.shadow_runtime',
-    'doxoade.tools.vulcan.shadow_scribe',
-    'doxoade.tools.vulcan.bridge',
-    'doxoade.tools.telemetry_tools.logger',
+    'doxoade.tools.aegis',
+#    'doxoade.tools.aegis.nexus_db',
+#    'doxoade.tools.aegis.aegis_utils',
+    'doxoade.tools.vulcan',
+#    'doxoade.tools.vulcan.shadow_runtime',
+#    'doxoade.tools.vulcan.shadow_scribe',
+#    'doxoade.tools.vulcan.bridge',
+    'doxoade.tools.telemetry_tools',
+#    'doxoade.tools.telemetry_tools.logger',
     'doxoade.tools.horus_scribe',
     'doxoade.rescue',
     'doxoade.database',
-    'doxoade.tools.aegis.nexus_db',
     'doxoade.tools.filesystem',
     'toml', 'ast', 'inspect',
     'json', 'shutil', 'importlib',
@@ -39,6 +42,7 @@ SHADOW_BLACKLIST = {
 }
 
 _INSTALLED = False
+_INSTALLED_SHADOW = False
 
 def is_shadow_enabled(project_root: str) -> bool:
     """Detecta se o Shadow Runtime deve ser ativado (Env > TOML > Default)."""
@@ -117,29 +121,15 @@ class ShadowLoader(importlib.abc.Loader):
             nexus_exec(source, module.__dict__)
 
 def install_shadow_runtime(project_root):
-    """Instalação com Autoverificação de Segurança."""
-    global _INSTALLED
-    if _INSTALLED: return
+    """Instala a INSTÂNCIA do ShadowFinder respeitando o MetaPath."""
+    global _INSTALLED_SHADOW
+    if _INSTALLED_SHADOW: return
     
-    if not is_shadow_enabled(project_root):
-        return
+    # Remove Apenas duplicatas do próprio Shadow
+    sys.meta_path = [f for f in sys.meta_path if "ShadowFinder" not in str(f)]
 
-    try:
-        # TESTE DE SANIDADE: Tenta compilar um snippet básico com a vacina
-        # Se o sistema de AST do usuário estiver corrompido, o NSR não sobe.
-        from doxoade.tools.aegis.shadow_scribe import NexusShadowScribe
-        import ast
-        test_tree = ast.parse("def sanity(): pass")
-        NexusShadowScribe("sanity").visit(test_tree)
-        
-        # Se passou no teste, instala o Finder
-
-    except Exception as e:
-        # LOG DE FALHA DE SEGURANÇA: O rastro de falha do NSR vai para o Hades
-        from doxoade.tools.telemetry_tools.logger import chief_heartbeat
-        chief_heartbeat("ENGINE", "BOOT_FAILURE", {"engine": "SHADOW", "err": str(e)})
-        # Não instala o finder, mantendo o Doxoade em "Safe Mode"
-
-    if not any(isinstance(f, ShadowFinder) for f in sys.meta_path):
-        sys.meta_path.insert(0, ShadowFinder(project_root))
-        _INSTALLED = True
+    finder_instance = ShadowFinder(project_root)
+    # Insere na posição 1, logo atrás do Vulcan (que estará na 0)
+    pos = 1 if len(sys.meta_path) > 0 else 0
+    sys.meta_path.insert(pos, finder_instance)
+    _INSTALLED_SHADOW = True

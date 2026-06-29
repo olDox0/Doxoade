@@ -1,4 +1,5 @@
 # doxoade/__main__.py
+# Main premier
 import sys
 import os
 import subprocess
@@ -51,8 +52,13 @@ def _install_finder(project_root: str):
 
 def main():
     package_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(package_dir)
-#    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cwd = os.getcwd()
+    doxoade_marker = os.path.join(cwd, '.doxoade', 'vulcan', 'bin')
+    if os.path.exists(doxoade_marker):
+        project_root = cwd
+    else:
+        project_root = os.path.dirname(package_dir)
+    
     _early_setup(project_root)
     _install_finder(project_root)
     try:

@@ -16,7 +16,8 @@ class AlexandriaManager:
 
     def _init_engine(self):
         self.queue = queue.Queue()
-        self.lock_file = Path("data/alexandria.lock")
+        from doxoade.core_database import DB_FILE
+        self.lock_file = DB_FILE.parent / "alexandria.lock"
         self.stop_event = threading.Event()
         self.worker = threading.Thread(target=self._consumer, daemon=True)
         self.worker.start()

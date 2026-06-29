@@ -17,14 +17,15 @@ def _force_reset():
     """Envia o sinal de reset global de forma agressiva."""
     # O código \033[0m reseta cores de fundo, frente e estilos (negrito, etc)
     # Enviamos para stdout e stderr para garantir que o terminal receba
-    if os.name == 'nt':
-        # No Windows, às vezes o flush do Python não atinge o buffer do console a tempo
-        os.system('') # Truque para forçar o processamento de ANSI no CMD/Powershell
-    
-    sys.stdout.write('\033[0m')
-    sys.stdout.flush()
-    sys.stderr.write('\033[0m')
-    sys.stderr.flush()
+    try:
+        if os.name == 'nt':
+            os.system('')
+        sys.stdout.write('\033[0m')
+        sys.stdout.flush()
+        sys.stderr.write('\033[0m')
+        sys.stderr.flush()
+    except KeyboardInterrupt:
+        print("KeyboardInterrupt")
 
 class AnsiCode(str):
     __slots__ = ()

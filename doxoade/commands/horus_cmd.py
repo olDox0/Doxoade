@@ -1,6 +1,7 @@
 # doxoade/doxoade/commands/horus_cmd.py
 import click
-# [DOX-UNUSED] import json
+import json
+from datetime import datetime
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.core_database import get_db_connection
 
@@ -9,6 +10,12 @@ from doxoade.tools.alexandria.engine import alexandria_write
 def horus_group():
     """👁️  Hórus: Sistema de Observabilidade de Incepção (Black Box)."""
     pass
+
+def _parse_ts(ts_str):
+    try:
+        return datetime.fromisoformat(str(ts_str))
+    except Exception:
+        return None
 
 def run_horus_view_logic(limit=100, full=False, focus=None):
     """Lógica de visualização NSR pura, invocável por outros sistemas."""
@@ -28,8 +35,14 @@ def run_horus_view_logic(limit=100, full=False, focus=None):
     click.secho("\n--- 👁️  INQUÉRITO HÓRUS: TIMELINE DO INCIDENTE ---", fg='cyan', bold=True)
     
     stack_level = 0
+    prev_ts = None
     for r in reversed(rows):
         try:
+            cur_ts = _parse_ts(r['timestamp'])
+            if prev_ts and cur_ts and (cur_ts - prev_ts).total_seconds() > 30:
+                stack_level = 0
+            prev_ts = cur_ts
+
             data = json.loads(r['data'])
             # Filtro de Foco inteligente
             if focus and focus not in data.get('file', '') and focus not in data.get('f', ''):
@@ -80,10 +93,7 @@ def horus_view(limit, full, focus):
 @horus_group.command('purge')
 def horus_purge():
     """Limpa o registro tático (HORUS, SHADOW e AEGIS)."""
-    conn = get_db_connection()
     alexandria_write("DELETE FROM operational_logs WHERE subsystem IN ('HORUS', 'SHADOW', 'AEGIS', 'DIAG')")
-    conn.commit()
-    conn.close()
     click.secho("[OK] Memória operacional do Nexus purificada.", fg='green')
     
 @horus_group.command('run', context_settings=dict(ignore_unknown_options=True))
@@ -101,7 +111,9 @@ def horus_run(cmd_args):
     try:
         # [PLATINUM] Inteligência de Parsing:
         if len(cmd_args) == 1 and " " in cmd_args[0]:
-            full_cmd = shlex.split(cmd_args[0].replace('\\', '/'))
+            raw = cmd_args[0].strip().strip('"').strip("'")  # <-- strip aspas extras
+            full_cmd = shlex.split(raw, posix=False)          # posix=False é mais seguro no Windows
+            full_cmd = [a.strip('"').strip("'") for a in full_cmd]
         else:
             full_cmd = list(cmd_args)
             

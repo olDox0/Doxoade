@@ -84,7 +84,7 @@ testes/
 
 # ====== terceirizados ======
 thirdparty/w64devkit/
-
+doxoade/tools/benzaiten_gui/native/include/
 
 # --- DOXOADE LOCAL DATA ---
 # Ignora o banco de dados (pode conter caminhos absolutos do seu PC)

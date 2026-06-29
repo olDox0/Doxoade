@@ -18,7 +18,9 @@ def nexus_eval(expression: str, globals_dict: Dict = None, locals_dict: Dict = N
     if globals_dict is None:
         globals_dict = {"__builtins__": {}}
     elif "__builtins__" not in globals_dict:
-        globals_dict["__builtins__"] = {}
+        import builtins as _builtins_mod
+        globals_dict["__builtins__"] = _builtins_mod.__dict__
+
         
     return eval(expression, globals_dict, locals_dict) # noqa
 
@@ -31,7 +33,9 @@ def nexus_exec(source: Any, globals_dict: Dict = None, locals_dict: Dict = None)
     if globals_dict is None:
         globals_dict = {"__builtins__": {}}
     elif "__builtins__" not in globals_dict:
-        globals_dict["__builtins__"] = {}
+        import builtins as _builtins_mod
+        globals_dict["__builtins__"] = _builtins_mod.__dict__
+
         
     return exec(source, globals_dict, locals_dict) # noqa
 

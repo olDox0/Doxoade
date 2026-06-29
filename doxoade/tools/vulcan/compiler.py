@@ -227,7 +227,7 @@ class VulcanCompiler:
         
         import uuid
         unique_id = uuid.uuid4().hex[:8]
-        unique_work_dir = foundry_path / f'temp_{module_name}_{unique_id}'
+        unique_work_dir = foundry_path / f'temp_{module_name}'
         unique_work_dir.mkdir(parents=True, exist_ok=True)
 
         # 2. Injeção de Headers no Blueprint (VITAL)
