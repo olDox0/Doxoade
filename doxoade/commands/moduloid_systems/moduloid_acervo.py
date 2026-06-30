@@ -372,7 +372,11 @@ class AcervoEngine:
             row = conn.execute("SELECT version FROM moduloid_acervo WHERE name = ?", (final_name,)).fetchone()
             version = (row[0] + 1) if row else 1
             
-            alexandria_write('''
+            # ═══════════════════════════════════════════════════════════
+            #  [FIX-GOLD] Escrita Síncrona (Confirmação Imediata)
+            #  Substitui alexandria_write (assíncrono) por conexão direta
+            # ═══════════════════════════════════════════════════════════
+            conn.execute('''
                 INSERT OR REPLACE INTO moduloid_acervo 
                 (name, category, filename, docstring, capabilities, version, last_updated, 
                  origin_project, quality_score, security_status, health_report)
@@ -380,9 +384,9 @@ class AcervoEngine:
             ''', (final_name, category, f"{final_name}.py", meta['doc'], meta['capabilities'], 
                   version, datetime.now().isoformat(), os.getcwd(), 
                   meta['score'], meta['sec'], meta['health']))
+            conn.commit()  # ← Força commit imediato
             
             shutil.copy2(file_path, dest_path)
-            conn.commit()
             click.secho(f"✅ Moduloid '{final_name}' imortalizado com Score: {meta['score']}", fg="green", bold=True)
         finally:
             conn.close()

@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 # doxoade/tools/telemetry_tools/logger.py
 
-import time
 import os
+import ast
 import sys
 import json
+import time
 import click
 import hashlib
 import inspect
@@ -14,38 +15,37 @@ from doxoade.tools.alexandria.engine import alexandria_write
 
 _CHIEF_CONN = None
 _HEARTBEAT_LOCK = RLock()
-#_HEARTBEAT_LOCK = False
 _HEARTBEAT_CACHE = {}
 _LOG_BUFFER = []
 _LAST_FLUSH_TIME = time.monotonic()
-BUFFER_SIZE_LIMIT = 50   # Descarrega ao acumular 50 logs
-BUFFER_TIME_LIMIT = 2.0  # Ou a cada 2 segundos no máximo
+BUFFER_SIZE_LIMIT = 100   
+BUFFER_TIME_LIMIT = 5.0  
 THROTTLE_INTERVAL = 2.0
 
+class ASTEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, ast.AST):
+            return ast.dump(obj)
+        if isinstance(obj, type):
+            return obj.__name__
+        if hasattr(obj, '__dict__'):
+            return str(obj)
+        return super().default(obj)
+
+_original_json_dumps = json.dumps
+def _patched_json_dumps(obj, *args, **kwargs):
+    if 'cls' not in kwargs:
+        kwargs['cls'] = ASTEncoder
+    return _original_json_dumps(obj, *args, **kwargs)
+json.dumps = _patched_json_dumps
+
 def chief_heartbeat(subsystem: str, action: str, details: dict):
-    """Registra batimentos cardíacos com vazão otimizada via Throttling por Hash."""
-    from doxoade.tools.alexandria.engine import alexandria_write
-
-    global _CHIEF_CONN, _HEARTBEAT_CACHE
-
-    # Tenta adquirir o lock — se outro thread já está gravando, descarta este log
-    if not _HEARTBEAT_LOCK.acquire(blocking=False):
-        return
-
+    """Registra batimentos cardíacos com vazão otimizada via Alexandria Async Engine."""
     try:
         now_time = time.monotonic()
         subsystem_upper = subsystem.upper()
         action_upper = action.upper()
-
-        # --- FILTRAGEM DE ALTA VAZÃO (COMPLIANCE PASC 6.4) ---
         cache_key = f"{subsystem_upper}:{action_upper}"
-        if cache_key in _HEARTBEAT_CACHE:
-            last_logged, last_details_hash = _HEARTBEAT_CACHE[cache_key]
-            if (now_time - last_logged) < THROTTLE_INTERVAL:
-                current_details_str = str(details.get('caller_context', '')) + str(details.get('category', ''))
-                current_hash = hashlib.md5(current_details_str.encode('utf-8', 'ignore')).hexdigest()
-                if current_hash == last_details_hash:
-                    return
 
         # 1. Triangulação Híbrida (VULCAN/SHADOW INVOCATION)
         if (subsystem_upper in ["VULCAN", "SHADOW"]) and ("IN" in action_upper or "ENTER" in action_upper):
@@ -58,37 +58,45 @@ def chief_heartbeat(subsystem: str, action: str, details: dict):
                         'file': os.path.basename(caller.f_code.co_filename),
                         'line': caller.f_lineno
                     }
-            except Exception as e:
-                import logging as _dox_log
-                _dox_log.error(f"[INFRA] chief_heartbeat: {e}")
+            except Exception:
+                pass
+            finally:
+                del frame # Previne Memory Leak de referências de frame
 
-        # Atualiza cache
+        # 2. Calcula o Hash de estado para o Throttling
         details_str = str(details.get('caller_context', '')) + str(details.get('category', ''))
-        details_hash = hashlib.md5(details_str.encode('utf-8', 'ignore')).hexdigest()
-        _HEARTBEAT_CACHE[cache_key] = (now_time, details_hash)
+        current_hash = hashlib.md5(details_str.encode('utf-8', 'ignore')).hexdigest()
 
-        # 2. Singleton de Conexão
-        if _CHIEF_CONN is None:
-            from doxoade.core_database import get_db_connection
-            _CHIEF_CONN = get_db_connection()
+        # 3. FILTRAGEM DE ALTA VAZÃO (Protege apenas a RAM)
+        with _HEARTBEAT_LOCK:
+            if cache_key in _HEARTBEAT_CACHE:
+                last_logged, last_details_hash = _HEARTBEAT_CACHE[cache_key]
+                if (now_time - last_logged) < THROTTLE_INTERVAL:
+                    if current_hash == last_details_hash:
+                        return
+            
+            _HEARTBEAT_CACHE[cache_key] = (now_time, current_hash)
 
+        # 4. Delegação Assíncrona Total (Zero I/O Locking)
+        from doxoade.tools.alexandria.engine import alexandria_write
+        
         alexandria_write(
             'INSERT INTO operational_logs (timestamp, subsystem, action, data, pid) VALUES (?, ?, ?, ?, ?)',
             (datetime.now().isoformat(), subsystem_upper, action_upper,
-             json.dumps(details, ensure_ascii=False), os.getpid())
+             json.dumps(details, ensure_ascii=False, cls=ASTEncoder),  # ✅ Adicione cls=ASTEncoder
+             os.getpid())
         )
 
+        # 5. Manutenção Programada Silenciosa
         if os.getpid() % 100 == 0:
             alexandria_write(
                 'DELETE FROM operational_logs WHERE id NOT IN (SELECT id FROM operational_logs ORDER BY id DESC LIMIT 2000)'
             )
 
     except Exception as e:
-        _CHIEF_CONN = None
         if os.environ.get('VULCAN_VERBOSE') == '1':
             print(f"\x1b[33m [LOG-FAIL] {subsystem}:{action} -> {e}\x1b[0m")
-    finally:
-        _HEARTBEAT_LOCK.release()
+
         
 class ExecutionLogger:
     def __init__(self, command_name, path, arguments):

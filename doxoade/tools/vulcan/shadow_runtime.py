@@ -1,7 +1,8 @@
 # doxoade/doxoade/tools/vulcan/shadow_runtime.py
-import sys
 import os
+import sys
 import ast
+import json
 import importlib.abc
 import importlib.util
 import importlib.machinery
@@ -58,6 +59,17 @@ def is_shadow_enabled(project_root: str) -> bool:
     except Exception:
         pass
     return True
+
+class ASTEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, ast.AST):
+            return ast.dump(obj)
+        if isinstance(obj, type):
+            return obj.__name__  # ✅ Corrigido: __name__ em vez de name
+        # Adiciona suporte para objetos genéricos
+        if hasattr(obj, '__dict__'):
+            return str(obj)  # Converte para string representacional
+        return super().default(obj)
 
 class ShadowFinder(importlib.abc.MetaPathFinder):
     def __init__(self, project_root):

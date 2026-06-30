@@ -4,14 +4,10 @@
 import os
 import ast
 from datetime import datetime
-try:
-    from ..intelligence_utils import SemanticAnalyzer, CSemanticAnalyzer, HTMLSemanticAnalyzer, NexusThothMapper, ChiefInsightVisitor, find_debt_tags
-    from .intelligence_css import CSSSemanticAnalyzer
-    from .intelligence_js import JSSemanticAnalyzer  # <-- NOVO
-except ImportError:
-    from doxoade.commands.intelligence_utils import SemanticAnalyzer, CSemanticAnalyzer, HTMLSemanticAnalyzer, NexusThothMapper, ChiefInsightVisitor, find_debt_tags
-    from doxoade.commands.intelligence_systems.intelligence_css import CSSSemanticAnalyzer
-    from doxoade.commands.intelligence_systems.intelligence_js import JSSemanticAnalyzer  # <-- NOVO
+
+from doxoade.commands.intelligence_utils import SemanticAnalyzer, CSemanticAnalyzer, HTMLSemanticAnalyzer, NexusThothMapper, ChiefInsightVisitor, find_debt_tags
+from doxoade.commands.intelligence_systems.intelligence_css import CSSSemanticAnalyzer
+from doxoade.commands.intelligence_systems.intelligence_js import JSSemanticAnalyzer
 
 CRITICAL_THRESHOLD = datetime(2026, 2, 14, 21, 0, 0)
 

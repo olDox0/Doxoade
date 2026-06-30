@@ -18,6 +18,11 @@ from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.doxcolors import init as init_colors
 from doxoade.tools.command_metadata import COMMAND_META, format_help
 
+# Instala Ganesha Advisor
+from doxoade.tools.ganesha_systems import install_ganesha_hook
+install_ganesha_hook()
+
+
 if sys.stdout.encoding != 'utf-8':
     try:
         sys.stdout.reconfigure(encoding='utf-8')
@@ -70,6 +75,7 @@ class DoxoadeLazyGroup(click.Group):
             'guicheck': 'doxoade.commands.guicheck:guicheck',
             'hack': 'doxoade.commands.hacking:hack',
             'health': 'doxoade.commands.health:health',
+            'hermes':'doxoade.commands.cmd_hermes:hermes_group',
             'history': 'doxoade.commands.history:history',
             'horus': 'doxoade.commands.horus_cmd:horus_group',
             'ide': 'doxoade.commands.mobile_ide:ide',
@@ -129,6 +135,44 @@ class DoxoadeLazyGroup(click.Group):
             'stress-abyss': 'doxoade.commands.stress_test:stress_abyss',
         }
 
+    def resolve_command(
+        self, ctx: click.Context, args: list
+    ):
+        """Intercepta comandos errados e sugere correções via Ganesha."""
+        cmd_name = click.utils.make_str(args[0]) if args else None
+        
+        # Tenta resolver o comando normalmente
+        cmd = self.get_command(ctx, cmd_name)
+        
+        if cmd is not None:
+            return cmd_name, cmd, args[1:]
+        
+        # Comando não existe - aciona Ganesha
+        from doxoade.tools.ganesha_systems.ganesha_advisor import GaneshaAdvisor
+        GaneshaAdvisor.show_command_suggestion(ctx, self, cmd_name)
+        ctx.exit(1)
+
+    def parse_args(self, ctx: click.Context, args: list) -> list:
+        """Intercepta opções erradas e sugere correções via Ganesha."""
+        if not args or args[0].startswith('-'):
+            # Tenta parsear normalmente
+            try:
+                return super().parse_args(ctx, args)
+            except click.exceptions.UsageError as e:
+                error_msg = str(e)
+                
+                # Detecta "No such option: -h"
+                if "No such option:" in error_msg:
+                    wrong_option = error_msg.split("No such option:")[-1].strip()
+                    from doxoade.tools.ganesha_systems.ganesha_advisor import GaneshaAdvisor
+                    GaneshaAdvisor.show_option_suggestion(ctx, ctx.command, wrong_option)
+                    ctx.exit(1)
+                
+                # Re-raise outros erros
+                raise
+        
+        return super().parse_args(ctx, args)
+        
     def _load_cache(self):
         if self._cache_path.exists():
             return json.loads(self._cache_path.read_text())
@@ -314,10 +358,26 @@ class DoxoadeLazyGroup(click.Group):
                         with formatter.section("Commands"):
                             formatter.write_dl(commands)
 
-                cmd.format_commands = patched_format_commands
-                cmd._dox_group_patched = True
+            if not getattr(cmd, '_ganesha_hooked', False):
+                original_parse_args = cmd.parse_args
+                
+                def ganesha_parse_args(ctx, args):
+                    try:
+                        return original_parse_args(ctx, args)
+                    except click.exceptions.UsageError as e:
+                        error_msg = str(e)
+                        if "No such option:" in error_msg:
+                            wrong_option = error_msg.split("No such option:")[-1].strip()
+                            from doxoade.tools.ganesha_systems.ganesha_advisor import GaneshaAdvisor
+                            GaneshaAdvisor.show_option_suggestion(ctx, cmd, wrong_option)
+                            ctx.exit(1)
+                        raise
+                
+                cmd.parse_args = ganesha_parse_args
+                cmd._ganesha_hooked = True
 
             return cmd
+
 
         except Exception as e:
             if not ctx.resilient_parsing:
@@ -401,6 +461,10 @@ def process_result(result, **kwargs):
 def main():
     """Wrapper blindado com injeção Vulcan e Auto-VENV."""
     os.environ['DOXOADE_AUTHORIZED_RUN'] = '1'
+
+    # Instala Ganesha Advisor para interceptar erros de CLI
+    from doxoade.tools.ganesha_systems import install_ganesha_hook
+    install_ganesha_hook()
 
     if sys.stdout.encoding != 'utf-8':
         try:
