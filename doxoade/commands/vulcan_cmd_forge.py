@@ -19,7 +19,7 @@ from .vulcan_cmd import _sigint_handler, _print_vulcan_forensic, _patch_vulcan_f
 from doxoade.tools.filesystem import _find_project_root
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 try:
- from doxoade.tools.vulcan.simd_compiler import SIMDContext, SIMDEnvironment, estimate_gain
+    from doxoade.tools.vulcan.simd_compiler import SIMDContext, SIMDEnvironment, estimate_gain
 except ImportError:
     pass
 try:
@@ -597,9 +597,11 @@ def vulcan_regression(reset, reset_all, purge_missing, output_json):
 @click.option('--keep-temp', is_flag=True, help='Mantém cópia temporária para inspeção/debug.')
 @click.option('--simd', is_flag=True, help='Ativa otimizações SIMD (AVX/SSE) na compilação.')
 @click.option('--simd-level', default='auto', type=click.Choice(['auto', 'native', 'sse2', 'avx', 'avx2', 'avx512f']), show_default=True, help='Nível SIMD máximo (padrão: auto-detecta).')
+@click.option('--hermes', is_flag=True, help='Gera .hermes (HBC3) dos .py otimizados da lib.')  # ← NOVO
 @click.option('--probe', help='Diagnóstico: mostra como o pacote é (ou não é) encontrado.')
 @click.pass_context
-def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, no_optimize, keep_temp, simd, simd_level, probe):
+def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, no_optimize, 
+               keep_temp, simd, simd_level, hermes, probe):
     """Compila funções elegíveis de dependências já instaladas no venv.
 
     Pipeline padrão (--target):
@@ -726,8 +728,12 @@ def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, no_optimize
             click.echo(f'{Fore.YELLOW}[ERRO] --optimize exige --target.{Style.RESET_ALL}\n{Fore.CYAN}Exemplo:{Style.RESET_ALL}\n  doxoade vulcan lib --optimize --target click\n\n{Fore.CYAN}Dica:{Style.RESET_ALL} use --list-installed para ver libs disponíveis.')
             return
         if optimize and target:
-            click.echo(f'{Fore.CYAN}   > Modo: OPTIMIZE-ONLY (nenhuma compilação será executada){Style.RESET_ALL}')
+            click.echo(f'{Fore.CYAN}    > Modo: OPTIMIZE-ONLY (nenhuma compilação será executada){Style.RESET_ALL}')
             click.echo(f'{Fore.CYAN}{Style.BRIGHT}--- [VULCAN LIB] Otimizando (apenas) a biblioteca: {target} ---{Style.RESET_ALL}')
+            
+            if hermes:
+                click.echo(f'{Fore.MAGENTA}    > --hermes ativo: também gerará .hermes HBC3{Style.RESET_ALL}')
+            
             import importlib.util
             import shutil
             import tempfile
@@ -747,6 +753,7 @@ def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, no_optimize
                 if not pkg_path.exists():
                     click.echo(f'{Fore.RED}[FALHA] Caminho da lib não existe: {pkg_path}{Style.RESET_ALL}')
                     return
+                
                 tmp_ctx = tempfile.TemporaryDirectory(prefix=f'vulcan_opt_{target}_')
                 tmp = tmp_ctx.name
                 dest = Path(tmp) / pkg_path.name
@@ -770,6 +777,23 @@ def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, no_optimize
                     bytes_saved = stats.get('bytes_saved', 0)
                     click.echo(f'  Bytes economizados   : {bytes_saved} ({bytes_saved / 1024:.1f} KiB)')
                     click.echo(f'\n{Fore.GREEN}[SUCESSO] Otimização concluída na cópia: {dest}{Style.RESET_ALL}')
+                    
+                    # ═══════════════════════════════════════════════════════════════════
+                    # [NOVO] Aplica Hermes se --hermes ativo
+                    # ═══════════════════════════════════════════════════════════════════
+                    if hermes:
+                        click.echo(f'\n{Fore.MAGENTA}{Style.BRIGHT}--- [VULCAN LIB] Compressão Hermes ---{Style.RESET_ALL}')
+                        from doxoade.tools.vulcan.lib_forge import LibForge
+                        forge = LibForge(root)
+                        hermes_stats = _apply_hermes_to_lib(forge, target, run_optimizer=True)
+                        if hermes_stats['compressed'] > 0:
+                            saved_kb = hermes_stats['total_saved'] / 1024
+                            click.echo(f'  {Fore.GREEN}✔ {hermes_stats["compressed"]} .hermes gerados em '
+                                      f'.doxoade/hermes/lib/{target}/{Style.RESET_ALL}')
+                            click.echo(f'     {Fore.CYAN}Economia: {saved_kb:.1f} KB | Tokens dinâmicos: {hermes_stats["total_dyn_tokens"]}{Style.RESET_ALL}')
+                        else:
+                            click.echo(f'  {Fore.YELLOW}⚠ Nenhum arquivo foi comprimido{Style.RESET_ALL}')
+                    
                     click.echo(f'{Fore.CYAN}[DICA] Para compilar após otimizar: doxoade vulcan lib --target {target}{Style.RESET_ALL}')
                 finally:
                     if keep_temp:
@@ -794,22 +818,36 @@ def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, no_optimize
             if resolved_name != target:
                 click.echo(f"{Fore.CYAN}  ⬡ Resolvido: '{target}' → importável como '{resolved_name}' ({pkg_dir}){Style.RESET_ALL}")
                 target = resolved_name
+            
+            # Monta label de modo (incluindo HERMES)
             mode_parts = []
             if run_optimizer:
                 mode_parts.append('OPT')
+            if hermes:
+                mode_parts.append('HERMES')
             if simd_ctx and _SIMD_AVAILABLE:
                 mode_parts.append(f'SIMD/{simd_level.upper()}')
             mode_label = ' + '.join(mode_parts) if mode_parts else 'PADRÃO'
+            
             click.echo(f'{Fore.CYAN}{Style.BRIGHT}--- [VULCAN LIB] Forjando: {target}  [{mode_label}] ---{Style.RESET_ALL}')
             click.echo(f'{Fore.CYAN}   > Modo: VENV LOCAL (sem download — cópia isolada dos fontes){Style.RESET_ALL}')
             if not run_optimizer:
                 click.echo(f'{Fore.YELLOW}   > --no-optimize: LibOptimizer desabilitado.{Style.RESET_ALL}')
+            if hermes:
+                click.echo(f'{Fore.MAGENTA}   > --hermes: Compressão HBC3 ativa (dicionário local por arquivo).{Style.RESET_ALL}')
             if simd_ctx and _SIMD_AVAILABLE:
                 eff = simd_ctx.effective_caps()
                 click.echo(f'  {Fore.MAGENTA}⬡ SIMD:{Style.RESET_ALL} {eff.best.upper()} — {estimate_gain(eff)}')
             elif simd and (not _SIMD_AVAILABLE):
                 click.echo(f'  {Fore.YELLOW}⚠ --simd ignorado: módulos SIMD não disponíveis.{Style.RESET_ALL}')
-            success, result_message = _lib_compile_with_simd(target, root, simd_ctx, run_optimizer=run_optimizer)
+            
+            # Pipeline unificado: OPT → HERMES → SIMD/Cython
+            success, result_message = _lib_compile_with_hermes(
+                target, root, simd_ctx, 
+                run_optimizer=run_optimizer, 
+                run_hermes=hermes
+            )
+            
             if success:
                 click.echo(f'{Fore.GREEN}{Style.BRIGHT}\n[SUCESSO] {result_message}{Style.RESET_ALL}')
                 click.echo(f"{Fore.CYAN}[DICA] Use 'doxoade vulcan status' para ver os binários ativos.{Style.RESET_ALL}")
@@ -817,27 +855,101 @@ def vulcan_lib(ctx, analyze, target, auto, list_installed, optimize, no_optimize
                 click.echo(f'{Fore.RED}{Style.BRIGHT}\n[FALHA] {result_message}{Style.RESET_ALL}')
                 click.echo(f'{Fore.YELLOW}[DICA] Use --list-installed para ver libs disponíveis no venv.{Style.RESET_ALL}')
             return
-        elif auto:
-            click.echo(f'{Fore.YELLOW}[INFO] --auto: compila as top-3 libs da telemetria automaticamente.{Style.RESET_ALL}')
-            from doxoade.tools.vulcan.advisor import VulcanAdvisor
-            from doxoade.tools.vulcan.lib_forge import LibForge
-            _patch_vulcan_forge()
-            advisor = VulcanAdvisor(root)
-            hot_deps = advisor.get_hot_dependencies()
-            if not hot_deps:
-                click.echo(f'{Fore.YELLOW}Sem dados de telemetria para --auto.{Style.RESET_ALL}')
-                return
-            forge = LibForge(root)
-            for lib in list(hot_deps.keys())[:3]:
-                click.echo(f'\n{Fore.CYAN}  → Compilando: {lib}{Style.RESET_ALL}')
-                success, msg = forge.compile_library(lib)
-                if success:
-                    click.echo(f'{Fore.GREEN}  ✔ {msg}{Style.RESET_ALL}')
-                else:
-                    click.echo(f'{Fore.YELLOW}  ↷ {msg}{Style.RESET_ALL}')
-            return
+
+def _lib_compile_with_hermes(
+    lib_name: str, 
+    project_root: str, 
+    simd_ctx=None, 
+    run_optimizer: bool = True, 
+    run_hermes: bool = False
+) -> tuple[bool, str]:
+    """Pipeline unificado: LibOptimizer → HermesCompressor → HybridIgnite.
+    
+    Fluxo:
+      1. LibOptimizer (se habilitado): remove docstrings/imports/dead code
+      2. HermesCompressor (se --hermes): gera .hermes HBC3 dos .py otimizados
+      3. HybridIgnite: compila funções elegíveis para Cython
+    
+    O Hermes atua como cache binário dos .py — útil se a lib for carregada
+    via HermesMetaFinder em projetos que embarcam Vulcan.
+    """
+    from doxoade.tools.vulcan.lib_forge import LibForge
+    
+    forge = LibForge(project_root)
+    
+    # Se --hermes, aplica compressão nos .py otimizados
+    if run_hermes:
+        click.echo(f'  {Fore.MAGENTA}⬡ HERMES: Comprimindo .py otimizados para HBC3...{Style.RESET_ALL}')
+        hermes_stats = _apply_hermes_to_lib(forge, lib_name, run_optimizer)
+        if hermes_stats['compressed'] > 0:
+            saved_kb = hermes_stats['total_saved'] / 1024
+            click.echo(f'     {Fore.GREEN}✔ {hermes_stats["compressed"]} arquivos comprimidos '
+                      f'({saved_kb:.1f} KB economizados){Style.RESET_ALL}')
         else:
-            click.echo(ctx.get_help())
+            click.echo(f'     {Fore.YELLOW}⚠ Nenhum arquivo foi comprimido (todos ignorados ou falharam){Style.RESET_ALL}')
+    
+    # Compilação Cython normal (fluxo existente)
+    return forge.compile_library(
+        lib_name, 
+        run_optimizer=run_optimizer, 
+        simd_ctx=simd_ctx
+    )
+
+
+def _apply_hermes_to_lib(forge, lib_name: str, run_optimizer: bool = True) -> dict:
+    """Aplica HermesCompressor nos .py da lib com nomes limpos."""
+    import tempfile
+    import shutil
+    from pathlib import Path
+    from doxoade.tools.hermes_systems.hermes_compress import HermesCompressor
+    
+    stats = {'compressed': 0, 'failed': 0, 'total_saved': 0, 'total_dyn_tokens': 0}
+    
+    source_path = forge._find_in_venv(lib_name)
+    if not source_path:
+        return stats
+    
+    # Diretório de saída: .doxoade/hermes/lib/<lib_name>/
+    hermes_dir = forge.root / '.doxoade' / 'hermes' / 'lib' / lib_name
+    hermes_dir.mkdir(parents=True, exist_ok=True)
+    
+    compressor = HermesCompressor(str(forge.root))
+    
+    for py_file in source_path.rglob('*.py'):
+        try:
+            # 1. Otimização pré-compressão
+            optimized_content = None
+            if run_optimizer:
+                try:
+                    from doxoade.tools.hermes_systems.hermes_preprocessor import preprocess_for_hermes
+                    optimized_content, _ = preprocess_for_hermes(py_file)
+                except Exception:
+                    optimized_content = None
+            
+            # 2. Compressão HBC3 com dynamic scan
+            orig, final, hermes_file, dyn_tokens = compressor.compress_file(
+                py_file, optimized_content=optimized_content, use_dynamic_scan=True
+            )
+            
+            # 3. [CRÍTICO] Renomeia com nome limpo baseado no módulo Python
+            # Ex: click/decorators.py → click.decorators.hermes
+            rel_path = py_file.relative_to(source_path)
+            module_parts = list(rel_path.with_suffix('').parts)
+            clean_name = '.'.join([lib_name] + module_parts)
+            dest = hermes_dir / f"{clean_name}.hermes"
+            
+            shutil.move(str(hermes_file), str(dest))
+            
+            stats['compressed'] += 1
+            stats['total_saved'] += (orig - final)
+            stats['total_dyn_tokens'] += dyn_tokens
+            
+        except Exception as e:
+            stats['failed'] += 1
+            if os.environ.get('VULCAN_VERBOSE') == '1':
+                print(f'     {Fore.YELLOW}⚠ {py_file.name}: {e}{Style.RESET_ALL}')
+    
+    return stats
 
 @click.command('benchmark')
 @click.argument('path', required=False, type=click.Path(exists=True))

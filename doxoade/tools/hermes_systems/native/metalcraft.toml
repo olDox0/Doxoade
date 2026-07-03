@@ -1,0 +1,17 @@
+[project]
+name = "hermes_decoder"
+version = "1.0.0"
+
+[compiler]
+engine = "gcc"
+opt = "O3"
+shield = false
+
+[paths]
+sources = [ "hermes_decoder.c",]
+headers = []
+output = "."
+
+[linker]
+flags = [ "-shared", "-fPIC",]
+libs = [ "lzma", "python3.12",]

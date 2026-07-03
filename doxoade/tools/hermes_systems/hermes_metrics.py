@@ -126,10 +126,11 @@ class HermesMetricsCollector:
                 continue
             
             if stripped in encoder:
-                token_byte = encoder[stripped]
-                token_counter[str(token_byte)] += 1
+                token = encoder[stripped]
+                token_counter[str(token)] += 1
                 metrics.tokenized_lines += 1
-                compressed_size += 1  # Token = 1 byte
+                # chr(token) terá exatos 3 bytes em U+E000 no file system
+                compressed_size += len(chr(token).encode('utf-8')) + 1
             else:
                 metrics.kept_lines += 1
                 compressed_size += len(line.encode('utf-8')) + 1  # Linha original + \n

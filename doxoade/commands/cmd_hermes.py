@@ -1,13 +1,18 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/cmd_hermes.py
-import click
 import os
+import dis
+import glob
+import click
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.hermes_systems.hermes_scanner import run_hermes_reconnaissance
 from doxoade.tools.hermes_systems.hermes_dict.hermes_builder import HermesDictionaryBuilder
 from doxoade.tools.hermes_systems.hermes_compress import HermesCompressor
+
+from doxoade.tools.error_info import formated_traceback
 
 @click.group('hermes', invoke_without_command=True)
 @click.pass_context
@@ -44,161 +49,266 @@ def scan(target):
 @click.argument('file', required=False, type=click.Path(exists=True))
 @click.option('--target', '-t', default='.', help="Diretório alvo para scan.")
 @click.option('--optimize', '-o', is_flag=True, help="Aplica otimizações pré-compressão.")
-@click.option('--dynamic', '-d', is_flag=True, help="Usa dynamic scanner local.")
+@click.option('--dynamic', '-d', is_flag=True, help="Usa dynamic scanner local (HBC3).")
+@click.option('--hbc4', is_flag=True, help="Usa formato HBC4 (sem LZMA, mais rápido).")
+@click.option('--all', '-a', 'build_all', is_flag=True, help="Comprime TODOS os .py do projeto.")
+@click.option('--workers', '-w', default=4, help="Threads paralelas para --all.")
 @click.option('--max-tokens', default=5000, help="Número máximo de tokens no dicionário global.")
-def build(file, target, optimize, dynamic, max_tokens):
+def build(file, target, optimize, dynamic, hbc4, build_all, workers, max_tokens):
     """[Fase 2] Gera o Dicionário e Comprime arquivos para .hermes."""
-    click.echo(f"\n{Fore.MAGENTA}{Style.BRIGHT}☤ [HERMES] Construindo Matriz de Compressão...{Style.RESET_ALL}")
-    
-    if file:
-        # MODO ARQUIVO ESPECÍFICO
-        file_path = Path(file).resolve()
-        project_root = Path.cwd().resolve()
-        
-        click.echo(f"  {Fore.CYAN}▶ Modo: Arquivo específico{Style.RESET_ALL}")
-        click.echo(f"  {Fore.CYAN}▶ Alvo: {file_path.name}{Style.RESET_ALL}")
-        
-        optimized_content = None
-        if optimize:
-            from doxoade.tools.hermes_systems.hermes_preprocessor import preprocess_for_hermes
-            click.echo(f"  {Fore.YELLOW}▶ Aplicando otimizações pré-compressão...{Style.RESET_ALL}")
-            optimized_content, metrics = preprocess_for_hermes(file_path, str(project_root))
-            
-            click.echo(f"     {Fore.GREEN}✔ Docstrings removidos: {metrics['docstrings_removed']}{Style.RESET_ALL}")
-            click.echo(f"     {Fore.GREEN}✔ Imports removidos: {metrics['imports_removed']}{Style.RESET_ALL}")
-            click.echo(f"     {Fore.GREEN}✔ Comentários removidos: {metrics['comments_removed']}{Style.RESET_ALL}")
-            click.echo(f"     {Fore.GREEN}✔ Linhas vazias removidas: {metrics['blank_lines_removed']}{Style.RESET_ALL}")
-        
-        dict_path = project_root / '.doxoade' / 'hermes' / 'master.dict'
-        if not dict_path.exists():
-            click.echo(f"{Fore.RED}✘ Dicionário não encontrado. Execute 'doxoade hermes build' primeiro.{Style.RESET_ALL}")
-            return
-        
-        compressor = HermesCompressor(str(project_root))
-        try:
-            result = compressor.compress_file(
-                file_path,
-                optimized_content,
-                use_dynamic_scan=dynamic
-            )
-            # Suporta retorno com 4 elementos (com dynamic_count)
-            if len(result) == 4:
-                orig_sz, new_sz, hermes_file, dynamic_count = result
-            else:
-                orig_sz, new_sz, hermes_file = result
-                dynamic_count = 0
-
-            savings = 100 - ((new_sz / orig_sz) * 100) if orig_sz > 0 else 0
-            click.echo(f"  {Fore.GREEN}✔ Comprimido: {file_path.name} -> {hermes_file.name}{Style.RESET_ALL}")
-            click.echo(f"     Tamanho: {orig_sz} bytes -> {new_sz} bytes ({Fore.GREEN}-{savings:.1f}%{Style.RESET_ALL})")
-            if dynamic_count > 0:
-                click.echo(f"     {Fore.BLUE}🔬 Dynamic Scanner: +{dynamic_count} tokens locais{Style.RESET_ALL}")
-        except Exception as e:
-            click.echo(f"{Fore.RED}✘ Falha na compressão: {e}{Style.RESET_ALL}")
-    
-    else:
-        # MODO SCAN COMPLETO
-        click.echo(f"  {Fore.CYAN}▶ Modo: Scan completo + Prova de Conceito{Style.RESET_ALL}")
-        click.echo(f"  {Fore.CYAN}▶ Limite de tokens: {max_tokens}{Style.RESET_ALL}")
-        
-        results, mapping = run_hermes_reconnaissance(target, max_tokens=max_tokens)
-        
-        builder = HermesDictionaryBuilder(target)
-        token_count, dict_path = builder.build_from_scan(results, mapping, max_tokens=max_tokens)
-        click.echo(f"  {Fore.GREEN}✔ Dicionário Master criado em: {dict_path.name} ({token_count} tokens){Style.RESET_ALL}")
-        
-        compressor = HermesCompressor(target)
-        main_file = Path(target) / "doxoade" / "__main__.py"
-        
-        if main_file.exists():
-            result = compressor.compress_file(main_file)
-            # Suporta retorno com 3 ou 4 elementos
-            if len(result) == 4:
-                orig_sz, new_sz, hermes_file, _ = result
-            else:
-                orig_sz, new_sz, hermes_file = result
-            
-            savings = 100 - ((new_sz / orig_sz) * 100) if orig_sz > 0 else 0
-            click.echo(f"  {Fore.CYAN}✔ Prova de Conceito: {main_file.name} -> {hermes_file.name}{Style.RESET_ALL}")
-            click.echo(f"     Tamanho: {orig_sz} bytes -> {new_sz} bytes ({Fore.GREEN}-{savings:.1f}%{Style.RESET_ALL})")
-        
-@hermes_group.command('run')
-@click.argument('module_or_file')
-@click.option('--save', '-s', is_flag=True, help="Salva o .py reconstruído no disco.")
-def run(module_or_file, save):
-    """[Fase 3] Descomprime e executa um arquivo .hermes.
-    
-    Aceita tanto caminho de arquivo quanto nome de módulo:
-      doxoade hermes run doxoade/commands/intelligence_engine.py
-      doxoade hermes run doxoade.commands.intelligence_engine
-    """
     from doxoade.tools.hermes_systems.hermes_loader import HermesLoader, verify_lossless
+    from doxoade.tools.hermes_systems.hermes_compress import HermesCompressor
     
+    click.echo(f"\n{Fore.MAGENTA}{Style.BRIGHT}☤ [HERMES] Construindo Matriz de Compressão...{Style.RESET_ALL}")
     project_root = Path.cwd().resolve()
     
-    click.echo(f"\n{Fore.BLUE}{Style.BRIGHT}☤ [HERMES] Carregando Loader...{Style.RESET_ALL}")
-    
-    try:
-        loader = HermesLoader(str(project_root))
-    except FileNotFoundError as e:
-        click.echo(f"{Fore.RED}✘ {e}{Style.RESET_ALL}")
+    # ─────────────────────────────────────────────────────────────
+    # MODO BATCH (--all)
+    # ─────────────────────────────────────────────────────────────
+    if build_all:
+        _run_batch_build(project_root, optimize, dynamic, workers, hbc4)
         return
     
-    # Determina o caminho do .hermes
-    if '/' in module_or_file or '\\' in module_or_file or module_or_file.endswith('.hermes'):
-        # É um caminho de arquivo
-        hermes_path = Path(module_or_file).resolve()
-        if not hermes_path.suffix == '.hermes':
-            hermes_path = hermes_path.with_suffix('.hermes')
+    # ─────────────────────────────────────────────────────────────
+    # MODO ARQUIVO ESPECÍFICO
+    # ─────────────────────────────────────────────────────────────
+    if file:
+        _run_single_build(file, project_root, optimize, dynamic, hbc4)
+        return
+    
+    # ─────────────────────────────────────────────────────────────
+    # MODO SCAN COMPLETO (gera dicionário + PoC)
+    # ─────────────────────────────────────────────────────────────
+    click.echo(f"  {Fore.CYAN}▶ Modo: Scan completo + Prova de Conceito{Style.RESET_ALL}")
+    click.echo(f"  {Fore.CYAN}▶ Limite de tokens: {max_tokens}{Style.RESET_ALL}")
+    
+    results, mapping = run_hermes_reconnaissance(target, max_tokens=max_tokens)
+    builder = HermesDictionaryBuilder(target)
+    token_count, dict_path = builder.build_from_scan(results, mapping, max_tokens=max_tokens)
+    
+    click.echo(f"  {Fore.GREEN}✔ Dicionário Master criado em: {dict_path.name} ({token_count} tokens){Style.RESET_ALL}")
+    
+    compressor = HermesCompressor(target)
+    main_file = Path(target) / "doxoade" / "__main__.py"
+    
+    if main_file.exists():
+        result = compressor.compress_file(main_file, use_hbc4=hbc4)
         
-        # Se o caminho não existe, tenta no diretório .doxoade/hermes/
-        if not hermes_path.exists():
-            relative = hermes_path.relative_to(project_root) if hermes_path.is_relative_to(project_root) else hermes_path.name
-            hermes_path = loader.hermes_base_dir / relative
-    else:
-        # É um nome de módulo
-        hermes_path = loader.find_hermes_for_module(module_or_file)
-        if not hermes_path:
-            click.echo(f"{Fore.RED}✘ Arquivo .hermes não encontrado para o módulo: {module_or_file}{Style.RESET_ALL}")
-            return
-    
-    if not hermes_path.exists():
-        click.echo(f"{Fore.RED}✘ Arquivo .hermes não encontrado: {hermes_path}{Style.RESET_ALL}")
-        return
-    
-    # 1. Descompressão
-    click.echo(f"  {Fore.CYAN}▶ Descomprimindo: {hermes_path.name}{Style.RESET_ALL}")
-    try:
-        python_code = loader.decompress_file(hermes_path)
-    except Exception as e:
-        click.echo(f"{Fore.RED}✘ Falha na descompressão: {e}{Style.RESET_ALL}")
-        return
-    
-    click.echo(f"  {Fore.GREEN}✔ Código reconstruído: {len(python_code)} caracteres{Style.RESET_ALL}")
-    
-    # 2. Verificação Lossless (se existir o .py original)
-    # Tenta encontrar o .py original no projeto
-    relative_to_hermes = hermes_path.relative_to(loader.hermes_base_dir)
-    original_py = project_root / relative_to_hermes.with_suffix('.py')
-    
-    if original_py.exists():
-        is_lossless = verify_lossless(original_py, hermes_path, loader)
-        if is_lossless:
-            click.echo(f"  {Fore.GREEN}✔ PROVA LOSSLESS: O .py reconstruído é IDÊNTICO ao original!{Style.RESET_ALL}")
+        if len(result) == 4:
+            orig_sz, new_sz, hermes_file, _ = result
         else:
-            click.echo(f"  {Fore.YELLOW}⚠ DIVERGÊNCIA detectada entre original e reconstruído.{Style.RESET_ALL}")
+            orig_sz, new_sz, hermes_file = result
+        
+        savings = 100 - ((new_sz / orig_sz) * 100) if orig_sz > 0 else 0
+        fmt = "HBC4" if hbc4 else "HBC3"
+        
+        click.echo(f"  {Fore.CYAN}✔ Prova de Conceito: {main_file.name} -> {hermes_file.name}{Style.RESET_ALL}")
+        click.echo(f"     Formato: {fmt}")
+        click.echo(f"     Tamanho: {orig_sz} bytes -> {new_sz} bytes ({Fore.GREEN}-{savings:.1f}%{Style.RESET_ALL})")
+
+def _run_batch_build(project_root: Path, optimize: bool, dynamic: bool, workers: int, hbc4: bool = False):
+    """Comprime todos os .py do projeto em paralelo."""
+    import concurrent.futures
+    from doxoade.tools.hermes_systems.hermes_preprocessor import preprocess_for_hermes
     
-    # 3. Salvar ou Executar
-    if save:
-        output = hermes_path.with_suffix('.restored.py')
-        output.write_text(python_code, encoding='utf-8')
-        click.echo(f"  {Fore.GREEN}✔ Salvo em: {output}{Style.RESET_ALL}")
-    else:
-        click.echo(f"\n{Fore.MAGENTA}--- Código Reconstruído (Preview) ---{Style.RESET_ALL}")
-        preview = python_code
-        click.echo(preview)
-        click.echo(f"{Fore.MAGENTA}-----------------------------------{Style.RESET_ALL}")
-        click.echo(f"{Fore.CYAN}Use --save para gravar o .py reconstruído.{Style.RESET_ALL}")
+    # Coleta arquivos (ignora diretórios irrelevantes)
+    exclude_dirs = {'.venv', 'venv', '__pycache__', '.doxoade', '.git', 
+                    'node_modules', 'build', 'dist', 'tests', 'test'}
+    py_files = [
+        p for p in project_root.rglob('*.py')
+        if not any(exclude in p.parts for exclude in exclude_dirs)
+    ]
+    
+    click.echo(f"  {Fore.CYAN}▶ Modo: Batch ({len(py_files)} arquivos){Style.RESET_ALL}")
+    click.echo(f"  {Fore.CYAN}▶ Workers: {workers} | Otimização: {optimize} | Dinâmico: {dynamic} | HBC4: {hbc4}{Style.RESET_ALL}\n")
+    
+    stats = {
+        'success': 0,
+        'failed': 0,
+        'total_saved_bytes': 0,
+        'total_dyn_tokens': 0,
+        'hbc1': 0,
+        'hbc3': 0,
+        'hbc4': 0,
+    }
+    
+    def process_file(py_file: Path):
+        try:
+            optimized_content = None
+            if optimize:
+                optimized_content, _ = preprocess_for_hermes(py_file, str(project_root))
+            
+            compressor = HermesCompressor(str(project_root))
+            result = compressor.compress_file(
+                py_file, optimized_content, use_dynamic_scan=dynamic, use_hbc4=hbc4
+            )
+            
+            if len(result) == 4:
+                orig_sz, new_sz, hermes_file, dyn_tokens = result
+            else:
+                orig_sz, new_sz, hermes_file = result
+                dyn_tokens = 0
+            
+            saved = orig_sz - new_sz
+            fmt = 'HBC4' if hbc4 else ('HBC3' if dyn_tokens > 0 else 'HBC1')
+            
+            return {
+                'ok': True,
+                'name': py_file.name,
+                'saved': saved,
+                'dyn_tokens': dyn_tokens,
+                'format': fmt,
+            }
+        except Exception as e:
+            return {'ok': False, 'name': py_file.name, 'error': str(e)[:80]}
+    
+    # Execução paralela
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(process_file, f): f for f in py_files}
+        
+        for future in concurrent.futures.as_completed(futures):
+            r = future.result()
+            
+            if r['ok']:
+                stats['success'] += 1
+                stats['total_saved_bytes'] += r['saved']
+                stats['total_dyn_tokens'] += r['dyn_tokens']
+                
+                if r['format'] == 'HBC4':
+                    stats['hbc4'] += 1
+                elif r['format'] == 'HBC3':
+                    stats['hbc3'] += 1
+                else:
+                    stats['hbc1'] += 1
+            else:
+                stats['failed'] += 1
+                click.echo(f"  {Fore.RED}✘ {r['name']}: {r['error']}{Style.RESET_ALL}")
+    
+    # Resumo final
+    saved_mb = stats['total_saved_bytes'] / 1024 / 1024
+    
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}{'═'*60}{Style.RESET_ALL}")
+    click.echo(f"{Fore.GREEN}✔ Batch concluído{Style.RESET_ALL}")
+    click.echo(f"  Sucesso: {stats['success']}/{len(py_files)} arquivos")
+    click.echo(f"  Falhas:  {stats['failed']}")
+    click.echo(f"  HBC1: {stats['hbc1']} | HBC3: {stats['hbc3']} | HBC4: {stats['hbc4']}")
+    click.echo(f"  Tokens dinâmicos totais: {stats['total_dyn_tokens']}")
+    click.echo(f"  {Fore.GREEN}Economia total: {saved_mb:.2f} MB{Style.RESET_ALL}")
+    click.echo(f"{Fore.CYAN}{Style.BRIGHT}{'═'*60}{Style.RESET_ALL}\n")
+
+def _run_single_build(file: str, project_root: Path, optimize: bool, dynamic: bool, hbc4: bool = False):
+    """Comprime um arquivo específico."""
+    from doxoade.tools.hermes_systems.hermes_preprocessor import preprocess_for_hermes
+    from doxoade.tools.hermes_systems.hermes_compress import HermesCompressor
+    from doxoade.tools.hermes_systems.hermes_loader import HermesLoader, verify_lossless
+    
+    file_path = Path(file).resolve()
+    
+    click.echo(f"  {Fore.CYAN}▶ Modo: Arquivo específico{Style.RESET_ALL}")
+    click.echo(f"  {Fore.CYAN}▶ Alvo: {file_path.name}{Style.RESET_ALL}")
+    
+    optimized_content = None
+    if optimize:
+        click.echo(f"  {Fore.YELLOW}▶ Aplicando otimizações pré-compressão...{Style.RESET_ALL}")
+        optimized_content, metrics = preprocess_for_hermes(file_path, str(project_root))
+        click.echo(f"     {Fore.GREEN}✔ Docstrings removidos: {metrics['docstrings_removed']}{Style.RESET_ALL}")
+        click.echo(f"     {Fore.GREEN}✔ Imports removidos: {metrics['imports_removed']}{Style.RESET_ALL}")
+        click.echo(f"     {Fore.GREEN}✔ Comentários removidos: {metrics['comments_removed']}{Style.RESET_ALL}")
+        click.echo(f"     {Fore.GREEN}✔ Linhas vazias removidas: {metrics['blank_lines_removed']}{Style.RESET_ALL}")
+    
+    dict_path = project_root / '.doxoade' / 'hermes' / 'master.dict'
+    if not dict_path.exists():
+        click.echo(f"{Fore.YELLOW}⚠ Dicionário não encontrado. Gerando automaticamente...{Style.RESET_ALL}")
+        results, mapping = run_hermes_reconnaissance(str(project_root))
+        builder = HermesDictionaryBuilder(str(project_root))
+        builder.build_from_scan(results, mapping)
+    
+    compressor = HermesCompressor(str(project_root))
+    
+    try:
+        result = compressor.compress_file(
+            file_path, optimized_content, use_dynamic_scan=dynamic, use_hbc4=hbc4
+        )
+        
+        if len(result) == 4:
+            orig_sz, new_sz, hermes_file, dynamic_count = result
+        else:
+            orig_sz, new_sz, hermes_file = result
+            dynamic_count = 0
+        
+        savings = 100 - ((new_sz / orig_sz) * 100) if orig_sz > 0 else 0
+        fmt = "HBC4" if hbc4 else "HBC3"
+        
+        click.echo(f"  {Fore.GREEN}✔ Comprimido: {file_path.name} -> {hermes_file.name}{Style.RESET_ALL}")
+        click.echo(f"     Formato: {fmt}")
+        click.echo(f"     Tamanho: {orig_sz} bytes -> {new_sz} bytes ({Fore.GREEN}-{savings:.1f}%{Style.RESET_ALL})")
+        
+        # Teste de integridade
+        source_to_verify = optimized_content if optimize else file_path.read_text(encoding='utf-8')
+        loader = HermesLoader(str(project_root))
+        is_lossless, hash_orig, hash_recon = verify_lossless(
+            source_to_verify, file_path, hermes_file, loader
+        )
+        
+        if is_lossless:
+            click.echo(f"     {Fore.CYAN}🛡️ Integridade: 100% Lossless (SHA256: {hash_orig}){Style.RESET_ALL}")
+        else:
+            click.echo(f"     {Fore.YELLOW}⚠ Integridade: {hash_orig} (verificação estrutural){Style.RESET_ALL}")
+        
+        if dynamic_count > 0:
+            click.echo(f"     {Fore.BLUE}🔬 Dynamic Scanner: +{dynamic_count} tokens locais{Style.RESET_ALL}")
+    
+    except Exception as e:
+        click.echo(f"{Fore.RED}✘ Falha na compressão: {e}{Style.RESET_ALL}")
+        from doxoade.tools.error_info import formated_traceback
+        formated_traceback(e, f"Compressão de {file_path.name}")
+
+@hermes_group.command('run')
+@click.argument('module_name')
+def run(module_name):
+    """[Fase 3] Testa a descompressão e faz Disassembly do Bytecode."""
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}☤ [HERMES] Carregando Loader na Virtual Machine...{Style.RESET_ALL}")
+    
+    project_root = Path.cwd().resolve()
+    from doxoade.tools.hermes_systems.hermes_loader import HermesLoader
+    
+    loader = HermesLoader(str(project_root))
+    hermes_path = loader.find_hermes_for_module(module_name)
+    
+    if not hermes_path:
+        click.echo(f"{Fore.RED}✘ Módulo .hermes não encontrado para: {module_name}{Style.RESET_ALL}")
+        return
+        
+    try:
+        # Puxa o objeto executável (bytecode) da memória
+        code_obj = loader.decompress_to_code(hermes_path)
+        click.echo(f"  {Fore.GREEN}✔ Bytecode reconstruído com sucesso na RAM!{Style.RESET_ALL}")
+        
+        click.echo(f"\n{Style.DIM}--- Inspeção de Bytecode (Primeiras 20 instruções) ---{Style.RESET_ALL}")
+        
+        # Faz o disassembly do código de máquina gerado
+        import io
+        import sys
+        
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        try:
+            dis.dis(code_obj)
+            assembly_output = sys.stdout.getvalue()
+        finally:
+            sys.stdout = old_stdout
+            
+        # Mostra apenas o começo para não poluir o terminal
+        lines = assembly_output.split('\n')
+        for line in lines[:50]:
+            click.echo(f"{Fore.YELLOW}{line}{Style.RESET_ALL}")
+            
+        if len(lines) > 50:
+            click.echo(f"{Style.DIM}... (mais {len(lines) - 50} instruções omitidas){Style.RESET_ALL}")
+            
+    except Exception as e:
+        click.echo(f"{Fore.RED}✘ Falha ao executar bytecode: {e}{Style.RESET_ALL}")
+        format_traceback(e, "cmd_hermes - run")
         
 @hermes_group.command('report')
 @click.option('--target', '-t', default='.', help="Diretório alvo para análise.")
@@ -231,3 +341,135 @@ def report(target, save):
     if save:
         report_path = collector.save_report()
         click.echo(f"\n{Fore.GREEN}✔ Relatório JSON salvo em: {report_path}{Style.RESET_ALL}")
+
+@hermes_group.command('benchmark')
+@click.option('--iterations', '-i', default=10, help='Número de iterações por teste.')
+@click.option('--output', '-o', is_flag=True, default=True, help='Salva relatório em JSON.')
+def benchmark(iterations, output):
+    """Executa benchmark de performance Hermes vs Python puro."""
+    from doxoade.tools.hermes_systems.hermes_benchmark import run_benchmark
+    
+    project_root = Path.cwd().resolve()
+    report = run_benchmark(str(project_root), iterations=iterations, output=output)
+    
+    # Retorna speedup médio
+    speedups = []
+    for test_name in set(r.test_name for r in report.results):
+        speedup = report.get_speedup(test_name)
+        if speedup:
+            speedups.append(speedup)
+    
+    if speedups:
+        avg_speedup = sum(speedups) / len(speedups)
+        if avg_speedup > 1.5:
+            click.echo(f"{Fore.GREEN}✔ Speedup médio: {avg_speedup:.2f}×{Style.RESET_ALL}")
+        elif avg_speedup > 1.0:
+            click.echo(f"{Fore.YELLOW}⚠ Speedup médio: {avg_speedup:.2f}× (marginal){Style.RESET_ALL}")
+        else:
+            click.echo(f"{Fore.RED}✘ Sem ganho significativo (speedup: {avg_speedup:.2f}×){Style.RESET_ALL}")
+            
+@hermes_group.command('purge')
+@click.option('--lib', help='Nome da biblioteca para purgar (ex: click)')
+@click.option('--all', 'purge_all', is_flag=True, help='Remove todos os .hermes do projeto')
+@click.option('--force', is_flag=True, help='Confirma sem perguntar')
+@click.pass_context
+def purge(ctx, lib, purge_all, force):
+    """Remove arquivos .hermes problemáticos."""
+    from pathlib import Path
+    from doxoade.tools.doxcolors import Fore, Style
+    
+    project_root = Path.cwd().resolve()
+    hermes_dir = project_root / '.doxoade' / 'hermes'
+    
+    if not hermes_dir.exists():
+        click.echo(f"{Fore.YELLOW}⚠ Diretório .doxoade/hermes não existe.{Style.RESET_ALL}")
+        return
+    
+    if lib:
+        # Purga lib específica
+        lib_dir = hermes_dir / 'lib' / lib
+        if not lib_dir.exists():
+            click.echo(f"{Fore.YELLOW}⚠ Lib '{lib}' não encontrada em {lib_dir}{Style.RESET_ALL}")
+            return
+        
+        hermes_files = list(lib_dir.glob('*.hermes'))
+        if not hermes_files:
+            click.echo(f"{Fore.YELLOW}⚠ Nenhum .hermes encontrado para '{lib}'{Style.RESET_ALL}")
+            return
+        
+        if not force:
+            if not click.confirm(f"Remover {len(hermes_files)} arquivos .hermes de '{lib}'?"):
+                return
+        
+        for f in hermes_files:
+            f.unlink()
+            click.echo(f"  {Fore.RED}✘{Style.RESET_ALL} {f.name}")
+        
+        # Remove diretório se vazio
+        if not any(lib_dir.iterdir()):
+            lib_dir.rmdir()
+            click.echo(f"  {Fore.CYAN}📁 Diretório removido: {lib_dir.name}{Style.RESET_ALL}")
+        
+        click.echo(f"\n{Fore.GREEN}✔ {len(hermes_files)} arquivo(s) removido(s) de '{lib}'{Style.RESET_ALL}")
+        click.echo(f"{Fore.YELLOW}💡 Dica: Rebuild com 'doxoade vulcan lib --target {lib} --optimize --hermes'{Style.RESET_ALL}")
+    
+    elif purge_all:
+        # Purga tudo
+        build_dir = hermes_dir / 'build'
+        lib_base = hermes_dir / 'lib'
+        total = 0
+        
+        if build_dir.exists():
+            files = list(build_dir.glob('*.hermes'))
+            total += len(files)
+            
+            if not force:
+                if not click.confirm(f"Remover TODOS os {total} arquivos .hermes?"):
+                    return
+            
+            for f in files:
+                f.unlink()
+        
+        if lib_base.exists():
+            for lib_dir in lib_base.iterdir():
+                if lib_dir.is_dir():
+                    files = list(lib_dir.glob('*.hermes'))
+                    total += len(files)
+                    for f in files:
+                        f.unlink()
+                    if not any(lib_dir.iterdir()):
+                        lib_dir.rmdir()
+        
+        click.echo(f"\n{Fore.GREEN}✔ {total} arquivo(s) .hermes removido(s){Style.RESET_ALL}")
+    
+    else:
+        click.echo(ctx.get_help())
+
+@hermes_group.command('native')
+@click.option('--force', '-f', is_flag=True, help='Força recompilação mesmo se cache válido')
+@click.option('--metalcraft', '-m', is_flag=True, default=True, help='Usa Metalcraft (padrão) ou GCC direto')
+def build_native(force, metalcraft):
+    """Compila o decoder C nativo do Hermes."""
+    from doxoade.tools.hermes_systems.native.build_auto import HermesNativeBuilder
+    from doxoade.tools.doxcolors import Fore, Style
+    
+    project_root = Path.cwd().resolve()
+    
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}☤ [HERMES] Build Native Decoder...{Style.RESET_ALL}\n")
+    
+    builder = HermesNativeBuilder(str(project_root))
+    
+    if force:
+        click.echo(f"  {Fore.YELLOW}⚠ Forçando recompilação (ignorando cache){Style.RESET_ALL}")
+        # Remove cache para forçar rebuild
+        if builder.cache_file.exists():
+            builder.cache_file.unlink()
+    
+    success = builder.build(use_metalcraft=metalcraft)
+    
+    if success:
+        click.echo(f"\n{Fore.GREEN}✔ Decoder C nativo compilado com sucesso!{Style.RESET_ALL}")
+        click.echo(f"  {Fore.CYAN}O Hermes agora usará o decoder acelerado por C.{Style.RESET_ALL}")
+    else:
+        click.echo(f"\n{Fore.RED}✘ Falha na compilação do decoder C{Style.RESET_ALL}")
+        click.echo(f"  {Fore.YELLOW}O Hermes usará o decoder Python puro (mais lento).{Style.RESET_ALL}")

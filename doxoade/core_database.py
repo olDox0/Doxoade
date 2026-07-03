@@ -16,10 +16,10 @@ import sqlite3 as real_sqlite3
 
 import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
 
-#from doxoade.tools.error_info.py import formated_traceback
-from doxoade.tools.alexandria.engine import alexandria_write
+from doxoade.tools.error_info             import formated_traceback
+from doxoade.tools.alexandria.engine      import alexandria_write
 from doxoade.tools.telemetry_tools.logger import chief_heartbeat
-from doxoade.tools.filesystem import _find_project_root
+from doxoade.tools.filesystem             import _find_project_root
 
 #from doxoade.database import DB_FILE, get_db_connection
 
@@ -38,7 +38,8 @@ DB_VERSION = 134
 _CACHED_DB_PATH = None
 _LOG_QUEUE = None 
 
-click.echo(f"[DB-TRACE] Alvo absoluto travado em: {DB_FILE}")
+if os.environ.get("VULCAN_VERBOSE") == "1":
+    click.echo(f"[DB-TRACE] Alvo absoluto travado em: {DB_FILE}")
 
 def get_db_connection():
     """Abre conexão com monitoramento resiliente (Sapiens Watcher)."""

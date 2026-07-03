@@ -1,10 +1,12 @@
+# -*- coding: utf-8 -*-
+# doxoade/boot.py
 """
 NEXUS BOOT MANAGER - Orquestrador Central de Sistemas de Background.
 Garante a hierarquia, evita colisões e preserva os importadores nativos do Python.
 """
 import sys
 import os
-
+from doxoade.tools.error_info import formated_traceback
 
 def clean_meta_path():
     """Limpa apenas o lixo do Doxoade, PRESERVANDO o PathFinder do Python."""
@@ -13,19 +15,17 @@ def clean_meta_path():
         if "VulcanMetaFinder" not in str(f) and "ShadowFinder" not in str(f)
     ]
 
-
 def ignite_background_systems(project_root: str):
     """Ordem estrita de inicialização Tier 1 -> Tier 2."""
     clean_meta_path()
-
+    
     # 1. ABI Gate (Move os arquivos compilados para o local correto)
     try:
         from doxoade.tools.vulcan.abi_gate import run_abi_gate
         run_abi_gate(project_root)
     except Exception as e:
-        from doxoade.tools.error_info import formated_traceback
         formated_traceback(e, "boot - ignite_background_systems - run_abi_gate")
-
+    
     # 2. Vulcan MetaFinder (Tier 1 - Índice 0)
     try:
         from doxoade.tools.vulcan.meta_finder import VulcanMetaFinder
@@ -33,9 +33,8 @@ def ignite_background_systems(project_root: str):
         sys.meta_path.insert(0, vulcan_finder)
     except Exception as e:
         print(f"⚠️ [BOOT] Falha no Vulcan: {e}")
-        from doxoade.tools.error_info import formated_traceback
         formated_traceback(e, "boot - ignite_background_systems - VulcanMetaFinder")
-
+    
     # 3. Shadow Runtime / NSR (Vigilância - Índice 1)
     try:
         if os.environ.get("DOXOADE_SHADOW") != "0":
@@ -44,31 +43,38 @@ def ignite_background_systems(project_root: str):
             pos = 1 if len(sys.meta_path) > 0 else 0
             sys.meta_path.insert(pos, shadow_finder)
     except Exception as e:
-        from doxoade.tools.error_info import formated_traceback
         formated_traceback(e, "boot - ignite_background_systems - DOXOADE_SHADOW")
-
+    
     # 4. Horus Shadow (Observabilidade - após Vulcan e Shadow)
     try:
         if os.environ.get("DOXOADE_HORUS_ACTIVE") == "1":
             from doxoade.tools.horus_scribe import activate_horus_shadow
             activate_horus_shadow()
     except Exception as e:
-        from doxoade.tools.error_info import formated_traceback
         formated_traceback(e, "boot - ignite_background_systems - DOXOADE_HORUS_ACTIVE")
-
+    
     # 5. Sotéria / Lazarus Hook (Crash Handler)
     os.environ["DOXOADE_RESCUE"] = "1"
     try:
         from doxoade.tools.aegis.lazarus_hook import install_shield
         install_shield()
     except Exception as e:
-        from doxoade.tools.error_info import formated_traceback
         formated_traceback(e, "boot - ignite_background_systems - DOXOADE_RESCUE")
-
-    # 6. Hermes Systems (Compressão de Módulos) — Índice 3 ou final
+    
+    # 6. Hermes Native Decoder (Auto-Build C)
+    try:
+        from doxoade.tools.hermes_systems.native.build_auto import ensure_decoder_built
+        if ensure_decoder_built(project_root):
+            if os.environ.get("HERMES_VERBOSE") == "1":
+                print(f"\x1b[90m[HERMES] Decoder C nativo pronto\x1b[0m")
+    except Exception as e:
+        # Não falha o boot se o decoder C não compilar
+        if os.environ.get("HERMES_VERBOSE") == "1":
+            print(f"\x1b[90m[HERMES] Decoder C não disponível (fallback Python)\x1b[0m")
+    
+    # 7. Hermes Systems (Compressão de Módulos) — Índice 3 ou final
     try:
         from doxoade.tools.hermes_systems.hermes_hook import install as hermes_install
         hermes_install(project_root)
     except Exception as e:
-        from doxoade.tools.error_info import formated_traceback
         formated_traceback(e, "boot - ignite_background_systems - HermesFinder")

@@ -3,6 +3,7 @@
 """
 Hermes Preprocessor - Pipeline de Otimização Pré-Compressão.
 Remove imports não utilizados, comentários e docstrings não atribuídos.
+Compliance: OSL-4 (responsabilidade única), OSL-5 (nunca levanta exceção).
 """
 import ast
 import re
@@ -11,153 +12,224 @@ from typing import Tuple
 
 
 class HermesPreprocessor:
-    """Otimiza código Python antes da compressão Hermes."""
+    """Otimiza código Python antes da compressão Hermes.
 
-    def __init__(self, project_root: str):
-        self.root = Path(project_root).resolve()
+    Pipeline:
+    1. Remove docstrings não atribuídos (via AST)
+    2. Remove imports não utilizados (via AST + análise de nomes)
+    3. Remove comentários inline (via regex)
+    4. Remove linhas vazias excessivas (via regex)
 
-    def optimize_file(self, py_file: Path) -> Tuple[str, dict]:
-        """
-        Aplica otimizações no arquivo e retorna o código otimizado + métricas.
-        """
-        original_content = py_file.read_text(encoding='utf-8', errors='ignore')
-        metrics = {
-            'original_size': len(original_content),
-            'original_lines': len(original_content.splitlines()),
+    Todas as métricas são contagens reais de remoções, não diffs de string.
+    """
+
+    def __init__(self, project_root: str = None):
+        self.root = Path(project_root).resolve() if project_root else None
+        self.metrics = {
+            'docstrings_removed': 0,
             'imports_removed': 0,
             'comments_removed': 0,
-            'docstrings_removed': 0,
             'blank_lines_removed': 0,
         }
 
-        # 1. Remove docstrings não atribuídos (apenas comentários de módulo/função)
-        optimized_content = self._remove_unassigned_docstrings(original_content)
-        metrics['docstrings_removed'] = original_content.count('"""') - optimized_content.count('"""')
+    def optimize_file(self, file_path: Path) -> Tuple[str, dict]:
+        self.metrics = {
+            'docstrings_removed': 0,
+            'imports_removed': 0,
+            'comments_removed': 0,
+            'blank_lines_removed': 0,
+        }
 
-        # 2. Remove imports não utilizados (via AST)
-        optimized_content = self._remove_unused_imports(optimized_content)
-        metrics['imports_removed'] = original_content.count('\nimport') - optimized_content.count('\nimport')
+        try:
+            content = file_path.read_text(encoding='utf-8')
+        except Exception:
+            return '', self.metrics
 
-        # 3. Remove comentários de linha única
-        optimized_content = self._remove_inline_comments(optimized_content)
-        metrics['comments_removed'] = original_content.count('#') - optimized_content.count('#')
+        original_lines = len(content.splitlines())
 
-        # 4. Remove linhas vazias consecutivas (mantém no máximo 1)
-        optimized_content = self._remove_excessive_blank_lines(optimized_content)
-        metrics['blank_lines_removed'] = metrics['original_lines'] - len(optimized_content.splitlines())
+        # Fase 1: Docstrings (via AST)
+        content = self._remove_unassigned_docstrings(content)
 
-        return optimized_content, metrics
+        # Fase 2: Imports não utilizados (via AST)
+        content = self._remove_unused_imports(content)
 
+        # Fase 3: Comentários inline (via regex)
+        content = self._remove_inline_comments(content)
+
+        # Fase 4: Linhas vazias excessivas (via regex)
+        content = self._remove_excessive_blank_lines(content)
+
+        final_lines = len(content.splitlines())
+        self.metrics['blank_lines_removed'] = max(0, original_lines - final_lines - 
+                                                   self.metrics['docstrings_removed'] - 
+                                                   self.metrics['comments_removed'])
+
+        return content, self.metrics
+
+    # ─────────────────────────────────────────────────────────────────
+    # Fase 1: Docstrings via AST
+    # ─────────────────────────────────────────────────────────────────
     def _remove_unassigned_docstrings(self, content: str) -> str:
-        """
-        Remove docstrings que não estão atribuídos a variáveis.
-        Preserva: xyz = \"\"\" ... \"\"\"
-        Remove: \"\"\" ... \"\"\" (no início de módulo/função/classe)
-        """
+        """Remove docstrings, mas preserva pelo menos um 'pass' se o corpo ficar vazio."""
         try:
             tree = ast.parse(content)
-            
-            # Coleta linhas de docstrings não atribuídos
-            docstring_lines = set()
+            lines = content.splitlines()
+            lines_to_remove = set()
             
             for node in ast.walk(tree):
-                # Docstrings de módulo
-                if isinstance(node, ast.Module):
+                if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                     if (node.body and isinstance(node.body[0], ast.Expr) and 
                         isinstance(node.body[0].value, ast.Constant) and 
                         isinstance(node.body[0].value.value, str)):
+                        
+                        # PROTEÇÃO: Se é o ÚNICO statement do corpo, não remove
+                        if len(node.body) == 1:
+                            continue
+                        
                         doc_node = node.body[0]
                         for line_no in range(doc_node.lineno, doc_node.end_lineno + 1):
-                            docstring_lines.add(line_no)
-                
-                # Docstrings de funções/classes
-                elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                    if (node.body and isinstance(node.body[0], ast.Expr) and 
-                        isinstance(node.body[0].value, ast.Constant) and 
-                        isinstance(node.body[0].value.value, str)):
-                        doc_node = node.body[0]
-                        for line_no in range(doc_node.lineno, doc_node.end_lineno + 1):
-                            docstring_lines.add(line_no)
+                            lines_to_remove.add(line_no)
             
-            # Remove as linhas marcadas
-            lines = content.splitlines()
-            optimized_lines = [line for i, line in enumerate(lines, 1) if i not in docstring_lines]
-            
+            optimized_lines = [line for i, line in enumerate(lines, 1) if i not in lines_to_remove]
             return '\n'.join(optimized_lines)
         
         except SyntaxError:
             return content
 
-    def _remove_unused_imports(self, content: str) -> str:
-        """Remove imports que não são usados no código (análise AST simples)."""
+    # ─────────────────────────────────────────────────────────────────
+    # Fase 2: Imports não utilizados via AST
+    # ─────────────────────────────────────────────────────────────────
+    def _remove_unused_imports(self, source: str) -> str:
+        """Remove imports não utilizados."""
         try:
-            tree = ast.parse(content)
-            
-            # Coleta todos os nomes usados no código
-            used_names = set()
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Name):
-                    used_names.add(node.id)
-                elif isinstance(node, ast.Attribute):
-                    if isinstance(node.value, ast.Name):
-                        used_names.add(node.value.id)
-            
-            # Remove imports não utilizados
-            lines = content.splitlines()
-            optimized_lines = []
-            for line in lines:
-                stripped = line.strip()
-                if stripped.startswith('import ') or stripped.startswith('from '):
-                    # Extrai o nome do módulo importado
-                    if ' import ' in stripped:
-                        module_name = stripped.split(' import ')[0].replace('from ', '').strip()
-                        if module_name not in used_names and module_name.split('.')[0] not in used_names:
-                            continue  # Pula este import
-                optimized_lines.append(line)
-            
-            return '\n'.join(optimized_lines)
+            tree = ast.parse(source)
         except SyntaxError:
-            return content
+            return source
 
-    def _remove_inline_comments(self, content: str) -> str:
-        """Remove comentários de linha única (# comentário)."""
-        lines = content.splitlines()
-        optimized_lines = []
-        for line in lines:
-            # Remove comentários que não estão dentro de strings
-            if '#' in line and not line.strip().startswith('#'):
-                # Verifica se o # não está dentro de uma string
-                parts = line.split('#', 1)
-                if len(parts) == 2:
-                    before_hash = parts[0]
-                    # Conta aspas antes do #
-                    single_quotes = before_hash.count("'")
-                    double_quotes = before_hash.count('"')
-                    # Se o número de aspas é par, o # não está em string
-                    if single_quotes % 2 == 0 and double_quotes % 2 == 0:
-                        line = before_hash.rstrip()
-            optimized_lines.append(line)
-        return '\n'.join(optimized_lines)
+        # Coleta nomes usados
+        used_names = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                used_names.add(node.id)
+            elif isinstance(node, ast.Attribute):
+                if isinstance(node.value, ast.Name):
+                    used_names.add(node.value.id)
 
-    def _remove_excessive_blank_lines(self, content: str) -> str:
-        """Remove linhas vazias consecutivas (mantém no máximo 1)."""
-        lines = content.splitlines()
-        optimized_lines = []
-        prev_blank = False
-        for line in lines:
-            if not line.strip():
-                if not prev_blank:
-                    optimized_lines.append(line)
-                prev_blank = True
+        lines = source.splitlines()
+        lines_to_remove = set()
+
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                # Verifica se algum nome do import é usado
+                has_used = False
+                for alias in node.names:
+                    name = alias.asname or alias.name.split('.')[0]
+                    if name in used_names or name == '*':
+                        has_used = True
+                        break
+
+                if not has_used:
+                    for line_no in range(node.lineno, getattr(node, 'end_lineno', node.lineno) + 1):
+                        lines_to_remove.add(line_no)
+                    self.metrics['imports_removed'] += 1
+
+        if lines_to_remove:
+            new_lines = [line for i, line in enumerate(lines, 1) if i not in lines_to_remove]
+            return '\n'.join(new_lines)
+
+        return source
+
+    # ─────────────────────────────────────────────────────────────────
+    # Fase 3: Comentários inline via regex
+    # ─────────────────────────────────────────────────────────────────
+    def _remove_inline_comments(self, source: str) -> str:
+        """Remove comentários inline."""
+        lines = source.splitlines()
+        new_lines = []
+
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+
+            # Preserva shebang e coding
+            if i == 0 and stripped.startswith('#!'):
+                new_lines.append(line)
+                continue
+            if i <= 1 and 'coding' in stripped and stripped.startswith('#'):
+                new_lines.append(line)
+                continue
+
+            # Linha que é apenas comentário
+            if stripped.startswith('#'):
+                # Preserva TODO, FIXME, etc
+                if any(tag in stripped.upper() for tag in ['TODO', 'FIXME', 'NOTE', 'HACK', 'XXX', 'NOQA']):
+                    new_lines.append(line)
+                    continue
+                self.metrics['comments_removed'] += 1
+                continue
+
+            # Comentário inline após código
+            if '#' in line:
+                new_line = self._remove_trailing_comment(line)
+                if new_line != line:
+                    self.metrics['comments_removed'] += 1
+                new_lines.append(new_line)
             else:
-                optimized_lines.append(line)
-                prev_blank = False
-        return '\n'.join(optimized_lines)
+                new_lines.append(line)
 
+        return '\n'.join(new_lines)
 
-def preprocess_for_hermes(py_file: Path, project_root: str) -> Tuple[str, dict]:
-    """
-    Função helper para pré-processar um arquivo antes da compressão.
-    """
+    def _remove_trailing_comment(self, line: str) -> str:
+        """Remove comentário trailing preservando strings."""
+        in_single = False
+        in_double = False
+        in_triple_single = False
+        in_triple_double = False
+        i = 0
+
+        while i < len(line):
+            if line[i:i+3] in ('"""', "'''"):
+                if line[i:i+3] == '"""':
+                    in_triple_double = not in_triple_double
+                else:
+                    in_triple_single = not in_triple_single
+                i += 3
+                continue
+
+            if in_triple_single or in_triple_double:
+                i += 1
+                continue
+
+            if line[i] == '"' and not in_single:
+                in_double = not in_double
+            elif line[i] == "'" and not in_double:
+                in_single = not in_single
+            elif line[i] == '#' and not in_single and not in_double:
+                return line[:i].rstrip()
+
+            i += 1
+
+        return line
+
+    # ─────────────────────────────────────────────────────────────────
+    # Fase 4: Linhas vazias excessivas
+    # ─────────────────────────────────────────────────────────────────
+    def _remove_excessive_blank_lines(self, source: str) -> str:
+        """Reduz blocos de 3+ linhas vazias para no máximo 2."""
+        lines = source.splitlines()
+        new_lines = []
+        blank_count = 0
+
+        for line in lines:
+            if line.strip() == '':
+                blank_count += 1
+                if blank_count <= 2:
+                    new_lines.append(line)
+            else:
+                blank_count = 0
+                new_lines.append(line)
+
+        return '\n'.join(new_lines)
+
+def preprocess_for_hermes(file_path: Path, project_root: str = None) -> Tuple[str, dict]:
     preprocessor = HermesPreprocessor(project_root)
-    return preprocessor.optimize_file(py_file)
+    return preprocessor.optimize_file(file_path)

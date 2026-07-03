@@ -202,7 +202,12 @@ def _register_subcommands():
     from .vulcan_cmd_tools import vulcan_alloc, vulcan_simd, vulcan_opt, opt_bench
     from .vulcan_cmd_bootstrap import vulcan_module, vulcan_probe, vulcan_verify, vulcan_telemetry_bridge
     from .vulcan_cmd_lazy import vulcan_lazy
-    for cmd in (ignite, vulcan_regression, vulcan_lib, vulcan_benchmark, vulcan_pitstop, vulcan_alloc, vulcan_simd, vulcan_opt, opt_bench, vulcan_module, vulcan_probe, vulcan_verify, vulcan_telemetry_bridge, vulcan_lazy):
+    from .vulcan_cmd_data import vulcan_data
+    for cmd in (ignite, vulcan_regression, vulcan_lib, vulcan_benchmark, vulcan_pitstop,
+                vulcan_alloc, vulcan_simd, vulcan_opt, opt_bench, vulcan_module,
+                vulcan_probe, vulcan_verify, vulcan_telemetry_bridge, vulcan_lazy,
+                vulcan_data ):
+            
         vulcan_group.add_command(cmd)
 _register_subcommands()
 

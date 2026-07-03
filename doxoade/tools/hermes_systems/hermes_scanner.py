@@ -11,7 +11,7 @@ from collections import Counter
 from pathlib import Path
 
 
-def run_hermes_reconnaissance(project_root: str, max_tokens: int = 5000, min_freq: int = 3):
+def run_hermes_reconnaissance(project_root: str, max_tokens: int = 5000, min_freq: int = 2):
     """
     Varre todos os .py do projeto e retorna as linhas mais repetitivas.
     APENAS linhas inteiras (sem substrings para evitar corrupção).

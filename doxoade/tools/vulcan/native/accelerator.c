@@ -174,12 +174,15 @@ static PyObject* vulcan_get_hot_vars(PyObject* self, PyObject* args) {
 /* --- TABELA DE MÉTODOS --- */
 
 static PyMethodDef VulcanMethods[] = {
-    {"native_strip",    vulcan_native_strip,    METH_VARARGS, "Limpa código .pyx em C"},
-    {"fast_scan",       vulcan_fast_scan,       METH_VARARGS, "Scan de Smart Skip"},
-    {"native_diagnose", vulcan_native_diagnose, METH_VARARGS, "Raio-X de Hardware via ASM"},
+    {"native_strip",        vulcan_native_strip,        METH_VARARGS, "Limpa código .pyx em C"},
+    {"fast_scan",           vulcan_fast_scan,           METH_VARARGS, "Scan de Smart Skip"},
+    {"native_diagnose",     vulcan_native_diagnose,     METH_VARARGS, "Raio-X de Hardware via ASM"},
     {"zero_alloc_diagnose", vulcan_zero_alloc_diagnose, METH_VARARGS, "Diagnóstico sem RAM"},
-    {"asm_check",       vulcan_asm_check,       METH_VARARGS, "Busca SSE2"},
-    {"get_hot_vars",       vulcan_get_hot_vars, METH_VARARGS, "variaveis "},
+    {"asm_check",           vulcan_asm_check,           METH_VARARGS, "Busca SSE2"},
+    {"get_hot_vars",        vulcan_get_hot_vars,        METH_VARARGS, "variaveis "},
+    {"fast_scan",           vulcan_fast_scan,           METH_VARARGS, "Scan de arquivos para Smart Skip"},
+    {"native_strip",        vulcan_native_strip,        METH_VARARGS, "Limpeza C-Level"},
+    {"load_hermes_data",    vulcan_load_hermes_data,    METH_VARARGS, "Expande arquivos .hbd1 via Dicionário na velocidade da RAM"},
     {NULL, NULL, 0, NULL}
 };
 
@@ -263,4 +266,91 @@ static PyObject* vulcan_fast_read_strip(PyObject* self, PyObject* args) {
     free(clean_buf);
 
     return py_string;
+}
+
+// ---------------------------------------------------------
+// MERCURY ENGINE: Hermes Data Decoder (HBD1)
+// Decodifica dados textuais/JSON massivos usando dicionário.
+// ---------------------------------------------------------
+
+static PyObject* vulcan_load_hermes_data(PyObject* self, PyObject* args) {
+    const char* path;
+    if (!PyArg_ParseTuple(args, "s", &path)) return NULL;
+
+    FILE* f = fopen(path, "rb");
+    if (!f) return PyErr_SetFromErrno(PyExc_FileNotFoundError);
+
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    uint8_t* data = (uint8_t*)malloc(sz);
+    if (!data) { fclose(f); return PyErr_NoMemory(); }
+    
+    fread(data, 1, sz, f);
+    fclose(f);
+
+    // Validação Mínima do Header HBD1 (Hermes Binary Data v1)
+    if (sz < 39 || memcmp(data, "HBD1", 4) != 0) {
+        free(data);
+        return PyErr_Format(PyExc_ValueError, "Arquivo HBD1 inválido ou corrompido");
+    }
+
+    uint16_t tk_count = (uint16_t)(data[5] | (data[6] << 8));
+    const uint8_t* bitmap = data + 7;
+    size_t off = 39; // 4 (magic) + 1 (ver) + 2 (count) + 32 (bitmap)
+
+    // Lookup Arrays em C (O(1) Array Access - Muito mais rápido que Python Dicts)
+    char* dict_strs[256] = {0};
+    int dict_lens[256] = {0};
+
+    // Lê os tokens do dicionário
+    for (int i = 0; i < tk_count; i++) {
+        if (off + 4 > (size_t)sz) break;
+        uint16_t tid = (uint16_t)(data[off] | (data[off+1] << 8)); off += 2;
+        uint16_t plen = (uint16_t)(data[off] | (data[off+1] << 8)); off += 2;
+        
+        dict_strs[tid] = (char*)malloc(plen + 1);
+        memcpy(dict_strs[tid], data + off, plen);
+        dict_strs[tid][plen] = '\0';
+        dict_lens[tid] = plen;
+        off += plen;
+    }
+
+    // Lê o tamanho do payload comprimido
+    if (off + 4 > (size_t)sz) { free(data); return PyErr_Format(PyExc_ValueError, "Payload HBD1 truncado"); }
+    uint32_t payload_sz = (uint32_t)(data[off] | (data[off+1]<<8) | (data[off+2]<<16) | (data[off+3]<<24));
+    off += 4;
+    const uint8_t* payload = data + off;
+
+    // Motor Branchless de Expansão na RAM
+    size_t out_cap = payload_sz * 4; // Estimativa inicial
+    char* out = (char*)malloc(out_cap);
+    size_t out_pos = 0;
+
+    for (uint32_t i = 0; i < payload_sz; i++) {
+        uint8_t c = payload[i];
+        
+        // Se for maior que 0x80 e estiver no bitmap, é um TOKEN.
+        if (c >= 0x80 && (bitmap[c >> 3] & (1 << (c & 7)))) {
+            int l = dict_lens[c];
+            if (out_pos + l >= out_cap) { out_cap *= 2; out = (char*)realloc(out, out_cap); }
+            memcpy(out + out_pos, dict_strs[c], l);
+            out_pos += l;
+        } else {
+            // É um caractere literal normal
+            if (out_pos + 1 >= out_cap) { out_cap *= 2; out = (char*)realloc(out, out_cap); }
+            out[out_pos++] = c;
+        }
+    }
+
+    // Cria a String Python final a partir do buffer C ultra-rápido
+    PyObject* result = PyUnicode_DecodeUTF8(out, out_pos, "strict");
+
+    // Limpeza de memória C
+    free(out);
+    free(data);
+    for(int i = 0; i < 256; i++) { if(dict_strs[i]) free(dict_strs[i]); }
+
+    return result;
 }

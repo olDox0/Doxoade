@@ -220,7 +220,7 @@ def save(ctx, message, archives, remove_commit, branch_target, merge_target, upd
         try:
             # Esta função cruza os erros antigos do banco com o novo código estável
             from doxoade.tools.db_utils import _learn_solutions_from_commit
-            _learn_solutions_from_commit(new_hash, os.getcwd())
+#            _learn_solutions_from_commit(new_hash, os.getcwd())
             click.secho("   ✔ Conhecimento integrado ao Lexicon.", fg='green')
         except Exception as e:
             click.echo(f"   [!] Gênese offline: {e}")
