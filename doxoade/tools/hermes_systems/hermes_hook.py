@@ -23,6 +23,7 @@ _jit_built = set()
 # ═══════════════════════════════════════════════════════════════════════
 HERMES_BLACKLIST = {
     # Módulos do próprio Hermes (CRÍTICO!)
+    'doxoade.commands.cmd_hermes',
     'doxoade.tools.hermes_systems',
     'doxoade.tools.hermes_systems.hermes_hook',
     'doxoade.tools.hermes_systems.hermes_loader',
@@ -51,6 +52,10 @@ HERMES_BLACKLIST = {
     'doxoade.tools.vulcan',
     'doxoade.tools.horus',
     'doxoade.tools.horus_scribe',
+    
+    'doxoade.commands.intelligence',
+    'doxoade.commands.intelligence_systems',
+    'doxoade.commands.intelligence_utils',
     
     # ✅ NOVO: Bibliotecas com lazy loading complexo (temporário)
 #    'colorama',

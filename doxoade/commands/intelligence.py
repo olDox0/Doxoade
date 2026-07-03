@@ -4,7 +4,7 @@ import os
 import json
 import click
 import traceback
-# [DOX-UNUSED] from pathlib import Path
+from pathlib import Path
 from rich.console import Console
 
 from doxoade.dnm import DNM
@@ -21,23 +21,22 @@ CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'], allow_interspersed_a
 @click.option(  '--no-comments','-nc',is_flag=True, help="Remove comentários.")
 @click.option(  '--concatenate','-c', is_flag=True, help="Minifica o JSON.")
 @click.option(  '--ai-export',  '-ai',is_flag=True, help="Gera XML para LLMs.")
+@click.option(  '--ia-qwen',    '-iq',is_flag=True, help="Gera XML nativo para Qwen (tool_call format).")
 @click.option(  '--output',     '-o', default='chief_dossier.json', help="Saída do dossiê.")
 @click.option(  '--focus',      '-f', type=click.Choice(['vulcan', 'check', 'economic']))
 @click.option(  '--exclude',    '-x', multiple=True, help="Pastas ou arquivos a ignorar.")
 @click.argument('paths', nargs=-1, type=click.Path(exists=True))
 @click.pass_context
 # ORDEM DOS PARÂMETROS DEVE SEGUIR A ORDEM DOS DECORADORES (Pilha: de cima para baixo)
-def intelligence(ctx, docs, source, no_comments, concatenate, ai_export, output, focus, exclude, paths):
-    """Módulo de Inteligência Topológica (v95.5)."""
-    
+def intelligence(ctx, docs, source, no_comments, concatenate, ai_export, ia_qwen, output, focus, exclude, paths):
+    """Módulo de Inteligência Topológica (v95.6 - Qwen Ready)."""
     if ctx.invoked_subcommand is None:
         scan_paths = paths if paths else ('.',)
-        
         try:
             # Passando os argumentos limpos para o motor
             _run_dossier_scan(
                 scan_paths, output, docs, source, 
-                no_comments, concatenate, focus, ai_export, ctx, exclude
+                no_comments, concatenate, focus, ai_export, ia_qwen, ctx, exclude
             )
         except Exception:
             error_data = traceback.format_exc()
@@ -55,25 +54,23 @@ def recover(backup_path, output_path):
     if success: click.echo(f"\033[92m✅ {msg}\033[0m")
     else: click.echo(f"\033[91m✘ {msg}\033[0m")
 
-def _run_dossier_scan(scan_paths, output, include_docs, include_source, no_comments, concat, focus, ai_export, ctx, cli_excludes):
+def _run_dossier_scan(scan_paths, output, include_docs, include_source, no_comments, concat, focus, ai_export, ia_qwen, ctx, cli_excludes):
     from .intelligence_systems.intelligence_engine import analyze_file_chief
-    from .intelligence_utils import strip_comments, get_ignore_spec # <-- IMPORTAR get_ignore_spec
+    from .intelligence_utils import strip_comments, get_ignore_spec
     
     root = _find_project_root(os.getcwd())
     console = Console()
-
+    
     # Inicializa o filtro de exclusão (Lê TOML + CLI)
     ignore_spec = get_ignore_spec(root, extra_patterns=list(cli_excludes))
-
+    
     with ExecutionLogger('intelligence', root, ctx.params):
-        console.print("[bold gold3]🔍 Doxoade Chief Insight v95.5 (Interspersed Args Active)[/bold gold3]")
-        
+        console.print("[bold gold3]🔍 Doxoade Chief Insight v95.6 (Qwen Ready)[/bold gold3]")
         valid_exts = (
             '.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx',
             '.pyd', '.so'
         )
         all_files_raw = []
-
         for p in scan_paths:
             p_abs = os.path.abspath(p)
             if os.path.isfile(p_abs):
@@ -81,13 +78,13 @@ def _run_dossier_scan(scan_paths, output, include_docs, include_source, no_comme
             else:
                 nav = DNM(p_abs)
                 all_files_raw.extend(nav.scan(extensions=list(valid_exts)))
-
+        
         unique_files = []
         for f in dict.fromkeys(all_files_raw):
             rel_path = os.path.relpath(f, root).replace('\\', '/')
             if not ignore_spec.match_file(rel_path):
                 unique_files.append(f)
-
+        
         dossier_files = []
         with click.progressbar(unique_files, label='[VULCAN:INTEL]') as bar:
             for f in bar:
@@ -99,13 +96,13 @@ def _run_dossier_scan(scan_paths, output, include_docs, include_source, no_comme
                         dossier_files.append(res)
                 except Exception:
                     continue
-                    
-        _save_report(dossier_files, output, root, concat, focus, ai_export, console)
+        
+        _save_report(dossier_files, output, root, concat, focus, ai_export, ia_qwen, console)
 
-def _save_report(files, output, root, concat, focus, ai_export, console):
+def _save_report(files, output, root, concat, focus, ai_export, ia_qwen, console):
     from datetime import datetime, timezone
     
-    report_files =[]
+    report_files = []
     economic_summary = {}
     report_type = "nexus_intelligence_report"
     
@@ -114,44 +111,37 @@ def _save_report(files, output, root, concat, focus, ai_export, console):
         report_type = f"{focus}_intelligence_report"
         console.print(f"[bold yellow]⚡ Gerando Relatório Focado: {focus.upper()}[/bold yellow]")
         
-        # Simple aggregation for economic summary
         total_complexity = 0
         total_debt_tags = 0
         total_mpot_violations = 0
         
         for f in files:
-            include_file = True 
+            include_file = True
             
             if focus == 'vulcan':
-                # Vulcan: Focus on security (Anúbis), critical logic (Atena, Zeus), or high complexity
                 god_assignment = f.get("god_assignment", "Unknown")
-                complexity = f.get("complexity", 0) # From SemanticAnalyzer.get_summary()
-                if god_assignment in ["Anúbis", "Zeus", "Atena"] or complexity > 10: # Example thresholds
-                    include_file = True
-                else:
-                    include_file = False
-                    
-            elif focus == 'check':
-                # Check: Focus on potential issues (MPoT violations, high complexity, debt tags)
-                mpot_violations = f.get("mpot_4_violations", 0) 
-                debt_tags = f.get("debt_tags", []) 
                 complexity = f.get("complexity", 0)
-                if mpot_violations > 0 or len(debt_tags) > 0 or complexity > 15: # Example thresholds
+                if god_assignment in ["Anúbis", "Zeus", "Atena"] or complexity > 10:
                     include_file = True
                 else:
                     include_file = False
-
+            elif focus == 'check':
+                mpot_violations = f.get("mpot_4_violations", 0)
+                debt_tags = f.get("debt_tags", [])
+                complexity = f.get("complexity", 0)
+                if mpot_violations > 0 or len(debt_tags) > 0 or complexity > 15:
+                    include_file = True
+                else:
+                    include_file = False
             elif focus == 'economic':
-                # Economic: Include all files but only with a summarized view
-                include_file = True 
-
+                include_file = True
+            
             if include_file:
                 report_files.append(f)
                 total_complexity += f.get("complexity", 0)
                 total_debt_tags += len(f.get("debt_tags", []))
-                total_mpot_violations += f.get("mpot_4_violations", 0) 
+                total_mpot_violations += f.get("mpot_4_violations", 0)
         
-        # Build economic_summary for focused reports
         economic_summary = {
             "total_files_scanned": len(files),
             "total_files_in_report": len(report_files),
@@ -161,7 +151,6 @@ def _save_report(files, output, root, concat, focus, ai_export, console):
             "total_mpot_violations_in_report": total_mpot_violations
         }
         
-        # For 'economic' focus, we also want a *more* economic representation of each file in codebase_map
         if focus == 'economic':
             summarized_report_files = []
             for f in report_files:
@@ -170,21 +159,18 @@ def _save_report(files, output, root, concat, focus, ai_export, console):
                     "god_assignment": f.get("god_assignment"),
                     "status": f.get("status"),
                     "complexity": f.get("complexity", 0),
-                    "functions_count": len(f.get("functions", [])), # Functions from SemanticAnalyzer.get_summary()
-                    "classes_count": len(f.get("classes", [])), # Classes from SemanticAnalyzer.get_summary()
-                    "docstring_intent": f.get("docstring_intent", "N/A"), 
+                    "functions_count": len(f.get("functions", [])),
+                    "classes_count": len(f.get("classes", [])),
+                    "docstring_intent": f.get("docstring_intent", "N/A"),
                     "debt_tags_count": len(f.get("debt_tags", [])),
                     "mpot_violations_count": f.get("mpot_4_violations", 0)
                 })
-            report_files = summarized_report_files # Replace detailed files with summarized ones
-        
-    else: # No focus, generate full report
+            report_files = summarized_report_files
+    else:
         report_files = files
-        # Calculate full economic summary for non-focused reports
         total_complexity = sum(f.get("complexity", 0) for f in files)
         total_debt_tags = sum(len(f.get("debt_tags", [])) for f in files)
         total_mpot_violations = sum(f.get("mpot_4_violations", 0) for f in files)
-
         economic_summary = {
             "total_files_scanned": len(files),
             "total_files_in_report": len(files),
@@ -193,29 +179,29 @@ def _save_report(files, output, root, concat, focus, ai_export, console):
             "total_debt_tags_in_report": total_debt_tags,
             "total_mpot_violations_in_report": total_mpot_violations
         }
-
-    # Estrutura Nexus para IAs
+    
     report = {
-        report_type: { 
+        report_type: {
             "version": "2026.Chief.v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "target_project": os.path.basename(root),
             "token_optimization": "ENABLED" if concat else "DISABLED",
             "focus_applied": focus if focus else "NONE"
         },
-        "economic_summary": economic_summary, 
-        "codebase_map": report_files 
+        "economic_summary": economic_summary,
+        "codebase_map": report_files
     }
     
-    # NOVO: Desvio de Formatação para Inteligência Artificial
-    if ai_export:
+    # DESVIO PARA FORMATO QWEN (PRIORIDADE MÁXIMA)
+    if ia_qwen:
+        qwen_output = output.replace('.json', '') + "_qwen.xml" if output.endswith('.json') else output + "_qwen.xml"
+        _save_qwen_report(report, qwen_output, console)
+    elif ai_export:
         ai_output = output.replace('.json', '') + "_llm.xml" if output.endswith('.json') else output + "_llm.xml"
         _save_llm_report(report, ai_output, console)
     else:
-        # PASC 6.3: UTF-8 Sem BOM (Padrão JSON Original)
         with open(output, 'w', encoding='utf-8') as f:
             json.dump(report, f, indent=None if concat else 2, ensure_ascii=False)
-        
         console.print(f"\n[bold green]✅ Dossiê NEXUS Gerado: {output}[/bold green]")
 
 def _calculate_distribution(files):
@@ -227,9 +213,8 @@ def _calculate_distribution(files):
     
 def _save_llm_report(report_data, output_path, console):
     """Traduz o JSON arquitetural para um formato de alta absorção por LLMs (PASC 11.0)."""
-    lines =[]
+    lines = []
     
-    # 1. Header (Contexto Geral)
     meta = None
     for key in report_data.keys():
         if key.endswith("intelligence_report"):
@@ -242,48 +227,42 @@ def _save_llm_report(report_data, output_path, console):
         lines.append(f"**Generated At:** {meta.get('generated_at')}")
         lines.append(f"**Focus Applied:** {meta.get('focus_applied')}\n")
     
-    # --- CORREÇÃO: Envolvendo o XML num bloco de código visível ---
     lines.append("```xml")
     
-    # 2. Resumo Econômico 
     eco = report_data.get("economic_summary", {})
     lines.append("<project_summary>")
     lines.append(f"  <total_files_scanned>{eco.get('total_files_scanned', 0)}</total_files_scanned>")
     lines.append(f"  <total_files_in_report>{eco.get('total_files_in_report', 0)}</total_files_in_report>")
     lines.append(f"  <average_complexity>{eco.get('average_complexity_in_report', 0):.2f}</average_complexity>")
     lines.append(f"  <total_debt_tags>{eco.get('total_debt_tags_in_report', 0)}</total_debt_tags>")
-    
     lines.append("  <god_distribution>")
     for god, count in eco.get("god_distribution_in_report", {}).items():
         lines.append(f"    <{god.lower().replace('ú','u')}>{count}</{god.lower().replace('ú','u')}>")
     lines.append("  </god_distribution>")
     lines.append("</project_summary>\n")
     
-    # 3. Codebase Map
     lines.append("<codebase_map>")
-    for f in report_data.get("codebase_map",[]):
+    for f in report_data.get("codebase_map", []):
         path = f.get('path', 'unknown')
         god = f.get('god_assignment', 'Unknown')
         comp = f.get('complexity', 0)
         status = f.get('status', 'unknown')
-        
         lines.append(f'\n  <file path="{path}" role="{god}" complexity="{comp}" status="{status}">')
         
-        classes = f.get('classes',[])
+        classes = f.get('classes', [])
         if classes:
             lines.append(f"    <classes>{', '.join(classes)}</classes>")
-            
-        # Funções com proteção estrita de tipo
-        funcs = f.get('functions',[])
+        
+        funcs = f.get('functions', [])
         if funcs:
-            funcs_str =[]
+            funcs_str = []
             for fn in funcs:
                 if isinstance(fn, str): funcs_str.append(fn)
                 elif isinstance(fn, dict): funcs_str.append(str(fn.get('name', 'unknown')))
                 else: funcs_str.append(str(getattr(fn, 'name', fn)))
             lines.append(f"    <functions>{', '.join(funcs_str)}</functions>")
-            
-        debt = f.get('debt_tags_count', len(f.get('debt_tags',[])))
+        
+        debt = f.get('debt_tags_count', len(f.get('debt_tags', [])))
         mpot = f.get('mpot_violations_count', f.get('mpot_4_violations', 0))
         if debt > 0 or mpot > 0:
             lines.append(f"    <technical_debt tags=\"{debt}\" mpot_violations=\"{mpot}\" />")
@@ -294,15 +273,83 @@ def _save_llm_report(report_data, output_path, console):
             lines.append("    <source_code><![CDATA[")
             lines.append(safe_src)
             lines.append("    ]]></source_code>")
-            
-        lines.append("  </file>")
         
+        lines.append("  </file>")
     lines.append("</codebase_map>")
-    
-    # Fecha o bloco Markdown
     lines.append("```\n")
     
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write("\n".join(lines))
-        
     console.print(f"\n[bold magenta]🤖 Dossiê LLM-Ready Gerado: {output_path}[/bold magenta]")
+
+def _save_qwen_report(report_data, output_path, console):
+    """
+    Gera relatório no formato nativo de Tool Calling do Qwen.
+    VERSÃO FINAL: Remove TODOS os espaços e valida estrutura XML.
+    """
+    import json as _json
+    import html
+    
+    lines = []
+    
+    # 1. Extrair metadados
+    meta = next((v for k, v in report_data.items() if k.endswith("intelligence_report")), None)
+    if not meta:
+        console.print("[bold red]✘ Metadados do relatório não encontrados.[/bold red]")
+        return
+    
+    eco = report_data.get("economic_summary", {})
+    codebase = report_data.get("codebase_map", [])
+    
+    # 2. BLOCO DE RACIOCÍNIO PRÉVIO (sem espaços extras)
+    lines.append("<think>")
+    lines.append(f"Analisando codebase do projeto: {meta.get('target_project', 'Desconhecido')}.")
+    lines.append(f"Total de arquivos escaneados: {eco.get('total_files_scanned', 0)}.")
+    lines.append(f"Filtros aplicados: {meta.get('focus_applied', 'NONE')}.")
+    lines.append("")
+    lines.append("Distribuição de responsabilidades (God Assignment):")
+    for god, count in eco.get("god_distribution_in_report", {}).items():
+        lines.append(f"  - {god}: {count} arquivos")
+    lines.append("")
+    lines.append(f"Complexidade média: {eco.get('average_complexity_in_report', 0):.2f}")
+    lines.append(f"Total de debt tags: {eco.get('total_debt_tags_in_report', 0)}")
+    lines.append(f"Total de MPoT violations: {eco.get('total_mpot_violations_in_report', 0)}")
+    lines.append("")
+    lines.append("Estruturando o codebase_map como JSON serializado dentro de CDATA para processamento seguro.")
+    lines.append("</think>")
+    lines.append("")
+    
+    # 3. BLOCO PRINCIPAL DE TOOL CALLING (SEM ESPAÇOS NAS TAGS)
+    lines.append("<tool_call>")
+    lines.append("<function=doxoade_nexus_report>")
+    
+    # Parâmetros simples (escapados, SEM espaços, com strip())
+    target = html.escape(str(meta.get('target_project', '')).strip())
+    gen_at = html.escape(str(meta.get('generated_at', '')).strip())
+    version = html.escape(str(meta.get('version', '')).strip())
+    focus = html.escape(str(meta.get('focus_applied', '')).strip())
+    
+    lines.append(f"<parameter=target_project>{target}</parameter=target_project>")
+    lines.append(f"<parameter=generated_at>{gen_at}</parameter=generated_at>")
+    lines.append(f"<parameter=report_version>{version}</parameter=report_version>")
+    lines.append(f"<parameter=focus_applied>{focus}</parameter=focus_applied>")
+    
+    # Parâmetros complexos (JSON COMPACTO sem espaços, dentro de CDATA válido)
+    # IMPORTANTE: separators=(',', ':') remove TODOS os espaços do JSON
+    eco_json = _json.dumps(eco, ensure_ascii=False, separators=(',', ':'))
+    codebase_json = _json.dumps(codebase, ensure_ascii=False, separators=(',', ':'))
+    
+    lines.append(f"<parameter=economic_summary><![CDATA[{eco_json}]]></parameter=economic_summary>")
+    lines.append(f"<parameter=codebase_map><![CDATA[{codebase_json}]]></parameter=codebase_map>")
+    
+    lines.append("</function>")
+    lines.append("</tool_call>")
+    
+    # 4. Escrita segura (UTF-8)
+    try:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write("\n".join(lines))
+        console.print(f"\n[bold magenta]🧠 Dossiê Qwen-Ready Gerado: {output_path}[/bold magenta]")
+        console.print(f"[dim]   Formato: tool_call nativo + <think> + CDATA seguro[/dim]")
+    except Exception as e:
+        console.print(f"[bold red]✘ Falha ao gerar XML Qwen: {e}[/bold red]")

@@ -212,18 +212,18 @@ def save(ctx, message, archives, remove_commit, branch_target, merge_target, upd
 
         console.print('[bold green]\n[OK] Alfa 71.10: Commit finalizado e Gênese atualizada.[/bold green]')
 
-    if commit_success:
-        # Pega o hash do commit que acabamos de fazer
-        new_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True)
-        
-        click.echo(Fore.CYAN + "   > [GÊNESE] Sincronizando soluções aprendidas com o Hades...")
-        try:
-            # Esta função cruza os erros antigos do banco com o novo código estável
-            from doxoade.tools.db_utils import _learn_solutions_from_commit
+#    if commit_success:
+#        # Pega o hash do commit que acabamos de fazer
+#        new_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True)
+#        
+#        click.echo(Fore.CYAN + "   > [GÊNESE] Sincronizando soluções aprendidas com o Hades...")
+#        try:
+#            # Esta função cruza os erros antigos do banco com o novo código estável
+#            from doxoade.tools.db_utils import _learn_solutions_from_commit
 #            _learn_solutions_from_commit(new_hash, os.getcwd())
-            click.secho("   ✔ Conhecimento integrado ao Lexicon.", fg='green')
-        except Exception as e:
-            click.echo(f"   [!] Gênese offline: {e}")
+#            click.secho("   ✔ Conhecimento integrado ao Lexicon.", fg='green')
+#        except Exception as e:
+#            click.echo(f"   [!] Gênese offline: {e}")
 
 def _build_update_message(source_branch: str, target_branch: str, base_ref: str='origin/main') -> str:
     """Gera mensagem de commit resumindo atualização desde a base."""
