@@ -6,7 +6,7 @@ CORREÇÃO: Desabilitado scanner de substrings para evitar corrupção.
 Foco em linhas inteiras que se repetem 3+ vezes no projeto.
 """
 import re
-import hashlib
+# [DOX-UNUSED] import hashlib
 from collections import Counter
 from pathlib import Path
 

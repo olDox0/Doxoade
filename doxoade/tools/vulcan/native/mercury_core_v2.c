@@ -144,7 +144,7 @@ MERCURY_EXPORT char* mercury_decode_hbd1(
 
     /* Tamanho original (informativo, usamos para pré-alocar) */
     uint32_t orig_sz = (uint32_t)(data[7]  | (data[8]  << 8) |
-                                  (data[9]  << 16) | (data[10] << 24));
+                                  (data[9]  << 16) | (data[10] << 16) << 8);
 
     /* Carrega dicionário contíguo */
     TokenDictionary dict = {0};

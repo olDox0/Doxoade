@@ -10,7 +10,7 @@ except Exception as e:
     handle_error(e, context="Clone Detection JSON Parse", debug=True)
 
 from doxoade.tools.error_info import formated_traceback
-format_traceback(e, "Encoding Reconfiguration")
+formated_traceback(e, "Encoding Reconfiguration")
 """
 
 def handle_error(err: Exception, context: str='', silent: bool=False, debug: bool=False):

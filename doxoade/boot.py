@@ -19,6 +19,36 @@ def ignite_background_systems(project_root: str):
     """Ordem estrita de inicialização Tier 1 -> Tier 2."""
     clean_meta_path()
     
+    # ═══════════════════════════════════════════════════════════════════
+    # FASE 0: HERMES INIT (Bootstrap Acelerado)
+    # Carrega módulos críticos como binários nativos (.pyd)
+    # ═══════════════════════════════════════════════════════════════════
+    try:
+        from doxoade.tools.hermes_systems.hermes_init import init_hermes_bootstrap
+        from pathlib import Path
+        
+        hermes_stats = init_hermes_bootstrap(
+            Path(project_root),
+            compile_if_missing=False  # Não compila automaticamente
+        )
+        
+        if os.environ.get('HERMES_VERBOSE') == '1':
+            print(f"[BOOT] Hermes Init: {hermes_stats['bootstrap']['loaded']} módulos nativos, "
+                  f"{hermes_stats['total_time_ms']:.2f}ms")
+    except Exception as e:
+        # Não falha o boot se Hermes Init falhar
+        if os.environ.get('HERMES_VERBOSE') == '1':
+            print(f"[BOOT] Hermes Init falhou: {e}")
+    
+    # 1. ABI Gate (Move os arquivos compilados para o local correto)
+    try:
+        from doxoade.tools.vulcan.abi_gate import run_abi_gate
+        run_abi_gate(project_root)
+    except Exception as e:
+        formated_traceback(e, "boot - ignite_background_systems - run_abi_gate")
+
+    clean_meta_path()
+    
     # 1. ABI Gate (Move os arquivos compilados para o local correto)
     try:
         from doxoade.tools.vulcan.abi_gate import run_abi_gate
@@ -61,20 +91,35 @@ def ignite_background_systems(project_root: str):
     except Exception as e:
         formated_traceback(e, "boot - ignite_background_systems - DOXOADE_RESCUE")
     
-    # 6. Hermes Native Decoder (Auto-Build C)
+    # 6. Hermes v2 Native Bridge (Auto-Build via Metalcraft)
     try:
-        from doxoade.tools.hermes_systems.native.build_auto import ensure_decoder_built
-        if ensure_decoder_built(project_root):
+        from doxoade.tools.hermes_systems.native.hermes_bridge_builder import ensure_bridge_built
+        if ensure_bridge_built(project_root):
             if os.environ.get("HERMES_VERBOSE") == "1":
-                print(f"\x1b[90m[HERMES] Decoder C nativo pronto\x1b[0m")
+                print(f"\x1b[90m[HERMES] Bridge v2 Nativo (SSE 4.2) pronto.\x1b[0m")
     except Exception as e:
-        # Não falha o boot se o decoder C não compilar
         if os.environ.get("HERMES_VERBOSE") == "1":
-            print(f"\x1b[90m[HERMES] Decoder C não disponível (fallback Python)\x1b[0m")
+            print(f"\x1b[90m[HERMES] Bridge v2 não disponível (fallback Python ativo)\x1b[0m")
     
-    # 7. Hermes Systems (Compressão de Módulos) — Índice 3 ou final
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # 7. HERMES SYSTEMS v2 (C-Native Dual-Dictionary) — Índice 2
+    # ═══════════════════════════════════════════════════════════════════════════════
+    os.environ["DOXOADE_HERMES_ACTIVE"] = "1"
     try:
-        from doxoade.tools.hermes_systems.hermes_hook import install as hermes_install
-        hermes_install(project_root)
+        if os.environ.get("DOXOADE_HERMES_ACTIVE") == "1":
+            # 7.1. Auto-Build do Motor C via Metalcraft
+            from doxoade.tools.hermes_systems.native.hermes_bridge_builder import ensure_bridge_built
+            if ensure_bridge_built(project_root):
+                if os.environ.get("HERMES_VERBOSE") == "1":
+                    print(f"\x1b[90m[HERMES v2] Bridge C-Native (SSE 4.2) pronto.\x1b[0m")
+            
+            # 7.2. Instala o Hook v2 (Intercepta imports e usa o C-Bridge)
+            from doxoade.tools.hermes_systems.hermes_hook_v2 import install as hermes_v2_install
+            hermes_v2_install(project_root)
+            
+            if os.environ.get("HERMES_VERBOSE") == "1":
+                print(f"\x1b[90m[HERMES v2] Hook instalado no sys.meta_path (Cold/Warm Start ativo)\x1b[0m")
     except Exception as e:
-        formated_traceback(e, "boot - ignite_background_systems - HermesFinder")
+        # Fallback gracioso: se o Hermes v2 falhar, o Python puro continua funcionando
+        if os.environ.get("HERMES_VERBOSE") == "1":
+            print(f"\x1b[90m[HERMES v2] Falha na inicialização: {e}\x1b[0m")

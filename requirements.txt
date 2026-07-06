@@ -10,6 +10,7 @@ cssutils==2.11.1
 cython==3.2.5
 esprima==4.0.1
 jsondiff==2.2.1
+lz4==4.4.5
 numpy==2.3.5
 packaging==25.0
 pathspec==1.0.4

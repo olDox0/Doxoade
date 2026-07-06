@@ -4,7 +4,7 @@
 Hermes Cache - Cache persistente de code objects descomprimidos.
 Salva em disco para evitar decompressão LZMA em reloads.
 """
-import marshal
+# [DOX-UNUSED] import marshal
 import pickle
 from pathlib import Path
 from typing import Optional

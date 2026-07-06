@@ -51,10 +51,11 @@ def scan(target):
 @click.option('--optimize', '-o', is_flag=True, help="Aplica otimizações pré-compressão.")
 @click.option('--dynamic', '-d', is_flag=True, help="Usa dynamic scanner local (HBC3).")
 @click.option('--hbc4', is_flag=True, help="Usa formato HBC4 (sem LZMA, mais rápido).")
+@click.option('--hbc5', is_flag=True, help="Usa formato HBC5 (sem LZMA + flags, mais rápido ainda).")
 @click.option('--all', '-a', 'build_all', is_flag=True, help="Comprime TODOS os .py do projeto.")
 @click.option('--workers', '-w', default=4, help="Threads paralelas para --all.")
 @click.option('--max-tokens', default=5000, help="Número máximo de tokens no dicionário global.")
-def build(file, target, optimize, dynamic, hbc4, build_all, workers, max_tokens):
+def build(file, target, optimize, dynamic, hbc4, hbc5, build_all, workers, max_tokens):
     """[Fase 2] Gera o Dicionário e Comprime arquivos para .hermes."""
     from doxoade.tools.hermes_systems.hermes_loader import HermesLoader, verify_lossless
     from doxoade.tools.hermes_systems.hermes_compress import HermesCompressor
@@ -66,14 +67,14 @@ def build(file, target, optimize, dynamic, hbc4, build_all, workers, max_tokens)
     # MODO BATCH (--all)
     # ─────────────────────────────────────────────────────────────
     if build_all:
-        _run_batch_build(project_root, optimize, dynamic, workers, hbc4)
+        _run_batch_build(project_root, optimize, dynamic, workers, hbc4, hbc5)
         return
     
     # ─────────────────────────────────────────────────────────────
     # MODO ARQUIVO ESPECÍFICO
     # ─────────────────────────────────────────────────────────────
     if file:
-        _run_single_build(file, project_root, optimize, dynamic, hbc4)
+        _run_single_build(file, project_root, optimize, dynamic, hbc4, hbc5)
         return
     
     # ─────────────────────────────────────────────────────────────
@@ -92,7 +93,7 @@ def build(file, target, optimize, dynamic, hbc4, build_all, workers, max_tokens)
     main_file = Path(target) / "doxoade" / "__main__.py"
     
     if main_file.exists():
-        result = compressor.compress_file(main_file, use_hbc4=hbc4)
+        result = compressor.compress_file(main_file, use_hbc4=hbc4, use_hbc5=hbc5)
         
         if len(result) == 4:
             orig_sz, new_sz, hermes_file, _ = result
@@ -100,13 +101,13 @@ def build(file, target, optimize, dynamic, hbc4, build_all, workers, max_tokens)
             orig_sz, new_sz, hermes_file = result
         
         savings = 100 - ((new_sz / orig_sz) * 100) if orig_sz > 0 else 0
-        fmt = "HBC4" if hbc4 else "HBC3"
+        fmt = "HBC5" if hbc5 else ("HBC4" if hbc4 else "HBC3")
         
         click.echo(f"  {Fore.CYAN}✔ Prova de Conceito: {main_file.name} -> {hermes_file.name}{Style.RESET_ALL}")
         click.echo(f"     Formato: {fmt}")
         click.echo(f"     Tamanho: {orig_sz} bytes -> {new_sz} bytes ({Fore.GREEN}-{savings:.1f}%{Style.RESET_ALL})")
 
-def _run_batch_build(project_root: Path, optimize: bool, dynamic: bool, workers: int, hbc4: bool = False):
+def _run_batch_build(project_root: Path, optimize: bool, dynamic: bool, workers: int, hbc4: bool = False, hbc5: bool = False):
     """Comprime todos os .py do projeto em paralelo."""
     import concurrent.futures
     from doxoade.tools.hermes_systems.hermes_preprocessor import preprocess_for_hermes
@@ -120,7 +121,7 @@ def _run_batch_build(project_root: Path, optimize: bool, dynamic: bool, workers:
     ]
     
     click.echo(f"  {Fore.CYAN}▶ Modo: Batch ({len(py_files)} arquivos){Style.RESET_ALL}")
-    click.echo(f"  {Fore.CYAN}▶ Workers: {workers} | Otimização: {optimize} | Dinâmico: {dynamic} | HBC4: {hbc4}{Style.RESET_ALL}\n")
+    click.echo(f"  {Fore.CYAN}▶ Workers: {workers} | Otimização: {optimize} | Dinâmico: {dynamic} | HBC5: {hbc5}{Style.RESET_ALL}\n")
     
     stats = {
         'success': 0,
@@ -130,6 +131,7 @@ def _run_batch_build(project_root: Path, optimize: bool, dynamic: bool, workers:
         'hbc1': 0,
         'hbc3': 0,
         'hbc4': 0,
+        'hbc5': 0,
     }
     
     def process_file(py_file: Path):
@@ -140,7 +142,7 @@ def _run_batch_build(project_root: Path, optimize: bool, dynamic: bool, workers:
             
             compressor = HermesCompressor(str(project_root))
             result = compressor.compress_file(
-                py_file, optimized_content, use_dynamic_scan=dynamic, use_hbc4=hbc4
+                py_file, optimized_content, use_dynamic_scan=dynamic, use_hbc4=hbc4, use_hbc5=hbc5
             )
             
             if len(result) == 4:
@@ -150,7 +152,7 @@ def _run_batch_build(project_root: Path, optimize: bool, dynamic: bool, workers:
                 dyn_tokens = 0
             
             saved = orig_sz - new_sz
-            fmt = 'HBC4' if hbc4 else ('HBC3' if dyn_tokens > 0 else 'HBC1')
+            fmt = 'HBC5' if hbc5 else ('HBC4' if hbc4 else ('HBC3' if dyn_tokens > 0 else 'HBC1'))
             
             return {
                 'ok': True,
@@ -174,7 +176,9 @@ def _run_batch_build(project_root: Path, optimize: bool, dynamic: bool, workers:
                 stats['total_saved_bytes'] += r['saved']
                 stats['total_dyn_tokens'] += r['dyn_tokens']
                 
-                if r['format'] == 'HBC4':
+                if r['format'] == 'HBC5':
+                    stats['hbc5'] += 1
+                elif r['format'] == 'HBC4':
                     stats['hbc4'] += 1
                 elif r['format'] == 'HBC3':
                     stats['hbc3'] += 1
@@ -191,12 +195,12 @@ def _run_batch_build(project_root: Path, optimize: bool, dynamic: bool, workers:
     click.echo(f"{Fore.GREEN}✔ Batch concluído{Style.RESET_ALL}")
     click.echo(f"  Sucesso: {stats['success']}/{len(py_files)} arquivos")
     click.echo(f"  Falhas:  {stats['failed']}")
-    click.echo(f"  HBC1: {stats['hbc1']} | HBC3: {stats['hbc3']} | HBC4: {stats['hbc4']}")
+    click.echo(f"  HBC1: {stats['hbc1']} | HBC3: {stats['hbc3']} | HBC4: {stats['hbc4']} | HBC5: {stats['hbc5']}")
     click.echo(f"  Tokens dinâmicos totais: {stats['total_dyn_tokens']}")
     click.echo(f"  {Fore.GREEN}Economia total: {saved_mb:.2f} MB{Style.RESET_ALL}")
     click.echo(f"{Fore.CYAN}{Style.BRIGHT}{'═'*60}{Style.RESET_ALL}\n")
 
-def _run_single_build(file: str, project_root: Path, optimize: bool, dynamic: bool, hbc4: bool = False):
+def _run_single_build(file: str, project_root: Path, optimize: bool, dynamic: bool, hbc4: bool = False, hbc5: bool = False):
     """Comprime um arquivo específico."""
     from doxoade.tools.hermes_systems.hermes_preprocessor import preprocess_for_hermes
     from doxoade.tools.hermes_systems.hermes_compress import HermesCompressor
@@ -227,7 +231,7 @@ def _run_single_build(file: str, project_root: Path, optimize: bool, dynamic: bo
     
     try:
         result = compressor.compress_file(
-            file_path, optimized_content, use_dynamic_scan=dynamic, use_hbc4=hbc4
+            file_path, optimized_content, use_dynamic_scan=dynamic, use_hbc4=hbc4, use_hbc5=hbc5
         )
         
         if len(result) == 4:
@@ -237,7 +241,7 @@ def _run_single_build(file: str, project_root: Path, optimize: bool, dynamic: bo
             dynamic_count = 0
         
         savings = 100 - ((new_sz / orig_sz) * 100) if orig_sz > 0 else 0
-        fmt = "HBC4" if hbc4 else "HBC3"
+        fmt = "HBC5" if hbc5 else ("HBC4" if hbc4 else "HBC3")
         
         click.echo(f"  {Fore.GREEN}✔ Comprimido: {file_path.name} -> {hermes_file.name}{Style.RESET_ALL}")
         click.echo(f"     Formato: {fmt}")
@@ -259,9 +263,8 @@ def _run_single_build(file: str, project_root: Path, optimize: bool, dynamic: bo
             click.echo(f"     {Fore.BLUE}🔬 Dynamic Scanner: +{dynamic_count} tokens locais{Style.RESET_ALL}")
     
     except Exception as e:
-        click.echo(f"{Fore.RED}✘ Falha na compressão: {e}{Style.RESET_ALL}")
         from doxoade.tools.error_info import formated_traceback
-        formated_traceback(e, f"Compressão de {file_path.name}")
+        formated_traceback(e, "_run_single_build - Falha na compressão")
 
 @hermes_group.command('run')
 @click.argument('module_name')
@@ -343,30 +346,82 @@ def report(target, save):
         click.echo(f"\n{Fore.GREEN}✔ Relatório JSON salvo em: {report_path}{Style.RESET_ALL}")
 
 @hermes_group.command('benchmark')
-@click.option('--iterations', '-i', default=10, help='Número de iterações por teste.')
-@click.option('--output', '-o', is_flag=True, default=True, help='Salva relatório em JSON.')
-def benchmark(iterations, output):
-    """Executa benchmark de performance Hermes vs Python puro."""
-    from doxoade.tools.hermes_systems.hermes_benchmark import run_benchmark
+@click.option('--module', '-m', help='Módulo específico para benchmark (ex: doxoade.tools.filesystem)')
+@click.option('--runs', default=3, help='Número de execuções por cenário')
+@click.option('--json', 'output_json', is_flag=True, help='Output em JSON')
+def hermes_benchmark(module, runs, output_json):
+    """🔬 Benchmark Comparativo: Python Puro vs Mercury Systems (Cold/Warm Start)."""
+    from doxoade.tools.hermes_systems.hermes_benchmark_compare import run_benchmark_compare
+    from pathlib import Path
     
     project_root = Path.cwd().resolve()
-    report = run_benchmark(str(project_root), iterations=iterations, output=output)
     
-    # Retorna speedup médio
-    speedups = []
-    for test_name in set(r.test_name for r in report.results):
-        speedup = report.get_speedup(test_name)
-        if speedup:
-            speedups.append(speedup)
+    if module:
+        modules = [module]
+    else:
+        modules = [
+            'doxoade.cli',
+            'doxoade.tools.vulcan.forge',
+            'doxoade.tools.hermes_systems.hermes_loader',
+            'doxoade.core_database',
+            'doxoade.tools.filesystem',
+        ]
     
-    if speedups:
-        avg_speedup = sum(speedups) / len(speedups)
-        if avg_speedup > 1.5:
-            click.echo(f"{Fore.GREEN}✔ Speedup médio: {avg_speedup:.2f}×{Style.RESET_ALL}")
-        elif avg_speedup > 1.0:
-            click.echo(f"{Fore.YELLOW}⚠ Speedup médio: {avg_speedup:.2f}× (marginal){Style.RESET_ALL}")
-        else:
-            click.echo(f"{Fore.RED}✘ Sem ganho significativo (speedup: {avg_speedup:.2f}×){Style.RESET_ALL}")
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🔬 MERCURY SYSTEMS BENCHMARK ENGINE{Style.RESET_ALL}")
+    click.echo(f"  Projeto: {project_root.name}")
+    click.echo(f"  Módulos: {len(modules)}")
+    click.echo(f"  Runs:    {runs} por cenário\n")
+    
+    results = run_benchmark_compare(str(project_root), modules, runs=runs)
+    
+    if output_json:
+        import json
+        click.echo(json.dumps(results, indent=2))
+        return
+    
+    # Imprimir tabela formatada
+    click.echo(f"\n{Fore.WHITE}{'MÓDULO':<45} {'PYTHON':>10} {'COLD':>10} {'WARM':>10} {'SPD COLD':>10} {'SPD WARM':>10}{Style.RESET_ALL}")
+    click.echo(f"{'─' * 105}")
+    
+    total_py = 0
+    total_cold = 0
+    total_warm = 0
+    valid_speedups_cold = []
+    valid_speedups_warm = []
+    
+    for r in results:
+        mod_short = r['module'] if len(r['module']) <= 45 else '...' + r['module'][-42:]
+        
+        spd_cold = r['python_ms'] / r['cold_ms'] if r['cold_ms'] > 0 else 0
+        spd_warm = r['python_ms'] / r['warm_ms'] if r['warm_ms'] > 0 else 0
+        
+        color_cold = Fore.GREEN if spd_cold >= 2.0 else Fore.CYAN if spd_cold >= 1.0 else Fore.YELLOW
+        color_warm = Fore.GREEN if spd_warm >= 2.0 else Fore.CYAN if spd_warm >= 1.0 else Fore.YELLOW
+        
+        click.echo(f"{mod_short:<45} {r['python_ms']:>8.2f}ms {r['cold_ms']:>8.2f}ms {r['warm_ms']:>8.2f}ms {color_cold}{spd_cold:>8.2f}×{Style.RESET_ALL} {color_warm}{spd_warm:>8.2f}×{Style.RESET_ALL}")
+        
+        total_py += r['python_ms']
+        total_cold += r['cold_ms']
+        total_warm += r['warm_ms']
+        if spd_cold > 0: valid_speedups_cold.append(spd_cold)
+        if spd_warm > 0: valid_speedups_warm.append(spd_warm)
+    
+    click.echo(f"{'─' * 105}")
+    
+    avg_speedup_cold = sum(valid_speedups_cold) / len(valid_speedups_cold) if valid_speedups_cold else 0
+    avg_speedup_warm = sum(valid_speedups_warm) / len(valid_speedups_warm) if valid_speedups_warm else 0
+    
+    click.echo(f"{'TOTAL/MÉDIA':<45} {total_py:>8.2f}ms {total_cold:>8.2f}ms {total_warm:>8.2f}ms {Fore.CYAN}{avg_speedup_cold:>8.2f}×{Style.RESET_ALL} {Fore.CYAN}{avg_speedup_warm:>8.2f}×{Style.RESET_ALL}")
+    
+    if avg_speedup_warm >= 2.0:
+        click.echo(f"\n{Fore.GREEN}🏆 VITÓRIA DECISIVA: Mercury Warm Start é {avg_speedup_warm:.2f}× mais rápido que Python Puro!{Style.RESET_ALL}")
+        click.echo(f"{Fore.GREEN}   O Marshal Cache + mmap Zero-Copy eliminou o gargalo do import machinery.{Style.RESET_ALL}")
+    elif avg_speedup_warm >= 1.0:
+        click.echo(f"\n{Fore.CYAN}✔ VITÓRIA: Mercury Warm Start é {avg_speedup_warm:.2f}× mais rápido que Python Puro.{Style.RESET_ALL}")
+    else:
+        click.echo(f"\n{Fore.YELLOW}⚠ Python Puro ainda vence no cenário atual. O gargalo pode ser I/O do cache_save.{Style.RESET_ALL}")
+    
+    click.echo(f"\n{Fore.CYAN}{'═' * 105}{Style.RESET_ALL}\n")
             
 @hermes_group.command('purge')
 @click.option('--lib', help='Nome da biblioteca para purgar (ex: click)')

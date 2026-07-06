@@ -9,7 +9,7 @@ import json
 import time
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Optional
+from typing import Dict, List
 from collections import Counter
 
 

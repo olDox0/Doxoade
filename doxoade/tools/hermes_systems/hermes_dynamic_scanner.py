@@ -7,7 +7,7 @@ CORREÇÃO: Apenas padrões de linha única (sem \n).
 import re
 from collections import Counter
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict
 
 
 class HermesDynamicScanner:

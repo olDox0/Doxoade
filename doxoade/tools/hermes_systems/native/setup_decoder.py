@@ -3,27 +3,17 @@
 """
 Build do Hermes Native Decoder via setuptools.
 Usa o compilador correto (MSVC no Windows) automaticamente.
-
 Uso:
-    cd doxoade/tools/hermes_systems/native
-    python setup_decoder.py build_ext --inplace
+cd doxoade/tools/hermes_systems/native
+python setup_decoder.py build_ext --inplace
 """
-import sys
 import os
-from pathlib import Path
+import sysconfig
 from setuptools import setup, Extension
 
-# Detecta paths do Python automaticamente
-python_include = sysconfig_get_path('include')
-python_lib_dir = sysconfig_get_config_var('LIBDIR') or ''
-
-def sysconfig_get_path(name):
-    import sysconfig
-    return sysconfig.get_path(name)
-
-def sysconfig_get_config_var(name):
-    import sysconfig
-    return sysconfig.get_config_var(name)
+# Detecta paths do Python automaticamente (Correção do bug de ordem)
+python_include = sysconfig.get_path('include')
+python_lib_dir = sysconfig.get_config_var('LIBDIR') or ''
 
 # Define a extensão
 hermes_decoder = Extension(

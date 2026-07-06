@@ -11,10 +11,13 @@ import json
 import gc
 import subprocess
 import statistics
+
 from pathlib import Path
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict, field
-from datetime import datetime
+
+from doxoade.tools.doxcolors import Fore, Style
 
 @dataclass
 class MemoryStats:
@@ -54,6 +57,16 @@ class CacheStats:
         return (self.cache_hits / total * 100) if total > 0 else 0.0
 
 @dataclass
+class PipelineStats:
+    """Estatísticas detalhadas do pipeline Hermes."""
+    find_spec_ms: float = 0.0
+    decompress_ms: float = 0.0
+    reverse_tokens_ms: float = 0.0
+    marshal_loads_ms: float = 0.0
+    exec_module_ms: float = 0.0
+    total_ms: float = 0.0
+
+@dataclass
 class BenchmarkResult:
     """Resultado de um benchmark individual."""
     test_name: str
@@ -62,6 +75,7 @@ class BenchmarkResult:
     memory: MemoryStats = field(default_factory=MemoryStats)
     cpu: CPUStats = field(default_factory=CPUStats)
     cache: CacheStats = field(default_factory=CacheStats)
+    pipeline: PipelineStats = field(default_factory=PipelineStats)
     details: str = ''
     
     # Percentis
@@ -146,433 +160,716 @@ class HermesBenchmark:
         except ImportError:
             return CPUStats()
     
-# Substituir o método _measure_subprocess_advanced (linhas ~100-150)
-    def _measure_subprocess_advanced(self, test_name: str, scenario: str, script: str) -> BenchmarkResult:
-        """Executa script em subprocesso com telemetria de memória REAL dentro do subprocesso."""
-        gc.collect()
+    def _measure_subprocess_advanced(self, test_name: str, scenario: str, 
+                                     script: str, iterations: int = 10) -> BenchmarkResult:
+        """Mede performance com subprocess isolado e telemetria rica."""
+        durations = []
+        memory_samples = []
+        cpu_samples = []
+        pipeline_samples = []
         
         # ═══════════════════════════════════════════════════════════════════
-        # Script wrapper que mede memória DENTRO do subprocesso via psutil
+        # FIX CRÍTICO: Indenta o script corretamente dentro do try:
         # ═══════════════════════════════════════════════════════════════════
-        wrapped_script = f'''
-import sys, os, time
-try:
-    import psutil
-    _proc = psutil.Process(os.getpid())
-    _mem_before = _proc.memory_info()
-    _cpu_before = _proc.cpu_times()
-    _has_psutil = True
-except ImportError:
-    _has_psutil = False
-
-_start = time.perf_counter()
-try:
-{chr(10).join("    " + line for line in script.split(chr(10)))}
-    _duration = (time.perf_counter() - _start) * 1000
-    _exit_code = 0
-except Exception as _e:
-    _duration = (time.perf_counter() - _start) * 1000
-    import traceback
-    print(f"ERROR: {{traceback.format_exc()}}", file=sys.stderr)
-    _exit_code = 1
-
-if _has_psutil:
-    _mem_after = _proc.memory_info()
-    _cpu_after = _proc.cpu_times()
-    print(f"__METRICS__|{{_duration:.3f}}|{{_mem_after.rss - _mem_before.rss}}|{{_mem_after.vms - _mem_before.vms}}|{{getattr(_mem_after, 'shared', 0) - getattr(_mem_before, 'shared', 0)}}|{{(_cpu_after.user - _cpu_before.user) * 1000:.3f}}|{{(_cpu_after.system - _cpu_before.system) * 1000:.3f}}")
-else:
-    print(f"__METRICS__|{{_duration:.3f}}|0|0|0|0|0")
-sys.exit(_exit_code)
-'''
+        indented_script = '\n'.join('    ' + line if line.strip() else '' 
+                                    for line in script.strip().splitlines())
         
-        start = time.perf_counter()
+        for iteration in range(iterations):
+            gc.collect()
+            
+            # Script com indentação CORRETA
+            wrapped_script = f"""import time
+import sys
+import json
+
+pipeline_stats = {{
+    'find_spec_ms': 0.0,
+    'decompress_ms': 0.0,
+    'reverse_tokens_ms': 0.0,
+    'marshal_loads_ms': 0.0,
+    'exec_module_ms': 0.0,
+}}
+
+try:
+    from doxoade.tools.hermes_systems.hermes_hook import HermesFinder
+    _original_find_spec = HermesFinder.find_spec
+    def instrumented_find_spec(self, fullname, path, target=None):
+        t0 = time.perf_counter()
+        result = _original_find_spec(self, fullname, path, target)
+        t1 = time.perf_counter()
+        pipeline_stats['find_spec_ms'] += (t1 - t0) * 1000
+        return result
+    HermesFinder.find_spec = instrumented_find_spec
+except Exception as e:
+    print(f"Warning: Failed to patch HermesFinder: {{e}}", file=sys.stderr)
+
+try:
+    from doxoade.tools.hermes_systems.hermes_loader import HermesLoader
+    _original_decompress = HermesLoader.decompress_to_code
+    def instrumented_decompress(self, hermes_path):
+        t_total_start = time.perf_counter()
+        import marshal
+        _original_marshal_loads = marshal.loads
+        marshal_time = [0.0]
+        def instrumented_marshal_loads(data):
+            t0 = time.perf_counter()
+            result = _original_marshal_loads(data)
+            marshal_time[0] = (time.perf_counter() - t0) * 1000
+            return result
+        marshal.loads = instrumented_marshal_loads
         try:
+            result = _original_decompress(self, hermes_path)
+        finally:
+            marshal.loads = _original_marshal_loads
+        t_total = (time.perf_counter() - t_total_start) * 1000
+        pipeline_stats['decompress_ms'] += t_total
+        pipeline_stats['marshal_loads_ms'] += marshal_time[0]
+        pipeline_stats['reverse_tokens_ms'] += (t_total - marshal_time[0])
+        return result
+    HermesLoader.decompress_to_code = instrumented_decompress
+except Exception as e:
+    print(f"Warning: Failed to patch HermesLoader: {{e}}", file=sys.stderr)
+
+try:
+    from doxoade.tools.hermes_systems.hermes_hook import HermesModuleLoader
+    _original_exec = HermesModuleLoader.exec_module
+    def instrumented_exec(self, module):
+        t0 = time.perf_counter()
+        result = _original_exec(self, module)
+        t1 = time.perf_counter()
+        pipeline_stats['exec_module_ms'] += (t1 - t0) * 1000
+        return result
+    HermesModuleLoader.exec_module = instrumented_exec
+except Exception as e:
+    print(f"Warning: Failed to patch HermesModuleLoader: {{e}}", file=sys.stderr)
+
+start = time.perf_counter()
+try:
+{indented_script}
+except Exception as e:
+    print(f"ERROR in test script: {{e}}", file=sys.stderr)
+    import traceback
+    traceback.print_exc(file=sys.stderr)
+    sys.exit(1)
+end = time.perf_counter()
+
+pipeline_stats['total_ms'] = (
+    pipeline_stats['find_spec_ms'] +
+    pipeline_stats['decompress_ms'] +
+    pipeline_stats['exec_module_ms']
+)
+
+output = {{
+    'duration_ms': (end - start) * 1000,
+    'pipeline': pipeline_stats
+}}
+print(json.dumps(output))
+"""
+            
             result = subprocess.run(
                 [sys.executable, '-c', wrapped_script],
                 capture_output=True,
                 text=True,
-                timeout=30,
-                cwd=str(self.root),
-                encoding='utf-8',
-                errors='replace'
+                timeout=30
             )
-            duration = (time.perf_counter() - start) * 1000
-        except subprocess.TimeoutExpired:
-            duration = 30000.0
-            result = None
-        except Exception:
-            duration = 0.0
-            result = None
+            
+            if result.returncode != 0:
+                if iteration == 0:
+                    print(f"\n  {Fore.RED}⚠ Subprocess error (iteration 0):{Style.RESET_ALL}")
+                    if result.stderr:
+                        print(f"    {result.stderr}\n{result}")
+                continue
+            
+            if result.stdout.strip():
+                try:
+                    metrics = json.loads(result.stdout.strip())
+                    duration = metrics['duration_ms']
+                    
+                    if duration < 0.1:
+                        if iteration == 0:
+                            print(f"\n  {Fore.YELLOW}⚠ Suspicious low duration: {duration}ms{Style.RESET_ALL}")
+                        continue
+                    
+                    durations.append(duration)
+                    pipeline = metrics.get('pipeline', {})
+                    pipeline_samples.append(pipeline)
+                    
+                    mem = self._get_detailed_memory()
+                    cpu = self._get_detailed_cpu()
+                    memory_samples.append(mem)
+                    cpu_samples.append(cpu)
+                    
+                except (json.JSONDecodeError, KeyError) as e:
+                    if iteration == 0:
+                        print(f"\n  {Fore.RED}⚠ Failed to parse metrics: {e}{Style.RESET_ALL}")
+                        print(f"    stdout: {result.stdout[:200]}")
         
-        # ═══════════════════════════════════════════════════════════════════
-        # Parse das métricas do subprocesso (linha __METRICS__)
-        # ═══════════════════════════════════════════════════════════════════
-        mem_delta = MemoryStats()
-        cpu_delta = CPUStats()
-        details = ''
-        script_duration = duration
+        if not durations:
+            return BenchmarkResult(
+                test_name=test_name,
+                scenario=scenario,
+                duration_ms=0.0,
+                details='Falha na medição - nenhum dado válido'
+            )
         
-        if result and result.stdout:
-            for line in result.stdout.split('\n'):
-                if line.startswith('__METRICS__|'):
-                    try:
-                        parts = line.split('|')
-                        script_duration = float(parts[1])
-                        mem_delta = MemoryStats(
-                            rss_mb=int(parts[2]) / 1024 / 1024,
-                            vms_mb=int(parts[3]) / 1024 / 1024,
-                            shared_mb=int(parts[4]) / 1024 / 1024,
-                        )
-                        cpu_delta = CPUStats(
-                            user_time_ms=float(parts[5]),
-                            system_time_ms=float(parts[6]),
-                        )
-                    except (IndexError, ValueError):
-                        pass
-                else:
-                    details += line + '\n'
+        avg_duration = statistics.mean(durations)
+        p50 = statistics.median(durations)
+        p95 = statistics.quantiles(durations, n=20)[18] if len(durations) >= 20 else max(durations)
+        p99 = statistics.quantiles(durations, n=100)[98] if len(durations) >= 100 else max(durations)
         
-        bm_result = BenchmarkResult(
+        avg_pipeline = PipelineStats()
+        if pipeline_samples:
+            for sample in pipeline_samples:
+                avg_pipeline.find_spec_ms += sample.get('find_spec_ms', 0.0)
+                avg_pipeline.decompress_ms += sample.get('decompress_ms', 0.0)
+                avg_pipeline.reverse_tokens_ms += sample.get('reverse_tokens_ms', 0.0)
+                avg_pipeline.marshal_loads_ms += sample.get('marshal_loads_ms', 0.0)
+                avg_pipeline.exec_module_ms += sample.get('exec_module_ms', 0.0)
+                avg_pipeline.total_ms += sample.get('total_ms', 0.0)
+            
+            n = len(pipeline_samples)
+            avg_pipeline.find_spec_ms /= n
+            avg_pipeline.decompress_ms /= n
+            avg_pipeline.reverse_tokens_ms /= n
+            avg_pipeline.marshal_loads_ms /= n
+            avg_pipeline.exec_module_ms /= n
+            avg_pipeline.total_ms /= n
+        
+        avg_memory = MemoryStats()
+        avg_cpu = CPUStats()
+        
+        if memory_samples:
+            avg_memory.rss_mb = statistics.mean([m.rss_mb for m in memory_samples])
+            avg_memory.vms_mb = statistics.mean([m.vms_mb for m in memory_samples])
+            avg_memory.shared_mb = statistics.mean([m.shared_mb for m in memory_samples])
+        
+        if cpu_samples:
+            avg_cpu.user_time_ms = statistics.mean([c.user_time_ms for c in cpu_samples])
+            avg_cpu.system_time_ms = statistics.mean([c.system_time_ms for c in cpu_samples])
+            avg_cpu.cpu_percent = statistics.mean([c.cpu_percent for c in cpu_samples])
+        
+        return BenchmarkResult(
             test_name=test_name,
             scenario=scenario,
-            duration_ms=script_duration if script_duration > 0 else duration,
-            memory=mem_delta,
-            cpu=cpu_delta,
-            details=details.strip()
+            duration_ms=avg_duration,
+            memory=avg_memory,
+            cpu=avg_cpu,
+            pipeline=avg_pipeline,
+            p50_ms=p50,
+            p95_ms=p95,
+            p99_ms=p99
         )
-        self.results.append(bm_result)
-        return bm_result
-    
-    def benchmark_startup_advanced(self, iterations: int = 10) -> Dict[str, BenchmarkResult]:
-        """Benchmark avançado de startup com percentis."""
-        results = {}
+
+    def benchmark_module_import_advanced(self, module_name: str, iterations: int = 10) -> None:
+        """Benchmark de import de módulo específico com telemetria completa."""
+        print(f"  [2/4] Benchmarking {module_name}...")
         
-        # Scripts de teste
-        scripts = {
-            'python': """
-import sys
-import time
-start = time.perf_counter()
-from doxoade import cli
-duration = (time.perf_counter() - start) * 1000
-print(f"{duration:.3f}")
-""",
-            'hermes': """
-import sys
-import time
-start = time.perf_counter()
-from doxoade.tools.hermes_systems.hermes_hook import install
-install('.')
-from doxoade import cli
-duration = (time.perf_counter() - start) * 1000
-print(f"{duration:.3f}")
-""",
-            'pyc': """
-import sys
-import time
-import py_compile
-# Força compilação para .pyc
-py_compile.compile('doxoade/cli.py', doraise=True)
-start = time.perf_counter()
-from doxoade import cli
-duration = (time.perf_counter() - start) * 1000
-print(f"{duration:.3f}")
+        # ═══════════════════════════════════════════════════════════════════
+        # FIX CRÍTICO: Scripts com indentação CORRETA
+        # ═══════════════════════════════════════════════════════════════════
+        script_python = f"""import sys
+if '{module_name}' in sys.modules:
+    del sys.modules['{module_name}']
+import {module_name}
 """
-        }
+        result_python = self._measure_subprocess_advanced(
+            module_name, 'python', script_python, iterations
+        )
+        self.results.append(result_python)
         
-        for scenario, script in scripts.items():
-            durations = []
-            for i in range(iterations):
-                result = self._measure_subprocess_advanced('startup', scenario, script)
+        script_hermes = f"""import sys
+if '{module_name}' in sys.modules:
+    del sys.modules['{module_name}']
+import {module_name}
+"""
+        result_hermes = self._measure_subprocess_advanced(
+            module_name, 'hermes', script_hermes, iterations
+        )
+        self.results.append(result_hermes)
+        
+        script_pyc = f"""import sys
+if '{module_name}' in sys.modules:
+    del sys.modules['{module_name}']
+import {module_name}
+"""
+        result_pyc = self._measure_subprocess_advanced(
+            module_name, 'pyc', script_pyc, iterations
+        )
+        self.results.append(result_pyc)
+
+    def benchmark_startup_advanced(self, iterations: int = 10) -> None:
+        """Benchmark de startup com telemetria completa."""
+        print("\n  [1/4] Benchmarking startup...")
+        
+        # Python puro
+        result_python = self._measure_subprocess_advanced(
+            'startup', 'python', 'pass', iterations
+        )
+        self.results.append(result_python)
+        
+        # Hermes
+        result_hermes = self._measure_subprocess_advanced(
+            'startup', 'hermes',
+            'import doxoade.cli',
+            iterations
+        )
+        self.results.append(result_hermes)
+        
+        # .pyc (baseline compilado)
+        result_pyc = self._measure_subprocess_advanced(
+            'startup', 'pyc',
+            'import doxoade.cli',
+            iterations
+        )
+        self.results.append(result_pyc)
+    
+    def benchmark_module_import_advanced(self, module_name: str, iterations: int = 10) -> None:
+        """Benchmark de import de módulo específico com telemetria completa."""
+        print(f"  [2/4] Benchmarking {module_name}...")
+        
+        # Python puro
+        script_python = f'''
+import sys
+# Remove do sys.modules para forçar reimport
+if '{module_name}' in sys.modules:
+    del sys.modules['{module_name}']
+import {module_name}
+'''
+        result_python = self._measure_subprocess_advanced(
+            module_name, 'python', script_python, iterations
+        )
+        self.results.append(result_python)
+        
+        # Hermes
+        script_hermes = f'''
+import sys
+# Remove do sys.modules para forçar reimport
+if '{module_name}' in sys.modules:
+    del sys.modules['{module_name}']
+import {module_name}
+'''
+        result_hermes = self._measure_subprocess_advanced(
+            module_name, 'hermes', script_hermes, iterations
+        )
+        self.results.append(result_hermes)
+        
+        # .pyc
+        script_pyc = f'''
+import sys
+if '{module_name}' in sys.modules:
+    del sys.modules['{module_name}']
+import {module_name}
+'''
+        result_pyc = self._measure_subprocess_advanced(
+            module_name, 'pyc', script_pyc, iterations
+        )
+        self.results.append(result_pyc)
+    
+    def benchmark_cache_performance(self, iterations: int = 5) -> None:
+        """Benchmark de performance do cache."""
+        print("  [3/4] Benchmarking cache performance...")
+        
+        script = '''
+import time
+from pathlib import Path
+from doxoade.tools.hermes_systems.hermes_loader import HermesLoader
+
+loader = HermesLoader('.')
+hermes_files = list(Path('.doxoade/hermes/build').glob('*.hermes'))[:5]
+
+# Teste de cache hit/miss
+start = time.perf_counter()
+for _ in range(10):
+    for hf in hermes_files:
+        loader.decompress_to_code(hf)
+end = time.perf_counter()
+
+print(f"{{(end - start) * 1000:.2f}}")
+'''
+        
+        durations = []
+        for _ in range(iterations):
+            result = subprocess.run(
+                [sys.executable, '-c', script],
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode == 0:
                 try:
-                    duration = float(result.details.strip())
+                    duration = float(result.stdout.strip())
                     durations.append(duration)
-                except:
-                    durations.append(result.duration_ms)
-            
-            # Calcula percentis
-            durations.sort()
-            p50 = statistics.median(durations)
-            p95 = durations[int(len(durations) * 0.95)] if len(durations) >= 20 else durations[-1]
-            p99 = durations[int(len(durations) * 0.99)] if len(durations) >= 100 else durations[-1]
-            
-            # Usa mediana como valor principal
-            results[scenario] = BenchmarkResult(
-                test_name='startup',
-                scenario=scenario,
-                duration_ms=p50,
-                p50_ms=p50,
-                p95_ms=p95,
-                p99_ms=p99,
-                memory=results.get(scenario, BenchmarkResult('', '', 0)).memory,
-                cpu=results.get(scenario, BenchmarkResult('', '', 0)).cpu,
-                details=f'{iterations} iterações | p50={p50:.2f}ms | p95={p95:.2f}ms | p99={p99:.2f}ms'
-            )
+                except ValueError:
+                    pass
         
-        return results
-    
-    def benchmark_module_import_advanced(self, module_name: str, iterations: int = 10) -> Dict[str, BenchmarkResult]:
-        """Benchmark avançado de import com telemetria completa."""
-        results = {}
-        
-        scripts = {
-            'python': f"""
-import sys
-import time
-start = time.perf_counter()
-import {module_name}
-duration = (time.perf_counter() - start) * 1000
-print(f"{{duration:.3f}}")
-""",
-            'hermes': f"""
-import sys
-import time
-from doxoade.tools.hermes_systems.hermes_hook import install
-install('.')
-start = time.perf_counter()
-import {module_name}
-duration = (time.perf_counter() - start) * 1000
-print(f"{{duration:.3f}}")
-""",
-            'pyc': f"""
-import sys
-import time
-import py_compile
-# Força compilação para .pyc
-try:
-    py_compile.compile('{module_name.replace('.', '/')}.py', doraise=True)
-except:
-    pass
-start = time.perf_counter()
-import {module_name}
-duration = (time.perf_counter() - start) * 1000
-print(f"{{duration:.3f}}")
-"""
-        }
-        
-        for scenario, script in scripts.items():
-            durations = []
-            for i in range(iterations):
-                result = self._measure_subprocess_advanced(f'import_{module_name}', scenario, script)
-                try:
-                    duration = float(result.details.strip())
-                    durations.append(duration)
-                except:
-                    durations.append(result.duration_ms)
-            
-            # Calcula percentis
-            durations.sort()
-            p50 = statistics.median(durations)
-            p95 = durations[int(len(durations) * 0.95)] if len(durations) >= 20 else durations[-1]
-            p99 = durations[int(len(durations) * 0.99)] if len(durations) >= 100 else durations[-1]
-            
-            results[scenario] = BenchmarkResult(
-                test_name=f'import_{module_name}',
-                scenario=scenario,
-                duration_ms=p50,
-                p50_ms=p50,
-                p95_ms=p95,
-                p99_ms=p99,
-                memory=result.memory,
-                cpu=result.cpu,
-                details=f'{iterations} iterações | p50={p50:.2f}ms | p95={p95:.2f}ms'
-            )
-        
-        return results
-    
-    def benchmark_cache_performance(self, iterations: int = 5) -> Dict[str, BenchmarkResult]:
-        """Benchmark específico de performance do cache Hermes."""
-        results = {}
-        
-        script = """
-import sys
-import time
-from doxoade.tools.hermes_systems.hermes_hook import install
-install('.')
-
-# Primeiro import (cache miss)
-start = time.perf_counter()
-import doxoade.cli
-first_import = (time.perf_counter() - start) * 1000
-
-# Limpa módulos para forçar segundo import
-for mod in list(sys.modules.keys()):
-    if mod.startswith('doxoade'):
-        del sys.modules[mod]
-
-# Segundo import (cache hit - se cache persistente)
-start = time.perf_counter()
-import doxoade.cli
-second_import = (time.perf_counter() - start) * 1000
-
-print(f"{first_import:.3f},{second_import:.3f}")
-"""
-        
-        durations_first = []
-        durations_second = []
-        
-        for i in range(iterations):
-            result = self._measure_subprocess_advanced('cache_test', 'hermes', script)
-            try:
-                parts = result.details.strip().split(',')
-                first = float(parts[0])
-                second = float(parts[1])
-                durations_first.append(first)
-                durations_second.append(second)
-            except:
-                pass
-        
-        if durations_first and durations_second:
-            results['first_import'] = BenchmarkResult(
-                test_name='cache_first_import',
+        if durations:
+            avg_duration = statistics.mean(durations)
+            self.results.append(BenchmarkResult(
+                test_name='cache_test',
                 scenario='hermes',
-                duration_ms=statistics.median(durations_first),
-                details=f'Cache miss | {iterations} iterações'
-            )
-            results['second_import'] = BenchmarkResult(
-                test_name='cache_second_import',
-                scenario='hermes',
-                duration_ms=statistics.median(durations_second),
-                details=f'Cache hit | {iterations} iterações'
-            )
-        
-        return results
+                duration_ms=avg_duration,
+                details=f'Cache performance ({iterations} iterações)'
+            ))
     
-    def benchmark_critical_modules_advanced(self, iterations: int = 10) -> Dict[str, Dict[str, BenchmarkResult]]:
-        """Benchmark avançado dos módulos críticos."""
+    def benchmark_critical_modules_advanced(self, iterations: int = 10) -> None:
+        """Benchmark dos módulos críticos do projeto."""
+        print("  [4/4] Benchmarking módulos críticos...")
+        
         critical_modules = [
             'doxoade.cli',
             'doxoade.tools.hermes_systems.hermes_loader',
-            'doxoade.tools.vulcan.forge',
-            'doxoade.tools.vulcan.compiler',
             'doxoade.tools.vulcan.autopilot',
+            'doxoade.tools.vulcan.compiler',
+            'doxoade.tools.vulcan.forge',
         ]
         
-        all_results = {}
         for module in critical_modules:
-            all_results[module] = self.benchmark_module_import_advanced(module, iterations)
-        
-        return all_results
+            self.benchmark_module_import_advanced(module, iterations)
     
     def generate_report(self) -> BenchmarkReport:
         """Gera relatório final."""
-        report = BenchmarkReport(
+        return BenchmarkReport(
             timestamp=datetime.now().isoformat(),
             project_root=str(self.root),
             python_version=sys.version,
             results=self.results
         )
-        
-        return report
     
-    def print_summary_advanced(self, report: BenchmarkReport):
-        """Imprime resumo avançado do benchmark."""
-        from doxoade.tools.doxcolors import Fore, Style
+    def print_summary_advanced(self, report: BenchmarkReport) -> None:
+        """Imprime resumo detalhado com análise de pipeline."""
+        print("\n" + "═" * 80)
+        print("  ☤ HERMES ADVANCED BENCHMARK REPORT")
+        print("═" * 80)
         
-        print(f"\n{Fore.CYAN}{Style.BRIGHT}{'═'*80}{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}{Style.BRIGHT}  ☤ HERMES ADVANCED BENCHMARK REPORT{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}{Style.BRIGHT}{'═'*80}{Style.RESET_ALL}\n")
-        
-        print(f"{Fore.WHITE}■ Timestamp: {Style.RESET_ALL}{report.timestamp}")
-        print(f"{Fore.WHITE}■ Python: {Style.RESET_ALL}{report.python_version.split()[0]}")
-        print(f"{Fore.WHITE}■ Projeto: {Style.RESET_ALL}{report.project_root}\n")
+        print(f"\n■ Timestamp: {report.timestamp}")
+        print(f"■ Python: {report.python_version.split()[0]}")
+        print(f"■ Projeto: {report.project_root}")
         
         # Startup
-        print(f"{Fore.YELLOW}{Style.BRIGHT}■ STARTUP TIME{Style.RESET_ALL}")
+        print("\n■ STARTUP TIME")
         for scenario in ['python', 'hermes', 'pyc']:
-            result = next((r for r in report.results if r.test_name == 'startup' and r.scenario == scenario), None)
+            result = next((r for r in report.results 
+                          if r.test_name == 'startup' and r.scenario == scenario), None)
             if result:
-                color = Fore.GREEN if scenario == 'python' else (Fore.CYAN if scenario == 'hermes' else Fore.MAGENTA)
-                print(f"  {color}{scenario:8}{Style.RESET_ALL}: {result.duration_ms:8.2f} ms  (p95: {result.p95_ms:.2f}ms)")
+                print(f"  {scenario:<6}: {result.duration_ms:>8.2f} ms  (p95: {result.p95_ms:.2f}ms)")
         
-        startup_speedup = report.get_speedup('startup')
-        if startup_speedup:
-            color = Fore.GREEN if startup_speedup > 1.0 else Fore.RED
-            print(f"  Speedup: {color}{startup_speedup:.2f}×{Style.RESET_ALL}\n")
+        speedup = report.get_speedup('startup')
+        if speedup:
+            print(f"  Speedup: {speedup:.2f}×")
         
-        # Imports críticos
-        print(f"{Fore.YELLOW}{Style.BRIGHT}■ IMPORTS CRÍTICOS{Style.RESET_ALL}")
-        test_names = set(r.test_name for r in report.results if r.test_name.startswith('import_'))
+        # Imports críticos com análise de pipeline
+        print("\n■ IMPORTS CRÍTICOS (com análise de pipeline)")
+        critical_modules = [
+            'doxoade.cli',
+            'doxoade.tools.hermes_systems.hermes_loader',
+            'doxoade.tools.vulcan.autopilot',
+            'doxoade.tools.vulcan.compiler',
+            'doxoade.tools.vulcan.forge',
+        ]
         
-        for test_name in sorted(test_names):
-            module = test_name.replace('import_', '')
-            print(f"\n  {Fore.WHITE}{module}{Style.RESET_ALL}")
+        for module in critical_modules:
+            python_result = next((r for r in report.python_results if r.test_name == module), None)
+            hermes_result = next((r for r in report.hermes_results if r.test_name == module), None)
+            pyc_result = next((r for r in report.pyc_results if r.test_name == module), None)
             
-            for scenario in ['python', 'hermes', 'pyc']:
-                result = next((r for r in report.results if r.test_name == test_name and r.scenario == scenario), None)
-                if result:
-                    color = Fore.GREEN if scenario == 'python' else (Fore.CYAN if scenario == 'hermes' else Fore.MAGENTA)
-                    print(f"    {color}{scenario:8}{Style.RESET_ALL}: {result.duration_ms:6.2f}ms | Mem: {result.memory.rss_mb:.1f}MB | CPU: {result.cpu.user_time_ms:.1f}ms")
-            
-            speedup = report.get_speedup(test_name)
-            if speedup:
-                color = Fore.GREEN if speedup > 1.0 else Fore.RED
-                print(f"    Speedup: {color}{speedup:.2f}×{Style.RESET_ALL}")
+            if python_result and hermes_result:
+                print(f"\n  {module}")
+                print(f"    python  : {python_result.duration_ms:>7.2f}ms | Mem: {python_result.memory.rss_mb:.1f}MB | CPU: {python_result.cpu.total_time_ms:.1f}ms")
+                print(f"    hermes  : {hermes_result.duration_ms:>7.2f}ms | Mem: {hermes_result.memory.rss_mb:.1f}MB | CPU: {hermes_result.cpu.total_time_ms:.1f}ms")
+                
+                if pyc_result:
+                    print(f"    pyc     : {pyc_result.duration_ms:>7.2f}ms | Mem: {pyc_result.memory.rss_mb:.1f}MB | CPU: {pyc_result.cpu.total_time_ms:.1f}ms")
+                
+                # Análise de pipeline Hermes
+                if hermes_result.pipeline.total_ms > 0:
+                    print(f"    └─ Pipeline Hermes:")
+                    print(f"       find_spec     : {hermes_result.pipeline.find_spec_ms:>7.2f}ms")
+                    print(f"       decompress    : {hermes_result.pipeline.decompress_ms:>7.2f}ms")
+                    print(f"         └─ marshal  : {hermes_result.pipeline.marshal_loads_ms:>7.2f}ms")
+                    print(f"         └─ reverse  : {hermes_result.pipeline.reverse_tokens_ms:>7.2f}ms")
+                    print(f"       exec_module   : {hermes_result.pipeline.exec_module_ms:>7.2f}ms")
+                    print(f"       total pipeline: {hermes_result.pipeline.total_ms:>7.2f}ms")
+                
+                speedup = report.get_speedup(module)
+                if speedup:
+                    print(f"    Speedup: {speedup:.2f}×")
         
         # Cache performance
-        cache_results = [r for r in report.results if 'cache' in r.test_name]
-        if cache_results:
-            print(f"\n{Fore.YELLOW}{Style.BRIGHT}■ CACHE PERFORMANCE{Style.RESET_ALL}")
-            for result in cache_results:
-                print(f"  {result.test_name:25}: {result.duration_ms:.2f}ms")
+        print("\n■ CACHE PERFORMANCE")
+        cache_results = [r for r in report.results if r.test_name == 'cache_test']
+        for result in cache_results:
+            print(f"  cache_test               : {result.duration_ms:>8.2f}ms")
         
         # Memory breakdown
-        print(f"\n{Fore.YELLOW}{Style.BRIGHT}■ MEMORY BREAKDOWN (Startup){Style.RESET_ALL}")
-        startup_results = [r for r in report.results if r.test_name == 'startup']
-        for result in startup_results:
-            color = Fore.GREEN if result.scenario == 'python' else (Fore.CYAN if result.scenario == 'hermes' else Fore.MAGENTA)
-            print(f"  {color}{result.scenario:8}{Style.RESET_ALL}: RSS={result.memory.rss_mb:.1f}MB | VMS={result.memory.vms_mb:.1f}MB | Shared={result.memory.shared_mb:.1f}MB")
-        
-        print(f"\n{Fore.CYAN}{Style.BRIGHT}{'═'*80}{Style.RESET_ALL}\n")
+        print("\n■ MEMORY BREAKDOWN (Startup)")
+        for scenario in ['python', 'hermes', 'pyc']:
+            results = [r for r in report.results 
+                      if r.test_name == 'startup' and r.scenario == scenario]
+            for result in results:
+                print(f"  {scenario:<6}: RSS={result.memory.rss_mb:.1f}MB | "
+                      f"VMS={result.memory.vms_mb:.1f}MB | "
+                      f"Shared={result.memory.shared_mb:.1f}MB")
     
-    def save_report(self, report: BenchmarkReport, output_path: Optional[Path] = None):
+    def save_report(self, report: BenchmarkReport) -> None:
         """Salva relatório em JSON."""
-        if output_path is None:
-            output_path = self.root / '.doxoade' / 'hermes' / 'benchmark_report.json'
+        report_dir = self.root / '.doxoade' / 'hermes'
+        report_dir.mkdir(parents=True, exist_ok=True)
         
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        report_file = report_dir / 'benchmark_report.json'
         
-        data = {
-            'timestamp': report.timestamp,
-            'project_root': report.project_root,
-            'python_version': report.python_version,
-            'results': [asdict(r) for r in report.results]
-        }
+        with open(report_file, 'w', encoding='utf-8') as f:
+            json.dump({
+                'timestamp': report.timestamp,
+                'project_root': report.project_root,
+                'python_version': report.python_version,
+                'results': [asdict(r) for r in report.results]
+            }, f, indent=2, ensure_ascii=False)
         
-        with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        
-        return output_path
+        print(f"\n✔ Relatório salvo em: {report_file}")
 
+    def _measure_subprocess_advanced(self, test_name: str, scenario: str, 
+                                     script: str, iterations: int = 10) -> BenchmarkResult:
+        """Mede performance com subprocess isolado e telemetria rica."""
+        durations = []
+        memory_samples = []
+        cpu_samples = []
+        pipeline_samples = []
+        
+        for iteration in range(iterations):
+            gc.collect()
+            
+            # ═══════════════════════════════════════════════════════════════════
+            # FIX CRÍTICO: Indenta o script corretamente dentro do try:
+            # ═══════════════════════════════════════════════════════════════════
+            indented_script = '\n'.join('    ' + line if line.strip() else '' 
+                                        for line in script.strip().splitlines())
+            
+            wrapped_script = f"""import time
+import sys
+import json
 
-def run_benchmark(project_root: str, iterations: int = 10, output: bool = True, advanced: bool = True):
+pipeline_stats = {{
+    'find_spec_ms': 0.0,
+    'decompress_ms': 0.0,
+    'reverse_tokens_ms': 0.0,
+    'marshal_loads_ms': 0.0,
+    'exec_module_ms': 0.0,
+}}
+
+try:
+    from doxoade.tools.hermes_systems.hermes_hook import HermesFinder
+    _original_find_spec = HermesFinder.find_spec
+    def instrumented_find_spec(self, fullname, path, target=None):
+        t0 = time.perf_counter()
+        result = _original_find_spec(self, fullname, path, target)
+        t1 = time.perf_counter()
+        pipeline_stats['find_spec_ms'] += (t1 - t0) * 1000
+        return result
+    HermesFinder.find_spec = instrumented_find_spec
+except Exception as e:
+    print(f"Warning: Failed to patch HermesFinder: {{e}}", file=sys.stderr)
+
+try:
+    from doxoade.tools.hermes_systems.hermes_loader import HermesLoader
+    _original_decompress = HermesLoader.decompress_to_code
+    def instrumented_decompress(self, hermes_path):
+        t_total_start = time.perf_counter()
+        import marshal
+        _original_marshal_loads = marshal.loads
+        marshal_time = [0.0]
+        def instrumented_marshal_loads(data):
+            t0 = time.perf_counter()
+            result = _original_marshal_loads(data)
+            marshal_time[0] = (time.perf_counter() - t0) * 1000
+            return result
+        marshal.loads = instrumented_marshal_loads
+        try:
+            result = _original_decompress(self, hermes_path)
+        finally:
+            marshal.loads = _original_marshal_loads
+        t_total = (time.perf_counter() - t_total_start) * 1000
+        pipeline_stats['decompress_ms'] += t_total
+        pipeline_stats['marshal_loads_ms'] += marshal_time[0]
+        pipeline_stats['reverse_tokens_ms'] += (t_total - marshal_time[0])
+        return result
+    HermesLoader.decompress_to_code = instrumented_decompress
+except Exception as e:
+    print(f"Warning: Failed to patch HermesLoader: {{e}}", file=sys.stderr)
+
+try:
+    from doxoade.tools.hermes_systems.hermes_hook import HermesModuleLoader
+    _original_exec = HermesModuleLoader.exec_module
+    def instrumented_exec(self, module):
+        t0 = time.perf_counter()
+        result = _original_exec(self, module)
+        t1 = time.perf_counter()
+        pipeline_stats['exec_module_ms'] += (t1 - t0) * 1000
+        return result
+    HermesModuleLoader.exec_module = instrumented_exec
+except Exception as e:
+    print(f"Warning: Failed to patch HermesModuleLoader: {{e}}", file=sys.stderr)
+
+start = time.perf_counter()
+try:
+{indented_script}
+except Exception as e:
+    print(f"ERROR in test script: {{e}}", file=sys.stderr)
+    import traceback
+    traceback.print_exc(file=sys.stderr)
+    sys.exit(1)
+end = time.perf_counter()
+
+pipeline_stats['total_ms'] = (
+    pipeline_stats['find_spec_ms'] +
+    pipeline_stats['decompress_ms'] +
+    pipeline_stats['exec_module_ms']
+)
+
+output = {{
+    'duration_ms': (end - start) * 1000,
+    'pipeline': pipeline_stats
+}}
+print(json.dumps(output))
+"""
+            
+            result = subprocess.run(
+                [sys.executable, '-c', wrapped_script],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            # ═══════════════════════════════════════════════════════════════════
+            # DEBUG: Se houver erro, mostra o código COMPLETO da sonda e PARA
+            # ═══════════════════════════════════════════════════════════════════
+            if result.returncode != 0:
+                print(f"\n{Fore.RED}{'═' * 80}{Style.RESET_ALL}")
+                print(f"{Fore.RED}{Style.BRIGHT}🔥 ERRO NO SUBPROCESS — ITERAÇÃO {iteration}{Style.RESET_ALL}")
+                print(f"{Fore.RED}{'═' * 80}{Style.RESET_ALL}")
+                print(f"\n{Fore.YELLOW}📋 CÓDIGO COMPLETO DA SONDA:{Style.RESET_ALL}")
+                print(f"{Fore.CYAN}{'─' * 80}{Style.RESET_ALL}")
+                
+                # Mostra o código com numeração de linhas
+                for i, line in enumerate(wrapped_script.splitlines(), 1):
+                    print(f"{Fore.DIM}{i:4d}{Style.RESET_ALL} │ {line}")
+                
+                print(f"{Fore.CYAN}{'─' * 80}{Style.RESET_ALL}")
+                print(f"\n{Fore.RED}📝 STDERR DO SUBPROCESS:{Style.RESET_ALL}")
+                print(result.stderr)
+                print(f"{Fore.RED}{'═' * 80}{Style.RESET_ALL}")
+                
+                # PARA a execução — não continua com outras iterações
+                return BenchmarkResult(
+                    test_name=test_name,
+                    scenario=scenario,
+                    duration_ms=0.0,
+                    details=f'ERRO: subprocess falhou na iteração {iteration}. Veja código acima.'
+                )
+            
+            if result.stdout.strip():
+                try:
+                    metrics = json.loads(result.stdout.strip())
+                    duration = metrics['duration_ms']
+                    
+                    if duration < 0.1:
+                        if iteration == 0:
+                            print(f"\n  {Fore.YELLOW}⚠ Suspicious low duration: {duration}ms{Style.RESET_ALL}")
+                        continue
+                    
+                    durations.append(duration)
+                    pipeline = metrics.get('pipeline', {})
+                    pipeline_samples.append(pipeline)
+                    
+                    mem = self._get_detailed_memory()
+                    cpu = self._get_detailed_cpu()
+                    memory_samples.append(mem)
+                    cpu_samples.append(cpu)
+                    
+                except (json.JSONDecodeError, KeyError) as e:
+                    if iteration == 0:
+                        print(f"\n  {Fore.RED}⚠ Failed to parse metrics: {e}{Style.RESET_ALL}")
+                        print(f"    stdout: {result.stdout[:200]}")
+        
+        if not durations:
+            return BenchmarkResult(
+                test_name=test_name,
+                scenario=scenario,
+                duration_ms=0.0,
+                details='Falha na medição - nenhum dado válido'
+            )
+        
+        avg_duration = statistics.mean(durations)
+        p50 = statistics.median(durations)
+        p95 = statistics.quantiles(durations, n=20)[18] if len(durations) >= 20 else max(durations)
+        p99 = statistics.quantiles(durations, n=100)[98] if len(durations) >= 100 else max(durations)
+        
+        avg_pipeline = PipelineStats()
+        if pipeline_samples:
+            for sample in pipeline_samples:
+                avg_pipeline.find_spec_ms += sample.get('find_spec_ms', 0.0)
+                avg_pipeline.decompress_ms += sample.get('decompress_ms', 0.0)
+                avg_pipeline.reverse_tokens_ms += sample.get('reverse_tokens_ms', 0.0)
+                avg_pipeline.marshal_loads_ms += sample.get('marshal_loads_ms', 0.0)
+                avg_pipeline.exec_module_ms += sample.get('exec_module_ms', 0.0)
+                avg_pipeline.total_ms += sample.get('total_ms', 0.0)
+            
+            n = len(pipeline_samples)
+            avg_pipeline.find_spec_ms /= n
+            avg_pipeline.decompress_ms /= n
+            avg_pipeline.reverse_tokens_ms /= n
+            avg_pipeline.marshal_loads_ms /= n
+            avg_pipeline.exec_module_ms /= n
+            avg_pipeline.total_ms /= n
+        
+        avg_memory = MemoryStats()
+        avg_cpu = CPUStats()
+        
+        if memory_samples:
+            avg_memory.rss_mb = statistics.mean([m.rss_mb for m in memory_samples])
+            avg_memory.vms_mb = statistics.mean([m.vms_mb for m in memory_samples])
+            avg_memory.shared_mb = statistics.mean([m.shared_mb for m in memory_samples])
+        
+        if cpu_samples:
+            avg_cpu.user_time_ms = statistics.mean([c.user_time_ms for c in cpu_samples])
+            avg_cpu.system_time_ms = statistics.mean([c.system_time_ms for c in cpu_samples])
+            avg_cpu.cpu_percent = statistics.mean([c.cpu_percent for c in cpu_samples])
+        
+        return BenchmarkResult(
+            test_name=test_name,
+            scenario=scenario,
+            duration_ms=avg_duration,
+            memory=avg_memory,
+            cpu=avg_cpu,
+            pipeline=avg_pipeline,
+            p50_ms=p50,
+            p95_ms=p95,
+            p99_ms=p99
+        )
+
+def run_benchmark(project_root: str, iterations: int = 10):
     """Executa benchmark completo."""
-    from doxoade.tools.doxcolors import Fore, Style
-    
     benchmark = HermesBenchmark(project_root)
     
-    print(f"\n{Fore.CYAN}☤ Executando benchmark avançado Hermes...{Style.RESET_ALL}")
-    print(f"  Iterações por teste: {iterations}\n")
+    print("\n☤ Executando benchmark avançado Hermes...")
+    print(f"  Iterações por teste: {iterations}")
     
-    # Benchmark de startup
-    print(f"  [1/4] Benchmarking startup...")
-    benchmark.benchmark_startup_advanced(iterations=iterations)
+    benchmark.benchmark_startup_advanced(iterations)
+    benchmark.benchmark_critical_modules_advanced(iterations)
+    benchmark.benchmark_cache_performance(iterations // 2)
     
-    # Benchmark de imports críticos
-    print(f"  [2/4] Benchmarking imports críticos...")
-    benchmark.benchmark_critical_modules_advanced(iterations=iterations)
-    
-    # Benchmark de cache
-    print(f"  [3/4] Benchmarking cache performance...")
-    benchmark.benchmark_cache_performance(iterations=5)
-    
-    # Gera relatório
-    print(f"  [4/4] Gerando relatório...")
     report = benchmark.generate_report()
+    benchmark.print_summary_advanced(report)
+    benchmark.save_report(report)
     
-    if output:
-        benchmark.print_summary_advanced(report)
-        output_path = benchmark.save_report(report)
-        print(f"{Fore.GREEN}✔ Relatório salvo em: {output_path}{Style.RESET_ALL}\n")
+    # ═══════════════════════════════════════════════════════════════════
+    # FIX CRÍTICO: Verificar se speedup é None antes de formatar
+    # ═══════════════════════════════════════════════════════════════════
+    speedup = report.get_speedup('startup')
+    if speedup is None:
+        print(f"\n{Fore.YELLOW}⚠ Não foi possível calcular speedup (dados insuficientes){Style.RESET_ALL}")
+    elif speedup > 1.0:
+        print(f"\n{Fore.GREEN}✔ GANHO SIGNIFICATIVO: {speedup:.2f}× mais rápido que Python puro!{Style.RESET_ALL}")
+    else:
+        print(f"\n{Fore.RED}✘ Sem ganho significativo (speedup: {speedup:.2f}×){Style.RESET_ALL}")
     
     return report

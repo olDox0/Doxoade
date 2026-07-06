@@ -109,86 +109,256 @@ def _is_blacklisted(fullname: str) -> bool:
 # ═══════════════════════════════════════════════════════════════════════
 class HermesModuleLoader(importlib.abc.Loader):
     def __init__(self, hermes_path: Path, original_py_path: Path = None, package_name: str = None):
-        """
-        Loader para módulos .hermes.
-        
-        Args:
-            hermes_path: Caminho para o arquivo .hermes
-            original_py_path: Caminho para o .py original (fallback)
-            package_name: Nome do pacote pai (para imports relativos)
-        """
         self.hermes_path = hermes_path
         self.original_py_path = original_py_path
         self.package_name = package_name
-
+        self._executed = False
+    
     def create_module(self, spec):
         return None
-
+    
     def exec_module(self, module):
-        from doxoade.tools.aegis.aegis_core import nexus_exec  # <-- IMPORT INJETADO AQUI
-        
+        from doxoade.tools.aegis.aegis_core import nexus_exec
         try:
             from doxoade.tools.hermes_systems.hermes_loader import HermesLoader
             project_root = self.hermes_path.parent.parent.parent.parent
             loader = HermesLoader(str(project_root))
-
-            # Configura metadados ANTES de executar
-            if self.package_name:
-                module.__package__ = self.package_name
-            elif '.' in module.__name__:
-                module.__package__ = module.__name__.rsplit('.', 1)[0]
-            else:
-                module.__package__ = module.__name__
-
-            # Configura __path__ para pacotes
-            is_package = False
-            if self.original_py_path and self.original_py_path.name == '__init__.py':
-                module.__path__ = [str(self.original_py_path.parent)]
-                is_package = True
-            elif self.hermes_path.name.endswith('.__init__.hermes'):
-                module.__path__ = [str(self.hermes_path.parent)]
-                is_package = True
-
+            
+            # CARREGAMENTO ADAPTATIVO (Fase 3)
+            file_size = self.hermes_path.stat().st_size
+            code_obj = loader.decompress_to_code_adaptive(self.hermes_path, file_size)
+            
+            # Se retornou None, usa Python puro (fallback)
+            if code_obj is None:
+                if self.original_py_path and self.original_py_path.exists():
+                    source = self._read_py_resilient(self.original_py_path)
+                    module.__file__ = str(self.original_py_path)
+                    self._setup_module_metadata(module)
+                    code = compile(source, str(self.original_py_path), 'exec')
+                    nexus_exec(code, module.__dict__)
+                    return
+                else:
+                    raise ImportError(f"Hermes skipou módulo pequeno mas não há .py fallback: {self.hermes_path}")
+            
+            # Configura metadados
+            self._setup_module_metadata(module)
             module.__file__ = str(self.hermes_path)
-
-            # Carrega bytecode
-            code_obj = loader.decompress_to_code(self.hermes_path)
             
             # Execução Segura via Aegis
             nexus_exec(code_obj, module.__dict__)
-
+            
         except Exception as e:
-            # ═══════════════════════════════════════════════════════════════
-            # Fallback só tenta .py se ele existir E for diferente do .hermes
-            # ═══════════════════════════════════════════════════════════════
+            # Fallback para .py original
             if (self.original_py_path
                     and self.original_py_path.exists()
                     and self.original_py_path.suffix == '.py'
                     and self.original_py_path.resolve() != self.hermes_path.resolve()):
                 try:
-                    with open(self.original_py_path, 'r', encoding='utf-8') as f:
-                        source = f.read()
+                    source = self._read_py_resilient(self.original_py_path)
                     module.__file__ = str(self.original_py_path)
-                    if self.package_name:
-                        module.__package__ = self.package_name
-                    elif '.' in module.__name__:
-                        module.__package__ = module.__name__.rsplit('.', 1)[0]
-                    else:
-                        module.__package__ = module.__name__
-                    if self.original_py_path.name == '__init__.py':
-                        module.__path__ = [str(self.original_py_path.parent)]
-                        
+                    self._setup_module_metadata(module)
                     code = compile(source, str(self.original_py_path), 'exec')
-                    
-                    # Execução Segura de Fallback via Aegis
                     nexus_exec(code, module.__dict__)
-                    return  # Fallback bem-sucedido
+                    return
                 except Exception as fallback_err:
                     raise ImportError(
                         f"Hermes falhou: {e} | Fallback .py também falhou: {fallback_err}"
                     ) from e
             else:
                 raise ImportError(f"Falha crítica no Hermes Loader: {e}") from e
+    
+    def _setup_module_metadata(self, module):
+        """Configura metadados do módulo."""
+        if self.package_name:
+            module.__package__ = self.package_name
+        elif '.' in module.__name__:
+            module.__package__ = module.__name__.rsplit('.', 1)[0]
+        else:
+            module.__package__ = module.__name__
+        
+        if self.original_py_path and self.original_py_path.name == '__init__.py':
+            module.__path__ = [str(self.original_py_path.parent)]
+        elif self.hermes_path.name.endswith('.__init__.hermes'):
+            module.__path__ = [str(self.hermes_path.parent)]
+    
+    def _resolve_safe_py_path(self):
+        """
+        Resolve o caminho do .py original de forma SEGURA.
+        NUNCA retorna um arquivo .hermes.
+        """
+        # 1. Verifica se original_py_path é válido e é .py
+        if (self.original_py_path 
+                and self.original_py_path.exists()
+                and self.original_py_path.suffix == '.py'
+                and not str(self.original_py_path).endswith('.hermes')):
+            return self.original_py_path
+        
+        # 2. Tenta resolver pelo nome do módulo
+        module_name = None
+        hermes_stem = self.hermes_path.stem  # ex: doxoade.tools.command_metadata
+        
+        # 3. Constrói o path do .py a partir do project root
+        project_root = self.hermes_path.parent.parent.parent.parent
+        parts = hermes_stem.split('.')
+        
+        candidates = []
+        
+        # Path direto: doxoade/tools/command_metadata.py
+        if len(parts) >= 2:
+            direct_path = project_root / Path(*parts[:-1]) / f"{parts[-1]}.py"
+            candidates.append(direct_path)
+            
+            # __init__.py: doxoade/tools/command_metadata/__init__.py
+            init_path = project_root / Path(*parts) / '__init__.py'
+            candidates.append(init_path)
+        
+        # Path com primeiro elemento como raiz
+        if len(parts) >= 3:
+            alt_path = project_root / parts[0] / Path(*parts[1:-1]) / f"{parts[-1]}.py"
+            candidates.append(alt_path)
+        
+        for candidate in candidates:
+            if (candidate.exists() 
+                    and candidate.suffix == '.py'
+                    and not str(candidate).endswith('.hermes')):
+                return candidate
+        
+        # 4. Último recurso: busca global
+        try:
+            import importlib.machinery
+            spec = importlib.machinery.PathFinder.find_spec(hermes_stem)
+            if (spec and spec.origin 
+                    and spec.origin.endswith('.py')
+                    and not spec.origin.endswith('.hermes')):
+                return Path(spec.origin)
+        except Exception:
+            pass
+        
+        return None
+
+    def _set_module_metadata(self, module, py_path):
+        """Configura metadados do módulo."""
+        if self.package_name:
+            module.__package__ = self.package_name
+        elif '.' in module.__name__:
+            module.__package__ = module.__name__.rsplit('.', 1)[0]
+        else:
+            module.__package__ = module.__name__
+        
+        if py_path.name == '__init__.py':
+            module.__path__ = [str(py_path.parent)]
+
+    @staticmethod
+    def _read_py_resilient(path: Path) -> str:
+        """Lê arquivo .py com encoding resiliente (anti-Unicode Plague)."""
+        encodings = [
+            ('utf-8', 'strict'),
+            ('utf-8', 'replace'),
+            ('latin-1', 'strict'),
+            ('cp1252', 'strict'),
+        ]
+        last_error = None
+        for encoding, errors in encodings:
+            try:
+                content = path.read_text(encoding=encoding, errors=errors)
+                # Remove null bytes
+                content = content.replace('\x00', '')
+                return content
+            except (UnicodeDecodeError, UnicodeError) as e:
+                last_error = e
+                continue
+            except Exception:
+                break
+        
+        try:
+            raw = path.read_bytes()
+            raw = raw.replace(b'\x00', b'')
+            return raw.decode('utf-8', errors='replace')
+        except Exception as e:
+            raise UnicodeDecodeError('utf-8', b'', 0, 1, f'Falha em todos os encodings: {last_error}') from e
+
+    def _resolve_original_py_path(self) -> 'Path | None':
+        """
+        Resolve o caminho do .py original de forma robusta.
+        Evita retornar o .hermes por engano.
+        """
+        # 1. Tenta o original_py_path se for um .py válido
+        if (self.original_py_path 
+                and self.original_py_path.suffix == '.py'
+                and self.original_py_path.exists()):
+            return self.original_py_path
+        
+        # 2. Tenta resolver a partir do nome do módulo
+        try:
+            import importlib.machinery
+            spec = importlib.machinery.PathFinder.find_spec(self.package_name or self.hermes_path.stem)
+            if spec and spec.origin and spec.origin.endswith('.py'):
+                return Path(spec.origin)
+        except Exception:
+            pass
+        
+        # 3. Tenta construir o path a partir do hermes_path
+        # hermes: .doxoade/hermes/build/doxoade.tools.command_metadata.hermes
+        # py: doxoade/tools/command_metadata.py
+        try:
+            hermes_stem = self.hermes_path.stem  # doxoade.tools.command_metadata
+            parts = hermes_stem.split('.')
+            if len(parts) >= 2:
+                # Tenta vários paths possíveis
+                project_root = self.hermes_path.parent.parent.parent.parent
+                candidates = [
+                    project_root / '/'.join(parts[:-1]) / f"{parts[-1]}.py",
+                    project_root / '/'.join(parts) / '__init__.py',
+                    project_root / parts[0] / 'tools' / parts[-1] / '__init__.py',
+                ]
+                for candidate in candidates:
+                    if candidate.exists() and candidate.suffix == '.py':
+                        return candidate
+        except Exception:
+            pass
+        
+        return None
+
+    @staticmethod
+    def _read_py_resilient(path: Path) -> str:
+        """
+        Lê arquivo .py com encoding resiliente (anti-Unicode Plague + Null Bytes).
+        Tenta múltiplos encodings em ordem de prioridade:
+          1. utf-8 (padrão Python 3)
+          2. utf-8 com errors='replace' (substitui bytes inválidos por U+FFFD)
+          3. latin-1 (sempre funciona, mapeia 1:1 bytes 0x00-0xFF)
+          4. cp1252 (Windows Western European)
+        
+        FIX: Remove null bytes (\x00) que causam SyntaxError no compile().
+        """
+        encodings = [
+            ('utf-8', 'strict'),
+            ('utf-8', 'replace'),
+            ('latin-1', 'strict'),
+            ('cp1252', 'strict'),
+        ]
+        
+        last_error = None
+        for encoding, errors in encodings:
+            try:
+                content = path.read_text(encoding=encoding, errors=errors)
+                # FIX CRÍTICO: Remove null bytes que quebram o compile()
+                content = content.replace('\x00', '')
+                return content
+            except (UnicodeDecodeError, UnicodeError) as e:
+                last_error = e
+                continue
+            except Exception:
+                break
+        
+        # Último recurso: lê como bytes e decodifica com replace
+        try:
+            raw = path.read_bytes()
+            # Remove null bytes antes de decodificar
+            raw = raw.replace(b'\x00', b'')
+            return raw.decode('utf-8', errors='replace')
+        except Exception as e:
+            raise UnicodeDecodeError('utf-8', b'', 0, 1, f'Falha em todos os encodings: {last_error}') from e
 
 # ═══════════════════════════════════════════════════════════════════════
 # GHOST BOOT + AUTO-BUILD (O coração do sistema)
@@ -290,14 +460,77 @@ class HermesFinder(importlib.abc.MetaPathFinder):
         self.dict_path = self.project_root / '.doxoade' / 'hermes' / 'master.dict'
         self.lib_hermes_dir = self.project_root / '.doxoade' / 'hermes' / 'lib'
         self._lib_cache: dict[str, dict[str, Path]] = {}
-        self._path_cache: dict[str, Path] = {}  # Cache de paths resolvidos
+        self._path_cache: dict[str, Path] = {}
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # NOVO: Cache de módulos com .pyd disponível (Tier 1)
+        # ═══════════════════════════════════════════════════════════════════
+        self._pyd_cache: set[str] = set()
+        self._build_pyd_index()
+        
         self._scan_lib_dir()
+    
+    def _build_pyd_index(self):
+        """
+        Constrói índice em RAM de todos os .pyd disponíveis no bin/.
+        Módulos com .pyd NÃO devem ser interceptados pelo Hermes.
+        """
+        bin_dir = self.project_root / '.doxoade' / 'vulcan' / 'bin'
+        if not bin_dir.exists():
+            return
+        
+        ext = '.pyd' if os.name == 'nt' else '.so'
+        try:
+            for pyd_file in bin_dir.glob(f'*{ext}'):
+                # Extrai nome do módulo do filename
+                # Ex: v_hermes_loader_38e018.pyd → hermes_loader
+                stem = pyd_file.stem
+                if stem.startswith('v_'):
+                    # Remove prefixo 'v_' e sufixo '_hash'
+                    parts = stem[2:].rsplit('_', 1)
+                    if len(parts) == 2:
+                        module_name = parts[0]
+                        self._pyd_cache.add(module_name)
+        except Exception:
+            pass
+    
+    def _build_hermes_index(self):
+        """
+        Constrói índice em RAM de todos os .hermes disponíveis.
+        Executado UMA VEZ no __init__, evita I/O repetido.
+        """
+        build_dir = self.project_root / '.doxoade' / 'hermes' / 'build'
+        if not build_dir.exists():
+            return
+        
+        try:
+            for hermes_file in build_dir.glob('*.hermes'):
+                # Extrai nome do módulo do filename
+                # Ex: doxoade.tools.vulcan.forge.hermes → doxoade.tools.vulcan.forge
+                module_name = hermes_file.stem
+                self._hermes_index[module_name] = hermes_file
+        except Exception:
+            pass
+
+    def _preload_build_cache(self):
+        """Pré-carrega todos os .hermes do build/ em um dict O(1)."""
+        build_dir = self.project_root / '.doxoade' / 'hermes' / 'build'
+        if not build_dir.exists():
+            return
+        try:
+            for f in build_dir.iterdir():
+                if f.suffix == '.hermes':
+                    # Converte nome do arquivo para nome do módulo
+                    # doxoade.tools.vulcan.forge.hermes → doxoade.tools.vulcan.forge
+                    module_name = f.stem
+                    self._build_cache[module_name] = f
+        except Exception:
+            pass
 
     def _scan_lib_dir(self):
         """Varre .doxoade/hermes/lib/ e cacheia libs disponíveis."""
         if not self.lib_hermes_dir.exists():
             return
-        
         for lib_dir in self.lib_hermes_dir.iterdir():
             if lib_dir.is_dir():
                 lib_name = lib_dir.name
@@ -306,12 +539,20 @@ class HermesFinder(importlib.abc.MetaPathFinder):
                     module_name = f.stem
                     hermes_files[module_name] = f
                 self._lib_cache[lib_name] = hermes_files
-
+    
     def find_spec(self, fullname, path, target=None):
         # ═══════════════════════════════════════════════════════════════════
         # [CRÍTICO] Blacklist check (rápido)
         # ═══════════════════════════════════════════════════════════════════
         if _is_blacklisted(fullname):
+            return None
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # OTIMIZAÇÃO: Se o módulo tem .pyd, NÃO intercepta
+        # Deixa o VulcanMetaFinder carregar o binário nativo
+        # ═══════════════════════════════════════════════════════════════════
+        module_stem = fullname.split('.')[-1]
+        if module_stem in self._pyd_cache:
             return None
         
         # ═══════════════════════════════════════════════════════════════════
@@ -322,17 +563,14 @@ class HermesFinder(importlib.abc.MetaPathFinder):
         else:
             # 1. Tenta build/ (módulos do projeto)
             hermes_path = self._find_in_build(fullname)
-            
             # 2. Tenta lib/ (libs de terceiros)
             if not hermes_path:
                 hermes_path = self._find_in_lib(fullname)
-            
             # 3. Cacheia o resultado (mesmo se None)
             self._path_cache[fullname] = hermes_path
         
         # ═══════════════════════════════════════════════════════════════════
         # [OTIMIZAÇÃO] Se não encontrou .hermes, retorna None imediatamente
-        # NÃO faz JIT build automático (muito lento)
         # ═══════════════════════════════════════════════════════════════════
         if not hermes_path:
             return None
@@ -341,19 +579,14 @@ class HermesFinder(importlib.abc.MetaPathFinder):
         # [OTIMIZAÇÃO] Verifica staleness UMA VEZ só
         # ═══════════════════════════════════════════════════════════════════
         py_path = self._resolve_py_path_cached(fullname, path)
-        
         if py_path and py_path.exists():
-            # Verifica se .py é mais recente que .hermes
             if py_path.stat().st_mtime > hermes_path.stat().st_mtime:
-                # [OTIMIZAÇÃO] NÃO faz JIT build automático
-                # Apenas loga warning e usa .hermes desatualizado
                 _log(f"⚠ {fullname}: .hermes desatualizado (use 'doxoade hermes build')")
         
         # ═══════════════════════════════════════════════════════════════════
-        # Cria spec (código único, sem duplicação)
+        # Cria spec
         # ═══════════════════════════════════════════════════════════════════
         package_name = fullname.rsplit('.', 1)[0] if '.' in fullname else None
-        
         spec = importlib.util.spec_from_loader(
             fullname,
             HermesModuleLoader(hermes_path, py_path, package_name),
@@ -368,7 +601,6 @@ class HermesFinder(importlib.abc.MetaPathFinder):
 
     def _find_in_build(self, fullname: str) -> Path:
         """Procura .hermes em .doxoade/hermes/build/"""
-        # [FIX] Não importa HermesLoader para evitar circularidade
         hermes_dir = self.project_root / '.doxoade' / 'hermes' / 'build'
         hermes_file = hermes_dir / f"{fullname}.hermes"
         return hermes_file if hermes_file.exists() else None
@@ -376,10 +608,8 @@ class HermesFinder(importlib.abc.MetaPathFinder):
     def _find_in_lib(self, fullname: str) -> Path:
         """Procura .hermes em .doxoade/hermes/lib/<lib>/"""
         lib_name = fullname.split('.')[0]
-        
         if lib_name not in self._lib_cache:
             return None
-        
         hermes_files = self._lib_cache[lib_name]
         
         # 1. Busca direta pelo nome completo
@@ -406,11 +636,14 @@ class HermesFinder(importlib.abc.MetaPathFinder):
 
     def _resolve_py_path_cached(self, fullname, path):
         """Resolve o caminho do .py original com cache."""
-        if fullname in self._path_cache:
-            return self._path_cache[fullname]
+        if not hasattr(self, '_py_path_cache'):
+            self._py_path_cache = {}
+        
+        if fullname in self._py_path_cache:
+            return self._py_path_cache[fullname]
         
         py_path = self._resolve_py_path(fullname, path)
-        self._path_cache[fullname] = py_path
+        self._py_path_cache[fullname] = py_path
         return py_path
 
     def _resolve_py_path(self, fullname, path):
@@ -441,7 +674,6 @@ class HermesFinder(importlib.abc.MetaPathFinder):
         try:
             import doxoade.tools.hermes_systems.hermes_compress as hc
             import doxoade.tools.hermes_systems.hermes_preprocessor as hp
-            
             compressor = hc.HermesCompressor(str(self.project_root))
             optimized, _ = hp.preprocess_for_hermes(py_path)
             compressor.compress_file(py_path, optimized_content=optimized, use_dynamic_scan=True)
@@ -452,5 +684,4 @@ class HermesFinder(importlib.abc.MetaPathFinder):
             _jit_built.discard(fullname)
             if _VERBOSE:
                 print(f"  ⚠ [HERMES-JIT] Falha em {fullname}: {e}")
-
             formated_traceback(e, "hermes_hook - install")

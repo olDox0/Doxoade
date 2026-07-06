@@ -6,7 +6,7 @@ Remove imports não utilizados, comentários e docstrings não atribuídos.
 Compliance: OSL-4 (responsabilidade única), OSL-5 (nunca levanta exceção).
 """
 import ast
-import re
+# [DOX-UNUSED] import re
 from pathlib import Path
 from typing import Tuple
 
