@@ -9,6 +9,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Dict
 
+_STRING_PATTERN = re.compile(r'''(["'])((?:(?!\1).){10,80})\1''')
 
 class HermesDynamicScanner:
     """Scanner que identifica padrões repetitivos DENTRO de um arquivo."""
@@ -54,8 +55,8 @@ class HermesDynamicScanner:
                 self.local_patterns[pattern] += 1
 
         # Strings literais longas (entre aspas, 10-80 caracteres)
-        string_pattern = re.compile(r'''(["'])((?:(?!\1).){10,80})\1''')
-        for match in string_pattern.finditer(content):
+#        string_pattern = re.compile(r'''(["'])((?:(?!\1).){10,80})\1''')
+        for match in _STRING_PATTERN.finditer(content):
             string_content = match.group(2)
             if not string_content.isspace() and '\n' not in string_content:
                 self.local_patterns[string_content] += 1

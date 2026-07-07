@@ -1,72 +1,34 @@
 // doxoade/tools/vulcan/native/mercury_core.c
 /*
- * Mercury Core Engine v3.0 — DLL Pura (Zero Python.h)
- * ====================================================
- * Estratégia: Compilar como DLL independente, carregar via ctypes.
- *
- * Vantagens:
- *   - Zero dependência de Python.h
- *   - Funciona com qualquer compilador (GCC/MinGW, MSVC, Clang)
- *   - Performance máxima (zero overhead PyObject)
- *   - Reutilizável em qualquer linguagem
- *
- * Otimizações aplicadas (herdadas do v2):
- *   1. Buffer contíguo para tokens (elimina N mallocs no loop)
- *   2. Branchless expansion
- *   3. Pointer chasing otimizado
- *
- * Formato HBD1 (compatível com hermes_data.py):
- *   [4B] Magic: "HBD1"
- *   [1B] Version: 0x01
- *   [2B] token_count (uint16)
- *   [4B] orig_size (uint32) — tamanho original descompactado
- *   [N×] tokens: [2B len][len bytes pattern]
- *   [4B] payload_size (uint32)
- *   [payload_size B] payload comprimido
- *
- * Compilação:
- *   gcc -O3 -shared -static-libgcc -fPIC -march=westmere -msse4.2 \
- *       mercury_core.c -o mercury_core.dll
+ * Mercury Core Engine v3.1 — DLL Pura (Zero Python.h)
+ * CORREÇÃO: Parse correto do cabeçalho HBD1 (token_count já vem no header).
  */
-
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 
-/* ═══════════════════════════════════════════════════════════════════════
- * EXPORT MACROS (Windows/Linux)
- * ═══════════════════════════════════════════════════════════════════════ */
 #ifdef _WIN32
     #define MERCURY_EXPORT __declspec(dllexport)
 #else
     #define MERCURY_EXPORT __attribute__((visibility("default")))
 #endif
 
-/* ═══════════════════════════════════════════════════════════════════════
- * ESTRUTURA DE TOKENS (Buffer Contíguo — Zero malloc no loop)
- * ═══════════════════════════════════════════════════════════════════════ */
 typedef struct {
-    char* buffer;           // Buffer único para todos os tokens
-    char* pointers[256];    // Apenas ponteiros (não strings alocadas)
-    int   lengths[256];     // Tamanhos dos tokens
-    int   count;            // Número de tokens carregados
+    char* buffer;
+    char* pointers[256];
+    int   lengths[256];
+    int   count;
 } TokenDictionary;
 
-/* ═══════════════════════════════════════════════════════════════════════
- * CARREGA DICIONÁRIO DE TOKENS (Buffer Contíguo)
- * ═══════════════════════════════════════════════════════════════════════ */
+/* CORREÇÃO: tk_count agora é passado como argumento, pois já está no header HBD1 */
 static int load_dictionary_contiguous(
     const uint8_t* data,
     size_t         data_size,
     size_t*        offset,
+    uint16_t       tk_count,
     TokenDictionary* dict
 ) {
-    if (*offset + 2 > data_size) return -1;
-
-    uint16_t tk_count = (uint16_t)(data[*offset] | (data[*offset + 1] << 8));
-    *offset += 2;
-
     if (tk_count > 254) return -1;
 
     /* 1ª passada: calcula tamanho total necessário */
@@ -82,7 +44,6 @@ static int load_dictionary_contiguous(
     /* Aloca UM buffer contíguo para todos os tokens */
     dict->buffer = (char*)malloc(total_token_size > 0 ? total_token_size : 1);
     if (!dict->buffer) return -1;
-
     dict->count = tk_count;
     char* current = dict->buffer;
 
@@ -95,20 +56,17 @@ static int load_dictionary_contiguous(
         }
         uint16_t plen = (uint16_t)(data[*offset] | (data[*offset + 1] << 8));
         *offset += 2;
-
         if (*offset + plen > data_size) {
             free(dict->buffer);
             dict->buffer = NULL;
             return -1;
         }
-
         memcpy(current, data + *offset, plen);
         dict->pointers[i] = current;
         dict->lengths[i]  = plen;
         current += plen;
         *offset += plen;
     }
-
     return 0;
 }
 
@@ -119,135 +77,91 @@ static void free_dictionary(TokenDictionary* dict) {
     }
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
- * DECODE PRINCIPAL (HBD1 → UTF-8 string)
- *
- * Retorna: buffer alocado com a string descompactada (caller deve free)
- *          ou NULL em caso de erro.
- *          *out_size recebe o tamanho da string (sem o null terminator).
- * ═══════════════════════════════════════════════════════════════════════ */
 MERCURY_EXPORT char* mercury_decode_hbd1(
     const char* input_data,
     size_t      input_size,
     size_t*     out_size
 ) {
     if (!input_data || input_size < 11 || !out_size) return NULL;
-
     const uint8_t* data = (const uint8_t*)input_data;
-
+    
     /* Validação do magic */
     if (memcmp(data, "HBD1", 4) != 0) return NULL;
-
-    /* Parse header mínimo */
-    /* uint8_t version = data[4]; */  /* reservado */
-    /* token_count em data[5..6] */
-
-    /* Tamanho original (informativo, usamos para pré-alocar) */
-    uint32_t orig_sz = (uint32_t)(data[7]  | (data[8]  << 8) |
-                                  (data[9]  << 16) | (data[10] << 24));
-
-    /* Carrega dicionário contíguo */
-    TokenDictionary dict = {0};
+    
+    /* Parse header HBD1 (Corrigido) */
+    uint16_t tk_count = (uint16_t)(data[5] | (data[6] << 8));
+    uint32_t orig_sz  = (uint32_t)(data[7] | (data[8] << 8) | (data[9] << 16) | (data[10] << 24));
+    
+    /* Carrega dicionário contíguo (inicia no offset 11) */
     size_t offset = 11;
-
-    if (load_dictionary_contiguous(data, input_size, &offset, &dict) != 0) {
-        return NULL;
+    TokenDictionary dict;
+    if (load_dictionary_contiguous(data, input_size, &offset, tk_count, &dict) != 0) {
+        return NULL; // Falha ao carregar dicionário
     }
 
-    /* Validação do payload */
+    /* Lê payload_size */
     if (offset + 4 > input_size) {
         free_dictionary(&dict);
         return NULL;
     }
-
-    uint32_t payload_sz = (uint32_t)(data[offset]      | (data[offset + 1] << 8) |
-                                     (data[offset + 2] << 16) | (data[offset + 3] << 24));
+    uint32_t payload_size = (uint32_t)(data[offset] | (data[offset+1] << 8) |
+                                       (data[offset+2] << 16) | (data[offset+3] << 24));
     offset += 4;
 
-    if (offset + payload_sz > input_size) {
+    if (offset + payload_size > input_size) {
         free_dictionary(&dict);
         return NULL;
     }
 
-    /* Pré-aloca buffer de saída (usa orig_sz se disponível, senão estima) */
-    size_t out_cap = (orig_sz > 0) ? (orig_sz + 1) : (payload_sz * 4 + 1);
-    char* out = (char*)malloc(out_cap);
-    if (!out) {
+    /* Pré-aloca buffer de saída */
+    char* out_buf = (char*)malloc(orig_sz > 0 ? orig_sz + 1 : 1);
+    if (!out_buf) {
         free_dictionary(&dict);
         return NULL;
     }
 
-    /* ═══════════════════════════════════════════════════════════════════
-     * EXPANSÃO BRANCHLESS (Pointer Chasing Otimizado)
-     * ═══════════════════════════════════════════════════════════════════ */
-    char*              dst = out;
-    const uint8_t*     src = data + offset;
-    const uint8_t*     end = src + payload_sz;
-    char*              out_end = out + out_cap;
-
-    while (src < end) {
-        uint8_t c = *src++;
-
-        if (c == 0xFF) {
-            /* Token escape: próximo byte é o token ID */
-            if (src < end) {
-                uint8_t tid = *src++;
-                if (tid < dict.count) {
-                    int len = dict.lengths[tid];
-                    /* Expande buffer se necessário (raro, mas seguro) */
-                    if (dst + len > out_end) {
-                        size_t new_cap = out_cap * 2;
-                        char* new_buf = (char*)realloc(out, new_cap);
-                        if (!new_buf) {
-                            free(out);
-                            free_dictionary(&dict);
-                            return NULL;
-                        }
-                        dst = new_buf + (dst - out);
-                        out_end = new_buf + new_cap;
-                        out = new_buf;
-                        out_cap = new_cap;
-                    }
-                    memcpy(dst, dict.pointers[tid], len);
-                    dst += len;
-                }
-            }
-        } else {
-            /* Caractere literal */
-            if (dst + 1 > out_end) {
-                size_t new_cap = out_cap * 2;
-                char* new_buf = (char*)realloc(out, new_cap);
-                if (!new_buf) {
-                    free(out);
+    /* Loop de expansão (Branchless-ish) */
+    const uint8_t* payload = data + offset;
+    size_t out_pos = 0;
+    size_t i = 0;
+    while (i < payload_size) {
+        uint8_t c = payload[i];
+        if (c == 0xFF && i + 1 < payload_size) {
+            uint8_t idx = payload[i+1];
+            if (idx < dict.count) {
+                size_t tok_len = dict.lengths[idx];
+                /* 🛡️ Proteção contra buffer overflow em caso de payload corrompido */
+                if (out_pos + tok_len > orig_sz) {
+                    free(out_buf);
                     free_dictionary(&dict);
-                    return NULL;
+                    return NULL; 
                 }
-                dst = new_buf + (dst - out);
-                out_end = new_buf + new_cap;
-                out = new_buf;
-                out_cap = new_cap;
+                memcpy(out_buf + out_pos, dict.pointers[idx], tok_len);
+                out_pos += tok_len;
+                i += 2;
+                continue;
             }
-            *dst++ = (char)c;
         }
+        /* 🛡️ Proteção contra buffer overflow */
+        if (out_pos + 1 > orig_sz) {
+            free(out_buf);
+            free_dictionary(&dict);
+            return NULL; 
+        }
+        out_buf[out_pos++] = c;
+        i++;
     }
-
-    *dst = '\0';
-    *out_size = (size_t)(dst - out);
+    out_buf[out_pos] = '\0';
+    *out_size = out_pos;
 
     free_dictionary(&dict);
-    return out;
+    return out_buf;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
- * FREE (caller deve liberar o buffer retornado por mercury_decode_hbd1)
- * ═══════════════════════════════════════════════════════════════════════ */
 MERCURY_EXPORT void mercury_free(void* ptr) {
     if (ptr) free(ptr);
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
- * VERSION INFO
- * ═══════════════════════════════════════════════════════════════════════ */
-MERCURY_EXPORT const char* mercury_version(void) {
-    return "Mercury Core Engine v3.0 (DLL Pura — Zero Python.h — Branchless)";
+MERCURY_EXPORT const char* mercury_version() {
+    return "Mercury Core Engine v3.1 (HBD1 Fix)";
 }

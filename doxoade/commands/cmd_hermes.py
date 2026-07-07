@@ -528,3 +528,100 @@ def build_native(force, metalcraft):
     else:
         click.echo(f"\n{Fore.RED}✘ Falha na compilação do decoder C{Style.RESET_ALL}")
         click.echo(f"  {Fore.YELLOW}O Hermes usará o decoder Python puro (mais lento).{Style.RESET_ALL}")
+
+@hermes_group.command('graph')
+@click.option('--verbose', '-v', is_flag=True, help='Output detalhado')
+@click.option('--save', '-s', is_flag=True, help='Salva grafo em JSON')
+@click.option('--preload', '-p', is_flag=True, help='Gera script de preload')
+def hermes_graph(verbose, save, preload):
+    """🔍 Analisa dependências e gera grafo de import cascade."""
+    from doxoade.tools.hermes_systems.hermes_dependency_graph import HermesDependencyGraph
+    
+    project_root = Path.cwd().resolve()
+    
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🔍 HERMES DEPENDENCY GRAPH ANALYZER{Style.RESET_ALL}")
+    click.echo(f"  Projeto: {project_root.name}\n")
+    
+    graph = HermesDependencyGraph(str(project_root))
+    graph.build(verbose=verbose)
+    
+    if verbose or (not save and not preload):
+        graph.print_report()
+    
+    if save:
+        graph.save_json()
+    
+    if preload:
+        graph.generate_preload_script()
+        click.echo(f"\n{Fore.GREEN}✔ Para executar o preload:{Style.RESET_ALL}")
+        click.echo(f"  python doxoade/tools/hermes_systems/hermes_preload_critical.py\n")
+        
+@hermes_group.command('auto-benchmark')
+@click.option('--runs', '-r', default=3, help='Número de execuções por cenário')
+@click.option('--modules', '-m', multiple=True, help='Módulos específicos (padrão: críticos)')
+def hermes_auto_benchmark(runs, modules):
+    """🔬 Executa benchmark e atualiza métricas de performance automaticamente."""
+    from doxoade.tools.hermes_systems.hermes_benchmark_auto import benchmark_and_update, benchmark_critical_modules
+    
+    if modules:
+        benchmark_and_update(list(modules), runs=runs)
+    else:
+        benchmark_critical_modules(runs=runs)
+
+
+@hermes_group.command('preload')
+@click.option('--verbose', '-v', is_flag=True, help='Mostra logs detalhados')
+@click.option('--modules', '-m', multiple=True, help='Módulos específicos (padrão: cache)')
+def hermes_preload(verbose, modules):
+    """⚡ Pré-carrega módulos críticos com cache inteligente."""
+    from doxoade.tools.hermes_systems.hermes_auto_preload import auto_preload
+    
+    project_root = Path.cwd().resolve()
+    
+    if modules:
+        stats = auto_preload(str(project_root), list(modules), verbose=verbose)
+    else:
+        stats = auto_preload(str(project_root), verbose=verbose)
+    
+    click.echo(f"\n{Fore.CYAN}{'═' * 70}{Style.RESET_ALL}")
+    click.echo(f"{Fore.CYAN}  ⚡ HERMES AUTO-PRELOAD{Style.RESET_ALL}")
+    click.echo(f"{Fore.CYAN}{'═' * 70}{Style.RESET_ALL}")
+    click.echo(f"  ✔ Carregados: {len(stats['loaded'])}")
+    click.echo(f"  ✔ Cache hits: {stats['cache_hits']}")
+    click.echo(f"  ✘ Falhas: {len(stats['failed'])}")
+    click.echo(f"  ⏱ Tempo total: {stats['total_time_ms']:.1f}ms")
+    click.echo(f"{Fore.CYAN}{'═' * 70}{Style.RESET_ALL}\n")
+    
+    if stats['failed']:
+        click.echo(f"{Fore.YELLOW}  Módulos que falharam:{Style.RESET_ALL}")
+        for fail in stats['failed']:
+            click.echo(f"    - {fail['module']}: {fail['error']}")
+        click.echo()
+
+@hermes_group.command('lab')
+@click.option('--mode', '-m', default='ngram-local',
+              help="Modo: 'ngram-local' (intra-arquivo) ou 'ngram-global' (cross-file)")
+@click.option('--target', '-t', default='.',
+              help="Arquivo .py único OU diretório.")
+@click.option('--top', default=30, help="Quantos padrões mostrar.")
+@click.option('--min-freq', default=3, help="(local) Freq mínima no mesmo arquivo.")
+@click.option('--min-files', default=2, help="(global) Mín de arquivos distintos.")
+def hermes_lab(mode, target, top, min_freq, min_files):
+    """🧬 [R&D] Hermes Lab: Incubador de Pesquisa de Bytecode."""
+    from doxoade.tools.hermes_systems.hermes_lab import BytecodeNgramScanner
+
+    click.echo(f"\n{Fore.MAGENTA}{Style.BRIGHT}☤ [HERMES LAB] Modo: {mode}{Style.RESET_ALL}")
+
+    scanner = BytecodeNgramScanner(target, n_sizes=(4, 6, 8, 10))
+    scanner.scan()
+
+    if not scanner.file_results:
+        click.echo(f"\n{Fore.RED}✘ Nenhum arquivo processado. Verifique o caminho.{Style.RESET_ALL}")
+        return
+
+    if mode == 'ngram-local':
+        scanner.print_local_report(top_n=top, min_freq=min_freq)
+    elif mode == 'ngram-global':
+        scanner.print_global_report(top_n=top, min_dispersion=min_files)
+    else:
+        click.echo(f"{Fore.RED}Modo desconhecido. Use 'ngram-local' ou 'ngram-global'.{Style.RESET_ALL}")

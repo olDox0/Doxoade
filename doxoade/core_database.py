@@ -57,28 +57,27 @@ def get_db_connection():
     except Exception:
         caller_name = "internal"
 
-    # 2. Silenciador de Boot (Respeita o DOXOADE_QUIET_BOOT do __main__.py)
-    if os.environ.get("DOXOADE_QUIET_BOOT") != "1":
+    # 2. Controle de Verbose do Banco de Dados
+    # DOXOADE_DATABASE_VERBOSE=1 para ver todos os traces
+    # DOXOADE_QUIET_BOOT=1 para silenciar completamente
+    db_verbose = os.environ.get("DOXOADE_DATABASE_VERBOSE") == "1"
+    quiet_boot = os.environ.get("DOXOADE_QUIET_BOOT") == "1"
+    
+    if db_verbose and not quiet_boot:
         print(f"\x1b[90m[DB-TRACE] Conexão aberta por: {caller_name}\x1b[0m")
-        if os.environ.get("VULCAN_VERBOSE") == "1":
-            print(f"\x1b[90m[DB-TRACE] Conexão: {caller_name}\x1b[0m")
-
-    # 3. Log de Verbose do Vulcan
-    if os.environ.get("VULCAN_VERBOSE") == "1":
-        print(f"\x1b[90m[DB-TRACE] Conexão: {caller_name}\x1b[0m")
         print(f"\x1b[90m[HADES:CONNECT] {DB_FILE}\x1b[0m")
 
     t0 = time.perf_counter()
     conn = sqlite3.connect(str(DB_FILE), check_same_thread=False, timeout=30.0)
     
-    # 4. Telemetria (Chief Heartbeat)
+    # 3. Telemetria (Chief Heartbeat)
     try:
         from doxoade.tools.telemetry_tools.logger import chief_heartbeat
         chief_heartbeat("HADES", "DB_CONNECTION_OPEN", {"path": str(DB_FILE), "by": caller_name})
     except Exception:
         pass
 
-    # 5. Otimizações de Performance HADES (WAL Mode)
+    # 4. Otimizações de Performance HADES (WAL Mode)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA cache_size=-4000")
 

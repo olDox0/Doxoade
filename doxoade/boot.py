@@ -123,3 +123,25 @@ def ignite_background_systems(project_root: str):
         # Fallback gracioso: se o Hermes v2 falhar, o Python puro continua funcionando
         if os.environ.get("HERMES_VERBOSE") == "1":
             print(f"\x1b[90m[HERMES v2] Falha na inicialização: {e}\x1b[0m")
+            
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # FASE 8: HERMES AUTO-PRELOAD (Inteligente)
+    # Pré-carrega módulos críticos com cache de performance
+    # ═══════════════════════════════════════════════════════════════════════════════
+    try:
+        from doxoade.tools.hermes_systems.hermes_auto_preload import auto_preload
+        
+        preload_stats = auto_preload(
+            project_root,
+            modules=None,  # Usa cache inteligente
+            verbose=os.environ.get("HERMES_VERBOSE") == "1"
+        )
+        
+        if os.environ.get("HERMES_VERBOSE") == "1":
+            print(f"[BOOT] Hermes Auto-Preload: {len(preload_stats['loaded'])} loaded, "
+                  f"{preload_stats['cache_hits']} cached, "
+                  f"{preload_stats['total_time_ms']:.1f}ms")
+    except Exception as e:
+        # Não falha o boot se preload falhar
+        if os.environ.get("HERMES_VERBOSE") == "1":
+            print(f"[BOOT] Hermes Auto-Preload falhou: {e}")
