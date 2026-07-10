@@ -1,4 +1,5 @@
 // doxoade/tools/hermes_systems/native/hermes_hbc5_parser.c
+#include <Python.h>   // 🚀 ADICIONE ESTA LINHA
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
@@ -174,4 +175,92 @@ void free_hbc5_context(HBC5Context* ctx) {
     if (ctx->local_dict.pointers) free(ctx->local_dict.pointers);
     if (ctx->local_dict.lengths) free(ctx->local_dict.lengths);
     memset(ctx, 0, sizeof(HBC5Context));
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// MOTOR BRANCHLESS (Expansão de Strings - Local Dict HBC5)
+// ═══════════════════════════════════════════════════════════════════
+static inline void get_pattern_data(uint16_t token, const HermesDict* l_dict,
+                                    char** out_ptr, int* out_len) {
+    uint16_t index = token - 0x80;
+    *out_ptr = l_dict->pointers[index];
+    *out_len = l_dict->lengths[index];
+}
+
+static size_t calculate_expanded_size(const char* src, size_t src_len,
+                                      const uint8_t* bitmap, const HermesDict* l_dict) {
+    size_t final_size = 0;
+    for (size_t i = 0; i < src_len; i++) {
+        uint8_t c = (uint8_t)src[i];
+        int has_tok = (bitmap[c >> 3] >> (c & 7)) & 1;
+        if (has_tok && c >= 0x80) {
+            char* p; int l;
+            get_pattern_data(c, l_dict, &p, &l);
+            final_size += l;
+        } else {
+            final_size += 1;
+        }
+    }
+    return final_size;
+}
+
+static void expand_string(const char* src, size_t src_len, char* dst,
+                          const uint8_t* bitmap, const HermesDict* l_dict) {
+    char* out = dst;
+    for (size_t i = 0; i < src_len; i++) {
+        uint8_t c = (uint8_t)src[i];
+        int has_tok = (bitmap[c >> 3] >> (c & 7)) & 1;
+        if (has_tok && c >= 0x80) {
+            char* p; int l;
+            get_pattern_data(c, l_dict, &p, &l);
+            memcpy(out, p, l);
+            out += l;
+        } else {
+            *out++ = c;
+        }
+    }
+}
+
+// 🚀 CRÍTICO: NÃO PODE SER static, senão o linker não consegue achar!
+int walk_and_decode_inplace(PyObject* code_obj, const uint8_t* bitmap, const HermesDict* l_dict) {
+    if (!PyCode_Check(code_obj)) return 0;
+    
+    PyObject* co_consts = PyObject_GetAttrString(code_obj, "co_consts");
+    if (!co_consts || !PyTuple_Check(co_consts)) { Py_XDECREF(co_consts); return -1; }
+    
+    Py_ssize_t n = PyTuple_Size(co_consts);
+    for (Py_ssize_t i = 0; i < n; i++) {
+        PyObject* item = PyTuple_GetItem(co_consts, i);
+        if (PyUnicode_Check(item)) {
+            Py_ssize_t len;
+            const char* s = PyUnicode_AsUTF8AndSize(item, &len);
+            if (!s) { Py_DECREF(co_consts); return -1; }
+            
+            int needs_decode = 0;
+            for (Py_ssize_t k = 0; k < len; k++) {
+                uint8_t c = (uint8_t)s[k];
+                if (c >= 0x80 && (bitmap[c >> 3] >> (c & 7)) & 1) { needs_decode = 1; break; }
+            }
+            
+            if (needs_decode) {
+                size_t final_size = calculate_expanded_size(s, len, bitmap, l_dict);
+                char* buffer = (char*)malloc(final_size + 1);
+                if (!buffer) { Py_DECREF(co_consts); return -1; }
+                
+                expand_string(s, len, buffer, bitmap, l_dict);
+                buffer[final_size] = '\0';
+                
+                PyObject* new_str = PyUnicode_DecodeUTF8(buffer, final_size, "strict");
+                free(buffer);
+                if (!new_str) { Py_DECREF(co_consts); return -1; }
+                
+                Py_DECREF(item);
+                PyTuple_SetItem(co_consts, i, new_str);
+            }
+        } else if (PyCode_Check(item)) {
+            if (walk_and_decode_inplace(item, bitmap, l_dict) != 0) { Py_DECREF(co_consts); return -1; }
+        }
+    }
+    Py_DECREF(co_consts);
+    return 0;
 }

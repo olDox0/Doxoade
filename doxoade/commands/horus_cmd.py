@@ -105,7 +105,6 @@ def horus_run(cmd_args):
     import os
     import sys
     import shutil
-    
     if not cmd_args:
         return
     try:
@@ -116,19 +115,28 @@ def horus_run(cmd_args):
             full_cmd = [a.strip('"').strip("'") for a in full_cmd]
         else:
             full_cmd = list(cmd_args)
-            
-        # Injeção de interpretador para evitar 'doxoade is not recognized' no Windows
-        if full_cmd[0] == 'doxoade':
-            full_cmd = [sys.executable, "-m", "doxoade"] + full_cmd[1:]
-        elif not shutil.which(full_cmd[0]) and full_cmd[0] != sys.executable:
-            # Encaminha comandos não mapeados na raiz para o executável padrão
-            full_cmd = [sys.executable, "-m", "doxoade"] + full_cmd
-            
-        click.secho(f"👁️  [HORUS SHADOW] Monitorando: {' '.join(full_cmd)}", fg='cyan', bold=True)
+
+        # ═══════════════════════════════════════════════════════════════════
+        # [FIX] BLINDAGEM CONTRA WinError 193 (Windows PATHEXT Trap)
+        # O shutil.which() retorna scripts .py se a extensão .PY estiver no PATHEXT.
+        # O subprocess.run(..., shell=False) usa CreateProcess, que NÃO lê 
+        # associação de arquivos. Tentar executar um .py direto causa erro 193.
+        # ═══════════════════════════════════════════════════════════════════
+        target = full_cmd[0] if full_cmd else ""
         
+        if target.endswith('.py') and os.path.isfile(target):
+            # 1. É um script Python local -> Injeta o interpretador explicitamente
+            full_cmd = [sys.executable] + full_cmd
+        elif target == 'doxoade':
+            # 2. É o próprio CLI do doxoade
+            full_cmd = [sys.executable, "-m", "doxoade"] + full_cmd[1:]
+        elif not target.lower().endswith(('.exe', '.com', '.bat', '.cmd')):
+            # 3. Não é um executável nativo -> Redireciona para o motor do doxoade
+            full_cmd = [sys.executable, "-m", "doxoade"] + full_cmd
+
+        click.secho(f"👁️  [HORUS SHADOW] Monitorando: {' '.join(full_cmd)}", fg='cyan', bold=True)
         env = os.environ.copy()
         env['DOXOADE_HORUS_ACTIVE'] = '1'
-        
         subprocess.run(full_cmd, env=env, shell=False)
     except Exception as e:
         click.secho(f"✘ Falha ao orquestrar sombra: {e}", fg='red')
@@ -138,7 +146,7 @@ def horus_run(cmd_args):
         exc_trace(exc_tb)
 
     click.secho("\n[!] Vigilância encerrada. Use 'doxoade horus view' para ver o rastro.", fg='yellow')
-    
+
 @horus_group.command('db')
 def horus_db():
     """Analisa a saúde e latência do subsistema de dados Hades."""

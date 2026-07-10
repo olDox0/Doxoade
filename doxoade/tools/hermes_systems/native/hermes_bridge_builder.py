@@ -24,12 +24,14 @@ class HermesBridgeBuilder:
     
     def __init__(self, project_root: str):
         self.root = Path(project_root).resolve()
-        self.native_dir = self.root / 'doxoade' / 'tools' / 'hermes_systems' / 'native'
-        
+        #self.native_dir = self.root / 'doxoade' / 'tools' / 'hermes_systems' / 'native'
+        self.native_dir = Path(__file__).resolve().parent
         # Fontes do Hermes v2 (Dual-Dictionary Architecture)
         self.source_files = [
-            self.native_dir / 'hermes_py_bridge.c',    # O Walker (Bypass do compile)
-            self.native_dir / 'hermes_hbc5_parser.c'   # O Parser HBC5 (Zero-Copy)
+            self.native_dir / 'hermes_py_utils.c',      # O Roteador & API (Substitui o py_bridge)
+            self.native_dir / 'hermes_cache.c',         # O Motor de Cache L1/L2 (NOVO)
+            self.native_dir / 'hermes_hbc5_parser.c',   # O Parser HBC5
+            self.native_dir / 'hermes_hbc6_patches.c',  # O Walker DFS HBC6
         ]
         
         self.cache_file = self.native_dir / '.bridge_build_cache.json'

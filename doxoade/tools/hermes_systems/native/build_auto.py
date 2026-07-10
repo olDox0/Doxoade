@@ -24,7 +24,8 @@ class HermesNativeBuilder:
     
     def __init__(self, project_root: str):
         self.root = Path(project_root).resolve()
-        self.native_dir = self.root / 'doxoade' / 'tools' / 'hermes_systems' / 'native'
+        self.native_dir = Path(__file__).resolve().parent
+#        self.native_dir = self.root / 'doxoade' / 'tools' / 'hermes_systems' / 'native'
         self.source_file = self.native_dir / 'hermes_decoder.c'
         self.cache_file = self.native_dir / '.build_cache.json'
         self.output_ext = '.pyd' if os.name == 'nt' else '.so'
