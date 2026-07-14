@@ -65,41 +65,83 @@ class HBC6Builder:
 
         return self._walk_and_surgery(code_obj, py_file)
 
+    def _is_stack_neutral(self, opcodes: list[str]) -> bool:
+        """
+        Verifica se o N-gram é stack-neutral (início e fim com stack = 0).
+        Stack-neutral = seguro para injeção sem quebrar o CPython 3.11+
+        """
+        import dis
+        if not opcodes:
+            return False
+        
+        stack = 0
+        for opname in opcodes:
+            opcode = dis.opmap.get(opname)
+            if opcode is None:
+                return False # Opcode desconhecido, assume não seguro
+            
+            # Usamos 0 como oparg padrão. Para a PoC, isso cobre a maioria dos casos,
+            # pois o efeito de pilha de opcodes como LOAD_CONST é +1 independente do arg.
+            try:
+                effect = dis.stack_effect(opcode, 0)
+            except Exception:
+                effect = 0
+                
+            stack += effect
+            if stack < 0:
+                return False # Underflow de pilha, não é seguro
+                
+        return stack == 0
+
     def _walk_and_surgery(self, code_obj, py_file: Path) -> Dict:
         """Extrai o DNA, mapeia o campo minado e calcula a HRT."""
         instructions = self._extract_instructions(code_obj)
         if not instructions:
             return {'saved_bytes': 0, 'hrt': []}
 
-        # 1. O MAPA DO CAMPO MINADO (Todos os destinos de salto absolutos)
         minefield: Set[int] = set()
         for instr in instructions:
             if instr.is_jump and instr.jump_target != -1:
                 minefield.add(instr.jump_target)
 
-        # 2. CAÇA AOS N-GRAMS (Janela Deslizante)
         safe_macros = []
-        opnames = [i.opname for i in instructions if i.opname not in _NOISE_OPCODES]
+        clean_instructions = [i for i in instructions if i.opname not in _NOISE_OPCODES]
+        opnames = [i.opname for i in clean_instructions]
         
-        # Para cada tamanho de N-gram que temos no dicionário global
-        for ng_hash, ng_ops in self.global_ngrams.items():
+        # 🚀 ORDENA N-GRAMS POR TAMANHO (maior primeiro)
+        sorted_ngrams = sorted(
+            self.global_ngrams.items(),
+            key=lambda x: len(x[1]),
+            reverse=True
+        )
+        
+        # 🚀 TRACK DE REGIÕES COBERTAS
+        covered_ranges = []
+        
+        def is_covered(start_idx, end_idx):
+            for cs, ce in covered_ranges:
+                if start_idx < ce and end_idx > cs:
+                    return True
+            return False
+        
+        for ng_hash, ng_ops in sorted_ngrams:
             n_len = len(ng_ops)
             if n_len < 2: continue
             
-            # Varre o bytecode procurando a sequência
+            if not self._is_stack_neutral(ng_ops):
+                continue
+            
             for i in range(len(opnames) - n_len + 1):
+                if is_covered(i, i + n_len):
+                    continue
+                    
                 window = tuple(opnames[i:i+n_len])
                 if window == tuple(ng_ops):
-                    # Achou a sequência! Mas onde ela começa e termina no bytecode real?
-                    # (Nota: mapeamento exato de índices limpos para offsets reais requer cuidado,
-                    # aqui usamos a lógica conceitual de offsets Wordcode * 2)
-                    start_offset = instructions[i].offset 
-                    end_offset = instructions[i + n_len - 1].offset + 2 
+                    start_offset = clean_instructions[i].offset 
+                    end_offset = clean_instructions[i + n_len - 1].offset + 2 
                     
-                    # 3. O FILTRO ATÔMICO (A Lei do Campo Minado)
                     is_safe = True
                     for target in minefield:
-                        # Se algum salto cai ESTRICTAMENTE dentro do bloco, é uma mina.
                         if start_offset < target < end_offset:
                             is_safe = False
                             self.metrics['blocked_by_minefield'] += 1
@@ -111,25 +153,22 @@ class HBC6Builder:
                             'start': start_offset,
                             'end': end_offset,
                             'original_size': end_offset - start_offset,
-                            'compressed_size': 2 # 1 Opcode Macro + 1 Arg
+                            'compressed_size': 2,
+                            'stack_neutral': True
                         })
+                        covered_ranges.append((i, i + n_len))
 
-        # 4. CÁLCULO DA TABELA DE RELOCAÇÃO (HRT - Hermes Relocation Table)
         hrt_entries = []
         total_saved = 0
-        
-        # Ordena os macros por offset para calcular o "Delta" acumulado
         safe_macros.sort(key=lambda x: x['start'])
         
         for macro in safe_macros:
-            delta = macro['compressed_size'] - macro['original_size'] # Ex: 2 - 8 = -6
+            delta = macro['compressed_size'] - macro['original_size']
             total_saved += -delta
             self.metrics['macros_applied'] += 1
             
-            # Quais saltos externos precisam ser avisados?
             for instr in instructions:
                 if instr.is_jump and instr.jump_target > macro['end']:
-                    # O salto pula por cima do buraco. O alvo encolheu.
                     hrt_entries.append({
                         'jump_offset': instr.offset,
                         'delta': delta
@@ -142,7 +181,7 @@ class HBC6Builder:
             'saved_bytes': total_saved,
             'macros_found': len(safe_macros),
             'hrt_entries': len(hrt_entries),
-            'hrt_sample': hrt_entries[:3] # Mostra os 3 primeiros para debug
+            'hrt_sample': hrt_entries[:3]
         }
 
     def _extract_instructions(self, code_obj) -> List[OpcodeInstruction]:
@@ -179,3 +218,15 @@ class HBC6Builder:
         print(f"  Entradas na HRT (Saltos)  : {Fore.MAGENTA}{self.metrics['hrt_entries']}{Style.RESET_ALL}")
         print(f"  Economia Total de co_code : {Fore.GREEN}{self.metrics['total_bytes_saved'] / 1024:.2f} KB{Style.RESET_ALL}")
         print(f"{'═' * 70}\n")
+        
+    def _calculate_stack_effect(self, opcodes: list[str]) -> int:
+        """Calcula o stack effect líquido de uma sequência de opcodes."""
+        stack_delta = 0
+        for opname in opcodes:
+            opcode = dis.opmap.get(opname)
+            if opcode is None:
+                continue
+            # Stack effect do opcode (1 = push, -1 = pop, 0 = neutro)
+            effect = dis.stack_effect(opcode, 0)  # 0 = sem arg
+            stack_delta += effect
+        return stack_delta

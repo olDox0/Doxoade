@@ -1,13 +1,13 @@
 // doxoade/tools/hermes_systems/native/hermes_hbc5_parser.c
-#include <Python.h>   // 🚀 ADICIONE ESTA LINHA
+#include <Python.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
 // ESTRUTURAS DE DADOS
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
 typedef struct {
     char* buffer;
     char** pointers;
@@ -27,168 +27,160 @@ typedef struct {
 #define READ_U16(p) ((uint16_t)((p)[0] | ((p)[1] << 8)))
 #define READ_U32(p) ((uint32_t)((p)[0] | ((p)[1] << 8) | ((p)[2] << 16) | ((p)[3] << 24)))
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// MOTOR DE PARSE HBC5 (COM DIAGNÓSTICO DE FALHA)
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// BUFFER POOL GLOBAL (Reutilização de Memória)
+// ═══════════════════════════════════════════════════════════════════
+#define POOL_MAX_TOKENS 2048
+#define POOL_MAX_BUFFER_SIZE (1024 * 1024)  // 1MB
 
+typedef struct {
+    char* buffer;
+    char** pointers;
+    uint16_t* lengths;
+    uint16_t count;
+    size_t buffer_offset;
+    uint16_t capacity;  // ← ADICIONADO
+    uint16_t used;      // ← ADICIONADO
+    int initialized;
+} HBC5_BufferPool;
+
+static HBC5_BufferPool g_pool = {0};
+
+// Inicializa o pool uma única vez
+static void init_buffer_pool(void) {
+    if (g_pool.initialized) return;
+    
+    g_pool.buffer = (char*)malloc(POOL_MAX_BUFFER_SIZE);
+    g_pool.pointers = (char**)malloc(POOL_MAX_TOKENS * sizeof(char*));
+    g_pool.lengths = (uint16_t*)malloc(POOL_MAX_TOKENS * sizeof(uint16_t));
+    g_pool.capacity = POOL_MAX_TOKENS;
+    g_pool.used = 0;
+    g_pool.buffer_offset = 0;
+    g_pool.initialized = 1;
+}
+
+// Reseta o pool (não libera memória, só marca como disponível)
+static void reset_buffer_pool(void) {
+    g_pool.used = 0;
+    g_pool.buffer_offset = 0;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PARSE HBC5 COM BUFFER POOL (Zero-Allocation no Loop Crítico)
+// ═══════════════════════════════════════════════════════════════════
 int parse_hbc5_header(const uint8_t* data, size_t data_size, HBC5Context* ctx) {
-    // 1. Validação de Tamanho Mínimo
-    if (!data || data_size < 44 || !ctx) {
-        fprintf(stderr, "[HERMES-C-ERR] Falha: data_size (%zu) < 44 bytes ou ctx nulo.\n", data_size);
-        return -1;
-    }
-
-    // 2. Validação de Magic ("HBC5")
-    if (data[0] != 'H' || data[1] != 'B' || data[2] != 'C' || data[3] != '5') {
-        fprintf(stderr, "[HERMES-C-ERR] Magic Inválido: Esperado 'HBC5', Lido '%c%c%c%c' (0x%02x%02x%02x%02x)\n", 
-                data[0], data[1], data[2], data[3], data[0], data[1], data[2], data[3]);
-        return -1;
-    }
+    // Validação de tamanho mínimo
+    if (!data || data_size < 44 || !ctx) return -1;
+    
+    // Validação de Magic ("HBC5")
+    if (memcmp(data, "HBC5", 4) != 0) return -1;
+    
+    // Inicializa o pool se necessário
+    init_buffer_pool();
+    
+    // Reseta o pool para este parse
+    reset_buffer_pool();
     
     size_t offset = 4;
     
-    // 3. Validação de Version (0x05)
+    // Version
     uint8_t version = data[offset];
-    if (version != 0x05) {
-        fprintf(stderr, "[HERMES-C-ERR] Version Inválida: Esperado 0x05, Lido 0x%02x\n", version);
-        return -1;
-    }
+    if (version != 0x05) return -1;
     offset += 1;
-
-    // 4. Extraindo Flags
+    
+    // Flags
     ctx->flags = data[offset];
     offset += 1;
-
-    // 5. Lendo Token Count
-    if (offset + 2 > data_size) {
-        fprintf(stderr, "[HERMES-C-ERR] Truncado ao ler Token Count (offset %zu)\n", offset);
-        return -1;
-    }
+    
+    // Token Count
     uint16_t token_count = READ_U16(&data[offset]);
     offset += 2;
-    ctx->local_dict.count = token_count;
-
-    // 6. Extraindo Bitmap (32 bytes)
-    if (offset + 32 > data_size) {
-        fprintf(stderr, "[HERMES-C-ERR] Truncado ao ler Bitmap (offset %zu)\n", offset);
-        return -1;
-    }
+    
+    // Bitmap (32 bytes)
     memcpy(ctx->bitmap, &data[offset], 32);
     offset += 32;
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // 7. ESTRATÉGIA TWO-PASS (Com Diagnóstico de Loop)
-    // ═══════════════════════════════════════════════════════════════════════════
     
-    size_t total_pattern_size = 0;
-    size_t temp_offset = offset;
+    // ═══════════════════════════════════════════════════════════════════
+    // LEITURA DE TOKENS (Usando Buffer Pool)
+    // ═══════════════════════════════════════════════════════════════════
+    if (token_count > g_pool.capacity) {
+        fprintf(stderr, "[HERMES-C-ERR] Token count (%u) excede pool capacity (%u)\n", 
+                token_count, g_pool.capacity);
+        return -1;
+    }
     
+    // Lê todos os tokens em um único loop (sem malloc individual)
+    size_t buffer_offset = 0;
     for (uint16_t i = 0; i < token_count; i++) {
-        if (temp_offset + 4 > data_size) {
-            fprintf(stderr, "[HERMES-C-ERR] Truncado no loop de tokens (Passo 1). Index: %u, Offset: %zu, Size: %zu\n", 
-                    i, temp_offset, data_size);
-            return -1;
-        }
-        uint16_t plen = READ_U16(&data[temp_offset + 2]); 
-        total_pattern_size += plen;
-        temp_offset += 4 + plen;
-    }
-
-    if (total_pattern_size > 0) {
-        ctx->local_dict.buffer = (char*)malloc(total_pattern_size);
-        if (!ctx->local_dict.buffer) {
-            fprintf(stderr, "[HERMES-C-ERR] Falha no malloc do buffer de tokens (%zu bytes)\n", total_pattern_size);
-            return -1;
-        }
-    } else {
-        ctx->local_dict.buffer = NULL;
-    }
-
-    if (token_count > 0) {
-        ctx->local_dict.pointers = (char**)malloc(token_count * sizeof(char*));
-        ctx->local_dict.lengths = (uint16_t*)malloc(token_count * sizeof(uint16_t));
-        if (!ctx->local_dict.pointers || !ctx->local_dict.lengths) {
-            fprintf(stderr, "[HERMES-C-ERR] Falha no malloc dos arrays de ponteiros\n");
-            free(ctx->local_dict.buffer);
-            return -1;
-        }
-    } else {
-        ctx->local_dict.pointers = NULL;
-        ctx->local_dict.lengths = NULL;
-    }
-
-    char* current_buffer_pos = ctx->local_dict.buffer;
-    
-    for (uint16_t i = 0; i < token_count; i++) {
-        if (offset + 4 > data_size) {
-            fprintf(stderr, "[HERMES-C-ERR] Truncado no loop de tokens (Passo 2). Index: %u, Offset: %zu\n", i, offset);
-            goto cleanup_error;
-        }
+        if (offset + 4 > data_size) return -1;
         
         uint16_t plen = READ_U16(&data[offset + 2]);
         offset += 4;
         
-        if (offset + plen > data_size) {
-            fprintf(stderr, "[HERMES-C-ERR] Pattern excede tamanho do arquivo. Index: %u, Offset: %zu, Plen: %u\n", 
-                    i, offset, plen);
-            goto cleanup_error;
+        if (offset + plen > data_size) return -1;
+        
+        // Copia o token para o buffer pool
+        if (buffer_offset + plen > POOL_MAX_BUFFER_SIZE) {
+            fprintf(stderr, "[HERMES-C-ERR] Buffer pool overflow\n");
+            return -1;
         }
         
-        memcpy(current_buffer_pos, &data[offset], plen);
+        memcpy(&g_pool.buffer[buffer_offset], &data[offset], plen);
+        g_pool.pointers[i] = &g_pool.buffer[buffer_offset];
+        g_pool.lengths[i] = plen;
         
-        ctx->local_dict.pointers[i] = current_buffer_pos;
-        ctx->local_dict.lengths[i] = plen;
-        
-        current_buffer_pos += plen;
+        buffer_offset += plen;
         offset += plen;
     }
-
-    // 8. Extraindo o Payload (Marshalled Bytecode)
-    if (offset + 4 > data_size) {
-        fprintf(stderr, "[HERMES-C-ERR] Truncado ao ler tamanho do Payload (offset %zu)\n", offset);
-        goto cleanup_error;
-    }
     
-    ctx->payload_size = READ_U32(&data[offset]);
+    // Payload
+    if (offset + 4 > data_size) return -1;
+    uint32_t payload_size = READ_U32(&data[offset]);
     offset += 4;
     
-    if (offset + ctx->payload_size > data_size) {
-        fprintf(stderr, "[HERMES-C-ERR] Payload excede tamanho do arquivo. Offset: %zu, PayloadSize: %u, FileSize: %zu\n", 
-                offset, ctx->payload_size, data_size);
-        goto cleanup_error;
-    }
+    if (offset + payload_size > data_size) return -1;
     
     ctx->payload_ptr = &data[offset];
+    ctx->payload_size = payload_size;
     ctx->header_size = offset;
-
-    return 0; // SUCESSO
-
-cleanup_error:
-    if (ctx->local_dict.buffer) free(ctx->local_dict.buffer);
-    if (ctx->local_dict.pointers) free(ctx->local_dict.pointers);
-    if (ctx->local_dict.lengths) free(ctx->local_dict.lengths);
-    return -1;
+    
+    // Configura o dicionário local para usar o pool
+    ctx->local_dict.buffer = g_pool.buffer;
+    ctx->local_dict.pointers = g_pool.pointers;
+    ctx->local_dict.lengths = g_pool.lengths;
+    ctx->local_dict.count = token_count;
+    
+    return 0;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// FREE CONTEXT (Não libera o pool, só limpa referências)
+// ═══════════════════════════════════════════════════════════════════
 void free_hbc5_context(HBC5Context* ctx) {
-    if (ctx->local_dict.buffer) free(ctx->local_dict.buffer);
-    if (ctx->local_dict.pointers) free(ctx->local_dict.pointers);
-    if (ctx->local_dict.lengths) free(ctx->local_dict.lengths);
-    memset(ctx, 0, sizeof(HBC5Context));
+    if (!ctx) return;
+    
+    // Não libera o pool (é global e reutilizável)
+    // Só limpa as referências no contexto
+    ctx->local_dict.buffer = NULL;
+    ctx->local_dict.pointers = NULL;
+    ctx->local_dict.lengths = NULL;
+    ctx->local_dict.count = 0;
+    ctx->payload_ptr = NULL;
+    ctx->payload_size = 0;
 }
 
 // ═══════════════════════════════════════════════════════════════════
 // MOTOR BRANCHLESS (Expansão de Strings - Local Dict HBC5)
 // ═══════════════════════════════════════════════════════════════════
-static inline void get_pattern_data(uint16_t token, const HermesDict* l_dict,
-                                    char** out_ptr, int* out_len) {
+static inline void get_pattern_data(uint16_t token, const HermesDict* l_dict, 
+                                     char** out_ptr, int* out_len) {
     uint16_t index = token - 0x80;
     *out_ptr = l_dict->pointers[index];
     *out_len = l_dict->lengths[index];
 }
 
 static size_t calculate_expanded_size(const char* src, size_t src_len,
-                                      const uint8_t* bitmap, const HermesDict* l_dict) {
+                                       const uint8_t* bitmap, const HermesDict* l_dict) {
     size_t final_size = 0;
     for (size_t i = 0; i < src_len; i++) {
         uint8_t c = (uint8_t)src[i];
@@ -205,7 +197,7 @@ static size_t calculate_expanded_size(const char* src, size_t src_len,
 }
 
 static void expand_string(const char* src, size_t src_len, char* dst,
-                          const uint8_t* bitmap, const HermesDict* l_dict) {
+                           const uint8_t* bitmap, const HermesDict* l_dict) {
     char* out = dst;
     for (size_t i = 0; i < src_len; i++) {
         uint8_t c = (uint8_t)src[i];
@@ -221,12 +213,15 @@ static void expand_string(const char* src, size_t src_len, char* dst,
     }
 }
 
-// 🚀 CRÍTICO: NÃO PODE SER static, senão o linker não consegue achar!
-int walk_and_decode_inplace(PyObject* code_obj, const uint8_t* bitmap, const HermesDict* l_dict) {
-    if (!PyCode_Check(code_obj)) return 0;
+PyObject* walk_and_decode_inplace(PyObject* code_obj, const uint8_t* bitmap, const HermesDict* l_dict) {
+    if (!PyCode_Check(code_obj)) return code_obj;
     
     PyObject* co_consts = PyObject_GetAttrString(code_obj, "co_consts");
-    if (!co_consts || !PyTuple_Check(co_consts)) { Py_XDECREF(co_consts); return -1; }
+    if (!co_consts || !PyTuple_Check(co_consts)) {
+        Py_XDECREF(co_consts);
+        Py_INCREF(code_obj);
+        return code_obj;
+    }
     
     Py_ssize_t n = PyTuple_Size(co_consts);
     for (Py_ssize_t i = 0; i < n; i++) {
@@ -234,33 +229,43 @@ int walk_and_decode_inplace(PyObject* code_obj, const uint8_t* bitmap, const Her
         if (PyUnicode_Check(item)) {
             Py_ssize_t len;
             const char* s = PyUnicode_AsUTF8AndSize(item, &len);
-            if (!s) { Py_DECREF(co_consts); return -1; }
+            if (!s) continue;
             
             int needs_decode = 0;
             for (Py_ssize_t k = 0; k < len; k++) {
                 uint8_t c = (uint8_t)s[k];
-                if (c >= 0x80 && (bitmap[c >> 3] >> (c & 7)) & 1) { needs_decode = 1; break; }
+                if (c >= 0x80 && (bitmap[c >> 3] >> (c & 7)) & 1) {
+                    needs_decode = 1;
+                    break;
+                }
             }
             
             if (needs_decode) {
                 size_t final_size = calculate_expanded_size(s, len, bitmap, l_dict);
                 char* buffer = (char*)malloc(final_size + 1);
-                if (!buffer) { Py_DECREF(co_consts); return -1; }
+                if (!buffer) continue;
                 
                 expand_string(s, len, buffer, bitmap, l_dict);
                 buffer[final_size] = '\0';
                 
                 PyObject* new_str = PyUnicode_DecodeUTF8(buffer, final_size, "strict");
                 free(buffer);
-                if (!new_str) { Py_DECREF(co_consts); return -1; }
                 
-                Py_DECREF(item);
-                PyTuple_SetItem(co_consts, i, new_str);
+                if (new_str) {
+                    PyTuple_SetItem(co_consts, i, new_str);
+                }
             }
         } else if (PyCode_Check(item)) {
-            if (walk_and_decode_inplace(item, bitmap, l_dict) != 0) { Py_DECREF(co_consts); return -1; }
+            PyObject* processed = walk_and_decode_inplace(item, bitmap, l_dict);
+            if (processed != item) {
+                PyTuple_SetItem(co_consts, i, processed);
+            }
         }
     }
+    
     Py_DECREF(co_consts);
-    return 0;
+    
+    // Retorna o code_obj original (não cria novo)
+    Py_INCREF(code_obj);
+    return code_obj;
 }

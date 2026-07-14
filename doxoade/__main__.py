@@ -17,6 +17,7 @@ def main():
     # 2. Ancoragem de Sistema
     package_dir = Path(__file__).resolve().parent
     project_root = str(package_dir.parent)
+
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
         

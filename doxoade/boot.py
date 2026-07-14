@@ -26,12 +26,10 @@ def ignite_background_systems(project_root: str):
     try:
         from doxoade.tools.hermes_systems.hermes_init import init_hermes_bootstrap
         from pathlib import Path
-        
         hermes_stats = init_hermes_bootstrap(
             Path(project_root),
             compile_if_missing=False  # Não compila automaticamente
         )
-        
         if os.environ.get('HERMES_VERBOSE') == '1':
             print(f"[BOOT] Hermes Init: {hermes_stats['bootstrap']['loaded']} módulos nativos, "
                   f"{hermes_stats['total_time_ms']:.2f}ms")
@@ -46,15 +44,8 @@ def ignite_background_systems(project_root: str):
         run_abi_gate(project_root)
     except Exception as e:
         formated_traceback(e, "boot - ignite_background_systems - run_abi_gate")
-
-    clean_meta_path()
     
-    # 1. ABI Gate (Move os arquivos compilados para o local correto)
-    try:
-        from doxoade.tools.vulcan.abi_gate import run_abi_gate
-        run_abi_gate(project_root)
-    except Exception as e:
-        formated_traceback(e, "boot - ignite_background_systems - run_abi_gate")
+    clean_meta_path()
     
     # 2. Vulcan MetaFinder (Tier 1 - Índice 0)
     try:
@@ -113,35 +104,22 @@ def ignite_background_systems(project_root: str):
                 if os.environ.get("HERMES_VERBOSE") == "1":
                     print(f"\x1b[90m[HERMES v2] Bridge C-Native (SSE 4.2) pronto.\x1b[0m")
             
-            # 7.2. Instala o Hook v2 (Intercepta imports e usa o C-Bridge)
+            # 7.2. Ativa o Hermes Hook V2 (MetaPathFinder)
             from doxoade.tools.hermes_systems.hermes_hook_v2 import install as hermes_v2_install
-            hermes_v2_install(project_root)
             
-            if os.environ.get("HERMES_VERBOSE") == "1":
-                print(f"\x1b[90m[HERMES v2] Hook instalado no sys.meta_path (Cold/Warm Start ativo)\x1b[0m")
-    except Exception as e:
-        # Fallback gracioso: se o Hermes v2 falhar, o Python puro continua funcionando
-        if os.environ.get("HERMES_VERBOSE") == "1":
-            print(f"\x1b[90m[HERMES v2] Falha na inicialização: {e}\x1b[0m")
+            # Verifica se há módulos .hbc6 disponíveis
+            from pathlib import Path
+            build_dir = Path(project_root) / '.doxoade' / 'hermes' / 'build'
+            hbc6_count = len(list(build_dir.glob('*.hbc6'))) if build_dir.exists() else 0
             
-    # ═══════════════════════════════════════════════════════════════════════════════
-    # FASE 8: HERMES AUTO-PRELOAD (Inteligente)
-    # Pré-carrega módulos críticos com cache de performance
-    # ═══════════════════════════════════════════════════════════════════════════════
-    try:
-        from doxoade.tools.hermes_systems.hermes_auto_preload import auto_preload
-        
-        preload_stats = auto_preload(
-            project_root,
-            modules=None,  # Usa cache inteligente
-            verbose=os.environ.get("HERMES_VERBOSE") == "1"
-        )
-        
-        if os.environ.get("HERMES_VERBOSE") == "1":
-            print(f"[BOOT] Hermes Auto-Preload: {len(preload_stats['loaded'])} loaded, "
-                  f"{preload_stats['cache_hits']} cached, "
-                  f"{preload_stats['total_time_ms']:.1f}ms")
+            if hbc6_count > 0:
+                hermes_v2_install(project_root)
+                if os.environ.get("HERMES_VERBOSE") == "1":
+                    print(f"\x1b[90m[HERMES v2] Hook V2 ativado: {hbc6_count} módulos .hbc6 disponíveis.\x1b[0m")
+            else:
+                if os.environ.get("HERMES_VERBOSE") == "1":
+                    print(f"\x1b[90m[HERMES v2] Nenhum módulo .hbc6 encontrado. Modo passivo.\x1b[0m")
     except Exception as e:
-        # Não falha o boot se preload falhar
         if os.environ.get("HERMES_VERBOSE") == "1":
-            print(f"[BOOT] Hermes Auto-Preload falhou: {e}")
+            print(f"\x1b[90m[HERMES v2] Falha na ativação: {e}\x1b[0m")
+        # Não falha o boot se Hermes V2 falhar

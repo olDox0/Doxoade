@@ -53,64 +53,45 @@ class HermesLoader:
 
     def decompress_to_code(self, hermes_path: Path):
         """
-        Decompressão com dicionários em camadas:
-        1. Carrega dicionário global (já em cache)
-        2. Extrai dicionário específico do header do .hermes
-        3. Combina: Global + Específico
-        4. Aplica reverse_tokens
+        Decompressão unificada com suporte a HBC3, HBC4, HBC5 e HBC6.
         """
         cache_key = str(hermes_path)
         if cache_key in self._code_cache:
             return self._code_cache[cache_key]
-
+            
         data = hermes_path.read_bytes()
-
+        code_obj = None
+        
         # ═══════════════════════════════════════════════════════════════════
-        # HBC5: Formato mais recente (com dicionário específico embutido)
+        # HBC5: Formato sem LZMA + flags
         # ═══════════════════════════════════════════════════════════════════
         if data.startswith(MAGIC_HBC5):
             file_decoder, marshalled_data, flags, _ = parse_header_hbc5(data)
             if file_decoder is None and len(data) > 4:
                 marshalled_data = data[4:]
                 file_decoder = {}
-            
             code_obj = marshal.loads(marshalled_data)
-            
-            # ═══════════════════════════════════════════════════════════════
-            # COMBINA: Global + Específico (lazy)
-            # ═══════════════════════════════════════════════════════════════
             if file_decoder:
-                combined_decoder = {**self.global_decoder, **file_decoder}
+                combined_decoder = {**self._load_global_decoder(), **file_decoder}
                 bitmap = get_bitmap_hbc5(data)
                 vec_dec = build_vector_decoder(combined_decoder)
                 code_obj = reverse_tokens_vectorized(code_obj, vec_dec, bitmap)
-            elif self.global_decoder:
-                # Só usa o global se não houver específico
-                code_obj = reverse_tokens_vectorized(
-                    code_obj, self._global_vector_decoder, get_bitmap_hbc5(data)
-                )
-
+                
         # ═══════════════════════════════════════════════════════════════════
-        # HBC4: Formato sem LZMA (com dicionário específico embutido)
+        # HBC4: Formato sem LZMA
         # ═══════════════════════════════════════════════════════════════════
         elif data.startswith(MAGIC_HBC4):
             file_decoder, marshalled_data, _ = parse_header_hbc4(data)
             if file_decoder is None and len(data) > 4:
                 marshalled_data = data[4:]
                 file_decoder = {}
-            
             code_obj = marshal.loads(marshalled_data)
-            
             if file_decoder:
-                combined_decoder = {**self.global_decoder, **file_decoder}
+                combined_decoder = {**self._load_global_decoder(), **file_decoder}
                 bitmap = get_bitmap_hbc4(data)
                 vec_dec = build_vector_decoder(combined_decoder)
                 code_obj = reverse_tokens_vectorized(code_obj, vec_dec, bitmap)
-            elif self.global_decoder:
-                code_obj = reverse_tokens_vectorized(
-                    code_obj, self._global_vector_decoder, get_bitmap_hbc4(data)
-                )
-
+                
         # ═══════════════════════════════════════════════════════════════════
         # HBC3: Formato com LZMA + bitmap
         # ═══════════════════════════════════════════════════════════════════
@@ -118,29 +99,122 @@ class HermesLoader:
             file_decoder, compressed_data, _ = parse_header(data)
             if file_decoder is None:
                 raise ValueError(f"Header HBC3 inválido: {hermes_path}")
-            
             bitmap = get_bitmap(data)
             decompressed = lzma.decompress(compressed_data)
             code_obj = marshal.loads(decompressed)
-            
             if file_decoder:
-                combined_decoder = {**self.global_decoder, **file_decoder}
+                combined_decoder = {**self._load_global_decoder(), **file_decoder}
                 vec_dec = build_vector_decoder(combined_decoder)
                 code_obj = reverse_tokens_vectorized(code_obj, vec_dec, bitmap)
-            elif self.global_decoder:
-                code_obj = reverse_tokens_vectorized(
-                    code_obj, self._global_vector_decoder, bitmap
-                )
-
+                
+        # ═══════════════════════════════════════════════════════════════════
+        # 🚀 HBC6: Formato Unificado (Bytecode + Strings)
+        # ═══════════════════════════════════════════════════════════════════
+        elif data[:4] == b'HBC6':
+            code_obj = self._decompress_hbc6(data)
+            
         else:
             raise ValueError(f"Formato desconhecido: {hermes_path}")
-
+            
         # Salva no cache LRU
         if len(self._code_cache) >= self._cache_max_size:
             oldest = next(iter(self._code_cache))
             del self._code_cache[oldest]
         self._code_cache[cache_key] = code_obj
         return code_obj
+
+    def _decompress_hbc6(self, data: bytes):
+        """
+        Fallback Python para HBC6.
+        Lê o header, ignora a HRT/MacroDict (não aplica patches),
+        e retorna o CodeObject cru do marshal.
+        """
+        import struct
+        
+        offset = 6  # Magic(4) + Version(1) + Flags(1)
+        
+        # 1. Lê HRT Size e pula a HRT
+        hrt_size = struct.unpack_from('<I', data, offset)[0]
+        offset += 4 + hrt_size
+        
+        # 2. 🚀 CORREÇÃO: Lê MACRO_DICT Size e guarda o offset ANTES de pular
+        macro_dict_size = struct.unpack_from('<I', data, offset)[0]
+        macro_dict_offset = offset + 4  # 🚀 Salva o offset do início do MACRO_DICT
+        offset += 4 + macro_dict_size
+        
+        # 3. Lê o Payload Size
+        payload_size = struct.unpack_from('<I', data, offset)[0]
+        offset += 4
+        
+        # 4. Extrai o Marshal
+        payload = data[offset:offset + payload_size]
+        
+        import marshal
+        code_obj = marshal.loads(payload)
+        
+        # 🚀 Expansão básica dos 0xC0 (sem o Motor C)
+        code_obj = self._expand_hbc6_macros_python(code_obj, data, macro_dict_offset, macro_dict_size)
+        
+        return code_obj
+
+    def _expand_hbc6_macros_python(self, code_obj, data: bytes, macro_dict_offset: int, macro_dict_size: int):
+        """Expande os macros 0xC0 no fallback Python (lento, mas funcional)."""
+        import struct, types, dis
+        
+        MACRO_OPCODE = 0xC0
+        
+        # 1. Parse do MACRO_DICT
+        macro_dict = {}
+        pos = macro_dict_offset + 4  # Pula o size field
+        if macro_dict_size >= 2:
+            dict_count = struct.unpack_from('<H', data, pos)[0]
+            pos += 2
+            for _ in range(dict_count):
+                tid = struct.unpack_from('<H', data, pos)[0]; pos += 2
+                length = struct.unpack_from('<H', data, pos)[0]; pos += 2
+                opcodes = data[pos:pos + length]
+                macro_dict[tid] = opcodes
+                pos += length
+        
+        # 2. Walker DFS para expandir
+        def expand_code(co):
+            bytecode = bytearray(co.co_code)
+            expanded = bytearray()
+            i = 0
+            changed = False
+            while i < len(bytecode):
+                if bytecode[i] == MACRO_OPCODE and (i + 1) < len(bytecode):
+                    token_id = bytecode[i + 1]
+                    if token_id in macro_dict:
+                        expanded.extend(macro_dict[token_id])
+                        i += 2
+                        changed = True
+                        continue
+                expanded.append(bytecode[i])
+                i += 1
+            
+            new_co = co
+            if changed:
+                new_co = co.replace(co_code=bytes(expanded))
+            
+            # Recursão
+            new_consts = []
+            consts_changed = False
+            for const in new_co.co_consts:
+                if isinstance(const, types.CodeType):
+                    new_const = expand_code(const)
+                    if new_const is not const:
+                        consts_changed = True
+                    new_consts.append(new_const)
+                else:
+                    new_consts.append(const)
+            
+            if consts_changed:
+                new_co = new_co.replace(co_consts=tuple(new_consts))
+            
+            return new_co
+        
+        return expand_code(code_obj)
 
     def _load_decoder(self) -> dict:
         """Carrega o dicionário de decodificação."""
@@ -188,65 +262,7 @@ class HermesLoader:
         hermes_bytes = hermes_path.read_bytes()
         return self.decompress_bytes(hermes_bytes)
 
-    def decompress_to_code(self, hermes_path: Path):
-        """Decompressão completa (modo FULL)."""
-        cache_key = str(hermes_path)
-        if cache_key in self._code_cache:
-            return self._code_cache[cache_key]
 
-        data = hermes_path.read_bytes()
-
-        # ═══════════════════════════════════════════════════════════════════
-        # HBC5: Formato mais recente (sem LZMA + flags)
-        # ═══════════════════════════════════════════════════════════════════
-        if data.startswith(MAGIC_HBC5):
-            dynamic_decoder, marshalled_data, flags, _ = parse_header_hbc5(data)
-            if dynamic_decoder is None and len(data) > 4:
-                marshalled_data = data[4:]
-                dynamic_decoder = {}
-            code_obj = marshal.loads(marshalled_data)
-            if dynamic_decoder:
-                bitmap = get_bitmap_hbc5(data)
-                vec_dec = build_vector_decoder(dynamic_decoder)
-                code_obj = reverse_tokens_vectorized(code_obj, vec_dec, bitmap)
-
-        # ═══════════════════════════════════════════════════════════════════
-        # HBC4: Formato sem LZMA (mais rápido)
-        # ═══════════════════════════════════════════════════════════════════
-        elif data.startswith(MAGIC_HBC4):
-            dynamic_decoder, marshalled_data, _ = parse_header_hbc4(data)
-            if dynamic_decoder is None and len(data) > 4:
-                marshalled_data = data[4:]
-                dynamic_decoder = {}
-            code_obj = marshal.loads(marshalled_data)
-            if dynamic_decoder:
-                bitmap = get_bitmap_hbc4(data)
-                vec_dec = build_vector_decoder(dynamic_decoder)
-                code_obj = reverse_tokens_vectorized(code_obj, vec_dec, bitmap)
-
-        # ═══════════════════════════════════════════════════════════════════
-        # HBC3: Formato com LZMA + bitmap
-        # ═══════════════════════════════════════════════════════════════════
-        elif data.startswith(MAGIC_HBC3):
-            dynamic_decoder, compressed_data, _ = parse_header(data)
-            if dynamic_decoder is None:
-                raise ValueError(f"Header HBC3 inválido: {hermes_path}")
-            bitmap = get_bitmap(data)
-            decompressed = lzma.decompress(compressed_data)
-            code_obj = marshal.loads(decompressed)
-            if dynamic_decoder:
-                vec_dec = build_vector_decoder(dynamic_decoder)
-                code_obj = reverse_tokens_vectorized(code_obj, vec_dec, bitmap)
-
-        else:
-            raise ValueError(f"Formato desconhecido: {hermes_path}")
-
-        # Salva no cache LRU
-        if len(self._code_cache) >= self._cache_max_size:
-            oldest = next(iter(self._code_cache))
-            del self._code_cache[oldest]
-        self._code_cache[cache_key] = code_obj
-        return code_obj
 
     # ═══════════════════════════════════════════════════════════════════════════════
     # CARREGAMENTO ADAPTATIVO (Fase 3)

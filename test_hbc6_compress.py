@@ -29,28 +29,28 @@ def main():
     print(f"  Alvo: {target_file.name}")
     print(f"  Dicionário: {len(GLOBAL_MACROS)} Macros Atômicas.\n")
 
-    compressor = HBC6Compressor(GLOBAL_MACROS, TOKEN_MAP)
+    compressor = HBC6Compressor(project_root, GLOBAL_MACROS, TOKEN_MAP)
+#    compressor = HBC6Compressor(GLOBAL_MACROS, TOKEN_MAP)
     
     # EXECUTA A ANÁLISE E GERA O HBC6
     stats = compressor.compress_file(target_file, output_file)
     
     # RELATÓRIO DE ENGENHARIA
     print(f"{Fore.GREEN}{'═' * 70}")
-    print(f"  📊 RELATÓRIO DE ENGENHARIA HBC6 (Patch-in-RAM)")
+    print(f"  📊 RELATÓRIO DE ENGENHARIA (HBC5 + HBC6 Unificado)")
     print(f"{'═' * 70}{Style.RESET_ALL}")
     print(f"  Arquivo Original (.py)   : {stats['original_bytes'] / 1024:.2f} KB")
     print(f"  Payload Marshal (Intacto): {stats['marshalled_bytes'] / 1024:.2f} KB")
     print(f"  Arquivo HBC6 Final       : {stats['hbc6_bytes'] / 1024:.2f} KB")
     print(f"  ──────────────────────────────────────────────────────────")
     print(f"  Code Objects Escaneados  : {Fore.CYAN}{stats['code_objects_scanned']}{Style.RESET_ALL}")
-    print(f"  Patches Seguros (HRT)    : {Fore.GREEN}{stats['patches_applied']}{Style.RESET_ALL}")
-    print(f"  Bytes a Economizar na RAM: {Fore.GREEN}{stats['bytes_to_save_in_ram']} bytes{Style.RESET_ALL} (via Motor C)")
+    print(f"  Patches Mapeados (HRT)   : {Fore.GREEN}{stats['patches_applied']}{Style.RESET_ALL} (Telemetria de Bytecode)")
+    print(f"  Tokens de String (HBC5)  : {Fore.GREEN}{stats['tokens_applied']}{Style.RESET_ALL} (Compressão de co_consts)")
     print(f"  Arquivo de Saída         : {output_file}")
     print(f"{'═' * 70}\n")
-    
-    print(f"{Fore.YELLOW}💡 Próximo Passo:{Style.RESET_ALL} O Motor C (Mercury) lerá a HRT,")
-    print(f"fará o marshal.loads() do payload intacto, e aplicará os {stats['patches_applied']} patches")
-    print(f"na RAM em microssegundos, entregando um CodeObject 'encolhido' para o CPython.\n")
+    print(f"{Fore.YELLOW}💡 Próximo Passo:{Style.RESET_ALL} O Motor C (Mercury) fará o mmap do HBC6,")
+    print(f"usará o Dicionário Global (HGD1) para expandir as strings tokenizadas,")
+    print(f"e entregará um CodeObject 100% intacto e executável para o CPython.\n")
 
 if __name__ == '__main__':
     main()

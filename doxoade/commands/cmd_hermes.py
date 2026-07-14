@@ -36,11 +36,14 @@ def scan(target):
     click.echo(f"\n{Fore.GREEN}Top Padrões (Candidatos ao Dicionário Binário):{Style.RESET_ALL}")
     click.echo(f"{Style.DIM}{'-'*80}{Style.RESET_ALL}")
     
-    for struct_hash, count in results:
-        source_code = mapping[struct_hash]
-        # Mostra o ID que será substituído e o código real
-        click.echo(f"  {Fore.YELLOW}[{struct_hash}]{Style.RESET_ALL} {count:4} repetições | {Fore.WHITE}{source_code}{Style.RESET_ALL}")
-#        click.echo(f"  {Fore.YELLOW}[{struct_hash}]{Style.RESET_ALL} {count:4} ocorrências | {Fore.WHITE}{source_code}{Style.RESET_ALL}")
+    # 🚀 CORREÇÃO: O scanner retorna 3 elementos (pattern, freq, type)
+    for pattern, count, _pattern_type in results:
+        source_code = mapping[pattern]
+        # Trunca a exibição para manter a UI limpa no terminal
+        display_hash = pattern if len(pattern) <= 40 else pattern[:37] + "..."
+        display_code = source_code if len(source_code) <= 35 else source_code[:32] + "..."
+        
+        click.echo(f"  {Fore.YELLOW}[{display_hash}]{Style.RESET_ALL} {count:4} reps | {Fore.WHITE}{display_code}{Style.RESET_ALL}")
         
     click.echo(f"{Style.DIM}{'-'*80}{Style.RESET_ALL}")
     click.echo(f"Ação sugerida: Os itens com alta ocorrência receberão IDs de 1 byte (0x01 a 0xFF).")
@@ -625,3 +628,25 @@ def hermes_lab(mode, target, top, min_freq, min_files):
         scanner.print_global_report(top_n=top, min_dispersion=min_files)
     else:
         click.echo(f"{Fore.RED}Modo desconhecido. Use 'ngram-local' ou 'ngram-global'.{Style.RESET_ALL}")
+
+@hermes_group.command('test')
+@click.argument('target', required=False, type=click.Path(exists=True))
+def hermes_test(target):
+    """[CI] Testa a integridade Lossless e performance do Motor C.
+    
+    Exemplos:
+      doxoade hermes test doxoade/cli.py
+      doxoade hermes test doxoade/tools/vulcan/forge.py
+    """
+    from doxoade.tools.hermes_systems.hermes_test import run_hermes_test
+    project_root = Path.cwd().resolve()
+    
+    # Se não passar alvo, usa o cli.py como padrão
+    target_file = target or str(project_root / "doxoade" / "cli.py")
+    
+    success = run_hermes_test(str(project_root), target_file)
+    if not success:
+        click.echo(f"\n{Fore.RED}✘ TESTE FALHOU. O Motor C está corrompendo o bytecode.{Style.RESET_ALL}")
+        sys.exit(1)
+    else:
+        click.echo(f"\n{Fore.GREEN}✔ TESTE APROVADO. O Motor C está gerando bytecode íntegro.{Style.RESET_ALL}")

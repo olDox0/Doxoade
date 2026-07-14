@@ -13,8 +13,12 @@ from typing import List, Dict, Any
 from html.parser import HTMLParser
 
 # Padrões de IO para busca via AST
-IO_KEYWORDS = {'open', 'read', 'write', 'load', 'dump', 'print', 'input', 'get', 'post', 'request'}
-IO_MODULES = {'os', 'sys', 'pathlib', 'shutil', 'subprocess', 'socket', 'requests', 'json', 'toml'}
+IO_KEYWORDS = {
+    'open', 'read', 'write', 'load', 'dump', 'print', 'input', 'get', 'post','request'
+}
+IO_MODULES = {
+    'os', 'sys', 'pathlib', 'shutil', 'subprocess', 'socket', 'requests', 'json', 'toml'
+}
 
 def strip_comments(code: str, filename: str) -> str:
     """

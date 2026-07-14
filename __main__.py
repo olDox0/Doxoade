@@ -6,13 +6,15 @@ import subprocess
 import tempfile
 import traceback
 
+from click import echo
+
 def _early_setup(project_root):
     """Garante diretórios e executa o Portão ABI."""
     try:
         from doxoade.tools.vulcan.abi_gate import run_abi_gate
         run_abi_gate(project_root)
     except Exception as e:
-        print(f'\x1b[31m ■ Erro: {e}')
+        echo(f'\x1b[31m ■ Erro: {e}')
         traceback.print_tb(e.__traceback__)
 
     # Nexus shadow runtime
@@ -47,7 +49,7 @@ def _install_finder(project_root: str):
         from doxoade.tools.vulcan.meta_finder import install as vulcan_install
         vulcan_install(project_root)
     except Exception as e:
-        print(f'\x1b[31m ■ Erro: {e}')
+        echo(f'\x1b[31m ■ Erro: {e}')
         traceback.print_tb(e.__traceback__)
 
 def main():
@@ -61,12 +63,18 @@ def main():
     
     _early_setup(project_root)
     _install_finder(project_root)
+    echo(f"\n[DEBUG-SONDA] sys.argv recebido: {sys.argv}")
     try:
         from doxoade.cli import cli
+        echo(f"[DEBUG-SONDA] Tipo do objeto 'cli': {type(cli)}")
+        echo(f"[DEBUG-SONDA] Chamando cli()...")
         cli()
+        echo("[DEBUG-SONDA] cli() retornou normalmente.")
+    except SystemExit as e:
+        echo(f"\n[DEBUG-SONDA] 🛑 SystemExit interceptado! Código: {e.code}")
     except Exception as e:
         import traceback
-        print(f'\x1b[31m ■ Erro: {e}')
+        echo(f'\x1b[31m ■ Erro: {e}')
         traceback.print_tb(e.__traceback__)
         err_msg = traceback.format_exc()
         current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -80,7 +88,7 @@ def main():
             try:
                 os.remove(path)
             except OSError as e:
-                print(f'\x1b[31m ■ Erro: {e}')
+                echo(f'\x1b[31m ■ Erro: {e}')
                 traceback.print_tb(e.__traceback__)
         sys.exit(1)
 if __name__ == '__main__':

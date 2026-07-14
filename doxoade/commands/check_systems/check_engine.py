@@ -114,7 +114,7 @@ def _run_integrity_check(files, project_root):
     return json.loads(res['stdout']) if res['success'] else []
 
 def run_audit_engine(state, io_manager, **kwargs):
-    from ...probes.manager import ProbeManager
+    from doxoade.probes.manager import ProbeManager
     finding_arena.flush() 
     
     # Tratamento dual de parâmetros de cache para garantir compatibilidade com Click

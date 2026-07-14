@@ -59,28 +59,6 @@ def main():
         print(f"    co_consts    : {len(code_obj.co_consts)} itens")
         print(f"    co_name      : {code_obj.co_name}")
 
-        # 4. VERIFICA SE OS PATCHES FORAM APLICADOS (Arquitetura NOP Padding)
-        # O Motor C injeta o opcode NOP (0x09) com o token_id como argumento.
-        bytecode = code_obj.co_code
-        nop_count = 0
-        token_ids_found = set()
-        
-        # Itera sobre o bytecode em passos de 2 (Wordcode)
-        for i in range(0, len(bytecode), 2):
-            if bytecode[i] == 0x09:  # 0x09 é o opcode de NOP
-                nop_count += 1
-                if i + 1 < len(bytecode):
-                    token_ids_found.add(bytecode[i+1])
-                    
-        print(f"\n  {Fore.CYAN}▶{Style.RESET_ALL} Instruções NOP (0x09) encontradas no co_code: {Fore.YELLOW}{nop_count}{Style.RESET_ALL}")
-        
-        if nop_count > 0:
-            print(f"  {Fore.GREEN}✔ SUCESSO!{Style.RESET_ALL} O Motor C aplicou os patches na RAM usando NOP Padding.")
-            print(f"    Tokens IDs injetados como argumentos: {sorted(list(token_ids_found))}")
-            print(f"    O CPython agora executará um bytecode válido com macros 'camufladas' como NOPs.")
-        else:
-            print(f"  {Fore.YELLOW}⚠{Style.RESET_ALL} Nenhum NOP encontrado. O Motor C pode não ter aplicado os patches.")
-
         # 4. VALIDAÇÃO DO MOTOR C (Modo Empacotador / Zero-LZMA)
         print(f"\n  {Fore.CYAN}▶{Style.RESET_ALL} Validando integridade do CodeObject...")
         if len(code_obj.co_code) > 0 and len(code_obj.co_consts) > 0:
