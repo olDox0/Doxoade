@@ -650,3 +650,20 @@ def hermes_test(target):
         sys.exit(1)
     else:
         click.echo(f"\n{Fore.GREEN}✔ TESTE APROVADO. O Motor C está gerando bytecode íntegro.{Style.RESET_ALL}")
+        
+# Adicione em cmd_hermes.py:
+@hermes_group.command('build-logger')
+def build_logger_cmd():
+    """Compila o Async Logger assíncrono."""
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}☤ [HERMES] Compilando Async Logger...{Style.RESET_ALL}")
+    
+    import subprocess
+    build_script = Path(__file__).parent.parent / 'tools' / 'hermes_systems' / 'native' / 'build_logger.py'
+    
+    result = subprocess.run([sys.executable, str(build_script)], capture_output=True, text=True)
+    
+    if result.returncode == 0:
+        click.echo(f"{Fore.GREEN}✔ Logger compilado com sucesso{Style.RESET_ALL}")
+    else:
+        click.echo(f"{Fore.RED}✘ Falha na compilação{Style.RESET_ALL}")
+        click.echo(result.stderr)

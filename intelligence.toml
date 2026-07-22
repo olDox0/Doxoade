@@ -1,15 +1,40 @@
-# intelligence.toml na raiz do projeto
+# intelligence.toml - Configuração de Blacklist do Motor Nexus
+
 ignore = [
-    "experiments/",        # Mata toda a pasta de experimentos
-    "Canone_Test/",        # Mata testes de canone
-    "commands_test/",      # Opcional: remove os testes do dossier
-    "build_soteria_test/", # Opcional: remove binários de teste
+    # === PASTAS ===
+    "experiments/",
+    "Canone_Test/",
+    "commands_test/",
+    "build_soteria_test/",
     "doxoade.egg-info/",
     "build/",
     "dist/",
+    "__pycache__/",
+    ".git/",
+    "venv/",
+
+    # === EXTENSÕES DE BUILD/SCRIPT ===
     "*.bkp",
-     "*.specpython",
+    "*.specpython",
     "*.bat",
     "*.sh",
-    "*.xml"
+    "*.xml",
+
+    # === EXTENSÕES BINÁRIAS/NATIVAS ===
+    "*.hh",
+    "*.dll",
+    "*.exe",
+    "*.db",
+    "*.db-shm",
+    "*.db-wal",
+
+    # === EXTENSÕES DE BACKUP/LIXO ===
+    "*.old",
+    "*.nxa",
+    "*.jsonl",
+    "*.conf",
+    "*.ini",
+    "*.whitelist_backup",
+    "*.hbc5_backup",
+    "*.final_backup",
 ]

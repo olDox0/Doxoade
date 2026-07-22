@@ -13,6 +13,11 @@ import threading
 # [DOX-UNUSED] import itertools
 import atexit
 
+if not hasattr(builtins, '_doxoade_original_print'):
+    builtins._doxoade_original_print = builtins.print
+
+_original_print = builtins._doxoade_original_print
+
 def _force_reset():
     """Envia o sinal de reset global de forma agressiva."""
     # O código \033[0m reseta cores de fundo, frente e estilos (negrito, etc)
@@ -44,7 +49,8 @@ def _ansi_enabled():
         return sys.stdout.isatty()
     return sys.stdout.isatty() or 'ANSICON' in os.environ or 'WT_SESSION' in os.environ or (os.environ.get('TERM_PROGRAM') == 'vscode')
 
-ANSI_ENABLED = _ansi_enabled()
+#ANSI_ENABLED = _ansi_enabled()
+ANSI_ENABLED = sys.stdout.isatty() if hasattr(sys.stdout, 'isatty') else False
 
 if os.name == 'nt' and ANSI_ENABLED:
     try:
@@ -415,15 +421,28 @@ class AsyncAnimation:
 
 # --- OVERRIDES ---
 
-_original_print = builtins.print
+#_original_print = builtins.print
 def safe_print(*args, **kwargs):
+    """Print seguro com proteção contra recursão."""
     try:
+        if ANSI_ENABLED:
+            _original_print('\x1b[0m', end='')  # Reset ANSI
+        
         _original_print(*args, **kwargs)
-    except UnicodeEncodeError:
-        # Se falhar, converte para string e substitui caracteres impossíveis por '?'
-        clean_args = [str(arg).encode('ascii', 'replace').decode() for arg in args]
-        _original_print(*clean_args, **kwargs)
-    if ANSI_ENABLED: _original_print('\x1b[0m', end='')
+        
+        if ANSI_ENABLED:
+            _original_print('\x1b[0m', end='')  # Reset ANSI
+    except RecursionError:
+        # Se detectar recursão, usa o print do builtins diretamente
+        builtins._doxoade_original_print(*args, **kwargs)
+    except Exception:
+        # Fallback para qualquer outro erro
+        try:
+            builtins._doxoade_original_print(*args, **kwargs)
+        except:
+            pass  # Último recurso: silêncio
+
+# Substitui o print global
 builtins.print = safe_print
 
 # --- EXPORTS ---

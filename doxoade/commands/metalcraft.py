@@ -40,13 +40,10 @@ def metal_build(ctx, target, release, soteria, force): # <--- ADICIONADO 'target
 @click.pass_context
 def metal_run(ctx, target, args):
     """Compila e executa o binário."""
-    # 1. Invoca o build e recebe o veredito
-    build_ok = ctx.invoke(metal_build)
-    
+    build_ok = ctx.invoke(metal_build, target=target)
     if build_ok:
         from doxoade.tools.metalcraft.metal_engine import NexusMetalEngine
         engine = NexusMetalEngine(os.getcwd())
-        # 2. Só agora Hefesto abre os portões!
         engine.run_binary(target_name=target, extra_args=list(args))
     else:
         click.secho("\n[!] Execução cancelada: O build falhou.", fg="yellow")

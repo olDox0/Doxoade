@@ -46,7 +46,8 @@ def diagnose_native_error(exit_code: int, tags: dict) -> tuple:
         # Sintoma A: AccessViolation em endereços "suspeitos" (ex: 0x58585858 ou muito baixos)
         # Se o endereço de falha for uma repetição de bytes (como 'X' ou '0'), é Smashing certeiro.
         if exit_code == 0xc0000005:
-            fault_addr, addr_str = tags.get('FAULT_ADDR', '0x0')
+            addr_str = tags.get('FAULT_ADDR', '0x0')
+            fault_addr = addr_str
 
             try: addr_int = int(addr_str, 16)
             except Exception as e:

@@ -8,21 +8,25 @@ type = "executable"
 engine = "gcc"
 std = "c11"
 opt = "O2"
-shield = true         # Ativa Sotéria (Resgate Nativo)
-incremental = true    # Recompila apenas mudanças
+shield = true
+incremental = true
 
 [paths]
 sources = ["src/*.c", "tests/memory_chaos_v4.c"]
 headers = [
-    "include/", 
+    "include/",
     "doxoade/tools/vulcan/diagnostic/soteria/include"
 ]
-output  = "bin/"
+output = "bin/"
+
+# -- Targets de TESTE (com Sotéria) ------------------------------
 
 [[targets]]
 name = "gordian_test"
 sources = ["doxoade/experiments/soteria_lab/gordian_lab.c"]
 output = "bin/gordian_test.exe"
+flags = ["-fno-stack-protector", "-fno-asynchronous-unwind-tables"]
+opt = "O0"
 
 [[targets]]
 name = "stress_test"
@@ -44,12 +48,15 @@ sources = ["tests/memory_chaos_v4.c"]
 output = "bin/memory_chaos_v4.exe"
 opt = "O0"
 
+# -- Targets de INFRAESTRUTURA (SEM Sotéria) ---------------------
+
 [[targets]]
 name = "soteria_scribe_advance"
 sources = ["doxoade/tools/vulcan/native/soteria_scribe_advance.c"]
 output = "doxoade/tools/vulcan/native/soteria_scribe_advance.dll"
 flags = ["-shared"]
 opt = "O3"
+soteria = false
 
 [[targets]]
 name = "vls_scanner"
@@ -57,3 +64,35 @@ sources = ["doxoade/tools/vulcan/native/vls_scanner.c"]
 output = "doxoade/tools/vulcan/native/vls_scanner.dll"
 flags = ["-shared"]
 opt = "O3"
+soteria = false
+
+[[targets]]
+name = "hermes_async_log"
+sources = ["doxoade/tools/hermes_systems/native/hermes_async_log.c"]
+output = "doxoade/tools/hermes_systems/native/hermes_async_log.dll"
+opt = "O3"
+flags = ["-shared"]
+soteria = false
+
+[[targets]]
+name = "async_log"
+sources = ["doxoade/tools/async_log_systems/native/async_log.c"]
+output = "doxoade/tools/async_log_systems/native/async_log.dll"
+opt = "O3"
+flags = ["-shared"]
+soteria = false
+
+[[targets]]
+name = "hermes_bridge_soteria"
+sources = [
+    "doxoade/tools/hermes_systems/native/hermes_py_utils.c",
+    "doxoade/tools/hermes_systems/native/hermes_cache.c",
+    "doxoade/tools/hermes_systems/native/hermes_hbc5_parser.c",
+    "doxoade/tools/hermes_systems/native/hermes_hbc6_patches.c",
+    "doxoade/tools/hermes_systems/native/hermes_async_log.c",
+    "doxoade/tools/hermes_systems/native/lz4.c"
+]
+output = "doxoade/tools/hermes_systems/native/hermes_bridge_soteria.pyd"
+opt = "O3"
+flags = ["-shared", "-msse4.2", "-mpopcnt", "-DSOTERIA_NO_ALLOC_HOOKS"]
+soteria = false

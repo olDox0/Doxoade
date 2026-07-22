@@ -1,23 +1,31 @@
+// doxoade\tools\vulcan\native\soteria_scribe_advance.c
 /*
- * SOTERIA SCRIBE ADVANCE v3.1 - Vulcan High-Speed Vaccinator
- * Foco: Performance Extrema em Hardware Low-End (SSE4.2 Optimized)
+ * SOTERIA SCRIBE ADVANCE v4.0 - Vulcan High-Speed Vaccinator
+ * Foco: Performance Extrema + Buffer Safety (Bounds Checking)
  */
-
 #include <windows.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
 
-#define MAX_MARKER_SIZE 256
+#define MAX_MARKER_SIZE 512
+#define MAX_FUNC_NAME   256
 
-// Definições de gatilhos
-const char* PY_TRIGGER = "def ";
+const char* PY_TRIGGER       = "def ";
 const char* PY_ASYNC_TRIGGER = "async def ";
-const char* C_MARKER = "    SOTERIA_ENTER(\"%s\");\n";
-const char* PY_MARKER = "\n    chief_heartbeat('SHADOW', 'ENTER', {'f': '%s'})\n";
+const char* C_MARKER         = "    SOTERIA_ENTER(\"%s\");\n";
+const char* PY_MARKER        = "\nchief_heartbeat('SHADOW', 'ENTER', {'f': '%s'})\n";
 
-// Função auxiliar para capturar o nome da função entre o gatilho e o parêntese
+/* ═══════════════════════════════════════════════════════════════════
+ * extract_name - Extrai nome de função com bounds checking
+ * ═══════════════════════════════════════════════════════════════════ */
 void extract_name(const char* src, char* dest, int max_len) {
+    if (max_len <= 0) {
+        if (max_len == 0) return;
+        dest[0] = '\0';
+        return;
+    }
+    
     int i = 0;
     while (src[i] != '(' && src[i] != ' ' && src[i] != '\0' && i < max_len - 1) {
         dest[i] = src[i];
@@ -26,64 +34,101 @@ void extract_name(const char* src, char* dest, int max_len) {
     dest[i] = '\0';
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+ * vax_process_buffer - Vaccinator com Bounds Checking Completo
+ * 
+ * CORREÇÃO v4.0: Adicionado parâmetro out_len para proteção contra
+ * buffer overflow. Todas as escritas em output são verificadas.
+ * ═══════════════════════════════════════════════════════════════════ */
 __declspec(dllexport) int vax_process_buffer(
-    const char* input, 
-    char* output, 
-    int in_len, 
+    const char* input,
+    char* output,
+    int in_len,
+    int out_len,      /* 🆕 NOVO: Tamanho do buffer de saída */
     int is_c_lang
 ) {
+    /* Validação de entrada */
+    if (!input || !output || in_len <= 0 || out_len <= 0) return -1;
+    
     int out_pos = 0;
     int line_start = 1;
-    char func_name[128];
+    char func_name[MAX_FUNC_NAME];
     char injection[MAX_MARKER_SIZE];
 
     for (int i = 0; i < in_len; i++) {
-        // Copia o caractere atual para o output
+        /* 🛡️ Bounds check: espaço para o caractere atual */
+        if (out_pos >= out_len - 1) break;
+        
         output[out_pos++] = input[i];
 
-        // Lógica de Gatilho de Linha
         if (line_start) {
             int trigger_found = 0;
             int offset = 0;
 
             if (!is_c_lang) {
-                // Detecção Python: def ou async def
-                if (strncmp(&input[i], PY_TRIGGER, 4) == 0) {
+                // Verifica triggers Python com bounds check no input
+                if (i + 4 <= in_len && strncmp(&input[i], PY_TRIGGER, 4) == 0) {
                     offset = 4;
                     trigger_found = 1;
-                } else if (strncmp(&input[i], PY_ASYNC_TRIGGER, 10) == 0) {
-                    offset = 10;
+                } else if (i + 11 <= in_len && strncmp(&input[i], "async def ", 11) == 0) {
+                    offset = 11;  // Tamanho de "async def "
                     trigger_found = 1;
                 }
 
                 if (trigger_found) {
-                    extract_name(&input[i + offset], func_name, 128);
-                    sprintf(injection, PY_MARKER, func_name);
-                    
-                    // Procura o fim da assinatura (o ':')
-                    while (i < in_len && input[i] != ':') {
+                    extract_name(&input[i + offset], func_name, MAX_FUNC_NAME);
+                    snprintf(injection, MAX_MARKER_SIZE, PY_MARKER, func_name);
+
+                    /* Avança até ':' com bounds check */
+                    while (i < in_len && input[i] != ':' && out_pos < out_len - 1) {
                         output[out_pos++] = input[++i];
                     }
-                    // Injeta logo após o ':'
-                    int inj_len = strlen(injection);
-                    memcpy(&output[out_pos], injection, inj_len);
-                    out_pos += inj_len;
+
+                    /* 🛡️ Bounds check: espaço para a injeção */
+                    int inj_len = (int)strlen(injection);
+                    if (out_pos + inj_len < out_len) {
+                        memcpy(&output[out_pos], injection, inj_len);
+                        out_pos += inj_len;
+                    }
                 }
             } else {
-                // Detecção C: Focamos em '{' no início de linha após declaração
-                // (Otimizado para o estilo de codificação industrial do OADE)
                 if (input[i] == '{') {
-                    const char* tag = "\n    SOTERIA_ENTER(\"native_func\");";
-                    int tag_len = strlen(tag);
-                    memcpy(&output[out_pos], tag, tag_len);
-                    out_pos += tag_len;
+                    // 🛡️ Lookahead: verifica se já existe SOTERIA_ENTER nas próximas linhas
+                    int has_soteria = 0;
+                    int lookahead_pos = i + 1;
+                    // Pula whitespace e newline
+                    while (lookahead_pos < in_len && (input[lookahead_pos] == ' ' || 
+                           input[lookahead_pos] == '\t' || input[lookahead_pos] == '\n' || 
+                           input[lookahead_pos] == '\r')) {
+                        lookahead_pos++;
+                    }
+                    // Verifica se a próxima coisa não-vazia é SOTERIA_ENTER
+                    if (lookahead_pos + 13 < in_len && 
+                        strncmp(&input[lookahead_pos], "SOTERIA_ENTER", 13) == 0) {
+                        has_soteria = 1;
+                    }
+                    
+                    if (!has_soteria) {
+                        const char* tag = "\n    SOTERIA_ENTER(\"native_func\");";
+                        int tag_len = (int)strlen(tag);
+                        if (out_pos + tag_len < out_len) {
+                            memcpy(&output[out_pos], tag, tag_len);
+                            out_pos += tag_len;
+                        }
+                    }
                 }
             }
-        }
 
-        // Determina se o próximo caractere inicia uma nova linha
+        }
         line_start = (input[i] == '\n');
     }
-
-    return out_pos; // Retorna o novo tamanho do buffer
+    
+    /* Null-terminate se houver espaço */
+    if (out_pos < out_len) {
+        output[out_pos] = '\0';
+    } else {
+        output[out_len - 1] = '\0';
+    }
+    
+    return out_pos;
 }

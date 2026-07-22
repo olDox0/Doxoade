@@ -10,6 +10,7 @@ Estratégia:
 """
 import sys
 import click
+import hashlib
 from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.hermes_systems.hermes_compress_hbc6 import HBC6Compressor
@@ -72,10 +73,11 @@ def analyze_break_even():
     print()
 
 @click.command()
-@click.option('--all', '-a', 'build_all', is_flag=True, help='Comprime todos os .py para HBC6')
-@click.option('--target', '-t', default='.', help='Diretório alvo')
-@click.option('--min-size-kb', default=10.0, help='Tamanho mínimo do arquivo para compressão (KB)')
-def main(build_all, target, min_size_kb):
+@click.argument('file', required=False, type=click.Path(exists=True))  # ← ADICIONE
+@click.option('--all', '-a', 'build_all', is_flag=True)
+@click.option('--target', '-t', default='.')
+@click.option('--min-size-kb', default=10.0)
+def main(file, build_all, target, min_size_kb):  # ← 'file' primeiro
     """🧬 Build HBC6 com Filtro Inteligente."""
     from doxoade.tools.doxcolors import Fore, Style
     
@@ -91,6 +93,16 @@ def main(build_all, target, min_size_kb):
     analyze_break_even()
     
     compressor = HBC6Compressor(project_root, GLOBAL_NGRAMS, TOKEN_MAP)
+    
+    if file:
+        py_file = Path(file).resolve()
+        abs_hash = hashlib.sha256(py_file.read_bytes()).hexdigest()[:6]
+        output_path = build_dir / f"{py_file.stem}_{abs_hash}.hbc6"
+        result = compressor.compress_file(py_file, output_path)
+        click.echo(f"  ✔ {py_file.name} → {output_path.name}")
+        click.echo(f"    {result['original_bytes']}B → {result['hbc6_bytes']}B | "
+                    f"patches={result['patches_applied']} tokens={result['tokens_applied']}")
+        return
     
     if build_all:
         exclude_dirs = {'.venv', 'venv', '__pycache__', '.doxoade', '.git', 
@@ -114,7 +126,10 @@ def main(build_all, target, min_size_kb):
                 file_size_kb = py_file.stat().st_size / 1024
                 
                 module_name = str(py_file.relative_to(project_root).with_suffix('')).replace('\\', '.')
-                output_path = build_dir / f"{module_name}.hbc6"
+                #output_path = build_dir / f"{module_name}.hbc6"
+                
+                abs_hash = hashlib.sha256(py_file.read_bytes()).hexdigest()[:6]
+                output_path = build_dir / f"{py_file.stem}_{abs_hash}.hbc6"
                 
                 result = compressor.compress_file(py_file, output_path)
                 

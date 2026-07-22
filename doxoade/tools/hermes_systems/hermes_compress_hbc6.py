@@ -2,16 +2,7 @@
 # doxoade/tools/hermes_systems/hermes_compress_hbc6.py
 """
 Hermes Compressor HBC6 Unificado — O Linker de Bytecode & Strings
-==================================================================
-Arquitetura: HBC5 (Strings) + HBC6 (Bytecode/Telemetria) + HGD1 (Global Dict).
-
-Estratégia de Expansão Pré-Marshal (Anti Py_FatalError):
-  1. O compressor Python injeta macros (0xC0 + token_id) no co_code cru.
-  2. O Motor C lê o payload, faz o PyMarshal (que não valida stack effect).
-  3. O Motor C faz um Walker DFS, encontra os 0xC0 e expande em um buffer RAM 
-     usando o MACRO_DICT embutido no header.
-  4. O Motor C injeta o co_code JÁ EXPANDIDO de volta no PyCodeObject.
-  5. O CPython recebe um bytecode 100% válido e stack-neutral.
+Arquitetura: HBC5 (Strings) + HBC6 (Bytecode) + HGD1 (Global Dict).
 """
 import dis
 import types
@@ -24,37 +15,51 @@ from typing import Dict, List
 MAGIC_HBC6 = b"HBC6"
 VERSION_HBC6 = 6
 FLAG_TOKENIZED_CONSTS = 0x01
-FLAG_BYTECODE_PATCHED = 0x02  # 🚀 Nova flag: Indica que o co_code contém macros 0xC0
-
-# Opcode customizado para MACRO. 
-# O Marshal aceita qualquer byte, mas o Motor C interceptará antes da execução.
+FLAG_BYTECODE_PATCHED = 0x02
+FLAG_LZ4_PAYLOAD = 0x20
 MACRO_OPCODE = 0xC0
+
+
+# ═══════════════════════════════════════════════════════════════════
+# VARINT LEB128 - Compactação de IDs
+# ═══════════════════════════════════════════════════════════════════
+def encode_varint(n: int) -> bytes:
+    """Codifica inteiro unsigned em Varint LEB128 (1-5 bytes)."""
+    if n < 0:
+        raise ValueError("Varint não suporta negativos")
+    result = bytearray()
+    while True:
+        byte = n & 0x7F
+        n >>= 7
+        if n == 0:
+            result.append(byte)
+            break
+        result.append(byte | 0x80)
+    return bytes(result)
+
 
 class HBC6Compressor:
     """Motor de Compressão Unificada (Strings + Bytecode)."""
     
     def __init__(self, project_root: Path, global_macros: Dict[str, List[str]], token_map: Dict[str, int]):
         self.root = project_root
-        self.global_macros = global_macros  # {hash: [opname1, opname2, ...]}
-        self.token_map = token_map          # {hash: token_id}
-        self.patches = []                   # Lista de patches aplicados (HRT)
-        self.macro_dict = {}                # {token_id: raw_bytes} para o Motor C
+        self.global_macros = global_macros
+        self.token_map = token_map
+        self.patches = []
+        self.macro_dict = {}
         self.stats = {
-            'patches_found': 0, 
-            'bytes_to_save': 0, 
-            'code_objects_scanned': 0, 
+            'patches_found': 0,
+            'bytes_to_save': 0,
+            'code_objects_scanned': 0,
             'tokens_applied': 0
         }
-        
-        # Carrega o Encoder Global (master.dict) para tokenizar strings (HBC5)
         self.global_encoder = self._load_global_encoder()
-        
-        # Mapeamento reverso: opname -> opcode byte (para reconstruir o bytecode cru)
         self.opcode_map = {dis.opname[i]: i for i in range(len(dis.opname))}
-        
+
     def _load_global_encoder(self) -> dict:
         dict_path = self.root / '.doxoade' / 'hermes' / 'master.dict'
-        if not dict_path.exists(): return {}
+        if not dict_path.exists():
+            return {}
         try:
             data = json.loads(dict_path.read_text(encoding='utf-8'))
             return {k: int(v) for k, v in data.get('encoder', {}).items() if not k.startswith('[')}
@@ -69,12 +74,14 @@ class HBC6Compressor:
         code_obj = compile(source, str(py_file), 'exec', optimize=2)
         
         # 2. FASE HBC5: Tokenização de Strings (co_consts)
+        # 🚨 HBC5 DESATIVADO TEMPORARIAMENTE (causa access violation - strings não revertidas)
+        # O loader ainda não tem a lógica reverse_tokens_vectorized implementada
         flags = 0
-        if self.global_encoder:
-            code_obj = self._tokenize_code_consts(code_obj)
-            if self.stats['tokens_applied'] > 0:
-                flags |= FLAG_TOKENIZED_CONSTS
-                
+        # if self.global_encoder:
+        #     code_obj = self._tokenize_code_consts(code_obj)
+        #     if self.stats['tokens_applied'] > 0:
+        #         flags |= FLAG_TOKENIZED_CONSTS
+        
         # 3. FASE HBC6: Mapeamento DFS e Varredura Cirúrgica (HRT)
         dfs_index_map = {}
         self._assign_dfs_indices(code_obj, dfs_index_map)
@@ -82,26 +89,33 @@ class HBC6Compressor:
         self.macro_dict = {}
         self._scan_code_obj(code_obj, dfs_index_map)
         
-        # 4. 🚀 APLICA A CIRURGIA NO BYTECODE (Injeção de 0xC0)
-        if self.patches:
-            code_obj = self._apply_patches_to_bytecode(code_obj, dfs_index_map)
-            flags |= FLAG_BYTECODE_PATCHED
-            
+        # 4. APLICA A CIRURGIA NO BYTECODE (Injeção de 0xC0)
+#        if self.patches:
+#            code_obj = self._apply_patches_to_bytecode(code_obj, dfs_index_map)
+#            flags |= FLAG_BYTECODE_PATCHED
         hrt_bytes = self._serialize_hrt()
         macro_dict_bytes = self._serialize_macro_dict()
         
-        # 5. Serialização do Payload (Marshal com co_code patcheado)
+        # 5. Serialização do Payload (Marshal padrão do CPython)
         marshalled_payload = marshal.dumps(code_obj)
         
-        # 6. Montagem do Arquivo HBC6 Unificado
-        # Layout: Magic(4) + Ver(1) + Flags(1) + HRT_Size(4) + HRT + MacroDict_Size(4) + MacroDict + Payload_Size(4) + Marshal
-        header = MAGIC_HBC6 + struct.pack('<B', VERSION_HBC6) + struct.pack('<B', flags)
+        # 🚀 COMPRESSÃO LZ4 DO PAYLOAD (Opcional)
+#        payload_to_write = marshalled_payload
+        try:
+            import lz4.block
+            payload_to_write = lz4.block.compress(marshalled_payload)
+            flags |= FLAG_LZ4_PAYLOAD
+        except ImportError:
+            payload_to_write = marshalled_payload
+
         
+        # 6. Montagem do Arquivo HBC6 Unificado
+        header = MAGIC_HBC6 + struct.pack('<B', VERSION_HBC6) + struct.pack('<B', flags)
         final_data = (
-            header + 
-            struct.pack('<I', len(hrt_bytes)) + hrt_bytes + 
+            header +
+            struct.pack('<I', len(hrt_bytes)) + hrt_bytes +
             struct.pack('<I', len(macro_dict_bytes)) + macro_dict_bytes +
-            struct.pack('<I', len(marshalled_payload)) + marshalled_payload
+            struct.pack('<I', len(payload_to_write)) + payload_to_write
         )
         
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -110,7 +124,7 @@ class HBC6Compressor:
         return {
             'original_bytes': orig_size,
             'hbc6_bytes': len(final_data),
-            'marshalled_bytes': len(marshalled_payload),
+            'marshalled_bytes': len(payload_to_write),
             'patches_applied': self.stats['patches_found'],
             'tokens_applied': self.stats['tokens_applied'],
             'code_objects_scanned': self.stats['code_objects_scanned']
@@ -120,26 +134,23 @@ class HBC6Compressor:
         """Injeta 0xC0 + token_id no co_code cru e preenche o resto com NOPs."""
         my_index = dfs_index_map.get(id(code_obj), -1)
         my_patches = [p for p in self.patches if p['co_index'] == my_index]
-        
         current_code_obj = code_obj
+        
         if my_patches:
             bytecode = bytearray(code_obj.co_code)
             for patch in my_patches:
                 offset = patch['offset']
                 orig_len = patch['orig_ngram_len']
                 token_id = patch['token_id']
-                
-                bytecode[offset] = MACRO_OPCODE  
+                bytecode[offset] = MACRO_OPCODE
                 bytecode[offset + 1] = token_id & 0xFF
-                
                 # Preenche o resto com NOPs (Wordcode: 2 bytes por instrução)
                 for i in range(2, orig_len, 2):
                     if offset + i + 1 < len(bytecode):
                         bytecode[offset + i] = 0x09     # NOP
-                        bytecode[offset + i + 1] = 0x00 
-                        
+                        bytecode[offset + i + 1] = 0x00
             current_code_obj = code_obj.replace(co_code=bytes(bytecode))
-
+        
         new_consts = []
         changed = False
         for const in current_code_obj.co_consts:
@@ -150,30 +161,32 @@ class HBC6Compressor:
                 new_consts.append(new_const)
             else:
                 new_consts.append(const)
-                
+        
         if changed:
             current_code_obj = current_code_obj.replace(co_consts=tuple(new_consts))
-            
+        
         return current_code_obj
 
     def _serialize_macro_dict(self) -> bytes:
         """
-        Serializa o dicionário de macros com tamanho DINÂMICO.
-        Layout: [Count(2)] + [ (TokenID(2), Len(2), RawOpcodes(Len)) ... ]
+        Serializa o dicionário de macros com VARINTS (LEB128).
+        Layout: [Count(varint)] + [ (TokenID(varint), Len(varint), RawOpcodes(Len)) ... ]
         
-        🚀 OTIMIZAÇÃO: Só serializa tokens realmente usados (não 256 fixos)
+        🚀 OTIMIZAÇÃO VARINT:
+        - Para 1.5 macros em média (IDs 0-127): 1 byte ao invés de 2 bytes
+        - Economia esperada: ~25-50% no tamanho do MacroDict
         """
         macro_dict_bytes = bytearray()
         used_tokens = set(p['token_id'] for p in self.patches)
         
-        # 🚀 DINÂMICO: Count = tokens usados (não 256)
-        macro_dict_bytes += struct.pack('<H', len(used_tokens))
+        # Count como Varint (1 byte para < 128 tokens)
+        macro_dict_bytes += encode_varint(len(used_tokens))
         
         for token_id in sorted(used_tokens):
             ng_hash = next((h for h, tid in self.token_map.items() if tid == token_id), None)
             if not ng_hash or ng_hash not in self.global_macros:
                 continue
-                
+            
             opnames = self.global_macros[ng_hash]
             raw_bytes = bytearray()
             for op in opnames:
@@ -181,11 +194,12 @@ class HBC6Compressor:
                 raw_bytes.append(opcode)
                 raw_bytes.append(0x00)
             
-            macro_dict_bytes += struct.pack('<HH', token_id, len(raw_bytes))
+            # TokenID e Len como Varints
+            macro_dict_bytes += encode_varint(token_id)
+            macro_dict_bytes += encode_varint(len(raw_bytes))
             macro_dict_bytes += raw_bytes
-            
+        
         return bytes(macro_dict_bytes)
-
 
     def _tokenize_code_consts(self, code_obj: types.CodeType) -> types.CodeType:
         """Percorre recursivamente o code object e substitui strings em co_consts."""
@@ -209,7 +223,7 @@ class HBC6Compressor:
                 new_consts.append(self._tokenize_code_consts(const))
             else:
                 new_consts.append(const)
-                
+        
         if changed:
             return code_obj.replace(co_consts=tuple(new_consts))
         return code_obj
@@ -226,11 +240,9 @@ class HBC6Compressor:
         """Varre o bytecode em busca dos N-grams globais (greedy, sem sobreposição)."""
         self.stats['code_objects_scanned'] += 1
         my_index = dfs_index_map[id(code_obj)]
-        
         instructions = list(dis.get_instructions(code_obj))
         clean_ops = []
         op_offsets = []
-        
         _NOISE = {'RESUME', 'NOP', 'PRECALL', 'CACHE', 'PUSH_NULL', 'COPY', 'EXTENDED_ARG'}
         
         for instr in instructions:
@@ -239,15 +251,14 @@ class HBC6Compressor:
             clean_ops.append(instr.opname)
             op_offsets.append(instr.offset)
         
-        # 🚀 ORDENA N-GRAMS POR TAMANHO (maior primeiro = greedy matching)
+        # ORDENA N-GRAMS POR TAMANHO (maior primeiro = greedy matching)
         sorted_ngrams = sorted(
             self.global_macros.items(),
             key=lambda x: len(x[1]),
             reverse=True
         )
         
-        # 🚀 TRACK DE REGIÕES JÁ COBERTAS (evita sobreposição)
-        covered_ranges = []  # Lista de (start_idx, end_idx) já cobertos
+        covered_ranges = []
         
         def is_covered(start_idx, end_idx):
             for cs, ce in covered_ranges:
@@ -260,16 +271,13 @@ class HBC6Compressor:
             n_len = len(ng_ops)
             if n_len < 2:
                 continue
-            
             for i in range(len(clean_ops) - n_len + 1):
                 window = tuple(clean_ops[i:i+n_len])
                 if window == tuple(ng_ops):
-                    # Verifica se esta região já está coberta por um N-gram maior
                     if is_covered(i, i + n_len):
                         continue
-                    
                     token_id = self.token_map.get(ng_hash, 0)
-                    orig_len = n_len * 2  # Wordcode: 2 bytes por instrução
+                    orig_len = n_len * 2
                     
                     # Verifica stack-neutral
                     stack = 0
@@ -286,7 +294,6 @@ class HBC6Compressor:
                             break
                     if stack != 0:
                         stack_neutral = False
-                    
                     if not stack_neutral:
                         continue
                     
@@ -299,8 +306,6 @@ class HBC6Compressor:
                     })
                     self.stats['patches_found'] += 1
                     self.stats['bytes_to_save'] += (orig_len - 2)
-                    
-                    # Marca esta região como coberta
                     covered_ranges.append((i, i + n_len))
         
         # Recursão

@@ -1,0 +1,36 @@
+{
+  "timestamp": "2026-07-21 17:26:02",
+  "artifacts": {
+    "python_bytes": 444,
+    "hbc5_bytes": 1165,
+    "hbc6_bytes": 934
+  },
+  "import_ms": {
+    "python": {
+      "median": 3.1309,
+      "mean": 4.88631,
+      "min": 2.3352,
+      "runs": 10
+    },
+    "hbc5": {
+      "median": 2.6795,
+      "mean": 2.73514,
+      "min": 2.4093,
+      "runs": 10
+    },
+    "hbc6": {
+      "median": 3.00915,
+      "mean": 3.24288,
+      "min": 2.546,
+      "runs": 10
+    }
+  },
+  "exec_fib20_ms": {
+    "python": {
+      "median": 387.633
+    },
+    "hbc6": {
+      "median": 340.0559
+    }
+  }
+}

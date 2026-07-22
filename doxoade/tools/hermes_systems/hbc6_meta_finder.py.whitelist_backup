@@ -1,0 +1,199 @@
+# doxoade/tools/hermes_systems/hbc6_meta_finder.py
+"""
+HBC6 MetaPathFinder — Redirecionamento Transparente para Produção
+=================================================================
+Intercepta `import doxoade.xyz`, calcula o hash do .py original,
+localiza o `xyz_{hash}.hbc6` e carrega via HermesLoader.
+"""
+import sys
+import hashlib
+import importlib.abc
+import importlib.util
+from pathlib import Path
+
+class HBC6Finder(importlib.abc.MetaPathFinder):
+    def __init__(self, project_root: str):
+        self.root = Path(project_root).resolve()
+        self.build_dir = self.root / '.doxoade' / 'hermes' / 'build'
+        self._loader_instance = None
+        
+        # 🛡️ BLACKLIST EXPANDIDA (Módulos que NUNCA devem ser carregados via HBC6)
+        self._blacklist = {
+            # 1. Core do Hermes (evita recursão infinita)
+            'doxoade.tools.hermes_systems',
+            'doxoade.tools.hermes_systems.hermes_loader',
+            'doxoade.tools.hermes_systems.hermes_compress_hbc6',
+            'doxoade.tools.hermes_systems.hbc6_meta_finder',
+            'doxoade.tools.hermes_systems.hermes_payload',
+            'doxoade.tools.hermes_systems.hermes_init',
+            'doxoade.tools.hermes_systems.hermes_hook',
+            'doxoade.tools.hermes_systems.hermes_hook_v2',
+            'doxoade.tools.hermes_systems.hermes_diagnostic',
+            'doxoade.tools.hermes_systems.hermes_format',
+            'doxoade.tools.hermes_systems.hermes_decoder_vector',
+            'doxoade.tools.hermes_systems.native',
+            
+            # 2. Boot e CLI (evita recursão no entry point)
+            '__main__',
+            'doxoade.__main__',
+            'doxoade.cli',
+            'doxoade.boot',
+            
+            # 3. Módulos críticos com C-extensions ou imports complexos
+            'doxoade.core_database',
+            'doxoade.tools.db_utils',
+            'doxoade.tools.filesystem',
+            'doxoade.tools.aegis',
+            'doxoade.tools.telemetry_tools',
+            'doxoade.tools.git',  # 🚨 NOVO: git.py está crashando
+            'doxoade.tools.git_utils',
+            
+            # 4. Vulcan (Tier 1 - já tem seu próprio MetaFinder)
+            'doxoade.tools.vulcan',
+            
+            # 5. Comandos que usam imports circulares ou C-extensions
+            'doxoade.commands.db',
+            'doxoade.commands.git_branch',
+            'doxoade.commands.save',
+            'doxoade.commands.check',
+            'doxoade.commands.refactor',
+            
+            # 6. Built-ins e import machinery
+            'sys', 'os', 'builtins', 'importlib',
+            '_frozen_importlib', '_frozen_importlib_external',
+            'click', 'click.core', 'click.decorators',
+        }
+        
+        # 🚀 WHITELIST (APENAS estes módulos podem ser carregados via HBC6)
+        # Se não estiver na whitelist, usa Python puro (mais seguro)
+        self._whitelist = {
+            'doxoade.tools.hermes_systems.hermes_loader_hbc5',
+            'doxoade.chronos',
+            'doxoade.commands.venvkeeper_systems.cli',
+            'doxoade.tools.hermes_systems.hermes_format',
+            'doxoade.commands.refactor_systems.refactor_syntax',
+            'doxoade.commands.vulcan_cmd_lazy',
+            'doxoade.commands.check_systems.fixer',
+            'doxoade.commands.check_systems.check_utils',
+            'doxoade.tools.doxcolors',
+            'doxoade.tools.chronos',
+            'doxoade.tools.compress_utils',
+            'doxoade.tools.colors_command',
+            'doxoade.tools.hermes_benchmark',
+            'doxoade.tools.hermes_metrics',
+            'doxoade.tools.hermes_lab',
+            'doxoade.commands.intelligence_utils',
+            'doxoade.commands.ganesha_advisor_standalone',
+        }
+        
+        # 🚀 OTIMIZAÇÃO: Pré-computa módulos disponíveis (lookup O(1))
+        self._available_modules = set()
+        if self.build_dir.exists():
+            for hbc6_file in self.build_dir.glob('*.hbc6'):
+                stem = hbc6_file.stem
+                if '_' in stem:
+                    base_name = stem.rsplit('_', 1)[0]
+                    self._available_modules.add(base_name)
+
+    def _get_hermes_loader(self):
+        if self._loader_instance is None:
+            from doxoade.tools.hermes_systems.hermes_loader import HermesLoader
+            self._loader_instance = HermesLoader(str(self.root))
+        return self._loader_instance
+
+    def find_spec(self, fullname, path, target=None):
+        # 1. 🛡️ VERIFICA BLACKLIST (lookup O(1))
+        if fullname in self._blacklist:
+            return None
+            
+        # 2. Verifica se é um submódulo de algo na blacklist
+        for blocked in self._blacklist:
+            if fullname.startswith(blocked + '.'):
+                return None
+        
+        # 3. 🚨 WHITELIST CHECK: Se NÃO está na whitelist, usa Python puro
+        # Isso é MUITO mais seguro que tentar carregar tudo via HBC6
+        if fullname not in self._whitelist:
+            # Verifica se é um submódulo de algo na whitelist
+            is_whitelisted = False
+            for allowed in self._whitelist:
+                if fullname.startswith(allowed + '.') or fullname == allowed:
+                    is_whitelisted = True
+                    break
+            
+            if not is_whitelisted:
+                return None  # Usa Python puro (mais seguro)
+        
+        # 4. Converte fullname para nome de arquivo base
+        parts = fullname.split('.')
+        if not parts:
+            return None
+        base_name = parts[-1]
+        
+        # 5. 🚀 LOOKUP O(1) no conjunto de módulos disponíveis
+        if base_name not in self._available_modules:
+            return None
+            
+        # 6. Resolve o caminho do .py original
+        rel_path = fullname.replace('.', '/')
+        py_path = self.root / f"{rel_path}.py"
+        if not py_path.exists():
+            py_path = self.root / rel_path / "__init__.py"
+            if not py_path.exists():
+                return None
+                
+        # 7. Calcula o hash para achar o .hbc6 correspondente
+        try:
+            file_hash = hashlib.sha256(py_path.read_bytes()).hexdigest()[:6]
+            hbc6_name = f"{base_name}_{file_hash}.hbc6"
+            hbc6_path = self.build_dir / hbc6_name
+        except Exception:
+            return None
+            
+        if not hbc6_path.exists():
+            return None
+            
+        # 8. Cria o Spec com o Loader HBC6
+        loader = HBC6Loader(fullname, hbc6_path, py_path, self._get_hermes_loader())
+        return importlib.util.spec_from_loader(fullname, loader, origin=str(hbc6_path))
+
+class HBC6Loader(importlib.abc.Loader):
+    def __init__(self, fullname, hbc6_path, py_path, hermes_loader):
+        self.fullname = fullname
+        self.hbc6_path = hbc6_path
+        self.py_path = py_path
+        self.hermes_loader = hermes_loader
+        
+    def create_module(self, spec): 
+        return None  # Usa a criação padrão do Python
+    
+    def exec_module(self, module):
+        """Executa o módulo via HBC6 com metadados corretos."""
+        # Configura metadados para imports relativos funcionarem
+        module.__file__ = str(self.py_path)
+        module.__loader__ = self
+        if '.' in self.fullname:
+            module.__package__ = self.fullname.rsplit('.', 1)[0]
+        else:
+            module.__package__ = self.fullname
+
+        try:
+            code_obj = self.hermes_loader.decompress_to_code(self.hbc6_path)
+        except Exception as e:
+            # Fallback: carrega o .py original se o HBC6 falhar
+            if hasattr(self, 'py_path') and self.py_path.exists():
+                source = self.py_path.read_text(encoding='utf-8')
+                code_obj = compile(source, str(self.py_path), 'exec')
+            else:
+                raise ImportError(f"[HBC6] Falha ao carregar {self.fullname}: {e}")
+
+        if code_obj is None:
+            raise ImportError(f"[HBC6] decompress_to_code retornou None para {self.fullname}")
+
+        exec(code_obj, module.__dict__)
+
+def install_hbc6_hook(project_root):
+    """Instala o HBC6Finder no sys.meta_path."""
+    finder = HBC6Finder(project_root)
+    sys.meta_path.insert(0, finder)
+    return finder

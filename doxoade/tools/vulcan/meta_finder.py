@@ -1,3 +1,4 @@
+# doxoade/tools/vulcan/meta_finder.py
 """
 VulcanMetaFinder - Hook Transparente de Importação.
 v6.1:
@@ -67,15 +68,43 @@ def _setup_logger(logfile: str, level: int = logging.INFO):
     logger.addHandler(fh)
     return logger
 
+class HBC6BridgeLoader(importlib.abc.Loader):
+    """Tier 0: Loader para bytecode HBC6 via Motor C (Hermes Bridge)."""
+    def __init__(self, fullname: str, hbc6_path: str, gd_path: str):
+        self.fullname = fullname
+        self.hbc6_path = hbc6_path
+        self.gd_path = gd_path
+
+    def create_module(self, spec):
+        return None
+
+    def exec_module(self, module):
+        module.__file__ = self.hbc6_path
+        module.__loader__ = self
+        try:
+            # 1. Importa o Motor C (hermes_bridge.pyd)
+            from doxoade.tools.hermes_systems.native.hermes_bridge import load_module
+            # 2. O Motor C faz mmap, expansão DFS e retorna o CodeObject
+            code_obj = load_module(self.hbc6_path, self.gd_path)
+            if code_obj is None:
+                raise ImportError("Motor C retornou NULL (HBC6 inválido)")
+            
+            # 3. Injeção segura no namespace (Aegis Nexus Exec)
+            from doxoade.tools.aegis.aegis_core import nexus_exec
+            nexus_exec(code_obj, module.__dict__)
+        except Exception as e:
+            raise ImportError(f"[Vulcan Tier 0] Falha no Motor C (HBC6) para {self.fullname}: {e}")
 
 class VulcanMetaFinder(importlib.abc.MetaPathFinder):
-    BYPASS = ('doxoade.tools.vulcan', 'encodings', 'codecs', '')
+#    BYPASS = ('doxoade.tools.vulcan', 'encodings', 'codecs', '')
+    BYPASS = ('doxoade.tools.vulcan', 'encodings', 'codecs', 'mercury_core', '')
     _path_hash_cache: dict[str, str] = {}
     _mtime_cache: dict[str, tuple[float, float]] = {}
     _MTIME_TTL = 2.0
 
     def __init__(self, project_root: str, logger=None):
         self.project_root = Path(project_root).resolve()
+        self.build_dir = self.project_root / '.doxoade' / 'hermes' / 'build'  # ← ADICIONE se ausente
         self.logger = logger or logging.getLogger(__name__)
         self.lib_bin_dir = self.project_root / '.doxoade' / 'vulcan' / 'lib_bin'
         self.bin_dir = self.project_root / '.doxoade' / 'vulcan' / 'bin'
@@ -102,17 +131,28 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
             return None
         abs_path = Path(py_path).resolve()
         path_hash = self._get_path_hash(str(abs_path))
+        stem = abs_path.stem
+        
+        # ═══════════════════════════════════════════════════════════════
+        # TIER 0: HBC6 (Motor C-Native) - PRIORIDADE MÁXIMA
+        # ═══════════════════════════════════════════════════════════════
+        hbc6_name = f"{stem}_{path_hash}.hbc6"
+        if hasattr(self, '_hbc6_files') and hbc6_name in self._hbc6_files:
+            return self.hbc6_dir / hbc6_name
+        if hasattr(self, '_hbc6_files') and f"{stem}.hbc6" in self._hbc6_files:
+            return self.hbc6_dir / f"{stem}.hbc6"
 
-        # 1. Verifica binários forjados no projeto
-        candidate_name = f"v_{abs_path.stem}_{path_hash}{self._ext}"
+        # ═══════════════════════════════════════════════════════════════
+        # TIER 1: Cython .pyd (Vulcan Bin)
+        # ═══════════════════════════════════════════════════════════════
+        candidate_name = f"v_{stem}_{path_hash}{self._ext}"
         if candidate_name in self._bin_files:
             return self.bin_dir / candidate_name
-
-        # 2. Verifica as bibliotecas forjadas externamente garantindo o sufixo hash
+            
         for name in self._lib_bin_files:
             if name.endswith(f"_{path_hash}{self._ext}"):
                 return self.lib_bin_dir / name
-
+                
         return None
 
     def _resolve_py_path(self, fullname, path):
@@ -134,7 +174,7 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
                         self._bin_files.append(f.name)
             except Exception:
                 pass
-
+        
         self._lib_bin_files = []
         if self.lib_bin_dir.exists():
             try:
@@ -144,11 +184,81 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
             except Exception:
                 pass
 
+        # 🚀 NOVO: Indexa Hermes HBC6 Build Dir (Tier 0)
+        self.hbc6_dir = self.project_root / '.doxoade' / 'hermes' / 'build'
+        self._hbc6_files = []
+        if self.hbc6_dir.exists():
+            try:
+                for f in os.scandir(self.hbc6_dir):
+                    if f.name.endswith('.hbc6'):
+                        self._hbc6_files.append(f.name)
+            except Exception:
+                pass
+
         # LOG CRÍTICO PARA O SEU CASO:
         if os.environ.get("VULCAN_META_DEBUG") == "1":
             print(f"[VULCAN INDEX] Binários detectados: {len(self._bin_files)} em {self.bin_dir}")
             for b in self._bin_files:
                 print(f"   -> {b}")
+
+    def find_spec(self, fullname, path, target=None):
+        """Intercepta imports e redireciona para binários Vulcan."""
+        if any(fullname.startswith(p) for p in self.BYPASS if p):
+            return None
+
+        py_path = self._resolve_py_path(fullname, path)
+        if not py_path:
+            return None
+
+        # Tenta binário .pyd/.so
+        bin_path = self._find_project_binary(str(py_path))
+        if bin_path and self._is_binary_valid(bin_path, py_path):
+            from doxoade.tools.vulcan.vulcan_safe_loader import SafeExtensionLoader
+            loader = SafeExtensionLoader(fullname, str(bin_path), str(py_path))
+            return importlib.util.spec_from_file_location(
+                fullname, str(bin_path), loader=loader)
+
+        # Tenta HBC6
+#        hbc6_path = self._find_hbc6(py_path)
+#        if hbc6_path:
+#            from doxoade.tools.vulcan.vulcan_safe_loader import HBC6BridgeLoader
+#            gd = str(self.project_root / '.doxoade' / 'hermes' / 'master.bin')
+#            loader = HBC6BridgeLoader(fullname, str(hbc6_path), gd)
+#            spec = importlib.util.spec_from_file_location(
+#                fullname, str(py_path), loader=loader)
+#            spec.origin = str(hbc6_path)
+#            return spec
+
+        return None
+
+    def _find_hbc6(self, py_path):
+        """
+        Localiza o arquivo .hbc6 correspondente a um .py.
+        Usa hash do conteúdo para encontrar o artefato no build dir.
+        Retorna Path se existir, None caso contrário.
+        """
+        if not py_path or not Path(py_path).exists():
+            return None
+
+        try:
+            content_hash = hashlib.sha256(
+                Path(py_path).read_bytes()
+            ).hexdigest()[:6]
+        except Exception:
+            return None
+
+        stem = Path(py_path).stem
+        hbc6_file = self.build_dir / f"{stem}_{content_hash}.hbc6"
+
+        if hbc6_file.exists():
+            return hbc6_file
+
+        # Fallback: busca por stem sem hash (compatibilidade)
+        candidates = list(self.build_dir.glob(f"{stem}_*.hbc6"))
+        if len(candidates) == 1:
+            return candidates[0]
+
+        return None
 
     @staticmethod
     def _debug_enabled() -> bool:
@@ -227,6 +337,20 @@ def find_spec(self, fullname: str, path, target=None):
             self._dlog(f"[RESOLVE] {fullname} -> {py_path}")
             bin_path = self._find_project_binary(py_path)
             self._dlog(f"[BINARY] {bin_path}")
+            
+            # ═══════════════════════════════════════════════════════════
+            # 🚀 TIER 0: HBC6 (Motor C) - Roteamento Direto
+            # ═══════════════════════════════════════════════════════════
+            if bin_path and str(bin_path).endswith('.hbc6'):
+                from .vulcan_safe_loader import HBC6BridgeLoader
+                gd_path = self.project_root / '.doxoade' / 'hermes' / 'master.bin'
+                loader = HBC6BridgeLoader(fullname, str(bin_path), str(gd_path))
+                spec = importlib.machinery.ModuleSpec(
+                    name=fullname, loader=loader, origin=str(bin_path), is_package=False
+                )
+                spec.has_location = True
+                self._spec_cache[fullname] = spec
+                return spec
 
             # ═══════════════════════════════════════════════════════════════════
             # TIER 1 (Projeto): Binário Nativo com hash matching

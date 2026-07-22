@@ -91,12 +91,12 @@ static PyObject* expand_bytecode_inplace(PyObject* co_code_bytes, HBC6_MacroDict
     uint64_t t0 = _rdtsc();
     Py_ssize_t orig_len = PyBytes_Size(co_code_bytes);
     const uint8_t* src = (const uint8_t*)PyBytes_AsString(co_code_bytes);
-    
+
     if (!has_macro_opcodes_simd(src, orig_len)) {
         Py_INCREF(co_code_bytes);
         return co_code_bytes;
     }
-    
+
     uint64_t t1 = _rdtsc();
     size_t max_len = orig_len * 2;
     uint8_t* dst = get_buffer(max_len);
@@ -104,15 +104,20 @@ static PyObject* expand_bytecode_inplace(PyObject* co_code_bytes, HBC6_MacroDict
         dst = (uint8_t*)malloc(max_len);
         if (!dst) return PyErr_NoMemory();
     }
-    
+
     uint64_t t2 = _rdtsc();
     size_t i = 0, j = 0;
+
     while (i < orig_len) {
         if (i + 64 < orig_len) __builtin_prefetch(src + i + 64, 0, 1);
+
         if (src[i] == MACRO_OPCODE && (i + 1) < orig_len) {
-            uint8_t token_idx = src[i+1];
+            uint8_t token_idx = src[i + 1];
+
+            // ✅ CORREÇÃO: usar 'dict' (parâmetro), não 'ctx->macro_dict'
             if (token_idx < dict->count && dict->defs[token_idx].opcodes != NULL) {
-                HBC6_MacroDef* def = &dict->defs[token_idx];
+                const HBC6_MacroDef* def = &dict->defs[token_idx];
+
                 if (j + def->len > max_len) {
                     max_len *= 2;
                     uint8_t* new_dst = (uint8_t*)malloc(max_len);
@@ -127,18 +132,19 @@ static PyObject* expand_bytecode_inplace(PyObject* co_code_bytes, HBC6_MacroDict
         }
         dst[j++] = src[i++];
     }
-    
+
     uint64_t t3 = _rdtsc();
     PyObject* new_bytes = PyBytes_FromStringAndSize((char*)dst, j);
     uint64_t t4 = _rdtsc();
-    
+
     if (g_verbose) {
         fprintf(stderr, "[HERMES-C:PROF] expand_bytecode breakdown:\n");
-        fprintf(stderr, "  SIMD scan         : %llu cycles\n", (unsigned long long)(t1 - t0));
-        fprintf(stderr, "  Buffer alloc      : %llu cycles\n", (unsigned long long)(t2 - t1));
-        fprintf(stderr, "  Expansion loop    : %llu cycles\n", (unsigned long long)(t3 - t2));
-        fprintf(stderr, "  PyObject create   : %llu cycles\n", (unsigned long long)(t4 - t3));
+        fprintf(stderr, "  SIMD scan: %llu cycles\n", (unsigned long long)(t1 - t0));
+        fprintf(stderr, "  Alloc:     %llu cycles\n", (unsigned long long)(t2 - t1));
+        fprintf(stderr, "  Expand:    %llu cycles\n", (unsigned long long)(t3 - t2));
+        fprintf(stderr, "  PyBytes:   %llu cycles\n", (unsigned long long)(t4 - t3));
     }
+
     return new_bytes;
 }
 

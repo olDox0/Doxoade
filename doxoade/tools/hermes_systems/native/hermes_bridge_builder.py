@@ -32,6 +32,8 @@ class HermesBridgeBuilder:
             self.native_dir / 'hermes_cache.c',         # O Motor de Cache L1/L2 (NOVO)
             self.native_dir / 'hermes_hbc5_parser.c',   # O Parser HBC5
             self.native_dir / 'hermes_hbc6_patches.c',  # O Walker DFS HBC6
+            self.native_dir / 'hermes_async_log.c',
+            self.native_dir / 'lz4.c',     # 🚀 NOVO: Logger Assíncrono (Ring Buffer)
         ]
         
         self.cache_file = self.native_dir / '.bridge_build_cache.json'
@@ -103,7 +105,8 @@ class HermesBridgeBuilder:
             '-mpopcnt',               # Population count (para bitmaps O(1))
             '-funroll-loops',         # Desrola loops para o branchless decoder
             '-march=native',          # Otimiza para a CPU atual
-            f'-I{include_dir}',       # Headers da C-API do Python
+            f'-I{include_dir}',
+            f'-I{self.native_dir}',  # Adicionado para encontrar lz4.h e headers locais       # Headers da C-API do Python
         ]
         
         # Adiciona os arquivos fonte

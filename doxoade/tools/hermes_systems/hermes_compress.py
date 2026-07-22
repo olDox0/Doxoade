@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # doxoade/tools/hermes_systems/hermes_compress.py
 import os
+import json
 import lzma
 import types
 import struct

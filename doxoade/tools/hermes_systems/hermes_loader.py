@@ -1,32 +1,46 @@
 # -*- coding: utf-8 -*-
 # doxoade/tools/hermes_systems/hermes_loader.py
+"""
+Hermes Loader Unificado — HBC3, HBC4, HBC5 e HBC6 (Varints + LZ4 + HRT)
+"""
 import hashlib
 import lzma
 import marshal
 import json
 import dis
 import types
+import struct
 from pathlib import Path
 from .hermes_format import parse_header, get_bitmap, string_needs_reverse, MAGIC_HBC3
 from .hermes_format_hbc4 import parse_header_hbc4, get_bitmap_hbc4, MAGIC_HBC4
 from .hermes_format_hbc5 import parse_header_hbc5, get_bitmap_hbc5, MAGIC_HBC5
 from .hermes_decoder_vector import VectorDecoder, build_vector_decoder, reverse_tokens_vectorized
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# CACHE GLOBAL (Singleton) — Dicionário carregado UMA VEZ
-# ═══════════════════════════════════════════════════════════════════════════════
-_GLOBAL_LOADER_CACHE = {}
-_GLOBAL_DECODER_CACHE = {}
-_GLOBAL_VECTOR_DECODER_CACHE = {}
+
+def decode_varint(data: bytes, offset: int = 0) -> tuple:
+    """Decodifica Varint LEB128. Retorna (valor, bytes_consumidos)."""
+    result = 0
+    shift = 0
+    consumed = 0
+    while True:
+        if offset + consumed >= len(data):
+            raise ValueError("Varint truncado")
+        byte = data[offset + consumed]
+        consumed += 1
+        result |= (byte & 0x7F) << shift
+        if (byte & 0x80) == 0:
+            break
+        shift += 7
+        if shift > 35:
+            raise ValueError("Varint excessivamente longo")
+    return result, consumed
+
 
 class HermesLoader:
-    # ═══════════════════════════════════════════════════════════════════════════════
-    # THRESHOLDS ADAPTATIVOS (Fase 3)
-    # ═══════════════════════════════════════════════════════════════════════════════
-    SKIP_THRESHOLD = 10 * 1024      # < 10KB: skip Hermes (Python puro é mais rápido)
-    TIER1_THRESHOLD = 30 * 1024     # < 30KB: só Tier 1 (32 tokens mais frequentes)
-    TIER1_TOKEN_COUNT = 32          # Número de tokens no Tier 1
-    
+    SKIP_THRESHOLD = 10 * 1024
+    TIER1_THRESHOLD = 30 * 1024
+    TIER1_TOKEN_COUNT = 32
+
     def __init__(self, project_root: str):
         self.root = Path(project_root).resolve()
         self.dict_file = self.root / '.doxoade' / 'hermes' / 'master.dict'
@@ -36,8 +50,7 @@ class HermesLoader:
         self._code_cache = {}
         self._cache_max_size = 100
 
-    def _load_global_decoder(self) -> dict:
-        """Carrega APENAS o dicionário global (master.dict)."""
+    def _load_decoder(self) -> dict:
         if not self.dict_file.exists():
             return {}
         try:
@@ -51,21 +64,29 @@ class HermesLoader:
         except Exception:
             return {}
 
+    def _load_global_decoder(self) -> dict:
+        return self._load_decoder()
+
+    def _build_vector_decoder(self) -> VectorDecoder:
+        if not self.decoder:
+            return VectorDecoder()
+        return build_vector_decoder(self.decoder)
+
     def decompress_to_code(self, hermes_path: Path):
-        """
-        Decompressão unificada com suporte a HBC3, HBC4, HBC5 e HBC6.
-        """
+        """Decompressão unificada com suporte a HBC3, HBC4, HBC5 e HBC6."""
         cache_key = str(hermes_path)
         if cache_key in self._code_cache:
             return self._code_cache[cache_key]
-            
+        
         data = hermes_path.read_bytes()
         code_obj = None
         
-        # ═══════════════════════════════════════════════════════════════════
-        # HBC5: Formato sem LZMA + flags
-        # ═══════════════════════════════════════════════════════════════════
-        if data.startswith(MAGIC_HBC5):
+        # HBC6: Formato Unificado
+        if data[:4] == b'HBC6':
+            code_obj = self._decompress_hbc6(data)
+        
+        # HBC5: Zero-Compression
+        elif data.startswith(MAGIC_HBC5):
             file_decoder, marshalled_data, flags, _ = parse_header_hbc5(data)
             if file_decoder is None and len(data) > 4:
                 marshalled_data = data[4:]
@@ -76,10 +97,8 @@ class HermesLoader:
                 bitmap = get_bitmap_hbc5(data)
                 vec_dec = build_vector_decoder(combined_decoder)
                 code_obj = reverse_tokens_vectorized(code_obj, vec_dec, bitmap)
-                
-        # ═══════════════════════════════════════════════════════════════════
+        
         # HBC4: Formato sem LZMA
-        # ═══════════════════════════════════════════════════════════════════
         elif data.startswith(MAGIC_HBC4):
             file_decoder, marshalled_data, _ = parse_header_hbc4(data)
             if file_decoder is None and len(data) > 4:
@@ -91,10 +110,8 @@ class HermesLoader:
                 bitmap = get_bitmap_hbc4(data)
                 vec_dec = build_vector_decoder(combined_decoder)
                 code_obj = reverse_tokens_vectorized(code_obj, vec_dec, bitmap)
-                
-        # ═══════════════════════════════════════════════════════════════════
+        
         # HBC3: Formato com LZMA + bitmap
-        # ═══════════════════════════════════════════════════════════════════
         elif data.startswith(MAGIC_HBC3):
             file_decoder, compressed_data, _ = parse_header(data)
             if file_decoder is None:
@@ -106,88 +123,149 @@ class HermesLoader:
                 combined_decoder = {**self._load_global_decoder(), **file_decoder}
                 vec_dec = build_vector_decoder(combined_decoder)
                 code_obj = reverse_tokens_vectorized(code_obj, vec_dec, bitmap)
-                
-        # ═══════════════════════════════════════════════════════════════════
-        # 🚀 HBC6: Formato Unificado (Bytecode + Strings)
-        # ═══════════════════════════════════════════════════════════════════
-        elif data[:4] == b'HBC6':
-            code_obj = self._decompress_hbc6(data)
-            
         else:
             raise ValueError(f"Formato desconhecido: {hermes_path}")
-            
-        # Salva no cache LRU
-        if len(self._code_cache) >= self._cache_max_size:
-            oldest = next(iter(self._code_cache))
-            del self._code_cache[oldest]
-        self._code_cache[cache_key] = code_obj
+        
+        # Cache LRU
+        if code_obj is not None:
+            if len(self._code_cache) >= self._cache_max_size:
+                oldest = next(iter(self._code_cache))
+                del self._code_cache[oldest]
+            self._code_cache[cache_key] = code_obj
+        
         return code_obj
 
     def _decompress_hbc6(self, data: bytes):
-        """
-        Fallback Python para HBC6.
-        Lê o header, ignora a HRT/MacroDict (não aplica patches),
-        e retorna o CodeObject cru do marshal.
-        """
-        import struct
-        
+        """Fallback Python para HBC6 com suporte a LZ4, Varints, HRT e Reversão de Strings."""
         offset = 6  # Magic(4) + Version(1) + Flags(1)
+        flags = data[5]
         
         # 1. Lê HRT Size e pula a HRT
         hrt_size = struct.unpack_from('<I', data, offset)[0]
+        hrt_offset = offset + 4
         offset += 4 + hrt_size
         
-        # 2. 🚀 CORREÇÃO: Lê MACRO_DICT Size e guarda o offset ANTES de pular
+        # 2. Lê MACRO_DICT Size e guarda o offset
         macro_dict_size = struct.unpack_from('<I', data, offset)[0]
-        macro_dict_offset = offset + 4  # 🚀 Salva o offset do início do MACRO_DICT
+        macro_dict_offset = offset + 4
         offset += 4 + macro_dict_size
         
         # 3. Lê o Payload Size
         payload_size = struct.unpack_from('<I', data, offset)[0]
         offset += 4
         
-        # 4. Extrai o Marshal
-        payload = data[offset:offset + payload_size]
+        # 4. Extrai o Payload bruto
+        raw_payload = data[offset:offset + payload_size]
         
-        import marshal
+        # 5. DESCOMPRESSÃO LZ4 (se flag 0x20 estiver ativa)
+        if flags & 0x20:  # FLAG_LZ4_PAYLOAD
+            try:
+                import lz4.block
+                payload = lz4.block.decompress(raw_payload)
+            except ImportError:
+                raise ImportError("Payload HBC6 comprimido com LZ4, mas módulo 'lz4' não instalado.")
+        else:
+            payload = raw_payload
+        
+        # 6. Deserializa o Marshal
         code_obj = marshal.loads(payload)
+        if code_obj is None:
+            raise ValueError("marshal.loads() retornou None - payload corrompido")
         
-        # 🚀 Expansão básica dos 0xC0 (sem o Motor C)
-        code_obj = self._expand_hbc6_macros_python(code_obj, data, macro_dict_offset, macro_dict_size)
+        # 7. REVERSÃO DE STRINGS TOKENIZADAS (HBC5 - se flag 0x01 estiver ativa)
+        if flags & 0x01:  # FLAG_TOKENIZED_CONSTS
+            combined_decoder = self._load_global_decoder()
+            if combined_decoder:
+                vec_dec = build_vector_decoder(combined_decoder)
+                code_obj = reverse_tokens_vectorized(code_obj, vec_dec, None)
+        
+        # 8. Expansão de macros 0xC0 usando HRT e Varints (se houver)
+        if macro_dict_size > 0:
+            code_obj = self._expand_hbc6_macros_python(
+                code_obj, data, 
+                hrt_offset, hrt_size, 
+                macro_dict_offset, macro_dict_size
+            )
         
         return code_obj
 
-    def _expand_hbc6_macros_python(self, code_obj, data: bytes, macro_dict_offset: int, macro_dict_size: int):
-        """Expande os macros 0xC0 no fallback Python (lento, mas funcional)."""
-        import struct, types, dis
-        
-        MACRO_OPCODE = 0xC0
-        
-        # 1. Parse do MACRO_DICT
+    def _expand_hbc6_macros_python(self, code_obj, data: bytes, hrt_offset: int, hrt_size: int, macro_dict_offset: int, macro_dict_size: int):
+        """
+        Expande os macros 0xC0 usando Varints no MacroDict e HRT para pular NOPs.
+        """
+        # 1. Parse do MACRO_DICT com VARINTS
         macro_dict = {}
-        pos = macro_dict_offset + 4  # Pula o size field
-        if macro_dict_size >= 2:
-            dict_count = struct.unpack_from('<H', data, pos)[0]
-            pos += 2
-            for _ in range(dict_count):
-                tid = struct.unpack_from('<H', data, pos)[0]; pos += 2
-                length = struct.unpack_from('<H', data, pos)[0]; pos += 2
-                opcodes = data[pos:pos + length]
-                macro_dict[tid] = opcodes
-                pos += length
+        pos = macro_dict_offset
+        end_pos = macro_dict_offset + macro_dict_size
         
-        # 2. Walker DFS para expandir
+        if macro_dict_size >= 1:
+            try:
+                # Count como Varint
+                dict_count, consumed = decode_varint(data, pos)
+                pos += consumed
+                
+                for _ in range(dict_count):
+                    if pos >= end_pos:
+                        break
+                    
+                    # TokenID como Varint
+                    tid, consumed_tid = decode_varint(data, pos)
+                    pos += consumed_tid
+                    
+                    # Length como Varint
+                    length, consumed_len = decode_varint(data, pos)
+                    pos += consumed_len
+                    
+                    if pos + length > end_pos:
+                        break
+                    
+                    opcodes = data[pos:pos + length]
+                    macro_dict[tid] = opcodes
+                    pos += length
+            except (ValueError, IndexError):
+                pass
+        
+        if not macro_dict:
+            return code_obj
+        
+        # 2. Parse da HRT (Hermes Relocation Table)
+        hrt_map = {}
+        pos = hrt_offset
+        end_hrt = hrt_offset + hrt_size
+        while pos + 12 <= end_hrt:
+            co_index = struct.unpack_from('<I', data, pos)[0]; pos += 4
+            offset_val = struct.unpack_from('<I', data, pos)[0]; pos += 4
+            token_id = struct.unpack_from('<H', data, pos)[0]; pos += 2
+            orig_len = struct.unpack_from('<H', data, pos)[0]; pos += 2
+            hrt_map[(co_index, offset_val)] = orig_len
+        
+        # 3. Mapeia id -> co_index usando DFS pré-ordem
+        dfs_index_map = {}
+        def assign_indices(co, idx=0):
+            dfs_index_map[id(co)] = idx
+            idx += 1
+            for c in co.co_consts:
+                if isinstance(c, types.CodeType):
+                    idx = assign_indices(c, idx)
+            return idx
+        assign_indices(code_obj)
+        
+        # 4. Walker DFS para expandir (usando HRT para pular NOPs)
         def expand_code(co):
+            my_index = dfs_index_map.get(id(co), -1)
             bytecode = bytearray(co.co_code)
             expanded = bytearray()
             i = 0
             changed = False
+            
             while i < len(bytecode):
-                if bytecode[i] == MACRO_OPCODE and (i + 1) < len(bytecode):
+                if bytecode[i] == 0xC0 and (i + 1) < len(bytecode):
                     token_id = bytecode[i + 1]
                     if token_id in macro_dict:
                         expanded.extend(macro_dict[token_id])
-                        i += 2
+                        # USA A HRT PARA PULAR O 0xC0 + token_id + NOPs
+                        orig_len = hrt_map.get((my_index, i), 2)
+                        i += orig_len
                         changed = True
                         continue
                 expanded.append(bytecode[i])
@@ -197,7 +275,6 @@ class HermesLoader:
             if changed:
                 new_co = co.replace(co_code=bytes(expanded))
             
-            # Recursão
             new_consts = []
             consts_changed = False
             for const in new_co.co_consts:
@@ -211,34 +288,14 @@ class HermesLoader:
             
             if consts_changed:
                 new_co = new_co.replace(co_consts=tuple(new_consts))
-            
             return new_co
         
         return expand_code(code_obj)
 
-    def _load_decoder(self) -> dict:
-        """Carrega o dicionário de decodificação."""
-        if not self.dict_file.exists():
-            return {}
-        try:
-            with open(self.dict_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            decoder = {}
-            for k, v in data.get('decoder', {}).items():
-                if not k.startswith('['):
-                    decoder[int(k)] = v
-            return decoder
-        except Exception:
-            return {}
-
-    def _build_vector_decoder(self) -> VectorDecoder:
-        """Constrói o VectorDecoder a partir do decoder dict."""
-        if not self.decoder:
-            return VectorDecoder()
-        return build_vector_decoder(self.decoder)
-
+    # ═══════════════════════════════════════════════════════════════════
+    # Métodos Auxiliares e Compatibilidade Retroativa
+    # ═══════════════════════════════════════════════════════════════════
     def decompress_bytes(self, hermes_bytes: bytes) -> str:
-        """Descompressão O(1) sem uso de sub-strings lentas"""
         if not self.decoder:
             return hermes_bytes.decode('utf-8')
         text = hermes_bytes.decode('utf-8')
@@ -262,47 +319,28 @@ class HermesLoader:
         hermes_bytes = hermes_path.read_bytes()
         return self.decompress_bytes(hermes_bytes)
 
-
-
-    # ═══════════════════════════════════════════════════════════════════════════════
-    # CARREGAMENTO ADAPTATIVO (Fase 3)
-    # ═══════════════════════════════════════════════════════════════════════════════
-    
     def _filter_decoder_tier1(self, decoder_dict: dict) -> dict:
-        """
-        Filtra o dicionário para apenas os tokens mais frequentes (Tier 1).
-        """
         if not decoder_dict:
             return {}
         sorted_tokens = sorted(decoder_dict.items(), key=lambda x: x[0])
         return dict(sorted_tokens[:self.TIER1_TOKEN_COUNT])
 
     def decompress_to_code_adaptive(self, hermes_path: Path, file_size: int = None):
-        """
-        Decompressão adaptativa baseada no tamanho do arquivo.
-        """
         if file_size is None:
             file_size = hermes_path.stat().st_size
-        
-        # MODO SKIP: Arquivo muito pequeno
         if file_size < self.SKIP_THRESHOLD:
             return None
-        
-        # MODO TIER1: Arquivo médio
         if file_size < self.TIER1_THRESHOLD:
             return self._decompress_tier1(hermes_path)
-        
-        # MODO FULL: Arquivo grande
         return self.decompress_to_code(hermes_path)
 
     def _decompress_tier1(self, hermes_path: Path):
-        """Decompressão Tier 1 — apenas os 32 tokens mais frequentes."""
         cache_key = f"tier1:{hermes_path}"
         if cache_key in self._code_cache:
             return self._code_cache[cache_key]
-
+        
         data = hermes_path.read_bytes()
-
+        
         if data.startswith(MAGIC_HBC5):
             dynamic_decoder, marshalled_data, flags, _ = parse_header_hbc5(data)
             if dynamic_decoder is None and len(data) > 4:
@@ -315,7 +353,7 @@ class HermesLoader:
                 bitmap = get_bitmap_hbc5(data)
                 vec_dec = build_vector_decoder(dynamic_decoder)
                 code_obj = reverse_tokens_vectorized(code_obj, vec_dec, bitmap)
-
+        
         elif data.startswith(MAGIC_HBC4):
             dynamic_decoder, marshalled_data, _ = parse_header_hbc4(data)
             if dynamic_decoder is None and len(data) > 4:
@@ -328,7 +366,7 @@ class HermesLoader:
                 bitmap = get_bitmap_hbc4(data)
                 vec_dec = build_vector_decoder(dynamic_decoder)
                 code_obj = reverse_tokens_vectorized(code_obj, vec_dec, bitmap)
-
+        
         elif data.startswith(MAGIC_HBC3):
             dynamic_decoder, compressed_data, _ = parse_header(data)
             if dynamic_decoder is None:
@@ -341,10 +379,9 @@ class HermesLoader:
             if dynamic_decoder:
                 vec_dec = build_vector_decoder(dynamic_decoder)
                 code_obj = reverse_tokens_vectorized(code_obj, vec_dec, bitmap)
-
         else:
             raise ValueError(f"Formato desconhecido: {hermes_path}")
-
+        
         if len(self._code_cache) >= self._cache_max_size:
             oldest = next(iter(self._code_cache))
             del self._code_cache[oldest]
@@ -352,7 +389,6 @@ class HermesLoader:
         return code_obj
 
     def _reverse_dynamic_tokens(self, code_obj, decoder_dict, bitmap=None):
-        """Compatibilidade retroativa — usa VectorDecoder internamente."""
         vec_dec = build_vector_decoder(decoder_dict)
         return reverse_tokens_vectorized(code_obj, vec_dec, bitmap)
 
@@ -360,66 +396,37 @@ class HermesLoader:
         hermes_file = self.hermes_base_dir / f"{module_name}.hermes"
         return hermes_file if hermes_file.exists() else None
 
-def verify_lossless(source_text: str, original_py_path: Path, 
-                    hermes_path: Path, loader: 'HermesLoader') -> tuple:
-    """Verifica se o bytecode reconstruído é equivalente ao original.
-    
-    Usa comparação estrutural (instruções + strings + nomes) ao invés de marshal.dumps,
-    pois code objects podem ter representações binárias diferentes mesmo sendo semanticamente idênticos.
-    """
-    # Compila o original
+
+def verify_lossless(source_text: str, original_py_path: Path, hermes_path: Path, loader: 'HermesLoader') -> tuple:
     original_code_obj = compile(source_text, str(original_py_path), 'exec', optimize=2)
-    
-    # Descomprime o .hermes
     reconstructed_code_obj = loader.decompress_to_code(hermes_path)
     
-    # ═══════════════════════════════════════════════════════════════════
-    # COMPARAÇÃO ESTRUTURAL (robusta contra diferenças de marshal)
-    # ═══════════════════════════════════════════════════════════════════
-    
-    # 1. Compara número de instruções
     orig_instructions = list(dis.get_instructions(original_code_obj))
     recon_instructions = list(dis.get_instructions(reconstructed_code_obj))
-    
     if len(orig_instructions) != len(recon_instructions):
         return False, "instruções", f"{len(orig_instructions)} vs {len(recon_instructions)}"
     
-    # 2. Compara strings recursivamente em co_consts
     orig_strings = _extract_all_strings(original_code_obj)
     recon_strings = _extract_all_strings(reconstructed_code_obj)
-    
     if orig_strings != recon_strings:
         return False, "strings", f"{len(orig_strings)} vs {len(recon_strings)}"
     
-    # 3. Compara nomes de variáveis e funções
-    orig_names = original_code_obj.co_names
-    recon_names = reconstructed_code_obj.co_names
+    if original_code_obj.co_names != reconstructed_code_obj.co_names:
+        return False, "names", f"{len(original_code_obj.co_names)} vs {len(reconstructed_code_obj.co_names)}"
     
-    if orig_names != recon_names:
-        return False, "names", f"{len(orig_names)} vs {len(recon_names)}"
-    
-    # 4. Compara constantes não-string (números, tuples, etc)
     orig_consts = [c for c in original_code_obj.co_consts if not isinstance(c, (str, types.CodeType))]
     recon_consts = [c for c in reconstructed_code_obj.co_consts if not isinstance(c, (str, types.CodeType))]
-    
     if orig_consts != recon_consts:
         return False, "consts", f"{len(orig_consts)} vs {len(recon_consts)}"
     
-    # 5. Compara variáveis locais
-    orig_varnames = original_code_obj.co_varnames
-    recon_varnames = reconstructed_code_obj.co_varnames
+    if original_code_obj.co_varnames != reconstructed_code_obj.co_varnames:
+        return False, "varnames", f"{len(original_code_obj.co_varnames)} vs {len(reconstructed_code_obj.co_varnames)}"
     
-    if orig_varnames != recon_varnames:
-        return False, "varnames", f"{len(orig_varnames)} vs {len(recon_varnames)}"
-    
-    # Se chegou aqui, é lossless
-    import hashlib
-    orig_hash = hashlib.sha256(str(orig_strings + list(orig_names)).encode()).hexdigest()[:8]
-#    orig_hash = hashlib.sha256(str(orig_strings + orig_names).encode()).hexdigest()[:8]
+    orig_hash = hashlib.sha256(str(orig_strings + list(original_code_obj.co_names)).encode()).hexdigest()[:8]
     return True, orig_hash, "lossless"
 
+
 def _extract_all_strings(code_obj) -> list:
-    """Extrai recursivamente todas as strings de um code object."""
     strings = []
     for const in code_obj.co_consts:
         if isinstance(const, str):

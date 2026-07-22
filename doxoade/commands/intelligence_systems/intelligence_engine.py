@@ -5,7 +5,12 @@ import os
 import ast
 from datetime import datetime
 
-from doxoade.commands.intelligence_utils import SemanticAnalyzer, CSemanticAnalyzer, HTMLSemanticAnalyzer, NexusThothMapper, ChiefInsightVisitor, find_debt_tags
+from doxoade.commands.intelligence_utils import (
+    SemanticAnalyzer, CSemanticAnalyzer, HTMLSemanticAnalyzer,
+    NexusThothMapper, ChiefInsightVisitor, find_debt_tags,
+    TOMLSemanticAnalyzer, MDSemanticAnalyzer, AssemblySemanticAnalyzer,
+    JSONSemanticAnalyzer, TXTSemanticAnalyzer # <-- ADICIONADO
+)
 from doxoade.commands.intelligence_systems.intelligence_css import CSSSemanticAnalyzer
 from doxoade.commands.intelligence_systems.intelligence_js import JSSemanticAnalyzer
 
@@ -21,25 +26,22 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
         "god_assignment": "Unknown"
     }
     
-    # ADICIONADO: '.js', '.jsx', '.ts', '.tsx' na lista
-    valid_exts = ('.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx', '.pyd', '.so')
 #    valid_exts = ('.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx')
-    if not file_path.endswith(valid_exts):
-        return data
-        
+    valid_exts = ('.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx', '.pyd', '.so', '.toml', '.md', '.s', '.json', '.txt' )
+    if not file_path.endswith(valid_exts): return data
     try:
         # --- NOVO: CAPTURA DE BINÁRIOS (VULCAN NATIVE) ---
-        if file_path.endswith(('.pyd', '.so')):
+        if file_path.endswith(('.pyd', '.so', '.dll', '.exe')): # Adicionei dll/exe de bônus
             data.update({
                 "status": "native_compiled",
                 "complexity": 0,
-                "god_assignment": "Vulcan", # Binários são sempre filhos de Vulcan
+                "god_assignment": "Vulcan",
                 "binary_info": {
                     "last_modified": datetime.fromtimestamp(os.path.getmtime(file_path)).isoformat(),
-                    "type": "Windows DLL/PYD" if file_path.endswith('.pyd') else "Linux Shared Object"
+                    "type": "Binary Executable/Library"
                 }
             })
-            return data # Retorna cedo, não tenta ler como texto
+            return data
 
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
@@ -48,6 +50,12 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
         is_html = file_path.endswith('.html')
         is_css = file_path.endswith('.css')
         is_js = file_path.endswith(('.js', '.jsx', '.ts', '.tsx')) # Engloba ecossistema JS
+        is_toml = file_path.endswith('.toml')
+        is_md = file_path.endswith('.md')
+        is_asm = file_path.endswith('.s')
+        is_json = file_path.endswith('.json')
+        is_txt = file_path.endswith('.txt')
+
         
         if is_python:
             sem = SemanticAnalyzer(content)
@@ -57,8 +65,7 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
             if sem.tree:
                 visitor.visit(sem.tree)
             all_imports = visitor.stats["imports"]["stdlib"] + visitor.stats["imports"]["external"]
-            data["god_assignment"] = NexusThothMapper.identify(rel_path, all_imports)
-
+            data["god_assignment"]    = NexusThothMapper.identify(rel_path, all_imports)
             data["mpot_4_violations"] = visitor.stats["mpot_4_violations"]
             data["debt_tags"]         = find_debt_tags(content)
 
@@ -89,13 +96,48 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
             data["mpot_4_violations"] = 0 
             data["debt_tags"]         = find_debt_tags(content) # Suporta // TODO e /* TODO */ nativamente
 
-        else:
+        elif is_toml:
+            sem_toml = TOMLSemanticAnalyzer(content)
+            data.update(sem_toml.get_summary())
+            data["god_assignment"] = "Hades" # Configurações/Storage
+            data["mpot_4_violations"] = 0
+            data["debt_tags"] = []
+
+        elif is_md:
+            sem_md = MDSemanticAnalyzer(content)
+            data.update(sem_md.get_summary())
+            data["god_assignment"] = "Dionísio" # Documentação/Artes
+            data["mpot_4_violations"] = 0
+            data["debt_tags"] = []
+
+        elif is_asm:
+            sem_asm = AssemblySemanticAnalyzer(content)
+            data.update(sem_asm.get_summary())
+            data["god_assignment"] = "Vulcan" # Baixo nível/Nativo
+            data["mpot_4_violations"] = 0
+            data["debt_tags"] = find_debt_tags(content) # Pega ; TODO em assembly
+
+        elif is_json:
+            sem_json = JSONSemanticAnalyzer(content)
+            data.update(sem_json.get_summary())
+            data["god_assignment"] = "Hades" # Dados estruturados
+            data["mpot_4_violations"] = 0
+            data["debt_tags"] = []
+
+        elif is_txt:
+            sem_txt = TXTSemanticAnalyzer(content)
+            data.update(sem_txt.get_summary())
+            data["god_assignment"] = "Dionísio" # Texto puro
+            data["mpot_4_violations"] = 0
+            data["debt_tags"] = find_debt_tags(content) # Pega TODO/FIXME em txt
+
+        else: # Fallback para C/C++
             sem_c = CSemanticAnalyzer(content)
             data.update(sem_c.get_summary())
-            data["god_assignment"]    = NexusThothMapper.identify(rel_path, sem_c.includes)
+            data["god_assignment"] = NexusThothMapper.identify(rel_path, sem_c.includes)
             data["mpot_4_violations"] = 0
-            data["debt_tags"]         = find_debt_tags(content)
-            
+            data["debt_tags"] = find_debt_tags(content)
+
         if source: 
             data["source_minified"] = content[:5000]
         

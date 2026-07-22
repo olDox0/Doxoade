@@ -14,29 +14,39 @@ from doxoade.tools.filesystem import _find_project_root
 
 # PASC 10.1: Configuração para permitir flags APÓS os caminhos
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'], allow_interspersed_args=True)
+VALID_EXTS = (
+    '.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx',
+    '.pyd', '.so', '.toml', '.md', '.s', '.json', '.txt'
+)
 
 @click.group('intelligence', invoke_without_command=True, context_settings=CONTEXT_SETTINGS)
-@click.option(  '--docs',       '-d', is_flag=True, help="Extrai docstrings.")
-@click.option(  '--source',     '-s', is_flag=True, help="Inclui código fonte.")
-@click.option(  '--no-comments','-nc',is_flag=True, help="Remove comentários.")
-@click.option(  '--concatenate','-c', is_flag=True, help="Minifica o JSON.")
-@click.option(  '--ai-export',  '-ai',is_flag=True, help="Gera XML para LLMs.")
-@click.option(  '--ia-qwen',    '-iq',is_flag=True, help="Gera XML nativo para Qwen (tool_call format).")
-@click.option(  '--output',     '-o', default='chief_dossier.json', help="Saída do dossiê.")
-@click.option(  '--focus',      '-f', type=click.Choice(['vulcan', 'check', 'economic']))
-@click.option(  '--exclude',    '-x', multiple=True, help="Pastas ou arquivos a ignorar.")
+@click.option('--docs',       '-d', is_flag=True,  help="Extrai docstrings.")
+@click.option('--source',     '-s', is_flag=True,  help="Inclui código fonte.")
+@click.option('--no-comments','-nc',is_flag=True,  help="Remove comentários.")
+@click.option('--no-spaces',  '-ns',is_flag=True,  help="Remove linhas em branco (Token Saver).") # 🆕 NOVO
+@click.option('--concatenate','-c', is_flag=True,  help="Minifica o JSON.")
+@click.option('--ai-export',  '-ai',is_flag=True,  help="Gera XML para LLMs.")
+@click.option('--ia-qwen',    '-iq',is_flag=True,  help="Gera XML nativo para Qwen (tool_call format).")
+@click.option('--output',     '-o', default='chief_dossier.json', help="Saída do dossiê.")
+@click.option('--focus',      '-f', type=click.Choice(['vulcan', 'check', 'economic']))
+@click.option('--exclude',    '-x', multiple=True, help="Pastas ou arquivos a ignorar.")
+@click.option('--ext-exclude','-xe', multiple=True, help="Extensões específicas a ignorar.") # 🆕 NOVO
+@click.option('--analyze',    '-a', is_flag=True,  help="Auditoria de Cobertura.")
+@click.option('--verbose',    '-v', is_flag=True,  help="Modo verboso.")
 @click.argument('paths', nargs=-1, type=click.Path(exists=True))
 @click.pass_context
-# ORDEM DOS PARÂMETROS DEVE SEGUIR A ORDEM DOS DECORADORES (Pilha: de cima para baixo)
-def intelligence(ctx, docs, source, no_comments, concatenate, ai_export, ia_qwen, output, focus, exclude, paths):
+def intelligence(ctx, docs, source, no_comments, no_spaces, concatenate, ai_export, ia_qwen, output, focus, exclude, ext_exclude, analyze, verbose, paths):
     """Módulo de Inteligência Topológica (v95.6 - Qwen Ready)."""
+    if analyze:
+        _run_analyze_coverage(paths, exclude, verbose, ext_exclude)
+        return
+
     if ctx.invoked_subcommand is None:
         scan_paths = paths if paths else ('.',)
         try:
-            # Passando os argumentos limpos para o motor
             _run_dossier_scan(
-                scan_paths, output, docs, source, 
-                no_comments, concatenate, focus, ai_export, ia_qwen, ctx, exclude
+                scan_paths, output, docs, source,
+                no_comments, no_spaces, concatenate, focus, ai_export, ia_qwen, ctx, exclude, ext_exclude
             )
         except Exception:
             error_data = traceback.format_exc()
@@ -54,22 +64,31 @@ def recover(backup_path, output_path):
     if success: click.echo(f"\033[92m✅ {msg}\033[0m")
     else: click.echo(f"\033[91m✘ {msg}\033[0m")
 
-def _run_dossier_scan(scan_paths, output, include_docs, include_source, no_comments, concat, focus, ai_export, ia_qwen, ctx, cli_excludes):
+def _run_dossier_scan(scan_paths, output, include_docs, include_source, no_comments, no_spaces, concat, focus, ai_export, ia_qwen, ctx, cli_excludes, ext_excludes):
     from .intelligence_systems.intelligence_engine import analyze_file_chief
-    from .intelligence_utils import strip_comments, get_ignore_spec
+    # 🆕 CORREÇÃO: Importar minify_code em vez de strip_comments
+    from .intelligence_utils import minify_code, get_ignore_spec 
     
     root = _find_project_root(os.getcwd())
     console = Console()
     
-    # Inicializa o filtro de exclusão (Lê TOML + CLI)
-    ignore_spec = get_ignore_spec(root, extra_patterns=list(cli_excludes))
+    # Fusão de Blacklists (TOML + CLI Paths + CLI Extensions)
+    extra_patterns = list(cli_excludes)
+    if ext_excludes:
+        for ext in ext_excludes:
+            if not ext.startswith('.'): ext = '.' + ext
+            extra_patterns.append(f"*{ext}")
+            
+    ignore_spec = get_ignore_spec(root, extra_patterns=extra_patterns)
     
     with ExecutionLogger('intelligence', root, ctx.params):
         console.print("[bold gold3]🔍 Doxoade Chief Insight v95.6 (Qwen Ready)[/bold gold3]")
         valid_exts = (
             '.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx',
-            '.pyd', '.so'
+            '.pyd', '.so', '.toml', '.md', '.s', '.json', '.txt'
         )
+        
+        # ... (Mantenha o bloco do DNM e unique_files igual) ...
         all_files_raw = []
         for p in scan_paths:
             p_abs = os.path.abspath(p)
@@ -78,25 +97,27 @@ def _run_dossier_scan(scan_paths, output, include_docs, include_source, no_comme
             else:
                 nav = DNM(p_abs)
                 all_files_raw.extend(nav.scan(extensions=list(valid_exts)))
-        
+                
         unique_files = []
         for f in dict.fromkeys(all_files_raw):
             rel_path = os.path.relpath(f, root).replace('\\', '/')
             if not ignore_spec.match_file(rel_path):
                 unique_files.append(f)
-        
+                
         dossier_files = []
         with click.progressbar(unique_files, label='[VULCAN:INTEL]') as bar:
             for f in bar:
                 try:
                     res = analyze_file_chief(f, root, docs=include_docs, source=include_source)
                     if res and isinstance(res, dict) and 'size' in res:
-                        if no_comments and res.get('source_minified'):
-                            res['source_minified'] = strip_comments(res['source_minified'], f)
+                        # 🆕 PIPELINE DE MINIFICAÇÃO (-nc e -ns)
+                        src = res.get('source_minified')
+                        if src and (no_comments or no_spaces):
+                            res['source_minified'] = minify_code(src, f, no_comments, no_spaces)
                         dossier_files.append(res)
                 except Exception:
                     continue
-        
+                    
         _save_report(dossier_files, output, root, concat, focus, ai_export, ia_qwen, console)
 
 def _save_report(files, output, root, concat, focus, ai_export, ia_qwen, console):
@@ -212,47 +233,46 @@ def _calculate_distribution(files):
     return dist
     
 def _save_llm_report(report_data, output_path, console):
-    """Traduz o JSON arquitetural para um formato de alta absorção por LLMs (PASC 11.0)."""
+    """Traduz o JSON arquitetural para um formato XML bem indentado e legível (PASC 11.0)."""
     lines = []
-    
     meta = None
     for key in report_data.keys():
         if key.endswith("intelligence_report"):
             meta = report_data[key]
             break
-    
+            
     if meta:
-        lines.append("# DOXOADE NEXUS INTELLIGENCE REPORT")
-        lines.append(f"**Target Project:** {meta.get('target_project')}")
-        lines.append(f"**Generated At:** {meta.get('generated_at')}")
-        lines.append(f"**Focus Applied:** {meta.get('focus_applied')}\n")
-    
-    lines.append("```xml")
-    
+        lines.append('<?xml version="1.0" encoding="UTF-8"?>')
+        lines.append('<doxoade_nexus_report>')
+        lines.append(f'  <target_project>{meta.get("target_project")}</target_project>')
+        lines.append(f'  <generated_at>{meta.get("generated_at")}</generated_at>')
+        lines.append(f'  <focus_applied>{meta.get("focus_applied")}</focus_applied>')
+        
     eco = report_data.get("economic_summary", {})
-    lines.append("<project_summary>")
-    lines.append(f"  <total_files_scanned>{eco.get('total_files_scanned', 0)}</total_files_scanned>")
-    lines.append(f"  <total_files_in_report>{eco.get('total_files_in_report', 0)}</total_files_in_report>")
-    lines.append(f"  <average_complexity>{eco.get('average_complexity_in_report', 0):.2f}</average_complexity>")
-    lines.append(f"  <total_debt_tags>{eco.get('total_debt_tags_in_report', 0)}</total_debt_tags>")
-    lines.append("  <god_distribution>")
+    lines.append('  <project_summary>')
+    lines.append(f'    <total_files_scanned>{eco.get("total_files_scanned", 0)}</total_files_scanned>')
+    lines.append(f'    <total_files_in_report>{eco.get("total_files_in_report", 0)}</total_files_in_report>')
+    lines.append(f'    <average_complexity>{eco.get("average_complexity_in_report", 0):.2f}</average_complexity>')
+    lines.append(f'    <total_debt_tags>{eco.get("total_debt_tags_in_report", 0)}</total_debt_tags>')
+    lines.append('    <god_distribution>')
     for god, count in eco.get("god_distribution_in_report", {}).items():
-        lines.append(f"    <{god.lower().replace('ú','u')}>{count}</{god.lower().replace('ú','u')}>")
-    lines.append("  </god_distribution>")
-    lines.append("</project_summary>\n")
+        safe_god = god.lower().replace('ú','u').replace('ã','a').replace('é','e').replace('í','i').replace('ó','o')
+        lines.append(f'      <{safe_god}>{count}</{safe_god}>')
+    lines.append('    </god_distribution>')
+    lines.append('  </project_summary>')
     
-    lines.append("<codebase_map>")
+    lines.append('  <codebase_map>')
     for f in report_data.get("codebase_map", []):
         path = f.get('path', 'unknown')
         god = f.get('god_assignment', 'Unknown')
         comp = f.get('complexity', 0)
         status = f.get('status', 'unknown')
-        lines.append(f'\n  <file path="{path}" role="{god}" complexity="{comp}" status="{status}">')
+        lines.append(f'    <file path="{path}" role="{god}" complexity="{comp}" status="{status}">')
         
         classes = f.get('classes', [])
         if classes:
-            lines.append(f"    <classes>{', '.join(classes)}</classes>")
-        
+            lines.append(f'      <classes>{", ".join(str(c) for c in classes)}</classes>')
+            
         funcs = f.get('functions', [])
         if funcs:
             funcs_str = []
@@ -260,23 +280,25 @@ def _save_llm_report(report_data, output_path, console):
                 if isinstance(fn, str): funcs_str.append(fn)
                 elif isinstance(fn, dict): funcs_str.append(str(fn.get('name', 'unknown')))
                 else: funcs_str.append(str(getattr(fn, 'name', fn)))
-            lines.append(f"    <functions>{', '.join(funcs_str)}</functions>")
-        
+            lines.append(f'      <functions>{", ".join(funcs_str)}</functions>')
+            
         debt = f.get('debt_tags_count', len(f.get('debt_tags', [])))
         mpot = f.get('mpot_violations_count', f.get('mpot_4_violations', 0))
         if debt > 0 or mpot > 0:
-            lines.append(f"    <technical_debt tags=\"{debt}\" mpot_violations=\"{mpot}\" />")
-        
+            lines.append(f'      <technical_debt tags="{debt}" mpot_violations="{mpot}" />')
+            
         src = f.get('source_minified')
         if src:
             safe_src = src.replace(']]>', ']]]]><![CDATA[>')
-            lines.append("    <source_code><![CDATA[")
-            lines.append(safe_src)
-            lines.append("    ]]></source_code>")
-        
-        lines.append("  </file>")
-    lines.append("</codebase_map>")
-    lines.append("```\n")
+            lines.append('      <source_code><![CDATA[')
+            # 🛡️ BLINDAGEM DE INDENTAÇÃO: Injeta linha por linha para preservar espaços à esquerda
+            for code_line in safe_src.splitlines():
+                lines.append(code_line)
+            lines.append('      ]]></source_code>')
+            
+        lines.append('    </file>')
+    lines.append('  </codebase_map>')
+    lines.append('</doxoade_nexus_report>')
     
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write("\n".join(lines))
@@ -353,3 +375,139 @@ def _save_qwen_report(report_data, output_path, console):
         console.print(f"[dim]   Formato: tool_call nativo + <think> + CDATA seguro[/dim]")
     except Exception as e:
         console.print(f"[bold red]✘ Falha ao gerar XML Qwen: {e}[/bold red]")
+        
+def _run_analyze_coverage(scan_paths, cli_excludes, verbose, ext_excludes):
+    """Auditoria de Cobertura: Blacklist, Extensões e Integridade de Parsing (Nexus Scan)."""
+    from .intelligence_systems.intelligence_engine import analyze_file_chief
+    from .intelligence_utils import get_ignore_spec
+    from rich.table import Table
+    
+    scan_paths = scan_paths if scan_paths else ('.',)
+    root = _find_project_root(os.getcwd())
+    
+    # 🆕 Fusão de Blacklists (TOML + CLI Paths + CLI Extensions)
+    extra_patterns = list(cli_excludes)
+    if ext_excludes:
+        for ext in ext_excludes:
+            if not ext.startswith('.'): ext = '.' + ext
+            extra_patterns.append(f"*{ext}")
+            
+    ignore_spec = get_ignore_spec(root, extra_patterns=extra_patterns)
+    
+    # Extensões suportadas pelo Motor Nexus
+
+    stats = {
+        "raw": 0, "ignored": 0, "unsupported": 0, "target": 0,
+        "success": 0, "failed": 0, "corrupt": 0
+    }
+    failures = []
+    ignored_files = []
+    unsupported_exts = {}  # 🆕 NOVO: Mapear extensões não suportadas
+    
+    console = Console()
+    console.print("\n[bold cyan]🔍 Iniciando Auditoria de Cobertura Nexus (PASC Compliance)...[/bold cyan]\n")
+    
+    # 1. Coleta Bruta
+    all_files_raw = []
+    for p in scan_paths:
+        p_abs = os.path.abspath(p)
+        if os.path.isfile(p_abs):
+            all_files_raw.append(p_abs)
+        else:
+            nav = DNM(p_abs)
+            all_files_raw.extend(nav.scan()) 
+            
+    # 2. Processamento e Auditoria em 3 Camadas
+    with click.progressbar(all_files_raw, label='[AUDIT] Analisando codebase') as bar:
+        for f_abs in bar:
+            stats["raw"] += 1
+            rel_path = os.path.relpath(f_abs, root).replace('\\', '/')
+            
+            # CAMADA 1: Blacklist
+            if ignore_spec.match_file(rel_path):
+                stats["ignored"] += 1
+                if verbose: ignored_files.append(rel_path)
+                continue
+                
+            # CAMADA 2: Extensões Suportadas
+            if not f_abs.endswith(VALID_EXTS):
+                stats["unsupported"] += 1
+                # 🆕 Captura a extensão para o relatório
+                ext = os.path.splitext(f_abs)[1].lower()
+                if ext:
+                    unsupported_exts[ext] = unsupported_exts.get(ext, 0) + 1
+                continue
+                
+            stats["target"] += 1
+            
+            # CAMADA 3: Integridade de Parsing
+            try:
+                res = analyze_file_chief(f_abs, root)
+                if res.get("error"):
+                    stats["failed"] += 1
+                    failures.append({"file": rel_path, "reason": res["error"]})
+                elif res.get("status") == "corrupt":
+                    stats["corrupt"] += 1
+                    failures.append({"file": rel_path, "reason": "Syntax/Parse Error (AST failed)"})
+                else:
+                    stats["success"] += 1
+            except Exception as e:
+                stats["failed"] += 1
+                failures.append({"file": rel_path, "reason": str(e)})
+
+    # 3. Renderização do Relatório
+    console.print("\n[bold green]✅ Auditoria Concluída.[/bold green]")
+    
+    table = Table(title="📊 Resumo de Cobertura e Integridade")
+    table.add_column("Métrica", style="cyan")
+    table.add_column("Total", justify="right", style="magenta")
+    
+    table.add_row("Arquivos Brutos (DNM)", str(stats["raw"]))
+    table.add_row("Ignorados (Blacklist)", str(stats["ignored"]))
+    table.add_row("Extensão Não Suportada", str(stats["unsupported"]))
+    table.add_row("Alvos Válidos", str(stats["target"]))
+    table.add_row("[green]Parseados com Sucesso[/green]", str(stats["success"]))
+    table.add_row("[red]Falha de Leitura/IO[/red]", str(stats["failed"]))
+    table.add_row("[yellow]Código Corrompido (AST)[/yellow]", str(stats["corrupt"]))
+    
+    console.print(table)
+    
+    # 🆕 NOVO: Tabela de Extensões Não Suportadas
+    if unsupported_exts:
+        console.print("\n[bold yellow]📦 Extensões Encontradas mas Não Suportadas pelo Motor Nexus:[/bold yellow]")
+        ext_table = Table(show_header=True, header_style="bold yellow")
+        ext_table.add_column("Extensão", style="cyan")
+        ext_table.add_column("Quantidade", justify="right", style="magenta")
+        
+        # Ordena por quantidade (maior para menor)
+        sorted_exts = sorted(unsupported_exts.items(), key=lambda x: x[1], reverse=True)
+        for ext, count in sorted_exts:
+            ext_table.add_row(ext if ext else "[dim](sem extensão)[/dim]", str(count))
+            
+        console.print(ext_table)
+        console.print("[dim]💡 Dica: Para adicionar suporte nativo, crie um analisador (ex: intelligence_java.py) e adicione a extensão em `VALID_EXTS` no `intelligence_engine.py` e aqui na auditoria.[/dim]")
+
+    # Validação Final
+    total_processed = stats["success"] + stats["failed"] + stats["corrupt"]
+    if total_processed == stats["target"]:
+        console.print("\n[bold green]🎯 VEREDICTO: 100% dos arquivos alvo foram processados pelo motor.[/bold green]")
+    else:
+        console.print("\n[bold red]⚠️ VEREDICTO: Houve perda de arquivos no pipeline de parsing![/bold red]")
+
+    # Detalhes (Verbose)
+    if verbose:
+        if ignored_files:
+            console.print(f"\n[bold yellow]📂 Arquivos Ignorados pela Blacklist ({len(ignored_files)}):[/bold yellow]")
+            for f in ignored_files[:10]: 
+                console.print(f"  [dim]- {f}[/dim]")
+            if len(ignored_files) > 10:
+                console.print(f"  [dim]... e mais {len(ignored_files) - 10} arquivos.[/dim]")
+                
+        if failures:
+            console.print(f"\n[bold red]🐞 Arquivos com Falha de Parsing ({len(failures)}):[/bold red]")
+            fail_table = Table(show_header=True, header_style="bold red")
+            fail_table.add_column("Arquivo")
+            fail_table.add_column("Motivo")
+            for f in failures:
+                fail_table.add_row(f["file"], f["reason"])
+            console.print(fail_table)

@@ -18,43 +18,59 @@ def build_decoder_simd():
     src = root / 'hermes_decoder_simd.c'
     out_ext = '.pyd' if os.name == 'nt' else '.so'
     out = root / f'hermes_decoder_simd{out_ext}'
-    
     inc = sysconfig.get_path('include')
-    libs = Path(sys.prefix) / 'libs'
-    version = f"{sys.version_info.major}{sys.version_info.minor}"
     
-    # Caça o w64devkit no PATH
+    # Caça o w64devkit no PATH ou thirdparty
     gcc = None
-    for p in os.environ.get('PATH', '').split(os.pathsep):
-        candidate = Path(p.strip('"')) / 'gcc.exe'
-        if candidate.exists():
-            gcc = str(candidate)
-            break
-    
+    project_root = Path(__file__).resolve().parents[4]
+    candidate = project_root / 'thirdparty' / 'w64devkit' / 'bin' / 'gcc.exe'
+    if candidate.exists():
+        gcc = str(candidate)
+    else:
+        for p in os.environ.get('PATH', '').split(os.pathsep):
+            candidate = Path(p.strip('"')) / 'gcc.exe'
+            if candidate.exists():
+                gcc = str(candidate)
+                break
+                
     if not gcc:
-        print("✘ GCC não encontrado no PATH.")
+        print("✘ GCC não encontrado.")
         return False
-    
-    # Flags otimizados para SSE 4.2
+
+    # 🚀 CORREÇÃO DEFINITIVA PARA MINGW: Linkagem direta contra a DLL
+    version = f"{sys.version_info.major}{sys.version_info.minor}"
+    dll_name = f"python{version}.dll"
+    dll_path = Path(sys.base_prefix) / dll_name
+    if not dll_path.exists():
+        dll_path = Path(sys.executable).parent / dll_name
+
     cmd = [
         gcc,
-        '-O3',                      # Otimização máxima
-        '-shared',                   # Biblioteca compartilhada
-        '-fPIC',                     # Position-independent code
-        '-static-libgcc',            # Linka libgcc estaticamente
-        '-msse4.2',                  # Habilita SSE 4.2
-        '-mpopcnt',                  # Population count (para bitmaps)
-        '-funroll-loops',            # Desrola loops
-        '-march=native',             # Usa instruções da CPU atual
+        '-O3',
+        '-shared',
+        '-fPIC',
+        '-static-libgcc',
+        '-msse4.2',
+        '-mpopcnt',
+        '-funroll-loops',
+        '-march=native',
         f'-I{inc}',
         str(src),
         '-o', str(out),
     ]
     
-    # No Windows, NÃO linkar com libpython
-    if os.name != 'nt':
+    # No Windows, linka diretamente contra a DLL (MinGW não lê .lib da MSVC)
+    if os.name == 'nt':
+        if dll_path.exists():
+            cmd.append(str(dll_path)) # <--- 🚀 LINKAGEM DIRETA CONTRA A DLL
+        else:
+            print(f"✘ Não foi possível localizar {dll_name} para linkagem.")
+            return False
+    else:
+        # Linux/macOS usa a lib padrão
+        libs = Path(sys.prefix) / 'libs'
         cmd.extend([f'-L{libs}', f'-lpython{version}'])
-    
+
     print(f"🔨 Compilando Hermes SIMD Decoder (SSE 4.2)...")
     print(f"   GCC: {gcc}")
     print(f"   Source: {src.name}")
@@ -65,15 +81,9 @@ def build_decoder_simd():
         res = subprocess.run(cmd, capture_output=True, text=True, check=True)
         print(f"✔ Sucesso! Decoder SIMD gerado: {out.name}")
         print(f"   Tamanho: {out.stat().st_size / 1024:.1f} KB")
-        
-        # Verifica se SSE 4.2 foi habilitado
-        if '-msse4.2' in cmd:
-            print(f"   ✓ SSE 4.2 habilitado")
-        
         return True
     except subprocess.CalledProcessError as e:
         print(f"✘ Erro na compilação:")
-        print(f"   stdout: {e.stdout}")
         print(f"   stderr: {e.stderr}")
         return False
 

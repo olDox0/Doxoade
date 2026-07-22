@@ -20,43 +20,45 @@ IO_MODULES = {
     'os', 'sys', 'pathlib', 'shutil', 'subprocess', 'socket', 'requests', 'json', 'toml'
 }
 
-def strip_comments(code: str, filename: str) -> str:
+def minify_code(code: str, filename: str, no_comments: bool, no_spaces: bool) -> str:
     """
-    Remove comentários para economia de tokens (PASC-11 Token Saver).
-    Preserva as 2 primeiras linhas (Geralmente referências de arquivo).
+    Pipeline de Minificação PASC-11 (Token Saver).
+    Suporta Python, C/C++, JS/TS, HTML, CSS e Assembly (.s).
     """
     import re
     lines = code.splitlines()
-    if len(lines) <= 2:
-        return code
-
-    # 1. Isola o cabeçalho (2 primeiras linhas)
-    header = lines[:2]
-    body = lines[2:]
-    processed_body = []
+    if not lines: return code
     
-    if filename.endswith('.py'):
-        for line in body:
-            # Remove o conteúdo após o '#'
-            # Regex protege contra remoção total se houver código antes do comentário
-            clean_line = re.sub(r'#.*$', '', line).rstrip()
-            if clean_line: # Só adiciona se a linha não ficou vazia
-                processed_body.append(clean_line)
-                
-    elif filename.endswith(('.c', '.cpp', '.h', '.js', '.ts', '.jsx', '.tsx')):
-        # Limpeza para linguagens estilo C
-        for line in body:
-            clean_line = re.sub(r'//.*$', '', line).rstrip()
-            processed_body.append(clean_line)
-        
-        # Junta o corpo para tratar comentários de bloco /* */
-        temp_body = '\n'.join(processed_body)
-        temp_body = re.sub(r'/\*.*?\*/', '', temp_body, flags=re.DOTALL)
-        processed_body = temp_body.splitlines()
+    # Preserva as 2 primeiras linhas (Shebang, encoding, referências de arquivo)
+    header = lines[:2] if len(lines) >= 2 else lines
+    body = lines[2:] if len(lines) >= 2 else []
+    
+    # 1. CAMADA DE REMOÇÃO DE COMENTÁRIOS (-nc)
+    if no_comments:
+        if filename.endswith('.py'):
+            body = [re.sub(r'#.*$', '', line) for line in body]
+        elif filename.endswith(('.c', '.cpp', '.h', '.hpp', '.js', '.ts', '.jsx', '.tsx')):
+            body = [re.sub(r'//.*$', '', line) for line in body]
+            temp_body = '\n'.join(body)
+            temp_body = re.sub(r'/\*.*?\*/', '', temp_body, flags=re.DOTALL)
+            body = temp_body.splitlines()
+        elif filename.endswith(('.html', '.css')):
+            temp_body = '\n'.join(body)
+            temp_body = re.sub(r'<!--.*?-->', '', temp_body, flags=re.DOTALL) # HTML
+            temp_body = re.sub(r'/\*.*?\*/', '', temp_body, flags=re.DOTALL) # CSS
+            body = temp_body.splitlines()
+        elif filename.endswith('.s'):
+            body = [re.sub(r';.*$', '', line) for line in body]
 
-    # Reconstroi o arquivo: Header Original + Corpo Limpo
-    final_lines = header + [l for l in processed_body if l.strip()]
-    return '\n'.join(final_lines)
+    # 2. CAMADA DE REMOÇÃO DE ESPAÇOS (-ns)
+    if no_spaces:
+        # Remove linhas vazias e faz strip lateral (esquerda e direita)
+        body = [l.strip() for l in body if l.strip()]
+    else:
+        # Apenas remove espaços no final da linha (trailing whitespaces)
+        body = [l.rstrip() for l in body]
+        
+    return '\n'.join(header + body)
 
 def get_ignore_spec(root: str, extra_patterns: list = None):
     """
@@ -355,4 +357,130 @@ class HTMLSemanticAnalyzer:
                 "embedded_styles": self.parser.styles,
                 "top_tags": top_tags
             }
+        }
+
+class TOMLSemanticAnalyzer:
+    """Extrai a estrutura de arquivos de configuração TOML (PASC 12.1)."""
+    def __init__(self, content: str):
+        self.content = content
+        self.sections = []
+        self.keys = []
+        self._parse()
+
+    def _parse(self):
+        try:
+            import toml
+            data = toml.loads(self.content)
+            for k, v in data.items():
+                if isinstance(v, dict): self.sections.append(k)
+                else: self.keys.append(k)
+        except Exception:
+            self.sections = re.findall(r'^\s*\[([^\]]+)\]', self.content, re.MULTILINE)
+
+    def get_summary(self):
+        return {
+            "status": "stable_toml",
+            "classes": self.sections,      
+            "functions": self.keys,        
+            "complexity": len(self.sections) + len(self.keys)
+        }
+
+class MDSemanticAnalyzer:
+    """Extrai a estrutura de documentação Markdown (PASC 12.2)."""
+    def __init__(self, content: str):
+        self.content = content
+        self.headers = []
+        self.code_blocks = 0
+        self._parse()
+
+    def _parse(self):
+        self.headers = re.findall(r'^#+\s+(.*)', self.content, re.MULTILINE)
+        self.code_blocks = len(re.findall(r'^```', self.content, re.MULTILINE)) // 2
+
+    def get_summary(self):
+        return {
+            "status": "stable_md",
+            "classes": [],
+            "functions": self.headers[:20], 
+            "complexity": len(self.headers) + self.code_blocks,
+            "doc_stats": {
+                "total_headers": len(self.headers),
+                "embedded_code_blocks": self.code_blocks
+            }
+        }
+
+class AssemblySemanticAnalyzer:
+    """Extrai a estrutura de arquivos Assembly (.s) via Regex (PASC 12.3)."""
+    def __init__(self, content: str):
+        self.content = content
+        self.labels = []     
+        self.includes = []   
+        self._parse()
+
+    def _parse(self):
+        self.labels = re.findall(r'^([a-zA-Z_][a-zA-Z0-9_]*):', self.content, re.MULTILINE)
+        self.includes = re.findall(r'(?:\.include|\.import)\s+["<]([^">]+)[">]', self.content)
+        
+    def get_summary(self):
+        branches = re.findall(r'\b(?:j[a-z]{1,3}|call|loop|jmp)\b', self.content, re.IGNORECASE)
+        return {
+            "status": "stable_asm",
+            "classes": [],
+            "functions": self.labels,
+            "complexity": len(branches) + 1,
+            "asm_stats": {
+                "total_labels": len(self.labels),
+                "branch_instructions": len(branches)
+            }
+        }
+
+class JSONSemanticAnalyzer:
+    """Extrai a estrutura de arquivos de dados JSON (PASC 12.4)."""
+    def __init__(self, content: str):
+        self.content = content
+        self.keys = []
+        self.type = "unknown"
+        self._parse()
+
+    def _parse(self):
+        try:
+            import json
+            data = json.loads(self.content)
+            if isinstance(data, dict):
+                self.type = "object"
+                self.keys = list(data.keys())[:30] # Limita para não poluir o dossiê
+            elif isinstance(data, list):
+                self.type = "array"
+                self.keys = [f"item_{i}" for i in range(min(len(data), 5))]
+        except Exception:
+            self.type = "malformed"
+
+    def get_summary(self):
+        return {
+            "status": "stable_json",
+            "classes": [],
+            "functions": self.keys,
+            "complexity": len(self.keys),
+            "json_stats": {"type": self.type, "top_level_keys": len(self.keys)}
+        }
+
+class TXTSemanticAnalyzer:
+    """Extrai a estrutura de arquivos de texto puro (PASC 12.5)."""
+    def __init__(self, content: str):
+        self.content = content
+        self.lines = 0
+        self.words = 0
+        self._parse()
+
+    def _parse(self):
+        self.lines = len(self.content.splitlines())
+        self.words = len(self.content.split())
+
+    def get_summary(self):
+        return {
+            "status": "stable_txt",
+            "classes": [],
+            "functions": [],
+            "complexity": 1,
+            "txt_stats": {"lines": self.lines, "words": self.words}
         }

@@ -26,6 +26,7 @@ import importlib.machinery
 import importlib.util
 import os
 import sys
+import importlib.abc
 from pathlib import Path
 from typing import Optional
 
@@ -107,3 +108,27 @@ class SafeExtensionLoader(importlib.machinery.ExtensionFileLoader):
             return str(result) if result else None
         except Exception:
             return None
+
+class HBC6BridgeLoader(importlib.abc.Loader):
+    """Tier 0: Loader para bytecode HBC6 via Motor C (Hermes Bridge)."""
+    def __init__(self, fullname: str, hbc6_path: str, gd_path: str):
+        self.fullname = fullname
+        self.hbc6_path = hbc6_path
+        self.gd_path = gd_path
+
+    def create_module(self, spec):
+        return None
+
+    def exec_module(self, module):
+        module.__file__ = self.hbc6_path
+        module.__loader__ = self
+        try:
+            from doxoade.tools.hermes_systems.native.hermes_bridge import load_module
+            code_obj = load_module(self.hbc6_path, self.gd_path)
+            if code_obj is None:
+                raise ImportError("Motor C retornou NULL (HBC6 inválido)")
+            
+            from doxoade.tools.aegis.aegis_core import nexus_exec
+            nexus_exec(code_obj, module.__dict__)
+        except Exception as e:
+            raise ImportError(f"[Vulcan Tier 0] Falha no Motor C (HBC6) para {self.fullname}: {e}")
