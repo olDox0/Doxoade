@@ -10,6 +10,8 @@ import importlib.abc
 import importlib.util
 from pathlib import Path
 
+from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
+
 _AUDIT_ENABLED = False
 _auditor = None
 
@@ -31,7 +33,8 @@ class HBC6Finder(importlib.abc.MetaPathFinder):
         self.build_dir = self.root / '.doxoade' / 'hermes' / 'build'
         self._loader_instance = None
         self._path_hash_cache = {}  # ✅ NOVO: Cache de hash
-        
+        self._deadzone_path = self.root / '.doxoade' / 'hermes' / 'deadzone.json'
+        self._dynamic_blacklist = self._load_deadzone()
         self._blacklist = {
             'doxoade.rescue',
             'doxoade.chronos',
@@ -91,6 +94,7 @@ class HBC6Finder(importlib.abc.MetaPathFinder):
             'doxoade.commands.ganesha_advisor_standalone',
         }
         
+        self._blacklist.update(self._dynamic_blacklist)
         self._available_modules = set()
         if self.build_dir.exists():
             for hbc6_file in self.build_dir.glob('*.hbc6'):
@@ -222,6 +226,28 @@ class HBC6Finder(importlib.abc.MetaPathFinder):
         )
         return spec
 
+    def _load_deadzone(self) -> set:
+        """Lê o arquivo de quarentena do disco."""
+        if not self._deadzone_path.exists():
+            return set()
+        try:
+            from doxoade.tools.hermes_systems.hermes_deadzone import load_deadzone
+            return load_deadzone()
+        except Exception:
+            return set()
+
+    def _quarantine_module(self, module_name: str):
+        """Autocura: Bane o módulo que crashou o Motor C e salva em disco."""
+        if module_name not in self._dynamic_blacklist:
+            self._dynamic_blacklist.add(module_name)
+            self._blacklist.add(module_name)
+            try:
+                data = sorted(list(self._dynamic_blacklist))
+                self._deadzone_path.write_text(json.dumps(data, indent=2), encoding='utf-8')
+                if os.environ.get('HERMES_VERBOSE') == '1':
+                    print(f"[HERMES-DEADZONE] ⚠ {module_name} banido (Motor C falhou).")
+            except Exception:
+                pass
 
 class HBC6Loader(importlib.abc.Loader):
     
@@ -257,7 +283,7 @@ class HBC6Loader(importlib.abc.Loader):
                     elapsed_us=elapsed,
                     fallback_to="motor_c",
                 )
-            exec(code_obj, module.__dict__)
+            restricted_safe_exec(code_obj, module.__dict__)
         else:
             if _AUDIT_ENABLED:
                 from doxoade.tools.hermes_systems.hbc6_audit import HBC6Decision
@@ -271,7 +297,7 @@ class HBC6Loader(importlib.abc.Loader):
                 )
             self._python_fallback(module)
 
-    def _try_c_bridge(self):
+    def _try_c_bridge(self, hbc6_path: str, py_path: str, module_name: str):
         """Tenta carregar via Motor C com blindagem total."""
         
         # 🛡️ BLINDAGEM 1: Verifica se o Global Dictionary existe
@@ -301,10 +327,11 @@ class HBC6Loader(importlib.abc.Loader):
         # 🛡️ BLINDAGEM 3: Chama o Motor C com os argumentos CORRETOS
         try:
             from doxoade.tools.hermes_systems.native import hermes_bridge
-            # ✅ CORRIGIDO: passa gd_path, NÃO py_path
-            code_obj = hermes_bridge.load_module(
-                str(self.hermes_path), str(gd_path)
-            )
+            code_obj = hermes_bridge.load_module(hbc6_path, py_path)
+            if code_obj is None:
+                # --- [ANÚBIS] AUTOCURA ---
+                self._quarantine_module(module_name)
+                return None
             return code_obj
         except Exception as e:
             if _AUDIT_ENABLED:
@@ -315,6 +342,7 @@ class HBC6Loader(importlib.abc.Loader):
                     exception_msg=str(e),
                     fallback_to="source_py",
                 )
+            self._quarantine_module(module_name)
             return None
 
     def _python_fallback(self, module):
@@ -323,7 +351,7 @@ class HBC6Loader(importlib.abc.Loader):
         module.__hermes_error__ = "Motor C falhou ou HGD1 ausente"  # ✅ CORRIGIDO
         source = self.py_path.read_text(encoding="utf-8")
         code_obj = compile(source, str(self.py_path), "exec")
-        exec(code_obj, module.__dict__)
+        restricted_safe_exec(code_obj, module.__dict__)
 
 
 def install_hbc6_hook(project_root):

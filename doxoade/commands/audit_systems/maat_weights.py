@@ -9,8 +9,8 @@ class WeightGuard:
 
     def __init__(self, root):
         self.root = root
-        self.MAX_KB = 50
-        self.MAX_LINES = 1000
+        self.MAX_KB = 100
+        self.MAX_LINES = 2000
 
     def audit(self, files: list):
         findings = []

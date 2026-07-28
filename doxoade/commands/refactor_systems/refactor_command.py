@@ -281,15 +281,17 @@ def refactor_refs(target_path: Path, targets: tuple[str, ...]) -> None:
 @click.argument('dest_file', type=click.Path(path_type=Path))
 @click.option('--target', '-t', 'targets', multiple=True, help='Função/Classe específica.')
 @click.option('--overwrite', is_flag=True, help='Sobrescreve destino.')
-@click.option('--dry-run', is_flag=True, help='Apenas mostra o que seria feito, sem alterar arquivos.')
+#@click.option('--run', is_flag=True, help='Executa a refatoração. Por padrão, apenas simula (dry-run).')
+@click.option('--run', is_flag=True, default=False, help="🛡️ [SOTERIA] Executa a refatoração. Por padrão, apenas simula (dry-run).")
 @click.option('--docstrings', '-d', is_flag=True, help='Inclui docstrings e strings f"" na refatoração.')
-def refactor_move(source_file, dest_file, targets, overwrite, dry_run, docstrings):
-    """Move funções ou o ARQUIVO INTEIRO (com visualização prévia)."""
+def refactor_move(source_file, dest_file, targets, overwrite, run, docstrings):
+    # --- [SOTERIA] GUARDA DE SEGURANÇA ---
+    dry_run = not run
     if dry_run:
         _sep("DRY RUN - SIMULAÇÃO", color="yellow")
     else:
         _sep("REFACTOR MOVE")
-
+    
     project_root = _find_project_root(source_file)
     engine = RefactorEngine(base_path=project_root)
     
@@ -306,6 +308,14 @@ def refactor_move(source_file, dest_file, targets, overwrite, dry_run, docstring
         color = "yellow" if dry_run else "green"
         prefix = "[DRY-OK]" if dry_run else "[OK]"
         click.secho(f"\n  {prefix} {msg}", fg=color)
+        
+        _old_mod = locals().get('source_module') or locals().get('old_module') or locals().get('old_mod')
+        _new_mod = locals().get('dest_module') or locals().get('new_module') or locals().get('new_mod')
+        if _old_mod and _new_mod and 'engine' in locals():
+            engine.fix_relative_imports(_old_mod, _new_mod)
+
+        click.secho(f"  [OK] Arquivo {dest_file.name} movido e projeto sincronizado.", fg="green", bold=True)
+        
     else:
         click.secho(f"\n  [ERRO] {msg}", fg="red")
 
@@ -359,10 +369,11 @@ def refactor_verify(target_path: Path, function_name: str, from_import: str, fix
 @refactor_group.command('rename')
 @click.argument('old_module', metavar='MODULO_ANTIGO')
 @click.argument('new_module', metavar='MODULO_NOVO')
-@click.option('--root', '-r', type=click.Path(path_type=Path, exists=True, file_okay=False), default=Path('.'), show_default=True, metavar='PASTA', help='Raiz do projeto onde os imports serão buscados e atualizados.')
-@click.option('--apply', is_flag=True, help='Aplica as mudanças em disco. Sem esta flag: dry-run (só relatório).')
+@click.option('--root', '-r', type=click.Path(path_type=Path, exists=True, file_okay=False), default=Path('.'), show_default=True, metavar='PASTA', help='Raiz do projeto.')
+@click.option('--run', is_flag=True, default=False, help="🛡️ [SOTERIA] Executa a refatoração. Por padrão, apenas simula (dry-run).")
 @click.option('--overwrite', is_flag=True, help='Sobrescreve MODULO_NOVO caso o arquivo de destino já exista.')
-def refactor_rename(old_module: str, new_module: str, root: Path, apply: bool, overwrite: bool) -> None:
+def refactor_rename(old_module: str, new_module: str, root: Path, run: bool, overwrite: bool) -> None:
+    dry_run = not run
     """Renomeia um módulo e atualiza todos os imports que o referenciam.
 
     Sem --apply opera em modo dry-run: mostra o que seria alterado sem
@@ -374,11 +385,38 @@ def refactor_rename(old_module: str, new_module: str, root: Path, apply: bool, o
       doxoade refactor rename myapp.old_utils myapp.utils --root . --apply
       doxoade refactor rename myapp.old_utils myapp.utils --root . --apply --overwrite
     """
+    dry_run = not run
+    apply = not dry_run # Mapeia para a variável 'apply' que o engine espera
+    
+    if dry_run:
+        _sep("DRY RUN - SIMULAÇÃO", color="yellow")
+    else:
+        _sep("REFACTOR RENAME")
+
     from .refactor_rename_ast import rename_module_ast
     try:
         result = rename_module_ast(root.resolve(), old_module, new_module, apply=apply, overwrite=overwrite)
     except RuntimeError as exc:
         raise click.ClickException(str(exc)) from exc
+
+    # --- [ÁRTEMIS] PREVIEW DE SNIPPETS NO DRY-RUN ---
+    if not apply and result.rewrites:
+        from .refactor_preview import preview_rewrite_group
+        from .refactor_utils import read_text_safe
+
+        click.secho(f"\n🔍 [PREVIEW] {len(result.rewrites)} import(s) seriam reescritos em {len(result.changed_files)} arquivo(s):\n", fg='yellow', bold=True)
+
+        # Agrupa rewrites por arquivo
+        from collections import defaultdict
+        by_file = defaultdict(list)
+        for rw in result.rewrites:
+            by_file[rw.file].append(rw)
+
+        for fpath, file_rewrites in by_file.items():
+            source_text = read_text_safe(fpath)
+            preview_rewrite_group(fpath, file_rewrites, source_text, context=2)
+    # ------------------------------------------------
+
     click.echo(f'[RENAME] {result.old_module} → {result.new_module}')
     click.echo(f'[RENAME] origem:             {result.source_file}')
     click.echo(f'[RENAME] destino:            {result.dest_file}')
@@ -386,26 +424,30 @@ def refactor_rename(old_module: str, new_module: str, root: Path, apply: bool, o
     click.echo(f'[RENAME] imports reescritos: {len(result.rewrites)}')
     click.echo(f'[RENAME] aplicado:           {result.moved_file}')
     if not apply:
-        click.secho('\n[DRY-RUN] Nenhuma alteração aplicada. Use --apply para gravar.', fg='yellow')
+        click.secho('\n[DRY-RUN] Nenhuma alteração aplicada. Use --run para gravar.', fg='yellow')
 
 @refactor_group.command('fix-imports')
 @click.argument('path', type=click.Path(exists=True, path_type=Path), default=Path('.'))
-def refactor_fix_imports(path: Path) -> None:
-    """Otimiza imports trocando a Facade shared_tools pelos módulos reais.
-    
-    Varre os arquivos buscando imports de 'doxoade.shared_tools' e resolve
-    o caminho físico de cada função em 'doxoade.tools.*'.
-    """
-    _sep('FIX IMPORTS')
-    click.secho(f' Alvo: {path.resolve()}', fg='cyan')
+@click.option('--run', is_flag=True, default=False, help="🛡️ [SOTERIA] Executa a refatoração. Por padrão, apenas simula (dry-run).")
+def refactor_fix_imports(path: Path, run: bool) -> None:
+    dry_run = not run
+    if dry_run:
+        _sep("DRY RUN - FIX IMPORTS", color="yellow")
+    else:
+        _sep("FIX IMPORTS")
+        
+    click.secho(f'[*] Alvo: {path.resolve()}', fg='cyan')
     engine = RefactorEngine()
     count = 0
     try:
-        for fpath, msg in engine.fix_facade_imports(path):
-            click.secho(f'  [FIX] {fpath}', fg='green')
+        # CORREÇÃO: Passar dry_run=dry_run para o engine
+        for fpath, msg in engine.fix_facade_imports(path, dry_run=dry_run):
+            if not dry_run:
+                click.secho(f'  [FIX] {fpath}', fg='green')
             count += 1
     except Exception as e:
         raise click.ClickException(f'Erro na refatoração de imports: {e}')
+
     if count == 0:
         click.secho('\n[INFO] Nenhum import de Facade encontrado para otimização.', fg='yellow')
     else:
@@ -415,13 +457,19 @@ def refactor_fix_imports(path: Path) -> None:
 @refactor_group.command('headers')
 @click.argument('path', type=click.Path(exists=True, path_type=Path), default=Path('.'))
 @click.option('--force', is_flag=True, help='Força a regravação do cabeçalho em todos os arquivos.')
-def refactor_headers(path: Path, force: bool) -> None:
+@click.option('--run', is_flag=True, default=False, help="🛡️ [SOTERIA] Executa a refatoração. Por padrão, apenas simula (dry-run).")
+def refactor_headers(path: Path, force: bool, run: bool) -> None:
     """Insere automaticamente o comentário de path no topo dos arquivos."""
-    _sep("NEXUS HEADERS")
+    dry_run = not run
+    if dry_run:
+        _sep("DRY RUN - NEXUS HEADERS", color="yellow")
+    else:
+        _sep("NEXUS HEADERS")
     click.secho(f" Alvo: {path.resolve()}", fg="cyan")
     if force:
         click.secho(" Modo: FORÇADO (Substituição Agressiva)", fg="yellow")
     
+    click.secho(f"[*] Alvo: {path.resolve()}", fg="cyan")
     engine = RefactorEngine()
     count = 0
     
@@ -442,20 +490,23 @@ def refactor_headers(path: Path, force: bool) -> None:
 @refactor_group.command('repair')
 @click.argument('target_file', type=click.Path(exists=True, path_type=Path))
 @click.option('--root', '-r', default='.', help='Raiz do projeto.')
-@click.option('--dry-run', is_flag=True, help='Simula o reparo sem alterar arquivos.')
+@click.option('--run', is_flag=True, default=False, help="🛡️ [SOTERIA] Executa a refatoração. Por padrão, apenas simula (dry-run).")
 @click.option('--verbose', '-v', is_flag=True, help='Exibe detalhes de cada alteração.')
-def refactor_repair(target_file, root, dry_run, verbose):
-    """Conserta imports e strings de CLI para apontarem para este arquivo."""
+def refactor_repair(target_file, root, run, verbose):
+    # --- [SOTERIA] GUARDA DE SEGURANÇA ---
+    dry_run = not run
     if dry_run:
         _sep("DRY RUN: REPAIR", color="yellow")
     else:
         _sep("REFACTOR REPAIR")
-
+        
     engine = RefactorEngine(base_path=root)
     success, msg = engine.repair_references(target_file, dry_run=dry_run, verbose=verbose)
     
     if success:
-        click.secho(f"\n  [OK] {msg}", fg="green")
+        color = "yellow" if dry_run else "green"
+        prefix = "[DRY-OK]" if dry_run else "[OK]"
+        click.secho(f"\n  {prefix} {msg}", fg=color)
     else:
         click.secho(f"\n  [ERRO] {msg}", fg="red")
 
@@ -488,19 +539,19 @@ def refactor_audit(file_path: Path):
 
 @refactor_group.command('syntax-fix')
 @click.argument('path', type=click.Path(exists=True, path_type=Path), default=Path('.'))
-@click.option('--dry-run', is_flag=True, help='Simula sem gravar arquivos.')
+@click.option('--run', is_flag=True, default=False, help="🛡️ [SOTERIA] Executa a refatoração. Por padrão, apenas simula (dry-run).")
 @click.option('--verbose', '-v', is_flag=True, help='Exibe cada mudança linha a linha.')
-@click.option('--skip', 'extra_skip', multiple=True, metavar='PASTA',
-              help='Pasta adicional a ignorar (repetível). Ex: --skip mypkg_tests')
-@click.option('--include-tests', is_flag=True,
-              help='Inclui pastas de teste (tests/, fixtures/, etc.) na varredura.')
+@click.option('--skip', 'extra_skip', multiple=True, metavar='PASTA', help='Pasta adicional a ignorar.')
+@click.option('--include-tests', is_flag=True, help='Inclui pastas de teste na varredura.')
 def refactor_syntax_fix(
     path: Path,
-    dry_run: bool,
+    run: bool,
     verbose: bool,
     extra_skip: tuple[str, ...],
     include_tests: bool,
 ) -> None:
+    # --- [SOTERIA] GUARDA DE SEGURANÇA ---
+    dry_run = not run
     """Repara erros de sintaxe em f-strings causados pelo refactor AST.
 
     \\x08
@@ -527,8 +578,8 @@ def refactor_syntax_fix(
 
     _sep("SYNTAX FIX", color="cyan")
     target = Path(path).resolve()
-    click.secho(f" Alvo:    {target}", fg='cyan')
-    click.secho(f" Modo:    {'DRY-RUN' if dry_run else 'APPLY'}", fg='yellow' if dry_run else 'green')
+    click.secho(f"[*] Alvo:    {target}", fg='cyan')
+    click.secho(f"[*] Modo:    {'DRY-RUN' if dry_run else 'APPLY'}", fg='yellow' if dry_run else 'green')
 
     # Monta o conjunto de exclusão
     if include_tests:

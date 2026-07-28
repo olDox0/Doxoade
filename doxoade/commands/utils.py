@@ -134,10 +134,10 @@ def show_trace(ctx, filepath):
 @click.option('--path', '-p', 'base_path', default='.', type=click.Path(exists=True))
 @click.option('--tree', '-t', is_flag=True)
 @register_mk_options
-def mk(base_path, items, architecture, learning, tree, up):
+def mk(base_path, items, architecture, learning, tree, up, gitignore):
     """🔨 Construtor de Topologia e Visualizador Nexus."""
     from .mk_systems.mk_commands import execute_mk_logic
-    execute_mk_logic(base_path, items, architecture, learning, tree, up)  # <-- learning added
+    execute_mk_logic(base_path, items, architecture, learning, tree, up, gitignore)  # <-- learning added
 
 @click.command('create-pipeline')
 @click.pass_context

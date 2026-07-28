@@ -207,8 +207,9 @@ class BenzaitenWindow:
                 def _msg_wrapper(raw: bytes):
                     try:
                         fn(raw.decode("utf-8") if raw else "")
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        import logging
+                        logging.error(f"[BENZAITEN] Erro no callback de mensagem: {e}")
                 cb2 = MSG_CALLBACK(_msg_wrapper)
                 self._msg_cb_ref = cb2
                 _fn_msg(cb2)

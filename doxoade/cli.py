@@ -62,7 +62,7 @@ class DoxoadeLazyGroup(click.Group):
             'deepcheck': 'doxoade.commands.deepcheck:deepcheck',
             'diagnose': 'doxoade.commands.diagnose:diagnose',
             'diff': 'doxoade.commands.diff:diff',
-            'doctor': 'doxoade.commands.doctor:doctor',
+            'doctor': 'doxoade.commands.vulcan_systems.vulcan_cmd:doctor',
             'doxcolors': 'doxoade.commands.doxcolors_systems.colors_command:doxcolors_cmd',
             'encoding': 'doxoade.commands.encoding:encoding',
             'engine': 'doxoade.commands.engine_cmd:engine_group',
@@ -82,7 +82,7 @@ class DoxoadeLazyGroup(click.Group):
             'impact-analysis': 'doxoade.commands.impact_analysis:impact_analysis',
             'init': 'doxoade.commands.init:init',
             'install': 'doxoade.commands.install:install',
-            'intelligence': 'doxoade.commands.intelligence:intelligence',
+            'intelligence': 'doxoade.commands.intelligence_systems.intelligence:intelligence',
             'kvcheck': 'doxoade.commands.kvcheck:kvcheck',
             'lab': 'doxoade.commands.lab:lab_group',
             'linux': 'doxoade.commands.linux_systems.linux_cmd:linux_group',
@@ -125,7 +125,7 @@ class DoxoadeLazyGroup(click.Group):
             'venvkeeper': 'doxoade.commands.venvkeeper_systems.venvkeeper:venvkeeper',
             'venv': 'doxoade.commands.venv_cmd:venv_cmd',
             'verilog': 'doxoade.commands.verilog:verilog',
-            'vulcan': 'doxoade.commands.vulcan_cmd:vulcan_group',
+            'vulcan': 'doxoade.commands.vulcan_systems.vulcan_cmd:vulcan_group',
             'webcheck': 'doxoade.commands.webcheck:webcheck',
             'wsl': 'doxoade.commands.linux_systems.linux_cmd:linux_group',
 
@@ -153,24 +153,23 @@ class DoxoadeLazyGroup(click.Group):
         ctx.exit(1)
 
     def parse_args(self, ctx: click.Context, args: list) -> list:
-        """Intercepta opções erradas e sugere correções via Ganesha."""
+        """Intercepta opções erradas no grupo principal e sugere correções via Ganesha."""
         if not args or args[0].startswith('-'):
-            # Tenta parsear normalmente
             try:
                 return super().parse_args(ctx, args)
             except click.exceptions.UsageError as e:
                 error_msg = str(e)
-                
-                # Detecta "No such option: -h"
                 if "No such option:" in error_msg:
                     wrong_option = error_msg.split("No such option:")[-1].strip()
                     from doxoade.tools.ganesha_systems.ganesha_advisor import GaneshaAdvisor
                     GaneshaAdvisor.show_option_suggestion(ctx, ctx.command, wrong_option)
+                    GaneshaAdvisor.show_usage_suggestion(ctx.command, args)
                     ctx.exit(1)
-                
-                # Re-raise outros erros
+                elif "Missing argument" in error_msg or "Got unexpected extra argument" in error_msg:
+                    from doxoade.tools.ganesha_systems.ganesha_advisor import GaneshaAdvisor
+                    GaneshaAdvisor.show_usage_suggestion(ctx.command, args)
+                    ctx.exit(1)
                 raise
-        
         return super().parse_args(ctx, args)
         
     def _load_cache(self):
@@ -255,10 +254,10 @@ class DoxoadeLazyGroup(click.Group):
     def get_command(self, ctx, name):
         if name not in self._lazy_map:
             return None
+        
         module_path, attr_name = self._lazy_map[name].split(':')
-
         import importlib.util
-
+        
         # --- ORÁCULO DE SINTAXE ---
         try:
             spec = importlib.util.find_spec(module_path)
@@ -271,12 +270,12 @@ class DoxoadeLazyGroup(click.Group):
             return None
         except Exception:
             pass
-
+        
         # --- CARREGAMENTO REAL E INJEÇÃO DE CORES ---
         try:
             mod = import_module(module_path)
             cmd = getattr(mod, attr_name)
-
+            
             # 1. Colore e sanitiza o título/descrição principal do comando
             import re
             base_help = getattr(cmd, 'help', None) or self._help_cache.get(name, "")
@@ -284,7 +283,7 @@ class DoxoadeLazyGroup(click.Group):
                 clean_help = re.sub(r'\x1b\[[0-9;]*m', '', base_help)
                 clean_help = self._sanitize(clean_help)
                 cmd.help = f"{Fore.CYAN}{Style.BRIGHT}{clean_help}{Style.RESET_ALL}"
-
+            
             # 2. Injeta cores dinâmicas nas flags e opções
             def patch_param(p):
                 orig_fn = p.get_help_record
@@ -298,11 +297,11 @@ class DoxoadeLazyGroup(click.Group):
                     return record
                 p.get_help_record = patched_get_help_record
                 p._dox_patched = True
-
+            
             for param in cmd.params:
                 if not getattr(param, '_dox_patched', False):
                     patch_param(param)
-
+            
             # 3. Subcomandos coloridos
             if isinstance(cmd, click.Group) and not getattr(cmd, '_dox_group_patched', False):
                 orig_format_commands = cmd.format_commands
@@ -312,73 +311,79 @@ class DoxoadeLazyGroup(click.Group):
                         sub_cmd = cmd.get_command(ctx_inner, sub_name)
                         if sub_cmd is None:
                             continue
-
-                        help_str = getattr(sub_cmd, 'short_help', None) or getattr(sub_cmd, 'help', None)
-
-                        cb = getattr(sub_cmd, 'callback', None)
-                        if cb:
-                            while hasattr(cb, '__wrapped__'):
-                                cb = cb.__wrapped__
-
-                        if not help_str and cb:
-                            help_str = inspect.getdoc(cb)
-
-                        # MODO SOTÉRIA / CYTHON BYPASS (PASC-8.22)
-                        if not help_str and cb and hasattr(cb, '__module__'):
-                            try:
-                                import ast
-                                mod_inner = sys.modules.get(cb.__module__)
-                                if mod_inner and hasattr(mod_inner, '__file__'):
-                                    fpath = mod_inner.__file__
-                                    if fpath.endswith(('.pyd', '.so', '.pyc')):
-                                        fpath = os.path.splitext(fpath)[0] + '.py'
-                                    if os.path.exists(fpath):
-                                        source = open(fpath, 'r', encoding='utf-8', errors='ignore').read()
-                                        for node in ast.walk(ast.parse(source)):
-                                            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                                                if hasattr(cb, '__name__') and node.name == cb.__name__:
-                                                    help_str = ast.get_docstring(node)
-                                                    break
-                            except Exception:
-                                pass
-
+                        
+                        help_str = sub_cmd.get_short_help_str(limit=80)
+                        
+                        if not help_str or help_str == "No help available.":
+                            cb = getattr(sub_cmd, 'callback', None)
+                            if cb:
+                                while hasattr(cb, '__wrapped__'):
+                                    cb = cb.__wrapped__
+                                if cb:
+                                    help_str = inspect.getdoc(cb)
+                                
+                                if not help_str and cb and hasattr(cb, '__module__'):
+                                    try:
+                                        import ast
+                                        mod_inner = sys.modules.get(cb.__module__)
+                                        if mod_inner and hasattr(mod_inner, '__file__'):
+                                            fpath = mod_inner.__file__
+                                            if fpath.endswith(('.pyd', '.so', '.pyc')):
+                                                fpath = os.path.splitext(fpath)[0] + '.py'
+                                            if os.path.exists(fpath):
+                                                source = open(fpath, 'r', encoding='utf-8', errors='ignore').read()
+                                                tree = ast.parse(source)
+                                                for node in ast.walk(tree):
+                                                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                                                        if (hasattr(cb, '__name__') and node.name == cb.__name__) or \
+                                                           (hasattr(sub_cmd, 'name') and node.name == sub_cmd.name):
+                                                            help_str = ast.get_docstring(node)
+                                                            break
+                                    except Exception:
+                                        pass
+                        
                         if not help_str:
                             help_str = "Sem descrição."
                         else:
                             lines = [line for line in str(help_str).strip().split('\n') if line.strip()]
                             help_str = self._sanitize(lines[0]) if lines else "Sem descrição."
-                            if not help_str:
-                                help_str = "Sem descrição."
-
+                        
                         colored_sub_name = f"{Fore.CYAN}{sub_name}{Style.RESET_ALL}"
                         colored_sub_desc = f"{Style.DIM}{help_str}{Style.RESET_ALL}"
                         commands.append((colored_sub_name, colored_sub_desc))
-
+                    
                     if commands:
                         with formatter.section("Commands"):
                             formatter.write_dl(commands)
+                
+                cmd.format_commands = patched_format_commands
+                cmd._dox_group_patched = True
 
+            # 4. Hook do Ganesha para interceptar erros de sintaxe/ordem nos subcomandos
             if not getattr(cmd, '_ganesha_hooked', False):
                 original_parse_args = cmd.parse_args
-                
-                def ganesha_parse_args(ctx, args):
+                def ganesha_parse_args(ctx_inner, args_inner):
                     try:
-                        return original_parse_args(ctx, args)
+                        return original_parse_args(ctx_inner, args_inner)
                     except click.exceptions.UsageError as e:
                         error_msg = str(e)
                         if "No such option:" in error_msg:
                             wrong_option = error_msg.split("No such option:")[-1].strip()
                             from doxoade.tools.ganesha_systems.ganesha_advisor import GaneshaAdvisor
-                            GaneshaAdvisor.show_option_suggestion(ctx, cmd, wrong_option)
-                            ctx.exit(1)
+                            GaneshaAdvisor.show_option_suggestion(ctx_inner, cmd, wrong_option)
+                            GaneshaAdvisor.show_usage_suggestion(cmd, args_inner)
+                            ctx_inner.exit(1)
+                        elif "Missing argument" in error_msg or "Got unexpected extra argument" in error_msg:
+                            from doxoade.tools.ganesha_systems.ganesha_advisor import GaneshaAdvisor
+                            GaneshaAdvisor.show_usage_suggestion(cmd, args_inner)
+                            ctx_inner.exit(1)
                         raise
-                
                 cmd.parse_args = ganesha_parse_args
                 cmd._ganesha_hooked = True
-
+            
             return cmd
-
-
+            
+        # 🛡️ FECHAMENTO DO TRY PRINCIPAL (Era aqui que estava o SyntaxError)
         except Exception as e:
             if not ctx.resilient_parsing:
                 from doxoade.rescue import activate_protocol

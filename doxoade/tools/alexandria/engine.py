@@ -52,18 +52,22 @@ class AlexandriaEngine:
 
 
     def _worker(self):
-        from doxoade.core_database import DB_FILE, get_db_connection
+        from doxoade.tools.core_locator import GLOBAL_DB_FILE, GLOBAL_DATA_DIR
+        from doxoade.core_database import DB_FILE, DB_DIR, get_db_connection
         import os
         
+        GLOBAL_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        DB_DIR.mkdir(parents=True, exist_ok=True)
         # Garante a existência física do diretório da base
         os.makedirs(os.path.dirname(str(DB_FILE)), exist_ok=True)
         
         # Invoca a conexão oficial para garantir a Gênese do init_db()
+#        conn_oficial = None
         conn_oficial = get_db_connection()
         conn_oficial.close()
 
         # Conexão paralela do Alexandria
-        conn = sqlite3.connect(str(DB_FILE), timeout=30)
+        conn = sqlite3.connect(str(GLOBAL_DB_FILE), timeout=30)
         cursor = conn.cursor()
         
         # 🔴 CORREÇÃO: O Alexandria garante sua própria estrutura antes de trabalhar

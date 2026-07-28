@@ -53,7 +53,8 @@ def minify_code(code: str, filename: str, no_comments: bool, no_spaces: bool) ->
     # 2. CAMADA DE REMOÇÃO DE ESPAÇOS (-ns)
     if no_spaces:
         # Remove linhas vazias e faz strip lateral (esquerda e direita)
-        body = [l.strip() for l in body if l.strip()]
+#        body = [l.strip() for l in body if l.strip()]
+        body = [l for l in body if l.strip()]
     else:
         # Apenas remove espaços no final da linha (trailing whitespaces)
         body = [l.rstrip() for l in body]
@@ -187,6 +188,31 @@ def _print_forensic(func_name: str, e: Exception):
     print(f"\033[1;34m\n[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: {func_name}\033[0m")
     print(f"\033[31m    ■ Type: {type(e).__name__} | Value: {e}\033[0m")
     
+def get_god_glossary():
+    """Retorna o glossário de arquétipos de engenharia (God Assignment)."""
+    return {
+        "Zeus": "⚡ Kernel / Orquestrador / Root. Controla permissões e roteamento (CLI, __main__).",
+        "Hera": "🦚 Consistência / Contratos / Estado. Mantém a integridade de dados inter-sistemas.",
+        "Poseidon": "🌊 Streams / I/O / Caos controlável. Lida com I/O de arquivos e redes.",
+        "Hades": "💀 Persistência / Arquivamento. Armazena histórico e logs profundos (banco de dados, cache).",
+        "Atena": "🦉 Estratégia / Arquitetura. Define design patterns e lógica de análise profunda.",
+        "Ares": "⚔️ Força Bruta / Hack. Ofensiva, scripts rígidos e de execução agressiva (segurança, check).",
+        "Apolo": "☀️ Ordem / Código Limpo. Responsável por UI/UX clara no terminal (display, telemetry).",
+        "Ártemis": "🏹 Ferramentas Autônomas. Espírito original do Doxoade, independência e precisão.",
+        "Hefesto": "🔨 Construção / Engenharia. Build systems, compilação C/Cython (Vulcan).",
+        "Hermes": "🪽 Comunicação. APIs, bridges inter-sistemas (integração, middlewares).",
+        "Dionísio": "🍷 Caos Criativo. Prototipagem, laboratórios de experimentação, documentação.",
+        "Rá": "☀️ Loop Principal. Fonte de energia, clock do sistema.",
+        "Osíris": "🌱 Persistência e Renascimento. Snapshots e recovery.",
+        "Ísis": "✨ Integração. Magia de juntar partes quebradas (Middlewares).",
+        "Hórus": "🦅 Observabilidade. O olho que tudo vê (Telemetria, Chronos).",
+        "Ma'at": "⚖️ Ordem e Invariantes. O que nunca pode quebrar (Asserções, auditoria).",
+        "Anúbis": "🐺 Validação e Auditoria. O juiz que decide o que passa ou morre (check, security).",
+        "Thoth": "📖 Linguagem e Lógica. AST Parsers, Inteligência Simbólica.",
+        "Set": "🏜️ Entropia. Falhas esperadas, inputs maliciosos. O sistema maduro espera por Set.",
+        "Vulcan": "🔥 Metalurgia Nativa. Compilação C/Cython de alta performance."
+    }
+    
 class SemanticAnalyzer:
     """Extrai a estrutura lógica para tokens de IA (OSL 4 / PASC 8.10)."""
     def __init__(self, code):
@@ -226,10 +252,20 @@ class SemanticAnalyzer:
         if not self.tree: 
             return {"status": "corrupt", "classes": [], "functions": [], "complexity": 0}
         
+        # 🆕 Extração de Funções com Docstrings (PASC 13.1)
+        funcs = []
+        for n in ast.walk(self.tree):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                doc = ast.get_docstring(n)
+                funcs.append({
+                    "name": n.name,
+                    "docstring": doc.split('\n')[0] if doc else "" # Pega apenas a primeira linha (resumo)
+                })
+                
         return {
             "status": "stable",
             "classes":    [n.name for n in ast.walk(self.tree) if isinstance(n, ast.ClassDef)],
-            "functions":  [n.name for n in ast.walk(self.tree) if isinstance(n, ast.FunctionDef)],
+            "functions":  funcs, # 🆕 Agora é uma lista de dicts
             "complexity":  len([n for n in ast.walk(self.tree) if isinstance(n, (ast.If, ast.For, ast.While))])
         }
 

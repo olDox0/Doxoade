@@ -2,7 +2,7 @@
 from pathlib import Path
 
 def _load_bootstrap_source() -> str:
-    src = Path('doxoade/commands/vulcan_cmd.py').read_text(encoding='utf-8')
+    src = Path('doxoade/commands/vulcan_systems/vulcan_cmd.py').read_text(encoding='utf-8')
     return src
 
 def test_bootstrap_registers_runtime_alias_module():

@@ -5,7 +5,7 @@ import os
 import ast
 from datetime import datetime
 
-from doxoade.commands.intelligence_utils import (
+from doxoade.commands.intelligence_systems.intelligence_utils import (
     SemanticAnalyzer, CSemanticAnalyzer, HTMLSemanticAnalyzer,
     NexusThothMapper, ChiefInsightVisitor, find_debt_tags,
     TOMLSemanticAnalyzer, MDSemanticAnalyzer, AssemblySemanticAnalyzer,

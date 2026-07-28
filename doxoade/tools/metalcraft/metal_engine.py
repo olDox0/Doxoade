@@ -143,6 +143,78 @@ class NexusMetalEngine:
     # ─────────────────────────────────────────────────────────────
     # BUILD PRINCIPAL
     # ─────────────────────────────────────────────────────────────
+    def _build_compiler_command(self, target_name: str, sources: list, output_dir: Path) -> list:
+        """
+        Monta o comando de compilação respeitando o metalcraft.toml.
+        🔥 NOVO: Suporte a 'type = shared_lib' e 'cflags'.
+        """
+        if not self.config:
+            return []
+
+        compiler_conf = self.config.get('compiler', {})
+        paths_conf = self.config.get('paths', {})
+        project_conf = self.config.get('project', {})
+
+        # 1. Engine e Standard
+        engine = compiler_conf.get('engine', 'gcc')
+        std = compiler_conf.get('std', 'c11')
+        opt = compiler_conf.get('opt', 'O2')
+        
+        # 2. 🔥 LEITURA DO TIPO DE SAÍDA (shared_lib vs executable)
+        project_type = project_conf.get('type', 'executable').lower()
+        is_shared = project_type in ['shared_lib', 'shared', 'library', 'dll', 'so']
+        
+        # 3. 🔥 LEITURA DOS CFLAGS CUSTOMIZADOS
+        custom_cflags = compiler_conf.get('cflags', [])
+        if isinstance(custom_cflags, str):
+            custom_cflags = [custom_cflags]
+
+        # 4. Monta o comando base
+        cmd = [engine]
+        
+        # 5. 🔥 INJEÇÃO DO -shared (se for shared_lib OU se o usuário colocou no cflags)
+        if is_shared or '-shared' in custom_cflags:
+            cmd.append('-shared')
+            # Remove duplicatas se o usuário já colocou -shared no cflags
+            custom_cflags = [f for f in custom_cflags if f != '-shared']
+
+        # 6. Otimização e Standard
+        if not opt.startswith('-'):
+            opt = f'-{opt}'
+        cmd.append(opt)
+        cmd.append(f'-std={std}')
+
+        # 7. 🔥 INJEÇÃO DOS CFLAGS CUSTOMIZADOS
+        cmd.extend(custom_cflags)
+
+        # 8. Headers/Includes
+        headers = paths_conf.get('headers', [])
+        for h in headers:
+            cmd.append(f'-I{h}')
+
+        # 9. Arquivos fonte
+        cmd.extend([str(s) for s in sources])
+
+        # 10. 🔥 DEFINIÇÃO DO ARQUIVO DE SAÍDA (extensão correta)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        if is_shared:
+            ext = '.dll' if os.name == 'nt' else '.so'
+            out_file = output_dir / f'{target_name}{ext}'
+        else:
+            ext = '.exe' if os.name == 'nt' else ''
+            out_file = output_dir / f'{target_name}{ext}'
+        
+        cmd.extend(['-o', str(out_file)])
+
+        # 11. LDFLAGS (se houver)
+        linker_conf = self.config.get('linker', {})
+        ldflags = linker_conf.get('ldflags', [])
+        if isinstance(ldflags, str):
+            ldflags = [ldflags]
+        cmd.extend(ldflags)
+
+        return cmd, out_file
+
     def build(self, target=None, release=False, use_soteria=True, force=False):
         """
         FORJA NATIVA INDUSTRIAL (v45.0) — Sotéria Integrated.
@@ -228,10 +300,19 @@ class NexusMetalEngine:
                 print(f"      {Fore.YELLOW}⚡ [BYPASS] Sotéria desativada.{self.RST}")
                 vacinados = final_sources
 
-            # e) Metalurgia (GCC)
+            # e) Metalurgia (GCC) — 🔥 CORRIGIDO: Respeita type=cflags do TOML
             opt = t_cfg.get('opt', self.config.get('compiler', {}).get('opt', 'O2'))
             flags = t_cfg.get('flags', [])
-
+            
+            # 🔥 LEITURA DO TIPO DE SAÍDA (shared_lib vs executable)
+            project_type = self.config.get('project', {}).get('type', 'executable').lower()
+            is_shared = project_type in ['shared_lib', 'shared', 'library', 'dll', 'so']
+            
+            # 🔥 LEITURA DOS CFLAGS CUSTOMIZADOS
+            custom_cflags = self.config.get('compiler', {}).get('cflags', [])
+            if isinstance(custom_cflags, str):
+                custom_cflags = [custom_cflags]
+            
             # Include paths
             source_dirs = list(set(str(s.parent) for s in final_sources))
             inc_flags = [f'-I"{str(d).replace(chr(92), "/")}"' for d in source_dirs]
@@ -255,26 +336,20 @@ class NexusMetalEngine:
                 if py_inc:
                     python_inc_flag = [f'-I"{py_inc.replace(chr(92), "/")}"']
                     print(f"      {Fore.CYAN}🐍 Python.h detectado — include: {py_inc}{self.RST}")
-                
-                # Detecta a biblioteca de importação do Python
                 import sys
                 py_version = f"{sys.version_info.major}{sys.version_info.minor}"
                 py_prefix = Path(sys.base_prefix)
                 libs_dir = py_prefix / 'libs'
-                
-                # Tenta múltiplos formatos de nome
                 candidates = [
-                    libs_dir / f'libpython{py_version}.dll.a',  # MinGW
-                    libs_dir / f'python{py_version}.lib',        # MSVC (python312.lib)
-                    libs_dir / f'libpython{py_version}.a',       # Linux
+                    libs_dir / f'libpython{py_version}.dll.a',
+                    libs_dir / f'python{py_version}.lib',
+                    libs_dir / f'libpython{py_version}.a',
                 ]
-                
                 found_lib = None
                 for candidate in candidates:
                     if candidate.exists():
                         found_lib = candidate
                         break
-                
                 if found_lib:
                     python_lib_flags = [f'-L"{str(libs_dir).replace(chr(92), "/")}"', f'-lpython{py_version}']
                     print(f"      {Fore.CYAN}🔗 Python lib: {found_lib.name}{self.RST}")
@@ -294,9 +369,23 @@ class NexusMetalEngine:
                 ]
                 print(f"      {Fore.CYAN}🛡️ Sotéria integrada — {len(soteria_srcs)} fontes{self.RST}")
 
+            # 🔥 MONTAGEM DO COMANDO AGORA RESPEITA O TOML
             cmd = [
-                f'"{self.toolchain.compiler_path}"', f"-{opt}", "-g",
-            ] + python_inc_flag + soteria_inc_flag + inc_flags + [
+                f'"{self.toolchain.compiler_path}"',
+            ]
+            
+            # 🔥 INJEÇÃO DO -shared (se for shared_lib OU se o usuário colocou no cflags)
+            if is_shared or '-shared' in custom_cflags:
+                cmd.append('-shared')
+                custom_cflags = [f for f in custom_cflags if f != '-shared']
+            
+            cmd.append(f'-{opt}')
+            cmd.append('-g')
+            
+            # 🔥 INJEÇÃO DOS CFLAGS CUSTOMIZADOS
+            cmd.extend(custom_cflags)
+            
+            cmd += python_inc_flag + soteria_inc_flag + inc_flags + [
                 f'-I"{str(self.root / "include").replace(chr(92), "/")}"'
             ]
 
@@ -306,19 +395,32 @@ class NexusMetalEngine:
                 if soteria_h.exists():
                     cmd.append(f'-include "{str(soteria_h).replace(chr(92), "/")}"')
 
-
             cmd += [f'"{str(v).replace(chr(92), "/")}"' for v in vacinados]
             cmd += soteria_srcs
             cmd += flags
+            
+            # 🔥 DEFINIÇÃO DO ARQUIVO DE SAÍDA (extensão correta)
+            if is_shared:
+                ext = '.dll' if os.name == 'nt' else '.so'
+                final_out = out_file.parent / f'{t_name}{ext}'
+            else:
+                ext = '.exe' if os.name == 'nt' else ''
+                final_out = out_file.parent / f'{t_name}{ext}'
+            
             cmd += [
-                f'-o "{str(out_file).replace(chr(92), "/")}"',
+                f'-o "{str(final_out).replace(chr(92), "/")}"',
             ] + python_lib_flags + [
                 "-ldbghelp", "-lpsapi", "-lkernel32"
             ]
+            
+            # Atualiza a referência do out_file para o nome correto
+            out_file = final_out
 
             chief_heartbeat("METAL", "LINKER_CHECK", {
-                "target": t_name, "opt": opt, "soteria": target_use_soteria
+                "target": t_name, "opt": opt, "soteria": target_use_soteria,
+                "shared": is_shared
             })
+
 
             res = subprocess.run(" ".join(cmd), capture_output=True,
                                  text=True, shell=True)

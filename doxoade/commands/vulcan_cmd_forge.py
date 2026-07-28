@@ -15,9 +15,14 @@ import click
 from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.vulcan.site_packages import site_packages_dirs_for_listing
-from .vulcan_cmd import _sigint_handler, _print_vulcan_forensic, _patch_vulcan_forge, _simd_context_or_none, _NullContext, _SIMD_AVAILABLE, _OBJREDUCE_AVAILABLE
+from .vulcan_systems.vulcan_cmd import _SIMD_AVAILABLE, _OBJREDUCE_AVAILABLE
 from doxoade.tools.filesystem import _find_project_root
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
+from doxoade.commands.vulcan_systems.vulcan_cmd import _simd_context_or_none
+from doxoade.commands.vulcan_systems.vulcan_cmd import _NullContext
+from doxoade.commands.vulcan_systems.vulcan_cmd import _sigint_handler
+from doxoade.commands.vulcan_systems.vulcan_cmd import _print_vulcan_forensic
+from doxoade.commands.vulcan_systems.vulcan_cmd import _patch_vulcan_forge
 try:
     from doxoade.tools.vulcan.simd_compiler import SIMDContext, SIMDEnvironment, estimate_gain
 except ImportError:

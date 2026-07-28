@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
-# doxoade/commands/intelligence.py
+# doxoade/commands/intelligence_systems/intelligence.py
 import os
+import re
 import json
 import click
 import traceback
+import xml.etree.ElementTree as ET
+
 from pathlib import Path
 from rich.console import Console
 
@@ -13,6 +16,7 @@ from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 from doxoade.tools.filesystem import _find_project_root
 
 # PASC 10.1: Configuração para permitir flags APÓS os caminhos
+ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'], allow_interspersed_args=True)
 VALID_EXTS = (
     '.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx',
@@ -33,12 +37,18 @@ VALID_EXTS = (
 @click.option('--ext-exclude','-xe', multiple=True, help="Extensões específicas a ignorar.") # 🆕 NOVO
 @click.option('--analyze',    '-a', is_flag=True,  help="Auditoria de Cobertura.")
 @click.option('--verbose',    '-v', is_flag=True,  help="Modo verboso.")
+@click.option('--graph',      '-g', is_flag=False, flag_value=1, default=0, type=int, help="Inclui arquivos relacionados (grafo de dependências). Nível de profundidade (padrão 1).")
+@click.option('--manifest',   '-m', is_flag=True, help="🦉 [THOTH] Gera o manifesto JSON de comandos para IAs (Tool Use).")
 @click.argument('paths', nargs=-1, type=click.Path(exists=True))
 @click.pass_context
-def intelligence(ctx, docs, source, no_comments, no_spaces, concatenate, ai_export, ia_qwen, output, focus, exclude, ext_exclude, analyze, verbose, paths):
+def intelligence(ctx, docs, source, no_comments, no_spaces, concatenate, ai_export, ia_qwen, output, focus, exclude, ext_exclude, analyze, verbose, manifest, paths, graph):
     """Módulo de Inteligência Topológica (v95.6 - Qwen Ready)."""
     if analyze:
         _run_analyze_coverage(paths, exclude, verbose, ext_exclude)
+        return
+
+    if manifest:
+        generate_manifest() # XML é o padrão absoluto
         return
 
     if ctx.invoked_subcommand is None:
@@ -46,7 +56,7 @@ def intelligence(ctx, docs, source, no_comments, no_spaces, concatenate, ai_expo
         try:
             _run_dossier_scan(
                 scan_paths, output, docs, source,
-                no_comments, no_spaces, concatenate, focus, ai_export, ia_qwen, ctx, exclude, ext_exclude
+                no_comments, no_spaces, concatenate, focus, ai_export, ia_qwen, ctx, exclude, ext_exclude, graph
             )
         except Exception:
             error_data = traceback.format_exc()
@@ -64,10 +74,10 @@ def recover(backup_path, output_path):
     if success: click.echo(f"\033[92m✅ {msg}\033[0m")
     else: click.echo(f"\033[91m✘ {msg}\033[0m")
 
-def _run_dossier_scan(scan_paths, output, include_docs, include_source, no_comments, no_spaces, concat, focus, ai_export, ia_qwen, ctx, cli_excludes, ext_excludes):
-    from .intelligence_systems.intelligence_engine import analyze_file_chief
+def _run_dossier_scan(scan_paths, output, include_docs, include_source, no_comments, no_spaces, concat, focus, ai_export, ia_qwen, ctx, cli_excludes, ext_excludes, graph_depth):
+    from doxoade.commands.intelligence_systems.intelligence_engine import analyze_file_chief
     # 🆕 CORREÇÃO: Importar minify_code em vez de strip_comments
-    from .intelligence_utils import minify_code, get_ignore_spec 
+    from doxoade.commands.intelligence_systems.intelligence_utils import minify_code, get_ignore_spec 
     
     root = _find_project_root(os.getcwd())
     console = Console()
@@ -88,7 +98,6 @@ def _run_dossier_scan(scan_paths, output, include_docs, include_source, no_comme
             '.pyd', '.so', '.toml', '.md', '.s', '.json', '.txt'
         )
         
-        # ... (Mantenha o bloco do DNM e unique_files igual) ...
         all_files_raw = []
         for p in scan_paths:
             p_abs = os.path.abspath(p)
@@ -104,6 +113,32 @@ def _run_dossier_scan(scan_paths, output, include_docs, include_source, no_comme
             if not ignore_spec.match_file(rel_path):
                 unique_files.append(f)
                 
+        # 🆕 --- GRAFO DE DEPENDÊNCIAS ---
+        neighbors_map = {}
+        if graph_depth > 0:
+            from doxoade.commands.intelligence_systems.graph_builder import get_graph_neighbors
+            console.print(
+                f"[bold cyan]🕸️  Construindo Grafo de Dependências "
+                f"(Profundidade: {graph_depth})...[/bold cyan]"
+            )
+            try:
+                neighbors_map, new_files = get_graph_neighbors(
+                    unique_files, root, ignore_spec, graph_depth
+                )
+                if new_files:
+                    console.print(
+                        f"[bold green]   ↳ {len(new_files)} arquivo(s) "
+                        f"relacionado(s) descoberto(s)[/bold green]"
+                    )
+                # Injeta os arquivos descobertos no scan principal
+                unique_files.extend(new_files)
+                # Remove duplicatas mantendo ordem
+                unique_files = list(dict.fromkeys(unique_files))
+            except Exception as e:
+                console.print(f"[bold red]   ⚠ Grafo falhou: {e}[/bold red]")
+                neighbors_map = {}
+        # -------------------------------------------
+
         dossier_files = []
         with click.progressbar(unique_files, label='[VULCAN:INTEL]') as bar:
             for f in bar:
@@ -114,13 +149,21 @@ def _run_dossier_scan(scan_paths, output, include_docs, include_source, no_comme
                         src = res.get('source_minified')
                         if src and (no_comments or no_spaces):
                             res['source_minified'] = minify_code(src, f, no_comments, no_spaces)
+                        
+                        # 🆕 ANEXA O GRAFO AO RELATÓRIO (Convertendo caminhos absolutos para relativos)
+                        if graph_depth > 0 and f in neighbors_map:
+                            res['graph_neighbors'] = [
+                                os.path.relpath(x, root).replace('\\', '/') 
+                                for x in neighbors_map[f]
+                            ]
                         dossier_files.append(res)
                 except Exception:
                     continue
-                    
-        _save_report(dossier_files, output, root, concat, focus, ai_export, ia_qwen, console)
 
-def _save_report(files, output, root, concat, focus, ai_export, ia_qwen, console):
+        # Passa graph_depth e include_source para o salvador do relatório
+        _save_report(dossier_files, output, root, concat, focus, ai_export, ia_qwen, console, graph_depth, include_source)
+
+def _save_report(files, output, root, concat, focus, ai_export, ia_qwen, console, graph_depth=0, include_source=False):
     from datetime import datetime, timezone
     
     report_files = []
@@ -201,6 +244,14 @@ def _save_report(files, output, root, concat, focus, ai_export, ia_qwen, console
             "total_mpot_violations_in_report": total_mpot_violations
         }
     
+    if graph_depth > 0:
+        total_graph_edges = sum(len(f.get('graph_neighbors', [])) for f in files)
+        economic_summary["total_graph_edges"] = total_graph_edges
+        economic_summary["graph_depth"] = graph_depth
+
+    # 🆕 Injeção do Glossário de Deuses
+    from doxoade.commands.intelligence_systems.intelligence_utils import get_god_glossary
+    
     report = {
         report_type: {
             "version": "2026.Chief.v2",
@@ -209,6 +260,7 @@ def _save_report(files, output, root, concat, focus, ai_export, ia_qwen, console
             "token_optimization": "ENABLED" if concat else "DISABLED",
             "focus_applied": focus if focus else "NONE"
         },
+        "god_glossary": get_god_glossary(),  # 🆕 Glossário embutido
         "economic_summary": economic_summary,
         "codebase_map": report_files
     }
@@ -219,7 +271,8 @@ def _save_report(files, output, root, concat, focus, ai_export, ia_qwen, console
         _save_qwen_report(report, qwen_output, console)
     elif ai_export:
         ai_output = output.replace('.json', '') + "_llm.xml" if output.endswith('.json') else output + "_llm.xml"
-        _save_llm_report(report, ai_output, console)
+        _save_llm_report(report, ai_output, console, include_source)
+#        _save_report(dossier_files, output, root, concat, focus, ai_export, ia_qwen, console, graph_depth, include_source)
     else:
         with open(output, 'w', encoding='utf-8') as f:
             json.dump(report, f, indent=None if concat else 2, ensure_ascii=False)
@@ -232,7 +285,7 @@ def _calculate_distribution(files):
         dist[g] = dist.get(g, 0) + 1
     return dist
     
-def _save_llm_report(report_data, output_path, console):
+def _save_llm_report(report_data, output_path, console, include_source=False):
     """Traduz o JSON arquitetural para um formato XML bem indentado e legível (PASC 11.0)."""
     lines = []
     meta = None
@@ -240,7 +293,7 @@ def _save_llm_report(report_data, output_path, console):
         if key.endswith("intelligence_report"):
             meta = report_data[key]
             break
-            
+    
     if meta:
         lines.append('<?xml version="1.0" encoding="UTF-8"?>')
         lines.append('<doxoade_nexus_report>')
@@ -248,61 +301,113 @@ def _save_llm_report(report_data, output_path, console):
         lines.append(f'  <generated_at>{meta.get("generated_at")}</generated_at>')
         lines.append(f'  <focus_applied>{meta.get("focus_applied")}</focus_applied>')
         
-    eco = report_data.get("economic_summary", {})
-    lines.append('  <project_summary>')
-    lines.append(f'    <total_files_scanned>{eco.get("total_files_scanned", 0)}</total_files_scanned>')
-    lines.append(f'    <total_files_in_report>{eco.get("total_files_in_report", 0)}</total_files_in_report>')
-    lines.append(f'    <average_complexity>{eco.get("average_complexity_in_report", 0):.2f}</average_complexity>')
-    lines.append(f'    <total_debt_tags>{eco.get("total_debt_tags_in_report", 0)}</total_debt_tags>')
-    lines.append('    <god_distribution>')
-    for god, count in eco.get("god_distribution_in_report", {}).items():
-        safe_god = god.lower().replace('ú','u').replace('ã','a').replace('é','e').replace('í','i').replace('ó','o')
-        lines.append(f'      <{safe_god}>{count}</{safe_god}>')
-    lines.append('    </god_distribution>')
-    lines.append('  </project_summary>')
-    
-    lines.append('  <codebase_map>')
-    for f in report_data.get("codebase_map", []):
-        path = f.get('path', 'unknown')
-        god = f.get('god_assignment', 'Unknown')
-        comp = f.get('complexity', 0)
-        status = f.get('status', 'unknown')
-        lines.append(f'    <file path="{path}" role="{god}" complexity="{comp}" status="{status}">')
+        eco = report_data.get("economic_summary", {})
+        lines.append('  <project_summary>')
+        lines.append(f'    <total_files_scanned>{eco.get("total_files_scanned", 0)}</total_files_scanned>')
+        lines.append(f'    <total_files_in_report>{eco.get("total_files_in_report", 0)}</total_files_in_report>')
+        lines.append(f'    <average_complexity>{eco.get("average_complexity_in_report", 0):.2f}</average_complexity>')
+        lines.append(f'    <total_debt_tags>{eco.get("total_debt_tags_in_report", 0)}</total_debt_tags>')
         
-        classes = f.get('classes', [])
-        if classes:
-            lines.append(f'      <classes>{", ".join(str(c) for c in classes)}</classes>')
+        # 🆕 Métricas do grafo
+        if "total_graph_edges" in eco:
+            lines.append(f'    <total_graph_edges>{eco.get("total_graph_edges", 0)}</total_graph_edges>')
+            lines.append(f'    <graph_depth>{eco.get("graph_depth", 0)}</graph_depth>')
+        
+        lines.append('    <god_distribution>')
+        for god, count in eco.get("god_distribution_in_report", {}).items():
+            safe_god = god.lower().replace('ú','u').replace('ã','a').replace('é','e').replace('í','i').replace('ó','o')
+            lines.append(f'      <{safe_god}>{count}</{safe_god}>')
+        lines.append('    </god_distribution>')
+        lines.append('  </project_summary>')
+        
+        # 🆕 Glossário de Deuses
+        glossary = report_data.get("god_glossary", {})
+        if glossary:
+            lines.append('  <god_glossary>')
+            for god, desc in glossary.items():
+                safe_god = god.lower().replace('ú','u').replace('ã','a').replace('é','e').replace('í','i').replace('ó','o').replace(' ','_')
+                import html
+                desc_escaped = html.escape(desc)
+                lines.append(f'    <{safe_god}>{desc_escaped}</{safe_god}>')
+            lines.append('  </god_glossary>')
+        
+        lines.append('  <codebase_map>')
+        for f in report_data.get("codebase_map", []):
+            path = f.get('path', 'unknown')
+            god = f.get('god_assignment', 'Unknown')
+            comp = f.get('complexity', 0)
+            status = f.get('status', 'unknown')
+            lines.append(f'    <file path="{path}" role="{god}" complexity="{comp}" status="{status}">')
             
-        funcs = f.get('functions', [])
-        if funcs:
-            funcs_str = []
-            for fn in funcs:
-                if isinstance(fn, str): funcs_str.append(fn)
-                elif isinstance(fn, dict): funcs_str.append(str(fn.get('name', 'unknown')))
-                else: funcs_str.append(str(getattr(fn, 'name', fn)))
-            lines.append(f'      <functions>{", ".join(funcs_str)}</functions>')
+            classes = f.get('classes', [])
+            if classes:
+                lines.append(f'      <classes>{", ".join(str(c) for c in classes)}</classes>')
             
-        debt = f.get('debt_tags_count', len(f.get('debt_tags', [])))
-        mpot = f.get('mpot_violations_count', f.get('mpot_4_violations', 0))
-        if debt > 0 or mpot > 0:
-            lines.append(f'      <technical_debt tags="{debt}" mpot_violations="{mpot}" />')
+            funcs = f.get('functions', [])
+            if funcs:
+                # 🛡️ Se -s (source) está ativo, não inclui docstrings (já estão no código)
+                if include_source:
+                    funcs_str = []
+                    for fn in funcs:
+                        if isinstance(fn, str): 
+                            funcs_str.append(fn)
+                        elif isinstance(fn, dict): 
+                            funcs_str.append(str(fn.get('name', 'unknown')))
+                        else: 
+                            funcs_str.append(str(getattr(fn, 'name', fn)))
+                    lines.append(f'      <functions>{", ".join(funcs_str)}</functions>')
+                else:
+                    # Inclui docstrings quando -s NÃO está ativo
+                    has_docs = any(isinstance(fn, dict) and fn.get('docstring') for fn in funcs)
+                    if has_docs:
+                        lines.append('      <functions>')
+                        for fn in funcs:
+                            if isinstance(fn, dict):
+                                name = fn.get('name', 'unknown')
+                                doc = fn.get('docstring', '')
+                                import html
+                                doc_escaped = html.escape(doc) if doc else ''
+                                lines.append(f'        <function name="{name}">{doc_escaped}</function>')
+                            else:
+                                lines.append(f'        <function name="{fn}"></function>')
+                        lines.append('      </functions>')
+                    else:
+                        funcs_str = []
+                        for fn in funcs:
+                            if isinstance(fn, str): funcs_str.append(fn)
+                            elif isinstance(fn, dict): funcs_str.append(str(fn.get('name', 'unknown')))
+                            else: funcs_str.append(str(getattr(fn, 'name', fn)))
+                        lines.append(f'      <functions>{", ".join(funcs_str)}</functions>')
             
-        src = f.get('source_minified')
-        if src:
-            safe_src = src.replace(']]>', ']]]]><![CDATA[>')
-            lines.append('      <source_code><![CDATA[')
-            # 🛡️ BLINDAGEM DE INDENTAÇÃO: Injeta linha por linha para preservar espaços à esquerda
-            for code_line in safe_src.splitlines():
-                lines.append(code_line)
-            lines.append('      ]]></source_code>')
+            debt = f.get('debt_tags_count', len(f.get('debt_tags', [])))
+            mpot = f.get('mpot_violations_count', f.get('mpot_4_violations', 0))
+            if debt > 0 or mpot > 0:
+                lines.append(f'      <technical_debt tags="{debt}" mpot_violations="{mpot}" />')
             
-        lines.append('    </file>')
-    lines.append('  </codebase_map>')
-    lines.append('</doxoade_nexus_report>')
-    
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write("\n".join(lines))
-    console.print(f"\n[bold magenta]🤖 Dossiê LLM-Ready Gerado: {output_path}[/bold magenta]")
+            # 🆕 Grafo de vizinhos
+            graph_n = f.get('graph_neighbors', [])
+            if graph_n:
+                lines.append('      <graph_neighbors>')
+                for neighbor in graph_n:
+                    lines.append(f'        <neighbor>{neighbor}</neighbor>')
+                lines.append('      </graph_neighbors>')
+            
+            src = f.get('source_minified')
+            if src:
+                safe_src = src.replace(']]>', ']]]]><![CDATA[>')
+                lines.append('      <source_code><![CDATA[')
+                for code_line in safe_src.splitlines():
+                    lines.append(code_line)
+                lines.append('      ]]></source_code>')
+            
+            lines.append('    </file>')
+        
+        lines.append('  </codebase_map>')
+        lines.append('</doxoade_nexus_report>')
+        
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write("\n".join(lines))
+        console.print(f"\n[bold magenta]🤖 Dossiê LLM-Ready Gerado: {output_path}[/bold magenta]")
 
 def _save_qwen_report(report_data, output_path, console):
     """
@@ -378,8 +483,8 @@ def _save_qwen_report(report_data, output_path, console):
         
 def _run_analyze_coverage(scan_paths, cli_excludes, verbose, ext_excludes):
     """Auditoria de Cobertura: Blacklist, Extensões e Integridade de Parsing (Nexus Scan)."""
-    from .intelligence_systems.intelligence_engine import analyze_file_chief
-    from .intelligence_utils import get_ignore_spec
+    from doxoade.commands.intelligence_systems.intelligence_engine import analyze_file_chief
+    from doxoade.commands.intelligence_systems.intelligence_utils import get_ignore_spec
     from rich.table import Table
     
     scan_paths = scan_paths if scan_paths else ('.',)
@@ -511,3 +616,114 @@ def _run_analyze_coverage(scan_paths, cli_excludes, verbose, ext_excludes):
             for f in failures:
                 fail_table.add_row(f["file"], f["reason"])
             console.print(fail_table)
+
+def _strip_ansi(text: str) -> str:
+    return ANSI_ESCAPE.sub('', text) if text else ""
+
+def _clean_type(param_type) -> str:
+    t = str(param_type)
+    if "Path" in t: return "PATH"
+    if "Choice" in t: return "CHOICE"
+    if "Int" in t: return "INT"
+    if "Float" in t: return "FLOAT"
+    if "Bool" in t: return "BOOL"
+    return ""  # STRING é o default, omitimos
+
+def _extract_examples(help_text: str) -> list:
+    if not help_text: return []
+    clean = _strip_ansi(help_text)
+    m = re.search(r'Exemplos?:\s*(.*?)(?:\n\n|\Z)', clean, re.DOTALL | re.IGNORECASE)
+    if m:
+        return [l.strip().lstrip('- ') for l in m.group(1).split('\n') if l.strip().startswith(('doxoade', '-'))]
+    return []
+
+def _cmd_to_xml(cmd, name: str) -> ET.Element:
+    """Converte um comando Click diretamente em XML compacto (sem dict intermediário)."""
+    elem = ET.Element("cmd", name=name)
+    
+    desc = _strip_ansi(cmd.help or "").strip()
+    if desc:
+        elem.set("desc", desc)
+    
+    # Exemplos (compactos como texto separado por ' | ')
+    examples = _extract_examples(cmd.help)
+    if examples:
+        ex_elem = ET.SubElement(elem, "examples")
+        ex_elem.text = " | ".join(examples)
+    
+    # Args posicionais
+    for param in cmd.params:
+        if isinstance(param, click.Argument):
+            attrs = {"name": param.name}
+            t = _clean_type(param.type)
+            if t: attrs["type"] = t
+            if getattr(param, "required", False): attrs["req"] = "1"
+            ET.SubElement(elem, "arg", **attrs)
+    
+    # Options (flags)
+    for param in cmd.params:
+        if isinstance(param, click.Option):
+            attrs = {"name": param.name}
+            attrs["flags"] = ",".join(param.opts + param.secondary_opts)
+            
+            t = _clean_type(param.type)
+            if t: attrs["type"] = t
+            
+            help_text = _strip_ansi(getattr(param, "help", None) or "").strip()
+            if help_text: attrs["help"] = help_text
+            
+            if param.is_flag: attrs["flag"] = "1"
+            if param.multiple: attrs["multi"] = "1"
+            if getattr(param, "required", False): attrs["req"] = "1"
+            
+            # Default: só inclui se for significativo
+            if not param.is_flag and param.default is not None:
+                d = str(param.default)
+                if d not in ("Sentinel.UNSET", "None", "", "False"):
+                    attrs["default"] = d
+            
+            ET.SubElement(elem, "opt", **attrs)
+    
+    # Subcomandos (recursão)
+    if isinstance(cmd, click.MultiCommand):
+        ctx = click.Context(cmd)
+        for sub_name in cmd.list_commands(ctx):
+            sub_cmd = cmd.get_command(ctx, sub_name)
+            if sub_cmd:
+                elem.append(_cmd_to_xml(sub_cmd, sub_name))
+    
+    return elem
+
+def generate_manifest():
+    """Gera o manifesto XML compacto e salva automaticamente."""
+    from doxoade.cli import cli
+    
+    ctx = click.Context(cli)
+    
+    root = ET.Element("doxoade")
+    root.set("version", "85.1")
+    root.set("mode", "dry-run")
+    root.set("exec", "--run")
+    
+    # Descrição compacta no topo
+    desc_elem = ET.SubElement(root, "desc")
+    desc_elem.text = _strip_ansi(cli.help or "").strip()
+    
+    # Comandos
+    for cmd_name in cli.list_commands(ctx):
+        cmd = cli.get_command(ctx, cmd_name)
+        if cmd:
+            root.append(_cmd_to_xml(cmd, cmd_name))
+    
+    # Formata e salva
+    ET.indent(root, space="  ")
+    xml_bytes = ET.tostring(root, encoding="unicode", xml_declaration=False)
+    xml_str = '<?xml version="1.0" encoding="utf-8"?>\n' + xml_bytes
+    
+    out_path = Path("doxoade_manifest.xml")
+    out_path.write_text(xml_str, encoding="utf-8")
+    
+    cmd_count = len(list(root.iter("cmd")))
+    line_count = xml_str.count('\n') + 1
+    click.secho(f"✅ [THOTH] Manifesto gerado: {out_path.resolve()}", fg="green", bold=True)
+    click.secho(f"   📦 {cmd_count} comandos | {line_count} linhas | {len(xml_str)//1024}KB", fg="cyan")

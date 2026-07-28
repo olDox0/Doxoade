@@ -1,8 +1,10 @@
 # doxoade/doxoade/commands/refactor_systems/refactor_assembler.py
 from __future__ import annotations
 import ast
+import click
 from dataclasses import dataclass, field
 from pathlib import Path
+from .refactor_preview import print_snippet_diff
 from .refactor_utils import FunctionHit, collect_function_defs, read_text_safe
 
 @dataclass(frozen=True)
@@ -88,8 +90,9 @@ def prepare_move_plan(root: Path, source: Path, function_name: str, dest: Path) 
             break
     return MovePlan(project_root=root, source_file=source, dest_file=dest, function_name=function_name, source_module=_module_name(root, source), dest_module=_module_name(root, dest), function_hit=best_hit)
 
-def move_function(plan: MovePlan) -> MoveResult:
+def move_function(plan: MovePlan, dry_run: bool = False) -> MoveResult:
     source_text = read_text_safe(plan.source_file)
+    
     try:
         source_tree = ast.parse(source_text)
     except Exception as e:
@@ -132,6 +135,23 @@ def move_function(plan: MovePlan) -> MoveResult:
         dest_valid = False
     if not dest_valid:
         return MoveResult(plan, created_dest, False, False, True, notes=('Inserção quebraria a sintaxe do destino.',))
+
+    if dry_run:
+        click.echo(click.style("\n🔍 [PREVIEW] Plano de Movimentação de Função:", fg='yellow', bold=True))
+        
+        # Preview da Origem (Remoção)
+        orig_src_lines = source_text.splitlines(keepends=True)
+        new_src_lines = new_source_text.splitlines(keepends=True)
+        print_snippet_diff(plan.source_file, orig_src_lines, new_src_lines, context=3)
+        
+        # Preview do Destino (Adição)
+        dest_text = read_text_safe(plan.dest_file) if plan.dest_file.exists() else ""
+        orig_dest_lines = dest_text.splitlines(keepends=True)
+        new_dest_lines = new_dest_text.splitlines(keepends=True)
+        print_snippet_diff(plan.dest_file, orig_dest_lines, new_dest_lines, context=3)
+        
+        return MoveResult(plan, created_dest, True, True, True, notes=('Dry-run: Preview exibido, nenhuma alteração gravada.',))
+
     plan.source_file.write_text(new_source_text, encoding='utf-8')
     plan.dest_file.write_text(new_dest_text, encoding='utf-8')
     return MoveResult(plan=plan, created_dest=created_dest, source_updated=True, dest_valid=True, source_valid=True, notes=('Função isolada e movida com sucesso.',))

@@ -1,9 +1,9 @@
-# doxoade/doxoade/commands/check_notepadpp.py
+# doxoade/doxoade/commands/check_systems/check_notepadpp.py
 import os
 import click
 from doxoade.tools.doxcolors import Fore
 from doxoade.tools.npp_integration import signal_notepadpp
-from .check import run_check_logic
+from doxoade.commands.check import run_check_logic
 
 def run_npp_workflow(path: str, **kwargs):
     """

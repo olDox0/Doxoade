@@ -16,7 +16,7 @@ from datetime import datetime
 # [DOX-UNUSED] from doxoade.tools.analysis import analyze_file_structure
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.commands.deepcheck_utils import DeepAnalyzer
-from doxoade.commands.intelligence_utils import ChiefInsightVisitor
+from doxoade.commands.intelligence_systems.intelligence_utils import ChiefInsightVisitor
 from doxoade.commands.mk_systems.mk_utils import open_in_notepadpp
 # [DOX-UNUSED] from doxoade.commands.check import run_check_logic
 from doxoade.commands.check_systems.check_io import CheckIO
@@ -26,7 +26,7 @@ from doxoade.commands.security_systems.maat_engine_integration import run_intern
 from doxoade.commands.init import _refactor_to_silo
 
 from doxoade.core_database import get_db_connection, get_active_db_path, DB_FILE
-
+from doxoade.tools.core_locator import CORE_ROOT
 
 from doxoade.tools.alexandria.engine import alexandria_write
 try:
@@ -39,8 +39,10 @@ except ImportError:
     HAS_RICH = False
 
 # Configuração de Caminhos
-ACERVO_BASE = Path.home() / ".doxoade" / "acervo"
+ACERVO_BASE = CORE_ROOT / "data" / "acervo"
 BRICKS_DIR = ACERVO_BASE / "bricks"
+BRICKS_DIR.mkdir(parents=True, exist_ok=True)
+
 TAXONOMIA_OPERACIONAL = {
     "sort":     "Ordenação de Dados",
     "partition":"Divisão Estrutural (Divide & Conquer)",

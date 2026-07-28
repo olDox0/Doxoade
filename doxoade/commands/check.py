@@ -4,6 +4,7 @@ from .check_systems.check_state import CheckState
 from .check_systems.check_engine import run_check_logic
 from doxoade.tools.doxcolors import Fore
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
+from doxoade.commands.check_systems.check_notepadpp import run_npp_workflow
 __all__ = ['check', 'run_check_logic']
 
 @click.command('check')
@@ -31,7 +32,7 @@ def check(ctx, path: str, **kwargs):
     from .check_systems.check_io import CheckIO
     io = CheckIO(path)
     if kwargs.get('npp_clear'):
-        from .check_notepadpp import cleanup_npp_bridge
+        from .check_systems.check_notepadpp import cleanup_npp_bridge
         cleanup_npp_bridge(io.project_root)
         return
     with ExecutionLogger('check', io.project_root, ctx.params) as logger:
@@ -51,7 +52,6 @@ def check(ctx, path: str, **kwargs):
         if kwargs.get('fix') or kwargs.get('fix_specify'):
             _apply_modular_fixes(state, kwargs.get('fix_specify'))
         if kwargs.get('npp'):
-            from .check_notepadpp import run_npp_workflow
             run_npp_workflow(path, **kwargs)
             return
         from doxoade.tools.db_utils import _update_open_incidents

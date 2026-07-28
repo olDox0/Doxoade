@@ -145,13 +145,14 @@ class RefactorEngine:
             new_line = code + comment
         return new_line, changed
 
-    def fix_facade_imports(self, target_path):
+    def fix_facade_imports(self, target_path, dry_run=False):
         """Padroniza imports absolutos do projeto."""
         target = Path(target_path)
         files = [target] if target.is_file() else target.rglob("*.py")
         SKIP = {'venv', 'thirdparty', 'build', 'dist', '__pycache__', '.git', '.doxoade'}
         for fpath in files:
-            if any(part in SKIP for part in fpath.parts): continue
+            if any(part in SKIP for part in fpath.parts):
+                continue
             try:
                 with open(fpath, 'r', encoding='utf-8') as f:
                     lines = f.readlines()
@@ -163,9 +164,14 @@ class RefactorEngine:
                         any_change, line = True, fixed
                     new_lines.append(line)
                 if any_change:
-                    with open(fpath, 'w', encoding='utf-8') as f:
-                        f.writelines(new_lines)
-                    list(self.ensure_nexus_headers(fpath, force=True))
+                    if dry_run:
+                        # --- [ÁRTEMIS] PREVIEW ---
+                        from .refactor_preview import preview_file_change
+                        preview_file_change(fpath, "".join(lines), "".join(new_lines))
+                    else:
+                        with open(fpath, 'w', encoding='utf-8') as f:
+                            f.writelines(new_lines)
+                        list(self.ensure_nexus_headers(fpath, force=True))
                     yield str(fpath), "Fixed"
             except Exception as e:
                 import sys as _dox_sys, os as _dox_os
@@ -280,68 +286,105 @@ class RefactorEngine:
     def move_function(self, src_file, dest_file, targets=None, overwrite=False, dry_run=False, include_strings=False):
         src_path = Path(src_file)
         dest_path = Path(dest_file)
-        
         if not src_path.exists():
             return False, f"Arquivo de origem não encontrado: {src_file}"
-
+        
         old_mod = self._path_to_module(src_file)
         new_mod = self._path_to_module(dest_file)
         
-        if dry_run:
-            click.secho(f"[DRY] Mover: {src_path} -> {dest_path}", fg="yellow")
-
         # --- MODO INTEGRAL (Arquivo Inteiro) ---
         if not targets:
             with open(src_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             
-            if not dry_run:
+            if dry_run:
+                from .refactor_preview import preview_file_change
+                
+                # 1. Simula a conversão dos imports internos do arquivo sendo movido
+                purified_content = self._simulate_absolute_conversion(content, old_mod)
+                
+                click.secho(f"\n  🔍 [PREVIEW] Conteúdo que seria escrito em {dest_path.name} (com imports absolutos):", fg='yellow', bold=True)
+                preview_file_change(dest_path, "(arquivo novo)", purified_content, context=5)
+                click.secho(f"\n  🔍 [PREVIEW] Arquivo de origem {src_path.name} seria DELETADO.", fg='red', bold=True)
+                
+                click.secho(f"\n[*] Iniciando Sincronização Global (Simulação): {old_mod} -> {new_mod}", fg="cyan")
+                
+                # 2. Propaga a mudança do nome do módulo em todo o projeto (Imports Absolutos)
+                self.update_project_imports(None, old_mod, new_mod, module_level=True, dry_run=True, include_strings=include_strings)
+                
+                # 3. [NOVO] Corrige imports relativos nos arquivos vizinhos (ex: from .check_notepadpp)
+                self.fix_relative_imports(old_mod, new_mod, dry_run=True)
+                
+                return True, "Simulação de movimentação integral concluída."
+            else:
                 dest_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(dest_path, 'w', encoding='utf-8') as f:
                     f.write(content)
                 src_path.unlink()
-                
-                # PURIFICAÇÃO: Usa o old_mod como referência para converter os '.'
                 self._ensure_absolute_imports_in_file(dest_path, old_mod)
-            
-            # --- O PINGO NO I: REPARO AUTOMÁTICO ---
-            click.secho(f"[*] Iniciando Sincronização Global: {old_mod} -> {new_mod}", fg="cyan")
-            
-            # 1. Propaga a mudança do nome do módulo em todo o projeto
-            self.update_project_imports(None, old_mod, new_mod, module_level=True, dry_run=dry_run, include_strings=include_strings)
-            
-            # 2. Se não for simulação, executa o Repair profundo baseado nas funções do arquivo
-            if not dry_run:
-                success, _ = self.repair_references(dest_path, verbose=False)
-                # Garante Headers Nexus no destino
-                list(self.ensure_nexus_headers(dest_path, force=True))
-                return True, f"Arquivo {src_path.name} movido e projeto sincronizado."
-            
-            return True, "Simulação de movimentação e reparo concluída."
+                
+                click.secho(f"[*] Iniciando Sincronização Global: {old_mod} -> {new_mod}", fg="cyan")
+                # 1. Propaga a mudança do nome do módulo em todo o projeto (Imports Absolutos)
+                self.update_project_imports(None, old_mod, new_mod, module_level=True, dry_run=dry_run, include_strings=include_strings)
+                # 1.5. [NOVO] Corrige imports relativos (ex: from .check_notepadpp -> from .check_systems.check_notepadpp)
+                self.fix_relative_imports(old_mod, new_mod, dry_run=dry_run)
+                # 2. Se não for simulação, executa o Repair profundo baseado nas funções do arquivo
+                if not dry_run:
+                    success, _ = self.repair_references(dest_path, verbose=False)
+                    # Garante Headers Nexus no destino
+                    list(self.ensure_nexus_headers(dest_path, force=True))
+                    return True, f"Arquivo {src_path.name} movido e projeto sincronizado."
 
-        # --- MODO 2: MIGRAÇÃO CIRÚRGICA (linha-a-linha, SEM ast.unparse) ---
-        # ast.unparse() foi removido pois destruía f-strings e formatação.
-        # Agora usa extração baseada em span de linhas (igual ao assembler).
+        # --- MODO 2: MIGRAÇÃO CIRÚRGICA ---
         from .refactor_assembler import prepare_move_plan, move_function as _move_fn
-
         project_root = self.root
+        
         for target_name in targets:
             plan = prepare_move_plan(project_root, src_path, target_name, dest_path)
             if plan is None:
                 click.secho(f"  [MISS] '{target_name}' não encontrado em {src_path.name}", fg='yellow')
                 continue
+            
             if dry_run:
-                click.secho(f"  [DRY] moveria '{target_name}': {src_path.name} → {dest_path.name}", fg='yellow')
-                continue
+                # --- [ÁRTEMIS] PREVIEW DO MOVE CIRÚRGICO ---
+                from .refactor_preview import preview_file_change
+                from .refactor_assembler import (
+                    _function_span, _find_function_node,
+                    _extract_block, _remove_block,
+                )
+                import ast as _ast
+                
+                src_text = read_text_safe(src_path)
+                try:
+                    src_tree = _ast.parse(src_text)
+                    func_node = _find_function_node(src_tree, target_name)
+                    if func_node:
+                        start, end = _function_span(func_node)
+                        src_lines = src_text.splitlines()
+                        
+                        new_src = _remove_block(src_lines.copy(), start, end)
+                        
+                        dest_text = read_text_safe(dest_path) if dest_path.exists() else ""
+                        func_code = _extract_block(src_text.splitlines(), start, end)
+                        if dest_text and not dest_text.endswith('\n'):
+                            dest_text += '\n'
+                        new_dest = dest_text + func_code + '\n'
+                        
+                        click.secho(f"\n  🔍 [PREVIEW] Movendo '{target_name}':", fg='yellow', bold=True)
+                        preview_file_change(src_path, src_text, new_src, context=2)
+                        preview_file_change(dest_path, dest_text or "(arquivo novo)", new_dest, context=2)
+                    else:
+                        click.secho(f"  [DRY] moveria '{target_name}': {src_path.name} → {dest_path.name}", fg='yellow')
+                except Exception:
+                    click.secho(f"  [DRY] moveria '{target_name}': {src_path.name} → {dest_path.name}", fg='yellow')
+                continue # <--- AGORA ESTÁ CORRETAMENTE DENTRO DO LOOP!
+            
             result = _move_fn(plan)
             if not result.source_updated:
                 notes = ', '.join(result.notes)
                 click.secho(f"  [ERRO] '{target_name}': {notes}", fg='red')
                 return False, f"Falha ao mover '{target_name}': {notes}"
-
-        if not targets:
-            return False, "Nenhum dos itens especificados foi encontrado."
-
+        
         # Atualização Global das referências das funções
         for name in targets:
             self.update_project_imports(name, old_mod, new_mod, dry_run=dry_run, include_strings=include_strings)
@@ -395,13 +438,15 @@ class RefactorEngine:
 
                 if changed:
                     if dry_run:
-                        rel_path = fpath.relative_to(self.root)
-                        click.secho(f"\n[CLEANUP] {rel_path}", fg="bright_cyan", bold=True)
-                        for ln, old, new in file_diff:
-                            click.echo(f"  L{ln}: - {old} -> + {new}")
+                        # --- [ÁRTEMIS] PREVIEW DE SNIPPETS ---
+                        click.echo() # Força pular linha após o progressbar
+                        click.secho(f"[*] Atualizando Import Absoluto em:", fg="cyan")
+                        from .refactor_preview import preview_file_change
+                        preview_file_change(fpath, content, "".join(new_lines))
                     else:
                         with open(fpath, 'w', encoding='utf-8', newline='') as f:
                             f.writelines(new_lines)
+
 
     def rename_file(self, old_path, new_path):
         """[PREP] Renomeia arquivo e atualiza todos os imports do projeto."""
@@ -760,3 +805,55 @@ class RefactorEngine:
 
         return modified_count
 
+    def fix_relative_imports(self, old_module: str, new_module: str, dry_run: bool = False):
+        """Varre o projeto e corrige imports relativos após um move."""
+        from .refactor_rename import get_relative_import
+        header_printed = False
+        
+        for py_file in iter_python_files(self.root):
+            try:
+                text = py_file.read_text(encoding='utf-8')
+            except Exception:
+                continue
+            try:
+                rel_path = py_file.relative_to(self.root)
+                py_module = '.'.join(rel_path.with_suffix('').parts)
+            except ValueError:
+                continue
+                
+            old_rel = get_relative_import(py_module, old_module)
+            new_rel = get_relative_import(py_module, new_module)
+            
+            if old_rel != new_rel and old_rel.startswith('.'):
+                pattern_rel_from = re.compile(rf'^(\s*from\s+){re.escape(old_rel)}(\s+import)', re.MULTILINE)
+                new_text, c = pattern_rel_from.subn(rf'\1{new_rel}\2', text)
+                if c > 0:
+                    if dry_run:
+                        if not header_printed:
+                            click.echo()
+                            click.secho(f"[*] Corrigindo Imports Relativos nos Vizinhos:", fg="cyan")
+                            header_printed = True
+                            
+                        # --- [ÁRTEMIS] PREVIEW DE IMPORTS RELATIVOS ---
+                        from .refactor_preview import preview_file_change
+                        preview_file_change(py_file, text, new_text, context=2)
+                    else:
+                        py_file.write_text(new_text, encoding='utf-8')
+
+    def _simulate_absolute_conversion(self, text: str, source_module_path: str) -> str:
+        """Simula a purificação de imports (relativo -> absoluto) em memória para o Preview."""
+        lines = text.splitlines(keepends=True)
+        new_lines = []
+        for line in lines:
+            new_line = line
+            # 1. Primeiro resolve os pontos (relativos)
+            if 'from .' in new_line:
+                fixed_rel, was_rel = self._convert_relative_to_absolute(new_line, source_module_path)
+                if was_rel:
+                    new_line = fixed_rel
+            # 2. Depois garante o prefixo doxoade (Nexus Fix)
+            fixed_abs, was_abs = self._fix_import_line(new_line)
+            if was_abs:
+                new_line = fixed_abs
+            new_lines.append(new_line)
+        return "".join(new_lines)

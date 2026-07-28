@@ -101,7 +101,7 @@ def _apply_rewrites(source_text: str, rewrites: list[ImportRewrite]) -> str:
         lines[start:end] = [rw.rewritten]
     return '\n'.join(lines) + '\n'
 
-def rename_module_ast(root: Path, old_module: str, new_module: str, apply: bool=False, overwrite: bool=False) -> RenameResult:
+def rename_module_ast(root: Path, old_module: str, new_module: str, apply: bool=False, overwrite: bool=False, dry_run: bool=False) -> RenameResult:
     root = root.resolve()
     old_module = old_module.strip()
     new_module = new_module.strip()
@@ -124,6 +124,21 @@ def rename_module_ast(root: Path, old_module: str, new_module: str, apply: bool=
         result.changed_files.append(py_file)
         result.rewrites.extend(rewrites)
         pending_file_text[py_file] = _apply_rewrites(source_text, rewrites)
+
+    if dry_run or not apply:
+        click.echo(click.style("\n🔍 [PREVIEW] Alterações de Importação Detectadas:", fg='yellow', bold=True))
+        files_previewed = set()
+        from .refactor_preview import print_snippet_diff
+        for py_file, new_text in pending_file_text.items():
+            original_text = read_text_safe(py_file)
+            if original_text != new_text:
+                orig_lines = original_text.splitlines(keepends=True)
+                new_lines = new_text.splitlines(keepends=True)
+                print_snippet_diff(py_file, orig_lines, new_lines, context=2)
+                files_previewed.add(py_file)
+        if not files_previewed:
+            click.echo("Nenhuma alteração de importação encontrada.")
+
     if apply:
         for py_file, new_text in pending_file_text.items():
             py_file.write_text(new_text, encoding='utf-8')

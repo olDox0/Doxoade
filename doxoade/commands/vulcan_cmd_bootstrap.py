@@ -14,7 +14,7 @@ import click
 from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.core_database import DB_FILE
-from .vulcan_cmd import _is_doxoade_project
+from doxoade.commands.vulcan_systems.vulcan_cmd import _is_doxoade_project
 
 _BOOTSTRAP_START = '# [DOXOADE:VULCAN]'
 _BOOTSTRAP_END = '# [/DOXOADE:VULCAN]'

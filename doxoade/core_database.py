@@ -1,6 +1,7 @@
+# -*- coding: utf-8 -*-
 # doxoade/doxoade/core_database.py antigo database.py
 """
-Módulo de Persistência (Sapiens/Chronos) - v71.1.
+Módulo de Persistência (Sapiens/Chronos) - v72.0 (Beacon Integrated).
 Gerencia o ciclo de vida do banco de dados e migrações de esquema.
 ESTRATÉGIA: Migration Dispatcher para conformidade MPoT-4/17.
 """
@@ -16,6 +17,7 @@ import sqlite3 as real_sqlite3
 
 import doxoade.tools.aegis.nexus_db as sqlite3  # noqa
 
+from doxoade.tools.core_locator import CORE_ROOT, GLOBAL_DATA_DIR, GLOBAL_DB_FILE
 from doxoade.tools.error_info             import formated_traceback
 from doxoade.tools.alexandria.engine      import alexandria_write
 from doxoade.tools.telemetry_tools.logger import chief_heartbeat
@@ -31,15 +33,17 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1] # Sobe de doxoade/ para a rai
 BASE_DIR = Path(__file__).resolve().parent
 PACKAGE_ROOT = Path(__file__).resolve().parent
 
-DB_DIR = TARGET_ROOT / ".doxoade" / "data"
-DB_FILE = DOXOADE_INSTALL_DIR / "data" / "doxoade.db"
+DOXOADE_GLOBAL_DIR = Path.home() / ".doxoade"
+DB_DIR = GLOBAL_DATA_DIR
+DB_FILE = GLOBAL_DB_FILE
 
 DB_VERSION = 134
 _CACHED_DB_PATH = None
-_LOG_QUEUE = None 
+_LOG_QUEUE = None
 
 if os.environ.get("VULCAN_VERBOSE") == "1":
-    click.echo(f"[DB-TRACE] Alvo absoluto travado em: {DB_FILE}")
+    click.echo(f"[DB-TRACE] 📡 Beacon travou o DB Global em: {DB_FILE}")
+    click.echo(f"[DB-TRACE] 🏭 Core Root detectado em: {CORE_ROOT}")
 
 def get_db_connection():
     """Abre conexão com monitoramento resiliente (Sapiens Watcher)."""
@@ -380,30 +384,8 @@ def optimize_database():
         conn.close()
         
 def get_db_path():
-    """Define a localização do banco: Local (data/) > Global (Home)."""
-    # 1. Tenta achar a raiz do projeto atual
-    from .tools.filesystem import _find_project_root
-    try:
-        project_root = Path(_find_project_root(os.getcwd()))
-        local_db = project_root / "data" / "doxoade.db"
-        
-        # Se o banco local existir, ele tem prioridade absoluta
-        if local_db.exists():
-            return local_db
-    except Exception as e:
-        import sys as _dox_sys, os as _dox_os
-        from traceback import print_tb as exc_trace
-        exc_obj, exc_tb = _dox_sys.exc_info()
-        f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        line_n = exc_tb.tb_lineno
-        exc_trace(exc_tb)
-        print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: get_db_path\033[0m")
-        print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
-        pass
-
-    # 2. Fallback para o diretório global (padrão antigo)
-    pkg_path = get_active_db_path()
-    return pkg_path 
+    """Retorna o caminho do DB Global ditado pelo Beacon."""
+    return GLOBAL_DB_FILE
 
 def start_persistence_worker():
     """Stub para evitar erro antes do import real."""
@@ -411,12 +393,11 @@ def start_persistence_worker():
     start_real()
 
 def get_active_db_path():
-    root = _find_project_root(os.getcwd())
-    return Path(root) / 'data' / 'doxoade.db'
+    """Alias de segurança para o DB Global."""
+    return GLOBAL_DB_FILE
 
 def _resolve_db_logic():
-    pkg_path = get_active_db_path()
-    return pkg_path if pkg_path.exists() else Path.home() / '.doxoade' / 'doxoade.db'
+    return GLOBAL_DB_FILE
 
 def _validate_dynamic_payload(payload: str, mode: str):
     """Analisa strings de payload em busca de escapes de sandbox."""

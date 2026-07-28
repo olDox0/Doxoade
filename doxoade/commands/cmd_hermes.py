@@ -667,3 +667,30 @@ def build_logger_cmd():
     else:
         click.echo(f"{Fore.RED}✘ Falha na compilação{Style.RESET_ALL}")
         click.echo(result.stderr)
+        
+@hermes_group.command('deadzone-scan')
+@click.option('--apply', '-a', is_flag=True, help="Grava os achados no deadzone.json.")
+def hermes_deadzone_scan(apply):
+    """[Fase 0] Varredura Estática: Detecta módulos incompatíveis com HBC6."""
+    from doxoade.tools.hermes_systems.hermes_deadzone import scan_project, update_deadzone_file, DEADZONE_TRIGGERS
+    from doxoade.tools.doxcolors import Fore, Style
+    
+    project_root = Path.cwd().resolve()
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}☤ [HERMES DEADZONE] Iniciando Varredura Estática...{Style.RESET_ALL}")
+    click.echo(f"  Gatilhos monitorados: {len(DEADZONE_TRIGGERS)}")
+    
+    deadzone_hits = scan_project(str(project_root))
+    
+    if not deadzone_hits:
+        click.secho("  ✔ Nenhum módulo perigoso encontrado. O projeto está limpo.", fg='green')
+        return
+        
+    click.secho(f"\n  ⚠ {len(deadzone_hits)} módulo(s) detectado(s) na Zona Morta:", fg='yellow', bold=True)
+    for mod in sorted(deadzone_hits):
+        click.echo(f"    - {mod}")
+        
+    if apply:
+        total = update_deadzone_file(deadzone_hits)
+        click.secho(f"\n  ✔ Deadzone atualizada. Total de {total} módulos banidos do Motor C.", fg='green', bold=True)
+    else:
+        click.secho(f"\n  [DRY-RUN] Use --apply para gravar no deadzone.json.", fg='cyan')

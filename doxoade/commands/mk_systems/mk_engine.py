@@ -68,6 +68,20 @@ class MkEngine:
 
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
 
+            # Criação de novo arquivo
+            # 📝 INJEÇÃO DE HEADER DE CAMINHO (Padrão Doxoade)
+            try:
+                rel_path = os.path.relpath(full_path, self.base_path).replace('\\', '/')
+            except ValueError:
+                rel_path = full_path.replace('\\', '/')
+            
+            ext = full_path.split('.')[-1].lower()
+            header = ""
+            if ext in ['py', 'md', 'txt', 'toml', 'json', 'dox']:
+                header = f"# {rel_path}\n"
+            elif ext in ['c', 'cpp', 'h', 'hpp', 's', 'asm']:
+                header = f"// {rel_path}\n"
+
             # Lógica de Movimentação (apenas se não tiver conteúdo explícito)
             if MOV_KEY == '1':
                 if not content:
@@ -83,17 +97,24 @@ class MkEngine:
                             except Exception as e:
                                 import sys as _dox_sys, os as _dox_os
                                 from traceback import print_tb as exc_trace
-                                exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
+                                exc_obj, exc_tb = _dox_sys.exc_info()
                                 f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
                                 line_n = exc_tb.tb_lineno
                                 exc_trace(exc_tb)
                                 print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: _process_single_item\033[0m")
                                 print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
 
-            # Criação de novo arquivo
+            # 🔥 [BLITZ INTERCEPTION] Verifica se o conteúdo é uma diretiva do Thoth
+            final_content = header + content
+            if content.startswith('blitz:'):
+                meta_str = content[6:] # Remove o prefixo 'blitz:'
+                generated_code = self._generate_blitz_code(name, meta_str)
+                final_content = header + generated_code
+                print(f"      {Fore.MAGENTA}⚡ [BLITZ]{Style.RESET_ALL} Forjando esqueleto para {name}")
+
             with open(full_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            
+                f.write(final_content)
+                
             if full_path not in self.affected_files:
                 self.affected_files.append(full_path)
             return (full_path, 'Arquivo')
@@ -150,3 +171,48 @@ class MkEngine:
         if len(candidates) == 1:
             return candidates[0]
         return None
+
+    def _generate_blitz_code(self, filename: str, meta_str: str) -> str:
+        """
+        Interpreta a DSL do Blitz e gera esqueletos de código com Docstrings.
+        Sintaxe: blitz:class=Nome,funcs=a,b,c
+        """
+        params = {}
+        for part in meta_str.split(','):
+            if '=' in part:
+                k, v = part.split('=', 1)
+                params[k.strip()] = v.strip()
+
+        ext = filename.split('.')[-1]
+        
+        if ext == 'py':
+            class_name = params.get('class', filename.capitalize().replace('.py', ''))
+            funcs = [f.strip() for f in params.get('funcs', 'run').split(';') if f.strip()]
+            
+            code = f'# -*- coding: utf-8 -*-\n"""Módulo {filename} gerado pelo Motor Blitz (Thoth)."""\n\n'
+            code += f'class {class_name}:\n    """Orquestrador principal do silo."""\n\n'
+            code += f'    def __init__(self):\n        """Inicializa os recursos e conecta ao Hades."""\n        pass\n\n'
+            
+            for func in funcs:
+                code += f'    def {func}(self, *args, **kwargs):\n'
+                code += f'        """\n        ⚡ BLITZ PLACEHOLDER: {func}\n        Implementar lógica de {func}.\n        """\n'
+                code += f'        raise NotImplementedError("Blitz: {func} pendente de implementação.")\n\n'
+            return code
+
+        elif ext == 'c':
+            includes = [i.strip() for i in params.get('includes', 'stdio').split(';')]
+            funcs = [f.strip() for f in params.get('funcs', 'main').split(';')]
+            
+            code = '// ⚡ Forjado pelo Motor Blitz (Metalcraft)\n'
+            for inc in includes:
+                code += f'#include <{inc}.h>\n'
+            code += '\n'
+            
+            for func in funcs:
+                if func == 'main':
+                    code += 'int main(int argc, char** argv) {\n    // ⚡ BLITZ: Entry Point\n    return 0;\n}\n'
+                else:
+                    code += f'// ⚡ BLITZ PLACEHOLDER: {func}\nvoid {func}() {{\n    // TODO: Implementar\n}}\n\n'
+            return code
+
+        return f"# Blitz: Template não encontrado para {filename}\n"

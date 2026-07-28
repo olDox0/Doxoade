@@ -13,8 +13,9 @@ import re
 import click
 from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
-from .vulcan_cmd import _print_vulcan_forensic, _SIMD_AVAILABLE, _OBJREDUCE_AVAILABLE
+from .vulcan_systems.vulcan_cmd import _SIMD_AVAILABLE, _OBJREDUCE_AVAILABLE
 from doxoade.tools.filesystem import _find_project_root
+from doxoade.commands.vulcan_systems.vulcan_cmd import _print_vulcan_forensic
 try:
     from doxoade.tools.vulcan.object_allocation_scanner import scan_source, scan_pyx, render_report as _render_alloc_report
     from doxoade.tools.vulcan.object_reduction import reduce_source
