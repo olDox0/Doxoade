@@ -2,7 +2,7 @@
 import click
 import json
 from datetime import datetime
-from doxoade.tools.doxcolors import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style, Back
 from doxoade.core_database import get_db_connection
 
 from doxoade.tools.alexandria.engine import alexandria_write
@@ -63,7 +63,7 @@ def run_horus_view_logic(limit=100, full=False, focus=None):
                 stack_level = max(0, stack_level - 1)
                 indent = "  " * stack_level
                 status = data.get('status', 'SUCCESS')
-                s_color = Fore.GREEN if status == 'SUCCESS' else Fore.RED
+                s_color = Fore.WHITE + Back.GREEN if status == 'SUCCESS' else Fore.WHITE + Back.RED
                 click.echo(f"{Style.DIM}{indent}{color}[{sub}] ⇠ {f_name} {s_color}({status}){Style.RESET_ALL}")
                 if full and 'snapshot' in data:
                     click.echo(f"{Style.DIM}{indent}      Snapshot: {data['snapshot']}")

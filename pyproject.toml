@@ -41,7 +41,81 @@ soteria_active = true
 vulcan_turbo = true
 shadow_vacuum_check = ["scan", "find", "resolve", "parse"]
 keep = [ "coverage", "jsondiff", "pytest", "pyyaml", "radon", "setuptools"]
-ignore = [ "commands_test/", ".git/", "tests/", "regression_tests/", "Canone_Test/", "Vers/", "venv/", "doxoade.egg-info/", ".pytest_cache/", "pytest_temp_dir/", "tmp/", ".dox_agent_workspace/", "dox_lab/","tests/old", "doxoade/diagnostic", ".doxoade/", ".doxoade_cache", ".git", "nppBackup", "__pycache__", "*.bkp", "*.old", "w64devkit/", "nppBackup/", "recovery_zone/", "__pycache__/"]
+
+ignore = [
+    # ___ PASTAS _________
+    "*./experiments/",
+    "*/.doxoade/",
+    "*/__pycache__/",
+    ".doxoade/",
+    ".doxoade_cache/",
+    ".git/",
+    ".pytest_cache/",
+    "__pycache__/",
+    "build/",
+    "build_soteria_test/",
+    "Canone_Test/",
+    "commands_test/",
+    "dist/",
+    "dox_lab/",
+    "doxoade.egg-info/",
+    "doxoade/diagnostic/",
+    "doxoade/tools/benzaiten_gui/native/include/webview/",
+    "doxoade/tools/benzaiten_gui/native/include/webview2/",
+    "nppBackup/",
+    "pytest_temp_dir/",
+    "recovery_zone/",
+    "regression_tests/",
+    "tests/",
+    "tmp/",
+    "venv/",
+    "Vers/",
+    "w64devkit/",
+    # === EXTENSÕES DE BUILD/SCRIPT ===
+    "*.specpython",
+    "*.bat",
+    "*.sh",
+    "*.xml",
+    "*.pyd",
+    "*.txt",
+    "*.json",
+    "*.jsonl",
+    "*.xml",
+    # === EXTENSÕES BINÁRIAS/NATIVAS ===
+    "*.hh",
+    "*.dll",
+    "*.exe",
+    # === EXTENSÕES DE BACKUP/LIXO ===
+    "*.bkp",
+    "*.old",
+    "*.bak",
+    "*.tmp",
+    "*.temp",
+    "*.log",
+    "*.cache",
+    "*.nxa",
+    "*.jsonl",
+    "*.conf",
+    "*.ini",
+    "*.whitelist_backup",
+    "*.hbc5_backup",
+    "*.final_backup",
+    # ___ DATABASE _________
+    "data/",
+    "*.db-journal",
+    "*.sqlite",
+    "*.sqlite3",
+    "*.sqlite-shm",
+    "*.sqlite-wal",
+    "*.sqlite-journal",
+    "*.db",
+    "*.db-shm",
+    "*.db-wal",
+    # ___ RELATÓRIOS _________
+    "chief_dossier_*.xml",
+    "*_dossier_*.xml",
+]
+
 exclude_categories = ["STYLE", "DOCS"]
 
 [tool.doxoade.macrothon]
