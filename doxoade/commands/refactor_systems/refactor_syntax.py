@@ -387,7 +387,8 @@ def repair_file(fpath: Path, dry_run: bool = False) -> RepairResult:
     if final_err is None and changes:
         result.fixed = True
         if not dry_run:
-            fpath.write_text(new_source, encoding='utf-8')
+            write_text_safe(fpath, new_source)
+#            fpath.write_text(new_source, encoding='utf-8')
     elif final_err is not None:
         result.fixed = False
         result.remaining_error = _issue_from_error(fpath, final_err)

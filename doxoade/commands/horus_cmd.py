@@ -1,9 +1,16 @@
 # doxoade/doxoade/commands/horus_cmd.py
-import click
+import os
 import json
+import click
 from datetime import datetime
 from doxoade.tools.doxcolors import Fore, Style, Back
 from doxoade.core_database import get_db_connection
+
+_HORUS_SUBSYSTEMS = tuple(
+    s.strip() for s in os.environ.get(
+        "DOXOADE_HORUS_SUBSYSTEMS", "HORUS,SHADOW,AEGIS,TYPHON,DIAG,CHIEF,HADES"  # ← +CHIEF,HADES
+    ).split(",") if s.strip()
+)
 
 from doxoade.tools.alexandria.engine import alexandria_write
 @click.group('horus')
@@ -23,19 +30,20 @@ def run_horus_view_logic(limit=100, full=False, focus=None):
     import json
     
     conn = get_db_connection()
-    query = """
-        SELECT timestamp, action, data, subsystem 
-        FROM operational_logs 
-        WHERE subsystem IN ('HORUS', 'SHADOW', 'AEGIS') 
+    query = f"""
+        SELECT timestamp, action, data, subsystem
+        FROM operational_logs
+        WHERE subsystem IN ({','.join('?' for _ in _HORUS_SUBSYSTEMS)})
         ORDER BY id DESC LIMIT ?
     """
-    rows = conn.execute(query, (limit,)).fetchall()
+    rows = conn.execute(query, (*_HORUS_SUBSYSTEMS, limit)).fetchall()
     conn.close()
 
     click.secho("\n--- 👁️  INQUÉRITO HÓRUS: TIMELINE DO INCIDENTE ---", fg='cyan', bold=True)
     
     stack_level = 0
     prev_ts = None
+    shown = 0
     for r in reversed(rows):
         try:
             cur_ts = _parse_ts(r['timestamp'])
@@ -45,21 +53,28 @@ def run_horus_view_logic(limit=100, full=False, focus=None):
 
             data = json.loads(r['data'])
             # Filtro de Foco inteligente
-            if focus and focus not in data.get('file', '') and focus not in data.get('f', ''):
+            if focus and focus not in (r['subsystem'] or '') \
+                and focus not in data.get('file', '') \
+                and focus not in data.get('f', '') \
+                and focus not in data.get('target', ''):   # ← âncora nova
                 continue
-            
-            f_name = data.get('f', data.get('func', '???')).split('.')[-1]
+            shown += 1
+
+            raw_name = data.get('f', data.get('func', data.get('motivo', '???')))
+            f_name = raw_name if (r['subsystem'] or '') == 'TYPHON' else raw_name.split('.')[-1]
             sub = r['subsystem']
             color = Fore.CYAN if sub == 'SHADOW' else Fore.MAGENTA
             action = r['action']
             
-            if action in ['ENTER', 'FUNCTION_IN']:
+#            if action in ['ENTER', 'FUNCTION_IN']:
+            if action in ['ENTER', 'FUNCTION_IN', 'CHAOS_INJECT']:
                 indent = "  " * stack_level
                 click.echo(f"{Style.DIM}{indent}{color}[{sub}] ➔ {f_name}{Style.RESET_ALL}")
                 if full and 'args' in data:
                     click.echo(f"{Style.DIM}{indent}      Args: {Fore.YELLOW}{data['args']}{Style.RESET_ALL}")
                 stack_level += 1
-            elif action in ['EXIT', 'FUNCTION_OUT']:
+#            elif action in ['EXIT', 'FUNCTION_OUT']:
+            elif action in ['EXIT', 'FUNCTION_OUT', 'CHAOS_VERDICT']:
                 stack_level = max(0, stack_level - 1)
                 indent = "  " * stack_level
                 status = data.get('status', 'SUCCESS')
@@ -82,6 +97,9 @@ def run_horus_view_logic(limit=100, full=False, focus=None):
                 if full:
                     click.echo(f"{Style.DIM}{indent}      Payload: {Fore.YELLOW}{data}{Style.RESET_ALL}")
         except Exception: continue
+    if shown == 0:
+        click.secho("   (Nenhum rastro tático para este foco — verifique o filtro de subsistemas.)",
+                    fg='yellow', dim=True)
 
 @horus_group.command('view')
 @click.option('--limit', '-n', default=100)

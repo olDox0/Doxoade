@@ -3,7 +3,7 @@
 name = "doxoade"
 version = "580.0"
 description = "olDox222 Advanced Development Environment - Chief Gold Edition"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "click>=8.1.0",
     "colorama>=0.4.6",
@@ -38,6 +38,7 @@ source_dir = "."
 shadow_runtime = true
 shadow_targets = ["doxoade"]
 soteria_active = true
+soteria_mode = "complete" 
 vulcan_turbo = true
 shadow_vacuum_check = ["scan", "find", "resolve", "parse"]
 keep = [ "coverage", "jsondiff", "pytest", "pyyaml", "radon", "setuptools"]

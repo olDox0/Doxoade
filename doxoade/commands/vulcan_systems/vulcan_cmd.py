@@ -14,6 +14,7 @@ import click
 from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.filesystem import _find_project_root
+from doxoade.tools.soteria_systems.soteria_engine import SoteriaForensic
 __version__ = '86.0 Omega (modular split)'
 try:
     pass  # [DOX-UNUSED] from doxoade.tools.vulcan.simd_detector import detect
@@ -52,7 +53,6 @@ def _print_vulcan_forensic(scope: str, e: Exception):
     # 1. TENTA O RESGATE NATIVO (Sotéria Mode)
     # PASC 6.6: Importação localizada para economizar RAM no N2808
     try:
-        from doxoade.tools.vulcan.soteria_engine import SoteriaForensic
         forensic = SoteriaForensic()
     except ImportError:
         # Fallback se o motor não estiver no path

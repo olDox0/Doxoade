@@ -12,6 +12,7 @@ from datetime import datetime
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 from .uroboros_engine import UroborosEngine
+from doxoade.commands.git_systems.git_workflow import sync
 
 class MacrothonHouseEngine:
     def __init__(self, name):

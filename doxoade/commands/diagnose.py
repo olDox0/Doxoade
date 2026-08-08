@@ -19,6 +19,28 @@ def diagnose(path: str, as_json: bool, detailed: bool, show_all: bool, show_max:
     inspector = SystemInspector()
     params = {'path': path, 'detailed': detailed, 'all': show_all, 'max': show_max, 'code': show_code, 'comments': only_comments}
     
+    if show_all and not path:
+        from doxoade.tools.git import analyze_git_changes
+        echo(f'\n{Fore.WHITE}{Style.BRIGHT}🧠 ANÁLISE INTELIGENTE DE MUDANÇAS{Style.RESET_ALL}')
+        analysis = analyze_git_changes(path or '.')
+        if analysis['total'] == 0:
+            echo(f'   {Fore.GREEN}Status: LIMPO (Nenhuma mudança pendente){Style.RESET_ALL}')
+        else:
+            summary = analysis['summary']
+            echo(f"   Total de arquivos: {analysis['total']}")
+            echo(f"   ├─ Ruído EOL: {Fore.YELLOW}{summary['eol_noise']}{Style.RESET_ALL} (apenas whitespace/EOL)")
+            echo(f"   ├─ Movimentações: {Fore.CYAN}{summary['structural_moves']}{Style.RESET_ALL} (refatoração)")
+            echo(f"   ├─ Mudanças reais: {Fore.GREEN}{summary['real_changes']}{Style.RESET_ALL}")
+            echo(f"   └─ Deleções reais: {Fore.RED}{summary['real_deletes']}{Style.RESET_ALL}")
+            
+            if summary['eol_noise'] > 50:
+                echo(f"\n   {Fore.YELLOW}⚠ ALERTA: {summary['eol_noise']} arquivos com ruído EOL.{Style.RESET_ALL}")
+                echo(f"   {Fore.CYAN}💡 Sugestão: Configure 'git config --global core.autocrlf true'{Style.RESET_ALL}")
+            
+            if summary['structural_moves'] > 10:
+                echo(f"\n   {Fore.CYAN}📦 Detectada refatoração estrutural ({summary['structural_moves']} arquivos movidos).{Style.RESET_ALL}")
+                echo(f"   {Fore.CYAN}💡 Sugestão: Use 'doxoade save --smart' para commits semânticos.{Style.RESET_ALL}")
+    
     with ExecutionLogger('diagnose', path or '.', params):
         try:
             is_detailed = detailed or show_code or only_comments

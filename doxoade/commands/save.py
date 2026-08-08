@@ -24,7 +24,38 @@ from doxoade.tools.filesystem import is_ignored
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 
 from doxoade.tools.alexandria.engine import alexandria_write
-__version__ = '63.3 Alfa (Gold Standard)'
+__version__ = ''
+
+def _build_semantic_commits(analysis, message):
+    """Monta a lista de commits semânticos a partir da análise inteligente."""
+    cats = analysis['categories']
+    summary = analysis['summary']
+    commits = []
+    if summary['structural_moves'] > 0:
+        commits.append({
+            'type': 'refactor',
+            'message': 'refactor(architecture): reorganiza módulos em subsistemas',
+            'files': [m['from'] for m in cats['STRUCTURAL_MOVE']] + [m['to'] for m in cats['STRUCTURAL_MOVE']],
+        })
+    if summary['real_changes'] > 0 or summary['real_deletes'] > 0:
+        commits.append({
+            'type': 'feat',
+            'message': message or 'feat: atualizações de funcionalidade',
+            'files': cats['REAL_CHANGE'] + cats['REAL_DELETE'],
+        })
+    if summary['eol_noise'] > 0:
+        commits.append({
+            'type': 'chore',
+            'message': 'chore: normaliza EOLs e whitespace',
+            'files': cats['EOL_NOISE'],
+        })
+    if summary['untracked'] > 0:
+        commits.append({
+            'type': 'chore',
+            'message': 'chore: adiciona novos arquivos não rastreados',
+            'files': cats['UNTRACKED'],
+        })
+    return commits
 
 def _get_staged_python_files(git_root):
     """Filtra o Stage contra lixo, testes e arquivos deletados."""
@@ -127,8 +158,10 @@ def _abstract_and_learn_template(cursor: sqlite3.Cursor, concrete_finding: Dict[
 @click.option('--merge', 'merge_target', help='Alias de --branch (ex.: --merge main).')
 @click.option('--update-base', default='origin/main', show_default=True, help='Base usada para gerar resumo automático de atualização.')
 @click.option('--force', is_flag=True, help='Força o commit ignorando erros de qualidade.')
+@click.option('--smart', '-s', is_flag=True, help='🧠 Analisa e propõe commits semânticos (DRY-RUN por padrão).')
+@click.option('--apply', is_flag=True, help='🛠️ Executa os commits propostos pelo --smart (sem esta flag, apenas prévia).')
 @click.pass_context
-def save(ctx, message, archives, remove_commit, branch_target, merge_target, update_base, force):
+def save(ctx, message, archives, remove_commit, branch_target, merge_target, update_base, force, smart, apply):
     """Executa commit seguro com aprendizado automatizado."""
     console = Console()
     project_path = os.getcwd()
@@ -146,6 +179,56 @@ def save(ctx, message, archives, remove_commit, branch_target, merge_target, upd
                 for item in sorted(data, key=lambda x: x['size'], reverse=True):
                     click.echo(f"  {item['size']:>7.1f} KB │ {item['path']}")
             return
+    if smart:
+        from doxoade.tools.git import analyze_git_changes
+        from doxoade.tools.doxcolors import Style
+        analysis = analyze_git_changes('.')
+        if analysis['total'] == 0:
+            click.echo(Fore.GREEN + '[OK] Nada a commitar.')
+            return
+        summary = analysis['summary']
+        click.echo(Fore.CYAN + '\n🧠 [SMART MODE] Análise de Mudanças:\n')
+        click.echo(f"  📊 Total de arquivos: {analysis['total']}")
+        click.echo(f"     ├─ Ruído EOL: {Fore.YELLOW}{summary['eol_noise']}{Style.RESET_ALL}")
+        click.echo(f"     ├─ Movimentações: {Fore.CYAN}{summary['structural_moves']}{Style.RESET_ALL}")
+        click.echo(f"     ├─ Mudanças reais: {Fore.GREEN}{summary['real_changes']}{Style.RESET_ALL}")
+        click.echo(f"     └─ Deleções reais: {Fore.RED}{summary['real_deletes']}{Style.RESET_ALL}")
+        commits_proposed = _build_semantic_commits(analysis, message)  # message pode ser None
+        if not commits_proposed:
+            click.echo(Fore.YELLOW + '[AVISO] Nenhuma categoria de commit identificada.')
+            return
+        for i, commit in enumerate(commits_proposed, 1):
+            click.echo(f"\n  {i}. [{commit['type'].upper()}] {commit['message']}")
+            click.echo(f"     Arquivos: {len(commit['files'])}")
+            for f in commit['files'][:5]:
+                click.echo(f"       - {f}")
+            if len(commit['files']) > 5:
+                click.echo(f"       ... e mais {len(commit['files']) - 5} arquivos")
+        if not apply:
+            click.echo(Fore.YELLOW + '\n🔍 DRY-RUN concluído. Nenhuma alteração foi aplicada.')
+            click.echo(Fore.CYAN + '   > Use --apply para executar (ou --apply --force para pular a confirmação).')
+            return
+        if not force and not click.confirm(Fore.YELLOW + '\nAplicar estes commits semânticos?'):
+            click.echo(Fore.YELLOW + '[CANCELADO] Operação abortada.')
+            return
+        applied = 0
+        for commit in commits_proposed:
+            click.echo(Fore.CYAN + f"\n▶ Commitando: {commit['message']}")
+            if 'EOL' in commit['message']:
+                # 🌊 Renormaliza o índice contra a regra nova (autocrlf/.gitattributes)
+                _run_git_command(['add', '--renormalize', '--'] + commit['files'], silent_fail=True)
+            else:
+                for f in commit['files']:
+                    _run_git_command(['add', f], silent_fail=True)
+            if _run_git_command(['commit', '-m', commit['message']], silent_fail=True):
+                applied += 1
+            else:
+                click.echo(Fore.RED + f'[ERRO] Falha no commit: {commit["message"]}')
+        new_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True)
+        if new_hash and applied:
+            _learn_solutions_from_commit(new_hash, os.getcwd())
+        click.echo(Fore.GREEN + f'\n✅ {applied}/{len(commits_proposed)} commits criados com sucesso!')
+        return 
     with ExecutionLogger('save', project_path, ctx.params):
         current_branch = (_run_git_command(['branch', '--show-current'], capture_output=True) or '').strip()
         final_merge_target = merge_target or branch_target

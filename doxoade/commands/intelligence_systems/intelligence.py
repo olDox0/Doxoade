@@ -43,6 +43,7 @@ VALID_EXTS = (
 @click.pass_context
 def intelligence(ctx, docs, source, no_comments, no_spaces, concatenate, ai_export, ia_qwen, output, focus, exclude, ext_exclude, analyze, verbose, manifest, paths, graph):
     """Módulo de Inteligência Topológica (v95.6 - Qwen Ready)."""
+    _sonda_contrato = ctx.params['graph']
     if analyze:
         _run_analyze_coverage(paths, exclude, verbose, ext_exclude)
         return

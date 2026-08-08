@@ -7,7 +7,7 @@ import os
 from click import progressbar, echo
 from doxoade.tools.doxcolors import Fore
 from .check_state import CheckState
-from ..security_utils import SEVERITY_MAP
+from doxoade.commands.security_systems.security_utils import SEVERITY_MAP
 from doxoade.commands.security_systems.security_cmd import _run_bandit_engine
 from doxoade.commands.security_systems.security_cmd import _run_safety_engine
 from doxoade.commands.security_systems.security_utils import get_tool_path

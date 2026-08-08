@@ -62,35 +62,52 @@ def minify_code(code: str, filename: str, no_comments: bool, no_spaces: bool) ->
     return '\n'.join(header + body)
 
 def get_ignore_spec(root: str, extra_patterns: list = None):
-    """
-    Carrega especificações de ignorar do intelligence.toml ou defaults.
-    """
+    """ Carrega especificações de ignorar do intelligence.toml ou defaults. """
     import toml
     import pathspec
-    
-    # Defaults de segurança
     patterns = [
-        '.git/', '__pycache__/', 'venv/', '.venv/', 
+        '.git/', '__pycache__/', 'venv/', '.venv/',
         '*.pyc', '.vscode/', '.idea/', 'dist/', 'build/',
         '*.bak', 'recovery_zone/', 'chief_dossier.json',
         'node_modules/', 'doxoade.egg-info/'
     ]
-    
-    # 1. Carrega do intelligence.toml se existir
-    config_path = os.path.join(root, "intelligence.toml")
-    if os.path.exists(config_path):
+
+    # 1. Carrega intelligence.toml (se existir)
+    intel_path = os.path.join(root, "intelligence.toml")
+    if os.path.exists(intel_path):
         try:
-            config = toml.load(config_path)
-            toml_patterns = config.get("ignore", [])
-            if toml_patterns:
-                patterns.extend(toml_patterns)
+            config = toml.load(intel_path)
+            intel_patterns = config.get("ignore", [])
+            if intel_patterns:
+                patterns.extend(intel_patterns)
         except Exception as e:
             _print_forensic("load_intelligence_toml", e)
 
-    # 2. Adiciona padrões vindos do CLI (-x)
+    # 2. Carrega [tool.doxoade].ignore do pyproject.toml
+    pyproject_path = os.path.join(root, "pyproject.toml")
+    if os.path.exists(pyproject_path):
+        try:
+            import tomllib
+            with open(pyproject_path, "rb") as f:
+                data = tomllib.load(f)
+        except ImportError:
+            try:
+                data = toml.load(pyproject_path)
+            except Exception:
+                data = {}
+        except Exception:
+            data = {}
+        if data:
+            pyproject_patterns = (
+                (data.get("tool", {}) or {})
+                .get("doxoade", {})
+                .get("ignore", [])
+            )
+            if pyproject_patterns:
+                patterns.extend(pyproject_patterns)
+
     if extra_patterns:
         patterns.extend(extra_patterns)
-        
     return pathspec.PathSpec.from_lines('gitwildmatch', patterns)
 
 class ChiefInsightVisitor(ast.NodeVisitor):

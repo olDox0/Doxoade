@@ -64,7 +64,8 @@ def rename_module(root: Path, old_module: str, new_module: str, apply: bool=Fals
             total_changes += changes
             print(f'[UPDATE] {py} ({changes} mudanças)')
             if apply:
-                py.write_text(new_text, encoding='utf-8')
+                `write_text_safe(py, new_text)
+#                py.write_text(new_text, encoding='utf-8')
     if apply:
         new_path.parent.mkdir(parents=True, exist_ok=True)
         os.rename(old_path, new_path)

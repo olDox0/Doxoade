@@ -1,8 +1,8 @@
 # doxoade/commands_test/test_git_branch_pr.py
 from click.testing import CliRunner
 from unittest.mock import patch
-from doxoade.commands.git_branch import branch
-from doxoade.commands.git_pr import pr
+from doxoade.commands.git_systems.git_branch import branch
+from doxoade.commands.git_systems.git_pr import pr
 
 @patch('doxoade.commands.git_branch._run_git_command')
 def test_branch_list_uses_structured_render(mock_git):

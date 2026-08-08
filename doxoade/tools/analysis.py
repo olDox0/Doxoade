@@ -107,23 +107,35 @@ def analyze_file_structure(file_path):
     return {'functions': functions}
 
 def _mine_traceback(stderr_output):
-    """Analisa um traceback bruto."""
+    """Analisa um traceback bruto.
+    v2: A cláusula 'in <func>' é OPCIONAL. Frames de SyntaxError/IndentationError
+    (alvos de compile/eval) não possuem cláusula 'in' — e é exatamente neles
+    que reside a Cena do Crime real (ex.: intelligence.py:44), não no call-site
+    do lazy loader (cli.py:271)."""
     if not stderr_output:
         return None
-    file_blocks = list(re.finditer('File "(.+?)", line (\\d+), in (.+?)\\n\\s*(.+?)\\n', stderr_output))
-    error_match = re.search('\\n(\\w+Error|Exception): (.+)', stderr_output)
+    file_blocks = list(re.finditer(
+        r'File "(?P<file>.+?)", line (?P<line>\d+)(?:, in (?P<ctx>.+?))?\s*\n\s*(?P<code>.+)',
+        stderr_output))
+    error_match = re.search('\n(\w+Error|Exception): (.+)', stderr_output)
     if not error_match:
-        error_match = re.search('\\n(\\w+): (.+)', stderr_output)
+        error_match = re.search('\n(\w+): (.+)', stderr_output)
     if not error_match:
         return None
     error_type = error_match.group(1)
     message = error_match.group(2)
     if file_blocks:
-        last_block = file_blocks[-1]
-        code_line = last_block.group(4).strip()
-        return {'file': last_block.group(1), 'line': int(last_block.group(2)), 'context': last_block.group(3), 'code': code_line, 'error_type': error_type, 'message': message}
-    else:
-        return {'file': 'Desconhecido', 'line': 0, 'context': 'Runtime', 'code': 'N/A', 'error_type': error_type, 'message': message}
+        last_block = file_blocks[-1]  # ← O frame REAL da exceção
+        return {
+            'file': last_block.group('file'),
+            'line': int(last_block.group('line')),
+            'context': (last_block.group('ctx') or '<compile>').strip(),
+            'code': last_block.group('code').strip(),
+            'error_type': error_type,
+            'message': message,
+        }
+    return {'file': None, 'line': None, 'context': None, 'code': None,
+            'error_type': error_type, 'message': message}
 
 def _analyze_runtime_error(error_data):
     if not error_data:

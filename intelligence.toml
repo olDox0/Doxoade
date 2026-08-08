@@ -16,7 +16,7 @@ ignore = [
     "commands_test/",
     "dist/",
     "dox_lab/",
-    "doxoade.egg-info/",
+    "*.egg-info/",
     "doxoade/diagnostic/",
     "doxoade/tools/benzaiten_gui/native/include/webview/",
     "doxoade/tools/benzaiten_gui/native/include/webview2/",

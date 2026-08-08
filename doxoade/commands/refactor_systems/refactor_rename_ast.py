@@ -141,7 +141,8 @@ def rename_module_ast(root: Path, old_module: str, new_module: str, apply: bool=
 
     if apply:
         for py_file, new_text in pending_file_text.items():
-            py_file.write_text(new_text, encoding='utf-8')
+            write_text_safe(py_file, new_text)
+#            py_file.write_text(new_text, encoding='utf-8')
         if source_file != dest_file:
             dest_file.parent.mkdir(parents=True, exist_ok=True)
             if dest_file.exists() and overwrite:

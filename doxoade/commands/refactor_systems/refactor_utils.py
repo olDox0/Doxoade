@@ -70,6 +70,32 @@ def parse_ast(path: Path) -> ast.AST | None:
     except Exception:
         return None
 
+def write_text_safe(path: Path, new_text: str, force: bool = False) -> bool:
+    """🛡️ Ma'at Write Guard: preserva o EOL dominante do original;
+    skip se a mudança for apenas ruído de EOL/whitespace."""
+    try:
+        old_raw = path.read_bytes()
+    except OSError:
+        old_raw = b''
+    old_text = old_raw.decode('utf-8', errors='ignore')
+
+    def _norm(t: str) -> str:
+        ls = [l.rstrip() for l in t.replace('\r\n', '\n').split('\n')]
+        while ls and ls[-1] == '':
+            ls.pop()
+        return '\n'.join(ls)
+
+    if old_text and not force and _norm(old_text) == _norm(new_text):
+        return False                      # puro ruído → não toca
+    crlf = old_text.count('\r\n')
+    lf = old_text.count('\n') - crlf
+    if crlf > lf:
+        new_text = new_text.replace('\r\n', '\n').replace('\n', '\r\n')
+    else:
+        new_text = new_text.replace('\r\n', '\n')
+    path.write_bytes(new_text.encode('utf-8'))
+    return True
+
 class _FunctionCollector(ast.NodeVisitor):
 
     def __init__(self, file: Path) -> None:

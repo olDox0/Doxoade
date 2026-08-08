@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from doxoade.tools.doxcolors import Fore
 from doxoade.core_database import get_db_connection
 from doxoade.tools.alexandria.engine import alexandria_write
+from doxoade.commands.git_systems.git_workflow import release
 try:
     import psutil
     HAS_PSUTIL = True

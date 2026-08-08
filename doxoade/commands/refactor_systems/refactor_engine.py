@@ -278,7 +278,8 @@ class RefactorEngine:
                         fix_imports(fpath, name, new_mod)
                 
                 if changed and not dry_run:
-                    fpath.write_text(content, encoding='utf-8')
+                    write_text_safe(fpath, "".join(new_lines))
+#                    fpath.write_text(content, encoding='utf-8')
                     modified_count += 1
 
         return True, f"Reparo concluído. {modified_count} arquivos sincronizados."
@@ -397,55 +398,44 @@ class RefactorEngine:
 
     def update_project_imports(self, func_name, old_mod, new_mod, module_level=False, dry_run=False, include_strings=False):
         all_files = list(iter_python_files(self.root))
-        
-        # Mapeamento de variações
-        old_parts = old_mod.split('.')
-        new_parts = new_mod.split('.')
+        old_parts, new_parts = old_mod.split('.'), new_mod.split('.')
         mapping = {
             old_mod: new_mod,
-            '.'.join(old_parts[1:]): '.'.join(new_parts[max(0, len(new_parts)-(len(old_parts)-1)):]),
+            '.'.join(old_parts[1:]): '.'.join(new_parts[max(0, len(new_parts) - (len(old_parts) - 1)):]),
         }
+        mapping = {k: v for k, v in mapping.items() if k}  # 🛡️ mata chave vazia
 
         with click.progressbar(all_files, label="Limpando rastros") as bar:
             for fpath in bar:
                 content = read_text_safe(fpath)
-                if not content: continue
+                if not content:
+                    continue
                 lines = content.splitlines(keepends=True)
-                changed, new_lines, file_diff = False, [], []
-
-                for i, line in enumerate(lines):
+                changed, new_lines = False, []
+                for line in lines:
                     stripped = line.strip()
-                    
-                    # NOVO FILTRO: É import ou é uma string de mapeamento CLI?
                     is_import = stripped.startswith(('from ', 'import '))
-                    is_cli_map = (':' in stripped and (old_mod in stripped))
-                    
-                    if not (include_strings or is_import or is_cli_map):
+                    is_cli_map = (':' in stripped and old_mod in stripped)
+                    if not (include_strings or module_level or is_import or is_cli_map):
                         new_lines.append(line)
                         continue
-
                     new_line = line
                     for o_var, n_var in mapping.items():
-                        # Se for CLI Map (doxoade.commands.migrate_colors:migrate_colors)
-                        if o_var in new_line:
-                            new_line = new_line.replace(o_var, n_var)
-                            changed = True
-
+                        # 🛡️ Fronteira de palavra: 'check' NÃO corrói 'check_systems'
+                        new_line = re.sub(rf'\b{re.escape(o_var)}\b', lambda m: n_var, new_line)
                     if new_line != line:
-                        file_diff.append((i + 1, line.strip(), new_line.strip()))
                         changed = True
                     new_lines.append(new_line)
-
                 if changed:
+                    new_text = ''.join(new_lines)
                     if dry_run:
-                        # --- [ÁRTEMIS] PREVIEW DE SNIPPETS ---
-                        click.echo() # Força pular linha após o progressbar
-                        click.secho(f"[*] Atualizando Import Absoluto em:", fg="cyan")
+                        click.echo()
+                        click.secho("[*] Atualizando Import Absoluto em:", fg="cyan")
                         from .refactor_preview import preview_file_change
-                        preview_file_change(fpath, content, "".join(new_lines))
+                        preview_file_change(fpath, content, new_text)
                     else:
-                        with open(fpath, 'w', encoding='utf-8', newline='') as f:
-                            f.writelines(new_lines)
+                        from .refactor_utils import write_text_safe
+                        write_text_safe(fpath, new_text)   # 🛡️ adeus, newline=''
 
 
     def rename_file(self, old_path, new_path):
@@ -509,34 +499,34 @@ class RefactorEngine:
                 print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
                 continue
 
-    def _ensure_absolute_imports_in_file(self, file_path: Path):
-        """Força que todos os imports internos do arquivo sejam absolutos."""
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-            
-            new_lines = []
-            changed = False
-            for line in lines:
-                fixed, was_fixed = self._fix_import_line(line)
-                if was_fixed:
-                    new_lines.append(fixed)
-                    changed = True
-                else:
-                    new_lines.append(line)
-            
-            if changed:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.writelines(new_lines)
-        except Exception as e:
-            import sys as _dox_sys, os as _dox_os
-            from traceback import print_tb as exc_trace
-            exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
-            f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            line_n = exc_tb.tb_lineno
-            exc_trace(exc_tb)
-            print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: _ensure_absolute_imports_in_file\033[0m")
-            print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
+    def _ensure_absolute_imports_in_file(self, file_path: Path, source_module_path: str = None, dry_run: bool = False):
+        """Versão ÚNICA (mata o shadowing): purifica relativos (se source_module_path)
+        + garante prefixo doxoade. EOL e encoding protegidos pelo Guardião."""
+        content = read_text_safe(file_path)               # tolera latin-1
+        if not content:
+            return
+        lines = content.splitlines(keepends=True)
+        new_lines, changed = [], False
+        for line in lines:
+            new_line = line
+            was_rel = False
+            if source_module_path and 'from .' in new_line:
+                new_line, was_rel = self._convert_relative_to_absolute(new_line, source_module_path)
+            fixed, was_abs = self._fix_import_line(new_line)
+            if was_rel or was_abs:
+                new_lines.append(fixed if was_abs else new_line)
+                changed = True
+            else:
+                new_lines.append(line)
+        if not changed:
+            return
+        new_text = ''.join(new_lines)
+        if dry_run:
+            from .refactor_preview import preview_file_change
+            preview_file_change(file_path, content, new_text)
+            return
+        from .refactor_utils import write_text_safe
+        write_text_safe(file_path, new_text)              # EOL original preservado
         
     def _convert_relative_to_absolute(self, line, current_module_path):
         """
@@ -658,7 +648,8 @@ class RefactorEngine:
                 new_lines.append(new_line)
 
             if changed:
-                target_path.write_text("".join(new_lines), encoding='utf-8')
+                write_text_safe(fpath, "".join(new_lines))
+#                target_path.write_text("".join(new_lines), encoding='utf-8')
                 return True
         except Exception as e:
             click.echo(f"  [ERRO] Falha ao purificar {target_path.name}: {e}")
@@ -838,7 +829,8 @@ class RefactorEngine:
                         from .refactor_preview import preview_file_change
                         preview_file_change(py_file, text, new_text, context=2)
                     else:
-                        py_file.write_text(new_text, encoding='utf-8')
+                        write_text_safe(fpath, "".join(new_lines))
+#                        py_file.write_text(new_text, encoding='utf-8')
 
     def _simulate_absolute_conversion(self, text: str, source_module_path: str) -> str:
         """Simula a purificação de imports (relativo -> absoluto) em memória para o Preview."""

@@ -5,6 +5,8 @@ import importlib
 import platform
 import shutil
 from doxoade.tools.git import _run_git_command, _get_detailed_diff_stats, _get_last_commit_info
+from doxoade.commands.git_systems.git_branch import branch
+from doxoade.commands.git_systems.git_workflow import release
 
 class SystemInspector:
 

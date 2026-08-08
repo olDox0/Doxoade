@@ -4,6 +4,7 @@ import click
 import os
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
+from doxoade.commands.git_systems.git_workflow import release
 
 @click.group('metal') # 'metal' é mais curto e forte
 def metal_group():

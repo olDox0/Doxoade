@@ -7,9 +7,9 @@ from pathlib import Path
 # [DOX-UNUSED] from setuptools import Extension
 
 from .diagnostic.soteria.scribe import SoteriaScribe
-from .diagnostic.soteria.soteria_analysis import SoteriaForensic
 from .buildcraft.dedalo_engine import DedaloEngine
 from doxoade.tools.doxcolors import Fore, Style
+from doxoade.tools.soteria_systems.soteria_engine import SoteriaForensic
 
 COMPILATION_TELEMETRY = []
 

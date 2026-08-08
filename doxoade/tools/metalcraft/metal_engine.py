@@ -10,6 +10,8 @@ from doxoade.tools.vulcan.diagnostic.soteria.scribe import SoteriaScribe
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.telemetry_tools.logger import chief_heartbeat
 from .metal_toolchain import NexusToolchain
+from doxoade.tools.soteria_systems.soteria_engine import SoteriaForensic
+from doxoade.commands.git_systems.git_workflow import release
 
 
 class NexusMetalEngine:
@@ -504,7 +506,6 @@ class NexusMetalEngine:
             if "@SOTERIA_BEGIN@" in full_log or "TAG_MOTIVO:" in full_log:
                 print(f"\n   {Fore.RED}🔬 [SOTÉRIA] Crash nativo — análise forense automática{self.RST}")
                 try:
-                    from doxoade.tools.vulcan.diagnostic.soteria.soteria_analysis import SoteriaForensic
                     forensic = SoteriaForensic()
                     dossier = forensic.process_pipe(full_log)
                     if dossier:

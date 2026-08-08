@@ -2,7 +2,103 @@
 import subprocess
 import os
 import re
+import hashlib
+import difflib
 from doxoade.tools.doxcolors import Fore
+import hashlib
+from typing import Dict, Any, Optional, List
+
+def _normalize_for_hash(content: str) -> str:
+    """Normalização canônica: CRLF→LF, rstrip por linha, sem blank lines finais."""
+    lines = [l.rstrip() for l in content.replace('\r\n', '\n').split('\n')]
+    while lines and lines[-1] == '':
+        lines.pop()
+    return '\n'.join(lines)
+
+def _get_file_content_hash(file_path: str) -> Optional[str]:
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            return hashlib.sha256(_normalize_for_hash(f.read()).encode('utf-8')).hexdigest()
+    except OSError:
+        return None
+
+def _detect_move_pair(deleted_path: str, untracked_files: list, git_root: str, threshold=0.80) -> Optional[str]:
+    """Detecta move mesmo COM edições, via similaridade (difflib ≥ 80%)."""
+    deleted_name = os.path.basename(deleted_path)
+    deleted_content = _run_git_command(['show', f'HEAD:{deleted_path}'], capture_output=True, silent_fail=True, cwd=git_root)
+    if not deleted_content:
+        return None
+    deleted_norm = _normalize_for_hash(deleted_content)
+    best_ratio, best_match = 0.0, None
+    for candidate in untracked_files:                      # ← era: for untracked in untracked:
+        if os.path.basename(candidate) != deleted_name:
+            continue
+        try:
+            with open(os.path.join(git_root, candidate), 'r', encoding='utf-8', errors='ignore') as f:
+                new_norm = _normalize_for_hash(f.read())
+        except OSError:
+            continue
+        ratio = difflib.SequenceMatcher(None, deleted_norm, new_norm).ratio()
+        if ratio > best_ratio:
+            best_ratio, best_match = ratio, candidate
+    return best_match if (best_match and best_ratio >= threshold) else None
+
+def analyze_git_changes(git_root: str = '.') -> Dict[str, Any]:
+    """🧠 ANÁLISE INTELIGENTE: EOL_NOISE, STRUCTURAL_MOVE, REAL_CHANGE, REAL_DELETE."""
+    git_root = os.path.abspath(git_root)
+    status_raw = _run_git_command(['status', '--porcelain', '-uall'], capture_output=True, silent_fail=True, cwd=git_root)
+    if not status_raw:
+        return {'total': 0, 'categories': {}, 'summary': {}}
+    lines = [l for l in status_raw.split('\n') if l.strip()]
+    modified, deleted, untracked = [], [], []
+    for line in lines:
+        code = line[:2].strip()
+        path = line[3:].strip().strip('"')
+        if ' -> ' in path and code.startswith('R'):
+            parts = path.split(' -> ')
+            deleted.append(parts[0]); untracked.append(parts[1])
+            continue
+        if code in ('M', 'MM', 'AM'): modified.append(path)
+        elif code in ('D', 'AD'): deleted.append(path)
+        elif code in ('??', 'A'): untracked.append(path)
+
+    eol_noise, real_modified = [], []
+    for path in modified:
+        full_path = os.path.join(git_root, path)
+        if not os.path.exists(full_path):
+            real_modified.append(path); continue
+        current_hash = _get_file_content_hash(full_path)
+        head_content = _run_git_command(['show', f'HEAD:{path}'], capture_output=True, silent_fail=True, cwd=git_root)
+        if head_content is not None:
+            head_hash = hashlib.sha256(_normalize_for_hash(head_content).encode('utf-8')).hexdigest()
+            if current_hash == head_hash:
+                eol_noise.append(path)
+            else:
+                real_modified.append(path)
+        else:
+            real_modified.append(path)
+
+    structural_moves, real_deletes = [], []
+    for deleted_path in deleted:
+        new_location = _detect_move_pair(deleted_path, untracked, git_root)
+        if new_location:
+            structural_moves.append({'from': deleted_path, 'to': new_location})
+            if new_location in untracked:
+                untracked.remove(new_location)
+        else:
+            real_deletes.append(deleted_path)
+
+    return {
+        'total': len(lines),
+        'categories': {
+            'EOL_NOISE': eol_noise, 'STRUCTURAL_MOVE': structural_moves,
+            'REAL_CHANGE': real_modified, 'REAL_DELETE': real_deletes, 'UNTRACKED': untracked,
+        },
+        'summary': {
+            'eol_noise': len(eol_noise), 'structural_moves': len(structural_moves),
+            'real_changes': len(real_modified), 'real_deletes': len(real_deletes), 'untracked': len(untracked),
+        },
+    }
 
 def _run_git_command(args, capture_output=False, silent_fail=False, cwd=None):
     """Executa um comando git de forma segura e codificada."""

@@ -1,17 +1,26 @@
 # -*- coding: utf-8 -*-
 # doxoade/doxoade/rescue.py
-"""
-Rescue System - Lazarus Protocol v61.0 Platinum Gold.
-Agregador Forense: Sotéria + Aegis + Lazarus (Consolidado).
-"""
+""" PROTOCOLO LÁZARO v2.2 — Necropsia de Falhas Mode-Aware.
+• complete: Relatório forense completo + menu de intervenção.
+• direct:   Falha rápida — 1 linha de diagnóstico + LOG BRUTO. Sem menu,
+            sem Cena do Crime, sem Cadeia de Envolvimento.
+A Cena do Crime aponta para o frame REAL da exceção (intelligence.py:44),
+não para o call-site do lazy loader (cli.py:271). """
 import os
 import subprocess
-# [DOX-UNUSED] import re
+import re
+import sys
+import hashlib
 from pathlib import Path
+from datetime import datetime
 from typing import Dict, Any, Optional
 
-# [DOX-UNUSED] from doxoade.tools.telemetry_tools.logger import chief_heartbeat
-from doxoade.tools.doxcolors import Fore, Style, Back
+try:
+    from doxoade.tools.doxcolors import Fore, Style, Back
+except Exception:
+    class _NoColor:
+        def __getattr__(self, _): return ''
+    Fore = _NoColor(); Style = _NoColor()
 
 from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
 
@@ -21,13 +30,243 @@ C, M, Y, R, W, G, RST = (Fore.CYAN+Style.BRIGHT, Fore.MAGENTA+Style.BRIGHT,
                          Fore.WHITE+Style.BRIGHT, Fore.GREEN+Style.BRIGHT, Style.RESET_ALL)
 
 WIN_SIGNALS = {
-    3221225477: ("AccessViolation (0xc0000005)", "Tentativa ilegal de violar a RAM física."),
-    3221225481: ("DivideByZero", "Erro aritmético de hardware."),
-    3221225621: ("StackOverflow", "A pilha de recursão explodiu."),
-    3221226505: ("StackBufferOverrun (0xc0000409)", "A integridade da pilha foi destruída (Stack Smashing).")
+  3221225477: ("AccessViolation (0xc0000005)", "Tentativa ilegal de violar a RAM física."),
+  3221225481: ("DivideByZero", "Erro aritmético de hardware."),
+  3221225621: ("StackOverflow", "A pilha de recursão explodiu."),
+  3221226505: ("StackBufferOverrun (0xc0000409)", "A integridade da pilha foi destruída (Stack Smashing).")
 }
 
-# --- AUXILIARES ---
+_CONTRACT_ERRORS = {'KeyError', 'AttributeError', 'IndexError'}
+
+_LAUDOS = {
+  'ModuleNotFoundError':('Falha de Suprimentos', 'Módulo inexistente no ambiente.'),
+  'FileNotFoundError':  ('Recurso Ausente',      'Arquivo/diretório não localizado.'),
+  'IndentationError':   ('Violação de Gramática','Recuo de blocos inconsistente.'),
+  'PermissionError':    ('Bloqueio de Aegis',    'Permissão negada pelo sistema.'),
+  
+  'AttributeError': ('Falha de Contrato',    'Atributo inexistente no objeto.'),
+  'SyntaxError':    ('Violação de Gramática','Código possui erro de sintaxe'),
+  'ImportError':    ('Falha de Suprimentos', 'Módulo/símbolo não pôde ser importado.'),
+  'IndexError':     ('Falha de Contrato',    'Índice fora dos limites garantidos.'),
+  'KeyError':       ('Falha de Contrato',    'Chave inexistente em estrutura de dados.'),
+}
+
+# ──────────────────────────── AUXILIARES ───────────────────────────
+
+def _collect_fixes_for_crime(info):
+    """🛠️ ANÚBIS-LINK: consulta o motor de check p/ a linha do crime (silencioso)."""
+    try:
+        import contextlib, io as _io
+        from doxoade.commands.check_systems.check_io import CheckIO
+        from doxoade.commands.check_systems.check_state import CheckState
+        from doxoade.commands.check_systems.check_engine import run_audit_engine
+        io_ = CheckIO(info['file'])
+        state = CheckState(root=io_.project_root, target_path=io_.target_abs, is_full_power=True)
+        buf = _io.StringIO()
+        with contextlib.redirect_stdout(buf):  # mantém o Lázaro limpo
+            run_audit_engine(state, io_, full_power=True)
+        return [f for f in state.findings
+                if f.get('line') == info.get('line') and f.get('suggestion_action')]
+    except Exception:
+        return []
+
+def _fix_workflow(info):
+    """🛠️ Dry-Run da correção + aplicação segura (valida com compile antes de salvar)."""
+    fixes = _collect_fixes_for_crime(info)
+    with open(info['file'], 'r', encoding='utf-8', errors='replace') as fh:
+        lines = fh.readlines()
+    # Candidato extra: correção de contrato (chave errada → chave real)
+    ct = info.get('contract') or {}
+    if ct.get('hint') and info.get('line'):
+        idx = info['line'] - 1
+        if idx < len(lines):
+            fixes = list(fixes) + [{
+                'line': info['line'],
+                'suggestion_action': 'FIX_CONTRACT_KEY',
+                'suggestion_content': lines[idx].strip().replace(ct['assumed'], ct['hint']),
+            }]
+    if not fixes:
+        print(f"  {Y}⚠ Nenhuma correção automática mapeada para a linha do crime.{RST}")
+        return
+    for f in fixes:  # --- DRY-RUN ---
+        idx = f['line'] - 1
+        orig = lines[idx].rstrip('\n') if idx < len(lines) else ''
+        indent = orig[:len(orig) - len(orig.lstrip())]          # ← preserva o recuo
+        print(f"\n  {C}■ DRY-RUN [{f['suggestion_action']}] {os.path.basename(info['file'])}:{f['line']}{RST}")
+        print(f"    {R}- {orig}{RST}")
+        print(f"    {G}+ {indent}{f['suggestion_content'].strip()}{RST}")   # ← prévia fiel
+    if input(f"\n  {W}Aplicar correções? [y/N]: {RST}").strip().lower() != 'y':
+        print(f"  {Y}✔ Dry-run encerrado sem alterações.{RST}")
+        return
+    for f in fixes:  # --- APLICAÇÃO ---
+        idx = f['line'] - 1
+        if idx >= len(lines):
+            continue
+        indent = lines[idx][:len(lines[idx]) - len(lines[idx].lstrip())]
+        lines[idx] = indent + f['suggestion_content'].strip() + '\n'
+    new_src = ''.join(lines)
+    try:
+        compile(new_src, info['file'], 'exec')  # Ma'at: nunca salvar código quebrado
+    except SyntaxError as e:
+        print(f"  {R}✘ Correção abortada: geraria SyntaxError ({e}).{RST}")
+        return
+    with open(info['file'], 'w', encoding='utf-8') as fh:
+        fh.write(new_src)
+    print(f"  {G}✔ Correção aplicada em {os.path.basename(info['file'])}. Ma'at restaurada.{RST}")
+
+def _extract_contract(crime):
+    """⚖️ HERA: reconstrói o contrato REAL da fronteira onde o KeyError nasceu.
+    Exibe o que a interface oferece vs. o que o código assumiu."""
+    if not crime:
+        return None
+    m = re.search(r"([\w\.]+)\[['\"](.+?)['\"]\]", crime.get('code', ''))
+    if not m:
+        return None
+    target, assumed = m.group(1), m.group(2)
+    contract = {'target': target, 'assumed': assumed, 'keys': [], 'hint': None}
+    try:
+        import ast, difflib
+        with open(crime['file'], 'r', encoding='utf-8', errors='ignore') as f:
+            tree = ast.parse(f.read())
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+               and node.lineno <= crime['line'] <= (node.end_lineno or node.lineno):
+                if target.endswith('params'):  # contrato Click: args da função
+                    contract['keys'] = [a.arg for a in node.args.args if a.arg not in ('self', 'cls', 'ctx')]
+                else:                          # contrato de dict: literal atribuído ao alvo
+                    var_name = target.split('.')[-1]
+                    for sub in ast.walk(node):
+                        if isinstance(sub, ast.Assign) and isinstance(sub.value, ast.Dict):
+                            if any(isinstance(t, ast.Name) and t.id == var_name for t in sub.targets):
+                                contract['keys'] = [str(k.value) for k in sub.value.keys if isinstance(k, ast.Constant)]
+                break
+    except Exception:
+        pass
+    if contract['keys']:
+        close = difflib.get_close_matches(assumed, contract['keys'], n=1, cutoff=0.4)
+        contract['hint'] = close[0] if close else None
+    return contract
+
+def _direct_report(trace, mined):
+    """🏹 DIRECT MODE: mesma estética do complete, porém compacta.
+    Header + Causa Raiz + Cena do Crime (snippet) + LOG BRUTO. Sem menu."""
+    mined = mined or {}
+    crime = mined.get('crime')
+    sep = '_' * 110
+    evento = hashlib.md5(trace.encode('utf-8', 'ignore')).hexdigest()[:8].upper()
+    laudo, _desc = _LAUDOS.get(mined.get('error_type', ''), ('Falha Desconhecida', ''))
+
+    out = sys.stderr
+    out.write(f"\n{C}{sep}{RST}\n")
+    out.write(f"  {W}🆔 ID EVENTO : {RST}{Y}{evento:<12}{RST} {W}🚪 EXIT CODE : {RST}{Y}1{RST}\n")
+    out.write(f"  {C}■ CAUSA RAIZ : {RST}{R}{laudo}{RST} {W}({mined.get('error_type', '?')}: {mined.get('error_msg', '')}){RST}\n")
+    if crime:
+        out.write(f"  {C}■ CENA DO CRIME : {RST}{Y}{os.path.basename(crime['file'])}{RST} | {Y}COORDENADA: {crime['file']}:{crime['line']}{RST}\n")
+        snip = _get_snippet(crime['file'], crime['line'], ctx=1)  # snippet enxuto (3 linhas)
+        if snip:
+            out.write(snip + '\n')
+    ct = _extract_contract(crime)
+    if ct and ct.get('hint'):
+        sys.stderr.write(f"{G}   ✔ contrato real oferece '{ct['hint']}' (não '{ct['assumed']}'){RST}\n")
+    out.write(f"{sep}\n")
+    out.write(f"{R}--- [LOG BRUTO] ---{RST}\n{trace}\n{R}-------------------{RST}\n")
+    sys.exit(1)
+
+def _correct_crime_scene(info: dict, trace: str) -> dict:
+    """🎯 Sobrescreve o veredito do CrashProcessor com o frame REAL da exceção
+    (intelligence.py:44) e reconstrói a Cadeia de Envolvimento."""
+    mined = _mine_traceback(trace)
+    crime = (mined or {}).get('crime')                   # ← defensivo
+    if not crime:
+        return info
+    info['file'] = crime['file']
+    info['line'] = crime['line']
+    info['chain'] = [(fr['ctx'], f"{fr['file']}:{fr['line']}") for fr in mined.get('frames', [])]
+    return info
+
+def _correct_crime_scene(info: dict, trace: str) -> dict:
+    mined = _mine_traceback(trace)
+    crime = (mined or {}).get('crime')
+    if not crime:
+        return info
+    info['file'] = crime['file']
+    info['line'] = crime['line']
+    info['chain'] = [(fr['ctx'], f"{fr['file']}:{fr['line']}") for fr in mined.get('frames', [])]
+    # ⚖️ ESCLARECIMENTO DE CONTRATO (Ma'at)
+    if mined.get('error_type') in _CONTRACT_ERRORS:
+        info['technical_error'] = 'FALHA_DE_CONTRATO'
+        info['explanation'] = (
+            f"{mined['error_type']}: o código assumiu uma garantia que o contrato não oferece "
+            f"(chave/atributo/índice inexistente). {mined['error_msg']}"
+        )
+        info['contract'] = _extract_contract(crime)   # ← HERA
+    return info
+
+def _read_trace(trace):
+    if trace and os.path.exists(str(trace)):
+        with open(trace, 'r', encoding='utf-8', errors='replace') as f:
+            return f.read()
+    return trace or ''
+
+def _mine_traceback(trace):
+    """Mineração NORMALIZADA: sempre retorna 'crime' e 'frames',
+    além das chaves legadas (file/line/context/code) p/ compatibilidade.
+    Cláusula 'in' opcional captura frames de SyntaxError (alvo do compile)."""
+    if not trace:
+        return None
+    frames = [{
+        'file': m.group('file'), 'line': int(m.group('line')),
+        'ctx': (m.group('ctx') or '<compile>').strip(),
+        'code': m.group('code').strip(),
+    } for m in re.finditer(
+        r'File "(?P<file>.+?)", line (?P<line>\d+)(?:, in (?P<ctx>.+?))?\s*\n\s*(?P<code>.+)',
+        trace)]
+    err = re.search(r'\n([A-Za-z_]+(?:Error|Exception)): (.+)', trace)
+    if not err:
+        err = re.search(r'\n([A-Za-z_]+): (.+)', trace)
+    if not err:
+        return None
+    crime = frames[-1] if frames else None
+    out = {
+        'frames': frames,
+        'crime': crime,                                   # ← forma nova
+        'error_type': err.group(1),
+        'error_msg': err.group(2).strip(),
+        'message': err.group(2).strip(),
+    }
+    # Chaves legadas (compatibilidade com consumers antigos)
+    if crime:
+        out.update({'file': crime['file'], 'line': crime['line'],
+                    'context': crime['ctx'], 'code': crime['code']})
+    else:
+        out.update({'file': None, 'line': None, 'context': None, 'code': None})
+    return out
+
+def _get_snippet(file_path, line, ctx=2):
+    """Snippet do arquivo REAL onde o erro nasceu."""
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+            lines = f.readlines()
+        out = []
+        for i in range(max(0, line - ctx - 1), min(len(lines), line + ctx)):
+            marker = '>>' if i == line - 1 else '  '
+            out.append(f'     {marker} {i + 1:>4} | {lines[i].rstrip()}')
+        return '\n'.join(out)
+    except Exception:
+        return '     (snippet indisponível)'
+
+def _open_npp(file_path, line):
+    for cmd in (['notepad++', f'-n{line}', file_path], ['npp', f'-n{line}', file_path]):
+        try:
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except Exception:
+            continue
+    try:
+        os.startfile(file_path)
+        return True
+    except Exception:
+        return False
 
 def _view_align(text, width):
     """Alinha o texto compensando os caracteres invisíveis de cor ANSI."""
@@ -80,7 +319,7 @@ def get_code_context(filepath: str, linenum: int, context_lines: int = 2) -> Opt
         print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: get_code_context\033[0m")
         print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
 
-# --- CORE ENGINE ---
+# ─────────────────────────── CORE ENGINE ───────────────────────────
 
 def _find_remedy_in_lexicon(error_msg):
     """Busca no acervo tático um remédio para o erro atual."""
@@ -266,6 +505,17 @@ def _render_tactical_dossier(d: dict):
     else:
         print(f"    {DIM}(O código-fonte original não pôde ser resgatado para este frame){RST}")
 
+    # --- SEÇÃO 5.5: CONTRATO DA FRONTEIRA (Hera) ---
+    ct = d.get('contract')
+    if ct:
+        print(f"\n  {M}■ CONTRATO DA FRONTEIRA (o que a interface realmente oferece):{RST}")
+        print(f"    {W}ALVO            : {RST}{Y}{ct['target']}{RST}")
+        if ct['keys']:
+            print(f"    {W}CHAVES VÁLIDAS ({len(ct['keys']):>2}) : {RST}{G}{', '.join(ct['keys'])}{RST}")
+        print(f"    {R}✘ ASSUMIDO       : '{ct['assumed']}'{RST}")
+        if ct.get('hint'):
+            print(f"    {G}✔ VOCÊ QUIS DIZER : '{ct['hint']}'{RST}")
+
     # --- SEÇÃO 6: CADEIA DE ENVOLVIMENTO ---
     if d.get('chain'):
         print(f"\n  {C}■ CADEIA DE ENVOLVIMENTO (Anatomia da Queda):{RST}")
@@ -297,8 +547,8 @@ def _render_tactical_dossier(d: dict):
         print(f"    {Y}{remedy}{RST}")
         print(f"    {Style.DIM}" + "─" * 40 + RST)
 
-def activate_protocol(error_text: str, exit_code: int = None, **kwargs): # <-- ADICIONADO **kwargs
-    """ Protocolo Lazarus: Menu de Intervenção Imediata. """
+def activate_protocol(error_text: str, exit_code: int = None, trace=None, **kwargs): # <-- ADICIONADO **kwargs
+    """Protocolo Lazarus: Menu de Intervenção Imediata (Mode-Aware)."""
     from .tools.telemetry_tools.logger import chief_heartbeat
     import sys as _sys
     import os as _os
@@ -306,9 +556,14 @@ def activate_protocol(error_text: str, exit_code: int = None, **kwargs): # <-- A
 
     # Agora kwargs existe no escopo e esta linha não vai mais dar NameError
     context_vars = kwargs.get('context', {})
-
+    trace_text = _read_trace(trace) or error_text or ''
+    
     if not error_text: 
         return
+
+    # 🏹 0. DIRECT MODE: falha rápida antes de qualquer necropsia pesada
+    if _os.environ.get('DOXOADE_MODE') == 'direct':
+        _direct_report(trace_text, _mine_traceback(trace_text))  # nunca retorna
 
     # --- 1. RESOLUÇÃO DE CÓDIGO TÉCNICO ---
     # Se o exit_code não foi passado pelo SO, tentamos extrair do log bruto da Sotéria
@@ -330,11 +585,16 @@ def activate_protocol(error_text: str, exit_code: int = None, **kwargs): # <-- A
     if info.get('technical_error') == "NORMAL_EXIT": 
         return
 
+    info = _correct_crime_scene(info, trace_text)
+
     # --- 3. TELEMETRIA ENRIQUECIDA (Hades Engine) ---
     # Agora o log registra o VEREDITO real (ex: Memory Corruption) em vez de apenas "Process Crash"
     chief_heartbeat("CHIEF", "RESCUE_ACTIVATED", {
         "verdict": info.get('technical_error', 'Process Crash'),
         "target": _os.path.basename(info.get('file', 'NATIVO')),
+        "file": info.get('file', 'NATIVO'),        # ← âncora p/ Hórus
+        "f": "activate_protocol",                  # ← nome p/ timeline
+        "motivo": info.get('technical_error', 'Process Crash'),
         "exit_code": exit_code
     })
 
@@ -346,9 +606,9 @@ def activate_protocol(error_text: str, exit_code: int = None, **kwargs): # <-- A
     
     # 3. Loop de Intervenção
     try:
-        from .tools.vulcan.diagnostic.soteria.analyze_crash import CrashProcessor
-        processor = CrashProcessor(project_root=".")
-        info = processor.process(error_text, exit_code)
+#        from .tools.vulcan.diagnostic.soteria.analyze_crash import CrashProcessor
+#        processor = CrashProcessor(project_root=".")
+#        info = processor.process(error_text, exit_code)
         
         while True:
             print('\n' + Fore.CYAN + Style.BRIGHT + '_' * 110 + RST)
@@ -363,7 +623,8 @@ def activate_protocol(error_text: str, exit_code: int = None, **kwargs): # <-- A
             opt4 = f"{Back.RED}4.{RST} {RST}{Fore.YELLOW} [DEBUG] Diagnóstico Pipeline{RST}"
             opt5 = f"{Back.RED}5.{RST} {Fore.MAGENTA} [IO]    Analisar Dados e Memória{RST}"
             opt6 = f"{Back.RED}6.{RST} {Fore.GREEN} [CODE]  Console Interativo{RST}"
-            opt7 = f"{Back.RED}7.{RST} {Fore.CYAN} [HORUS] Ver Timeline NSR (Shadow){RST}" # <-- NOVA OPÇÃO
+            opt7 = f"{Back.RED}7.{RST} {Fore.CYAN} [HORUS] Ver Timeline NSR (Shadow){RST}" 
+            opt8 = f"{Back.RED}8.{RST} {Fore.YELLOW} [FIX]  Dry-Run da Correção (Anúbis){RST}"
             opt0 = f"{Back.RED}0.{RST} {Fore.LIGHTMAGENTA_EX} [EXIT] Encerrar sessão{RST}"
 
             # Renderização em Grade 2x2 usando o alinhador inteligente
@@ -372,6 +633,7 @@ def activate_protocol(error_text: str, exit_code: int = None, **kwargs): # <-- A
             print(f"  {_view_align(opt3, 55)} {opt4}")
             print(f"  {_view_align(opt5, 55)} {opt6}")
             print(f"  {_view_align(opt7, 55)} {opt0}")
+            print(f"  {opt8}")
 #            print(f"  {_view_align(opt0, 55)}")
 
             choices = input("\n  Sua decisão (ex: 34): ").strip()
@@ -379,6 +641,8 @@ def activate_protocol(error_text: str, exit_code: int = None, **kwargs): # <-- A
 
             try:
                 for choice in choices:
+                    if len(choices) > 1:
+                        print(f"\n  {Style.DIM}▶ executando ação [{choice}]...{RST}")
                     if choice == '1' and file_label != "NATIVO":
                         subprocess.run(['git', 'checkout', '--', info['file']], capture_output=True)
                         print(f'  {Fore.GREEN}✔ Sucesso: {file_label} restaurado.{Style.RESET_ALL}')
@@ -442,22 +706,22 @@ def activate_protocol(error_text: str, exit_code: int = None, **kwargs): # <-- A
                         except Exception as e:
                             print(f"  {R}✘ Falha ao consultar Hades: {e}{RST}")
                             
-                    elif '5' in choices:
+                    elif choice == '5':                      # ← era: '5' in choices
                         _render_io_analysis(info)
-                    elif '6' in choices:
+                    elif choice == '6':                      # ← era: '6' in choices
                         _interactive_inspection(info)
-                    elif '7' in choices:
+                    elif choice == '7':                      # ← era: '7' in choices
                         print('\n' + Fore.CYAN + Style.BRIGHT + '─' * 110 + RST)
                         print(f"\n  {Fore.CYAN + Style.BRIGHT}👁️  INQUÉRITO HÓRUS: Rastro Próximo ao Incidente{RST}\n")
                         try:
                             from .commands.horus_cmd import run_horus_view_logic
-                            # Invocamos o visualizador focado no arquivo que falhou
                             f_name = _os.path.basename(info.get('file', ''))
-                            if f_name == "<string>": f_name = None # Se for anônimo, mostra tudo
-                            
+                            if f_name == "<string>": f_name = None
                             run_horus_view_logic(limit=50, full=True, focus=f_name)
                         except Exception as e:
                             print(f"  {Fore.RED}✘ Falha ao recuperar rastro tático: {e}{RST}")
+                    elif choice in ('8', 'f', 'F'):          # ← agora alcançável
+                        _fix_workflow(info)
                 break
             except Exception as e:
                 from doxoade.tools.error_info import handle_error
@@ -483,3 +747,6 @@ def activate_protocol(error_text: str, exit_code: int = None, **kwargs): # <-- A
 # [DOX-UNUSED]     import os
 #    _os._exit(1) # obs: vejo que é melhor sys._exit.
     _sys.exit(exit_code if exit_code is not None else 1)
+
+if __name__ == '__main__':
+    activate_protocol(sys.argv[1] if len(sys.argv) > 1 else None)
