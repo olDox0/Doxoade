@@ -1,13 +1,13 @@
-# doxoade/doxoade/commands/git_cmd.py
+# doxoade/doxoade/commands/git_systems/git_cmd.py
 """
 NEXUS-GIT - Comando Unificado de Gestão Profissional v1.0.
 Gerencia Branches, Issues e Saúde de Dependências.
 """
 import click
 import os
-from .git_systems.git_flow import GitFlowManager
-from .git_systems.git_bridge import GitHubBridge
-from .git_systems.git_health import DependencyGuard
+from doxoade.commands.git_systems.git_flow import GitFlowManager
+from doxoade.commands.git_systems.git_bridge import GitHubBridge
+from doxoade.commands.git_systems.git_health import DependencyGuard
 
 @click.group('git')
 def git_group():

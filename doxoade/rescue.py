@@ -636,7 +636,14 @@ def activate_protocol(error_text: str, exit_code: int = None, trace=None, **kwar
             print(f"  {opt8}")
 #            print(f"  {_view_align(opt0, 55)}")
 
-            choices = input("\n  Sua decisão (ex: 34): ").strip()
+#            choices = input("\n  Sua decisão (ex: 34): ").strip()
+#            if '0' in choices: break
+
+            raw = input("\n  Sua decisão (ex: 34): ").strip()
+            # 🛡️ Ignora caracteres que não são opções (evita executar letra por letra)
+            choices = [c for c in raw if c in '0123456789fF']
+            if not choices:
+                continue  # texto sem opção válida → volta ao menu
             if '0' in choices: break
 
             try:

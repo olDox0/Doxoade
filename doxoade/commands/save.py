@@ -160,8 +160,11 @@ def _abstract_and_learn_template(cursor: sqlite3.Cursor, concrete_finding: Dict[
 @click.option('--force', is_flag=True, help='Força o commit ignorando erros de qualidade.')
 @click.option('--smart', '-s', is_flag=True, help='🧠 Analisa e propõe commits semânticos (DRY-RUN por padrão).')
 @click.option('--apply', is_flag=True, help='🛠️ Executa os commits propostos pelo --smart (sem esta flag, apenas prévia).')
+@click.option('--alfa', is_flag=True, help='🏷️ Gera mensagem automática no padrão Alfa (Versão + Arquivos + Data).')
+@click.option('--amend', is_flag=True, help='✏️ Edita a mensagem do último commit (git commit --amend).')
 @click.pass_context
-def save(ctx, message, archives, remove_commit, branch_target, merge_target, update_base, force, smart, apply):
+def save(ctx, message, archives, remove_commit, branch_target, merge_target, update_base, force, smart, apply, alfa, amend):
+#def save(ctx, message, archives, remove_commit, branch_target, merge_target, update_base, force, smart, apply):
     """Executa commit seguro com aprendizado automatizado."""
     console = Console()
     project_path = os.getcwd()
@@ -179,6 +182,31 @@ def save(ctx, message, archives, remove_commit, branch_target, merge_target, upd
                 for item in sorted(data, key=lambda x: x['size'], reverse=True):
                     click.echo(f"  {item['size']:>7.1f} KB │ {item['path']}")
             return
+            
+    # ═══ MOTORALFA: Automação do Padrão Doxoade ═══
+    if alfa:
+        from doxoade.tools.git import analyze_git_changes
+        analysis = analyze_git_changes('.')
+        message = _build_alfa_template(project_path, analysis, message)
+        console.print(f'[bold gold3]🏷️ [SAVE] Padrão Doxoade Ativado:[/bold gold3] {message}')
+        
+        # 🔍 DRY-RUN POR PADRÃO: se não tem --apply, apenas mostra e sai
+        if not apply:
+            console.print(f'[bold yellow]🔍 DRY-RUN concluído. Use --apply para commitar.[/bold yellow]')
+            return
+
+    # ═══ AMEND: Edita mensagem do último commit ═══
+    if amend:
+        if not message:
+            click.echo(Fore.RED + 'Erro: --amend exige uma mensagem.')
+            return
+        console.print(f'[bold cyan]✏️ [AMEND] Editando mensagem do último commit...[/bold cyan]')
+        if _run_git_command(['commit', '--amend', '-m', message]):
+            console.print(f'[bold green]✔ Mensagem atualizada: {message}[/bold green]')
+        else:
+            click.echo(Fore.RED + '[ERRO] Falha ao editar commit.')
+        return
+
     if smart:
         from doxoade.tools.git import analyze_git_changes
         from doxoade.tools.doxcolors import Style
@@ -281,6 +309,13 @@ def save(ctx, message, archives, remove_commit, branch_target, merge_target, upd
         if not _run_git_command(['commit', '-m', message]):
             click.echo(Fore.RED + "[ERRO] Falha ao executar 'git commit'.")
             sys.exit(1)
+        
+        # 🏷️ ATUALIZAÇÃO AUTOMÁTICA DE VERSÃO
+        if _update_version_file(git_root):
+            _run_git_command(['add', 'doxoade/_version.py'], silent_fail=True)
+            _run_git_command(['commit', '--amend', '--no-edit'], silent_fail=True)
+            console.print(f'[bold cyan]🏷️ Versão atualizada em _version.py[/bold cyan]')
+        
         console.print('[bold green]✔ Conhecimento sepultado com sucesso.[/bold green]')
         
         new_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, silent_fail=True)
@@ -430,3 +465,62 @@ def _capture_delta_knowledge(new_commit_hash, project_path):
         
     conn.commit()
     conn.close()
+
+# ___ Auto-descricionamento ______________________________________
+
+def _get_last_alfa_version(git_root='.'):
+    """Extrai a última versão Alfa do histórico Git."""
+    log = _run_git_command(['log', '--grep=[Aa]lfa', '-1', '--format=%s'], capture_output=True, silent_fail=True, cwd=git_root)
+    if not log:
+        log = _run_git_command(['log', '-1', '--format=%s'], capture_output=True, silent_fail=True, cwd=git_root)
+    match = re.search(r'[Aa]lfa\s+(\d+)', log or '')
+    return int(match.group(1)) if match else 847
+
+def _get_total_commits(git_root='.'):
+    """Conta o número total de commits no repositório."""
+    count = _run_git_command(['rev-list', '--count', 'HEAD'], capture_output=True, silent_fail=True, cwd=git_root)
+    return int(count) if count and count.isdigit() else 0
+
+def _build_alfa_template(git_root, analysis, user_msg=None):
+    """Gera a mensagem padrão Doxoade: Alfa [V+1] (+N arquivos) : YMD... : Resumo"""
+    last_v = _get_last_alfa_version(git_root)
+    total_files = analysis['total'] if analysis else 0
+    next_v = last_v + 1 + total_files
+    today = datetime.now().strftime('%Y.%m.%d')
+    
+    # Constrói resumo automático inteligente se o usuário não fornecer
+    if not user_msg:
+        parts = []
+        if analysis:
+            cats = analysis['categories']
+            if cats.get('STRUCTURAL_MOVE'):
+                dirs = set(p.split('/')[1].replace('_systems', '').upper() for p in [m['to'] for m in cats['STRUCTURAL_MOVE']] if len(p.split('/')) > 2)
+                if dirs: parts.append(f"{', '.join(dirs)} - Refatoração estrutural")
+            if cats.get('REAL_CHANGE'):
+                parts.append(f"{len(cats['REAL_CHANGE'])} modificações reais")
+            if cats.get('UNTRACKED'):
+                parts.append(f"{len(cats['UNTRACKED'])} novos módulos")
+        user_msg = " | ".join(parts) if parts else "Manutenção e atualizações gerais"
+
+    return f"Alfa {next_v} (+{total_files} arquivos) : YMD {today} : {user_msg}"
+    
+def _update_version_file(git_root: str) -> bool:
+    """🏷️ Sincroniza doxoade/_version.py com o número total de commits (Hades-Link)."""
+    from pathlib import Path
+    count = _run_git_command(['rev-list', '--count', 'HEAD'], capture_output=True, silent_fail=True, cwd=git_root)
+    if not count or not count.isdigit():
+        return False
+    version_file = Path(git_root) / 'doxoade' / '_version.py'
+    if not version_file.exists():
+        return False
+    # Escreve os dois nomes: __init__.py importa `version`, mas o padrão histórico é `__version__`
+    new_content = (
+        "# doxoade/doxoade/_version.py\n"
+        f"__version__ = '{count}.0'\n"
+        f"version = '{count}.0'\n"
+    )
+    try:
+        version_file.write_text(new_content, encoding='utf-8')
+        return True
+    except Exception:
+        return False

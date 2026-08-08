@@ -1,4 +1,4 @@
-# doxoade/doxoade/commands/git_clean.py
+# doxoade/doxoade/commands/git_systems/git_clean.py
 import os
 import sys
 import fnmatch

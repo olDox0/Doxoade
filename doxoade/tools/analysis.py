@@ -3,6 +3,8 @@ import ast
 import hashlib
 import re
 import json
+
+from datetime import datetime
 from .streamer import ufs
 
 def _get_file_hash(file_path):
@@ -117,9 +119,9 @@ def _mine_traceback(stderr_output):
     file_blocks = list(re.finditer(
         r'File "(?P<file>.+?)", line (?P<line>\d+)(?:, in (?P<ctx>.+?))?\s*\n\s*(?P<code>.+)',
         stderr_output))
-    error_match = re.search('\n(\w+Error|Exception): (.+)', stderr_output)
+    error_match = re.search(r'\n(\w+Error|Exception): (.+)', stderr_output)
     if not error_match:
-        error_match = re.search('\n(\w+): (.+)', stderr_output)
+        error_match = re.search(r'\n(\w+): (.+)', stderr_output)
     if not error_match:
         return None
     error_type = error_match.group(1)
@@ -208,3 +210,41 @@ def _get_function_source(content: str, func_name: str) -> str:
         return ''
     except Exception:
         return ''
+
+# ___ Auto-descricionamento ______________________________________
+
+def _get_last_alfa_version(git_root='.'):
+    """Extrai a última versão Alfa do histórico Git."""
+    log = _run_git_command(['log', '--grep=[Aa]lfa', '-1', '--format=%s'], capture_output=True, silent_fail=True, cwd=git_root)
+    if not log:
+        log = _run_git_command(['log', '-1', '--format=%s'], capture_output=True, silent_fail=True, cwd=git_root)
+    match = re.search(r'[Aa]lfa\s+(\d+)', log or '')
+    return int(match.group(1)) if match else 847
+
+def _get_total_commits(git_root='.'):
+    """Conta o número total de commits no repositório."""
+    count = _run_git_command(['rev-list', '--count', 'HEAD'], capture_output=True, silent_fail=True, cwd=git_root)
+    return int(count) if count and count.isdigit() else 0
+
+def _build_alfa_template(git_root, analysis, user_msg=None):
+    """Gera a mensagem padrão Doxoade: Alfa [V+1] (+N arquivos) : YMD... : Resumo"""
+    last_v = _get_last_alfa_version(git_root)
+    next_v = last_v + 1
+    total_files = analysis['total'] if analysis else 0
+    today = datetime.now().strftime('%Y.%m.%d')
+    
+    # Constrói resumo automático inteligente se o usuário não fornecer
+    if not user_msg:
+        parts = []
+        if analysis:
+            cats = analysis['categories']
+            if cats.get('STRUCTURAL_MOVE'):
+                dirs = set(p.split('/')[1].replace('_systems', '').upper() for p in [m['to'] for m in cats['STRUCTURAL_MOVE']] if len(p.split('/')) > 2)
+                if dirs: parts.append(f"{', '.join(dirs)} - Refatoração estrutural")
+            if cats.get('REAL_CHANGE'):
+                parts.append(f"{len(cats['REAL_CHANGE'])} modificações reais")
+            if cats.get('UNTRACKED'):
+                parts.append(f"{len(cats['UNTRACKED'])} novos módulos")
+        user_msg = " | ".join(parts) if parts else "Manutenção e atualizações gerais"
+
+    return f"Alfa {next_v} (+{total_files} arquivos) : YMD{today} : {user_msg}"

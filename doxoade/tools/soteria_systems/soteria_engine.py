@@ -1,5 +1,6 @@
+# doxoade/doxoade/tools/soteria_systems/soteria_engine.py
+# antigo tools\vulcan\soteria_engine.py
 # -*- coding: utf-8 -*-
-# doxoade\tools\vulcan\soteria_engine.py
 # Analista Forense - Python
 
 import re

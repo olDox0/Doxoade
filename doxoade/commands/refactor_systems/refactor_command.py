@@ -1,9 +1,10 @@
-# doxoade/doxoade/commands/refactor_systems/refactor_command.py
+# doxoade/commands/refactor_systems/refactor_command.py
 from __future__ import annotations
 from pathlib import Path
 import click
 from .refactor_engine import RefactorEngine
 from .refactor_utils import iter_python_files
+from doxoade.commands.git_systems.git_merge import merge
 
 def _find_project_root(path: Path) -> Path:
     """Sobe a árvore até encontrar um marcador de projeto."""
@@ -207,6 +208,29 @@ def refactor_group() -> None:
       doxoade refactor src/ -t parse_config helper
       doxoade refactor utils.py helpers.py -t parse_config
     """
+
+@refactor_group.command('imports')
+@click.argument("path", default=".")
+@click.option("--run", is_flag=True)
+@click.option("-v", "--verbose", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def refactor_imports(path, run, verbose, as_json):
+    """Auditoria moderna de imports."""
+    from pathlib import Path
+    from .import_doctor import ImportDoctor, print_report
+
+    target = Path(path).resolve()
+
+    doctor = ImportDoctor(
+        root=Path.cwd(),
+        target=target,
+    )
+
+    report = doctor.run(apply=run)
+    print_report(report, verbose=verbose, as_json=as_json)
+
+    if report.errors:
+        raise SystemExit(1)
 
 @refactor_group.command('path')
 @click.argument('target_path', metavar='ARQUIVO_OU_PASTA', type=click.Path(path_type=Path, exists=True))
@@ -947,3 +971,145 @@ def refactor_sandbox(distro, rebuild):
         click.secho("\n❌ FALHOU: Erros detectados no ambiente Linux:", fg="red", bold=True)
         click.echo(result.stderr or result.stdout)
         # Aqui o desenvolvedor verá quais comandos (import/help) quebraram no Linux
+
+@refactor_group.command("move-dir")
+@click.argument("src")
+@click.argument("dst")
+@click.option(
+    "--merge",
+    is_flag=True,
+    help="Move o conteúdo de SRC para DST sem criar subpasta.",
+)
+@click.option(
+    "--stage",
+    is_flag=True,
+    help="Cria um espelho em .doxoade/refactor_staging para inspeção.",
+)
+@click.option(
+    "--include-backups",
+    is_flag=True,
+    help="Inclui .bak, .old, .orig, .bkp e .backup no movimento.",
+)
+@click.option(
+    "--run",
+    is_flag=True,
+    help="Aplica. Sem isso, apenas simula.",
+)
+@click.option(
+    "-v",
+    "--verbose",
+    is_flag=True,
+    help="Mostra movimentações e diffs.",
+)
+def refactor_move_dir(src, dst, merge, stage, include_backups, run, verbose):
+    """Move uma pasta/pacote e reescreve imports automaticamente."""
+
+    from pathlib import Path
+    from .package_mover import PackageMover
+
+    mover = PackageMover(
+        root=Path.cwd(),
+        src=Path(src),
+        dst=Path(dst),
+        merge=merge,
+        include_backups=include_backups,
+    )
+
+    mover.report(verbose=verbose)
+
+    if stage:
+        staged = mover.stage()
+        click.echo(f"🧪 Stage criado em: {staged}")
+
+    if run:
+        mover.apply()
+        click.echo("✔ Aplicado.")
+    else:
+        click.echo("Dry-run. Use --run para aplicar.")
+
+@refactor_group.command("autopilot")
+@click.argument("path", default=".")
+@click.option(
+    "--run",
+    is_flag=True,
+    help="Aplica correções de imports. Sem isso, apenas simula.",
+)
+@click.option(
+    "-v",
+    "--verbose",
+    is_flag=True,
+    help="Mostra diffs detalhados.",
+)
+def refactor_autopilot(path, run, verbose):
+    """Autopilot de imports: analisa o caminho e repara o que for seguro."""
+
+    from pathlib import Path
+    from .import_doctor import ImportDoctor, print_report
+
+    root = Path.cwd()
+    target = Path(path).resolve()
+
+    click.echo(f"🤖 REFACTOR AUTOPILOT → {target}")
+
+    doctor = ImportDoctor(root=root, target=target)
+    report = doctor.run(apply=run)
+
+    print_report(report, verbose=verbose)
+
+    if run:
+        click.echo("🔁 Revalidando após aplicação...")
+
+        doctor2 = ImportDoctor(root=root, target=target)
+        report2 = doctor2.run(apply=False)
+
+        print_report(report2, verbose=verbose)
+
+        if report2.errors:
+            raise SystemExit(1)
+    else:
+        click.echo("Dry-run. Use --run para aplicar.")
+
+@refactor_group.command('crlf-fix')
+@click.argument('paths', nargs=-1, type=click.Path(exists=True))
+@click.option('--target', type=click.Choice(['lf', 'crlf', 'auto']), default='lf', show_default=True)
+@click.option('--apply', is_flag=True, help='🛠 Grava as mudanças (padrão é DRY-RUN).')
+@click.option('--commit', is_flag=True, help='Com --apply: commita o chore de normalização.')
+@click.option('-v', '--verbose', is_flag=True, help='🔬 Mostra snippet ␍ das linhas convertidas.')
+def refactor_crlf_fix(paths, target, apply, commit, verbose):
+    """🌊 CRLF-FIX: cura o LF-Apocalypse. 🔍 DRY-RUN por padrão, fail-graceful."""
+    from .refactor_crlf import fix_file_eol, iter_candidate_files
+    from doxoade.tools.git import _run_git_command
+    root = _find_project_root(Path.cwd())
+    fixed, clean, skipped = [], 0, 0
+    for f in iter_candidate_files(root, paths):
+        status, detail, snippet = fix_file_eol(f, target, dry_run=not apply, verbose=verbose)
+        if status == 'fixed':
+            fixed.append((f, detail))
+            try:
+                disp = f.relative_to(root)
+            except ValueError:
+                disp = f
+            click.secho(f"  {'[DRY] ' if not apply else ''}🌊 {disp} ({detail})", fg='yellow')
+            if snippet:
+                click.echo(snippet)
+        elif status == 'clean':
+            clean += 1
+        else:
+            skipped += 1
+            if verbose:
+                click.secho(f"  ⏭️  {f.name}: {detail}", fg='bright_black')
+    click.secho(f"\n  ✔ fixed={len(fixed)} | clean={clean} | skipped={skipped}", fg='cyan')
+    if not apply:
+        click.secho("  🔍 DRY-RUN concluído. Use --apply para gravar (ou --apply --commit para sepultar).", fg='yellow')
+        return
+    if commit and fixed:
+        rels = []
+        for f, _ in fixed:
+            try:
+                rels.append(str(f.relative_to(root)).replace('\\', '/'))
+            except ValueError:
+                continue
+        for i in range(0, len(rels), 50):
+            _run_git_command(['add', '--renormalize', '--'] + rels[i:i + 50], silent_fail=True)
+        _run_git_command(['commit', '-m', 'chore(eol): normaliza terminadores (refactor crlf-fix)'], silent_fail=True)
+        click.secho("  ✔ Chore de EOL sepultado no histórico.", fg='green')

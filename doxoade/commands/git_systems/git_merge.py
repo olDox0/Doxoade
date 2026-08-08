@@ -1,9 +1,10 @@
-# doxoade/doxoade/commands/git_merge.py
+# doxoade/doxoade/commands/git_systems/git_merge.py
 import click
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.git import _run_git_command
-from .check import run_check_logic
+from doxoade.commands.check import run_check_logic
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
+from doxoade.commands.git_systems.git_branch import branch
 
 def _get_conflicted_files():
     """Retorna lista de arquivos marcados como 'Unmerged' pelo Git."""
