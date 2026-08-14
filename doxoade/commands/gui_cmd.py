@@ -76,8 +76,9 @@ def build_gui():
 
         cmd = [
             gpp, "-shared", "-O2", "-std=c++17",
-            f"-I{inc_webview}",    # para #include "webview/webview.h"
-            f"-I{inc_webview2}",   # para #include "WebView2.h"
+            "-DSOTERIA_CORE",  # <-- Adicione esta linha
+            f"-I{inc_webview}",
+            f"-I{inc_webview2}",
             "-o", str(out), str(src),
             "-mwindows",
             "-lgdi32", "-luser32",
@@ -85,6 +86,7 @@ def build_gui():
             f"-L{out_dir}",
             "-lWebView2Loader",
         ]
+
         os_name  = "Windows"
         used_cmp = gpp
     else:
@@ -287,3 +289,72 @@ def diag_gui():
             click.echo(f"     → DLL antiga. Rode: doxoade gui build")
     except OSError as e:
         click.echo(f"  {Fore.RED}✘ Ligação Ctypes:{Style.RESET_ALL} {e}")
+
+# ─── softclub ────────────────────────────────────────────────────────────────
+@gui_group.command('softclub')
+@click.option('--run', is_flag=True, help='🖼️ Abre a janela SoftClub (Fase 1).')
+@click.option('--theme', default='night', type=click.Choice(['day', 'night']))
+@click.option('--seed', default=7, type=int)
+@click.option('--width', default=800, show_default=True)
+@click.option('--height', default=600, show_default=True)
+def gui_softclub(run, theme, seed, width, height):
+    """🎨 SoftClub — GUI vanilla Gen X Soft Club (experimental).
+
+    \b
+    TECLAS NA JANELA:
+      NAV   ↑/↓ notas · ENTER editar · h/? ajuda · t tema · r seed · q sair
+      EDIT  setas movem · digitar edita · ENTER nova linha · CTRL+L linha abaixo
+            CTRL+S salvar · ESC salva+sai · SHIFT+setas seleciona
+            CTRL+C/X/V copiar/cortar/colar · CTRL+D apagar · TAB pote
+      POTE  digitar/BACKSPACE edita · CTRL+V cola · TAB volta
+      F1    ajuda
+    """
+    if not run:
+        click.echo('Use --run para abrir a janela SoftClub.')
+        return
+    from doxoade.tools.benzaiten_gui.softclub.notes_app import run_notes_gui
+    from pathlib import Path
+    from doxoade.tools.filesystem import _find_project_root
+    project_root = Path(_find_project_root(os.getcwd()))
+    run_notes_gui(project_root, theme_name=theme, seed=seed, width=width, height=height)
+        
+def _default_browser_exe():
+    """Descobre o executável do browser PADRÃO via registro do Windows (nunca o fallback Edge)."""
+    if os.name != 'nt':
+        return None
+    try:
+        import winreg
+        import re as _re
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r'Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice'
+        ) as k:
+            prog_id, _ = winreg.QueryValueEx(k, 'ProgId')          # ex: FirefoxURL-...
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, rf'{prog_id}\shell\open\command') as k2:
+            cmd, _ = winreg.QueryValueEx(k2, '')                   # ex: "C:\...\firefox.exe" "%1"
+        m = _re.search(r'"([^"]+)"', cmd)
+        return (m.group(1) if m else cmd.split(' ')[0]) or None
+    except Exception:
+        return None
+
+def _open_image(path):
+    """Abre no browser padrão real; fallbacks graduais, nunca crash."""
+    p = str(path)
+    exe = _default_browser_exe()
+    if exe and os.path.exists(exe):
+        try:
+            subprocess.Popen([exe, p], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except OSError:
+            pass
+    try:
+        os.startfile(p)
+        return True
+    except OSError:
+        pass
+    try:
+        import webbrowser
+        return webbrowser.open(Path(p).as_uri())
+    except Exception:
+        return False
+        

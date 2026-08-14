@@ -94,6 +94,23 @@ def main():
     _early_setup(project_root)
     _install_finder(project_root)
     echo(f"\n[DEBUG-SONDA] sys.argv recebido: {sys.argv}")
+    
+    # AGENDA NEXUS: avisa lembretes vencidos (fail-graceful, nunca bloqueia)
+    if os.environ.get('DOXOADE_QUIET_BOOT') != '1':
+        try:
+            from pathlib import Path as _P
+            from doxoade.commands.note_systems import agenda
+            msg = agenda.render_reminder(agenda.reminder_items(project_root))
+            if msg:
+                echo(msg)
+            due = agenda.due_items(project_root)
+            due += agenda.due_tasks(_P(project_root) / '.doxoade' / 'note')
+            if due:
+                echo(agenda.render_task_table(due, title='LEMBRETES VENCIDOS'))
+        except Exception as e:
+            echo(f'\x1b[31m ■ Erro: {e}')
+            traceback.print_tb(e.__traceback__)
+    
     try:
         from doxoade.cli import cli
         echo(f"[DEBUG-SONDA] Tipo do objeto 'cli': {type(cli)}")

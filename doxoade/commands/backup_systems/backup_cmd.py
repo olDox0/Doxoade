@@ -83,12 +83,12 @@ HARDCODED_IGNORE += STORAGE_GUARD_IGNORE
     "--backup", "-b", "backup_id", default=None, help="ID do backup (usado com --diff)."
 )
 @click.option(
-    "--all",
+    "--all/--source-only",
     "include_all",
-    is_flag=True,
+    default=True,
     help=(
-        "Snapshot completo (inclui binários/db/zim). "
-        "Padrão = só fonte, ideal para rewind de regressão."
+        "Snapshot completo (padrão). "
+        "Use --source-only para backup leve apenas de fonte."
     ),
 )
 @click.option(
@@ -101,10 +101,13 @@ HARDCODED_IGNORE += STORAGE_GUARD_IGNORE
     help="Sem arquivo: resumo desde o último backup; com arquivo: diff completo.",
 )
 @click.option(
-    "--dry-run",
+    "--dry-run/--write",
     "dry_run",
-    is_flag=True,
-    help="Simula o backup sem gravar; mostra escopo, tipos e contagens.",
+    default=None,
+    help=(
+        "Padrão: simula o backup sem gravar. "
+        "Use --write para persistir o snapshot."
+    ),
 )
 @click.option(
     "--compress",
@@ -180,8 +183,35 @@ def backup(
     backup_path = (
         Path(backup_dir) if backup_dir else project_root / ".doxoade" / "backups"
     )
-
     engine = BackupEngineStrap(project_root, backup_path)
+
+    # ------------------------------------------------------------------
+    # Resolução do dry-run efetivo.
+    #
+    # dry_run vem como:
+    #   None  -> usuário não passou nem --dry-run nem --write
+    #   True  -> usuário passou --dry-run
+    #   False -> usuário passou --write
+    #
+    # Regra nova:
+    # - Em modo de criação: dry-run padrão.
+    # - Em modo de consulta (--list, --diff, --analyze-compression):
+    #   dry-run não deve interferir.
+    # ------------------------------------------------------------------
+    query_mode = bool(analyze_compression or show_list or diff_target is not None)
+
+    if dry_run is None:
+        dry_run_effective = not query_mode
+    else:
+        dry_run_effective = dry_run
+
+        # Se o usuário passar --dry-run junto com consulta, apenas ignora.
+        if query_mode and dry_run_effective:
+            click.echo(
+                f"{Fore.YELLOW}Nota: --dry-run ignorado em modo de consulta "
+                f"(--list/--diff/--analyze-compression).{Style.RESET_ALL}"
+            )
+            dry_run_effective = False
 
     if analyze_compression:
         if delta or show_list or diff_target is not None:
@@ -197,24 +227,12 @@ def backup(
         _run_analyze_compression(backup_path, backup_id)
         return
 
-    if dry_run:
-        if show_list or diff_target is not None or backup_id:
-            raise click.UsageError(
-                "--dry-run não pode ser combinado com --list, --diff ou -b."
-            )
-
-        if delta:
-            click.echo(
-                f"{Fore.YELLOW}Nota: --dry-run ainda simula escopo cheio, não delta.{Style.RESET_ALL}"
-            )
-
-        _run_backup_dry_run(project_root, include_all)
-        return
-
+    # ------------------------------------------------------------------
     # Modo diff: prioridade máxima e NÃO cria backup.
+    # ------------------------------------------------------------------
     if diff_target is not None:
-        if delta or show_list or include_all:
-            raise click.UsageError("--diff não pode ser combinado com -d, -l ou --all.")
+        if delta or show_list:
+            raise click.UsageError("--diff não pode ser combinado com -d ou -l.")
 
         backup_id = (
             _resolve_backup_id(engine, backup_id)
@@ -226,6 +244,23 @@ def backup(
             _run_backup_summary(project_root, backup_path, backup_id)
         else:
             _run_backup_diff(project_root, backup_path, backup_id, diff_target)
+        return
+
+    # ------------------------------------------------------------------
+    # Dry-run de criação.
+    # ------------------------------------------------------------------
+    if dry_run_effective:
+        if backup_id:
+            raise click.UsageError(
+                "--dry-run não pode ser combinado com -b sem --diff."
+            )
+
+        if delta:
+            click.echo(
+                f"{Fore.YELLOW}Nota: --dry-run ainda simula escopo cheio, não delta.{Style.RESET_ALL}"
+            )
+
+        _run_backup_dry_run(project_root, include_all)
         return
 
     if backup_id:
@@ -566,25 +601,65 @@ def _load_current_text(project_root: Path, rel_posix: str):
     return status, text
 
 
-def _load_backup_text(archive: Path, rel_posix: str):
+def _load_backup_text(archive: Path, meta_obj, rel_posix: str):
+    """Extrai e DESCOMPRESSA o arquivo do backup usando o codec_meta."""
     try:
         mode = "r:gz" if archive.name.endswith(".tar.gz") else "r"
         with tarfile.open(archive, mode) as tar:
             member = _find_tar_member(tar, rel_posix)
             if member is None:
                 return "missing", None
-
             extracted = tar.extractfile(member)
             if extracted is None:
                 return "missing", None
+            raw_data = extracted.read()
+            
+            # --- DESCOMPRESSÃO (CORREÇÃO DO BUG ZSTD) ---
+            manifest_file = None
+            if meta_obj and hasattr(meta_obj, 'files'):
+                manifest_file = next((f for f in meta_obj.files if _normalize_manifest_path(f.path) == rel_posix), None)
+                
+            if manifest_file and manifest_file.included and manifest_file.codec_meta:
+                codec_meta = manifest_file.codec_meta
+                codec = codec_meta.get("codec", "plain")
+                
+                if codec in ("zstd", "zstd+dict"):
+                    import zstandard as zstd
+                    if codec == "zstd+dict":
+                        dict_sha = codec_meta.get("dict_sha256")
+                        dict_member_name = f"__doxoade/dicts/{dict_sha}.dict.zst"
+                        dict_member = _find_tar_member(tar, dict_member_name)
+                        if dict_member:
+                            stored_dict_bytes = tar.extractfile(dict_member).read()
+                            raw_dict_bytes = zstd.ZstdDecompressor().decompress(stored_dict_bytes)
+                            dct = zstd.ZstdCompressionDict(raw_dict_bytes)
+                            dctx = zstd.ZstdDecompressor(dict_data=dct)
+                        else:
+                            dctx = zstd.ZstdDecompressor()
+                    else:
+                        dctx = zstd.ZstdDecompressor()
+                    
+                    try:
+                        raw_data = dctx.decompress(raw_data)
+                    except Exception:
+                        pass # Se falhar, tenta o raw_data como fallback
+                        
+                elif codec.startswith("hybrid"):
+                    import zstandard as zstd
+                    from doxoade.tools.compression import hybrid_codec
+                    try:
+                        dctx = zstd.ZstdDecompressor()
+                        transformed_data = dctx.decompress(raw_data)
+                        raw_data = hybrid_codec.decode(transformed_data, codec_meta)
+                    except Exception:
+                        pass
+            # -----------------------------------------
 
-            data = extracted.read()
     except tarfile.TarError as e:
         raise click.UsageError(f"Falha ao ler backup '{archive.name}': {e}")
-
-    status, text = _decode_bytes_to_text(data)
+        
+    status, text = _decode_bytes_to_text(raw_data)
     return status, text
-
 
 def _load_parent_backup_id(backup_path: Path, backup_id: str):
     """
@@ -608,29 +683,26 @@ def _load_backup_text_chain(
     depth: int = 0,
     visited: set = None,
 ):
-    """
-    Carrega o texto de um arquivo a partir de um backup.
-    Se o backup for delta e o arquivo não estiver lá, tenta subir a cadeia
-    via parent_backup_id.
-    """
+    """Carrega o texto subindo a cadeia de pais, agora passando o metadata para descompressão."""
     if visited is None:
         visited = set()
-
     if backup_id in visited or depth > 16:
         return "missing", None
-
     visited.add(backup_id)
-
+    
     archive = _resolve_backup_archive(backup_path, backup_id)
     resolved_id = _backup_id_from_archive(archive)
-
-    status, text = _load_backup_text(archive, rel_posix)
-
+    
+    # Carrega o metadata para passar para a função de extração
+    meta_obj = _load_metadata_object(backup_path, resolved_id)
+    
+    # Chama a versão corrigida que sabe descomprimir
+    status, text = _load_backup_text(archive, meta_obj, rel_posix)
+        
     if status != "missing":
         return status, text
-
+        
     parent = _load_parent_backup_id(backup_path, resolved_id)
-
     if parent:
         return _load_backup_text_chain(
             backup_path,
@@ -639,7 +711,6 @@ def _load_backup_text_chain(
             depth=depth + 1,
             visited=visited,
         )
-
     return "missing", None
 
 
@@ -660,9 +731,20 @@ def _run_backup_diff(
     )
 
     if current_status == "binary" or backup_status == "binary":
+        source = "no disco atual" if current_status == "binary" else f"no backup '{backup_id}'"
         click.echo(
-            f"{Fore.YELLOW}⚠️  '{rel}' é binário. "
+            f"{Fore.YELLOW}⚠️  '{rel}' foi detectado como binário {source}. "
             f"Diff textual não é suportado.{Style.RESET_ALL}"
+        )
+        click.echo(
+            f"{Fore.CYAN}   💡 Dica: O arquivo pode ter sido excluído, corrompido ou estar comprimido de forma não suportada neste snapshot. "
+            f"Tente comparar com um backup anterior (ex: o penúltimo) usando a flag '-b':{Style.RESET_ALL}"
+        )
+        click.echo(
+            f"{Fore.WHITE}      doxoade backup --diff {rel} -b <ID_ANTERIOR>{Style.RESET_ALL}"
+        )
+        click.echo(
+            f"{Fore.WHITE}      (Use 'doxoade backup -l' para ver a lista de backups e seus IDs){Style.RESET_ALL}"
         )
         return
 

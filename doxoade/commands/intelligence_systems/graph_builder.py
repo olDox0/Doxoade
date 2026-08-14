@@ -6,7 +6,10 @@ Rastreia imports (AST) e referências textuais (comportamento Nexus Search).
 """
 import os
 import ast
+from pathlib import Path  # ← ADICIONAR ESTA LINHA
+
 from doxoade.dnm import DNM
+from doxoade.tools.hermes_systems.blacklist import is_blacklisted
 
 
 def get_module_path(file_path, project_root):
@@ -90,25 +93,47 @@ def build_text_index(project_root, ignore_spec, target_terms):
     index = {term: set() for term in target_terms}
     if not target_terms:
         return index
-
+    
     nav = DNM(project_root)
     all_files = nav.scan(extensions=[
         '.py', '.c', '.cpp', '.h', '.html', '.js', '.ts',
         '.md', '.txt', '.toml', '.json', '.css'
     ])
-
+    
+    project_root_path = Path(project_root).resolve()
+    
     for f_abs in all_files:
         f_rel = os.path.relpath(f_abs, project_root).replace('\\', '/')
+        
+        # 1. Respeita gitignore
         if ignore_spec.match_file(f_rel):
             continue
+        
+        # 2. NOVO: Respeita blacklist do Hermes
+        try:
+            # Converte path para module name
+            f_path = Path(f_abs)
+            if f_path.suffix == '.py':
+                module_name = str(f_path.relative_to(project_root_path).with_suffix('')).replace(os.sep, '.')
+                if is_blacklisted(module_name, project_root_path):
+                    continue
+            
+            # 3. NOVO: Bloqueia binários nativos mesmo com extensão .py
+            if f_path.suffix.lower() in {'.pyd', '.so', '.dll', '.exe', '.o'}:
+                continue
+                
+        except (ValueError, AttributeError):
+            pass
+        
         try:
             with open(f_abs, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
-            for term in target_terms:
-                if term in content:
-                    index[term].add(f_rel)
+                for term in target_terms:
+                    if term in content:
+                        index[term].add(f_rel)
         except Exception:
             pass
+    
     return index
 
 

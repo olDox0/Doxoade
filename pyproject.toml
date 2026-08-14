@@ -117,7 +117,7 @@ ignore = [
     "*_dossier_*.xml",
 ]
 
-exclude_categories = ["STYLE", "DOCS"]
+exclude_categories = ["STYLE", "DOCS", "COMPLEXITY"]
 
 [tool.doxoade.macrothon]
 # Este carimbo transforma o Silo em uma House Viva

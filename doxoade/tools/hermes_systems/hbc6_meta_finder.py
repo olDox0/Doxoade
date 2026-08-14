@@ -35,49 +35,9 @@ class HBC6Finder(importlib.abc.MetaPathFinder):
         self._path_hash_cache = {}  # ✅ NOVO: Cache de hash
         self._deadzone_path = self.root / '.doxoade' / 'hermes' / 'deadzone.json'
         self._dynamic_blacklist = self._load_deadzone()
-        self._blacklist = {
-            'doxoade.rescue',
-            'doxoade.chronos',
-            'doxoade.commands.cmd_hermes',
-            'doxoade.commands',
-            'doxoade.tools.hermes_systems',
-            'doxoade.tools.hermes_systems.hermes_loader',
-            'doxoade.tools.hermes_systems.hermes_compress_hbc6',
-            'doxoade.tools.vulcan.meta_finder',
-            'doxoade.tools.hermes_systems.hbc6_meta_finder',
-            'doxoade.tools.hermes_systems.hermes_payload',
-            'doxoade.tools.hermes_systems.hermes_init',
-            'doxoade.tools.hermes_systems.hermes_hook',
-            'doxoade.tools.hermes_systems.hermes_hook_v2',
-            'doxoade.tools.hermes_systems.hermes_diagnostic',
-            'doxoade.tools.hermes_systems.hermes_format',
-            'doxoade.tools.hermes_systems.hermes_decoder_vector',
-            'doxoade.tools.hermes_systems.native',
-            'doxoade.tools.hermes_systems.hbc6_audit',
-            '__main__',
-            'doxoade.__main__',
-            'doxoade.cli',
-            'doxoade.boot',
-            'doxoade.core_database',
-            'doxoade.tools.db_utils',
-            'doxoade.tools.filesystem',
-            'doxoade.tools.aegis',
-            'doxoade.tools.telemetry_tools',
-            'doxoade.tools.git',
-            'doxoade.tools.git_utils',
-            'doxoade.tools.vulcan',
-            'doxoade.commands.db',
-            'doxoade.commands.git_branch',
-            'doxoade.commands.save',
-            'doxoade.commands.check',
-            'doxoade.commands.refactor',
-            'sys', 'os', 'builtins', 'importlib',
-            '_frozen_importlib', '_frozen_importlib_external',
-            'click', 'click.core', 'click.decorators',
-            'doxoade.tools.ganesha_systems',
-            'doxoade.tools.ganesha_systems.ganesha_advisor_standalone',
-            'doxoade.tools.ganesha_systems.ganesha_advisor',
-        }
+        
+        from doxoade.tools.hermes_systems.blacklist import get_unified_blacklist
+        self._blacklist = get_unified_blacklist(self.root)
         
         self._whitelist = {
             'doxoade.tools.hermes_systems.hermes_format',

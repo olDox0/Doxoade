@@ -13,71 +13,11 @@ from pathlib import Path
 import threading
 
 from doxoade.tools.error_info import formated_traceback
+from doxoade.tools.hermes_systems.blacklist import get_unified_blacklist, is_blacklisted
 
 _jit_stats = {'built': 0, 'skipped': 0, 'failed': 0}
 _jit_lock = threading.Lock()
 _jit_built = set()
-
-# ═══════════════════════════════════════════════════════════════════════
-# BLACKLIST DE SEGURANÇA (Anti-Recursão Infinita)
-# ═══════════════════════════════════════════════════════════════════════
-HERMES_BLACKLIST = {
-    # Módulos do próprio Hermes (CRÍTICO!)
-    'doxoade.commands.cmd_hermes',
-    'doxoade.tools.hermes_systems',
-    'doxoade.tools.hermes_systems.hermes_hook',
-    'doxoade.tools.hermes_systems.hermes_loader',
-    'doxoade.tools.hermes_systems.hermes_compress',
-    'doxoade.tools.hermes_systems.hermes_scanner',
-    'doxoade.tools.hermes_systems.hermes_dynamic_scanner',
-    'doxoade.tools.hermes_systems.hermes_preprocessor',
-    'doxoade.tools.hermes_systems.hermes_format',
-    'doxoade.tools.hermes_systems.hermes_metrics',
-    'doxoade.tools.hermes_systems.hermes_dict',
-    'doxoade.tools.hermes_systems.hermes_dict.hermes_builder',
-    
-    # Módulos de infraestrutura crítica
-    'doxoade.tools.aegis',
-    'doxoade.tools.telemetry_tools',
-    'doxoade.tools.alexandria',
-    'doxoade.tools.filesystem',
-    'doxoade.core_database',
-    'doxoade.boot',
-    'doxoade.rescue',
-    'doxoade.__main__',
-    'doxoade.tools.doxcolors',
-    'doxoade.tools.error_info',
-
-    # Módulos do Vulcan e Shadow
-    'doxoade.tools.vulcan',
-    'doxoade.tools.horus',
-    'doxoade.tools.horus_scribe',
-    
-    'doxoade.commands.intelligence',
-    'doxoade.commands.intelligence_systems',
-    'doxoade.commands.intelligence_utils',
-    
-    # ✅ NOVO: Bibliotecas com lazy loading complexo (temporário)
-#    'colorama',
-#    'colorama.initialise',
-#    'colorama.ansitowin32',
-#    'colorama.ansi',
-#    'colorama.winterm',
-#    'colorama.win32',
-#    'click',
-#    'click.core',
-#    'click.decorators',
-#    'click.types',
-#    'click._compat',
-#    'click._winconsole',
-#    'click.exceptions',
-#    'click.globals',
-#    'click.utils',
-#    'click._utils',
-#    'click.formatting',
-#    'click.parser',
-#    'click.termui',
-}
 
 HERMES_BLACKLIST_PREFIXES = (
     'doxoade.tools.hermes_systems',
@@ -91,6 +31,11 @@ HERMES_BLACKLIST_PREFIXES = (
 )
 _HERMES_FINDER_MARKER = True
 _VERBOSE = os.environ.get('HERMES_VERBOSE') == '1'
+
+def _is_blacklisted(fullname: str) -> bool:
+    """Verifica se um módulo está na blacklist unificada."""
+    project_root = Path.cwd().resolve()
+    return is_blacklisted(fullname, project_root)
 
 def _log(msg: str):
     if _VERBOSE:
