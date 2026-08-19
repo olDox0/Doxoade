@@ -1,7 +1,9 @@
 # doxoade/commands/lan_git/client_lan_git/lan_git_comparator.py
 # Comparador de hashes de commit (Local vs Remoto)
-""" Módulo Comparador de Estado do Repositório Git Local vs Remoto.
-Valida divergências de branches e ignora arquivos não rastreados para não travar o pull. """
+"""
+Módulo Comparador de Estado do Repositório Git Local vs Remoto.
+Valida divergências de branches e suporta modo force/live.
+"""
 
 import os
 import subprocess
@@ -47,7 +49,6 @@ class LANComparator:
         if not ok or not out.strip():
             return False
 
-        # Filtra apenas modificações em arquivos já rastreados
         for line in out.splitlines():
             status_code = line[:2].strip()
             if status_code and status_code != "??":
@@ -62,12 +63,13 @@ class LANComparator:
 
     @classmethod
     def evaluate_sync(cls, repo_path: str, remote_manifest: GitManifest, force: bool = False) -> Tuple[SyncStatus, str]:
+        """Avalia o relacionamento entre o repositório local e o manifesto remoto."""
         git_dir = os.path.join(repo_path, ".git")
 
         if not os.path.exists(git_dir):
             return SyncStatus.UNINITIALIZED, "Repositório local não inicializado. Inicializando Git via LAN..."
 
-        # Se force estiver ativo, pula a checagem de dirty tree
+        # Se force estiver ativo, ignora dirty tree
         if not force and cls.check_local_dirty(repo_path):
             return SyncStatus.DIRTY_LOCAL, "Repositório local possui arquivos rastreados modificados."
 
