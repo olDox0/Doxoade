@@ -1,7 +1,5 @@
-# doxoade/commands/lan_git/discovery_lan_git/manifest_lan_git.py
-# Serializador e Validador do Payload de Anúncio
-""" Módulo de Manifesto do Repositório Git Local.
-Coleta metadados do Git e empacota no formato padrão do Doxoade LAN Git. """
+""" Módulo de Manifesto do Repositório Git Local com Suporte a Live Mirror.
+Extrai metadados do Git e gera Shadow Commits em memória (refs/heads/dox-live) para espelhamento sem commit. """
 
 import os
 import json
@@ -28,10 +26,10 @@ class GitManifest:
     short_commit: str
     commit_message: str
     is_dirty: bool
+    is_live: bool             # Indica se é um espelho ao vivo em memória
     timestamp: float
 
     def to_json(self) -> str:
-        """Serializa o manifesto em JSON minificado para tráfego UDP."""
         return json.dumps(asdict(self), separators=(",", ":"))
 
     def to_bytes(self) -> bytes:
@@ -56,6 +54,7 @@ class GitManifest:
                 short_commit=payload["short_commit"],
                 commit_message=payload.get("commit_message", ""),
                 is_dirty=bool(payload.get("is_dirty", False)),
+                is_live=bool(payload.get("is_live", False)),
                 timestamp=float(payload.get("timestamp", 0.0))
             )
         except Exception:
@@ -63,7 +62,7 @@ class GitManifest:
 
 
 class GitManifestExtractor:
-    """Extrai informações seguras do repositório Git local via CLI."""
+    """Extrai informações e forja Shadow Commits para o modo Live Mirror."""
 
     @staticmethod
     def _run_git(repo_dir: str, args: list) -> Tuple[bool, str]:
@@ -75,39 +74,52 @@ class GitManifestExtractor:
                 timeout=5,
                 check=False
             )
-            if res.returncode == 0:
-                return True, res.stdout.strip()
-            return False, res.stderr.strip()
+            return (res.returncode == 0), res.stdout.strip()
         except Exception as e:
             return False, str(e)
 
     @classmethod
-    def extract(cls, repo_path: str, host_ip: str, port: int = 9418, transport: str = "git_daemon") -> Optional[GitManifest]:
+    def extract(cls, repo_path: str, host_ip: str, port: int = 9418, transport: str = "git_daemon", live: bool = False) -> Optional[GitManifest]:
         repo_path = os.path.abspath(repo_path)
         if not os.path.exists(os.path.join(repo_path, ".git")) and not repo_path.endswith(".git"):
             return None
 
-        # 1. Branch atual
+        # 1. Checa status de modificações (dirty)
+        ok, status = cls._run_git(repo_path, ["status", "--porcelain"])
+        is_dirty = bool(status.strip()) if ok else False
+
+        # 2. Branch e Commit Base
         ok, branch = cls._run_git(repo_path, ["rev-parse", "--abbrev-ref", "HEAD"])
         if not ok:
             branch = "main"
 
-        # 2. Hash do Commit HEAD
         ok, head_commit = cls._run_git(repo_path, ["rev-parse", "HEAD"])
         if not ok:
             head_commit = "0" * 40
 
-        # 3. Hash curto
-        short_commit = head_commit[:7]
-
-        # 4. Mensagem do último commit
+        commit_msg = ""
         ok, msg = cls._run_git(repo_path, ["log", "-1", "--pretty=%s"])
-        commit_msg = msg if ok else ""
+        if ok:
+            commit_msg = msg
 
-        # 5. Status dirty (alterações não commitadas)
-        ok, status = cls._run_git(repo_path, ["status", "--porcelain"])
-        is_dirty = bool(status.strip()) if ok else False
+        # 3. Se o Modo LIVE estiver ativo, forja um Shadow Commit em memória
+        if live:
+            # Tenta capturar rascunhos + arquivos novos untracked com 'git stash create -u'
+            ok_stash, stash_hash = cls._run_git(repo_path, ["stash", "create", "--include-untracked"])
+            if not ok_stash or not stash_hash.strip():
+                ok_stash, stash_hash = cls._run_git(repo_path, ["stash", "create"])
 
+            # Se houver alterações em memória, usa o hash do stash; caso contrário, usa o HEAD
+            shadow_hash = stash_hash.strip() if (ok_stash and stash_hash.strip()) else head_commit
+
+            # Atualiza a referência efêmera 'refs/heads/dox-live'
+            cls._run_git(repo_path, ["update-ref", "refs/heads/dox-live", shadow_hash])
+
+            branch = "dox-live"
+            head_commit = shadow_hash
+            commit_msg = f"[LIVE-MIRROR] Espelho de rascunho em memória ({len(status.splitlines()) if is_dirty else 0} alterações)"
+
+        short_commit = head_commit[:7]
         repo_name = os.path.basename(repo_path)
         if repo_name.endswith(".git"):
             repo_name = repo_name[:-4]
@@ -128,5 +140,6 @@ class GitManifestExtractor:
             short_commit=short_commit,
             commit_message=commit_msg,
             is_dirty=is_dirty,
+            is_live=live,
             timestamp=time.time()
         )

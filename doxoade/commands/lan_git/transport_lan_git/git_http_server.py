@@ -1,7 +1,7 @@
 # doxoade/commands/lan_git/transport_lan_git/git_http_server.py
 # Plano B: Servidor Git Smart HTTP embutido
 """ Módulo Servidor Git Smart HTTP Embutido (Plano B).
-Servidor HTTP leve para redes que bloqueiam a porta 9418 ou ambientes sem git daemon. """
+Servidor HTTP leve para transmissão resiliente e imune a bugs de caminho no Windows. """
 
 import os
 import subprocess
@@ -12,32 +12,36 @@ from urllib.parse import urlparse
 
 
 class SecureGitHTTPRequestHandler(SimpleHTTPRequestHandler):
-    """Handler HTTP customizado com bloqueio de escrita e Anti-Path Traversal."""
+    """Handler HTTP customizado para o backend nativo do Git."""
 
     repo_dir: str = ""
     repo_name: str = ""
 
     def log_message(self, format, *args):
-        # Silencia logs HTTP em stdout para não poluir o CLI
         pass
 
     def do_POST(self):
-        # Bloqueio de segurança 403: Proíbe qualquer tentativa de push (git-receive-pack)
-        self.send_error(403, "Acesso Negado: Servidor em modo estrito de Somente Leitura.")
+        # Permite upload-pack (leitura) e bloqueia receive-pack (escrita)
+        parsed = urlparse(self.path)
+        if "git-receive-pack" in parsed.path:
+            self.send_error(403, "Acesso Negado: Push Proibido.")
+            return
+
+        self._handle_git_backend("POST")
 
     def do_GET(self):
-        # Validação de segurança de caminho (Anti-Path Traversal)
+        self._handle_git_backend("GET")
+
+    def _handle_git_backend(self, method: str):
         parsed = urlparse(self.path)
         clean_path = os.path.normpath(parsed.path).lstrip("/\\")
 
-        # Impede requisições de diretórios pais
         if ".." in clean_path:
             self.send_error(400, "Caminho malicioso detectado.")
             return
 
-        # Executa git http-backend nativo via CGI/Subprocesso seguro
         env = {
-            "REQUEST_METHOD": "GET",
+            "REQUEST_METHOD": method,
             "GIT_PROJECT_ROOT": os.path.dirname(self.repo_dir),
             "GIT_HTTP_EXPORT_ALL": "1",
             "PATH_INFO": parsed.path,
@@ -47,19 +51,24 @@ class SecureGitHTTPRequestHandler(SimpleHTTPRequestHandler):
         }
 
         try:
+            body_input = b""
+            if method == "POST":
+                length = int(self.headers.get("Content-Length", 0))
+                if length > 0:
+                    body_input = self.rfile.read(length)
+
             res = subprocess.run(
                 ["git", "http-backend"],
                 env={**os.environ, **env},
-                input=b"",
+                input=body_input,
                 capture_output=True,
-                timeout=10
+                timeout=30
             )
 
             if res.returncode != 0:
-                self.send_error(500, "Erro interno no backend do Git.")
+                self.send_error(500, f"Erro interno no backend do Git: {res.stderr.decode('utf-8', errors='ignore')}")
                 return
 
-            # Separa os headers do corpo retornados pelo git http-backend
             header_data, _, body = res.stdout.partition(b"\r\n\r\n")
             if not header_data:
                 header_data, _, body = res.stdout.partition(b"\n\n")

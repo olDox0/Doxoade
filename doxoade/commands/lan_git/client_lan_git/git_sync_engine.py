@@ -1,7 +1,5 @@
-# doxoade/commands/lan_git/client_lan_git/git_sync_engine.py
-# Orquestrador do Fetch/Pull e controle do git remote
-""" Módulo Motor de Sincronização LAN Git com Telemetria e Fallback Automático.
-Suporta protocolo nativo git:// com contingência transparente para Smart HTTP. """
+""" Módulo Motor de Sincronização LAN Git com Suporte a Live Mirroring.
+Sincroniza commits do main ou espelha rascunhos efêmeros do dox-live em tempo real. """
 
 import os
 import sys
@@ -18,7 +16,7 @@ from doxoade.commands.lan_git.transport_lan_git.git_bundle_stream import GitBund
 
 
 class GitSyncEngine:
-    """Executa as operações de Git Fetch/Pull com resiliência multicamadas."""
+    """Executa as operações de Git Fetch/Pull e Live Mirroring em tempo real."""
 
     REMOTE_NAME = "lan-peer"
 
@@ -79,10 +77,8 @@ class GitSyncEngine:
         remote_list = remotes.splitlines() if remotes else []
 
         if cls.REMOTE_NAME in remote_list:
-            click.secho(f"  [REMOTE] Atualizando URL do remote '{cls.REMOTE_NAME}' -> {remote_url}", fg="cyan")
             ok, out, code, err = cls._run_git_forensic(repo_path, ["remote", "set-url", cls.REMOTE_NAME, remote_url])
         else:
-            click.secho(f"  [REMOTE] Adicionando novo remote '{cls.REMOTE_NAME}' -> {remote_url}", fg="cyan")
             ok, out, code, err = cls._run_git_forensic(repo_path, ["remote", "add", cls.REMOTE_NAME, remote_url])
 
         if not ok:
@@ -91,92 +87,81 @@ class GitSyncEngine:
         return True, "Remote configurado com sucesso."
 
     @classmethod
-    def pull_from_peer(cls, repo_path: str, manifest: GitManifest) -> Tuple[bool, str]:
+    def pull_from_peer(cls, repo_path: str, manifest: GitManifest, force: bool = False, autostash: bool = False, live: bool = False) -> Tuple[bool, str]:
         repo_path = os.path.abspath(repo_path)
+
+        target_branch = "dox-live" if (live or manifest.is_live or manifest.branch == "dox-live") else manifest.branch
 
         click.secho("\n--- [DIAGNÓSTICO FORENSE DE SINCRONIZAÇÃO] ---", fg="cyan", bold=True)
         click.echo(f"  Diretório Alvo : {repo_path}")
         click.echo(f"  Host Remoto    : {manifest.hostname} ({manifest.ip}:{manifest.port})")
         click.echo(f"  Transporte     : {manifest.transport.upper()}")
-        click.echo(f"  Commit Remoto  : {manifest.short_commit} ({manifest.commit_message})")
+        click.echo(f"  Alvo de Sinc   : {target_branch} @ {manifest.short_commit}")
+        click.echo(f"  Mensagem       : {manifest.commit_message}")
+        if live or manifest.is_live:
+            click.secho("  Modo Live      : ATIVO (Espelhamento Direto de Rascunho)", fg="magenta", bold=True)
         click.secho("----------------------------------------------\n", fg="cyan")
 
-        status, msg = LANComparator.evaluate_sync(repo_path, manifest)
+        # Em modo Live Mirror ou Force, permitimos reset direto
+        bypass_safety = force or live or manifest.is_live
+
+        status, msg = LANComparator.evaluate_sync(repo_path, manifest, force=bypass_safety)
         click.echo(f"[STATUS AVALIADO] {status.value.upper()}: {msg}")
 
-        if status == SyncStatus.DIRTY_LOCAL:
-            return False, f"[SEGURANÇA] {msg} Faça commit ou stash antes de atualizar."
-        if status == SyncStatus.UP_TO_DATE:
+        if status == SyncStatus.DIRTY_LOCAL and not bypass_safety and not autostash:
+            return False, f"[SEGURANÇA] {msg} Use '--force' ou '--live' para espelhar."
+
+        if status == SyncStatus.UP_TO_DATE and not bypass_safety:
             return True, f"[SINCRONIZADO] {msg}"
 
-        is_uninit = (status == SyncStatus.UNINITIALIZED)
+        ok_head, _, _, _ = cls._run_git_forensic(repo_path, ["rev-parse", "HEAD"])
+        has_no_head = not ok_head
 
-        # Tentativa 1: Transporte Primário Anunciado (Plano A: git://)
-        if manifest.transport == "git_daemon":
-            remote_url = f"git://{manifest.ip}:{manifest.port}/{manifest.repo_name}"
-            ok, result_msg = cls._pull_via_standard_remote(repo_path, remote_url, manifest.branch, is_uninitialized=is_uninit)
-            if ok:
-                return True, result_msg
+        # 1. Tentativa via Smart HTTP (Mais confiável no Windows)
+        http_url = f"http://{manifest.ip}:8080/{manifest.repo_name}"
+        ok, result_msg = cls._pull_via_standard_remote(repo_path, http_url, target_branch, has_no_head=has_no_head, force=bypass_safety, autostash=autostash)
+        if ok:
+            return True, result_msg
 
-            # Fallback Automático: Se o git:// der erro no Windows, tenta Smart HTTP (Plano B)
-            click.secho("\n[CONTINGÊNCIA] Falha no protocolo git://. Tentando Plano B via Smart HTTP...", fg="yellow", bold=True)
-            fallback_http_url = f"http://{manifest.ip}:8080/{manifest.repo_name}"
-            return cls._pull_via_standard_remote(repo_path, fallback_http_url, manifest.branch, is_uninitialized=is_uninit)
-
-        elif manifest.transport == "http":
-            remote_url = f"http://{manifest.ip}:{manifest.port}/{manifest.repo_name}"
-            return cls._pull_via_standard_remote(repo_path, remote_url, manifest.branch, is_uninitialized=is_uninit)
-
-        elif manifest.transport == "bundle":
-            return cls._pull_via_bundle(repo_path, manifest.ip, manifest.port, manifest.branch)
-
-        return False, f"Transporte desconhecido: {manifest.transport}"
+        # 2. Fallback para Git Daemon nativo (Porta 9418)
+        click.secho("\n[CONTINGÊNCIA] Tentando porta do Git Daemon (9418)...", fg="yellow", bold=True)
+        daemon_url = f"git://{manifest.ip}:{manifest.port}/{manifest.repo_name}"
+        return cls._pull_via_standard_remote(repo_path, daemon_url, target_branch, has_no_head=has_no_head, force=bypass_safety, autostash=autostash)
 
     @classmethod
-    def _pull_via_standard_remote(cls, repo_path: str, remote_url: str, branch: str, is_uninitialized: bool = False) -> Tuple[bool, str]:
+    def _pull_via_standard_remote(cls, repo_path: str, remote_url: str, branch: str, has_no_head: bool = False, force: bool = False, autostash: bool = False) -> Tuple[bool, str]:
         ok, err = cls._configure_remote(repo_path, remote_url)
         if not ok:
             return False, err
 
+        stashed = False
+        if autostash and not has_no_head:
+            click.secho("\n[STASH] Guardando alterações de pesquisa locais...", fg="yellow")
+            ok_stash, out_stash, _, _ = cls._run_git_forensic(repo_path, ["stash", "push", "-m", "lan_git_autostash"])
+            stashed = ("No local changes to save" not in out_stash)
+
+        # Executa Fetch do branch alvo (main ou dox-live)
         click.secho(f"\n[FETCH] Puxando objetos do branch '{branch}' via LAN ({remote_url})...", fg="cyan")
         ok, fetch_out, code, fetch_err = cls._run_git_forensic(repo_path, ["fetch", cls.REMOTE_NAME, branch])
         if not ok:
             return False, f"Falha no 'git fetch' (Exit {code}): {fetch_err or fetch_out}"
 
-        if is_uninitialized:
-            click.secho(f"\n[CHECKOUT] Configurando branch local '{branch}'...", fg="cyan")
-            ok, out, code, err = cls._run_git_forensic(repo_path, ["checkout", "-B", branch, f"{cls.REMOTE_NAME}/{branch}"])
+        # Se for modo live, force ou repositório sem HEAD: aplica Reset Hard
+        if has_no_head or force or branch == "dox-live":
+            click.secho(f"\n[APLICAÇÃO] Espelhando estado exato do Host ({cls.REMOTE_NAME}/{branch})...", fg="green", bold=True)
+            ok, reset_out, code, reset_err = cls._run_git_forensic(repo_path, ["reset", "--hard", f"{cls.REMOTE_NAME}/{branch}"])
             if not ok:
-                return False, f"Falha no 'git checkout' inicial (Exit {code}): {err or out}"
-            return True, f"Repositório inicializado e sincronizado com sucesso (Branch: {branch})."
+                return False, f"Falha no Reset Hard (Exit {code}): {reset_err or reset_out}"
+            return True, f"Repositório espelhado com sucesso com o Host ({branch} @ {cls.REMOTE_NAME}/{branch})."
 
+        # Caso padrão: Fast-Forward Merge
         click.secho(f"\n[MERGE] Aplicando Fast-Forward para '{cls.REMOTE_NAME}/{branch}'...", fg="cyan")
         ok, merge_out, code, merge_err = cls._run_git_forensic(repo_path, ["merge", "--ff-only", f"{cls.REMOTE_NAME}/{branch}"])
         if not ok:
             return False, f"Falha no Fast-Forward (Exit {code}): {merge_err or merge_out}"
 
+        if stashed:
+            click.secho("\n[STASH-POP] Restaurando alterações de pesquisa locais...", fg="yellow")
+            cls._run_git_forensic(repo_path, ["stash", "pop"])
+
         return True, f"Repositório atualizado com sucesso via LAN: {merge_out}"
-
-    @classmethod
-    def _pull_via_bundle(cls, repo_path: str, host_ip: str, port: int, branch: str) -> Tuple[bool, str]:
-        with tempfile.NamedTemporaryFile(suffix=".bundle", delete=False) as tmp:
-            tmp_bundle_file = tmp.name
-
-        try:
-            ok, err = GitBundleClient.receive_bundle(host_ip, port, tmp_bundle_file)
-            if not ok:
-                return False, f"Falha no download do bundle: {err}"
-
-            ok, out, code, fetch_err = cls._run_git_forensic(repo_path, ["fetch", tmp_bundle_file, f"{branch}:{branch}"])
-            if not ok:
-                ok, out, code, merge_err = cls._run_git_forensic(repo_path, ["pull", "--ff-only", tmp_bundle_file, branch])
-                if not ok:
-                    return False, f"Falha ao aplicar commits do bundle (Exit {code}): {fetch_err or merge_err}"
-
-            return True, "Repositório atualizado com sucesso a partir de Git Bundle validado por SHA-256."
-        finally:
-            if os.path.exists(tmp_bundle_file):
-                try:
-                    os.remove(tmp_bundle_file)
-                except Exception:
-                    pass

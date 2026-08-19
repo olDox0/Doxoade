@@ -30,87 +30,6 @@ def lan_git_cli():
     """Sistema de Sincronização P2P e Compartilhamento Local de Repositórios Git."""
     pass
 
-
-# =====================================================================
-# COMANDO: SHARE (HOST)
-# =====================================================================
-@lan_git_cli.command(name="share")
-@click.argument("repo_path", default=".", type=click.Path(exists=True))
-@click.option("--port", default=9418, help="Porta TCP do servidor Git.")
-@click.option("--udp-port", default=54545, help="Porta UDP para anúncio Discovery.")
-@click.option("--http", is_flag=True, help="Usa Plano B (Smart HTTP) em vez do Git Daemon.")
-@click.option("--bundle", is_flag=True, help="Usa Plano C (Streaming de Git Bundle).")
-def cmd_share(repo_path: str, port: int, udp_port: int, http: bool, bundle: bool):
-    """Compartilha o repositório atual na rede local (Somente Leitura)."""
-    abs_path = os.path.abspath(repo_path)
-    primary_iface = LANInterfaceDetector.get_primary_interface()
-
-    if not primary_iface:
-        click.secho("[ERRO CRÍTICO] Nenhuma interface de rede física ativa foi detectada.", fg="red")
-        return
-
-    host_ip = primary_iface["ip"]
-    transport_type = "git_daemon"
-    if http:
-        transport_type = "http"
-        port = 8080 if port == 9418 else port
-    elif bundle:
-        transport_type = "bundle"
-        port = 54546 if port == 9418 else port
-
-    manifest = GitManifestExtractor.extract(abs_path, host_ip=host_ip, port=port, transport=transport_type)
-    if not manifest:
-        click.secho(f"[ERRO] O caminho '{abs_path}' não é um repositório Git válido.", fg="red")
-        return
-
-    server_instance = None
-    if transport_type == "git_daemon":
-        server_instance = GitDaemonServer(abs_path, port=port)
-        ok, err = server_instance.start()
-        if not ok:
-            click.secho(f"[ERRO] Falha ao iniciar Git Daemon: {err}", fg="red")
-            return
-    elif transport_type == "http":
-        server_instance = GitHTTPServer(abs_path, port=port)
-        ok, err = server_instance.start()
-        if not ok:
-            click.secho(f"[ERRO] Falha ao iniciar Git HTTP Server: {err}", fg="red")
-            return
-
-    beacon = LANBeaconHost(manifest, udp_port=udp_port)
-    beacon_thread = threading.Thread(target=beacon.start, daemon=True)
-    beacon_thread.start()
-
-    click.secho("============================================================", fg="cyan")
-    click.secho("             DOXOADE LAN GIT - MODO SERVIDOR (HOST)", fg="green", bold=True)
-    click.secho("============================================================", fg="cyan")
-    click.echo(f"  Repositório : {click.style(manifest.repo_name, bold=True)}")
-    click.echo(f"  Branch      : {manifest.branch} [{manifest.short_commit}]")
-    click.echo(f"  Mensagem    : {manifest.commit_message}")
-    click.echo(f"  Interface   : {primary_iface['interface']} ({host_ip})")
-    click.echo(f"  Transporte  : {transport_type.upper()} (Porta TCP {port})")
-    click.echo(f"  Discovery   : UDP Broadcast (Porta {udp_port})")
-    click.echo(f"  Permissão   : SOMENTE LEITURA (Anti-Push Ativo)")
-    click.secho("============================================================", fg="cyan")
-    click.secho("📡 Aguardando conexões de computadores na rede... (Ctrl+C para encerrar)", fg="yellow")
-
-    try:
-        if transport_type == "bundle":
-            while True:
-                GitBundleHost.serve_bundle(abs_path, port=port)
-                time.sleep(1)
-        else:
-            while True:
-                time.sleep(1)
-    except KeyboardInterrupt:
-        click.echo("\n[INFO] Encerrando servidor e liberando portas...")
-    finally:
-        beacon.stop()
-        if server_instance:
-            server_instance.stop()
-        click.secho("[OK] Servidor finalizado com segurança.", fg="green")
-
-
 # =====================================================================
 # COMANDO: WEB (PORTAL)
 # =====================================================================
@@ -195,14 +114,83 @@ def cmd_discover(udp_port: int, timeout: float, scan: bool):
 
 
 # =====================================================================
+# COMANDO: SHARE (HOST)
+# =====================================================================
+@lan_git_cli.command(name="share")
+@click.argument("repo_path", default=".", type=click.Path(exists=True))
+@click.option("--port", default=9418, help="Porta TCP do servidor Git.")
+@click.option("--http-port", default=8080, help="Porta TCP do Smart HTTP.")
+@click.option("--udp-port", default=54545, help="Porta UDP para anúncio Discovery.")
+@click.option("--live", is_flag=True, help="Ativa modo Live Mirror (Espelha alterações em memória sem commit).")
+def cmd_share(repo_path: str, port: int, http_port: int, udp_port: int, live: bool):
+    """Compartilha o repositório atual na rede local (Modo Normal ou Live Mirror)."""
+    abs_path = os.path.abspath(repo_path)
+    primary_iface = LANInterfaceDetector.get_primary_interface()
+
+    if not primary_iface:
+        click.secho("[ERRO CRÍTICO] Nenhuma interface de rede física ativa foi detectada.", fg="red")
+        return
+
+    host_ip = primary_iface["ip"]
+
+    manifest = GitManifestExtractor.extract(abs_path, host_ip=host_ip, port=port, transport="git_daemon", live=live)
+    if not manifest:
+        click.secho(f"[ERRO] O caminho '{abs_path}' não é um repositório Git válido.", fg="red")
+        return
+
+    daemon_server = GitDaemonServer(abs_path, port=port)
+    daemon_server.start()
+
+    http_server = GitHTTPServer(abs_path, port=http_port)
+    http_server.start()
+
+    beacon = LANBeaconHost(manifest, udp_port=udp_port)
+    beacon_thread = threading.Thread(target=beacon.start, daemon=True)
+    beacon_thread.start()
+
+    mode_title = "MODO ESPELHO AO VIVO (LIVE MIRROR)" if live else "MODO SERVIDOR (HOST)"
+    header_color = "magenta" if live else "green"
+
+    click.secho("============================================================", fg="cyan")
+    click.secho(f"             DOXOADE LAN GIT - {mode_title}", fg=header_color, bold=True)
+    click.secho("============================================================", fg="cyan")
+    click.echo(f"  Repositório : {click.style(manifest.repo_name, bold=True)}")
+    click.echo(f"  Branch/Alvo : {manifest.branch} [{manifest.short_commit}]")
+    click.echo(f"  Mensagem    : {manifest.commit_message}")
+    click.echo(f"  Interface   : {primary_iface['interface']} ({host_ip})")
+    click.echo(f"  Dual Serv.  : Daemon ({port}) | Smart HTTP ({http_port})")
+    click.echo(f"  Discovery   : UDP Broadcast (Porta {udp_port})")
+    if live:
+        click.secho("  Estado      : ESPELHAMENTO DE MEMÓRIA (Sem poluir commits do Git)", fg="yellow", bold=True)
+    click.secho("============================================================", fg="cyan")
+    click.secho("📡 Aguardando sincronização de computadores... (Ctrl+C para encerrar)", fg="yellow")
+
+    try:
+        while True:
+            # Em modo live, atualiza o shadow commit periodicamente se houver alterações no editor
+            if live:
+                GitManifestExtractor.extract(abs_path, host_ip=host_ip, port=port, transport="git_daemon", live=True)
+            time.sleep(1)
+    except KeyboardInterrupt:
+        click.echo("\n[INFO] Encerrando servidores e liberando portas...")
+    finally:
+        beacon.stop()
+        daemon_server.stop()
+        http_server.stop()
+        click.secho("[OK] Servidores finalizados com segurança.", fg="green")
+
+# =====================================================================
 # COMANDO: PULL (CLIENT)
 # =====================================================================
 @lan_git_cli.command(name="pull")
 @click.argument("repo_path", default=".", type=click.Path(exists=True))
 @click.option("--host", default=None, help="IP direto do Host (ex: 192.168.18.52).")
 @click.option("--udp-port", default=54545, help="Porta UDP de descoberta.")
-def cmd_pull(repo_path: str, host: Optional[str], udp_port: int):
-    """Puxa e atualiza o repositório local a partir do peer da rede."""
+@click.option("--force", "-f", is_flag=True, help="Força a sincronização sobrescrevendo alterações locais (Reset Hard).")
+@click.option("--autostash", is_flag=True, help="Guarda alterações locais no stash e restaura após o pull.")
+@click.option("--live", is_flag=True, help="Espelha o estado de rascunho em memória do Host (Live Mirror).")
+def cmd_pull(repo_path: str, host: Optional[str], udp_port: int, force: bool, autostash: bool, live: bool):
+    """Puxa e atualiza o repositório local (Modo Normal ou Live Mirror)."""
     abs_path = os.path.abspath(repo_path)
     target_manifest = None
 
@@ -213,7 +201,6 @@ def cmd_pull(repo_path: str, host: Optional[str], udp_port: int):
         click.echo("Procurando o repositório na rede local...")
         peers = LANBeaconClient.discover_peers(timeout=2.0, udp_port=udp_port)
         if not peers:
-            # Auto-fallback para varredura de sub-rede
             peers = LANDirectScanner.scan_subnet(udp_port=udp_port)
 
         if peers:
@@ -227,17 +214,15 @@ def cmd_pull(repo_path: str, host: Optional[str], udp_port: int):
 
     if not target_manifest:
         click.secho("[FALHA] Nenhum peer com repositório ativo foi localizado na rede.", fg="red")
-        click.echo("Dica: Certifique-se de que 'doxoade lan-git share' está rodando no Host.")
         return
 
     click.echo(f"Sincronizando com '{target_manifest.hostname}' ({target_manifest.ip})...")
-    ok, message = GitSyncEngine.pull_from_peer(abs_path, target_manifest)
+    ok, message = GitSyncEngine.pull_from_peer(abs_path, target_manifest, force=force, autostash=autostash, live=live)
 
     if ok:
         click.secho(f"\n✔ [SUCESSO] {message}", fg="green", bold=True)
     else:
         click.secho(f"\n✖ [FALHA FORENSE]\n{message}", fg="red", bold=True)
-
 
 # =====================================================================
 # COMANDO: DOCTOR (DIAGNÓSTICO COM AUTO-REPARO UAC)

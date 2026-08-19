@@ -1,7 +1,7 @@
 # doxoade/commands/lan_git/transport_lan_git/git_daemon_server.py
 # Plano A: Wrapper do 'git daemon' nativo
 """ Módulo Servidor Git Daemon Nativo (Plano A).
-Executa o processo 'git daemon' com normalização de caminhos POSIX para Windows. """
+Executa o processo 'git daemon' com blindagem estrita para caminhos com espaços no Windows. """
 
 import os
 import subprocess
@@ -10,7 +10,7 @@ from typing import Optional, Tuple
 
 
 class GitDaemonServer:
-    """Gerencia o processo do 'git daemon' com compatibilidade rigorosa para Windows."""
+    """Gerencia o processo do 'git daemon' com suporte a caminhos com espaços."""
 
     def __init__(self, repo_path: str, port: int = 9418):
         self.repo_path = os.path.abspath(repo_path)
@@ -36,19 +36,19 @@ class GitDaemonServer:
             except Exception as e:
                 return False, f"Falha ao criar marcador de segurança: {e}"
 
-        # Normaliza caminhos do Windows para barras normais (Evita o erro 'Invalid argument' do MSYS2)
         base_dir_posix = self.base_dir.replace("\\", "/")
         repo_path_posix = self.repo_path.replace("\\", "/")
 
+        # Removemos o --base-path com espaço e usamos argumentos separados limpos
         cmd = [
             "git", "daemon",
             "--reuseaddr",
             "--listen=0.0.0.0",
-            f"--base-path={base_dir_posix}",
             "--export-all",
             "--enable=upload-pack",
             "--disable=receive-pack",
             f"--port={self.port}",
+            f"--base-path={base_dir_posix}",
             repo_path_posix
         ]
 
