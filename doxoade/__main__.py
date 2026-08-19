@@ -22,6 +22,7 @@ def cli(hbc6_audit, hbc6_audit_verbose):
         os.environ["HERMES_HBC6_AUDIT_VERBOSE"] = "1"
 
 def main():
+    import os
     os.environ["DOXOADE_QUIET_BOOT"] = "1"
     package_dir = Path(__file__).resolve().parent
     project_root = str(package_dir.parent)
@@ -48,8 +49,47 @@ def main():
             exit_code = getattr(e, 'exit_code', 0) or 0
         else:
             import traceback
-            print(f"\n\x1b[41;1m 🔥 CRASH NO SISTEMA \x1b[0m")
-            print(traceback.format_exc())
+            import os
+            from datetime import datetime
+            tb_text = traceback.format_exc()
+            lines = tb_text.splitlines()
+            # Forensic Extraction (Ma'at)
+            info = {'error': lines[-1] if lines else 'Unknown', 'file': 'Unknown', 'line': '0', 'func': 'Unknown'}
+            for line in reversed(lines):
+                if 'File "' in line:
+                    try:
+                        parts = line.split('"')
+                        info['file'] = parts[1]
+                        info['line'] = line.split('line ')[1].split(',')[0]
+                    except Exception:
+                        pass
+                    break
+            for i, line in enumerate(lines):
+                if f"line {info['line']}" in line and i + 1 < len(lines):
+                    next_line = lines[i+1].strip()
+                    if next_line.startswith("in "):
+                        info['func'] = next_line[3:]
+                    break
+            # Terminal Output (Anúbis)
+            print(f"\n\x1b[41;1m 🔥 CRASH NO SISTEMA (Forensic Report) \x1b[0m"
+                  f"\n\x1b[1;31m  ■ Tipo de Falha: \x1b[0m\x1b[1m{type(e).__name__}\x1b[0m"
+                  f"\x1b[1;31m  ■ Mensagem:      \x1b[0m{e}"
+                  f"\x1b[1;33m  ■ Arquivo:       \x1b[0m{info['file']}"
+                  f"\x1b[1;33m  ■ Linha:         \x1b[0m{info['line']}"
+                  f"\x1b[1;33m  ■ Função:        \x1b[0m{info['func']}"
+                  f"\n\x1b[2m--- Traceback Completo ---\x1b[0m" )
+            print(tb_text)
+            # Black Box Logger (Hades)
+            try:
+                log_dir = Path(os.environ.get("DOXOADE_PROJECT_ROOT", ".")) / ".doxoade" / "logs"
+                log_dir.mkdir(parents=True, exist_ok=True)
+                crash_log = log_dir / "doxoade_crash.log"
+                with open(crash_log, "a", encoding="utf-8") as f:
+                    f.write(f"\n{'='*60}\nCRASH EM: {datetime.now().isoformat()}\n")
+                    f.write(f"FILE: {info['file']} | LINE: {info['line']} | FUNC: {info['func']}\n")
+                    f.write(f"{'='*60}\n{tb_text}\n")
+                print(f"\x1b[1;35m  💾 [HADES] Black Box salvo em: {crash_log}\x1b[0m")
+            except Exception: pass
             exit_code = 1
     finally:
         # 🔥 FORÇA O DUMP DO HBC6 AUDITOR ANTES DE MORRER

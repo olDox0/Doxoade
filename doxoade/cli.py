@@ -89,6 +89,7 @@ class DoxoadeLazyGroup(click.Group):
             'kvcheck': 'doxoade.commands.kvcheck:kvcheck',
             'lab': 'doxoade.commands.lab:lab_group',
             'linux': 'doxoade.commands.linux_systems.linux_cmd:linux_group',
+            'lan-git': 'doxoade.commands.lan_git.cli_lan_git:lan_git_cli',
             'log': 'doxoade.commands.utils:log',
             'macrothon': 'doxoade.commands.macrothon_systems.macrothon_builder:macrothon_group',
             'maestro': 'doxoade.commands.maestro:maestro',

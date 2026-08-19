@@ -149,8 +149,12 @@ def horus_run(cmd_args):
             # 2. É o próprio CLI do doxoade
             full_cmd = [sys.executable, "-m", "doxoade"] + full_cmd[1:]
         elif not target.lower().endswith(('.exe', '.com', '.bat', '.cmd')):
-            # 3. Não é um executável nativo -> Redireciona para o motor do doxoade
-            full_cmd = [sys.executable, "-m", "doxoade"] + full_cmd
+            # Verifica se é um comando local do projeto (sysutils)
+            local_cli = shutil.which("sysutils")
+            if local_cli:
+                full_cmd = [local_cli] + full_cmd
+            else:
+                full_cmd = [sys.executable, "-m", "doxoade"] + full_cmd
 
         click.secho(f"👁️  [HORUS SHADOW] Monitorando: {' '.join(full_cmd)}", fg='cyan', bold=True)
         env = os.environ.copy()

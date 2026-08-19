@@ -83,7 +83,7 @@ def _dump_vulcan_telemetry():
 #        if local_cand.exists(): db_path = local_cand
     
     if not db_path: raise RuntimeError(f"db_path tem caminho quebrado {db_path}")
-    echo("db_path: {db_path}")
+    echo(f"db_path: {db_path}")
     try:
         with sqlite3.connect(str(db_path), timeout=10.0) as conn:
             conn.execute("""

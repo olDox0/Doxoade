@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import traceback
 
+
 def _early_setup(project_root: str):
     """Garante diretórios e executa o Portão ABI."""
     try:
@@ -13,6 +14,7 @@ def _early_setup(project_root: str):
     except Exception as e:
         print(f'\x1b[31m ■ Erro: {e}')
         traceback.print_tb(e.__traceback__)
+
 
 def _install_finder(project_root: str):
     """Instala o MetaFinder do Vulcan no sistema de importação do Python."""
@@ -23,6 +25,7 @@ def _install_finder(project_root: str):
         print(f'\x1b[31m ■ Erro: {e}')
         traceback.print_tb(e.__traceback__)
 
+
 def main():
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     _early_setup(project_root)
@@ -31,7 +34,6 @@ def main():
         from doxoade.cli import cli
         cli()
     except Exception as e:
-        import traceback
         print(f'\x1b[31m ■ Erro: {e}')
         traceback.print_tb(e.__traceback__)
         err_msg = traceback.format_exc()
@@ -49,5 +51,7 @@ def main():
                 print(f'\x1b[31m ■ Erro: {e}')
                 traceback.print_tb(e.__traceback__)
         sys.exit(1)
+
+
 if __name__ == '__main__':
     main()

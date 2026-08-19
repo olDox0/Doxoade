@@ -56,8 +56,18 @@ class NexusMetalEngine:
         return hasher.hexdigest()
 
     def _is_stale(self, target_name, sources, output_path):
+        """Verifica se o target precisa ser recompilado, com cooldown para falhas."""
         if not output_path.exists():
+            # Verifica cooldown: se falhou nos últimos 5 minutos, não tenta novamente
+            fail_marker = self.cache_path.parent / f".build_failed_{target_name}"
+            if fail_marker.exists():
+                import time
+                fail_time = fail_marker.stat().st_mtime
+                if (time.time() - fail_time) < 300:  # 5 minutos de cooldown
+                    return False  # Não é stale, foi falha recente
+            
             return True
+        
         cache = {}
         if self.cache_path.exists():
             try:
@@ -65,7 +75,16 @@ class NexusMetalEngine:
                     cache = json.load(f)
             except Exception:
                 return True
-        return cache.get(target_name) != self._get_bundle_hash(sources)
+        
+        is_stale = cache.get(target_name) != self._get_bundle_hash(sources)
+        
+        # Se não é stale, remove marcador de falha (se existir)
+        if not is_stale:
+            fail_marker = self.cache_path.parent / f".build_failed_{target_name}"
+            if fail_marker.exists():
+                fail_marker.unlink()
+        
+        return is_stale
 
     def _update_cache(self, target_name, sources):
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -424,18 +443,24 @@ class NexusMetalEngine:
             })
 
 
-            res = subprocess.run(" ".join(cmd), capture_output=True,
-                                 text=True, shell=True)
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                # Marca falha para cooldown
+                fail_marker = self.cache_path.parent / f".build_failed_{target_name}"
+                fail_marker.parent.mkdir(parents=True, exist_ok=True)
+                fail_marker.write_text(result.stderr[:500], encoding='utf-8')
+                
+                print(f"      {Fore.RED}✘ Falha na compilação:{Style.RESET_ALL}")
+                print(f"        {result.stderr[:300]}")
+                print(f"      {Fore.YELLOW}⏸ Cooldown de 5 minutos ativado para {target_name}{Style.RESET_ALL}")
+                return False
+            
+            # Se sucesso, remove marcador de falha
+            fail_marker = self.cache_path.parent / f".build_failed_{target_name}"
+            if fail_marker.exists():
+                fail_marker.unlink()
 
-            if res.returncode == 0:
-                print(f"      {Fore.GREEN}✅ {t_name} gerado com sucesso.{self.RST}")
-                # g) Validação pós-build do DNA Sotéria
-                if target_use_soteria:
-                    self._validate_soteria_dna(out_file)
-                self._update_cache(t_name, final_sources)
-            else:
-                print(f"      {Fore.RED}❌ Falha na Metalurgia:\n{res.stderr}{self.RST}")
-                global_success = False
 
         return global_success
 
