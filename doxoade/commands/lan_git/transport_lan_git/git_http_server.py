@@ -1,18 +1,30 @@
 # doxoade/commands/lan_git/transport_lan_git/git_http_server.py
 # Plano B: Servidor Git Smart HTTP embutido
-""" Módulo Servidor Git Smart HTTP Embutido (Plano B).
-Servidor HTTP leve para transmissão resiliente e imune a bugs de caminho no Windows. """
+""" Módulo Servidor Git Smart HTTP Embutido com Suporte a Espaços em Nomes de Silos. """
 
 import os
+import time
 import subprocess
+import traceback
 import threading
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from typing import Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
+import click
+
+
+def identify_peer_device(ip: str) -> str:
+    if ip == "192.168.18.91":
+        return "💻 PC-B (Windows 11)"
+    elif ip == "192.168.18.105":
+        return "📱 PC-C (Android / Termux)"
+    elif ip.startswith("127.") or ip == "localhost":
+        return "🖥️ Localhost (Self-Check)"
+    return f"🌐 Dispositivo ({ip})"
 
 
 class SecureGitHTTPRequestHandler(SimpleHTTPRequestHandler):
-    """Handler HTTP customizado para o backend nativo do Git."""
+    """Handler HTTP com suporte a unquote para caminhos com espaços."""
 
     repo_dir: str = ""
     repo_name: str = ""
@@ -21,7 +33,6 @@ class SecureGitHTTPRequestHandler(SimpleHTTPRequestHandler):
         pass
 
     def do_POST(self):
-        # Permite upload-pack (leitura) e bloqueia receive-pack (escrita)
         parsed = urlparse(self.path)
         if "git-receive-pack" in parsed.path:
             self.send_error(403, "Acesso Negado: Push Proibido.")
@@ -33,20 +44,31 @@ class SecureGitHTTPRequestHandler(SimpleHTTPRequestHandler):
         self._handle_git_backend("GET")
 
     def _handle_git_backend(self, method: str):
+        client_ip = self.client_address[0]
+        device_label = identify_peer_device(client_ip)
         parsed = urlparse(self.path)
-        clean_path = os.path.normpath(parsed.path).lstrip("/\\")
+        
+        # ⚡ Decodifica a URL (ex: "/Projeto%20SysUtils/..." -> "/Projeto SysUtils/...")
+        unquoted_path = unquote(parsed.path)
+        clean_path = os.path.normpath(unquoted_path).lstrip("/\\")
 
         if ".." in clean_path:
             self.send_error(400, "Caminho malicioso detectado.")
             return
 
+        timestamp_str = time.strftime("%H:%M:%S")
+        if "info/refs" in unquoted_path:
+            click.secho(f"  [{timestamp_str}] [GIT-NEGOTIATE] {device_label} consultando referências...", fg="cyan")
+        elif "git-upload-pack" in unquoted_path:
+            click.secho(f"  [{timestamp_str}] [GIT-STREAM] Transmitindo pack de objetos para {device_label}...", fg="green")
+
         env = {
             "REQUEST_METHOD": method,
             "GIT_PROJECT_ROOT": os.path.dirname(self.repo_dir),
             "GIT_HTTP_EXPORT_ALL": "1",
-            "PATH_INFO": parsed.path,
+            "PATH_INFO": unquoted_path,
             "QUERY_STRING": parsed.query,
-            "REMOTE_ADDR": self.client_address[0],
+            "REMOTE_ADDR": client_ip,
             "CONTENT_TYPE": self.headers.get("Content-Type", "")
         }
 
@@ -66,7 +88,9 @@ class SecureGitHTTPRequestHandler(SimpleHTTPRequestHandler):
             )
 
             if res.returncode != 0:
-                self.send_error(500, f"Erro interno no backend do Git: {res.stderr.decode('utf-8', errors='ignore')}")
+                err_msg = res.stderr.decode('utf-8', errors='ignore')
+                click.secho(f"  [{timestamp_str}] ✖ [BACKEND-ERR] {err_msg}", fg="red")
+                self.send_error(500, f"Erro interno no backend do Git: {err_msg}")
                 return
 
             header_data, _, body = res.stdout.partition(b"\r\n\r\n")
@@ -81,13 +105,16 @@ class SecureGitHTTPRequestHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
 
-        except Exception:
+            if "git-upload-pack" in unquoted_path:
+                click.secho(f"  [{timestamp_str}] ✔ [STREAM-OK] Objetos entregues a {device_label} ({len(body)} bytes).", fg="green", bold=True)
+
+        except Exception as e:
+            tb = traceback.format_exc()
+            click.secho(f"  [{timestamp_str}] ✖ [GIT-ERR] Falha ao atender {device_label}: {e}\n{tb}", fg="red")
             self.send_error(500, "Falha na execução do backend Git.")
 
 
 class GitHTTPServer:
-    """Gerenciador do ciclo de vida do Servidor Smart HTTP."""
-
     def __init__(self, repo_path: str, port: int = 8080):
         self.repo_path = os.path.abspath(repo_path)
         self.repo_name = os.path.basename(self.repo_path)

@@ -1,15 +1,14 @@
 # doxoade/commands/lan_git/discovery_lan_git/beacon_lan_git.py
 # Host: Transmissor UDP | Client: Receptor UDP (Plano A)
-""" Módulo de Descoberta UDP (Beacon Ping/Pong).
-Plano A: Broadcast em sub-rede local com rate limiting e parsing de manifesto. 
-
-* **Host Mode:** Fica em escuta na porta UDP `54545`. Quando recebe um pacote `PING_DOXOADE`, responde imediatamente com o Manifesto JSON do repositório.
-* **Client Mode:** Envia um broadcast `PING_DOXOADE` e coleta todas as respostas recebidas em uma janela de 2 segundos. """
+""" Módulo de Descoberta UDP (Beacon Ping/Pong) com Telemetria em Tempo Real.
+Plano A: Broadcast em sub-rede local com rate limiting e logs visuais no Host. """
 
 import socket
 import select
 import time
 from typing import List, Optional, Callable
+import click
+
 from doxoade.commands.lan_git.discovery_lan_git.manifest_lan_git import (
     GitManifest, DOX_MAGIC_HEADER
 )
@@ -21,7 +20,7 @@ PING_PAYLOAD = f"PING_{DOX_MAGIC_HEADER}".encode("utf-8")
 
 
 class LANBeaconHost:
-    """Modo Servidor: Escuta solicitações de ping UDP e responde com o Manifesto."""
+    """Modo Servidor: Escuta solicitações de ping UDP e responde com telemetria."""
 
     def __init__(self, manifest: GitManifest, udp_port: int = 54545):
         self.manifest = manifest
@@ -29,16 +28,14 @@ class LANBeaconHost:
         self.guard = GitFirewallGuard()
         self.running = False
         self._sock: Optional[socket.socket] = None
+        self._seen_pings: dict = {}  # Limita poluição de logs repetidos
 
     def start(self, stop_callback: Optional[Callable[[], bool]] = None):
-        """Inicia a escuta UDP bloqueante ou com verificação de callback de parada."""
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock.bind(("0.0.0.0", self.udp_port))
         self._sock.setblocking(False)
         self.running = True
-
-        response_bytes = self.manifest.to_bytes()
 
         while self.running:
             if stop_callback and stop_callback():
@@ -50,16 +47,31 @@ class LANBeaconHost:
                     data, addr = self._sock.recvfrom(2048)
                     client_ip, client_port = addr
 
-                    # Valida taxa de requisição para mitigar DoS na LAN
                     if not self.guard.check_rate_limit(client_ip):
                         continue
 
                     if data == PING_PAYLOAD:
+                        response_bytes = self.manifest.to_bytes()
                         self._sock.sendto(response_bytes, addr)
+
+                        now = time.time()
+                        if client_ip not in self._seen_pings or now - self._seen_pings[client_ip] > 4.0:
+                            self._seen_pings[client_ip] = now
+                            timestamp_str = time.strftime("%H:%M:%S")
+
+                            # Identifica o dispositivo pelo IP
+                            from doxoade.commands.lan_git.transport_lan_git.git_http_server import identify_peer_device
+                            device_label = identify_peer_device(client_ip)
+                            click.secho(f"  [{timestamp_str}] [DISCOVERY] {device_label} localizou este repositório via UDP.", fg="cyan")
+
                 except Exception:
                     continue
 
         self.stop()
+
+    def update_manifest(self, new_manifest: GitManifest):
+        """Permite atualizar o manifesto transmitido em modo Live Mirror."""
+        self.manifest = new_manifest
 
     def stop(self):
         self.running = False
@@ -76,9 +88,6 @@ class LANBeaconClient:
 
     @classmethod
     def discover_peers(cls, timeout: float = 2.0, udp_port: int = 54545) -> List[GitManifest]:
-        """
-        Envia broadcast em todas as interfaces físicas ativas e retorna peers encontrados.
-        """
         interfaces = LANInterfaceDetector.get_active_interfaces()
         if not interfaces:
             return []
@@ -88,7 +97,6 @@ class LANBeaconClient:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.settimeout(0.2)
 
-        # Envia broadcast em cada interface física identificada
         for iface in interfaces:
             bcast_ip = iface.get("broadcast", "255.255.255.255")
             try:
@@ -96,7 +104,6 @@ class LANBeaconClient:
             except Exception:
                 pass
 
-        # Também envia no broadcast global como redundância
         try:
             sock.sendto(PING_PAYLOAD, ("255.255.255.255", udp_port))
         except Exception:
