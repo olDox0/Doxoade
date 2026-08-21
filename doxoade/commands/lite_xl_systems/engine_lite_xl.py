@@ -758,21 +758,27 @@ class LiteXLEngine:
             errs = []
             warns = []
 
-            # 1. Checagem de Strict.lua (_G.VAR)
+            # 1. Detecção de marcadores markdown soltos fora de comentários
+            for idx, l in enumerate(lines, start=1):
+                stripped = l.strip()
+                if stripped.startswith("- ") or stripped.startswith("* ") or (stripped.startswith("---") and not stripped.startswith("--")):
+                    errs.append(f"Linha {idx}: Marcador Markdown solto detectado -> '{stripped[:30]}'")
+
+            # 2. Checagem de Strict.lua (_G.VAR)
             if re.search(r'_G\.\w+\s*=', content):
                 errs.append("Atribuição em _G detectada (incompatível com strict.lua). Use variáveis locais.")
 
-            # 2. Checagem de Requires Inválidos
+            # 3. Checagem de Requires Inválidos
             reqs = re.findall(r'require\s*\(?[\'"]([^\'"]+)[\'"]\)?', content)
             for r in reqs:
                 if r == "core.renderer":
                     errs.append("require('core.renderer') é inválido. Use 'renderer'.")
 
-            # 3. Checagem de métodos obsoletos
+            # 4. Checagem de métodos obsoletos
             if ":traverse(" in content:
                 errs.append("Chamada a ':traverse' detectada. Use 'find_other_leaf' recursivo.")
 
-            # 4. Compilador Lua (se disponível)
+            # 5. Compilador Lua (se disponível)
             if lua_bin:
                 proc = subprocess.run([lua_bin, "-p", str(f)], capture_output=True, text=True)
                 if proc.returncode != 0:
@@ -842,13 +848,22 @@ class LiteXLEngine:
 
     @classmethod
     def is_running(cls) -> bool:
+        """Verifica se o processo está rodando E se a janela gráfica realmente existe."""
         if sys.platform == "win32":
             try:
                 out = subprocess.check_output(
                     ["tasklist", "/FI", "IMAGENAME eq lite-xl.exe", "/FO", "CSV", "/NH"],
                     text=True, stderr=subprocess.DEVNULL, timeout=2
                 )
-                return "lite-xl.exe" in out.lower()
+                has_process = any(
+                    line.strip().lower().startswith('"lite-xl.exe"') or line.strip().lower().startswith('lite-xl.exe')
+                    for line in out.splitlines()
+                )
+                if not has_process:
+                    return False
+
+                # Se tem processo, valida se a janela está viva
+                return cls.focus_running_window()
             except Exception:
                 return False
         else:
@@ -859,13 +874,16 @@ class LiteXLEngine:
                 return False
 
     @classmethod
-    def focus_running_window(cls):
+    def focus_running_window(cls) -> bool:
+        """Tenta focar a janela visível do Lite XL. Retorna False se não houver janela ativa."""
         if sys.platform == "win32":
             try:
-                cmd = "$wshell = New-Object -ComObject WScript.Shell; $wshell.AppActivate('Lite XL')"
-                subprocess.run(["powershell", "-NoProfile", "-Command", cmd], capture_output=True, timeout=2)
+                cmd = "$ws = New-Object -ComObject WScript.Shell; if ($ws.AppActivate('Lite XL')) { exit 0 } else { exit 1 }"
+                res = subprocess.run(["powershell", "-NoProfile", "-Command", cmd], capture_output=True, timeout=2)
+                return res.returncode == 0
             except Exception:
-                pass
+                return False
+        return True
 
     @classmethod
     def resolve_target_path(cls, raw_path: str) -> Tuple[Optional[str], bool, bool]:
@@ -1054,3 +1072,11 @@ class LiteXLEngine:
         code = cls.generate_sovereign_init()
         init_file.write_text(code, encoding="utf-8")
         return True, str(init_file)
+        
+    @classmethod
+    def kill_ghost_processes(cls):
+        """Mata qualquer processo fantasma travado em segundo plano."""
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/F", "/IM", "lite-xl.exe"], capture_output=True)
+        else:
+            subprocess.run(["pkill", "-9", "-f", "lite-xl"], capture_output=True)

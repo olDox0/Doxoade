@@ -1,17 +1,19 @@
 -- doxoade/commands/lite_xl_systems/template/template/02_blacklist.lua
 -- =============================================================================
--- 02. BLACKLIST DE PASTAS (PYTHON VENV, CACHE, GIT)
+-- 02. BLACKLIST UNIVERSAL (IGNORA VENV EM QUALQUER NÍVEL DE SUBPASTA)
 -- =============================================================================
 local ignored_patterns = {
-  "^%.venv/", "^%.venv\\",
-  "^venv/", "^venv\\",
-  "^env/", "^env\\",
-  "^%.env/", "^%.env\\",
-  "^__pycache__/", "^__pycache__\\",
+  "[/\\]%.venv[/\\]", "^%.venv[/\\]",
+  "[/\\]venv[/\\]", "^venv[/\\]",
+  "[/\\]env[/\\]", "^env[/\\]",
+  "[/\\]%.env[/\\]", "^%.env[/\\]",
+  "[/\\]__pycache__[/\\]", "^__pycache__[/\\]",
+  "[/\\]%.pytest_cache[/\\]", "[/\\]%.mypy_cache[/\\]", "[/\\]%.ruff_cache[/\\]",
+  "[/\\]%.git[/\\]", "^%.git[/\\]",
+  "[/\\]%.idea[/\\]", "[/\\]%.vscode[/\\]",
+  "[/\\]node_modules[/\\]", "^node_modules[/\\]",
+  "[/\\]dist[/\\]", "[/\\]build[/\\]", "[/\\]%.egg%-info[/\\]",
   "%.pyc$", "%.pyo$", "%.pyd$",
-  "^%.pytest_cache/", "^%.mypy_cache/", "^%.ruff_cache/",
-  "%.egg%-info/", "^%.git/", "^%.idea/", "^%.vscode/",
-  "^node_modules/", "^dist/", "^build/",
   "%.DS_Store$", "Thumbs%.db$"
 }
 

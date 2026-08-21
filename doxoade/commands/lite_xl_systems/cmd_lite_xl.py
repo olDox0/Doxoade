@@ -110,11 +110,12 @@ def cmd_diagnose():
     click.echo()
 
 
-@lite_xl_group.command("log", help="Exibe os logs (padrão: últimos 10min | use -at para tudo).")
+@lite_xl_group.command("log", help="Exibe os logs (padrão: últimos 10min | use --err para erros).")
 @click.option("--all-time", "-at", is_flag=True, help="Exibe todo o histórico de log gravado na sessão.")
+@click.option("--err", "-e", is_flag=True, help="Filtra estritamente erros e exceções.")
 @click.option("--watch", "-w", is_flag=True, help="Modo Sentinela: segue os logs ao vivo no terminal (tail -f).")
 @click.option("--clear", "-c", is_flag=True, help="Limpa o log de sessão.")
-def cmd_log(all_time, watch, clear):
+def cmd_log(all_time, err, watch, clear):
     log_file = LiteXLEngine.get_session_log_path()
     err_file = LiteXLEngine.get_error_txt_path()
 
@@ -134,13 +135,16 @@ def cmd_log(all_time, watch, clear):
         click.echo(f"{Fore.YELLOW}Arquivo session_log.txt ainda não criado.{Fore.RESET}")
         return
 
-    filter_info = "Histórico Completo" if all_time else "Últimos 10 Minutos (use -at para tudo)"
+    filter_info = "Apenas Erros" if err else ("Histórico Completo" if all_time else "Últimos 10 Minutos")
     click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}📜 [LITE XL SESSION LOG - {filter_info}] -> {log_file}{Style.RESET_ALL}\n")
 
     now = datetime.now()
     cutoff_time = now - timedelta(minutes=10)
 
     def print_formatted_line(line):
+        if err and "[ERROR]" not in line and "STACK TRACEBACK" not in line and "Error:" not in line:
+            return
+
         if not all_time and not watch and line.startswith("["):
             try:
                 ts_str = line[1:9]
@@ -152,7 +156,7 @@ def cmd_log(all_time, watch, clear):
             except Exception:
                 pass
 
-        if "[ERROR]" in line:
+        if "[ERROR]" in line or "Error:" in line:
             click.echo(f"{Fore.RED}{line}{Fore.RESET}")
         elif "[INFO]" in line or "[LOG]" in line:
             click.echo(f"{Fore.GREEN}{line}{Fore.RESET}")
@@ -207,56 +211,89 @@ def cmd_setup(force, no_backup):
         click.echo(f"\n{Fore.YELLOW}💡 Execute 'doxoade lite-xl restart' para iniciar limpo.{Fore.RESET}\n")
 
 
-@lite_xl_group.command("open", help="Abre arquivos ou anexa diretórios ao Lite XL com validação.")
-@click.argument("target", required=False, default=".")
-@click.option("--config-only", "-c", is_flag=True, help="Apenas abre o init.lua no editor padrão.")
-def cmd_open(target, config_only):
-    if os.environ.get("_DOXOADE_LXL_GUARD") == "1":
-        return
-    os.environ["_DOXOADE_LXL_GUARD"] = "1"
+@lite_xl_group.command("log", help="Exibe os logs (padrão: últimos 20min | use --err para erros).")
+@click.option("--all-time", "-at", is_flag=True, help="Exibe todo o histórico gravado na sessão.")
+@click.option("--err", "-e", is_flag=True, help="Exibe tudo exceto logs normais de plugins ([LOG] e [QUIET]).")
+@click.option("--watch", "-w", is_flag=True, help="Modo Sentinela: segue os logs ao vivo no terminal (tail -f).")
+@click.option("--clear", "-c", is_flag=True, help="Limpa o log de sessão.")
+def cmd_log(all_time, err, watch, clear):
+    log_file = LiteXLEngine.get_session_log_path()
+    err_file = LiteXLEngine.get_error_txt_path()
 
-    init_file = LiteXLEngine.get_init_lua_path()
-    if config_only:
-        if not init_file.exists():
-            click.echo(f"{Fore.RED}init.lua ainda não existe.{Fore.RESET}")
+    if clear:
+        if log_file.exists():
+            log_file.unlink()
+        if err_file.exists():
+            err_file.unlink()
+        click.echo(f"{Fore.GREEN}✔ Logs de sessão limpos.{Fore.RESET}")
+        return
+
+    if err_file.exists():
+        click.echo(f"\n{Fore.RED}{Style.BRIGHT}⚠ [LITE XL CRASH LOG DETECTADO - error.txt]{Style.RESET_ALL}")
+        click.echo(err_file.read_text(encoding="utf-8", errors="replace"))
+
+    if not log_file.exists():
+        click.echo(f"{Fore.YELLOW}Arquivo session_log.txt ainda não criado.{Fore.RESET}")
+        return
+
+    filter_info = "Apenas Erros Recentes" if err else ("Histórico Completo" if all_time else "Últimos 20 Minutos")
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}📜 [LITE XL SESSION LOG - {filter_info}] -> {log_file}{Style.RESET_ALL}\n")
+
+    now = datetime.now()
+    cutoff_time = now - timedelta(minutes=20)
+    in_time_window = True
+
+    def print_formatted_line(line):
+        nonlocal in_time_window
+
+        # Atualiza a janela de tempo se a linha tiver timestamp [HH:MM:SS]
+        if not all_time and not watch and line.startswith("[") and len(line) >= 10 and line[3] == ":" and line[6] == ":":
+            try:
+                ts_str = line[1:9]
+                line_dt = datetime.strptime(ts_str, "%H:%M:%S").replace(
+                    year=now.year, month=now.month, day=now.day
+                )
+                in_time_window = line_dt >= cutoff_time
+            except Exception:
+                in_time_window = True
+
+        if not all_time and not watch and not in_time_window:
             return
-        if sys.platform == "win32":
-            os.startfile(str(init_file))
+
+        if err:
+            if "[LOG]" in line or "[QUIET]" in line or "[INFO] Saved" in line or "[INFO] Loaded" in line or "[INFO] Opened" in line:
+                return
+            if not line.strip():
+                return
+
+        if "[ERROR]" in line or "Error:" in line:
+            click.echo(f"{Fore.RED}{Style.BRIGHT}{line}{Style.RESET_ALL}")
+        elif any(k in line for k in ["STACK TRACEBACK", "in function", "in main chunk", "in upvalue", "in field", "in local"]):
+            click.echo(f"{Fore.RED}{line}{Fore.RESET}")
+        elif "[INFO]" in line or "[LOG]" in line:
+            click.echo(f"{Fore.GREEN}{line}{Fore.RESET}")
+        elif "[PRINT]" in line:
+            click.echo(f"{Fore.YELLOW}{line}{Fore.RESET}")
         else:
-            subprocess.run(["xdg-open", str(init_file)], check=False)
-        return
+            click.echo(f"{Fore.WHITE}{line}{Fore.RESET}")
 
-    resolved_path, exists, is_dir = LiteXLEngine.resolve_target_path(target)
+    content = log_file.read_text(encoding="utf-8", errors="replace")
+    for line in content.splitlines():
+        print_formatted_line(line)
 
-    if not exists:
-        click.echo(f"{Fore.RED}✖ O caminho especificado não existe no disco:{Fore.RESET} {resolved_path}")
-        return
-
-    item_type = "Pasta/Projeto" if is_dir else "Arquivo"
-
-    if LiteXLEngine.is_running():
-        ok, msg = LiteXLEngine.send_to_running_instance(target)
-        if ok:
-            click.echo(f"{Fore.GREEN}✔ {item_type} despachado para o Lite XL ativo:{Fore.RESET} {resolved_path}")
-        else:
-            click.echo(f"{Fore.RED}✖ Falha ao despachar:{Fore.RESET} {msg}")
-        return
-
-    native_exe = LiteXLEngine.find_executable()
-    if native_exe:
-        creation_flags = 0
-        if sys.platform == "win32":
-            creation_flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-
-        subprocess.Popen(
-            [str(native_exe), resolved_path],
-            creationflags=creation_flags,
-            close_fds=True
-        )
-        click.echo(f"{Fore.GREEN}✔ Lite XL iniciado com {item_type.lower()}:{Fore.RESET} {resolved_path}")
-    else:
-        click.echo(f"{Fore.RED}✖ Executável lite-xl.exe não encontrado.{Fore.RESET}")
-
+    if watch:
+        click.echo(f"\n{Fore.CYAN}👀 Modo Sentinela ativo. Pressione Ctrl+C para sair...{Fore.RESET}\n")
+        try:
+            with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+                f.seek(0, os.SEEK_END)
+                while True:
+                    line = f.readline()
+                    if line:
+                        print_formatted_line(line.rstrip())
+                    else:
+                        time.sleep(0.2)
+        except KeyboardInterrupt:
+            click.echo(f"\n{Fore.YELLOW}Modo Sentinela encerrado.{Fore.RESET}")
 
 @lite_xl_group.command("check-keys", help="Audita atalhos e detecta conformidade com Notepad++.")
 @click.option("--detailed", "-d", is_flag=True, help="Exibe lista completa de atalhos ativos.")

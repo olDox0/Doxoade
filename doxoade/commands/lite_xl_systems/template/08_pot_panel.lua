@@ -4,8 +4,8 @@
 -- =============================================================================
 local core = require "core"
 local DocView = require "core.docview"
+local command = require "core.command"
 
--- Função auxiliar que localiza ou cria a divisão da direita
 local function get_or_create_right_panel()
   local function get_doc_leaves(n, list)
     list = list or {}
@@ -37,34 +37,36 @@ local function open_in_right_panel(file_path, log_msg)
       right_node.active_view = v
       core.set_active_view(v)
       core.redraw = true
-      return
+      return v
     end
   end
 
-  right_node:add_view(DocView(doc))
-  core.set_active_view(right_node.active_view)
+  local view = DocView(doc)
+  right_node:add_view(view)
+  core.set_active_view(view)
   if log_msg then core.log(log_msg) end
   core.redraw = true
+  return view
 end
 
--- Cria o diretório .doxoade se não existir
 local doxoade_cfg_dir = USERDIR .. PATHSEP .. ".doxoade"
 pcall(function() system.mkdir(doxoade_cfg_dir) end)
 local dumppot_file = doxoade_cfg_dir .. PATHSEP .. "dumppot.txt"
+pcall(function()
+  local f = io.open(dumppot_file, "a")
+  if f then f:close() end
+end)
 
 command.add(nil, {
-  -- Pote abre sempre na direita no caminho fixo
   ["doxoade:open-pot-in-right-panel"] = function()
-    open_in_right_panel(dumppot_file, "dumppot.txt aberto no painel da direita.")
+    open_in_right_panel(dumppot_file, "dumppot.txt aberto na direita.")
   end,
 
-  -- Init.lua abre sempre na direita
   ["doxoade:open-init-lua"] = function()
     local config_file = USERDIR .. PATHSEP .. "init.lua"
-    open_in_right_panel(config_file, "init.lua aberto no painel da direita.")
+    open_in_right_panel(config_file, "init.lua aberto na direita.")
   end,
 
-  -- Log abre sempre na direita
   ["doxoade:open-log"] = function()
     local right_node = get_or_create_right_panel()
     for _, doc in ipairs(core.docs) do
@@ -77,12 +79,19 @@ command.add(nil, {
             return
           end
         end
-        right_node:add_view(DocView(doc))
-        core.set_active_view(right_node.active_view)
+        local v = DocView(doc)
+        right_node:add_view(v)
+        core.set_active_view(v)
         core.redraw = true
         return
       end
     end
     command.perform("core:open-log")
+  end,
+
+  ["doxoade:open-workspace-hub"] = function()
+    open_in_right_panel(USERDIR .. PATHSEP .. "init.lua")
+    command.perform("doxoade:open-log")
+    open_in_right_panel(dumppot_file, "Workspace Hub ativado na direita.")
   end
 })

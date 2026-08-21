@@ -1,6 +1,6 @@
 -- doxoade/commands/lite_xl_systems/template/template/07_keymaps_and_help.lua
 -- =============================================================================
--- 07. GUIA DE ATALHOS & MAPA DE TECLAS NOTEPAD++ CONSOLIDADO
+-- 07. GUIA DE ATALHOS & KEYMAP CONSOLIDADO
 -- =============================================================================
 command.add(nil, {
   ["doxoade:show-shortcuts-cheat-sheet"] = function()
@@ -14,7 +14,7 @@ command.add(nil, {
 [ 🎨 VISUAL, CORES E ABAS ]
   Abas com Fundo Sólido   : Cor automática e preenchimento total por Projeto
   #00FF00 / {R,G,B} texto : Fundo do texto preenchido com a cor exata referida
-  Margem Amarela (Gutter) : Indicador de alterações não salvas no arquivo
+  Linha Amarela           : Indicador de linhas modificadas e não salvas
 
 [ 🔍 BUSCA E NAVEGAÇÃO NOTEPAD++ ]
   Ctrl + F          : Abre busca (Highlight em Azul Anil persistente e global)
@@ -31,6 +31,8 @@ command.add(nil, {
 
 [ ✂️ DIVISÃO DE TELAS E ABAS ]
   Ctrl + Alt + D    : Move o arquivo atual entre os painéis (Esquerda ⇄ Direita)
+  Ctrl + Alt + \    : Abre Hub de Ferramentas (Dumppot, Init, Log) na direita
+  Ctrl + Alt + P    : Fixa dumppot.txt no painel da direita
   Alt + D           : Cria uma nova divisão vazia à direita
   Alt + Shift + D   : Divide a tela na horizontal (baixo)
   Ctrl + Alt + Left : Foca no painel da esquerda
@@ -59,17 +61,19 @@ command.add(nil, {
 })
 
 keymap.add {
-  -- Arquivos & Criação
+  -- Criação & Arquivos
   ["ctrl+n"]           = "doxoade:new-doc",
   ["ctrl+o"]           = "core:open-file",
   ["ctrl+s"]           = "doc:save",
   ["ctrl+shift+s"]     = "doc:save-all",
 
-  -- Config do Editor & Logs
+  -- Config do Editor, Logs & Dumppot
   ["ctrl+,"]           = "doxoade:open-init-lua",
   ["ctrl+alt+u"]       = "doxoade:toggle-litexl-in-tree",
   ["ctrl+shift+l"]     = "doxoade:open-log",
   ["ctrl+f2"]          = "doxoade:open-log",
+  ["ctrl+alt+p"]       = "doxoade:open-pot-in-right-panel",
+  ["ctrl+alt+\\"]      = "doxoade:open-workspace-hub",
 
   -- Ajuda e Cheat Sheet
   ["f1"]               = "doxoade:show-shortcuts-cheat-sheet",
