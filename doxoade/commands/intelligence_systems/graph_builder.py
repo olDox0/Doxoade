@@ -60,7 +60,9 @@ def build_project_graph(project_root, ignore_spec):
     module_dependents = {}
 
     nav = DNM(project_root)
-    all_files = nav.scan(extensions=['.py'])
+    all_files = nav.scan(extensions=[
+        '.py', '.c', '.cpp', '.h', '.html', '.js', '.ts',
+        '.md', '.txt', '.toml', '.json', '.css', '.lua' ])
 
     # 1. Mapeia arquivos para módulos
     for f_abs in all_files:
@@ -97,7 +99,7 @@ def build_text_index(project_root, ignore_spec, target_terms):
     nav = DNM(project_root)
     all_files = nav.scan(extensions=[
         '.py', '.c', '.cpp', '.h', '.html', '.js', '.ts',
-        '.md', '.txt', '.toml', '.json', '.css'
+        '.md', '.txt', '.toml', '.json', '.css', '.lua'  # <--- ADICIONE '.lua' AQUI
     ])
     
     project_root_path = Path(project_root).resolve()

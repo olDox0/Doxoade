@@ -15,13 +15,14 @@ from doxoade.rescue import activate_protocol
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 from doxoade.tools.filesystem import _find_project_root
 
+from doxoade.commands.intelligence_systems.intelligence_truncation import verify_dossier_integrity
+
 # PASC 10.1: Configuração para permitir flags APÓS os caminhos
 ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'], allow_interspersed_args=True)
 VALID_EXTS = (
     '.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx',
-    '.pyd', '.so', '.toml', '.md', '.s', '.json', '.txt'
-)
+    '.pyd', '.so', '.toml', '.md', '.s', '.json', '.txt', '.lua' )
 
 @click.group('intelligence', invoke_without_command=True, context_settings=CONTEXT_SETTINGS)
 @click.option('--docs',       '-d', is_flag=True,  help="Extrai docstrings.")
@@ -94,9 +95,11 @@ def _run_dossier_scan(scan_paths, output, include_docs, include_source, no_comme
     
     with ExecutionLogger('intelligence', root, ctx.params):
         console.print("[bold gold3]🔍 Doxoade Chief Insight v95.6 (Qwen Ready)[/bold gold3]")
+        
+        # 🔧 CORREÇÃO: Adicionar '.lua' na lista local de extensões
         valid_exts = (
             '.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx',
-            '.pyd', '.so', '.toml', '.md', '.s', '.json', '.txt'
+            '.pyd', '.so', '.toml', '.md', '.s', '.json', '.txt', '.lua' 
         )
         
         all_files_raw = []
@@ -285,9 +288,11 @@ def _calculate_distribution(files):
         g = f.get("god_assignment", "Unknown")
         dist[g] = dist.get(g, 0) + 1
     return dist
-    
+
+#def _save_llm_report(report, output, console, include_source):
 def _save_llm_report(report_data, output_path, console, include_source=False):
     """Traduz o JSON arquitetural para um formato XML bem indentado e legível (PASC 11.0)."""
+    
     lines = []
     meta = None
     for key in report_data.keys():
@@ -405,10 +410,23 @@ def _save_llm_report(report_data, output_path, console, include_source=False):
         
         lines.append('  </codebase_map>')
         lines.append('</doxoade_nexus_report>')
-        
+
+        # 1. GRAVAÇÃO ÚNICA E DEFINITIVA (Via String Builder)
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write("\n".join(lines))
+            
         console.print(f"\n[bold magenta]🤖 Dossiê LLM-Ready Gerado: {output_path}[/bold magenta]")
+
+        # ❌ REMOVIDO: O bloco do ElementTree (tree.write) que estava sobrescrevendo o arquivo.
+        # ❌ REMOVIDO: A variável 'root = ET.Element(...)' lá no topo da função também pode ser apagada.
+
+        # 🐺 2. AUDITORIA PÓS-GRAVAÇÃO (ANÚBIS / MA'AT PROTOCOL)
+        from doxoade.commands.intelligence_systems.intelligence_truncation import verify_dossier_integrity
+        is_intact, msg = verify_dossier_integrity(output_path)
+        if not is_intact:
+            console.print(f"[bold red]⚠️ [ANÚBIS] {msg}[/bold red]")
+        else:
+            console.print(f"[bold green]✔ [MA'AT] Dossiê gravado com integridade validada. {msg}[/bold green]")
 
 def _save_qwen_report(report_data, output_path, console):
     """

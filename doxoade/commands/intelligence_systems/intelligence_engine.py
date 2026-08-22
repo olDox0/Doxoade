@@ -12,7 +12,9 @@ from doxoade.commands.intelligence_systems.intelligence_utils import (
     JSONSemanticAnalyzer, TXTSemanticAnalyzer # <-- ADICIONADO
 )
 from doxoade.commands.intelligence_systems.intelligence_css import CSSSemanticAnalyzer
-from doxoade.commands.intelligence_systems.intelligence_js import JSSemanticAnalyzer
+from doxoade.commands.intelligence_systems.intelligence_js  import JSSemanticAnalyzer
+from doxoade.commands.intelligence_systems.intelligence_lua import LuaSemanticAnalyzer
+from doxoade.commands.intelligence_systems.intelligence_truncation import TruncationChecker
 
 CRITICAL_THRESHOLD = datetime(2026, 2, 14, 21, 0, 0)
 
@@ -26,8 +28,12 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
         "god_assignment": "Unknown"
     }
     
-#    valid_exts = ('.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx')
-    valid_exts = ('.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx', '.pyd', '.so', '.toml', '.md', '.s', '.json', '.txt' )
+#    valid_exts = ('.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx', '.pyd', '.so', '.toml', '.md', '.s', '.json', '.txt' )
+    valid_exts = (
+        '.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', 
+        '.js', '.jsx', '.ts', '.tsx', '.pyd', '.so', '.toml', 
+        '.md', '.s', '.json', '.txt', '.lua'
+    )
     if not file_path.endswith(valid_exts): return data
     try:
         # --- NOVO: CAPTURA DE BINÁRIOS (VULCAN NATIVE) ---
@@ -45,6 +51,18 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
 
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
+
+        trunc_check = TruncationChecker.analyze(file_path, content)
+        if trunc_check["status"] in ("truncated", "corrupt"):
+            data.update({
+                "status": trunc_check["status"],
+                "complexity": 0,
+                "god_assignment": "Anúbis",  # O auditor que detecta a falha
+                "truncation_reason": trunc_check["reason"],
+                "mpot_4_violations": 0,
+                "debt_tags": []
+            })
+            return data  # Retorna cedo para evitar crashes no AST/Regex
             
         is_python = file_path.endswith('.py')
         is_html = file_path.endswith('.html')
@@ -55,7 +73,7 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
         is_asm = file_path.endswith('.s')
         is_json = file_path.endswith('.json')
         is_txt = file_path.endswith('.txt')
-
+        is_lua = file_path.endswith('.lua')
         
         if is_python:
             sem = SemanticAnalyzer(content)
@@ -72,6 +90,13 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
             backups = _get_safe_backups(file_path)
             if backups:
                 data["archaeology_layers"] = _perform_triple_diff(content, backups)
+
+        elif is_lua:
+            sem_lua = LuaSemanticAnalyzer(content)
+            data.update(sem_lua.get_summary())
+            data["god_assignment"] = NexusThothMapper.identify(rel_path, sem_lua.imports)
+            data["mpot_4_violations"] = 0
+            data["debt_tags"] = find_debt_tags(content)
 
         elif is_html:
             sem_html = HTMLSemanticAnalyzer(content)

@@ -722,9 +722,17 @@ def _run_backup_diff(
 ):
     """
     Compara o arquivo atual com a versão armazenada em um backup.
+    Se o alvo for um diretório, gera um resumo escopoado (Scoped Summary).
     """
     rel = _normalize_rel_path(project_root, file_path)
+    target_path = project_root / rel
 
+    # 🆕 INTERCEPTAÇÃO DE DIRETÓRIOS (Tree Diff)
+    if target_path.is_dir():
+        _run_backup_diff_directory(project_root, backup_path, backup_id, rel)
+        return
+
+    # --- Lógica original de diff de arquivo único segue abaixo ---
     current_status, current_text = _load_current_text(project_root, rel)
     backup_status, backup_text = _load_backup_text_chain(
         backup_path, backup_id, rel
@@ -786,6 +794,61 @@ def _run_backup_diff(
     except Exception:
         click.echo(output)
 
+def _run_backup_diff_directory(project_root: Path, backup_path: Path, backup_id: str, scope_dir: str):
+    """Gera o unified diff de todos os arquivos modificados dentro do diretório (Tree Diff)."""
+    meta = _load_metadata_object(backup_path, backup_id)
+    if meta is None:
+        raise click.UsageError(f"Metadados do backup '{backup_id}' não encontrados.")
+        
+    effective = _effective_manifest(backup_path, backup_id)
+    base = project_root.resolve()
+    
+    # 1. Descobre quais arquivos dentro do escopo foram modificados
+    modified_files = []
+    for rel, old_hash in effective.items():
+        if not (rel == scope_dir or rel.startswith(scope_dir + "/")):
+            continue
+        path = base / rel
+        if not path.exists() or not path.is_file():
+            continue
+        current_hash = compute_file_hash(path)
+        if current_hash != old_hash:
+            modified_files.append(rel)
+            
+    if not modified_files:
+        click.echo(f"{Fore.GREEN}✔ Nenhuma alteração em arquivos dentro de '{scope_dir}'.{Style.RESET_ALL}")
+        return
+        
+    click.echo(f"{Fore.CYAN}═══ DIFF COMPLETO: {len(modified_files)} arquivos alterados em '{scope_dir}' ═══{Style.RESET_ALL}\n")
+    
+    # 2. Gera o diff unificado para cada arquivo modificado
+    for rel in sorted(modified_files):
+        current_status, current_text = _load_current_text(project_root, rel)
+        backup_status, backup_text = _load_backup_text_chain(backup_path, backup_id, rel)
+        
+        if current_status == "binary" or backup_status == "binary":
+            click.echo(f"{Fore.YELLOW}⚠️  '{rel}' é binário, pulando diff textual.{Style.RESET_ALL}\n")
+            continue
+            
+        if backup_status == "missing": backup_text = ""
+        if current_status == "missing": current_text = ""
+        
+        diff_lines = list(difflib.unified_diff(
+            backup_text.splitlines(), current_text.splitlines(),
+            fromfile=f"backup/{backup_id}/{rel}", tofile=f"atual/{rel}", lineterm=""
+        ))
+        
+        if diff_lines:
+            click.echo(f"{Fore.MAGENTA}{'='*80}{Style.RESET_ALL}")
+            click.echo(f"{Fore.MAGENTA}📄 ARQUIVO: {rel}{Style.RESET_ALL}")
+            click.echo(f"{Fore.MAGENTA}{'='*80}{Style.RESET_ALL}")
+            output = "\n".join(diff_lines)
+            try:
+                from doxoade.tools.display import _present_diff_output
+                _present_diff_output(output)
+            except Exception:
+                click.echo(output)
+            click.echo()
 
 # --- Resume helpers ---------------------------------------------------------
 
@@ -892,9 +955,10 @@ def _print_summary_section(title: str, items: list, color: str, limit: int = 20)
         click.echo(f"  ... +{len(items) - limit}")
 
 
-def _run_backup_summary(project_root: Path, backup_path: Path, backup_id: str):
+def _run_backup_summary(project_root: Path, backup_path: Path, backup_id: str, scope_dir: str = None):
     """
     Resumo seguro: mostra apenas o que mudou, sem exibir código.
+    Se scope_dir for fornecido, filtra apenas arquivos dentro desse diretório.
     """
     meta = _load_metadata_object(backup_path, backup_id)
     if meta is None:
@@ -904,7 +968,6 @@ def _run_backup_summary(project_root: Path, backup_path: Path, backup_id: str):
         )
 
     effective = _effective_manifest(backup_path, backup_id)
-
     if not effective:
         raise click.UsageError(
             f"Não foi possível montar o snapshot efetivo de '{backup_id}'. "
@@ -912,39 +975,44 @@ def _run_backup_summary(project_root: Path, backup_path: Path, backup_id: str):
         )
 
     base = project_root.resolve()
-
     modified = []
     deleted = []
     unreadable = []
 
+    # 🆕 FUNÇÃO DE FILTRAGEM DE ESCOPO
+    def is_in_scope(rel: str) -> bool:
+        if not scope_dir:
+            return True
+        if rel == scope_dir:
+            return True
+        return rel.startswith(scope_dir + "/")
+
     # 1) Compara arquivos existentes no snapshot efetivo
     for rel, old_hash in effective.items():
+        if not is_in_scope(rel):
+            continue
         path = base / rel
-
         if not path.exists() or not path.is_file():
             deleted.append(rel)
             continue
-
         current_hash = compute_file_hash(path)
-
         if current_hash is None:
             unreadable.append(rel)
             continue
-
         if current_hash != old_hash:
             modified.append(rel)
 
     # 2) Detecta arquivos novos no projeto atual
     new = []
     for rel, full_path in _iter_current_source_files(project_root):
+        if not is_in_scope(rel):
+            continue
         if rel in effective:
             continue
-
         current_hash = compute_file_hash(full_path)
         if current_hash is None:
             unreadable.append(rel)
             continue
-
         new.append(rel)
 
     modified = sorted(set(modified))
@@ -954,9 +1022,11 @@ def _run_backup_summary(project_root: Path, backup_path: Path, backup_id: str):
 
     ts = (meta.timestamp or "")[:19]
     btype = (meta.backup_type or "?").upper()
-
+    
+    # 🆕 RÓTULO DE ESCOPO NO CABEÇALHO
+    scope_label = f" (Escopo: {scope_dir})" if scope_dir else ""
     click.echo(
-        f"{Fore.CYAN}═══ Resumo desde {meta.backup_id} ({btype}) {ts} ═══{Style.RESET_ALL}"
+        f"{Fore.CYAN}═══ Resumo desde {meta.backup_id} ({btype}) {ts}{scope_label} ═══{Style.RESET_ALL}"
     )
     click.echo(f"Snapshot efetivo: {len(effective)} arquivos")
     click.echo(

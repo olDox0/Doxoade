@@ -2,18 +2,20 @@
 -- =============================================================================
 -- 03. MATRIZ DE CORES DE FUNDO DE ABAS POR PROJETO
 -- =============================================================================
+--  { accent = { , , },   active_bg = { , , },    hover_bg = { , , },   inactive_bg = { , , } },     -- x (#)
 local PROJECT_THEMES = {
-  { accent = { 56, 189, 248, 255 },  active_bg = { 14, 116, 144, 255 },  hover_bg = { 8, 85, 105, 255 },   inactive_bg = { 8, 48, 60, 255 } },    -- Ciano Oceano
-  { accent = { 74, 222, 128, 255 },  active_bg = { 21, 128, 61, 255 },   hover_bg = { 15, 95, 45, 255 },   inactive_bg = { 10, 55, 28, 255 } },   -- Esmeralda
-  { accent = { 244, 114, 182, 255 }, active_bg = { 190, 24, 93, 255 },   hover_bg = { 140, 18, 68, 255 },  inactive_bg = { 85, 12, 42, 255 } },   -- Rosa Vibrante
-  { accent = { 251, 191, 36, 255 },  active_bg = { 180, 83, 9, 255 },    hover_bg = { 130, 60, 7, 255 },   inactive_bg = { 80, 36, 5, 255 } },    -- Âmbar / Ouro
-  { accent = { 167, 139, 250, 255 }, active_bg = { 109, 40, 217, 255 },  hover_bg = { 80, 28, 160, 255 },  inactive_bg = { 50, 18, 100, 255 } },  -- Violeta Real
-  { accent = { 45, 212, 191, 255 },  active_bg = { 15, 118, 110, 255 },  hover_bg = { 11, 88, 82, 255 },   inactive_bg = { 8, 55, 50, 255 } },    -- Teal Escuro
-  { accent = { 251, 113, 133, 255 }, active_bg = { 185, 28, 28, 255 },   hover_bg = { 135, 20, 20, 255 },  inactive_bg = { 85, 12, 12, 255 } },   -- Carmesim
-  { accent = { 129, 140, 248, 255 }, active_bg = { 67, 56, 202, 255 },   hover_bg = { 50, 42, 150, 255 },  inactive_bg = { 32, 26, 95, 255 } },   -- Índigo
+  { accent = { 255, 0, 0 },   active_bg = { 175, 0, 0 },    hover_bg = { 170, 68, 0 },   inactive_bg = { 130, 0, 0 } },        -- fullred (#ff0000)
+  { accent = { 255, 103, 0 },   active_bg = { 224, 90, 0 },    hover_bg = { 170, 68, 0 },   inactive_bg = { 90, 36, 0 } },     -- Laranja Blaze (#ff6700)
+  { accent = { 232, 170, 0 },   active_bg = { 170, 125, 0 },   hover_bg = { 130, 95, 0 },   inactive_bg = { 70, 50, 0 } },     -- Urobilin (#e8aa00)
+  { accent = { 38, 188, 95 },   active_bg = { 25, 123, 63 },   hover_bg = { 18, 90, 46 },    inactive_bg = { 10, 51, 26 } },   -- Esmeralda (#26bc5f)
+  { accent = { 0, 108, 255 },   active_bg = { 0, 80, 190 },    hover_bg = { 0, 60, 140 },   inactive_bg = { 0, 35, 80 } },     -- Brandeis Blue (#006cff)
+  { accent = { 200, 21, 118 },  active_bg = { 150, 16, 88 },   hover_bg = { 110, 12, 65 },  inactive_bg = { 60, 6, 35 } },     -- Magenta Electric (#c81576)
+  { accent = { 77, 145, 232 },  active_bg = { 30, 57, 92 },    hover_bg = { 22, 42, 68 },   inactive_bg = { 14, 28, 45 } },    -- Pastel Blue (#4d91e8)
+  { accent = { 206, 105, 158 }, active_bg = { 82, 41, 63 },    hover_bg = { 60, 30, 46 },   inactive_bg = { 38, 19, 29 } },    -- Pastel Pink (#ce699e)
+  { accent = { 227, 141, 83 },  active_bg = { 90, 56, 33 },    hover_bg = { 68, 42, 25 },   inactive_bg = { 42, 26, 15 } },    -- Pastel Orange (#e38d53)
 }
 
-local DEFAULT_THEME = { accent = { 148, 163, 184, 255 }, active_bg = { 51, 65, 85, 255 }, hover_bg = { 38, 48, 64, 255 }, inactive_bg = { 30, 41, 59, 255 } }
+local DEFAULT_THEME = { accent = { 94, 92, 94 }, active_bg = { 47, 46, 48 }, hover_bg = { 35, 34, 36 }, inactive_bg = { 25, 23, 26 } }
 
 local function get_project_tab_theme(filename)
   if not filename then return DEFAULT_THEME end

@@ -63,6 +63,8 @@ command.add(nil, {
 keymap.add {
   -- Criação & Arquivos
   ["ctrl+n"]           = "doxoade:new-doc",
+  ["ctrl+alt+n"]       = "doxoade:create-file-interactive",
+  
   ["ctrl+o"]           = "core:open-file",
   ["ctrl+s"]           = "doc:save",
   ["ctrl+shift+s"]     = "doc:save-all",
@@ -86,6 +88,7 @@ keymap.add {
   ["ctrl+f"]           = "find-replace:find",
   ["f3"]               = "find-replace:repeat-find",
   ["shift+f3"]         = "find-replace:previous-find",
+  ["ctrl+alt+f"]       = "doxoade:find-selection-in-opposite-split",
   ["ctrl+h"]           = "find-replace:replace",
   ["ctrl+g"]           = "doc:go-to-line",
 
@@ -108,4 +111,7 @@ keymap.add {
   -- Projetos e Pastas na Treeview
   ["ctrl+alt+o"]       = "treeview:add-project-folder",
   ["ctrl+alt+r"]       = "treeview:remove-project-folder",
+  
+  -- diagnostico
+  ["ctrl+alt+k"] = "doxoade:diagnose-live",
 }

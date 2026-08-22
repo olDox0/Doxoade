@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# doxoade/commands/intelligence_utils.py
+# doxoade/commands/intelligence_utils/intelligence_utils.py
 """
 Support_Utils para Intelligence (PASC 1.2 / MPoT 17).
 Foco: Extração de Metadados de Documentação e Análise de Fluxo de IO.
@@ -37,6 +37,11 @@ def minify_code(code: str, filename: str, no_comments: bool, no_spaces: bool) ->
     if no_comments:
         if filename.endswith('.py'):
             body = [re.sub(r'#.*$', '', line) for line in body]
+        elif filename.endswith('.lua'):
+            temp_body = '\n'.join(body)
+            temp_body = re.sub(r'--\[\[.*?\]\]', '', temp_body, flags=re.DOTALL)
+            temp_body = re.sub(r'--.*$', '', temp_body, flags=re.MULTILINE)
+            body = temp_body.splitlines()
         elif filename.endswith(('.c', '.cpp', '.h', '.hpp', '.js', '.ts', '.jsx', '.tsx')):
             body = [re.sub(r'//.*$', '', line) for line in body]
             temp_body = '\n'.join(body)

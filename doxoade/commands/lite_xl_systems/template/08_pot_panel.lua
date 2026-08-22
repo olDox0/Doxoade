@@ -1,10 +1,22 @@
 -- doxoade/commands/lite_xl_systems/template/08_pot_panel.lua
 -- =============================================================================
--- 08. PAINEL DIREITO PARA CONFIGS, LOGS E DUMPPOT (.doxoade/dumppot.txt)
+-- 08. PAINEL DIREITO, DUMPPOT INTACTO, GUIA INDEPENDENTE & SPLIT SEARCH
 -- =============================================================================
 local core = require "core"
 local DocView = require "core.docview"
 local command = require "core.command"
+
+local doxoade_cfg_dir = USERDIR .. PATHSEP .. ".doxoade"
+pcall(function() system.mkdir(doxoade_cfg_dir) end)
+
+local dumppot_file = doxoade_cfg_dir .. PATHSEP .. "dumppot.txt"
+local cheat_sheet_file = doxoade_cfg_dir .. PATHSEP .. "cheat_sheet.txt"
+
+-- Garante que o dumppot exista sem sobrescrever seu conteúdo
+pcall(function()
+  local f = io.open(dumppot_file, "a")
+  if f then f:close() end
+end)
 
 local function get_or_create_right_panel()
   local function get_doc_leaves(n, list)
@@ -49,22 +61,81 @@ local function open_in_right_panel(file_path, log_msg)
   return view
 end
 
-local doxoade_cfg_dir = USERDIR .. PATHSEP .. ".doxoade"
-pcall(function() system.mkdir(doxoade_cfg_dir) end)
-local dumppot_file = doxoade_cfg_dir .. PATHSEP .. "dumppot.txt"
-pcall(function()
-  local f = io.open(dumppot_file, "a")
-  if f then f:close() end
-end)
+local CHEAT_SHEET_CONTENT = [[
+================================================================================
+          📖 GUIA DE ATALHOS RÁPIDOS - LITE XL SOVEREIGN
+================================================================================
+
+[ 🎨 VISUAL, CORES E ABAS ]
+  Abas com Fundo Sólido   : 16 Paletas automáticas por Projeto Raiz
+  #00FF00 / {R,G,B} texto : Fundo do texto preenchido com a cor exata referida
+  Linha Amarela (Gutter)  : Indicador de linhas modificadas não salvas
+
+[ 🔍 BUSCA E NAVEGAÇÃO NOTEPAD++ ]
+  Ctrl + F          : Abre busca (Highlight em Azul Anil global)
+  Ctrl + Alt + F    : Busca seleção na aba oposta (Esquerda ⇄ Direita)
+  Enter (no painel) : Pula para a PRÓXIMA ocorrência
+  Shift + Enter     : Volta para a ocorrência ANTERIOR
+  F3 / Shift + F3   : Navega entre ocorrências mesmo sem a busca aberta
+  Ctrl + H          : Localizar e Substituir texto
+  Ctrl + G          : Ir para a linha (Go to line)
+
+[ 📋 COPIAR CAMINHOS E NOMES (Botão Direito no Arquivo/Árvore) ]
+  Copy Project Relative Path : Ex: doxoade/commands/cmd_lite_xl.py
+  Copy Full Absolute Path    : Ex: C:\Users\...\cmd_lite_xl.py
+  Copy Filename              : Ex: cmd_lite_xl.py
+
+[ 📂 GESTÃO DE PROJETOS NA ÁRVORE ]
+  Botão Direito na Árvore   : Menu contextual (Add / Remove Project Folder)
+  Ctrl + Alt + O    : Adicionar qualquer pasta/projeto à árvore lateral
+  Ctrl + Alt + R    : Remover projeto da árvore lateral (Menu com busca Fuzzy)
+  Ctrl + Alt + U    : Fixar / Desafixar pasta do Lite XL na Árvore
+  Ctrl + B          : Ocultar / Exibir Árvore Lateral (Sidebar)
+  Ctrl + P          : Fuzzy Finder (Busca arquivos em todos os projetos)
+
+[ ✂️ DIVISÃO DE TELAS E ABAS ]
+  Ctrl + Alt + D    : Move o arquivo atual entre os painéis (Esquerda ⇄ Direita)
+  Ctrl + Alt + \    : Abre Workspace Hub (Dumppot, Init, Log) na direita
+  Ctrl + Alt + P    : Abre dumppot.txt no painel da direita
+  Alt + D           : Cria uma nova divisão vazia à direita
+  Alt + Shift + D   : Divide a tela na horizontal (baixo)
+  Ctrl + W / Alt + W: Fecha a aba / divisão atual
+  Ctrl + Tab        : Próxima aba
+  Ctrl + Shift + Tab: Aba anterior
+
+[ ⚡ EDIÇÃO RÁPIDA ]
+  Ctrl + N          : Novo documento em branco
+  Ctrl + S          : Salvar arquivo
+  Ctrl + Shift + S  : Salvar todos os arquivos
+  Ctrl + D          : Duplicar linha atual
+  Ctrl + L          : Deletar linha inteira
+  Ctrl + Q          : Comentar/Descomentar linha
+
+[ ⚙️ CONFIGURAÇÃO & LOGS ]
+  Ctrl + ,          : Abrir init.lua no painel direito
+  Ctrl + Shift + L  : Abrir aba de Logs no painel direito
+  F1 / Ctrl+Shift+/ : Abre este Guia em cheat_sheet.txt
+================================================================================
+]]
 
 command.add(nil, {
+  -- Guia de atalhos em arquivo próprio (protege o dumppot)
+  ["doxoade:show-shortcuts-cheat-sheet"] = function()
+    local doc = core.open_doc(cheat_sheet_file)
+    if #doc.lines <= 1 then
+      doc:insert(1, 1, CHEAT_SHEET_CONTENT)
+      doc:save()
+    end
+    open_in_right_panel(cheat_sheet_file, "Guia de atalhos aberto na direita.")
+  end,
+
+  -- Dumppot permanece livre para rascunhos do desenvolvedor
   ["doxoade:open-pot-in-right-panel"] = function()
     open_in_right_panel(dumppot_file, "dumppot.txt aberto na direita.")
   end,
 
   ["doxoade:open-init-lua"] = function()
-    local config_file = USERDIR .. PATHSEP .. "init.lua"
-    open_in_right_panel(config_file, "init.lua aberto na direita.")
+    open_in_right_panel(USERDIR .. PATHSEP .. "init.lua", "init.lua aberto na direita.")
   end,
 
   ["doxoade:open-log"] = function()
@@ -93,5 +164,77 @@ command.add(nil, {
     open_in_right_panel(USERDIR .. PATHSEP .. "init.lua")
     command.perform("doxoade:open-log")
     open_in_right_panel(dumppot_file, "Workspace Hub ativado na direita.")
+  end
+})
+
+-- Comandos no DocView
+command.add("core.docview", {
+  ["doxoade:find-selection-in-opposite-split"] = function()
+    local active_view = core.active_view
+    if not active_view or not active_view.doc then return end
+
+    local query = nil
+    if active_view.doc:has_selection() then
+      local l1, c1, l2, c2 = active_view.doc:get_selection(true)
+      query = active_view.doc:get_text(l1, c1, l2, c2)
+    end
+
+    if not query or #query == 0 then
+      core.error("Selecione um texto para buscar no painel oposto.")
+      return
+    end
+
+    local current_node = core.root_view:get_active_node()
+    local target_leaf = nil
+
+    local function get_doc_leaves(n, list)
+      list = list or {}
+      if not n then return list end
+      if n.type == "leaf" and not n.locked then
+        table.insert(list, n)
+      elseif n.type ~= "leaf" then
+        get_doc_leaves(n.a, list)
+        get_doc_leaves(n.b, list)
+      end
+      return list
+    end
+
+    for _, leaf in ipairs(get_doc_leaves(core.root_view.root_node)) do
+      if leaf ~= current_node then
+        target_leaf = leaf
+        break
+      end
+    end
+
+    if target_leaf and target_leaf.active_view and target_leaf.active_view.doc then
+      core.set_active_view(target_leaf.active_view)
+      local t_doc = target_leaf.active_view.doc
+      local line, col = t_doc:get_selection()
+      local start_line = line or 1
+      local found_line, found_col = nil, nil
+
+      for idx = start_line, #t_doc.lines do
+        local s, e = t_doc.lines[idx]:find(query, (idx == start_line and (col or 1) + 1 or 1), true)
+        if s then found_line, found_col = idx, s break end
+      end
+
+      if not found_line then
+        for idx = 1, start_line do
+          local s, e = t_doc.lines[idx]:find(query, 1, true)
+          if s then found_line, found_col = idx, s break end
+        end
+      end
+
+      if found_line then
+        t_doc:set_selection(found_line, found_col, found_line, found_col + #query)
+        target_leaf.active_view:scroll_to_line(found_line, true)
+        core.log("Encontrado na linha %d: '%s'", found_line, query)
+      else
+        core.error("Termo '%s' não encontrado no painel oposto.", query)
+      end
+      core.redraw = true
+    else
+      core.error("Abra um documento no painel oposto para pesquisar.")
+    end
   end
 })

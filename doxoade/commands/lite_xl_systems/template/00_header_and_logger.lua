@@ -96,3 +96,36 @@ core.add_thread(function()
     coroutine.yield(0.3)
   end
 end)
+
+-- -----------------------------------------------------------------------------
+-- TEMA SOBERANO DOXOADE (PIANO BLACK & ESMERALDA)
+-- -----------------------------------------------------------------------------
+pcall(function()
+  -- Fundo e painéis (Piano Black 3, 2, 1)
+--  style.background       = { 15, 13, 15 }       -- #0f0d0f (Piano Black 3)
+  style.background       = { 1, 1, 1 }       -- #000000 (FullBlack)
+  style.background2      = { 25, 23, 26 }       -- #19171a (Piano Black 2 - Treeview/Tabs)
+  style.background3      = { 47, 46, 48 }       -- #2f2e30 (Piano Black 1 - Hover)
+
+  -- Tipografia e bordas
+  style.text             = { 210, 220, 230 }    -- #d2dce6 (Nordic Breeze)
+  style.dim              = { 94, 92, 94 }       -- #5e5c5e (Piano Black 0)
+  style.divider          = { 76, 69, 82 }       -- #4c4552 (Mortar)
+
+  -- Destaques e cursor
+  style.caret            = { 38, 188, 95 }      -- #26bc5f (Esmeralda)
+  style.accent           = { 38, 188, 95 }      -- #26bc5f (Esmeralda)
+  style.line_number2     = { 38, 188, 95 }      -- Número da linha ativa
+  style.line_highlight   = { 25, 23, 26 }       -- Fundo da linha ativa
+  style.selection        = { 0, 108, 255, 110 } -- #006cff (Brandeis Blue)
+
+  -- Cores de Sintaxe (Código)
+  style.syntax["keyword"]   = { 255, 103, 0 }   -- #ff6700 (Laranja Blaze)
+  style.syntax["keyword2"]  = { 200, 21, 118 }  -- #c81576 (Magenta Electric)
+  style.syntax["function"]  = { 0, 108, 255 }   -- #006cff (Brandeis Blue)
+  style.syntax["string"]    = { 38, 188, 95 }   -- #26bc5f (Esmeralda)
+  style.syntax["comment"]   = { 94, 92, 94 }    -- #5e5c5e (Piano Black 0)
+  style.syntax["number"]    = { 232, 170, 0 }   -- #e8aa00 (Urobilin Yellow)
+  style.syntax["operator"]  = { 210, 220, 230 } -- #d2dce6 (Nordic Breeze)
+  style.syntax["symbol"]    = { 206, 105, 158 } -- #ce699e (Pastel Pink)
+end)

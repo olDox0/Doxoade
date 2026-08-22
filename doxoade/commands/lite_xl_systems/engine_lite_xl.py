@@ -74,16 +74,12 @@ local command = require "core.command"
 local keymap = require "core.keymap"
 local Node = require "core.node"
 local DocView = require "core.docview"
-
 local rencache = nil
 pcall(function() rencache = require "core.rencache" end)
 local native_renderer = renderer or (pcall(require, "renderer") and require("renderer") or nil)
-
 config.load_workspace = true
 config.max_project_files = 50000
-
 local session_log_file = USERDIR .. PATHSEP .. "session_log.txt"
-
 local function safe_format(...)
   local args = { ... }
   if #args == 0 then return "" end
@@ -94,7 +90,6 @@ local function safe_format(...)
   for _, v in ipairs(args) do table.insert(t, tostring(v)) end
   return table.concat(t, " ")
 end
-
 local function append_session_log(level, msg)
   pcall(function()
     local f = io.open(session_log_file, "a")
@@ -106,7 +101,6 @@ local function append_session_log(level, msg)
     end
   end)
 end
-
 pcall(function()
   local f = io.open(session_log_file, "w")
   if f then
@@ -115,35 +109,32 @@ pcall(function()
     f:close()
   end
 end)
-
 local original_print = print
 function print(...)
   append_session_log("PRINT", safe_format(...))
   if original_print then original_print(...) end
 end
-
 local original_core_log = core.log
 function core.log(...)
   local msg = safe_format(...)
   append_session_log("INFO", msg)
   return original_core_log(...)
 end
-
 local original_core_error = core.error
 function core.error(...)
   local msg = safe_format(...)
   append_session_log("ERROR", msg)
   return original_core_error(...)
 end
-
 local original_core_log_quiet = core.log_quiet
 function core.log_quiet(...)
   local msg = safe_format(...)
   append_session_log("QUIET", msg)
   if original_core_log_quiet then return original_core_log_quiet(...) end
 end
-
+-- Substitua o bloco core.add_thread no final do 00_header_and_logger.lua por:
 local last_synced_log_idx = 0
+local synced_messages = {}  -- 🆕 Anti-duplicação
 core.add_thread(function()
   while true do
     if core.log_items and #core.log_items > last_synced_log_idx then
@@ -152,7 +143,13 @@ core.add_thread(function()
         if item then
           local text = item.text or tostring(item)
           local info = item.info or "LOG"
-          append_session_log(info:upper(), text)
+          -- 🆕 Anti-duplicação: só loga se a mensagem não foi registrada nos últimos 2 segundos
+          local key = info .. ":" .. text
+          local now_ts = os.clock()
+          if not synced_messages[key] or (now_ts - synced_messages[key]) > 2.0 then
+            synced_messages[key] = now_ts
+            append_session_log(info:upper(), text)
+          end
         end
       end
       last_synced_log_idx = #core.log_items
@@ -685,7 +682,125 @@ keymap.add {
   ["ctrl+alt+o"]       = "treeview:add-project-folder",
   ["ctrl+alt+r"]       = "treeview:remove-project-folder",
 }
-'''
+''',
+    "10_forensic_engine.lua": r'''-- =============================================================================
+-- DOXOADE FORENSIC ENGINE (Horus/Anúbis Protocol)
+-- Coleta telemetria de erros, performance e ambiente para o Doxoade CLI.
+-- =============================================================================
+local core = require "core"
+local config = require "core.config"
+
+local diag_dir = USERDIR .. PATHSEP .. ".doxoade" .. PATHSEP .. "diagnostics"
+pcall(function() system.mkdir(diag_dir) end)
+local report_path = diag_dir .. PATHSEP .. "forensic_report.txt"
+
+local forensic_data = {
+    errors = {},
+    performance = {},
+    env_plugins = {},
+    start_time = os.time()
+}
+
+-- 🐺 1. QUEM E ONDE (Error Interception)
+local original_core_error = core.error
+function core.error(...)
+    local msg = table.concat({...}, " ")
+    local traceback = debug.traceback("", 2)
+    
+    local culprit = "core"
+    local culprit_file = "unknown"
+    local culprit_line = 0
+    
+    for line in traceback:gmatch("[^\r\n]+") do
+        if not line:match("core[/\\]init%.lua") and 
+           not line:match("forensic_engine%.lua") and
+           not line:match("%[C%]:") and
+           not line:match("%[string") then
+            local file, ln = line:match("(.-):(%d+):")
+            if file and not file:match("core[/\\]") then
+                culprit_file = file
+                culprit_line = tonumber(ln) or 0
+                culprit = file:match("plugins[/\\](.-)[/\\]") or 
+                          file:match("plugins[/\\](.-)%.lua") or "user_config"
+                break
+            end
+        end
+    end
+
+    table.insert(forensic_data.errors, {
+        msg = msg,
+        culprit = culprit,
+        file = culprit_file,
+        line = culprit_line,
+        trace = traceback,
+        time = os.date("%H:%M:%S")
+    })
+
+    return original_core_error(...)
+end
+
+-- 🏹 2. QUANTO (Filesystem & Performance Bottleneck)
+local original_add_dir = core.add_project_directory
+function core.add_project_directory(path, ...)
+    local start = os.clock()
+    local ok, res = pcall(original_add_dir, path, ...)
+    local elapsed = os.clock() - start
+    
+    table.insert(forensic_data.performance, {
+        action = "index_project",
+        target = path,
+        duration = string.format("%.3f", elapsed),
+        status = elapsed > 1.5 and "BOTTLENECK" or "OK",
+        time = os.date("%H:%M:%S")
+    })
+    
+    if ok then return res else error(res) end
+end
+
+-- 🦅 3. EXPORTAÇÃO DO RELATÓRIO (Thread de Background)
+core.add_thread(function()
+    coroutine.yield(3.0) 
+    
+    if core.plugins then
+        for name, _ in pairs(core.plugins) do
+            table.insert(forensic_data.env_plugins, name)
+        end
+    end
+
+    local f = io.open(report_path, "w")
+    if f then
+        f:write("=== DOXOADE FORENSIC REPORT ===\n")
+        f:write(string.format("Generated: %s\n\n", os.date("%Y-%m-%d %H:%M:%S")))
+        
+        f:write("--- ERRORS ---\n")
+        if #forensic_data.errors == 0 then
+            f:write("No errors captured.\n")
+        else
+            for _, err in ipairs(forensic_data.errors) do
+                f:write(string.format("[%s] CULPRIT: %s | FILE: %s:%d\n", err.time, err.culprit, err.file, err.line))
+                f:write(string.format("MSG: %s\n", err.msg))
+                f:write(string.format("TRACE: %s\n\n", err.trace))
+            end
+        end
+        
+        f:write("--- PERFORMANCE ---\n")
+        if #forensic_data.performance == 0 then
+            f:write("No performance events.\n")
+        else
+            for _, perf in ipairs(forensic_data.performance) do
+                f:write(string.format("[%s] ACTION: %s | TARGET: %s | DURATION: %ss | STATUS: %s\n", 
+                    perf.time, perf.action, perf.target, perf.duration, perf.status))
+            end
+        end
+        
+        f:write("--- ENVIRONMENT ---\n")
+        f:write("Platform: " .. (PLATFORM or "Unknown") .. "\n")
+        f:write("Plugins: " .. table.concat(forensic_data.env_plugins, ", ") .. "\n")
+        
+        f:close()
+    end
+end)
+''',
 }
 
 
@@ -768,11 +883,11 @@ class LiteXLEngine:
             if re.search(r'_G\.\w+\s*=', content):
                 errs.append("Atribuição em _G detectada (incompatível com strict.lua). Use variáveis locais.")
 
-            # 3. Checagem de Requires Inválidos
+            # 3. Checagem de Requires Inválidos de Módulos C nativos
             reqs = re.findall(r'require\s*\(?[\'"]([^\'"]+)[\'"]\)?', content)
             for r in reqs:
-                if r == "core.renderer":
-                    errs.append("require('core.renderer') é inválido. Use 'renderer'.")
+                if r in ("core.renderer", "core.rencache", "renderer", "rencache"):
+                    errs.append(f"require('{r}') é inválido. No Lite XL use o C global direto (rencache/renderer).")
 
             # 4. Checagem de métodos obsoletos
             if ":traverse(" in content:
@@ -887,6 +1002,7 @@ class LiteXLEngine:
 
     @classmethod
     def resolve_target_path(cls, raw_path: str) -> Tuple[Optional[str], bool, bool]:
+        """Resolve caminhos e auto-cria arquivos/pastas se não existirem."""
         if not raw_path or raw_path.strip() == ".":
             cwd = Path.cwd().resolve()
             return str(cwd), True, True
@@ -901,9 +1017,19 @@ class LiteXLEngine:
         except Exception:
             abs_p = p.absolute()
 
-        exists = abs_p.exists()
-        is_dir = abs_p.is_dir() if exists else False
-        return str(abs_p), exists, is_dir
+        # Se não existe no disco, cria de forma inteligente
+        if not abs_p.exists():
+            # Se termina com barra ou não tem extensão, cria como diretório
+            if clean.endswith(("\\", "/")) or not abs_p.suffix:
+                abs_p.mkdir(parents=True, exist_ok=True)
+                return str(abs_p), True, True
+            else:
+                # É um arquivo novo: cria as pastas pai e gera o arquivo vazio
+                abs_p.parent.mkdir(parents=True, exist_ok=True)
+                abs_p.touch(exist_ok=True)
+                return str(abs_p), True, False
+
+        return str(abs_p), True, abs_p.is_dir()
 
     @classmethod
     def send_to_running_instance(cls, target_path: str) -> Tuple[bool, str]:
