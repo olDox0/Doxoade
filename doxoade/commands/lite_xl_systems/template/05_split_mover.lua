@@ -2,6 +2,9 @@
 -- =============================================================================
 -- 05. SPLIT MOVER BIDIRECIONAL (Ctrl + Alt + D) - ESQUERDA ⇄ DIREITA
 -- =============================================================================
+local core = require "core"
+local command = require "core.command"
+
 command.add("core.docview", {
   ["root:move-tab-to-opposite-panel"] = function()
     local node = core.root_view:get_active_node()

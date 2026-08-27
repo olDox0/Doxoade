@@ -57,7 +57,27 @@ def check(ctx, path: str, **kwargs):
         from doxoade.tools.db_utils import _update_open_incidents
         _update_open_incidents(state.findings, state.target_path)
         for f in state.findings:
-            logger.add_finding(f['severity'], f['message'], f.get('category'), f.get('file'), f.get('line'))
+            logger.add_finding(
+                f['severity'],
+                f['message'],
+                f.get('category'),
+                f.get('file'),
+                f.get('line'),
+            )
+
+        # 🌉 [HERMES/MA'AT] Exporta contrato atômico para o Lite XL
+        try:
+            from .check_systems.check_lua_integration import signal_litexl_audit
+
+            signal_litexl_audit(
+                target_file=state.target_path,
+                findings=state.findings,
+                project_root=io.project_root,
+                summary=state.summary,
+            )
+        except Exception:
+            pass
+
         _render_output(state, kwargs)
         if kwargs.get('ai') and _has_blocking_findings(state):
             from ..API.orn_bridge import dispatch_check_errors_to_orn

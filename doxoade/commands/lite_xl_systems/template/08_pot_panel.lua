@@ -1,6 +1,6 @@
 -- doxoade/commands/lite_xl_systems/template/08_pot_panel.lua
 -- =============================================================================
--- 08. PAINEL DIREITO, DUMPPOT INTACTO, GUIA INDEPENDENTE & SPLIT SEARCH
+-- 08. HUB DUMPPOT & SINTAXE MULTILINGUAGEM (```lua, ```python, ```c, ETC.)
 -- =============================================================================
 local core = require "core"
 local DocView = require "core.docview"
@@ -8,14 +8,61 @@ local command = require "core.command"
 
 local doxoade_cfg_dir = USERDIR .. PATHSEP .. ".doxoade"
 pcall(function() system.mkdir(doxoade_cfg_dir) end)
-
 local dumppot_file = doxoade_cfg_dir .. PATHSEP .. "dumppot.txt"
 local cheat_sheet_file = doxoade_cfg_dir .. PATHSEP .. "cheat_sheet.txt"
 
--- Garante que o dumppot exista sem sobrescrever seu conteúdo
 pcall(function()
   local f = io.open(dumppot_file, "a")
   if f then f:close() end
+end)
+
+-- 🎨 SINTAXE MULTILINGUAGEM PARA O DUMPPOT (Code Blocks ```lang ... ```)
+pcall(function()
+  local syntax = require "core.syntax"
+  syntax.add {
+    name = "Dumppot Markdown",
+    files = { "dumppot%.txt$", "cheat_sheet%.txt$", "%.doxpot$", "%.pot$" },
+    comment = "--",
+    patterns = {
+      -- 1. Sub-sintaxes para blocos cercados por ```
+      { pattern = { "```%s*lua", "```" },        type = "string",   syntax = ".lua" },
+      { pattern = { "```%s*python", "```" },     type = "string",   syntax = ".py" },
+      { pattern = { "```%s*py", "```" },         type = "string",   syntax = ".py" },
+      { pattern = { "```%s*c", "```" },          type = "string",   syntax = ".c" },
+      { pattern = { "```%s*cpp", "```" },        type = "string",   syntax = ".cpp" },
+      { pattern = { "```%s*json", "```" },       type = "string",   syntax = ".json" },
+      { pattern = { "```%s*sh", "```" },         type = "string",   syntax = ".sh" },
+      { pattern = { "```%s*bash", "```" },       type = "string",   syntax = ".sh" },
+      { pattern = { "```%s*zsh", "```" },        type = "string",   syntax = ".sh" },
+      { pattern = { "```%s*diff", "```" },       type = "string",   syntax = ".diff" },
+      { pattern = { "```%s*patch", "```" },      type = "string",   syntax = ".diff" },
+      { pattern = { "```%s*html", "```" },       type = "string",   syntax = ".html" },
+      { pattern = { "```%s*css", "```" },        type = "string",   syntax = ".css" },
+      { pattern = { "```%s*js", "```" },         type = "string",   syntax = ".js" },
+      { pattern = { "```%s*javascript", "```" }, type = "string",   syntax = ".js" },
+      { pattern = { "```%s*ts", "```" },         type = "string",   syntax = ".ts" },
+      { pattern = { "```%s*typescript", "```" }, type = "string",   syntax = ".ts" },
+      { pattern = { "```%s*yaml", "```" },       type = "string",   syntax = ".yaml" },
+      { pattern = { "```%s*yml", "```" },        type = "string",   syntax = ".yaml" },
+      { pattern = { "```%s*xml", "```" },        type = "string",   syntax = ".xml" },
+      { pattern = { "```%s*sql", "```" },        type = "string",   syntax = ".sql" },
+      { pattern = { "```%s*rust", "```" },       type = "string",   syntax = ".rs" },
+      { pattern = { "```%s*rs", "```" },         type = "string",   syntax = ".rs" },
+      { pattern = { "```%s*go", "```" },         type = "string",   syntax = ".go" },
+      { pattern = { "```", "```" },              type = "string" }, -- Bloco genérico
+
+      -- 2. Elementos Markdown
+      { pattern = "^#+%s.*",                     type = "keyword" },  -- Títulos # H1, ## H2
+      { pattern = "`.-`",                        type = "keyword2" }, -- `código inline`
+      { pattern = "%*%*.-%*%*",                  type = "keyword" },  -- **negrito**
+      { pattern = "%*.-%*",                      type = "operator" }, -- *itálico*
+      { pattern = "%[.-%]%b()",                  type = "symbol" },   -- [links](url)
+      { pattern = "https?://%S+",                type = "operator" }, -- URLs diretas
+      { pattern = "^===+.*===+",                 type = "keyword" },  -- Banners Doxoade
+      { pattern = "^%-%-%-+.*",                  type = "comment" },  -- Linhas divisoras ---
+    },
+    symbols = {}
+  }
 end)
 
 local function get_or_create_right_panel()
@@ -30,7 +77,6 @@ local function get_or_create_right_panel()
     end
     return list
   end
-
   local leaves = get_doc_leaves(core.root_view.root_node)
   if #leaves >= 2 then
     return leaves[#leaves]
@@ -43,7 +89,6 @@ end
 local function open_in_right_panel(file_path, log_msg)
   local right_node = get_or_create_right_panel()
   local doc = core.open_doc(file_path)
-
   for _, v in ipairs(right_node.views) do
     if v.doc == doc then
       right_node.active_view = v
@@ -52,7 +97,6 @@ local function open_in_right_panel(file_path, log_msg)
       return v
     end
   end
-
   local view = DocView(doc)
   right_node:add_view(view)
   core.set_active_view(view)
@@ -131,9 +175,11 @@ command.add(nil, {
 
   -- Dumppot permanece livre para rascunhos do desenvolvedor
   ["doxoade:open-pot-in-right-panel"] = function()
-    open_in_right_panel(dumppot_file, "dumppot.txt aberto na direita.")
+    open_in_right_panel(dumppot_file, "Dumppot fixado na direita.")
   end,
-
+  ["doxoade:open-workspace-hub"] = function()
+    open_in_right_panel(dumppot_file, "Workspace Hub ativado na direita.")
+  end,
   ["doxoade:open-init-lua"] = function()
     open_in_right_panel(USERDIR .. PATHSEP .. "init.lua", "init.lua aberto na direita.")
   end,
@@ -230,7 +276,8 @@ command.add("core.docview", {
         target_leaf.active_view:scroll_to_line(found_line, true)
         core.log("Encontrado na linha %d: '%s'", found_line, query)
       else
-        core.error("Termo '%s' não encontrado no painel oposto.", query)
+        core.log("Termo '%s' não encontrado no painel oposto.", query)
+        -- core.error("Termo '%s' não encontrado no painel oposto.", query)
       end
       core.redraw = true
     else
