@@ -25,7 +25,8 @@ este é o novo protocolo simplificado e sucinto de desenvolveimento do doxoade. 
   4.2. Caso o dev não estejá com a capacidade de desenvolveimento com segurança no momento, não desenvolva no periodo, ou só planeje.
     4.2.1. Esta regra é por questões de segurança contra regressões.
 5. Recomendações:
-  5.1. É recomendado colocar notas tecnicas sobre problemas, é importante, é necessario colocar informações sobre o problema, pode colocar no codigo em docstring o erro se necessario.
+  5.1. É recomendado colocar notas tecnicas sobre problemas, é importante, é necessario colocar informações sobre o problema. pode-se colocar no codigo em docstring o erro se necessario.
+  5.2. Recomenda-se fortemente que lide com o tratamento de exceptions para que falhas sejam bem informadas e previstas para que o deve não fique a ver navios com relação a erros.
     
 ## Exemplos reais:
 

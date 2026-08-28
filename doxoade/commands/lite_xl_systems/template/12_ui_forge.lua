@@ -6,6 +6,8 @@
 local core = require "core"
 local command = require "core.command"
 local keymap = require "core.keymap"
+local style = require "core.style"
+local View = require "core.view"
 
 local UIForge = {
   commands = {},
@@ -170,6 +172,113 @@ UIForge.register_command("doxoade:tab-open-in-explorer", function()
 
   core.log("Explorer aberto em: " .. dir_path)
 end)
+
+-- =============================================================================
+-- 🧱 SOVEREIGN DOCKED VIEW — CLASSE BASE REUTILIZÁVEL PARA INTERFACES
+-- =============================================================================
+
+local SovereignDockedView = View:extend()
+
+function SovereignDockedView:new(config)
+  SovereignDockedView.super.new(self)
+  config = config or {}
+
+  self.title = config.title or "Painel Soberano"
+  self.height = config.height or 85
+  self.visible = false
+  self.inputs = config.inputs or {} -- Lista de { label = "...", text = "...", id = "..." }
+  self.buttons = config.buttons or {} -- Lista de { label = "...", action = fn, key = "..." }
+  self.active_input_idx = 1
+  self.hovered_btn_idx = nil
+  self.previous_active_view = nil
+end
+
+function SovereignDockedView:get_target_height()
+  return self.visible and self.height or 0
+end
+
+function SovereignDockedView:show()
+  if not self.visible then
+    self.visible = true
+    self.previous_active_view = core.active_view
+    core.set_active_view(self)
+    core.redraw = true
+  end
+end
+
+function SovereignDockedView:hide()
+  if self.visible then
+    self.visible = false
+    if self.previous_active_view then
+      core.set_active_view(self.previous_active_view)
+    end
+    core.redraw = true
+  end
+end
+
+function SovereignDockedView:toggle()
+  if self.visible then self:hide() else self:show() end
+end
+
+-- Captura de Digitação Direta no Campo Ativo
+function SovereignDockedView:on_text_input(text)
+  if not self.visible or #self.inputs == 0 then return end
+  local input = self.inputs[self.active_input_idx]
+  if input then
+    input.text = (input.text or "") .. text
+    core.redraw = true
+  end
+end
+
+-- Renderização Padrão de Alta Performance
+function SovereignDockedView:draw()
+  if not self.visible then return end
+  self:draw_background(style.background2)
+
+  local x, y = self.position.x, self.position.y
+  local w, h = self.size.x, self.size.y
+  local font = style.font
+
+  -- 1. Borda Superior Esmeralda
+  renderer.draw_rect(x, y, w, 1, style.divider or { 76, 69, 82, 255 })
+  renderer.draw_rect(x, y, w, 2, style.accent or { 38, 188, 95, 255 })
+
+  -- 2. Título do Painel
+  renderer.draw_text(font, self.title, x + 14, y + 8, style.accent)
+
+  -- 3. Renderização Dinâmica dos Inputs
+  local input_y = y + 32
+  for i, input in ipairs(self.inputs) do
+    local is_active = (i == self.active_input_idx)
+    local border_col = is_active and style.accent or style.divider
+    local field_x = x + 120 + ((i - 1) * 240)
+
+    renderer.draw_text(font, input.label .. ":", field_x - 100, input_y + 3, style.text)
+    renderer.draw_rect(field_x, input_y, 220, 24, style.background3)
+    renderer.draw_rect(field_x, input_y, 220, 1, border_col)
+    renderer.draw_rect(field_x, input_y + 23, 220, 1, border_col)
+
+    local txt = (input.text or "") .. (is_active and "_" or "")
+    renderer.draw_text(font, txt, field_x + 6, input_y + 4, style.text)
+  end
+
+  -- 4. Renderização Dinâmica dos Botões
+  local btn_x = x + w - 16
+  for i = #self.buttons, 1, -1 do
+    local btn = self.buttons[i]
+    local btn_w = font:get_width(btn.label) + 20
+    btn_x = btn_x - btn_w - 8
+    btn._x, btn._w = btn_x, btn_w
+    btn._y, btn._h = input_y, 24
+
+    local is_hov = (self.hovered_btn_idx == i)
+    local bg = is_hov and (style.accent or { 38, 188, 95, 255 }) or style.background3
+    local fg = is_hov and { 0, 0, 0, 255 } or style.text
+
+    renderer.draw_rect(btn_x, input_y, btn_w, 24, bg)
+    renderer.draw_text(font, btn.label, btn_x + 10, input_y + 4, fg)
+  end
+end
 
 -- =====================================================
 -- KEYMAPS

@@ -18,6 +18,10 @@ Soluções complexas não devem quebrar o fluxo. Se falhar, deve ser um *safe-fa
 
 ## 4. Comunicação (Comm)
 Instruções de código devem ser claras, breves e com apontamentos exatos do que modificar e onde.
+* **4.1. informar o contexto
+* **4.2. informar o erro
+* **4.3. informar e triangular o erro, quem, onde, quando, porque, o que.
+* **4.4. discutir solução com plano A, B e C.
 
 ## 5. Parceiros e Contribuidores (P&C)
 Tolere falhas humanas (cansaço, falta de tempo). Use a brevidade para instruções gerais e detalhamento apenas para zonas de risco.

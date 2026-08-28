@@ -81,1137 +81,16 @@ UNIVERSAL_RENDERER_POLYFILL = (
     'local native_renderer = rawget(_G, "renderer") or (pcall(require, "renderer") and require("renderer") or nil)'
 )
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACERVO COMPLETO DE TEMPLATES PADRÃO (13 MÓDULOS NATIVOS)
-# ═════════════════════════════════════════════════════════════════════════════
-DEFAULT_TEMPLATE_CHUNKS = {
-    "00_header_and_logger.lua": r'''-- =============================================================================
--- 00. HEADER, MÓDULOS E LOGGER EM DISCO PERSISTENTE
--- =============================================================================
-local core = require "core"
-local common = require "core.common"
-local config = require "core.config"
-local style = require "core.style"
-local command = require "core.command"
-local keymap = require "core.keymap"
-local Node = require "core.node"
-local DocView = require "core.docview"
-
--- 🛡️ Polyfill Universal de Renderização
-local rencache = rawget(_G, "rencache") or (pcall(require, "core.rencache") and require("core.rencache") or nil)
-local native_renderer = rawget(_G, "renderer") or (pcall(require, "renderer") and require("renderer") or nil)
-
-config.load_workspace = true
-config.max_project_files = 50000
-
-local session_log_file = USERDIR .. PATHSEP .. "session_log.txt"
-
-local function safe_format(...)
-  local args = { ... }
-  if #args == 0 then return "" end
-  if #args == 1 then return tostring(args[1]) end
-  local ok, res = pcall(string.format, ...)
-  if ok then return res end
-  local t = {}
-  for _, v in ipairs(args) do table.insert(t, tostring(v)) end
-  return table.concat(t, " ")
-end
-
-local function append_session_log(level, msg)
-  pcall(function()
-    local f = io.open(session_log_file, "a")
-    if f then
-      local ts = os.date("%H:%M:%S")
-      f:write(string.format("[%s] [%s] %s\n", ts, level, tostring(msg)))
-      f:flush()
-      f:close()
-    end
-  end)
-end
-
-pcall(function()
-  os.remove(session_log_file)
-  local f = io.open(session_log_file, "w")
-  if f then
-    f:write(string.format("=== LITE XL SESSION INICIADA: %s ===\n", os.date()))
-    f:flush()
-    f:close()
-  end
-end)
-
-local original_print = print
-function print(...)
-  append_session_log("PRINT", safe_format(...))
-  if original_print then original_print(...) end
-end
-
-local original_core_log = core.log
-local is_logging = false
-
-function core.log(...)
-  local msg = safe_format(...)
-  append_session_log("INFO", msg)
-  is_logging = true
-  local ok, res = pcall(original_core_log, ...)
-  is_logging = false
-  if ok then return res end
-end
-
-local original_core_error = core.error
-function core.error(...)
-  local msg = safe_format(...)
-  append_session_log("ERROR", msg)
-  return original_core_error(...)
-end
-
-local original_core_log_quiet = core.log_quiet
-function core.log_quiet(...)
-  if not is_logging then
-    local msg = safe_format(...)
-    append_session_log("QUIET", msg)
-  end
-  if original_core_log_quiet then return original_core_log_quiet(...) end
-end
-
--- Tema Soberano Doxoade (Piano Black & Esmeralda)
-pcall(function()
-  style.background       = { 1, 1, 1 }
-  style.background2      = { 25, 23, 26 }
-  style.background3      = { 47, 46, 48 }
-  style.text             = { 210, 220, 230 }
-  style.dim              = { 94, 92, 94 }
-  style.divider          = { 76, 69, 82 }
-  style.caret            = { 38, 188, 95 }
-  style.accent           = { 38, 188, 95 }
-  style.line_number2     = { 38, 188, 95 }
-  style.line_highlight   = { 25, 23, 26 }
-  style.selection        = { 0, 108, 255, 110 }
-
-  style.syntax["keyword"]   = { 255, 103, 0 }
-  style.syntax["keyword2"]  = { 200, 21, 118 }
-  style.syntax["function"]  = { 0, 108, 255 }
-  style.syntax["string"]    = { 38, 188, 95 }
-  style.syntax["comment"]   = { 94, 92, 94 }
-  style.syntax["number"]    = { 232, 170, 0 }
-  style.syntax["operator"]  = { 210, 220, 230 }
-  style.syntax["symbol"]    = { 206, 105, 158 }
-end)
-''',
-
-    "01_ipc_dispatcher.lua": r'''-- =============================================================================
--- 01. SINGLE INSTANCE DISPATCHER (IPC)
--- =============================================================================
-local ipc_queue_file = USERDIR .. PATHSEP .. ".ipc_queue"
-
-core.add_thread(function()
-  while true do
-    local f = io.open(ipc_queue_file, "r")
-    if f then
-      local content = f:read("*a")
-      f:close()
-      os.remove(ipc_queue_file)
-
-      if content and content:match("%S") then
-        for line in content:gmatch("[^\r\n]+") do
-          local target = line:match("^%s*(.-)%s*$")
-          if target == "__DOXOADE_GRACEFUL_QUIT__" then
-            pcall(function()
-              local workspace = require "plugins.workspace"
-              if workspace and workspace.save then workspace.save() end
-            end)
-            core.quit()
-            return
-          elseif target ~= "" then
-            pcall(function()
-              local abs_target = system.absolute_path(target) or target
-              local info = system.get_file_info(abs_target) or system.get_file_info(target)
-              if info and info.type == "dir" then
-                core.add_project_directory(abs_target)
-                core.log("Projeto anexado à Árvore: " .. abs_target)
-              else
-                local doc = core.open_doc(abs_target)
-                core.root_view:open_doc(doc)
-                core.log("Arquivo aberto: " .. abs_target)
-              end
-            end)
-          end
-        end
-        core.redraw = true
-        pcall(function()
-          if system.show_window then system.show_window() end
-          if system.raise_window then system.raise_window() end
-        end)
-      end
-    end
-    coroutine.yield(0.1)
-  end
-end)
-''',
-
-    "02_blacklist.lua": r'''-- =============================================================================
--- 02. BLACKLIST DE PASTAS (PYTHON VENV, CACHE, GIT)
--- =============================================================================
-local ignored_patterns = {
-  "^%.?venv[/\\]",          "^venv[/\\]",
-  "^%.?env[/\\]",           "^env[/\\]",
-  "[/\\]%.?venv[/\\]",      "[/\\]venv[/\\]",
-  "[/\\]%.?env[/\\]",       "[/\\]env[/\\]",
-  "[/\\]__pycache__[/\\]",  "^__pycache__[/\\]",
-  "[/\\]%.pytest_cache[/\\]", "[/\\]%.mypy_cache[/\\]", "[/\\]%.ruff_cache[/\\]",
-  "[/\\]%.git[/\\]",        "^%.git[/\\]",
-  "[/\\]%.idea[/\\]",       "[/\\]%.vscode[/\\]",
-  "[/\\]node_modules[/\\]", "^node_modules[/\\]",
-  "[/\\]dist[/\\]",         "[/\\]build[/\\]",
-  "[/\\]%.egg%-info[/\\]",
-  "%.pyc$", "%.pyo$", "%.pyd$",
-  "%.DS_Store$", "Thumbs%.db$"
-}
-
-for _, pattern in ipairs(ignored_patterns) do
-  table.insert(config.ignore_files, pattern)
-end
-''',
-
-    "03_tab_colors.lua": r'''-- =============================================================================
--- 03. MATRIZ DE CORES DE ABAS POR PROJETO RAIZ COM INDICADOR DE MODIFICADO
--- =============================================================================
-local core = require "core"
-local style = require "core.style"
-local Node = require "core.node"
-
-local rencache = rawget(_G, "rencache") or (pcall(require, "core.rencache") and require("core.rencache") or nil)
-local native_renderer = rawget(_G, "renderer") or (pcall(require, "renderer") and require("renderer") or nil)
-
-local function draw_rect_safe(x, y, w, h, color)
-  if rencache and rencache.draw_rect then
-    rencache.draw_rect(x, y, w, h, color)
-  elseif native_renderer and native_renderer.draw_rect then
-    native_renderer.draw_rect(x, y, w, h, color)
-  end
-end
-
-local PROJECT_THEMES = {
-  { accent = { 255, 0, 0 },     active_bg = { 175, 0, 0 },   hover_bg = { 170, 68, 0 },  inactive_bg = { 130, 0, 0 } },
-  { accent = { 255, 103, 0 },   active_bg = { 224, 90, 0 },  hover_bg = { 170, 68, 0 },  inactive_bg = { 90, 36, 0 } },
-  { accent = { 232, 170, 0 },   active_bg = { 170, 125, 0 }, hover_bg = { 130, 95, 0 },  inactive_bg = { 70, 50, 0 } },
-  { accent = { 38, 188, 95 },   active_bg = { 25, 123, 63 }, hover_bg = { 18, 90, 46 },  inactive_bg = { 10, 51, 26 } },
-  { accent = { 0, 108, 255 },   active_bg = { 0, 80, 190 },  hover_bg = { 0, 60, 140 },  inactive_bg = { 0, 35, 80 } },
-  { accent = { 200, 21, 118 },  active_bg = { 150, 16, 88 }, hover_bg = { 110, 12, 65 }, inactive_bg = { 60, 6, 35 } },
-  { accent = { 77, 145, 232 },  active_bg = { 30, 57, 92 },  hover_bg = { 22, 42, 68 },   inactive_bg = { 14, 28, 45 } },
-  { accent = { 206, 105, 158 }, active_bg = { 82, 41, 63 },  hover_bg = { 60, 30, 46 },  inactive_bg = { 38, 19, 29 } },
-  { accent = { 227, 141, 83 },  active_bg = { 90, 56, 33 },  hover_bg = { 68, 42, 25 },   inactive_bg = { 42, 26, 15 } },
-}
-
-local DEFAULT_THEME = { accent = { 94, 92, 94 }, active_bg = { 47, 46, 48 }, hover_bg = { 35, 34, 36 }, inactive_bg = { 25, 23, 26 } }
-local MODIFIED_YELLOW = { 234, 179, 8, 255 }
-
-local function get_project_tab_theme(filename)
-  if not filename then return DEFAULT_THEME end
-  local clean_fn = tostring(filename):gsub("\\", "/"):lower()
-  local matched_project = nil
-
-  if core.project_directories then
-    for _, proj in ipairs(core.project_directories) do
-      local ppath = type(proj) == "table" and (proj.path or proj.name) or proj
-      if ppath and type(ppath) == "string" then
-        local clean_ppath = tostring(ppath):gsub("\\", "/"):lower()
-        if clean_fn:sub(1, #clean_ppath) == clean_ppath then
-          matched_project = type(proj) == "table" and (proj.name or proj.path) or proj
-          break
-        end
-      end
-    end
-  end
-
-  if not matched_project then
-    matched_project = clean_fn:match("^(.*)[/\\]") or clean_fn
-  end
-
-  matched_project = tostring(matched_project or "default")
-  local hash = 0
-  for i = 1, #matched_project do
-    hash = (hash * 31 + matched_project:byte(i)) % #PROJECT_THEMES
-  end
-  return PROJECT_THEMES[hash + 1] or DEFAULT_THEME
-end
-
-local original_draw_tab_title = Node.draw_tab_title
-function Node:draw_tab_title(view, font, is_active, is_hovered, x, y, w, h)
-  local ok, theme = pcall(function()
-    local doc = view and view.doc
-    local filename = doc and doc.filename or (view and view:get_name() or nil)
-    return get_project_tab_theme(filename)
-  end)
-
-  if ok and theme then
-    local bg = is_active and theme.active_bg or (is_hovered and theme.hover_bg or theme.inactive_bg)
-    draw_rect_safe(x, y, w, h, bg)
-
-    local is_dirty = false
-    pcall(function()
-      if view and view.doc and view.doc.is_dirty then
-        is_dirty = view.doc:is_dirty()
-      end
-    end)
-
-    if is_dirty then
-      draw_rect_safe(x, y, w, is_active and 3 or 2, MODIFIED_YELLOW)
-    else
-      draw_rect_safe(x, y, w, is_active and 3 or 1, theme.accent)
-    end
-
-    local old_text = style.text
-    local old_dim = style.dim
-    style.text = is_active and { 255, 255, 255, 255 } or (is_hovered and { 240, 240, 240, 255 } or { 190, 190, 190, 255 })
-    style.dim = { 180, 180, 180, 255 }
-    local res = original_draw_tab_title(self, view, font, is_active, is_hovered, x, y, w, h)
-    style.text = old_text
-    style.dim = old_dim
-    return res
-  end
-
-  return original_draw_tab_title(self, view, font, is_active, is_hovered, x, y, w, h)
-end
-''',
-
-    "04_color_and_search_highlight.lua": r'''-- =============================================================================
--- 04. HIGHLIGHT GLOBAL (SPLITS) + CORES INLINE (#HEX, {R, G, B}) + GUTTER AMARELO
--- =============================================================================
-local core = require "core"
-local Doc = require "core.doc"
-local DocView = require "core.docview"
-
-local rencache = rawget(_G, "rencache") or (pcall(require, "core.rencache") and require("core.rencache") or nil)
-local native_renderer = rawget(_G, "renderer") or (pcall(require, "renderer") and require("renderer") or nil)
-
-local function draw_rect_safe(x, y, w, h, color)
-  if rencache and rencache.draw_rect then
-    rencache.draw_rect(x, y, w, h, color)
-  elseif native_renderer and native_renderer.draw_rect then
-    native_renderer.draw_rect(x, y, w, h, color)
-  end
-end
-
-local original_doc_insert = Doc.insert
-function Doc:insert(line, col, text)
-  self.modified_lines = self.modified_lines or {}
-  self.modified_lines[line] = true
-  return original_doc_insert(self, line, col, text)
-end
-
-local original_doc_remove = Doc.remove
-function Doc:remove(line1, col1, line2, col2)
-  self.modified_lines = self.modified_lines or {}
-  self.modified_lines[line1] = true
-  return original_doc_remove(self, line1, col1, line2, col2)
-end
-
-local original_doc_save = Doc.save
-function Doc:save(...)
-  self.modified_lines = {}
-  return original_doc_save(self, ...)
-end
-
-local function get_active_highlight_query()
-  local active_view = core.active_view
-  if active_view and active_view.doc and active_view.doc:has_selection() then
-    local l1, c1, l2, c2 = active_view.doc:get_selection(true)
-    if l1 == l2 and c1 ~= c2 then
-      local sel = active_view.doc:get_text(l1, c1, l2, c2)
-      if sel and #sel >= 1 and #sel <= 100 and not sel:find("\n") and not sel:match("^%s+$") then
-        return sel
-      end
-    end
-  end
-  if core.command_view and core.command_view.text and #core.command_view.text > 0 then
-    local cv_text = core.command_view.text
-    if #cv_text >= 1 and #cv_text <= 100 and not cv_text:find("\n") and not cv_text:match("^%s+$") then
-      return cv_text
-    end
-  end
-  return nil
-end
-
-local function get_col_x(view, line_text, col)
-  if not line_text or col <= 1 then return 0 end
-  return view:get_font():get_width(line_text:sub(1, col - 1))
-end
-
-local function parse_any_color(text)
-  local hex = text:match("^#([%da-fA-F]+)$")
-  if hex then
-    local len = #hex
-    if len == 3 or len == 4 then
-      local r = tonumber(hex:sub(1, 1):rep(2), 16) or 0
-      local g = tonumber(hex:sub(2, 2):rep(2), 16) or 0
-      local b = tonumber(hex:sub(3, 3):rep(2), 16) or 0
-      return { r, g, b, 220 }
-    elseif len == 6 or len == 8 then
-      local r = tonumber(hex:sub(1, 2), 16) or 0
-      local g = tonumber(hex:sub(3, 4), 16) or 0
-      local b = tonumber(hex:sub(5, 6), 16) or 0
-      return { r, g, b, 220 }
-    end
-  end
-  local r, g, b = text:match("^{%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)")
-  if r and g and b then
-    local nr, ng, nb = tonumber(r) or 0, tonumber(g) or 0, tonumber(b) or 0
-    if nr <= 255 and ng <= 255 and nb <= 255 then
-      return { nr, ng, nb, 220 }
-    end
-  end
-  return nil
-end
-
-local HIGHLIGHT_BLUE = { 0, 108, 255, 140 }
-local MODIFIED_YELLOW = { 234, 179, 8, 200 }
-
-local original_draw_line_body = DocView.draw_line_body
-function DocView:draw_line_body(line, x, y)
-  pcall(function()
-    local doc = self.doc
-    if not doc or not doc.lines then return end
-    local line_text = doc.lines[line]
-    if not line_text then return end
-    local line_h = self.get_line_height and self:get_line_height() or 16
-
-    local search_text = get_active_highlight_query()
-    if search_text then
-      local start_idx = 1
-      while true do
-        local s_idx, e_idx = line_text:find(search_text, start_idx, true)
-        if not s_idx then break end
-        local x1 = x + get_col_x(self, line_text, s_idx)
-        local x2 = x + get_col_x(self, line_text, e_idx + 1)
-        local w = x2 - x1
-        if w > 0 then
-          draw_rect_safe(x1, y, w, line_h, HIGHLIGHT_BLUE)
-        end
-        start_idx = e_idx + 1
-      end
-    end
-  end)
-  return original_draw_line_body(self, line, x, y)
-end
-''',
-
-    "05_split_mover.lua": r'''-- =============================================================================
--- 05. SPLIT MOVER BIDIRECIONAL (Ctrl + Alt + D) - ESQUERDA ⇄ DIREITA
--- =============================================================================
-command.add("core.docview", {
-  ["root:move-tab-to-opposite-panel"] = function()
-    local node = core.root_view:get_active_node()
-    local view = core.active_view
-    if not view or not view.doc or node.locked then return end
-
-    local function get_doc_leaves(n, list)
-      list = list or {}
-      if not n then return list end
-      if n.type == "leaf" and not n.locked then
-        table.insert(list, n)
-      elseif n.type ~= "leaf" then
-        get_doc_leaves(n.a, list)
-        get_doc_leaves(n.b, list)
-      end
-      return list
-    end
-
-    local leaves = get_doc_leaves(core.root_view.root_node)
-    local target_node = nil
-
-    if #leaves >= 2 then
-      for _, leaf in ipairs(leaves) do
-        if leaf ~= node then
-          target_node = leaf
-          break
-        end
-      end
-    else
-      target_node = node:split("right")
-    end
-
-    if target_node and target_node ~= node and not target_node.locked then
-      target_node:add_view(view)
-      local idx = node:get_view_idx(view)
-      if idx then
-        table.remove(node.views, idx)
-        if #node.views > 0 then
-          node.active_view = node.views[math.min(idx, #node.views)]
-        else
-          node:close()
-        end
-      end
-      core.set_active_view(view)
-      core.redraw = true
-    end
-  end
-})
-''',
-
-    "06_tree_manager.lua": r'''-- =============================================================================
--- 06. GESTÃO DINÂMICA DE PROJETOS NA TREEVIEW
--- =============================================================================
-local core = require "core"
-local common = require "core.common"
-local command = require "core.command"
-
-local function normalize_path(path)
-  if not path then return nil end
-  local str = tostring(path):gsub('^["\']', ''):gsub('["\']$', '')
-  if str:sub(1, 1) == "~" then
-    local home = os.getenv("USERPROFILE") or os.getenv("HOME") or ""
-    str = home .. str:sub(2)
-  end
-  return system.absolute_path(str) or str
-end
-
-local function ensure_parent_directories(file_path)
-  local dir = file_path:match("^(.*)[/\\]")
-  if dir and dir ~= "" then
-    local current = ""
-    for part in dir:gmatch("[^/\\]+") do
-      if current == "" and part:find("^[a-zA-Z]:") then
-        current = part
-      else
-        current = (current == "" and "" or current .. PATHSEP) .. part
-        pcall(function() system.mkdir(current) end)
-      end
-    end
-  end
-end
-
-command.add(nil, {
-  ["doxoade:new-doc"] = function()
-    local doc = core.open_doc()
-    core.root_view:open_doc(doc)
-    core.log("Novo documento em branco criado.")
-  end,
-
-  ["doxoade:open-log"] = function()
-    local performed = command.perform("core:open-log")
-    if not performed then
-      for _, doc in ipairs(core.docs) do
-        if doc:get_name() == "Log" or (doc.filename and doc.filename:find("Log")) then
-          core.root_view:open_doc(doc)
-          return
-        end
-      end
-    end
-  end,
-
-  ["doxoade:open-init-lua"] = function()
-    local config_file = USERDIR .. PATHSEP .. "init.lua"
-    core.root_view:open_doc(core.open_doc(config_file))
-  end,
-
-  ["doxoade:toggle-litexl-in-tree"] = function()
-    if not core.project_directories then return end
-    local clean_userdir = tostring(system.absolute_path(USERDIR) or USERDIR):gsub("\\", "/"):lower()
-    for _, p in ipairs(core.project_directories) do
-      local raw_path = type(p) == "table" and (p.path or p.name) or p
-      local ppath = tostring(raw_path or ""):gsub("\\", "/"):lower()
-      if ppath == clean_userdir then
-        core.remove_project_directory(type(p) == "table" and (p.path or p) or p)
-        core.log("Lite XL Config desanexado da Árvore.")
-        core.redraw = true
-        return
-      end
-    end
-    core.add_project_directory(USERDIR)
-    core.log("Lite XL Config anexado à Árvore.")
-    core.redraw = true
-  end,
-
-  ["treeview:add-project-folder"] = function()
-    core.command_view:enter("Caminho do Projeto para Adicionar", {
-      submit = function(path)
-        path = normalize_path(path)
-        if path and tostring(path):match("%S") then
-          local info = system.get_file_info(path)
-          if info and info.type == "dir" then
-            core.add_project_directory(path)
-            core.log("Projeto anexado à Árvore: " .. tostring(path))
-            core.redraw = true
-          elseif info and info.type == "file" then
-            core.root_view:open_doc(core.open_doc(path))
-          else
-            core.error("Caminho inexistente no disco: " .. tostring(path))
-          end
-        end
-      end
-    })
-  end,
-})
-''',
-
-    "07_keymaps_and_help.lua": r'''-- =============================================================================
--- 07. GUIA DE ATALHOS & KEYMAP CONSOLIDADO (NOTEPAD++ COMPATIBILITY)
--- =============================================================================
-keymap.add {
-  ["ctrl+n"]           = "doxoade:new-doc",
-  ["ctrl+o"]           = "core:open-file",
-  ["ctrl+s"]           = "doc:save",
-  ["ctrl+shift+s"]     = "doc:save-all",
-  ["ctrl+,"]           = "doxoade:open-init-lua",
-  ["ctrl+alt+u"]       = "doxoade:toggle-litexl-in-tree",
-  ["ctrl+shift+l"]     = "doxoade:open-log",
-  ["ctrl+f2"]          = "doxoade:open-log",
-  ["ctrl+alt+c"]       = "doxoade:copy-path-menu",
-  ["ctrl+shift+c"]     = "doxoade:tab-copy-relative-path",
-  ["f1"]               = "doxoade:show-shortcuts-cheat-sheet",
-  ["ctrl+shift+?"]     = "doxoade:show-shortcuts-cheat-sheet",
-  ["ctrl+shift+/"]     = "doxoade:show-shortcuts-cheat-sheet",
-  ["ctrl+/"]           = "doxoade:show-shortcuts-cheat-sheet",
-  ["ctrl+alt+/"]       = "doxoade:show-shortcuts-cheat-sheet",
-
-  ["ctrl+f"]           = "find-replace:find",
-  ["f3"]               = "find-replace:repeat-find",
-  ["shift+f3"]         = "find-replace:previous-find",
-  ["ctrl+h"]           = "find-replace:replace",
-  ["ctrl+g"]           = "doc:go-to-line",
-
-  ["ctrl+alt+d"]       = "root:move-tab-to-opposite-panel",
-  ["alt+d"]            = "root:split-right",
-  ["alt+shift+d"]      = "root:split-down",
-  ["ctrl+alt+left"]    = "root:switch-to-left",
-  ["ctrl+alt+right"]   = "root:switch-to-right",
-  ["alt+w"]            = "root:close",
-  ["ctrl+w"]           = "root:close",
-  ["ctrl+tab"]         = "root:switch-to-next-tab",
-  ["ctrl+shift+tab"]   = "root:switch-to-previous-tab",
-
-  ["ctrl+d"]           = "doc:duplicate-lines",
-  ["ctrl+l"]           = "doc:delete-lines",
-  ["ctrl+q"]           = "doc:toggle-line-comments",
-
-  ["ctrl+alt+o"]       = "treeview:add-project-folder",
-  ["ctrl+alt+r"]       = "treeview:remove-project-folder",
-}
-''',
-
-    "08_pot_panel.lua": r'''-- =============================================================================
--- 08. HUB DE FERRAMENTAS LATERAIS (DUMPPOT & WORKSPACE HUB)
--- =============================================================================
-local core = require "core"
-local DocView = require "core.docview"
-local command = require "core.command"
-
-local doxoade_cfg_dir = USERDIR .. PATHSEP .. ".doxoade"
-pcall(function() system.mkdir(doxoade_cfg_dir) end)
-local dumppot_file = doxoade_cfg_dir .. PATHSEP .. "dumppot.txt"
-
-pcall(function()
-  local f = io.open(dumppot_file, "a")
-  if f then f:close() end
-end)
-
-local function get_or_create_right_panel()
-  local function get_doc_leaves(n, list)
-    list = list or {}
-    if not n then return list end
-    if n.type == "leaf" and not n.locked then
-      table.insert(list, n)
-    elseif n.type ~= "leaf" then
-      get_doc_leaves(n.a, list)
-      get_doc_leaves(n.b, list)
-    end
-    return list
-  end
-  local leaves = get_doc_leaves(core.root_view.root_node)
-  if #leaves >= 2 then
-    return leaves[#leaves]
-  elseif #leaves == 1 then
-    return leaves[1]:split("right")
-  end
-  return core.root_view.root_node:get_primary_node()
-end
-
-local function open_in_right_panel(file_path, log_msg)
-  local right_node = get_or_create_right_panel()
-  local doc = core.open_doc(file_path)
-  for _, v in ipairs(right_node.views) do
-    if v.doc == doc then
-      right_node.active_view = v
-      core.set_active_view(v)
-      core.redraw = true
-      return v
-    end
-  end
-  local view = DocView(doc)
-  right_node:add_view(view)
-  core.set_active_view(view)
-  if log_msg then core.log(log_msg) end
-  core.redraw = true
-  return view
-end
-
-command.add(nil, {
-  ["doxoade:open-pot-in-right-panel"] = function()
-    open_in_right_panel(dumppot_file, "Dumppot fixado na direita.")
-  end,
-  ["doxoade:open-workspace-hub"] = function()
-    open_in_right_panel(dumppot_file, "Workspace Hub ativado na direita.")
-  end,
-})
-''',
-
-    "09_panel_manager.lua": r'''-- =============================================================================
--- 09. GERENCIADOR DE PAINÉIS E SLOTS (DIREITA, BAIXO, ESQUERDA)
--- =============================================================================
-local core = require "core"
-local DocView = require "core.docview"
-local command = require "core.command"
-
-local PanelSlots = {}
-
-local function get_doc_leaves(n, list)
-  list = list or {}
-  if not n then return list end
-  if n.type == "leaf" and not n.locked then
-    table.insert(list, n)
-  elseif n.type ~= "leaf" then
-    get_doc_leaves(n.a, list)
-    get_doc_leaves(n.b, list)
-  end
-  return list
-end
-
-function PanelSlots.get_slot_node(slot_type)
-  local leaves = get_doc_leaves(core.root_view.root_node)
-  if slot_type == "right" then
-    if #leaves >= 2 then
-      return leaves[#leaves]
-    elseif #leaves == 1 then
-      return leaves[1]:split("right")
-    end
-  elseif slot_type == "bottom" then
-    local active_node = core.root_view:get_active_node()
-    if active_node and not active_node.locked then
-      return active_node:split("down")
-    end
-  elseif slot_type == "left" then
-    if #leaves >= 1 then
-      return leaves[1]
-    end
-  end
-  return core.root_view.root_node:get_primary_node()
-end
-
-command.add(nil, {
-  ["doxoade:split-bottom-panel"] = function()
-    local active_node = core.root_view:get_active_node()
-    if active_node and not active_node.locked then
-      active_node:split("down")
-      core.redraw = true
-    end
-  end
-})
-''',
-
-    "10_forensic_engine.lua": r'''-- =============================================================================
--- 10. DOXOADE FORENSIC TELEMETRY ENGINE
--- =============================================================================
-local core = require "core"
-local diag_dir = USERDIR .. PATHSEP .. ".doxoade" .. PATHSEP .. "diagnostics"
-pcall(function() system.mkdir(diag_dir) end)
-local report_path = diag_dir .. PATHSEP .. "forensic_report.txt"
-
-local forensic_data = {
-    errors = {},
-    performance = {},
-    env_plugins = {},
-    start_time = os.time()
-}
-
-local original_core_error = core.error
-function core.error(...)
-    local msg = table.concat({...}, " ")
-    local traceback = debug.traceback("", 2)
-    local culprit = "core"
-    local culprit_file = "unknown"
-    local culprit_line = 0
-
-    for line in traceback:gmatch("[^\r\n]+") do
-        if not line:match("core[/\\]init%.lua") and 
-           not line:match("forensic_engine%.lua") and
-           not line:match("%[C%]:") and
-           not line:match("%[string") then
-            local file, ln = line:match("(.-):(%d+):")
-            if file and not file:match("core[/\\]") then
-                culprit_file = file
-                culprit_line = tonumber(ln) or 0
-                culprit = file:match("plugins[/\\](.-)[/\\]") or 
-                          file:match("plugins[/\\](.-)%.lua") or "user_config"
-                break
-            end
-        end
-    end
-
-    table.insert(forensic_data.errors, {
-        msg = msg,
-        culprit = culprit,
-        file = culprit_file,
-        line = culprit_line,
-        trace = traceback,
-        time = os.date("%H:%M:%S")
-    })
-
-    return original_core_error(...)
-end
-''',
-
-    "11_tab_context_menu.lua": r'''-- =============================================================================
--- 11. MENU FLUTUANTE NATIVO IMEDIATO (IMMEDIATE-MODE TAB POPUP)
--- =============================================================================
-local core = require "core"
-local style = require "core.style"
-local command = require "core.command"
-local keymap = require "core.keymap"
-local Node = require "core.node"
-local RootView = require "core.rootview"
-
-local rencache = rawget(_G, "rencache") or (pcall(require, "core.rencache") and require("core.rencache") or nil)
-local native_renderer = rawget(_G, "renderer") or (pcall(require, "renderer") and require("renderer") or nil)
-
-local function draw_rect_safe(x, y, w, h, color)
-  if rencache and rencache.draw_rect then
-    rencache.draw_rect(x, y, w, h, color)
-  elseif native_renderer and native_renderer.draw_rect then
-    native_renderer.draw_rect(x, y, w, h, color)
-  end
-end
-
-local function draw_text_safe(font, text, x, y, color)
-  if rencache and rencache.draw_text then
-    rencache.draw_text(font, text, x, y, color)
-  elseif native_renderer and native_renderer.draw_text then
-    native_renderer.draw_text(font, text, x, y, color)
-  end
-end
-
-local FloatingMenu = {
-  visible = false,
-  x = 0,
-  y = 0,
-  w = 260,
-  h = 100,
-  hovered_idx = nil,
-  items = {},
-}
-
-local PADDING_X = 14
-local PADDING_Y = 6
-
-local function get_item_height()
-  local font = style.font or style.code_font
-  return font:get_height() + (PADDING_Y * 2)
-end
-
-local function build_menu_items(view)
-  if not view or not view.doc or not view.doc.filename then
-    return nil
-  end
-
-  local raw_path = view.doc.filename
-  local abs_path = system.absolute_path(raw_path) or raw_path
-  local clean_abs = abs_path:gsub("[/\\]", PATHSEP or "\\")
-  local fname = raw_path:match("[/\\]([^/\\]+)$") or raw_path
-
-  local rel_path = abs_path:gsub("\\", "/")
-  if core.project_directories then
-    for _, proj in ipairs(core.project_directories) do
-      local ppath = tostring(type(proj) == "table" and (proj.path or proj.name) or proj or ""):gsub("\\", "/")
-      if ppath ~= "" and abs_path:sub(1, #ppath) == ppath then
-        rel_path = abs_path:sub(#ppath + 1):gsub("^/", "")
-        break
-      end
-    end
-  end
-  rel_path = rel_path:gsub("/", PATHSEP or "\\")
-  local dir_path = abs_path:match("^(.*)[/\\]") or abs_path
-
-  return {
-    {
-      text = "📋 Copy Name     : " .. fname,
-      action = function()
-        system.set_clipboard(fname)
-        core.log("Copiado (Nome): " .. fname)
-      end
-    },
-    {
-      text = "📂 Proj. Address : " .. rel_path,
-      action = function()
-        system.set_clipboard(rel_path)
-        core.log("Copiado (Proj. Address): " .. rel_path)
-      end
-    },
-    {
-      text = "📍 Total Address : " .. clean_abs,
-      action = function()
-        system.set_clipboard(clean_abs)
-        core.log("Copiado (Total Address): " .. clean_abs)
-      end
-    },
-    {
-      text = "🧭 Open Explorer : " .. dir_path,
-      action = function()
-        if system.show_in_file_manager then
-          system.show_in_file_manager(abs_path)
-        elseif PLATFORM == "Windows" then
-          system.exec(string.format('explorer.exe /select,"%s"', clean_abs))
-        else
-          system.exec(string.format('xdg-open "%s"', dir_path))
-        end
-        core.log("Explorer aberto em: " .. dir_path)
-      end
-    }
-  }
-end
-
-local function open_floating_menu(view, mx, my)
-  local items = build_menu_items(view)
-  if not items then return end
-
-  local font = style.font or style.code_font
-  local item_h = get_item_height()
-
-  local max_w = 200
-  for _, it in ipairs(items) do
-    local tw = font:get_width(it.text)
-    if tw > max_w then max_w = tw end
-  end
-
-  local menu_w = max_w + (PADDING_X * 2) + 12
-  local menu_h = (#items * item_h) + 8
-
-  local screen_w = core.root_view and core.root_view.size and core.root_view.size.x or 1200
-  local screen_h = core.root_view and core.root_view.size and core.root_view.size.y or 800
-
-  local fx = mx
-  local fy = my
-
-  if fx + menu_w > screen_w then fx = screen_w - menu_w - 6 end
-  if fy + menu_h > screen_h then fy = screen_h - menu_h - 6 end
-  if fx < 4 then fx = 4 end
-  if fy < 4 then fy = 4 end
-
-  FloatingMenu.x = fx
-  FloatingMenu.y = fy
-  FloatingMenu.w = menu_w
-  FloatingMenu.h = menu_h
-  FloatingMenu.items = items
-  FloatingMenu.hovered_idx = nil
-  FloatingMenu.visible = true
-
-  core.redraw = true
-end
-
-local original_rootview_draw = RootView.draw
-function RootView:draw()
-  original_rootview_draw(self)
-
-  if FloatingMenu.visible and #FloatingMenu.items > 0 then
-    local x = FloatingMenu.x
-    local y = FloatingMenu.y
-    local w = FloatingMenu.w
-    local h = FloatingMenu.h
-    local item_h = get_item_height()
-    local font = style.font or style.code_font
-
-    draw_rect_safe(x - 2, y - 2, w + 4, h + 4, { 10, 10, 10, 200 })
-    draw_rect_safe(x, y, w, h, { 25, 23, 26, 255 })
-    draw_rect_safe(x, y, 3, h, { 38, 188, 95, 255 })
-    draw_rect_safe(x, y, w, 1, { 76, 69, 82, 255 })
-
-    local curr_y = y + 4
-    for i, it in ipairs(FloatingMenu.items) do
-      local is_hovered = (FloatingMenu.hovered_idx == i)
-      if is_hovered then
-        draw_rect_safe(x + 3, curr_y, w - 4, item_h, { 47, 46, 48, 255 })
-      end
-
-      local text_color = is_hovered and { 255, 255, 255, 255 } or { 210, 220, 230, 255 }
-      local text_x = x + PADDING_X
-      local text_y = curr_y + PADDING_Y
-
-      draw_text_safe(font, it.text, text_x, text_y, text_color)
-      curr_y = curr_y + item_h
-    end
-  end
-end
-
-local original_rootview_mouse_moved = RootView.on_mouse_moved
-function RootView:on_mouse_moved(x, y, ...)
-  if FloatingMenu.visible then
-    local mx = FloatingMenu.x
-    local my = FloatingMenu.y
-    local mw = FloatingMenu.w
-    local mh = FloatingMenu.h
-    local item_h = get_item_height()
-
-    if x >= mx and x <= mx + mw and y >= my and y <= my + mh then
-      local rel_y = y - my - 4
-      local idx = math.floor(rel_y / item_h) + 1
-      if idx >= 1 and idx <= #FloatingMenu.items then
-        if FloatingMenu.hovered_idx ~= idx then
-          FloatingMenu.hovered_idx = idx
-          core.redraw = true
-        end
-        return true
-      end
-    else
-      if FloatingMenu.hovered_idx ~= nil then
-        FloatingMenu.hovered_idx = nil
-        core.redraw = true
-      end
-    end
-  end
-  return original_rootview_mouse_moved(self, x, y, ...)
-end
-
-local original_rootview_mouse_pressed = RootView.on_mouse_pressed
-function RootView:on_mouse_pressed(button, x, y, clicks)
-  if FloatingMenu.visible then
-    local mx = FloatingMenu.x
-    local my = FloatingMenu.y
-    local mw = FloatingMenu.w
-    local mh = FloatingMenu.h
-    local item_h = get_item_height()
-
-    if button == "left" or button == 1 then
-      if x >= mx and x <= mx + mw and y >= my and y <= my + mh then
-        local rel_y = y - my - 4
-        local idx = math.floor(rel_y / item_h) + 1
-        local item = FloatingMenu.items[idx]
-        FloatingMenu.visible = false
-        core.redraw = true
-
-        if item and item.action then
-          item.action()
-        end
-        return true
-      end
-    end
-
-    FloatingMenu.visible = false
-    core.redraw = true
-    return true
-  end
-  return original_rootview_mouse_pressed(self, button, x, y, clicks)
-end
-
-local original_node_mouse_pressed = Node.on_mouse_pressed
-function Node:on_mouse_pressed(button, x, y, clicks)
-  if button == "right" or button == 3 or button == "secondary" then
-    local idx = self:get_tab_idx(x, y)
-    if idx and self.views and self.views[idx] then
-      local view = self.views[idx]
-      self:set_active_view(view)
-      core.set_active_view(view)
-      open_floating_menu(view, x, y)
-      return true
-    end
-  end
-  return original_node_mouse_pressed(self, button, x, y, clicks)
-end
-
-command.add("core.docview", {
-  ["doxoade:copy-path-menu"] = function()
-    local view = core.active_view
-    if view then
-      open_floating_menu(view, 80, 50)
-    end
-  end
-})
-''',
-
-    "12_ui_forge.lua": r'''-- =============================================================================
--- 12. DOXOADE UI FORGE - Sistema Declarativo de Interface
--- =============================================================================
-local core = require "core"
-local command = require "core.command"
-local keymap = require "core.keymap"
-
-local UIForge = {
-  commands = {},
-  keymaps = {},
-  panels = {},
-}
-
-function UIForge.register_command(name, handler)
-  UIForge.commands[name] = handler
-end
-
-function UIForge.register_keymap(keys, command_name)
-  UIForge.keymaps[keys] = command_name
-end
-
-function UIForge.register_panel(spec)
-  table.insert(UIForge.panels, spec)
-end
-
-function UIForge.build_all()
-  local cmd_table = {}
-  for name, handler in pairs(UIForge.commands) do
-    cmd_table[name] = handler
-  end
-  if next(cmd_table) then
-    command.add(nil, cmd_table)
-  end
-
-  if next(UIForge.keymaps) then
-    keymap.add(UIForge.keymaps)
-  end
-
-  core.log("UIForge: " ..
-    #UIForge.panels .. " painéis, " ..
-    tostring(next(UIForge.commands) and "comandos" or "0 comandos") .. ", " ..
-    tostring(next(UIForge.keymaps) and "atalhos" or "0 atalhos") ..
-    " registrados.")
-end
-
-UIForge.register_command("doxoade:tab-open-in-explorer", function()
-  local view = core.active_view
-  if not view or not view.doc or not view.doc.filename then
-    core.error("Nenhum arquivo ativo.")
-    return
-  end
-  local abs_path = system.absolute_path(view.doc.filename) or view.doc.filename
-  local dir_path = abs_path:match("^(.*)[/\\]") or abs_path
-  if system.show_in_file_manager then
-    system.show_in_file_manager(abs_path)
-  elseif PLATFORM == "Windows" then
-    system.exec(string.format('explorer.exe /select,"%s"', abs_path:gsub('/', '\\')))
-  else
-    system.exec(string.format('xdg-open "%s"', dir_path))
-  end
-  core.log("Explorer aberto em: " .. dir_path)
-end)
-
-UIForge.register_keymap("ctrl+alt+e", "doxoade:tab-open-in-explorer")
-
-UIForge.build_all()
-''',
-}
-
-
 def _clean_lua_source(source: str) -> str:
-    """Lexer atômico de passagem única (elimina colisões entre regexes e strings)."""
-    # Ordem estrita de precedência léxica do Lua:
-    # 1. Comentário de bloco: --[[ ... ]]
-    # 2. Comentário de linha: -- ...
-    # 3. String multilinha: [[ ... ]] ou [=[ ... ]=]
-    # 4. String aspas duplas: " ... "
-    # 5. String aspas simples: ' ... '
+    """Lexer atômico de passagem única (elimina comentários e strings literais)."""
     lua_pattern = re.compile(
         r"--\[(=*)\[.*?\]\1\]|"  # 1. Comentário de bloco
-        r"--[^\r\n]*|"  # 2. Comentário de linha
-        r"\[(=*)\[.*?\]\2\]|"  # 3. String multilinha
-        r'"(?:\\.|[^"\\])*"|'  # 4. String aspas duplas
-        r"'(?:\\.|[^'\\])*'",  # 5. String aspas simples
+        r"--[^\r\n]*|"           # 2. Comentário de linha
+        r"\[(=*)\[.*?\]\2\]|"    # 3. String multilinha
+        r'"(?:\\.|[^"\\])*"|'   # 4. String aspas duplas
+        r"'(?:\\.|[^'\\])*'",    # 5. String aspas simples
         re.DOTALL,
     )
-    # Substitui qualquer comentário ou string por espaço atômico
     return lua_pattern.sub(" ", source)
 
 class LiteXLEngine:
@@ -1430,6 +309,10 @@ class LiteXLEngine:
 
         return report
 
+    # =========================================================================
+    # 📁 [1] RESOLUÇÃO DE CAMINHOS & ESTRUTURA
+    # =========================================================================
+
     @staticmethod
     def get_user_dir() -> Path:
         home = Path.home()
@@ -1470,13 +353,9 @@ class LiteXLEngine:
 
     @classmethod
     def bootstrap_templates_if_missing(cls):
-        """Auto-cria a pasta e os 13 arquivos .lua modulares caso não existam."""
+        """Garante que a pasta de templates modular exista no sistema."""
         t_dir = cls.get_template_dir()
         t_dir.mkdir(parents=True, exist_ok=True)
-        for fname, content in DEFAULT_TEMPLATE_CHUNKS.items():
-            fpath = t_dir / fname
-            if not fpath.exists():
-                fpath.write_text(content, encoding="utf-8")
 
     @classmethod
     def get_template_files(cls) -> List[Path]:
@@ -1813,33 +692,65 @@ class LiteXLEngine:
         except Exception:
             return lua, "versão desconhecida"
 
-#    @staticmethod
+    @classmethod
+    def _get_lua_manager(cls):
+        """Obtém a classe LuaRuntimeManager com fallback seguro de importação."""
+        global LuaRuntimeManager
+        if LuaRuntimeManager is not None:
+            return LuaRuntimeManager
+        try:
+            from doxoade.tools.lua_systems.lua_manager import LuaRuntimeManager as LRM
+            LuaRuntimeManager = LRM
+            return LuaRuntimeManager
+        except Exception:
+            return None
+
     @classmethod
     def _find_lua_runtime(cls) -> Optional[str]:
         """Encontra runtime Lua usando o sistema de gestão."""
-        if LuaRuntimeManager is None:
+        manager = cls._get_lua_manager()
+        if not manager:
             return None
-        runtime = LuaRuntimeManager.find_lua_runtime()
+        runtime = manager.find_lua_runtime()
         return str(runtime[0]) if runtime else None
 
     @classmethod
     def ensure_lua_runtime(cls) -> Optional[str]:
         """Garante que um runtime Lua esteja disponível, instalando se necessário."""
-        runtime = LuaRuntimeManager.ensure_lua_runtime()
+        manager = cls._get_lua_manager()
+        if not manager:
+            return None
+        runtime = manager.ensure_lua_runtime()
         return str(runtime[0]) if runtime else None
+
+    @classmethod
+    def lua_runtime_info(cls) -> Optional[Tuple[str, str]]:
+        """Retorna (caminho_do_lua, banner_de_versao) ou None se ausente."""
+        lua = cls._find_lua_runtime()
+        if not lua:
+            return None
+        try:
+            res = subprocess.run([lua, "-v"], capture_output=True, text=True, timeout=5)
+            banner = (res.stdout + res.stderr).strip()
+            version = banner.splitlines()[0] if banner else "versão desconhecida"
+            return lua, version
+        except Exception:
+            return lua, "versão desconhecida"
 
     @classmethod
     def true_compile_check(cls, path: Union[str, Path]) -> Optional[str]:
         """Compilação real via runtime Lua externo. None = OK."""
-        runtime = LuaRuntimeManager.find_lua_runtime()
+        manager = cls._get_lua_manager()
+        if not manager:
+            return "NO_RUNTIME"
+
+        runtime = manager.find_lua_runtime()
         if not runtime:
             return "NO_RUNTIME"
 
         exe_path, version = runtime
-        # Normaliza o caminho com barras '/' evitando problemas de escape no Windows
         clean_path = str(path).replace("\\", "/").replace('"', '\\"')
 
-        # Script com caminho literal embutido: sem dependência de arg[] e com exit(0)
         probe = (
             f'local f, err = loadfile("{clean_path}") '
             f'if not f then '
@@ -1856,7 +767,7 @@ class LiteXLEngine:
                 capture_output=True,
                 text=True,
                 timeout=5,
-                stdin=subprocess.DEVNULL,  # 🛡️ Impede qualquer bloqueio em STDIN
+                stdin=subprocess.DEVNULL,
             )
             if res.returncode != 0:
                 err_msg = (res.stderr or res.stdout).strip()
@@ -2062,7 +973,7 @@ class LiteXLEngine:
     def launch_with_safety_guard(
         cls, target_path: Optional[str] = None, restore_session: bool = True, *args, **kwargs
     ) -> Tuple[bool, str]:
-        """Inicia o Lite XL com restauração de sessão ativa e supervisão segura."""
+        """Inicia o Lite XL com monitoramento de session_log e error.txt."""
         if restore_session:
             cls.restore_workspace_state()
         else:
@@ -2094,28 +1005,43 @@ class LiteXLEngine:
                     f"  Laudo: {err_detail}"
                 )
 
-        # Limpa session_log anterior para evitar falsos positivos
+        # Limpa session_log e error.txt anteriores para isolar a sessão atual
         log_path = cls.get_session_log_path()
-        try:
-            if log_path.exists():
-                log_path.unlink()
-        except Exception:
-            pass
+        error_path = cls.get_error_txt_path()
+        for p in [log_path, error_path]:
+            try:
+                if p.exists():
+                    p.unlink()
+            except Exception:
+                pass
 
         start_time = time.time()
         proc = subprocess.Popen(cmd_args)
 
-        # Handshake Watchdog Inteligente (até 2.5s)
+        # Handshake Watchdog (monitora logs e error.txt por até 3s)
         boot_confirmed = False
         has_errors = False
         error_excerpt = ""
-        deadline = time.time() + 2.5
+        deadline = time.time() + 3.0
 
         while time.time() < deadline:
             if proc.poll() is not None:
-                # Processo fechou antes do tempo
+                # Processo encerrou abruptamente
                 break
 
+            # 🛡️ 1. Checagem prioritária de crash fatal (error.txt)
+            if error_path.exists():
+                try:
+                    mtime = error_path.stat().st_mtime
+                    if mtime >= (start_time - 1.0):
+                        err_content = error_path.read_text(encoding="utf-8", errors="replace")
+                        has_errors = True
+                        error_excerpt = "\n".join(err_content.splitlines()[:6])
+                        break
+                except Exception:
+                    pass
+
+            # 🛡️ 2. Checagem de session_log.txt
             if log_path.exists():
                 try:
                     log_content = log_path.read_text(encoding="utf-8", errors="replace")
@@ -2124,22 +1050,21 @@ class LiteXLEngine:
                         err_lines = [l for l in log_content.splitlines() if "[ERROR]" in l or "[TRACE]" in l]
                         error_excerpt = "\n".join(err_lines[-5:])
                         break
-                    
-                    # Confirmado se tem o handshake OU se o log registrou inicialização sem erros
-                    if "=== SOVEREIGN BOOT OK ===" in log_content or "UIForge:" in log_content:
+                    if "=== SOVEREIGN BOOT OK ===" in log_content:
                         boot_confirmed = True
                         break
                 except Exception:
                     pass
+
             time.sleep(0.15)
 
-        # Se o processo está vivo, logou e não teve erros: SUCESSO TOTAL
+        # Confirmação de Sucesso
         if (boot_confirmed or (log_path.exists() and not has_errors)) and not has_errors and proc.poll() is None:
             cls.promote_to_stable_snapshot()
             cls.backup_workspace_state()
             return True, "Lite XL inicializado com sucesso em Modo Soberano (Sessão Preservada)."
 
-        # Fallback de emergência
+        # 🚨 Fallback Imediato (mata qualquer popup modal travado e restaura o snapshot)
         try:
             proc.kill()
         except Exception:
@@ -2150,7 +1075,7 @@ class LiteXLEngine:
         subprocess.Popen(cmd_args)
 
         return False, (
-            f"FALHA CAPTURADA NO BOOT.\n"
+            f"FALHA CAPTURADA NO BOOT / RENDERIZAÇÃO.\n"
             f"  MODO SEGURO ATIVADO (Sessão e Snapshot Estável Restaurados).\n"
             f"  Evidência capturada:\n{error_excerpt or 'Timeout aguardando handshake.'}"
         )
@@ -2193,6 +1118,10 @@ class LiteXLEngine:
             temp_init.unlink(missing_ok=True)
             return False, f"Falha durante a instalação: {e}"
 
+    # =========================================================================
+    # 🛑 [4] FINALIZAÇÃO & LIMPEZA DE PROCESSOS
+    # =========================================================================
+
     @classmethod
     def _clear_ipc_queue(cls) -> None:
         """Remove a fila IPC residual com segurança."""
@@ -2200,27 +1129,16 @@ class LiteXLEngine:
             ipc_file = cls.get_ipc_queue_path()
             if ipc_file.exists():
                 ipc_file.unlink()
-        except FileNotFoundError:
-            pass
         except Exception:
             pass
 
     @classmethod
     def kill_ghost_processes(cls):
-        """Mata processos fantasmas travados em segundo plano e limpa a fila IPC residual."""
-        # 1. Primeiro mata os processos
+        """Mata processos fantasmas e purga a fila IPC residual."""
         if sys.platform == "win32":
             subprocess.run(["taskkill", "/F", "/IM", "lite-xl.exe"], capture_output=True, timeout=5)
         else:
             subprocess.run(["pkill", "-9", "-f", "lite-xl"], capture_output=True, timeout=5)
-            
-        # # 2. Só depois limpa a fila IPC para não descartar comandos de uma instância viva
-        # ipc_file = cls.get_ipc_queue_path()
-        # if ipc_file.exists():
-        #     try:
-        #         ipc_file.unlink()
-        #     except Exception:
-        #         pass
 
         cls._clear_ipc_queue()
 

@@ -127,22 +127,49 @@ local function restore_sovereign_session()
       local active_to_set = nil
       for _, file_info in ipairs(panel_data.files or {}) do
         if file_info.filename and file_info.filename ~= "" then
-          local finfo = system.get_file_info(file_info.filename)
-          if finfo then
-            local doc = core.open_doc(file_info.filename)
-            if doc then
-              local view = DocView(doc)
-              target_node:add_view(view)
-              total_reopened = total_reopened + 1
+          local target_fn = system.absolute_path(file_info.filename) or file_info.filename
+          local clean_target = target_fn:lower():gsub("\\", "/")
 
-              if file_info.line and file_info.line > 1 then
-                pcall(function()
-                  doc:set_selection(file_info.line, file_info.col or 1, file_info.line, file_info.col or 1)
-                end)
+          -- 🛡️ Checa se o arquivo já está aberto neste painel para NUNCA duplicar
+          local existing_view = nil
+          for _, v in ipairs(target_node.views or {}) do
+            if v and v.doc and v.doc.filename then
+              local abs_v = (system.absolute_path(v.doc.filename) or v.doc.filename):lower():gsub("\\", "/")
+              if abs_v == clean_target then
+                existing_view = v
+                break
               end
+            end
+          end
 
-              if panel_data.active_file == file_info.filename then
-                active_to_set = view
+          if existing_view then
+            if panel_data.active_file then
+              local clean_act = (system.absolute_path(panel_data.active_file) or panel_data.active_file):lower():gsub("\\", "/")
+              if clean_act == clean_target then
+                active_to_set = existing_view
+              end
+            end
+          else
+            local finfo = system.get_file_info(target_fn)
+            if finfo then
+              local doc = core.open_doc(target_fn)
+              if doc then
+                local view = DocView(doc)
+                target_node:add_view(view)
+                total_reopened = total_reopened + 1
+
+                if file_info.line and file_info.line > 1 then
+                  pcall(function()
+                    doc:set_selection(file_info.line, file_info.col or 1, file_info.line, file_info.col or 1)
+                  end)
+                end
+
+                if panel_data.active_file then
+                  local clean_act = (system.absolute_path(panel_data.active_file) or panel_data.active_file):lower():gsub("\\", "/")
+                  if clean_act == clean_target then
+                    active_to_set = view
+                  end
+                end
               end
             end
           end

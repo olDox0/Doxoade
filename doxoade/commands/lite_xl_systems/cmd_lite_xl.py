@@ -745,3 +745,56 @@ def cmd_rollback():
         click.echo(f"  {Fore.LIGHTBLACK_EX}Execute 'doxoade lite-xl restart' para iniciar o editor.{Fore.RESET}\n")
     else:
         click.echo(f"  {Fore.RED}✖ {msg}{Fore.RESET}\n")
+
+@lite_xl_group.command("debug", help="🩺 Depurador e monitor de telemetria live do Lite XL.")
+@click.option("--live", "-l", is_flag=True, default=True, help="Modo streaming contínuo em tempo real.")
+@click.option("--errors-only", "-e", is_flag=True, help="Filtra apenas erros e tracebacks.")
+def cmd_debug(live, errors_only):
+    """Monitor de depuração ao vivo com formatação de tracebacks e eventos."""
+    log_path = LiteXLEngine.get_session_log_path()
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🩺 DOXOADE LITE XL LIVE DEBUGGER{Style.RESET_ALL}")
+    click.echo(f"  {Fore.WHITE}Alvo:{Fore.RESET} {log_path}")
+    click.echo(f"  {Fore.LIGHTBLACK_EX}Pressione Ctrl+C para encerrar o monitoramento.{Fore.RESET}\n")
+
+    if not log_path.exists():
+        click.echo(f"  {Fore.YELLOW}⚠ Nenhum log de sessão ativo no momento.{Fore.RESET}\n")
+        return
+
+    def format_log_line(line: str) -> str:
+        if "[ERROR]" in line:
+            return f"  {Fore.RED}{Style.BRIGHT}✖ {line}{Style.RESET_ALL}"
+        elif "[WARN]" in line:
+            return f"  {Fore.YELLOW}⚠ {line}{Fore.RESET}"
+        elif "[INFO]" in line:
+            return f"  {Fore.GREEN}ℹ {line}{Fore.RESET}"
+        elif "[TRACE]" in line or line.strip().startswith("stack traceback:"):
+            return f"    {Fore.LIGHTBLACK_EX}{line}{Fore.RESET}"
+        return f"  {Fore.WHITE}{line}{Fore.RESET}"
+
+    # Leitura inicial do histórico recente
+    try:
+        content = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        recent = content[-20:] if len(content) > 20 else content
+        for l in recent:
+            if not errors_only or ("[ERROR]" in l or "[TRACE]" in l):
+                click.echo(format_log_line(l))
+    except Exception as e:
+        click.echo(f"  {Fore.RED}Erro ao ler log: {e}{Fore.RESET}")
+
+    if not live:
+        return
+
+    # Streaming em tempo real (Tail -f inteligente)
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            f.seek(0, os.SEEK_END)
+            while True:
+                line = f.readline()
+                if line:
+                    line_clean = line.rstrip("\r\n")
+                    if not errors_only or ("[ERROR]" in line_clean or "[TRACE]" in line_clean):
+                        click.echo(format_log_line(line_clean))
+                else:
+                    time.sleep(0.1)
+    except KeyboardInterrupt:
+        click.echo(f"\n{Fore.YELLOW}Monitoramento de depuração encerrado.{Fore.RESET}\n")

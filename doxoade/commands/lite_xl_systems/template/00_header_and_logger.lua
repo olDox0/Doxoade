@@ -10,45 +10,43 @@ local command = require "core.command"
 local keymap = require "core.keymap"
 local Node = require "core.node"
 local DocView = require "core.docview"
--- =====================================================
--- 📜 LOGGER BASE EM DISCO
--- =====================================================
+
+config.load_workspace = true
+config.max_project_files = 50000
+
+-- =============================================================================
+-- 🛡️ GUARDA DE ESCOPO RAIZ (DECLARADAS FORA DE QUALQUER BLOCO OU PCALL)
+-- =============================================================================
+local inside_append_log = false
+local inside_core_log = false
+local inside_core_error = false
+
 local session_log_file = USERDIR .. PATHSEP .. "session_log.txt"
 
+-- =============================================================================
+-- 📜 FUNÇÃO DE FORMATAÇÃO SEGURA
+-- =============================================================================
 local function safe_format(...)
   local argc = select("#", ...)
-
-  if argc == 0 then
-    return ""
-  end
-
+  if argc == 0 then return "" end
   local first = select(1, ...)
+  if argc == 1 then return tostring(first) end
 
-  if argc == 1 then
-    return tostring(first)
-  end
-
-  -- Se parecer uma chamada de format, tenta string.format primeiro.
-  -- Exemplo:
-  --   core.log("Saved \"%s\"", filename)
   if type(first) == "string" and first:find("%%") then
     local ok, res = pcall(string.format, ...)
-    if ok then
-      return res
-    end
+    if ok then return res end
   end
 
-  -- Fallback: concatena todos os argumentos como string.
   local t = {}
   for i = 1, argc do
     t[i] = tostring(select(i, ...))
   end
-
   return table.concat(t, " ")
 end
 
-local inside_append_log = false
-
+-- =============================================================================
+-- 💾 GRAVAÇÃO EM DISCO PERSISTENTE
+-- =============================================================================
 local function append_session_log(level, msg)
   if inside_append_log then return end
   inside_append_log = true
@@ -69,7 +67,6 @@ end
 -- Reset do log no início da sessão
 pcall(function()
   os.remove(session_log_file)
-
   local f = io.open(session_log_file, "w")
   if f then
     f:write(string.format("=== LITE XL SESSION INICIADA: %s ===\n", os.date()))
@@ -78,58 +75,43 @@ pcall(function()
   end
 end)
 
--- =====================================================
--- 🖨️ PRINT HOOK
--- =====================================================
+-- =============================================================================
+-- 🖨️ HOOK DE PRINT
+-- =============================================================================
 local original_print = print
-
 function print(...)
-  append_session_log("PRINT", safe_format(...))
-
-  if original_print then
-    original_print(...)
+  if not inside_core_log then
+    append_session_log("PRINT", safe_format(...))
   end
+  if original_print then original_print(...) end
 end
 
--- =====================================================
--- ℹ️ CORE.LOG HOOK
--- =====================================================
+-- =============================================================================
+-- ℹ️ HOOK DE CORE.LOG
+-- =============================================================================
 local original_core_log = core.log
-local inside_core_log = false
-
 function core.log(...)
   if inside_core_log then
-    if original_core_log then
-      return original_core_log(...)
-    end
+    if original_core_log then return original_core_log(...) end
     return
   end
 
   inside_core_log = true
-
   append_session_log("INFO", safe_format(...))
 
-  local ok, res
+  local ok, res = true, nil
   if original_core_log then
     ok, res = pcall(original_core_log, ...)
-  else
-    ok = true
   end
-
   inside_core_log = false
 
-  if ok then
-    return res
-  end
+  if ok then return res end
 end
 
--- =====================================================
--- ❌ CORE.ERROR HOOK COM RATE LIMIT E EVIDÊNCIA
--- =====================================================
--- 🛡️ Anti-Freeze Forense (rate limit + contador + anti-reentrância)
+-- =============================================================================
+-- ❌ HOOK DE CORE.ERROR COM RATE LIMIT
+-- =============================================================================
 local original_core_error = core.error
-local inside_core_error = false
-
 local error_rate = {
   last_msg = "",
   last_time = 0,
@@ -138,9 +120,7 @@ local error_rate = {
 
 function core.error(...)
   if inside_core_error then
-    if original_core_error then
-      return original_core_error(...)
-    end
+    if original_core_error then return original_core_error(...) end
     return
   end
 
@@ -167,14 +147,12 @@ function core.error(...)
       append_session_log("TRACE", tb)
     else
       error_rate.count = error_rate.count + 1
-
       if (now - error_rate.last_time) >= 1.0 then
         append_session_log(
           "ERROR",
           string.format("%s [repetido %dx]", msg, error_rate.count)
         )
         append_session_log("TRACE", tb)
-
         error_rate.last_time = now
         error_rate.count = 0
       end
@@ -185,15 +163,14 @@ function core.error(...)
   if original_core_error then
     ok, res = pcall(original_core_error, ...)
   end
-
   inside_core_error = false
 
-  if ok then
-    return res
-  end
+  if ok then return res end
 end
 
--- Tema Soberano Doxoade (Piano Black & Esmeralda)
+-- =============================================================================
+-- 🎨 TEMA SOBERANO DOXOADE (PIANO BLACK & ESMERALDA NATIVO)
+-- =============================================================================
 pcall(function()
   style.background       = { 1, 1, 1 }
   style.background2      = { 25, 23, 26 }
@@ -202,8 +179,9 @@ pcall(function()
   style.dim              = { 94, 92, 94 }
   style.divider          = { 76, 69, 82 }
   style.caret            = { 38, 188, 95 }
-  style.accent           = { 38, 148, 95 }
-  style.line_number2     = { 38, 108, 95 }
+  style.accent           = { 38, 188, 95 }
+  style.line_number      = { 94, 92, 94 }
+  style.line_number2     = { 38, 188, 95 }
   style.line_highlight   = { 25, 23, 26 }
   style.selection        = { 0, 108, 255, 110 }
 

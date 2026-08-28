@@ -66,7 +66,7 @@ end
 -- Expande a largura da gutter em +6px para o marcador nunca sobrepor os números
 local original_get_gutter_width = DocView.get_gutter_width
 function DocView:get_gutter_width()
-  return original_get_gutter_width(self) + 6
+  return original_get_gutter_width(self)
 end
 
 -- Desenho da barra colada na extremidade direita da margem
@@ -79,7 +79,7 @@ function DocView:draw_line_gutter(line_idx, x, y, width)
     local marker_color = (state == "dirty") and COLOR_DIRTY or COLOR_SAVED
 
     -- Barra de 3px na borda direita da gutter (divisor natural)
-    draw_rect_safe(x + width - 3, y, 3, self:get_line_height(), marker_color)
+    draw_rect_safe(x + width + 18, y, 3, self:get_line_height(), marker_color)
   end
 
   return h

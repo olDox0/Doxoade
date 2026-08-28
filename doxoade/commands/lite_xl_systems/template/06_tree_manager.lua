@@ -1,12 +1,18 @@
--- doxoade/commands/lite_xl_systems/template/template/06_tree_manager.lua
--- =============================================================================
--- 06. GESTÃO DE PROJETOS NA TREEVIEW + CRIAÇÃO INTERATIVA (Ctrl + Alt + N)
--- =============================================================================
+-- doxoade/commands/lite_xl_systems/template/06_tree_manager.lua
+--[[
+  Módulo de Gerenciamento da Árvore de Arquivos (TreeView Soberana).
+  Fornece criação recursiva de pastas, toggles de projeto e comandos
+  de anexo/desanexo integrados ao menu de contexto nativo.
+]]
+
 local core = require "core"
 local common = require "core.common"
 local command = require "core.command"
 local DocView = require "core.docview"
 
+-- =============================================================================
+-- 1. UTILITÁRIOS DE PATH E CRIAÇÃO INTERATIVA
+-- =============================================================================
 local function normalize_path(path)
   if not path then return nil end
   local str = tostring(path):gsub('^["\']', ''):gsub('["\']$', '')
@@ -49,8 +55,10 @@ local function get_tree_target_dir()
   return "."
 end
 
+-- =============================================================================
+-- 2. COMANDOS SOBERANOS DA ÁRVORE
+-- =============================================================================
 command.add(nil, {
-  -- Criação Interativa (Ctrl + Alt + N): digite o caminho relativo ou absoluto
   ["doxoade:create-file-interactive"] = function()
     local base_dir = get_tree_target_dir()
     core.command_view:enter("Criar Arquivo (ex: doxoade/commands/novo_modulo.py)", {
@@ -62,11 +70,9 @@ command.add(nil, {
           else
             full_path = base_dir .. PATHSEP .. input_path
           end
-
           ensure_parent_directories(full_path)
           local f = io.open(full_path, "a")
           if f then f:close() end
-
           local doc = core.open_doc(full_path)
           core.root_view:open_doc(doc)
           core.log("Arquivo criado e aberto: " .. full_path)
@@ -83,7 +89,7 @@ command.add(nil, {
   ["doxoade:toggle-litexl-in-tree"] = function()
     if not core.project_directories then return end
     local clean_userdir = tostring(system.absolute_path(USERDIR) or USERDIR):gsub("\\", "/"):lower()
-    for i, p in ipairs(core.project_directories) do
+    for _, p in ipairs(core.project_directories) do
       local raw_path = type(p) == "table" and (p.path or p.name) or p
       local ppath = tostring(raw_path or ""):gsub("\\", "/"):lower()
       if ppath == clean_userdir then
@@ -109,7 +115,8 @@ command.add(nil, {
             core.log("Projeto anexado à Árvore: " .. tostring(path))
             core.redraw = true
           elseif info and info.type == "file" then
-            core.root_view:open_doc(core.open_doc(path))
+            local doc = core.open_doc(path)
+            core.root_view:open_doc(doc)
           else
             core.error("Caminho inexistente no disco: " .. tostring(path))
           end
@@ -126,37 +133,38 @@ command.add(nil, {
     for _, p in ipairs(projects) do
       local pname = type(p) == "table" and (p.name or p.path) or p
       local ppath = type(p) == "table" and (p.path or p.name) or p
-      local label = tostring(pname or "Projeto") .. " -> [" .. tostring(ppath or "") .. "]"
+      local label = string.format("%s (%s)", pname, ppath)
       table.insert(items, label)
       map[label] = ppath
     end
-
     core.command_view:enter("Selecione o Projeto para Desanexar", {
       submit = function(item)
         local target_path = map[item]
         if target_path then
           core.remove_project_directory(target_path)
-          core.log("Projeto desanexado: " .. tostring(target_path))
+          core.log("Projeto desanexado: " .. target_path)
           core.redraw = true
         end
       end,
-      suggest = function(text) return common.fuzzy_match(items, text) end
+      suggest = function(text)
+        return common.fuzzy_match(items, text)
+      end
     })
   end
 })
 
+-- =============================================================================
+-- 3. INTEGRAÇÃO COM O MENU DE CONTEXTO DO TREEVIEW
+-- =============================================================================
 pcall(function()
   local contextmenu = require "plugins.contextmenu"
   local TreeView = require "plugins.treeview"
-
-  if contextmenu then
-    contextmenu:register(function()
-      return core.active_view and TreeView and core.active_view:is(TreeView)
+  if contextmenu and TreeView then
+    contextmenu.register(function(view)
+      return view:is(TreeView)
     end, {
-      contextmenu.DIVIDER,
-      { text = "New File...",            command = "doxoade:create-file-interactive" },
-      contextmenu.DIVIDER,
-      { text = "Add Project Folder...",    command = "treeview:add-project-folder" },
+      { text = "New File...", command = "doxoade:create-file-interactive" },
+      { text = "Add Project Folder...", command = "treeview:add-project-folder" },
       { text = "Remove Project Folder...", command = "treeview:remove-project-folder" },
     })
   end
