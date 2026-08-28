@@ -8,6 +8,7 @@ local command = require "core.command"
 local keymap = require "core.keymap"
 local style = require "core.style"
 local View = require "core.view"
+local config = require "core.config"
 
 local UIForge = {
   commands = {},

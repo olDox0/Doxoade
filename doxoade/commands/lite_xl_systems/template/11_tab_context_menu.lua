@@ -7,6 +7,8 @@ local style = require "core.style"
 local command = require "core.command"
 local Node = require "core.node"
 local RootView = require "core.rootview"
+local common = require "core.common"
+local keymap = require "core.keymap"
 
 -- 🛡️ Polyfill de Renderização
 local rencache = rawget(_G, "rencache") or (pcall(require, "core.rencache") and require("core.rencache") or nil)

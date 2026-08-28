@@ -2,7 +2,7 @@
 -- =============================================================================
 -- 15. IN-EDITOR AUDIT HIGHLIGHTER (ISOLAMENTO POR ABA, TOOLTIPS & AUTO-CLEAR)
 -- =============================================================================
--- local core = require "core"
+local core = require "core"
 local config = require "core.config"
 local style = require "core.style"
 local command = require "core.command"

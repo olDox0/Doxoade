@@ -1,3 +1,7 @@
+:: seguinte, preciso fazer um sistema, chamado litexl_api_guard. ele é responsavel por verificar se aquela função existe e funciona. opcionalmente, como funciona, especificamente o contrato. o lite_xl é open source então teoricamente é facil projetar e planejar o que vamos fazer. isso porque recentemente enfrentei um problema como o 7° templante tive que dar rewind para voltar a funcionar, o problema era uma função de deprecada. tem um backup do 7° template que você pode dar uma olhada. basicamente estou planejando um sistema para impedir que este tipo de problema volte novamente. assim vamos fazer alguns comandos e integrar no doxoade lite-xl diagnose para verificar se esta tudo certo. tinha feito um plano que vou enviar.
+
+
+
 permite implementar com segurança, sem quebrar o que já funciona.
 
 Só vou fazer um ajuste arquitetural importante antes de consolidar o plano:

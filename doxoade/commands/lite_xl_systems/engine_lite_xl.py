@@ -96,6 +96,103 @@ def _clean_lua_source(source: str) -> str:
 class LiteXLEngine:
     """Motor Soberano Lite XL V17.0."""
 
+    @classmethod
+    def get_probe_dir(cls) -> Path:
+        """Diretório de probes do API Guard."""
+        return cls.get_template_dir() / "lite_xl_probes"
+
+    @classmethod
+    def get_probe_files(cls) -> List[Path]:
+        """Retorna todos os probes Lua de forma ordenada."""
+        p_dir = cls.get_probe_dir()
+        if not p_dir.exists():
+            return []
+        return sorted([f for f in p_dir.glob("*.lua") if f.is_file()])
+
+    @classmethod
+    def get_template_files(cls) -> List[Path]:
+        """Retorna todos os templates em ordem alfabética estrita."""
+        t_dir = cls.get_template_dir()
+        if not t_dir.exists():
+            return []
+        return sorted([f for f in t_dir.glob("*.lua") if f.is_file()])
+
+    @classmethod
+    def generate_sovereign_init(cls) -> str:
+        """Gera o init.lua soberano com isolamento léxico (do ... end) eliminando o limite de 200 locals."""
+        init_buffer: List[str] = [
+            "-- =============================================================================",
+            "-- DOXOADE SOVEREIGN INIT — API GUARD & MODULAR ENGINE (SCOPED)",
+            f"-- Compilado em: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+            "-- =============================================================================\n",
+        ]
+
+        for tf in cls.get_template_files():
+            init_buffer.append(f"-- >>> [TEMPLATE: {tf.name}] >>>")
+            init_buffer.append("do")
+            init_buffer.append(tf.read_text(encoding="utf-8"))
+            init_buffer.append("end")
+            init_buffer.append(f"-- <<< [END TEMPLATE: {tf.name}] <<<\n")
+
+        return "\n".join(init_buffer)
+
+        # # 1. INJETA OS PROBES E O API GUARD NO TOPO
+        # probe_files = cls.get_probe_files()
+        # for pf in probe_files:
+        #     init_buffer.append(f"-- >>> [API GUARD PROBE: {pf.name}] >>>")
+        #     init_buffer.append(pf.read_text(encoding="utf-8"))
+        #     init_buffer.append(f"-- <<< [END PROBE: {pf.name}] <<<\n")
+
+        # # 2. INJETA OS TEMPLATES FUNCIONAIS (00_ a 15_)
+        # template_files = cls.get_template_files()
+        # for tf in template_files:
+        #     init_buffer.append(f"-- >>> [TEMPLATE: {tf.name}] >>>")
+        #     init_buffer.append(tf.read_text(encoding="utf-8"))
+        #     init_buffer.append(f"-- <<< [END TEMPLATE: {tf.name}] <<<\n")
+
+        # return "\n".join(init_buffer)
+
+    @classmethod
+    def install_sovereign_config(cls, force: bool = False, backup: bool = True, **kwargs) -> Tuple[bool, str]:
+        """Instalação soberana atômica com Pre-Flight Gatekeeper e snapshot promotion."""
+        init_path = cls.get_init_lua_path()
+        init_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Garante a pasta de artefatos do API Guard
+        guard_dir = cls.get_user_dir() / ".doxoade" / "api_guard"
+        guard_dir.mkdir(parents=True, exist_ok=True)
+
+        content = cls.generate_sovereign_init()
+
+        # 1. Pre-Flight Estático
+        scan_errs = cls.compile_scan_lua(content)
+        if scan_errs and not force:
+            return False, f"Pre-Flight rejeitou o init gerado: {'; '.join(scan_errs)}"
+
+        temp_init = init_path.with_suffix(f".tmp_{os.getpid()}")
+        try:
+            temp_init.write_text(content, encoding="utf-8")
+
+            # 2. Pre-Flight de Compilação Real
+            compile_err = cls.true_compile_check(temp_init)
+            if compile_err and compile_err != "NO_RUNTIME" and not force:
+                temp_init.unlink(missing_ok=True)
+                return False, f"Pre-Flight de compilação rejeitou o init: {compile_err}"
+
+            if backup and init_path.exists():
+                cls.backup_workspace_state()
+
+            temp_init.replace(init_path)
+
+            # 3. Promove para o snapshot estável oficial
+            if not scan_errs and (not compile_err or compile_err == "NO_RUNTIME"):
+                cls.promote_to_stable_snapshot()
+
+            return True, f"Configuração soberana instalada e validada em {init_path}"
+        except Exception as e:
+            temp_init.unlink(missing_ok=True)
+            return False, f"Falha durante a instalação: {e}"
+
     # =========================================================================
     # 🗂️ PRESERVAÇÃO DE WORKSPACE, SESSÃO & GOLDEN SNAPSHOT
     # =========================================================================
@@ -359,8 +456,11 @@ class LiteXLEngine:
 
     @classmethod
     def get_template_files(cls) -> List[Path]:
-        cls.bootstrap_templates_if_missing()
-        return sorted(cls.get_template_dir().glob("*.lua"))
+        """Retorna todos os templates em ordem alfabética estrita."""
+        t_dir = cls.get_template_dir()
+        if not t_dir.exists():
+            return []
+        return sorted([f for f in t_dir.glob("*.lua") if f.is_file()])
 
     @classmethod
     def verify_templates(cls) -> Dict[str, Any]:
@@ -456,8 +556,34 @@ class LiteXLEngine:
             'core.log("=== SOVEREIGN BOOT OK ===")\n'
         )
         chunks.append(footer)
+        
+        init_buffer = []
+        # 1. Injeta probes primeiro (se existirem)
+        probe_files = cls.get_probe_files()
+        for pf in probe_files:
+            init_buffer.append(f"-- [PROBE / API GUARD: {pf.name}]")
+            init_buffer.append(pf.read_text(encoding="utf-8"))
+            init_buffer.append("")
 
-        return "".join(chunks)
+        # 2. Em seguida, injeta os templates modulares regulares (00_ a 15_)
+        template_files = cls.get_template_files()
+        init_buffer: List[str] = [
+            "-- =============================================================================",
+            "-- DOXOADE SOVEREIGN INIT — API GUARD & MODULAR ENGINE (SCOPED)",
+            f"-- Compilado em: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+            "-- =============================================================================\n",
+        ]
+
+        for tf in cls.get_template_files():
+            init_buffer.append(f"-- >>> [TEMPLATE: {tf.name}] >>>")
+            init_buffer.append("do")
+            init_buffer.append(tf.read_text(encoding="utf-8"))
+            init_buffer.append("end")
+            init_buffer.append(f"-- <<< [END TEMPLATE: {tf.name}] <<<\n")
+
+        init_buffer.append('local core = require "core"')
+        init_buffer.append('core.log("=== SOVEREIGN BOOT OK ===")\n')
+        return "\n".join(init_buffer)
 
     @classmethod
     def find_executable(cls) -> Optional[Path]:
@@ -1081,14 +1207,18 @@ class LiteXLEngine:
         )
 
     @classmethod
-    def install_sovereign_config(cls, force: bool = False, backup: bool = True) -> Tuple[bool, str]:
-        """Instalação com Pre-Flight Gatekeeper completo (Sintaxe + strict.lua)."""
+    def install_sovereign_config(cls, force: bool = False, backup: bool = True, **kwargs) -> Tuple[bool, str]:
+        """Instalação soberana atômica com Pre-Flight Gatekeeper e snapshot promotion."""
         init_path = cls.get_init_lua_path()
         init_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # Garante a pasta de artefatos do API Guard
+        guard_dir = cls.get_user_dir() / ".doxoade" / "api_guard"
+        guard_dir.mkdir(parents=True, exist_ok=True)
+
         content = cls.generate_sovereign_init()
 
-        # 1. Pre-Flight Estático em Memória
+        # 1. Pre-Flight Estático
         scan_errs = cls.compile_scan_lua(content)
         if scan_errs and not force:
             return False, f"Pre-Flight rejeitou o init gerado: {'; '.join(scan_errs)}"
@@ -1103,13 +1233,12 @@ class LiteXLEngine:
                 temp_init.unlink(missing_ok=True)
                 return False, f"Pre-Flight de compilação rejeitou o init: {compile_err}"
 
-            # 3. Gravação atômica segura
             if backup and init_path.exists():
                 cls.backup_workspace_state()
 
             temp_init.replace(init_path)
 
-            # Promove apenas se passou em tudo
+            # 3. Promove para o snapshot estável oficial
             if not scan_errs and (not compile_err or compile_err == "NO_RUNTIME"):
                 cls.promote_to_stable_snapshot()
 

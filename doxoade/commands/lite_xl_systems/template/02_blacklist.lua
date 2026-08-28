@@ -2,6 +2,8 @@
 -- =============================================================================
 -- 02. BLACKLIST UNIVERSAL (BLOQUEIA PASTAS ANTES DO SCANNER DO FILESYSTEM)
 -- =============================================================================
+local config = require "core.config"
+
 local ignored_patterns = {
   -- Bloqueio de Venvs (Raiz e Subpastas)
   "^%.?venv[/\\]",          "^venv[/\\]",
