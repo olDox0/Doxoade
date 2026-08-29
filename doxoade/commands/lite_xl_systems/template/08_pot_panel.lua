@@ -185,9 +185,15 @@ command.add(nil, {
   end,
 
   ["doxoade:open-log"] = function()
+    local log_path = USERDIR .. PATHSEP .. "session_log.txt"
+    -- 🛡️ Garante que o arquivo exista antes de abrir
+    local f = io.open(log_path, "a")
+    if f then f:close() end
+    
     local right_node = get_or_create_right_panel()
-    for _, doc in ipairs(core.docs) do
-      if doc:get_name() == "Log" or (doc.filename and doc.filename:find("Log")) then
+    for _, doc in ipairs(core.docs or {}) do
+      local dname = (doc.get_name and doc:get_name()) or doc.filename or ""
+      if dname == "Log" or dname:find("Log") or (doc.filename and doc.filename:find("Log")) then
         for _, v in ipairs(right_node.views) do
           if v.doc == doc then
             right_node.active_view = v
@@ -210,6 +216,7 @@ command.add(nil, {
     open_in_right_panel(USERDIR .. PATHSEP .. "init.lua")
     command.perform("doxoade:open-log")
     open_in_right_panel(dumppot_file, "Workspace Hub ativado na direita.")
+    open_in_right_panel(log_path, "📜 Session Log aberto no painel direito.")
   end
 })
 

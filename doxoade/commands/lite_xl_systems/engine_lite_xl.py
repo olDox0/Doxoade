@@ -111,29 +111,81 @@ class LiteXLEngine:
 
     @classmethod
     def get_template_files(cls) -> List[Path]:
-        """Retorna todos os templates em ordem alfabética estrita."""
+        """Retorna todos os templates em ordem alfabética estrita (ignora sandbox de teste)."""
         t_dir = cls.get_template_dir()
         if not t_dir.exists():
             return []
-        return sorted([f for f in t_dir.glob("*.lua") if f.is_file()])
+        return sorted([f for f in t_dir.glob("*.lua") if f.is_file() and f.name != "sandbox_module.lua"])
 
     @classmethod
     def generate_sovereign_init(cls) -> str:
-        """Gera o init.lua soberano com isolamento léxico (do ... end) eliminando o limite de 200 locals."""
+        """Gera o init.lua com tolerância a falhas e abertura automática de aba de erro na tela."""
         init_buffer: List[str] = [
             "-- =============================================================================",
-            "-- DOXOADE SOVEREIGN INIT — API GUARD & MODULAR ENGINE (SCOPED)",
+            "-- DOXOADE SOVEREIGN INIT — VISUAL ON-SCREEN ERROR REPORTER",
             f"-- Compilado em: {time.strftime('%Y-%m-%d %H:%M:%S')}",
             "-- =============================================================================\n",
+            "rawset(_G, '_DOXOADE_BOOT_REPORT', { total = 0, passed = 0, failed = 0, modules = {} })",
+            "local function _doxoade_safe_boot(name, fn)",
+            "  local report = rawget(_G, '_DOXOADE_BOOT_REPORT')",
+            "  report.total = report.total + 1",
+            "  local t0 = os.clock()",
+            "  local ok, err = xpcall(fn, debug.traceback)",
+            "  local elapsed = (os.clock() - t0) * 1000",
+            "  if ok then",
+            "    report.passed = report.passed + 1",
+            "    report.modules[name] = { status = 'PASS', time_ms = elapsed }",
+            "  else",
+            "    report.failed = report.failed + 1",
+            "    report.modules[name] = { status = 'FAIL', time_ms = elapsed, error = tostring(err) }",
+            "    local err_msg = string.format('[BOOT CRASH] ✖ Falha no módulo \'%s\':\\n%s', name, tostring(err))",
+            "    if core and core.error then core.error(err_msg) end",
+            "    -- 🚨 ABRE ABA VISUAL DE ERRO NA TELA DO LITE XL",
+            "    if core and core.add_thread then",
+            "      core.add_thread(function()",
+            "        coroutine.yield(0.1)",
+            "        local doc = core.open_doc()",
+            "        doc.filename = '🚨_ERRO_CRITICO_' .. name .. '.txt'",
+            "        local banner = string.format([[",
+            "================================================================================",
+            "🚨 DOXOADE ALERTA CRÍTICO: FALHA DE EXECUÇÃO DETECTADA NA INICIALIZAÇÃO",
+            "================================================================================",
+            "MÓDULO CULPADO : %s",
+            "ERRO DISPARADO : %s",
+            "",
+            "TRACEBACK FORENSE:",
+            "%s",
+            "================================================================================",
+            "]], name, tostring(err), debug.traceback('', 2))",
+            "        doc:insert(1, 1, banner)",
+            "        if core.root_view and core.root_view.open_doc then",
+            "          core.root_view:open_doc(doc)",
+            "        end",
+            "        core.redraw = true",
+            "      end)",
+            "    end",
+            "  end",
+            "end\n",
         ]
-
         for tf in cls.get_template_files():
             init_buffer.append(f"-- >>> [TEMPLATE: {tf.name}] >>>")
-            init_buffer.append("do")
+            init_buffer.append(f'_doxoade_safe_boot("{tf.name}", function()')
             init_buffer.append(tf.read_text(encoding="utf-8"))
-            init_buffer.append("end")
+            init_buffer.append("end)")
             init_buffer.append(f"-- <<< [END TEMPLATE: {tf.name}] <<<\n")
+        return "\n".join(init_buffer)
 
+    @classmethod
+    def generate_sandbox_init(cls, sandbox_file: Path) -> str:
+        """Gera o init.lua do Sandbox protegido pelo Horus Shield."""
+        init_buffer = [cls.generate_sovereign_init()]
+        if sandbox_file.exists():
+            init_buffer.append("\n-- =============================================================================")
+            init_buffer.append("-- 🧪 SANDBOX EXPERIMENTAL MODULE (HORUS PROTECTED)")
+            init_buffer.append("-- =============================================================================")
+            init_buffer.append(f'_doxoade_safe_boot("{sandbox_file.name}", function()')
+            init_buffer.append(sandbox_file.read_text(encoding="utf-8"))
+            init_buffer.append("end)\n")
         return "\n".join(init_buffer)
 
         # # 1. INJETA OS PROBES E O API GUARD NO TOPO
@@ -531,58 +583,54 @@ class LiteXLEngine:
         return report
 
     @classmethod
-    def generate_sovereign_init(cls) -> str:
-        """Gera o init.lua consolidado com rodapé canônico de handshake."""
-        files = cls.get_template_files()
-        chunks = []
+    def generate_sovereign_init(cls, quarantine_broken: bool = True) -> str:
+        """
+        Gera o init.lua soberano com isolamento por módulo.
+        Se quarantine_broken=True, os módulos que falharem no Shadow Audit são pulados automaticamente.
+        """
+        quarantined_files: Set[str] = set()
+        if quarantine_broken:
+            shadow_res = cls.run_shadow_audit()
+            if shadow_res.get("status") == "FAIL":
+                for fname, data in shadow_res.get("files", {}).items():
+                    if data["status"] == "FAIL":
+                        quarantined_files.add(fname)
 
-        header = (
-            "-- =============================================================================\n"
-            "-- ⚡ DOXOADE SOVEREIGN LITE XL INIT (AUTO-GERADO)\n"
-            f"-- Total de templates incorporados: {len(files)}\n"
-            "-- =============================================================================\n\n"
-        )
-        chunks.append(header)
-
-        for f in files:
-            content = f.read_text(encoding="utf-8", errors="replace")
-            chunks.append(f"-- 🧩 MÓDULO: {f.name}\n{content}\n\n")
-
-        # 🛡️ Rodapé garantido de Handshake de Boot (independente de templates opcionais)
-        footer = (
-            "-- =============================================================================\n"
-            "-- 🏁 FINALIZAÇÃO DO SOVEREIGN BOOT\n"
-            "-- =============================================================================\n"
-            'core.log("=== SOVEREIGN BOOT OK ===")\n'
-        )
-        chunks.append(footer)
-        
-        init_buffer = []
-        # 1. Injeta probes primeiro (se existirem)
-        probe_files = cls.get_probe_files()
-        for pf in probe_files:
-            init_buffer.append(f"-- [PROBE / API GUARD: {pf.name}]")
-            init_buffer.append(pf.read_text(encoding="utf-8"))
-            init_buffer.append("")
-
-        # 2. Em seguida, injeta os templates modulares regulares (00_ a 15_)
-        template_files = cls.get_template_files()
         init_buffer: List[str] = [
             "-- =============================================================================",
-            "-- DOXOADE SOVEREIGN INIT — API GUARD & MODULAR ENGINE (SCOPED)",
+            "-- DOXOADE SOVEREIGN INIT — ACTIVE SHIELD & AUTO-QUARANTINE ENGINE",
             f"-- Compilado em: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"-- Módulos em Quarentena: {len(quarantined_files)}",
             "-- =============================================================================\n",
+            "rawset(_G, '_DOXOADE_BOOT_REPORT', { total = 0, passed = 0, failed = 0, quarantined = 0, modules = {} })",
+            "local function _doxoade_safe_boot(name, fn)",
+            "  local report = rawget(_G, '_DOXOADE_BOOT_REPORT')",
+            "  report.total = report.total + 1",
+            "  local t0 = os.clock()",
+            "  local ok, err = xpcall(fn, debug.traceback)",
+            "  local elapsed = (os.clock() - t0) * 1000",
+            "  if ok then",
+            "    report.passed = report.passed + 1",
+            "    report.modules[name] = { status = 'PASS', time_ms = elapsed }",
+            "  else",
+            "    report.failed = report.failed + 1",
+            "    report.modules[name] = { status = 'FAIL', time_ms = elapsed, error = tostring(err) }",
+            "    if core and core.error then core.error(string.format('[BOOT CRASH] %s: %s', name, tostring(err))) end",
+            "  end",
+            "end\n",
         ]
 
         for tf in cls.get_template_files():
+            if tf.name in quarantined_files:
+                init_buffer.append(f"-- >>> [QUARANTINED TEMPLATE: {tf.name}] (Ignorado para manter a estabilidade) >>>\n")
+                continue
+
             init_buffer.append(f"-- >>> [TEMPLATE: {tf.name}] >>>")
-            init_buffer.append("do")
+            init_buffer.append(f'_doxoade_safe_boot("{tf.name}", function()')
             init_buffer.append(tf.read_text(encoding="utf-8"))
-            init_buffer.append("end")
+            init_buffer.append("end)")
             init_buffer.append(f"-- <<< [END TEMPLATE: {tf.name}] <<<\n")
 
-        init_buffer.append('local core = require "core"')
-        init_buffer.append('core.log("=== SOVEREIGN BOOT OK ===")\n')
         return "\n".join(init_buffer)
 
     @classmethod
@@ -1270,4 +1318,169 @@ class LiteXLEngine:
             subprocess.run(["pkill", "-9", "-f", "lite-xl"], capture_output=True, timeout=5)
 
         cls._clear_ipc_queue()
+
+    @classmethod
+    def get_sandbox_dir(cls) -> Path:
+        """Diretório de configuração isolado exclusivo para testes."""
+        sandbox_dir = cls.get_user_dir() / ".doxoade" / "sandbox"
+        sandbox_dir.mkdir(parents=True, exist_ok=True)
+        return sandbox_dir
+
+    @classmethod
+    def generate_sandbox_init(cls, test_module: Optional[Path] = None) -> str:
+        """Gera um init.lua focado em testes com API Guard em modo ENFORCE."""
+        init_buffer: List[str] = [
+            "-- =============================================================================",
+            "-- DOXOADE SANDBOX INIT — ISOLATED TESTING HARNESS (STRICT SECURE BOOT)",
+            f"-- Compilado em: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+            "-- =============================================================================\n",
+        ]
+
+        # 1. Probes e Guard
+        probes = [f for f in cls.get_template_files() if f.name.startswith("00_0")]
+        for pf in probes:
+            init_buffer.append(f"-- >>> [PROBE: {pf.name}] >>>")
+            init_buffer.append("do")
+            init_buffer.append(pf.read_text(encoding="utf-8"))
+            init_buffer.append("end")
+            init_buffer.append(f"-- <<< [END PROBE: {pf.name}] <<<\n")
+
+        # 2. Ativa modo ENFORCE no Sandbox
+        init_buffer.append('do\n  if rawget(_G, "DOXOADE_API") then\n    DOXOADE_API.mode = "enforce"\n  end\nend\n')
+
+        # 3. Templates base (00_ a 04_) para ter abas, cores e highlight
+        base_templates = [f for f in cls.get_template_files() if not f.name.startswith("00_0") and f.name != "sandbox_module.lua"]
+        for tf in base_templates:
+            init_buffer.append(f"-- >>> [BASE TEMPLATE: {tf.name}] >>>")
+            init_buffer.append("do")
+            init_buffer.append(tf.read_text(encoding="utf-8"))
+            init_buffer.append("end")
+            init_buffer.append(f"-- <<< [END BASE TEMPLATE: {tf.name}] <<<\n")
+
+        # 4. Módulo de Teste Experimental (sandbox_module.lua)
+        target_test = test_module or (cls.get_template_dir() / "sandbox_module.lua")
+        if target_test.exists():
+            init_buffer.append(f"-- >>> [TEST SUBJECT: {target_test.name}] >>>")
+            init_buffer.append("do")
+            init_buffer.append(target_test.read_text(encoding="utf-8"))
+            init_buffer.append("end")
+            init_buffer.append(f"-- <<< [END TEST SUBJECT] <<<\n")
+
+        return "\n".join(init_buffer)
+
+    @classmethod
+    def launch_sandbox(cls, target_file: Optional[Path] = None) -> Tuple[bool, str]:
+        """Inicia uma instância do Lite XL apontando estritamente para o ambiente Sandbox."""
+        exe = cls.find_executable()
+        if not exe:
+            return False, "Executável do Lite XL não foi localizado no sistema."
+
+        sandbox_dir = cls.get_sandbox_dir()
+        sandbox_dir.mkdir(parents=True, exist_ok=True)
+
+        target = target_file or (cls.get_template_dir() / "sandbox_module.lua")
+        init_content = cls.generate_sandbox_init(target)
+        (sandbox_dir / "init.lua").write_text(init_content, encoding="utf-8")
+
+        # Injeta LITE_USERDIR para forçar o Lite XL a carregar a sandbox
+        env = os.environ.copy()
+        env["LITE_USERDIR"] = str(sandbox_dir)
+
+        try:
+            subprocess.Popen([str(exe)], env=env)
+            return True, f"IDE Sandbox iniciada com sucesso em: {sandbox_dir}"
+        except Exception as e:
+            return False, f"Falha ao disparar processo Lite XL: {str(e)}"
+
+    # ============ SHADOW RUNNER ============
+    
+    @classmethod
+    def get_shadow_harness_path(cls) -> Path:
+        """Localiza o shadow_harness.lua de forma infalível."""
+        curr = Path(__file__).resolve()
+        # Sobe até encontrar a raiz 'doxoade'
+        for parent in curr.parents:
+            candidate = parent / "tools" / "lua_systems" / "shadow_harness.lua"
+            if candidate.exists():
+                return candidate
+            candidate_nested = parent / "doxoade" / "tools" / "lua_systems" / "shadow_harness.lua"
+            if candidate_nested.exists():
+                return candidate_nested
+        return curr.parent.parent.parent / "tools" / "lua_systems" / "shadow_harness.lua"
+
+    @classmethod
+    def run_shadow_audit(cls) -> Dict[str, Any]:
+        """Executa todos os templates no Shadow Harness do Lua 5.4 headless mock."""
+        harness_path = cls.get_shadow_harness_path()
+        templates = cls.get_template_files()
+        
+        runtime_info = cls.lua_runtime_info()
+        if not runtime_info or not harness_path.exists() or not templates:
+            return {
+                "status": "SKIPPED",
+                "reason": f"Harness: {'OK' if harness_path.exists() else 'NÃO ENCONTRADO (' + str(harness_path) + ')'}",
+                "files": {}
+            }
+        
+        lua_exe, _ = runtime_info
+        cmd = [str(lua_exe), str(harness_path)] + [str(t) for t in templates]
+        
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            encoding="utf-8",
+            errors="replace"
+        )
+        
+        output = proc.stdout
+        stderr_msg = proc.stderr.strip()
+        files_report: Dict[str, Dict[str, Any]] = {}
+        total_passed = 0
+        total_failed = 0
+        
+        in_report = False
+        for line in output.splitlines():
+            line = line.strip()
+            if line == "=== SHADOW_REPORT_START ===":
+                in_report = True
+                continue
+            elif line == "=== SHADOW_REPORT_END ===":
+                in_report = False
+                continue
+            
+            if in_report and "|" in line:
+                parts = line.split("|", 3)
+                status = parts[0]
+                fname = parts[1]
+                time_ms = float(parts[2]) if len(parts) > 2 else 0.0
+                err_msg = parts[3] if len(parts) > 3 else ""
+                
+                if status == "PASS":
+                    total_passed += 1
+                    files_report[fname] = {"status": "PASS", "time_ms": time_ms}
+                else:
+                    total_failed += 1
+                    files_report[fname] = {"status": "FAIL", "time_ms": time_ms, "error": err_msg}
+        
+        if len(files_report) == 0 and stderr_msg:
+            return {
+                "status": "FAIL",
+                "reason": f"Erro interno do Harness: {stderr_msg}",
+                "files": {"harness_bootstrap": {"status": "FAIL", "time_ms": 0, "error": stderr_msg}},
+                "total_templates": len(templates),
+                "passed": 0,
+                "failed": 1
+            }
+
+        return {
+            "status": "PASS" if total_failed == 0 else "FAIL",
+            "total_templates": len(templates),
+            "passed": total_passed,
+            "failed": total_failed,
+            "files": files_report
+        }
+
+
 

@@ -3,6 +3,7 @@
 -- 00. HEADER, MÓDULOS E LOGGER EM DISCO PERSISTENTE COM ANTI-FREEZE
 -- =============================================================================
 local core = require "core"
+local RootView = require "core.rootview"
 local common = require "core.common"
 local config = require "core.config"
 local style = require "core.style"
@@ -14,6 +15,45 @@ local DocView = require "core.docview"
 
 config.load_workspace = true
 config.max_project_files = 50000
+
+-- =============================================================================
+-- 🚨 DOXOADE RUNTIME VISUAL ALERT (HUD OSD)
+-- Mostra um banner vermelho no topo da tela sempre que houver falha de módulo.
+-- =============================================================================
+
+local rencache = rawget(_G, "rencache") or (pcall(require, "core.rencache") and require("core.rencache") or nil)
+local native_renderer = rawget(_G, "renderer") or (pcall(require, "renderer") and require("renderer") or nil)
+
+local rencache = rawget(_G, "rencache") or (pcall(require, "core.rencache") and require("core.rencache") or nil)
+local native_renderer = rawget(_G, "renderer") or (pcall(require, "renderer") and require("renderer") or nil)
+
+local function draw_rect_safe(x, y, w, h, color)
+  if rencache and rencache.draw_rect then
+    rencache.draw_rect(x, y, w, h, color)
+  elseif native_renderer and native_renderer.draw_rect then
+    native_renderer.draw_rect(x, y, w, h, color)
+  end
+end
+
+local original_rootview_draw = RootView.draw
+function RootView:draw(...)
+  original_rootview_draw(self, ...)
+
+  local report = rawget(_G, "_DOXOADE_BOOT_REPORT")
+  if report and report.failed and report.failed > 0 then
+    local font = require("core.style").font
+    local w = self.size.x
+    local banner_h = 26
+
+    -- Banner Vermelho de Alerta no Topo
+    draw_rect_safe(0, 0, w, banner_h, { 220, 38, 38, 240 })
+    
+    local msg = string.format("🚨 [DOXOADE ALERT] %d módulo(s) falharam no boot! Verifique o log ou 'Ctrl+Alt+Shift+L'", report.failed)
+    if rencache and rencache.draw_text then
+      rencache.draw_text(font, msg, 14, 6, { 255, 255, 255, 255 })
+    end
+  end
+end
 
 -- =============================================================================
 -- 🛡️ GUARDA DE ESCOPO RAIZ (DECLARADAS FORA DE QUALQUER BLOCO OU PCALL)

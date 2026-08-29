@@ -10,6 +10,11 @@ local RootView = require "core.rootview"
 local common = require "core.common"
 local keymap = require "core.keymap"
 
+if rawget(_G, "DOXOADE_TAB_CONTEXT_LOADED") then
+  return
+end
+rawset(_G, "DOXOADE_TAB_CONTEXT_LOADED", true)
+
 -- 🛡️ Polyfill de Renderização
 local rencache = rawget(_G, "rencache") or (pcall(require, "core.rencache") and require("core.rencache") or nil)
 local native_renderer = rawget(_G, "renderer") or (pcall(require, "renderer") and require("renderer") or nil)
@@ -17,26 +22,34 @@ local native_renderer = rawget(_G, "renderer") or (pcall(require, "renderer") an
 -- =====================================================
 -- 🧂 QUOTING E ABERTURA SEGURA EM FILE MANAGER
 -- =====================================================
-local function quote_windows_path(path)
-  return '"' .. tostring(path):gsub('"', '""') .. '"'
-end
+local function get_active_paths(view)
+  view = view or core.active_view
+  if not view or not view.doc or not view.doc.filename then return nil end
+  local raw_path = view.doc.filename
+  local abs_path = system.absolute_path(raw_path) or raw_path
+  local clean_abs = abs_path:gsub("[/\\]", PATHSEP or "\\")
+  local fname = raw_path:match("[/\\]([^/\\]+)$") or raw_path
 
-local function quote_posix_path(path)
-  return "'" .. tostring(path):gsub("'", "'\\''") .. "'"
-end
-
-local function open_in_file_manager(path)
-  if system.show_in_file_manager then
-    system.show_in_file_manager(path)
-    return
+  local rel_path = abs_path:gsub("\\", "/")
+  if core.project_directories then
+    for _, proj in ipairs(core.project_directories) do
+      local ppath = tostring(type(proj) == "table" and (proj.path or proj.name) or proj or ""):gsub("\\", "/")
+      if ppath ~= "" and abs_path:sub(1, #ppath) == ppath then
+        rel_path = abs_path:sub(#ppath + 1):gsub("^/", "")
+        break
+      end
+    end
   end
+  rel_path = rel_path:gsub("/", PATHSEP or "\\")
+  local dir_path = abs_path:match("^(.*)[/\\]") or abs_path
 
-  if PLATFORM == "Windows" then
-    system.exec("explorer.exe /select," .. quote_windows_path(path))
-  else
-    local dir_path = tostring(path):match("^(.*)[/\\]") or path
-    system.exec("xdg-open " .. quote_posix_path(dir_path))
-  end
+  return {
+    filename = fname,
+    relative = rel_path,
+    absolute = clean_abs,
+    dir = dir_path,
+    raw = abs_path
+  }
 end
 
 local function draw_rect_safe(x, y, w, h, color)
@@ -458,184 +471,115 @@ local function get_active_doc_info()
   }
 end
 
--- -----------------------------------------------------------------------------
--- Registro de Comandos
--- -----------------------------------------------------------------------------
-command.add(nil, {
-  ["doxoade:tab-open-in-explorer"] = function()
-    local info = get_active_doc_info()
-    if info then
-      open_in_explorer(info.dir_path)
-    else
-      core.error("Nenhum arquivo ativo para abrir no Explorer.")
-    end
-  end,
-
+-- =============================================================================
+-- REGISTRO DOS COMANDOS
+-- =============================================================================
+command.add("core.docview", {
   ["doxoade:tab-copy-filename"] = function()
-    local info = get_active_doc_info()
-    if info then
-      copy_to_clipboard(info.file_name)
-    else
-      core.error("Nenhum arquivo ativo.")
-    end
-  end,
-
-  ["doxoade:tab-copy-directory"] = function()
-    local info = get_active_doc_info()
-    if info then
-      copy_to_clipboard(info.dir_path)
-    else
-      core.error("Nenhum arquivo ativo.")
-    end
-  end,
-
-  ["doxoade:tab-copy-full-path"] = function()
-    local info = get_active_doc_info()
-    if info then
-      copy_to_clipboard(info.abs_path)
-    else
-      core.error("Nenhum arquivo ativo.")
+    local p = get_active_paths()
+    if p then
+      system.set_clipboard(p.filename)
+      core.log("Copiado (Nome): " .. p.filename)
     end
   end,
 
   ["doxoade:tab-copy-relative-path"] = function()
-    local info = get_active_doc_info()
-    if not info then
-      core.error("Nenhum arquivo ativo.")
-      return
+    local p = get_active_paths()
+    if p then
+      system.set_clipboard(p.relative)
+      core.log("Copiado (Proj. Address): " .. p.relative)
     end
-    -- Tenta calcular caminho relativo ao primeiro projeto
-    local rel = info.abs_path
-    if core.project_directories and #core.project_directories > 0 then
-      for _, proj in ipairs(core.project_directories) do
-        local ppath = type(proj) == "table" and (proj.path or proj.name) or proj
-        if ppath and type(ppath) == "string" then
-          local clean_proj = tostring(ppath):gsub("\\", "/")
-          local clean_abs = info.abs_path:gsub("\\", "/")
-          if clean_abs:sub(1, #clean_proj) == clean_proj then
-            rel = clean_abs:sub(#clean_proj + 2)
-            break
-          end
-        end
-      end
-    end
-    copy_to_clipboard(rel)
   end,
-})
 
--- -----------------------------------------------------------------------------
--- Context Menu nas Abas (via plugin contextmenu)
--- -----------------------------------------------------------------------------
--- 📋 Registra os itens do menu de contexto
-pcall(function()
-  local contextmenu = require "plugins.contextmenu"
-  if not contextmenu then return end
+  ["doxoade:tab-copy-full-path"] = function()
+    local p = get_active_paths()
+    if p then
+      system.set_clipboard(p.absolute)
+      core.log("Copiado (Total Address): " .. p.absolute)
+    end
+  end,
 
-  contextmenu:register("core.docview", {
-    contextmenu.DIVIDER,
-    { text = "Copy Name",        command = "doxoade:tab-copy-filename" },
-    { text = "Proj. Address",    command = "doxoade:tab-copy-relative-path" },
-    { text = "Total Address",    command = "doxoade:tab-copy-full-path" },
-    contextmenu.DIVIDER,
-    { text = "Open in Explorer", command = "doxoade:tab-open-in-explorer" },
-  })
-end)
+  ["doxoade:tab-open-in-explorer"] = function()
+    local p = get_active_paths()
+    if p then
+      open_in_file_manager(p.raw)
+      core.log("Explorer aberto em: " .. p.dir)
+    end
+  end,
 
-command.add("core.docview", {
   ["doxoade:copy-path-menu"] = function()
-    local info = get_active_doc_info()
-    if not info then
-      core.error("Nenhum arquivo ativo para copiar endereço.")
+    local paths = get_active_paths()
+    if not paths then
+      core.error("Nenhum documento ativo para copiar caminho.")
       return
     end
 
-    local items = {
-      {
-        label = "📋 [1] Copy Name        : " .. info.filename,
-        value = info.filename,
-        action = "copy",
-        msg = "Copiado (Copy Name): " .. info.filename
-      },
-      {
-        label = "📂 [2] Proj. Address    : " .. info.proj_address,
-        value = info.proj_address,
-        action = "copy",
-        msg = "Copiado (Proj. Address): " .. info.proj_address
-      },
-      {
-        label = "📍 [3] Total Address    : " .. info.total_address,
-        value = info.total_address,
-        action = "copy",
-        msg = "Copiado (Total Address): " .. info.total_address
-      },
-      {
-        label = "🧭 [4] Open in Explorer : Revelar pasta no Explorer",
-        value = info.total_address,
-        action = "explorer",
-        msg = "Explorer aberto em: " .. info.dir_path
-      },
-    }
-
-    local labels = {}
-    local map = {}
-    for _, item in ipairs(items) do
-      table.insert(labels, item.label)
-      map[item.label] = item
-    end
-
-    core.command_view:enter("Copiar Endereço / Nome do Arquivo", {
-      submit = function(text, item)
-        local selected = map[text] or (item and map[item.text or item])
-
-        -- Suporte a seleção rápida digitando apenas o número (1, 2, 3, 4)
-        if not selected then
-          local num = tonumber(tostring(text):match("^%d+"))
-          if num and items[num] then
-            selected = items[num]
-          end
+    core.command_view:enter("Copiar Endereço (1: Nome, 2: Relativo, 3: Completo, 4: Explorer)", {
+      submit = function(text)
+        local opt = tostring(text):match("%d") or text:lower()
+        if opt == "1" or opt:find("nome") or opt:find("name") then
+          system.set_clipboard(paths.filename)
+          core.log("Copiado (Nome): " .. paths.filename)
+        elseif opt == "2" or opt:find("rel") or opt:find("proj") then
+          system.set_clipboard(paths.relative)
+          core.log("Copiado (Proj. Address): " .. paths.relative)
+        elseif opt == "3" or opt:find("comp") or opt:find("total") then
+          system.set_clipboard(paths.absolute)
+          core.log("Copiado (Total Address): " .. paths.absolute)
+        elseif opt == "4" or opt:find("exp") then
+          open_in_file_manager(paths.raw)
+          core.log("Explorer aberto em: " .. paths.dir)
         end
-
-        if selected then
-          if selected.action == "copy" then
-            if system.set_clipboard then
-              system.set_clipboard(selected.value)
-              core.log(selected.msg)
-            end
-          elseif selected.action == "explorer" then
-            command.perform("doxoade:tab-open-in-explorer")
-          end
-        end
-      end,
-      suggest = function(text)
-        return common.fuzzy_match(labels, text)
       end
     })
-  end,
+  end
+})
 
-  -- Comandos Diretos One-Shot
-  ["doxoade:tab-copy-filename"] = function()
-    local info = get_active_doc_info()
-    if info and system.set_clipboard then
-      system.set_clipboard(info.filename)
-      core.log("Copiado (Nome): " .. info.filename)
-    end
-  end,
+-- =============================================================================
+-- REGISTRO NATIVO NO CONTEXTMENU (Uma Única Chamada para core.docview)
+-- =============================================================================
+pcall(function()
+  local contextmenu = require "plugins.contextmenu" or require "core.contextmenu"
+  if contextmenu and contextmenu.register then
+    contextmenu:register("core.docview", {
+      contextmenu.DIVIDER,
+      { text = "Copy Name", command = "doxoade:tab-copy-filename" },
+      { text = "Proj. Address", command = "doxoade:tab-copy-relative-path" },
+      { text = "Total Address", command = "doxoade:tab-copy-full-path" },
+      contextmenu.DIVIDER,
+      { text = "Open in Explorer", command = "doxoade:tab-open-in-explorer" },
+    })
+  end
+end)
 
-  ["doxoade:tab-copy-relative-path"] = function()
-    local info = get_active_doc_info()
-    if info and system.set_clipboard then
-      system.set_clipboard(info.proj_address)
-      core.log("Copiado (Proj. Address): " .. info.proj_address)
+-- Hub interativo de atalho
+command.add("core.docview", {
+  ["doxoade:copy-path-menu"] = function()
+    local paths = get_active_paths()
+    if not paths then
+      core.error("Nenhum documento ativo para copiar caminho.")
+      return
     end
-  end,
 
-  ["doxoade:tab-copy-full-path"] = function()
-    local info = get_active_doc_info()
-    if info and system.set_clipboard then
-      system.set_clipboard(info.total_address)
-      core.log("Copiado (Total Address): " .. info.total_address)
-    end
-  end,
+    core.command_view:enter("Copiar Endereço (1: Nome, 2: Relativo, 3: Completo, 4: Explorer)", {
+      submit = function(text)
+        local opt = tostring(text):match("%d") or text:lower()
+        if opt == "1" or opt:find("nome") or opt:find("name") then
+          system.set_clipboard(paths.filename)
+          core.log("Copiado (Nome): " .. paths.filename)
+        elseif opt == "2" or opt:find("rel") or opt:find("proj") then
+          system.set_clipboard(paths.relative)
+          core.log("Copiado (Proj. Address): " .. paths.relative)
+        elseif opt == "3" or opt:find("comp") or opt:find("total") then
+          system.set_clipboard(paths.absolute)
+          core.log("Copiado (Total Address): " .. paths.absolute)
+        elseif opt == "4" or opt:find("exp") then
+          open_in_file_manager(paths.raw)
+          core.log("Explorer aberto em: " .. paths.dir)
+        end
+      end
+    })
+  end
 })
 
 -- -----------------------------------------------------------------------------

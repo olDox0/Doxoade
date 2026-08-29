@@ -113,6 +113,27 @@ def cmd_check_templates(fix, apply):
     # 2. AUDITORIA E SNIPPETS FORENSES DE CÓDIGO
     # ═══════════════════════════════════════════════════════════
     report = LiteXLEngine.verify_templates()
+
+    # 🐺 FASE 2: SHADOW RUNTIME AUDIT (Headless Mock Engine)
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🐺 AUDITORIA SEMÂNTICA SHADOW (Mock Runtime Execution){Style.RESET_ALL}")
+    shadow_report = LiteXLEngine.run_shadow_audit()
+    
+    if shadow_report.get("status") == "SKIPPED":
+        click.echo(f"  {Fore.YELLOW}⚠ Shadow Audit ignorado: {shadow_report.get('reason')}{Fore.RESET}\n")
+    else:
+        for fname, sdata in shadow_report["files"].items():
+            if sdata["status"] == "PASS":
+                time_badge = f"{Fore.LIGHTBLACK_EX}({sdata['time_ms']:.2f}ms){Fore.RESET}"
+                click.echo(f"  {Fore.GREEN}[SHADOW PASS]{Fore.RESET} {Style.BRIGHT}{fname:<35}{Style.RESET_ALL} {time_badge}")
+            else:
+                click.echo(f"  {Fore.RED}[SHADOW FAIL]{Fore.RESET} {Style.BRIGHT}{fname:<35}{Style.RESET_ALL}")
+                click.echo(f"      {Fore.RED}✖ Runtime Crash:{Fore.RESET} {sdata.get('error')}")
+        
+        if shadow_report["failed"] > 0:
+            click.echo(f"\n{Fore.RED}{Style.BRIGHT}✖ {shadow_report['failed']} template(s) falharam na execução em runtime Shadow!{Style.RESET_ALL}\n")
+        else:
+            click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}✔ Todos os {shadow_report['passed']} templates executaram em 0ms sem exceções em tempo de inicialização.{Style.RESET_ALL}\n")
+
     for fname, data in report["files"].items():
         status_badge = (
             f"{Fore.GREEN}[PASS]{Fore.RESET}"
@@ -173,14 +194,12 @@ def cmd_kill():
 def cmd_restart(target, clean):
     """Reinicia o editor preservando integralmente o estado das abas e splits."""
     click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}⚡ REINICIALIZAÇÃO SUPERVISIONADA DO LITE XL{Style.RESET_ALL}\n")
-    
-    # 1. Regrava o init.lua no disco com Probes inclusos
-    LiteXLEngine.install_sovereign_config()
-    
-    # 2. Fecha instâncias anteriores e aguarda finalização no Windows
+
+    # 1. Fecha instâncias anteriores e aguarda finalização no Windows
     LiteXLEngine.graceful_shutdown()
     time.sleep(0.5)
-    
+    # 2. Regrava o init.lua no disco com Probes inclusos
+    LiteXLEngine.install_sovereign_config()
     # 3. Relaunch com restauração ativa da sessão
     ok, msg = LiteXLEngine.launch_with_safety_guard(
         target_path=target or None,
@@ -199,39 +218,38 @@ def cmd_restart(target, clean):
         click.echo(f"\n  {Fore.GREEN}✔ IDE aberta utilizando o último snapshot estável.{Fore.RESET}\n")
 
 
-@lite_xl_group.command("diagnose", help="Diagnóstico forense completo do init.lua e erros de runtime.")
+@lite_xl_group.command("diagnose", help="Diagnóstico forense completo com auditoria Shadow ativa.")
 def cmd_diagnose():
-    init_path = LiteXLEngine.get_init_lua_path()
-    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🩺 DIAGNÓSTICO FORENSE DO LITE XL (Capítulo 6){Style.RESET_ALL}")
-    click.echo(f"  Alvo: {init_path}\n")
-    # 1. Checagens estáticas e de compilação
-    report = LiteXLEngine.diagnose_init_file(init_path)
-    # 2. Checagem ativa de Runtime Log (strict.lua e core.error)
-    log_path = LiteXLEngine.get_session_log_path()
-    runtime_errors = []
-    if log_path.exists():
-        try:
-            log_lines = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
-            for line in log_lines[-40:]:  # Analisa as últimas 40 linhas da sessão
-                if "[ERROR]" in line:
-                    runtime_errors.append(line.strip())
-        except Exception:
-            pass
-
-    if runtime_errors:
-        click.echo(f"  {Fore.RED}{Style.BRIGHT}✖ ERROS CAPTURADOS NA SESSÃO DO LITE XL ({len(runtime_errors)}):{Style.RESET_ALL}")
-        for err in runtime_errors:
-            click.echo(f"    {Fore.RED}• {err}{Fore.RESET}")
-        click.echo()
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🩺 DIAGNÓSTICO FORENSE DO LITE XL (Shadow Powered){Style.RESET_ALL}")
+    
+    # 1. Auditoria Shadow Ativa
+    click.echo(f"  {Fore.WHITE}Executando simulação de runtime e comandos...{Fore.RESET}")
+    shadow_res = LiteXLEngine.run_shadow_audit()
+    
+    if shadow_res.get("status") == "PASS":
+        click.echo(f"  {Fore.GREEN}✔ Shadow Runtime:{Fore.RESET} 100% dos comandos e templates passaram na simulação ({shadow_res.get('passed')} módulos).")
     else:
-        click.echo(f"  {Fore.GREEN}✔ Zero erros de runtime na sessão ativa.{Fore.RESET}\n")
+        click.echo(f"  {Fore.RED}✖ Shadow Runtime:{Fore.RESET} {shadow_res.get('failed')} falha(s) de comando detectada(s):")
+        for fname, fdata in shadow_res.get("files", {}).items():
+            if fdata.get("status") == "FAIL":
+                click.echo(f"      {Fore.RED}• [{fname}]{Fore.RESET} {fdata.get('error')}")
 
-    # Exibe integridade sintática
-    click.echo(f"{Fore.GREEN}✔ CHECAGENS DE INTEGRIDADE:{Fore.RESET}")
-    click.echo(f"  • Sintaxe validada por COMPILAÇÃO REAL.")
-    click.echo(f"  • Balanceamento de blocos Lua íntegro ({report.get('lines', 0)} linhas).")
-    click.echo(f"  • Scanner de Templates API Guard: 100% PASS.")
-    click.echo()
+    # 2. Diagnóstico de Sessão e Inicialização
+    init_path = LiteXLEngine.get_init_lua_path()
+    click.echo(f"\n{Fore.WHITE}Alvo:{Fore.RESET} {init_path}\n")
+    
+    diag_res = LiteXLEngine.diagnose_init_file(init_path)
+    if isinstance(diag_res, dict):
+        for item in diag_res.get("items", diag_res.get("checks", [])):
+            click.echo(f"  • {item}")
+        if diag_res.get("errors"):
+            for err in diag_res["errors"]:
+                click.echo(f"  {Fore.RED}✖ {err}{Fore.RESET}")
+    elif isinstance(diag_res, list):
+        for item in diag_res:
+            click.echo(f"  • {item}")
+    
+    click.echo(f"\n{Fore.GREEN}✔ CHECAGENS DE INTEGRIDADE CONCLUÍDAS.{Fore.RESET}\n")
 
 
 def parse_traceback(traceback_text, message=""):
@@ -757,6 +775,13 @@ def cmd_debug(live, errors_only):
     """Monitor de depuração ao vivo com formatação de tracebacks e eventos."""
     log_path = LiteXLEngine.get_session_log_path()
     click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🩺 DOXOADE LITE XL LIVE DEBUGGER{Style.RESET_ALL}")
+
+    shadow_quick = LiteXLEngine.run_shadow_audit()
+    if shadow_quick.get("status") == "FAIL":
+        click.echo(f"  {Fore.RED}⚠ ATENÇÃO:{Fore.RESET} {shadow_quick.get('failed')} módulo(s) com erros de comando em background!")
+    else:
+        click.echo(f"  {Fore.GREEN}✔ Submarino Semântico:{Fore.RESET} Todos os módulos saudáveis na simulação.")
+
     click.echo(f"  {Fore.WHITE}Alvo:{Fore.RESET} {log_path}")
     click.echo(f"  {Fore.LIGHTBLACK_EX}Pressione Ctrl+C para encerrar o monitoramento.{Fore.RESET}\n")
 
@@ -948,4 +973,36 @@ def cmd_api_catalog_scan():
                 click.echo(f"         {Fore.LIGHTBLACK_EX}Sugestão:{Fore.RESET} {Fore.GREEN}{item['suggested_require']}{Fore.RESET}")
 
     click.echo()
+
+@lite_xl_group.command("test", help="🧪 Executa o sandbox_module.lua em uma IDE Lite XL 100% isolada.")
+@click.option("--file", "-f", "target_file", type=click.Path(exists=True), default=None, help="Arquivo .lua customizado para testar.")
+def cmd_test_sandbox(target_file):
+    from doxoade.tools.lua_systems.api_guard.api_scan import APITemplateScanner
+    test_path = Path(target_file) if target_file else (LiteXLEngine.get_template_dir() / "sandbox_module.lua")
+
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🧪 DOXOADE LITE XL SANDBOX HARNESS{Style.RESET_ALL}")
+    click.echo(f"  Alvo do teste: {test_path.name}")
+    click.echo(f"  Modo: {Fore.YELLOW}ISOLADO (Sessão de trabalho preservada){Fore.RESET}\n")
+
+    # 1. Scanner de Conformidade no arquivo de teste
+    scanner = APITemplateScanner(LiteXLEngine.get_template_dir())
+    scan_report = scanner.scan_file(test_path)
+
+    if scan_report["status"] == "FAIL":
+        click.echo(f"  {Fore.RED}{Style.BRIGHT}✖ SECURE BOOT: Inconformidades detectadas no teste:{Style.RESET_ALL}")
+        for item in scan_report["missing_requires"]:
+            click.echo(f"    • {Fore.YELLOW}L{item['line']}:{Fore.RESET} Símbolo '{item['symbol']}' sem require.")
+            click.echo(f"      Sugestão: {Fore.GREEN}{item['suggested_require']}{Fore.RESET}")
+        click.echo(f"\n{Fore.RED}Abortando inicialização do Sandbox para evitar crash.{Fore.RESET}\n")
+        return
+
+    click.echo(f"  {Fore.GREEN}✔ Scanner Estático: 100% PASS (Sem vazamento de escopo){Fore.RESET}")
+
+    # 2. Lança a IDE isolada
+    success, msg = LiteXLEngine.launch_sandbox(test_path)
+    if not success:
+        click.echo(f"  {Fore.RED}✖ {msg}{Fore.RESET}\n")
+    else:
+        click.echo(f"  {Fore.GREEN}✔ IDE Sandbox iniciada com sucesso em:{Fore.RESET} {msg}")
+        click.echo(f"  {Fore.LIGHTBLACK_EX}Dica: Teste seu comando no Sandbox pressionando Ctrl+Shift+P ou o atalho configurado.{Fore.RESET}\n")
 

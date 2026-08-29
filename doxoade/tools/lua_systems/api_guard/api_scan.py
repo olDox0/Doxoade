@@ -65,8 +65,9 @@ class APITemplateScanner:
             "error", "assert", "select", "next", "setmetatable", "getmetatable",
             "dofile", "loadfile", "require", "math", "string", "table", "io", "os",
             "debug", "coroutine", "package", "utf8", "DOXOADE_API", "_DOXOADE_API_PROBE",
-            "UIForge", "PanelSlots", "AuditState", "HoverTooltip", "FloatingMenu"
+            "PanelSlots", "AuditState", "HoverTooltip", "FloatingMenu"
         }
+        # removidos: "UIForge", 
 
         missing_requires: List[Dict[str, Any]] = []
         suspicious_patches: List[Dict[str, Any]] = []
