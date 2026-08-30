@@ -98,105 +98,69 @@ local function save_sovereign_session()
 end
 
 local function restore_sovereign_session()
-  local info = system.get_file_info(session_file)
-  if not info then return end
-
-  local ok, session = pcall(dofile, session_file)
-  if not ok or type(session) ~= "table" or not session.panels or #session.panels == 0 then
-    return
-  end
-
-  local leaves = get_doc_leaves(core.root_view.root_node)
-  local total_reopened = 0
-  local primary_node = leaves[1] or core.root_view.root_node:get_primary_node()
-
-  for p_idx, panel_data in ipairs(session.panels) do
-    local target_node = nil
-    if p_idx == 1 then
-      target_node = primary_node
-    elseif p_idx == 2 then
-      leaves = get_doc_leaves(core.root_view.root_node)
-      if #leaves >= 2 then
-        target_node = leaves[2]
-      else
-        target_node = primary_node:split("right")
-      end
+    local info = system.get_file_info(session_file)
+    if not info then return end
+    local ok, session = pcall(dofile, session_file)
+    if not ok or type(session) ~= "table" or not session.panels or #session.panels == 0 then
+        return
     end
 
-    if target_node then
-      local active_to_set = nil
-      for _, file_info in ipairs(panel_data.files or {}) do
-        if file_info.filename and file_info.filename ~= "" then
-          local target_fn = system.absolute_path(file_info.filename) or file_info.filename
-          local clean_target = target_fn:lower():gsub("\\", "/")
+    local primary_node = (function()
+        local leaves = get_doc_leaves(core.root_view.root_node)
+        return leaves[1] or core.root_view.root_node:get_primary_node()
+    end)()
 
-          -- 🛡️ Checa se o arquivo já está aberto neste painel para NUNCA duplicar
-          local existing_view = nil
-          for _, v in ipairs(target_node.views or {}) do
-            if v and v.doc and v.doc.filename then
-              local abs_v = (system.absolute_path(v.doc.filename) or v.doc.filename):lower():gsub("\\", "/")
-              if abs_v == clean_target then
-                existing_view = v
-                break
-              end
-            end
-          end
-
-          if existing_view then
-            if panel_data.active_file then
-              local clean_act = (system.absolute_path(panel_data.active_file) or panel_data.active_file):lower():gsub("\\", "/")
-              if clean_act == clean_target then
-                active_to_set = existing_view
-              end
-            end
-          else
-            local finfo = system.get_file_info(target_fn)
-            if finfo then
-              local doc = core.open_doc(target_fn)
-              if doc then
-                local view = DocView(doc)
-                target_node:add_view(view)
-                total_reopened = total_reopened + 1
-
-                if file_info.line and file_info.line > 1 then
-                  pcall(function()
-                    doc:set_selection(file_info.line, file_info.col or 1, file_info.line, file_info.col or 1)
-                  end)
-                end
-
-                if panel_data.active_file then
-                  local clean_act = (system.absolute_path(panel_data.active_file) or panel_data.active_file):lower():gsub("\\", "/")
-                  if clean_act == clean_target then
-                    active_to_set = view
-                  end
-                end
-              end
-            end
-          end
+    for p_idx, panel_data in ipairs(session.panels) do
+        local target_node = nil
+        if p_idx == 1 then
+            target_node = primary_node
+        elseif p_idx == 2 then
+            local leaves = get_doc_leaves(core.root_view.root_node)
+            target_node = (#leaves >= 2) and leaves[2] or primary_node:split("right")
         end
-      end
 
-      if active_to_set then
-        target_node.active_view = active_to_set
-      end
+        if target_node then
+            -- ⚡ LOOKUP MAP pré-computado (1x, não N×M)
+            local existing_map = {}
+            for _, v in ipairs(target_node.views or {}) do
+                if v and v.doc and v.doc.filename then
+                    local key = (system.absolute_path(v.doc.filename) or v.doc.filename):lower():gsub("\\", "/")
+                    existing_map[key] = v
+                end
+            end
 
-      -- Remove documento em branco não salvo inicial se arquivos reais foram abertos
-      if #target_node.views > 1 then
-        for v_idx = #target_node.views, 1, -1 do
-          local v = target_node.views[v_idx]
-          if v and v.doc and not v.doc.filename and not v.doc:is_dirty() then
-            table.remove(target_node.views, v_idx)
-            break
-          end
+            local active_to_set = nil
+            for _, file_info in ipairs(panel_data.files or {}) do
+                if file_info.filename and file_info.filename ~= "" then
+                    local clean_target = (system.absolute_path(file_info.filename) or file_info.filename):lower():gsub("\\", "/")
+                    local existing_view = existing_map[clean_target]
+
+                    if existing_view then
+                        -- Foca a aba se ela for a ativa do painel
+                        if panel_data.active_file then
+                            local clean_act = (system.absolute_path(panel_data.active_file) or panel_data.active_file):lower():gsub("\\", "/")
+                            if clean_act == clean_target then
+                                active_to_set = existing_view
+                            end
+                        end
+                    else
+                        -- Reabre o arquivo se não estiver no painel
+                        local ok_open, doc = pcall(core.open_doc, file_info.filename)
+                        if ok_open and doc then
+                            if file_info.line and file_info.col then
+                                pcall(function() doc:set_selection(file_info.line, file_info.col) end)
+                            end
+                            target_node:add_view(DocView(doc))
+                        end
+                    end
+                end
+            end
+            
+            if active_to_set then
+                core.set_active_view(active_to_set)
+            end
         end
-      end
     end
-  end
-
-  if total_reopened > 0 then
-    core.redraw = true
-    core.log(string.format("Sessão Soberana restaurada: %d aba(s) preservadas.", total_reopened))
-  end
 end
 
 -- =============================================================================

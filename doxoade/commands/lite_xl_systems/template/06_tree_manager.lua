@@ -23,19 +23,24 @@ local function normalize_path(path)
   return system.absolute_path(str) or str
 end
 
+local _created_dirs = {}
 local function ensure_parent_directories(file_path)
-  local dir = file_path:match("^(.*)[/\\]")
-  if dir and dir ~= "" then
+    local dir = file_path:match("^(.*)[/\\]")
+    if not dir or dir == "" or _created_dirs[dir] then return end
+    
     local current = ""
     for part in dir:gmatch("[^/\\]+") do
-      if current == "" and part:find("^[a-zA-Z]:") then
-        current = part
-      else
-        current = (current == "" and "" or current .. PATHSEP) .. part
-        pcall(function() system.mkdir(current) end)
-      end
+        if current == "" and part:find("^[a-zA-Z]:") then
+            current = part
+        else
+            current = (current == "" and "" or current .. PATHSEP) .. part
+            if not _created_dirs[current] then
+                pcall(system.mkdir, current)
+                _created_dirs[current] = true
+            end
+        end
     end
-  end
+    _created_dirs[dir] = true
 end
 
 local function get_tree_target_dir()

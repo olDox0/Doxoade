@@ -1,201 +1,131 @@
 -- doxoade/commands/lite_xl_systems/template/00_01_api_probe.lua
 -- =============================================================================
--- DOXOADE API GUARD — RUNTIME PROBE (Estágio 00.1: Scanner Atômico de Boot)
+-- 🧭 DOXOADE API GUARD — RUNTIME PROBE (ASYNC & ZERO-BOOT OVERHEAD)
 -- =============================================================================
-
-local core = rawget(_G, "core") or (pcall(require, "core") and require("core") or {})
-local system = rawget(_G, "system") or (pcall(require, "system") and require("system") or {})
+local core = rawget(_G, "core") or (pcall(require, "core") and require("core") or nil)
+local system = rawget(_G, "system") or (pcall(require, "system") and require("system") or nil)
 
 local user_dir = USERDIR or "."
 local sep = PATHSEP or "/"
-local doxoade_dir = (user_dir .. sep .. ".doxoade"):gsub("\\", "/")
-local probe_dir = (doxoade_dir .. sep .. "api_guard"):gsub("\\", "/")
-
--- Garante pastas universalmente
-pcall(function() system.mkdir(doxoade_dir) end)
-pcall(function() system.mkdir(probe_dir) end)
-
+local doxoade_dir = (user_dir .. sep .. ".doxoade"):gsub("[/\\]", sep)
+local probe_dir = (doxoade_dir .. sep .. "api_guard"):gsub("[/\\]", sep)
 local probe_out_json = probe_dir .. sep .. "runtime_probe.json"
 
 local ProbeEngine = {
   version = rawget(_G, "VERSION") or "unknown",
   platform = rawget(_G, "PLATFORM") or "unknown",
-  timestamp = os.time(),
+  timestamp = os.date("%Y-%m-%d %H:%M:%S"),
   results = {},
-  summary = { present = 0, missing = 0, type_mismatch = 0, total = 0 }
+  total_probed = 0,
+  present_count = 0,
+  missing_count = 0,
+  deprecated_count = 0,
 }
 
-local CLASS_MODULE_MAP = {
-  RootView = "core.rootview",
-  DocView = "core.docview",
-  Doc = "core.doc",
-  Node = "core.node",
-  StatusView = "core.statusview",
-  CommandView = "core.commandview",
-  View = "core.view",
-}
+-- 1. Estado Global Imediato (Consumível instantaneamente pelo 00_02_api_guard)
+rawset(_G, "_DOXOADE_API_PROBE", ProbeEngine)
 
--- Mapeamento inteligente de raízes e módulos
-local MODULE_MAP = {
-  core = "core",
-  common = "core.common",
-  config = "core.config",
-  style = "core.style",
-  command = "core.command",
-  keymap = "core.keymap",
-  syntax = "core.syntax",
-  RootView = "core.rootview",
-  DocView = "core.docview",
-  Doc = "core.doc",
-  Node = "core.node",
-  StatusView = "core.statusview",
-  CommandView = "core.commandview",
-  View = "core.view",
+-- Cache direto dos módulos raiz para evitar chamadas de require repetidas
+local ROOT_MODULES = {
+  core = core,
+  system = system,
+  renderer = rawget(_G, "renderer"),
+  rencache = rawget(_G, "rencache"),
 }
 
 function ProbeEngine.resolve_symbol(symbol_path)
-  if not symbol_path or symbol_path == "" then return nil, "nil" end
+  if not symbol_path or symbol_path == "" then return nil end
 
-  local parts = {}
-  for part in symbol_path:gmatch("[^%.]+") do
-    table.insert(parts, part)
+  local dot_idx = symbol_path:find("%.")
+  local root_name = dot_idx and symbol_path:sub(1, dot_idx - 1) or symbol_path
+  local rest = dot_idx and symbol_path:sub(dot_idx + 1) or nil
+
+  local current = ROOT_MODULES[root_name] or rawget(_G, root_name)
+  if not current and pcall(require, root_name) then
+    current = require(root_name)
+    ROOT_MODULES[root_name] = current
   end
 
-  local root_name = parts[1]
-  local current = rawget(_G, root_name)
-
-  -- 1. Se for módulo core (ex: core.log, core.open_doc, core.command.add)
-  if root_name == "core" then
-    local ok, core_mod = pcall(require, "core")
-    if ok and type(core_mod) == "table" then
-      current = core_mod
-      table.remove(parts, 1) -- Consome 'core'
-
-      -- Se o próximo for um submódulo que precisa de require (ex: core.command)
-      if #parts > 0 and current[parts[1]] == nil then
-        local sub_name = "core." .. parts[1]
-        local ok_sub, sub_mod = pcall(require, sub_name)
-        if ok_sub then
-          current = sub_mod
-          table.remove(parts, 1)
-        end
-      end
-    end
-  -- 2. Se for uma classe/módulo mapeado (ex: RootView, DocView, rencache)
-  elseif current == nil and MODULE_MAP[root_name] then
-    local ok, mod = pcall(require, MODULE_MAP[root_name])
-    if ok then
-      current = mod
-      table.remove(parts, 1)
-    end
-  -- 3. Tenta require genérico
-  elseif current == nil then
-    local ok, mod = pcall(require, root_name)
-    if ok then
-      current = mod
-      table.remove(parts, 1)
-    end
-  else
-    table.remove(parts, 1)
+  if not current or not rest then
+    return current
   end
 
-  if current == nil then return nil, "nil" end
-
-  -- Navega pelas propriedades restantes da tabela
-  for _, part in ipairs(parts) do
-    if type(current) == "table" or type(current) == "userdata" then
-      local ok, val = pcall(function() return current[part] end)
-      if ok and val ~= nil then
-        current = val
-      else
-        return nil, "nil"
-      end
-    else
-      return nil, type(current)
+  for part in rest:gmatch("[^%.]+") do
+    if type(current) ~= "table" and type(current) ~= "userdata" then
+      return nil
     end
+    current = current[part]
+    if current == nil then return nil end
   end
 
-  return current, type(current)
+  return current
+end
+
+function ProbeEngine.probe_api(entry)
+  local sym = ProbeEngine.resolve_symbol(entry.id)
+  local real_type = type(sym)
+  local is_present = (sym ~= nil)
+  local status = is_present and "present" or "missing"
+
+  if is_present and entry.is_deprecated then
+    status = "deprecated"
+  end
+
+  ProbeEngine.total_probed = ProbeEngine.total_probed + 1
+  if status == "present" then
+    ProbeEngine.present_count = ProbeEngine.present_count + 1
+  elseif status == "missing" then
+    ProbeEngine.missing_count = ProbeEngine.missing_count + 1
+  elseif status == "deprecated" then
+    ProbeEngine.deprecated_count = ProbeEngine.deprecated_count + 1
+  end
+
+  ProbeEngine.results[entry.id] = {
+    status = status,
+    real_type = real_type,
+    expected_type = entry.expected_type or "function",
+    severity = entry.severity or "critical",
+    safe_to_patch = entry.safe_to_patch or false,
+    fallback = entry.fallback,
+  }
 end
 
 function ProbeEngine.run_probe()
-  local catalog_path = probe_dir .. sep .. "catalog.lua"
-  local catalog = {}
-
-  local ok_cat, cat_data = pcall(dofile, catalog_path)
-  if ok_cat and type(cat_data) == "table" and cat_data.catalog then
-    catalog = cat_data.catalog
-  else
-    catalog = {
-      ["core"] = { expected_type = "table", severity = "critical" },
-      ["core.command.add"] = { expected_type = "function", severity = "critical" },
-      ["core.keymap.add"] = { expected_type = "function", severity = "critical" },
-      ["RootView.draw"] = { expected_type = "function", severity = "critical" },
-      ["RootView.on_text_input"] = { expected_type = "function", severity = "warning", is_deprecated = true },
-      ["Doc.insert"] = { expected_type = "function", severity = "critical" },
-      ["Doc.remove"] = { expected_type = "function", severity = "critical" },
-      ["system.mkdir"] = { expected_type = "function", severity = "critical" },
-    }
+  local catalog_file = probe_dir .. sep .. "catalog.lua"
+  local ok, cat_data = pcall(dofile, catalog_file)
+  if not ok or type(cat_data) ~= "table" or not cat_data.catalog then
+    return
   end
 
-  ProbeEngine.results = {}
-  ProbeEngine.summary = { present = 0, missing = 0, type_mismatch = 0, total = 0 }
-
-  for api_id, spec in pairs(catalog) do
-    local val, real_type = ProbeEngine.resolve_symbol(api_id)
-    local expected = spec.expected_type or "function"
-    local status = "present"
-
-    if val == nil or real_type == "nil" then
-      status = "missing"
-      ProbeEngine.summary.missing = ProbeEngine.summary.missing + 1
-    elseif expected ~= "any" and real_type ~= expected then
-      status = "type_mismatch"
-      ProbeEngine.summary.type_mismatch = ProbeEngine.summary.type_mismatch + 1
-    else
-      ProbeEngine.summary.present = ProbeEngine.summary.present + 1
-    end
-
-    ProbeEngine.summary.total = ProbeEngine.summary.total + 1
-    ProbeEngine.results[api_id] = {
-      status = status,
-      real_type = real_type,
-      expected_type = expected,
-      severity = spec.severity or "warning",
-      is_deprecated = spec.is_deprecated or false,
-      fallback = spec.fallback
-    }
+  for api_id, entry in pairs(cat_data.catalog) do
+    entry.id = api_id
+    ProbeEngine.probe_api(entry)
   end
 
+  -- Grava o JSON de auditoria de forma atômica
   pcall(function()
-    local fj = io.open(probe_out_json, "w")
-    if fj then
-      fj:write("{\n")
-      fj:write(string.format('  "litexl_version": %q,\n', tostring(ProbeEngine.version)))
-      fj:write(string.format('  "platform": %q,\n', tostring(ProbeEngine.platform)))
-      fj:write(string.format('  "timestamp": %d,\n', os.time()))
-      fj:write('  "summary": {\n')
-      fj:write(string.format('    "present": %d,\n', ProbeEngine.summary.present))
-      fj:write(string.format('    "missing": %d,\n', ProbeEngine.summary.missing))
-      fj:write(string.format('    "type_mismatch": %d,\n', ProbeEngine.summary.type_mismatch))
-      fj:write(string.format('    "total": %d\n', ProbeEngine.summary.total))
-      fj:write('  },\n')
-      fj:write('  "capabilities": {\n')
-      local entries = {}
-      for k, v in pairs(ProbeEngine.results) do
-        local entry_str = string.format(
-          '    %q: { "status": %q, "real_type": %q, "expected_type": %q, "severity": %q, "is_deprecated": %s }',
-          k, v.status, v.real_type, v.expected_type, v.severity, v.is_deprecated and "true" or "false"
-        )
-        table.insert(entries, entry_str)
+    system.mkdir(doxoade_dir)
+    system.mkdir(probe_dir)
+    local f = io.open(probe_out_json, "w")
+    if f then
+      local parts = {}
+      for id, r in pairs(ProbeEngine.results) do
+        table.insert(parts, string.format('    %q: { "status": %q, "real_type": %q, "expected": %q }',
+          id, r.status, r.real_type, r.expected_type))
       end
-      fj:write(table.concat(entries, ",\n"))
-      fj:write("\n  }\n}\n")
-      fj:flush()
-      fj:close()
+      f:write("{\n  \"version\": \"" .. ProbeEngine.version .. "\",\n  \"apis\": {\n" .. table.concat(parts, ",\n") .. "\n  }\n}\n")
+      f:close()
     end
   end)
 end
 
-ProbeEngine.run_probe()
-rawset(_G, "_DOXOADE_API_PROBE", ProbeEngine)
+-- 2. Execução Diferida Assíncrona (Libera o boot imediatamente)
+if core and core.add_thread then
+  core.add_thread(function()
+    coroutine.yield(0.05)
+    ProbeEngine.run_probe()
+  end)
+else
+  -- Fallback imediato caso não haja event loop (ex: shadow harness)
+  pcall(ProbeEngine.run_probe)
+end

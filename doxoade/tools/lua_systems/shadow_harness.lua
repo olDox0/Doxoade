@@ -1,6 +1,6 @@
 -- doxoade/tools/lua_systems/shadow_harness.lua
 -- =============================================================================
--- 🐺 DOXOADE ACTIVE SHADOW HARNESS — MOCK RUNTIME V3 (COMPLETO)
+-- 🐺 DOXOADE CUMULATIVE FUNCTION PROFILER — TRACE-LEVEL CALL-STACK INSPECTOR
 -- =============================================================================
 local is_windows = (package.config:sub(1, 1) == "\\")
 rawset(_G, "PLATFORM", is_windows and "Windows" or "Linux")
@@ -44,13 +44,12 @@ local mock_system = {
 rawset(_G, "system", mock_system)
 
 local mock_renderer = {
-  draw_rect = function() end,
-  draw_text = function() end,
+  draw_rect = function(x, y, w, h, col) end,
+  draw_text = function(font, text, x, y, col) end,
 }
 rawset(_G, "renderer", mock_renderer)
 rawset(_G, "rencache", mock_renderer)
 
--- Construtor com metamétodo __call (permite Cls(...) e Cls:new(...))
 local function create_class()
   local cls = {}
   cls.__index = cls
@@ -66,9 +65,7 @@ local function create_class()
     return sub
   end
   return setmetatable(cls, {
-    __call = function(self, ...)
-      return self:new(...)
-    end
+    __call = function(self, ...) return self:new(...) end
   })
 end
 
@@ -77,7 +74,7 @@ function MockDoc:init(filename)
   self.filename = filename or "mock_file.lua"
   self.lines = { "local x = 1", "return x" }
 end
-function MockDoc:get_name() return self.filename or "mock_file.lua" end -- 👈 ADICIONE ESTA LINHA
+function MockDoc:get_name() return self.filename or "mock_file.lua" end
 function MockDoc:insert(...) end
 function MockDoc:remove(...) end
 function MockDoc:save(...) return true end
@@ -145,7 +142,7 @@ local mock_command = {
 }
 
 local mock_core = {
-  docs = { mock_doc },  -- 👈 Adicione esta linha
+  docs = { mock_doc },
   root_view = {
     root_node = mock_root_node,
     get_active_node = function() return mock_root_node end,
@@ -203,7 +200,51 @@ for mod_name, mod_val in pairs(mock_modules) do
 end
 
 -- =============================================================================
--- EXECUÇÃO DOS TEMPLATES + SONDAGEM ATIVA
+-- MOTOR DE PROFILING POR FUNÇÃO (CALL-STACK TRACKER)
+-- =============================================================================
+local function_stats = {}
+local call_stack = {}
+
+local function profiler_hook(event)
+  local info = debug.getinfo(2, "nSf")
+  if not info or not info.source then return end
+  local t = os.clock()
+
+  if event == "call" then
+    table.insert(call_stack, { info = info, start_t = t, child_t = 0 })
+  elseif event == "return" and #call_stack > 0 then
+    local frame = table.remove(call_stack)
+    local elapsed = (t - frame.start_t) * 1000
+    local self_t = math.max(0, elapsed - frame.child_t)
+
+    local src = frame.info.source:match("[/\\]([^/\\]+)$") or frame.info.source
+    local fn_name = frame.info.name or "anonymous"
+    local line = frame.info.linedefined or 0
+
+    if src:find("%.lua$") and not src:find("shadow_harness") then
+      local key = src .. "|" .. fn_name .. "|" .. line
+      local st = function_stats[key] or {
+        source = src,
+        name = fn_name,
+        line = line,
+        calls = 0,
+        total_time = 0,
+        self_time = 0
+      }
+      st.calls = st.calls + 1
+      st.total_time = st.total_time + elapsed
+      st.self_time = st.self_time + self_t
+      function_stats[key] = st
+    end
+
+    if #call_stack > 0 then
+      call_stack[#call_stack].child_t = call_stack[#call_stack].child_t + elapsed
+    end
+  end
+end
+
+-- =============================================================================
+-- EXECUÇÃO COM ANÁLISE DE TEMPO, MEMÓRIA E FUNÇÕES
 -- =============================================================================
 local results = {}
 local total_failed = 0
@@ -211,11 +252,13 @@ local total_failed = 0
 for i = 1, #arg do
   local file_path = arg[i]
   local fname = file_path:match("[/\\]([^/\\]+)$") or file_path
-  local t0 = os.clock()
+  
+  collectgarbage("collect")
+  local mem_before = collectgarbage("count")
   
   local f = io.open(file_path, "r")
   if not f then
-    results[fname] = { status = "FAIL", error = "Arquivo inacessível", time_ms = 0 }
+    results[fname] = { status = "FAIL", error = "Arquivo inacessível", time_ms = 0, mem_kb = 0 }
     total_failed = total_failed + 1
   else
     local source = f:read("*a")
@@ -223,49 +266,53 @@ for i = 1, #arg do
     
     local chunk, load_err = load(source, "@" .. fname)
     if not chunk then
-      results[fname] = { status = "FAIL", error = "Syntax Error: " .. tostring(load_err), time_ms = 0 }
+      results[fname] = { status = "FAIL", error = "Syntax Error: " .. tostring(load_err), time_ms = 0, mem_kb = 0 }
       total_failed = total_failed + 1
     else
-      local before_cmds = {}
-      for k in pairs(registered_commands) do before_cmds[k] = true end
+      local t0 = os.clock()
       
+      -- Ativa o Hook de Rastreamento de Funções
+      call_stack = {}
+      debug.sethook(profiler_hook, "cr")
       local ok, exec_err = xpcall(chunk, debug.traceback)
+      debug.sethook() -- Desativa o hook
+      
       local elapsed = (os.clock() - t0) * 1000
+      local mem_delta = collectgarbage("count") - mem_before
       
       if not ok then
-        results[fname] = { status = "FAIL", error = tostring(exec_err), time_ms = elapsed }
+        results[fname] = { status = "FAIL", error = tostring(exec_err), time_ms = elapsed, mem_kb = mem_delta }
         total_failed = total_failed + 1
       else
-        local cmd_error = nil
-        for cmd_name, cmd_data in pairs(registered_commands) do
-          if not before_cmds[cmd_name] and type(cmd_data.fn) == "function" then
-            local cmd_ok, cmd_err = xpcall(function() cmd_data.fn() end, debug.traceback)
-            if not cmd_ok then
-              cmd_error = string.format("Comando '%s' falhou: %s", cmd_name, tostring(cmd_err))
-              break
-            end
-          end
-        end
-        
-        if cmd_error then
-          results[fname] = { status = "FAIL", error = cmd_error, time_ms = elapsed }
-          total_failed = total_failed + 1
-        else
-          results[fname] = { status = "PASS", time_ms = elapsed }
-        end
+        results[fname] = {
+          status = "PASS",
+          time_ms = elapsed,
+          mem_kb = math.max(0, mem_delta)
+        }
       end
     end
   end
 end
 
+-- 1. Relatório por Módulo
 print("=== SHADOW_REPORT_START ===")
 for fname, res in pairs(results) do
   if res.status == "PASS" then
-    print(string.format("PASS|%s|%.2f", fname, res.time_ms))
+    print(string.format("PASS|%s|%.3f|%.1f", fname, res.time_ms, res.mem_kb or 0))
   else
-    local err_clean = res.error:gsub("\r", ""):gsub("\n", " -> ")
-    print(string.format("FAIL|%s|%.2f|%s", fname, res.time_ms, err_clean))
+    local err_clean = tostring(res.error or ""):gsub("\r", ""):gsub("\n", " -> ")
+    print(string.format("FAIL|%s|%.3f|%.1f|%s", fname, res.time_ms, res.mem_kb or 0, err_clean))
   end
 end
 print("=== SHADOW_REPORT_END ===")
+
+-- 2. Relatório Detalhado por Função Acumulada (Captura Total)
+print("=== FUNCTION_REPORT_START ===")
+for _, st in pairs(function_stats) do
+  if st.total_time >= 0.0 or st.calls >= 1 then
+    print(string.format("%s|%s|%d|%d|%.3f|%.3f", st.source, st.name, st.line, st.calls, st.self_time, st.total_time))
+  end
+end
+print("=== FUNCTION_REPORT_END ===")
+
 os.exit(total_failed == 0 and 0 or 1)

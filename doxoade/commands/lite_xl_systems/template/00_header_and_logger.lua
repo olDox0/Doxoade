@@ -43,10 +43,10 @@ function RootView:draw(...)
   if report and report.failed and report.failed > 0 then
     local font = require("core.style").font
     local w = self.size.x
-    local banner_h = 26
+    local banner_h = 4
 
     -- Banner Vermelho de Alerta no Topo
-    draw_rect_safe(0, 0, w, banner_h, { 220, 38, 38, 240 })
+    draw_rect_safe(0, 0, w, banner_h, { 220, 38, 38, 60 })
     
     local msg = string.format("🚨 [DOXOADE ALERT] %d módulo(s) falharam no boot! Verifique o log ou 'Ctrl+Alt+Shift+L'", report.failed)
     if rencache and rencache.draw_text then
@@ -61,8 +61,23 @@ end
 local inside_append_log = false
 local inside_core_log = false
 local inside_core_error = false
-
 local session_log_file = USERDIR .. PATHSEP .. "session_log.txt"
+local _log_buffer = {}
+local _log_dirty = false
+local LOG_FLUSH_THRESHOLD = 50
+
+local function flush_session_log()
+    if #_log_buffer == 0 then return end
+    pcall(function()
+        local f = io.open(session_log_file, "a")
+        if f then
+            f:write(table.concat(_log_buffer))
+            f:flush()
+            f:close()
+        end
+    end)
+    _log_buffer = {}
+end
 
 -- =============================================================================
 -- 📜 FUNÇÃO DE FORMATAÇÃO SEGURA
@@ -89,20 +104,24 @@ end
 -- 💾 GRAVAÇÃO EM DISCO PERSISTENTE
 -- =============================================================================
 local function append_session_log(level, msg)
-  if inside_append_log then return end
-  inside_append_log = true
-
-  pcall(function()
-    local f = io.open(session_log_file, "a")
-    if f then
-      local ts = os.date("%H:%M:%S")
-      f:write(string.format("[%s] [%s] %s\n", ts, level, tostring(msg)))
-      f:flush()
-      f:close()
+    if inside_append_log then return end
+    inside_append_log = true
+    local ts = os.date("%H:%M:%S")
+    table.insert(_log_buffer, string.format("[%s] [%s] %s\n", ts, level, tostring(msg)))
+    if #_log_buffer >= LOG_FLUSH_THRESHOLD then
+        flush_session_log()
     end
-  end)
+    inside_append_log = false
+end
 
-  inside_append_log = false
+-- Thread de flush periódico (a cada 5s)
+if core.add_thread then
+    core.add_thread(function()
+        while true do
+            coroutine.yield(5.0)
+            flush_session_log()
+        end
+    end)
 end
 
 -- Reset do log no início da sessão

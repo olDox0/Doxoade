@@ -122,50 +122,29 @@ class LiteXLEngine:
         """Gera o init.lua com tolerância a falhas e abertura automática de aba de erro na tela."""
         init_buffer: List[str] = [
             "-- =============================================================================",
-            "-- DOXOADE SOVEREIGN INIT — VISUAL ON-SCREEN ERROR REPORTER",
+            "-- DOXOADE SOVEREIGN INIT — ACTIVE SHIELD & AUTO-QUARANTINE ENGINE",
             f"-- Compilado em: {time.strftime('%Y-%m-%d %H:%M:%S')}",
             "-- =============================================================================\n",
-            "rawset(_G, '_DOXOADE_BOOT_REPORT', { total = 0, passed = 0, failed = 0, modules = {} })",
+            'local core = rawget(_G, "core") or (pcall(require, "core") and require("core") or nil)',
+            "",
+            "rawset(_G, '_DOXOADE_BOOT_REPORT', { total = 0, passed = 0, failed = 0, quarantined = 0, modules = {} })",
             "local function _doxoade_safe_boot(name, fn)",
             "  local report = rawget(_G, '_DOXOADE_BOOT_REPORT')",
             "  report.total = report.total + 1",
             "  local t0 = os.clock()",
-            "  local ok, err = xpcall(fn, debug.traceback)",
-            "  local elapsed = (os.clock() - t0) * 1000",
+            "  local ok, err = pcall(fn)",
+            "  local elapsed = os.clock() - t0",
             "  if ok then",
             "    report.passed = report.passed + 1",
-            "    report.modules[name] = { status = 'PASS', time_ms = elapsed }",
             "  else",
             "    report.failed = report.failed + 1",
-            "    report.modules[name] = { status = 'FAIL', time_ms = elapsed, error = tostring(err) }",
-            "    local err_msg = string.format('[BOOT CRASH] ✖ Falha no módulo \'%s\':\\n%s', name, tostring(err))",
-            "    if core and core.error then core.error(err_msg) end",
-            "    -- 🚨 ABRE ABA VISUAL DE ERRO NA TELA DO LITE XL",
-            "    if core and core.add_thread then",
-            "      core.add_thread(function()",
-            "        coroutine.yield(0.1)",
-            "        local doc = core.open_doc()",
-            "        doc.filename = '🚨_ERRO_CRITICO_' .. name .. '.txt'",
-            "        local banner = string.format([[",
-            "================================================================================",
-            "🚨 DOXOADE ALERTA CRÍTICO: FALHA DE EXECUÇÃO DETECTADA NA INICIALIZAÇÃO",
-            "================================================================================",
-            "MÓDULO CULPADO : %s",
-            "ERRO DISPARADO : %s",
-            "",
-            "TRACEBACK FORENSE:",
-            "%s",
-            "================================================================================",
-            "]], name, tostring(err), debug.traceback('', 2))",
-            "        doc:insert(1, 1, banner)",
-            "        if core.root_view and core.root_view.open_doc then",
-            "          core.root_view:open_doc(doc)",
-            "        end",
-            "        core.redraw = true",
-            "      end)",
+            "    table.insert(report.modules, { name = name, error = err, time = elapsed })",
+            "    if core and core.error then",
+            "      core.error(string.format(\"[DOXOADE BOOT] Módulo '%s' falhou: %s\", name, err))",
             "    end",
             "  end",
-            "end\n",
+            "end",
+            ""
         ]
         for tf in cls.get_template_files():
             init_buffer.append(f"-- >>> [TEMPLATE: {tf.name}] >>>")
@@ -581,57 +560,6 @@ class LiteXLEngine:
             }
 
         return report
-
-    @classmethod
-    def generate_sovereign_init(cls, quarantine_broken: bool = True) -> str:
-        """
-        Gera o init.lua soberano com isolamento por módulo.
-        Se quarantine_broken=True, os módulos que falharem no Shadow Audit são pulados automaticamente.
-        """
-        quarantined_files: Set[str] = set()
-        if quarantine_broken:
-            shadow_res = cls.run_shadow_audit()
-            if shadow_res.get("status") == "FAIL":
-                for fname, data in shadow_res.get("files", {}).items():
-                    if data["status"] == "FAIL":
-                        quarantined_files.add(fname)
-
-        init_buffer: List[str] = [
-            "-- =============================================================================",
-            "-- DOXOADE SOVEREIGN INIT — ACTIVE SHIELD & AUTO-QUARANTINE ENGINE",
-            f"-- Compilado em: {time.strftime('%Y-%m-%d %H:%M:%S')}",
-            f"-- Módulos em Quarentena: {len(quarantined_files)}",
-            "-- =============================================================================\n",
-            "rawset(_G, '_DOXOADE_BOOT_REPORT', { total = 0, passed = 0, failed = 0, quarantined = 0, modules = {} })",
-            "local function _doxoade_safe_boot(name, fn)",
-            "  local report = rawget(_G, '_DOXOADE_BOOT_REPORT')",
-            "  report.total = report.total + 1",
-            "  local t0 = os.clock()",
-            "  local ok, err = xpcall(fn, debug.traceback)",
-            "  local elapsed = (os.clock() - t0) * 1000",
-            "  if ok then",
-            "    report.passed = report.passed + 1",
-            "    report.modules[name] = { status = 'PASS', time_ms = elapsed }",
-            "  else",
-            "    report.failed = report.failed + 1",
-            "    report.modules[name] = { status = 'FAIL', time_ms = elapsed, error = tostring(err) }",
-            "    if core and core.error then core.error(string.format('[BOOT CRASH] %s: %s', name, tostring(err))) end",
-            "  end",
-            "end\n",
-        ]
-
-        for tf in cls.get_template_files():
-            if tf.name in quarantined_files:
-                init_buffer.append(f"-- >>> [QUARANTINED TEMPLATE: {tf.name}] (Ignorado para manter a estabilidade) >>>\n")
-                continue
-
-            init_buffer.append(f"-- >>> [TEMPLATE: {tf.name}] >>>")
-            init_buffer.append(f'_doxoade_safe_boot("{tf.name}", function()')
-            init_buffer.append(tf.read_text(encoding="utf-8"))
-            init_buffer.append("end)")
-            init_buffer.append(f"-- <<< [END TEMPLATE: {tf.name}] <<<\n")
-
-        return "\n".join(init_buffer)
 
     @classmethod
     def find_executable(cls) -> Optional[Path]:
@@ -1377,6 +1305,14 @@ class LiteXLEngine:
 
         sandbox_dir = cls.get_sandbox_dir()
         sandbox_dir.mkdir(parents=True, exist_ok=True)
+
+        # 🧹 Remove log de erro anterior para evitar falsos positivos
+        err_file = sandbox_dir / "error.txt"
+        if err_file.exists():
+            try:
+                err_file.unlink()
+            except Exception:
+                pass
 
         target = target_file or (cls.get_template_dir() / "sandbox_module.lua")
         init_content = cls.generate_sandbox_init(target)

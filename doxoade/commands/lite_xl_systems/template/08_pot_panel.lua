@@ -10,6 +10,7 @@ local doxoade_cfg_dir = USERDIR .. PATHSEP .. ".doxoade"
 pcall(function() system.mkdir(doxoade_cfg_dir) end)
 local dumppot_file = doxoade_cfg_dir .. PATHSEP .. "dumppot.txt"
 local cheat_sheet_file = doxoade_cfg_dir .. PATHSEP .. "cheat_sheet.txt"
+local log_path = USERDIR .. PATHSEP .. "session_log.txt"
 
 pcall(function()
   local f = io.open(dumppot_file, "a")
@@ -185,7 +186,6 @@ command.add(nil, {
   end,
 
   ["doxoade:open-log"] = function()
-    local log_path = USERDIR .. PATHSEP .. "session_log.txt"
     -- 🛡️ Garante que o arquivo exista antes de abrir
     local f = io.open(log_path, "a")
     if f then f:close() end

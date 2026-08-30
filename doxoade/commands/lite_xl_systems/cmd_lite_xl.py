@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.commands.lite_xl_systems.engine_lite_xl import LiteXLEngine
+from doxoade.tools.lua_systems.profiler import ProfilerEngine
 
 @click.group("lite-xl", help="⚡ Gestão, diagnóstico e automação do Lite XL.")
 def lite_xl_group():
@@ -1002,7 +1003,240 @@ def cmd_test_sandbox(target_file):
     success, msg = LiteXLEngine.launch_sandbox(test_path)
     if not success:
         click.echo(f"  {Fore.RED}✖ {msg}{Fore.RESET}\n")
+        err_file = sandbox_dir / "error.txt"
+        if err_file.exists():
+            try:
+                err_file.unlink()
+            except Exception:
+                pass
+
     else:
         click.echo(f"  {Fore.GREEN}✔ IDE Sandbox iniciada com sucesso em:{Fore.RESET} {msg}")
         click.echo(f"  {Fore.LIGHTBLACK_EX}Dica: Teste seu comando no Sandbox pressionando Ctrl+Shift+P ou o atalho configurado.{Fore.RESET}\n")
 
+    sandbox_err_file = LiteXLEngine.get_sandbox_dir() / "error.txt"
+    if sandbox_err_file.exists():
+        err_content = sandbox_err_file.read_text(encoding="utf-8", errors="replace").strip()
+        if err_content:
+            click.echo(f"\n{Fore.RED}{Style.BRIGHT}🚨 [SANDBOX ERROR.TXT DETECTADO]:{Style.RESET_ALL}")
+            click.echo(f"{Fore.RED}{err_content}{Fore.RESET}\n")
+
+@lite_xl_group.command("profile", help="⏱️ Análise forense de performance e peso de funções por arquivo.")
+@click.option("--runs", "-r", default=5, type=int, help="Número de iterações para benchmark (padrão: 5).")
+@click.option("--file", "-f", "target_file", default=None, type=str, help="Filtra a análise para um arquivo específico (ex: 00_01, 11).")
+@click.option("--tree", "-t", is_flag=True, default=True, help="Exibe a decomposição em árvore de funções por arquivo.")
+def cmd_profile(runs, target_file, tree):
+    """Diagnóstico hierárquico: peso de cada função dentro de cada arquivo."""
+    user_dir = LiteXLEngine.get_user_dir()
+
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}⏱️ CHRONOS DEEP PROFILER — ANÁLISE HIERÁRQUICA DE FUNÇÕES{Style.RESET_ALL}")
+    click.echo(f"  {Fore.WHITE}Alvo:{Fore.RESET} {user_dir} | {Fore.WHITE}Amostras:{Fore.RESET} {Fore.GREEN}{runs} iterações{Fore.RESET}")
+    if target_file:
+        click.echo(f"  {Fore.YELLOW}Filtro Ativo:{Fore.RESET} Arquivos com '{target_file}'")
+    click.echo()
+
+    bench = ProfilerEngine.run_deep_benchmark(runs=runs, target_file=target_file)
+    total_time = bench["total_avg_ms"]
+    total_mem = sum(m["mem_kb"] for m in bench["modules"])
+
+    # 1. Resumo Executivo
+    click.echo(f"  ┌─ {Style.BRIGHT}RESUMO GERAL DO BENCHMARK{Style.RESET_ALL}")
+    click.echo(f"  │  • Tempo Médio Total : {Fore.GREEN}{total_time:.2f} ms{Fore.RESET}")
+    click.echo(f"  │  • Memória Alocada   : {Fore.CYAN}{total_mem:.1f} KB{Fore.RESET}")
+    click.echo(f"  │  • Módulos Mapeados  : {len(bench['modules'])} módulos")
+    click.echo(f"  └{'─' * 65}\n")
+
+    # 2. Decomposição em Árvore por Arquivo
+    click.echo(f"  {Style.BRIGHT}📦 PESO DAS FUNÇÕES POR ARQUIVO (DRILL-DOWN):{Style.RESET_ALL}\n")
+
+    for mod in bench["modules"]:
+        m_name = mod["module"]
+        m_time = mod["mean_ms"]
+        m_pct = mod["percent"]
+        m_mem = mod["mem_kb"]
+        funcs = mod.get("functions", [])
+        
+        # Identificador de padrão de custo
+        if mod["is_single_bottleneck"]:
+            pattern_badge = f"{Fore.RED}[GARGALO CONCENTRADO: {mod['dominant_feature']}]{Fore.RESET}"
+        elif len(funcs) > 5:
+            pattern_badge = f"{Fore.YELLOW}[CUSTO DISTRIBUÍDO]{Fore.RESET}"
+        else:
+            pattern_badge = f"{Fore.GREEN}[LEVE / UNIFORME]{Fore.RESET}"
+
+        click.echo(f"  {Fore.WHITE}📄 {Style.BRIGHT}{m_name:<32}{Style.RESET_ALL} {Fore.GREEN}{m_time:>6.2f} ms{Fore.RESET} ({m_pct:>4.1f}%) | {Fore.CYAN}+{m_mem:>5.1f} KB{Fore.RESET}  {pattern_badge}")
+
+        if funcs:
+            for idx, fn in enumerate(funcs[:6], start=1):
+                is_last = (idx == min(len(funcs), 6))
+                branch = "└──" if is_last else "├──"
+                
+                f_name = fn["name"]
+                line_no = fn["line"]
+                calls = fn["calls"]
+                self_t = fn["self_time_ms"]
+                total_t = fn["total_time_ms"]
+                f_pct = fn["file_percent"]
+
+                # Destaca se for o grande vilão do arquivo
+                f_color = Fore.RED if f_pct >= 50.0 else (Fore.YELLOW if f_pct >= 25.0 else Fore.LIGHTBLACK_EX)
+                
+                click.echo(f"     {branch} {f_color}{f_name:<24}{Fore.RESET} (L{line_no:<4}) {total_t:>6.2f} ms ({f_pct:>4.1f}% do arq) | {calls:>3} calls | Self: {self_t:.2f}ms")
+        else:
+            click.echo(f"     └── {Fore.LIGHTBLACK_EX}(Nenhuma função interna rastreada — execução de bloco único){Fore.RESET}")
+
+        click.echo()
+
+    # 3. Laudo Executivo
+    click.echo(f"  {Fore.YELLOW}{Style.BRIGHT}🔍 DIAGNÓSTICO ACIONÁVEL:{Style.RESET_ALL}")
+    for mod in bench["modules"][:3]:
+        if mod["is_single_bottleneck"]:
+            click.echo(f"    • {Fore.WHITE}{mod['module']}:{Fore.RESET} Otimizar pontualmente a função {Fore.RED}'{mod['dominant_feature']}'{Fore.RESET} eliminará mais da metade do custo do arquivo.")
+        else:
+            click.echo(f"    • {Fore.WHITE}{mod['module']}:{Fore.RESET} Custo distribuído ({mod['cost_reason']}). Requer simplificação geral.")
+    click.echo()
+
+@lite_xl_group.command("preflight", help="🛡️ Valida o init.lua antes de instalar em produção.")
+def cmd_preflight():
+    """Gera o init.lua em memória e valida com compilação real + shadow audit."""
+    import tempfile
+    from doxoade.commands.lite_xl_systems.engine_lite_xl import LiteXLEngine
+    
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🛡️ PRE-FLIGHT GATE — Validação Pré-Deploy{Style.RESET_ALL}")
+    
+    # 1. Gera o init.lua em memória
+    init_content = LiteXLEngine.generate_sovereign_init()
+    temp_init = Path(tempfile.gettempdir()) / "doxoade_preflight_init.lua"
+    temp_init.write_text(init_content, encoding="utf-8")
+    
+    click.echo(f"  {Fore.WHITE}Init gerado em memória: {len(init_content):,} bytes{Fore.RESET}")
+    
+    # 2. Compilação real (Lua 5.4)
+    runtime = LiteXLEngine.lua_runtime_info()
+    if runtime:
+        lua_exe, lua_ver = runtime
+        try:
+            lua_safe_path = str(temp_init).replace("\\", "/")  # Unix-style para Lua
+            result = subprocess.run(
+                [str(lua_exe), "-e", f'dofile("{lua_safe_path}")'],
+#                [str(lua_exe), "-e", f'dofile("{temp_init}")'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                click.echo(f"  {Fore.GREEN}✔ Compilação real OK ({lua_ver}){Fore.RESET}")
+            else:
+                click.echo(f"  {Fore.RED}✖ ERRO DE COMPILAÇÃO:{Fore.RESET}")
+                click.echo(f"    {result.stderr}")
+                return
+        except Exception as e:
+            click.echo(f"  {Fore.YELLOW}⚠ Compilação falhou: {e}{Fore.RESET}")
+    else:
+        click.echo(f"  {Fore.YELLOW}⚠ Sem runtime Lua — pulando compilação real{Fore.RESET}")
+    
+    # 3. Shadow Audit (mock runtime)
+    click.echo(f"\n  {Fore.CYAN}Executando Shadow Audit...{Fore.RESET}")
+    shadow = LiteXLEngine.run_shadow_audit()
+    if shadow.get("status") == "FAIL":
+        click.echo(f"  {Fore.RED}✖ Shadow Audit detectou falhas:{Fore.RESET}")
+        for fname, data in shadow.get("files", {}).items():
+            if data["status"] == "FAIL":
+                click.echo(f"    {Fore.RED}• {fname}: {data.get('error', 'unknown')}{Fore.RESET}")
+        return
+    
+    click.echo(f"  {Fore.GREEN}✔ Shadow Audit OK{Fore.RESET}")
+    
+    # 4. Verifica variáveis globais indefinidas (padrão forensic_data)
+    click.echo(f"\n  {Fore.CYAN}Verificando variáveis não declaradas...{Fore.RESET}")
+    undeclared = []
+    
+    # 🆕 Literais Lua que NÃO são variáveis
+    LUA_LITERALS = {"true", "false", "nil"}
+    
+    for line_no, line in enumerate(init_content.splitlines(), 1):
+        match = re.search(r'rawset\(_G,\s*"[^"]+",\s*([a-zA-Z_][a-zA-Z0-9_]*)\)', line)
+        if match:
+            var_name = match.group(1)
+            # 🆕 Skip em literais
+            if var_name in LUA_LITERALS:
+                continue
+            preceding = "\n".join(init_content.splitlines()[:line_no-1])
+            if not re.search(rf'\blocal\s+{var_name}\b', preceding) and \
+               not re.search(rf'rawset\(_G,\s*"{var_name}"', preceding):
+                undeclared.append((line_no, var_name))
+    
+    if undeclared:
+        click.echo(f"  {Fore.RED}✖ Variáveis não declaradas detectadas:{Fore.RESET}")
+        for line_no, var_name in undeclared:
+            click.echo(f"    {Fore.RED}• Linha {line_no}: '{var_name}' usada antes da declaração{Fore.RESET}")
+        click.echo(f"\n  {Fore.YELLOW}💡 Corrija os templates e re-execute o preflight.{Fore.RESET}")
+        return
+    
+    click.echo(f"  {Fore.GREEN}✔ Nenhuma variável não declarada{Fore.RESET}")
+    
+    # 5. Sucesso — libera para deploy
+    click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}✔ PRE-FLIGHT OK — Init.lua validado e pronto para deploy.{Style.RESET_ALL}")
+    click.echo(f"  {Fore.WHITE}Execute 'doxoade lite-xl setup --force' para instalar.{Fore.RESET}\n")
+
+
+
+# ═══════════════════════════════════════════════════════════
+# 🐉 TYPHON — Pipeline Supervisionado de Deploy
+# ═══════════════════════════════════════════════════════════
+from doxoade.commands.lite_xl_systems.typhon import TyphonEngine
+@lite_xl_group.group("typhon", help="🐉 Pipeline supervisionado de deploy com auto-rollback.")
+def typhon_group():
+    """Typhon: O pai dos monstros. Deploy supervisionado com gates e rollback."""
+    pass
+
+@typhon_group.command("deploy")
+@click.option("--watch", "-w", default=5, type=int, help="Segundos para monitorar o boot (padrão: 5).")
+@click.option("--dry-run", is_flag=True, help="Valida sem gravar nada em produção.")
+@click.option("--no-rollback", is_flag=True, help="Desativa rollback automático (para debug).")
+@click.option("--baseline", is_flag=True, help="Compara boot time com o último deploy estável.")
+@click.argument("target", required=False, default=".")
+def cmd_typhon_deploy(watch, dry_run, no_rollback, baseline, target):
+    """Executa o pipeline completo: snapshot → preflight → deploy → watch → verdict."""
+    TyphonEngine.run_pipeline(
+        target=target,
+        watch_seconds=watch,
+        dry_run=dry_run,
+        no_rollback=no_rollback,
+        baseline=baseline,
+        echo=click.echo,
+    )
+
+@typhon_group.command("status")
+def cmd_typhon_status():
+    """Exibe o status do TYPHON: snapshot, último deploy, histórico."""
+    status = TyphonEngine.get_status()
+    click.echo(f"\n{Fore.MAGENTA}{Style.BRIGHT}🐉 TYPHON STATUS{Style.RESET_ALL}\n")
+    click.echo(f"  init.lua:       {Fore.GREEN if status['init_lua_exists'] else Fore.RED}{status['init_lua_size']:,} bytes{Fore.RESET}")
+    click.echo(f"  Snapshot:       {Fore.GREEN if status['stable_snapshot_exists'] else Fore.YELLOW}{status['stable_snapshot_size']:,} bytes{Fore.RESET}")
+    click.echo(f"  Lite XL:        {Fore.GREEN if status['lite_xl_running'] else Fore.LIGHTBLACK_EX}{'rodando' if status['lite_xl_running'] else 'parado'}{Fore.RESET}")
+    click.echo(f"  Deploys totais: {Fore.WHITE}{status['deploy_history_count']}{Fore.RESET}")
+
+    if status["last_deploy"]:
+        ld = status["last_deploy"]
+        click.echo(f"\n  {Fore.CYAN}Último deploy:{Fore.RESET}")
+        click.echo(f"    Timestamp:  {ld.get('timestamp', 'N/A')}")
+        click.echo(f"    Boot time:  {ld.get('boot_time_ms', 0):.0f}ms")
+        click.echo(f"    Init size:  {ld.get('init_size_bytes', 0):,} bytes")
+
+    if status["recent_history"]:
+        click.echo(f"\n  {Fore.CYAN}Histórico recente:{Fore.RESET}")
+        for entry in status["recent_history"]:
+            t = entry.get("type", "?")
+            ts = entry.get("timestamp", "?")[:19]
+            color = Fore.GREEN if "OK" in t else Fore.RED
+            click.echo(f"    {color}• {t}{Fore.RESET} — {ts}")
+    click.echo()
+
+@typhon_group.command("rollback")
+def cmd_typhon_rollback():
+    """Rollback manual: restaura o init.lua a partir do snapshot estável."""
+    ok, msg = TyphonEngine.rollback()
+    if ok:
+        click.echo(f"\n{Fore.GREEN}✔ {msg}{Fore.RESET}")
+        click.echo(f"  {Fore.YELLOW}Execute 'doxoade lite-xl restart' para aplicar.{Fore.RESET}\n")
+    else:
+        click.echo(f"\n{Fore.RED}✖ {msg}{Fore.RESET}\n")

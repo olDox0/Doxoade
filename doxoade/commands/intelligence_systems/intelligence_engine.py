@@ -15,8 +15,10 @@ from doxoade.commands.intelligence_systems.intelligence_css import CSSSemanticAn
 from doxoade.commands.intelligence_systems.intelligence_js  import JSSemanticAnalyzer
 from doxoade.commands.intelligence_systems.intelligence_lua import LuaSemanticAnalyzer
 from doxoade.commands.intelligence_systems.intelligence_truncation import TruncationChecker
+from doxoade.commands.intelligence_systems.intelligence_lua_truncation import analyze_lua_integrity
 
 CRITICAL_THRESHOLD = datetime(2026, 2, 14, 21, 0, 0)
+SOURCE_CHAR_LIMIT = int(os.environ.get("DOXOADE_SOURCE_LIMIT", "0"))  # 0 = ilimitado
 
 def analyze_file_chief(file_path: str, project_root: str, docs=False, source=False) -> dict:
     """Motor de Scan Nexus v100.1 (PASC 1.3 Compliance c/ C/C++, HTML, CSS, JS/TS)."""
@@ -52,17 +54,25 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
 
-        trunc_check = TruncationChecker.analyze(file_path, content)
+        # 🐺 TRATAMENTO ESPECÍFICO PARA LUA (bypass do checker genérico)
+        if file_path.endswith('.lua'):
+            trunc_check = analyze_lua_integrity(content)
+        else:
+            trunc_check = TruncationChecker.analyze(file_path, content)
+
         if trunc_check["status"] in ("truncated", "corrupt"):
             data.update({
                 "status": trunc_check["status"],
                 "complexity": 0,
-                "god_assignment": "Anúbis",  # O auditor que detecta a falha
+                "god_assignment": "Anúbis",
                 "truncation_reason": trunc_check["reason"],
                 "mpot_4_violations": 0,
                 "debt_tags": []
             })
-            return data  # Retorna cedo para evitar crashes no AST/Regex
+            # 🆕 Mesmo truncado, inclui o source disponível para diagnóstico forense
+            if source and content:
+                data["source_minified"] = content if SOURCE_CHAR_LIMIT == 0 else content[:SOURCE_CHAR_LIMIT]
+            return data            
             
         is_python = file_path.endswith('.py')
         is_html = file_path.endswith('.html')
