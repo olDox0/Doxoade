@@ -27,7 +27,13 @@ este é o novo protocolo simplificado e sucinto de desenvolveimento do doxoade. 
 5. Recomendações:
   5.1. É recomendado colocar notas tecnicas sobre problemas, é importante, é necessario colocar informações sobre o problema. pode-se colocar no codigo em docstring o erro se necessario.
   5.2. Recomenda-se fortemente que lide com o tratamento de exceptions para que falhas sejam bem informadas e previstas para que o deve não fique a ver navios com relação a erros.
-    
+6. Comunicação:
+ 6.1. Atualiação de codigo deve seguir serto protocolo:
+  6.1.1. Contexto, é preciso contextualizar o problema
+  6.1.2. problema, qual o problema, o que?, onde?, quando?, porque?, quem?
+  6.1.3. solução, a resposta deve ser breve, o snipped de modificação com referencia do final e começo dos codigos anteriores.
+  6.1.4. previsão do resultado.
+
 ## Exemplos reais:
 
 ´´´python

@@ -97,70 +97,112 @@ local function save_sovereign_session()
   end)
 end
 
+-- =============================================================================
+-- 2. RESTAURAÇÃO SEGURA DE SESSÃO NO BOOT
+-- =============================================================================
 local function restore_sovereign_session()
-    local info = system.get_file_info(session_file)
-    if not info then return end
-    local ok, session = pcall(dofile, session_file)
-    if not ok or type(session) ~= "table" or not session.panels or #session.panels == 0 then
-        return
+  local info = system.get_file_info(session_file)
+  if not info then return end
+
+  local ok, session = pcall(dofile, session_file)
+  if not ok or type(session) ~= "table" or not session.panels or #session.panels == 0 then
+    return
+  end
+
+  local primary_node = (function()
+    local leaves = get_doc_leaves(core.root_view.root_node)
+    return leaves[1] or core.root_view.root_node:get_primary_node()
+  end)()
+
+  for p_idx, panel_data in ipairs(session.panels) do
+    -- 1. Filtra apenas arquivos válidos e existentes no disco
+    local valid_files = {}
+    for _, f_info in ipairs(panel_data.files or {}) do
+      if f_info.filename and f_info.filename ~= "" then
+        local finfo = system.get_file_info(f_info.filename)
+        if finfo and finfo.type == "file" then
+          table.insert(valid_files, f_info)
+        end
+      end
     end
 
-    local primary_node = (function()
+    -- 2. Só cria split se houver arquivos reais para colocar nele
+    if #valid_files > 0 then
+      local target_node = nil
+      if p_idx == 1 then
+        target_node = primary_node
+      elseif p_idx == 2 then
         local leaves = get_doc_leaves(core.root_view.root_node)
-        return leaves[1] or core.root_view.root_node:get_primary_node()
-    end)()
+        target_node = (#leaves >= 2) and leaves[2] or primary_node:split("right")
+      end
 
-    for p_idx, panel_data in ipairs(session.panels) do
-        local target_node = nil
-        if p_idx == 1 then
-            target_node = primary_node
-        elseif p_idx == 2 then
-            local leaves = get_doc_leaves(core.root_view.root_node)
-            target_node = (#leaves >= 2) and leaves[2] or primary_node:split("right")
+      if target_node then
+        -- Mapeia abas já abertas para nunca duplicar
+        local existing_map = {}
+        for _, v in ipairs(target_node.views or {}) do
+          if v and v.doc and v.doc.filename then
+            local key = (system.absolute_path(v.doc.filename) or v.doc.filename):lower():gsub("\\", "/")
+            existing_map[key] = v
+          end
         end
 
-        if target_node then
-            -- ⚡ LOOKUP MAP pré-computado (1x, não N×M)
-            local existing_map = {}
-            for _, v in ipairs(target_node.views or {}) do
-                if v and v.doc and v.doc.filename then
-                    local key = (system.absolute_path(v.doc.filename) or v.doc.filename):lower():gsub("\\", "/")
-                    existing_map[key] = v
-                end
-            end
+        local active_to_set = nil
+        for _, file_info in ipairs(valid_files) do
+          local clean_target = (system.absolute_path(file_info.filename) or file_info.filename):lower():gsub("\\", "/")
+          local existing_view = existing_map[clean_target]
 
-            local active_to_set = nil
-            for _, file_info in ipairs(panel_data.files or {}) do
-                if file_info.filename and file_info.filename ~= "" then
-                    local clean_target = (system.absolute_path(file_info.filename) or file_info.filename):lower():gsub("\\", "/")
-                    local existing_view = existing_map[clean_target]
+          if existing_view then
+            if panel_data.active_file then
+              local clean_act = (system.absolute_path(panel_data.active_file) or panel_data.active_file):lower():gsub("\\", "/")
+              if clean_act == clean_target then
+                active_to_set = existing_view
+              end
+            end
+          else
+            local ok_open, doc = pcall(core.open_doc, file_info.filename)
+            if ok_open and doc then
+              if file_info.line and doc.set_selection then
+                pcall(function() doc:set_selection(file_info.line, file_info.col or 1) end)
+              end
 
-                    if existing_view then
-                        -- Foca a aba se ela for a ativa do painel
-                        if panel_data.active_file then
-                            local clean_act = (system.absolute_path(panel_data.active_file) or panel_data.active_file):lower():gsub("\\", "/")
-                            if clean_act == clean_target then
-                                active_to_set = existing_view
-                            end
-                        end
-                    else
-                        -- Reabre o arquivo se não estiver no painel
-                        local ok_open, doc = pcall(core.open_doc, file_info.filename)
-                        if ok_open and doc then
-                            if file_info.line and file_info.col then
-                                pcall(function() doc:set_selection(file_info.line, file_info.col) end)
-                            end
-                            target_node:add_view(DocView(doc))
-                        end
-                    end
+              -- 🛡️ Instanciação Canônica (Garante geometry com view.position e view.size)
+              local ok_v, view = pcall(DocView, doc)
+              if ok_v and view and view.position then
+                target_node:add_view(view)
+                existing_map[clean_target] = view
+
+                if panel_data.active_file then
+                  local clean_act = (system.absolute_path(panel_data.active_file) or panel_data.active_file):lower():gsub("\\", "/")
+                  if clean_act == clean_target then
+                    active_to_set = view
+                  end
                 end
+              end
             end
-            
-            if active_to_set then
-                core.set_active_view(active_to_set)
-            end
+          end
         end
+
+        -- 3. Limpa aba em branco inicial se arquivos reais foram restaurados
+        if #target_node.views > 1 then
+          for v_idx = #target_node.views, 1, -1 do
+            local v = target_node.views[v_idx]
+            if v and v.doc and not v.doc.filename and not (v.doc.is_dirty and v.doc:is_dirty()) then
+              table.remove(target_node.views, v_idx)
+              break
+            end
+          end
+        end
+
+        -- 4. Foca a aba correta e o nó correspondente
+        if active_to_set then
+          target_node.active_view = active_to_set
+          core.set_active_view(active_to_set)
+        end
+      end
     end
+  end
+
+  core.redraw = true
 end
 
 -- =============================================================================

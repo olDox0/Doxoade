@@ -1332,91 +1332,306 @@ class LiteXLEngine:
     
     @classmethod
     def get_shadow_harness_path(cls) -> Path:
-        """Localiza o shadow_harness.lua de forma infalível."""
-        curr = Path(__file__).resolve()
-        # Sobe até encontrar a raiz 'doxoade'
-        for parent in curr.parents:
-            candidate = parent / "tools" / "lua_systems" / "shadow_harness.lua"
-            if candidate.exists():
-                return candidate
-            candidate_nested = parent / "doxoade" / "tools" / "lua_systems" / "shadow_harness.lua"
-            if candidate_nested.exists():
-                return candidate_nested
-        return curr.parent.parent.parent / "tools" / "lua_systems" / "shadow_harness.lua"
+        """Gera o shadow_harness.lua com Simulação Ativa de Execução de Comandos (Active Dry-Run)."""
+        harness_dir = cls.get_user_dir() / ".doxoade" / "shadow_harness"
+        harness_dir.mkdir(parents=True, exist_ok=True)
+        h_file = harness_dir / "shadow_harness.lua"
+
+        harness_lua = """-- Shadow Deep Inspector Active Simulator — Doxoade Nexus Edition
+local templates = { ... }
+
+-- 🛡️ 0. STRICT GLOBAL GUARD (Emulação exata do strict.lua do Lite XL)
+local declared_globals = {
+  core = true, system = true, renderer = true, rencache = true,
+  USERDIR = true, PATHSEP = true, VERSION = true, PLATFORM = true,
+  SCALE = true, ARGS = true, _G = true, type = true, pcall = true,
+  xpcall = true, rawget = true, rawset = true, pairs = true, ipairs = true,
+  tostring = true, tonumber = true, print = true, error = true, assert = true,
+  select = true, next = true, setmetatable = true, getmetatable = true,
+  dofile = true, loadfile = true, require = true, math = true, string = true,
+  table = true, io = true, os = true, debug = true, coroutine = true, package = true,
+  utf8 = true, collectgarbage = true
+}
+
+setmetatable(_G, {
+  __newindex = function(t, k, v)
+    rawset(declared_globals, k, true)
+    rawset(t, k, v)
+  end,
+  __index = function(t, k)
+    if not rawget(declared_globals, k) and not rawget(t, k) then
+      error("cannot get undefined variable: " .. tostring(k), 2)
+    end
+    return rawget(t, k)
+  end
+})
+
+-- 1. Mock Ativo de Globais, Views e CommandView com Auto-Submit
+local core = {
+  project_directories = { "." },
+  project_dir = ".",
+  threads = {},
+  command_view = {
+    text = "",
+    enter = function(self, prompt, opts)
+      -- 🧪 Simulação ativa: Testa se o callback submit executa sem erros
+      if opts and type(opts.submit) == "function" then
+        local ok, err = pcall(opts.submit, "teste_busca_soberana")
+        if not ok then
+          print(string.format("SHADOW_PROMPT_CRASH|%s|%s", tostring(prompt), tostring(err):gsub("\\n", " ")))
+        end
+      end
+    end
+  },
+  root_view = {
+    root_node = {
+      type = "leaf",
+      views = {},
+      get_primary_node = function(self) return self end,
+      split = function(self) return self end,
+      add_view = function(self, v) table.insert(self.views, v) end,
+      get_view_idx = function(self, v) return 1 end,
+    },
+    get_active_node = function(self) return self.root_node end,
+    open_doc = function(self, d) return d end,
+    draw = function(self) end,
+    on_mouse_moved = function(self) end,
+    on_mouse_pressed = function(self) end,
+  },
+  status_view = { add_item = function() end },
+  command = {
+    map = {
+      ["core:open-file"] = { action = function() end },
+      ["core:find-file"] = { action = function() end },
+      ["doc:save"] = { action = function() end },
+      ["doc:save-all"] = { action = function() end },
+      ["doc:duplicate-lines"] = { action = function() end },
+      ["doc:delete-lines"] = { action = function() end },
+      ["doc:toggle-line-comments"] = { action = function() end },
+      ["doc:go-to-line"] = { action = function() end },
+      ["doc:newline"] = { action = function() end },
+      ["root:close"] = { action = function() end },
+      ["root:split-right"] = { action = function() end },
+      ["root:split-down"] = { action = function() end },
+      ["root:switch-to-next-tab"] = { action = function() end },
+      ["root:switch-to-previous-tab"] = { action = function() end },
+      ["root:switch-to-left"] = { action = function() end },
+      ["root:switch-to-right"] = { action = function() end },
+      ["find-replace:find"] = { action = function() end },
+      ["find-replace:replace"] = { action = function() end },
+      ["find-replace:repeat-find"] = { action = function() end },
+      ["find-replace:previous-find"] = { action = function() end },
+    },
+    add = function(pred, map)
+      for k, v in pairs(map) do
+        core.command.map[k] = { predicate = pred, action = v }
+      end
+    end,
+    perform = function(cmd, ...)
+      local c = core.command.map[cmd]
+      if c and c.action then return pcall(c.action, ...) end
+      return false
+    end
+  },
+  keymap = {
+    map = {},
+    add = function(map)
+      for k, v in pairs(map) do core.keymap.map[k] = v end
+    end
+  },
+  syntax = { items = {}, add = function(s) table.insert(core.syntax.items, s) end },
+  config = { ignore_files = {}, draw_indent_guides = true, indent_size = 4 },
+  style = {
+    font = { get_height = function() return 14 end, get_width = function(self, t) return #(t or "") * 7 end },
+    tree_font = { get_height = function() return 12 end, get_width = function(self, t) return #(t or "") * 6 end },
+    background = { 30, 30, 30, 255 },
+    text = { 200, 200, 200, 255 },
+    accent = { 38, 188, 95, 255 },
+  },
+  log = function(...) end,
+  error = function(...) end,
+  open_doc = function(fn)
+    return { filename = fn, lines = { "linha teste 1", "linha teste 2" }, is_dirty = function() return false end, clean = function() end, insert = function() end, set_selection = function() end, remove = function() end }
+  end,
+  add_thread = function(fn) pcall(fn) end,
+  set_active_view = function() end,
+}
+
+local active_doc = core.open_doc("teste.lua")
+core.active_view = {
+  doc = active_doc,
+  get_font = function() return core.style.font end,
+  get_line_height = function() return 14 end,
+  lines = active_doc.lines,
+}
+
+local system = {
+  mkdir = function() return true end,
+  list_dir = function() return { "arquivo_teste.py", "modulo_teste.lua" } end,
+  get_file_info = function(p) return { type = "file", size = 100, modified = os.time() } end,
+  absolute_path = function(p) return p end,
+  exec = function() end,
+  set_clipboard = function() end,
+}
+
+local Doc = {
+  has_selection = function(self) return false end,
+  get_selection = function(self) return 1, 1, 1, 1 end,
+  get_text = function(self) return "" end,
+  insert = function(self) end,
+  remove = function(self) end,
+  save = function(self) end,
+  extend = function(self) return self end,
+}
+
+local DocView = {
+  draw_line_body = function(self) return 14 end,
+  draw_line_gutter = function(self) return 14 end,
+  get_gutter_width = function(self) return 40 end,
+  get_line_height = function(self) return 14 end,
+  get_font = function(self) return core.style.font end,
+  new = function(self, doc) return setmetatable({ doc = doc }, { __index = self }) end,
+  extend = function(self) return self end,
+}
+setmetatable(DocView, {
+  __call = function(cls, doc) return cls:new(doc) end
+})
+local Node = { draw_tab_title = function() end, on_mouse_pressed = function() end, extend = function(self) return self end }
+local RootView = { draw = function() end, on_mouse_moved = function() end, on_mouse_pressed = function() end, extend = function(self) return self end }
+local View = { extend = function(self) return self end }
+local StatusView = { Item = { LEFT = 1, RIGHT = 2 } }
+
+rawset(_G, "core", core)
+rawset(_G, "system", system)
+rawset(_G, "USERDIR", ".")
+rawset(_G, "PATHSEP", "/")
+rawset(_G, "VERSION", "2.1.8")
+rawset(_G, "PLATFORM", "Windows")
+rawset(_G, "renderer", { draw_rect = function() end, draw_text = function() end })
+rawset(_G, "rencache", { draw_rect = function() end, draw_text = function() end })
+
+package.loaded["core"] = core
+package.loaded["core.common"] = { fuzzy_match = function() return true end }
+package.loaded["core.config"] = core.config
+package.loaded["core.style"] = core.style
+package.loaded["core.syntax"] = core.syntax
+package.loaded["core.command"] = core.command
+package.loaded["core.keymap"] = core.keymap
+package.loaded["core.node"] = Node
+package.loaded["core.docview"] = DocView
+package.loaded["core.doc"] = Doc
+package.loaded["core.view"] = View
+package.loaded["core.rootview"] = RootView
+package.loaded["core.statusview"] = StatusView
+
+-- 2. Carregamento dos Templates
+for _, tpath in ipairs(templates) do
+  local fname = tpath:match("[^/\\\\]+$") or tpath
+  local t0 = os.clock()
+  local ok, err = pcall(dofile, tpath)
+  local elapsed = (os.clock() - t0) * 1000
+
+  if ok then
+    print(string.format("SHADOW_MOD|%s|PASS|%.2f", fname, elapsed))
+  else
+    print(string.format("SHADOW_MOD|%s|FAIL|%.2f|%s", fname, elapsed, tostring(err):gsub("\\n", " ")))
+  end
+end
+
+-- 3. Auditoria de Contagem de Comandos
+local cmd_count = 0
+for _, _ in pairs(core.command.map) do cmd_count = cmd_count + 1 end
+print(string.format("SHADOW_CMD_COUNT|%d", cmd_count))
+
+-- 4. 🔬 SIMULAÇÃO ATIVA DE EXECUÇÃO (Invoca cada comando registrado)
+local passed_cmds = 0
+local failed_cmds = 0
+for cmd_name, cmd_entry in pairs(core.command.map) do
+  if type(cmd_entry) == "table" and type(cmd_entry.action) == "function" then
+    local ok_act, err_act = pcall(cmd_entry.action)
+    if not ok_act then
+      failed_cmds = failed_cmds + 1
+      print(string.format("SHADOW_CMD_CRASH|%s|%s", tostring(cmd_name), tostring(err_act):gsub("\\n", " ")))
+    else
+      passed_cmds = passed_cmds + 1
+    end
+  end
+end
+print(string.format("SHADOW_CMD_SIMULATION|%d|%d", passed_cmds, failed_cmds))
+
+-- 5. Detecção de Atalhos Órfãos
+for key, target_cmd in pairs(core.keymap.map) do
+  if not core.command.map[target_cmd] then
+    print(string.format("SHADOW_ORPHAN_KEY|%s -> %s", tostring(key), tostring(target_cmd)))
+  end
+end
+"""
+        h_file.write_text(harness_lua, encoding="utf-8")
+        return h_file
 
     @classmethod
     def run_shadow_audit(cls) -> Dict[str, Any]:
-        """Executa todos os templates no Shadow Harness do Lua 5.4 headless mock."""
+        """Auditoria profunda com simulação de comandos, execução ativa e integridade de closures."""
         harness_path = cls.get_shadow_harness_path()
-        templates = cls.get_template_files()
-        
         runtime_info = cls.lua_runtime_info()
+        templates = cls.get_template_files()
+
         if not runtime_info or not harness_path.exists() or not templates:
-            return {
-                "status": "SKIPPED",
-                "reason": f"Harness: {'OK' if harness_path.exists() else 'NÃO ENCONTRADO (' + str(harness_path) + ')'}",
-                "files": {}
-            }
-        
+            return {"status": "SKIPPED", "reason": "Runtime Lua ou templates indisponíveis", "files": {}, "total_files": 0}
+
         lua_exe, _ = runtime_info
         cmd = [str(lua_exe), str(harness_path)] + [str(t) for t in templates]
-        
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=10,
-            encoding="utf-8",
-            errors="replace"
-        )
-        
-        output = proc.stdout
-        stderr_msg = proc.stderr.strip()
-        files_report: Dict[str, Dict[str, Any]] = {}
-        total_passed = 0
-        total_failed = 0
-        
-        in_report = False
-        for line in output.splitlines():
-            line = line.strip()
-            if line == "=== SHADOW_REPORT_START ===":
-                in_report = True
-                continue
-            elif line == "=== SHADOW_REPORT_END ===":
-                in_report = False
-                continue
-            
-            if in_report and "|" in line:
-                parts = line.split("|", 3)
-                status = parts[0]
-                fname = parts[1]
-                time_ms = float(parts[2]) if len(parts) > 2 else 0.0
-                err_msg = parts[3] if len(parts) > 3 else ""
-                
-                if status == "PASS":
-                    total_passed += 1
-                    files_report[fname] = {"status": "PASS", "time_ms": time_ms}
-                else:
-                    total_failed += 1
-                    files_report[fname] = {"status": "FAIL", "time_ms": time_ms, "error": err_msg}
-        
-        if len(files_report) == 0 and stderr_msg:
-            return {
-                "status": "FAIL",
-                "reason": f"Erro interno do Harness: {stderr_msg}",
-                "files": {"harness_bootstrap": {"status": "FAIL", "time_ms": 0, "error": stderr_msg}},
-                "total_templates": len(templates),
-                "passed": 0,
-                "failed": 1
+
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=15, encoding="utf-8", errors="replace")
+            output = res.stdout + "\n" + res.stderr
+
+            report: Dict[str, Any] = {
+                "status": "PASS",
+                "total_files": len(templates),
+                "files": {},
+                "commands_count": 0,
+                "commands_passed": 0,
+                "commands_crashed": 0,
+                "crashed_commands": [],
+                "prompt_crashes": [],
+                "orphan_keys": [],
+                "errors": []
             }
 
-        return {
-            "status": "PASS" if total_failed == 0 else "FAIL",
-            "total_templates": len(templates),
-            "passed": total_passed,
-            "failed": total_failed,
-            "files": files_report
-        }
+            for line in output.splitlines():
+                line = line.strip()
+                if line.startswith("SHADOW_MOD|"):
+                    parts = line.split("|")
+                    if len(parts) >= 4:
+                        status = parts[2]
+                        if status == "FAIL":
+                            report["status"] = "FAIL"
+                        report["files"][parts[1]] = {
+                            "status": status,
+                            "time_ms": float(parts[3]),
+                            "error": parts[4] if len(parts) > 4 else None
+                        }
+                elif line.startswith("SHADOW_CMD_COUNT|"):
+                    report["commands_count"] = int(line.split("|")[1])
+                elif line.startswith("SHADOW_CMD_SIMULATION|"):
+                    parts = line.split("|")
+                    report["commands_passed"] = int(parts[1])
+                    report["commands_crashed"] = int(parts[2])
+                elif line.startswith("SHADOW_CMD_CRASH|"):
+                    parts = line.split("|", 2)
+                    report["crashed_commands"].append({"command": parts[1], "error": parts[2] if len(parts) > 2 else "unknown"})
+                    report["status"] = "FAIL"
+                elif line.startswith("SHADOW_PROMPT_CRASH|"):
+                    parts = line.split("|", 2)
+                    report["prompt_crashes"].append({"prompt": parts[1], "error": parts[2] if len(parts) > 2 else "unknown"})
+                    report["status"] = "FAIL"
+                elif line.startswith("SHADOW_ORPHAN_KEY|"):
+                    report["orphan_keys"].append(line.split("|")[1])
+
+            return report
+        except Exception as e:
+            return {"status": "FAIL", "reason": str(e), "files": {}, "total_files": len(templates)}
 
 
 

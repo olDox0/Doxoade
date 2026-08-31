@@ -714,11 +714,11 @@ def _cmd_to_xml(cmd, name: str) -> ET.Element:
     return elem
 
 def generate_manifest():
-    """Gera o manifesto XML compacto e salva automaticamente."""
+    """Gera o manifesto XML compacto e salva automaticamente com blindagem de I/O."""
+    import shutil
     from doxoade.cli import cli
     
     ctx = click.Context(cli)
-    
     root = ET.Element("doxoade")
     root.set("version", "85.1")
     root.set("mode", "dry-run")
@@ -733,16 +733,31 @@ def generate_manifest():
         cmd = cli.get_command(ctx, cmd_name)
         if cmd:
             root.append(_cmd_to_xml(cmd, cmd_name))
-    
+            
     # Formata e salva
     ET.indent(root, space="  ")
     xml_bytes = ET.tostring(root, encoding="unicode", xml_declaration=False)
     xml_str = '<?xml version="1.0" encoding="utf-8"?>\n' + xml_bytes
     
-    out_path = Path("doxoade_manifest.xml")
-    out_path.write_text(xml_str, encoding="utf-8")
+    # 🛡️ MUDANÇA DE NOME: Evita conflitos de cache ou travamento no nome antigo
+    out_path = (Path.cwd() / "doxoade_manifest_v2.xml").resolve()
     
-    cmd_count = len(list(root.iter("cmd")))
-    line_count = xml_str.count('\n') + 1
-    click.secho(f"✅ [THOTH] Manifesto gerado: {out_path.resolve()}", fg="green", bold=True)
-    click.secho(f"   📦 {cmd_count} comandos | {line_count} linhas | {len(xml_str)//1024}KB", fg="cyan")
+    # 🧹 LIMPEZA PREVENTIVA: Remove o alvo se ele existir (seja arquivo ou pasta corrompida)
+    if out_path.is_dir():
+        click.secho(f"⚠️ [ANÚBIS] '{out_path.name}' é um diretório corrompido. Removendo...", fg="yellow")
+        shutil.rmtree(out_path)
+    elif out_path.is_file():
+        try:
+            out_path.unlink() # Tenta deletar o arquivo travado
+        except PermissionError:
+            click.secho(f"⚠️ [ANÚBIS] Arquivo travado por outro programa. Feche-o (ex: Notepad++) e tente novamente.", fg="yellow")
+            return
+
+    try:
+        out_path.write_text(xml_str, encoding="utf-8")
+        cmd_count = len(list(root.iter("cmd")))
+        line_count = xml_str.count('\n') + 1
+        click.secho(f"✅ [THOTH] Manifesto gerado: {out_path}", fg="green", bold=True)
+        click.secho(f"   📦 {cmd_count} comandos | {line_count} linhas | {len(xml_str)//1024}KB", fg="cyan")
+    except OSError as e:
+        raise RuntimeError(f"🚨 [ANÚBIS] Falha crítica ao gravar em '{out_path}'. Detalhes: {e}")

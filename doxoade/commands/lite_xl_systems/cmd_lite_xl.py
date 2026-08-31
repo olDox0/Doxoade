@@ -116,24 +116,40 @@ def cmd_check_templates(fix, apply):
     report = LiteXLEngine.verify_templates()
 
     # 🐺 FASE 2: SHADOW RUNTIME AUDIT (Headless Mock Engine)
-    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🐺 AUDITORIA SEMÂNTICA SHADOW (Mock Runtime Execution){Style.RESET_ALL}")
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🐺 AUDITORIA SEMÂNTICA SHADOW (Active Simulator){Style.RESET_ALL}")
     shadow_report = LiteXLEngine.run_shadow_audit()
-    
     if shadow_report.get("status") == "SKIPPED":
         click.echo(f"  {Fore.YELLOW}⚠ Shadow Audit ignorado: {shadow_report.get('reason')}{Fore.RESET}\n")
     else:
-        for fname, sdata in shadow_report["files"].items():
-            if sdata["status"] == "PASS":
-                time_badge = f"{Fore.LIGHTBLACK_EX}({sdata['time_ms']:.2f}ms){Fore.RESET}"
-                click.echo(f"  {Fore.GREEN}[SHADOW PASS]{Fore.RESET} {Style.BRIGHT}{fname:<35}{Style.RESET_ALL} {time_badge}")
-            else:
-                click.echo(f"  {Fore.RED}[SHADOW FAIL]{Fore.RESET} {Style.BRIGHT}{fname:<35}{Style.RESET_ALL}")
-                click.echo(f"      {Fore.RED}✖ Runtime Crash:{Fore.RESET} {sdata.get('error')}")
-        
-        if shadow_report["failed"] > 0:
-            click.echo(f"\n{Fore.RED}{Style.BRIGHT}✖ {shadow_report['failed']} template(s) falharam na execução em runtime Shadow!{Style.RESET_ALL}\n")
-        else:
-            click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}✔ Todos os {shadow_report['passed']} templates executaram em 0ms sem exceções em tempo de inicialização.{Style.RESET_ALL}\n")
+        for fname, sdata in shadow_report.get("files", {}).items():
+            status_tag = f"{Fore.GREEN}[SHADOW PASS]{Fore.RESET}" if sdata["status"] == "PASS" else f"{Fore.RED}[SHADOW FAIL]{Fore.RESET}"
+            time_badge = f"{Fore.LIGHTBLACK_EX}({sdata.get('time_ms', 0):.2f}ms){Fore.RESET}"
+            click.echo(f"  {status_tag} {Style.BRIGHT}{fname:<35}{Style.RESET_ALL} {time_badge}")
+            if sdata.get("error"):
+                click.echo(f"      {Fore.RED}✖ {sdata['error']}{Fore.RESET}")
+
+        cmd_count = shadow_report.get("commands_count", 0)
+        cmd_passed = shadow_report.get("commands_passed", 0)
+        cmd_crashed = shadow_report.get("commands_crashed", 0)
+
+        if cmd_count > 0:
+            status_color = Fore.GREEN if cmd_crashed == 0 else Fore.RED
+            click.echo(f"\n  {status_color}✔ Simulação Ativa de Comandos:{Fore.RESET} {cmd_passed}/{cmd_count} executaram com sucesso ({cmd_crashed} falhas).")
+
+        if shadow_report.get("crashed_commands"):
+            click.echo(f"  {Fore.RED}✖ Comandos que Falharam na Execução Ativa:{Fore.RESET}")
+            for c in shadow_report["crashed_commands"]:
+                click.echo(f"      {Fore.RED}• [{c['command']}]: {Fore.YELLOW}{c['error']}{Fore.RESET}")
+
+        if shadow_report.get("prompt_crashes"):
+            click.echo(f"  {Fore.RED}✖ Falhas em Callbacks de Prompt (Submit):{Fore.RESET}")
+            for p in shadow_report["prompt_crashes"]:
+                click.echo(f"      {Fore.RED}• [{p['prompt']}]: {Fore.YELLOW}{p['error']}{Fore.RESET}")
+
+        if shadow_report.get("orphan_keys"):
+            click.echo(f"  {Fore.RED}⚠ Atalhos Órfãos Detectados:{Fore.RESET}")
+            for ok in shadow_report["orphan_keys"]:
+                click.echo(f"      {Fore.YELLOW}• {ok}{Fore.RESET}")
 
     for fname, data in report["files"].items():
         status_badge = (
@@ -218,28 +234,25 @@ def cmd_restart(target, clean):
             click.echo(f"    {Fore.RED}{line}{Fore.RESET}")
         click.echo(f"\n  {Fore.GREEN}✔ IDE aberta utilizando o último snapshot estável.{Fore.RESET}\n")
 
-
 @lite_xl_group.command("diagnose", help="Diagnóstico forense completo com auditoria Shadow ativa.")
 def cmd_diagnose():
     click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🩺 DIAGNÓSTICO FORENSE DO LITE XL (Shadow Powered){Style.RESET_ALL}")
-    
-    # 1. Auditoria Shadow Ativa
-    click.echo(f"  {Fore.WHITE}Executando simulação de runtime e comandos...{Fore.RESET}")
-    shadow_res = LiteXLEngine.run_shadow_audit()
-    
-    if shadow_res.get("status") == "PASS":
-        click.echo(f"  {Fore.GREEN}✔ Shadow Runtime:{Fore.RESET} 100% dos comandos e templates passaram na simulação ({shadow_res.get('passed')} módulos).")
-    else:
-        click.echo(f"  {Fore.RED}✖ Shadow Runtime:{Fore.RESET} {shadow_res.get('failed')} falha(s) de comando detectada(s):")
-        for fname, fdata in shadow_res.get("files", {}).items():
-            if fdata.get("status") == "FAIL":
-                click.echo(f"      {Fore.RED}• [{fname}]{Fore.RESET} {fdata.get('error')}")
+    click.echo("  Executando simulação de runtime e comandos...")
 
-    # 2. Diagnóstico de Sessão e Inicialização
-    init_path = LiteXLEngine.get_init_lua_path()
-    click.echo(f"\n{Fore.WHITE}Alvo:{Fore.RESET} {init_path}\n")
+    shadow_report = LiteXLEngine.run_shadow_audit()
+    total_mods = shadow_report.get("total_files", len(LiteXLEngine.get_template_files()))
     
-    diag_res = LiteXLEngine.diagnose_init_file(init_path)
+    if shadow_report.get("status") == "PASS":
+        click.echo(f"  {Fore.GREEN}✔ Shadow Runtime: 100% dos comandos e templates passaram na simulação ({total_mods} módulos).{Fore.RESET}")
+    else:
+        click.echo(f"  {Fore.YELLOW}⚠ Shadow Runtime: Simulação com alertas ou truncamento ({total_mods} módulos).{Fore.RESET}")
+    init_path = LiteXLEngine.get_init_lua_path()
+    init_file = LiteXLEngine.get_init_lua_path()
+    err_file = LiteXLEngine.get_error_txt_path()
+    click.echo(f"\nAlvo: {init_file}\n")
+    
+    diag_res = LiteXLEngine.diagnose_init_file(init_file)
+    
     if isinstance(diag_res, dict):
         for item in diag_res.get("items", diag_res.get("checks", [])):
             click.echo(f"  • {item}")
@@ -1177,7 +1190,53 @@ def cmd_preflight():
     click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}✔ PRE-FLIGHT OK — Init.lua validado e pronto para deploy.{Style.RESET_ALL}")
     click.echo(f"  {Fore.WHITE}Execute 'doxoade lite-xl setup --force' para instalar.{Fore.RESET}\n")
 
+@lite_xl_group.command("search-bridge", help="Ponte de busca de alta velocidade Vulcan/SearchState para o Lite XL.")
+@click.argument("query")
+@click.option("--limit", "-n", default=300, type=int, help="Limite de ocorrências")
+@click.option("--out-file", "-o", default="", help="Arquivo de saída opcional")
+def cmd_search_bridge(query, limit, out_file):
+    """Executa a busca via motor nativo Doxoade e gera buffer de resultados Dumppot."""
+    import time
+    from pathlib import Path
+    from doxoade.commands.search_systems.search_engine import _search_code_logic
+    from doxoade.tools.filesystem import _find_project_root
 
+    t0 = time.time()
+    root_path = _find_project_root(os.getcwd()) or os.getcwd()
+    root = Path(root_path)
+    matches = _search_code_logic(root, query, limit)
+    elapsed = time.time() - t0
+
+    grouped = {}
+    for m in matches:
+        full_p = (root / m["file"]).resolve()
+        f_str = str(full_p).replace("\\", "/")
+        grouped.setdefault(f_str, []).append(m)
+
+    lines = [
+        "================================================================================",
+        f"  🔍 RESULTADOS DA BUSCA DOXOADE: \"{query}\"",
+        f"  Ocorrências: {len(matches)} | Arquivos: {len(grouped)} | Varredura: {elapsed:.2f}s",
+        "  💡 Pressione [ENTER] em qualquer linha com 'arquivo:linha' para ir direto ao código!",
+        "================================================================================\n"
+    ]
+
+    if not matches:
+        lines.append(f"  (Nenhum resultado encontrado para \"{query}\")\n")
+    else:
+        for fpath, m_list in grouped.items():
+            lines.append(f"📄 {fpath}")
+            for m in m_list:
+                lines.append(f"   {fpath}:{m['line']}: {m['text']}")
+            lines.append("")
+
+    content = "\n".join(lines)
+    if out_file:
+        out_p = Path(out_file)
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        out_p.write_text(content, encoding="utf-8")
+    else:
+        click.echo(content)
 
 # ═══════════════════════════════════════════════════════════
 # 🐉 TYPHON — Pipeline Supervisionado de Deploy

@@ -75,22 +75,41 @@ class TyphonEngine:
         state_path.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
 
     # ─────────────────────────────────────────────────────────────
-    # FASE 0: SNAPSHOT (Backup do init.lua estável)
+    # FASE 0: SNAPSHOT — ponto de restauração PRÉ-DEPLOY
+    # (NÃO sobrescreve mais o init.stable.lua — isso quebra o ciclo vicioso)
     # ─────────────────────────────────────────────────────────────
     @classmethod
     def take_snapshot(cls) -> Tuple[bool, str]:
-        """Captura o init.lua atual como snapshot estável antes do deploy."""
+        """Salva o init.lua atual como ponto pré-deploy (não toca no stable)."""
         init_path = LiteXLEngine.get_init_lua_path()
-        stable_path = cls._get_stable_init_path()
-
+        pre_path = cls._get_doxoade_dir() / "init.pre_deploy.lua"
         if not init_path.exists():
             return False, "init.lua não existe ainda — primeiro deploy, sem snapshot"
-
         try:
-            shutil.copy2(init_path, stable_path)
-            return True, f"Snapshot salvo: {stable_path}"
+            shutil.copy2(init_path, pre_path)
+            return True, f"Pré-deploy salvo: {pre_path}"
         except Exception as e:
             return False, f"Falha ao criar snapshot: {e}"
+
+    # PROMOÇÃO: novo init.lua só vira "stable" com veredicto positivo
+    @classmethod
+    def promote_to_stable(cls) -> Tuple[bool, str]:
+        """Promove o init.lua recém-verificado a snapshot estável oficial."""
+        init_path = LiteXLEngine.get_init_lua_path()
+        stable_path = cls._get_stable_init_path()
+        if not init_path.exists():
+            return False, "init.lua não existe para promoção"
+        try:
+            shutil.copy2(init_path, stable_path)
+            state = cls.load_state()
+            state["stable_snapshot"] = {
+                "path": str(stable_path),
+                "promoted_at": datetime.now().isoformat(timespec="seconds"),
+            }
+            cls.save_state(state)
+            return True, f"init.lua promovido a estável: {stable_path}"
+        except Exception as e:
+            return False, f"Falha na promoção: {e}"
 
     # ─────────────────────────────────────────────────────────────
     # FASE 1: PREFLIGHT (Gate de validação)
@@ -101,6 +120,16 @@ class TyphonEngine:
         Executa validação completa do init.lua em memória.
         Retorna: (passou, mensagem, detalhes)
         """
+
+        try:
+            from doxoade.tools.lua_systems.api_guard.api_catalog import APICatalogSchema, get_default_catalog, save_catalog, get_api_guard_dir
+            catalog = get_default_catalog()
+            guard_dir = get_api_guard_dir()
+            (guard_dir / "catalog.json").write_text(APICatalogSchema.serialize_json(catalog), encoding="utf-8")
+            (guard_dir / "catalog.lua").write_text(APICatalogSchema.export_to_lua(catalog), encoding="utf-8")
+        except Exception:
+            pass
+
         details: Dict[str, Any] = {
             "compilation": False,
             "shadow_audit": False,
@@ -225,71 +254,81 @@ class TyphonEngine:
             return False, f"Falha ao relançar: {e}", None
 
     # ─────────────────────────────────────────────────────────────
-    # FASE 4: WATCH (Polling de PID + Leitura de log)
+    # FASE 4: WATCH — veredicto baseado em EVIDÊNCIAS FRESCAS
     # ─────────────────────────────────────────────────────────────
     @classmethod
-    def watch(cls, pid: int, watch_seconds: int = 5, poll_interval: float = 0.5) -> Tuple[str, Dict[str, Any]]:
+    def watch(cls, pid: int, watch_seconds: float = 5.0) -> Tuple[str, Dict[str, Any]]:
         """
-        Monitora o processo do Lite XL até estabilizar ou crashar.
-        Retorna: (verdict, details)
-        verdict: "STABLE", "CRASH", "TIMEOUT"
+        Observa o PID recém-lançado e emite veredicto semântico.
+
+        STABLE  → processo vivo + nenhum error.txt novo + boot confirmado no log.
+        CRASH   → processo morreu OU error.txt criado/atualizado após o deploy.
+        TIMEOUT → janela expirou com processo vivo, sem confirmação (INCONCLUSIVO).
+
+        Regra de ouro: nenhum artefato é lido sem baseline de frescor (mtime/size).
         """
+        t0 = time.time()
         details: Dict[str, Any] = {
-            "pid_alive": False,
-            "boot_ok_detected": False,
-            "errors": [],
             "elapsed_seconds": 0.0,
+            "errors": [],
+            "boot_confirmed": False,
         }
 
-        log_path = LiteXLEngine.get_session_log_path()
-        start_time = time.time()
-        deadline = start_time + watch_seconds
+        error_txt = LiteXLEngine.get_error_txt_path()
+        session_log = LiteXLEngine.get_session_log_path()
+
+        # Baselines de frescor capturados ANTES do boot do novo PID
+        baseline_error_mtime = error_txt.stat().st_mtime if error_txt.exists() else None
+        baseline_log_size = session_log.stat().st_size if session_log.exists() else 0
+
+        GRACE_AFTER_BOOT = 2.0  # segundos de vida extra p/ saída antecipada
+        boot_confirmed_at: Optional[float] = None
+        deadline = t0 + watch_seconds
 
         while time.time() < deadline:
-            # 1. Verifica se o processo está vivo
-            alive = cls._is_pid_alive(pid)
-#            alive = LiteXLEngine.is_process_alive(pid)
-            details["pid_alive"] = alive
-            details["elapsed_seconds"] = round(time.time() - start_time, 2)
+            # 1) Processo morreu → CRASH imediato
+            if not cls._is_pid_alive(pid):
+                details["elapsed_seconds"] = round(time.time() - t0, 2)
+                details["errors"].append(f"PID {pid} morreu durante a janela de observação")
+                return "CRASH", details
 
-            # 2. Lê o session_log.txt
-            if log_path.exists():
+            # 2) error.txt NOVO/ATUALIZADO após o deploy → CRASH
+            if error_txt.exists():
+                mtime = error_txt.stat().st_mtime
+                if baseline_error_mtime is None or mtime > baseline_error_mtime:
+                    details["elapsed_seconds"] = round(time.time() - t0, 2)
+                    try:
+                        snippet = error_txt.read_text(encoding="utf-8", errors="replace")[:300]
+                    except Exception:
+                        snippet = "error.txt criado/atualizado após o deploy"
+                    details["errors"].append(snippet)
+                    return "CRASH", details
+
+            # 3) Confirmação de boot via crescimento do session_log
+            if boot_confirmed_at is None and session_log.exists():
                 try:
-                    log_content = log_path.read_text(encoding="utf-8", errors="replace")
-
-                    if "=== SOVEREIGN BOOT OK ===" in log_content:
-                        details["boot_ok_detected"] = True
-                        return "STABLE", details
-
-                    # Captura erros da sessão atual
-                    errors = []
-                    for line in log_content.splitlines():
-                        if "[ERROR]" in line:
-                            errors.append(line.strip())
-                    details["errors"] = errors
-
-                    # Processo morreu com erros?
-                    if not alive and errors:
-                        return "CRASH", details
-
+                    if session_log.stat().st_size > baseline_log_size:
+                        content = session_log.read_text(encoding="utf-8", errors="replace")
+                        if "SOVEREIGN BOOT OK" in content:
+                            boot_confirmed_at = time.time()
+                            details["boot_confirmed"] = True
                 except Exception:
                     pass
 
-            # 3. Processo morreu silenciosamente?
-            if not alive and not details.get("boot_ok_detected"):
-                time.sleep(0.5)  # Dá mais uma chance pro log aparecer
-                if log_path.exists():
-                    log_content = log_path.read_text(encoding="utf-8", errors="replace")
-                    if "[ERROR]" in log_content:
-                        details["errors"] = [l.strip() for l in log_content.splitlines() if "[ERROR]" in l]
-                        return "CRASH", details
+            # 4) STABLE antecipado: boot confirmado + grace period vivo
+            if boot_confirmed_at is not None and (time.time() - boot_confirmed_at) >= GRACE_AFTER_BOOT:
+                details["elapsed_seconds"] = round(time.time() - t0, 2)
+                return "STABLE", details
 
-            time.sleep(poll_interval)
+            time.sleep(0.25)
 
-        # Timeout: processo vivo mas sem SOVEREIGN BOOT OK
-        if details["pid_alive"]:
-            return "TIMEOUT", details
-
+        # Fim da janela
+        details["elapsed_seconds"] = round(time.time() - t0, 2)
+        if cls._is_pid_alive(pid):
+            if boot_confirmed_at is not None:
+                return "STABLE", details      # vivo + boot confirmado
+            return "TIMEOUT", details         # vivo, sem sinal de boot (inconclusivo)
+        details["errors"].append(f"PID {pid} morreu no final da janela")
         return "CRASH", details
 
     @staticmethod
@@ -459,7 +498,7 @@ class TyphonEngine:
         pipeline_duration = (time.time() - pipeline_start) * 1000
 
         if verdict == "STABLE":
-            # Promove snapshot como estável
+            # ── (MANTIDO) seu bloco STABLE original: promoção + DEPLOY_OK + delta ──
             state["last_deploy"] = {
                 "timestamp": datetime.now().isoformat(),
                 "boot_time_ms": watch_details["elapsed_seconds"] * 1000,
@@ -476,7 +515,6 @@ class TyphonEngine:
 
             echo(f"\n  {Fore.GREEN}{Style.BRIGHT}✔ DEPLOY BEM-SUCEDIDO{Style.RESET_ALL} ({pipeline_duration:.0f}ms)")
 
-            # Delta de baseline
             if baseline_boot_ms is not None:
                 current_boot_ms = watch_details["elapsed_seconds"] * 1000
                 delta = current_boot_ms - baseline_boot_ms
@@ -487,11 +525,42 @@ class TyphonEngine:
             echo()
             return {"success": True, "verdict": "STABLE", "timeline": timeline, "total_ms": pipeline_duration}
 
-        else:
-            # CRASH ou TIMEOUT → rollback
+        elif verdict == "TIMEOUT":
+            # ── INCONCLUSIVO: processo vivo, sem evidência de falha → NÃO reverter ──
+            echo(f"\n  {Fore.YELLOW}{Style.BRIGHT}⚠ DEPLOY INCONCLUSIVO — Veredicto: TIMEOUT{Style.RESET_ALL}")
+            echo(f"  {Fore.WHITE}O processo segue vivo, mas o boot não foi confirmado na janela.{Fore.RESET}")
+            echo(f"  {Fore.WHITE}Nenhum rollback executado. Verifique com: {Fore.CYAN}doxoade lite-xl log{Fore.RESET}")
+
+            state.setdefault("history", []).append({
+                "type": "DEPLOY_INCONCLUSIVE",
+                "verdict": verdict,
+                "errors": watch_details.get("errors", []),
+                "timestamp": datetime.now().isoformat(),
+                "timeline": timeline,
+                "rollback": False,
+            })
+            cls.save_state(state)
+
+            echo()
+            return {
+                "success": True,
+                "verdict": verdict,
+                "timeline": timeline,
+                "errors": watch_details.get("errors", []),
+                "total_ms": pipeline_duration,
+            }
+
+        else:  # verdict == "CRASH" — falha REAL com evidência
             echo(f"\n  {Fore.RED}{Style.BRIGHT}✖ DEPLOY FALHOU — Veredicto: {verdict}{Style.RESET_ALL}")
 
             if not no_rollback:
+                # Mata instâncias órfãs ANTES de relançar a versão estável
+                try:
+                    LiteXLEngine.kill_ghost_processes()
+                    time.sleep(0.5)
+                except Exception:
+                    pass
+
                 echo(f"  {Fore.YELLOW}🛡️ Executando ROLLBACK automático...{Fore.RESET}")
                 rb_ok, rb_msg = cls.rollback()
                 echo(f"  {'✔' if rb_ok else '✖'} {rb_msg}")
@@ -501,7 +570,6 @@ class TyphonEngine:
                     re_ok, re_msg, re_pid = cls.relaunch(target)
                     echo(f"  {'✔' if re_ok else '✖'} {re_msg}")
 
-            # Abre debug automaticamente
             echo(f"  {Fore.MAGENTA}🐛 Abrindo debug para investigação...{Fore.RESET}")
             dbg_ok, dbg_msg = cls.open_debug()
             echo(f"  {'✔' if dbg_ok else '✖'} {dbg_msg}")

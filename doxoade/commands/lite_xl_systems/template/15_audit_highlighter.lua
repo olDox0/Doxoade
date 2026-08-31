@@ -38,8 +38,8 @@ local CATEGORY_THEMES = {
   STYLE           = { color = { 168, 85, 247, 255 },  tint = { 168, 85, 247, 18 },  name = "Estilo",       symbol = "🟣" },
   UNUSED          = { color = { 234, 179, 8, 255 },   tint = { 234, 179, 8, 18 },   name = "Não Utilizado", symbol = "🟡" },
   COMPLEXITY      = { color = { 249, 115, 22, 255 },  tint = { 249, 115, 22, 18 },  name = "Complexidade", symbol = "⚠️" },
-  SYNTAX          = { color = { 239, 68, 68, 255 },   tint = { 239, 68, 68, 25 },   name = "Sintaxe",      symbol = "🔴" },
-  CRITICAL        = { color = { 220, 38, 38, 255 },   tint = { 220, 38, 38, 28 },   name = "Crítico",      symbol = "💥" },
+  SYNTAX          = { color = { 255, 88, 88, 255 },   tint = { 239, 68, 68, 25 },   name = "Sintaxe",      symbol = "🔴" },
+  CRITICAL        = { color = { 212, 38, 38, 255 },   tint = { 220, 38, 38, 28 },   name = "Crítico",      symbol = "💥" },
   SECURITY        = { color = { 59, 130, 246, 255 },  tint = { 59, 130, 246, 22 },  name = "Segurança",    symbol = "🛡️" },
   ["QA-REMINDER"] = { color = { 6, 182, 212, 255 },   tint = { 6, 182, 212, 18 },   name = "QA/Todo",      symbol = "🔵" },
   DEFAULT         = { color = { 156, 163, 175, 255 }, tint = { 156, 163, 175, 18 }, name = "Aviso",        symbol = "⚪" },
@@ -288,49 +288,52 @@ end
 
 -- ═══════════════════════════════════════════════════════════
 -- 4. NOVO CTRL + H INTUITIVO EM 2 ETAPAS & NAVEGAÇÃO F2
--- =============================================================
+-- ═══════════════════════════════════════════════════════════
 command.add("core.docview", {
   -- 🔍 Novo Ctrl + H Interativo: "O que mudar" -> "Para o que mudar"
   ["doxoade:interactive-find-replace"] = function()
     local doc = core.active_view and core.active_view.doc
     if not doc then return end
 
-    local initial_query = ""
-    if doc:has_selection() then
+    local default_find = ""
+    if doc and doc.has_selection and doc:has_selection() then
       local l1, c1, l2, c2 = doc:get_selection(true)
       if l1 == l2 then
-        initial_query = doc:get_text(l1, c1, l2, c2)
+        default_find = doc:get_text(l1, c1, l2, c2)
       end
     end
 
     core.command_view:enter("1/2 Localizar Texto (O que mudar):", {
-      text = initial_query,
+      text = default_find,
       submit = function(find_text)
         if not find_text or find_text == "" then return end
+        if find_text:find("\n") then
+          core.error("Busca com quebra de linha não suportada neste modo.")
+          return
+        end
 
-        core.command_view:enter(string.format("2/2 Substituir '%s' por (Para o que mudar):", find_text), {
+        local prompt_label = string.format("2/2 Substituir '%s' por:", find_text)
+        core.command_view:enter(prompt_label, {
           submit = function(replace_text)
             replace_text = replace_text or ""
             local count = 0
-
-            for i = 1, #doc.lines do
-              local line = doc.lines[i]
-              if line:find(find_text, 1, true) then
-                local new_line, n = line:gsub(find_text:gsub("[%(%)%.%%%+%-%*%?%[%]%^%$]", "%%%1"), replace_text)
-                if n > 0 then
-                  doc.lines[i] = new_line
-                  count = count + n
-                end
+            local escaped_pat = find_text:gsub("[%(%)%.%%%+%-%*%?%[%]%^%$]", "%%%1")
+            for line_idx = 1, #doc.lines do
+              local line_text = doc.lines[line_idx]
+              local s, e = line_text:find(escaped_pat)
+              if s then
+                local new_text = line_text:gsub(escaped_pat, replace_text)
+                doc.lines[line_idx] = new_text
+                count = count + 1
               end
             end
 
             if count > 0 then
-              doc.modified_lines = doc.modified_lines or {}
-              for i = 1, #doc.lines do doc.modified_lines[i] = true end
-              core.log(string.format("✔ Substituídas %d ocorrências de '%s' por '%s'", count, find_text, replace_text))
+              doc.session_modified = doc.session_modified or {}
+              core.log(string.format("✔ Substituídas %d ocorrência(s).", count))
               core.redraw = true
             else
-              core.log(string.format("Nenhuma ocorrência de '%s' encontrada.", find_text))
+              core.log("Nenhuma ocorrência encontrada.")
             end
           end
         })

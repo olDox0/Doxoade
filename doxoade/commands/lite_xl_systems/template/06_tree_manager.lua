@@ -1,18 +1,23 @@
 -- doxoade/commands/lite_xl_systems/template/06_tree_manager.lua
 --[[
   Módulo de Gerenciamento da Árvore de Arquivos (TreeView Soberana).
-  Fornece criação recursiva de pastas, toggles de projeto e comandos
-  de anexo/desanexo integrados ao menu de contexto nativo.
+  - Controle cirúrgico de margem esquerda (elimina o vazio à esquerda).
+  - Indentação compacta configurável por nível de subpasta (default 8px).
+  - Criação recursiva de pastas, toggles de projeto e comandos rápidos.
 ]]
-
 local core = require "core"
 local common = require "core.common"
 local command = require "core.command"
 local DocView = require "core.docview"
+local style = require "core.style"
+local config = require "core.config"
 
 -- =============================================================================
--- 1. UTILITÁRIOS DE PATH E CRIAÇÃO INTERATIVA
+-- CONFIGURAÇÕES DE DENSIDADE E MARGEM DA TREEVIEW
 -- =============================================================================
+config.treeview_indent = config.treeview_indent or 8         -- Passo por subpasta (era 16px -> agora 8px)
+config.treeview_left_padding = config.treeview_left_padding or 2 -- Recuo da borda esquerda (era 14px -> agora 2px)
+
 local function normalize_path(path)
   if not path then return nil end
   local str = tostring(path):gsub('^["\']', ''):gsub('["\']$', '')
@@ -27,7 +32,6 @@ local _created_dirs = {}
 local function ensure_parent_directories(file_path)
     local dir = file_path:match("^(.*)[/\\]")
     if not dir or dir == "" or _created_dirs[dir] then return end
-    
     local current = ""
     for part in dir:gmatch("[^/\\]+") do
         if current == "" and part:find("^[a-zA-Z]:") then
@@ -61,7 +65,37 @@ local function get_tree_target_dir()
 end
 
 -- =============================================================================
--- 2. COMANDOS SOBERANOS DA ÁRVORE
+-- HOOKS NA TREEVIEW: MARGEM ESQUERDA ZERO + INDENTAÇÃO COMPACTA
+-- =============================================================================
+pcall(function()
+  local TreeView = require "plugins.treeview" or require "core.treeview"
+  if TreeView then
+    -- 1. Altura compacta das linhas
+    TreeView.get_item_height = function(self)
+      local font = style.tree_font or style.font
+      return math.floor(font:get_height() + 2)
+    end
+
+    -- 2. Recuo do texto/ícone encostado na margem esquerda
+    if TreeView.get_item_text_offset then
+      TreeView.get_item_text_offset = function(self)
+        local font = style.tree_font or style.font
+        return font:get_width("w") + (config.treeview_left_padding or 2)
+      end
+    end
+
+    -- 3. Interceptação de indentação por profundidade
+    if TreeView.get_item_indent then
+      TreeView.get_item_indent = function(self, item)
+        local depth = item and (item.depth or item.level or 1) or 1
+        return (config.treeview_left_padding or 2) + (depth - 1) * (config.treeview_indent or 8)
+      end
+    end
+  end
+end)
+
+-- =============================================================================
+-- COMANDOS SOBERANOS DA ÁRVORE
 -- =============================================================================
 command.add(nil, {
   ["doxoade:create-file-interactive"] = function()
@@ -86,29 +120,32 @@ command.add(nil, {
       end
     })
   end,
-
   ["doxoade:new-file-in-tree"] = function()
     command.perform("doxoade:create-file-interactive")
   end,
-
   ["doxoade:toggle-litexl-in-tree"] = function()
     if not core.project_directories then return end
     local clean_userdir = tostring(system.absolute_path(USERDIR) or USERDIR):gsub("\\", "/"):lower()
-    for _, p in ipairs(core.project_directories) do
+    for idx, p in ipairs(core.project_directories) do
       local raw_path = type(p) == "table" and (p.path or p.name) or p
       local ppath = tostring(raw_path or ""):gsub("\\", "/"):lower()
       if ppath == clean_userdir then
-        core.remove_project_directory(type(p) == "table" and (p.path or p) or p)
+        if core.remove_project_directory then
+          core.remove_project_directory(type(p) == "table" and (p.path or p) or p)
+        else
+          table.remove(core.project_directories, idx)
+        end
         core.log("Lite XL Config desanexado da Árvore.")
         core.redraw = true
         return
       end
     end
-    core.add_project_directory(USERDIR)
-    core.log("Lite XL Config anexado à Árvore.")
-    core.redraw = true
+    if core.add_project_directory then
+      core.add_project_directory(USERDIR)
+      core.log("Lite XL Config anexado à Árvore.")
+      core.redraw = true
+    end
   end,
-
   ["treeview:add-project-folder"] = function()
     core.command_view:enter("Caminho do Projeto para Adicionar", {
       submit = function(path)
