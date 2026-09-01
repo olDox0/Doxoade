@@ -1,3 +1,4 @@
+# doxoade\docs\Protocols\ProDeNov.md
 # PROTOCOLO DE DESENVOLVIMENTO NOVISSIMO / ProDeNov
 ## Glossario:
 singular; plural com repetição ex: S. Ss.
@@ -5,7 +6,11 @@ Sistema - S./Ss.
 
 ## Desenvolvimento:
 este é o novo protocolo simplificado e sucinto de desenvolveimento do doxoade. basicamente outros protocolos são muito estenço e detalhados desnecessariamente, então protocolo Novissimo vai lidar com esta direção.
-1. planejarmento: o planejarmento deve se basear no contexto da implementação, ouseja Sistema operacional, ferramentas usadas no contexto, como python 3.12, e objetivo e compatibilidade.
+1. planejamento: o planejarmento deve se basear no contexto da implementação, ouseja Sistema operacional, ferramentas usadas no contexto, como python 3.12, e objetivo e compatibilidade.
+  1.1. faça brainstoming do que é desejado e depois analise de viabilidade, manutenção e escalabilidade posteriormente
+  1.2. tasklist de features, revisão e implementação. 
+  1.3. revisão de regressão deve ser agendada.
+  1.4. prazo e prioridade do sistema.
 2. placeholders: deve se estabelecer o que sera usado e preparar os placeholder naqual é o esboço do sistema, neste sera estabilicido os seguintes elementos:
   2.1. os arquivos com seus objetivos, obs: limite de 50kb. os arquivos devem ter o seguinte modelo:
     2.1.1. o comentario com o local relativo ao projeto, exemplo pratico # RAIZ/DIRETORIO/ARQUIVO.xyz . outro exemplo real: "# doxoade/commands/lite_xl_systems/template/03_tab_colors.lua"

@@ -19,7 +19,6 @@ keymap.add {
   ["ctrl+alt+i"]       = "doxoade:toggle-indent-guides",
   ["ctrl+o"]           = "doxoade:open-file",
   ["ctrl+alt+shift+k"] = "doxoade:diagnose-live",
-  ["return"]           = "doxoade:jump-to-search-match",
 }
 
 -- Pastas e extensões ignoradas para máxima velocidade na busca
@@ -395,29 +394,13 @@ command.add(nil, {
   end,
 
   ["doxoade:open-file"] = function()
-    -- Tenta o buscador rápido do Lite XL primeiro
-    if command.map and (command.map["core:find-file"] or command.map["core:open-file"]) then
-      local ok = command.perform("core:find-file")
-      if not ok then ok = command.perform("core:open-file") end
-      if ok then return end
-    end
+    -- Delega para o diálogo nativo do Lite XL
+    command.perform("core:open-file")
+  end,
 
-    -- Fallback Soberano: Prompt interativo que abre qualquer arquivo no projeto
-    core.command_view:enter("Abrir Arquivo (caminho relativo ou absoluto):", {
-      submit = function(text)
-        if text and text:match("%S") then
-          local clean_path = text:gsub('^["\']', ''):gsub('["\']$', '')
-          local doc = core.open_doc(clean_path)
-          if doc then
-            core.root_view:open_doc(doc)
-            core.redraw = true
-            core.log("Aberto: " .. clean_path)
-          else
-            core.error("Não foi possível abrir o arquivo: " .. clean_path)
-          end
-        end
-      end
-    })
+  ["doxoade:find-file"] = function()
+    -- Alternativa: abrir arquivo por nome no projeto (fuzzy match)
+    command.perform("core:find-file")
   end,
 
   ["doxoade:jump-to-search-match"] = function()
@@ -591,6 +574,58 @@ command.add(nil, {
 -- =============================================================================
 -- LOCALIZAR E SUBSTITUIR SEGURO EM 2 PASSOS
 -- =============================================================================
+
+-- =============================================================================
+-- ⏎ SALTO PARA RESULTADO DE BUSCA (PREDICADO CONTEXTUAL)
+-- Só intercepta 'return' quando um buffer [Busca] está ativo.
+-- Fora dele, o evento segue para o handler nativo da view (submit/newline).
+-- =============================================================================
+local function is_search_buffer_active()
+  local view = core.active_view
+  local doc = view and view.doc
+  return doc ~= nil
+     and doc.filename ~= nil
+     and tostring(doc.filename):find("^%[Busca%]") ~= nil
+end
+
+command.add(is_search_buffer_active, {
+  ["doxoade:jump-to-search-match"] = function()
+    local view = core.active_view
+    local doc = view and view.doc
+    -- 🛡️ Guarda defensiva: o Shadow Simulator invoca ações SEM checar predicado.
+    if not doc or not doc.filename or not tostring(doc.filename):find("^%[Busca%]") then
+      command.perform("doc:newline")
+      return
+    end
+    local line_idx = doc:get_selection(true)
+    local line_text = doc.lines[line_idx] or ""
+
+    local fpath, line_no = line_text:match("^%s*([a-zA-Z]:[\\/][^:]+):(%d+):")
+    if not fpath then
+      fpath, line_no = line_text:match("^%s*([^:]+%.[%w_]+):(%d+):")
+    end
+
+    if fpath and line_no then
+      local clean_fpath = fpath:gsub("/", PATHSEP or "\\")
+      local info = system.get_file_info(clean_fpath)
+      if info then
+        local target_doc = core.open_doc(clean_fpath)
+        if target_doc then
+          core.root_view:open_doc(target_doc)
+          local ln = tonumber(line_no) or 1
+          target_doc:set_selection(ln, 1, ln, 1)
+          core.log("Salto para: " .. clean_fpath .. ":" .. ln)
+          core.redraw = true
+        end
+      else
+        core.error("Arquivo não encontrado no disco: " .. clean_fpath)
+      end
+    else
+      command.perform("doc:newline")
+    end
+  end,
+})
+
 command.add("core.docview", {
   ["doxoade:interactive-find-replace"] = function()
     local doc = core.active_view and core.active_view.doc
@@ -658,7 +693,7 @@ keymap.add {
 
   -- Sistema Doxoade
   ["ctrl+,"] = "doxoade:open-init-lua",
-  ["ctrl+alt+\\"] = "doxoade:open-workspace-hub",
+  ["ctrl+alt+\\"] = "doxoade:open-pantheon",
   ["ctrl+alt+u"] = "doxoade:toggle-litexl-in-tree",
   ["ctrl+alt+p"] = "doxoade:open-pot-in-right-panel",
   ["ctrl+shift+l"] = "doxoade:open-log",

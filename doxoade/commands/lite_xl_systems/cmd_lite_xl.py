@@ -9,9 +9,11 @@ import subprocess
 import click
 from datetime import datetime, timedelta
 from pathlib import Path
-from doxoade.tools.doxcolors import Fore, Style
+from doxoade.tools.doxcolors import Fore, Style, Back
 from doxoade.commands.lite_xl_systems.engine_lite_xl import LiteXLEngine
 from doxoade.tools.lua_systems.profiler import ProfilerEngine
+from doxoade.commands.lite_xl_systems.chaos_sandbox_runner import ChaosSandboxRunner
+from doxoade.commands.lite_xl_systems.chaos_payload import MEGA_CHAOS_PAYLOAD
 
 @click.group("lite-xl", help="⚡ Gestão, diagnóstico e automação do Lite XL.")
 def lite_xl_group():
@@ -1238,6 +1240,71 @@ def cmd_search_bridge(query, limit, out_file):
     else:
         click.echo(content)
 
+@lite_xl_group.command("chaos", help="Executa o ambiente isolado (Sandbox) para testes de templates.")
+@click.option("--chaos", "-c", is_flag=True, help="Injeta o Mega-Payload de Caos (Estresse) no Sandbox.")
+def cmd_test_sandbox(chaos):
+    """Orquestra o Sandbox, com suporte a injeção de caos controlado."""
+    
+    # ═══════════════════════════════════════════════════════════
+    # 🍷 MODO CAOS (DELEGAÇÃO AO RUNNER)
+    # ═══════════════════════════════════════════════════════════
+    if chaos:
+        click.echo(f"\n{Fore.MAGENTA}{Style.BRIGHT}🍷 MODO CAOS ATIVADO: Preparando Sandbox de Estresse...{Style.RESET_ALL}")
+        
+        runner = ChaosSandboxRunner(
+            payload_filename="99_chaos_sandbox.lua",
+            payload_content=MEGA_CHAOS_PAYLOAD
+        )
+        
+        # Executa o ciclo: Preparar -> Compilar/Executar -> Extrair Forense -> Reportar -> Limpar
+        runner.run(timeout=15)
+        return
+
+    # ═══════════════════════════════════════════════════════════
+    # 🧪 MODO SANDBOX PADRÃO (LÓGICA ORIGINAL)
+    # ═══════════════════════════════════════════════════════════
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🧪 EXECUTANDO SANDBOX PADRÃO...{Style.RESET_ALL}")
+    
+    # (Aqui entra a lógica original do seu test-sandbox sem caos)
+    # Ex: LiteXLEngine.launch_sandbox()
+    click.echo(f"{Fore.YELLOW}💡 Dica: Use --chaos para testar a resiliência do sistema.{Fore.RESET}")
+
+@lite_xl_group.command("health-check", help="🏥 Diagnóstico completo de saúde do sistema Doxoade.")
+@click.option("--verbose", "-v", is_flag=True, help="Exibe o relatório estruturado bruto do gate.")
+def cmd_health_check(verbose):
+    """Executa a bateria de validação e apresenta o resultado."""
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🏥 HEALTH CHECK — Diagnóstico do Sistema Doxoade{Style.RESET_ALL}\n")
+
+    gate = LiteXLEngine.run_health_gate()
+
+    icons = {
+        "pass": f"{Fore.GREEN}✔{Fore.RESET}",
+        "warn": f"{Fore.YELLOW}⚠{Fore.RESET}",
+        "fail": f"{Fore.RED}✖{Fore.RESET}",
+    }
+    for idx, step in enumerate(gate["steps"], start=1):
+        click.echo(f"[{idx}/5] {step['label']}...")
+        click.echo(f"  {icons.get(step['status'], '•')} {step['detail']}")
+
+    total = gate["passed"] + gate["failed"] + gate["warnings"]
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}📊 RELATÓRIO FINAL{Style.RESET_ALL}")
+    click.echo(f"  {Fore.GREEN}✔ Passou: {gate['passed']}/{total}{Fore.RESET}")
+    click.echo(f"  {Fore.YELLOW}⚠ Avisos: {gate['warnings']}/{total}{Fore.RESET}")
+    click.echo(f"  {Fore.RED}✖ Falhas: {gate['failed']}/{total}{Fore.RESET}")
+
+    if gate["healthy"]:
+        click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}✔ Sistema saudável e operacional!{Style.RESET_ALL}\n")
+    else:
+        click.echo(f"\n{Fore.RED}{Style.BRIGHT}✖ Sistema com problemas críticos.{Style.RESET_ALL}")
+        click.echo(f"{Fore.YELLOW}💡 Execute 'doxoade lite-xl check-templates --fix --apply' para reparar.{Fore.RESET}\n")
+
+    # 📦 Modo verbose: despeja o relatório estruturado bruto (útil para o Typhon/debug)
+    if verbose:
+        click.echo(f"{Fore.CYAN}{Style.BRIGHT}📦 RELATÓRIO ESTRUTURADO (gate):{Style.RESET_ALL}")
+        for step in gate["steps"]:
+            click.echo(f"  [{step['status'].upper():4}] {step['label']}: {step['detail']}")
+        click.echo(f"  healthy={gate['healthy']} passed={gate['passed']} failed={gate['failed']} warnings={gate['warnings']}\n")
+
 # ═══════════════════════════════════════════════════════════
 # 🐉 TYPHON — Pipeline Supervisionado de Deploy
 # ═══════════════════════════════════════════════════════════
@@ -1247,22 +1314,114 @@ def typhon_group():
     """Typhon: O pai dos monstros. Deploy supervisionado com gates e rollback."""
     pass
 
-@typhon_group.command("deploy")
-@click.option("--watch", "-w", default=5, type=int, help="Segundos para monitorar o boot (padrão: 5).")
-@click.option("--dry-run", is_flag=True, help="Valida sem gravar nada em produção.")
-@click.option("--no-rollback", is_flag=True, help="Desativa rollback automático (para debug).")
-@click.option("--baseline", is_flag=True, help="Compara boot time com o último deploy estável.")
-@click.argument("target", required=False, default=".")
-def cmd_typhon_deploy(watch, dry_run, no_rollback, baseline, target):
-    """Executa o pipeline completo: snapshot → preflight → deploy → watch → verdict."""
-    TyphonEngine.run_pipeline(
-        target=target,
-        watch_seconds=watch,
-        dry_run=dry_run,
-        no_rollback=no_rollback,
-        baseline=baseline,
-        echo=click.echo,
-    )
+@typhon_group.command("deploy", help="🐉 Deploy supervisionado do init de produção (com health gate obrigatório).")
+@click.option("--force", is_flag=True, help="⚠️ Ignora o health gate e força o deploy (emergência).")
+def cmd_typhon_deploy(force):
+    """Executa o pipeline de deploy de produção."""
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🐉 TYPHON DEPLOY — Produção{Style.RESET_ALL}")
+    if force:
+        click.echo(f"  {Fore.YELLOW}⚠ --force ativo: o health gate será IGNORADO.{Fore.RESET}")
+    click.echo()
+
+    result = TyphonEngine.run_pipeline(skip_gate=force)
+
+    for phase in result["phases"]:
+        icon = f"{Fore.GREEN}✔{Fore.RESET}" if phase["ok"] else f"{Fore.RED}✖{Fore.RESET}"
+        click.echo(f"  {icon} [{phase['name']}] {phase['msg'][:100]}")
+
+    click.echo()
+    if result["success"]:
+        click.echo(f"  {Fore.GREEN}{Style.BRIGHT}✔ DEPLOY BEM-SUCEDIDO{Style.RESET_ALL}")
+        click.echo(f"  {Fore.LIGHTBLACK_EX}Init promovido a estável.{Fore.RESET}\n")
+    else:
+        # 🩺 Renderiza o erro da fase que falhou como traceback
+        failed_phase = next((p for p in result["phases"] if not p["ok"]), None)
+        if failed_phase:
+            _render_typhon_error(failed_phase["name"], failed_phase["msg"])
+        click.echo(f"  {Fore.RED}{Style.BRIGHT}✖ DEPLOY FALHOU ({result['verdict']}){Style.RESET_ALL}")
+        if result["verdict"] == "ABORTED_BY_GATE":
+            click.echo(f"  {Fore.YELLOW}💡 Corrija os problemas ou use 'doxoade lite-xl typhon deploy --force' para ignorar.{Fore.RESET}\n")
+        else:
+            click.echo(f"  {Fore.YELLOW}💡 Use 'doxoade lite-xl typhon rollback' para restaurar.{Fore.RESET}\n")
+
+def _render_typhon_error(phase_name: str, msg: str):
+    """Formata erros do Typhon como traceback legível com snippet de código."""
+    # click.echo(f"\n{Fore.RED}{Style.BRIGHT}{'═' * 70}{Style.RESET_ALL}")
+    # click.echo(f"{Fore.RED}{Style.BRIGHT}  ✖ [{phase_name}] FALHA DETECTADA{Style.RESET_ALL}")
+    # click.echo(f"{Fore.RED}{Style.BRIGHT}{'═' * 70}{Style.RESET_ALL}\n")
+
+    print('\n' + Back.RED + f"[{phase_name}] FALHA DETECTADA".center(100) + Style.RESET_ALL)
+
+    # ── Erro de compilação Lua ──
+    if "Erro de compilação Lua" in msg or "lua54.exe" in msg:
+        lua_err_match = re.search(r"lua54\.exe:\s*(.+?\.lua):(\d+):\s*(.+?)(?:\n|$)", msg)
+        if lua_err_match:
+            err_file, err_line, err_msg = lua_err_match.groups()
+            short_file = Path(err_file).name
+            err_line_no = int(err_line)
+            click.echo(f"  {Fore.WHITE}🩺 CAUSA RAIZ:{Fore.RESET}")
+            click.echo(f"    {Fore.WHITE}STATUS :{Fore.RESET} Erro de Sintaxe Lua")
+            click.echo(f"    {Fore.WHITE}ARQUIVO:{Fore.RESET} {short_file}")
+            click.echo(f"    {Fore.WHITE}LINHA  :{Fore.RESET} {err_line}")
+            click.echo(f"    {Fore.WHITE}LAUDO  :{Fore.RESET} {Fore.RED}{err_msg.strip()}{Fore.RESET}")
+
+            # 📍 SNIPPET DE CÓDIGO — usa o init.lua real (mesma numeração de linha)
+            init_path = LiteXLEngine.get_init_lua_path()
+            if init_path.exists():
+                try:
+                    src_lines = init_path.read_text(encoding="utf-8", errors="replace").splitlines()
+                    start = max(0, err_line_no - 4)
+                    end = min(len(src_lines), err_line_no + 3)
+                    click.echo(f"\n  {Fore.CYAN}📍 CENA DO CRIME:{Fore.RESET}")
+                    click.echo(f"    {Fore.CYAN}┌─ [{init_path.name}:{err_line_no}]{Fore.RESET}")
+                    for idx in range(start, end):
+                        ln = idx + 1
+                        prefix = f"{Fore.RED}>>{Fore.RESET}" if ln == err_line_no else "  "
+                        click.echo(f"    {prefix} {Fore.YELLOW}{ln:4d} |{Fore.RESET} {src_lines[idx]}")
+                    click.echo(f"    {Fore.CYAN}└{'─' * 50}{Fore.RESET}")
+                except Exception:
+                    pass
+        else:
+            click.echo(f"  {Fore.RED}{msg}{Fore.RESET}")
+
+    # ── Erro do Shadow Audit ──
+    elif "Shadow Audit falhou" in msg:
+        shadow_match = re.search(r"template[\\/](\d+_\w+\.lua):(\d+):\s*(.+?)(?:\n|$)", msg)
+        prompt_match = re.search(r"prompt '([^']+)'", msg)
+        if shadow_match:
+            tmpl, line, err = shadow_match.groups()
+            tmpl_line_no = int(line)
+            click.echo(f"  {Fore.WHITE}🩺 CAUSA RAIZ:{Fore.RESET}")
+            click.echo(f"    {Fore.WHITE}STATUS :{Fore.RESET} Shadow Audit — Simulação de Comando")
+            click.echo(f"    {Fore.WHITE}TEMPLATE:{Fore.RESET} {tmpl}")
+            click.echo(f"    {Fore.WHITE}LINHA  :{Fore.RESET} {line}")
+            click.echo(f"    {Fore.WHITE}LAUDO  :{Fore.RESET} {Fore.RED}{err.strip()[:120]}{Fore.RESET}")
+            if prompt_match:
+                click.echo(f"    {Fore.WHITE}PROMPT :{Fore.RESET} {prompt_match.group(1)[:80]}")
+
+            # 📍 SNIPPET DO TEMPLATE
+            tmpl_path = LiteXLEngine.get_template_dir() / tmpl
+            if tmpl_path.exists():
+                try:
+                    src_lines = tmpl_path.read_text(encoding="utf-8", errors="replace").splitlines()
+                    start = max(0, tmpl_line_no - 4)
+                    end = min(len(src_lines), tmpl_line_no + 3)
+                    click.echo(f"\n  {Fore.CYAN}📍 CENA DO CRIME:{Fore.RESET}")
+                    click.echo(f"    {Fore.CYAN}┌─ [{tmpl}:{tmpl_line_no}]{Fore.RESET}")
+                    for idx in range(start, end):
+                        ln = idx + 1
+                        prefix = f"{Fore.RED}>>{Fore.RESET}" if ln == tmpl_line_no else "  "
+                        click.echo(f"    {prefix} {Fore.YELLOW}{ln:4d} |{Fore.RESET} {src_lines[idx]}")
+                    click.echo(f"    {Fore.CYAN}└{'─' * 50}{Fore.RESET}")
+                except Exception:
+                    pass
+        else:
+            click.echo(f"  {Fore.RED}{msg[:200]}{Fore.RESET}")
+
+    else:
+        click.echo(f"  {Fore.RED}{msg}{Fore.RESET}")
+        
+    click.echo(f"\n{Fore.RED}{Style.BRIGHT}{'_' * 100}{Style.RESET_ALL}\n")
 
 @typhon_group.command("status")
 def cmd_typhon_status():
@@ -1299,3 +1458,24 @@ def cmd_typhon_rollback():
         click.echo(f"  {Fore.YELLOW}Execute 'doxoade lite-xl restart' para aplicar.{Fore.RESET}\n")
     else:
         click.echo(f"\n{Fore.RED}✖ {msg}{Fore.RESET}\n")
+
+@typhon_group.command("test-deploy", help="🧪 Deploy de TESTE isolado no sandbox (não toca o init real).")
+@click.option("--watch", "-w", default=5, show_default=True, help="Segundos de monitoramento do sandbox.")
+def cmd_typhon_test_deploy(watch):
+    """Executa o pipeline de test-deploy isolado no sandbox."""
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🧪 TYPHON TEST-DEPLOY — Sandbox Isolado{Style.RESET_ALL}")
+    click.echo(f"  {Fore.LIGHTBLACK_EX}🛡️ O init.lua de produção NÃO será modificado.{Fore.RESET}\n")
+
+    result = TyphonEngine.run_test_pipeline(watch_seconds=watch)
+
+    for phase in result["phases"]:
+        icon = f"{Fore.GREEN}✔{Fore.RESET}" if phase["ok"] else f"{Fore.RED}✖{Fore.RESET}"
+        click.echo(f"  {icon} [{phase['name']}] {phase['msg']}")
+
+    click.echo()
+    if result["success"]:
+        click.echo(f"  {Fore.GREEN}{Style.BRIGHT}✔ TEST-DEPLOY BEM-SUCEDIDO{Style.RESET_ALL}")
+        click.echo(f"  {Fore.LIGHTBLACK_EX}Sandbox estável. Para promover a produção, use 'doxoade lite-xl typhon deploy'.{Fore.RESET}\n")
+    else:
+        click.echo(f"  {Fore.RED}{Style.BRIGHT}✖ TEST-DEPLOY FALHOU ({result['verdict']}){Style.RESET_ALL}")
+        click.echo(f"  {Fore.YELLOW}💡 O init real permanece intacto. Corrija os problemas e tente novamente.{Fore.RESET}\n")

@@ -129,8 +129,17 @@ command.add(nil, {
     open_in_right_panel(dumppot_file, "📂 Workspace Hub aberto.")
   end,
 
+  ["doxoade:open-pantheon"] = function()
+    local init_file = (USERDIR or ".") .. (PATHSEP or "/") .. "init.lua"
+    open_in_right_panel(init_file, "⚡ init.lua aberto no Panteão.")
+    open_in_right_panel(log_path, "📜 session_log.txt aberto no Panteão.")
+    open_in_right_panel(dumppot_file, "📋 Dumppot aberto no Panteão.")
+    open_in_right_panel(cheat_sheet_file, "📖 Cheat Sheet aberto no Panteão.")
+    core.log("🏛️ Panteão Soberano invocado. 4 abas de diagnóstico abertas à direita.")
+  end,
+
   ["doxoade:show-shortcuts-cheat-sheet"] = function()
-    command.perform("doxoade:show-shortcuts-cheat-sheet")
+    open_in_right_panel(cheat_sheet_file, "📖 Cheat Sheet aberto.")
   end,
 
   ["doxoade:open-log"] = function()

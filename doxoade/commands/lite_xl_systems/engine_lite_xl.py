@@ -97,6 +97,141 @@ class LiteXLEngine:
     """Motor Soberano Lite XL V17.0."""
 
     @classmethod
+    def run_health_gate(cls) -> Dict[str, Any]:
+        """
+        🏥 HEALTH GATE — Bateria de validação reutilizável (5 estágios).
+        Retorna dados estruturados para o CLI 'health-check' e os pipelines Typhon.
+        Returns: {"healthy": bool, "passed": int, "failed": int, "warnings": int, "steps": [...]}
+        """
+        results = {"passed": 0, "failed": 0, "warnings": 0}
+        steps: List[Dict[str, str]] = []
+
+        def _add(label: str, status: str, detail: str) -> None:
+            steps.append({"label": label, "status": status, "detail": detail})
+
+        # ═══ 1. TEMPLATES ═══
+        try:
+            report = cls.verify_templates()
+            if report["all_ok"]:
+                results["passed"] += 1
+                _add("Verificando templates", "pass", f"Todos os {report['total_files']} templates íntegros")
+            else:
+                results["failed"] += 1
+                _add("Verificando templates", "fail", "Erros detectados em templates")
+        except Exception as e:
+            results["failed"] += 1
+            _add("Verificando templates", "fail", f"Falha na verificação: {e}")
+
+        # ═══ 2. API PROBE (bloqueia apenas severidade crítica) ═══
+        try:
+            import json as _json
+            from doxoade.tools.lua_systems.api_guard.api_catalog import load_catalog
+            probe_json = cls.get_user_dir() / ".doxoade" / "api_guard" / "runtime_probe.json"
+            if probe_json.exists():
+                probe_data = _json.loads(probe_json.read_text(encoding="utf-8"))
+                results_map = probe_data.get("results", {})
+                catalog = load_catalog()
+                missing = [aid for aid, r in results_map.items() if r.get("status") == "missing"]
+                critical_missing = [a for a in missing if catalog.get(a) and catalog[a].severity_if_missing == "critical"]
+                info_missing = [a for a in missing if a not in critical_missing]
+                total = probe_data.get("summary", {}).get("total", len(results_map))
+                if not critical_missing:
+                    results["passed"] += 1
+                    detail = f"0/{total} APIs críticas ausentes"
+                    if info_missing:
+                        detail += f" ({len(info_missing)} não-críticas ausentes)"
+                    _add("Validando contratos de API", "pass", detail)
+                else:
+                    results["failed"] += 1
+                    _add("Validando contratos de API", "fail", f"{len(critical_missing)} APIs críticas ausentes: {', '.join(critical_missing)}")
+            else:
+                results["warnings"] += 1
+                _add("Validando contratos de API", "warn", "runtime_probe.json não encontrado (abra o Lite XL ao menos 1x)")
+        except Exception as e:
+            results["failed"] += 1
+            _add("Validando contratos de API", "fail", f"Falha ao validar APIs: {e}")
+
+        # ═══ 3. COMANDOS CRÍTICOS (Shadow Audit) ═══
+        try:
+            shadow_report = cls.run_shadow_audit()
+            if shadow_report.get("status") == "SKIPPED":
+                results["warnings"] += 1
+                _add("Testando comandos críticos", "warn", f"Shadow audit indisponível: {shadow_report.get('reason', 'N/A')}")
+            else:
+                cmds_total = shadow_report.get("commands_count", 0)
+                cmds_passed = shadow_report.get("commands_passed", 0)
+                cmds_crashed = shadow_report.get("commands_crashed", 0)
+                orphan_keys = shadow_report.get("orphan_keys", [])
+                if cmds_crashed == 0 and cmds_total > 0:
+                    if orphan_keys:
+                        results["warnings"] += 1
+                        _add("Testando comandos críticos", "warn", f"{cmds_passed}/{cmds_total} comandos OK | {len(orphan_keys)} teclas órfãs")
+                    else:
+                        results["passed"] += 1
+                        _add("Testando comandos críticos", "pass", f"{cmds_passed}/{cmds_total} comandos simulados com sucesso")
+                else:
+                    results["failed"] += 1
+                    crashed_list = ", ".join(map(str, shadow_report.get("crashed_commands", [])[:5]))
+                    _add("Testando comandos críticos", "fail", f"{cmds_crashed}/{cmds_total} comandos falharam: {crashed_list}")
+        except Exception as e:
+            results["failed"] += 1
+            _add("Testando comandos críticos", "fail", f"Falha no shadow audit: {e}")
+
+        # ═══ 4. KEYMAPS ═══
+        try:
+            keymaps = cls.parse_keybindings(cls.get_init_lua_path())
+            registered = set()
+            for entry in keymaps:
+                if isinstance(entry, dict):
+                    nk = entry.get("normalized_key") or entry.get("raw_key")
+                    if nk:
+                        registered.add(nk.lower())
+            critical_keys = ["ctrl+alt+\\", "ctrl+alt+shift+f", "f1"]
+            def _found(target: str) -> bool:
+                variants = {target.lower(), target.lower().replace("\\\\", "\\"), target.lower().replace("\\", "\\\\")}
+                return any(v in registered for v in variants)
+            missing = [k for k in critical_keys if not _found(k)]
+            if not missing:
+                results["passed"] += 1
+                _add("Verificando mapeamento de teclas", "pass", f"{len(critical_keys)}/{len(critical_keys)} atalhos críticos mapeados ({len(keymaps)} bindings totais)")
+            else:
+                results["warnings"] += 1
+                _add("Verificando mapeamento de teclas", "warn", f"Faltando atalhos: {', '.join(missing)}")
+        except Exception as e:
+            results["failed"] += 1
+            _add("Verificando mapeamento de teclas", "fail", f"Falha ao verificar keymaps: {e}")
+
+        # ═══ 5. ARTEFATOS FORENSES ═══
+        try:
+            artifacts = cls.get_session_artifacts()
+            session_log = cls.get_session_log_path()
+            forensic_report = cls.get_user_dir() / ".doxoade" / "diagnostics" / "forensic_report.txt"
+            signals = []
+            if isinstance(artifacts, list) and artifacts:
+                signals.append(f"{len(artifacts)} artefatos de sessão")
+            if session_log.exists():
+                signals.append("session_log.txt")
+            if forensic_report.exists():
+                signals.append("forensic_report.txt")
+            if signals:
+                results["passed"] += 1
+                _add("Verificando sistema forense", "pass", f"Sinais forenses: {', '.join(signals)}")
+            else:
+                results["warnings"] += 1
+                _add("Verificando sistema forense", "warn", "Nenhum artefato forense encontrado ainda")
+        except Exception as e:
+            results["failed"] += 1
+            _add("Verificando sistema forense", "fail", f"Falha ao verificar artefatos: {e}")
+
+        return {
+            "healthy": results["failed"] == 0,
+            "passed": results["passed"],
+            "failed": results["failed"],
+            "warnings": results["warnings"],
+            "steps": steps,
+        }
+
+    @classmethod
     def get_probe_dir(cls) -> Path:
         """Diretório de probes do API Guard."""
         return cls.get_template_dir() / "lite_xl_probes"
@@ -1548,10 +1683,27 @@ local passed_cmds = 0
 local failed_cmds = 0
 for cmd_name, cmd_entry in pairs(core.command.map) do
   if type(cmd_entry) == "table" and type(cmd_entry.action) == "function" then
-    local ok_act, err_act = pcall(cmd_entry.action)
-    if not ok_act then
-      failed_cmds = failed_cmds + 1
-      print(string.format("SHADOW_CMD_CRASH|%s|%s", tostring(cmd_name), tostring(err_act):gsub("\\n", " ")))
+    -- 🛡️ Respeita predicados funcionais (comando contextual fora de contexto = PASS)
+    local eligible = true
+    if type(cmd_entry.predicate) == "function" then
+      local ok_p, res_p = pcall(cmd_entry.predicate)
+      if not ok_p then
+        failed_cmds = failed_cmds + 1
+        print(string.format("SHADOW_CMD_CRASH|%s|predicate: %s", tostring(cmd_name), tostring(res_p):gsub("\\n", " ")))
+        eligible = false
+      elseif res_p == false or res_p == nil then
+        eligible = false
+      end
+    end
+    if eligible then
+      local ok_act, err_act = pcall(cmd_entry.action)
+      if not ok_act then
+        failed_cmds = failed_cmds + 1
+        print(string.format("SHADOW_CMD_CRASH|%s|%s",
+              tostring(cmd_name), tostring(err_act):gsub("\\n", " ")))
+      else
+        passed_cmds = passed_cmds + 1
+      end
     else
       passed_cmds = passed_cmds + 1
     end
@@ -1562,7 +1714,7 @@ print(string.format("SHADOW_CMD_SIMULATION|%d|%d", passed_cmds, failed_cmds))
 -- 5. Detecção de Atalhos Órfãos
 for key, target_cmd in pairs(core.keymap.map) do
   if not core.command.map[target_cmd] then
-    print(string.format("SHADOW_ORPHAN_KEY|%s -> %s", tostring(key), tostring(target_cmd)))
+    print(string.format("SHADOW_ORPHAN_KEY|%s -> %s", tostring(cmd_name), tostring(err_act):gsub("\\n", " ")))
   end
 end
 """
@@ -1585,6 +1737,20 @@ end
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=15, encoding="utf-8", errors="replace")
             output = res.stdout + "\n" + res.stderr
+
+            if res.returncode != 0 and "SHADOW_MOD|" not in output:
+                print(f"\n{Fore.RED}🐛 [SHADOW HARNESS CRASH] O Lua falhou ao executar o simulador (Exit Code: {res.returncode}).{Fore.RESET}")
+                print(f"{Fore.RED}🐛 [STDERR]:{Fore.RESET}\n{res.stderr[:1500]}")
+                print(f"{Fore.RED}🐛 [STDOUT]:{Fore.RESET}\n{res.stdout[:500]}\n")
+
+            if res.returncode != 0 and not output.strip():
+                # Lua crashou na inicialização e não imprimiu nada útil
+                return {
+                    "status": "FAIL",
+                    "reason": f"Lua crashou com exit code {res.returncode}. Stderr: {res.stderr[:500]}",
+                    "files": {},
+                    "total_files": len(templates),
+                }
 
             report: Dict[str, Any] = {
                 "status": "PASS",

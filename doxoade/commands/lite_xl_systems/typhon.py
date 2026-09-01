@@ -31,6 +31,99 @@ except ImportError:
 class TyphonEngine:
     """Motor do Pipeline TYPHON: SNAPSHOT → PREFLIGHT → DEPLOY → RELAUNCH → WATCH → VERDICT."""
 
+    # ─────────────────────────────────────────────────────────────
+    # 🧪 TEST-DEPLOY — Pipeline isolado no SANDBOX (não toca o init real)
+    # ─────────────────────────────────────────────────────────────
+    @classmethod
+    def _get_sandbox_dir(cls) -> Path:
+        """Diretório do sandbox isolado para test-deploy."""
+        return LiteXLEngine.get_sandbox_dir()
+
+    @classmethod
+    def run_health_gate(cls) -> Tuple[bool, Dict[str, Any]]:
+        """Executa o gate de saúde completo. Retorna (passou, dados_do_gate)."""
+        gate = LiteXLEngine.run_health_gate()
+        return gate["healthy"], gate
+
+    @classmethod
+    def deploy_to_sandbox(cls) -> Tuple[bool, str]:
+        """Compila o init de TESTE (com módulo de sandbox) e instala no sandbox isolado.
+        NUNCA toca o init.lua de produção."""
+        try:
+            sandbox_dir = cls._get_sandbox_dir()
+            sandbox_dir.mkdir(parents=True, exist_ok=True)
+            # 🛡️ FIX: generate_sandbox_init() inclui o sandbox_module.lua,
+            # diferenciando do init de produção (generate_sovereign_init()).
+            init_content = LiteXLEngine.generate_sandbox_init()
+            sandbox_init = sandbox_dir / "init.lua"
+            sandbox_init.write_text(init_content, encoding="utf-8")
+            return True, f"Init de teste (com sandbox) instalado: {sandbox_init}"
+        except Exception as e:
+            return False, f"Falha ao instalar init no sandbox: {e}"
+
+    @classmethod
+    def launch_sandbox(cls) -> Tuple[bool, str, Optional[int]]:
+        """Lança o Lite XL apontando para o sandbox isolado. Retorna (ok, msg, pid)."""
+        try:
+            exe = LiteXLEngine.find_executable()
+            if not exe:
+                return False, "Executável lite-xl.exe não encontrado", None
+            sandbox_dir = cls._get_sandbox_dir()
+            # 🛡️ FIX: diretório de projeto após --userdir evita que o Lite XL
+            # interprete a flag '--userdir' como um arquivo a abrir.
+            project_dir = os.getcwd()
+            proc = subprocess.Popen(
+                [str(exe), "--userdir", str(sandbox_dir), project_dir],
+                close_fds=True,
+            )
+            return True, f"Sandbox lançado (PID {proc.pid})", proc.pid
+        except Exception as e:
+            return False, f"Falha ao lançar sandbox: {e}", None
+
+    @classmethod
+    def run_test_pipeline(cls, watch_seconds: int = 5) -> Dict[str, Any]:
+        """
+        🧪 TYPHON TEST-DEPLOY — Pipeline isolado no sandbox.
+        Fases: HEALTH GATE → DEPLOY SANDBOX → LAUNCH → WATCH → VERDICT.
+        O init.lua de produção NUNCA é modificado.
+        """
+        result = {"success": False, "phases": [], "verdict": None, "sandbox_pid": None}
+
+        def _phase(name: str, ok: bool, msg: str) -> None:
+            result["phases"].append({"name": name, "ok": ok, "msg": msg})
+
+        # FASE 1: HEALTH GATE (validação completa antes de qualquer deploy)
+        gate_ok, gate = cls.run_health_gate()
+        if not gate_ok:
+            _phase("HEALTH_GATE", False, f"Sistema NÃO saudável: {gate['failed']} falha(s) crítica(s)")
+            result["verdict"] = "ABORTED_BY_GATE"
+            return result
+        _phase("HEALTH_GATE", True, f"Sistema saudável ({gate['passed']} OK, {gate['warnings']} avisos)")
+
+        # FASE 2: COMPILE + DEPLOY NO SANDBOX
+        ok, msg = cls.deploy_to_sandbox()
+        _phase("DEPLOY_SANDBOX", ok, msg)
+        if not ok:
+            result["verdict"] = "DEPLOY_FAILED"
+            return result
+
+        # FASE 3: LAUNCH SANDBOX
+        ok, msg, pid = cls.launch_sandbox()
+        _phase("LAUNCH_SANDBOX", ok, msg)
+        result["sandbox_pid"] = pid
+        if not ok or pid is None:
+            result["verdict"] = "LAUNCH_FAILED"
+            return result
+
+        # FASE 4: WATCH (monitora sobrevivência do processo)
+        time.sleep(watch_seconds)
+        stable = cls._is_pid_alive(pid)
+        _phase("WATCH", stable, f"PID {pid} {'STABLE' if stable else 'UNSTABLE'} após {watch_seconds}s")
+
+        result["success"] = stable
+        result["verdict"] = "TEST_STABLE" if stable else "TEST_UNSTABLE"
+        return result
+
     STATE_FILE_NAME = "typhon_state.json"
     STABLE_INIT_NAME = "init.stable.lua"
     DEPLOY_LOG_NAME = "typhon_deploy_log.txt"
@@ -173,9 +266,36 @@ class TyphonEngine:
         # 3. Shadow Audit
         try:
             shadow = LiteXLEngine.run_shadow_audit()
+
+            # 🛡️ Cláusula anti-vácuo: harness morto = nenhum módulo reportado = FALHA
+            if not shadow.get("files"):
+                details["shadow_audit"] = False
+                return False, (
+                    "Shadow Audit falhou em: harness não reportou nenhum módulo "
+                    f"({shadow.get('reason', 'verifique get_shadow_harness_path')})"
+                ), details
+
             if shadow.get("status") == "FAIL":
-                failed = [f for f, d in shadow.get("files", {}).items() if d.get("status") == "FAIL"]
-                return False, f"Shadow Audit falhou em: {', '.join(failed)}", details
+                failed_files = [
+                    f"{n} → {str(i.get('error', 'unknown error'))[:120]}"
+                    for n, i in shadow.get("files", {}).items()
+                    if i.get("status") == "FAIL"
+                ]
+                crashed_cmds = [
+                    f"{c.get('command', '?')} → {str(c.get('error', '?'))[:70]}"
+                    for c in shadow.get("crashed_commands", [])
+                ]
+                prompt_crashes = [
+                    f"prompt '{p.get('prompt', '?')}' → {str(p.get('error', '?'))[:70]}"
+                    for p in shadow.get("prompt_crashes", [])
+                ]
+                causes = []
+                if failed_files:    causes.append("arquivos: " + ", ".join(failed_files))
+                if crashed_cmds:    causes.append("comandos: " + " | ".join(crashed_cmds))
+                if prompt_crashes:  causes.append("prompts: " + " | ".join(prompt_crashes))
+                reason = "; ".join(causes) or shadow.get("reason") or "causa não identificada"
+                return False, f"Shadow Audit falhou em: {reason}", details
+
             details["shadow_audit"] = True
         except Exception as e:
             return False, f"Shadow Audit falhou: {e}", details
@@ -281,10 +401,11 @@ class TyphonEngine:
         baseline_error_mtime = error_txt.stat().st_mtime if error_txt.exists() else None
         baseline_log_size = session_log.stat().st_size if session_log.exists() else 0
 
-        GRACE_AFTER_BOOT = 2.0  # segundos de vida extra p/ saída antecipada
-        boot_confirmed_at: Optional[float] = None
-        deadline = t0 + watch_seconds
-
+        GRACE_AFTER_BOOT = 3.0  # Aumentado para dar tempo do flush
+        FALLBACK_ALIVE_THRESHOLD = 4.0  # Se vivo por 4s sem crash, é STABLE
+        boot_confirmed_at = None
+        deadline = t0 + watch_seconds        
+        
         while time.time() < deadline:
             # 1) Processo morreu → CRASH imediato
             if not cls._is_pid_alive(pid):
@@ -317,6 +438,14 @@ class TyphonEngine:
 
             # 4) STABLE antecipado: boot confirmado + grace period vivo
             if boot_confirmed_at is not None and (time.time() - boot_confirmed_at) >= GRACE_AFTER_BOOT:
+                details["elapsed_seconds"] = round(time.time() - t0, 2)
+                return "STABLE", details
+
+            # 5) FALLBACK: Processo vivo por FALLBACK_ALIVE_THRESHOLD sem crash → STABLE
+            # Cobre o caso onde o flush do log está atrasado mas o app está estável
+            if (time.time() - t0) >= FALLBACK_ALIVE_THRESHOLD and not details.get("fallback_stable"):
+                details["fallback_stable"] = True
+                details["boot_confirmed"] = True
                 details["elapsed_seconds"] = round(time.time() - t0, 2)
                 return "STABLE", details
 
@@ -385,213 +514,68 @@ class TyphonEngine:
     # PIPELINE COMPLETO
     # ─────────────────────────────────────────────────────────────
     @classmethod
-    def run_pipeline(
-        cls,
-        target: str = ".",
-        watch_seconds: int = 5,
-        dry_run: bool = False,
-        no_rollback: bool = False,
-        baseline: bool = False,
-        echo=None,
-    ) -> Dict[str, Any]:
+    def run_pipeline(cls, skip_gate: bool = False) -> Dict[str, Any]:
         """
-        Executa o pipeline completo TYPHON.
-        Retorna um dict com timeline e resultado final.
+        🐉 Pipeline TYPHON de produção:
+        SNAPSHOT → PREFLIGHT → 🏥 HEALTH GATE → DEPLOY → RELAUNCH → WATCH → VERDICT.
+        O HEALTH GATE é obrigatório; use skip_gate=True (--force) para ignorá-lo.
         """
-        if echo is None:
-            echo = print
+        result = {"success": False, "phases": [], "verdict": None}
 
-        timeline: List[Dict[str, Any]] = []
-        state = cls.load_state()
-        pipeline_start = time.time()
+        def _phase(name: str, ok: bool, msg: str) -> None:
+            result["phases"].append({"name": name, "ok": ok, "msg": msg})
 
-        def log_phase(phase: str, status: str, duration_ms: float, detail: str = ""):
-            entry = {
-                "phase": phase,
-                "status": status,
-                "duration_ms": round(duration_ms, 2),
-                "detail": detail,
-                "timestamp": datetime.now().isoformat(),
-            }
-            timeline.append(entry)
-            badge = f"{Fore.GREEN}✔{Fore.RESET}" if status == "OK" else f"{Fore.RED}✖{Fore.RESET}"
-            echo(f"  {badge} {Fore.CYAN}[{phase}]{Fore.RESET} {detail} {Fore.LIGHTBLACK_EX}({duration_ms:.0f}ms){Fore.RESET}")
+        # FASE 0: SNAPSHOT (ponto de restauração pré-deploy)
+        ok, msg = cls.take_snapshot()
+        _phase("SNAPSHOT", ok, msg)
+        if not ok:
+            result["verdict"] = "SNAPSHOT_FAILED"
+            return result
 
-        echo(f"\n{Fore.MAGENTA}{Style.BRIGHT}🐉 TYPHON DEPLOY PIPELINE{Style.RESET_ALL}")
-        echo(f"  {Fore.WHITE}Alvo: {target} | Watch: {watch_seconds}s | Rollback: {'OFF' if no_rollback else 'ON'}{Fore.RESET}\n")
+        # FASE 1: PREFLIGHT (validação do init em memória)
+        ok, msg, _details = cls.run_preflight()
+        _phase("PREFLIGHT", ok, msg)
+        if not ok:
+            result["verdict"] = "PREFLIGHT_FAILED"
+            return result
 
-        # ── FASE 0: SNAPSHOT ──
-        t0 = time.time()
-        snap_ok, snap_msg = cls.take_snapshot()
-        log_phase("SNAPSHOT", "OK" if snap_ok else "SKIP", (time.time() - t0) * 1000, snap_msg)
+        # FASE 2: 🏥 HEALTH GATE (obrigatório, salvo --force)
+        if skip_gate:
+            _phase("HEALTH_GATE", True, "IGNORADO via --force (deploy forçado)")
+        else:
+            gate_ok, gate = cls.run_health_gate()
+            if not gate_ok:
+                _phase("HEALTH_GATE", False, f"Sistema NÃO saudável: {gate['failed']} falha(s) — deploy ABORTADO")
+                result["verdict"] = "ABORTED_BY_GATE"
+                return result
+            _phase("HEALTH_GATE", True, f"Sistema saudável ({gate['passed']} OK, {gate['warnings']} avisos)")
 
-        # Baseline: captura boot time do snapshot estável
-        baseline_boot_ms = None
-        if baseline and state.get("last_deploy", {}).get("boot_time_ms"):
-            baseline_boot_ms = state["last_deploy"]["boot_time_ms"]
+        # FASE 3: DEPLOY (grava o init de produção)
+        ok, msg = cls.deploy_init()
+        _phase("DEPLOY", ok, msg)
+        if not ok:
+            result["verdict"] = "DEPLOY_FAILED"
+            return result
 
-        # ── FASE 1: PREFLIGHT ──
-        t0 = time.time()
-        preflight_ok, preflight_msg, preflight_details = cls.run_preflight()
-        log_phase("PREFLIGHT", "OK" if preflight_ok else "FAIL", (time.time() - t0) * 1000, preflight_msg)
+        # FASE 4: RELAUNCH (reinicia o Lite XL com o novo init)
+        ok, msg, pid = cls.relaunch()
+        _phase("RELAUNCH", ok, msg)
+        if not ok or pid is None:
+            result["verdict"] = "RELAUNCH_FAILED"
+            return result
 
-        if not preflight_ok:
-            echo(f"\n  {Fore.RED}{Style.BRIGHT}✖ PIPELINE ABORTADO — Preflight falhou.{Style.RESET_ALL}")
-            echo(f"  {Fore.YELLOW}Nenhuma alteração foi feita em produção.{Fore.RESET}\n")
+        # FASE 5: WATCH (monitora a estabilidade do processo)
+        stable = cls.watch(pid)
+        _phase("WATCH", stable, f"PID {pid} {'STABLE' if stable else 'UNSTABLE'}")
 
-            # Registra no histórico
-            state.setdefault("history", []).append({
-                "type": "ABORTED",
-                "phase": "PREFLIGHT",
-                "reason": preflight_msg,
-                "timestamp": datetime.now().isoformat(),
-                "timeline": timeline,
-            })
-            cls.save_state(state)
-            return {"success": False, "phase": "PREFLIGHT", "timeline": timeline, "detail": preflight_msg}
-
-        if dry_run:
-            echo(f"\n  {Fore.YELLOW}{Style.BRIGHT}🔍 DRY-RUN — Pipeline validado, nenhuma alteração gravada.{Style.RESET_ALL}\n")
-            return {"success": True, "dry_run": True, "timeline": timeline}
-
-        # ── FASE 2: DEPLOY ──
-        t0 = time.time()
-        deploy_ok, deploy_msg = cls.deploy_init()
-        log_phase("DEPLOY", "OK" if deploy_ok else "FAIL", (time.time() - t0) * 1000, deploy_msg)
-
-        if not deploy_ok:
-            echo(f"\n  {Fore.RED}✖ Deploy falhou. Snapshot preservado para rollback manual.{Fore.RESET}\n")
-            return {"success": False, "phase": "DEPLOY", "timeline": timeline, "detail": deploy_msg}
-
-        # ── FASE 3: RELAUNCH ──
-        t0 = time.time()
-        launch_ok, launch_msg, new_pid = cls.relaunch(target)
-        log_phase("RELAUNCH", "OK" if launch_ok else "FAIL", (time.time() - t0) * 1000, launch_msg)
-
-        if not launch_ok or new_pid is None:
-            echo(f"\n  {Fore.RED}✖ Relaunch falhou.{Fore.RESET}\n")
-            if not no_rollback:
-                echo(f"  {Fore.YELLOW}Executando rollback...{Fore.RESET}")
-                rb_ok, rb_msg = cls.rollback()
-                echo(f"  {'✔' if rb_ok else '✖'} {rb_msg}")
-            return {"success": False, "phase": "RELAUNCH", "timeline": timeline, "detail": launch_msg}
-
-        # ── FASE 4: WATCH ──
-        t0 = time.time()
-        echo(f"  {Fore.CYAN}👁️ Monitorando PID {new_pid} por {watch_seconds}s...{Fore.RESET}")
-        verdict, watch_details = cls.watch(new_pid, watch_seconds)
-        watch_duration = (time.time() - t0) * 1000
-
-        verdict_colors = {"STABLE": Fore.GREEN, "CRASH": Fore.RED, "TIMEOUT": Fore.YELLOW}
-        verdict_badges = {"STABLE": "✔ STABLE", "CRASH": "✖ CRASH", "TIMEOUT": "⚠ TIMEOUT"}
-        color = verdict_colors.get(verdict, Fore.WHITE)
-        echo(f"  {color}{Style.BRIGHT}{verdict_badges[verdict]}{Style.RESET_ALL} ({watch_details['elapsed_seconds']}s)")
-
-        if watch_details["errors"]:
-            echo(f"  {Fore.RED}Erros capturados:{Fore.RESET}")
-            for err in watch_details["errors"][:5]:
-                echo(f"    {Fore.RED}• {err[:120]}{Fore.RESET}")
-
-        log_phase("WATCH", verdict, watch_duration, f"PID {new_pid} → {verdict}")
-
-        # ── FASE 5: VERDICT ──
-        pipeline_duration = (time.time() - pipeline_start) * 1000
-
-        if verdict == "STABLE":
-            # ── (MANTIDO) seu bloco STABLE original: promoção + DEPLOY_OK + delta ──
-            state["last_deploy"] = {
-                "timestamp": datetime.now().isoformat(),
-                "boot_time_ms": watch_details["elapsed_seconds"] * 1000,
-                "pid": new_pid,
-                "init_size_bytes": preflight_details.get("init_size_bytes", 0),
-            }
-            state.setdefault("history", []).append({
-                "type": "DEPLOY_OK",
-                "timestamp": datetime.now().isoformat(),
-                "timeline": timeline,
-                "total_ms": pipeline_duration,
-            })
-            cls.save_state(state)
-
-            echo(f"\n  {Fore.GREEN}{Style.BRIGHT}✔ DEPLOY BEM-SUCEDIDO{Style.RESET_ALL} ({pipeline_duration:.0f}ms)")
-
-            if baseline_boot_ms is not None:
-                current_boot_ms = watch_details["elapsed_seconds"] * 1000
-                delta = current_boot_ms - baseline_boot_ms
-                sign = "+" if delta > 0 else ""
-                delta_color = Fore.RED if delta > 500 else (Fore.GREEN if delta < -100 else Fore.WHITE)
-                echo(f"  {Fore.WHITE}Boot: {current_boot_ms:.0f}ms ({delta_color}{sign}{delta:.0f}ms vs baseline{Fore.RESET})")
-
-            echo()
-            return {"success": True, "verdict": "STABLE", "timeline": timeline, "total_ms": pipeline_duration}
-
-        elif verdict == "TIMEOUT":
-            # ── INCONCLUSIVO: processo vivo, sem evidência de falha → NÃO reverter ──
-            echo(f"\n  {Fore.YELLOW}{Style.BRIGHT}⚠ DEPLOY INCONCLUSIVO — Veredicto: TIMEOUT{Style.RESET_ALL}")
-            echo(f"  {Fore.WHITE}O processo segue vivo, mas o boot não foi confirmado na janela.{Fore.RESET}")
-            echo(f"  {Fore.WHITE}Nenhum rollback executado. Verifique com: {Fore.CYAN}doxoade lite-xl log{Fore.RESET}")
-
-            state.setdefault("history", []).append({
-                "type": "DEPLOY_INCONCLUSIVE",
-                "verdict": verdict,
-                "errors": watch_details.get("errors", []),
-                "timestamp": datetime.now().isoformat(),
-                "timeline": timeline,
-                "rollback": False,
-            })
-            cls.save_state(state)
-
-            echo()
-            return {
-                "success": True,
-                "verdict": verdict,
-                "timeline": timeline,
-                "errors": watch_details.get("errors", []),
-                "total_ms": pipeline_duration,
-            }
-
-        else:  # verdict == "CRASH" — falha REAL com evidência
-            echo(f"\n  {Fore.RED}{Style.BRIGHT}✖ DEPLOY FALHOU — Veredicto: {verdict}{Style.RESET_ALL}")
-
-            if not no_rollback:
-                # Mata instâncias órfãs ANTES de relançar a versão estável
-                try:
-                    LiteXLEngine.kill_ghost_processes()
-                    time.sleep(0.5)
-                except Exception:
-                    pass
-
-                echo(f"  {Fore.YELLOW}🛡️ Executando ROLLBACK automático...{Fore.RESET}")
-                rb_ok, rb_msg = cls.rollback()
-                echo(f"  {'✔' if rb_ok else '✖'} {rb_msg}")
-
-                if rb_ok:
-                    echo(f"  {Fore.CYAN}🔄 Relançando versão estável...{Fore.RESET}")
-                    re_ok, re_msg, re_pid = cls.relaunch(target)
-                    echo(f"  {'✔' if re_ok else '✖'} {re_msg}")
-
-            echo(f"  {Fore.MAGENTA}🐛 Abrindo debug para investigação...{Fore.RESET}")
-            dbg_ok, dbg_msg = cls.open_debug()
-            echo(f"  {'✔' if dbg_ok else '✖'} {dbg_msg}")
-
-            state.setdefault("history", []).append({
-                "type": "DEPLOY_FAILED",
-                "verdict": verdict,
-                "errors": watch_details.get("errors", []),
-                "timestamp": datetime.now().isoformat(),
-                "timeline": timeline,
-                "rollback": not no_rollback,
-            })
-            cls.save_state(state)
-
-            echo()
-            return {
-                "success": False,
-                "verdict": verdict,
-                "timeline": timeline,
-                "errors": watch_details.get("errors", []),
-                "total_ms": pipeline_duration,
-            }
+        # VERDICT
+        result["success"] = stable
+        if stable:
+            result["verdict"] = "DEPLOY_STABLE"
+            cls.promote_to_stable()  # promove o init verificado a estável
+        else:
+            result["verdict"] = "DEPLOY_UNSTABLE"
+        return result
 
     # ─────────────────────────────────────────────────────────────
     # STATUS

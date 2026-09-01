@@ -120,6 +120,17 @@ def get_default_catalog() -> Dict[str, APIEntry]:
         # MÓDULOS BASE
         # ==========================================
         APIEntry(
+            id="rencache",                     # ← era "core.rencache"
+            kind="module",
+            module="_G",                        # ← global, não core.*
+            name="rencache",
+            expected_type="table",
+            severity_if_missing="warning",
+            fallback="renderer",
+            signature_notes="Global _G.rencache (polyfill cobre require core.rencache).",
+            known_consumers=["03_tab_colors.lua", "04_color_and_search_highlight.lua", "15_audit_highlighter.lua"],
+        ),
+        APIEntry(
             id="core",
             kind="module",
             module="core",
@@ -438,9 +449,9 @@ def get_default_catalog() -> Dict[str, APIEntry]:
             cls_name="RootView",
             name="on_key_pressed",
             expected_type="function",
-            severity_if_missing="warning",
+            severity_if_missing="info",         # ← era "warning"
             safe_to_patch=True,
-            signature_notes="RootView:on_key_pressed(key)",
+            signature_notes="Inexistente no Lite XL; teclado é via keymap/core.on_event.",
             known_consumers=["07_keymaps_and_help.lua"],
         ),
 
