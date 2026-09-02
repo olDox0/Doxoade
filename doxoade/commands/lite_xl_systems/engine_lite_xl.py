@@ -246,11 +246,26 @@ class LiteXLEngine:
 
     @classmethod
     def get_template_files(cls) -> List[Path]:
-        """Retorna todos os templates em ordem alfabética estrita (ignora sandbox de teste)."""
+        """Retorna a lista ordenada de templates, garantindo dependências visuais."""
         t_dir = cls.get_template_dir()
         if not t_dir.exists():
             return []
-        return sorted([f for f in t_dir.glob("*.lua") if f.is_file() and f.name != "sandbox_module.lua"])
+        
+        # Descoberta dinâmica ordenada alfabeticamente (03b vem após 03, 16 após 15)
+        templates = sorted(t_dir.glob("*.lua"))
+        
+        # 🛡️ SANITY CHECK DE MA'AT: Validação de Dependências Visuais
+        names = {p.name for p in templates}
+        critical_deps = {
+            "03b_tab_compact_staircase.lua": "03_tab_colors.lua",
+            "16_open_editors_dock.lua": "15_audit_highlighter.lua"
+        }
+        
+        for child, parent in critical_deps.items():
+            if child in names and parent not in names:
+                templates = [t for t in templates if t.name != child]
+                
+        return templates
 
     @classmethod
     def generate_sovereign_init(cls) -> str:

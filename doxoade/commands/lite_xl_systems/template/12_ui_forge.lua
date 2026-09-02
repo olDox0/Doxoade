@@ -74,6 +74,10 @@ function SovereignDockedView:draw()
   renderer.draw_text(font, self.title, x + 14, y + 8, style.accent)
 end
 
+function SovereignDockedView:get_name()
+    return self.title or "Sovereign Dock"
+end
+
 function UIForge.build_all()
   -- Inicializador seguro
 end

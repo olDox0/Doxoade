@@ -24,6 +24,10 @@ MODULE_COST_FACTORS = {
     "14_doxnote_panel.lua": "Parser regex de tarefas, datas relativas e IDs de notas",
     "08_pot_panel.lua": "Gramática Markdown para linguagens múltiplas (Dumppot)",
     "13_toolbar_doxoade.lua": "Registro de itens de statusview assíncronos",
+    
+    # ⚡ NOVOS MÓDULOS SOBERANOS (V17.1 - Escadaria & Dock Dinâmico)
+    "03b_tab_compact_staircase.lua": "Hooks de geometria de abas, cache de fonte compacta e efeito de sobreposição 2.5D",
+    "16_open_editors_dock.lua": "Motor de cache de travessia de nós (O(1)) e renderização de dock vertical empilhado",
 }
 
 

@@ -1305,6 +1305,56 @@ def cmd_health_check(verbose):
             click.echo(f"  [{step['status'].upper():4}] {step['label']}: {step['detail']}")
         click.echo(f"  healthy={gate['healthy']} passed={gate['passed']} failed={gate['failed']} warnings={gate['warnings']}\n")
 
+@lite_xl_group.command("sandbox", help=" Lança o Lite XL no modo Sandbox isolado (não toca o init de produção).")
+@click.option("--watch", "-w", default=0, help="Segundos para monitorar antes de fechar (0 = manual).")
+def cmd_sandbox(watch):
+    """Lança o Lite XL apontando para o sandbox isolado."""
+    from doxoade.commands.lite_xl_systems.typhon import TyphonEngine
+    
+    sandbox_dir = TyphonEngine._get_sandbox_dir()
+    exe = LiteXLEngine.find_executable()
+    
+    if not exe:
+        click.echo(f"{Fore.RED}✖ Executável do Lite XL não encontrado.{Fore.RESET}")
+        return
+    
+    if not sandbox_dir.exists():
+        click.echo(f"{Fore.YELLOW}⚠ Sandbox não existe. Execute 'doxoade lite-xl typhon test-deploy' primeiro.{Fore.RESET}")
+        return
+    
+    click.echo(f"{Fore.CYAN}{Style.BRIGHT}🧪 MODO SANDBOX ISOLADO{Style.RESET_ALL}")
+    click.echo(f"  {Fore.WHITE}Sandbox:{Fore.RESET} {sandbox_dir}")
+    click.echo(f"  {Fore.WHITE}Executável:{Fore.RESET} {exe}")
+    click.echo(f"  {Fore.YELLOW}⚠ Este modo NÃO afeta seu init.lua de produção!{Fore.RESET}")
+    
+    # Lança o Lite XL no sandbox
+    CREATE_NEW_CONSOLE = 0x00000010 if sys.platform == "win32" else 0
+    proc = subprocess.Popen(
+        [str(exe), "--userdir", str(sandbox_dir)],
+        creationflags=CREATE_NEW_CONSOLE
+    )
+    
+    click.echo(f"✔ Lite XL Sandbox lançado (PID: {proc.pid})")
+    click.echo(f"💡 Pressione Ctrl+C para encerrar o sandbox.")
+    
+    if watch > 0:
+        click.echo(f"️ Monitorando por {watch} segundos...")
+        try:
+            time.sleep(watch)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                click.echo("✔ Sandbox encerrado.")
+    else:
+        # Aguarda o processo terminar ou Ctrl+C
+        try:
+            proc.wait()
+        except KeyboardInterrupt:
+            proc.kill()
+            click.echo("✔ Sandbox encerrado pelo usuário.")
+
 # ═══════════════════════════════════════════════════════════
 # 🐉 TYPHON — Pipeline Supervisionado de Deploy
 # ═══════════════════════════════════════════════════════════

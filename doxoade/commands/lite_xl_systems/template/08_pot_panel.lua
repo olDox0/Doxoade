@@ -54,13 +54,20 @@ end)
 -- 2. UTILITÁRIOS DE PAINEL DIREITO
 -- =============================================================================
 local function create_docview_safe(doc)
-  if not doc then return nil end
-  if type(DocView) == "table" and DocView.new then
-    return DocView:new(doc)
-  end
-  local ok, view = pcall(DocView, doc)
-  if ok and view then return view end
-  return { doc = doc }
+    if not doc then return nil end
+    if type(DocView) == "table" and DocView.new then
+        return DocView:new(doc)
+    end
+    local ok, view = pcall(DocView, doc)
+    if ok and view then return view end
+    
+    -- 🛡️ FALLBACK MA'AT: Retorna um objeto estruturado em vez de tabela órfã
+    local orphan_view = { doc = doc }
+    orphan_view.get_name = function(self) return "Pot Panel" end
+    orphan_view.get_title = function(self) return self:get_name() end
+    orphan_view.is = function(self, class) return false end
+    orphan_view.draw = function(self) end -- Evita crash de renderização
+    return orphan_view
 end
 
 local function get_doc_leaves(n, list)

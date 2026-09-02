@@ -74,6 +74,95 @@ function Node:update_layout(...)
 end
 
 -- =============================================================================
+-- 🛡️ VACINA MA'AT: BLINDAGEM ABSOLUTA CONTRA 'get_name' NIL (CRASH DO core.step)
+-- =============================================================================
+-- O crash ocorre no upvalue 'get_title_filename' do core.init.lua quando o loop
+-- principal (core.step) itera sobre node.views e encontra uma tabela sem metatable.
+
+-- 1. Saneamento Contínuo no Loop Principal (Antes de cada frame)
+local original_core_step = core.step
+function core.step()
+    pcall(function()
+        if core.root_view and core.root_view.root_node then
+            local function sanitize_node(node)
+                if not node then return end
+                if node.type == "leaf" then
+                    for _, view in ipairs(node.views or {}) do
+                        if type(view) == "table" then
+                            if not view.get_name then view.get_name = function() return "Orphan View" end end
+                            if not view.get_title then view.get_title = function(self) return self:get_name() end end
+                            if not view.is then view.is = function() return false end end
+                        end
+                    end
+                else
+                    sanitize_node(node.a)
+                    sanitize_node(node.b)
+                end
+            end
+            sanitize_node(core.root_view.root_node)
+        end
+        -- Blindagem extra para a view ativa global
+        if core.active_view and type(core.active_view) == "table" then
+            if not core.active_view.get_name then core.active_view.get_name = function() return "Active Orphan" end end
+            if not core.active_view.is then core.active_view.is = function() return false end end
+        end
+    end)
+    return original_core_step()
+end
+
+-- 2. Hook no core.set_active_view (Proteção na promoção de views)
+local original_set_active_view = core.set_active_view
+core.set_active_view = function(view)
+    if view and type(view) == "table" then
+        if not view.is then view.is = function(self, class) return false end end
+        if not view.get_name then view.get_name = function(self) return "Orphan View" end end
+        if not view.get_title then view.get_title = function(self) return self:get_name() end end
+    end
+    if original_set_active_view then
+        return original_set_active_view(view)
+    end
+end
+
+-- =============================================================================
+-- 🛡️ VACINA MA'AT: BLINDAGEM ABSOLUTA CONTRA 'get_name' NIL (CRASH DO core.step)
+-- =============================================================================
+-- Intercepta a promoção de views e injeta métodos faltantes para evitar que
+-- tabelas órfãs (sem metatable de View) crashem o upvalue 'get_title_filename'.
+
+-- 1. Blindagem no core.set_active_view (Atualiza o hook existente)
+local original_set_active_view = core.set_active_view
+core.set_active_view = function(view)
+	if view and type(view) == "table" then
+		if not view.is then
+			view.is = function(self, class) return false end
+		end
+		if not view.get_name then
+			view.get_name = function(self) return "Orphan View" end
+		end
+		if not view.get_title then
+			view.get_title = function(self) return self:get_name() end
+		end
+	end
+	if original_set_active_view then
+		return original_set_active_view(view)
+	end
+end
+
+-- 2. Blindagem no Node:add_view (Impede que abas órfãs entrem na árvore de nós)
+local original_node_add_view = Node.add_view
+function Node:add_view(view)
+	if view and type(view) == "table" then
+		if not view.get_name then
+			view.get_name = function(self) return "Orphan View" end
+		end
+		if not view.is then
+			view.is = function(self, class) return false end
+		end
+	end
+	return original_node_add_view(self, view)
+end
+
+-- =============================================================================
 -- 🛡️ ESCUDO DE AUTO-CURA DA ÁRVORE DE NÓS (EXTINÇÃO UNIVERSAL DE CRASHES)
 -- =============================================================================
 

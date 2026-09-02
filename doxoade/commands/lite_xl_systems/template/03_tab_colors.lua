@@ -3,6 +3,7 @@
 -- 03. TEMA E CORES DE ABAS POR PROJETO RAIZ COM INDICADOR DE MODIFICADO
 -- =============================================================================
 local core = require "core"
+
 local style = require "core.style"
 local Node = require "core.node"
 
@@ -22,13 +23,14 @@ end
 local PROJECT_THEMES = {
   { accent = { 255, 0, 0 },     active_bg = { 175, 0, 0 },   hover_bg = { 170, 68, 0 },  inactive_bg = { 130, 0, 0 } },
   { accent = { 255, 103, 0 },   active_bg = { 224, 90, 0 },  hover_bg = { 170, 68, 0 },  inactive_bg = { 90, 36, 0 } },
-  { accent = { 232, 170, 0 },   active_bg = { 170, 125, 0 }, hover_bg = { 130, 95, 0 },  inactive_bg = { 70, 50, 0 } },
-  { accent = { 38, 188, 95 },   active_bg = { 25, 123, 63 }, hover_bg = { 18, 90, 46 },  inactive_bg = { 10, 51, 26 } },
-  { accent = { 0, 108, 255 },   active_bg = { 0, 80, 190 },  hover_bg = { 0, 60, 140 },  inactive_bg = { 0, 35, 80 } },
-  { accent = { 200, 21, 118 },  active_bg = { 150, 16, 88 }, hover_bg = { 110, 12, 65 }, inactive_bg = { 60, 6, 35 } },
-  { accent = { 77, 145, 232 },  active_bg = { 30, 57, 92 },  hover_bg = { 22, 42, 68 },   inactive_bg = { 14, 28, 45 } },
-  { accent = { 206, 105, 158 }, active_bg = { 82, 41, 63 },  hover_bg = { 60, 30, 46 },  inactive_bg = { 38, 19, 29 } },
+  { accent = { 255, 170, 0 },   active_bg = { 170, 125, 0 }, hover_bg = { 130, 95, 0 },  inactive_bg = { 70, 50, 0 } },
   { accent = { 227, 141, 83 },  active_bg = { 90, 56, 33 },  hover_bg = { 68, 42, 25 },   inactive_bg = { 42, 26, 15 } },
+  { accent = { 138, 205, 25 },   active_bg = { 78, 105, 25 }, hover_bg = { 38, 95, 25 },  inactive_bg = { 28, 65, 15 } },
+  { accent = { 38, 188, 95 },   active_bg = { 25, 123, 63 }, hover_bg = { 18, 90, 46 },  inactive_bg = { 10, 51, 26 } },
+  { accent = { 77, 145, 232 },  active_bg = { 30, 57, 92 },  hover_bg = { 22, 42, 68 },   inactive_bg = { 14, 28, 45 } },
+  { accent = { 0, 0, 255 },   active_bg = { 0, 0, 120 },  hover_bg = { 0, 0, 80 },  inactive_bg = { 0, 0, 50 } },
+  { accent = { 200, 21, 118 },  active_bg = { 150, 16, 88 }, hover_bg = { 110, 12, 65 }, inactive_bg = { 60, 6, 35 } },
+  { accent = { 206, 105, 158 }, active_bg = { 82, 41, 63 },  hover_bg = { 60, 30, 46 },  inactive_bg = { 38, 19, 29 } },
 }
 
 local DEFAULT_THEME = { accent = { 94, 92, 94 }, active_bg = { 47, 46, 48 }, hover_bg = { 35, 34, 36 }, inactive_bg = { 25, 23, 26 } }
@@ -66,44 +68,116 @@ local function get_project_tab_theme(filename)
   return PROJECT_THEMES[hash + 1] or DEFAULT_THEME
 end
 
+local function mix_color(base, accent, t)
+	return {
+		math.floor(base[1] + (accent[1] - base[1]) * t),
+		math.floor(base[2] + (accent[2] - base[2]) * t),
+		math.floor(base[3] + (accent[3] - base[3]) * t),
+		255,
+	}
+end
+
+local function doxoade_hash_string(s)
+	s = tostring(s or "")
+	local h = 0
+	for i = 1, #s do
+		h = (h * 31 + s:byte(i)) % 2147483647
+	end
+	return h
+end
+
+local DOXOADE_TAB_PALETTE = {
+	{ 96, 165, 250, 255 },  -- azul pálido
+	{ 129, 140, 248, 255 }, -- índigo
+	{ 168, 85, 247, 255 },  -- violeta
+	{ 244, 114, 182, 255 }, -- rosa
+	{ 45, 212, 191, 255 },  -- teal
+	{ 52, 211, 153, 255 },  -- verde
+	{ 251, 146, 60, 255 },  -- laranja suave
+}
+
+local function doxoade_resolve_tab_theme(filename)
+	local key = tostring(filename or "default")
+	local h = doxoade_hash_string(key)
+	local accent = DOXOADE_TAB_PALETTE[(h % #DOXOADE_TAB_PALETTE) + 1]
+	return {
+		accent = accent,
+	}
+end
+
+rawget(_G, "DOXOADE_GET_TAB_THEME")
+
 local original_draw_tab_title = Node.draw_tab_title
+
 function Node:draw_tab_title(view, font, is_active, is_hovered, x, y, w, h)
-  local ok, theme = pcall(function()
-    local doc = view and view.doc
-    local filename = doc and doc.filename or (view and view:get_name() or nil)
-    return get_project_tab_theme(filename)
-  end)
+	local filename = nil
 
-  if ok and theme then
-    local bg = is_active and theme.active_bg or (is_hovered and theme.hover_bg or theme.inactive_bg)
-    draw_rect_safe(x, y, w, h, bg)
+	pcall(function()
+		if view and view.doc and view.doc.filename then
+			filename = view.doc.filename
+		elseif view and view.get_name then
+			filename = view:get_name()
+		end
+	end)
 
-    -- 🟡 Detecta se o arquivo atual tem modificações não salvas
-    local is_dirty = false
-    pcall(function()
-      if view and view.doc and view.doc.is_dirty then
-        is_dirty = view.doc:is_dirty()
-      end
-    end)
+	local theme = doxoade_resolve_tab_theme(filename)
 
-    -- 🌟 LINHA INDICADORA NO TÍTULO DA ABA:
-    -- Se modificado: Linha Amarela destacada
-    -- Se salvo: Linha Accent na cor de identidade do projeto
-    if is_dirty then
-      draw_rect_safe(x, y, w, is_active and 3 or 2, MODIFIED_YELLOW)
-    else
-      draw_rect_safe(x, y, w, is_active and 3 or 1, theme.accent)
-    end
+	if theme then
+		local is_dirty = false
 
-    local old_text = style.text
-    local old_dim = style.dim
-    style.text = is_active and { 255, 255, 255, 255 } or (is_hovered and { 240, 240, 240, 255 } or { 190, 190, 190, 255 })
-    style.dim = { 180, 180, 180, 255 }
-    local res = original_draw_tab_title(self, view, font, is_active, is_hovered, x, y, w, h)
-    style.text = old_text
-    style.dim = old_dim
-    return res
-  end
+		pcall(function()
+			if view and view.doc and view.doc.is_dirty then
+				is_dirty = view.doc:is_dirty()
+			end
+		end)
 
-  return original_draw_tab_title(self, view, font, is_active, is_hovered, x, y, w, h)
+		if is_dirty then
+			-- 🟡 Arquivo modificado: identidade visual amarelada.
+			local YEL = { 234, 179, 8, 255 }
+
+			draw_rect_safe(x, y, w, 2, YEL)
+			draw_rect_safe(x, y + 2, w, 1, { 234, 179, 8, 115 })
+			draw_rect_safe(x, y + 3, w, 1, { 234, 179, 8, 45 })
+
+			draw_rect_safe(x, y, 1, h, YEL)
+			draw_rect_safe(x + w - 1, y, 1, h, YEL)
+			draw_rect_safe(x, y + h - 1, w, 1, YEL)
+		else
+			-- Filete pálido de identidade do projeto/arquivo.
+			local a = theme.accent
+			local alpha = is_active and 220 or 120
+			draw_rect_safe(x, y, w, is_active and 2 or 1, {
+				a[1], a[2], a[3], alpha
+			})
+		end
+
+		local old_text = style.text
+		local old_dim = style.dim
+
+		style.text = is_active
+			and { 245, 245, 245, 255 }
+			or  (is_hovered and { 220, 220, 220, 255 } or { 178, 178, 178, 255 })
+
+		style.dim = { 150, 150, 150, 255 }
+
+		local ok, res = pcall(
+			original_draw_tab_title,
+			self,
+			view,
+			font,
+			is_active,
+			is_hovered,
+			x,
+			y,
+			w,
+			h
+		)
+
+		style.text = old_text
+		style.dim = old_dim
+
+		if ok then return res end
+	end
+
+	return original_draw_tab_title(self, view, font, is_active, is_hovered, x, y, w, h)
 end
