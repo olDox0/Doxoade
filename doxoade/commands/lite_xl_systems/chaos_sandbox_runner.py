@@ -80,13 +80,16 @@ end)
             if not exe_path:
                 raise FileNotFoundError("Executável do Lite XL não encontrado.")
             
-            cmd = [str(exe_path), "--userdir", str(self.sandbox_dir)]
+            env = os.environ.copy()
+            env["LITE_USERDIR"] = str(self.sandbox_dir)
+            env["XDG_CONFIG_HOME"] = str(self.sandbox_dir.parent)
             
-            print(f"{Fore.CYAN}⚡ Executando Sandbox (Timeout: {timeout_seconds}s)...{Fore.RESET}")
+            cmd = [str(exe_path)]
+            print(f"{Fore.CYAN}⚡ Executando Sandbox com LITE_USERDIR (Timeout: {timeout_seconds}s)...{Fore.RESET}")
             start_time = time.time()
-            
             process = subprocess.Popen(
-                cmd, 
+                cmd,
+                env=env,
                 stdout=subprocess.PIPE, 
                 stderr=subprocess.PIPE,
                 text=True,

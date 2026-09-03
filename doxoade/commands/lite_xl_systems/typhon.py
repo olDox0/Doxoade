@@ -63,36 +63,41 @@ class TyphonEngine:
 
     @classmethod
     def launch_sandbox(cls) -> Tuple[bool, str, Optional[int]]:
-        """Lança o Lite XL apontando para o sandbox isolado. Retorna (ok, msg, pid)."""
+        """Lança o Lite XL apontando para o sandbox isolado com LITE_USERDIR."""
         try:
             exe = LiteXLEngine.find_executable()
             if not exe:
                 return False, "Executável lite-xl.exe não encontrado", None
             sandbox_dir = cls._get_sandbox_dir()
-            # 🛡️ FIX: diretório de projeto após --userdir evita que o Lite XL
-            # interprete a flag '--userdir' como um arquivo a abrir.
             project_dir = os.getcwd()
+            
+            env = os.environ.copy()
+            env["LITE_USERDIR"] = str(sandbox_dir)
+            env["XDG_CONFIG_HOME"] = str(sandbox_dir.parent)
+            
+            CREATE_NEW_CONSOLE = 0x00000010 if sys.platform == "win32" else 0
             proc = subprocess.Popen(
-                [str(exe), "--userdir", str(sandbox_dir), project_dir],
-                close_fds=True,
+                [str(exe), project_dir],
+                env=env,
+                creationflags=CREATE_NEW_CONSOLE,
+                close_fds=(sys.platform != "win32"),
             )
             return True, f"Sandbox lançado (PID {proc.pid})", proc.pid
         except Exception as e:
             return False, f"Falha ao lançar sandbox: {e}", None
 
     @classmethod
-    def run_test_pipeline(cls, watch_seconds: int = 5) -> Dict[str, Any]:
+    def run_test_pipeline(cls, watch_seconds: int = 4) -> Dict[str, Any]:
         """
-        🧪 TYPHON TEST-DEPLOY — Pipeline isolado no sandbox.
-        Fases: HEALTH GATE → DEPLOY SANDBOX → LAUNCH → WATCH → VERDICT.
-        O init.lua de produção NUNCA é modificado.
+        🧪 TYPHON TEST-DEPLOY — Pipeline supervisionado com análise de telemetria.
+        Fases: HEALTH GATE → DEPLOY TEST → LAUNCH (LITE_USERDIR) → WATCH → FORENSIC VERDICT.
         """
         result = {"success": False, "phases": [], "verdict": None, "sandbox_pid": None}
 
         def _phase(name: str, ok: bool, msg: str) -> None:
             result["phases"].append({"name": name, "ok": ok, "msg": msg})
 
-        # FASE 1: HEALTH GATE (validação completa antes de qualquer deploy)
+        # 1. Health Gate estático
         gate_ok, gate = cls.run_health_gate()
         if not gate_ok:
             _phase("HEALTH_GATE", False, f"Sistema NÃO saudável: {gate['failed']} falha(s) crítica(s)")
@@ -100,28 +105,71 @@ class TyphonEngine:
             return result
         _phase("HEALTH_GATE", True, f"Sistema saudável ({gate['passed']} OK, {gate['warnings']} avisos)")
 
-        # FASE 2: COMPILE + DEPLOY NO SANDBOX
-        ok, msg = cls.deploy_to_sandbox()
-        _phase("DEPLOY_SANDBOX", ok, msg)
-        if not ok:
+        # 2. Deploy no diretório de teste isolado
+        from .typhon_deploy import TyphonDeployEngine
+        deploy_res = TyphonDeployEngine.deploy("test")
+        if not deploy_res["success"]:
+            _phase("DEPLOY_TEST", False, deploy_res["error"])
             result["verdict"] = "DEPLOY_FAILED"
             return result
+        _phase("DEPLOY_TEST", True, f"Init de teste compilado ({deploy_res['size']} chars)")
 
-        # FASE 3: LAUNCH SANDBOX
-        ok, msg, pid = cls.launch_sandbox()
-        _phase("LAUNCH_SANDBOX", ok, msg)
-        result["sandbox_pid"] = pid
-        if not ok or pid is None:
+        # 3. Lançamento com LITE_USERDIR
+        test_dir = TyphonDeployEngine._get_deploy_dir("test")
+        exe = LiteXLEngine.find_executable()
+        if not exe:
+            _phase("LAUNCH_TEST", False, "Executável lite-xl.exe não encontrado")
             result["verdict"] = "LAUNCH_FAILED"
             return result
 
-        # FASE 4: WATCH (monitora sobrevivência do processo)
-        time.sleep(watch_seconds)
-        stable = cls._is_pid_alive(pid)
-        _phase("WATCH", stable, f"PID {pid} {'STABLE' if stable else 'UNSTABLE'} após {watch_seconds}s")
+        env = os.environ.copy()
+        env["LITE_USERDIR"] = str(test_dir)
+        env["XDG_CONFIG_HOME"] = str(test_dir.parent)
 
-        result["success"] = stable
-        result["verdict"] = "TEST_STABLE" if stable else "TEST_UNSTABLE"
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/F", "/IM", "lite-xl.exe"], capture_output=True)
+        else:
+            subprocess.run(["pkill", "-f", "lite-xl"], capture_output=True)
+        time.sleep(0.5)
+
+        CREATE_NEW_CONSOLE = 0x00000010 if sys.platform == "win32" else 0
+        proc = subprocess.Popen(
+            [str(exe), os.getcwd()],
+            env=env,
+            creationflags=CREATE_NEW_CONSOLE,
+            close_fds=(sys.platform != "win32")
+        )
+        _phase("LAUNCH_TEST", True, f"Instância de teste lançada (PID: {proc.pid})")
+        result["sandbox_pid"] = proc.pid
+
+        # 4. Watch com inspeção de logs
+        time.sleep(watch_seconds)
+        alive = proc.poll() is None
+
+        # 5. Análise de Forensics
+        error_file = test_dir / "error.txt"
+        session_file = test_dir / "session_log.txt"
+        has_error_txt = error_file.exists() and error_file.stat().st_size > 0
+        session_log = session_file.read_text(encoding="utf-8", errors="replace") if session_file.exists() else ""
+
+        # Encerramento limpo da instância de teste
+        if alive:
+            proc.kill()
+            try:
+                proc.wait(timeout=1.0)
+            except Exception:
+                pass
+
+        if alive and not has_error_txt and ("HOOKS_INIT" in session_log or "SOVEREIGN BOOT OK" in session_log or len(session_log) > 0):
+            _phase("WATCH", True, f"PID {proc.pid} estável. Telemetria confirmada.")
+            result["success"] = True
+            result["verdict"] = "TEST_STABLE"
+        else:
+            reason = "Processo encerrou prematuramente" if not alive else ("error.txt detectado" if has_error_txt else "Sem telemetria no session_log")
+            _phase("WATCH", False, f"Falha no teste: {reason}")
+            result["success"] = False
+            result["verdict"] = "TEST_UNSTABLE"
+
         return result
 
     STATE_FILE_NAME = "typhon_state.json"

@@ -36,7 +36,7 @@ local PROJECT_THEMES = {
 local DEFAULT_THEME = { accent = { 94, 92, 94 }, active_bg = { 47, 46, 48 }, hover_bg = { 35, 34, 36 }, inactive_bg = { 25, 23, 26 } }
 
 -- 🟡 Cor de Alerta: Linha Amarela de Modificado / Não Salvo
-local MODIFIED_YELLOW = { 234, 179, 8, 255 }
+local MODIFIED_YELLOW = { 254, 139, 8, 255 }
 
 local function get_project_tab_theme(filename)
   if not filename then return DEFAULT_THEME end
@@ -133,11 +133,11 @@ function Node:draw_tab_title(view, font, is_active, is_hovered, x, y, w, h)
 
 		if is_dirty then
 			-- 🟡 Arquivo modificado: identidade visual amarelada.
-			local YEL = { 234, 179, 8, 255 }
+			local YEL = { 254, 139, 8, 255 }
 
 			draw_rect_safe(x, y, w, 2, YEL)
-			draw_rect_safe(x, y + 2, w, 1, { 234, 179, 8, 115 })
-			draw_rect_safe(x, y + 3, w, 1, { 234, 179, 8, 45 })
+			draw_rect_safe(x, y + 2, w, 1, { 254, 139, 8, 115 })
+			draw_rect_safe(x, y + 3, w, 1, { 254, 139, 8, 45 })
 
 			draw_rect_safe(x, y, 1, h, YEL)
 			draw_rect_safe(x + w - 1, y, 1, h, YEL)
@@ -153,12 +153,28 @@ function Node:draw_tab_title(view, font, is_active, is_hovered, x, y, w, h)
 
 		local old_text = style.text
 		local old_dim = style.dim
-
-		style.text = is_active
-			and { 245, 245, 245, 255 }
-			or  (is_hovered and { 220, 220, 220, 255 } or { 178, 178, 178, 255 })
-
-		style.dim = { 150, 150, 150, 255 }
+		-- 🎯 CONTRASTE AUTOMÁTICO: lê o fundo exposto pelo 03b e adapta o texto
+		local bg = rawget(_G, "_DOXOADE_TAB_BG")
+		local text_col, dim_col
+		if type(bg) == "table" then
+			local function lin(c)
+				c = c / 255
+				return c <= 0.03928 and c / 12.92 or ((c + 0.055) / 1.055) ^ 2.4
+			end
+			local lum = 0.2126 * lin(bg[1] or 0) + 0.7152 * lin(bg[2] or 0) + 0.0722 * lin(bg[3] or 0)
+			if lum > 0.179 then
+				text_col = { 26, 26, 26, 255 }   -- fundo claro → texto escuro
+				dim_col = { 70, 70, 70, 255 }
+			else
+				text_col = { 248, 248, 248, 255 } -- fundo escuro → texto claro
+				dim_col = { 205, 205, 205, 255 }
+			end
+		else
+			text_col = is_active and { 250, 250, 250, 255 } or { 185, 185, 185, 255 }
+			dim_col = { 170, 170, 170, 255 }
+		end
+		style.text = text_col
+		style.dim = dim_col
 
 		local ok, res = pcall(
 			original_draw_tab_title,

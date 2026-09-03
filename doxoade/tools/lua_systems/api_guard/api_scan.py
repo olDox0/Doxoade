@@ -80,7 +80,6 @@ class APITemplateScanner:
             # Detecta símbolos do Lite XL acessados
             for sym, module_name in LITEXL_CORE_SYMBOLS.items():
                 if sym not in local_decls and sym not in allowed_globals:
-                    # Checa se o símbolo é usado como identificador de chamada/propriedade
                     pattern = rf"\b{sym}\b(?:\s*[\.\:\[]|\s*\()"
                     if re.search(pattern, clean_line) and not clean_line.strip().startswith(f"local {sym}"):
                         missing_requires.append({
@@ -90,13 +89,28 @@ class APITemplateScanner:
                             "raw_line": line.strip()
                         })
 
-            # Detecta monkey-patches cegos do tipo: `local original = RootView.on_key_pressed`
-            patch_match = re.search(r"local\s+original_(\w+)\s*=\s*([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)", clean_line)
+            # 🔧 CORREÇÃO MA'AT: Regex abrangente para capturar tanto 
+            # `local original = X.y` quanto `local original_X = X.y`
+            patch_match = re.search(
+                r"local\s+(?:original(?:_\w+)?|original)\s*=\s*([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)", 
+                clean_line
+            )
             if patch_match:
+                target_class = patch_match.group(1)
+                method = patch_match.group(2)
+                
+                # 🛡️ Verifica se o alvo do patch é conhecido no escopo atual
+                is_known_target = (
+                    target_class in local_decls or 
+                    target_class in allowed_globals or 
+                    target_class in LITEXL_CORE_SYMBOLS
+                )
+                
                 suspicious_patches.append({
                     "line": idx,
-                    "target_class": patch_match.group(2),
-                    "method": patch_match.group(3),
+                    "target_class": target_class,
+                    "method": method,
+                    "target_exists": is_known_target,  # 🆕 Metadado para o Chaos Validator
                     "raw_line": line.strip()
                 })
 
@@ -106,7 +120,7 @@ class APITemplateScanner:
             "declared_locals": list(sorted(local_decls)),
             "missing_requires": missing_requires,
             "suspicious_patches": suspicious_patches,
-            "status": "PASS" if len(missing_requires) == 0 else "FAIL"
+            "status": "PASS" if len(missing_requires) == 0 and len(suspicious_patches) == 0 else "FAIL"
         }
 
     def scan_all(self) -> Dict[str, Any]:

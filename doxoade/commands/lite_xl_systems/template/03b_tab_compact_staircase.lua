@@ -15,19 +15,21 @@ if rawget(_G, "_DOXOADE_NPP_HOOKED") then return end
 rawset(_G, "_DOXOADE_NPP_HOOKED", true)
 
 config.always_show_tabs = true
-config.doxoade_npp_min_tab_width = 46
+config.doxoade_npp_min_tab_width = 40
 config.doxoade_npp_max_tab_width = 260
 
 core.log("🚀 [03b] MOTOR NOTEPAD++ V5 (cor por todo o bloco + resolver autônomo).")
 
 -- ── Paleta autônoma de projetos (mesma família visual do 03) ────────────────
 local PROJECT_ACCENTS = {
-	{ 38, 188, 95 }, { 255, 0, 0 }, { 0, 255, 0 }, { 255, 255, 0 },
-	{ 0, 0, 255 }, { 255, 0, 255 }, { 0, 255, 255 }, { 115, 115, 115},
-  { 255, 115, 0 }, { 115, 255, 0 }, { 255, 255, 115 }, { 0, 115, 255 },
-  { 255, 115, 255 }, { 115, 255, 255 }, { 115, 0, 255 },
+{ 105, 0, 0}, { 0, 105, 0}, { 105, 105, 0}, { 0, 0, 105}, { 105, 0, 105}, { 0, 105, 105}, { 115, 105, 85}, { 60, 40, 60},
+{ 165, 0, 0}, { 0, 165, 0}, { 165, 165, 0}, { 0, 0, 165}, { 165, 0, 165}, { 0, 165, 165}, { 175, 165, 145}, { 40, 50, 40},
+{ 255, 0, 0}, { 0, 255, 0}, { 215, 215, 0}, { 0, 0, 255}, { 255, 0, 255}, { 0, 255, 255}, { 255, 255, 255}, { 30, 20, 20},
+{ 255, 70, 0}, { 140, 255, 0}, { 195, 195, 80}, { 70, 70, 255}, { 255, 100, 255}, { 100, 255, 255}, { 145, 155, 115}, { 40, 0, 40},
+{ 255, 140, 0}, { 0, 255, 140}, { 115, 115, 140}, { 100, 100, 255}, { 255, 160, 255}, { 150, 255, 255}, { 75, 55, 65}, { 0, 50, 50},
+{ 255, 0, 50}, { 255, 0, 150}, { 205, 0, 255}, { 155, 0, 255},{ 95, 0, 255}, { 0, 95, 255}, { 0, 155, 255}, { 0, 205, 255}, 
 }
---  { 0, 0, 0}, { 0, 0, 0}, { 0, 0, 0}, { 0, 0, 0}, { 0, 0, 0},
+--  { 0, 0, 0}, { 0, 0, 0}, { 0, 0, 0}, { 0, 0, 0},
 
 local function hash_string(s)
 	local h = 0
@@ -83,7 +85,7 @@ local function mix_color(base, accent, t)
 	}
 end
 
--- ── Layout: caixa = tamanho do texto ────────────────────────────────────────
+-- ── Layout: caixa = texto + PREENCHIMENTO elegante (linha fecha à direita) ──
 local function npp_layout(node)
 	local c = node._npp_cache
 	local views = node.views
@@ -102,8 +104,9 @@ local function npp_layout(node)
 	local min_tab = (config.doxoade_npp_min_tab_width or 46) * (SCALE or 1)
 	local max_tab = (config.doxoade_npp_max_tab_width or 260) * (SCALE or 1)
 
-	local rects, ids = {}, {}
-	local cur_x, cur_row = 0, 1
+	-- Passagem 1: largura-base = tamanho do texto + quebra de linhas
+	local base_w, row_of, rows, row_w = {}, {}, {}, {}
+	local cur_row, cur_x = 1, 0
 	for i, view in ipairs(views) do
 		local ok_name, name = pcall(function() return view:get_name() end)
 		name = (ok_name and name) or "…"
@@ -112,13 +115,50 @@ local function npp_layout(node)
 			cur_row = cur_row + 1
 			cur_x = 0
 		end
-		rects[i] = {
-			x = node.position.x + cur_x,
-			y = node.position.y + (cur_row - 1) * row_h,
-			w = w, h = row_h,
-		}
+		base_w[i] = w
+		row_of[i] = cur_row
+		rows[cur_row] = rows[cur_row] or {}
+		table.insert(rows[cur_row], i)
+		row_w[cur_row] = (row_w[cur_row] or 0) + w
 		cur_x = cur_x + w
-		ids[i] = view
+	end
+
+	-- Passagem 2: PREENCHIMENTO elegante (sem buraco morto à direita)
+	-- Distribui o leftover igualmente com teto max_tab; o ÚLTIMO da linha
+	-- absorve o resto e fecha a fileira rente à borda direita (estilo Notepad++).
+	local final_w = {}
+	for r, idxs in pairs(rows) do
+		local leftover = max_w - (row_w[r] or 0)
+		if leftover > 0 and #idxs > 0 then
+			local add = math.floor(leftover / #idxs)
+			local acc = 0
+			for j, i in ipairs(idxs) do
+				local extra
+				if j == #idxs then
+					extra = leftover - acc
+				else
+					extra = math.min(add, math.max(0, max_tab - base_w[i]))
+				end
+				acc = acc + extra
+				final_w[i] = base_w[i] + extra
+			end
+		else
+			for _, i in ipairs(idxs) do final_w[i] = base_w[i] end
+		end
+	end
+
+	-- Passagem 3: retângulos absolutos
+	local rects, ids = {}, {}
+	local cx, cr = 0, 1
+	for i = 1, n do
+		if row_of[i] ~= cr then cr = row_of[i] cx = 0 end
+		rects[i] = {
+			x = node.position.x + cx,
+			y = node.position.y + (cr - 1) * row_h,
+			w = final_w[i], h = row_h,
+		}
+		cx = cx + final_w[i]
+		ids[i] = views[i]
 	end
 
 	c = {
@@ -181,7 +221,28 @@ function Node:tab_hovered_update(px, py)
 	end
 end
 
--- ── Desenho: COR POR TODO O BLOCO + caixa compacta + X só no hover ──────────
+-- ── Algoritmo de Contraste Dinâmico (W3C Relative Luminance) ────────────────
+local function get_contrast_color(bg_color)
+	-- Normaliza RGB para 0-1 e aplica gamma correction (sRGB)
+	-- 🛡️ FIX Ma'at: Lua 5.4 removeu math.pow. Usando operador ^ nativo.
+	local function linearize(c)
+		c = c / 255
+		return c <= 0.03928 and c / 12.92 or ((c + 0.055) / 1.055) ^ 2.4
+	end
+	local r = linearize(bg_color[1])
+	local g = linearize(bg_color[2])
+	local b = linearize(bg_color[3])
+	-- Luminância relativa (W3C WCAG 2.1)
+	local luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+	-- Se fundo claro (luminance > 0.5) → texto escuro; senão → texto claro
+	if luminance > 0.5 then
+		return { 30, 30, 30, 255 } -- Texto escuro para fundo claro
+	else
+		return { 245, 245, 245, 255 } -- Texto claro para fundo escuro
+	end
+end
+
+-- ── Desenho: COR POR TODO O BLOCO + CONTRASTE DINÂMICO ─────────────────────
 function Node:draw_tab(view, is_active, is_hovered, is_close_hovered, x, y, w, h, standalone)
 	local by, bh = y + 1, h - 1
 	local accent = get_accent(view and view.doc and view.doc.filename or (view and view:get_name()))
@@ -192,23 +253,48 @@ function Node:draw_tab(view, is_active, is_hovered, is_close_hovered, x, y, w, h
 
 	renderer.draw_rect(x, by, w, bh, bg)
 
+	-- CONTRASTE DINÂMICO: calcula a cor do texto baseada na luminância do fundo
+	local text_color = get_contrast_color(bg)
+	local dim_color = {
+		math.floor(text_color[1] * 0.7),
+		math.floor(text_color[2] * 0.7),
+		math.floor(text_color[3] * 0.7),
+		255,
+	}
+
 	local font = get_compact_font()
 	core.push_clip_rect(x, by, w, bh)
+	
+	-- Aplica o contraste dinâmico antes de renderizar o título
+	local old_text = style.text
+	local old_dim = style.dim
+	style.text = text_color
+	style.dim = dim_color
+	
 	self:draw_tab_title(view, font, is_active, is_hovered, x, by, w, bh)
+	
+	-- Restaura as cores globais
+	style.text = old_text
+	style.dim = old_dim
+
+	rawset(_G, "_DOXOADE_TAB_BG", bg)
+	self:draw_tab_title(view, font, is_active, is_hovered, x, by, w, bh)
+	rawset(_G, "_DOXOADE_TAB_BG", nil)
+	
 	core.pop_clip_rect()
 
-	-- 'X' somente ao passar o mouse
+	-- 'X' somente ao passar o mouse (cor do X também contrasta)
 	if is_hovered and not standalone and config.tab_close_button then
 		local cw, cpad = close_metrics()
 		local cx = x + w - cw - cpad
 		renderer.draw_rect(cx - cpad, by + 1, cw + cpad * 2, bh - 2, { 0, 0, 0, 110 })
 		common.draw_text(style.icon_font,
-			is_close_hovered and { 255, 255, 255, 255 } or { 225, 225, 225, 255 },
+			is_close_hovered and text_color or dim_color,
 			"C", nil, cx, by, cw, bh)
 	end
 
 	-- Borda retangular (ativa = cor de identidade pura)
-	local box_col = is_active and accent or (style.divider or { 38, 34, 41, 255 })
+	local box_col = is_active and accent or (style.divider or { 94, 92, 94 , 255 })
 	renderer.draw_rect(x, by, w, 1, box_col)
 	renderer.draw_rect(x, by + bh - 1, w, 1, box_col)
 	renderer.draw_rect(x, by, 1, bh, box_col)

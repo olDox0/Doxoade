@@ -14,11 +14,17 @@ from doxoade.commands.lite_xl_systems.engine_lite_xl import LiteXLEngine
 from doxoade.tools.lua_systems.profiler import ProfilerEngine
 from doxoade.commands.lite_xl_systems.chaos_sandbox_runner import ChaosSandboxRunner
 from doxoade.commands.lite_xl_systems.chaos_payload import MEGA_CHAOS_PAYLOAD
+from doxoade.tools.lua_systems.chaos_validator import ChaosValidator
+from doxoade.commands.lite_xl_systems.chaos_deep_runner import DeepChaosRunner
+from doxoade.commands.lite_xl_systems.chaos_canary_probe import run_canary_probe
+from doxoade.commands.lite_xl_systems.cmd_typhon_deploy import deploy_group
 
 @click.group("lite-xl", help="⚡ Gestão, diagnóstico e automação do Lite XL.")
 def lite_xl_group():
     """Grupo de comandos do ecossistema Lite XL."""
     pass
+
+lite_xl_group.add_command(deploy_group)
 
 @lite_xl_group.command(
     "check-templates",
@@ -198,6 +204,43 @@ def cmd_check_templates(fix, apply):
                 f" check-templates --fix' para simular o auto-reparo.{Fore.RESET}\n"
             )
 
+@lite_xl_group.command("chaos-canary", help="🐤 Prova de execução do init do sandbox.")
+def cmd_chaos_canary():
+    """Verifica se o Lite XL está lendo o init.lua do sandbox."""
+    try:
+        run_canary_probe()
+    except Exception as e:
+        click.echo(f"{Fore.RED}✖ Falha no canário forense: {e}{Fore.RESET}")
+        sys.exit(1)
+
+@lite_xl_group.command("chaos-deep", help="🏜️ Testes de crash, falha e erro oculto no sandbox.")
+@click.option("--category", "-c", multiple=True,
+              type=click.Choice(["crash", "fault", "hidden"]),
+              help="Filtra por categoria (pode repetir). Padrão: todos.")
+def cmd_chaos_deep(category):
+    """Executa a suíte de caos profundo no sandbox isolado."""
+    try:
+        cats = list(category) if category else None
+        results = DeepChaosRunner.run_deep_suite(categories=cats)
+        if results["missed"] > 0:
+            sys.exit(1)
+    except Exception as e:
+        click.echo(f"{Fore.RED}✖ Falha na suíte profunda: {e}{Fore.RESET}")
+        sys.exit(1)
+
+@lite_xl_group.command("chaos-test", help="⚖️ Injeta erros propositalmente para testar se a auditoria os detecta.")
+def cmd_chaos_test():
+    """Executa a suíte de validação de falhas (Mutation Testing)."""
+    try:
+        results = ChaosValidator.run_chaos_suite()
+        if results["escaped"] > 0:
+            sys.exit(1) # Força saída com erro se a auditoria falhou em detectar
+        else:
+            click.echo(f"{Fore.GREEN}✔ Teste de Caos concluído com sucesso.{Fore.RESET}")
+    except Exception as e:
+        click.echo(f"{Fore.RED}✖ Falha na execução do Chaos Validator: {e}{Fore.RESET}")
+        sys.exit(1)
+
 @lite_xl_group.command("kill", help="Encerra todos os processos do Lite XL em execução.")
 def cmd_kill():
     if sys.platform == "win32":
@@ -236,37 +279,37 @@ def cmd_restart(target, clean):
             click.echo(f"    {Fore.RED}{line}{Fore.RESET}")
         click.echo(f"\n  {Fore.GREEN}✔ IDE aberta utilizando o último snapshot estável.{Fore.RESET}\n")
 
-@lite_xl_group.command("diagnose", help="Diagnóstico forense completo com auditoria Shadow ativa.")
-def cmd_diagnose():
-    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🩺 DIAGNÓSTICO FORENSE DO LITE XL (Shadow Powered){Style.RESET_ALL}")
-    click.echo("  Executando simulação de runtime e comandos...")
-
-    shadow_report = LiteXLEngine.run_shadow_audit()
-    total_mods = shadow_report.get("total_files", len(LiteXLEngine.get_template_files()))
-    
-    if shadow_report.get("status") == "PASS":
-        click.echo(f"  {Fore.GREEN}✔ Shadow Runtime: 100% dos comandos e templates passaram na simulação ({total_mods} módulos).{Fore.RESET}")
+@lite_xl_group.command("diagnose", help="Realiza auditoria forense do init.lua (Production, Sandbox ou Test).")
+@click.option("--mode", "-m", type=click.Choice(["production", "sandbox", "test"]), default="production", help="Ambiente a ser diagnosticado.")
+def cmd_diagnose(mode):
+    if mode == "sandbox":
+        target_dir = LiteXLEngine.get_sandbox_dir()
+    elif mode == "test":
+        target_dir = LiteXLEngine.get_user_dir() / ".doxoade" / "test_deploy"
     else:
-        click.echo(f"  {Fore.YELLOW}⚠ Shadow Runtime: Simulação com alertas ou truncamento ({total_mods} módulos).{Fore.RESET}")
-    init_path = LiteXLEngine.get_init_lua_path()
-    init_file = LiteXLEngine.get_init_lua_path()
-    err_file = LiteXLEngine.get_error_txt_path()
-    click.echo(f"\nAlvo: {init_file}\n")
-    
-    diag_res = LiteXLEngine.diagnose_init_file(init_file)
-    
-    if isinstance(diag_res, dict):
-        for item in diag_res.get("items", diag_res.get("checks", [])):
-            click.echo(f"  • {item}")
-        if diag_res.get("errors"):
-            for err in diag_res["errors"]:
-                click.echo(f"  {Fore.RED}✖ {err}{Fore.RESET}")
-    elif isinstance(diag_res, list):
-        for item in diag_res:
-            click.echo(f"  • {item}")
-    
-    click.echo(f"\n{Fore.GREEN}✔ CHECAGENS DE INTEGRIDADE CONCLUÍDAS.{Fore.RESET}\n")
+        target_dir = LiteXLEngine.get_user_dir()
 
+    init_file = target_dir / "init.lua"
+    err_file = target_dir / "error.txt"
+
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🩺 DIAGNÓSTICO FORENSE DO INIT.LUA ({mode.upper()}){Style.RESET_ALL}")
+    click.echo(f"  {Fore.WHITE}Alvo:{Fore.RESET} {init_file}\n")
+
+    if err_file.exists() and err_file.stat().st_size > 0:
+        click.echo(f"{Fore.RED}{Style.BRIGHT}⚠ CRASH REPORT DETECTADO (error.txt):{Style.RESET_ALL}")
+        click.echo(err_file.read_text(encoding="utf-8", errors="replace"))
+
+    report = LiteXLEngine.diagnose_init_file(init_file)
+    if not report["exists"]:
+        click.echo(f"{Fore.YELLOW}⚠ Arquivo init.lua não encontrado em {target_dir}.{Fore.RESET}")
+        return
+
+    if report["errors"]:
+        click.echo(f"{Fore.RED}{Style.BRIGHT}✖ ERROS CRÍTICOS DETECTADOS ({len(report['errors'])}):{Style.RESET_ALL}")
+        for err in report["errors"]:
+            click.echo(f"  {Fore.RED}• {err}{Fore.RESET}")
+    else:
+        click.echo(f"{Fore.GREEN}✔ Sintaxe, escapes e módulos 100% validados!{Fore.RESET}")
 
 def parse_traceback(traceback_text, message=""):
     """Extrai informações estruturadas do traceback OU da mensagem."""
@@ -339,228 +382,31 @@ def render_snippet(file_path, line_no):
         pass
 
 
-@lite_xl_group.command(
-    "log",
-    help=(
-        "Exibe os logs da sessão (padrão: sessão ativa | use --err para"
-        " diagnóstico forense)."
-    ),
-)
-@click.option(
-    "--all-time",
-    "-at",
-    is_flag=True,
-    help="Exibe todo o histórico gravado no disco.",
-)
-@click.option(
-    "--err",
-    "-e",
-    is_flag=True,
-    help="Diagnóstico forense: Quando, Onde, Quem, Por Quê.",
-)
-@click.option(
-    "--watch",
-    "-w",
-    is_flag=True,
-    help="Modo Sentinela: segue os logs ao vivo (tail -f).",
-)
-@click.option("--clear", "-c", is_flag=True, help="Limpa o log de sessão.")
-def cmd_log(all_time, err, watch, clear):
-    log_file = LiteXLEngine.get_session_log_path()
-    err_file = LiteXLEngine.get_error_txt_path()
-
-    if clear:
-        if log_file.exists():
-            log_file.write_text("", encoding="utf-8")
-        if err_file.exists():
-            err_file.unlink()
-        click.echo(f"{Fore.GREEN}✔ Logs de sessão limpos.{Fore.RESET}")
-        return
-
-    if err_file.exists():
-        click.echo(
-            f"\n{Fore.RED}{Style.BRIGHT}⚠ [LITE XL CRASH LOG -"
-            f" error.txt]{Style.RESET_ALL}"
-        )
-        click.echo(err_file.read_text(encoding="utf-8", errors="replace"))
-
-    if not log_file.exists():
-        click.echo(
-            f"{Fore.YELLOW}Arquivo session_log.txt ainda não criado.{Fore.RESET}"
-        )
-        return
-
-    raw_content = log_file.read_text(encoding="utf-8", errors="replace")
-    if not raw_content.strip():
-        click.echo(
-            f"{Fore.YELLOW}Arquivo session_log.txt está vazio.{Fore.RESET}"
-        )
-        return
-
-    if all_time:
-        content = raw_content
-        filter_info = "Histórico Completo"
+@lite_xl_group.command("log", help="Exibe os logs de sessão (Production, Sandbox ou Test).")
+@click.option("--mode", "-m", type=click.Choice(["production", "sandbox", "test"]), default="production", help="Ambiente do log.")
+@click.option("--lines", "-n", default=30, help="Número de linhas a exibir.")
+def cmd_log(mode, lines):
+    if mode == "sandbox":
+        target_dir = LiteXLEngine.get_sandbox_dir()
+    elif mode == "test":
+        target_dir = LiteXLEngine.get_user_dir() / ".doxoade" / "test_deploy"
     else:
-        sessions = raw_content.split("=== LITE XL SESSION INICIADA:")
-        if len(sessions) > 1:
-            content = "=== LITE XL SESSION INICIADA:" + sessions[-1]
-            filter_info = "Sessão Ativa"
-        else:
-            content = raw_content
-            filter_info = "Última Sessão"
+        target_dir = LiteXLEngine.get_user_dir()
 
-    if err:
-        filter_info = f"Diagnóstico Forense ({filter_info})"
+    log_path = target_dir / "session_log.txt"
+    err_path = target_dir / "error.txt"
 
-    click.echo(
-        f"\n{Fore.CYAN}{Style.BRIGHT}📜 [LITE XL SESSION LOG - {filter_info}] ->"
-        f" {log_file}{Style.RESET_ALL}\n"
-    )
+    if err_path.exists() and err_path.stat().st_size > 0:
+        click.echo(f"\n{Fore.RED}{Style.BRIGHT}⚠ [CRASH LOG ({mode.upper()}) - error.txt]{Style.RESET_ALL}")
+        click.echo(err_path.read_text(encoding="utf-8", errors="replace"))
 
-    if err:
-        error_block_pattern = re.compile(
-            r"\[(\d{2}:\d{2}:\d{2})\]\s*\[\s*\n(STACK"
-            r" TRACEBACK:.*?\n)\]\s*([^\r\n]+)",
-            re.DOTALL | re.IGNORECASE,
-        )
-
-        seen_errors = set()
-        error_count = 0
-
-        # 1. Erros Estruturados com Stack Traceback
-        for match in error_block_pattern.finditer(content):
-            ts = match.group(1)
-            traceback_raw = match.group(2)
-            message = match.group(3).strip()
-
-            dedup_key = f"{ts}:{message}"
-            if dedup_key in seen_errors:
-                continue
-            seen_errors.add(dedup_key)
-
-            error_count += 1
-            info = parse_traceback(traceback_raw, message)
-
-            click.echo(f"{Fore.RED}{Style.BRIGHT}{'─' * 70}{Style.RESET_ALL}")
-            click.echo(
-                f"{Fore.RED}{Style.BRIGHT}  ❌ ERRO #{error_count}{Style.RESET_ALL}"
-            )
-            click.echo(f"{Fore.YELLOW}  📅 Quando :{Fore.RESET} {ts}")
-            click.echo(
-                f"{Fore.YELLOW}  📍 Onde   :{Fore.RESET}"
-                f" {info['file'] or 'desconhecido'}:{info['line']}"
-            )
-            click.echo(f"{Fore.YELLOW}  👤 Quem   :{Fore.RESET} {info['name']}")
-            click.echo(
-                f"{Fore.YELLOW}  💬 Por Quê:{Fore.RESET}"
-                f" {Fore.RED}{message}{Fore.RESET}"
-            )
-
-            if info["frames"]:
-                click.echo(f"\n  {Fore.CYAN}Stack Traceback:{Fore.RESET}")
-                for frame in info["frames"]:
-                    click.echo(f"    {Fore.WHITE}{frame}{Fore.RESET}")
-
-            if info["file"]:
-                click.echo()
-                render_snippet(info["file"], info["line"])
-
-            click.echo(
-                f"{Fore.RED}{Style.BRIGHT}{'─' * 70}{Style.RESET_ALL}\n"
-            )
-
-        # 2. Erros inline [ERROR] residuais
-        for line in content.splitlines():
-            if "[ERROR]" in line and "STACK TRACEBACK" not in line:
-                ts_match = re.match(r"^\[(\d{2}:\d{2}:\d{2})\]", line)
-                ts = ts_match.group(1) if ts_match else "??"
-                msg = (
-                    line.split("[ERROR]", 1)[-1].strip()
-                    if "[ERROR]" in line
-                    else line
-                )
-
-                dedup_key = f"{ts}:{msg}"
-                if dedup_key in seen_errors:
-                    continue
-                seen_errors.add(dedup_key)
-
-                error_count += 1
-                info = parse_traceback("", msg)
-
-                click.echo(
-                    f"{Fore.RED}{Style.BRIGHT}{'─' * 70}{Style.RESET_ALL}"
-                )
-                click.echo(
-                    f"{Fore.RED}{Style.BRIGHT}  ❌ ERRO INLINE"
-                    f" #{error_count}{Style.RESET_ALL}"
-                )
-                click.echo(f"{Fore.YELLOW}  📅 Quando :{Fore.RESET} {ts}")
-                click.echo(
-                    f"{Fore.YELLOW}  📍 Onde   :{Fore.RESET}"
-                    f" {info['file'] or 'inline'}:{info['line']}"
-                )
-                click.echo(
-                    f"{Fore.YELLOW}  💬 Mensagem:{Fore.RESET}"
-                    f" {Fore.RED}{msg}{Fore.RESET}"
-                )
-                if info["file"]:
-                    click.echo()
-                    render_snippet(info["file"], info["line"])
-                click.echo(
-                    f"{Fore.RED}{Style.BRIGHT}{'─' * 70}{Style.RESET_ALL}\n"
-                )
-
-        if error_count == 0:
-            click.echo(
-                f"{Fore.GREEN}✔ Nenhum erro capturado nesta sessão.{Fore.RESET}\n"
-            )
-        else:
-            click.echo(
-                f"{Fore.YELLOW}📊 Total de erros únicos identificados:"
-                f" {error_count}{Fore.RESET}\n"
-            )
-
+    if log_path.exists():
+        click.echo(f"\n{Fore.CYAN}📜 [SESSION LOG ({mode.upper()})] -> {log_path}{Fore.RESET}\n")
+        all_lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        for line in all_lines[-lines:]:
+            click.echo(f"  {line}")
     else:
-        # Modo Normal com supressão de duplicatas consecutivas
-        last_line = None
-        for line in content.splitlines():
-            if line == last_line:
-                continue
-            last_line = line
-
-            if "[ERROR]" in line or "Error:" in line:
-                click.echo(f"{Fore.RED}{Style.BRIGHT}{line}{Style.RESET_ALL}")
-            elif any(
-                k in line.upper()
-                for k in ["STACK TRACEBACK", "IN FUNCTION", "IN MAIN CHUNK"]
-            ):
-                click.echo(f"{Fore.RED}{line}{Fore.RESET}")
-            elif "[INFO]" in line or "[LOG]" in line:
-                click.echo(f"{Fore.GREEN}{line}{Fore.RESET}")
-            elif "[QUIET]" in line:
-                click.echo(f"{Fore.WHITE}{Style.DIM}{line}{Style.RESET_ALL}")
-            elif "[PRINT]" in line:
-                click.echo(f"{Fore.YELLOW}{line}{Fore.RESET}")
-            else:
-                click.echo(f"{Fore.WHITE}{line}{Fore.RESET}")
-
-    if watch:
-        click.echo(
-            f"\n{Fore.CYAN}👀 Modo Sentinela ativo. Pressione Ctrl+C para"
-            f" sair...{Fore.RESET}\n"
-        )
-        try:
-            with open(log_file, "r", encoding="utf-8", errors="replace") as f:
-                f.seek(0, os.SEEK_END)
-                while True:
-                    line = f.readline()
-                    if line:
-                        click.echo(line.rstrip())
-                    else:
-                        time.sleep(0.2)
-        except KeyboardInterrupt:
-            click.echo(f"\n{Fore.YELLOW}Modo Sentinela encerrado.{Fore.RESET}")
+        click.echo(f"{Fore.YELLOW}⚠ Nenhum session_log.txt encontrado em {target_dir}.{Fore.RESET}")
 
 
 @lite_xl_group.command("setup", help="Monta os templates modulares e grava no init.lua.")

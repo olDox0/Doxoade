@@ -24,6 +24,7 @@ este é o novo protocolo simplificado e sucinto de desenvolveimento do doxoade. 
     3.1.1. se existe uma lib padrão que já cumpri aquela tarefa, use-a. só não use se o escopo ou regras não permir.
     3.1.2. dependendo do objetivo vai ser preciso criar camadas de orquestão para inter-operabilidade.
     3.1.3. num onjetivo complexo, vai ser preciso desenvolver sistemas complexos ou delegar sistemas complexos
+    3.1.4. sistema de diagnostico é fundamental em qualquer sistema, ele deve responder sobre: onde?, o que?, quem?, quando?, quanto? e porque? estas perguntas são essencias em diagnostico.
 4. Situações reais
   4.1. Caso o prazo não permitir o sistema estiver estavel o suficiente, pode-se não seguir o protocolo
     4.1.1. se o sistema funciona naquele contexto limitado, pode-se cosidera-lo pronto temporariamente até a proxima revisão.
