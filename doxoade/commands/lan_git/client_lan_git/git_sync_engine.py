@@ -23,6 +23,34 @@ class GitSyncEngine:
     REMOTE_NAME = "lan-peer"
 
     @classmethod
+    def verify_sync_integrity(cls, repo_path: str, remote_manifest: GitManifest) -> bool:
+        """Audita se a árvore do repositório local é 100% idêntica à do Host remoto."""
+        ok, local_tree = cls._run_git_forensic(repo_path, ["rev-parse", "HEAD^{tree}"])
+        if not ok or not local_tree:
+            click.secho("  ⚠ [AUDIT] Não foi possível obter o Tree Hash local.", fg="yellow")
+            return False
+
+        local_tree_hash = local_tree.strip()
+        remote_tree_hash = remote_manifest.tree_hash.strip()
+
+        click.secho("\n--- [AUDITORIA CRIPTOGRÁFICA DE SINCRONIZAÇÃO] ---", fg="cyan", bold=True)
+        click.echo(f"  Host Tree Hash   : {remote_tree_hash or 'N/A'}")
+        click.echo(f"  Local Tree Hash  : {local_tree_hash}")
+
+        if remote_tree_hash and local_tree_hash == remote_tree_hash:
+            click.secho("  ✔ [INTEGRIDADE CONFIRMADA] O cliente está 100% espelhado com o Host.", fg="green", bold=True)
+            click.secho("--------------------------------------------------\n", fg="cyan")
+            return True
+        elif not remote_tree_hash:
+            click.secho("  ✔ [PULL OK] Sincronização concluída (Host sem hash de auditoria).", fg="green")
+            click.secho("--------------------------------------------------\n", fg="cyan")
+            return True
+        else:
+            click.secho("  ✖ [DIVERGÊNCIA DETECTADA] Os arquivos entre Host e Cliente não coincidem.", fg="red", bold=True)
+            click.secho("--------------------------------------------------\n", fg="cyan")
+            return False
+
+    @classmethod
     def _run_git_forensic(cls, repo_path: str, args: list) -> Tuple[bool, str, int, str]:
         git_bin = shutil.which("git")
         if not git_bin:
