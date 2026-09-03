@@ -2,7 +2,7 @@
 # doxoade/commands/lite_xl_systems/cmd_typhon_deploy.py
 """
 Comandos CLI para o Typhon Deploy Engine v2.0.
-Separação clara entre PRODUCTION, SANDBOX e TEST modes.
+Separação clara entre PRODUCTION, SANDBOX e TEST modes com Launch Automático.
 """
 import click
 from pathlib import Path
@@ -20,20 +20,17 @@ def cmd_status(mode):
     """Exibe status completo dos modos de deploy."""
     TyphonDeployEngine.print_status(mode)
 
-@deploy_group.command("production", help="Deploy em PRODUÇÃO (com backup automático).")
+@deploy_group.command("production", help="Deploy em PRODUÇÃO (com backup e launch automático).")
 @click.option("--force", "-f", is_flag=True, help="Força deploy mesmo com warnings.")
-@click.option("--launch", "-l", is_flag=True, help="Lança o Lite XL após deploy.")
+@click.option("--launch/--no-launch", "-l/-nl", default=True, help="Lança o Lite XL após deploy (Padrão: True).")
 def cmd_deploy_production(force, launch):
-    """Deploy seguro em produção com backup e rollback automático."""
+    """Deploy seguro em produção com backup e lançamento automático."""
     print(f"\n{Fore.GREEN}{Style.BRIGHT}🟢 DEPLOY PRODUCTION{Style.RESET_ALL}\n")
-    
     result = TyphonDeployEngine.deploy("production", force=force)
-    
     if result["success"]:
         print(f"\n{Fore.GREEN}✔ Deploy de produção concluído com sucesso!{Fore.RESET}")
         if result["backup"]:
             print(f"{Fore.CYAN}💾 Backup de segurança: {result['backup'].name}{Fore.RESET}")
-        
         if launch:
             print()
             TyphonDeployEngine.launch("production", exorcise=False)
@@ -42,39 +39,34 @@ def cmd_deploy_production(force, launch):
         if result["backup"]:
             print(f"{Fore.YELLOW}🔄 Rollback automático executado.{Fore.RESET}")
 
-@deploy_group.command("sandbox", help="Deploy em SANDBOX (isolamento total).")
-@click.option("--launch", "-l", is_flag=True, help="Lança o Lite XL após deploy.")
-@click.option("--no-exorcise", is_flag=True, help="Não mata instâncias antigas.")
-def cmd_deploy_sandbox(launch, no_exorcise):
-    """Deploy isolado no sandbox com exorcismo de processos."""
+@deploy_group.command("sandbox", help="Deploy em SANDBOX (isolamento total + launch automático).")
+@click.option("--launch/--no-launch", "-l/-nl", default=True, help="Lança o Lite XL após deploy (Padrão: True).")
+@click.option("--exorcise", is_flag=True, default=False, help="Mata instâncias antigas de sandbox.")
+def cmd_deploy_sandbox(launch, exorcise):
+    """Deploy isolado no sandbox sem interferir na produção."""
     print(f"\n{Fore.BLUE}{Style.BRIGHT}🔵 DEPLOY SANDBOX{Style.RESET_ALL}\n")
-    
     result = TyphonDeployEngine.deploy("sandbox")
-    
     if result["success"]:
         print(f"\n{Fore.GREEN}✔ Deploy de sandbox concluído!{Fore.RESET}")
         print(f"{Fore.LIGHTBLACK_EX}   Diretório isolado: {result['init'].parent}{Fore.RESET}")
-        
         if launch:
             print()
-            TyphonDeployEngine.launch("sandbox", exorcise=not no_exorcise)
+            TyphonDeployEngine.launch("sandbox", exorcise=exorcise)
     else:
         print(f"\n{Fore.RED}✖ Deploy falhou: {result['error']}{Fore.RESET}")
 
-@deploy_group.command("test", help="Deploy em TEST (chaos injection + forense).")
-@click.option("--launch", "-l", is_flag=True, help="Lança o Lite XL após deploy.")
-def cmd_deploy_test(launch):
-    """Deploy de teste com injeção de caos e diagnóstico forense."""
+@deploy_group.command("test", help="Deploy em TEST (chaos injection + launch automático).")
+@click.option("--launch/--no-launch", "-l/-nl", default=True, help="Lança o Lite XL após deploy (Padrão: True).")
+@click.option("--exorcise", is_flag=True, default=False, help="Mata instâncias antigas de teste.")
+def cmd_deploy_test(launch, exorcise):
+    """Deploy de teste com telemetria forense e launch automático."""
     print(f"\n{Fore.YELLOW}{Style.BRIGHT}🟡 DEPLOY TEST{Style.RESET_ALL}\n")
-    
     result = TyphonDeployEngine.deploy("test")
-    
     if result["success"]:
         print(f"\n{Fore.GREEN}✔ Deploy de teste concluído!{Fore.RESET}")
-        
         if launch:
             print()
-            TyphonDeployEngine.launch("test", exorcise=True)
+            TyphonDeployEngine.launch("test", exorcise=exorcise)
     else:
         print(f"\n{Fore.RED}✖ Deploy falhou: {result['error']}{Fore.RESET}")
 

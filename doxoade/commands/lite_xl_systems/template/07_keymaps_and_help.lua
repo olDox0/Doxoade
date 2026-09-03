@@ -16,6 +16,7 @@ keymap.add {
   ["ctrl+alt+shift+f"] = "doxoade:global-project-search",
   ["ctrl+alt+shift+d"] = "root:move-following-tabs-to-opposite-panel",
   ["ctrl+alt+d"]       = "root:move-tab-to-opposite-panel",
+  ["ctrl+alt+x"]       = "root:close-following-tabs",
   ["ctrl+alt+i"]       = "doxoade:toggle-indent-guides",
   ["ctrl+o"]           = "doxoade:open-file",
   ["ctrl+alt+shift+k"] = "doxoade:diagnose-live",

@@ -136,7 +136,13 @@ local function build_menu_items(paths)
         open_in_file_manager(paths.raw)
         core.log("Explorer aberto em: " .. paths.dir)
       end
-    }
+    },
+    {
+      text = "🧹 Close Tabs to Right",
+      action = function()
+        command.perform("root:close-following-tabs")
+      end
+    },
   }
 end
 

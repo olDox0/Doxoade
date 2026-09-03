@@ -631,64 +631,47 @@ def cmd_rollback():
         click.echo(f"  {Fore.RED}✖ {msg}{Fore.RESET}\n")
 
 @lite_xl_group.command("debug", help="🩺 Depurador e monitor de telemetria live do Lite XL.")
-@click.option("--live", "-l", is_flag=True, default=True, help="Modo streaming contínuo em tempo real.")
-@click.option("--errors-only", "-e", is_flag=True, help="Filtra apenas erros e tracebacks.")
-def cmd_debug(live, errors_only):
-    """Monitor de depuração ao vivo com formatação de tracebacks e eventos."""
-    log_path = LiteXLEngine.get_session_log_path()
-    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🩺 DOXOADE LITE XL LIVE DEBUGGER{Style.RESET_ALL}")
-
-    shadow_quick = LiteXLEngine.run_shadow_audit()
-    if shadow_quick.get("status") == "FAIL":
-        click.echo(f"  {Fore.RED}⚠ ATENÇÃO:{Fore.RESET} {shadow_quick.get('failed')} módulo(s) com erros de comando em background!")
+@click.option("--mode", "-m", type=click.Choice(["production", "sandbox", "test"]), default="production", help="Ambiente alvo.")
+@click.option("-l", "--live", is_flag=True, help="Modo streaming contínuo em tempo real.")
+@click.option("-e", "--errors-only", is_flag=True, help="Filtra apenas erros e tracebacks.")
+def cmd_debug(mode, live, errors_only):
+    if mode == "sandbox":
+        target_dir = LiteXLEngine.get_sandbox_dir()
+    elif mode == "test":
+        target_dir = LiteXLEngine.get_user_dir() / ".doxoade" / "test_deploy"
     else:
-        click.echo(f"  {Fore.GREEN}✔ Submarino Semântico:{Fore.RESET} Todos os módulos saudáveis na simulação.")
+        target_dir = LiteXLEngine.get_user_dir()
 
-    click.echo(f"  {Fore.WHITE}Alvo:{Fore.RESET} {log_path}")
-    click.echo(f"  {Fore.LIGHTBLACK_EX}Pressione Ctrl+C para encerrar o monitoramento.{Fore.RESET}\n")
+    log_path = target_dir / "session_log.txt"
+    err_path = target_dir / "error.txt"
+
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🩺 DOXOADE LITE XL LIVE DEBUGGER ({mode.upper()}){Style.RESET_ALL}")
+    click.echo(f"  {Fore.WHITE}Alvo:{Fore.RESET} {log_path}\n")
 
     if not log_path.exists():
-        click.echo(f"  {Fore.YELLOW}⚠ Nenhum log de sessão ativo no momento.{Fore.RESET}\n")
+        click.echo(f"{Fore.YELLOW}⚠ Arquivo session_log.txt não encontrado em {target_dir}.{Fore.RESET}")
         return
 
-    def format_log_line(line: str) -> str:
-        if "[ERROR]" in line:
-            return f"  {Fore.RED}{Style.BRIGHT}✖ {line}{Style.RESET_ALL}"
-        elif "[WARN]" in line:
-            return f"  {Fore.YELLOW}⚠ {line}{Fore.RESET}"
-        elif "[INFO]" in line:
-            return f"  {Fore.GREEN}ℹ {line}{Fore.RESET}"
-        elif "[TRACE]" in line or line.strip().startswith("stack traceback:"):
-            return f"    {Fore.LIGHTBLACK_EX}{line}{Fore.RESET}"
-        return f"  {Fore.WHITE}{line}{Fore.RESET}"
+    # Exibe o conteúdo atual
+    content = log_path.read_text(encoding="utf-8", errors="replace")
+    for line in content.splitlines()[-20:]:
+        if not errors_only or "[ERROR]" in line or "GHOST" in line:
+            click.echo(f"  {line}")
 
-    # Leitura inicial do histórico recente
-    try:
-        content = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-        recent = content[-20:] if len(content) > 20 else content
-        for l in recent:
-            if not errors_only or ("[ERROR]" in l or "[TRACE]" in l):
-                click.echo(format_log_line(l))
-    except Exception as e:
-        click.echo(f"  {Fore.RED}Erro ao ler log: {e}{Fore.RESET}")
-
-    if not live:
-        return
-
-    # Streaming em tempo real (Tail -f inteligente)
-    try:
-        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
-            f.seek(0, os.SEEK_END)
-            while True:
-                line = f.readline()
-                if line:
-                    line_clean = line.rstrip("\r\n")
-                    if not errors_only or ("[ERROR]" in line_clean or "[TRACE]" in line_clean):
-                        click.echo(format_log_line(line_clean))
-                else:
-                    time.sleep(0.1)
-    except KeyboardInterrupt:
-        click.echo(f"\n{Fore.YELLOW}Monitoramento de depuração encerrado.{Fore.RESET}\n")
+    if live:
+        click.echo(f"\n{Fore.CYAN}👀 Modo Live streaming ativo. Pressione Ctrl+C para encerrar.{Fore.RESET}\n")
+        try:
+            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                f.seek(0, os.SEEK_END)
+                while True:
+                    line = f.readline()
+                    if line:
+                        if not errors_only or "[ERROR]" in line or "GHOST" in line:
+                            click.echo(f"  {line.rstrip()}")
+                    else:
+                        time.sleep(0.2)
+        except KeyboardInterrupt:
+            click.echo(f"\n{Fore.YELLOW}Monitoramento de depuração encerrado.{Fore.RESET}")
 
 
 # ______ API GUARD SYS ______
@@ -882,44 +865,157 @@ def cmd_test_sandbox(target_file):
             click.echo(f"\n{Fore.RED}{Style.BRIGHT}🚨 [SANDBOX ERROR.TXT DETECTADO]:{Style.RESET_ALL}")
             click.echo(f"{Fore.RED}{err_content}{Fore.RESET}\n")
 
-@lite_xl_group.command("profile", help="⏱️ Análise forense de performance e peso de funções por arquivo.")
-@click.option("--runs", "-r", default=5, type=int, help="Número de iterações para benchmark (padrão: 5).")
-@click.option("--file", "-f", "target_file", default=None, type=str, help="Filtra a análise para um arquivo específico (ex: 00_01, 11).")
-@click.option("--tree", "-t", is_flag=True, default=True, help="Exibe a decomposição em árvore de funções por arquivo.")
-def cmd_profile(runs, target_file, tree):
-    """Diagnóstico hierárquico: peso de cada função dentro de cada arquivo."""
+@lite_xl_group.command("profile", help="⏱️ Análise forense de performance, peso de módulos e telemetria live.")
+@click.option("-l", "--live", is_flag=True, help="Exibe a telemetria em tempo real do editor em execução.")
+@click.option("-m", "--mode", type=click.Choice(["production", "sandbox", "test"]), default="production", help="Ambiente a monitorar (padrão: production).")
+@click.option("-w", "--watch", is_flag=True, help="Modo sentinela contínuo em tempo real.")
+@click.option("-r", "--runs", default=5, help="Número de iterações para benchmark estático (padrão: 5).")
+@click.option("-f", "--file", default=None, help="Filtra a análise para um arquivo específico.")
+def cmd_profile(live, mode, watch, runs, file):
+    """⏱️ Chronos Profiler — Análise estática de boot e telemetria dinâmica de produção."""
+    
+    # =========================================================================
+    # MODO 1: LIVE PROFILER INTERATIVO (Sessão de Captura com Encerramento por ENTER)
+    # =========================================================================
+    if live or watch:
+        import threading
+        
+        target_dir = LiteXLEngine.get_sandbox_dir() if mode == "sandbox" else (
+            LiteXLEngine.get_user_dir() / ".doxoade" / "test_deploy" if mode == "test" else LiteXLEngine.get_user_dir()
+        )
+        
+        click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}⚡ CHRONOS LIVE PROFILER — SESSÃO DE CAPTURA EM TEMPO REAL ({mode.upper()}){Style.RESET_ALL}")
+        click.echo(f"  {Fore.WHITE}Alvo:{Fore.RESET} {target_dir}")
+        click.echo(f"  {Fore.GREEN}👉 Use o Lite XL normalmente (digite, navegue, abra arquivos).{Fore.RESET}")
+        click.echo(f"  {Fore.YELLOW}🛑 Pressione [ENTER] neste terminal a qualquer momento para encerrar e gerar o laudo.{Fore.RESET}\n")
+        click.echo(f"{Fore.LIGHTBLACK_EX}{'─' * 70}{Fore.RESET}")
+
+        stop_event = threading.Event()
+
+        def wait_for_enter():
+            try:
+                input()
+            except Exception:
+                pass
+            stop_event.set()
+
+        # Thread não-bloqueante para capturar o [ENTER] do usuário
+        listener_thread = threading.Thread(target=wait_for_enter, daemon=True)
+        listener_thread.start()
+
+        start_time = time.time()
+        fps_samples = []
+        seen_spikes = set()
+        all_spikes = []
+        last_cmds_snapshot = {}
+
+        try:
+            while not stop_event.is_set():
+                data = ProfilerEngine.get_live_telemetry(mode=mode)
+                if data:
+                    fps = data["average_fps"]
+                    fps_samples.append(fps)
+                    gc_mem = data["gc_memory_kb"]
+                    last_cmds_snapshot = data.get("command_frequencies", {})
+
+                    # Notifica novos spikes detectados em tempo real (sem limpar a tela)
+                    for sp in data.get("frame_spikes", []):
+                        sp_key = f"{sp['timestamp']}:{sp['duration_ms']}:{sp['active_file']}"
+                        if sp_key not in seen_spikes:
+                            seen_spikes.add(sp_key)
+                            all_spikes.append(sp)
+                            click.echo(
+                                f"  {Fore.RED}⚠️ [SPIKE DETECTADO]{Fore.RESET} {Fore.YELLOW}{sp['duration_ms']:5.2f} ms{Fore.RESET} "
+                                f"no buffer: {Fore.WHITE}{sp['active_file']}{Fore.RESET}"
+                            )
+
+                # Pulso de status a cada 2 segundos
+                elapsed_sec = int(time.time() - start_time)
+                current_fps = fps_samples[-1] if fps_samples else 60.0
+                fps_color = Fore.GREEN if current_fps >= 55.0 else (Fore.YELLOW if current_fps >= 30.0 else Fore.RED)
+                
+                # Exibe linha discreta de streaming
+                sys.stdout.write(f"\r  ⏱️ [{elapsed_sec:3d}s] FPS: {fps_color}{current_fps:4.1f}{Fore.RESET} | Spikes: {Fore.RED}{len(all_spikes)}{Fore.RESET} | Pressione [ENTER] para laudo final... ")
+                sys.stdout.flush()
+
+                time.sleep(1.0)
+        except KeyboardInterrupt:
+            stop_event.set()
+
+        sys.stdout.write("\r" + " " * 80 + "\r") # Limpa a linha de pulso
+        session_duration = round(time.time() - start_time, 1)
+
+        # =====================================================================
+        # LAUDO CONSOLIDADO FINAL DA SESSÃO
+        # =====================================================================
+        final_data = ProfilerEngine.get_live_telemetry(mode=mode) or {}
+        avg_fps = round(sum(fps_samples) / max(1, len(fps_samples)), 1)
+        min_fps = round(min(fps_samples), 1) if fps_samples else 60.0
+        final_gc = final_data.get("gc_memory_kb", 0.0)
+
+        click.echo(f"\n{'=' * 70}")
+        click.echo(f"{Fore.GREEN}{Style.BRIGHT}🏆 LAUDO CONSOLIDADO DA SESSÃO DE PERFORMANCE (CHRONOS){Style.RESET_ALL}")
+        click.echo(f"{'=' * 70}")
+        click.echo(f"  • {Fore.WHITE}Duração da Sessão   :{Fore.RESET} {session_duration} segundos")
+        click.echo(f"  • {Fore.WHITE}Taxa Média de Quadros:{Fore.RESET} {Fore.GREEN if avg_fps >= 55 else Fore.RED}{avg_fps:4.1f} FPS{Fore.RESET} (Mínima: {Fore.RED}{min_fps:4.1f} FPS{Fore.RESET})")
+        click.echo(f"  • {Fore.WHITE}Memória do GC       :{Fore.RESET} {Fore.CYAN}{final_gc:6.1f} KB{Fore.RESET} ({final_gc / 1024.0:4.2f} MB)")
+        click.echo(f"  • {Fore.WHITE}Total de Frame Spikes:{Fore.RESET} {Fore.RED}{len(all_spikes)} queda(s) (>16.6ms){Fore.RESET}")
+
+        # Ranking de Comandos Disparados na Sessão
+        click.echo(f"\n  {Fore.YELLOW}{Style.BRIGHT}📊 COMANDOS MAIS DISPARADOS NA SESSÃO (Frequência):{Style.RESET_ALL}")
+        top_cmds = final_data.get("top_commands", [])
+        if top_cmds:
+            for idx, (cmd_name, count) in enumerate(top_cmds[:6], start=1):
+                click.echo(f"     {idx}. {Fore.WHITE}{cmd_name:<32}{Fore.RESET} {Fore.CYAN}{count:>4}x{Fore.RESET}")
+        else:
+            click.echo(f"     {Fore.LIGHTBLACK_EX}(Nenhum comando registrado){Fore.RESET}")
+
+        # Análise dos Buffers que mais travaram
+        click.echo(f"\n  {Fore.YELLOW}{Style.BRIGHT}🔍 DIAGNÓSTICO ACIONÁVEL DO RUNTIME:{Style.RESET_ALL}")
+        if all_spikes:
+            # Agrupa spikes por arquivo
+            spike_counts = {}
+            for sp in all_spikes:
+                fn = sp["active_file"]
+                spike_counts[fn] = spike_counts.get(fn, 0) + 1
+            worst_buffer = max(spike_counts.items(), key=lambda x: x[1])[0]
+            click.echo(f"    • {Fore.RED}Gargalo Principal:{Fore.RESET} O buffer {Fore.YELLOW}'{worst_buffer}'{Fore.RESET} concentrou {spike_counts[worst_buffer]} queda(s) de frame.")
+            click.echo(f"    • {Fore.WHITE}Ação Recomendada:{Fore.RESET} Aplicar memoization ou simplificação de regex no tokenizer deste arquivo.")
+        else:
+            click.echo(f"    • {Fore.GREEN}✔ Renderização lisa. O pipeline manteve 60 FPS estáveis durante toda a sessão.{Fore.RESET}")
+
+        click.echo(f"\n{'=' * 70}\n")
+        return
+
+    # =========================================================================
+    # MODO 2: SHADOW PROFILER (A Ponta do Iceberg: Benchmark Estático de Boot)
+    # =========================================================================
     user_dir = LiteXLEngine.get_user_dir()
-
     click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}⏱️ CHRONOS DEEP PROFILER — ANÁLISE HIERÁRQUICA DE FUNÇÕES{Style.RESET_ALL}")
-    click.echo(f"  {Fore.WHITE}Alvo:{Fore.RESET} {user_dir} | {Fore.WHITE}Amostras:{Fore.RESET} {Fore.GREEN}{runs} iterações{Fore.RESET}")
-    if target_file:
-        click.echo(f"  {Fore.YELLOW}Filtro Ativo:{Fore.RESET} Arquivos com '{target_file}'")
-    click.echo()
+    click.echo(f"  {Fore.WHITE}Alvo:{Fore.RESET} {user_dir} | {Fore.WHITE}Amostras:{Fore.RESET} {runs} iterações\n")
 
-    bench = ProfilerEngine.run_deep_benchmark(runs=runs, target_file=target_file)
-    total_time = bench["total_avg_ms"]
-    total_mem = sum(m["mem_kb"] for m in bench["modules"])
+    bench = ProfilerEngine.run_deep_benchmark(runs=runs, target_file=file)
+    if bench["runs"] == 0:
+        click.echo(f"{Fore.RED}✖ Não foi possível executar o benchmark de sombra.{Fore.RESET}")
+        return
 
-    # 1. Resumo Executivo
-    click.echo(f"  ┌─ {Style.BRIGHT}RESUMO GERAL DO BENCHMARK{Style.RESET_ALL}")
-    click.echo(f"  │  • Tempo Médio Total : {Fore.GREEN}{total_time:.2f} ms{Fore.RESET}")
-    click.echo(f"  │  • Memória Alocada   : {Fore.CYAN}{total_mem:.1f} KB{Fore.RESET}")
-    click.echo(f"  │  • Módulos Mapeados  : {len(bench['modules'])} módulos")
-    click.echo(f"  └{'─' * 65}\n")
+    click.echo(f"  ┌─ RESUMO GERAL DO BENCHMARK")
+    click.echo(f"  │  • Tempo Médio Total : {Fore.GREEN}{bench['total_avg_ms']:5.2f} ms{Fore.RESET}")
+    click.echo(f"  │  • Memória Alocada   : {Fore.CYAN}{bench.get('total_mem_kb', 0.0):5.1f} KB{Fore.RESET}")
+    click.echo(f"  │  • Módulos Mapeados  : {bench['modules_count']} módulos")
+    click.echo(f"  └─────────────────────────────────────────────────────────────────\n")
 
-    # 2. Decomposição em Árvore por Arquivo
-    click.echo(f"  {Style.BRIGHT}📦 PESO DAS FUNÇÕES POR ARQUIVO (DRILL-DOWN):{Style.RESET_ALL}\n")
+    click.echo(f"  {Fore.YELLOW}{Style.BRIGHT}📦 PESO DAS FUNÇÕES POR ARQUIVO (DRILL-DOWN):{Style.RESET_ALL}\n")
 
     for mod in bench["modules"]:
         m_name = mod["module"]
         m_time = mod["mean_ms"]
         m_pct = mod["percent"]
-        m_mem = mod["mem_kb"]
+        m_mem = mod.get("mem_kb", 0.0)
         funcs = mod.get("functions", [])
-        
-        # Identificador de padrão de custo
-        if mod["is_single_bottleneck"]:
-            pattern_badge = f"{Fore.RED}[GARGALO CONCENTRADO: {mod['dominant_feature']}]{Fore.RESET}"
+
+        if mod.get("is_single_bottleneck"):
+            pattern_badge = f"{Fore.RED}[GARGALO CONCENTRADO: {mod.get('dominant_feature', 'Lógica')}]{Fore.RESET}"
         elif len(funcs) > 5:
             pattern_badge = f"{Fore.YELLOW}[CUSTO DISTRIBUÍDO]{Fore.RESET}"
         else:
@@ -931,30 +1027,31 @@ def cmd_profile(runs, target_file, tree):
             for idx, fn in enumerate(funcs[:6], start=1):
                 is_last = (idx == min(len(funcs), 6))
                 branch = "└──" if is_last else "├──"
-                
-                f_name = fn["name"]
-                line_no = fn["line"]
-                calls = fn["calls"]
-                self_t = fn["self_time_ms"]
-                total_t = fn["total_time_ms"]
-                f_pct = fn["file_percent"]
 
-                # Destaca se for o grande vilão do arquivo
-                f_color = Fore.RED if f_pct >= 50.0 else (Fore.YELLOW if f_pct >= 25.0 else Fore.LIGHTBLACK_EX)
-                
-                click.echo(f"     {branch} {f_color}{f_name:<24}{Fore.RESET} (L{line_no:<4}) {total_t:>6.2f} ms ({f_pct:>4.1f}% do arq) | {calls:>3} calls | Self: {self_t:.2f}ms")
+                f_name = fn.get("name", "anon")
+                line_no = fn.get("line", 0)
+                calls = fn.get("calls", 1)
+                self_t = fn.get("self_time_ms", fn.get("self_ms", 0.0))
+                f_pct = fn.get("file_percent", fn.get("impact_pct", 0.0))
+
+                click.echo(
+                    f"     {branch} {Fore.WHITE}{f_name:<28}{Fore.RESET} "
+                    f"[L{line_no:<3}] {Fore.GREEN}{calls:>2}x{Fore.RESET} | "
+                    f"{Fore.YELLOW}{self_t:>5.2f} ms{Fore.RESET} ({f_pct:>4.1f}%)"
+                )
         else:
             click.echo(f"     └── {Fore.LIGHTBLACK_EX}(Nenhuma função interna rastreada — execução de bloco único){Fore.RESET}")
-
         click.echo()
 
-    # 3. Laudo Executivo
+    # Diagnóstico Acionável
     click.echo(f"  {Fore.YELLOW}{Style.BRIGHT}🔍 DIAGNÓSTICO ACIONÁVEL:{Style.RESET_ALL}")
     for mod in bench["modules"][:3]:
-        if mod["is_single_bottleneck"]:
-            click.echo(f"    • {Fore.WHITE}{mod['module']}:{Fore.RESET} Otimizar pontualmente a função {Fore.RED}'{mod['dominant_feature']}'{Fore.RESET} eliminará mais da metade do custo do arquivo.")
+        if mod.get("is_single_bottleneck"):
+            feat = mod.get("dominant_feature", "Lógica principal")
+            click.echo(f"    • {Fore.WHITE}{mod['module']}:{Fore.RESET} Otimizar pontualmente a função {Fore.RED}'{feat}'{Fore.RESET} eliminará mais da metade do custo do arquivo.")
         else:
-            click.echo(f"    • {Fore.WHITE}{mod['module']}:{Fore.RESET} Custo distribuído ({mod['cost_reason']}). Requer simplificação geral.")
+            reason = mod.get("cost_reason", mod.get("cost_factor", "Custo distribuído em rotinas de inicialização"))
+            click.echo(f"    • {Fore.WHITE}{mod['module']}:{Fore.RESET} Custo distribuído ({reason}). Requer simplificação geral.")
     click.echo()
 
 @lite_xl_group.command("preflight", help="🛡️ Valida o init.lua antes de instalar em produção.")

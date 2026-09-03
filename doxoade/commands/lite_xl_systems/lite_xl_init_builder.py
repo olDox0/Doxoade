@@ -23,9 +23,22 @@ except ImportError:
 from .lite_xl_paths import LiteXLPaths
 from .lite_xl_snapshots import LiteXLSnapshots
 
+def _clean_lua_source(source: str) -> str:
+    """Lexer atômico de passagem única (elimina comentários e strings literais)."""
+    lua_pattern = re.compile(
+        r"--\[(=*)\[.*?\]\1\]|"  
+        r"--[^\r\n]*|"           
+        r"\[(=*)\[.*?\]\2\]|"    
+        r'"(?:\\.|[^"\\])*"|'   
+        r"'(?:\\.|[^'\\])*'",    
+        re.DOTALL,
+    )
+    return lua_pattern.sub(" ", source)
+
 class LiteXLInitBuilder:
     """🔨 Hefesto — Geração e validação estática do init.lua (soberano e sandbox)."""
-
+    
+    _clean_lua_source = staticmethod(_clean_lua_source)
     _LUA_NOISE = re.compile(
         r"--\[(=*)\[.*?\]\1\]|"  # 1. Comentário de bloco
         r"--[^\r\n]*|"           # 2. Comentário de linha

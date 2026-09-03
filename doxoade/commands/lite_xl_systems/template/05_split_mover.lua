@@ -30,6 +30,35 @@ local function get_target_split_node(node)
 end
 
 command.add("core.docview", {
+
+  ["root:close-following-tabs"] = function()
+    local node = core.root_view:get_active_node()
+    local view = core.active_view
+    if not node or not view or not view.doc or node.locked then return end
+    
+    local cur_idx = node:get_view_idx(view)
+    if not cur_idx or cur_idx >= #node.views then return end
+
+    local closed_count = 0
+    -- Itera de trás para frente para evitar problemas com reindexação do array
+    for i = #node.views, cur_idx + 1, -1 do
+      local target_view = node.views[i]
+      if target_view then
+        if node.close_view then
+          pcall(node.close_view, node, core.root_view.root_node, target_view)
+        else
+          table.remove(node.views, i)
+        end
+        closed_count = closed_count + 1
+      end
+    end
+
+    core.redraw = true
+    if core.log and closed_count > 0 then
+      core.log(string.format("🧹 %d aba(s) à direita fechada(s).", closed_count))
+    end
+  end,
+  
   -- Move apenas a aba ativa atual (Ctrl + Alt + D)
   ["root:move-tab-to-opposite-panel"] = function()
     local node = core.root_view:get_active_node()

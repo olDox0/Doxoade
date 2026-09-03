@@ -1,16 +1,25 @@
 -- doxoade/commands/lite_xl_systems/template/01_ipc_dispatcher.lua
--- =============================================================================
--- 01. SINGLE INSTANCE DISPATCHER & NATIVE SOVEREIGN SESSION ENGINE
--- =============================================================================
+--[[
+  🪽 DOXOADE IPC DISPATCHER & SOVEREIGN SESSION MANAGER (V2.0)
+  - Persistência e Restauração Inteligente do Último Projeto Ativo.
+  - Detecção de Inicialização via Barra de Tarefas (#ARGS == 0).
+  - Fila IPC e Restauração Precisa de Splits, Abas e Cursores.
+]]
 local core = require "core"
 local DocView = require "core.docview"
 
-local ipc_queue_file = USERDIR .. PATHSEP .. ".ipc_queue"
-local ipc_processing_file = USERDIR .. PATHSEP .. ".ipc_processing"
-local session_file = USERDIR .. PATHSEP .. ".doxoade" .. PATHSEP .. "sovereign_session.lua"
+local user_dir = USERDIR or "."
+local sep = PATHSEP or "/"
+local doxoade_dir = user_dir .. sep .. ".doxoade"
+pcall(function() system.mkdir(doxoade_dir) end)
+
+local ipc_queue_file = user_dir .. sep .. ".ipc_queue"
+local ipc_processing_file = user_dir .. sep .. ".ipc_processing"
+local session_file = doxoade_dir .. sep .. "sovereign_session.lua"
+local last_proj_file = doxoade_dir .. sep .. "last_project.txt"
 
 -- =============================================================================
--- 💾 MOTOR DE SERIALIZAÇÃO DE SESSÃO (ABAS, SPLITS E CURSORES)
+-- 1. AUXILIARES DE NAVEGAÇÃO DE NÓS (LEAVES)
 -- =============================================================================
 local function get_doc_leaves(n, list)
   list = list or {}
@@ -24,27 +33,44 @@ local function get_doc_leaves(n, list)
   return list
 end
 
+-- =============================================================================
+-- 2. GRAVAÇÃO DA SESSÃO SOBERANA (Projetos + Abas + Splits + Posições)
+-- =============================================================================
 local function save_sovereign_session()
   if not core.root_view or not core.root_view.root_node then return end
 
+  -- 1. Coleta de Diretórios de Projeto
+  local project_paths = {}
+  if core.project_directories then
+    for _, p in ipairs(core.project_directories) do
+      local ppath = type(p) == "table" and (p.path or p.name) or p
+      if ppath and type(ppath) == "string" and ppath ~= "" then
+        local abs = system.absolute_path(ppath) or ppath
+        local clean = abs:gsub("[/\\]+$", ""):gsub("\\", "/")
+        table.insert(project_paths, clean)
+      end
+    end
+  end
+
+  if #project_paths == 0 and core.project_dir then
+    local abs = system.absolute_path(core.project_dir) or core.project_dir
+    table.insert(project_paths, abs:gsub("[/\\]+$", ""):gsub("\\", "/"))
+  end
+
+  -- 2. Coleta de Painéis e Documentos
   local leaves = get_doc_leaves(core.root_view.root_node)
   local active_node = core.root_view:get_active_node()
-
-  local session = {
-    panels = {},
-    active_panel_idx = 1
-  }
+  local panels = {}
+  local active_panel_idx = 1
 
   for idx, node in ipairs(leaves) do
     if node == active_node then
-      session.active_panel_idx = idx
+      active_panel_idx = idx
     end
-
     local panel_data = {
       files = {},
       active_file = nil
     }
-
     for _, view in ipairs(node.views or {}) do
       if view and view.doc and view.doc.filename then
         local abs_fn = system.absolute_path(view.doc.filename) or view.doc.filename
@@ -52,39 +78,44 @@ local function save_sovereign_session()
         if view.doc.get_selection then
           line, col = view.doc:get_selection(true)
         end
-
         table.insert(panel_data.files, {
-          filename = abs_fn,
+          filename = abs_fn:gsub("\\", "/"),
           line = line,
           col = col
         })
-
         if node.active_view == view then
-          panel_data.active_file = abs_fn
+          panel_data.active_file = abs_fn:gsub("\\", "/")
         end
       end
     end
-
     if #panel_data.files > 0 then
-      table.insert(session.panels, panel_data)
+      table.insert(panels, panel_data)
     end
   end
 
+  -- 3. Gravação Atômica em Arquivo
   pcall(function()
-    system.mkdir(USERDIR .. PATHSEP .. ".doxoade")
     local f = io.open(session_file, "w")
     if f then
       f:write("return {\n")
-      f:write(string.format("  active_panel_idx = %d,\n", session.active_panel_idx))
+      f:write(string.format("  active_panel_idx = %d,\n", active_panel_idx))
+
+      -- Grava a lista de projetos raiz
+      f:write("  projects = {\n")
+      for _, p in ipairs(project_paths) do
+        f:write(string.format("    %q,\n", p))
+      end
+      f:write("  },\n")
+
+      -- Grava os painéis e arquivos
       f:write("  panels = {\n")
-      for _, p in ipairs(session.panels) do
+      for _, p in ipairs(panels) do
         f:write("    {\n")
         f:write(string.format("      active_file = %q,\n", tostring(p.active_file or "")))
         f:write("      files = {\n")
         for _, file_info in ipairs(p.files) do
-          local esc_fn = tostring(file_info.filename):gsub("\\", "/")
           f:write(string.format("        { filename = %q, line = %d, col = %d },\n",
-            esc_fn, file_info.line, file_info.col))
+            file_info.filename, file_info.line, file_info.col))
         end
         f:write("      }\n")
         f:write("    },\n")
@@ -94,20 +125,72 @@ local function save_sovereign_session()
       f:flush()
       f:close()
     end
+
+    -- Grava o projeto principal em last_project.txt para acesso rápido
+    if #project_paths > 0 then
+      local lf = io.open(last_proj_file, "w")
+      if lf then
+        lf:write(project_paths[1] .. "\n")
+        lf:flush()
+        lf:close()
+      end
+    end
   end)
 end
 
 -- =============================================================================
--- 2. RESTAURAÇÃO SEGURA DE SESSÃO NO BOOT
+-- 3. RESTAURAÇÃO DA SESSÃO E PROJETO NO BOOT (Com Deduplicação de Abas)
 -- =============================================================================
+local _session_restored = false
+
+local function has_cli_project_argument()
+  local args = rawget(_G, "ARGS") or {}
+  for _, arg in ipairs(args) do
+    if type(arg) == "string" and not arg:match("^%-%-") and not arg:match("^%-") then
+      local info = system.get_file_info(arg)
+      if info then return true end
+    end
+  end
+  return false
+end
+
 local function restore_sovereign_session()
+  if _session_restored then return end
+  _session_restored = true
+
   local info = system.get_file_info(session_file)
   if not info then return end
 
   local ok, session = pcall(dofile, session_file)
-  if not ok or type(session) ~= "table" or not session.panels or #session.panels == 0 then
-    return
+  if not ok or type(session) ~= "table" then return end
+
+  -- 1. RESTAURAÇÃO DE PROJETO (Sem recarregar se já for o mesmo)
+  if not has_cli_project_argument() and session.projects and #session.projects > 0 then
+    local primary = session.projects[1]
+    local pinfo = system.get_file_info(primary)
+    if pinfo and pinfo.type == "dir" then
+      local current_primary = core.project_directories and core.project_directories[1]
+      local current_str = type(current_primary) == "table" and (current_primary.path or current_primary.name) or current_primary
+      current_str = current_str and (system.absolute_path(current_str) or current_str):gsub("[/\\]+$", ""):gsub("\\", "/") or ""
+      
+      if current_str:lower() ~= primary:lower() then
+        if core.set_project_dir then
+          pcall(core.set_project_dir, primary)
+        end
+      end
+
+      -- Adiciona os demais projetos secundários se houver
+      for i = 2, #session.projects do
+        local subp = session.projects[i]
+        if system.get_file_info(subp) and core.add_project_directory then
+          pcall(core.add_project_directory, subp)
+        end
+      end
+    end
   end
+
+  -- 2. RESTAURAÇÃO DE PAINÉIS E ARQUIVOS (Deduplicação Atômica)
+  if not session.panels or #session.panels == 0 then return end
 
   local primary_node = (function()
     local leaves = get_doc_leaves(core.root_view.root_node)
@@ -115,7 +198,6 @@ local function restore_sovereign_session()
   end)()
 
   for p_idx, panel_data in ipairs(session.panels) do
-    -- 1. Filtra apenas arquivos válidos e existentes no disco
     local valid_files = {}
     for _, f_info in ipairs(panel_data.files or {}) do
       if f_info.filename and f_info.filename ~= "" then
@@ -126,7 +208,6 @@ local function restore_sovereign_session()
       end
     end
 
-    -- 2. Só cria split se houver arquivos reais para colocar nele
     if #valid_files > 0 then
       local target_node = nil
       if p_idx == 1 then
@@ -137,63 +218,40 @@ local function restore_sovereign_session()
       end
 
       if target_node then
-        -- Mapeia abas já abertas para nunca duplicar
+        -- 🛑 MAPA DE DEDUPLICAÇÃO: Mapeia todas as abas que JÁ estão abertas no painel
         local existing_map = {}
         for _, v in ipairs(target_node.views or {}) do
           if v and v.doc and v.doc.filename then
-            local key = (system.absolute_path(v.doc.filename) or v.doc.filename):lower():gsub("\\", "/")
-            existing_map[key] = v
+            local clean_k = (system.absolute_path(v.doc.filename) or v.doc.filename):gsub("\\", "/"):lower()
+            existing_map[clean_k] = v
           end
         end
 
         local active_to_set = nil
-        for _, file_info in ipairs(valid_files) do
-          local clean_target = (system.absolute_path(file_info.filename) or file_info.filename):lower():gsub("\\", "/")
-          local existing_view = existing_map[clean_target]
+        for _, f_info in ipairs(valid_files) do
+          local clean_fn = tostring(f_info.filename):gsub("\\", "/"):lower()
+          local view_to_use = existing_map[clean_fn]
 
-          if existing_view then
-            if panel_data.active_file then
-              local clean_act = (system.absolute_path(panel_data.active_file) or panel_data.active_file):lower():gsub("\\", "/")
-              if clean_act == clean_target then
-                active_to_set = existing_view
+          -- Se a aba NÃO existe ainda no painel, abre e adiciona
+          if not view_to_use then
+            local doc = core.open_doc(f_info.filename)
+            if doc then
+              if f_info.line and f_info.col and doc.set_selection then
+                doc:set_selection(f_info.line, f_info.col, f_info.line, f_info.col)
               end
+              view_to_use = DocView(doc)
+              if target_node.add_view then
+                target_node:add_view(view_to_use)
+              end
+              existing_map[clean_fn] = view_to_use
             end
-          else
-            local ok_open, doc = pcall(core.open_doc, file_info.filename)
-            if ok_open and doc then
-              if file_info.line and doc.set_selection then
-                pcall(function() doc:set_selection(file_info.line, file_info.col or 1) end)
-              end
+          end
 
-              -- 🛡️ Instanciação Canônica (Garante geometry com view.position e view.size)
-              local ok_v, view = pcall(DocView, doc)
-              if ok_v and view and view.position then
-                target_node:add_view(view)
-                existing_map[clean_target] = view
-
-                if panel_data.active_file then
-                  local clean_act = (system.absolute_path(panel_data.active_file) or panel_data.active_file):lower():gsub("\\", "/")
-                  if clean_act == clean_target then
-                    active_to_set = view
-                  end
-                end
-              end
-            end
+          if panel_data.active_file and clean_fn == panel_data.active_file:lower() then
+            active_to_set = view_to_use
           end
         end
 
-        -- 3. Limpa aba em branco inicial se arquivos reais foram restaurados
-        if #target_node.views > 1 then
-          for v_idx = #target_node.views, 1, -1 do
-            local v = target_node.views[v_idx]
-            if v and v.doc and not v.doc.filename and not (v.doc.is_dirty and v.doc:is_dirty()) then
-              table.remove(target_node.views, v_idx)
-              break
-            end
-          end
-        end
-
-        -- 4. Foca a aba correta e o nó correspondente
         if active_to_set then
           target_node.active_view = active_to_set
           core.set_active_view(active_to_set)
@@ -203,95 +261,97 @@ local function restore_sovereign_session()
   end
 
   core.redraw = true
+  if core.log then
+    core.log("✔ Sessão Soberana restaurada sem duplicações.")
+  end
 end
 
 -- =============================================================================
--- 📬 DESPACHANTE IPC & CICLO DE VIDA
+-- 4. DESPACHANTE IPC (Abertura Remota sem Nova Janela)
 -- =============================================================================
-local function process_line(target)
-  if target == "__DOXOADE_GRACEFUL_QUIT__" then
+local function process_ipc_line(line)
+  if not line or line == "" then return end
+  line = line:gsub("^%s*", ""):gsub("%s*$", "")
+
+  if line == "__DOXOADE_GRACEFUL_QUIT__" then
     save_sovereign_session()
     core.quit()
-    return "quit"
-  elseif target ~= "" then
-    pcall(function()
-      local abs_target = system.absolute_path(target) or target
-      local info = system.get_file_info(abs_target) or system.get_file_info(target)
-      if info and info.type == "dir" then
-        core.add_project_directory(abs_target)
-        core.log("Projeto anexado à Árvore: " .. abs_target)
-      else
-        local doc = core.open_doc(abs_target)
-        core.root_view:open_doc(doc)
-        core.log("Arquivo aberto: " .. abs_target)
-      end
-    end)
+    return
   end
-  return nil
+
+  -- Se for um caminho de arquivo enviado via CLI
+  local file_path = line
+  local target_line, target_col = nil, nil
+  local m_file, m_line, m_col = line:match("^(.-):(%d+):(%d+)$")
+  if m_file then
+    file_path = m_file
+    target_line = tonumber(m_line)
+    target_col = tonumber(m_col)
+  else
+    local m_file2, m_line2 = line:match("^(.-):(%d+)$")
+    if m_file2 then
+      file_path = m_file2
+      target_line = tonumber(m_line2)
+    end
+  end
+
+  local abs_path = system.absolute_path(file_path) or file_path
+  local finfo = system.get_file_info(abs_path)
+
+  if finfo and finfo.type == "dir" then
+    if core.add_project_directory then
+      core.add_project_directory(abs_path)
+    elseif core.set_project_dir then
+      core.set_project_dir(abs_path)
+    end
+    save_sovereign_session()
+  else
+    local doc = core.open_doc(abs_path)
+    if doc then
+      core.root_view:open_doc(doc)
+      if target_line and doc.set_selection then
+        doc:set_selection(target_line, target_col or 1, target_line, target_col or 1)
+      end
+      save_sovereign_session()
+    end
+  end
+  core.redraw = true
 end
 
--- Thread de Inicialização da Sessão
+-- =============================================================================
+-- 5. THREADS DE SESSÃO E MONITORAMENTO
+-- =============================================================================
 core.add_thread(function()
+  -- Restauração no boot
   coroutine.yield(0.05)
-  pcall(restore_sovereign_session)
+  restore_sovereign_session()
 
-  -- Loop de auto-save periódico a cada 5 segundos
-  local last_save = os.time()
+  -- Loop contínuo: Processamento de IPC e Auto-Save periódico
+  local save_timer = 0
   while true do
-    if os.time() - last_save >= 5 then
-      save_sovereign_session()
-      last_save = os.time()
-    end
-    coroutine.yield(1.0)
-  end
-end)
+    coroutine.yield(0.25)
+    save_timer = save_timer + 0.25
 
--- Thread Principal do IPC Dispatcher
-core.add_thread(function()
-  while true do
+    -- Processa fila IPC
     local info = system.get_file_info(ipc_queue_file)
-    if info and info.size and info.size > 0 then
-      local content = nil
-      pcall(os.remove, ipc_processing_file)
-
-      local renamed = os.rename(ipc_queue_file, ipc_processing_file)
-      if renamed then
+    if info and (info.size or 0) > 0 then
+      pcall(function()
+        os.rename(ipc_queue_file, ipc_processing_file)
         local f = io.open(ipc_processing_file, "r")
         if f then
-          content = f:read("*a")
-          f:close()
-        end
-        pcall(os.remove, ipc_processing_file)
-      else
-        local f = io.open(ipc_queue_file, "r")
-        if f then
-          content = f:read("*a")
-          f:close()
-        end
-        local f_clean = io.open(ipc_queue_file, "w")
-        if f_clean then f_clean:close() end
-        pcall(os.remove, ipc_queue_file)
-      end
-
-      if content and content:match("%S") then
-        local quit = false
-        for line in content:gmatch("[^\r\n]+") do
-          local target = line:match("^%s*(.-)%s*$")
-          if process_line(target) == "quit" then
-            quit = true
-            break
+          for l in f:lines() do
+            process_ipc_line(l)
           end
+          f:close()
+          os.remove(ipc_processing_file)
         end
-        if quit then return end
-
-        core.redraw = true
-        pcall(function()
-          if system.show_window then system.show_window() end
-          if system.raise_window then system.raise_window() end
-        end)
-      end
+      end)
     end
 
-    coroutine.yield(0.1)
+    -- Auto-save de estado a cada 4 segundos
+    if save_timer >= 4.0 then
+      save_timer = 0
+      save_sovereign_session()
+    end
   end
 end)

@@ -1,30 +1,41 @@
 -- doxoade/commands/lite_xl_systems/template/10_forensic_engine.lua
--- =============================================================================
--- 10. FORENSIC ENGINE (HARDENED)
--- =============================================================================
-
+--[[
+  🦅 DOXOADE FORENSIC ENGINE & LIVE TELEMETRY (CHRONOS V2)
+  - Medição de Frame Spikes (>16.6ms) no pipeline gráfico.
+  - Contador de Frequência de Comandos (100x vs 2x).
+  - Telemetria de Memória GC e Exportação Contínua de profiler_telemetry.json.
+]]
 local core = require "core"
 local config = require "core.config"
 local RootView = require "core.rootview"
+local command = require "core.command"
 
-local diag_dir = USERDIR .. PATHSEP .. ".doxoade" .. PATHSEP .. "diagnostics"
+local user_dir = USERDIR or "."
+local sep = PATHSEP or "/"
+local diag_dir = user_dir .. sep .. ".doxoade" .. sep .. "diagnostics"
 pcall(function() system.mkdir(diag_dir) end)
 
-local telemetry_json_path = diag_dir .. PATHSEP .. "profiler_telemetry.json"
+local telemetry_json_path = diag_dir .. sep .. "profiler_telemetry.json"
+local report_path = diag_dir .. sep .. "forensic_report.txt"
 
+-- =============================================================================
+-- 1. ESTRUTURA GLOBAL DO PROFILER (CHRONOS)
+-- =============================================================================
 local Profiler = {
-  frame_spikes = {},
-  thread_bottlenecks = {},
-  last_step_time = os.clock(),
   frame_count = 0,
-  total_frame_time = 0,
-  max_spike_records = 30,
+  current_fps = 60.0,
+  last_fps_calc = os.clock(),
+  frame_spikes = {},       -- Histórico dos últimos 20 spikes (>16.6ms)
+  cmd_frequencies = {},    -- Mapa de frequências: [cmd_name] = count
+  thread_bottlenecks = {}, -- Histórico de threads demoradas
+  gc_memory_kb = collectgarbage("count"),
+  boot_timestamp = os.date("%Y-%m-%d %H:%M:%S"),
+  total_boot_time_ms = 0.0,
 }
 
--- Hotfix de compatibilidade:
--- Se algum código antigo referenciar forensic_data como global,
--- evitamos "cannot get undefined variable" enquanto a causa raiz é removida.
 rawset(_G, "_DOXOADE_PROFILER", Profiler)
+
+
 
 local forensic_data = {
     errors = {},
@@ -182,34 +193,40 @@ core.add_thread(function()
 end)
 
 -- =============================================================================
--- 1. MONITORAMENTO DE FRAME BUDGET (DETECTOR DE QUEDA DE FPS)
+-- 2. HOOK GRÁFICO LEVE NO ROOTVIEW (Cálculo de FPS e Detecção de Spikes)
 -- =============================================================================
 local original_rootview_draw = RootView.draw
 function RootView:draw(...)
   local t0 = os.clock()
   original_rootview_draw(self, ...)
-  local elapsed = (os.clock() - t0) * 1000
+  local elapsed_ms = (os.clock() - t0) * 1000
 
   Profiler.frame_count = Profiler.frame_count + 1
-  Profiler.total_frame_time = Profiler.total_frame_time + elapsed
 
-  -- Registra spike se o frame demorar mais de 16.6ms (< 60 FPS)
-  if elapsed > 16.6 and #Profiler.frame_spikes < Profiler.max_spike_records then
-    local active_fn = "none"
-    local lines = 0
-    if core.active_view and core.active_view.doc then
-      active_fn = tostring(core.active_view.doc.filename or core.active_view.doc:get_name())
-      lines = core.active_view.doc.lines and #core.active_view.doc.lines or 0
-    end
-
+  -- Spike: frame demorou mais que 16.6ms (queda de 60 FPS)
+  if elapsed_ms > 16.6 then
+    local active_name = (core.active_view and core.active_view.get_name and core.active_view:get_name()) or "workspace"
     table.insert(Profiler.frame_spikes, {
       timestamp = os.date("%H:%M:%S"),
-      duration_ms = tonumber(string.format("%.2f", elapsed)),
-      fps = tonumber(string.format("%.1f", 1000 / math.max(elapsed, 1))),
-      active_file = active_fn,
-      lines_count = lines,
+      duration_ms = math.floor(elapsed_ms * 100) / 100,
+      active_file = active_name,
       is_spike = true
     })
+    if #Profiler.frame_spikes > 20 then
+      table.remove(Profiler.frame_spikes, 1)
+    end
+  end
+end
+
+-- =============================================================================
+-- 3. RASTREADOR DE FREQUÊNCIA DE COMANDOS (100x vs 2x)
+-- =============================================================================
+if command and command.perform then
+  local original_command_perform = command.perform
+  command.perform = function(cmd_name, ...)
+    local name = tostring(cmd_name or "unknown")
+    Profiler.cmd_frequencies[name] = (Profiler.cmd_frequencies[name] or 0) + 1
+    return original_command_perform(cmd_name, ...)
   end
 end
 
@@ -235,66 +252,58 @@ function core.add_thread(fn, target)
 end
 
 -- =============================================================================
--- 3. EXPORTAÇÃO ASSÍNCRONA DE TELEMETRIA JSON
+-- 4. EXPORTADOR ATÔMICO DE TELEMETRIA JSON (A cada 2.5s)
 -- =============================================================================
 local function export_profiler_telemetry()
-  local boot_report = rawget(_G, "_DOXOADE_BOOT_REPORT") or { modules = {}, total = 0 }
-  local boot_list = {}
-  local total_boot_ms = 0
-
-  for name, data in pairs(boot_report.modules or {}) do
-    local ms = data.time_ms or 0
-    total_boot_ms = total_boot_ms + ms
-    table.insert(boot_list, {
-      module = name,
-      status = data.status or "UNKNOWN",
-      time_ms = tonumber(string.format("%.2f", ms)),
-      error = data.error
-    })
+  local now = os.clock()
+  local dt = now - Profiler.last_fps_calc
+  if dt > 0 then
+    Profiler.current_fps = math.floor((Profiler.frame_count / dt) * 10) / 10
+    Profiler.frame_count = 0
+    Profiler.last_fps_calc = now
   end
+  Profiler.gc_memory_kb = math.floor(collectgarbage("count") * 10) / 10
 
-  local avg_fps = 60.0
-  if Profiler.frame_count > 0 then
-    local avg_duration = Profiler.total_frame_time / Profiler.frame_count
-    avg_fps = tonumber(string.format("%.1f", 1000 / math.max(avg_duration, 1)))
-  end
-
-  local payload = {
-    timestamp = os.date("%Y-%m-%d %H:%M:%S"),
-    total_boot_time_ms = tonumber(string.format("%.2f", total_boot_ms)),
-    boot_modules = boot_list,
-    frame_spikes = Profiler.frame_spikes,
-    thread_bottlenecks = Profiler.thread_bottlenecks,
-    gc_memory_kb = tonumber(string.format("%.2f", collectgarbage("count"))),
-    average_fps = avg_fps
+  -- Serialização manual JSON simples e ultrarrápida (sem dependências externas)
+  local json_parts = {
+    "{\n",
+    string.format('  "timestamp": %q,\n', os.date("%Y-%m-%d %H:%M:%S")),
+    string.format('  "average_fps": %.1f,\n', Profiler.current_fps),
+    string.format('  "gc_memory_kb": %.1f,\n', Profiler.gc_memory_kb),
+    '  "frame_spikes": [\n'
   }
+
+  for idx, sp in ipairs(Profiler.frame_spikes) do
+    json_parts[#json_parts + 1] = string.format(
+      '    { "timestamp": %q, "duration_ms": %.2f, "active_file": %q, "is_spike": true }%s\n',
+      sp.timestamp, sp.duration_ms, sp.active_file, (idx < #Profiler.frame_spikes and "," or "")
+    )
+  end
+  json_parts[#json_parts + 1] = '  ],\n  "command_frequencies": {\n'
+
+  local cmd_entries = {}
+  for k, v in pairs(Profiler.cmd_frequencies) do
+    cmd_entries[#cmd_entries + 1] = string.format('    %q: %d', k, v)
+  end
+  json_parts[#json_parts + 1] = table.concat(cmd_entries, ",\n")
+  json_parts[#json_parts + 1] = '\n  }\n}\n'
 
   pcall(function()
     local f = io.open(telemetry_json_path, "w")
     if f then
-      -- Serializador JSON simples e rápido
-      local function serialize(val)
-        local t = type(val)
-        if t == "table" then
-          local is_arr = (#val > 0)
-          local items = {}
-          if is_arr then
-            for _, v in ipairs(val) do table.insert(items, serialize(v)) end
-            return "[" .. table.concat(items, ", ") .. "]"
-          else
-            for k, v in pairs(val) do table.insert(items, string.format("%q: %s", tostring(k), serialize(v))) end
-            return "{" .. table.concat(items, ", ") .. "}"
-          end
-        elseif t == "string" then
-          return string.format("%q", val)
-        elseif t == "number" or t == "boolean" then
-          return tostring(val)
-        else
-          return "null"
-        end
-      end
-      f:write(serialize(payload))
+      f:write(table.concat(json_parts))
+      f:flush()
       f:close()
+    end
+  end)
+end
+
+-- Thread de exportação periódica
+if core.add_thread then
+  core.add_thread(function()
+    while true do
+      coroutine.yield(2.5)
+      export_profiler_telemetry()
     end
   end)
 end

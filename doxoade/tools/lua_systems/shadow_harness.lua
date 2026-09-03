@@ -1,6 +1,6 @@
 -- doxoade/tools/lua_systems/shadow_harness.lua
 -- =============================================================================
--- 🐺 DOXOADE CUMULATIVE FUNCTION PROFILER — TRACE-LEVEL CALL-STACK INSPECTOR
+-- 🏛️ DOXOADE SHADOW HARNESS V2.0 (Chronos Profiler & Ma'at Command Simulator)
 -- =============================================================================
 local is_windows = (package.config:sub(1, 1) == "\\")
 rawset(_G, "PLATFORM", is_windows and "Windows" or "Linux")
@@ -11,14 +11,18 @@ rawset(_G, "VERSION", "2.1.8")
 rawset(_G, "SCALE", 1.0)
 rawset(_G, "ARGS", {})
 
+-- 1. Mocks de Sistema e Renderização
 local mock_font = {
   get_height = function() return 14 end,
   get_width = function(self, t) return #(tostring(t or "")) * 8 end,
+  copy = function(self) return self end,
 }
 
 local mock_style = {
   font = mock_font,
   code_font = mock_font,
+  tree_font = mock_font,
+  icon_font = mock_font,
   background = { 30, 30, 30, 255 },
   background2 = { 25, 25, 25, 255 },
   background3 = { 35, 35, 35, 255 },
@@ -27,6 +31,7 @@ local mock_style = {
   dim = { 100, 100, 100, 255 },
   divider = { 50, 50, 50, 255 },
   line_number = { 100, 100, 100, 255 },
+  syntax = {},
 }
 
 local mock_system = {
@@ -50,6 +55,7 @@ local mock_renderer = {
 rawset(_G, "renderer", mock_renderer)
 rawset(_G, "rencache", mock_renderer)
 
+-- 2. Mock de Objetos e Classes (OOP Lite XL)
 local function create_class()
   local cls = {}
   cls.__index = cls
@@ -81,6 +87,7 @@ function MockDoc:save(...) return true end
 function MockDoc:get_text(...) return "" end
 function MockDoc:has_selection() return false end
 function MockDoc:get_selection() return 1, 1, 1, 1 end
+function MockDoc:set_selection(...) end
 function MockDoc:is_dirty() return false end
 
 local MockView = create_class()
@@ -91,6 +98,7 @@ end
 function MockView:draw() end
 function MockView:draw_background() end
 function MockView:get_name() return "MockView" end
+function MockView:is(class) return true end
 
 local MockDocView = MockView:extend()
 function MockDocView:init(doc)
@@ -123,6 +131,7 @@ local mock_doc = MockDoc:new("mock_script.lua")
 mock_active_view.doc = mock_doc
 mock_root_node:add_view(mock_active_view)
 
+-- 3. Mock de Comandos e Core
 local registered_commands = {}
 local mock_command = {
   add = function(predicate, map)
@@ -150,49 +159,47 @@ local mock_core = {
   },
   active_view = mock_active_view,
   project_directories = { USERDIR },
+  project_dir = USERDIR,
   plugins = {},
   threads = {},
   log = function() end,
   error = function() end,
   warn = function() end,
-  open_doc = function(fn) return MockDoc:new(fn) end,
-  add_thread = function(fn) pcall(fn) end,
-  set_active_view = function() end,
-  add_project_directory = function() end,
-  remove_project_directory = function() end,
+  open_doc = function() return mock_doc end,
+  add_thread = function(fn) table.insert(mock_core.threads, fn) end,
+  set_active_view = function(v) mock_core.active_view = v end,
   redraw = false,
-  status_view = { add_item = function() end },
-  command_view = {
-    enter = function(self, prompt, opts)
-      if opts and type(opts.submit) == "function" then
-        pcall(opts.submit, "1")
-      end
-    end
-  },
+  step = function() end,
+  add_project_directory = function(p) end,
+  remove_project_directory = function(p) end,
 }
-rawset(_G, "core", mock_core)
 
+rawset(_G, "core", mock_core)
+rawset(_G, "command", mock_command)
+
+-- 4. Preload de Módulos Requeridos pelos Templates
 local mock_modules = {
   ["core"] = mock_core,
-  ["core.style"] = mock_style,
-  ["core.command"] = mock_command,
-  ["core.keymap"] = { add = function() return true end },
-  ["core.config"] = { ignore_files = {}, draw_indent_guides = true },
-  ["core.common"] = {
-    fuzzy_match = function(items) return items end,
-    basename = function(p) return p:match("[/\\]([^/\\]+)$") or p end,
-    dirname = function(p) return p:match("^(.*)[/\\]") or p end,
-  },
-  ["core.syntax"] = { items = {}, add = function() end },
-  ["core.view"] = MockView,
-  ["core.doc"] = MockDoc,
-  ["core.docview"] = MockDocView,
-  ["core.node"] = MockNode,
   ["core.rootview"] = MockView:extend(),
-  ["core.statusview"] = MockView:extend(),
+  ["core.docview"] = MockDocView,
+  ["core.doc"] = MockDoc,
+  ["core.node"] = MockNode,
+  ["core.view"] = MockView,
+  ["core.style"] = mock_style,
+  ["core.config"] = { load_workspace = true, ignore_files = {} },
+  ["core.command"] = mock_command,
+  ["core.keymap"] = { add = function() end, bind = function() end },
+  ["core.common"] = {
+    clamp = function(n, min, max) return math.max(min, math.min(max, n)) end,
+    fuzzy_match = function() return true end,
+  },
+  ["core.syntax"] = { add = function() end },
+  ["core.statusview"] = { Item = { LEFT = 1, RIGHT = 2 }, add_item = function() end },
   ["core.rencache"] = mock_renderer,
   ["renderer"] = mock_renderer,
-  ["plugins.contextmenu"] = { DIVIDER = "---", register = function() end }
+  ["system"] = mock_system,
+  ["plugins.contextmenu"] = { DIVIDER = "---", register = function() end },
+  ["core.emptyview"] = MockView:extend(),
 }
 
 for mod_name, mod_val in pairs(mock_modules) do
@@ -200,119 +207,73 @@ for mod_name, mod_val in pairs(mock_modules) do
 end
 
 -- =============================================================================
--- MOTOR DE PROFILING POR FUNÇÃO (CALL-STACK TRACKER)
+-- 5. BENCHMARK DE MÓDULOS COM GC PROFILING & CALL HOOKS (CHRONOS V2)
 -- =============================================================================
-local function_stats = {}
-local call_stack = {}
+local raw_args = { ... }
+local args = (#raw_args > 0) and raw_args or (type(arg) == "table" and arg or {})
 
-local function profiler_hook(event)
-  local info = debug.getinfo(2, "nSf")
-  if not info or not info.source then return end
-  local t = os.clock()
+for i = 1, #args do
+  local template_path = args[i]
+  local fname = template_path:match("([^/\\]+)$") or template_path
 
-  if event == "call" then
-    table.insert(call_stack, { info = info, start_t = t, child_t = 0 })
-  elseif event == "return" and #call_stack > 0 then
-    local frame = table.remove(call_stack)
-    local elapsed = (t - frame.start_t) * 1000
-    local self_t = math.max(0, elapsed - frame.child_t)
-
-    local src = frame.info.source:match("[/\\]([^/\\]+)$") or frame.info.source
-    local fn_name = frame.info.name or "anonymous"
-    local line = frame.info.linedefined or 0
-
-    if src:find("%.lua$") and not src:find("shadow_harness") then
-      local key = src .. "|" .. fn_name .. "|" .. line
-      local st = function_stats[key] or {
-        source = src,
-        name = fn_name,
-        line = line,
-        calls = 0,
-        total_time = 0,
-        self_time = 0
-      }
-      st.calls = st.calls + 1
-      st.total_time = st.total_time + elapsed
-      st.self_time = st.self_time + self_t
-      function_stats[key] = st
-    end
-
-    if #call_stack > 0 then
-      call_stack[#call_stack].child_t = call_stack[#call_stack].child_t + elapsed
-    end
-  end
-end
-
--- =============================================================================
--- EXECUÇÃO COM ANÁLISE DE TEMPO, MEMÓRIA E FUNÇÕES
--- =============================================================================
-local results = {}
-local total_failed = 0
-
-for i = 1, #arg do
-  local file_path = arg[i]
-  local fname = file_path:match("[/\\]([^/\\]+)$") or file_path
-  
+  -- Medição precisa de memória antes do carregamento
   collectgarbage("collect")
   local mem_before = collectgarbage("count")
-  
-  local f = io.open(file_path, "r")
-  if not f then
-    results[fname] = { status = "FAIL", error = "Arquivo inacessível", time_ms = 0, mem_kb = 0 }
-    total_failed = total_failed + 1
-  else
-    local source = f:read("*a")
-    f:close()
-    
-    local chunk, load_err = load(source, "@" .. fname)
-    if not chunk then
-      results[fname] = { status = "FAIL", error = "Syntax Error: " .. tostring(load_err), time_ms = 0, mem_kb = 0 }
-      total_failed = total_failed + 1
-    else
-      local t0 = os.clock()
-      
-      -- Ativa o Hook de Rastreamento de Funções
-      call_stack = {}
-      debug.sethook(profiler_hook, "cr")
-      local ok, exec_err = xpcall(chunk, debug.traceback)
-      debug.sethook() -- Desativa o hook
-      
-      local elapsed = (os.clock() - t0) * 1000
-      local mem_delta = collectgarbage("count") - mem_before
-      
-      if not ok then
-        results[fname] = { status = "FAIL", error = tostring(exec_err), time_ms = elapsed, mem_kb = mem_delta }
-        total_failed = total_failed + 1
+  local t0 = os.clock()
+
+  -- Hook para rastreamento de funções internas
+  local funcs_map = {}
+  local function call_hook(event)
+    local info = debug.getinfo(2, "nSl")
+    if info and info.what == "Lua" and info.linedefined and info.linedefined > 0 then
+      local name = info.name or (info.namewhat ~= "" and info.namewhat) or string.format("closure:L%d", info.linedefined)
+      local key = info.linedefined .. ":" .. name
+      if not funcs_map[key] then
+        funcs_map[key] = { name = name, line = info.linedefined, calls = 1 }
       else
-        results[fname] = {
-          status = "PASS",
-          time_ms = elapsed,
-          mem_kb = math.max(0, mem_delta)
-        }
+        funcs_map[key].calls = funcs_map[key].calls + 1
       end
     end
   end
+
+  debug.sethook(call_hook, "c")
+  local chunk, load_err = loadfile(template_path)
+  local ok = false
+  if chunk then
+    local run_ok, run_err = pcall(chunk)
+    ok = run_ok
+  end
+  debug.sethook()
+
+  local elapsed_ms = (os.clock() - t0) * 1000
+  local mem_after = collectgarbage("count")
+  local mem_delta = math.max(0.4, mem_after - mem_before)
+
+  -- Emite SHADOW_MOD com a 5ª coluna (mem_kb)
+  print(string.format("SHADOW_MOD|%s|%s|%.2f|%.1f", fname, ok and "PASS" or "FAIL", elapsed_ms, mem_delta))
+
+  -- Emite SHADOW_FUNC para drill-down
+  for _, f in pairs(funcs_map) do
+    print(string.format("SHADOW_FUNC|%s|%s|%d|%d", fname, f.name, f.line, f.calls))
+  end
 end
 
--- 1. Relatório por Módulo
-print("=== SHADOW_REPORT_START ===")
-for fname, res in pairs(results) do
-  if res.status == "PASS" then
-    print(string.format("PASS|%s|%.3f|%.1f", fname, res.time_ms, res.mem_kb or 0))
+-- =============================================================================
+-- 6. SIMULAÇÃO DE COMANDOS REGISTRADOS (EXIGIDO PELO HEALTH-CHECK MA'AT)
+-- =============================================================================
+local total_cmds = 0
+local passed_cmds = 0
+local crashed_cmds = 0
+
+for name, cmd in pairs(registered_commands) do
+  total_cmds = total_cmds + 1
+  local ok, err = pcall(cmd.fn)
+  if ok then
+    passed_cmds = passed_cmds + 1
   else
-    local err_clean = tostring(res.error or ""):gsub("\r", ""):gsub("\n", " -> ")
-    print(string.format("FAIL|%s|%.3f|%.1f|%s", fname, res.time_ms, res.mem_kb or 0, err_clean))
+    crashed_cmds = crashed_cmds + 1
   end
 end
-print("=== SHADOW_REPORT_END ===")
 
--- 2. Relatório Detalhado por Função Acumulada (Captura Total)
-print("=== FUNCTION_REPORT_START ===")
-for _, st in pairs(function_stats) do
-  if st.total_time >= 0.0 or st.calls >= 1 then
-    print(string.format("%s|%s|%d|%d|%.3f|%.3f", st.source, st.name, st.line, st.calls, st.self_time, st.total_time))
-  end
-end
-print("=== FUNCTION_REPORT_END ===")
-
-os.exit(total_failed == 0 and 0 or 1)
+print(string.format("SHADOW_CMD_COUNT|%d", total_cmds))
+print(string.format("SHADOW_CMD_SIMULATION|%d|%d", passed_cmds, crashed_cmds))

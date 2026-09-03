@@ -109,11 +109,17 @@ end
 function ProbeEngine.run_probe()
   local catalog_file = probe_dir .. sep .. "catalog.lua"
   local catalog = {}
+  
+  -- Checa a existência antes de chamar dofile
+  local finfo = system and system.get_file_info and system.get_file_info(catalog_file)
+  if finfo and finfo.type == "file" then
+    local ok_cat, cat_data = pcall(dofile, catalog_file)
+    if ok_cat and type(cat_data) == "table" and cat_data.catalog then
+      catalog = cat_data.catalog
+    end
+  end
 
-  local ok_cat, cat_data = pcall(dofile, catalog_file)
-  if ok_cat and type(cat_data) == "table" and cat_data.catalog then
-    catalog = cat_data.catalog
-  else
+  if not next(catalog) then
     catalog = {
       ["core"] = { expected_type = "table", severity = "critical" },
       ["core.command"] = { expected_type = "table", severity = "critical" },
