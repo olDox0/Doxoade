@@ -71,6 +71,7 @@ class DoxoadeLazyGroup(click.Group):
             'engine': 'doxoade.commands.engine_cmd:engine_group',
             'fix': 'doxoade.commands.fix:fix',
             'flow': 'doxoade.commands.run:flow_command',
+            'git': 'doxoade.commands.git_systems.git_cmd:git_group',
             'git-clean': 'doxoade.commands.git_systems.git_clean:git_clean',
             'git-new': 'doxoade.commands.git_systems.git_new:git_new',
             'global-health': 'doxoade.commands.global_health:global_health',
