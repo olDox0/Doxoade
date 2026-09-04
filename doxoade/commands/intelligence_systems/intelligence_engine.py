@@ -174,7 +174,7 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
             data["debt_tags"] = find_debt_tags(content)
 
         if source: 
-            data["source_minified"] = content[:5000]
+            data["source_minified"] = content[:10000]
         
     except Exception as e:
         data["error"] = str(e)

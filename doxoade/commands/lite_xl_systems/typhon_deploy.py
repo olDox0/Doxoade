@@ -17,6 +17,7 @@ from typing import Dict, Any, Optional, Tuple, Literal
 from doxoade.tools.doxcolors import Fore, Style
 from .engine_lite_xl import LiteXLEngine
 from .lite_xl_init_builder import LiteXLInitBuilder
+from .typhon_doxly.doxly_khonsu_gate import DoxlyKhonsuGate
 
 DeployMode = Literal["production", "sandbox", "test"]
 
@@ -157,51 +158,52 @@ class TyphonDeployEngine:
     
     @classmethod
     def deploy(cls, mode: DeployMode = "production", force: bool = False) -> Dict[str, Any]:
-        """Compila e instala o init.lua no diretório de destino correspondente ao modo."""
+        """Compila e instala o init.lua supervisionado pelo Khonsu Gatekeeper."""
         deploy_dir = cls._get_deploy_dir(mode)
         deploy_dir.mkdir(parents=True, exist_ok=True)
-        init_dest = deploy_dir / "init.lua"
-        
         backup_path = None
+
+        if mode == "test":
+            session_log = deploy_dir / "session_log.txt"
+            error_txt = deploy_dir / "error.txt"
+            if session_log.exists():
+                try: session_log.unlink()
+                except Exception: pass
+            if error_txt.exists():
+                try: error_txt.unlink()
+                except Exception: pass
+
         if mode == "production":
             ok, backup_path = cls.create_backup(mode, reason="pre-deploy")
             if not ok and not force:
                 return {"success": False, "error": "Falha ao criar backup de segurança", "backup": None}
 
         try:
-            # 1. Geração do Init Base Soberano
-            init_content = LiteXLInitBuilder.generate_sovereign_init()
+            # 🛡️ Aciona o Khonsu Gate com Source Map e Triangulação
+            gate_res = DoxlyKhonsuGate.compile_aot_supervisioned(target_mode=mode, verbose=True)
+            init_dest = deploy_dir / "init.lua"
 
-            # 2. Se for modo TEST ou SANDBOX, anexa os hooks de observabilidade
-            if mode in ("test", "sandbox"):
-                hooks_file = Path(__file__).parent / "template" / "chaos_hooks.lua"
-                if hooks_file.exists():
-                    hooks_code = hooks_file.read_text(encoding="utf-8")
-                    init_content = init_content + "\n\n-- 🛡️ HOOKS DE TELEMETRIA FORENSE\n" + hooks_code
-
-            # 3. Gravação atômica do init.lua
-            init_dest.write_text(init_content, encoding="utf-8")
-
-            # 4. Limpeza de logs antigos no diretório de destino
-            for artifact in ["session_log.txt", "error.txt", "BOOT_CANARY.txt"]:
-                p = deploy_dir / artifact
-                if p.exists():
-                    try:
-                        p.unlink()
-                    except Exception:
-                        pass
+            if gate_res["success"] and gate_res["bytecode"]:
+                # Instala Bytecode AOT Oficial
+                init_dest.write_bytes(gate_res["bytecode"])
+                installed_size = len(gate_res["bytecode"])
+            else:
+                # Aciona Plano B (Minificação / Texto Seguro)
+                init_dest.write_text(gate_res["source"], encoding="utf-8")
+                installed_size = len(gate_res["source"])
 
             return {
                 "success": True,
                 "mode": mode,
                 "init": init_dest,
                 "backup": backup_path,
-                "size": len(init_content),
-                "error": None
+                "size": installed_size,
+                "opt_mode": gate_res["opt_mode"],
+                "error": gate_res.get("error"),
             }
         except Exception as e:
-            # Rollback automático em produção se houver falha de gravação
             if mode == "production" and backup_path and backup_path.exists():
+                init_dest = deploy_dir / "init.lua"
                 shutil.copy2(backup_path, init_dest)
             return {"success": False, "error": str(e), "backup": backup_path}
     

@@ -71,6 +71,34 @@ local function draw_text_safe(font, text, x, y, color)
   end
 end
 
+local _path_cache = {}
+local function resolve_active_paths(view)
+  view = view or core.active_view
+  if not view or not view.doc or not view.doc.filename then return nil end
+  local raw = view.doc.filename
+  if _path_cache[raw] then return _path_cache[raw] end
+
+  local abs = system.absolute_path(raw) or raw
+  local clean_abs = abs:gsub("[/\\]", PATHSEP or "\\")
+  local fname = raw:match("[/\\]([^/\\]+)$") or raw
+  local rel = abs:gsub("\\", "/")
+
+  if core.project_directories then
+    for _, proj in ipairs(core.project_directories) do
+      local ppath = tostring(type(proj) == "table" and (proj.path or proj.name) or proj or ""):gsub("\\", "/")
+      if ppath ~= "" and abs:sub(1, #ppath) == ppath then
+        rel = abs:sub(#ppath + 1):gsub("^/", "")
+        break
+      end
+    end
+  end
+  rel = rel:gsub("/", PATHSEP or "\\")
+  local dir = clean_abs:match("^(.*)[/\\]") or clean_abs
+  local result = { filename = fname, relative = rel, absolute = clean_abs, dir = dir, raw = abs }
+  _path_cache[raw] = result
+  return result
+end
+
 local function open_in_file_manager(path)
   if system.show_in_file_manager then
     system.show_in_file_manager(path)
@@ -89,10 +117,7 @@ end
 -- =============================================================================
 local FloatingMenu = {
   visible = false,
-  x = 0,
-  y = 0,
-  w = 260,
-  h = 100,
+  x = 0, y = 0, w = 260, h = 100,
   hovered_idx = nil,
   items = {},
 }
@@ -107,7 +132,6 @@ end
 
 local function build_menu_items(paths)
   if not paths then return nil end
-
   return {
     {
       text = "📋 Copy Name     : " .. paths.filename,
@@ -153,7 +177,6 @@ local function open_floating_menu(view, mx, my)
 
   local font = style.font or style.code_font
   local item_h = get_item_height()
-
   local max_w = 200
   for _, it in ipairs(items) do
     local tw = font:get_width(it.text)
@@ -162,16 +185,13 @@ local function open_floating_menu(view, mx, my)
 
   local menu_w = max_w + (PADDING_X * 2) + 12
   local menu_h = (#items * item_h) + 8
-
   local screen_w = core.root_view and core.root_view.size and core.root_view.size.x or 1200
   local screen_h = core.root_view and core.root_view.size and core.root_view.size.y or 800
 
-  local fx = mx
-  local fy = my
-  if fx + menu_w > screen_w then fx = screen_w - menu_w - 6 end
-  if fy + menu_h > screen_h then fy = screen_h - menu_h - 6 end
-  if fx < 4 then fx = 4 end
-  if fy < 4 then fy = 4 end
+  local fx = (mx + menu_w > screen_w) and (screen_w - menu_w - 6) or mx
+  local fy = (my + menu_h > screen_h) and (screen_h - menu_h - 6) or my
+  fx = math.max(4, fx)
+  fy = math.max(4, fy)
 
   FloatingMenu.x = fx
   FloatingMenu.y = fy
@@ -190,24 +210,22 @@ local original_rootview_draw = RootView.draw
 function RootView:draw(...)
   original_rootview_draw(self, ...)
   if not FloatingMenu.visible or #FloatingMenu.items == 0 then return end
-
-  local x, y = FloatingMenu.x, FloatingMenu.y
-  local w, h = FloatingMenu.w, FloatingMenu.h
+  local x, y, w, h = FloatingMenu.x, FloatingMenu.y, FloatingMenu.w, FloatingMenu.h
   local item_h = get_item_height()
   local font = style.font or style.code_font
 
   draw_rect_safe(x - 2, y - 2, w + 4, h + 4, { 10, 10, 10, 200 })
-  draw_rect_safe(x, y, w, h, { 25, 23, 26, 255 })
-  draw_rect_safe(x, y, 3, h, { 38, 188, 95, 255 })
-  draw_rect_safe(x, y, w, 1, { 76, 69, 82, 255 })
+  draw_rect_safe(x, y, w, h, style.background2 or { 25, 23, 26, 255 })
+  draw_rect_safe(x, y, 3, h, style.accent or { 38, 188, 95, 255 })
+  draw_rect_safe(x, y, w, 1, style.divider or { 76, 69, 82, 255 })
 
   local curr_y = y + 4
   for i, it in ipairs(FloatingMenu.items) do
     local is_hovered = (FloatingMenu.hovered_idx == i)
     if is_hovered then
-      draw_rect_safe(x + 3, curr_y, w - 4, item_h, { 47, 46, 48, 255 })
+      draw_rect_safe(x + 3, curr_y, w - 4, item_h, style.background3 or { 47, 46, 48, 255 })
     end
-    local text_color = is_hovered and { 255, 255, 255, 255 } or { 210, 220, 230, 255 }
+    local text_color = is_hovered and { 255, 255, 255, 255 } or style.text
     draw_text_safe(font, it.text, x + PADDING_X, curr_y + PADDING_Y, text_color)
     curr_y = curr_y + item_h
   end
@@ -219,10 +237,7 @@ function RootView:on_mouse_moved(x, y, ...)
     return original_rootview_mouse_moved(self, x, y, ...)
   end
   original_rootview_mouse_moved(self, x, y, ...)
-
-  local mx, my = FloatingMenu.x, FloatingMenu.y
-  local mw, mh = FloatingMenu.w, FloatingMenu.h
-
+  local mx, my, mw, mh = FloatingMenu.x, FloatingMenu.y, FloatingMenu.w, FloatingMenu.h
   if x >= mx and x <= mx + mw and y >= my and y <= my + mh then
     local item_h = get_item_height()
     local idx = math.floor((y - my - 4) / item_h) + 1
@@ -241,10 +256,7 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
   if not FloatingMenu.visible then
     return original_rootview_mouse_pressed(self, button, x, y, clicks)
   end
-
-  local mx, my = FloatingMenu.x, FloatingMenu.y
-  local mw, mh = FloatingMenu.w, FloatingMenu.h
-
+  local mx, my, mw, mh = FloatingMenu.x, FloatingMenu.y, FloatingMenu.w, FloatingMenu.h
   if (button == "left" or button == 1) and x >= mx and x <= mx + mw and y >= my and y <= my + mh then
     local item_h = get_item_height()
     local idx = math.floor((y - my - 4) / item_h) + 1
@@ -254,7 +266,6 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
     if item and item.action then item.action() end
     return true
   end
-
   FloatingMenu.visible = false
   core.redraw = true
   return true
@@ -277,17 +288,6 @@ function Node:on_mouse_pressed(button, x, y, clicks)
       local view = self.views[idx]
       self:set_active_view(view)
       core.set_active_view(view)
-
-      -- Tenta contextmenu nativo primeiro
-      if contextmenu and contextmenu.show then
-        contextmenu:show(x, y)
-        return true
-      elseif command and command.perform then
-        command.perform("context-menu:show", x, y)
-        return true
-      end
-
-      -- Fallback para FloatingMenu customizado
       open_floating_menu(view, x, y)
       return true
     end

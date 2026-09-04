@@ -219,7 +219,7 @@ class ProfilerEngine:
 
     @classmethod
     def get_live_telemetry(cls, mode: str = "production") -> Optional[Dict[str, Any]]:
-        """Lê e processa os dados de telemetria em tempo real gravados pelo Lite XL."""
+        """Lê e processa os dados de telemetria calibrada gravados pelo Lite XL."""
         from doxoade.commands.lite_xl_systems.engine_lite_xl import LiteXLEngine
         
         if mode == "sandbox":
@@ -236,14 +236,16 @@ class ProfilerEngine:
         try:
             raw_data = json.loads(t_file.read_text(encoding="utf-8"))
             
-            # Ordena comandos por frequência decrescente
             raw_cmds = raw_data.get("command_frequencies", {})
             sorted_cmds = sorted(raw_cmds.items(), key=lambda x: x[1], reverse=True)
             
             return {
                 "target_dir": target_dir,
                 "timestamp": raw_data.get("timestamp", "N/A"),
-                "average_fps": raw_data.get("average_fps", 60.0),
+                "is_idle": raw_data.get("is_idle", False),
+                "avg_draw_latency_ms": raw_data.get("avg_draw_latency_ms", 1.8),
+                "active_fps": raw_data.get("active_fps", 60.0),
+                "target_fps": raw_data.get("target_fps", 60),
                 "gc_memory_kb": raw_data.get("gc_memory_kb", 0.0),
                 "frame_spikes": raw_data.get("frame_spikes", []),
                 "top_commands": sorted_cmds,

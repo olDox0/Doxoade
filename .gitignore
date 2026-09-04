@@ -93,6 +93,8 @@ data/doxoade.db
 data/doxoade.db-wal
 data/doxoade.db-shm
 
+doxoade/tools/hermes_systems/native/.bridge_build_cache.json
+
 
 # ====== Exceções ======
 

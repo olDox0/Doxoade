@@ -150,6 +150,16 @@ core.add_thread(function()
   end
 end)
 
+-- No 15_audit_highlighter.lua:
+-- Se Khonsu estiver ativo, usa throttle para não bater no disco a cada frame
+local function safe_trigger_audit_reload()
+  if rawget(_G, "Khonsu") and Khonsu.throttle then
+    Khonsu.throttle("audit_bridge_reload", 0.3, load_audit_bridge)
+  else
+    load_audit_bridge()
+  end
+end
+
 -- 🧹 Remoção Dinâmica do Erro ao Alterar/Digitar na Linha
 local original_doc_insert = Doc.insert
 function Doc:insert(line, col, text)

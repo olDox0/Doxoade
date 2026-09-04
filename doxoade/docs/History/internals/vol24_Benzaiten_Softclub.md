@@ -1,3 +1,4 @@
+# doxoade\docs\History\internals\vol24_Benzaiten_Softclub.md
 # DOSSIER SOFTCLUB — GUI Nativa Windows sem WebView2
 
 **Versão**: v23 (estável)  

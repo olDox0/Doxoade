@@ -193,7 +193,7 @@ core.add_thread(function()
 end)
 
 -- =============================================================================
--- 2. HOOK GRÁFICO LEVE NO ROOTVIEW (Cálculo de FPS e Detecção de Spikes)
+-- 2. HOOK GRÁFICO INTELIGENTE (Render Latency & Active Frame Measurement)
 -- =============================================================================
 local original_rootview_draw = RootView.draw
 function RootView:draw(...)
@@ -202,9 +202,13 @@ function RootView:draw(...)
   local elapsed_ms = (os.clock() - t0) * 1000
 
   Profiler.frame_count = Profiler.frame_count + 1
+  Profiler.total_draw_ms = (Profiler.total_draw_ms or 0) + elapsed_ms
+  Profiler.last_draw_time = os.clock()
 
-  -- Spike: frame demorou mais que 16.6ms (queda de 60 FPS)
-  if elapsed_ms > 16.6 then
+  local target_fps = config.fps or 60
+  local frame_budget_ms = (1000.0 / target_fps) * 1.15
+
+  if elapsed_ms > frame_budget_ms then
     local active_name = (core.active_view and core.active_view.get_name and core.active_view:get_name()) or "workspace"
     table.insert(Profiler.frame_spikes, {
       timestamp = os.date("%H:%M:%S"),
@@ -252,23 +256,33 @@ function core.add_thread(fn, target)
 end
 
 -- =============================================================================
--- 4. EXPORTADOR ATÔMICO DE TELEMETRIA JSON (A cada 2.5s)
+-- 4. EXPORTAÇÃO INTELIGENTE (Separa Active Draw de Idle Sleep)
 -- =============================================================================
 local function export_profiler_telemetry()
   local now = os.clock()
-  local dt = now - Profiler.last_fps_calc
-  if dt > 0 then
-    Profiler.current_fps = math.floor((Profiler.frame_count / dt) * 10) / 10
-    Profiler.frame_count = 0
-    Profiler.last_fps_calc = now
+  local is_idle = (now - (Profiler.last_draw_time or 0)) > 1.2
+
+  local avg_draw_latency = 0.0
+  local active_fps = 60.0
+
+  if Profiler.frame_count > 0 and Profiler.total_draw_ms then
+    avg_draw_latency = math.floor((Profiler.total_draw_ms / Profiler.frame_count) * 100) / 100
+    if avg_draw_latency > 0 then
+      active_fps = math.min(60.0, math.floor((1000.0 / avg_draw_latency) * 10) / 10)
+    end
   end
+
+  Profiler.frame_count = 0
+  Profiler.total_draw_ms = 0
   Profiler.gc_memory_kb = math.floor(collectgarbage("count") * 10) / 10
 
-  -- Serialização manual JSON simples e ultrarrápida (sem dependências externas)
   local json_parts = {
     "{\n",
     string.format('  "timestamp": %q,\n', os.date("%Y-%m-%d %H:%M:%S")),
-    string.format('  "average_fps": %.1f,\n', Profiler.current_fps),
+    string.format('  "is_idle": %s,\n', is_idle and "true" or "false"),
+    string.format('  "avg_draw_latency_ms": %.2f,\n', avg_draw_latency),
+    string.format('  "active_fps": %.1f,\n', is_idle and (config.fps or 60.0) or active_fps),
+    string.format('  "target_fps": %d,\n', config.fps or 60),
     string.format('  "gc_memory_kb": %.1f,\n', Profiler.gc_memory_kb),
     '  "frame_spikes": [\n'
   }

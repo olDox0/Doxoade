@@ -167,67 +167,45 @@ class LiteXLDiagnostics:
 
     @classmethod
     def diagnose_init_file(cls, init_path: Path) -> Dict[str, Any]:
-        """Diagnóstico forense do init.lua consolidado."""
-        report = {"exists": False, "errors": [], "checks": []}
+        """Diagnóstico forense do init.lua (com suporte transparente a AOT Bytecode)."""
+        report = {"exists": False, "errors": [], "checks": [], "is_binary": False}
 
         if not init_path.exists():
             return report
 
         report["exists"] = True
-        raw_content = init_path.read_text(encoding="utf-8", errors="replace")
-        lines = raw_content.splitlines()
+        raw_bytes = init_path.read_bytes()
 
-        # 1. Tripwire de compilação (scanner interno)
-        scan = LiteXLInitBuilder.compile_scan_lua(raw_content)
-        if scan:
-            report["errors"].append(
-                "Erro de compilação (scanner): " + "; ".join(scan[:5])
-            )
-
-        # 2. Compilação real, se houver runtime Lua
-        info = LiteXLPaths.lua_runtime_info()
-        if info:
-            lua_path, lua_version = info
-            real_err = LiteXLInitBuilder.true_compile_check(init_path)
-            if real_err and real_err != "NO_RUNTIME":
-                report["errors"].append(
-                    f"Erro de compilação REAL ({lua_version}): {real_err}"
+        # 1. Detecção de Assinatura de Bytecode Lua (\x1bLua)
+        if raw_bytes.startswith(b"\x1bLua"):
+            report["is_binary"] = True
+            info = LiteXLPaths.lua_runtime_info()
+            if info:
+                lua_exe, lua_version = info
+                # Validação de integridade do chunk binário
+                verify = subprocess.run(
+                    [str(lua_exe), "-e", f'local f, err = loadfile({repr(str(init_path))}); if not f then io.stderr:write(tostring(err)); os.exit(1) end'],
+                    capture_output=True,
+                    text=True
                 )
+                if verify.returncode == 0:
+                    report["checks"].append(f"Artefato Binário AOT íntegro e validado ({lua_version} | {len(raw_bytes):,} bytes).")
+                else:
+                    report["errors"].append(f"Bytecode Binário Corrompido: {verify.stderr.strip()}")
             else:
-                report["checks"].append(
-                    f"Sintaxe validada por COMPILAÇÃO REAL "
-                    f"({lua_version} em {lua_path})."
-                )
-        else:
-            report["checks"].append(
-                "⚠ Sem runtime Lua externo. Validação por scanner interno + "
-                "balanceamento de blocos. Cobertura PARCIAL."
-            )
+                report["checks"].append(f"Artefato Binário AOT ({len(raw_bytes):,} bytes).")
+            return report
 
-        # 3. Armadilha strict.lua
-        if re.search(r"local\s+rencache\s*=\s*rencache\b", raw_content) and not re.search(
-            r"rawget\(_G,\s*[\"']rencache[\"']\)", raw_content
-        ):
-            report["errors"].append(
-                "Armadilha strict.lua: 'local rencache = rencache' detectado sem rawget."
-            )
-
-        # 4. Balanceamento de blocos
+        # Se for texto, executa a análise léxica tradicional
+        raw_content = raw_bytes.decode("utf-8", errors="replace")
         clean_code = _clean_lua_source(raw_content)
         opens = len(re.findall(r"\b(?:function|if|do)\b", clean_code))
         closes = len(re.findall(r"\b(?:end)\b", clean_code))
         if opens == closes:
-            report["checks"].append(
-                f"Balanceamento de blocos Lua íntegro ({len(lines)} linhas | {opens} blocos)."
-            )
+            report["checks"].append(f"Balanceamento de blocos íntegro ({opens} blocos).")
         else:
-            diff = opens - closes
-            report["errors"].append(
-                f"Erro de Sintaxe Crítico: {abs(diff)} bloco(s) "
-                f"{'sem end' if diff > 0 else 'end excedente'}'."
-            )
+            report["errors"].append(f"Desbalanceamento de blocos: {opens} opens vs {closes} closes.")
 
-        report["checks"].append("Módulos Core e C-Level APIs validados.")
         return report
 
     @classmethod

@@ -39,7 +39,7 @@ NOTEPADPP_CANONICAL_KEYS = {
     "ctrl+shift+tab": "root:switch-to-previous-tab",
     "ctrl+alt+d": "root:move-tab-to-opposite-panel",
     "ctrl+,": "doxoade:open-init-lua",
-    "ctrl+alt+u": "doxoade:toggle-litexl-in-tree",
+    "ctrl+alt+y": "doxoade:toggle-litexl-in-tree",
     "ctrl+alt+o": "treeview:add-project-folder",
     "ctrl+alt+r": "treeview:remove-project-folder",
     "ctrl+shift+l": "doxoade:open-log",

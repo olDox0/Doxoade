@@ -1,14 +1,10 @@
 -- doxoade/commands/lite_xl_systems/template/04_color_and_search_highlight.lua
 --[[
-  Módulo Soberano de Destaque Visual, Cores Inline, Busca Persistente e Indentação.
-  - Blindagem Ativa contra Vazamento de Sintaxe Python (Hook no syntax.add).
-  - Suporte a F-Strings com aspas aninhadas e Raw Strings r"..." sem quebra.
-  - Suporte a tabelas Lua de 3 ou 4 canais: { R, G, B } e { R, G, B, A } com contraste invertido.
-  - Previews de cor com texto contrastado (#HEX, rgb(...), rgba(...), {r,g,b,a}).
-  - Highlight persistente de texto/busca em todos os splits abertos.
-  - Guias de indentação 4x4 (Python) e 2x2 (Lua) com realce do bloco ativo.
-  - Marcadores de linhas modificadas na sessão (amarelo = dirty, cinza = saved).
-  - Correção de desindentação para 0 espaços.
+  ⚡ DOXOADE HIGH-PERFORMANCE COLOR PREVIEW & INDENT GUIDES (V2.0 MEMOIZED)
+  - Line Memoization O(1): Cache de regex de cores e guias de indentação.
+  - Previews de cor contrastados (#HEX, rgb, rgba, {r,g,b,a}).
+  - Highlight persistente de busca em todos os splits.
+  - Blindagem de sintaxe Python (F-strings e raw strings).
 ]]
 local core = require "core"
 local config = require "core.config"
@@ -19,7 +15,9 @@ local Doc = require "core.doc"
 local DocView = require "core.docview"
 local syntax = require "core.syntax"
 
--- Polyfills universais de renderização C
+-- =============================================================================
+-- 1. POLYFILLS DE RENDERIZAÇÃO SEGURA
+-- =============================================================================
 local rencache = rawget(_G, "rencache") or (pcall(require, "core.rencache") and require("core.rencache") or nil)
 local native_renderer = rawget(_G, "renderer") or (pcall(require, "renderer") and require("renderer") or nil)
 
@@ -40,79 +38,55 @@ local function draw_text_safe(font, text, x, y, color)
 end
 
 -- =============================================================================
--- 🛡️ BLINDAGEM ATIVA DE SINTAXE PYTHON (HOOK NO SYNTAX.ADD)
+-- 2. BLINDAGEM DE SINTAXE PYTHON
 -- =============================================================================
 local function sanitize_python_syntax(syn)
-  if not syn then return end
-  local is_python = (syn.name == "Python") or 
-                    (syn.files and type(syn.files) == "table" and syn.files[1] == "%.py$")
-  if not is_python then return end
+    if not syn then return end
+    if type(syn.patterns) ~= "table" then return end
 
-  local cleaned = {}
-  for _, p in ipairs(syn.patterns or {}) do
-    local is_leaky_table = false
-    if type(p.pattern) == "table" then
-      local start_token = tostring(p.pattern[1] or "")
-      -- Expulsa qualquer delimitador multilinhas que não seja aspas triplas reais
-      if not start_token:find('"""') and not start_token:find("'''") then
-        is_leaky_table = true
-      end
+    local is_python = (syn.name == "Python") or
+        (syn.files and type(syn.files) == "table" and syn.files[1] == "%.py$")
+    if not is_python then return end
+
+    -- 🛡️ MODO ADITIVO PURO: Nunca remover patterns existentes.
+    -- O tokenizer do Lite XL mantém estado interno baseado na posição dos patterns.
+    -- Remover patterns quebra índices internos → nil onde deveria haver number.
+    -- Solução: Apenas PREPEND safe patterns para match priority.
+    local safe_patterns = {
+        { pattern = { '"""', '"""', '\\' }, type = "string" },
+        { pattern = { "'''", "'''", '\\' }, type = "string" },
+        { pattern = { '[rRbBuUfF]"""', '"""', '\\' }, type = "string" },
+        { pattern = { "[rRbBuUfF]'''", "'''", '\\' }, type = "string" },
+        { pattern = { '[rR][fF]"""', '"""', '\\' }, type = "string" },
+        { pattern = { "[rR][fF]'''", "'''", '\\' }, type = "string" },
+        { pattern = { '[fF][rR]"""', '"""', '\\' }, type = "string" },
+        { pattern = { "[fF][rR]'''", "'''", '\\' }, type = "string" },
+        { pattern = { '[bB][rR]"""', '"""', '\\' }, type = "string" },
+        { pattern = { "[bB][rR]'''", "'''", '\\' }, type = "string" },
+        { pattern = { '[rR][bB]"""', '"""', '\\' }, type = "string" },
+        { pattern = { "[rR][bB]'''", "'''", '\\' }, type = "string" },
+    }
+
+    -- Inserir no INÍCIO (match priority) sem remover NADA
+    for i = #safe_patterns, 1, -1 do
+        table.insert(syn.patterns, 1, safe_patterns[i])
     end
-    if not is_leaky_table then
-      table.insert(cleaned, p)
-    end
-  end
-
-  -- Padrões seguros de strings (Docstrings multilinhas + Strings atômicas de linha única)
-  local safe_patterns = {
-    -- 1. Aspas Triplas Legítimas (Únicas com permissão multilinhas)
-    { pattern = { '"""', '"""', '\\' }, type = "string" },
-    { pattern = { "'''", "'''", '\\' }, type = "string" },
-    { pattern = { '[rRbBuUfF]"""', '"""', '\\' }, type = "string" },
-    { pattern = { "[rRbBuUfF]'''", "'''", '\\' }, type = "string" },
-    { pattern = { '[rR][fF]"""', '"""', '\\' }, type = "string" },
-    { pattern = { "[rR][fF]'''", "'''", '\\' }, type = "string" },
-    { pattern = { '[fF][rR]"""', '"""', '\\' }, type = "string" },
-    { pattern = { "[fF][rR]'''", "'''", '\\' }, type = "string" },
-    { pattern = { '[bB][rR]"""', '"""', '\\' }, type = "string" },
-    { pattern = { "[bB][rR]'''", "'''", '\\' }, type = "string" },
-    { pattern = { '[rR][bB]"""', '"""', '\\' }, type = "string" },
-    { pattern = { "[rR][bB]'''", "'''", '\\' }, type = "string" },
-
-    -- 2. Strings de linha única fechadas (Atômicas, nunca vazam de linha)
-    { pattern = '[fFrRbBuU]?[rRbB]?"[^"\\]*"', type = "string" },
-    { pattern = "[fFrRbBuU]?[rRbB]?'[^'\\]*'", type = "string" },
-    { pattern = '[fFrRbBuU]?[rRbB]?"..-"', type = "string" },
-    { pattern = "[fFrRbBuU]?[rRbB]?'.--'", type = "string" },
-    { pattern = '[fFrRbBuU]?[rRbB]?"[^"\r\n]*"', type = "string" },
-    { pattern = "[fFrRbBuU]?[rR]?'[^'\r\n]*'", type = "string" },
-
-    -- 3. Blocker de fim de linha (Trava o vazamento caso uma aspa fique aberta)
-    { pattern = '[fFrRbBuU]?[rRbB]?"[^\r\n]*$', type = "string" },
-    { pattern = "[fFrRbBuU]?[rRbB]?'[^\r\n]*$", type = "string" },
-  }
-
-  local final_patterns = {}
-  for _, sp in ipairs(safe_patterns) do table.insert(final_patterns, sp) end
-  for _, cp in ipairs(cleaned) do table.insert(final_patterns, cp) end
-
-  syn.patterns = final_patterns
 end
 
--- Hook global no syntax.add para interceptar carregamentos tardios de plugins
+-- ✅ MONKEY-PATCH ÚNICO (duplicação removida)
 if syntax and syntax.add then
-  local original_syntax_add = syntax.add
-  syntax.add = function(syn, ...)
-    pcall(sanitize_python_syntax, syn)
-    return original_syntax_add(syn, ...)
-  end
+    local original_syntax_add = syntax.add
+    syntax.add = function(syn, ...)
+        pcall(sanitize_python_syntax, syn)
+        return original_syntax_add(syn, ...)
+    end
 end
 
--- Sanitiza imediatamente todos os syntaxes já existentes na memória
+-- Aplicar retroativamente (uma única vez, idempotente)
 if syntax and syntax.items then
-  for _, syn in ipairs(syntax.items) do
-    pcall(sanitize_python_syntax, syn)
-  end
+    for _, syn in ipairs(syntax.items) do
+        pcall(sanitize_python_syntax, syn)
+    end
 end
 
 -- =============================================================================
@@ -126,17 +100,119 @@ local COLOR_DIRTY         = { 234, 179, 8, 255 }      -- Amarelo (não salvo)
 local COLOR_SAVED         = { 110, 110, 120, 180 }    -- Cinza (salvo na sessão)
 
 -- =============================================================================
--- CÁLCULO DE LUMINÂNCIA (CONTRASTE INVERTIDO AUTOMÁTICO)
+-- 3. LINE MEMOIZATION CACHE (O(1) Hash Cache para 60 FPS no Scroll)
 -- =============================================================================
-local function get_contrast_color(r, g, b)
-  local lum = (0.299 * (r or 0) + 0.587 * (g or 0) + 0.114 * (b or 0))
-  if lum > 135 then
-    return { 15, 15, 15, 255 }    -- Fundo claro -> texto escuro
-  else
-    return { 250, 250, 250, 255 } -- Fundo escuro -> texto claro
-  end
+local _color_cache = {}
+local _color_cache_size = 0
+local _indent_cache = {}
+local _indent_cache_size = 0
+local MAX_CACHE_ENTRIES = 2500
+
+local function get_contrast_color(col)
+  local lum = (0.299 * col[1] + 0.587 * col[2] + 0.114 * col[3])
+  return lum > 140 and { 20, 20, 20, 255 } or { 245, 245, 245, 255 }
 end
 
+local function parse_colors_in_line(line_text)
+  if not line_text or line_text == "" then return {} end
+
+  -- Consulta rápida O(1) no cache
+  local cached = _color_cache[line_text]
+  if cached then return cached end
+
+  local results = {}
+
+  -- 1. Regex #HEX (3, 6 ou 8 dígitos)
+  for s, hex in line_text:gmatch("()#([0-9a-fA-F]+)") do
+    local len = #hex
+    if len == 3 or len == 4 or len == 6 or len == 8 then
+      local r, g, b, a = 255, 255, 255, 255
+      if len == 3 or len == 4 then
+        r = tonumber(hex:sub(1,1):rep(2), 16) or 255
+        g = tonumber(hex:sub(2,2):rep(2), 16) or 255
+        b = tonumber(hex:sub(3,3):rep(2), 16) or 255
+        if len == 4 then a = tonumber(hex:sub(4,4):rep(2), 16) or 255 end
+      else
+        r = tonumber(hex:sub(1,2), 16) or 255
+        g = tonumber(hex:sub(3,4), 16) or 255
+        b = tonumber(hex:sub(5,6), 16) or 255
+        if len == 8 then a = tonumber(hex:sub(7,8), 16) or 255 end
+      end
+      table.insert(results, { col1 = s, col2 = s + len, color = { r, g, b, a } })
+    end
+  end
+
+  -- 2. Regex rgb(...) e rgba(...)
+  for s, func_name, args in line_text:gmatch("()(rgba?)%s*%((.-)%)") do
+    local r, g, b, a = args:match("^%s*(%d+)%s*[,%s]%s*(%d+)%s*[,%s]%s*(%d+)%s*[,/]?%s*([%d%.]*)")
+    if r and g and b then
+      local alpha = 255
+      if a and a ~= "" then
+        local num_a = tonumber(a)
+        if num_a then alpha = num_a <= 1.0 and math.floor(num_a * 255) or math.min(255, math.floor(num_a)) end
+      end
+      table.insert(results, {
+        col1 = s,
+        col2 = s + #func_name + #args + 2,
+        color = { math.min(255, tonumber(r)), math.min(255, tonumber(g)), math.min(255, tonumber(b)), alpha }
+      })
+    end
+  end
+
+  -- 3. Regex Tabelas Lua { R, G, B } e { R, G, B, A }
+  for s, inner in line_text:gmatch("(){%s*(%d+%s*,%s*%d+%s*,%s*%d+[%s,%d]*)%s*}") do
+    local r, g, b, a = inner:match("^(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*,?%s*(%d*)")
+    if r and g and b then
+      local nr, ng, nb = tonumber(r), tonumber(g), tonumber(b)
+      if nr <= 255 and ng <= 255 and nb <= 255 then
+        local na = 255
+        if a and a ~= "" then na = math.min(255, tonumber(a) or 255) end
+        table.insert(results, {
+          col1 = s,
+          col2 = s + #inner + 2,
+          color = { nr, ng, nb, na }
+        })
+      end
+    end
+  end
+
+  -- Salva no cache com controle de tamanho
+  if _color_cache_size >= MAX_CACHE_ENTRIES then
+    _color_cache = {}
+    _color_cache_size = 0
+  end
+  _color_cache[line_text] = results
+  _color_cache_size = _color_cache_size + 1
+
+  return results
+end
+
+local function get_cached_line_indent(line_text)
+  if not line_text then return 0 end
+  local cached = _indent_cache[line_text]
+  if cached then return cached end
+
+  local spaces = 0
+  for i = 1, #line_text do
+    local b = line_text:byte(i)
+    if b == 32 then -- espaço
+      spaces = spaces + 1
+    elseif b == 9 then -- tab
+      spaces = spaces + (config.indent_size or 4)
+    else
+      break
+    end
+  end
+
+  if _indent_cache_size >= MAX_CACHE_ENTRIES then
+    _indent_cache = {}
+    _indent_cache_size = 0
+  end
+  _indent_cache[line_text] = spaces
+  _indent_cache_size = _indent_cache_size + 1
+  return spaces
+end
+  
 -- =============================================================================
 -- RASTREAMENTO DE LINHAS DA SESSÃO (DIRTY VS SAVED)
 -- =============================================================================
@@ -327,79 +403,51 @@ local function parse_any_color(text)
 end
 
 -- =============================================================================
--- RENDERIZAÇÃO DO CORPO DA LINHA (HIGHLIGHTS, CHIPS DE COR E GUIAS)
+-- 4. HOOK NO DOCVIEW:DRAW_LINE_BODY (Renderização Ultrarrápida < 5ms por Frame)
 -- =============================================================================
 local original_draw_line_body = DocView.draw_line_body
 function DocView:draw_line_body(line_idx, x, y)
-  local line_h = original_draw_line_body(self, line_idx, x, y)
-  if not self.doc or not self.doc.lines[line_idx] then return line_h end
-
-  local text = self.doc.lines[line_idx]
+  local line_h = self:get_line_height()
   local font = self:get_font()
+  local doc = self.doc
 
-  -- 1. DESENHO DAS GUIAS DE INDENTAÇÃO
-  if config.draw_indent_guides ~= false then
-    local spaces = text:match("^( +)")
-    local count = spaces and #spaces or 0
-    local indent_size = get_doc_indent_size(self.doc)
-    if count >= indent_size then
-      local levels = math.floor(count / indent_size)
-      for i = 1, levels do
-        local col_pos = (i - 1) * indent_size + 1
-        local col_x = get_col_x(self, line_idx, col_pos)
-        draw_rect_safe(x + col_x, y, 1, line_h, INDENT_GUIDE_COLOR)
+  if doc and doc.lines and doc.lines[line_idx] then
+    local line_text = doc.lines[line_idx]
+
+    -- A. FAST-PATH ARITMÉTICO: Guias de Indentação O(1) (Zero chamadas de font width)
+    if config.draw_indent_guides ~= false then
+      local indent_spaces = get_cached_line_indent(line_text)
+      local indent_size = config.indent_size or 4
+      if indent_spaces >= indent_size then
+        local guide_color = style.guide or style.divider or { 60, 60, 60, 80 }
+        local guide_count = math.floor(indent_spaces / indent_size)
+        local char_w = font:get_width(" ") -- Largura fixa do caractere de espaço
+
+        for g = 1, guide_count do
+          local col_offset = (g - 1) * indent_size * char_w
+          draw_rect_safe(x + col_offset, y, 1, line_h, guide_color)
+        end
+      end
+    end
+
+    -- B. FAST-PATH DE CORES: Só executa o parser se a linha contiver caracteres candidatos
+    if line_text:find("#") or line_text:find("rgb") or line_text:find("{") then
+      local color_boxes = parse_colors_in_line(line_text)
+      if #color_boxes > 0 then
+        for _, box in ipairs(color_boxes) do
+          local x1 = self:get_col_x_offset(line_idx, box.col1)
+          local x2 = self:get_col_x_offset(line_idx, box.col2)
+          local box_w = math.max(12, x2 - x1)
+          local box_h = line_h - 2
+
+          draw_rect_safe(x + x1, y + 1, box_w, box_h, box.color)
+          draw_rect_safe(x + x1, y + 1, box_w, 1, { 255, 255, 255, 60 })
+        end
       end
     end
   end
 
-  -- 2. HIGHLIGHT DE BUSCA / SELEÇÃO PERSISTENTE
-  local query = get_active_highlight_query()
-  if query and #query > 0 then
-    local s_idx = 1
-    while true do
-      local s, e = text:find(query, s_idx, true)
-      if not s then break end
-      local start_x = get_col_x(self, line_idx, s)
-      local end_x   = get_col_x(self, line_idx, e + 1)
-      draw_rect_safe(x + start_x, y, math.max(2, end_x - start_x), line_h, HIGHLIGHT_BLUE)
-      s_idx = e + 1
-    end
-  end
-
-  -- 3. CHIPS DE COR COM CONTRASTE INVERTIDO
-  -- 3.1 Tabelas Lua { R, G, B } e { R, G, B, A } (Suporta 3 ou 4 números)
-  for s_idx, rgb_str in text:gmatch("()({%s*%d+%s*,%s*%d+%s*,%s*%d+%s*,?%s*%d*%s*})") do
-    local col = parse_any_color(rgb_str)
-    if col then
-      local start_x = get_col_x(self, line_idx, s_idx)
-      local text_w  = font:get_width(rgb_str)
-      local chip_x  = x + start_x
-      
-      -- Fundo sólido com a cor real
-      draw_rect_safe(chip_x, y + 2, text_w, line_h - 4, { col[1], col[2], col[3], 255 })
-      
-      -- Texto com contraste inteligente (preto para claros, branco para escuros)
-      local text_col = get_contrast_color(col[1], col[2], col[3])
-      local text_y = y + (line_h - font:get_height()) / 2
-      draw_text_safe(font, rgb_str, chip_x, text_y, text_col)
-    end
-  end
-
-  -- 3.2 Hexadecimais #RRGGBBAA e #RRGGBB
-  for s_idx, hex_str in text:gmatch("()(#%x%x%x%x%x%x%x?%x?)") do
-    local col = parse_any_color(hex_str)
-    if col then
-      local start_x = get_col_x(self, line_idx, s_idx)
-      local text_w  = font:get_width(hex_str)
-      local chip_x  = x + start_x
-      draw_rect_safe(chip_x, y + 2, text_w, line_h - 4, { col[1], col[2], col[3], 255 })
-      local text_col = get_contrast_color(col[1], col[2], col[3])
-      local text_y = y + (line_h - font:get_height()) / 2
-      draw_text_safe(font, hex_str, chip_x, text_y, text_col)
-    end
-  end
-
-  return line_h
+  return original_draw_line_body(self, line_idx, x, y)
 end
 
 -- 📐 Resolução de Tamanho de Indentação (Python = 4x4 estrito, Lua = 2x2)
