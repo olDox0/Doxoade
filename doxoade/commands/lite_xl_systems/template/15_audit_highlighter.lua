@@ -1,7 +1,10 @@
 -- doxoade/commands/lite_xl_systems/template/15_audit_highlighter.lua
--- =============================================================================
--- 15. IN-EDITOR AUDIT HIGHLIGHTER (ISOLAMENTO POR ABA, TOOLTIPS & AUTO-CLEAR)
--- =============================================================================
+--[[
+  ⚖️ DOXOADE AUDIT HIGHLIGHTER (Ma'at Bridge V2.0)
+  - Destaca visualmente no gutter e no corpo do texto os achados do Ma'at Check.
+  - Tooltips flutuantes inteligentes ao passar o mouse.
+  - Integração com Khonsu Throttle para leitura eficiente do check_bridge.lua.
+]]
 local core = require "core"
 local config = require "core.config"
 local style = require "core.style"
@@ -11,7 +14,6 @@ local Doc = require "core.doc"
 local DocView = require "core.docview"
 local RootView = require "core.rootview"
 
--- 🛡️ Polyfill de Renderização
 local rencache = rawget(_G, "rencache") or (pcall(require, "core.rencache") and require("core.rencache") or nil)
 local native_renderer = rawget(_G, "renderer") or (pcall(require, "renderer") and require("renderer") or nil)
 
@@ -31,9 +33,6 @@ local function draw_text_safe(font, text, x, y, color)
   end
 end
 
--- ═══════════════════════════════════════════════════════════
--- MATRIZ DE CORES SEMÂNTICAS
--- =============================================================
 local CATEGORY_THEMES = {
   STYLE           = { color = { 168, 85, 247, 255 },  tint = { 168, 85, 247, 18 },  name = "Estilo",       symbol = "🟣" },
   UNUSED          = { color = { 234, 179, 8, 255 },   tint = { 234, 179, 8, 18 },   name = "Não Utilizado", symbol = "🟡" },
@@ -49,7 +48,6 @@ local function get_finding_theme(finding)
   if not finding then return CATEGORY_THEMES.DEFAULT end
   local cat = tostring(finding.category or ""):upper()
   local sev = tostring(finding.severity or ""):upper()
-
   if sev == "CRITICAL" or cat == "SYNTAX" or cat == "SYNTAX_INDENT" or cat == "INDENT" then
     return CATEGORY_THEMES.SYNTAX
   elseif cat == "SECURITY" then
@@ -61,13 +59,9 @@ local function get_finding_theme(finding)
   elseif cat == "QA-REMINDER" or cat == "TODO" then
     return CATEGORY_THEMES["QA-REMINDER"]
   end
-
   return CATEGORY_THEMES[cat] or (sev == "ERROR" and CATEGORY_THEMES.SYNTAX) or CATEGORY_THEMES.DEFAULT
 end
 
--- ═══════════════════════════════════════════════════════════
--- ESTADO E CONTRATO DA PONTE
--- =============================================================
 local AuditState = {
   active_file = nil,
   relative_file = nil,
@@ -87,7 +81,6 @@ local HoverTooltip = {
   h = 40,
 }
 
--- 🎯 Validador: Garante que os marcadores só apareçam no arquivo auditado
 local function is_target_doc(doc)
   if not doc or not doc.filename or not AuditState.active_file then
     return false
@@ -95,7 +88,6 @@ local function is_target_doc(doc)
   local doc_path = tostring(system.absolute_path(doc.filename) or doc.filename):gsub("\\", "/"):lower()
   local target_abs = tostring(AuditState.active_file):gsub("\\", "/"):lower()
   local target_rel = tostring(AuditState.relative_file or ""):gsub("\\", "/"):lower()
-
   if doc_path == target_abs then
     return true
   end
@@ -105,35 +97,28 @@ local function is_target_doc(doc)
   return false
 end
 
--- 🔄 Carregador Nativo do check_bridge.lua
 local function load_audit_bridge()
   if not core.project_directories or #core.project_directories == 0 then return end
   local p = core.project_directories[1]
   local root = tostring(type(p) == "table" and (p.path or p.name) or p)
   local bridge_path = root .. PATHSEP .. ".doxoade" .. PATHSEP .. "check_bridge.lua"
-
   local info = system.get_file_info(bridge_path)
   if not info or info.mtime == AuditState.last_mtime then return end
-
   AuditState.last_mtime = info.mtime
 
-  -- 🛡️ Política de confiança (Ma'at): nenhum código de projeto
-  -- não confiável é executado dentro do Lite XL.
   local trust_marker = root .. PATHSEP .. ".doxoade" .. PATHSEP .. "TRUSTED"
   if not system.get_file_info(trust_marker) then
     return
   end
-  
+
   local ok, data = pcall(dofile, bridge_path)
   if ok and type(data) == "table" and data.findings then
     AuditState.findings_by_line = {}
     AuditState.active_file = data.active_file
     AuditState.relative_file = data.relative_file
     AuditState.summary = data.summary or { errors = 0, warnings = 0, info = 0, total = 0 }
-
     rawset(_G, "_DOXOADE_AUDIT_SUMMARY", AuditState.summary)
     rawset(_G, "_DOXOADE_AUDIT_CHECKED", true)
-
     for _, f in ipairs(data.findings) do
       if f.line and f.line > 0 then
         AuditState.findings_by_line[f.line] = f
@@ -143,15 +128,6 @@ local function load_audit_bridge()
   end
 end
 
-core.add_thread(function()
-  while true do
-    pcall(load_audit_bridge)
-    coroutine.yield(0.3)
-  end
-end)
-
--- No 15_audit_highlighter.lua:
--- Se Khonsu estiver ativo, usa throttle para não bater no disco a cada frame
 local function safe_trigger_audit_reload()
   if rawget(_G, "Khonsu") and Khonsu.throttle then
     Khonsu.throttle("audit_bridge_reload", 0.3, load_audit_bridge)
@@ -160,7 +136,14 @@ local function safe_trigger_audit_reload()
   end
 end
 
--- 🧹 Remoção Dinâmica do Erro ao Alterar/Digitar na Linha
+core.add_thread(function()
+  while true do
+    safe_trigger_audit_reload()
+    coroutine.yield(0.3)
+  end
+end)
+
+-- Remoção Dinâmica do Erro ao Alterar/Digitar na Linha
 local original_doc_insert = Doc.insert
 function Doc:insert(line, col, text)
   if is_target_doc(self) and AuditState.findings_by_line[line] then
@@ -183,16 +166,11 @@ function Doc:remove(line1, col1, line2, col2)
   return original_doc_remove(self, line1, col1, line2, col2)
 end
 
--- ═══════════════════════════════════════════════════════════
--- 1. RENDERIZADOR NO GUTTER (ISOLADO POR ABA)
--- =============================================================
 local original_draw_line_gutter = DocView.draw_line_gutter
 function DocView:draw_line_gutter(line, x, y, width)
   local res = original_draw_line_gutter and original_draw_line_gutter(self, line, x, y, width) or 0
-
   pcall(function()
     if not is_target_doc(self.doc) then return end
-
     local finding = AuditState.findings_by_line[line]
     if finding then
       local theme = get_finding_theme(finding)
@@ -200,38 +178,27 @@ function DocView:draw_line_gutter(line, x, y, width)
       local line_h = self.get_line_height and self:get_line_height() or 16
       local dot_x = x + 3
       local dot_y = y + (line_h - dot_size) / 2
-
       draw_rect_safe(dot_x, dot_y, dot_size, dot_size, theme.color)
     end
   end)
-
   return res
 end
 
--- ═══════════════════════════════════════════════════════════
--- 2. RENDERIZADOR NO CORPO DA LINHA (ISOLADO POR ABA)
--- =============================================================
 local original_draw_line_body = DocView.draw_line_body
 function DocView:draw_line_body(line, x, y)
   pcall(function()
     if not is_target_doc(self.doc) then return end
-
     local finding = AuditState.findings_by_line[line]
     if finding then
       local theme = get_finding_theme(finding)
       local line_h = self.get_line_height and self:get_line_height() or 16
-
       draw_rect_safe(x, y, self.size.x, line_h, theme.tint)
       draw_rect_safe(x, y, 2, line_h, theme.color)
     end
   end)
-
   return original_draw_line_body(self, line, x, y)
 end
 
--- ═══════════════════════════════════════════════════════════
--- 3. TOOLTIP NO HOVER DO MOUSE (GUTTER & LINHA)
--- =============================================================
 local original_docview_mouse_moved = DocView.on_mouse_moved
 function DocView:on_mouse_moved(x, y, dx, dy)
   pcall(function()
@@ -239,19 +206,16 @@ function DocView:on_mouse_moved(x, y, dx, dy)
       local line_h = self:get_line_height()
       local line = math.floor((y - self.position.y + self.scroll.y) / line_h) + 1
       local finding = AuditState.findings_by_line[line]
-
       if finding then
         local theme = get_finding_theme(finding)
         local font = style.font or style.code_font
         local main_text = string.format("%s [%s] %s", theme.symbol, theme.name:upper(), finding.message)
         local sub = finding.suggestion and finding.suggestion ~= "" and ("🔧 " .. finding.suggestion) or ""
-
         local max_w = font:get_width(main_text)
         if sub ~= "" then
           local sw = font:get_width(sub)
           if sw > max_w then max_w = sw end
         end
-
         HoverTooltip.text = main_text
         HoverTooltip.sub_text = sub
         HoverTooltip.theme = theme

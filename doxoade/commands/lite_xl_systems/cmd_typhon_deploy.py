@@ -33,7 +33,7 @@ def cmd_deploy_production(force, launch):
             print(f"{Fore.CYAN}💾 Backup de segurança: {result['backup'].name}{Fore.RESET}")
         if launch:
             print()
-            TyphonDeployEngine.launch("production", exorcise=False)
+            TyphonDeployEngine.launch("production", exorcise=True)
     else:
         print(f"\n{Fore.RED}✖ Deploy falhou: {result['error']}{Fore.RESET}")
         if result["backup"]:
@@ -41,7 +41,7 @@ def cmd_deploy_production(force, launch):
 
 @deploy_group.command("sandbox", help="Deploy em SANDBOX (isolamento total + launch automático).")
 @click.option("--launch/--no-launch", "-l/-nl", default=True, help="Lança o Lite XL após deploy (Padrão: True).")
-@click.option("--exorcise", is_flag=True, default=False, help="Mata instâncias antigas de sandbox.")
+@click.option("--exorcise/--no-exorcise", default=True, help="Mata instâncias antigas de sandbox.")
 def cmd_deploy_sandbox(launch, exorcise):
     """Deploy isolado no sandbox sem interferir na produção."""
     print(f"\n{Fore.BLUE}{Style.BRIGHT}🔵 DEPLOY SANDBOX{Style.RESET_ALL}\n")
@@ -57,7 +57,7 @@ def cmd_deploy_sandbox(launch, exorcise):
 
 @deploy_group.command("test", help="Deploy em TEST (chaos injection + launch automático).")
 @click.option("--launch/--no-launch", "-l/-nl", default=True, help="Lança o Lite XL após deploy (Padrão: True).")
-@click.option("--exorcise", is_flag=True, default=False, help="Mata instâncias antigas de teste.")
+@click.option("--exorcise/--no-exorcise", default=True, help="Mata instâncias antigas de teste.")
 def cmd_deploy_test(launch, exorcise):
     """Deploy de teste com telemetria forense e launch automático."""
     print(f"\n{Fore.YELLOW}{Style.BRIGHT}🟡 DEPLOY TEST{Style.RESET_ALL}\n")

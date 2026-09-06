@@ -23,6 +23,7 @@ from doxoade.commands.lite_xl_systems.chaos_canary_probe import run_canary_probe
 from doxoade.commands.lite_xl_systems.cmd_typhon_deploy import deploy_group
 from doxoade.commands.lite_xl_systems.typhon_doxly.cmd_typhon_doxly import typhon_doxly_group
 
+
 @click.group("lite-xl", help="⚡ Gestão, diagnóstico e automação do Lite XL.")
 def lite_xl_group():
     """Grupo de comandos do ecossistema Lite XL."""
@@ -548,53 +549,30 @@ def cmd_check_keys(detailed):
             click.echo(f"  {b['raw_key']:<22} => {b['command']}")
 
 
-@lite_xl_group.command("open", help="Abre arquivos ou anexa diretórios ao Lite XL.")
+@lite_xl_group.command("open", help="📂 Abre arquivo/pasta no Lite XL (reutiliza instância viva via IPC).")
 @click.argument("target", required=False, default=".")
-@click.option("--config-only", "-c", is_flag=True, help="Apenas abre o init.lua no editor padrão.")
-def cmd_open(target, config_only):
-    if os.environ.get("_DOXOADE_LXL_GUARD") == "1":
-        return
-    os.environ["_DOXOADE_LXL_GUARD"] = "1"
+@click.option("--new", "-n", is_flag=True, help="Força nova instância (ignora IPC).")
+def cmd_open(target: str, new: bool):
+    """Abre arquivo ou pasta no Lite XL, reutilizando instância viva via IPC se possível."""
+    resolved, exists, is_dir = LiteXLEngine.resolve_target_path(target)
+    if not resolved or not exists:
+        click.echo(f"{Fore.RED}✖ Caminho não existe no disco: {target}{Fore.RESET}")
+        sys.exit(1)
 
-    init_file = LiteXLEngine.get_init_lua_path()
-    if config_only:
-        if not init_file.exists():
-            click.echo(f"{Fore.RED}init.lua ainda não existe.{Fore.RESET}")
-            return
-        if sys.platform == "win32":
-            os.startfile(str(init_file))
-        else:
-            subprocess.run(["xdg-open", str(init_file)], check=False)
-        return
-
-    resolved_path, exists, is_dir = LiteXLEngine.resolve_target_path(target)
-
-    if not exists:
-        click.echo(f"{Fore.RED}✖ O caminho especificado não existe no disco:{Fore.RESET} {resolved_path}")
-        return
-
-    item_type = "Pasta/Projeto" if is_dir else "Arquivo"
-
-    if LiteXLEngine.is_running():
-        ok, msg = LiteXLEngine.send_to_running_instance(target)
+    if LiteXLEngine.is_process_alive() and not new:
+        ok, sent_path = LiteXLEngine.send_to_running_instance(resolved)
         if ok:
-            click.echo(f"{Fore.GREEN}✔ {item_type} despachado para o Lite XL ativo:{Fore.RESET} {resolved_path}")
+            click.echo(f"{Fore.GREEN}✔ Enviado para instância viva via IPC: {sent_path}{Fore.RESET}")
             return
+        else:
+            click.echo(f"{Fore.YELLOW}⚠ IPC falhou ({sent_path}), lançando nova instância...{Fore.RESET}")
 
-    LiteXLEngine.kill_ghost_processes()
-    native_exe = LiteXLEngine.find_executable()
-
-    if native_exe:
-        working_dir = str(Path(resolved_path).parent if Path(resolved_path).is_file() else resolved_path)
-        subprocess.Popen(
-            [str(native_exe), resolved_path],
-            cwd=working_dir,
-            close_fds=True
-        )
-        click.echo(f"{Fore.GREEN}✔ Lite XL aberto com sucesso:{Fore.RESET} {resolved_path}")
+    ok, msg = LiteXLEngine.launch_with_safety_guard(resolved, restore_session=True)
+    if ok:
+        click.echo(f"{Fore.GREEN}✔ Lite XL iniciado: {msg}{Fore.RESET}")
     else:
-        click.echo(f"{Fore.RED}✖ Executável lite-xl.exe não encontrado.{Fore.RESET}")
-
+        click.echo(f"{Fore.RED}✖ Falha ao iniciar: {msg}{Fore.RESET}")
+        sys.exit(1)
 
 @lite_xl_group.command("forensic", help="🦅 Analisa o session_log.txt do Lite XL e gera autópsia forense.")
 def cmd_forensic():
@@ -1401,6 +1379,172 @@ def cmd_sandbox(watch):
             proc.kill()
             click.echo("✔ Sandbox encerrado pelo usuário.")
 
+@lite_xl_group.command("terminal-shims", help="⌨️ Instala atalhos globais (lite-xl, litexl) no terminal.")
+def cmd_terminal_shims():
+    """Instala shims .cmd no PATH do sistema para invocar o Lite XL via terminal."""
+    installed = LiteXLEngine.install_terminal_shims()
+    if installed:
+        click.echo(f"{Fore.GREEN}✔ Shims instalados com sucesso:{Fore.RESET}")
+        for shim in installed:
+            click.echo(f"   {Fore.CYAN}↳ {shim}{Fore.RESET}")
+        click.echo(f"\n{Fore.YELLOW}💡 Reinicie o terminal para usar 'lite-xl <arquivo>' diretamente.{Fore.RESET}")
+    else:
+        click.echo(f"{Fore.RED}✖ Falha ao instalar shims.{Fore.RESET}")
+
+# ═══════════════════════════════════════════════════════════════
+# 🗂️ VULCAN INDEX & SEARCH BRIDGE V2 (Indexação + Busca Paralela)
+# ═══════════════════════════════════════════════════════════════
+VULCAN_IGNORED_DIRS = {
+    ".git", "venv", ".venv", "env", "__pycache__", "build", "dist",
+    "node_modules", ".idea", ".vscode", ".pytest_cache", ".mypy_cache",
+    ".ruff_cache", ".doxoade_cache",
+}
+VULCAN_IGNORED_EXTS = {
+    "pyc", "pyo", "pyd", "exe", "dll", "so", "dylib", "zip", "tar", "gz",
+    "png", "jpg", "jpeg", "gif", "ico", "pdf", "db", "sqlite", "sqlite3", "bin",
+}
+
+
+def _vulcan_build_index(root: Path) -> dict:
+    """Varre o projeto e grava o índice de arquivos (mtime+size)."""
+    index_path = root / ".doxoade" / "vulcan_index.json"
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    files = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in VULCAN_IGNORED_DIRS]
+        for fn in filenames:
+            ext = fn.rsplit(".", 1)[-1].lower() if "." in fn else ""
+            if ext in VULCAN_IGNORED_EXTS:
+                continue
+            fp = Path(dirpath) / fn
+            try:
+                st = fp.stat()
+                if st.st_size > 2_000_000:
+                    continue
+                files[fp.relative_to(root).as_posix()] = [st.st_mtime, st.st_size]
+            except Exception:
+                continue
+    payload = {"version": 1, "root": str(root), "built_at": time.time(),
+               "count": len(files), "files": files}
+    tmp = index_path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload), encoding="utf-8")
+    os.replace(tmp, index_path)  # atômico
+    return payload
+
+
+def _vulcan_load_index(root: Path) -> dict:
+    index_path = root / ".doxoade" / "vulcan_index.json"
+    if index_path.exists():
+        try:
+            data = json.loads(index_path.read_text(encoding="utf-8"))
+            if time.time() - data.get("built_at", 0) < 300:  # fresco: 5 min
+                return data
+        except Exception:
+            pass
+    return _vulcan_build_index(root)
+
+
+@lite_xl_group.command("index-build", help="🗂️ Constrói/atualiza o índice Vulcan do projeto.")
+@click.option("--project", "-p", default=None, help="Raiz do projeto (default: cwd).")
+def cmd_index_build(project):
+    root = Path(project).resolve() if project else Path.cwd().resolve()
+    t0 = time.time()
+    payload = _vulcan_build_index(root)
+    click.echo(f"{Fore.GREEN}✔ Índice Vulcan: {payload['count']} arquivos "
+               f"em {time.time() - t0:.2f}s{Fore.RESET}")
+
+
+@lite_xl_group.command("search-bridge", help="🔍 Busca indexada Vulcan (paralela) → .pot")
+@click.argument("query", required=False, default=None)
+@click.option("-o", "--output", default=None)
+@click.option("--request", default=None, help="Arquivo de pedido: L1=query L2=raiz L3=pot.")
+def cmd_search_bridge(query, output, request):
+    from concurrent.futures import ThreadPoolExecutor
+    project_root = None
+    out_path = Path(output) if output else None
+    if request:
+        lines = Path(request).read_text(encoding="utf-8", errors="replace").splitlines()
+        if lines and lines[0].strip():
+            query = lines[0].strip()
+        if len(lines) > 1 and lines[1].strip():
+            project_root = Path(lines[1].strip())
+        if len(lines) > 2 and lines[2].strip():
+            out_path = Path(lines[2].strip())
+    if not query or not query.strip():
+        return
+    root = (project_root or Path.cwd()).resolve()
+    out_path = out_path or (root / ".doxoade" / "search_results.pot")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    t0 = time.time()
+    index = _vulcan_load_index(root)
+    case_sensitive = query != query.lower()
+    needle = query if case_sensitive else query.lower()
+
+    hits, files_hit, scanned = [], 0, 0
+    MAX_HITS, MAX_FILES = 1000, 100
+
+    def scan_one(rel):
+        fp = root / rel
+        local = []
+        try:
+            with open(fp, "r", encoding="utf-8", errors="ignore") as f:
+                for lineno, line in enumerate(f, 1):
+                    target = line if case_sensitive else line.lower()
+                    if needle in target:
+                        local.append((rel, lineno, line.strip()))
+                        if len(local) >= 20:
+                            return local
+        except Exception:
+            pass
+        return local
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for result in pool.map(scan_one, list(index["files"].keys())):
+            scanned += 1
+            if result:
+                files_hit += 1
+                hits.extend(result)
+                if len(hits) >= MAX_HITS or files_hit >= MAX_FILES:
+                    break
+
+    out = [
+        "=" * 80,
+        f"  🔍 RESULTADOS DA BUSCA VULCAN: {query!r}",
+        f"  Ocorrências: {len(hits)} | Arquivos: {files_hit} | "
+        f"Índice: {index['count']} arquivos ({time.time() - t0:.2f}s)",
+        "  💡 Pressione [ENTER] em qualquer linha com 'arquivo:linha' para saltar!",
+        "=" * 80, "",
+    ]
+    if not hits:
+        out.append(f"  (Nenhum resultado encontrado para {query!r})")
+    else:
+        for rel, lineno, text in hits:
+            out.append(f"   {(root / rel).as_posix()}:{lineno}: {text}")
+        out.append("")
+
+    tmp = out_path.with_suffix(".tmp")
+    tmp.write_text("\n".join(out), encoding="utf-8")
+    os.replace(tmp, out_path)  # atômico: o Lua nunca lê parcial
+
+
+@lite_xl_group.command("bridge-install", help="🔌 Gera o mecanismo de acesso vulcan_search.cmd.")
+def cmd_bridge_install():
+    """Gera .cmd com o python ABSOLUTO — o bytecode compilado não depende de PATH/venv."""
+    user_cfg = Path(os.environ.get("LITE_USERDIR",
+                                   str(Path.home() / ".config" / "lite-xl")))
+    dox_dir = user_cfg / ".doxoade"
+    dox_dir.mkdir(parents=True, exist_ok=True)
+    cmd_path = dox_dir / "vulcan_search.cmd"
+    cmd_path.write_text(
+        "@echo off\r\n"
+        f'"{sys.executable}" -m doxoade lite-xl search-bridge '
+        '--request "%~dp0search_request.txt"\r\n',
+        encoding="ascii", errors="replace")
+    click.echo(f"{Fore.GREEN}✔ Mecanismo de acesso instalado:{Fore.RESET} {cmd_path}")
+    click.echo(f"   {Fore.CYAN}↳ Python absoluto: {sys.executable}{Fore.RESET}")
+
+
 # ═══════════════════════════════════════════════════════════
 # 🐉 TYPHON — Pipeline Supervisionado de Deploy
 # ═══════════════════════════════════════════════════════════
@@ -1577,3 +1721,4 @@ def cmd_typhon_test_deploy(watch):
     else:
         click.echo(f"  {Fore.RED}{Style.BRIGHT}✖ TEST-DEPLOY FALHOU ({result['verdict']}){Style.RESET_ALL}")
         click.echo(f"  {Fore.YELLOW}💡 O init real permanece intacto. Corrija os problemas e tente novamente.{Fore.RESET}\n")
+

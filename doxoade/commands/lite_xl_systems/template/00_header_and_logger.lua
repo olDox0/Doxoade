@@ -39,6 +39,29 @@ rawset(_G, "_DOXOADE_RUNTIME_INCIDENTS", {
 local rencache = rawget(_G, "rencache") or (pcall(require, "core.rencache") and require("core.rencache") or nil)
 local native_renderer = rawget(_G, "renderer") or (pcall(require, "renderer") and require("renderer") or nil)
 
+-- 🛡️ POLYFILL GLOBAL: Intercepta draw_rect para validar cor (anti-boolean crash)
+-- Resolve: "bad argument #5 to 'draw_rect' (table expected, got boolean)"
+local _validate_draw_color = function(c)
+    if type(c) ~= "table" then
+        return { 128, 128, 128, 255 } -- cinza fallback seguro
+    end
+    return c
+end
+
+if rencache and type(rencache.draw_rect) == "function" then
+    local _orig_rencache_dr = rencache.draw_rect
+    rencache.draw_rect = function(x, y, w, h, color)
+        return _orig_rencache_dr(x, y, w, h, _validate_draw_color(color))
+    end
+end
+
+if native_renderer and type(native_renderer.draw_rect) == "function" then
+    local _orig_renderer_dr = native_renderer.draw_rect
+    native_renderer.draw_rect = function(x, y, w, h, color)
+        return _orig_renderer_dr(x, y, w, h, _validate_draw_color(color))
+    end
+end
+
 local function draw_rect_safe(x, y, w, h, color)
   if rencache and rencache.draw_rect then
     rencache.draw_rect(x, y, w, h, color)
@@ -249,6 +272,39 @@ function Node:add_view(view)
 end
 
 -- =============================================================================
+-- 📥 DRAG-AND-DROP HANDLER (Abre arquivos arrastados do Explorer/Desktop)
+-- =============================================================================
+local original_rootview_on_file_dropped = RootView.on_file_dropped
+function RootView:on_file_dropped(file_path, x, y)
+    if file_path and type(file_path) == "string" and file_path ~= "" then
+        local info = system.get_file_info(file_path)
+        if info and info.type == "file" then
+            local doc = core.open_doc(file_path)
+            if doc then
+                core.root_view:open_doc(doc)
+                if core.log then
+                    core.log("📥 [DRAG-DROP] Arquivo aberto: " .. file_path)
+                end
+                core.redraw = true
+                return
+            end
+        elseif info and info.type == "dir" then
+            if core.add_project_directory then
+                core.add_project_directory(file_path)
+                if core.log then
+                    core.log("📂 [DRAG-DROP] Projeto anexado: " .. file_path)
+                end
+                core.redraw = true
+                return
+            end
+        end
+    end
+    if original_rootview_on_file_dropped then
+        return original_rootview_on_file_dropped(self, file_path, x, y)
+    end
+end
+
+-- =============================================================================
 -- 7. BANNER DE ALERTA NO ROOTVIEW (BOOT SHIELD)
 -- =============================================================================
 local original_rootview_draw = RootView.draw
@@ -294,3 +350,5 @@ pcall(function()
 end)
 
 append_session_log("BOOT", "=== SOVEREIGN BOOT OK ===")
+
+rawset(_G, "INDENT_GUIDE_ACTIVE", (config.draw_indent_guides ~= false))

@@ -265,7 +265,15 @@ class LiteXLProcess:
     ) -> Tuple[bool, str]:
         """Inicia o Lite XL com monitoramento de session_log e error.txt."""
         if restore_session:
-            LiteXLSnapshots.restore_workspace_state()
+            # 🛡️ Anti-regressão: NUNCA sobrescreve sessão viva com backup velho.
+            user_dir = LiteXLPaths.get_user_dir()
+            live_state = (
+                (user_dir / "session.lua").exists()
+                or (user_dir / "workspace").exists()
+                or (user_dir / ".doxoade" / "sovereign_session.lua").exists()
+            )
+            if not live_state:
+                LiteXLSnapshots.restore_workspace_state()
         else:
             LiteXLSnapshots.backup_workspace_state()
 

@@ -115,3 +115,40 @@ def cmd_chaos(subsystem: str | None, stress: bool):
     if summary["silent"] > 0:
         print(f"{Fore.RED}✖ Falha de cobertura: {summary['silent']} modos de falha silenciosos detectados.{Fore.RESET}")
         sys.exit(1)
+
+@typhon_doxly_group.command("fuzz", help="🐺 Executa teste de mutação automática auditando as 5 perguntas (O que, Quem, Onde, Quando, Por que).")
+@click.option("--runs", "-n", default=5, help="Número de rodadas de mutação aleatória (Padrão: 5).")
+def cmd_fuzz(runs: int):
+    """Executa o Fuzzer de mutações e expõe pontos cegos de diagnóstico."""
+    from .doxly_mutation_fuzzer import DoxlyMutationFuzzer
+    report = DoxlyMutationFuzzer.run_fuzzing_cycle(runs=runs, verbose=True)
+    if report.get("blindspots", 0) > 0:
+        sys.exit(1)
+
+@typhon_doxly_group.command("struct-audit", help="🏗️ Auditoria estrutural: duplicações e funcionalidades órfãs.")
+def cmd_struct_audit():
+    """Executa auditoria estrutural sem mutação."""
+    from .doxly_structural_fuzzer import DoxlyStructuralFuzzer
+    report = DoxlyStructuralFuzzer.run_structural_audit()
+    if report.health_score < 80:
+        sys.exit(1)
+
+
+@typhon_doxly_group.command("struct-fuzz", help="🏗️ Fuzzing estrutural: mutações de adição/remoção/alteração.")
+@click.option("--runs", "-n", default=10, help="Número de rodadas de mutação estrutural.")
+def cmd_struct_fuzz(runs: int):
+    """Executa o fuzzer de mutações estruturais avançadas."""
+    from .doxly_structural_fuzzer import DoxlyStructuralFuzzer
+    report = DoxlyStructuralFuzzer.run_structural_fuzz(runs=runs)
+    if report["blindspots"] > 0:
+        sys.exit(1)
+
+
+@typhon_doxly_group.command("struct-chaos", help="🔥 Suíte completa: auditoria + fuzzing estrutural.")
+@click.option("--runs", "-n", default=15, help="Número de rodadas de mutação.")
+def cmd_struct_chaos(runs: int):
+    """Executa a suíte completa de caos estrutural."""
+    from .doxly_structural_fuzzer import DoxlyStructuralFuzzer
+    result = DoxlyStructuralFuzzer.run_full_chaos_suite(runs=runs)
+    if not result["overall_healthy"]:
+        sys.exit(1)

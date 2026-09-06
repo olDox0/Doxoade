@@ -129,28 +129,50 @@ class TyphonDeployEngine:
     # 🔪 EXORCISMO DE PROCESSOS (Contorna Single Instance)
     # ═══════════════════════════════════════════════════════════
     
+    # @classmethod
+    # def exorcise_instances(cls, wait_seconds: float = 1.5) -> bool:
+    #     """🕊️ Quit gracioso (salva sessão) + 🔪 hard kill de fantasmas."""
+    #     try:
+    #         from .lite_xl_process import LiteXLProcess
+    #         # FASE 1: pede para a instância viva salvar a sessão e sair
+    #         if LiteXLProcess.is_process_alive():
+    #             try:
+    #                 LiteXLProcess.send_to_running_instance("__DOXOADE_GRACEFUL_QUIT__")
+    #             except Exception:
+    #                 pass
+    #             deadline = time.time() + 2.0
+    #             while time.time() < deadline:
+    #                 if not LiteXLProcess.is_process_alive():
+    #                     break
+    #                 time.sleep(0.1)
+    #         # FASE 2: hard kill apenas de fantasmas residuais
+    #         if sys.platform == "win32":
+    #             subprocess.run(["taskkill", "/F", "/IM", "lite-xl.exe"],
+    #                            capture_output=True, timeout=5)
+    #         else:
+    #             subprocess.run(["pkill", "-f", "lite-xl"],
+    #                            capture_output=True, timeout=5)
+    #         time.sleep(wait_seconds)
+    #         return True
+    #     except Exception as e:
+    #         print(f"{Fore.YELLOW}⚠ Exorcismo parcial: {e}{Fore.RESET}")
+    #         return False
+
     @classmethod
-    def exorcise_instances(cls, wait_seconds: float = 1.5) -> bool:
-        """Mata todas as instâncias do Lite XL para garantir isolamento."""
-        try:
-            if sys.platform == "win32":
-                subprocess.run(
-                    ["taskkill", "/F", "/IM", "lite-xl.exe"],
-                    capture_output=True,
-                    timeout=5
-                )
-            else:
-                subprocess.run(
-                    ["pkill", "-f", "lite-xl"],
-                    capture_output=True,
-                    timeout=5
-                )
-            
-            time.sleep(wait_seconds)
-            return True
-        except Exception as e:
-            print(f"{Fore.YELLOW}⚠ Exorcismo parcial: {e}{Fore.RESET}")
-            return False
+    def exorcise_mode_instance(cls, mode: DeployMode) -> None:
+        """Encerra apenas o processo isolado do modo especificado (sem tocar na produção)."""
+        deploy_dir = cls._get_deploy_dir(mode)
+        pid_file = deploy_dir / f".{mode}.pid"
+        if pid_file.exists():
+            try:
+                pid = int(pid_file.read_text().strip())
+                if sys.platform == "win32":
+                    subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
+                else:
+                    subprocess.run(["kill", "-9", str(pid)], capture_output=True)
+                pid_file.unlink(missing_ok=True)
+            except Exception:
+                pass
     
     # ═══════════════════════════════════════════════════════════
     # 🚀 DEPLOY POR MODO
@@ -211,12 +233,48 @@ class TyphonDeployEngine:
     # 🧪 LANÇAMENTO COM ISOLAMENTO
     # ═══════════════════════════════════════════════════════════
     
+    # @classmethod
+    # def launch(cls, mode: DeployMode = "production", exorcise: bool = True) -> bool:
+    #     """Lança o Lite XL no modo especificado (production, sandbox, test)."""
+    #     if exorcise:
+    #         cls.exorcise_instances()
+    #         time.sleep(0.5)
+
+    #     exe = LiteXLEngine.find_executable()
+    #     if not exe:
+    #         print(f"{Fore.RED}✖ Executável do Lite XL não encontrado.{Fore.RESET}")
+    #         return False
+
+    #     deploy_dir = cls._get_deploy_dir(mode)
+    #     env = os.environ.copy()
+
+    #     if mode != "production":
+    #         env["LITE_USERDIR"] = str(deploy_dir)
+    #         env["XDG_CONFIG_HOME"] = str(deploy_dir.parent)
+
+    #     CREATE_NEW_CONSOLE = 0x00000010 if sys.platform == "win32" else 0
+    #     try:
+    #         proc = subprocess.Popen(
+    #             [str(exe), os.getcwd()],
+    #             env=env,
+    #             creationflags=CREATE_NEW_CONSOLE,
+    #             close_fds=(sys.platform != "win32")
+    #         )
+    #         print(f"{Fore.GREEN}✔ Lite XL ({mode.upper()}) iniciado com sucesso (PID: {proc.pid}){Fore.RESET}")
+    #         return True
+    #     except Exception as e:
+    #         print(f"{Fore.RED}✖ Falha ao lançar Lite XL: {e}{Fore.RESET}")
+    #         return False
+
     @classmethod
     def launch(cls, mode: DeployMode = "production", exorcise: bool = True) -> bool:
-        """Lança o Lite XL no modo especificado (production, sandbox, test)."""
+        """Lança o Lite XL no modo especificado preservando as outras instâncias."""
         if exorcise:
-            cls.exorcise_instances()
-            time.sleep(0.5)
+            if mode == "production":
+                cls.exorcise_instances() # Na produção faz quit gracioso
+            else:
+                cls.exorcise_mode_instance(mode) # Em test/sandbox mata apenas o PID daquele modo
+            time.sleep(0.6)
 
         exe = LiteXLEngine.find_executable()
         if not exe:
@@ -238,12 +296,14 @@ class TyphonDeployEngine:
                 creationflags=CREATE_NEW_CONSOLE,
                 close_fds=(sys.platform != "win32")
             )
+            # Salva o PID do modo para permitir matar apenas ele no próximo deploy
+            (deploy_dir / f".{mode}.pid").write_text(str(proc.pid))
             print(f"{Fore.GREEN}✔ Lite XL ({mode.upper()}) iniciado com sucesso (PID: {proc.pid}){Fore.RESET}")
             return True
         except Exception as e:
-            print(f"{Fore.RED}✖ Falha ao lançar Lite XL: {e}{Fore.RESET}")
+            print(f"{Fore.RED}✖ Falha ao lançar processo: {e}{Fore.RESET}")
             return False
-    
+
     # ═══════════════════════════════════════════════════════════
     # 📊 STATUS E DIAGNÓSTICO
     # ═══════════════════════════════════════════════════════════

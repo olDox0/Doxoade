@@ -1,10 +1,11 @@
 -- doxoade/commands/lite_xl_systems/template/04_color_and_search_highlight.lua
 --[[
-  ⚡ DOXOADE HIGH-PERFORMANCE COLOR PREVIEW & INDENT GUIDES (V2.0 MEMOIZED)
+  ⚡ DOXOADE HIGH-PERFORMANCE COLOR PREVIEW & INDENT GUIDES (V2.1 Calibrada)
   - Line Memoization O(1): Cache de regex de cores e guias de indentação.
   - Previews de cor contrastados (#HEX, rgb, rgba, {r,g,b,a}).
-  - Highlight persistente de busca em todos os splits.
-  - Blindagem de sintaxe Python (F-strings e raw strings).
+  - Highlight persistente de busca e seleção em todos os splits abertos.
+  - Blindagem idempotente de sintaxe Python (F-strings e raw strings sem duplicatas).
+  - Alinhamento de guias com suporte a TABs (\t) e espaços.
 ]]
 local core = require "core"
 local config = require "core.config"
@@ -38,70 +39,60 @@ local function draw_text_safe(font, text, x, y, color)
 end
 
 -- =============================================================================
--- 2. BLINDAGEM DE SINTAXE PYTHON
+-- 2. BLINDAGEM IDEMPOTENTE DE SINTAXE PYTHON
 -- =============================================================================
 local function sanitize_python_syntax(syn)
-    if not syn then return end
-    if type(syn.patterns) ~= "table" then return end
+  if not syn or type(syn.patterns) ~= "table" then return end
+  if syn._doxoade_python_shielded then return end
 
-    local is_python = (syn.name == "Python") or
-        (syn.files and type(syn.files) == "table" and syn.files[1] == "%.py$")
-    if not is_python then return end
+  local is_python = (syn.name == "Python") or
+      (syn.files and type(syn.files) == "table" and syn.files[1] == "%.py$")
+  if not is_python then return end
+  syn._doxoade_python_shielded = true
 
-    -- 🛡️ MODO ADITIVO PURO: Nunca remover patterns existentes.
-    -- O tokenizer do Lite XL mantém estado interno baseado na posição dos patterns.
-    -- Remover patterns quebra índices internos → nil onde deveria haver number.
-    -- Solução: Apenas PREPEND safe patterns para match priority.
-    local safe_patterns = {
-        { pattern = { '"""', '"""', '\\' }, type = "string" },
-        { pattern = { "'''", "'''", '\\' }, type = "string" },
-        { pattern = { '[rRbBuUfF]"""', '"""', '\\' }, type = "string" },
-        { pattern = { "[rRbBuUfF]'''", "'''", '\\' }, type = "string" },
-        { pattern = { '[rR][fF]"""', '"""', '\\' }, type = "string" },
-        { pattern = { "[rR][fF]'''", "'''", '\\' }, type = "string" },
-        { pattern = { '[fF][rR]"""', '"""', '\\' }, type = "string" },
-        { pattern = { "[fF][rR]'''", "'''", '\\' }, type = "string" },
-        { pattern = { '[bB][rR]"""', '"""', '\\' }, type = "string" },
-        { pattern = { "[bB][rR]'''", "'''", '\\' }, type = "string" },
-        { pattern = { '[rR][bB]"""', '"""', '\\' }, type = "string" },
-        { pattern = { "[rR][bB]'''", "'''", '\\' }, type = "string" },
-    }
+  local safe_patterns = {
+    { pattern = { '"""', '"""', '\\' }, type = "string" },
+    { pattern = { "'''", "'''", '\\' }, type = "string" },
+    { pattern = { '[rRbBuUfF]"""', '"""', '\\' }, type = "string" },
+    { pattern = { "[rRbBuUfF]'''", "'''", '\\' }, type = "string" },
+    { pattern = { '[rR][fF]"""', '"""', '\\' }, type = "string" },
+    { pattern = { "[rR][fF]'''", "'''", '\\' }, type = "string" },
+    { pattern = { '[fF][rR]"""', '"""', '\\' }, type = "string" },
+    { pattern = { "[fF][rR]'''", "'''", '\\' }, type = "string" },
+    { pattern = { '[bB][rR]"""', '"""', '\\' }, type = "string" },
+    { pattern = { "[bB][rR]'''", "'''", '\\' }, type = "string" },
+    { pattern = { '[rR][bB]"""', '"""', '\\' }, type = "string" },
+    { pattern = { "[rR][bB]'''", "'''", '\\' }, type = "string" },
+  }
 
-    -- Inserir no INÍCIO (match priority) sem remover NADA
-    for i = #safe_patterns, 1, -1 do
-        table.insert(syn.patterns, 1, safe_patterns[i])
-    end
+  for i = #safe_patterns, 1, -1 do
+    table.insert(syn.patterns, 1, safe_patterns[i])
+  end
 end
 
--- ✅ MONKEY-PATCH ÚNICO (duplicação removida)
 if syntax and syntax.add then
-    local original_syntax_add = syntax.add
-    syntax.add = function(syn, ...)
-        pcall(sanitize_python_syntax, syn)
-        return original_syntax_add(syn, ...)
-    end
+  local original_syntax_add = syntax.add
+  syntax.add = function(syn, ...)
+    pcall(sanitize_python_syntax, syn)
+    return original_syntax_add(syn, ...)
+  end
 end
 
--- Aplicar retroativamente (uma única vez, idempotente)
 if syntax and syntax.items then
-    for _, syn in ipairs(syntax.items) do
-        pcall(sanitize_python_syntax, syn)
-    end
+  for _, syn in ipairs(syntax.items) do
+    pcall(sanitize_python_syntax, syn)
+  end
 end
 
 -- =============================================================================
--- CONFIGURAÇÕES VISUAIS E CORES
+-- 3. LINE MEMOIZATION CACHE & PARSERS O(1)
 -- =============================================================================
 config.draw_indent_guides = config.draw_indent_guides ~= false
-local INDENT_GUIDE_COLOR = { 45, 42, 48, 160 }       -- Guia inativa (Piano Black)
-local INDENT_GUIDE_ACTIVE = { 76, 69, 82, 240 }      -- Guia do bloco ativo
-local HIGHLIGHT_BLUE      = { 0, 108, 255, 130 }     -- Highlight azul persistente
-local COLOR_DIRTY         = { 234, 179, 8, 255 }      -- Amarelo (não salvo)
-local COLOR_SAVED         = { 110, 110, 120, 180 }    -- Cinza (salvo na sessão)
+local INDENT_GUIDE_COLOR = { 45, 42, 48, 160 }       
+local HIGHLIGHT_BLUE      = { 0, 108, 255, 130 }     
+local COLOR_DIRTY         = { 234, 179, 8, 255 }      
+local COLOR_SAVED         = { 110, 110, 120, 180 }    
 
--- =============================================================================
--- 3. LINE MEMOIZATION CACHE (O(1) Hash Cache para 60 FPS no Scroll)
--- =============================================================================
 local _color_cache = {}
 local _color_cache_size = 0
 local _indent_cache = {}
@@ -116,13 +107,12 @@ end
 local function parse_colors_in_line(line_text)
   if not line_text or line_text == "" then return {} end
 
-  -- Consulta rápida O(1) no cache
   local cached = _color_cache[line_text]
   if cached then return cached end
 
   local results = {}
 
-  -- 1. Regex #HEX (3, 6 ou 8 dígitos)
+  -- 1. Regex #HEX (3, 4, 6 ou 8 dígitos)
   for s, hex in line_text:gmatch("()#([0-9a-fA-F]+)") do
     local len = #hex
     if len == 3 or len == 4 or len == 6 or len == 8 then
@@ -176,7 +166,6 @@ local function parse_colors_in_line(line_text)
     end
   end
 
-  -- Salva no cache com controle de tamanho
   if _color_cache_size >= MAX_CACHE_ENTRIES then
     _color_cache = {}
     _color_cache_size = 0
@@ -193,12 +182,13 @@ local function get_cached_line_indent(line_text)
   if cached then return cached end
 
   local spaces = 0
+  local indent_unit = config.indent_size or 4
   for i = 1, #line_text do
     local b = line_text:byte(i)
-    if b == 32 then -- espaço
+    if b == 32 then
       spaces = spaces + 1
-    elseif b == 9 then -- tab
-      spaces = spaces + (config.indent_size or 4)
+    elseif b == 9 then
+      spaces = spaces + indent_unit
     else
       break
     end
@@ -212,9 +202,22 @@ local function get_cached_line_indent(line_text)
   _indent_cache_size = _indent_cache_size + 1
   return spaces
 end
-  
+
+local function get_active_highlight_query()
+  local view = core.active_view
+  local doc = view and view.doc
+  if not doc or not doc.has_selection or not doc:has_selection() then
+    return nil
+  end
+  local l1, c1, l2, c2 = doc:get_selection(true)
+  if l1 ~= l2 then return nil end
+  local query = doc:get_text(l1, c1, l2, c2)
+  if not query or #query < 2 or #query > 80 then return nil end
+  return query
+end
+
 -- =============================================================================
--- RASTREAMENTO DE LINHAS DA SESSÃO (DIRTY VS SAVED)
+-- 4. RASTREAMENTO DE LINHAS DA SESSÃO (DIRTY VS SAVED)
 -- =============================================================================
 local original_doc_insert = Doc.insert
 function Doc:insert(line, col, text)
@@ -302,35 +305,6 @@ local function get_col_x(view, line_text, col)
 end
 
 -- =============================================================================
--- CORREÇÃO DO BUG DE DESINDENTAÇÃO (PERMITE ZERAR ESPAÇOS RESIDUAIS)
--- =============================================================================
-command.add("core.docview", {
-  ["doc:unindent"] = function()
-    local view = core.active_view
-    local doc = view and view.doc
-    if not doc or not doc.get_selection then return end
-    local l1, c1, l2, c2 = doc:get_selection(true)
-    local indent_size = config.indent_size or 4
-    if doc.filename and doc.filename:lower():find("%.lua$") then
-      indent_size = 2
-    end
-    for line = (l1 or 1), (l2 or 1) do
-      local text = doc.lines and doc.lines[line]
-      if text then
-        local spaces = text:match("^( +)")
-        if spaces then
-          local count = #spaces
-          local to_remove = (count >= indent_size) and indent_size or count
-          if doc.remove then
-            doc:remove(line, 1, line, to_remove + 1)
-          end
-        end
-      end
-    end
-  end
-})
-
--- =============================================================================
 -- FUNÇÕES AUXILIARES DE OFFSET, INDENTAÇÃO E BUSCA PERSISTENTE
 -- =============================================================================
 local function get_col_x(view, line_idx, col)
@@ -403,7 +377,7 @@ local function parse_any_color(text)
 end
 
 -- =============================================================================
--- 4. HOOK NO DOCVIEW:DRAW_LINE_BODY (Renderização Ultrarrápida < 5ms por Frame)
+-- 5. HOOK NO DOCVIEW:DRAW_LINE_BODY (Renderização de Destaques, Cores e Guias)
 -- =============================================================================
 local original_draw_line_body = DocView.draw_line_body
 function DocView:draw_line_body(line_idx, x, y)
@@ -414,23 +388,37 @@ function DocView:draw_line_body(line_idx, x, y)
   if doc and doc.lines and doc.lines[line_idx] then
     local line_text = doc.lines[line_idx]
 
-    -- A. FAST-PATH ARITMÉTICO: Guias de Indentação O(1) (Zero chamadas de font width)
+    -- A. HIGHLIGHT PERSISTENTE DE BUSCA / SELEÇÃO
+    local query = get_active_highlight_query()
+    if query and #query > 0 then
+      local s_idx = 1
+      while true do
+        local s, e = line_text:find(query, s_idx, true)
+        if not s then break end
+        local start_x = self:get_col_x_offset(line_idx, s)
+        local end_x   = self:get_col_x_offset(line_idx, e + 1)
+        draw_rect_safe(x + start_x, y, math.max(2, end_x - start_x), line_h, HIGHLIGHT_BLUE)
+        s_idx = e + 1
+      end
+    end
+
+    -- B. GUIAS DE INDENTAÇÃO (Suporte a TABs e Espaços)
     if config.draw_indent_guides ~= false then
       local indent_spaces = get_cached_line_indent(line_text)
       local indent_size = config.indent_size or 4
       if indent_spaces >= indent_size then
-        local guide_color = style.guide or style.divider or { 60, 60, 60, 80 }
+        local guide_color = style.guide or style.divider or INDENT_GUIDE_COLOR
         local guide_count = math.floor(indent_spaces / indent_size)
-        local char_w = font:get_width(" ") -- Largura fixa do caractere de espaço
 
         for g = 1, guide_count do
-          local col_offset = (g - 1) * indent_size * char_w
+          local col_char = (g - 1) * indent_size + 1
+          local col_offset = self:get_col_x_offset(line_idx, col_char)
           draw_rect_safe(x + col_offset, y, 1, line_h, guide_color)
         end
       end
     end
 
-    -- B. FAST-PATH DE CORES: Só executa o parser se a linha contiver caracteres candidatos
+    -- C. CHIPS DE PRÉVIA DE COR INLINE
     if line_text:find("#") or line_text:find("rgb") or line_text:find("{") then
       local color_boxes = parse_colors_in_line(line_text)
       if #color_boxes > 0 then
@@ -441,7 +429,7 @@ function DocView:draw_line_body(line_idx, x, y)
           local box_h = line_h - 2
 
           draw_rect_safe(x + x1, y + 1, box_w, box_h, box.color)
-          draw_rect_safe(x + x1, y + 1, box_w, 1, { 255, 255, 255, 60 })
+          draw_rect_safe(x + x1, y + 1, box_w, 1, { 255, 255, 255, 70 })
         end
       end
     end

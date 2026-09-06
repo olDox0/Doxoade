@@ -1,7 +1,9 @@
 -- doxoade/commands/lite_xl_systems/template/13_toolbar_doxoade.lua
---[[ ⚡ DOXOADE STATUS BAR HUD & SOVEREIGN BADGES (V2.0 UX Calibrada)
-  Exibe badges dinâmicos de indentação, auditoria Ma'at, atalhos rápidos e contador de seleção. ]]
-
+--[[
+  ⚡ DOXOADE STATUS BAR HUD & SOVEREIGN BADGES (V2.1 Calibrada)
+  - Exibe badges dinâmicos de indentação, auditoria Ma'at, atalhos rápidos e contador de seleção.
+  - Ordenação determinística de slots no rodapé (sem conflito de posições).
+]]
 local core = require "core"
 local config = require "core.config"
 local style = require "core.style"
@@ -43,7 +45,7 @@ core.add_thread(function()
     local DIVIDER_COLOR = style.divider or { 76, 69, 82, 255 }
     local ACCENT_GREEN = style.accent or { 38, 188, 95, 255 }
 
-    -- 1. Badge Doxoade
+    -- 1. Badge Doxoade (Acesso ao Panteão)
     register_status_item(
       "doxoade:badge",
       StatusView.Item.LEFT,
@@ -149,7 +151,23 @@ core.add_thread(function()
       4
     )
 
-    -- 5. Scratchpad Dumppot
+    -- 5. Status DoxNote
+    register_status_item(
+      "doxoade:note_status",
+      StatusView.Item.LEFT,
+      function()
+        return {
+          { 56, 189, 248, 255 }, "📝 Note ",
+          DIVIDER_COLOR, "| "
+        }
+      end,
+      function()
+        command.perform("doxoade:note-hub-menu")
+      end,
+      5
+    )
+
+    -- 6. Scratchpad Dumppot
     register_status_item(
       "doxoade:dumppot_status",
       StatusView.Item.LEFT,
@@ -162,7 +180,42 @@ core.add_thread(function()
       function()
         command.perform("doxoade:open-pot-in-right-panel")
       end,
-      5
+      6
     )
+
+    register_status_item(
+      "doxoade:search_status",
+      StatusView.Item.LEFT,
+      function()
+        local state = rawget(_G, "_DOXOADE_SEARCH_STATE")
+        if not state then return {} end
+        if state.is_searching then
+          return {
+            { 251, 191, 36, 255 }, "⏳ Searching: " .. state.query .. " ",
+            DIVIDER_COLOR, "| "
+          }
+        elseif state.query ~= "" and #state.results > 0 then
+          return {
+            ACCENT_GREEN, string.format("🔍 %d hits (%.2fs) ", state.total_hits, state.elapsed),
+            DIVIDER_COLOR, "| "
+          }
+        end
+        return {}
+      end,
+      function() command.perform("doxoade:toggle-search-dock") end,
+      7
+    )
+
+    -- 7. Badge Terminal
+    register_status_item(
+      "doxoade:bottom_shelf_btn",
+      StatusView.Item.LEFT,
+      function()
+        return { { 56, 189, 248, 255 }, "Terminal/Canvas ", DIVIDER_COLOR, "| " }
+      end,
+      function() command.perform("doxoade:toggle-bottom-shelf") end,
+      7
+    )
+
   end)
 end)

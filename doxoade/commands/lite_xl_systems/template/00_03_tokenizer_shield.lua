@@ -1,13 +1,13 @@
 -- doxoade/commands/lite_xl_systems/template/00_03_tokenizer_shield.lua
 --[[
-  💉 DOXOADE SYNTAX VACCINE & TOKENIZER ACTIVE SHIELD (V2.2 Semântica)
+  💉 DOXOADE SYNTAX VACCINE & TOKENIZER ACTIVE SHIELD (V2.3 Resiliente)
   Objetivo:
-  1. Purga de patterns corrompidos (Syntax Vaccine).
+  1. Purga segura de patterns corrompidos (Syntax Vaccine sem quebra de índices).
   2. Short-circuit para arquivos binários (Zero Nil/Crash em Bytecode \x1bLua e \0).
-  3. Lexer Semântico O(N) de Alta Disponibilidade para alimentar o Autocomplete.
-  4. Auto-bootstrap de user_settings.lua resiliente e limpeza forense.
+  3. Suporte universal a estados de Tokenizer (table, number e nil).
+  4. Lexer Semântico O(N) de Alta Disponibilidade para alimentar o Autocomplete.
+  5. Auto-bootstrap de user_settings.lua sem risco de sobrescrita destrutiva.
 ]]
-
 local core = rawget(_G, "core") or (pcall(require, "core") and require("core") or nil)
 local user_dir = USERDIR or "."
 local sep = PATHSEP or "/"
@@ -17,7 +17,7 @@ local sep = PATHSEP or "/"
 -- =============================================================================
 local stats = {
   vaccinated = 0,
-  removed_entries = 0,
+  neutralized_entries = 0,
   syntaxes_cleaned = 0,
   patched_add = false,
   tokenizer_shield_active = false,
@@ -33,7 +33,7 @@ local function log_vaccine(msg)
 end
 
 -- =============================================================================
--- 2. VACINA DE DADOS EM SINTAXES (Nível de Estrutura)
+-- 2. VACINA DE DADOS EM SINTAXES (Preservação Estrita de Índices)
 -- =============================================================================
 local _vaccinated = setmetatable({}, { __mode = "k" })
 
@@ -45,7 +45,6 @@ local function entry_is_valid(p)
   if type(pat) == "table" then
     if type(pat[1]) ~= "string" then return false end
     if type(pat[2]) ~= "string" then return false end
-    if pat[3] ~= nil and type(pat[3]) ~= "string" then return false end
     return true
   end
   return false
@@ -58,20 +57,18 @@ local function vaccinate_syntax(syn, origin)
 
   if type(syn.patterns) ~= "table" then return end
 
-  local clean = {}
-  local removed = 0
+  local neutralized = 0
   for idx, p in ipairs(syn.patterns) do
-    if entry_is_valid(p) then
-      table.insert(clean, p)
-    else
-      removed = removed + 1
+    if not entry_is_valid(p) then
+      -- Substitui por no-op seguro para manter o mapeamento de índices do tokenizer intacto
+      syn.patterns[idx] = { pattern = "$^", type = "normal" }
+      neutralized = neutralized + 1
     end
   end
 
   stats.vaccinated = stats.vaccinated + 1
-  if removed > 0 then
-    syn.patterns = clean
-    stats.removed_entries = stats.removed_entries + removed
+  if neutralized > 0 then
+    stats.neutralized_entries = stats.neutralized_entries + neutralized
     stats.syntaxes_cleaned = stats.syntaxes_cleaned + 1
   end
 end
@@ -148,14 +145,14 @@ if tokenizer and type(tokenizer.tokenize) == "function" and not rawget(_G, "_DOX
   }
 
   tokenizer.tokenize = function(incoming_syntax, text, state)
-    -- Invariante 1: O texto NUNCA pode ser nil
+    -- Invariante 1: O texto nunca pode ser nulo
     if text == nil then
       return { "normal", "" }, nil
     elseif type(text) ~= "string" then
       text = tostring(text)
     end
 
-    -- Invariante 2: SHORT-CIRCUIT PARA BINÁRIOS (Zero crash em bytecode \x1bLua e \0)
+    -- Invariante 2: Short-circuit para arquivos binários / bytecodes
     if text:find("%z") or text:find("^\x1bLua") then
       stats.binary_bypasses = stats.binary_bypasses + 1
       return { "normal", text }, nil
@@ -167,21 +164,13 @@ if tokenizer and type(tokenizer.tokenize) == "function" and not rawget(_G, "_DOX
       syn = (syntax_mod and syntax_mod.plain_text_syntax) or fallback_syntax
     end
 
-    -- Invariante 4: State no Lite XL 2.1+ DEVE ser table ou nil (NUNCA número)
-    if type(state) ~= "table" then
-      state = nil
-    end
-
-    -- Execução supervisionada do motor nativo
+    -- Execução supervisionada (aceita table, number ou nil como state válido)
     local ok, res, next_state = pcall(original_tokenize, syn, text, state)
     if ok and type(res) == "table" then
-      if type(next_state) ~= "table" and next_state ~= nil then
-        next_state = nil
-      end
       return res, next_state
     end
 
-    -- RECUPERAÇÃO SEMÂNTICA (Alimenta o Autocomplete com Símbolos Reais)
+    -- RECUPERAÇÃO SEMÂNTICA (Preserva símbolos para o Autocomplete)
     stats.semantic_fallbacks = stats.semantic_fallbacks + 1
     local now = os.clock()
     if now - last_rescue_log >= 5.0 then
@@ -194,7 +183,7 @@ if tokenizer and type(tokenizer.tokenize) == "function" and not rawget(_G, "_DOX
   end
 
   stats.tokenizer_shield_active = true
-  log_vaccine("🛡️ Tokenizer Active Shield V2.2 ativo (Lexer Semântico integrado).")
+  log_vaccine("🛡️ Tokenizer Active Shield V2.3 ativo (Contrato Universal preservado).")
 end
 
 -- =============================================================================
@@ -229,18 +218,30 @@ if core and type(core.open_doc) == "function" and not rawget(_G, "_DOXOADE_OPEN_
 end
 
 -- =============================================================================
--- 6. AUTO-BOOTSTRAP DE USER_SETTINGS.LUA & LIMPEZA FORENSE
+-- 6. AUTO-BOOTSTRAP SEGURO DE USER_SETTINGS.LUA & LIMPEZA FORENSE
 -- =============================================================================
 pcall(function()
   local settings_path = user_dir .. sep .. "user_settings.lua"
-  local f_check = io.open(settings_path, "r")
   local needs_init = true
 
-  if f_check then
-    local content = f_check:read("*a") or ""
-    f_check:close()
-    if content:find("return%s*{") then
+  -- Validação robusta via compilação real (loadfile)
+  local ok_load, chunk = pcall(loadfile, settings_path)
+  if ok_load and type(chunk) == "function" then
+    local run_ok, val = pcall(chunk)
+    if run_ok and type(val) == "table" then
       needs_init = false
+    end
+  end
+
+  -- Se o arquivo já existe no disco, nunca sobrescreva cegamente
+  if needs_init then
+    local f_check = io.open(settings_path, "r")
+    if f_check then
+      local content = f_check:read("*a") or ""
+      f_check:close()
+      if content:find("return") then
+        needs_init = false
+      end
     end
   end
 
@@ -254,6 +255,7 @@ pcall(function()
     end
   end
 
+  -- Limpeza e arquivamento forense do error.txt
   local err_path = user_dir .. sep .. "error.txt"
   local f_err = io.open(err_path, "r")
   if f_err then

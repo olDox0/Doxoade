@@ -1,8 +1,8 @@
 -- doxoade/commands/lite_xl_systems/template/10_forensic_engine.lua
 --[[
-  🦅 DOXOADE FORENSIC ENGINE & LIVE TELEMETRY (CHRONOS V2)
-  - Medição de Frame Spikes (>16.6ms) no pipeline gráfico.
-  - Contador de Frequência de Comandos (100x vs 2x).
+  🦅 DOXOADE FORENSIC ENGINE & LIVE TELEMETRY (CHRONOS V2.1)
+  - Medição de Frame Spikes (> frame_budget_ms) no pipeline gráfico.
+  - Medição de FPS real entre ciclos + Latência ativa de renderização.
   - Telemetria de Memória GC e Exportação Contínua de profiler_telemetry.json.
 ]]
 local core = require "core"
@@ -18,55 +18,45 @@ pcall(function() system.mkdir(diag_dir) end)
 local telemetry_json_path = diag_dir .. sep .. "profiler_telemetry.json"
 local report_path = diag_dir .. sep .. "forensic_report.txt"
 
--- =============================================================================
--- 1. ESTRUTURA GLOBAL DO PROFILER (CHRONOS)
--- =============================================================================
 local Profiler = {
   frame_count = 0,
+  total_draw_ms = 0.0,
   current_fps = 60.0,
   last_fps_calc = os.clock(),
-  frame_spikes = {},       -- Histórico dos últimos 20 spikes (>16.6ms)
-  cmd_frequencies = {},    -- Mapa de frequências: [cmd_name] = count
-  thread_bottlenecks = {}, -- Histórico de threads demoradas
+  last_draw_time = os.clock(),
+  frame_spikes = {},       
+  cmd_frequencies = {},    
+  thread_bottlenecks = {}, 
   gc_memory_kb = collectgarbage("count"),
   boot_timestamp = os.date("%Y-%m-%d %H:%M:%S"),
   total_boot_time_ms = 0.0,
 }
-
 rawset(_G, "_DOXOADE_PROFILER", Profiler)
 
-
-
 local forensic_data = {
-    errors = {},
-    performance = {},
-    env_plugins = {}
+  errors = {},
+  performance = {},
+  env_plugins = {}
 }
-
 rawset(_G, "_DOXOADE_FORENSIC_DATA", forensic_data)
 rawset(_G, "forensic_data", forensic_data)
 
 local function safe_error_message(...)
   local args = { ... }
-
   for i = 1, select("#", ...) do
     args[i] = tostring(args[i])
   end
-
   return table.concat(args, " ")
 end
 
 local original_core_error = core.error
-
 function core.error(...)
   local msg = safe_error_message(...)
   local tb = debug.traceback("", 2)
-
   local culprit = "core"
   local culprit_file = "unknown"
   local culprit_line = 0
 
-  -- Parsing resiliente do traceback para localizar o arquivo causador fora do core
   for line in tb:gmatch("[^\r\n]+") do
     if not line:match("core[/\\]init%.lua") and
        not line:match("10_forensic_engine%.lua") and
@@ -100,10 +90,8 @@ function core.error(...)
 end
 
 local original_add_dir = core.add_project_directory
-
 function core.add_project_directory(path, ...)
   local start = os.clock()
-
   local ok, res
   if original_add_dir then
     ok, res = pcall(original_add_dir, path, ...)
@@ -111,7 +99,6 @@ function core.add_project_directory(path, ...)
     ok = false
     res = "original core.add_project_directory is nil"
   end
-
   local elapsed = os.clock() - start
 
   pcall(function()
@@ -155,7 +142,6 @@ local function write_forensic_report()
   end
 
   f:write("\n")
-
   if #forensic_data.performance == 0 then
     f:write("No performance events.\n")
   else
@@ -174,27 +160,21 @@ local function write_forensic_report()
   f:write("\n")
   f:write("Platform: " .. tostring(PLATFORM or "Unknown") .. "\n")
   f:write("Plugins: " .. table.concat(forensic_data.env_plugins, ", ") .. "\n")
-
   f:close()
 end
 
 core.add_thread(function()
   coroutine.yield(3.0)
-
   pcall(function()
     if core.plugins then
       for name, _ in pairs(core.plugins) do
         table.insert(forensic_data.env_plugins, name)
       end
     end
-
     write_forensic_report()
   end)
 end)
 
--- =============================================================================
--- 2. HOOK GRÁFICO INTELIGENTE (Render Latency & Active Frame Measurement)
--- =============================================================================
 local original_rootview_draw = RootView.draw
 function RootView:draw(...)
   local t0 = os.clock()
@@ -222,9 +202,6 @@ function RootView:draw(...)
   end
 end
 
--- =============================================================================
--- 3. RASTREADOR DE FREQUÊNCIA DE COMANDOS (100x vs 2x)
--- =============================================================================
 if command and command.perform then
   local original_command_perform = command.perform
   command.perform = function(cmd_name, ...)
@@ -234,14 +211,21 @@ if command and command.perform then
   end
 end
 
--- =============================================================================
--- 2. MONITORAMENTO DE CORROTINAS (DETECTOR DE THREADS BLOQUEANTES)
--- =============================================================================
 local original_add_thread = core.add_thread
 function core.add_thread(fn, target)
   local wrapped_fn = function()
     local co_t0 = os.clock()
-    fn()
+    
+    -- ✅ CAPTURA FORENSE DE CORROTINAS: Impede que threads morram em silêncio
+    local ok, err = xpcall(fn, debug.traceback)
+    if not ok then
+      local err_msg = tostring(err or "Erro desconhecido em corrotina")
+      if core.error then
+        core.error(string.format("👻 [THREAD CRASH] %s: %s", tostring(target or "anonymous"), err_msg))
+      end
+      return
+    end
+
     local co_elapsed = (os.clock() - co_t0) * 1000
     if co_elapsed > 5.0 and #Profiler.thread_bottlenecks < 20 then
       table.insert(Profiler.thread_bottlenecks, {
@@ -260,20 +244,25 @@ end
 -- =============================================================================
 local function export_profiler_telemetry()
   local now = os.clock()
+  local dt = now - (Profiler.last_fps_calc or now)
   local is_idle = (now - (Profiler.last_draw_time or 0)) > 1.2
-
   local avg_draw_latency = 0.0
-  local active_fps = 60.0
 
-  if Profiler.frame_count > 0 and Profiler.total_draw_ms then
+  if Profiler.frame_count > 0 and (Profiler.total_draw_ms or 0) > 0 then
     avg_draw_latency = math.floor((Profiler.total_draw_ms / Profiler.frame_count) * 100) / 100
-    if avg_draw_latency > 0 then
-      active_fps = math.min(60.0, math.floor((1000.0 / avg_draw_latency) * 10) / 10)
-    end
   end
 
+  local calculated_fps = 0.0
+  if dt > 0 and Profiler.frame_count > 0 then
+    calculated_fps = math.min(config.fps or 60.0, math.floor((Profiler.frame_count / dt) * 10) / 10)
+  elseif is_idle then
+    calculated_fps = config.fps or 60.0
+  end
+
+  Profiler.current_fps = calculated_fps
   Profiler.frame_count = 0
-  Profiler.total_draw_ms = 0
+  Profiler.total_draw_ms = 0.0
+  Profiler.last_fps_calc = now
   Profiler.gc_memory_kb = math.floor(collectgarbage("count") * 10) / 10
 
   local json_parts = {
@@ -281,7 +270,7 @@ local function export_profiler_telemetry()
     string.format('  "timestamp": %q,\n', os.date("%Y-%m-%d %H:%M:%S")),
     string.format('  "is_idle": %s,\n', is_idle and "true" or "false"),
     string.format('  "avg_draw_latency_ms": %.2f,\n', avg_draw_latency),
-    string.format('  "active_fps": %.1f,\n', is_idle and (config.fps or 60.0) or active_fps),
+    string.format('  "active_fps": %.1f,\n', calculated_fps),
     string.format('  "target_fps": %d,\n', config.fps or 60),
     string.format('  "gc_memory_kb": %.1f,\n', Profiler.gc_memory_kb),
     '  "frame_spikes": [\n'
@@ -293,8 +282,8 @@ local function export_profiler_telemetry()
       sp.timestamp, sp.duration_ms, sp.active_file, (idx < #Profiler.frame_spikes and "," or "")
     )
   end
-  json_parts[#json_parts + 1] = '  ],\n  "command_frequencies": {\n'
 
+  json_parts[#json_parts + 1] = '  ],\n  "command_frequencies": {\n'
   local cmd_entries = {}
   for k, v in pairs(Profiler.cmd_frequencies) do
     cmd_entries[#cmd_entries + 1] = string.format('    %q: %d', k, v)
@@ -312,12 +301,11 @@ local function export_profiler_telemetry()
   end)
 end
 
--- Thread de exportação periódica
 if core.add_thread then
   core.add_thread(function()
     while true do
       coroutine.yield(2.5)
-      export_profiler_telemetry()
+      pcall(export_profiler_telemetry)
     end
   end)
 end

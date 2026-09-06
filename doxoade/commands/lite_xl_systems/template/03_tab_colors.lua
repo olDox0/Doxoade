@@ -105,7 +105,7 @@ local function doxoade_resolve_tab_theme(filename)
 	}
 end
 
-rawget(_G, "DOXOADE_GET_TAB_THEME")
+rawset(_G, "DOXOADE_GET_TAB_THEME", doxoade_resolve_tab_theme)
 
 local original_draw_tab_title = Node.draw_tab_title
 

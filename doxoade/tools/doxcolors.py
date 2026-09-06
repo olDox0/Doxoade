@@ -1,27 +1,20 @@
+# doxoade/tools/doxcolors.py
 # -*- coding: utf-8 -*-
-# doxoade/doxoade/tools/doxcolors.py
-"""
-Doxcolors Nexus Edition – High-Performance CLI UI Engine
-Versão: 2.0 (Nexus UI)
-"""
+""" Doxcolors Nexus Edition – High-Performance CLI UI Engine
+Versão: 2.1 (Nexus UI - Dynamic Color Force) """
 import os
 import sys
 import builtins
 import time
-# [DOX-UNUSED] import math
 import threading
-# [DOX-UNUSED] import itertools
 import atexit
 
 if not hasattr(builtins, '_doxoade_original_print'):
     builtins._doxoade_original_print = builtins.print
-
 _original_print = builtins._doxoade_original_print
 
 def _force_reset():
     """Envia o sinal de reset global de forma agressiva."""
-    # O código \033[0m reseta cores de fundo, frente e estilos (negrito, etc)
-    # Enviamos para stdout e stderr para garantir que o terminal receba
     try:
         if os.name == 'nt':
             os.system('')
@@ -30,27 +23,56 @@ def _force_reset():
         sys.stderr.write('\033[0m')
         sys.stderr.flush()
     except KeyboardInterrupt:
-        print("KeyboardInterrupt")
+        pass
 
+def _ansi_enabled():
+    # 🛡️ Suporte universal a variáveis de ambiente de cores forçadas
+    if os.environ.get("FORCE_COLOR") == "1" or os.environ.get("CLICOLOR_FORCE") == "1":
+        return True
+    if os.name != 'nt':
+        return sys.stdout.isatty() if hasattr(sys.stdout, 'isatty') else False
+    return (hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()) or 'ANSICON' in os.environ or 'WT_SESSION' in os.environ or (os.environ.get('TERM_PROGRAM') == 'vscode')
+
+ANSI_ENABLED = _ansi_enabled()
+
+if os.name == 'nt' and ANSI_ENABLED:
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetStdHandle(-11)
+        mode = ctypes.c_ulong()
+        kernel32.GetConsoleMode(handle, ctypes.byref(mode))
+        kernel32.SetConsoleMode(handle, mode.value | 4)
+    except Exception:
+        pass
+
+# 🛡️ CLASSE ÚNICA E DEFINITIVA: NUNCA descarta códigos se FORCE_COLOR estiver ativo
 class AnsiCode(str):
     __slots__ = ()
     def __new__(cls, code: str):
-        try:
-            if not ANSI_ENABLED: return str.__new__(cls, '')
-            return str.__new__(cls, f'\x1b[{code}m')
-        except Exception:
-            # Fallback total: se falhar, retorna string vazia (texto sem cor)
+        if not _ansi_enabled():
             return str.__new__(cls, '')
+        return str.__new__(cls, f'\x1b[{code}m')
 
 # --- CORE ENGINE ---
 
-def _ansi_enabled():
-    if os.name != 'nt':
-        return sys.stdout.isatty()
-    return sys.stdout.isatty() or 'ANSICON' in os.environ or 'WT_SESSION' in os.environ or (os.environ.get('TERM_PROGRAM') == 'vscode')
+# def _ansi_enabled():
+#     if os.name != 'nt':
+#         return sys.stdout.isatty()
+#     return sys.stdout.isatty() or 'ANSICON' in os.environ or 'WT_SESSION' in os.environ or (os.environ.get('TERM_PROGRAM') == 'vscode')
 
-#ANSI_ENABLED = _ansi_enabled()
-ANSI_ENABLED = sys.stdout.isatty() if hasattr(sys.stdout, 'isatty') else False
+# #ANSI_ENABLED = _ansi_enabled()
+# ANSI_ENABLED = sys.stdout.isatty() if hasattr(sys.stdout, 'isatty') else False
+
+def _ansi_enabled():
+    # 🛡️ Respeita flags universais de forçamento de cor no terminal e subprocessos
+    if os.environ.get("FORCE_COLOR") == "1" or os.environ.get("CLICOLOR_FORCE") == "1":
+        return True
+    if os.name != 'nt':
+        return sys.stdout.isatty() if hasattr(sys.stdout, 'isatty') else False
+    return (hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()) or 'ANSICON' in os.environ or 'WT_SESSION' in os.environ or (os.environ.get('TERM_PROGRAM') == 'vscode')
+
+ANSI_ENABLED = _ansi_enabled()
 
 if os.name == 'nt' and ANSI_ENABLED:
     try:
@@ -91,36 +113,35 @@ class Fore:
     RESET   = AnsiCode('0')
     WHITE   = AnsiCode('37')
     YELLOW  = AnsiCode('33')
-    
     LIGHTBLUE_EX    = AnsiCode('94')
     LIGHTCYAN_EX    = AnsiCode('96')
     LIGHTBLACK_EX   = AnsiCode('90')
-    LIGHTRED_EX   = AnsiCode('91')
+    LIGHTRED_EX     = AnsiCode('91')
     LIGHTGREEN_EX   = AnsiCode('92')
     LIGHTYELLOW_EX  = AnsiCode('93')
     LIGHTMAGENTA_EX = AnsiCode('95')
     LIGHTWHITE_EX   = AnsiCode('97')
-
-    # Nexus Semantic Colors
-
-    ORANGE      = AnsiCode('38;2;255;100;0')   # ORANGE
-    LIGHTYELLOW = AnsiCode('38;2;255;255;100')   # LIGHTYELLOW
-    EMERALD     = AnsiCode('38;2;38;188;95')   # Verde Estável
-    GREY        = AnsiCode('38;2;100;100;100')   # LIGHTYELLOW
-
-    PRIMARY     = AnsiCode('38;2;0;108;255')   # Azul Nexus
-    SUCCESS     = AnsiCode('38;2;38;188;95')   # Verde Estável
-    ERROR       = AnsiCode('38;2;255;103;0')   # Laranja Erro
-    WARNING     = AnsiCode('38;2;232;170;0')   # Amarelo Alerta
-    STABLE      = AnsiCode('38;2;176;176;176') # Cinza (Código antigo/estável)
-    VOLATILE    = AnsiCode('38;2;255;0;255')   # Magenta (Código sendo alterado)
-    
-    XYZ          = AnsiCode('38;2;255;155;0')   # ORANGE
+    ORANGE      = AnsiCode('38;2;255;100;0')   
+    LIGHTYELLOW = AnsiCode('38;2;255;255;100')   
+    EMERALD     = AnsiCode('38;2;38;188;95')   
+    GREY        = AnsiCode('38;2;100;100;100')   
+    PRIMARY     = AnsiCode('38;2;0;108;255')   
+    SUCCESS     = AnsiCode('38;2;38;188;95')   
+    ERROR       = AnsiCode('38;2;255;103;0')   
+    WARNING     = AnsiCode('38;2;232;170;0')   
+    STABLE      = AnsiCode('38;2;176;176;176') 
+    VOLATILE    = AnsiCode('38;2;255;0;255')   
+    XYZ         = AnsiCode('38;2;255;155;0')   
 
 class Style:
-    DIM = AnsiCode('2'); NORMAL = AnsiCode('22'); BRIGHT = AnsiCode('1')
-    RESET_ALL = AnsiCode('0'); BLINK = AnsiCode('5'); ITALIC = AnsiCode('3')
-    HIDDEN = AnsiCode('?25l'); SHOW = AnsiCode('?25h') # Cursor control
+    DIM       = AnsiCode('2')
+    NORMAL    = AnsiCode('22')
+    BRIGHT    = AnsiCode('1')
+    RESET_ALL = AnsiCode('0')
+    BLINK     = AnsiCode('5')
+    ITALIC    = AnsiCode('3')
+    HIDDEN    = AnsiCode('?25l')
+    SHOW      = AnsiCode('?25h')
 
 # --- UTILS ---
 

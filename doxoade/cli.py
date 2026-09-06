@@ -91,7 +91,9 @@ class DoxoadeLazyGroup(click.Group):
             'lab': 'doxoade.commands.lab:lab_group',
             'linux': 'doxoade.commands.linux_systems.linux_cmd:linux_group',
             'lan-git': 'doxoade.commands.lan_git.cli_lan_git:lan_git_cli',
+            # lite xl sys
             'doxly': 'doxoade.commands.lite_xl_systems.cmd_lite_xl:lite_xl_group',
+            'lite-xl': 'doxoade.commands.lite_xl_systems.cmd_lite_xl:cmd_open',
             'log': 'doxoade.commands.utils:log',
             'macrothon': 'doxoade.commands.macrothon_systems.macrothon_builder:macrothon_group',
             'maestro': 'doxoade.commands.maestro:maestro',

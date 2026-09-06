@@ -201,9 +201,15 @@ local function restore_sovereign_session()
     local valid_files = {}
     for _, f_info in ipairs(panel_data.files or {}) do
       if f_info.filename and f_info.filename ~= "" then
-        local finfo = system.get_file_info(f_info.filename)
-        if finfo and finfo.type == "file" then
-          table.insert(valid_files, f_info)
+        local fn_lower = tostring(f_info.filename):lower():gsub("\\", "/")
+        -- 🛡️ PROIBIÇÃO: Nunca reabrir o init.lua compilado ou arquivos de bytecode como abas
+        local is_init_bytecode = fn_lower:match("/init%.lua$") or fn_lower:match("/init%.luac$") or fn_lower:match("%.luac$")
+        
+        if not is_init_bytecode then
+          local finfo = system.get_file_info(f_info.filename)
+          if finfo and finfo.type == "file" then
+            table.insert(valid_files, f_info)
+          end
         end
       end
     end
@@ -355,3 +361,197 @@ core.add_thread(function()
     end
   end
 end)
+
+-- =============================================================================
+-- 📂 SINGLE INSTANCE — Processamento de Argumentos CLI (ARGS) [V2.1 Blindado]
+-- Filtra o próprio executável, binários e adia processamento (Lazy Load).
+-- =============================================================================
+local _cli_args_processed = false
+local _BINARY_EXTS = {
+    ["exe"] = true, ["dll"] = true, ["so"] = true, ["dylib"] = true,
+    ["pyd"] = true, ["pyc"] = true, ["pyo"] = true, ["bin"] = true,
+    ["dat"] = true, ["db"] = true, ["sqlite"] = true, ["sqlite3"] = true,
+}
+
+local function is_binary_path(path)
+    if not path then return true end
+    local p = tostring(path):lower()
+    -- Filtra o próprio executável do Lite XL
+    if p:find("lite%-xl%.exe$") or p:find("lite%-xl$") then return true end
+    -- Filtra por extensão binária
+    local ext = p:match("%.([%w_]+)$")
+    if ext and _BINARY_EXTS[ext] then return true end
+    return false
+end
+
+local function process_cli_arguments()
+    if _cli_args_processed then return end
+    _cli_args_processed = true
+
+    local args = rawget(_G, "ARGS") or {}
+    if #args == 0 then return end
+
+    local files_to_open = {}
+    local dirs_to_add = {}
+
+    for _, arg in ipairs(args) do
+        if type(arg) == "string"
+           and not arg:match("^%-%-")
+           and not arg:match("^%-")
+           and not is_binary_path(arg) then
+            local ok_info, info = pcall(system.get_file_info, arg)
+            if ok_info and info then
+                if info.type == "file" then
+                    table.insert(files_to_open, arg)
+                elseif info.type == "dir" then
+                    table.insert(dirs_to_add, arg)
+                end
+            end
+        end
+    end
+
+    for _, dir_path in ipairs(dirs_to_add) do
+        if core.add_project_directory then
+            pcall(core.add_project_directory, dir_path)
+            if core.log then
+                core.log("📂 [CLI] Projeto anexado via argumento: " .. dir_path)
+            end
+        end
+    end
+
+    for _, file_path in ipairs(files_to_open) do
+        local ok_open, doc = pcall(core.open_doc, file_path)
+        if ok_open and doc then
+            pcall(core.root_view.open_doc, core.root_view, doc)
+            if core.log then
+                core.log("📄 [CLI] Arquivo aberto via argumento: " .. file_path)
+            end
+        end
+    end
+
+    if #files_to_open > 0 or #dirs_to_add > 0 then
+        core.redraw = true
+    end
+end
+
+-- ⏱️ LAZY LOAD: Processa argumentos CLI SOMENTE após o boot estabilizar (1.5s)
+core.add_thread(function()
+    coroutine.yield(1.5)
+    pcall(process_cli_arguments)
+end)
+
+-- =============================================================================
+-- 🔄 IPC QUEUE MONITOR (Lê .ipc_queue para instância viva receber novos arquivos)
+-- =============================================================================
+core.add_thread(function()
+    while true do
+        coroutine.yield(0.5)
+        pcall(function()
+            local ipc_file = user_dir .. sep .. ".ipc_queue"
+            local f = io.open(ipc_file, "r")
+            if not f then return end
+
+            local lines = {}
+            for line in f:lines() do
+                if line and line ~= "" then
+                    table.insert(lines, line)
+                end
+            end
+            f:close()
+
+            if #lines == 0 then return end
+
+            -- Limpa a fila após leitura
+            local fw = io.open(ipc_file, "w")
+            if fw then fw:close() end
+
+            -- Processa cada linha
+            for _, line in ipairs(lines) do
+                process_ipc_line(line)
+            end
+            core.redraw = true
+        end)
+    end
+end)
+
+-- =============================================================================
+-- 💾 HADES SESSION LOCK — Auto-Save com Anti-Loop (V2.1)
+-- =============================================================================
+local _hades_last_signature = ""
+local _hades_save_in_progress = false
+local _hades_last_save_time = 0
+
+local function hades_autosave_if_changed()
+    if _hades_save_in_progress then return end
+    local now = os.clock()
+    if (now - _hades_last_save_time) < 3.0 then return end  -- Cooldown de 3s
+
+    pcall(function()
+        local sig = {}
+        sig[#sig+1] = tostring(core.project_directories and #core.project_directories or 0)
+        local leaves = get_doc_leaves(core.root_view and core.root_view.root_node)
+        local views = 0
+        for _, n in ipairs(leaves) do views = views + #(n.views or {}) end
+        sig[#sig+1] = tostring(views)
+        sig[#sig+1] = tostring(core.active_view and core.active_view.doc
+            and core.active_view.doc.filename or "")
+        local signature = table.concat(sig, "|")
+        if signature ~= _hades_last_signature then
+            _hades_last_signature = signature
+            _hades_save_in_progress = true
+            _hades_last_save_time = now
+            pcall(save_sovereign_session)
+            _hades_save_in_progress = false
+        end
+    end)
+end
+
+-- Save-on-Quit com guarda
+local original_core_quit = core.quit
+core.quit = function(...)
+    pcall(save_sovereign_session)
+    if original_core_quit then return original_core_quit(...) end
+end
+
+pcall(function()
+    if type(core.on_quit) == "function" then
+        local original_on_quit = core.on_quit
+        core.on_quit = function(...)
+            pcall(save_sovereign_session)
+            return original_on_quit(...)
+        end
+    end
+end)
+
+-- Auto-save com intervalo maior (30s) para evitar I/O excessivo
+core.add_thread(function()
+    coroutine.yield(5.0)  -- Delay inicial maior
+    while true do
+        coroutine.yield(30)  -- 30s entre verificações
+        hades_autosave_if_changed()
+    end
+end)
+
+if core.log then
+    core.log("💾 [HADES LOCK] Auto-save de sessão ativo (on-quit + 30s + anti-loop).")
+end
+
+-- 4. Save debounced ao abrir documentos
+pcall(function()
+    local original_open_doc = core.open_doc
+    core.open_doc = function(...)
+        local doc = original_open_doc(...)
+        pcall(function()
+            local Khonsu = rawget(_G, "Khonsu")
+            if Khonsu and Khonsu.debounce then
+                Khonsu.debounce("hades_session_save", 1.0, save_sovereign_session)
+            end
+        end)
+        return doc
+    end
+end)
+
+if core.log then
+    core.log("💾 [HADES LOCK] Auto-save de sessão ativo (on-quit + 15s + debounced).")
+end
+

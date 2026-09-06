@@ -1,7 +1,10 @@
 -- doxoade/commands/lite_xl_systems/template/11_tab_context_menu.lua
--- =============================================================================
--- 11. MENU FLUTUANTE NATIVO NO CLIQUE DIREITO DA ABA (IMMEDIATE-MODE POPUP)
--- =============================================================================
+--[[
+  📋 DOXOADE TAB CONTEXT MENU (Menu Flutuante Soberano de Abas)
+  - Copia caminhos com 1 clique: Nome, Caminho Relativo e Caminho Absoluto.
+  - Abertura de arquivo no gerenciador de arquivos nativo do SO.
+  - Invalidação automática de caminhos cacheados e suporte a temas do Lite XL.
+]]
 local core = require "core"
 local style = require "core.style"
 local command = require "core.command"
@@ -14,42 +17,61 @@ if rawget(_G, "DOXOADE_TAB_CONTEXT_LOADED") then
 end
 rawset(_G, "DOXOADE_TAB_CONTEXT_LOADED", true)
 
--- Polyfill de Renderização
 local rencache = rawget(_G, "rencache") or (pcall(require, "core.rencache") and require("core.rencache") or nil)
 local native_renderer = rawget(_G, "renderer") or (pcall(require, "renderer") and require("renderer") or nil)
 
--- =============================================================================
--- RESOLUÇÃO DE CAMINHOS COM CACHE (Única implementação)
--- =============================================================================
+local function draw_rect_safe(x, y, w, h, color)
+  if rencache and rencache.draw_rect then
+    rencache.draw_rect(x, y, w, h, color)
+  elseif native_renderer and native_renderer.draw_rect then
+    native_renderer.draw_rect(x, y, w, h, color)
+  end
+end
+
+local function draw_text_safe(font, text, x, y, color)
+  if rencache and rencache.draw_text then
+    rencache.draw_text(font, text, x, y, color)
+  elseif native_renderer and native_renderer.draw_text then
+    native_renderer.draw_text(font, text, x, y, color)
+  end
+end
+
 local _path_cache = {}
+local _last_project_count = 0
 
 local function resolve_active_paths(view)
-    view = view or core.active_view
-    if not view or not view.doc or not view.doc.filename then return nil end
-    local raw = view.doc.filename
+  view = view or core.active_view
+  if not view or not view.doc or not view.doc.filename then return nil end
+  local raw = view.doc.filename
 
-    if _path_cache[raw] then return _path_cache[raw] end
+  -- Invalida o cache caso os diretórios do projeto tenham mudado
+  local current_proj_count = core.project_directories and #core.project_directories or 0
+  if current_proj_count ~= _last_project_count then
+    _path_cache = {}
+    _last_project_count = current_proj_count
+  end
 
-    local abs = system.absolute_path(raw) or raw
-    local clean_abs = abs:gsub("[/\\]", PATHSEP or "\\")
-    local fname = raw:match("[/\\]([^/\\]+)$") or raw
-    local rel = abs:gsub("\\", "/")
+  if _path_cache[raw] then return _path_cache[raw] end
 
-    if core.project_directories then
-        for _, proj in ipairs(core.project_directories) do
-            local ppath = tostring(type(proj) == "table" and (proj.path or proj.name) or proj or ""):gsub("\\", "/")
-            if ppath ~= "" and abs:sub(1, #ppath) == ppath then
-                rel = abs:sub(#ppath + 1):gsub("^/", "")
-                break
-            end
-        end
+  local abs = system.absolute_path(raw) or raw
+  local clean_abs = abs:gsub("[/\\]", PATHSEP or "\\")
+  local fname = raw:match("[/\\]([^/\\]+)$") or raw
+  local rel = abs:gsub("\\", "/")
+
+  if core.project_directories then
+    for _, proj in ipairs(core.project_directories) do
+      local ppath = tostring(type(proj) == "table" and (proj.path or proj.name) or proj or ""):gsub("\\", "/")
+      if ppath ~= "" and abs:sub(1, #ppath) == ppath then
+        rel = abs:sub(#ppath + 1):gsub("^/", "")
+        break
+      end
     end
-    rel = rel:gsub("/", PATHSEP or "\\")
-    local dir = clean_abs:match("^(.*)[/\\]") or clean_abs
-
-    local result = { filename = fname, relative = rel, absolute = clean_abs, dir = dir, raw = abs }
-    _path_cache[raw] = result
-    return result
+  end
+  rel = rel:gsub("/", PATHSEP or "\\")
+  local dir = clean_abs:match("^(.*)[/\\]") or clean_abs
+  local result = { filename = fname, relative = rel, absolute = clean_abs, dir = dir, raw = abs }
+  _path_cache[raw] = result
+  return result
 end
 
 -- =============================================================================
@@ -112,9 +134,6 @@ local function open_in_file_manager(path)
   end
 end
 
--- =============================================================================
--- MENU FLUTUANTE CUSTOMIZADO
--- =============================================================================
 local FloatingMenu = {
   visible = false,
   x = 0, y = 0, w = 260, h = 100,
@@ -178,6 +197,7 @@ local function open_floating_menu(view, mx, my)
   local font = style.font or style.code_font
   local item_h = get_item_height()
   local max_w = 200
+
   for _, it in ipairs(items) do
     local tw = font:get_width(it.text)
     if tw > max_w then max_w = tw end
@@ -185,6 +205,7 @@ local function open_floating_menu(view, mx, my)
 
   local menu_w = max_w + (PADDING_X * 2) + 12
   local menu_h = (#items * item_h) + 8
+
   local screen_w = core.root_view and core.root_view.size and core.root_view.size.x or 1200
   local screen_h = core.root_view and core.root_view.size and core.root_view.size.y or 800
 
@@ -210,6 +231,7 @@ local original_rootview_draw = RootView.draw
 function RootView:draw(...)
   original_rootview_draw(self, ...)
   if not FloatingMenu.visible or #FloatingMenu.items == 0 then return end
+
   local x, y, w, h = FloatingMenu.x, FloatingMenu.y, FloatingMenu.w, FloatingMenu.h
   local item_h = get_item_height()
   local font = style.font or style.code_font
@@ -225,7 +247,7 @@ function RootView:draw(...)
     if is_hovered then
       draw_rect_safe(x + 3, curr_y, w - 4, item_h, style.background3 or { 47, 46, 48, 255 })
     end
-    local text_color = is_hovered and { 255, 255, 255, 255 } or style.text
+    local text_color = is_hovered and { 255, 255, 255, 255 } or (style.text or { 210, 220, 230, 255 })
     draw_text_safe(font, it.text, x + PADDING_X, curr_y + PADDING_Y, text_color)
     curr_y = curr_y + item_h
   end
@@ -237,6 +259,7 @@ function RootView:on_mouse_moved(x, y, ...)
     return original_rootview_mouse_moved(self, x, y, ...)
   end
   original_rootview_mouse_moved(self, x, y, ...)
+
   local mx, my, mw, mh = FloatingMenu.x, FloatingMenu.y, FloatingMenu.w, FloatingMenu.h
   if x >= mx and x <= mx + mw and y >= my and y <= my + mh then
     local item_h = get_item_height()
@@ -256,6 +279,7 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
   if not FloatingMenu.visible then
     return original_rootview_mouse_pressed(self, button, x, y, clicks)
   end
+
   local mx, my, mw, mh = FloatingMenu.x, FloatingMenu.y, FloatingMenu.w, FloatingMenu.h
   if (button == "left" or button == 1) and x >= mx and x <= mx + mw and y >= my and y <= my + mh then
     local item_h = get_item_height()
@@ -266,28 +290,34 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
     if item and item.action then item.action() end
     return true
   end
+
   FloatingMenu.visible = false
   core.redraw = true
   return true
 end
 
--- =============================================================================
--- INTEGRAÇÃO COM CONTEXTMENU NATIVO (Prioridade sobre FloatingMenu)
--- =============================================================================
 local contextmenu = nil
 pcall(function() contextmenu = require "plugins.contextmenu" end)
-if not contextmenu then
-  pcall(function() contextmenu = require "core.contextmenu" end)
-end
 
 local original_node_mouse_pressed = Node.on_mouse_pressed
 function Node:on_mouse_pressed(button, x, y, clicks)
-  if button == "right" or button == 3 or button == "secondary" then
-    local idx = self:get_tab_idx(x, y)
+  if button == "right" or button == 2 then
+    local idx = self:get_tab_overlapping_point(x, y)
     if idx and self.views and self.views[idx] then
       local view = self.views[idx]
       self:set_active_view(view)
       core.set_active_view(view)
+
+      -- Fallback para menu de contexto nativo se disponível
+      if contextmenu and contextmenu.show then
+        local ok = pcall(contextmenu.show, contextmenu, x, y)
+        if ok then return true end
+      elseif command and command.perform then
+        local ok = pcall(command.perform, "context-menu:show", x, y)
+        if ok then return true end
+      end
+
+      -- Menu Flutuante Soberano do Doxoade
       open_floating_menu(view, x, y)
       return true
     end
