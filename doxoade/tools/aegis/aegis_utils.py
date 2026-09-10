@@ -221,17 +221,24 @@ def _validate_ast_safety(tree: ast.AST, allow_imports: bool):
                 raise RuntimeError('Sandbox Breach: Private access blocked.')
 
 def _handle_sandbox_exception(e, filename=None):
-    """Dispatcher Forense."""
+    """Dispatcher Forense com preservação de traceback real."""
     if isinstance(e, OSError) and "access violation" in str(e).lower():
         sys.stderr.write(f"\n{Fore.RED}🛡️  [AEGIS] Bloqueio de Segurança: Violação Proibida.{Style.RESET_ALL}\n")
         return # Deixa o sinal fluir para o Lazarus
-    if isinstance(e, (NameError, ImportError, ModuleNotFoundError, SyntaxError)):
-        raise e
+
     import os as _os
     _, _, exc_tb = sys.exc_info()
-    f_name = _os.path.split(exc_tb.tb_frame.f_code.co_filename)[1] if exc_tb else 'unknown'
-    line_n = exc_tb.tb_lineno if exc_tb else 0
+    
+    # Navega até o frame mais profundo (onde a exceção de fato nasceu no código)
+    deepest_tb = exc_tb
+    while deepest_tb and deepest_tb.tb_next:
+        deepest_tb = deepest_tb.tb_next
+
+    f_name = _os.path.split(deepest_tb.tb_frame.f_code.co_filename)[1] if deepest_tb else 'unknown'
+    line_n = deepest_tb.tb_lineno if deepest_tb else 0
     msg = f'\x1b[1;34m\n[ FORENSIC:AEGIS ]\x1b[0m \x1b[1mFile: {f_name} | L: {line_n}\x1b[0m\n'
     msg += f'\x1b[31m    ■ Exception: {type(e).__name__} | Value: {e}\x1b[0m'
     print(msg)
-    raise RuntimeError(f'Aegis Sandbox Blocked: {e}')
+
+    # Re-lança a exceção original para preservar a causa raiz e o stack trace do usuário
+    raise e

@@ -94,10 +94,10 @@ local function safe_format(...)
   return table.concat(t, " ")
 end
 
-local function append_session_log(level, msg)
-  if inside_logging then return end
-  inside_logging = true
+local session_log_file = user_dir .. path_sep .. "session_log.txt"
+local inside_logging = false
 
+local function append_session_log(level, msg)
   pcall(function()
     local f = io.open(session_log_file, "a")
     if f then
@@ -109,24 +109,34 @@ local function append_session_log(level, msg)
       f:close()
     end
   end)
-
-  inside_logging = false
 end
 
--- =============================================================================
--- 4. HOOKS DE LOG, PRINT E ERRO COM RATE LIMIT
--- =============================================================================
 local original_print = print
 function print(...)
-  append_session_log("PRINT", safe_format(...))
-  if original_print then original_print(...) end
+  if not inside_logging then
+    inside_logging = true
+    append_session_log("PRINT", safe_format(...))
+    if original_print then original_print(...) end
+    inside_logging = false
+  elseif original_print then
+    original_print(...)
+  end
 end
 
 local original_core_log = core.log
 core.log = function(...)
-  local msg = safe_format(...)
-  append_session_log("INFO", msg)
-  if original_core_log then return original_core_log(...) end
+  if not inside_logging then
+    inside_logging = true
+    local msg = safe_format(...)
+    append_session_log("INFO", msg)
+    if original_core_log then
+      -- 🛡️ Blindagem: usa ("%s", msg) para impedir que '%' cause crash no string.format
+      pcall(original_core_log, "%s", msg)
+    end
+    inside_logging = false
+  elseif original_core_log then
+    pcall(original_core_log, ...)
+  end
 end
 
 local original_core_error = core.error
@@ -218,33 +228,49 @@ function Node:update_layout(...)
   return original_node_update_layout(self, ...)
 end
 
--- Vacina 3: Blindagem contínua no core.step
+-- =============================================================================
+-- 🛡️ VACINA DE NÓS ESTÁTICA (Zero Alocação no core.step)
+-- =============================================================================
+local _static_orphan_get_name = function() return "Orphan View" end
+local _static_orphan_get_title = function(self) return self:get_name() end
+local _static_orphan_is = function(self, class) return false end
+local _static_active_orphan_name = function() return "Active Orphan" end
+
+-- Função estática (NÃO recriada a cada frame)
+local function _sanitize_node_tree(node)
+  if not node then return end
+  if node.type == "leaf" then
+    for _, view in ipairs(node.views or {}) do
+      if type(view) == "table" then
+        if not view.get_name then view.get_name = _static_orphan_get_name end
+        if not view.get_title then view.get_title = _static_orphan_get_title end
+        if not view.is then view.is = _static_orphan_is end
+      end
+    end
+  else
+    _sanitize_node_tree(node.a)
+    _sanitize_node_tree(node.b)
+  end
+end
+
+-- Ativa o Garbage Collector Generational do Lua 5.4 (Ultrarrápido para objetos de frame)
+pcall(collectgarbage, "generational", 20, 50)
+
+local _last_sanitize_time = 0
 local original_core_step = core.step
 function core.step()
-  pcall(function()
+  -- Sanitiza apenas a cada 0.25s ou quando a árvore mudar, e sem alocar closures no heap
+  local now = os.clock()
+  if (now - _last_sanitize_time) >= 0.25 then
+    _last_sanitize_time = now
     if core.root_view and core.root_view.root_node then
-      local function sanitize_node(node)
-        if not node then return end
-        if node.type == "leaf" then
-          for _, view in ipairs(node.views or {}) do
-            if type(view) == "table" then
-              if not view.get_name then view.get_name = function() return "Orphan View" end end
-              if not view.get_title then view.get_title = function(self) return self:get_name() end end
-              if not view.is then view.is = function() return false end end
-            end
-          end
-        else
-          sanitize_node(node.a)
-          sanitize_node(node.b)
-        end
-      end
-      sanitize_node(core.root_view.root_node)
+      _sanitize_node_tree(core.root_view.root_node)
     end
     if core.active_view and type(core.active_view) == "table" then
-      if not core.active_view.get_name then core.active_view.get_name = function() return "Active Orphan" end end
-      if not core.active_view.is then core.active_view.is = function() return false end end
+      if not core.active_view.get_name then core.active_view.get_name = _static_active_orphan_name end
+      if not core.active_view.is then core.active_view.is = _static_orphan_is end
     end
-  end)
+  end
   return original_core_step()
 end
 
@@ -305,19 +331,23 @@ function RootView:on_file_dropped(file_path, x, y)
 end
 
 -- =============================================================================
--- 7. BANNER DE ALERTA NO ROOTVIEW (BOOT SHIELD)
+-- 🚨 OSD BOOT REPORT BANNER (Alerta Visual Imediato de Falhas no Boot)
 -- =============================================================================
 local original_rootview_draw = RootView.draw
 function RootView:draw(...)
   original_rootview_draw(self, ...)
   local report = rawget(_G, "_DOXOADE_BOOT_REPORT")
   if report and report.failed and report.failed > 0 then
-    local font = require("core.style").font
-    local w = self.size.x
-    draw_rect_safe(0, 0, w, 4, { 220, 38, 38, 60 })
-    local msg = string.format("🚨 [DOXOADE ALERT] %d módulo(s) falharam no boot! Verifique o log", report.failed)
-    if rencache and rencache.draw_text then
-      rencache.draw_text(font, msg, 14, 6, { 255, 255, 255, 255 })
+    local font = style.font
+    local screen_w = self.size and self.size.x or 800
+    local banner_h = 24
+    draw_rect_safe(0, 0, screen_w, banner_h, { 220, 38, 38, 240 })
+    draw_rect_safe(0, banner_h - 1, screen_w, 1, { 255, 255, 255, 80 })
+    local alert_msg = string.format("⚠ [DOXOADE BOOT] %d módulo(s) falharam na inicialização! Verifique o session_log.txt", report.failed)
+    if font and rencache and rencache.draw_text then
+      rencache.draw_text(font, alert_msg, 14, 4, { 255, 255, 255, 255 })
+    elseif font and native_renderer and native_renderer.draw_text then
+      native_renderer.draw_text(font, alert_msg, 14, 4, { 255, 255, 255, 255 })
     end
   end
 end

@@ -33,7 +33,7 @@ def _resolve_execution_mode():
         config = _get_project_config(start_path=os.getcwd())
         return config.get('mode', 'complete')
     except Exception:
-        return 'complete'
+        return 'direct'
 
 def _early_setup(project_root):
     """Garante diretórios e executa o Portão ABI."""

@@ -37,13 +37,15 @@ este é o novo protocolo simplificado e sucinto de desenvolveimento do doxoade. 
   5.2. Recomenda-se fortemente que lide com o tratamento de exceptions para que falhas sejam bem informadas e previstas para que o deve não fique a ver navios com relação a erros.
   5.3. recomenda-se salvaguardas --dry-run por padrão caso o comando ou sistema manipule questões excepcionais para o workflow, features essencial e UX.
   5.4. mecanismos para verificar a integridade dos dados é essencial. recomendase um err table para fazer previsão de problemas e já ter uma solução em mente; maior exemplo desta tecnica é o doxoade typhon
+  5.5. antes de comitar faça revisão vendo o diff para lidar com regressões da melhor forma.
+  5.6. para não ficar preso num development hell, deve testar cada implementação adequadamente, com calma, um passo de cada vez. fazer um blitzplan é bastante recomendado, e fazer roteiro para teste e implementação é adequado.
 6. Comunicação:
  6.1. Atualiação de codigo deve seguir serto protocolo:
   6.1.1. Contexto, é preciso contextualizar o problema
   6.1.2. problema, qual o problema, o que?, onde?, quando?, porque?, quem? origem? e consequencias
   6.1.3. solução, a resposta deve ser breve, o snipped de modificação com referencia do final e começo dos codigos anteriores.
   6.1.4. previsão do resultado.
-  6.1.5. citações devem ser mencionadas no codigo por razões eticas e de responsabilidade com a comunidade dev.
+  6.1.5. citações devem ser mencionadas no codigo por razões eticas e de responsabilidade com a comunidade dev. então um comentario como: # solução de github.com/fulano/projeto ou """ fix https://site.com/exemplo/123 """
 
 ## Sistemas e conceitos
 
@@ -54,7 +56,7 @@ Blitz Devlopmente: Desenvolvimento baseado em preparo e construção rapida de p
 * *Devflow*:     é quando o dev pode fazer suas atividade com tranquilidade e segurança mesmo com imprevistos, e com garantias que o trabalho não sera perdido e permanecera escalavel. assim a manutenção tem sua importancia, um codigo que segue os protocolos teram sua criação, desenvolvimento e manutenção adequada.
 * *os porques*:  qual o problema, o que?, onde?, quando?, porque?, quem? origem? e consequencias
 * *Preservação*: é importante dados de registro e historico por preservação e investigações com segurança.
-* **:
+* *roteiro*:     roteiro de implementação e testagem(RIT/Ritual) -> avaliação -> sistema de diagnostico/testagem -> implementação.
 
 ## Sistemas
 

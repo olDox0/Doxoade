@@ -1,9 +1,8 @@
 # doxoade/commands/lite_xl_systems/typhon_doxly/doxly_khonsu_gate.py
 # -*- coding: utf-8 -*-
-r"""
-Khonsu AOT Compiler Gatekeeper & Template Source Map (Typhon Doxly Edition - V2.3 Zero-Drift).
-Source Map com contagem precisa linha a linha, tolerância a wrappers de fechamento
-e normalização POSIX imune a erros de escape do Windows.
+"""
+Khonsu AOT Compiler Gatekeeper & Template Source Map (Typhon Doxly Edition - V2.4 Zero-Freeze Staging).
+Implementa montagem unificada escalonada com proteção de frame zero para o SDL2.
 """
 from __future__ import annotations
 import os
@@ -23,9 +22,22 @@ except ImportError:
     class Style:
         BRIGHT = DIM = RESET_ALL = NORMAL = ""
 
+# Módulos pesados que são deferidos para não bloquear a criação da janela gráfica
+DEFERRED_STAGE_TEMPLATES = {
+    "10_forensic_engine.lua": 0.20,
+    "14_doxnote_panel.lua": 0.35,
+    "15_audit_highlighter.lua": 0.45,
+    "16_open_editors_dock.lua": 0.60,
+    "17_khonsu_coroutine.lua": 0.70,
+    "18_search_results_dock.lua": 0.85,
+    "19a_dox_image_inline.lua": 0.90,
+    "19b_terminal_console.lua": 0.95,
+    "19c_canvas_sdl2_studio.lua": 1.00,
+    "19d_bottom_shelf_hub.lua": 1.05,
+}
+
 @dataclass
 class TemplateSegment:
-    """Segmento mapeado de um template dentro do buffer unificado."""
     name: str
     file_path: Path
     start_line: int
@@ -33,51 +45,55 @@ class TemplateSegment:
     line_count: int
 
 class TemplateSourceMap:
-    """Mapeador bidirecional de linhas do buffer unificado para o template original."""
     def __init__(self) -> None:
         self.segments: List[TemplateSegment] = []
 
     def register(self, name: str, file_path: Path, start_line: int, line_count: int) -> None:
-        """Registra um template cobrindo desde o header até o fechamento do bloco."""
         end_line = start_line + line_count - 1
         self.segments.append(TemplateSegment(name, file_path, start_line, end_line, line_count))
 
     def resolve(self, unified_line: int) -> Tuple[Optional[str], Optional[Path], int]:
-        """
-        Traduz o número de linha do buffer unificado para (nome_template, caminho, linha_relativa).
-        Possui tolerância para erros capturados no fechamento do wrapper (end)).
-        """
         for seg in self.segments:
-            # Tolerância de +1 linha para capturar erros de bloco não fechado no 'end)'
             if seg.start_line <= unified_line <= (seg.end_line + 1):
                 relative_line = min(seg.line_count, max(1, unified_line - seg.start_line + 1))
                 return seg.name, seg.file_path, relative_line
-
-        # Fallback de proximidade mais próxima caso caia em comentários divisores
-        closest_seg = None
-        min_dist = 999999
-        for seg in self.segments:
-            dist = min(abs(unified_line - seg.start_line), abs(unified_line - seg.end_line))
-            if dist < min_dist:
-                min_dist = dist
-                closest_seg = seg
-
-        if closest_seg and min_dist <= 2:
-            relative_line = min(closest_seg.line_count, max(1, unified_line - closest_seg.start_line + 1))
-            return closest_seg.name, closest_seg.file_path, relative_line
-
         return None, None, unified_line
+
+    # def resolve(self, unified_line: int) -> Tuple[Optional[str], Optional[Path], int]:
+    #     """
+    #     Traduz o número de linha do buffer unificado para (nome_template, caminho, linha_relativa).
+    #     Possui tolerância para erros capturados no fechamento do wrapper (end)).
+    #     """
+    #     for seg in self.segments:
+    #         # Tolerância de +1 linha para capturar erros de bloco não fechado no 'end)'
+    #         if seg.start_line <= unified_line <= (seg.end_line + 1):
+    #             relative_line = min(seg.line_count, max(1, unified_line - seg.start_line + 1))
+    #             return seg.name, seg.file_path, relative_line
+
+    #     # Fallback de proximidade mais próxima caso caia em comentários divisores
+    #     closest_seg = None
+    #     min_dist = 999999
+    #     for seg in self.segments:
+    #         dist = min(abs(unified_line - seg.start_line), abs(unified_line - seg.end_line))
+    #         if dist < min_dist:
+    #             min_dist = dist
+    #             closest_seg = seg
+
+    #     if closest_seg and min_dist <= 2:
+    #         relative_line = min(closest_seg.line_count, max(1, unified_line - closest_seg.start_line + 1))
+    #         return closest_seg.name, closest_seg.file_path, relative_line
+
+    #     return None, None, unified_line
 
 class DoxlyKhonsuGate:
     """Portão de Validação e Compilação AOT Supervisionada do Khonsu."""
 
     @classmethod
     def assemble_unified_buffer(cls, templates: List[Path]) -> Tuple[str, TemplateSourceMap]:
-        """Monta o buffer unificado com contagem pura (sem quebras de linha embutidas que causem drift)."""
         source_map = TemplateSourceMap()
         buffer_lines: List[str] = [
             "-- =============================================================================",
-            "-- DOXOADE SOVEREIGN INIT — KHONSU AOT UNIFIED RUNTIME",
+            "-- DOXOADE SOVEREIGN INIT — KHONSU AOT UNIFIED RUNTIME (STAGED ZERO-FREEZE)",
             f"-- Compilado em: {time.strftime('%Y-%m-%d %H:%M:%S')}",
             "-- =============================================================================",
             "",
@@ -88,16 +104,35 @@ class DoxlyKhonsuGate:
             "  local report = rawget(_G, '_DOXOADE_BOOT_REPORT')",
             "  report.total = report.total + 1",
             "  local t0 = os.clock()",
+            "  local mem0 = collectgarbage('count')",
             "  local ok, err = pcall(fn)",
-            "  local elapsed = os.clock() - t0",
+            "  local elapsed_ms = (os.clock() - t0) * 1000",
+            "  local mem_delta_kb = math.max(0, collectgarbage('count') - mem0)",
             "  if ok then",
             "    report.passed = report.passed + 1",
             "  else",
             "    report.failed = report.failed + 1",
-            "    table.insert(report.modules, { name = name, error = err, time = elapsed })",
             "    if core and core.error then",
             "      core.error(string.format(\"[DOXOADE BOOT] Módulo '%s' falhou: %s\", name, err))",
             "    end",
+            "  end",
+            "  table.insert(report.modules, {",
+            "    name = name,",
+            "    status = ok and 'PASS' or 'FAIL',",
+            "    time_ms = math.floor(elapsed_ms * 100) / 100,",
+            "    mem_kb = math.floor(mem_delta_kb * 10) / 10,",
+            "    error = err and tostring(err) or nil",
+            "  })",
+            "end",
+            "",
+            "local function _doxoade_staged_boot(name, delay_sec, fn)",
+            "  if core and core.add_thread then",
+            "    core.add_thread(function()",
+            "      if delay_sec and delay_sec > 0 then coroutine.yield(delay_sec) end",
+            "      _doxoade_safe_boot(name, fn)",
+            "    end)",
+            "  else",
+            "    _doxoade_safe_boot(name, fn)",
             "  end",
             "end",
             "",
@@ -106,18 +141,20 @@ class DoxlyKhonsuGate:
         for tf in templates:
             content = tf.read_text(encoding="utf-8", errors="replace")
             content_lines = content.splitlines()
-
             header_comment = f"-- >>> [TEMPLATE: {tf.name}] >>>"
-            boot_open = f'_doxoade_safe_boot("{tf.name}", function()'
+            
+            # Aplica staging assíncrono para templates secundários pesados
+            if tf.name in DEFERRED_STAGE_TEMPLATES:
+                delay = DEFERRED_STAGE_TEMPLATES[tf.name]
+                boot_open = f'_doxoade_staged_boot("{tf.name}", {delay}, function()'
+            else:
+                boot_open = f'_doxoade_safe_boot("{tf.name}", function()'
+
             buffer_lines.append(header_comment)
             buffer_lines.append(boot_open)
-
-            # A linha 1 do template original corresponde exatamente à próxima linha do buffer
             code_start_line = len(buffer_lines) + 1
             buffer_lines.extend(content_lines)
-
             source_map.register(tf.name, tf, code_start_line, len(content_lines))
-
             buffer_lines.append("end)")
             buffer_lines.append(f"-- <<< [END TEMPLATE: {tf.name}] <<<")
             buffer_lines.append("")

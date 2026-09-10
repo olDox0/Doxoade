@@ -36,6 +36,9 @@ local function draw_text_safe(font, text, x, y, color)
   end
 end
 
+-- =============================================================================
+-- 📂 RESOLUÇÃO SOBERANA DE CAMINHOS (Única e Blindada contra Windows Case/Slashes)
+-- =============================================================================
 local _path_cache = {}
 local _last_project_count = 0
 
@@ -44,7 +47,6 @@ local function resolve_active_paths(view)
   if not view or not view.doc or not view.doc.filename then return nil end
   local raw = view.doc.filename
 
-  -- Invalida o cache caso os diretórios do projeto tenham mudado
   local current_proj_count = core.project_directories and #core.project_directories or 0
   if current_proj_count ~= _last_project_count then
     _path_cache = {}
@@ -54,24 +56,72 @@ local function resolve_active_paths(view)
   if _path_cache[raw] then return _path_cache[raw] end
 
   local abs = system.absolute_path(raw) or raw
-  local clean_abs = abs:gsub("[/\\]", PATHSEP or "\\")
+  local clean_abs = abs:gsub("\\", "/")
+  local clean_abs_lower = clean_abs:lower()
   local fname = raw:match("[/\\]([^/\\]+)$") or raw
-  local rel = abs:gsub("\\", "/")
 
+  -- Coleta todas as raízes de projeto ativas
+  local project_roots = {}
   if core.project_directories then
-    for _, proj in ipairs(core.project_directories) do
-      local ppath = tostring(type(proj) == "table" and (proj.path or proj.name) or proj or ""):gsub("\\", "/")
-      if ppath ~= "" and abs:sub(1, #ppath) == ppath then
-        rel = abs:sub(#ppath + 1):gsub("^/", "")
-        break
+    for _, p in ipairs(core.project_directories) do
+      local p_str = type(p) == "table" and (p.path or p.name) or tostring(p)
+      if p_str and p_str ~= "" then
+        table.insert(project_roots, (system.absolute_path(p_str) or p_str):gsub("\\", "/"):gsub("/+$", ""))
       end
     end
   end
-  rel = rel:gsub("/", PATHSEP or "\\")
-  local dir = clean_abs:match("^(.*)[/\\]") or clean_abs
-  local result = { filename = fname, relative = rel, absolute = clean_abs, dir = dir, raw = abs }
+  if core.project_dir then
+    local p_str = tostring(core.project_dir)
+    table.insert(project_roots, (system.absolute_path(p_str) or p_str):gsub("\\", "/"):gsub("/+$", ""))
+  end
+
+  -- Encontra o projeto que é pai do arquivo atual
+  local best_root = nil
+  local best_len = 0
+  for _, root in ipairs(project_roots) do
+    local root_lower = root:lower()
+    if clean_abs_lower:sub(1, #root_lower) == root_lower then
+      if #root > best_len then
+        best_root = root
+        best_len = #root
+      end
+    end
+  end
+
+  -- Extrai o caminho relativo limpo
+  local rel = clean_abs
+  if best_root and best_len > 0 then
+    rel = clean_abs:sub(best_len + 1):gsub("^/", "")
+  end
+  if rel == "" then rel = fname end
+
+  local clean_native_abs = abs:gsub("[/\\]", PATHSEP or "\\")
+  local clean_native_rel = rel:gsub("[/\\]", PATHSEP or "\\")
+  local dir = clean_native_abs:match("^(.*)[/\\]") or clean_native_abs
+
+  local result = {
+    filename = fname,
+    relative = clean_native_rel,
+    absolute = clean_native_abs,
+    dir = dir,
+    raw = abs
+  }
+
   _path_cache[raw] = result
   return result
+end
+
+local function open_in_file_manager(path)
+  if system.show_in_file_manager then
+    system.show_in_file_manager(path)
+    return
+  end
+  if PLATFORM == "Windows" then
+    system.exec('explorer.exe /select,"' .. tostring(path):gsub('"', '""') .. '"')
+  else
+    local dir = tostring(path):match("^(.*)[/\\]") or path
+    system.exec("xdg-open '" .. tostring(dir):gsub("'", "'\\''") .. "'")
+  end
 end
 
 -- =============================================================================

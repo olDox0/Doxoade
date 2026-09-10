@@ -184,19 +184,33 @@ class LiteXLProcess:
 
     @classmethod
     def send_to_running_instance(cls, target_path: str) -> Tuple[bool, str]:
-        resolved, exists, is_dir = cls.resolve_target_path(target_path)
+        if target_path == "__DOXOADE_GRACEFUL_QUIT__":
+            ipc_queue = LiteXLPaths.get_ipc_queue_path()
+            with open(ipc_queue, "a", encoding="utf-8") as f:
+                f.write(target_path + "\n")
+            return True, target_path
+
+        # Separa coordenada de linha/coluna caso exista (ex: arquivo.py:120)
+        clean_path = target_path.strip().strip("'\"")
+        line_suffix = ""
+        m = re.search(r"(:[0-9]+(?::[0-9]+)?)$", clean_path)
+        if m:
+            line_suffix = m.group(1)
+            clean_path = clean_path[: -len(line_suffix)]
+
+        resolved, exists, is_dir = cls.resolve_target_path(clean_path)
         if not resolved:
             return False, "Caminho inválido."
-
         if not exists:
             return False, f"O caminho não existe no disco: {resolved}"
 
+        ipc_payload = f"{resolved}{line_suffix}"
         try:
             ipc_queue = LiteXLPaths.get_ipc_queue_path()
             with open(ipc_queue, "a", encoding="utf-8") as f:
-                f.write(resolved + "\n")
+                f.write(ipc_payload + "\n")
             cls.focus_running_window()
-            return True, resolved
+            return True, ipc_payload
         except Exception as e:
             return False, str(e)
 

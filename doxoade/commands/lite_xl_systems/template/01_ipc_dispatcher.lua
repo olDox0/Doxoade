@@ -278,50 +278,65 @@ end
 local function process_ipc_line(line)
   if not line or line == "" then return end
   line = line:gsub("^%s*", ""):gsub("%s*$", "")
+  line = line:gsub('^["\']', ''):gsub('["\']$', '') -- Limpa aspas envolventes
 
   if line == "__DOXOADE_GRACEFUL_QUIT__" then
-    save_sovereign_session()
-    core.quit()
+    if core.quit then
+      pcall(save_sovereign_session)
+      core.quit()
+    end
     return
   end
 
-  -- Se for um caminho de arquivo enviado via CLI
-  local file_path = line
-  local target_line, target_col = nil, nil
-  local m_file, m_line, m_col = line:match("^(.-):(%d+):(%d+)$")
-  if m_file then
-    file_path = m_file
-    target_line = tonumber(m_line)
-    target_col = tonumber(m_col)
+  -- 🧭 DECODIFICADOR DE COORDENADAS (Suporte a "caminho:linha:coluna" ou "caminho:linha")
+  local target_fn = line
+  local target_line = nil
+  local target_col = 1
+
+  local fn_c, l_c, c_c = line:match("^(.-):(%d+):(%d+)$")
+  if fn_c and l_c and c_c then
+    target_fn = fn_c
+    target_line = tonumber(l_c)
+    target_col = tonumber(c_c)
   else
-    local m_file2, m_line2 = line:match("^(.-):(%d+)$")
-    if m_file2 then
-      file_path = m_file2
-      target_line = tonumber(m_line2)
+    local fn_l, l_l = line:match("^(.-):(%d+)$")
+    if fn_l and l_l then
+      target_fn = fn_l
+      target_line = tonumber(l_l)
+      target_col = 1
     end
   end
 
-  local abs_path = system.absolute_path(file_path) or file_path
-  local finfo = system.get_file_info(abs_path)
-
-  if finfo and finfo.type == "dir" then
+  -- Se for diretório, anexa à árvore de projetos
+  local info = system.get_file_info(target_fn)
+  if info and info.type == "dir" then
     if core.add_project_directory then
-      core.add_project_directory(abs_path)
-    elseif core.set_project_dir then
-      core.set_project_dir(abs_path)
+      core.add_project_directory(target_fn)
+      if core.log then core.log("📂 [IPC] Diretório anexado: " .. target_fn) end
     end
-    save_sovereign_session()
-  else
-    local doc = core.open_doc(abs_path)
-    if doc then
-      core.root_view:open_doc(doc)
-      if target_line and doc.set_selection then
-        doc:set_selection(target_line, target_col or 1, target_line, target_col or 1)
+    core.redraw = true
+    return
+  end
+
+  -- Abre o documento e salta para a coordenada
+  local doc = core.open_doc(target_fn)
+  if doc then
+    core.root_view:open_doc(doc)
+    if target_line and target_line > 0 then
+      if doc.set_selection then
+        doc:set_selection(target_line, target_col, target_line, target_col)
       end
-      save_sovereign_session()
+    end
+    core.redraw = true
+    if core.log then
+      local fname = target_fn:match("[^/\\]+$") or target_fn
+      if target_line then
+        core.log(string.format("📂 [IPC] Aberto: %s (linha %d)", fname, target_line))
+      else
+        core.log("📂 [IPC] Aberto: " .. fname)
+      end
     end
   end
-  core.redraw = true
 end
 
 -- =============================================================================

@@ -117,8 +117,8 @@ local core = rawget(_G, "core") or (pcall(require, "core") and require("core") o
             [str(exe)],
             env=env,
             creationflags=CREATE_NEW_CONSOLE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             text=True,
             encoding="utf-8",
             errors="replace"

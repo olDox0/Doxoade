@@ -100,8 +100,9 @@ end
 -- =============================================================================
 if core.add_thread then
   core.add_thread(function()
+    coroutine.yield(0.5) -- Staging: permite o primeiro frame da UI ser renderizado
     while true do
-      coroutine.yield(0.02)
+      coroutine.yield(0.05) -- Calibração: 20 Hz (orçamento suave de CPU)
       local now = os.clock()
       for id, timer in pairs(Khonsu.debounce_timers) do
         if now >= timer.target_time then

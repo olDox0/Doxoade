@@ -7,14 +7,14 @@
   - Blindagem idempotente de sintaxe Python (F-strings e raw strings sem duplicatas).
   - Alinhamento de guias com suporte a TABs (\t) e espaços.
 ]]
-local core = require "core"
-local config = require "core.config"
-local style = require "core.style"
+local core    = require "core"
+local config  = require "core.config"
+local style   = require "core.style"
 local command = require "core.command"
-local keymap = require "core.keymap"
-local Doc = require "core.doc"
+local keymap  = require "core.keymap"
+local Doc     = require "core.doc"
 local DocView = require "core.docview"
-local syntax = require "core.syntax"
+local syntax  = require "core.syntax"
 
 -- =============================================================================
 -- 1. POLYFILLS DE RENDERIZAÇÃO SEGURA
@@ -23,19 +23,71 @@ local rencache = rawget(_G, "rencache") or (pcall(require, "core.rencache") and 
 local native_renderer = rawget(_G, "renderer") or (pcall(require, "renderer") and require("renderer") or nil)
 
 local function draw_rect_safe(x, y, w, h, color)
-  if rencache and rencache.draw_rect then
-    rencache.draw_rect(x, y, w, h, color)
-  elseif native_renderer and native_renderer.draw_rect then
-    native_renderer.draw_rect(x, y, w, h, color)
-  end
+  if rencache and rencache.draw_rect then rencache.draw_rect(x, y, w, h, color)
+  elseif native_renderer and native_renderer.draw_rect then native_renderer.draw_rect(x, y, w, h, color) end
 end
 
-local function draw_text_safe(font, text, x, y, color)
-  if rencache and rencache.draw_text then
-    rencache.draw_text(font, text, x, y, color)
-  elseif native_renderer and native_renderer.draw_text then
-    native_renderer.draw_text(font, text, x, y, color)
+config.draw_indent_guides = config.draw_indent_guides ~= false
+local INDENT_GUIDE_COLOR = { 65, 62, 70, 140 }
+
+local function get_doc_indent_unit(doc)
+  if doc and doc.filename then
+    local fn = tostring(doc.filename):lower()
+    if fn:find("%.lua$") then return 2 end
   end
+  return config.indent_size or 4
+end
+
+local function get_effective_line_indent(line_text, indent_unit)
+  if not line_text or line_text == "" then return 0 end
+  local spaces = 0
+  for i = 1, #line_text do
+    local b = line_text:byte(i)
+    if b == 32 then
+      spaces = spaces + 1
+    elseif b == 9 then
+      spaces = spaces + indent_unit
+    else
+      break
+    end
+  end
+  return spaces
+end
+
+-- =============================================================================
+-- ⚡ INDENT GUIDES O(1) COM CACHE ESTÁTICO DE LARGURA
+-- =============================================================================
+local _cached_space_w = 0
+local _cached_font = nil
+
+local original_draw_line_body = DocView.draw_line_body
+function DocView:draw_line_body(line_idx, x, y)
+  local res = original_draw_line_body(self, line_idx, x, y)
+
+  if config.draw_indent_guides and self.doc and self.doc.lines and self.doc.lines[line_idx] then
+    local text = self.doc.lines[line_idx]
+    local indent_unit = get_doc_indent_unit(self.doc)
+    local total_spaces = get_effective_line_indent(text, indent_unit)
+
+    if total_spaces >= indent_unit then
+      local font = self:get_font()
+      if font ~= _cached_font then
+        _cached_font = font
+        _cached_space_w = font:get_width(" ")
+      end
+
+      local space_w = _cached_space_w
+      local line_h = self:get_line_height()
+      local levels = math.floor(total_spaces / indent_unit)
+
+      for lvl = 1, levels do
+        local gx = x + (lvl - 1) * (indent_unit * space_w)
+        draw_rect_safe(gx, y, 1, line_h, INDENT_GUIDE_COLOR)
+      end
+    end
+  end
+
+  return res
 end
 
 -- =============================================================================
@@ -245,15 +297,27 @@ function Doc:save(...)
   return original_doc_save(self, ...)
 end
 
+-- =============================================================================
+-- 🧱 LINHA GROSSA SEPARADORA DE GUTTER (Posicionada após os números de linha)
+-- =============================================================================
+local GUTTER_DIVIDER_WIDTH = 3
+local GUTTER_DIVIDER_COLOR = { 115, 110, 130, 255 }
+
 local original_draw_line_gutter = DocView.draw_line_gutter
-function DocView:draw_line_gutter(line_idx, x, y, width)
-  local h = original_draw_line_gutter(self, line_idx, x, y, width)
-  if self.doc and self.doc.session_modified and self.doc.session_modified[line_idx] then
-    local state = self.doc.session_modified[line_idx]
-    local marker_color = (state == "dirty") and COLOR_DIRTY or COLOR_SAVED
-    draw_rect_safe(x + width + 18, y, 3, self:get_line_height(), marker_color)
-  end
-  return h
+function DocView:draw_line_gutter(line_idx, x, y, ...)
+  local res = original_draw_line_gutter and original_draw_line_gutter(self, line_idx, x, y, ...) or 0
+
+  -- Obtém a largura REAL da coluna de numeração (números + padding)
+  local gw = (self.get_gutter_width and self:get_gutter_width()) or 40
+  local div_w = config.gutter_divider_width or GUTTER_DIVIDER_WIDTH
+  local div_col = style.gutter_divider or style.divider or GUTTER_DIVIDER_COLOR
+  local line_h = (self.get_line_height and self:get_line_height()) or 16
+
+  -- Posiciona a linha exatamente na fronteira onde os números terminam e o código começa
+  local divider_x = x + gw - div_w - 2
+  draw_rect_safe(divider_x, y, div_w, line_h, div_col)
+
+  return res
 end
 
 -- =============================================================================

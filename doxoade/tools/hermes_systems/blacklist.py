@@ -71,6 +71,8 @@ HARDCODED_BLACKLIST = {
     'doxoade.commands.intelligence',
     'doxoade.commands.intelligence_systems',
     'doxoade.commands.intelligence_utils',
+    'doxoade.commands.regret_systems.regret_git_reader',
+    'doxoade.commands.regret_systems.regret_engine',
 }
 
 # Prefixos que também são bloqueados
@@ -79,6 +81,7 @@ HARDCODED_BLACKLIST_PREFIXES = (
     'doxoade.tools.vulcan.',
     'doxoade.tools.aegis.',
     'doxoade.tools.horus',
+    'doxoade.commands.regret_systems',
 )
 
 def sync_blacklist_defaults(project_root: Path) -> int:

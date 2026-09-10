@@ -27,8 +27,8 @@ def _search_code_logic(root: Path, query: str, limit: int) -> list:
     q_lower = query.lower()
     q_bytes = query.encode('utf-8')
     QUARANTINE = {'.git', 'venv', '.venv', '__pycache__', 'build', 'dist', '.doxoade', '.doxoade_cache', 'node_modules'}
-    ALLOWED_EXTS = {'.py', '.lua', '.md', '.txt', '.dox', '.toml', '.c', '.h', '.json', '.xml', '.yaml', '.yml'}
-    
+    #ALLOWED_EXTS = {'.py', '.lua', '.md', '.txt', '.dox', '.toml', '.c', '.h', '.json', '.xml', '.yaml', '.yml'}
+    ALLOWED_EXTS = {'.py', '.lua', '.md', '.dox', '.toml', '.c', '.h', '.json', '.xml', '.yaml', '.yml'}
     v_mod = vulcan_bridge.get_optimized_module('vulcan_search')
     for r, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if d not in QUARANTINE]

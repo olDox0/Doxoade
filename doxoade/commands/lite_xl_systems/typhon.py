@@ -156,7 +156,7 @@ class TyphonEngine:
         if alive:
             proc.kill()
             try:
-                proc.wait(timeout=1.0)
+                proc.wait(timeout=2.0)
             except Exception:
                 pass
 

@@ -1381,9 +1381,10 @@ def _awaken_up(affected_files: list[str]) -> None:
     from doxoade.commands.mk_systems.mk_utils import open_in_notepadpp
     files_to_open = [f for f in affected_files if os.path.isfile(f)]
     if files_to_open:
-        click.echo(f"\n{Fore.MAGENTA}--- [UP] Abrindo {len(files_to_open)} arquivo(s) no Notepad++ ---{Style.RESET_ALL}")
-        open_in_notepadpp(files_to_open)
-
+        from doxoade.tools.editor_dispatch import EditorDispatcher
+        ok, editor_name = EditorDispatcher.open_files(files_to_open)
+        badge_color = Fore.GREEN if ok else Fore.YELLOW
+        click.echo(f"\n{Fore.CYAN}--- [UP] Abrindo {len(files_to_open)} arquivo(s) via {badge_color}{editor_name}{Fore.CYAN} ---{Style.RESET_ALL}")
 
 # ═══════════════════════════════════════════════════════════════
 # CLI ENTRYPOINT DO INIT

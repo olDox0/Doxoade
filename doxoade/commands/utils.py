@@ -129,15 +129,14 @@ def show_trace(ctx, filepath):
         click.echo(Fore.RED + f'Falha ao processar o arquivo de trace: {e}')
     pass
 
-@click.command('mk')
+@click.command('mk', help="🔨 Construtor de Topologia e Visualizador Nexus.")
 @click.argument('items', nargs=-1)
-@click.option('--path', '-p', 'base_path', default='.', type=click.Path(exists=True))
-@click.option('--tree', '-t', is_flag=True)
+@click.option('--path', '-p', 'base_path', default='.', type=click.Path())
+@click.option('--tree', '-t', is_flag=True, help="Visualizar a estrutura do projeto em formato de árvore.")
 @register_mk_options
-def mk(base_path, items, architecture, learning, tree, up, gitignore):
-    """🔨 Construtor de Topologia e Visualizador Nexus."""
+def mk(items, base_path, tree, architecture, learning, up, gitignore, **kwargs):
     from .mk_systems.mk_commands import execute_mk_logic
-    execute_mk_logic(base_path, items, architecture, learning, tree, up, gitignore)  # <-- learning added
+    execute_mk_logic(base_path, items, architecture, learning, tree, up, gitignore, **kwargs)
 
 @click.command('create-pipeline')
 @click.pass_context

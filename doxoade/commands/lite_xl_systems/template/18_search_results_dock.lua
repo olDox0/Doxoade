@@ -186,7 +186,8 @@ command.add(nil, {
       local active = core.root_view:get_active_node()
       if active and not active.locked then
         local new_node = active:split("right")
-        local sv = SearchResultsView()
+        --local sv = SearchResultsView()
+        local sv = SearchResultsView:new()
         new_node:add_view(sv)
         core.set_active_view(sv)
       end

@@ -173,33 +173,25 @@ def _direct_report(trace, mined):
     sys.exit(1)
 
 def _correct_crime_scene(info: dict, trace: str) -> dict:
-    """🎯 Sobrescreve o veredito do CrashProcessor com o frame REAL da exceção
-    (intelligence.py:44) e reconstrói a Cadeia de Envolvimento."""
-    mined = _mine_traceback(trace)
-    crime = (mined or {}).get('crime')                   # ← defensivo
-    if not crime:
-        return info
-    info['file'] = crime['file']
-    info['line'] = crime['line']
-    info['chain'] = [(fr['ctx'], f"{fr['file']}:{fr['line']}") for fr in mined.get('frames', [])]
-    return info
-
-def _correct_crime_scene(info: dict, trace: str) -> dict:
+    """🎯 Sobrescreve o veredito com o frame REAL do código do usuário e reconstrói a cadeia."""
     mined = _mine_traceback(trace)
     crime = (mined or {}).get('crime')
     if not crime:
         return info
+
     info['file'] = crime['file']
     info['line'] = crime['line']
     info['chain'] = [(fr['ctx'], f"{fr['file']}:{fr['line']}") for fr in mined.get('frames', [])]
-    # ⚖️ ESCLARECIMENTO DE CONTRATO (Ma'at)
+
+    # ⚖️ ESCLARECIMENTO DE CONTRATO (Ma'at / Hera)
     if mined.get('error_type') in _CONTRACT_ERRORS:
         info['technical_error'] = 'FALHA_DE_CONTRATO'
         info['explanation'] = (
             f"{mined['error_type']}: o código assumiu uma garantia que o contrato não oferece "
             f"(chave/atributo/índice inexistente). {mined['error_msg']}"
         )
-        info['contract'] = _extract_contract(crime)   # ← HERA
+        info['contract'] = _extract_contract(crime)
+        
     return info
 
 def _read_trace(trace):
@@ -226,10 +218,21 @@ def _mine_traceback(trace):
         err = re.search(r'\n([A-Za-z_]+): (.+)', trace)
     if not err:
         return None
-    crime = frames[-1] if frames else None
+    # Lista de exclusão de infraestrutura/sandbox interno
+    FRAMEWORK_IGN = ('tools/aegis', 'tools\\aegis', 'aegis_utils.py', 'aegis_core.py', 
+                     'commands/run.py', 'commands\\run.py', 'rescue.py', '<frozen')
+    
+    user_frames = [
+        f for f in frames 
+        if not any(ign in f['file'].replace('\\', '/') for ign in FRAMEWORK_IGN)
+    ]
+    
+    # Elege o frame do usuário mais profundo; se não houver, cai para o último frame
+    crime = user_frames[-1] if user_frames else (frames[-1] if frames else None)
+
     out = {
         'frames': frames,
-        'crime': crime,                                   # ← forma nova
+        'crime': crime,
         'error_type': err.group(1),
         'error_msg': err.group(2).strip(),
         'message': err.group(2).strip(),
@@ -256,12 +259,12 @@ def _get_snippet(file_path, line, ctx=2):
         return '     (snippet indisponível)'
 
 def _open_npp(file_path, line):
-    for cmd in (['notepad++', f'-n{line}', file_path], ['npp', f'-n{line}', file_path]):
-        try:
-            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return True
-        except Exception:
-            continue
+    """Abre o arquivo na coordenada via EditorDispatcher (Doxly com fallback para Notepad++)."""
+    try:
+        from doxoade.tools.editor_dispatch import EditorDispatcher
+        EditorDispatcher.open_at_line(file_path, line=line)
+    except Exception:
+        pass
     try:
         os.startfile(file_path)
         return True
@@ -618,7 +621,8 @@ def activate_protocol(error_text: str, exit_code: int = None, trace=None, **kwar
             opt1                            = f"{Back.RED}1.{RST} {Fore.GREEN} [GIT]  Reverter {Y}{file_label}{RST}"
             if file_label == "NATIVO": opt1 = f"{Style.DIM}[1] [GIT]  (Indisponível p/ falha nativa){RST}"
 
-            opt2 = f"{Back.RED}2.{RST} {Fore.CYAN} [EDIT] Abrir Notepad++ Linha {Y}{info['line']}{RST}"
+#            opt2 = f"{Back.RED}2.{RST} {Fore.CYAN} [EDIT] Abrir Notepad++ Linha {Y}{info['line']}{RST}"
+            opt2 = f"{Back.RED}2.{RST} {Fore.CYAN} [EDIT] Abrir no Doxly (Lite XL) Linha {Y}{info['line']}{RST}"
             opt3 = f"{Back.RED}3.{RST} {Fore.RED} [INFO] Ver logs brutos{RST}"
             opt4 = f"{Back.RED}4.{RST} {RST}{Fore.YELLOW} [DEBUG] Diagnóstico Pipeline{RST}"
             opt5 = f"{Back.RED}5.{RST} {Fore.MAGENTA} [IO]    Analisar Dados e Memória{RST}"
@@ -655,19 +659,11 @@ def activate_protocol(error_text: str, exit_code: int = None, trace=None, **kwar
                         print(f'  {Fore.GREEN}✔ Sucesso: {file_label} restaurado.{Style.RESET_ALL}')
                         
                     elif choice == '2':
-                        # Localização Industrial do Notepad++ (Evita 'file not found' no Windows)
-                        import shutil
-                        npp_candidates = [
-                            r"C:\Program Files\Notepad++\notepad++.exe",
-                            r"C:\Program Files (x86)\Notepad++\notepad++.exe",
-                            "notepad++.exe"
-                        ]
-                        npp_bin = next((p for p in npp_candidates if _os.path.exists(p) or shutil.which(p)), 'notepad.exe')
-                        
-                        print(f'  {C}[*] Invocando editor...{RST}')
-                        # Flag -n pula direto para a linha do erro no Notepad++
-                        target_abs = _os.path.abspath(info['file'])
-                        subprocess.Popen([npp_bin, f"-n{info['line']}", "-nosession", target_abs], shell=False)
+                        print(f'  {C}[*] Invocando Doxly (Lite XL) na linha {info["line"]}...{RST}')
+                        from doxoade.tools.editor_dispatch import EditorDispatcher
+                        ok = EditorDispatcher.open_at_line(info['file'], line=info['line'])
+                        if not ok:
+                            print(f'  {Fore.YELLOW}⚠ Falha ao disparar Doxly. Tentando fallback...{RST}')
                         print(f'  {G}✔ Editor aberto em {file_label} L{info["line"]}.{RST}')
                         
                     elif choice == '3':
