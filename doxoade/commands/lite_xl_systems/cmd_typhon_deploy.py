@@ -23,12 +23,13 @@ def cmd_status(mode):
 @deploy_group.command("production", help="Deploy em PRODUÇÃO (com backup e launch automático).")
 @click.option("--force", "-f", is_flag=True, help="Força deploy mesmo com warnings.")
 @click.option("--launch/--no-launch", "-l/-nl", default=True, help="Lança o Lite XL após deploy (Padrão: True).")
-def cmd_deploy_production(force, launch):
+@click.option("--no-khonsu", is_flag=True, default=False, help="Desativa o compilador Khonsu AOT (gera init.lua em texto puro soberano).")
+def cmd_deploy_production(force, launch, no_khonsu):
     """Deploy seguro em produção com backup e lançamento automático."""
     print(f"\n{Fore.GREEN}{Style.BRIGHT}🟢 DEPLOY PRODUCTION{Style.RESET_ALL}\n")
-    result = TyphonDeployEngine.deploy("production", force=force)
+    result = TyphonDeployEngine.deploy("production", force=force, no_khonsu=no_khonsu)
     if result["success"]:
-        print(f"\n{Fore.GREEN}✔ Deploy de produção concluído com sucesso!{Fore.RESET}")
+        print(f"\n{Fore.GREEN}✔ Deploy de produção concluído com sucesso! ({result.get('opt_mode', 'standard')}){Fore.RESET}")
         if result["backup"]:
             print(f"{Fore.CYAN}💾 Backup de segurança: {result['backup'].name}{Fore.RESET}")
         if launch:
@@ -58,15 +59,23 @@ def cmd_deploy_sandbox(launch, exorcise):
 @deploy_group.command("test", help="Deploy em TEST (chaos injection + launch automático).")
 @click.option("--launch/--no-launch", "-l/-nl", default=True, help="Lança o Lite XL após deploy (Padrão: True).")
 @click.option("--exorcise/--no-exorcise", default=True, help="Mata instâncias antigas de teste.")
-def cmd_deploy_test(launch, exorcise):
+@click.option("--harvest/--no-harvest", default=True, help="Ativa o Forensic Harvester automático.")
+@click.option("--no-khonsu", is_flag=True, default=False, help="Desativa o compilador Khonsu AOT (gera init.lua em texto puro).")
+def cmd_deploy_test(launch, exorcise, harvest, no_khonsu):
     """Deploy de teste com telemetria forense e launch automático."""
     print(f"\n{Fore.YELLOW}{Style.BRIGHT}🟡 DEPLOY TEST{Style.RESET_ALL}\n")
-    result = TyphonDeployEngine.deploy("test")
+    result = TyphonDeployEngine.deploy("test", no_khonsu=no_khonsu)
     if result["success"]:
-        print(f"\n{Fore.GREEN}✔ Deploy de teste concluído!{Fore.RESET}")
+        print(f"\n{Fore.GREEN}✔ Deploy de teste concluído! ({result['opt_mode']}){Fore.RESET}")
         if launch:
             print()
-            TyphonDeployEngine.launch("test", exorcise=exorcise)
+            pid = TyphonDeployEngine.launch("test", exorcise=exorcise)
+            if harvest and pid:
+                import threading
+                from .typhon_deploy import forensic_harvester
+                test_dir = TyphonDeployEngine._get_deploy_dir("test")
+                thread = threading.Thread(target=forensic_harvester, args=(pid, test_dir), daemon=True)
+                thread.start()
     else:
         print(f"\n{Fore.RED}✖ Deploy falhou: {result['error']}{Fore.RESET}")
 

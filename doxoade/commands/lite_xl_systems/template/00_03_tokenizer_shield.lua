@@ -8,9 +8,15 @@
   4. Lexer Semântico O(N) de Alta Disponibilidade para alimentar o Autocomplete.
   5. Auto-bootstrap de user_settings.lua sem risco de sobrescrita destrutiva.
 ]]
+
 local core = rawget(_G, "core") or (pcall(require, "core") and require("core") or nil)
+local config = rawget(_G, "config") or (pcall(require, "core.config") and require("core.config") or {})
 local user_dir = USERDIR or "."
 local sep = PATHSEP or "/"
+
+if config.doxoade_khonsu == false or config.doxoade_plain_mode then
+  -- Modo plain respeitado
+end
 
 -- =============================================================================
 -- 1. TELEMETRIA E CONTROLE DE ESTADO
@@ -271,5 +277,61 @@ pcall(function()
       end
       os.remove(err_path)
     end
+  end
+end)
+
+-- =============================================================================
+-- 🌙 KHONSU ADAPTIVE HIGHLIGHTER (Zero Duplicate Thread Reference)
+-- =============================================================================
+pcall(function()
+  local Highlighter = require "core.doc.highlighter"
+  if not Highlighter or rawget(_G, "_DOXOADE_HIGHLIGHTER_PATCHED") then return end
+  rawset(_G, "_DOXOADE_HIGHLIGHTER_PATCHED", true)
+
+  Highlighter.start = function(self)
+    if self.running then return end
+    self.running = true
+
+    -- Sem passar 'self' como target para evitar colisão de chave em core.threads
+    core.add_thread(function()
+      while self.first_invalid_line <= self.max_wanted_line do
+        local max = math.min(self.first_invalid_line + 40, self.max_wanted_line)
+        local retokenized_from
+        local t0 = os.clock()
+
+        for i = self.first_invalid_line, max do
+          local state = (i > 1) and self.lines[i - 1].state
+          local line = self.lines[i]
+          if line and line.resume and (line.init_state ~= state or line.text ~= self.doc.lines[i]) then
+            line.resume = nil
+          end
+          if not (line and line.init_state == state and line.text == self.doc.lines[i] and not line.resume) then
+            retokenized_from = retokenized_from or i
+            self.lines[i] = self:tokenize_line(i, state, line and line.resume)
+          end
+
+          local khonsu = rawget(_G, "Khonsu")
+          if khonsu and khonsu.should_yield then
+            if khonsu.should_yield(t0) then
+              self.first_invalid_line = i + 1
+              coroutine.yield()
+              t0 = os.clock()
+            end
+          elseif (os.clock() - t0) >= 0.002 then
+            self.first_invalid_line = i + 1
+            coroutine.yield()
+            t0 = os.clock()
+          end
+        end
+
+        self.first_invalid_line = max + 1
+        if retokenized_from then
+          core.redraw = true
+        end
+        coroutine.yield()
+      end
+
+      self.running = false
+    end) -- 👈 Sem ', self', garantindo que cada thread seja independente
   end
 end)

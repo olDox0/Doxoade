@@ -1,20 +1,22 @@
 -- doxoade/commands/lite_xl_systems/template/04_color_and_search_highlight.lua
 --[[
-  ⚡ DOXOADE HIGH-PERFORMANCE COLOR PREVIEW & INDENT GUIDES (V2.1 Calibrada)
-  - Line Memoization O(1): Cache de regex de cores e guias de indentação.
-  - Previews de cor contrastados (#HEX, rgb, rgba, {r,g,b,a}).
-  - Highlight persistente de busca e seleção em todos os splits abertos.
-  - Blindagem idempotente de sintaxe Python (F-strings e raw strings sem duplicatas).
-  - Alinhamento de guias com suporte a TABs (\t) e espaços.
+  ⚡ DOXOADE HIGH-PERFORMANCE COLOR PREVIEW, INDENT GUIDES & SESSION DIFF (V3.6)
+  - Escadaria / Cascata Ativa: Guia de indentação do escopo do cursor realçada em tempo real.
+  - Marcador de Linhas Modificadas no Gutter: Amarelo (Dirty) e Verde (Saved).
+  - Previews de Cor Inline (#HEX, rgb, rgba, {r,g,b,a}) com texto contrastado.
+  - Highlight Persistente de Busca: Seleção ativa E digitação no Command View (Ctrl+F).
+  - Blindagem Idempotente de Sintaxe Python: Protege f-strings e docstrings triplas.
+  - Comandos de UX: doc:unindent (resiliente a TABs e espaços) e toggle-indent-guides (Ctrl+Alt+I).
+  Compliance: ProDeNov 1.2.1, PASC-6.1.
 ]]
-local core    = require "core"
-local config  = require "core.config"
-local style   = require "core.style"
+local core = require "core"
+local config = require "core.config"
+local style = require "core.style"
 local command = require "core.command"
-local keymap  = require "core.keymap"
-local Doc     = require "core.doc"
+local keymap = require "core.keymap"
+local Doc = require "core.doc"
 local DocView = require "core.docview"
-local syntax  = require "core.syntax"
+local syntax = require "core.syntax"
 
 -- =============================================================================
 -- 1. POLYFILLS DE RENDERIZAÇÃO SEGURA
@@ -23,75 +25,24 @@ local rencache = rawget(_G, "rencache") or (pcall(require, "core.rencache") and 
 local native_renderer = rawget(_G, "renderer") or (pcall(require, "renderer") and require("renderer") or nil)
 
 local function draw_rect_safe(x, y, w, h, color)
-  if rencache and rencache.draw_rect then rencache.draw_rect(x, y, w, h, color)
-  elseif native_renderer and native_renderer.draw_rect then native_renderer.draw_rect(x, y, w, h, color) end
+  if rencache and rencache.draw_rect then
+    rencache.draw_rect(x, y, w, h, color)
+  elseif native_renderer and native_renderer.draw_rect then
+    native_renderer.draw_rect(x, y, w, h, color)
+  end
 end
 
-config.draw_indent_guides = config.draw_indent_guides ~= false
-local INDENT_GUIDE_COLOR = { 65, 62, 70, 140 }
-
-local function get_doc_indent_unit(doc)
-  if doc and doc.filename then
-    local fn = tostring(doc.filename):lower()
-    if fn:find("%.lua$") then return 2 end
+local function draw_text_safe(font, text, x, y, color)
+  if not font or not text or text == "" then return end
+  if rencache and rencache.draw_text then
+    rencache.draw_text(font, text, x, y, color)
+  elseif native_renderer and native_renderer.draw_text then
+    native_renderer.draw_text(font, text, x, y, color)
   end
-  return config.indent_size or 4
-end
-
-local function get_effective_line_indent(line_text, indent_unit)
-  if not line_text or line_text == "" then return 0 end
-  local spaces = 0
-  for i = 1, #line_text do
-    local b = line_text:byte(i)
-    if b == 32 then
-      spaces = spaces + 1
-    elseif b == 9 then
-      spaces = spaces + indent_unit
-    else
-      break
-    end
-  end
-  return spaces
 end
 
 -- =============================================================================
--- ⚡ INDENT GUIDES O(1) COM CACHE ESTÁTICO DE LARGURA
--- =============================================================================
-local _cached_space_w = 0
-local _cached_font = nil
-
-local original_draw_line_body = DocView.draw_line_body
-function DocView:draw_line_body(line_idx, x, y)
-  local res = original_draw_line_body(self, line_idx, x, y)
-
-  if config.draw_indent_guides and self.doc and self.doc.lines and self.doc.lines[line_idx] then
-    local text = self.doc.lines[line_idx]
-    local indent_unit = get_doc_indent_unit(self.doc)
-    local total_spaces = get_effective_line_indent(text, indent_unit)
-
-    if total_spaces >= indent_unit then
-      local font = self:get_font()
-      if font ~= _cached_font then
-        _cached_font = font
-        _cached_space_w = font:get_width(" ")
-      end
-
-      local space_w = _cached_space_w
-      local line_h = self:get_line_height()
-      local levels = math.floor(total_spaces / indent_unit)
-
-      for lvl = 1, levels do
-        local gx = x + (lvl - 1) * (indent_unit * space_w)
-        draw_rect_safe(gx, y, 1, line_h, INDENT_GUIDE_COLOR)
-      end
-    end
-  end
-
-  return res
-end
-
--- =============================================================================
--- 2. BLINDAGEM IDEMPOTENTE DE SINTAXE PYTHON
+-- 2. BLINDAGEM IDEMPOTENTE DE SINTAXE PYTHON (RESTAURADA)
 -- =============================================================================
 local function sanitize_python_syntax(syn)
   if not syn or type(syn.patterns) ~= "table" then return end
@@ -137,104 +88,65 @@ if syntax and syntax.items then
 end
 
 -- =============================================================================
--- 3. LINE MEMOIZATION CACHE & PARSERS O(1)
+-- 3. CONFIGURAÇÃO DE CORES & PALETAS
 -- =============================================================================
-config.draw_indent_guides = config.draw_indent_guides ~= false
-local INDENT_GUIDE_COLOR = { 45, 42, 48, 160 }       
-local HIGHLIGHT_BLUE      = { 0, 108, 255, 130 }     
-local COLOR_DIRTY         = { 234, 179, 8, 255 }      
-local COLOR_SAVED         = { 110, 110, 120, 180 }    
+config.draw_indent_guides  = config.draw_indent_guides ~= false
+local INDENT_GUIDE_COLOR   = { 55, 52, 60, 130 }
+local INDENT_GUIDE_ACTIVE  = { 130, 125, 145, 240 }
+local HIGHLIGHT_BLUE       = { 0, 108, 255, 130 }
+local GUTTER_DIVIDER_WIDTH = 3
+local GUTTER_DIVIDER_COLOR = { 115, 110, 130, 255 }
+local COLOR_DIRTY          = { 234, 179, 8, 255 }
+local COLOR_SAVED          = { 34, 197, 94, 255 }
 
-local _color_cache = {}
-local _color_cache_size = 0
-local _indent_cache = {}
-local _indent_cache_size = 0
-local MAX_CACHE_ENTRIES = 2500
+local function get_doc_indent_unit(doc)
+  if doc and doc.filename then
+    local fn = tostring(doc.filename):lower()
+    if fn:find("%.lua$") then return 2 end
+  end
+  return config.indent_size or 4
+end
 
 local function get_contrast_color(col)
   local lum = (0.299 * col[1] + 0.587 * col[2] + 0.114 * col[3])
   return lum > 140 and { 20, 20, 20, 255 } or { 245, 245, 245, 255 }
 end
 
-local function parse_colors_in_line(line_text)
-  if not line_text or line_text == "" then return {} end
-
-  local cached = _color_cache[line_text]
-  if cached then return cached end
-
-  local results = {}
-
-  -- 1. Regex #HEX (3, 4, 6 ou 8 dígitos)
-  for s, hex in line_text:gmatch("()#([0-9a-fA-F]+)") do
-    local len = #hex
-    if len == 3 or len == 4 or len == 6 or len == 8 then
-      local r, g, b, a = 255, 255, 255, 255
-      if len == 3 or len == 4 then
-        r = tonumber(hex:sub(1,1):rep(2), 16) or 255
-        g = tonumber(hex:sub(2,2):rep(2), 16) or 255
-        b = tonumber(hex:sub(3,3):rep(2), 16) or 255
-        if len == 4 then a = tonumber(hex:sub(4,4):rep(2), 16) or 255 end
-      else
-        r = tonumber(hex:sub(1,2), 16) or 255
-        g = tonumber(hex:sub(3,4), 16) or 255
-        b = tonumber(hex:sub(5,6), 16) or 255
-        if len == 8 then a = tonumber(hex:sub(7,8), 16) or 255 end
-      end
-      table.insert(results, { col1 = s, col2 = s + len, color = { r, g, b, a } })
-    end
-  end
-
-  -- 2. Regex rgb(...) e rgba(...)
-  for s, func_name, args in line_text:gmatch("()(rgba?)%s*%((.-)%)") do
-    local r, g, b, a = args:match("^%s*(%d+)%s*[,%s]%s*(%d+)%s*[,%s]%s*(%d+)%s*[,/]?%s*([%d%.]*)")
-    if r and g and b then
-      local alpha = 255
-      if a and a ~= "" then
-        local num_a = tonumber(a)
-        if num_a then alpha = num_a <= 1.0 and math.floor(num_a * 255) or math.min(255, math.floor(num_a)) end
-      end
-      table.insert(results, {
-        col1 = s,
-        col2 = s + #func_name + #args + 2,
-        color = { math.min(255, tonumber(r)), math.min(255, tonumber(g)), math.min(255, tonumber(b)), alpha }
-      })
-    end
-  end
-
-  -- 3. Regex Tabelas Lua { R, G, B } e { R, G, B, A }
-  for s, inner in line_text:gmatch("(){%s*(%d+%s*,%s*%d+%s*,%s*%d+[%s,%d]*)%s*}") do
-    local r, g, b, a = inner:match("^(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*,?%s*(%d*)")
-    if r and g and b then
-      local nr, ng, nb = tonumber(r), tonumber(g), tonumber(b)
-      if nr <= 255 and ng <= 255 and nb <= 255 then
-        local na = 255
-        if a and a ~= "" then na = math.min(255, tonumber(a) or 255) end
-        table.insert(results, {
-          col1 = s,
-          col2 = s + #inner + 2,
-          color = { nr, ng, nb, na }
-        })
+-- Busca ativa: suporta seleção de texto E input no command view (Ctrl+F)
+local function get_active_highlight_query()
+  local view = core.active_view
+  local doc = view and view.doc
+  if doc and doc.has_selection and doc:has_selection() then
+    local l1, c1, l2, c2 = doc:get_selection(true)
+    if l1 == l2 and c1 ~= c2 then
+      local query = doc:get_text(l1, c1, l2, c2)
+      if query and #query >= 2 and #query <= 80 and not query:find("\n") and not query:match("^%s+$") then
+        return query
       end
     end
   end
-
-  if _color_cache_size >= MAX_CACHE_ENTRIES then
-    _color_cache = {}
-    _color_cache_size = 0
+  if core.command_view and core.command_view.text and #core.command_view.text >= 2 then
+    local cv_text = core.command_view.text
+    if #cv_text <= 80 and not cv_text:find("\n") and not cv_text:match("^%s+$") then
+      return cv_text
+    end
   end
-  _color_cache[line_text] = results
-  _color_cache_size = _color_cache_size + 1
-
-  return results
+  return nil
 end
 
-local function get_cached_line_indent(line_text)
-  if not line_text then return 0 end
+-- =============================================================================
+-- 4. CÁLCULO DE INDENTAÇÃO & ESCADARIA EM CASCATA
+-- =============================================================================
+local _indent_cache = {}
+local _indent_cache_size = 0
+local MAX_CACHE_ENTRIES = 2000
+
+local function compute_line_indent(line_text, indent_unit)
+  if not line_text or line_text == "" then return 0 end
   local cached = _indent_cache[line_text]
   if cached then return cached end
 
   local spaces = 0
-  local indent_unit = config.indent_size or 4
   for i = 1, #line_text do
     local b = line_text:byte(i)
     if b == 32 then
@@ -255,21 +167,120 @@ local function get_cached_line_indent(line_text)
   return spaces
 end
 
-local function get_active_highlight_query()
-  local view = core.active_view
-  local doc = view and view.doc
-  if not doc or not doc.has_selection or not doc:has_selection() then
-    return nil
+local function get_active_cursor_indent(doc, indent_unit)
+  if not doc or not doc.get_selection then return -1 end
+  local cur_line = doc:get_selection(true)
+  local text = doc.lines and doc.lines[cur_line]
+  if not text or text:match("^%s*$") then
+    for l = cur_line - 1, math.max(1, cur_line - 15), -1 do
+      local prev_text = doc.lines[l]
+      if prev_text and not prev_text:match("^%s*$") then
+        return compute_line_indent(prev_text, indent_unit)
+      end
+    end
+    return 0
   end
-  local l1, c1, l2, c2 = doc:get_selection(true)
-  if l1 ~= l2 then return nil end
-  local query = doc:get_text(l1, c1, l2, c2)
-  if not query or #query < 2 or #query > 80 then return nil end
-  return query
+  return compute_line_indent(text, indent_unit)
 end
 
 -- =============================================================================
--- 4. RASTREAMENTO DE LINHAS DA SESSÃO (DIRTY VS SAVED)
+-- 5. PARSER DE CORES INLINE (#HEX, RGB, RGBA, TABELAS LUA)
+-- =============================================================================
+local _color_cache = {}
+local _color_cache_size = 0
+
+local function parse_colors_in_line(line_text)
+  if not line_text or line_text == "" or (not line_text:find("#") and not line_text:find("rgb") and not line_text:find("{")) then
+    return nil
+  end
+
+  local cached = _color_cache[line_text]
+  if cached ~= nil then return cached end
+
+  local results = nil
+
+  -- 1. #HEX (3, 4, 6, 8 dígitos)
+  for s, hex in line_text:gmatch("()#([0-9a-fA-F]+)") do
+    local len = #hex
+    if len == 3 or len == 4 or len == 6 or len == 8 then
+      local r, g, b, a = 255, 255, 255, 255
+      if len == 3 or len == 4 then
+        r = tonumber(hex:sub(1,1):rep(2), 16) or 255
+        g = tonumber(hex:sub(2,2):rep(2), 16) or 255
+        b = tonumber(hex:sub(3,3):rep(2), 16) or 255
+        if len == 4 then a = tonumber(hex:sub(4,4):rep(2), 16) or 255 end
+      else
+        r = tonumber(hex:sub(1,2), 16) or 255
+        g = tonumber(hex:sub(3,4), 16) or 255
+        b = tonumber(hex:sub(5,6), 16) or 255
+        if len == 8 then a = tonumber(hex:sub(7,8), 16) or 255 end
+      end
+      results = results or {}
+      table.insert(results, {
+        col1 = s,
+        col2 = s + len,
+        text = line_text:sub(s, s + len),
+        color = { r, g, b, a }
+      })
+    end
+  end
+
+  -- 2. rgb / rgba
+  for s, full_match in line_text:gmatch("()(rgba?%s*%b())") do
+    local args = full_match:match("%((.-)%)")
+    if args then
+      local r, g, b, a = args:match("^%s*(%d+)%s*[,%s]%s*(%d+)%s*[,%s]%s*(%d+)%s*[,/]?%s*([%d%.]*)")
+      if r and g and b then
+        local alpha = 255
+        if a and a ~= "" then
+          local num_a = tonumber(a)
+          if num_a then alpha = num_a <= 1.0 and math.floor(num_a * 255) or math.min(255, math.floor(num_a)) end
+        end
+        results = results or {}
+        table.insert(results, {
+          col1 = s,
+          col2 = s + #full_match - 1,
+          text = full_match,
+          color = { math.min(255, tonumber(r)), math.min(255, tonumber(g)), math.min(255, tonumber(b)), alpha }
+        })
+      end
+    end
+  end
+
+  -- 3. Tabelas Lua { R, G, B } e { R, G, B, A } (CORRIGIDO: b restaurado, sem duplicar g)
+  for s, full_match in line_text:gmatch("()({%s*%d+%s*,%s*%d+%s*,%s*%d+[%s,%d]*})") do
+    local inner = full_match:match("{(.-)}")
+    if inner then
+      local r, g, b, a = inner:match("^(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*,?%s*(%d*)")
+      if r and g and b then
+        local nr, ng, nb = tonumber(r), tonumber(g), tonumber(b)
+        if nr <= 255 and ng <= 255 and nb <= 255 then
+          local na = 255
+          if a and a ~= "" then na = math.min(255, tonumber(a) or 255) end
+          results = results or {}
+          table.insert(results, {
+            col1 = s,
+            col2 = s + #full_match - 1,
+            text = full_match,
+            color = { nr, ng, nb, na }
+          })
+        end
+      end
+    end
+  end
+
+  if _color_cache_size >= MAX_CACHE_ENTRIES then
+    _color_cache = {}
+    _color_cache_size = 0
+  end
+  _color_cache[line_text] = results or false
+  _color_cache_size = _color_cache_size + 1
+
+  return results
+end
+
+-- =============================================================================
+-- 6. RASTREAMENTO ATÔMICO DE LINHAS DA SESSÃO (DIRTY VS SAVED)
 -- =============================================================================
 local original_doc_insert = Doc.insert
 function Doc:insert(line, col, text)
@@ -298,434 +309,146 @@ function Doc:save(...)
 end
 
 -- =============================================================================
--- 🧱 LINHA GROSSA SEPARADORA DE GUTTER (Posicionada após os números de linha)
+-- 7. DOCVIEW: DRAW_LINE_GUTTER (MARCADOR DIRTY/SAVED & DIVISOR GROSSO)
 -- =============================================================================
-local GUTTER_DIVIDER_WIDTH = 3
-local GUTTER_DIVIDER_COLOR = { 115, 110, 130, 255 }
-
 local original_draw_line_gutter = DocView.draw_line_gutter
 function DocView:draw_line_gutter(line_idx, x, y, ...)
   local res = original_draw_line_gutter and original_draw_line_gutter(self, line_idx, x, y, ...) or 0
 
-  -- Obtém a largura REAL da coluna de numeração (números + padding)
   local gw = (self.get_gutter_width and self:get_gutter_width()) or 40
   local div_w = config.gutter_divider_width or GUTTER_DIVIDER_WIDTH
   local div_col = style.gutter_divider or style.divider or GUTTER_DIVIDER_COLOR
   local line_h = (self.get_line_height and self:get_line_height()) or 16
 
-  -- Posiciona a linha exatamente na fronteira onde os números terminam e o código começa
   local divider_x = x + gw - div_w - 2
   draw_rect_safe(divider_x, y, div_w, line_h, div_col)
+
+  local doc = self.doc
+  if doc and doc.session_modified and doc.session_modified[line_idx] then
+    local state = doc.session_modified[line_idx]
+    local marker_col = (state == "dirty") and COLOR_DIRTY or COLOR_SAVED
+    draw_rect_safe(divider_x, y, div_w + 1, line_h, marker_col)
+  end
 
   return res
 end
 
 -- =============================================================================
--- BLOCKERS DE SINTAXE (EVITA VAZAMENTO DE COR EM STRINGS)
+-- 8. DOCVIEW: DRAW_LINE_BODY (ESCADARIA ATIVA, BUSCA E CORES INLINE)
 -- =============================================================================
-pcall(function()
-  local syntax = require "core.syntax"
-  for _, syn in ipairs(syntax.items or {}) do
-    if syn.name == "Python" or (syn.files and type(syn.files) == "table" and syn.files[1] == "%.py$") then
-      table.insert(syn.patterns, 1, { pattern = { '[rRbBuUfF]?"""', '"""', '\\' }, type = "string" })
-      table.insert(syn.patterns, 1, { pattern = { "[rRbBuUfF]?'''", "'''", '\\' }, type = "string" })
-      table.insert(syn.patterns, 1, { pattern = { 'rf"""', '"""', '\\' }, type = "string" })
-      table.insert(syn.patterns, 1, { pattern = { "rf'''", "'''", '\\' }, type = "string" })
-      break
+local original_draw_line_body = DocView.draw_line_body
+function DocView:draw_line_body(line_idx, x, y)
+  local res = original_draw_line_body(self, line_idx, x, y)
+  local doc = self.doc
+  if not doc or not doc.lines or not doc.lines[line_idx] then
+    return res
+  end
+
+  local line_text = doc.lines[line_idx]
+  local line_h = self:get_line_height()
+  local font = self:get_font()
+  local space_w = font:get_width(" ")
+
+  -- A. Highlight persistente de busca
+  local query = get_active_highlight_query()
+  if query and #query > 0 then
+    local s_idx = 1
+    while true do
+      local s, e = line_text:find(query, s_idx, true)
+      if not s then break end
+      local start_x = self:get_col_x_offset(line_idx, s)
+      local end_x   = self:get_col_x_offset(line_idx, e + 1)
+      draw_rect_safe(x + start_x, y, math.max(2, end_x - start_x), line_h, HIGHLIGHT_BLUE)
+      s_idx = e + 1
+    end
+  end
+
+  -- B. Guias de indentação em cascata / escadaria ativa
+  if config.draw_indent_guides ~= false then
+    local indent_unit = get_doc_indent_unit(doc)
+    local eff_indent = compute_line_indent(line_text, indent_unit)
+    local active_indent = get_active_cursor_indent(doc, indent_unit)
+
+    if eff_indent >= indent_unit then
+      local levels = math.floor(eff_indent / indent_unit)
+      for lvl = 1, levels do
+        local col_offset = (lvl - 1) * indent_unit
+        local col_char = col_offset + 1
+
+        local gx = x + (col_offset * space_w)
+        if line_text:find("\t", 1, true) then
+          gx = x + self:get_col_x_offset(line_idx, col_char)
+        end
+
+        local is_active_guide = (active_indent > 0 and col_offset < active_indent and (col_offset + indent_unit) >= active_indent)
+        local guide_color = is_active_guide and INDENT_GUIDE_ACTIVE or INDENT_GUIDE_COLOR
+
+        draw_rect_safe(gx, y, 1, line_h, guide_color)
+      end
+    end
+  end
+
+  -- C. Chips de cor inline
+  local colors = parse_colors_in_line(line_text)
+  if colors then
+    for _, item in ipairs(colors) do
+      local rx = self:get_col_x_offset(line_idx, item.col1)
+      local rw = self:get_col_x_offset(line_idx, item.col2 + 1) - rx
+      if rw > 0 then
+        local bx = x + rx
+        local by = y + 1
+        local bh = line_h - 2
+        draw_rect_safe(bx, by, rw, bh, item.color)
+        draw_rect_safe(bx, by, rw, 1, { 0, 0, 0, 90 })
+        draw_rect_safe(bx, by + bh - 1, rw, 1, { 0, 0, 0, 90 })
+        local text_col = get_contrast_color(item.color)
+        draw_text_safe(font, item.text, bx, y, text_col)
+      end
+    end
+  end
+
+  return res
+end
+
+-- Thread leve para atualização da escadaria ativa ao mover o cursor
+core.add_thread(function()
+  local last_cursor_line = -1
+  while true do
+    coroutine.yield(0.05)
+    local view = core.active_view
+    local doc = view and view.doc
+    if doc and doc.get_selection then
+      local cur_line = doc:get_selection(true)
+      if cur_line ~= last_cursor_line then
+        last_cursor_line = cur_line
+        core.redraw = true
+      end
     end
   end
 end)
 
--- Rastreamento de linhas modificadas não salvas
-local original_doc_save = Doc.save
-function Doc:save(...)
-  self.modified_lines = {}
-  return original_doc_save(self, ...)
-end
-
-local function get_active_highlight_query()
-  local active_view = core.active_view
-  if active_view and active_view.doc and active_view.doc:has_selection() then
-    local l1, c1, l2, c2 = active_view.doc:get_selection(true)
-    if l1 == l2 and c1 ~= c2 then
-      local sel = active_view.doc:get_text(l1, c1, l2, c2)
-      if sel and #sel >= 1 and #sel <= 100 and not sel:find("\n") and not sel:match("^%s+$") then
-        return sel
-      end
-    end
-  end
-  if core.command_view and core.command_view.text and #core.command_view.text > 0 then
-    local cv_text = core.command_view.text
-    if #cv_text >= 1 and #cv_text <= 100 and not cv_text:find("\n") and not cv_text:match("^%s+$") then
-      return cv_text
-    end
-  end
-  return nil
-end
-
-local function get_col_x(view, line_text, col)
-  if not line_text or col <= 1 then return 0 end
-  return view:get_font():get_width(line_text:sub(1, col - 1))
-end
-
 -- =============================================================================
--- FUNÇÕES AUXILIARES DE OFFSET, INDENTAÇÃO E BUSCA PERSISTENTE
+-- 9. COMANDOS DE UX & KEYMAPS (RESILIENTE A TABS E ESPAÇOS)
 -- =============================================================================
-local function get_col_x(view, line_idx, col)
-  if not view or not view.doc or not view.doc.lines[line_idx] then return 0 end
-  local line_text = view.doc.lines[line_idx]
-  local font = view:get_font()
-  return font:get_width(line_text:sub(1, math.max(0, col - 1)))
-end
-
-local function get_doc_indent_size(doc)
-  if not doc then return 4 end
-  local fn = tostring(doc.filename or ""):lower()
-  if fn:find("%.lua$") then return 2 end
-  return config.indent_size or 4
-end
-
-local function get_active_highlight_query()
-  local active_view = core.active_view
-  if active_view and active_view.doc and active_view.doc.has_selection and active_view.doc:has_selection() then
-    local l1, c1, l2, c2 = active_view.doc:get_selection(true)
-    if l1 == l2 and c1 ~= c2 then
-      local sel = active_view.doc:get_text(l1, c1, l2, c2)
-      if sel and #sel >= 1 and #sel <= 120 and not sel:find("\n") and not sel:match("^%s+$") then
-        return sel
-      end
-    end
-  end
-  if core.command_view and core.command_view.text and #core.command_view.text > 0 then
-    local cv_text = core.command_view.text
-    if #cv_text >= 1 and #cv_text <= 120 and not cv_text:find("\n") and not cv_text:match("^%s+$") then
-      return cv_text
-    end
-  end
-  return nil
-end
-
--- =============================================================================
--- PARSER UNIVERSAL DE CORES (HEX, RGB, RGBA, TABELAS 3 OU 4 CANAIS)
--- =============================================================================
-local function parse_any_color(text)
-  if not text then return nil end
-  
-  -- Hexadecimal #RRGGBBAA, #RRGGBB, #RGB
-  local hex = text:match("^#([0-9a-fA-F]+)$")
-  if hex then
-    if #hex == 6 then
-      return { tonumber(hex:sub(1, 2), 16), tonumber(hex:sub(3, 4), 16), tonumber(hex:sub(5, 6), 16), 255 }
-    elseif #hex == 8 then
-      return { tonumber(hex:sub(1, 2), 16), tonumber(hex:sub(3, 4), 16), tonumber(hex:sub(5, 6), 16), tonumber(hex:sub(7, 8), 16) }
-    elseif #hex == 3 then
-      return { tonumber(hex:sub(1, 1):rep(2), 16), tonumber(hex:sub(2, 2):rep(2), 16), tonumber(hex:sub(3, 3):rep(2), 16), 255 }
-    end
-  end
-
-  -- CSS rgb(...) e rgba(...)
-  local r, g, b, a = text:match("^rgba?%s*%(%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*,?%s*(%d*)%s*%)$")
-  if r and g and b then
-    local alpha = (a ~= "" and tonumber(a)) or 255
-    return { tonumber(r), tonumber(g), tonumber(b), alpha }
-  end
-
-  -- Tabelas Lua { R, G, B } ou { R, G, B, A }
-  local tr, tg, tb, ta = text:match("^{%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*,?%s*(%d*)%s*}")
-  if tr and tg and tb then
-    local alpha = (ta ~= "" and tonumber(ta)) or 255
-    return { tonumber(tr), tonumber(tg), tonumber(tb), alpha }
-  end
-
-  return nil
-end
-
--- =============================================================================
--- 5. HOOK NO DOCVIEW:DRAW_LINE_BODY (Renderização de Destaques, Cores e Guias)
--- =============================================================================
-local original_draw_line_body = DocView.draw_line_body
-function DocView:draw_line_body(line_idx, x, y)
-  local line_h = self:get_line_height()
-  local font = self:get_font()
-  local doc = self.doc
-
-  if doc and doc.lines and doc.lines[line_idx] then
-    local line_text = doc.lines[line_idx]
-
-    -- A. HIGHLIGHT PERSISTENTE DE BUSCA / SELEÇÃO
-    local query = get_active_highlight_query()
-    if query and #query > 0 then
-      local s_idx = 1
-      while true do
-        local s, e = line_text:find(query, s_idx, true)
-        if not s then break end
-        local start_x = self:get_col_x_offset(line_idx, s)
-        local end_x   = self:get_col_x_offset(line_idx, e + 1)
-        draw_rect_safe(x + start_x, y, math.max(2, end_x - start_x), line_h, HIGHLIGHT_BLUE)
-        s_idx = e + 1
-      end
-    end
-
-    -- B. GUIAS DE INDENTAÇÃO (Suporte a TABs e Espaços)
-    if config.draw_indent_guides ~= false then
-      local indent_spaces = get_cached_line_indent(line_text)
-      local indent_size = config.indent_size or 4
-      if indent_spaces >= indent_size then
-        local guide_color = style.guide or style.divider or INDENT_GUIDE_COLOR
-        local guide_count = math.floor(indent_spaces / indent_size)
-
-        for g = 1, guide_count do
-          local col_char = (g - 1) * indent_size + 1
-          local col_offset = self:get_col_x_offset(line_idx, col_char)
-          draw_rect_safe(x + col_offset, y, 1, line_h, guide_color)
-        end
-      end
-    end
-
-    -- C. CHIPS DE PRÉVIA DE COR INLINE
-    if line_text:find("#") or line_text:find("rgb") or line_text:find("{") then
-      local color_boxes = parse_colors_in_line(line_text)
-      if #color_boxes > 0 then
-        for _, box in ipairs(color_boxes) do
-          local x1 = self:get_col_x_offset(line_idx, box.col1)
-          local x2 = self:get_col_x_offset(line_idx, box.col2)
-          local box_w = math.max(12, x2 - x1)
-          local box_h = line_h - 2
-
-          draw_rect_safe(x + x1, y + 1, box_w, box_h, box.color)
-          draw_rect_safe(x + x1, y + 1, box_w, 1, { 255, 255, 255, 70 })
-        end
-      end
-    end
-  end
-
-  return original_draw_line_body(self, line_idx, x, y)
-end
-
--- 📐 Resolução de Tamanho de Indentação (Python = 4x4 estrito, Lua = 2x2)
-local function get_doc_indent_size(doc)
-  if not doc then return 4 end
-  if doc.indent_size then return doc.indent_size end
-
-  local fn = tostring(doc.filename or ""):lower()
-  if fn:find("%.pyw?$") or (doc.syntax and doc.syntax.name == "Python") then
-    return 4
-  end
-  if fn:find("%.lua$") or (doc.syntax and doc.syntax.name == "Lua") then
-    return 2
-  end
-  return config.indent_size or 4
-end
-
--- 📐 Métrica e Nível de Indentação por Linha
-local function get_raw_line_indent(doc, line_idx, indent_size)
-  if not doc then return 0 end
-  doc._doxoade_indent_cache = doc._doxoade_indent_cache or { raw = {}, active = nil }
-  local raw_cache = doc._doxoade_indent_cache.raw
-
-  if raw_cache[line_idx] then
-    return raw_cache[line_idx]
-  end
-
-  local text = doc.lines[line_idx]
-  local result = 0
-
-  if not text then
-    result = 0
-  elseif text:match("^%s*$") then
-    result = -1
-  else
-    local s, e = text:find("^[ \t]+")
-    if not s then
-      result = 0
-    else
-      local indent_str = text:sub(s, e)
-      local total = 0
-      for i = 1, #indent_str do
-        local byte_val = indent_str:byte(i)
-        if byte_val == 9 then
-          total = total + indent_size
-        elseif byte_val == 32 then
-          total = total + 1
-        end
-      end
-      result = total
-    end
-  end
-
-  raw_cache[line_idx] = result
-  return result
-end
-
--- 🔗 Interpolação de Linhas Vazias
-local function get_effective_line_indent(doc, line_idx, indent_size)
-  local raw = get_raw_line_indent(doc, line_idx, indent_size)
-  if raw >= 0 then return raw end
-
-  local prev_indent = 0
-  for prev_idx = line_idx - 1, math.max(1, line_idx - 20), -1 do
-    local ind = get_raw_line_indent(doc, prev_idx, indent_size)
-    if ind >= 0 then
-      prev_indent = ind
-      break
-    end
-  end
-
-  local next_indent = 0
-  for next_idx = line_idx + 1, math.min(#doc.lines, line_idx + 20) do
-    local ind = get_raw_line_indent(doc, next_idx, indent_size)
-    if ind >= 0 then
-      next_indent = ind
-      break
-    end
-  end
-
-  return math.min(prev_indent, next_indent)
-end
-
--- 📍 Nível de Indentação do Cursor Ativo
-local function get_active_cursor_indent(doc, indent_size)
-  if not doc then return -1 end
-  doc._doxoade_indent_cache = doc._doxoade_indent_cache or { raw = {}, active = nil }
-
-  local line = doc:get_selection(true)
-  local cache = doc._doxoade_indent_cache
-
-  if cache.active_line == line and cache.active_indent then
-    return cache.active_indent
-  end
-
-  local v = get_effective_line_indent(doc, line, indent_size)
-  cache.active_line = line
-  cache.active_indent = v
-  return v
-end
-
--- 🎨 RENDERIZADOR DO CORPO DA LINHA (DRAW_LINE_BODY)
-local original_draw_line_body = DocView.draw_line_body
-
--- 📍 Converte coluna em posição X de pixel
-local function get_col_x(view, line_text, col)
-  if not line_text or col <= 1 then return 0 end
-  local ok, w = pcall(function()
-    return view:get_font():get_width(line_text:sub(1, col - 1))
-  end)
-  if ok and w then
-    return w
-  end
-  return 0
-end
-
-function DocView:draw_line_body(line, x, y)
-  pcall(function()
-    local doc = self.doc
-    if not doc or not doc.lines then return end
-    local line_text = doc.lines[line]
-    if not line_text then return end
-    local line_h = self.get_line_height and self:get_line_height() or 16
-    local font = self:get_font()
-    local space_w = font:get_width(" ")
-
-    -- 1. 📐 RENDERIZAÇÃO DAS LINHAS DE INDENTAÇÃO (4x4 PYTHON / 2x2 LUA)
-    if config.draw_indent_guides then
-      local indent_size = get_doc_indent_size(doc)
-      local eff_indent = get_effective_line_indent(doc, line, indent_size)
-      local active_indent = get_active_cursor_indent(doc, indent_size)
-
-      if eff_indent >= indent_size then
-        local max_level = math.floor(eff_indent / indent_size)
-        for level = 1, max_level do
-          local col_offset = (level - 1) * indent_size
-          local guide_col = col_offset + 1
-
-          -- Cálculo de pixel X seguro contra line_text nulo
-          local first_tab = line_text and line_text:find("\t", 1, true)
-          local guide_x
-
-          if first_tab and first_tab < guide_col then
-            -- Linha com tab no trecho: métrica de fonte precisa
-            guide_x = x + get_col_x(self, line_text, guide_col)
-          else
-            -- Prefixo com espaços: cálculo aritmético direto
-            guide_x = x + (col_offset * space_w)
-          end
-
-          -- Realce da guia ativa correspondente ao escopo do cursor
-          local is_active_guide = (active_indent > 0 and col_offset < active_indent and (col_offset + indent_size) >= active_indent)
-          local guide_color = is_active_guide and INDENT_GUIDE_ACTIVE or INDENT_GUIDE_COLOR
-
-          draw_rect_safe(guide_x, y, 1, line_h, guide_color)
-        end
-      end
-    end
-
-    -- 2. 🔍 HIGHLIGHT DE BUSCA / SELEÇÃO GLOBAL
-    local search_text = get_active_highlight_query()
-    if search_text then
-      local start_idx = 1
-      while true do
-        local s_idx, e_idx = line_text:find(search_text, start_idx, true)
-        if not s_idx then break end
-        local x1 = x + get_col_x(self, line_text, s_idx)
-        local x2 = x + get_col_x(self, line_text, e_idx + 1)
-        local w = x2 - x1
-        if w > 0 then
-          draw_rect_safe(x1, y, w, line_h, HIGHLIGHT_BLUE)
-        end
-        start_idx = e_idx + 1
-      end
-    end
-
-    -- 3. 🎨 FUNDO DE COR PARA #HEX
-    local s_hex = 1
-    while true do
-      local s_idx, e_idx, hex_code = line_text:find("(#([%da-fA-F]+))", s_hex)
-      if not s_idx then break end
-      local parsed = parse_any_color(hex_code)
-      if parsed then
-        local x1 = x + get_col_x(self, line_text, s_idx)
-        local x2 = x + get_col_x(self, line_text, e_idx + 1)
-        draw_rect_safe(x1, y, x2 - x1, line_h, parsed)
-      end
-      s_hex = e_idx + 1
-    end
-
-    -- 4. 🎨 FUNDO DE COR PARA TABELAS { R, G, B }
-    local s_tbl = 1
-    while true do
-      local s_idx, e_idx, tbl_code = line_text:find("({%s*%d+%s*,%s*%d+%s*,%s*%d+[%s,%d]*})", s_tbl)
-      if not s_idx then break end
-      local parsed = parse_any_color(tbl_code)
-      if parsed then
-        local x1 = x + get_col_x(self, line_text, s_idx)
-        local x2 = x + get_col_x(self, line_text, e_idx + 1)
-        draw_rect_safe(x1, y, x2 - x1, line_h, parsed)
-      end
-      s_tbl = e_idx + 1
-    end
-  end)
-
-  return original_draw_line_body(self, line, x, y)
-end
-
 command.add("core.docview", {
   ["doc:unindent"] = function()
     local view = core.active_view
     local doc = view and view.doc
     if not doc or not doc.get_selection then return end
     local l1, c1, l2, c2 = doc:get_selection(true)
-    local indent_size = config.indent_size or 4
-    if doc.filename and doc.filename:lower():find("%.lua$") then
-      indent_size = 2
-    end
+    local indent_unit = get_doc_indent_unit(doc)
+
     for line = (l1 or 1), (l2 or 1) do
       local text = doc.lines and doc.lines[line]
-      if text then
-        local spaces = text:match("^( +)")
-        if spaces then
-          local count = #spaces
-          local to_remove = (count >= indent_size) and indent_size or count
-          if doc.remove then
+      if text and #text > 0 then
+        local first_byte = text:byte(1)
+        if first_byte == 9 then -- '\t'
+          doc:remove(line, 1, line, 2)
+        elseif first_byte == 32 then -- ' '
+          local spaces = text:match("^( +)")
+          if spaces then
+            local count = #spaces
+            local to_remove = (count >= indent_unit) and indent_unit or count
             doc:remove(line, 1, line, to_remove + 1)
           end
         end
@@ -734,13 +457,15 @@ command.add("core.docview", {
   end
 })
 
--- ⌨️ Comando e Atalho para Alternar Guias de Indentação
 command.add(nil, {
   ["doxoade:toggle-indent-guides"] = function()
     config.draw_indent_guides = not config.draw_indent_guides
-    core.log("Indent Guides: " .. (config.draw_indent_guides and "ATIVADAS" or "DESATIVADAS"))
+    if core.log then
+      core.log("📐 Indent Guides: " .. (config.draw_indent_guides and "ATIVADAS" or "DESATIVADAS"))
+    end
     core.redraw = true
-end})
+  end
+})
 
 keymap.add {
   ["ctrl+alt+i"] = "doxoade:toggle-indent-guides",

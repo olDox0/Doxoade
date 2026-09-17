@@ -97,36 +97,79 @@ local function is_target_doc(doc)
   return false
 end
 
+-- =============================================================================
+-- ⚖️ REUTILIZAÇÃO SLAB DA TABELA DE ACHADOS (Pilar 3)
+-- =============================================================================
+local function clear_table_in_place(t)
+  if not t then return end
+  for k in pairs(t) do
+    t[k] = nil
+  end
+end
+
 local function load_audit_bridge()
-  if not core.project_directories or #core.project_directories == 0 then return end
+  if not core.project_directories or #core.project_directories == 0 then return false end
   local p = core.project_directories[1]
   local root = tostring(type(p) == "table" and (p.path or p.name) or p)
   local bridge_path = root .. PATHSEP .. ".doxoade" .. PATHSEP .. "check_bridge.lua"
   local info = system.get_file_info(bridge_path)
-  if not info or info.mtime == AuditState.last_mtime then return end
+  
+  if not info or info.mtime == AuditState.last_mtime then 
+    return false -- Não houve alteração
+  end
+  
   AuditState.last_mtime = info.mtime
-
   local trust_marker = root .. PATHSEP .. ".doxoade" .. PATHSEP .. "TRUSTED"
   if not system.get_file_info(trust_marker) then
-    return
+    return false
   end
 
   local ok, data = pcall(dofile, bridge_path)
   if ok and type(data) == "table" and data.findings then
-    AuditState.findings_by_line = {}
+    -- Slab reutilizável: limpa chaves sem criar nova tabela na heap
+    clear_table_in_place(AuditState.findings_by_line)
+    
     AuditState.active_file = data.active_file
     AuditState.relative_file = data.relative_file
     AuditState.summary = data.summary or { errors = 0, warnings = 0, info = 0, total = 0 }
     rawset(_G, "_DOXOADE_AUDIT_SUMMARY", AuditState.summary)
     rawset(_G, "_DOXOADE_AUDIT_CHECKED", true)
+
     for _, f in ipairs(data.findings) do
       if f.line and f.line > 0 then
         AuditState.findings_by_line[f.line] = f
       end
     end
     core.redraw = true
+    return true
   end
+  return false
 end
+
+-- Corrotina com Sono Reativo e Backoff Exponencial
+core.add_thread(function()
+  local idle_count = 0
+  while true do
+    local modified = false
+    if rawget(_G, "Khonsu") and Khonsu.throttle then
+      Khonsu.throttle("audit_bridge_reload", 0.3, function()
+        modified = load_audit_bridge()
+      end)
+    else
+      modified = load_audit_bridge()
+    end
+
+    -- Backoff: se o arquivo não muda, dorme progressivamente até 1.5s
+    if not modified then
+      idle_count = idle_count + 1
+      local sleep_time = idle_count > 5 and 1.5 or (idle_count > 2 and 0.6 or 0.3)
+      coroutine.yield(sleep_time)
+    else
+      idle_count = 0
+      coroutine.yield(0.3)
+    end
+  end
+end)
 
 local function safe_trigger_audit_reload()
   if rawget(_G, "Khonsu") and Khonsu.throttle then

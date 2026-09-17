@@ -290,19 +290,18 @@ DOXLY_TREE.failure(
 DOXLY_TREE.failure(
     "runtime",
     id="doxly.khonsu.coroutine_budget_spike",
-    name="Estouro de Orçamento da Corrotina Khonsu",
+    name="Estouro de Orçamento de Corrotina (Lag de Frame)",
     severity="medium",
     symptoms=(
-        r"Khonsu budget overrun",
-        r"status: BLOCKING",
-        r"thread_bottlenecks",
+        r"KHONSU SLOW DEBOUNCE",
+        r"Thread bloqueante de 50ms",
         r"\[CHAOS\] Thread bloqueante",
         r"\[STRESS_02\]",
-        r"Degrada[cç][aã]o de FPS Detectada",
+        r"coroutine_budget_spike",
     ),
-    dev_comment="Tarefas em background ultrapassando 1.5ms por tick causam stuttering no render loop.",
-    mitigation="Ajustar o particionamento de itens em Khonsu.run_sliced_task.",
-    auto_fixable=False,
+    dev_comment="Corrotina ou debounce reteve a thread principal por tempo excessivo, degradando os 60 FPS.",
+    mitigation="Fatiar a tarefa com Khonsu.run_sliced_task ou aumentar intervalos de debounce/throttle.",
+    auto_fixable=True,
 )
 
 DOXLY_TREE.failure(
@@ -343,16 +342,17 @@ DOXLY_TREE.failure(
 DOXLY_TREE.failure(
     "api_guard",
     id="doxly.api.patch_nil_target",
-    name="Monkey-Patch em Alvo Inexistente",
+    name="Monkey-Patch em Alvo/Método Nulo",
     severity="high",
     symptoms=(
-        r"Alvo do patch .* [eé] nil",
         r"ORIGINAL_METHOD_NIL",
-        r"\[API GUARD\].*Patch ignorado",
-        r"\[CHAOS\] API\.patch aplicado",
+        r"TARGET_NIL",
+        r"Patch ignorado para evitar falha silenciosa",
+        r"\[CHAOS\] API\.patch aplicado em simbolo inexistente",
+        r"\[API GUARD\] ⚠ Patch ignorado",
         r"\[STRESS_03\]",
     ),
-    dev_comment="Tentativa de envolver método que não existe na versão atual do Lite XL.",
-    mitigation="O API.patch aborta a operação e aciona o fallback com segurança.",
+    dev_comment="API.patch tentou substituir uma função em um módulo que não existe ou é nil.",
+    mitigation="Verificar se o módulo foi carregado e se a versão do Lite XL exporta o método correspondente.",
     auto_fixable=True,
 )

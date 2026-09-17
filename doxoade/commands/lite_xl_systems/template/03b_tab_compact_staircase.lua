@@ -103,14 +103,23 @@ local function npp_layout(node)
 	local max_w = math.max(node.size.x, 80)
 	local min_tab = (config.doxoade_npp_min_tab_width or 46) * (SCALE or 1)
 	local max_tab = (config.doxoade_npp_max_tab_width or 260) * (SCALE or 1)
-
-	-- Passagem 1: largura-base = tamanho do texto + quebra de linhas
 	local base_w, row_of, rows, row_w = {}, {}, {}, {}
 	local cur_row, cur_x = 1, 0
-	for i, view in ipairs(views) do
+
+	for i = 1, n do
+		local view = views[i]
 		local ok_name, name = pcall(function() return view:get_name() end)
 		name = (ok_name and name) or "…"
-		local w = math.min(math.max(font:get_width(name) + PAD_X * 2, min_tab), max_tab, max_w)
+
+		-- Memoization O(1): só mede a fonte se o nome ou a fonte da aba mudaram
+		local w = view._dox_cached_w
+		if not w or view._dox_cached_name ~= name or view._dox_cached_font ~= font then
+			w = math.min(math.max(font:get_width(name) + PAD_X * 2, min_tab), max_tab, max_w)
+			view._dox_cached_w = w
+			view._dox_cached_name = name
+			view._dox_cached_font = font
+		end
+
 		if cur_x > 0 and cur_x + w > max_w then
 			cur_row = cur_row + 1
 			cur_x = 0
@@ -123,31 +132,35 @@ local function npp_layout(node)
 		cur_x = cur_x + w
 	end
 
-	-- Passagem 2: PREENCHIMENTO elegante (sem buraco morto à direita)
-	-- Distribui o leftover igualmente com teto max_tab; o ÚLTIMO da linha
-	-- absorve o resto e fecha a fileira rente à borda direita (estilo Notepad++).
 	local final_w = {}
-	for r, idxs in pairs(rows) do
-		local leftover = max_w - (row_w[r] or 0)
-		if leftover > 0 and #idxs > 0 then
-			local add = math.floor(leftover / #idxs)
-			local acc = 0
-			for j, i in ipairs(idxs) do
-				local extra
-				if j == #idxs then
-					extra = leftover - acc
-				else
-					extra = math.min(add, math.max(0, max_tab - base_w[i]))
+	-- Loop numérico O(1) sem closures de pairs()
+	for r = 1, cur_row do
+		local idxs = rows[r]
+		if idxs then
+			local leftover = max_w - (row_w[r] or 0)
+			if leftover > 0 and #idxs > 0 then
+				local add = math.floor(leftover / #idxs)
+				local acc = 0
+				for j = 1, #idxs do
+					local i = idxs[j]
+					local extra
+					if j == #idxs then
+						extra = leftover - acc
+					else
+						extra = math.min(add, math.max(0, max_tab - base_w[i]))
+					end
+					acc = acc + extra
+					final_w[i] = base_w[i] + extra
 				end
-				acc = acc + extra
-				final_w[i] = base_w[i] + extra
+			else
+				for j = 1, #idxs do
+					local i = idxs[j]
+					final_w[i] = base_w[i]
+				end
 			end
-		else
-			for _, i in ipairs(idxs) do final_w[i] = base_w[i] end
 		end
 	end
 
-	-- Passagem 3: retângulos absolutos
 	local rects, ids = {}, {}
 	local cx, cr = 0, 1
 	for i = 1, n do
@@ -160,7 +173,6 @@ local function npp_layout(node)
 		cx = cx + final_w[i]
 		ids[i] = views[i]
 	end
-
 	c = {
 		views = views, n = n, w = node.size.x,
 		px = node.position.x, py = node.position.y,
@@ -247,13 +259,9 @@ function Node:draw_tab(view, is_active, is_hovered, is_close_hovered, x, y, w, h
 	local by, bh = y + 1, h - 1
 	local accent = get_accent(view and view.doc and view.doc.filename or (view and view:get_name()))
 	local base = style.background2 or { 40, 38, 42, 255 }
-	-- Cor preenche o bloco INTEIRO: ativa vívida, hover média, inativa visível
 	local t = is_active and 0.90 or (is_hovered and 0.55 or 0.38)
 	local bg = mix_color(base, accent, t)
-
 	renderer.draw_rect(x, by, w, bh, bg)
-
-	-- CONTRASTE DINÂMICO: calcula a cor do texto baseada na luminância do fundo
 	local text_color = get_contrast_color(bg)
 	local dim_color = {
 		math.floor(text_color[1] * 0.7),
@@ -261,29 +269,22 @@ function Node:draw_tab(view, is_active, is_hovered, is_close_hovered, x, y, w, h
 		math.floor(text_color[3] * 0.7),
 		255,
 	}
-
 	local font = get_compact_font()
 	core.push_clip_rect(x, by, w, bh)
-	
-	-- Aplica o contraste dinâmico antes de renderizar o título
 	local old_text = style.text
 	local old_dim = style.dim
 	style.text = text_color
 	style.dim = dim_color
-	
-	self:draw_tab_title(view, font, is_active, is_hovered, x, by, w, bh)
-	
-	-- Restaura as cores globais
-	style.text = old_text
-	style.dim = old_dim
 
+	-- Chamada ÚNICA com o background anotado para contraste dinâmico O(1)
 	rawset(_G, "_DOXOADE_TAB_BG", bg)
 	self:draw_tab_title(view, font, is_active, is_hovered, x, by, w, bh)
 	rawset(_G, "_DOXOADE_TAB_BG", nil)
-	
+
+	style.text = old_text
+	style.dim = old_dim
 	core.pop_clip_rect()
 
-	-- 'X' somente ao passar o mouse (cor do X também contrasta)
 	if is_hovered and not standalone and config.tab_close_button then
 		local cw, cpad = close_metrics()
 		local cx = x + w - cw - cpad
@@ -292,13 +293,6 @@ function Node:draw_tab(view, is_active, is_hovered, is_close_hovered, x, y, w, h
 			is_close_hovered and text_color or dim_color,
 			"C", nil, cx, by, cw, bh)
 	end
-
-	-- Borda retangular (ativa = cor de identidade pura)
-	local box_col = is_active and accent or (style.divider or { 94, 92, 94 , 255 })
-	renderer.draw_rect(x, by, w, 1, box_col)
-	renderer.draw_rect(x, by + bh - 1, w, 1, box_col)
-	renderer.draw_rect(x, by, 1, bh, box_col)
-	renderer.draw_rect(x + w - 1, by, 1, bh, box_col)
 end
 
 function Node:draw_tabs()

@@ -181,3 +181,72 @@ end
 
 **Plano delineado no padrão ProDeNov.**  
 Podemos iniciar a **Fase 1** (Lançador do Terminal Real e Parser TrueColor no `19b`)?
+
+---
+
+### 🩺 Diagnóstico da Abertura de Terminal Externo no Windows
+
+O motivo do terminal real (especialmente como Administrador) não ter aberto decorre de como o Windows e o Lite XL gerenciam processos:
+
+---
+
+### 🔍 1. Por que o terminal externo / Admin falhou?
+
+1. **O Comportamento do `system.exec` no Lite XL:**
+   * No Windows, o `system.exec` do Lite XL invoca a API `CreateProcessW` em modo desacoplado (`DETACHED_PROCESS` ou sem console associado).
+   * Se você tentar executar `wt.exe` ou `cmd.exe` diretamente pelo `system.exec`, o processo é criado em segundo plano sem janela interativa ou é finalizado imediatamente.
+2. **A Elevação de Privilégios (Admin / UAC no Windows):**
+   * Nenhum processo comum pode abrir outro processo com privilégios de Administrador usando apenas `CreateProcess`.
+   * Para disparar a janela de confirmação de Administrador do Windows (UAC), é obrigatório usar a API `ShellExecuteEx` com o verbo **`runas`**, ou disparar via PowerShell:
+     ```powershell
+     Start-Process wt.exe -Verb RunAs -WorkingDirectory "C:\projeto"
+     ```
+3. **Ativação Automática do Virtualenv:**
+   * Ao abrir um terminal externo (seja `wt.exe`, `powershell.exe` ou `cmd.exe`), o ideal é que ele já inicie **com o `venv` ativado** e na pasta raiz do seu projeto, sem exigir que você navegue ou rode `activate` manualmente.
+
+---
+
+### 🏛️ 2. Proposta de Arquitetura para o Terminal Real (ProDeNov 1.2.1)
+
+Vamos criar um **Despachante Soberano de Terminais Externos** integrado ao `19b_terminal_console.lua` e `19d_bottom_shelf_hub.lua`:
+
+```
+                                    ┌─► [1. Windows Terminal (wt.exe)]  (Prioridade 1 - Abas & TrueColor)
+[Invocação no Doxly] ──► Roteador ──┼─► [2. PowerShell 7 / Windows PS]  (Prioridade 2)
+  (Normal ou Admin)      Soberano   └─► [3. CMD Clássico (cmd.exe)]     (Fallback Seguro)
+                                                    │
+                                                    ▼
+                                       Injeta Script de Ativação
+                                          do Venv do Projeto!
+```
+
+---
+
+### 🎛️ 3. Modos de Terminal Disponíveis
+
+| Modo | Comando no Console | Ação Realizada |
+| :--- | :--- | :--- |
+| **Terminal Normal** | `term` ou `wt` ou botão `[Terminal]` | Abre o **Windows Terminal** (ou PowerShell/CMD) na raiz do projeto com o `venv` ativo. |
+| **Terminal Administrador** | `admin` ou `sudo` ou botão `[🛡️ Admin]` | Dispara o prompt do UAC e abre o terminal elevado como **Administrador** com o `venv` ativo. |
+| **CMD Puro** | `cmd` | Abre o Prompt de Comando clássico (`cmd.exe /k`) com o `activate.bat` executado. |
+| **PowerShell Puro** | `ps` ou `pwsh` | Abre o PowerShell com a política de execução liberada e `Activate.ps1` carregado. |
+
+---
+
+### 🛠️ 4. Como será implementado nos Templates
+
+1. **No `19b_terminal_console.lua`:**
+   * Adicionar o despachante `TerminalEngine:launch_external_terminal(as_admin, shell_type)`.
+   * Se `as_admin == true`, monta o comando via PowerShell `Start-Process ... -Verb RunAs`.
+   * Se for `cmd.exe`: executa `cmd.exe /k "cd /d <projeto> && venv\Scripts\activate.bat"`.
+   * Se for `wt.exe`: executa `wt.exe -d "<projeto>" cmd.exe /k "venv\Scripts\activate.bat"`.
+2. **Comandos Interativos do Console Studio:**
+   * Digitar `wt`, `term`, `cmd`, `admin` ou `sudo` no prompt do Console Studio abrirá a janela externa instantaneamente.
+3. **Na Barra Superior do Bottom Shelf (`19d_bottom_shelf_hub.lua`):**
+   * Botões dedicados:
+     * **`[> Terminal]`** (Abre terminal externo normal)
+     * **`[🛡️ Admin]`** (Abre terminal externo como Administrador)
+
+---
+
+Podemos avançar com o **Blitzplan e implementação** desse despachante de terminais reais?

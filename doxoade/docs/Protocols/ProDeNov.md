@@ -27,11 +27,13 @@ este é o novo protocolo simplificado e sucinto de desenvolveimento do doxoade. 
     3.1.2. dependendo do objetivo vai ser preciso criar camadas de orquestão para inter-operabilidade.
     3.1.3. num onjetivo complexo, vai ser preciso desenvolver sistemas complexos ou delegar sistemas complexos
     3.1.4. sistema de diagnostico é fundamental em qualquer sistema, ele deve responder sobre: onde?, o que?, quem?, quando?, quanto? porque? origem? e consequencias estas perguntas são essencias em diagnostico.
+    3.1.5. tomar decisões baseada em evidencias tecnicas, dados reais e comprovação de teorias.
 4. Situações reais
   4.1. Caso o prazo não permitir o sistema estiver estavel o suficiente, pode-se não seguir o protocolo
     4.1.1. se o sistema funciona naquele contexto limitado, pode-se cosidera-lo pronto temporariamente até a proxima revisão.
   4.2. Caso o dev não estejá com a capacidade de desenvolveimento com segurança no momento, não desenvolva no periodo, ou só planeje.
     4.2.1. Esta regra é por questões de segurança contra regressões.
+  4.3. na demora da resolução de um problema, deve-se focar no diagnostico e na reunião de evidencias para que o plano seja feito baseado naquele esxopo, contexto, e limitações daquele sistena. o pragmatismo é em vindo nestes momentos.
 5. Recomendações:
   5.1. É recomendado colocar notas tecnicas sobre problemas, é importante, é necessario colocar informações sobre o problema. pode-se colocar no codigo em docstring o erro se necessario.
   5.2. Recomenda-se fortemente que lide com o tratamento de exceptions para que falhas sejam bem informadas e previstas para que o deve não fique a ver navios com relação a erros.
@@ -39,6 +41,10 @@ este é o novo protocolo simplificado e sucinto de desenvolveimento do doxoade. 
   5.4. mecanismos para verificar a integridade dos dados é essencial. recomendase um err table para fazer previsão de problemas e já ter uma solução em mente; maior exemplo desta tecnica é o doxoade typhon
   5.5. antes de comitar faça revisão vendo o diff para lidar com regressões da melhor forma.
   5.6. para não ficar preso num development hell, deve testar cada implementação adequadamente, com calma, um passo de cada vez. fazer um blitzplan é bastante recomendado, e fazer roteiro para teste e implementação é adequado.
+   5.6.1. roteiro deve ter a tasklist do que vai ser feito em sequencia, com isso na ordem de capito e parte para desenvolviemnto estavel.
+   5.6.2. discussão -> implementação -> teste -> discussão ou fix. este loop é o principal motor de desenvolviemnto ao executar o plano em partes.
+   5.6.3. problemas arquiteturas precisa de replanejamento do plano, caso um sistema não funcione adequadamente deve ser discutirdo refazer de forma diferete, troca de versão, ou mudar para outro sistema.
+   5.6.4. revisão é uma das partes mai fundamentais, ao final da implementação, deve ser discutido, como estava antes, o que mudou, o que ficou, e o que pode mudar, assim deve se discutido a manutentabilidade do sisitema e escalabilidade.
 6. Comunicação:
  6.1. Atualiação de codigo deve seguir serto protocolo:
   6.1.1. Contexto, é preciso contextualizar o problema
@@ -47,21 +53,22 @@ este é o novo protocolo simplificado e sucinto de desenvolveimento do doxoade. 
   6.1.4. previsão do resultado.
   6.1.5. citações devem ser mencionadas no codigo por razões eticas e de responsabilidade com a comunidade dev. então um comentario como: # solução de github.com/fulano/projeto ou """ fix https://site.com/exemplo/123 """
 
-## Sistemas e conceitos
+## conceitos
 
 Blitz Devlopmente: Desenvolvimento baseado em preparo e construção rapida de prototipos, seguindo regras simples de planejamento, planos caso ocorra problemas em cada parte do desenvolvimento. assim uma documentação dita Blitzplan ou Blueprint é feita para auxilio em projetos que exigem mais de um dia de desenvolvimento. Assim é exigido sistemas de diagnsotico para auxiliar em teste em produção. não é tolerado erros ocultos ou falta de dados de erro.
 * *Plano*:       Blitzplan para preparar o que vai ser feito, é a arquitetura, a documentação que vai fazer as coisas estaveis a longo prazo, ela pode estar no local do sistema mesmo e não necessariamente no docs/ caso o dev ache mais dinamico assim.
 * *Requisição*:  contexto, O que, onde, quem, quando, quanto, porque, origem e consequencias. delegações e resposabilidade das partes. com isso o que vai ser usado, aonde, por quem, quanto vai ser usado, e porque daquele sistema. respostas simples já é bom começo; exemplo simplorio: python 3.12, projeto_x/, uso para devs, pequeno porte, projeto de exemplo.
-* *Segurança*:   a garantia de que um problema ocorra e tenha reversibilidade, quanto um sistema traz segurança, isso é pefeito e o objetivo da segurança. com isso, um sistema complexo que manipula sistemas sensiveis tem que ser seguro, precisa de segurança
+* *Segurança*:   a garantia de que um problema ocorra e tenha reversibilidade, quanto um sistema traz segurança, isso é pefeito e o objetivo da segurança. com isso, um sistema complexo que manipula sistemas sensiveis tem que ser seguro, precisa de segurança. deve ser avaliado riscos de curto, medio e longo prazo. reversibilidade da implementação é importante para estabilidade do sistema, senão possivel voltar atraz, então o sistema tem uma falha.
 * *Devflow*:     é quando o dev pode fazer suas atividade com tranquilidade e segurança mesmo com imprevistos, e com garantias que o trabalho não sera perdido e permanecera escalavel. assim a manutenção tem sua importancia, um codigo que segue os protocolos teram sua criação, desenvolvimento e manutenção adequada.
 * *os porques*:  qual o problema, o que?, onde?, quando?, porque?, quem? origem? e consequencias
 * *Preservação*: é importante dados de registro e historico por preservação e investigações com segurança.
 * *roteiro*:     roteiro de implementação e testagem(RIT/Ritual) -> avaliação -> sistema de diagnostico/testagem -> implementação.
+* *portabulidade*: portabilidade de sistemas complexos, é quado é possivelportar para 32bits, ou outras arquiteturas como o RISC, portabilidade de funcionamento o python faz bem, e lua tambem. mas portar sistemas em C ou outros mecanismos é mais complexo e exige sagacidade tecnica nas escolhas de sistemas que seram usados em produção.
 
 ## Sistemas
 
-VULCAN:
- * **:
+NEOVULCAN:
+ * *Build*: Sistema de build C multi-sistema, faz orquestração para build em diferentes sistema. o principal é 64-86x. principal tridparty usado é o gcc/w64devkit para windows 10 e 11. RISC é usado o clang
 
 TYPHON: Sistema de diagnostico e triangulação de dados. doxoade typhon apresentou o conteito de rastreamento de problemas, posteriorment no doxly foi aprofundado o sistema para um sistema de testagem, diagnostico com profundidade para sistemas complexos.
  * *Rastreabilidade*: este é extremamente importante para ter um horizonte da profundidade de um problema.

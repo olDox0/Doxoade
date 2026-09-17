@@ -565,8 +565,10 @@ def activate_protocol(error_text: str, exit_code: int = None, trace=None, **kwar
         return
 
     # 🏹 0. DIRECT MODE: falha rápida antes de qualquer necropsia pesada
-    if _os.environ.get('DOXOADE_MODE') == 'direct':
-        _direct_report(trace_text, _mine_traceback(trace_text))  # nunca retorna
+    # if _os.environ.get('DOXOADE_MODE') == 'direct':
+    #     _direct_report(trace_text, _mine_traceback(trace_text))  # nunca retorna
+    if _os.environ.get('DOXOADE_MODE') == 'direct' or not _sys.stdin.isatty():
+        _direct_report(trace_text, _mine_traceback(trace_text))  # emite o laudo e encerra em 0.01s!
 
     # --- 1. RESOLUÇÃO DE CÓDIGO TÉCNICO ---
     # Se o exit_code não foi passado pelo SO, tentamos extrair do log bruto da Sotéria

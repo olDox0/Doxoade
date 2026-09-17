@@ -393,111 +393,166 @@ def parse_traceback(traceback_text, message=""):
         "frames": frames,
     }
 
-
-def render_snippet(file_path, line_no):
-    """Renderiza snippet do código fonte."""
-    if not file_path:
+def render_snippet(file_path: Path, line_no: int, radius: int = 3, resolved_from: str = "") -> None:
+    """Renderiza snippet visual forense com destaque de cor na linha culpada."""
+    if not file_path.exists():
+        click.echo(f"  {Fore.YELLOW}⚠ Arquivo de template não encontrado no disco: {file_path}{Fore.RESET}")
         return
-    target = Path(file_path)
-    if not target.exists() or not target.is_file():
-        return
-    try:
-        src_lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
-        start = max(0, line_no - 3)
-        end = min(len(src_lines), line_no + 2)
-        click.echo(f"    {Fore.CYAN}┌─ [{target.name}:{line_no}]{Fore.RESET}")
-        for idx in range(start, end):
-            ln = idx + 1
-            prefix = f"{Fore.RED}>>{Fore.RESET}" if ln == line_no else "  "
-            click.echo(f"    {prefix} {Fore.YELLOW}{ln:4d} |{Fore.RESET} {src_lines[idx]}")
-        click.echo(f"    {Fore.CYAN}└────────────────────────────────────{Fore.RESET}")
-    except Exception:
-        pass
-
-
-def detect_khonsu_crash(raw_err, target_dir):
-    """
-    🌙 KHONSU CRASH DETECTOR — Analisa error.txt (crash fatal fora do hook core.error),
-    atribui culpado via parse_traceback e, se o frame culpado for um chunk anônimo
-    (assinatura de init compilado/minificado pelo Khonsu, ex: [string "local core..."]),
-    tenta mapear a linha de volta ao init.lua.dev (espelho legível salvo pelo Khonsu).
-    """
-    if not raw_err or not raw_err.strip():
+    
+    lines = file_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    if not lines:
         return
 
-    lines = raw_err.strip().splitlines()
-    first_line = lines[0] if lines else ""
-    message = first_line.split("Error:", 1)[-1].strip() if "Error:" in first_line else first_line
-    traceback_body = "\n".join(lines[1:]) if len(lines) > 1 else raw_err
+    start = max(1, line_no - radius)
+    end = min(len(lines), line_no + radius)
 
-    info = parse_traceback(traceback_body, message)
+    header_info = f"{file_path.name}:{line_no}"
+    if resolved_from:
+        header_info += f" {Fore.LIGHTBLACK_EX}(resolvido de {resolved_from}){Fore.CYAN}"
 
-    click.echo(f"\n{Fore.MAGENTA}{Style.BRIGHT}🌙 [KHONSU CRASH DETECTOR]{Style.RESET_ALL}")
+    click.echo(f"\n    {Fore.CYAN}┌─ [{header_info}]{Fore.RESET}")
+    for ln in range(start, end + 1):
+        is_target = (ln == line_no)
+        prefix = f"{Fore.RED}>>{Fore.RESET}" if is_target else "  "
+        color = Fore.YELLOW if is_target else Fore.WHITE
+        code_text = lines[ln - 1] if ln <= len(lines) else ""
+        click.echo(f"    {prefix} {color}{ln:4d} | {code_text}{Fore.RESET}")
+    click.echo(f"    {Fore.CYAN}└{'─' * 65}{Fore.RESET}\n")
 
-    if info["file"]:
-        real_path = Path(info["file"])
-        click.echo(f"  {Fore.WHITE}Culpado provável:{Fore.RESET} {info['name']}")
-        click.echo(f"  {Fore.WHITE}Local:{Fore.RESET} {info['file']}:{info['line']}")
-        if real_path.exists():
-            render_snippet(real_path, info["line"])
-        else:
-            click.echo(f"  {Fore.YELLOW}⚠ Arquivo não encontrado em disco para snippet.{Fore.RESET}")
+def detect_khonsu_crash(error_txt: str) -> None:
+    """Detecta a causa do crash e exibe o snippet exato do template via Source Map Resolver."""
+    if not error_txt or not error_txt.strip():
         return
 
-    # Nenhum frame externo identificável — provável falha pura do core nativo do
-    # Lite XL, ou o único frame com contexto é um chunk anônimo do init compilado.
-    anon_match = re.search(r'\[string "([^"]*)"\]:(\d+)', raw_err)
-    dev_mirror = target_dir / "init.lua.dev"
-    if anon_match and dev_mirror.exists():
-        anon_line = int(anon_match.group(2))
-        click.echo(
-            f"  {Fore.YELLOW}💡 Frame culpado é um chunk anônimo do init compilado pelo Khonsu "
-            f"({anon_match.group(1)}...):{anon_line}{Fore.RESET}"
-        )
-        click.echo(f"  {Fore.CYAN}Mapeando via dev mirror (init.lua.dev):{Fore.RESET}")
-        render_snippet(dev_mirror, anon_line)
+    # Regex para capturar padrões como: ...khonsu_aot.lua:7157: mensagem
+    m = re.search(r"([^\r\n:\"]+?\.(?:lua|luac)):(\d+):\s*(.+)", error_txt)
+    if not m:
+        return
+
+    raw_file = m.group(1).strip()
+    raw_line = int(m.group(2).strip())
+    error_msg = m.group(3).strip()
+
+    from doxoade.commands.lite_xl_systems.typhon_doxly.doxly_khonsu_gate import DoxlyKhonsuGate
+    
+    # 🧭 RESOLVER REVERSO ATIVADO
+    template_path, rel_line, template_name = DoxlyKhonsuGate.resolve_unified_trace(raw_file, raw_line)
+
+    click.echo(f"\n{Fore.MAGENTA}{Style.BRIGHT}🌙 [KHONSU CRASH DETECTOR — SOURCE MAP RESOLVER]{Style.RESET_ALL}")
+    click.echo(f"  {Fore.WHITE}Erro Fatal:{Fore.RESET} {Fore.RED}{error_msg}{Fore.RESET}")
+    click.echo(f"  {Fore.WHITE}Origem Unificada:{Fore.RESET} {Fore.LIGHTBLACK_EX}{Path(raw_file).name}:{raw_line}{Fore.RESET}")
+    click.echo(f"  {Fore.WHITE}Template Mapeado:{Fore.RESET} {Fore.GREEN}{Style.BRIGHT}{template_name}{Style.RESET_ALL} (Linha {rel_line})")
+
+    # Renderiza o snippet com destaque
+    render_snippet(template_path, rel_line, radius=3, resolved_from=f"{Path(raw_file).name}:{raw_line}")
+
+
+@lite_xl_group.command("log", help="📜 Exibe e monitora logs de sessão e eventos do Sensorium.")
+@click.option("--mode", "-m", type=click.Choice(["production", "sandbox", "test"]), default="production",
+              help="Ambiente alvo dos logs (Padrão: production).")
+@click.option("--lines", "-n", default=40, help="Quantidade de linhas recentes para exibir.")
+@click.option("--follow", "-f", is_flag=True, help="Modo streaming contínuo (tail -f).")
+@click.option("--errors", "-e", is_flag=True, help="Filtra apenas erros, avisos e incidentes.")
+@click.option("--phanto", "-p", is_flag=True, help="Exibe capturas estruturadas do Phanto Crisis (NDJSON).")
+@click.option("--clear", "-c", is_flag=True, help="Limpa os arquivos de log do ambiente selecionado.")
+def cmd_log(mode: str, lines: int, follow: bool, errors: bool, phanto: bool, clear: bool):
+    """Exibe os logs unificados de sessão do Lite XL e eventos forenses."""
+    from doxoade.commands.lite_xl_systems.typhon_deploy import TyphonDeployEngine
+    target_dir = TyphonDeployEngine._get_deploy_dir(mode)
+    
+    session_file = target_dir / "session_log.txt"
+    error_file = target_dir / "error.txt"
+    phanto_file = target_dir / ".doxoade" / "diagnostics" / "phanto_crisis.ndjson"
+
+    if clear:
+        cleared = []
+        for p in [session_file, error_file, phanto_file]:
+            if p.exists():
+                try:
+                    p.unlink()
+                    cleared.append(p.name)
+                except Exception:
+                    pass
+        click.echo(f"{Fore.GREEN}✔ Logs limpos em [{mode}]: {', '.join(cleared) or 'nenhum'}{Fore.RESET}")
+        return
+
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}📜 DOXLY LOG VIEWER — MODO [{mode.upper()}]{Style.RESET_ALL}")
+    click.echo(f"  {Fore.LIGHTBLACK_EX}Diretório:{Fore.RESET} {target_dir}")
+
+    # 1. Seção de Crashes Críticos (error.txt)
+    if error_file.exists() and error_file.stat().st_size > 0:
+        click.echo(f"\n{Fore.RED}{Style.BRIGHT}🩺 CRASH DETECTADO (error.txt):{Style.RESET_ALL}")
+        err_content = error_file.read_text(encoding="utf-8", errors="replace").splitlines()
+        for l in err_content[:15]:
+            click.echo(f"  {Fore.LIGHTRED_EX}↳ {l}{Fore.RESET}")
+        click.echo()
+
+    # 2. Seção Phanto Crisis (--phanto)
+    if phanto:
+        if not phanto_file.exists() or phanto_file.stat().st_size == 0:
+            click.echo(f"\n{Fore.GREEN}✔ Nenhum incidente registrado no Phanto Crisis NDJSON.{Fore.RESET}\n")
+            return
+        click.echo(f"\n{Fore.MAGENTA}{Style.BRIGHT}👻 INCIDENTES ESTRUTURADOS (phanto_crisis.ndjson):{Style.RESET_ALL}")
+        for raw_line in phanto_file.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:]:
+            try:
+                ev = json.loads(raw_line)
+                ts = ev.get("ts_iso", "??")
+                mod = ev.get("module", "unknown")
+                err = ev.get("error", "")
+                click.echo(f"  {Fore.LIGHTBLACK_EX}[{ts}]{Fore.RESET} {Fore.CYAN}[{mod}]{Fore.RESET} {Fore.RED}{err}{Fore.RESET}")
+            except Exception:
+                click.echo(f"  {raw_line}")
+        click.echo()
+        return
+
+    # 3. Stream / Tail do session_log.txt
+    if not session_file.exists():
+        click.echo(f"{Fore.YELLOW}⚠ session_log.txt não encontrado neste ambiente.{Fore.RESET}\n")
+        return
+
+    # Leitura em cauda protegida contra arquivos massivos (Zero-OOM)
+    max_tail_bytes = 128 * 1024  # Últimos 128 KB
+    file_size = session_file.stat().st_size
+    with open(session_file, "r", encoding="utf-8", errors="replace") as f:
+        if file_size > max_tail_bytes:
+            f.seek(file_size - max_tail_bytes)
+            # Descarta linha incompleta da quebra do seek
+            f.readline()
+        raw_lines = f.read().splitlines()
+
+    if errors:
+        filtered = [
+            l for l in raw_lines
+            if any(w in l for w in ["ERROR", "CRITICAL", "WARN", "💥", "⚠", "GHOST", "FALHA"])
+        ]
+        display_lines = filtered[-lines:]
     else:
-        click.echo(
-            f"  {Fore.YELLOW}⚠ Nenhum culpado atribuível em código nosso — indício de falha "
-            f"no core nativo do Lite XL (fora do init/plugins customizados).{Fore.RESET}"
-        )
-        if anon_match and not dev_mirror.exists():
-            click.echo(
-                f"  {Fore.LIGHTBLACK_EX}(init.lua.dev não encontrado em {target_dir} — "
-                f"rode o deploy com save_dev_mirror ativo para habilitar o mapeamento.){Fore.RESET}"
-            )
+        display_lines = raw_lines[-lines:]
 
+    click.echo(f"{Fore.WHITE}Exibindo as últimas {len(display_lines)} linha(s):{Fore.RESET}\n")
+    for l in display_lines:
+        click.echo(f"  {_colorize_log_line(l)}")
+    click.echo()
 
-@lite_xl_group.command("log", help="Exibe os logs de sessão (Production, Sandbox ou Test).")
-@click.option("--mode", "-m", type=click.Choice(["production", "sandbox", "test"]), default="production", help="Ambiente do log.")
-@click.option("--lines", "-n", default=30, help="Número de linhas a exibir.")
-@click.option("--khonsu/--no-khonsu", "khonsu_on", default=True,
-              help="Ativa/desativa o Khonsu Crash Detector na saída.")
-def cmd_log(mode, lines, khonsu_on):
-    if mode == "sandbox":
-        target_dir = LiteXLEngine.get_sandbox_dir()
-    elif mode == "test":
-        target_dir = LiteXLEngine.get_user_dir() / ".doxoade" / "test_deploy"
-    else:
-        target_dir = LiteXLEngine.get_user_dir()
-
-    log_path = target_dir / "session_log.txt"
-    err_path = target_dir / "error.txt"
-
-    if err_path.exists() and err_path.stat().st_size > 0:
-        raw_err = err_path.read_text(encoding="utf-8", errors="replace")
-        click.echo(f"\n{Fore.RED}{Style.BRIGHT}⚠ [CRASH LOG ({mode.upper()}) - error.txt]{Style.RESET_ALL}")
-        click.echo(raw_err)
-        detect_khonsu_crash(raw_err, target_dir)
-
-    if log_path.exists():
-        click.echo(f"\n{Fore.CYAN}📜 [SESSION LOG ({mode.upper()})] -> {log_path}{Fore.RESET}\n")
-        all_lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-        for line in all_lines[-lines:]:
-            click.echo(f"  {line}")
-    else:
-        click.echo(f"{Fore.YELLOW}⚠ Nenhum session_log.txt encontrado em {target_dir}.{Fore.RESET}")
-
+    # Modo Streaming Contínuo (Follow)
+    if follow:
+        click.echo(f"{Fore.CYAN}⏳ Monitorando logs em tempo real (Ctrl+C para sair)...{Fore.RESET}\n")
+        last_size = session_file.stat().st_size
+        try:
+            while True:
+                time.sleep(0.5)
+                if session_file.exists():
+                    curr_size = session_file.stat().st_size
+                    if curr_size > last_size:
+                        with open(session_file, "r", encoding="utf-8", errors="replace") as f:
+                            f.seek(last_size)
+                            new_data = f.read().splitlines()
+                            for nl in new_data:
+                                if not errors or any(w in nl for w in ["ERROR", "CRITICAL", "WARN", "💥", "⚠", "GHOST"]):
+                                    click.echo(f"  {_colorize_log_line(nl)}")
+                        last_size = curr_size
+        except KeyboardInterrupt:
+            click.echo(f"\n{Fore.YELLOW}🛑 Monitoramento encerrado.{Fore.RESET}\n")
 
 @lite_xl_group.command("setup", help="Monta os templates modulares e grava no init.lua.")
 @click.option("--force", "-f", is_flag=True, help="Sobrescreve sem pedir confirmação.")
@@ -548,6 +603,26 @@ def cmd_check_keys(detailed):
         for b in audit["bindings_list"]:
             click.echo(f"  {b['raw_key']:<22} => {b['command']}")
 
+TERMINAL_ONLY_SUBCOMMANDS = {
+    "kill", "restart", "simulate-ghost", "trace-ghost", "deploy",
+    "chaos-deep", "chaos-canary", "chaos-test", "test-sandbox",
+    "check-templates", "health-check", "profile", "debug", "diagnose",
+    "log", "forensic", "preflight", "sandbox", "exorcise", "rollback",
+    "status", "backup", "restore", "index-build", "bridge-install",
+}
+
+def should_bypass_ipc(args_list):
+    """Retorna True se o comando deve rodar no terminal mesmo com a IDE aberta."""
+    if "lite-xl" in args_list:
+        try:
+            idx = args_list.index("lite-xl")
+            # Procura o próximo argumento que não seja flag
+            for i in range(idx + 1, len(args_list)):
+                if not args_list[i].startswith("-"):
+                    return args_list[i] in TERMINAL_ONLY_SUBCOMMANDS
+        except (ValueError, IndexError):
+            pass
+    return False
 
 @lite_xl_group.command("open", help="📂 Abre arquivo/pasta no Lite XL (reutiliza instância viva via IPC).")
 @click.argument("target", required=False, default=".")
@@ -559,7 +634,9 @@ def cmd_open(target: str, new: bool):
         click.echo(f"{Fore.RED}✖ Caminho não existe no disco: {target}{Fore.RESET}")
         sys.exit(1)
 
-    if LiteXLEngine.is_process_alive() and not new:
+
+    #if LiteXLEngine.is_process_alive() and not new:
+    if LiteXLEngine.is_process_alive() and not should_bypass_ipc(sys.argv):
         ok, sent_path = LiteXLEngine.send_to_running_instance(resolved)
         if ok:
             click.echo(f"{Fore.GREEN}✔ Enviado para instância viva via IPC: {sent_path}{Fore.RESET}")
@@ -697,66 +774,111 @@ def cmd_rollback():
     else:
         click.echo(f"  {Fore.RED}✖ {msg}{Fore.RESET}\n")
 
-@lite_xl_group.command("debug", help="🩺 Depurador e monitor de telemetria live do Lite XL.")
-@click.option("--mode", "-m", type=click.Choice(["production", "sandbox", "test"]), default="production", help="Ambiente alvo.")
-@click.option("-l", "--live", is_flag=True, help="Modo streaming contínuo em tempo real.")
-@click.option("-e", "--errors-only", is_flag=True, help="Filtra apenas erros e tracebacks.")
-def cmd_debug(mode, live, errors_only):
-    if mode == "sandbox":
-        target_dir = LiteXLEngine.get_sandbox_dir()
-    elif mode == "test":
-        target_dir = LiteXLEngine.get_user_dir() / ".doxoade" / "test_deploy"
-    else:
-        target_dir = LiteXLEngine.get_user_dir()
+def _colorize_log_line(line: str) -> str:
+    """Aplica formatação cromática Apolo para eventos do Lite XL e Sensorium."""
+    if not line:
+        return ""
+    if any(w in line for w in ["CRITICAL", "ERROR", "💥", "☠", "FALHA"]):
+        return f"{Fore.RED}{Style.BRIGHT}{line}{Style.RESET_ALL}"
+    elif any(w in line for w in ["[PHANTO", "PHANTO_CRISIS", "GHOST"]):
+        return f"{Fore.MAGENTA}{Style.BRIGHT}{line}{Style.RESET_ALL}"
+    elif any(w in line for w in ["[CHAOS]", "TYPHON CHAOS"]):
+        return f"{Fore.YELLOW}{Style.BRIGHT}{line}{Style.RESET_ALL}"
+    elif any(w in line for w in ["[SENSOR", "[BINARY GUARD]", "[API GUARD]", "[SYNTAX SHIELD]"]):
+        return f"{Fore.CYAN}{line}{Fore.RESET}"
+    elif "WARN" in line or "⚠" in line:
+        return f"{Fore.YELLOW}{line}{Fore.RESET}"
+    elif "✔" in line or "PASS" in line or "SUCCESS" in line:
+        return f"{Fore.GREEN}{line}{Fore.RESET}"
+    return f"{Fore.WHITE}{line}{Fore.RESET}"
 
-    log_path = target_dir / "session_log.txt"
-    err_path = target_dir / "error.txt"
+@lite_xl_group.command("debug", help="🩺 Depurador e monitor de telemetria consolidada do Lite XL.")
+@click.option("--mode", "-m", type=click.Choice(["production", "sandbox", "test"]), default="production",
+              help="Ambiente inspecionado (Padrão: production).")
+@click.option("--watch", "-w", is_flag=True, help="Modo painel vivo atualizado continuamente a cada 2s.")
+def cmd_debug(mode: str, watch: bool):
+    """Diagnóstico consolidado de processos, boot, contratos de API e anomalias."""
+    from doxoade.commands.lite_xl_systems.typhon_deploy import TyphonDeployEngine
+    from doxoade.commands.lite_xl_systems.lite_xl_process import LiteXLProcess
+    
+    def _render_debug_snapshot():
+        target_dir = TyphonDeployEngine._get_deploy_dir(mode)
+        diag_dir = target_dir / ".doxoade" / "diagnostics"
+        api_dir = target_dir / ".doxoade" / "api_guard"
 
-    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🩺 DOXOADE LITE XL LIVE DEBUGGER ({mode.upper()}){Style.RESET_ALL}")
-    click.echo(f"  {Fore.WHITE}Alvo:{Fore.RESET} {log_path}\n")
+        is_alive = LiteXLProcess.is_process_alive()
+        proc_badge = f"{Fore.GREEN}ATIVO (Em Execução){Fore.RESET}" if is_alive else f"{Fore.LIGHTBLACK_EX}INATIVO (Parado){Fore.RESET}"
 
-    if not log_path.exists():
-        click.echo(f"{Fore.YELLOW}⚠ Arquivo session_log.txt não encontrado em {target_dir}.{Fore.RESET}")
+        print(f"\n{Fore.CYAN}{Style.BRIGHT}{'═' * 75}")
+        print(f"🩺 DOXLY CONSOLIDATED DEBUG PANEL — [{mode.upper()}]")
+        print(f"{'═' * 75}{Style.RESET_ALL}")
+        print(f"  • {Fore.WHITE}Processo Lite XL  :{Fore.RESET} {proc_badge}")
+        print(f"  • {Fore.WHITE}Diretório de Config:{Fore.RESET} {target_dir}")
+
+        # 1. Telemetria de Boot
+        boot_file = diag_dir / "boot_telemetry.json"
+        if boot_file.exists():
+            try:
+                bdata = json.loads(boot_file.read_text(encoding="utf-8"))
+                total_t = bdata.get("total_boot_ms", 0.0)
+                total_kb = bdata.get("total_boot_kb", 0.0)
+                passed = bdata.get("passed_modules", 0)
+                total_m = bdata.get("total_modules", 0)
+                print(f"  • {Fore.WHITE}Último Boot Real  :{Fore.RESET} {Fore.GREEN}{total_t:.2f}ms{Fore.RESET} ({passed}/{total_m} módulos) | Heap: {Fore.YELLOW}{total_kb:.1f} KB{Fore.RESET}")
+            except Exception:
+                pass
+
+        # 2. Contratos de API
+        probe_file = api_dir / "runtime_probe.json"
+        if probe_file.exists():
+            try:
+                pdata = json.loads(probe_file.read_text(encoding="utf-8"))
+                s = pdata.get("summary", {})
+                missing = s.get("missing", 0)
+                total_api = s.get("total", 0)
+                api_col = Fore.GREEN if missing == 0 else Fore.RED
+                print(f"  • {Fore.WHITE}Contratos de API  :{Fore.RESET} {api_col}{total_api - missing}/{total_api} Íntegros{Fore.RESET} ({missing} ausentes)")
+            except Exception:
+                pass
+
+        # 3. Incidentes Phanto Crisis
+        phanto_file = diag_dir / "phanto_crisis.ndjson"
+        phanto_count = 0
+        if phanto_file.exists():
+            phanto_count = len(phanto_file.read_text(encoding="utf-8", errors="replace").splitlines())
+        phanto_col = Fore.GREEN if phanto_count == 0 else Fore.MAGENTA
+        print(f"  • {Fore.WHITE}Phanto Crisis     :{Fore.RESET} {phanto_col}{phanto_count} anomalia(s) registrada(s){Fore.RESET}")
+
+        # 4. Crash Report de Hardware
+        error_file = target_dir / "error.txt"
+        if error_file.exists() and error_file.stat().st_size > 0:
+            print(f"  • {Fore.WHITE}Crash Report      :{Fore.RESET} {Fore.RED}error.txt DETECTADO com erros não-tratados!{Fore.RESET}")
+        else:
+            print(f"  • {Fore.WHITE}Crash Report      :{Fore.RESET} {Fore.GREEN}Nenhum crash fatal pendente.{Fore.RESET}")
+
+        # 5. Resumo das Últimas 5 Linhas de Log
+        session_file = target_dir / "session_log.txt"
+        if session_file.exists():
+            print(f"\n  {Fore.CYAN}📜 ÚLTIMOS EVENTOS DO SENSORIUM:{Fore.RESET}")
+            lines = session_file.read_text(encoding="utf-8", errors="replace").splitlines()[-6:]
+            for l in lines:
+                print(f"     {_colorize_log_line(l)}")
+        print(f"{Fore.CYAN}{'═' * 75}{Style.RESET_ALL}\n")
+
+    if not watch:
+        _render_debug_snapshot()
         return
 
-    # Exibe o conteúdo atual
-    content = log_path.read_text(encoding="utf-8", errors="replace")
-    for line in content.splitlines()[-20:]:
-        if not errors_only or "[ERROR]" in line or "GHOST" in line or "STACK TRACEBACK" in line.upper():
-            click.echo(f"  {line}")
+    try:
+        while True:
+            # Limpa tela no Windows e Linux
+            os.system("cls" if os.name == "nt" else "clear")
+            _render_debug_snapshot()
+            print(f"  {Fore.LIGHTBLACK_EX}Pressione Ctrl+C para sair do painel.{Fore.RESET}")
+            time.sleep(2.0)
+    except KeyboardInterrupt:
+        print(f"\n{Fore.YELLOW}🛑 Painel de debug encerrado.{Fore.RESET}\n")
 
-    # 🌙 Captura de crash fatal (error.txt) — antes ausente deste comando.
-    last_err_mtime = None
-    if err_path.exists() and err_path.stat().st_size > 0:
-        raw_err = err_path.read_text(encoding="utf-8", errors="replace")
-        click.echo(f"\n{Fore.RED}{Style.BRIGHT}⚠ CRASH REPORT DETECTADO (error.txt):{Style.RESET_ALL}")
-        click.echo(raw_err)
-        detect_khonsu_crash(raw_err, target_dir)
-        last_err_mtime = err_path.stat().st_mtime
-
-    if live:
-        click.echo(f"\n{Fore.CYAN}👀 Modo Live streaming ativo. Pressione Ctrl+C para encerrar.{Fore.RESET}\n")
-        try:
-            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
-                f.seek(0, os.SEEK_END)
-                while True:
-                    line = f.readline()
-                    if line:
-                        if not errors_only or "[ERROR]" in line or "GHOST" in line or "STACK TRACEBACK" in line.upper():
-                            click.echo(f"  {line.rstrip()}")
-                    else:
-                        # Verifica se um crash fatal apareceu/mudou desde a última checagem.
-                        if err_path.exists() and err_path.stat().st_size > 0:
-                            cur_mtime = err_path.stat().st_mtime
-                            if cur_mtime != last_err_mtime:
-                                last_err_mtime = cur_mtime
-                                raw_err = err_path.read_text(encoding="utf-8", errors="replace")
-                                click.echo(f"\n{Fore.RED}{Style.BRIGHT}⚠ [CRASH DETECTADO EM TEMPO REAL] error.txt{Style.RESET_ALL}")
-                                click.echo(raw_err)
-                                detect_khonsu_crash(raw_err, target_dir)
-                        time.sleep(0.2)
-        except KeyboardInterrupt:
-            click.echo(f"\n{Fore.YELLOW}Monitoramento de depuração encerrado.{Fore.RESET}")
 
 
 # ______ API GUARD SYS ______
@@ -950,190 +1072,79 @@ def cmd_test_sandbox(target_file):
             click.echo(f"\n{Fore.RED}{Style.BRIGHT}🚨 [SANDBOX ERROR.TXT DETECTADO]:{Style.RESET_ALL}")
             click.echo(f"{Fore.RED}{err_content}{Fore.RESET}\n")
 
-@lite_xl_group.command("profile", help="⏱️ Análise forense de performance, peso de módulos e telemetria live.")
-@click.option("-l", "--live", is_flag=True, help="Exibe a telemetria em tempo real do editor em execução.")
-@click.option("-m", "--mode", type=click.Choice(["production", "sandbox", "test"]), default="production", help="Ambiente a monitorar (padrão: production).")
-@click.option("-w", "--watch", is_flag=True, help="Modo sentinela contínuo em tempo real.")
-@click.option("-r", "--runs", default=5, help="Número de iterações para benchmark estático (padrão: 5).")
-@click.option("-f", "--file", default=None, help="Filtra a análise para um arquivo específico.")
-def cmd_profile(live, mode, watch, runs, file):
-    """⏱️ Chronos Profiler — Análise estática de boot e telemetria dinâmica de produção."""
-    
-    # =========================================================================
-    # MODO 1: LIVE PROFILER INTERATIVO (Sessão de Captura com Encerramento por ENTER)
-    # =========================================================================
-    if live or watch:
-        import threading
-        
-        target_dir = LiteXLEngine.get_sandbox_dir() if mode == "sandbox" else (
-            LiteXLEngine.get_user_dir() / ".doxoade" / "test_deploy" if mode == "test" else LiteXLEngine.get_user_dir()
-        )
-        
-        click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}⚡ CHRONOS LIVE PROFILER — SESSÃO DE CAPTURA EM TEMPO REAL ({mode.upper()}){Style.RESET_ALL}")
-        click.echo(f"  {Fore.WHITE}Alvo:{Fore.RESET} {target_dir}")
-        click.echo(f"  {Fore.GREEN}👉 Use o Lite XL normalmente (digite, navegue, abra arquivos).{Fore.RESET}")
-        click.echo(f"  {Fore.YELLOW}🛑 Pressione [ENTER] neste terminal a qualquer momento para encerrar e gerar o laudo.{Fore.RESET}\n")
-        click.echo(f"{Fore.LIGHTBLACK_EX}{'─' * 70}{Fore.RESET}")
+# =============================================================================
+# ⏱️ CHRONOS PROFILER & ADVISOR CLI (Unificado, Sem Duplicações)
+# =============================================================================
+@lite_xl_group.command("profile", help="⏱️ Chronos Advisor: Análise de performance e decisões baseadas em evidências.")
+@click.option("--mode", "-m", type=click.Choice(["production", "sandbox", "test"]), default="production",
+              help="Ambiente alvo (padrão: production).")
+@click.option("--watch", "-w", is_flag=True, help="Modo sentinela contínuo ao vivo (estilo htop).")
+@click.option("--boot", is_flag=True, help="Filtra e exibe o ranking completo de inicialização (Boot Telemetry).")
+@click.option("--threads", is_flag=True, help="Filtra e exibe o consumo de CPU acumulado por corrotina ativa.")
+@click.option("--export", "-e", is_flag=True, help="Exporta o laudo completo em .doxoade/diagnostics/profiler_dossier.md.")
+@click.option("--up", is_flag=True, help="Abre o dossiê exportado diretamente como aba no Doxly (Lite XL).")
+@click.option("--json", "as_json", is_flag=True, help="Saída em formato JSON bruto (para CI/CD).")
+@click.option("--bench", is_flag=True, help="Executa o benchmark estatístico profundo de sombra.")
+@click.option("--runs", "-r", default=5, type=int, help="Quantidade de amostras para o benchmark (padrão: 5).")
+@click.option("--file", "-f", "target_file", default=None, help="Filtra benchmark para um template específico.")
+@click.option("--timeline", "-t", is_flag=True, default=False, help="Exibe gráficos de série temporal e tendência.")
+def cmd_profile(mode, watch, boot, threads, export, up, as_json, bench, runs, target_file, timeline):
+    """Diagnóstico empírico de CPU, RAM e prescrições do Chronos Advisor."""
+    try:
+        from doxoade.tools.lua_systems.profiler.profiler_engine import ProfilerEngine
+        from doxoade.commands.lite_xl_systems.engine_lite_xl import LiteXLEngine
 
-        stop_event = threading.Event()
+        if watch:
+            ProfilerEngine.run_watch_mode(mode=mode)
+            return
 
-        def wait_for_enter():
-            try:
-                input()
-            except Exception:
-                pass
-            stop_event.set()
+        # 2. Modo Deep Benchmark (apenas se explicitamente solicitado via --bench)
+        if bench:
+            user_dir = LiteXLEngine.get_user_dir() if mode == "production" else (
+                LiteXLEngine.get_sandbox_dir() if mode == "sandbox" else LiteXLEngine.get_user_dir() / ".doxoade" / "test_deploy"
+            )
+            click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}⏱️ CHRONOS DEEP PROFILER — BENCHMARK ESTATÍSTICO{Style.RESET_ALL}")
+            click.echo(f"  {Fore.WHITE}Alvo:{Fore.RESET} {user_dir} | {Fore.WHITE}Amostras:{Fore.RESET} {runs} iterações\n")
+            bench_res = ProfilerEngine.run_deep_benchmark(runs=runs, target_file=target_file)
 
-        # Thread não-bloqueante para capturar o [ENTER] do usuário
-        listener_thread = threading.Thread(target=wait_for_enter, daemon=True)
-        listener_thread.start()
+            if bench_res.get("runs", 0) == 0:
+                click.echo(f"{Fore.RED}✖ Não foi possível executar o benchmark de sombra (harness ausente ou sem templates).{Fore.RESET}\n")
+                return
 
-        start_time = time.time()
-        fps_samples = []
-        seen_spikes = set()
-        all_spikes = []
-        last_cmds_snapshot = {}
+            click.echo(f"  ┌─ RESUMO GERAL DO BENCHMARK")
+            click.echo(f"  │  • Tempo Médio Total : {Fore.GREEN}{bench_res.get('total_avg_ms', 0.0):5.2f} ms{Fore.RESET}")
+            click.echo(f"  │  • Memória Alocada   : {Fore.CYAN}{bench_res.get('total_mem_kb', 0.0):5.1f} KB{Fore.RESET}")
+            click.echo(f"  │  • Módulos Mapeados  : {bench_res.get('modules_count', 0)} módulos")
+            click.echo(f"  └─────────────────────────────────────────────────────────────────\n")
+            return
 
-        try:
-            while not stop_event.is_set():
-                data = ProfilerEngine.get_live_telemetry(mode=mode)
-                if data:
-                    fps = data.get("active_fps", 60.0)
-                    fps_samples.append(fps)
-                    gc_mem = data.get("gc_memory_kb", 0.0)
-                    last_cmds_snapshot = data.get("command_frequencies", {})
+        # 3. Fluxo Principal: Chronos Advisor Baseado em Evidências
+        show_all = not (boot or threads)
+        show_boot = boot or show_all
+        show_threads = threads or show_all
+        should_export = export or up
 
-                    # Notifica novos spikes detectados em tempo real (sem limpar a tela)
-                    for sp in data.get("frame_spikes", []):
-                        sp_key = f"{sp['timestamp']}:{sp['duration_ms']}:{sp['active_file']}"
-                        if sp_key not in seen_spikes:
-                            seen_spikes.add(sp_key)
-                            all_spikes.append(sp)
-                            click.echo(
-                                f"  {Fore.RED}⚠️ [SPIKE DETECTADO]{Fore.RESET} {Fore.YELLOW}{sp['duration_ms']:5.2f} ms{Fore.RESET} "
-                                f"no buffer: {Fore.WHITE}{sp['active_file']}{Fore.RESET}"
-                            )
-
-                # Pulso de status a cada 2 segundos
-                elapsed_sec = int(time.time() - start_time)
-                current_fps = fps_samples[-1] if fps_samples else 60.0
-                fps_color = Fore.GREEN if current_fps >= 55.0 else (Fore.YELLOW if current_fps >= 30.0 else Fore.RED)
-                
-                # Exibe linha discreta de streaming
-                sys.stdout.write(f"\r  ⏱️ [{elapsed_sec:3d}s] FPS: {fps_color}{current_fps:4.1f}{Fore.RESET} | Spikes: {Fore.RED}{len(all_spikes)}{Fore.RESET} | Pressione [ENTER] para laudo final... ")
-                sys.stdout.flush()
-
-                time.sleep(1.0)
-        except KeyboardInterrupt:
-            stop_event.set()
-
-        sys.stdout.write("\r" + " " * 80 + "\r") # Limpa a linha de pulso
-        session_duration = round(time.time() - start_time, 1)
-
-        # =====================================================================
-        # LAUDO CONSOLIDADO FINAL DA SESSÃO CALIBRADA
-        # =====================================================================
-        final_data = ProfilerEngine.get_live_telemetry(mode=mode) or {}
-        
-        latency = final_data.get("avg_draw_latency_ms", 1.8)
-        active_fps = final_data.get("active_fps", 60.0)
-        target_fps = final_data.get("target_fps", 60)
-        final_gc = final_data.get("gc_memory_kb", 0.0)
-        is_idle = final_data.get("is_idle", False)
-
-        # Badge visual de estabilidade
-        status_badge = f"{Fore.CYAN}[💤 OCIOSO / 0% CPU]{Fore.RESET}" if is_idle else (
-            f"{Fore.GREEN}[⚡ FLUIDO / {target_fps} FPS]{Fore.RESET}" if active_fps >= (target_fps * 0.9) else f"{Fore.YELLOW}[ALERTA: QUEDAS DE QUADRO]{Fore.RESET}"
+        dossier_path = ProfilerEngine.render_cli_profile(
+            mode=mode,
+            show_boot=boot or (not threads and not timeline),
+            show_threads=threads or (not boot and not timeline),
+            export_dossier=export or up,
+            as_json=as_json,
+            timeline=timeline,
         )
 
-        click.echo(f"\n{'=' * 70}")
-        click.echo(f"{Fore.GREEN}{Style.BRIGHT}🏆 LAUDO CONSOLIDADO DA SESSÃO DE PERFORMANCE (CHRONOS CALIBRADO){Style.RESET_ALL}")
-        click.echo(f"{'=' * 70}")
-        click.echo(f"  • {Fore.WHITE}Duração da Sessão   :{Fore.RESET} {session_duration} segundos")
-        click.echo(f"  • {Fore.WHITE}Latência de Render  :{Fore.RESET} {Fore.GREEN}{latency:4.2f} ms{Fore.RESET} por quadro (Capacidade: {Fore.CYAN}{1000/max(latency, 0.1):.0f} FPS{Fore.RESET})")
-        click.echo(f"  • {Fore.WHITE}Taxa Ativa de FPS   :{Fore.RESET} {Fore.GREEN}{active_fps:4.1f} FPS{Fore.RESET} (Alvo: {target_fps} FPS)  {status_badge}")
-        click.echo(f"  • {Fore.WHITE}Memória do GC       :{Fore.RESET} {Fore.CYAN}{final_gc:6.1f} KB{Fore.RESET} ({final_gc / 1024.0:4.2f} MB)")
-        click.echo(f"  • {Fore.WHITE}Total de Spikes     :{Fore.RESET} {Fore.RED if all_spikes else Fore.GREEN}{len(all_spikes)} queda(s) reais (> {target_fps} FPS limit){Fore.RESET}")
+        # 4. Abertura automática no Doxly (--up)
+        if up and dossier_path and dossier_path.exists():
+            from doxoade.tools.editor_dispatch import EditorDispatcher
+            ok, ed = EditorDispatcher.open_files([dossier_path])
+            if ok:
+                click.echo(f"  {Fore.GREEN}✔ Dossiê aberto no {ed}: {dossier_path.name}{Fore.RESET}\n")
+            else:
+                click.echo(f"  {Fore.YELLOW}⚠ Falha ao abrir no editor. Arquivo salvo em: {dossier_path}{Fore.RESET}\n")
 
-        # Ranking de Comandos Disparados na Sessão
-        click.echo(f"\n  {Fore.YELLOW}{Style.BRIGHT}📊 COMANDOS MAIS DISPARADOS NA SESSÃO (Frequência):{Style.RESET_ALL}")
-        top_cmds = final_data.get("top_commands", [])
-        if top_cmds:
-            for idx, (cmd_name, count) in enumerate(top_cmds[:6], start=1):
-                click.echo(f"     {idx}. {Fore.WHITE}{cmd_name:<32}{Fore.RESET} {Fore.CYAN}{count:>4}x{Fore.RESET}")
-        else:
-            click.echo(f"     {Fore.LIGHTBLACK_EX}(Nenhum comando registrado){Fore.RESET}")
-
-        click.echo(f"\n{'=' * 70}\n")
-        return
-
-    # =========================================================================
-    # MODO 2: SHADOW PROFILER (A Ponta do Iceberg: Benchmark Estático de Boot)
-    # =========================================================================
-    user_dir = LiteXLEngine.get_user_dir()
-    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}⏱️ CHRONOS DEEP PROFILER — ANÁLISE HIERÁRQUICA DE FUNÇÕES{Style.RESET_ALL}")
-    click.echo(f"  {Fore.WHITE}Alvo:{Fore.RESET} {user_dir} | {Fore.WHITE}Amostras:{Fore.RESET} {runs} iterações\n")
-
-    bench = ProfilerEngine.run_deep_benchmark(runs=runs, target_file=file)
-    if bench["runs"] == 0:
-        click.echo(f"{Fore.RED}✖ Não foi possível executar o benchmark de sombra.{Fore.RESET}")
-        return
-
-    click.echo(f"  ┌─ RESUMO GERAL DO BENCHMARK")
-    click.echo(f"  │  • Tempo Médio Total : {Fore.GREEN}{bench['total_avg_ms']:5.2f} ms{Fore.RESET}")
-    click.echo(f"  │  • Memória Alocada   : {Fore.CYAN}{bench.get('total_mem_kb', 0.0):5.1f} KB{Fore.RESET}")
-    click.echo(f"  │  • Módulos Mapeados  : {bench['modules_count']} módulos")
-    click.echo(f"  └─────────────────────────────────────────────────────────────────\n")
-
-    click.echo(f"  {Fore.YELLOW}{Style.BRIGHT}📦 PESO DAS FUNÇÕES POR ARQUIVO (DRILL-DOWN):{Style.RESET_ALL}\n")
-
-    for mod in bench["modules"]:
-        m_name = mod["module"]
-        m_time = mod["mean_ms"]
-        m_pct = mod["percent"]
-        m_mem = mod.get("mem_kb", 0.0)
-        funcs = mod.get("functions", [])
-
-        if mod.get("is_single_bottleneck"):
-            pattern_badge = f"{Fore.RED}[GARGALO CONCENTRADO: {mod.get('dominant_feature', 'Lógica')}]{Fore.RESET}"
-        elif len(funcs) > 5:
-            pattern_badge = f"{Fore.YELLOW}[CUSTO DISTRIBUÍDO]{Fore.RESET}"
-        else:
-            pattern_badge = f"{Fore.GREEN}[LEVE / UNIFORME]{Fore.RESET}"
-
-        click.echo(f"  {Fore.WHITE}📄 {Style.BRIGHT}{m_name:<32}{Style.RESET_ALL} {Fore.GREEN}{m_time:>6.2f} ms{Fore.RESET} ({m_pct:>4.1f}%) | {Fore.CYAN}+{m_mem:>5.1f} KB{Fore.RESET}  {pattern_badge}")
-
-        if funcs:
-            for idx, fn in enumerate(funcs[:6], start=1):
-                is_last = (idx == min(len(funcs), 6))
-                branch = "└──" if is_last else "├──"
-
-                f_name = fn.get("name", "anon")
-                line_no = fn.get("line", 0)
-                calls = fn.get("calls", 1)
-                self_t = fn.get("self_time_ms", fn.get("self_ms", 0.0))
-                f_pct = fn.get("file_percent", fn.get("impact_pct", 0.0))
-
-                click.echo(
-                    f"     {branch} {Fore.WHITE}{f_name:<28}{Fore.RESET} "
-                    f"[L{line_no:<3}] {Fore.GREEN}{calls:>2}x{Fore.RESET} | "
-                    f"{Fore.YELLOW}{self_t:>5.2f} ms{Fore.RESET} ({f_pct:>4.1f}%)"
-                )
-                
-        else:
-            click.echo(f"     └── {Fore.LIGHTBLACK_EX}(Nenhuma função interna rastreada — execução de bloco único){Fore.RESET}")
-        click.echo()
-
-    # Diagnóstico Acionável
-    click.echo(f"  {Fore.YELLOW}{Style.BRIGHT}🔍 DIAGNÓSTICO ACIONÁVEL:{Style.RESET_ALL}")
-    for mod in bench["modules"][:3]:
-        if mod.get("is_single_bottleneck"):
-            feat = mod.get("dominant_feature", "Lógica principal")
-            click.echo(f"    • {Fore.WHITE}{mod['module']}:{Fore.RESET} Otimizar pontualmente a função {Fore.RED}'{feat}'{Fore.RESET} eliminará mais da metade do custo do arquivo.")
-        else:
-            reason = mod.get("cost_reason", mod.get("cost_factor", "Custo distribuído em rotinas de inicialização"))
-            click.echo(f"    • {Fore.WHITE}{mod['module']}:{Fore.RESET} Custo distribuído ({reason}). Requer simplificação geral.")
-    click.echo()
+    except Exception as e:
+        click.echo(f"{Fore.RED}✖ Falha no Chronos Profiler: {e}{Fore.RESET}")
+        sys.exit(1)
 
 @lite_xl_group.command("preflight", help="🛡️ Valida o init.lua antes de instalar em produção.")
 def cmd_preflight():
@@ -1544,6 +1555,45 @@ def cmd_bridge_install():
     click.echo(f"{Fore.GREEN}✔ Mecanismo de acesso instalado:{Fore.RESET} {cmd_path}")
     click.echo(f"   {Fore.CYAN}↳ Python absoluto: {sys.executable}{Fore.RESET}")
 
+@lite_xl_group.command("trace-ghost", help="👻 Rastreia travamentos (Ghost Windows) no deploy de teste.")
+def cmd_trace_ghost():
+    """Analisa o log do Ghost Tracer para detectar travamentos de frame."""
+    from doxoade.commands.lite_xl_systems.typhon_deploy import TyphonDeployEngine
+    test_dir = TyphonDeployEngine._get_deploy_dir("test")
+    trace_log = test_dir / ".doxoade" / "diagnostics" / "ghost_trace.txt"
+    
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}👻 GHOST TRACER ANALYSIS{Style.RESET_ALL}")
+    
+    if not trace_log.exists():
+        click.echo(f"{Fore.GREEN}✔ Nenhum travamento de frame (>50ms) detectado no último teste.{Fore.RESET}")
+        return
+        
+    click.echo(f"{Fore.RED}⚠ TRAVAMENTOS DETECTADOS:{Fore.RESET}")
+    lines = trace_log.read_text(encoding="utf-8").splitlines()
+    for line in lines[-10:]: # Mostra os últimos 10 eventos
+        click.echo(f"  {Fore.YELLOW}↳{Fore.RESET} {line}")
+        
+    click.echo(f"\n{Fore.LIGHTBLACK_EX}Dica: O módulo listado é o provável causador do congelamento.{Fore.RESET}")
+
+@lite_xl_group.command("simulate-ghost", help="👻 Injeta travamentos de frame propositais para testar o Ghost Tracer.")
+def cmd_simulate_ghost():
+    """Executa o simulador de Ghost Window em ambiente 100% isolado."""
+    from doxoade.commands.lite_xl_systems.ghost_simulator import run_ghost_simulation
+    run_ghost_simulation()
+
+@lite_xl_group.command("probe-process", help="🔬 Sonda automatizada de compatibilidade do binding C 'process' do Lite XL.")
+def cmd_probe_process():
+    """Executa a sonda empírica automatizada de subprocessos no sandbox."""
+    try:
+        from doxoade.commands.lite_xl_systems.runtime_process_probe import RuntimeProcessProbeEngine
+        click.echo(f"\n{Fore.CYAN}⚡ Lançando Sonda Automatizada de Runtime...{Fore.RESET}")
+        data = RuntimeProcessProbeEngine.run_probe()
+        RuntimeProcessProbeEngine.render_report(data)
+    except Exception as e:
+        from doxoade.tools.error_info import handle_error
+        handle_error(e, context="cmd_probe_process", debug=True)
+        click.echo(f"{Fore.RED}✖ Falha na sonda de processo: {e}{Fore.RESET}")
+        sys.exit(1)
 
 # ═══════════════════════════════════════════════════════════
 # 🐉 TYPHON — Pipeline Supervisionado de Deploy

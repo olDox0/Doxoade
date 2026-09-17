@@ -36,26 +36,34 @@ end
 
 local original_pcall = pcall
 _G.pcall = function(fn, ...)
-  if _in_hook then
-    return original_pcall(fn, ...)
-  end
+  if _in_hook then return original_pcall(fn, ...) end
   _in_hook = true
-  local results = {original_pcall(fn, ...)}
+  local trace = ""
+  local results = { xpcall(fn, function(err)
+    trace = debug.traceback("", 2) or ""
+    return err
+  end, ...) }
   _in_hook = false
+
   if not results[1] then
     local err = tostring(results[2] or "")
+
+    -- ✅ DECLARAÇÃO RESTAURADA (Elimina os 30 erros de variável indefinida):
     local is_probe_require = err:find("module '") and (
-      err:find("not found:") or 
-      err:find("no field package.preload") or 
+      err:find("not found:") or
+      err:find("no field package.preload") or
       err:find("no file")
     )
+
     if not is_probe_require and not err:find("core%.emptyview") then
-      _forensic_sync_write("GHOST_PCALL", err)
+      local caller = trace:match("\t([^\r\n]+)") or "desconhecido"
+      _forensic_sync_write("GHOST_PCALL", err .. " | Origem: " .. caller)
       if core and core.log then
-        core.log("👻 [HOOK] pcall capturou erro: " .. err)
+        core.log(string.format("👻 [HOOK] pcall falhou: %s\n   ↳ Origem: %s", err, caller))
       end
     end
   end
+
   local unpack_fn = table.unpack or rawget(_G, "unpack")
   if unpack_fn then
     return unpack_fn(results)
@@ -75,6 +83,20 @@ end
 
 local _tracked_globals = {}
 for k in pairs(_G) do _tracked_globals[k] = true end
+
+-- ⚖️ Whitelist de globais intencionais (registradas via rawset pelos módulos)
+local _ALLOWED_GLOBALS = {
+    Khonsu = true,
+    forensic_data = true,
+    DOXOADE_API = true,
+    UIForge = true,
+    PTYClient = true,
+    AnsiParser = true,
+    flush_session_log = true,
+    phanto_capture = true,
+    phanto_shadow_flush = true,
+}
+
 if core and core.add_thread then
   -- Flush contínuo do buffer em background
   core.add_thread(function()
@@ -90,7 +112,8 @@ if core and core.add_thread then
     while true do
       coroutine.yield(1.5)
       for k in pairs(_G) do
-        if not _tracked_globals[k] and not k:match("^_") then
+--        if not _tracked_globals[k] and not k:match("^_") then
+        if not _tracked_globals[k] and not k:match("^_") and not _ALLOWED_GLOBALS[k] then
           _forensic_sync_write("GLOBAL_LEAK", k)
           if core.log then
             core.log("👻 [HOOK] Global vazada: " .. k)

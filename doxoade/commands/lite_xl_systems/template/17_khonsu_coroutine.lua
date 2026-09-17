@@ -1,114 +1,134 @@
 -- doxoade/commands/lite_xl_systems/template/17_khonsu_coroutine.lua
 --[[
-  🌙 KHONSU ASYNC & TIME-SLICING WORKER (V1.2 Resiliente)
-  - Time-Slicing: Fatiamento de tarefas com orçamento máximo de 1.5ms por tick.
-  - Job Generation Guard: Rastreamento atômico em active_jobs para cancelar tarefas obsoletas.
-  - Debounce: Execução diferida após cessar digitação ou scroll.
-  - Throttle: Limitação de taxa de disparo para I/O e telemetria.
+  🌙 KHONSU ADAPTIVE SCHEDULER & FRAME GOVERNOR (V2.0 Pilar 2)
+  - Frame Deadline Scheduling: Orçamento de tempo dinâmico calculado por frame.
+  - Regimes Reativos: 0.5ms durante digitação ativa e até 8.0ms em repouso.
+  - Khonsu.should_yield(): Sonda universal O(1) de cooperação para corrotinas.
+  - Debounce & Throttle com preservação de estado.
+  Compliance: ProDeNov 1.2.1 | PASC-6.1 | Limite < 50KB.
 ]]
 local core = require "core"
 local config = require "core.config"
-
-if config.doxoade_khonsu == false then
-  pcall(function()
-    core.log("🌙 [KHONSU] Desativado via config.doxoade_khonsu = false.")
-  end)
-  return 
-end
 
 local Khonsu = {
   active_jobs = {},
   job_generations = {},
   debounce_timers = {},
   throttle_timers = {},
-  default_budget_ms = 1.5,
+  
+  -- Métricas de Frame do Governador
+  frame_start_clock = os.clock(),
+  last_user_activity = os.clock(),
+  default_budget_ms = 2.0,
+  min_budget_ms = 0.5,
+  max_budget_ms = 8.0,
+  reserved_render_ms = 3.5,
 }
-
 rawset(_G, "Khonsu", Khonsu)
 
 -- =============================================================================
--- 1. DEBOUNCE (Adia execução até cessar a atividade)
+-- ⏱️ GOVERNADOR TEMPORAL ADAPTATIVO (PILAR 2)
 -- =============================================================================
-function Khonsu.debounce(id, delay_sec, action_fn)
-  Khonsu.debounce_timers[id] = {
-    target_time = os.clock() + (delay_sec or 0.08),
-    action = action_fn
-  }
+
+function Khonsu.on_frame_start()
+  Khonsu.frame_start_clock = os.clock()
+end
+
+function Khonsu.notify_user_activity()
+  Khonsu.last_user_activity = os.clock()
+end
+
+function Khonsu.is_user_active()
+  -- Usuário é considerado ativo por 0.35s após o último toque
+  return (os.clock() - Khonsu.last_user_activity) < 0.35
+end
+
+function Khonsu.get_adaptive_budget()
+  local target_fps = config.fps or 60
+  local frame_limit_ms = 1000.0 / target_fps
+  
+  -- Se o usuário estiver digitando ou rolando, impõe orçamento mínimo para blindar 60 FPS
+  if Khonsu.is_user_active() then
+    return Khonsu.min_budget_ms / 1000.0
+  end
+
+  local elapsed_in_frame_ms = (os.clock() - Khonsu.frame_start_clock) * 1000.0
+  local available_ms = frame_limit_ms - elapsed_in_frame_ms - Khonsu.reserved_render_ms
+
+  local clamped_ms = math.max(Khonsu.min_budget_ms, math.min(Khonsu.max_budget_ms, available_ms))
+  return clamped_ms / 1000.0
+end
+
+function Khonsu.should_yield(slice_t0, custom_max_sec)
+  local t0 = slice_t0 or os.clock()
+  local max_sec = custom_max_sec or Khonsu.get_adaptive_budget()
+  
+  -- Cede a CPU se o lote ultrapassou a folga do frame
+  if (os.clock() - t0) >= max_sec then
+    return true
+  end
+
+  -- Cede forçadamente se o frame global estiver próximo do estouro de 16.6ms
+  local frame_elapsed_sec = os.clock() - Khonsu.frame_start_clock
+  local frame_deadline_sec = (1000.0 / (config.fps or 60)) / 1000.0
+  if (frame_deadline_sec - frame_elapsed_sec) <= (Khonsu.reserved_render_ms / 1000.0) then
+    return true
+  end
+
+  return false
 end
 
 -- =============================================================================
--- 2. THROTTLE (Garante no máximo 1 execução por intervalo)
+-- 🔄 DEBOUNCE E THROTTLE REATIVOS
 -- =============================================================================
+
+function Khonsu.debounce(id, delay_sec, action_fn)
+  Khonsu.debounce_timers[id] = {
+    target_time = os.clock() + (delay_sec or 0.08),
+    action = action_fn,
+  }
+end
+
 function Khonsu.throttle(id, interval_sec, action_fn)
   local now = os.clock()
   local last = Khonsu.throttle_timers[id] or 0
-  if now - last >= (interval_sec or 0.25) then
+  if (now - last) >= (interval_sec or 0.25) then
     Khonsu.throttle_timers[id] = now
     pcall(action_fn)
   end
 end
 
 -- =============================================================================
--- 3. TIME-SLICING WORKER COM JOB GENERATION GUARD
+-- 🌙 THREADS DO KHONSU & HOOK DO FRAME
 -- =============================================================================
-function Khonsu.run_sliced_task(job_id, items_list, process_item_fn, on_complete_fn, budget_ms)
-  if not items_list or #items_list == 0 then
-    if on_complete_fn then pcall(on_complete_fn) end
-    return
+
+-- Sincroniza o início do frame no loop do core.step
+if core and core.step then
+  local original_step = core.step
+  core.step = function(...)
+    Khonsu.on_frame_start()
+    return original_step(...)
   end
-
-  local max_ms = budget_ms or Khonsu.default_budget_ms
-  local gen = (Khonsu.job_generations[job_id] or 0) + 1
-  Khonsu.job_generations[job_id] = gen
-  Khonsu.active_jobs[job_id] = true
-
-  core.add_thread(function()
-    local idx = 1
-    local total = #items_list
-
-    while idx <= total do
-      -- Se um novo job com o mesmo ID foi disparado, cancela a execução obsoleta
-      if Khonsu.job_generations[job_id] ~= gen then
-        return
-      end
-
-      local t0 = os.clock()
-      while idx <= total do
-        local item = items_list[idx]
-        pcall(process_item_fn, item, idx, total)
-        idx = idx + 1
-
-        local elapsed_ms = (os.clock() - t0) * 1000
-        if elapsed_ms >= max_ms then
-          coroutine.yield()
-          break
-        end
-      end
-    end
-
-    if Khonsu.job_generations[job_id] == gen then
-      Khonsu.active_jobs[job_id] = nil
-      if on_complete_fn then
-        pcall(on_complete_fn)
-      end
-    end
-  end)
 end
 
--- =============================================================================
--- 4. EVENT LOOP SENTINEL (Processa Debounces Registrados a 50 Hz)
--- =============================================================================
-if core.add_thread then
+-- Loop de Debounce escalonado
+if core and core.add_thread then
   core.add_thread(function()
-    coroutine.yield(0.5) -- Staging: permite o primeiro frame da UI ser renderizado
     while true do
-      coroutine.yield(0.05) -- Calibração: 20 Hz (orçamento suave de CPU)
-      local now = os.clock()
-      for id, timer in pairs(Khonsu.debounce_timers) do
-        if now >= timer.target_time then
-          local fn = timer.action
-          Khonsu.debounce_timers[id] = nil
-          if fn then pcall(fn) end
+      if next(Khonsu.debounce_timers) == nil then
+        coroutine.yield(0.25)  -- Sono profundo quando não há timers
+      else
+        coroutine.yield(0.02)
+        local now = os.clock()
+        local expired = {}
+        for id, timer in pairs(Khonsu.debounce_timers) do
+          if now >= timer.target_time then
+            table.insert(expired, timer.action)
+            Khonsu.debounce_timers[id] = nil
+          end
+        end
+        for i = 1, #expired do
+          pcall(expired[i])
         end
       end
     end
@@ -116,95 +136,7 @@ if core.add_thread then
 end
 
 if core.log then
-  core.log("🌙 [KHONSU] Motor de Time-Slicing e Debounce Ativado.")
+  core.log("🌙 [KHONSU V2] Governador Adaptativo de Frame ativo (Pilar 2).")
 end
 
--- =============================================================================
--- 5. SYNTAX SENTINEL (Auditor de Integridade Estrutural)
--- =============================================================================
-Khonsu.syntax_sentinel = {
-  enabled = true,
-  validated_count = 0,
-  corrupted_count = 0,
-}
-
-function Khonsu.validate_syntax_integrity(syn)
-  if not Khonsu.syntax_sentinel.enabled then return true end
-  if not syn or type(syn.patterns) ~= "table" then return false end
-
-  for idx, p in ipairs(syn.patterns) do
-    if type(p) ~= "table" then
-      Khonsu.syntax_sentinel.corrupted_count = Khonsu.syntax_sentinel.corrupted_count + 1
-      if core and core.log then
-        core.log(string.format(
-          "🌙 [KHONSU SENTINEL] Pattern #%d inválido (tipo: %s) em syntax '%s'",
-          idx, type(p), tostring(syn.name or "unknown")))
-      end
-      return false
-    end
-    if p.pattern == nil then
-      Khonsu.syntax_sentinel.corrupted_count = Khonsu.syntax_sentinel.corrupted_count + 1
-      if core and core.log then
-        core.log(string.format(
-          "🌙 [KHONSU SENTINEL] Pattern #%d sem campo 'pattern' em syntax '%s'",
-          idx, tostring(syn.name or "unknown")))
-      end
-      return false
-    end
-    if type(p.pattern) == "table" then
-      if not p.pattern[1] or not p.pattern[2] then
-        Khonsu.syntax_sentinel.corrupted_count = Khonsu.syntax_sentinel.corrupted_count + 1
-        if core and core.log then
-          core.log(string.format(
-            "🌙 [KHONSU SENTINEL] Pattern #%d com range incompleto em syntax '%s'",
-            idx, tostring(syn.name or "unknown")))
-        end
-        return false
-      end
-      if type(p.pattern[1]) ~= "string" or type(p.pattern[2]) ~= "string" then
-        Khonsu.syntax_sentinel.corrupted_count = Khonsu.syntax_sentinel.corrupted_count + 1
-        if core and core.log then
-          core.log(string.format(
-            "🌙 [KHONSU SENTINEL] Pattern #%d com range não-string em syntax '%s'",
-            idx, tostring(syn.name or "unknown")))
-        end
-        return false
-      end
-    elseif type(p.pattern) ~= "string" then
-      Khonsu.syntax_sentinel.corrupted_count = Khonsu.syntax_sentinel.corrupted_count + 1
-      if core and core.log then
-        core.log(string.format(
-          "🌙 [KHONSU SENTINEL] Pattern #%d com tipo inesperado (%s) em syntax '%s'",
-          idx, type(p.pattern), tostring(syn.name or "unknown")))
-      end
-      return false
-    end
-  end
-  Khonsu.syntax_sentinel.validated_count = Khonsu.syntax_sentinel.validated_count + 1
-  return true
-end
-
-
-if core and core.add_thread then
-  core.add_thread(function()
-    coroutine.yield(2.0)
-    local syntax_mod = rawget(_G, "syntax") or (pcall(require, "core.syntax") and require("core.syntax") or nil)
-    if syntax_mod and syntax_mod.items then
-      local total = #syntax_mod.items
-      local valid = 0
-      local invalid = 0
-      for _, syn in ipairs(syntax_mod.items) do
-        if Khonsu.validate_syntax_integrity(syn) then
-          valid = valid + 1
-        else
-          invalid = invalid + 1
-        end
-      end
-      if core and core.log then
-        core.log(string.format(
-          "🌙 [KHONSU SENTINEL] Validação de syntax: %d/%d íntegras, %d corrompidas",
-          valid, total, invalid))
-      end
-    end
-  end)
-end
+return Khonsu

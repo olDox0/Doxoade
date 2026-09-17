@@ -144,9 +144,12 @@ class DoxlyTriangulator:
         if not text_to_scan:
             session_file = user_dir / "session_log.txt"
             error_file = user_dir / "error.txt"
+            phanto_file = user_dir / ".doxoade" / "diagnostics" / "phanto_crisis.ndjson"
+            
             t1 = session_file.read_text(encoding="utf-8", errors="replace") if session_file.exists() else ""
             t2 = error_file.read_text(encoding="utf-8", errors="replace") if error_file.exists() else ""
-            text_to_scan = f"{t2}\n{t1}"
+            t3 = phanto_file.read_text(encoding="utf-8", errors="replace") if phanto_file.exists() else ""
+            text_to_scan = f"{t2}\n{t1}\n{t3}"
 
         if text_to_scan.strip():
             matches = DOXLY_TREE.scan_text(text_to_scan)

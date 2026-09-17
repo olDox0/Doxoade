@@ -1,0 +1,1 @@
+{"alive": false, "error": "Falha ao criar ConPTY: argument 'env': 'dict' object is not an instance of 'str'"}

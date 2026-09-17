@@ -279,3 +279,290 @@ No `04_color_and_search_highlight.lua`:
 
 ---
 
+Os dados empíricos agora são uma mina de ouro de inteligência operacional. Olhando para a telemetria, temos **três grandes vitórias consolidadas** e **três alvos estratégicos revelados** para desenharmos os próximos passos.
+
+---
+
+# PARTE 2 🏆 O Que os Dados Provam que Foi Curado:
+
+1. **O Fim do Ralo de Memória:**
+   * A taxa de alocação de memória despencou de **1.178,9 KB/s para 31,6 KB/s** (uma redução brutal de **97,3%**!).
+   * O heap do Garbage Collector caiu de **16.32 MB para 9.15 MB** e permaneceu estável.
+2. **O Fim do Redesenho Fantasma (0.0 FPS em Repouso):**
+   * A taxa em repouso marcou **0.0 FPS**, provando que o Lite XL agora dorme corretamente quando ocioso, sem closures consumindo ciclos à toa no `core.step`.
+3. **Boot Relâmpago (33.90ms):**
+   * Todos os 31 templates carregaram em apenas **33.90ms**, alocando ínfimos **327.4 KB** no boot inteiro. O módulo `04` caiu pela metade (**0.99ms**).
+
+---
+
+### 🔬 Autópsia dos Novos Dados: O Que Precisamos Tratar
+
+Ao dissecar as métricas da sua execução, três anomalias saltam aos olhos:
+
+#### 1. A Corrotina de 76 Segundos (`worker_...84c0: CPU: 76928.00ms`):
+* **O Diagnóstico:** O número `76928.00ms` (~76.9 segundos) bate exatamente com o tempo total que o Lite XL ficou aberto entre o boot e a execução do comando!
+* **A Causa Raiz:** O cronômetro da corrotina mediu o tempo de relógio de parede (*wall-clock*) desde que a thread nasceu até agora, **incluindo os segundos em que ela ficou dormindo no `coroutine.yield()`**.
+* **Estratégia de Correção:** Medir o **tempo líquido de CPU por tick**: o cronômetro deve rodar apenas entre o despertar e o adormecer da corrotina, somando estritamente os microssegundos de instruções Lua executadas.
+
+#### 2. O Vilão de CPU Revelado: `Highlighter` (125.00ms):
+* **O Diagnóstico:** O tokenizador de sintaxe nativo do Lite XL consumiu **125ms** em uma única ativação para colorir os arquivos abertos.
+* **Estratégia:** Integrar o fatiamento temporal (*time-slicing*) do Khonsu para que o Highlighter nunca processe um buffer inteiro de uma vez só se isso custar mais que o orçamento de 2ms por frame.
+
+#### 3. Caracteres Quebrados (``) no Terminal Python:
+* **O Diagnóstico:** `Latncia`, `Memria`, `Alocao` e as bolinhas de lista ``.
+* **A Causa:** O console do Windows 10/11 roda por padrão em página de código CP1252/OEM e o Python 3.12 tentou emitir UTF-8 sem o `reconfigure`.
+* **Estratégia:** Adicionar `sys.stdout.reconfigure(encoding='utf-8')` no `profiler_engine.py`.
+
+---
+
+### 🗺️ As 4 Estratégias Propostas para o `blitzplan_profile_2.md`
+
+Para avançarmos com rigor, podemos estruturar o plano nas seguintes frentes:
+
+| Frente | Estratégia | Objetivo |
+| :--- | :--- | :--- |
+| **Estratégia 1: Cronometragem Líquida de Threads** | Isolar o `coroutine.yield()` no `10_forensic_engine.lua` | O profiler reportará o tempo de processamento real da CPU (em ms), eliminando falsas leituras de dezenas de segundos. |
+| **Estratégia 2: Fatiamento do Highlighter (Khonsu)** | Impor orçamento máximo de 2ms por ciclo de tokenização de sintaxe | Impedir picos de 125ms na abertura e digitação de arquivos longos. |
+| **Estratégia 3: Acomodação do Fast-Path $O(1)$** | Medição em regime contínuo após o primeiro frame de cold-start | Medir a latência do `DocView:draw_line_body` em rolagem ativa (com o cache de linhas aquecido). |
+| **Estratégia 4: Blindagem UTF-8 no Profiler CLI** | `reconfigure(encoding='utf-8')` no `profiler_engine.py` | Exibição visual Apolo limpa, sem caracteres corrompidos (``). |
+
+Deseja que iniciemos pela **Estratégia 1** (correção da medição líquida das corrotinas) e **Estratégia 4** (limpeza de caracteres no terminal)?
+
+---
+
+### 🎯 O MOMENTO "EUREKA" DA OBSERVABILIDADE: OS VILÕES REAIS DESMASCARADOS
+
+Veja o salto de maturidade: **os ponteiros mudos e anônimos desapareceram por completo!**  
+O relatório agora aponta com precisão o arquivo, a linha exata e a quantidade de chamadas:
+
+```text
+  ■ CORROTINAS / THREADS ATIVAS (Consumo Acumulado):
+    • init.lua:L285                  CPU: 24.00ms (412 calls | pico: 20.00ms)
+    • 10_forensic_engine.lua:L501    CPU:  6.00ms (  6 calls | pico:  2.00ms)
+    • 17_khonsu_coroutine.lua:L189   CPU:  5.00ms (  2 calls | pico:  5.00ms)
+    • 15_audit_highlighter.lua:L139  CPU:  4.00ms ( 46 calls | pico:  2.00ms)
+    • 17_khonsu_coroutine.lua:L102   CPU:  3.00ms (208 calls | pico:  2.00ms)
+
+  ■ CUSTO REAL POR SUBSISTEMA GRÁFICO (Frame):
+    +- Abas de Arquivo (Tabs) : 2.71ms  (Caiu de 4.85ms)
+    +- Corpo do Código (Doc)  : 3.57ms  (Caiu de 54.99ms ➔ REDUÇÃO DE 93.5%!)
+    +- Marcadores do Gutter   : 3.42ms
+```
+
+A sua leitura foi precisa:  
+> *"o nucleo esta pesando, o resto esta tranquilo, precisamos de uma solução de duas frentes, sem regressões, precisamos de um otimização vertical para o nucleo, e outra geral."*
+
+---
+
+# 📜 BLITZPLAN — OTIMIZAÇÃO DE DUAS FRENTES (NÚCLEO VERTICAL + SISTEMA GERAL)
+**Documento Técnico:** `blitzplan_nucleo_duas_frentes.md`  
+**Objetivo:** Otimização cirúrgica em duas camadas independentes, com tolerância zero a regressões de UX e integridade testada no `doxoade regret`.
+
+---
+
+## 1. Autópsia das Duas Frentes
+
+```text
+               ┌────────────────────────────────────────────────────────┐
+               │              FRENTE 1: NÚCLEO VERTICAL                 │
+               │  • init.lua:L285 (412 chamadas em segundos!)           │
+               │  • 00_header_and_logger.lua (20.99ms no Boot)          │
+               │  • Latência restante do Frame (31ms fora dos subs)     │
+               └──────────────────────────┬─────────────────────────────┘
+                                          │
+               ┌──────────────────────────▼─────────────────────────────┐
+               │              FRENTE 2: SISTEMA GERAL                   │
+               │  • Khonsu:L102 acordando 208x em polling cego          │
+               │  • Audit:L139 checando mtime de arquivo 46x            │
+               │  • Eliminação de duplicações no Boot Telemetry         │
+               └────────────────────────────────────────────────────────┘
+```
+
+### 🔬 O Que é o `init.lua:L285` (412 calls | pico 20ms)?
+O `init.lua` nativo do Lite XL possui a thread de animação e foco de janela (`core.step`), ou o polling de IPC do `01_ipc_dispatcher.lua` operando no topo.  
+Ele está acordando a cada frame para checar filas mesmo quando não há eventos pendentes, retendo 24ms de CPU e forçando o frame a esperar.
+
+### 🔬 Por que `00_header_and_logger.lua` levou 20.99ms no Boot?
+Porque ele inicializa os polyfills de C (`renderer`, `rencache`), instala os hooks do `print`/`core.log`/`core.error` e faz o setup inicial de metatables. Podemos acelerar isso aplicando *fast-paths* semânticos.
+
+---
+
+## 2. As Duas Frentes de Otimização
+
+### 🚀 FRENTE 1: Otimização Vertical do Núcleo
+1. **Sono Inteligente no Núcleo de Eventos (`init.lua:L285`):**
+   * Em vez de fazer a corrotina acordar em taxa fixa contínua, impor um regime de **Sono Reativo**:
+     * Se não houver itens na fila de IPC nem animações ativas, o yield salta de `0.01s` para `0.15s` (modo repouso).
+     * Ao receber um novo arquivo ou clique, ele acorda no frame zero.
+   * **Resultado esperado:** Redução de 412 chamadas para menos de 30 chamadas em repouso.
+2. **Saneamento do `00_header_and_logger.lua`:**
+   * Pré-alocar a tabela de incidentes e os formatadores de string estáticos para derrubar os 20.99ms do boot para menos de 5ms.
+
+---
+
+### 🌐 FRENTE 2: Otimização Geral do Sistema
+1. **Sono Reativo no Khonsu (`17_khonsu_coroutine.lua:L102`):**
+   * O loop de debounce atualmente faz `coroutine.yield(0.05)` direto (208 chamadas).
+   * **Ajuste:** Se `next(Khonsu.debounce_timers) == nil`, o Khonsu dorme por `0.5s` em vez de acordar a cada 50ms para olhar uma tabela vazia!
+2. **Throttle com Backoff no `15_audit_highlighter.lua:L139`:**
+   * O linter faz polling de `system.get_file_info(bridge_path)` a cada 0.3s.
+   * **Ajuste:** Se o arquivo não mudar por 3 ciclos consecutivos, aumentar o intervalo para 1.5s (Backoff Exponencial Seguro), voltando a 0.3s imediatamente após digitação.
+
+---
+
+## 3. Planos de Execução (Regra 1.2.1 ProDeNov)
+
+* **🔹 Plano A (Principal):**
+  * Aplicar Sono Reativo no `01_ipc_dispatcher` / `init` (Frente 1).
+  * Aplicar Sono Reativo no `17_khonsu` e `15_audit` (Frente 2).
+  * Validar ausência de regressões com `doxoade regret` e `doxoade doxly check-templates`.
+* **🔹 Plano B (Fallback):**
+  * Caso o Sono Reativo atrase a recepção de comandos externos via IPC, manter taxa dinâmica (`0.05s` durante 3s após qualquer interação, caindo para `0.25s` depois).
+* **🔹 Plano C (Contingência):**
+  * Rollback individual de qualquer módulo via `git checkout` sem afetar o restante do ecossistema.
+
+---
+
+## 4. Ordem de Ação Proposta
+
+1. **Passo 1 (Frente 1):** Investigar o que reside exatamente na linha 285 do `init` / `01_ipc_dispatcher` e aplicar o Sono Reativo.
+2. **Passo 2 (Frente 2):** Aplicar o Sono Reativo no Khonsu e no Audit Highlighter.
+3. **Passo 3:** Executar a medição com `ProfilerEngine.render_cli_profile(mode='test')` para registrar o impacto real nas chamadas e no frame.
+
+Podemos iniciar pelo **Passo 1 (Frente 1: Núcleo Vertical)**?
+
+---
+
+# PARTE 3
+
+---
+
+Essa é a chave de ouro da engenharia de software: **telemetria sem interface de decisão é apenas ruído no disco**. 
+
+Para que você e qualquer desenvolvedor possam bater o olho nos números e saber exatamente onde atuar (qual plugin podar, qual loop espaçar, onde aplicar lazy-loading), vamos estruturar o **Blitzplan de Comandos de Relatório & Decisão Baseada em Evidências**.
+
+---
+
+# 📜 BLITZPLAN — CHRONOS ADVISOR (RELATÓRIOS & DECISÃO BASEADA EM EVIDÊNCIAS)
+**Módulos Alvo:** `doxoade/tools/lua_systems/profiler/profiler_engine.py`, `cmd_lite_xl.py` e `10_forensic_engine.lua`  
+**Protocolo:** ProDeNov 1.2.1 | PASC-6.1 | Hórus & Chronos Profiler  
+**Foco:** Transformar telemetria bruta em laudos executáveis e inteligência de decisão
+
+---
+
+## 1. Contexto e Objetivos (W5)
+
+* **O quê:** Criação de um conjunto de comandos e opções CLI para o `doxoade doxly profile`, além de um comando interno na IDE para abrir o dossiê formatado em Markdown com recomendações automáticas baseadas em evidências.
+* **Quem:** Desenvolvedores e mantenedores auditando a saúde do editor em produção, teste ou sandbox.
+* **Onde:** 
+  * Terminal CLI: `doxoade doxly profile [OPÇÕES]`.
+  * Na IDE: Comando na paleta (`doxoade:open-profiler-dossier`) abrindo o relatório no painel lateral.
+* **Quando:** Sempre que houver suspeita de lentidão, após adicionar novos templates ou antes de fechar releases.
+* **Por quê:** Substituir a chamada crua `python -c "..."` por comandos CLI ergonômicos que não apenas listam números, mas **emitem laudos prescritivos** (ex: *"O módulo X está retendo Y% da CPU no frame — Ação recomendada: Z"*).
+
+---
+
+## 2. A Matriz de Comandos Planejada
+
+O comando `doxoade doxly profile` passará a ter modos de visualização cirúrgicos:
+
+```bash
+# 1. Visão Geral (Resumo do Frame + Vilões de CPU + Top 5 Boot)
+doxoade doxly profile -m test
+
+# 2. Modo Watch (Estilo 'htop' — atualiza a tela a cada 1.5s em tempo real)
+doxoade doxly profile -m test -w
+
+# 3. Raio-X Exclusivo de Inicialização (Ranking completo dos 31 templates no Boot)
+doxoade doxly profile -m test --boot
+
+# 4. Raio-X Exclusivo de Corrotinas e Loops Contínuos
+doxoade doxly profile -m test --threads
+
+# 5. Geração de Dossiê Forense com Abertura Automática no Doxly
+doxoade doxly profile -m test --export --up
+```
+
+---
+
+## 3. O Motor de Evidências e Recomendações (Chronos Advisor)
+
+O relatório não exibirá apenas tabelas. Ele terá uma seção final de **Diagnóstico Prescritivo Automatizado**:
+
+```text
+═══════════════════════════════════════════════════════════════════════════
+💡 CHRONOS ADVISOR — TOMADA DE DECISÃO BASEADA EM EVIDÊNCIAS
+═══════════════════════════════════════════════════════════════════════════
+
+  [EVIDÊNCIA 1] O loop 'init.lua:L285' registrou 874 chamadas (13ms acumulados).
+    ↳ DIAGNÓSTICO : O indexador de projeto ainda está vasculhando pastas de cache.
+    ↳ PRESCRIÇÃO  : Elevar 'config.project_scan_rate' para 30s ou ignorar diretórios pesados.
+
+  [EVIDÊNCIA 2] O corpo do código ('DocView:draw_line_body') consome 4.50ms (9.8% do frame).
+    ↳ DIAGNÓSTICO : O Fast-Path O(1) estabilizou a renderização com sucesso (queda de 92%).
+    ↳ PRESCRIÇÃO  : Custo saudável para 60 FPS. Nenhuma intervenção necessária.
+
+  [EVIDÊNCIA 3] Taxa de alocação zerada (0.0 KB/s) e GC em 9.61 MB.
+    ↳ DIAGNÓSTICO : O GC Generational estancou com sucesso o vazamento de memória.
+    ↳ PRESCRIÇÃO  : Manter o regime atual.
+```
+
+---
+
+## 4. Planos de Execução (Regra 1.2.1 ProDeNov)
+
+### 🔹 Plano A (Principal — CLI Enriquecido + Advisor + Exportação Markdown)
+1. **Refatorar `doxoade/tools/lua_systems/profiler/profiler_engine.py`:**
+   * Adicionar o motor de heurística `ChronosAdvisor` que analisa os JSONs e gera os diagnósticos e prescrições.
+   * Adicionar modo `--watch` (loop com `time.sleep(1.5)` e limpeza de tela ANSI `\033[2J\033[H`).
+   * Adicionar gerador de dossiê em Markdown (`.doxoade/diagnostics/profiler_dossier.md`).
+2. **Atualizar `cmd_lite_xl.py`:**
+   * Conectar as flags de Click (`--mode`, `--watch`, `--boot`, `--threads`, `--export`, `--up`).
+3. **Comando na IDE (`10_forensic_engine.lua`):**
+   * Adicionar comando `doxoade:open-profiler-dossier` para abrir o relatório gerado diretamente em split à direita.
+
+### 🔹 Plano B (Fallback — Saída JSON Pura para Integração)
+* Se a flag `--json` for passada, emite o objeto JSON consolidado bruto (ideal para pipelines de CI/CD ou auditorias do Ma'at).
+
+### 🔹 Plano C (Contingência — Leitura Direta de Arquivo)
+* Se o Doxly estiver fechado, o comando analisa os últimos arquivos gravados no disco informando que a sessão é histórica.
+
+---
+
+## 5. Arquivos Impactados e Limite de Tamanho (< 50KB)
+
+```
+doxoade/
+├── tools/lua_systems/profiler/
+│   └── profiler_engine.py           # Advisor de decisão + Watch mode + Export (~24KB)
+├── commands/lite_xl_systems/
+│   ├── cmd_lite_xl.py               # CLI Click atualizada com as novas flags (~38KB)
+│   └── template/
+│       └── 10_forensic_engine.lua   # Comando interno do Doxly para abrir dossiê (~18KB)
+```
+*Todos os arquivos cumprem rigorosamente a meta de tamanho do ProDeNov.*
+
+---
+
+## 6. Tasklist de Implementação
+
+- [ ] **Fase 1: O Motor de Prescrição e Análise em `profiler_engine.py`**
+  - [ ] Implementar a classe/método `ChronosAdvisor.analyze(live_data, boot_data)`.
+  - [ ] Implementar filtros de exibição (`--boot`, `--threads`, `--all`).
+  - [ ] Implementar exportador de Dossiê Markdown (`profiler_dossier.md`).
+  - [ ] Implementar o modo sentinela contínuo (`--watch / -w`).
+
+- [ ] **Fase 2: Conexão CLI em `cmd_lite_xl.py`**
+  - [ ] Mapear flags no comando `profile` (`-m`, `-w`, `--boot`, `--threads`, `--export`, `--up`).
+  - [ ] Conectar `--up` com o `EditorDispatcher` (abrir o laudo direto no Doxly).
+
+- [ ] **Fase 3: Validação e Testes em Produção**
+  - [ ] Testar `doxoade doxly profile -m test`.
+  - [ ] Testar `doxoade doxly profile -m test --boot`.
+  - [ ] Testar `doxoade doxly profile -m test --threads`.
+  - [ ] Testar `doxoade doxly profile -m test --export --up` (geração e abertura na IDE).
+  - [ ] Rodar `doxoade regret` para garantir conformidade contínua.
+
+---
+
+Aprovado o plano para transformarmos o Profiler no **Chronos Advisor**? Se estiver de acordo, iniciamos a **Fase 1**.

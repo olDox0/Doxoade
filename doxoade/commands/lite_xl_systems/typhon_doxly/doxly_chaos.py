@@ -45,32 +45,32 @@ def doxly_injector(fmid: str):
 def _inj_tokenizer_nil(sandbox_dir: Path) -> str:
     return """
 core.add_thread(function()
-    coroutine.yield(0.5)
+    coroutine.yield(0.05)
     local tokenizer = require "core.tokenizer"
     pcall(tokenizer.tokenize, nil, nil, nil)
     core.log("💥 [CHAOS] Tokenizer nil compare disparado.")
+    if rawget(_G, "flush_session_log") then flush_session_log() end
 end)
 """
-
 
 @doxly_injector("doxly.tokenizer.invalid_state")
 def _inj_tokenizer_invalid_state(sandbox_dir: Path) -> str:
     return """
 core.add_thread(function()
-    coroutine.yield(0.5)
+    coroutine.yield(0.05)
     local tokenizer = require "core.tokenizer"
     local syn = (require("core.syntax")).plain_text_syntax
     pcall(tokenizer.tokenize, syn, "linha de teste", 9999)
     core.log("💥 [CHAOS] Tokenizer number state disparado.")
+    if rawget(_G, "flush_session_log") then flush_session_log() end
 end)
 """
-
 
 @doxly_injector("doxly.syntax.corrupted_pattern")
 def _inj_syntax_corrupted_pattern(sandbox_dir: Path) -> str:
     return """
 core.add_thread(function()
-    coroutine.yield(0.5)
+    coroutine.yield(0.05)
     local syntax = require "core.syntax"
     syntax.add {
         name = "Corrupted Pattern Test",
@@ -81,9 +81,9 @@ core.add_thread(function()
         }
     }
     core.log("💥 [CHAOS] Syntax com pattern corrompido adicionada.")
+    if rawget(_G, "flush_session_log") then flush_session_log() end
 end)
 """
-
 
 @doxly_injector("doxly.syntax.binary_raw_highlight")
 def _inj_binary_lua_doc(sandbox_dir: Path) -> str:
@@ -91,21 +91,19 @@ def _inj_binary_lua_doc(sandbox_dir: Path) -> str:
     test_bin.write_bytes(b"\x1bLua\x54\x00\x19\x93\r\n\x1a\n\x00\x00\x00\x00")
     return f"""
 core.add_thread(function()
-    coroutine.yield(0.5)
+    coroutine.yield(0.05)
     local doc = core.open_doc({repr(str(test_bin))})
     if doc then core.root_view:open_doc(doc) end
     core.log("💥 [CHAOS] Buffer binario aberto no editor.")
+    if rawget(_G, "flush_session_log") then flush_session_log() end
 end)
 """
-
-
-# --- 2. Renderizador, Layout & Views ---
 
 @doxly_injector("doxly.docview.nil_highlighter")
 def _inj_docview_nil_highlighter(sandbox_dir: Path) -> str:
     return """
 core.add_thread(function()
-    coroutine.yield(0.5)
+    coroutine.yield(0.05)
     local doc = core.open_doc()
     if doc then
         core.root_view:open_doc(doc)
@@ -113,24 +111,24 @@ core.add_thread(function()
         core.redraw = true
         core.log("💥 [CHAOS] active_doc.highlighter anulado.")
     end
+    if rawget(_G, "flush_session_log") then flush_session_log() end
 end)
 """
-
 
 @doxly_injector("doxly.node.orphan_view")
 def _inj_orphan_view(sandbox_dir: Path) -> str:
     return """
 core.add_thread(function()
-    coroutine.yield(0.5)
+    coroutine.yield(0.05)
     local node = core.root_view and core.root_view:get_active_node()
     if node and node.views then
         table.insert(node.views, { doc = nil, position = {x=0, y=0}, size = {x=100, y=100} })
         core.redraw = true
         core.log("💥 [CHAOS] View orfa injetada no no ativo.")
     end
+    if rawget(_G, "flush_session_log") then flush_session_log() end
 end)
 """
-
 
 # --- 3. Configuracao & Plugins Nativos ---
 
@@ -159,12 +157,13 @@ core.log("💥 [CHAOS] user_settings.lua deletado do sandbox.")
 def _inj_khonsu_budget_spike(sandbox_dir: Path) -> str:
     return """
 core.add_thread(function()
-    coroutine.yield(0.5)
+    coroutine.yield(0.05)
     local t0 = os.clock()
     while (os.clock() - t0) < 0.050 do
         local _ = math.sqrt(os.clock())
     end
     core.log("💥 [CHAOS] Thread bloqueante de 50ms concluida.")
+    if rawget(_G, "flush_session_log") then flush_session_log() end
 end)
 """
 
@@ -205,7 +204,7 @@ core.log("💥 [CHAOS] Simbolo critico ausente simulado em runtime_probe.json.")
 def _inj_api_patch_nil_target(sandbox_dir: Path) -> str:
     return """
 core.add_thread(function()
-    coroutine.yield(0.5)
+    coroutine.yield(0.05)
     local API = rawget(_G, "DOXOADE_API")
     if API and API.patch then
         API.patch({
@@ -216,6 +215,7 @@ core.add_thread(function()
         })
     end
     core.log("💥 [CHAOS] API.patch aplicado em simbolo inexistente.")
+    if rawget(_G, "flush_session_log") then flush_session_log() end
 end)
 """
 
@@ -236,9 +236,9 @@ def _kill_existing_instances():
 def execute_chaos_vector(
     fmid: str,
     sandbox_dir: Path,
-    timeout: float = 2.5,
+    timeout: float = 3.5,
 ) -> Dict[str, Any]:
-    """Executa um vetor de caos especifico no sandbox e verifica a deteccao."""
+    """Executa um vetor de caos específico no sandbox com verificação reativa multi-sink."""
     fm = DOXLY_TREE.get_by_id(fmid)
     if not fm:
         return {"fmid": fmid, "status": "UNKNOWN_FMID", "detected": False, "evidence": ""}
@@ -247,15 +247,18 @@ def execute_chaos_vector(
     if not injector_fn:
         return {"fmid": fmid, "status": "NO_INJECTOR", "detected": False, "evidence": "Sem injetor registrado"}
 
-    # 1. Preparacao do Sandbox
     sandbox_dir.mkdir(parents=True, exist_ok=True)
-    for art in ["session_log.txt", "error.txt"]:
-        p = sandbox_dir / art
+    diag_dir = sandbox_dir / ".doxoade" / "diagnostics"
+    diag_dir.mkdir(parents=True, exist_ok=True)
+
+    session_file = sandbox_dir / "session_log.txt"
+    error_file = sandbox_dir / "error.txt"
+    phanto_file = diag_dir / "phanto_crisis.ndjson"
+
+    for p in [session_file, error_file, phanto_file]:
         if p.exists():
-            try:
-                p.unlink()
-            except Exception:
-                pass
+            try: p.unlink()
+            except Exception: pass
 
     payload_lua = injector_fn(sandbox_dir)
 
@@ -274,17 +277,15 @@ def execute_chaos_vector(
             "fmid": fmid,
             "status": "DETECTED_MOCK" if detected else "SILENT_MOCK",
             "detected": detected,
-            "evidence": "Avaliacao estatica (sem binario)",
+            "evidence": "Avaliação estática (sem binário)",
         }
 
-    # 2. Execucao Supervisionada
     _kill_existing_instances()
     env = os.environ.copy()
     env["LITE_USERDIR"] = str(sandbox_dir)
     env["XDG_CONFIG_HOME"] = str(sandbox_dir.parent)
 
     CREATE_NEW_CONSOLE = 0x00000010 if sys.platform == "win32" else 0
-    start_t = time.time()
     proc = subprocess.Popen(
         [str(exe)],
         env=env,
@@ -293,45 +294,61 @@ def execute_chaos_vector(
         stderr=subprocess.PIPE,
     )
 
-    time.sleep(timeout)
+    start_t = time.time()
+    evidence_found = ""
+    detected = False
+
+    # ⏳ Polling Reativo Multi-Sink: verifica os logs a cada 100ms
+    while (time.time() - start_t) < timeout:
+        session_text = session_file.read_text(encoding="utf-8", errors="replace") if session_file.exists() else ""
+        error_text = error_file.read_text(encoding="utf-8", errors="replace") if error_file.exists() else ""
+        phanto_text = phanto_file.read_text(encoding="utf-8", errors="replace") if phanto_file.exists() else ""
+        
+        combined_logs = f"{error_text}\n{session_text}\n{phanto_text}"
+        tree_matches = DOXLY_TREE.scan_text(combined_logs)
+        matched_this_fmid = [m for m in tree_matches if m[0].id == fmid]
+
+        if matched_this_fmid:
+            detected = True
+            evidence_found = matched_this_fmid[0][1]
+            break
+
+        if proc.poll() is not None:
+            # Processo encerrou; última chance de ler
+            break
+        time.sleep(0.1)
+
+    # Encerra o sandbox após capturar o evento
     if proc.poll() is None:
-        proc.kill()
         try:
-            proc.wait(timeout=1.0)
+            # Tenta sinal de quit gracioso via IPC
+            (sandbox_dir / ".ipc_queue").write_text("__DOXOADE_GRACEFUL_QUIT__\n", encoding="utf-8")
+            time.sleep(0.15)
         except Exception:
             pass
+        if proc.poll() is None:
+            proc.kill()
+            try: proc.wait(timeout=0.8)
+            except Exception: pass
 
-    # 3. Extracao e Avaliacao Forense
-    session_file = sandbox_dir / "session_log.txt"
-    error_file = sandbox_dir / "error.txt"
+    # Leitura forense final caso tenha havido flush no fechamento
+    if not detected:
+        session_text = session_file.read_text(encoding="utf-8", errors="replace") if session_file.exists() else ""
+        error_text = error_file.read_text(encoding="utf-8", errors="replace") if error_file.exists() else ""
+        phanto_text = phanto_file.read_text(encoding="utf-8", errors="replace") if phanto_file.exists() else ""
+        combined_logs = f"{error_text}\n{session_text}\n{phanto_text}"
+        tree_matches = DOXLY_TREE.scan_text(combined_logs)
+        matched_this_fmid = [m for m in tree_matches if m[0].id == fmid]
+        if matched_this_fmid:
+            detected = True
+            evidence_found = matched_this_fmid[0][1]
 
-    session_text = session_file.read_text(encoding="utf-8", errors="replace") if session_file.exists() else ""
-    error_text = error_file.read_text(encoding="utf-8", errors="replace") if error_file.exists() else ""
-    combined_logs = f"{error_text}\n{session_text}"
-
-    # Verificacao 1: Tree Matches
-    tree_matches = DOXLY_TREE.scan_text(combined_logs)
-    matched_this_fmid = any(m[0].id == fmid for m in tree_matches)
-
-    # Verificacao 2: Probes Vivos
-    probe_report = run_all_doxly_probes(sandbox_dir, verbose=False)
-    probe_caught = any(p.failure_mode_id == fmid for p in probe_report.findings)
-
-    detected = matched_this_fmid or probe_caught
-    evidence = ""
-    if matched_this_fmid:
-        evidence = next(m[1] for m in tree_matches if m[0].id == fmid)[:100]
-    elif probe_caught:
-        evidence = next(p.message for p in probe_report.findings if p.failure_mode_id == fmid)[:100]
-
+    status = "DETECTABLE" if detected else "SILENT"
     return {
         "fmid": fmid,
-        "name": fm.name,
-        "severity": fm.severity,
-        "status": "DETECTABLE" if detected else "SILENT",
+        "status": status,
         "detected": detected,
-        "evidence": evidence,
-        "duration_s": round(time.time() - start_t, 2),
+        "evidence": evidence_found,
     }
 
 

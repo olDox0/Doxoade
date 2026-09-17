@@ -1,187 +1,173 @@
 # -*- coding: utf-8 -*-
 # doxoade/tools/image_systems/thumbnail_engine.py
 """
-🖼️ DOXOADE THUMBNAIL ENGINE — Geração de Sidecars Binários DOXRLE1 (CAS V2.0).
-Contrato imutável com suporte polimórfico a Dict/Dataclass (Zero-Breakage).
+🖼️ DOXOADE THUMBNAIL ENGINE & RLE BINARY CODEC (DOXRLE1)
+Compliance: ProDeNov 1.2.1, PASC-6.1, Limite < 50KB.
 """
 from __future__ import annotations
+
 import os
 import struct
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple, List, Union
+from typing import Dict, List, Tuple, Optional, Any, Union
 
-try:
-    from PIL import Image
-    PIL_AVAILABLE = True
-except ImportError:
-    PIL_AVAILABLE = False
-
-# =============================================================================
-# 📦 CONSTANTES GLOBAIS EXPORTADAS (CONTRATO DO __INIT__.PY)
-# =============================================================================
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
-
 PRESETS = {
-    "card": {"max_w": 120, "max_h": 68, "color_tolerance": 6},
-    "compact": {"max_w": 60, "max_h": 34, "color_tolerance": 8},
-    "hd_preview": {"max_w": 240, "max_h": 136, "color_tolerance": 4},
+    "card": {"max_w": 240, "max_h": 136, "tolerance": 4, "suffix": ".thumb.rlebin"},
+    "canvas_hd": {"max_w": 1920, "max_h": 1080, "tolerance": 1, "suffix": ".canvas.rlebin"},
+    "tiny": {"max_w": 60,  "max_h": 34,  "tolerance": 6, "suffix": ".tiny.rlebin"},
 }
 
 
 @dataclass
 class ThumbResult:
     ok: bool
-    status: str
+    status: str  # "GENERATED", "CACHE_HIT", "SKIPPED", "ERROR"
     rects: int = 0
     bytes: int = 0
-    orig_w: int = 0
-    orig_h: int = 0
-    grid_w: int = 0
-    grid_h: int = 0
-    sidecar_path: Optional[Path] = None
     error: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        d = asdict(self)
-        if self.sidecar_path:
-            d["sidecar_path"] = str(self.sidecar_path)
-        return d
+    file_name: str = ""
 
     def get(self, key: str, default: Any = None) -> Any:
         return getattr(self, key, default)
 
     def __getitem__(self, key: str) -> Any:
-        if hasattr(self, key):
-            return getattr(self, key)
-        raise KeyError(f"ThumbResult não possui o campo: {key}")
+        return getattr(self, key)
+
+
+class RleCodec:
+    MAGIC = b"DOXRLE1"
+    VERSION = 1
+    HEADER_STRUCT = "<7sBHHHHI"
+    RECT_STRUCT = "<HHHBBB"
+
+    @classmethod
+    def encode_binary(
+        cls,
+        grid_w: int,
+        grid_h: int,
+        orig_w: int,
+        orig_h: int,
+        rects: List[Tuple[int, int, int, int, int, int]]
+    ) -> bytes:
+        count = len(rects)
+        header = struct.pack(
+            cls.HEADER_STRUCT,
+            cls.MAGIC,
+            cls.VERSION,
+            grid_w,
+            grid_h,
+            orig_w,
+            orig_h,
+            count
+        )
+        body = bytearray()
+        for rx, ry, rw, r, g, b in rects:
+            body.extend(struct.pack(cls.RECT_STRUCT, rx, ry, rw, r, g, b))
+        return header + bytes(body)
+
+    @classmethod
+    def build_runs(
+        cls,
+        pixels_flat: List[Tuple[int, int, int]],
+        grid_w: int,
+        grid_h: int,
+        tolerance: int = 1
+    ) -> List[Tuple[int, int, int, int, int, int]]:
+        rects = []
+        for y in range(grid_h):
+            row_offset = y * grid_w
+            if row_offset >= len(pixels_flat):
+                break
+            run_start_x = 0
+            cur_c = pixels_flat[row_offset]
+            run_len = 1
+
+            for x in range(1, grid_w):
+                idx = row_offset + x
+                if idx >= len(pixels_flat):
+                    break
+                c = pixels_flat[idx]
+
+                if (abs(c[0] - cur_c[0]) <= tolerance and
+                    abs(c[1] - cur_c[1]) <= tolerance and
+                    abs(c[2] - cur_c[2]) <= tolerance):
+                    run_len += 1
+                else:
+                    rects.append((run_start_x, y, run_len, cur_c[0], cur_c[1], cur_c[2]))
+                    run_start_x = x
+                    cur_c = c
+                    run_len = 1
+
+            rects.append((run_start_x, y, run_len, cur_c[0], cur_c[1], cur_c[2]))
+        return rects
 
 
 class ThumbnailEngine:
-    HEADER_MAGIC = b"DOXRLE1"
-    VERSION = 1
     PRESETS = PRESETS
     IMAGE_EXTS = IMAGE_EXTS
 
-    def __init__(self, project_root: Optional[Path] = None):
+    def __init__(self, project_root: Optional[Union[str, Path]] = None):
         self.project_root = Path(project_root or os.getcwd()).resolve()
 
     def generate(
         self,
-        image_path: Union[str, Path],
+        img_path: Union[str, Path],
         preset: str = "card",
         force: bool = False
     ) -> ThumbResult:
-        if not PIL_AVAILABLE:
-            return ThumbResult(
-                ok=False,
-                status="NO_PILLOW",
-                error="Biblioteca Pillow não instalada. Execute: pip install pillow"
-            )
+        src_path = Path(img_path).resolve()
+        if not src_path.exists() or not src_path.is_file():
+            return ThumbResult(ok=False, status="ERROR", error=f"Arquivo inexistente: {src_path}", file_name=src_path.name)
 
-        img_p = Path(image_path).resolve()
-        if not img_p.exists() or not img_p.is_file():
-            return ThumbResult(ok=False, status="FILE_NOT_FOUND", error=f"Arquivo inexistente: {img_p}")
+        p_cfg = self.PRESETS.get(preset, self.PRESETS["card"])
+        sidecar_suffix = p_cfg.get("suffix", ".thumb.rlebin")
+        sidecar_path = src_path.with_name(src_path.stem + sidecar_suffix)
 
-        sidecar_p = img_p.with_name(f"{img_p.stem}.thumb.rlebin")
-
-        if not force and sidecar_p.exists():
+        if not force and sidecar_path.exists():
             try:
-                if sidecar_p.stat().st_mtime >= img_p.stat().st_mtime and sidecar_p.stat().st_size > 20:
-                    return ThumbResult(
-                        ok=True,
-                        status="CACHE_HIT",
-                        bytes=sidecar_p.stat().st_size,
-                        sidecar_path=sidecar_p
-                    )
-            except OSError:
+                if sidecar_path.stat().st_mtime >= src_path.stat().st_mtime:
+                    return ThumbResult(ok=True, status="CACHE_HIT", bytes=sidecar_path.stat().st_size, file_name=src_path.name)
+            except Exception:
                 pass
 
-        cfg = PRESETS.get(preset, PRESETS["card"])
-        max_w = cfg["max_w"]
-        max_h = cfg["max_h"]
-        tol = cfg["color_tolerance"]
+        try:
+            from PIL import Image
+        except ImportError:
+            return ThumbResult(ok=False, status="SKIPPED", error="Pillow não instalada.", file_name=src_path.name)
 
         try:
-            with Image.open(img_p) as img:
-                img = img.convert("RGB")
-                orig_w, orig_h = img.size
+            with Image.open(src_path) as img:
+                img_rgb = img.convert("RGB")
+                orig_w, orig_h = img_rgb.size
+                if orig_w == 0 or orig_h == 0:
+                    return ThumbResult(ok=False, status="ERROR", error="Dimensões nulas", file_name=src_path.name)
 
-                ratio = min(max_w / max(1, orig_w), max_h / max(1, orig_h))
-                target_w = max(4, int(orig_w * ratio))
-                target_h = max(4, int(orig_h * ratio))
+                target_w = min(p_cfg["max_w"], orig_w)
+                target_h = max(10, int(orig_h * (target_w / orig_w)))
 
-                resized = img.resize((target_w, target_h), Image.Resampling.BILINEAR)
-                pixels = resized.load()
+                if target_h > p_cfg["max_h"]:
+                    target_h = p_cfg["max_h"]
+                    target_w = max(10, int(orig_w * (target_h / orig_h)))
 
-                rects_payload = bytearray()
-                rect_count = 0
-
-                for y in range(target_h):
-                    run_start = 0
-                    cur_c = pixels[0, y]
-                    run_len = 1
-
-                    for x in range(1, target_w):
-                        c = pixels[x, y]
-                        if (
-                            abs(c[0] - cur_c[0]) <= tol
-                            and abs(c[1] - cur_c[1]) <= tol
-                            and abs(c[2] - cur_c[2]) <= tol
-                        ):
-                            run_len += 1
-                        else:
-                            rects_payload.extend(struct.pack("<HHHBBB", run_start, y, run_len, cur_c[0], cur_c[1], cur_c[2]))
-                            rect_count += 1
-                            run_start = x
-                            cur_c = c
-                            run_len = 1
-
-                    rects_payload.extend(struct.pack("<HHHBBB", run_start, y, run_len, cur_c[0], cur_c[1], cur_c[2]))
-                    rect_count += 1
-
-                header = struct.pack(
-                    "<7sBHHHHI",
-                    self.HEADER_MAGIC,
-                    self.VERSION,
-                    target_w,
-                    target_h,
-                    orig_w,
-                    orig_h,
-                    rect_count
-                )
-
-                full_data = header + rects_payload
-                sidecar_p.write_bytes(full_data)
-
-                return ThumbResult(
-                    ok=True,
-                    status="GENERATED",
-                    rects=rect_count,
-                    bytes=len(full_data),
-                    orig_w=orig_w,
-                    orig_h=orig_h,
-                    grid_w=target_w,
-                    grid_h=target_h,
-                    sidecar_path=sidecar_p
-                )
-
+                resized = img_rgb.resize((target_w, target_h), Image.Resampling.BILINEAR)
+                pixels_flat = list(resized.getdata())
+                rects = RleCodec.build_runs(pixels_flat, target_w, target_h, tolerance=p_cfg.get("tolerance", 1))
+                blob = RleCodec.encode_binary(target_w, target_h, orig_w, orig_h, rects)
+                sidecar_path.write_bytes(blob)
+                return ThumbResult(ok=True, status="GENERATED", rects=len(rects), bytes=len(blob), file_name=src_path.name)
         except Exception as e:
-            return ThumbResult(ok=False, status="ERROR", error=str(e), sidecar_path=sidecar_p)
+            return ThumbResult(ok=False, status="ERROR", error=str(e), file_name=src_path.name)
 
     def scan(self, target_dir: Any = None, force: bool = False, **kwargs) -> Dict[str, Any]:
-        """Varre e sincroniza thumbnails (imune a argumentos em formato dict)."""
+        """Varre e sincroniza thumbnails (compatível com chamadas de deploy)."""
         from .image_manager import ImageAssetManager
         if isinstance(target_dir, dict):
             force = target_dir.get("force", force)
             target_dir = None
-        if not target_dir or not isinstance(target_dir, (str, Path)):
-            root = Path(self.project_root).resolve()
-        else:
-            root = Path(target_dir).resolve()
+        root = Path(target_dir or self.project_root).resolve()
         return ImageAssetManager.sync_project_thumbnails(root, force=force)
 
     def batch(self, target_dir: Any = None, force: bool = False, **kwargs) -> Dict[str, Any]:
         return self.scan(target_dir, force=force, **kwargs)
-
-

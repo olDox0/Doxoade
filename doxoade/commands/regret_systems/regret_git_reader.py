@@ -7,12 +7,45 @@ e identifica arquivos modificados mesmo durante operações de rebase ou detache
 
 from __future__ import annotations
 import subprocess
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
 
 class RegretGitReader:
-    """Interface segura de extração de artefatos e diffs do Git."""
+    """Interface segura de extração de artefatos e diffs do Git com blindagem NT."""
+    
+    _GIT_LOCK = threading.Lock()  # 🛡️ Previne colisão de _readerthread no Windows
+
+    @classmethod
+    def get_file_content_at_revision(
+        cls, file_path: Path, revision: str = "HEAD"
+    ) -> Optional[str]:
+        """Extrai o conteúdo de um arquivo em uma revisão específica do Git sem access violation."""
+        root = cls.get_repo_root(file_path.parent)
+        try:
+            rel_path = file_path.relative_to(root).as_posix()
+        except ValueError:
+            rel_path = file_path.as_posix()
+
+        with cls._GIT_LOCK:
+            try:
+                # Usar stderr=DEVNULL evita a criação da 2ª _readerthread no Windows
+                res = subprocess.run(
+                    ["git", "show", f"{revision}:{rel_path}"],
+                    cwd=str(root),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    timeout=4,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+                if res.returncode == 0:
+                    return res.stdout
+                return None
+            except Exception:
+                return None
 
     @staticmethod
     def is_git_repository(target_path: Optional[Path] = None) -> bool:

@@ -1,87 +1,79 @@
 -- doxoade/commands/lite_xl_systems/template/19c_canvas_sdl2_studio.lua
 --[[
-  🎨 DOXOADE HIGH-PERFORMANCE CANVAS & PRINTSCREEN STUDIO (Módulo 19c V27.0)
-  - Renderizador de Bordas Contíguas: Elimina 100% das linhas de grade e frestas pretas.
-  - Pan Drag & Zoom a 60 FPS: Otimização RLE contínua (~700 blocos com carga < 0.05s).
-  - Captura Win32 Nativa via Venv Python (CF_DIB / CF_DIBV5 e Pillow).
+  🎨 DOXOADE HIGH-PERFORMANCE CANVAS & PRINTSCREEN STUDIO (Módulo 19c V42.0 Nil-Safe)
+  - Resolução Full HD 1080p Nativa (.canvas.rlebin 1920x1080): Leitura de código perfeita.
+  - Interpolações de string.format 100% blindadas contra argumentos nil.
+  - Viewport Culling O(1): Descarta blocos fora do campo visual no Zoom.
+  - Calibração Matemática 1:1 Real (Pixel-Perfect).
+  Compliance: ProDeNov 1.2.1, PASC-6.1, Limite < 50KB.
 ]]
 local core = require "core"
 local style = require "core.style"
+local command = require "core.command"
 
 local rencache = rawget(_G, "rencache") or (pcall(require, "core.rencache") and require("core.rencache") or nil)
 local native_renderer = rawget(_G, "renderer") or (pcall(require, "renderer") and require("renderer") or nil)
 
 local function draw_rect_safe(x, y, w, h, color)
-  if rencache and rencache.draw_rect then rencache.draw_rect(x, y, w, h, color)
-  elseif native_renderer and native_renderer.draw_rect then native_renderer.draw_rect(x, y, w, h, color) end
+  if not color or type(color) ~= "table" then color = { 128, 128, 128, 255 } end
+  if rencache and rencache.draw_rect then
+    rencache.draw_rect(x, y, w, h, color)
+  elseif native_renderer and native_renderer.draw_rect then
+    native_renderer.draw_rect(x, y, w, h, color)
+  end
 end
 
 local function draw_text_safe(font, text, x, y, color)
-  if rencache and rencache.draw_text then rencache.draw_text(font, text, x, y, color)
-  elseif native_renderer and native_renderer.draw_text then native_renderer.draw_text(font, text, x, y, color) end
-end
-
-local function get_active_project_dir()
-  if core.project_directories and #core.project_directories > 0 then
-    local p = core.project_directories[1]
-    return tostring(type(p) == "table" and (p.path or p.name) or p)
+  if not font or not text or text == "" then return end
+  if rencache and rencache.draw_text then
+    rencache.draw_text(font, text, x, y, color)
+  elseif native_renderer and native_renderer.draw_text then
+    native_renderer.draw_text(font, text, x, y, color)
   end
-  return core.project_dir or "."
 end
 
-local function detect_project_venv(proj_dir)
-  local sep = PATHSEP or "/"
-  local candidates = { proj_dir .. sep .. "venv", proj_dir .. sep .. ".venv", proj_dir .. sep .. "env", proj_dir .. sep .. ".env" }
-  for _, vpath in ipairs(candidates) do
-    local info = system.get_file_info(vpath)
-    if info and info.type == "dir" then
-      local scripts = (PLATFORM == "Windows") and (vpath .. sep .. "Scripts") or (vpath .. sep .. "bin")
-      if system.get_file_info(scripts) then return scripts, vpath end
-    end
-  end
-  return nil, nil
-end
-
--- =============================================================================
--- 🖼️ AUTO-THUMBNAIL ÁRTEMIS V2 (sidecar pós-paste, escopo corrigido)
--- Correção do crash 'cannot get undefined variable: dest_png':
--- caminhos agora entram como PARÂMETROS (upvalues reais da closure).
--- =============================================================================
-local function _spawn_sidecar_generator(dest_png, proj_dir)
-  if not dest_png or not proj_dir then return end
-  local user_dir = USERDIR or "."
-  local sep = PATHSEP or "/"
-  local cache_dir = user_dir .. sep .. ".doxoade" .. sep .. "canvas_cache"
-  pcall(function() system.mkdir(cache_dir) end)
-  local gen_script = cache_dir .. sep .. "auto_thumb_gen_19c.py"
-  local py_code = string.format([[
-import sys
-from pathlib import Path
-try:
-    sys.path.insert(0, %q)
-    from doxoade.tools.image_systems import ThumbnailEngine
-    engine = ThumbnailEngine(Path(%q))
-    res = engine.generate(Path(%q), preset="card")
-    print(f"[THUMB-19C] {res.status} {res.rects} rects")
-except Exception as e:
-    print(f"[THUMB-19C-ERR] {e}")
-]], proj_dir, proj_dir, dest_png)
-  local f_py = io.open(gen_script, "w")
-  if f_py then f_py:write(py_code); f_py:close() end
-  local venv_scripts = detect_project_venv(proj_dir)
-  local py_exe = (venv_scripts and (venv_scripts .. sep .. "python.exe")) or "python"
-  core.add_thread(function()
-    pcall(system.exec, string.format('"%s" "%s"', py_exe, gen_script))
-  end)
-end
-
-local function resolve_image_full_path(filename)
-  local proj_dir = get_active_project_dir()
+local function resolve_real_project_root()
   local user_dir = USERDIR or "."
   local sep = PATHSEP or "/"
   
+  local py_anchor = user_dir .. sep .. ".doxoade" .. sep .. "python_path.txt"
+  local finfo = system.get_file_info(py_anchor)
+  if finfo and finfo.type == "file" then
+    local f = io.open(py_anchor, "r")
+    if f then
+      local py_exe = f:read("*l") or ""
+      f:close()
+      if py_exe ~= "" and system.get_file_info(py_exe) then
+        local pdir = py_exe:match("^(.*)[/\\]Scripts[/\\]") or py_exe:match("^(.*)[/\\]bin[/\\]") or py_exe:match("^(.*)[/\\]")
+        if pdir and system.get_file_info(pdir) then
+          return (system.absolute_path(pdir) or pdir):gsub("\\", "/"), py_exe:gsub("/", "\\")
+        end
+      end
+    end
+  end
+
+  if core.project_directories and #core.project_directories > 0 then
+    for _, p in ipairs(core.project_directories) do
+      local p_str = tostring(type(p) == "table" and (p.path or p.name) or p)
+      if not p_str:find("test_deploy") and not p_str:find("sandbox") then
+        local abs_p = (system.absolute_path(p_str) or p_str):gsub("\\", "/")
+        return abs_p, "python"
+      end
+    end
+  end
+
+  local cwd = (system.absolute_path(".") or "."):gsub("\\", "/")
+  return cwd, "python"
+end
+
+local function resolve_image_full_path(filename)
+  local proj_dir, _ = resolve_real_project_root()
+  local user_dir = USERDIR or "."
+  local sep = PATHSEP or "/"
   local candidates = {
     proj_dir .. sep .. ".doxoade" .. sep .. "assets" .. sep .. "images" .. sep .. filename,
+    proj_dir .. sep .. "doxoade" .. sep .. ".doxoade" .. sep .. "assets" .. sep .. "images" .. sep .. filename,
+    proj_dir .. sep .. "assets" .. sep .. "images" .. sep .. filename,
     user_dir .. sep .. ".doxoade" .. sep .. "assets" .. sep .. "images" .. sep .. filename,
     user_dir .. sep .. "assets" .. sep .. "images" .. sep .. filename,
   }
@@ -91,14 +83,105 @@ local function resolve_image_full_path(filename)
   return candidates[1]
 end
 
+-- =============================================================================
+-- 🚀 GERADOR SOB DEMANDA DE RLE FULL HD 1080P (Lossless RLE)
+-- =============================================================================
+local function generate_hd_canvas_sidecar(img_path, hd_sidecar)
+  local proj_dir, py_exe = resolve_real_project_root()
+  local user_dir = USERDIR or "."
+  local sep = PATHSEP or "/"
+  local cache_dir = user_dir .. sep .. ".doxoade" .. sep .. "canvas_cache"
+  pcall(function() system.mkdir(cache_dir) end)
+
+  local script_py = (cache_dir .. sep .. "generate_canvas_hd.py"):gsub("/", "\\")
+  local py_code = string.format([[
+import sys
+from pathlib import Path
+try:
+    from PIL import Image
+    src = Path(%q)
+    dest = Path(%q)
+    img = Image.open(src).convert("RGB")
+    ow, oh = img.size
+    
+    # 🎯 Resolução HD Nativa: preserva resolução original até 1920x1080 (ou escala suave)
+    target_w = min(1920, ow)
+    target_h = int(oh * (target_w / ow))
+    if (target_w, target_h) != (ow, oh):
+        img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+    
+    pixels = img.load()
+    rects = []
+    
+    # RLE exato (threshold 0 = nitidez absoluta de fontes e código)
+    for y in range(target_h):
+        run_start = 0
+        cur_c = pixels[0, y]
+        for x in range(1, target_w):
+            c = pixels[x, y]
+            if c != cur_c:
+                rects.append((run_start, y, x - run_start, cur_c[0], cur_c[1], cur_c[2]))
+                run_start = x
+                cur_c = c
+        rects.append((run_start, y, target_w - run_start, cur_c[0], cur_c[1], cur_c[2]))
+    
+    # Grava cabeçalho DOXRLE1 binário rápido
+    import struct
+    header = struct.pack("<7sBHHHHI", b"DOXRLE1", 1, target_w, target_h, ow, oh, len(rects))
+    with open(dest, "wb") as f:
+        f.write(header)
+        for rx, ry, rw, r, g, b in rects:
+            f.write(struct.pack("<HHHBBB", rx, ry, rw, r, g, b))
+    print("[HD-OK]")
+except Exception as e:
+    print(f"[HD-ERR] {e}")
+]], img_path, hd_sidecar)
+
+  local f_py = io.open(script_py, "w")
+  if f_py then
+    f_py:write(py_code)
+    f_py:close()
+  end
+
+  pcall(system.exec, string.format('"%s" "%s"', py_exe, script_py))
+end
+
+local function load_rle_binary(path)
+  if not path then return nil end
+  local f = io.open(path, "rb")
+  if not f then return nil end
+  local data = f:read("*a") or ""
+  f:close()
+  if #data < 21 or data:sub(1, 7) ~= "DOXRLE1" then return nil end
+  local ok, ver, gw, gh, ow, oh, count = pcall(string.unpack, "<BHHHHI", data, 8)
+  
+  -- Teto elevado para 350.000 blocos (permite telas Full HD 1080p detalhadas)
+  if not ok or ver ~= 1 or not count or count > 350000 then return nil end
+  
+  local rects = {}
+  local off = 21
+  for i = 1, count do
+    local ok2, rx, ry, rw, r, g, b = pcall(string.unpack, "<HHHBBB", data, off)
+    if not ok2 or not rx then break end
+    off = off + 9
+    rects[i] = { x = rx or 0, y = ry or 0, w = rw or 1, h = 1, color = { r or 255, g or 255, b or 255, 255 } }
+  end
+  return {
+    grid_w = gw or 240,
+    grid_h = gh or 136,
+    orig_w = ow or 1920,
+    orig_h = oh or 1080,
+    rects = rects
+  }
+end
+
 local CanvasStudio = {
   rects = {},
-  grid_w = 1920, --460
-  grid_h = 270,
-  orig_w = 1366,
-  orig_h = 768,
+  grid_w = 1920,
+  grid_h = 1080,
+  orig_w = 1920,
+  orig_h = 1080,
   image_path = nil,
-  meta_path = nil,
   zoom = 1.0,
   pan_x = 0,
   pan_y = 0,
@@ -107,294 +190,142 @@ local CanvasStudio = {
   is_capturing = false,
   status_msg = "Nenhum print carregado. Pressione Ctrl+V para colar.",
 }
-
 rawset(_G, "_DOXOADE_CANVAS_STUDIO", CanvasStudio)
 
 function CanvasStudio:load_cas_image_by_filename(img_filename)
+  if not img_filename or img_filename == "" then return false end
   local full_path = resolve_image_full_path(img_filename)
-  local meta_path = full_path:gsub("%.png$", ".meta.json")
-
-  if not system.get_file_info(full_path) then
-    core.log("⚠ Imagem não encontrada: " .. full_path)
-    return false
-  end
+  local hd_sidecar = full_path:gsub("%.png$", ".canvas.rlebin")
+  local thumb_sidecar = full_path:gsub("%.png$", ".thumb.rlebin")
 
   self.image_path = full_path
-  self.meta_path = meta_path
   self.mode_1to1 = false
   self.zoom = 1.0
   self.pan_x = 0
   self.pan_y = 0
 
-  local user_dir = USERDIR or "."
-  local sep = PATHSEP or "/"
-  local cache_dir = user_dir .. sep .. ".doxoade" .. sep .. "canvas_cache"
-  pcall(function() system.mkdir(cache_dir) end)
-  local rle_out = cache_dir .. sep .. "preview_rle.dat"
-  local script_py = cache_dir .. sep .. "load_cas_rle.py"
-
-  self.status_msg = "Carregando imagem em alta definição..."
-  core.redraw = true
-
-  local py_code = [[
-import sys, os
-try:
-    from PIL import Image
-    img = Image.open(sys.argv[1]).convert("RGB")
-    orig_w, orig_h = img.size
-    target_w = min(1920, orig_w) # 480
-    target_h = max(10, int(orig_h * (target_w / orig_w)))
-    resized = img.resize((target_w, target_h), Image.Resampling.BILINEAR)
-    pixels = resized.load()
-
-    rects = []
-    for y in range(target_h):
-        run_start = 0
-        cur_c = pixels[0, y]
-        run_len = 1
-        for x in range(1, target_w):
-            c = pixels[x, y]
-            if abs(c[0]-cur_c[0]) <= 4 and abs(c[1]-cur_c[1]) <= 4 and abs(c[2]-cur_c[2]) <= 4:
-                run_len += 1
-            else:
-                rects.append(f"{run_start},{y},{run_len},{cur_c[0]},{cur_c[1]},{cur_c[2]}")
-                run_start = x; cur_c = c; run_len = 1
-        rects.append(f"{run_start},{y},{run_len},{cur_c[0]},{cur_c[1]},{cur_c[2]}")
-
-    with open(sys.argv[2], "w", encoding="utf-8") as f:
-        f.write(f"{target_w},{target_h},{orig_w},{orig_h}\n")
-        f.write("\n".join(rects))
-    print(f"[OK] {orig_w}|{orig_h}")
-except Exception as e:
-    print(f"[ERRO] {e}")
-]]
-  local f_py = io.open(script_py, "w")
-  if f_py then f_py:write(py_code); f_py:close() end
-
-  local proj_dir = get_active_project_dir()
-  local venv_scripts, _ = detect_project_venv(proj_dir)
-  local py_exe = (venv_scripts and (venv_scripts .. "\\python.exe")) or "python"
-
-  core.add_thread(function()
-    pcall(system.exec, string.format('"%s" "%s" "%s" "%s"', py_exe, script_py, full_path, rle_out))
-    for _ = 1, 40 do
-      coroutine.yield(0.04)
-      local finfo = system.get_file_info(rle_out)
-      if finfo and (finfo.size or 0) > 0 then break end
-    end
-
-    local f_rle = io.open(rle_out, "r")
-    if f_rle then
-      local header = f_rle:read("*l") or "480,270,1366,768"
-      local gw, gh, ow, oh = header:match("^(%d+),(%d+),(%d+),(%d+)$")
-      CanvasStudio.grid_w = tonumber(gw) or 480
-      CanvasStudio.grid_h = tonumber(gh) or 270
-      CanvasStudio.orig_w = tonumber(ow) or 1366
-      CanvasStudio.orig_h = tonumber(oh) or 768
-      CanvasStudio.rects = {}
-      for line in f_rle:lines() do
-        local rx, ry, rw, r, g, b = line:match("^(%d+),(%d+),(%d+),(%d+),(%d+),(%d+)$")
-        if rx then
-          table.insert(CanvasStudio.rects, {
-            x = tonumber(rx), y = tonumber(ry), w = tonumber(rw),
-            color = { tonumber(r), tonumber(g), tonumber(b), 255 }
-          })
+  -- 1. Tenta carregar o sidecar HD (1080p)
+  local bin = load_rle_binary(hd_sidecar)
+  
+  -- 2. Se não existir, tenta carregar a thumb provisória E dispara a forja em HD
+  if not bin then
+    bin = load_rle_binary(thumb_sidecar)
+    core.add_thread(function()
+      generate_hd_canvas_sidecar(full_path, hd_sidecar)
+      -- Aguarda geração rápida
+      for _ = 1, 30 do
+        coroutine.yield(0.05)
+        local finfo = system.get_file_info(hd_sidecar)
+        if finfo and (finfo.size or 0) > 200 then
+          local hd_bin = load_rle_binary(hd_sidecar)
+          if hd_bin and hd_bin.rects then
+            CanvasStudio.rects = hd_bin.rects
+            CanvasStudio.grid_w = hd_bin.grid_w
+            CanvasStudio.grid_h = hd_bin.grid_h
+            CanvasStudio.orig_w = hd_bin.orig_w
+            CanvasStudio.orig_h = hd_bin.orig_h
+            CanvasStudio.status_msg = string.format(
+              "Canvas 1080p HD: %s (%dx%d px • %d blocos)",
+              tostring(img_filename),
+              CanvasStudio.orig_w,
+              CanvasStudio.orig_h,
+              #CanvasStudio.rects
+            )
+            core.redraw = true
+          end
+          break
         end
       end
-      f_rle:close()
-      CanvasStudio.status_msg = string.format("CAS Visualizer: %s (%dx%d px)", img_filename, CanvasStudio.orig_w, CanvasStudio.orig_h)
-      core.redraw = true
-    end
-  end)
-  core.log("✔ Imagem CAS aberta no Canvas: " .. img_filename)
+    end)
+  end
+
+  if bin and bin.rects and #bin.rects > 0 then
+    self.rects = bin.rects
+    self.grid_w = tonumber(bin.grid_w) or 1920
+    self.grid_h = tonumber(bin.grid_h) or 1080
+    self.orig_w = tonumber(bin.orig_w) or 1920
+    self.orig_h = tonumber(bin.orig_h) or 1080
+    local is_1080p = (self.grid_w >= 960)
+    self.status_msg = string.format(
+      "Canvas %s: %s (%dx%d px • %d blocos)",
+      is_1080p and "1080p HD" or "Otimizando HD...",
+      tostring(img_filename),
+      self.orig_w,
+      self.orig_h,
+      #self.rects
+    )
+  else
+    self.status_msg = "Carregando imagem em alta definição..."
+  end
+
+  local shelf = rawget(_G, "_DOXOADE_SHELF_HUB")
+  if shelf then
+    shelf.active_tab = "canvas"
+    shelf.visible = true
+  end
+
+  core.redraw = true
+  if core.log then
+    core.log("🔍 [CANVAS] Imagem aberta: " .. tostring(img_filename))
+  end
   return true
 end
 
-function CanvasStudio:paste_clipboard_image()
-  if self.is_capturing then return end
-  self.is_capturing = true
-
-  local user_dir = USERDIR or "."
-  local sep = PATHSEP or "/"
-  local cache_dir = user_dir .. sep .. ".doxoade" .. sep .. "canvas_cache"
-  pcall(function() system.mkdir(cache_dir) end)
-
-  local rle_out = cache_dir .. sep .. "clipboard_rle.dat"
-  local script_py = cache_dir .. sep .. "clip_bridge_v3.py"
-  local log_out = cache_dir .. sep .. "clip_bridge.log"
-
-  pcall(os.remove, rle_out)
-  pcall(os.remove, log_out)
-
-  local proj_dir = get_active_project_dir()
-  local assets_dir = proj_dir .. sep .. ".doxoade" .. sep .. "assets" .. sep .. "images"
-  pcall(function() system.mkdir(proj_dir .. sep .. ".doxoade") end)
-  pcall(function() system.mkdir(assets_dir) end)
-
-  local ts = os.date("%Y%m%d_%H%M%S")
-  local dest_png = assets_dir .. sep .. "print_" .. ts .. ".png"
-  local dest_meta = assets_dir .. sep .. "print_" .. ts .. ".meta.json"
-
-  self.status_msg = "Capturando PrintScreen via Venv Python..."
+function CanvasStudio:adjust_zoom(delta, pivot_x, pivot_y)
+  local old_zoom = self.zoom
+  local factor = delta > 0 and 1.15 or 0.85
+  
+  -- Trava de segurança: Zoom entre 20% (0.2x) e 500% (5.0x)
+  self.zoom = math.max(0.2, math.min(5.0, self.zoom * factor))
+  
+  -- Se estiver no modo 1:1, desativa para permitir zoom livre
+  if self.zoom ~= 1.0 then
+    self.mode_1to1 = false
+  end
+  
   core.redraw = true
+end
 
-  local py_code = [[
-import sys, os, time, json, platform
-from io import BytesIO
-from pathlib import Path
+function CanvasStudio:reset_view()
+  self.zoom = 1.0
+  self.pan_x = 0
+  self.pan_y = 0
+  self.mode_1to1 = false
+  core.redraw = true
+end
 
-def get_clipboard_image():
-    try:
-        from PIL import ImageGrab, Image
-        for _ in range(5):
-            img = ImageGrab.grabclipboard()
-            if isinstance(img, Image.Image): return img
-            elif isinstance(img, list) and len(img) > 0 and Path(img[0]).is_file():
-                return Image.open(img[0])
-            time.sleep(0.04)
-    except Exception: pass
+function CanvasStudio:load_latest_image(force)
+  if not force and #self.rects > 0 then return end
 
-    if platform.system() == "Windows":
-        try:
-            import ctypes
-            from PIL import Image
-            u32 = ctypes.windll.user32
-            k32 = ctypes.windll.kernel32
-            for _ in range(5):
-                if u32.OpenClipboard(None):
-                    h_data = u32.GetClipboardData(8) or u32.GetClipboardData(17)
-                    if h_data:
-                        p_data = k32.GlobalLock(h_data)
-                        size = k32.GlobalSize(h_data)
-                        if p_data and size > 0:
-                            import struct
-                            raw_bytes = ctypes.string_at(p_data, size)
-                            k32.GlobalUnlock(h_data)
-                            u32.CloseClipboard()
-                            header_size = struct.unpack("<I", raw_bytes[0:4])[0]
-                            file_header = struct.pack("<2sIHHI", b"BM", 14 + size, 0, 0, 14 + header_size)
-                            return Image.open(BytesIO(file_header + raw_bytes))
-                    u32.CloseClipboard()
-                time.sleep(0.04)
-        except Exception: pass
-    return None
+  local proj_dir, _ = resolve_real_project_root()
+  local sep = PATHSEP or "/"
+  local images_dir = proj_dir .. sep .. ".doxoade" .. sep .. "assets" .. sep .. "images"
+  local files = system.list_dir(images_dir) or {}
+  local latest_png = nil
+  local latest_mtime = 0
 
-def main():
-    if len(sys.argv) < 4: sys.exit(1)
-    dest_png, dest_meta, rle_file = sys.argv[1], sys.argv[2], sys.argv[3]
-
-    img = get_clipboard_image()
-    if not img:
-        print("[ERRO] Clipboard vazio ou sem imagem.")
-        sys.exit(1)
-
-    from PIL import Image
-    img = img.convert("RGB")
-    orig_w, orig_h = img.size
-
-    # Salva PNG Nativo 100% Original
-    img.save(dest_png, format="PNG")
-
-    # Miniatura 60x34 para o card do documento
-    tw = 60
-    th = max(10, int((orig_h / orig_w) * tw))
-    thumb = img.resize((tw, th), Image.Resampling.BILINEAR)
-    t_pixels = thumb.load()
-    thumb_rects = []
-    for ty in range(th):
-        r_start = 0; cur_c = t_pixels[0, ty]; r_len = 1
-        for tx in range(1, tw):
-            c = t_pixels[tx, ty]
-            if c == cur_c: r_len += 1
-            else:
-                thumb_rects.append(f"{r_start},{ty},{r_len},{cur_c[0]},{cur_c[1]},{cur_c[2]}")
-                r_start = tx; cur_c = c; r_len = 1
-        thumb_rects.append(f"{r_start},{ty},{r_len},{cur_c[0]},{cur_c[1]},{cur_c[2]}")
-
-    meta = {
-        "width": orig_w, "height": orig_h, "resolution": f"{orig_w}x{orig_h}",
-        "thumb_w": tw, "thumb_h": th, "thumb_rects": thumb_rects,
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"), "platform": platform.system()
-    }
-    with open(dest_meta, "w", encoding="utf-8") as f:
-        json.dump(meta, f, indent=2)
-
-    # RLE Contínuo para o Canvas Studio (Espaço de grade 480px sem saltos de linha)
-    target_w = min(480, orig_w)
-    target_h = max(10, int(orig_h * (target_w / orig_w)))
-    resized = img.resize((target_w, target_h), Image.Resampling.BILINEAR)
-    pixels = resized.load()
-
-    rects = []
-    for y in range(target_h):
-        run_start = 0; cur_color = pixels[0, y]; run_len = 1
-        for x in range(1, target_w):
-            c = pixels[x, y]
-            if abs(c[0]-cur_color[0]) <= 4 and abs(c[1]-cur_color[1]) <= 4 and abs(c[2]-cur_color[2]) <= 4:
-                run_len += 1
-            else:
-                rects.append(f"{run_start},{y},{run_len},{cur_color[0]},{cur_color[1]},{cur_color[2]}")
-                run_start = x; cur_color = c; run_len = 1
-        rects.append(f"{run_start},{y},{run_len},{cur_color[0]},{cur_color[1]},{cur_color[2]}")
-
-    with open(rle_file, "w", encoding="utf-8") as f:
-        f.write(f"{target_w},{target_h},{orig_w},{orig_h}\n")
-        f.write("\n".join(rects))
-
-    print(f"[OK] {orig_w}|{orig_h}")
-    sys.exit(0)
-
-if __name__ == "__main__": main()
-]]
-
-  local f_py = io.open(script_py, "w")
-  if f_py then f_py:write(py_code); f_py:close() end
-
-  local venv_scripts, _ = detect_project_venv(proj_dir)
-  local py_exe = (venv_scripts and (venv_scripts .. "\\python.exe")) or "python"
-
-  core.add_thread(function()
-    pcall(system.exec, string.format('"%s" "%s" "%s" "%s" "%s" > "%s" 2>&1', py_exe, script_py, dest_png, dest_meta, rle_out, log_out))
-
-    for _ = 1, 40 do
-      coroutine.yield(0.04)
-      local finfo = system.get_file_info(rle_out)
-      if finfo and (finfo.size or 0) > 0 then break end
-    end
-
-    local f_rle = io.open(rle_out, "r")
-    if f_rle then
-      local header = f_rle:read("*l") or "480,270,1366,768"
-      local gw, gh, ow, oh = header:match("^(%d+),(%d+),(%d+),(%d+)$")
-      CanvasStudio.grid_w = tonumber(gw) or 480
-      CanvasStudio.grid_h = tonumber(gh) or 270
-      CanvasStudio.orig_w = tonumber(ow) or 1366
-      CanvasStudio.orig_h = tonumber(oh) or 768
-      CanvasStudio.rects = {}
-      for line in f_rle:lines() do
-        local rx, ry, rw, r, g, b = line:match("^(%d+),(%d+),(%d+),(%d+),(%d+),(%d+)$")
-        if rx then
-          table.insert(CanvasStudio.rects, {
-            x = tonumber(rx), y = tonumber(ry), w = tonumber(rw),
-            color = { tonumber(r), tonumber(g), tonumber(b), 255 }
-          })
-        end
+  for _, fn in ipairs(files) do
+    if fn:find("%.png$") then
+      local fpath = images_dir .. sep .. fn
+      local finfo = system.get_file_info(fpath)
+      local mtime = finfo and (finfo.modified or finfo.mtime or 0) or 0
+      if mtime >= latest_mtime then
+        latest_mtime = mtime
+        latest_png = fn
       end
-      f_rle:close()
-      CanvasStudio.image_path = dest_png
-      CanvasStudio.meta_path = dest_meta
-      CanvasStudio.mode_1to1 = false
-      CanvasStudio.zoom = 1.0
-      CanvasStudio.pan_x = 0
-      CanvasStudio.pan_y = 0
-      CanvasStudio.status_msg = string.format("Print Salvo: print_%s.png (%dx%d px)", ts, CanvasStudio.orig_w, CanvasStudio.orig_h)
-      core.log(string.format("✔ Print capturado e salvo: .doxoade/assets/images/print_%s.png", ts))
-    else
-      CanvasStudio.status_msg = "Nenhuma imagem encontrada no clipboard."
-      core.log("⚠ Clipboard vazio. Pressione a tecla PrintScreen ou Win+Shift+S.")
     end
-    CanvasStudio.is_capturing = false
-    core.redraw = true
+  end
+
+  if latest_png then
+    self:load_cas_image_by_filename(latest_png)
+  end
+end
+
+function CanvasStudio:paste_clipboard_image()
+  command.perform("doxoade:paste-image-from-clipboard")
+  core.add_thread(function()
+    coroutine.yield(0.5)
+    CanvasStudio:load_latest_image(true)
   end)
 end
 
@@ -403,20 +334,12 @@ function CanvasStudio:copy_image_to_clipboard()
     core.log("⚠ Nenhuma imagem carregada no Canvas para copiar.")
     return
   end
-  local full_path = self.image_path
-  local fname = full_path:match("[^/\\]+$")
-
+  local img_path = self.image_path:gsub("/", "\\")
   if PLATFORM == "Windows" then
-    local ps_cmd = string.format([[powershell.exe -NoProfile -STA -Command "Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; [System.Windows.Forms.Clipboard]::SetImage([System.Drawing.Image]::FromFile('%s'))"]], full_path:gsub('/', '\\'))
+    local ps_cmd = string.format([[powershell.exe -NoProfile -STA -Command "Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; [System.Windows.Forms.Clipboard]::SetImage([System.Drawing.Image]::FromFile('%s'))"]], img_path:gsub('"', '""'))
     pcall(system.exec, ps_cmd)
   end
-
-  if system.set_clipboard then
-    local tag = string.format("[DOX-IMG:%s | %dx%d | %s]", fname, self.orig_w or 1366, self.orig_h or 768, os.date("%Y-%m-%d"))
-    system.set_clipboard(tag)
-  end
-
-  core.log(string.format("✔ Imagem '%s' copiada para a área de transferência!", fname))
+  core.log("📋 Imagem copiada para a área de transferência do Windows!")
 end
 
 function CanvasStudio:open_image_external()
@@ -432,163 +355,74 @@ function CanvasStudio:open_image_external()
   end
 end
 
--- Adicionar o método de limpeza completa
 function CanvasStudio:clear()
   self.rects = {}
   self.image_path = nil
-  self.meta_path = nil
-  self.native_img_obj = nil
   self.zoom = 1.0
   self.pan_x = 0
   self.pan_y = 0
   self.status_msg = "Canvas limpo. Pressione Ctrl+V para colar novo print."
   core.redraw = true
-  if core.log then core.log("🧹 [CANVAS] Tela limpa com sucesso.") end
+  core.log("🧹 [CANVAS] Tela limpa com sucesso.")
 end
 
 -- =============================================================================
--- RENDERIZADOR CONTÍNUO ZERO-SEAMS (Sem Linhas de Grade e Pan Drag Suave 60 FPS)
+-- 🎨 RENDERIZADOR CONTÍNUO FULL HD COM VIEWPORT CULLING (60 FPS)
 -- =============================================================================
 function CanvasStudio:draw_viewport(x, y, w, h)
   local font = style.font or style.code_font
   if #self.rects > 0 then
-    local gw = self.grid_w or 480
-    local gh = self.grid_h or 270
+    local gw = self.grid_w or 1920
+    local gh = self.grid_h or 1080
+    local ow = self.orig_w or 1920
 
-    local base_w = w - 20
-    local base_h = h - 20
-    local base_scale = math.min(base_w / gw, base_h / gh)
+    local base_w = w - 32
+    local base_h = h - 32
+    local fit_scale = math.min(base_w / math.max(1, gw), base_h / math.max(1, gh))
 
-    local total_drawn_w = math.floor(gw * base_scale * self.zoom)
-    local total_drawn_h = math.floor(gh * base_scale * self.zoom)
+    local scale
+    if self.mode_1to1 then
+      local ratio_1to1 = (ow / math.max(1, gw))
+      scale = ratio_1to1 * self.zoom
+    else
+      scale = fit_scale * self.zoom
+    end
+
+    local total_drawn_w = math.floor(gw * scale)
+    local total_drawn_h = math.floor(gh * scale)
 
     local start_draw_x = x + math.floor((w - total_drawn_w) / 2) + self.pan_x
     local start_draw_y = y + math.floor((h - total_drawn_h) / 2) + self.pan_y
 
-    local scale_x = total_drawn_w / gw
-    local scale_y = total_drawn_h / gh
+    draw_rect_safe(start_draw_x - 3, start_draw_y - 3, total_drawn_w + 6, total_drawn_h + 6, { 30, 30, 35, 255 })
+    draw_rect_safe(start_draw_x, start_draw_y, total_drawn_w, total_drawn_h, { 5, 5, 5, 255 })
 
-    -- Fundo de contraste escuro
-    draw_rect_safe(start_draw_x - 2, start_draw_y - 2, total_drawn_w + 4, total_drawn_h + 4, { 5, 5, 5, 255 })
-
-    -- 🚀 Renderizador de Bordas Contíguas: rx2 - rx e ry2 - ry eliminam qualquer fresta
     for _, r in ipairs(self.rects) do
-      local rx = start_draw_x + math.floor(r.x * scale_x)
-      local ry = start_draw_y + math.floor(r.y * scale_y)
-      local rx2 = start_draw_x + math.ceil((r.x + r.w) * scale_x)
-      local ry2 = start_draw_y + math.ceil((r.y + 1) * scale_y)
-      local rw = rx2 - rx
-      local rh = ry2 - ry
+      local rx = math.floor(start_draw_x + r.x * scale)
+      local ry = math.floor(start_draw_y + r.y * scale)
+      local rx2 = math.floor(start_draw_x + (r.x + r.w) * scale)
+      local ry2 = math.floor(start_draw_y + (r.y + 1) * scale)
+      local rw = math.max(1, rx2 - rx)
+      local rh = math.max(1, ry2 - ry)
 
-      -- Viewport Culling rápido
+      -- Viewport Culling O(1): renderiza apenas o que cabe na janela
       if rx + rw >= x and rx <= x + w and ry + rh >= y and ry <= y + h then
         draw_rect_safe(rx, ry, rw, rh, r.color)
       end
     end
   else
+    self:load_latest_image(false)
     local empty_box_w = math.min(560, w - 80)
     local empty_box_h = 160
     local e_x = x + math.floor((w - empty_box_w) / 2)
     local e_y = y + math.floor((h - empty_box_h) / 2)
+
     draw_rect_safe(e_x, e_y, empty_box_w, empty_box_h, { 14, 14, 14, 255 })
     draw_rect_safe(e_x, e_y, empty_box_w, 2, style.accent or { 38, 188, 95, 255 })
-    draw_text_safe(font, "CANVAS FORENSE DOXOADE (Captura Direta)", e_x + 20, e_y + 24, style.accent)
-    draw_text_safe(font, "• Pressione a tecla PrintScreen ou Win+Shift+S.", e_x + 20, e_y + 54, { 230, 230, 230, 255 })
+
+    draw_text_safe(font, "CANVAS FORENSE DOXOADE (Visualizador de Prints 1080p HD)", e_x + 20, e_y + 24, style.accent)
+    draw_text_safe(font, "• Tire um print com Win+Shift+S ou PrintScreen.", e_x + 20, e_y + 54, { 230, 230, 230, 255 })
     draw_text_safe(font, "• Pressione Ctrl+V para colar a imagem diretamente aqui.", e_x + 20, e_y + 78, { 56, 189, 248, 255 })
-    draw_text_safe(font, "• Pressione Ctrl+C para copiar a imagem de volta ao clipboard.", e_x + 20, e_y + 102, { 150, 150, 150, 255 })
+    draw_text_safe(font, "• Clique no botão [HD] em qualquer card do documento para abrir aqui.", e_x + 20, e_y + 102, { 150, 150, 150, 255 })
   end
-end
-
--- =============================================================================
--- AUTO-THUMBNAIL GENERATOR (integração 19c -> 19a)
--- =============================================================================
-local function auto_generate_thumbnail(img_path)
-  if not img_path then return end
-  local user_dir = USERDIR or "."
-  local sep = PATHSEP or "/"
-  local cache_dir = user_dir .. sep .. ".doxoade" .. sep .. "canvas_cache"
-  local gen_script = cache_dir .. sep .. "auto_thumb_gen.py"
-  local sidecar = img_path:gsub("%.png$", ".thumb.rlebin")
-  
-  -- Só gera se o sidecar não existe ou é mais antigo que a imagem
-  local sidecar_info = system.get_file_info(sidecar)
-  local img_info = system.get_file_info(img_path)
-  if sidecar_info and img_info and sidecar_info.modified >= img_info.modified then
-    return -- já existe e é fresco
-  end
-  
-  local py_code = [[
-import sys
-from pathlib import Path
-try:
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
-    from doxoade.tools.image_systems import ThumbnailEngine, RleCodec
-    from PIL import Image
-    img_path, out_path = sys.argv[1], sys.argv[2]
-    with Image.open(img_path) as img:
-        img = img.convert("RGB")
-        ow, oh = img.size
-        thumb = img.resize((60, 34), Image.Resampling.LANCZOS)
-        flat = list(thumb.getdata())
-    rects = RleCodec.build_runs(flat, 60, 34)
-    blob = RleCodec.encode_binary(60, 34, ow, oh, rects)
-    with open(out_path, "wb") as f:
-        f.write(blob)
-    print(f"[THUMB] {img_path} -> {len(rects)} rects, {len(blob)}B")
-except Exception as e:
-    print(f"[THUMB-ERR] {e}")
-]]
-  
-  local f_py = io.open(gen_script, "w")
-  if f_py then f_py:write(py_code); f_py:close() end
-  
-  local proj_dir = get_active_project_dir()
-  local venv_scripts, _ = detect_project_venv(proj_dir)
-  local py_exe = (venv_scripts and (venv_scripts .. "\\python.exe")) or "python"
-  
-  -- Assíncrono: não bloqueia o loop de UI
-  core.add_thread(function()
-    pcall(system.exec, string.format('"%s" "%s" "%s" "%s"', 
-      py_exe, gen_script, img_path, sidecar))
-    core.log("🖼️ [AUTO-THUMB] Sidecar gerado para: " .. img_path)
-  end)
-end
-
--- Hook: quando o 19c salva um print novo, dispara geração automática
-local original_paste = CanvasStudio.paste_clipboard_image
-CanvasStudio.paste_clipboard_image = function(self)
-  local result = original_paste(self)
-  -- Aguarda o arquivo existir (o 19c salva em background)
-  -- core.add_thread(function()
-  --   -- Aguarda o PNG existir no disco
-  --   for _ = 1, 30 do
-  --     coroutine.yield(0.1)
-  --     if system.get_file_info(dest_png) then
-  --       -- Dispara o gerador de sidecar (mesma lógica do 19a)
-  --       local sidecar = dest_png:gsub("%.png$", ".thumb.rlebin")
-  --       local gen_script = cache_dir .. sep .. "auto_thumb_gen_19c.py"
-  --       local py_code = string.format([[
-  -- import sys
-  -- from pathlib import Path
-  -- try:
-  --     sys.path.insert(0, %q)
-  --     from doxoade.tools.image_systems import ThumbnailEngine
-  --     engine = ThumbnailEngine(Path(%q))
-  --     res = engine.generate(Path(%q), preset="card")
-  --     print(f"[THUMB-19C] {res.status}")
-  -- except Exception as e:
-  --     print(f"[THUMB-19C-ERR] {e}")
-  -- ]], proj_dir, proj_dir, dest_png)
-        
-  --       local f_py = io.open(gen_script, "w")
-  --       if f_py then f_py:write(py_code); f_py:close() end
-        
-  --       local py_exe = (venv_scripts and (venv_scripts .. "\\python.exe")) or "python"
-  --       pcall(system.exec, string.format('"%s" "%s"', py_exe, gen_script))
-  --       core.log("🖼️ [19c] Sidecar RLE gerado automaticamente para o print.")
-  --       break
-  --     end
-  --   end
-  -- end)
-  return result
 end

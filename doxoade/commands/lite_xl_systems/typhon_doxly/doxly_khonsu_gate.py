@@ -23,18 +23,27 @@ except ImportError:
         BRIGHT = DIM = RESET_ALL = NORMAL = ""
 
 # Módulos pesados que são deferidos para não bloquear a criação da janela gráfica
-DEFERRED_STAGE_TEMPLATES = {
-    "10_forensic_engine.lua": 0.20,
-    "14_doxnote_panel.lua": 0.35,
-    "15_audit_highlighter.lua": 0.45,
-    "16_open_editors_dock.lua": 0.60,
-    "17_khonsu_coroutine.lua": 0.70,
-    "18_search_results_dock.lua": 0.85,
-    "19a_dox_image_inline.lua": 0.90,
-    "19b_terminal_console.lua": 0.95,
-    "19c_canvas_sdl2_studio.lua": 1.00,
-    "19d_bottom_shelf_hub.lua": 1.05,
+
+SHADOW_WEIGHTS = {
+    "00_header_and_logger.lua": 0.0,
+    "00_01_api_probe.lua": 0.1,
+    "00_02_api_guard.lua": 0.1,
+    "01_ipc_dispatcher.lua": 0.2,
+    "04_color_and_search_highlight.lua": 0.3,
+    "10_forensic_engine.lua": 0.6,      # Pesado: Telemetria
+    "15_audit_highlighter.lua": 0.7,    # Pesado: I/O de arquivo
+    "16_open_editors_dock.lua": 0.8,    # Luxo: UI
+    "19b_terminal_console.lua": 0.9,    # Luxo: Terminal
+    "19c_canvas_sdl2_studio.lua": 0.95, # Luxo: Canvas
+    "19d_bottom_shelf_hub.lua": 1.0,    # Luxo: Hub
 }
+
+def generate_shadow_boot_call(template_name: str) -> str:
+    weight = SHADOW_WEIGHTS.get(template_name, 0.5)
+    if weight <= 0.3:
+        return f'_doxoade_safe_boot("{template_name}", function()'
+    else:
+        return f'_doxoade_shadow_boot("{template_name}", {weight}, function()'
 
 @dataclass
 class TemplateSegment:
@@ -88,6 +97,47 @@ class TemplateSourceMap:
 class DoxlyKhonsuGate:
     """Portão de Validação e Compilação AOT Supervisionada do Khonsu."""
 
+    # ✅ CORREÇÃO: Dicionário movido para DENTRO da classe como atributo de classe
+   # DEFERRED_STAGE_TEMPLATES = {
+   #    "10_forensic_engine.lua": 0.15,
+   #    "14_doxnote_panel.lua": 0.30,
+   #    "15_audit_highlighter.lua": 0.45,
+   #    "16_open_editors_dock.lua": 0.60,
+   #    "17_khonsu_coroutine.lua": 0.75,
+   #    "18_search_results_dock.lua": 0.85,
+   #    "19a_dox_image_inline.lua": 0.90,
+   #    "19b_terminal_console.lua": 0.95,
+   #    "19c_canvas_sdl2_studio.lua": 1.00,
+   #    "19d_bottom_shelf_hub.lua": 1.05,
+   #    "20_split_comparator_and_tools.lua": 1.10,
+   # }
+    DEFERRED_STAGE_TEMPLATES = {}
+    
+    @classmethod
+    def resolve_unified_trace(cls, raw_file: str, line_no: int) -> Tuple[Path, int, str]:
+        """
+        🧭 SOURCE MAP RESOLVER: Mapeia uma linha do buffer compilado (khonsu_aot.lua ou init.lua)
+        de volta para o arquivo de template .lua original e sua linha relativa.
+        Retorna: (caminho_do_template, linha_relativa, nome_do_template)
+        """
+        from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+        t_dir = LiteXLPaths.get_template_dir()
+        templates = sorted([t for t in t_dir.glob("*.lua") if t.is_file()])
+        
+        # Se o arquivo citado já for um template real existente no disco:
+        target_path = Path(raw_file)
+        if target_path.exists() and target_path.suffix == ".lua":
+            return target_path, line_no, target_path.name
+
+        # Caso contrário, reconstruímos o Source Map para localizar a fatia exata
+        _, source_map = cls.assemble_unified_buffer(templates)
+        name, file_path, rel_line = source_map.resolve(line_no)
+        
+        if file_path and file_path.exists():
+            return file_path, rel_line, name or file_path.name
+        
+        return target_path, line_no, raw_file
+
     @classmethod
     def assemble_unified_buffer(cls, templates: List[Path]) -> Tuple[str, TemplateSourceMap]:
         source_map = TemplateSourceMap()
@@ -100,7 +150,15 @@ class DoxlyKhonsuGate:
             'local core = rawget(_G, "core") or (pcall(require, "core") and require("core") or nil)',
             "",
             "rawset(_G, '_DOXOADE_BOOT_REPORT', { total = 0, passed = 0, failed = 0, quarantined = 0, modules = {} })",
+            "rawset(_G, '_CURRENT_BOOT_MODULE', 'init')",
+            "",
+            "-- Hook para o Ghost Tracer saber qual módulo está carregando",
+            "rawset(_G, '_DOXOADE_SET_CURRENT_MODULE', function(name)",
+            "  rawset(_G, '_CURRENT_BOOT_MODULE', name)",
+            "end)",
+            "",
             "local function _doxoade_safe_boot(name, fn)",
+            "  rawset(_G, '_DOXOADE_SET_CURRENT_MODULE', name)",
             "  local report = rawget(_G, '_DOXOADE_BOOT_REPORT')",
             "  report.total = report.total + 1",
             "  local t0 = os.clock()",
@@ -143,13 +201,13 @@ class DoxlyKhonsuGate:
             content_lines = content.splitlines()
             header_comment = f"-- >>> [TEMPLATE: {tf.name}] >>>"
             
-            # Aplica staging assíncrono para templates secundários pesados
-            if tf.name in DEFERRED_STAGE_TEMPLATES:
-                delay = DEFERRED_STAGE_TEMPLATES[tf.name]
+            # ✅ Agora acessa corretamente via cls.
+            if tf.name in cls.DEFERRED_STAGE_TEMPLATES:
+                delay = cls.DEFERRED_STAGE_TEMPLATES[tf.name]
                 boot_open = f'_doxoade_staged_boot("{tf.name}", {delay}, function()'
             else:
                 boot_open = f'_doxoade_safe_boot("{tf.name}", function()'
-
+            
             buffer_lines.append(header_comment)
             buffer_lines.append(boot_open)
             code_start_line = len(buffer_lines) + 1
@@ -159,7 +217,23 @@ class DoxlyKhonsuGate:
             buffer_lines.append(f"-- <<< [END TEMPLATE: {tf.name}] <<<")
             buffer_lines.append("")
 
+        map_lines = ["rawset(_G, '_DOXOADE_SOURCE_MAP', {"]
+        for seg in source_map.segments:
+            map_lines.append(f'  {{ name = "{seg.name}", start_line = {seg.start_line}, end_line = {seg.end_line} }},')
+        map_lines.append("})\n")
+        buffer_lines.extend(map_lines)
+        
         unified_source = "\n".join(buffer_lines)
+        
+        # 💾 Snapshot Persistente para o mody show não dar "does not exist":
+        try:
+            from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+            diag_dir = LiteXLPaths.get_user_dir() / ".doxoade" / "diagnostics"
+            diag_dir.mkdir(parents=True, exist_ok=True)
+            (diag_dir / "last_preflight_aot.lua").write_text(unified_source, encoding="utf-8")
+        except Exception:
+            pass
+
         return unified_source, source_map
 
     @classmethod
