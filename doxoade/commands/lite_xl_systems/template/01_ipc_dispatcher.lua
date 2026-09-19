@@ -18,6 +18,21 @@ local ipc_processing_file = user_dir .. sep .. ".ipc_processing"
 local session_file = doxoade_dir .. sep .. "sovereign_session.lua"
 local last_proj_file = doxoade_dir .. sep .. "last_project.txt"
 
+local function safe_restore_session(session_data)
+  for _, filepath in ipairs(session_data.open_files or {}) do
+    local ok, err = pcall(function()
+      if system.get_file_info(filepath) then  -- ← verificação antes de abrir
+        core.open_doc(filepath)
+      else
+        core.log("⚠️ [SESSION] Arquivo não encontrado, ignorando: " .. filepath)
+      end
+    end)
+    if not ok then
+      core.log("⚠️ [SESSION] Falha ao restaurar: " .. tostring(err))
+    end
+  end
+end
+
 -- =============================================================================
 -- 1. AUXILIARES DE NAVEGAÇÃO DE NÓS (LEAVES)
 -- =============================================================================

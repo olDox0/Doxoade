@@ -101,12 +101,15 @@ local Profiler = {
     tabs_ms = 0.0,
     body_ms = 0.0,
     gutter_ms = 0.0,
+    tree_ms = 0.0,
+    status_ms = 0.0,
     rencache_ms = 0.0,
   },
   gc_memory_kb = collectgarbage("count"),
   gc_prev_kb = collectgarbage("count"),
   gc_growth_rate_kbs = 0.0,
   boot_timestamp = os.date("%Y-%m-%d %H:%M:%S"),
+  _last_subsystem_reset = os.clock(),
 }
 rawset(_G, "_DOXOADE_PROFILER", Profiler)
 
@@ -226,23 +229,98 @@ if original_draw_line_gutter then
 end
 
 -- =============================================================================
--- 🖼️ SONDAS DO LOOP PRINCIPAL (RootView:draw & core.step)
+-- 🖼️ SONDAS DO LOOP PRINCIPAL (RootView:draw & Subsistemas com EMA)
 -- =============================================================================
+local _frame_tabs_ms = 0.0
+local _frame_body_ms = 0.0
+local _frame_gutter_ms = 0.0
+local _frame_tree_ms = 0.0
+local _frame_status_ms = 0.0
+
+if original_draw_tabs then
+  Node.draw_tabs = function(self, ...)
+    local t0 = os.clock()
+    local res = original_draw_tabs(self, ...)
+    _frame_tabs_ms = _frame_tabs_ms + ((os.clock() - t0) * 1000)
+    return res
+  end
+end
+
+if original_draw_line_body then
+  DocView.draw_line_body = function(self, ...)
+    local t0 = os.clock()
+    local res = original_draw_line_body(self, ...)
+    _frame_body_ms = _frame_body_ms + ((os.clock() - t0) * 1000)
+    return res
+  end
+end
+
+if original_draw_line_gutter then
+  DocView.draw_line_gutter = function(self, ...)
+    local t0 = os.clock()
+    local res = original_draw_line_gutter(self, ...)
+    _frame_gutter_ms = _frame_gutter_ms + ((os.clock() - t0) * 1000)
+    return res
+  end
+end
+
+-- Sonda para TreeView (Árvore de Arquivos lateral)
+pcall(function()
+  local TreeView = require "plugins.treeview" or require "core.treeview"
+  if TreeView and TreeView.draw then
+    local orig_tree_draw = TreeView.draw
+    TreeView.draw = function(self, ...)
+      local t0 = os.clock()
+      local res = orig_tree_draw(self, ...)
+      _frame_tree_ms = _frame_tree_ms + ((os.clock() - t0) * 1000)
+      return res
+    end
+  end
+end)
+
+-- Sonda para StatusView (Barra de status e badges inferiores)
+pcall(function()
+  local StatusView = require "core.statusview"
+  if StatusView and StatusView.draw then
+    local orig_status_draw = StatusView.draw
+    StatusView.draw = function(self, ...)
+      local t0 = os.clock()
+      local res = orig_status_draw(self, ...)
+      _frame_status_ms = _frame_status_ms + ((os.clock() - t0) * 1000)
+      return res
+    end
+  end
+end)
+
 local original_rootview_draw = RootView.draw
 function RootView:draw(...)
+  _frame_tabs_ms = 0.0
+  _frame_body_ms = 0.0
+  _frame_gutter_ms = 0.0
+  _frame_tree_ms = 0.0
+  _frame_status_ms = 0.0
+
   local t0 = os.clock()
   original_rootview_draw(self, ...)
   local t_draw_total = (os.clock() - t0) * 1000
 
-  Profiler.cycle.last_draw_ms = t_draw_total
-  local measured = Profiler.subsystems.tabs_ms + Profiler.subsystems.body_ms + Profiler.subsystems.gutter_ms
-  Profiler.subsystems.rencache_ms = math.max(0, t_draw_total - measured)
+  -- Decomposição de todos os componentes medidos
+  local measured = _frame_tabs_ms + _frame_body_ms + _frame_gutter_ms + _frame_tree_ms + _frame_status_ms
+  local frame_gpu = math.max(0, t_draw_total - measured)
 
+  -- Média móvel exponencial (EMA - 70/30) suave e contínua
+  Profiler.subsystems.tabs_ms = math.floor((Profiler.subsystems.tabs_ms * 0.7 + _frame_tabs_ms * 0.3) * 100) / 100
+  Profiler.subsystems.body_ms = math.floor((Profiler.subsystems.body_ms * 0.7 + _frame_body_ms * 0.3) * 100) / 100
+  Profiler.subsystems.gutter_ms = math.floor((Profiler.subsystems.gutter_ms * 0.7 + _frame_gutter_ms * 0.3) * 100) / 100
+  Profiler.subsystems.tree_ms = math.floor((Profiler.subsystems.tree_ms * 0.7 + _frame_tree_ms * 0.3) * 100) / 100
+  Profiler.subsystems.status_ms = math.floor((Profiler.subsystems.status_ms * 0.7 + _frame_status_ms * 0.3) * 100) / 100
+  Profiler.subsystems.rencache_ms = math.floor((Profiler.subsystems.rencache_ms * 0.7 + frame_gpu * 0.3) * 100) / 100
+
+  Profiler.cycle.last_draw_ms = t_draw_total
   Profiler.frame_count = Profiler.frame_count + 1
   Profiler.total_draw_ms = (Profiler.total_draw_ms or 0) + t_draw_total
   Profiler.last_draw_time = os.clock()
 
-  -- Amostra instantânea para o cálculo de percentis
   table.insert(Profiler.frame_samples_1s, t_draw_total)
 
   local target_fps = config.fps or 60
@@ -300,6 +378,12 @@ local function extract_safe_thread_id(fn, target)
   end
   local info = debug.getinfo(fn, "Sl")
   if info and info.short_src then
+    local src = tostring(info.short_src):lower():gsub("\\", "/")
+    -- Se a thread nasceu no núcleo nativo do Lite XL (data/core/init.lua ou core/init.lua)
+    if src:find("/core/init%.lua$") or src:find("^core/init%.lua$") or src:find("data/core/") then
+      return string.format("core_kernel:L%d", info.linedefined or 0)
+    end
+
     local fname = info.short_src:match("[^/\\]+$") or info.short_src
     return string.format("%s:L%d", fname, info.linedefined or 0)
   end
@@ -383,6 +467,23 @@ local function export_boot_telemetry()
     f:write(string.format('  "total_boot_ms": %.2f,\n', total_ms))
     f:write(string.format('  "total_boot_kb": %.2f,\n', total_kb))
     f:write('  "modules": [\n' .. table.concat(entries, ",\n") .. '\n  ]\n}\n')
+    local reported_draw_ms = (Profiler.cycle.avg_draw_ms and Profiler.cycle.avg_draw_ms > 0)
+                              and Profiler.cycle.avg_draw_ms
+                              or (Profiler.cycle.last_draw_ms or 0.0)
+    f:write('  "cycle": {\n')
+    f:write(string.format('    "step_logic_ms": %.2f,\n', Profiler.cycle.avg_step_logic_ms or 0.0))
+    f:write(string.format('    "draw_ms": %.2f,\n', reported_draw_ms))
+    f:write(string.format('    "last_draw_ms": %.2f,\n', Profiler.cycle.last_draw_ms or 0.0))
+    f:write(string.format('    "step_total_ms": %.2f\n', Profiler.cycle.step_total_ms or 0.0))
+    f:write('  },\n')
+    f:write('  "subsystems": {\n')
+    f:write(string.format('    "tabs_ms": %.2f,\n', Profiler.subsystems.tabs_ms or 0.0))
+    f:write(string.format('    "body_ms": %.2f,\n', Profiler.subsystems.body_ms or 0.0))
+    f:write(string.format('    "gutter_ms": %.2f,\n', Profiler.subsystems.gutter_ms or 0.0))
+    f:write(string.format('    "tree_ms": %.2f,\n', Profiler.subsystems.tree_ms or 0.0))
+    f:write(string.format('    "status_ms": %.2f,\n', Profiler.subsystems.status_ms or 0.0))
+    f:write(string.format('    "rencache_ms": %.2f\n', Profiler.subsystems.rencache_ms or 0.0))
+    f:write('  },\n')
     f:flush()
     f:close()
   end
@@ -431,7 +532,11 @@ local function export_profiler_telemetry()
     f:write(string.format('  "frame_ms": %.2f,\n', Profiler.percentiles.max_ms or 0.0))
     f:write('  "cycle": {\n')
     f:write(string.format('    "step_logic_ms": %.2f,\n', Profiler.cycle.avg_step_logic_ms or 0.0))
-    f:write(string.format('    "draw_ms": %.2f,\n', Profiler.cycle.avg_draw_ms or 0.0))
+    local reported_draw_ms = (Profiler.cycle.avg_draw_ms and Profiler.cycle.avg_draw_ms > 0)
+                              and Profiler.cycle.avg_draw_ms
+                              or (Profiler.cycle.last_draw_ms or 0.0)
+    f:write(string.format('    "draw_ms": %.2f,\n', reported_draw_ms))
+    --f:write(string.format('    "draw_ms": %.2f,\n', Profiler.cycle.avg_draw_ms or 0.0))
     f:write(string.format('    "step_total_ms": %.2f\n', Profiler.cycle.step_total_ms or 0.0))
     f:write('  },\n')
     f:write('  "percentiles": {\n')
@@ -522,10 +627,10 @@ core.add_thread(function()
       top_thread_ms = math.floor(top_thread_cpu * 100) / 100,
     })
 
-    Profiler.subsystems.tabs_ms = 0.0
-    Profiler.subsystems.body_ms = 0.0
-    Profiler.subsystems.gutter_ms = 0.0
-    Profiler.subsystems.rencache_ms = 0.0
+    -- Profiler.subsystems.tabs_ms = 0.0
+    -- Profiler.subsystems.body_ms = 0.0
+    -- Profiler.subsystems.gutter_ms = 0.0
+    -- Profiler.subsystems.rencache_ms = 0.0
 
     -- Exporta para o disco a cada 2 segundos para cortar I/O e alocações pela metade
     if flush_timer >= 2 then
@@ -537,4 +642,26 @@ end)
 
 if core.log then
   core.log("🦅 [CHRONOS V3] Telemetria temporal e Ring Buffer de 120s ativos.")
+end
+
+Profiler.gc_by_module = {}
+Profiler._last_gc_total = collectgarbage("count")
+
+-- Dentro do hook de boot (_doxoade_safe_boot):
+local function _doxoade_safe_boot(name, fn)
+    local mem_before = collectgarbage("count")
+    local ok, err = pcall(fn)
+    local mem_after = collectgarbage("count")
+    local mem_delta = mem_after - mem_before
+    
+    if Profiler.gc_by_module[name] then
+        Profiler.gc_by_module[name].total_kb = Profiler.gc_by_module[name].total_kb + mem_delta
+        Profiler.gc_by_module[name].calls = Profiler.gc_by_module[name].calls + 1
+    else
+        Profiler.gc_by_module[name] = {
+            total_kb = mem_delta,
+            calls = 1,
+            peak_kb = mem_delta
+        }
+    end
 end

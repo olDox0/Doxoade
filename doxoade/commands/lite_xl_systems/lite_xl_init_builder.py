@@ -299,43 +299,54 @@ class LiteXLInitBuilder:
         return errors
 
     @classmethod
-    def true_compile_check(cls, path: Union[str, Path]) -> Optional[str]:
-        """Compilação real via runtime Lua externo. None = OK."""
-        manager = LiteXLPaths._get_lua_manager()
-        if not manager:
-            return "NO_RUNTIME"
-
-        runtime = manager.find_lua_runtime()
-        if not runtime:
-            return "NO_RUNTIME"
-
-        exe_path, version = runtime
-        clean_path = str(path).replace("\\", "/").replace('"', '\\"')
-
-        probe = (
-            f'local f, err = loadfile("{clean_path}") '
-            f'if not f then '
-            f'  io.stderr:write(tostring(err)) '
-            f'  os.exit(1) '
-            f'else '
-            f'  os.exit(0) '
-            f'end'
-        )
-
+    def true_compile_check(cls, path: Path) -> Optional[str]:
+        """
+        Validação real via runtime Lua. Retorna None se OK, ou mensagem de erro mapeada.
+        """
+        from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+        
+        if not path.exists():
+            return f"Arquivo inexistente: {path}"
+        
+        lua_info = LiteXLPaths.lua_runtime_info()
+        if not lua_info:
+            return "NO_RUNTIME"  # Sentinel: sem runtime, pula validação
+        
+        lua_exe, _ = lua_info
+        
         try:
-            res = subprocess.run(
-                [str(exe_path), "-e", probe],
+            result = subprocess.run(
+                [lua_exe, "-e", f"local f, err = loadfile({repr(str(path))}); if not f then io.stderr:write(tostring(err)); os.exit(1) end"],
                 capture_output=True,
                 text=True,
-                timeout=5,
-                stdin=subprocess.DEVNULL,
+                timeout=10,
+                encoding="utf-8",
+                errors="replace",
             )
-            if res.returncode != 0:
-                err_msg = (res.stderr or res.stdout).strip()
-                return err_msg or "Erro de compilação desconhecido"
-            return None
+            
+            if result.returncode != 0:
+                raw_error = result.stderr.strip()
+                
+                # Tenta mapear via Source Map se for init.lua
+                if "init.lua" in str(path) or "khonsu" in str(path):
+                    try:
+                        from doxoade.commands.lite_xl_systems.typhon_doxly.doxly_khonsu_gate import DoxlyKhonsuGate
+                        t_dir = LiteXLPaths.get_template_dir()
+                        templates = sorted([t for t in t_dir.glob("*.lua") if t.is_file()])
+                        _, source_map = DoxlyKhonsuGate.assemble_unified_buffer(templates)
+                        mapped = DoxlyKhonsuGate._resolve_compiler_error(raw_error, source_map, templates)
+                        return mapped["display"]
+                    except Exception:
+                        pass
+                
+                return raw_error
+            
+            return None  # OK
+        
+        except subprocess.TimeoutExpired:
+            return "Timeout na validação (>10s)"
         except Exception as e:
-            return f"Falha na execução do probe de runtime: {e}"
+            return f"Falha na validação: {e}"
 
     @classmethod
     def verify_templates(cls) -> Dict[str, Any]:

@@ -6,6 +6,12 @@ Sistema - S./Ss.
 
 ## Desenvolvimento:
 este é o novo protocolo simplificado e sucinto de desenvolveimento do doxoade. basicamente outros protocolos são muito estenço e detalhados desnecessariamente, então protocolo Novissimo vai lidar com esta direção.
+0. Complexidade: a complexidade é determinada da seguinte forma:
+  0.0. Thirdpaty: se o sistema é desenvolvido por terceiros. ouseja, existe grau de adaptação com todo aparato do software.
+  0.1. Devflow: se a complexidade interfere no worflow de desenvolvimento, ouseja, conceber, placeholder, implementação, diagnostico, atualização.
+  0.2. Rabbit Hole: se a complexidade da API, versão e dependencia acaba trazendo um desenvolvimento demorado de features.
+  0.3. Sensibilidade: Sistemas de performace podem pesar conforme as features implementadas, geralmente prog. orientada a eventos tem essa caracteristica.
+  0.4. Revisitar: revisitar features para atualiza-las todo tempo por causar de outro contra tempo.
 1. planejamento: o planejarmento deve se basear no contexto da implementação, ouseja Sistema operacional, ferramentas usadas no contexto, como python 3.12, e objetivo e compatibilidade.
   1.0. seguir o protocolo ProDeNov obrigatoriamente. a interpretação caso não implicita deve ser feita a decisão por parte do leitor, e a viabilidade da aplicação do protocolo pode ser questionado para critica construtiva e evoulução continua.
   1.1. faça brainstoming do que é desejado e depois analise de viabilidade, manutenção e escalabilidade posteriormente

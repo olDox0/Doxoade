@@ -1,9 +1,10 @@
 -- doxoade/commands/lite_xl_systems/template/11_tab_context_menu.lua
 --[[
-  📋 DOXOADE TAB CONTEXT MENU (Menu Flutuante Soberano de Abas)
-  - Copia caminhos com 1 clique: Nome, Caminho Relativo e Caminho Absoluto.
-  - Abertura de arquivo no gerenciador de arquivos nativo do SO.
-  - Invalidação automática de caminhos cacheados e suporte a temas do Lite XL.
+ DOXOADE TAB CONTEXT MENU (Menu Flutuante Soberano de Abas) V2
+- Copia caminhos com 1 clique: Nome, Caminho Relativo e Caminho Absoluto.
+- Proj. Address: relativo a partir da raiz do projeto MAIS LONGO na TreeView.
+- Invalidação automática de cache ao adicionar/remover projetos.
+- Abertura de arquivo no gerenciador de arquivos nativo do SO.
 ]]
 local core = require "core"
 local style = require "core.style"
@@ -20,6 +21,9 @@ rawset(_G, "DOXOADE_TAB_CONTEXT_LOADED", true)
 local rencache = rawget(_G, "rencache") or (pcall(require, "core.rencache") and require("core.rencache") or nil)
 local native_renderer = rawget(_G, "renderer") or (pcall(require, "renderer") and require("renderer") or nil)
 
+-- =============================================================================
+-- 🛠️ UTILITÁRIOS DE RENDERIZAÇÃO (declarados UMA VEZ)
+-- =============================================================================
 local function draw_rect_safe(x, y, w, h, color)
   if rencache and rencache.draw_rect then
     rencache.draw_rect(x, y, w, h, color)
@@ -37,140 +41,114 @@ local function draw_text_safe(font, text, x, y, color)
 end
 
 -- =============================================================================
--- 📂 RESOLUÇÃO SOBERANA DE CAMINHOS (Única e Blindada contra Windows Case/Slashes)
+-- 📂 RESOLUÇÃO SOBERANA DE CAMINHOS (V2 — Best-Root + Cache Invalidation)
 -- =============================================================================
 local _path_cache = {}
-local _last_project_count = 0
+local _last_project_signature = ""
 
-local function resolve_active_paths(view)
-  view = view or core.active_view
-  if not view or not view.doc or not view.doc.filename then return nil end
-  local raw = view.doc.filename
-
-  local current_proj_count = core.project_directories and #core.project_directories or 0
-  if current_proj_count ~= _last_project_count then
-    _path_cache = {}
-    _last_project_count = current_proj_count
-  end
-
-  if _path_cache[raw] then return _path_cache[raw] end
-
-  local abs = system.absolute_path(raw) or raw
-  local clean_abs = abs:gsub("\\", "/")
-  local clean_abs_lower = clean_abs:lower()
-  local fname = raw:match("[/\\]([^/\\]+)$") or raw
-
-  -- Coleta todas as raízes de projeto ativas
-  local project_roots = {}
+-- Invalida o cache sempre que a lista de projetos muda
+local function _invalidate_path_cache_if_needed()
+  local sig = ""
   if core.project_directories then
     for _, p in ipairs(core.project_directories) do
-      local p_str = type(p) == "table" and (p.path or p.name) or tostring(p)
-      if p_str and p_str ~= "" then
-        table.insert(project_roots, (system.absolute_path(p_str) or p_str):gsub("\\", "/"):gsub("/+$", ""))
-      end
+      sig = sig .. tostring(type(p) == "table" and (p.path or p.name) or p or "") .. "|"
     end
   end
-  if core.project_dir then
-    local p_str = tostring(core.project_dir)
-    table.insert(project_roots, (system.absolute_path(p_str) or p_str):gsub("\\", "/"):gsub("/+$", ""))
-  end
-
-  -- Encontra o projeto que é pai do arquivo atual
-  local best_root = nil
-  local best_len = 0
-  for _, root in ipairs(project_roots) do
-    local root_lower = root:lower()
-    if clean_abs_lower:sub(1, #root_lower) == root_lower then
-      if #root > best_len then
-        best_root = root
-        best_len = #root
-      end
-    end
-  end
-
-  -- Extrai o caminho relativo limpo
-  local rel = clean_abs
-  if best_root and best_len > 0 then
-    rel = clean_abs:sub(best_len + 1):gsub("^/", "")
-  end
-  if rel == "" then rel = fname end
-
-  local clean_native_abs = abs:gsub("[/\\]", PATHSEP or "\\")
-  local clean_native_rel = rel:gsub("[/\\]", PATHSEP or "\\")
-  local dir = clean_native_abs:match("^(.*)[/\\]") or clean_native_abs
-
-  local result = {
-    filename = fname,
-    relative = clean_native_rel,
-    absolute = clean_native_abs,
-    dir = dir,
-    raw = abs
-  }
-
-  _path_cache[raw] = result
-  return result
-end
-
-local function open_in_file_manager(path)
-  if system.show_in_file_manager then
-    system.show_in_file_manager(path)
-    return
-  end
-  if PLATFORM == "Windows" then
-    system.exec('explorer.exe /select,"' .. tostring(path):gsub('"', '""') .. '"')
-  else
-    local dir = tostring(path):match("^(.*)[/\\]") or path
-    system.exec("xdg-open '" .. tostring(dir):gsub("'", "'\\''") .. "'")
+  if sig ~= _last_project_signature then
+    _path_cache = {}
+    _last_project_signature = sig
   end
 end
 
--- =============================================================================
--- UTILITÁRIOS DE RENDERIZAÇÃO E SISTEMA
--- =============================================================================
-local function draw_rect_safe(x, y, w, h, color)
-  if rencache and rencache.draw_rect then
-    rencache.draw_rect(x, y, w, h, color)
-  elseif native_renderer and native_renderer.draw_rect then
-    native_renderer.draw_rect(x, y, w, h, color)
-  end
-end
-
-local function draw_text_safe(font, text, x, y, color)
-  if rencache and rencache.draw_text then
-    rencache.draw_text(font, text, x, y, color)
-  elseif native_renderer and native_renderer.draw_text then
-    native_renderer.draw_text(font, text, x, y, color)
-  end
-end
-
-local _path_cache = {}
 local function resolve_active_paths(view)
-  view = view or core.active_view
-  if not view or not view.doc or not view.doc.filename then return nil end
-  local raw = view.doc.filename
-  if _path_cache[raw] then return _path_cache[raw] end
+    view = view or core.active_view
+    if not view or not view.doc or not view.doc.filename then return nil end
 
-  local abs = system.absolute_path(raw) or raw
-  local clean_abs = abs:gsub("[/\\]", PATHSEP or "\\")
-  local fname = raw:match("[/\\]([^/\\]+)$") or raw
-  local rel = abs:gsub("\\", "/")
+    _invalidate_path_cache_if_needed()
 
-  if core.project_directories then
-    for _, proj in ipairs(core.project_directories) do
-      local ppath = tostring(type(proj) == "table" and (proj.path or proj.name) or proj or ""):gsub("\\", "/")
-      if ppath ~= "" and abs:sub(1, #ppath) == ppath then
-        rel = abs:sub(#ppath + 1):gsub("^/", "")
-        break
-      end
+    local raw = view.doc.filename
+    if _path_cache[raw] then return _path_cache[raw] end
+
+    local abs = system.absolute_path(raw) or raw
+    local clean_abs = abs:gsub("\\", "/"):lower()
+    local fname = raw:match("[/\\]([^/\\]+)$") or raw
+
+    -- Coleta todas as raízes de projeto normalizadas
+    local project_roots = {}
+    if core.project_directories then
+        for _, proj in ipairs(core.project_directories) do
+            local p_str = type(proj) == "table" and (proj.path or proj.name) or tostring(proj or "")
+            if p_str and p_str ~= "" then
+                local clean_p = (system.absolute_path(p_str) or p_str):gsub("\\", "/"):lower():gsub("/+$", "")
+                if clean_p ~= "" then
+                    table.insert(project_roots, clean_p)
+                end
+            end
+        end
     end
-  end
-  rel = rel:gsub("/", PATHSEP or "\\")
-  local dir = clean_abs:match("^(.*)[/\\]") or clean_abs
-  local result = { filename = fname, relative = rel, absolute = clean_abs, dir = dir, raw = abs }
-  _path_cache[raw] = result
-  return result
+    
+    -- DEBUG: Log das raízes encontradas
+    if core.log then
+        core.log(string.format("🔍 [Proj.Address] Raízes de projeto: %d", #project_roots))
+        for i, root in ipairs(project_roots) do
+            core.log(string.format("   Raiz %d: %s", i, root))
+        end
+        core.log(string.format("🔍 [Proj.Address] Arquivo: %s", clean_abs))
+    end
+
+    -- Encontra o projeto raiz MAIS LONGO que contém o arquivo
+    local best_root = nil
+    local best_len = 0
+    for _, root in ipairs(project_roots) do
+        if clean_abs:sub(1, #root) == root then
+            if #root > best_len then
+                best_root = root
+                best_len = #root
+            end
+        end
+    end
+
+    -- DEBUG: Log do best_root encontrado
+    if core.log then
+        if best_root then
+            core.log(string.format("🔍 [Proj.Address] Best root: %s (len=%d)", best_root, best_len))
+        else
+            core.log("⚠️ [Proj.Address] Nenhum projeto raiz encontrado para este arquivo")
+        end
+    end
+
+    -- Calcula o relativo
+    local rel = clean_abs
+    if best_root and best_len > 0 then
+        rel = clean_abs:sub(best_len + 1):gsub("^/", "")
+    end
+    if rel == "" then rel = fname end
+
+    -- DEBUG: Log do relativo calculado
+    if core.log then
+        core.log(string.format("🔍 [Proj.Address] Relativo calculado: %s", rel))
+    end
+
+    -- Converte para separador nativo do SO
+    local clean_native_abs = abs:gsub("[/\\]", PATHSEP or "\\")
+    local clean_native_rel = rel:gsub("/", PATHSEP or "\\")
+    local dir = clean_native_abs:match("^(.*)[/\\]") or clean_native_abs
+
+    local result = {
+        filename = fname,
+        relative = clean_native_rel,
+        absolute = clean_native_abs,
+        dir = dir,
+        raw = abs
+    }
+
+    _path_cache[raw] = result
+    return result
 end
 
+-- =============================================================================
+-- 🖥️ ABERTURA NO EXPLORER
+-- =============================================================================
 local function open_in_file_manager(path)
   if system.show_in_file_manager then
     system.show_in_file_manager(path)
@@ -184,6 +162,9 @@ local function open_in_file_manager(path)
   end
 end
 
+-- =============================================================================
+-- 📋 MENU FLUTUANTE
+-- =============================================================================
 local FloatingMenu = {
   visible = false,
   x = 0, y = 0, w = 260, h = 100,
@@ -217,7 +198,7 @@ local function build_menu_items(paths)
       end
     },
     {
-      text = "📍 Total Address : " .. paths.absolute,
+      text = " Total Address : " .. paths.absolute,
       action = function()
         system.set_clipboard(paths.absolute)
         core.log("Copiado (Total Address): " .. paths.absolute)
@@ -358,7 +339,6 @@ function Node:on_mouse_pressed(button, x, y, clicks)
       self:set_active_view(view)
       core.set_active_view(view)
 
-      -- Fallback para menu de contexto nativo se disponível
       if contextmenu and contextmenu.show then
         local ok = pcall(contextmenu.show, contextmenu, x, y)
         if ok then return true end
@@ -367,7 +347,6 @@ function Node:on_mouse_pressed(button, x, y, clicks)
         if ok then return true end
       end
 
-      -- Menu Flutuante Soberano do Doxoade
       open_floating_menu(view, x, y)
       return true
     end
@@ -376,7 +355,7 @@ function Node:on_mouse_pressed(button, x, y, clicks)
 end
 
 -- =============================================================================
--- REGISTRO DE COMANDOS (Único bloco)
+-- REGISTRO DE COMANDOS
 -- =============================================================================
 command.add("core.docview", {
   ["doxoade:tab-copy-filename"] = function()

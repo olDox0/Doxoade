@@ -94,6 +94,60 @@ class TemplateSourceMap:
 
     #     return None, None, unified_line
 
+def resolve_compiler_error_to_template(error_msg: str, source_map, templates_dir: Path) -> str:
+    """
+    🔍 TRADUTOR DE ERROS: Converte 'init.lua:1535: erro' em '01_ipc_dispatcher.lua:42: erro'
+    """
+    # Tenta encontrar "init.lua:NUMERO" ou "algo.lua:NUMERO" na mensagem de erro
+    match = re.search(r"(?:init\.lua|khonsu_aot\.lua):(\d+):", error_msg)
+    if not match:
+        # Fallback: tenta achar qualquer número de linha no erro
+        match = re.search(r":(\d+):", error_msg)
+        
+    if not match:
+        return f"{Fore.RED}✖ Erro de compilação não mapeável:\n{error_msg}{Fore.RESET}"
+
+    unified_line = int(match.group(1))
+    
+    # Usa o Source Map para encontrar o arquivo original
+    template_name, template_path, original_line = source_map.resolve(unified_line)
+
+    if not template_path or not template_path.exists():
+        return (
+            f"{Fore.RED}✖ Erro na linha {unified_line} do init.lua unificado, "
+            f"mas o mapeamento para o template falhou.{Fore.RESET}\n"
+            f"Erro bruto: {error_msg}"
+        )
+
+    # Extrai o snippet do arquivo original
+    try:
+        lines = template_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        start = max(0, original_line - 3)
+        end = min(len(lines), original_line + 2)
+        
+        snippet_lines = []
+        for i in range(start, end):
+            prefix = f"{Fore.RED} >> {Fore.RESET}" if i == original_line else "    "
+            line_num = f"{Fore.YELLOW}{i + 1:4d}{Fore.RESET}"
+            snippet_lines.append(f"{prefix}{line_num} | {lines[i]}")
+            
+        snippet = "\n".join(snippet_lines)
+    except Exception:
+        snippet = f"{Fore.YELLOW}  [Falha ao ler o snippet do arquivo]{Fore.RESET}"
+
+    # Limpa a mensagem de erro para exibição
+    clean_error = error_msg.split(":", 2)[-1].strip() if ":" in error_msg else error_msg
+
+    return (
+        f"\n{Fore.RED}{Style.BRIGHT}🚨 ERRO DE SINTAXE DETECTADO NO TEMPLATE{Style.RESET_ALL}"
+        f"\n  {Fore.WHITE}📄 Arquivo:{Fore.RESET} {Fore.CYAN}{template_name}{Fore.RESET}"
+        f"\n  {Fore.WHITE}📍 Linha Original:{Fore.RESET} {Fore.YELLOW}{original_line}{Fore.RESET} (Linha {unified_line} no init.lua unificado)"
+        f"\n  {Fore.WHITE}⚠️ Mensagem:{Fore.RESET} {Fore.LIGHTRED_EX}{clean_error}{Fore.RESET}"
+        f"\n\n  {Fore.WHITE}Trecho do código:{Fore.RESET}"
+        f"\n{snippet}\n"
+        f"{Fore.RED}{'─' * 75}{Fore.RESET}\n"
+    )
+
 class DoxlyKhonsuGate:
     """Portão de Validação e Compilação AOT Supervisionada do Khonsu."""
 
@@ -255,107 +309,212 @@ class DoxlyKhonsuGate:
     @classmethod
     def compile_aot_supervisioned(
         cls,
-        target_mode: str = "production",
+        target_mode: str = "test",
         templates: Optional[List[Path]] = None,
         verbose: bool = True,
     ) -> Dict[str, Any]:
-        """Executa a compilação AOT com Pre-Flight Gatekeeper, Source Map e Triangulação."""
-        from doxoade.commands.lite_xl_systems.lite_xl_init_builder import LiteXLInitBuilder
+        """
+        Compilação AOT supervisionada com Mapeador Forense de Erros.
+        Retorna dict com: success, source, error, template_culprit, relative_line, snippet
+        """
         from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
-
+        
         if templates is None:
-            templates = LiteXLInitBuilder.get_template_files()
-
-        if verbose:
-            print(f"{Fore.CYAN}🛡️  [KHONSU GATE] Montando buffer unificado com Source Map ({len(templates)} templates)...{Fore.RESET}")
-
+            t_dir = LiteXLPaths.get_template_dir()
+            templates = sorted([t for t in t_dir.glob("*.lua") if t.is_file()])
+        
+        # 1. Monta o buffer unificado com Source Map
         unified_source, source_map = cls.assemble_unified_buffer(templates)
+        
+        # 2. Validação estática rápida (scanner de balanceamento)
+        from doxoade.commands.lite_xl_systems.lite_xl_init_builder import LiteXLInitBuilder
+        scan_errors = LiteXLInitBuilder.compile_scan_lua(unified_source)
+        if scan_errors:
+            # Tenta mapear o primeiro erro via Source Map
+            first_err = scan_errors[0]
+            mapped = cls._resolve_scan_error(first_err, source_map, templates)
+            return {
+                "success": False,
+                "error": mapped["display"],
+                "raw_error": first_err,
+                "template_culprit": mapped.get("template"),
+                "relative_line": mapped.get("line"),
+                "snippet": mapped.get("snippet"),
+                "source": unified_source,
+            }
+        
+        # 3. Compilação AOT real (se houver runtime Lua)
         lua_info = LiteXLPaths.lua_runtime_info()
-
         if not lua_info:
-            if verbose:
-                print(f"{Fore.YELLOW}⚠ [KHONSU GATE] Runtime LuaC não detectado. Acionando Plano B (Minificação Segura).{Fore.RESET}")
             return {
                 "success": True,
-                "opt_mode": "minified_text",
                 "source": unified_source,
-                "bytecode": None,
-                "error": None,
+                "opt_mode": "plain_no_runtime",
             }
-
+        
         lua_exe, lua_version = lua_info
-        temp_dir = LiteXLPaths.get_sandbox_dir() / ".khonsu_preflight"
-        temp_dir.mkdir(parents=True, exist_ok=True)
-
-        temp_lua = temp_dir / "khonsu_aot.lua"
-        temp_out = temp_dir / "khonsu_aot.luac"
-        temp_lua.write_text(unified_source, encoding="utf-8")
-
-        posix_src = temp_lua.as_posix()
-        posix_out = temp_out.as_posix()
-
-        compile_cmd = [
-            str(lua_exe),
-            "-e",
-            f'local f, err = loadfile("{posix_src}"); '
-            f'if not f then io.stderr:write("LOADFILE_ERR: " .. tostring(err)); os.exit(1) end; '
-            f'local dump_ok, code = pcall(string.dump, f); '
-            f'if not dump_ok then io.stderr:write("DUMP_ERR: " .. tostring(code)); os.exit(2) end; '
-            f'local out = io.open("{posix_out}", "wb"); '
-            f'if not out then io.stderr:write("WRITE_ERR: cannot open output file"); os.exit(3) end; '
-            f'out:write(code); out:flush(); out:close();'
-        ]
-
-        res = subprocess.run(compile_cmd, capture_output=True, text=True)
-
-        if res.returncode == 0 and temp_out.exists() and temp_out.stat().st_size > 0:
-            bytecode_bytes = temp_out.read_bytes()
+        
+        # Grava em arquivo temporário para compilação
+        import tempfile
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".lua", delete=False, encoding="utf-8"
+        ) as tmp:
+            tmp.write(unified_source)
+            tmp_path = Path(tmp.name)
+        
+        try:
+            # Compila para bytecode (validação real)
+            result = subprocess.run(
+                [lua_exe, "-e", f"local f, err = loadfile({repr(str(tmp_path))}); if not f then io.stderr:write(tostring(err)); os.exit(1) end"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                encoding="utf-8",
+                errors="replace",
+            )
+            
+            if result.returncode != 0:
+                raw_error = result.stderr.strip()
+                # 🧩 MÁGICA: Traduz init.lua:L1535 → 01_ipc_dispatcher.lua:42
+                mapped = cls._resolve_compiler_error(raw_error, source_map, templates)
+                
+                if verbose:
+                    print(f"\n{Fore.RED}{Style.BRIGHT}🚨 ERRO DE COMPILAÇÃO AOT DETECTADO{Style.RESET_ALL}")
+                    print(mapped["display"])
+                
+                return {
+                    "success": False,
+                    "error": mapped["display"],
+                    "raw_error": raw_error,
+                    "template_culprit": mapped.get("template"),
+                    "relative_line": mapped.get("line"),
+                    "snippet": mapped.get("snippet"),
+                    "source": unified_source,
+                }
+            
+            # Sucesso: lê o bytecode gerado
+            bytecode_path = tmp_path.with_suffix(".luac")
+            subprocess.run(
+                [lua_exe, "-e", f"local f = assert(loadfile({repr(str(tmp_path))})); local bf = io.open({repr(str(bytecode_path))}, 'wb'); bf:write(string.dump(f)); bf:close()"],
+                capture_output=True,
+                timeout=10,
+            )
+            
+            bytecode = bytecode_path.read_bytes() if bytecode_path.exists() else b""
+            
             if verbose:
-                print(f"{Fore.GREEN}✔ [KHONSU GATE] Compilação AOT Bytecode 100% Validada ({len(bytecode_bytes):,} bytes | {lua_version}).{Fore.RESET}")
-            temp_lua.unlink(missing_ok=True)
-            temp_out.unlink(missing_ok=True)
+                print(f"{Fore.GREEN}✔ [KHONSU GATE] Compilação AOT Bytecode 100% Validada "
+                      f"({len(bytecode):,} bytes | {lua_version}).{Fore.RESET}")
+            
             return {
                 "success": True,
-                "opt_mode": "bytecode",
                 "source": unified_source,
-                "bytecode": bytecode_bytes,
-                "error": None,
+                "bytecode": bytecode,
+                "opt_mode": "bytecode",
+                "lua_version": lua_version,
             }
+        
+        except subprocess.TimeoutExpired:
+            return {
+                "success": False,
+                "error": "Timeout na compilação AOT (>10s)",
+                "source": unified_source,
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Falha inesperada na compilação: {e}",
+                "source": unified_source,
+            }
+        finally:
+            tmp_path.unlink(missing_ok=True)
+            tmp_path.with_suffix(".luac").unlink(missing_ok=True)
 
-        raw_error = res.stderr.strip() or "Erro de compilação AOT desconhecido"
 
-        diag_log = LiteXLPaths.get_user_dir() / ".doxoade" / "diagnostics" / "khonsu_compile_error.log"
-        try:
-            diag_log.parent.mkdir(parents=True, exist_ok=True)
-            diag_log.write_text(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]\n{raw_error}\n", encoding="utf-8")
-        except Exception:
-            pass
-
-        # Extrai a linha do arquivo unificado (suporta formatos do Lua 5.4)
-        match = re.search(r"(?:khonsu_aot\.lua|string):(\d+):\s*(.*)", raw_error)
-        if not match:
-            match = re.search(r":(\d+):\s*(.*)", raw_error)
-
-        unified_line = int(match.group(1)) if match else 0
-        err_msg = match.group(2) if match else raw_error
-
-        template_name, template_path, relative_line = source_map.resolve(unified_line)
-        print(f"\n{Fore.RED}{Style.BRIGHT}✖ [KHONSU GATE REJECT] Falha na Compilação AOT Bytecode!{Style.RESET_ALL}")
-        print(f"  {Fore.WHITE}Erro do Compilador:{Fore.RESET} {Fore.LIGHTRED_EX}{err_msg}{Fore.RESET}")
-        if template_name and template_path:
-            print(f"  {Fore.WHITE}Template Culpado:{Fore.RESET} {Fore.CYAN}{template_name}{Fore.RESET} (Linha {relative_line})")
-            cls.render_culprit_snippet(template_path, relative_line)
-        else:
-            print(f"  {Fore.WHITE}Linha Unificada:{Fore.RESET} {unified_line}")
-
-        temp_lua.unlink(missing_ok=True)
-        temp_out.unlink(missing_ok=True)
+    # =============================================================================
+    # 🧩 MAPEADOR FORENSE DE ERROS (Apolo UX)
+    # =============================================================================
+    @classmethod
+    def _resolve_compiler_error(
+        cls,
+        error_msg: str,
+        source_map: "TemplateSourceMap",
+        templates: List[Path],
+    ) -> Dict[str, Any]:
+        """
+        Traduz 'init.lua:1535: cannot use ...' em '01_ipc_dispatcher.lua:42: cannot use ...'
+        com snippet do código original.
+        """
+        # Extrai número da linha do init.lua unificado
+        m = re.search(r"(?:init\.lua|khonsu_aot\.lua|tmp\w+\.lua):(\d+):", error_msg)
+        if not m:
+            m = re.search(r":(\d+):", error_msg)
+        
+        if not m:
+            return {
+                "display": f"{Fore.RED}✖ Erro de compilação não mapeável:\n{error_msg}{Fore.RESET}",
+                "template": None,
+                "line": 0,
+                "snippet": "",
+            }
+        
+        unified_line = int(m.group(1))
+        template_name, template_path, original_line = source_map.resolve(unified_line)
+        
+        # Limpa a mensagem (remove prefixo de arquivo)
+        clean_error = re.sub(r"^[^:]+:\d+:\s*", "", error_msg).strip()
+        
+        # Extrai snippet do arquivo original
+        snippet = ""
+        if template_path and template_path.exists():
+            try:
+                lines = template_path.read_text(encoding="utf-8", errors="replace").splitlines()
+                # Pula comentários para encontrar código executável real
+                target_line = original_line
+                for offset in range(0, 8):
+                    check = original_line + offset
+                    if check <= len(lines):
+                        content = lines[check - 1].strip()
+                        if content and not content.startswith("--"):
+                            target_line = check
+                            break
+                
+                start = max(1, target_line - 2)
+                end = min(len(lines), target_line + 2)
+                snippet_lines = []
+                for ln in range(start, end + 1):
+                    prefix = f"{Fore.RED} >> {Fore.RESET}" if ln == target_line else "    "
+                    num = f"{Fore.YELLOW}{ln:4d} |{Fore.RESET}"
+                    snippet_lines.append(f"{prefix}{num} {lines[ln - 1]}")
+                snippet = "\n".join(snippet_lines)
+            except Exception:
+                snippet = f"{Fore.YELLOW}  [Falha ao ler snippet]{Fore.RESET}"
+        
+        display = (
+            f"\n{Fore.RED}{Style.BRIGHT}🚨 ERRO DE SINTAXE NO TEMPLATE{Style.RESET_ALL}"
+            f"\n  {Fore.WHITE}📄 Arquivo:{Fore.RESET} {Fore.CYAN}{template_name or 'desconhecido'}{Fore.RESET}"
+            f"\n  {Fore.WHITE}📍 Linha:{Fore.RESET} {Fore.YELLOW}{original_line}{Fore.RESET} "
+            f"({Fore.LIGHTBLACK_EX}linha {unified_line} no init.lua unificado{Fore.RESET})"
+            f"\n  {Fore.WHITE}⚠️ Erro:{Fore.RESET} {Fore.LIGHTRED_EX}{clean_error}{Fore.RESET}"
+            f"\n\n  {Fore.WHITE}Trecho do código:{Fore.RESET}"
+            f"\n{snippet}"
+            f"\n{Fore.RED}{'─' * 75}{Fore.RESET}\n"
+        )
+        
         return {
-            "success": False,
-            "opt_mode": "fallback_minified",
-            "source": unified_source,
-            "bytecode": None,
-            "error": err_msg,
-            "template_culprit": template_name,
-            "relative_line": relative_line,
+            "display": display,
+            "template": template_name,
+            "line": original_line,
+            "snippet": snippet,
         }
+
+
+    @classmethod
+    def _resolve_scan_error(
+        cls,
+        error_msg: str,
+        source_map: "TemplateSourceMap",
+        templates: List[Path],
+    ) -> Dict[str, Any]:
+        """Versão simplificada para erros do scanner estático (compile_scan_lua)."""
+        return cls._resolve_compiler_error(error_msg, source_map, templates)

@@ -88,12 +88,12 @@ if syntax and syntax.items then
 end
 
 -- =============================================================================
--- 3. CONFIGURAÇÃO DE CORES & PALETAS
+-- 3. CONFIGURAÇÃO DE CORES & PALETAS (Solid Color Baking - Zero Alpha Thrashing)
 -- =============================================================================
 config.draw_indent_guides  = config.draw_indent_guides ~= false
-local INDENT_GUIDE_COLOR   = { 55, 52, 60, 130 }
-local INDENT_GUIDE_ACTIVE  = { 130, 125, 145, 240 }
-local HIGHLIGHT_BLUE       = { 0, 108, 255, 130 }
+local INDENT_GUIDE_COLOR   = { 42, 40, 48, 255 }    -- Sólido opaco (Cache Hit no rencache)
+local INDENT_GUIDE_ACTIVE  = { 88, 85, 98, 255 }    -- Sólido opaco (Cache Hit no rencache)
+local HIGHLIGHT_BLUE       = { 12, 55, 120, 255 }   -- Sólido opaco (Cache Hit no rencache)
 local GUTTER_DIVIDER_WIDTH = 3
 local GUTTER_DIVIDER_COLOR = { 115, 110, 130, 255 }
 local COLOR_DIRTY          = { 234, 179, 8, 255 }
@@ -247,16 +247,28 @@ local function parse_colors_in_line(line_text)
     end
   end
 
-  -- 3. Tabelas Lua { R, G, B } e { R, G, B, A } (CORRIGIDO: b restaurado, sem duplicar g)
-  for s, full_match in line_text:gmatch("()({%s*%d+%s*,%s*%d+%s*,%s*%d+[%s,%d]*})") do
+  -- 3. Tabelas Lua { R, G, B } e { R, G, B, A } (Suporta espaços, floats e inteiros)
+  for s, full_match in line_text:gmatch("()({%s*[%d%.]+%s*,%s*[%d%.]+%s*,%s*[%d%.]+[%s,%d%.]*})") do
     local inner = full_match:match("{(.-)}")
     if inner then
-      local r, g, b, a = inner:match("^(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*,?%s*(%d*)")
+      -- ⚡ CORREÇÃO: ^%s* aceita espaços após a chave { sem falhar
+      local r, g, b, a = inner:match("^%s*([%d%.]+)%s*,%s*([%d%.]+)%s*,%s*([%d%.]+)%s*,?%s*([%d%.]*)")
       if r and g and b then
         local nr, ng, nb = tonumber(r), tonumber(g), tonumber(b)
-        if nr <= 255 and ng <= 255 and nb <= 255 then
+        if nr and ng and nb then
+          -- Suporte a números normalizados 0.0-1.0 ou 0-255
+          nr = (nr <= 1.0 and nr > 0) and math.floor(nr * 255) or math.min(255, math.floor(nr))
+          ng = (ng <= 1.0 and ng > 0) and math.floor(ng * 255) or math.min(255, math.floor(ng))
+          nb = (nb <= 1.0 and nb > 0) and math.floor(nb * 255) or math.min(255, math.floor(nb))
+
           local na = 255
-          if a and a ~= "" then na = math.min(255, tonumber(a) or 255) end
+          if a and a ~= "" then
+            local num_a = tonumber(a)
+            if num_a then
+              na = (num_a <= 1.0) and math.floor(num_a * 255) or math.min(255, math.floor(num_a))
+            end
+          end
+
           results = results or {}
           table.insert(results, {
             col1 = s,
@@ -336,6 +348,19 @@ end
 -- =============================================================================
 -- 8. DOCVIEW: DRAW_LINE_BODY (ESCADARIA ATIVA, BUSCA E CORES INLINE)
 -- =============================================================================
+local _last_frame_clock = 0
+local _cached_highlight_query = nil
+local _cached_active_indent = -1
+
+local function update_frame_memo(doc, indent_unit)
+  local now = os.clock()
+  if now ~= _last_frame_clock then
+    _last_frame_clock = now
+    _cached_highlight_query = get_active_highlight_query()
+    _cached_active_indent = get_active_cursor_indent(doc, indent_unit)
+  end
+end
+
 local original_draw_line_body = DocView.draw_line_body
 function DocView:draw_line_body(line_idx, x, y)
   local res = original_draw_line_body(self, line_idx, x, y)
@@ -348,9 +373,13 @@ function DocView:draw_line_body(line_idx, x, y)
   local line_h = self:get_line_height()
   local font = self:get_font()
   local space_w = font:get_width(" ")
+  local indent_unit = get_doc_indent_unit(doc)
 
-  -- A. Highlight persistente de busca
-  local query = get_active_highlight_query()
+  -- Atualiza o cache do frame (roda uma única vez por frame)
+  update_frame_memo(doc, indent_unit)
+
+  -- A. Highlight persistente de busca (reutiliza query cacheada)
+  local query = _cached_highlight_query
   if query and #query > 0 then
     local s_idx = 1
     while true do
@@ -363,46 +392,46 @@ function DocView:draw_line_body(line_idx, x, y)
     end
   end
 
-  -- B. Guias de indentação em cascata / escadaria ativa
+  -- B. Guias de indentação (usando cores sólidas sem alpha blending)
   if config.draw_indent_guides ~= false then
-    local indent_unit = get_doc_indent_unit(doc)
     local eff_indent = compute_line_indent(line_text, indent_unit)
-    local active_indent = get_active_cursor_indent(doc, indent_unit)
-
     if eff_indent >= indent_unit then
+      local active_indent = _cached_active_indent
       local levels = math.floor(eff_indent / indent_unit)
+      local has_tab = line_text:find("\t", 1, true) ~= nil
+
       for lvl = 1, levels do
         local col_offset = (lvl - 1) * indent_unit
-        local col_char = col_offset + 1
-
         local gx = x + (col_offset * space_w)
-        if line_text:find("\t", 1, true) then
-          gx = x + self:get_col_x_offset(line_idx, col_char)
+        if has_tab then
+          gx = x + self:get_col_x_offset(line_idx, col_offset + 1)
         end
 
-        local is_active_guide = (active_indent > 0 and col_offset < active_indent and (col_offset + indent_unit) >= active_indent)
-        local guide_color = is_active_guide and INDENT_GUIDE_ACTIVE or INDENT_GUIDE_COLOR
+        local is_active = (active_indent > 0 and col_offset < active_indent and (col_offset + indent_unit) >= active_indent)
+        local guide_color = is_active and INDENT_GUIDE_ACTIVE or INDENT_GUIDE_COLOR
 
         draw_rect_safe(gx, y, 1, line_h, guide_color)
       end
     end
   end
 
-  -- C. Chips de cor inline
-  local colors = parse_colors_in_line(line_text)
-  if colors then
-    for _, item in ipairs(colors) do
-      local rx = self:get_col_x_offset(line_idx, item.col1)
-      local rw = self:get_col_x_offset(line_idx, item.col2 + 1) - rx
-      if rw > 0 then
-        local bx = x + rx
-        local by = y + 1
-        local bh = line_h - 2
-        draw_rect_safe(bx, by, rw, bh, item.color)
-        draw_rect_safe(bx, by, rw, 1, { 0, 0, 0, 90 })
-        draw_rect_safe(bx, by + bh - 1, rw, 1, { 0, 0, 0, 90 })
-        local text_col = get_contrast_color(item.color)
-        draw_text_safe(font, item.text, bx, y, text_col)
+  -- C. Chips de cor inline (Fast-Path: só analisa se houver marcadores)
+  if line_text:find("#", 1, true) or line_text:find("rgb", 1, true) or line_text:find("{", 1, true) then
+    local colors = parse_colors_in_line(line_text)
+    if colors then
+      for _, item in ipairs(colors) do
+        local rx = self:get_col_x_offset(line_idx, item.col1)
+        local rw = self:get_col_x_offset(line_idx, item.col2 + 1) - rx
+        if rw > 0 then
+          local bx = x + rx
+          local by = y + 1
+          local bh = line_h - 2
+          draw_rect_safe(bx, by, rw, bh, item.color)
+          draw_rect_safe(bx, by, rw, 1, { 0, 0, 0, 255 })
+          draw_rect_safe(bx, by + bh - 1, rw, 1, { 0, 0, 0, 255 })
+          local text_col = get_contrast_color(item.color)
+          draw_text_safe(font, item.text, bx, y, text_col)
+        end
       end
     end
   end
@@ -410,11 +439,11 @@ function DocView:draw_line_body(line_idx, x, y)
   return res
 end
 
--- Thread leve para atualização da escadaria ativa ao mover o cursor
+-- Thread relaxada para atualização da escadaria ativa (0.15s)
 core.add_thread(function()
   local last_cursor_line = -1
   while true do
-    coroutine.yield(0.05)
+    coroutine.yield(0.15)
     local view = core.active_view
     local doc = view and view.doc
     if doc and doc.get_selection then

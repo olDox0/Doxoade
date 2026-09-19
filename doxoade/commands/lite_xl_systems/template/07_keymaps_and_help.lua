@@ -293,7 +293,6 @@ command.add(nil, {
       submit = function(query) execute_global_search(query) end
     })
   end,
-  ["doxoade:open-file"] = function() command.perform("core:open-file") end,
   ["doxoade:find-file"] = function() command.perform("core:find-file") end,
   ["doxoade:new-doc"] = function()
     local doc = core.open_doc()
@@ -408,6 +407,247 @@ command.add("core.docview", {
   end
 })
 
+-- =============================================================================
+-- 🎯 DOXOADE:OPEN-FILE V7 — Ctrl+O Multi-Projeto (Scan Síncrono Fatiado)
+-- Corrige: cache vazio, submit quebrado, paths sem extensão
+-- =============================================================================
+
+local _doxoade_file_cache = {}
+local _doxoade_cache_built = false
+
+local DOXOADE_OPEN_FILE_IGNORED_DIRS = {
+    ["^%.git$"] = true, ["^venv$"] = true, ["^%.venv$"] = true,
+    ["^__pycache__$"] = true, ["^node_modules$"] = true,
+    ["^%.doxoade$"] = true, ["^%.doxoade_cache$"] = true,
+    ["^dist$"] = true, ["^build$"] = true,
+    ["^%.idea$"] = true, ["^%.vscode$"] = true,
+    ["^w64devkit$"] = true,
+}
+
+local DOXOADE_OPEN_FILE_IGNORED_EXTS = {
+    ["pyc"] = true, ["pyo"] = true, ["pyd"] = true,
+    ["exe"] = true, ["dll"] = true, ["so"] = true, ["dylib"] = true,
+    ["png"] = true, ["jpg"] = true, ["jpeg"] = true,
+    ["gif"] = true, ["ico"] = true, ["pdf"] = true,
+    ["db"] = true, ["sqlite"] = true, ["sqlite3"] = true,
+    ["rlebin"] = true, ["zip"] = true, ["tar"] = true, ["gz"] = true,
+    ["bak"] = true, ["tmp"] = true,
+}
+
+local function _doxoade_is_userdir(path)
+    if not path then return false end
+    local user_dir = USERDIR or "."
+    local abs_user = system.absolute_path(user_dir) or user_dir
+    local abs_path = system.absolute_path(path) or path
+    local u = abs_user:gsub("\\", "/"):lower():gsub("/+$", "")
+    local p = abs_path:gsub("\\", "/"):lower():gsub("/+$", "")
+    return u == p or p:sub(1, #u + 1) == u .. "/"
+end
+
+local function _doxoade_get_project_roots()
+    local roots = {}
+    local seen = {}
+    local function add_root(p)
+        if not p then return end
+        local path_str = type(p) == "table" and (p.path or p.name) or tostring(p)
+        if path_str and path_str ~= "" then
+            local abs = system.absolute_path(path_str) or path_str
+            local clean = abs:gsub("[/\\]+$", "")
+            if not _doxoade_is_userdir(clean) and not seen[clean:lower()] then
+                seen[clean:lower()] = true
+                table.insert(roots, clean)
+            end
+        end
+    end
+    if core.project_directories then
+        for _, p in ipairs(core.project_directories) do add_root(p) end
+    end
+    local cwd = system.absolute_path(".") or "."
+    cwd = cwd:gsub("[/\\]+$", "")
+    if not seen[cwd:lower()] and not _doxoade_is_userdir(cwd) then
+        seen[cwd:lower()] = true
+        table.insert(roots, cwd)
+    end
+    return roots
+end
+
+local function _doxoade_get_open_files()
+    local files = {}
+    local function traverse(node)
+        if not node then return end
+        if node.type == "leaf" then
+            for _, view in ipairs(node.views or {}) do
+                if view and view.doc and view.doc.filename then
+                    local abs = system.absolute_path(view.doc.filename) or view.doc.filename
+                    local clean = abs:gsub("\\", "/")
+                    local fname = view.doc.filename:match("[/\\]([^/\\]+)$") or view.doc.filename
+                    table.insert(files, {
+                        path = clean,
+                        relative = fname,
+                        name = fname,
+                        is_open = true,
+                    })
+                end
+            end
+        else
+            traverse(node.a)
+            traverse(node.b)
+        end
+    end
+    if core.root_view and core.root_view.root_node then
+        traverse(core.root_view.root_node)
+    end
+    return files
+end
+
+local function _doxoade_scan_directory(dir, prefix, files, seen, depth)
+    if depth > 30 then return end
+    local ok, items = pcall(system.list_dir, dir)
+    if not ok or not items then return end
+    
+    for _, item in ipairs(items) do
+        local skip = false
+        for pat in pairs(DOXOADE_OPEN_FILE_IGNORED_DIRS) do
+            if item:match(pat) then skip = true break end
+        end
+        if not skip then
+            local full = dir .. (PATHSEP or "\\") .. item
+            local finfo_ok, finfo = pcall(system.get_file_info, full)
+            if finfo_ok and finfo then
+                if finfo.type == "dir" then
+                    _doxoade_scan_directory(full, prefix .. item .. "/", files, seen, depth + 1)
+                elseif finfo.type == "file" then
+                    local ext = item:match("%.([%w_]+)$")
+                    if not ext or not DOXOADE_OPEN_FILE_IGNORED_EXTS[ext:lower()] then
+                        if (finfo.size or 0) < 5000000 then
+                            local clean_path = full:gsub("\\", "/")
+                            if not seen[clean_path:lower()] then
+                                seen[clean_path:lower()] = true
+                                table.insert(files, {
+                                    path = clean_path,
+                                    relative = prefix .. item,
+                                    name = item,
+                                    is_open = false,
+                                })
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function _doxoade_build_cache_sync()
+    local roots = _doxoade_get_project_roots()
+    local files = _doxoade_get_open_files()
+    local seen = {}
+    for _, f in ipairs(files) do seen[f.path:lower()] = true end
+    
+    for _, root in ipairs(roots) do
+        _doxoade_scan_directory(root, "", files, seen, 0)
+    end
+    
+    table.sort(files, function(a, b) return a.relative < b.relative end)
+    _doxoade_file_cache = files
+    _doxoade_cache_built = true
+    
+    if core.log then
+        core.log(string.format("📂 [Ctrl+O] Cache construído: %d arquivos em %d raízes", #files, #roots))
+        for i, r in ipairs(roots) do
+            core.log(string.format("   Raiz %d: %s", i, r))
+        end
+    end
+end
+
+command.add(nil, {
+    ["doxoade:open-file"] = function()
+        -- SCAN SÍNCRONO (rápido para projetos < 5000 arquivos)
+        _doxoade_build_cache_sync()
+        
+        local all_files = _doxoade_file_cache
+        if #all_files == 0 then
+            if core.log then core.log("⚠️ [Ctrl+O] Nenhum arquivo encontrado nas raízes de projeto") end
+            return
+        end
+        
+        -- Constrói labels e mapa
+        local labels = {}
+        local path_map = {}
+        for _, f in ipairs(all_files) do
+            local prefix = f.is_open and "● " or "  "
+            local label = prefix .. f.relative
+            table.insert(labels, label)
+            path_map[label] = f.path
+        end
+        
+        core.command_view:enter("🔍 Abrir Arquivo (Ctrl+O)", {
+            submit = function(selected)
+                if not selected or selected == "" then return end
+                
+                -- Limpa espaços e prefixos
+--                selected = selected:match("^%s*●%s*(.*)$") or selected:match("^%s*(.-)%s*$")
+                selected = selected:gsub("\\", "/")
+                selected = selected:match("^%s*●%s*(.*)$") or selected:match("^%s*(.-)%s*$")
+                selected = selected:gsub("\\", "/")
+              
+                -- Busca exata no path_map
+                local target = path_map[selected]
+                
+                -- Se não encontrou, busca fuzzy no cache
+                if not target then
+                    local needle = selected:lower()
+                    for _, f in ipairs(all_files) do
+                        if f.relative:lower():find(needle, 1, true) or f.name:lower():find(needle, 1, true) then
+                            target = f.path
+                            break
+                        end
+                    end
+                end
+                
+                if not target then
+                    if core.log then core.log("⚠️ [Ctrl+O] Arquivo não encontrado: " .. selected) end
+                    return
+                end
+                
+                -- Verifica se existe
+                local finfo_ok, finfo = pcall(system.get_file_info, target)
+                if not finfo_ok or not finfo or finfo.type ~= "file" then
+                    if core.log then core.log("❌ [Ctrl+O] Arquivo inválido: " .. target) end
+                    return
+                end
+                
+                -- Abre o documento
+                local doc_ok, doc = pcall(core.open_doc, target)
+                if doc_ok and doc then
+                    pcall(function() core.root_view:open_doc(doc) end)
+                    if core.log then core.log("📄 [Ctrl+O] Aberto: " .. target) end
+                else
+                    if core.log then core.log("❌ [Ctrl+O] Falha ao abrir: " .. tostring(doc)) end
+                end
+            end,
+            suggest = function(text)
+                if not text or text == "" then
+                    local limit = math.min(200, #labels)
+                    local out = {}
+                    for i = 1, limit do out[i] = labels[i] end
+                    return out
+                end
+                
+                local results = {}
+                local needle = text:lower()
+                for _, label in ipairs(labels) do
+                    if label:lower():find(needle, 1, true) then
+                        table.insert(results, label)
+                        if #results >= 100 then break end
+                    end
+                end
+                return results
+            end,
+        })
+    end,
+})
+
 -- =====================================================
 -- ⌨️ MAPEAMENTO GLOBAL CANÔNICO NOTEPAD++ / DOXOADE
 -- =====================================================
@@ -430,7 +670,7 @@ keymap.add {
   ["ctrl+f"] = "find-replace:find", ["ctrl+h"] = "doxoade:interactive-find-replace",
   ["f3"] = "find-replace:repeat-find", ["shift+f3"] = "find-replace:previous-find",
   ["ctrl+g"] = "doc:go-to-line",
-  ["ctrl+n"] = "doxoade:new-doc", ["ctrl+o"] = "core:open-file",
+  ["ctrl+n"] = "doxoade:new-doc", ["ctrl+o"] = "doxoade:open-file",
   ["ctrl+s"] = "doc:save", ["ctrl+shift+s"] = "doc:save-all",
   ["ctrl+d"] = "doc:duplicate-lines", ["ctrl+l"] = "doc:delete-lines",
   ["ctrl+q"] = "doc:toggle-line-comments",

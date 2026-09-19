@@ -40,31 +40,58 @@ def get_source_snippet(file_path: Path, line_no: int, radius: int = 2) -> List[T
     except Exception:
         return []
 
-def resolve_thread_origin(thread_id: str, mode: str = "test") -> Tuple[str, Optional[Path], int]:
-    """Mapeia 'init.lua:L8875' de volta para o template .lua original via Source Map."""
-    m = re.match(r"(.*?):L?(\d+)", thread_id)
+def resolve_thread_origin(raw_id: str, mode: str = "test") -> Tuple[str, Optional[Path], int]:
+    """Resolve o template e linha reais de uma thread inspecionando diretamente os banners do init.lua."""
+    import re
+    from pathlib import Path
+    from doxoade.commands.lite_xl_systems.engine_lite_xl import LiteXLEngine
+    from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+
+    m = re.match(r"^(.+?):L(\d+)$", raw_id)
     if not m:
-        return thread_id, None, 0
+        return raw_id, None, 0
 
     raw_file, raw_line = m.group(1), int(m.group(2))
-    
-    # Se for um arquivo nativo ou template direto
-    if raw_file.endswith(".lua") and not raw_file.endswith("init.lua"):
-        # Tenta localizar na pasta de templates
-        from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
-        t_path = LiteXLPaths.get_template_dir() / raw_file
+    template_dir = LiteXLPaths.get_template_dir()
+    if raw_file.startswith("core_kernel") or "core_kernel" in raw_id:
+        return "⚡ Kernel Lite XL (Event Loop)", None, raw_line
+    # 1. Se já for um arquivo .lua direto fora do init.lua
+    if not raw_file.endswith("init.lua"):
+        t_path = template_dir / raw_file
         if t_path.exists():
             return raw_file, t_path, raw_line
+        return raw_file, None, raw_line
 
-    # Se for init.lua, resolve via Source Map unificado
-    if "init.lua" in raw_file:
-        try:
-            from doxoade.commands.lite_xl_systems.typhon_doxly.doxly_khonsu_gate import DoxlyKhonsuGate
-            target_path, rel_line, t_name = DoxlyKhonsuGate.resolve_unified_trace(raw_file, raw_line)
-            if target_path and target_path.exists():
-                return t_name, target_path, rel_line
-        except Exception:
-            pass
+    # 2. Se for init.lua, resolve inspecionando o init.lua ativo na pasta de deploy
+    try:
+        user_dir = Path(LiteXLEngine.get_user_dir())
+        target_init = (user_dir / ".doxoade" / "test_deploy" / "init.lua") if mode == "test" else (user_dir / "init.lua")
+
+        if target_init.exists():
+            lines = target_init.read_text(encoding="utf-8", errors="replace").splitlines()
+            current_template = None
+            template_start = 0
+
+            for idx, line in enumerate(lines, start=1):
+                m_start = re.match(r"--\s*>>>\s*\[TEMPLATE:\s*(.+?)\]\s*>>>", line)
+                if m_start:
+                    current_template = m_start.group(1).strip()
+                    template_start = idx
+                elif re.match(r"--\s*<<<\s*\[END\s+TEMPLATE:\s*(.+?)\]\s*<<<", line):
+                    if idx >= raw_line and current_template:
+                        break
+
+                if idx == raw_line and current_template:
+                    rel_line = max(1, raw_line - template_start)
+                    t_path = template_dir / current_template
+                    return current_template, (t_path if t_path.exists() else None), rel_line
+
+            # Se a linha for anterior a qualquer template, pertence ao header
+            if raw_line < 50:
+                h_path = template_dir / "00_header_and_logger.lua"
+                return "00_header_and_logger.lua", (h_path if h_path.exists() else None), raw_line
+    except Exception:
+        pass
 
     return raw_file, None, raw_line
 
@@ -75,107 +102,200 @@ class ChronosAdvisor:
     """Analisa telemetria real e emite diagnósticos prescritivos automatizados."""
 
     @classmethod
+    def analyze(cls, live_data: dict, boot_data: dict) -> list[dict]:
+        recommendations = []
+
+        # 1. Extração das chaves reais do JSON do Lite XL
+        percentiles = live_data.get("percentiles", {})
+        p50 = float(percentiles.get("p50", 0.0))
+        p95 = float(percentiles.get("p95", 0.0))
+        p99 = float(percentiles.get("p99", 0.0))
+        jitter = float(percentiles.get("jitter_ms", 0.0))
+
+        fps = float(live_data.get("current_fps", live_data.get("fps", 0.0)))
+        cycle = live_data.get("cycle", {})
+        draw_ms = float(cycle.get("last_draw_ms", 0.0))
+        logic_ms = float(cycle.get("step_logic_ms", 0.0))
+        total_cycle_ms = float(cycle.get("step_total_ms", 0.0))
+
+        gc_data = live_data.get("gc", {}) if isinstance(live_data.get("gc"), dict) else {}
+        gc_kb = float(gc_data.get("memory_kb", live_data.get("gc_memory_kb", 0.0)))
+        heap_mb = round(gc_kb / 1024.0, 2)
+        alloc_rate = float(gc_data.get("growth_rate_kbs", live_data.get("gc_growth_rate_kbs", 0.0)))
+
+        # gc_kb = float(live_data.get("gc_memory_kb", 0.0))
+        # heap_mb = round(gc_kb / 1024.0, 2)
+        # alloc_rate = float(live_data.get("gc_growth_rate_kbs", 0.0))
+
+        # 2. Avaliação de Frame Rate e Latência Real
+        if fps > 0.0 and (fps < 30.0 or p95 > 25.0):
+            recommendations.append({
+                "topic": f"Degradação Severa de Frame Rate ({fps:.1f} FPS)",
+                "title": f"Degradação Severa de Frame Rate ({fps:.1f} FPS)",
+                "evidence": f"P50: {p50:.2f}ms • P95: {p95:.2f}ms • Ciclo Total: {total_cycle_ms:.2f}ms.",
+                "diagnosis": f"O editor está operando em taxa crítica ({fps:.1f} FPS). O loop está retido por corrotinas ou espera de eventos.",
+                "prescription": "Inspecionar corrotinas no topo do ranking com ciclos ativos frequentes."
+            })
+        elif jitter > 10.0:
+            recommendations.append({
+                "topic": f"Jitter Elevado de Renderização ({jitter:.2f}ms)",
+                "title": f"Jitter Elevado de Renderização ({jitter:.2f}ms)",
+                "evidence": f"P50: {p50:.2f}ms saltando para P99: {p99:.2f}ms.",
+                "diagnosis": "Picos esporádicos bloqueiam o redesenho suave.",
+                "prescription": "Espaçar corrotinas em segundo plano e inspecionar threads com picos >5ms."
+            })
+        elif fps >= 55.0 and p95 <= 18.0:
+            recommendations.append({
+                "topic": "Estabilidade de Frame Excelente",
+                "title": "Estabilidade de Frame Excelente",
+                "evidence": f"Latência P95 em {p95:.2f}ms mantendo {fps:.1f} FPS estáveis.",
+                "diagnosis": "O pipeline de renderização opera dentro do orçamento ideal de 60 FPS.",
+                "prescription": "Nenhuma intervenção necessária no loop gráfico."
+            })
+
+        # 3. Avaliação de Lógica / IPC
+        if logic_ms > 8.0:
+            recommendations.append({
+                "topic": f"Gargalo no Loop Lógico ({logic_ms:.2f}ms)",
+                "title": f"Gargalo no Loop Lógico ({logic_ms:.2f}ms)",
+                "evidence": f"core.step consumindo {logic_ms:.2f}ms por ciclo.",
+                "diagnosis": "A fila de IPC ou corrotinas ativas estão retendo o frame.",
+                "prescription": "Aplicar regime de Sono Reativo nas corrotinas do núcleo."
+            })
+
+        # 4. Avaliação de Memória Real
+        if alloc_rate > 500.0:
+            recommendations.append({
+                "topic": f"Taxa de Alocação Elevada ({alloc_rate:.1f} KB/s)",
+                "title": f"Taxa de Alocação Elevada ({alloc_rate:.1f} KB/s)",
+                "evidence": f"Alocando {alloc_rate:.1f} KB/s com heap em {heap_mb:.2f} MB.",
+                "diagnosis": "Criação contínua de strings ou tabelas temporárias em hotpaths.",
+                "prescription": "Reutilizar tabelas (pooling) e evitar concatenações dentro de hooks contínuos."
+            })
+        else:
+            recommendations.append({
+                "topic": "Alocação de Memória Estancada",
+                "title": "Alocação de Memória Estancada",
+                "evidence": f"Taxa de alocação estável em {alloc_rate:.1f} KB/s com heap em {heap_mb:.2f} MB.",
+                "diagnosis": "O GC Generational do Lua 5.4 mantém o heap estável sem degradação.",
+                "prescription": "Regime de memória saudável aprovado."
+            })
+
+        # 5. Avaliação do Boot
+        modules = boot_data.get("modules", []) if boot_data else []
+        if modules:
+            slowest = max(modules, key=lambda m: m.get("time_ms", 0.0))
+            if slowest.get("time_ms", 0.0) >= 15.0:
+                recommendations.append({
+                    "topic": f"Carga Pesada no Boot: {slowest['name']}",
+                    "title": f"Carga Pesada no Boot: {slowest['name']}",
+                    "evidence": f"O módulo consumiu {slowest['time_ms']:.2f}ms e {slowest.get('mem_kb', 0.0):.1f} KB no boot.",
+                    "diagnosis": "Módulo com dependências pesadas carregado no caminho crítico do boot.",
+                    "prescription": f"Mover '{slowest['name']}' para DEFERRED_STAGE_TEMPLATES no Khonsu Gate (carregamento diferido)."
+                })
+
+        return recommendations
+
+    @classmethod
     def generate_prescriptions(
         cls,
         live_data: Optional[Dict[str, Any]],
         boot_data: Optional[Dict[str, Any]]
     ) -> List[Dict[str, str]]:
-        prescriptions: List[Dict[str, str]] = []
+        """Delega diretamente para o analyze, unificando a leitura de memória e latência."""
+        return cls.analyze(live_data or {}, boot_data or {})
+    # @classmethod
+    # def generate_prescriptions(
+    #     cls,
+    #     live_data: Optional[Dict[str, Any]],
+    #     boot_data: Optional[Dict[str, Any]]
+    # ) -> List[Dict[str, str]]:
+    #     prescriptions: List[Dict[str, str]] = []
+    #     if not live_data:
+    #         return prescriptions
 
-        # 1. Análise da Taxa de Quadros e Latência de Frame
-        if live_data:
-            fps = live_data.get("active_fps", 60.0)
-            latency = live_data.get("avg_draw_latency_ms", 0.0)
-            subs = live_data.get("subsystems", {})
+    #     # 1. Extração das chaves reais do JSON gerado pelo 10_forensic_engine.lua
+    #     percentiles = live_data.get("percentiles", {})
+    #     p50 = float(percentiles.get("p50", 0.0))
+    #     p95 = float(percentiles.get("p95", 0.0))
+    #     p99 = float(percentiles.get("p99", 0.0))
+    #     jitter = float(percentiles.get("jitter_ms", 0.0))
 
-            if latency > 16.67:
-                # Localiza o maior vilão gráfico
-                highest_sub = "Desconhecido"
-                highest_val = 0.0
-                sub_names = {
-                    "doc_body_avg_ms": "Corpo do Código (Doc)",
-                    "tabs_avg_ms": "Abas de Arquivo (Tabs)",
-                    "gutter_avg_ms": "Marcadores do Gutter",
-                    "rencache_avg_ms": "GPU / Rencache Flush",
-                }
-                for k, label in sub_names.items():
-                    val = subs.get(k, 0.0)
-                    if val > highest_val:
-                        highest_val = val
-                        highest_sub = label
+    #     fps = float(live_data.get("current_fps", live_data.get("active_fps", live_data.get("fps", 0.0))))
+    #     cycle = live_data.get("cycle", {})
+    #     draw_ms = float(cycle.get("last_draw_ms", 0.0))
+    #     logic_ms = float(cycle.get("step_logic_ms", 0.0))
+    #     total_cycle_ms = float(cycle.get("step_total_ms", 0.0))
 
-                prescriptions.append({
-                    "topic": "Latência de Frame Acima do Orçamento (Alerta 60 FPS)",
-                    "evidence": f"Latência média de {latency:.2f}ms ({fps:.1f} FPS). O maior consumidor gráfico é '{highest_sub}' com {highest_val:.2f}ms.",
-                    "diagnosis": f"A renderização gráfica está estourando a janela de 16.6ms devido à carga em {highest_sub}.",
-                    "prescription": f"Aplicar memoization O(1) ou fatiamento de renderização em {highest_sub}."
-                })
-            else:
-                prescriptions.append({
-                    "topic": "Estabilidade de Frame Excelente",
-                    "evidence": f"Latência de {latency:.2f}ms mantendo {fps:.1f} FPS estáveis.",
-                    "diagnosis": "O pipeline de renderização opera dentro do orçamento ideal de 60 FPS.",
-                    "prescription": "Nenhuma intervenção necessária no loop gráfico."
-                })
+    #     gc_kb = float(live_data.get("gc_memory_kb", 0.0))
+    #     heap_mb = round(gc_kb / 1024.0, 2)
+    #     alloc_rate = float(live_data.get("gc_growth_rate_kbs", 0.0))
 
-            # 2. Análise de Corrotinas e Loops Contínuos
-            threads = live_data.get("active_threads", {})
-            for tid, st in threads.items():
-                calls = st.get("calls", 0)
-                cpu_ms = st.get("total_ms", 0.0)
-                max_ms = st.get("max_ms", 0.0)
+    #     # 2. Avaliação de Frame Rate e Latência Real
+    #     if fps > 0.0 and (fps < 30.0 or p95 > 25.0):
+    #         prescriptions.append({
+    #             "topic": f"Degradação Severa de Frame Rate ({fps:.1f} FPS)",
+    #             "evidence": f"P50: {p50:.2f}ms • P95: {p95:.2f}ms • Ciclo Total: {total_cycle_ms:.2f}ms.",
+    #             "diagnosis": f"O editor está operando em taxa crítica ({fps:.1f} FPS). O loop está retido por espera de eventos ou corrotinas.",
+    #             "prescription": "Inspecionar corrotinas no topo do ranking (00_02_api_guard, autoreload, ipc_dispatcher)."
+    #         })
+    #     elif jitter > 10.0:
+    #         prescriptions.append({
+    #             "topic": f"Jitter Elevado de Renderização ({jitter:.2f}ms)",
+    #             "evidence": f"P50: {p50:.2f}ms saltando para P99: {p99:.2f}ms.",
+    #             "diagnosis": "Picos esporádicos bloqueiam o redesenho suave.",
+    #             "prescription": "Espaçar corrotinas em segundo plano e inspecionar threads com picos >5ms."
+    #         })
+    #     elif fps >= 55.0 and p95 <= 18.0:
+    #         prescriptions.append({
+    #             "topic": "Estabilidade de Frame Excelente",
+    #             "evidence": f"Latência P95 em {p95:.2f}ms mantendo {fps:.1f} FPS estáveis.",
+    #             "diagnosis": "O pipeline de renderização opera dentro do orçamento ideal de 60 FPS.",
+    #             "prescription": "Nenhuma intervenção necessária no loop gráfico."
+    #         })
 
-                # Flag de polling excessivo
-                if calls > 300:
-                    prescriptions.append({
-                        "topic": f"Polling Contínuo Detectado: {tid}",
-                        "evidence": f"A thread registrou {calls} ativações acumulando {cpu_ms:.2f}ms de CPU ativa.",
-                        "diagnosis": "Loop em segundo plano acordando em taxa muito alta mesmo sem eventos pendentes.",
-                        "prescription": "Substituir polling cego por Sono Reativo (yield maior quando fila/tabela estiver vazia)."
-                    })
+    #     # 3. Avaliação de Lógica / IPC
+    #     if logic_ms > 8.0:
+    #         prescriptions.append({
+    #             "topic": f"Gargalo no Loop Lógico ({logic_ms:.2f}ms)",
+    #             "evidence": f"core.step consumindo {logic_ms:.2f}ms por ciclo.",
+    #             "diagnosis": "A fila de IPC ou corrotinas ativas estão retendo o frame.",
+    #             "prescription": "Aplicar regime de Sono Reativo nas corrotinas do núcleo."
+    #         })
 
-                # Flag de fatia bloqueante
-                if max_ms > 15.0:
-                    prescriptions.append({
-                        "topic": f"Fatia Bloqueante de Thread: {tid}",
-                        "evidence": f"A corrotina teve um pico ininterrupto de {max_ms:.2f}ms de CPU em uma única ativação.",
-                        "diagnosis": "Operação monolítica sem fatiamento temporal (Khonsu Time-Slicing).",
-                        "prescription": "Inserir coroutine.yield() em loops internos para não travar a renderização."
-                    })
+    #     # 4. Avaliação de Memória Real
+    #     if alloc_rate > 500.0:
+    #         prescriptions.append({
+    #             "topic": f"Taxa de Alocação Elevada ({alloc_rate:.1f} KB/s)",
+    #             "evidence": f"Alocando {alloc_rate:.1f} KB/s com heap em {heap_mb:.2f} MB.",
+    #             "diagnosis": "Criação contínua de strings ou tabelas temporárias em hotpaths.",
+    #             "prescription": "Reutilizar tabelas (pooling) e evitar concatenações dentro de hooks contínuos."
+    #         })
+    #     else:
+    #         prescriptions.append({
+    #             "topic": "Alocação de Memória Estancada",
+    #             "evidence": f"Taxa de alocação estável em {alloc_rate:.1f} KB/s com heap em {heap_mb:.2f} MB.",
+    #             "diagnosis": "O GC Generational do Lua 5.4 mantém o heap estável sem degradação.",
+    #             "prescription": "Regime de memória saudável aprovado."
+    #         })
 
-            # 3. Análise do Heap e Garbage Collector
-            gc_rate = live_data.get("gc_growth_rate_kbs", 0.0)
-            gc_ram = live_data.get("gc_memory_kb", 0.0) / 1024.0
+    #     # 5. Avaliação do Boot (se fornecido)
+    #     if boot_data and isinstance(boot_data, dict):
+    #         modules = boot_data.get("modules", [])
+    #         if modules:
+    #             slowest = max(modules, key=lambda m: m.get("time_ms", 0.0))
+    #             if slowest.get("time_ms", 0.0) >= 15.0:
+    #                 prescriptions.append({
+    #                     "topic": f"Carga Pesada no Boot: {slowest['name']}",
+    #                     "evidence": f"O módulo consumiu {slowest['time_ms']:.2f}ms e {slowest.get('mem_kb', 0.0):.1f} KB no carregamento inicial.",
+    #                     "diagnosis": "Módulo com dependências pesadas carregado no caminho crítico do boot.",
+    #                     "prescription": f"Mover '{slowest['name']}' para DEFERRED_STAGE_TEMPLATES no Khonsu Gate (carregamento diferido)."
+    #                 })
 
-            if gc_rate > 100.0:
-                prescriptions.append({
-                    "topic": "Pressão Alta no Garbage Collector",
-                    "evidence": f"Taxa de alocação de {gc_rate:.1f} KB/s com heap em {gc_ram:.2f} MB.",
-                    "diagnosis": "Criação contínua de tabelas ou strings descartáveis no ciclo de frame.",
-                    "prescription": "Utilizar buffers estáticos reutilizáveis e evitar closures anônimas em funções chamadas por tick."
-                })
-            else:
-                prescriptions.append({
-                    "topic": "Alocação de Memória Estancada",
-                    "evidence": f"Taxa de alocação estável em {gc_rate:.1f} KB/s com heap em {gc_ram:.2f} MB.",
-                    "diagnosis": "O GC Generational do Lua 5.4 mantém o heap estável sem degradação.",
-                    "prescription": "Regime de memória saudável aprovado."
-                })
+    #     return prescriptions
 
-        # 4. Análise de Inicialização (Boot)
-        if boot_data and boot_data.get("modules"):
-            modules = boot_data["modules"]
-            for m in modules:
-                t_ms = m.get("time_ms", 0.0)
-                if t_ms > 15.0:
-                    prescriptions.append({
-                        "topic": f"Carga Pesada no Boot: {m['name']}",
-                        "evidence": f"O módulo consumiu {t_ms:.2f}ms e {m.get('mem_kb', 0):.1f} KB no carregamento inicial.",
-                        "diagnosis": "Módulo com dependências pesadas sendo carregado no caminho crítico do boot.",
-                        "prescription": f"Mover '{m['name']}' para DEFERRED_STAGE_TEMPLATES no Khonsu Gate (carregamento diferido)."
-                    })
-
-        return prescriptions
+    # # Alias para retrocompatibilidade
+    # analyze = generate_prescriptions
 
 # =============================================================================
 # 📈 MOTORES MATEMÁTICOS DE SÉRIE TEMPORAL E SPARKLINES (CHRONOS V3)
@@ -457,16 +577,26 @@ class ProfilerEngine:
 
         # 4. Métricas de ciclo, frame e percentis
         if live_data:
-            fps = live_data.get("fps", live_data.get("active_fps", 60.0))
-            cycle = live_data.get("cycle", {})
             percentiles = live_data.get("percentiles", {})
-            p50 = percentiles.get("p50", 0.0)
-            p95 = percentiles.get("p95", 0.0)
-            p99 = percentiles.get("p99", 0.0)
-            jitter = percentiles.get("jitter_ms", 0.0)
+            p50 = float(percentiles.get("p50", 0.0))
+            p95 = float(percentiles.get("p95", 0.0))
+            p99 = float(percentiles.get("p99", 0.0))
+            jitter = float(percentiles.get("jitter_ms", 0.0))
+
+            fps = float(live_data.get("current_fps", live_data.get("fps", 0.0)))
+            cycle = live_data.get("cycle", {})
+            # Fallback seguro: busca "draw_ms" ou "last_draw_ms"
+            draw_ms = float(cycle.get("draw_ms") or cycle.get("last_draw_ms") or 0.0)
+            logic_ms = float(cycle.get("step_logic_ms", 0.0))
+            total_cycle_ms = float(cycle.get("step_total_ms", 0.0))
+
+            gc_data = live_data.get("gc", {}) if isinstance(live_data.get("gc"), dict) else {}
+            gc_kb = float(gc_data.get("memory_kb", live_data.get("gc_memory_kb", 0.0)))
+            heap_mb = round(gc_kb / 1024.0, 2)
+            alloc_rate = float(gc_data.get("growth_rate_kbs", live_data.get("gc_growth_rate_kbs", 0.0)))
 
             step_logic_ms = cycle.get("step_logic_ms", 0.0)
-            draw_ms = cycle.get("draw_ms", 0.0)
+            #draw_ms = cycle.get("draw_ms", 0.0)
             step_total_ms = cycle.get("step_total_ms", 0.0)
 
             gc_mem_kb = live_data.get("gc", {}).get("memory_kb", live_data.get("gc_memory_kb", 0.0))
@@ -485,10 +615,12 @@ class ProfilerEngine:
                 subs = live_data.get("subsystems", {})
                 if subs:
                     print(f"  {Fore.MAGENTA}■ CUSTO REAL POR SUBSISTEMA GRÁFICO (Frame):{Fore.RESET}")
-                    print(f"    ├─ Abas de Arquivo (Tabs) : {Fore.YELLOW}{subs.get('tabs_ms', subs.get('tabs_avg_ms', 0)):.2f}ms{Fore.RESET}")
-                    print(f"    ├─ Corpo do Código (Doc)  : {Fore.YELLOW}{subs.get('body_ms', subs.get('doc_body_avg_ms', 0)):.2f}ms{Fore.RESET}")
-                    print(f"    ├─ Marcadores do Gutter   : {Fore.YELLOW}{subs.get('gutter_ms', subs.get('gutter_avg_ms', 0)):.2f}ms{Fore.RESET}")
-                    print(f"    └─ GPU / Swap de Buffers  : {Fore.YELLOW}{subs.get('rencache_ms', subs.get('rencache_avg_ms', 0)):.2f}ms{Fore.RESET}\n")
+                    print(f"    ├─ Abas de Arquivo (Tabs)   : {Fore.YELLOW}{subs.get('tabs_ms', subs.get('tabs_avg_ms', 0)):.2f}ms{Fore.RESET}")
+                    print(f"    ├─ Corpo do Código (Doc)    : {Fore.YELLOW}{subs.get('body_ms', subs.get('doc_body_avg_ms', 0)):.2f}ms{Fore.RESET}")
+                    print(f"    ├─ Marcadores do Gutter     : {Fore.YELLOW}{subs.get('gutter_ms', subs.get('gutter_avg_ms', 0)):.2f}ms{Fore.RESET}")
+                    print(f"    ├─ Árvore de Pastas (Tree)  : {Fore.YELLOW}{subs.get('tree_ms', 0.0):.2f}ms{Fore.RESET}")
+                    print(f"    ├─ Barra de Status (HUD)    : {Fore.YELLOW}{subs.get('status_ms', 0.0):.2f}ms{Fore.RESET}")
+                    print(f"    └─ GPU / Swap de Buffers    : {Fore.YELLOW}{subs.get('rencache_ms', subs.get('rencache_avg_ms', 0)):.2f}ms{Fore.RESET}\n")
 
             # 6. Threads e Corrotinas Ativas
             if show_threads:

@@ -1,39 +1,33 @@
 -- doxoade/commands/lite_xl_systems/template/00_02_api_guard.lua
 -- =============================================================================
--- DOXOADE API GUARD — ACTIVE DEFENDER (Estágio 00.2: Defesa Ativa de Patches)
+-- 🛡️ DOXOADE API GUARD — MOTOR DE CONTRATOS E PROTEÇÃO DE PATCHES (V2.5 Fast-Path)
 -- =============================================================================
-
 local core = rawget(_G, "core")
 local probe = rawget(_G, "_DOXOADE_API_PROBE")
-
 local API = {
   violations = {},
   disabled_features = {},
   patched_symbols = {},
 }
 
+local _api_has_cache = {}
 function API.has(symbol_path)
-  if probe and probe.results and probe.results[symbol_path] then
-    return probe.results[symbol_path].status == "present"
-  end
-  return true
+    if _api_has_cache[symbol_path] ~= nil then
+        return _api_has_cache[symbol_path]
+    end
+    local result = true
+    if probe and probe.results and probe.results[symbol_path] then
+        result = probe.results[symbol_path].status == "present"
+    end
+    _api_has_cache[symbol_path] = result
+    return result
 end
 
-function API.type_of(symbol_path)
-  if probe and probe.results and probe.results[symbol_path] then
-    return probe.results[symbol_path].real_type
-  end
-  return "unknown"
-end
-
---- Bloqueia monkey-patch em métodos nil para evitar engolir eventos silenciosamente
 function API.patch(spec)
   if type(spec) ~= "table" then return false end
-
   local target_table = spec.target
   local method_name = spec.method
   local feature_name = spec.feature or spec.id or "unknown"
-
   if not target_table or type(target_table) ~= "table" then
     table.insert(API.violations, {
       type = "TARGET_NIL",
@@ -46,7 +40,6 @@ function API.patch(spec)
   end
 
   local original_method = target_table[method_name]
-
   if original_method == nil and not spec.allow_nil_original then
     table.insert(API.violations, {
       type = "ORIGINAL_METHOD_NIL",
@@ -64,7 +57,6 @@ function API.patch(spec)
   target_table[method_name] = function(self, ...)
     return spec.wrapper(original_method, self, ...)
   end
-
   table.insert(API.patched_symbols, spec.id)
   return true
 end

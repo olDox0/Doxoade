@@ -171,21 +171,6 @@ core.add_thread(function()
   end
 end)
 
-local function safe_trigger_audit_reload()
-  if rawget(_G, "Khonsu") and Khonsu.throttle then
-    Khonsu.throttle("audit_bridge_reload", 0.3, load_audit_bridge)
-  else
-    load_audit_bridge()
-  end
-end
-
-core.add_thread(function()
-  while true do
-    safe_trigger_audit_reload()
-    coroutine.yield(0.3)
-  end
-end)
-
 -- Remoção Dinâmica do Erro ao Alterar/Digitar na Linha
 local original_doc_insert = Doc.insert
 function Doc:insert(line, col, text)

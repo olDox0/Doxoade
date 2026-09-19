@@ -30,38 +30,66 @@ end
 
 local _created_dirs = {}
 local function ensure_parent_directories(file_path)
-    local dir = file_path:match("^(.*)[/\\]")
-    if not dir or dir == "" or _created_dirs[dir] then return end
-    local current = ""
-    for part in dir:gmatch("[^/\\]+") do
-        if current == "" and part:find("^[a-zA-Z]:") then
-            current = part
-        else
-            current = (current == "" and "" or current .. PATHSEP) .. part
-            if not _created_dirs[current] then
-                pcall(system.mkdir, current)
-                _created_dirs[current] = true
-            end
-        end
+  local clean = tostring(file_path):gsub("\\", "/")
+  local dir = clean:match("^(.*)/")
+  if not dir or dir == "" then return end
+
+  local current = ""
+  local drive = dir:match("^([a-zA-Z]:)")
+  if drive then
+    current = drive
+    dir = dir:sub(#drive + 1)
+  end
+
+  for part in dir:gmatch("[^/]+") do
+    current = current .. "/" .. part
+    local info = system.get_file_info(current)
+    if not info then
+      pcall(system.mkdir, current)
     end
-    _created_dirs[dir] = true
+  end
 end
 
-local function get_tree_target_dir()
-  local view = core.active_view
-  if view and view.hovered_item and view.hovered_item.filename then
-    local info = system.get_file_info(view.hovered_item.filename)
-    if info and info.type == "dir" then
-      return view.hovered_item.filename
-    else
-      return view.hovered_item.filename:match("^(.*)[/\\]") or view.hovered_item.filename
+local function get_real_workspace_root()
+  -- 1. Procura a raiz de trabalho real (ignora test_deploy e sandbox)
+  if core.project_directories then
+    for _, p in ipairs(core.project_directories) do
+      local p_str = tostring(type(p) == "table" and (p.path or p.name) or p)
+      local clean = p_str:gsub("\\", "/"):lower()
+      if not clean:find("test_deploy") and not clean:find("sandbox") then
+        local abs = system.absolute_path(p_str) or p_str
+        return abs:gsub("\\", "/"):gsub("/+$", "")
+      end
     end
   end
+
+  -- 2. Fallback para primeira raiz disponível ou CWD
   if core.project_directories and #core.project_directories > 0 then
-    local p = core.project_directories[1]
-    return type(p) == "table" and (p.path or p.name) or p
+    local p1 = core.project_directories[1]
+    local p_str = tostring(type(p1) == "table" and (p1.path or p1.name) or p1)
+    local abs = system.absolute_path(p_str) or p_str
+    return abs:gsub("\\", "/"):gsub("/+$", "")
   end
-  return "."
+
+  local cwd = system.absolute_path(".") or "."
+  return cwd:gsub("\\", "/"):gsub("/+$", "")
+end
+
+local function resolve_smart_file_path(input_path)
+  if not input_path or input_path:match("^%s*$") then return nil end
+
+  -- 1. Normalização de barras e limpeza de aspas/espaços
+  local clean_input = input_path:gsub("\\", "/"):gsub("^%s+", ""):gsub("%s+$", "")
+  clean_input = clean_input:gsub('^["\']', ''):gsub('["\']$', '')
+
+  -- 2. Se já for absoluto (C:/... ou /... ou ~)
+  if clean_input:find("^[a-zA-Z]:") or clean_input:sub(1, 1) == "/" or clean_input:sub(1, 1) == "~" then
+    return normalize_path(clean_input)
+  end
+
+  -- 3. Resolução fiel: anexa exatamente o que o desenvolvedor digitou à raiz do projeto
+  local project_root = get_real_workspace_root()
+  return project_root .. "/" .. clean_input
 end
 
 -- =============================================================================
@@ -99,24 +127,38 @@ end)
 -- =============================================================================
 command.add(nil, {
   ["doxoade:create-file-interactive"] = function()
-    local base_dir = get_tree_target_dir()
-    core.command_view:enter("Criar Arquivo (ex: doxoade/commands/novo_modulo.py)", {
+    core.command_view:enter("Criar Arquivo (Ctrl+Alt+N)", {
       submit = function(input_path)
-        if input_path and input_path:match("%S") then
-          local full_path
-          if input_path:find("^[a-zA-Z]:") or input_path:sub(1, 1) == "/" or input_path:sub(1, 1) == "~" then
-            full_path = normalize_path(input_path)
-          else
-            full_path = base_dir .. PATHSEP .. input_path
-          end
-          ensure_parent_directories(full_path)
-          local f = io.open(full_path, "a")
-          if f then f:close() end
-          local doc = core.open_doc(full_path)
+        local full_path = resolve_smart_file_path(input_path)
+        if not full_path then return end
+
+        ensure_parent_directories(full_path)
+
+        -- Cria o arquivo no disco se não existir
+        local f = io.open(full_path, "a")
+        if f then f:close() end
+
+        -- Abre o arquivo criado em uma nova aba
+        local doc = core.open_doc(full_path)
+        if doc then
           core.root_view:open_doc(doc)
-          core.log("Arquivo criado e aberto: " .. full_path)
+          core.log("✔ [Ctrl+Alt+N] Arquivo criado e aberto: " .. full_path)
           core.redraw = true
+        else
+          core.error("✖ Falha ao abrir o arquivo criado: " .. full_path)
         end
+      end,
+      suggest = function(text)
+        -- Auto-reversão dinâmica de barras em tempo real ao colar/digitar '\'
+        if text and text:find("\\") then
+          local converted = text:gsub("\\", "/")
+          pcall(function()
+            if core.command_view and core.command_view.set_text then
+              core.command_view:set_text(converted)
+            end
+          end)
+        end
+        return {}
       end
     })
   end,
