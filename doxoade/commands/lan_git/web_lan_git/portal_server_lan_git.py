@@ -12,7 +12,7 @@ import threading
 import queue
 import json
 import subprocess
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse, unquote
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Optional, Tuple, Set
 import click
@@ -264,20 +264,26 @@ class SecurePortalRequestHandler(BaseHTTPRequestHandler):
             self.close_connection = True
 
     def _handle_git_backend(self, method: str):
-        auth_header = self.headers.get("Authorization")
-        if not self.auth_manager.validate_basic_auth(auth_header):
-            self.send_response(401)
-            self.send_header('WWW-Authenticate', 'Basic realm="Doxoade LAN Git"')
-            self.end_headers()
-            self.wfile.write(b"Autenticacao Git necessaria.")
+        """Encaminha requisições Git Smart HTTP para o git http-backend nativo."""
+        parsed = urlparse(self.path)
+        unquoted_path = unquote(parsed.path)
+
+        # Bloqueio estrito de Push na LAN (Apenas leitura/clone/pull permitido)
+        if "git-receive-pack" in unquoted_path:
+            self.send_error(403, "Acesso Negado: Push Proibido via Web Portal.")
             return
 
-        parsed = urlparse(self.path)
+        # Proteção contra Path Traversal
+        clean_path = os.path.normpath(unquoted_path).lstrip("/\\")
+        if ".." in clean_path:
+            self.send_error(400, "Caminho malicioso detectado.")
+            return
+
         env = {
             "REQUEST_METHOD": method,
             "GIT_PROJECT_ROOT": os.path.dirname(self.repo_path),
             "GIT_HTTP_EXPORT_ALL": "1",
-            "PATH_INFO": parsed.path,
+            "PATH_INFO": unquoted_path,  # 🟢 Decodificado com espaço real ('Projeto SysUtils')
             "QUERY_STRING": parsed.query,
             "REMOTE_ADDR": self.client_address[0],
             "CONTENT_TYPE": self.headers.get("Content-Type", "")
@@ -499,11 +505,18 @@ class SecurePortalRequestHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+    def do_HEAD(self):
+        """Suporte nativo ao handshake preliminar do cliente Git."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
         client_ip = self.client_address[0]
 
+        # 1. Smart HTTP Git POST (Clone / Fetch streaming de objetos)
         if "git-upload-pack" in path:
             self._handle_git_backend("POST")
             return

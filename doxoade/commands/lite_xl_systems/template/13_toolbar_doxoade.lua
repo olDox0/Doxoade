@@ -169,16 +169,26 @@ core.add_thread(function()
 
     -- 6. Scratchpad Dumppot
     register_status_item(
-      "doxoade:dumppot_status",
+      "doxoade:shared-hub-menu",
       StatusView.Item.LEFT,
       function()
-        return {
-          { 251, 191, 36, 255 }, "📋 Pot ",
-          DIVIDER_COLOR, "| "
-        }
+        local is_sync_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
+        if is_sync_active then
+          return {
+            { 192, 132, 252, 255 }, "📝 Shared Notes ",
+            DIVIDER_COLOR, "| ",
+            { 34, 197, 94, 255 }, "⚡ Sync Ativa ",
+            DIVIDER_COLOR, "| "
+          }
+        else
+          return {
+            { 192, 132, 252, 255 }, "📝 Shared Notes ",
+            DIVIDER_COLOR, "| "
+          }
+        end
       end,
       function()
-        command.perform("doxoade:open-pot-in-right-panel")
+        command.perform("doxoade:shared-hub-menu")
       end,
       6
     )

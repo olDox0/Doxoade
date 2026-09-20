@@ -9,6 +9,7 @@ import re
 import threading
 import shutil
 import subprocess
+from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 import click
 
@@ -193,7 +194,8 @@ def cmd_web(repo_path: str, project: Optional[str], password: Optional[str],
     # Se estiver em modo --clone, define chave padrão e avisa na tela
     is_open_clone = clone
     if clone and not password:
-        password = "dox"
+        #password = "dox"
+        password = click.prompt("Senha do portal web", hide_input=True, confirmation_prompt=True)
     elif not password:
         password = click.prompt("Senha do portal web", hide_input=True, confirmation_prompt=True)
 
@@ -348,24 +350,33 @@ def cmd_pull(repo_path: str, repo: Optional[str], host: Optional[str], udp_port:
         return
 
     # ═══════════════════════════════════════════════════════════
-    # 3. MODO LIVE: FUSÃO SEGURA NO BRANCH ORIGINAL
+    # 3. MODO LIVE: FUSÃO OU ESPELHAMENTO FORÇADO
     # ═══════════════════════════════════════════════════════════
     sync_branch = "dox-live-sync"
     remote_ref = f"{GitSyncEngine.REMOTE_NAME}/dox-live"
 
-    click.secho("\n  [LIVE] Recebendo rascunho em memória e preparando fusão...", fg="yellow")
+    click.secho("\n  [LIVE] Recebendo rascunho em memória...", fg="yellow")
 
-    # Atualiza a branch auxiliar local 'dox-live-sync' apontando para o que veio do Host
+    # 1. Atualiza a branch auxiliar local 'dox-live-sync' apontando para o que veio do Host
     ok_br, _, _, err_br = GitSyncEngine._run_git_forensic(abs_path, ["branch", "-f", sync_branch, remote_ref])
     if not ok_br:
         click.secho(f"  ✖ [FALHA] Não foi possível atualizar '{sync_branch}': {err_br}", fg="red")
-        GitSyncEngine._run_git_forensic(abs_path, ["checkout", original_branch])
         return
 
-    # Garante que o workspace está no branch original para receber o merge
+    # Garante que o workspace está no branch original
     GitSyncEngine._run_git_forensic(abs_path, ["checkout", original_branch])
 
-    # Tenta incorporar os dados da sync_branch diretamente na branch original
+    # 2. SE --FORCE ESTIVER ATIVO: Espelhamento direto e absoluto (sem travar por merge ou arquivos dirty)
+    if force:
+        click.secho(f"  ⚡ [--FORCE ATIVO] Espelhando estado exato do Host em '{original_branch}'...", fg="yellow", bold=True)
+        ok_reset, reset_out, _, reset_err = GitSyncEngine._run_git_forensic(abs_path, ["reset", "--hard", sync_branch])
+        if ok_reset:
+            click.secho(f"  ✔ [SUCESSO] Workspace espelhado com o Host com sucesso ({original_branch} @ {sync_branch}).", fg="green", bold=True)
+        else:
+            click.secho(f"  ✖ [FALHA NO RESET] {reset_err}", fg="red")
+        return
+
+    # 3. SE NÃO FOR FORCE: Tenta merge limpo com proteção contra conflitos
     click.secho(f"  [INFO] Incorporando alterações recebidas em '{original_branch}'...", fg="cyan")
     ok_merge, out_merge, _, err_merge = GitSyncEngine._run_git_forensic(
         abs_path, ["merge", sync_branch, "--no-edit", "--no-ff"]
@@ -373,62 +384,18 @@ def cmd_pull(repo_path: str, repo: Optional[str], host: Optional[str], udp_port:
 
     if ok_merge:
         click.secho(f"  ✔ [SUCESSO] Alterações do Host incorporadas com sucesso em '{original_branch}'.", fg="green")
-
-        # Relatório forense de arquivos
-        click.secho("\n  📊 [RELATÓRIO DE SINCRONIZAÇÃO]", fg="cyan", bold=True)
-        ok_diff, diff_out, _, _ = GitSyncEngine._run_git_forensic(abs_path, ["diff", "--name-status", "HEAD~1..HEAD"])
-        if ok_diff and diff_out:
-            files_changed, files_new, files_deleted = [], [], []
-            for line in diff_out.splitlines():
-                if not line.strip():
-                    continue
-                parts = line.split('\t', 1)
-                if len(parts) == 2:
-                    st, fp = parts
-                    if st.startswith('M'):
-                        files_changed.append(fp)
-                    elif st.startswith('A'):
-                        files_new.append(fp)
-                    elif st.startswith('D'):
-                        files_deleted.append(fp)
-
-            if files_changed:
-                click.secho(f"  📝 Arquivos Modificados ({len(files_changed)}):", fg="yellow")
-                for f in files_changed[:10]:
-                    click.echo(f"     • {f}")
-                if len(files_changed) > 10:
-                    click.echo(f"     ... e mais {len(files_changed) - 10} arquivo(s)")
-
-            if files_new:
-                click.secho(f"  ✨ Arquivos Novos ({len(files_new)}):", fg="green")
-                for f in files_new[:10]:
-                    click.echo(f"     • {f}")
-                if len(files_new) > 10:
-                    click.echo(f"     ... e mais {len(files_new) - 10} arquivo(s)")
-
-            if files_deleted:
-                click.secho(f"  🗑️  Arquivos Deletados ({len(files_deleted)}):", fg="red")
-                for f in files_deleted[:10]:
-                    click.echo(f"     • {f}")
-                if len(files_deleted) > 10:
-                    click.echo(f"     ... e mais {len(files_deleted) - 10} arquivo(s)")
-
-            if not (files_changed or files_new or files_deleted):
-                click.secho("  ℹ️  Nenhuma alteração de arquivo detectada.", fg="white")
     else:
-        # 🛡️ PROTEÇÃO DE INTEGRIDADE: Auto-Abort em caso de conflito
-        click.secho("\n  ⚠ [DIVERGÊNCIA DETECTADA NO LIVE-SYNC]", fg="yellow", bold=True)
-        click.secho(f"  O rascunho do Host diverge do histórico atual de '{original_branch}'.", fg="white")
-        click.secho("  🛡️ [AUTO-PROTEÇÃO] Abortando a fusão para evitar marcadores de conflito em arquivos de código...", fg="cyan")
-        GitSyncEngine._run_git_forensic(abs_path, ["merge", "--abort"])
-        click.secho(f"  ✔ Branch '{original_branch}' restaurado e 100% íntegro.", fg="green")
-        click.secho(f"\n  💡 Para testar o rascunho do Host em isolamento sem afetar o '{original_branch}':", fg="yellow")
-        click.echo(f"     git checkout {sync_branch}")
+        # Auto-Abort para proteger o workspace em caso de colisão
+        click.secho("\n  ⚠ [DIVERGÊNCIA OU ARQUIVOS LOCAIS PENDENTES]", fg="yellow", bold=True)
+        click.secho(f"  Não foi possível mesclar automaticamente em '{original_branch}'.", fg="white")
+        # Só tenta abortar se MERGE_HEAD existir
+        git_dir = os.path.join(abs_path, ".git")
+        if os.path.exists(os.path.join(git_dir, "MERGE_HEAD")):
+            GitSyncEngine._run_git_forensic(abs_path, ["merge", "--abort"])
+        click.secho(f"  ✔ Branch '{original_branch}' mantido seguro.", fg="green")
+        click.secho("\n  💡 Para sobrepor alterações locais e forçar o estado do Host:", fg="yellow")
+        click.secho(f"     doxoade lan-git pull --live --force\n", fg="cyan", bold=True)
 
-    # Confirmação final do branch
-    ok_final, final_b, _, _ = GitSyncEngine._run_git_forensic(abs_path, ["branch", "--show-current"])
-    current_active = final_b.strip() if ok_final and final_b.strip() else original_branch
-    click.secho(f"\n  ✔ [BRANCH ATIVO] Seu repositório está no branch: '{current_active}'.", fg="green", bold=True)
     return
 
 # =====================================================================
@@ -656,6 +623,138 @@ def cmd_clone(arg1: Optional[str], arg2: Optional[str], dest: Optional[str], hos
     if final_dest != ".":
         click.echo(f"  cd \"{final_dest}\"")
     click.echo("  doxoade lan-git pull")
+
+# ═════════════════════════════════════════════════════════════════════
+# COMANDO SOBERANO: NOTE (ARQUIVO GLOBAL + SERVIÇO DE SINCRONIZAÇÃO)
+# ═════════════════════════════════════════════════════════════════════
+@lan_git_cli.command(name="note")
+@click.argument("text", required=False, default=None)
+@click.option("--pull", is_flag=True, help="Baixa as notas do Host para o arquivo global.")
+@click.option("--push", is_flag=True, help="Envia as notas do arquivo global para o Host.")
+@click.option("--host", default=None, help="IP do Host (padrão: auto-descoberta via LAN).")
+@click.option("--http-port", default=8080, help="Porta HTTP.")
+@click.option("--edit", is_flag=True, help="Abre o arquivo global no editor configurado.")
+@click.option("--daemon", is_flag=True, help="Inicia o serviço em segundo plano para sincronização contínua.")
+def cmd_note(text: Optional[str], pull: bool, push: bool, host: Optional[str], http_port: int, edit: bool, daemon: bool):
+    """Gerencia o Bloco de Notas Global compartilhado entre máquinas e silos."""
+    import urllib.request
+    
+    # 🌍 Caminho Global Canônico: ~/.doxoade/shared_notes.md
+    home = os.path.expanduser("~")
+    global_dir = os.path.join(home, ".doxoade")
+    os.makedirs(global_dir, exist_ok=True)
+    notes_path = os.path.join(global_dir, "shared_notes.md")
+
+    if not os.path.exists(notes_path):
+        with open(notes_path, "w", encoding="utf-8") as f:
+            f.write("# 📝 Notas Compartilhadas (Amaranth <-> Bluebaby)\n\n")
+    
+    if not notes_path.exists():
+        notes_path.write_text("# 📝 Notas Compartilhadas (Amaranth <-> Bluebaby)\n\n", encoding="utf-8")
+
+    # 1. Abrir na IDE
+    if edit:
+        click.echo(f"Abrindo {notes_path}...")
+        if os.name == "nt":
+            os.system(f'start "" "{notes_path}"')
+        else:
+            os.system(f'xdg-open "{notes_path}"')
+        return
+
+    # Descobre o host se necessário
+    target_host = host
+    if not target_host and (pull or push or text or daemon):
+        peers = LANBeaconClient.discover_peers(timeout=1.5)
+        target_host = peers[0].ip if peers else "127.0.0.1"
+
+    base_url = f"http://{target_host}:{http_port}/api/notepad"
+
+    # 2. Modo Daemon (Serviço de Sincronização Contínua Bidirecional)
+    if daemon:
+        click.secho(f"⚡ [DAEMON] Serviço de notas ativo observando {notes_path}", fg="green", bold=True)
+        click.echo(f"   Conectado ao Host: {target_host}:{http_port} (Ctrl+C para encerrar)\n")
+        last_mtime = notes_path.stat().st_mtime
+        current_rev = 0
+        try:
+            while True:
+                time.sleep(0.5)
+                # A. Detecta se VOCÊ salvou o arquivo localmente -> Envia para o Host (PUSH)
+                curr_mtime = notes_path.stat().st_mtime
+                if curr_mtime != last_mtime:
+                    last_mtime = curr_mtime
+                    content = notes_path.read_text(encoding="utf-8")
+                    try:
+                        req = urllib.request.Request(
+                            base_url,
+                            data=content.encode("utf-8"),
+                            headers={"Content-Type": "text/plain; charset=utf-8"},
+                            method="POST"
+                        )
+                        with urllib.request.urlopen(req, timeout=2.0) as resp:
+                            if resp.status == 200:
+                                t_str = time.strftime("%H:%M:%S")
+                                click.secho(f"  [{t_str}] 📤 [PUSH] Notas locais enviadas para o Host.", fg="cyan")
+                    except Exception:
+                        pass
+
+                # B. Detecta se o OUTRO computador atualizou -> Baixa para o disco (PULL)
+                try:
+                    poll_url = f"{base_url}?rev={current_rev}"
+                    req = urllib.request.Request(poll_url, headers={"User-Agent": "Doxoade-Daemon"})
+                    with urllib.request.urlopen(req, timeout=2.0) as resp:
+                        if resp.status == 200:
+                            rev_header = resp.headers.get("X-Notepad-Revision")
+                            if rev_header:
+                                current_rev = int(rev_header)
+                            remote_text = resp.read().decode("utf-8")
+                            local_text = notes_path.read_text(encoding="utf-8") if notes_path.exists() else ""
+                            if remote_text != local_text:
+                                notes_path.write_text(remote_text, encoding="utf-8")
+                                last_mtime = notes_path.stat().st_mtime
+                                t_str = time.strftime("%H:%M:%S")
+                                click.secho(f"  [{t_str}] 📥 [PULL] Notas atualizadas pelo outro dispositivo.", fg="green")
+                except Exception:
+                    pass
+
+        except KeyboardInterrupt:
+            click.echo("\n[INFO] Serviço de notas encerrado.")
+            return
+
+    # 3. Puxar do Host (Pull)
+    if pull:
+        try:
+            req = urllib.request.Request(base_url, headers={"User-Agent": "Doxoade-Note"})
+            with urllib.request.urlopen(req, timeout=4.0) as resp:
+                if resp.status == 200:
+                    content = resp.read().decode("utf-8")
+                    notes_path.write_text(content, encoding="utf-8")
+                    click.secho(f"✔ [PULL] {notes_path} sincronizado com sucesso.", fg="green", bold=True)
+                    return
+        except Exception as e:
+            click.secho(f"✖ [ERRO] {e}", fg="red")
+            return
+
+    # 4. Envio rápido via CLI
+    if text:
+        curr = notes_path.read_text(encoding="utf-8") if notes_path.exists() else ""
+        new_content = (curr + "\n" + text).strip()
+        notes_path.write_text(new_content, encoding="utf-8")
+        try:
+            req = urllib.request.Request(
+                base_url,
+                data=new_content.encode("utf-8"),
+                headers={"Content-Type": "text/plain; charset=utf-8"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=3.0):
+                click.secho("✔ Nota gravada localmente e propagada para a rede.", fg="green")
+        except Exception as e:
+            click.secho(f"Nota salva localmente (sem conexão remota: {e})", fg="yellow")
+        return
+
+    # 5. Exibir notas atuais no console
+    click.secho(f"--- [ {notes_path} ] ---", fg="cyan", bold=True)
+    click.echo(notes_path.read_text(encoding="utf-8"))
 
 if __name__ == "__main__":
     lan_git_cli()

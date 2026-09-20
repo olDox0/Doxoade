@@ -5,7 +5,8 @@
   - Destacador de sintaxe Markdown multi-linguagem.
   - Comandos de busca e transferência de seleção entre painéis opostos.
 ]]
-local core = require "core"
+local core    = require "core"
+local common  = require "core.common"
 local DocView = require "core.docview"
 local command = require "core.command"
 
@@ -16,8 +17,15 @@ local dumppot_file = doxoade_cfg_dir .. (PATHSEP or "/") .. "dumppot.txt"
 local cheat_sheet_file = doxoade_cfg_dir .. (PATHSEP or "/") .. "cheat_sheet.txt"
 local log_path = (USERDIR or ".") .. (PATHSEP or "/") .. "session_log.txt"
 
+-- Localização global na home do usuário
+local home_dir = os.getenv("USERPROFILE") or os.getenv("HOME") or (USERDIR or ".")
+local global_doxoade_dir = home_dir .. (PATHSEP or "/") .. ".doxoade"
+pcall(function() system.mkdir(global_doxoade_dir) end)
+local global_shared_notes = global_doxoade_dir .. (PATHSEP or "/") .. "shared_notes.md"
+
+-- Garante que o arquivo exista
 pcall(function()
-  local f = io.open(dumppot_file, "a")
+  local f = io.open(global_shared_notes, "a")
   if f then f:close() end
 end)
 
@@ -199,4 +207,80 @@ command.add(nil, {
       core.log(string.format("Termo '%s' não encontrado no painel oposto.", query))
     end
   end,
+  -- ═════════════════════════════════════════════════════════════════
+  -- MENU DE OPÇÕES DO DOXNOTE E CONTROLE DE SYNC EM BACKGROUND
+  -- ═════════════════════════════════════════════════════════════════
+  ["doxoade:shared-hub-menu"] = function()
+    local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
+    local toggle_label = is_active and "🛑 Parar Sincronização em Background" 
+                                   or  "⚡ Iniciar Sincronização em Background (Sync Ativa)"
+    local options = {
+      "1. 📝 Abrir Bloco de Notas (shared_notes.md)",
+      "2. " .. toggle_label,
+      "3. 📥 Puxar Notas do Host Agora (Pull)",
+      "4. 📤 Enviar Notas para o Host Agora (Push)",
+    }
+    core.command_view:enter("Opções do Bloco de Notas LAN", {
+      submit = function(item)
+        if item:find("1.") then
+          command.perform("doxoade:open-shared-notes")
+        elseif item:find("2.") then
+          command.perform("doxoade:toggle-note-sync-daemon")
+        elseif item:find("3.") then
+          command.perform("doxoade:pull-shared-notes")
+        elseif item:find("4.") then
+          command.perform("doxoade:push-shared-notes")
+        end
+      end,
+      suggest = function(text)
+        return common.fuzzy_match(options, text)
+      end
+    })
+  end,
+
+  ["doxoade:toggle-note-sync-daemon"] = function()
+    local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
+    if is_active then
+      -- Desliga
+      rawset(_G, "_DOXOADE_NOTE_SYNC_ACTIVE", false)
+      local pid = rawget(_G, "_DOXOADE_NOTE_SYNC_PID")
+      if pid and PLATFORM == "Windows" then
+        pcall(system.exec, string.format('taskkill /F /PID %d', pid))
+      end
+      rawset(_G, "_DOXOADE_NOTE_SYNC_PID", nil)
+      core.log("🛑 [NOTE] Sincronização em background desativada.")
+    else
+      -- Liga
+      local py_anchor = (USERDIR or ".") .. (PATHSEP or "/") .. ".doxoade" .. (PATHSEP or "/") .. "python_path.txt"
+      local py_exe = "python"
+      local finfo = system.get_file_info(py_anchor)
+      if finfo and finfo.type == "file" then
+        local f = io.open(py_anchor, "r")
+        if f then
+          local l = f:read("*l") or ""
+          f:close()
+          if l ~= "" then py_exe = l:gsub("[\r\n]", "") end
+        end
+      end
+      local cmd = string.format('start /b "" "%s" -m doxoade lan-git note --daemon', py_exe)
+      pcall(system.exec, cmd)
+      rawset(_G, "_DOXOADE_NOTE_SYNC_ACTIVE", true)
+      core.log("⚡ [NOTE] Sincronização em background ativada. Status: Sync Ativa.")
+    end
+    core.redraw = true
+  end,
+
+  ["doxoade:pull-shared-notes"] = function()
+    core.log("📥 Puxando notas mais recentes do Host...")
+    pcall(system.exec, 'doxoade lan-git note --pull')
+  end,
+
+  ["doxoade:push-shared-notes"] = function()
+    core.log("📤 Enviando notas locais para o Host...")
+    pcall(system.exec, 'doxoade lan-git note --push')
+  end,
+  ["doxoade:open-shared-notes"] = function()
+    open_in_right_panel(global_shared_notes, "📝 Bloco de Notas Global aberto no painel direito.")
+  end,
+  -- mantem os demais comandos existentes...
 })

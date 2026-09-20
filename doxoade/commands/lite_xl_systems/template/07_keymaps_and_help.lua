@@ -738,6 +738,7 @@ keymap.add {
   ["ctrl+alt+u"] = "doxoade:toggle-litexl-in-tree", ["ctrl+alt+p"] = "doxoade:open-pot-in-right-panel",
   ["ctrl+shift+l"] = "doxoade:open-log", ["ctrl+f2"] = "doxoade:open-log",
   ["f1"] = "doxoade:show-shortcuts-cheat-sheet", ["ctrl+shift+/"] = "doxoade:show-shortcuts-cheat-sheet",
+  ["ctrl+shift+n"] = "doxoade:shared-hub-menu",
   ["ctrl+alt+n"] = "doxoade:create-file-interactive", ["ctrl+alt+shift+n"] = "doxoade:note-hub-menu",
   ["ctrl+alt+a"] = "doxoade:open-agenda-view", ["ctrl+alt+i"] = "doxoade:toggle-indent-guides",
   ["ctrl+alt+k"] = "doxoade:trigger-active-check", ["ctrl+alt+shift+k"] = "doxoade:diagnose-live",

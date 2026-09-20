@@ -192,15 +192,16 @@ class GitSyncEngine:
             return True, f"Repositório espelhado com sucesso com o Host ({branch})."
 
         if branch == "dox-live":
-            # 🛡️ PROTEÇÃO PRODENOV: NUNCA aplicar reset --hard se estiver no main ou branch canônico!
-            if current_branch == "dox-live":
+            # 🛡️ PROTEÇÃO PRODENOV: Aplica no main SOMENTE se force=True for solicitado expressamente!
+            if current_branch == "dox-live" or force:
+                click.secho(f"\n[APLICAÇÃO] Espelhando rascunho do Host no branch '{current_branch}' ({cls.REMOTE_NAME}/{branch})...", fg="green", bold=True)
                 ok, reset_out, code, reset_err = cls._run_git_forensic(repo_path, ["reset", "--hard", f"{cls.REMOTE_NAME}/{branch}"])
                 if not ok:
-                    return False, f"Falha ao sincronizar dox-live: {reset_err or reset_out}"
-                return True, f"Branch 'dox-live' atualizado com sucesso com o rascunho do Host."
+                    return False, f"Falha no Reset Hard do Live Mirror: {reset_err or reset_out}"
+                return True, f"Workspace atualizado com sucesso com o rascunho do Host ({current_branch} @ {branch})."
             else:
-                # O fetch já trouxe os objetos para lan-peer/dox-live. Mantém o main intacto!
-                return True, f"Rascunho de rede recebido em '{cls.REMOTE_NAME}/dox-live'. Seu branch ativo '{current_branch}' permanece protegido."
+                # Sem --force, mantém o main seguro e avisa
+                return True, f"Rascunho de rede recebido em '{cls.REMOTE_NAME}/dox-live'. Seu branch ativo '{current_branch}' permanece protegido (use '--force' para sobrepor)."
 
         if force:
             click.secho(f"\n[FORCE] Forçando sincronização ({cls.REMOTE_NAME}/{branch})...", fg="yellow", bold=True)
