@@ -444,6 +444,62 @@ local function _doxoade_is_userdir(path)
     return u == p or p:sub(1, #u + 1) == u .. "/"
 end
 
+-- =============================================================================
+-- 🧭 RESOLUÇÃO INTELIGENTE DE CAMINHOS DIGITADOS (Multi-Projeto, Pastas Duplicadas)
+-- Resolve casos como digitar "doxoade/commands/x/y.py" quando o caminho real é
+-- "doxoade/doxoade/commands/x/y.py" (pasta filha com o mesmo nome da raiz).
+-- =============================================================================
+local function _doxoade_path_segments(path)
+    local segments = {}
+    for seg in tostring(path):gsub("\\", "/"):gmatch("[^/]+") do
+        -- 🛡️ Trim de segurança em cada segmento individual
+        seg = seg:match("^%s*(.-)%s*$") or seg
+        if seg ~= "" then
+            table.insert(segments, seg:lower())
+        end
+    end
+    return segments
+end
+
+-- Casa needle_segs (o que o usuário digitou) como subsequência ORDENADA, de trás
+-- para frente, dentro de hay_segs (o caminho real). Pastas duplicadas/extras no
+-- meio do caminho real são puladas livremente. O último segmento (nome do
+-- arquivo) precisa bater exatamente. Retorna um score (menor = match mais
+-- específico/próximo) ou nil se não houver match.
+local function _doxoade_match_score(needle_segs, hay_segs)
+    local nn, nh = #needle_segs, #hay_segs
+    if nn == 0 or nh == 0 then return nil end
+    if needle_segs[nn] ~= hay_segs[nh] then return nil end
+
+    local hi, ni, gaps = nh, nn, 0
+    while ni >= 1 do
+        if hi < 1 then return nil end
+        if hay_segs[hi] == needle_segs[ni] then
+            ni = ni - 1
+            hi = hi - 1
+        else
+            gaps = gaps + 1
+            hi = hi - 1
+        end
+    end
+    return gaps
+end
+
+-- Encontra, dentre uma lista de itens com campo .relative, o melhor match para
+-- o caminho digitado. Retorna o item vencedor ou nil.
+local function _doxoade_resolve_best_match(typed_path, items)
+    local needle_segs = _doxoade_path_segments(typed_path)
+    local best, best_score = nil, math.huge
+    for _, it in ipairs(items) do
+        local hay_segs = _doxoade_path_segments(it.relative)
+        local score = _doxoade_match_score(needle_segs, hay_segs)
+        if score and score < best_score then
+            best, best_score = it, score
+        end
+    end
+    return best
+end
+
 local function _doxoade_get_project_roots()
     local roots = {}
     local seen = {}
@@ -585,16 +641,38 @@ command.add(nil, {
             submit = function(selected)
                 if not selected or selected == "" then return end
                 
-                -- Limpa espaços e prefixos
---                selected = selected:match("^%s*●%s*(.*)$") or selected:match("^%s*(.-)%s*$")
+                -- 🛡️ 1. LIMPEZA BLINDADA: Remove prefixos visuais, espaços residuais e normaliza barras
+                selected = selected:gsub("^[●%s]+", ""):gsub("%s+$", "")
                 selected = selected:gsub("\\", "/")
-                selected = selected:match("^%s*●%s*(.*)$") or selected:match("^%s*(.-)%s*$")
-                selected = selected:gsub("\\", "/")
-              
-                -- Busca exata no path_map
-                local target = path_map[selected]
+                selected = selected:gsub("%s+", "") -- ⚡ Remove QUALQUER espaço interno (mata o bug do "/ ")
                 
-                -- Se não encontrou, busca fuzzy no cache
+                -- 2) Busca exata (autocomplete ou caminho relativo limpo)
+                local target = nil
+                for _, f in ipairs(all_files) do
+                    if f.relative == selected then
+                        target = f.path
+                        break
+                    end
+                end
+
+                -- 3) Match exato case-insensitive (segurança extra)
+                if not target then
+                    local sel_lower = selected:lower()
+                    for _, f in ipairs(all_files) do
+                        if f.relative:lower() == sel_lower then
+                            target = f.path
+                            break
+                        end
+                    end
+                end
+
+                -- 4) Match inteligente por segmentos (resolve pastas duplicadas tipo doxoade/doxoade/...)
+                if not target then
+                    local best = _doxoade_resolve_best_match(selected, all_files)
+                    if best then target = best.path end
+                end
+
+                -- 5) Fallback: substring simples no nome ou caminho
                 if not target then
                     local needle = selected:lower()
                     for _, f in ipairs(all_files) do
@@ -604,19 +682,19 @@ command.add(nil, {
                         end
                     end
                 end
-                
+
                 if not target then
                     if core.log then core.log("⚠️ [Ctrl+O] Arquivo não encontrado: " .. selected) end
                     return
                 end
-                
-                -- Verifica se existe
+
+                -- Verifica se existe no disco
                 local finfo_ok, finfo = pcall(system.get_file_info, target)
                 if not finfo_ok or not finfo or finfo.type ~= "file" then
                     if core.log then core.log("❌ [Ctrl+O] Arquivo inválido: " .. target) end
                     return
                 end
-                
+
                 -- Abre o documento
                 local doc_ok, doc = pcall(core.open_doc, target)
                 if doc_ok and doc then

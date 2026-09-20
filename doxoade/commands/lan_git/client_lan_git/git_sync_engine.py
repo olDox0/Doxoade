@@ -179,13 +179,35 @@ class GitSyncEngine:
         if not ok:
             return False, f"Falha no 'git fetch' (Exit {code}): {fetch_err or fetch_out}"
 
-        # Aplica Reset Hard em caso de novo repositório, force ou live mirror
-        if has_no_head or force or branch == "dox-live":
-            click.secho(f"\n[APLICAÇÃO] Espelhando estado exato do Host ({cls.REMOTE_NAME}/{branch})...", fg="green", bold=True)
+        # Identifica o branch ativo local
+        ok_cb, cb_out, _, _ = cls._run_git_forensic(repo_path, ["branch", "--show-current"])
+        current_branch = cb_out.strip() if ok_cb else ""
+
+        # Aplica Reset Hard APENAS se for repositório vazio (has_no_head) ou force explícito
+        if has_no_head:
+            click.secho(f"\n[APLICAÇÃO] Repositório inicializado. Espelhando ({cls.REMOTE_NAME}/{branch})...", fg="green", bold=True)
+            ok, reset_out, code, reset_err = cls._run_git_forensic(repo_path, ["reset", "--hard", f"{cls.REMOTE_NAME}/{branch}"])
+            if not ok:
+                return False, f"Falha no Reset Hard inicial (Exit {code}): {reset_err or reset_out}"
+            return True, f"Repositório espelhado com sucesso com o Host ({branch})."
+
+        if branch == "dox-live":
+            # 🛡️ PROTEÇÃO PRODENOV: NUNCA aplicar reset --hard se estiver no main ou branch canônico!
+            if current_branch == "dox-live":
+                ok, reset_out, code, reset_err = cls._run_git_forensic(repo_path, ["reset", "--hard", f"{cls.REMOTE_NAME}/{branch}"])
+                if not ok:
+                    return False, f"Falha ao sincronizar dox-live: {reset_err or reset_out}"
+                return True, f"Branch 'dox-live' atualizado com sucesso com o rascunho do Host."
+            else:
+                # O fetch já trouxe os objetos para lan-peer/dox-live. Mantém o main intacto!
+                return True, f"Rascunho de rede recebido em '{cls.REMOTE_NAME}/dox-live'. Seu branch ativo '{current_branch}' permanece protegido."
+
+        if force:
+            click.secho(f"\n[FORCE] Forçando sincronização ({cls.REMOTE_NAME}/{branch})...", fg="yellow", bold=True)
             ok, reset_out, code, reset_err = cls._run_git_forensic(repo_path, ["reset", "--hard", f"{cls.REMOTE_NAME}/{branch}"])
             if not ok:
                 return False, f"Falha no Reset Hard (Exit {code}): {reset_err or reset_out}"
-            return True, f"Repositório espelhado com sucesso com o Host ({branch} @ {cls.REMOTE_NAME}/{branch})."
+            return True, f"Repositório forçado para {cls.REMOTE_NAME}/{branch}."
 
         click.secho(f"\n[MERGE] Aplicando Fast-Forward para '{cls.REMOTE_NAME}/{branch}'...", fg="cyan")
         ok, merge_out, code, merge_err = cls._run_git_forensic(repo_path, ["merge", "--ff-only", f"{cls.REMOTE_NAME}/{branch}"])

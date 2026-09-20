@@ -170,7 +170,9 @@ def cmd_share(repo_path: str, project: Optional[str], port: int, http_port: int,
 @click.option("--password", "-p_pass", default=None, help="Senha do portal web (se omitida em modo normal, será solicitada).")
 @click.option("--port", default=8080, help="Porta HTTP do portal web.")
 @click.option("--clone", is_flag=True, help="Modo Clone Rápido: sobe Smart HTTP direto para download sem travar por senha.")
-def cmd_web(repo_path: str, project: Optional[str], password: Optional[str], port: int, clone: bool):
+@click.option("--profile", is_flag=True, help="Ativa telemetria de rede e medição de latência em tempo real.")
+def cmd_web(repo_path: str, project: Optional[str], password: Optional[str],
+            port: int, clone: bool, profile: bool):
     """Inicia o Portal Web & Smart HTTP para download e clone de qualquer Silo/Projeto."""
     target_query = project if project else repo_path
     ok, resolved_path, err = ProjectResolver.resolve_project_path(target_query)
@@ -188,18 +190,23 @@ def cmd_web(repo_path: str, project: Optional[str], password: Optional[str], por
 
     host_ip = primary_iface["ip"]
 
-    # Se estiver em modo --clone ou senha não informada, usa autenticação simplificada/aberta
+    # Se estiver em modo --clone, define chave padrão e avisa na tela
+    is_open_clone = clone
     if clone and not password:
         password = "dox"
     elif not password:
         password = click.prompt("Senha do portal web", hide_input=True, confirmation_prompt=True)
 
-    portal = LANWebPortal(abs_path, password=password, host_ip=host_ip, port=port)
+    portal = LANWebPortal(abs_path, password=password, host_ip=host_ip, port=port, profile=profile)
+#    portal = LANWebPortal(abs_path, password=password, host_ip=host_ip, port=port, open_mode=is_open_clone)
 
     ok, err = portal.start()
     if not ok:
         click.secho(f"[ERRO] {err}", fg="red")
         return
+
+    if profile:
+        click.secho("  Telemetria  : PROFILING ATIVO (Medindo latências e SSE)", fg="magenta", bold=True)
 
     repo_name = os.path.basename(abs_path)
     click.secho("============================================================", fg="cyan")
@@ -208,22 +215,25 @@ def cmd_web(repo_path: str, project: Optional[str], password: Optional[str], por
     click.echo(f"  Silo/Projeto: {click.style(repo_name, bold=True)}")
     click.echo(f"  Diretório   : {abs_path}")
     click.echo(f"  Link Portal : {click.style(f'http://{host_ip}:{port}', fg='bright_yellow', bold=True)}")
-    
-    click.secho("\n📋 [COMANDO PRONTO PARA O BABYBLUE / PC-B]:", fg="magenta", bold=True)
-    click.secho(f"  doxoade lan-git clone {repo_name} . --web --host {host_ip}", fg="yellow", bold=True)
-    click.secho("  (Ou simplesmente navegue no browser acima para baixar o ZIP)", fg="white")
-    click.secho("============================================================", fg="cyan")
-    click.secho("Pressione Ctrl+C para encerrar o serviço.", fg="white")
+    if is_open_clone:
+        click.secho(f"  Acesso Rápido: ABERTO / Senha pré-definida: 'dox'", fg="green", bold=True)
 
+    click.secho("\n📋 [COMANDO PRONTO PARA O BABYBLUE / PC-B]:", fg="magenta", bold=True)
+    # ⚡ Aspas obrigatórias para suportar espaços no nome
+    click.secho(f'  doxoade lan-git clone "{repo_name}" . --web --host {host_ip}', fg="yellow", bold=True)
+    click.secho("  (Ou navegue no browser acima para baixar ZIP ou usar o Bloco de Notas)", fg="white")
+    click.secho("============================================================", fg="cyan")
+
+    stop_signal = threading.Event()
     try:
-        while True:
-            time.sleep(1)
+        # Permite ao Windows interceptar o Ctrl+C com resposta imediata
+        while not stop_signal.is_set():
+            stop_signal.wait(timeout=0.5)
     except KeyboardInterrupt:
         click.echo("\n[INFO] Encerrando Portal Web e liberando portas...")
     finally:
         portal.stop()
         click.secho("[OK] Portal Web finalizado com segurança.", fg="green")
-
 
 # =====================================================================
 # COMANDO: DISCOVER (CLIENT)
@@ -406,30 +416,57 @@ def cmd_pull(repo_path: str, repo: Optional[str], host: Optional[str], udp_port:
             if not (files_changed or files_new or files_deleted):
                 click.secho("  ℹ️  Nenhuma alteração de arquivo detectada.", fg="white")
     else:
-        # PLANO B: Divergência / Conflito
-        click.secho("\n  ⚠ [CONFLITO DE MERGE DETECTADO]", fg="yellow", bold=True)
-        click.secho(f"  O Git encontrou divergências ao mesclar '{sync_branch}' em '{original_branch}'.", fg="white")
-        click.secho(f"  Seu ambiente permanece no branch '{original_branch}', mas com marcadores de conflito.", fg="white")
-
-        # Exibir conflitos
-        ok_status, status_out, _, _ = GitSyncEngine._run_git_forensic(abs_path, ["status", "--porcelain"])
-        if ok_status and status_out:
-            click.secho("\n  🔴 Arquivos em Conflito:", fg="red", bold=True)
-            for line in status_out.splitlines():
-                if line.startswith(('UU', 'AA', 'DD', 'UD', 'DU', 'AU', 'UA')):
-                    click.echo(f"     • {line[3:].strip()}")
-
-        click.secho("\n  🛠️ [OPÇÕES DE RESOLUÇÃO]", fg="magenta", bold=True)
-        click.echo("  • Para concluir a integração após editar os arquivos:")
-        click.echo("     git add . && git commit --no-edit")
-        click.echo(f"  • Para descartar as alterações do Host e voltar 100% limpo ao '{original_branch}':")
-        click.echo("     git merge --abort")
+        # 🛡️ PROTEÇÃO DE INTEGRIDADE: Auto-Abort em caso de conflito
+        click.secho("\n  ⚠ [DIVERGÊNCIA DETECTADA NO LIVE-SYNC]", fg="yellow", bold=True)
+        click.secho(f"  O rascunho do Host diverge do histórico atual de '{original_branch}'.", fg="white")
+        click.secho("  🛡️ [AUTO-PROTEÇÃO] Abortando a fusão para evitar marcadores de conflito em arquivos de código...", fg="cyan")
+        GitSyncEngine._run_git_forensic(abs_path, ["merge", "--abort"])
+        click.secho(f"  ✔ Branch '{original_branch}' restaurado e 100% íntegro.", fg="green")
+        click.secho(f"\n  💡 Para testar o rascunho do Host em isolamento sem afetar o '{original_branch}':", fg="yellow")
+        click.echo(f"     git checkout {sync_branch}")
 
     # Confirmação final do branch
     ok_final, final_b, _, _ = GitSyncEngine._run_git_forensic(abs_path, ["branch", "--show-current"])
     current_active = final_b.strip() if ok_final and final_b.strip() else original_branch
     click.secho(f"\n  ✔ [BRANCH ATIVO] Seu repositório está no branch: '{current_active}'.", fg="green", bold=True)
     return
+
+# =====================================================================
+# COMANDO: REPAIR (AUTO-RECUPERAÇÃO DE RAMIFICAÇÃO E LIMPEZA)
+# =====================================================================
+@lan_git_cli.command(name="repair")
+@click.argument("repo_path", default=".", type=click.Path(exists=True))
+def cmd_repair(repo_path: str):
+    """Diagnostica e recupera automaticamente o repositório de merges travados e conflitos."""
+    abs_path = os.path.abspath(repo_path)
+    click.secho("============================================================", fg="cyan")
+    click.secho("          DOXOADE LAN GIT - AUTO-REPARO DE REPOSITÓRIO", fg="green", bold=True)
+    click.secho("============================================================", fg="cyan")
+
+    # 1. Aborta merges pendentes (MERGE_HEAD)
+    git_dir = os.path.join(abs_path, ".git")
+    if os.path.exists(os.path.join(git_dir, "MERGE_HEAD")):
+        click.secho("  ⚠ Merge pendente detectado. Abortando com segurança...", fg="yellow")
+        GitSyncEngine._run_git_forensic(abs_path, ["merge", "--abort"])
+        click.secho("  ✔ Merge pendente cancelado.", fg="green")
+
+    # 2. Limpa arquivos com marcadores literais de conflito no stage
+    GitSyncEngine._run_git_forensic(abs_path, ["reset", "HEAD", "*pty_status.json*", "*--userdir~*"])
+    
+    # 3. Retorna ao main caso esteja preso em dox-live ou dox-live-sync
+    ok_b, curr_b, _, _ = GitSyncEngine._run_git_forensic(abs_path, ["branch", "--show-current"])
+    current_branch = curr_b.strip() if ok_b else ""
+    if current_branch in ("dox-live", "dox-live-sync"):
+        click.secho(f"  ⚠ Repositório está na branch temporária '{current_branch}'. Retornando ao 'main'...", fg="yellow")
+        GitSyncEngine._run_git_forensic(abs_path, ["checkout", "main"])
+
+    # 4. Status final
+    ok_st, status_out, _, _ = GitSyncEngine._run_git_forensic(abs_path, ["status", "--short"])
+    if not status_out.strip():
+        click.secho("\n✔ [100% RECUPERADO] Árvore de trabalho limpa e sincronizável.", fg="green", bold=True)
+    else:
+        click.secho(f"\nℹ Arquivos modificados remanescentes:\n{status_out}", fg="cyan")
+    click.secho("============================================================", fg="cyan")
 
 
 # =====================================================================

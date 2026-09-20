@@ -9,14 +9,14 @@
   - Comandos de UX: doc:unindent (resiliente a TABs e espaços) e toggle-indent-guides (Ctrl+Alt+I).
   Compliance: ProDeNov 1.2.1, PASC-6.1.
 ]]
-local core = require "core"
-local config = require "core.config"
-local style = require "core.style"
+local core    = require "core"
+local config  = require "core.config"
+local style   = require "core.style"
 local command = require "core.command"
-local keymap = require "core.keymap"
-local Doc = require "core.doc"
+local keymap  = require "core.keymap"
+local Doc     = require "core.doc"
 local DocView = require "core.docview"
-local syntax = require "core.syntax"
+local syntax  = require "core.syntax"
 
 -- =============================================================================
 -- 1. POLYFILLS DE RENDERIZAÇÃO SEGURA
@@ -42,50 +42,90 @@ local function draw_text_safe(font, text, x, y, color)
 end
 
 -- =============================================================================
--- 2. BLINDAGEM IDEMPOTENTE DE SINTAXE PYTHON (RESTAURADA)
+-- 🎨 COLORAÇÃO DE DOCSTRINGS PYTHON (""" ... """)
 -- =============================================================================
-local function sanitize_python_syntax(syn)
-  if not syn or type(syn.patterns) ~= "table" then return end
-  if syn._doxoade_python_shielded then return end
+local DOCSTRING_GREEN_DARK = { 21, 128, 61, 255 }        -- #15803d
+local DOCSTRING_GREEN_MEDIUM = { 34, 197, 94, 255 }      -- #22c55e  
+local DOCSTRING_GREEN_LIGHT = { 74, 222, 128, 255 }      -- #4ade80
+local DOCSTRING_GREEN_PALE = { 134, 239, 172, 255 }      -- #86efac
 
-  local is_python = (syn.name == "Python") or
-      (syn.files and type(syn.files) == "table" and syn.files[1] == "%.py$")
-  if not is_python then return end
-  syn._doxoade_python_shielded = true
+-- Aplica as cores ao style.syntax
+style.syntax = style.syntax or {}
+style.syntax["string.docstring"] = DOCSTRING_GREEN_MEDIUM
+style.syntax["string.docstring.delimiter"] = DOCSTRING_GREEN_DARK
 
-  local safe_patterns = {
-    { pattern = { '"""', '"""', '\\' }, type = "string" },
-    { pattern = { "'''", "'''", '\\' }, type = "string" },
-    { pattern = { '[rRbBuUfF]"""', '"""', '\\' }, type = "string" },
-    { pattern = { "[rRbBuUfF]'''", "'''", '\\' }, type = "string" },
-    { pattern = { '[rR][fF]"""', '"""', '\\' }, type = "string" },
-    { pattern = { "[rR][fF]'''", "'''", '\\' }, type = "string" },
-    { pattern = { '[fF][rR]"""', '"""', '\\' }, type = "string" },
-    { pattern = { "[fF][rR]'''", "'''", '\\' }, type = "string" },
-    { pattern = { '[bB][rR]"""', '"""', '\\' }, type = "string" },
-    { pattern = { "[bB][rR]'''", "'''", '\\' }, type = "string" },
-    { pattern = { '[rR][bB]"""', '"""', '\\' }, type = "string" },
-    { pattern = { "[rR][bB]'''", "'''", '\\' }, type = "string" },
-  }
-
-  for i = #safe_patterns, 1, -1 do
-    table.insert(syn.patterns, 1, safe_patterns[i])
-  end
+-- =============================================================================
+-- 2. INJEÇÃO DIRETA DE PATTERNS PYTHON (Docstrings Verdes)
+-- =============================================================================
+local function inject_python_docstring_syntax()
+    -- Verifica se já foi injetado
+    if rawget(_G, "_DOXOADE_PYTHON_DOCSTRINGS_INJECTED") then 
+        return 
+    end
+    
+    -- Encontra o syntax de Python existente
+    local python_syntax = nil
+    if syntax and syntax.items then
+        for _, syn in ipairs(syntax.items) do
+            if syn.name == "Python" or (syn.files and syn.files[1] == "%.py$") then
+                python_syntax = syn
+                break
+            end
+        end
+    end
+    
+    if not python_syntax then 
+        return 
+    end
+    
+    -- Marca como injetado
+    rawset(_G, "_DOXOADE_PYTHON_DOCSTRINGS_INJECTED", true)
+    
+    -- Patterns de docstrings (devem vir PRIMEIRO para ter prioridade)
+    local docstring_patterns = {
+        -- f-strings, r-strings, b-strings com triplas aspas
+        { pattern = { '[fF][rR]"""', '"""', '\\' }, type = "string.docstring" },
+        { pattern = { '[rR][fF]"""', '"""', '\\' }, type = "string.docstring" },
+        { pattern = { '[fF]"""', '"""', '\\' }, type = "string.docstring" },
+        { pattern = { '[rR]"""', '"""', '\\' }, type = "string.docstring" },
+        { pattern = { '[bB]"""', '"""', '\\' }, type = "string.docstring" },
+        { pattern = { '[uU]"""', '"""', '\\' }, type = "string.docstring" },
+        -- Docstrings padrão
+        { pattern = { '"""', '"""', '\\' }, type = "string.docstring" },
+        -- Versão com aspas simples
+        { pattern = { "'''", "'''", '\\' }, type = "string.docstring" },
+    }
+    
+    -- Insere NO INÍCIO da lista de patterns (prioridade máxima)
+    for i = #docstring_patterns, 1, -1 do
+        table.insert(python_syntax.patterns, 1, docstring_patterns[i])
+    end
+    
+    if core.log then
+        core.log("🟢 [DOXOADE] Docstrings Python injetadas com sucesso!")
+    end
 end
 
+-- Executa a injeção imediatamente
+inject_python_docstring_syntax()
+
+-- Hook para futuros syntax loads
 if syntax and syntax.add then
-  local original_syntax_add = syntax.add
-  syntax.add = function(syn, ...)
-    pcall(sanitize_python_syntax, syn)
-    return original_syntax_add(syn, ...)
-  end
+    local original_add = syntax.add
+    syntax.add = function(syn, ...)
+        local result = original_add(syn, ...)
+        if syn.name == "Python" or (syn.files and syn.files[1] == "%.py$") then
+            inject_python_docstring_syntax()
+        end
+        return result
+    end
 end
 
-if syntax and syntax.items then
-  for _, syn in ipairs(syntax.items) do
-    pcall(sanitize_python_syntax, syn)
-  end
-end
+-- if syntax and syntax.items then
+--   for _, syn in ipairs(syntax.items) do
+--     pcall(sanitize_python_syntax, syn)
+--   end
+-- end
 
 -- =============================================================================
 -- 3. CONFIGURAÇÃO DE CORES & PALETAS (Solid Color Baking - Zero Alpha Thrashing)
@@ -93,7 +133,8 @@ end
 config.draw_indent_guides  = config.draw_indent_guides ~= false
 local INDENT_GUIDE_COLOR   = { 42, 40, 48, 255 }    -- Sólido opaco (Cache Hit no rencache)
 local INDENT_GUIDE_ACTIVE  = { 88, 85, 98, 255 }    -- Sólido opaco (Cache Hit no rencache)
-local HIGHLIGHT_BLUE       = { 12, 55, 120, 255 }   -- Sólido opaco (Cache Hit no rencache)
+--local HIGHLIGHT_BLUE       = { 12, 55, 120, 255 }
+local HIGHLIGHT_BLUE       = { 25, 75, 255, 90 }   -- Sólido opaco (Cache Hit no rencache)
 local GUTTER_DIVIDER_WIDTH = 3
 local GUTTER_DIVIDER_COLOR = { 115, 110, 130, 255 }
 local COLOR_DIRTY          = { 234, 179, 8, 255 }
@@ -353,7 +394,8 @@ local _cached_highlight_query = nil
 local _cached_active_indent = -1
 
 local function update_frame_memo(doc, indent_unit)
-  local now = os.clock()
+  -- Usa os.time() para tempo real (os.clock() é tempo de CPU e pode não mudar entre frames)
+  local now = os.time() * 1000 + os.clock()
   if now ~= _last_frame_clock then
     _last_frame_clock = now
     _cached_highlight_query = get_active_highlight_query()
@@ -430,7 +472,7 @@ function DocView:draw_line_body(line_idx, x, y)
           draw_rect_safe(bx, by, rw, 1, { 0, 0, 0, 255 })
           draw_rect_safe(bx, by + bh - 1, rw, 1, { 0, 0, 0, 255 })
           local text_col = get_contrast_color(item.color)
-          draw_text_safe(font, item.text, bx, y, text_col)
+          draw_text_safe(font, item.text, bx, y, text_col)  -- ⚠️ Esta linha está CORRETA
         end
       end
     end
@@ -499,3 +541,10 @@ command.add(nil, {
 keymap.add {
   ["ctrl+alt+i"] = "doxoade:toggle-indent-guides",
 }
+
+-- =============================================================================
+-- 🟢 CARREGA COLORAÇÃO DE DOCSTRINGS PYTHON
+-- =============================================================================
+pcall(function()
+    require "doxoade.commands.lite_xl_systems.template.python_docstrings"
+end)
