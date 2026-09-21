@@ -127,6 +127,132 @@ local function open_in_right_panel(file_path, log_msg)
   return nil
 end
 
+-- ═════════════════════════════════════════════════════════════════
+-- ⚡ AUTO-START DO DAEMON DE SINCRONIZAÇÃO EM BACKGROUND NA IDE
+-- ═════════════════════════════════════════════════════════════════
+local function ensure_note_sync_daemon_running()
+  if rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true then return end
+
+  local py_anchor = (USERDIR or ".") .. (PATHSEP or "/") .. ".doxoade" .. (PATHSEP or "/") .. "python_path.txt"
+  local py_exe = "python"
+  local finfo = system.get_file_info(py_anchor)
+  if finfo and finfo.type == "file" then
+    local f = io.open(py_anchor, "r")
+    if f then
+      local l = f:read("*l") or ""
+      f:close()
+      if l ~= "" then py_exe = l:gsub("[\r\n]", "") end
+    end
+  end
+
+  -- Inicia o daemon silencioso em segundo plano
+  local cmd = string.format('start /b "" "%s" -m doxoade lan-git note --daemon', py_exe)
+  pcall(system.exec, cmd)
+  rawset(_G, "_DOXOADE_NOTE_SYNC_ACTIVE", true)
+  core.redraw = true
+  if core.log then
+    core.log("⚡ [DOXNOTE] Sincronização LAN em background auto-iniciada.")
+  end
+end
+
+-- Auto-disparo 2 segundos após o boot estável da IDE
+if core and core.add_thread then
+  core.add_thread(function()
+    coroutine.yield(2.0)
+    ensure_note_sync_daemon_running()
+  end)
+end
+
+-- ═════════════════════════════════════════════════════════════════
+-- ⚡ DOXNOTE MESH — GESTÃO AUTÔNOMA NA IDE E AUTO-RELOAD DE BUFFER
+-- ═════════════════════════════════════════════════════════════════
+local function is_mesh_daemon_alive()
+  local home_dir = os.getenv("USERPROFILE") or os.getenv("HOME") or "."
+  local state_path = home_dir .. (PATHSEP or "/") .. ".doxoade" .. (PATHSEP or "/") .. "mesh_state.json"
+  local finfo = system and system.get_file_info and system.get_file_info(state_path)
+  if finfo and finfo.type == "file" then
+    local f = io.open(state_path, "r")
+    if f then
+      local data = f:read("*a") or ""
+      f:close()
+      local updated_at = tonumber(data:match('"updated_at":%s*([%d%.]+)')) or 0
+      local status = data:match('"status":%s*"([^"]+)"')
+      -- Se atualizou há menos de 5 segundos e não está offline, o daemon está vivo!
+      if (os.time() - updated_at) < 6 and status ~= "offline" then
+        return true, status, data:match('"peer_name":%s*"([^"]+)"'), data:match('"peer_ip":%s*"([^"]+)"')
+      end
+    end
+  end
+  return false, "offline", nil, nil
+end
+
+local function start_mesh_service_in_background()
+  local alive = is_mesh_daemon_alive()
+  if alive then return end
+
+  local py_anchor = (USERDIR or ".") .. (PATHSEP or "/") .. ".doxoade" .. (PATHSEP or "/") .. "python_path.txt"
+  local py_exe = "python"
+  local finfo = system.get_file_info and system.get_file_info(py_anchor)
+  if finfo and finfo.type == "file" then
+    local f = io.open(py_anchor, "r")
+    if f then
+      local l = f:read("*l") or ""
+      f:close()
+      if l ~= "" then py_exe = l:gsub("[\r\n]", "") end
+    end
+  end
+
+  -- Inicia o serviço P2P silencioso e desacoplado
+  local cmd
+  if PLATFORM == "Windows" then
+    cmd = string.format('start /b "" "%s" -m doxoade lan-git note service', py_exe)
+  else
+    cmd = string.format('"%s" -m doxoade lan-git note service &', py_exe)
+  end
+  pcall(system.exec, cmd)
+  if core.log then
+    core.log("⚡ [DOXNOTE MESH] Serviço P2P auto-iniciado em segundo plano.")
+  end
+end
+
+-- Corrotina de Monitoramento Contínuo: Auto-Start + Auto-Reload do Buffer Aberto
+if core and core.add_thread then
+  core.add_thread(function()
+    -- 1. Aguarda 1.5s após o boot da IDE e inicializa a malha
+    coroutine.yield(1.5)
+    start_mesh_service_in_background()
+
+    -- 2. Loop Sentinela: Recarrega o texto na tela se o outro PC enviar alteração
+    local last_seen_mtime = 0
+    while true do
+      coroutine.yield(0.5)
+      
+      -- Verifica se o shared_notes.md está aberto e se mudou no disco
+      for _, doc in ipairs(core.docs or {}) do
+        if doc.filename and doc.filename:find("shared_notes.md") and not doc:is_dirty() then
+          local finfo = system.get_file_info and system.get_file_info(doc.filename)
+          if finfo and finfo.mtime and finfo.mtime ~= last_seen_mtime then
+            last_seen_mtime = finfo.mtime
+            -- Recarrega o conteúdo no editor preservando seleção
+            local f = io.open(doc.filename, "r")
+            if f then
+              local new_text = f:read("*a")
+              f:close()
+              local l1, c1, l2, c2 = 1, 1, 1, 1
+              if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
+              doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
+              doc:insert(1, 1, new_text)
+              doc:clean()
+              if doc.set_selection then doc:set_selection(l1, c1, l2, c2) end
+              core.redraw = true
+            end
+          end
+        end
+      end
+    end
+  end)
+end
+
 -- =============================================================================
 -- 3. COMANDOS SOBERANOS DO DUMPPOT E PAINÉIS
 -- =============================================================================

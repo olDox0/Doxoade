@@ -6,6 +6,7 @@ import os
 import sys
 import time
 import re
+import json
 import threading
 import shutil
 import subprocess
@@ -115,8 +116,10 @@ def cmd_share(repo_path: str, project: Optional[str], port: int, http_port: int,
     daemon_server = GitDaemonServer(abs_path, port=port)
     daemon_server.start()
 
-    http_server = GitHTTPServer(abs_path, port=http_port)
-    http_server.start()
+    # O LANWebPortal provê simultaneamente Git Smart HTTP + Bloco de Notas LAN
+    password = click.prompt("Senha do portal web", hide_input=True, confirmation_prompt=True)
+    portal_server = LANWebPortal(abs_path, password=password, host_ip=host_ip, port=http_port)
+    portal_server.start()
 
     beacon = LANBeaconHost(manifest, udp_port=udp_port)
     beacon_thread = threading.Thread(target=beacon.start, daemon=True)
@@ -158,9 +161,9 @@ def cmd_share(repo_path: str, project: Optional[str], port: int, http_port: int,
     finally:
         beacon.stop()
         daemon_server.stop()
-        http_server.stop()
+        if 'portal_server' in locals() and portal_server:
+            portal_server.stop()
         click.secho("[OK] Servidores finalizados com segurança.", fg="green")
-
 
 # =====================================================================
 # COMANDO: WEB (PORTAL MULTI-PROJETOS E CLONE HTTP)
@@ -625,136 +628,82 @@ def cmd_clone(arg1: Optional[str], arg2: Optional[str], dest: Optional[str], hos
     click.echo("  doxoade lan-git pull")
 
 # ═════════════════════════════════════════════════════════════════════
-# COMANDO SOBERANO: NOTE (ARQUIVO GLOBAL + SERVIÇO DE SINCRONIZAÇÃO)
+# COMANDO: NOTE (DOXNOTE MESH - CONTROLE, DIAGNÓSTICO E SERVIÇO)
 # ═════════════════════════════════════════════════════════════════════
-@lan_git_cli.command(name="note")
-@click.argument("text", required=False, default=None)
-@click.option("--pull", is_flag=True, help="Baixa as notas do Host para o arquivo global.")
-@click.option("--push", is_flag=True, help="Envia as notas do arquivo global para o Host.")
-@click.option("--host", default=None, help="IP do Host (padrão: auto-descoberta via LAN).")
-@click.option("--http-port", default=8080, help="Porta HTTP.")
-@click.option("--edit", is_flag=True, help="Abre o arquivo global no editor configurado.")
-@click.option("--daemon", is_flag=True, help="Inicia o serviço em segundo plano para sincronização contínua.")
-def cmd_note(text: Optional[str], pull: bool, push: bool, host: Optional[str], http_port: int, edit: bool, daemon: bool):
-    """Gerencia o Bloco de Notas Global compartilhado entre máquinas e silos."""
-    import urllib.request
-    
-    # 🌍 Caminho Global Canônico: ~/.doxoade/shared_notes.md
-    home = os.path.expanduser("~")
-    global_dir = os.path.join(home, ".doxoade")
-    os.makedirs(global_dir, exist_ok=True)
-    notes_path = os.path.join(global_dir, "shared_notes.md")
+@lan_git_cli.group(name="note")
+def note_group():
+    """Sistema de Sincronização P2P para o Bloco de Notas Global da IDE."""
+    pass
 
-    if not os.path.exists(notes_path):
-        with open(notes_path, "w", encoding="utf-8") as f:
-            f.write("# 📝 Notas Compartilhadas (Amaranth <-> Bluebaby)\n\n")
-    
-    if not notes_path.exists():
-        notes_path.write_text("# 📝 Notas Compartilhadas (Amaranth <-> Bluebaby)\n\n", encoding="utf-8")
 
-    # 1. Abrir na IDE
-    if edit:
-        click.echo(f"Abrindo {notes_path}...")
-        if os.name == "nt":
-            os.system(f'start "" "{notes_path}"')
-        else:
-            os.system(f'xdg-open "{notes_path}"')
+@note_group.command(name="service")
+@click.option("--password", "-p", default=None, help="Chave de pareamento da malha.")
+def cmd_note_service(password: Optional[str]):
+    """Inicia o daemon P2P do DoxNote Mesh em background/terminal."""
+    from doxoade.commands.lan_git.note_mesh.mesh_engine import NoteMeshEngine, UDP_PORT, TCP_PORT
+    
+    engine = NoteMeshEngine(password=password)
+    engine.start()
+
+    click.secho("============================================================", fg="cyan")
+    click.secho("          DOXNOTE MESH — SERVIÇO P2P DE NOTAS ATIVO", fg="green", bold=True)
+    click.secho("============================================================", fg="cyan")
+    click.echo(f"  Arquivo Global : {engine.notes_file}")
+    click.echo(f"  Porta Beacon   : {UDP_PORT}/UDP (Descoberta P2P)")
+    click.echo(f"  Porta Sync     : {TCP_PORT}/TCP (Túnel Criptografado)")
+    click.echo(f"  Dispositivo    : {engine.hostname} ({engine.local_ip})")
+    click.secho("============================================================", fg="cyan")
+    click.secho("📡 Malha P2P Ativa. Sincronizando com a IDE em tempo real... (Ctrl+C para sair)\n", fg="yellow")
+
+    try:
+        while True:
+            time.sleep(1.0)
+    except KeyboardInterrupt:
+        click.echo("\n[INFO] Encerrando DoxNote Mesh...")
+    finally:
+        engine.stop()
+        click.secho("[OK] Serviço P2P finalizado.", fg="green")
+
+
+@note_group.command(name="status")
+def cmd_note_status():
+    """Exibe o diagnóstico e estado vivo da malha DoxNote Mesh."""
+    from pathlib import Path
+    state_file = Path.home() / ".doxoade" / "mesh_state.json"
+    
+    click.secho("============================================================", fg="cyan")
+    click.secho("          DIAGNÓSTICO DA MALHA DOXNOTE MESH", fg="green", bold=True)
+    click.secho("============================================================", fg="cyan")
+
+    if not state_file.exists():
+        click.secho("  Status: DESCONECTADO / SERVIÇO INATIVO", fg="yellow")
+        click.echo("  Execute 'doxoade lan-git note service' para iniciar.")
         return
 
-    # Descobre o host se necessário
-    target_host = host
-    if not target_host and (pull or push or text or daemon):
-        peers = LANBeaconClient.discover_peers(timeout=1.5)
-        target_host = peers[0].ip if peers else "127.0.0.1"
+    try:
+        data = json.loads(state_file.read_text(encoding="utf-8"))
+        status = data.get("status", "unknown").upper()
+        status_color = "green" if status == "CONNECTED" else "yellow"
 
-    base_url = f"http://{target_host}:{http_port}/api/notepad"
+        click.secho(f"  Status Geral  : {status}", fg=status_color, bold=True)
+        click.echo(f"  Dispositivo   : {data.get('hostname')} ({data.get('local_ip')})")
+        click.echo(f"  Par Conectado : {data.get('peer_name')} ({data.get('peer_ip')})")
+        click.echo(f"  Último Sync   : {data.get('last_sync')}")
+        click.echo(f"  Latência RTT  : {data.get('rtt_ms')} ms")
+    except Exception as e:
+        click.secho(f"  Erro ao ler estado: {e}", fg="red")
+    click.secho("============================================================", fg="cyan")
 
-    # 2. Modo Daemon (Serviço de Sincronização Contínua Bidirecional)
-    if daemon:
-        click.secho(f"⚡ [DAEMON] Serviço de notas ativo observando {notes_path}", fg="green", bold=True)
-        click.echo(f"   Conectado ao Host: {target_host}:{http_port} (Ctrl+C para encerrar)\n")
-        last_mtime = notes_path.stat().st_mtime
-        current_rev = 0
-        try:
-            while True:
-                time.sleep(0.5)
-                # A. Detecta se VOCÊ salvou o arquivo localmente -> Envia para o Host (PUSH)
-                curr_mtime = notes_path.stat().st_mtime
-                if curr_mtime != last_mtime:
-                    last_mtime = curr_mtime
-                    content = notes_path.read_text(encoding="utf-8")
-                    try:
-                        req = urllib.request.Request(
-                            base_url,
-                            data=content.encode("utf-8"),
-                            headers={"Content-Type": "text/plain; charset=utf-8"},
-                            method="POST"
-                        )
-                        with urllib.request.urlopen(req, timeout=2.0) as resp:
-                            if resp.status == 200:
-                                t_str = time.strftime("%H:%M:%S")
-                                click.secho(f"  [{t_str}] 📤 [PUSH] Notas locais enviadas para o Host.", fg="cyan")
-                    except Exception:
-                        pass
 
-                # B. Detecta se o OUTRO computador atualizou -> Baixa para o disco (PULL)
-                try:
-                    poll_url = f"{base_url}?rev={current_rev}"
-                    req = urllib.request.Request(poll_url, headers={"User-Agent": "Doxoade-Daemon"})
-                    with urllib.request.urlopen(req, timeout=2.0) as resp:
-                        if resp.status == 200:
-                            rev_header = resp.headers.get("X-Notepad-Revision")
-                            if rev_header:
-                                current_rev = int(rev_header)
-                            remote_text = resp.read().decode("utf-8")
-                            local_text = notes_path.read_text(encoding="utf-8") if notes_path.exists() else ""
-                            if remote_text != local_text:
-                                notes_path.write_text(remote_text, encoding="utf-8")
-                                last_mtime = notes_path.stat().st_mtime
-                                t_str = time.strftime("%H:%M:%S")
-                                click.secho(f"  [{t_str}] 📥 [PULL] Notas atualizadas pelo outro dispositivo.", fg="green")
-                except Exception:
-                    pass
-
-        except KeyboardInterrupt:
-            click.echo("\n[INFO] Serviço de notas encerrado.")
-            return
-
-    # 3. Puxar do Host (Pull)
-    if pull:
-        try:
-            req = urllib.request.Request(base_url, headers={"User-Agent": "Doxoade-Note"})
-            with urllib.request.urlopen(req, timeout=4.0) as resp:
-                if resp.status == 200:
-                    content = resp.read().decode("utf-8")
-                    notes_path.write_text(content, encoding="utf-8")
-                    click.secho(f"✔ [PULL] {notes_path} sincronizado com sucesso.", fg="green", bold=True)
-                    return
-        except Exception as e:
-            click.secho(f"✖ [ERRO] {e}", fg="red")
-            return
-
-    # 4. Envio rápido via CLI
-    if text:
-        curr = notes_path.read_text(encoding="utf-8") if notes_path.exists() else ""
-        new_content = (curr + "\n" + text).strip()
-        notes_path.write_text(new_content, encoding="utf-8")
-        try:
-            req = urllib.request.Request(
-                base_url,
-                data=new_content.encode("utf-8"),
-                headers={"Content-Type": "text/plain; charset=utf-8"},
-                method="POST"
-            )
-            with urllib.request.urlopen(req, timeout=3.0):
-                click.secho("✔ Nota gravada localmente e propagada para a rede.", fg="green")
-        except Exception as e:
-            click.secho(f"Nota salva localmente (sem conexão remota: {e})", fg="yellow")
-        return
-
-    # 5. Exibir notas atuais no console
-    click.secho(f"--- [ {notes_path} ] ---", fg="cyan", bold=True)
-    click.echo(notes_path.read_text(encoding="utf-8"))
+@note_group.command(name="open")
+def cmd_note_open():
+    """Abre o arquivo global shared_notes.md no editor padrão."""
+    from pathlib import Path
+    p = Path.home() / ".doxoade" / "shared_notes.md"
+    if os.name == "nt":
+        os.system(f'start "" "{p}"')
+    else:
+        os.system(f'xdg-open "{p}"')
 
 if __name__ == "__main__":
     lan_git_cli()

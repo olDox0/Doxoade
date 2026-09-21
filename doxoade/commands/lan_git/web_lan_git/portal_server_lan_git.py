@@ -355,7 +355,11 @@ class SecurePortalRequestHandler(BaseHTTPRequestHandler):
             return
 
         # Barreira de Autenticação Estrita
-        if not self._is_authenticated():
+        is_local_lan = client_ip.startswith("192.168.") or client_ip.startswith("10.") or client_ip.startswith("127.") or client_ip == "localhost"
+        is_note_api = path in ("/api/notepad", "/api/notepad/events")
+
+        # Barreira de Autenticação: protege o Dashboard web, mas permite a API do Bloco de Notas na LAN
+        if not self._is_authenticated() and not (is_note_api and is_local_lan):
             if path != "/favicon.ico":
                 click.secho(f"  [AUTH-BLOQUEIO] Tentativa não autenticada em '{path}' de {client_ip}.", fg="yellow")
             self.send_response(302)
@@ -562,7 +566,8 @@ class SecurePortalRequestHandler(BaseHTTPRequestHandler):
 
         # ⚡ ATUALIZAÇÃO REATIVA DO BLOCO DE NOTAS EM RAM + BROADCAST
         if path == "/api/notepad":
-            if not self._is_authenticated():
+            is_local_lan = client_ip.startswith("192.168.") or client_ip.startswith("10.") or client_ip.startswith("127.") or client_ip == "localhost"
+            if not self._is_authenticated() and not is_local_lan:
                 self.send_response(401)
                 self.end_headers()
                 self.wfile.write(b"Nao autenticado.")

@@ -167,28 +167,49 @@ core.add_thread(function()
       5
     )
 
-    -- 6. Scratchpad Dumppot
+    -- 6. Botão DoxNote Mesh Reativo no Rodapé
     register_status_item(
-      "doxoade:shared-hub-menu",
+      "doxoade:open-shared-notes",
       StatusView.Item.LEFT,
       function()
-        local is_sync_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
-        if is_sync_active then
-          return {
-            { 192, 132, 252, 255 }, "📝 Shared Notes ",
-            DIVIDER_COLOR, "| ",
-            { 34, 197, 94, 255 }, "⚡ Sync Ativa ",
-            DIVIDER_COLOR, "| "
-          }
-        else
-          return {
-            { 192, 132, 252, 255 }, "📝 Shared Notes ",
-            DIVIDER_COLOR, "| "
-          }
+        local home_dir = os.getenv("USERPROFILE") or os.getenv("HOME") or "."
+        local state_path = home_dir .. (PATHSEP or "/") .. ".doxoade" .. (PATHSEP or "/") .. "mesh_state.json"
+        
+        local status_text = "Offline"
+        local status_color = { 150, 150, 150, 255 }
+
+        local finfo = system and system.get_file_info and system.get_file_info(state_path)
+        if finfo and finfo.type == "file" then
+          local f = io.open(state_path, "r")
+          if f then
+            local data = f:read("*a") or ""
+            f:close()
+            local updated_at = tonumber(data:match('"updated_at":%s*([%d%.]+)')) or 0
+            local status = data:match('"status":%s*"([^"]+)"')
+            local peer = data:match('"peer_name":%s*"([^"]+)"')
+            
+            -- Só exibe ativo se o heartbeat tiver menos de 5 segundos
+            if (os.time() - updated_at) < 6 then
+              if status == "connected" then
+                status_text = "⚡ " .. (peer or "Conectado")
+                status_color = { 34, 197, 94, 255 } -- Verde Vivo
+              elseif status == "searching" then
+                status_text = "Procurando par..."
+                status_color = { 234, 179, 8, 255 } -- Amarelo
+              end
+            end
+          end
         end
+
+        return {
+          { 192, 132, 252, 255 }, "📝 Note ",
+          DIVIDER_COLOR, "| ",
+          status_color, status_text .. " ",
+          DIVIDER_COLOR, "| "
+        }
       end,
       function()
-        command.perform("doxoade:shared-hub-menu")
+        command.perform("doxoade:open-shared-menu")
       end,
       6
     )

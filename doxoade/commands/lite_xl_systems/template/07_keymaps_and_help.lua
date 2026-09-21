@@ -5,27 +5,28 @@
   - Enter no buffer [Busca]: Salto instantâneo para o arquivo e linha exata.
   - Fila fatiada não-bloqueante para manter a interface a 60 FPS durante varreduras pesadas.
 ]]
-local core = require "core"
 local command = require "core.command"
-local keymap = require "core.keymap"
+local common  = require "core.common"
+local core    = require "core"
 local DocView = require "core.docview"
+local keymap  = require "core.keymap"
 
 keymap.add {
-  ["ctrl+alt+shift+f"] = "doxoade:global-project-search",
-  ["ctrl+alt+shift+d"] = "root:move-following-tabs-to-opposite-panel",
   ["ctrl+alt+d"]       = "root:move-tab-to-opposite-panel",
-  ["ctrl+alt+x"]       = "root:close-following-tabs",
-  ["ctrl+shift+u"]     = "doxoade:open-user-settings",
   ["ctrl+alt+i"]       = "doxoade:toggle-indent-guides",
-  ["ctrl+o"]           = "doxoade:open-file",
+  ["ctrl+alt+shift+d"] = "root:move-following-tabs-to-opposite-panel",
+  ["ctrl+alt+shift+f"] = "doxoade:global-project-search",
   ["ctrl+alt+shift+k"] = "doxoade:diagnose-live",
+  ["ctrl+alt+x"]       = "root:close-following-tabs",
+  ["ctrl+o"]           = "doxoade:open-file",
+  ["ctrl+shift+u"]     = "doxoade:open-user-settings",
 }
 
 local IGNORED_DIRS = {
-  ["^%.git$"] = true, ["^venv$"] = true, ["^%.venv$"] = true, ["^env$"] = true,
-  ["^__pycache__$"] = true, ["^build$"] = true, ["^dist$"] = true,
-  ["^node_modules$"] = true, ["^%.idea$"] = true, ["^%.vscode$"] = true,
-  ["^%.pytest_cache$"] = true, ["^%.mypy_cache$"] = true, ["^%.ruff_cache$"] = true,
+  ["^%.git$"]           = true, ["^venv$"] = true, ["^%.venv$"] = true, ["^env$"] = true,
+  ["^__pycache__$"]     = true, ["^build$"] = true, ["^dist$"] = true,
+  ["^node_modules$"]    = true, ["^%.idea$"] = true, ["^%.vscode$"] = true,
+  ["^%.pytest_cache$"]  = true, ["^%.mypy_cache$"] = true, ["^%.ruff_cache$"] = true,
   ["^%.doxoade_cache$"] = true,
 }
 
@@ -50,11 +51,11 @@ local function execute_global_search_bridge(query)
   end
 
   state.is_searching = true
-  state.query = query
-  state.results = {}
-  state.total_hits = 0
-  state.total_files = 0
-  core.redraw = true -- Atualiza o HUD imediatamente para "⏳ Searching..."
+  state.query        = query
+  state.results      = {}
+  state.total_hits   = 0
+  state.total_files  = 0
+  core.redraw        = true  -- Atualiza o HUD imediatamente para "⏳ Searching..."
 
   -- Garante que o Dock está aberto
   command.perform("doxoade:toggle-search-dock")
@@ -161,11 +162,11 @@ end
 -- =============================================================================
 local function execute_global_search(query)
   if not query or query:match("^%s*$") then return end
-  local start_time = os.clock()
-  local roots = get_all_project_roots()
+  local start_time     = os.clock()
+  local roots          = get_all_project_roots()
   local search_results = {}
-  local total_hits = 0
-  local total_files = 0
+  local total_hits     = 0
+  local total_files    = 0
 
   local is_case_sensitive = (query:lower() ~= query)
   local query_needle = is_case_sensitive and query or query:lower()
@@ -616,114 +617,171 @@ local function _doxoade_build_cache_sync()
     end
 end
 
+-- ═════════════════════════════════════════════════════════════════════
+-- 🔍 DOXOADE SOVEREIGN MULTI-PROJECT OPEN FILE (CTRL+O NATIVO)
+-- Suporte a 3+ Projetos simultâneos, normalização \ para / e caminhos absolutos.
+-- ═════════════════════════════════════════════════════════════════════
+
+local function _doxoade_get_all_projects()
+  local projects = {}
+  local seen = {}
+  local function add_proj(p)
+    if not p then return end
+    local raw = type(p) == "table" and (p.path or p.name) or tostring(p)
+    if not raw or raw == "" then return end
+    local abs = system.absolute_path(raw) or raw
+    local clean = abs:gsub("\\", "/"):gsub("/+$", "")
+    local key = clean:lower()
+    if not seen[key] then
+      seen[key] = true
+      local name = type(p) == "table" and p.name or (clean:match("([^/]+)$") or clean)
+      table.insert(projects, { path = clean, name = name })
+    end
+  end
+  if core.project_directories then
+    for _, p in ipairs(core.project_directories) do
+      add_proj(p)
+    end
+  end
+  if #projects == 0 then
+    add_proj(core.project_dir or ".")
+  end
+  return projects
+end
+
+local function _doxoade_scan_project_files(root_path, max_depth)
+  local files = {}
+  local ignored = {
+    ["^%.git$"] = true, ["^venv$"] = true, ["^%.venv$"] = true, ["^env$"] = true,
+    ["^__pycache__$"] = true, ["^build$"] = true, ["^dist$"] = true,
+    ["^node_modules$"] = true, ["^%.idea$"] = true, ["^%.vscode$"] = true,
+    ["^%.doxoade_cache$"] = true, ["^w64devkit$"] = true
+  }
+  local ignored_ext = {
+    ["pyc"] = true, ["pyo"] = true, ["pyd"] = true, ["exe"] = true, ["dll"] = true,
+    ["so"] = true, ["zip"] = true, ["tar"] = true, ["gz"] = true, ["bin"] = true,
+    ["thumb%.rlebin"] = true, ["canvas%.rlebin"] = true
+  }
+
+  local function traverse(dir, rel, depth)
+    if depth > (max_depth or 12) or #files > 8000 then return end
+    local items = system.list_dir(dir) or {}
+    for _, item in ipairs(items) do
+      if not ignored[item] then
+        local full = dir .. "/" .. item
+        local rel_path = (rel == "") and item or (rel .. "/" .. item)
+        local finfo = system.get_file_info(full)
+        if finfo then
+          if finfo.type == "dir" then
+            traverse(full, rel_path, depth + 1)
+          elseif finfo.type == "file" then
+            local ext = item:match("%.([%w_]+)$") or ""
+            if not ignored_ext[ext:lower()] then
+              table.insert(files, {
+                relative = rel_path:gsub("\\", "/"),
+                absolute = full:gsub("\\", "/")
+              })
+            end
+          end
+        end
+      end
+    end
+  end
+
+  traverse(root_path, "", 0)
+  return files
+end
+
+local _GLOBAL_FILE_CACHE = {
+  candidates = {},
+  lookup = {},
+  last_scan = 0,
+  last_sig = ""
+}
+
+local function _doxoade_refresh_cache_if_needed()
+  local projects = _doxoade_get_all_projects()
+  local sig = ""
+  for _, p in ipairs(projects) do sig = sig .. p.path .. "|" end
+
+  -- Reutiliza cache se foi escaneado há menos de 15 segundos e os projetos não mudaram
+  local now = os.clock()
+  if (now - _GLOBAL_FILE_CACHE.last_scan < 15.0) and (sig == _GLOBAL_FILE_CACHE.last_sig) and #_GLOBAL_FILE_CACHE.candidates > 0 then
+    return _GLOBAL_FILE_CACHE.candidates, _GLOBAL_FILE_CACHE.lookup
+  end
+
+  local candidates = {}
+  local lookup = {}
+  local is_multi = (#projects > 1)
+
+  for _, proj in ipairs(projects) do
+    local p_files = _doxoade_scan_project_files(proj.path)
+    for _, item in ipairs(p_files) do
+      -- Se for multi-projeto, adiciona a tag [NomeDoProjeto] no início
+      local display = is_multi and string.format("[%s] %s", proj.name, item.relative) or item.relative
+      table.insert(candidates, display)
+      lookup[display] = item.absolute
+    end
+  end
+
+  _GLOBAL_FILE_CACHE.candidates = candidates
+  _GLOBAL_FILE_CACHE.lookup = lookup
+  _GLOBAL_FILE_CACHE.last_scan = now
+  _GLOBAL_FILE_CACHE.last_sig = sig
+  return candidates, lookup
+end
+
 command.add(nil, {
-    ["doxoade:open-file"] = function()
-        -- SCAN SÍNCRONO (rápido para projetos < 5000 arquivos)
-        _doxoade_build_cache_sync()
+  ["doxoade:open-file"] = function()
+    local candidates, lookup = _doxoade_refresh_cache_if_needed()
+
+    core.command_view:enter("Abrir Arquivo (Multi-Projeto)", {
+      submit = function(item)
+        if not item or item:match("^%s*$") then return end
         
-        local all_files = _doxoade_file_cache
-        if #all_files == 0 then
-            if core.log then core.log("⚠️ [Ctrl+O] Nenhum arquivo encontrado nas raízes de projeto") end
-            return
+        -- 1. Tenta recuperar o caminho absoluto mapeado diretamente
+        local abs_target = lookup[item]
+        
+        -- 2. Fallback: Se o usuário digitou um caminho manual que não está na lista
+        if not abs_target then
+          local clean_input = item:gsub("^%[[^%]]+%]%s*", ""):gsub("\\", "/")
+          
+          -- Se for caminho absoluto do Windows (ex: C:/...)
+          if clean_input:find("^[a-zA-Z]:") then
+            abs_target = clean_input
+          else
+            -- Procura em todas as raízes de projetos conhecidas
+            for _, p in ipairs(_doxoade_get_all_projects()) do
+              local candidate = p.path .. "/" .. clean_input
+              if system.get_file_info(candidate) then
+                abs_target = candidate
+                break
+              end
+            end
+            if not abs_target and core.project_dir then
+              abs_target = (system.absolute_path(core.project_dir) or core.project_dir):gsub("\\", "/") .. "/" .. clean_input
+            end
+          end
         end
-        
-        -- Constrói labels e mapa
-        local labels = {}
-        local path_map = {}
-        for _, f in ipairs(all_files) do
-            local prefix = f.is_open and "● " or "  "
-            local label = prefix .. f.relative
-            table.insert(labels, label)
-            path_map[label] = f.path
+
+        if abs_target then
+          local doc = core.open_doc(abs_target)
+          if doc then
+            core.root_view:open_doc(doc)
+            core.log(string.format("📄 Aberto: %s", abs_target:match("[^/]+$") or abs_target))
+          end
+        else
+          core.error(string.format("Arquivo não localizado: %s", item))
         end
-        
-        core.command_view:enter("🔍 Abrir Arquivo (Ctrl+O)", {
-            submit = function(selected)
-                if not selected or selected == "" then return end
-                
-                -- 🛡️ 1. LIMPEZA BLINDADA: Remove prefixos visuais, espaços residuais e normaliza barras
-                selected = selected:gsub("^[●%s]+", ""):gsub("%s+$", "")
-                selected = selected:gsub("\\", "/")
-                selected = selected:gsub("%s+", "") -- ⚡ Remove QUALQUER espaço interno (mata o bug do "/ ")
-                
-                -- 2) Busca exata (autocomplete ou caminho relativo limpo)
-                local target = nil
-                for _, f in ipairs(all_files) do
-                    if f.relative == selected then
-                        target = f.path
-                        break
-                    end
-                end
+      end,
 
-                -- 3) Match exato case-insensitive (segurança extra)
-                if not target then
-                    local sel_lower = selected:lower()
-                    for _, f in ipairs(all_files) do
-                        if f.relative:lower() == sel_lower then
-                            target = f.path
-                            break
-                        end
-                    end
-                end
-
-                -- 4) Match inteligente por segmentos (resolve pastas duplicadas tipo doxoade/doxoade/...)
-                if not target then
-                    local best = _doxoade_resolve_best_match(selected, all_files)
-                    if best then target = best.path end
-                end
-
-                -- 5) Fallback: substring simples no nome ou caminho
-                if not target then
-                    local needle = selected:lower()
-                    for _, f in ipairs(all_files) do
-                        if f.relative:lower():find(needle, 1, true) or f.name:lower():find(needle, 1, true) then
-                            target = f.path
-                            break
-                        end
-                    end
-                end
-
-                if not target then
-                    if core.log then core.log("⚠️ [Ctrl+O] Arquivo não encontrado: " .. selected) end
-                    return
-                end
-
-                -- Verifica se existe no disco
-                local finfo_ok, finfo = pcall(system.get_file_info, target)
-                if not finfo_ok or not finfo or finfo.type ~= "file" then
-                    if core.log then core.log("❌ [Ctrl+O] Arquivo inválido: " .. target) end
-                    return
-                end
-
-                -- Abre o documento
-                local doc_ok, doc = pcall(core.open_doc, target)
-                if doc_ok and doc then
-                    pcall(function() core.root_view:open_doc(doc) end)
-                    if core.log then core.log("📄 [Ctrl+O] Aberto: " .. target) end
-                else
-                    if core.log then core.log("❌ [Ctrl+O] Falha ao abrir: " .. tostring(doc)) end
-                end
-            end,
-            suggest = function(text)
-                if not text or text == "" then
-                    local limit = math.min(200, #labels)
-                    local out = {}
-                    for i = 1, limit do out[i] = labels[i] end
-                    return out
-                end
-                
-                local results = {}
-                local needle = text:lower()
-                for _, label in ipairs(labels) do
-                    if label:lower():find(needle, 1, true) then
-                        table.insert(results, label)
-                        if #results >= 100 then break end
-                    end
-                end
-                return results
-            end,
-        })
-    end,
+      suggest = function(text)
+        -- ⚡ [PRODENOV CORREÇÃO] Normaliza qualquer barra invertida (\ -> /) na busca
+        local clean_query = (text or ""):gsub("\\", "/")
+        return common.fuzzy_match(candidates, clean_query)
+      end
+    })
+  end,
 })
 
 -- =====================================================
