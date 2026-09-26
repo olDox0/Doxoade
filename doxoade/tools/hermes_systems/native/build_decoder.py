@@ -26,18 +26,20 @@ def find_python_lib():
     return None
 
 def find_lzma():
-    """Encontra a biblioteca LZMA"""
-    # No Windows com w64devkit, geralmente está em /lib ou /usr/lib
+    """Encontra a biblioteca LZMA via caminhos do Janus e sistema."""
+    from doxoade.tools.janus_systems import Janus
+    info = Janus.get_info()
     search_paths = [
-        Path("C:/w64devkit/lib"),
-        Path("C:/w64devkit/x86_64-w64-mingw32/lib"),
         Path("/usr/lib"),
         Path("/usr/local/lib"),
     ]
-    
+    if info:
+        compiler_parent = Path(info.compiler_path).parent.parent
+        search_paths.insert(0, compiler_parent / "lib")
+        search_paths.insert(1, compiler_parent / "x86_64-w64-mingw32" / "lib")
+
     for path in search_paths:
         if path.exists():
-            # Procura por liblzma.a ou lzma.lib
             for lib_file in path.glob("*lzma*"):
                 if lib_file.suffix in ['.a', '.lib']:
                     return path
@@ -51,11 +53,8 @@ def build_decoder():
     
     # Detecta sistema operacional
     if os.name == 'nt':
-        output_file = native_dir / "hermes_decoder.pyd"
-        compiler = "gcc"  # w64devkit
-    else:
-        output_file = native_dir / "hermes_decoder.so"
-        compiler = "gcc"
+        from doxoade.tools.janus_systems import Janus
+        compiler = Janus.get_compiler_path() or "gcc"
     
     # Caminhos
     python_include = find_python_include()

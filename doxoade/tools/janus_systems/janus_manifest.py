@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional
 from dataclasses import asdict
 
+from .janus_cpu import JanusCPU
 from .janus_detector import CompilerInfo, JanusDetector
 
 
@@ -51,9 +52,13 @@ class JanusManifest:
         return None
 
     def save(self, info: CompilerInfo):
-        """Grava os dados do compilador detectado."""
+        """Grava os dados do compilador e da CPU detectada."""
         self.manifest_file.parent.mkdir(parents=True, exist_ok=True)
         payload = asdict(info)
+        
+        # 🛑 INJETA O PERFIL DE CPU E FLAGS IDEAIS
+        cpu_prof = JanusCPU.profile()
+        payload["cpu_profile"] = asdict(cpu_prof)
         payload["station"] = platform.node().lower().replace(" ", "_").strip()
         payload["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
 

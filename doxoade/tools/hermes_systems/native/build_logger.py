@@ -8,24 +8,15 @@ Compila o logger assíncrono como DLL/SO independente.
 """
 import os
 import sys
+import time
 import subprocess
 from pathlib import Path
 
-def find_gcc() -> str:
-    """Detecta GCC via w64devkit no PATH ou thirdparty."""
-    # 1. Procura no thirdparty do projeto
-    project_root = Path(__file__).resolve().parents[4]
-    candidate = project_root / 'thirdparty' / 'w64devkit' / 'bin' / 'gcc.exe'
-    if candidate.exists():
-        return str(candidate)
-    
-    # 2. Procura no PATH
-    for p in os.environ.get('PATH', '').split(os.pathsep):
-        candidate = Path(p.strip('"')) / 'gcc.exe'
-        if candidate.exists():
-            return str(candidate)
-    
-    return None
+def find_gcc() -> str | None:
+    """Detecta compilador via Janus."""
+    from doxoade.tools.janus_systems import Janus
+    info = Janus.get_info()
+    return info.compiler_path if info else None
 
 def build_logger() -> bool:
     """Compila hermes_async_log.dll/so."""
@@ -46,18 +37,34 @@ def build_logger() -> bool:
     if not src.exists():
         print(f"✘ Arquivo fonte não encontrado: {src}")
         return False
+
+    if out.exists():
+        try:
+            out.unlink()
+        except PermissionError:
+            old_file = out.with_name(f"{out.name}.old_{int(time.time())}")
+            try:
+                out.rename(old_file)
+                print(f"  ⚠ DLL em uso na memória: renomeada para {old_file.name}")
+            except Exception as e:
+                print(f"  ✘ Não foi possível liberar a DLL: {e}")
+                return False
     
     # Flags otimizados
     cmd = [
         gcc,
-        '-O2',                    # Otimização balanceada
-        '-shared',                # Biblioteca compartilhada
-        '-static-libgcc',         # Linka libgcc estaticamente
-        '-fPIC',                  # Position-independent code
-        '-pthread',               # Suporte a threads (Linux)
+        '-O2',
+        '-shared',
+        '-fPIC',
+        '-pthread',
+    ]
+    if os.name == 'nt':
+        cmd.append('-static-libgcc')
+
+    cmd.extend([
         str(src),
         '-o', str(out),
-    ]
+    ])
     
     print(f"🔨 Compilando Hermes Async Logger...")
     print(f"   GCC: {gcc}")

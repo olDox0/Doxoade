@@ -12,6 +12,7 @@ import sysconfig
 from pathlib import Path
 from typing import List, Optional
 
+from .janus_cpu import JanusCPU
 from .janus_detector import CompilerInfo
 
 
@@ -42,34 +43,28 @@ class JanusBridge:
         include_python: bool = True,
         extra_flags: Optional[List[str]] = None
     ) -> List[str]:
-        """
-        Monta o comando de compilação adequado para GCC ou Clang.
-        Aplica flags de portabilidade (Windows MinGW / Linux / Termux).
-        """
         compiler = self.info.compiler_path
         cmd = [compiler]
 
-        # Flags de Otimização e Padrão C
-        cmd.append(f"-{opt}")
+        # 🛑 Injeta as flags exatas da CPU da máquina atual
+        cpu_profile = JanusCPU.profile()
+        cmd.extend(cpu_profile.optimal_cflags)
+
         cmd.append("-std=c11")
 
         if is_shared:
             cmd.append("-shared")
-            # -fPIC é obrigatório em Linux/Android; no Windows é tolerado
             if os.name != 'nt':
                 cmd.append("-fPIC")
 
-        # Inclusão de Headers do Python (Include Dir)
         if include_python:
             py_inc = sysconfig.get_path("include")
             if py_inc:
                 cmd.append(f"-I{py_inc}")
 
-        # Inclusão dos Arquivos Fontes
         cmd.extend([str(s) for s in sources])
         cmd.extend(["-o", str(output)])
 
-        # Linkagem no Windows (MinGW/WinLibs exige linkar com a pythonXY.dll)
         if os.name == 'nt' and include_python:
             cmd.append("-static-libgcc")
             py_ver = f"{sys.version_info.major}{sys.version_info.minor}"
@@ -77,7 +72,6 @@ class JanusBridge:
             cmd.append(f"-L{py_lib_dir}")
             cmd.append(f"-lpython{py_ver}")
 
-        # Flags Extras fornecidas pelo chamador (ex.: -msse4.2, -Iinclude)
         if extra_flags:
             cmd.extend(extra_flags)
 

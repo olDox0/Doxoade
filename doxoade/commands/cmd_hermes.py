@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/cmd_hermes.py
-import os
+import os, sys
 import dis
 import glob
 import click
@@ -651,22 +651,20 @@ def hermes_test(target):
     else:
         click.echo(f"\n{Fore.GREEN}✔ TESTE APROVADO. O Motor C está gerando bytecode íntegro.{Style.RESET_ALL}")
         
-# Adicione em cmd_hermes.py:
 @hermes_group.command('build-logger')
 def build_logger_cmd():
-    """Compila o Async Logger assíncrono."""
+    """Compila o Hermes Async Logger como biblioteca nativa."""
+    import sys          # 🛑 ADICIONE ESTAS DUAS LINHAS
+    import subprocess   # 🛑 AQUI DENTRO DA FUNÇÃO
+    
     click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}☤ [HERMES] Compilando Async Logger...{Style.RESET_ALL}")
-    
-    import subprocess
     build_script = Path(__file__).parent.parent / 'tools' / 'hermes_systems' / 'native' / 'build_logger.py'
-    
-    result = subprocess.run([sys.executable, str(build_script)], capture_output=True, text=True)
-    
-    if result.returncode == 0:
-        click.echo(f"{Fore.GREEN}✔ Logger compilado com sucesso{Style.RESET_ALL}")
+
+    res = subprocess.run([sys.executable, str(build_script)])
+    if res.returncode == 0:
+        click.echo(f"\n{Fore.GREEN}✔ Async Logger compilado com sucesso!{Style.RESET_ALL}\n")
     else:
-        click.echo(f"{Fore.RED}✘ Falha na compilação{Style.RESET_ALL}")
-        click.echo(result.stderr)
+        click.echo(f"\n{Fore.RED}✘ Falha na compilação do Async Logger{Style.RESET_ALL}\n")
         
 @hermes_group.command('deadzone-scan')
 @click.option('--apply', '-a', is_flag=True, help="Grava os achados no deadzone.json.")

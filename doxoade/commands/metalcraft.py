@@ -157,22 +157,27 @@ def metal_audit_bin(target_exe):
 @metal_group.command('setup-tools')
 @click.pass_context
 def metal_setup_tools(ctx):
-    """🛠️  Provisionamento Automático: Baixa e instala o GCC/Toolchain."""
+    """🛠️  Provisionamento Automático: Detecta ou provisiona compilador via Janus."""
+    from doxoade.tools.janus_systems import Janus
+    click.echo(f"{Fore.CYAN}⚒️  Doxoade Metalcraft: Verificando Toolchain C/C++...{Style.RESET_ALL}")
+    
+    info = Janus.get_info()
+    if info:
+        click.secho(f"\n✅ Compilador pronto e ativo: {info.compiler_path} ({info.version})", fg="green", bold=True)
+        if not click.confirm(f"   {Fore.YELLOW}Compilador já detectado. Deseja re-escanear?{Style.RESET_ALL}"):
+            return
+        Janus.get_info(force_scan=True)
+        click.secho("✔ Varredura concluída.", fg="green")
+        return
+
+    # Fallback caso a máquina não possua compilador
     from doxoade.tools.metalcraft.provisioner import download_w64devkit
     from pathlib import Path
-    
     core_root = Path(__file__).resolve().parents[2]
     target_dir = core_root / "thirdparty" / "w64devkit"
     target_dir.mkdir(parents=True, exist_ok=True)
-    
-    click.echo(f"{Fore.CYAN}⚒️  Doxoade Metalcraft: Iniciando Configuração de Toolchain{Style.RESET_ALL}")
-    
-    if (target_dir / "bin" / "gcc.exe").exists():
-        if not click.confirm(f"   {Fore.YELLOW}Compilador já detectado. Deseja reinstalar?{Style.RESET_ALL}"):
-            return
-
     if download_w64devkit(target_dir):
-        click.secho("\n✅ Toolchain pronto! GCC, Make e BusyBox instalados.", fg="green", bold=True)
-        click.echo(f"   Local: {target_dir}")
+        Janus.get_info(force_scan=True)
+        click.secho("\n✅ Toolchain provisionado com sucesso via Janus!", fg="green", bold=True)
     else:
         click.secho("\n❌ Erro ao configurar ambiente.", fg="red", bold=True)

@@ -19,25 +19,15 @@ def build_decoder_simd():
     out_ext = '.pyd' if os.name == 'nt' else '.so'
     out = root / f'hermes_decoder_simd{out_ext}'
     inc = sysconfig.get_path('include')
-    
-    # Caça o w64devkit no PATH ou thirdparty
-    gcc = None
-    project_root = Path(__file__).resolve().parents[4]
-    candidate = project_root / 'thirdparty' / 'w64devkit' / 'bin' / 'gcc.exe'
-    if candidate.exists():
-        gcc = str(candidate)
-    else:
-        for p in os.environ.get('PATH', '').split(os.pathsep):
-            candidate = Path(p.strip('"')) / 'gcc.exe'
-            if candidate.exists():
-                gcc = str(candidate)
-                break
-                
-    if not gcc:
-        print("✘ GCC não encontrado.")
-        return False
 
-    # 🚀 CORREÇÃO DEFINITIVA PARA MINGW: Linkagem direta contra a DLL
+    # 🛑 Substituição Janus:
+    from doxoade.tools.janus_systems import Janus
+    info = Janus.get_info()
+    if not info:
+        print("✘ GCC não encontrado. Use 'doxoade janus scan'.")
+        return False
+    gcc = info.compiler_path
+
     version = f"{sys.version_info.major}{sys.version_info.minor}"
     dll_name = f"python{version}.dll"
     dll_path = Path(sys.base_prefix) / dll_name

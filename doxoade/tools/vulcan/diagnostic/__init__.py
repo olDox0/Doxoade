@@ -31,16 +31,11 @@ class VulcanDiagnostic:
             sys.path.insert(0, str(sp))
 
     def _check_compiler(self):
-        """Busca compilador no PATH ou na pasta 'opt' do Doxoade."""
-        if shutil.which('gcc') or shutil.which('cl.exe'):
+        """Busca compilador via Janus de forma agnóstica."""
+        from doxoade.tools.janus_systems import Janus
+        if Janus.ensure_active():
             return True
-        internal_gcc = self.core_dir / 'thirdparty' / 'w64devkit' / 'bin' / 'gcc.exe'
-        if internal_gcc.exists():
-            bin_path = str(internal_gcc.parent)
-            if bin_path not in os.environ['PATH']:
-                os.environ['PATH'] = bin_path + os.pathsep + os.environ['PATH']
-            return True
-        self.issues.append(f"Compilador não encontrado. Instale o w64devkit em: {self.core_dir / 'thirdparty'}")
+        self.issues.append("Compilador C/C++ não localizado. Use 'doxoade janus scan' ou instale MinGW/WinLibs/Clang.")
         return False
 
     def _check_internal_dependency(self, package_name):

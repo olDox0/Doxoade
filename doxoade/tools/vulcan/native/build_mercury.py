@@ -12,12 +12,10 @@ from pathlib import Path
 def build_mercury():
     """Compila mercury_core.pyd linkando corretamente contra python3XX.dll."""
     print("🔨 Compilando Mercury Core Engine...")
-
-    gcc = "C:/Users/olDox222/Documents/A20251122/DOSSIER/Altonomo/Projetos_E_Programas/Projeto OADE/doxoade/thirdparty/w64devkit/bin/gcc.exe"
-    if not Path(gcc).exists():
-        gcc = "gcc"
+    from doxoade.tools.janus_systems import Janus
+    info = Janus.get_info()
+    gcc = info.compiler_path if info else "gcc"
     print(f"GCC: {gcc}")
-
     python_include = sysconfig.get_path('include')
     python_libs_dir = Path(sys.base_prefix) / 'libs'
     python_version = f"{sys.version_info.major}{sys.version_info.minor}"

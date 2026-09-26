@@ -27,7 +27,9 @@ def janus_status():
     """Exibe o compilador registrado e o status do ambiente."""
     info = Janus.get_info()
     console = Console()
-
+    from doxoade.tools.janus_systems.janus_cpu import JanusCPU
+    cpu = JanusCPU.profile()
+    
     if not info:
         console.print("[bold red]✘ Nenhum compilador C/C++ detectado na máquina.[/bold red]")
         console.print("[yellow]💡 Instale o MinGW (Windows), WinLibs ou Clang (Termux: pkg install clang).[/yellow]")
@@ -41,6 +43,10 @@ def janus_status():
     table.add_column("Propriedade", style="bold white", width=22)
     table.add_column("Valor / Configuração", style="cyan")
 
+    table.add_row("Processador (CPU)", f"[bold white]{cpu.model_name}[/bold white]")
+    table.add_row("SIMD Tier Ativo", f"[bold magenta]{cpu.simd_tier}[/bold magenta]")
+    table.add_row("Flags Otimizadas", f"[dim green]{' '.join(cpu.optimal_cflags)}[/dim green]")
+    
     table.add_row("Compilador C (CC)", info.compiler_path)
     table.add_row("Compilador C++ (CXX)", info.gpp_path or "[dim]Não disponível[/dim]")
     table.add_row("Tipo de Compilador", f"[bold green]{info.compiler_type.upper()}[/bold green]")

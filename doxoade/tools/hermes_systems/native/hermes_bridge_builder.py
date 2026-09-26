@@ -92,25 +92,48 @@ class HermesBridgeBuilder:
         print(f"  🔨 [HERMES v2] Compilando Bridge Nativo (Dual-Dictionary + SSE 4.2)...")
         print(f"     GCC: {gcc}")
         
+        from doxoade.tools.janus_systems import Janus
+        info = Janus.get_info()
+        is_arm = False
+        if info:
+            is_arm = any(a in info.target_machine.lower() for a in ("aarch64", "arm64", "armv8"))
+
         include_dir = sysconfig.get_path('include')
-        
-        # 2. MONTAGEM DO COMANDO (Otimizado para Celeron N2808 / Silvermont)
         cmd = [
             gcc,
-            '-O3',                    # Otimização máxima
-            '-shared',                # Biblioteca compartilhada (.pyd/.so)
-            '-static-libgcc',         # Linka libgcc estaticamente (portabilidade)
-            '-fPIC',                  # Position-independent code
-            '-msse4.2',               # Habilita SSE 4.2 (STTNI para strings)
-            '-mpopcnt',               # Population count (para bitmaps O(1))
-            '-funroll-loops',         # Desrola loops para o branchless decoder
-            '-march=native',          # Otimiza para a CPU atual
-            f'-I{include_dir}',
-            f'-I{self.native_dir}',  # Adicionado para encontrar lz4.h e headers locais       # Headers da C-API do Python
+            '-O3',
+            '-shared',
+            '-fPIC',
+            '-funroll-loops',
         ]
-        
-        # Adiciona os arquivos fonte
+
+        # Flags Intel apenas no PC (Amaranth e Bluebaby)
+        if not is_arm:
+            cmd.extend(['-msse4.2', '-mpopcnt', '-march=native', '-static-libgcc'])
+        else:
+            # No celular (Termux), usa flags limpas de ARM
+            cmd.append('-march=armv8-a')
+
+        cmd.extend([
+            f'-I{include_dir}',
+            f'-I{self.native_dir}',
+        ])
         cmd.extend([str(src) for src in self.source_files if src.exists()])
+
+        if os.name == 'nt':
+            lib_dir = Path(sys.base_prefix) / 'libs'
+            version = f"{sys.version_info.major}{sys.version_info.minor}"
+            cmd.extend([f'-L{lib_dir}', f'-lpython{version}'])
+
+        cmd.extend(['-o', str(self.output_file)])
+
+        if os.name == 'nt':
+            lib_dir = Path(sys.base_prefix) / 'libs'
+            version = f"{sys.version_info.major}{sys.version_info.minor}"
+            cmd.extend([f'-L{lib_dir}', f'-lpython{version}'])
+        # No Linux/Android não precisa passar -lpython: os símbolos já estão no binário do python em execução!
+
+        cmd.extend(['-o', str(self.output_file)])
         
         # ═══════════════════════════════════════════════════════════════════
         # LINKAGEM DA C-API (CRÍTICO NO WINDOWS/MINGW)

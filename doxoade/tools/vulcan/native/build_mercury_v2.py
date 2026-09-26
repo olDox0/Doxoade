@@ -19,20 +19,10 @@ from pathlib import Path
 
 
 def find_gcc() -> str | None:
-    """Detecta GCC via w64devkit no PATH ou thirdparty."""
-    # 1. Procura no thirdparty do projeto
-    project_root = Path(__file__).resolve().parents[4]
-    candidate = project_root / 'thirdparty' / 'w64devkit' / 'bin' / 'gcc.exe'
-    if candidate.exists():
-        return str(candidate)
-
-    # 2. Procura no PATH
-    for p in os.environ.get('PATH', '').split(os.pathsep):
-        candidate = Path(p.strip('"')) / 'gcc.exe'
-        if candidate.exists():
-            return str(candidate)
-
-    return None
+    """Detecta compilador via Janus."""
+    from doxoade.tools.janus_systems import Janus
+    info = Janus.get_info()
+    return info.compiler_path if info else None
 
 
 def build_mercury() -> bool:
