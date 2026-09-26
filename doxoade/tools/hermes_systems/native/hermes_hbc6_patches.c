@@ -84,20 +84,6 @@ static uint8_t* get_buffer(size_t needed) {
 // ═══════════════════════════════════════════════════════════════════
 // SIMD SCANNER (SSE2 - Busca 16 bytes por vez)
 // ═══════════════════════════════════════════════════════════════════
-static inline uint64_t _rdtsc(void) {
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-    uint32_t lo, hi;
-    __asm__ volatile ("rdtsc" : "=a" (lo), "=d" (hi));
-    return ((uint64_t)hi << 32) | lo;
-#elif defined(__aarch64__)
-    uint64_t val;
-    __asm__ volatile("mrs %0, cntvct_el0" : "=r"(val));
-    return val;
-#else
-    return 0;
-#endif
-}
-
 static inline int has_macro_opcodes_simd(const uint8_t* data, size_t len) {
 #if HERMES_HAS_SSE2
     __m128i target = _mm_set1_epi8((char)MACRO_OPCODE);
