@@ -7,8 +7,10 @@ Compliance: PASC-6.1 (Lazy Loading Isolado), OSL-4.
 import os
 import sys
 import click
+from pathlib import Path
 
 from doxoade.tools.doxcolors import Fore, Style
+from doxoade.tools.git import _run_git_command
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 
 
@@ -23,73 +25,45 @@ def git_group():
 @click.option('--force', '-f', is_flag=True, help='Força a sincronização global (Reset Hard).')
 @click.option('--apply', '-a', is_flag=True, help='Aplica as alterações no disco (sai do modo DRY-RUN).')
 @click.option('--conflicts', '-c', is_flag=True, help='Exibe a Matriz de Colisão detalhada (Locais vs Remotos).')
-@click.option('--diff', '-d', type=str, help='Exibe o diff forense de um arquivo específico contra o servidor.')
+@click.option('--diff', '-d', 'diff_file', is_flag=False, flag_value='ALL', default=None, help='Exibe o diff forense (sem argumento: mostra tudo; ou informe o arquivo).')
 @click.option('--file', '-p', 'target_files', multiple=True, help='Puxa/sobrescreve apenas os arquivos especificados.')
 @click.option('--remote', '-r', default='origin', show_default=True, help='Remote de destino.')
 @click.option('--branch', '-b', default=None, help='Branch específico (padrão: branch atual).')
 @click.pass_context
-def pull_cmd(ctx, subscribe, force, apply, conflicts, diff, target_files, remote, branch):
+def pull_cmd(ctx, subscribe, force, apply, conflicts, diff_file, target_files, remote, branch):
     """
-    📥 Sincronização e auditoria forense do repositório.
-    Use '--subscribe' para subscrever o Lite XL e novos módulos preservando seus arquivos Git locais.
+    📥 Sincronização e auditoria forense do repositório (Smart Multi-Station).
+    Padrão: Diagnostica e simula (Dry-Run). Use '--apply' para efetivar.
     """
     from doxoade.commands.git_systems.git_engine import GitEngine
-
     with ExecutionLogger('git_pull', os.getcwd(), ctx.params) as logger:
         engine = GitEngine(os.getcwd())
         target_branch = branch or engine.get_current_branch()
         is_apply_mode = apply
 
-        click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}⚡ NEXUS-GIT :: SINCRONIZAÇÃO E AUDITORIA{Style.RESET_ALL}")
-        click.echo(f"  {Fore.WHITE}Branch:{Fore.RESET} {target_branch} | {Fore.WHITE}Remote:{Fore.RESET} {remote}\n")
-
-        # 1. Fetch preliminar
-        engine.fetch_remote(remote=remote, branch=target_branch)
-
-        # ═══════════════════════════════════════════════════════════
-        # MODO SUBSCRIÇÃO SEGURA (--subscribe / -s)
-        # ═══════════════════════════════════════════════════════════
-        if subscribe:
-            sub_report = engine.subscribe_safe_remote(remote=remote, branch=target_branch, apply_changes=is_apply_mode)
-
-            if not is_apply_mode:
-                click.echo(f"{Fore.YELLOW}{Style.BRIGHT}🔍 [DRY-RUN] PRÉVIA DE SUBSCRIÇÃO DO SERVIDOR (--subscribe){Style.RESET_ALL}")
-                click.echo(f"  • Arquivos que serão subscritos do servidor: {Fore.GREEN}{sub_report['total_to_update']}{Fore.RESET}")
-                click.echo(f"  • Modificações locais preservadas intactas : {Fore.CYAN}{len(sub_report['preserved_items'])}{Fore.RESET}")
-
-                if sub_report['safe_items']:
-                    click.echo(f"\n  {Fore.WHITE}Módulos a serem incorporados no disco:{Fore.RESET}")
-                    for item in sub_report['safe_items'][:12]:
-                        click.echo(f"    {Fore.GREEN}+ [SUBSCREVER]{Fore.RESET} {item['file']}")
-                    if len(sub_report['safe_items']) > 12:
-                        click.echo(f"    {Style.DIM}... e mais {len(sub_report['safe_items']) - 12} arquivos.{Style.RESET_ALL}")
-
-                if sub_report['preserved_items']:
-                    click.echo(f"\n  {Fore.WHITE}Seus arquivos locais blindados (não serão tocados):{Fore.RESET}")
-                    for item in sub_report['preserved_items']:
-                        click.echo(f"    {Fore.CYAN}🛡️  [PRESERVADO]{Fore.RESET} {item['file']}")
-
-                click.echo(f"\n{Fore.YELLOW}💡 Nenhuma alteração gravada. Para subscrever o Lite XL e atualizar o disco:{Fore.RESET}")
-                click.echo(f"   {Fore.WHITE}doxoade git pull --subscribe --apply{Fore.RESET}\n")
+        # 1. Auto-cura ativa de MERGE_HEAD
+        if (Path(engine.root) / ".git" / "MERGE_HEAD").exists():
+            click.echo(f"{Fore.YELLOW}{Style.BRIGHT}⚠ [AUTO-HEAL] Detectado merge inacabado bloqueando o Git.{Style.RESET_ALL}")
+            if is_apply_mode or click.confirm("Deseja auto-curar o estado travado e prosseguir?"):
+                engine.heal_stuck_merge()
+                click.echo(f"{Fore.GREEN}✔ Estado restaurado com segurança. Continuando...{Fore.RESET}\n")
+            else:
+                click.echo(f"{Fore.RED}✖ Operação cancelada. Use 'doxoade merge --abort'.{Fore.RESET}")
                 return
 
-            # Modo Apply Efetivado
-            click.echo(f"{Fore.GREEN}{Style.BRIGHT}✔ [APPLY] SUBSCRIÇÃO CONCLUÍDA COM SUCESSO!{Style.RESET_ALL}")
-            click.echo(f"  • Arquivos atualizados no disco : {Fore.GREEN}{len(sub_report['updated_files'])}{Fore.RESET}")
-            click.echo(f"  • Seus arquivos locais mantidos : {Fore.CYAN}{len(sub_report['preserved_items'])}{Fore.RESET}\n")
-            for f in sub_report['updated_files'][:10]:
-                click.echo(f"    {Fore.GREEN}✔ {f}{Fore.RESET}")
-            if len(sub_report['updated_files']) > 10:
-                click.echo(f"    {Style.DIM}... e mais {len(sub_report['updated_files']) - 10} arquivos atualizados.{Style.RESET_ALL}")
-            click.echo(f"\n{Fore.CYAN}O sistema Lite XL está 100% atualizado e seus módulos Git permanecem intactos!{Style.RESET_ALL}\n")
-            return
+        click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}⚡ NEXUS-GIT :: SINCRONIZAÇÃO SOBERANA [{engine.get_station_name().upper()}]{Style.RESET_ALL}")
+        click.echo(f"  {Fore.WHITE}Branch:{Fore.RESET} {target_branch} | {Fore.WHITE}Remote:{Fore.RESET} {remote}\n")
 
-        # ═══════════════════════════════════════════════════════════
-        # CASO A: INSPEÇÃO DE DIFF (--diff)
-        # ═══════════════════════════════════════════════════════════
-        if diff:
-            click.echo(f"{Fore.CYAN}🔍 Diff Forense: {Style.BRIGHT}{diff}{Style.RESET_ALL}")
-            diff_text = engine.get_file_diff(diff, remote=remote, branch=target_branch)
+        # 2. Exibição de Diff Forense (--diff sem argumento ou específico)
+        if diff_file:
+            engine.fetch_remote(remote=remote, branch=target_branch)
+            if diff_file == 'ALL':
+                click.echo(f"{Fore.CYAN}🔍 Diff Forense Global contra {remote}/{target_branch}:{Style.RESET_ALL}")
+                diff_text = _run_git_command(['diff', f'{remote}/{target_branch}'], capture_output=True, cwd=str(engine.root)) or "Nenhuma diferença."
+            else:
+                click.echo(f"{Fore.CYAN}🔍 Diff Forense de '{diff_file}':{Style.RESET_ALL}")
+                diff_text = engine.get_file_diff(diff_file, remote=remote, branch=target_branch)
+
             for line in diff_text.splitlines():
                 if line.startswith('+'): click.echo(Fore.GREEN + line + Style.RESET_ALL)
                 elif line.startswith('-'): click.echo(Fore.RED + line + Style.RESET_ALL)
@@ -98,59 +72,71 @@ def pull_cmd(ctx, subscribe, force, apply, conflicts, diff, target_files, remote
             click.echo()
             return
 
-        # ═══════════════════════════════════════════════════════════
-        # CASO B: MATRIZ DE COLISÃO (--conflicts)
-        # ═══════════════════════════════════════════════════════════
-        if conflicts:
-            matrix = engine.detect_collisions(remote=remote, branch=target_branch)
-            click.echo(f"{Fore.CYAN}{Style.BRIGHT}📊 MATRIZ DE IMPACTO E COLISÃO{Style.RESET_ALL}\n")
-            if matrix['collisions']:
-                click.echo(f"  {Fore.RED}{Style.BRIGHT}🔴 COLISÕES DIRETAS ({matrix['total_collisions']} arquivos):{Style.RESET_ALL}")
-                for item in matrix['collisions']:
-                    click.echo(f"    {Fore.RED}✖ {item['file']}{Fore.RESET}")
-            else:
-                click.echo(f"  {Fore.GREEN}✔ Nenhuma colisão direta detectada.{Style.RESET_ALL}")
-
-            click.echo(f"\n  {Fore.GREEN}🟢 ATUALIZAÇÕES DISPONÍVEIS ({matrix['total_safe_remote']} arquivos){Style.RESET_ALL}")
-            click.echo(f"  {Fore.YELLOW}🟡 ARQUIVOS LOCAIS EXCLUSIVOS ({matrix['total_local_only']} arquivos){Style.RESET_ALL}\n")
-            return
-
-        # ═══════════════════════════════════════════════════════════
-        # CASO C: PULL SELETIVO (--file)
-        # ═══════════════════════════════════════════════════════════
-        if target_files:
-            click.echo(f"{Fore.CYAN}🎯 PULL SELETIVO: {len(target_files)} arquivo(s){Style.RESET_ALL}")
+        # 3. Subscrição Segura
+        if subscribe:
+            engine.fetch_remote(remote=remote, branch=target_branch)
+            sub_report = engine.subscribe_safe_remote(remote=remote, branch=target_branch, apply_changes=is_apply_mode)
             if not is_apply_mode:
-                click.echo(f"{Fore.YELLOW}[DRY-RUN] Execute com --apply para efetivar:{Fore.RESET}")
-                click.echo(f"   doxoade git pull {' '.join(['--file ' + f for f in target_files])} --apply\n")
+                click.echo(f"{Fore.YELLOW}{Style.BRIGHT}🔍 [DRY-RUN] PRÉVIA DE SUBSCRIÇÃO DO SERVIDOR (--subscribe){Style.RESET_ALL}")
+                click.echo(f"  • Arquivos que serão subscritos do servidor: {Fore.GREEN}{sub_report['total_to_update']}{Fore.RESET}")
+                click.echo(f"  • Modificações locais preservadas intactas : {Fore.CYAN}{len(sub_report['preserved_items'])}{Fore.RESET}")
+                click.echo(f"\n{Fore.YELLOW}💡 Para efetivar no disco: doxoade git pull --subscribe --apply{Fore.RESET}\n")
                 return
 
+            click.echo(f"{Fore.GREEN}{Style.BRIGHT}✔ [APPLY] SUBSCRIÇÃO CONCLUÍDA!{Style.RESET_ALL}")
+            click.echo(f"  • Arquivos atualizados: {len(sub_report['updated_files'])} | Preservados: {len(sub_report['preserved_items'])}\n")
+            return
+
+        # 4. Pull Seletivo
+        if target_files:
+            engine.fetch_remote(remote=remote, branch=target_branch)
+            if not is_apply_mode:
+                click.echo(f"{Fore.YELLOW}[DRY-RUN] Execute com --apply para puxar os {len(target_files)} arquivos selecionados.{Fore.RESET}\n")
+                return
             res = engine.pull_selective_files(list(target_files), remote=remote, branch=target_branch, apply_changes=True)
             for f in res['success_files']: click.echo(f"  {Fore.GREEN}✔ Atualizado:{Fore.RESET} {f}")
             for f in res['failed_files']: click.echo(f"  {Fore.RED}✖ Falha:{Fore.RESET} {f}")
-            click.echo()
             return
 
-        # ═══════════════════════════════════════════════════════════
-        # CASO D: FORCE PULL GLOBAL (RESET HARD)
-        # ═══════════════════════════════════════════════════════════
+        # 5. Reset Hard Forçado
         if force:
             report = engine.force_pull_reset(branch=target_branch, remote=remote, apply_changes=is_apply_mode)
             if not report['success']:
                 click.echo(f"{Fore.RED}✖ Erro: {report.get('error')}{Fore.RESET}")
                 sys.exit(1)
-
             if not is_apply_mode:
-                click.echo(f"{Fore.YELLOW}{Style.BRIGHT}🔍 [DRY-RUN] PRÉVIA DE RESET HARD GLOBAL{Style.RESET_ALL}")
-                click.echo(f"   {Fore.WHITE}doxoade git pull --force --apply{Fore.RESET}\n")
+                click.echo(f"{Fore.YELLOW}[DRY-RUN] Use 'doxoade git pull --force --apply' para forçar o estado do servidor.{Fore.RESET}\n")
                 return
+            click.echo(f"{Fore.GREEN}✔ Reset Hard aplicado com backup prévio em .doxoade/git_recovery/.{Fore.RESET}\n")
+            return
 
-            click.echo(f"{Fore.GREEN}{Style.BRIGHT}✔ [APPLY] Reset Hard global concluído com sucesso!{Style.RESET_ALL}\n")
+        # 6. Fluxo Padrão: Smart Sync Reconciliado
+        report = engine.smart_pull_sync(remote=remote, branch=target_branch, apply_changes=is_apply_mode)
+        matrix = report['matrix']
+
+        if not is_apply_mode:
+            click.echo(f"{Fore.YELLOW}{Style.BRIGHT}🔍 [DRY-RUN] ANÁLISE DE IMPACTO MULTI-ESTAÇÃO{Style.RESET_ALL}")
+            click.echo(f"  • Servidor tem novidades : {Fore.GREEN}{matrix['total_safe_remote']} arquivo(s){Fore.RESET}")
+            click.echo(f"  • Rascunhos locais desta máquina : {Fore.CYAN}{matrix['total_local_only']} arquivo(s){Fore.RESET}")
+            if matrix['collisions']:
+                click.echo(f"  • {Fore.RED}Colisões diretas (exigem merge): {matrix['total_collisions']} arquivo(s){Fore.RESET}")
+                for c in matrix['collisions']:
+                    click.echo(f"    {Fore.RED}✖ {c['file']}{Fore.RESET}")
+            else:
+                click.echo(f"  • {Fore.GREEN}✔ Nenhuma colisão direta detectada.{Fore.RESET}")
+
+            click.echo(f"\n{Fore.YELLOW}💡 Para sincronizar com segurança total:{Fore.RESET}")
+            click.echo(f"   {Fore.WHITE}doxoade git pull --apply{Fore.RESET}\n")
+            return
+
+        if report['success']:
+            click.echo(f"{Fore.GREEN}{Style.BRIGHT}✔ [OK] Repositório sincronizado com sucesso!{Style.RESET_ALL}")
+            if report['snapshot']:
+                click.echo(f"  {Fore.CYAN}💾 Snapshot de segurança gravado em: {Path(report['snapshot']).name}{Fore.RESET}")
         else:
-            click.echo(f"{Fore.CYAN}Dica de uso recomendada:{Style.RESET_ALL}")
-            click.echo(f"  doxoade git pull --subscribe --apply      (Subscreve Lite XL e mantém arquivos Git)")
-            click.echo(f"  doxoade git pull --conflicts              (Audita arquivos e colisões)")
-            click.echo(f"  doxoade git pull --diff <arquivo>         (Vê o diff de um arquivo)")
+            click.echo(f"{Fore.RED}✖ {report['action_summary']}{Fore.RESET}")
+            if report['has_collisions']:
+                click.echo(f"{Fore.YELLOW}💡 Execute 'doxoade merge' para resolver interativamente as colisões.{Fore.RESET}")
 
 
 @git_group.command('branch')
