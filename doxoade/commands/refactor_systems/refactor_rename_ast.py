@@ -1,9 +1,10 @@
-# doxoade/doxoade/commands/refactor_systems/refactor_rename_ast.py
+# -*- coding: utf-8 -*-
+# doxoade/commands/refactor_systems/refactor_rename_ast.py
 from __future__ import annotations
 import ast
 from dataclasses import dataclass, field
 from pathlib import Path
-from .refactor_utils import iter_python_files, read_text_safe
+from .refactor_utils import iter_python_files, read_text_safe, write_text_safe
 
 @dataclass(frozen=True)
 class ImportRewrite:

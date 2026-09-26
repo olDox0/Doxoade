@@ -1,4 +1,4 @@
-# doxoade/doxoade/commands/telemetry_utils.py
+# doxoade/doxoade/commands/telemetry_systems/telemetry_utils.py
 """
 Telemetry Utils v3.8 - Córtex Analítico de Recursos.
 Focado em precisão de I/O, análise de vazão e fluxo entre arquivos.

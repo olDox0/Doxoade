@@ -33,24 +33,20 @@ class ResourceMonitor(threading.Thread):
 
     def _scan_tree(self, parent_proc):
         """
-        Traversal único da árvore de processos (pai + filhos).
-
-        Cirurgia: substitui três métodos que faziam a mesma coisa
-        (_update_tree_metrics, _get_process_tree_stats, _get_tree_io)
-        — dois deles eram chamados em sequência no mesmo ciclo de 0.3s,
-        resultando em ~1.360 traversals durante uma compilação de 206s
-        em vez de ~680. Agora é uma única passagem que coleta tudo.
-
-        Retorna (cpu_total, mem_mb, io_read_bytes, io_write_bytes).
+        Traversal ultraleve de processos.
+        Bypassa a varredura recursiva completa do Windows quando não há processos filhos.
         """
         cpu_total = 0.0
         mem_total = 0.0
         r_total = 0
         w_total = 0
         try:
-            procs = [parent_proc] + parent_proc.children(recursive=True)
+            # 🛑 OTIMIZAÇÃO: Checagem não-recursiva rápida para poupar CPU
+            children = parent_proc.children(recursive=False)
+            procs = [parent_proc] + children if children else [parent_proc]
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             procs = [parent_proc]
+
         for p in procs:
             try:
                 cpu_total += p.cpu_percent(interval=None)
@@ -68,18 +64,14 @@ class ResourceMonitor(threading.Thread):
         try:
             parent = psutil.Process(self.pid)
             parent.cpu_percent(interval=None)
-            parent = psutil.Process(self.pid)
             try:
                 io_init = parent.io_counters()
                 self.peaks['io_read_start'] = io_init.read_bytes
                 self.peaks['io_write_start'] = io_init.write_bytes
-            except Exception as e:
-                import sys as _dox_sys, os as _dox_os
-                exc_obj, exc_tb = _dox_sys.exc_info()
-                f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-                line_n = exc_tb.tb_lineno
-                print(f'\x1b[1;34m[ FORENSIC ]\x1b[0m \x1b[1mFile: {f_name} | L: {line_n} | Func: run\x1b[0m')
-                print(f'\x1b[31m  ■ Type: {type(e).__name__} | Value: {e}\x1b[0m')
+            except Exception:
+                pass
+
+            # Intervalo calibrado para não afogar processadores Dual-Core
             while self.running:
                 cpu, mem, r_tree, w_tree = self._scan_tree(parent)
                 if cpu > self.peaks['cpu_percent']:
@@ -90,7 +82,8 @@ class ResourceMonitor(threading.Thread):
                     self.peaks['io_read_max'] = r_tree
                 if w_tree > self.peaks['io_write_max']:
                     self.peaks['io_write_max'] = w_tree
-                time.sleep(0.3)
+                time.sleep(0.25)
+
             _, _, r_end, w_end = self._scan_tree(parent)
             self.peaks['io_read_end'] = r_end
             self.peaks['io_write_end'] = w_end
@@ -115,9 +108,9 @@ class ResourceMonitor(threading.Thread):
             os._exit(1)
 
 class CodeSampler(threading.Thread):
-    _NOISE_SUFFIXES = frozenset({'<frozen', 'chronos.py', 'threading.py'})
+    _NOISE_SUFFIXES = frozenset({'<frozen', 'chronos.py', 'threading.py', 'shadow_matrix.py'})
 
-    def __init__(self, interval=0.01):
+    def __init__(self, interval=0.025):  # 🛑 OTIMIZAÇÃO: 40Hz em vez de 100Hz
         super().__init__(daemon=True)
         self.interval = interval
         self.running = True
@@ -139,7 +132,7 @@ class CodeSampler(threading.Thread):
                         continue
                     self.samples[os.path.abspath(filename), frame.f_lineno] += 1
                     break
-            except Exception as e:
+            except Exception:
                 import sys as dox_exc_sys
                 _, exc_obj, exc_tb = dox_exc_sys.exc_info()
                 fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]

@@ -14,6 +14,7 @@ from typing import Dict, Any, Optional
 
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.commands.lite_xl_systems.engine_lite_xl import LiteXLEngine
+from doxoade.commands.telemetry_systems.telemetry import telemetry
 
 
 class ChaosSandboxRunner:

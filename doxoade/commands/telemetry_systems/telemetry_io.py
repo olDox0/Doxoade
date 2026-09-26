@@ -1,4 +1,4 @@
-# doxoade/doxoade/commands/telemetry_io.py
+# doxoade/doxoade/commands/telemetry_systems/telemetry_io.py
 """
 Telemetry IO v3.9 - Interface Nexus Gold.
 Exibição de I/O, Memória, Fluxo e Contexto com Syntax Highlight.
@@ -8,6 +8,8 @@ import re
 import linecache
 from click import echo
 from doxoade.tools.doxcolors import Fore, Style
+from doxoade.commands.telemetry_systems.telemetry_utils import format_bytes
+from doxoade.commands.telemetry_systems.telemetry_utils import bottleneck_score
 
 def draw_bar(value, max_val, width=10, color=Fore.GREEN):
     percent = min(1.0, value / max_val) if max_val > 0 else 0
@@ -19,7 +21,6 @@ def render_resource_line(label, val, formatted_val, bar_color, max_ref, status):
     echo(f'   {Style.BRIGHT}{label:<10}{Style.NORMAL} {bar} {formatted_val:>10} │ {status}')
 
 def render_disk_detail(read_mb, write_mb, status):
-    from .telemetry_utils import format_bytes
     total = read_mb + write_mb
     bar = draw_bar(total, 50, 10, Fore.BLUE)
     r_str = f'{Fore.CYAN}R:{format_bytes(read_mb)}{Fore.RESET}'
@@ -196,7 +197,6 @@ def _render_predecessor_block(fname: str, lineno: int, hits: int, layer: str, in
     echo(f"{indent}{Style.DIM}└{'─' * 48}{Style.RESET_ALL}")
 
 def render_flow_map(flow_data: dict, io_read_mb: float=0.0, io_write_mb: float=0.0):
-    from .telemetry_utils import bottleneck_score, format_bytes
     proj = flow_data.get('proj', {})
     libs = flow_data.get('libs', {})
     total_hits = flow_data.get('total_hits', 1) or 1

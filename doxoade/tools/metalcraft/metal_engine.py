@@ -1,48 +1,77 @@
 # -*- coding: utf-8 -*-
 # doxoade/tools/metalcraft/metal_engine.py
 """
-Nexus Metalcraft Engine v45.0 — Sotéria Integrated Build System.
+Nexus Metalcraft Engine v45.1 — Sotéria Integrated Build System.
+Otimizado: Lazy Loading de Scribe, tomllib nativo e eliminação de acoplamentos espúrios.
 """
-import os, subprocess, toml, hashlib, json, re, shutil, time
+from __future__ import annotations
+import os
+import subprocess
+import toml
+import hashlib
+import json
+import re
+import time
+import shutil
 from pathlib import Path
 from glob import glob
-from doxoade.tools.vulcan.diagnostic.soteria.scribe import SoteriaScribe
+# [DOX-UNUSED] from doxoade.tools.vulcan.diagnostic.soteria.scribe import SoteriaScribe
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.telemetry_tools.logger import chief_heartbeat
 from .metal_toolchain import NexusToolchain
 from doxoade.tools.soteria_systems.soteria_engine import SoteriaForensic
-from doxoade.commands.git_systems.git_workflow import release
+# [DOX-UNUSED] from doxoade.commands.git_systems.git_workflow import release
 
 
 class NexusMetalEngine:
-
-    def __init__(self, root):
+    def __init__(self, root: str | Path):
         self.root = Path(root).resolve()
         self.RST = Style.RESET_ALL
         self.toolchain = NexusToolchain()
-        self.scribe = SoteriaScribe()
+        self._scribe = None  # Inicialização Lazy sob demanda
         self.cache_path = self.root / ".doxoade" / "metalcraft" / "build_cache.json"
         self.config = self._load_config()
 
-    # ─────────────────────────────────────────────────────────────
-    # CONFIG
-    # ─────────────────────────────────────────────────────────────
+    @property
+    def scribe(self):
+        """Inicializa o SoteriaScribe somente quando for estritamente necessário."""
+        if self._scribe is None:
+            from doxoade.tools.vulcan.diagnostic.soteria.scribe import SoteriaScribe
+            self._scribe = SoteriaScribe()
+        return self._scribe
+
     def _load_config(self):
         conf_path = self.root / "metalcraft.toml"
         if not conf_path.exists():
             return None
+
         try:
-            with open(conf_path, 'r', encoding='utf-8') as f:
-                return toml.load(f)
+            raw_bytes = conf_path.read_bytes()
+        except Exception:
+            return None
+
+        # Decodificação resiliente: UTF-8 -> Fallback CP1252 (Windows ANSI)
+        try:
+            content = raw_bytes.decode('utf-8')
         except UnicodeDecodeError:
             try:
-                with open(conf_path, 'r', encoding='cp1252') as f:
-                    return toml.load(f)
+                content = raw_bytes.decode('cp1252')
+            except Exception:
+                content = raw_bytes.decode('utf-8', errors='replace')
+
+        # Parse com o tomllib nativo em C do Python 3.12
+        try:
+            import tomllib
+            return tomllib.loads(content)
+        except ImportError:
+            try:
+                import toml
+                return toml.loads(content)
             except Exception as e:
-                print(f"   {Fore.RED}✘ Erro de Encoding: {e}{self.RST}")
+                print(f"   {Fore.RED}✘ Erro no metalcraft.toml: {e}{self.RST}")
                 return None
         except Exception as e:
-            print(f"   {Fore.RED}✘ Erro no metalcraft.toml: {e}{self.RST}")
+            print(f"   {Fore.RED}✘ Erro de sintaxe TOML: {e}{self.RST}")
             return None
 
     # ─────────────────────────────────────────────────────────────
@@ -125,9 +154,10 @@ class NexusMetalEngine:
     # ─────────────────────────────────────────────────────────────
     def _validate_soteria_dna(self, bin_path: Path) -> bool:
         """Verifica se o binário contém os símbolos críticos da Sotéria."""
+        import shutil
         nm = shutil.which("nm") or shutil.which("nm.exe")
         if not nm:
-            return True  # Skip se nm indisponível
+            return True
         try:
             res = subprocess.run([nm, str(bin_path)],
                                  capture_output=True, text=True, timeout=10)

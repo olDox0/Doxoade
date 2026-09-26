@@ -56,6 +56,7 @@ class DoxoadeLazyGroup(click.Group):
             'check': 'doxoade.commands.check:check',
             'clean': 'doxoade.commands.clean:clean',
             'compress': 'doxoade.commands.compress_systems.compress_cmd:compress_file_cmd',
+            'consult': 'doxoade.commands.consult_systems.cmd_consult:consult_group',
             'config': 'doxoade.commands.config:config_group',
             'create-pipeline': 'doxoade.commands.utils:create_pipeline',
             'dashboard': 'doxoade.commands.dashboard:dashboard',
@@ -109,6 +110,7 @@ class DoxoadeLazyGroup(click.Group):
             'pedia': 'doxoade.commands.pedia:pedia',
             'purge-history': 'doxoade.commands.purge_history:purge_history',
             'pr': 'doxoade.commands.git_systems.git_pr:pr',
+            'profile': 'doxoade.commands.telemetry_systems.cmd_profile:cmd_profile',
             'python': 'doxoade.commands.python:python',
             'rebuild': 'doxoade.commands.rebuild:rebuild',
             'refactor': 'doxoade.commands.refactor_systems.refactor_command:refactor_group',
@@ -128,7 +130,7 @@ class DoxoadeLazyGroup(click.Group):
             'show-trace': 'doxoade.commands.utils:show_trace',
             'style': 'doxoade.commands.style:style',
             'sync': 'doxoade.commands.git_systems.git_workflow:sync',
-            'telemetry': 'doxoade.commands.telemetry:telemetry',
+            'telemetry': 'doxoade.commands.telemetry_systems.telemetry:telemetry',
             'terminal': 'doxoade.commands.shell_systems.shell_cmd:terminal',
             'termux-config': 'doxoade.commands.termux_command:termux_config',
             'test': 'doxoade.commands.test:test',
@@ -415,15 +417,17 @@ class DoxoadeLazyGroup(click.Group):
 
 
 @click.group(cls=DoxoadeLazyGroup, invoke_without_command=True)
-@click.option('--guard',        is_flag=True, help='Verificação de integridade Aegis.')
+@click.option('--guard', is_flag=True, help='Verificação de integridade Aegis.')
 @click.option('--refresh-help', is_flag=True, help='Força a atualização do cache de descrições.')
-@click.option('--pure',         is_flag=True, help='Inicia sem Shadow Runtime nem MetaFinder (modo mínimo).')
+@click.option('--pure', is_flag=True, help='Inicia sem Shadow Runtime nem MetaFinder (modo mínimo).')
 @click.pass_context
-#def cli(ctx, **kwargs):
 def cli(ctx, guard, refresh_help, pure):
     """olDox222 Advanced Development Environment (doxoade)."""
-    # --pure já foi consumido e removido de sys.argv em __main__.py antes do
-    # Click rodar; aqui só garantimos que o schema o conhece (--help, parsing).
+    # Se o usuário chamou 'doxoade' puro ou sem subcomando, exibe o help na hora:
+    if not ctx.invoked_subcommand:
+        click.echo(ctx.get_help())
+        return
+
     from doxoade.tools.log_filter import CLILogFilter
     CLILogFilter.suppress_db_traces()
 

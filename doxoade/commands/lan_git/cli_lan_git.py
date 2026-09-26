@@ -116,9 +116,12 @@ def cmd_share(repo_path: str, project: Optional[str], port: int, http_port: int,
     daemon_server = GitDaemonServer(abs_path, port=port)
     daemon_server.start()
 
-    # O LANWebPortal provê simultaneamente Git Smart HTTP + Bloco de Notas LAN
-    password = click.prompt("Senha do portal web", hide_input=True, confirmation_prompt=True)
-    portal_server = LANWebPortal(abs_path, password=password, host_ip=host_ip, port=http_port)
+    # 🛡️ Em modo Live ou se não for interativo, usa chave padrão da malha sem travar o terminal
+    portal_password = os.environ.get("DOXOADE_LAN_PASSWORD", "doxoade_lan_mesh") if live else None
+    if not portal_password:
+        portal_password = click.prompt("Senha do portal web", hide_input=True, confirmation_prompt=True, default="doxoade")
+
+    portal_server = LANWebPortal(abs_path, password=portal_password, host_ip=host_ip, port=http_port)
     portal_server.start()
 
     beacon = LANBeaconHost(manifest, udp_port=udp_port)
@@ -281,46 +284,118 @@ def cmd_discover(udp_port: int, timeout: float, scan: bool):
 # =====================================================================
 @lan_git_cli.command(name="pull")
 @click.argument("repo_path", default=".", type=click.Path(exists=True))
-@click.option("--repo", "-r", default=None, help="Nome específico do repositório a sincronizar.")
-@click.option("--host", default=None, help="IP direto do Host (ex: 192.168.18.52).")
+@click.option("--apply", "-a", is_flag=True, help="Efetiva a sincronização no workspace (sai do modo DRY-RUN).")
+@click.option("--force", "-f", is_flag=True, help="Sobrescreve alterações locais divergentes.")
+@click.option("--autostash", is_flag=True, help="Guarda alterações locais automaticamente no stash.")
+@click.option("--live", is_flag=True, help="Puxa o branch de espelhamento ao vivo (dox-live).")
 @click.option("--udp-port", default=54545, help="Porta UDP de descoberta.")
-@click.option("--force", "-f", is_flag=True, help="Força a sincronização sobrescrevendo alterações locais (Reset Hard).")
-@click.option("--autostash", is_flag=True, help="Guarda alterações locais no stash e restaura após o pull.")
-@click.option("--live", is_flag=True, help="Espelha o estado de rascunho em memória do Host (Live Mirror).")
-def cmd_pull(repo_path: str, repo: Optional[str], host: Optional[str], udp_port: int, force: bool, autostash: bool, live: bool):
-    """Puxa e atualiza o repositório local com Auto-Matching Inteligente."""
+def cmd_pull(repo_path: str, apply: bool, force: bool, autostash: bool, live: bool, udp_port: int):
+    """Puxa e atualiza o repositório local.
+    PADRÃO: DRY-RUN seguro com relatório W5. Use '--apply' (-a) para efetivar.
+    """
     abs_path = os.path.abspath(repo_path)
-    target_manifest = None
+    local_name = os.path.basename(abs_path)
+    norm_local = _fuzzy_clean_name(local_name)
 
-    if host:
-        click.echo(f"Conectando diretamente ao Host {host}...")
-        target_manifest = LANDirectScanner.probe_single(host, udp_port=udp_port)
-    else:
-        click.echo("Procurando o repositório na rede local...")
-        peers = LANBeaconClient.discover_peers(timeout=2.0, udp_port=udp_port)
-        if not peers:
-            peers = LANDirectScanner.scan_subnet(udp_port=udp_port)
-
-        if peers:
-            # 🎯 AUTO-MATCHING INTELIGENTE:
-            current_folder_name = os.path.basename(abs_path)
-            clean_local = _fuzzy_clean_name(repo if repo else current_folder_name)
-
-            for p in peers:
-                clean_remote = _fuzzy_clean_name(p.repo_name)
-                if clean_local == clean_remote or clean_local in clean_remote or clean_remote in clean_local:
-                    target_manifest = p
-                    break
-
-            # Se ainda não casou mas só há 1 repositório sendo anunciado na LAN, usa ele como padrão
-            if not target_manifest and len(peers) == 1:
-                target_manifest = peers[0]
-
-    if not target_manifest:
-        click.secho("[FALHA] Nenhum repositório correspondente foi localizado na rede.", fg="red")
+    manifests = LANBeaconClient.discover_peers(timeout=2.0, udp_port=udp_port)
+    if not manifests:
+        click.secho("[AVISO] Nenhum Host transmitindo repositórios via UDP na rede local.", fg="yellow")
         return
 
-    click.echo(f"Sincronizando com '{target_manifest.hostname}' ({target_manifest.ip})...")
+    # 🔍 AUTO-MATCHING SEGURO (Silo Shield)
+    selected_manifest = None
+    for m in manifests:
+        if _fuzzy_clean_name(m.repo_name) == norm_local:
+            selected_manifest = m
+            break
+
+    if not selected_manifest:
+        click.secho(f"\n🛑 [SILO SHIELD] Nenhum compartilhamento para '{local_name}' localizado na rede.", fg="red", bold=True)
+        click.echo("Projetos disponíveis no Host:")
+        for m in manifests:
+            click.echo(f"  • {m.repo_name} (no host {m.hostname} @ {m.ip})")
+        click.secho(f"\n💡 Você está na pasta '{local_name}'. O download foi bloqueado para evitar contaminação.", fg="yellow")
+        return
+
+    is_dry_run = not (apply or force)
+    target_branch = "dox-live" if (live or selected_manifest.is_live or selected_manifest.branch == "dox-live") else selected_manifest.branch
+
+    # Executa o fetch dos objetos
+    encoded_repo_name = quote(selected_manifest.repo_name)
+    http_url = f"http://{selected_manifest.ip}:8080/{encoded_repo_name}"
+
+    click.secho("\n════════════════════════════════════════════════════════════", fg="cyan")
+    label_mode = "🔍 MODO AUDITORIA (DRY-RUN)" if is_dry_run else "⚡ MODO APLICAÇÃO REAL (--apply)"
+    color_mode = "yellow" if is_dry_run else "green"
+    click.secho(f"          LAN-GIT PULL — {label_mode}", fg=color_mode, bold=True)
+    click.secho("════════════════════════════════════════════════════════════", fg="cyan")
+    click.echo(f"  • Quem (Host)    : {selected_manifest.hostname} ({selected_manifest.ip})")
+    click.echo(f"  • Onde (Destino) : {abs_path}")
+    click.echo(f"  • Alvo (Branch)  : {target_branch} [{selected_manifest.short_commit}]")
+    click.echo(f"  • Por Quê (Log)  : {selected_manifest.commit_message}")
+
+    # Faz o fetch para calcular as diferenças sem tocar no working tree
+    refspec = f"+refs/heads/{target_branch}:refs/remotes/{GitSyncEngine.REMOTE_NAME}/{target_branch}"
+    GitSyncEngine._configure_remote(abs_path, http_url)
+    ok_fetch, fetch_out, code, err_f = GitSyncEngine._run_git_forensic(abs_path, ["fetch", GitSyncEngine.REMOTE_NAME, refspec])
+    if not ok_fetch:
+        ok_fetch, fetch_out, code, err_f = GitSyncEngine._run_git_forensic(abs_path, ["fetch", GitSyncEngine.REMOTE_NAME, target_branch])
+        if not ok_fetch:
+            click.secho(f"  ✖ Falha ao buscar objetos do Host: {err_f}", fg="red")
+            return
+
+    # Compara o que mudaria
+    ok_diff, diff_out, _, _ = GitSyncEngine._run_git_forensic(abs_path, ["diff", "--name-status", f"HEAD..FETCH_HEAD"])
+    files_mod, files_new, files_del = [], [], []
+
+    if ok_diff and diff_out:
+        for line in diff_out.splitlines():
+            parts = line.split('\t', 1)
+            if len(parts) == 2:
+                st, fp = parts
+                if st.startswith('M'): files_mod.append(fp)
+                elif st.startswith('A'): files_new.append(fp)
+                elif st.startswith('D'): files_del.append(fp)
+
+    total_changes = len(files_mod) + len(files_new) + len(files_del)
+
+    # 📊 DOSSIÊ W5 DE MODIFICAÇÕES
+    click.secho("\n  📋 [RELATÓRIO FORENSE DE ARQUIVOS (W5)]", fg="cyan", bold=True)
+    if total_changes == 0:
+        click.secho("  ✔ Nenhuma diferença detectada. Seu repositório já está idêntico ao Host.", fg="green")
+    else:
+        click.echo(f"  Total de Alterações: {total_changes} arquivo(s)")
+        if files_mod:
+            click.secho(f"    📝 Modificados ({len(files_mod)}):", fg="yellow")
+            for f in files_mod[:10]: click.echo(f"       ↳ {f}")
+            if len(files_mod) > 10: click.echo(f"       ... e mais {len(files_mod)-10} arquivo(s)")
+        if files_new:
+            click.secho(f"    ✨ Novos ({len(files_new)}):", fg="green")
+            for f in files_new[:10]: click.echo(f"       ↳ {f}")
+            if len(files_new) > 10: click.echo(f"       ... e mais {len(files_new)-10} arquivo(s)")
+        if files_del:
+            click.secho(f"    🗑️  Deletados ({len(files_del)}):", fg="red")
+            for f in files_del[:5]: click.echo(f"       ↳ {f}")
+
+    click.secho("════════════════════════════════════════════════════════════\n", fg="cyan")
+
+    # Se estiver em Dry-Run, encerra aqui com instrução de aplicação
+    if is_dry_run:
+        if total_changes > 0:
+            click.secho("💡 Para aplicar as alterações acima com segurança no seu projeto, execute:", fg="yellow", bold=True)
+            click.secho(f"   doxoade lan-git pull --live --apply\n", fg="cyan", bold=True)
+        return
+
+    # ⚡ SE FOR --APPLY OU --FORCE: Efetiva com snapshot de segurança prévio
+    click.secho("💾 [BACKUP AUTOMÁTICO] Criando âncora 'dox-safety-backup' antes da aplicação...", fg="yellow")
+    GitSyncEngine._run_git_forensic(abs_path, ["branch", "-f", "dox-safety-backup", "HEAD"])
+
+    ok_reset, _, code_r, err_r = GitSyncEngine._run_git_forensic(abs_path, ["reset", "--hard", "FETCH_HEAD"])
+    if ok_reset:
+        click.secho(f"✔ [100% SINCRONIZADO] {total_changes} arquivo(s) aplicados com sucesso!", fg="green", bold=True)
+        click.secho("  (Reversibilidade garantida: 'git reset --hard dox-safety-backup' para desfazer).\n", fg="white")
+    else:
+        click.secho(f"✖ Falha ao aplicar sincronização: {err_r}", fg="red")
 
     # ═══════════════════════════════════════════════════════════
     # CORREÇÃO: TRANSMISSÃO P2P COM RETORNO AO BRANCH ORIGINAL

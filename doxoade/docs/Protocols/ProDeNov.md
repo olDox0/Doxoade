@@ -64,12 +64,13 @@ este é o novo protocolo simplificado e sucinto de desenvolveimento do doxoade. 
 Blitz Devlopmente: Desenvolvimento baseado em preparo e construção rapida de prototipos, seguindo regras simples de planejamento, planos caso ocorra problemas em cada parte do desenvolvimento. assim uma documentação dita Blitzplan ou Blueprint é feita para auxilio em projetos que exigem mais de um dia de desenvolvimento. Assim é exigido sistemas de diagnsotico para auxiliar em teste em produção. não é tolerado erros ocultos ou falta de dados de erro.
 * *Plano*:       Blitzplan para preparar o que vai ser feito, é a arquitetura, a documentação que vai fazer as coisas estaveis a longo prazo, ela pode estar no local do sistema mesmo e não necessariamente no docs/ caso o dev ache mais dinamico assim.
 * *Requisição*:  contexto, O que, onde, quem, quando, quanto, porque, origem e consequencias. delegações e resposabilidade das partes. com isso o que vai ser usado, aonde, por quem, quanto vai ser usado, e porque daquele sistema. respostas simples já é bom começo; exemplo simplorio: python 3.12, projeto_x/, uso para devs, pequeno porte, projeto de exemplo.
-* *Segurança*:   a garantia de que um problema ocorra e tenha reversibilidade, quanto um sistema traz segurança, isso é pefeito e o objetivo da segurança. com isso, um sistema complexo que manipula sistemas sensiveis tem que ser seguro, precisa de segurança. deve ser avaliado riscos de curto, medio e longo prazo. reversibilidade da implementação é importante para estabilidade do sistema, senão possivel voltar atraz, então o sistema tem uma falha.
+* *Segurança*:   a garantia de que um problema ocorra e tenha reversibilidade, quanto um sistema traz segurança, isso é pefeito e o objetivo da segurança. com isso, um sistema complexo que manipula sistemas sensiveis tem que ser seguro, precisa de segurança. deve ser avaliado riscos de curto, medio e longo prazo. reversibilidade da implementação é importante para estabilidade do sistema, senão possivel voltar atraz, então o sistema tem uma falha. considere seriamente ter feito backup persistente, e sistemas de reversabilidade para que acidentes de comrrompimento, acidentes, substituição acidentais ocorram.
 * *Devflow*:     é quando o dev pode fazer suas atividade com tranquilidade e segurança mesmo com imprevistos, e com garantias que o trabalho não sera perdido e permanecera escalavel. assim a manutenção tem sua importancia, um codigo que segue os protocolos teram sua criação, desenvolvimento e manutenção adequada.
 * *os porques*:  qual o problema, o que?, onde?, quando?, porque?, quem? origem? e consequencias
 * *Preservação*: é importante dados de registro e historico por preservação e investigações com segurança.
 * *roteiro*:     roteiro de implementação e testagem(RIT/Ritual) -> avaliação -> sistema de diagnostico/testagem -> implementação.
 * *portabulidade*: portabilidade de sistemas complexos, é quado é possivelportar para 32bits, ou outras arquiteturas como o RISC, portabilidade de funcionamento o python faz bem, e lua tambem. mas portar sistemas em C ou outros mecanismos é mais complexo e exige sagacidade tecnica nas escolhas de sistemas que seram usados em produção.
+* *Revisitação*: Voltar a desenvolver um sistema considerado velho, e continuar a voltar da onde parou ou a realizar manutenção e atualização trnaquilamente é algo bastante desejado, mesmo um terceiro consultando o sistema deve ter a experiencia tranquila
 
 ## Sistemas
 
@@ -84,6 +85,9 @@ TYPHON: Sistema de diagnostico e triangulação de dados. doxoade typhon apresen
 DOXLY: IDE naqual o doxoade adotou para usar em produção do doxoade e de outros projetos. dotada de integrações e sistemas de apoio para desenvolvimento rapido de prototipos, reparação rapida, flexibilidade e outras atividades.
  * *Automação*:
  * *Workflow*:
+
+## Arquiteturas Especiais
+ * *STRAP/Correia*: SAP/Strap processing (Streaming, Assyncronous and Pitstop), nome remete a correia de bicicleta naqual consegue se alterar em modos. é uma arquitetura que se baseia em procesamento streaming de forma assincrona que não para, fazendo pitstop naqual é acionada sem atrapalhar o work via sinal 'ready'. cada parte do processo seja indempendente e assincrona, e que já esteja preparado a atuação dos sistemas. ouseja, por exemplo no contexto do thotharchive, tera o worker para extração, sincronização e contrução de indice. a questão do pitstop é basicamente ter um sistema preparado para substituir o worker caso tenha ocorrido algum problema ou parada por alguma razão. os sistemas teria freio(backpressure) ou diminuição do processamento caso alguma parte esteja sobrecarregada. o manusei deve ter delimite para não sobrecarregar a memoria. detalhes de IO de banco de dados devem ter sua ateção ao desenvolver seu sistema, cuidado.
 
 ## Exemplos reais:
 

@@ -25,6 +25,7 @@ from doxoade.tools.compression.hybrid_codec import (
     get_profile_for_ext,
     encode as hybrid_encode,
 )
+from doxoade.commands.telemetry_systems.telemetry import telemetry
 
 
 LEARNER_VERSION = 1

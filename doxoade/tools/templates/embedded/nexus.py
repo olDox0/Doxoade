@@ -15,7 +15,6 @@ except ImportError:
     # Fallback para o modo Silo (Arquivos na mesma pasta utils/)
     import doxcolors as colors
 # [DOX-UNUSED]     import error_info
-    import telemetry as logger
     IS_CORE = False
 
 def monitor(func):

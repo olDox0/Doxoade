@@ -1,23 +1,34 @@
-# doxoade\tools\alexandria\engine.py
-import threading
+# -*- coding: utf-8 -*-
+# doxoade/tools/alexandria/engine.py
+"""
+Alexandria Engine v4.0 — Motor de Persistência Assíncrona Nexus.
+Otimizado: Batch Ingest, Idle Timeout adaptativo (100ms) e Zero Lock Contention.
+"""
+from __future__ import annotations
+
+import os
 import queue
 import sqlite3
+import threading
+from pathlib import Path
+
 
 class AlexandriaEngine:
     def __init__(self):
         self.queue = queue.Queue()
         self._thread = None
-        self._idle_timeout = 5.0 
+        self._idle_timeout = 0.1  # 🛑 OTIMIZAÇÃO: 100ms em vez de 5.0s
+        self._lock = threading.Lock()
 
-    def enqueue(self, query, params):
+    def enqueue(self, query, params=()):
         self.queue.put((query, params))
-        if self._thread is None or not self._thread.is_alive():
-            self._thread = threading.Thread(target=self._worker, daemon=True)
-            self._thread.start()
+        with self._lock:
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = threading.Thread(target=self._worker, daemon=True)
+                self._thread.start()
 
-    def _init_db_structure(self, cursor):
-        """Garante a estrutura exata exigida pelo sistema de telemetria (v134+)."""
-        # 1. Cria a tabela com a topologia moderna unificada
+    def _init_db_structure(self, cursor: sqlite3.Cursor):
+        """Garante a estrutura unificada de logs sem invalidar caches do SQLite."""
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS operational_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,17 +42,19 @@ class AlexandriaEngine:
                 details TEXT
             )
         """)
+
+        cursor.execute("PRAGMA table_info(operational_logs)")
+        colunas_existentes = {info[1] for info in cursor.fetchall()}
         
-        # 2. Sincroniza retrocompatibilidade se o banco físico já existia com colunas antigas
         colunas_modernas = [
             ("subsystem", "TEXT"),
             ("action", "TEXT"),
             ("data", "TEXT"),
-            ("pid", "INTEGER")
+            ("pid", "INTEGER"),
+            ("level", "TEXT"),
+            ("message", "TEXT"),
+            ("details", "TEXT")
         ]
-        
-        cursor.execute("PRAGMA table_info(operational_logs)")
-        colunas_existentes = [info[1] for info in cursor.fetchall()]
         
         for nome_coluna, tipo_coluna in colunas_modernas:
             if nome_coluna not in colunas_existentes:
@@ -50,78 +63,76 @@ class AlexandriaEngine:
                 except sqlite3.OperationalError:
                     pass
 
-
     def _worker(self):
         from doxoade.tools.core_locator import GLOBAL_DB_FILE, GLOBAL_DATA_DIR
-        from doxoade.core_database import DB_FILE, DB_DIR, get_db_connection
-        import os
         
         GLOBAL_DATA_DIR.mkdir(parents=True, exist_ok=True)
-        DB_DIR.mkdir(parents=True, exist_ok=True)
-        # Garante a existência física do diretório da base
-        os.makedirs(os.path.dirname(str(DB_FILE)), exist_ok=True)
-        
-        # Invoca a conexão oficial para garantir a Gênese do init_db()
-#        conn_oficial = None
-        conn_oficial = get_db_connection()
-        conn_oficial.close()
+        os.makedirs(os.path.dirname(str(GLOBAL_DB_FILE)), exist_ok=True)
 
-        # Conexão paralela do Alexandria
-        conn = sqlite3.connect(str(GLOBAL_DB_FILE), timeout=30)
+        # Conexão direta com WAL e timeout resiliente
+        conn = sqlite3.connect(str(GLOBAL_DB_FILE), timeout=30.0)
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
         cursor = conn.cursor()
-        
-        # 🔴 CORREÇÃO: O Alexandria garante sua própria estrutura antes de trabalhar
-        self._init_db_structure(cursor)
-        
-        try:
-            cursor.execute("ALTER TABLE operational_logs ADD COLUMN subsystem TEXT")
-            cursor.execute("ALTER TABLE operational_logs ADD COLUMN action TEXT")
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass # Ignora se já existirem fisicamente
 
-        
-        # Força o SQLite a limpar cache de schemas antigos nesta conexão
-        cursor.execute("PRAGMA writable_schema = ON;")
-        cursor.execute("PRAGMA writable_schema = OFF;")
-        
+        self._init_db_structure(cursor)
+        conn.commit()
+
         while True:
             try:
+                # 🛑 Aguarda com timeout curto e drena em lote
                 task = self.queue.get(timeout=self._idle_timeout)
-                if task is None: 
+                if task is None:
                     break
-                query, params = task
-                
-                # Tenta executar a query de log
+
+                batch = [task]
+                # Coleta todos os itens já acumulados na fila de uma vez só
+                while not self.queue.empty() and len(batch) < 50:
+                    try:
+                        batch.append(self.queue.get_nowait())
+                    except queue.Empty:
+                        break
+
+                # 🛑 GRAVAÇÃO ATÔMICA EM LOTE: Um único commit para todo o lote!
                 try:
-                    cursor.execute(query, params)
+                    cursor.execute("BEGIN TRANSACTION")
+                    for q, p in batch:
+                        cursor.execute(q, p)
                     conn.commit()
                 except sqlite3.OperationalError as e:
-                    # Se mesmo assim ele reclamar que a coluna não existe (bug de cache do SQLite)
-                    if "no such column: subsystem" in str(e) or "has no column named subsystem" in str(e):
-                        # Força uma reinicialização da conexão para limpar o estado
-                        conn.close()
-                        conn = sqlite3.connect(str(DB_FILE), timeout=30)
-                        cursor = conn.cursor()
-                        # Tenta reexecutar uma única vez com a nova conexão limpa
-                        cursor.execute(query, params)
+                    conn.rollback()
+                    # Fallback com re-verificação de colunas se houver divergência
+                    if "no such column" in str(e) or "has no column" in str(e):
+                        self._init_db_structure(cursor)
+                        cursor.execute("BEGIN TRANSACTION")
+                        for q, p in batch:
+                            cursor.execute(q, p)
                         conn.commit()
                     else:
-                        raise e # Repassa se for outro erro operacional
-                        
-                self.queue.task_done()
+                        raise e
+
+                for _ in batch:
+                    self.queue.task_done()
+
             except queue.Empty:
+                # Fila vazia após 100ms de inatividade: encerra a thread de forma limpa
                 break
             except Exception as e:
-                # Captura qualquer erro residual para nunca travar ou inundar o terminal
-                print(f"[-] Erro Alexandria Engine tratado: {e}")
+                # Falha pontual nunca derruba o processo
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
                 try:
                     self.queue.task_done()
                 except ValueError:
                     pass
+
         conn.close()
 
+
 alexandria = AlexandriaEngine()
+
 
 def alexandria_write(query, params=()):
     alexandria.enqueue(query, params)

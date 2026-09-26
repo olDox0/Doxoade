@@ -1,8 +1,10 @@
-# doxoade/doxoade/commands/refactor_systems/refactor_rename.py
+# -*- coding: utf-8 -*-
+# doxoade/commands/refactor_systems/refactor_rename.py
 from __future__ import annotations
 import os
 import re
 from pathlib import Path
+from .refactor_utils import write_text_safe
 IMPORT_RE = re.compile('^\\s*(from\\s+([\\w\\.]+)\\s+import|import\\s+([\\w\\.]+))')
 
 def module_to_path(root: Path, module: str) -> Path:
@@ -64,7 +66,7 @@ def rename_module(root: Path, old_module: str, new_module: str, apply: bool=Fals
             total_changes += changes
             print(f'[UPDATE] {py} ({changes} mudanças)')
             if apply:
-                `write_text_safe(py, new_text)
+                write_text_safe(py, new_text)
 #                py.write_text(new_text, encoding='utf-8')
     if apply:
         new_path.parent.mkdir(parents=True, exist_ok=True)

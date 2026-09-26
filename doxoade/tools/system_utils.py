@@ -35,7 +35,7 @@ def auto_vaccinate_env():
             f"project_root = r'{str(project_root)}'\n"
             "if project_root not in sys.path: sys.path.insert(0, project_root)\n"
             "try:\n"
-            "    import doxoade.tools.aegis.lazarus_hook as lz\n"
+            "    import doxoade.tools.soteria_systems.lazarus_hook as lz\n"
             "    lz.install()\n"
             "except Exception: pass\n"
             f"{signature}_END\n"

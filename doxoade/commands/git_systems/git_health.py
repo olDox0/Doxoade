@@ -10,6 +10,7 @@ class DependencyGuard:
         self.root = root
 
     def check_health(self, auto_fix=False):
+        """Audita vulnerabilidades e dependências obsoletas (Dependabot Local)."""
         print(f'{Fore.CYAN}🛡  [DEPENDABOT-LOCAL] Analisando suprimentos...{Style.RESET_ALL}')
         python_exe = sys.executable
         try:

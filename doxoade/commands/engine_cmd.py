@@ -1,75 +1,121 @@
+# -*- coding: utf-8 -*-
 # doxoade/commands/engine_cmd.py
-import sys
+"""
+⚙️  ZEUS — Gerenciamento Central dos Motores de Background.
+Permite inspecionar, ligar e desligar módulos legados do arranque.
+"""
+from __future__ import annotations
+
 import os
+import sys
 import click
 from pathlib import Path
-from doxoade.tools.doxcolors import Fore, Style
+from rich.console import Console
+from rich.table import Table
+
+from doxoade.tools.filesystem import _find_project_root
+from doxoade.boot import (
+    load_engine_config,
+    save_engine_config,
+    DEFAULT_ENGINES,
+    get_engine_config_path
+)
+
 
 @click.group('engine')
 def engine_group():
     """⚙️  Gerenciamento Central dos Motores de Background."""
     pass
 
+
 @engine_group.command('status')
 def engine_status():
-    """Exibe o estado atual dos interceptadores no MetaPath."""
-    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}╔════════════════════════════════════════╗")
-    click.echo(f"║     NEXUS BACKGROUND ENGINE STATUS     ║")
-    click.echo(f"╚════════════════════════════════════════╝{Style.RESET_ALL}\n")
-    
-    click.echo(f"{Fore.WHITE}■ Variáveis de Ambiente:{Style.RESET_ALL}")
-    click.echo(f"  DOXOADE_QUIET_BOOT : {os.environ.get('DOXOADE_QUIET_BOOT', '0')}")
-    click.echo(f"  DOXOADE_SHADOW     : {os.environ.get('DOXOADE_SHADOW', '1')}")
-    click.echo(f"  DOXOADE_RESCUE     : {os.environ.get('DOXOADE_RESCUE', '1')}")
-    click.echo(f"  VULCAN_VERBOSE     : {os.environ.get('VULCAN_VERBOSE', '0')}")
+    """Exibe o estado de cada motor de boot e o sys.meta_path."""
+    root = _find_project_root(os.getcwd())
+    cfg = load_engine_config(root)
+    console = Console()
 
-    click.echo(f"\n{Fore.WHITE}■ Topologia sys.meta_path:{Style.RESET_ALL}")
-    vulcan_ok = False
-    shadow_ok = False
-    
+    table = Table(
+        title="⚙️  PAINEL DE MOTORES DE BACKGROUND (DOXOADE BOOT)",
+        header_style="bold cyan",
+        border_style="dim cyan"
+    )
+    table.add_column("Motor ID", style="bold white", width=18)
+    table.add_column("Status", width=12)
+    table.add_column("Finalidade / Papel", style="dim white")
+
+    descriptions = {
+        "hermes_init": "Bootstrap nativo C de módulos críticos",
+        "metalcraft": "Compilação de alvos C (metalcraft.toml)",
+        "hermes_diag": "Diagnostic Hooks e Logger Assíncrono",
+        "abi_gate": "Auditor de arquitetura de binários .pyd/.so",
+        "vulcan_meta": "Interceptador Tier 1 de imports nativos",
+        "shadow_runtime": "Vigilância NSR e injeção de vacinas AST",
+        "horus": "Observabilidade de incepção",
+        "lazarus": "Escudo de resgate global (sys.excepthook)",
+        "hermes_bridge": "Bridge C SSE 4.2 compilado",
+        "hbc6": "Carregador de bytecode comprimido HBC6",
+    }
+
+    for engine_id, is_active in cfg.items():
+        status_badge = "[bold green]🟢 ATIVO[/bold green]" if is_active else "[bold red]🔴 DESLIGADO[/bold red]"
+        desc = descriptions.get(engine_id, "Subsistema interno")
+        table.add_row(engine_id, status_badge, desc)
+
+    console.print("\n")
+    console.print(table)
+
+    # Detalhe do MetaPath
+    console.print("[bold yellow]Topologia sys.meta_path ativa:[/bold yellow]")
     for i, finder in enumerate(sys.meta_path):
-        # Tenta extrair o nome real, caso seja uma classe nativa do Python
         name = getattr(finder, '__name__', type(finder).__name__)
-        
-        if "VulcanMetaFinder" in name:
-            if isinstance(finder, type):
-                click.echo(f"  {i}. {Fore.RED}{name:<20}{Style.RESET_ALL} [!] AVISO: CLASSE INVÁLIDA (LIXO)")
-            else:
-                vulcan_ok = True
-                click.echo(f"  {i}. {Fore.GREEN}{name:<20}{Style.RESET_ALL} [TIER 1 - Redirecionamento Ativo]")
-        elif "ShadowFinder" in name:
-            if isinstance(finder, type):
-                click.echo(f"  {i}. {Fore.RED}{name:<20}{Style.RESET_ALL} [!] AVISO: CLASSE INVÁLIDA (LIXO)")
-            else:
-                shadow_ok = True
-                click.echo(f"  {i}. {Fore.YELLOW}{name:<20}{Style.RESET_ALL} [VIGILÂNCIA - Vacinação AST]")
-        elif isinstance(finder, type):
-            # Motores nativos do Python (PathFinder, BuiltinImporter, etc)
-            click.echo(f"  {i}. {Fore.WHITE}{name:<20}{Style.RESET_ALL} 🔒 [Nativo Python (Built-in)]")
-        else:
-            click.echo(f"  {i}. {Style.DIM}{name:<20}{Style.RESET_ALL} 🔹 [Nativo Python (Instância)]")
-            
-        cwd_root = Path.cwd()
-        opt_dir = cwd_root / '.doxoade' / 'vulcan' / 'opt_py'
-        opt_count = len(list(opt_dir.glob('opt_*.py'))) if opt_dir.exists() else 0
+        name = finder.__name__ if hasattr(finder, '__name__') else type(finder).__name__
+        console.print(f"  {i}. [cyan]{name}[/cyan]")
+    
+    conf_path = get_engine_config_path(root)
+    console.print(f"\n[dim]Arquivo de configuração: {conf_path}[/dim]\n")
 
-        click.echo(f"\n{Fore.WHITE}■ Tier 2 (Python Otimizado):{Style.RESET_ALL}")
-        if opt_count > 0:
-            click.echo(f"  {Fore.CYAN}opt_py: {opt_count} arquivo(s) em {opt_dir}{Style.RESET_ALL}")
-            tier2_ok = True
-        else:
-            click.echo(f"  {Fore.RED}opt_py: Nenhum arquivo encontrado em {opt_dir}{Style.RESET_ALL}")
-            tier2_ok = False
 
-        # Atualizar o diagnóstico geral para incluir tier2_ok
-        if vulcan_ok and shadow_ok and tier2_ok:
-            click.echo(f"  {Fore.GREEN}✔ SISTEMA GOLD: Todos os tiers operacionais.{Style.RESET_ALL}")
-        elif vulcan_ok and shadow_ok:
-            click.echo(f"  {Fore.YELLOW}⚠ SISTEMA SILVER: Tier 1 ativo, Tier 2 ausente.{Style.RESET_ALL}")
-            
-    click.echo(f"\n{Fore.WHITE}■ Diagnóstico Geral:{Style.RESET_ALL}")
-    if vulcan_ok and shadow_ok:
-        click.echo(f"  {Fore.GREEN}✔ SISTEMA GOLD: Motores alinhados perfeitamente.{Style.RESET_ALL}")
-    else:
-        click.echo(f"  {Fore.RED}✘ SISTEMA DEGRADADO: Motores ausentes ou corrompidos.{Style.RESET_ALL}")
-    print()
+@engine_group.command('enable')
+@click.argument('engine_name')
+def engine_enable(engine_name: str):
+    """Ativa um motor específico de inicialização."""
+    root = _find_project_root(os.getcwd())
+    cfg = load_engine_config(root)
+    key = engine_name.lower().strip()
+
+    if key not in DEFAULT_ENGINES:
+        click.secho(f"Motor '{key}' não reconhecido.", fg="red")
+        click.echo(f"Opções válidas: {', '.join(DEFAULT_ENGINES.keys())}")
+        return
+
+    cfg[key] = True
+    save_engine_config(root, cfg)
+    click.secho(f"✔ Motor '{key}' ATIVADO com sucesso.", fg="green", bold=True)
+
+
+@engine_group.command('disable')
+@click.argument('engine_name')
+def engine_disable(engine_name: str):
+    """Desativa um motor específico do arranque."""
+    root = _find_project_root(os.getcwd())
+    cfg = load_engine_config(root)
+    key = engine_name.lower().strip()
+
+    if key not in DEFAULT_ENGINES:
+        click.secho(f"Motor '{key}' não reconhecido.", fg="red")
+        click.echo(f"Opções válidas: {', '.join(DEFAULT_ENGINES.keys())}")
+        return
+
+    cfg[key] = False
+    save_engine_config(root, cfg)
+    click.secho(f"✔ Motor '{key}' DESATIVADO.", fg="yellow", bold=True)
+
+
+@engine_group.command('reset')
+def engine_reset():
+    """Restaura todos os motores para a configuração padrão."""
+    root = _find_project_root(os.getcwd())
+    save_engine_config(root, DEFAULT_ENGINES)
+    click.secho("✔ Todos os motores de boot foram restaurados para a configuração padrão.", fg="green", bold=True)
+

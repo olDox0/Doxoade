@@ -1,15 +1,22 @@
+# -*- coding: utf-8 -*-
 # doxoade/doxoade/__main__.py
 # Main satellite
-import click
+from __future__ import annotations
+
 import sys
 import os
+import time
 from pathlib import Path
+import click
+
 
 def _find_project_root():
     current = Path.cwd().resolve()
     for node in [current, *current.parents]:
-        if (node / ".doxoade" / "vulcan" / "bin").exists(): return str(node)
+        if (node / ".doxoade" / "vulcan" / "bin").exists():
+            return str(node)
     return str(current)
+
 
 @click.group()
 @click.option('--hbc6-audit', is_flag=True, help='Ativa auditoria de fallback do HBC6')
@@ -21,27 +28,40 @@ def cli(hbc6_audit, hbc6_audit_verbose):
         os.environ["HERMES_HBC6_AUDIT"] = "1"
         os.environ["HERMES_HBC6_AUDIT_VERBOSE"] = "1"
 
+
 def main():
-    import os
+    # 🛑 ÉPOCA ZERO: Marcador inicial absoluto no primeiro instante do processo
+    t0_boot = time.perf_counter()
+
     os.environ["DOXOADE_QUIET_BOOT"] = "1"
     package_dir = Path(__file__).resolve().parent
     project_root = str(package_dir.parent)
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
+
     cwd_root = _find_project_root()
     os.environ["DOXOADE_PROJECT_ROOT"] = cwd_root
+
     pure_mode = "--pure" in sys.argv
     if pure_mode:
         sys.argv.remove("--pure")
+        boot_metrics = {"mode": "PURE", "phases": {}}
     else:
         from doxoade.boot import ignite_background_systems
-        ignite_background_systems(cwd_root)
+        boot_res = ignite_background_systems(cwd_root)
+        boot_metrics = boot_res if isinstance(boot_res, dict) else {"phases": {}}
+        boot_metrics["mode"] = "FULL"
+
+    # Cálculo seguro do tempo de arranque
+    total_boot_ms = round((time.perf_counter() - t0_boot) * 1000.0, 2)
+    boot_metrics["total_boot_ms"] = total_boot_ms
+    os.environ["DOXOADE_BOOT_MS"] = str(total_boot_ms)
     os.environ["DOXOADE_QUIET_BOOT"] = "0"
-    
+
     exit_code = 0
     try:
-        from doxoade.cli import cli
-        cli()
+        from doxoade.cli import cli as root_cli
+        root_cli(obj={"boot_metrics": boot_metrics, "t0_boot": t0_boot})
     except SystemExit as e:
         exit_code = getattr(e, 'code', 0) or 0
     except Exception as e:
@@ -49,11 +69,9 @@ def main():
             exit_code = getattr(e, 'exit_code', 0) or 0
         else:
             import traceback
-            import os
             from datetime import datetime
             tb_text = traceback.format_exc()
             lines = tb_text.splitlines()
-            # Forensic Extraction (Ma'at)
             info = {'error': lines[-1] if lines else 'Unknown', 'file': 'Unknown', 'line': '0', 'func': 'Unknown'}
             for line in reversed(lines):
                 if 'File "' in line:
@@ -70,16 +88,14 @@ def main():
                     if next_line.startswith("in "):
                         info['func'] = next_line[3:]
                     break
-            # Terminal Output (Anúbis)
             print(f"\n\x1b[41;1m 🔥 CRASH NO SISTEMA (Forensic Report) \x1b[0m"
                   f"\n\x1b[1;31m  ■ Tipo de Falha: \x1b[0m\x1b[1m{type(e).__name__}\x1b[0m"
                   f"\x1b[1;31m  ■ Mensagem:      \x1b[0m{e}"
                   f"\x1b[1;33m  ■ Arquivo:       \x1b[0m{info['file']}"
                   f"\x1b[1;33m  ■ Linha:         \x1b[0m{info['line']}"
                   f"\x1b[1;33m  ■ Função:        \x1b[0m{info['func']}"
-                  f"\n\x1b[2m--- Traceback Completo ---\x1b[0m" )
+                  f"\n\x1b[2m--- Traceback Completo ---\x1b[0m")
             print(tb_text)
-            # Black Box Logger (Hades)
             try:
                 log_dir = Path(os.environ.get("DOXOADE_PROJECT_ROOT", ".")) / ".doxoade" / "logs"
                 log_dir.mkdir(parents=True, exist_ok=True)
@@ -89,12 +105,11 @@ def main():
                     f.write(f"FILE: {info['file']} | LINE: {info['line']} | FUNC: {info['func']}\n")
                     f.write(f"{'='*60}\n{tb_text}\n")
                 print(f"\x1b[1;35m  💾 [HADES] Black Box salvo em: {crash_log}\x1b[0m")
-            except Exception: pass
+            except Exception:
+                pass
             exit_code = 1
     finally:
-        # 🔥 FORÇA O DUMP DO HBC6 AUDITOR ANTES DE MORRER
-        import os as _os
-        if _os.environ.get("HERMES_HBC6_AUDIT") == "1":
+        if os.environ.get("HERMES_HBC6_AUDIT") == "1":
             try:
                 from doxoade.tools.hermes_systems.hbc6_audit import HBC6Auditor
                 auditor = HBC6Auditor.get_instance()
@@ -104,8 +119,8 @@ def main():
                     print(f"  💾 [HBC6-AUDIT] Dossiê salvo em: {path}")
             except Exception:
                 pass
-        
         sys.exit(exit_code)
+
 
 if __name__ == "__main__":
     main()

@@ -694,3 +694,11 @@ def hermes_deadzone_scan(apply):
         click.secho(f"\n  ✔ Deadzone atualizada. Total de {total} módulos banidos do Motor C.", fg='green', bold=True)
     else:
         click.secho(f"\n  [DRY-RUN] Use --apply para gravar no deadzone.json.", fg='cyan')
+
+@hermes_group.command('profile')
+@click.argument('module_name', default='doxoade.commands.check')
+def hermes_profile_cmd(module_name: str):
+    """🔬 Raio-X de precisão: compara Hermes vs Python Puro em microssegundos."""
+    from doxoade.tools.hermes_systems.hermes_profiler import HermesProfiler
+    profiler = HermesProfiler(Path.cwd())
+    profiler.profile_module(module_name)

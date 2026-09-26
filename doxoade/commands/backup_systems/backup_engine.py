@@ -32,6 +32,7 @@ from .backup_metadata import (
 )
 from doxoade.tools.source_profile import is_source_path, ext_of
 from doxoade.tools.compression import hybrid_codec
+from doxoade.commands.telemetry_systems.telemetry import telemetry
 
 try:
     from doxoade.tools.compression import dict_learner

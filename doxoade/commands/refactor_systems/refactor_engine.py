@@ -1,14 +1,13 @@
 # -*- coding: utf-8 -*-
-# doxoade/doxoade/commands/refactor_systems/refactor_engine.py
+# doxoade/commands/refactor_systems/refactor_engine.py
 import os
 import ast
 import re
-# [DOX-UNUSED] import shutil
 import click
 from pathlib import Path
 
-# [DOX-UNUSED] from .refactor_verify         import verify_and_fix
-from .refactor_utils          import iter_python_files, read_text_safe 
+# Correção: Injeção de write_text_safe no cabeçalho
+from .refactor_utils import iter_python_files, read_text_safe, write_text_safe
 from doxoade.tools.filesystem import _find_project_root
 
 class FunctionMover(ast.NodeTransformer):
@@ -217,6 +216,35 @@ class RefactorEngine:
         self._facade_cache = mapping
         return mapping
 
+    def _create_pre_refactor_snapshot(self, target_path: Path, affected_files: list = None) -> Path:
+        """
+        🛡️ SOTÉRIA / HADES: Backup de segurança com reversibilidade garantida.
+        Salva o arquivo-alvo e todos os arquivos vizinhos que sofrerão mutação de import.
+        """
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        backup_dir = self.root / ".doxoade" / "refactor_backups" / f"snapshot_{timestamp}"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. Backup do arquivo sob movimentação
+        if target_path.exists():
+            rel_target = target_path.relative_to(self.root)
+            dest_backup = backup_dir / rel_target
+            dest_backup.parent.mkdir(parents=True, exist_ok=True)
+            dest_backup.write_bytes(target_path.read_bytes())
+
+        # 2. Backup dos vizinhos afetados
+        if affected_files:
+            for f in affected_files:
+                f_path = Path(f).resolve()
+                if f_path.exists():
+                    rel_f = f_path.relative_to(self.root)
+                    dest_f = backup_dir / rel_f
+                    dest_f.parent.mkdir(parents=True, exist_ok=True)
+                    dest_f.write_bytes(f_path.read_bytes())
+
+        click.secho(f"  💾 [SOTÉRIA] Backup de reversão criado em: {backup_dir.name}", fg="green")
+        return backup_dir
+
     def _path_to_module(self, file_path):
         try:
             abs_root = self.root.resolve()
@@ -278,9 +306,13 @@ class RefactorEngine:
                         fix_imports(fpath, name, new_mod)
                 
                 if changed and not dry_run:
-                    write_text_safe(fpath, "".join(new_lines))
-#                    fpath.write_text(content, encoding='utf-8')
-                    modified_count += 1
+                        # Garante compatibilidade caso a variável seja str ou list
+                        payload = "".join(content) if isinstance(content, list) else content
+                        try:
+                            write_text_safe(fpath, payload)
+                        except NameError:
+                            fpath.write_text(payload, encoding='utf-8')
+                        modified_count += 1
 
         return True, f"Reparo concluído. {modified_count} arquivos sincronizados."
 
@@ -615,8 +647,10 @@ class RefactorEngine:
         """
         Analisa o arquivo e corrige imports relativos ou absolutos quebrados.
         """
+        target_path = Path(target_path).resolve()
         try:
-            content = target_path.read_text(encoding='utf-8')
+            #content = target_path.read_text(encoding='utf-8')
+            content = read_text_safe(target_path)
             lines = content.splitlines(keepends=True)
             new_lines = []
             changed = False
@@ -648,7 +682,8 @@ class RefactorEngine:
                 new_lines.append(new_line)
 
             if changed:
-                write_text_safe(fpath, "".join(new_lines))
+                write_text_safe(target_path, content)
+#                write_text_safe(fpath, "".join(new_lines))
 #                target_path.write_text("".join(new_lines), encoding='utf-8')
                 return True
         except Exception as e:

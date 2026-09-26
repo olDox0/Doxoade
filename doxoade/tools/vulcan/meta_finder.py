@@ -20,6 +20,7 @@ import hashlib
 import ctypes
 from pathlib import Path
 from doxoade.tools.vulcan.vulcan_safe_loader import SafeExtensionLoader
+from doxoade.tools.vulcan.runtime import VulcanLoader
 
 GENERIC_NAMES = {'core', 'common', 'base', 'helpers', 'config'}
 _VULCAN_FINDER_INSTANCE = None
@@ -125,6 +126,25 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
             h = "000000"
         self._path_hash_cache[path_str] = h
         return h
+
+    def _is_binary_valid(self, bin_path: Path, py_path: str | Path) -> bool:
+        """
+        Valida se o binário .pyd/.so é compatível com a arquitetura da máquina
+        e se não está desatualizado (stale) em relação ao código-fonte .py.
+        """
+        bin_p = Path(bin_path)
+        if not bin_p.exists():
+            return False
+        
+        # 1. Valida se o cabeçalho PE (Windows) ou ELF (Linux) bate com 32/64 bits
+        if not self.is_binary_valid_for_host(bin_p):
+            return False
+            
+        # 2. Valida se o .py não foi modificado após a compilação do .pyd
+        if self._is_stale(str(py_path), str(bin_p)):
+            return False
+
+        return True
 
     def _find_project_binary(self, py_path: str):
         if not py_path:
@@ -270,155 +290,153 @@ class VulcanMetaFinder(importlib.abc.MetaPathFinder):
         if cls._debug_enabled():
             print(str(msg), file=sys.stderr)
 
-def find_spec(self, fullname: str, path, target=None):
-    try:
-        if any((fullname.startswith(p) for p in self.BYPASS)):
-            return None
-        cached = self._spec_cache.get(fullname)
-        if cached is not None:
-            return cached if cached is not False else None
+    def find_spec(self, fullname: str, path, target=None):
+        try:
+            if any((fullname.startswith(p) for p in self.BYPASS)):
+                return None
+            cached = self._spec_cache.get(fullname)
+            if cached is not None:
+                return cached if cached is not False else None
 
-        module_part = fullname.split('.')[-1]
-        lib_bin_enabled = os.environ.get('VULCAN_DISABLE_LIB_BIN', '0').strip() != '1'
-
-        # ═══════════════════════════════════════════════════════════════════
-        # TIER 1: Binário Nativo (.pyd/.so)
-        # ═══════════════════════════════════════════════════════════════════
-        if lib_bin_enabled and self._lib_bin_files:
-            prefix = f'v_{module_part}_'
-            exact = f'v_{module_part}{self._ext}'
-            candidate_names = [f for f in self._lib_bin_files if f.startswith(prefix) or f == exact]
-            if candidate_names:
-                candidates = [self.lib_bin_dir / f for f in candidate_names]
-                for bin_path in sorted(candidates, key=lambda p: self._get_mtime(str(p)), reverse=True):
-                    if not is_binary_candidate(fullname, bin_path):
-                        self._dlog(f'\x1b[90m[VULCAN SKIP] {bin_path.name} ≠ {fullname}\x1b[0m')
-                        continue
-                    if not self.is_binary_valid_for_host(bin_path):
-                        continue
-
-                    original_spec = self._resolve_py_path_as_spec(fullname, path)
-                    self._dlog(f'[DEBUG] {fullname} → original_spec={original_spec}')
-
-                    if not (original_spec and original_spec.loader):
-                        continue
-
-                    expected_hash = self._get_path_hash(original_spec.origin)
-                    actual_hash = bin_path.stem.split('.')[0].rsplit('_', 1)[-1]
-                    if actual_hash != expected_hash:
-                        self._dlog(f'[VULCAN SKIP] hash mismatch {fullname}: esperado={expected_hash}, pyd={actual_hash} ({bin_path.name})')
-                        continue
-
-                    try:
-                        origin_name = Path(str(original_spec.origin)).name
-                    except Exception:
-                        origin_name = ''
-
-                    if origin_name == '__init__.py':
-                        self._dlog(f'[DEBUG] skip package root for {fullname}')
-                        continue
-
-                    native_name = bin_path.stem.split('.')[0]
-                    from doxoade.tools.vulcan.runtime import VulcanLoader
-                    new_spec = importlib.machinery.ModuleSpec(
-                        fullname,
-                        VulcanLoader(original_spec.loader, bin_path, native_name),
-                        origin=original_spec.origin
-                    )
-                    if getattr(original_spec, 'submodule_search_locations', None) is not None:
-                        new_spec.submodule_search_locations = original_spec.submodule_search_locations
-                    new_spec.has_location = True
-                    self._spec_cache[fullname] = new_spec
-                    return new_spec
-
-        # Resolve .py original para Tier 2 e Tier 3
-        py_path = self._resolve_py_path(fullname, path)
-        if py_path:
-            self._dlog(f"[RESOLVE] {fullname} -> {py_path}")
-            bin_path = self._find_project_binary(py_path)
-            self._dlog(f"[BINARY] {bin_path}")
-            
-            # ═══════════════════════════════════════════════════════════
-            # 🚀 TIER 0: HBC6 (Motor C) - Roteamento Direto
-            # ═══════════════════════════════════════════════════════════
-            if bin_path and str(bin_path).endswith('.hbc6'):
-                from .vulcan_safe_loader import HBC6BridgeLoader
-                gd_path = self.project_root / '.doxoade' / 'hermes' / 'master.bin'
-                loader = HBC6BridgeLoader(fullname, str(bin_path), str(gd_path))
-                spec = importlib.machinery.ModuleSpec(
-                    name=fullname, loader=loader, origin=str(bin_path), is_package=False
-                )
-                spec.has_location = True
-                self._spec_cache[fullname] = spec
-                return spec
+            module_part = fullname.split('.')[-1]
+            lib_bin_enabled = os.environ.get('VULCAN_DISABLE_LIB_BIN', '0').strip() != '1'
 
             # ═══════════════════════════════════════════════════════════════════
-            # TIER 1 (Projeto): Binário Nativo com hash matching
+            # TIER 1: Binário Nativo (.pyd/.so)
             # ═══════════════════════════════════════════════════════════════════
-            if (bin_path and
-                self.is_binary_valid_for_host(bin_path) and
-                not self._is_stale(py_path, str(bin_path))):
+            if lib_bin_enabled and self._lib_bin_files:
+                prefix = f'v_{module_part}_'
+                exact = f'v_{module_part}{self._ext}'
+                candidate_names = [f for f in self._lib_bin_files if f.startswith(prefix) or f == exact]
+                if candidate_names:
+                    candidates = [self.lib_bin_dir / f for f in candidate_names]
+                    for bin_path in sorted(candidates, key=lambda p: self._get_mtime(str(p)), reverse=True):
+                        if not is_binary_candidate(fullname, bin_path):
+                            self._dlog(f'\x1b[90m[VULCAN SKIP] {bin_path.name} ≠ {fullname}\x1b[0m')
+                            continue
+                        if not self.is_binary_valid_for_host(bin_path):
+                            continue
 
-                original_spec = self._resolve_py_path_as_spec(fullname, path)
-                if original_spec and original_spec.loader:
-                    self.logger.info(
-                        f"VULCAN HIT: Mapping project file "
-                        f"'{fullname}' -> '{bin_path}'"
+                        original_spec = self._resolve_py_path_as_spec(fullname, path)
+                        self._dlog(f'[DEBUG] {fullname} → original_spec={original_spec}')
+
+                        if not (original_spec and original_spec.loader):
+                            continue
+
+                        expected_hash = self._get_path_hash(original_spec.origin)
+                        actual_hash = bin_path.stem.split('.')[0].rsplit('_', 1)[-1]
+                        if actual_hash != expected_hash:
+                            self._dlog(f'[VULCAN SKIP] hash mismatch {fullname}: esperado={expected_hash}, pyd={actual_hash} ({bin_path.name})')
+                            continue
+
+                        try:
+                            origin_name = Path(str(original_spec.origin)).name
+                        except Exception:
+                            origin_name = ''
+
+                        if origin_name == '__init__.py':
+                            self._dlog(f'[DEBUG] skip package root for {fullname}')
+                            continue
+
+                        native_name = bin_path.stem.split('.')[0]
+                        new_spec = importlib.machinery.ModuleSpec(
+                            fullname,
+                            VulcanLoader(original_spec.loader, bin_path, native_name),
+                            origin=original_spec.origin
+                        )
+                        if getattr(original_spec, 'submodule_search_locations', None) is not None:
+                            new_spec.submodule_search_locations = original_spec.submodule_search_locations
+                        new_spec.has_location = True
+                        self._spec_cache[fullname] = new_spec
+                        return new_spec
+
+            # Resolve .py original para Tier 2 e Tier 3
+            py_path = self._resolve_py_path(fullname, path)
+            if py_path:
+                self._dlog(f"[RESOLVE] {fullname} -> {py_path}")
+                bin_path = self._find_project_binary(py_path)
+                self._dlog(f"[BINARY] {bin_path}")
+                
+                # ═══════════════════════════════════════════════════════════
+                # 🚀 TIER 0: HBC6 (Motor C) - Roteamento Direto
+                # ═══════════════════════════════════════════════════════════
+                if bin_path and str(bin_path).endswith('.hbc6'):
+                    from .vulcan_safe_loader import HBC6BridgeLoader
+                    gd_path = self.project_root / '.doxoade' / 'hermes' / 'master.bin'
+                    loader = HBC6BridgeLoader(fullname, str(bin_path), str(gd_path))
+                    spec = importlib.machinery.ModuleSpec(
+                        name=fullname, loader=loader, origin=str(bin_path), is_package=False
                     )
-                    spec = self._make_spec(fullname, original_spec, Path(bin_path))
+                    spec.has_location = True
+                    self._spec_cache[fullname] = spec
+                    return spec
 
-                    if spec:
-                        self._spec_cache[fullname] = spec
-                        return spec
+                # ═══════════════════════════════════════════════════════════════════
+                # TIER 1 (Projeto): Binário Nativo com hash matching
+                # ═══════════════════════════════════════════════════════════════════
+                if (bin_path and
+                    self.is_binary_valid_for_host(bin_path) and
+                    not self._is_stale(py_path, str(bin_path))):
 
-        # ═══════════════════════════════════════════════════════════════════
-        # TIER 2: Python Otimizado (.py do opt_cache)
-        # ═══════════════════════════════════════════════════════════════════
-        if py_path:
-            try:
-                from doxoade.tools.vulcan.opt_cache import find_opt_py, find_project_root_for
-                origin_path = Path(py_path)
-                opt_root = find_project_root_for(origin_path) or self.project_root
-                opt_path = find_opt_py(opt_root, origin_path)
-                if opt_path and opt_path.exists():
                     original_spec = self._resolve_py_path_as_spec(fullname, path)
                     if original_spec and original_spec.loader:
-                        from doxoade.tools.vulcan.runtime import VulcanLoader
-                        loader = VulcanLoader(original_spec.loader, None, '', opt_path)
-                        t2_spec = importlib.machinery.ModuleSpec(
-                            fullname, loader, origin=original_spec.origin
+                        self.logger.info(
+                            f"VULCAN HIT: Mapping project file "
+                            f"'{fullname}' -> '{bin_path}'"
                         )
-                        t2_spec.has_location = True
-                        self._spec_cache[fullname] = t2_spec
-                        return t2_spec
+                        spec = self._make_spec(fullname, original_spec, Path(bin_path))
+
+                        if spec:
+                            self._spec_cache[fullname] = spec
+                            return spec
+
+            # ═══════════════════════════════════════════════════════════════════
+            # TIER 2: Python Otimizado (.py do opt_cache)
+            # ═══════════════════════════════════════════════════════════════════
+            if py_path:
+                try:
+                    from doxoade.tools.vulcan.opt_cache import find_opt_py, find_project_root_for
+                    origin_path = Path(py_path)
+                    opt_root = find_project_root_for(origin_path) or self.project_root
+                    opt_path = find_opt_py(opt_root, origin_path)
+                    if opt_path and opt_path.exists():
+                        original_spec = self._resolve_py_path_as_spec(fullname, path)
+                        if original_spec and original_spec.loader:
+                            loader = VulcanLoader(original_spec.loader, None, '', opt_path)
+                            t2_spec = importlib.machinery.ModuleSpec(
+                                fullname, loader, origin=original_spec.origin
+                            )
+                            t2_spec.has_location = True
+                            self._spec_cache[fullname] = t2_spec
+                            return t2_spec
+                except Exception:
+                    pass
+
+            # ═══════════════════════════════════════════════════════════════════
+            # [NOVO] TIER 3: Hermes (.hermes HBC3)
+            # ═══════════════════════════════════════════════════════════════════
+            try:
+                from doxoade.tools.hermes_systems.hermes_hook import try_load_from_hermes
+                hermes_spec = try_load_from_hermes(fullname, str(self.project_root))
+                if hermes_spec:
+                    self._dlog(f'[HERMES HIT] {fullname} → {hermes_spec.origin}')
+                    self._spec_cache[fullname] = hermes_spec
+                    return hermes_spec
             except Exception:
                 pass
 
-        # ═══════════════════════════════════════════════════════════════════
-        # [NOVO] TIER 3: Hermes (.hermes HBC3)
-        # ═══════════════════════════════════════════════════════════════════
-        try:
-            from doxoade.tools.hermes_systems.hermes_hook import try_load_from_hermes
-            hermes_spec = try_load_from_hermes(fullname, str(self.project_root))
-            if hermes_spec:
-                self._dlog(f'[HERMES HIT] {fullname} → {hermes_spec.origin}')
-                self._spec_cache[fullname] = hermes_spec
-                return hermes_spec
+            # ═══════════════════════════════════════════════════════════════════
+            # FALLBACK: Não encontrou nada → deixa Python padrão carregar
+            # ═══════════════════════════════════════════════════════════════════
+            # [CORREÇÃO] Não cacheia False para módulos não-doxoade
+            # Isso permite que o HermesFinder (em sys.meta_path[-1]) tente carregar
+            if fullname.startswith('doxoade.'):
+                self._spec_cache[fullname] = False
+            
+            return None
         except Exception:
-            pass
-
-        # ═══════════════════════════════════════════════════════════════════
-        # FALLBACK: Não encontrou nada → deixa Python padrão carregar
-        # ═══════════════════════════════════════════════════════════════════
-        # [CORREÇÃO] Não cacheia False para módulos não-doxoade
-        # Isso permite que o HermesFinder (em sys.meta_path[-1]) tente carregar
-        if fullname.startswith('doxoade.'):
-            self._spec_cache[fullname] = False
-        
-        return None
-    except Exception:
-        self.logger.error(f"VulcanMetaFinder.find_spec failure on '{fullname}'", exc_info=True)
-        return None
+            self.logger.error(f"VulcanMetaFinder.find_spec failure on '{fullname}'", exc_info=True)
+            return None
 
     def _resolve_py_path_as_spec(self, fullname: str, path):
         """Retorna o spec do .py original sem acionar este finder."""
@@ -462,7 +480,6 @@ def find_spec(self, fullname: str, path, target=None):
     def _make_spec(self, fullname: str, original_spec, bin_path: Path):
         try:
             native_name = bin_path.stem.split('.')[0]
-            from doxoade.tools.vulcan.runtime import VulcanLoader
 
             opt_path = None
             try:

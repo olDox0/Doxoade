@@ -309,6 +309,7 @@ def refactor_refs(target_path: Path, targets: tuple[str, ...]) -> None:
 @click.option('--run', is_flag=True, default=False, help="🛡️ [SOTERIA] Executa a refatoração. Por padrão, apenas simula (dry-run).")
 @click.option('--docstrings', '-d', is_flag=True, help='Inclui docstrings e strings f"" na refatoração.')
 def refactor_move(source_file, dest_file, targets, overwrite, run, docstrings):
+    """Move uma função ou módulo atualizando referências em todo o projeto."""
     # --- [SOTERIA] GUARDA DE SEGURANÇA ---
     dry_run = not run
     if dry_run:
@@ -397,7 +398,6 @@ def refactor_verify(target_path: Path, function_name: str, from_import: str, fix
 @click.option('--run', is_flag=True, default=False, help="🛡️ [SOTERIA] Executa a refatoração. Por padrão, apenas simula (dry-run).")
 @click.option('--overwrite', is_flag=True, help='Sobrescreve MODULO_NOVO caso o arquivo de destino já exista.')
 def refactor_rename(old_module: str, new_module: str, root: Path, run: bool, overwrite: bool) -> None:
-    dry_run = not run
     """Renomeia um módulo e atualiza todos os imports que o referenciam.
 
     Sem --apply opera em modo dry-run: mostra o que seria alterado sem
@@ -454,6 +454,7 @@ def refactor_rename(old_module: str, new_module: str, root: Path, run: bool, ove
 @click.argument('path', type=click.Path(exists=True, path_type=Path), default=Path('.'))
 @click.option('--run', is_flag=True, default=False, help="🛡️ [SOTERIA] Executa a refatoração. Por padrão, apenas simula (dry-run).")
 def refactor_fix_imports(path: Path, run: bool) -> None:
+    """Varre arquivos e converte imports de facade para absolutos."""
     dry_run = not run
     if dry_run:
         _sep("DRY RUN - FIX IMPORTS", color="yellow")
@@ -517,7 +518,7 @@ def refactor_headers(path: Path, force: bool, run: bool) -> None:
 @click.option('--run', is_flag=True, default=False, help="🛡️ [SOTERIA] Executa a refatoração. Por padrão, apenas simula (dry-run).")
 @click.option('--verbose', '-v', is_flag=True, help='Exibe detalhes de cada alteração.')
 def refactor_repair(target_file, root, run, verbose):
-    # --- [SOTERIA] GUARDA DE SEGURANÇA ---
+    """Purifica referências e reconcilia o estado com o cli.py."""
     dry_run = not run
     if dry_run:
         _sep("DRY RUN: REPAIR", color="yellow")
@@ -574,8 +575,6 @@ def refactor_syntax_fix(
     extra_skip: tuple[str, ...],
     include_tests: bool,
 ) -> None:
-    # --- [SOTERIA] GUARDA DE SEGURANÇA ---
-    dry_run = not run
     """Repara erros de sintaxe em f-strings causados pelo refactor AST.
 
     \\x08
@@ -596,6 +595,7 @@ def refactor_syntax_fix(
       doxoade refactor syntax-fix . --skip mypkg_tests --skip proto
       doxoade refactor syntax-fix . --include-tests
     """
+    dry_run = not run
     from .refactor_syntax import (
         _default_skip, classify_issue, repair_all, repair_file, scan_syntax_errors,
     )
@@ -1068,6 +1068,36 @@ def refactor_autopilot(path, run, verbose):
             raise SystemExit(1)
     else:
         click.echo("Dry-run. Use --run para aplicar.")
+
+@refactor_group.command('docstrings', help="📖 Arqueologia Git: recupera docstrings perdidas no histórico do projeto.")
+@click.argument('path', type=click.Path(exists=True, path_type=Path), default=Path('.'))
+@click.option('--run', is_flag=True, help="🛡️ Aplica as docstrings recuperadas no disco (padrão é dry-run).")
+@click.option('--depth', default=20, help="Profundidade de commits no Git a inspecionar (padrão: 20).")
+@click.option('--stubs', is_flag=True, help="Gera stubs estruturados para símbolos que nunca tiveram docstring.")
+@click.option('-v', '--verbose', is_flag=True, help="Exibe detalhes de cada commit e símbolo resgatado.")
+def refactor_docstrings(path, run, depth, stubs, verbose):
+    """Minera versões antigas do Git para reinjetar docstrings esquecidas."""
+    from .refactor_docstrings import DocstringArcheologist
+
+    archeologist = DocstringArcheologist(Path.cwd())
+    report = archeologist.run_archaeology(
+        target_path=path,
+        apply=run,
+        depth=depth,
+        allow_stubs=stubs,
+        verbose=verbose
+    )
+
+    mode_label = click.style("[APLICADO]", fg="green", bold=True) if run else click.style("[SIMULAÇÃO / DRY-RUN]", fg="yellow", bold=True)
+    click.echo(f"\n{mode_label} Resumo:")
+    click.echo(f"  • Símbolos sem docstring detectados : {report['missing']}")
+    click.echo(f"  • Docstrings resgatadas no Git     : {click.style(str(report['recovered_git']), fg='green', bold=True)}")
+    if stubs:
+        click.echo(f"  • Docstrings canônicas (Stubs)     : {report['stubs']}")
+    click.echo(f"  • Arquivos afetados                : {report['files_modified']}")
+
+    if not run and report['recovered_git'] > 0:
+        click.secho("\n💡 Para gravar as alterações no disco, repita o comando com '--run'.", fg="cyan")
 
 @refactor_group.command('crlf-fix')
 @click.argument('paths', nargs=-1, type=click.Path(exists=True))

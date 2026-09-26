@@ -158,6 +158,7 @@ def pull_cmd(ctx, subscribe, force, apply, conflicts, diff, target_files, remote
 @click.option('--list', '-l', is_flag=True, help='Lista branches.')
 @click.option('--done', '-d', help='Finaliza branch.')
 def branch_cmd(new, list, done):
+    """Organiza a árvore genealógica do código (Osíris)."""
     from doxoade.commands.git_systems.git_flow import GitFlowManager
     flow = GitFlowManager(os.getcwd())
     if new: flow.create_branch(new)
@@ -168,6 +169,7 @@ def branch_cmd(new, list, done):
 @git_group.command('issues')
 @click.option('--sync', '-s', is_flag=True, help='Sincroniza issues.')
 def issues_cmd(sync):
+    """Conecta com Hermes para buscar ordens do Olimpo (GitHub Issues)."""
     from doxoade.commands.git_systems.git_bridge import GitHubBridge
     bridge = GitHubBridge(os.getcwd())
     bridge.display_issues()
@@ -176,6 +178,7 @@ def issues_cmd(sync):
 @git_group.command('audit-deps')
 @click.option('--fix', is_flag=True, help='Atualiza dependências vulneráveis.')
 def audit_deps(fix):
+    """O Dependabot do Doxoade: Vigilância de Vulns e Versões."""
     from doxoade.commands.git_systems.git_health import DependencyGuard
     guard = DependencyGuard(os.getcwd())
     guard.check_health(auto_fix=fix)

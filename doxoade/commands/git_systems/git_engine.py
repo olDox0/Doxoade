@@ -20,6 +20,7 @@ class GitEngine:
         self.root = Path(root or os.getcwd()).resolve()
 
     def get_current_branch(self) -> str:
+        """Obtém o nome da branch ativa local ou o hash curto do HEAD."""
         branch = _run_git_command(['branch', '--show-current'], capture_output=True, cwd=str(self.root))
         if branch and branch.strip():
             return branch.strip()
