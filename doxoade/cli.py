@@ -89,6 +89,7 @@ class DoxoadeLazyGroup(click.Group):
             'init': 'doxoade.commands.init:init',
             'install': 'doxoade.commands.install:install',
             'intelligence': 'doxoade.commands.intelligence_systems.intelligence:intelligence',
+            'janus': 'doxoade.commands.janus_cmd:janus_group',
             'kvcheck': 'doxoade.commands.kvcheck:kvcheck',
             'lab': 'doxoade.commands.lab:lab_group',
             'linux': 'doxoade.commands.linux_systems.linux_cmd:linux_group',

@@ -19,6 +19,65 @@ def git_group():
     """🛠  NEXUS-GIT: Gestão profissional de fluxo, upstream e auditoria."""
     pass
 
+@git_group.command('auto')
+@click.option('--push', '-p', is_flag=True, help='Envia commits locais automaticamente se o servidor estiver em dia.')
+@click.option('--prefer', type=click.Choice(['remote', 'local', 'interactive']), default='interactive', help='Estratégia de resolução se houver conflito.')
+@click.pass_context
+def git_auto(ctx, push, prefer):
+    """
+    🤖 Piloto Automático Git: Sincronização inteligente sem erros humanos.
+    Auto-cura MERGE_HEAD, salva backup preventivo, aplica pull suave e sobe commits.
+    """
+    from doxoade.commands.git_systems.git_engine import GitEngine
+    engine = GitEngine(os.getcwd())
+    
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🤖 [AUTOPILOT GIT] Iniciando Reconciliação Soberana...{Style.RESET_ALL}")
+    click.echo(f"  {Fore.WHITE}Estação Atual:{Fore.RESET} {Fore.YELLOW}{engine.get_station_name().upper()}{Fore.RESET}")
+    click.echo(f"  {Fore.WHITE}Branch:{Fore.RESET} {engine.get_current_branch()}\n")
+
+    res = engine.autopilot(prefer=prefer if prefer != 'interactive' else None, auto_push=push)
+
+    if res['snapshot']:
+        click.echo(f"  {Fore.CYAN}💾 [SOTÉRIA] Backup preventivo gravado em: {Path(res['snapshot']).name}{Style.RESET_ALL}")
+
+    if res['healed_merge']:
+        click.echo(f"  {Fore.GREEN}✔ [AUTO-HEAL] Merge travado anterior foi limpo com segurança.{Style.RESET_ALL}")
+
+    # Apresenta a decisão tomada
+    if res['status'] == 'CONFLICT':
+        click.echo(f"\n{Fore.RED}{Style.BRIGHT}🔴 [COLISÃO DETECTADA] Arquivos em divergência real entre as máquinas:{Style.RESET_ALL}")
+        for c in res['collisions']:
+            click.echo(f"   {Fore.RED}✖ {c['file']}{Fore.RESET}")
+
+        if prefer == 'interactive':
+            click.echo(f"\n{Fore.WHITE}Como deseja resolver automaticamente?{Style.RESET_ALL}")
+            click.echo("  [1] Aceitar versão do Servidor (Recomendado se o outro PC terminou o trabalho)")
+            click.echo("  [2] Manter versão desta Máquina (Preserva seus rascunhos atuais)")
+            click.echo("  [3] Abrir assistente cirúrgico 'doxoade merge' (Linha a linha)")
+            click.echo("  [0] Abortar")
+            choice = click.prompt("Opção", type=str, default="1")
+
+            if choice == "1":
+                engine.force_pull_reset(apply_changes=True)
+                click.echo(f"\n{Fore.GREEN}✔ [SUCESSO] Código do servidor aceito. O seu estado anterior está salvo no backup de resgate.{Style.RESET_ALL}\n")
+            elif choice == "2":
+                click.echo(f"\n{Fore.YELLOW}✔ Alterações locais preservadas. Nada foi sobrescrito.{Style.RESET_ALL}\n")
+            elif choice == "3":
+                from doxoade.commands.git_systems.git_merge import merge as run_merge
+                ctx.invoke(run_merge)
+            return
+
+    elif res['status'] == 'PULLED':
+        click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}✔ [ATUALIZADO] {res['action_taken']}{Style.RESET_ALL}\n")
+
+    elif res['status'] == 'AHEAD':
+        click.echo(f"\n{Fore.YELLOW}ℹ [PENDENTE DE ENVIO] {res['action_taken']}{Style.RESET_ALL}")
+        if not push and click.confirm("Deseja enviar agora para o GitHub (git push)?"):
+            engine.autopilot(auto_push=True)
+            click.echo(f"{Fore.GREEN}✔ Commits enviados com sucesso!{Style.RESET_ALL}\n")
+
+    elif res['status'] == 'SYNCED':
+        click.echo(f"{Fore.GREEN}✔ {res['action_taken']}{Style.RESET_ALL}\n")
 
 @git_group.command('pull')
 @click.option('--subscribe', '-s', is_flag=True, help='Subscreve todas as atualizações do servidor preservando modificações locais.')

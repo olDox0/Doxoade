@@ -34,6 +34,89 @@ class GitEngine:
         name = platform.node().lower().replace(" ", "_").strip()
         return name if name else "station"
 
+    def autopilot(self, prefer: Optional[str] = None, auto_push: bool = False) -> Dict[str, Any]:
+        """
+        🤖 AUTOPILOT SOBERANO: Reconciliação automática de Git sem erro humano.
+        - Identifica estação, auto-cura MERGE_HEAD e salva snapshot prévio.
+        - Se estiver atrasado (Behind): atualiza com segurança.
+        - Se estiver adiantado (Ahead): sobe commits se solicitado.
+        - Se divergir: resolve por preferência ou apresenta opções seguras.
+        """
+        station = self.get_station_name()
+        branch = self.get_current_branch()
+        remote = 'origin'
+        remote_ref = f"{remote}/{branch}"
+
+        # 1. Snapshot Preventivo Absoluto
+        snapshot_dir = self.create_safety_snapshot(reason="autopilot")
+
+        # 2. Auto-Cura de travas antigas
+        healed_merge = self.heal_stuck_merge()
+
+        # 3. Fetch silencioso das novidades do servidor
+        self.fetch_remote(remote=remote, branch=branch)
+
+        # 4. Avaliação de Distância (Ahead / Behind)
+        rev_count_raw = _run_git_command(['rev-list', '--left-right', '--count', f'HEAD...{remote_ref}'], capture_output=True, silent_fail=True, cwd=str(self.root)) or '0\t0'
+        parts = rev_count_raw.strip().split()
+        ahead = int(parts[0]) if len(parts) > 0 and parts[0].isdigit() else 0
+        behind = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+
+        matrix = self.detect_collisions(remote=remote, branch=branch)
+        is_dirty = self.is_dirty()
+
+        report = {
+            'station': station,
+            'branch': branch,
+            'ahead': ahead,
+            'behind': behind,
+            'is_dirty': is_dirty,
+            'collisions': matrix['collisions'],
+            'healed_merge': healed_merge,
+            'snapshot': str(snapshot_dir) if snapshot_dir else None,
+            'status': 'SYNCED',
+            'action_taken': ''
+        }
+
+        # CENÁRIO 1: Conflito Real no mesmo arquivo
+        if matrix['collisions']:
+            report['status'] = 'CONFLICT'
+            if prefer == 'remote':
+                self.force_pull_reset(branch=branch, remote=remote, apply_changes=True)
+                report['action_taken'] = "Conflito resolvido: arquivos do Servidor aceitos com sucesso."
+            elif prefer == 'local':
+                _run_git_command(['merge', '--abort'], silent_fail=True, cwd=str(self.root))
+                report['action_taken'] = "Conflito resolvido: alterações locais preservadas intactas."
+            return report
+
+        # CENÁRIO 2: Servidor tem atualizações (Behind)
+        if behind > 0:
+            sync_res = self.smart_pull_sync(remote=remote, branch=branch, apply_changes=True)
+            if sync_res['success']:
+                report['status'] = 'PULLED'
+                report['action_taken'] = f"Recebidos {behind} commit(s) do servidor com sucesso."
+            else:
+                report['status'] = 'ERROR'
+                report['action_taken'] = sync_res.get('action_summary', 'Falha no pull automático.')
+            return report
+
+        # CENÁRIO 3: Estação tem novos commits locais (Ahead)
+        if ahead > 0:
+            report['status'] = 'AHEAD'
+            if auto_push:
+                push_ok = _run_git_command(['push', remote, branch], capture_output=True, cwd=str(self.root))
+                if push_ok:
+                    report['action_taken'] = f"Enviados {ahead} commit(s) desta estação para o servidor."
+                else:
+                    report['action_taken'] = "Falha ao enviar commits para o servidor."
+            else:
+                report['action_taken'] = f"Você tem {ahead} commit(s) pronto(s) para subir."
+            return report
+
+        # CENÁRIO 4: Tudo em dia
+        report['action_taken'] = "Repositório 100% atualizado e sincronizado."
+        return report
+
     def create_safety_snapshot(self, reason: str = "pre_sync") -> Optional[Path]:
         """
         🛡️ SOTÉRIA / HADES: Grava backup físico dos arquivos modificados/untracked

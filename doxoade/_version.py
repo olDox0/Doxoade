@@ -1,3 +1,3 @@
 # doxoade/doxoade/_version.py
-__version__ = '478.0'
-version = '478.0'
+__version__ = '479.0'
+version = '479.0'

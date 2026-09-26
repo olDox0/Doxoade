@@ -45,19 +45,24 @@ class VulcanCompiler:
         self.py_link_lib = f"-lpython{py_ver}"
 
     def _prepare_pitstop_env(self):
-        """Prepara o toolkit GCC apenas uma vez (Hefesto)."""
+        """Prepara o toolkit GCC/Clang via Janus de forma agnóstica (Hefesto)."""
         if VulcanCompiler._cached_env is not None:
             return VulcanCompiler._cached_env
-        core_root = Path(__file__).resolve().parents[3]
-        gcc_exe = core_root / 'trirdparty' / 'w64devkit' / 'bin' / 'gcc.exe'
+
+        from doxoade.tools.janus_systems import Janus
+        Janus.ensure_active()
+        info = Janus.get_info()
+
         env = os.environ.copy()
-        if gcc_exe.exists():
-            bin_dir = str(gcc_exe.parent)
+        if info:
+            bin_dir = str(Path(info.compiler_path).parent)
             env['PATH'] = bin_dir + os.pathsep + env.get('PATH', '')
-            env['CC'] = 'gcc'
-            env['CXX'] = 'g++'
+            env['CC'] = info.compiler_path
+            if info.gpp_path:
+                env['CXX'] = info.gpp_path
             env['DISTUTILS_USE_SDK'] = '1'
             env['PY_VULCAN_PITSTOP'] = '1'
+
         VulcanCompiler._cached_env = env
         return env
 

@@ -1,36 +1,34 @@
+# -*- coding: utf-8 -*-
 # doxoade/tools/metalcraft/metal_toolchain.py
-import shutil
+"""
+Nexus Toolchain — Fachada de Compiladores (Janus Integrated).
+Delega a detecção soberana ao janus_systems.
+"""
+from __future__ import annotations
+
 import os
 from pathlib import Path
+from doxoade.tools.janus_systems import Janus
+
 
 class NexusToolchain:
-    """Especialista em detecção de compiladores e SDKs."""
-    
+    """Especialista em detecção de compiladores e SDKs (Janus Adapter)."""
+
     def __init__(self):
         self.compiler_path = None
-        self.type = None # gcc | clang | msvc
+        self.type = None
 
-    def detect(self):
-        # 1. Tenta o GCC global
-        gcc = shutil.which("gcc")
-        if gcc:
-            self.compiler_path = gcc
-            return True
-            
-        # 2. Busca na estrutura industrial do Doxoade
-        core_root = Path(__file__).resolve().parents[3]
-        # O provisionador coloca o bin logo abaixo da pasta w64devkit
-        internal_gcc = core_root / "thirdparty" / "w64devkit" / "bin" / "gcc.exe"
-        
-        if internal_gcc.exists():
-            self.compiler_path = str(internal_gcc)
-            # Injeta o bin no PATH para que o GCC ache o 'as' (assembler) e o 'ld' (linker)
-            os.environ["PATH"] = str(internal_gcc.parent) + os.pathsep + os.environ.get("PATH", "")
+    def detect(self) -> bool:
+        """Descobre o compilador via Janus e injeta no PATH se necessário."""
+        info = Janus.get_info()
+        if info:
+            self.compiler_path = info.compiler_path
+            self.type = info.compiler_type
+            Janus.ensure_active()
             return True
         return False
 
-    def get_version(self):
-        import subprocess
-        if not self.compiler_path: return "N/A"
-        res = subprocess.run([self.compiler_path, "--version"], capture_output=True, text=True)
-        return res.stdout.splitlines()[0]
+    def get_version(self) -> str:
+        """Retorna a versão do compilador detectado pelo Janus."""
+        info = Janus.get_info()
+        return info.version if info else "N/A"

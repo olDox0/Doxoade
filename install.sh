@@ -1,22 +1,37 @@
-#!/bin/bash
-echo "--- Instalador Universal Doxoade (Moderno) ---"
+#!/usr/bin/env bash
+# doxoade/install.sh
+# Instalador Universal Doxoade — Termux / Linux / WSL
 
-# Verifica se Python está instalado
-if ! command -v python &> /dev/null; then
-    echo "[ERRO] Python não encontrado. Instale o Python primeiro."
-    exit 1
+set -e
+
+echo "=== 🚀 Instalador Universal Doxoade (Multiplataforma) ==="
+
+# 1. Detecção de Ambiente Termux (Android)
+IS_TERMUX=0
+if [ -n "$TERMUX_VERSION" ] || [ -d "/data/data/com.termux" ]; then
+    IS_TERMUX=1
+    echo "📱 Ambiente detectado: Termux (Android)"
 fi
 
-# Instalação via PIP (o método correto que gera os binários)
-echo "Instalando via pip em modo editável..."
-python -m pip install -e .
+# 2. Provisionamento de pacotes nativos no Termux
+if [ "$IS_TERMUX" -eq 1 ]; then
+    echo "📦 Instalando dependências nativas via pkg (clang, python, python-psutil)..."
+    pkg update -y
+    pkg install -y python clang libxml2 libxslt python-psutil git
+fi
 
-if [ $? -eq 0 ]; then
-    echo ""
-    echo "[SUCESSO] Doxoade instalado."
-    echo "Se o comando 'doxoade' não for encontrado, adicione este caminho ao seu PATH:"
-    python -m site --user-base | sed 's/$/\/bin/'
+# 3. Atualização do pip e ferramentas de empacotamento
+echo "⚙️ Atualizando pip, setuptools e wheel..."
+python -m pip install --upgrade pip setuptools wheel
+
+# 4. Instalação em Modo Editável
+echo "🔨 Instalando Doxoade em modo editável (-e .)..."
+if [ "$IS_TERMUX" -eq 1 ]; then
+    # No Termux, instala sem isolamento de build para aproveitar o python-psutil nativo
+    python -m pip install --no-build-isolation -e .
 else
-    echo "[ERRO] Falha na instalação via pip."
-    exit 1
+    python -m pip install -e .
 fi
+
+echo "✅ Instalação concluída com sucesso!"
+echo "💡 Execute: doxoade --help"
