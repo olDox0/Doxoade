@@ -1,13 +1,13 @@
 // doxoade/tools/hermes_systems/native/hermes_cache.c
 #include "hermes_cache.h"
 #include "hermes_mmap.h"
-#include <process.h>
 #include <stdlib.h>
 #include <marshal.h>
 #include <sys/stat.h>
 #include <stdio.h>
 #include <string.h>
 
+// 🛑 PROCESS.H APENAS NO WINDOWS:
 #ifdef _WIN32
     #include <windows.h>
     #include <process.h>

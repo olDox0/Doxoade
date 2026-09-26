@@ -178,6 +178,7 @@ static uint8_t* get_buffer(size_t needed) {
 }
 
 static inline int has_macro_opcodes_simd(const uint8_t* data, size_t len) {
+#if HERMES_HAS_SSE2
     __m128i target = _mm_set1_epi8((char)MACRO_OPCODE);
     size_t i = 0;
     for (; i + 16 <= len; i += 16) {
@@ -188,6 +189,13 @@ static inline int has_macro_opcodes_simd(const uint8_t* data, size_t len) {
         if (data[i] == MACRO_OPCODE) return 1;
     }
     return 0;
+#else
+    // Fallback escalar limpo para ARM64 / Termux
+    for (size_t i = 0; i < len; i++) {
+        if (data[i] == MACRO_OPCODE) return 1;
+    }
+    return 0;
+#endif
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -811,20 +819,32 @@ static PyObject* walk_and_decode_inplace_global(PyObject* code_obj, const HGD1_H
 // ═══════════════════════════════════════════════════════════════════
 // [FIX VULN-4] CACHE RAM COM SRWLOCK (Thread-Safe)
 // ═══════════════════════════════════════════════════════════════════
-static SRWLOCK g_ram_cache_lock = SRWLOCK_INIT;
+#ifdef _WIN32
+    static SRWLOCK g_ram_cache_lock = SRWLOCK_INIT;
+    #define RAM_LOCK_READ()    AcquireSRWLockShared(&g_ram_cache_lock)
+    #define RAM_UNLOCK_READ()  ReleaseSRWLockShared(&g_ram_cache_lock)
+    #define RAM_LOCK_WRITE()   AcquireSRWLockExclusive(&g_ram_cache_lock)
+    #define RAM_UNLOCK_WRITE() ReleaseSRWLockExclusive(&g_ram_cache_lock)
+#else
+    #include <pthread.h>
+    static pthread_rwlock_t g_ram_cache_lock = PTHREAD_RWLOCK_INITIALIZER;
+    #define RAM_LOCK_READ()    pthread_rwlock_rdlock(&g_ram_cache_lock)
+    #define RAM_UNLOCK_READ()  pthread_rwlock_unlock(&g_ram_cache_lock)
+    #define RAM_LOCK_WRITE()   pthread_rwlock_wrlock(&g_ram_cache_lock)
+    #define RAM_UNLOCK_WRITE() pthread_rwlock_unlock(&g_ram_cache_lock)
+#endif
 
-// Wrappers thread-safe para o cache RAM (hermes_cache.c)
 static PyObject* safe_cache_ram_get(const char* path) {
-    AcquireSRWLockShared(&g_ram_cache_lock);
+    RAM_LOCK_READ();
     PyObject* result = cache_ram_get(path);
-    ReleaseSRWLockShared(&g_ram_cache_lock);
+    RAM_UNLOCK_READ();
     return result;
 }
 
 static void safe_cache_ram_put(const char* path, PyObject* code_obj) {
-    AcquireSRWLockExclusive(&g_ram_cache_lock);
+    RAM_LOCK_WRITE();
     cache_ram_put(path, code_obj);
-    ReleaseSRWLockExclusive(&g_ram_cache_lock);
+    RAM_UNLOCK_WRITE();
 }
 
 // ═══════════════════════════════════════════════════════════════════
