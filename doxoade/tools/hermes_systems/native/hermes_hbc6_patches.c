@@ -82,7 +82,7 @@ static uint8_t* get_buffer(size_t needed) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// SIMD SCANNER (SSE2 - Busca 16 bytes por vez)
+// SIMD SCANNER (Definição Única — SSE2 no x86 / Escalar no ARM)
 // ═══════════════════════════════════════════════════════════════════
 static inline int has_macro_opcodes_simd(const uint8_t* data, size_t len) {
 #if HERMES_HAS_SSE2
@@ -97,7 +97,6 @@ static inline int has_macro_opcodes_simd(const uint8_t* data, size_t len) {
     }
     return 0;
 #else
-    // Fallback escalar universal (ARM64 / Termux / RISC-V)
     for (size_t i = 0; i < len; i++) {
         if (data[i] == MACRO_OPCODE) return 1;
     }
