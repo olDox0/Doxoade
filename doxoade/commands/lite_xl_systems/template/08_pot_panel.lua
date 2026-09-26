@@ -215,43 +215,43 @@ local function start_mesh_service_in_background()
   end
 end
 
--- Corrotina de Monitoramento Contínuo: Auto-Start + Auto-Reload do Buffer Aberto
-if core and core.add_thread then
-  core.add_thread(function()
-    -- 1. Aguarda 1.5s após o boot da IDE e inicializa a malha
-    coroutine.yield(1.5)
-    start_mesh_service_in_background()
+-- -- Corrotina de Monitoramento Contínuo: Auto-Start + Auto-Reload do Buffer Aberto
+-- if core and core.add_thread then
+--   core.add_thread(function()
+--     -- 1. Aguarda 1.5s após o boot da IDE e inicializa a malha
+--     coroutine.yield(1.5)
+--     start_mesh_service_in_background()
 
-    -- 2. Loop Sentinela: Recarrega o texto na tela se o outro PC enviar alteração
-    local last_seen_mtime = 0
-    while true do
-      coroutine.yield(0.5)
+--     -- 2. Loop Sentinela: Recarrega o texto na tela se o outro PC enviar alteração
+--     local last_seen_mtime = 0
+--     while true do
+--       coroutine.yield(0.5)
       
-      -- Verifica se o shared_notes.md está aberto e se mudou no disco
-      for _, doc in ipairs(core.docs or {}) do
-        if doc.filename and doc.filename:find("shared_notes.md") and not doc:is_dirty() then
-          local finfo = system.get_file_info and system.get_file_info(doc.filename)
-          if finfo and finfo.mtime and finfo.mtime ~= last_seen_mtime then
-            last_seen_mtime = finfo.mtime
-            -- Recarrega o conteúdo no editor preservando seleção
-            local f = io.open(doc.filename, "r")
-            if f then
-              local new_text = f:read("*a")
-              f:close()
-              local l1, c1, l2, c2 = 1, 1, 1, 1
-              if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
-              doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
-              doc:insert(1, 1, new_text)
-              doc:clean()
-              if doc.set_selection then doc:set_selection(l1, c1, l2, c2) end
-              core.redraw = true
-            end
-          end
-        end
-      end
-    end
-  end)
-end
+--       -- Verifica se o shared_notes.md está aberto e se mudou no disco
+--       for _, doc in ipairs(core.docs or {}) do
+--         if doc.filename and doc.filename:find("shared_notes.md") and not doc:is_dirty() then
+--           local finfo = system.get_file_info and system.get_file_info(doc.filename)
+--           if finfo and finfo.mtime and finfo.mtime ~= last_seen_mtime then
+--             last_seen_mtime = finfo.mtime
+--             -- Recarrega o conteúdo no editor preservando seleção
+--             local f = io.open(doc.filename, "r")
+--             if f then
+--               local new_text = f:read("*a")
+--               f:close()
+--               local l1, c1, l2, c2 = 1, 1, 1, 1
+--               if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
+--               doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
+--               doc:insert(1, 1, new_text)
+--               doc:clean()
+--               if doc.set_selection then doc:set_selection(l1, c1, l2, c2) end
+--               core.redraw = true
+--             end
+--           end
+--         end
+--       end
+--     end
+--   end)
+-- end
 
 -- =============================================================================
 -- 3. COMANDOS SOBERANOS DO DUMPPOT E PAINÉIS

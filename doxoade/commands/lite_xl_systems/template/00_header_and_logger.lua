@@ -614,6 +614,20 @@ local function arct_xpcall(fn, module_name, ...)
     return ok, err
 end
 
+local orig_on_file_dropped = RootView.on_file_dropped
+function RootView:on_file_dropped(filename, x, y)
+  if orig_on_file_dropped then
+    local res = orig_on_file_dropped(self, filename, x, y)
+    if res ~= nil then return res end
+  end
+  if filename and core.open_doc then
+    local doc = core.open_doc(filename)
+    if doc then core.root_view:open_doc(doc) end
+    return true
+  end
+  return false
+end
+
 -- ✅ CORREÇÃO: Exportar como globais para que outros módulos possam usar
 
 -- =============================================================================

@@ -151,32 +151,15 @@ core.add_thread(function()
       4
     )
 
-    -- 5. Status DoxNote
-    register_status_item(
-      "doxoade:note_status",
-      StatusView.Item.LEFT,
-      function()
-        return {
-          { 56, 189, 248, 255 }, "📝 Note ",
-          DIVIDER_COLOR, "| "
-        }
-      end,
-      function()
-        command.perform("doxoade:note-hub-menu")
-      end,
-      5
-    )
-
-    -- 6. Botão DoxNote Mesh (Leitura em RAM O(1) - Zero Disk I/O no Frame)
+    -- 5. Badge Unificado DoxNote & Mesh (Leitura em RAM O(1) + Menu Integrado)
     local _mesh_status_text = "Offline"
     local _mesh_status_color = { 150, 150, 150, 255 }
     local _mesh_last_poll = 0
 
     register_status_item(
-      "doxoade:open-shared-notes",
+      "doxoade:note_status",
       StatusView.Item.LEFT,
       function()
-        -- Atualização amortecida em memória (máximo uma checagem rápida a cada 2.5 segundos)
         local now = os.clock()
         if (now - _mesh_last_poll) > 2.5 then
           _mesh_last_poll = now
@@ -197,7 +180,7 @@ core.add_thread(function()
                   _mesh_status_text = "⚡ " .. (peer or "Conectado")
                   _mesh_status_color = { 34, 197, 94, 255 }
                 elseif status == "searching" then
-                  _mesh_status_text = "Procurando par..."
+                  _mesh_status_text = "Buscando..."
                   _mesh_status_color = { 234, 179, 8, 255 }
                 else
                   _mesh_status_text = "Offline"
@@ -215,16 +198,15 @@ core.add_thread(function()
         end
 
         return {
-          { 192, 132, 252, 255 }, "📝 Note ",
-          DIVIDER_COLOR, "| ",
+          { 56, 189, 248, 255 }, "📝 Note: ",
           _mesh_status_color, _mesh_status_text .. " ",
           DIVIDER_COLOR, "| "
         }
       end,
       function()
-        command.perform("doxoade:open-shared-menu")
+        command.perform("doxoade:note-hub-menu")
       end,
-      6
+      5
     )
 
     register_status_item(

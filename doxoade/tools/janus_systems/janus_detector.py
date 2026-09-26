@@ -74,6 +74,7 @@ class JanusDetector:
     def _detect_windows(self, project_root: Optional[Path]) -> Optional[CompilerInfo]:
         """Varre WinLibs, MinGW, MSYS2 e PATH do Windows."""
         # 1. Checa PATH primeiro
+
         if project_root:
             w64 = Path(project_root) / "thirdparty" / "w64devkit" / "bin" / "gcc.exe"
             as_exe = w64.parent / "as.exe"
@@ -99,10 +100,19 @@ class JanusDetector:
             *Path("C:/").glob("winlibs*"),
         ]
         for base in winlibs_patterns:
-            gcc = base / "bin" / "gcc.exe"
-            if gcc.exists():
-                gpp = base / "bin" / "g++.exe"
-                return self._probe_compiler(str(gcc), str(gpp) if gpp.exists() else None, provider="winlibs")
+            # 🛑 Procura tanto em bin/ quanto na subpasta mingw64/bin/
+            for sub_candidate in (
+                base / "bin" / "gcc.exe",
+                base / "mingw64" / "bin" / "gcc.exe",
+                base / "mingw32" / "bin" / "gcc.exe",
+            ):
+                if sub_candidate.exists():
+                    gpp = sub_candidate.parent / "g++.exe"
+                    return self._probe_compiler(
+                        str(sub_candidate), 
+                        str(gpp) if gpp.exists() else None, 
+                        provider="winlibs"
+                    )
 
         # 3. Pastas canônicas do MinGW (Amaranth)
         mingw_dirs = [

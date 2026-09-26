@@ -210,22 +210,21 @@ if core and core.add_thread then
     local last_mtimes = {}
 
     while true do
-      -- Regime reativo: se o usuário estiver digitando, espera 4 segundos; em repouso, checa a cada 2.5s
-      local sleep_interval = (rawget(_G, "Khonsu") and Khonsu.is_user_active and Khonsu.is_user_active()) and 4.0 or 2.5
-      coroutine.yield(sleep_interval)
+      -- Se o usuário estiver ativo/digitando, aguarda 4s; em repouso checa a cada 2.5s
+      local is_active = rawget(_G, "Khonsu") and Khonsu.is_user_active and Khonsu.is_user_active()
+      coroutine.yield(is_active and 4.0 or 2.5)
 
       for _, doc in ipairs(core.docs or {}) do
         if doc.filename and not doc:is_dirty() then
           local fn_clean = doc.filename:gsub("\\", "/"):lower()
           local is_shared = fn_clean:find("shared_notes%.md$") or fn_clean:find("shared_notes%.txt$")
-          local is_project_note = fn_clean:find("/%.doxoade/note/")
 
-          if is_shared or is_project_note then
+          if is_shared then
             local finfo = system.get_file_info and system.get_file_info(doc.filename)
             if finfo and finfo.mtime then
               local prev = last_mtimes[doc.filename]
               if prev == nil then
-                -- Primeira detecção ao abrir o arquivo: apenas registra o mtime atual sem mutar o buffer
+                -- Registra mtime inicial sem tocar no documento
                 last_mtimes[doc.filename] = finfo.mtime
               elseif finfo.mtime > prev then
                 last_mtimes[doc.filename] = finfo.mtime
@@ -234,7 +233,7 @@ if core and core.add_thread then
                   local new_text = f:read("*a")
                   f:close()
 
-                  -- Validação de divergência: só reconstrói o buffer se o conteúdo real tiver mudado
+                  -- Só muta o buffer se o texto em disco for REALMENTE diferente
                   local cur_text = doc:get_text(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
                   if cur_text ~= new_text then
                     local l1, c1, l2, c2 = 1, 1, 1, 1
@@ -248,10 +247,6 @@ if core and core.add_thread then
                     doc.clean_change_id = doc:get_change_id()
                     if doc.set_selection then doc:set_selection(l1, c1, l2, c2) end
                     core.redraw = true
-
-                    if core.log then
-                      core.log("🔄 [DOXNOTE SYNC] Buffer atualizado: " .. (doc.filename:match("[^/]+$") or doc.filename))
-                    end
                   end
                 end
               end
