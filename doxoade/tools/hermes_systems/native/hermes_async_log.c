@@ -127,26 +127,29 @@ static THREAD_FUNC logger_consumer_thread(void* arg) {
 // INICIALIZAÇÃO E SHUTDOWN
 // ═══════════════════════════════════════════════════════════════════
 HERMES_LOG_EXPORT void hermes_log_init(void) {
-    if (g_logger.running) return;  // Já inicializado
-    
+    if (g_logger.running) return;  
     memset(&g_logger, 0, sizeof(AsyncLogger));
     g_logger.start_time_us = GET_TIME_US();
     g_logger.running = true;
-    
-    // Cria a thread consumidora
-    g_logger.thread_handle = (THREAD_HANDLE)THREAD_CREATE(logger_consumer_thread, NULL);
+
+#ifdef _WIN32
+    g_logger.thread_handle = (hermes_thread_t)_beginthreadex(NULL, 0, logger_consumer_thread, NULL, 0, NULL);
+#else
+    pthread_create(&g_logger.thread_handle, NULL, logger_consumer_thread, NULL);
+#endif
 }
 
 HERMES_LOG_EXPORT void hermes_log_shutdown(void) {
     if (!g_logger.running) return;
-    
     g_logger.running = false;
-    
-    // Aguarda a thread terminar
-    THREAD_JOIN((THREAD_HANDLE)g_logger.thread_handle);
-    THREAD_CLOSE((THREAD_HANDLE)g_logger.thread_handle);
-    
-    // Imprime estatísticas finais
+
+#ifdef _WIN32
+    WaitForSingleObject((HANDLE)g_logger.thread_handle, INFINITE);
+    CloseHandle((HANDLE)g_logger.thread_handle);
+#else
+    pthread_join(g_logger.thread_handle, NULL);
+#endif
+
     fprintf(stderr, "\n[HERMES-LOG] Shutdown: %llu logs processed, %llu dropped\n",
             (unsigned long long)g_logger.total_logs,
             (unsigned long long)g_logger.dropped_logs);

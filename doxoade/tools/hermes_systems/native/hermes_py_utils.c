@@ -9,10 +9,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <marshal.h>
-#include <windows.h>
-#include <emmintrin.h>  // SSE2
-#include <lz4.h>
 
+#ifdef _WIN32
+    #include <windows.h>
+#else
+    #include <unistd.h>
+    #include <time.h>
+#endif
+
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+    #include <emmintrin.h>
+    #define HERMES_HAS_SSE2 1
+#else
+    #define HERMES_HAS_SSE2 0
+#endif
+
+#include <lz4.h>
 #include "hermes_cache.h"
 #include "hermes_mmap.h"
 #include "hermes_async_log.h"
@@ -56,10 +68,16 @@ static int g_verbose = -1;
 } while(0)
 
 static double get_time_ms(void) {
+#ifdef _WIN32
     LARGE_INTEGER freq, count;
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&count);
     return (double)count.QuadPart / (double)freq.QuadPart * 1000.0;
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
+#endif
 }
 
 #define TIMER_START(name) double timer_##name = get_time_ms();

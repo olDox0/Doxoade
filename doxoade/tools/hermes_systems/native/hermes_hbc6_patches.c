@@ -1,10 +1,19 @@
-// doxoade/tools/hermes_systems/native/hermes_hbc6_patches.c
+// Em doxoade/tools/hermes_systems/native/hermes_hbc6_patches.c:
+
 #include <Python.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <emmintrin.h>  // SSE2
+
+// 🛑 GUARDA DE ARQUITETURA: Só inclui emmintrin em x86/x64
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+    #include <emmintrin.h>
+    #define HAS_SSE2 1
+#else
+    #define HAS_SSE2 0
+#endif
+
 #include "hermes_hbc6_patches.h"
 
 #define MACRO_OPCODE 0xC0
@@ -38,11 +47,15 @@ static void init_interned_strings(void) {
 // ═══════════════════════════════════════════════════════════════════
 // MICRO-TIMERS (RDTSC)
 // ═══════════════════════════════════════════════════════════════════
-static inline uint64_t _rdtsc() {
-#if defined(x86_64) || defined(_M_X64) || defined(__i386) || defined(_M_IX86)
+static inline uint64_t _rdtsc(void) {
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
     uint32_t lo, hi;
     __asm__ volatile ("rdtsc" : "=a" (lo), "=d" (hi));
     return ((uint64_t)hi << 32) | lo;
+#elif defined(__aarch64__)
+    uint64_t val;
+    __asm__ volatile("mrs %0, cntvct_el0" : "=r"(val));
+    return val;
 #else
     return 0;
 #endif
@@ -71,7 +84,22 @@ static uint8_t* get_buffer(size_t needed) {
 // ═══════════════════════════════════════════════════════════════════
 // SIMD SCANNER (SSE2 - Busca 16 bytes por vez)
 // ═══════════════════════════════════════════════════════════════════
+static inline uint64_t _rdtsc(void) {
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+    uint32_t lo, hi;
+    __asm__ volatile ("rdtsc" : "=a" (lo), "=d" (hi));
+    return ((uint64_t)hi << 32) | lo;
+#elif defined(__aarch64__)
+    uint64_t val;
+    __asm__ volatile("mrs %0, cntvct_el0" : "=r"(val));
+    return val;
+#else
+    return 0;
+#endif
+}
+
 static inline int has_macro_opcodes_simd(const uint8_t* data, size_t len) {
+#if HERMES_HAS_SSE2
     __m128i target = _mm_set1_epi8((char)MACRO_OPCODE);
     size_t i = 0;
     for (; i + 16 <= len; i += 16) {
@@ -82,6 +110,13 @@ static inline int has_macro_opcodes_simd(const uint8_t* data, size_t len) {
         if (data[i] == MACRO_OPCODE) return 1;
     }
     return 0;
+#else
+    // Fallback escalar universal (ARM64 / Termux / RISC-V)
+    for (size_t i = 0; i < len; i++) {
+        if (data[i] == MACRO_OPCODE) return 1;
+    }
+    return 0;
+#endif
 }
 
 // ═══════════════════════════════════════════════════════════════════

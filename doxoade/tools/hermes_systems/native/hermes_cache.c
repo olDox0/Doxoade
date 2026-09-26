@@ -7,7 +7,14 @@
 #include <sys/stat.h>
 #include <stdio.h>
 #include <string.h>
-#include <windows.h>
+
+#ifdef _WIN32
+    #include <windows.h>
+    #include <process.h>
+#else
+    #include <unistd.h>
+    #include <pthread.h>
+#endif
 
 // ═══════════════════════════════════════════════════════════════════
 // LOG CONDICIONAL
@@ -93,7 +100,11 @@ static unsigned __stdcall async_save_worker(void* arg) {
     if (!last_slash) last_slash = strrchr(dir_path, '/');
     if (last_slash) {
         *last_slash = '\0';
+#ifdef _WIN32
         CreateDirectoryA(dir_path, NULL);
+#else
+        mkdir(dir_path, 0755);
+#endif
     }
 
     // 2. Escreve no disco (I/O Puro, sem GIL)
