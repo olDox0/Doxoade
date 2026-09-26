@@ -205,48 +205,56 @@ end
 
 if core and core.add_thread then
   core.add_thread(function()
-    coroutine.yield(2.0)
+    coroutine.yield(2.5)
     launch_mesh_service_safe()
-
     local last_mtimes = {}
 
     while true do
-      coroutine.yield(1.0)
+      -- Regime reativo: se o usuário estiver digitando, espera 4 segundos; em repouso, checa a cada 2.5s
+      local sleep_interval = (rawget(_G, "Khonsu") and Khonsu.is_user_active and Khonsu.is_user_active()) and 4.0 or 2.5
+      coroutine.yield(sleep_interval)
 
-      -- Recarrega na tela qualquer nota modificada pelo outro PC
       for _, doc in ipairs(core.docs or {}) do
         if doc.filename and not doc:is_dirty() then
           local fn_clean = doc.filename:gsub("\\", "/"):lower()
-          local is_shared = fn_clean:find("shared_notes%.md$")
+          local is_shared = fn_clean:find("shared_notes%.md$") or fn_clean:find("shared_notes%.txt$")
           local is_project_note = fn_clean:find("/%.doxoade/note/")
 
           if is_shared or is_project_note then
             local finfo = system.get_file_info and system.get_file_info(doc.filename)
             if finfo and finfo.mtime then
               local prev = last_mtimes[doc.filename]
-              if prev and finfo.mtime > prev then
+              if prev == nil then
+                -- Primeira detecção ao abrir o arquivo: apenas registra o mtime atual sem mutar o buffer
+                last_mtimes[doc.filename] = finfo.mtime
+              elseif finfo.mtime > prev then
+                last_mtimes[doc.filename] = finfo.mtime
                 local f = io.open(doc.filename, "r")
                 if f then
                   local new_text = f:read("*a")
                   f:close()
-                  local l1, c1, l2, c2 = 1, 1, 1, 1
-                  if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
-                  doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
-                  doc:insert(1, 1, new_text)
-                  doc:clean()
 
-                  -- Sincroniza ponteiros internos do Lite XL para nunca disparar alerta
-                  doc.clean_mtime = finfo.mtime
-                  doc.mtime = finfo.mtime
-                  doc.clean_change_id = doc:get_change_id()
-                  if doc.set_selection then doc:set_selection(l1, c1, l2, c2) end
-                  core.redraw = true
-                  if core.log then
-                    core.log("🔄 [DOXNOTE SYNC] Conteúdo atualizado do par remoto: " .. (doc.filename:match("[^/]+$") or doc.filename))
+                  -- Validação de divergência: só reconstrói o buffer se o conteúdo real tiver mudado
+                  local cur_text = doc:get_text(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
+                  if cur_text ~= new_text then
+                    local l1, c1, l2, c2 = 1, 1, 1, 1
+                    if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
+
+                    doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
+                    doc:insert(1, 1, new_text)
+                    doc:clean()
+                    doc.clean_mtime = finfo.mtime
+                    doc.mtime = finfo.mtime
+                    doc.clean_change_id = doc:get_change_id()
+                    if doc.set_selection then doc:set_selection(l1, c1, l2, c2) end
+                    core.redraw = true
+
+                    if core.log then
+                      core.log("🔄 [DOXNOTE SYNC] Buffer atualizado: " .. (doc.filename:match("[^/]+$") or doc.filename))
+                    end
                   end
                 end
               end
-              last_mtimes[doc.filename] = finfo.mtime
             end
           end
         end

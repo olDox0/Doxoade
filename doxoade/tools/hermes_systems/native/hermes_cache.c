@@ -65,7 +65,11 @@ typedef struct {
     PyObject* code_obj;  // <-- ADICIONADO: Campo que estava faltando
 } AsyncSaveJob;
 
+#ifdef _WIN32
 static unsigned __stdcall async_save_worker(void* arg) {
+#else
+static void* async_save_worker(void* arg) {
+#endif
     AsyncSaveJob* job = (AsyncSaveJob*)arg;
     
     // 🚀 ADQUIRIR GIL APENAS PARA MARSHAL
@@ -139,12 +143,21 @@ int cache_disk_save(const char* hermes_path, PyObject* code_obj) {
     job->code_obj = code_obj;
     Py_INCREF(code_obj); // Thread background segura referência
 
+#ifdef _WIN32
     uintptr_t thrd = _beginthreadex(NULL, 0, async_save_worker, job, 0, NULL);
     if (thrd != 0) {
         CloseHandle((HANDLE)thrd);
     } else {
         async_save_worker(job); // Fallback síncrono
     }
+#else
+    pthread_t thrd;
+    if (pthread_create(&thrd, NULL, async_save_worker, job) == 0) {
+        pthread_detach(thrd); // Thread independente no Linux/Android
+    } else {
+        async_save_worker(job);
+    }
+#endif
     
     HERMES_LOG("💾 ASYNC MARSHAL+SAVE DESPATCHED");
     return 1;

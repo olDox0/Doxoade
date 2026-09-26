@@ -74,6 +74,14 @@ class JanusDetector:
     def _detect_windows(self, project_root: Optional[Path]) -> Optional[CompilerInfo]:
         """Varre WinLibs, MinGW, MSYS2 e PATH do Windows."""
         # 1. Checa PATH primeiro
+        if project_root:
+            w64 = Path(project_root) / "thirdparty" / "w64devkit" / "bin" / "gcc.exe"
+            as_exe = w64.parent / "as.exe"
+            # 🛑 Só usa w64devkit se gcc.exe E as.exe existirem!
+            if w64.exists() and (os.name != 'nt' or as_exe.exists()):
+                gpp = w64.parent / "g++.exe"
+                return self._probe_compiler(str(w64), str(gpp) if gpp.exists() else None, provider="w64devkit_legacy")
+
         gcc_in_path = shutil.which("gcc")
         if gcc_in_path:
             gpp = shutil.which("g++") or str(Path(gcc_in_path).parent / "g++.exe")
