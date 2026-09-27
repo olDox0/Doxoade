@@ -196,4 +196,4 @@ command.add(nil, {
   end
 })
 
-keymap.add { ["ctrl+alt+shift+s"] = "doxoade:toggle-search-dock" }
+--keymap.add { ["ctrl+alt+shift+s"] = "doxoade:toggle-search-dock" }

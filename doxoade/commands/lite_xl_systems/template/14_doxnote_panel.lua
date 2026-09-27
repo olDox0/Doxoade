@@ -200,13 +200,11 @@ local function launch_mesh_service_safe()
 end
 
 -- ═════════════════════════════════════════════════════════════════════════════
--- 3. SENTINELA BLINDADO POR HASH (ZERO FALSOS-POSITIVOS / ZERO FREEZE)
+-- 3. SENTINELA BLINDADO COM PISO DE TEMPO (ZERO PISCAR / ZERO PING-PONG)
 -- ═════════════════════════════════════════════════════════════════════════════
 
--- Função de Hash rápida para comparação estrita de conteúdo
 local function calc_clean_hash(str)
-  if not str or str == "" then return 0 end
-  -- Normaliza quebras de linha Windows/Unix e espaços marginais
+  if not str or str == "" then return 0, 0, "" end
   local clean = str:gsub("\r\n", "\n"):gsub("\r", "\n"):gsub("%s+$", "")
   local h = 5381
   for i = 1, #clean do
@@ -218,23 +216,24 @@ end
 if core and core.add_thread then
   core.add_thread(function()
     local last_file_hashes = {}
+    local last_reload_time = 0
 
     while true do
-      -- Se a sincronização estiver DESATIVADA (Fundo Vermelho), dorme 2.0s sem tocar no disco
+      -- Piso de tempo: verifica a cada 3.5 segundos (relaxado, sem flood)
+      coroutine.yield(3.5)
+
       local is_enabled = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
-      if not is_enabled then
-        coroutine.yield(2.0)
-      else
-        -- Quando ativado (Verde), checa com calma respeitando digitação ativa
-        local is_user_typing = rawget(_G, "Khonsu") and Khonsu.is_user_active and Khonsu.is_user_active()
-        coroutine.yield(is_user_typing and 4.0 or 2.0)
+      if is_enabled then
+        local now = os.clock()
 
         for _, doc in ipairs(core.docs or {}) do
+          -- Se o usuário está digitando no documento (dirty), NÃO mexe no buffer!
           if doc.filename and not doc:is_dirty() then
             local fn_clean = doc.filename:gsub("\\", "/"):lower()
             local is_shared = fn_clean:find("shared_notes%.md$") or fn_clean:find("shared_notes%.txt$")
 
-            if is_shared then
+            -- Piso de tempo de recarga (máximo 1 recarga a cada 3.0s)
+            if is_shared and (now - last_reload_time) > 3.0 then
               local finfo = system.get_file_info and system.get_file_info(doc.filename)
               if finfo and finfo.type == "file" then
                 local f = io.open(doc.filename, "r")
@@ -246,13 +245,16 @@ if core and core.add_thread then
                   local cur_raw = doc:get_text(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
                   local cur_hash, cur_len = calc_clean_hash(cur_raw)
 
-                  if disk_clean and disk_clean ~= "" and disk_hash ~= cur_hash and disk_hash ~= last_file_hashes[doc.filename] then
+                  if last_file_hashes[doc.filename] == nil then
                     last_file_hashes[doc.filename] = disk_hash
+                  elseif disk_clean and disk_clean ~= "" and disk_hash ~= cur_hash and disk_hash ~= last_file_hashes[doc.filename] then
+                    last_file_hashes[doc.filename] = disk_hash
+                    last_reload_time = now
 
+                    -- Recarregamento seguro sem piscar
                     local l1, c1, l2, c2 = 1, 1, 1, 1
                     if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
 
-                    -- Atualização atômica segura contra texto nulo
                     doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
                     doc:insert(1, 1, tostring(disk_clean))
                     doc:clean()
@@ -263,32 +265,7 @@ if core and core.add_thread then
                     core.redraw = true
 
                     if core.log then
-                      core.log("🔄 [NOTE MESH] Atualização legítima recebida.")
-                    end
-                  end
-
-                  -- Registra o hash na abertura inicial
-                  if last_file_hashes[doc.filename] == nil then
-                    last_file_hashes[doc.filename] = disk_hash
-                  -- SÓ MUTAR SE O HASH FOR COMPROVADAMENTE DIFERENTE
-                  elseif disk_hash ~= cur_hash and disk_hash ~= last_file_hashes[doc.filename] then
-                    last_file_hashes[doc.filename] = disk_hash
-
-                    local l1, c1, l2, c2 = 1, 1, 1, 1
-                    if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
-
-                    -- Atualização atômica segura
-                    doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
-                    doc:insert(1, 1, disk_clean)
-                    doc:clean()
-                    doc.clean_mtime = finfo.mtime
-                    doc.mtime = finfo.mtime
-                    doc.clean_change_id = doc:get_change_id()
-                    if doc.set_selection then doc:set_selection(l1, c1, l2, c2) end
-                    core.redraw = true
-
-                    if core.log then
-                      core.log("🔄 [NOTE MESH] Atualização legítima recebida.")
+                      core.log("🔄 [NOTE MESH] Atualização remota aplicada com sucesso.")
                     end
                   end
                 end

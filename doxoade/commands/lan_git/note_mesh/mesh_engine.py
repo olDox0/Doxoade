@@ -57,6 +57,8 @@ class NoteMeshEngine:
         # Filtro Anti-Echo
         self._last_processed_hash: str = self._calculate_file_hash()
         self._last_mtime: float = self.notes_file.stat().st_mtime
+        self._ignore_watcher_until: float = 0.0
+        self._last_broadcast_time: float = 0.0
 
     def _get_local_ip(self) -> str:
         try:
@@ -266,40 +268,53 @@ class NoteMeshEngine:
             pass
 
     def _apply_incoming_sync(self, raw_data: bytes):
+        """Aplica dados recebidos da rede e silencia o watcher local para NÃO ecoar de volta."""
         try:
             msg = json.loads(raw_data.decode("utf-8"))
             remote_hash = msg.get("hash", "")
             remote_content = msg.get("content", "")
+            
             if remote_hash and remote_hash != self._last_processed_hash:
-                # Grava bytes diretos (sem conversão de quebra de linha que altere o hash no Windows)
                 raw_bytes = remote_content.encode("utf-8")
-                self.notes_file.write_bytes(raw_bytes)
                 
-                # Sincroniza os marcadores com o hash REAL do disco para o watcher local não ecoar
-                disk_hash = hashlib.sha256(raw_bytes).hexdigest()
-                self._last_processed_hash = disk_hash
+                # 🛑 TRAVA ANTI-ECO: silencia o file watcher por 3.5s
+                self._ignore_watcher_until = time.time() + 3.5
+                self._last_processed_hash = remote_hash
+                
+                self.notes_file.write_bytes(raw_bytes)
                 self._last_mtime = self.notes_file.stat().st_mtime
                 self.last_sync_time = time.time()
                 self._update_state_file("connected")
         except Exception:
             pass
 
-    # ═════════════════════════════════════════════════════════════════
-    # CAMADA 3: WATCHER LOCAL (DETECÇÃO DE SALVAMENTO NA IDE)
-    # ═════════════════════════════════════════════════════════════════
     def _file_watcher_loop(self):
+        """Watcher local com piso mínimo de tempo e proteção absoluta contra eco."""
+        MIN_INTERVAL_SEC = 3.0  # Piso de tempo mínimo entre transmissões
+
         while self.running:
-            time.sleep(1.5)
+            time.sleep(1.0)
             if not self.notes_file.exists():
                 continue
+
+            # Se estamos dentro da janela de supressão de eco, não transmite
+            if time.time() < self._ignore_watcher_until:
+                continue
+
+            # Piso de tempo: não transmite mais de uma vez a cada 3 segundos
+            if (time.time() - self._last_broadcast_time) < MIN_INTERVAL_SEC:
+                continue
+
             try:
                 mtime = self.notes_file.stat().st_mtime
                 if mtime > self._last_mtime:
                     self._last_mtime = mtime
                     h = self._calculate_file_hash()
-                    # Só dispara para a rede se for uma edição local genuína
+                    
+                    # Só dispara se o hash for genuinamente novo e diferente do último recebido
                     if h and h != self._last_processed_hash:
                         self._last_processed_hash = h
+                        self._last_broadcast_time = time.time()
                         if self.connected_peer_ip:
                             self._broadcast_change()
             except Exception:
