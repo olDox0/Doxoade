@@ -127,6 +127,11 @@ static void* async_save_worker(void* arg) {
     free(payload_copy);
     free(job);
     return THREAD_RET_OK; // 🛑 LINHA FINAL CORRIGIDA
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
+#endif
 }
 
 int cache_disk_save(const char* hermes_path, PyObject* code_obj) {

@@ -581,22 +581,39 @@ local function arct_xpcall(fn, module_name, ...)
     return ok, err
 end
 
+-- =============================================================================
+-- 📂 DRAG & DROP SOBERANO (Garante abertura em nós desbloqueados)
+-- =============================================================================
+local DocView = require "core.docview"
+
+local function find_unlocked_leaf(node)
+  if not node then return nil end
+  if node.type == "leaf" and not node.locked then return node end
+  if node.type ~= "leaf" then
+    return find_unlocked_leaf(node.b) or find_unlocked_leaf(node.a)
+  end
+  return nil
+end
+
 function RootView:on_file_dropped(filename, x, y)
   if not filename or filename == "" then return false end
 
   local ok, doc = pcall(core.open_doc, filename)
   if ok and doc then
+    -- Tenta o nó sob o mouse; se for a TreeView (locked), busca o painel de código aberto
     local node = self.root_node:get_child_overlapping_point(x, y)
     if not node or node.locked then
-      node = self.root_node:get_primary_node()
+      node = self:get_active_node()
+    end
+    if not node or node.locked then
+      node = find_unlocked_leaf(self.root_node)
     end
 
-    if node and node.add_view then
+    if node and not node.locked and node.add_view then
       local view = DocView(doc)
       node:add_view(view)
-      core.set_active_view(view)
+      self:set_active_view(view)
       core.redraw = true
-
       if core.log then
         core.log("📂 [DRAG&DROP] Aberto: " .. (filename:match("[^/\\]+$") or filename))
       end

@@ -156,12 +156,12 @@ local function ensure_note_sync_daemon_running()
 end
 
 -- Auto-disparo 2 segundos após o boot estável da IDE
-if core and core.add_thread then
-  core.add_thread(function()
-    coroutine.yield(2.0)
-    ensure_note_sync_daemon_running()
-  end)
-end
+-- if core and core.add_thread then
+--   core.add_thread(function()
+--     coroutine.yield(2.0)
+--     ensure_note_sync_daemon_running()
+--   end)
+-- end
 
 -- ═════════════════════════════════════════════════════════════════
 -- ⚡ DOXNOTE MESH — GESTÃO AUTÔNOMA NA IDE E AUTO-RELOAD DE BUFFER
