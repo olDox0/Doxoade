@@ -83,7 +83,11 @@ static void* async_save_worker(void* arg) {
     if (!marshal_bytes) {
         PyGILState_Release(gstate);
         free(job);
-        return THREAD_RET_FAIL; // 🛑 LINHA 83 CORRIGIDA
+#ifdef _WIN32
+        return 1;
+#else
+        return NULL;
+#endif
     }
     
     const char* payload = PyBytes_AsString(marshal_bytes);
@@ -95,6 +99,11 @@ static void* async_save_worker(void* arg) {
         PyGILState_Release(gstate);
         free(job);
         return THREAD_RET_FAIL; // 🛑 LINHA 94 CORRIGIDA
+#ifdef _WIN32
+        return 1;
+#else
+        return NULL;
+#endif
     }
     memcpy(payload_copy, payload, payload_size);
     Py_DECREF(marshal_bytes);

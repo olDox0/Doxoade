@@ -464,6 +464,18 @@ def cmd_log(mode: str, lines: int, follow: bool, errors: bool, phanto: bool, cle
     error_file = target_dir / "error.txt"
     phanto_file = target_dir / ".doxoade" / "diagnostics" / "phanto_crisis.ndjson"
 
+    if error_file.exists():
+        click.echo(f"\n{Fore.RED}{Style.BRIGHT}🩺 CRASH DETECTADO (error.txt):{Style.RESET_ALL}")
+
+    # 🧭 Exibição Automática da Caixa-Preta do Shadow Flow
+    blackbox_file = target_dir / ".doxoade" / "diagnostics" / "flow_blackbox.txt"
+    if not blackbox_file.exists():
+        blackbox_file = target_dir / "diagnostics" / "flow_blackbox.txt"
+
+    if blackbox_file.exists():
+        click.echo(f"\n{Fore.MAGENTA}{Style.BRIGHT}🧭 TRAJETÓRIA DO SHADOW FLOW (Últimos Passos):{Style.RESET_ALL}")
+        click.echo(blackbox_file.read_text(encoding="utf-8", errors="replace"))
+
     if clear:
         cleared = []
         for p in [session_file, error_file, phanto_file]:

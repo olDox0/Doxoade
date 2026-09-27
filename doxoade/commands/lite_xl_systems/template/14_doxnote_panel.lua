@@ -200,53 +200,75 @@ local function launch_mesh_service_safe()
 end
 
 -- ═════════════════════════════════════════════════════════════════════════════
--- 3. SENTINELA EM TEMPO REAL: RECARGA AUTOMÁTICA DE NOTAS (PC-A <-> PC-B)
+-- 3. SENTINELA BLINDADO POR HASH (ZERO FALSOS-POSITIVOS / ZERO FREEZE)
 -- ═════════════════════════════════════════════════════════════════════════════
+
+-- Função de Hash rápida para comparação estrita de conteúdo
+local function calc_clean_hash(str)
+  if not str or str == "" then return 0 end
+  -- Normaliza quebras de linha Windows/Unix e espaços marginais
+  local clean = str:gsub("\r\n", "\n"):gsub("\r", "\n"):gsub("%s+$", "")
+  local h = 5381
+  for i = 1, #clean do
+    h = ((h * 33) + clean:byte(i)) % 2147483647
+  end
+  return h, #clean, clean
+end
 
 if core and core.add_thread then
   core.add_thread(function()
-    coroutine.yield(2.5)
-    launch_mesh_service_safe()
-    local last_mtimes = {}
+    local last_file_hashes = {}
 
     while true do
-      -- Se o usuário estiver ativo/digitando, aguarda 4s; em repouso checa a cada 2.5s
-      local is_active = rawget(_G, "Khonsu") and Khonsu.is_user_active and Khonsu.is_user_active()
-      coroutine.yield(is_active and 4.0 or 2.5)
+      -- Se a sincronização estiver DESATIVADA (Fundo Vermelho), dorme 2.0s sem tocar no disco
+      local is_enabled = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
+      if not is_enabled then
+        coroutine.yield(2.0)
+      else
+        -- Quando ativado (Verde), checa com calma respeitando digitação ativa
+        local is_user_typing = rawget(_G, "Khonsu") and Khonsu.is_user_active and Khonsu.is_user_active()
+        coroutine.yield(is_user_typing and 4.0 or 2.0)
 
-      for _, doc in ipairs(core.docs or {}) do
-        if doc.filename and not doc:is_dirty() then
-          local fn_clean = doc.filename:gsub("\\", "/"):lower()
-          local is_shared = fn_clean:find("shared_notes%.md$") or fn_clean:find("shared_notes%.txt$")
+        for _, doc in ipairs(core.docs or {}) do
+          if doc.filename and not doc:is_dirty() then
+            local fn_clean = doc.filename:gsub("\\", "/"):lower()
+            local is_shared = fn_clean:find("shared_notes%.md$") or fn_clean:find("shared_notes%.txt$")
 
-          if is_shared then
-            local finfo = system.get_file_info and system.get_file_info(doc.filename)
-            if finfo and finfo.mtime then
-              local prev = last_mtimes[doc.filename]
-              if prev == nil then
-                -- Registra mtime inicial sem tocar no documento
-                last_mtimes[doc.filename] = finfo.mtime
-              elseif finfo.mtime > prev then
-                last_mtimes[doc.filename] = finfo.mtime
+            if is_shared then
+              local finfo = system.get_file_info and system.get_file_info(doc.filename)
+              if finfo and finfo.type == "file" then
                 local f = io.open(doc.filename, "r")
                 if f then
-                  local new_text = f:read("*a")
+                  local disk_raw = f:read("*a") or ""
                   f:close()
 
-                  -- Só muta o buffer se o texto em disco for REALMENTE diferente
-                  local cur_text = doc:get_text(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
-                  if cur_text ~= new_text then
+                  local disk_hash, disk_len, disk_clean = calc_clean_hash(disk_raw)
+                  local cur_raw = doc:get_text(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
+                  local cur_hash, cur_len = calc_clean_hash(cur_raw)
+
+                  -- Registra o hash na abertura inicial
+                  if last_file_hashes[doc.filename] == nil then
+                    last_file_hashes[doc.filename] = disk_hash
+                  -- SÓ MUTAR SE O HASH FOR COMPROVADAMENTE DIFERENTE
+                  elseif disk_hash ~= cur_hash and disk_hash ~= last_file_hashes[doc.filename] then
+                    last_file_hashes[doc.filename] = disk_hash
+
                     local l1, c1, l2, c2 = 1, 1, 1, 1
                     if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
 
-                    -- doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
-                    -- doc:insert(1, 1, new_text)
-                    -- doc:clean()
+                    -- Atualização atômica segura
+                    doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
+                    doc:insert(1, 1, disk_clean)
+                    doc:clean()
                     doc.clean_mtime = finfo.mtime
                     doc.mtime = finfo.mtime
                     doc.clean_change_id = doc:get_change_id()
                     if doc.set_selection then doc:set_selection(l1, c1, l2, c2) end
                     core.redraw = true
+
+                    if core.log then
+                      core.log("🔄 [NOTE MESH] Atualização legítima recebida.")
+                    end
                   end
                 end
               end
@@ -659,28 +681,48 @@ command.add(nil, {
   end,
 
   -- 📋 MENU CENTRAL UNIFICADO: SHARED NOTES + NOTAS DO PROJETO + AGENDA
+  -- 📋 MENU CENTRAL UNIFICADO: SHARED NOTES + NOTAS DO PROJETO + CONTROLE DE SYNC
   ["doxoade:note-hub-menu"] = function()
+    local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
+    local sync_toggle_label = is_active and "🛑 [1] Desativar Sincronização (Modo Local / Fundo Vermelho)"
+                                         or "⚡ [1] Ativar Sincronização (Modo Rede / Fundo Verde)"
+
     local options = {
-      "[1] Abrir shared_notes.md (Painel Dividido)",
-      "[2] Abrir Notas do Projeto (Painel Dividido)",
-      "[3] Abrir na Aba Atual...",
-      "[4] Criar Nova Nota no Projeto...",
-      "[5] Ver Agenda & Tarefas Sincronizadas",
-      "[6] Adicionar Tarefa Rápida (+1d, hoje...)",
-      "[7] Marcar Tarefa Concluída [x]",
-      "[8] Reiniciar Serviço Mesh P2P"
+      sync_toggle_label,
+      "📝 [2] Abrir shared_notes.md (Painel Dividido)",
+      "📂 [3] Abrir Notas do Projeto (Painel Dividido)",
+      "➕ [4] Criar Nova Nota no Projeto...",
+      "⏰ [5] Ver Agenda & Tarefas Sincronizadas",
+      "⚡ [6] Adicionar Tarefa Rápida (+1d, hoje...)",
+      "✔️ [7] Marcar Tarefa Concluída [x]",
+      "🔄 [8] Puxar do Host Remoto (lan-git pull --live -f)",
+      "🚀 [9] Iniciar Host Live Mirror (lan-git share --live)"
     }
 
-    core.command_view:enter("Shared Note Hub — Versátil & Sincronizado", {
+    core.command_view:enter("Shared Note Hub — Gestão de Notas & Sincronização", {
       submit = function(choice)
         local home_dir = os.getenv("USERPROFILE") or os.getenv("HOME") or "."
         local sep = PATHSEP or "/"
         local shared_path = home_dir .. sep .. ".doxoade" .. sep .. "shared_notes.md"
 
+        -- 1. Alterna o estado da Sincronização (Muda a cor do Badge no Rodapé)
         if choice:find("%[1%]") then
-          open_note_in_split(shared_path, "🌐 shared_notes.md aberto no painel lateral.")
+          local new_state = not (rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true)
+          rawset(_G, "_DOXOADE_NOTE_SYNC_ACTIVE", new_state)
+
+          if new_state then
+            core.log("🟢 [NOTE MESH] Sincronização ATIVADA. Fundo do Note: VERDE.")
+          else
+            core.log("🔴 [NOTE MESH] Sincronização DESATIVADA. Fundo do Note: VERMELHO.")
+          end
+          core.redraw = true
+
+        -- 2. Abrir shared_notes no split lateral
         elseif choice:find("%[2%]") then
-          -- Lista e abre a nota escolhida diretamente no split lateral
+          open_note_in_split(shared_path, "🌐 shared_notes.md aberto no painel lateral.")
+
+        -- 3. Abrir notas do projeto no split lateral
+        elseif choice:find("%[3%]") then
           local notes = get_all_existing_notes()
           local labels, path_map = {}, {}
           for _, n in ipairs(notes) do
@@ -695,20 +737,37 @@ command.add(nil, {
             end,
             suggest = function(text) return common.fuzzy_match(labels, text) end
           })
-        elseif choice:find("%[3%]") then
-          command.perform("doxoade:open-note")
+
+        -- 4. Nova nota
         elseif choice:find("%[4%]") then
           command.perform("doxoade:new-note-interactive")
+
+        -- 5. Agenda
         elseif choice:find("%[5%]") then
           local note_dir = get_primary_note_dir()
           open_note_in_split(note_dir .. "/.agenda_view.md", "⏰ Agenda aberta à direita.")
+
+        -- 6. Adicionar tarefa
         elseif choice:find("%[6%]") then
           command.perform("doxoade:quick-add-task")
+
+        -- 7. Concluir tarefa
         elseif choice:find("%[7%]") then
           command.perform("doxoade:mark-task-done")
+
+        -- 8. Puxar do host remoto
         elseif choice:find("%[8%]") then
-          launch_mesh_service_safe()
-          core.log("⚡ [DOXNOTE MESH] Serviço P2P reiniciado.")
+          local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+          local shelf = rawget(_G, "_DOXOADE_SHELF_HUB")
+          if shelf then shelf.visible = true; shelf.active_tab = "terminal" end
+          if term then term:ensure_started(); term:execute_command("doxoade lan-git pull --live -f") end
+
+        -- 9. Iniciar host live mirror
+        elseif choice:find("%[9%]") then
+          local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+          local shelf = rawget(_G, "_DOXOADE_SHELF_HUB")
+          if shelf then shelf.visible = true; shelf.active_tab = "terminal" end
+          if term then term:ensure_started(); term:execute_command("doxoade lan-git share --live") end
         end
       end,
       suggest = function(text) return common.fuzzy_match(options, text) end

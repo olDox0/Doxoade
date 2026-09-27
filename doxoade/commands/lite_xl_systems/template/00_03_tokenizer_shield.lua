@@ -131,6 +131,18 @@ local function safe_lex_semantic_line(text, symbols)
   return res
 end
 
+if core and type(core.open_doc) == "function" and not rawget(_G, "_DOXOADE_OPEN_DOC_ABS_PATCHED") then
+  rawset(_G, "_DOXOADE_OPEN_DOC_ABS_PATCHED", true)
+  local orig_open_doc = core.open_doc
+  core.open_doc = function(filename)
+    local doc = orig_open_doc(filename)
+    if doc and doc.filename and not doc.abs_filename then
+      doc.abs_filename = system.absolute_path(doc.filename) or doc.filename
+    end
+    return doc
+  end
+end
+
 -- =============================================================================
 -- 4. ESCUDO DE CONTRATO DO TOKENIZER + SHORT-CIRCUIT BINÁRIO
 -- =============================================================================

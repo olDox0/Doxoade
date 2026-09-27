@@ -151,21 +151,71 @@ core.add_thread(function()
       4
     )
 
-    -- 5. Badge DoxNote Estático (Custo Zero O(1))
+    -- 5. Badge DoxNote com Fundo Verde (ON) / Vermelho (OFF) + Abertura de Menu
+    rawset(_G, "_DOXOADE_NOTE_SYNC_ACTIVE", rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") or false)
+
+    local COLOR_SYNC_ON_BG  = { 34, 197, 94, 255 }   -- Verde Esmeralda Sólido
+    local COLOR_SYNC_OFF_BG = { 220, 38, 38, 255 }   -- Vermelho Alerta Sólido
+    local COLOR_TEXT_WHITE  = { 255, 255, 255, 255 } -- Texto Branco Puro
+
     register_status_item(
       "doxoade:note_status",
       StatusView.Item.LEFT,
       function()
+        local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
+        local badge_label = is_active and " [ NOTE: ON ] " or " [ NOTE: OFF ] "
+
         return {
-          { 56, 189, 248, 255 }, "📝 Note ",
+          COLOR_TEXT_WHITE, badge_label,
           DIVIDER_COLOR, "| "
         }
       end,
       function()
+        -- Ao clicar: abre diretamente o menu completo de gestão e configuração
         command.perform("doxoade:note-hub-menu")
       end,
       5
     )
+
+    -- Hook que pinta o fundo colorido ANTES do desenho dos textos
+    if StatusView and StatusView.draw then
+      local orig_statusview_draw = StatusView.draw
+      StatusView.draw = function(self, ...)
+        local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
+        local badge_bg = is_active and COLOR_SYNC_ON_BG or COLOR_SYNC_OFF_BG
+        local font = style.font
+        local h = self.size and self.size.y or 24
+        local x = self.position.x + (style.padding and style.padding.x or 8)
+        local y = self.position.y
+
+        local target_x, target_w = nil, 0
+        for _, item in ipairs(self.items or {}) do
+          if item.alignment == StatusView.Item.LEFT and item.predicate and item.predicate() then
+            local res = item.get_item and item.get_item() or {}
+            local item_w = 0
+            for i = 2, #res, 2 do
+              item_w = item_w + font:get_width(tostring(res[i] or ""))
+            end
+
+            if item.name == "doxoade:note_status" then
+              target_x = x
+              target_w = item_w - font:get_width(" | ")
+              break
+            end
+            x = x + item_w
+          end
+        end
+
+        if target_x and target_w > 0 then
+          local ren = rawget(_G, "rencache") or rawget(_G, "renderer")
+          if ren and ren.draw_rect then
+            ren.draw_rect(target_x + 2, y + 3, target_w - 4, h - 6, badge_bg)
+          end
+        end
+
+        orig_statusview_draw(self, ...)
+      end
+    end
 
     register_status_item(
       "doxoade:search_status",
