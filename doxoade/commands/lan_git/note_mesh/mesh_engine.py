@@ -36,29 +36,25 @@ class NoteMeshEngine:
         self.home = Path.home()
         self.doxoade_dir = self.home / ".doxoade"
         self.doxoade_dir.mkdir(parents=True, exist_ok=True)
-
         self.notes_file = self.doxoade_dir / "shared_notes.md"
         self.state_file = self.doxoade_dir / "mesh_state.json"
         self.key_file = self.doxoade_dir / "mesh_auth.key"
-
         if not self.notes_file.exists():
-            self.notes_file.write_text("# 📝 Notas Compartilhadas DoxNote\n\n", encoding="utf-8")
-
+            self.notes_file.write_text("# 📝 Shared Notes\n\n", encoding="utf-8")
         self.secret_key = self._load_or_create_key(password)
         self.hostname = socket.gethostname()
         self.local_ip = self._get_local_ip()
-
         self.running = False
         self.connected_peer_ip: Optional[str] = None
         self.connected_peer_name: Optional[str] = None
         self.last_sync_time: float = 0.0
         self.last_rtt_ms: float = 0.0
-
-        # Filtro Anti-Echo
         self._last_processed_hash: str = self._calculate_file_hash()
         self._last_mtime: float = self.notes_file.stat().st_mtime
-        self._ignore_watcher_until: float = 0.0
-        self._last_broadcast_time: float = 0.0
+        
+        # 🛑 ESTRATÉGIA ANTI-ECO: Hash do que veio da rede
+        self._network_received_hash: Optional[str] = None
+        self._last_send_time: float = 0.0
 
     def _get_local_ip(self) -> str:
         try:
@@ -269,7 +265,7 @@ class NoteMeshEngine:
             pass
 
     def _apply_incoming_sync(self, raw_data: bytes):
-        """Aplica dados recebidos da rede e silencia o watcher local para NÃO ecoar de volta."""
+        """RECEBEU DA REDE: Grava no disco, atualiza a tela e PROÍBE retransmissão."""
         try:
             msg = json.loads(raw_data.decode("utf-8"))
             remote_hash = msg.get("hash", "")
@@ -278,8 +274,8 @@ class NoteMeshEngine:
             if remote_hash and remote_hash != self._last_processed_hash:
                 raw_bytes = remote_content.encode("utf-8")
                 
-                # 🛑 TRAVA ANTI-ECO: silencia o file watcher por 3.5s
-                self._ignore_watcher_until = time.time() + 3.5
+                # Marca que ESTE hash veio de fora (NUNCA retransmitir!)
+                self._network_received_hash = remote_hash
                 self._last_processed_hash = remote_hash
                 
                 self.notes_file.write_bytes(raw_bytes)
@@ -290,20 +286,12 @@ class NoteMeshEngine:
             pass
 
     def _file_watcher_loop(self):
-        """Watcher local com piso mínimo de tempo e proteção absoluta contra eco."""
-        MIN_INTERVAL_SEC = 3.0  # Piso de tempo mínimo entre transmissões
+        """MODIFICOU LOCALMENTE: Só transmite se foi o usuário desta máquina que salvou."""
+        MIN_PISO_ENVIO = 3.0  # Piso de tempo mínimo de 3s entre envios
 
         while self.running:
             time.sleep(1.0)
             if not self.notes_file.exists():
-                continue
-
-            # Se estamos dentro da janela de supressão de eco, não transmite
-            if time.time() < self._ignore_watcher_until:
-                continue
-
-            # Piso de tempo: não transmite mais de uma vez a cada 3 segundos
-            if (time.time() - self._last_broadcast_time) < MIN_INTERVAL_SEC:
                 continue
 
             try:
@@ -312,10 +300,15 @@ class NoteMeshEngine:
                     self._last_mtime = mtime
                     h = self._calculate_file_hash()
                     
-                    # Só dispara se o hash for genuinamente novo e diferente do último recebido
-                    if h and h != self._last_processed_hash:
+                    # 🛑 REGRA DE OURO: Se o hash do disco for o que a rede acabou de mandar, IGNORA!
+                    if h == self._network_received_hash:
+                        self._network_received_hash = None  # Consumido
+                        continue
+                    
+                    # Se foi uma alteração real do usuário local e respeitou o piso de tempo
+                    if h and h != self._last_processed_hash and (time.time() - self._last_send_time) > MIN_PISO_ENVIO:
                         self._last_processed_hash = h
-                        self._last_broadcast_time = time.time()
+                        self._last_send_time = time.time()
                         if self.connected_peer_ip:
                             self._broadcast_change()
             except Exception:
