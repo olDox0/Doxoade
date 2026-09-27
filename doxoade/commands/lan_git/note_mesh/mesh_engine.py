@@ -286,11 +286,11 @@ class NoteMeshEngine:
             pass
 
     def _file_watcher_loop(self):
-        """MODIFICOU LOCALMENTE: Só transmite se foi o usuário desta máquina que salvou."""
-        MIN_PISO_ENVIO = 3.0  # Piso de tempo mínimo de 3s entre envios
+        """PULSO DE 5 SEGUNDOS: Checa alteração local a cada 5s e transmite uma única vez."""
+        PULSO_INTERVALO_SEC = 5.0
 
         while self.running:
-            time.sleep(1.0)
+            time.sleep(PULSO_INTERVALO_SEC)
             if not self.notes_file.exists():
                 continue
 
@@ -300,13 +300,13 @@ class NoteMeshEngine:
                     self._last_mtime = mtime
                     h = self._calculate_file_hash()
                     
-                    # 🛑 REGRA DE OURO: Se o hash do disco for o que a rede acabou de mandar, IGNORA!
+                    # Se o hash for igual ao que a rede acabou de mandar, ignora (anti-eco)
                     if h == self._network_received_hash:
-                        self._network_received_hash = None  # Consumido
+                        self._network_received_hash = None
                         continue
                     
-                    # Se foi uma alteração real do usuário local e respeitou o piso de tempo
-                    if h and h != self._last_processed_hash and (time.time() - self._last_send_time) > MIN_PISO_ENVIO:
+                    # Se foi modificação do usuário local e o hash é novo
+                    if h and h != self._last_processed_hash and (time.time() - self._last_send_time) > 4.0:
                         self._last_processed_hash = h
                         self._last_send_time = time.time()
                         if self.connected_peer_ip:

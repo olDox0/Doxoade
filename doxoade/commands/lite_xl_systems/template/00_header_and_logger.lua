@@ -437,8 +437,6 @@ local function _sanitize_node_tree(node)
       local v = node.views[i]
       if type(v) ~= "table" then
         table.remove(node.views, i)
-      elseif not v.doc and not v.get_name then
-        -- View órfã tratada com segurança
       end
     end
     if not node then return end
