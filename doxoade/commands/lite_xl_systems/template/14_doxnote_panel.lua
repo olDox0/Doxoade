@@ -200,7 +200,7 @@ local function launch_mesh_service_safe()
 end
 
 -- ═════════════════════════════════════════════════════════════════════════════
--- 3. SENTINELA BLINDADO COM PISO DE TEMPO (ZERO PISCAR / ZERO PING-PONG)
+-- 3. SENTINELA IMORTAL COM GUARDA DE SALVAMENTO (ZERO CRASH / BIDIRECIONAL)
 -- ═════════════════════════════════════════════════════════════════════════════
 
 local function calc_clean_hash(str)
@@ -213,66 +213,86 @@ local function calc_clean_hash(str)
   return h, #clean, clean
 end
 
+local _last_local_save_time = 0
+
+-- Hook no salvamento para proteger contra recarga imediata da própria edição
+if Doc and Doc.save then
+  local orig_doc_save = Doc.save
+  Doc.save = function(self, ...)
+    if self.filename and (self.filename:find("shared_notes%.md$") or self.filename:find("shared_notes%.txt$")) then
+      _last_local_save_time = os.clock()
+    end
+    return orig_doc_save(self, ...)
+  end
+end
+
 if core and core.add_thread then
   core.add_thread(function()
     local last_file_hashes = {}
     local last_reload_time = 0
 
     while true do
-      -- Piso de tempo: verifica a cada 3.5 segundos (relaxado, sem flood)
-      coroutine.yield(3.5)
+      coroutine.yield(2.5)
 
       local is_enabled = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
       if is_enabled then
         local now = os.clock()
 
-        for _, doc in ipairs(core.docs or {}) do
-          -- Se o usuário está digitando no documento (dirty), NÃO mexe no buffer!
-          if doc.filename and not doc:is_dirty() then
-            local fn_clean = doc.filename:gsub("\\", "/"):lower()
-            local is_shared = fn_clean:find("shared_notes%.md$") or fn_clean:find("shared_notes%.txt$")
+        -- Proteção pcall: se qualquer detalhe falhar, a corrotina NUNCA morre
+        pcall(function()
+          -- Se o usuário salvou o arquivo há menos de 4 segundos, não mexe no buffer!
+          if (now - _last_local_save_time) < 4.0 then return end
 
-            -- Piso de tempo de recarga (máximo 1 recarga a cada 3.0s)
-            if is_shared and (now - last_reload_time) > 3.0 then
-              local finfo = system.get_file_info and system.get_file_info(doc.filename)
-              if finfo and finfo.type == "file" then
-                local f = io.open(doc.filename, "r")
-                if f then
-                  local disk_raw = f:read("*a") or ""
-                  f:close()
+          for _, doc in ipairs(core.docs or {}) do
+            if doc.filename and not doc:is_dirty() then
+              local fn_clean = doc.filename:gsub("\\", "/"):lower()
+              local is_shared = fn_clean:find("shared_notes%.md$") or fn_clean:find("shared_notes%.txt$")
 
-                  local disk_hash, disk_len, disk_clean = calc_clean_hash(disk_raw)
-                  local cur_raw = doc:get_text(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
-                  local cur_hash, cur_len = calc_clean_hash(cur_raw)
+              if is_shared and (now - last_reload_time) > 2.5 then
+                local finfo = system.get_file_info and system.get_file_info(doc.filename)
+                -- Só lê se o arquivo existir e tiver tamanho válido no disco
+                if finfo and finfo.type == "file" and (finfo.size or 0) > 0 then
+                  local f = io.open(doc.filename, "r")
+                  if f then
+                    local disk_raw = f:read("*a")
+                    f:close()
 
-                  if last_file_hashes[doc.filename] == nil then
-                    last_file_hashes[doc.filename] = disk_hash
-                  elseif disk_clean and disk_clean ~= "" and disk_hash ~= cur_hash and disk_hash ~= last_file_hashes[doc.filename] then
-                    last_file_hashes[doc.filename] = disk_hash
-                    last_reload_time = now
+                    -- Guarda anti-leitura vazia
+                    if disk_raw and disk_raw ~= "" then
+                      local disk_hash, disk_len, disk_clean = calc_clean_hash(disk_raw)
+                      local cur_raw = doc:get_text(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
+                      local cur_hash, cur_len = calc_clean_hash(cur_raw)
 
-                    -- Recarregamento seguro sem piscar
-                    local l1, c1, l2, c2 = 1, 1, 1, 1
-                    if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
+                      if last_file_hashes[doc.filename] == nil then
+                        last_file_hashes[doc.filename] = disk_hash
+                      elseif disk_clean and disk_clean ~= "" and disk_hash ~= cur_hash and disk_hash ~= last_file_hashes[doc.filename] then
+                        last_file_hashes[doc.filename] = disk_hash
+                        last_reload_time = now
 
-                    doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
-                    doc:insert(1, 1, tostring(disk_clean))
-                    doc:clean()
-                    doc.clean_mtime = finfo.mtime
-                    doc.mtime = finfo.mtime
-                    doc.clean_change_id = doc:get_change_id()
-                    if doc.set_selection then doc:set_selection(l1, c1, l2, c2) end
-                    core.redraw = true
+                        local l1, c1, l2, c2 = 1, 1, 1, 1
+                        if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
 
-                    if core.log then
-                      core.log("🔄 [NOTE MESH] Atualização remota aplicada com sucesso.")
+                        -- Mutação segura garantida contra nil
+                        doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
+                        doc:insert(1, 1, tostring(disk_clean))
+                        doc:clean()
+                        doc.clean_mtime = finfo.mtime
+                        doc.mtime = finfo.mtime
+                        doc.clean_change_id = doc:get_change_id()
+                        if doc.set_selection then doc:set_selection(l1, c1, l2, c2) end
+                        core.redraw = true
+
+                        if core.log then
+                          core.log("🔄 [NOTE MESH] Atualização remota aplicada com sucesso.")
+                        end
+                      end
                     end
                   end
                 end
               end
             end
           end
-        end
+        end)
       end
     end
   end)

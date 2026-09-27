@@ -175,37 +175,38 @@ class NoteMeshEngine:
         server.close()
 
     def _handle_client_socket(self, sock: socket.socket, peer_ip: str):
-        sock.settimeout(10.0)
         try:
-            # 1. Handshake de Autenticação HMAC
             challenge = os.urandom(16)
             sock.sendall(challenge)
             expected_hmac = hmac.new(self.secret_key, challenge, hashlib.sha256).digest()
-
             received_hmac = sock.recv(32)
             if not hmac.compare_digest(expected_hmac, received_hmac):
                 sock.close()
                 return
-
             sock.sendall(b"OK")
             self.connected_peer_ip = peer_ip
             self._update_state_file("connected")
+            
+            sock.setblocking(False)
 
-            # 2. Loop de Recepção de Dados
-            while self.running:
-                raw_len = sock.recv(4)
-                if not raw_len or len(raw_len) < 4:
-                    break
-                data_len = int.from_bytes(raw_len, "big")
-                payload_bytes = bytearray()
-                while len(payload_bytes) < data_len:
-                    chunk = sock.recv(min(8192, data_len - len(payload_bytes)))
-                    if not chunk:
-                        break
-                    payload_bytes.extend(chunk)
-
-                if len(payload_bytes) == data_len:
-                    self._apply_incoming_sync(payload_bytes)
+            while self.running and self.connected_peer_ip == peer_ip:
+                # Usa select com timeout de 1.0s para NÃO derrubar o socket por inatividade
+                ready = select.select([sock], [], [], 1.0)
+                if ready[0]:
+                    raw_len = sock.recv(4)
+                    if not raw_len or len(raw_len) < 4:
+                        break  # Peer desconectou de verdade
+                    
+                    data_len = int.from_bytes(raw_len, "big")
+                    payload_bytes = bytearray()
+                    while len(payload_bytes) < data_len:
+                        chunk = sock.recv(min(8192, data_len - len(payload_bytes)))
+                        if not chunk:
+                            break
+                        payload_bytes.extend(chunk)
+                    
+                    if len(payload_bytes) == data_len:
+                        self._apply_incoming_sync(payload_bytes)
         except Exception:
             pass
         finally:
