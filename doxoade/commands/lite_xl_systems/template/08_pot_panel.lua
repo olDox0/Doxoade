@@ -131,28 +131,7 @@ end
 -- ⚡ AUTO-START DO DAEMON DE SINCRONIZAÇÃO EM BACKGROUND NA IDE
 -- ═════════════════════════════════════════════════════════════════
 local function ensure_note_sync_daemon_running()
-  if rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true then return end
-
-  local py_anchor = (USERDIR or ".") .. (PATHSEP or "/") .. ".doxoade" .. (PATHSEP or "/") .. "python_path.txt"
-  local py_exe = "python"
-  local finfo = system.get_file_info(py_anchor)
-  if finfo and finfo.type == "file" then
-    local f = io.open(py_anchor, "r")
-    if f then
-      local l = f:read("*l") or ""
-      f:close()
-      if l ~= "" then py_exe = l:gsub("[\r\n]", "") end
-    end
-  end
-
-  -- Inicia o daemon silencioso em segundo plano
-  local cmd = string.format('start /b "" "%s" -m doxoade lan-git note --daemon', py_exe)
-  pcall(system.exec, cmd)
-  rawset(_G, "_DOXOADE_NOTE_SYNC_ACTIVE", true)
-  core.redraw = true
-  if core.log then
-    core.log("⚡ [DOXNOTE] Sincronização LAN em background auto-iniciada.")
-  end
+  return
 end
 
 -- Auto-disparo 2 segundos após o boot estável da IDE

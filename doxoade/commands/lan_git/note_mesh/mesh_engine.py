@@ -36,6 +36,11 @@ class NoteMeshEngine:
         self.home = Path.home()
         self.doxoade_dir = self.home / ".doxoade"
         self.doxoade_dir.mkdir(parents=True, exist_ok=True)
+        self.pid_file = self.doxoade_dir / "mesh_daemon.pid"
+
+        # 🛡️ SINGLETON LOCK: Impede múltiplos daemons de rodar juntos
+        self._enforce_single_instance()
+
         self.notes_file = self.doxoade_dir / "shared_notes.md"
         self.state_file = self.doxoade_dir / "mesh_state.json"
         self.key_file = self.doxoade_dir / "mesh_auth.key"
@@ -51,10 +56,26 @@ class NoteMeshEngine:
         self.last_rtt_ms: float = 0.0
         self._last_processed_hash: str = self._calculate_file_hash()
         self._last_mtime: float = self.notes_file.stat().st_mtime
-        
-        # 🛑 ESTRATÉGIA ANTI-ECO: Hash do que veio da rede
         self._network_received_hash: Optional[str] = None
         self._last_send_time: float = 0.0
+
+    def _enforce_single_instance(self):
+        """Garante que apenas UM daemon execute por máquina."""
+        import ctypes
+        if self.pid_file.exists():
+            try:
+                old_pid = int(self.pid_file.read_text().strip())
+                # Verifica se o PID antigo ainda está vivo no Windows
+                kernel32 = ctypes.windll.kernel32
+                handle = kernel32.OpenProcess(0x100000, False, old_pid)
+                if handle:
+                    kernel32.CloseHandle(handle)
+                    # Já existe um daemon rodando! Encerra este novo imediatamente.
+                    sys.exit(0)
+            except Exception:
+                pass
+        # Registra o PID deste daemon soberano
+        self.pid_file.write_text(str(os.getpid()), encoding="utf-8")
 
     def _get_local_ip(self) -> str:
         try:

@@ -170,7 +170,8 @@ local function is_mesh_service_alive()
 end
 
 local function launch_mesh_service_safe()
-  local alive, _, _ = is_mesh_service_alive()
+  -- Só inicia se não estiver vivo
+  local alive = is_mesh_service_alive()
   if alive then return end
 
   local user_dir = USERDIR or "."
@@ -186,17 +187,10 @@ local function launch_mesh_service_safe()
     end
   end
 
-  local cmd
-  local is_win = (PLATFORM == "Windows") or (package.config:sub(1, 1) == "\\")
-  if is_win then
-    cmd = string.format('start /b "" "%s" -m doxoade lan-git note service', py_exe)
-  else
-    cmd = string.format('"%s" -m doxoade lan-git note service &', py_exe)
-  end
-
+  local cmd = string.format('start /b "" "%s" -m doxoade lan-git note service', py_exe)
   pcall(system.exec, cmd)
   if core.log then
-    core.log("⚡ [DOXNOTE MESH] Serviço P2P auto-iniciado em segundo plano.")
+    core.log("⚡ [DOXNOTE MESH] Daemon único iniciado.")
   end
 end
 
