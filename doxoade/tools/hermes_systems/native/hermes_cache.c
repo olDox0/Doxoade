@@ -67,20 +67,23 @@ typedef struct {
 
 #ifdef _WIN32
 static unsigned __stdcall async_save_worker(void* arg) {
+    #define THREAD_RET_FAIL 1
+    #define THREAD_RET_OK   0
 #else
 static void* async_save_worker(void* arg) {
+    #define THREAD_RET_FAIL NULL
+    #define THREAD_RET_OK   NULL
 #endif
     AsyncSaveJob* job = (AsyncSaveJob*)arg;
     
-    // 🚀 ADQUIRIR GIL APENAS PARA MARSHAL
     PyGILState_STATE gstate = PyGILState_Ensure();
     PyObject* marshal_bytes = PyMarshal_WriteObjectToString(job->code_obj, Py_MARSHAL_VERSION);
-    Py_DECREF(job->code_obj); // Libera referência mantida pelo job
+    Py_DECREF(job->code_obj);
     
     if (!marshal_bytes) {
         PyGILState_Release(gstate);
         free(job);
-        return 1;
+        return THREAD_RET_FAIL; // 🛑 LINHA 83 CORRIGIDA
     }
     
     const char* payload = PyBytes_AsString(marshal_bytes);
@@ -91,11 +94,11 @@ static void* async_save_worker(void* arg) {
         Py_DECREF(marshal_bytes);
         PyGILState_Release(gstate);
         free(job);
-        return 1;
+        return THREAD_RET_FAIL; // 🛑 LINHA 94 CORRIGIDA
     }
     memcpy(payload_copy, payload, payload_size);
     Py_DECREF(marshal_bytes);
-    PyGILState_Release(gstate); // 🚀 LIBERA GIL ANTES DO I/O
+    PyGILState_Release(gstate);
 
     // 1. Garante que o diretório existe
     char dir_path[512];
@@ -123,7 +126,7 @@ static void* async_save_worker(void* arg) {
     // 3. Limpa a memória
     free(payload_copy);
     free(job);
-    return 0;
+    return THREAD_RET_OK; // 🛑 LINHA FINAL CORRIGIDA
 }
 
 int cache_disk_save(const char* hermes_path, PyObject* code_obj) {

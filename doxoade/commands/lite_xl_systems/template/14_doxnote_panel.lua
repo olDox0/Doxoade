@@ -15,15 +15,15 @@ local DocView = require "core.docview"
 
 local sep = PATHSEP or "/"
 
-if core and core.nag_verify then
-  local orig_nag_verify = core.nag_verify
-  core.nag_verify = function(title, msg, ...)
-    if msg and (msg:find("shared_notes%.md") or msg:find("/%.doxoade/note/")) then
-      return false
-    end
-    return orig_nag_verify(title, msg, ...)
-  end
-end
+-- if core and core.nag_verify then
+--   local orig_nag_verify = core.nag_verify
+--   core.nag_verify = function(title, msg, ...)
+--     if msg and (msg:find("shared_notes%.md") or msg:find("/%.doxoade/note/")) then
+--       return false
+--     end
+--     return orig_nag_verify(title, msg, ...)
+--   end
+-- end
 
 -- ═════════════════════════════════════════════════════════════════════════════
 -- 1. LOCALIZAÇÃO E RESOLUÇÃO DE DIRETÓRIOS (PARENT WALK)
@@ -239,9 +239,9 @@ if core and core.add_thread then
                     local l1, c1, l2, c2 = 1, 1, 1, 1
                     if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
 
-                    doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
-                    doc:insert(1, 1, new_text)
-                    doc:clean()
+                    -- doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
+                    -- doc:insert(1, 1, new_text)
+                    -- doc:clean()
                     doc.clean_mtime = finfo.mtime
                     doc.mtime = finfo.mtime
                     doc.clean_change_id = doc:get_change_id()

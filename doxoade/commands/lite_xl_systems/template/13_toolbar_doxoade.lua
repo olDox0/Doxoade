@@ -151,8 +151,8 @@ core.add_thread(function()
       4
     )
 
-    -- 5. Badge Unificado DoxNote & Mesh (Leitura em RAM O(1) + Menu Integrado)
-    local _mesh_status_text = "Offline"
+    -- 5. Badge Unificado DoxNote & Mesh
+    local _mesh_status_text = "Local"
     local _mesh_status_color = { 150, 150, 150, 255 }
     local _mesh_last_poll = 0
 
@@ -161,7 +161,7 @@ core.add_thread(function()
       StatusView.Item.LEFT,
       function()
         local now = os.clock()
-        if (now - _mesh_last_poll) > 2.5 then
+        if (now - _mesh_last_poll) > 3.0 then
           _mesh_last_poll = now
           local home_dir = os.getenv("USERPROFILE") or os.getenv("HOME") or "."
           local state_path = home_dir .. (PATHSEP or "/") .. ".doxoade" .. (PATHSEP or "/") .. "mesh_state.json"
@@ -175,24 +175,16 @@ core.add_thread(function()
               local status = data:match('"status":%s*"([^"]+)"')
               local peer = data:match('"peer_name":%s*"([^"]+)"')
 
-              if (os.time() - updated_at) < 6 then
-                if status == "connected" then
-                  _mesh_status_text = "⚡ " .. (peer or "Conectado")
-                  _mesh_status_color = { 34, 197, 94, 255 }
-                elseif status == "searching" then
-                  _mesh_status_text = "Buscando..."
-                  _mesh_status_color = { 234, 179, 8, 255 }
-                else
-                  _mesh_status_text = "Offline"
-                  _mesh_status_color = { 150, 150, 150, 255 }
-                end
+              if (os.time() - updated_at) < 6 and status == "connected" then
+                _mesh_status_text = "⚡ " .. (peer or "Conectado")
+                _mesh_status_color = { 34, 197, 94, 255 }
               else
-                _mesh_status_text = "Offline"
+                _mesh_status_text = "Local"
                 _mesh_status_color = { 150, 150, 150, 255 }
               end
             end
           else
-            _mesh_status_text = "Offline"
+            _mesh_status_text = "Local"
             _mesh_status_color = { 150, 150, 150, 255 }
           end
         end

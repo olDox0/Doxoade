@@ -490,39 +490,6 @@ function Node:add_view(view)
 end
 
 -- =============================================================================
--- 📥 DRAG-AND-DROP HANDLER (Abre arquivos arrastados do Explorer/Desktop)
--- =============================================================================
-local original_rootview_on_file_dropped = RootView.on_file_dropped
-function RootView:on_file_dropped(file_path, x, y)
-    if file_path and type(file_path) == "string" and file_path ~= "" then
-        local info = system.get_file_info(file_path)
-        if info and info.type == "file" then
-            local doc = core.open_doc(file_path)
-            if doc then
-                core.root_view:open_doc(doc)
-                if core.log then
-                    core.log("📥 [DRAG-DROP] Arquivo aberto: " .. file_path)
-                end
-                core.redraw = true
-                return
-            end
-        elseif info and info.type == "dir" then
-            if core.add_project_directory then
-                core.add_project_directory(file_path)
-                if core.log then
-                    core.log("📂 [DRAG-DROP] Projeto anexado: " .. file_path)
-                end
-                core.redraw = true
-                return
-            end
-        end
-    end
-    if original_rootview_on_file_dropped then
-        return original_rootview_on_file_dropped(self, file_path, x, y)
-    end
-end
-
--- =============================================================================
 -- 🚨 OSD BOOT REPORT BANNER (Alerta Visual Imediato de Falhas no Boot)
 -- =============================================================================
 local original_rootview_draw = RootView.draw
@@ -614,21 +581,30 @@ local function arct_xpcall(fn, module_name, ...)
     return ok, err
 end
 
-local orig_on_file_dropped = RootView.on_file_dropped
 function RootView:on_file_dropped(filename, x, y)
-  if orig_on_file_dropped then
-    local res = orig_on_file_dropped(self, filename, x, y)
-    if res ~= nil then return res end
-  end
-  if filename and core.open_doc then
-    local doc = core.open_doc(filename)
-    if doc then core.root_view:open_doc(doc) end
-    return true
+  if not filename or filename == "" then return false end
+
+  local ok, doc = pcall(core.open_doc, filename)
+  if ok and doc then
+    local node = self.root_node:get_child_overlapping_point(x, y)
+    if not node or node.locked then
+      node = self.root_node:get_primary_node()
+    end
+
+    if node and node.add_view then
+      local view = DocView(doc)
+      node:add_view(view)
+      core.set_active_view(view)
+      core.redraw = true
+
+      if core.log then
+        core.log("📂 [DRAG&DROP] Aberto: " .. (filename:match("[^/\\]+$") or filename))
+      end
+      return true
+    end
   end
   return false
 end
-
--- ✅ CORREÇÃO: Exportar como globais para que outros módulos possam usar
 
 -- =============================================================================
 -- 8. TEMA SOBERANO (PIANO BLACK & ESMERALDA)
