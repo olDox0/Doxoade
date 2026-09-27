@@ -258,7 +258,6 @@ if core and core.add_thread then
                     local disk_raw = f:read("*a")
                     f:close()
 
-                    -- Guarda anti-leitura vazia
                   if disk_clean and type(disk_clean) == "string" and #disk_clean > 0 
                      and disk_hash ~= cur_hash and disk_hash ~= last_file_hashes[doc.filename] then
                     
@@ -280,6 +279,38 @@ if core and core.add_thread then
 
                     if core.log then
                       core.log("🔄 [NOTE MESH] Atualização remota recebida e aplicada.")
+                    end
+                  end
+
+                    -- Guarda anti-leitura vazia
+                    if disk_raw and disk_raw ~= "" then
+                      local disk_hash, disk_len, disk_clean = calc_clean_hash(disk_raw)
+                      local cur_raw = doc:get_text(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
+                      local cur_hash, cur_len = calc_clean_hash(cur_raw)
+
+                      if last_file_hashes[doc.filename] == nil then
+                        last_file_hashes[doc.filename] = disk_hash
+                      elseif disk_clean and disk_clean ~= "" and disk_hash ~= cur_hash and disk_hash ~= last_file_hashes[doc.filename] then
+                        last_file_hashes[doc.filename] = disk_hash
+                        last_reload_time = now
+
+                        local l1, c1, l2, c2 = 1, 1, 1, 1
+                        if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
+
+                        -- Mutação segura garantida contra nil
+                        doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
+                        doc:insert(1, 1, tostring(disk_clean))
+                        doc:clean()
+                        doc.clean_mtime = finfo.mtime
+                        doc.mtime = finfo.mtime
+                        doc.clean_change_id = doc:get_change_id()
+                        if doc.set_selection then doc:set_selection(l1, c1, l2, c2) end
+                        core.redraw = true
+
+                        if core.log then
+                          core.log("🔄 [NOTE MESH] Atualização remota aplicada com sucesso.")
+                        end
+                      end
                     end
                   end
                 end
