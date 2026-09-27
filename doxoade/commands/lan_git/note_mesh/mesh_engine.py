@@ -133,11 +133,10 @@ class NoteMeshEngine:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         sock.bind(("0.0.0.0", UDP_PORT))
         sock.setblocking(False)
-
         last_broadcast = 0.0
+
         while self.running:
             now = time.time()
-            # Envia ping de anúncio a cada 3 segundos se não estiver conectado
             if now - last_broadcast > 3.0:
                 payload = json.dumps({
                     "magic": MESH_MAGIC,
@@ -150,8 +149,11 @@ class NoteMeshEngine:
                 except Exception:
                     pass
                 last_broadcast = now
+                
+                # Mantém o heartbeat vivo para a barra de status do Lite XL
+                if not self.connected_peer_ip:
+                    self._update_state_file("searching")
 
-            # Escuta anúncios de outros computadores
             ready = select.select([sock], [], [], 0.5)
             if ready[0]:
                 try:
@@ -161,7 +163,6 @@ class NoteMeshEngine:
                         remote_ip = msg["ip"]
                         if not self.connected_peer_ip:
                             self.connected_peer_name = msg.get("host")
-                            # Conecta via TCP ao par descoberto
                             threading.Thread(target=self._connect_to_peer, args=(remote_ip,), daemon=True).start()
                 except Exception:
                     pass
@@ -335,16 +336,21 @@ class NoteMeshEngine:
             except Exception:
                 pass
 
-    def _broadcast_change(self, peer_ip: str):
+    def _broadcast_change(self):
+        """Transmite a alteração do arquivo para o par remoto conectado."""
+        if not self.connected_peer_ip:
+            return
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2.0)
-            sock.connect((peer_ip, TCP_PORT))
+            sock.settimeout(3.0)
+            sock.connect((self.connected_peer_ip, TCP_PORT))
             challenge = sock.recv(16)
-            response_hmac = hmac.new(self.secret_key, challenge, hashlib.sha256).digest()
-            sock.sendall(response_hmac)
-            if sock.recv(2) == b"OK":
-                self._send_file_to_socket(sock)
+            if len(challenge) == 16:
+                response_hmac = hmac.new(self.secret_key, challenge, hashlib.sha256).digest()
+                sock.sendall(response_hmac)
+                auth_res = sock.recv(2)
+                if auth_res == b"OK":
+                    self._send_file_to_socket(sock)
             sock.close()
         except Exception:
             pass

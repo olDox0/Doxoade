@@ -735,9 +735,11 @@ command.add(nil, {
           rawset(_G, "_DOXOADE_NOTE_SYNC_ACTIVE", new_state)
 
           if new_state then
-            core.log("🟢 [NOTE MESH] Sincronização ATIVADA. Fundo do Note: VERDE.")
+            -- Dispara o daemon único de background (protegido pelo Singleton Lock)
+            launch_mesh_service_safe()
+            core.log("🟢 [NOTE MESH] Sincronização ATIVADA e Daemon de Rede iniciado.")
           else
-            core.log("🔴 [NOTE MESH] Sincronização DESATIVADA. Fundo do Note: VERMELHO.")
+            core.log("🔴 [NOTE MESH] Sincronização DESATIVADA (Modo Local).")
           end
           core.redraw = true
 
