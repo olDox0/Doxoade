@@ -152,6 +152,7 @@ def _abstract_and_learn_template(cursor: sqlite3.Cursor, concrete_finding: Dict[
 
 @click.command('save')
 @click.argument('message', required=False)
+@click.option('--local', '-l', is_flag=True, help='Salva e comita apenas localmente (sem push para o remoto).')
 @click.option('--archives', '-a', help='Lista arquivos de um commit.')
 @click.option('--remove-commit', '-rc', help='Apaga o último commit.')
 @click.option('--branch', 'branch_target', help='Após salvar, faz merge local da branch atual para a branch alvo.')
@@ -163,7 +164,7 @@ def _abstract_and_learn_template(cursor: sqlite3.Cursor, concrete_finding: Dict[
 @click.option('--alfa', is_flag=True, help='🏷️ Gera mensagem automática no padrão Alfa (Versão + Arquivos + Data).')
 @click.option('--amend', is_flag=True, help='✏️ Edita a mensagem do último commit (git commit --amend).')
 @click.pass_context
-def save(ctx, message, archives, remove_commit, branch_target, merge_target, update_base, force, smart, apply, alfa, amend):
+def save(ctx, message, local, archives, remove_commit, branch_target, merge_target, update_base, force, smart, apply, alfa, amend):
 #def save(ctx, message, archives, remove_commit, branch_target, merge_target, update_base, force, smart, apply):
     """Executa commit seguro com aprendizado automatizado."""
     console = Console()
@@ -329,6 +330,19 @@ def save(ctx, message, archives, remove_commit, branch_target, merge_target, upd
             _capture_delta_knowledge(new_hash.strip(), ".")
 
         console.print('[bold green]\n[OK] Alfa 71.10: Commit finalizado e Gênese atualizada.[/bold green]')
+
+        if not local:
+            current_branch = _run_git_command(['branch', '--show-current'], capture_output=True) or 'main'
+            current_branch = current_branch.strip()
+            console.print(f"\n[bold cyan]🚀 [AUTO-PUSH] Enviando para origin/{current_branch}...[/bold cyan]")
+            push_res = _run_git_command(['push', 'origin', current_branch], capture_output=True, silent_fail=True)
+            if push_res is not None:
+                console.print(f"[bold green]✔ [AUTO-PUSH] Código sincronizado com sucesso no origin/{current_branch}![/bold green]\n")
+            else:
+                console.print(f"[bold yellow]⚠ [OFFLINE] Commit local seguro, mas o push falhou (sem conexão ou rejeitado pelo servidor).[/bold yellow]\n")
+        else:
+            console.print(f"\n[yellow]💾 [LOCAL] Salvo apenas localmente (--local ativado). Push ignorado.[/yellow]\n")
+
 
 #    if commit_success:
 #        # Pega o hash do commit que acabamos de fazer

@@ -20,6 +20,8 @@ build/
 dist/
 *.egg-info/
 *.spec
+*.dll # dependendo pode ser problematico
+hermes_async_log.dll*
 
 
 # ====== SENSÍVEIS ======
@@ -28,7 +30,9 @@ chief_dossier_llm.md
 doxoade_report.json
 graph.html
 chief_dossier_llm.xml
+.bridge_build_cache.json
 
+*.old_*
 *.db
 *.log
 *.txt
@@ -95,6 +99,20 @@ data/doxoade.db-shm
 
 doxoade/tools/hermes_systems/native/.bridge_build_cache.json
 
+# ═════════════════════════════════════════════════════════════════════
+# 🔨 ARTEFATOS EFÊMEROS DE COMPILAÇÃO C / JANUS / HERMES
+# ═════════════════════════════════════════════════════════════════════
+.bridge_build_cache.json
+*.pyd
+*.dll
+*.dll.*
+*.old_*
+hermes_async_log.dll*
+*.o
+*.a
+.doxoade/janus/
+.doxoade/mesh_daemon.pid
+.doxoade/mesh_state.json
 
 # ====== Exceções ======
 
