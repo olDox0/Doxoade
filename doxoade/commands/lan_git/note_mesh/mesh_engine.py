@@ -268,19 +268,19 @@ class NoteMeshEngine:
     def _apply_incoming_sync(self, raw_data: bytes):
         try:
             msg = json.loads(raw_data.decode("utf-8"))
-            in_hash = msg.get("hash")
-            in_content = msg.get("content")
-
-            # 🛡️ FILTRO ANTI-ECHO: Se o hash for igual ao que já temos, descarta!
-            if in_hash and in_hash == self._last_processed_hash:
-                return
-
-            self.notes_file.write_text(in_content, encoding="utf-8")
-            self._last_processed_hash = in_hash
-            self._last_mtime = self.notes_file.stat().st_mtime
-            self.last_sync_time = time.time()
-            self._update_state_file("connected")
-            click.secho(f"  [{time.strftime('%H:%M:%S')}] ⚡ [SYNC RECEBIDO] Notas atualizadas via DoxNote Mesh.", fg="green")
+            remote_hash = msg.get("hash", "")
+            remote_content = msg.get("content", "")
+            if remote_hash and remote_hash != self._last_processed_hash:
+                # Grava bytes diretos (sem conversão de quebra de linha que altere o hash no Windows)
+                raw_bytes = remote_content.encode("utf-8")
+                self.notes_file.write_bytes(raw_bytes)
+                
+                # Sincroniza os marcadores com o hash REAL do disco para o watcher local não ecoar
+                disk_hash = hashlib.sha256(raw_bytes).hexdigest()
+                self._last_processed_hash = disk_hash
+                self._last_mtime = self.notes_file.stat().st_mtime
+                self.last_sync_time = time.time()
+                self._update_state_file("connected")
         except Exception:
             pass
 
@@ -288,31 +288,20 @@ class NoteMeshEngine:
     # CAMADA 3: WATCHER LOCAL (DETECÇÃO DE SALVAMENTO NA IDE)
     # ═════════════════════════════════════════════════════════════════
     def _file_watcher_loop(self):
-        last_heartbeat = 0.0
         while self.running:
-            time.sleep(0.35)
-            now = time.time()
-            
-            # 💓 Heartbeat a cada 2s para avisar a IDE que o daemon está vivo
-            if now - last_heartbeat > 2.0:
-                current_status = "connected" if self.connected_peer_ip else "searching"
-                self._update_state_file(current_status)
-                last_heartbeat = now
-
+            time.sleep(1.5)
             if not self.notes_file.exists():
                 continue
             try:
-                curr_mtime = self.notes_file.stat().st_mtime
-                if curr_mtime != self._last_mtime:
-                    self._last_mtime = curr_mtime
-                    curr_hash = self._calculate_file_hash()
-                    
-                    if curr_hash != self._last_processed_hash:
-                        self._last_processed_hash = curr_hash
-                        self.last_sync_time = time.time()
+                mtime = self.notes_file.stat().st_mtime
+                if mtime > self._last_mtime:
+                    self._last_mtime = mtime
+                    h = self._calculate_file_hash()
+                    # Só dispara para a rede se for uma edição local genuína
+                    if h and h != self._last_processed_hash:
+                        self._last_processed_hash = h
                         if self.connected_peer_ip:
-                            threading.Thread(target=self._broadcast_change, args=(self.connected_peer_ip,), daemon=True).start()
-                            click.secho(f"  [{time.strftime('%H:%M:%S')}] 📤 [SYNC] Transmitido para {self.connected_peer_ip}.", fg="cyan")
+                            self._broadcast_change()
             except Exception:
                 pass
 

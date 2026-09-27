@@ -432,6 +432,15 @@ local _static_orphan_is = function(self, class) return false end
 local _static_active_orphan_name = function() return "Active Orphan" end
 
 local function _sanitize_node_tree(node)
+    -- Garante que só tente acessar propriedades se v for realmente uma tabela/view válida
+    for i = #(node.views or {}), 1, -1 do
+      local v = node.views[i]
+      if type(v) ~= "table" then
+        table.remove(node.views, i)
+      elseif not v.doc and not v.get_name then
+        -- View órfã tratada com segurança
+      end
+    end
     if not node then return end
     if node.type == "leaf" then
         for _, view in ipairs(node.views or {}) do

@@ -246,6 +246,27 @@ if core and core.add_thread then
                   local cur_raw = doc:get_text(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
                   local cur_hash, cur_len = calc_clean_hash(cur_raw)
 
+                  if disk_clean and disk_clean ~= "" and disk_hash ~= cur_hash and disk_hash ~= last_file_hashes[doc.filename] then
+                    last_file_hashes[doc.filename] = disk_hash
+
+                    local l1, c1, l2, c2 = 1, 1, 1, 1
+                    if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
+
+                    -- Atualização atômica segura contra texto nulo
+                    doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
+                    doc:insert(1, 1, tostring(disk_clean))
+                    doc:clean()
+                    doc.clean_mtime = finfo.mtime
+                    doc.mtime = finfo.mtime
+                    doc.clean_change_id = doc:get_change_id()
+                    if doc.set_selection then doc:set_selection(l1, c1, l2, c2) end
+                    core.redraw = true
+
+                    if core.log then
+                      core.log("🔄 [NOTE MESH] Atualização legítima recebida.")
+                    end
+                  end
+
                   -- Registra o hash na abertura inicial
                   if last_file_hashes[doc.filename] == nil then
                     last_file_hashes[doc.filename] = disk_hash
