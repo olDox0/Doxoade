@@ -718,7 +718,7 @@ keymap.add {
   ["ctrl+j"]       = "doxoade:toggle-bottom-shelf",
   ["alt+return"]   = "doxoade:bottom-shelf-toggle-maximize",
   ["escape"]       = "bottom-shelf:close",
-  ["ctrl+sift+c"]  = "bottom-shelf:copy",
+  ["ctrl+shift+c"]  = "bottom-shelf:copy",
   ["ctrl+c"]       = "bottom-shelf:interrupt",
   ["pageup"]       = "bottom-shelf:page-up",
   ["pagedown"]     = "bottom-shelf:page-down",

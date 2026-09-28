@@ -17,7 +17,7 @@ import hashlib
 import subprocess
 from pathlib import Path
 from datetime import datetime
-
+from typing import Optional, List, Dict, Any
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 
@@ -105,30 +105,55 @@ def load_command(name: str):
 def _inject_metalcraft_existing(root: Path, apply_changes: bool = False) -> None:
     root = Path(root).resolve()
     project_name = root.name
-    
     click.echo()
-    click.secho("[HEFESTO] Injeção do Metalcraft em projeto existente", fg="cyan", bold=True)
+    click.secho("[HEFESTO & JANUS] Injeção do Metalcraft em projeto existente", fg="cyan", bold=True)
     click.echo(f"Silo: {root}")
     click.echo("=" * 80)
-    
     if not apply_changes:
         click.secho("[MA'AT] DRY-RUN é o padrão. Nada será escrito sem --apply.", fg="yellow", bold=True)
-    
+
+    # 1. Detecção ativa via Janus
+    compiler_info = None
+    try:
+        from doxoade.tools.janus_systems.janus_detector import JanusDetector
+        from doxoade.tools.janus_systems.janus_cpu import JanusCPU
+        det = JanusDetector()
+        compiler_info = det.detect(project_root=root)
+        cpu = JanusCPU.profile()
+        if compiler_info:
+            click.secho(f"  🏛️ [JANUS] Compilador: {compiler_info.compiler_type} ({compiler_info.version}) | SIMD: {cpu.simd_tier}", fg="cyan")
+            click.secho(f"     ↳ Binário: {compiler_info.compiler_path}", fg="cyan")
+        else:
+            click.secho(f"  ⚠️ [JANUS] Nenhum compilador detectado. Execute 'doxoade metal setup-tools' se necessário.", fg="yellow")
+    except Exception as e:
+        click.secho(f"  ⚠️ [JANUS] Falha no probe do toolchain: {e}", fg="yellow")
+
     toml_path = root / 'metalcraft.toml'
     main_c_path = root / 'src' / 'native' / 'main.c'
     include_dir = root / 'src' / 'native' / 'include'
     bin_dir = root / 'bin'
-    
-    toml_content = _generate_metalcraft_toml(project_name)
+
+    # 1. Gera o conteúdo ANTES de colocar na lista
+    toml_content = _generate_metalcraft_toml(project_name, root_path=root)
     main_c_content = _generate_main_c(project_name)
-    
+
+    # 2. Agora a lista files_to_create usa as variáveis já definidas
     files_to_create = [
         (toml_path, toml_content, "metalcraft.toml"),
         (main_c_path, main_c_content, "src/native/main.c"),
     ]
-    
     dirs_to_create = [include_dir, bin_dir]
-    
+
+    try:
+        from doxoade.tools.janus_systems.janus_detector import JanusDetector
+        from doxoade.tools.janus_systems.janus_manifest import JanusManifest
+        det_info = JanusDetector().detect(project_root=root)
+        if det_info:
+            JanusManifest(root).save(det_info)
+    except Exception:
+        pass
+    main_c_content = _generate_main_c(project_name)
+
     for path, content, desc in files_to_create:
         if path.exists():
             click.secho(f"  [SKIP] {desc} já existe.", fg="yellow")
@@ -138,7 +163,7 @@ def _inject_metalcraft_existing(root: Path, apply_changes: bool = False) -> None
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(content, encoding="utf-8")
                 click.secho(f"  [APPLIED] {desc}", fg="green")
-    
+
     for d in dirs_to_create:
         if d.exists():
             click.secho(f"  [SKIP] {d.relative_to(root)}/ já existe.", fg="yellow")
@@ -147,15 +172,29 @@ def _inject_metalcraft_existing(root: Path, apply_changes: bool = False) -> None
             if apply_changes:
                 d.mkdir(parents=True, exist_ok=True)
                 click.secho(f"  [APPLIED] {d.relative_to(root)}/", fg="green")
-    
+
+    # 2. Salva manifesto persistente do Janus no projeto
+    if apply_changes and compiler_info:
+        try:
+            from doxoade.tools.janus_systems.janus_manifest import JanusManifest
+            JanusManifest(root).save(compiler_info)
+            click.secho("  [APPLIED] .doxoade/janus/compiler_manifest.json criado.", fg="green")
+        except Exception:
+            pass
+
     gitignore_path = root / '.gitignore'
     metalcraft_gitignore_rules = """
-# ====== C/C++ (Metalcraft & Native) ======
+# ═════════════════════════════════════════════════════════════════════
+# 🔨 ARTEFATOS METALCRAFT & JANUS
+# ═════════════════════════════════════════════════════════════════════
 *.o
 *.obj
 *.exe
 *.dll
+*.dll.*
 *.dylib
+*.so
+*.pyd
 *.lib
 *.out
 *.app
@@ -165,6 +204,12 @@ obj/
 *.pch
 *.nm
 *.map
+.bridge_build_cache.json
+hermes_async_log.dll*
+*.old_*
+.doxoade/janus/
+.doxoade/mesh_daemon.pid
+.doxoade/mesh_state.json
 """
     if gitignore_path.exists():
         current_content = gitignore_path.read_text(encoding="utf-8", errors="ignore")
@@ -181,10 +226,10 @@ obj/
         if apply_changes:
             gitignore_path.write_text(metalcraft_gitignore_rules, encoding="utf-8")
             click.secho("  [APPLIED] .gitignore criado.", fg="green")
-    
+
     click.echo("=" * 80)
     if apply_changes:
-        click.secho("✅ Metalcraft injetado com sucesso no Silo existente.", fg="green", bold=True)
+        click.secho("✅ Metalcraft injetado com sucesso no Silo existente (Janus-Aware).", fg="green", bold=True)
     else:
         click.secho("Simulação concluída. Rode com --apply para escrever.", fg="yellow", bold=True)
 
@@ -988,22 +1033,74 @@ setup(
 '''
 
 
-def _generate_metalcraft_toml(project_name: str) -> str:
-    return f"""[project]
+def _generate_metalcraft_toml(project_name: str, root_path: Optional[Path] = None) -> str:
+    """
+    🏛️ HEFESTO & JANUS: Gera o metalcraft.toml dinâmico e auto-configurado.
+    Detecta GCC/Clang via JanusDetector e perfila capacidades SIMD via JanusCPU.
+    """
+    compiler_info = None
+    cpu_profile = None
+
+    try:
+        from doxoade.tools.janus_systems.janus_detector import JanusDetector
+        from doxoade.tools.janus_systems.janus_cpu import JanusCPU
+        detector = JanusDetector()
+        compiler_info = detector.detect(project_root=root_path)
+        cpu_profile = JanusCPU.profile()
+    except Exception:
+        pass
+
+    if compiler_info:
+        toolchain = compiler_info.compiler_type
+        c_path = compiler_info.compiler_path.replace("\\", "/")
+        gpp_path = compiler_info.gpp_path.replace("\\", "/") if compiler_info.gpp_path else ""
+        simd_tier = cpu_profile.simd_tier if cpu_profile else "GENERIC"
+        cflags = cpu_profile.optimal_cflags if cpu_profile else ["-O2"]
+        cflags_repr = json.dumps(cflags)
+
+        return f"""# 🏛️ METALCRAFT CONTRACT — CONFIGURADO VIA JANUS TOOLCHAIN
+[project]
 name = "{project_name}"
 version = "1.0.0"
 type = "executable"
 
 [compiler]
-engine = "gcc"
+engine = "janus"
+toolchain = "{toolchain}"
+compiler_path = "{c_path}"
+gpp_path = "{gpp_path}"
 std = "c11"
-opt = "O3"
+opt = "O2"
+simd_tier = "{simd_tier}"
+cflags = {cflags_repr}
 shield = true
 incremental = true
 
 [paths]
-sources = ["src/native/*.c"]
-headers = ["src/native/include/"]
+sources = ["src/native/*.c", "src/*.c"]
+headers = ["src/native/include/", "include/"]
+output  = "bin/"
+"""
+    else:
+        # Fallback genérico caso a máquina não possua compilador C ainda
+        return f"""# 🏛️ METALCRAFT CONTRACT — PADRÃO INDUSTRIAL HEFESTO
+[project]
+name = "{project_name}"
+version = "1.0.0"
+type = "executable"
+
+[compiler]
+engine = "janus"
+toolchain = "gcc"
+std = "c11"
+opt = "O2"
+cflags = ["-O2"]
+shield = true
+incremental = true
+
+[paths]
+sources = ["src/native/*.c", "src/*.c"]
+headers = ["src/native/include/", "include/"]
 output  = "bin/"
 """
 

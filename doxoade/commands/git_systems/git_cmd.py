@@ -20,21 +20,21 @@ def git_group():
     pass
 
 @git_group.command('auto')
-@click.option('--push', '-p', is_flag=True, help='Envia commits locais automaticamente se o servidor estiver em dia.')
-@click.option('--prefer', type=click.Choice(['remote', 'local', 'interactive']), default='interactive', help='Estratégia de resolução se houver conflito.')
+@click.option('--push/--no-push', '-p/-np', default=True, help='Envia commits locais automaticamente (Padrão: True).')
+@click.option('--prefer', type=click.Choice(['remote', 'local', 'interactive']), default='remote', help='Estratégia padrão de resolução.')
 @click.pass_context
 def git_auto(ctx, push, prefer):
     """
-    🤖 Piloto Automático Git: Sincronização inteligente sem erros humanos.
-    Auto-cura MERGE_HEAD, salva backup preventivo, aplica pull suave e sobe commits.
+    🤖 Piloto Automático Git: Sincronização inteligente bidirecional (Pull + Push).
+    Auto-cura MERGE_HEAD, salva backup preventivo, aplica pull suave e sobe commits no main.
     """
     from doxoade.commands.git_systems.git_engine import GitEngine
     engine = GitEngine(os.getcwd())
-    
-    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🤖 [AUTOPILOT GIT] Iniciando Reconciliação Soberana...{Style.RESET_ALL}")
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🤖 [AUTOPILOT GIT] Iniciando Reconciliação Soberana (Pull + Push)...{Style.RESET_ALL}")
     click.echo(f"  {Fore.WHITE}Estação Atual:{Fore.RESET} {Fore.YELLOW}{engine.get_station_name().upper()}{Fore.RESET}")
     click.echo(f"  {Fore.WHITE}Branch:{Fore.RESET} {engine.get_current_branch()}\n")
-
+    
+    # Executa reconciliação com auto_push ativado por padrão
     res = engine.autopilot(prefer=prefer if prefer != 'interactive' else None, auto_push=push)
 
     if res['snapshot']:
@@ -45,36 +45,19 @@ def git_auto(ctx, push, prefer):
 
     # Apresenta a decisão tomada
     if res['status'] == 'CONFLICT':
-        click.echo(f"\n{Fore.RED}{Style.BRIGHT}🔴 [COLISÃO DETECTADA] Arquivos em divergência real entre as máquinas:{Style.RESET_ALL}")
-        for c in res['collisions']:
-            click.echo(f"   {Fore.RED}✖ {c['file']}{Fore.RESET}")
-
-        if prefer == 'interactive':
-            click.echo(f"\n{Fore.WHITE}Como deseja resolver automaticamente?{Style.RESET_ALL}")
-            click.echo("  [1] Aceitar versão do Servidor (Recomendado se o outro PC terminou o trabalho)")
-            click.echo("  [2] Manter versão desta Máquina (Preserva seus rascunhos atuais)")
-            click.echo("  [3] Abrir assistente cirúrgico 'doxoade merge' (Linha a linha)")
-            click.echo("  [0] Abortar")
-            choice = click.prompt("Opção", type=str, default="1")
-
-            if choice == "1":
-                engine.force_pull_reset(apply_changes=True)
-                click.echo(f"\n{Fore.GREEN}✔ [SUCESSO] Código do servidor aceito. O seu estado anterior está salvo no backup de resgate.{Style.RESET_ALL}\n")
-            elif choice == "2":
-                click.echo(f"\n{Fore.YELLOW}✔ Alterações locais preservadas. Nada foi sobrescrito.{Style.RESET_ALL}\n")
-            elif choice == "3":
-                from doxoade.commands.git_systems.git_merge import merge as run_merge
-                ctx.invoke(run_merge)
-            return
+        from doxoade.commands.git_systems.git_merge import merge as run_merge
+        ctx.invoke(run_merge)
+        return
 
     elif res['status'] == 'PULLED':
         click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}✔ [ATUALIZADO] {res['action_taken']}{Style.RESET_ALL}\n")
 
     elif res['status'] == 'AHEAD':
-        click.echo(f"\n{Fore.YELLOW}ℹ [PENDENTE DE ENVIO] {res['action_taken']}{Style.RESET_ALL}")
-        if not push and click.confirm("Deseja enviar agora para o GitHub (git push)?"):
+        if push:
             engine.autopilot(auto_push=True)
-            click.echo(f"{Fore.GREEN}✔ Commits enviados com sucesso!{Style.RESET_ALL}\n")
+            click.echo(f"{Fore.GREEN}✔ Commits enviados automaticamente para o servidor!{Style.RESET_ALL}\n")
+        else:
+            click.echo(f"\n{Fore.YELLOW}ℹ [PENDENTE DE ENVIO] {res['action_taken']}{Style.RESET_ALL}")
 
     elif res['status'] == 'SYNCED':
         click.echo(f"{Fore.GREEN}✔ {res['action_taken']}{Style.RESET_ALL}\n")
@@ -82,23 +65,24 @@ def git_auto(ctx, push, prefer):
 @git_group.command('pull')
 @click.option('--subscribe', '-s', is_flag=True, help='Subscreve todas as atualizações do servidor preservando modificações locais.')
 @click.option('--force', '-f', is_flag=True, help='Força a sincronização global (Reset Hard).')
-@click.option('--apply', '-a', is_flag=True, help='Aplica as alterações no disco (sai do modo DRY-RUN).')
+@click.option('--dry-run', is_flag=True, help='Apenas simula o pull sem aplicar no disco.')
+@click.option('--apply', '-a', is_flag=True, default=True, help='Aplica as alterações no disco (Padrão: True).')
 @click.option('--conflicts', '-c', is_flag=True, help='Exibe a Matriz de Colisão detalhada (Locais vs Remotos).')
-@click.option('--diff', '-d', 'diff_file', is_flag=False, flag_value='ALL', default=None, help='Exibe o diff forense (sem argumento: mostra tudo; ou informe o arquivo).')
+@click.option('--diff', '-d', 'diff_file', is_flag=False, flag_value='ALL', default=None, help='Exibe o diff forense.')
 @click.option('--file', '-p', 'target_files', multiple=True, help='Puxa/sobrescreve apenas os arquivos especificados.')
 @click.option('--remote', '-r', default='origin', show_default=True, help='Remote de destino.')
 @click.option('--branch', '-b', default=None, help='Branch específico (padrão: branch atual).')
 @click.pass_context
-def pull_cmd(ctx, subscribe, force, apply, conflicts, diff_file, target_files, remote, branch):
+def pull_cmd(ctx, subscribe, force, dry_run, apply, conflicts, diff_file, target_files, remote, branch):
     """
-    📥 Sincronização e auditoria forense do repositório (Smart Multi-Station).
-    Padrão: Diagnostica e simula (Dry-Run). Use '--apply' para efetivar.
+    📥 Sincronização direta e inteligente do repositório (Smart Multi-Station).
+    Puxa e aplica imediatamente do origin/<branch>. Use '--dry-run' para simular.
     """
     from doxoade.commands.git_systems.git_engine import GitEngine
     with ExecutionLogger('git_pull', os.getcwd(), ctx.params) as logger:
         engine = GitEngine(os.getcwd())
         target_branch = branch or engine.get_current_branch()
-        is_apply_mode = apply
+        is_apply_mode = not dry_run  # Aplica direto, a menos que --dry-run seja passado
 
         # 1. Auto-cura ativa de MERGE_HEAD
         if (Path(engine.root) / ".git" / "MERGE_HEAD").exists():

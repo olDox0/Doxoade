@@ -34,26 +34,36 @@ class GitEngine:
         name = platform.node().lower().replace(" ", "_").strip()
         return name if name else "station"
 
-    def autopilot(self, prefer: Optional[str] = None, auto_push: bool = False) -> Dict[str, Any]:
+    def clean_transient_build_artifacts(self) -> None:
         """
-        🤖 AUTOPILOT SOBERANO: Reconciliação automática de Git sem erro humano.
-        - Identifica estação, auto-cura MERGE_HEAD e salva snapshot prévio.
-        - Se estiver atrasado (Behind): atualiza com segurança.
-        - Se estiver adiantado (Ahead): sobe commits se solicitado.
-        - Se divergir: resolve por preferência ou apresenta opções seguras.
+        🛡️ SOTÉRIA: Limpa arquivos transitórios de compilação C/Janus que
+        podem causar falsos conflitos no Git Pull entre estações.
         """
+        transient_patterns = [
+            "doxoade/tools/hermes_systems/native/.bridge_build_cache.json",
+            "doxoade/tools/hermes_systems/native/hermes_async_log.dll",
+        ]
+        for pattern in transient_patterns:
+            target = self.root / pattern
+            if target.exists():
+                _run_git_command(['checkout', '--', pattern], capture_output=True, silent_fail=True, cwd=str(self.root))
+
+    def autopilot(self, prefer: Optional[str] = None, auto_push: bool = True) -> Dict[str, Any]:
         station = self.get_station_name()
         branch = self.get_current_branch()
         remote = 'origin'
         remote_ref = f"{remote}/{branch}"
+        
+        # 1. Higieniza caches efêmeros de build antes de qualquer checagem
+        self.clean_transient_build_artifacts()
 
-        # 1. Snapshot Preventivo Absoluto
+        # 2. Salva snapshot de resgate preventivo (Segurança Sotéria)
         snapshot_dir = self.create_safety_snapshot(reason="autopilot")
-
-        # 2. Auto-Cura de travas antigas
+        
+        # 3. Cura eventuais merges travados
         healed_merge = self.heal_stuck_merge()
-
-        # 3. Fetch silencioso das novidades do servidor
+        
+        # 4. Fetch e reconciliação bilateral
         self.fetch_remote(remote=remote, branch=branch)
 
         # 4. Avaliação de Distância (Ahead / Behind)

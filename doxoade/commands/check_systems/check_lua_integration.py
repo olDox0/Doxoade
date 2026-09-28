@@ -33,18 +33,20 @@ def signal_litexl_audit(
     formatted_findings = []
     for f in findings:
         ln = f.get("line", 0)
-        if ln > 0:
-            formatted_findings.append({
-                "line": ln,
-                "severity": str(f.get("severity", "WARNING")).upper(),
-                "category": str(f.get("category", "STYLE")).upper(),
-                "message": str(f.get("message", "No message")),
-                "suggestion": str(
-                    f.get("suggestion_content", "")
-                    or f.get("suggestion_action", "")
-                    or ""
-                ),
-            })
+        # Se for achado global do arquivo (linha 0), mapeia para a linha 1 para ser visível no editor
+        target_line = ln if ln > 0 else 1
+        
+        formatted_findings.append({
+            "line": target_line,
+            "severity": str(f.get("severity", "WARNING")).upper(),
+            "category": str(f.get("category", "STYLE")).upper(),
+            "message": str(f.get("message", "No message")),
+            "suggestion": str(
+                f.get("suggestion_content", "")
+                or f.get("suggestion_action", "")
+                or ""
+            ),
+        })
 
     payload = {
         "protocol": "Doxoade-LXL-Audit-v1",

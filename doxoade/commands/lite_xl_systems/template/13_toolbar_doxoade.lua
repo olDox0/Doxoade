@@ -120,6 +120,16 @@ core.add_thread(function()
       "doxoade:check_status",
       StatusView.Item.LEFT,
       function()
+        -- ⏳ Se estiver auditando, mostra os segundos decorridos ao vivo!
+        if rawget(_G, "_DOXOADE_AUDIT_RUNNING") then
+          local t0 = rawget(_G, "_DOXOADE_AUDIT_START_TIME") or os.clock()
+          local sec = math.floor(os.clock() - t0)
+          return {
+            { 234, 179, 8, 255 }, string.format("⏳ Auditando (%ds)... ", sec),
+            DIVIDER_COLOR, "| "
+          }
+        end
+
         local summary = rawget(_G, "_DOXOADE_AUDIT_SUMMARY")
         local text = "⚖️ Check "
         local col = { 244, 114, 182, 255 }
@@ -130,14 +140,14 @@ core.add_thread(function()
           if total_cnt > 0 then
             if errors_cnt > 0 then
               text = string.format("⚖️ Check: %dE %dW ", errors_cnt, warnings_cnt)
-              col = { 255, 60, 60, 255 }
+              col = { 255, 60, 60, 255 } -- Vermelho
             else
               text = string.format("⚖️ Check: %dW ", warnings_cnt)
-              col = { 234, 179, 8, 255 }
+              col = { 234, 179, 8, 255 } -- Amarelo
             end
           elseif rawget(_G, "_DOXOADE_AUDIT_CHECKED") then
             text = "⚖️ Check: Clean "
-            col = ACCENT_GREEN
+            col = ACCENT_GREEN          -- Verde
           end
         end
         return {
@@ -146,7 +156,7 @@ core.add_thread(function()
         }
       end,
       function()
-        command.perform("doxoade:diagnose-live")
+        command.perform("doxoade:trigger-active-check")
       end,
       4
     )
@@ -222,21 +232,20 @@ core.add_thread(function()
       StatusView.Item.LEFT,
       function()
         local state = rawget(_G, "_DOXOADE_SEARCH_STATE")
-        if not state then return {} end
-        if state.is_searching then
+        if state and state.is_searching then
           return {
-            { 251, 191, 36, 255 }, "⏳ Searching: " .. state.query .. " ",
-            DIVIDER_COLOR, "| "
-          }
-        elseif state.query ~= "" and #state.results > 0 then
-          return {
-            ACCENT_GREEN, string.format("🔍 %d hits (%.2fs) ", state.total_hits, state.elapsed),
+            { 251, 191, 36, 255 }, "⏳ Searching... ",
             DIVIDER_COLOR, "| "
           }
         end
-        return {}
+        return {
+          { 56, 189, 248, 255 }, "🔍 Search ",
+          DIVIDER_COLOR, "| "
+        }
       end,
-      function() command.perform("doxoade:toggle-search-dock") end,
+      function()
+        command.perform("doxoade:open-search-docs-hub")
+      end,
       7
     )
 

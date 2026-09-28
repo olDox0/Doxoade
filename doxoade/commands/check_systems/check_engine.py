@@ -188,8 +188,16 @@ def _scan_single_file(fp, manager, kwargs):
     from doxoade.tools.governor import governor
     if governor.pace(file_path=fp, force=kwargs.get('full_power')):
         return [{'severity': 'INFO', 'category': 'SYSTEM', 'message': 'ALB_REDUCED', 'file': fp, 'line': 0}]
+    
+    # 1. C / C++
     if fp.endswith(('.c', '.cpp', '.h', '.hpp')): 
         return _run_c_cpp_checks(fp)
+
+    # 2. 🌙 LUA: Analisa arquivos .lua nativamente via scanner de sintaxe
+    if fp.endswith('.lua'):
+        return _run_lua_checks(fp)
+
+    # 3. Python (.py)
     findings = _run_syntax_check(fp, manager, kwargs)
     if findings is None: findings = []
     if any(f.get('severity') == 'CRITICAL' for f in findings):
@@ -222,6 +230,32 @@ def _run_syntax_check(fp, manager, kwargs):
             'line': getattr(e, 'lineno', 0),
             'suggestion_action': action
         }]
+
+def _run_lua_checks(fp: str) -> list:
+    """Audita a sintaxe e o balanceamento de blocos de arquivos Lua."""
+    findings = []
+    try:
+        from pathlib import Path
+        from doxoade.commands.lite_xl_systems.lite_xl_init_builder import LiteXLInitBuilder
+
+        content = Path(fp).read_text(encoding='utf-8', errors='replace')
+        errors = LiteXLInitBuilder.compile_scan_lua(content)
+        for err in errors:
+            line_no = 1
+            m = re.search(r"linha\s+(\d+)", err, re.IGNORECASE)
+            if m:
+                line_no = int(m.group(1))
+
+            findings.append({
+                'severity': 'CRITICAL',
+                'category': 'SYNTAX',
+                'message': f"Lua: {err}",
+                'file': fp,
+                'line': line_no,
+            })
+    except Exception as e:
+        pass
+    return findings
 
 def _run_style_check(f):
     from radon.visitors import ComplexityVisitor

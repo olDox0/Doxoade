@@ -205,9 +205,26 @@ class NexusMetalEngine:
         compiler_conf = self.config.get('compiler', {})
         paths_conf = self.config.get('paths', {})
         project_conf = self.config.get('project', {})
+        
+        # 🏛️ RESOLUÇÃO INTELIGENTE JANUS:
+        # 1. Se houver compiler_path explícito, usa ele e injeta sua pasta bin no PATH
+        # 2. Se engine == 'janus', consulta o manifesto ou detector do Janus
+        # 3. Fallback: usa toolchain ou 'gcc'
+        engine = compiler_conf.get('compiler_path')
+        if not engine or not os.path.exists(engine):
+            if compiler_conf.get('engine') == 'janus' or not compiler_conf.get('engine'):
+                from doxoade.tools.janus_systems import Janus
+                info = Janus.get_info()
+                engine = info.compiler_path if info else compiler_conf.get('toolchain', 'gcc')
+            else:
+                engine = compiler_conf.get('engine', 'gcc')
 
-        # 1. Engine e Standard
-        engine = compiler_conf.get('engine', 'gcc')
+        # Se temos o caminho do binário, garante a pasta bin no PATH do processo
+        if os.path.isabs(str(engine)) and os.path.exists(str(engine)):
+            c_dir = str(Path(engine).parent)
+            cur_path = os.environ.get("PATH", "")
+            if c_dir.lower() not in cur_path.lower():
+                os.environ["PATH"] = c_dir + os.pathsep + cur_path
         std = compiler_conf.get('std', 'c11')
         opt = compiler_conf.get('opt', 'O2')
         
