@@ -60,22 +60,22 @@ class NoteMeshEngine:
         self._last_send_time: float = 0.0
 
     def _enforce_single_instance(self):
-        """Garante que apenas UM daemon execute por máquina."""
-        import ctypes
-        if self.pid_file.exists():
-            try:
-                old_pid = int(self.pid_file.read_text().strip())
-                # Verifica se o PID antigo ainda está vivo no Windows
-                kernel32 = ctypes.windll.kernel32
-                handle = kernel32.OpenProcess(0x100000, False, old_pid)
-                if handle:
-                    kernel32.CloseHandle(handle)
-                    # Já existe um daemon rodando! Encerra este novo imediatamente.
-                    sys.exit(0)
-            except Exception:
-                pass
-        # Registra o PID deste daemon soberano
-        self.pid_file.write_text(str(os.getpid()), encoding="utf-8")
+        """Trava atômica de instância única via bind de Socket (imune a PIDs fantasmas)."""
+        lock_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        lock_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            # Tenta um bind de teste na porta do serviço
+            lock_sock.bind(("127.0.0.1", TCP_PORT))
+            lock_sock.close()
+        except OSError:
+            print(f"{Fore.YELLOW}⚠ [DOXNOTE MESH] O serviço P2P já está ativo nesta máquina (Porta {TCP_PORT} em uso).{Fore.RESET}")
+            sys.exit(0)
+            
+        # Grava o PID apenas para telemetria
+        try:
+            self.pid_file.write_text(str(os.getpid()), encoding="utf-8")
+        except Exception:
+            pass
 
     def _get_local_ip(self) -> str:
         try:
