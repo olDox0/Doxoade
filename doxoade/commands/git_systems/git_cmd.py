@@ -156,7 +156,7 @@ def pull_cmd(ctx, subscribe, force, dry_run, apply, conflicts, diff_file, target
         # 6. Fluxo Padrão: Smart Sync Reconciliado
         report = engine.smart_pull_sync(remote=remote, branch=target_branch, apply_changes=is_apply_mode)
         matrix = report['matrix']
-
+        
         if not is_apply_mode:
             click.echo(f"{Fore.YELLOW}{Style.BRIGHT}🔍 [DRY-RUN] ANÁLISE DE IMPACTO MULTI-ESTAÇÃO{Style.RESET_ALL}")
             click.echo(f"  • Servidor tem novidades : {Fore.GREEN}{matrix['total_safe_remote']} arquivo(s){Fore.RESET}")
@@ -167,19 +167,28 @@ def pull_cmd(ctx, subscribe, force, dry_run, apply, conflicts, diff_file, target
                     click.echo(f"    {Fore.RED}✖ {c['file']}{Fore.RESET}")
             else:
                 click.echo(f"  • {Fore.GREEN}✔ Nenhuma colisão direta detectada.{Fore.RESET}")
-
             click.echo(f"\n{Fore.YELLOW}💡 Para sincronizar com segurança total:{Fore.RESET}")
             click.echo(f"   {Fore.WHITE}doxoade git pull --apply{Fore.RESET}\n")
             return
 
-        if report['success']:
-            click.echo(f"{Fore.GREEN}{Style.BRIGHT}✔ [OK] Repositório sincronizado com sucesso!{Style.RESET_ALL}")
-            if report['snapshot']:
-                click.echo(f"  {Fore.CYAN}💾 Snapshot de segurança gravado em: {Path(report['snapshot']).name}{Fore.RESET}")
+        # 🎯 FEEDBACK FORENSE ENRIQUECIDO (Fim do Pull Vago)
+        if report.get('already_up_to_date'):
+            short_head = report['new_head'][:7] if report.get('new_head') else 'HEAD'
+            click.echo(f"{Fore.GREEN}✔ Repositório já está atualizado no topo de {remote}/{target_branch} (HEAD em {short_head}).{Style.RESET_ALL}\n")
         else:
-            click.echo(f"{Fore.RED}✖ {report['action_summary']}{Fore.RESET}")
-            if report['has_collisions']:
-                click.echo(f"{Fore.YELLOW}💡 Execute 'doxoade merge' para resolver interativamente as colisões.{Fore.RESET}")
+            commits = report.get('commits_received', [])
+            click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}📥 [ATUALIZAÇÃO RECEBIDA] {len(commits)} novo(s) commit(s) integrados:{Style.RESET_ALL}")
+            for c in commits[:8]:
+                click.echo(f"   {Fore.CYAN}•{Fore.RESET} {c}")
+            if len(commits) > 8:
+                click.echo(f"   {Fore.LIGHTBLACK_EX}... e mais {len(commits) - 8} commit(s).{Fore.RESET}")
+            
+            if report.get('diff_stat'):
+                click.echo(f"\n{Fore.WHITE}{Style.BRIGHT}📋 [IMPACTO NO DISCO]{Style.RESET_ALL}")
+                click.echo(f"   ↳ {Fore.YELLOW}{report['diff_stat']}{Fore.RESET}")
+                click.echo(f"   ↳ HEAD avançou: {Fore.LIGHTBLACK_EX}{report['old_head'][:7]}{Fore.RESET} ➔ {Fore.GREEN}{report['new_head'][:7]}{Fore.RESET}")
+            
+            click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}✔ Sincronização concluída com sucesso!{Style.RESET_ALL}\n")
 
 
 @git_group.command('branch')

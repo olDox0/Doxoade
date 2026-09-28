@@ -281,69 +281,60 @@ class GitEngine:
             'total_local_only': len(local_only)
         }
 
-    def smart_pull_sync(self, remote: str = 'origin', branch: Optional[str] = None, apply_changes: bool = False) -> Dict[str, Any]:
-        """
-        ⚡ SMART PULL SOBERANO (Multi-Station Resilient):
-        1. Auto-cura de MERGE_HEAD.
-        2. Snapshot de segurança dos arquivos locais.
-        3. Se houver rascunhos locais sem colisão direta, faz auto-stash.
-        4. Puxa atualizações do servidor.
-        5. Restaura rascunhos locais por cima sem perder nada.
-        """
-        current_branch = branch or self.get_current_branch()
-        healed_merge = self.heal_stuck_merge()
-        self.fetch_remote(remote=remote, branch=current_branch)
+    def smart_pull_sync(self, remote: str = 'origin', branch: Optional[str] = None, apply_changes: bool = True) -> Dict[str, Any]:
+        """Sincroniza com relatório forense de commits e impacto de arquivos."""
+        target_branch = branch or self.get_current_branch()
+        remote_ref = f"{remote}/{target_branch}"
+        self.clean_transient_build_artifacts()
+        
+        # 1. Captura o HEAD antes do pull
+        old_head = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, cwd=str(self.root)) or ''
+        old_head = old_head.strip()
 
-        matrix = self.detect_collisions(remote=remote, branch=current_branch)
-        has_collisions = matrix['total_collisions'] > 0
-        is_locally_dirty = self.is_dirty()
+        # 2. Busca do servidor
+        self.fetch_remote(remote=remote, branch=target_branch)
+        matrix = self.detect_collisions(remote=remote, branch=target_branch)
 
         report = {
-            'station': self.get_station_name(),
-            'branch': current_branch,
-            'remote': remote,
-            'healed_merge': healed_merge,
+            'success': True,
             'matrix': matrix,
-            'has_collisions': has_collisions,
-            'is_dirty': is_locally_dirty,
-            'snapshot': None,
-            'success': False,
-            'mode': 'APPLY' if apply_changes else 'DRY-RUN',
+            'old_head': old_head,
+            'new_head': old_head,
+            'commits_received': [],
+            'diff_stat': '',
+            'already_up_to_date': True,
             'action_summary': ''
         }
 
         if not apply_changes:
             return report
 
-        # Grava snapshot de resgate antes de tocar no código
-        snapshot_dir = self.create_safety_snapshot(reason="smart_pull")
-        report['snapshot'] = str(snapshot_dir) if snapshot_dir else None
+        # Snapshot preventivo antes de tocar no disco
+        self.create_safety_snapshot(reason="smart_pull")
 
-        # Se houver colisão de conteúdo no mesmo arquivo, não quebra: avisa para abrir o merge
-        if has_collisions:
-            report['success'] = False
-            report['action_summary'] = f"Colisão detectada em {matrix['total_collisions']} arquivo(s). Use 'doxoade merge' para resolver."
-            return report
-
-        # Fluxo limpo com auto-stash
-        stashed = False
-        if is_locally_dirty:
-            stash_msg = f"doxoade_autostash_{self.get_station_name()}_{int(time.time())}"
-            out = _run_git_command(['stash', 'push', '-u', '-m', stash_msg], capture_output=True, cwd=str(self.root))
-            stashed = "Saved working directory" in str(out)
-
-        pull_res = _run_git_command(['pull', '--rebase', remote, current_branch], capture_output=True, silent_fail=True, cwd=str(self.root))
+        # 3. Executa o merge ou fast-forward
+        pull_res = _run_git_command(['merge', '--no-edit', remote_ref], capture_output=True, cwd=str(self.root))
         
-        # Se rebase falhar (históricos muito divergentes), tenta merge padrão
-        if not pull_res:
-            _run_git_command(['rebase', '--abort'], capture_output=True, silent_fail=True, cwd=str(self.root))
-            pull_res = _run_git_command(['pull', '--no-edit', remote, current_branch], capture_output=True, silent_fail=True, cwd=str(self.root))
+        # 4. Captura o novo HEAD
+        new_head = _run_git_command(['rev-parse', 'HEAD'], capture_output=True, cwd=str(self.root)) or ''
+        new_head = new_head.strip()
+        report['new_head'] = new_head
 
-        if stashed:
-            _run_git_command(['stash', 'pop'], capture_output=True, silent_fail=True, cwd=str(self.root))
+        if old_head != new_head and old_head:
+            report['already_up_to_date'] = False
+            # Coleta lista de commits recebidos
+            fmt = "%h [%an] %s"
+            log_raw = _run_git_command(['log', f'--format={fmt}', f'{old_head}..{new_head}'], capture_output=True, cwd=str(self.root)) or ''
+            report['commits_received'] = [l.strip() for l in log_raw.splitlines() if l.strip()]
+            
+            # Coleta impacto no disco (--shortstat)
+            stat_raw = _run_git_command(['diff', '--shortstat', old_head, new_head], capture_output=True, cwd=str(self.root)) or ''
+            report['diff_stat'] = stat_raw.strip()
+            report['action_summary'] = f"{len(report['commits_received'])} commit(s) integrados."
+        else:
+            report['already_up_to_date'] = True
+            report['action_summary'] = "Repositório já se encontra no topo do remoto."
 
-        report['success'] = bool(pull_res)
-        report['action_summary'] = "Sincronização aplicada com sucesso!" if pull_res else "Falha ao puxar do servidor."
         return report
 
     def subscribe_safe_remote(

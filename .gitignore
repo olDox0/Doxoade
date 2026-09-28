@@ -102,6 +102,9 @@ doxoade/tools/hermes_systems/native/.bridge_build_cache.json
 # ═════════════════════════════════════════════════════════════════════
 # 🔨 ARTEFATOS EFÊMEROS DE COMPILAÇÃO C / JANUS / HERMES
 # ═════════════════════════════════════════════════════════════════════
+doxoade/tools/hermes_systems/native/*.dll
+doxoade/tools/hermes_systems/native/*.pyd
+doxoade/tools/hermes_systems/native/.bridge_build_cache.json
 .bridge_build_cache.json
 *.pyd
 *.dll

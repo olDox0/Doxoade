@@ -406,7 +406,8 @@ def cmd_pull(repo_path: str, apply: bool, force: bool, autostash: bool, live: bo
     ok_b, curr_branch, _, _ = GitSyncEngine._run_git_forensic(abs_path, ["branch", "--show-current"])
     original_branch = curr_branch.strip() if ok_b and curr_branch.strip() else "main"
 
-    click.echo(f"Sincronizando com '{target_manifest.hostname}' ({target_manifest.ip})...")
+    click.echo(f"Sincronizando com '{manifest.hostname}' ({manifest.ip})...")
+#    click.echo(f"Sincronizando com '{target_manifest.hostname}' ({target_manifest.ip})...")
     click.echo(f"  [RAMIFICAÇÃO] Branch de trabalho ativo: '{original_branch}'")
 
     # 2. Executa a transmissão real via rede LAN (Fetch dos objetos e refs)
