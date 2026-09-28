@@ -225,72 +225,59 @@ if core and core.add_thread then
   core.add_thread(function()
     local last_file_hashes = {}
     local last_sync_time = 0
-
     while true do
-      -- ⏱️ GATILHO ESTRITO: Descansa 5.0 segundos cravados entre checagens
-      coroutine.yield(5.0)
-
-      -- Só executa se o sistema estiver explicitamente ATIVADO (Fundo Verde)
+      coroutine.yield(1.0) -- 👈 Reduzido de 5.0s para 1.0s (Live Sync)
       local is_enabled = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
       if is_enabled then
         local now = os.clock()
-
         pcall(function()
-          -- Se você salvou o arquivo há menos de 5 segundos, respeita e não mexe
-          if (now - _last_local_save_time) < 5.0 then return end
+          -- Se o usuário acabou de salvar localmente, espera 2s antes de aceitar reload externo
+          if (now - _last_local_save_time) < 2.0 then return end
 
           for _, doc in ipairs(core.docs or {}) do
-            -- 🛡️ REGRA DE OURO: Se o arquivo estiver sendo modificado/dirty, NUNCA toca no buffer!
-            if doc.filename and not doc:is_dirty() then
+            if doc.filename then
               local fn_clean = doc.filename:gsub("\\", "/"):lower()
               local is_shared = fn_clean:find("shared_notes%.md$") or fn_clean:find("shared_notes%.txt$")
-
-              if is_shared and (now - last_sync_time) > 4.5 then
+              
+              if is_shared then
                 local finfo = system.get_file_info and system.get_file_info(doc.filename)
-                
-                -- Se o arquivo em disco teve mtime alterado externamente pela rede
-                if finfo and finfo.type == "file" and (finfo.size or 0) > 0 and finfo.mtime ~= doc.clean_mtime then
+                if finfo and finfo.type == "file" and (finfo.size or 0) > 0 then
+                  
                   local f = io.open(doc.filename, "r")
                   if f then
                     local disk_raw = f:read("*a")
                     f:close()
-
+                    
                     if disk_raw and disk_raw ~= "" then
                       local disk_hash = calc_clean_hash(disk_raw)
                       local cur_raw = doc:get_text(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
                       local cur_hash = calc_clean_hash(cur_raw)
-
-                      if last_file_hashes[doc.filename] == nil then
+                      
+                      -- Se o disco mudou e está diferente do buffer em tela
+                      if disk_hash ~= cur_hash then
                         last_file_hashes[doc.filename] = disk_hash
-                      -- Só atualiza UMA VEZ se o conteúdo for comprovadamente diferente
-                      elseif disk_hash ~= cur_hash and disk_hash ~= last_file_hashes[doc.filename] then
-                        last_file_hashes[doc.filename] = disk_hash
-                        last_sync_time = now
-
-                        -- 🚀 RECARGA NATIVA CANÔNICA: Atualiza o buffer de forma limpa
-                        if doc.reload then
-                          doc:reload()
-                        else
-                          local l1, c1, l2, c2 = 1, 1, 1, 1
-                          if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
-                          doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
-                          doc:insert(1, 1, disk_raw:gsub("\r\n", "\n"))
-                          doc:clean()
-                          if doc.set_selection then doc:set_selection(l1, c1, l2, c2) end
+                        
+                        -- Salva a seleção/cursor atual
+                        local l1, c1, l2, c2 = 1, 1, 1, 1
+                        if doc.get_selection then
+                          l1, c1, l2, c2 = doc:get_selection()
                         end
-
-                        -- 🛑 CRAVA O MTIME LIMPO: Isso elimina de vez o diálogo "File Changed Reload?"
+                        
+                        -- Recarrega o buffer atomicamente
+                        doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
+                        doc:insert(1, 1, disk_raw)
+                        doc:clean()
                         doc.clean_mtime = finfo.mtime
-                        doc.mtime = finfo.mtime
+                        
+                        -- Restaura o cursor
+                        if doc.set_selection then
+                          pcall(doc.set_selection, doc, l1, c1, l2, c2)
+                        end
+                        
                         core.redraw = true
-
                         if core.log then
-                          core.log("🔄 [NOTE] Sincronização remota aplicada (Uma única vez).")
+                          core.log("⚡ [DOXNOTE] Buffer recarregado em tempo real!")
                         end
-                      else
-                        -- Conteúdo já é igual, apenas alinha o mtime para silenciar o Lite XL
-                        doc.clean_mtime = finfo.mtime
-                        doc.mtime = finfo.mtime
                       end
                     end
                   end
