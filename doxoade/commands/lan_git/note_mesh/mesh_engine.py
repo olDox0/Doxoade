@@ -149,10 +149,9 @@ class NoteMeshEngine:
                 except Exception:
                     pass
                 last_broadcast = now
-                
-                # Mantém o heartbeat vivo para a barra de status do Lite XL
-                if not self.connected_peer_ip:
-                    self._update_state_file("searching")
+                # 💓 Heartbeat contínuo: Mantém o updated_at sempre fresco (< 3s)
+                status_now = "connected" if self.connected_peer_ip else "searching"
+                self._update_state_file(status_now)
 
             ready = select.select([sock], [], [], 0.5)
             if ready[0]:

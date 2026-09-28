@@ -223,26 +223,22 @@ end
 
 if core and core.add_thread then
   core.add_thread(function()
-    local last_file_hashes = {}
-    local last_sync_time = 0
+    local last_disk_hashes = {}
     while true do
-      coroutine.yield(1.0) -- 👈 Reduzido de 5.0s para 1.0s (Live Sync)
+      coroutine.yield(1.0)
       local is_enabled = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
       if is_enabled then
-        local now = os.clock()
         pcall(function()
-          -- Se o usuário acabou de salvar localmente, espera 2s antes de aceitar reload externo
-          if (now - _last_local_save_time) < 2.0 then return end
-
           for _, doc in ipairs(core.docs or {}) do
-            if doc.filename then
+            -- 🛡️ REGRA DE OURO: Se o usuário estiver digitando (is_dirty), NUNCA sobrescreva!
+            if doc.filename and not doc:is_dirty() then
               local fn_clean = doc.filename:gsub("\\", "/"):lower()
               local is_shared = fn_clean:find("shared_notes%.md$") or fn_clean:find("shared_notes%.txt$")
               
               if is_shared then
                 local finfo = system.get_file_info and system.get_file_info(doc.filename)
-                if finfo and finfo.type == "file" and (finfo.size or 0) > 0 then
-                  
+                -- Só lê o disco se o timestamp de modificação (mtime) mudou de verdade
+                if finfo and finfo.type == "file" and (finfo.size or 0) > 0 and finfo.mtime ~= doc.clean_mtime then
                   local f = io.open(doc.filename, "r")
                   if f then
                     local disk_raw = f:read("*a")
@@ -250,33 +246,30 @@ if core and core.add_thread then
                     
                     if disk_raw and disk_raw ~= "" then
                       local disk_hash = calc_clean_hash(disk_raw)
-                      local cur_raw = doc:get_text(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
-                      local cur_hash = calc_clean_hash(cur_raw)
                       
-                      -- Se o disco mudou e está diferente do buffer em tela
-                      if disk_hash ~= cur_hash then
-                        last_file_hashes[doc.filename] = disk_hash
+                      -- Se o hash do disco realmente mudou em relação ao último recebido
+                      if disk_hash ~= last_disk_hashes[doc.filename] then
+                        last_disk_hashes[doc.filename] = disk_hash
                         
-                        -- Salva a seleção/cursor atual
+                        -- Salva a posição do cursor atual
                         local l1, c1, l2, c2 = 1, 1, 1, 1
                         if doc.get_selection then
                           l1, c1, l2, c2 = doc:get_selection()
                         end
                         
-                        -- Recarrega o buffer atomicamente
+                        -- Atualiza o buffer
                         doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
                         doc:insert(1, 1, disk_raw)
                         doc:clean()
                         doc.clean_mtime = finfo.mtime
                         
-                        -- Restaura o cursor
                         if doc.set_selection then
                           pcall(doc.set_selection, doc, l1, c1, l2, c2)
                         end
                         
                         core.redraw = true
                         if core.log then
-                          core.log("⚡ [DOXNOTE] Buffer recarregado em tempo real!")
+                          core.log("⚡ [DOXNOTE] Nota sincronizada da rede com sucesso!")
                         end
                       end
                     end

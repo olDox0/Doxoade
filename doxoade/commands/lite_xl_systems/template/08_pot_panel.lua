@@ -627,8 +627,14 @@ command.add(nil, {
     open_in_right_panel(dumppot_file, "📂 Workspace Hub aberto.")
   end,
   ["doxoade:open-pantheon"] = function()
-    local init_file = user_dir .. sep .. "init.lua"
-    open_in_right_panel(init_file, "⚡ Pantheon aberto.")
+    local init_file = (USERDIR or ".") .. (PATHSEP or "/") .. "init.lua"
+    local settings_file = (USERDIR or ".") .. (PATHSEP or "/") .. "user_settings.lua"
+    open_in_right_panel(init_file, "⚡ init.lua aberto no Panteão.")
+    open_in_right_panel(log_path, "📜 session_log.txt aberto no Panteão.")
+    open_in_right_panel(dumppot_file, "📋 Dumppot aberto no Panteão.")
+    open_in_right_panel(cheat_sheet_file, "📖 Cheat Sheet aberto no Panteão.")
+    open_in_right_panel(settings_file, "⚙️ user_settings.lua aberto no Panteão.") -- ✅ CORRIGIDO
+    core.log("🏛️ Panteão Soberano invocado. 5 abas de diagnóstico abertas à direita.")
   end,
   ["doxoade:open-log"] = function()
     open_in_right_panel(log_path, "📜 session_log.txt aberto.")
@@ -636,12 +642,58 @@ command.add(nil, {
   ["doxoade:show-shortcuts-cheat-sheet"] = function()
     open_in_right_panel(cheat_sheet_file, "📖 Cheat Sheet aberto.")
   end,
+  ["doxoade:open-user-settings"] = function()
+    local settings_file = (USERDIR or ".") .. (PATHSEP or "/") .. "user_settings.lua"
+    pcall(function()
+      local f = io.open(settings_file, "a")
+      if f then f:close() end
+    end)
   ["doxoade:open-search-docs-hub"] = function()
     core.command_view:enter("🔍 Buscar Documentação Python (Ex: asyncio, json, socket):", {
       submit = function(text)
         execute_docs_search_interactive(text)
       end
     })
+  end,
+  ["doxoade:find-selection-in-opposite-split"] = function()
+    local view = core.active_view
+    local doc = view and view.doc
+    if not doc or not doc.has_selection or not doc:has_selection() then
+      core.log("Selecione um texto para buscar no painel oposto.")
+      return
+    end
+    local l1, c1, l2, c2 = doc:get_selection(true)
+    local query = doc:get_text(l1, c1, l2, c2)
+    if not query or query == "" then return end
+    local leaves = get_doc_leaves(core.root_view.root_node)
+    local active_node = core.root_view:get_active_node()
+    local target_node = nil
+    for _, leaf in ipairs(leaves) do
+      if leaf ~= active_node then
+        target_node = leaf
+        break
+      end
+    end
+    if not target_node or not target_node.active_view or not target_node.active_view.doc then
+      core.error("Nenhum documento aberto no painel oposto.")
+      return
+    end
+    local target_doc = target_node.active_view.doc
+    local found_line = nil
+    for line_idx, line_text in ipairs(target_doc.lines or {}) do
+      if line_text:find(query, 1, true) then
+        found_line = line_idx
+        break
+      end
+    end
+    if found_line then
+      core.set_active_view(target_node.active_view)
+      target_doc:set_selection(found_line, 1, found_line, 1)
+      core.log(string.format("Encontrado na linha %d: '%s'", found_line, query))
+      core.redraw = true
+    else
+      core.log(string.format("Termo '%s' não encontrado no painel oposto.", query))
+    end
   end,
   ["doxoade:consult-selection-or-word"] = function()
     local view = core.active_view
