@@ -162,8 +162,11 @@ core.add_thread(function()
     )
 
     -- 5. Badge DoxNote com Fundo Verde (ON) / Vermelho (OFF) + Abertura de Menu
-    rawset(_G, "_DOXOADE_NOTE_SYNC_ACTIVE", rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") or false)
-
+--    rawset(_G, "_DOXOADE_NOTE_SYNC_ACTIVE", rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") or false)
+   if rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == nil then
+   rawset(_G, "_DOXOADE_NOTE_SYNC_ACTIVE", true)
+   end
+   
     local COLOR_SYNC_ON_BG  = { 34, 197, 94, 255 }   -- Verde Esmeralda Sólido
     local COLOR_SYNC_OFF_BG = { 220, 38, 38, 255 }   -- Vermelho Alerta Sólido
     local COLOR_TEXT_WHITE  = { 255, 255, 255, 255 } -- Texto Branco Puro
