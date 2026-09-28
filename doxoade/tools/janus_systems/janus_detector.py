@@ -72,26 +72,27 @@ class JanusDetector:
         return None
 
     def _detect_windows(self, project_root: Optional[Path]) -> Optional[CompilerInfo]:
-        """Varre WinLibs, MinGW, MSYS2 e PATH do Windows."""
-        # 1. Checa PATH primeiro
-
+        """Varre WinLibs, MinGW, MSYS2, PATH e o w64devkit central do Doxoade."""
+        # 1. Verifica no Silo local se houver
         if project_root:
             w64 = Path(project_root) / "thirdparty" / "w64devkit" / "bin" / "gcc.exe"
             as_exe = w64.parent / "as.exe"
-            # 🛑 Só usa w64devkit se gcc.exe E as.exe existirem!
             if w64.exists() and (os.name != 'nt' or as_exe.exists()):
                 gpp = w64.parent / "g++.exe"
-                return self._probe_compiler(str(w64), str(gpp) if gpp.exists() else None, provider="w64devkit_legacy")
+                return self._probe_compiler(str(w64), str(gpp) if gpp.exists() else None, provider="w64devkit_local")
 
+        # 2. Verifica no repositório mestre do Doxoade (Central Toolchain)
+        core_root = Path(__file__).resolve().parents[3]  # Raiz do pacote doxoade
+        core_w64 = core_root / "thirdparty" / "w64devkit" / "bin" / "gcc.exe"
+        if core_w64.exists():
+            gpp = core_w64.parent / "g++.exe"
+            return self._probe_compiler(str(core_w64), str(gpp) if gpp.exists() else None, provider="w64devkit_core")
+
+        # 3. Verifica no PATH do sistema
         gcc_in_path = shutil.which("gcc")
         if gcc_in_path:
             gpp = shutil.which("g++") or str(Path(gcc_in_path).parent / "g++.exe")
             return self._probe_compiler(gcc_in_path, gpp if Path(gpp).exists() else None, provider="system_path")
-
-        clang_in_path = shutil.which("clang")
-        if clang_in_path:
-            gpp = shutil.which("clang++") or str(Path(clang_in_path).parent / "clang++.exe")
-            return self._probe_compiler(clang_in_path, gpp if Path(gpp).exists() else None, provider="system_path")
 
         # 2. Pastas canônicas do WinLibs (Bluebaby)
         winlibs_patterns = [

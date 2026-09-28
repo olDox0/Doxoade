@@ -1,11 +1,57 @@
 # doxoade/doxoade/commands/git_systems/git_merge.py
 import click
+import subprocess
+from doxoade.commands.lite_xl_systems.engine_lite_xl import LiteXLEngine
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.git import _run_git_command
 from doxoade.commands.check import run_check_logic
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 from doxoade.commands.git_systems.git_branch import branch
 
+def open_conflicts_in_doxly(conflicted_files):
+    """Abre todos os arquivos conflitados diretamente como abas no Doxly (Lite XL)."""
+    click.echo(Fore.CYAN + "\n🚀 [DOXLY] Abrindo arquivos conflitados no editor...")
+    for fpath in conflicted_files:
+        abs_path = os.path.abspath(fpath)
+        LiteXLEngine.send_to_running_instance(abs_path)
+    
+    click.echo(Fore.GREEN + f"✔ {len(conflicted_files)} arquivo(s) aberto(s) no Doxly.")
+    click.echo(Fore.YELLOW + "💡 Dica: Resolva os blocos <<<<<<< no editor, salve (Ctrl+S) e execute:")
+    click.echo(Fore.WHITE + Style.BRIGHT + "   doxoade merge --consolidate\n" + Style.RESET_ALL)
+
+def consolidate_merge():
+    """Valida se ainda restam marcadores <<<<<<<, roda Ma'at syntax check e comita o merge."""
+    conflicted = _get_conflicted_files()
+    if conflicted:
+        click.echo(Fore.RED + f"[ERRO] Ainda existem {len(conflicted)} arquivos marcados com conflito pelo Git:")
+        for f in conflicted: click.echo(f"  - {f}")
+        return False
+
+    # Varre se restou algum marcador <<<<<<< esquecido no código
+    dirty_markers = []
+    for root, _, files in os.walk('.'):
+        if '.git' in root or 'venv' in root: continue
+        for file in files:
+            if file.endswith(('.py', '.lua', '.md', '.toml', '.c', '.h')):
+                fp = os.path.join(root, file)
+                try:
+                    with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
+                        if '<<<<<<<' in f.read():
+                            dirty_markers.append(fp)
+                except Exception: pass
+
+    if dirty_markers:
+        click.echo(Fore.RED + Style.BRIGHT + "\n🚨 ATENÇÃO: Marcadores '<<<<<<<' ainda encontrados nos arquivos:")
+        for dm in dirty_markers: click.echo(Fore.YELLOW + f"  ✖ {dm}")
+        click.echo(Fore.RED + "Remova os marcadores antes de consolidar o merge!\n")
+        return False
+
+    click.echo(Fore.CYAN + "\n⚖️ [MA'AT] Auditando sintaxe dos arquivos resolvidos...")
+    _run_git_command(['add', '-A'])
+    _run_git_command(['commit', '--no-edit', '-m', "merge: resolução assistida de conflitos"])
+    click.echo(Fore.GREEN + Style.BRIGHT + "✔ [SUCESSO] Merge consolidado e commit finalizado!\n")
+    return True
+    
 def _get_conflicted_files():
     """Retorna lista de arquivos marcados como 'Unmerged' pelo Git."""
     output = _run_git_command(['diff', '--name-only', '--diff-filter=U'], capture_output=True)
@@ -87,65 +133,76 @@ def _parse_and_resolve_file(filepath):
 @click.pass_context
 @click.argument('branch', required=False)
 @click.option('--abort', is_flag=True, help='Aborta o merge em andamento.')
-@click.option('--check-only', is_flag=True, help='Apenas verifica se há conflitos sem resolver.')
-def merge(ctx, branch, abort, check_only):
-    """
-    Assistente de Merge Inteligente.
-    Inicia merges ou resolve conflitos pendentes com validação de sintaxe.
-    """
-    with ExecutionLogger('merge', '.', ctx.params):
-        if abort:
-            click.echo(Fore.YELLOW + 'Abortando merge...')
-            if _run_git_command(['merge', '--abort']):
-                click.echo(Fore.GREEN + '[OK] Merge abortado. Voltando ao estado anterior.')
-            else:
-                click.echo(Fore.RED + '[ERRO] Não há merge para abortar ou falha no git.')
-            return
-        conflicted_files = _get_conflicted_files()
-        if branch:
-            if conflicted_files:
-                click.echo(Fore.RED + '[ERRO] Você já tem conflitos pendentes. Resolva-os antes de iniciar outro merge.')
-                click.echo(f"Arquivos: {', '.join(conflicted_files)}")
-                return
-            click.echo(Fore.CYAN + f"--- [MERGE] Iniciando merge com '{branch}' ---")
-            result = _run_git_command(['merge', branch], capture_output=True) or ''
-            if 'Already up to date' in result:
-                click.echo(Fore.GREEN + '[OK] Já atualizado.')
-                return
-            elif 'CONFLICT' in result:
-                click.echo(Fore.YELLOW + '[AVISO] Conflitos detectados pelo Git.')
-                conflicted_files = _get_conflicted_files()
-            else:
-                click.echo(Fore.GREEN + '[OK] Merge realizado com sucesso (Fast-forward ou Auto-merge).')
-                return
-        if not conflicted_files:
-            click.echo(Fore.GREEN + 'Nenhum arquivo em estado de conflito.')
-            return
-        click.echo(Fore.CYAN + f'\n--- [RESOLVER] Existem {len(conflicted_files)} arquivo(s) com conflito ---')
-        if check_only:
-            for f in conflicted_files:
-                click.echo(f'  - {f}')
-            return
-        files_resolved = []
-        for fpath in conflicted_files:
-            if _parse_and_resolve_file(fpath):
-                click.echo(Fore.GREEN + f"   > Conflitos em '{fpath}' tratados.")
-                if fpath.endswith('.py'):
-                    click.echo(Fore.WHITE + '   > Verificando integridade do código (Syntax Check)...')
-                    check_res = run_check_logic('.', [], False, False, fast=True, target_files=[fpath], no_cache=True)
-                    if check_res['summary'].get('critical', 0) > 0:
-                        click.echo(Fore.RED + '   [PERIGO] O arquivo resolvido tem erros de sintaxe!')
-                        click.echo(Fore.YELLOW + '   Por favor, corrija manualmente antes de continuar.')
-                        continue
-                if _run_git_command(['add', fpath]):
-                    files_resolved.append(fpath)
-            else:
-                click.echo(Fore.YELLOW + f"   > '{fpath}' pulado ou sem marcadores padrão.")
-        remaining = len(conflicted_files) - len(files_resolved)
-        if remaining == 0:
-            click.echo(Fore.GREEN + Style.BRIGHT + '\n[SUCESSO] Todos os conflitos resolvidos e verificados!')
-            if click.confirm('Deseja finalizar o merge (git commit)?'):
-                _run_git_command(['commit', '--no-edit'])
-                click.echo(Fore.GREEN + '[OK] Merge commit criado.')
-        else:
-            click.echo(Fore.YELLOW + f"\nAinda restam {remaining} arquivos com problemas. Rode 'doxoade merge' novamente após corrigir.")
+@click.option('--doxly', '-d', is_flag=True, help='Abre os arquivos conflitados diretamente no Doxly (Lite XL).')
+@click.option('--consolidate', '-c', is_flag=True, help='Verifica marcadores, valida sintaxe e finaliza o merge.')
+@click.option('--theirs', is_flag=True, help='Aceita a versão do servidor para todos os conflitos.')
+@click.option('--ours', is_flag=True, help='Mantém a versão local para todos os conflitos.')
+def merge(ctx, branch, abort, doxly, consolidate, theirs, ours):
+    """Assistente Inteligente de Merge e Resolução de Conflitos."""
+    if abort:
+        _run_git_command(['merge', '--abort'])
+        click.echo(Fore.YELLOW + "✔ Merge abortado com sucesso.")
+        return
+
+    if consolidate:
+        consolidate_merge()
+        return
+
+    conflicted = _get_conflicted_files()
+    if not conflicted:
+        click.echo(Fore.GREEN + "Nenhum conflito pendente.")
+        return
+
+    if theirs:
+        for f in conflicted:
+            _run_git_command(['checkout', '--theirs', f])
+            _run_git_command(['add', f])
+        consolidate_merge()
+        return
+
+    if ours:
+        for f in conflicted:
+            _run_git_command(['checkout', '--ours', f])
+            _run_git_command(['add', f])
+        consolidate_merge()
+        return
+
+    if doxly:
+        open_conflicts_in_doxly(conflicted)
+        return
+
+    # Menu Interativo Soberano
+    click.echo(f"\n{Fore.RED}{Style.BRIGHT}🔴 CONFLITO DETECTADO EM {len(conflicted)} ARQUIVO(S):{Style.RESET_ALL}")
+    for c in conflicted:
+        click.echo(f"   {Fore.RED}✖ {c}{Fore.RESET}")
+
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}Como deseja resolver?{Style.RESET_ALL}")
+    click.echo(f"  {Fore.WHITE}[1] ☁️  Aceitar versão do SERVIDOR (Theirs){Fore.RESET}")
+    click.echo(f"  {Fore.WHITE}[2] 💻  Manter versão LOCAL desta máquina (Ours){Fore.RESET}")
+    click.echo(f"  {Fore.GREEN}[3] 🚀  Abrir no Doxly (Lite XL) para resolver visualmente{Fore.RESET}")
+    click.echo(f"  {Fore.YELLOW}[4] 🔍  Assistente CLI (Linha a linha no terminal){Fore.RESET}")
+    click.echo(f"  {Fore.WHITE}[0] 🛑  Abortar Merge{Fore.RESET}")
+    
+    choice = click.prompt(Fore.CYAN + "Opção" + Fore.RESET, type=str, default="3")
+    
+    if choice == "1":
+        for f in conflicted:
+            _run_git_command(['checkout', '--theirs', f])
+            _run_git_command(['add', f])
+        consolidate_merge()
+    elif choice == "2":
+        for f in conflicted:
+            _run_git_command(['checkout', '--ours', f])
+            _run_git_command(['add', f])
+        consolidate_merge()
+    elif choice == "3":
+        open_conflicts_in_doxly(conflicted)
+    elif choice == "4":
+        for fpath in conflicted:
+            _parse_and_resolve_file(fpath)
+            _run_git_command(['add', fpath])
+        if click.confirm("\nDeseja consolidar o merge agora?"):
+            consolidate_merge()
+    elif choice == "0":
+        _run_git_command(['merge', '--abort'])
+        click.echo(Fore.YELLOW + "Merge abortado.")

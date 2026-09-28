@@ -145,4 +145,15 @@ if core then
   end
 end
 
+-- Limpa resíduos de crash de sessões anteriores no boot
+pcall(function()
+  local user_dir = USERDIR or "."
+  local sep = PATHSEP or "/"
+  local old_blackbox = user_dir .. sep .. ".doxoade" .. sep .. "diagnostics" .. sep .. "flow_blackbox.txt"
+  if system and system.get_file_info(old_blackbox) then
+    os.remove(old_blackbox)
+  end
+end)
+
 flow_mark("BOOT", "flow_shadow_init", "Flight Recorder Armado")
+
