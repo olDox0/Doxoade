@@ -192,11 +192,22 @@ end
 if core and core.add_thread then
   core.add_thread(function()
     coroutine.yield(1.0)
-    -- Só dispara se o serviço ainda não estiver respondendo no estado
-    local alive = is_mesh_service_alive()
-    if not alive then
-      launch_mesh_service_safe()
+    local user_dir = USERDIR or "."
+    local sep = PATHSEP or "/"
+    local py_anchor = user_dir .. sep .. ".doxoade" .. sep .. "python_path.txt"
+    local py_exe = "python"
+    local finfo = system.get_file_info(py_anchor)
+    if finfo and finfo.type == "file" then
+      local f = io.open(py_anchor, "r")
+      if f then
+        local l = f:read("*l") or ""
+        f:close()
+        if l ~= "" then py_exe = l:gsub("[\r\n]", "") end
+      end
     end
+    -- Executa desacoplado no background com -d
+    local cmd = string.format('start /b "" "%s" -m doxoade lan-git note service -d', py_exe)
+    pcall(system.exec, cmd)
   end)
 end
 
@@ -251,12 +262,12 @@ if Doc and Doc.save then
   end
 end
 
--- 🛡️ REGRA 2: Corrotina "CHECK ➔ ATUALIZA" (Leve, sem loop fantasma e respeitando a digitação)
+-- 🛡️ REGRA 2: Corrotina "CHECK ➔ ATUALIZA" (Respeito sagrado ao usuário digitando)
 if core and core.add_thread then
   core.add_thread(function()
     while true do
-      -- Intervalo suave de 2 segundos (Custo de CPU praticamente zero)
-      coroutine.yield(2.0)
+      -- Checagem suave a cada 1.5s
+      coroutine.yield(1.5)
       
       local is_enabled = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
       if is_enabled then
@@ -266,18 +277,23 @@ if core and core.add_thread then
               local fn_clean = doc.filename:gsub("\\", "/"):lower()
               if fn_clean:find("shared_notes%.md$") or fn_clean:find("shared_notes%.txt$") then
                 
-                local finfo = system.get_file_info and system.get_file_info(doc.filename)
-                if finfo and finfo.type == "file" and finfo.mtime and finfo.mtime > 0 then
-                  
-                  -- 1. Primeira vez que abre o arquivo na sessão: apenas registra o mtime
-                  if not _last_known_disk_mtime[doc.filename] then
-                    _last_known_disk_mtime[doc.filename] = finfo.mtime
-                  
-                  -- 2. SÓ AGE SE O DISCO REALMENTE MUDOU DE FORA (Rede gravou novo mtime)
-                  elseif finfo.mtime ~= _last_known_disk_mtime[doc.filename] then
+                -- 🛑 TRAVA SAGRADA: Se o usuário estiver digitando (is_dirty), NUNCA RECARREGUE!
+                local is_user_editing = false
+                if doc.is_dirty then
+                  local ok, dirty = pcall(doc.is_dirty, doc)
+                  if ok and dirty then is_user_editing = true end
+                end
+
+                if not is_user_editing then
+                  local finfo = system.get_file_info and system.get_file_info(doc.filename)
+                  if finfo and finfo.type == "file" and finfo.mtime and finfo.mtime > 0 then
                     
-                    -- Se o usuário estiver digitando alterações não salvas, NÃO toca no buffer!
-                    if not is_doc_modified(doc) then
+                    -- Primeira vez que abre: apenas registra o mtime do disco
+                    if not _last_known_disk_mtime[doc.filename] then
+                      _last_known_disk_mtime[doc.filename] = finfo.mtime
+                    
+                    -- SÓ RECARREGA SE O DISCO FOI ALTERADO PELA REDE (novo mtime no Windows)
+                    elseif finfo.mtime ~= _last_known_disk_mtime[doc.filename] then
                       _last_known_disk_mtime[doc.filename] = finfo.mtime
                       
                       local f = io.open(doc.filename, "r")
@@ -287,7 +303,7 @@ if core and core.add_thread then
                         
                         if disk_raw and disk_raw ~= "" then
                           local l1, c1, l2, c2 = 1, 1, 1, 1
-                          if doc.get_selection then l1, c1, l2, c2 = doc:get_selection() end
+                          if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
                           
                           doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
                           doc:insert(1, 1, disk_raw)
