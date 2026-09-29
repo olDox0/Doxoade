@@ -750,6 +750,7 @@ def cmd_note_service(password: Optional[str], foreground: bool):
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL,
+        cwd=str(Path.cwd()),  # 👈 Mantém o diretório do projeto ativo explicitamente!
     )
     click.secho(f"🚀 [DOXNOTE MESH] Serviço ativo em segundo plano (PID: {proc.pid}) — Zero Janelas.", fg="green", bold=True)
 

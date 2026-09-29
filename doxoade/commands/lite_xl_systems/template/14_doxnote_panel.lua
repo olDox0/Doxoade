@@ -661,23 +661,26 @@ end
 
 local function start_mesh_daemon_from_ide()
   local py_exe = get_mesh_python_exe()
-  -- Se for Windows, usa pythonw.exe para não abrir nenhuma janela
+  
+  -- Se for Windows, usa pythonw.exe garantindo aspas para caminhos com espaço
   if PLATFORM == "Windows" or package.config:sub(1, 1) == "\\" then
     local pyw = py_exe:gsub("python%.exe$", "pythonw.exe")
     if system.get_file_info and system.get_file_info(pyw) then
       py_exe = pyw
     end
   end
+
+  -- Aspas duplas obrigatórias para caminhos como "C:\Users\Victor Alexandre\..."
   local cmd = string.format('"%s" -m doxoade lan-git note service', py_exe)
   pcall(system.exec, cmd)
 end
 
--- 🛡️ REGRA 2: Verificador Rápido no Doxly (300ms)
+-- 🛡️ REGRA 2: Verificador Relâmpago no Doxly (150ms com Despertador de Frame)
 if core and core.add_thread then
   core.add_thread(function()
     while true do
-      -- ⚡ Reduzido para 0.3s (recarga quase imperceptível ao olho humano!)
-      coroutine.yield(0.3)
+      -- ⚡ 150ms: resposta em tempo real idêntica a um editor colaborativo
+      coroutine.yield(0.15)
 
       local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
       if is_active then
@@ -693,12 +696,14 @@ if core and core.add_thread then
                   if not _last_synced_mtimes[doc.filename] then
                     _last_synced_mtimes[doc.filename] = finfo.mtime
                   elseif finfo.mtime > _last_synced_mtimes[doc.filename] then
+                    
                     local is_dirty = false
                     if doc.is_dirty then
                       local ok, d = pcall(doc.is_dirty, doc)
                       if ok and d then is_dirty = true end
                     end
 
+                    -- Se você não estiver digitando alterações não salvas
                     if not is_dirty then
                       local f = io.open(doc.filename, "r")
                       if f then
@@ -711,13 +716,16 @@ if core and core.add_thread then
                           local l1, c1, l2, c2 = 1, 1, 1, 1
                           if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
 
+                          -- Substitui o conteúdo suavemente
                           doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
                           doc:insert(1, 1, content)
                           if doc.clean then doc:clean() end
 
                           if doc.set_selection then pcall(doc.set_selection, doc, l1, c1, l2, c2) end
+                          
+                          -- 🚀 DESPERTADOR DO LITE XL: Força redesenho imediato mesmo sem foco!
                           core.redraw = true
-                          if core.log then core.log("⚡ [DOXNOTE] Nota atualizada pela malha.") end
+                          if core.log then core.log("⚡ [DOXNOTE] Nota sincronizada da rede.") end
                         end
                       end
                     end
