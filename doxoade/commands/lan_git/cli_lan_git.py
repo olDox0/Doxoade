@@ -714,33 +714,59 @@ def note_group():
 
 
 @note_group.command(name="service")
-@click.option("--password", "-p", default=None, help="Chave de pareamento da malha.")
-def cmd_note_service(password: Optional[str]):
-    """Inicia o daemon P2P do DoxNote Mesh em background/terminal."""
-    from doxoade.commands.lan_git.note_mesh.mesh_engine import NoteMeshEngine, UDP_PORT, TCP_PORT
-    
-    engine = NoteMeshEngine(password=password)
-    engine.start()
+@click.option("--password", default=None, help="Chave de pareamento segura.")
+@click.option("--foreground", "-f", is_flag=True, help="Executa preso ao terminal (modo depuração visual).")
+def cmd_note_service(password: Optional[str], foreground: bool):
+    """Inicia o Daemon P2P de Sincronização de Notas (Background por padrão)."""
+    from doxoade.commands.lan_git.note_mesh.mesh_engine import NoteMeshEngine
 
-    click.secho("============================================================", fg="cyan")
-    click.secho("          DOXNOTE MESH — SERVIÇO P2P DE NOTAS ATIVO", fg="green", bold=True)
-    click.secho("============================================================", fg="cyan")
-    click.echo(f"  Arquivo Global : {engine.notes_file}")
-    click.echo(f"  Porta Beacon   : {UDP_PORT}/UDP (Descoberta P2P)")
-    click.echo(f"  Porta Sync     : {TCP_PORT}/TCP (Túnel Criptografado)")
-    click.echo(f"  Dispositivo    : {engine.hostname} ({engine.local_ip})")
-    click.secho("============================================================", fg="cyan")
-    click.secho("📡 Malha P2P Ativa. Sincronizando com a IDE em tempo real... (Ctrl+C para sair)\n", fg="yellow")
+    # Se já estiver rodando, não duplica
+    if NoteMeshEngine.is_service_running():
+        click.secho("✔ [DOXNOTE MESH] O serviço já está ativo e operando em segundo plano.", fg="green")
+        return
 
-    try:
-        while True:
-            time.sleep(1.0)
-    except KeyboardInterrupt:
-        click.echo("\n[INFO] Encerrando DoxNote Mesh...")
-    finally:
-        engine.stop()
-        click.secho("[OK] Serviço P2P finalizado.", fg="green")
+    # Modo Interativo / Depuração
+    if foreground:
+        engine = NoteMeshEngine(password=password)
+        engine.start()
+        return
 
+    # 🚀 Modo Padrão: Dispara e libera o terminal imediatamente!
+    cmd = [sys.executable, "-m", "doxoade", "lan-git", "note", "service", "-f"]
+    if password:
+        cmd.extend(["--password", password])
+
+    flags = 0
+    if sys.platform == "win32":
+        flags = subprocess.CREATE_NO_WINDOW | 0x00000008  # DETACHED_PROCESS
+
+    proc = subprocess.Popen(cmd, creationflags=flags, close_fds=True)
+    click.secho(f"🚀 [DOXNOTE MESH] Serviço P2P iniciado em segundo plano (PID: {proc.pid}).", fg="green", bold=True)
+    click.echo(f"   {click.style('↳', fg='yellow')} Digite 'doxoade lan-git note status' para ver a telemetria da rede.")
+
+@note_group.command(name="stop")
+def cmd_note_stop():
+    """Encerra o serviço P2P em segundo plano."""
+    home = Path.home()
+    pid_file = home / ".doxoade" / "mesh_daemon.pid"
+    stopped = False
+
+    if pid_file.exists():
+        try:
+            pid = int(pid_file.read_text().strip())
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
+            else:
+                subprocess.run(["kill", "-9", str(pid)], capture_output=True)
+            pid_file.unlink(missing_ok=True)
+            stopped = True
+        except Exception:
+            pass
+
+    if stopped:
+        click.secho("✔ [DOXNOTE MESH] Serviço finalizado com sucesso.", fg="green")
+    else:
+        click.secho("ℹ Nenhum serviço em execução para finalizar.", fg="yellow")
 
 @note_group.command(name="status")
 def cmd_note_status():
