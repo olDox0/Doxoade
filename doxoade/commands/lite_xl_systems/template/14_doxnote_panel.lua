@@ -246,10 +246,9 @@ local function is_doc_modified(doc)
 end
 
 -- =============================================================================
--- 📝 DOXNOTE: SINCRONIZAÇÃO SOBERANA (Salva ➔ Dispara | Rede ➔ Atualiza 1 Vez)
+-- 3. GESTÃO DE NOTAS SOBERANA (Salva ➔ Identifica | Rede ➔ Atualiza 1 Vez)
 -- =============================================================================
 
--- Guarda o último carimbo de modificação (mtime) de cada arquivo
 local _last_synced_mtimes = {}
 
 -- 🛡️ REGRA 1: Ao salvar com Ctrl+S, identifica a alteração e atualiza o carimbo local
@@ -258,21 +257,27 @@ if Doc and Doc.save then
   Doc.save = function(self, ...)
     local res = orig_doc_save(self, ...)
     if self.filename and (self.filename:find("shared_notes%.md$") or self.filename:find("shared_notes%.txt$")) then
-      if core.log then
-        core.log("📝 [DOXNOTE] Salvo localmente com sucesso.")
-      end
+      pcall(function()
+        local finfo = system.get_file_info and system.get_file_info(self.filename)
+        if finfo and finfo.mtime then
+          _last_synced_mtimes[self.filename] = finfo.mtime
+        end
+        if core.log then
+          core.log("📝 [DOXNOTE] Salvo localmente. Sincronizando com a rede...")
+        end
+      end)
     end
     return res
   end
 end
 
--- 🛡️ REGRA 2: Verificador Suave — Só recarrega UMA VEZ se o disco mudou pela rede
+-- 🛡️ REGRA 2: Verificador Suave de Janela (Só recarrega se o disco mudou pela rede E o buffer está limpo)
 if core and core.add_thread then
   core.add_thread(function()
     while true do
-      -- Intervalo relaxado de 2 segundos (sem flood de CPU)
-      coroutine.yield(2.0)
-      
+      -- Intervalo relaxado de 3 segundos
+      coroutine.yield(3.0)
+
       local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
       if is_active then
         pcall(function()
@@ -280,41 +285,37 @@ if core and core.add_thread then
             if doc.filename then
               local fn = doc.filename:gsub("\\", "/"):lower()
               if fn:find("shared_notes%.md$") or fn:find("shared_notes%.txt$") then
-                
-                local finfo = system.get_file_info and system.get_file_info(doc.filename)
-                if finfo and finfo.type == "file" and finfo.mtime and finfo.mtime > 0 then
-                  
-                  -- 1. Primeira vez que vê o arquivo: apenas registra o carimbo atual
-                  if not _last_synced_mtimes[doc.filename] then
-                    _last_synced_mtimes[doc.filename] = finfo.mtime
-                  
-                  -- 2. SÓ AGE se o disco for estritamente mais novo que o último carimbo conhecido
-                  elseif finfo.mtime > _last_synced_mtimes[doc.filename] then
-                    -- Atualiza o carimbo IMEDIATAMENTE para garantir que só recarregue UMA VEZ
-                    _last_synced_mtimes[doc.filename] = finfo.mtime
-                    
-                    -- Se o usuário estiver no meio de edições não salvas, não atrapalha
-                    local is_dirty = false
-                    if doc.is_dirty then
-                      local ok, d = pcall(doc.is_dirty, doc)
-                      if ok and d then is_dirty = true end
-                    end
-                    
-                    if not is_dirty then
+
+                -- 🛑 SE O USUÁRIO ESTÁ DIGITANDO, NUNCA TOQUE NO DOCUMENTO!
+                local is_dirty = false
+                if doc.is_dirty then
+                  local ok, d = pcall(doc.is_dirty, doc)
+                  if ok and d then is_dirty = true end
+                end
+
+                if not is_dirty then
+                  local finfo = system.get_file_info and system.get_file_info(doc.filename)
+                  if finfo and finfo.type == "file" and finfo.mtime and finfo.mtime > 0 then
+
+                    if not _last_synced_mtimes[doc.filename] then
+                      _last_synced_mtimes[doc.filename] = finfo.mtime
+                    elseif finfo.mtime > _last_synced_mtimes[doc.filename] then
+                      _last_synced_mtimes[doc.filename] = finfo.mtime
+
+                      -- Recarrega UMA VEZ
                       local f = io.open(doc.filename, "r")
                       if f then
                         local content = f:read("*a")
                         f:close()
-                        
+
                         if content and content ~= "" then
                           local l1, c1, l2, c2 = 1, 1, 1, 1
                           if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
-                          
-                          -- Recarrega o conteúdo recebido da rede uma única vez
+
                           doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
                           doc:insert(1, 1, content)
                           if doc.clean then doc:clean() end
-                          
+
                           if doc.set_selection then pcall(doc.set_selection, doc, l1, c1, l2, c2) end
                           core.redraw = true
                           if core.log then core.log("⚡ [DOXNOTE] Nota atualizada pela malha.") end
@@ -915,7 +916,7 @@ command.add(nil, {
         return common.fuzzy_match(labels, text)
       end
     })
-  end
+  end,
   ["doxoade:reload-shared-notes"] = function()
     local doc = core.active_view and core.active_view.doc
     if doc and doc.filename then
@@ -926,8 +927,10 @@ command.add(nil, {
         doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
         doc:insert(1, 1, content)
         if doc.clean then doc:clean() end
+        local finfo = system.get_file_info and system.get_file_info(doc.filename)
+        if finfo and finfo.mtime then _last_synced_mtimes[doc.filename] = finfo.mtime end
         core.redraw = true
-        core.log("🔄 [DOXNOTE] Nota recarregada do disco com sucesso.")
+        core.log("🔄 [DOXNOTE] Nota recarregada do disco.")
       end
     end
   end
@@ -938,6 +941,8 @@ command.add(nil, {
 -- ═════════════════════════════════════════════════════════════════════════════
 
 keymap.add {
+  ["f5"] = "doxoade:reload-shared-notes",
+  ["ctrl+r"] = "doxoade:reload-shared-notes",
   ["ctrl+alt+shift+n"] = "doxoade:note-hub-menu",
   ["ctrl+alt+shift+o"] = "doxoade:open-note",
 }

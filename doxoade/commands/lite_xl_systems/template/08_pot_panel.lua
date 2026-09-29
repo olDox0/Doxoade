@@ -643,11 +643,14 @@ command.add(nil, {
     open_in_right_panel(cheat_sheet_file, "📖 Cheat Sheet aberto.")
   end,
   ["doxoade:open-user-settings"] = function()
-    local settings_file = (USERDIR or ".") .. (PATHSEP or "/") .. "user_settings.lua"
+    local settings_file = user_dir .. sep .. "user_settings.lua"
     pcall(function()
       local f = io.open(settings_file, "a")
       if f then f:close() end
     end)
+    open_in_right_panel(settings_file, "⚙️ user_settings.lua aberto no painel direito.")
+  end,
+
   ["doxoade:open-search-docs-hub"] = function()
     core.command_view:enter("🔍 Buscar Documentação Python (Ex: asyncio, json, socket):", {
       submit = function(text)
