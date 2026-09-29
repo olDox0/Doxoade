@@ -74,7 +74,7 @@ class MeshSyncHTTPHandler(BaseHTTPRequestHandler):
                         pass
                 self.engine._file_network_hashes["shared_notes.md"] = new_hash
             else:
-                # Trata notas dentro do subdiretório note/
+                # Salva notas do projeto em .doxoade/note/ na raiz real
                 target_dest = self.engine.project_notes_dir / Path(clean_rel).name
                 target_dest.parent.mkdir(parents=True, exist_ok=True)
                 target_dest.write_bytes(body)
@@ -95,27 +95,6 @@ class MeshSyncHTTPHandler(BaseHTTPRequestHandler):
             self.engine.log(f"✖ Erro no processamento do sync HTTP: {e}")
             self.send_error(500)
 
-    def _resolve_real_project_root(self) -> Path:
-        """Localiza a pasta raiz real do projeto em desenvolvimento."""
-        # 1. Tenta ler o último projeto ativo registrado pelo Doxly
-        last_proj = self.doxoade_dir / "last_project.txt"
-        if last_proj.exists():
-            try:
-                line = last_proj.read_text(encoding="utf-8").strip().splitlines()[0]
-                p = Path(line).resolve()
-                if p.exists() and not str(p).lower().endswith(".config"):
-                    return p
-            except Exception:
-                pass
-
-        # 2. Busca subindo a árvore a partir do diretório atual
-        from doxoade.tools.filesystem import _find_project_root
-        found = _find_project_root(os.getcwd())
-        p_found = Path(found).resolve()
-        if not str(p_found).lower().endswith(".config"):
-            return p_found
-
-        return Path.cwd().resolve()
 
 class NoteMeshEngine:
     """Nó P2P soberano com suporte a diretório multi-notas."""
@@ -125,7 +104,6 @@ class NoteMeshEngine:
         self.doxoade_dir = self.home / ".doxoade"
         self.doxoade_dir.mkdir(parents=True, exist_ok=True)
 
-        # 📂 1. Arquivo canônico global
         self.global_notes_file = self.doxoade_dir / "shared_notes.md"
         
         # 📂 2. Raiz Real do Projeto (Resolve de last_project.txt ou busca recursiva)
@@ -152,11 +130,33 @@ class NoteMeshEngine:
         self.peer_name: Optional[str] = cached_peer.get("name")
         self.last_sync_time: float = 0.0
 
-        # Rastreamento de estado granular por arquivo
         self._file_mtimes: Dict[str, float] = {}
         self._file_sent_hashes: Dict[str, str] = {}
         self._file_network_hashes: Dict[str, str] = {}
         self._init_catalog_state()
+
+    def _resolve_real_project_root(self) -> Path:
+        """Localiza a pasta raiz real do projeto em desenvolvimento."""
+        last_proj = self.doxoade_dir / "last_project.txt"
+        if last_proj.exists():
+            try:
+                line = last_proj.read_text(encoding="utf-8").strip().splitlines()[0]
+                p = Path(line).resolve()
+                if p.exists() and not str(p).lower().endswith(".config"):
+                    return p
+            except Exception:
+                pass
+
+        try:
+            from doxoade.tools.filesystem import _find_project_root
+            found = _find_project_root(os.getcwd())
+            p_found = Path(found).resolve()
+            if not str(p_found).lower().endswith(".config"):
+                return p_found
+        except Exception:
+            pass
+
+        return Path.cwd().resolve()
 
     @property
     def notes_file(self) -> Path:
@@ -364,13 +364,11 @@ class NoteMeshEngine:
             time.sleep(0.15)
             candidates: List[tuple[Path, str]] = []
 
-            # 1. Arquivos de rascunho rápido
             if self.global_notes_file.exists():
                 candidates.append((self.global_notes_file, "shared_notes.md"))
             if self.project_notes_file.exists():
                 candidates.append((self.project_notes_file, "shared_notes.md"))
 
-            # 2. Todos os cadernos de projeto (.doxoade/note/*.md)
             if self.project_notes_dir.exists():
                 try:
                     for note_path in self.project_notes_dir.glob("*.md"):
@@ -379,7 +377,6 @@ class NoteMeshEngine:
                 except Exception:
                     pass
 
-            # Varredura e despacho de deltas
             for path_obj, rel_name in candidates:
                 try:
                     p_str = str(path_obj)
@@ -394,12 +391,10 @@ class NoteMeshEngine:
                         last_net = self._file_network_hashes.get(rel_name)
                         last_sent = self._file_sent_hashes.get(rel_name)
 
-                        # Só envia se foi alterado LOCALMENTE (não eco da rede)
                         if cur_hash != last_net and cur_hash != last_sent:
                             self.log(f"📝 [SALVAMENTO DETECTADO] em: {rel_name}")
                             if self.send_push_to_peer(content, note_rel_path=rel_name):
                                 self._file_sent_hashes[rel_name] = cur_hash
-                                # Se foi o shared_notes global, espelha no projeto
                                 if path_obj == self.global_notes_file and self.project_notes_file.exists():
                                     self.project_notes_file.write_bytes(content)
                                     self._file_mtimes[str(self.project_notes_file)] = self.project_notes_file.stat().st_mtime
