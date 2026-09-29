@@ -246,31 +246,38 @@ local function is_doc_modified(doc)
 end
 
 -- =============================================================================
--- 📝 DOXNOTE WATCHER (Lógica Inviolável: Zero Reversão / Respeito ao Editor)
+-- 📝 DOXNOTE: SINCRONIZAÇÃO SOBERANA (Salva ➔ Dispara | Rede ➔ Atualiza 1 Vez)
 -- =============================================================================
-local _doc_last_mtime = {}
 
--- 🛡️ REGRA 1: Ao salvar com Ctrl+S, o Doxly salva e atualiza o carimbo dele mesmo
+-- Guarda o último carimbo de modificação (mtime) de cada arquivo
+local _last_synced_mtimes = {}
+
+-- 🛡️ REGRA 1: Ao salvar com Ctrl+S, identifica a alteração e atualiza o carimbo local
 if Doc and Doc.save then
   local orig_doc_save = Doc.save
   Doc.save = function(self, ...)
     local res = orig_doc_save(self, ...)
-    pcall(function()
-      if self.filename and (self.filename:find("shared_notes%.md$") or self.filename:find("shared_notes%.txt$")) then
-        local info = system.get_file_info(self.filename)
-        if info and info.mtime then
-          _doc_last_mtime[self.filename] = info.mtime
+    if self.filename and (self.filename:find("shared_notes%.md$") or self.filename:find("shared_notes%.txt$")) then
+      pcall(function()
+        local finfo = system.get_file_info and system.get_file_info(self.filename)
+        if finfo and finfo.mtime then
+          -- Registra que fomos nós que salvamos este mtime
+          _last_synced_mtimes[self.filename] = finfo.mtime
         end
-      end
-    end)
+        if core.log then
+          core.log("📝 [DOXNOTE] Salvo localmente. Enviando para a malha...")
+        end
+      end)
+    end
     return res
   end
 end
 
--- 🛡️ REGRA 2: Corrotina "CHECK ➔ ATUALIZA" (Leve, sem falso-positivo e sem auto-revert)
+-- 🛡️ REGRA 2: Verificador Suave — Só recarrega UMA VEZ se o disco mudou pela rede
 if core and core.add_thread then
   core.add_thread(function()
     while true do
+      -- Intervalo relaxado de 2 segundos (sem flood de CPU)
       coroutine.yield(2.0)
       
       local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
@@ -281,41 +288,43 @@ if core and core.add_thread then
               local fn = doc.filename:gsub("\\", "/"):lower()
               if fn:find("shared_notes%.md$") or fn:find("shared_notes%.txt$") then
                 
-                -- 🛑 LEI SAGRADA: Se o usuário estiver digitando (is_dirty), NUNCA TOCAR NO TEXTO!
-                local is_dirty = false
-                if doc.is_dirty then
-                  local ok, d = pcall(doc.is_dirty, doc)
-                  if ok and d then is_dirty = true end
-                end
-
-                if not is_dirty then
-                  local info = system.get_file_info(doc.filename)
-                  if info and info.type == "file" and info.mtime then
+                local finfo = system.get_file_info and system.get_file_info(doc.filename)
+                if finfo and finfo.type == "file" and finfo.mtime and finfo.mtime > 0 then
+                  
+                  -- 1. Primeira vez que vê o arquivo: apenas registra o carimbo atual
+                  if not _last_synced_mtimes[doc.filename] then
+                    _last_synced_mtimes[doc.filename] = finfo.mtime
+                  
+                  -- 2. SÓ AGE se o disco for estritamente mais novo que o último carimbo conhecido
+                  elseif finfo.mtime > _last_synced_mtimes[doc.filename] then
+                    -- Atualiza o carimbo IMEDIATAMENTE para garantir que só recarregue UMA VEZ
+                    _last_synced_mtimes[doc.filename] = finfo.mtime
                     
-                    -- Registra na primeira abertura
-                    if not _doc_last_mtime[doc.filename] then
-                      _doc_last_mtime[doc.filename] = info.mtime
-                      
-                    -- SÓ recarrega se o disco for ESTRITAMENTE MAIS NOVO (vindo da rede)
-                    elseif info.mtime > _doc_last_mtime[doc.filename] then
-                      _doc_last_mtime[doc.filename] = info.mtime
-                      
+                    -- Se o usuário estiver no meio de edições não salvas, não atrapalha
+                    local is_dirty = false
+                    if doc.is_dirty then
+                      local ok, d = pcall(doc.is_dirty, doc)
+                      if ok and d then is_dirty = true end
+                    end
+                    
+                    if not is_dirty then
                       local f = io.open(doc.filename, "r")
                       if f then
-                        local disk_text = f:read("*a")
+                        local content = f:read("*a")
                         f:close()
                         
-                        if disk_text and disk_text ~= "" then
+                        if content and content ~= "" then
                           local l1, c1, l2, c2 = 1, 1, 1, 1
                           if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
                           
+                          -- Recarrega o conteúdo recebido da rede uma única vez
                           doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
-                          doc:insert(1, 1, disk_text)
+                          doc:insert(1, 1, content)
                           if doc.clean then doc:clean() end
                           
                           if doc.set_selection then pcall(doc.set_selection, doc, l1, c1, l2, c2) end
                           core.redraw = true
-                          if core.log then core.log("⚡ [DOXNOTE] Nota sincronizada da rede com sucesso!") end
+                          if core.log then core.log("⚡ [DOXNOTE] Nota atualizada pela malha.") end
                         end
                       end
                     end
@@ -914,6 +923,22 @@ command.add(nil, {
       end
     })
   end
+  ["doxoade:reload-shared-notes"] = function()
+    local doc = core.active_view and core.active_view.doc
+    if doc and doc.filename then
+      local f = io.open(doc.filename, "r")
+      if f then
+        local content = f:read("*a")
+        f:close()
+        doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
+        doc:insert(1, 1, content)
+        if doc.clean then doc:clean() end
+        local finfo = system.get_file_info and system.get_file_info(doc.filename)
+        if finfo and finfo.mtime then _last_synced_mtimes[doc.filename] = finfo.mtime end
+        core.redraw = true
+        core.log("🔄 [DOXNOTE] Nota recarregada manualmente.")
+      end
+    end
 })
 
 -- ═════════════════════════════════════════════════════════════════════════════
