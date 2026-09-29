@@ -299,16 +299,24 @@ if core and core.add_thread then
 
                     if not _last_synced_mtimes[doc.filename] then
                       _last_synced_mtimes[doc.filename] = finfo.mtime
-                    elseif finfo.mtime > _last_synced_mtimes[doc.filename] then
-                      _last_synced_mtimes[doc.filename] = finfo.mtime
+                  elseif finfo.mtime > _last_synced_mtimes[doc.filename] then
+                    local is_dirty = false
+                    if doc.is_dirty then
+                      local ok, d = pcall(doc.is_dirty, doc)
+                      if ok and d then is_dirty = true end
+                    end
 
-                      -- Recarrega UMA VEZ
+                    -- Só recarrega se você não estiver digitando alterações não salvas
+                    if not is_dirty then
                       local f = io.open(doc.filename, "r")
                       if f then
                         local content = f:read("*a")
                         f:close()
 
                         if content and content ~= "" then
+                          -- 🎯 ATUALIZA O CARIMBO AQUI (Garante que não perca o evento)
+                          _last_synced_mtimes[doc.filename] = finfo.mtime
+                          
                           local l1, c1, l2, c2 = 1, 1, 1, 1
                           if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
 
