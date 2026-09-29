@@ -653,14 +653,8 @@ end
 
 local function start_mesh_daemon_from_ide()
   local py_exe = get_mesh_python_exe()
-  local is_win = (PLATFORM == "Windows") or (package.config:sub(1, 1) == "\\")
-  local cmd
-  if is_win then
-    -- Inicia em background silencioso desacoplado
-    cmd = string.format('start /b "" "%s" -m doxoade lan-git note service', py_exe)
-  else
-    cmd = string.format('"%s" -m doxoade lan-git note service &', py_exe)
-  end
+  -- Invoca diretamente o executável Python (o próprio CLI já se desacopla em background)
+  local cmd = string.format('"%s" -m doxoade lan-git note service', py_exe)
   pcall(system.exec, cmd)
 end
 
@@ -816,19 +810,9 @@ command.add(nil, {
         local shared_path = home_dir .. sep .. ".doxoade" .. sep .. "shared_notes.md"
 
         -- 1. Alterna o estado da Sincronização (Muda a cor do Badge no Rodapé)
+        -- 1. Alterna o estado da Sincronização (1 chamada limpa)
         if choice:find("%[1%]") then
           command.perform("doxoade:toggle-note-sync")
-          local new_state = not (rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true)
-          rawset(_G, "_DOXOADE_NOTE_SYNC_ACTIVE", new_state)
-
-          if new_state then
-            -- Dispara o daemon único de background (protegido pelo Singleton Lock)
-            launch_mesh_service_safe()
-            core.log("🟢 [NOTE MESH] Sincronização ATIVADA e Daemon de Rede iniciado.")
-          else
-            core.log("🔴 [NOTE MESH] Sincronização DESATIVADA (Modo Local).")
-          end
-          core.redraw = true
 
         -- 2. Abrir shared_notes no split lateral
         elseif choice:find("%[2%]") then
