@@ -613,6 +613,63 @@ local function open_note_in_split(file_path, log_msg)
   return nil
 end
 
+-- =============================================================================
+-- 🔌 CONTROLADOR DO DAEMON P2P EM BACKGROUND (IGNIÇÃO VIA IDE)
+-- =============================================================================
+
+local function get_mesh_python_exe()
+  local user_dir = USERDIR or "."
+  local sep = PATHSEP or "/"
+
+  -- 1. Verifica âncora gravada em .doxoade/python_path.txt
+  local py_anchor = (user_dir .. sep .. ".doxoade" .. sep .. "python_path.txt")
+  local finfo = system.get_file_info and system.get_file_info(py_anchor)
+  if finfo and finfo.type == "file" then
+    local f = io.open(py_anchor, "r")
+    if f then
+      local line = f:read("*l") or ""
+      f:close()
+      line = line:gsub("[\r\n]", ""):match("^%s*(.-)%s*$")
+      if line ~= "" and system.get_file_info(line) then
+        return line:gsub("/", "\\")
+      end
+    end
+  end
+
+  -- 2. Verifica venv na raiz dos projetos abertos no Doxly
+  if core.project_directories then
+    for _, p in ipairs(core.project_directories) do
+      local p_str = tostring(type(p) == "table" and (p.path or p.name) or p)
+      local is_win = (PLATFORM == "Windows") or (package.config:sub(1, 1) == "\\")
+      local venv_py = p_str .. sep .. "venv" .. sep .. (is_win and "Scripts\\python.exe" or "bin/python")
+      if system.get_file_info(venv_py) then
+        return venv_py:gsub("/", "\\")
+      end
+    end
+  end
+
+  return "python"
+end
+
+local function start_mesh_daemon_from_ide()
+  local py_exe = get_mesh_python_exe()
+  local is_win = (PLATFORM == "Windows") or (package.config:sub(1, 1) == "\\")
+  local cmd
+  if is_win then
+    -- Inicia em background silencioso desacoplado
+    cmd = string.format('start /b "" "%s" -m doxoade lan-git note service', py_exe)
+  else
+    cmd = string.format('"%s" -m doxoade lan-git note service &', py_exe)
+  end
+  pcall(system.exec, cmd)
+end
+
+local function stop_mesh_daemon_from_ide()
+  local py_exe = get_mesh_python_exe()
+  local cmd = string.format('"%s" -m doxoade lan-git note stop', py_exe)
+  pcall(system.exec, cmd)
+end
+
 -- ═════════════════════════════════════════════════════════════════════════════
 -- 4. COMANDOS SOBERANOS DO SISTEMA DE NOTAS
 -- ═════════════════════════════════════════════════════════════════════════════
@@ -760,6 +817,7 @@ command.add(nil, {
 
         -- 1. Alterna o estado da Sincronização (Muda a cor do Badge no Rodapé)
         if choice:find("%[1%]") then
+          command.perform("doxoade:toggle-note-sync")
           local new_state = not (rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true)
           rawset(_G, "_DOXOADE_NOTE_SYNC_ACTIVE", new_state)
 
@@ -916,6 +974,23 @@ command.add(nil, {
         return common.fuzzy_match(labels, text)
       end
     })
+  end,
+  ["doxoade:toggle-note-sync"] = function()
+    local is_active = not (rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true)
+    rawset(_G, "_DOXOADE_NOTE_SYNC_ACTIVE", is_active)
+
+    if is_active then
+      start_mesh_daemon_from_ide()
+      if core.log then
+        core.log("🟢 [NOTE MESH] Sincronização ATIVADA e Daemon P2P iniciado em background.")
+      end
+    else
+      stop_mesh_daemon_from_ide()
+      if core.log then
+        core.log("🔴 [NOTE MESH] Sincronização DESATIVADA (Modo Local).")
+      end
+    end
+    core.redraw = true
   end,
   ["doxoade:reload-shared-notes"] = function()
     local doc = core.active_view and core.active_view.doc

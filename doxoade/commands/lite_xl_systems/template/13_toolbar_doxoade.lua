@@ -177,15 +177,14 @@ core.add_thread(function()
       function()
         local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
         local badge_label = is_active and " [ NOTE: ON ] " or " [ NOTE: OFF ] "
-
         return {
           COLOR_TEXT_WHITE, badge_label,
           DIVIDER_COLOR, "| "
         }
       end,
       function()
-        -- Ao clicar: abre diretamente o menu completo de gestão e configuração
-        command.perform("doxoade:note-hub-menu")
+        -- ⚡ 1 CLIQUE: Alterna o estado e dispara/mata o daemon em background
+        command.perform("doxoade:toggle-note-sync")
       end,
       5
     )
