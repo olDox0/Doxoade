@@ -213,6 +213,11 @@ class LiteXLProcess:
             return True, ipc_payload
         except Exception as e:
             return False, str(e)
+        try:
+            from doxoade.commands.lan_git.note_mesh.mesh_engine import NoteMeshEngine
+            NoteMeshEngine.ensure_background_running()
+        except Exception:
+            pass
 
     @classmethod
     def cleanup_old_shims(cls):

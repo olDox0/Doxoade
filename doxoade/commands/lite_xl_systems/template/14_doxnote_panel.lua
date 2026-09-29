@@ -170,10 +170,6 @@ local function is_mesh_service_alive()
 end
 
 local function launch_mesh_service_safe()
-  -- Só inicia se não estiver vivo
-  local alive = is_mesh_service_alive()
-  if alive then return end
-
   local user_dir = USERDIR or "."
   local py_anchor = user_dir .. sep .. ".doxoade" .. sep .. "python_path.txt"
   local py_exe = "python"
@@ -187,11 +183,21 @@ local function launch_mesh_service_safe()
     end
   end
 
-  local cmd = string.format('start /b "" "%s" -m doxoade lan-git note service', py_exe)
+  -- Dispara o daemon em segundo plano com a flag -d (desacoplada)
+  local cmd = string.format('start /b "" "%s" -m doxoade lan-git note service -d', py_exe)
   pcall(system.exec, cmd)
-  if core.log then
-    core.log("⚡ [DOXNOTE MESH] Daemon único iniciado.")
-  end
+end
+
+-- 🚀 AUTO-IGNIÇÃO: Dispara a verificação 1 segundo após o boot do Doxly
+if core and core.add_thread then
+  core.add_thread(function()
+    coroutine.yield(1.0)
+    -- Só dispara se o serviço ainda não estiver respondendo no estado
+    local alive = is_mesh_service_alive()
+    if not alive then
+      launch_mesh_service_safe()
+    end
+  end)
 end
 
 -- ═════════════════════════════════════════════════════════════════════════════
@@ -211,25 +217,31 @@ end
 local _last_local_save_time = 0
 
 local _shared_doc_mtimes = {}
+local _last_known_disk_hash = {}
+
+-- 🛡️ REGRA 1: Ao salvar com Ctrl+S, o Doxly grava no disco e guarda o hash dele mesmo
 if Doc and Doc.save then
   local orig_doc_save = Doc.save
   Doc.save = function(self, ...)
     local res = orig_doc_save(self, ...)
     if self.filename and (self.filename:find("shared_notes%.md$") or self.filename:find("shared_notes%.txt$")) then
-      local finfo = system.get_file_info and system.get_file_info(self.filename)
-      if finfo and finfo.mtime then
-        _shared_doc_mtimes[self.filename] = finfo.mtime
-      end
+      pcall(function()
+        local f = io.open(self.filename, "r")
+        if f then
+          local text = f:read("*a")
+          f:close()
+          _last_known_disk_hash[self.filename] = calc_clean_hash(text)
+        end
+      end)
     end
     return res
   end
 end
 
--- 🛡️ REGRA 2: Corrotina "CHECK ➔ ATUALIZA" (Leve, sem flood de CPU e imune a travamentos)
+-- 🛡️ REGRA 2: Corrotina "CHECK ➔ ATUALIZA" (Respeito sagrado ao usuário digitando)
 if core and core.add_thread then
   core.add_thread(function()
     while true do
-      -- Intervalo calmo de 1.5s (Zero impacto no frame de 60 FPS)
       coroutine.yield(1.5)
       
       local is_enabled = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
@@ -237,49 +249,41 @@ if core and core.add_thread then
         pcall(function()
           for _, doc in ipairs(core.docs or {}) do
             if doc.filename then
-              local fn_lower = doc.filename:gsub("\\", "/"):lower()
-              if fn_lower:find("shared_notes%.md$") or fn_lower:find("shared_notes%.txt$") then
-                local finfo = system.get_file_info and system.get_file_info(doc.filename)
+              local fn_clean = doc.filename:gsub("\\", "/"):lower()
+              if fn_clean:find("shared_notes%.md$") or fn_clean:find("shared_notes%.txt$") then
                 
-                if finfo and finfo.type == "file" and finfo.mtime and finfo.mtime > 0 then
-                  -- Inicializa o carimbo na primeira vez que abre o arquivo
-                  if not _shared_doc_mtimes[doc.filename] then
-                    _shared_doc_mtimes[doc.filename] = finfo.mtime
-                  
-                  -- SÓ age se o arquivo no disco foi alterado por fora (pela rede)
-                  elseif finfo.mtime ~= _shared_doc_mtimes[doc.filename] then
-                    _shared_doc_mtimes[doc.filename] = finfo.mtime
+                -- Se você está digitando (buffer dirty), NUNCA sobrescreva!
+                if not doc:is_dirty() then
+                  local finfo = system.get_file_info and system.get_file_info(doc.filename)
+                  if finfo and finfo.type == "file" and (finfo.size or 0) > 0 then
                     
-                    -- Se você estiver digitando edições não salvas, respeita e não apaga!
-                    if not doc:is_dirty() then
-                      local f = io.open(doc.filename, "r")
-                      if f then
-                        local disk_raw = f:read("*a")
-                        f:close()
+                    local f = io.open(doc.filename, "r")
+                    if f then
+                      local disk_raw = f:read("*a")
+                      f:close()
+                      
+                      if disk_raw and disk_raw ~= "" then
+                        local disk_hash = calc_clean_hash(disk_raw)
                         
-                        if disk_raw and disk_raw ~= "" then
-                          local cur_raw = doc:get_text(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
+                        -- Inicializa no boot
+                        if not _last_known_disk_hash[doc.filename] then
+                          _last_known_disk_hash[doc.filename] = disk_hash
+                        
+                        -- SÓ RECARREGA SE O DISCO REALMENTE MUDOU POR FORA (PELA REDE)
+                        elseif disk_hash ~= _last_known_disk_hash[doc.filename] then
+                          _last_known_disk_hash[doc.filename] = disk_hash
                           
-                          -- Só substitui se o conteúdo for realmente diferente
-                          if cur_raw ~= disk_raw then
-                            local l1, c1, l2, c2 = 1, 1, 1, 1
-                            if doc.get_selection then
-                              l1, c1, l2, c2 = doc:get_selection()
-                            end
-                            
-                            doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
-                            doc:insert(1, 1, disk_raw)
-                            doc:clean()
-                            
-                            if doc.set_selection then
-                              pcall(doc.set_selection, doc, l1, c1, l2, c2)
-                            end
-                            
-                            core.redraw = true
-                            if core.log then
-                              core.log("⚡ [DOXNOTE] Nota recarregada da rede com sucesso!")
-                            end
-                          end
+                          local l1, c1, l2, c2 = 1, 1, 1, 1
+                          if doc.get_selection then l1, c1, l2, c2 = doc:get_selection() end
+                          
+                          doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
+                          doc:insert(1, 1, disk_raw)
+                          doc:clean()
+                          
+                          if doc.set_selection then pcall(doc.set_selection, doc, l1, c1, l2, c2) end
+                          
+                          core.redraw = true
+                          if core.log then core.log("⚡ [DOXNOTE] Nota sincronizada da rede com sucesso!") end
                         end
                       end
                     end
