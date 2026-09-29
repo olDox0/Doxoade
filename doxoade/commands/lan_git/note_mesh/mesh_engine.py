@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/lan_git/note_mesh/mesh_engine.py
 """
-🌐 DOXNOTE MESH ENGINE v2.0 — Motor P2P Simétrico e Atômico (Push on Change).
-Sem sockets persistentes bloqueantes: Transmissão atômica com ACK imediato.
+🌐 DOXNOTE MESH ENGINE v3.0 — Dual-Watchdog & Resilient Unicast Peering.
+Monitora tanto ~/.doxoade/shared_notes.md quanto ./shared_notes.md.
 Compliance: ProDeNov 1.2.1 | PASC-6.1 | Limite < 50KB.
 """
 from __future__ import annotations
@@ -16,89 +16,60 @@ import hashlib
 import hmac
 import threading
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
-MESH_MAGIC = "DOX_MESH_V2"
+MESH_MAGIC = "DOX_MESH_V3"
 UDP_PORT = 54547
 TCP_PORT = 54548
 
 
 class NoteMeshEngine:
-    """Nó P2P soberano com sincronização simétrica atômica."""
+    """Nó P2P soberano com Dual-Watchdog e Peering Resiliente."""
 
     def __init__(self, password: Optional[str] = None):
         self.home = Path.home()
         self.doxoade_dir = self.home / ".doxoade"
         self.doxoade_dir.mkdir(parents=True, exist_ok=True)
-        self.notes_file = self.doxoade_dir / "shared_notes.md"
+        
+        # 📂 Arquivo canônico global
+        self.global_notes_file = self.doxoade_dir / "shared_notes.md"
+        # 📂 Arquivo local do projeto (se existir)
+        self.project_notes_file = Path.cwd() / "shared_notes.md"
+        
         self.state_file = self.doxoade_dir / "mesh_state.json"
         self.key_file = self.doxoade_dir / "mesh_auth.key"
         self.pid_file = self.doxoade_dir / "mesh_daemon.pid"
+        self.log_file = self.doxoade_dir / "mesh.log"
 
-        if not self.notes_file.exists():
-            self.notes_file.write_text("# 📝 Doxoade Shared Notes\n\n", encoding="utf-8")
+        if not self.global_notes_file.exists():
+            self.global_notes_file.write_text("# 📝 Doxoade Shared Notes\n\n", encoding="utf-8")
 
         self.secret_key = self._load_or_create_key(password)
         self.hostname = socket.gethostname()
         self.local_ip = self._get_local_ip()
         self.running = False
 
-        self.peer_ip: Optional[str] = None
-        self.peer_name: Optional[str] = None
+        # Recupera último peer conhecido do cache
+        cached_peer = self._load_cached_peer()
+        self.peer_ip: Optional[str] = cached_peer.get("ip")
+        self.peer_name: Optional[str] = cached_peer.get("name")
         self.last_sync_time: float = 0.0
-        self.last_rtt_ms: float = 0.0
 
-        self._last_sent_hash: str = self._calculate_file_hash()
+        self._last_sent_hash: str = self._calculate_file_hash(self.global_notes_file)
         self._last_network_hash: str = self._last_sent_hash
-        self._last_mtime: float = self.notes_file.stat().st_mtime
+        self._last_global_mtime: float = self.global_notes_file.stat().st_mtime
+        self._last_proj_mtime: float = self.project_notes_file.stat().st_mtime if self.project_notes_file.exists() else 0.0
 
-    @classmethod
-    def is_service_running(cls) -> bool:
-        """Verifica de forma atômica se o serviço já está ouvindo na porta TCP 54548."""
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(0.2)
+    def log(self, msg: str):
+        """Grava log com timestamp legível para telemetria forense."""
+        ts = time.strftime("%H:%M:%S")
+        line = f"[{ts}] {msg}"
+        print(line)
         try:
-            res = s.connect_ex(("127.0.0.1", TCP_PORT))
-            s.close()
-            return res == 0
-        except Exception:
-            return False
-
-    def _enforce_single_instance(self):
-        """Trava atômica no bind da porta (imune a PIDs reciclados no Windows)."""
-        lock_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        lock_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            lock_sock.bind(("127.0.0.1", TCP_PORT))
-            lock_sock.close()
-        except OSError:
-            # Se a porta já está ocupada, sai silenciosamente sem erro
-            sys.exit(0)
-            
-        try:
-            self.pid_file.write_text(str(os.getpid()), encoding="utf-8")
+            with open(self.log_file, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
         except Exception:
             pass
-
-    @classmethod
-    def ensure_background_running(cls, password: Optional[str] = None) -> bool:
-        """Garante que o serviço esteja rodando em background; se não estiver, sobe silenciosamente."""
-        if cls.is_service_running():
-            return True
-        import subprocess
-        cmd = [sys.executable, "-m", "doxoade", "lan-git", "note", "service", "-d"]
-        if password:
-            cmd.extend(["--password", password])
-        
-        flags = 0
-        if sys.platform == "win32":
-            flags = subprocess.CREATE_NO_WINDOW | 0x00000008  # DETACHED_PROCESS
-            
-        try:
-            subprocess.Popen(cmd, creationflags=flags, close_fds=True)
-            return True
-        except Exception:
-            return False
 
     def _get_local_ip(self) -> str:
         try:
@@ -121,13 +92,24 @@ class NoteMeshEngine:
         self.key_file.write_bytes(default_key)
         return default_key
 
-    def _calculate_file_hash(self) -> str:
-        if not self.notes_file.exists():
+    def _calculate_file_hash(self, path: Path) -> str:
+        if not path.exists():
             return ""
         try:
-            return hashlib.sha256(self.notes_file.read_bytes()).hexdigest()
+            return hashlib.sha256(path.read_bytes()).hexdigest()
         except Exception:
             return ""
+
+    def _load_cached_peer(self) -> dict:
+        if self.state_file.exists():
+            try:
+                data = json.loads(self.state_file.read_text(encoding="utf-8"))
+                pip = data.get("peer_ip")
+                if pip and pip != "Nenhum" and pip != self.local_ip:
+                    return {"ip": pip, "name": data.get("peer_name")}
+            except Exception:
+                pass
+        return {}
 
     def _update_state_file(self, status: str):
         state = {
@@ -138,7 +120,6 @@ class NoteMeshEngine:
             "peer_name": self.peer_name or "Nenhum",
             "peer_ip": self.peer_ip or "Nenhum",
             "last_sync": time.strftime("%H:%M:%S", time.localtime(self.last_sync_time)) if self.last_sync_time else "Nunca",
-            "rtt_ms": round(self.last_rtt_ms, 2),
             "updated_at": time.time(),
         }
         try:
@@ -147,7 +128,7 @@ class NoteMeshEngine:
             pass
 
     def _beacon_loop(self):
-        """Descoberta contínua via UDP Broadcast."""
+        """Descoberta contínua em broadcast local e direto na sub-rede."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -157,21 +138,37 @@ class NoteMeshEngine:
             return
         sock.setblocking(False)
 
-        last_broadcast = 0.0
+        # Calcula o broadcast da sub-rede local (ex: 192.168.18.255)
+        subnet_bcast = "255.255.255.255"
+        if self.local_ip.startswith("192.168."):
+            parts = self.local_ip.split(".")
+            subnet_bcast = f"{parts[0]}.{parts[1]}.{parts[2]}.255"
+
+        last_bcast = 0.0
         while self.running:
             now = time.time()
-            if now - last_broadcast > 3.0:
+            if now - last_bcast > 3.0:
                 payload = json.dumps({
                     "magic": MESH_MAGIC,
                     "host": self.hostname,
                     "ip": self.local_ip,
                     "tcp_port": TCP_PORT
                 }).encode("utf-8")
-                try:
-                    sock.sendto(payload, ("255.255.255.255", UDP_PORT))
-                except Exception:
-                    pass
-                last_broadcast = now
+
+                for target_ip in [subnet_bcast, "255.255.255.255"]:
+                    try:
+                        sock.sendto(payload, (target_ip, UDP_PORT))
+                    except Exception:
+                        pass
+
+                # Se já temos um peer salvo em cache, envia probe unicast direto
+                if self.peer_ip:
+                    try:
+                        sock.sendto(payload, (self.peer_ip, UDP_PORT))
+                    except Exception:
+                        pass
+
+                last_bcast = now
                 self._update_state_file("connected" if self.peer_ip else "searching")
 
             ready = select.select([sock], [], [], 0.5)
@@ -180,8 +177,10 @@ class NoteMeshEngine:
                     data, addr = sock.recvfrom(2048)
                     msg = json.loads(data.decode("utf-8"))
                     if msg.get("magic") == MESH_MAGIC and msg.get("ip") != self.local_ip:
-                        self.peer_ip = msg["ip"]
-                        self.peer_name = msg.get("host")
+                        if self.peer_ip != msg["ip"]:
+                            self.peer_ip = msg["ip"]
+                            self.peer_name = msg.get("host")
+                            self.log(f"📡 [DESCOBERTA] Par conectado: {self.peer_name} ({self.peer_ip})")
                 except Exception:
                     pass
         sock.close()
@@ -193,7 +192,7 @@ class NoteMeshEngine:
         try:
             server.bind(("0.0.0.0", TCP_PORT))
         except OSError:
-            print(f"⚠ [DOXNOTE MESH] Porta {TCP_PORT} já em uso. Encerrando duplicata.")
+            self.log(f"⚠ Porta {TCP_PORT} já em uso. Daemon anterior ativo.")
             sys.exit(0)
 
         server.listen(5)
@@ -210,10 +209,10 @@ class NoteMeshEngine:
         server.close()
 
     def _handle_incoming_push(self, sock: socket.socket, sender_ip: str):
-        """Recebe payload com autenticação HMAC, salva no disco e responde OK."""
+        """Recebe payload da rede, valida HMAC e atualiza ambos os arquivos."""
         try:
             sock.settimeout(4.0)
-            raw_header = sock.recv(32 + 8 + 4)  # HMAC (32) + Timestamp (8) + Len (4)
+            raw_header = sock.recv(32 + 8 + 4)
             if len(raw_header) < 44:
                 sock.close()
                 return
@@ -230,76 +229,112 @@ class NoteMeshEngine:
                     break
                 body.extend(chunk)
 
-            # Valida autenticação
             computed_hmac = hmac.new(self.secret_key, ts_bytes + len_bytes + body, hashlib.sha256).digest()
             if not hmac.compare_digest(expected_hmac, computed_hmac):
                 sock.close()
                 return
 
-            # Grava no arquivo
             new_hash = hashlib.sha256(body).hexdigest()
             self._last_network_hash = new_hash
-            self.notes_file.write_bytes(body)
-            self._last_mtime = self.notes_file.stat().st_mtime
-            self.last_sync_time = time.time()
 
-            # Responde ACK
-            sock.sendall(b"OK")
+            # Atualiza o arquivo global
+            self.global_notes_file.write_bytes(body)
+            self._last_global_mtime = self.global_notes_file.stat().st_mtime
+
+            # Se o projeto tiver seu próprio shared_notes.md, sincroniza ele também!
+            if self.project_notes_file.exists():
+                try:
+                    self.project_notes_file.write_bytes(body)
+                    self._last_proj_mtime = self.project_notes_file.stat().st_mtime
+                except Exception:
+                    pass
+
+            self.last_sync_time = time.time()
             self.peer_ip = sender_ip
+            sock.sendall(b"OK")
+            self.log(f"📥 [RECEBIDO] Nota sincronizada de {sender_ip} ({len(body)} bytes).")
             self._update_state_file("connected")
-        except Exception:
-            pass
+        except Exception as e:
+            self.log(f"✖ Erro ao receber push: {e}")
         finally:
             sock.close()
 
     def send_push_to_peer(self, content_bytes: bytes) -> bool:
-        """Envia atualização atômica para o par na rede."""
-        if not self.peer_ip:
+        """Envia atualização atômica para o par."""
+        target_ip = self.peer_ip
+        if not target_ip:
+            self.log("⚠️ Nenhum IP de par detectado para envio.")
             return False
-        t0 = time.perf_counter_ns()
+
+        t0 = time.perf_counter()
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2.5)
-            sock.connect((self.peer_ip, TCP_PORT))
+            sock.settimeout(3.0)
+            sock.connect((target_ip, TCP_PORT))
 
             ts_bytes = int(time.time()).to_bytes(8, "big")
             len_bytes = len(content_bytes).to_bytes(4, "big")
             token_hmac = hmac.new(self.secret_key, ts_bytes + len_bytes + content_bytes, hashlib.sha256).digest()
 
-            header = token_hmac + ts_bytes + len_bytes
-            sock.sendall(header + content_bytes)
-
+            sock.sendall(token_hmac + ts_bytes + len_bytes + content_bytes)
             ack = sock.recv(2)
             sock.close()
 
             if ack == b"OK":
-                self.last_rtt_ms = (time.perf_counter_ns() - t0) / 1_000_000.0
+                rtt = (time.perf_counter() - t0) * 1000.0
                 self.last_sync_time = time.time()
+                self.log(f"📤 [ENVIADO] {len(content_bytes)} bytes entregues a {target_ip} em {rtt:.1f}ms! ✔")
                 self._update_state_file("connected")
                 return True
-        except Exception:
-            pass
+        except Exception as e:
+            self.log(f"✖ Falha no envio para {target_ip}: {e}")
         return False
 
     def _file_watcher_loop(self):
-        """Monitora modificações locais no arquivo e dispara envio imediato."""
+        """Dual-Watchdog: Monitora TANTO o arquivo da home quanto o do projeto!"""
         while self.running:
             time.sleep(1.0)
-            if not self.notes_file.exists():
-                continue
-            try:
-                cur_mtime = self.notes_file.stat().st_mtime
-                if cur_mtime > self._last_mtime:
-                    self._last_mtime = cur_mtime
-                    content = self.notes_file.read_bytes()
+            target_to_sync = None
+
+            # 1. Verifica arquivo global
+            if self.global_notes_file.exists():
+                try:
+                    m = self.global_notes_file.stat().st_mtime
+                    if m > self._last_global_mtime:
+                        self._last_global_mtime = m
+                        target_to_sync = self.global_notes_file
+                except Exception:
+                    pass
+
+            # 2. Verifica arquivo do projeto
+            if self.project_notes_file.exists():
+                try:
+                    m = self.project_notes_file.stat().st_mtime
+                    if m > self._last_proj_mtime:
+                        self._last_proj_mtime = m
+                        target_to_sync = self.project_notes_file
+                except Exception:
+                    pass
+
+            if target_to_sync:
+                try:
+                    content = target_to_sync.read_bytes()
                     cur_hash = hashlib.sha256(content).hexdigest()
 
                     # Só envia se foi alterado LOCALMENTE (não eco da rede)
                     if cur_hash != self._last_network_hash and cur_hash != self._last_sent_hash:
+                        self.log(f"📝 [SALVAMENTO DETECTADO] em: {target_to_sync.name}")
                         if self.send_push_to_peer(content):
                             self._last_sent_hash = cur_hash
-            except Exception:
-                pass
+                            # Espelha localmente para manter os dois arquivos idênticos
+                            if target_to_sync == self.global_notes_file and self.project_notes_file.exists():
+                                self.project_notes_file.write_bytes(content)
+                                self._last_proj_mtime = self.project_notes_file.stat().st_mtime
+                            elif target_to_sync == self.project_notes_file:
+                                self.global_notes_file.write_bytes(content)
+                                self._last_global_mtime = self.global_notes_file.stat().st_mtime
+                except Exception as e:
+                    self.log(f"✖ Erro no watchdog: {e}")
 
     def start(self):
         self.running = True
@@ -308,23 +343,17 @@ class NoteMeshEngine:
         except Exception:
             pass
 
-        t_beacon = threading.Thread(target=self._beacon_loop, daemon=True)
-        t_server = threading.Thread(target=self._tcp_server_loop, daemon=True)
-        t_watcher = threading.Thread(target=self._file_watcher_loop, daemon=True)
+        threading.Thread(target=self._beacon_loop, daemon=True).start()
+        threading.Thread(target=self._tcp_server_loop, daemon=True).start()
+        threading.Thread(target=self._file_watcher_loop, daemon=True).start()
 
-        t_beacon.start()
-        t_server.start()
-        t_watcher.start()
-
-        print("============================================================")
-        print("          DOXNOTE MESH — SERVIÇO P2P DE NOTAS ATIVO")
-        print("============================================================")
-        print(f"  Arquivo Global : {self.notes_file}")
-        print(f"  Porta Beacon   : {UDP_PORT}/UDP (Descoberta P2P)")
-        print(f"  Porta Sync     : {TCP_PORT}/TCP (Push Atômico)")
-        print(f"  Dispositivo    : {self.hostname} ({self.local_ip})")
-        print("============================================================")
-        print("📡 Malha P2P Ativa. Sincronizando com a IDE em tempo real...\n")
+        self.log(f"============================================================")
+        self.log(f"       DOXNOTE MESH v3.0 — DUAL-WATCHDOG ATIVO")
+        self.log(f"============================================================")
+        self.log(f"  Home Notes    : {self.global_notes_file}")
+        self.log(f"  Project Notes : {self.project_notes_file if self.project_notes_file.exists() else '(não criado no projeto)'}")
+        self.log(f"  Peer IP       : {self.peer_ip or 'Aguardando Descoberta...'}")
+        self.log(f"============================================================")
 
         try:
             while self.running:

@@ -744,33 +744,43 @@ def cmd_note_service(password: Optional[str]):
 
 @note_group.command(name="status")
 def cmd_note_status():
-    """Exibe o diagnóstico e estado vivo da malha DoxNote Mesh."""
-    from pathlib import Path
-    state_file = Path.home() / ".doxoade" / "mesh_state.json"
-    
+    """Exibe o diagnóstico e a telemetria ao vivo da malha de notas."""
+    home = Path.home()
+    doxoade_dir = home / ".doxoade"
+    state_file = doxoade_dir / "mesh_state.json"
+    log_file = doxoade_dir / "mesh.log"
+
     click.secho("============================================================", fg="cyan")
     click.secho("          DIAGNÓSTICO DA MALHA DOXNOTE MESH", fg="green", bold=True)
     click.secho("============================================================", fg="cyan")
 
     if not state_file.exists():
-        click.secho("  Status: DESCONECTADO / SERVIÇO INATIVO", fg="yellow")
-        click.echo("  Execute 'doxoade lan-git note service' para iniciar.")
+        click.secho("  Status Geral  : OFFLINE (Serviço não inicializado)", fg="red")
+        click.secho("============================================================", fg="cyan")
         return
 
     try:
-        data = json.loads(state_file.read_text(encoding="utf-8"))
-        status = data.get("status", "unknown").upper()
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+        status = state.get("status", "unknown").upper()
         status_color = "green" if status == "CONNECTED" else "yellow"
 
-        click.secho(f"  Status Geral  : {status}", fg=status_color, bold=True)
-        click.echo(f"  Dispositivo   : {data.get('hostname')} ({data.get('local_ip')})")
-        click.echo(f"  Par Conectado : {data.get('peer_name')} ({data.get('peer_ip')})")
-        click.echo(f"  Último Sync   : {data.get('last_sync')}")
-        click.echo(f"  Latência RTT  : {data.get('rtt_ms')} ms")
+        click.echo(f"  Status Geral  : {click.style(status, fg=status_color, bold=True)}")
+        click.echo(f"  Dispositivo   : {state.get('hostname')} ({state.get('local_ip')})")
+        click.echo(f"  Par Conectado : {state.get('peer_name')} ({state.get('peer_ip')})")
+        click.echo(f"  Último Sync   : {state.get('last_sync')}")
     except Exception as e:
         click.secho(f"  Erro ao ler estado: {e}", fg="red")
-    click.secho("============================================================", fg="cyan")
 
+    if log_file.exists():
+        click.secho("\n📋 ÚLTIMOS EVENTOS REGISTRADOS:", fg="magenta", bold=True)
+        try:
+            lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
+            for l in lines[-6:]:
+                click.echo(f"  {click.style('↳', fg='yellow')} {l}")
+        except Exception:
+            pass
+
+    click.secho("============================================================\n", fg="cyan")
 
 @note_group.command(name="open")
 def cmd_note_open():
