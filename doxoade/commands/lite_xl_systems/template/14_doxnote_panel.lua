@@ -258,16 +258,9 @@ if Doc and Doc.save then
   Doc.save = function(self, ...)
     local res = orig_doc_save(self, ...)
     if self.filename and (self.filename:find("shared_notes%.md$") or self.filename:find("shared_notes%.txt$")) then
-      pcall(function()
-        local finfo = system.get_file_info and system.get_file_info(self.filename)
-        if finfo and finfo.mtime then
-          -- Registra que fomos nós que salvamos este mtime
-          _last_synced_mtimes[self.filename] = finfo.mtime
-        end
-        if core.log then
-          core.log("📝 [DOXNOTE] Salvo localmente. Enviando para a malha...")
-        end
-      end)
+      if core.log then
+        core.log("📝 [DOXNOTE] Salvo localmente com sucesso.")
+      end
     end
     return res
   end
@@ -933,12 +926,11 @@ command.add(nil, {
         doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
         doc:insert(1, 1, content)
         if doc.clean then doc:clean() end
-        local finfo = system.get_file_info and system.get_file_info(doc.filename)
-        if finfo and finfo.mtime then _last_synced_mtimes[doc.filename] = finfo.mtime end
         core.redraw = true
-        core.log("🔄 [DOXNOTE] Nota recarregada manualmente.")
+        core.log("🔄 [DOXNOTE] Nota recarregada do disco com sucesso.")
       end
     end
+  end
 })
 
 -- ═════════════════════════════════════════════════════════════════════════════
