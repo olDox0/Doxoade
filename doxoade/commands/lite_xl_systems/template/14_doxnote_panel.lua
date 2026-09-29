@@ -191,23 +191,64 @@ end
 -- 🚀 AUTO-IGNIÇÃO: Dispara a verificação 1 segundo após o boot do Doxly
 if core and core.add_thread then
   core.add_thread(function()
-    coroutine.yield(1.0)
-    local user_dir = USERDIR or "."
-    local sep = PATHSEP or "/"
-    local py_anchor = user_dir .. sep .. ".doxoade" .. sep .. "python_path.txt"
-    local py_exe = "python"
-    local finfo = system.get_file_info(py_anchor)
-    if finfo and finfo.type == "file" then
-      local f = io.open(py_anchor, "r")
-      if f then
-        local l = f:read("*l") or ""
-        f:close()
-        if l ~= "" then py_exe = l:gsub("[\r\n]", "") end
+    while true do
+      coroutine.yield(0.3)
+
+      -- Ativo por padrão (a menos que o usuário clique para desligar)
+      local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") ~= false
+      if is_active then
+        pcall(function()
+          for _, doc in ipairs(core.docs or {}) do
+            if doc.filename then
+              local fn = doc.filename:gsub("\\", "/"):lower()
+              if fn:find("shared_notes%.md$") or fn:find("shared_notes%.txt$") then
+
+                local finfo = system.get_file_info and system.get_file_info(doc.filename)
+                if finfo and finfo.type == "file" and finfo.mtime and finfo.mtime > 0 then
+
+                  if not _last_synced_mtimes[doc.filename] then
+                    _last_synced_mtimes[doc.filename] = finfo.mtime
+                  elseif finfo.mtime > _last_synced_mtimes[doc.filename] then
+                    
+                    local is_dirty = false
+                    if doc.is_dirty then
+                      local ok, d = pcall(doc.is_dirty, doc)
+                      if ok and d then is_dirty = true end
+                    end
+
+                    -- Se o buffer estiver limpo, atualiza imediatamente!
+                    if not is_dirty then
+                      _last_synced_mtimes[doc.filename] = finfo.mtime
+                      local f = io.open(doc.filename, "r")
+                      if f then
+                        local content = f:read("*a")
+                        f:close()
+
+                        if content and content ~= "" then
+                          local l1, c1, l2, c2 = 1, 1, 1, 1
+                          if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
+
+                          doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
+                          doc:insert(1, 1, content)
+                          if doc.clean then doc:clean() end
+
+                          if doc.set_selection then pcall(doc.set_selection, doc, l1, c1, l2, c2) end
+                          core.redraw = true
+                          if core.log then core.log("⚡ [DOXNOTE] Nota atualizada pela malha.") end
+                        end
+                      end
+                    else
+                      -- Se você estiver digitando, apenas avisa sem apagar seu texto
+                      if core.log then core.log("⚠️ [DOXNOTE] Chegou atualização da rede (aperte F5 para recarregar).") end
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end)
       end
     end
-    -- Executa desacoplado no background com -d
-    local cmd = string.format('start /b "" "%s" -m doxoade lan-git note service -d', py_exe)
-    pcall(system.exec, cmd)
   end)
 end
 

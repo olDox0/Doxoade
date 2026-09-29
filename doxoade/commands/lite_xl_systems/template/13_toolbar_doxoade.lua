@@ -161,21 +161,16 @@ core.add_thread(function()
       4
     )
 
-    -- 5. Badge DoxNote com Fundo Verde (ON) / Vermelho (OFF) + Abertura de Menu
---    rawset(_G, "_DOXOADE_NOTE_SYNC_ACTIVE", rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") or false)
-   if rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == nil then
-   rawset(_G, "_DOXOADE_NOTE_SYNC_ACTIVE", true)
-   end
-   
-    local COLOR_SYNC_ON_BG  = { 34, 197, 94, 255 }   -- Verde Esmeralda Sólido
-    local COLOR_SYNC_OFF_BG = { 220, 38, 38, 255 }   -- Vermelho Alerta Sólido
-    local COLOR_TEXT_WHITE  = { 255, 255, 255, 255 } -- Texto Branco Puro
+    -- 5. Badge DoxNote: Sempre ATIVO por padrão no boot
+    if rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == nil then
+      rawset(_G, "_DOXOADE_NOTE_SYNC_ACTIVE", true)
+    end
 
     register_status_item(
       "doxoade:note_status",
       StatusView.Item.LEFT,
       function()
-        local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
+        local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") ~= false
         local badge_label = is_active and " [ NOTE: ON ] " or " [ NOTE: OFF ] "
         return {
           COLOR_TEXT_WHITE, badge_label,
@@ -183,7 +178,6 @@ core.add_thread(function()
         }
       end,
       function()
-        -- ⚡ 1 CLIQUE: Alterna o estado e dispara/mata o daemon em background
         command.perform("doxoade:toggle-note-sync")
       end,
       5
