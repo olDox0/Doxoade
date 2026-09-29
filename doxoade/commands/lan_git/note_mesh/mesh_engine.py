@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/lan_git/note_mesh/mesh_engine.py
 """
-🌐 DOXNOTE MESH ENGINE v3.0 — Dual-Watchdog & Resilient Unicast Peering.
-Monitora tanto ~/.doxoade/shared_notes.md quanto ./shared_notes.md.
+🌐 DOXNOTE MESH ENGINE v3.5 — HTTP REST Transport & Zero-Timeout Stream.
+Substitui sockets binários crus por HTTP/1.1 persistente nativo (stdlib pura).
+Imune a fragmentação de pacotes TCP e com reconexão automática.
 Compliance: ProDeNov 1.2.1 | PASC-6.1 | Limite < 50KB.
 """
 from __future__ import annotations
@@ -16,26 +17,84 @@ import hashlib
 import hmac
 import threading
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.request import Request, urlopen
+from typing import Optional, Dict, Any
 
 MESH_MAGIC = "DOX_MESH_V3"
 UDP_PORT = 54547
 TCP_PORT = 54548
 
 
+class MeshSyncHTTPHandler(BaseHTTPRequestHandler):
+    """Handler HTTP atômico imune a fragmentação de pacotes."""
+    engine: NoteMeshEngine = None
+
+    def log_message(self, format, *args):
+        pass  # Silencia logs automáticos no terminal
+
+    def do_POST(self):
+        if self.path != "/sync":
+            self.send_error(404)
+            return
+
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length <= 0:
+                self.send_error(400)
+                return
+
+            body = self.rfile.read(content_length)
+            received_hmac = self.headers.get("X-Mesh-HMAC", "")
+            note_rel_path = self.headers.get("X-Mesh-Path", "shared_notes.md")
+
+            # Valida HMAC com a chave da malha
+            computed_hmac = hmac.new(self.engine.secret_key, body, hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(received_hmac, computed_hmac):
+                self.send_error(401, "HMAC Invalido")
+                return
+
+            new_hash = hashlib.sha256(body).hexdigest()
+            self.engine._last_network_hash = new_hash
+
+            # Atualiza o arquivo global
+            self.engine.global_notes_file.write_bytes(body)
+            self.engine._last_global_mtime = self.engine.global_notes_file.stat().st_mtime
+
+            # Se o projeto tiver seu próprio shared_notes.md, atualiza também
+            if self.engine.project_notes_file.exists():
+                try:
+                    self.engine.project_notes_file.write_bytes(body)
+                    self.engine._last_proj_mtime = self.engine.project_notes_file.stat().st_mtime
+                except Exception:
+                    pass
+
+            self.engine.last_sync_time = time.time()
+            self.engine.peer_ip = self.client_address[0]
+
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"OK")
+
+            self.engine.log(f"📥 [RECEBIDO] {note_rel_path} sincronizado de {self.client_address[0]} ({len(body)} bytes).")
+            self.engine._update_state_file("connected")
+        except Exception as e:
+            self.engine.log(f"✖ Erro no processamento do sync HTTP: {e}")
+            self.send_error(500)
+
+
 class NoteMeshEngine:
-    """Nó P2P soberano com Dual-Watchdog e Peering Resiliente."""
+    """Nó P2P soberano com transporte HTTP/1.1 atômico."""
 
     def __init__(self, password: Optional[str] = None):
         self.home = Path.home()
         self.doxoade_dir = self.home / ".doxoade"
         self.doxoade_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 📂 Arquivo canônico global
+
         self.global_notes_file = self.doxoade_dir / "shared_notes.md"
-        # 📂 Arquivo local do projeto (se existir)
         self.project_notes_file = Path.cwd() / "shared_notes.md"
-        
+
         self.state_file = self.doxoade_dir / "mesh_state.json"
         self.key_file = self.doxoade_dir / "mesh_auth.key"
         self.pid_file = self.doxoade_dir / "mesh_daemon.pid"
@@ -49,7 +108,6 @@ class NoteMeshEngine:
         self.local_ip = self._get_local_ip()
         self.running = False
 
-        # Recupera último peer conhecido do cache
         cached_peer = self._load_cached_peer()
         self.peer_ip: Optional[str] = cached_peer.get("ip")
         self.peer_name: Optional[str] = cached_peer.get("name")
@@ -60,9 +118,12 @@ class NoteMeshEngine:
         self._last_global_mtime: float = self.global_notes_file.stat().st_mtime
         self._last_proj_mtime: float = self.project_notes_file.stat().st_mtime if self.project_notes_file.exists() else 0.0
 
+    @property
+    def notes_file(self) -> Path:
+        return self.global_notes_file
+
     @classmethod
     def is_service_running(cls) -> bool:
-        """Verifica de forma atômica se o serviço já está ativo na porta TCP 54548."""
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(0.2)
         try:
@@ -71,9 +132,8 @@ class NoteMeshEngine:
             return res == 0
         except Exception:
             return False
-            
+
     def log(self, msg: str):
-        """Grava log com timestamp legível para telemetria forense."""
         ts = time.strftime("%H:%M:%S")
         line = f"[{ts}] {msg}"
         print(line)
@@ -140,7 +200,6 @@ class NoteMeshEngine:
             pass
 
     def _beacon_loop(self):
-        """Descoberta contínua em broadcast local e direto na sub-rede."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -150,7 +209,6 @@ class NoteMeshEngine:
             return
         sock.setblocking(False)
 
-        # Calcula o broadcast da sub-rede local (ex: 192.168.18.255)
         subnet_bcast = "255.255.255.255"
         if self.local_ip.startswith("192.168."):
             parts = self.local_ip.split(".")
@@ -173,7 +231,6 @@ class NoteMeshEngine:
                     except Exception:
                         pass
 
-                # Se já temos um peer salvo em cache, envia probe unicast direto
                 if self.peer_ip:
                     try:
                         sock.sendto(payload, (self.peer_ip, UDP_PORT))
@@ -197,138 +254,56 @@ class NoteMeshEngine:
                     pass
         sock.close()
 
-    def _tcp_server_loop(self):
-        """Servidor de recepção atômica de notas (Push-Receiver)."""
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    def _http_server_loop(self):
+        """Servidor HTTP nativo na porta 54548."""
+        MeshSyncHTTPHandler.engine = self
         try:
-            server.bind(("0.0.0.0", TCP_PORT))
+            server = HTTPServer(("0.0.0.0", TCP_PORT), MeshSyncHTTPHandler)
+            server.timeout = 1.0
         except OSError:
-            self.log(f"⚠ Porta {TCP_PORT} já em uso. Daemon anterior ativo.")
+            self.log(f"⚠ Porta {TCP_PORT} já em uso.")
             sys.exit(0)
 
-        server.listen(5)
-        server.settimeout(1.0)
-
         while self.running:
-            try:
-                client_sock, addr = server.accept()
-                threading.Thread(target=self._handle_incoming_push, args=(client_sock, addr[0]), daemon=True).start()
-            except socket.timeout:
-                continue
-            except Exception:
-                break
-        server.close()
-
-    def _handle_incoming_push(self, sock: socket.socket, sender_ip: str):
-        """Recebe payload da rede, valida HMAC e atualiza ambos os arquivos."""
-        try:
-            sock.settimeout(4.0)
-            raw_header = sock.recv(32 + 8 + 4)
-            if len(raw_header) < 44:
-                sock.close()
-                return
-
-            expected_hmac = raw_header[:32]
-            ts_bytes = raw_header[32:40]
-            path_len_bytes = sock.recv(2)
-            path_len = int.from_bytes(path_len_bytes, "big")
-            path_bytes = sock.recv(path_len)
-            note_rel_path = path_bytes.decode("utf-8", errors="replace")
-            
-            len_bytes = sock.recv(4)
-            data_len = int.from_bytes(len_bytes, "big")
-
-            body = bytearray()
-            while len(body) < data_len:
-                chunk = sock.recv(min(8192, data_len - len(body)))
-                if not chunk:
-                    break
-                body.extend(chunk)
-
-            computed_hmac = hmac.new(
-                self.secret_key, 
-                ts_bytes + path_len_bytes + path_bytes + len_bytes + body, 
-                hashlib.sha256
-            ).digest()
-
-            if not hmac.compare_digest(expected_hmac, computed_hmac):
-                sock.close()
-                return
-
-            new_hash = hashlib.sha256(body).hexdigest()
-            self._last_network_hash = new_hash
-
-            # Se for shared_notes.md, atualiza os arquivos canônicos
-            if note_rel_path == "shared_notes.md":
-                self.global_notes_file.write_bytes(body)
-                self._last_global_mtime = self.global_notes_file.stat().st_mtime
-                if self.project_notes_file.exists():
-                    self.project_notes_file.write_bytes(body)
-                    self._last_proj_mtime = self.project_notes_file.stat().st_mtime
-            else:
-                # Se for nota do projeto (.doxoade/note/nome.md)
-                dest = Path.cwd() / ".doxoade" / note_rel_path
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(body)
-
-            self.last_sync_time = time.time()
-            self.peer_ip = sender_ip
-            sock.sendall(b"OK")
-            self.log(f"📥 [RECEBIDO] {note_rel_path} sincronizado de {sender_ip} ({len(body)} bytes).")
-            self._update_state_file("connected")
-        except Exception as e:
-            self.log(f"✖ Erro ao receber push: {e}")
-        finally:
-            sock.close()
+            server.handle_request()
+        server.server_close()
 
     def send_push_to_peer(self, content_bytes: bytes, note_rel_path: str = "shared_notes.md") -> bool:
-        """Envia atualização atômica para o par (suporta shared_notes e notas do projeto)."""
+        """Envia atualização via HTTP POST imune a fragmentação."""
         target_ip = self.peer_ip
         if not target_ip:
             self.log("⚠️ Nenhum IP de par detectado para envio.")
             return False
 
-        path_bytes = note_rel_path.encode("utf-8")
-        path_len_bytes = len(path_bytes).to_bytes(2, "big")
-        ts_bytes = int(time.time()).to_bytes(8, "big")
-        len_bytes = len(content_bytes).to_bytes(4, "big")
-        
-        token_hmac = hmac.new(
-            self.secret_key, 
-            ts_bytes + path_len_bytes + path_bytes + len_bytes + content_bytes, 
-            hashlib.sha256
-        ).digest()
+        t0 = time.perf_counter()
+        computed_hmac = hmac.new(self.secret_key, content_bytes, hashlib.sha256).hexdigest()
+        url = f"http://{target_ip}:{TCP_PORT}/sync"
+
+        req = Request(url, data=content_bytes, method="POST")
+        req.add_header("X-Mesh-HMAC", computed_hmac)
+        req.add_header("X-Mesh-Path", note_rel_path)
+        req.add_header("Content-Type", "text/markdown; charset=utf-8")
 
         for tentativa in range(1, 3):
-            t0 = time.perf_counter()
             try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(7.0)
-                sock.connect((target_ip, TCP_PORT))
-
-                header = token_hmac + ts_bytes + path_len_bytes + path_bytes + len_bytes
-                sock.sendall(header + content_bytes)
-                ack = sock.recv(2)
-                sock.close()
-
-                if ack == b"OK":
-                    rtt = (time.perf_counter() - t0) * 1000.0
-                    self.last_sync_time = time.time()
-                    self.log(f"📤 [ENVIADO] {note_rel_path} ({len(content_bytes)} bytes) entregue a {target_ip} em {rtt:.1f}ms! ✔")
-                    self._update_state_file("connected")
-                    return True
+                with urlopen(req, timeout=5.0) as response:
+                    if response.status == 200 and response.read() == b"OK":
+                        rtt = (time.perf_counter() - t0) * 1000.0
+                        self.last_sync_time = time.time()
+                        self.log(f"📤 [ENVIADO] {note_rel_path} ({len(content_bytes)} bytes) entregue a {target_ip} em {rtt:.1f}ms! ✔")
+                        self._update_state_file("connected")
+                        return True
             except Exception as e:
                 if tentativa == 1:
-                    time.sleep(0.2)
+                    time.sleep(0.3)
                 else:
-                    self.log(f"✖ Falha no envio para {target_ip}: {e}")
+                    self.log(f"✖ Falha no envio HTTP para {target_ip}: {e}")
         return False
 
     def _file_watcher_loop(self):
-        """Dual-Watchdog veloz (300ms): Detecta o salvamento quase instantaneamente!"""
+        """Watchdog rápido (150ms) monitorando Home e Projeto."""
         while self.running:
-            time.sleep(0.3)  # 👈 Reduzido de 1.0s para 0.3s
+            time.sleep(0.15)
             target_to_sync = None
 
             if self.global_notes_file.exists():
@@ -375,16 +350,16 @@ class NoteMeshEngine:
             pass
 
         threading.Thread(target=self._beacon_loop, daemon=True).start()
-        threading.Thread(target=self._tcp_server_loop, daemon=True).start()
+        threading.Thread(target=self._http_server_loop, daemon=True).start()
         threading.Thread(target=self._file_watcher_loop, daemon=True).start()
 
-        self.log(f"============================================================")
-        self.log(f"       DOXNOTE MESH v3.0 — DUAL-WATCHDOG ATIVO")
-        self.log(f"============================================================")
+        self.log("============================================================")
+        self.log("       DOXNOTE MESH v3.5 — HTTP REST TRANSPORT ATIVO")
+        self.log("============================================================")
         self.log(f"  Home Notes    : {self.global_notes_file}")
-        self.log(f"  Project Notes : {self.project_notes_file if self.project_notes_file.exists() else '(não criado no projeto)'}")
+        self.log(f"  Project Notes : {self.project_notes_file if self.project_notes_file.exists() else '(não criado)'}")
         self.log(f"  Peer IP       : {self.peer_ip or 'Aguardando Descoberta...'}")
-        self.log(f"============================================================")
+        self.log("============================================================")
 
         try:
             while self.running:
