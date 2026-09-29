@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/lan_git/note_mesh/mesh_engine.py
 """
-🌐 DOXNOTE MESH ENGINE v3.5 — HTTP REST Transport & Zero-Timeout Stream.
-Substitui sockets binários crus por HTTP/1.1 persistente nativo (stdlib pura).
-Imune a fragmentação de pacotes TCP e com reconexão automática.
+🌐 DOXNOTE MESH ENGINE v4.0 — Multi-Note Directory Watcher & HTTP REST Transport.
+Sincroniza tanto shared_notes.md quanto múltiplos cadernos em .doxoade/note/*.md.
 Compliance: ProDeNov 1.2.1 | PASC-6.1 | Limite < 50KB.
 """
 from __future__ import annotations
@@ -19,19 +18,19 @@ import threading
 from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.request import Request, urlopen
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
-MESH_MAGIC = "DOX_MESH_V3"
+MESH_MAGIC = "DOX_MESH_V4"
 UDP_PORT = 54547
 TCP_PORT = 54548
 
 
 class MeshSyncHTTPHandler(BaseHTTPRequestHandler):
-    """Handler HTTP atômico imune a fragmentação de pacotes."""
+    """Handler HTTP atômico com suporte a múltiplos arquivos de notas."""
     engine: NoteMeshEngine = None
 
     def log_message(self, format, *args):
-        pass  # Silencia logs automáticos no terminal
+        pass  # Silencia logs automáticos de console
 
     def do_POST(self):
         if self.path != "/sync":
@@ -41,33 +40,46 @@ class MeshSyncHTTPHandler(BaseHTTPRequestHandler):
         try:
             content_length = int(self.headers.get("Content-Length", 0))
             if content_length <= 0:
-                self.send_error(400)
+                self.send_error(400, "Corpo vazio")
                 return
 
             body = self.rfile.read(content_length)
             received_hmac = self.headers.get("X-Mesh-HMAC", "")
-            note_rel_path = self.headers.get("X-Mesh-Path", "shared_notes.md")
+            note_rel_path = self.headers.get("X-Mesh-Path", "shared_notes.md").strip()
 
-            # Valida HMAC com a chave da malha
+            # 🛡️ ANÚBIS SHIELD: Proteção contra Path Traversal
+            clean_rel = note_rel_path.replace("\\", "/").strip("/")
+            if ".." in clean_rel or clean_rel.startswith("/"):
+                self.engine.log(f"🚨 [SEGURANÇA] Bloqueada tentativa de Path Traversal: {note_rel_path}")
+                self.send_error(403, "Caminho proibido")
+                return
+
+            # Valida HMAC com a chave compartilhada da malha
             computed_hmac = hmac.new(self.engine.secret_key, body, hashlib.sha256).hexdigest()
             if not hmac.compare_digest(received_hmac, computed_hmac):
                 self.send_error(401, "HMAC Invalido")
                 return
 
             new_hash = hashlib.sha256(body).hexdigest()
-            self.engine._last_network_hash = new_hash
 
-            # Atualiza o arquivo global
-            self.engine.global_notes_file.write_bytes(body)
-            self.engine._last_global_mtime = self.engine.global_notes_file.stat().st_mtime
-
-            # Se o projeto tiver seu próprio shared_notes.md, atualiza também
-            if self.engine.project_notes_file.exists():
-                try:
-                    self.engine.project_notes_file.write_bytes(body)
-                    self.engine._last_proj_mtime = self.engine.project_notes_file.stat().st_mtime
-                except Exception:
-                    pass
+            # 📂 Roteamento e Destino
+            if clean_rel == "shared_notes.md":
+                self.engine.global_notes_file.write_bytes(body)
+                self.engine._file_mtimes[str(self.engine.global_notes_file)] = self.engine.global_notes_file.stat().st_mtime
+                if self.engine.project_notes_file.exists():
+                    try:
+                        self.engine.project_notes_file.write_bytes(body)
+                        self.engine._file_mtimes[str(self.engine.project_notes_file)] = self.engine.project_notes_file.stat().st_mtime
+                    except Exception:
+                        pass
+                self.engine._file_network_hashes["shared_notes.md"] = new_hash
+            else:
+                # Trata notas dentro do subdiretório note/
+                target_dest = self.engine.project_notes_dir / Path(clean_rel).name
+                target_dest.parent.mkdir(parents=True, exist_ok=True)
+                target_dest.write_bytes(body)
+                self.engine._file_mtimes[str(target_dest)] = target_dest.stat().st_mtime
+                self.engine._file_network_hashes[clean_rel] = new_hash
 
             self.engine.last_sync_time = time.time()
             self.engine.peer_ip = self.client_address[0]
@@ -77,7 +89,7 @@ class MeshSyncHTTPHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"OK")
 
-            self.engine.log(f"📥 [RECEBIDO] {note_rel_path} sincronizado de {self.client_address[0]} ({len(body)} bytes).")
+            self.engine.log(f"📥 [RECEBIDO] {clean_rel} sincronizado de {self.client_address[0]} ({len(body)} bytes).")
             self.engine._update_state_file("connected")
         except Exception as e:
             self.engine.log(f"✖ Erro no processamento do sync HTTP: {e}")
@@ -85,7 +97,7 @@ class MeshSyncHTTPHandler(BaseHTTPRequestHandler):
 
 
 class NoteMeshEngine:
-    """Nó P2P soberano com transporte HTTP/1.1 atômico."""
+    """Nó P2P soberano com suporte a diretório multi-notas."""
 
     def __init__(self, password: Optional[str] = None):
         self.home = Path.home()
@@ -94,6 +106,8 @@ class NoteMeshEngine:
 
         self.global_notes_file = self.doxoade_dir / "shared_notes.md"
         self.project_notes_file = Path.cwd() / "shared_notes.md"
+        self.project_notes_dir = Path.cwd() / ".doxoade" / "note"
+        self.project_notes_dir.mkdir(parents=True, exist_ok=True)
 
         self.state_file = self.doxoade_dir / "mesh_state.json"
         self.key_file = self.doxoade_dir / "mesh_auth.key"
@@ -113,14 +127,36 @@ class NoteMeshEngine:
         self.peer_name: Optional[str] = cached_peer.get("name")
         self.last_sync_time: float = 0.0
 
-        self._last_sent_hash: str = self._calculate_file_hash(self.global_notes_file)
-        self._last_network_hash: str = self._last_sent_hash
-        self._last_global_mtime: float = self.global_notes_file.stat().st_mtime
-        self._last_proj_mtime: float = self.project_notes_file.stat().st_mtime if self.project_notes_file.exists() else 0.0
+        # Rastreamento de estado granular por arquivo
+        self._file_mtimes: Dict[str, float] = {}
+        self._file_sent_hashes: Dict[str, str] = {}
+        self._file_network_hashes: Dict[str, str] = {}
+        self._init_catalog_state()
 
     @property
     def notes_file(self) -> Path:
+        """Alias de compatibilidade retroativa para cli_lan_git."""
         return self.global_notes_file
+
+    def _init_catalog_state(self):
+        """Inicializa carimbos e hashes de todas as notas monitoradas."""
+        for p in [self.global_notes_file, self.project_notes_file]:
+            if p.exists():
+                m = p.stat().st_mtime
+                h = self._calculate_file_hash(p)
+                self._file_mtimes[str(p)] = m
+                self._file_sent_hashes[p.name] = h
+                self._file_network_hashes[p.name] = h
+
+        if self.project_notes_dir.exists():
+            for p in self.project_notes_dir.glob("*.md"):
+                if not p.name.startswith("."):
+                    m = p.stat().st_mtime
+                    h = self._calculate_file_hash(p)
+                    self._file_mtimes[str(p)] = m
+                    rel = f"note/{p.name}"
+                    self._file_sent_hashes[rel] = h
+                    self._file_network_hashes[rel] = h
 
     @classmethod
     def is_service_running(cls) -> bool:
@@ -255,7 +291,6 @@ class NoteMeshEngine:
         sock.close()
 
     def _http_server_loop(self):
-        """Servidor HTTP nativo na porta 54548."""
         MeshSyncHTTPHandler.engine = self
         try:
             server = HTTPServer(("0.0.0.0", TCP_PORT), MeshSyncHTTPHandler)
@@ -269,10 +304,8 @@ class NoteMeshEngine:
         server.server_close()
 
     def send_push_to_peer(self, content_bytes: bytes, note_rel_path: str = "shared_notes.md") -> bool:
-        """Envia atualização via HTTP POST imune a fragmentação."""
         target_ip = self.peer_ip
         if not target_ip:
-            self.log("⚠️ Nenhum IP de par detectado para envio.")
             return False
 
         t0 = time.perf_counter()
@@ -295,52 +328,61 @@ class NoteMeshEngine:
                         return True
             except Exception as e:
                 if tentativa == 1:
-                    time.sleep(0.3)
+                    time.sleep(0.2)
                 else:
-                    self.log(f"✖ Falha no envio HTTP para {target_ip}: {e}")
+                    self.log(f"✖ Falha no envio de {note_rel_path} para {target_ip}: {e}")
         return False
 
     def _file_watcher_loop(self):
-        """Watchdog rápido (150ms) monitorando Home e Projeto."""
+        """Dual-Watchdog Multi-Note: Vigia shared_notes E todos os .doxoade/note/*.md."""
         while self.running:
             time.sleep(0.15)
-            target_to_sync = None
+            candidates: List[tuple[Path, str]] = []
 
+            # 1. Arquivos de rascunho rápido
             if self.global_notes_file.exists():
-                try:
-                    m = self.global_notes_file.stat().st_mtime
-                    if m > self._last_global_mtime:
-                        self._last_global_mtime = m
-                        target_to_sync = self.global_notes_file
-                except Exception:
-                    pass
-
+                candidates.append((self.global_notes_file, "shared_notes.md"))
             if self.project_notes_file.exists():
+                candidates.append((self.project_notes_file, "shared_notes.md"))
+
+            # 2. Todos os cadernos de projeto (.doxoade/note/*.md)
+            if self.project_notes_dir.exists():
                 try:
-                    m = self.project_notes_file.stat().st_mtime
-                    if m > self._last_proj_mtime:
-                        self._last_proj_mtime = m
-                        target_to_sync = self.project_notes_file
+                    for note_path in self.project_notes_dir.glob("*.md"):
+                        if not note_path.name.startswith("."):
+                            candidates.append((note_path, f"note/{note_path.name}"))
                 except Exception:
                     pass
 
-            if target_to_sync:
+            # Varredura e despacho de deltas
+            for path_obj, rel_name in candidates:
                 try:
-                    content = target_to_sync.read_bytes()
-                    cur_hash = hashlib.sha256(content).hexdigest()
+                    p_str = str(path_obj)
+                    cur_m = path_obj.stat().st_mtime
+                    last_m = self._file_mtimes.get(p_str, 0.0)
 
-                    if cur_hash != self._last_network_hash and cur_hash != self._last_sent_hash:
-                        self.log(f"📝 [SALVAMENTO DETECTADO] em: {target_to_sync.name}")
-                        if self.send_push_to_peer(content):
-                            self._last_sent_hash = cur_hash
-                            if target_to_sync == self.global_notes_file and self.project_notes_file.exists():
-                                self.project_notes_file.write_bytes(content)
-                                self._last_proj_mtime = self.project_notes_file.stat().st_mtime
-                            elif target_to_sync == self.project_notes_file:
-                                self.global_notes_file.write_bytes(content)
-                                self._last_global_mtime = self.global_notes_file.stat().st_mtime
-                except Exception as e:
-                    self.log(f"✖ Erro no watchdog: {e}")
+                    if cur_m > last_m:
+                        self._file_mtimes[p_str] = cur_m
+                        content = path_obj.read_bytes()
+                        cur_hash = hashlib.sha256(content).hexdigest()
+
+                        last_net = self._file_network_hashes.get(rel_name)
+                        last_sent = self._file_sent_hashes.get(rel_name)
+
+                        # Só envia se foi alterado LOCALMENTE (não eco da rede)
+                        if cur_hash != last_net and cur_hash != last_sent:
+                            self.log(f"📝 [SALVAMENTO DETECTADO] em: {rel_name}")
+                            if self.send_push_to_peer(content, note_rel_path=rel_name):
+                                self._file_sent_hashes[rel_name] = cur_hash
+                                # Se foi o shared_notes global, espelha no projeto
+                                if path_obj == self.global_notes_file and self.project_notes_file.exists():
+                                    self.project_notes_file.write_bytes(content)
+                                    self._file_mtimes[str(self.project_notes_file)] = self.project_notes_file.stat().st_mtime
+                                elif path_obj == self.project_notes_file and self.global_notes_file.exists():
+                                    self.global_notes_file.write_bytes(content)
+                                    self._file_mtimes[str(self.global_notes_file)] = self.global_notes_file.stat().st_mtime
+                except Exception:
+                    pass
 
     def start(self):
         self.running = True
@@ -354,10 +396,10 @@ class NoteMeshEngine:
         threading.Thread(target=self._file_watcher_loop, daemon=True).start()
 
         self.log("============================================================")
-        self.log("       DOXNOTE MESH v3.5 — HTTP REST TRANSPORT ATIVO")
+        self.log("    DOXNOTE MESH v4.0 — MULTI-NOTE MESH TRANSPORT ATIVO")
         self.log("============================================================")
-        self.log(f"  Home Notes    : {self.global_notes_file}")
-        self.log(f"  Project Notes : {self.project_notes_file if self.project_notes_file.exists() else '(não criado)'}")
+        self.log(f"  Global Notes  : {self.global_notes_file}")
+        self.log(f"  Project Notes : {self.project_notes_dir}/*.md")
         self.log(f"  Peer IP       : {self.peer_ip or 'Aguardando Descoberta...'}")
         self.log("============================================================")
 
