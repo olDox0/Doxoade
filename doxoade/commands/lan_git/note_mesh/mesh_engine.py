@@ -60,6 +60,18 @@ class NoteMeshEngine:
         self._last_global_mtime: float = self.global_notes_file.stat().st_mtime
         self._last_proj_mtime: float = self.project_notes_file.stat().st_mtime if self.project_notes_file.exists() else 0.0
 
+    @classmethod
+    def is_service_running(cls) -> bool:
+        """Verifica de forma atômica se o serviço já está ativo na porta TCP 54548."""
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.2)
+        try:
+            res = s.connect_ex(("127.0.0.1", TCP_PORT))
+            s.close()
+            return res == 0
+        except Exception:
+            return False
+            
     def log(self, msg: str):
         """Grava log com timestamp legível para telemetria forense."""
         ts = time.strftime("%H:%M:%S")
