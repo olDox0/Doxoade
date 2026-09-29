@@ -661,9 +661,20 @@ end
 
 local function start_mesh_daemon_from_ide()
   local py_exe = get_mesh_python_exe()
-  -- Invoca diretamente o executável Python (o próprio CLI já se desacopla em background)
+  -- Roda o service sem o -f (ele sobe em background e libera instantaneamente)
   local cmd = string.format('"%s" -m doxoade lan-git note service', py_exe)
   pcall(system.exec, cmd)
+end
+
+-- 🚀 AUTO-START NO BOOT DA IDE:
+if core and core.add_thread then
+  core.add_thread(function()
+    coroutine.yield(1.0)
+    -- Só dispara se o status estiver ativo
+    if rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true then
+      start_mesh_daemon_from_ide()
+    end
+  end)
 end
 
 local function stop_mesh_daemon_from_ide()

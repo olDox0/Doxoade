@@ -720,18 +720,18 @@ def cmd_note_service(password: Optional[str], foreground: bool):
     """Inicia o Daemon P2P de Sincronização de Notas (Background por padrão)."""
     from doxoade.commands.lan_git.note_mesh.mesh_engine import NoteMeshEngine
 
-    # Se já estiver rodando, não duplica
+    # 1. Se já estiver rodando, não abre outro
     if NoteMeshEngine.is_service_running():
         click.secho("✔ [DOXNOTE MESH] O serviço já está ativo e operando em segundo plano.", fg="green")
         return
 
-    # Modo Interativo / Depuração
+    # 2. Se pediu modo visual (preso ao terminal com logs na tela)
     if foreground:
         engine = NoteMeshEngine(password=password)
         engine.start()
         return
 
-    # 🚀 Modo Padrão: Dispara e libera o terminal imediatamente!
+    # 🚀 3. Modo Padrão: Dispara invisível e LIBERA O TERMINAL NA HORA!
     cmd = [sys.executable, "-m", "doxoade", "lan-git", "note", "service", "-f"]
     if password:
         cmd.extend(["--password", password])
@@ -741,8 +741,7 @@ def cmd_note_service(password: Optional[str], foreground: bool):
         flags = subprocess.CREATE_NO_WINDOW | 0x00000008  # DETACHED_PROCESS
 
     proc = subprocess.Popen(cmd, creationflags=flags, close_fds=True)
-    click.secho(f"🚀 [DOXNOTE MESH] Serviço P2P iniciado em segundo plano (PID: {proc.pid}).", fg="green", bold=True)
-    click.echo(f"   {click.style('↳', fg='yellow')} Digite 'doxoade lan-git note status' para ver a telemetria da rede.")
+    click.secho(f"🚀 [DOXNOTE MESH] Serviço iniciado em segundo plano (PID: {proc.pid}).", fg="green", bold=True)
 
 @note_group.command(name="stop")
 def cmd_note_stop():

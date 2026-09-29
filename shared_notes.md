@@ -1,11 +1,5 @@
-
-a
-d
-a
-ds
-ass\zx
-\z
-x\
-zx
-\c
-
+c
+gg
+hhnbbvvghyhjj
+ggds
+4
