@@ -661,23 +661,23 @@ end
 
 local function start_mesh_daemon_from_ide()
   local py_exe = get_mesh_python_exe()
-  local is_win = (PLATFORM == "Windows") or (package.config:sub(1, 1) == "\\")
-  local cmd
-  if is_win then
-    -- Dispara o cmd /c start /min para abrir minimizado na barra de tarefas sem pular na tela
-    cmd = string.format('cmd.exe /c start "DoxNote Mesh" /min "%s" -m doxoade lan-git note service -f', py_exe)
-  else
-    cmd = string.format('"%s" -m doxoade lan-git note service &', py_exe)
+  -- Se for Windows, usa pythonw.exe para não abrir nenhuma janela
+  if PLATFORM == "Windows" or package.config:sub(1, 1) == "\\" then
+    local pyw = py_exe:gsub("python%.exe$", "pythonw.exe")
+    if system.get_file_info and system.get_file_info(pyw) then
+      py_exe = pyw
+    end
   end
+  local cmd = string.format('"%s" -m doxoade lan-git note service', py_exe)
   pcall(system.exec, cmd)
 end
 
--- 🚀 AUTO-START NO BOOT DA IDE:
+-- 🛡️ REGRA 2: Verificador Rápido no Doxly (300ms)
 if core and core.add_thread then
   core.add_thread(function()
     while true do
-      -- Checagem rápida de 0.6s (menos de 1 segundo de latência total!)
-      coroutine.yield(0.6)
+      -- ⚡ Reduzido para 0.3s (recarga quase imperceptível ao olho humano!)
+      coroutine.yield(0.3)
 
       local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
       if is_active then

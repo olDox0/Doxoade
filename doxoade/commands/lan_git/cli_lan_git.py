@@ -715,33 +715,44 @@ def note_group():
 
 @note_group.command(name="service")
 @click.option("--password", default=None, help="Chave de pareamento segura.")
-@click.option("--foreground", "-f", is_flag=True, help="Executa preso na janela atual do terminal.")
+@click.option("--foreground", "-f", is_flag=True, help="Executa preso ao terminal para depuração com logs na tela.")
 def cmd_note_service(password: Optional[str], foreground: bool):
-    """Inicia o Daemon P2P de Sincronização de Notas (Minimizado por padrão)."""
+    """Inicia o Daemon P2P de Sincronização de Notas (100% Invisível por padrão)."""
     from doxoade.commands.lan_git.note_mesh.mesh_engine import NoteMeshEngine
 
-    # 1. Se já estiver rodando, não abre outro
     if NoteMeshEngine.is_service_running():
-        click.secho("✔ [DOXNOTE MESH] O serviço já está ativo na porta 54548.", fg="green")
+        click.secho("✔ [DOXNOTE MESH] O serviço já está ativo e operando em segundo plano.", fg="green")
         return
 
-    # 2. Modo Preso ao Terminal atual
+    # Modo depuração visível no terminal atual
     if foreground:
         engine = NoteMeshEngine(password=password)
         engine.start()
         return
 
-    # 🚀 3. Modo Padrão: Abre direto MINIMIZADO na barra de tarefas (Antivirus-Safe)!
+    # 🚀 Modo 100% Invisível: usa pythonw.exe sem alocar nenhuma janela de console
+    py_exe = Path(sys.executable)
+    pyw_exe = py_exe.with_name("pythonw.exe")
+    target_py = str(pyw_exe if pyw_exe.exists() else py_exe)
+
+    cmd = [target_py, "-m", "doxoade", "lan-git", "note", "service", "-f"]
+    if password:
+        cmd.extend(["--password", password])
+
+    flags = 0
     if sys.platform == "win32":
-        pwd_arg = f' --password "{password}"' if password else ""
-        # Invoca o cmd com /min (inicia minimizado direto na barra de tarefas)
-        cmd = f'cmd.exe /c start "DoxNote Mesh" /min "{sys.executable}" -m doxoade lan-git note service -f{pwd_arg}'
-        subprocess.Popen(cmd, shell=True)
-        click.secho("🚀 [DOXNOTE MESH] Serviço iniciado minimizado na barra de tarefas!", fg="green", bold=True)
-    else:
-        cmd = [sys.executable, "-m", "doxoade", "lan-git", "note", "service", "-f"]
-        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        click.secho("🚀 [DOXNOTE MESH] Serviço iniciado em segundo plano.", fg="green", bold=True)
+        flags = subprocess.CREATE_NO_WINDOW | 0x00000008  # DETACHED_PROCESS
+
+    proc = subprocess.Popen(
+        cmd,
+        creationflags=flags,
+        close_fds=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL,
+    )
+    click.secho(f"🚀 [DOXNOTE MESH] Serviço ativo em segundo plano (PID: {proc.pid}) — Zero Janelas.", fg="green", bold=True)
+
 
 @note_group.command(name="stop")
 def cmd_note_stop():
