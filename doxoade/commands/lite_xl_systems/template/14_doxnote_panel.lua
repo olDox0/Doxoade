@@ -1091,6 +1091,50 @@ command.add(nil, {
     end
     core.redraw = true
   end,
+  ["doxoade:note-status-click"] = function()
+    local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") ~= false
+    local status_str = is_active and "🟢 Ligado (P2P Mesh)" or "🔴 Desligado (Local)"
+    local toggle_label = is_active and "🔴 [3] Desativar Sincronização (Modo Local)"
+                                   or  "🟢 [3] Ativar Sincronização (Modo Rede)"
+
+    local options = {
+      "📖 [1] Abrir shared_notes.md (Painel Dividido)",
+      "⚡ [2] Forçar Sincronização Agora (Push / Pull)",
+      toggle_label,
+      "📂 [4] Abrir Notas do Projeto (.doxoade/note/)",
+      "➕ [5] Criar Nova Nota no Projeto...",
+      "📊 [6] Ver Status da Malha (" .. status_str .. ")"
+    }
+
+    core.command_view:enter("DoxNote P2P Hub (Selecione 1 a 6):", {
+      submit = function(item)
+        local home_dir = os.getenv("USERPROFILE") or os.getenv("HOME") or "."
+        local sep = PATHSEP or "/"
+        local shared_path = home_dir .. sep .. ".doxoade" .. sep .. "shared_notes.md"
+
+        if item:find("%[1%]") then
+          open_note_in_split(shared_path, "📖 shared_notes.md aberto no painel lateral.")
+        elseif item:find("%[2%]") then
+          command.perform("doxoade:reload-shared-notes")
+          local py_exe = get_mesh_python_exe()
+          pcall(system.exec, string.format('"%s" -m doxoade lan-git note service', py_exe))
+          core.log("⚡ [DOXNOTE] Forçada sincronização e recarga com a rede.")
+        elseif item:find("%[3%]") then
+          command.perform("doxoade:toggle-note-sync")
+        elseif item:find("%[4%]") then
+          command.perform("doxoade:open-note")
+        elseif item:find("%[5%]") then
+          command.perform("doxoade:new-note-interactive")
+        elseif item:find("%[6%]") then
+          local cache = rawget(_G, "_DOXOADE_MESH_STATUS_CACHE") or { text = status_str }
+          core.log("📊 Status: " .. tostring(cache.text or status_str))
+        end
+      end,
+      suggest = function(text)
+        return common.fuzzy_match(options, text)
+      end
+    })
+  end,
   ["doxoade:reload-shared-notes"] = function()
     local doc = core.active_view and core.active_view.doc
     if doc and doc.filename then

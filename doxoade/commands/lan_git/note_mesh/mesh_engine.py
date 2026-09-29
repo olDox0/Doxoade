@@ -231,7 +231,12 @@ class NoteMeshEngine:
 
             expected_hmac = raw_header[:32]
             ts_bytes = raw_header[32:40]
-            len_bytes = raw_header[40:44]
+            path_len_bytes = sock.recv(2)
+            path_len = int.from_bytes(path_len_bytes, "big")
+            path_bytes = sock.recv(path_len)
+            note_rel_path = path_bytes.decode("utf-8", errors="replace")
+            
+            len_bytes = sock.recv(4)
             data_len = int.from_bytes(len_bytes, "big")
 
             body = bytearray()
@@ -241,7 +246,12 @@ class NoteMeshEngine:
                     break
                 body.extend(chunk)
 
-            computed_hmac = hmac.new(self.secret_key, ts_bytes + len_bytes + body, hashlib.sha256).digest()
+            computed_hmac = hmac.new(
+                self.secret_key, 
+                ts_bytes + path_len_bytes + path_bytes + len_bytes + body, 
+                hashlib.sha256
+            ).digest()
+
             if not hmac.compare_digest(expected_hmac, computed_hmac):
                 sock.close()
                 return
@@ -249,61 +259,68 @@ class NoteMeshEngine:
             new_hash = hashlib.sha256(body).hexdigest()
             self._last_network_hash = new_hash
 
-            # Atualiza o arquivo global
-            self.global_notes_file.write_bytes(body)
-            self._last_global_mtime = self.global_notes_file.stat().st_mtime
-
-            # Se o projeto tiver seu próprio shared_notes.md, sincroniza ele também!
-            if self.project_notes_file.exists():
-                try:
+            # Se for shared_notes.md, atualiza os arquivos canônicos
+            if note_rel_path == "shared_notes.md":
+                self.global_notes_file.write_bytes(body)
+                self._last_global_mtime = self.global_notes_file.stat().st_mtime
+                if self.project_notes_file.exists():
                     self.project_notes_file.write_bytes(body)
                     self._last_proj_mtime = self.project_notes_file.stat().st_mtime
-                except Exception:
-                    pass
+            else:
+                # Se for nota do projeto (.doxoade/note/nome.md)
+                dest = Path.cwd() / ".doxoade" / note_rel_path
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(body)
 
             self.last_sync_time = time.time()
             self.peer_ip = sender_ip
             sock.sendall(b"OK")
-            self.log(f"📥 [RECEBIDO] Nota sincronizada de {sender_ip} ({len(body)} bytes).")
+            self.log(f"📥 [RECEBIDO] {note_rel_path} sincronizado de {sender_ip} ({len(body)} bytes).")
             self._update_state_file("connected")
         except Exception as e:
             self.log(f"✖ Erro ao receber push: {e}")
         finally:
             sock.close()
 
-    def send_push_to_peer(self, content_bytes: bytes) -> bool:
-        """Envia atualização atômica para o par com tolerância a oscilação de Wi-Fi."""
+    def send_push_to_peer(self, content_bytes: bytes, note_rel_path: str = "shared_notes.md") -> bool:
+        """Envia atualização atômica para o par (suporta shared_notes e notas do projeto)."""
         target_ip = self.peer_ip
         if not target_ip:
             self.log("⚠️ Nenhum IP de par detectado para envio.")
             return False
 
-        # Tenta até 2 vezes se o Wi-Fi der pico de latência
+        path_bytes = note_rel_path.encode("utf-8")
+        path_len_bytes = len(path_bytes).to_bytes(2, "big")
+        ts_bytes = int(time.time()).to_bytes(8, "big")
+        len_bytes = len(content_bytes).to_bytes(4, "big")
+        
+        token_hmac = hmac.new(
+            self.secret_key, 
+            ts_bytes + path_len_bytes + path_bytes + len_bytes + content_bytes, 
+            hashlib.sha256
+        ).digest()
+
         for tentativa in range(1, 3):
             t0 = time.perf_counter()
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                # Timeout generoso de 7s para não quebrar em oscilações
                 sock.settimeout(7.0)
                 sock.connect((target_ip, TCP_PORT))
 
-                ts_bytes = int(time.time()).to_bytes(8, "big")
-                len_bytes = len(content_bytes).to_bytes(4, "big")
-                token_hmac = hmac.new(self.secret_key, ts_bytes + len_bytes + content_bytes, hashlib.sha256).digest()
-
-                sock.sendall(token_hmac + ts_bytes + len_bytes + content_bytes)
+                header = token_hmac + ts_bytes + path_len_bytes + path_bytes + len_bytes
+                sock.sendall(header + content_bytes)
                 ack = sock.recv(2)
                 sock.close()
 
                 if ack == b"OK":
                     rtt = (time.perf_counter() - t0) * 1000.0
                     self.last_sync_time = time.time()
-                    self.log(f"📤 [ENVIADO] {len(content_bytes)} bytes entregues a {target_ip} em {rtt:.1f}ms! ✔")
+                    self.log(f"📤 [ENVIADO] {note_rel_path} ({len(content_bytes)} bytes) entregue a {target_ip} em {rtt:.1f}ms! ✔")
                     self._update_state_file("connected")
                     return True
             except Exception as e:
                 if tentativa == 1:
-                    time.sleep(0.2)  # Pausa rápida antes do retry
+                    time.sleep(0.2)
                 else:
                     self.log(f"✖ Falha no envio para {target_ip}: {e}")
         return False

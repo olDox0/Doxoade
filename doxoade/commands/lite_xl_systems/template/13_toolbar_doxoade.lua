@@ -178,7 +178,8 @@ core.add_thread(function()
         }
       end,
       function()
-        command.perform("doxoade:toggle-note-sync")
+        -- ⚡ Ao clicar no badge: abre o DoxNote Hub com opções de abrir, forçar sync e notas do projeto
+        command.perform("doxoade:note-status-click")
       end,
       5
     )
