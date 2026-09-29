@@ -661,18 +661,73 @@ end
 
 local function start_mesh_daemon_from_ide()
   local py_exe = get_mesh_python_exe()
-  -- Roda o service sem o -f (ele sobe em background e libera instantaneamente)
-  local cmd = string.format('"%s" -m doxoade lan-git note service', py_exe)
+  local is_win = (PLATFORM == "Windows") or (package.config:sub(1, 1) == "\\")
+  local cmd
+  if is_win then
+    -- Dispara o cmd /c start /min para abrir minimizado na barra de tarefas sem pular na tela
+    cmd = string.format('cmd.exe /c start "DoxNote Mesh" /min "%s" -m doxoade lan-git note service -f', py_exe)
+  else
+    cmd = string.format('"%s" -m doxoade lan-git note service &', py_exe)
+  end
   pcall(system.exec, cmd)
 end
 
 -- 🚀 AUTO-START NO BOOT DA IDE:
 if core and core.add_thread then
   core.add_thread(function()
-    coroutine.yield(1.0)
-    -- Só dispara se o status estiver ativo
-    if rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true then
-      start_mesh_daemon_from_ide()
+    while true do
+      -- Checagem rápida de 0.6s (menos de 1 segundo de latência total!)
+      coroutine.yield(0.6)
+
+      local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
+      if is_active then
+        pcall(function()
+          for _, doc in ipairs(core.docs or {}) do
+            if doc.filename then
+              local fn = doc.filename:gsub("\\", "/"):lower()
+              if fn:find("shared_notes%.md$") or fn:find("shared_notes%.txt$") then
+
+                local finfo = system.get_file_info and system.get_file_info(doc.filename)
+                if finfo and finfo.type == "file" and finfo.mtime and finfo.mtime > 0 then
+
+                  if not _last_synced_mtimes[doc.filename] then
+                    _last_synced_mtimes[doc.filename] = finfo.mtime
+                  elseif finfo.mtime > _last_synced_mtimes[doc.filename] then
+                    local is_dirty = false
+                    if doc.is_dirty then
+                      local ok, d = pcall(doc.is_dirty, doc)
+                      if ok and d then is_dirty = true end
+                    end
+
+                    if not is_dirty then
+                      local f = io.open(doc.filename, "r")
+                      if f then
+                        local content = f:read("*a")
+                        f:close()
+
+                        if content and content ~= "" then
+                          _last_synced_mtimes[doc.filename] = finfo.mtime
+
+                          local l1, c1, l2, c2 = 1, 1, 1, 1
+                          if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
+
+                          doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
+                          doc:insert(1, 1, content)
+                          if doc.clean then doc:clean() end
+
+                          if doc.set_selection then pcall(doc.set_selection, doc, l1, c1, l2, c2) end
+                          core.redraw = true
+                          if core.log then core.log("⚡ [DOXNOTE] Nota atualizada pela malha.") end
+                        end
+                      end
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end)
+      end
     end
   end)
 end

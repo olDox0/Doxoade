@@ -272,43 +272,48 @@ class NoteMeshEngine:
             sock.close()
 
     def send_push_to_peer(self, content_bytes: bytes) -> bool:
-        """Envia atualização atômica para o par."""
+        """Envia atualização atômica para o par com tolerância a oscilação de Wi-Fi."""
         target_ip = self.peer_ip
         if not target_ip:
             self.log("⚠️ Nenhum IP de par detectado para envio.")
             return False
 
-        t0 = time.perf_counter()
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(3.0)
-            sock.connect((target_ip, TCP_PORT))
+        # Tenta até 2 vezes se o Wi-Fi der pico de latência
+        for tentativa in range(1, 3):
+            t0 = time.perf_counter()
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                # Timeout generoso de 7s para não quebrar em oscilações
+                sock.settimeout(7.0)
+                sock.connect((target_ip, TCP_PORT))
 
-            ts_bytes = int(time.time()).to_bytes(8, "big")
-            len_bytes = len(content_bytes).to_bytes(4, "big")
-            token_hmac = hmac.new(self.secret_key, ts_bytes + len_bytes + content_bytes, hashlib.sha256).digest()
+                ts_bytes = int(time.time()).to_bytes(8, "big")
+                len_bytes = len(content_bytes).to_bytes(4, "big")
+                token_hmac = hmac.new(self.secret_key, ts_bytes + len_bytes + content_bytes, hashlib.sha256).digest()
 
-            sock.sendall(token_hmac + ts_bytes + len_bytes + content_bytes)
-            ack = sock.recv(2)
-            sock.close()
+                sock.sendall(token_hmac + ts_bytes + len_bytes + content_bytes)
+                ack = sock.recv(2)
+                sock.close()
 
-            if ack == b"OK":
-                rtt = (time.perf_counter() - t0) * 1000.0
-                self.last_sync_time = time.time()
-                self.log(f"📤 [ENVIADO] {len(content_bytes)} bytes entregues a {target_ip} em {rtt:.1f}ms! ✔")
-                self._update_state_file("connected")
-                return True
-        except Exception as e:
-            self.log(f"✖ Falha no envio para {target_ip}: {e}")
+                if ack == b"OK":
+                    rtt = (time.perf_counter() - t0) * 1000.0
+                    self.last_sync_time = time.time()
+                    self.log(f"📤 [ENVIADO] {len(content_bytes)} bytes entregues a {target_ip} em {rtt:.1f}ms! ✔")
+                    self._update_state_file("connected")
+                    return True
+            except Exception as e:
+                if tentativa == 1:
+                    time.sleep(0.2)  # Pausa rápida antes do retry
+                else:
+                    self.log(f"✖ Falha no envio para {target_ip}: {e}")
         return False
 
     def _file_watcher_loop(self):
-        """Dual-Watchdog: Monitora TANTO o arquivo da home quanto o do projeto!"""
+        """Dual-Watchdog veloz (300ms): Detecta o salvamento quase instantaneamente!"""
         while self.running:
-            time.sleep(1.0)
+            time.sleep(0.3)  # 👈 Reduzido de 1.0s para 0.3s
             target_to_sync = None
 
-            # 1. Verifica arquivo global
             if self.global_notes_file.exists():
                 try:
                     m = self.global_notes_file.stat().st_mtime
@@ -318,7 +323,6 @@ class NoteMeshEngine:
                 except Exception:
                     pass
 
-            # 2. Verifica arquivo do projeto
             if self.project_notes_file.exists():
                 try:
                     m = self.project_notes_file.stat().st_mtime
@@ -333,12 +337,10 @@ class NoteMeshEngine:
                     content = target_to_sync.read_bytes()
                     cur_hash = hashlib.sha256(content).hexdigest()
 
-                    # Só envia se foi alterado LOCALMENTE (não eco da rede)
                     if cur_hash != self._last_network_hash and cur_hash != self._last_sent_hash:
                         self.log(f"📝 [SALVAMENTO DETECTADO] em: {target_to_sync.name}")
                         if self.send_push_to_peer(content):
                             self._last_sent_hash = cur_hash
-                            # Espelha localmente para manter os dois arquivos idênticos
                             if target_to_sync == self.global_notes_file and self.project_notes_file.exists():
                                 self.project_notes_file.write_bytes(content)
                                 self._last_proj_mtime = self.project_notes_file.stat().st_mtime
