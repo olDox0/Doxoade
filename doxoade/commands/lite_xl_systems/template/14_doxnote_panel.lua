@@ -669,30 +669,42 @@ end
 local function get_mesh_python_exe()
   local user_dir = USERDIR or "."
   local sep = PATHSEP or "/"
+  local is_win = (PLATFORM == "Windows") or (package.config:sub(1, 1) == "\\")
 
-  -- 1. Verifica âncora gravada em .doxoade/python_path.txt
-  local py_anchor = (user_dir .. sep .. ".doxoade" .. sep .. "python_path.txt")
-  local finfo = system.get_file_info and system.get_file_info(py_anchor)
-  if finfo and finfo.type == "file" then
-    local f = io.open(py_anchor, "r")
-    if f then
-      local line = f:read("*l") or ""
-      f:close()
-      line = line:gsub("[\r\n]", ""):match("^%s*(.-)%s*$")
-      if line ~= "" and system.get_file_info(line) then
-        return line:gsub("/", "\\")
+  -- 1. Verifica âncora gravada em .doxoade/python_path.txt (na home ou no userdir)
+  local candidates = {
+    user_dir .. sep .. ".doxoade" .. sep .. "python_path.txt",
+    (os.getenv("USERPROFILE") or os.getenv("HOME") or ".") .. sep .. ".doxoade" .. sep .. "python_path.txt"
+  }
+  for _, py_anchor in ipairs(candidates) do
+    local finfo = system.get_file_info and system.get_file_info(py_anchor)
+    if finfo and finfo.type == "file" then
+      local f = io.open(py_anchor, "r")
+      if f then
+        local line = f:read("*l") or ""
+        f:close()
+        line = line:gsub("[\r\n]", ""):match("^%s*(.-)%s*$")
+        if line ~= "" and system.get_file_info(line) then
+          return line:gsub("/", "\\")
+        end
       end
     end
   end
 
-  -- 2. Verifica venv na raiz dos projetos abertos no Doxly
-  if core.project_directories then
-    for _, p in ipairs(core.project_directories) do
-      local p_str = tostring(type(p) == "table" and (p.path or p.name) or p)
-      local is_win = (PLATFORM == "Windows") or (package.config:sub(1, 1) == "\\")
-      local venv_py = p_str .. sep .. "venv" .. sep .. (is_win and "Scripts\\python.exe" or "bin/python")
-      if system.get_file_info(venv_py) then
-        return venv_py:gsub("/", "\\")
+  -- 2. Lê a pasta do projeto ativo em last_project.txt
+  local last_proj = (os.getenv("USERPROFILE") or os.getenv("HOME") or ".") .. sep .. ".doxoade" .. sep .. "last_project.txt"
+  local finfo_lp = system.get_file_info and system.get_file_info(last_proj)
+  if finfo_lp and finfo_lp.type == "file" then
+    local f = io.open(last_proj, "r")
+    if f then
+      local proj_path = f:read("*l") or ""
+      f:close()
+      proj_path = proj_path:gsub("[\r\n]", ""):match("^%s*(.-)%s*$")
+      if proj_path ~= "" then
+        local venv_py = proj_path .. sep .. "venv" .. sep .. (is_win and "Scripts\\python.exe" or "bin/python")
+        if system.get_file_info(venv_py) then
+          return venv_py:gsub("/", "\\")
+        end
       end
     end
   end
