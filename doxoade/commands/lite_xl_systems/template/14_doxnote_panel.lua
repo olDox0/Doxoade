@@ -245,73 +245,77 @@ local function is_doc_modified(doc)
   return false
 end
 
--- 🛡️ REGRA 1: Ao salvar com Ctrl+S, o Doxly grava no disco e guarda o novo mtime dele mesmo
+-- =============================================================================
+-- 📝 DOXNOTE WATCHER (Lógica Inviolável: Zero Reversão / Respeito ao Editor)
+-- =============================================================================
+local _doc_last_mtime = {}
+
+-- 🛡️ REGRA 1: Ao salvar com Ctrl+S, o Doxly salva e atualiza o carimbo dele mesmo
 if Doc and Doc.save then
   local orig_doc_save = Doc.save
   Doc.save = function(self, ...)
     local res = orig_doc_save(self, ...)
-    if self.filename and (self.filename:find("shared_notes%.md$") or self.filename:find("shared_notes%.txt$")) then
-      pcall(function()
-        local finfo = system.get_file_info and system.get_file_info(self.filename)
-        if finfo and finfo.mtime then
-          _last_known_disk_mtime[self.filename] = finfo.mtime
+    pcall(function()
+      if self.filename and (self.filename:find("shared_notes%.md$") or self.filename:find("shared_notes%.txt$")) then
+        local info = system.get_file_info(self.filename)
+        if info and info.mtime then
+          _doc_last_mtime[self.filename] = info.mtime
         end
-      end)
-    end
+      end
+    end)
     return res
   end
 end
 
--- 🛡️ REGRA 2: Corrotina "CHECK ➔ ATUALIZA" (Respeito sagrado ao usuário digitando)
+-- 🛡️ REGRA 2: Corrotina "CHECK ➔ ATUALIZA" (Leve, sem falso-positivo e sem auto-revert)
 if core and core.add_thread then
   core.add_thread(function()
     while true do
-      -- Checagem suave a cada 1.5s
-      coroutine.yield(1.5)
+      coroutine.yield(2.0)
       
-      local is_enabled = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
-      if is_enabled then
+      local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
+      if is_active then
         pcall(function()
           for _, doc in ipairs(core.docs or {}) do
             if doc.filename then
-              local fn_clean = doc.filename:gsub("\\", "/"):lower()
-              if fn_clean:find("shared_notes%.md$") or fn_clean:find("shared_notes%.txt$") then
+              local fn = doc.filename:gsub("\\", "/"):lower()
+              if fn:find("shared_notes%.md$") or fn:find("shared_notes%.txt$") then
                 
-                -- 🛑 TRAVA SAGRADA: Se o usuário estiver digitando (is_dirty), NUNCA RECARREGUE!
-                local is_user_editing = false
+                -- 🛑 LEI SAGRADA: Se o usuário estiver digitando (is_dirty), NUNCA TOCAR NO TEXTO!
+                local is_dirty = false
                 if doc.is_dirty then
-                  local ok, dirty = pcall(doc.is_dirty, doc)
-                  if ok and dirty then is_user_editing = true end
+                  local ok, d = pcall(doc.is_dirty, doc)
+                  if ok and d then is_dirty = true end
                 end
 
-                if not is_user_editing then
-                  local finfo = system.get_file_info and system.get_file_info(doc.filename)
-                  if finfo and finfo.type == "file" and finfo.mtime and finfo.mtime > 0 then
+                if not is_dirty then
+                  local info = system.get_file_info(doc.filename)
+                  if info and info.type == "file" and info.mtime then
                     
-                    -- Primeira vez que abre: apenas registra o mtime do disco
-                    if not _last_known_disk_mtime[doc.filename] then
-                      _last_known_disk_mtime[doc.filename] = finfo.mtime
-                    
-                    -- SÓ RECARREGA SE O DISCO FOI ALTERADO PELA REDE (novo mtime no Windows)
-                    elseif finfo.mtime ~= _last_known_disk_mtime[doc.filename] then
-                      _last_known_disk_mtime[doc.filename] = finfo.mtime
+                    -- Registra na primeira abertura
+                    if not _doc_last_mtime[doc.filename] then
+                      _doc_last_mtime[doc.filename] = info.mtime
+                      
+                    -- SÓ recarrega se o disco for ESTRITAMENTE MAIS NOVO (vindo da rede)
+                    elseif info.mtime > _doc_last_mtime[doc.filename] then
+                      _doc_last_mtime[doc.filename] = info.mtime
                       
                       local f = io.open(doc.filename, "r")
                       if f then
-                        local disk_raw = f:read("*a")
+                        local disk_text = f:read("*a")
                         f:close()
                         
-                        if disk_raw and disk_raw ~= "" then
+                        if disk_text and disk_text ~= "" then
                           local l1, c1, l2, c2 = 1, 1, 1, 1
                           if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
                           
                           doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
-                          doc:insert(1, 1, disk_raw)
+                          doc:insert(1, 1, disk_text)
                           if doc.clean then doc:clean() end
                           
                           if doc.set_selection then pcall(doc.set_selection, doc, l1, c1, l2, c2) end
                           core.redraw = true
-                          if core.log then core.log("⚡ [DOXNOTE] Nota sincronizada da rede.") end
+                          if core.log then core.log("⚡ [DOXNOTE] Nota sincronizada da rede com sucesso!") end
                         end
                       end
                     end
