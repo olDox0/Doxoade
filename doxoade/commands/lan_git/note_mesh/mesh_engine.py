@@ -95,6 +95,27 @@ class MeshSyncHTTPHandler(BaseHTTPRequestHandler):
             self.engine.log(f"✖ Erro no processamento do sync HTTP: {e}")
             self.send_error(500)
 
+    def _resolve_real_project_root(self) -> Path:
+        """Localiza a pasta raiz real do projeto em desenvolvimento."""
+        # 1. Tenta ler o último projeto ativo registrado pelo Doxly
+        last_proj = self.doxoade_dir / "last_project.txt"
+        if last_proj.exists():
+            try:
+                line = last_proj.read_text(encoding="utf-8").strip().splitlines()[0]
+                p = Path(line).resolve()
+                if p.exists() and not str(p).lower().endswith(".config"):
+                    return p
+            except Exception:
+                pass
+
+        # 2. Busca subindo a árvore a partir do diretório atual
+        from doxoade.tools.filesystem import _find_project_root
+        found = _find_project_root(os.getcwd())
+        p_found = Path(found).resolve()
+        if not str(p_found).lower().endswith(".config"):
+            return p_found
+
+        return Path.cwd().resolve()
 
 class NoteMeshEngine:
     """Nó P2P soberano com suporte a diretório multi-notas."""
@@ -104,9 +125,13 @@ class NoteMeshEngine:
         self.doxoade_dir = self.home / ".doxoade"
         self.doxoade_dir.mkdir(parents=True, exist_ok=True)
 
+        # 📂 1. Arquivo canônico global
         self.global_notes_file = self.doxoade_dir / "shared_notes.md"
-        self.project_notes_file = Path.cwd() / "shared_notes.md"
-        self.project_notes_dir = Path.cwd() / ".doxoade" / "note"
+        
+        # 📂 2. Raiz Real do Projeto (Resolve de last_project.txt ou busca recursiva)
+        self.project_root = self._resolve_real_project_root()
+        self.project_notes_file = self.project_root / "shared_notes.md"
+        self.project_notes_dir = self.project_root / ".doxoade" / "note"
         self.project_notes_dir.mkdir(parents=True, exist_ok=True)
 
         self.state_file = self.doxoade_dir / "mesh_state.json"
