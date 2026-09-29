@@ -220,17 +220,30 @@ local _shared_doc_mtimes = {}
 local _last_known_disk_hash = {}
 
 -- 🛡️ REGRA 1: Ao salvar com Ctrl+S, o Doxly grava no disco e guarda o hash dele mesmo
+local _last_known_disk_mtime = {}
+
+-- Função auxiliar que detecta com segurança se o usuário fez alterações na tela
+local function is_doc_modified(doc)
+  if doc.is_clean then
+    local ok, res = pcall(doc.is_clean, doc)
+    if ok and res ~= nil then return not res end
+  end
+  if doc.clean_change_id and doc.get_change_id then
+    return doc.clean_change_id ~= doc:get_change_id()
+  end
+  return false
+end
+
+-- 🛡️ REGRA 1: Ao salvar com Ctrl+S, o Doxly grava no disco e guarda o novo mtime dele mesmo
 if Doc and Doc.save then
   local orig_doc_save = Doc.save
   Doc.save = function(self, ...)
     local res = orig_doc_save(self, ...)
     if self.filename and (self.filename:find("shared_notes%.md$") or self.filename:find("shared_notes%.txt$")) then
       pcall(function()
-        local f = io.open(self.filename, "r")
-        if f then
-          local text = f:read("*a")
-          f:close()
-          _last_known_disk_hash[self.filename] = calc_clean_hash(text)
+        local finfo = system.get_file_info and system.get_file_info(self.filename)
+        if finfo and finfo.mtime then
+          _last_known_disk_mtime[self.filename] = finfo.mtime
         end
       end)
     end
@@ -238,11 +251,12 @@ if Doc and Doc.save then
   end
 end
 
--- 🛡️ REGRA 2: Corrotina "CHECK ➔ ATUALIZA" (Respeito sagrado ao usuário digitando)
+-- 🛡️ REGRA 2: Corrotina "CHECK ➔ ATUALIZA" (Leve, sem loop fantasma e respeitando a digitação)
 if core and core.add_thread then
   core.add_thread(function()
     while true do
-      coroutine.yield(1.5)
+      -- Intervalo suave de 2 segundos (Custo de CPU praticamente zero)
+      coroutine.yield(2.0)
       
       local is_enabled = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
       if is_enabled then
@@ -252,38 +266,36 @@ if core and core.add_thread then
               local fn_clean = doc.filename:gsub("\\", "/"):lower()
               if fn_clean:find("shared_notes%.md$") or fn_clean:find("shared_notes%.txt$") then
                 
-                -- Se você está digitando (buffer dirty), NUNCA sobrescreva!
-                if not doc:is_dirty() then
-                  local finfo = system.get_file_info and system.get_file_info(doc.filename)
-                  if finfo and finfo.type == "file" and (finfo.size or 0) > 0 then
+                local finfo = system.get_file_info and system.get_file_info(doc.filename)
+                if finfo and finfo.type == "file" and finfo.mtime and finfo.mtime > 0 then
+                  
+                  -- 1. Primeira vez que abre o arquivo na sessão: apenas registra o mtime
+                  if not _last_known_disk_mtime[doc.filename] then
+                    _last_known_disk_mtime[doc.filename] = finfo.mtime
+                  
+                  -- 2. SÓ AGE SE O DISCO REALMENTE MUDOU DE FORA (Rede gravou novo mtime)
+                  elseif finfo.mtime ~= _last_known_disk_mtime[doc.filename] then
                     
-                    local f = io.open(doc.filename, "r")
-                    if f then
-                      local disk_raw = f:read("*a")
-                      f:close()
+                    -- Se o usuário estiver digitando alterações não salvas, NÃO toca no buffer!
+                    if not is_doc_modified(doc) then
+                      _last_known_disk_mtime[doc.filename] = finfo.mtime
                       
-                      if disk_raw and disk_raw ~= "" then
-                        local disk_hash = calc_clean_hash(disk_raw)
+                      local f = io.open(doc.filename, "r")
+                      if f then
+                        local disk_raw = f:read("*a")
+                        f:close()
                         
-                        -- Inicializa no boot
-                        if not _last_known_disk_hash[doc.filename] then
-                          _last_known_disk_hash[doc.filename] = disk_hash
-                        
-                        -- SÓ RECARREGA SE O DISCO REALMENTE MUDOU POR FORA (PELA REDE)
-                        elseif disk_hash ~= _last_known_disk_hash[doc.filename] then
-                          _last_known_disk_hash[doc.filename] = disk_hash
-                          
+                        if disk_raw and disk_raw ~= "" then
                           local l1, c1, l2, c2 = 1, 1, 1, 1
                           if doc.get_selection then l1, c1, l2, c2 = doc:get_selection() end
                           
                           doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
                           doc:insert(1, 1, disk_raw)
-                          doc:clean()
+                          if doc.clean then doc:clean() end
                           
                           if doc.set_selection then pcall(doc.set_selection, doc, l1, c1, l2, c2) end
-                          
                           core.redraw = true
-                          if core.log then core.log("⚡ [DOXNOTE] Nota sincronizada da rede com sucesso!") end
+                          if core.log then core.log("⚡ [DOXNOTE] Nota sincronizada da rede.") end
                         end
                       end
                     end
