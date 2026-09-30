@@ -29,6 +29,7 @@ class GitManifest:
     is_live: bool
     dirty_count: int
     timestamp: float
+    notes_hash: str = ""
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), separators=(",", ":"))
@@ -58,7 +59,8 @@ class GitManifest:
                 is_dirty=bool(payload.get("is_dirty", False)),
                 is_live=bool(payload.get("is_live", False)),
                 dirty_count=int(payload.get("dirty_count", 0)),
-                timestamp=float(payload.get("timestamp", 0.0))
+                timestamp=float(payload.get("timestamp", 0.0)),
+                notes_hash=payload.get("notes_hash", "")
             )
         except Exception:
             return None
@@ -168,6 +170,14 @@ class GitManifestExtractor:
         except Exception:
             hostname = "DoxoadeHost"
 
+        notes_hash = ""
+        notes_file = os.path.join(repo_path, "shared_notes.md")
+        if os.path.exists(notes_file):
+            try:
+                notes_hash = hashlib.sha256(open(notes_file, "rb").read()).hexdigest()
+            except Exception:
+                pass
+
         return GitManifest(
             magic=DOX_MAGIC_HEADER,
             protocol_version="1.0",
@@ -184,5 +194,6 @@ class GitManifestExtractor:
             is_dirty=is_dirty,
             is_live=live,
             dirty_count=len(dirty_lines),
-            timestamp=os.path.getmtime(repo_path)
+            timestamp=os.path.getmtime(repo_path),
+            notes_hash=notes_hash
         )

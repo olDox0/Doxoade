@@ -142,6 +142,22 @@ class NoteMeshEngine:
         self.debug = MeshDebugLogger()
         self.fw_guard = MeshFirewallGuard()
 
+    def _fetch_from_peer(self, peer_ip: str, peer_port: int, rel_path: str):
+        """Busca automaticamente o arquivo do peer quando detecta versão mais recente."""
+        url = f"http://{peer_ip}:{peer_port}/sync?fetch={quote(rel_path)}"
+        try:
+            req = Request(url, method="GET")
+            with urlopen(req, timeout=5) as resp:
+                if resp.status == 200:
+                    body = resp.read()
+                    if rel_path == "shared_notes.md":
+                        self.global_notes_file.write_bytes(body)
+                        self._file_mtimes[str(self.global_notes_file)] = self.global_notes_file.stat().st_mtime
+                        self._file_sent_hashes["shared_notes.md"] = hashlib.sha256(body).hexdigest()
+                        self.log(f"📥 [AUTO-PULL OK] {rel_path} atualizado de {peer_ip} ({len(body)} bytes).")
+        except Exception as e:
+            self.log(f"⚠️ [AUTO-PULL FALHA] Não foi buscar de {peer_ip}: {e}")
+
     def _resolve_real_project_root(self) -> Path:
         """Localiza a pasta raiz real do projeto em desenvolvimento."""
         last_proj = self.doxoade_dir / "last_project.txt"
@@ -326,6 +342,20 @@ class NoteMeshEngine:
             ready = select.select([sock], [], [], 0.5)
             if ready[0]:
                 try:
+                    manifest = GitManifest.from_bytes(data)
+                    if manifest:
+                        self.peer_ip = addr[0]
+                        self.peer_name = manifest.hostname
+                        self._update_state_file("connected")
+                        
+                        # 🔄 AUTO-PULL FALLBACK (Zero-Admin / Contorno de Firewall)
+                        # Se o hash das notas do peer for diferente, iniciamos o pull automaticamente.
+                        # Isso usa uma conexão de SAÍDA nossa, contornando o firewall de entrada do peer.
+                        if hasattr(manifest, 'notes_hash') and manifest.notes_hash:
+                            local_hash = self._file_sent_hashes.get("shared_notes.md", "")
+                            if manifest.notes_hash != local_hash:
+                                self.log(f"🔄 [AUTO-PULL] Alteração detectada no peer {manifest.hostname}. Sincronizando...")
+                                threading.Thread(target=self._fetch_from_peer, args=(manifest.ip, manifest.port, "shared_notes.md"), daemon=True).start()
                     data, addr = sock.recvfrom(2048)
                     msg = json.loads(data.decode("utf-8"))
                     if msg.get("magic") == MESH_MAGIC and msg.get("ip") != self.local_ip:
