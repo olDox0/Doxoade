@@ -30,11 +30,36 @@ TCP_PORT = 54548
 
 
 class MeshSyncHTTPHandler(BaseHTTPRequestHandler):
-    """Handler HTTP atômico com suporte a múltiplos arquivos de notas."""
     engine: NoteMeshEngine = None
-
+    
     def log_message(self, format, *args):
-        pass  # Silencia logs automáticos de console
+        pass
+
+    def do_GET(self):
+        """Atende requisições de Pull automático (Fallback de Firewall)."""
+        parsed = urlparse(self.path)
+        if parsed.path == "/sync" and "fetch=" in parsed.query:
+            qs = parse_qs(parsed.query)
+            rel_path = qs.get("fetch", ["shared_notes.md"])[0]
+            clean_rel = rel_path.replace("\\", "/").strip("/")
+            
+            if clean_rel == "shared_notes.md":
+                target_file = self.engine.global_notes_file
+            else:
+                target_file = self.engine.project_notes_dir / Path(clean_rel).name
+                
+            if target_file.exists():
+                body = target_file.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                self.engine.log(f"📤 [SERVINDO PULL] {clean_rel} enviado para {self.client_address[0]} ({len(body)} bytes).")
+            else:
+                self.send_error(404, "Arquivo não encontrado")
+        else:
+            self.send_error(404)
 
     def do_POST(self):
         if self.path != "/sync":
