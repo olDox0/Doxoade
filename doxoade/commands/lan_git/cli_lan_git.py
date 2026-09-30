@@ -829,5 +829,49 @@ def cmd_note_open():
     else:
         os.system(f'xdg-open "{p}"')
 
+@note_group.command(name="doctor")
+def cmd_note_doctor():
+    """🩺 Diagnóstico completo de conectividade e firewall da malha P2P."""
+    from doxoade.commands.lan_git.note_mesh.mesh_engine import NoteMeshEngine
+    from doxoade.commands.lan_git.note_mesh.mesh_firewall_guard import MeshFirewallGuard
+
+    engine = NoteMeshEngine()
+    guard = MeshFirewallGuard()
+
+    click.secho("══════════════════════════════════════════════════════════", fg="cyan")
+    click.secho("  🩺 DOXNOTE MESH DOCTOR — Diagnóstico Completo", fg="cyan", bold=True)
+    click.secho("══════════════════════════════════════════════════════════", fg="cyan")
+
+    if not engine.peer_ip:
+        click.secho("  ⚠ Nenhum peer descoberto. Rode 'doxoade lan-git note service' primeiro.", fg="yellow")
+        return
+
+    click.echo(f"  Peer Alvo: {engine.peer_name or 'Desconhecido'} ({engine.peer_ip})")
+    click.echo("  Executando testes de conectividade...\n")
+    
+    report = guard.run_full_diagnostic(engine.peer_ip)
+
+    for check_name, check_data in report["checks"].items():
+        if check_name == "outbound":
+            status = "✅" if check_data.get("success") else "❌"
+            latency = f" ({check_data.get('latency_ms')}ms)" if check_data.get("success") else f" ({check_data.get('error')})"
+            click.echo(f"  {status} Conectividade TCP ({check_data.get('target')}):{latency}")
+        elif check_name == "is_admin":
+            status = "👑" if check_data else "👤"
+            click.echo(f"  {status} Privilégios Atuais: {'Administrador' if check_data else 'Usuário Padrão'}")
+
+    click.secho(f"\n  Veredito: {report['verdict']}", fg="green" if report["verdict"] == "CONNECTIVITY_OK" else "red", bold=True)
+
+    if report["verdict"] == "OUTBOUND_BLOCKED":
+        if click.confirm("  Deseja solicitar permissão de firewall agora (UAC - 24h)?"):
+            result = guard.request_firewall_permission(ttl_hours=24)
+            if result.get("rules_created"):
+                click.secho(f"  ✅ Regras criadas! Expiram em: {result['expire_at']}", fg="green")
+            else:
+                click.secho(f"  ❌ Falha: {result.get('errors')}", fg="red")
+                
+    click.secho(f"\n  📁 Logs de Debug em: {guard.debug_dir}", fg="white")
+
 if __name__ == "__main__":
     lan_git_cli()
+

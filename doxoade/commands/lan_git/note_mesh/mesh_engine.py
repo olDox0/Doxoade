@@ -20,6 +20,10 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.request import Request, urlopen
 from typing import Optional, Dict, Any, List
 
+from doxoade.commands.lan_git.note_mesh.mesh_firewall_guard import MeshFirewallGuard
+from doxoade.commands.lan_git.note_mesh.mesh_debug_logger import MeshDebugLogger
+
+
 MESH_MAGIC = "DOX_MESH_V4"
 UDP_PORT = 54547
 TCP_PORT = 54548
@@ -134,6 +138,9 @@ class NoteMeshEngine:
         self._file_sent_hashes: Dict[str, str] = {}
         self._file_network_hashes: Dict[str, str] = {}
         self._init_catalog_state()
+
+        self.debug = MeshDebugLogger()
+        self.fw_guard = MeshFirewallGuard()
 
     def _resolve_real_project_root(self) -> Path:
         """Localiza a pasta raiz real do projeto em desenvolvimento."""
@@ -275,6 +282,21 @@ class NoteMeshEngine:
             parts = self.local_ip.split(".")
             subnet_bcast = f"{parts[0]}.{parts[1]}.{parts[2]}.255"
 
+        if not self.peer_ip:
+            from doxoade.commands.lan_git.discovery_lan_git.scanner_lan_git import LANDirectScanner
+            # Tentar IPs conhecidos da sub-rede
+            for candidate_ip in self._get_subnet_candidates():
+                try:
+                    resp = self._probe_peer(candidate_ip)
+                    if resp:
+                        self.peer_ip = candidate_ip
+                        self.peer_name = resp.get("hostname", "Unknown")
+                        self._update_state_file("connected")
+                        self.log(f"🔍 [DISCOVERY] Peer encontrado via probe: {candidate_ip}")
+                        break
+                except Exception:
+                    continue
+
         last_bcast = 0.0
         while self.running:
             now = time.time()
@@ -328,35 +350,57 @@ class NoteMeshEngine:
             server.handle_request()
         server.server_close()
 
-    def send_push_to_peer(self, content_bytes: bytes, note_rel_path: str = "shared_notes.md") -> bool:
-        target_ip = self.peer_ip
-        if not target_ip:
-            return False
+    def send_push_to_peer(self, file_path: Path, rel_path: str):
+        if not self.peer_ip:
+            self.debug.event("SEND", "Sem peer descoberto", rel_path=rel_path)
+            self.log("⚠ [MESH] Nenhum peer descoberto. Aguardando beacon...")
+            return
 
-        t0 = time.perf_counter()
-        computed_hmac = hmac.new(self.secret_key, content_bytes, hashlib.sha256).hexdigest()
-        url = f"http://{target_ip}:{TCP_PORT}/sync"
+        self.debug.counter("sends_attempted")
+        url = f"http://{self.peer_ip}:{TCP_PORT}/sync"
+        body = file_path.read_bytes()
+        mac = hmac.new(self.secret_key, body, hashlib.sha256).hexdigest()
 
-        req = Request(url, data=content_bytes, method="POST")
-        req.add_header("X-Mesh-HMAC", computed_hmac)
-        req.add_header("X-Mesh-Path", note_rel_path)
-        req.add_header("Content-Type", "text/markdown; charset=utf-8")
+        req = Request(url, data=body, method="POST")
+        req.add_header("X-Mesh-HMAC", mac)
+        req.add_header("X-Mesh-Path", rel_path)
 
-        for tentativa in range(1, 3):
-            try:
-                with urlopen(req, timeout=5.0) as response:
-                    if response.status == 200 and response.read() == b"OK":
-                        rtt = (time.perf_counter() - t0) * 1000.0
-                        self.last_sync_time = time.time()
-                        self.log(f"📤 [ENVIADO] {note_rel_path} ({len(content_bytes)} bytes) entregue a {target_ip} em {rtt:.1f}ms! ✔")
-                        self._update_state_file("connected")
-                        return True
-            except Exception as e:
-                if tentativa == 1:
-                    time.sleep(0.2)
+        try:
+            t0 = time.time()
+            with urlopen(req, timeout=5) as resp:
+                elapsed = (time.time() - t0) * 1000
+                self.debug.counter("sends_ok")
+                self.debug.event("SEND", "Push entregue", rel_path=rel_path, peer=self.peer_ip, latency_ms=round(elapsed, 2), bytes=len(body))
+                self.log(f"📤 [ENVIADO] {rel_path} ({len(body)} bytes) → {self.peer_ip} em {elapsed:.1f}ms ✔")
+        except TimeoutError:
+            self.debug.counter("sends_failed")
+            self.debug.counter("timeouts")
+            self.debug.event("SEND", "TIMEOUT no push", rel_path=rel_path, peer=self.peer_ip, bytes=len(body))
+            self.log(f"✖ Falha: {self.peer_ip}:{TCP_PORT} inacessível (TIMEOUT).")
+
+            # ─── AUTO-DIAGNÓSTICO E CORREÇÃO ─────────────────────
+            self.log("🔍 [GUARD] Executando diagnóstico automático de firewall...")
+            report = self.fw_guard.run_full_diagnostic(self.peer_ip)
+            self.debug.event("GUARD", "Diagnóstico completo", **report)
+
+            if report["verdict"] == "OUTBOUND_BLOCKED":
+                self.log("🛡️ [GUARD] Solicitando permissão de firewall (UAC)...")
+                perm_result = self.fw_guard.request_firewall_permission(ttl_hours=24)
+                self.debug.event("GUARD", "Solicitação de permissão", **perm_result)
+
+                if perm_result.get("rules_created"):
+                    self.log(f"✅ [GUARD] Regras criadas! Expiram em: {perm_result.get('expire_at')}")
+                elif perm_result.get("uac_result") == "user_denied":
+                    self.log("⚠️ [GUARD] Usuário recusou a elevação. Sincronização permanecerá bloqueada.")
                 else:
-                    self.log(f"✖ Falha no envio de {note_rel_path} para {target_ip}: {e}")
-        return False
+                    self.log(f"❌ [GUARD] Falha: {perm_result.get('errors')}")
+            else:
+                self.log("✅ [GUARD] Conectividade OK. O problema pode ser no servidor de destino.")
+
+        except Exception as e:
+            self.debug.counter("sends_failed")
+            self.debug.event("SEND", "Erro no push", rel_path=rel_path, error=str(e))
+            self.log(f"✖ Falha no envio de {rel_path}: {e}")
 
     def _file_watcher_loop(self):
         """Dual-Watchdog Multi-Note: Vigia shared_notes E todos os .doxoade/note/*.md."""
