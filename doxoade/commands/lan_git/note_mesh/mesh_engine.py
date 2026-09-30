@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/lan_git/note_mesh/mesh_engine.py
 """
-🌐 DOXNOTE MESH ENGINE v4.0 — Multi-Note Directory Watcher & HTTP REST Transport.
-Sincroniza tanto shared_notes.md quanto múltiplos cadernos em .doxoade/note/*.md.
+🌐 DOXNOTE MESH ENGINE v5.0 — PULL-ONLY MODE (Zero-Firewall-Dependency).
+Modo soberano que NUNCA tenta push direto. Usa APENAS Auto-Pull via Beacon UDP.
 Compliance: ProDeNov 1.2.1 | PASC-6.1 | Limite < 50KB.
 """
 from __future__ import annotations
@@ -18,50 +18,51 @@ import threading
 from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.request import Request, urlopen
+from urllib.parse import urlparse, parse_qs, quote
 from typing import Optional, Dict, Any, List
 
-from doxoade.commands.lan_git.note_mesh.mesh_firewall_guard import MeshFirewallGuard
-from doxoade.commands.lan_git.note_mesh.mesh_debug_logger import MeshDebugLogger
-
-
-MESH_MAGIC = "DOX_MESH_V4"
+MESH_MAGIC = "DOX_MESH_V5"
 UDP_PORT = 54547
 TCP_PORT = 54548
 
-
 class MeshSyncHTTPHandler(BaseHTTPRequestHandler):
+    """Handler HTTP com suporte a GET (Auto-Pull) e POST (compatibilidade)."""
     engine: NoteMeshEngine = None
-    
+
     def log_message(self, format, *args):
         pass
 
     def do_GET(self):
-        """Atende requisições de Pull automático (Fallback de Firewall)."""
+        """Atende requisições de Auto-Pull do peer."""
         parsed = urlparse(self.path)
         if parsed.path == "/sync" and "fetch=" in parsed.query:
             qs = parse_qs(parsed.query)
             rel_path = qs.get("fetch", ["shared_notes.md"])[0]
             clean_rel = rel_path.replace("\\", "/").strip("/")
-            
+
+            self.engine.log(f"📥 [GET] Peer {self.client_address[0]} solicitou: {clean_rel}")
+
             if clean_rel == "shared_notes.md":
                 target_file = self.engine.global_notes_file
             else:
                 target_file = self.engine.project_notes_dir / Path(clean_rel).name
-                
+
             if target_file.exists():
                 body = target_file.read_bytes()
                 self.send_response(200)
-                self.send_header("Content-Type", "text/plain")
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
-                self.engine.log(f"📤 [SERVINDO PULL] {clean_rel} enviado para {self.client_address[0]} ({len(body)} bytes).")
+                self.engine.log(f"📤 [SERVINDO] {clean_rel} enviado para {self.client_address[0]} ({len(body)} bytes).")
             else:
+                self.engine.log(f"⚠️ [GET] Arquivo não encontrado: {clean_rel}")
                 self.send_error(404, "Arquivo não encontrado")
         else:
             self.send_error(404)
 
     def do_POST(self):
+        """Mantém compatibilidade com push direto (caso o firewall permita no futuro)."""
         if self.path != "/sync":
             self.send_error(404)
             return
@@ -75,15 +76,13 @@ class MeshSyncHTTPHandler(BaseHTTPRequestHandler):
             body = self.rfile.read(content_length)
             received_hmac = self.headers.get("X-Mesh-HMAC", "")
             note_rel_path = self.headers.get("X-Mesh-Path", "shared_notes.md").strip()
-
-            # 🛡️ ANÚBIS SHIELD: Proteção contra Path Traversal
             clean_rel = note_rel_path.replace("\\", "/").strip("/")
+
             if ".." in clean_rel or clean_rel.startswith("/"):
                 self.engine.log(f"🚨 [SEGURANÇA] Bloqueada tentativa de Path Traversal: {note_rel_path}")
                 self.send_error(403, "Caminho proibido")
                 return
 
-            # Valida HMAC com a chave compartilhada da malha
             computed_hmac = hmac.new(self.engine.secret_key, body, hashlib.sha256).hexdigest()
             if not hmac.compare_digest(received_hmac, computed_hmac):
                 self.send_error(401, "HMAC Invalido")
@@ -91,19 +90,11 @@ class MeshSyncHTTPHandler(BaseHTTPRequestHandler):
 
             new_hash = hashlib.sha256(body).hexdigest()
 
-            # 📂 Roteamento e Destino
             if clean_rel == "shared_notes.md":
                 self.engine.global_notes_file.write_bytes(body)
                 self.engine._file_mtimes[str(self.engine.global_notes_file)] = self.engine.global_notes_file.stat().st_mtime
-                if self.engine.project_notes_file.exists():
-                    try:
-                        self.engine.project_notes_file.write_bytes(body)
-                        self.engine._file_mtimes[str(self.engine.project_notes_file)] = self.engine.project_notes_file.stat().st_mtime
-                    except Exception:
-                        pass
                 self.engine._file_network_hashes["shared_notes.md"] = new_hash
             else:
-                # Salva notas do projeto em .doxoade/note/ na raiz real
                 target_dest = self.engine.project_notes_dir / Path(clean_rel).name
                 target_dest.parent.mkdir(parents=True, exist_ok=True)
                 target_dest.write_bytes(body)
@@ -120,13 +111,14 @@ class MeshSyncHTTPHandler(BaseHTTPRequestHandler):
 
             self.engine.log(f"📥 [RECEBIDO] {clean_rel} sincronizado de {self.client_address[0]} ({len(body)} bytes).")
             self.engine._update_state_file("connected")
+
         except Exception as e:
             self.engine.log(f"✖ Erro no processamento do sync HTTP: {e}")
             self.send_error(500)
 
 
 class NoteMeshEngine:
-    """Nó P2P soberano com suporte a diretório multi-notas."""
+    """Nó P2P soberano em modo PULL-ONLY (Zero-Firewall-Dependency)."""
 
     def __init__(self, password: Optional[str] = None):
         self.home = Path.home()
@@ -134,8 +126,6 @@ class NoteMeshEngine:
         self.doxoade_dir.mkdir(parents=True, exist_ok=True)
 
         self.global_notes_file = self.doxoade_dir / "shared_notes.md"
-        
-        # 📂 2. Raiz Real do Projeto (Resolve de last_project.txt ou busca recursiva)
         self.project_root = self._resolve_real_project_root()
         self.project_notes_file = self.project_root / "shared_notes.md"
         self.project_notes_dir = self.project_root / ".doxoade" / "note"
@@ -147,7 +137,7 @@ class NoteMeshEngine:
         self.log_file = self.doxoade_dir / "mesh.log"
 
         if not self.global_notes_file.exists():
-            self.global_notes_file.write_text("# 📝 Doxoade Shared Notes\n\n", encoding="utf-8")
+            self.global_notes_file.write_text("# DoxNote Shared\n", encoding="utf-8")
 
         self.secret_key = self._load_or_create_key(password)
         self.hostname = socket.gethostname()
@@ -162,26 +152,17 @@ class NoteMeshEngine:
         self._file_mtimes: Dict[str, float] = {}
         self._file_sent_hashes: Dict[str, str] = {}
         self._file_network_hashes: Dict[str, str] = {}
+
         self._init_catalog_state()
 
-        self.debug = MeshDebugLogger()
-        self.fw_guard = MeshFirewallGuard()
-
-    def _fetch_from_peer(self, peer_ip: str, peer_port: int, rel_path: str):
-        """Busca automaticamente o arquivo do peer quando detecta versão mais recente."""
-        url = f"http://{peer_ip}:{peer_port}/sync?fetch={quote(rel_path)}"
-        try:
-            req = Request(url, method="GET")
-            with urlopen(req, timeout=5) as resp:
-                if resp.status == 200:
-                    body = resp.read()
-                    if rel_path == "shared_notes.md":
-                        self.global_notes_file.write_bytes(body)
-                        self._file_mtimes[str(self.global_notes_file)] = self.global_notes_file.stat().st_mtime
-                        self._file_sent_hashes["shared_notes.md"] = hashlib.sha256(body).hexdigest()
-                        self.log(f"📥 [AUTO-PULL OK] {rel_path} atualizado de {peer_ip} ({len(body)} bytes).")
-        except Exception as e:
-            self.log(f"⚠️ [AUTO-PULL FALHA] Não foi buscar de {peer_ip}: {e}")
+        self.log("=" * 60)
+        self.log("🌐 DOXNOTE MESH v5.0 — PULL-ONLY MODE ATIVO")
+        self.log("=" * 60)
+        self.log(f"  Modo         : PULL-ONLY (Zero-Firewall-Dependency)")
+        self.log(f"  Global Notes : {self.global_notes_file}")
+        self.log(f"  Project Notes: {self.project_notes_dir}/*.md")
+        self.log(f"  Peer IP      : {self.peer_ip or 'Aguardando descoberta...'}")
+        self.log("=" * 60)
 
     def _resolve_real_project_root(self) -> Path:
         """Localiza a pasta raiz real do projeto em desenvolvimento."""
@@ -208,7 +189,7 @@ class NoteMeshEngine:
 
     @property
     def notes_file(self) -> Path:
-        """Alias de compatibilidade retroativa para cli_lan_git."""
+        """Alias de compatibilidade retroativa."""
         return self.global_notes_file
 
     def _init_catalog_state(self):
@@ -267,8 +248,10 @@ class NoteMeshEngine:
             key = hashlib.sha256(password.encode("utf-8")).digest()
             self.key_file.write_bytes(key)
             return key
+
         if self.key_file.exists() and self.key_file.stat().st_size == 32:
             return self.key_file.read_bytes()
+
         default_key = hashlib.sha256(b"doxoade_sovereign_mesh_key").digest()
         self.key_file.write_bytes(default_key)
         return default_key
@@ -280,6 +263,19 @@ class NoteMeshEngine:
             return hashlib.sha256(path.read_bytes()).hexdigest()
         except Exception:
             return ""
+
+    def _get_current_notes_hash(self) -> str:
+        """Calcula o hash combinado de todas as notas monitoradas."""
+        combined = ""
+        if self.global_notes_file.exists():
+            combined += self.global_notes_file.read_text(encoding="utf-8", errors="replace")
+
+        if self.project_notes_dir.exists():
+            for p in sorted(self.project_notes_dir.glob("*.md")):
+                if not p.name.startswith("."):
+                    combined += p.read_text(encoding="utf-8", errors="replace")
+
+        return hashlib.sha256(combined.encode("utf-8")).hexdigest()[:16]
 
     def _load_cached_peer(self) -> dict:
         if self.state_file.exists():
@@ -301,217 +297,206 @@ class NoteMeshEngine:
             "peer_name": self.peer_name or "Nenhum",
             "peer_ip": self.peer_ip or "Nenhum",
             "last_sync": time.strftime("%H:%M:%S", time.localtime(self.last_sync_time)) if self.last_sync_time else "Nunca",
-            "updated_at": time.time(),
+            "updated_at": time.time()
         }
         try:
-            self.state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+            self.state_file.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
         except Exception:
             pass
 
     def _beacon_loop(self):
+        """Loop de descoberta UDP com anúncio de hash das notas."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        try:
-            sock.bind(("0.0.0.0", UDP_PORT))
-        except Exception:
-            return
-        sock.setblocking(False)
+        sock.bind(("0.0.0.0", UDP_PORT))
+        sock.settimeout(1.0)
 
-        subnet_bcast = "255.255.255.255"
-        if self.local_ip.startswith("192.168."):
-            parts = self.local_ip.split(".")
-            subnet_bcast = f"{parts[0]}.{parts[1]}.{parts[2]}.255"
-
-        if not self.peer_ip:
-            from doxoade.commands.lan_git.discovery_lan_git.scanner_lan_git import LANDirectScanner
-            # Tentar IPs conhecidos da sub-rede
-            for candidate_ip in self._get_subnet_candidates():
-                try:
-                    resp = self._probe_peer(candidate_ip)
-                    if resp:
-                        self.peer_ip = candidate_ip
-                        self.peer_name = resp.get("hostname", "Unknown")
-                        self._update_state_file("connected")
-                        self.log(f"🔍 [DISCOVERY] Peer encontrado via probe: {candidate_ip}")
-                        break
-                except Exception:
-                    continue
+        self.log(f"📡 [BEACON] Escutando na porta UDP {UDP_PORT}...")
 
         last_bcast = 0.0
+        last_notes_hash = ""
+
         while self.running:
             now = time.time()
-            if now - last_bcast > 3.0:
-                payload = json.dumps({
-                    "magic": MESH_MAGIC,
-                    "host": self.hostname,
-                    "ip": self.local_ip,
-                    "tcp_port": TCP_PORT
-                }).encode("utf-8")
 
-                for target_ip in [subnet_bcast, "255.255.255.255"]:
+            # Anunciar a cada 3 segundos
+            if now - last_bcast >= 3.0:
+                current_hash = self._get_current_notes_hash()
+
+                # Só anunciar se o hash mudou ou a cada 15s
+                if current_hash != last_notes_hash or now - last_bcast >= 15.0:
+                    manifest = {
+                        "magic": MESH_MAGIC,
+                        "hostname": self.hostname,
+                        "ip": self.local_ip,
+                        "port": TCP_PORT,
+                        "notes_hash": current_hash,
+                        "timestamp": now
+                    }
                     try:
-                        sock.sendto(payload, (target_ip, UDP_PORT))
-                    except Exception:
-                        pass
+                        data = json.dumps(manifest).encode("utf-8")
+                        parts = self.local_ip.split(".")
+                        subnet_bcast = f"{parts[0]}.{parts[1]}.{parts[2]}.255"
+                        sock.sendto(data, (subnet_bcast, UDP_PORT))
+                        sock.sendto(data, ("255.255.255.255", UDP_PORT))
 
-                if self.peer_ip:
-                    try:
-                        sock.sendto(payload, (self.peer_ip, UDP_PORT))
-                    except Exception:
-                        pass
+                        if current_hash != last_notes_hash:
+                            self.log(f"📢 [BEACON] Anunciando hash atualizado: {current_hash[:8]}...")
+                            last_notes_hash = current_hash
 
-                last_bcast = now
-                self._update_state_file("connected" if self.peer_ip else "searching")
+                        last_bcast = now
+                    except Exception as e:
+                        self.log(f"⚠️ [BEACON] Falha ao anunciar: {e}")
 
-            ready = select.select([sock], [], [], 0.5)
-            if ready[0]:
+            # Receber beacons de outros peers
+            try:
+                data, addr = sock.recvfrom(4096)
+                if addr[0] == self.local_ip:
+                    continue
+
                 try:
-                    manifest = GitManifest.from_bytes(data)
-                    if manifest:
-                        self.peer_ip = addr[0]
-                        self.peer_name = manifest.hostname
-                        self._update_state_file("connected")
-                        
-                        # 🔄 AUTO-PULL FALLBACK (Zero-Admin / Contorno de Firewall)
-                        # Se o hash das notas do peer for diferente, iniciamos o pull automaticamente.
-                        # Isso usa uma conexão de SAÍDA nossa, contornando o firewall de entrada do peer.
-                        if hasattr(manifest, 'notes_hash') and manifest.notes_hash:
-                            local_hash = self._file_sent_hashes.get("shared_notes.md", "")
-                            if manifest.notes_hash != local_hash:
-                                self.log(f"🔄 [AUTO-PULL] Alteração detectada no peer {manifest.hostname}. Sincronizando...")
-                                threading.Thread(target=self._fetch_from_peer, args=(manifest.ip, manifest.port, "shared_notes.md"), daemon=True).start()
-                    data, addr = sock.recvfrom(2048)
-                    msg = json.loads(data.decode("utf-8"))
-                    if msg.get("magic") == MESH_MAGIC and msg.get("ip") != self.local_ip:
-                        if self.peer_ip != msg["ip"]:
-                            self.peer_ip = msg["ip"]
-                            self.peer_name = msg.get("host")
-                            self.log(f"📡 [DESCOBERTA] Par conectado: {self.peer_name} ({self.peer_ip})")
-                except Exception:
+                    manifest = json.loads(data.decode("utf-8"))
+                    if manifest.get("magic") == MESH_MAGIC:
+                        peer_ip = manifest.get("ip")
+                        peer_name = manifest.get("hostname", "Unknown")
+                        peer_hash = manifest.get("notes_hash", "")
+
+                        if peer_ip and peer_ip != self.local_ip:
+                            self.peer_ip = peer_ip
+                            self.peer_name = peer_name
+                            self._update_state_file("connected")
+
+                            # 🔄 AUTO-PULL: Se o hash do peer é diferente, puxar
+                            if peer_hash:
+                                local_hash = self._file_sent_hashes.get("shared_notes.md", "")
+                                if peer_hash != local_hash:
+                                    self.log(f"🔄 [AUTO-PULL] Detectada alteração no peer {peer_name} ({peer_ip}). Puxando...")
+                                    threading.Thread(
+                                        target=self._fetch_from_peer,
+                                        args=(peer_ip, TCP_PORT, "shared_notes.md"),
+                                        daemon=True
+                                    ).start()
+
+                except Exception as e:
                     pass
+
+            except socket.timeout:
+                continue
+            except Exception as e:
+                self.log(f"⚠️ [BEACON] Erro inesperado: {e}")
+
         sock.close()
 
-    def _http_server_loop(self):
-        MeshSyncHTTPHandler.engine = self
+    def _fetch_from_peer(self, peer_ip: str, peer_port: int, rel_path: str):
+        """Busca automaticamente o arquivo do peer (Auto-Pull)."""
+        url = f"http://{peer_ip}:{peer_port}/sync?fetch={quote(rel_path)}"
+        self.log(f"📥 [FETCH] Tentando puxar {rel_path} de {peer_ip}:{peer_port}...")
+
         try:
-            server = HTTPServer(("0.0.0.0", TCP_PORT), MeshSyncHTTPHandler)
-            server.timeout = 1.0
-        except OSError:
-            self.log(f"⚠ Porta {TCP_PORT} já em uso.")
-            sys.exit(0)
+            req = Request(url, method="GET")
+            with urlopen(req, timeout=5) as resp:
+                if resp.status == 200:
+                    body = resp.read()
+
+                    if rel_path == "shared_notes.md":
+                        self.global_notes_file.write_bytes(body)
+                        self._file_mtimes[str(self.global_notes_file)] = self.global_notes_file.stat().st_mtime
+                        self._file_sent_hashes["shared_notes.md"] = hashlib.sha256(body).hexdigest()
+                    else:
+                        target_dest = self.project_notes_dir / Path(rel_path).name
+                        target_dest.parent.mkdir(parents=True, exist_ok=True)
+                        target_dest.write_bytes(body)
+                        self._file_mtimes[str(target_dest)] = target_dest.stat().st_mtime
+                        self._file_sent_hashes[f"note/{Path(rel_path).name}"] = hashlib.sha256(body).hexdigest()
+
+                    self.last_sync_time = time.time()
+                    self.log(f"✅ [AUTO-PULL OK] {rel_path} atualizado de {peer_ip} ({len(body)} bytes).")
+                    self._update_state_file("connected")
+        except Exception as e:
+            self.log(f"⚠️ [AUTO-PULL FALHA] Não foi possível puxar de {peer_ip}: {e}")
+
+    def _http_server_loop(self):
+        """Servidor HTTP para atender requisições GET (Auto-Pull) e POST."""
+        MeshSyncHTTPHandler.engine = self
+        server = HTTPServer(("0.0.0.0", TCP_PORT), MeshSyncHTTPHandler)
+        server.timeout = 1.0
+
+        self.log(f"🌐 [HTTP] Servidor escutando na porta TCP {TCP_PORT}...")
 
         while self.running:
             server.handle_request()
+
         server.server_close()
 
-    def send_push_to_peer(self, file_path: Path, rel_path: str):
-        if not self.peer_ip:
-            self.debug.event("SEND", "Sem peer descoberto", rel_path=rel_path)
-            self.log("⚠ [MESH] Nenhum peer descoberto. Aguardando beacon...")
-            return
-
-        self.debug.counter("sends_attempted")
-        url = f"http://{self.peer_ip}:{TCP_PORT}/sync"
-        body = file_path.read_bytes()
-        mac = hmac.new(self.secret_key, body, hashlib.sha256).hexdigest()
-
-        req = Request(url, data=body, method="POST")
-        req.add_header("X-Mesh-HMAC", mac)
-        req.add_header("X-Mesh-Path", rel_path)
-
-        try:
-            t0 = time.time()
-            with urlopen(req, timeout=5) as resp:
-                elapsed = (time.time() - t0) * 1000
-                self.debug.counter("sends_ok")
-                self.debug.event("SEND", "Push entregue", rel_path=rel_path, peer=self.peer_ip, latency_ms=round(elapsed, 2), bytes=len(body))
-                self.log(f"📤 [ENVIADO] {rel_path} ({len(body)} bytes) → {self.peer_ip} em {elapsed:.1f}ms ✔")
-        except TimeoutError:
-            self.debug.counter("sends_failed")
-            self.debug.counter("timeouts")
-            self.debug.event("SEND", "TIMEOUT no push", rel_path=rel_path, peer=self.peer_ip, bytes=len(body))
-            self.log(f"✖ Falha: {self.peer_ip}:{TCP_PORT} inacessível (TIMEOUT).")
-
-            # ─── AUTO-DIAGNÓSTICO E CORREÇÃO ─────────────────────
-            self.log("🔍 [GUARD] Executando diagnóstico automático de firewall...")
-            report = self.fw_guard.run_full_diagnostic(self.peer_ip)
-            self.debug.event("GUARD", "Diagnóstico completo", **report)
-
-            if report["verdict"] == "OUTBOUND_BLOCKED":
-                self.log("🛡️ [GUARD] Solicitando permissão de firewall (UAC)...")
-                perm_result = self.fw_guard.request_firewall_permission(ttl_hours=24)
-                self.debug.event("GUARD", "Solicitação de permissão", **perm_result)
-
-                if perm_result.get("rules_created"):
-                    self.log(f"✅ [GUARD] Regras criadas! Expiram em: {perm_result.get('expire_at')}")
-                elif perm_result.get("uac_result") == "user_denied":
-                    self.log("⚠️ [GUARD] Usuário recusou a elevação. Sincronização permanecerá bloqueada.")
-                else:
-                    self.log(f"❌ [GUARD] Falha: {perm_result.get('errors')}")
-            else:
-                self.log("✅ [GUARD] Conectividade OK. O problema pode ser no servidor de destino.")
-
-        except Exception as e:
-            self.debug.counter("sends_failed")
-            self.debug.event("SEND", "Erro no push", rel_path=rel_path, error=str(e))
-            self.log(f"✖ Falha no envio de {rel_path}: {e}")
-
     def _file_watcher_loop(self):
-        """Dual-Watchdog Multi-Note: Vigia shared_notes E todos os .doxoade/note/*.md."""
+        """Monitora alterações nos arquivos e anuncia via Beacon (NÃO faz push direto)."""
         while self.running:
             time.sleep(0.3)
+
             watch_targets = [self.global_notes_file]
             if self.project_notes_file != self.global_notes_file and self.project_notes_file.exists():
                 watch_targets.append(self.project_notes_file)
+
             if self.project_notes_dir.exists():
                 for p in self.project_notes_dir.glob("*.md"):
                     if not p.name.startswith("."):
                         watch_targets.append(p)
-            
+
             for path in watch_targets:
                 if not path.exists():
                     continue
+
                 current_mtime = path.stat().st_mtime
                 last_mtime = self._file_mtimes.get(str(path), 0)
+
                 if current_mtime > last_mtime:
                     self._file_mtimes[str(path)] = current_mtime
                     current_hash = self._calculate_file_hash(path)
                     rel = path.name if path == self.global_notes_file else f"note/{path.name}"
+
                     if current_hash != self._file_sent_hashes.get(rel, ""):
                         self._file_sent_hashes[rel] = current_hash
-                        self.send_push_to_peer(path, rel)
+                        self.log(f"📝 [DETECTADO] Alteração em {rel}. Anunciando via Beacon...")
+                        # O Beacon loop vai anunciar automaticamente no próximo ciclo
 
     def start(self):
+        """Inicia todos os threads do motor P2P."""
+        if self.running:
+            return
+
         self.running = True
+
+        # Testar se a porta TCP está disponível
+        test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        test_sock.settimeout(0.5)
         try:
-            self.pid_file.write_text(str(os.getpid()), encoding="utf-8")
-        except Exception:
-            pass
+            test_sock.bind(("0.0.0.0", TCP_PORT))
+            test_sock.close()
+        except OSError as e:
+            self.log(f"🚨 [CRÍTICO] Porta TCP {TCP_PORT} já está em uso! Encerrando...")
+            self.running = False
+            return
 
-        threading.Thread(target=self._beacon_loop, daemon=True).start()
-        threading.Thread(target=self._http_server_loop, daemon=True).start()
-        threading.Thread(target=self._file_watcher_loop, daemon=True).start()
+        self.pid_file.write_text(str(os.getpid()), encoding="utf-8")
 
-        self.log("============================================================")
-        self.log("    DOXNOTE MESH v4.0 — MULTI-NOTE MESH TRANSPORT ATIVO")
-        self.log("============================================================")
-        self.log(f"  Global Notes  : {self.global_notes_file}")
-        self.log(f"  Project Notes : {self.project_notes_dir}/*.md")
-        self.log(f"  Peer IP       : {self.peer_ip or 'Aguardando Descoberta...'}")
-        self.log("============================================================")
+        threads = [
+            threading.Thread(target=self._beacon_loop, daemon=True),
+            threading.Thread(target=self._http_server_loop, daemon=True),
+            threading.Thread(target=self._file_watcher_loop, daemon=True),
+        ]
 
-        try:
-            while self.running:
-                time.sleep(1.0)
-        except KeyboardInterrupt:
-            self.stop()
+        for t in threads:
+            t.start()
+
+        self.log("✔ [MESH] Todos os threads iniciados com sucesso.")
 
     def stop(self):
+        """Para todos os threads e limpa recursos."""
         self.running = False
-        self._update_state_file("offline")
         try:
             if self.pid_file.exists():
                 self.pid_file.unlink()
         except Exception:
             pass
+        self.log("🛑 [MESH] Serviço encerrado.")
