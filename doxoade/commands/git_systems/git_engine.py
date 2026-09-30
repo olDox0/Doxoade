@@ -50,31 +50,28 @@ class GitEngine:
 
     def autopilot(self, prefer: Optional[str] = None, auto_push: bool = True) -> Dict[str, Any]:
         station = self.get_station_name()
+        
+        # 🩺 Auto-Cura de branches temporárias de LAN
+        healed_lan_branch, lan_msg = self.normalize_transient_branches()
+        cleaned_lan_branches = self.cleanup_transient_branches()
+        
         branch = self.get_current_branch()
         remote = 'origin'
         remote_ref = f"{remote}/{branch}"
         
-        # 1. Higieniza caches efêmeros de build antes de qualquer checagem
         self.clean_transient_build_artifacts()
-
-        # 2. Salva snapshot de resgate preventivo (Segurança Sotéria)
         snapshot_dir = self.create_safety_snapshot(reason="autopilot")
-        
-        # 3. Cura eventuais merges travados
         healed_merge = self.heal_stuck_merge()
-        
-        # 4. Fetch e reconciliação bilateral
         self.fetch_remote(remote=remote, branch=branch)
-
-        # 4. Avaliação de Distância (Ahead / Behind)
+        
         rev_count_raw = _run_git_command(['rev-list', '--left-right', '--count', f'HEAD...{remote_ref}'], capture_output=True, silent_fail=True, cwd=str(self.root)) or '0\t0'
         parts = rev_count_raw.strip().split()
         ahead = int(parts[0]) if len(parts) > 0 and parts[0].isdigit() else 0
         behind = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
-
+        
         matrix = self.detect_collisions(remote=remote, branch=branch)
         is_dirty = self.is_dirty()
-
+        
         report = {
             'station': station,
             'branch': branch,
@@ -83,6 +80,9 @@ class GitEngine:
             'is_dirty': is_dirty,
             'collisions': matrix['collisions'],
             'healed_merge': healed_merge,
+            'healed_lan_branch': healed_lan_branch,
+            'lan_msg': lan_msg,
+            'cleaned_lan_branches': cleaned_lan_branches,
             'snapshot': str(snapshot_dir) if snapshot_dir else None,
             'status': 'SYNCED',
             'action_taken': ''
@@ -193,6 +193,49 @@ class GitEngine:
                 pass
 
         return True
+
+    def normalize_transient_branches(self) -> Tuple[bool, str]:
+        """
+        🩺 Auto-Cura: Detecta e normaliza branches temporárias de LAN (ex: dox-live)
+        de volta ao branch principal (main/master), preservando o trabalho.
+        """
+        current_branch = self.get_current_branch()
+        if current_branch in ("dox-live", "dox-live-sync"):
+            primary_branch = "main"
+            if not _run_git_command(['rev-parse', '--verify', 'main'], capture_output=True, silent_fail=True, cwd=str(self.root)):
+                primary_branch = "master"
+            
+            # Guarda alterações não commitadas se houver (segurança)
+            if self.is_dirty():
+                _run_git_command(['stash', 'push', '-m', 'auto_stash_lan_cleanup'], capture_output=True, silent_fail=True, cwd=str(self.root))
+            
+            # Muda para o branch principal
+            _run_git_command(['checkout', primary_branch], capture_output=True, silent_fail=True, cwd=str(self.root))
+            
+            # Tenta fazer merge do branch temporário (se houver commits reais de rascunho)
+            _run_git_command(['merge', current_branch, '--no-edit'], capture_output=True, silent_fail=True, cwd=str(self.root))
+            
+            # Aplica o stash se existir
+            _run_git_command(['stash', 'pop'], capture_output=True, silent_fail=True, cwd=str(self.root))
+            
+            # Remove o branch temporário
+            _run_git_command(['branch', '-D', current_branch], capture_output=True, silent_fail=True, cwd=str(self.root))
+            return True, f"Branch temporária '{current_branch}' normalizada e fundida em '{primary_branch}'."
+        return False, ""
+
+    def cleanup_transient_branches(self) -> List[str]:
+        """Remove branches temporárias de LAN que não estão mais em uso (limpeza de fundo)."""
+        cleaned = []
+        for branch in ["dox-live", "dox-live-sync"]:
+            exists = _run_git_command(['rev-parse', '--verify', branch], capture_output=True, silent_fail=True, cwd=str(self.root))
+            if exists:
+                current = self.get_current_branch()
+                if current == branch:
+                    continue # Já tratado por normalize_transient_branches
+                
+                _run_git_command(['branch', '-D', branch], capture_output=True, silent_fail=True, cwd=str(self.root))
+                cleaned.append(branch)
+        return cleaned
 
     def get_current_branch(self) -> str:
         branch = _run_git_command(['branch', '--show-current'], capture_output=True, cwd=str(self.root))

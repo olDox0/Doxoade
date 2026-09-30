@@ -37,13 +37,16 @@ def git_auto(ctx, push, prefer):
     # Executa reconciliação com auto_push ativado por padrão
     res = engine.autopilot(prefer=prefer if prefer != 'interactive' else None, auto_push=push)
 
-    if res['snapshot']:
-        click.echo(f"  {Fore.CYAN}💾 [SOTÉRIA] Backup preventivo gravado em: {Path(res['snapshot']).name}{Style.RESET_ALL}")
-
     if res['healed_merge']:
         click.echo(f"  {Fore.GREEN}✔ [AUTO-HEAL] Merge travado anterior foi limpo com segurança.{Style.RESET_ALL}")
-
-    # Apresenta a decisão tomada
+    
+    # 🩺 Novo feedback de cura de branches LAN
+    if res.get('healed_lan_branch'):
+        click.echo(f"  {Fore.GREEN}✔ [AUTO-HEAL] {res['lan_msg']}{Style.RESET_ALL}")
+    if res.get('cleaned_lan_branches'):
+        branches_str = ", ".join(res['cleaned_lan_branches'])
+        click.echo(f"  {Fore.GREEN}✔ [AUTO-HEAL] Branchs temporárias de LAN removidas: {branches_str}{Style.RESET_ALL}")
+        
     if res['status'] == 'CONFLICT':
         from doxoade.commands.git_systems.git_merge import merge as run_merge
         ctx.invoke(run_merge)
