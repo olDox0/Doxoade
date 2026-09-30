@@ -24,6 +24,7 @@ from doxoade.commands.lan_git.transport_lan_git.git_daemon_server import GitDaem
 from doxoade.commands.lan_git.transport_lan_git.git_http_server import GitHTTPServer
 from doxoade.commands.lan_git.client_lan_git.git_sync_engine import GitSyncEngine
 from doxoade.commands.lan_git.web_lan_git.portal_server_lan_git import LANWebPortal
+from doxoade.commands.lan_git.network_lan_git.unified_elevation import UnifiedFirewallShield
 
 # Importação defensiva do ProjectResolver com fallback inline
 try:
@@ -871,6 +872,55 @@ def cmd_note_doctor():
                 click.secho(f"  ❌ Falha: {result.get('errors')}", fg="red")
                 
     click.secho(f"\n  📁 Logs de Debug em: {guard.debug_dir}", fg="white")
+
+@lan_git_cli.group(name="network")
+def network_group():
+    """Gerenciamento de Integridade de Rede, Firewall e Elevação UAC."""
+    pass
+
+@network_group.command(name="status")
+def cmd_network_status():
+    """Verifica se as regras do Firewall do Windows estão ativas."""
+    status = UnifiedFirewallShield.check_rules_status()
+    ports = UnifiedFirewallShield.get_ports_summary()
+    
+    click.secho("\n════════════════════════════════════════════════════════════", fg="cyan")
+    click.secho("       🛡️  STATUS DO FIREWALL E PORTAS (DOXOADE MESH)", fg="green", bold=True)
+    click.secho("════════════════════════════════════════════════════════════", fg="cyan")
+    click.echo(f"  • Plataforma       : {'Windows (NT)' if status['is_windows'] else 'POSIX/Linux'}")
+    click.echo(f"  • Processo Elevado : {'Sim (Admin)' if status['is_admin'] else 'Não (Usuário Padrão)'}")
+    click.echo(f"  • Portas TCP Malha : {ports['tcp']}")
+    click.echo(f"  • Portas UDP Malha : {ports['udp']}")
+    
+    tcp_color = "green" if status["tcp_rule_active"] else "red"
+    udp_color = "green" if status["udp_rule_active"] else "red"
+    tcp_icon = "✔ ATIVA" if status["tcp_rule_active"] else "✖ BLOQUEADA"
+    udp_icon = "✔ ATIVA" if status["udp_rule_active"] else "✖ BLOQUEADA"
+    
+    click.echo(f"  • Regra TCP (In)   : {click.style(tcp_icon, fg=tcp_color, bold=True)}")
+    click.echo(f"  • Regra UDP (In)   : {click.style(udp_icon, fg=udp_color, bold=True)}")
+    click.secho("════════════════════════════════════════════════════════════\n", fg="cyan")
+    
+    if not status["tcp_rule_active"] or not status["udp_rule_active"]:
+        click.secho("⚠ Portas bloqueadas! Execute: doxoade lan-git network elevate\n", fg="yellow")
+
+@network_group.command(name="elevate")
+@click.option("--dry-run", is_flag=True, help="Exibe o script sem aplicá-lo.")
+@click.option("--fallback-netsh", is_flag=True, help="Usa netsh.exe em vez de PowerShell.")
+@click.option("--remove", is_flag=True, help="Remove as regras de firewall (Reversibilidade).")
+def cmd_network_elevate(dry_run: bool, fallback_netsh: bool, remove: bool):
+    """Solicita elevação oficial UAC do Windows e configura as regras de Firewall."""
+    if remove:
+        click.secho("\n🗑️ Removendo regras do Firewall...", fg="yellow")
+        ok, msg = UnifiedFirewallShield.remove_firewall_rules(dry_run=dry_run)
+    else:
+        click.secho("\n🛡️ Provisionando regras do Firewall para a sub-rede...", fg="cyan", bold=True)
+        ok, msg = UnifiedFirewallShield.apply_firewall_rules(dry_run=dry_run, fallback_netsh=fallback_netsh)
+
+    if ok:
+        click.secho(f"✔ {msg}", fg="green", bold=True)
+    else:
+        click.secho(f"✖ {msg}", fg="red", bold=True)
 
 if __name__ == "__main__":
     lan_git_cli()

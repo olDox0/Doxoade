@@ -12,12 +12,14 @@ from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.git import _run_git_command
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
-
+from .git_feature import feature_cmd
 
 @click.group('git')
 def git_group():
     """🛠  NEXUS-GIT: Gestão profissional de fluxo, upstream e auditoria."""
     pass
+
+git_group.add_command(feature_cmd, 'feature')
 
 @git_group.command('auto')
 @click.option('--push/--no-push', '-p/-np', default=True, help='Envia commits locais automaticamente (Padrão: True).')

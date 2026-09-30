@@ -15,15 +15,16 @@ from typing import Dict, Any, Tuple, Set
 from rich.console import Console
 
 from .check import run_check_logic
-
 from doxoade.core_database import get_db_connection
 from doxoade.tools.display    import _present_results
 from doxoade.tools.doxcolors  import Fore
 from doxoade.tools.git        import _run_git_command
 from doxoade.tools.filesystem import is_ignored
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
-
 from doxoade.tools.alexandria.engine import alexandria_write
+
+from doxoade.commands.git_systems.git_feature import get_features_summary, clear_features, load_features
+
 __version__ = ''
 
 def _build_semantic_commits(analysis, message):
@@ -165,10 +166,23 @@ def _abstract_and_learn_template(cursor: sqlite3.Cursor, concrete_finding: Dict[
 @click.option('--amend', is_flag=True, help='✏️ Edita a mensagem do último commit (git commit --amend).')
 @click.pass_context
 def save(ctx, message, local, archives, remove_commit, branch_target, merge_target, update_base, force, smart, apply, alfa, amend):
-#def save(ctx, message, archives, remove_commit, branch_target, merge_target, update_base, force, smart, apply):
     """Executa commit seguro com aprendizado automatizado."""
     console = Console()
     project_path = os.getcwd()
+
+    tracker_features = load_features()
+    tracker_text = get_features_summary()
+    if tracker_features:
+        console.print(f"\n[bold cyan]📝 [TRACKER] Features Acumuladas ({len(tracker_features)}):[/bold cyan]")
+        for f in tracker_features:
+            console.print(f"  [white]• {f['text']}[/white]")
+        
+        # Injeta no corpo da mensagem do commit
+        if message:
+            message = message + tracker_text
+        else:
+            message = f"feat: atualizações de rotina{tracker_text}"
+
     if remove_commit or archives:
         from .git_systems.git_archivist import GitArchivist
         archivist = GitArchivist(project_path)
@@ -342,6 +356,11 @@ def save(ctx, message, local, archives, remove_commit, branch_target, merge_targ
                 console.print(f"[bold yellow]⚠ [OFFLINE] Commit local seguro, mas o push falhou (sem conexão ou rejeitado pelo servidor).[/bold yellow]\n")
         else:
             console.print(f"\n[yellow]💾 [LOCAL] Salvo apenas localmente (--local ativado). Push ignorado.[/yellow]\n")
+
+        is_dry_run = smart and not apply
+        if tracker_features and not is_dry_run:
+            clear_features()
+            console.print("[bold green]✔ [TRACKER] Registro de features limpo para o próximo ciclo.[/bold green]")
 
 
 #    if commit_success:

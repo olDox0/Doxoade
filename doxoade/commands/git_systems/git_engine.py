@@ -260,7 +260,10 @@ class GitEngine:
     def fetch_remote(self, remote: str = 'origin', branch: Optional[str] = None) -> Tuple[bool, str]:
         cmd = ['fetch', remote]
         if branch:
-            cmd.append(branch)
+            # 🔧 FIX MA'AT: 'git fetch origin main' não atualiza 'origin/main' no Git.
+            # Precisamos forçar o refspec para atualizar a referência remota local.
+            cmd.extend([f'+{branch}:refs/remotes/{remote}/{branch}'])
+        
         try:
             out = _run_git_command(cmd, capture_output=True, cwd=str(self.root))
             return True, (out or "Fetch concluído com sucesso.")

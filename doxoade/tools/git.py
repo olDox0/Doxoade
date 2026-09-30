@@ -106,7 +106,6 @@ def _run_git_command(args, capture_output=False, silent_fail=False, cwd=None):
         env = os.environ.copy()
         env['PYTHONIOENCODING'] = 'utf-8'
         command = ['git'] + args
-#        result = subprocess.run(command, capture_output=capture_output, text=True, check=True, encoding='utf-8', errors='replace', env=env, cwd=cwd)
         result = subprocess.run(
             command,
             capture_output=capture_output,
