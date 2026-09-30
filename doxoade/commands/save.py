@@ -362,7 +362,6 @@ def save(ctx, message, local, archives, remove_commit, branch_target, merge_targ
             clear_features()
             console.print("[bold green]✔ [TRACKER] Registro de features limpo para o próximo ciclo.[/bold green]")
 
-
 #    if commit_success:
 #        # Pega o hash do commit que acabamos de fazer
 #        new_hash = _run_git_command(['rev-parse', 'HEAD'], capture_output=True)

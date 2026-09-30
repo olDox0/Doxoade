@@ -1147,6 +1147,12 @@ command.add(nil, {
       end
     })
   end,
+  ["doxoade:network-elevate"] = function()
+    local py_exe = get_mesh_python_exe()
+    core.log("🛡️ [DOXOADE] Solicitando pop-up UAC do Windows para liberar portas da malha...")
+    local cmd = string.format('"%s" -m doxoade lan-git network elevate', py_exe)
+    pcall(system.exec, cmd)
+  end,
   ["doxoade:reload-shared-notes"] = function()
     local doc = core.active_view and core.active_view.doc
     if doc and doc.filename then
