@@ -25,6 +25,7 @@ MESH_MAGIC = "DOX_MESH_V5"
 UDP_PORT = 54547
 TCP_PORT = 54548
 
+
 class MeshSyncHTTPHandler(BaseHTTPRequestHandler):
     """Handler HTTP com suporte a GET (Auto-Pull) e POST (compatibilidade)."""
     engine: NoteMeshEngine = None
