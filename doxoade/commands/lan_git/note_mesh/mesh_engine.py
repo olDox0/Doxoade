@@ -405,48 +405,27 @@ class NoteMeshEngine:
     def _file_watcher_loop(self):
         """Dual-Watchdog Multi-Note: Vigia shared_notes E todos os .doxoade/note/*.md."""
         while self.running:
-            time.sleep(0.15)
-            candidates: List[tuple[Path, str]] = []
-
-            if self.global_notes_file.exists():
-                candidates.append((self.global_notes_file, "shared_notes.md"))
-            if self.project_notes_file.exists():
-                candidates.append((self.project_notes_file, "shared_notes.md"))
-
+            time.sleep(0.3)
+            watch_targets = [self.global_notes_file]
+            if self.project_notes_file != self.global_notes_file and self.project_notes_file.exists():
+                watch_targets.append(self.project_notes_file)
             if self.project_notes_dir.exists():
-                try:
-                    for note_path in self.project_notes_dir.glob("*.md"):
-                        if not note_path.name.startswith("."):
-                            candidates.append((note_path, f"note/{note_path.name}"))
-                except Exception:
-                    pass
-
-            for path_obj, rel_name in candidates:
-                try:
-                    p_str = str(path_obj)
-                    cur_m = path_obj.stat().st_mtime
-                    last_m = self._file_mtimes.get(p_str, 0.0)
-
-                    if cur_m > last_m:
-                        self._file_mtimes[p_str] = cur_m
-                        content = path_obj.read_bytes()
-                        cur_hash = hashlib.sha256(content).hexdigest()
-
-                        last_net = self._file_network_hashes.get(rel_name)
-                        last_sent = self._file_sent_hashes.get(rel_name)
-
-                        if cur_hash != last_net and cur_hash != last_sent:
-                            self.log(f"📝 [SALVAMENTO DETECTADO] em: {rel_name}")
-                            if self.send_push_to_peer(content, note_rel_path=rel_name):
-                                self._file_sent_hashes[rel_name] = cur_hash
-                                if path_obj == self.global_notes_file and self.project_notes_file.exists():
-                                    self.project_notes_file.write_bytes(content)
-                                    self._file_mtimes[str(self.project_notes_file)] = self.project_notes_file.stat().st_mtime
-                                elif path_obj == self.project_notes_file and self.global_notes_file.exists():
-                                    self.global_notes_file.write_bytes(content)
-                                    self._file_mtimes[str(self.global_notes_file)] = self.global_notes_file.stat().st_mtime
-                except Exception:
-                    pass
+                for p in self.project_notes_dir.glob("*.md"):
+                    if not p.name.startswith("."):
+                        watch_targets.append(p)
+            
+            for path in watch_targets:
+                if not path.exists():
+                    continue
+                current_mtime = path.stat().st_mtime
+                last_mtime = self._file_mtimes.get(str(path), 0)
+                if current_mtime > last_mtime:
+                    self._file_mtimes[str(path)] = current_mtime
+                    current_hash = self._calculate_file_hash(path)
+                    rel = path.name if path == self.global_notes_file else f"note/{path.name}"
+                    if current_hash != self._file_sent_hashes.get(rel, ""):
+                        self._file_sent_hashes[rel] = current_hash
+                        self.send_push_to_peer(path, rel)
 
     def start(self):
         self.running = True
