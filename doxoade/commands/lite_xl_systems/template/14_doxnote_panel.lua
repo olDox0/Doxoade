@@ -1,10 +1,11 @@
 -- doxoade/commands/lite_xl_systems/template/14_doxnote_panel.lua
 --[[
-  📝 DOXOADE UNIFIED NOTES & MESH ENGINE (V24.0 Sovereign Unification)
+  📝 DOXOADE UNIFIED NOTES & MESH ENGINE (V25.0 Sovereign Unification)
   - Unificação total: Shared Notes P2P (PC-A <-> PC-B) + Notas Locais do Projeto.
-  - Auto-start seguro do daemon P2P (doxoade lan-git note service).
-  - Recarregamento automático de buffer em tempo real quando o outro PC sincroniza.
-  - Parent Walk idêntico ao Python filesystem.py para encontrar notas reais.
+  - Watcher único e reativo com guarda de reentrância (_DOXOADE_NOTE_THREAD_ACTIVE).
+  - Auto-start seguro do daemon P2P e disparo de elevação de firewall UAC.
+  - Recarregamento automático de buffer em tempo real quando o outro nó sincroniza.
+  - Menus interativos corrigidos com comandos CLI completos e robustos.
   Compliance: ProDeNov 1.2.1 | PASC-6.1 | Limite < 50KB.
 ]]
 local core = require "core"
@@ -13,22 +14,10 @@ local command = require "core.command"
 local keymap = require "core.keymap"
 local DocView = require "core.docview"
 local Doc = require "core.doc"
-
 local sep = PATHSEP or "/"
 
--- if core and core.nag_verify then
---   local orig_nag_verify = core.nag_verify
---   core.nag_verify = function(title, msg, ...)
---     if msg and (msg:find("shared_notes%.md") or msg:find("/%.doxoade/note/")) then
---       return false
---     end
---     return orig_nag_verify(title, msg, ...)
---   end
--- end
-
--- ═════════════════════════════════════════════════════════════════════════════
--- 1. LOCALIZAÇÃO E RESOLUÇÃO DE DIRETÓRIOS (PARENT WALK)
--- ═════════════════════════════════════════════════════════════════════════════
+-- Tabela unificada de carimbos de tempo para controle de mtime
+local _last_synced_mtimes = {}
 
 local function is_test_dir(p)
   local clean = tostring(p or ""):gsub("\\", "/"):lower()
@@ -38,12 +27,10 @@ end
 local function walk_up_project_root(start_path)
   if not start_path or start_path == "" then return nil end
   local cur = (system.absolute_path(start_path) or start_path):gsub("\\", "/"):gsub("/+$", "")
-
   local finfo = system.get_file_info(cur)
   if finfo and finfo.type == "file" then
     cur = cur:match("^(.*)/") or cur
   end
-
   for _ = 1, 15 do
     if not cur or cur == "" or cur:find("^[a-zA-Z]:/?$") or cur == "/" then break end
     if not is_test_dir(cur) then
@@ -64,7 +51,6 @@ end
 local function resolve_all_note_directories()
   local dirs = {}
   local seen = {}
-
   local function register_dir(d_path)
     if not d_path or d_path == "" then return end
     local clean = (system.absolute_path(d_path) or d_path):gsub("\\", "/"):gsub("/+$", "")
@@ -132,7 +118,6 @@ local function resolve_all_note_directories()
   if home then
     register_dir(home:gsub("\\", "/") .. "/.doxoade/note")
   end
-
   return dirs
 end
 
@@ -145,10 +130,6 @@ local function get_shared_note_path()
   local home = os.getenv("USERPROFILE") or os.getenv("HOME") or "."
   return (home .. sep .. ".doxoade" .. sep .. "shared_notes.md"):gsub("\\", "/")
 end
-
--- ═════════════════════════════════════════════════════════════════════════════
--- 2. GERENCIAMENTO AUTÔNOMO DA MALHA P2P (DOXNOTE MESH)
--- ═════════════════════════════════════════════════════════════════════════════
 
 local function is_mesh_service_alive()
   local home = os.getenv("USERPROFILE") or os.getenv("HOME") or "."
@@ -169,77 +150,98 @@ local function is_mesh_service_alive()
   return false, "offline", nil
 end
 
-local function launch_mesh_service_safe()
+local function get_mesh_python_exe()
   local user_dir = USERDIR or "."
-  local py_anchor = user_dir .. sep .. ".doxoade" .. sep .. "python_path.txt"
-  local py_exe = "python"
-  local finfo = system.get_file_info(py_anchor)
-  if finfo and finfo.type == "file" then
-    local f = io.open(py_anchor, "r")
-    if f then
-      local l = f:read("*l") or ""
-      f:close()
-      if l ~= "" then py_exe = l:gsub("[\r\n]", "") end
+  local candidates = {
+    user_dir .. sep .. ".doxoade" .. sep .. "python_path.txt",
+    (os.getenv("USERPROFILE") or os.getenv("HOME") or ".") .. sep .. ".doxoade" .. sep .. "python_path.txt"
+  }
+  for _, py_anchor in ipairs(candidates) do
+    local finfo = system.get_file_info and system.get_file_info(py_anchor)
+    if finfo and finfo.type == "file" then
+      local f = io.open(py_anchor, "r")
+      if f then
+        local line = f:read("*l") or ""
+        f:close()
+        line = line:gsub("[\r\n]", ""):match("^%s*(.-)%s*$")
+        if line ~= "" and system.get_file_info(line) then
+          return line:gsub("/", "\\")
+        end
+      end
     end
   end
+  return "python"
+end
 
-  -- Dispara o daemon em segundo plano com a flag -d (desacoplada)
+local function launch_mesh_service_safe()
+  local py_exe = get_mesh_python_exe()
   local cmd = string.format('start /b "" "%s" -m doxoade lan-git note service -d', py_exe)
   pcall(system.exec, cmd)
 end
 
--- 🚀 AUTO-IGNIÇÃO: Dispara a verificação 1 segundo após o boot do Doxly
-if core and core.add_thread then
+local function start_mesh_daemon_from_ide()
+  local py_exe = get_mesh_python_exe()
+  if PLATFORM == "Windows" or package.config:sub(1, 1) == "\\" then
+    local pyw = py_exe:gsub("python%.exe$", "pythonw.exe")
+    if system.get_file_info and system.get_file_info(pyw) then
+      py_exe = pyw
+    end
+  end
+  local cmd = string.format('"%s" -m doxoade lan-git note service', py_exe)
+  pcall(system.exec, cmd)
+end
+
+local function stop_mesh_daemon_from_ide()
+  local py_exe = get_mesh_python_exe()
+  local cmd = string.format('"%s" -m doxoade lan-git note stop', py_exe)
+  pcall(system.exec, cmd)
+end
+
+-- =============================================================================
+-- WATCHER SENTINELA ÚNICO (Substitui os 3 loops concorrentes anteriores)
+-- =============================================================================
+if core and core.add_thread and not rawget(_G, "_DOXOADE_NOTE_THREAD_ACTIVE") then
+  rawset(_G, "_DOXOADE_NOTE_THREAD_ACTIVE", true)
   core.add_thread(function()
     while true do
-      coroutine.yield(0.3)
-
-      -- Ativo por padrão (a menos que o usuário clique para desligar)
+      coroutine.yield(0.5) -- Ciclo calibrado: fluidez garantida sem sobrecarga de CPU
       local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") ~= false
-      if is_active then
+      if is_active and core.docs then
         pcall(function()
-          for _, doc in ipairs(core.docs or {}) do
+          for _, doc in ipairs(core.docs) do
             if doc.filename then
               local fn = doc.filename:gsub("\\", "/"):lower()
               if fn:find("shared_notes%.md$") or fn:find("shared_notes%.txt$") then
-
                 local finfo = system.get_file_info and system.get_file_info(doc.filename)
                 if finfo and finfo.type == "file" and finfo.mtime and finfo.mtime > 0 then
-
-                  if not _last_synced_mtimes[doc.filename] then
+                  local last_m = _last_synced_mtimes[doc.filename]
+                  if not last_m then
                     _last_synced_mtimes[doc.filename] = finfo.mtime
-                  elseif finfo.mtime > _last_synced_mtimes[doc.filename] then
-                    
+                  elseif finfo.mtime > last_m then
                     local is_dirty = false
                     if doc.is_dirty then
                       local ok, d = pcall(doc.is_dirty, doc)
                       if ok and d then is_dirty = true end
                     end
-
-                    -- Se o buffer estiver limpo, atualiza imediatamente!
                     if not is_dirty then
                       _last_synced_mtimes[doc.filename] = finfo.mtime
                       local f = io.open(doc.filename, "r")
                       if f then
                         local content = f:read("*a")
                         f:close()
-
                         if content and content ~= "" then
                           local l1, c1, l2, c2 = 1, 1, 1, 1
                           if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
-
                           doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
                           doc:insert(1, 1, content)
                           if doc.clean then doc:clean() end
-
                           if doc.set_selection then pcall(doc.set_selection, doc, l1, c1, l2, c2) end
                           core.redraw = true
                           if core.log then core.log("⚡ [DOXNOTE] Nota atualizada pela malha.") end
                         end
                       end
                     else
-                      -- Se você estiver digitando, apenas avisa sem apagar seu texto
-                      if core.log then core.log("⚠️ [DOXNOTE] Chegou atualização da rede (aperte F5 para recarregar).") end
+                      if core.log then core.log("⚠️ [DOXNOTE] Atualização da rede em espera (Pressione F5 para recarregar).") end
                     end
                   end
                 end
@@ -252,47 +254,7 @@ if core and core.add_thread then
   end)
 end
 
--- ═════════════════════════════════════════════════════════════════════════════
--- 3. SENTINELA IMORTAL COM GUARDA DE SALVAMENTO (ZERO CRASH / BIDIRECIONAL)
--- ═════════════════════════════════════════════════════════════════════════════
-
-local function calc_clean_hash(str)
-  if not str or str == "" then return 0 end
-  local clean = str:gsub("\r\n", "\n"):gsub("\r", "\n"):gsub("%s+$", "")
-  local h = 5381
-  for i = 1, #clean do
-    h = ((h * 33) + clean:byte(i)) % 2147483647
-  end
-  return h
-end
-
-local _last_local_save_time = 0
-
-local _shared_doc_mtimes = {}
-local _last_known_disk_hash = {}
-
--- 🛡️ REGRA 1: Ao salvar com Ctrl+S, o Doxly grava no disco e guarda o hash dele mesmo
-local _last_known_disk_mtime = {}
-
--- Função auxiliar que detecta com segurança se o usuário fez alterações na tela
-local function is_doc_modified(doc)
-  if doc.is_clean then
-    local ok, res = pcall(doc.is_clean, doc)
-    if ok and res ~= nil then return not res end
-  end
-  if doc.clean_change_id and doc.get_change_id then
-    return doc.clean_change_id ~= doc:get_change_id()
-  end
-  return false
-end
-
--- =============================================================================
--- 3. GESTÃO DE NOTAS SOBERANA (Salva ➔ Identifica | Rede ➔ Atualiza 1 Vez)
--- =============================================================================
-
-local _last_synced_mtimes = {}
-
--- 🛡️ REGRA 1: Ao salvar com Ctrl+S, identifica a alteração e atualiza o carimbo local
+-- Hook de Salvamento em Disco
 if Doc and Doc.save then
   local orig_doc_save = Doc.save
   Doc.save = function(self, ...)
@@ -312,80 +274,6 @@ if Doc and Doc.save then
   end
 end
 
--- 🛡️ REGRA 2: Verificador Suave de Janela (Só recarrega se o disco mudou pela rede E o buffer está limpo)
-if core and core.add_thread then
-  core.add_thread(function()
-    while true do
-      -- Intervalo relaxado de 3 segundos
-      coroutine.yield(3.0)
-
-      local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
-      if is_active then
-        pcall(function()
-          for _, doc in ipairs(core.docs or {}) do
-            if doc.filename then
-              local fn = doc.filename:gsub("\\", "/"):lower()
-              if fn:find("shared_notes%.md$") or fn:find("shared_notes%.txt$") then
-
-                -- 🛑 SE O USUÁRIO ESTÁ DIGITANDO, NUNCA TOQUE NO DOCUMENTO!
-                local is_dirty = false
-                if doc.is_dirty then
-                  local ok, d = pcall(doc.is_dirty, doc)
-                  if ok and d then is_dirty = true end
-                end
-
-                if not is_dirty then
-                  local finfo = system.get_file_info and system.get_file_info(doc.filename)
-                  if finfo and finfo.type == "file" and finfo.mtime and finfo.mtime > 0 then
-
-                    if not _last_synced_mtimes[doc.filename] then
-                      _last_synced_mtimes[doc.filename] = finfo.mtime
-                  elseif finfo.mtime > _last_synced_mtimes[doc.filename] then
-                    local is_dirty = false
-                    if doc.is_dirty then
-                      local ok, d = pcall(doc.is_dirty, doc)
-                      if ok and d then is_dirty = true end
-                    end
-
-                    -- Só recarrega se você não estiver digitando alterações não salvas
-                    if not is_dirty then
-                      local f = io.open(doc.filename, "r")
-                      if f then
-                        local content = f:read("*a")
-                        f:close()
-
-                        if content and content ~= "" then
-                          -- 🎯 ATUALIZA O CARIMBO AQUI (Garante que não perca o evento)
-                          _last_synced_mtimes[doc.filename] = finfo.mtime
-                          
-                          local l1, c1, l2, c2 = 1, 1, 1, 1
-                          if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
-
-                          doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
-                          doc:insert(1, 1, content)
-                          if doc.clean then doc:clean() end
-
-                          if doc.set_selection then pcall(doc.set_selection, doc, l1, c1, l2, c2) end
-                          core.redraw = true
-                          if core.log then core.log("⚡ [DOXNOTE] Nota atualizada pela malha.") end
-                        end
-                      end
-                    end
-                  end
-                end
-              end
-            end
-          end
-        end)
-      end
-    end
-  end)
-end
-
--- ═════════════════════════════════════════════════════════════════════════════
--- 4. COLETOR DE NOTAS E TAREFAS (COMPATIBILIDADE AGENDA.PY)
--- ═════════════════════════════════════════════════════════════════════════════
-
 local function extract_note_preview(lines)
   for _, l in ipairs(lines) do
     local s = l:gsub("^%s+", ""):gsub("%s+$", "")
@@ -400,8 +288,6 @@ end
 local function get_all_existing_notes()
   local notes = {}
   local seen = {}
-
-  -- 1. Inclui o shared_notes.md global como primeira nota se existir
   local shared_path = get_shared_note_path()
   local shared_info = system.get_file_info(shared_path)
   if shared_info and shared_info.type == "file" then
@@ -418,7 +304,6 @@ local function get_all_existing_notes()
     })
   end
 
-  -- 2. Coleta as notas locais de projeto (.doxoade/note/*.md)
   for _, dir in ipairs(resolve_all_note_directories()) do
     local info = system.get_file_info(dir)
     if info and info.type == "dir" then
@@ -429,7 +314,6 @@ local function get_all_existing_notes()
           local finfo = system.get_file_info(full_path)
           if finfo and finfo.type == "file" and not seen[full_path:lower()] then
             seen[full_path:lower()] = true
-
             local title = fn
             local task_count = 0
             local lines = {}
@@ -446,9 +330,7 @@ local function get_all_existing_notes()
               end
               f:close()
             end
-
             local proj_name = dir:match("([^/]+)/%.doxoade/note$") or "projeto"
-
             table.insert(notes, {
               filename = fn,
               title = title,
@@ -512,7 +394,6 @@ end
 local function collect_all_tasks()
   local tasks = {}
   local today = os.date("%Y-%m-%d")
-
   for _, n in ipairs(get_all_existing_notes()) do
     local f = io.open(n.path, "r")
     if f then
@@ -551,7 +432,6 @@ local function collect_all_tasks()
       f:close()
     end
   end
-
   return tasks
 end
 
@@ -559,7 +439,6 @@ local function generate_agenda_markdown()
   local tasks = collect_all_tasks()
   local today = os.date("%Y-%m-%d")
   local buckets = { today = {}, overdue = {}, upcoming = {}, done = {} }
-
   for _, t in ipairs(tasks) do
     if t.done then
       table.insert(buckets.done, t)
@@ -579,7 +458,6 @@ local function generate_agenda_markdown()
     string.format("[ Data: %s | Total de Tarefas: %d ]\n", today, #tasks),
     "## ⭐ HOJE (TODAY)"
   }
-
   if #buckets.today == 0 then
     table.insert(out, "  (Nenhuma tarefa agendada para hoje)")
   else
@@ -587,7 +465,6 @@ local function generate_agenda_markdown()
       table.insert(out, string.format("  - [ ] %s | (%s:%d) %s ^id:%s", t.date, t.file, t.line, t.text, t.id))
     end
   end
-
   table.insert(out, "\n## 🔴 [!] VENCIDAS (OVERDUE)")
   if #buckets.overdue == 0 then
     table.insert(out, "  (Nenhuma tarefa vencida pendente)")
@@ -596,7 +473,6 @@ local function generate_agenda_markdown()
       table.insert(out, string.format("  - [!] %s | (%s:%d) %s ^id:%s", t.date, t.file, t.line, t.text, t.id))
     end
   end
-
   table.insert(out, "\n## 🟡 [>] PRÓXIMAS & FUTURAS (UPCOMING)")
   if #buckets.upcoming == 0 then
     table.insert(out, "  (Nenhuma tarefa futura cadastrada)")
@@ -605,7 +481,6 @@ local function generate_agenda_markdown()
       table.insert(out, string.format("  - [>] %s | (%s:%d) %s ^id:%s", t.date, t.file, t.line, t.text, t.id))
     end
   end
-
   table.insert(out, "\n## 🟢 [x] CONCLUÍDAS RECENTES")
   if #buckets.done == 0 then
     table.insert(out, "  (Nenhuma tarefa concluída)")
@@ -615,7 +490,6 @@ local function generate_agenda_markdown()
       table.insert(out, string.format("  - [x] %s | (%s:%d) %s", t.date, t.file, t.line, t.text))
     end
   end
-
   table.insert(out, "\n================================================================================")
   return table.concat(out, "\n")
 end
@@ -641,7 +515,6 @@ local function open_note_in_split(file_path, log_msg)
   local target_node = get_or_create_note_split()
   local doc = type(file_path) == "string" and core.open_doc(file_path) or file_path
   if not doc then return nil end
-
   for _, v in ipairs(target_node.views or {}) do
     if v and v.doc == doc then
       target_node.active_view = v
@@ -650,7 +523,6 @@ local function open_note_in_split(file_path, log_msg)
       return v
     end
   end
-
   local ok_v, view = pcall(DocView, doc)
   if ok_v and view then
     if target_node.add_view then target_node:add_view(view) end
@@ -662,140 +534,14 @@ local function open_note_in_split(file_path, log_msg)
   return nil
 end
 
--- =============================================================================
--- 🔌 CONTROLADOR DO DAEMON P2P EM BACKGROUND (IGNIÇÃO VIA IDE)
--- =============================================================================
-
-local function get_mesh_python_exe()
-  local user_dir = USERDIR or "."
-  local sep = PATHSEP or "/"
-  local is_win = (PLATFORM == "Windows") or (package.config:sub(1, 1) == "\\")
-
-  -- 1. Verifica âncora gravada em .doxoade/python_path.txt (na home ou no userdir)
-  local candidates = {
-    user_dir .. sep .. ".doxoade" .. sep .. "python_path.txt",
-    (os.getenv("USERPROFILE") or os.getenv("HOME") or ".") .. sep .. ".doxoade" .. sep .. "python_path.txt"
-  }
-  for _, py_anchor in ipairs(candidates) do
-    local finfo = system.get_file_info and system.get_file_info(py_anchor)
-    if finfo and finfo.type == "file" then
-      local f = io.open(py_anchor, "r")
-      if f then
-        local line = f:read("*l") or ""
-        f:close()
-        line = line:gsub("[\r\n]", ""):match("^%s*(.-)%s*$")
-        if line ~= "" and system.get_file_info(line) then
-          return line:gsub("/", "\\")
-        end
-      end
-    end
-  end
-
-  -- 2. Lê a pasta do projeto ativo em last_project.txt
-  local last_proj = (os.getenv("USERPROFILE") or os.getenv("HOME") or ".") .. sep .. ".doxoade" .. sep .. "last_project.txt"
-  local finfo_lp = system.get_file_info and system.get_file_info(last_proj)
-  if finfo_lp and finfo_lp.type == "file" then
-    local f = io.open(last_proj, "r")
-    if f then
-      local proj_path = f:read("*l") or ""
-      f:close()
-      proj_path = proj_path:gsub("[\r\n]", ""):match("^%s*(.-)%s*$")
-      if proj_path ~= "" then
-        local venv_py = proj_path .. sep .. "venv" .. sep .. (is_win and "Scripts\\python.exe" or "bin/python")
-        if system.get_file_info(venv_py) then
-          return venv_py:gsub("/", "\\")
-        end
-      end
-    end
-  end
-
-  return "python"
-end
-
-local function start_mesh_daemon_from_ide()
-  local py_exe = get_mesh_python_exe()
-  -- Se for Windows, usa pythonw.exe para não abrir nenhuma janela
-  if PLATFORM == "Windows" or package.config:sub(1, 1) == "\\" then
-    local pyw = py_exe:gsub("python%.exe$", "pythonw.exe")
-    if system.get_file_info and system.get_file_info(pyw) then
-      py_exe = pyw
-    end
-  end
-  local cmd = string.format('"%s" -m doxoade lan-git note service', py_exe)
-  pcall(system.exec, cmd)
-end
-
--- 🛡️ REGRA 2: Verificador Rápido no Doxly (300ms)
-if core and core.add_thread then
-  core.add_thread(function()
-    while true do
-      -- ⚡ Reduzido para 0.3s (recarga quase imperceptível ao olho humano!)
-      coroutine.yield(0.3)
-
-      local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
-      if is_active then
-        pcall(function()
-          for _, doc in ipairs(core.docs or {}) do
-            if doc.filename then
-              local fn = doc.filename:gsub("\\", "/"):lower()
-              if fn:find("shared_notes%.md$") or fn:find("shared_notes%.txt$") then
-
-                local finfo = system.get_file_info and system.get_file_info(doc.filename)
-                if finfo and finfo.type == "file" and finfo.mtime and finfo.mtime > 0 then
-
-                  if not _last_synced_mtimes[doc.filename] then
-                    _last_synced_mtimes[doc.filename] = finfo.mtime
-                  elseif finfo.mtime > _last_synced_mtimes[doc.filename] then
-                    local is_dirty = false
-                    if doc.is_dirty then
-                      local ok, d = pcall(doc.is_dirty, doc)
-                      if ok and d then is_dirty = true end
-                    end
-
-                    if not is_dirty then
-                      local f = io.open(doc.filename, "r")
-                      if f then
-                        local content = f:read("*a")
-                        f:close()
-
-                        if content and content ~= "" then
-                          _last_synced_mtimes[doc.filename] = finfo.mtime
-
-                          local l1, c1, l2, c2 = 1, 1, 1, 1
-                          if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
-
-                          doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
-                          doc:insert(1, 1, content)
-                          if doc.clean then doc:clean() end
-
-                          if doc.set_selection then pcall(doc.set_selection, doc, l1, c1, l2, c2) end
-                          core.redraw = true
-                          if core.log then core.log("⚡ [DOXNOTE] Nota atualizada pela malha.") end
-                        end
-                      end
-                    end
-                  end
-                end
-              end
-            end
-          end
-        end)
-      end
-    end
-  end)
-end
-
-local function stop_mesh_daemon_from_ide()
-  local py_exe = get_mesh_python_exe()
-  local cmd = string.format('"%s" -m doxoade lan-git note stop', py_exe)
-  pcall(system.exec, cmd)
-end
-
--- ═════════════════════════════════════════════════════════════════════════════
--- 4. COMANDOS SOBERANOS DO SISTEMA DE NOTAS
--- ═════════════════════════════════════════════════════════════════════════════
 command.add(nil, {
-  -- 📂 ABRIR NOTA (SHARED OU LOCAL DO PROJETO)
+  ["doxoade:network-elevate"] = function()
+    local py_exe = get_mesh_python_exe()
+    core.log("🛡️ [DOXOADE] Solicitando pop-up UAC do Windows para liberar portas da malha...")
+    local cmd = string.format('"%s" -m doxoade lan-git network elevate', py_exe)
+    pcall(system.exec, cmd)
+  end,
+
   ["doxoade:open-note"] = function()
     local notes = get_all_existing_notes()
     if #notes == 0 then
@@ -803,10 +549,8 @@ command.add(nil, {
       command.perform("doxoade:new-note-interactive")
       return
     end
-
     local labels = {}
     local path_map = {}
-
     for _, n in ipairs(notes) do
       local task_badge = (n.task_count and n.task_count > 0) and string.format(" [%d tarefas]", n.task_count) or ""
       local icon = n.is_shared and "🌐" or "📝"
@@ -814,7 +558,6 @@ command.add(nil, {
       table.insert(labels, label)
       path_map[label] = n.path
     end
-
     core.command_view:enter("Abrir Nota (DoxNote Sovereign Hub)", {
       submit = function(selected)
         local target = path_map[selected]
@@ -826,7 +569,6 @@ command.add(nil, {
             end
           end
         end
-
         if target and system.get_file_info(target) then
           local doc = core.open_doc(target)
           if doc then
@@ -843,7 +585,6 @@ command.add(nil, {
     })
   end,
 
-  -- ➕ CRIAR NOVA NOTA INTERATIVA
   ["doxoade:new-note-interactive"] = function()
     core.command_view:enter("Nome da Nova Nota (ex: reuniao, arquitetura, sprint)", {
       submit = function(name)
@@ -852,10 +593,8 @@ command.add(nil, {
         if not clean_name:match("%.md$") and not clean_name:match("%.txt$") then
           clean_name = clean_name .. ".md"
         end
-
         local note_dir = get_primary_note_dir()
         local note_path = note_dir .. "/" .. clean_name
-
         if not system.get_file_info(note_path) then
           local f = io.open(note_path, "w")
           if f then
@@ -863,7 +602,6 @@ command.add(nil, {
             f:close()
           end
         end
-
         local doc = core.open_doc(note_path)
         if doc then
           core.root_view:open_doc(doc)
@@ -874,30 +612,30 @@ command.add(nil, {
   end,
 
   ["doxoade:lan-hub-menu"] = function()
-    local cache = rawget(_G, "_DOXOADE_MESH_STATUS_CACHE") or { text = "Offline" }
+    local is_alive, status, peer_name = is_mesh_service_alive()
+    local peer_label = peer_name and (" (" .. peer_name .. ")") or ""
     local options = {
       "[1] Iniciar Host Live Mirror (lan-git share --live)",
-      "[2] Puxar do Host Remoto (lan-git pull --live -f)",
+      "[2] Puxar do Host Remoto (lan-git pull --live)",
       "[3] Abrir shared_notes.md (Bloco Sincronizado)",
       "[4] Reiniciar Serviço Mesh P2P",
-      "[5] Status da Rede: " .. tostring(cache.text)
+      "[5] Liberar Firewall do Windows (UAC Elevação)",
+      string.format("[6] Status da Rede: %s%s", status, peer_label)
     }
-
     core.command_view:enter("LAN-Git Live Control Hub", {
       submit = function(choice)
         local home_dir = os.getenv("USERPROFILE") or os.getenv("HOME") or "."
         local sep = PATHSEP or "/"
-
         if choice:find("%[1%]") then
           local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
           local shelf = rawget(_G, "_DOXOADE_SHELF_HUB")
           if shelf then shelf.visible = true; shelf.active_tab = "terminal" end
-          if term then term:ensure_started(); term:execute_command("doxoade lan-git share --live") end
+          if term then term:ensure_started(); term:execute_command("doxoade lan-git share --live\n") end
         elseif choice:find("%[2%]") then
           local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
           local shelf = rawget(_G, "_DOXOADE_SHELF_HUB")
           if shelf then shelf.visible = true; shelf.active_tab = "terminal" end
-          if term then term:ensure_started(); term:execute_command("doxoade lan-git pull --live -f") end
+          if term then term:ensure_started(); term:execute_command("doxoade lan-git pull --live\n") end
         elseif choice:find("%[3%]") then
           local shared_path = home_dir .. sep .. ".doxoade" .. sep .. "shared_notes.md"
           local doc = core.open_doc(shared_path)
@@ -905,19 +643,18 @@ command.add(nil, {
         elseif choice:find("%[4%]") then
           launch_mesh_service_safe()
           core.log("⚡ [DOXNOTE MESH] Serviço P2P reiniciado.")
+        elseif choice:find("%[5%]") then
+          command.perform("doxoade:network-elevate")
         end
       end,
       suggest = function(text) return common.fuzzy_match(options, text) end
     })
   end,
 
-  -- 📋 MENU CENTRAL UNIFICADO: SHARED NOTES + NOTAS DO PROJETO + AGENDA
-  -- 📋 MENU CENTRAL UNIFICADO: SHARED NOTES + NOTAS DO PROJETO + CONTROLE DE SYNC
   ["doxoade:note-hub-menu"] = function()
     local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
-    local sync_toggle_label = is_active and "🛑 [1] Desativar Sincronização (Modo Local / Fundo Vermelho)"
-                                         or "⚡ [1] Ativar Sincronização (Modo Rede / Fundo Verde)"
-
+    local sync_toggle_label = is_active and "🛑 [1] Desativar Sincronização (Modo Local)"
+                                         or "⚡ [1] Ativar Sincronização (Modo Rede)"
     local options = {
       sync_toggle_label,
       "📝 [2] Abrir shared_notes.md (Painel Dividido)",
@@ -926,26 +663,19 @@ command.add(nil, {
       "⏰ [5] Ver Agenda & Tarefas Sincronizadas",
       "⚡ [6] Adicionar Tarefa Rápida (+1d, hoje...)",
       "✔️ [7] Marcar Tarefa Concluída [x]",
-      "🔄 [8] Puxar do Host Remoto (lan-git pull --live -f)",
-      "🚀 [9] Iniciar Host Live Mirror (lan-git share --live)"
+      "🔄 [8] Puxar do Host Remoto (lan-git pull --live)",
+      "🚀 [9] Iniciar Host Live Mirror (lan-git share --live)",
+      "🛡️ [10] Liberar Portas no Firewall do Windows (UAC)"
     }
-
     core.command_view:enter("Shared Note Hub — Gestão de Notas & Sincronização", {
       submit = function(choice)
         local home_dir = os.getenv("USERPROFILE") or os.getenv("HOME") or "."
         local sep = PATHSEP or "/"
         local shared_path = home_dir .. sep .. ".doxoade" .. sep .. "shared_notes.md"
-
-        -- 1. Alterna o estado da Sincronização (Muda a cor do Badge no Rodapé)
-        -- 1. Alterna o estado da Sincronização (1 chamada limpa)
         if choice:find("%[1%]") then
           command.perform("doxoade:toggle-note-sync")
-
-        -- 2. Abrir shared_notes no split lateral
         elseif choice:find("%[2%]") then
           open_note_in_split(shared_path, "🌐 shared_notes.md aberto no painel lateral.")
-
-        -- 3. Abrir notas do projeto no split lateral
         elseif choice:find("%[3%]") then
           local notes = get_all_existing_notes()
           local labels, path_map = {}, {}
@@ -961,44 +691,33 @@ command.add(nil, {
             end,
             suggest = function(text) return common.fuzzy_match(labels, text) end
           })
-
-        -- 4. Nova nota
         elseif choice:find("%[4%]") then
           command.perform("doxoade:new-note-interactive")
-
-        -- 5. Agenda
         elseif choice:find("%[5%]") then
           local note_dir = get_primary_note_dir()
           open_note_in_split(note_dir .. "/.agenda_view.md", "⏰ Agenda aberta à direita.")
-
-        -- 6. Adicionar tarefa
         elseif choice:find("%[6%]") then
           command.perform("doxoade:quick-add-task")
-
-        -- 7. Concluir tarefa
         elseif choice:find("%[7%]") then
           command.perform("doxoade:mark-task-done")
-
-        -- 8. Puxar do host remoto
         elseif choice:find("%[8%]") then
           local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
           local shelf = rawget(_G, "_DOXOADE_SHELF_HUB")
           if shelf then shelf.visible = true; shelf.active_tab = "terminal" end
-          if term then term:ensure_started(); term:execute_command("doxoade lan-git pull --live -f") end
-
-        -- 9. Iniciar host live mirror
+          if term then term:ensure_started(); term:execute_command("doxoade lan-git pull --live\n") end
         elseif choice:find("%[9%]") then
           local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
           local shelf = rawget(_G, "_DOXOADE_SHELF_HUB")
           if shelf then shelf.visible = true; shelf.active_tab = "terminal" end
-          if term then term:ensure_started(); term:execute_command("doxoade lan-git share --live") end
+          if term then term:ensure_started(); term:execute_command("doxoade lan-git share --live\n") end
+        elseif choice:find("%[10%]") then
+          command.perform("doxoade:network-elevate")
         end
       end,
       suggest = function(text) return common.fuzzy_match(options, text) end
     })
   end,
 
-  -- 📅 AGENDA VIEW
   ["doxoade:open-agenda-view"] = function()
     local note_dir = get_primary_note_dir()
     local agenda_file = note_dir .. "/.agenda_view.md"
@@ -1015,7 +734,6 @@ command.add(nil, {
     end
   end,
 
-  -- ⚡ ADICIONAR TAREFA RÁPIDA
   ["doxoade:quick-add-task"] = function()
     core.command_view:enter("Descrição da Tarefa", {
       submit = function(task_text)
@@ -1040,12 +758,10 @@ command.add(nil, {
     })
   end,
 
-  -- ✔ CONCLUIR TAREFA
   ["doxoade:mark-task-done"] = function()
     local tasks = collect_all_tasks()
     local labels = {}
     local map = {}
-
     for _, t in ipairs(tasks) do
       if not t.done then
         local label = string.format("[%s] %s (%s) ^id:%s", t.date, t.text, t.file, t.id)
@@ -1053,12 +769,10 @@ command.add(nil, {
         map[label] = t
       end
     end
-
     if #labels == 0 then
       core.log("Parabéns! Nenhuma tarefa pendente no momento.")
       return
     end
-
     core.command_view:enter("Selecione a Tarefa para Marcar como Concluída [x]", {
       submit = function(selected_label)
         local t = map[selected_label]
@@ -1086,10 +800,10 @@ command.add(nil, {
       end
     })
   end,
+
   ["doxoade:toggle-note-sync"] = function()
     local is_active = not (rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true)
     rawset(_G, "_DOXOADE_NOTE_SYNC_ACTIVE", is_active)
-
     if is_active then
       start_mesh_daemon_from_ide()
       if core.log then
@@ -1103,27 +817,26 @@ command.add(nil, {
     end
     core.redraw = true
   end,
+
   ["doxoade:note-status-click"] = function()
     local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") ~= false
     local status_str = is_active and "🟢 Ligado (P2P Mesh)" or "🔴 Desligado (Local)"
     local toggle_label = is_active and "🔴 [3] Desativar Sincronização (Modo Local)"
                                    or  "🟢 [3] Ativar Sincronização (Modo Rede)"
-
     local options = {
       "📖 [1] Abrir shared_notes.md (Painel Dividido)",
       "⚡ [2] Forçar Sincronização Agora (Push / Pull)",
       toggle_label,
       "📂 [4] Abrir Notas do Projeto (.doxoade/note/)",
       "➕ [5] Criar Nova Nota no Projeto...",
-      "📊 [6] Ver Status da Malha (" .. status_str .. ")"
+      "📊 [6] Ver Status da Malha (" .. status_str .. ")",
+      "🛡️ [7] Liberar Portas no Firewall do Windows (UAC Elevação)"
     }
-
-    core.command_view:enter("DoxNote P2P Hub (Selecione 1 a 6):", {
+    core.command_view:enter("DoxNote P2P Hub (Selecione uma opção):", {
       submit = function(item)
         local home_dir = os.getenv("USERPROFILE") or os.getenv("HOME") or "."
         local sep = PATHSEP or "/"
         local shared_path = home_dir .. sep .. ".doxoade" .. sep .. "shared_notes.md"
-
         if item:find("%[1%]") then
           open_note_in_split(shared_path, "📖 shared_notes.md aberto no painel lateral.")
         elseif item:find("%[2%]") then
@@ -1138,8 +851,10 @@ command.add(nil, {
         elseif item:find("%[5%]") then
           command.perform("doxoade:new-note-interactive")
         elseif item:find("%[6%]") then
-          local cache = rawget(_G, "_DOXOADE_MESH_STATUS_CACHE") or { text = status_str }
-          core.log("📊 Status: " .. tostring(cache.text or status_str))
+          local is_alive, s_text, peer = is_mesh_service_alive()
+          core.log(string.format("📊 Status: %s | Peer: %s", s_text, peer or "Aguardando..."))
+        elseif item:find("%[7%]") then
+          command.perform("doxoade:network-elevate")
         end
       end,
       suggest = function(text)
@@ -1147,12 +862,7 @@ command.add(nil, {
       end
     })
   end,
-  ["doxoade:network-elevate"] = function()
-    local py_exe = get_mesh_python_exe()
-    core.log("🛡️ [DOXOADE] Solicitando pop-up UAC do Windows para liberar portas da malha...")
-    local cmd = string.format('"%s" -m doxoade lan-git network elevate', py_exe)
-    pcall(system.exec, cmd)
-  end,
+
   ["doxoade:reload-shared-notes"] = function()
     local doc = core.active_view and core.active_view.doc
     if doc and doc.filename then
@@ -1171,10 +881,6 @@ command.add(nil, {
     end
   end
 })
-
--- ═════════════════════════════════════════════════════════════════════════════
--- 6. ATALHOS DE TECLADO SOBERANOS
--- ═════════════════════════════════════════════════════════════════════════════
 
 keymap.add {
   ["f5"] = "doxoade:reload-shared-notes",
