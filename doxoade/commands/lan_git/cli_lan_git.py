@@ -822,11 +822,37 @@ def cmd_note_status():
 
 @note_group.command(name="open")
 def cmd_note_open():
-    """Abre o arquivo global shared_notes.md no editor padrão."""
+    """Abre o arquivo global shared_notes.md com fallback soberano."""
     from pathlib import Path
     p = Path.home() / ".doxoade" / "shared_notes.md"
+    if not p.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("# DoxNote Shared\n", encoding="utf-8")
+
+    # 1. Plano A: Se o Lite XL/Doxly estiver aberto, abre direto na aba
+    try:
+        from doxoade.commands.lite_xl_systems.engine_lite_xl import LiteXLEngine
+        if LiteXLEngine.is_process_alive():
+            ok, msg = LiteXLEngine.send_to_running_instance(str(p))
+            if ok:
+                click.secho(f"✔ [DOXNOTE] Aberto no Lite XL: {p.name}", fg="green")
+                return
+    except Exception:
+        pass
+
+    # 2. Plano B: Tenta abrir com o aplicativo padrão associado no SO
     if os.name == "nt":
-        os.system(f'start "" "{p}"')
+        try:
+            os.startfile(str(p))
+            click.secho(f"✔ [DOXNOTE] Aberto no editor padrão: {p.name}", fg="green")
+            return
+        except Exception:
+            pass
+
+    # 3. Plano C: Fallback infalível (Bloco de Notas no Windows / xdg-open no Linux)
+    if os.name == "nt":
+        subprocess.Popen(["notepad.exe", str(p)])
+        click.secho(f"✔ [DOXNOTE] Aberto no Bloco de Notas: {p.name}", fg="green")
     else:
         os.system(f'xdg-open "{p}"')
 

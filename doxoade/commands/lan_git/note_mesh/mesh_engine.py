@@ -44,7 +44,17 @@ class MeshSyncHTTPHandler(BaseHTTPRequestHandler):
             self.engine.log(f"📥 [GET] Peer {self.client_address[0]} solicitou: {clean_rel}")
 
             if clean_rel == "shared_notes.md":
-                target_file = self.engine.global_notes_file
+                # 1. Atualiza a nota global
+                self.engine.global_notes_file.write_bytes(body)
+                self.engine._file_mtimes[str(self.engine.global_notes_file)] = self.engine.global_notes_file.stat().st_mtime
+                
+                # 2. Atualiza a nota do projeto local (se existir no workspace)
+                if self.engine.project_notes_file.exists():
+                    self.engine.project_notes_file.write_bytes(body)
+                    self.engine._file_mtimes[str(self.engine.project_notes_file)] = self.engine.project_notes_file.stat().st_mtime
+                
+                self.engine._file_network_hashes["shared_notes.md"] = new_hash
+
             else:
                 target_file = self.engine.project_notes_dir / Path(clean_rel).name
 
@@ -491,6 +501,12 @@ class NoteMeshEngine:
             t.start()
 
         self.log("✔ [MESH] Todos os threads iniciados com sucesso.")
+
+        try:
+            while self.running:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            self.stop()
 
     def stop(self):
         """Para todos os threads e limpa recursos."""
