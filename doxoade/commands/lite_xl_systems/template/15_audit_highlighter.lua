@@ -367,12 +367,13 @@ command.add("core.docview", {
 
   -- Navegação entre incidentes (F2 / Shift + F2)
   ["doxoade:next-audit-incident"] = function()
-    local doc = core.active_view and core.active_view.doc
-    if not doc or not is_target_doc(doc) then
-      core.log("Nenhum incidente de auditoria no arquivo ativo.")
+    local view = core.active_view
+    local doc = view and view.doc
+    if not doc or not doc.get_selection then
+      if core.log then core.log("⚠ Nenhum documento ativo para auditoria.") end
       return
     end
-    local cur_line = doc:get_selection(true)
+    local current_line = doc:get_selection(true)
     local target_line = nil
 
     for ln = cur_line + 1, #doc.lines do

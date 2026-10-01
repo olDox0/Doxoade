@@ -1,8 +1,9 @@
 -- doxoade/commands/lite_xl_systems/template/13_toolbar_doxoade.lua
 --[[
-  ⚡ DOXOADE STATUS BAR HUD & SOVEREIGN BADGES (V2.1 Calibrada)
+  ⚡ DOXOADE STATUS BAR HUD & SOVEREIGN BADGES (V2.2 Strict-Safe)
   - Exibe badges dinâmicos de indentação, auditoria Ma'at, atalhos rápidos e contador de seleção.
   - Ordenação determinística de slots no rodapé (sem conflito de posições).
+  - Cores declaradas localmente para conformidade estrita (strict.lua safe).
 ]]
 local core = require "core"
 local config = require "core.config"
@@ -42,10 +43,13 @@ core.add_thread(function()
     if rawget(_G, "_DOXOADE_STATUS_HUD_REGISTERED") then return end
     rawset(_G, "_DOXOADE_STATUS_HUD_REGISTERED", true)
 
-    local DIVIDER_COLOR = style.divider or { 76, 69, 82, 255 }
-    local ACCENT_GREEN = style.accent or { 38, 188, 95, 255 }
+    -- Definição local de paletas para o strict.lua
+    local DIVIDER_COLOR      = style.divider or { 76, 69, 82, 255 }
+    local ACCENT_GREEN       = style.accent or { 38, 188, 95, 255 }
+    local COLOR_TEXT_WHITE   = { 250, 250, 250, 255 }
+    local COLOR_SYNC_ON_BG   = { 25, 123, 63, 255 }
+    local COLOR_SYNC_OFF_BG  = { 45, 45, 48, 255 }
 
-    -- 1. Badge Doxoade (Acesso ao Panteão)
     register_status_item(
       "doxoade:badge",
       StatusView.Item.LEFT,
@@ -61,7 +65,6 @@ core.add_thread(function()
       1
     )
 
-    -- 2. Contador Dinâmico de Seleção (Linhas / Caracteres)
     register_status_item(
       "doxoade:selection_counter",
       StatusView.Item.LEFT,
@@ -89,7 +92,6 @@ core.add_thread(function()
       2
     )
 
-    -- 3. Indicador de Indentação Ativa
     register_status_item(
       "doxoade:indent_status",
       StatusView.Item.LEFT,
@@ -115,12 +117,10 @@ core.add_thread(function()
       3
     )
 
-    -- 4. Status de Auditoria Ma'at / Check
     register_status_item(
       "doxoade:check_status",
       StatusView.Item.LEFT,
       function()
-        -- ⏳ Se estiver auditando, mostra os segundos decorridos ao vivo!
         if rawget(_G, "_DOXOADE_AUDIT_RUNNING") then
           local t0 = rawget(_G, "_DOXOADE_AUDIT_START_TIME") or os.clock()
           local sec = math.floor(os.clock() - t0)
@@ -129,7 +129,6 @@ core.add_thread(function()
             DIVIDER_COLOR, "| "
           }
         end
-
         local summary = rawget(_G, "_DOXOADE_AUDIT_SUMMARY")
         local text = "⚖️ Check "
         local col = { 244, 114, 182, 255 }
@@ -140,14 +139,14 @@ core.add_thread(function()
           if total_cnt > 0 then
             if errors_cnt > 0 then
               text = string.format("⚖️ Check: %dE %dW ", errors_cnt, warnings_cnt)
-              col = { 255, 60, 60, 255 } -- Vermelho
+              col = { 255, 60, 60, 255 } 
             else
               text = string.format("⚖️ Check: %dW ", warnings_cnt)
-              col = { 234, 179, 8, 255 } -- Amarelo
+              col = { 234, 179, 8, 255 } 
             end
           elseif rawget(_G, "_DOXOADE_AUDIT_CHECKED") then
             text = "⚖️ Check: Clean "
-            col = ACCENT_GREEN          -- Verde
+            col = ACCENT_GREEN          
           end
         end
         return {
@@ -161,7 +160,6 @@ core.add_thread(function()
       4
     )
 
-    -- 5. Badge DoxNote: Sempre ATIVO por padrão no boot
     if rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == nil then
       rawset(_G, "_DOXOADE_NOTE_SYNC_ACTIVE", true)
     end
@@ -178,13 +176,11 @@ core.add_thread(function()
         }
       end,
       function()
-        -- ⚡ Ao clicar no badge: abre o DoxNote Hub com opções de abrir, forçar sync e notas do projeto
         command.perform("doxoade:note-status-click")
       end,
       5
     )
 
-    -- Hook que pinta o fundo colorido ANTES do desenho dos textos
     if StatusView and StatusView.draw then
       local orig_statusview_draw = StatusView.draw
       StatusView.draw = function(self, ...)
@@ -194,7 +190,6 @@ core.add_thread(function()
         local h = self.size and self.size.y or 24
         local x = self.position.x + (style.padding and style.padding.x or 8)
         local y = self.position.y
-
         local target_x, target_w = nil, 0
         for _, item in ipairs(self.items or {}) do
           if item.alignment == StatusView.Item.LEFT and item.predicate and item.predicate() then
@@ -203,7 +198,6 @@ core.add_thread(function()
             for i = 2, #res, 2 do
               item_w = item_w + font:get_width(tostring(res[i] or ""))
             end
-
             if item.name == "doxoade:note_status" then
               target_x = x
               target_w = item_w - font:get_width(" | ")
@@ -212,14 +206,12 @@ core.add_thread(function()
             x = x + item_w
           end
         end
-
         if target_x and target_w > 0 then
           local ren = rawget(_G, "rencache") or rawget(_G, "renderer")
           if ren and ren.draw_rect then
             ren.draw_rect(target_x + 2, y + 3, target_w - 4, h - 6, badge_bg)
           end
         end
-
         orig_statusview_draw(self, ...)
       end
     end
@@ -246,7 +238,6 @@ core.add_thread(function()
       7
     )
 
-    -- 7. Badge Terminal
     register_status_item(
       "doxoade:bottom_shelf_btn",
       StatusView.Item.LEFT,
@@ -254,8 +245,7 @@ core.add_thread(function()
         return { { 56, 189, 248, 255 }, "Terminal/Canvas ", DIVIDER_COLOR, "| " }
       end,
       function() command.perform("doxoade:toggle-bottom-shelf") end,
-      7
+      8
     )
-
   end)
 end)
