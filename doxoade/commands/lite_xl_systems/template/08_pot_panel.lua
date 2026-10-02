@@ -27,6 +27,27 @@ local dumppot_file = doxoade_cfg_dir .. sep .. "dumppot.txt"
 local cheat_sheet_file = doxoade_cfg_dir .. sep .. "cheat_sheet.txt"
 local log_path = user_dir .. sep .. "session_log.txt"
 
+-- 🛡️ INJEÇÃO DE UTILITÁRIO DE DIRETÓRIOS (Ma'at)
+-- Garante que a chamada 'ensure_dir' exista e seja recursiva no Windows/Linux.
+local function ensure_dir(target_dir)
+    if not target_dir or target_dir == "" then return end
+    local parts = {}
+    for p in tostring(target_dir):gmatch("[^/\\]+") do
+        table.insert(parts, p)
+    end
+    local cur = ""
+    for i, p in ipairs(parts) do
+        if i == 1 and p:find("^[a-zA-Z]:") then
+            cur = p
+        else
+            cur = (cur == "" and "" or cur .. (PATHSEP or "/")) .. p
+            if system and system.mkdir then
+                pcall(system.mkdir, cur)
+            end
+        end
+    end
+end
+
 local rencache = rawget(_G, "rencache") or (pcall(require, "core.rencache") and require("core.rencache") or nil)
 local native_renderer = rawget(_G, "renderer") or (pcall(require, "renderer") and require("renderer") or nil)
 

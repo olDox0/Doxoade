@@ -1,19 +1,42 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/consult_systems/cmd_consult.py
 """
-⚡ ZEUS — Roteador CLI do Subsistema Doxoade Consult (V25.0 Hybrid Bridge).
-Suporte universal a emissão em formato de Tabela Lua (--lua) e Markdown (--md)
-tanto para busca profunda FTS5 quanto para módulos locais do virtualenv.
+⚡ ZEUS — Roteador CLI do Subsistema Doxoade Consult (V25.1 Hybrid Bridge Blindada).
 Compliance: ProDeNov 1.2.1 | PASC-6.1 | Limite < 50KB.
 """
 from __future__ import annotations
 import click
 import re
+import sys
+import os
 from pathlib import Path
 from typing import List, Tuple
-from .consult_engine import ConsultEngine
-from .consult_renderer import ConsultRenderer
-from doxoade.commands.telemetry_systems import ShadowMatrix as ShadowProfiler
+
+# 🛡️ ADAPTADOR DE IMPORTAÇÃO UNIVERSAL (Hermes)
+# Permite que o arquivo seja executado tanto via 'python -m' quanto diretamente pela bridge Lua.
+try:
+    from .consult_engine import ConsultEngine
+    from .consult_renderer import ConsultRenderer
+except ImportError:
+    # Fallback para execução direta (script) ou bridge sem contexto de pacote
+    _base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    if _base_dir not in sys.path:
+        sys.path.insert(0, _base_dir)
+    from commands.consult_systems.consult_engine import ConsultEngine
+    from commands.consult_systems.consult_renderer import ConsultRenderer
+
+try:
+    from doxoade.commands.telemetry_systems import ShadowMatrix as ShadowProfiler
+except ImportError:
+    try:
+        from commands.telemetry_systems import ShadowMatrix as ShadowProfiler
+    except ImportError:
+        # Profiler Dummy (Fallback de Degradação Graciosa - Plano C)
+        class ShadowProfiler:
+            def __init__(self, *args, **kwargs): pass
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def render_hud(self): pass
 
 
 def _escape_lua_str(s: str) -> str:
@@ -274,3 +297,51 @@ def cmd_symbols():
         renderer.render_doc("Símbolos Python", symbols_text)
     except Exception:
         renderer.render_error("symbols", "Não foi possível carregar a lista de símbolos via pydoc.")
+
+@consult_group.command("ingest", help="📥 Indexa datasets educacionais (suporta caminho local ou URL).")
+@click.argument("source", type=str, default="cheatsheet")
+@click.option("--limit", "-l", type=int, default=0, help="Limita o número de registros (útil para testes).")
+@click.pass_context
+def cmd_ingest(ctx, source: str, limit: int):
+    """Orquestrador Zeus para ingestão automática de conhecimento."""
+    is_prof = ctx.obj.get("shadow_prof", False)
+    
+    # Presets de fallback (URLs públicas)
+    PRESETS = {
+        "cheatsheet": {
+            "url": "https://raw.githubusercontent.com/gto76/python-cheatsheet/main/README.md",
+            "name": "Python_Cheatsheet_MD",
+        }
+    }
+
+    source_path = Path(source)
+    
+    # Roteamento Inteligente de Fonte
+    if source in PRESETS:
+        target_source = PRESETS[source]["url"]
+        dataset_name = PRESETS[source]["name"]
+    elif source.startswith("http"):
+        target_source = source
+        dataset_name = source.split("/")[-1].split("?")[0] or "custom_dataset"
+    elif source_path.exists() and source_path.is_file():
+        target_source = str(source_path.resolve())
+        dataset_name = source_path.stem # Ex: "stack_edu_python"
+    else:
+        click.secho(f"❌ Fonte '{source}' não reconhecida. Use um preset, uma URL direta ou um caminho de arquivo local válido.", fg="red")
+        return
+
+    from .dataset_ingestor import DatasetIngestor
+    from .doc_indexer import DocIndexer
+    
+    db_path = Path.home() / ".doxoade" / "consult_docs_fts5.db"
+    
+    # Garante que a tabela FTS5 existe
+    indexer = DocIndexer(db_path)
+    indexer.init_db()
+    
+    ingestor = DatasetIngestor(db_path)
+    
+    with ShadowProfiler("consult_ingest", enabled=is_prof) as profiler:
+        ingestor.ingest(target_source, dataset_name, limit=limit)
+        if is_prof:
+            profiler.render_hud()
