@@ -38,69 +38,55 @@ local function register_status_item(name, alignment, get_item_fn, action_fn, pos
 end
 
 core.add_thread(function()
-  coroutine.yield(0.02)
-  pcall(function()
-    if rawget(_G, "_DOXOADE_STATUS_HUD_REGISTERED") then return end
-    rawset(_G, "_DOXOADE_STATUS_HUD_REGISTERED", true)
+    coroutine.yield(0.02)
+    pcall(function()
+        if rawget(_G, "_DOXOADE_STATUS_HUD_REGISTERED") then return end
+        rawset(_G, "_DOXOADE_STATUS_HUD_REGISTERED", true)
 
-    -- Definição local de paletas para o strict.lua
-    local DIVIDER_COLOR      = style.divider or { 76, 69, 82, 255 }
-    local ACCENT_GREEN       = style.accent or { 38, 188, 95, 255 }
-    local COLOR_TEXT_WHITE   = { 250, 250, 250, 255 }
-    local COLOR_SYNC_ON_BG   = { 25, 123, 63, 255 }
-    local COLOR_SYNC_OFF_BG  = { 45, 45, 48, 255 }
+        local DIVIDER_COLOR      = style.divider or { 76, 69, 82, 255 }
+        local ACCENT_GREEN       = style.accent or { 38, 188, 95, 255 }
+        local COLOR_TEXT_WHITE   = { 250, 250, 250, 255 }
+        local COLOR_SYNC_ON_BG   = { 25, 123, 63, 255 }
+        local COLOR_SYNC_OFF_BG  = { 45, 45, 48, 255 }
 
-    -- register_status_item(
-    --   "doxoade:badge",
-    --   StatusView.Item.LEFT,
-    --   function()
-    --     return {
-    --       ACCENT_GREEN, "⚡ DOXOADE ",
-    --       DIVIDER_COLOR, "| "
-    --     }
-    --   end,
-    --   function()
-    --     command.perform("doxoade:open-pantheon")
-    --   end,
-    --   1
-    -- )
+        -- ==========================================
+        -- LADO ESQUERDO (Contexto do Documento)
+        -- ==========================================
 
-    register_status_item(
-      "doxoade:selection_counter",
-      StatusView.Item.LEFT,
-      function()
-        local view = core.active_view
-        local doc = view and view.doc
-        if doc and doc.has_selection and doc:has_selection() then
-          local l1, c1, l2, c2 = doc:get_selection(true)
-          local line_count = math.abs(l2 - l1) + 1
-          local text
-          if line_count > 1 then
-            text = string.format("📊 Sel: %d lin ", line_count)
-          else
-            local char_count = math.abs(c2 - c1)
-            text = string.format("📊 Sel: %d car ", char_count)
-          end
-          return {
-            { 56, 189, 248, 255 }, text,
-            DIVIDER_COLOR, "| "
-          }
-        end
-        return {}
-      end,
-      nil,
-      1
-    )
+        register_status_item(
+            "doxoade:selection_counter",
+            StatusView.Item.LEFT,
+            function()
+                local view = core.active_view
+                local doc = view and view.doc
+                if doc and doc.has_selection and doc:has_selection() then
+                    local l1, c1, l2, c2 = doc:get_selection(true)
+                    local line_count = math.abs(l2 - l1) + 1
+                    local text = line_count > 1 
+                        and string.format("📊 %d L ", line_count) 
+                        or string.format("📊 %d C ", math.abs(c2 - c1))
+                    return { { 56, 189, 248, 255 }, text, DIVIDER_COLOR, "| " }
+                end
+                return {}
+            end,
+            nil, 1
+        )
 
-    register_status_item(
-      "doxoade:bottom_shelf_btn",
-      StatusView.Item.LEFT,
-      function()
-        return { { 56, 189, 248, 255 }, "Terminal/Canvas ", DIVIDER_COLOR, "| " }
-      end,
-      function() command.perform("doxoade:toggle-bottom-shelf") end,
-      2
-    )
+        register_status_item(
+            "doxoade:indent_status",
+            StatusView.Item.LEFT,
+            function()
+                local is_on = (config.draw_indent_guides ~= false)
+                local indent_size = config.indent_size or 4
+                local text = is_on and string.format("📐 %dx%d ", indent_size, indent_size) or "📐 OFF "
+                local col = is_on and ACCENT_GREEN or { 130, 130, 130, 255 }
+                return { col, text, DIVIDER_COLOR, "| " }
+            end,
+            function()
+                config.draw_indent_guides = not config.draw_indent_guides
+                core.redraw = true
+            end, 2
+        )
 
     register_status_item(
       "doxoade:indent_status",
@@ -127,126 +113,68 @@ core.add_thread(function()
       3
     )
 
-    register_status_item(
-      "doxoade:check_status",
-      StatusView.Item.LEFT,
-      function()
-        if rawget(_G, "_DOXOADE_AUDIT_RUNNING") then
-          local t0 = rawget(_G, "_DOXOADE_AUDIT_START_TIME") or os.clock()
-          local sec = math.floor(os.clock() - t0)
-          return {
-            { 234, 179, 8, 255 }, string.format("⏳ Auditando (%ds)... ", sec),
-            DIVIDER_COLOR, "| "
-          }
-        end
-        local summary = rawget(_G, "_DOXOADE_AUDIT_SUMMARY")
-        local text = "⚖️ Check "
-        local col = { 244, 114, 182, 255 }
-        if summary and type(summary) == "table" then
-          local errors_cnt = tonumber(summary.errors) or 0
-          local warnings_cnt = tonumber(summary.warnings) or 0
-          local total_cnt = tonumber(summary.total) or (errors_cnt + warnings_cnt)
-          if total_cnt > 0 then
-            if errors_cnt > 0 then
-              text = string.format("⚖️ Check: %dE %dW ", errors_cnt, warnings_cnt)
-              col = { 255, 60, 60, 255 } 
-            else
-              text = string.format("⚖️ Check: %dW ", warnings_cnt)
-              col = { 234, 179, 8, 255 } 
-            end
-          elseif rawget(_G, "_DOXOADE_AUDIT_CHECKED") then
-            text = "⚖️ Check: Clean "
-            col = ACCENT_GREEN          
-          end
-        end
-        return {
-          col, text,
-          DIVIDER_COLOR, "| "
-        }
-      end,
-      function()
-        command.perform("doxoade:trigger-active-check")
-      end,
-      4
-    )
+        register_status_item(
+            "doxoade:check_status",
+            StatusView.Item.LEFT,
+            function()
+                if rawget(_G, "_DOXOADE_AUDIT_RUNNING") then
+                    return { { 234, 179, 8, 255 }, "⏳ Audit... ", DIVIDER_COLOR, "| " }
+                end
+                local summary = rawget(_G, "_DOXOADE_AUDIT_SUMMARY")
+                local text = "⚖️ "
+                local col = { 244, 114, 182, 255 }
+                if summary and type(summary) == "table" then
+                    local errors_cnt = tonumber(summary.errors) or 0
+                    local warnings_cnt = tonumber(summary.warnings) or 0
+                    if errors_cnt > 0 then
+                        text = string.format("⚖️ %dE %dW ", errors_cnt, warnings_cnt)
+                        col = { 255, 60, 60, 255 }
+                    elseif warnings_cnt > 0 then
+                        text = string.format("⚖️ %dW ", warnings_cnt)
+                        col = { 234, 179, 8, 255 }
+                    elseif rawget(_G, "_DOXOADE_AUDIT_CHECKED") then
+                        text = "⚖️ OK "
+                        col = ACCENT_GREEN
+                    end
+                end
+                return { col, text, DIVIDER_COLOR, "| " }
+            end,
+            function() command.perform("doxoade:trigger-active-check") end, 3
+        )
 
-    if rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == nil then
-      rawset(_G, "_DOXOADE_NOTE_SYNC_ACTIVE", true)
-    end
+        -- ==========================================
+        -- LADO DIREITO (Sistema & Ações Globais)
+        -- ==========================================
 
-    register_status_item(
-      "doxoade:note_status",
-      StatusView.Item.LEFT,
-      function()
-        local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") ~= false
-        local badge_label = is_active and " [ NOTE: ON ] " or " [ NOTE: OFF ] "
-        return {
-          COLOR_TEXT_WHITE, badge_label,
-          DIVIDER_COLOR, "| "
-        }
-      end,
-      function()
-        command.perform("doxoade:note-status-click")
-      end,
-      5
-    )
+        register_status_item(
+            "doxoade:bottom_shelf_btn",
+            StatusView.Item.RIGHT,
+            function() return { { 56, 189, 248, 255 }, "🖥️ ", DIVIDER_COLOR, "| " } end,
+            function() command.perform("doxoade:toggle-bottom-shelf") end, 1
+        )
 
-    if StatusView and StatusView.draw then
-      local orig_statusview_draw = StatusView.draw
-      StatusView.draw = function(self, ...)
-        local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == true
-        local badge_bg = is_active and COLOR_SYNC_ON_BG or COLOR_SYNC_OFF_BG
-        local font = style.font
-        local h = self.size and self.size.y or 24
-        local x = self.position.x + (style.padding and style.padding.x or 8)
-        local y = self.position.y
-        local target_x, target_w = nil, 0
-        for _, item in ipairs(self.items or {}) do
-          if item.alignment == StatusView.Item.LEFT and item.predicate and item.predicate() then
-            local res = item.get_item and item.get_item() or {}
-            local item_w = 0
-            for i = 2, #res, 2 do
-              item_w = item_w + font:get_width(tostring(res[i] or ""))
-            end
-            if item.name == "doxoade:note_status" then
-              target_x = x
-              target_w = item_w - font:get_width(" | ")
-              break
-            end
-            x = x + item_w
-          end
-        end
-        if target_x and target_w > 0 then
-          local ren = rawget(_G, "rencache") or rawget(_G, "renderer")
-          if ren and ren.draw_rect then
-            ren.draw_rect(target_x + 2, y + 3, target_w - 4, h - 6, badge_bg)
-          end
-        end
-        orig_statusview_draw(self, ...)
-      end
-    end
+        register_status_item(
+            "doxoade:search_status",
+            StatusView.Item.RIGHT,
+            function()
+                local state = rawget(_G, "_DOXOADE_SEARCH_STATE")
+                if state and state.is_searching then
+                    return { { 251, 191, 36, 255 }, "⏳ ", DIVIDER_COLOR, "| " }
+                end
+                return { { 56, 189, 248, 255 }, "🔍 ", DIVIDER_COLOR, "| " }
+            end,
+            function() command.perform("doxoade:open-search-docs-hub") end, 2
+        )
 
-    register_status_item(
-      "doxoade:search_status",
-      StatusView.Item.LEFT,
-      function()
-        local state = rawget(_G, "_DOXOADE_SEARCH_STATE")
-        if state and state.is_searching then
-          return {
-            { 251, 191, 36, 255 }, "⏳ Searching... ",
-            DIVIDER_COLOR, "| "
-          }
-        end
-        return {
-          { 56, 189, 248, 255 }, "🔍 Search ",
-          DIVIDER_COLOR, "| "
-        }
-      end,
-      function()
-        command.perform("doxoade:open-search-docs-hub")
-      end,
-      6
-    )
-
-  end)
+        register_status_item(
+            "doxoade:note_status",
+            StatusView.Item.RIGHT,
+            function()
+                local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") ~= false
+                return { is_active and COLOR_SYNC_ON_BG or COLOR_SYNC_OFF_BG, 
+                         is_active and " 📝 " or " 📝 ", DIVIDER_COLOR, "| " }
+            end,
+            function() command.perform("doxoade:note-status-click") end, 3
+        )
+    end)
 end)

@@ -114,24 +114,28 @@ core.add_thread(function()
     if existing and type(existing) == "table" then return end
 
     local DIVIDER_COLOR = style.divider or { 76, 69, 82, 255 }
+    
     pcall(function()
         core.status_view:add_item({
             name = "doxoade:leap_status",
-            alignment = StatusView.Item.LEFT,
+            alignment = StatusView.Item.RIGHT, -- Alinhado à direita para não esmagar o código
             predicate = function() return true end,
             get_item = function()
-                local label = " [ LEAP: OFF ] "
+                local label = "L:OFF"
+                local color = COLOR_TEXT
                 if LeapHUD.active then
                     if LeapHUD.mode == "host" then
-                        label = " [ LEAP: HOST ] "
+                        label = "L:HST" -- Host/Servidor
+                        color = { 100, 255, 150, 255 }
                     else
-                        label = " [ LEAP: CLIENT ] "
+                        label = "L:CLI" -- Cliente
+                        color = { 150, 200, 255, 255 }
                     end
                 end
-                return { COLOR_TEXT, label, DIVIDER_COLOR, "| " }
+                return { color, " " .. label .. " ", DIVIDER_COLOR, "| " }
             end,
             command = function() toggle_leap_state() end,
-            position = 6
+            position = 4 -- Posição 4 no lado RIGHT
         })
     end)
 end)

@@ -92,25 +92,19 @@ core.add_thread(function()
     pcall(function()
         core.status_view:add_item({
             name = "doxoade:scroll_lock_status",
-            alignment = StatusView.Item.LEFT,
+            alignment = StatusView.Item.RIGHT, -- Alinhado à direita
             predicate = function() return true end,
             get_item = function()
                 if ScrollGuard.is_active then
-                    return {
-                        COLOR_WARN_BG, " [ ⚠️ SCROLL LOCK ] ",
-                        DIVIDER_COLOR, "| "
-                    }
+                    return { COLOR_WARN_BG, " ⚠️ SL ", DIVIDER_COLOR, "| " }
                 else
-                    return {
-                        COLOR_OK_BG, " [ 🔒 Scroll ] ",
-                        DIVIDER_COLOR, "| "
-                    }
+                    return { COLOR_OK_BG, " 🔒 ", DIVIDER_COLOR, "| " }
                 end
             end,
             command = function()
-                core.log("💡 Dica: Pressione a tecla 'Scroll Lock' no seu teclado para alternar o estado.")
+                core.log("💡 Dica: Pressione a tecla 'Scroll Lock' no teclado para alternar.")
             end,
-            position = 7 -- Posicionado logo após o badge do Leap e Note
+            position = 5 -- Posição 5 no lado RIGHT
         })
     end)
 end)
