@@ -20,7 +20,7 @@ local function register_status_item(name, alignment, get_item_fn, action_fn, pos
       alignment = alignment or StatusView.Item.LEFT,
       get_item = get_item_fn,
       command = action_fn,
-      position = position or 10
+      position = position or 3
     })
   end)
   if not ok then
@@ -31,7 +31,7 @@ local function register_status_item(name, alignment, get_item_fn, action_fn, pos
         alignment or StatusView.Item.LEFT,
         get_item_fn,
         action_fn,
-        position or 10
+        position or 3
       )
     end)
   end
@@ -93,6 +93,16 @@ core.add_thread(function()
     )
 
     register_status_item(
+      "doxoade:bottom_shelf_btn",
+      StatusView.Item.LEFT,
+      function()
+        return { { 56, 189, 248, 255 }, "Terminal/Canvas ", DIVIDER_COLOR, "| " }
+      end,
+      function() command.perform("doxoade:toggle-bottom-shelf") end,
+      2
+    )
+
+    register_status_item(
       "doxoade:indent_status",
       StatusView.Item.LEFT,
       function()
@@ -114,7 +124,7 @@ core.add_thread(function()
         config.draw_indent_guides = not config.draw_indent_guides
         core.redraw = true
       end,
-      2
+      3
     )
 
     register_status_item(
@@ -157,7 +167,7 @@ core.add_thread(function()
       function()
         command.perform("doxoade:trigger-active-check")
       end,
-      3
+      4
     )
 
     if rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == nil then
@@ -178,7 +188,7 @@ core.add_thread(function()
       function()
         command.perform("doxoade:note-status-click")
       end,
-      4
+      5
     )
 
     if StatusView and StatusView.draw then
@@ -235,17 +245,8 @@ core.add_thread(function()
       function()
         command.perform("doxoade:open-search-docs-hub")
       end,
-      5
-    )
-
-    register_status_item(
-      "doxoade:bottom_shelf_btn",
-      StatusView.Item.LEFT,
-      function()
-        return { { 56, 189, 248, 255 }, "Terminal/Canvas ", DIVIDER_COLOR, "| " }
-      end,
-      function() command.perform("doxoade:toggle-bottom-shelf") end,
       6
     )
+
   end)
 end)

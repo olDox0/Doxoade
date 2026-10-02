@@ -142,8 +142,32 @@ def _install_finder(project_root: str):
         echo(f'\x1b[31m ■ Erro: {e}')
         traceback.print_tb(e.__traceback__)
 
+def _ensure_admin_elevation():
+    """⚡ ZEUS: Auto-Elevação inteligente que respeita o wrapper do pip no Windows."""
+    if os.name != 'nt' or os.environ.get('DOXOADE_NO_ELEVATE') == '1':
+        return
+    
+    try:
+        import ctypes
+        if ctypes.windll.shell32.IsUserAnAdmin():
+            os.environ['DOXOADE_ELEVATED'] = '1'
+            return
+        
+        # Se for executado via wrapper .exe (ex: venv\Scripts\doxoade.exe)
+        if sys.argv[0].lower().endswith('.exe'):
+            target_exe = os.path.abspath(sys.argv[0])
+            params = ' '.join(f'"{a}"' for a in sys.argv[1:])
+        else:
+            target_exe = sys.executable
+            params = f'"{os.path.abspath(sys.argv[0])}" ' + ' '.join(f'"{a}"' for a in sys.argv[1:])
+            
+        ctypes.windll.shell32.ShellExecuteW(None, "runas", target_exe, params.strip(), os.getcwd(), 1)
+        sys.exit(0)
+    except Exception:
+        pass
+
 def main():
-    _ensure_admin_elevation()
+    _ensure_admin_elevation() # 🛡️ PRIMEIRA AÇÃO
     mode = _resolve_execution_mode()
     os.environ['DOXOADE_MODE'] = mode
     
