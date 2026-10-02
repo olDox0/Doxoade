@@ -1,5 +1,6 @@
 # doxoade/__main__.py
 # Main premier
+""" ⚡ ZEUS — Ponto de Entrada Soberano do Doxoade CLI. Compliance: ProDeNov 1.2.1 | PASC-6.1 """
 import sys
 import os
 import subprocess
@@ -7,6 +8,68 @@ import tempfile
 import traceback
 
 from click import echo
+
+def _ensure_doxly_elevation():
+    """
+    ⚡ ZEUS + ARES — Guardião de Elevação Específica para o Subsistema Doxly.
+    Garante que qualquer comando 'doxly' rode como Admin e purge instâncias antigas.
+    """
+    if os.name != 'nt' or os.environ.get('DOXOADE_NO_ELEVATE') == '1':
+        return
+    
+    # 1. Verifica se o comando atual é do subsistema 'doxly'
+    is_doxly_cmd = len(sys.argv) > 1 and sys.argv[1] == 'doxly'
+    if not is_doxly_cmd:
+        return
+
+    try:
+        import ctypes
+        is_admin = ctypes.windll.shell32.IsUserAnAdmin()
+        
+        if is_admin:
+            os.environ['DOXOADE_ELEVATED'] = '1'
+            # Se já somos admin, purgamos qualquer Lite XL aberto como usuário normal
+            _purge_non_admin_litexl()
+            return
+        
+        # 2. Não é admin -> Solicita UAC
+        echo('\x1b[33m⚡ [ZEUS] O subsistema Doxly requer privilégios de Administrador (para hooks de teclado/Leap).\x1b[0m')
+        echo('\x1b[33m   Solicitando elevação UAC...\x1b[0m')
+        
+        python_exe = sys.executable
+        script_path = os.path.abspath(sys.argv[0])
+        args = ' '.join(f'"{a}"' for a in sys.argv[1:])
+        params = f'"{script_path}" {args}'.strip()
+        
+        # ShellExecuteW com verbo 'runas' dispara o prompt UAC
+        result = ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", python_exe, params, os.getcwd(), 1
+        )
+        
+        if result > 32:
+            sys.exit(0) # Encerra a instância não-elevada
+        else:
+            echo('\x1b[31m❌ [ZEUS] Elevação recusada. O Leap/KVM não funcionará corretamente.\x1b[0m')
+    except Exception as e:
+        echo(f'\x1b[33m⚠️ [ZEUS] Falha na verificação de privilégios: {e}\x1b[0m')
+
+def _purge_non_admin_litexl():
+    """
+    ⚔️ ARES — Purga instâncias do Lite XL que não estejam rodando como Admin.
+    Garante que o IPC não se conecte a um processo não-elevado.
+    """
+    try:
+        import psutil
+        for proc in psutil.process_iter(['pid', 'name']):
+            if proc.info['name'] and 'lite-xl' in proc.info['name'].lower():
+                # Se nós somos Admin e o processo existe, nós o matamos para reabrir do zero
+                try:
+                    proc.kill()
+                    echo(f'\x1b[33m⚔️ [ARES] Instância antiga do Lite XL (PID {proc.info["pid"]}) purgada.\x1b[0m')
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+    except ImportError:
+        pass # Se não tiver psutil, segue sem purgar
 
 def _resolve_execution_mode():
     """
@@ -80,6 +143,7 @@ def _install_finder(project_root: str):
         traceback.print_tb(e.__traceback__)
 
 def main():
+    _ensure_admin_elevation()
     mode = _resolve_execution_mode()
     os.environ['DOXOADE_MODE'] = mode
     

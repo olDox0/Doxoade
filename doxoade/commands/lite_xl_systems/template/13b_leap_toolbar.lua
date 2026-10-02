@@ -73,15 +73,15 @@ local function toggle_leap_state()
 
     if is_amaranth then
         -- 🚀 HOST (Amaranth -> Bluebaby)
-        -- NOTA: --client e --no-firewall são OBRIGATÓRIOS para evitar click.prompt e exigir UAC em background
         local cmd = 'sysutils leap host --client bluebaby --pos right --port 24800 --no-firewall'
         pcall(system.exec, cmd)
         LeapHUD.active = true
         LeapHUD.mode = "host"
         if core.log then core.log("🚀 [LEAP] Servidor Host iniciado (Amaranth -> Bluebaby)") end
     else
-        -- 🔌 CLIENT (Outro PC -> Amaranth)
-        local cmd = string.format('sysutils leap join %s --port 24800 --name %s', LeapHUD.server_ip, hostname)
+        -- 🔌 CLIENT (Bluebaby -> Amaranth)
+        -- 🛡️ BLINDAGEM: IP e nome hardcoded para evitar falhas de resolução de DNS/Prompt
+        local cmd = string.format('sysutils leap join %s --port 24800 --name bluebaby', LeapHUD.server_ip)
         pcall(system.exec, cmd)
         LeapHUD.active = true
         LeapHUD.mode = "client"

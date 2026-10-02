@@ -40,11 +40,11 @@ local function hash_string(s)
 end
 local function get_accent(filename)
 	-- 1) Respeita o resolvedor do 03 se ele existir (consistência de tema)
-	local fn = rawget(_G, "DOXOADE_GET_TAB_THEME")
-	if fn then
-		local ok, t = pcall(fn, filename)
-		if ok and t and t.accent then return t.accent end
-	end
+  local fn = rawget(_G, "DOXOADE_GET_TAB_THEME")
+  if fn then
+     local ok, t = pcall(fn, filename)
+     if ok and t and t.accent then return t.accent end
+  end
 	-- 2) Fallback autônomo: hash do diretório = cor estável por projeto
 	local key = tostring(filename or "default"):gsub("\\", "/"):lower()
 	local dir = key:match("^(.*)/") or key
