@@ -231,9 +231,20 @@ class TyphonDeployEngine:
         Compila e instala o init.lua.
         Se no_khonsu=True, gera init.lua em texto plano (Plain Source), sem AOT e com Khonsu desativado.
         """
+
         deploy_dir = cls._get_deploy_dir(mode)
         deploy_dir.mkdir(parents=True, exist_ok=True)
         backup_path = None
+
+        # Âncora do Interpretador Python: grava o executável do venv ativo
+        # para que todos os templates Lua (consult, pty, linters) saibam exatamente quem chamar
+        dox_dir = deploy_dir / ".doxoade"
+        dox_dir.mkdir(parents=True, exist_ok=True)
+        (dox_dir / "python_path.txt").write_text(str(Path(sys.executable).resolve()), encoding="utf-8")
+        
+        home_anchor = Path.home() / ".doxoade" / "python_path.txt"
+        home_anchor.parent.mkdir(parents=True, exist_ok=True)
+        home_anchor.write_text(str(Path(sys.executable).resolve()), encoding="utf-8")
 
         if mode == "test":
             for art in ["session_log.txt", "error.txt"]:

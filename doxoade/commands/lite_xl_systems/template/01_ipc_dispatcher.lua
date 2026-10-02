@@ -235,7 +235,9 @@ local function restore_sovereign_session()
         target_node = primary_node
       elseif p_idx == 2 then
         local leaves = get_doc_leaves(core.root_view.root_node)
-        target_node = (#leaves >= 2) and leaves[2] or primary_node:split("right")
+        local is_portrait = (core.root_view and core.root_view.size and core.root_view.size.y > core.root_view.size.x)
+        local default_split = is_portrait and "down" or "right"
+        target_node = (#leaves >= 2) and leaves[2] or primary_node:split(default_split)
       end
 
       if target_node then

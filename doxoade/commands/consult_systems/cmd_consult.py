@@ -1,13 +1,67 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/consult_systems/cmd_consult.py
 """
-⚡ ZEUS — Roteador CLI do Subsistema Doxoade Consult.
+⚡ ZEUS — Roteador CLI do Subsistema Doxoade Consult (V25.0 Hybrid Bridge).
+Suporte universal a emissão em formato de Tabela Lua (--lua) e Markdown (--md)
+tanto para busca profunda FTS5 quanto para módulos locais do virtualenv.
+Compliance: ProDeNov 1.2.1 | PASC-6.1 | Limite < 50KB.
 """
+from __future__ import annotations
 import click
+import re
 from pathlib import Path
+from typing import List, Tuple
 from .consult_engine import ConsultEngine
 from .consult_renderer import ConsultRenderer
 from doxoade.commands.telemetry_systems import ShadowMatrix as ShadowProfiler
+
+
+def _escape_lua_str(s: str) -> str:
+    """Escapa strings com segurança para serialização em tabelas Lua."""
+    if not s:
+        return ""
+    return (
+        s.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "")
+        .replace("\t", " ")
+    )
+
+
+def _format_modules_lua_table(query: str, results: List[Tuple[str, str]]) -> str:
+    """Serializa resultados do pydoc.apropos em tabela Lua nativa para o Lite XL."""
+    lines = [
+        "return {",
+        f'  query = "{_escape_lua_str(query)}",',
+        f'  total = {len(results)},',
+        "  results = {",
+    ]
+    for mod_name, desc in results:
+        clean_desc = desc if desc else mod_name
+        lines.append("    {")
+        lines.append(f'      title = "{_escape_lua_str(mod_name)}",')
+        lines.append(f'      path = "{_escape_lua_str(mod_name)}",')
+        lines.append(f'      snippet = "{_escape_lua_str(clean_desc)}"')
+        lines.append("    },")
+    lines.append("  }")
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def _format_modules_markdown(query: str, results: List[Tuple[str, str]]) -> str:
+    """Serializa resultados em Markdown legível."""
+    lines = [
+        f"# 📚 Resultados da Busca: `{query}`",
+        f"> 📊 **Encontrados:** `{len(results)}` módulos disponíveis",
+        "---",
+        "",
+    ]
+    for mod_name, desc in results:
+        lines.append(f"### 📦 `{mod_name}`")
+        if desc:
+            lines.append(f"↳ {desc}\n")
+    return "\n".join(lines)
 
 
 @click.group("consult", help="📖 Doxoade Consult — Consultor offline de Python, módulos locais e fontes.")
@@ -18,9 +72,9 @@ from doxoade.commands.telemetry_systems import ShadowMatrix as ShadowProfiler
 def consult_group(ctx, source, raw, shadow_prof):
     """Grupo de comandos de consulta offline."""
     ctx.obj = {
-        "source": source, 
+        "source": source,
         "raw": raw,
-        "shadow_prof": shadow_prof
+        "shadow_prof": shadow_prof,
     }
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
@@ -54,67 +108,140 @@ def cmd_doc(ctx, term):
     if is_prof:
         profiler.render_hud()
 
+
 @consult_group.command("search", help="Busca por palavra-chave nos resumos de módulos locais ou docs HTML.")
 @click.argument("keyword", type=str)
-@click.option("--deep", "-d", is_flag=True, help="Busca profunda na documentação HTML indexada (requer 'doxoade consult index').")
+@click.option("--deep", "-d", is_flag=True, help="Busca profunda na documentação HTML indexada (FTS5).")
 @click.option("--md", is_flag=True, help="Emite o resultado diretamente em Markdown puro (para integração IDE).")
 @click.option("--lua", is_flag=True, help="Emite o resultado em formato de tabela Lua nativa para a IDE.")
 @click.option("--output", "-o", type=click.Path(dir_okay=False, writable=True), default=None, help="Grava o resultado diretamente no arquivo especificado em UTF-8.")
 @click.pass_context
 def cmd_search(ctx, keyword, deep, md, lua, output):
+    """Busca híbrida inteligente: consulta índice FTS5 e módulos locais do venv."""
     is_prof = ctx.obj.get("shadow_prof", False)
     with ShadowProfiler("consult_search", enabled=is_prof) as profiler:
         engine = ConsultEngine()
         renderer = ConsultRenderer()
-        if deep:
-            from .doc_indexer import DocIndexer
-            db_path = Path.home() / ".doxoade" / "consult_docs_fts5.db"
-            indexer = DocIndexer(db_path)
-            if lua:
-                lua_table = indexer.generate_search_lua_table(keyword, limit=20)
-                if output:
-                    Path(output).write_text(lua_table, encoding="utf-8")
-                else:
-                    click.echo(lua_table)
-                return
-            if md:
-                markdown_doc = indexer.generate_search_markdown(keyword, limit=20)
-                if output:
-                    Path(output).write_text(markdown_doc, encoding="utf-8")
-                else:
-                    click.echo(markdown_doc)
-                return
-            results = indexer.search(keyword, limit=15)
-            if results:
-                renderer.render_deep_search_results(keyword, results)
+
+        # 1. Tenta consulta no índice FTS5
+        fts_results = []
+        db_path = Path.home() / ".doxoade" / "consult_docs_fts5.db"
+        if db_path.exists():
+            try:
+                from .doc_indexer import DocIndexer
+                indexer = DocIndexer(db_path)
+                fts_results = indexer.search(keyword, limit=20)
+            except Exception:
+                fts_results = []
+
+        # 2. Busca de módulos locais do Python/venv (pydoc apropos)
+        mod_results = engine.search_modules(keyword)
+
+        # 3. Emissão para a IDE Lite XL (Tabela Lua)
+        if lua:
+            lines = [
+                "return {",
+                f'  query = "{_escape_lua_str(keyword)}",',
+                f'  total = {len(fts_results) if fts_results else len(mod_results)},',
+                "  results = {"
+            ]
+
+            if fts_results:
+                for path, title, snippet in fts_results:
+                    clean_snip = re.sub(r'[\x02\x03]', '', str(snippet or title or ''))
+                    lines.append("    {")
+                    lines.append(f'      title = "{_escape_lua_str(str(title or path))}",')
+                    lines.append(f'      path = "{_escape_lua_str(str(path))}",')
+                    lines.append(f'      snippet = "{_escape_lua_str(clean_snip)}"')
+                    lines.append("    },")
             else:
-                renderer.render_error(keyword, "Nenhum resultado na documentação HTML. Execute 'doxoade consult index' primeiro.")
+                for mod_name, desc in mod_results:
+                    clean_desc = desc if desc else mod_name
+                    lines.append("    {")
+                    lines.append(f'      title = "{_escape_lua_str(mod_name)}",')
+                    lines.append(f'      path = "{_escape_lua_str(mod_name)}",')
+                    lines.append(f'      snippet = "{_escape_lua_str(clean_desc)}"')
+                    lines.append("    },")
+
+            lines.append("  }")
+            lines.append("}")
+            out_content = "\n".join(lines)
+
+            if output:
+                out_p = Path(output)
+                out_p.parent.mkdir(parents=True, exist_ok=True)
+                out_p.write_text(out_content, encoding="utf-8")
+            else:
+                click.echo(out_content)
+            return
+
+        # 4. Emissão em Markdown (se solicitado)
+        if md:
+            if fts_results:
+                from .doc_indexer import DocIndexer
+                out_content = DocIndexer(db_path).generate_search_markdown(keyword, limit=20)
+            else:
+                out_content = _format_modules_markdown(keyword, mod_results)
+
+            if output:
+                out_p = Path(output)
+                out_p.parent.mkdir(parents=True, exist_ok=True)
+                out_p.write_text(out_content, encoding="utf-8")
+            else:
+                click.echo(out_content)
+            return
+
+        # 5. Renderização visual no terminal (Rich)
+        if deep and fts_results:
+            renderer.render_deep_search_results(keyword, fts_results)
+        elif mod_results:
+            renderer.render_search_results(keyword, mod_results)
+        elif fts_results:
+            renderer.render_deep_search_results(keyword, fts_results)
         else:
-            results = engine.search_modules(keyword)
-            if results:
-                renderer.render_search_results(keyword, results)
-            else:
-                renderer.render_error(keyword, "Nenhum módulo local encontrado. Tente 'doxoade consult search --deep " + keyword + "'.")
+            renderer.render_error(keyword, f"Nenhum resultado encontrado para '{keyword}'.")
+
     if is_prof:
         profiler.render_hud()
 
 
-@consult_group.command("read", help="Converte e exibe um documento HTML do Python em formato Markdown puro.")
+@consult_group.command("read", help="Converte e exibe um documento HTML ou docstring de módulo em Markdown puro.")
 @click.argument("doc_path", type=str)
 @click.option("--output", "-o", type=click.Path(dir_okay=False, writable=True), default=None, help="Grava o resultado diretamente no arquivo especificado em UTF-8.")
 def cmd_read(doc_path, output):
-    """Lê um arquivo de doc e exibe em Markdown para a IDE."""
-    from .doc_indexer import DocIndexer
+    """Lê um arquivo HTML ou docstring do objeto e gera Markdown para a IDE."""
+    md_content = None
+
+    # 1. Tenta ler via indexador de HTML
     db_path = Path.home() / ".doxoade" / "consult_docs_fts5.db"
-    indexer = DocIndexer(db_path)
-    md_content = indexer.read_doc_as_markdown(doc_path)
+    if db_path.exists():
+        try:
+            from .doc_indexer import DocIndexer
+            indexer = DocIndexer(db_path)
+            md_content = indexer.read_doc_as_markdown(doc_path)
+        except Exception:
+            md_content = None
+
+    # 2. Se não era HTML, tenta resolver como módulo ou objeto Python
+    if not md_content:
+        engine = ConsultEngine()
+        obj = engine.resolve_object(doc_path)
+        if obj:
+            doc_text = engine.get_docstring(obj)
+            src_text = engine.get_source(obj)
+            md_content = f"# 📖 `{doc_path}`\n\n```python\n{doc_text}\n```\n"
+            if src_text:
+                md_content += f"\n## 💻 Código Fonte\n\n```python\n{src_text}\n```\n"
+
     if md_content:
         if output:
-            Path(output).write_text(md_content, encoding="utf-8")
+            out_p = Path(output)
+            out_p.parent.mkdir(parents=True, exist_ok=True)
+            out_p.write_text(md_content, encoding="utf-8")
         else:
             click.echo(md_content)
     else:
-        click.secho(f"Documento não localizado: {doc_path}", fg="red")
+        click.secho(f"Documento ou módulo não localizado: {doc_path}", fg="red")
 
 
 @consult_group.command("index", help="🗃️ Indexa a documentação HTML local do Python para busca profunda (FTS5).")

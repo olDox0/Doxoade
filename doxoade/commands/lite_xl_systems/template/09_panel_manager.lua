@@ -28,7 +28,8 @@ function PanelSlots.get_slot_node(slot_type)
     if #leaves >= 2 then
       return leaves[#leaves]
     elseif #leaves == 1 then
-      return leaves[1]:split("right")
+      local is_portrait = (core.root_view and core.root_view.size and core.root_view.size.y > core.root_view.size.x)
+      return leaves[1]:split(is_portrait and "down" or "right")
     end
   elseif slot_type == "bottom" then
     local active_node = core.root_view:get_active_node()

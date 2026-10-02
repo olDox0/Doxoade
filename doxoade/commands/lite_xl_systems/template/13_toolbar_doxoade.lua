@@ -50,20 +50,20 @@ core.add_thread(function()
     local COLOR_SYNC_ON_BG   = { 25, 123, 63, 255 }
     local COLOR_SYNC_OFF_BG  = { 45, 45, 48, 255 }
 
-    register_status_item(
-      "doxoade:badge",
-      StatusView.Item.LEFT,
-      function()
-        return {
-          ACCENT_GREEN, "⚡ DOXOADE ",
-          DIVIDER_COLOR, "| "
-        }
-      end,
-      function()
-        command.perform("doxoade:open-pantheon")
-      end,
-      1
-    )
+    -- register_status_item(
+    --   "doxoade:badge",
+    --   StatusView.Item.LEFT,
+    --   function()
+    --     return {
+    --       ACCENT_GREEN, "⚡ DOXOADE ",
+    --       DIVIDER_COLOR, "| "
+    --     }
+    --   end,
+    --   function()
+    --     command.perform("doxoade:open-pantheon")
+    --   end,
+    --   1
+    -- )
 
     register_status_item(
       "doxoade:selection_counter",
@@ -89,7 +89,7 @@ core.add_thread(function()
         return {}
       end,
       nil,
-      2
+      1
     )
 
     register_status_item(
@@ -114,7 +114,7 @@ core.add_thread(function()
         config.draw_indent_guides = not config.draw_indent_guides
         core.redraw = true
       end,
-      3
+      2
     )
 
     register_status_item(
@@ -157,7 +157,7 @@ core.add_thread(function()
       function()
         command.perform("doxoade:trigger-active-check")
       end,
-      4
+      3
     )
 
     if rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") == nil then
@@ -178,7 +178,7 @@ core.add_thread(function()
       function()
         command.perform("doxoade:note-status-click")
       end,
-      5
+      4
     )
 
     if StatusView and StatusView.draw then
@@ -235,7 +235,7 @@ core.add_thread(function()
       function()
         command.perform("doxoade:open-search-docs-hub")
       end,
-      7
+      5
     )
 
     register_status_item(
@@ -245,7 +245,7 @@ core.add_thread(function()
         return { { 56, 189, 248, 255 }, "Terminal/Canvas ", DIVIDER_COLOR, "| " }
       end,
       function() command.perform("doxoade:toggle-bottom-shelf") end,
-      8
+      6
     )
   end)
 end)

@@ -237,13 +237,14 @@ end
 if rencache and type(rencache.draw_rect) == "function" then
     local _orig = rencache.draw_rect
     rencache.draw_rect = function(x, y, w, h, color)
+        if not x or not y or not w or not h then return end
         return _orig(x, y, w, h, _validate_draw_color(color))
     end
 end
-
 if native_renderer and type(native_renderer.draw_rect) == "function" then
     local _orig = native_renderer.draw_rect
     native_renderer.draw_rect = function(x, y, w, h, color)
+        if not x or not y or not w or not h then return end
         return _orig(x, y, w, h, _validate_draw_color(color))
     end
 end

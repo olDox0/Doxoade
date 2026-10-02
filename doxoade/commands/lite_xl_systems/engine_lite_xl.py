@@ -33,7 +33,6 @@ NOTEPADPP_CANONICAL_KEYS = {
     "shift+f3": "find-replace:previous-find",
     "ctrl+g": "doc:go-to-line",
     "ctrl+d": "doc:duplicate-lines",
-    "ctrl+l": "doc:delete-lines",
     "ctrl+q": "doc:toggle-line-comments",
     "ctrl+tab": "root:switch-to-next-tab",
     "ctrl+shift+tab": "root:switch-to-previous-tab",
@@ -42,10 +41,13 @@ NOTEPADPP_CANONICAL_KEYS = {
     "ctrl+alt+y": "doxoade:toggle-litexl-in-tree",
     "ctrl+alt+o": "treeview:add-project-folder",
     "ctrl+alt+r": "treeview:remove-project-folder",
-    "ctrl+shift+l": "doxoade:open-log",
     "ctrl+alt+c": "doxoade:copy-path-menu",
     "f1": "doxoade:show-shortcuts-cheat-sheet",
 }
+
+#    "ctrl+l": "doc:delete-lines",
+#    "ctrl+shift+l": "doxoade:open-log",
+
 
 KNOWN_LITEXL_MODULES = {
     "core": "Core Engine",

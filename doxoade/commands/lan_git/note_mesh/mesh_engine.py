@@ -101,6 +101,27 @@ class MeshSyncHTTPHandler(BaseHTTPRequestHandler):
 
             new_hash = hashlib.sha256(body).hexdigest()
 
+            if rel_path == "shared_notes.md":
+                # 1. Atualiza nota global
+                self.global_notes_file.write_bytes(body)
+                self._file_mtimes[str(self.global_notes_file)] = self.global_notes_file.stat().st_mtime
+                self._file_sent_hashes["shared_notes.md"] = hashlib.sha256(body).hexdigest()
+
+                # 2. Atualiza nota local do projeto se existir
+                if self.project_notes_file != self.global_notes_file and self.project_notes_file.exists():
+                    self.project_notes_file.write_bytes(body)
+                    self._file_mtimes[str(self.project_notes_file)] = self.project_notes_file.stat().st_mtime
+            else:
+                target_dest = self.project_notes_dir / Path(rel_path).name
+                target_dest.parent.mkdir(parents=True, exist_ok=True)
+                target_dest.write_bytes(body)
+                self._file_mtimes[str(target_dest)] = target_dest.stat().st_mtime
+                self._file_sent_hashes[f"note/{Path(rel_path).name}"] = hashlib.sha256(body).hexdigest()
+
+            self.last_sync_time = time.time()
+            self.log(f"✅ [AUTO-PULL OK] {rel_path} atualizado de {peer_ip} ({len(body)} bytes).")
+            self._update_state_file("connected")
+
             if clean_rel == "shared_notes.md":
                 self.engine.global_notes_file.write_bytes(body)
                 self.engine._file_mtimes[str(self.engine.global_notes_file)] = self.engine.global_notes_file.stat().st_mtime
@@ -411,9 +432,15 @@ class NoteMeshEngine:
                     body = resp.read()
 
                     if rel_path == "shared_notes.md":
+                        # 1. Atualiza nota global
                         self.global_notes_file.write_bytes(body)
                         self._file_mtimes[str(self.global_notes_file)] = self.global_notes_file.stat().st_mtime
                         self._file_sent_hashes["shared_notes.md"] = hashlib.sha256(body).hexdigest()
+
+                        # 2. Atualiza nota local do projeto se existir
+                        if self.project_notes_file != self.global_notes_file and self.project_notes_file.exists():
+                            self.project_notes_file.write_bytes(body)
+                            self._file_mtimes[str(self.project_notes_file)] = self.project_notes_file.stat().st_mtime
                     else:
                         target_dest = self.project_notes_dir / Path(rel_path).name
                         target_dest.parent.mkdir(parents=True, exist_ok=True)
@@ -424,6 +451,8 @@ class NoteMeshEngine:
                     self.last_sync_time = time.time()
                     self.log(f"✅ [AUTO-PULL OK] {rel_path} atualizado de {peer_ip} ({len(body)} bytes).")
                     self._update_state_file("connected")
+
+                    
         except Exception as e:
             self.log(f"⚠️ [AUTO-PULL FALHA] Não foi possível puxar de {peer_ip}: {e}")
 

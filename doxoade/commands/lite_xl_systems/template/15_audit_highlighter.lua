@@ -402,7 +402,7 @@ command.add("core.docview", {
 
   ["doxoade:prev-audit-incident"] = function()
     local doc = core.active_view and core.active_view.doc
-    if not doc or not is_target_doc(doc) then return end
+    if not doc or type(doc.get_selection) ~= "function" or not is_target_doc(doc) then return end
     local cur_line = doc:get_selection(true)
     local target_line = nil
 

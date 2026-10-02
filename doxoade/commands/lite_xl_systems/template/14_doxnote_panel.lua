@@ -218,30 +218,25 @@ if core and core.add_thread and not rawget(_G, "_DOXOADE_NOTE_THREAD_ACTIVE") th
                   if not last_m then
                     _last_synced_mtimes[doc.filename] = finfo.mtime
                   elseif finfo.mtime > last_m then
-                    local is_dirty = false
-                    if doc.is_dirty then
-                      local ok, d = pcall(doc.is_dirty, doc)
-                      if ok and d then is_dirty = true end
-                    end
-                    if not is_dirty then
-                      _last_synced_mtimes[doc.filename] = finfo.mtime
-                      local f = io.open(doc.filename, "r")
-                      if f then
-                        local content = f:read("*a")
-                        f:close()
-                        if content and content ~= "" then
-                          local l1, c1, l2, c2 = 1, 1, 1, 1
-                          if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
-                          doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
-                          doc:insert(1, 1, content)
-                          if doc.clean then doc:clean() end
-                          if doc.set_selection then pcall(doc.set_selection, doc, l1, c1, l2, c2) end
-                          core.redraw = true
-                          if core.log then core.log("⚡ [DOXNOTE] Nota atualizada pela malha.") end
-                        end
+                    _last_synced_mtimes[doc.filename] = finfo.mtime
+                    local f = io.open(doc.filename, "r")
+                    if f then
+                      local content = f:read("*a")
+                      f:close()
+                      if content and content ~= "" then
+                        -- Salva cursor atual
+                        local l1, c1, l2, c2 = 1, 1, 1, 1
+                        if doc.get_selection then l1, c1, l2, c2 = doc:get_selection(true) end
+                        
+                        -- Atualiza o buffer na tela atomicamente
+                        doc:remove(1, 1, #doc.lines, #doc.lines[#doc.lines] + 1)
+                        doc:insert(1, 1, content)
+                        if doc.clean then doc:clean() end
+                        if doc.set_selection then pcall(doc.set_selection, doc, l1, c1, l2, c2) end
+                        
+                        core.redraw = true
+                        if core.log then core.log("⚡ [DOXNOTE] Nota recarregada em tempo real da malha!") end
                       end
-                    else
-                      if core.log then core.log("⚠️ [DOXNOTE] Atualização da rede em espera (Pressione F5 para recarregar).") end
                     end
                   end
                 end
