@@ -1,4 +1,4 @@
-# doxoade/doxoade/commands/vulcan_cmd_tools.py
+# doxoade/doxoade/commands/vulcan_cmd/vulcan_cmd_tools.py
 """
 Subcomandos de análise e otimização do Vulcan.
 
@@ -13,7 +13,7 @@ import re
 import click
 from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
-from .vulcan_systems.vulcan_cmd import _SIMD_AVAILABLE, _OBJREDUCE_AVAILABLE
+from doxoade.commands.vulcan_systems.vulcan_cmd import _SIMD_AVAILABLE, _OBJREDUCE_AVAILABLE
 from doxoade.tools.filesystem import _find_project_root
 from doxoade.commands.vulcan_systems.vulcan_cmd import _print_vulcan_forensic
 try:

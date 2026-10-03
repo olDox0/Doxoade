@@ -15,6 +15,21 @@ from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.filesystem import _find_project_root
 from doxoade.tools.soteria_systems.soteria_engine import SoteriaForensic
+from doxoade.commands.vulcan_cmd.vulcan_cmd_bootstrap import vulcan_module
+from doxoade.commands.vulcan_cmd.vulcan_cmd_bootstrap import vulcan_probe
+from doxoade.commands.vulcan_cmd.vulcan_cmd_bootstrap import vulcan_verify
+from doxoade.commands.vulcan_cmd.vulcan_cmd_bootstrap import vulcan_telemetry_bridge
+from doxoade.commands.vulcan_cmd.vulcan_cmd_data import vulcan_data
+from doxoade.commands.vulcan_cmd.vulcan_cmd_forge import ignite
+from doxoade.commands.vulcan_cmd.vulcan_cmd_forge import vulcan_regression
+from doxoade.commands.vulcan_cmd.vulcan_cmd_forge import vulcan_lib
+from doxoade.commands.vulcan_cmd.vulcan_cmd_forge import vulcan_benchmark
+from doxoade.commands.vulcan_cmd.vulcan_cmd_forge import vulcan_pitstop
+from doxoade.commands.vulcan_cmd.vulcan_cmd_lazy import vulcan_lazy
+from doxoade.commands.vulcan_cmd.vulcan_cmd_tools import vulcan_alloc
+from doxoade.commands.vulcan_cmd.vulcan_cmd_tools import vulcan_simd
+from doxoade.commands.vulcan_cmd.vulcan_cmd_tools import vulcan_opt
+from doxoade.commands.vulcan_cmd.vulcan_cmd_tools import opt_bench
 __version__ = '86.0 Omega (modular split)'
 try:
     pass  # [DOX-UNUSED] from doxoade.tools.vulcan.simd_detector import detect
@@ -198,11 +213,6 @@ def _analyze_forge_quality(code):
             click.echo(f"   {Fore.YELLOW}⚠ Math: Checagem de erro Python ativa (Lento).{Style.RESET_ALL}")
 
 def _register_subcommands():
-    from doxoade.commands.vulcan_cmd_forge import ignite, vulcan_regression, vulcan_lib, vulcan_benchmark, vulcan_pitstop
-    from doxoade.commands.vulcan_cmd_tools import vulcan_alloc, vulcan_simd, vulcan_opt, opt_bench
-    from doxoade.commands.vulcan_cmd_bootstrap import vulcan_module, vulcan_probe, vulcan_verify, vulcan_telemetry_bridge
-    from doxoade.commands.vulcan_cmd_lazy import vulcan_lazy
-    from doxoade.commands.vulcan_cmd_data import vulcan_data
     for cmd in (ignite, vulcan_regression, vulcan_lib, vulcan_benchmark, vulcan_pitstop,
                 vulcan_alloc, vulcan_simd, vulcan_opt, opt_bench, vulcan_module,
                 vulcan_probe, vulcan_verify, vulcan_telemetry_bridge, vulcan_lazy,

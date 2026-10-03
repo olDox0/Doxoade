@@ -48,7 +48,7 @@ class HBC6Finder(importlib.abc.MetaPathFinder):
             'doxoade.tools.compress_utils',
             'doxoade.tools.colors_command',
             'doxoade.commands.refactor_systems.refactor_syntax',
-            'doxoade.commands.vulcan_cmd_lazy',
+            'doxoade.commands.vulcan_cmd.vulcan_cmd_lazy',
             'doxoade.commands.check_systems.fixer',
             'doxoade.commands.intelligence_utils',
             'doxoade.commands.ganesha_advisor_standalone',

@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from doxoade.tools.vulcan.cpu_flags import simd_compile_flags
 from .simd_detector import SIMDCapabilities, detect as detect_simd
+from doxoade.commands.vulcan_cmd.vulcan_cmd_forge import ignite
 _BEST_TO_CPU_LEVEL: dict[str, str] = {'avx512f': 'AVX512', 'avx2': 'AVX2', 'avx': 'AVX', 'sse4.2': 'SSE4', 'sse4.1': 'SSE4', 'sse2': 'SSE2', 'neon': 'SCALAR', 'none': 'SCALAR'}
 
 @dataclass

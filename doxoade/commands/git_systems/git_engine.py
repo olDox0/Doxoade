@@ -50,11 +50,6 @@ class GitEngine:
 
     def autopilot(self, prefer: Optional[str] = None, auto_push: bool = True) -> Dict[str, Any]:
         station = self.get_station_name()
-        
-        # 🩺 Auto-Cura de branches temporárias de LAN
-        healed_lan_branch, lan_msg = self.normalize_transient_branches()
-        cleaned_lan_branches = self.cleanup_transient_branches()
-        
         branch = self.get_current_branch()
         remote = 'origin'
         remote_ref = f"{remote}/{branch}"
@@ -62,33 +57,36 @@ class GitEngine:
         self.clean_transient_build_artifacts()
         snapshot_dir = self.create_safety_snapshot(reason="autopilot")
         healed_merge = self.heal_stuck_merge()
-        self.fetch_remote(remote=remote, branch=branch)
-        
-        rev_count_raw = _run_git_command(['rev-list', '--left-right', '--count', f'HEAD...{remote_ref}'], capture_output=True, silent_fail=True, cwd=str(self.root)) or '0\t0'
-        parts = rev_count_raw.strip().split()
-        ahead = int(parts[0]) if len(parts) > 0 and parts[0].isdigit() else 0
-        behind = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
-        
-        matrix = self.detect_collisions(remote=remote, branch=branch)
         is_dirty = self.is_dirty()
-        
+        matrix = self.detect_collisions(remote=remote, branch=branch)
+
+        # 1. INICIALIZAÇÃO PRECOCE: Garante que 'report' sempre exista, evitando UnboundLocalError
         report = {
             'station': station,
             'branch': branch,
-            'ahead': ahead,
-            'behind': behind,
+            'ahead': 0,
+            'behind': 0,
             'is_dirty': is_dirty,
             'collisions': matrix['collisions'],
             'healed_merge': healed_merge,
-            'healed_lan_branch': healed_lan_branch,
-            'lan_msg': lan_msg,
-            'cleaned_lan_branches': cleaned_lan_branches,
             'snapshot': str(snapshot_dir) if snapshot_dir else None,
             'status': 'SYNCED',
             'action_taken': ''
         }
 
-        # CENÁRIO 1: Conflito Real no mesmo arquivo
+        # 2. 🛡️ GUARDA DE REDE DOXOADE: Interrompe o fluxo se o servidor estiver fora do ar
+        fetch_ok, fetch_msg = self.fetch_remote(remote=remote, branch=branch)
+        if not fetch_ok:
+            report['status'] = 'NETWORK_ERROR'
+            report['action_taken'] = f"⚠️ Servidor inacessível. Impossível sincronizar agora. Detalhes: {fetch_msg}"
+            return report
+
+        # 3. LÓGICA DE SINCRONIZAÇÃO (Só executa se o fetch teve sucesso)
+        rev_count_raw = _run_git_command(['rev-list', '--left-right', '--count', f'HEAD...{remote_ref}'], capture_output=True, silent_fail=True, cwd=str(self.root)) or '0\t0'
+        parts = rev_count_raw.strip().split()
+        report['ahead'] = int(parts[0]) if len(parts) > 0 and parts[0].isdigit() else 0
+        report['behind'] = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+
         if matrix['collisions']:
             report['status'] = 'CONFLICT'
             if prefer == 'remote':
@@ -99,31 +97,28 @@ class GitEngine:
                 report['action_taken'] = "Conflito resolvido: alterações locais preservadas intactas."
             return report
 
-        # CENÁRIO 2: Servidor tem atualizações (Behind)
-        if behind > 0:
+        if report['behind'] > 0:
             sync_res = self.smart_pull_sync(remote=remote, branch=branch, apply_changes=True)
             if sync_res['success']:
                 report['status'] = 'PULLED'
-                report['action_taken'] = f"Recebidos {behind} commit(s) do servidor com sucesso."
+                report['action_taken'] = f"Recebidos {report['behind']} commit(s) do servidor com sucesso."
             else:
                 report['status'] = 'ERROR'
                 report['action_taken'] = sync_res.get('action_summary', 'Falha no pull automático.')
             return report
 
-        # CENÁRIO 3: Estação tem novos commits locais (Ahead)
-        if ahead > 0:
+        if report['ahead'] > 0:
             report['status'] = 'AHEAD'
             if auto_push:
                 push_ok = _run_git_command(['push', remote, branch], capture_output=True, cwd=str(self.root))
                 if push_ok:
-                    report['action_taken'] = f"Enviados {ahead} commit(s) desta estação para o servidor."
+                    report['action_taken'] = f"Enviados {report['ahead']} commit(s) desta estação para o servidor."
                 else:
                     report['action_taken'] = "Falha ao enviar commits para o servidor."
             else:
-                report['action_taken'] = f"Você tem {ahead} commit(s) pronto(s) para subir."
+                report['action_taken'] = f"Você tem {report['ahead']} commit(s) pronto(s) para subir."
             return report
 
-        # CENÁRIO 4: Tudo em dia
         report['action_taken'] = "Repositório 100% atualizado e sincronizado."
         return report
 
@@ -260,15 +255,31 @@ class GitEngine:
     def fetch_remote(self, remote: str = 'origin', branch: Optional[str] = None) -> Tuple[bool, str]:
         cmd = ['fetch', remote]
         if branch:
-            # 🔧 FIX MA'AT: 'git fetch origin main' não atualiza 'origin/main' no Git.
-            # Precisamos forçar o refspec para atualizar a referência remota local.
+            # Mantendo o refspec que corrigimos anteriormente para atualizar o origin/main
             cmd.extend([f'+{branch}:refs/remotes/{remote}/{branch}'])
-        
+            
         try:
-            out = _run_git_command(cmd, capture_output=True, cwd=str(self.root))
-            return True, (out or "Fetch concluído com sucesso.")
+            # Precisamos capturar o stderr para saber se foi erro de rede
+            env = os.environ.copy()
+            env['PYTHONIOENCODING'] = 'utf-8'
+            result = subprocess.run(
+                ['git'] + cmd,
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                env=env,
+                cwd=str(self.root)
+            )
+            
+            if result.returncode != 0:
+                # O Git falhou (provavelmente rede offline ou auth)
+                return False, result.stderr.strip() or "Falha desconhecida no fetch."
+                
+            return True, (result.stdout.strip() or "Fetch concluído com sucesso.")
+            
         except Exception as e:
-            return False, f"Falha no git fetch: {e}"
+            return False, f"Exceção no git fetch: {e}"
 
     def detect_collisions(self, remote: str = 'origin', branch: Optional[str] = None) -> Dict[str, Any]:
         """Gera a Matriz de Colisão comparando working tree local com o remote."""

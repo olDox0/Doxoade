@@ -1,3 +1,4 @@
+from doxoade.commands.vulcan_cmd.vulcan_cmd_forge import ignite
 # doxoade/tools/hermes_systems/hermes_preloader.py
 class HermesPreloader:
     def __init__(self, project_root: str):

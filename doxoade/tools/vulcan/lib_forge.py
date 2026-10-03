@@ -23,6 +23,7 @@ import os
 import concurrent.futures
 import threading
 from pathlib import Path
+from doxoade.commands.vulcan_cmd.vulcan_cmd_forge import ignite
 _thread_local = threading.local()
 
 class LibForge:

@@ -1,7 +1,8 @@
 # doxoade/doxoade/commands/refactor_systems/refactor_utils.py
 from __future__ import annotations
 import ast
-# [DOX-UNUSED] import os
+import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator
@@ -70,31 +71,91 @@ def parse_ast(path: Path) -> ast.AST | None:
     except Exception:
         return None
 
-def write_text_safe(path: Path, new_text: str, force: bool = False) -> bool:
-    """🛡️ Ma'at Write Guard: preserva o EOL dominante do original;
-    skip se a mudança for apenas ruído de EOL/whitespace."""
+def write_text_safe(path: Path, new_text: str, force: bool = False, preserve_whitespace: bool = False) -> bool:
+    """🛡️ Ma'at Write Guard Robusto:
+    - Escrita atômica (impede corrupção em crash/kill).
+    - Preserva EOL dominante do original (ou LF para novos).
+    - Cria diretórios pais caso não existam.
+    - Evita descartes acidentais de correções de whitespace intencionais.
+    """
+    path = path.resolve()
+    old_raw = b''
+    if path.exists():
+        try:
+            old_raw = path.read_bytes()
+        except OSError:
+            old_raw = b''
+
+    # Detecção de encoding tolerante
+    encoding = 'utf-8'
+    old_text = ''
     try:
-        old_raw = path.read_bytes()
-    except OSError:
-        old_raw = b''
-    old_text = old_raw.decode('utf-8', errors='ignore')
+        old_text = old_raw.decode('utf-8')
+    except UnicodeDecodeError:
+        try:
+            old_text = old_raw.decode('utf-8-sig')
+            encoding = 'utf-8-sig'
+        except UnicodeDecodeError:
+            old_text = old_raw.decode('latin-1', errors='replace')
+            encoding = 'latin-1'
 
-    def _norm(t: str) -> str:
-        ls = [l.rstrip() for l in t.replace('\r\n', '\n').split('\n')]
-        while ls and ls[-1] == '':
-            ls.pop()
-        return '\n'.join(ls)
+    # Se o conteúdo exato já for idêntico em bytes, nada a fazer
+    if not force and old_raw:
+        # Normalização canônica para testar se houve mudança real
+        if not preserve_whitespace:
+            def _norm(t: str) -> str:
+                ls = [l.rstrip() for l in t.replace('\r\n', '\n').split('\n')]
+                while ls and ls[-1] == '':
+                    ls.pop()
+                return '\n'.join(ls)
+            
+            if _norm(old_text) == _norm(new_text):
+                return False
+        elif old_text == new_text:
+            return False
 
-    if old_text and not force and _norm(old_text) == _norm(new_text):
-        return False                      # puro ruído → não toca
+    # Detecção e ajuste de EOL
     crlf = old_text.count('\r\n')
     lf = old_text.count('\n') - crlf
+    
+    # Padroniza temporariamente para LF e depois aplica o dominante
+    normalized = new_text.replace('\r\n', '\n').replace('\r', '\n')
     if crlf > lf:
-        new_text = new_text.replace('\r\n', '\n').replace('\n', '\r\n')
+        final_text = normalized.replace('\n', '\r\n')
     else:
-        new_text = new_text.replace('\r\n', '\n')
-    path.write_bytes(new_text.encode('utf-8'))
-    return True
+        final_text = normalized
+
+    encoded_bytes = final_text.encode(encoding)
+    if not force and encoded_bytes == old_raw:
+        return False
+
+    # Garante que o diretório pai existe
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Gravação atômica via tempfile no mesmo filesystem
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='wb',
+            dir=str(path.parent),
+            delete=False,
+            prefix=f'.{path.name}.',
+            suffix='.tmp'
+        ) as tmp:
+            tmp.write(encoded_bytes)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+            tmp_path = Path(tmp.name)
+
+        os.replace(tmp_path, path)
+        return True
+    except Exception:
+        if tmp_path and tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+        raise
 
 class _FunctionCollector(ast.NodeVisitor):
 

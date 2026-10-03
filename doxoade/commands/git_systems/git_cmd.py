@@ -48,8 +48,13 @@ def git_auto(ctx, push, prefer):
     if res.get('cleaned_lan_branches'):
         branches_str = ", ".join(res['cleaned_lan_branches'])
         click.echo(f"  {Fore.GREEN}✔ [AUTO-HEAL] Branchs temporárias de LAN removidas: {branches_str}{Style.RESET_ALL}")
-        
-    if res['status'] == 'CONFLICT':
+
+    if res['status'] == 'NETWORK_ERROR':
+        click.echo(f"\n{Fore.RED}{Style.BRIGHT}✖ [REDE OFFLINE] {res['action_taken']}{Style.RESET_ALL}\n")
+        click.echo(f"{Fore.YELLOW}💡 Dica: Verifique sua conexão com o servidor Git ou use 'git pull' nativo para debug.{Style.RESET_ALL}")
+        return
+    elif res['status'] == 'CONFLICT':
+#    if res['status'] == 'CONFLICT':
         from doxoade.commands.git_systems.git_merge import merge as run_merge
         ctx.invoke(run_merge)
         return

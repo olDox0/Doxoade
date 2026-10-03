@@ -1,4 +1,4 @@
-# doxoade/doxoade/commands/vulcan_cmd_lazy.py
+# doxoade/doxoade/commands/vulcan_cmd/vulcan_cmd_lazy.py
 """
 Subcomandos de gerenciamento do lazy-loader Vulcan.
 

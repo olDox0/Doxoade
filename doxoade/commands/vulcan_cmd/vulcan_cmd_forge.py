@@ -1,4 +1,4 @@
-# doxoade/doxoade/commands/vulcan_cmd_forge.py
+# doxoade/doxoade/commands/vulcan_cmd/vulcan_cmd_forge.py
 """
 Subcomandos de compilação/forja do Vulcan.
 
@@ -15,7 +15,7 @@ import click
 from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.vulcan.site_packages import site_packages_dirs_for_listing
-from .vulcan_systems.vulcan_cmd import _SIMD_AVAILABLE, _OBJREDUCE_AVAILABLE
+from doxoade.commands.vulcan_systems.vulcan_cmd import _SIMD_AVAILABLE, _OBJREDUCE_AVAILABLE
 from doxoade.tools.filesystem import _find_project_root
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 from doxoade.commands.vulcan_systems.vulcan_cmd import _simd_context_or_none
