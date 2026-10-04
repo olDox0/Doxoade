@@ -311,7 +311,7 @@ local core = {
     map = {
       ["core:open-file"] = { action = function() end },
       ["core:find-file"] = { action = function() end },
-      ["doc:save"] = { action = function() end },
+      ["doxoade.commands.git_ystems.save:save"] = { action = function() end },
       ["doc:save-all"] = { action = function() end },
       ["doc:duplicate-lines"] = { action = function() end },
       ["doc:delete-lines"] = { action = function() end },

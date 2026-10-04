@@ -1,4 +1,4 @@
-# doxoade/doxoade/commands/save.py
+# doxoade/doxoade/commands/git_ystems/save.py
 """
 Comando Save - v80.1 Gold.
 Gatekeeper Ma'at (Produção) & Anúbis (Infraestrutura).
@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Tuple, Set
 from rich.console import Console
 
-from .check import run_check_logic
+from doxoade.commands.check import run_check_logic
 from doxoade.core_database import get_db_connection
 from doxoade.tools.display    import _present_results
 from doxoade.tools.doxcolors  import Fore
@@ -184,7 +184,7 @@ def save(ctx, message, local, archives, remove_commit, branch_target, merge_targ
             message = f"feat: atualizações de rotina{tracker_text}"
 
     if remove_commit or archives:
-        from .git_systems.git_archivist import GitArchivist
+        from doxoade.commands.git_systems.git_archivist import GitArchivist
         archivist = GitArchivist(project_path)
         if remove_commit:
             if click.confirm(f'{Fore.RED}⚠️ APAGAR commit {remove_commit}?'):
@@ -308,7 +308,7 @@ def save(ctx, message, local, archives, remove_commit, branch_target, merge_targ
         if staged_prod and (not force):
             console.print("   > [MA'AT] Julgando integridade da produção...")
             results = run_check_logic(path='.', fix=False, fast=True, target_files=staged_prod, state=None)
-            from .audit_systems.maat_engine import MaatEngine
+            from doxoade.commands.audit_systems.maat_engine import MaatEngine
             maat = MaatEngine(project_path)
             is_stable, maat_findings = maat.run_full_audit(staged_prod)
             blocking = [f for f in results.get('findings', []) if f['severity'] in ['CRITICAL', 'ERROR']]

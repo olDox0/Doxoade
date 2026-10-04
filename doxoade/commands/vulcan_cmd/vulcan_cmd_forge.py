@@ -23,6 +23,7 @@ from doxoade.commands.vulcan_cmd.vulcan_command import _NullContext
 from doxoade.commands.vulcan_cmd.vulcan_command import _sigint_handler
 from doxoade.commands.vulcan_cmd.vulcan_command import _print_vulcan_forensic
 from doxoade.commands.vulcan_cmd.vulcan_command import _patch_vulcan_forge
+from doxoade.commands.git_ystems.save import save
 try:
     from doxoade.tools.vulcan.simd_compiler import SIMDContext, SIMDEnvironment, estimate_gain
 except ImportError:

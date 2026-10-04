@@ -252,34 +252,16 @@ class GitEngine:
         status = _run_git_command(['status', '--porcelain'], capture_output=True, cwd=str(self.root))
         return bool(status and status.strip())
 
-    def fetch_remote(self, remote: str = 'origin', branch: Optional[str] = None) -> Tuple[bool, str]:
-        cmd = ['fetch', remote]
+    def fetch_remote(self, remote: str = "origin", branch: Optional[str] = None) -> Tuple[bool, str]:
+        """Garante o download de metadados do remote com prune de branches mortas."""
+        cmd = ['fetch', remote, '--prune']
         if branch:
-            # Mantendo o refspec que corrigimos anteriormente para atualizar o origin/main
-            cmd.extend([f'+{branch}:refs/remotes/{remote}/{branch}'])
-            
-        try:
-            # Precisamos capturar o stderr para saber se foi erro de rede
-            env = os.environ.copy()
-            env['PYTHONIOENCODING'] = 'utf-8'
-            result = subprocess.run(
-                ['git'] + cmd,
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='replace',
-                env=env,
-                cwd=str(self.root)
-            )
-            
-            if result.returncode != 0:
-                # O Git falhou (provavelmente rede offline ou auth)
-                return False, result.stderr.strip() or "Falha desconhecida no fetch."
-                
-            return True, (result.stdout.strip() or "Fetch concluído com sucesso.")
-            
-        except Exception as e:
-            return False, f"Exceção no git fetch: {e}"
+            cmd.append(branch)
+        
+        res = _run_git_command(cmd, capture_output=True, cwd=str(self.root))
+        if res is not None:
+            return (True, "Fetch realizado com sucesso.")
+        return (False, f"Falha ao executar fetch em {remote}.")
 
     def detect_collisions(self, remote: str = 'origin', branch: Optional[str] = None) -> Dict[str, Any]:
         """Gera a Matriz de Colisão comparando working tree local com o remote."""

@@ -30,6 +30,7 @@ from doxoade.commands.vulcan_cmd.vulcan_cmd_tools import vulcan_alloc
 from doxoade.commands.vulcan_cmd.vulcan_cmd_tools import vulcan_simd
 from doxoade.commands.vulcan_cmd.vulcan_cmd_tools import vulcan_opt
 from doxoade.commands.vulcan_cmd.vulcan_cmd_tools import opt_bench
+from doxoade.commands.git_ystems.save import save
 __version__ = '86.0 Omega (modular split)'
 try:
     pass  # [DOX-UNUSED] from doxoade.tools.vulcan.simd_detector import detect

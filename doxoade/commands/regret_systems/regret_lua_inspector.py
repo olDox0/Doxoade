@@ -269,7 +269,7 @@ class RegretLuaInspector:
 
     KNOWN_LITEXL_COMMANDS: Set[str] = {
         "core:open-file", "core:new-doc", "core:restart", "core:quit",
-        "doc:save", "doc:save-as", "doc:save-all", "doc:undo", "doc:redo",
+        "doxoade.commands.git_ystems.save:save", "doc:save-as", "doc:save-all", "doc:undo", "doc:redo",
         "doc:cut", "doc:copy", "doc:paste", "doc:select-all",
         "doc:delete-lines", "doc:duplicate-lines", "doc:toggle-line-comments",
         "doc:go-to-line", "doc:unindent", "doc:indent",

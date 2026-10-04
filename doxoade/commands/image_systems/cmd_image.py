@@ -9,6 +9,7 @@ from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.image_systems.image_manager import ImageAssetManager
 from doxoade.tools.image_systems.thumbnail_engine import ThumbnailEngine
+from doxoade.commands.git_ystems.save import save
 
 
 @click.group("image", help="🖼️ Gestão de imagens, capturas e sidecars binários (CAS).")

@@ -903,7 +903,7 @@ class {class_name}(click.Group):
             'check': 'doxoade.commands.check:check',
             'flow': 'doxoade.commands.run:flow_command',
             'horus': 'doxoade.commands.horus_cmd:horus_group',
-            'save': 'doxoade.commands.save:save',
+            'save': 'doxoade.commands.git_ystems.save:save',
             'sync': 'doxoade.commands.git_systems.git_workflow:sync',
             'mk': 'doxoade.commands.utils:mk',
             'intelligence': 'doxoade.commands.intelligence_systems.intelligence:intelligence',

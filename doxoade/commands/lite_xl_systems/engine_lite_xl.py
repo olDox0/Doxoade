@@ -24,7 +24,7 @@ from .lite_xl_diagnostics import LiteXLDiagnostics
 NOTEPADPP_CANONICAL_KEYS = {
     "ctrl+n": "doxoade:new-doc",
     "ctrl+o": "core:open-file",
-    "ctrl+s": "doc:save",
+    "ctrl+s": "doxoade.commands.git_ystems.save:save",
     "ctrl+shift+s": "doc:save-all",
     "ctrl+w": "root:close",
     "ctrl+f": "find-replace:find",

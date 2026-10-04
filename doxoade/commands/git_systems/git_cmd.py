@@ -72,6 +72,45 @@ def git_auto(ctx, push, prefer):
     elif res['status'] == 'SYNCED':
         click.echo(f"{Fore.GREEN}✔ {res['action_taken']}{Style.RESET_ALL}\n")
 
+def _resolve_target_branch(engine, requested_branch: str = None) -> str:
+    """
+    Descobre a branch correta para o pull.
+    Se nenhuma for passada, prioriza o upstream do branch atual;
+    se não houver upstream ou for branch transitória, reconcilia com a branch principal (main/master).
+    """
+    if requested_branch:
+        return requested_branch
+
+    current = engine.get_current_branch()
+    
+    # Se a máquina estiver numa branch transitória de LAN, normaliza primeiro
+    if current in ("dox-live", "dox-live-sync"):
+        engine.normalize_transient_branches()
+        current = engine.get_current_branch()
+
+    # Verifica se a branch atual existe no origin
+    remote_check = _run_git_command(
+        ['ls-remote', '--heads', 'origin', current],
+        capture_output=True,
+        silent_fail=True,
+        cwd=str(engine.root)
+    )
+    if remote_check and remote_check.strip():
+        return current
+
+    # Fallback inteligente para branch principal remota (main ou master)
+    for main_candidate in ('main', 'master'):
+        main_ref = _run_git_command(
+            ['ls-remote', '--heads', 'origin', main_candidate],
+            capture_output=True,
+            silent_fail=True,
+            cwd=str(engine.root)
+        )
+        if main_ref and main_ref.strip():
+            return main_candidate
+
+    return current or 'main'
+
 @git_group.command('pull')
 @click.option('--subscribe', '-s', is_flag=True, help='Subscreve todas as atualizações do servidor preservando modificações locais.')
 @click.option('--force', '-f', is_flag=True, help='Força a sincronização global (Reset Hard).')
@@ -81,20 +120,25 @@ def git_auto(ctx, push, prefer):
 @click.option('--diff', '-d', 'diff_file', is_flag=False, flag_value='ALL', default=None, help='Exibe o diff forense.')
 @click.option('--file', '-p', 'target_files', multiple=True, help='Puxa/sobrescreve apenas os arquivos especificados.')
 @click.option('--remote', '-r', default='origin', show_default=True, help='Remote de destino.')
-@click.option('--branch', '-b', default=None, help='Branch específico (padrão: branch atual).')
+@click.option('--branch', '-b', default=None, help='Branch específico (padrão: branch principal ou atual).')
 @click.pass_context
 def pull_cmd(ctx, subscribe, force, dry_run, apply, conflicts, diff_file, target_files, remote, branch):
     """
     📥 Sincronização direta e inteligente do repositório (Smart Multi-Station).
-    Puxa e aplica imediatamente do origin/<branch>. Use '--dry-run' para simular.
+    Puxa e reconcilia com origin/main mesmo entre estações diferentes (PC-A / Bluebaby).
     """
     from doxoade.commands.git_systems.git_engine import GitEngine
     with ExecutionLogger('git_pull', os.getcwd(), ctx.params) as logger:
         engine = GitEngine(os.getcwd())
-        target_branch = branch or engine.get_current_branch()
-        is_apply_mode = not dry_run  # Aplica direto, a menos que --dry-run seja passado
+        
+        # 1. Limpeza preventiva Sotéria contra falsos conflitos de DLLs/Janus
+        engine.clean_transient_build_artifacts()
 
-        # 1. Auto-cura ativa de MERGE_HEAD
+        # 2. Resolução da branch soberana (detecta se é main/master e normaliza)
+        target_branch = _resolve_target_branch(engine, branch)
+        is_apply_mode = not dry_run
+
+        # 3. Auto-cura de merge travado
         if (Path(engine.root) / ".git" / "MERGE_HEAD").exists():
             click.echo(f"{Fore.YELLOW}{Style.BRIGHT}⚠ [AUTO-HEAL] Detectado merge inacabado bloqueando o Git.{Style.RESET_ALL}")
             if is_apply_mode or click.confirm("Deseja auto-curar o estado travado e prosseguir?"):
@@ -104,19 +148,29 @@ def pull_cmd(ctx, subscribe, force, dry_run, apply, conflicts, diff_file, target
                 click.echo(f"{Fore.RED}✖ Operação cancelada. Use 'doxoade merge --abort'.{Fore.RESET}")
                 return
 
-        click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}⚡ NEXUS-GIT :: SINCRONIZAÇÃO SOBERANA [{engine.get_station_name().upper()}]{Style.RESET_ALL}")
-        click.echo(f"  {Fore.WHITE}Branch:{Fore.RESET} {target_branch} | {Fore.WHITE}Remote:{Fore.RESET} {remote}\n")
+        # 4. FETCH OBRIGATÓRIO (A fonte da falha do pull clássico)
+        fetch_ok, fetch_msg = engine.fetch_remote(remote=remote, branch=target_branch)
+        if not fetch_ok:
+            click.echo(f"\n{Fore.RED}{Style.BRIGHT}✖ [REDE OFFLINE] Não foi possível contatar '{remote}'.{Style.RESET_ALL}")
+            click.echo(f"  ↳ Detalhe: {fetch_msg}\n")
+            return
 
-        # 2. Exibição de Diff Forense (--diff sem argumento ou específico)
+        click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}⚡ NEXUS-GIT :: SINCRONIZAÇÃO SOBERANA [{engine.get_station_name().upper()}]{Style.RESET_ALL}")
+        click.echo(f"  {Fore.WHITE}Branch Alvo:{Fore.RESET} {Fore.YELLOW}{target_branch}{Fore.RESET} | {Fore.WHITE}Remote:{Fore.RESET} {remote}\n")
+
+        # Se a branch local divergir da remota selecionada, alinha a estação
+        current_local = engine.get_current_branch()
+        if current_local != target_branch:
+            click.echo(f"  {Fore.CYAN}ℹ [ESTAÇÃO] Alternando branch local: {current_local} -> {target_branch}{Fore.RESET}")
+            _run_git_command(['checkout', target_branch], silent_fail=True, cwd=str(engine.root))
+
         if diff_file:
-            engine.fetch_remote(remote=remote, branch=target_branch)
             if diff_file == 'ALL':
                 click.echo(f"{Fore.CYAN}🔍 Diff Forense Global contra {remote}/{target_branch}:{Style.RESET_ALL}")
                 diff_text = _run_git_command(['diff', f'{remote}/{target_branch}'], capture_output=True, cwd=str(engine.root)) or "Nenhuma diferença."
             else:
                 click.echo(f"{Fore.CYAN}🔍 Diff Forense de '{diff_file}':{Style.RESET_ALL}")
                 diff_text = engine.get_file_diff(diff_file, remote=remote, branch=target_branch)
-
             for line in diff_text.splitlines():
                 if line.startswith('+'): click.echo(Fore.GREEN + line + Style.RESET_ALL)
                 elif line.startswith('-'): click.echo(Fore.RED + line + Style.RESET_ALL)
@@ -125,9 +179,7 @@ def pull_cmd(ctx, subscribe, force, dry_run, apply, conflicts, diff_file, target
             click.echo()
             return
 
-        # 3. Subscrição Segura
         if subscribe:
-            engine.fetch_remote(remote=remote, branch=target_branch)
             sub_report = engine.subscribe_safe_remote(remote=remote, branch=target_branch, apply_changes=is_apply_mode)
             if not is_apply_mode:
                 click.echo(f"{Fore.YELLOW}{Style.BRIGHT}🔍 [DRY-RUN] PRÉVIA DE SUBSCRIÇÃO DO SERVIDOR (--subscribe){Style.RESET_ALL}")
@@ -135,14 +187,11 @@ def pull_cmd(ctx, subscribe, force, dry_run, apply, conflicts, diff_file, target
                 click.echo(f"  • Modificações locais preservadas intactas : {Fore.CYAN}{len(sub_report['preserved_items'])}{Fore.RESET}")
                 click.echo(f"\n{Fore.YELLOW}💡 Para efetivar no disco: doxoade git pull --subscribe --apply{Fore.RESET}\n")
                 return
-
             click.echo(f"{Fore.GREEN}{Style.BRIGHT}✔ [APPLY] SUBSCRIÇÃO CONCLUÍDA!{Style.RESET_ALL}")
             click.echo(f"  • Arquivos atualizados: {len(sub_report['updated_files'])} | Preservados: {len(sub_report['preserved_items'])}\n")
             return
 
-        # 4. Pull Seletivo
         if target_files:
-            engine.fetch_remote(remote=remote, branch=target_branch)
             if not is_apply_mode:
                 click.echo(f"{Fore.YELLOW}[DRY-RUN] Execute com --apply para puxar os {len(target_files)} arquivos selecionados.{Fore.RESET}\n")
                 return
@@ -151,7 +200,6 @@ def pull_cmd(ctx, subscribe, force, dry_run, apply, conflicts, diff_file, target
             for f in res['failed_files']: click.echo(f"  {Fore.RED}✖ Falha:{Fore.RESET} {f}")
             return
 
-        # 5. Reset Hard Forçado
         if force:
             report = engine.force_pull_reset(branch=target_branch, remote=remote, apply_changes=is_apply_mode)
             if not report['success']:
@@ -163,43 +211,20 @@ def pull_cmd(ctx, subscribe, force, dry_run, apply, conflicts, diff_file, target
             click.echo(f"{Fore.GREEN}✔ Reset Hard aplicado com backup prévio em .doxoade/git_recovery/.{Fore.RESET}\n")
             return
 
-        # 6. Fluxo Padrão: Smart Sync Reconciliado
+        # Execução padrão do Smart Pull com Snapshot preventivo
+        engine.create_safety_snapshot(reason="pre_pull")
         report = engine.smart_pull_sync(remote=remote, branch=target_branch, apply_changes=is_apply_mode)
-        matrix = report['matrix']
         
-        if not is_apply_mode:
-            click.echo(f"{Fore.YELLOW}{Style.BRIGHT}🔍 [DRY-RUN] ANÁLISE DE IMPACTO MULTI-ESTAÇÃO{Style.RESET_ALL}")
-            click.echo(f"  • Servidor tem novidades : {Fore.GREEN}{matrix['total_safe_remote']} arquivo(s){Fore.RESET}")
-            click.echo(f"  • Rascunhos locais desta máquina : {Fore.CYAN}{matrix['total_local_only']} arquivo(s){Fore.RESET}")
-            if matrix['collisions']:
-                click.echo(f"  • {Fore.RED}Colisões diretas (exigem merge): {matrix['total_collisions']} arquivo(s){Fore.RESET}")
-                for c in matrix['collisions']:
-                    click.echo(f"    {Fore.RED}✖ {c['file']}{Fore.RESET}")
+        if is_apply_mode:
+            # Garante que os commits remotos recebidos sejam incorporados no working tree
+            merge_res = _run_git_command(['merge', f'{remote}/{target_branch}', '--no-edit'], capture_output=True, cwd=str(engine.root))
+            if merge_res:
+                click.echo(f"{Fore.GREEN}✔ [PULL] Alterações de '{remote}/{target_branch}' integradas com sucesso!{Fore.RESET}\n")
             else:
-                click.echo(f"  • {Fore.GREEN}✔ Nenhuma colisão direta detectada.{Fore.RESET}")
-            click.echo(f"\n{Fore.YELLOW}💡 Para sincronizar com segurança total:{Fore.RESET}")
-            click.echo(f"   {Fore.WHITE}doxoade git pull --apply{Fore.RESET}\n")
-            return
-
-        # 🎯 FEEDBACK FORENSE ENRIQUECIDO (Fim do Pull Vago)
-        if report.get('already_up_to_date'):
-            short_head = report['new_head'][:7] if report.get('new_head') else 'HEAD'
-            click.echo(f"{Fore.GREEN}✔ Repositório já está atualizado no topo de {remote}/{target_branch} (HEAD em {short_head}).{Style.RESET_ALL}\n")
-        else:
-            commits = report.get('commits_received', [])
-            click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}📥 [ATUALIZAÇÃO RECEBIDA] {len(commits)} novo(s) commit(s) integrados:{Style.RESET_ALL}")
-            for c in commits[:8]:
-                click.echo(f"   {Fore.CYAN}•{Fore.RESET} {c}")
-            if len(commits) > 8:
-                click.echo(f"   {Fore.LIGHTBLACK_EX}... e mais {len(commits) - 8} commit(s).{Fore.RESET}")
-            
-            if report.get('diff_stat'):
-                click.echo(f"\n{Fore.WHITE}{Style.BRIGHT}📋 [IMPACTO NO DISCO]{Style.RESET_ALL}")
-                click.echo(f"   ↳ {Fore.YELLOW}{report['diff_stat']}{Fore.RESET}")
-                click.echo(f"   ↳ HEAD avançou: {Fore.LIGHTBLACK_EX}{report['old_head'][:7]}{Fore.RESET} ➔ {Fore.GREEN}{report['new_head'][:7]}{Fore.RESET}")
-            
-            click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}✔ Sincronização concluída com sucesso!{Style.RESET_ALL}\n")
-
+                # Se houver conflito real, aciona o assistente de merge
+                click.echo(f"{Fore.YELLOW}⚠ Conflito de merge detectado. Acionando assistente...{Fore.RESET}")
+                from doxoade.commands.git_systems.git_merge import merge as run_merge
+                ctx.invoke(run_merge)
 
 @git_group.command('branch')
 @click.option('--new', '-n', help='Cria uma nova branch.')

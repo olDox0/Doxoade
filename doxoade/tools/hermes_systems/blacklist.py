@@ -67,7 +67,7 @@ HARDCODED_BLACKLIST = {
     'doxoade.commands.db',
     'doxoade.commands.git_branch',
     'doxoade.commands.refactor',
-    'doxoade.commands.save',
+    'doxoade.commands.git_ystems.save',
     'doxoade.commands.intelligence',
     'doxoade.commands.intelligence_systems',
     'doxoade.commands.intelligence_utils',

@@ -167,6 +167,18 @@ def _ensure_admin_elevation():
         pass
 
 def main():
+
+    HERMES_ACTIVE = os.environ.get("DOXOADE_HERMES", "0") == "1"
+    if HERMES_ACTIVE:
+        try:
+            # Aqui fica a chamada original de inicialização do Hermes
+            # (ex: HermesPreloader, boot_hermes, etc.)
+            from doxoade.tools.hermes_systems.hermes_preloader import init_hermes_subsystem
+            init_hermes_subsystem()
+        except Exception as e:
+            # Falha silenciosa para não travar o Doxoade
+            pass
+
     # 🛑 DAEMON DESATIVADO POR PADRÃO (Modo Estável / Cold Start Direto)
     # Para reativar durante testes no futuro: passe '--daemon' ou defina DOXOADE_USE_DAEMON=1
     use_daemon = False
