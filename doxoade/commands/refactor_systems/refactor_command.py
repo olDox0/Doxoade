@@ -1210,7 +1210,7 @@ def _parse_batch_manifest(manifest_content: str) -> list[tuple[Path, Path]]:
 @click.option('--run', is_flag=True, help="Executa a movimentação física e reescrita de imports. Padrão: dry-run.")
 @click.pass_context
 def refactor_batch(ctx, manifest_file: Path, run: bool):
-    """Executa refatorações em lote com notificação completa de imports e tabelas de CLI."""
+    """Executa refatorações em lote com predição integral de resultados (estilo RefactorEngine)."""
     from .refactor_engine import RefactorEngine
 
     manifest_path = Path(manifest_file).resolve()
@@ -1223,23 +1223,22 @@ def refactor_batch(ctx, manifest_file: Path, run: bool):
         click.secho("  ✘ Nenhuma instrução válida encontrada no manifesto.", fg='red')
         return
 
-    click.echo(Fore.CYAN + Style.BRIGHT + "\n─ REFACTOR BATCH (PIPELINE GLOBAL) ──────────────────────────────" + Style.RESET_ALL)
-    click.echo(f"  {Fore.WHITE}📋 Manifesto :{Style.RESET_ALL} {Fore.YELLOW}{manifest_path.name}{Style.RESET_ALL} ({len(moves)} operações)")
+    click.echo(Fore.CYAN + Style.BRIGHT + "\n═ REFACTOR BATCH — PREDIÇÃO INTEGRAL DE RESULTADOS ═════════════════════════" + Style.RESET_ALL)
+    click.echo(f"  {Fore.WHITE}📋 Manifesto :{Style.RESET_ALL} {Fore.YELLOW}{manifest_path.name}{Style.RESET_ALL} ({len(moves)} operações planejadas)")
     click.echo(f"  {Fore.WHITE}📁 Raiz     :{Style.RESET_ALL} {Style.DIM}{root}{Style.RESET_ALL}")
-    click.echo(f"  {Fore.WHITE}⚙️  Modo     :{Style.RESET_ALL} " + (f"{Fore.GREEN}[EXECUÇÃO REAL --run]{Style.RESET_ALL}" if run else f"{Fore.YELLOW}[SIMULAÇÃO / DRY-RUN]{Style.RESET_ALL}"))
+    click.echo(f"  {Fore.WHITE}🛡️  Modo     :{Style.RESET_ALL} " + (f"{Fore.GREEN}[EXECUÇÃO REAL --run]{Style.RESET_ALL}" if run else f"{Fore.YELLOW}[PREDIÇÃO SEGURA / DRY-RUN]{Style.RESET_ALL}"))
 
     engine = RefactorEngine(base_path=str(root))
-    processed = 0
+    total_success = 0
 
     for idx, (src, dst) in enumerate(moves, 1):
-        # 1. Resolução inteligente de caminhos
         src_path = (root / src) if not src.is_absolute() else src
         if not src_path.exists() and not str(src).startswith("doxoade"):
             src_path = root / "doxoade" / src
         src_path = src_path.resolve()
 
         if not src_path.exists():
-            click.echo(f"\n  {Fore.RED}✘ [PULADO ({idx}/{len(moves)})]{Style.RESET_ALL} Origem não existe: {src}")
+            click.echo(f"\n  {Fore.RED}✘ [PULADO ({idx}/{len(moves)})]{Style.RESET_ALL} Origem não localizada: {src}")
             continue
 
         dst_path = (root / dst) if not dst.is_absolute() else dst
@@ -1247,23 +1246,28 @@ def refactor_batch(ctx, manifest_file: Path, run: bool):
             dst_path = root / "doxoade" / dst
         dst_path = dst_path.resolve()
 
-        click.echo(Fore.CYAN + f"\n[{idx}/{len(moves)}] Processando: {src_path.name} ➔ {dst_path.name}" + Style.RESET_ALL)
+        click.echo(Fore.CYAN + f"\n┌── [OPERAÇÃO {idx}/{len(moves)}] {src_path.name} ➔ {dst_path.name} " + "─" * 40 + Style.RESET_ALL)
 
-        # 2. Aciona o motor completo do refactor move
-        # (Varre AST, strings literais do CLI, exibe barra de rastros e diffs de imports)
         try:
+            # Aciona exatamente o mesmo pipeline do 'refactor move':
+            # 1. Preview do novo arquivo gerado no destino
+            # 2. Notificação de deleção da origem
+            # 3. Sincronização global com barra "Limpando rastros"
+            # 4. Detecção e Diff em cada arquivo que importar (AST ou strings do CLI)
+            # 5. Selo [DRY-OK]
             engine.rename_file(src_path, dst_path, dry_run=not run)
-            processed += 1
+            total_success += 1
         except Exception as e:
-            click.echo(f"  {Fore.RED}✘ Falha ao processar {src_path.name}: {e}{Style.RESET_ALL}")
+            click.echo(f"  {Fore.RED}✘ Falha na operação {src_path.name}: {e}{Style.RESET_ALL}")
 
-    click.echo(Fore.CYAN + "\n─ RESUMO DO LOTE ────────────────────────────────────────────────" + Style.RESET_ALL)
-    click.echo(f"  Operações concluídas : {processed}/{len(moves)}")
+    click.echo(Fore.CYAN + "\n═ RESUMO DO LOTE ═══════════════════════════════════════════════════════════" + Style.RESET_ALL)
+    click.echo(f"  Operações concluídas : {total_success}/{len(moves)}")
     if not run:
-        click.echo(f"  {Fore.YELLOW}💡 Simulação finalizada. Execute com --run para aplicar.{Style.RESET_ALL}")
+        click.echo(f"  {Fore.YELLOW}💡 Predição concluída. Todos os impactos e diffs foram mapeados acima.")
+        click.echo(f"     Para persistir no disco com total segurança: execute adicionando '--run'.{Style.RESET_ALL}")
     else:
-        click.echo(f"  {Fore.GREEN}✔ Todas as movimentações e imports foram persistidos!{Style.RESET_ALL}")
-    click.echo(Fore.CYAN + "─────────────────────────────────────────────────────────────────\n" + Style.RESET_ALL)
+        click.echo(f"  {Fore.GREEN}✔ Todas as movimentações físicas e reescritas de imports foram aplicadas!{Style.RESET_ALL}")
+    click.echo(Fore.CYAN + "════════════════════════════════════════════════════════════════════════════\n" + Style.RESET_ALL)
 
 @refactor_group.command('rename-dir')
 @click.argument('src_dir', type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path))

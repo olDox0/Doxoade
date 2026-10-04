@@ -137,7 +137,7 @@ HERMES_LOG_EXPORT void hermes_log_init(void) {
 #endif
 }
 
-static char g_stats_buffer[256];
+static char g_stats_buffer[256]; // 🛑 DECLARADO ANTES DA FUNÇÃO!
 
 HERMES_LOG_EXPORT const char* hermes_log_py_get_stats(void) {
     snprintf(g_stats_buffer, sizeof(g_stats_buffer),

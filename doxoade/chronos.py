@@ -205,14 +205,13 @@ class ChronosRecorder:
     def end_command(self, exit_code, duration_ms):
         from doxoade.tools.alexandria.engine import alexandria_write
         
-        # 🛑 REMOVA OU COMENTE ESSA LINHA QUE MATAVA O REGISTRO:
+        # ❌ REMOVA OU COMENTE ESTA LINHA:
         # if self.profiler is None:
         #     return
-        
+
         if self._ended:
             return
         self._ended = True
-        
         if not self.monitor:
             return
         self.monitor.stop()
