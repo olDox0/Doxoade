@@ -907,7 +907,7 @@ class {class_name}(click.Group):
             'sync': 'doxoade.commands.git_systems.git_workflow:sync',
             'mk': 'doxoade.commands.utils:mk',
             'intelligence': 'doxoade.commands.intelligence_systems.intelligence:intelligence',
-            'doctor': 'doxoade.commands.vulcan_systems.vulcan_cmd:doctor',
+            'doctor': 'doxoade.commands.vulcan_cmd.vulcan_command:doctor',
             'venv': 'doxoade.commands.venv_cmd:venv_cmd',
         }}
         

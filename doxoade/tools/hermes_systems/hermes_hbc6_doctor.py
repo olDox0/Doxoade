@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
-from doxoade.commands.vulcan_systems.vulcan_cmd import doctor
+from doxoade.commands.vulcan_cmd.vulcan_command import doctor
 
 # ─── Cores ────────────────────────────────────────────────────────────
 G = "\033[32m"  # verde

@@ -71,7 +71,7 @@ name = "hermes_async_log"
 sources = ["doxoade/tools/hermes_systems/native/hermes_async_log.c"]
 output = "doxoade/tools/hermes_systems/native/hermes_async_log.dll"
 opt = "O3"
-flags = ["-shared"]
+flags = ["-shared", "-lws2_32"] # <--- ADICIONE "-lws2_32"
 soteria = false
 
 [[targets]]
@@ -94,5 +94,5 @@ sources = [
 ]
 output = "doxoade/tools/hermes_systems/native/hermes_bridge_soteria.pyd"
 opt = "O3"
-flags = ["-shared", "-msse4.2", "-mpopcnt", "-DSOTERIA_NO_ALLOC_HOOKS"]
+flags = ["-shared", "-msse4.2", "-mpopcnt", "-DSOTERIA_NO_ALLOC_HOOKS", "-lws2_32"] # <--- ADICIONE "-lws2_32"
 soteria = false

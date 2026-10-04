@@ -167,7 +167,22 @@ def _ensure_admin_elevation():
         pass
 
 def main():
-    _ensure_admin_elevation() # 🛡️ PRIMEIRA AÇÃO
+    # ⚡ ZEUS: EXPURGA FLAG DO CLI ANTES DE CHEGAR NO CLICK
+    no_daemon = False
+    while '--no-daemon' in sys.argv:
+        sys.argv.remove('--no-daemon')
+        no_daemon = True
+
+    if not no_daemon and os.environ.get('DOXOADE_NO_DAEMON') != '1':
+        try:
+            from doxoade.tools.engine_daemon.client import dispatch_to_daemon
+            exit_code = dispatch_to_daemon(sys.argv, os.getcwd())
+            if exit_code is not None:
+                sys.exit(exit_code)
+        except Exception:
+            pass
+            
+    # 🌊 PLANO B: Fallback para Boot Tradicional (Cold Start)
     mode = _resolve_execution_mode()
     os.environ['DOXOADE_MODE'] = mode
     

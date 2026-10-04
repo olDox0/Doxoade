@@ -15,7 +15,7 @@ import click
 from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.core_database import DB_FILE
-from doxoade.commands.vulcan_systems.vulcan_cmd import _is_doxoade_project
+#from doxoade.commands.vulcan_cmd.vulcan_command import _is_doxoade_project
 
 _BOOTSTRAP_START = '# [DOXOADE:VULCAN]'
 _BOOTSTRAP_END = '# [/DOXOADE:VULCAN]'
@@ -35,6 +35,14 @@ except ImportError:
     pass # Doxoade não instalado neste ambiente
 {_SYNC_END}
 """
+
+def _is_doxoade_project(path: Path) -> bool:
+    """Verifica se o caminho pertence ao próprio projeto doxoade."""
+    markers = [
+        path / 'doxoade' / 'tools' / 'vulcan' / 'meta_finder.py',
+        path / 'doxoade' / 'tools' / 'vulcan' / 'runtime.py'
+    ]
+    return any(m.exists() for m in markers)
 
 def generate_vulcan_stub() -> str:
     return f'# -*- coding: utf-8 -*-\n"""\nStub Vulcan embutido no projeto.\nGerenciado automaticamente pelo doxoade.\n"""\n\nVULCAN_STUB_VERSION = {VULCAN_STUB_VERSION}\n\ndef activate():\n    try:\n        from doxoade.tools.vulcan.meta_finder import install\n        import __main__\n        # Resolutor de caminhos\n        import os\n        curr = os.path.abspath(__file__)\n        while curr:\n            if os.path.exists(os.path.join(os.path.dirname(curr), ".doxoade")):\n                root = os.path.dirname(curr)\n                break\n            parent = os.path.dirname(curr)\n            if parent == curr: return False\n            curr = parent\n        install(root)\n        return True\n    except Exception:\n        return False\n'

@@ -100,12 +100,20 @@ class HermesBridgeBuilder:
 
         include_dir = sysconfig.get_path('include')
         cmd = [
-            gcc,
-            '-O3',
-            '-shared',
-            '-fPIC',
-            '-funroll-loops',
+           gcc,
+           '-O2',
+           '-shared',
+           '-fPIC',
+           '-pthread',
         ]
+        if os.name == 'nt':
+           cmd.extend(['-static-libgcc', '-lws2_32'])  # <--- ADICIONE -lws2_32 AQUI
+        cmd.extend([
+           str(src),
+           '-o', str(out),
+        ])
+        if os.name == 'nt':
+           cmd.append('-lws2_32')  # <--- Garante -lws2_32 no final da linha de comando
 
         # Flags Intel apenas no PC (Amaranth e Bluebaby)
         if not is_arm:
@@ -123,14 +131,7 @@ class HermesBridgeBuilder:
         if os.name == 'nt':
             lib_dir = Path(sys.base_prefix) / 'libs'
             version = f"{sys.version_info.major}{sys.version_info.minor}"
-            cmd.extend([f'-L{lib_dir}', f'-lpython{version}'])
-
-        cmd.extend(['-o', str(self.output_file)])
-
-        if os.name == 'nt':
-            lib_dir = Path(sys.base_prefix) / 'libs'
-            version = f"{sys.version_info.major}{sys.version_info.minor}"
-            cmd.extend([f'-L{lib_dir}', f'-lpython{version}'])
+            cmd.extend([f'-L{lib_dir}', f'-lpython{version}', '-lws2_32'])
         # No Linux/Android não precisa passar -lpython: os símbolos já estão no binário do python em execução!
 
         cmd.extend(['-o', str(self.output_file)])

@@ -66,7 +66,7 @@ class DoxoadeLazyGroup(click.Group):
             'deepcheck': 'doxoade.commands.deepcheck:deepcheck',
             'diagnose': 'doxoade.commands.diagnose:diagnose',
             'diff': 'doxoade.commands.diff:diff',
-            'doctor': 'doxoade.commands.vulcan_systems.vulcan_cmd:doctor',
+            'doctor': 'doxoade.commands.vulcan_cmd.vulcan_command:doctor',
             'doxcolors': 'doxoade.commands.doxcolors_systems.colors_command:doxcolors_cmd',
             'encoding': 'doxoade.commands.encoding:encoding',
             'engine': 'doxoade.commands.engine_cmd:engine_group',
@@ -143,7 +143,7 @@ class DoxoadeLazyGroup(click.Group):
             'venvkeeper': 'doxoade.commands.venvkeeper_systems.venvkeeper:venvkeeper',
             'venv': 'doxoade.commands.venv_cmd:venv_cmd',
 #            'verilog': 'doxoade.commands.verilog:verilog',
-            'vulcan': 'doxoade.commands.vulcan_systems.vulcan_cmd:vulcan_group',
+            'vulcan': 'doxoade.commands.vulcan_cmd.vulcan_command:vulcan_group',
             'webcheck': 'doxoade.commands.webcheck:webcheck',
             'wsl': 'doxoade.commands.linux_systems.linux_cmd:linux_group',
 

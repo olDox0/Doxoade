@@ -56,15 +56,20 @@ def build_logger() -> bool:
         '-O2',
         '-shared',
         '-fPIC',
-        '-pthread',
     ]
     if os.name == 'nt':
         cmd.append('-static-libgcc')
+    else:
+        cmd.append('-pthread')
 
     cmd.extend([
         str(src),
         '-o', str(out),
     ])
+
+    # 🛑 CRÍTICO: No MinGW/GCC, -lws2_32 TEM que vir DEPOIS de str(src)
+    if os.name == 'nt':
+        cmd.append('-lws2_32')
     
     print(f"🔨 Compilando Hermes Async Logger...")
     print(f"   GCC: {gcc}")

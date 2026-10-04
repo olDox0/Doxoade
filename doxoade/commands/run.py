@@ -41,8 +41,12 @@ def run(ctx, script, args, shadow, **kwargs):
         os.environ['DOXOADE_RESCUE'] = '0'
         click.secho("🛡️  [SOTERIA] Modo de Resgate DESATIVADO.", fg="yellow", dim=True)
     
-    from ..rescue_systems.execution_context import ExecutionContext, ExecutionMode
-    from doxoade.rescue import activate_protocol
+    try:
+        from doxoade.rescue_systems.execution_context import ExecutionContext, ExecutionMode
+        context = ExecutionContext.detect(mode=ExecutionMode.SANDBOX)
+    except Exception:
+        context = None
+        
     from doxoade.tools.telemetry_tools.logger import ExecutionLogger
     abs_path = os.path.abspath(script)
     

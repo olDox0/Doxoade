@@ -116,6 +116,7 @@ class CodeSampler(threading.Thread):
         self.running = True
         self.samples = collections.defaultdict(int)
         self.main_thread_id = threading.main_thread().ident
+        self.target_thread_id = getattr(chronos_recorder, 'main_thread_id', None) or threading.main_thread().ident
 
     def run(self):
         lib_path = os.path.dirname(os.__file__).lower().replace('\\', '/')
@@ -203,22 +204,33 @@ class ChronosRecorder:
 
     def end_command(self, exit_code, duration_ms):
         from doxoade.tools.alexandria.engine import alexandria_write
-        if self.profiler is None:
-            return
+        
+        # 🛑 REMOVA OU COMENTE ESSA LINHA QUE MATAVA O REGISTRO:
+        # if self.profiler is None:
+        #     return
+        
         if self._ended:
             return
         self._ended = True
+        
         if not self.monitor:
             return
         self.monitor.stop()
         self.sampler.stop()
         resources = self.monitor.get_stats()
         hot_lines = self.sampler.get_hot_lines()
-        self.profiler.disable()
-        s = io.StringIO()
-        ps = pstats.Stats(self.profiler, stream=s).sort_stats('cumulative')
-        ps.print_stats(15)
-        profile_text = s.getvalue()
+        
+        profile_text = ""
+        if self.profiler is not None:
+            try:
+                self.profiler.disable()
+                s = io.StringIO()
+                ps = pstats.Stats(self.profiler, stream=s).sort_stats('cumulative')
+                ps.print_stats(15)
+                profile_text = s.getvalue()
+            except Exception:
+                pass
+                
         top_funcs = []
         for line in profile_text.splitlines():
             if '(' in line and ')' in line and (os.getcwd() in line):

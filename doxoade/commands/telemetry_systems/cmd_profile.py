@@ -54,6 +54,14 @@ def cmd_profile(ctx: click.Context, as_json: bool, output: str | None):
         except Exception as e:
             click.secho(f"\n[ERRO PROFILE] Falha na execução do comando: {e}", fg="red")
             exit_code = 1
+        finally:
+            # 🎯 FORÇA O CHRONOS A REGISTRAR NO BANCO DO TELEMETRY
+            try:
+                from doxoade.chronos import chronos_recorder
+                duration_ms = (time.perf_counter() - (chronos_recorder._perf_start or time.perf_counter())) * 1000
+                chronos_recorder.end_command(exit_code, duration_ms)
+            except Exception:
+                pass
 
     # Gravação em arquivo (quando solicitado com -o / --output)
     if output:

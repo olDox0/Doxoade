@@ -2,18 +2,24 @@
 from __future__ import annotations
 from pathlib import Path
 import click
+import re
+import time
+from doxoade.tools.doxcolors import Fore, Style
 from .refactor_engine import RefactorEngine
 from .refactor_utils import iter_python_files
 from doxoade.commands.git_systems.git_merge import merge
 
-def _find_project_root(path: Path) -> Path:
-    """Sobe a árvore até encontrar um marcador de projeto."""
-    base = path if path.is_dir() else path.parent
+def _find_project_root(start: Path = Path('.')) -> Path:
+    """Localiza a raiz do projeto e SEMPRE retorna um Path absoluto resolvido."""
+    start_abs = Path(start).resolve()
+    base = start_abs if start_abs.is_dir() else start_abs.parent
     for candidate in [base, *base.parents]:
-        for marker in ('pyproject.toml', 'setup.py', 'setup.cfg', '.git'):
-            if (candidate / marker).exists():
-                return candidate
-    return base
+        # Identifica a raiz pelo pacote doxoade, pyproject.toml ou .git
+        if (candidate / "doxoade" / "cli.py").exists():
+            return candidate.resolve()
+        if (candidate / "pyproject.toml").exists() or (candidate / ".git").exists():
+            return candidate.resolve()
+    return base.resolve()
 
 def _parse_orch_args(args: list[str]) -> tuple[list[str], list[str]]:
     """
@@ -1143,3 +1149,205 @@ def refactor_crlf_fix(paths, target, apply, commit, verbose):
             _run_git_command(['add', '--renormalize', '--'] + rels[i:i + 50], silent_fail=True)
         _run_git_command(['commit', '-m', 'chore(eol): normaliza terminadores (refactor crlf-fix)'], silent_fail=True)
         click.secho("  ✔ Chore de EOL sepultado no histórico.", fg='green')
+
+def _parse_batch_manifest(manifest_content: str) -> list[tuple[Path, Path]]:
+    """
+    Parser resiliente com suporte a:
+    - Espaços ou setas (->)
+    - Blocos escopados: prefixo/{ arq1 arq2 }
+    - Blocos de mapeamento: src_dir/ -> dst_dir/{ arq1 arq2 }
+    """
+    moves: list[tuple[Path, Path]] = []
+    current_src_scope = ""
+    current_dst_scope = ""
+
+    lines = manifest_content.splitlines()
+    for line_num, line in enumerate(lines, 1):
+        clean = line.strip()
+        if not clean or clean.startswith('#') or clean.startswith('::'):
+            continue
+
+        # Fechamento de bloco
+        if clean == '}':
+            current_src_scope = ""
+            current_dst_scope = ""
+            continue
+
+        # Abertura de bloco escopado
+        if clean.endswith('{'):
+            scope_header = clean[:-1].strip()
+            if '->' in scope_header:
+                parts = scope_header.split('->', 1)
+                current_src_scope = parts[0].strip().rstrip('/\\') + '/'
+                current_dst_scope = parts[1].strip().rstrip('/\\') + '/'
+            else:
+                current_src_scope = scope_header.rstrip('/\\') + '/'
+                current_dst_scope = current_src_scope
+            continue
+
+        # Linha de instrução: divide por '->' ou por whitespace
+        if '->' in clean:
+            parts = [p.strip() for p in clean.split('->', 1)]
+        else:
+            parts = clean.split()
+
+        if len(parts) != 2:
+            click.secho(f"⚠ [L{line_num}] Linha ignorada (formato inválido): {clean}", fg='yellow')
+            continue
+
+        src_raw, dst_raw = parts[0], parts[1]
+
+        # Aplica o escopo caso ativo
+        full_src = (current_src_scope + src_raw) if current_src_scope and not Path(src_raw).is_absolute() else src_raw
+        full_dst = (current_dst_scope + dst_raw) if current_dst_scope and not Path(dst_raw).is_absolute() else dst_raw
+
+        moves.append((Path(full_src), Path(full_dst)))
+
+    return moves
+
+@refactor_group.command('batch')
+@click.argument('manifest_file', type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option('--run', is_flag=True, help="Executa a movimentação física e reescrita de imports. Padrão: dry-run.")
+@click.pass_context
+def refactor_batch(ctx, manifest_file: Path, run: bool):
+    """Executa refatorações em lote com notificação completa de imports e tabelas de CLI."""
+    from .refactor_engine import RefactorEngine
+
+    manifest_path = Path(manifest_file).resolve()
+    root = _find_project_root(manifest_path)
+
+    content = manifest_path.read_text(encoding='utf-8')
+    moves = _parse_batch_manifest(content)
+
+    if not moves:
+        click.secho("  ✘ Nenhuma instrução válida encontrada no manifesto.", fg='red')
+        return
+
+    click.echo(Fore.CYAN + Style.BRIGHT + "\n─ REFACTOR BATCH (PIPELINE GLOBAL) ──────────────────────────────" + Style.RESET_ALL)
+    click.echo(f"  {Fore.WHITE}📋 Manifesto :{Style.RESET_ALL} {Fore.YELLOW}{manifest_path.name}{Style.RESET_ALL} ({len(moves)} operações)")
+    click.echo(f"  {Fore.WHITE}📁 Raiz     :{Style.RESET_ALL} {Style.DIM}{root}{Style.RESET_ALL}")
+    click.echo(f"  {Fore.WHITE}⚙️  Modo     :{Style.RESET_ALL} " + (f"{Fore.GREEN}[EXECUÇÃO REAL --run]{Style.RESET_ALL}" if run else f"{Fore.YELLOW}[SIMULAÇÃO / DRY-RUN]{Style.RESET_ALL}"))
+
+    engine = RefactorEngine(base_path=str(root))
+    processed = 0
+
+    for idx, (src, dst) in enumerate(moves, 1):
+        # 1. Resolução inteligente de caminhos
+        src_path = (root / src) if not src.is_absolute() else src
+        if not src_path.exists() and not str(src).startswith("doxoade"):
+            src_path = root / "doxoade" / src
+        src_path = src_path.resolve()
+
+        if not src_path.exists():
+            click.echo(f"\n  {Fore.RED}✘ [PULADO ({idx}/{len(moves)})]{Style.RESET_ALL} Origem não existe: {src}")
+            continue
+
+        dst_path = (root / dst) if not dst.is_absolute() else dst
+        if not str(dst).startswith("doxoade") and "doxoade" in src_path.parts:
+            dst_path = root / "doxoade" / dst
+        dst_path = dst_path.resolve()
+
+        click.echo(Fore.CYAN + f"\n[{idx}/{len(moves)}] Processando: {src_path.name} ➔ {dst_path.name}" + Style.RESET_ALL)
+
+        # 2. Aciona o motor completo do refactor move
+        # (Varre AST, strings literais do CLI, exibe barra de rastros e diffs de imports)
+        try:
+            engine.rename_file(src_path, dst_path, dry_run=not run)
+            processed += 1
+        except Exception as e:
+            click.echo(f"  {Fore.RED}✘ Falha ao processar {src_path.name}: {e}{Style.RESET_ALL}")
+
+    click.echo(Fore.CYAN + "\n─ RESUMO DO LOTE ────────────────────────────────────────────────" + Style.RESET_ALL)
+    click.echo(f"  Operações concluídas : {processed}/{len(moves)}")
+    if not run:
+        click.echo(f"  {Fore.YELLOW}💡 Simulação finalizada. Execute com --run para aplicar.{Style.RESET_ALL}")
+    else:
+        click.echo(f"  {Fore.GREEN}✔ Todas as movimentações e imports foram persistidos!{Style.RESET_ALL}")
+    click.echo(Fore.CYAN + "─────────────────────────────────────────────────────────────────\n" + Style.RESET_ALL)
+
+@refactor_group.command('rename-dir')
+@click.argument('src_dir', type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path))
+@click.argument('dst_dir', type=click.Path(file_okay=False, dir_okay=True, path_type=Path))
+@click.option('--run', is_flag=True, help="Executa a movimentação física e reescrita de imports. Padrão: dry-run.")
+@click.option('--merge', is_flag=True, help="Mescla o conteúdo no destino se a pasta já existir.")
+@click.option('-v', '--verbose', is_flag=True, help="Exibe detalhes completos dos diffs.")
+def refactor_rename_dir(src_dir: Path, dst_dir: Path, run: bool, merge: bool, verbose: bool):
+    """Move/renomeia diretórios/pacotes inteiros e atualiza referências em todo o projeto."""
+    from .package_mover import PackageMover
+    
+    root = _find_project_root(src_dir)
+    mover = PackageMover(root=root, src=src_dir, dst=dst_dir, merge=merge)
+    
+    if not run:
+        mover.report(verbose=verbose)
+        click.secho("\n💡 Para aplicar as alterações acima, execute novamente adicionando a flag --run", fg='yellow')
+    else:
+        click.secho(f"\n🚀 Aplicando movimentação de diretório: {src_dir} ➔ {dst_dir}", fg='cyan', bold=True)
+        mover.apply()
+        click.secho("✔ Pacote movido e imports atualizados com sucesso!", fg='green', bold=True)
+
+@refactor_group.command('cycle-fix')
+@click.argument('target_file', type=click.Path(exists=True, path_type=Path))
+@click.option('--run', is_flag=True, help="Aplica a correção. Padrão: dry-run.")
+def refactor_cycle_fix(target_file: Path, run: bool):
+    """Detecta e cura automaticamente imports circulares pai-filho em módulos Click/CLI."""
+    import ast
+    from .refactor_utils import read_text_safe, write_text_safe
+    from .refactor_preview import preview_file_change
+
+    target_path = Path(target_file).resolve()
+    content = read_text_safe(target_path)
+    try:
+        tree = ast.parse(content)
+    except SyntaxError as e:
+        click.secho(f"✘ Erro de sintaxe no arquivo: {e}", fg='red')
+        return
+
+    lines = content.splitlines()
+    subcommand_imports = []
+    lines_to_remove = set()
+
+    # 1. Identifica imports de submódulos irmãos (ex: from .filho import cmd)
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module:
+            # Detecta se está importando de módulos sob o mesmo pacote
+            if target_path.stem in node.module or node.module.startswith(target_path.parent.name):
+                start = node.lineno - 1
+                end = getattr(node, 'end_lineno', node.lineno)
+                subcommand_imports.extend(lines[start:end])
+                for l in range(start, end):
+                    lines_to_remove.add(l)
+
+    if not subcommand_imports:
+        click.secho("✔ Nenhum import circular pai-filho detectado no topo.", fg='green')
+        return
+
+    # 2. Remove os imports do topo
+    new_lines = [line for i, line in enumerate(lines) if i not in lines_to_remove]
+
+    # 3. Localiza a função de registro (ex: _register_subcommands ou final do grupo)
+    func_idx = -1
+    for i, line in enumerate(new_lines):
+        if "def _register_subcommands" in line:
+            func_idx = i + 1
+            break
+
+    if func_idx != -1:
+        # Injeta dentro da função com indentação de 4 espaços
+        indented_imports = ["    " + imp.strip() for imp in subcommand_imports]
+        new_lines = new_lines[:func_idx] + indented_imports + new_lines[func_idx:]
+    else:
+        # Injeta no final do arquivo antes da chamada de registro
+        new_lines.extend(["\n# --- AUTO-HEALED SUBCOMMAND IMPORTS ---"] + subcommand_imports)
+
+    new_content = "\n".join(new_lines) + "\n"
+
+    # 4. Preview / Aplicação
+    if not run:
+        click.secho(f"\n🔍 [PREVIEW] Cura de Ciclo em: {target_path.name}", fg='yellow', bold=True)
+        preview_file_change(target_path, content, new_content)
+        click.secho("Use --run para aplicar a cura.", fg='yellow')
+    else:
+        write_text_safe(target_path, new_content)
+        click.secho(f"✔ [CURADO] Imports circulares de {target_path.name} deferidos com sucesso!", fg='green')
+
