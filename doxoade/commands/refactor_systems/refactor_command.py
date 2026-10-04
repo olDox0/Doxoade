@@ -978,60 +978,108 @@ def refactor_sandbox(distro, rebuild):
         click.echo(result.stderr or result.stdout)
         # Aqui o desenvolvedor verá quais comandos (import/help) quebraram no Linux
 
-@refactor_group.command("move-dir")
-@click.argument("src")
-@click.argument("dst")
-@click.option(
-    "--merge",
-    is_flag=True,
-    help="Move o conteúdo de SRC para DST sem criar subpasta.",
-)
-@click.option(
-    "--stage",
-    is_flag=True,
-    help="Cria um espelho em .doxoade/refactor_staging para inspeção.",
-)
-@click.option(
-    "--include-backups",
-    is_flag=True,
-    help="Inclui .bak, .old, .orig, .bkp e .backup no movimento.",
-)
-@click.option(
-    "--run",
-    is_flag=True,
-    help="Aplica. Sem isso, apenas simula.",
-)
-@click.option(
-    "-v",
-    "--verbose",
-    is_flag=True,
-    help="Mostra movimentações e diffs.",
-)
-def refactor_move_dir(src, dst, merge, stage, include_backups, run, verbose):
-    """Move uma pasta/pacote e reescreve imports automaticamente."""
-
-    from pathlib import Path
+@refactor_group.command('move-dir')
+@click.argument('src_dir', type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path))
+@click.argument('dst_dir', type=click.Path(file_okay=False, dir_okay=True, path_type=Path))
+@click.option('--run', is_flag=True, help="Aplica a movimentação física e reescrita de imports. Padrão: dry-run.")
+@click.option('--merge', is_flag=True, help="Mescla o conteúdo no destino se a pasta já existir.")
+@click.option('-v', '--verbose', is_flag=True, help="Exibe caminhos absolutos e detalhes estendidos.")
+def refactor_move_dir(src_dir: Path, dst_dir: Path, run: bool, merge: bool, verbose: bool):
+    """Move pacotes/pastas inteiros com previsão cirúrgica e resolução inteligente de colisões."""
     from .package_mover import PackageMover
+    from .refactor_utils import read_text_safe, write_text_safe
 
-    mover = PackageMover(
-        root=Path.cwd(),
-        src=Path(src),
-        dst=Path(dst),
-        merge=merge,
-        include_backups=include_backups,
-    )
+    root = _find_project_root(src_dir)
+    src_clean = Path(str(src_dir).rstrip('/\\'))
+    dst_clean = Path(str(dst_dir).rstrip('/\\'))
 
-    mover.report(verbose=verbose)
+    # 1. Inicializa o motor de movimentação
+    mover = PackageMover(root=root, src=src_clean, dst=dst_clean, merge=merge)
+    moves = mover.planned_moves()
+    old_pkg = mover.old_pkg
+    new_pkg = mover.new_pkg
 
-    if stage:
-        staged = mover.stage()
-        click.echo(f"🧪 Stage criado em: {staged}")
+    # 2. Varredura cirúrgica de imports afetados
+    mapping = {old_pkg: new_pkg}
+    impacts = _inspect_impacts(root, mapping)
 
-    if run:
-        mover.apply()
-        click.echo("✔ Aplicado.")
+    # 3. Análise de Colisão / Sobreposição Física
+    collisions = []
+    for src_file, dst_file in moves:
+        if dst_file.exists():
+            collisions.append((src_file, dst_file))
+
+    # ── RENDERIZAÇÃO DA PREVISÃO CIRÚRGICA ────────────────────────────
+    click.echo(Fore.CYAN + Style.BRIGHT + "\n═ MOVE-DIR — PREVISÃO CIRÚRGICA DE PACOTE ═════════════════════════════════════" + Style.RESET_ALL)
+    click.echo(f"  {Fore.WHITE}📁 Origem  :{Style.RESET_ALL} {Fore.YELLOW}{src_clean}{Style.RESET_ALL} (Módulo: {Fore.CYAN}{old_pkg}{Style.RESET_ALL})")
+    click.echo(f"  {Fore.WHITE}📁 Destino :{Style.RESET_ALL} {Fore.YELLOW}{mover.new_dir}{Style.RESET_ALL} (Módulo: {Fore.GREEN}{new_pkg}{Style.RESET_ALL})")
+    click.echo(f"  {Fore.WHITE}⚙️  Modo    :{Style.RESET_ALL} {Fore.WHITE}{'MERGE (Mesclagem)' if mover.merge else 'MOVE-PACKAGE (Novo Pacote)'}{Style.RESET_ALL} | " + (f"{Fore.GREEN}[EXECUÇÃO REAL --run]{Style.RESET_ALL}" if run else f"{Fore.YELLOW}[SIMULAÇÃO / DRY-RUN]{Style.RESET_ALL}"))
+
+    # Alerta de Colisão de Arquivos
+    if collisions:
+        click.echo(f"\n  {Fore.RED}🚨 ALERTA DE COLISÃO DE ARQUIVOS ({len(collisions)} sobreposições detectadas):{Style.RESET_ALL}")
+        for s_f, d_f in collisions:
+            click.echo(f"     ✘ Destino já existe e seria sobrescrito: {d_f.name}")
+        if not merge:
+            click.echo(f"     {Fore.YELLOW}💡 Dica: Se quiser juntar os arquivos no destino use a flag: --merge{Style.RESET_ALL}")
+
+    # 1. Arquivos Físicos a Mover
+    click.echo(Fore.CYAN + f"\n📦 [ARQUIVOS A MOVER] ({len(moves)} arquivos)" + Style.RESET_ALL)
+    for old_f, new_f in moves:
+        click.echo(f"   • {old_f.relative_to(root)} ➔ {Fore.CYAN}{new_f.relative_to(root)}{Style.RESET_ALL}")
+
+    # 2. Previsão Cirúrgica de Imports
+    click.echo(Fore.CYAN + f"\n🔍 [IMPACTO EM IMPORTS] ({len(impacts)} arquivo(s) afetado(s))" + Style.RESET_ALL)
+    if not impacts:
+        click.echo(f"   {Style.DIM}(Nenhum import externo precisa de alteração){Style.RESET_ALL}")
     else:
-        click.echo("Dry-run. Use --run para aplicar.")
+        for affected_file, changes in impacts.items():
+            click.echo(f"\n   📄 {Fore.YELLOW}{affected_file.relative_to(root)}{Style.RESET_ALL}")
+            for l_num, kind, old_l, new_l in changes:
+                click.echo(f"      {Fore.CYAN}L{l_num:<4}{Style.RESET_ALL} {Style.DIM}[{kind}]{Style.RESET_ALL}")
+                click.echo(f"         {Fore.RED}- {old_l}{Style.RESET_ALL}")
+                click.echo(f"         {Fore.GREEN}+ {new_l}{Style.RESET_ALL}")
+
+    # 3. Dossiê Executivo
+    total_modifications = sum(len(c) for c in impacts.values())
+    click.echo(Fore.CYAN + "\n📊 [DOSSIÊ EXECUTIVO]" + Style.RESET_ALL)
+    click.echo(f"   Arquivos a mover     : {len(moves)}")
+    click.echo(f"   Consumidores afetados: {len(impacts)} arquivos ({total_modifications} referências a atualizar)")
+    click.echo(f"   Colisões de arquivos : {len(collisions)}")
+
+    if not run:
+        click.echo(f"\n   {Fore.YELLOW}💡 SIMULAÇÃO CONCLUÍDA. Nenhum arquivo foi alterado no disco.")
+        click.echo(f"      Para persistir exatamente o resumo acima, adicione a flag: {Fore.WHITE}--run{Style.RESET_ALL}")
+    else:
+        # ── APLICAÇÃO REAL (--run) ────────────────────────────────────
+        # A. Atualiza imports nos arquivos consumidores
+        for affected_file, changes in impacts.items():
+            content = read_text_safe(affected_file)
+            lines = content.splitlines()
+            for l_num, _, _, new_l in changes:
+                lines[l_num - 1] = new_l
+            write_text_safe(affected_file, "\n".join(lines) + "\n")
+
+        # B. Move arquivos físicos
+        for old_f, new_f in moves:
+            new_f.parent.mkdir(parents=True, exist_ok=True)
+            if new_f.exists():
+                new_f.unlink()
+            old_f.replace(new_f)
+
+        # C. Poda Recursiva Segura: Remove a árvore de origem que ficou vazia
+        import shutil
+        try:
+            if mover.src.exists():
+                # Remove arquivos de cache residuais (.pyc) e a árvore de diretórios vazia
+                shutil.rmtree(mover.src, ignore_errors=True)
+        except Exception:
+            pass
+
+        click.echo(f"\n   {Fore.GREEN}{Style.BRIGHT}✔ SUCESSO: Pacote movido e imports atualizados com segurança!{Style.RESET_ALL}")
+
+    click.echo(Fore.CYAN + "════════════════════════════════════════════════════════════════════════════════\n" + Style.RESET_ALL)
+
 
 @refactor_group.command("autopilot")
 @click.argument("path", default=".")
