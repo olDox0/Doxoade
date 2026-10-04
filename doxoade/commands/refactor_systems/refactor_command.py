@@ -6,7 +6,7 @@ import re
 import time
 from doxoade.tools.doxcolors import Fore, Style
 from .refactor_engine import RefactorEngine
-from .refactor_utils import iter_python_files
+from .refactor_utils import iter_python_files, read_text_safe, write_text_safe
 from doxoade.commands.git_systems.git_merge import merge
 
 def _find_project_root(start: Path = Path('.')) -> Path:
@@ -1205,14 +1205,65 @@ def _parse_batch_manifest(manifest_content: str) -> list[tuple[Path, Path]]:
 
     return moves
 
+def _inspect_impacts(root: Path, mapping: dict[str, str]) -> dict[Path, list[tuple[int, str, str, str]]]:
+    """
+    Varre o projeto e localiza cirurgicamente onde imports e strings do CLI mudam.
+    Retorna: { arquivo: [(numero_linha, tipo, linha_antiga, linha_nova), ...] }
+    """
+    impacts: dict[Path, list[tuple[int, str, str, str]]] = {}
+    
+    for py_file in iter_python_files(root):
+        text = read_text_safe(py_file)
+        if not text:
+            continue
+
+        # Fast-gate: se o arquivo não tem nenhuma das palavras-chave, pula em microsegundos
+        if not any(old_mod in text for old_mod in mapping.keys()):
+            continue
+
+        lines = text.splitlines()
+        file_changes = []
+
+        for lineno, line in enumerate(lines, 1):
+            changed = False
+            new_line = line
+
+            for old_mod, new_mod in mapping.items():
+                kind = "IMPORT"
+
+                # 1. Imports formais: from X import ... ou import X ...
+                pattern_from = rf"(\bfrom\s+){re.escape(old_mod)}(\b|\.)"
+                if re.search(pattern_from, new_line):
+                    new_line = re.sub(pattern_from, rf"\1{new_mod}\2", new_line)
+                    changed = True
+
+                pattern_import = rf"(\bimport\s+){re.escape(old_mod)}(\b|\.)"
+                if re.search(pattern_import, new_line):
+                    new_line = re.sub(pattern_import, rf"\1{new_mod}\2", new_line)
+                    changed = True
+
+                # 2. Literais de string / Tabelas de CLI: 'old_mod:func' ou 'old_mod'
+                pattern_str = rf"(['\"]){re.escape(old_mod)}([:\.][\w\.]+)?(['\"])"
+                if re.search(pattern_str, new_line):
+                    new_line = re.sub(pattern_str, rf"\1{new_mod}\2\3", new_line)
+                    changed = True
+                    kind = "STRING/CLI"
+
+                if changed:
+                    file_changes.append((lineno, kind, line.strip(), new_line.strip()))
+                    break
+
+        if file_changes:
+            impacts[py_file] = file_changes
+
+    return impacts
+
+
 @refactor_group.command('batch')
 @click.argument('manifest_file', type=click.Path(exists=True, dir_okay=False, path_type=Path))
-@click.option('--run', is_flag=True, help="Executa a movimentação física e reescrita de imports. Padrão: dry-run.")
-@click.pass_context
-def refactor_batch(ctx, manifest_file: Path, run: bool):
-    """Executa refatorações em lote com predição integral de resultados (estilo RefactorEngine)."""
-    from .refactor_engine import RefactorEngine
-
+@click.option('--run', is_flag=True, help="Aplica a movimentação física e reescrita de imports. Padrão: dry-run.")
+def refactor_batch(manifest_file: Path, run: bool):
+    """Executa refatorações em lote com Previsão Cirúrgica Concentrada de Impactos."""
     manifest_path = Path(manifest_file).resolve()
     root = _find_project_root(manifest_path)
 
@@ -1223,22 +1274,16 @@ def refactor_batch(ctx, manifest_file: Path, run: bool):
         click.secho("  ✘ Nenhuma instrução válida encontrada no manifesto.", fg='red')
         return
 
-    click.echo(Fore.CYAN + Style.BRIGHT + "\n═ REFACTOR BATCH — PREDIÇÃO INTEGRAL DE RESULTADOS ═════════════════════════" + Style.RESET_ALL)
-    click.echo(f"  {Fore.WHITE}📋 Manifesto :{Style.RESET_ALL} {Fore.YELLOW}{manifest_path.name}{Style.RESET_ALL} ({len(moves)} operações planejadas)")
-    click.echo(f"  {Fore.WHITE}📁 Raiz     :{Style.RESET_ALL} {Style.DIM}{root}{Style.RESET_ALL}")
-    click.echo(f"  {Fore.WHITE}🛡️  Modo     :{Style.RESET_ALL} " + (f"{Fore.GREEN}[EXECUÇÃO REAL --run]{Style.RESET_ALL}" if run else f"{Fore.YELLOW}[PREDIÇÃO SEGURA / DRY-RUN]{Style.RESET_ALL}"))
+    mapping: dict[str, str] = {}
+    planned_physical: list[tuple[Path, Path, bool]] = []
 
-    engine = RefactorEngine(base_path=str(root))
-    total_success = 0
-
-    for idx, (src, dst) in enumerate(moves, 1):
+    for src, dst in moves:
         src_path = (root / src) if not src.is_absolute() else src
         if not src_path.exists() and not str(src).startswith("doxoade"):
             src_path = root / "doxoade" / src
         src_path = src_path.resolve()
 
         if not src_path.exists():
-            click.echo(f"\n  {Fore.RED}✘ [PULADO ({idx}/{len(moves)})]{Style.RESET_ALL} Origem não localizada: {src}")
             continue
 
         dst_path = (root / dst) if not dst.is_absolute() else dst
@@ -1246,28 +1291,75 @@ def refactor_batch(ctx, manifest_file: Path, run: bool):
             dst_path = root / "doxoade" / dst
         dst_path = dst_path.resolve()
 
-        click.echo(Fore.CYAN + f"\n┌── [OPERAÇÃO {idx}/{len(moves)}] {src_path.name} ➔ {dst_path.name} " + "─" * 40 + Style.RESET_ALL)
+        old_mod = '.'.join(src_path.relative_to(root).with_suffix('').parts)
+        new_mod = '.'.join(dst_path.relative_to(root).with_suffix('').parts)
+        mapping[old_mod] = new_mod
+        planned_physical.append((src_path, dst_path, dst_path.exists()))
 
-        try:
-            # Aciona exatamente o mesmo pipeline do 'refactor move':
-            # 1. Preview do novo arquivo gerado no destino
-            # 2. Notificação de deleção da origem
-            # 3. Sincronização global com barra "Limpando rastros"
-            # 4. Detecção e Diff em cada arquivo que importar (AST ou strings do CLI)
-            # 5. Selo [DRY-OK]
-            engine.rename_file(src_path, dst_path, dry_run=not run)
-            total_success += 1
-        except Exception as e:
-            click.echo(f"  {Fore.RED}✘ Falha na operação {src_path.name}: {e}{Style.RESET_ALL}")
+    # ── VARREDURA DE IMPACTO CIRÚRGICA ────────────────────────────────
+    impacts = _inspect_impacts(root, mapping)
 
-    click.echo(Fore.CYAN + "\n═ RESUMO DO LOTE ═══════════════════════════════════════════════════════════" + Style.RESET_ALL)
-    click.echo(f"  Operações concluídas : {total_success}/{len(moves)}")
-    if not run:
-        click.echo(f"  {Fore.YELLOW}💡 Predição concluída. Todos os impactos e diffs foram mapeados acima.")
-        click.echo(f"     Para persistir no disco com total segurança: execute adicionando '--run'.{Style.RESET_ALL}")
+    # ── RENDERIZAÇÃO DA PREVISÃO CONCENTRADA ──────────────────────────
+    click.echo(Fore.CYAN + Style.BRIGHT + "\n═ PREVISÃO CIRÚRGICA DO LOTE ══════════════════════════════════════════════════" + Style.RESET_ALL)
+    click.echo(f"  {Fore.WHITE}📋 Manifesto :{Style.RESET_ALL} {Fore.YELLOW}{manifest_path.name}{Style.RESET_ALL} ({len(planned_physical)} arquivos)")
+    click.echo(f"  {Fore.WHITE}📁 Raiz     :{Style.RESET_ALL} {Style.DIM}{root}{Style.RESET_ALL}")
+    click.echo(f"  {Fore.WHITE}🛡️  Modo     :{Style.RESET_ALL} " + (f"{Fore.GREEN}[EXECUÇÃO REAL --run]{Style.RESET_ALL}" if run else f"{Fore.YELLOW}[SIMULAÇÃO / DRY-RUN]{Style.RESET_ALL}"))
+
+    # 1. Movimentações Físicas
+    click.echo(Fore.CYAN + "\n📦 [MOVIMENTAÇÕES FÍSICAS]" + Style.RESET_ALL)
+    for src_p, dst_p, already_exists in planned_physical:
+        status_dest = f"{Fore.YELLOW}(sobrescreverá){Style.RESET_ALL}" if already_exists else f"{Fore.GREEN}(novo arquivo){Style.RESET_ALL}"
+        click.echo(f"   • {src_p.relative_to(root)} ➔ {Fore.CYAN}{dst_p.relative_to(root)}{Style.RESET_ALL} {status_dest}")
+
+    # 2. Resumo Cirúrgico de Imports & Strings do CLI
+    click.echo(Fore.CYAN + f"\n🔍 [IMPACTO EM CONSUMIDORES & TABELAS CLI] ({len(impacts)} arquivo(s) afetado(s))" + Style.RESET_ALL)
+    if not impacts:
+        click.echo(f"   {Style.DIM}(Nenhum arquivo externo precisa de alteração de import){Style.RESET_ALL}")
     else:
-        click.echo(f"  {Fore.GREEN}✔ Todas as movimentações físicas e reescritas de imports foram aplicadas!{Style.RESET_ALL}")
-    click.echo(Fore.CYAN + "════════════════════════════════════════════════════════════════════════════\n" + Style.RESET_ALL)
+        for affected_file, changes in impacts.items():
+            click.echo(f"\n   📄 {Fore.YELLOW}{affected_file.relative_to(root)}{Style.RESET_ALL}")
+            for l_num, kind, old_l, new_l in changes:
+                click.echo(f"      {Fore.CYAN}L{l_num:<4}{Style.RESET_ALL} {Style.DIM}[{kind}]{Style.RESET_ALL}")
+                click.echo(f"         {Fore.RED}- {old_l}{Style.RESET_ALL}")
+                click.echo(f"         {Fore.GREEN}+ {new_l}{Style.RESET_ALL}")
+
+    # 3. Outrem / Ações Secundárias
+    click.echo(Fore.CYAN + "\n⚠️  [AÇÕES SECUNDÁRIAS ('OUTREM')]" + Style.RESET_ALL)
+    click.echo(f"   • {len(planned_physical)} arquivo(s) de origem serão {Fore.RED}DELETADOS{Style.RESET_ALL} após migração.")
+    parent_dirs = {dst_p.parent.relative_to(root) for _, dst_p, _ in planned_physical}
+    for pdir in parent_dirs:
+        click.echo(f"   • Diretório destino verificado: {Fore.WHITE}{pdir}/{Style.RESET_ALL}")
+
+    # 4. Dossiê Executivo Final
+    total_modifications = sum(len(c) for c in impacts.values())
+    click.echo(Fore.CYAN + "\n📊 [DOSSIÊ EXECUTIVO]" + Style.RESET_ALL)
+    click.echo(f"   Movimentações : {len(planned_physical)} arquivos")
+    click.echo(f"   Consumidores  : {len(impacts)} arquivos ({total_modifications} referências atualizadas)")
+    
+    if not run:
+        click.echo(f"\n   {Fore.YELLOW}💡 DRY-RUN CONCLUÍDO. Nenhum arquivo foi alterado no disco.")
+        click.echo(f"      Para persistir exatamente o resumo acima, adicione a flag: {Fore.WHITE}--run{Style.RESET_ALL}")
+    else:
+        # ── APLICAÇÃO REAL (--run) ────────────────────────────────────
+        # A. Atualiza imports nos arquivos consumidores
+        for affected_file, changes in impacts.items():
+            content = read_text_safe(affected_file)
+            lines = content.splitlines()
+            for l_num, _, _, new_l in changes:
+                lines[l_num - 1] = new_l  # Substitui na linha exata preservando o restante
+            write_text_safe(affected_file, "\n".join(lines) + "\n")
+
+        # B. Move arquivos físicos
+        for src_p, dst_p, _ in planned_physical:
+            dst_p.parent.mkdir(parents=True, exist_ok=True)
+            if dst_p.exists():
+                dst_p.unlink()
+            src_p.replace(dst_p)
+
+        click.echo(f"\n   {Fore.GREEN}{Style.BRIGHT}✔ SUCESSO: Todas as movimentações físicas e imports foram persistidos!{Style.RESET_ALL}")
+
+    click.echo(Fore.CYAN + "════════════════════════════════════════════════════════════════════════════════\n" + Style.RESET_ALL)
+
 
 @refactor_group.command('rename-dir')
 @click.argument('src_dir', type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path))

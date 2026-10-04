@@ -77,4 +77,4 @@ def feature_cmd(text, list_features, clear):
 
     add_feature(text)
     click.echo(Fore.GREEN + f"✔ Feature registrada: '{text}'")
-    click.echo(Fore.CYAN + "💡 Ela será incluída automaticamente no próximo 'doxoade save'." + {Style.RESET_ALL})
+    click.echo(Fore.CYAN + "💡 Ela será incluída automaticamente no próximo 'doxoade save'." + Style.RESET_ALL)

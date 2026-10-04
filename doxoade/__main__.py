@@ -31,14 +31,21 @@ def cli(hbc6_audit, hbc6_audit_verbose):
 
 def main():
     # ⚡ ZEUS: TENTATIVA DE DELEGAÇÃO AO DAEMON (ZERO COLD-START)
-    if '--no-daemon' not in sys.argv and os.environ.get('DOXOADE_NO_DAEMON') != '1':
+    use_daemon = False
+    if '--daemon' in sys.argv:
+        sys.argv.remove('--daemon')
+        use_daemon = True
+    elif os.environ.get('DOXOADE_USE_DAEMON') == '1':
+        use_daemon = True
+
+    if use_daemon:
         try:
             from doxoade.tools.engine_daemon.client import dispatch_to_daemon
             exit_code = dispatch_to_daemon(sys.argv, os.getcwd())
             if exit_code is not None:
-                sys.exit(exit_code)  # Sucesso! O daemon fez o trabalho.
+                sys.exit(exit_code)
         except Exception:
-            pass  # Falha na comunicação, cai para o Plano B (Cold Start)
+            pass  # Fallback seguro para o modo tradicional
 
     # 🛑 ÉPOCA ZERO: Marcador inicial absoluto no primeiro instante do processo
     t0_boot = time.perf_counter()

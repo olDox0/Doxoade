@@ -908,7 +908,7 @@ class {class_name}(click.Group):
             'mk': 'doxoade.commands.utils:mk',
             'intelligence': 'doxoade.commands.intelligence_systems.intelligence:intelligence',
             'doctor': 'doxoade.commands.vulcan_cmd.vulcan_command:doctor',
-            'venv': 'doxoade.commands.venv_cmd:venv_cmd',
+'venv': 'doxoade.commands.terminal_sys.venv_cmd:venv_cmd',
         }}
         
         self._lazy_map = {{**self._local_commands, **self._doxoade_commands}}

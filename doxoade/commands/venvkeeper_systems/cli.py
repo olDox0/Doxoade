@@ -103,7 +103,7 @@ class DoxoadeLazyGroup(click.Group):
             'test': 'doxoade.commands.test:test',
             'timeline': 'doxoade.commands.timeline:timeline',
             'venvkeeper': 'doxoade.commands.venvkeeper_systems.venvkeeper:venvkeeper',
-            'venv-up': 'doxoade.commands.venv_up:venv_up',
+'venv-up': 'doxoade.commands.terminal_sys.venv_up:venv_up',
             'verilog': 'doxoade.commands.verilog:verilog',
             'vulcan': 'doxoade.commands.vulcan_cmd.vulcan_command:vulcan_group',
             'webcheck': 'doxoade.commands.webcheck:webcheck',
