@@ -20,19 +20,290 @@ IO_MODULES = {
     'os', 'sys', 'pathlib', 'shutil', 'subprocess', 'socket', 'requests', 'json', 'toml'
 }
 
-def minify_code(code: str, filename: str, no_comments: bool, no_spaces: bool) -> str:
+def compact_python_imports(code: str) -> str:
+    """
+    Concatena declarações consecutivas de 'import' com a mesma indentação em uma linha única.
+    Exemplo:
+        import os
+        import sys
+        import re
+        --> import os, sys, re
+
+    Também agrupa 'from X import A' e 'from X import B' consecutivos do mesmo módulo:
+        from typing import List
+        from typing import Dict
+        --> from typing import List, Dict
+    """
+    lines = code.splitlines()
+    if not lines:
+        return code
+
+    new_lines = []
+    i = 0
+    n = len(lines)
+
+    while i < n:
+        line = lines[i]
+        stripped = line.strip()
+
+        # ── 1. AGRUPAMENTO DE 'import mod1', 'import mod2' ─────────────
+        if (stripped.startswith("import ") and 
+            not stripped.startswith("import (") and 
+            "#" not in line and 
+            ";" not in line):
+            
+            indent = line[:len(line) - len(stripped)]
+            collected_imports = [stripped[len("import "):].strip()]
+
+            j = i + 1
+            while j < n:
+                next_line = lines[j]
+                next_stripped = next_line.strip()
+                next_indent = next_line[:len(next_line) - len(next_stripped)]
+
+                if (next_indent == indent and
+                    next_stripped.startswith("import ") and
+                    not next_stripped.startswith("import (") and
+                    "#" not in next_line and
+                    ";" not in next_line):
+                    
+                    collected_imports.append(next_stripped[len("import "):].strip())
+                    j += 1
+                else:
+                    break
+
+            if len(collected_imports) > 1:
+                joined_items = ", ".join(collected_imports)
+                new_lines.append(f"{indent}import {joined_items}")
+                i = j
+                continue
+
+        # ── 2. AGRUPAMENTO DE 'from X import A', 'from X import B' ─────
+        elif (stripped.startswith("from ") and 
+              " import " in stripped and 
+              not stripped.endswith("(") and 
+              "#" not in line and 
+              ";" not in line):
+            
+            indent = line[:len(line) - len(stripped)]
+            match = re.match(r"^from\s+([\w\.]+)\s+import\s+(.+)$", stripped)
+            if match:
+                mod_name = match.group(1)
+                first_items = match.group(2).strip()
+                collected_from_items = [first_items]
+
+                j = i + 1
+                while j < n:
+                    next_line = lines[j]
+                    next_stripped = next_line.strip()
+                    next_indent = next_line[:len(next_line) - len(next_stripped)]
+
+                    if (next_indent == indent and
+                        next_stripped.startswith(f"from {mod_name} import ") and
+                        not next_stripped.endswith("(") and
+                        "#" not in next_line and
+                        ";" not in next_line):
+                        
+                        next_match = re.match(rf"^from\s+{re.escape(mod_name)}\s+import\s+(.+)$", next_stripped)
+                        if next_match:
+                            collected_from_items.append(next_match.group(1).strip())
+                            j += 1
+                            continue
+                    break
+
+                if len(collected_from_items) > 1:
+                    joined_from = ", ".join(collected_from_items)
+                    new_lines.append(f"{indent}from {mod_name} import {joined_from}")
+                    i = j
+                    continue
+
+        new_lines.append(line)
+        i += 1
+
+    return "\n".join(new_lines)
+    
+def inline_single_statement_blocks(code: str) -> str:
+    """
+    Concatena blocos de instrução única diretamente após ':' na mesma linha.
+    Exemplo:
+        if not path.exists():
+            return None
+        --> if not path.exists(): return None
+    """
+    lines = code.splitlines()
+    if len(lines) < 2:
+        return code
+
+    def get_indent(line: str) -> int:
+        return len(line) - len(line.lstrip())
+
+    def has_balanced_delimiters(line: str) -> bool:
+        parens = line.count('(') - line.count(')')
+        brackets = line.count('[') - line.count(']')
+        braces = line.count('{') - line.count('}')
+        single_quotes = line.count("'") % 2
+        double_quotes = line.count('"') % 2
+        return parens == 0 and brackets == 0 and braces == 0 and single_quotes == 0 and double_quotes == 0
+
+    BLOCK_KEYWORDS = (
+        'if ', 'elif ', 'else:', 'while ', 'for ', 'with ',
+        'try:', 'except', 'finally:', 'def ', 'class '
+    )
+
+    COMPOUND_START = (
+        'if ', 'elif ', 'else:', 'while ', 'for ', 'with ',
+        'try:', 'except', 'finally:', 'def ', 'class ', '@'
+    )
+
+    new_lines = []
+    i = 0
+    n = len(lines)
+
+    while i < n:
+        curr = lines[i]
+        stripped_curr = curr.strip()
+
+        # Checa se a linha atual termina com ':' e é um cabeçalho de bloco válido
+        is_block_header = (
+            stripped_curr.endswith(':') and
+            any(stripped_curr.startswith(kw) for kw in BLOCK_KEYWORDS) and
+            '#' not in curr  # Evita que comentários engulam a instrução inlined
+        )
+
+        if is_block_header and i + 1 < n:
+            # Localiza a próxima linha com conteúdo
+            next_idx = i + 1
+            while next_idx < n and not lines[next_idx].strip():
+                next_idx += 1
+
+            if next_idx < n:
+                nxt = lines[next_idx]
+                stripped_nxt = nxt.strip()
+                indent_curr = get_indent(curr)
+                indent_nxt = get_indent(nxt)
+
+                # O corpo deve estar indentado em relação ao cabeçalho
+                if indent_nxt > indent_curr:
+                    # O corpo deve ser uma instrução simples (não outro bloco)
+                    is_simple_stmt = (
+                        not stripped_nxt.endswith(':') and
+                        not any(stripped_nxt.startswith(kw) for kw in COMPOUND_START) and
+                        has_balanced_delimiters(stripped_nxt)
+                    )
+
+                    if is_simple_stmt:
+                        # Checa se após esta linha o bloco desindenta (garante que é corpo ÚNICO)
+                        after_idx = next_idx + 1
+                        while after_idx < n and not lines[after_idx].strip():
+                            after_idx += 1
+
+                        is_single_body = (
+                            after_idx >= n or
+                            get_indent(lines[after_idx]) <= indent_curr
+                        )
+
+                        if is_single_body:
+                            # ⚡ Concatena na mesma linha após o ':'
+                            inlined = f"{curr} {stripped_nxt}"
+                            new_lines.append(inlined)
+                            i = next_idx + 1
+                            continue
+
+        new_lines.append(curr)
+        i += 1
+
+    return '\n'.join(new_lines)
+
+def strip_py_docstrings(text: str) -> str:
+    """
+    Remove cirurgicamente docstrings de módulos, classes e funções.
+    Dupla camada: AST estrutural + Regex de segurança para blocos triplos.
+    """
+    if not text:
+        return text
+
+    # ── CAMADA 1: Remoção Estrutural via AST (preserva indentação e injeta pass se necessário)
+    try:
+        tree = ast.parse(text)
+        lines = text.splitlines()
+        spans_to_remove = []
+
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Module)):
+                if not node.body:
+                    continue
+                first = node.body[0]
+                if isinstance(first, ast.Expr):
+                    val = getattr(first, 'value', None)
+                    is_str = False
+                    if isinstance(val, ast.Constant) and isinstance(val.value, str):
+                        is_str = True
+                    elif isinstance(val, ast.Str):
+                        is_str = True
+
+                    if is_str:
+                        start = getattr(first, 'lineno', None)
+                        end = getattr(first, 'end_lineno', start)
+                        if start is not None and end is not None:
+                            needs_pass = len(node.body) == 1 and not isinstance(node, ast.Module)
+                            indent = lines[start - 1][:len(lines[start - 1]) - len(lines[start - 1].lstrip())]
+                            spans_to_remove.append((start - 1, end, needs_pass, indent))
+
+        if spans_to_remove:
+            spans_to_remove.sort(key=lambda x: x[0], reverse=True)
+            for start, end, needs_pass, indent in spans_to_remove:
+                if needs_pass:
+                    lines[start:end] = [f"{indent}pass"]
+                else:
+                    del lines[start:end]
+            text = '\n'.join(lines)
+    except Exception:
+        pass  # Se o código estiver truncado, a Camada 2 resolve
+
+    # ── CAMADA 2: Varredura Regex de Segurança (Garante que nenhuma aspa tripla escape)
+    # Remove qualquer bloco """...""" ou '''...''' isolado
+    pattern = r'(?m)^[ \t]*([ruRU]?("""[\s\S]*?"""|\'\'\'[\s\S]*?\'\'\'))[ \t]*\n?'
+    text = re.sub(pattern, '', text)
+
+    return text
+
+
+def minify_code(code: str, filename: str, no_comments: bool, no_spaces: bool, no_docstrings: bool = False, compact_blocks: bool = False, compact_imports: bool = False) -> str:
     """
     Pipeline de Minificação PASC-11 (Token Saver).
     Suporta Python, C/C++, JS/TS, HTML, CSS e Assembly (.s).
     """
     import re
+
+    # 0. CAMADA DE REMOÇÃO DE DOCSTRINGS (-nd)
+    if no_docstrings:
+        if filename.endswith('.py'):
+            code = strip_py_docstrings(code)
+        elif filename.endswith(('.c', '.cpp', '.h', '.hpp')):
+            code = re.sub(r'/\*\*[\s\S]*?\*/', '', code)
+        elif filename.endswith('.lua'):
+            code = re.sub(r'--\[\[[\s\S]*?\]\]', '', code)
+
+    # 0.4. CAMADA DE CONCATENAÇÃO DE IMPORTS (-ci)
+    if compact_imports and filename.endswith('.py'):
+        code = compact_python_imports(code)
+
+    # 0.5. CAMADA DE CONCATENAÇÃO DE BLOCOS ÚNICOS APÓS ':' (-cb)
+    if compact_blocks and filename.endswith('.py'):
+        code = inline_single_statement_blocks(code)
+
     lines = code.splitlines()
-    if not lines: return code
-    
-    # Preserva as 2 primeiras linhas (Shebang, encoding, referências de arquivo)
-    header = lines[:2] if len(lines) >= 2 else lines
-    body = lines[2:] if len(lines) >= 2 else []
-    
+    if not lines: 
+        return code
+
+    # Preserva Shebang ou encoding da primeira linha se existir
+    if lines and lines[0].startswith(("#!", "# -*-")):
+        header = [lines[0]]
+        body = lines[1:]
+    else:
+        header = []
+        body = lines
+
     # 1. CAMADA DE REMOÇÃO DE COMENTÁRIOS (-nc)
     if no_comments:
         if filename.endswith('.py'):
@@ -49,21 +320,18 @@ def minify_code(code: str, filename: str, no_comments: bool, no_spaces: bool) ->
             body = temp_body.splitlines()
         elif filename.endswith(('.html', '.css')):
             temp_body = '\n'.join(body)
-            temp_body = re.sub(r'<!--.*?-->', '', temp_body, flags=re.DOTALL) # HTML
-            temp_body = re.sub(r'/\*.*?\*/', '', temp_body, flags=re.DOTALL) # CSS
+            temp_body = re.sub(r'<!--.*?-->', '', temp_body, flags=re.DOTALL)
+            temp_body = re.sub(r'/\*.*?\*/', '', temp_body, flags=re.DOTALL)
             body = temp_body.splitlines()
         elif filename.endswith('.s'):
             body = [re.sub(r';.*$', '', line) for line in body]
 
     # 2. CAMADA DE REMOÇÃO DE ESPAÇOS (-ns)
     if no_spaces:
-        # Remove linhas vazias e faz strip lateral (esquerda e direita)
-#        body = [l.strip() for l in body if l.strip()]
         body = [l for l in body if l.strip()]
     else:
-        # Apenas remove espaços no final da linha (trailing whitespaces)
         body = [l.rstrip() for l in body]
-        
+
     return '\n'.join(header + body)
 
 def get_ignore_spec(root: str, extra_patterns: list = None):
@@ -116,7 +384,8 @@ def get_ignore_spec(root: str, extra_patterns: list = None):
     return pathspec.PathSpec.from_lines('gitwildmatch', patterns)
 
 class ChiefInsightVisitor(ast.NodeVisitor):
-    def __init__(self):
+    def __init__(self, no_docstrings: bool = False):
+        self.no_docstrings = no_docstrings
         self.stats = {
             "classes":      [], "functions": [], 
             "imports":      {"stdlib": [], "external": []},
@@ -150,10 +419,12 @@ class ChiefInsightVisitor(ast.NodeVisitor):
             "io_flow":   self._detect_io_calls(node) # Novo: Rastreio de Fluxo
         })
     def visit_FunctionDef(self, node):
-        doc = ast.get_docstring(node) or ""
-        if doc:
-            self.stats["docstrings"][node.name] = doc
-        self._analyze_func(node)   # delega — salva dict consistente, conta mpot corretamente
+        if not self.no_docstrings:
+            doc = ast.get_docstring(node) or ""
+            if doc:
+                self.stats["docstrings"][node.name] = doc
+        self._analyze_func(node)
+        self.generic_visit(node)
         self.generic_visit(node)
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
         self._analyze_func(node)
@@ -237,11 +508,13 @@ def get_god_glossary():
     
 class SemanticAnalyzer:
     """Extrai a estrutura lógica para tokens de IA (OSL 4 / PASC 8.10)."""
-    def __init__(self, code):
+    def __init__(self, code, no_docstrings: bool = False):
         self.code = code
+        self.no_docstrings = no_docstrings
         try:
             self.tree = ast.parse(code)
-        except Exception as e:
+        except Exception:
+            self.tree = None
             import sys as _dox_sys, os as _dox_os
             exc_obj, exc_tb = _dox_sys.exc_info() #exc_type
             f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
@@ -274,35 +547,48 @@ class SemanticAnalyzer:
         if not self.tree: 
             return {"status": "corrupt", "classes": [], "functions": [], "complexity": 0}
         
-        # 🆕 Extração de Funções com Docstrings (PASC 13.1)
         funcs = []
         for n in ast.walk(self.tree):
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                doc = ast.get_docstring(n)
+                if self.no_docstrings:
+                    doc_preview = ""
+                else:
+                    doc = ast.get_docstring(n)
+                    doc_preview = doc.split('\n')[0] if doc else ""
                 funcs.append({
                     "name": n.name,
-                    "docstring": doc.split('\n')[0] if doc else "" # Pega apenas a primeira linha (resumo)
+                    "docstring": doc_preview
                 })
                 
         return {
             "status": "stable",
             "classes":    [n.name for n in ast.walk(self.tree) if isinstance(n, ast.ClassDef)],
-            "functions":  funcs, # 🆕 Agora é uma lista de dicts
+            "functions":  funcs,
             "complexity":  len([n for n in ast.walk(self.tree) if isinstance(n, (ast.If, ast.For, ast.While))])
         }
 
+    # def get_docstrings(self):
+    #     """Mapeia docstrings a símbolos para entendimento contextual."""
+    #     docs = {}
+    #     if not self.tree or self.no_docstrings: 
+    #         return docs
+    #     for node in ast.walk(self.tree):
+    #         if isinstance(node, (ast.FunctionDef, ast.ClassDef, ast.Module)):
+    #             doc = ast.get_docstring(node)
+    #             if doc:
+    #                 name = getattr(node, 'name', 'module_root')
+    #                 docs[name] = {"intent": doc.split('\n')[0], "full_doc": doc}
+    #     return docs
+
     def get_docstrings(self):
-        """Mapeia docstrings a símbolos para entendimento contextual."""
+        if self.no_docstrings:
+            return {}
         docs = {}
-        if not self.tree: return docs
-        for node in ast.walk(self.tree):
-            if isinstance(node, (ast.FunctionDef, ast.ClassDef, ast.Module)):
-                doc = ast.get_docstring(node)
-                if doc:
-                    name = getattr(node, 'name', 'module_root')
-                    docs[name] = {"intent": doc.split('\n')[0], "full_doc": doc}
+        blocks = re.findall(r'/\*\*?(.*?)\*/', self.code, re.DOTALL)
+        if blocks:
+            docs["c_cpp_comments"] = {"intent": "Extracted block comments", "full_doc": "\n".join(blocks[:3])}
         return docs
-        
+
 class NexusThothMapper:
     """Mapeia a topologia do código para o panteão Doxoade (AI-Ready)."""
     GOD_MAP = {
@@ -324,12 +610,12 @@ class NexusThothMapper:
 
 
 class CSemanticAnalyzer:
-    """Extrai a estrutura lógica para tokens de IA de arquivos C/C++ via Regex (PASC 8.15)."""
-    def __init__(self, code):
+    def __init__(self, code, no_docstrings: bool = False):
         self.code = code
+        self.no_docstrings = no_docstrings
         self.classes = []
         self.functions = []
-        self.includes =[]
+        self.includes = []
         self.complexity = 1
         self._parse()
 

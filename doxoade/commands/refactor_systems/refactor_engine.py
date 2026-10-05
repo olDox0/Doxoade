@@ -168,8 +168,9 @@ class RefactorEngine:
                         from .refactor_preview import preview_file_change
                         preview_file_change(fpath, "".join(lines), "".join(new_lines))
                     else:
-                        with open(fpath, 'w', encoding='utf-8') as f:
-                            f.writelines(new_lines)
+                        write_text_safe(fpath, "".join(lines))
+                        # with open(fpath, 'w', encoding='utf-8') as f:
+                        #     f.writelines(new_lines)
                         list(self.ensure_nexus_headers(fpath, force=True))
                     yield str(fpath), "Fixed"
             except Exception as e:
@@ -624,7 +625,8 @@ class RefactorEngine:
                 new_lines.append(new_line)
 
             if changed:
-                file_path.write_text("".join(new_lines), encoding='utf-8')
+                write_text_safe(file_path, "".join(new_lines))
+#                file_path.write_text("".join(new_lines), encoding='utf-8')
         except Exception as e:
             click.echo(f"  [AVISO] Falha ao purificar {file_path.name}: {e}")
             

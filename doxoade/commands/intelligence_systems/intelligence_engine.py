@@ -20,8 +20,8 @@ from doxoade.commands.intelligence_systems.intelligence_lua_truncation import an
 CRITICAL_THRESHOLD = datetime(2026, 2, 14, 21, 0, 0)
 SOURCE_CHAR_LIMIT = int(os.environ.get("DOXOADE_SOURCE_LIMIT", "0"))  # 0 = ilimitado
 
-def analyze_file_chief(file_path: str, project_root: str, docs=False, source=False) -> dict:
-    """Motor de Scan Nexus v100.1 (PASC 1.3 Compliance c/ C/C++, HTML, CSS, JS/TS)."""
+def analyze_file_chief(file_path: str, project_root: str, docs=False, source=False, no_docstrings=False) -> dict:
+    """Motor de Scan Nexus v100.1 com suporte a exclusão de docstrings (-nd)."""
     rel_path = os.path.relpath(file_path, project_root).replace('\\', '/')
     
     data = {
@@ -30,16 +30,15 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
         "god_assignment": "Unknown"
     }
     
-#    valid_exts = ('.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx', '.pyd', '.so', '.toml', '.md', '.s', '.json', '.txt' )
     valid_exts = (
         '.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', 
         '.js', '.jsx', '.ts', '.tsx', '.pyd', '.so', '.toml', 
         '.md', '.s', '.json', '.txt', '.lua'
     )
     if not file_path.endswith(valid_exts): return data
+
     try:
-        # --- NOVO: CAPTURA DE BINÁRIOS (VULCAN NATIVE) ---
-        if file_path.endswith(('.pyd', '.so', '.dll', '.exe')): # Adicionei dll/exe de bônus
+        if file_path.endswith(('.pyd', '.so', '.dll', '.exe')):
             data.update({
                 "status": "native_compiled",
                 "complexity": 0,
@@ -54,7 +53,6 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
 
-        # 🐺 TRATAMENTO ESPECÍFICO PARA LUA (bypass do checker genérico)
         if file_path.endswith('.lua'):
             trunc_check = analyze_lua_integrity(content)
         else:
@@ -69,7 +67,6 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
                 "mpot_4_violations": 0,
                 "debt_tags": []
             })
-            # 🆕 Mesmo truncado, inclui o source disponível para diagnóstico forense
             if source and content:
                 data["source_minified"] = content if SOURCE_CHAR_LIMIT == 0 else content[:SOURCE_CHAR_LIMIT]
             return data            
@@ -77,7 +74,7 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
         is_python = file_path.endswith('.py')
         is_html = file_path.endswith('.html')
         is_css = file_path.endswith('.css')
-        is_js = file_path.endswith(('.js', '.jsx', '.ts', '.tsx')) # Engloba ecossistema JS
+        is_js = file_path.endswith(('.js', '.jsx', '.ts', '.tsx'))
         is_toml = file_path.endswith('.toml')
         is_md = file_path.endswith('.md')
         is_asm = file_path.endswith('.s')
@@ -86,10 +83,11 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
         is_lua = file_path.endswith('.lua')
         
         if is_python:
-            sem = SemanticAnalyzer(content)
+            # 👈 Repassa no_docstrings para o analisador e visitor
+            sem = SemanticAnalyzer(content, no_docstrings=no_docstrings)
             data.update(sem.get_summary())
 
-            visitor = ChiefInsightVisitor()
+            visitor = ChiefInsightVisitor(no_docstrings=no_docstrings)
             if sem.tree:
                 visitor.visit(sem.tree)
             all_imports = visitor.stats["imports"]["stdlib"] + visitor.stats["imports"]["external"]
@@ -123,58 +121,70 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
             data["debt_tags"]         = find_debt_tags(content) 
 
         elif is_js:
-            # NOVO: FLUXO JS/TS
             sem_js = JSSemanticAnalyzer(content)
             data.update(sem_js.get_summary())
-            # Envia as dependências mapeadas para tentar inferir Deus Regente (ex: front vs back)
             data["god_assignment"] = NexusThothMapper.identify(rel_path, sem_js.imports)
             data["mpot_4_violations"] = 0 
-            data["debt_tags"]         = find_debt_tags(content) # Suporta // TODO e /* TODO */ nativamente
+            data["debt_tags"]         = find_debt_tags(content)
 
         elif is_toml:
             sem_toml = TOMLSemanticAnalyzer(content)
             data.update(sem_toml.get_summary())
-            data["god_assignment"] = "Hades" # Configurações/Storage
+            data["god_assignment"] = "Hades"
             data["mpot_4_violations"] = 0
             data["debt_tags"] = []
 
         elif is_md:
             sem_md = MDSemanticAnalyzer(content)
             data.update(sem_md.get_summary())
-            data["god_assignment"] = "Dionísio" # Documentação/Artes
+            data["god_assignment"] = "Dionísio"
             data["mpot_4_violations"] = 0
             data["debt_tags"] = []
 
         elif is_asm:
             sem_asm = AssemblySemanticAnalyzer(content)
             data.update(sem_asm.get_summary())
-            data["god_assignment"] = "Vulcan" # Baixo nível/Nativo
+            data["god_assignment"] = "Vulcan"
             data["mpot_4_violations"] = 0
-            data["debt_tags"] = find_debt_tags(content) # Pega ; TODO em assembly
+            data["debt_tags"] = find_debt_tags(content)
 
         elif is_json:
             sem_json = JSONSemanticAnalyzer(content)
             data.update(sem_json.get_summary())
-            data["god_assignment"] = "Hades" # Dados estruturados
+            data["god_assignment"] = "Hades"
             data["mpot_4_violations"] = 0
             data["debt_tags"] = []
 
         elif is_txt:
             sem_txt = TXTSemanticAnalyzer(content)
             data.update(sem_txt.get_summary())
-            data["god_assignment"] = "Dionísio" # Texto puro
+            data["god_assignment"] = "Dionísio"
             data["mpot_4_violations"] = 0
-            data["debt_tags"] = find_debt_tags(content) # Pega TODO/FIXME em txt
+            data["debt_tags"] = find_debt_tags(content)
 
-        else: # Fallback para C/C++
-            sem_c = CSemanticAnalyzer(content)
+        else: # C/C++
+            # 👈 Repassa no_docstrings
+            sem_c = CSemanticAnalyzer(content, no_docstrings=no_docstrings)
             data.update(sem_c.get_summary())
             data["god_assignment"] = NexusThothMapper.identify(rel_path, sem_c.includes)
             data["mpot_4_violations"] = 0
             data["debt_tags"] = find_debt_tags(content)
 
-        if source: 
-            data["source_minified"] = content[:10000]
+        if source:
+            src_clean = content
+            if no_docstrings:
+                if is_python:
+                    from doxoade.commands.intelligence_systems.intelligence_utils import strip_py_docstrings
+                    src_clean = strip_py_docstrings(src_clean)
+                elif file_path.endswith(('.c', '.cpp', '.h', '.hpp')):
+                    src_clean = re.sub(r'/\*\*[\s\S]*?\*/', '', src_clean)
+                elif file_path.endswith('.lua'):
+                    src_clean = re.sub(r'--\[\[[\s\S]*?\]\]', '', src_clean)
+
+            if SOURCE_CHAR_LIMIT > 0:
+                data["source_minified"] = src_clean[:SOURCE_CHAR_LIMIT]
+            else:
+                data["source_minified"] = src_clean
         
     except Exception as e:
         data["error"] = str(e)

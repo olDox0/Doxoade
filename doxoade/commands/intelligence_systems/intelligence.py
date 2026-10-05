@@ -25,32 +25,36 @@ VALID_EXTS = (
     '.pyd', '.so', '.toml', '.md', '.s', '.json', '.txt', '.lua' )
 
 @click.group('intelligence', invoke_without_command=True, context_settings=CONTEXT_SETTINGS)
-@click.option('--docs',       '-d', is_flag=True,  help="Extrai docstrings.")
-@click.option('--source',     '-s', is_flag=True,  help="Inclui código fonte.")
-@click.option('--no-comments','-nc',is_flag=True,  help="Remove comentários.")
-@click.option('--no-spaces',  '-ns',is_flag=True,  help="Remove linhas em branco (Token Saver).") # 🆕 NOVO
-@click.option('--concatenate','-c', is_flag=True,  help="Minifica o JSON.")
-@click.option('--ai-export',  '-ai',is_flag=True,  help="Gera XML para LLMs.")
-@click.option('--ia-qwen',    '-iq',is_flag=True,  help="Gera XML nativo para Qwen (tool_call format).")
-@click.option('--output',     '-o', default='chief_dossier.json', help="Saída do dossiê.")
-@click.option('--focus',      '-f', type=click.Choice(['vulcan', 'check', 'economic']))
-@click.option('--exclude',    '-x', multiple=True, help="Pastas ou arquivos a ignorar.")
-@click.option('--ext-exclude','-xe', multiple=True, help="Extensões específicas a ignorar.") # 🆕 NOVO
-@click.option('--analyze',    '-a', is_flag=True,  help="Auditoria de Cobertura.")
-@click.option('--verbose',    '-v', is_flag=True,  help="Modo verboso.")
-@click.option('--graph',      '-g', is_flag=False, flag_value=1, default=0, type=int, help="Inclui arquivos relacionados (grafo de dependências). Nível de profundidade (padrão 1).")
-@click.option('--manifest',   '-m', is_flag=True, help="🦉 [THOTH] Gera o manifesto JSON de comandos para IAs (Tool Use).")
+@click.option('--docs',           '-d',  is_flag=True, help="Extrai docstrings.")
+@click.option('--source',         '-s',  is_flag=True, help="Inclui código fonte.")
+@click.option('--no-comments',    '-nc', is_flag=True, help="Remove comentários.")
+@click.option('--no-spaces',      '-ns', is_flag=True, help="Remove linhas em branco (Token Saver).")
+@click.option('--no-docstrings',  '-nd', is_flag=True, help="Exclui docstrings e blocos de comentários do relatório.")
+@click.option('--compact-blocks', '-cb', is_flag=True, help="Concatena instruções de linha única após ':' (Token/Space Saver).")
+@click.option('--compact-imports','-ci', is_flag=True, help="Concatena declarações consecutivas de 'import' na mesma linha (Token Saver).")
+@click.option('--level',          '-l',  default=None, type=int, help="Profundidade máxima de diretórios a inspecionar (ex: -l 1 apenas raiz, -l 2 raiz + 1 subnível).")  # 👈 NOVA FLAG
+@click.option('--concatenate',    '-c',  is_flag=True, help="Minifica o JSON.")
+@click.option('--ai-export',      '-ai', is_flag=True, help="Gera XML para LLMs.")
+@click.option('--ia-qwen',        '-iq', is_flag=True, help="Gera XML nativo para Qwen (tool_call format).")
+@click.option('--output',         '-o',  default='chief_dossier.json', help="Saída do dossiê.")
+@click.option('--focus',          '-f',  type=click.Choice(['vulcan', 'check', 'economic']))
+@click.option('--exclude',        '-x',  multiple=True, help="Pastas ou arquivos a ignorar.")
+@click.option('--ext-exclude',    '-xe', multiple=True, help="Extensões específicas a ignorar.")
+@click.option('--analyze',        '-a',  is_flag=True, help="Auditoria de Cobertura.")
+@click.option('--verbose',        '-v',  is_flag=True, help="Modo verboso.")
+@click.option('--graph',          '-g',  is_flag=False, flag_value=1, default=0, type=int, help="Inclui arquivos relacionados (grafo de dependências). Nível de profundidade (padrão 1).")
+@click.option('--manifest',       '-m',  is_flag=True, help="🦉 [THOTH] Gera o manifesto JSON de comandos para IAs (Tool Use).")
 @click.argument('paths', nargs=-1, type=click.Path(exists=True))
 @click.pass_context
-def intelligence(ctx, docs, source, no_comments, no_spaces, concatenate, ai_export, ia_qwen, output, focus, exclude, ext_exclude, analyze, verbose, manifest, paths, graph):
+def intelligence(ctx, docs, source, no_comments, no_spaces, no_docstrings, level, compact_blocks, compact_imports, concatenate, ai_export, ia_qwen, output, focus, exclude, ext_exclude, analyze, verbose, manifest, paths, graph):
     """Módulo de Inteligência Topológica (v95.6 - Qwen Ready)."""
     _sonda_contrato = ctx.params['graph']
     if analyze:
-        _run_analyze_coverage(paths, exclude, verbose, ext_exclude)
+        _run_analyze_coverage(paths, exclude, verbose, ext_exclude, level=level)
         return
 
     if manifest:
-        generate_manifest() # XML é o padrão absoluto
+        generate_manifest()
         return
 
     if ctx.invoked_subcommand is None:
@@ -58,33 +62,22 @@ def intelligence(ctx, docs, source, no_comments, no_spaces, concatenate, ai_expo
         try:
             _run_dossier_scan(
                 scan_paths, output, docs, source,
-                no_comments, no_spaces, concatenate, focus, ai_export, ia_qwen, ctx, exclude, ext_exclude, graph
+                compact_imports, no_comments, no_spaces, no_docstrings, compact_blocks, concatenate, focus, ai_export, ia_qwen, ctx, exclude, ext_exclude, graph, level,
             )
         except Exception:
             error_data = traceback.format_exc()
             activate_protocol(error_data)
             ctx.exit(1)
 
-@intelligence.command('recover')
-@click.option('--dir', 'backup_path', required=True, help="Pasta de backup do NPP.")
-@click.option('--out', 'output_path', default='recovery_zone', help="Destino.")
-def recover(backup_path, output_path):
-    """Resgata versões estáveis (Protocolo Ma'at)."""
-    from .intelligence_systems.recovery_engine import run_recovery_mission
-    click.echo("\033[93m🧐 Iniciando Resgate: Material Estável (Janela Ma'at)\033[0m")
-    success, msg = run_recovery_mission(backup_path, output_path)
-    if success: click.echo(f"\033[92m✅ {msg}\033[0m")
-    else: click.echo(f"\033[91m✘ {msg}\033[0m")
-
-def _run_dossier_scan(scan_paths, output, include_docs, include_source, no_comments, no_spaces, concat, focus, ai_export, ia_qwen, ctx, cli_excludes, ext_excludes, graph_depth):
+def _run_dossier_scan(scan_paths, output, include_docs, include_source, compact_imports, no_comments, no_spaces,
+                      no_docstrings, compact_blocks, concat, focus, ai_export, ia_qwen, ctx, cli_excludes,
+                      ext_excludes, graph_depth, level=None):
     from doxoade.commands.intelligence_systems.intelligence_engine import analyze_file_chief
-    # 🆕 CORREÇÃO: Importar minify_code em vez de strip_comments
     from doxoade.commands.intelligence_systems.intelligence_utils import minify_code, get_ignore_spec 
     
     root = _find_project_root(os.getcwd())
     console = Console()
     
-    # Fusão de Blacklists (TOML + CLI Paths + CLI Extensions)
     extra_patterns = list(cli_excludes)
     if ext_excludes:
         for ext in ext_excludes:
@@ -95,8 +88,9 @@ def _run_dossier_scan(scan_paths, output, include_docs, include_source, no_comme
     
     with ExecutionLogger('intelligence', root, ctx.params):
         console.print("[bold gold3]🔍 Doxoade Chief Insight v95.6 (Qwen Ready)[/bold gold3]")
+        if level and level > 0:
+            console.print(f"[bold cyan]📁 Filtro de Nível (--level): {level} nível(is) a partir do alvo[/bold cyan]")
         
-        # 🔧 CORREÇÃO: Adicionar '.lua' na lista local de extensões
         valid_exts = (
             '.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx',
             '.pyd', '.so', '.toml', '.md', '.s', '.json', '.txt', '.lua' 
@@ -109,7 +103,15 @@ def _run_dossier_scan(scan_paths, output, include_docs, include_source, no_comme
                 all_files_raw.append(p_abs)
             else:
                 nav = DNM(p_abs)
-                all_files_raw.extend(nav.scan(extensions=list(valid_exts)))
+                scanned = nav.scan(extensions=list(valid_exts))
+                
+                # ⚡ FILTRO DE PROFUNDIDADE CIRÚRGICO (--level / -l)
+                if level and level > 0:
+                    scanned = [
+                        f for f in scanned
+                        if len(Path(os.path.relpath(f, p_abs)).parts) <= level
+                    ]
+                all_files_raw.extend(scanned)
                 
         unique_files = []
         for f in dict.fromkeys(all_files_raw):
@@ -117,7 +119,6 @@ def _run_dossier_scan(scan_paths, output, include_docs, include_source, no_comme
             if not ignore_spec.match_file(rel_path):
                 unique_files.append(f)
                 
-        # 🆕 --- GRAFO DE DEPENDÊNCIAS ---
         neighbors_map = {}
         if graph_depth > 0:
             from doxoade.commands.intelligence_systems.graph_builder import get_graph_neighbors
@@ -134,27 +135,27 @@ def _run_dossier_scan(scan_paths, output, include_docs, include_source, no_comme
                         f"[bold green]   ↳ {len(new_files)} arquivo(s) "
                         f"relacionado(s) descoberto(s)[/bold green]"
                     )
-                # Injeta os arquivos descobertos no scan principal
                 unique_files.extend(new_files)
-                # Remove duplicatas mantendo ordem
                 unique_files = list(dict.fromkeys(unique_files))
             except Exception as e:
                 console.print(f"[bold red]   ⚠ Grafo falhou: {e}[/bold red]")
                 neighbors_map = {}
-        # -------------------------------------------
 
         dossier_files = []
         with click.progressbar(unique_files, label='[VULCAN:INTEL]') as bar:
             for f in bar:
                 try:
-                    res = analyze_file_chief(f, root, docs=include_docs, source=include_source)
+                    # 👈 Passa no_docstrings
+                    res = analyze_file_chief(f, root, docs=include_docs, source=include_source, no_docstrings=no_docstrings)
                     if res and isinstance(res, dict) and 'size' in res:
-                        # 🆕 PIPELINE DE MINIFICAÇÃO (-nc e -ns)
                         src = res.get('source_minified')
-                        if src and (no_comments or no_spaces):
-                            res['source_minified'] = minify_code(src, f, no_comments, no_spaces)
-                        
-                        # 🆕 ANEXA O GRAFO AO RELATÓRIO (Convertendo caminhos absolutos para relativos)
+                        if src and (no_comments or no_spaces or no_docstrings or compact_blocks):
+                            res['source_minified'] = minify_code(
+                                src, f, no_comments, no_spaces, 
+                                no_docstrings=no_docstrings, 
+                                compact_blocks=compact_blocks,
+                                compact_imports=compact_imports
+                            )
                         if graph_depth > 0 and f in neighbors_map:
                             res['graph_neighbors'] = [
                                 os.path.relpath(x, root).replace('\\', '/') 
@@ -164,17 +165,16 @@ def _run_dossier_scan(scan_paths, output, include_docs, include_source, no_comme
                 except Exception:
                     continue
 
-        # Passa graph_depth e include_source para o salvador do relatório
-        _save_report(dossier_files, output, root, concat, focus, ai_export, ia_qwen, console, graph_depth, include_source)
+        _save_report(dossier_files, output, root, concat, focus, ai_export, ia_qwen, console, graph_depth, include_source, no_docstrings)
 
-def _save_report(files, output, root, concat, focus, ai_export, ia_qwen, console, graph_depth=0, include_source=False):
+
+def _save_report(files, output, root, concat, focus, ai_export, ia_qwen, console, graph_depth=0, include_source=False, no_docstrings=False):
     from datetime import datetime, timezone
     
     report_files = []
     economic_summary = {}
     report_type = "nexus_intelligence_report"
     
-    # Filtering logic based on 'focus'
     if focus:
         report_type = f"{focus}_intelligence_report"
         console.print(f"[bold yellow]⚡ Gerando Relatório Focado: {focus.upper()}[/bold yellow]")
@@ -185,22 +185,15 @@ def _save_report(files, output, root, concat, focus, ai_export, ia_qwen, console
         
         for f in files:
             include_file = True
-            
             if focus == 'vulcan':
                 god_assignment = f.get("god_assignment", "Unknown")
                 complexity = f.get("complexity", 0)
-                if god_assignment in ["Anúbis", "Zeus", "Atena"] or complexity > 10:
-                    include_file = True
-                else:
-                    include_file = False
+                include_file = god_assignment in ["Anúbis", "Zeus", "Atena"] or complexity > 10
             elif focus == 'check':
                 mpot_violations = f.get("mpot_4_violations", 0)
                 debt_tags = f.get("debt_tags", [])
                 complexity = f.get("complexity", 0)
-                if mpot_violations > 0 or len(debt_tags) > 0 or complexity > 15:
-                    include_file = True
-                else:
-                    include_file = False
+                include_file = mpot_violations > 0 or len(debt_tags) > 0 or complexity > 15
             elif focus == 'economic':
                 include_file = True
             
@@ -229,7 +222,7 @@ def _save_report(files, output, root, concat, focus, ai_export, ia_qwen, console
                     "complexity": f.get("complexity", 0),
                     "functions_count": len(f.get("functions", [])),
                     "classes_count": len(f.get("classes", [])),
-                    "docstring_intent": f.get("docstring_intent", "N/A"),
+                    "docstring_intent": "N/A" if no_docstrings else f.get("docstring_intent", "N/A"),
                     "debt_tags_count": len(f.get("debt_tags", [])),
                     "mpot_violations_count": f.get("mpot_4_violations", 0)
                 })
@@ -253,7 +246,6 @@ def _save_report(files, output, root, concat, focus, ai_export, ia_qwen, console
         economic_summary["total_graph_edges"] = total_graph_edges
         economic_summary["graph_depth"] = graph_depth
 
-    # 🆕 Injeção do Glossário de Deuses
     from doxoade.commands.intelligence_systems.intelligence_utils import get_god_glossary
     
     report = {
@@ -262,25 +254,25 @@ def _save_report(files, output, root, concat, focus, ai_export, ia_qwen, console
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "target_project": os.path.basename(root),
             "token_optimization": "ENABLED" if concat else "DISABLED",
-            "focus_applied": focus if focus else "NONE"
+            "focus_applied": focus if focus else "NONE",
+            "no_docstrings": no_docstrings
         },
-        "god_glossary": get_god_glossary(),  # 🆕 Glossário embutido
+        "god_glossary": get_god_glossary(),
         "economic_summary": economic_summary,
         "codebase_map": report_files
     }
     
-    # DESVIO PARA FORMATO QWEN (PRIORIDADE MÁXIMA)
     if ia_qwen:
         qwen_output = output.replace('.json', '') + "_qwen.xml" if output.endswith('.json') else output + "_qwen.xml"
         _save_qwen_report(report, qwen_output, console)
     elif ai_export:
         ai_output = output.replace('.json', '') + "_llm.xml" if output.endswith('.json') else output + "_llm.xml"
-        _save_llm_report(report, ai_output, console, include_source)
-#        _save_report(dossier_files, output, root, concat, focus, ai_export, ia_qwen, console, graph_depth, include_source)
+        _save_llm_report(report, ai_output, console, include_source=include_source, no_docstrings=no_docstrings)
     else:
         with open(output, 'w', encoding='utf-8') as f:
             json.dump(report, f, indent=None if concat else 2, ensure_ascii=False)
         console.print(f"\n[bold green]✅ Dossiê NEXUS Gerado: {output}[/bold green]")
+
 
 def _calculate_distribution(files):
     dist = {}
@@ -289,10 +281,8 @@ def _calculate_distribution(files):
         dist[g] = dist.get(g, 0) + 1
     return dist
 
-#def _save_llm_report(report, output, console, include_source):
-def _save_llm_report(report_data, output_path, console, include_source=False):
+def _save_llm_report(report_data, output_path, console, include_source=False, no_docstrings=False):
     """Traduz o JSON arquitetural para um formato XML bem indentado e legível (PASC 11.0)."""
-    
     lines = []
     meta = None
     for key in report_data.keys():
@@ -314,7 +304,6 @@ def _save_llm_report(report_data, output_path, console, include_source=False):
         lines.append(f'    <average_complexity>{eco.get("average_complexity_in_report", 0):.2f}</average_complexity>')
         lines.append(f'    <total_debt_tags>{eco.get("total_debt_tags_in_report", 0)}</total_debt_tags>')
         
-        # 🆕 Métricas do grafo
         if "total_graph_edges" in eco:
             lines.append(f'    <total_graph_edges>{eco.get("total_graph_edges", 0)}</total_graph_edges>')
             lines.append(f'    <graph_depth>{eco.get("graph_depth", 0)}</graph_depth>')
@@ -326,7 +315,6 @@ def _save_llm_report(report_data, output_path, console, include_source=False):
         lines.append('    </god_distribution>')
         lines.append('  </project_summary>')
         
-        # 🆕 Glossário de Deuses
         glossary = report_data.get("god_glossary", {})
         if glossary:
             lines.append('  <god_glossary>')
@@ -351,8 +339,8 @@ def _save_llm_report(report_data, output_path, console, include_source=False):
             
             funcs = f.get('functions', [])
             if funcs:
-                # 🛡️ Se -s (source) está ativo, não inclui docstrings (já estão no código)
-                if include_source:
+                # 🛡️ Se -s (source) ou -nd (no-docstrings) está ativo, formata lista compacta
+                if include_source or no_docstrings:
                     funcs_str = []
                     for fn in funcs:
                         if isinstance(fn, str): 
@@ -363,7 +351,6 @@ def _save_llm_report(report_data, output_path, console, include_source=False):
                             funcs_str.append(str(getattr(fn, 'name', fn)))
                     lines.append(f'      <functions>{", ".join(funcs_str)}</functions>')
                 else:
-                    # Inclui docstrings quando -s NÃO está ativo
                     has_docs = any(isinstance(fn, dict) and fn.get('docstring') for fn in funcs)
                     if has_docs:
                         lines.append('      <functions>')
@@ -390,7 +377,6 @@ def _save_llm_report(report_data, output_path, console, include_source=False):
             if debt > 0 or mpot > 0:
                 lines.append(f'      <technical_debt tags="{debt}" mpot_violations="{mpot}" />')
             
-            # 🆕 Grafo de vizinhos
             graph_n = f.get('graph_neighbors', [])
             if graph_n:
                 lines.append('      <graph_neighbors>')
@@ -411,16 +397,11 @@ def _save_llm_report(report_data, output_path, console, include_source=False):
         lines.append('  </codebase_map>')
         lines.append('</doxoade_nexus_report>')
 
-        # 1. GRAVAÇÃO ÚNICA E DEFINITIVA (Via String Builder)
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write("\n".join(lines))
             
         console.print(f"\n[bold magenta]🤖 Dossiê LLM-Ready Gerado: {output_path}[/bold magenta]")
 
-        # ❌ REMOVIDO: O bloco do ElementTree (tree.write) que estava sobrescrevendo o arquivo.
-        # ❌ REMOVIDO: A variável 'root = ET.Element(...)' lá no topo da função também pode ser apagada.
-
-        # 🐺 2. AUDITORIA PÓS-GRAVAÇÃO (ANÚBIS / MA'AT PROTOCOL)
         from doxoade.commands.intelligence_systems.intelligence_truncation import verify_dossier_integrity
         is_intact, msg = verify_dossier_integrity(output_path)
         if not is_intact:
@@ -539,7 +520,13 @@ def _run_analyze_coverage(scan_paths, cli_excludes, verbose, ext_excludes):
             all_files_raw.append(p_abs)
         else:
             nav = DNM(p_abs)
-            all_files_raw.extend(nav.scan()) 
+            scanned = nav.scan()
+            if level and level > 0:
+                scanned = [
+                    f for f in scanned
+                    if len(Path(os.path.relpath(f, p_abs)).parts) <= level
+                ]
+            all_files_raw.extend(scanned)
             
     # 2. Processamento e Auditoria em 3 Camadas
     with click.progressbar(all_files_raw, label='[AUDIT] Analisando codebase') as bar:
