@@ -426,7 +426,7 @@ class RefactorEngine:
             success, msg = self.repair_references(dest_file)
             return True, f"Movimentação física OK. {msg}"
         
-        return True, "Simulação de movimentação cirúrgica concluída."
+        return False, "Simulação de movimentação cirúrgica concluída."
 
     def update_project_imports(self, func_name, old_mod, new_mod, module_level=False, dry_run=False, include_strings=False):
         all_files = list(iter_python_files(self.root))
@@ -470,12 +470,26 @@ class RefactorEngine:
                         write_text_safe(fpath, new_text)   # 🛡️ adeus, newline=''
 
 
-    def rename_file(self, old_path, new_path):
-        """[PREP] Renomeia arquivo e atualiza todos os imports do projeto."""
-        old_p = Path(old_path)
-        new_p = Path(new_path)
-        old_mod = self._path_to_module(old_path)
-        new_mod = self._path_to_module(new_path)
+    def rename_file(self, old_path, new_path, dry_run=False):
+        """Renomeia arquivo e atualiza todos os imports do projeto com proteção de Dry-Run."""
+        old_p = Path(old_path).resolve()
+        new_p = Path(new_path).resolve()
+        
+        if not old_p.exists():
+            raise FileNotFoundError(f"Origem não existe: {old_p}")
+
+        old_mod = self._path_to_module(old_p)
+        new_mod = self._path_to_module(new_p)
+
+        if dry_run:
+            # Em modo simulação, apenas reporta o que seria feito
+            click.echo(f"  [DRY-RUN] Moveria {old_p.name} ➔ {new_p.name}")
+            return True
+
+        # Execução real: cria pastas e move fisicamente
+        new_p.parent.mkdir(parents=True, exist_ok=True)
+        if new_p.exists():
+            new_p.unlink()
         os.rename(old_p, new_p)
         return True
 

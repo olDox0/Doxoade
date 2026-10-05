@@ -1,3 +1,4 @@
+# doxoade/doxoade/commands/init_systems/init_cmd.py
 # -*- coding: utf-8 -*-
 # doxoade/commands/init.py
 """
@@ -20,6 +21,8 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
+from doxoade.commands.init_systems.init_setup import inject_setup_existing
+from doxoade.commands.init_systems.init_setup import inject_lan_git_silo
 
 # Caminho raiz da instalação do Doxoade (para buscar os Core Tools)
 DOXOADE_ROOT = Path(__file__).resolve().parents[2]
@@ -746,13 +749,13 @@ def generate_silo_header(project_name: str) -> str:
 def _refactor_to_silo(content: str) -> str:
     replacements = {
         'import doxoade.tools.aegis.nexus_db as sqlite3': 'from . import nexus_db as sqlite3',
-        'from doxoade.database import': 'from .database import',
-        'from doxoade.tools.vulcan.runtime import': 'from .runtime import',
-        'from doxoade.tools.vulcan.opt_cache import': 'from .opt_cache import',
-        'from doxoade.tools.vulcan.vulcan_safe_loader import': 'from .safe_loader import',
+        'from doxoade.database import': 'from doxoade.commands.database import',
+        'from doxoade.tools.vulcan.runtime import': 'from doxoade.commands.runtime import',
+        'from doxoade.tools.vulcan.opt_cache import': 'from doxoade.commands.opt_cache import',
+        'from doxoade.tools.vulcan.vulcan_safe_loader import': 'from doxoade.commands.safe_loader import',
         'from doxoade.tools.vulcan import': 'from . import',
-        'from doxoade.tools.telemetry_tools.logger import': 'from .telemetry import',
-        'from doxoade.rescue import': 'from .rescue import',
+        'from doxoade.tools.telemetry_tools.logger import': 'from doxoade.commands.telemetry import',
+        'from doxoade.rescue import': 'from doxoade.commands.rescue import',
     }
     for old, new in replacements.items():
         content = content.replace(old, new)
@@ -1518,7 +1521,6 @@ def init(ctx, project_name, desc, deps, alias, remote, metalcraft, macrothon, ho
 
     # 1. Caso Especial: Injeção do LAN Git em Silo existente
     if lan_git_flag and not project_name:
-        from doxoade.commands.init_system.init_setup import inject_lan_git_silo
         target_root = Path.cwd().resolve()
         inject_lan_git_silo(target_root, apply_changes=apply_changes)
         return
@@ -1548,7 +1550,6 @@ def init(ctx, project_name, desc, deps, alias, remote, metalcraft, macrothon, ho
 
     # 5. Caso Especial: Injeção do install_setup.py legado
     if setup_flag:
-        from doxoade.commands.init_system.init_setup import inject_setup_existing
         inject_setup_existing(Path.cwd(), apply_changes=apply_changes)
         return
 
@@ -1563,7 +1564,6 @@ def init(ctx, project_name, desc, deps, alias, remote, metalcraft, macrothon, ho
     project_path.mkdir(parents=True, exist_ok=True)
 
     # Forja o instalador V4 soberano
-    from doxoade.commands.init_system.init_setup import inject_setup_existing
     inject_setup_existing(project_path, apply_changes=True)
 
     if desc is None:

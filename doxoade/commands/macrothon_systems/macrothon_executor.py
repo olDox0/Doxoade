@@ -6,9 +6,9 @@ from doxoade.core_database import get_db_connection
 from doxoade.tools.doxcolors import Fore, Style
 from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger, chief_heartbeat
-from doxoade.commands.init import _refactor_to_silo
 from .macrothon_translator import MacrothonTranslator
 from doxoade.tools.aegis.aegis_utils import restricted_safe_exec
+from doxoade.commands.init_systems.init_cmd import _refactor_to_silo
 
 _MACRO_LOOP = asyncio.new_event_loop()
 

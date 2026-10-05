@@ -23,12 +23,12 @@ from doxoade.commands.check_systems.check_io import CheckIO
 from doxoade.commands.check_systems.check_state import CheckState
 from doxoade.commands.check_systems.check_engine import run_audit_engine
 from doxoade.commands.security_systems.maat_engine_integration import run_internal_security_audit
-from doxoade.commands.init import _refactor_to_silo
 
 from doxoade.core_database import get_db_connection, get_active_db_path, DB_FILE
 from doxoade.tools.core_locator import CORE_ROOT
 
 from doxoade.tools.alexandria.engine import alexandria_write
+from doxoade.commands.init_systems.init_cmd import _refactor_to_silo
 try:
     from rich.console import Console
     from rich.syntax import Syntax
@@ -496,7 +496,6 @@ class AcervoEngine:
         shutil.copy2(src, dest)
         
         # Ajuste de Silo (Importado do init.py logic)
-        from doxoade.commands.init import _refactor_to_silo
         content = dest.read_text(encoding='utf-8')
         dest.write_text(_refactor_to_silo(content))
 

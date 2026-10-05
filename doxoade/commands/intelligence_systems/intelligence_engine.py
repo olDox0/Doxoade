@@ -34,7 +34,7 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
     valid_exts = (
         '.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', 
         '.js', '.jsx', '.ts', '.tsx', '.pyd', '.so', '.toml', 
-        '.md', '.s', '.json', '.txt', '.lua'
+        '.md', '.s', '.asm', '.json', '.txt', '.lua'
     )
     if not file_path.endswith(valid_exts): return data
     try:
@@ -80,7 +80,8 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
         is_js = file_path.endswith(('.js', '.jsx', '.ts', '.tsx')) # Engloba ecossistema JS
         is_toml = file_path.endswith('.toml')
         is_md = file_path.endswith('.md')
-        is_asm = file_path.endswith('.s')
+        is_asm = file_path.endswith(('.s', '.asm'))
+        #is_asm = file_path.endswith('.s')
         is_json = file_path.endswith('.json')
         is_txt = file_path.endswith('.txt')
         is_lua = file_path.endswith('.lua')

@@ -476,7 +476,9 @@ class AssemblySemanticAnalyzer:
         self._parse()
 
     def _parse(self):
-        self.labels = re.findall(r'^([a-zA-Z_][a-zA-Z0-9_]*):', self.content, re.MULTILINE)
+        self.labels = len(re.findall(r'^[a-zA-Z_\.]\w*:', clean_content, re.MULTILINE))
+        self.sections = len(re.findall(r'^\s*(section|SEGMENT)\b', clean_content, re.MULTILINE | re.IGNORECASE))
+        self.globals = len(re.findall(r'^\s*(global|GLOBAL|extern|EXTERN)\b', clean_content, re.MULTILINE | re.IGNORECASE))
         self.includes = re.findall(r'(?:\.include|\.import)\s+["<]([^">]+)[">]', self.content)
         
     def get_summary(self):
