@@ -46,6 +46,7 @@ class DoxoadeLazyGroup(click.Group):
         self._lazy_map = {
             'android': 'doxoade.commands.android:android_group',
             'apicheck': 'doxoade.commands.apicheck:apicheck',
+            'asm': 'doxoade.commands.asm_cmd:asm_group',
             'audit': 'doxoade.commands.audit_cmd:audit',
             'auto': 'doxoade.commands.auto:auto',
 #            'backup': 'doxoade.commands.backup_systems:backup',
