@@ -1,47 +1,18 @@
--- doxoade/commands/lite_xl_systems/template/13d_frameless_hud.lua
---[[
-  🎛️ DOXOADE TOOLBAR HUD & FLOATING LOG TOAST (V3.3 Safe-Predicate)
-  - Zero overrides em get_items: Extingue o crash em merge_deprecated_items.
-  - Ocultação de caminhos e diretórios sob os ícones via item.predicate = false.
-  - Floating Log Toast: Mensagens de log flutuam ACIMA da barra em Azul com texto Branco.
-  - Chips de status na ala esquerda limpa (Seleção, Indent, Check, Note, Search, Terminal, Leap, Scroll Lock).
-  Compliance: ProDeNov 1.2.1 | PASC-6.1 | Limite < 50KB.
-]]
-local core       = require "core"
-local style      = require "core.style"
-local config     = require "core.config"
-local command    = require "core.command"
-local RootView   = require "core.rootview"
+-- =============================================================================
+-- 13d_frameless_hud.lua — TOOLBAR DUAL-TIER COM TOOLTIPS, CLIQUES & CHECKS VIVOS
+-- =============================================================================
+local core = require "core"
+local style = require "core.style"
+local config = require "core.config"
+local command = require "core.command"
+local keymap = require "core.keymap"
 local StatusView = require "core.statusview"
+local RootView = require "core.rootview"
 
 local rencache = rawget(_G, "rencache") or (pcall(require, "core.rencache") and require("core.rencache") or nil)
 local native_renderer = rawget(_G, "renderer") or (pcall(require, "renderer") and require("renderer") or nil)
 
-if rawget(_G, "_DOXOADE_TOOLBAR_HUD_V3_LOADED") then return end
-rawset(_G, "_DOXOADE_TOOLBAR_HUD_V3_LOADED", true)
-
-local CHIP_PAD = 6
-local DARK     = { 30, 30, 34, 255 }
-local GREEN    = { 38, 188, 95, 255 }
-local BLUE     = { 56, 189, 248, 255 }
-local GREY     = { 120, 120, 128, 255 }
-local RED      = { 239, 68, 68, 255 }
-local YEL      = { 234, 179, 8, 255 }
-
-local hud = { chips = {}, hovered = nil, icons = {} }
-rawset(_G, "_DOXOADE_TOOLBAR_HUD", hud)
-
-local DESCRIPTIONS = {
-  sel    = "Seleção ativa no documento",
-  indent = "Guias de indentação — clique para alternar",
-  check  = "Auditoria Ma'at — clique para executar",
-  note   = "Sincronização de notas P2P — clique para alternar",
-  search = "Docs Hub offline (Consult FTS5)",
-  term   = "Terminal / Canvas (Bottom Shelf)",
-  leap   = "Leap KVM — clique para alternar Host/Cliente",
-  scroll = "Scroll Lock — se vermelho, desative no teclado",
-}
-
+-- ── 1. RENDERIZADORES SEGUROS ─────────────────────────────────────────────────
 local function draw_rect_safe(x, y, w, h, c)
   if rencache and rencache.draw_rect then rencache.draw_rect(x, y, w, h, c)
   elseif native_renderer and native_renderer.draw_rect then native_renderer.draw_rect(x, y, w, h, c) end
@@ -53,153 +24,467 @@ local function draw_text_safe(font, text, x, y, c)
   elseif native_renderer and native_renderer.draw_text then native_renderer.draw_text(font, text, x, y, c) end
 end
 
-local function mix(base, accent, t)
-  return {
-    math.floor(base[1] + (accent[1] - base[1]) * t),
-    math.floor(base[2] + (accent[2] - base[2]) * t),
-    math.floor(base[3] + (accent[3] - base[3]) * t),
-    255
-  }
-end
+-- ── 2. MOTOR RLE DE ÍCONES (HEFESTO) COM FALLBACK ASCII ───────────────────────
+local _ICON_CACHE = {}
 
-local function looks_like_path(s)
-  if not s or s == "" then return false end
-  local str = tostring(s):lower()
-  if str:find("[/\\]") then return true end
-  if str:find("^[a-z]:") then return true end
-  if str:find("%.%w+$") and #str > 4 then return true end
-  if str:find("projetos") or str:find("doxoade") or str:find("autonomo") then return true end
-  return false
-end
-
--- =============================================================================
--- DETECÇÃO DE ESTADOS (LEAP & SCROLL LOCK)
--- =============================================================================
-local _leap_cache = { t = 0, active = false, mode = "idle" }
-local function leap_state()
-  local now = os.clock()
-  if now - _leap_cache.t < 1.0 then return _leap_cache end
-  _leap_cache.t = now
+local function get_icons_dir()
   local home = os.getenv("USERPROFILE") or os.getenv("HOME") or "."
-  local f = io.open(home .. (PATHSEP or "/") .. ".doxoade" .. (PATHSEP or "/") .. "leap_state.json", "r")
-  if f then
-    local c = f:read("*a") or ""; f:close()
-    _leap_cache.active = c:find('"active":%s*true') ~= nil
-    _leap_cache.mode = c:match('"mode":%s*"([^"]+)"') or "idle"
-  else
-    _leap_cache.active = false; _leap_cache.mode = "idle"
-  end
-  return _leap_cache
+  return home .. (PATHSEP or "/") .. ".doxoade" .. (PATHSEP or "/") .. "assets" .. (PATHSEP or "/") .. "icons" .. (PATHSEP or "/")
 end
 
-local _sl_cache = { t = 0, on = false }
-local function scroll_state()
+local function load_rle_icon(name)
+  if _ICON_CACHE[name] ~= nil then return _ICON_CACHE[name] end
+  local path = get_icons_dir() .. name .. ".icon.rlebin"
+  local f = io.open(path, "rb")
+  if not f then
+    _ICON_CACHE[name] = false
+    return false
+  end
+  local data = f:read("*a")
+  f:close()
+  if not data or #data < 20 then
+    _ICON_CACHE[name] = false
+    return false
+  end
+
+  local magic, ver, w, h, ow, oh, count, pos = string.unpack("<c7 I1 I2 I2 I2 I2 I4", data)
+  if magic ~= "DOXRLE1" then
+    _ICON_CACHE[name] = false
+    return false
+  end
+
+  local rects = {}
+  for _ = 1, count do
+    if pos > #data then break end
+    local rx, ry, rw, r, g, b, next_pos = string.unpack("<I2 I2 I2 I1 I1 I1", data, pos)
+    pos = next_pos
+    table.insert(rects, { rx, ry, rw, r, g, b })
+  end
+
+  local icon_obj = { w = w, h = h, rects = rects }
+  _ICON_CACHE[name] = icon_obj
+  return icon_obj
+end
+
+local function draw_rle_icon(name, x, y, tint_color)
+  local icon = load_rle_icon(name)
+  if not icon or not icon.rects then return false end
+  for _, rc in ipairs(icon.rects) do
+    local c = tint_color or { rc[4], rc[5], rc[6], 255 }
+    draw_rect_safe(x + rc[1], y + rc[2], rc[3], 1, c)
+  end
+  return true
+end
+
+-- ── 3. ESTADOS E DESCRIÇÕES PARA AS LEGENDAS (TOOLTIPS) ──────────────────────
+local _state = {
+  t = 0,
+  leap_active = false,
+  leap_mode = "idle",
+  sl_on = false,
+  layout_mode = "auto", -- "auto" | "dual" | "single"
+  hovered = nil,
+}
+
+local DESCRIPTIONS = {
+  check  = "Auditoria Ma'at — clique para executar análise de integridade",
+  notes  = "Notas e Agenda P2P — clique para abrir o painel de notas",
+  search = "Docs Hub & Busca Global — clique para localizar no projeto",
+  term   = "Terminal / Console — clique para abrir o prompt inferior",
+  leap   = "Leap KVM — clique para alternar serviço Host/Cliente",
+  scroll = "Scroll Lock — se vermelho, desative a tecla no teclado",
+  indent = "Indentação — clique para alternar tamanho (2 / 4 / OFF)",
+  sel    = "Seleção ativa no documento",
+  layout = "Alternador de Escada: clique para alternar 1 Linha ou 2 Linhas (Alt+T)",
+}
+
+local function refresh_states()
   local now = os.clock()
-  if now - _sl_cache.t < 1.0 then return _sl_cache.on end
-  _sl_cache.t = now
-  local tmp = os.getenv("TEMP") or os.getenv("TMP") or "."
-  local f = io.open(tmp .. (PATHSEP or "/") .. "doxoade_scroll_lock.txt", "r")
-  if f then
-    local l = f:read("*l") or ""; f:close()
-    _sl_cache.on = (l == "1")
+  if now - _state.t < 1.0 then return end
+  _state.t = now
+
+  -- Leap State
+  local home = os.getenv("USERPROFILE") or os.getenv("HOME") or "."
+  local lf = io.open(home .. (PATHSEP or "/") .. ".doxoade" .. (PATHSEP or "/") .. "leap_state.json", "r")
+  if lf then
+    local c = lf:read("*a") or ""; lf:close()
+    _state.leap_active = c:find('"active":%s*true') ~= nil
+    _state.leap_mode = c:match('"mode":%s*"([^"]+)"') or "idle"
   else
-    _sl_cache.on = false
+    _state.leap_active = false
   end
-  return _sl_cache.on
+
+  -- Scroll Lock State
+  local tmp = os.getenv("TEMP") or os.getenv("TMP") or "."
+  local sf = io.open(tmp .. (PATHSEP or "/") .. "doxoade_scroll_lock.txt", "r")
+  if sf then
+    local l = sf:read("*l") or ""; sf:close()
+    _state.sl_on = (l == "1")
+  else
+    _state.sl_on = false
+  end
 end
 
--- =============================================================================
--- CONSTRUÇÃO E DESENHO DOS CHIPS DO HUD
--- =============================================================================
-local function build_chips()
-  local chips = {}
+-- ── 4. RESOLUTOR DE CAMINHO RELATIVO (ECONOMIA DE ESPAÇO) ────────────────────
+local function get_relative_project_path(path)
+  if not path or path == "" then return "Sem Título" end
+  local norm = path:gsub("\\", "/")
+
+  if core.project_directories then
+    for _, d in ipairs(core.project_directories) do
+      local base = (type(d) == "table" and d.name or tostring(d)):gsub("\\", "/")
+      if not base:find("/$") then base = base .. "/" end
+      if norm:sub(1, #base):lower() == base:lower() then
+        return norm:sub(#base + 1)
+      end
+    end
+  end
+
+  if core.project_dir then
+    local base = core.project_dir:gsub("\\", "/")
+    if not base:find("/$") then base = base .. "/" end
+    if norm:sub(1, #base):lower() == base:lower() then
+      return norm:sub(#base + 1)
+    end
+  end
+
+  return norm:match("([^/]+/[^/]+/[^/]+)$") or norm:match("[^/]+/[^/]+$") or norm:match("[^/]+$") or norm
+end
+
+-- ── 5. SENSOR DE ORIENTAÇÃO (PORTRAIT vs LANDSCAPE) ───────────────────────────
+local function is_two_rows_active(total_w, total_h)
+  if _state.layout_mode == "dual" then return true end
+  if _state.layout_mode == "single" then return false end
+  return (total_h > total_w) or (total_w < 920)
+end
+
+local function toggle_rows_mode()
+  if _state.layout_mode == "auto" then
+    _state.layout_mode = "dual"
+    core.log("📐 [TOOLBAR] Modo Forçado: 2 Andares (Escada Dupla).")
+  elseif _state.layout_mode == "dual" then
+    _state.layout_mode = "single"
+    core.log("📐 [TOOLBAR] Modo Forçado: 1 Andar (Compacto).")
+  else
+    _state.layout_mode = "auto"
+    core.log("📐 [TOOLBAR] Modo Responsivo Automático.")
+  end
+  core.redraw = true
+end
+
+command.add(nil, {
+  ["doxoade:toggle-toolbar-layout"] = toggle_rows_mode
+})
+keymap.add { ["alt+t"] = "doxoade:toggle-toolbar-layout" }
+
+-- ── 6. AÇÕES DE DISPARO DOS BOTÕES ───────────────────────────────────────────
+local function open_notes_action()
+  if command.map and command.map["doxoade:toggle-doxnote-panel"] then
+    command.perform("doxoade:toggle-doxnote-panel")
+  elseif command.map and command.map["doxoade:open-shared-notes"] then
+    command.perform("doxoade:open-shared-notes")
+  elseif command.map and command.map["doxoade:note-status-click"] then
+    command.perform("doxoade:note-status-click")
+  else
+    command.perform("core:open-file", "shared_notes.md")
+  end
+end
+
+local function trigger_check_action()
+  if command.map and command.map["doxoade:trigger-active-check"] then
+    command.perform("doxoade:trigger-active-check")
+  elseif command.map and command.map["doxoade:run-check"] then
+    command.perform("doxoade:run-check")
+  else
+    command.perform("core:find-file")
+  end
+end
+
+-- Alternador robusto em ciclo de 3 estados (2 -> 4 -> OFF -> 2)
+local function toggle_indent_action()
   local doc = core.active_view and core.active_view.doc
+  local is_on = (config.draw_indent_guides ~= false)
+  local cur_sz = (doc and doc.indent_size) or config.indent_size or 4
+
+  if not is_on then
+    config.draw_indent_guides = true
+    config.indent_size = 2
+    if doc then doc.indent_size = 2 end
+    core.log("📐 [INDENT] Guias Ativadas: 2 Espaços.")
+  elseif cur_sz == 2 then
+    config.draw_indent_guides = true
+    config.indent_size = 4
+    if doc then doc.indent_size = 4 end
+    core.log("📐 [INDENT] Guias Ativadas: 4 Espaços.")
+  else
+    config.draw_indent_guides = false
+    core.log("📐 [INDENT] Guias Desativadas (OFF).")
+  end
+
+  if command.map and command.map["doxoade:toggle-indent-guides"] then
+    pcall(command.perform, "doxoade:toggle-indent-guides")
+  end
+  core.redraw = true
+end
+
+-- ── 7. CONSTRUÇÃO COMPLETA DOS CHIPS ──────────────────────────────────────────
+local function build_action_chips(is_two_rows, total_w)
+  refresh_states()
+  local chips = {}
+
+  local function add(id, icon, ascii, label, bg, fg, cmd_target)
+    local text = (is_two_rows or total_w >= 1100) and (icon .. " " .. label) or icon
+    table.insert(chips, {
+      id = id, icon = icon, ascii = ascii, label = label, text = text,
+      bg = bg, fg = fg, cmd = cmd_target
+    })
+  end
+
+  local doc = core.active_view and core.active_view.doc
+
+  -- 1. Chip de Seleção Ativa
   if doc and doc.has_selection and doc:has_selection() then
     local l1, c1, l2, c2 = doc:get_selection(true)
-    local txt = (l2 > l1) and string.format("%dL", l2 - l1 + 1) or string.format("%dC", math.abs(c2 - c1))
-    chips[#chips + 1] = { id = "sel", text = txt, color = BLUE, cmd = nil }
+    local sel_txt = (l2 > l1) and string.format("%dL", l2 - l1 + 1) or string.format("%dC", math.abs(c2 - c1))
+    add("sel", "indent", "SEL", sel_txt, { 25, 45, 60, 255 }, { 56, 189, 248, 255 }, nil)
   end
 
+  -- 2. Chip de Guias de Indentação (Ciclo: 2 / 4 / OFF)
   local ion = (config.draw_indent_guides ~= false)
-  local isz = config.indent_size or 4
-  if doc and doc.filename and tostring(doc.filename):lower():find("%.lua$") then isz = 2 end
-  chips[#chips + 1] = { id = "indent", text = ion and tostring(isz) or "OFF", color = ion and GREEN or GREY, cmd = "doxoade:toggle-indent-guides" }
+  local isz = (doc and doc.indent_size) or config.indent_size or 4
+  local ind_lbl = ion and tostring(isz) or "OFF"
+  local ind_fg = ion and { 110, 231, 183, 255 } or { 120, 120, 128, 255 }
+  add("indent", "indent", "IN", ind_lbl, { 20, 40, 30, 255 }, ind_fg, toggle_indent_action)
 
-  local ctxt, ccol = "OK", GREEN
+  -- 3. Chip de Check / Ma'at
+  local c_txt, c_col = "OK", { 52, 211, 153, 255 }
   if rawget(_G, "_DOXOADE_AUDIT_RUNNING") then
-    ctxt, ccol = "…", YEL
+    c_txt, c_col = "…", { 234, 179, 8, 255 }
   else
     local sum = rawget(_G, "_DOXOADE_AUDIT_SUMMARY")
     if sum and type(sum) == "table" then
-      local e = tonumber(sum.errors) or 0
-      local w = tonumber(sum.warnings) or 0
-      if e > 0 then ctxt, ccol = string.format("%dE", e), RED
-      elseif w > 0 then ctxt, ccol = string.format("%dW", w), YEL end
+      local err_count = tonumber(sum.errors) or 0
+      local warn_count = tonumber(sum.warnings) or 0
+      if err_count > 0 then c_txt, c_col = tostring(err_count) .. "E", { 239, 68, 68, 255 }
+      elseif warn_count > 0 then c_txt, c_col = tostring(warn_count) .. "W", { 234, 179, 8, 255 } end
     end
   end
-  chips[#chips + 1] = { id = "check", text = ctxt, color = ccol, cmd = "doxoade:trigger-active-check" }
+  add("check", "check", "OK", c_txt, { 20, 50, 35, 255 }, c_col, trigger_check_action)
 
-  local non = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") ~= false
-  chips[#chips + 1] = { id = "note", text = non and "ON" or "OFF", color = non and GREEN or GREY, cmd = "doxoade:note-status-click" }
+  -- 4. Botão de Notas e Agenda
+  add("notes", "note", "N", "NOTAS", { 45, 30, 60, 255 }, { 216, 180, 254, 255 }, open_notes_action)
 
+  -- 5. Busca Global / Docs Hub
+  local s_txt, s_col = "BUSCA", { 147, 197, 253, 255 }
   local st = rawget(_G, "_DOXOADE_SEARCH_STATE")
-  local stxt, scol = "", BLUE
-  if st and st.is_searching then stxt, scol = "…", YEL end
-  chips[#chips + 1] = { id = "search", text = stxt ~= "" and stxt or "🔍", color = scol, cmd = "doxoade:open-search-docs-hub" }
-  chips[#chips + 1] = { id = "term", text = ">_", color = BLUE, cmd = "doxoade:toggle-bottom-shelf" }
+  if st and st.is_searching then s_txt, s_col = "…", { 234, 179, 8, 255 } end
+  local search_cmd = (command.map and command.map["doxoade:open-search-docs-hub"]) and "doxoade:open-search-docs-hub" or "doxoade:execute-pot-search"
+  add("search", "search", "Q", s_txt, { 30, 50, 70, 255 }, s_col, search_cmd)
 
-  local lp = leap_state()
-  local ltxt, lcol = "OFF", GREY
-  if lp.active then
-    if lp.mode == "host" then ltxt, lcol = "HST", GREEN else ltxt, lcol = "CLI", BLUE end
-  end
-  chips[#chips + 1] = { id = "leap", text = ltxt, color = lcol, cmd = "doxoade:leap-toggle" }
+  -- 6. Terminal CLI (Bottom Shelf)
+  add("term", "term", ">_", "CLI", { 25, 45, 60, 255 }, { 56, 189, 248, 255 }, "doxoade:toggle-bottom-shelf")
 
-  local sl = scroll_state()
-  chips[#chips + 1] = { id = "scroll", text = "SL", color = sl and RED or GREY, cmd = function()
-    core.log("💡 Dica: Pressione a tecla 'Scroll Lock' no teclado para alternar.")
-  end }
+  -- 7. Leap KVM
+  local leap_fg = _state.leap_active and { 110, 231, 183, 255 } or { 120, 120, 128, 255 }
+  local leap_lbl = _state.leap_active and (_state.leap_mode == "host" and "HST" or "CLI") or "OFF"
+  local leap_cmd = (command.map and command.map["doxoade:leap-toggle"]) and "doxoade:leap-toggle" or "doxoade:toggle-leap-service"
+  add("leap", "leap", "<>", leap_lbl, { 20, 45, 35, 255 }, leap_fg, leap_cmd)
+
+  -- 8. Scroll Lock
+  local sl_fg = _state.sl_on and { 239, 68, 68, 255 } or { 120, 120, 128, 255 }
+  add("scroll", "lock", "SL", "SL", { 35, 30, 35, 255 }, sl_fg, function()
+    core.log("💡 Dica: Pressione Scroll Lock no teclado físico para alternar.")
+  end)
 
   return chips
 end
 
-local function draw_chips(status_view)
-  local font = style.font or style.code_font
-  local h = status_view.size.y
-  local cy = status_view.position.y + math.floor((h - 18) / 2)
-  local cx = status_view.position.x + 4
+-- ── 8. HOOK DE UPDATE: ALTURA DAS ESCADAS ─────────────────────────────────────
+local orig_statusview_update = StatusView.update
+local ROW_H = 22
 
-  hud.chips = build_chips()
-  for _, c in ipairs(hud.chips) do
-    local text_w = font:get_width(c.text)
-    local w = math.max(18, text_w + CHIP_PAD * 2)
-    local is_hover = (hud.hovered == c.id)
-    local bg = is_hover and mix(DARK, c.color, 0.45) or mix(DARK, c.color, 0.22)
+function StatusView:update(...)
+  if orig_statusview_update then orig_statusview_update(self, ...) end
+  local root_w = core.root_view and core.root_view.size.x or 1200
+  local root_h = core.root_view and core.root_view.size.y or 800
+  local two_rows = is_two_rows_active(root_w, root_h)
+  self.size.y = two_rows and (ROW_H * 2) or ROW_H
+end
 
-    draw_rect_safe(cx, cy, w, 18, bg)
-    draw_rect_safe(cx, cy, w, 1, c.color)
-    draw_rect_safe(cx, cy + 17, w, 1, mix(c.color, {0,0,0,255}, 0.5))
+-- ── 9. RENDERIZADOR PRINCIPAL DA TOOLBAR ──────────────────────────────────────
+local _active_rects = {}
 
-    local tx = cx + math.floor((w - text_w) / 2)
-    local ty = cy + math.floor((18 - font:get_height()) / 2)
-    draw_text_safe(font, c.text, tx, ty, is_hover and {255,255,255,255} or c.color)
+function StatusView:draw(...)
+  local font = style.font
+  local total_w = self.size.x
+  local total_h = self.size.y
+  local two_rows = (total_h > ROW_H + 5)
+  local pos_x = self.position.x
+  local pos_y = self.position.y
+  _active_rects = {}
 
-    c.rect = { x = cx, y = cy, w = w, h = 18 }
-    cx = cx + w + 3
+  -- Fundo Geral da Barra
+  draw_rect_safe(pos_x, pos_y, total_w, total_h, style.background2 or { 24, 24, 28, 255 })
+  draw_rect_safe(pos_x, pos_y, total_w, 1, style.line_number or { 45, 45, 50, 255 })
+
+  local y1 = pos_y + 2
+  local y2 = pos_y + (two_rows and ROW_H or 0) + 2
+
+  if two_rows then
+    draw_rect_safe(pos_x, pos_y + ROW_H, total_w, 1, { 35, 35, 40, 255 })
+  end
+
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- ANDAR 1 (SUPERIOR): FERRAMENTAS & BOTÕES (CALIBRAÇÃO DE TELA)
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local chips = build_action_chips(two_rows, total_w)
+  local cur_x = pos_x + 6
+
+  for _, chip in ipairs(chips) do
+    local icon_w = 16
+    local label_w = (chip.text:find(" ") and font:get_width(chip.label) + 6) or 0
+    local chip_w = icon_w + label_w + 12
+    local chip_h = ROW_H - 4
+    local is_hover = (_state.hovered == chip.id)
+
+    local bg_color = is_hover and { chip.bg[1] + 20, chip.bg[2] + 20, chip.bg[3] + 20, 255 } or chip.bg
+    draw_rect_safe(cur_x, y1, chip_w, chip_h, bg_color)
+    draw_rect_safe(cur_x, y1, chip_w, 1, is_hover and (style.accent or { 56, 189, 248, 255 }) or { chip.bg[1] + 30, chip.bg[2] + 30, chip.bg[3] + 30, 255 })
+
+    local icon_y = y1 + math.floor((chip_h - 16) / 2)
+    local icon_ok = draw_rle_icon(chip.icon, cur_x + 5, icon_y, chip.fg)
+    if not icon_ok then
+      draw_text_safe(font, chip.ascii, cur_x + 5, y1 + math.floor((chip_h - font:get_height()) / 2), chip.fg)
+    end
+
+    if label_w > 0 then
+      local tx = cur_x + icon_w + 8
+      local ty = y1 + math.floor((chip_h - font:get_height()) / 2)
+      draw_text_safe(font, chip.label, tx, ty, chip.fg)
+    end
+
+    table.insert(_active_rects, {
+      id = chip.id,
+      x = cur_x, y = y1, w = chip_w, h = chip_h,
+      cmd = chip.cmd
+    })
+
+    cur_x = cur_x + chip_w + 4
+  end
+
+  -- Botão de Layout Manual ([2L] / [1L])
+  local mode_badge = two_rows and "2L" or "1L"
+  if _state.layout_mode == "auto" then mode_badge = mode_badge .. "·A" end
+  local badge_w = font:get_width(mode_badge) + 12
+  local badge_x = pos_x + total_w - badge_w - 6
+  local is_layout_hover = (_state.hovered == "layout")
+  draw_rect_safe(badge_x, y1, badge_w, ROW_H - 4, is_layout_hover and { 50, 50, 65, 255 } or { 35, 35, 45, 255 })
+  draw_text_safe(font, mode_badge, badge_x + 6, y1 + 2, { 180, 180, 200, 255 })
+  table.insert(_active_rects, {
+    id = "layout",
+    x = badge_x, y = y1, w = badge_w, h = ROW_H - 4,
+    cmd = toggle_rows_mode
+  })
+
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- ANDAR 2 (INFERIOR): DIRETÓRIO RELATIVO & METADADOS COMPLETOS
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local doc_x = two_rows and (pos_x + 8) or (cur_x + 10)
+  local av = core.active_view
+  local doc = av and av.doc
+
+  if doc then
+    local raw_path = doc.filename or (doc.get_name and doc:get_name()) or "Sem Título"
+    local rel_path = get_relative_project_path(raw_path)
+    local display_doc = two_rows and rel_path or (raw_path:match("[^/\\\\]+$") or raw_path)
+    if doc.is_dirty and doc:is_dirty() then display_doc = display_doc .. " *" end
+
+    draw_rle_icon("note", doc_x, y2 + 1, style.accent or { 110, 231, 183, 255 })
+    local ty = y2 + math.floor((ROW_H - font:get_height()) / 2)
+    local doc_fg = (doc.is_dirty and doc:is_dirty()) and { 234, 179, 8, 255 } or (style.text or { 220, 220, 220, 255 })
+    draw_text_safe(font, display_doc, doc_x + 20, ty, doc_fg)
+
+    -- Lado Direito: Linhas, Seleção, Indentação, EOL, Encoding e Sintaxe
+    local right_info = {}
+
+    -- 1. Posição e Total de Linhas
+    if doc.get_selection then
+      local l1, c1, l2, c2 = doc:get_selection(true)
+      local total_lines = (doc.lines and #doc.lines) or 1
+      table.insert(right_info, string.format("Ln %d/%d, Col %d", l1, total_lines, c1))
+
+      -- 2. Seleção Ativa Detalhada
+      if l1 ~= l2 or c1 ~= c2 then
+        local sel_desc = (l2 > l1)
+          and string.format("%d lin. sel.", l2 - l1 + 1)
+          or string.format("%d carac. sel.", math.abs(c2 - c1))
+        table.insert(right_info, sel_desc)
+      end
+    end
+
+    -- 3. Modo e Tamanho de Indentação
+    local tab_type = config.tab_type or "soft"
+    local indent_sz = (doc.indent_size) or config.indent_size or 4
+    local tab_desc = (tab_type == "hard") and ("tabs: " .. indent_sz) or ("spaces: " .. indent_sz)
+    table.insert(right_info, tab_desc)
+
+    -- 4. Quebra de linha (CRLF / LF)
+    table.insert(right_info, (doc.crlf == true) and "CRLF" or "LF")
+
+    -- 5. Codificação do Arquivo (Encoding)
+    local enc = doc.encoding or "UTF-8"
+    table.insert(right_info, enc:upper())
+
+    -- 6. Sintaxe Ativa
+    if doc.syntax and doc.syntax.name then
+      table.insert(right_info, doc.syntax.name)
+    end
+
+    if #right_info > 0 then
+      local info_str = table.concat(right_info, "  |  ")
+      local info_w = font:get_width(info_str)
+      local info_x = pos_x + total_w - info_w - 10
+      local rty = y2 + math.floor((ROW_H - font:get_height()) / 2)
+      draw_text_safe(font, info_str, info_x, rty, style.dim or { 150, 150, 160, 255 })
+    end
   end
 end
 
--- =============================================================================
--- LOG TOAST FLUTUANTE (AZUL & BRANCO - 6px ACIMA DA BARRA DE STATUS)
--- =============================================================================
+-- ── 10. LEGENDA FLUTUANTE (TOOLTIP) & TOAST DE NOTIFICAÇÃO ───────────────────
+local function draw_tooltip()
+  if not _state.hovered then return end
+  local text = DESCRIPTIONS[_state.hovered]
+  if not text or text == "" then return end
+
+  local font = style.font
+  local tw = font:get_width(text) + 16
+  local th = font:get_height() + 8
+  local sv = core.status_view
+  if not sv then return end
+
+  local target_btn = nil
+  for _, b in ipairs(_active_rects) do
+    if b.id == _state.hovered then target_btn = b; break end
+  end
+
+  local tx = target_btn and target_btn.x or 10
+  local ty = sv.position.y - th - 6
+  local max_x = (core.root_view.size.x or 1200) - tw - 6
+  tx = math.max(6, math.min(tx, max_x))
+
+  draw_rect_safe(tx - 1, ty - 1, tw + 2, th + 2, { 10, 10, 12, 220 })
+  draw_rect_safe(tx, ty, tw, th, { 25, 25, 30, 250 })
+  draw_rect_safe(tx, ty, tw, 1, style.accent or { 56, 189, 248, 255 })
+  draw_text_safe(font, text, tx + 8, ty + 4, { 240, 240, 240, 255 })
+end
+
 local function draw_log_toast()
   local sv = core.status_view
-  if not sv or not sv.visible then return end
+  if not sv or not sv.visible or not sv.message then return end
   local msg = sv.message
-  if not msg then return end
 
   local now = (system and system.get_time and system.get_time()) or os.clock()
-  local timeout = sv.message_timeout or (type(msg) == "table" and msg.time) or 0
+  local timeout = sv.message_timeout or 0
   if timeout > 0 and now > timeout then
     sv.message = nil
     return
@@ -222,116 +507,45 @@ local function draw_log_toast()
 
   if not text or text:match("^%s*$") then return end
 
-  local icon_str = "ℹ "
-  if text:find("💡") or text:lower():find("dica") then
-    icon_str = "💡 "
-    text = text:gsub("^[💡ℹ%s]+", "")
-  elseif text:find("⚠") or text:lower():find("aviso") then
-    icon_str = "⚠️ "
-    text = text:gsub("^[⚠️⚠%s]+", "")
-  end
-
-  local full_text = icon_str .. text
-  local font = style.font or style.code_font
-  local text_w = font:get_width(full_text)
-  local toast_h = 24
-  local screen_w = core.root_view.size.x or 1200
-  local toast_w = math.min(text_w + 24, screen_w - 24)
-
-  -- Flutua exatamente 6 pixels ACIMA da barra de status
-  local toast_x = sv.position.x + 8
-  local toast_y = sv.position.y - toast_h - 6
-
-  -- Sombra suave
-  draw_rect_safe(toast_x - 1, toast_y - 1, toast_w + 2, toast_h + 2, { 8, 14, 24, 160 })
-
-  -- Fundo Azul Real vibrante
-  draw_rect_safe(toast_x, toast_y, toast_w, toast_h, { 24, 82, 155, 245 })
-
-  -- Borda fina em Sky Blue
-  draw_rect_safe(toast_x, toast_y, toast_w, 1, { 56, 189, 248, 255 })
-  draw_rect_safe(toast_x, toast_y + toast_h - 1, toast_w, 1, { 56, 189, 248, 160 })
-  draw_rect_safe(toast_x, toast_y, 1, toast_h, { 56, 189, 248, 255 })
-  draw_rect_safe(toast_x + toast_w - 1, toast_y, 1, toast_h, { 56, 189, 248, 255 })
-
-  -- Texto Branco Puro
-  local text_y = toast_y + math.floor((toast_h - font:get_height()) / 2)
-  draw_text_safe(font, full_text, toast_x + 10, text_y, { 255, 255, 255, 255 })
-end
-
-local function draw_tooltip()
-  if not hud.hovered then return end
-  local text = DESCRIPTIONS[hud.hovered]
-  if not text or text == "" then return end
-  local font = style.font or style.code_font
-  local tw = font:get_width(text) + 16
-  local th = font:get_height() + 8
-  local sv = core.status_view
-  if not sv then return end
-
-  local target_chip = nil
-  for _, c in ipairs(hud.chips or {}) do
-    if c.id == hud.hovered then target_chip = c break end
-  end
-
-  local tx = target_chip and target_chip.rect and target_chip.rect.x or 10
+  local font = style.font
+  local tw = math.min(font:get_width(text) + 24, (core.root_view.size.x or 1200) - 24)
+  local th = 24
+  local tx = sv.position.x + 8
   local ty = sv.position.y - th - 6
-  local max_x = (core.root_view.size.x or 1200) - tw - 6
-  tx = math.max(6, math.min(tx, max_x))
 
-  draw_rect_safe(tx - 1, ty - 1, tw + 2, th + 2, { 10, 10, 10, 200 })
-  draw_rect_safe(tx, ty, tw, th, { 25, 25, 28, 250 })
-  draw_rect_safe(tx, ty, tw, 1, style.accent or { 56, 189, 248, 255 })
-  draw_text_safe(font, text, tx + 8, ty + 4, style.text or { 240, 240, 240, 255 })
+  draw_rect_safe(tx - 1, ty - 1, tw + 2, th + 2, { 8, 14, 24, 160 })
+  draw_rect_safe(tx, ty, tw, th, { 24, 82, 155, 245 })
+  draw_rect_safe(tx, ty, tw, 1, { 56, 189, 248, 255 })
+  draw_text_safe(font, text, tx + 10, ty + math.floor((th - font:get_height()) / 2), { 255, 255, 255, 255 })
 end
 
--- =============================================================================
--- HOOKS NO STATUSVIEW & ROOTVIEW (SANEAMENTO E RENDERIZAÇÃO)
--- =============================================================================
--- Suprime a mensagem horizontal no rodapé e desativa caminhos via predicate
-local orig_statusview_draw = StatusView.draw
-function StatusView:draw(...)
-  -- 1. Oculta com segurança itens de diretório/arquivo à esquerda através do predicado
-  local items_table = self.items or self.left_items
-  if type(items_table) == "table" then
-    for _, it in pairs(items_table) do
-      if type(it) == "table" and it.alignment == StatusView.Item.LEFT then
-        local name = tostring(it.name or ""):lower()
-        if name == "doc:file-name" or name == "doc:file-info" or name == "file-info" or name:find("path") or name:find("file") then
-          it.predicate = function() return false end
-        elseif not it._dox_pred_shielded then
-          it._dox_pred_shielded = true
-          local orig_p = it.predicate or function() return true end
-          it.predicate = function(...)
-            if not orig_p(...) then return false end
-            local ok, parts = pcall(it.get_item, it)
-            if ok and type(parts) == "table" then
-              for _, p in ipairs(parts) do
-                if type(p) == "string" and looks_like_path(p) then
-                  return false
-                end
-              end
-            end
-            return true
-          end
-        end
+-- ── 11. DESPACHO SEGURO COM DEBOUNCE ANTI-REENTRADA ──────────────────────────
+local _last_click_t = 0
+
+local function handle_action_click(x, y)
+  local now = os.clock()
+  if now - _last_click_t < 0.20 then
+    return true
+  end
+
+  for _, btn in ipairs(_active_rects) do
+    if x >= btn.x and x <= (btn.x + btn.w) and y >= btn.y and y <= (btn.y + btn.h) then
+      _last_click_t = now
+      if type(btn.cmd) == "function" then
+        btn.cmd()
+        core.redraw = true
+        return true
+      elseif type(btn.cmd) == "string" then
+        command.perform(btn.cmd)
+        core.redraw = true
+        return true
       end
     end
   end
-
-  -- 2. Intercepta a mensagem crua horizontal na barra de status
-  local active_msg = self.message
-  self.message = nil
-
-  orig_statusview_draw(self, ...)
-
-  self.message = active_msg -- Restaura para o timer do Lite XL
-
-  -- 3. Desenha os chips segmentados
-  draw_chips(self)
+  return false
 end
 
--- Desenha o Toast flutuante e tooltips sem sofrer corte de viewport
+-- ── 12. HOOKS NO ROOTVIEW ─────────────────────────────────────────────────────
 local orig_rootview_draw = RootView.draw
 function RootView:draw(...)
   orig_rootview_draw(self, ...)
@@ -339,32 +553,33 @@ function RootView:draw(...)
   pcall(draw_log_toast)
 end
 
-local orig_mouse_moved = RootView.on_mouse_moved
+local orig_rootview_on_mouse_moved = RootView.on_mouse_moved
 function RootView:on_mouse_moved(px, py, ...)
-  hud.hovered = nil
-  for _, c in ipairs(hud.chips or {}) do
-    if c.rect and px >= c.rect.x and px <= (c.rect.x + c.rect.w) and py >= c.rect.y and py <= (c.rect.y + c.rect.h) then
-      hud.hovered = c.id
-      core.redraw = true
+  local old_h = _state.hovered
+  _state.hovered = nil
+
+  for _, b in ipairs(_active_rects) do
+    if px >= b.x and px <= (b.x + b.w) and py >= b.y and py <= (b.y + b.h) then
+      _state.hovered = b.id
       break
     end
   end
-  return orig_mouse_moved(self, px, py, ...)
+
+  if _state.hovered ~= old_h then
+    core.redraw = true
+  end
+
+  if orig_rootview_on_mouse_moved then
+    return orig_rootview_on_mouse_moved(self, px, py, ...)
+  end
 end
 
-local orig_mouse_pressed = RootView.on_mouse_pressed
-function RootView:on_mouse_pressed(button, px, py, ...)
-  if button == "left" then
-    for _, c in ipairs(hud.chips or {}) do
-      if c.rect and px >= c.rect.x and px <= (c.rect.x + c.rect.w) and py >= c.rect.y and py <= (c.rect.y + c.rect.h) then
-        if type(c.cmd) == "function" then
-          c.cmd()
-        elseif type(c.cmd) == "string" then
-          command.perform(c.cmd)
-        end
-        return true
-      end
-    end
+local orig_rootview_on_mouse_pressed = RootView.on_mouse_pressed
+function RootView:on_mouse_pressed(button, x, y, clicks)
+  if button == "left" and handle_action_click(x, y) then
+    return true
   end
-  return orig_mouse_pressed(self, button, px, py, ...)
+  if orig_rootview_on_mouse_pressed then
+    return orig_rootview_on_mouse_pressed(self, button, x, y, clicks)
+  end
 end

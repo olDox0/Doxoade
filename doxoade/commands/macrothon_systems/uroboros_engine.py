@@ -18,7 +18,7 @@ from doxoade.tools.doxcolors         import Fore, Style
 from doxoade.core_database          import get_db_connection
 from doxoade.tools.alexandria.engine import alexandria_write
 from doxoade.core_database           import get_db_connection
-from doxoade.commands.init           import _refactor_to_silo
+from doxoade.commands.init_systems.init_cmd import _refactor_to_silo
 
 class UroborosEngine:
     def __init__(self, project_root: str):

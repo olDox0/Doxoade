@@ -12,6 +12,7 @@ from .mk_engine import MkEngine
 from .mk_utils import open_in_notepadpp
 from doxoade.tools.filesystem import _find_project_root
 from doxoade.tools.editor_dispatch import EditorDispatcher
+from doxoade.commands.init_systems.init_cmd import _generate_gitignore
 
 
 def register_mk_options(f):
@@ -53,7 +54,6 @@ def execute_mk_logic(base_path, items, architecture, learning, tree, up, gitigno
 
     # 2. Modo .gitignore soberano
     if gitignore:
-        from doxoade.commands.init import _generate_gitignore
         project_name = os.path.basename(os.path.abspath(base_path))
         gi_path = os.path.join(base_path, '.gitignore')
         if not is_dry_run:

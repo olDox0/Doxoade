@@ -66,7 +66,7 @@ class DoxoadeLazyGroup(click.Group):
             'history': 'doxoade.commands.history:history',
             'ide': 'doxoade.commands.mobile_ide:ide',
             'impact-analysis': 'doxoade.commands.impact_analysis:impact_analysis',
-            'init': 'doxoade.commands.init:init',
+            'init': 'doxoade.commands.init_systems.init_cmd:init',
             'install': 'doxoade.commands.install:install',
             'intelligence': 'doxoade.commands.intelligence:intelligence',
             'kvcheck': 'doxoade.commands.kvcheck:kvcheck',

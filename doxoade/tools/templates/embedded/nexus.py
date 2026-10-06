@@ -2,6 +2,7 @@
 import sys
 import os
 import functools
+from doxoade.commands.init_systems.init_cmd import init
 
 # --- DETECÇÃO DE CONTEXTO ---
 # Se 'doxoade' está no path, estamos no modo CORE. 
