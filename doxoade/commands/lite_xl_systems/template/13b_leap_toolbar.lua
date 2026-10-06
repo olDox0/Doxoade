@@ -1,9 +1,9 @@
 -- doxoade/commands/lite_xl_systems/template/13b_leap_toolbar.lua
 --[[
-⚡ DOXOADE LEAP SYS KVM TOOLBAR & CONTROLLER (V1.3 Fixed & Strict-Safe)
-- 修复字符串截断语法错误。
-- 显式注入 CLI 参数，防止 click.prompt 在无 TTY 后台调用时死锁。
-- 状态同步基于 ~/.doxoade/leap_state.json (SysUtils Zeus <-> Doxly Hermes)。
+⚡ DOXOADE LEAP SYS KVM CONTROLLER & DISPATCHER (V2.0 Sovereign)
+- Acionamento direto do Host no Amaranth (Amaranth -> bluebaby à direita).
+- Despacho desacoplado no Windows (sem congelar o loop gráfico do Lite XL).
+- Escrita e leitura direta do contrato ~/.doxoade/leap_state.json.
 ]]
 local core = require "core"
 local style = require "core.style"
@@ -21,17 +21,13 @@ local state_file = home .. sep .. ".doxoade" .. sep .. "leap_state.json"
 local LeapHUD = {
     active = false,
     mode = "idle",
-    target = "",
-    server_ip = "192.168.18.52", -- IP padrão do Amaranth (Host)
+    target = "bluebaby",
+    server_ip = "192.168.18.52", -- IP Wi-Fi padrão do Amaranth
+    port = 24800,
     last_toggle_time = 0,
 }
 
-local COLOR_HOST_BG   = { 25, 123, 63, 255 }
-local COLOR_CLIENT_BG = { 30, 57, 92, 255 }
-local COLOR_OFF_BG    = { 45, 45, 48, 255 }
-local COLOR_TEXT      = { 250, 250, 250, 255 }
-
--- 📖 Leitura O(1) do contrato de estado gerado pelo SysUtils
+-- ── 1. Leitura O(1) do Contrato de Estado ────────────────────────────────────
 local function read_leap_state()
     local f = io.open(state_file, "r")
     if not f then
@@ -41,60 +37,91 @@ local function read_leap_state()
     end
     local content = f:read("*a") or ""
     f:close()
-    
+
     LeapHUD.active = content:find('"active":%s*true') ~= nil
     LeapHUD.mode = content:match('"mode":%s*"([^"]+)"') or "idle"
-    LeapHUD.target = content:match('"target":%s*"([^"]+)"') or ""
-    
+    LeapHUD.target = content:match('"target":%s*"([^"]+)"') or "bluebaby"
+
     local ip = content:match('"server_ip":%s*"([^"]+)"')
-    if ip and ip ~= "" then
-        LeapHUD.server_ip = ip
+    if ip and ip ~= "" then LeapHUD.server_ip = ip end
+end
+
+-- ── 2. Gravação do Contrato de Estado ─────────────────────────────────────────
+local function write_leap_state(active, mode, target, ip)
+    local f = io.open(state_file, "w")
+    if f then
+        local payload = string.format(
+            '{\n  "active": %s,\n  "mode": "%s",\n  "target": "%s",\n  "server_ip": "%s",\n  "port": %d,\n  "updated_at": %d\n}',
+            active and "true" or "false",
+            mode or "idle",
+            target or "bluebaby",
+            ip or "192.168.18.52",
+            LeapHUD.port,
+            os.time()
+        )
+        f:write(payload)
+        f:close()
     end
 end
 
--- ⚡ Despachante Soberano (Corrigido e Blindado contra Bloqueio de TTY)
+-- ── 3. Execução Silenciosa e Desacoplada no Windows ──────────────────────────
+local function execute_async(cmd)
+    if PLATFORM == "Windows" or os.getenv("OS") == "Windows_NT" then
+        -- start /b evita abrir janela de console preta e não trava o Lite XL
+        os.execute('start /b cmd /c "' .. cmd .. '" > NUL 2>&1')
+    else
+        os.execute(cmd .. ' > /dev/null 2>&1 &')
+    end
+end
+
+-- ── 4. Despachante Soberano de Toggle ─────────────────────────────────────────
 local function toggle_leap_state()
     local now = os.clock()
-    if (now - LeapHUD.last_toggle_time) < 0.8 then return end
+    if (now - LeapHUD.last_toggle_time) < 0.6 then return end
     LeapHUD.last_toggle_time = now
+
+    read_leap_state()
 
     local hostname = os.getenv("COMPUTERNAME") or "UNKNOWN"
     local is_amaranth = hostname:upper():find("AMARANTH") ~= nil
 
     if LeapHUD.active then
-        -- 🛑 STOP: Encerra todos os daemons
-        pcall(system.exec, 'sysutils leap stop')
+        -- Parar serviço ativo
+        execute_async("sysutils leap stop")
+        write_leap_state(false, "idle", "", LeapHUD.server_ip)
         LeapHUD.active = false
         LeapHUD.mode = "idle"
+        core.log("🛑 [LEAP] Servidor KVM desativado.")
         core.redraw = true
-        if core.log then core.log("🛑 [LEAP] Mouse/Teclado desconectado.") end
         return
     end
 
     if is_amaranth then
-        -- 🚀 HOST (Amaranth -> Bluebaby)
-        local cmd = 'sysutils leap host --client bluebaby --pos right --port 24800 --no-firewall'
-        pcall(system.exec, cmd)
+        -- AMARANTH -> Dispara como Host com topologia fixada à direita para o bluebaby
+        local cmd = "sysutils leap host --client bluebaby --pos right --port 24800 --no-firewall"
+        execute_async(cmd)
+        write_leap_state(true, "host", "bluebaby", LeapHUD.server_ip)
         LeapHUD.active = true
         LeapHUD.mode = "host"
-        if core.log then core.log("🚀 [LEAP] Servidor Host iniciado (Amaranth -> Bluebaby)") end
+        core.log("🚀 [LEAP HOST] Servidor KVM ativo em Amaranth ➔ bluebaby (Direita :24800)")
     else
-        -- 🔌 CLIENT (Bluebaby -> Amaranth)
-        -- 🛡️ BLINDAGEM: IP e nome hardcoded para evitar falhas de resolução de DNS/Prompt
-        local cmd = string.format('sysutils leap join %s --port 24800 --name bluebaby', LeapHUD.server_ip)
-        pcall(system.exec, cmd)
+        -- BLUEBABY -> Conecta ao Amaranth
+        local cmd = string.format("sysutils leap join %s --port 24800 --name bluebaby", LeapHUD.server_ip)
+        execute_async(cmd)
+        write_leap_state(true, "client", "Amaranth", LeapHUD.server_ip)
         LeapHUD.active = true
         LeapHUD.mode = "client"
-        if core.log then core.log("🚀 [LEAP] Conectando cliente ao Amaranth (" .. LeapHUD.server_ip .. ")") end
+        core.log("🔗 [LEAP CLI] Conectando ao host Amaranth (" .. LeapHUD.server_ip .. ")")
     end
+
     core.redraw = true
 end
 
--- 🔄 Polling Assíncrono para sincronizar estado se o SysUtils for alterado externamente
+-- ── 5. Polling de Sincronia em Background ────────────────────────────────────
 if core and core.add_thread then
     core.add_thread(function()
         while true do
-            coroutine.yield(1.5)
+            coroutine.yield(1.0)
             local prev_active = LeapHUD.active
             local prev_mode = LeapHUD.mode
             read_leap_state()
@@ -105,50 +132,18 @@ if core and core.add_thread then
     end)
 end
 
--- 🎨 Registro na Status Bar (Hermes UI)
-core.add_thread(function()
-    coroutine.yield(0.05)
-    if not core.status_view or not core.status_view.add_item then return end
-    
-    local existing = pcall(function() return core.status_view:get_item("doxoade:leap_status") end)
-    if existing and type(existing) == "table" then return end
-
-    local DIVIDER_COLOR = style.divider or { 76, 69, 82, 255 }
-    
-    pcall(function()
-        core.status_view:add_item({
-            name = "doxoade:leap_status",
-            alignment = StatusView.Item.RIGHT, -- Alinhado à direita para não esmagar o código
-            predicate = function() return true end,
-            get_item = function()
-                local label = "L:OFF"
-                local color = COLOR_TEXT
-                if LeapHUD.active then
-                    if LeapHUD.mode == "host" then
-                        label = "L:HST" -- Host/Servidor
-                        color = { 100, 255, 150, 255 }
-                    else
-                        label = "L:CLI" -- Cliente
-                        color = { 150, 200, 255, 255 }
-                    end
-                end
-                return { color, " " .. label .. " ", DIVIDER_COLOR, "| " }
-            end,
-            command = function() toggle_leap_state() end,
-            position = 4 -- Posição 4 no lado RIGHT
-        })
-    end)
-end)
-
--- ⌨️ Comandos e Atalhos
+-- ── 6. Registro de Comandos e Atalhos ────────────────────────────────────────
 command.add(nil, {
     ["doxoade:leap-toggle"] = function() toggle_leap_state() end,
+    ["doxoade:toggle-leap-service"] = function() toggle_leap_state() end,
     ["doxoade:leap-stop"] = function()
-        pcall(system.exec, "sysutils leap stop")
+        execute_async("sysutils leap stop")
+        write_leap_state(false, "idle", "", LeapHUD.server_ip)
         LeapHUD.active = false
+        LeapHUD.mode = "idle"
+        core.log("🛑 [LEAP] Processos encerrados.")
         core.redraw = true
-        if core.log then core.log("🛑 [LEAP] Processos encerrados.") end
-    end
+    end,
 })
 
 keymap.add { ["ctrl+alt+l"] = "doxoade:leap-toggle" }
