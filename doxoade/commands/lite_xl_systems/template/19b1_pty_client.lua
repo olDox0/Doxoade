@@ -181,7 +181,10 @@ function PTYClient:poll()
         return true
       elseif content:find('"alive":%s*false') then
         local err_msg = content:match('"error"%s*:%s*"([^"]+)"') or "Falha no backend PTY"
-        if core.log then core.log("❌ [PTY Bluebaby] " .. err_msg) end
+        if err_msg:find("winpty") or err_msg:find("pywinpty") then
+          self.missing_winpty = true
+        end
+        if core.log then core.log("❌ [PTY] " .. err_msg) end
         self:close()
         return false
       end

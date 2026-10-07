@@ -420,6 +420,23 @@ function ShelfHub:draw()
   if self.active_tab == "terminal" and term then
     term:update_viewport(w - 8, canvas_h + 30)
 
+    -- 📦 Banner de Diagnóstico quando falta o WinPTY
+    if term._client and term._client.missing_winpty then
+      local box_w = math.min(w - 32, 600)
+      local box_h = 130
+      local bx = x + math.floor((w - box_w) / 2)
+      local by = canvas_y + 20
+
+      draw_rect_safe(bx, by, box_w, box_h, { 25, 20, 15, 245 })
+      draw_rect_safe(bx, by, box_w, 2, { 245, 158, 11, 255 })
+
+      draw_text_safe(font, "⚠ DEPENDÊNCIA AUSENTE: pywinpty (ConPTY Engine)", bx + 16, by + 12, { 245, 158, 11, 255 })
+      draw_text_safe(font, "O terminal integrado requer 'pywinpty' para emular o console no Windows 11.", bx + 16, by + 34, { 220, 220, 220, 255 })
+      draw_text_safe(font, "Execute no seu terminal com o venv ativo:", bx + 16, by + 60, { 150, 150, 150, 255 })
+      draw_text_safe(font, "> pip install pywinpty", bx + 16, by + 80, { 34, 197, 94, 255 })
+      draw_text_safe(font, "Ou rode: doxoade doxly pty-install", bx + 16, by + 102, { 56, 189, 248, 255 })
+    end
+
     local line_h = term:_line_height()
     local max_line_w = w - 24
 

@@ -570,6 +570,14 @@ def cmd_log(mode: str, lines: int, follow: bool, errors: bool, phanto: bool, cle
 @click.option("--force", "-f", is_flag=True, help="Sobrescreve sem pedir confirmação.")
 @click.option("--no-backup", is_flag=True, help="Não gera arquivo .bak.")
 def cmd_setup(force, no_backup):
+    if sys.platform == "win32":
+        try:
+            import winpty
+        except ImportError:
+            click.echo(f"\n{Fore.YELLOW}⚠ AVISO DE CONSOLE: 'pywinpty' ausente.{Fore.RESET}")
+            if click.confirm("O Terminal PTY do Doxly requer 'pywinpty'. Deseja instalar agora no virtualenv?", default=True):
+                subprocess.run([sys.executable, "-m", "pip", "install", "pywinpty"])
+
 
     num_probes = len(LiteXLEngine.get_probe_files())
     num_templates = len(LiteXLEngine.get_template_files())
@@ -1783,4 +1791,30 @@ def cmd_typhon_test_deploy(watch):
     else:
         click.echo(f"  {Fore.RED}{Style.BRIGHT}✖ TEST-DEPLOY FALHOU ({result['verdict']}){Style.RESET_ALL}")
         click.echo(f"  {Fore.YELLOW}💡 O init real permanece intacto. Corrija os problemas e tente novamente.{Fore.RESET}\n")
+
+@lite_xl_group.command("pty-install", help="📦 Instala as dependências nativas do Terminal PTY (pywinpty).")
+def cmd_pty_install():
+    """Instala o pywinpty no ambiente virtual ativo para emulação ConPTY."""
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}📦 INSTALADOR DE DEPENDÊNCIAS DO TERMINAL PTY{Style.RESET_ALL}\n")
+    if sys.platform != "win32":
+        click.echo(f"{Fore.GREEN}✔ O sistema atual é Unix/POSIX (PTY nativo da biblioteca padrão). Nenhuma instalação necessária.{Fore.RESET}\n")
+        return
+
+    try:
+        import winpty
+        click.echo(f"{Fore.GREEN}✔ 'pywinpty' já está instalado e funcional neste Python:{Fore.RESET} {sys.executable}\n")
+        return
+    except ImportError:
+        pass
+
+    click.echo(f"  {Fore.YELLOW}⚠ A biblioteca 'pywinpty' não foi localizada no ambiente virtual.{Fore.RESET}")
+    click.echo(f"  {Fore.WHITE}Interpretador:{Fore.RESET} {sys.executable}\n")
+
+    if click.confirm("Deseja instalar 'pywinpty' agora via pip?", default=True):
+        click.echo(f"\n{Fore.CYAN}⏳ Executando: pip install pywinpty...{Fore.RESET}")
+        res = subprocess.run([sys.executable, "-m", "pip", "install", "pywinpty"])
+        if res.returncode == 0:
+            click.echo(f"\n{Fore.GREEN}✔ 'pywinpty' instalado com sucesso! O Terminal PTY já pode ser iniciado.{Fore.RESET}\n")
+        else:
+            click.echo(f"\n{Fore.RED}✖ Falha ao instalar via pip (Exit Code {res.returncode}). Tente manualmente: pip install pywinpty{Fore.RESET}\n")
 
