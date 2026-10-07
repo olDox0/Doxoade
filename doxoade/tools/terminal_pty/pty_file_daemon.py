@@ -60,10 +60,23 @@ def main() -> int:
     # 🎯 Iniciação Limpa do CMD (Gera script bat isolado no ipc_dir sem conflito de aspas)
     if platform_kind == PlatformKind.WINDOWS and shell_res.shell_id == "cmd":
         init_bat = ipc_dir / "init_env.cmd"
-        venv_act = Path(work_dir) / "venv" / "Scripts" / "activate.bat"
-        bat_lines = ["@echo off", f'cd /d "{work_dir}"']
-        if venv_act.exists():
+        work_path = Path(work_dir).resolve()
+        
+        # Procura venvs em múltiplos padrões (venv, .venv, env)
+        candidates = [
+            work_path / "venv" / "Scripts" / "activate.bat",
+            work_path / ".venv" / "Scripts" / "activate.bat",
+            work_path / "env" / "Scripts" / "activate.bat",
+        ]
+        venv_act = next((c for c in candidates if c.exists()), None)
+
+        bat_lines = ["@echo off", f'cd /d "{work_path}"']
+        if venv_act:
             bat_lines.append(f'call "{venv_act.resolve()}"')
+        else:
+            # Fallback limpo: se não tiver venv, opera no CMD padrão sem erro
+            bat_lines.append('echo [INFO] Projeto sem virtualenv local. Operando em CMD padrão.')
+
         bat_lines.append("doskey doxoade=doxoade --pure $*")
         init_bat.write_text("\r\n".join(bat_lines) + "\r\n", encoding="utf-8")
         shell_res.args = ["/k", str(init_bat.resolve())]
@@ -130,7 +143,14 @@ def main() -> int:
                     if action == "resize":
                         backend.resize(cmd_data.get("cols", 120), cmd_data.get("rows", 30))
                     elif action == "interrupt":
+                        # 1. Envia caractere de controle \x03
                         backend.send_interrupt()
+                        # 2. No Windows, se houver processo filho rodando no CMD, força cancelamento
+                        if platform_kind == PlatformKind.WINDOWS and backend.child_pid > 0:
+                            subprocess.run(
+                                ["taskkill", "/F", "/T", "/FI", f"PID ne {backend.child_pid}", "/FI", f"PID ne {os.getpid()}"],
+                                capture_output=True
+                            )
                     elif action == "shutdown":
                         break
                 except Exception:

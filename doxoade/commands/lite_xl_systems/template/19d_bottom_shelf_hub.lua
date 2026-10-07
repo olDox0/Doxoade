@@ -1064,6 +1064,21 @@ command.add(function() return ShelfHub.visible end, {
     local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
     if term then term:scroll_by(-300) end
   end,
+  ["bottom-shelf:smart-ctrl-c"] = function()
+    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+    if not term then return true end
+
+    local has_input_sel = (term._all_selected and #term.input_text > 0) or
+      (term.input_sel_from and term.input_cursor and term.input_sel_from ~= term.input_cursor)
+    local has_term_sel  = (term.sel_s_line and term.sel_e_line and
+      (term.sel_s_line ~= term.sel_e_line or term.sel_s_col ~= term.sel_e_col))
+
+    if has_input_sel or has_term_sel then
+      return command.perform("bottom-shelf:copy")
+    else
+      return command.perform("bottom-shelf:interrupt")
+    end
+  end,
 })
 
 keymap.add {
@@ -1072,6 +1087,7 @@ keymap.add {
   ["alt+return"]      = "doxoade:bottom-shelf-toggle-maximize",
   ["escape"]          = "bottom-shelf:close",
   ["ctrl+shift+c"]   = "bottom-shelf:copy",
+  ["ctrl+c"]          = "bottom-shelf:smart-ctrl-c",
   ["ctrl+c"]          = "bottom-shelf:copy",
   ["ctrl+v"]          = "bottom-shelf:paste",
   ["ctrl+a"]          = "bottom-shelf:select-all",

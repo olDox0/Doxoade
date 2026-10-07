@@ -790,7 +790,7 @@ command.add(nil, {
 keymap.add {
   ["alt+d"] = "root:split-right", ["alt+shift+d"] = "root:split-down",
   ["ctrl+alt+d"] = "root:move-tab-to-opposite-panel",
-  ["ctrl+w"] = "root:close", ["alt+w"] = "root:close",
+  ["ctrl+w"] = "root:close",
   ["ctrl+tab"] = "root:switch-to-next-tab", ["ctrl+shift+tab"] = "root:switch-to-previous-tab",
   ["ctrl+,"] = "doxoade:open-init-lua", ["ctrl+alt+\\"] = "doxoade:open-pantheon",
   ["ctrl+alt+u"] = "doxoade:toggle-litexl-in-tree", ["ctrl+alt+p"] = "doxoade:open-pot-in-right-panel",

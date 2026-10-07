@@ -68,45 +68,28 @@ function PTYClient:_find_python()
   local sep = PATHSEP or "/"
   local user_dir = USERDIR or "."
 
-  -- 1. Variável de ambiente VIRTUAL_ENV
+  -- 1. Âncora oficial do DoxOADE (onde pywinpty com certeza existe)
+  local home_dir = os.getenv("USERPROFILE") or os.getenv("HOME") or "."
+  local anchors = {
+    user_dir .. sep .. ".doxoade" .. sep .. "python_path.txt",
+    home_dir .. sep .. ".doxoade" .. sep .. "python_path.txt",
+  }
+  for _, ap in ipairs(anchors) do
+    local f = io.open(ap, "r")
+    if f then
+      local py = (f:read("*l") or ""):gsub("[\r\n]", ""):gsub("^%s*", ""):gsub("%s*$", "")
+      f:close()
+      if py ~= "" and system.get_file_info(py) then
+        return py:gsub("/", "\\")
+      end
+    end
+  end
+
+  -- 2. Variável VIRTUAL_ENV
   local venv_env = os.getenv("VIRTUAL_ENV")
   if venv_env and venv_env ~= "" then
     local py = (venv_env .. sep .. "Scripts" .. sep .. "python.exe"):gsub("/", "\\")
-    if system and system.get_file_info and system.get_file_info(py) then
-      return py
-    end
-  end
-
-  -- 2. Raiz do projeto ativo ou CWD selecionado
-  local check_dirs = {}
-  if self.cwd then table.insert(check_dirs, self.cwd) end
-  if core.project_directories then
-    for _, d in ipairs(core.project_directories) do
-      local p = (type(d) == "table" and (d.path or d.name) or tostring(d))
-      table.insert(check_dirs, p)
-    end
-  end
-  if core.project_dir then table.insert(check_dirs, core.project_dir) end
-
-  for _, dir in ipairs(check_dirs) do
-    local c1 = (dir .. sep .. "venv" .. sep .. "Scripts" .. sep .. "python.exe"):gsub("/", "\\")
-    if system and system.get_file_info and system.get_file_info(c1) then return c1 end
-    local c2 = (dir .. sep .. ".venv" .. sep .. "Scripts" .. sep .. "python.exe"):gsub("/", "\\")
-    if system and system.get_file_info and system.get_file_info(c2) then return c2 end
-  end
-
-  -- 3. Âncora ~/.doxoade/python_path.txt
-  local py_anchor = user_dir .. sep .. ".doxoade" .. sep .. "python_path.txt"
-  local finfo = system and system.get_file_info and system.get_file_info(py_anchor)
-  if finfo and finfo.type == "file" then
-    local f = io.open(py_anchor, "r")
-    if f then
-      local py_exe = (f:read("*l") or ""):gsub("[\r\n]", ""):gsub("^%s*", ""):gsub("%s*$", "")
-      f:close()
-      if py_exe ~= "" and system.get_file_info(py_exe) then
-        return py_exe:gsub("/", "\\")
-      end
-    end
+    if system.get_file_info(py) then return py end
   end
 
   return "python"
@@ -233,12 +216,15 @@ function PTYClient:send_resize(cols, rows)
 end
 
 function PTYClient:send_interrupt()
+  -- 1. Sinal estruturado no pty_cmd.json
   local f = io.open(self.file_cmd, "w")
   if f then
     f:write('{"action": "interrupt"}\n')
     f:flush()
     f:close()
   end
+  -- 2. Injeção direta de byte \x03 (ETX / Ctrl+C) no stdin
+  self:send_input("\x03\r\n")
 end
 
 function PTYClient:clear_screen()
