@@ -68,7 +68,33 @@ function PTYClient:_find_python()
   local sep = PATHSEP or "/"
   local user_dir = USERDIR or "."
 
-  -- 1. Âncora oficial do DoxOADE (onde pywinpty com certeza existe)
+  -- 1. Varre venvs dentro de todos os projetos abertos no Lite XL
+  local check_dirs = {}
+  if self.cwd then table.insert(check_dirs, self.cwd) end
+  if core.project_directories then
+    for _, d in ipairs(core.project_directories) do
+      local p = type(d) == "table" and (d.path or d.name) or d
+      table.insert(check_dirs, p)
+    end
+  end
+  if core.project_dir then table.insert(check_dirs, core.project_dir) end
+
+  for _, dir in ipairs(check_dirs) do
+    local p_str = tostring(dir)
+    local v1 = (p_str .. sep .. "venv" .. sep .. "Scripts" .. sep .. "python.exe"):gsub("/", "\\")
+    if system and system.get_file_info and system.get_file_info(v1) then return v1 end
+    local v2 = (p_str .. sep .. ".venv" .. sep .. "Scripts" .. sep .. "python.exe"):gsub("/", "\\")
+    if system and system.get_file_info and system.get_file_info(v2) then return v2 end
+  end
+
+  -- 2. Variável de ambiente VIRTUAL_ENV do Windows
+  local venv_env = os.getenv("VIRTUAL_ENV")
+  if venv_env and venv_env ~= "" then
+    local py = (venv_env .. sep .. "Scripts" .. sep .. "python.exe"):gsub("/", "\\")
+    if system and system.get_file_info and system.get_file_info(py) then return py end
+  end
+
+  -- 3. Âncoras locais (apenas se o arquivo existir fisicamente no bluebaby)
   local home_dir = os.getenv("USERPROFILE") or os.getenv("HOME") or "."
   local anchors = {
     user_dir .. sep .. ".doxoade" .. sep .. "python_path.txt",
@@ -79,17 +105,21 @@ function PTYClient:_find_python()
     if f then
       local py = (f:read("*l") or ""):gsub("[\r\n]", ""):gsub("^%s*", ""):gsub("%s*$", "")
       f:close()
-      if py ~= "" and system.get_file_info(py) then
+      if py ~= "" and system.get_file_info and system.get_file_info(py) then
         return py:gsub("/", "\\")
       end
     end
   end
 
-  -- 2. Variável VIRTUAL_ENV
-  local venv_env = os.getenv("VIRTUAL_ENV")
-  if venv_env and venv_env ~= "" then
-    local py = (venv_env .. sep .. "Scripts" .. sep .. "python.exe"):gsub("/", "\\")
-    if system.get_file_info(py) then return py end
+  -- 4. Instalações padrão do Python no Windows 11 (AppData)
+  local local_app = os.getenv("LOCALAPPDATA")
+  if local_app then
+    for _, ver in ipairs({ "Python312", "Python311", "Python310" }) do
+      local py_std = (local_app .. [[\Programs\Python\]] .. ver .. [[\python.exe]])
+      if system and system.get_file_info and system.get_file_info(py_std) then
+        return py_std
+      end
+    end
   end
 
   return "python"
@@ -107,12 +137,20 @@ function PTYClient:spawn()
   self.current_line = {}
 
   local target_cwd = self.cwd and (system.absolute_path(self.cwd) or self.cwd):gsub("/", "\\") or ""
+  
+  -- 🎯 Resolve a raiz do DoxOADE para injetar no PYTHONPATH
+  local root_proj = target_cwd ~= "" and target_cwd or (core.project_dir or ".")
+  local abs_root = (system.absolute_path(root_proj) or root_proj):gsub("/", "\\")
+
+  -- Injeção atômica de PYTHONPATH para o bluebaby sempre encontrar o módulo doxoade
   local cmd = string.format(
-    'start /b "" "%s" -m doxoade.tools.terminal_pty.pty_file_daemon --ipc-dir "%s" --shell "%s" --cols %d --rows %d',
-    python_exe, self.ipc_dir, self.shell, self.cols, self.rows
+    'cmd /c "set PYTHONPATH=%s;%%PYTHONPATH%% && start /b \"\" \"%s\" -m doxoade.tools.terminal_pty.pty_file_daemon --ipc-dir \"%s\" --shell \"%s\" --cols %d --rows %d',
+    abs_root, python_exe, self.ipc_dir, self.shell, self.cols, self.rows
   )
   if target_cwd ~= "" then
-    cmd = cmd .. string.format(' --cwd "%s"', target_cwd)
+    cmd = cmd .. string.format(' --cwd \"%s\""', target_cwd)
+  else
+    cmd = cmd .. '"'
   end
 
   local ok = pcall(system.exec, cmd)
@@ -142,6 +180,8 @@ function PTYClient:poll()
         core.redraw = true
         return true
       elseif content:find('"alive":%s*false') then
+        local err_msg = content:match('"error"%s*:%s*"([^"]+)"') or "Falha no backend PTY"
+        if core.log then core.log("❌ [PTY Bluebaby] " .. err_msg) end
         self:close()
         return false
       end

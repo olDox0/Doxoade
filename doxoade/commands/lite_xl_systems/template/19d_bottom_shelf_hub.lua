@@ -45,6 +45,28 @@ local function draw_text_safe(font, text, x, y, color)
   end
 end
 
+-- ── Quebra de Linha Suave para Comandos Longos no Input ──────────────────────
+local function wrap_input_string(font, text, max_w)
+  local lines = {}
+  if not text or text == "" then return { "" } end
+
+  local cur = ""
+  for i = 1, #text do
+    local ch = text:sub(i, i)
+    if ch == "\n" then
+      table.insert(lines, cur)
+      cur = ""
+    elseif font:get_width(cur .. ch) > max_w and cur ~= "" then
+      table.insert(lines, cur)
+      cur = ch
+    else
+      cur = cur .. ch
+    end
+  end
+  table.insert(lines, cur)
+  return lines
+end
+
 -- ── Gerador de Cor de Fundo Ultra-Escura & Fiel por Projeto (EM ESCOPO TOPO) ──
 local function hash_string(str)
   local h = 5381
@@ -486,49 +508,60 @@ function ShelfHub:draw()
   core.pop_clip_rect()
 
   -- ═══════════════════════════════════════════════════════════════════════════
-  -- BARRA DE ENTRADA INFERIOR HARMONIZADA
+  -- BARRA DE ENTRADA INFERIOR COM EXPANSÃO DINÂMICA (QUEBRA DE LINHA)
   -- ═══════════════════════════════════════════════════════════════════════════
-  local input_y = y + h - 30
-  self.input_rect = { x = x + 1, y = input_y, w = w - 2, h = 29 }
+  local tag = (term and term.is_executing) and "[RODANDO]" or "[PTY]"
+  local p_off = font:get_width(tag) + 24
+  local max_text_w = math.max(120, w - p_off - 32)
+
+  -- Calcula quebra de linha visual do comando digitado
+  local input_lines = wrap_input_string(font, (term and term.input_text) or "", max_text_w)
+  local num_input_lines = math.min(4, math.max(1, #input_lines))
+  local line_h_inp = font:get_height() + 2
+  local dynamic_inp_h = math.max(29, (num_input_lines * line_h_inp) + 10)
+
+  local input_y = y + h - dynamic_inp_h - 1
+  self.input_rect = { x = x + 1, y = input_y, w = w - 2, h = dynamic_inp_h }
+
   local in_bg = (self.active_tab == "terminal") and proj_tint or { 10, 10, 10, 255 }
-  draw_rect_safe(x + 1, input_y, w - 2, 29, in_bg)
+  draw_rect_safe(x + 1, input_y, w - 2, dynamic_inp_h, in_bg)
   draw_rect_safe(x + 1, input_y, w - 2, 1, style.accent or { 38, 188, 95, 255 })
 
   if self.active_tab == "terminal" and term then
-    local tag = term.is_executing and "[RODANDO]" or "[PTY]"
     local tag_col = term.is_executing and { 251, 191, 36, 255 } or (style.accent or { 38, 188, 95, 255 })
     draw_text_safe(font, tag, x + 14, input_y + 6, tag_col)
-    local p_off = font:get_width(tag) + 24
-    local text_start_x = x + p_off + font:get_width("> ")
 
-    local sel_s = term.input_sel_from and term.input_cursor and math.min(term.input_sel_from, term.input_cursor)
-    local sel_e = term.input_sel_from and term.input_cursor and math.max(term.input_sel_from, term.input_cursor)
+    local cursor_abs = term.input_cursor or (#term.input_text + 1)
+    local char_count = 0
+    local caret_drawn = false
 
-    if term._all_selected and #term.input_text > 0 then
-      local sel_w = font:get_width("> " .. term.input_text)
-      draw_rect_safe(x + p_off, input_y + 4, sel_w + 4, font:get_height() + 4, { 56, 189, 248, 90 })
-    elseif sel_s and sel_e and sel_s < sel_e then
-      local before_w = font:get_width(term.input_text:sub(1, sel_s - 1))
-      local sel_w = font:get_width(term.input_text:sub(sel_s, sel_e - 1))
-      draw_rect_safe(text_start_x + before_w, input_y + 4, sel_w + 2, font:get_height() + 4, { 56, 189, 248, 90 })
-    end
+    -- Renderiza cada linha do comando quebrado
+    for l_idx, line_str in ipairs(input_lines) do
+      if l_idx <= num_input_lines then
+        local cur_line_y = input_y + 5 + (l_idx - 1) * line_h_inp
+        local prefix = (l_idx == 1) and "> " or "  "
+        local text_x = x + p_off + font:get_width(prefix)
 
-    draw_text_safe(font, "> " .. term.input_text, x + p_off, input_y + 6, { 255, 255, 255, 255 })
+        draw_text_safe(font, prefix .. line_str, x + p_off, cur_line_y, { 255, 255, 255, 255 })
 
-    -- Ghost Text
-    if #term.suggestions > 0 and term.input_text ~= "" and not term._all_selected then
-      local top_sug = term.suggestions[term.suggestion_idx or 1]
-      if top_sug and top_sug:sub(1, #term.input_text):lower() == term.input_text:lower() then
-        local ghost_part = top_sug:sub(#term.input_text + 1)
-        local ghost_x = x + p_off + font:get_width("> " .. term.input_text)
-        draw_text_safe(font, ghost_part, ghost_x, input_y + 6, { 110, 110, 110, 220 })
+        -- Posicionamento do cursor na linha correspondente
+        local line_len = #line_str
+        if not caret_drawn and cursor_abs >= char_count + 1 and cursor_abs <= char_count + line_len + 1 then
+          local rel_col = cursor_abs - char_count
+          local before_str = line_str:sub(1, rel_col - 1)
+          local cx = text_x + font:get_width(before_str)
+          draw_rect_safe(cx, cur_line_y, 2, font:get_height(), style.accent or { 38, 188, 95, 255 })
+          caret_drawn = true
+        end
+        char_count = char_count + line_len
       end
     end
 
-    -- Cursor
-    local text_before = term.input_text:sub(1, term.input_cursor - 1)
-    local cx = text_start_x + font:get_width(text_before)
-    draw_rect_safe(cx, input_y + 6, 2, font:get_height(), style.accent or { 38, 188, 95, 255 })
+    if not caret_drawn then
+      local last_y = input_y + 5 + (num_input_lines - 1) * line_h_inp
+      local cx = x + p_off + font:get_width("> " .. (input_lines[num_input_lines] or ""))
+      draw_rect_safe(cx, last_y, 2, font:get_height(), style.accent or { 38, 188, 95, 255 })
+    end
   elseif self.active_tab == "canvas" and canvas then
     local mode_str = canvas.mode_1to1 and "1:1 Real" or "Ajustado"
     local zoom_lbl = string.format("[%s | Zoom: %d%%] ", mode_str, math.floor(canvas.zoom * 100))
@@ -1079,9 +1112,19 @@ command.add(function() return ShelfHub.visible end, {
       return command.perform("bottom-shelf:interrupt")
     end
   end,
+  ["bottom-shelf:insert-newline"] = function()
+    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+    if term then
+      term.input_text = term.input_text:sub(1, term.input_cursor - 1) .. "\n" .. term.input_text:sub(term.input_cursor)
+      term.input_cursor = term.input_cursor + 1
+      core.redraw = true
+    end
+    return true
+  end,
 })
 
 keymap.add {
+  ["shift+return"] = "bottom-shelf:insert-newline",
   ["ctrl+`"]          = "doxoade:toggle-bottom-shelf",
   ["ctrl+j"]          = "doxoade:toggle-bottom-shelf",
   ["alt+return"]      = "doxoade:bottom-shelf-toggle-maximize",
