@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
-# doxoade/tools/terminal_pty/__init__.py
+# doxoade/tools/terminal_systems/__init__.py
 """
-🖥️ DOXOADE TERMINAL PTY — Motor de Terminal Real Embutido.
+1. DOXOADE TERMINAL SYSTEMS — Subsistema de Terminal Interativo e Streaming PTY.
+Exporta o Daemon de Sessão Persistente e Gerenciador de I/O.
 
+2. Motor de Terminal Real Embutido.
 Fornece um terminal interativo real (ConPTY no Windows, PTY no Unix)
 comunicando-se com o Lite XL via Socket TCP Local autenticado.
-
 Suporte:
   - Windows 10 (1809+) / Windows 11 → ConPTY via pywinpty
   - Linux (incl. Alpine/musl)       → pty stdlib
@@ -13,6 +14,7 @@ Suporte:
 
 Compliance: ProDeNov 1.2.1 | PASC-6.1
 """
+
 from __future__ import annotations
 
 import platform
@@ -20,6 +22,8 @@ import sys
 from enum import Enum
 from pathlib import Path
 from typing import Optional
+
+from .terminal_stream_daemon import TerminalStreamDaemon, TerminalSessionConfig
 
 __version__ = "1.0.0"
 __author__ = "Doxoade Nexus Core / Hefesto & Hermes"
@@ -88,4 +92,7 @@ __all__ = [
     "get_windows_build",
     "is_conpty_available",
     "is_pywinpty_installed",
+    "TerminalStreamDaemon",
+    "TerminalSessionConfig"
 ]
+

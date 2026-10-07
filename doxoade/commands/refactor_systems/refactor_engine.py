@@ -880,7 +880,7 @@ class RefactorEngine:
                         from .refactor_preview import preview_file_change
                         preview_file_change(py_file, text, new_text, context=2)
                     else:
-                        write_text_safe(fpath, "".join(new_lines))
+                        write_text_safe(path, "".join(new_lines))
 #                        py_file.write_text(new_text, encoding='utf-8')
 
     def _simulate_absolute_conversion(self, text: str, source_module_path: str) -> str:

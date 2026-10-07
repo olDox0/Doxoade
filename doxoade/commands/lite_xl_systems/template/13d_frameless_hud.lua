@@ -583,3 +583,82 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
     return orig_rootview_on_mouse_pressed(self, button, x, y, clicks)
   end
 end
+
+-- Remove item fantasma legado que causava conflito de assert no Lite XL
+pcall(function()
+  if core.status_view and core.status_view.remove_item then
+    core.status_view:remove_item("doxoade:indent_status")
+  end
+end)
+
+-- ── Blindagem do StatusView contra conflitos de itens e chamadas legadas ──────
+local orig_statusview_add_item = StatusView.add_item
+function StatusView:add_item(options, ...)
+  -- 1. Normaliza chamada legada: add_item(predicate_fn, name, alignment, ...) -> tabela
+  if type(options) == "function" then
+    local extra = { ... }
+    options = {
+      predicate = options,
+      name = extra[1],
+      alignment = extra[2],
+      get_item = extra[3],
+      command = extra[4],
+      position = extra[5]
+    }
+  end
+
+  -- 2. Se for tabela e o item já existir, remove antes para não disparar assert no Lite XL
+  if type(options) == "table" and options.name then
+    if self.get_item and self:get_item(options.name) then
+      if self.remove_item then
+        pcall(self.remove_item, self, options.name)
+      else
+        return -- Já existe, ignora assert
+      end
+    end
+  end
+
+  if orig_statusview_add_item then
+    return orig_statusview_add_item(self, options, ...)
+  end
+end
+
+-- ── Hook Soberano de Zoom do Terminal via Ctrl + Wheel ───────────────────────
+local orig_rootview_on_mouse_wheel = RootView.on_mouse_wheel
+function RootView:on_mouse_wheel(y, x, ...)
+  -- Se a tecla Ctrl estiver pressionada durante o scroll do mouse
+  if keymap and keymap.modkeys and (keymap.modkeys["ctrl"] or keymap.modkeys["control"]) then
+    local my = (self.mouse and self.mouse.y) or 0
+    local win_h = (self.size and self.size.y) or 800
+    local shelf = rawget(_G, "_DOXOADE_SHELF_HUB") or rawget(_G, "_DOXOADE_BOTTOM_SHELF")
+
+    local is_over_shelf = false
+    if shelf and shelf.visible and shelf.position and shelf.size then
+      if my >= shelf.position.y and my <= (shelf.position.y + shelf.size.y) then
+        is_over_shelf = true
+      end
+    end
+
+    -- Fallback: gaveta aberta e cursor na metade inferior da tela
+    if not is_over_shelf and shelf and shelf.visible and my >= (win_h * 0.40) then
+      is_over_shelf = true
+    end
+
+    if is_over_shelf then
+      local mgr = rawget(_G, "_DOXOADE_TERMINAL_SESSION_MGR")
+      local term = (mgr and mgr.get_active()) or rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+      if term and term.adjust_font_size then
+        if y > 0 then
+          term:adjust_font_size(1)
+        elseif y < 0 then
+          term:adjust_font_size(-1)
+        end
+        return true
+      end
+    end
+  end
+
+  if orig_rootview_on_mouse_wheel then
+    return orig_rootview_on_mouse_wheel(self, y, x, ...)
+  end
+end

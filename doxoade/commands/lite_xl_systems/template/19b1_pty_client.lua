@@ -1,10 +1,8 @@
 -- doxoade/commands/lite_xl_systems/template/19b1_pty_client.lua
 --[[
-  🔌 DOXOADE PTY FILE-STREAM CLIENT (V32.0 Non-Blocking IPC Engine)
-  - Comunicação bidirecional via buffer de arquivo atômico em RAM/disco.
-  - 100% imune a erros C de handles/pipes do Lite XL no Windows.
-  - Zero-Freeze: Leituras rápidas via f:seek (<0.02ms por tick de frame).
-  Compliance: ProDeNov 1.2.1 | PASC-6.1 | Limite < 50KB.
+  ⚡ DOXOADE PTY FILE-STREAM CLIENT (V33.0 Fast-Throughput Engine)
+  - Latência zero: sem yields artificiais durante o parsing de buffers.
+  - Leitura em bloco atômico via f:read com I/O instantâneo.
 ]]
 local core = require "core"
 
@@ -30,6 +28,7 @@ function PTYClient.new(config)
   local cfg = config or {}
   local self = setmetatable({}, PTYClient)
 
+  self.id = cfg.id or "default"
   self.shell = cfg.shell or "cmd"
   self.cols = cfg.cols or 120
   self.rows = cfg.rows or 30
@@ -45,10 +44,10 @@ function PTYClient.new(config)
   self.scroll_y = 0
   self.parser = AnsiParser.new()
 
-  -- Arquivos do canal IPC
+  -- 🎯 CANAL IPC EXCLUSIVO POR SESSÃO (Zero colisão entre abas)
   local user_dir = USERDIR or "."
   local sep = PATHSEP or "/"
-  self.ipc_dir = user_dir .. sep .. ".doxoade" .. sep .. "terminal_pty_ipc"
+  self.ipc_dir = user_dir .. sep .. ".doxoade" .. sep .. "terminal_pty_ipc_" .. tostring(self.id)
   pcall(function() system.mkdir(self.ipc_dir) end)
 
   self.file_in = self.ipc_dir .. sep .. "pty_in.bin"
@@ -66,26 +65,48 @@ function PTYClient.new(config)
 end
 
 function PTYClient:_find_python()
-  local user_dir = USERDIR or "."
   local sep = PATHSEP or "/"
-  local py_anchor = user_dir .. sep .. ".doxoade" .. sep .. "python_path.txt"
+  local user_dir = USERDIR or "."
 
+  -- 1. Variável de ambiente VIRTUAL_ENV
+  local venv_env = os.getenv("VIRTUAL_ENV")
+  if venv_env and venv_env ~= "" then
+    local py = (venv_env .. sep .. "Scripts" .. sep .. "python.exe"):gsub("/", "\\")
+    if system and system.get_file_info and system.get_file_info(py) then
+      return py
+    end
+  end
+
+  -- 2. Raiz do projeto ativo ou CWD selecionado
+  local check_dirs = {}
+  if self.cwd then table.insert(check_dirs, self.cwd) end
+  if core.project_directories then
+    for _, d in ipairs(core.project_directories) do
+      local p = (type(d) == "table" and (d.path or d.name) or tostring(d))
+      table.insert(check_dirs, p)
+    end
+  end
+  if core.project_dir then table.insert(check_dirs, core.project_dir) end
+
+  for _, dir in ipairs(check_dirs) do
+    local c1 = (dir .. sep .. "venv" .. sep .. "Scripts" .. sep .. "python.exe"):gsub("/", "\\")
+    if system and system.get_file_info and system.get_file_info(c1) then return c1 end
+    local c2 = (dir .. sep .. ".venv" .. sep .. "Scripts" .. sep .. "python.exe"):gsub("/", "\\")
+    if system and system.get_file_info and system.get_file_info(c2) then return c2 end
+  end
+
+  -- 3. Âncora ~/.doxoade/python_path.txt
+  local py_anchor = user_dir .. sep .. ".doxoade" .. sep .. "python_path.txt"
   local finfo = system and system.get_file_info and system.get_file_info(py_anchor)
   if finfo and finfo.type == "file" then
     local f = io.open(py_anchor, "r")
     if f then
-      local py_exe = f:read("*l") or ""
+      local py_exe = (f:read("*l") or ""):gsub("[\r\n]", ""):gsub("^%s*", ""):gsub("%s*$", "")
       f:close()
-      py_exe = py_exe:gsub("[\r\n]", ""):gsub("^%s*", ""):gsub("%s*$", "")
       if py_exe ~= "" and system.get_file_info(py_exe) then
         return py_exe:gsub("/", "\\")
       end
     end
-  end
-
-  local venv_py = (user_dir .. sep .. ".." .. sep .. "venv" .. sep .. "Scripts" .. sep .. "python.exe"):gsub("/", "\\")
-  if system and system.get_file_info and system.get_file_info(venv_py) then
-    return venv_py
   end
 
   return "python"
@@ -93,8 +114,7 @@ end
 
 function PTYClient:spawn()
   local python_exe = self:_find_python()
-  
-  -- Limpa arquivos antigos para não misturar sessões passadas
+
   pcall(os.remove, self.file_in)
   pcall(os.remove, self.file_out)
   pcall(os.remove, self.file_cmd)
@@ -103,15 +123,15 @@ function PTYClient:spawn()
   self.lines = {}
   self.current_line = {}
 
+  local target_cwd = self.cwd and (system.absolute_path(self.cwd) or self.cwd):gsub("/", "\\") or ""
   local cmd = string.format(
-    '"%s" -m doxoade.tools.terminal_pty.pty_file_daemon --ipc-dir "%s" --shell "%s" --cols %d --rows %d',
+    'start /b "" "%s" -m doxoade.tools.terminal_pty.pty_file_daemon --ipc-dir "%s" --shell "%s" --cols %d --rows %d',
     python_exe, self.ipc_dir, self.shell, self.cols, self.rows
   )
-  if self.cwd then
-    cmd = cmd .. string.format(' --cwd "%s"', tostring(self.cwd))
+  if target_cwd ~= "" then
+    cmd = cmd .. string.format(' --cwd "%s"', target_cwd)
   end
 
-  -- Disparo assíncrono via system.exec (Não toca em process.start, livre de erros C)
   local ok = pcall(system.exec, cmd)
   if not ok then
     if core.log then core.log("❌ [PTY] Falha ao invocar pty_file_daemon.") end
@@ -120,21 +140,13 @@ function PTYClient:spawn()
 
   self.is_connected = true
   self._handshake_done = false
-
-  if core.log then
-    core.log("🖥️ [PTY] Daemon iniciado via File-Stream. Sincronizando...")
-  end
   return true
 end
 
-function PTYClient:poll_handshake()
-  self:poll()
-end
-
 function PTYClient:poll()
-  if not self.is_connected then return end
+  if not self.is_connected then return false end
 
-  -- Handshake inicial
+  -- Handshake
   if not self._handshake_done then
     local f_st = io.open(self.file_status, "r")
     if f_st then
@@ -144,15 +156,15 @@ function PTYClient:poll()
         self._handshake_done = true
         self.server_pid = tonumber(content:match('"pid":%s*(%d+)')) or 0
         if self.on_ready then pcall(self.on_ready, self) end
-        if core.log then core.log("✅ [PTY] Terminal conectado e pronto.") end
+        core.redraw = true
+        return true
       elseif content:find('"alive":%s*false') then
         self:close()
-        return
+        return false
       end
     end
   end
 
-  -- 🎯 Zero-Allocation I/O Guard: Só abre o arquivo se o tamanho realmente mudou no disco
   local finfo = system.get_file_info(self.file_out)
   local cur_size = finfo and (finfo.size or 0) or 0
 
@@ -165,62 +177,31 @@ function PTYClient:poll()
       f:close()
       if new_data and new_data ~= "" then
         self:_handle_output(new_data)
+        return true
       end
     end
   end
-end
-
--- Pool de reciclagem de linhas (Slab Pattern O(1))
-local _LINE_POOL = {}
-
-local function acquire_line_container()
-  local item = table.remove(_LINE_POOL)
-  if item then
-    item.segments = {}
-    return item
-  end
-  return { segments = {} }
-end
-
-local function release_line_container(item)
-  if #_LINE_POOL < 200 then
-    item.segments = nil
-    table.insert(_LINE_POOL, item)
-  end
+  return false
 end
 
 function PTYClient:_handle_output(payload)
   local parsed_segments = self.parser:parse(payload)
-  local t0 = os.clock()
 
   for idx = 1, #parsed_segments do
     local seg = parsed_segments[idx]
-    
+
     if seg.control == "clear" then
-      for i = 1, #self.lines do
-        release_line_container(self.lines[i])
-      end
       self.lines = {}
       self.current_line = {}
       self.scroll_y = 0
     elseif seg.control == "lf" or seg.text == "\n" then
-      local line_item = acquire_line_container()
-      line_item.segments = self.current_line
-      table.insert(self.lines, line_item)
+      table.insert(self.lines, { segments = self.current_line })
       self.current_line = {}
-
       if #self.lines > MAX_SCROLLBACK then
-        local old = table.remove(self.lines, 1)
-        release_line_container(old)
+        table.remove(self.lines, 1)
       end
     else
       table.insert(self.current_line, seg)
-    end
-
-    -- 🌙 KHONSU TIME-SLICING: Se o lote de texto for longo e passar de 2.5ms, cede a CPU para não engasgar o frame
-    if (idx % 20 == 0) and (os.clock() - t0) >= 0.0025 then
-      coroutine.yield()
-      t0 = os.clock()
     end
   end
 
@@ -270,6 +251,10 @@ function PTYClient:clear_screen()
   core.redraw = true
 end
 
+function PTYClient:poll_handshake()
+  return self:poll()
+end
+
 function PTYClient:close()
   if self.is_connected then
     local f = io.open(self.file_cmd, "w")
@@ -279,15 +264,12 @@ function PTYClient:close()
       f:close()
     end
   end
-
   self.is_connected = false
   self._handshake_done = false
-
-  if self.on_exit then
-    pcall(self.on_exit, 0)
-  end
+  if self.on_exit then pcall(self.on_exit, 0) end
   core.redraw = true
 end
 
 rawset(_G, "PTYClient", PTYClient)
 rawset(_G, "_DOXOADE_PTY_CLIENT", PTYClient)
+return PTYClient
