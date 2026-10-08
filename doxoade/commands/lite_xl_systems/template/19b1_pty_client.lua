@@ -67,38 +67,12 @@ end
 function PTYClient:_find_python()
   local sep = PATHSEP or "/"
   local user_dir = USERDIR or "."
-
-  -- 1. Varre venvs dentro de todos os projetos abertos no Lite XL
-  local check_dirs = {}
-  if self.cwd then table.insert(check_dirs, self.cwd) end
-  if core.project_directories then
-    for _, d in ipairs(core.project_directories) do
-      local p = type(d) == "table" and (d.path or d.name) or d
-      table.insert(check_dirs, p)
-    end
-  end
-  if core.project_dir then table.insert(check_dirs, core.project_dir) end
-
-  for _, dir in ipairs(check_dirs) do
-    local p_str = tostring(dir)
-    local v1 = (p_str .. sep .. "venv" .. sep .. "Scripts" .. sep .. "python.exe"):gsub("/", "\\")
-    if system and system.get_file_info and system.get_file_info(v1) then return v1 end
-    local v2 = (p_str .. sep .. ".venv" .. sep .. "Scripts" .. sep .. "python.exe"):gsub("/", "\\")
-    if system and system.get_file_info and system.get_file_info(v2) then return v2 end
-  end
-
-  -- 2. Variável de ambiente VIRTUAL_ENV do Windows
-  local venv_env = os.getenv("VIRTUAL_ENV")
-  if venv_env and venv_env ~= "" then
-    local py = (venv_env .. sep .. "Scripts" .. sep .. "python.exe"):gsub("/", "\\")
-    if system and system.get_file_info and system.get_file_info(py) then return py end
-  end
-
-  -- 3. Âncoras locais (apenas se o arquivo existir fisicamente no bluebaby)
   local home_dir = os.getenv("USERPROFILE") or os.getenv("HOME") or "."
+
+  -- 1. 🎯 PRIORIDADE ABSOLUTA: Âncora do DoxOADE (onde o pywinpty e doxoade foram instalados no setup)
   local anchors = {
-    user_dir .. sep .. ".doxoade" .. sep .. "python_path.txt",
     home_dir .. sep .. ".doxoade" .. sep .. "python_path.txt",
+    user_dir .. sep .. ".doxoade" .. sep .. "python_path.txt",
   }
   for _, ap in ipairs(anchors) do
     local f = io.open(ap, "r")
@@ -111,7 +85,27 @@ function PTYClient:_find_python()
     end
   end
 
-  -- 4. Instalações padrão do Python no Windows 11 (AppData)
+  -- 2. Busca o projeto 'doxoade' especificamente entre os projetos abertos
+  if core.project_directories then
+    for _, d in ipairs(core.project_directories) do
+      local p_str = tostring(type(d) == "table" and (d.path or d.name) or d)
+      if p_str:lower():find("doxoade") then
+        local v1 = (p_str .. sep .. "venv" .. sep .. "Scripts" .. sep .. "python.exe"):gsub("/", "\\")
+        if system and system.get_file_info and system.get_file_info(v1) then return v1 end
+        local v2 = (p_str .. sep .. ".venv" .. sep .. "Scripts" .. sep .. "python.exe"):gsub("/", "\\")
+        if system and system.get_file_info and system.get_file_info(v2) then return v2 end
+      end
+    end
+  end
+
+  -- 3. Variável de ambiente VIRTUAL_ENV do processo pai (se ativa)
+  local venv_env = os.getenv("VIRTUAL_ENV")
+  if venv_env and venv_env ~= "" then
+    local py = (venv_env .. sep .. "Scripts" .. sep .. "python.exe"):gsub("/", "\\")
+    if system and system.get_file_info and system.get_file_info(py) then return py end
+  end
+
+  -- 4. Instalações padrão do Python no Windows 11 / 10
   local local_app = os.getenv("LOCALAPPDATA")
   if local_app then
     for _, ver in ipairs({ "Python312", "Python311", "Python310" }) do
@@ -137,20 +131,61 @@ function PTYClient:spawn()
   self.current_line = {}
 
   local target_cwd = self.cwd and (system.absolute_path(self.cwd) or self.cwd):gsub("/", "\\") or ""
-  
-  -- 🎯 Resolve a raiz do DoxOADE para injetar no PYTHONPATH
-  local root_proj = target_cwd ~= "" and target_cwd or (core.project_dir or ".")
-  local abs_root = (system.absolute_path(root_proj) or root_proj):gsub("/", "\\")
 
-  -- Injeção atômica de PYTHONPATH para o bluebaby sempre encontrar o módulo doxoade
-  local cmd = string.format(
-    'cmd /c "set PYTHONPATH=%s;%%PYTHONPATH%% && start /b \"\" \"%s\" -m doxoade.tools.terminal_pty.pty_file_daemon --ipc-dir \"%s\" --shell \"%s\" --cols %d --rows %d',
-    abs_root, python_exe, self.ipc_dir, self.shell, self.cols, self.rows
-  )
-  if target_cwd ~= "" then
-    cmd = cmd .. string.format(' --cwd \"%s\""', target_cwd)
-  else
+  -- 🎯 Resolve a raiz onde o pacote DoxOADE reside para injetar no PYTHONPATH
+  local home_dir = os.getenv("USERPROFILE") or os.getenv("HOME") or "."
+  local dox_engine_root = nil
+
+  local anchors = {
+    home_dir .. (PATHSEP or "/") .. ".doxoade" .. (PATHSEP or "/") .. "python_path.txt",
+    (USERDIR or ".") .. (PATHSEP or "/") .. ".doxoade" .. (PATHSEP or "/") .. "python_path.txt",
+  }
+  for _, ap in ipairs(anchors) do
+    local f = io.open(ap, "r")
+    if f then
+      local py_line = f:read("*l") or ""
+      f:close()
+      dox_engine_root = py_line:match("^(.*)[/\\]venv[/\\]") or py_line:match("^(.*)[/\\]%.?venv[/\\]")
+      if dox_engine_root then
+        dox_engine_root = dox_engine_root:gsub("/", "\\")
+        break
+      end
+    end
+  end
+
+  if not dox_engine_root and core.project_directories then
+    for _, d in ipairs(core.project_directories) do
+      local p = type(d) == "table" and (d.path or d.name) or d
+      local p_str = tostring(p):gsub("/", "\\")
+      if p_str:lower():find("doxoade") then
+        dox_engine_root = p_str
+        break
+      end
+    end
+  end
+
+  dox_engine_root = dox_engine_root or (core.project_dir and (system.absolute_path(core.project_dir) or core.project_dir):gsub("/", "\\")) or "."
+
+  -- 🎯 Invocação blindada: Executa o daemon via Python do DoxOADE, operando no CWD do projeto
+  local cmd
+  if PLATFORM == "Windows" or os.getenv("OS") == "Windows_NT" then
+    cmd = string.format(
+      'start /b "" cmd /c "set PYTHONPATH=%s;%%PYTHONPATH%% && "%s" -m doxoade.tools.terminal_pty.pty_file_daemon --ipc-dir "%s" --shell "%s" --cols %d --rows %d',
+      dox_engine_root, python_exe, self.ipc_dir, self.shell, self.cols, self.rows
+    )
+    if target_cwd ~= "" then
+      cmd = cmd .. string.format(' --cwd "%s"', target_cwd)
+    end
     cmd = cmd .. '"'
+  else
+    cmd = string.format(
+      'PYTHONPATH="%s:$PYTHONPATH" "%s" -m doxoade.tools.terminal_pty.pty_file_daemon --ipc-dir "%s" --shell "%s" --cols %d --rows %d',
+      dox_engine_root, python_exe, self.ipc_dir, self.shell, self.cols, self.rows
+    )
+    if target_cwd ~= "" then
+      cmd = cmd .. string.format(' --cwd "%s"', target_cwd)
+    end
+    cmd = cmd .. ' &'
   end
 
   local ok = pcall(system.exec, cmd)

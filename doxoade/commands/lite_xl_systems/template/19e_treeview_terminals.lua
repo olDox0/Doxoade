@@ -51,13 +51,14 @@ end
 
 -- ── 2. VIGILÂNCIA DE PROJETOS NO BOOT / RESTAURAÇÃO DE SESSÃO ────────────────
 core.add_thread(function()
-  coroutine.yield(0.6) -- Aguarda o bootloader carregar os projetos da sessão
+  coroutine.yield(0.6)
   local mgr = rawget(_G, "_DOXOADE_TERMINAL_SESSION_MGR")
   if mgr and core.project_directories then
     for _, p in ipairs(core.project_directories) do
       local p_path = type(p) == "table" and (p.path or p.name) or p
       local norm = normalize_dir(p_path)
       if norm then
+        -- Garante a sessão registrada na aba sem forçar spawn imediato
         mgr.get_or_create_for_project(norm)
       end
     end
