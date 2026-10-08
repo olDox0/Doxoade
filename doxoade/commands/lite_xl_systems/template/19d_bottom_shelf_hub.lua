@@ -1,13 +1,9 @@
 -- doxoade/commands/lite_xl_systems/template/19d_bottom_shelf_hub.lua
 --[[
-  🖥️ DOXOADE BOTTOM SHELF HUB — ESCADA DINÂMICA TRIPLA & MULTI-PROJETOS (V41.0)
-  - Escada Adaptativa de 3 Andares para resoluções verticais estreitas:
-      • Andar 1: Abas Mestras + Badge de Escada ([3L·A]) + Maximizar + Fechar [X].
-      • Andar 2: Sessões de Projetos Concorrentes ([ 1: doxoade ], [ 2: SysUtils ], [+]) + CWD HUD.
-      • Andar 3: Ações do PTY ([CMD], [Ctrl+C], [Copiar], [Colar], [Limpar], [Externo], [Admin]).
-  - Fundo sutil com matiz única por projeto e marca d'água centralizada.
-  - Funções de cor em escopo estrito no topo (zero crash de strict.lua).
-  - Canvas SDL2, prints inline e sketch 100% preservados.
+  🖥️ DOXOADE BOTTOM SHELF HUB — ESCADA DINÂMICA TRIPLA & MULTI-PROJETOS (V42.0)
+  - Correção estrita de eventos: abas e botões têm prioridade total sobre o Canvas.
+  - Panning do Canvas isolado exclusivamente dentro do viewport de imagem.
+  - Escada Tripla (3L) operante com seleção de texto e projetos simultâneos.
   Compliance: ProDeNov 1.2.1 | PASC-6.1 | Limite < 50KB.
 ]]
 local core = require "core"
@@ -45,29 +41,7 @@ local function draw_text_safe(font, text, x, y, color)
   end
 end
 
--- ── Quebra de Linha Suave para Comandos Longos no Input ──────────────────────
-local function wrap_input_string(font, text, max_w)
-  local lines = {}
-  if not text or text == "" then return { "" } end
-
-  local cur = ""
-  for i = 1, #text do
-    local ch = text:sub(i, i)
-    if ch == "\n" then
-      table.insert(lines, cur)
-      cur = ""
-    elseif font:get_width(cur .. ch) > max_w and cur ~= "" then
-      table.insert(lines, cur)
-      cur = ch
-    else
-      cur = cur .. ch
-    end
-  end
-  table.insert(lines, cur)
-  return lines
-end
-
--- ── Gerador de Cor de Fundo Ultra-Escura & Fiel por Projeto (EM ESCOPO TOPO) ──
+-- ── Gerador de Cor de Fundo por Projeto (Escopo do Topo) ─────────────────────
 local function hash_string(str)
   local h = 5381
   for i = 1, #str do
@@ -80,8 +54,8 @@ local function get_project_tint(proj_str)
   if not proj_str or proj_str == "" then return { 10, 10, 12, 255 } end
   local h = hash_string(proj_str:lower())
   local hue = (h % 360) / 360
-  local s = 0.28   -- Saturação suave
-  local l = 0.055  -- 🎯 Luminosidade ultra-escura (tons entre 8 e 20)
+  local s = 0.28
+  local l = 0.055
 
   local function hue2rgb(p, q, t)
     if t < 0 then t = t + 1 end
@@ -324,7 +298,7 @@ function ShelfHub:draw()
       sess_x = sess_x + add_w + 10
     end
 
-    -- 🌟 HUD DO DIRETÓRIO ATIVO (CWD)
+    -- HUD do Diretório Ativo (CWD)
     local cur_cwd = term and term:get_cwd() or ""
     if cur_cwd ~= "" and sess_x + 80 < sess_max_x then
       local cwd_label = "📁 " .. cur_cwd
@@ -337,7 +311,7 @@ function ShelfHub:draw()
   end
 
   -- ═══════════════════════════════════════════════════════════════════════════
-  -- ANDAR 3: AÇÕES DO SHELL
+  -- ANDAR 3: AÇÕES DO SHELL OU CANVAS
   -- ═══════════════════════════════════════════════════════════════════════════
   self.action_buttons = {}
   local action_y = (tiers >= 3) and y3 or ((tiers == 2) and y2 or y1)
@@ -380,13 +354,13 @@ function ShelfHub:draw()
   end
 
   -- ═══════════════════════════════════════════════════════════════════════════
-  -- VIEWPORT DE CONTEÚDO (FUNDO COLORIDO SUTIL & MARCA D'ÁGUA POR PROJETO)
+  -- VIEWPORT DE CONTEÚDO (TERMINAL OU CANVAS)
   -- ═══════════════════════════════════════════════════════════════════════════
   local canvas_y = y + self.header_height + 2
   local canvas_h = h - self.header_height - 34
   self.terminal_viewport_rect = { x = x + 2, y = canvas_y, w = w - 4, h = canvas_h }
 
-  -- 🎯 1. FUNDO EXCLUSIVO COM COR SUTIL POR PROJETO
+  -- 1. Fundo Exclusivo por Projeto
   local cur_proj = (term and term:get_display_name()) or ""
   local cur_cwd  = (term and term:get_cwd()) or ""
   local proj_tint = get_project_tint(cur_cwd ~= "" and cur_cwd or cur_proj)
@@ -397,7 +371,7 @@ function ShelfHub:draw()
 
   core.push_clip_rect(x + 2, canvas_y, w - 4, canvas_h)
 
-  -- 🎯 2. MARCA D'ÁGUA SUTIL COM O NOME DO PROJETO NO CENTRO
+  -- 2. Marca d'Água Centralizada por Projeto
   if self.active_tab == "terminal" and cur_proj ~= "" then
     local wm_font = style.big_font or font
     if wm_font:get_width(cur_proj) > w - 40 then
@@ -420,23 +394,6 @@ function ShelfHub:draw()
   if self.active_tab == "terminal" and term then
     term:update_viewport(w - 8, canvas_h + 30)
 
-    -- 📦 Banner de Diagnóstico quando falta o WinPTY
-    if term._client and term._client.missing_winpty then
-      local box_w = math.min(w - 32, 600)
-      local box_h = 130
-      local bx = x + math.floor((w - box_w) / 2)
-      local by = canvas_y + 20
-
-      draw_rect_safe(bx, by, box_w, box_h, { 25, 20, 15, 245 })
-      draw_rect_safe(bx, by, box_w, 2, { 245, 158, 11, 255 })
-
-      draw_text_safe(font, "⚠ DEPENDÊNCIA AUSENTE: pywinpty (ConPTY Engine)", bx + 16, by + 12, { 245, 158, 11, 255 })
-      draw_text_safe(font, "O terminal integrado requer 'pywinpty' para emular o console no Windows 11.", bx + 16, by + 34, { 220, 220, 220, 255 })
-      draw_text_safe(font, "Execute no seu terminal com o venv ativo:", bx + 16, by + 60, { 150, 150, 150, 255 })
-      draw_text_safe(font, "> pip install pywinpty", bx + 16, by + 80, { 34, 197, 94, 255 })
-      draw_text_safe(font, "Ou rode: doxoade doxly pty-install", bx + 16, by + 102, { 56, 189, 248, 255 })
-    end
-
     local line_h = term:_line_height()
     local max_line_w = w - 24
 
@@ -447,7 +404,7 @@ function ShelfHub:draw()
 
     local cur_y = canvas_y + 4 + ((start_idx - 1) * line_h) - term.scroll_y
 
-    -- Faixa de seleção de texto no terminal
+    -- Seleção cirúrgica de caracteres
     local has_char_sel = (term.sel_s_line and term.sel_e_line and (term.sel_s_line ~= term.sel_e_line or term.sel_s_col ~= term.sel_e_col))
     local s_line, s_col, e_line, e_col
     if has_char_sel then
@@ -481,7 +438,6 @@ function ShelfHub:draw()
             seg_x = x + 14
           end
 
-          -- Realce cirúrgico de seleção
           if has_char_sel and i >= s_line and i <= e_line then
             local hl_start_col = (i == s_line) and s_col or 1
             local hl_end_col   = (i == e_line) and e_col or (line_char_offset + seg_len)
@@ -507,7 +463,7 @@ function ShelfHub:draw()
       cur_y = cur_y + line_h
     end
 
-    -- Prompt Ativo (Sempre desenhado sem omissão)
+    -- Prompt Ativo
     local cur_line_segs = term._client and term._client.current_line
     if cur_line_segs and #cur_line_segs > 0 then
       local seg_x = x + 14
@@ -525,60 +481,49 @@ function ShelfHub:draw()
   core.pop_clip_rect()
 
   -- ═══════════════════════════════════════════════════════════════════════════
-  -- BARRA DE ENTRADA INFERIOR COM EXPANSÃO DINÂMICA (QUEBRA DE LINHA)
+  -- BARRA DE ENTRADA INFERIOR HARMONIZADA
   -- ═══════════════════════════════════════════════════════════════════════════
-  local tag = (term and term.is_executing) and "[RODANDO]" or "[PTY]"
-  local p_off = font:get_width(tag) + 24
-  local max_text_w = math.max(120, w - p_off - 32)
-
-  -- Calcula quebra de linha visual do comando digitado
-  local input_lines = wrap_input_string(font, (term and term.input_text) or "", max_text_w)
-  local num_input_lines = math.min(4, math.max(1, #input_lines))
-  local line_h_inp = font:get_height() + 2
-  local dynamic_inp_h = math.max(29, (num_input_lines * line_h_inp) + 10)
-
-  local input_y = y + h - dynamic_inp_h - 1
-  self.input_rect = { x = x + 1, y = input_y, w = w - 2, h = dynamic_inp_h }
-
+  local input_y = y + h - 30
+  self.input_rect = { x = x + 1, y = input_y, w = w - 2, h = 29 }
   local in_bg = (self.active_tab == "terminal") and proj_tint or { 10, 10, 10, 255 }
-  draw_rect_safe(x + 1, input_y, w - 2, dynamic_inp_h, in_bg)
+  draw_rect_safe(x + 1, input_y, w - 2, 29, in_bg)
   draw_rect_safe(x + 1, input_y, w - 2, 1, style.accent or { 38, 188, 95, 255 })
 
   if self.active_tab == "terminal" and term then
+    local tag = term.is_executing and "[RODANDO]" or "[PTY]"
     local tag_col = term.is_executing and { 251, 191, 36, 255 } or (style.accent or { 38, 188, 95, 255 })
     draw_text_safe(font, tag, x + 14, input_y + 6, tag_col)
+    local p_off = font:get_width(tag) + 24
+    local text_start_x = x + p_off + font:get_width("> ")
 
-    local cursor_abs = term.input_cursor or (#term.input_text + 1)
-    local char_count = 0
-    local caret_drawn = false
+    local sel_s = term.input_sel_from and term.input_cursor and math.min(term.input_sel_from, term.input_cursor)
+    local sel_e = term.input_sel_from and term.input_cursor and math.max(term.input_sel_from, term.input_cursor)
 
-    -- Renderiza cada linha do comando quebrado
-    for l_idx, line_str in ipairs(input_lines) do
-      if l_idx <= num_input_lines then
-        local cur_line_y = input_y + 5 + (l_idx - 1) * line_h_inp
-        local prefix = (l_idx == 1) and "> " or "  "
-        local text_x = x + p_off + font:get_width(prefix)
+    if term._all_selected and #term.input_text > 0 then
+      local sel_w = font:get_width("> " .. term.input_text)
+      draw_rect_safe(x + p_off, input_y + 4, sel_w + 4, font:get_height() + 4, { 56, 189, 248, 90 })
+    elseif sel_s and sel_e and sel_s < sel_e then
+      local before_w = font:get_width(term.input_text:sub(1, sel_s - 1))
+      local sel_w = font:get_width(term.input_text:sub(sel_s, sel_e - 1))
+      draw_rect_safe(text_start_x + before_w, input_y + 4, sel_w + 2, font:get_height() + 4, { 56, 189, 248, 90 })
+    end
 
-        draw_text_safe(font, prefix .. line_str, x + p_off, cur_line_y, { 255, 255, 255, 255 })
+    draw_text_safe(font, "> " .. term.input_text, x + p_off, input_y + 6, { 255, 255, 255, 255 })
 
-        -- Posicionamento do cursor na linha correspondente
-        local line_len = #line_str
-        if not caret_drawn and cursor_abs >= char_count + 1 and cursor_abs <= char_count + line_len + 1 then
-          local rel_col = cursor_abs - char_count
-          local before_str = line_str:sub(1, rel_col - 1)
-          local cx = text_x + font:get_width(before_str)
-          draw_rect_safe(cx, cur_line_y, 2, font:get_height(), style.accent or { 38, 188, 95, 255 })
-          caret_drawn = true
-        end
-        char_count = char_count + line_len
+    -- Ghost Text
+    if #term.suggestions > 0 and term.input_text ~= "" and not term._all_selected then
+      local top_sug = term.suggestions[term.suggestion_idx or 1]
+      if top_sug and top_sug:sub(1, #term.input_text):lower() == term.input_text:lower() then
+        local ghost_part = top_sug:sub(#term.input_text + 1)
+        local ghost_x = x + p_off + font:get_width("> " .. term.input_text)
+        draw_text_safe(font, ghost_part, ghost_x, input_y + 6, { 110, 110, 110, 220 })
       end
     end
 
-    if not caret_drawn then
-      local last_y = input_y + 5 + (num_input_lines - 1) * line_h_inp
-      local cx = x + p_off + font:get_width("> " .. (input_lines[num_input_lines] or ""))
-      draw_rect_safe(cx, last_y, 2, font:get_height(), style.accent or { 38, 188, 95, 255 })
-    end
+    -- Cursor
+    local text_before = term.input_text:sub(1, term.input_cursor - 1)
+    local cx = text_start_x + font:get_width(text_before)
+    draw_rect_safe(cx, input_y + 6, 2, font:get_height(), style.accent or { 38, 188, 95, 255 })
   elseif self.active_tab == "canvas" and canvas then
     local mode_str = canvas.mode_1to1 and "1:1 Real" or "Ajustado"
     local zoom_lbl = string.format("[%s | Zoom: %d%%] ", mode_str, math.floor(canvas.zoom * 100))
@@ -588,7 +533,7 @@ function ShelfHub:draw()
 end
 
 -- =============================================================================
--- HOOKS DE MOUSE & SELEÇÃO CIRÚRGICA
+-- HOOKS DE MOUSE & CLIQUES (ABAS TÊM PRIORIDADE TOTAL)
 -- =============================================================================
 local original_rootview_draw = RootView.draw
 function RootView:draw(...)
@@ -602,9 +547,7 @@ local function resolve_term_char_at_pos(term, font, px, py, vp)
   line_idx = math.max(1, math.min(#term.lines + 1, line_idx))
 
   local line_item = term.lines[line_idx]
-  if not line_item or not line_item.segments then
-    return line_idx, 1
-  end
+  if not line_item or not line_item.segments then return line_idx, 1 end
 
   local full_text = ""
   for _, s in ipairs(line_item.segments) do full_text = full_text .. (s.text or "") end
@@ -638,7 +581,7 @@ function RootView:on_mouse_moved(x, y, dx, dy)
     ShelfHub.hovered_layout = false
     ShelfHub.hovered_close = false
 
-    -- Panning do Canvas
+    -- 🎯 Panning do Canvas só ocorre se o usuário estiver segurando o clique
     if canvas and canvas.is_panning and ShelfHub.active_tab == "canvas" then
       canvas.pan_x = canvas.pan_x + dx
       canvas.pan_y = canvas.pan_y + dy
@@ -646,7 +589,7 @@ function RootView:on_mouse_moved(x, y, dx, dy)
       return true
     end
 
-    -- Arrasto de seleção no terminal
+    -- Arrasto de seleção cirúrgica no terminal
     if ShelfHub.is_selecting_output and term and ShelfHub.terminal_viewport_rect then
       local vp = ShelfHub.terminal_viewport_rect
       local l_idx, c_idx = resolve_term_char_at_pos(term, font, x, y, vp)
@@ -707,82 +650,105 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
     local canvas = rawget(_G, "_DOXOADE_CANVAS_STUDIO")
     local font = (term and term:get_font()) or style.font
 
+    -- 1. Clique fora do card fecha o shelf
     if r and (x < r.x or x > r.x + r.w or y < r.y or y > r.y + r.h) then
-      ShelfHub.visible = false; core.redraw = true; return true
-    end
-
-    if (button == "right" or button == 2) and term and term.sel_s_line then
-      command.perform("bottom-shelf:copy")
-      return true
-    end
-
-    -- Panning do Canvas
-    if ShelfHub.active_tab == "canvas" and canvas and (button == "left" or button == 1) then
-      canvas.is_panning = true
-      return true
-    end
-
-    -- Seleção cirúrgica no terminal
-    local vp = ShelfHub.terminal_viewport_rect
-    if (button == "left" or button == 1) and vp and (x >= vp.x and x <= vp.x + vp.w and y >= vp.y and y <= vp.y + vp.h) and term then
-      local l_idx, c_idx = resolve_term_char_at_pos(term, font, x, y, vp)
-      ShelfHub.is_selecting_output = true
-      term.sel_s_line = l_idx
-      term.sel_s_col  = c_idx
-      term.sel_e_line = l_idx
-      term.sel_e_col  = c_idx
+      ShelfHub.visible = false
+      if canvas then canvas.is_panning = false end
       core.redraw = true
       return true
     end
 
-    -- Cursor no input bar
-    local inp = ShelfHub.input_rect
-    if (button == "left" or button == 1) and inp and (x >= inp.x and x <= inp.x + inp.w and y >= inp.y and y <= inp.y + inp.h) and term then
-      local tag = term.is_executing and "[RODANDO]" or "[PTY]"
-      local p_off = font:get_width(tag) + 24
-      local text_start_x = ShelfHub.card_rect.x + p_off + font:get_width("> ")
-      local char_idx = get_input_char_from_x(font, term.input_text, x, text_start_x)
-
-      term.input_cursor = char_idx
-      term.input_sel_from = char_idx
-      term._all_selected = false
-      ShelfHub.is_selecting_input = true
-      core.redraw = true
-      return true
-    end
-
-    -- Abas e Botões
+    -- 2. 🎯 ABAS MESTRAS TÊM PRIORIDADE TOTAL (Terminal, Canvas, Sketch)
     for i, tab in ipairs(ShelfHub.tabs) do
       if tab.rect and x >= tab.rect.x and x <= tab.rect.x + tab.rect.w and y >= tab.rect.y and y <= tab.rect.y + tab.rect.h then
         ShelfHub.active_tab = tab.id
         ShelfHub:ensure_initialized(tab.id)
+        if canvas then canvas.is_panning = false end
         core.redraw = true
         return true
       end
     end
-    for _, s_btn in ipairs(ShelfHub.session_buttons) do
-      if s_btn.rect and x >= s_btn.rect.x and x <= s_btn.rect.x + s_btn.rect.w and y >= s_btn.rect.y and y <= s_btn.rect.y + s_btn.rect.h then
-        if s_btn.action then s_btn.action(); return true end
-      end
-    end
-    for _, btn in ipairs(ShelfHub.action_buttons) do
-      if btn.rect and x >= btn.rect.x and x <= btn.rect.x + btn.rect.w and y >= btn.rect.y and y <= btn.rect.y + btn.rect.h then
-        if btn.action then btn.action(); return true end
-      end
-    end
-    if ShelfHub.layout_rect and x >= ShelfHub.layout_rect.x and x <= ShelfHub.layout_rect.x + ShelfHub.layout_rect.w and
-       y >= ShelfHub.layout_rect.y and y <= ShelfHub.layout_rect.y + ShelfHub.layout_rect.h then
-      ShelfHub:toggle_layout_mode()
+
+    -- 3. Botão Fechar [X]
+    if ShelfHub.close_rect and x >= ShelfHub.close_rect.x and x <= ShelfHub.close_rect.x + ShelfHub.close_rect.w and
+       y >= ShelfHub.close_rect.y and y <= ShelfHub.close_rect.y + ShelfHub.close_rect.h then
+      ShelfHub.visible = false
+      if canvas then canvas.is_panning = false end
+      core.redraw = true
       return true
     end
+
+    -- 4. Botão Maximizar [□]
     if ShelfHub.max_rect and x >= ShelfHub.max_rect.x and x <= ShelfHub.max_rect.x + ShelfHub.max_rect.w and
        y >= ShelfHub.max_rect.y and y <= ShelfHub.max_rect.y + ShelfHub.max_rect.h then
       command.perform("doxoade:bottom-shelf-toggle-maximize")
       return true
     end
-    if ShelfHub.hovered_close then
-      ShelfHub.visible = false; core.redraw = true; return true
+
+    -- 5. Badge de Layout [3L·A]
+    if ShelfHub.layout_rect and x >= ShelfHub.layout_rect.x and x <= ShelfHub.layout_rect.x + ShelfHub.layout_rect.w and
+       y >= ShelfHub.layout_rect.y and y <= ShelfHub.layout_rect.y + ShelfHub.layout_rect.h then
+      ShelfHub:toggle_layout_mode()
+      return true
     end
+
+    -- 6. Botões de Sessões de Projeto
+    for _, s_btn in ipairs(ShelfHub.session_buttons) do
+      if s_btn.rect and x >= s_btn.rect.x and x <= s_btn.rect.x + s_btn.rect.w and y >= s_btn.rect.y and y <= s_btn.rect.y + s_btn.rect.h then
+        if s_btn.action then s_btn.action(); return true end
+      end
+    end
+
+    -- 7. Botões Dinâmicos de Ação
+    for _, btn in ipairs(ShelfHub.action_buttons) do
+      if btn.rect and x >= btn.rect.x and x <= btn.rect.x + btn.rect.w and y >= btn.rect.y and y <= btn.rect.y + btn.rect.h then
+        if btn.action then btn.action(); return true end
+      end
+    end
+
+    -- 8. Clique no campo de entrada inferior
+    local inp = ShelfHub.input_rect
+    if (button == "left" or button == 1) and inp and (x >= inp.x and x <= inp.x + inp.w and y >= inp.y and y <= inp.y + inp.h) and term then
+      if ShelfHub.active_tab == "terminal" then
+        local tag = term.is_executing and "[RODANDO]" or "[PTY]"
+        local p_off = font:get_width(tag) + 24
+        local text_start_x = ShelfHub.card_rect.x + p_off + font:get_width("> ")
+        local char_idx = get_input_char_from_x(font, term.input_text, x, text_start_x)
+
+        term.input_cursor = char_idx
+        term.input_sel_from = char_idx
+        term._all_selected = false
+        ShelfHub.is_selecting_input = true
+        core.redraw = true
+        return true
+      end
+    end
+
+    -- 9. 🎯 Cliques dentro do Viewport (Terminal ou Canvas)
+    local vp = ShelfHub.terminal_viewport_rect
+    if vp and (x >= vp.x and x <= vp.x + vp.w and y >= vp.y and y <= vp.y + vp.h) then
+      if ShelfHub.active_tab == "terminal" and term then
+        if button == "right" or button == 2 then
+          if term.sel_s_line then command.perform("bottom-shelf:copy") return true end
+        elseif button == "left" or button == 1 then
+          local l_idx, c_idx = resolve_term_char_at_pos(term, font, x, y, vp)
+          ShelfHub.is_selecting_output = true
+          term.sel_s_line = l_idx
+          term.sel_s_col  = c_idx
+          term.sel_e_line = l_idx
+          term.sel_e_col  = c_idx
+          core.redraw = true
+          return true
+        end
+      elseif ShelfHub.active_tab == "canvas" and canvas then
+        -- 🎯 Panning só ativa se o clique for estritamente dentro da área de imagem
+        if button == "left" or button == 1 then
+          canvas.is_panning = true
+          return true
+        end
+      end
+    end
+
     return true
   end
   if original_rootview_on_mouse_pressed then return original_rootview_on_mouse_pressed(self, button, x, y, clicks) end
@@ -901,12 +867,18 @@ command.add(function() return ShelfHub.visible end, {
     return true
   end,
 
-  -- 📋 Cópia cirúrgica de caracteres ou linhas selecionadas
+  -- Cópia cirúrgica da seleção
   ["bottom-shelf:copy"] = function()
     local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+    if ShelfHub.active_tab == "canvas" then
+      local canvas = rawget(_G, "_DOXOADE_CANVAS_STUDIO")
+      if canvas then canvas:copy_image_to_clipboard() end
+      return true
+    end
+
     if not term then return true end
 
-    -- 1. Se houver seleção no input bar
+    -- 1. Seleção no input bar
     local s_from = term.input_sel_from and term.input_cursor and math.min(term.input_sel_from, term.input_cursor)
     local s_to   = term.input_sel_from and term.input_cursor and math.max(term.input_sel_from, term.input_cursor)
 
@@ -921,7 +893,7 @@ command.add(function() return ShelfHub.visible end, {
       return true
     end
 
-    -- 2. Cópia cirúrgica da saída do terminal
+    -- 2. Seleção cirúrgica na saída do terminal
     if term.sel_s_line and term.sel_e_line then
       local s_l, s_c, e_l, e_c
       if term.sel_s_line < term.sel_e_line or (term.sel_s_line == term.sel_e_line and term.sel_s_col <= term.sel_e_col) then
@@ -961,6 +933,12 @@ command.add(function() return ShelfHub.visible end, {
   end,
 
   ["bottom-shelf:paste"] = function()
+    if ShelfHub.active_tab == "canvas" then
+      local canvas = rawget(_G, "_DOXOADE_CANVAS_STUDIO")
+      if canvas then canvas:paste_clipboard_image() end
+      return true
+    end
+
     local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
     if term then
       local clip = system.get_clipboard and system.get_clipboard()
@@ -1009,7 +987,6 @@ command.add(function() return ShelfHub.visible end, {
     if term and term.history_next then term:history_next() end
     return true
   end,
-
   ["bottom-shelf:start-of-line"] = function()
     local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
     if term then term.input_cursor = 1; term._all_selected = false; term.input_sel_from = nil; core.redraw = true end
@@ -1020,7 +997,6 @@ command.add(function() return ShelfHub.visible end, {
     if term then term.input_cursor = #term.input_text + 1; term._all_selected = false; term.input_sel_from = nil; core.redraw = true end
     return true
   end,
-
   ["bottom-shelf:word-left"] = function()
     local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
     if term and term.move_word_left then term:move_word_left() end
@@ -1031,7 +1007,6 @@ command.add(function() return ShelfHub.visible end, {
     if term and term.move_word_right then term:move_word_right() end
     return true
   end,
-
   ["bottom-shelf:backspace"] = function()
     local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
     if term then
@@ -1056,7 +1031,6 @@ command.add(function() return ShelfHub.visible end, {
     end
     return true
   end,
-
   ["bottom-shelf:delete"] = function()
     local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
     if term then
@@ -1080,15 +1054,9 @@ command.add(function() return ShelfHub.visible end, {
     end
     return true
   end,
-
   ["bottom-shelf:select-all"] = function()
     local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if term then
-      term._all_selected = true
-      term.input_sel_from = nil
-      term.input_cursor = #term.input_text + 1
-      core.redraw = true
-    end
+    if term then term._all_selected = true; term.input_sel_from = nil; term.input_cursor = #term.input_text + 1; core.redraw = true end
     return true
   end,
   ["bottom-shelf:previous-char"] = function()
@@ -1109,45 +1077,21 @@ command.add(function() return ShelfHub.visible end, {
   ["bottom-shelf:page-up"] = function()
     local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
     if term then term:scroll_by(300) end
+    return true
   end,
   ["bottom-shelf:page-down"] = function()
     local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
     if term then term:scroll_by(-300) end
-  end,
-  ["bottom-shelf:smart-ctrl-c"] = function()
-    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if not term then return true end
-
-    local has_input_sel = (term._all_selected and #term.input_text > 0) or
-      (term.input_sel_from and term.input_cursor and term.input_sel_from ~= term.input_cursor)
-    local has_term_sel  = (term.sel_s_line and term.sel_e_line and
-      (term.sel_s_line ~= term.sel_e_line or term.sel_s_col ~= term.sel_e_col))
-
-    if has_input_sel or has_term_sel then
-      return command.perform("bottom-shelf:copy")
-    else
-      return command.perform("bottom-shelf:interrupt")
-    end
-  end,
-  ["bottom-shelf:insert-newline"] = function()
-    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if term then
-      term.input_text = term.input_text:sub(1, term.input_cursor - 1) .. "\n" .. term.input_text:sub(term.input_cursor)
-      term.input_cursor = term.input_cursor + 1
-      core.redraw = true
-    end
     return true
   end,
 })
 
 keymap.add {
-  ["shift+return"] = "bottom-shelf:insert-newline",
   ["ctrl+`"]          = "doxoade:toggle-bottom-shelf",
   ["ctrl+j"]          = "doxoade:toggle-bottom-shelf",
   ["alt+return"]      = "doxoade:bottom-shelf-toggle-maximize",
   ["escape"]          = "bottom-shelf:close",
-  ["ctrl+shift+c"]   = "bottom-shelf:copy",
-  ["ctrl+c"]          = "bottom-shelf:smart-ctrl-c",
+  ["ctrl+shift+c"]    = "bottom-shelf:copy",
   ["ctrl+c"]          = "bottom-shelf:copy",
   ["ctrl+v"]          = "bottom-shelf:paste",
   ["ctrl+a"]          = "bottom-shelf:select-all",
