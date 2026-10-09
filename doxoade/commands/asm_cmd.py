@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# doxoade\commands\asm_cmd.py
 """
 [ZEUS] CLI Assembly — doxoade asm {build,status,run,clean}.
 """
@@ -205,3 +206,92 @@ def asm_setup_tools():
             
     except Exception as e:
         click.echo(f"  {Fore.RED}✘ Falha no provisionamento de rede: {e}{Style.RESET_ALL}")
+
+@asm_group.command("image")
+@click.argument("project_root", default=".", type=click.Path(exists=True))
+@click.option("--run", is_flag=True, help="Boota a imagem no QEMU apos a forja.")
+@click.option("--clean", is_flag=True, help="Limpa objetos antes do build.")
+def asm_image(project_root, run, clean):
+    """📀 Forja a imagem bootavel: build + flat + imagem (+ QEMU opcional)."""
+    import shutil, subprocess
+    from doxoade.tools.assembly_systems.image_builder import ImageBuilder
+
+    engine = AssemblyEngine(project_root)
+    results = engine.build(clean=clean)
+    if not results["success"]:
+        click.echo(f"{Fore.RED}✘ Build falhou — forja de imagem abortada.{Style.RESET_ALL}")
+        if results.get("link") and results["link"].stderr:
+            click.echo(results["link"].stderr[:800])
+        sys.exit(1)
+
+    if not engine.extract_flat():
+        click.echo(f"{Fore.RED}✘ Falha ao extrair o flat binary.{Style.RESET_ALL}")
+        sys.exit(1)
+
+    info = ImageBuilder(project_root).build()
+    click.echo(f"{Fore.CYAN}📀 Imagem forjada: {info['output']} ({info['bytes']} bytes){Style.RESET_ALL}")
+    click.echo(f"   MBR 0xAA55 : {'✔' if info['mbr_ok'] else '✘'}")
+    click.echo(f"   DAP        : {info['dap_sectors']} >= {info['sectors_needed']} setores {'✔' if info['dap_ok'] else '✘'}")
+
+    if run:
+        qemu = shutil.which("qemu-system-i386") or r"C:\Program Files\qemu\qemu-system-i386.exe"
+        click.echo(f"{Fore.CYAN}▶ Bootando no QEMU...{Style.RESET_ALL}")
+        subprocess.run([qemu, "-drive", f"file={info['output']},format=raw,if=ide", "-boot", "c"])
+
+@asm_group.command("setup-tools")
+@click.option("--skip-nasm", is_flag=True, help="Não instala NASM.")
+@click.option("--skip-zig", is_flag=True, help="Não instala Zig.")
+@click.option("--skip-qemu", is_flag=True, help="Não instala QEMU.")
+def asm_setup_tools(skip_nasm, skip_zig, skip_qemu):
+    """🛠️ Provisiona a toolchain OS-Dev (NASM + Zig + QEMU) via winget."""
+    import os, shutil, subprocess
+    from doxoade.tools.assembly_systems.asm_detector import AssemblyDetector
+
+    local = Path(os.environ.get("LOCALAPPDATA", ""))
+    zig_ok = bool(shutil.which("zig")) or (local / "Microsoft/WinGet/Links/zig.exe").exists() \
+             or any(local.glob("Microsoft/WinGet/Packages/zig.zig_*/zig-*/zig.exe"))
+    qemu_ok = bool(shutil.which("qemu-system-i386")) or Path(r"C:\Program Files\qemu\qemu-system-i386.exe").exists()
+    nasm_ok = AssemblyDetector.detect("nasm") is not None
+
+    plan = []
+    if not skip_nasm and not nasm_ok: plan.append(("NASM.NASM", "assembler x86"))
+    if not skip_zig and not zig_ok:   plan.append(("zig.zig", "cross-compiler ELF32/LLD"))
+    if not skip_qemu and not qemu_ok: plan.append(("SoftwareFreedomConservancy.QEMU", "emulador"))
+
+    if not plan:
+        click.echo(f"{Fore.GREEN}✔ Toolchain OS-Dev completa detectada. Nada a prover.{Style.RESET_ALL}")
+        return
+
+    for pkg, desc in plan:
+        click.echo(f"{Fore.CYAN}📦 Provisionando {desc}: winget install --id {pkg}{Style.RESET_ALL}")
+        subprocess.run(["winget", "install", "--id", pkg,
+                        "--accept-package-agreements", "--accept-source-agreements"])
+
+    click.echo(f"{Fore.GREEN}✔ Provisionamento concluído.{Style.RESET_ALL}")
+    click.echo(f"{Fore.YELLOW}💡 Abra um NOVO terminal para ativar os aliases (ou rode 'doxoade asm doctor').{Style.RESET_ALL}")
+
+@asm_group.command("doctor")
+def asm_doctor():
+    """🩺 Auditoria Ma'at da toolchain OS-Dev."""
+    import os, shutil
+    from doxoade.tools.assembly_systems.asm_detector import AssemblyDetector
+
+    local = Path(os.environ.get("LOCALAPPDATA", ""))
+    zig = shutil.which("zig") or next(
+        (str(p) for p in local.glob("Microsoft/WinGet/Packages/zig.zig_*/zig-*/zig.exe")), None)
+    qemu = shutil.which("qemu-system-i386") or (
+        r"C:\Program Files\qemu\qemu-system-i386.exe"
+        if Path(r"C:\Program Files\qemu\qemu-system-i386.exe").exists() else None)
+
+    rows = [
+        ("NASM (bootloader)", AssemblyDetector.detect("nasm")),
+        ("GAS  (fallback .s)", AssemblyDetector.detect("gas")),
+        ("Zig  (C freestanding + LLD)", zig),
+        ("QEMU (emulação)", qemu),
+    ]
+    click.echo(f"\n{Fore.CYAN}🩺 [ASM DOCTOR] Toolchain OS-Dev{Style.RESET_ALL}")
+    for name, info in rows:
+        ok = info is not None
+        detail = str(info) if ok and not isinstance(info, str) else (info or "ausente")
+        click.echo(f"  {'✔' if ok else Fore.RED + '✘' + Style.RESET_ALL} {name:<28} {Fore.DIM if not ok else ''}{detail}{Style.RESET_ALL}")
+    click.echo()

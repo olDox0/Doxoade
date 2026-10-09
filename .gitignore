@@ -86,10 +86,10 @@ testes/
 .dox_agent_workspace/
 .dox_lab/
 
-
 # ====== terceirizados ======
 thirdparty/w64devkit/
 doxoade/tools/benzaiten_gui/native/include/
+models/smol_sys/
 
 # --- DOXOADE LOCAL DATA ---
 # Ignora o banco de dados (pode conter caminhos absolutos do seu PC)
@@ -100,7 +100,7 @@ data/doxoade.db-shm
 doxoade/tools/hermes_systems/native/.bridge_build_cache.json
 
 # ═════════════════════════════════════════════════════════════════════
-# 🔨 ARTEFATOS EFÊMEROS DE COMPILAÇÃO C / JANUS / HERMES
+# 🔨 ARTEFATOS EFÊMEROS DE COMPILAÇÃO C / JANUS / HERMES / ASM / OS dump
 # ═════════════════════════════════════════════════════════════════════
 doxoade/tools/hermes_systems/native/*.dll
 doxoade/tools/hermes_systems/native/*.pyd
@@ -116,6 +116,14 @@ hermes_async_log.dll*
 .doxoade/janus/
 .doxoade/mesh_daemon.pid
 .doxoade/mesh_state.json
+.doxoade_assembly.json
+# OS Dev & Emulation Artifacts
+*.img
+*.bin
+qemu_trace.log
+serial.log
+firmware/
+
 
 # ====== Exceções ======
 

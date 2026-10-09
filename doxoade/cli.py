@@ -108,6 +108,7 @@ class DoxoadeLazyGroup(click.Group):
             'mody': 'doxoade.commands.moddify:moddify',
             'moduloid': 'doxoade.commands.moduloid_systems.moduloid_acervo:moduloid_group',
             'note': 'doxoade.commands.note_systems.note_cmd:note',
+            'os-cmd': 'doxoade.commands.os_cmd:os_group',
             'panel': 'doxoade.commands.panel_command:panel_command',
             'pedia': 'doxoade.commands.pedia:pedia',
             'purge-history': 'doxoade.commands.purge_history:purge_history',
