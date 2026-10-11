@@ -184,26 +184,27 @@ class QemuDetector:
     def find_ovmf(cls, arch: str = "ia32") -> Optional[OvmfInfo]:
         """
         Localiza imagens de ROM UEFI (OVMF).
-        Suporta 'ia32' (para alvos Bay Trail) e 'x64'.
+        Prioriza ROMs locais unificadas do projeto antes de ROMs divididas do sistema.
         """
         target_files = {
-            "ia32": ["OVMF32.fd", "OVMF_IA32.fd", "OVMF-ia32.fd", "ovmf-ia32.bin"],
-            "x64":  ["OVMF.fd", "OVMF_CODE.fd", "OVMF_X64.fd", "ovmf-x86_64.bin"]
+            "ia32": ["OVMF_IA32.fd", "OVMF32.fd", "OVMF-ia32.fd", "ovmf-ia32.bin", "edk2-i386-code.fd"],
+            "x64":  ["OVMF.fd", "OVMF_X64.fd", "OVMF_CODE.fd", "ovmf-x86_64.bin", "edk2-x86_64-code.fd"]
         }
 
         names = target_files.get(arch, target_files["x64"])
-        search_dirs: List[Path] = []
+        search_dirs: List[Path] = [
+            # 1. Prioridade Máxima: Pasta local do projeto e cache Doxoade
+            Path("firmware"),
+            Path(".doxoade") / "firmware",
+        ]
 
+        # 2. Caminhos do Sistema Operacional (Fallback)
         if os.name == "posix":
             search_dirs.extend(cls.OVMF_SEARCH_DIRS_LINUX)
         elif os.name == "nt":
             for base in cls.WINDOWS_SEARCH_DIRS:
                 search_dirs.append(base / "share")
                 search_dirs.append(base)
-
-        # Busca em pasta local 'firmware/' ou '.doxoade/firmware/' se existir
-        search_dirs.append(Path("firmware"))
-        search_dirs.append(Path(".doxoade") / "firmware")
 
         for directory in search_dirs:
             if not directory.exists():

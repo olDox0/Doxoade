@@ -95,14 +95,19 @@ class QemuRunner:
         else:
             raise ValueError(f"Tipo de mídia inválido: {cfg.media_type}")
 
-        # 4. Firmware UEFI (se fornecido)
+        # 4. Firmware UEFI via PFlash nativo (EDK2 / OVMF)
         if cfg.uefi_rom:
             rom_path = Path(cfg.uefi_rom)
             if not rom_path.is_absolute():
                 rom_path = self.root / rom_path
             if not rom_path.exists():
                 raise FileNotFoundError(f"ROM UEFI não encontrada em: {rom_path}")
-            cmd.extend(["-bios", str(rom_path)])
+
+            # PFlash unit=0 (código somente leitura, padrão moderno do QEMU)
+            cmd.extend([
+                "-drive",
+                f"if=pflash,format=raw,unit=0,file={rom_path},readonly=on"
+            ])
 
         # 5. Telemetria Serial
         # Plano A: Redirecionamento stdio para leitura imediata

@@ -30,35 +30,21 @@ def cli(hbc6_audit, hbc6_audit_verbose):
 
 
 def main():
-    # ⚡ ZEUS: TENTATIVA DE DELEGAÇÃO AO DAEMON (ZERO COLD-START)
-    use_daemon = False
-    if '--daemon' in sys.argv:
-        sys.argv.remove('--daemon')
-        use_daemon = True
-    elif os.environ.get('DOXOADE_USE_DAEMON') == '1':
-        use_daemon = True
-
-    if use_daemon:
-        try:
-            from doxoade.tools.engine_daemon.client import dispatch_to_daemon
-            exit_code = dispatch_to_daemon(sys.argv, os.getcwd())
-            if exit_code is not None:
-                sys.exit(exit_code)
-        except Exception:
-            pass  # Fallback seguro para o modo tradicional
-
-    # 🛑 ÉPOCA ZERO: Marcador inicial absoluto no primeiro instante do processo
+    # 🔥 [DAEMON EXTIRPADO] 
+    # O Engine Daemon foi arquivado como experimento de IPC.
+    # O boot nativo agora é otimizado para ser instantâneo (< 2s).
+    
     t0_boot = time.perf_counter()
-
     os.environ["DOXOADE_QUIET_BOOT"] = "1"
+    
     package_dir = Path(__file__).resolve().parent
     project_root = str(package_dir.parent)
-    if project_root not in sys.path:
+    if project_root not in sys.path: 
         sys.path.insert(0, project_root)
-
+        
     cwd_root = _find_project_root()
     os.environ["DOXOADE_PROJECT_ROOT"] = cwd_root
-
+    
     pure_mode = "--pure" in sys.argv
     if pure_mode:
         sys.argv.remove("--pure")
@@ -68,21 +54,21 @@ def main():
         boot_res = ignite_background_systems(cwd_root)
         boot_metrics = boot_res if isinstance(boot_res, dict) else {"phases": {}}
         boot_metrics["mode"] = "FULL"
-
-    # Cálculo seguro do tempo de arranque
+        
     total_boot_ms = round((time.perf_counter() - t0_boot) * 1000.0, 2)
     boot_metrics["total_boot_ms"] = total_boot_ms
+    
     os.environ["DOXOADE_BOOT_MS"] = str(total_boot_ms)
     os.environ["DOXOADE_QUIET_BOOT"] = "0"
-
+    
     exit_code = 0
     try:
         from doxoade.cli import cli as root_cli
         root_cli(obj={"boot_metrics": boot_metrics, "t0_boot": t0_boot})
-    except SystemExit as e:
+    except SystemExit as e: 
         exit_code = getattr(e, 'code', 0) or 0
     except Exception as e:
-        if "Exit" in type(e).__name__ or "Abort" in type(e).__name__:
+        if "Exit" in type(e).__name__ or "Abort" in type(e).__name__: 
             exit_code = getattr(e, 'exit_code', 0) or 0
         else:
             import traceback
@@ -96,14 +82,12 @@ def main():
                         parts = line.split('"')
                         info['file'] = parts[1]
                         info['line'] = line.split('line ')[1].split(',')[0]
-                    except Exception:
-                        pass
+                    except Exception: pass
                     break
             for i, line in enumerate(lines):
                 if f"line {info['line']}" in line and i + 1 < len(lines):
                     next_line = lines[i+1].strip()
-                    if next_line.startswith("in "):
-                        info['func'] = next_line[3:]
+                    if next_line.startswith("in "): info['func'] = next_line[3:]
                     break
             print(f"\n\x1b[41;1m 🔥 CRASH NO SISTEMA (Forensic Report) \x1b[0m"
                   f"\n\x1b[1;31m  ■ Tipo de Falha: \x1b[0m\x1b[1m{type(e).__name__}\x1b[0m"
@@ -122,8 +106,7 @@ def main():
                     f.write(f"FILE: {info['file']} | LINE: {info['line']} | FUNC: {info['func']}\n")
                     f.write(f"{'='*60}\n{tb_text}\n")
                 print(f"\x1b[1;35m  💾 [HADES] Black Box salvo em: {crash_log}\x1b[0m")
-            except Exception:
-                pass
+            except Exception: pass
             exit_code = 1
     finally:
         if os.environ.get("HERMES_HBC6_AUDIT") == "1":
@@ -134,8 +117,7 @@ def main():
                     auditor.print_report()
                     path = auditor.dump_json()
                     print(f"  💾 [HBC6-AUDIT] Dossiê salvo em: {path}")
-            except Exception:
-                pass
+            except Exception: pass
         sys.exit(exit_code)
 
 

@@ -12,17 +12,21 @@ from pathlib import Path
 from doxoade.tools.error_info import formated_traceback
 from doxoade.tools.soteria_systems.lazarus_hook import install_shield
 
+# 🔥 [BOOT OTIMIZADO v2.0]
+# MetaFinders e Hooks pesados desligados por padrão.
+# Eles serão ativados sob demanda pelos comandos específicos (ex: 'vulcan', 'metal').
+# Isso garante um boot instantâneo (< 2s).
 DEFAULT_ENGINES = {
-    "hermes_init": True,
-    "metalcraft": True,
-    "hermes_diag": True,
-    "abi_gate": True,
-    "vulcan_meta": True,
-    "shadow_runtime": True,
-    "horus": False,       # Desativado por padrão para reduzir consumo
-    "lazarus": True,
-    "hermes_bridge": True,
-    "hbc6": True,
+    "hermes_init": False,
+    "metalcraft": False,
+    "hermes_diag": False,
+    "abi_gate": False,
+    "vulcan_meta": False,     # 🔴 DESLIGADO (Causa os 4s de delay)
+    "shadow_runtime": False,  # 🔴 DESLIGADO (Overhead de AST)
+    "horus": False,
+    "lazarus": True,          # 🟢 MANTIDO (Escudo de exceção leve)
+    "hermes_bridge": False,
+    "hbc6": False,            # 🔴 DESLIGADO (MetaFinder pesado)
 }
 
 

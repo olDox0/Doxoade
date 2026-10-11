@@ -58,6 +58,12 @@ este é o novo protocolo simplificado e sucinto de desenvolveimento do doxoade. 
   6.1.3. solução, a resposta deve ser breve, o snipped de modificação com referencia do final e começo dos codigos anteriores.
   6.1.4. previsão do resultado.
   6.1.5. citações devem ser mencionadas no codigo por razões eticas e de responsabilidade com a comunidade dev. então um comentario como: # solução de github.com/fulano/projeto ou """ fix https://site.com/exemplo/123 """
+7. Preservação e ciencia:
+  7.1. Pesquisa em produção deve ser registrada, onde, quando, e o que no minimo para preservar experiencias.
+  7.2. Registrar problemas é adequando e desejado.
+  7.3. documentar no Docs/Research é o diretorio padrão doxoade.
+  7.4. por questão de dinamismo é permitido registrar pesquisa no blitzplan.
+  
 
 ## conceitos
 

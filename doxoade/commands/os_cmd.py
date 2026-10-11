@@ -25,6 +25,8 @@ from doxoade.tools.emulator_systems import (
     DiskForge,
     DiskForgeConfig,
     DiskForgeResult,
+    SimulationMatrix,
+    ProfileCatalog,
 )
 
 
@@ -83,6 +85,7 @@ def os_doctor():
 @click.option("--serial", default="stdio", type=click.Choice(["stdio", "file", "none"]), help="Canal da COM1.")
 @click.option("--uefi", is_flag=True, help="Tenta boot UEFI via OVMF correspondente.")
 @click.option("--dry-run", is_flag=True, help="Exibe comando sem disparar emulador.")
+@click.option("--serial", default="file", type=click.Choice(["stdio", "file", "none"]), help="Canal da COM1 (Padrão: file).")
 def os_run(image, arch, media, ram, serial, uefi, dry_run):
     """🚀 Executa a imagem bootável no QEMU com telemetria serial."""
     runner = QemuRunner(".")
@@ -233,3 +236,63 @@ def os_forge(output, kernel, arch, size, dry_run):
     click.echo(f"  Binário : {Fore.CYAN}/EFI/BOOT/{res.target_efi_name}{Style.RESET_ALL}")
     click.echo(f"  Tamanho : {res.size_bytes / (1024*1024):.1f} MB\n")
 
+@os_group.command("log")
+@click.option("--file", "-f", default="serial.log", help="Arquivo de log a inspecionar.")
+@click.option("--lines", "-n", default=30, type=int, help="Número de linhas do final.")
+def os_log(file, lines):
+    """📄 Exibe o log serial limpo sem poluir o terminal hospedeiro."""
+    log_path = Path(file)
+    if not log_path.exists():
+        click.echo(f"{Fore.YELLOW}⚠ Nenhum arquivo '{file}' encontrado.{Style.RESET_ALL}")
+        return
+
+    content = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    click.echo(f"\n{Fore.CYAN}📄 [SERIAL LOG: {file}] ({len(content)} linhas){Style.RESET_ALL}\n")
+    
+    # Exibe as últimas N linhas
+    for line in content[-lines:]:
+        click.echo(line)
+    click.echo(f"\n{Fore.CYAN}══════════════════════════════════════════════════════{Style.RESET_ALL}\n")
+
+@os_group.command("sim")
+@click.option("--profile", "-p", default="baytrail", help="Perfil de hardware (baytrail, legacy, uefi64 ou seus aliases).")
+@click.option("--image", "-i", default=None, help="Caminho de imagem customizada (opcional).")
+@click.option("--ram", default=None, type=int, help="Override de memória RAM em MB.")
+@click.option("--dry-run", is_flag=True, help="Exibe comando sem disparar o emulador.")
+def os_sim(profile, image, ram, dry_run):
+    """🌐 Simula um perfil de hardware matricial (Bay Trail, Legacy BIOS ou UEFI x64)."""
+    matrix = SimulationMatrix(".")
+    
+    if dry_run:
+        click.echo(f"{Fore.YELLOW}🛡️  [DRY-RUN] Simulando perfil matricial '{profile}':{Style.RESET_ALL}")
+    
+    res = matrix.run(profile_query=profile, custom_image=image, memory_mb=ram, dry_run=dry_run)
+    
+    if dry_run and res.success:
+        click.echo(f"  cmd: {' '.join(res.command)}\n")
+        return
+
+    if not res.success:
+        click.echo(f"{Fore.RED}✘ Falha na simulação:{Style.RESET_ALL}\n{res.message}")
+        sys.exit(1)
+
+    click.echo(f"{Fore.GREEN}✔ {res.message}{Style.RESET_ALL}")
+
+
+@os_group.command("profiles")
+def os_profiles():
+    """📋 Lista o catálogo de perfis matriciais disponíveis e status de ROMs."""
+    matrix = SimulationMatrix(".")
+    audit = matrix.audit_profiles()
+    
+    click.echo(f"\n{Fore.CYAN}📋 [SIMULATION MATRIX] Catálogo de Perfis de Hardware{Style.RESET_ALL}\n")
+    for item in audit["perfis"]:
+        rom_status = f"{Fore.GREEN}✔ Pronta{Style.RESET_ALL}" if item["rom_pronta"] else f"{Fore.RED}✘ Ausente{Style.RESET_ALL}"
+        img_status = f"{Fore.GREEN}✔ Pronta{Style.RESET_ALL}" if item["imagem_pronta"] else f"{Fore.YELLOW}⚠ Não gerada{Style.RESET_ALL}"
+        
+        click.echo(f"  • Perfil     : {Fore.YELLOW}{item['perfil']}{Style.RESET_ALL}")
+        click.echo(f"    Era/Alvo   : {item['era']}")
+        click.echo(f"    Arquitetura: {item['arch']} ({item['chipset']}) | RAM Segura: {item['ram_segura']}")
+        click.echo(f"    Firmware   : {rom_status} | Mídia padrão: {img_status}")
+        click.echo(f"    --------------------------------------------------------")
+    click.echo()

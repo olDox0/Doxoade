@@ -90,6 +90,7 @@ class DoxoadeLazyGroup(click.Group):
             'init': 'doxoade.commands.init_systems.init_cmd:init',
             'install': 'doxoade.commands.install:install',
             'intelligence': 'doxoade.commands.intelligence_systems.intelligence:intelligence',
+            'izanami': 'doxoade.commands.izanami_cmd:izanami_group',
             'janus': 'doxoade.commands.janus_cmd:janus_group',
             'kvcheck': 'doxoade.commands.kvcheck:kvcheck',
 #            'lab': 'doxoade.commands.lab:lab_group',
