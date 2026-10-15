@@ -12,6 +12,17 @@ local RootView = require "core.rootview"
 local rencache = rawget(_G, "rencache") or (pcall(require, "core.rencache") and require("core.rencache") or nil)
 local native_renderer = rawget(_G, "renderer") or (pcall(require, "renderer") and require("renderer") or nil)
 
+-- 🏛️ Identificação Soberana Cânone
+core.add_thread(function()
+  coroutine.yield(0.2)
+  local is_test = USERDIR and USERDIR:find("test_deploy")
+  local mode_label = is_test and "[TESTE]" or "Cânone"
+  if system and system.set_window_title then
+    local cur_proj = core.project_dir and core.project_dir:match("[^/\\\\]+$") or "Doxly"
+    system.set_window_title(string.format("Doxly %s — %s", mode_label, cur_proj))
+  end
+end)
+
 -- ── 1. RENDERIZADORES SEGUROS ─────────────────────────────────────────────────
 local function draw_rect_safe(x, y, w, h, c)
   if rencache and rencache.draw_rect then rencache.draw_rect(x, y, w, h, c)

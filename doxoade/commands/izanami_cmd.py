@@ -29,6 +29,7 @@ from doxoade.tools.emulator_systems import (
     SimulationMatrix,
 )
 from doxoade.tools.emulator_systems.esp_manager import EspManager
+from doxoade.tools.emulator_systems.partition_manager import PartitionManager
 
 IZANAMI_ROOT = Path(__file__).resolve().parent.parent / "izanami"
 
@@ -245,3 +246,56 @@ def izanami_sim(image, rebuild, dry_run):
     if not res.success:
         click.echo(f"{Fore.RED}✘ Falha na simulação: {res.message}{Style.RESET_ALL}")
         sys.exit(1)
+
+@izanami_group.command("partition-audit")
+def izanami_partition_audit():
+    """🔍 Audita com segurança o espaço do SSD antes de criar a partição."""
+    try:
+        a = PartitionManager.audit()
+        click.echo(f"\n{Fore.CYAN}🔍 [AUDITORIA DE DISCO DO AMARANTH]{Style.RESET_ALL}\n")
+        click.echo(f"  • Volume C: Tamanho Atual  : {Fore.YELLOW}{a.current_size_gb:.2f} GB{Style.RESET_ALL}")
+        click.echo(f"  • Volume C: Espaço Livre   : {Fore.GREEN}{a.free_space_gb:.2f} GB{Style.RESET_ALL}")
+        click.echo(f"  • Letra M: Disponível      : {'✔ Sim' if a.drive_m_available else Fore.RED + '✘ Não' + Style.RESET_ALL}")
+        
+        if a.can_shrink_1gb:
+            click.echo(f"\n  {Fore.GREEN}✔ DIAGNÓSTICO: SEGURO PARA ENCOLHER 1 GB.{Style.RESET_ALL}")
+            click.echo(f"  O Windows manterá ~{a.free_space_gb - 1.0:.2f} GB livres após a criação.\n")
+        else:
+            click.echo(f"\n  {Fore.RED}✘ DIAGNÓSTICO: RISCO DE ESPAÇO. Espaço livre insuficiente.{Style.RESET_ALL}\n")
+    except Exception as e:
+        click.echo(f"{Fore.RED}✘ Falha na auditoria: {e}{Style.RESET_ALL}")
+
+
+@izanami_group.command("partition-create")
+@click.option("--size", default=1024, type=int, help="Tamanho em MB (Padrão: 1024 MB).")
+@click.option("--dry-run", is_flag=True, help="Simula sem modificar o disco.")
+def izanami_partition_create(size, dry_run):
+    """🛠️ Reduz C: e cria a partição M: (FAT32) para o Alpine com salvaguarda."""
+    try:
+        res = PartitionManager.create_slice(size_mb=size, dry_run=dry_run)
+        if dry_run:
+            click.echo(f"\n{Fore.YELLOW}🛡️  [DRY-RUN] Simulação de Particionamento:{Style.RESET_ALL}")
+            click.echo(f"  Ação: {res['action']}")
+            click.echo(f"  Espaço livre restante no C:: ~{res['remaining_c_free_gb']} GB\n")
+            return
+
+        click.echo(f"\n{Fore.GREEN}✔ Partição criada com sucesso absoluto!{Style.RESET_ALL}")
+        click.echo(f"  Unidade: {Fore.CYAN}{res['drive']}{Style.RESET_ALL} ({res['size_mb']} MB, FAT32)")
+        click.echo(f"  Rótulo : {res['label']}\n")
+    except Exception as e:
+        click.echo(f"\n{Fore.RED}✘ Operação cancelada com segurança: {e}{Style.RESET_ALL}\n")
+
+
+@izanami_group.command("partition-revert")
+@click.option("--dry-run", is_flag=True, help="Simula sem modificar o disco.")
+def izanami_partition_revert(dry_run):
+    """🔄 Reversão: Remove a partição M: e expande C: de volta ao tamanho total."""
+    try:
+        res = PartitionManager.revert_slice(dry_run=dry_run)
+        if dry_run:
+            click.echo(f"\n{Fore.YELLOW}🛡️  [DRY-RUN] Simulação de Reversão: {res['action']}{Style.RESET_ALL}\n")
+            return
+
+        click.echo(f"\n{Fore.GREEN}✔ {res['message']}{Style.RESET_ALL}\n")
+    except Exception as e:
+        click.echo(f"\n{Fore.RED}✘ Erro na reversão: {e}{Style.RESET_ALL}\n")

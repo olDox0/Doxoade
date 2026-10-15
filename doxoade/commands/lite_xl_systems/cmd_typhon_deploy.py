@@ -140,3 +140,32 @@ def cmd_exorcise():
         print(f"{Fore.GREEN}✔ Instâncias encerradas com sucesso.{Fore.RESET}")
     else:
         print(f"{Fore.YELLOW}⚠ Exorcismo parcial (algumas instâncias podem ter falhado).{Fore.RESET}")
+
+@deploy_group.command("canone", help="🏛️ Deploy CÂNONE soberano de produção.")
+@click.option("--force", "-f", is_flag=True, help="Força deploy mesmo com warnings.")
+@click.option("--launch/--no-launch", "-l/-nl", default=True, help="Lança o Lite XL Cânone após deploy (Padrão: True).")
+@click.option("--no-khonsu", is_flag=True, default=False, help="Desativa Khonsu AOT (gera texto puro).")
+def cmd_deploy_canone(force, launch, no_khonsu):
+    """Promove e instala o perfil soberano Cânone em produção definitiva."""
+    print(f"\n{Fore.CYAN}{Style.BRIGHT}🏛️  DEPLOY CÂNONE (PRODUÇÃO SOBERANA){Style.RESET_ALL}\n")
+    result = TyphonDeployEngine.deploy("production", force=force, no_khonsu=no_khonsu)
+    if result["success"]:
+        print(f"\n{Fore.GREEN}✔ Perfil CÂNONE promovido com sucesso para a produção definitiva! ({result.get('opt_mode', 'standard')}){Fore.RESET}")
+        if result["backup"]:
+            print(f"{Fore.CYAN}💾 Backup prévio salvo: {result['backup'].name}{Fore.RESET}")
+        
+        # Atualiza o atalho soberano do Windows
+        try:
+            from doxoade.commands.leap_sys.leap_platform.leap_windows.leap_elevation import create_sovereign_shortcut
+            create_sovereign_shortcut()
+        except Exception:
+            pass
+
+        if launch:
+            print()
+            TyphonDeployEngine.launch("production", exorcise=True)
+    else:
+        print(f"\n{Fore.RED}✖ Falha no deploy Cânone: {result['error']}{Fore.RESET}")
+        if result["backup"]:
+            print(f"{Fore.YELLOW}🔄 Rollback automático executado.{Fore.RESET}")
+

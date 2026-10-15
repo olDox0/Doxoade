@@ -25,6 +25,29 @@ local PHANTO_CONFIG = {
   ndjson_file = "phanto_crisis.ndjson",
 }
 
+-- ── Vacina Soberana contra 'Permission Denied' em Diretórios ──────────────────
+local orig_core_open_doc = core.open_doc
+core.open_doc = function(filename, ...)
+  if filename and type(filename) == "string" then
+    local info = system.get_file_info(filename)
+    if info and info.type == "dir" then
+      -- 🎯 É uma pasta! Anexa ao workspace em vez de tentar ler com io.open
+      if core.add_project_directory then
+        pcall(core.add_project_directory, filename)
+      end
+      return nil, "O caminho especificado é um diretório"
+    end
+  end
+  return orig_core_open_doc(filename, ...)
+end
+
+-- Blindagem no RootView para ignorar retorno nulo de pastas
+local orig_rootview_open_doc = RootView.open_doc
+function RootView:open_doc(doc, ...)
+  if not doc then return nil end
+  return orig_rootview_open_doc(self, doc, ...)
+end
+
 local _phanto_ring = {}
 local _phanto_head = 1
 local _phanto_count = 0

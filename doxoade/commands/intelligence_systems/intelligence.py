@@ -481,7 +481,7 @@ def _save_qwen_report(report_data, output_path, console):
     except Exception as e:
         console.print(f"[bold red]✘ Falha ao gerar XML Qwen: {e}[/bold red]")
         
-def _run_analyze_coverage(scan_paths, cli_excludes, verbose, ext_excludes):
+def _run_analyze_coverage(scan_paths, cli_excludes, verbose, ext_excludes, level):
     """Auditoria de Cobertura: Blacklist, Extensões e Integridade de Parsing (Nexus Scan)."""
     from doxoade.commands.intelligence_systems.intelligence_engine import analyze_file_chief
     from doxoade.commands.intelligence_systems.intelligence_utils import get_ignore_spec

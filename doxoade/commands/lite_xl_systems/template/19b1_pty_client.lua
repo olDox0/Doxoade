@@ -255,7 +255,11 @@ function PTYClient:_handle_output(payload)
       self.lines = {}
       self.current_line = {}
       self.scroll_y = 0
+    elseif seg.control == "cr" or seg.control == "erase_line" then
+      -- 🎯 BARRAS DE PROGRESSO / SPINNERS: Limpa a linha ativa para sobrescrita in-place
+      self.current_line = {}
     elseif seg.control == "lf" or seg.text == "\n" then
+      -- Promove a linha para o histórico permanente apenas no LF real
       table.insert(self.lines, { segments = self.current_line })
       self.current_line = {}
       if #self.lines > MAX_SCROLLBACK then
