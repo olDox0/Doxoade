@@ -75,29 +75,21 @@ class NexusMetalEngine:
         return hasher.hexdigest()
 
     def _is_stale(self, target_name, sources, output_path):
+        """Verifica se o alvo precisa ser recompilado."""
+        # Se o binário não existe, DEVE compilar. Nunca pode ser Cache Hit.
         if not output_path.exists():
-            fail_marker = self.cache_path.parent / f".build_failed_{target_name}"
-            if fail_marker.exists():
-                fail_time = fail_marker.stat().st_mtime
-                if (time.time() - fail_time) < 300:
-                    return False
             return True
 
         cache = {}
         if self.cache_path.exists():
             try:
-                with open(self.cache_path, 'r') as f:
+                with open(self.cache_path, 'r', encoding='utf-8') as f:
                     cache = json.load(f)
             except Exception:
                 return True
 
-        is_stale = cache.get(target_name) != self._get_bundle_hash(sources)
-        if not is_stale:
-            fail_marker = self.cache_path.parent / f".build_failed_{target_name}"
-            if fail_marker.exists():
-                fail_marker.unlink()
+        return cache.get(target_name) != self._get_bundle_hash(sources)
 
-        return is_stale
 
     def _update_cache(self, target_name, sources):
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -347,20 +339,24 @@ class NexusMetalEngine:
             result = subprocess.run(cmd, capture_output=True, text=True)
 
             if result.returncode != 0:
-                fail_marker = self.cache_path.parent / f".build_failed_{t_name}"
-                fail_marker.parent.mkdir(parents=True, exist_ok=True)
-                fail_marker.write_text(result.stderr[:500], encoding='utf-8')
-                print(f"      {Fore.RED}✘ Falha na compilação:{Style.RESET_ALL}")
-                print(f"        {result.stderr[:400]}")
-                print(f"      {Fore.YELLOW}⏸ Cooldown de 5 minutos ativado para {t_name}{Style.RESET_ALL}")
+                print(f"      {Fore.RED}✘ Falha na compilação ({compiler_bin}):{Style.RESET_ALL}")
+                # Exibe as linhas relevantes do erro completo sem truncamento cego
+                stderr_text = result.stderr.strip()
+                lines = stderr_text.splitlines()
+                # Mostra até 30 linhas de erro para não poluir, mas sem cortar o motivo real
+                for line in lines[-25:] if len(lines) > 25 else lines:
+                    print(f"        {line}")
                 return False
-
-            fail_marker = self.cache_path.parent / f".build_failed_{t_name}"
-            if fail_marker.exists():
-                fail_marker.unlink()
 
             self._update_cache(t_name, final_sources)
             print(f"      {Fore.GREEN}✔ Fundição concluída com sucesso: {final_out.name}{self.RST}")
+
+            # fail_marker = self.cache_path.parent / f".build_failed_{t_name}"
+            # if fail_marker.exists():
+            #     fail_marker.unlink()
+
+            # self._update_cache(t_name, final_sources)
+            # print(f"      {Fore.GREEN}✔ Fundição concluída com sucesso: {final_out.name}{self.RST}")
 
         return global_success
 
