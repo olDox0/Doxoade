@@ -4,6 +4,8 @@ import shutil
 from doxoade.tools.doxcolors import Fore
 from ..chronos import chronos_recorder
 
+# No final do arquivo doxoade/commands/moddify.py:
+
 def _backup_file(file_path):
     shutil.copy2(file_path, f'{file_path}.bak')
 
@@ -40,6 +42,13 @@ def _parse_line_range(range_str, max_lines):
 def moddify():
     """Ferramentas de modificação cirúrgica de arquivos."""
     pass
+
+try:
+    from doxoade.commands.moddify_sys.mody_patch import mod_patch
+    moddify.add_command(mod_patch, 'patch')
+except ImportError as e:
+    from doxoade.tools.error_info import handle_error
+    handle_error(e, context="Comando Patch", debug=True)
 
 @moddify.command('show')
 @click.argument('file_path', type=click.Path(exists=True))

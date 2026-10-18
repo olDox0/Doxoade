@@ -158,11 +158,12 @@ def ignite_background_systems(project_root: str) -> dict:
     # 7. SOTÉRIA / LAZARUS HOOK
     if cfg.get("lazarus"):
         def _phase_lazarus():
-            os.environ["DOXOADE_RESCUE"] = "1"
-            try:
-                install_shield()
-            except Exception:
-                pass
+            if cfg.get("lazarus"):
+                os.environ["DOXOADE_RESCUE"] = "1"
+                try: install_shield()
+                except Exception: pass
+            else:
+                os.environ["DOXOADE_RESCUE"] = "0"
         _track("lazarus", _phase_lazarus)
 
     # 8. HERMES BRIDGE & HBC6

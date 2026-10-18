@@ -104,6 +104,11 @@ local function toggle_leap_state()
         LeapHUD.active = true
         LeapHUD.mode = "host"
         core.log("🚀 [LEAP HOST] Servidor KVM ativo em Amaranth ➔ bluebaby (Direita :24800)")
+        -- No init.lua do Doxly: Dispara o Leap Auto em segundo plano sem travar a interface
+        core.add_thread(function()
+          -- Executa silencioso e desacoplado via cmd em background
+          system.exec("cmd.exe /c start /b sysutils leap auto")
+        end)
     else
         -- BLUEBABY -> Conecta ao Amaranth
         local cmd = string.format("sysutils leap join %s --port 24800 --name bluebaby", LeapHUD.server_ip)
@@ -112,6 +117,11 @@ local function toggle_leap_state()
         LeapHUD.active = true
         LeapHUD.mode = "client"
         core.log("🔗 [LEAP CLI] Conectando ao host Amaranth (" .. LeapHUD.server_ip .. ")")
+        -- No init.lua do Doxly: Dispara o Leap Auto em segundo plano sem travar a interface
+        core.add_thread(function()
+          -- Executa silencioso e desacoplado via cmd em background
+          system.exec("cmd.exe /c start /b sysutils leap auto")
+        end)
     end
 
     core.redraw = true

@@ -557,6 +557,12 @@ def activate_protocol(error_text: str, exit_code: int = None, trace=None, **kwar
     import os as _os
     import re
 
+    # 🛑 BLINDAGEM LAZARUS: Se o motor foi desligado, aborta imediatamente
+    if _os.environ.get('DOXOADE_RESCUE') == '0':
+        if exit_code and exit_code != 0:
+            _sys.exit(exit_code)
+        return
+
     # Agora kwargs existe no escopo e esta linha não vai mais dar NameError
     context_vars = kwargs.get('context', {})
     trace_text = _read_trace(trace) or error_text or ''

@@ -168,6 +168,9 @@ class NexusMetalEngine:
             from doxoade.tools.janus_systems import Janus
             info = Janus.get_info()
             if info:
+                if has_cpp and os.name == 'nt':
+                    if '-static-libstdc++' not in cmd:
+                        cmd.extend(['-static-libgcc', '-static-libstdc++'])
                 if has_cpp and info.gpp_path and os.path.exists(info.gpp_path):
                     return info.gpp_path
                 return info.compiler_path
@@ -362,77 +365,102 @@ class NexusMetalEngine:
 
     def run_binary(self, target_name=None, extra_args=None):
         from doxoade.rescue import activate_protocol
-
         if self.config is None:
             print(f"   {Fore.RED}✘ metalcraft.toml ausente.{self.RST}")
             return False
-
+            
         target = self._get_target(target_name)
         if not target:
             print(f"   {Fore.RED}✘ Alvo não resolvido.{self.RST}")
             return False
-
+            
         out_exe = (self.root / target['output']).resolve()
-        if os.name == 'nt' and not str(out_exe).lower().endswith(".exe"):
+        if os.name == 'nt' and not str(out_exe).lower().endswith(".exe"): 
             out_exe = Path(str(out_exe) + ".exe")
-
+            
         if not out_exe.exists():
             print(f"   {Fore.RED}✘ Binário {out_exe.name} não localizado.{self.RST}")
             return False
-
+            
         print(f"   🚀 {Style.BRIGHT}Invocando: {target['name']}{self.RST}")
         print("   " + "─" * 65)
-
+        
         full_cmd = [str(out_exe)] + (extra_args or [])
         env = os.environ.copy()
         env['PYTHONIOENCODING'] = 'utf-8'
-
+        
+        compiler_path = self._resolve_compiler([out_exe])
+        if compiler_path and os.path.exists(compiler_path):
+            c_dir = str(Path(compiler_path).parent)
+            env['PATH'] = c_dir + os.pathsep + env.get('PATH', '')
+            
         process = subprocess.Popen(
             full_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding='utf-8', errors='replace', env=env
         )
+        
         captured_output = []
-
         try:
             for line in process.stdout:
                 captured_output.append(line)
-                if any(x in line for x in ["@SOTERIA_", "TAG_", "@NEXUS_"]):
+                # Filtra ruído do Sotéria durante a execução normal para não poluir o terminal
+                if any(x in line for x in ["@SOTERIA_", "TAG_", "@NEXUS_"]): 
                     continue
                 clean = line.encode('ascii', 'ignore').decode('ascii').strip()
-                if clean:
+                if clean: 
                     print(f"      {clean}")
-
+                    
             process.wait()
             print("   " + "─" * 65)
             full_log = "".join(captured_output)
-
+            
+            # ==========================================================
+            # MA'AT — Soberania do Exit Code (Lógica Pragmática ProDeNov)
+            # ==========================================================
+            
+            # 1. Detecção de Race Condition (Diagnóstico controlado)
             if "RACE_CONDITION" in full_log:
                 race_count = full_log.count("RACE_CONDITION")
-                print(f"\n   {Fore.YELLOW}⚠️  [SENTINEL] {race_count} conflitos detectados.{self.RST}")
+                print(f"\n{Fore.YELLOW}⚠️  [SENTINEL] {race_count} conflitos detectados.{self.RST}")
                 activate_protocol(full_log)
                 return True
 
-            if "@SOTERIA_BEGIN@" in full_log or "TAG_MOTIVO:" in full_log:
-                print(f"\n   {Fore.RED}🔬 [SOTÉRIA] Crash nativo — análise forense automática{self.RST}")
+            # 2. Detecção de Crash Real (Sotéria + Exit Code != 0)
+            # Só aciona o pânico se houver tag de erro E o processo realmente falhou
+            # 2. Detecção de Crash Real (Sotéria + Exit Code != 0)
+            if process.returncode != 0 and ("@SOTERIA_BEGIN@" in full_log or "TAG_MOTIVO:" in full_log):
+                print(f"\\n{Fore.RED}🔬 [SOTÉRIA] Crash nativo — análise forense automática{self.RST}")
                 try:
                     forensic = SoteriaForensic()
                     dossier = forensic.process_pipe(full_log)
                     if dossier:
-                        print(f"\n   {Fore.CYAN}■ CAUSA: {dossier.get('explanation', 'N/A')}{self.RST}")
+                        print(f"\\n{Fore.CYAN}■ CAUSA: {dossier.get('explanation', 'N/A')}{self.RST}")
                         print(f"   {Fore.CYAN}■ ARQUIVO: {dossier.get('file', 'N/A')}:{dossier.get('line', 0)}{self.RST}")
-                except Exception:
+                except Exception: 
                     pass
                 activate_protocol(full_log, exit_code=process.returncode)
                 return False
 
-            if process.returncode != 0:
-                print(f"\n   {Fore.RED}🚨 [METAL-CRASH] Exit: {process.returncode}{self.RST}")
-                activate_protocol(full_log, exit_code=process.returncode)
-                return False
+            # 3. Detecção de Leak em Encerramento Normal (Pragmatismo ProDeNov)
+            if "TAG_MOTIVO: MEMORY_LEAK_REPORT" in full_log and process.returncode == 0:
+                print(f"\\n{Fore.YELLOW}⚠️  [SOTÉRIA] Sucesso, com aviso de recursos órfãos no encerramento.{self.RST}")
+                print(f"   {Fore.DIM}   💡 Sem TAG_LEAK_ENTRY no log: veredito sem evidência. Investigar instrumentação Sotéria.{self.RST}")
 
+            # 4. Tratamento de Exit Code genérico (Respeita o interruptor Lazarus)
+            if process.returncode != 0:
+                from doxoade.boot import load_engine_config
+                cfg = load_engine_config(self.root)
+                lazarus_ativo = cfg.get("lazarus", True) and os.environ.get("DOXOADE_RESCUE") != "0"
+                if lazarus_ativo:
+                    print(f"\n{Fore.RED}🚨 [METAL-CRASH] Exit: {process.returncode}{self.RST}")
+                    activate_protocol(full_log, exit_code=process.returncode)
+                else: 
+                    print(f"\n{Fore.YELLOW}⚠️  Execução encerrou com código {process.returncode} (Lazarus desativado).{self.RST}")
+                return False
+                
             print(f"   {Fore.GREEN}✔ Execução finalizada normalmente.{self.RST}")
             return True
-
+            
         except Exception as e:
             print(f"   {Fore.RED}✘ Falha no monitor: {e}{self.RST}")
             return False
