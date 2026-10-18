@@ -3,6 +3,7 @@
 ## Glossario:
 singular; plural com repetição ex: S. Ss.
 Sistema - S./Ss.
+Ecosistema - eco/ecos
 
 ## Desenvolvimento:
 este é o novo protocolo simplificado e sucinto de desenvolveimento do doxoade. basicamente outros protocolos são muito estenço e detalhados desnecessariamente, então protocolo Novissimo vai lidar com esta direção.
@@ -12,6 +13,7 @@ este é o novo protocolo simplificado e sucinto de desenvolveimento do doxoade. 
   0.2. Rabbit Hole: se a complexidade da API, versão e dependencia acaba trazendo um desenvolvimento demorado de features.
   0.3. Sensibilidade: Sistemas de performace podem pesar conforme as features implementadas, geralmente prog. orientada a eventos tem essa caracteristica.
   0.4. Revisitar: revisitar features para atualiza-las todo tempo por causar de outro contra tempo.
+  0.5. particularidade: sistemas podem ser solicitações naqual não podem ser identificadas facilmente, derrepende um sistema que precisa de admin e falha dando timedout é um exemplo classico no eco. windowns
 1. planejamento: o planejarmento deve se basear no contexto da implementação, ouseja Sistema operacional, ferramentas usadas no contexto, como python 3.12, e objetivo e compatibilidade.
   1.0. seguir o protocolo ProDeNov obrigatoriamente. a interpretação caso não implicita deve ser feita a decisão por parte do leitor, e a viabilidade da aplicação do protocolo pode ser questionado para critica construtiva e evoulução continua.
   1.1. faça brainstoming do que é desejado e depois analise de viabilidade, manutenção e escalabilidade posteriormente
@@ -24,9 +26,32 @@ este é o novo protocolo simplificado e sucinto de desenvolveimento do doxoade. 
     2.1.1. o comentario com o local relativo ao projeto, exemplo pratico # RAIZ/DIRETORIO/ARQUIVO.xyz . outro exemplo real: "# doxoade/commands/lite_xl_systems/template/03_tab_colors.lua"
     2.1.2. depois do anterior deve colocar o docstrings com o objetivo arquivo e especificações exemplo: """ Interface CLI para Orquestração, Diag. Forense, Verificação de Templates e Reinício. """
     2.1.3.  imports, neste sera colocado os imports que seram usados naquele arquivo.
-        2.1.3.1. obs: em database não se usa o sqlite, se delega a um arquivo para este fim por razões de segurança.
+      2.1.3.1. obs: em database não se usa o sqlite, se delega a um arquivo para este fim por razões de segurança.
     2.1.4. esboço de funções. neste sera esboçado funções, nestas sera explicado sua atividade no docstring e sera desenhado um fluxo
-    2.1.4. Integração, dependendo se já existir delegações na arquitetura existente, vai ser necessario adaptar ou adequar.
+    2.1.5. Integração, dependendo se já existir delegações na arquitetura existente, vai ser necessario adaptar ou adequar.
+    2.1.6. boundaries e Concerns: os sistemas devem ter suas responsabilidade no seus devido objetivo, e devem ser seperados, o contrario só se aplica dentro do contexo. mas é interresante que a orquestraçao faça a normalizaçao ou a priorizaçao adequada das operações que seram feitas.
+      2.1.6.1. Source Level - Componenetes internos separados; ex. classes, interfaces, e modulos.
+      2.1.6.2. Domain-Driven Design - Separação por dominio, ex. linguagem, dados, ou contexto.
+      2.1.6.3. Deploy & Runner - separações de rede por conteiners, serviços, database ou API.
+      2.1.6.4. Separation of Concerns - Modularizar partes internas de um sistema em seu campo, separar UI, Logicas e APIs.
+      2.1.6.5. Contexto, sistemas podem ter enfocos diferentes como aspecto ou concepts oriented, então o sistema deve ser analisado antes de trabalhos.
+      2.1.6.5. Outlines:
+        Matematica/calculo,
+        Algoritmos,
+        Estrutura de dados,
+        Inteligencia Artifial/Tomada de decisão automatica,
+        Network/Rede,
+        Cibersegurança,
+        Graficos,
+        Processamento,
+        Database/Preservação,
+        Linguagem/Compilação,
+        Arquiteturas,
+        Computação Cientifica/Teorica,
+        Engenharia,
+        Programação,
+        Profissão/Etica,
+        Historia/Filosofia.
 3. questões tecnicas: elaborarei sobre tecnicidades chatas aqui
   3.1. recomenda-se usar o que esta estabilicido com mais prioridade, se possivel delegue funções ao o que já existe e tem aquele fim.
     3.1.1. se existe uma lib padrão que já cumpri aquela tarefa, use-a. só não use se o escopo ou regras não permir.

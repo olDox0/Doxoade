@@ -132,64 +132,40 @@ def cmd_doc(ctx, term):
         profiler.render_hud()
 
 
-@consult_group.command("search", help="Busca por palavra-chave nos resumos de módulos locais ou docs HTML.")
+@consult_group.command("search", help="Busca unificada por palavra-chave no FTS5.")
 @click.argument("keyword", type=str)
-@click.option("--deep", "-d", is_flag=True, help="Busca profunda na documentação HTML indexada (FTS5).")
-@click.option("--md", is_flag=True, help="Emite o resultado diretamente em Markdown puro (para integração IDE).")
+@click.option("--deep", "-d", is_flag=True, help="Compatibilidade legada (busca profunda ativada por padrão).")
+@click.option("--md", is_flag=True, help="Emite o resultado diretamente em Markdown puro para a IDE.")
 @click.option("--lua", is_flag=True, help="Emite o resultado em formato de tabela Lua nativa para a IDE.")
-@click.option("--output", "-o", type=click.Path(dir_okay=False, writable=True), default=None, help="Grava o resultado diretamente no arquivo especificado em UTF-8.")
+@click.option("--output", "-o", type=click.Path(dir_okay=False, writable=True), default=None, help="Grava a saída em arquivo UTF-8.")
 @click.pass_context
 def cmd_search(ctx, keyword, deep, md, lua, output):
-    """Busca híbrida inteligente: consulta índice FTS5 e módulos locais do venv."""
     is_prof = ctx.obj.get("shadow_prof", False)
     with ShadowProfiler("consult_search", enabled=is_prof) as profiler:
-        engine = ConsultEngine()
+        from .doc_indexer import DocIndexer
         renderer = ConsultRenderer()
 
-        # 1. Tenta consulta no índice FTS5
-        fts_results = []
-        db_path = Path.home() / ".doxoade" / "consult_docs_fts5.db"
-        if db_path.exists():
-            try:
-                from .doc_indexer import DocIndexer
-                indexer = DocIndexer(db_path)
-                fts_results = indexer.search(keyword, limit=20)
-            except Exception:
-                fts_results = []
+        indexer = DocIndexer()
+        fts_results = indexer.search(keyword, limit=25)
 
-        # 2. Busca de módulos locais do Python/venv (pydoc apropos)
-        mod_results = engine.search_modules(keyword)
-
-        # 3. Emissão para a IDE Lite XL (Tabela Lua)
+        # Emissão nativa para o Doxly/Lite XL
         if lua:
             lines = [
                 "return {",
                 f'  query = "{_escape_lua_str(keyword)}",',
-                f'  total = {len(fts_results) if fts_results else len(mod_results)},',
+                f'  total = {len(fts_results)},',
                 "  results = {"
             ]
-
-            if fts_results:
-                for path, title, snippet in fts_results:
-                    clean_snip = re.sub(r'[\x02\x03]', '', str(snippet or title or ''))
-                    lines.append("    {")
-                    lines.append(f'      title = "{_escape_lua_str(str(title or path))}",')
-                    lines.append(f'      path = "{_escape_lua_str(str(path))}",')
-                    lines.append(f'      snippet = "{_escape_lua_str(clean_snip)}"')
-                    lines.append("    },")
-            else:
-                for mod_name, desc in mod_results:
-                    clean_desc = desc if desc else mod_name
-                    lines.append("    {")
-                    lines.append(f'      title = "{_escape_lua_str(mod_name)}",')
-                    lines.append(f'      path = "{_escape_lua_str(mod_name)}",')
-                    lines.append(f'      snippet = "{_escape_lua_str(clean_desc)}"')
-                    lines.append("    },")
-
+            for path, title, snippet in fts_results:
+                clean_snip = re.sub(r'[\x02\x03]', '', str(snippet or title or '')).replace("\r", "").replace("\n", " ")
+                lines.append("    {")
+                lines.append(f'      title = "{_escape_lua_str(str(title or path))}",')
+                lines.append(f'      path = "{_escape_lua_str(str(path))}",')
+                lines.append(f'      snippet = "{_escape_lua_str(clean_snip)}"')
+                lines.append("    },")
             lines.append("  }")
             lines.append("}")
             out_content = "\n".join(lines)
-
             if output:
                 out_p = Path(output)
                 out_p.parent.mkdir(parents=True, exist_ok=True)
@@ -198,14 +174,20 @@ def cmd_search(ctx, keyword, deep, md, lua, output):
                 click.echo(out_content)
             return
 
-        # 4. Emissão em Markdown (se solicitado)
         if md:
-            if fts_results:
-                from .doc_indexer import DocIndexer
-                out_content = DocIndexer(db_path).generate_search_markdown(keyword, limit=20)
-            else:
-                out_content = _format_modules_markdown(keyword, mod_results)
-
+            lines = [
+                f"# 🔍 Doxoade Consult — Resultados: `{keyword}`",
+                f"> 📊 **Encontrados:** `{len(fts_results)}` documentos relevantes",
+                "---",
+                ""
+            ]
+            for path, title, snippet in fts_results:
+                clean_snip = snippet.replace("\x02", "**`").replace("\x03", "`**").replace("\r", "")
+                lines.append(f"### 📄 {title}")
+                lines.append(f"↳ `{path}`\n")
+                lines.append(f"> {clean_snip}\n")
+                lines.append("---\n")
+            out_content = "\n".join(lines)
             if output:
                 out_p = Path(output)
                 out_p.parent.mkdir(parents=True, exist_ok=True)
@@ -214,12 +196,7 @@ def cmd_search(ctx, keyword, deep, md, lua, output):
                 click.echo(out_content)
             return
 
-        # 5. Renderização visual no terminal (Rich)
-        if deep and fts_results:
-            renderer.render_deep_search_results(keyword, fts_results)
-        elif mod_results:
-            renderer.render_search_results(keyword, mod_results)
-        elif fts_results:
+        if fts_results:
             renderer.render_deep_search_results(keyword, fts_results)
         else:
             renderer.render_error(keyword, f"Nenhum resultado encontrado para '{keyword}'.")
@@ -228,33 +205,13 @@ def cmd_search(ctx, keyword, deep, md, lua, output):
         profiler.render_hud()
 
 
-@consult_group.command("read", help="Converte e exibe um documento HTML ou docstring de módulo em Markdown puro.")
+@consult_group.command("read", help="Exibe o conteúdo integral de um documento pelo path.")
 @click.argument("doc_path", type=str)
-@click.option("--output", "-o", type=click.Path(dir_okay=False, writable=True), default=None, help="Grava o resultado diretamente no arquivo especificado em UTF-8.")
+@click.option("--output", "-o", type=click.Path(dir_okay=False, writable=True), default=None, help="Grava o resultado diretamente em arquivo UTF-8.")
 def cmd_read(doc_path, output):
-    """Lê um arquivo HTML ou docstring do objeto e gera Markdown para a IDE."""
-    md_content = None
-
-    # 1. Tenta ler via indexador de HTML
-    db_path = Path.home() / ".doxoade" / "consult_docs_fts5.db"
-    if db_path.exists():
-        try:
-            from .doc_indexer import DocIndexer
-            indexer = DocIndexer(db_path)
-            md_content = indexer.read_doc_as_markdown(doc_path)
-        except Exception:
-            md_content = None
-
-    # 2. Se não era HTML, tenta resolver como módulo ou objeto Python
-    if not md_content:
-        engine = ConsultEngine()
-        obj = engine.resolve_object(doc_path)
-        if obj:
-            doc_text = engine.get_docstring(obj)
-            src_text = engine.get_source(obj)
-            md_content = f"# 📖 `{doc_path}`\n\n```python\n{doc_text}\n```\n"
-            if src_text:
-                md_content += f"\n## 💻 Código Fonte\n\n```python\n{src_text}\n```\n"
+    from .doc_indexer import DocIndexer
+    indexer = DocIndexer()
+    md_content = indexer.read_doc_as_markdown(doc_path)
 
     if md_content:
         if output:
@@ -264,18 +221,17 @@ def cmd_read(doc_path, output):
         else:
             click.echo(md_content)
     else:
-        click.secho(f"Documento ou módulo não localizado: {doc_path}", fg="red")
+        click.secho(f"Documento não localizado no banco: {doc_path}", fg="red")
 
 
-@consult_group.command("index", help="🗃️ Indexa a documentação HTML local do Python para busca profunda (FTS5).")
-@click.option("--force", "-f", is_flag=True, help="Força a reindexação completa de todos os arquivos HTML.")
+@consult_group.command("index", help="🗃️ Indexa e unifica todas as fontes de documentação (CPython + Cheatsheet).")
+@click.option("--force", "-f", is_flag=True, help="Força a reconstrução total da base unificada.")
 @click.pass_context
 def cmd_index(ctx, force):
     is_prof = ctx.obj.get("shadow_prof", False)
     with ShadowProfiler("consult_index", enabled=is_prof) as profiler:
         from .doc_indexer import DocIndexer
-        db_path = Path.home() / ".doxoade" / "consult_docs_fts5.db"
-        indexer = DocIndexer(db_path)
+        indexer = DocIndexer()
         indexer.build_index(force=force)
     if is_prof:
         profiler.render_hud()
@@ -298,21 +254,27 @@ def cmd_symbols():
     except Exception:
         renderer.render_error("symbols", "Não foi possível carregar a lista de símbolos via pydoc.")
 
-@consult_group.command("ingest", help="📥 Indexa datasets educacionais (suporta caminho local ou URL).")
+@consult_group.command("ingest", help="📥 Indexa datasets canônicos normalizados.")
 @click.argument("source", type=str, default="cheatsheet")
-@click.option("--limit", "-l", type=int, default=0, help="Limita o número de registros (útil para testes).")
 @click.pass_context
-def cmd_ingest(ctx, source: str, limit: int):
-    """Orquestrador Zeus para ingestão automática de conhecimento."""
+def cmd_ingest(ctx, source: str):
     is_prof = ctx.obj.get("shadow_prof", False)
-    
-    # Presets de fallback (URLs públicas)
-    PRESETS = {
-        "cheatsheet": {
-            "url": "https://raw.githubusercontent.com/gto76/python-cheatsheet/main/README.md",
-            "name": "Python_Cheatsheet_MD",
-        }
-    }
+    with ShadowProfiler("consult_ingest", enabled=is_prof) as profiler:
+        if source == "cheatsheet":
+            from .cheatsheet_converter import CheatsheetConverter
+            from .canonical_db import CanonicalDB
+            
+            converter = CheatsheetConverter()
+            canonical_file = converter.process_url()
+            
+            db = CanonicalDB()
+            count = db.ingest_jsonl(canonical_file)
+            click.secho(f"\n✔ [HADES] Cheatsheet sincronizado e indexado ({count} registros)!", fg="green", bold=True)
+        else:
+            click.secho(f"Fonte '{source}' não reconhecida.", fg="red")
+            
+    if is_prof:
+        profiler.render_hud()
 
     source_path = Path(source)
     
