@@ -307,45 +307,6 @@ class TyphonDeployEngine:
             return {"success": False, "error": str(e), "backup": backup_path}
 
     @classmethod
-    def launch(cls, mode: DeployMode, exorcise: bool = True) -> Optional[int]:
-        """Lança a instância do Lite XL no ambiente e variáveis do modo escolhido."""
-        deploy_dir = cls._get_deploy_dir(mode)
-        exe = LiteXLEngine.find_executable()
-        if not exe:
-            print(f"{Fore.RED}✖ Executável do Lite XL não encontrado no sistema.{Fore.RESET}")
-            return None
-
-        if exorcise:
-            if mode == "production":
-                cls.exorcise_instances(wait_seconds=0.4)
-            else:
-                cls.exorcise_mode_instance(mode)
-
-        env = os.environ.copy()
-        env["LITE_USERDIR"] = str(deploy_dir)
-        env["XDG_CONFIG_HOME"] = str(deploy_dir.parent)
-        env["DOXOADE_DEPLOY_MODE"] = mode
-
-        CREATE_NEW_CONSOLE = 0x00000010 if sys.platform == "win32" else 0
-        project_dir = os.getcwd()
-
-        try:
-            proc = subprocess.Popen(
-                [str(exe), project_dir],
-                env=env,
-                creationflags=CREATE_NEW_CONSOLE,
-                close_fds=(sys.platform != "win32"),
-            )
-            pid = proc.pid
-            pid_file = deploy_dir / f".{mode}.pid"
-            pid_file.write_text(str(pid), encoding="utf-8")
-            print(f"{Fore.GREEN}✔ Instância Lite XL lançada [{mode.upper()}] (PID: {pid}){Fore.RESET}")
-            return pid
-        except Exception as e:
-            print(f"{Fore.RED}✖ Falha ao lançar processo: {e}{Fore.RESET}")
-            return None
-
-    @classmethod
     def print_status(cls, target_mode: Optional[DeployMode] = None) -> None:
         """Exibe o diagnóstico e integridade de todos os modos de deploy."""
         modes: list[DeployMode] = [target_mode] if target_mode else ["production", "sandbox", "test"]
@@ -481,41 +442,44 @@ class TyphonDeployEngine:
     # 🧪 LANÇAMENTO COM ISOLAMENTO
     # ═══════════════════════════════════════════════════════════
     @classmethod
-    def launch(cls, mode: DeployMode = "production", exorcise: bool = True) -> bool:
-        """Lança o Lite XL no modo especificado preservando as outras instâncias."""
+    def launch(cls, mode: DeployMode = "production", exorcise: bool = True) -> Optional[int]:
+        """Lança a instância do Lite XL de forma limpa, estável e isolada."""
         if exorcise:
             if mode == "production":
-                cls.exorcise_instances()
+                cls.exorcise_instances(wait_seconds=0.4)
             else:
                 cls.exorcise_mode_instance(mode)
-            time.sleep(0.6)
+            time.sleep(0.4)
+
         exe = LiteXLEngine.find_executable()
         if not exe:
-            print(f"{Fore.RED}✖ Executável do Lite XL não encontrado.{Fore.RESET}")
-            return False
+            print(f"{Fore.RED}✖ Executável do Lite XL não encontrado no sistema.{Fore.RESET}")
+            return None
+
         deploy_dir = cls._get_deploy_dir(mode)
+
         env = os.environ.copy()
         if mode != "production":
             env["LITE_USERDIR"] = str(deploy_dir)
             env["XDG_CONFIG_HOME"] = str(deploy_dir.parent)
+        env["DOXOADE_DEPLOY_MODE"] = mode
+
         CREATE_NEW_CONSOLE = 0x00000010 if sys.platform == "win32" else 0
+
         try:
             proc = subprocess.Popen(
-                  [str(exe), "--userdir", str(deploy_dir)],
-                  env=env,
-                  creationflags=CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
+                [str(exe), "--userdir", str(deploy_dir)],
+                env=env,
+                creationflags=CREATE_NEW_CONSOLE,
             )
-            # (deploy_dir / f".{mode}.pid").write_text(str(proc.pid))
-            # print(f"{Fore.GREEN}✔ Lite XL ({mode.upper()}) iniciado com sucesso (PID: {proc.pid}){Fore.RESET}")
-            # return True
+            pid = proc.pid
             pid_file = deploy_dir / f".{mode}.pid"
-            pid_file.write_text(str(proc.pid), encoding="utf-8")
-            
-            print(f"{Fore.CYAN}🚀 Lite XL ({mode.upper()}) iniciado com sucesso (PID: {proc.pid}){Fore.RESET}")
-            return proc.pid  # <--- ADICIONE ESTE RETORNO
+            pid_file.write_text(str(pid), encoding="utf-8")
+            print(f"{Fore.CYAN}🚀 Lite XL ({mode.upper()}) iniciado com sucesso (PID: {pid}){Fore.RESET}")
+            return pid
         except Exception as e:
             print(f"{Fore.RED}✖ Falha ao lançar processo: {e}{Fore.RESET}")
-            return False
+            return None
 
     # ═══════════════════════════════════════════════════════════
     # 📊 STATUS E DIAGNÓSTICO

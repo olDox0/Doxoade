@@ -62,7 +62,6 @@ def cmd_deploy_sandbox(launch, exorcise):
 @click.option("--harvest/--no-harvest", default=True, help="Ativa o Forensic Harvester automático.")
 @click.option("--no-khonsu", is_flag=True, default=False, help="Desativa o compilador Khonsu AOT (gera init.lua em texto puro).")
 def cmd_deploy_test(launch, exorcise, harvest, no_khonsu):
-    """Deploy de teste com telemetria forense e launch automático."""
     print(f"\n{Fore.YELLOW}{Style.BRIGHT}🟡 DEPLOY TEST{Style.RESET_ALL}\n")
     result = TyphonDeployEngine.deploy("test", no_khonsu=no_khonsu)
     if result["success"]:

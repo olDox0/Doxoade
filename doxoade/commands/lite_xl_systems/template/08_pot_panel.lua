@@ -303,6 +303,9 @@ function ConsultSearchView:on_mouse_moved(px, py, dx, dy)
   if prev ~= self.hovered_idx then core.redraw = true end
 end
 
+-- =============================================================================
+-- 4. AJUSTE DE MOUSE: Trava contra clique duplo concorrente
+-- =============================================================================
 function ConsultSearchView:on_mouse_pressed(button, px, py, clicks)
   local scrollbar_w = (style.scrollbar_size or 8) + 6
   if px >= (self.position.x + self.size.x - scrollbar_w) then
@@ -310,6 +313,7 @@ function ConsultSearchView:on_mouse_pressed(button, px, py, clicks)
   end
 
   if button == "left" and self.hovered_idx then
+    if self.is_loading_doc then return true end -- Trava reentrância
     self.selected_idx = self.hovered_idx
     self:open_selected(self.hovered_idx)
     return true
@@ -317,9 +321,6 @@ function ConsultSearchView:on_mouse_pressed(button, px, py, clicks)
   return ConsultSearchView.super.on_mouse_pressed(self, button, px, py, clicks)
 end
 
--- =============================================================================
--- 4. CONSULT DOC READER VIEW (Com Isolamento de Scroll, Tracking de Cores & Raw)
--- =============================================================================
 local ConsultDocReaderView = View:extend()
 
 function ConsultDocReaderView:new(title, doc_path, md_lines, parent_search_view)
@@ -340,6 +341,45 @@ function ConsultDocReaderView:new(title, doc_path, md_lines, parent_search_view)
   self.is_selecting = false
   self.sel_start_line = nil
   self.sel_end_line = nil
+end
+
+local function wrap_line(line, width)
+  local parts = {}
+  while #line > width do
+    local seg, cut = line:sub(1, width), nil
+    for i = width, 1, -1 do
+      if seg:sub(i, i) == " " then cut = i break end
+    end
+    cut = cut or width
+    parts[#parts + 1] = line:sub(1, cut)
+    line = line:sub(cut + 1):gsub("^%s+", "")
+  end
+  parts[#parts + 1] = line
+  return parts
+end
+
+function ConsultDocReaderView:reflow()
+  local char_w = 7 -- largura média do glifo mono; ajuste p/ renderer.font:get_width("x")
+  local cols = math.max(40, math.floor((self.size.x - 24) / char_w))
+  if self._rf_cols == cols and self._rf_n == #self.md_lines then return end
+  self._rf_cols, self._rf_n = cols, #self.md_lines
+
+  local view, in_code = {}, false
+  for _, raw in ipairs(self.md_lines) do
+    local is_fence = raw:match("^%s*```") ~= nil
+    local state = is_fence and true or in_code
+    local pieces = (#raw > cols) and wrap_line(raw, cols) or { raw }
+    for i, p in ipairs(pieces) do
+      view[#view + 1] = { text = p, cont = (i > 1), code = state }
+    end
+    if is_fence then in_code = not in_code end
+  end
+  self.view_lines = view
+end
+
+function ConsultDocReaderView:get_scrollable_size()
+  self:reflow()
+  return (#self.view_lines + 1) * self.line_height
 end
 
 function ConsultDocReaderView:generate_raw_lines(source_lines)
@@ -589,110 +629,96 @@ function ConsultDocReaderView:on_mouse_released(button, px, py)
 end
 
 -- =============================================================================
--- 5. TRANSIÇÃO: ABERTURA DO DOCUMENTO NO LEITOR
+-- 5. TRANSIÇÃO: ABERTURA DO DOCUMENTO NO LEITOR (SQLite Direto < 30ms)
 -- =============================================================================
 function ConsultSearchView:open_selected(idx)
   local item = self.results[idx]
   if not item or not item.path then return end
+  if self.is_loading_doc then return end
+  self.is_loading_doc = true
 
   local py_exe = get_doxoade_python_exe()
-  local user_dir = USERDIR or "."
-  local sep = PATHSEP or "/"
-  local doxoade_dir = user_dir .. sep .. ".doxoade"
-  
-  ensure_dir(doxoade_dir)
+  local udir = USERDIR or "."
+  local p_sep = PATHSEP or "/"
+  local doxoade_dir = udir .. p_sep .. ".doxoade"
 
-  local out_md = doxoade_dir .. sep .. "consult_active_doc.md"
-  local runner_py = doxoade_dir .. sep .. "run_read.py"
-  local err_log = doxoade_dir .. sep .. "read_error.log"
-  local target_path = item.path
-
-  pcall(os.remove, out_md)
-  pcall(os.remove, runner_py)
-  pcall(os.remove, err_log)
-
-  core.log(string.format("📄 [CONSULT READ] Solicitando leitura de: '%s' (%s)", tostring(item.title), target_path))
-  core.log(string.format("🐍 [CONSULT READ] Interpretador: %s", py_exe))
-
-  -- Script Python autônomo para extração instantânea do Markdown (HTML ou Docstring)
-  local f_run = io.open(runner_py, "w")
-  if f_run then
-    f_run:write(string.format([[
-import sys
-from pathlib import Path
-
-doc_path = %q
-out_path = Path(%q)
-err_path = Path(%q)
-db_path = Path.home() / ".doxoade" / "consult_docs_fts5.db"
-
-md_content = None
-
-# 1. Tenta converter HTML indexado
-if db_path.exists():
-    try:
-        from doxoade.commands.consult_systems.doc_indexer import DocIndexer
-        indexer = DocIndexer(db_path)
-        md_content = indexer.read_doc_as_markdown(doc_path)
-    except Exception as e:
-        err_path.write_text(f"Erro no DocIndexer: {e}\n", encoding="utf-8")
-
-# 2. Se não era HTML, tenta resolver como módulo Python do venv
-if not md_content:
-    try:
-        from doxoade.commands.consult_systems.consult_engine import ConsultEngine
-        engine = ConsultEngine()
-        obj = engine.resolve_object(doc_path)
-        if obj:
-            doc_text = engine.get_docstring(obj)
-            src_text = engine.get_source(obj)
-            md_content = f"# 📖 `{doc_path}`\n\n```python\n{doc_text}\n```\n"
-            if src_text:
-                md_content += f"\n## 💻 Código Fonte\n\n```python\n{src_text}\n```\n"
-    except Exception as e:
-        err_path.write_text(f"Erro no ConsultEngine: {e}\n", encoding="utf-8")
-
-if not md_content:
-    md_content = f"# ⚠️ Não foi possível carregar `{doc_path}`\n\nDocumentação não localizada no índice local."
-
-out_path.parent.mkdir(parents=True, exist_ok=True)
-out_path.write_text(md_content, encoding="utf-8")
-]], target_path, out_md, err_log))
-    f_run:close()
+  if system and system.mkdir then
+    local clean = tostring(doxoade_dir):gsub("/", "\\")
+    local sub = ""
+    for part in clean:gmatch("[^\\]+") do
+      if sub == "" and part:find("^[a-zA-Z]:") then sub = part
+      else sub = (sub == "" and "" or sub .. "\\") .. part; pcall(system.mkdir, sub) end
+    end
   end
 
+  local out_md_win  = (doxoade_dir .. p_sep .. "consult_active_doc.md"):gsub("/", "\\")
+  local out_md_py   = out_md_win:gsub("\\", "/")
+  local runner_py   = (doxoade_dir .. p_sep .. "run_read.py"):gsub("/", "\\")
+  local target_path = item.path
+
+  pcall(os.remove, out_md_win)
+  pcall(os.remove, runner_py)
+
+  core.log(string.format("📄 [CONSULT READ] Abrindo: '%s'", tostring(item.title)))
+
+  local f_run = io.open(runner_py, "w")
+  if not f_run then
+    self.is_loading_doc = false
+    return
+  end
+
+  local script_content = string.format([=[# -*- coding: utf-8 -*-
+import sqlite3
+from pathlib import Path
+
+db_path = Path.home() / ".doxoade" / "consult_docs_fts5.db"
+doc_path = %q
+out_path = Path(%q)
+
+conn = sqlite3.connect(str(db_path), timeout=5.0)
+row = conn.execute("SELECT title, content FROM docs WHERE path = ? LIMIT 1;", (doc_path,)).fetchone()
+conn.close()
+
+if row and row[1]:
+    title, content = row
+    md = content if content.strip().startswith("#") else f"# 📖 {title}\n\n{content}\n"
+else:
+    md = "# ⚠️ Documento não localizado no banco."
+
+out_path.parent.mkdir(parents=True, exist_ok=True)
+out_path.write_text(md, encoding="utf-8")
+]=], target_path, out_md_py)
+
+  f_run:write(script_content)
+  f_run:close()
+
   local t0 = os.clock()
-  system.exec(string.format('"%s" "%s"', py_exe, runner_py))
+  local exec_cmd = string.format('"%s" "%s"', py_exe, runner_py)
+  system.exec(exec_cmd)
 
   local search_view = self
   core.add_thread(function()
     local found = false
-    local final_size = 0
-    for _ = 1, 60 do
-      coroutine.yield(0.1)
-      local info = system.get_file_info(out_md)
+    for _ = 1, 100 do
+      coroutine.yield(0.05)
+      -- 1. Monitora o arquivo Markdown correto
+      local info = system.get_file_info(out_md_win)
       if info and (info.size or 0) > 10 then
         found = true
-        final_size = info.size
         break
       end
     end
 
+    search_view.is_loading_doc = false
     local elapsed_ms = math.floor((os.clock() - t0) * 1000)
 
     if not found then
-      local err_msg = "Timeout ao gerar Markdown."
-      local ef = io.open(err_log, "r")
-      if ef then
-        err_msg = ef:read("*a") or err_msg
-        ef:close()
-      end
-      core.log(string.format("❌ [CONSULT READ] Falha após %dms: %s", elapsed_ms, err_msg:sub(1, 120)))
+      core.log(string.format("❌ [CONSULT READ] Timeout ao abrir documento (%dms).", elapsed_ms))
       return
     end
 
     local md_lines = {}
-    local f = io.open(out_md, "r")
+    local f = io.open(out_md_win, "r")
     if f then
       for line in f:lines() do
         table.insert(md_lines, line)
@@ -700,16 +726,15 @@ out_path.write_text(md_content, encoding="utf-8")
       f:close()
     end
 
-    core.log(string.format("✔ [CONSULT READ] Sucesso em %dms! (%d bytes | %d linhas)",
-      elapsed_ms, final_size, #md_lines))
-
+    core.log(string.format("✔ [CONSULT READ] Sucesso em %dms! (%d linhas)", elapsed_ms, #md_lines))
+    -- 2. Abre o leitor Markdown dedicado
     local reader = ConsultDocReaderView(item.title, item.path, md_lines, search_view)
-    open_in_right_panel(reader, string.format("📖 %s (%d linhas)", item.title:sub(1, 25), #md_lines))
+    open_in_right_panel(reader, string.format("📖 %s", item.title:sub(1, 25)))
   end)
 end
 
 -- =============================================================================
--- 6. ORQUESTRAÇÃO DE BUSCA E COMANDOS
+-- 6. ORQUESTRAÇÃO DE BUSCA ULTRA-RÁPIDA (SQLite FTS5 Direto < 50ms)
 -- =============================================================================
 local function ensure_dir(dir_path)
   if not system or not system.mkdir then return end
@@ -727,98 +752,95 @@ end
 
 local function execute_docs_search_interactive(query)
   if not query or query:match("^%s*$") then return end
+  
   local py_exe = get_doxoade_python_exe()
-  local user_dir = USERDIR or "."
-  local sep = PATHSEP or "/"
-  local doxoade_dir = user_dir .. sep .. ".doxoade"
+  local udir = USERDIR or "."
+  local p_sep = PATHSEP or "/"
+  local doxoade_dir = udir .. p_sep .. ".doxoade"
 
-  ensure_dir(doxoade_dir)
+  if system and system.mkdir then
+    local clean = tostring(doxoade_dir):gsub("/", "\\")
+    local sub = ""
+    for part in clean:gmatch("[^\\]+") do
+      if sub == "" and part:find("^[a-zA-Z]:") then sub = part
+      else sub = (sub == "" and "" or sub .. "\\") .. part; pcall(system.mkdir, sub) end
+    end
+  end
 
-  local out_file = doxoade_dir .. sep .. "consult_search.lua"
-  local runner_py = doxoade_dir .. sep .. "run_consult.py"
-  pcall(os.remove, out_file)
+  local out_file_win = (doxoade_dir .. p_sep .. "consult_search.lua"):gsub("/", "\\")
+  local out_file_py  = out_file_win:gsub("\\", "/")
+  local runner_py    = (doxoade_dir .. p_sep .. "run_consult.py"):gsub("/", "\\")
+
+  pcall(os.remove, out_file_win)
   pcall(os.remove, runner_py)
 
-  core.log(string.format("🔍 Consultando docs: '%s'...", query))
-  core.log(string.format("🐍 [CONSULT] Interpretador: %s", py_exe))
-
-  -- Script Python autônomo: consulta diretamente o FTS5 e grava a tabela Lua em 50ms
   local f_run = io.open(runner_py, "w")
-  if f_run then
-    f_run:write(string.format([[
-import re
+  if not f_run then return end
+
+  -- Script Python Otimizado (Sem telemetria de disco excessiva)
+  local script_content = string.format([=[# -*- coding: utf-8 -*-
+import sqlite3, re
 from pathlib import Path
 
+db_path = Path.home() / ".doxoade" / "consult_docs_fts5.db"
 query = %q
 out_path = Path(%q)
-db_path = Path.home() / ".doxoade" / "consult_docs_fts5.db"
 
-results = []
-if db_path.exists():
-    try:
-        from doxoade.commands.consult_systems.doc_indexer import DocIndexer
-        results = DocIndexer(db_path).search(query, limit=20)
-    except Exception:
-        results = []
+try:
+    conn = sqlite3.connect(str(db_path), timeout=15.0)
+    clean_q = re.sub(r'[^\w\s]', ' ', query).strip()
+    tokens = clean_q.split()
+    fts_query = " OR ".join([f'"{tok}"*' for tok in tokens])
+    
+    sql = """
+        SELECT path, title, snippet(docs_fts, 3, '\x02', '\x03', '...', 18)
+        FROM docs_fts WHERE docs_fts MATCH ? ORDER BY rank LIMIT 25;
+    """
+    results = conn.execute(sql, (fts_query,)).fetchall()
+    conn.close()
+except Exception:
+    results = []
 
-if not results:
-    try:
-        from doxoade.commands.consult_systems.consult_engine import ConsultEngine
-        mod_results = ConsultEngine().search_modules(query)
-        results = [(m, m, desc or m) for m, desc in mod_results]
-    except Exception:
-        results = []
+def clean_lua_str(s):
+    if not s: return ""
+    clean = str(s).replace("\r", "").replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
+    return re.sub(r'[\x00-\x1f\x7f-\x9f]', '', clean)
 
-lines = [
-    "return {",
-    f'  query = "{query}",',
-    f'  total = {len(results)},',
-    '  results = {'
-]
-
+lines = ["return {", f'  query = "{clean_lua_str(query)}",', f'  total = {len(results)},', '  results = {']
 for path, title, snippet in results:
-    clean_snip = re.sub(r'[\x02\x03]', '', str(snippet or title)).replace('\\', '\\\\').replace('"', '\\"').replace('\n', ' ')
-    clean_title = str(title).replace('\\', '\\\\').replace('"', '\\"')
-    clean_path = str(path).replace('\\', '\\\\').replace('"', '\\"')
     lines.append('    {')
-    lines.append(f'      title = "{clean_title}",')
-    lines.append(f'      path = "{clean_path}",')
-    lines.append(f'      snippet = "{clean_snip}"')
+    lines.append(f'      title = "{clean_lua_str(title)}",')
+    lines.append(f'      path = "{clean_lua_str(path)}",')
+    lines.append(f'      snippet = "{clean_lua_str(snippet or title)}"')
     lines.append('    },')
-
-lines.append('  }')
-lines.append('}')
+lines.extend(['  }', '}'])
 
 out_path.parent.mkdir(parents=True, exist_ok=True)
 out_path.write_text('\n'.join(lines), encoding="utf-8")
-]], query, out_file))
-    f_run:close()
-  end
+]=], query, out_file_py)
 
-  -- Executa diretamente o script Python sem depender de Click ou console
-  system.exec(string.format('"%s" "%s"', py_exe, runner_py))
+  f_run:write(script_content)
+  f_run:close()
+
+  -- 🎯 CHAMADA DIRETA (Agora funciona pois o Lite XL é Admin)
+  local exec_cmd = string.format('"%s" "%s"', py_exe, runner_py)
+  system.exec(exec_cmd)
 
   core.add_thread(function()
-    local found = false
-    for _ = 1, 50 do
-      coroutine.yield(0.1)
-      local info = system.get_file_info(out_file)
+    local t0 = os.clock()
+    for _ = 1, 100 do -- 5 segundos de tolerância
+      coroutine.yield(0.05)
+      local info = system.get_file_info(out_file_win)
       if info and (info.size or 0) > 10 then
-        found = true
-        break
-      end
-    end
-
-    if found then
-      local ok, data = pcall(dofile, out_file)
-      if ok and type(data) == "table" and data.results then
-        open_in_right_panel(ConsultSearchView(query, data),
-          string.format("✔ %d resultado(s) para %q.", data.total or #data.results, query))
+        local ok, data = pcall(dofile, out_file_win)
+        if ok and type(data) == "table" and data.results then
+          local elapsed_ms = math.floor((os.clock() - t0) * 1000)
+          open_in_right_panel(ConsultSearchView(query, data),
+            string.format("✔ %d resultado(s) em %dms.", data.total or #data.results, elapsed_ms))
+        end
         return
       end
     end
-
-    core.log("⚠️ Nenhum resultado encontrado para a pesquisa.")
   end)
 end
 
