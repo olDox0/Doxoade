@@ -37,7 +37,7 @@ DOXOADE_GLOBAL_DIR = Path.home() / ".doxoade"
 DB_DIR = GLOBAL_DATA_DIR
 DB_FILE = GLOBAL_DB_FILE
 
-DB_VERSION = 134
+DB_VERSION = 135
 _CACHED_DB_PATH = None
 _LOG_QUEUE = None
 
@@ -101,7 +101,19 @@ def _m_v1_v3_core(cursor):
 
 def _m_v4_v9_incidents(cursor):
     """Dívida Técnica: Tabela de Incidentes Abertos."""
-    cursor.execute("\n    CREATE TABLE IF NOT EXISTS open_incidents (\n        finding_hash TEXT PRIMARY KEY, file_path TEXT NOT NULL,\n        commit_hash TEXT NOT NULL, timestamp TEXT NOT NULL,\n        project_path TEXT NOT NULL DEFAULT '', message TEXT NOT NULL DEFAULT '',\n        line INTEGER, category TEXT\n    );")
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS open_incidents (
+            finding_hash TEXT PRIMARY KEY,
+            file_path TEXT NOT NULL,
+            commit_hash TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            project_path TEXT NOT NULL DEFAULT '',
+            message TEXT NOT NULL DEFAULT '',
+            line INTEGER,
+            severity TEXT DEFAULT 'WARNING',
+            category TEXT
+        );
+    """)
 
 def _m_v10_v14_genesis(cursor):
     """Projeto Gênese: IA Simbólica e Templates."""
@@ -233,13 +245,19 @@ def _m_v134_incident_schema_repair(cursor):
 
 def _apply_incremental_patches(cursor, current_version):
     """Aplica alterações de colunas em tabelas existentes (Resiliência)."""
-    alterations = [(2, 'ALTER TABLE findings ADD COLUMN category TEXT;'), (6, "ALTER TABLE solutions ADD COLUMN message TEXT NOT NULL DEFAULT '';"), (12, 'ALTER TABLE open_incidents ADD COLUMN category TEXT;')]
+    alterations = [
+        (2, 'ALTER TABLE findings ADD COLUMN category TEXT;'),
+        (6, "ALTER TABLE solutions ADD COLUMN message TEXT NOT NULL DEFAULT '';"),
+        (12, 'ALTER TABLE open_incidents ADD COLUMN category TEXT;'),
+        # [FIX] Adiciona severity a DBs existentes que não tinham a coluna
+        (135, "ALTER TABLE open_incidents ADD COLUMN severity TEXT DEFAULT 'WARNING';"),
+    ]
     for ver, sql in alterations:
         if current_version < ver:
             try:
                 cursor.execute(sql)
             except sqlite3.OperationalError:
-                pass
+                pass  # coluna já existe ou tabela não existe ainda — silencioso
 
 def _log_execution(command_name, path, results, arguments, execution_time_ms, exit_code=0):
     start_persistence_worker()
@@ -312,9 +330,9 @@ def init_db():
             _m_v134_incident_schema_repair(cursor)
             
             # Sela a versão atual base
-            cursor.execute("UPDATE schema_version SET version = 134")
+            cursor.execute("UPDATE schema_version SET version = 135")
             conn.commit()
-            current_version = 134
+            current_version = 135
         else:
             # BANCO EXISTENTE: Lê a versão para saber se precisa de patches
             current_version = row[0]

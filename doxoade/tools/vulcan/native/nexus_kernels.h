@@ -15,6 +15,7 @@
 
 uint64_t nexus_asm_crc32(const uint8_t* buf, int64_t len);
 int64_t nexus_asm_search_char(const uint8_t* buf, int64_t len, int64_t target);
+double nexus_asm_cmov_double(long long selector, double val_true, double val_false);
 
 static inline int64_t nexus_asm_vec_search(const uint8_t* buf, int64_t len, int64_t target) {
     if (!buf || len <= 0) return -1;
