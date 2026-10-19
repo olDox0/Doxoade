@@ -158,7 +158,7 @@ def _forge_to_pyx(task: dict) -> dict:
         sys.stdout.flush()
 
         # 4. Forja do Código Nativo (Tier 1)
-        forge = VForge(str(abs_path))
+        forge = VForge(str(abs_path), env_root=task.get('project_root', ''))
         pyx_code = forge.generate_source(str(abs_path))
         
         if not pyx_code:

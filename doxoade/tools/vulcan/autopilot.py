@@ -63,7 +63,7 @@ def _forge_worker(task: dict) -> dict:
     try:
         sys.stdout.write(f'   [VULCAN:FORGE] {abs_path.name}...\n')
         sys.stdout.flush()
-        forge = VulcanForge(str(abs_path))
+        forge = VulcanForge(str(abs_path), env_root=project_root)
         pyx_code = forge.generate_source(str(abs_path))
         if not pyx_code:
             return {'name': abs_path.name, 'ok': False, 'err': 'pyx_code vazio'}
