@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/consult_systems/cheatsheet_converter.py
 """
-Conversor Canônico para Python Cheatsheet v3.5 (Suporte a ATX e Setext Headings).
-Reconhece cabeçalhos sublinhados (---- e ====) e cerquilhas (###), eliminando vazamentos de código.
+Conversor Canônico para Python Cheatsheet v4.0 (Capítulos Completos sem Fragmentação).
+Preserva todos os subtópicos (###) no mesmo artigo para manter a dinâmica de estudo contínua.
 """
 from __future__ import annotations
 import os
@@ -34,7 +34,7 @@ class CheatsheetConverter:
         code_blocks = re.findall(r'```(?:python|py)?(.*?)```', content, re.DOTALL)
         for block in code_blocks:
             identifiers = re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]{2,}\b', block)
-            raw_words.extend(identifiers[:30])
+            raw_words.extend(identifiers[:40])
 
         ignore = {'def', 'class', 'import', 'from', 'return', 'self', 'true', 'false', 'none', 'and', 'for', 'in', 'with', 'open'}
         unique = []
@@ -42,7 +42,7 @@ class CheatsheetConverter:
             wl = w.lower()
             if wl not in ignore and wl not in unique:
                 unique.append(wl)
-        return " ".join(unique[:35])
+        return " ".join(unique[:50])
 
     def convert_text(self, markdown_text: str) -> List[Dict[str, Any]]:
         lines = markdown_text.splitlines()
@@ -50,8 +50,7 @@ class CheatsheetConverter:
 
         in_code_block = False
         current_h1 = "Python Cheatsheet"
-        current_h2 = ""
-        current_h3 = ""
+        current_chapter = ""
         buffer: List[str] = []
 
         def flush_buffer():
@@ -60,28 +59,19 @@ class CheatsheetConverter:
             body = "\n".join(buffer).strip()
             buffer.clear()
 
-            # Descarta sumários e links de navegação pura
-            if len(body) < 40 or (body.count('[') > 12 and body.count('](#') > 6):
+            # Descarta sumários de links (TOC) e blocos vazios
+            if len(body) < 50 or (body.count('[') > 15 and body.count('](#') > 8):
                 return
 
-            if current_h2 and current_h3:
-                title = f"{current_h1} — {current_h2} > {current_h3}"
-                slug = self._slugify(f"{current_h2}_{current_h3}")
-            elif current_h2:
-                title = f"{current_h1} — {current_h2}"
-                slug = self._slugify(current_h2)
-            elif current_h3:
-                title = f"{current_h1} — {current_h3}"
-                slug = self._slugify(current_h3)
-            else:
-                title = current_h1
-                slug = "geral"
+            chapter_name = current_chapter or "Geral"
+            title = f"{current_h1} — {chapter_name}"
+            slug = self._slugify(chapter_name)
 
             uid = f"python/cheatsheet/{slug}"
             keywords = self._extract_keywords(title, body)
 
-            # Adiciona cabeçalho amigável no topo do markdown
-            full_content = f"# 📖 {title}\n\n{body}"
+            # Cabeçalho único e elegante no topo do capítulo
+            full_content = f"# 📖 {title}\n\n{body}\n"
 
             records.append({
                 "uid": uid,
@@ -99,7 +89,7 @@ class CheatsheetConverter:
             line = lines[i]
             stripped = line.strip()
 
-            # Rastreia blocos de código (para ignorar comentários '#' dentro de código)
+            # Preserva blocos de código com comentários
             if stripped.startswith("```"):
                 in_code_block = not in_code_block
                 buffer.append(line)
@@ -111,39 +101,34 @@ class CheatsheetConverter:
                 i += 1
                 continue
 
-            # 1. Detecção de Cabeçalho Setext (Texto sublinhado com '---' ou '===')
+            # 1. Detecção de Cabeçalho Setext (ex: 'JSON\n----' ou 'Class\n-----')
             if i + 1 < total_lines and stripped and not stripped.startswith('#') and not stripped.startswith('`'):
                 next_line = lines[i + 1].strip()
                 if re.match(r'^={3,}\s*$', next_line):
                     flush_buffer()
                     current_h1 = stripped
-                    current_h2 = ""
-                    current_h3 = ""
+                    current_chapter = ""
                     i += 2
                     continue
                 elif re.match(r'^-{3,}\s*$', next_line):
                     flush_buffer()
-                    current_h2 = stripped
-                    current_h3 = ""
+                    current_chapter = stripped
                     i += 2
                     continue
 
-            # 2. Detecção de Cabeçalho ATX ('#', '##', '###')
-            if stripped.startswith('#'):
-                m = re.match(r'^(#{1,3})\s+(.+)$', stripped)
+            # 2. Detecção de Cabeçalho ATX (# e ##).
+            # ATENÇÃO: Os '###' NÃO sofrem flush! Eles viram subseções no mesmo artigo!
+            if stripped.startswith('# ') or stripped.startswith('## '):
+                m = re.match(r'^(#{1,2})\s+(.+)$', stripped)
                 if m:
                     level = len(m.group(1))
                     header_text = re.sub(r'^\d+[\.\)]\s*', '', m.group(2).strip())
                     flush_buffer()
                     if level == 1:
                         current_h1 = header_text or "Python Cheatsheet"
-                        current_h2 = ""
-                        current_h3 = ""
+                        current_chapter = ""
                     elif level == 2:
-                        current_h2 = header_text
-                        current_h3 = ""
-                    elif level == 3:
-                        current_h3 = header_text
+                        current_chapter = header_text
                     i += 1
                     continue
 
@@ -155,14 +140,14 @@ class CheatsheetConverter:
 
     def process_url(self, url: str = DEFAULT_URL) -> Path:
         print(f"[*] Baixando fonte bruta: {url}")
-        req = urllib.request.Request(url, headers={'User-Agent': 'Doxoade-Converter/3.5'})
+        req = urllib.request.Request(url, headers={'User-Agent': 'Doxoade-Converter/4.0'})
         with urllib.request.urlopen(req, timeout=30) as resp:
             raw_text = resp.read().decode('utf-8', errors='replace')
 
-        print(f"[*] Convertendo Markdown híbrido (ATX + Setext: {len(raw_text) / 1024:.1f} KB)...")
+        print(f"[*] Convertendo em capítulos completos ({len(raw_text) / 1024:.1f} KB)...")
         records = self.convert_text(raw_text)
 
-        print(f"[*] Gravando {len(records)} seções estruturadas em: {self.output_file}")
+        print(f"[*] Gravando {len(records)} capítulos integrais em: {self.output_file}")
         with open(self.output_file, 'w', encoding='utf-8') as f:
             for rec in records:
                 f.write(json.dumps(rec, ensure_ascii=False) + '\n')

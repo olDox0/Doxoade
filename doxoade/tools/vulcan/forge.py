@@ -123,7 +123,10 @@ class BodyPurityScanner(ast.NodeVisitor):
         )
 
     def visit_Constant(self, node):
-        # Se houver qualquer string ou valor que não seja um número, exige GIL
+        # [FIX] Qualquer retorno sob nogil não pode ser objeto Python.
+        # Em Cython nogil, retornar Python int/float é ilegal.
+        # Só podemos retornar tipos C puros. Se o corpo não tem 'return',
+        # é ok — mas se tem, o 'is_pure_c' deve ser reavaliado no visit_Return.
         if isinstance(node.value, (str, bytes, dict, list, tuple)):
             self.is_pure_c = False
         self.generic_visit(node)
@@ -155,10 +158,13 @@ class BodyPurityScanner(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Return(self, node):
-        # Se retornar algo que não seja um número simples, exige GIL
-        if node.value and not isinstance(node.value, ast.Num):
-            if not (isinstance(node.value, ast.Constant) and isinstance(node.value.value, (int, float))):
-                self.is_pure_c = False
+        # [FIX] Verifica se retorna Python object (Constant, Name, Call, etc)
+        if node.value is not None:
+            # Retornar qualquer coisa em Python é um objeto Python,
+            # EXCETO se o compilador Cython conseguir inferir tipo C.
+            # Como BodyPurityScanner é conservador, marcamos False
+            # sempre que houver retorno não-void sob nogil.
+            self.is_pure_c = False
         self.generic_visit(node)
 
     def get_purity_report(self):
@@ -188,16 +194,30 @@ class VulcanAutoTyper(ast.NodeVisitor):
         args = {arg.arg for arg in node.args.args}
         if node.args.vararg: args.add(node.args.vararg.arg)
         if node.args.kwarg: args.add(node.args.kwarg.arg)
-        
-        promoted = {} 
+
+        # [FIX] Coleta nomes já existentes no corpo da função
+        existing_locals = set()
+        for child in ast.walk(node):
+            if isinstance(child, ast.Assign):
+                for target in child.targets:
+                    if isinstance(target, ast.Name):
+                        existing_locals.add(target.id)
+            elif isinstance(child, ast.AugAssign) and isinstance(child.target, ast.Name):
+                existing_locals.add(child.target.id)
+            elif isinstance(child, ast.For) and isinstance(child.target, ast.Name):
+                existing_locals.add(child.target.id)
+
+        promoted = {}
         for child in ast.walk(node):
             if isinstance(child, ast.For) and isinstance(child.target, ast.Name):
                 var = child.target.id
-                is_range = (isinstance(child.iter, ast.Call) and 
-                            getattr(child.iter.func, 'id', '') == 'range')
+                is_range = (isinstance(child.iter, ast.Call) and
+                            getattr(child.iter.func, "id", "") == "range")
                 if is_range and var not in args and var != "self":
-                    promoted[var] = "int"
-            
+                    # [FIX] Só promove se ainda não declarado explicitamente
+                    if var not in promoted:
+                        promoted[var] = "int"
+
             if isinstance(child, ast.Assign) and isinstance(child.value, ast.Constant):
                 for target in child.targets:
                     if isinstance(target, ast.Name):
@@ -207,8 +227,39 @@ class VulcanAutoTyper(ast.NodeVisitor):
                             if isinstance(val, bool): continue
                             if isinstance(val, int) or var in self.hot_names:
                                 promoted[var] = "long"
-        
-        self.suggestions[node.name] = promoted
+
+        # [FIX] Remove any variable from promotion that the function body declares on its own
+        # (evita 'pos redeclared'). O Cython não permite cdef X em cima de uma atribuição normal
+        # da mesma variável em alguns casos — mas a regra mais segura é: se o corpo já tem
+        # o nome, não injetar cdef.
+        # self.suggestions[node.name] = {
+        #     k: v for k, v in promoted.items() if k not in existing_locals
+        # }
+        # [FIX] Coleta APENAS variáveis que têm atribuição simples no corpo
+        # (não contam como conflito: alvo de for, arg de função, ou uso sem store)
+        plain_assigned = set()
+        for child in ast.walk(node):
+            if isinstance(child, ast.Assign):
+                for target in child.targets:
+                    if isinstance(target, ast.Name):
+                        plain_assigned.add(target.id)
+            elif isinstance(child, ast.AugAssign) and isinstance(child.target, ast.Name):
+                plain_assigned.add(child.target.id)
+
+        # Remove do 'promoted' apenas vars que já são atribuídas em plain_assigned
+        # E que NÃO sejam alvo de for-range (essas devem ser tipadas)
+        for_range_targets = set()
+        for child in ast.walk(node):
+            if isinstance(child, ast.For) and isinstance(child.target, ast.Name):
+                if isinstance(child.iter, ast.Call) and getattr(child.iter.func, "id", "") == "range":
+                    for_range_targets.add(child.target.id)
+
+        final_promoted = {}
+        for var, ctype in promoted.items():
+            if var in plain_assigned and var not in for_range_targets:
+                continue  # já tem atribuição normal, não injeta cdef
+            final_promoted[var] = ctype
+        self.suggestions[node.name] = final_promoted
         self.generic_visit(node)
 
 class PurityMeter(ast.NodeVisitor):
@@ -262,58 +313,55 @@ class VulcanForge:
         return node
 
     def visit_ImportFrom(self, node):
-        if node.module == '__future__':
+        if node.module == "__future__":
             return None
 
         # [ALVO OMEGA] Conversão de Import Relativo para Absoluto
         if node.level and node.level > 0:
             try:
-                # 1. Detecta a posição do arquivo (ex: doxoade/tools/analysis.py)
                 p = Path(self.target_path).resolve()
                 parts = list(p.parts)
-                
-                # 2. Localiza a âncora 'doxoade' no caminho do Windows
-                if 'doxoade' in parts:
-                    idx = parts.index('doxoade')
-                    # Pega a hierarquia de pacotes: ['doxoade', 'tools']
+                if "doxoade" in parts:
+                    idx = parts.index("doxoade")
                     pkg_hierarchy = parts[idx:-1]
-                    
-                    # Sobe níveis se for .. ou ...
                     for _ in range(node.level - 1):
-                        if pkg_hierarchy: pkg_hierarchy.pop()
-                    
+                        if pkg_hierarchy:
+                            pkg_hierarchy.pop()
                     base_prefix = ".".join(pkg_hierarchy)
-                    
-                    # 3. Reescreve o módulo (ex: doxoade.tools.streamer)
                     if node.module:
                         node.module = f"{base_prefix}.{node.module}"
                     else:
                         node.module = base_prefix
-                    
-                    node.level = 0 # Agora o binário é SOBERANO (Import Absoluto)
+                    node.level = 0
             except Exception:
-                pass # Fallback para stubs se a lógica de path falhar
+                pass
 
-        # [CONTINUIDADE] Lógica de Blacklist e Stubs
-        if node.level and node.level > 0:
-            # Se ainda sobrou algum ponto, vira stub por segurança
+        # [FIX CRÍTICO] Preserva imports relativos convertidos para absolutos.
+        # A versão anterior os substituía por _Stub(), causando
+        # "undeclared name not builtin: _read_file_safe".
+        if node.module and self._is_blacklisted(node.module):
+            for alias in node.names:
+                self._blacklisted_names.add(alias.asname or alias.name)
+            # Stubs de UI blacklist (click, rich) — esses SIM devem ser stub
             stubs = []
             for alias in node.names:
                 stub_name = alias.asname or alias.name
-                if stub_name == '*': continue
-                self._blacklisted_names.add(stub_name)
+                if stub_name == "*":
+                    continue
                 stubs.append(ast.Assign(
-                    targets=[ast.Name(id=stub_name, ctx=ast.Store())], 
-                    value=ast.Call(func=ast.Name(id='_Stub', ctx=ast.Load()), args=[], keywords=[]), 
-                    lineno=node.lineno))
+                    targets=[ast.Name(id=stub_name, ctx=ast.Store())],
+                    value=ast.Call(
+                        func=ast.Name(id="_Stub", ctx=ast.Load()),
+                        args=[],
+                        keywords=[],
+                    ),
+                    lineno=node.lineno,
+                ))
             return stubs if stubs else None
-
-        if node.module and self._is_blacklisted(node.module):
-            for alias in node.names: self._blacklisted_names.add(alias.asname or alias.name)
-            return None
 
         if node.module:
             self.original_imports.append(ast.unparse(node))
+        # [FIX] Preserva o import em vez de stub
         return node
 
     def visit_arg(self, node):
@@ -501,6 +549,7 @@ class VulcanForge:
         pyx_lines.append('    ctypedef unsigned long long uint64_t')
         pyx_lines.append('    ctypedef long long int64_t')
         pyx_lines.append('    int64_t nexus_asm_cmov(int64_t selector, int64_t val_true, int64_t val_false)')
+        pyx_lines.append('    double nexus_asm_cmov_double(int64_t selector, double val_true, double val_false)')
         pyx_lines.append('    long nexus_asm_popcount(long value)')
         pyx_lines.append('    int nexus_encode_varint_branchless(uint64_t n, uint8_t* out)')
         pyx_lines.append('    int64_t nexus_asm_vec_search(const uint8_t* buf, int64_t len, int64_t target)')
@@ -583,21 +632,25 @@ class VulcanForge:
         # 2. Transformação de Lógica (Branchless)
         class BranchlessTransformer(ast.NodeTransformer):
             def _is_numeric_constant(self, n):
-                """Verifica se o valor é compatível com o CMOV de hardware."""
                 if isinstance(n, ast.Constant):
-                    # Somente números e booleanos cabem no registrador do ASM
                     return isinstance(n.value, (int, bool, float))
                 return False
 
+            def _is_float_literal(self, n):
+                return isinstance(n, ast.Constant) and isinstance(n.value, float)
+
             def visit_IfExp(self, n):
-                # SÓ transforma em ASM se ambos os lados forem numéricos
                 if self._is_numeric_constant(n.body) and self._is_numeric_constant(n.orelse):
+                    # [FIX] Escolhe versão inteira ou double do kernel
+                    if self._is_float_literal(n.body) or self._is_float_literal(n.orelse):
+                        kernel = "nexus_asm_cmov_double"
+                    else:
+                        kernel = "nexus_asm_cmov"
                     return ast.Call(
-                        func=ast.Name(id='nexus_asm_cmov', ctx=ast.Load()),
+                        func=ast.Name(id=kernel, ctx=ast.Load()),
                         args=[n.test, n.body, n.orelse],
                         keywords=[]
                     )
-                # Se for string (como no analysis.py), mantém o ternário original do Python
                 return n
         
         node = BranchlessTransformer().visit(node)
@@ -653,7 +706,16 @@ class VulcanForge:
         # 7. Caso Geral (Python Híbrido Otimizado)
         scanner = BodyPurityScanner()
         scanner.visit(node)
-        is_nogil_candidate = scanner.is_pure_c and not any(arg.arg in {'self', 'cls'} for arg in node.args.args)
+        is_nogil_candidate = scanner.is_pure_c and not any(arg.arg in {"self", "cls"} for arg in node.args.args)
+
+        # [FIX] Segunda barreira: se o corpo tem qualquer 'return X', não usar nogil
+        # (evita "Returning Python object not allowed without gil")
+        has_return_value = any(
+            isinstance(child, ast.Return) and child.value is not None
+            for child in ast.walk(node)
+        )
+        if has_return_value:
+            is_nogil_candidate = False
         
         code = [f"{indent}def {name}({args_str}):"]
         

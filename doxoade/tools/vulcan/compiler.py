@@ -13,6 +13,41 @@ from doxoade.tools.soteria_systems.soteria_engine import SoteriaForensic
 
 COMPILATION_TELEMETRY = []
 
+def _resolve_tool(name: str) -> str:
+    """
+    Resolve o caminho absoluto de um binário via Janus (gcc, g++, ar, etc).
+    Fallback para shutil.which se Janus não estiver disponível.
+    """
+    from pathlib import Path
+    from doxoade.tools.janus_systems import Janus
+    import shutil
+
+    try:
+        Janus.ensure_active()
+        info = Janus.get_info()
+        if info:
+            compiler_bin = Path(info.compiler_path).parent
+            candidate = compiler_bin / name
+            for ext in ("", ".exe"):
+                full = Path(f"{candidate}{ext}")
+                if full.exists():
+                    return str(full)
+            if name.lower() in ("g++", "g++.exe") and info.gpp_path:
+                if Path(info.gpp_path).exists():
+                    return info.gpp_path
+    except Exception:
+        pass
+
+    found = shutil.which(name)
+    if found:
+        return found
+
+    raise RuntimeError(
+        f"[VULCAN] Não foi possível localizar '{name}'. "
+        f"Janus não encontrou um compilador. "
+        f"Execute: doxoade janus scan"
+    )
+
 class VulcanCompiler:
     _cached_env = None
 
@@ -181,20 +216,51 @@ class VulcanCompiler:
             return False
 
     def _ensure_pch(self):
-        """Gera o cabeçalho pré-compilado (Python.h.gch) se não existir."""
+        """
+        Gera o cabeçalho pré-compilado (Python.h.gch) se não existir.
+        [PATCH] Usa Janus para localizar o compilador — sem hardcode 'gcc'.
+        """
         pch_file = self.env.foundry / "vulcan_headers.h"
         gch_file = self.env.foundry / "vulcan_headers.h.gch"
-        
-        if not gch_file.exists():
-            print(f"   {Fore.YELLOW}❄ Preparando Criogenia de Cabeçalhos (PCH)...{Fore.RESET}")
-            # Criamos um cabeçalho que inclui as bases mais usadas
-            content = "#include <Python.h>\n#include <structmember.h>\n"
-            pch_file.write_text(content)
-            
-            # Compilamos o cabeçalho em si (isso é feito apenas uma vez)
-            cmd = f'gcc -x c-header "{str(pch_file)}" -I{self.py_include} -o "{str(gch_file)}"'
-            import subprocess
-            subprocess.run(cmd, shell=True, capture_output=True)
+
+        if gch_file.exists():
+            return pch_file
+
+        print(f"   {Fore.YELLOW}❄ Preparando Criogenia de Cabeçalhos (PCH)...{Fore.RESET}")
+
+        # [FIX] Localiza GCC via Janus
+        try:
+            compiler_bin = _resolve_tool("gcc")
+        except RuntimeError as e:
+            print(f"   {Fore.RED}✘ {e}{Fore.RESET}")
+            return pch_file  # Retorna sem GCH; o build tentará sem PCH
+
+        content = "#include <Python.h>\n#include <structmember.h>\n"
+        pch_file.write_text(content, encoding="utf-8")
+
+        cmd = [
+            compiler_bin,
+            "-x", "c-header",
+            str(pch_file),
+            f"-I{self.py_include}",
+            "-o", str(gch_file),
+        ]
+
+        import subprocess
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=60,
+            )
+            if result.returncode != 0:
+                print(f"   {Fore.YELLOW}⚠ PCH falhou (continuando sem): {result.stderr[:200]}{Fore.RESET}")
+        except Exception as e:
+            print(f"   {Fore.YELLOW}⚠ PCH falhou (continuando sem): {e}{Fore.RESET}")
+
         return pch_file
 
     def _get_doxo_python(self):
@@ -417,79 +483,141 @@ setup(
         return c_obj, s_obj
 
     def _prepare_static_lib(self):
-        """Fundição Suprema: Cria a biblioteca libnexus.a (Industrial)."""
+        """
+        Fundição Suprema: Cria a biblioteca libnexus.a (Industrial).
+        [PATCH] Usa Janus para gcc e ar — sem hardcode, sem shell=True.
+        """
         native_dir = Path(self.env.root) / "doxoade" / "tools" / "vulcan" / "native"
         foundry_path = self.env.foundry.resolve()
         lib_file = foundry_path / "libnexus.a"
-        
-        if not lib_file.exists():
-            import subprocess
-            print(f"   {Fore.YELLOW}📦 Forjando Biblioteca Estática Nexus...{Fore.RESET}")
-            # 1. Compila C e ASM para objetos .o
-#            subprocess.run(f'gcc -O3 -c "{native_dir / "nexus_kernels.c"}" -o "{foundry_path / "k.o"}"', shell=True)
-            subprocess.run(f'gcc -O3 -I"{native_dir}" -c "{native_dir / "nexus_kernels.c"}" -o "{foundry_path / "k.o"}"', shell=True)
-            subprocess.run(f'gcc -c "{native_dir / "nexus_asm.s"}" -o "{foundry_path / "a.o"}"', shell=True)
-            
-            # 2. Funde os objetos em um Archive (.a)
-            # O utilitário 'ar' é o bibliotecário do GCC
-            subprocess.run(f'ar rcs "{lib_file}" "{foundry_path / "k.o"}" "{foundry_path / "a.o"}"', shell=True)
-            
+
+        if lib_file.exists():
+            return lib_file
+
+        import subprocess
+        from pathlib import Path as _P
+
+        try:
+            gcc_bin = _resolve_tool("gcc")
+            ar_bin = _resolve_tool("ar")
+        except RuntimeError as e:
+            print(f"   {Fore.RED}✘ [STATIC LIB] {e}{Fore.RESET}")
+            raise
+
+        print(f"   {Fore.YELLOW}📦 Forjando Biblioteca Estática Nexus...{Fore.RESET}")
+
+        # 1. Compila C para objeto
+        k_obj = foundry_path / "k.o"
+        cmd_c = [
+            gcc_bin, "-O3",
+            f"-I{native_dir}",
+            "-c", str(native_dir / "nexus_kernels.c"),
+            "-o", str(k_obj),
+        ]
+        res_c = subprocess.run(cmd_c, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if res_c.returncode != 0:
+            raise RuntimeError(f"nexus_kernels.c compilation failed: {res_c.stderr[:500]}")
+
+        # 2. Compila ASM para objeto
+        a_obj = foundry_path / "a.o"
+        cmd_asm = [
+            gcc_bin, "-c",
+            str(native_dir / "nexus_asm.s"),
+            "-o", str(a_obj),
+        ]
+        res_asm = subprocess.run(cmd_asm, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if res_asm.returncode != 0:
+            raise RuntimeError(f"nexus_asm.s compilation failed: {res_asm.stderr[:500]}")
+
+        # 3. Cria o archive (.a) com 'ar'
+        cmd_ar = [ar_bin, "rcs", str(lib_file), str(k_obj), str(a_obj)]
+        res_ar = subprocess.run(cmd_ar, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if res_ar.returncode != 0:
+            raise RuntimeError(f"'ar rcs' failed: {res_ar.stderr[:500]}")
+
         return lib_file
 
     def _run_gcc_direct(self, module_name: str, use_soteria: bool = True) -> bool:
-        """Executa linkagem direta via GCC com suporte a Sotéria."""
+        """
+        Executa linkagem direta via GCC com suporte a Sotéria.
+        [PATCH] Janus resolve o compilador — shell=False — lista de argumentos.
+        """
         import subprocess, time
+
         t_start = time.perf_counter()
-        
+
         # 1. Localização do arquivo C gerado pelo Cython
         c_file = self.env.foundry / f"{module_name}.c"
-        if getattr(self, 'use_soteria', False):
+        if getattr(self, "use_soteria", False):
             shadow_c = self.env.foundry / "shadow_pyx" / f"{module_name}.c"
             if shadow_c.exists():
                 c_file = shadow_c
 
-        # Inicializa a lista de fontes com o arquivo principal
         sources = [str(c_file)]
 
-        # 2. Injeta arquivos da Sotéria se o escudo estiver ativo
-        if getattr(self, 'use_soteria', False):
-            # Procura todos os .c na pasta de diagnóstico
+        if getattr(self, "use_soteria", False):
             soteria_files = list(self.soteria_src_dir.glob("*.c"))
             sources.extend([str(f) for f in soteria_files])
 
         obj_file = self.env.bin_dir / f"{module_name}.pyd"
-        self._prepare_static_lib()
-        lib_path = (self.env.foundry / "libnexus.a").resolve()
-        
-        is_infra = any(x in module_name for x in ['compiler', 'pitstop', 'forge'])
-        opt_level = '-Os' if is_infra else '-O2'
-
-        # 3. Montagem do Comando (Usa a lista 'sources' de forma dinâmica)
-        # Convertemos a lista sources em uma lista de strings formatadas para o shell
-        formatted_sources = [f'"{s.replace("\\", "/")}"' for s in sources]
-        
-        cmd = [
-            'gcc', opt_level, '-shared', '-g',
-            f'-I"{str(self.soteria_include).replace("\\", "/")}"',
-            f'-I"{str(self.env.foundry).replace("\\", "/")}"',
-            f'-I"{str(self.env.foundry / "shadow_pyx").replace("\\", "/")}"',
-            f'-I"{self.py_include.replace("\\", "/")}"',
-            f'-L"{self.py_libs.replace("\\", "/")}"'
-        ] + formatted_sources + [  # <--- INJEÇÃO ATÔMICA DOS FONTES
-            f'"{str(lib_path).replace("\\", "/")}"',
-            '-o', f'"{str(obj_file).replace("\\", "/")}"',
-        ]
-        cmd.extend([self.py_link_lib, '-ldbghelp', '-lpsapi', '-lkernel32', '-Wall'])
         try:
-            res = subprocess.run(" ".join(cmd), capture_output=True, text=True, encoding='utf-8', errors='replace', shell=True)
+            self._prepare_static_lib()
+        except RuntimeError as e:
+            print(f"{Fore.RED}✘ Static lib falhou em {module_name}: {e}{Fore.RESET}")
+            return False
+
+        lib_path = (self.env.foundry / "libnexus.a").resolve()
+        is_infra = any(x in module_name for x in ["compiler", "pitstop", "forge"])
+        opt_level = "-Os" if is_infra else "-O2"
+
+        # [FIX] Janus resolve o compilador
+        try:
+            gcc_bin = _resolve_tool("gcc")
+        except RuntimeError as e:
+            print(f"{Fore.RED}✘ {e}{Fore.RESET}")
+            return False
+
+        # [FIX] Argumentos como lista — sem shell=True, sem quoting manual
+        cmd = [
+            gcc_bin,
+            opt_level,
+            "-shared",
+            "-g",
+            f"-I{str(self.soteria_include)}",
+            f"-I{str(self.env.foundry)}",
+            f"-I{str(self.env.foundry / 'shadow_pyx')}",
+            f"-I{self.py_include}",
+            f"-L{self.py_libs}",
+        ]
+        cmd.extend(sources)
+        cmd.extend([str(lib_path), "-o", str(obj_file)])
+
+        # Extras por plataforma
+        cmd.append(self.py_link_lib)
+        if os.name == "nt":
+            cmd.extend(["-ldbghelp", "-lpsapi", "-lkernel32"])
+        cmd.append("-Wall")
+
+        try:
+            res = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=180,
+            )
             elapsed = (time.perf_counter() - t_start) * 1000
-            self.detailed_telemetry.setdefault(module_name, {})['link_ms'] = elapsed
-            
+            self.detailed_telemetry.setdefault(module_name, {})["link_ms"] = elapsed
+
             if res.returncode != 0:
                 print(f"\n{Fore.RED}✘ Falha na Linkagem Sotéria ({module_name}):{Fore.RESET}")
-                print(res.stderr)
+                print(res.stderr[-2000:])
                 return False
             return True
+        except subprocess.TimeoutExpired:
+            print(f"{Fore.RED}✘ Timeout na linkagem de {module_name}{Fore.RESET}")
+            return False
         except Exception as e:
-            print(f"🚨 Erro no GCC: {e}")
+            print(f"🚨 Erro no GCC ({module_name}): {e}")
             return False

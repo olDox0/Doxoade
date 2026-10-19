@@ -103,3 +103,7 @@ int64_t nexus_nogil_scan(const uint8_t* data, int64_t size, uint8_t target) {
 int64_t nexus_asm_cmov(int64_t selector, int64_t val_a, int64_t val_b) {
     return nexus_branchless_select(selector, val_a, val_b);
 }
+
+double nexus_asm_cmov_double(long long selector, double val_true, double val_false) {
+    return selector ? val_true : val_false;
+}

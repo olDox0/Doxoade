@@ -153,21 +153,7 @@ class DocIndexer:
         m_title = RE_TITLE.search(raw_html)
         title = html_lib.unescape(m_title.group(1).strip()) if m_title else title_fallback
 
-        # 1. Isola o corpo principal do Sphinx (restaurado da v2.3 — regressão RIT-CONSULT-002)
-        main_match = re.search(
-            r'<div[^>]*role="main"[^>]*>(.*?)</div>\s*<div[^>]*class="clearer"',
-            raw_html, flags=re.DOTALL | re.IGNORECASE)
-        if not main_match:
-            main_match = re.search(
-                r'<div[^>]*class="body"[^>]*role="main"[^>]*>(.*?)</div>\s*</div>',
-                raw_html, flags=re.DOTALL | re.IGNORECASE)
-        body = main_match.group(1) if main_match else raw_html
-
-        # 2. Purga navegação, breadcrumbs e sidebars
-        body = re.sub(
-            r'<div[^>]*(?:class="[^"]*(?:related|sphinxsidebar|mobile-nav|header|footer)[^"]*"|role="navigation")[^>]*>.*?</div>',
-            '', body, flags=re.DOTALL | re.IGNORECASE)
-
+        body = self._isolate_sphinx_body(raw_html)
         text = RE_STRIP_BLOCKS.sub(' ', body)
 
         code_placeholders = {}
@@ -198,6 +184,31 @@ class DocIndexer:
         clean_text = "\n".join(lines)
         clean_text = re.sub(r'\n{3,}', '\n\n', clean_text).strip()
         return f"# 📖 {title}\n\n{clean_text}"
+
+    def _isolate_sphinx_body(self, raw_html: str) -> str:
+        """
+        🛡️ [RIT-002 FIX v2] Isolamento por marcadores posicionais.
+        Nota técnica (§5.1): regex lazy `(.*?)</div>` ceifa o body no primeiro
+        div aninhado do Sphinx (highlight/section/admonition). Aqui nenhuma tag
+        de fechamento é casada: o corte usa marcadores que só existem APÓS o body.
+        """
+        start_m = re.search(r'<div[^>]*role="main"[^>]*>', raw_html, re.IGNORECASE)
+        if not start_m:
+            start_m = re.search(r'<div[^>]*class="body"[^>]*>', raw_html, re.IGNORECASE)
+        if not start_m:
+            return raw_html
+        body = raw_html[start_m.end():]
+
+        low = body.lower()
+        cuts = [low.find(m) for m in (
+            '<div class="clearer"',
+            '<div class="sphinxsidebar"',
+            '<div role="navigation"',
+            '<div class="footer"',
+            '<footer',
+        )]
+        cuts = [i for i in cuts if i > 0]
+        return body[:min(cuts)] if cuts else body
 
     def search(self, query: str, limit: int = 25) -> List[Tuple[str, str, str]]:
         """Busca textual no FTS5 com prefixos coringa (*)."""
@@ -236,18 +247,30 @@ class DocIndexer:
         finally:
             conn.close()
 
-    def read_doc_as_markdown(self, path_or_uid: str) -> Optional[str]:
+    def read_doc_as_markdown(self, path_or_query: str) -> Optional[str]:
         """
-        Leitor Universal (B-Tree direto):
-        1. Busca direta na tabela física 'docs' (0.1ms).
-        2. Fallback de arquivo HTML físico caso não esteja armazenado.
+        Leitor Universal Inteligente:
+        1. Busca exata por chave primária (0.1ms).
+        2. Busca flexível por aproximação de path ou título (ex: 'json' acha 'python/cheatsheet/json').
+        3. Fallback de arquivo HTML físico no disco.
         """
+        clean_path = path_or_query.strip().strip("'\"")
+
         if self.db_path.exists():
             try:
                 conn = self._get_db_connection(bulk_mode=False)
+                # 1. Busca exata
                 row = conn.execute(
-                    "SELECT title, content FROM docs WHERE path = ? LIMIT 1;", (path_or_uid,)
+                    "SELECT title, content FROM docs WHERE path = ? LIMIT 1;", (clean_path,)
                 ).fetchone()
+
+                # 2. Busca flexível se o usuário digitou apenas 'json' ou 'dataclass'
+                if not row:
+                    row = conn.execute(
+                        "SELECT title, content FROM docs WHERE path LIKE ? OR title LIKE ? LIMIT 1;",
+                        (f"%{clean_path}%", f"%{clean_path}%")
+                    ).fetchone()
+
                 conn.close()
                 if row and row[1]:
                     title, content = row
@@ -259,9 +282,9 @@ class DocIndexer:
 
         # Fallback de arquivo HTML no disco
         docs_dir = self.find_python_docs()
-        target = Path(path_or_uid)
+        target = Path(clean_path)
         if not target.is_absolute() and docs_dir:
-            target = docs_dir / path_or_uid
+            target = docs_dir / clean_path
 
         if target.exists() and target.is_file():
             raw_html = target.read_text(encoding="utf-8", errors="ignore")
