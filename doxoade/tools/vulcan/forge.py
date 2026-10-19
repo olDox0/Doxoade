@@ -276,13 +276,14 @@ class PurityMeter(ast.NodeVisitor):
 class VulcanForge:
     """Transpilador Estrutural: Converte Python moderno em C-Style limpo."""
 
-    def __init__(self, target_path: str=''):
+    def __init__(self, target_path: str = "", env_root: str | None = None):
         super().__init__()
         self.original_imports: list = []
         self.blacklist: Set[str] = _BLACKLIST
         self._blacklisted_names: Set[str] = set()
         self._name_rewrites: list[dict[str, str]] = []
         self.target_path = target_path
+        self._env_root = env_root  # ← NEW: projeto raiz para conversão de imports
         self.blacklist = {'click', 'rich', 'colorama', 'progressbar', 'click_echo'}
         self.hot_names = {'n', 'i', 'j', 'k', 'idx', 'count', 'size', 'offset', 'delta', 'last_id', 'current_id', 'doc_id'}
 
@@ -316,33 +317,77 @@ class VulcanForge:
         if node.module == "__future__":
             return None
 
-        # [ALVO OMEGA] Conversão de Import Relativo para Absoluto
+        # ============================================================
+        # [ALVO OMEGA v2] Conversão de Import Relativo → Absoluto
+        # Funciona para DOXOADE e para PROJETOS DE USUÁRIO (ORN etc.)
+        # ============================================================
         if node.level and node.level > 0:
             try:
                 p = Path(self.target_path).resolve()
                 parts = list(p.parts)
+                base_idx = None
+
+                # Estratégia 1: ancora em 'doxoade' (doxoade-internal)
                 if "doxoade" in parts:
-                    idx = parts.index("doxoade")
-                    pkg_hierarchy = parts[idx:-1]
+                    base_idx = parts.index("doxoade")
+
+                # Estratégia 2: usa project_root do VulcanEnvironment
+                if base_idx is None:
+                    env_root = getattr(self, "_env_root", None)
+                    if env_root:
+                        root_parts = list(Path(env_root).resolve().parts)
+                        if root_parts and parts[:len(root_parts)] == root_parts:
+                            base_idx = len(root_parts)
+
+                # Estratégia 3: walk-up até encontrar __init__.py (fallback)
+                if base_idx is None:
+                    cur = p.parent
+                    while cur != cur.parent:
+                        if not (cur / "__init__.py").exists():
+                            base_idx = len(list(cur.parts))
+                            break
+                        cur = cur.parent
+
+                if base_idx is not None:
+                    pkg_hierarchy = parts[base_idx:-1]
                     for _ in range(node.level - 1):
                         if pkg_hierarchy:
                             pkg_hierarchy.pop()
-                    base_prefix = ".".join(pkg_hierarchy)
-                    if node.module:
-                        node.module = f"{base_prefix}.{node.module}"
-                    else:
-                        node.module = base_prefix
-                    node.level = 0
+
+                    if pkg_hierarchy:
+                        base_prefix = ".".join(pkg_hierarchy)
+                        if node.module:
+                            node.module = f"{base_prefix}.{node.module}"
+                        else:
+                            node.module = base_prefix
+                        node.level = 0
             except Exception:
                 pass
 
-        # [FIX CRÍTICO] Preserva imports relativos convertidos para absolutos.
-        # A versão anterior os substituía por _Stub(), causando
-        # "undeclared name not builtin: _read_file_safe".
+        # ============================================================
+        # Fallback: relativo não convertido → stub _Stub()
+        # (só quando não conseguimos resolver o path — raro)
+        # ============================================================
+        if node.level and node.level > 0:
+            stubs = []
+            for alias in node.names:
+                stub_name = alias.asname or alias.name
+                if stub_name == "*":
+                    continue
+                self._blacklisted_names.add(stub_name)
+                stubs.append(ast.Assign(
+                    targets=[ast.Name(id=stub_name, ctx=ast.Store())],
+                    value=ast.Call(func=ast.Name(id="_Stub", ctx=ast.Load()), args=[], keywords=[]),
+                    lineno=node.lineno,
+                ))
+            return stubs if stubs else None
+
+        # ============================================================
+        # UI Blacklist (click, rich, colorama, etc) → stub _Stub()
+        # ============================================================
         if node.module and self._is_blacklisted(node.module):
             for alias in node.names:
                 self._blacklisted_names.add(alias.asname or alias.name)
-            # Stubs de UI blacklist (click, rich) — esses SIM devem ser stub
             stubs = []
             for alias in node.names:
                 stub_name = alias.asname or alias.name
@@ -350,18 +395,16 @@ class VulcanForge:
                     continue
                 stubs.append(ast.Assign(
                     targets=[ast.Name(id=stub_name, ctx=ast.Store())],
-                    value=ast.Call(
-                        func=ast.Name(id="_Stub", ctx=ast.Load()),
-                        args=[],
-                        keywords=[],
-                    ),
+                    value=ast.Call(func=ast.Name(id="_Stub", ctx=ast.Load()), args=[], keywords=[]),
                     lineno=node.lineno,
                 ))
             return stubs if stubs else None
 
+        # ============================================================
+        # Import legítimo (relativo convertido ou absoluto) → PRESERVA
+        # ============================================================
         if node.module:
             self.original_imports.append(ast.unparse(node))
-        # [FIX] Preserva o import em vez de stub
         return node
 
     def visit_arg(self, node):
@@ -507,15 +550,17 @@ class VulcanForge:
             "# cython: language_level=3",
             "# cython: boundscheck=False",
             "# cython: wraparound=True",
-            "import sys, os, json, struct",
+            # [FIX] Módulos stdlib preservados por padrão (evita undeclared name)
+            "import sys, os, json, struct, zlib, re, time, hashlib, base64, io, collections, functools, itertools, math",
+            "import datetime",
             "",
             "class _Stub:",
             "    def __getattr__(self, _): return _Stub()",
             "    def __call__(self, *a, **kw): return _Stub()",
             "",
-            "Fore = _Stub()", # Sempre injeta Fore
-            "Style = _Stub()", # Sempre injeta Style
-            "Back = _Stub()"
+            "Fore = _Stub()",
+            "Style = _Stub()",
+            "Back = _Stub()",
         ])
 
         # 3. Injeção de Stubs Única (Removi a duplicata da sua versão)
@@ -556,6 +601,47 @@ class VulcanForge:
         pyx_lines.append('    int64_t nexus_raw_search(const uint8_t* h, int64_t hl, const uint8_t* n, int64_t nl)')
         pyx_lines.append('    void nexus_path_normalize(char* path)')
         pyx_lines.append('    const char* nexus_get_filename(const char* path)')
+
+        # ============================================================
+        # [FIX] AUTO-INJECT: Detecta nomes referenciados no corpo dos
+        # pyx functions mas não importados no pyx, e re-injeta import
+        # a partir do AST original.
+        # ============================================================
+        pyx_body_str = "\n".join(pyx_lines)
+        missing_imports = set()
+
+        # Constrói mapa nome → módulo a partir do AST original
+        top_level_imports = {}
+        for node in tree.body:
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    name = alias.asname or alias.name.split('.')[0]
+                    top_level_imports[name] = ast.unparse(node)
+            elif isinstance(node, ast.ImportFrom) and node.module and not self._is_blacklisted(node.module):
+                for alias in node.names:
+                    if alias.name == '*':
+                        continue
+                    name = alias.asname or alias.name
+                    top_level_imports[name] = ast.unparse(node)
+
+        # Verifica cada nome importável original no pyx
+        for name, import_stmt in top_level_imports.items():
+            # Se o nome é usado no pyx e não está importado, reinjeta
+            if name in pyx_body_str and f"import {name}" not in pyx_body_str:
+                # Evita duplicação
+                if name not in {imp.split()[-1].split('.')[0].split('(')[0] for imp in missing_imports}:
+                    missing_imports.add(import_stmt)
+
+        if missing_imports:
+            # Reinsere logo após os imports do header
+            header_marker = "import datetime"
+            insert_idx = next(
+                (i for i, line in enumerate(pyx_lines) if line == header_marker),
+                len(pyx_lines)
+            )
+            for imp in sorted(missing_imports):
+                pyx_lines.insert(insert_idx + 1, imp)
+                insert_idx += 1
 
         # 5. Transformação de Corpo com Hefesto v3
         optimized_functions = []
@@ -709,15 +795,34 @@ class VulcanForge:
         is_nogil_candidate = scanner.is_pure_c and not any(arg.arg in {"self", "cls"} for arg in node.args.args)
 
         # [FIX] Segunda barreira: se o corpo tem qualquer 'return X', não usar nogil
-        # (evita "Returning Python object not allowed without gil")
         has_return_value = any(
             isinstance(child, ast.Return) and child.value is not None
             for child in ast.walk(node)
         )
         if has_return_value:
             is_nogil_candidate = False
+
+        # [FIX] Não entra em nogil se o corpo efetivo (após strip de docstrings) for vazio
+        non_trivial_body = [
+            stmt for stmt in node.body
+            if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant))
+        ]
+        if not non_trivial_body:
+            # Função vazia/docstring-only: emitir pass, sem nogil
+            return f"{indent}def {name}({args_str}):\n{indent}    pass"
         
         code = [f"{indent}def {name}({args_str}):"]
+
+        # ============================================================
+        # [FIX] Função vazia ou só-docstring → emite pass, sem nogil
+        # (evita "Expected an increase in indentation level" no Cython)
+        # ============================================================
+        non_trivial_body = [
+            stmt for stmt in node.body
+            if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant))
+        ]
+        if not non_trivial_body:
+            return f"{indent}def {name}({args_str}):\n{indent}    pass\n"
         
         if is_nogil_candidate:
             code.append(f"{indent}    with nogil:")

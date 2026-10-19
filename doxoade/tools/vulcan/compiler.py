@@ -61,7 +61,6 @@ class VulcanCompiler:
         # soteria e DedaloEngine
         self.soteria_dir = Path(__file__).resolve().parent / "diagnostic" / "soteria"
         self.soteria_include = self.soteria_dir / "include"
-#        self.soteria_src = self.soteria_dir / "src" / "soteria.c"
         self.soteria_src_dir = self.soteria_dir / "src"
         self.scribe = SoteriaScribe()
         self.forensic = SoteriaForensic()
@@ -485,18 +484,29 @@ setup(
     def _prepare_static_lib(self):
         """
         Fundição Suprema: Cria a biblioteca libnexus.a (Industrial).
-        [PATCH] Usa Janus para gcc e ar — sem hardcode, sem shell=True.
+        [PATCH v2] native_dir e soteria vêm do CORE do doxoade, NÃO do projeto.
         """
-        native_dir = Path(self.env.root) / "doxoade" / "tools" / "vulcan" / "native"
+        from pathlib import Path
+        # Core installation do doxoade (onde vive este compiler.py)
+        core_root = Path(__file__).resolve().parent  # .../doxoade/tools/vulcan
+        native_dir = core_root / "native"
         foundry_path = self.env.foundry.resolve()
         lib_file = foundry_path / "libnexus.a"
 
         if lib_file.exists():
             return lib_file
 
-        import subprocess
-        from pathlib import Path as _P
+        # Verifica se os arquivos nativos existem
+        c_src = native_dir / "nexus_kernels.c"
+        s_src = native_dir / "nexus_asm.s"
+        if not c_src.exists():
+            raise RuntimeError(f"[STATIC LIB] Nexus kernel source não encontrado: {c_src}")
+        if not s_src.exists():
+            # ASM opcional: pode estar ausente em algumas máquinas (ex: ARM)
+            print(f"   {Fore.YELLOW}⚠ nexus_asm.s não encontrado — compilando apenas C{Fore.RESET}")
+            s_src = None
 
+        import subprocess
         try:
             gcc_bin = _resolve_tool("gcc")
             ar_bin = _resolve_tool("ar")
@@ -506,31 +516,22 @@ setup(
 
         print(f"   {Fore.YELLOW}📦 Forjando Biblioteca Estática Nexus...{Fore.RESET}")
 
-        # 1. Compila C para objeto
         k_obj = foundry_path / "k.o"
-        cmd_c = [
-            gcc_bin, "-O3",
-            f"-I{native_dir}",
-            "-c", str(native_dir / "nexus_kernels.c"),
-            "-o", str(k_obj),
-        ]
+        cmd_c = [gcc_bin, "-O3", f"-I{native_dir}", "-c", str(c_src), "-o", str(k_obj)]
         res_c = subprocess.run(cmd_c, capture_output=True, text=True, encoding="utf-8", errors="replace")
         if res_c.returncode != 0:
             raise RuntimeError(f"nexus_kernels.c compilation failed: {res_c.stderr[:500]}")
 
-        # 2. Compila ASM para objeto
-        a_obj = foundry_path / "a.o"
-        cmd_asm = [
-            gcc_bin, "-c",
-            str(native_dir / "nexus_asm.s"),
-            "-o", str(a_obj),
-        ]
-        res_asm = subprocess.run(cmd_asm, capture_output=True, text=True, encoding="utf-8", errors="replace")
-        if res_asm.returncode != 0:
-            raise RuntimeError(f"nexus_asm.s compilation failed: {res_asm.stderr[:500]}")
+        objects = [str(k_obj)]
+        if s_src:
+            a_obj = foundry_path / "a.o"
+            cmd_asm = [gcc_bin, "-c", str(s_src), "-o", str(a_obj)]
+            res_asm = subprocess.run(cmd_asm, capture_output=True, text=True, encoding="utf-8", errors="replace")
+            if res_asm.returncode != 0:
+                raise RuntimeError(f"nexus_asm.s compilation failed: {res_asm.stderr[:500]}")
+            objects.append(str(a_obj))
 
-        # 3. Cria o archive (.a) com 'ar'
-        cmd_ar = [ar_bin, "rcs", str(lib_file), str(k_obj), str(a_obj)]
+        cmd_ar = [ar_bin, "rcs", str(lib_file)] + objects
         res_ar = subprocess.run(cmd_ar, capture_output=True, text=True, encoding="utf-8", errors="replace")
         if res_ar.returncode != 0:
             raise RuntimeError(f"'ar rcs' failed: {res_ar.stderr[:500]}")
@@ -545,7 +546,9 @@ setup(
         import subprocess, time
 
         t_start = time.perf_counter()
-
+        core_root = Path(__file__).resolve().parent
+        self.soteria_include = core_root / "diagnostic" / "soteria" / "include"
+        self.soteria_src_dir = core_root / "diagnostic" / "soteria" / "src"
         # 1. Localização do arquivo C gerado pelo Cython
         c_file = self.env.foundry / f"{module_name}.c"
         if getattr(self, "use_soteria", False):
@@ -605,7 +608,7 @@ setup(
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=180,
+                timeout=300,  # ← was 180; increased for large modules on slow hardware
             )
             elapsed = (time.perf_counter() - t_start) * 1000
             self.detailed_telemetry.setdefault(module_name, {})["link_ms"] = elapsed
