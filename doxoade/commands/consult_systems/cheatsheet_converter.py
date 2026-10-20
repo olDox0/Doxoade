@@ -17,6 +17,9 @@ DEFAULT_URL = "https://raw.githubusercontent.com/gto76/python-cheatsheet/main/RE
 
 
 class CheatsheetConverter:
+    category = "python_cheatsheet"
+    canonical_filename = "python_cheatsheet.jsonl"
+
     def __init__(self, output_dir: Optional[Path] = None):
         self.output_dir = output_dir or (Path.home() / ".doxoade" / "consult" / "canonical")
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -70,7 +73,6 @@ class CheatsheetConverter:
             uid = f"python/cheatsheet/{slug}"
             keywords = self._extract_keywords(title, body)
 
-            # Cabeçalho único e elegante no topo do capítulo
             full_content = f"# 📖 {title}\n\n{body}\n"
 
             records.append({
@@ -89,7 +91,6 @@ class CheatsheetConverter:
             line = lines[i]
             stripped = line.strip()
 
-            # Preserva blocos de código com comentários
             if stripped.startswith("```"):
                 in_code_block = not in_code_block
                 buffer.append(line)
@@ -101,7 +102,7 @@ class CheatsheetConverter:
                 i += 1
                 continue
 
-            # 1. Detecção de Cabeçalho Setext (ex: 'JSON\n----' ou 'Class\n-----')
+            # 1. Cabeçalho Setext (ex: 'JSON\n----')
             if i + 1 < total_lines and stripped and not stripped.startswith('#') and not stripped.startswith('`'):
                 next_line = lines[i + 1].strip()
                 if re.match(r'^={3,}\s*$', next_line):
@@ -116,8 +117,7 @@ class CheatsheetConverter:
                     i += 2
                     continue
 
-            # 2. Detecção de Cabeçalho ATX (# e ##).
-            # ATENÇÃO: Os '###' NÃO sofrem flush! Eles viram subseções no mesmo artigo!
+            # 2. Cabeçalho ATX (# e ##). '###' vira subseção no mesmo artigo.
             if stripped.startswith('# ') or stripped.startswith('## '):
                 m = re.match(r'^(#{1,2})\s+(.+)$', stripped)
                 if m:
@@ -154,6 +154,10 @@ class CheatsheetConverter:
 
         print(f"✔ Conversão concluída: {self.output_file.name}")
         return self.output_file
+
+    # Shim opcional para compatibilidade com o registry (Fase B remove isso)
+    def convert(self, source_url: Optional[str] = None) -> Path:
+        return self.process_url(source_url or DEFAULT_URL)
 
 
 def run_converter():

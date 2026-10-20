@@ -343,6 +343,37 @@ function ConsultDocReaderView:new(title, doc_path, md_lines, parent_search_view)
   self.sel_end_line = nil
 end
 
+local function style_line_markdown(line)
+    -- Retorna { {text=..., style=...}, ... }
+    local parts = {}
+    local pos = 1
+    -- Detecta header
+    local header = line:match("^(#+)%s+(.+)$")
+    if header then
+        table.insert(parts, { text = header, style = style.accent })
+        return parts
+    end
+    -- Detecta inline code
+    while true do
+        local a, b = line:find("`", pos)
+        if not a then
+            table.insert(parts, { text = line:sub(pos), style = style.text })
+            break
+        end
+        if a > pos then
+            table.insert(parts, { text = line:sub(pos, a - 1), style = style.text })
+        end
+        local c, d = line:find("`", b + 1)
+        if not c then
+            table.insert(parts, { text = line:sub(b + 1), style = style.text })
+            break
+        end
+        table.insert(parts, { text = line:sub(b + 1, c - 1), style = style.syntax })
+        pos = d + 1
+    end
+    return parts
+end
+
 local function wrap_line(line, width)
   local parts = {}
   while #line > width do

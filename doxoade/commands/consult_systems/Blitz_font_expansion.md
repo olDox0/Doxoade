@@ -385,3 +385,57 @@ Qualquer tentativa de ingerir documentação em Markdown resulta em `JSONDecodeE
 
 ---
 
+### A Prioridade é o python basico, assim erros comuns de syntax e contratos são resolvidos pelo usuario ou pelo brunnr
+
+- Cat 1. python basico
+  * A Byte of Python  * 
+  * Automate the Boring Stuff  * 
+  * PY4E  * 
+  * DevDocs Scraped Reference  * 
+  * TheAlgorithms  * 
+  * https://github.com/asabeneh/30-days-of-python  * 
+
+- Cat 2. desenvolvimento python avançado
+  * Python Design Patterns  * 
+  * PEP  * 
+  * Cosmic python  * 
+  * 30 Seconds of Python  * 
+  * Python std libs  * 
+  * Typeshed Stdlib Stubs  * 
+
+- Cat 3. automação
+  * Click  * 
+  * Rich  * 
+  * Pytest  * 
+  * Unittest  * 
+
+- Cat 4. Outrem
+  * https://github.com/Asabeneh/10-days-of-git-and-github  * 
+  * https://github.com/fernandofeltrin/PYTHON  * 
+
+---
+
+Sistema de render de markdown e PDF para o litexl.
+
+
+fontes que podem ser procesadas.
+
+https://github.com/EbookFoundation/free-programming-books/blob/main/books/free-programming-books-pt_BR.md#python
+
+---
+
+dados uteis:
+
+batch(windows)
+
+
+bash/shell
+
+
+engenharia reversa
+
+
+lua
+
+
+computação e eng. sistemas
