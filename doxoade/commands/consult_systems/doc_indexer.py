@@ -1,8 +1,14 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/consult_systems/doc_indexer.py
 """
-DocIndexer v3.0 — Orquestrador Soberano de Indexação FTS5 & B-Tree (Thoth & Hades Engine).
+DocIndexer v3.1 — Orquestrador Soberano de Indexação FTS5 & B-Tree (Thoth & Hades Engine).
 Unifica a documentação HTML do CPython e os Datasets Canônicos em um único banco relacional + FTS5.
+
+v3.1 (fixes):
+- Pipeline _clean_cpython_markdown agora é efetivamente chamado no final de html_to_markdown.
+- _fix_mojibake com strings Unicode escapadas (sem ambiguidade visual).
+- RE_INLINE_CODE remove <span class="pre"> do Sphinx antes de envolver em backtick.
+- Snippet de busca aumentado para 60 tokens (~30 palavras de contexto).
 """
 from __future__ import annotations
 import os
@@ -31,6 +37,91 @@ RE_H2 = re.compile(r'<h2[^>]*>(.*?)</h2>', flags=re.DOTALL | re.IGNORECASE)
 RE_H3 = re.compile(r'<h3[^>]*>(.*?)</h3>', flags=re.DOTALL | re.IGNORECASE)
 RE_P = re.compile(r'<p[^>]*>(.*?)</p>', flags=re.DOTALL | re.IGNORECASE)
 RE_LI = re.compile(r'<li[^>]*>(.*?)</li>', flags=re.DOTALL | re.IGNORECASE)
+
+
+# ─── Limpeza pós-conversão HTML → Markdown (CPython/Sphinx) ───
+
+# Mapa de mojibake UTF-8→CP1252. Usamos escapes Unicode para não depender
+# da codificação do arquivo-fonte nem gerar ambiguidade visual.
+# ─── Limpeza pós-conversão HTML → Markdown (CPython/Sphinx) ───
+
+_MOJIBAKE_MAP = {
+    "\u00e2\u20ac\u2122": "\u2019",
+    "\u00e2\u20ac\u02dc": "\u2018",
+    "\u00e2\u20ac\u0153": "\u201c",
+    "\u00e2\u20ac\u009d": "\u201d",
+    "\u00e2\u20ac\u201d": "\u2014",
+    "\u00e2\u20ac\u201c": "\u2013",
+    "\u00c2\u00b6": "\u00b6",
+    "\u00c2\u00a7": "\u00a7",
+    "\u00c2\u00a9": "\u00a9",
+    "\u00c2\u00ae": "\u00ae",
+    "\u00c2\u00b7": "\u00b7",
+    "\u00e2\u20ac\u00a6": "\u2026",
+    "\u00e2\u2030\u00a5": "\u2265",
+    "\u00e2\u2030\u00a4": "\u2264",
+    "\u00e2\u2030\u00a0": "\u2260",
+}
+
+
+def _fix_mojibake(text: str) -> str:
+    for bad, good in _MOJIBAKE_MAP.items():
+        text = text.replace(bad, good)
+    return text
+
+
+def _strip_sphinx_permalink_paragraphs(text: str) -> str:
+    """Remove o ¶ de permalink que fica no fim de headers do Sphinx."""
+    # Casa "¶" isolado no fim da linha (com espaços/tabs antes)
+    return re.sub(r"[ \t]*\u00b6[ \t]*$", "", text, flags=re.MULTILINE)
+
+
+def _strip_span_artifacts(text: str) -> str:
+    """Remove espaços internos de inline code e colapsa espaços duplos fora de fences."""
+    # 1) ` foo ` → `foo`  (espaços dentro do backtick)
+    text = re.sub(r"`[ \t]+([^`\n]+?)[ \t]+`", r"`\1`", text)
+    # 2) `` → ` (colapsa múltiplos backticks)
+    text = re.sub(r"``([^`\n]+?)``", r"`\1`", text)
+    # 3) Colapsa espaços duplos FORA de fences ``` ``` e fora de backticks
+    #    Usa state machine: percorre linha por linha, rastreia se está em fence
+    out_lines = []
+    in_fence = False
+    for line in text.split("\n"):
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            out_lines.append(line)
+            continue
+        if in_fence:
+            out_lines.append(line)
+            continue
+        # Colapsa [ \t]{2,} → " " mas preserva espaços internos de backticks
+        # Para preservar `PyTypeObject` como token único, split por backtick
+        parts = line.split("`")
+        for i in range(len(parts)):
+            if i % 2 == 0:
+                parts[i] = re.sub(r"[ \t]{2,}", " ", parts[i])
+        out_lines.append("`".join(parts))
+    return "\n".join(out_lines)
+
+
+def _ensure_header_spacing(text: str) -> str:
+    """Garante \n\n antes e depois de cada header (#, ##, ###)."""
+    # Colapsa \n\n+ antes do header em \n\n
+    text = re.sub(r"\n{2,}(#{1,3}\s)", r"\n\n\1", text)
+    # Colapsa \n\n+ depois do header em \n\n
+    text = re.sub(r"(#{1,3}\s[^\n]+)\n{1,}", r"\1\n\n", text)
+    # Colapsa \n\n+ em geral
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text
+
+
+def _clean_cpython_markdown(text: str) -> str:
+    """Pipeline completo de limpeza para HTML do CPython."""
+    text = _fix_mojibake(text)
+    text = _strip_sphinx_permalink_paragraphs(text)
+    text = _strip_span_artifacts(text)
+    text = _ensure_header_spacing(text)
+    return text.strip()
 
 
 class DocIndexer:
@@ -62,7 +153,6 @@ class DocIndexer:
                 conn.execute("DROP TABLE IF EXISTS docs;")
                 conn.execute("DROP TABLE IF EXISTS doc_metadata;")
             else:
-                # Migração automática se tabelas antigas estiverem sem colunas canônicas
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='docs';")
                 if cursor.fetchone():
                     cursor.execute("PRAGMA table_info(docs);")
@@ -77,7 +167,6 @@ class DocIndexer:
                     if "keywords" not in cols or "path" not in cols:
                         conn.execute("DROP TABLE docs_fts;")
 
-            # 1. Tabela relacional permanente (chave primária 'path')
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS docs (
                     path TEXT PRIMARY KEY,
@@ -88,7 +177,6 @@ class DocIndexer:
                 );
             """)
 
-            # 2. Tabela virtual FTS5 com tokenizador porter unicode61
             conn.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
                     path UNINDEXED,
@@ -99,7 +187,6 @@ class DocIndexer:
                 );
             """)
 
-            # 3. Metadados de mtime dos arquivos HTML
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS doc_metadata (
                     path TEXT PRIMARY KEY,
@@ -119,15 +206,18 @@ class DocIndexer:
         candidates = []
         py_prefix = Path(sys.base_prefix)
         candidates.append(py_prefix / "Doc" / "html")
-        candidates.append(py_prefix / "share" / "doc" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "html")
-
+        candidates.append(
+            py_prefix / "share" / "doc"
+            / f"python{sys.version_info.major}.{sys.version_info.minor}" / "html"
+        )
         if os.name == 'nt':
             local_app = os.environ.get("LOCALAPPDATA", "")
             if local_app:
                 candidates.append(
-                    Path(local_app) / "Programs" / "Python" / f"Python{sys.version_info.major}{sys.version_info.minor}" / "Doc" / "html"
+                    Path(local_app) / "Programs" / "Python"
+                    / f"Python{sys.version_info.major}{sys.version_info.minor}"
+                    / "Doc" / "html"
                 )
-
         for c in candidates:
             if c.exists() and (c / "index.html").exists():
                 return c
@@ -142,11 +232,9 @@ class DocIndexer:
         clean = html_lib.unescape(clean)
         clean = RE_SPACES.sub(' ', clean).strip()
 
-        # Extrai palavras-chave do nome do arquivo e título
         stem = file_path.stem.lower()
         title_words = re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]{2,}\b', title.lower())
         keywords = f"{stem} {' '.join(title_words[:10])}"
-
         return title, clean, keywords
 
     def html_to_markdown(self, raw_html: str, title_fallback: str = "Doc") -> str:
@@ -157,14 +245,17 @@ class DocIndexer:
         text = RE_STRIP_BLOCKS.sub(' ', body)
 
         code_placeholders = {}
+
         def _save_code(m):
-            token = f"@@CODEBLOCK_{len(code_placeholders)}@@"
+            token = f"@@CODEBLOCK_{len(code_placeholders)}@@" 
             code_placeholders[token] = html_lib.unescape(m.group(1).strip())
             return f"\n\n{token}\n\n"
 
         text = RE_CODE_BLOCK.sub(_save_code, text)
         text = RE_PRE_BLOCK.sub(_save_code, text)
-        text = RE_INLINE_CODE.sub(lambda m: f"`{html_lib.unescape(m.group(1).strip())}`", text)
+
+        # Inline code com limpeza interna (remove <span class="pre">)
+        text = RE_INLINE_CODE.sub(_clean_inline_code, text)
 
         text = RE_H1.sub(lambda m: f"\n\n# {html_lib.unescape(m.group(1).strip())}\n\n", text)
         text = RE_H2.sub(lambda m: f"\n\n## {html_lib.unescape(m.group(1).strip())}\n\n", text)
@@ -183,15 +274,13 @@ class DocIndexer:
         lines = [line.rstrip() for line in text.splitlines()]
         clean_text = "\n".join(lines)
         clean_text = re.sub(r'\n{3,}', '\n\n', clean_text).strip()
+
+        # ─── PATCH: pipeline de limpeza pós-conversão ───
+        clean_text = _clean_cpython_markdown(clean_text)
+
         return f"# 📖 {title}\n\n{clean_text}"
 
     def _isolate_sphinx_body(self, raw_html: str) -> str:
-        """
-        🛡️ [RIT-002 FIX v2] Isolamento por marcadores posicionais.
-        Nota técnica (§5.1): regex lazy `(.*?)</div>` ceifa o body no primeiro
-        div aninhado do Sphinx (highlight/section/admonition). Aqui nenhuma tag
-        de fechamento é casada: o corte usa marcadores que só existem APÓS o body.
-        """
         start_m = re.search(r'<div[^>]*role="main"[^>]*>', raw_html, re.IGNORECASE)
         if not start_m:
             start_m = re.search(r'<div[^>]*class="body"[^>]*>', raw_html, re.IGNORECASE)
@@ -211,30 +300,29 @@ class DocIndexer:
         return body[:min(cuts)] if cuts else body
 
     def search(self, query: str, limit: int = 25) -> List[Tuple[str, str, str]]:
-        """Busca textual no FTS5 com prefixos coringa (*)."""
-        if not self.db_path.exists():
+        if not query or not query.strip():
             return []
 
-        clean_q = re.sub(r'[^\w\s]', ' ', query).strip()
-        if not clean_q:
-            return []
-
-        tokens = clean_q.split()
-        fts_query = " OR ".join([f'"{tok}"*' for tok in tokens])
-
+        clean_q = query.strip()
         conn = self._get_db_connection(bulk_mode=False)
         cursor = conn.cursor()
 
         sql = """
-            SELECT 
+            SELECT
                 path,
                 title,
-                snippet(docs_fts, 3, '\x02', '\x03', '...', 18) as snippet
+                snippet(docs_fts, 3, '\x02', '\x03', '...', 60) as snippet
             FROM docs_fts
             WHERE docs_fts MATCH ?
             ORDER BY rank
             LIMIT ?;
         """
+
+        fts_query = clean_q
+        if " " in clean_q and not any(c in clean_q for c in ('"', '*')):
+            terms = [f'"{t}"' for t in clean_q.split() if t]
+            fts_query = " ".join(terms)
+
         try:
             cursor.execute(sql, (fts_query, limit))
             return cursor.fetchall()
@@ -248,23 +336,15 @@ class DocIndexer:
             conn.close()
 
     def read_doc_as_markdown(self, path_or_query: str) -> Optional[str]:
-        """
-        Leitor Universal Inteligente:
-        1. Busca exata por chave primária (0.1ms).
-        2. Busca flexível por aproximação de path ou título (ex: 'json' acha 'python/cheatsheet/json').
-        3. Fallback de arquivo HTML físico no disco.
-        """
         clean_path = path_or_query.strip().strip("'\"")
 
         if self.db_path.exists():
             try:
                 conn = self._get_db_connection(bulk_mode=False)
-                # 1. Busca exata
                 row = conn.execute(
                     "SELECT title, content FROM docs WHERE path = ? LIMIT 1;", (clean_path,)
                 ).fetchone()
 
-                # 2. Busca flexível se o usuário digitou apenas 'json' ou 'dataclass'
                 if not row:
                     row = conn.execute(
                         "SELECT title, content FROM docs WHERE path LIKE ? OR title LIKE ? LIMIT 1;",
@@ -280,7 +360,6 @@ class DocIndexer:
             except Exception:
                 pass
 
-        # Fallback de arquivo HTML no disco
         docs_dir = self.find_python_docs()
         target = Path(clean_path)
         if not target.is_absolute() and docs_dir:
@@ -293,7 +372,6 @@ class DocIndexer:
         return None
 
     def build_index(self, force: bool = False):
-        """Indexação Unificada: CPython HTMLs + Datasets Canônicos em uma só passada."""
         self.console.print(f"[bold cyan]🗃️ [HADES] Inicializando Motor de Indexação Unificado...[/bold cyan]")
         self.init_db(drop_existing=force)
 
@@ -362,58 +440,53 @@ class DocIndexer:
         else:
             self.console.print("  [yellow]⚠ Pasta de HTML Docs do CPython não encontrada no ambiente.[/yellow]")
 
-        # ── PARTIÇÃO 2: DATASET CANÔNICO (CHEATSHEET) ──
+        # ── PARTIÇÃO 2: DATASETS CANÔNICOS (*.jsonl) ──
         canonical_dir = Path.home() / ".doxoade" / "consult" / "canonical"
-        cheatsheet_file = canonical_dir / "python_cheatsheet.jsonl"
+        canonical_dir.mkdir(parents=True, exist_ok=True)
 
-        # Se o canônico ainda não foi gerado, roda o conversor automaticamente
-        if not cheatsheet_file.exists():
-            self.console.print("  [yellow]⚡ Gerando arquivo canônico do Cheatsheet automaticamente...[/yellow]")
-            try:
-                from .cheatsheet_converter import CheatsheetConverter
-                CheatsheetConverter(canonical_dir).process_url()
-            except Exception as e:
-                self.console.print(f"  [red]✘ Erro ao gerar Cheatsheet: {e}[/red]")
+        jsonl_files = sorted(canonical_dir.glob("*.jsonl"))
+        total_canonical_records = 0
 
-        cheatsheet_indexed = 0
-        if cheatsheet_file.exists():
-            self.console.print(f"  📖 Ingerindo Cheatsheet Canônico: [cyan]{cheatsheet_file.name}[/cyan]...")
+        if jsonl_files:
             db_conn = self._get_db_connection(bulk_mode=True)
             cursor = db_conn.cursor()
 
             try:
                 db_conn.execute("BEGIN IMMEDIATE;")
-                # Limpa partições antigas do cheatsheet antes de reinserir
-                cursor.execute("DELETE FROM docs_fts WHERE path LIKE 'python/cheatsheet/%';")
-                cursor.execute("DELETE FROM docs WHERE category = 'python_cheatsheet';")
+                for jf in jsonl_files:
+                    b_docs, b_fts = [], []
+                    self.console.print(f"  📖 Ingerindo Acervo Canônico: [cyan]{jf.name}[/cyan]...")
 
-                b_docs, b_fts = [], []
-                with open(cheatsheet_file, "r", encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if line:
-                            try:
-                                r = json.loads(line)
-                                path = r.get("path") or r.get("uid", "")
-                                cat = r.get("category", "python_cheatsheet")
-                                title = r.get("title", "")
-                                kw = r.get("keywords", "")
-                                content = r.get("content", "")
+                    with open(jf, "r", encoding="utf-8") as f:
+                        for line in f:
+                            line = line.strip()
+                            if line:
+                                try:
+                                    r = json.loads(line)
+                                    path = r.get("path") or r.get("uid", "")
+                                    cat = r.get("category", jf.stem)
+                                    title = r.get("title", "")
+                                    kw = r.get("keywords", "")
+                                    content = r.get("content", "")
 
-                                b_docs.append((path, cat, title, kw, content))
-                                b_fts.append((path, title, kw, content))
-                            except Exception:
-                                continue
+                                    b_docs.append((path, cat, title, kw, content))
+                                    b_fts.append((path, title, kw, content))
+                                except Exception:
+                                    continue
 
-                if b_docs:
-                    cursor.executemany("INSERT OR REPLACE INTO docs VALUES (?, ?, ?, ?, ?);", b_docs)
-                    cursor.executemany("INSERT INTO docs_fts VALUES (?, ?, ?, ?);", b_fts)
-                    cheatsheet_indexed = len(b_docs)
+                    if b_docs:
+                        cat_clean = b_docs[0][1]
+                        cursor.execute("DELETE FROM docs_fts WHERE path IN (SELECT path FROM docs WHERE category = ?);", (cat_clean,))
+                        cursor.execute("DELETE FROM docs WHERE category = ?;", (cat_clean,))
+
+                        cursor.executemany("INSERT OR REPLACE INTO docs VALUES (?, ?, ?, ?, ?);", b_docs)
+                        cursor.executemany("INSERT INTO docs_fts VALUES (?, ?, ?, ?);", b_fts)
+                        total_canonical_records += len(b_docs)
 
                 db_conn.execute("COMMIT;")
             except Exception as e:
                 db_conn.execute("ROLLBACK;")
-                self.console.print(f"  [red]✘ Erro ao indexar Cheatsheet: {e}[/red]")
+                self.console.print(f"  [red]✘ Erro ao indexar acervos canônicos: {e}[/red]")
             finally:
                 db_conn.close()
 
@@ -430,10 +503,10 @@ class DocIndexer:
 
         db_size_mb = self.db_path.stat().st_size / (1024 * 1024)
         self.console.print(f"\n[green bold]✔ [HADES] Base Unificada Concluída com Sucesso![/green bold]")
-        self.console.print(f"  • CPython HTML Docs: [bold white]{html_indexed}[/bold white] adicionados")
-        self.console.print(f"  • Cheatsheet Chunks:  [bold white]{cheatsheet_indexed}[/bold white] adicionados")
-        self.console.print(f"  • Total no Banco:     [bold green]{total_records}[/bold green] documentos disponíveis")
-        self.console.print(f"  • Tamanho no Disco:   [bold cyan]{db_size_mb:.2f} MB[/bold cyan]\n")
+        self.console.print(f"  • CPython HTML Docs:   [bold white]{html_indexed}[/bold white] adicionados")
+        self.console.print(f"  • Acervos Canônicos:   [bold white]{total_canonical_records}[/bold white] adicionados")
+        self.console.print(f"  • Total no Banco:       [bold green]{total_records}[/bold green] documentos disponíveis")
+        self.console.print(f"  • Tamanho no Disco:     [bold cyan]{db_size_mb:.2f} MB[/bold cyan]\n")
 
     def _commit_batch(self, conn: sqlite3.Connection, b_docs, b_fts, b_meta):
         cursor = conn.cursor()

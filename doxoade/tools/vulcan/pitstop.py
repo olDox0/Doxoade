@@ -785,7 +785,12 @@ class PitstopEngine:
         compiler_thread = threading.Thread(target=_compile_consumer, daemon=True)
         compiler_thread.start()
         t_forge = time.perf_counter()
-        forge_tasks = [{'file_path': c['file'], 'foundry': str(self.env.foundry)} for c in stale]
+        #forge_tasks = [{'file_path': c['file'], 'foundry': str(self.env.foundry)} for c in stale]
+        forge_tasks = [{
+            'file_path': c['file'],
+            'foundry': str(self.env.foundry),
+            'project_root': str(self.env.root),  # ← ADD THIS
+        } for c in stale]
         with TPE(max_workers=n_workers) as executor:
             futures = {executor.submit(_forge_to_pyx, task): task for task in forge_tasks}
             for future in as_completed(futures):
@@ -845,7 +850,8 @@ class PitstopEngine:
         tasks = [{
             'file_path': c['file'],
             'foundry': str(self.env.foundry),
-            'use_soteria': self.use_soteria
+            'use_soteria': self.use_soteria,
+            'project_root': str(self.env.root),  # ← ADD THIS
         } for c in candidates]
         
         with TPE(max_workers=n_workers) as executor:

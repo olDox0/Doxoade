@@ -10,7 +10,7 @@ import re
 import sys
 import os
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Type
 
 # 🛡️ ADAPTADOR DE IMPORTAÇÃO UNIVERSAL (Hermes)
 # Permite que o arquivo seja executado tanto via 'python -m' quanto diretamente pela bridge Lua.
@@ -254,56 +254,88 @@ def cmd_symbols():
     except Exception:
         renderer.render_error("symbols", "Não foi possível carregar a lista de símbolos via pydoc.")
 
+# ─── REGISTRY DE CONVERTERS ─────────────────────────────────────────────
+# Mapeamento central de presets → classes de converter canônico.
+# Cada converter deve retornar um Path de arquivo .jsonl em
+# ~/.doxoade/consult/canonical/ que será ingerido pelo CanonicalDB.
+def _get_converter_registry() -> Dict[str, str]:
+    """Retorna mapa name → 'module:Class'. Import só no momento do uso."""
+    return {
+        "cheatsheet":     "doxoade.commands.consult_systems.cheatsheet_converter:CheatsheetConverter",
+        "byte_of_python": "doxoade.commands.consult_systems.converters.byte_of_python_converter:ByteOfPythonConverter",
+        "30days":         "doxoade.commands.consult_systems.converters.thirty_days_converter:ThirtyDaysConverter",
+        "py4e":           "doxoade.commands.consult_systems.converters.py4e_converter:Py4eConverter",
+        "the_algorithms": "doxoade.commands.consult_systems.converters.the_algorithms_converter:TheAlgorithmsConverter",
+        "automate":       "doxoade.commands.consult_systems.converters.automate_boring_stuff_converter:AutomateBoringStuffConverter",
+        "peps":           "doxoade.commands.consult_systems.converters.peps_converter:PepsConverter",
+        "cosmic":         "doxoade.commands.consult_systems.converters.cosmic_python_converter:CosmicPythonConverter",
+        "patterns":       "doxoade.commands.consult_systems.converters.design_patterns_converter:DesignPatternsConverter",
+        "typeshed":       "doxoade.commands.consult_systems.converters.typeshed_converter:TypeshedConverter",
+        "automation":     "doxoade.commands.consult_systems.converters.click_rich_pytest_converter:ClickRichPytestConverter",
+    }
+
+
+def _resolve_converter(name: str):
+    """Importa o converter só no momento do uso."""
+    from importlib import import_module
+    path = _get_converter_registry()[name]
+    mod_path, cls_name = path.split(":")
+    mod = import_module(mod_path)
+    return getattr(mod, cls_name)
+
+
+def _ingest_one(name: str, converter) -> int:
+    from .canonical_db import CanonicalDB
+    click.secho(f"\n▶ [{name}] Executando converter...", fg="cyan", bold=True)
+    try:
+        canonical_file = converter.convert()
+    except Exception as e:
+        click.secho(f"  ✖ [{name}] Falha no converter: {e}", fg="red")
+        return 0
+    if not canonical_file or not canonical_file.exists():
+        click.secho(f"  ✖ [{name}] Converter não produziu arquivo canônico.", fg="red")
+        return 0
+    db = CanonicalDB()
+    count = db.ingest_jsonl(canonical_file)
+    click.secho(f"  ✔ [{name}] {count} registros indexados no Hades.", fg="green")
+    return count
+
+
 @consult_group.command("ingest", help="📥 Indexa datasets canônicos normalizados.")
 @click.argument("source", type=str, default="cheatsheet")
+@click.option("--limit", "-l", type=int, default=0,
+              help="Limita o nº de registros por fonte (0 = sem limite).")
 @click.pass_context
-def cmd_ingest(ctx, source: str):
-    is_prof = ctx.obj.get("shadow_prof", False)
-    with ShadowProfiler("consult_ingest", enabled=is_prof) as profiler:
-        if source == "cheatsheet":
-            from .cheatsheet_converter import CheatsheetConverter
-            from .canonical_db import CanonicalDB
-            
-            converter = CheatsheetConverter()
-            canonical_file = converter.process_url()
-            
-            db = CanonicalDB()
-            count = db.ingest_jsonl(canonical_file)
-            click.secho(f"\n✔ [HADES] Cheatsheet sincronizado e indexado ({count} registros)!", fg="green", bold=True)
-        else:
-            click.secho(f"Fonte '{source}' não reconhecida.", fg="red")
-            
-    if is_prof:
-        profiler.render_hud()
+def cmd_ingest(ctx, source: str, limit: int):
+    is_prof = ctx.obj.get("shadow_prof", False) if ctx.obj else False
+    registry = _get_converter_registry()
 
-    source_path = Path(source)
-    
-    # Roteamento Inteligente de Fonte
-    if source in PRESETS:
-        target_source = PRESETS[source]["url"]
-        dataset_name = PRESETS[source]["name"]
-    elif source.startswith("http"):
-        target_source = source
-        dataset_name = source.split("/")[-1].split("?")[0] or "custom_dataset"
-    elif source_path.exists() and source_path.is_file():
-        target_source = str(source_path.resolve())
-        dataset_name = source_path.stem # Ex: "stack_edu_python"
+    if source == "all":
+        targets = list(registry.keys())
+    elif source in registry:
+        targets = [source]
     else:
-        click.secho(f"❌ Fonte '{source}' não reconhecida. Use um preset, uma URL direta ou um caminho de arquivo local válido.", fg="red")
+        available = ", ".join(sorted(registry.keys())) + ", all"
+        click.secho(
+            f"❌ Fonte '{source}' não reconhecida.\n"
+            f"   Opções: {available}",
+            fg="red"
+        )
         return
 
-    from .dataset_ingestor import DatasetIngestor
-    from .doc_indexer import DocIndexer
-    
-    db_path = Path.home() / ".doxoade" / "consult_docs_fts5.db"
-    
-    # Garante que a tabela FTS5 existe
-    indexer = DocIndexer(db_path)
-    indexer.init_db()
-    
-    ingestor = DatasetIngestor(db_path)
-    
+    total = 0
     with ShadowProfiler("consult_ingest", enabled=is_prof) as profiler:
-        ingestor.ingest(target_source, dataset_name, limit=limit)
-        if is_prof:
-            profiler.render_hud()
+        for name in targets:
+            try:
+                converter = _resolve_converter(name)()
+            except Exception as e:
+                click.secho(f"  ✖ [{name}] Falha no import: {e}", fg="red")
+                continue
+            total += _ingest_one(name, converter)
+        click.secho(
+            f"\n✔ [HADES] Ingestão concluída: {total} registros totais "
+            f"de {len(targets)} fonte(s).",
+            fg="green", bold=True
+        )
+    if is_prof:
+        profiler.render_hud()

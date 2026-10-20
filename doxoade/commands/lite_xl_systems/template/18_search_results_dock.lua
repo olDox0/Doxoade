@@ -13,6 +13,42 @@ local keymap = require "core.keymap"
 
 local SearchResultsView = View:extend()
 
+local function parse_snippet_markers(snippet)
+    -- O FTS5 retorna markers \x02 (start) e \x03 (end) em volta dos hits
+    -- Retorna uma lista de {text=..., highlighted=bool}
+    local segments = {}
+    if not snippet or snippet == "" then return segments end
+    
+    local buf = {}
+    local in_hit = false
+    local i = 1
+    local len = #snippet
+    
+    while i <= len do
+        local c = snippet:sub(i, i)
+        if c == "\x02" then
+            if #buf > 0 then
+                table.insert(segments, { text = table.concat(buf), highlighted = in_hit })
+                buf = {}
+            end
+            in_hit = true
+        elseif c == "\x03" then
+            if #buf > 0 then
+                table.insert(segments, { text = table.concat(buf), highlighted = true })
+                buf = {}
+            end
+            in_hit = false
+        else
+            table.insert(buf, c)
+        end
+        i = i + 1
+    end
+    if #buf > 0 then
+        table.insert(segments, { text = table.concat(buf), highlighted = in_hit })
+    end
+    return segments
+end
+
 function SearchResultsView:new()
   if SearchResultsView.super and SearchResultsView.super.new then
     pcall(SearchResultsView.super.new, self)
@@ -23,6 +59,47 @@ function SearchResultsView:new()
   self.header_h = 32
   self.hovered_idx = nil
   self.selected_idx = 0
+end
+
+local function draw_rich_snippet(view, snippet, x, y, width)
+    local segments = parse_snippet_markers(snippet)
+    local cur_x = x
+    local cur_y = y
+    local line_height = view:get_font():get_height()
+    
+    for _, seg in ipairs(segments) do
+        local color = seg.highlighted and style.accent or style.text
+        local bg = seg.highlighted and style.background2 or nil
+        
+        -- Quebra por backticks dentro do segmento
+        local parts = {}
+        local pos = 1
+        while true do
+            local a, b = seg.text:find("`", pos)
+            if not a then
+                table.insert(parts, { text = seg.text:sub(pos), code = false })
+                break
+            end
+            if a > pos then
+                table.insert(parts, { text = seg.text:sub(pos, a - 1), code = false })
+            end
+            local c, d = seg.text:find("`", b + 1)
+            if not c then
+                table.insert(parts, { text = seg.text:sub(b + 1), code = false })
+                break
+            end
+            table.insert(parts, { text = seg.text:sub(b + 1, c - 1), code = true })
+            pos = d + 1
+        end
+        
+        for _, p in ipairs(parts) do
+            local part_color = p.code and style.syntax or color
+            renderer.font:set_color(part_color)
+            if bg then renderer:draw_rect(x, cur_y, width, line_height, bg) end
+            renderer:draw_text(cur_x, cur_y, p.text)
+            cur_x = cur_x + renderer.font:get_width(p.text)
+        end
+    end
 end
 
 function SearchResultsView:get_name()

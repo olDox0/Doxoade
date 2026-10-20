@@ -82,7 +82,7 @@ class CanonicalDB:
         finally:
             conn.close()
 
-    def ingest_jsonl(self, jsonl_path: Path, category_filter: Optional[str] = None) -> int:
+    def ingest_jsonl(self, jsonl_path: Path, category_filter: Optional[str] = None, limit: int = 0) -> int:
         """Ingere um dataset canônico com substituição limpa (idempotente)."""
         self.init_schema()
         conn = self.get_connection(bulk=True)
@@ -90,7 +90,10 @@ class CanonicalDB:
 
         records: List[Dict[str, Any]] = []
         with open(jsonl_path, "r", encoding="utf-8") as f:
+            count = 0
             for line in f:
+                if limit and count >= limit:
+                    break
                 line = line.strip()
                 if line:
                     try:

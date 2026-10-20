@@ -261,14 +261,22 @@ def vulcan_status():
         click.echo(f"{Fore.CYAN}{rel_path[:35]:<35}{Style.RESET_ALL} │ {Fore.YELLOW}{size:>7.1f} KB{Style.RESET_ALL}    │ {status_txt}")
 
 @vulcan_group.command('purge')
-def vulcan_purge():
-    """Remove todos os binários e códigos temporários da forja."""
+@click.option('--all', 'purge_all', is_flag=True, help='Também apaga bin/ e lib_bin/.')
+def vulcan_purge(purge_all):
     root = _find_project_root(os.getcwd())
     from doxoade.tools.vulcan.environment import VulcanEnvironment
     env = VulcanEnvironment(root)
     if click.confirm(f'{Fore.RED}Deseja realmente limpar a foundry Vulcano?{Fore.RESET}'):
         env.purge_unstable()
         click.echo(f'{Fore.GREEN}Foundry purificada.{Fore.RESET}')
+        if purge_all:
+            import shutil
+            for sub in ('bin', 'lib_bin', 'staging', 'opt_py'):
+                p = env.work_dir / sub
+                if p.exists():
+                    shutil.rmtree(p, ignore_errors=True)
+            env._setup_structure()
+            click.echo(f'{Fore.GREEN}Binários limpos.{Fore.RESET}')
 
 def _register_subcommands():
     """⚡ Injeção Segura: Subcomandos importados apenas após as dependências existirem."""

@@ -273,17 +273,17 @@ class PurityMeter(ast.NodeVisitor):
         else: self.py_calls += 1
         self.generic_visit(node)
 
-class VulcanForge:
+class VulcanForge(ast.NodeTransformer):
     """Transpilador Estrutural: Converte Python moderno em C-Style limpo."""
 
-    def __init__(self, target_path: str = "", env_root: str | None = None):
-        super().__init__()
+    def __init__(self, target_path: str='', env_root: str = None):
+        super().__init__()  # now calls ast.NodeTransformer.__init__()
         self.original_imports: list = []
         self.blacklist: Set[str] = _BLACKLIST
         self._blacklisted_names: Set[str] = set()
         self._name_rewrites: list[dict[str, str]] = []
         self.target_path = target_path
-        self._env_root = env_root  # ← NEW: projeto raiz para conversão de imports
+        self._env_root = env_root
         self.blacklist = {'click', 'rich', 'colorama', 'progressbar', 'click_echo'}
         self.hot_names = {'n', 'i', 'j', 'k', 'idx', 'count', 'size', 'offset', 'delta', 'last_id', 'current_id', 'doc_id'}
 
@@ -486,12 +486,10 @@ class VulcanForge:
         return ast.Assign(targets=[node.target], value=node.value, lineno=node.lineno)
 
     def _transform_funcdef(self, node):
-        """
-        Lógica compartilhada entre visit_FunctionDef e visit_AsyncFunctionDef.
-        Remove type hints, decorators e aplica sufixo _vulcan_optimized.
-        """
+        """Remove type hints e decorators. NÃO renomeia (isso é do _forge_node)."""
         node.returns = None
         node.decorator_list = []
+        # rename de args
         name_map: dict[str, str] = {}
         args = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
         if node.args.vararg:
@@ -504,8 +502,6 @@ class VulcanForge:
                 name_map[arg.arg] = rewritten
         if name_map:
             self._name_rewrites.append(name_map)
-        if not node.name.endswith('_vulcan_optimized'):
-            node.name = f'{node.name}_vulcan_optimized'
         try:
             self.generic_visit(node)
         finally:
@@ -523,18 +519,21 @@ class VulcanForge:
         p = Path(file_path)
         raw_source = p.read_text(encoding='utf-8', errors='ignore')
         
-        # 1. Extração de Future Imports
         future_imports = re.findall(r'^(from\s+__future__\s+import\s+.+)$', raw_source, re.M)
         clean_source = re.sub(r'^(from\s+__future__\s+import\s+.+)$', '', raw_source, flags=re.M)
         
         tree = ast.parse(clean_source)
         
-        # [HEFESTO] Análise Preventiva
+        # [FIX] Invoca VulcanForge como NodeTransformer para transformar
+        # visit_ImportFrom, visit_Import, visit_arg, etc.
+        tree = self.visit(tree)  # ← THIS IS THE MISSING CALL
+        ast.fix_missing_locations(tree)
+        
         typer = VulcanAutoTyper(self.hot_names)
         typer.visit(tree)
         meter = PurityMeter()
         meter.visit(tree)
-        
+
         self._local_funcs = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
         
         # 2. Cabeçalho de Performance Máxima
