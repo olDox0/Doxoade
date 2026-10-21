@@ -851,7 +851,7 @@ class PitstopEngine:
             'file_path': c['file'],
             'foundry': str(self.env.foundry),
             'use_soteria': self.use_soteria,
-            'project_root': str(self.env.root),  # ← ADICIONAR
+            'project_root': str(self.env.root),
         } for c in candidates]
         
         with TPE(max_workers=n_workers) as executor:

@@ -153,9 +153,23 @@ class BodyPurityScanner(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Attribute(self, node):
-        # obj.attr exige o sistema de introspecção do Python
-        self.is_pure_c = False
-        self.generic_visit(node)
+        """
+        TRANSFORMAÇÃO: obj.name (READ-ONLY) → nexus_get_filename(obj)
+
+        CRITICAL: NÃO transforma quando o atributo é:
+          - alvo de atribuição (`self.name = x`) → ctx=Store
+          - alvo de del (`del self.name`)       → ctx=Del
+
+        Sem esta guarda, `self.name = name` vira `nexus_get_filename(self) = name`,
+        que é inválido em Cython ("Cannot assign to or delete this").
+        """
+        if node.attr == 'name' and isinstance(node.ctx, ast.Load):
+            return ast.Call(
+                func=ast.Name(id='nexus_get_filename', ctx=ast.Load()),
+                args=[node.value],
+                keywords=[]
+            )
+        return self.generic_visit(node)
 
     def visit_Return(self, node):
         # [FIX] Verifica se retorna Python object (Constant, Name, Call, etc)
@@ -398,12 +412,15 @@ class VulcanForge(ast.NodeTransformer):
 
     def visit_Attribute(self, node):
         """
-        TRANSFORMAÇÃO: pyd_path.name → nexus_get_filename(pyd_path)
-        SOMENTE quando o atributo é LIDO (Load).
-        NÃO transforma quando é ALVO de atribuição (Store/Del),
-        evitando: nexus_get_filename(self) = name (inválido).
+        TRANSFORMAÇÃO: obj.name (READ-ONLY) → nexus_get_filename(obj)
+
+        CRITICAL: NÃO transforma quando o atributo é:
+          - alvo de atribuição (`self.name = x`) → ctx=Store
+          - alvo de del (`del self.name`)       → ctx=Del
+
+        Sem esta guarda, `self.name = name` vira `nexus_get_filename(self) = name`,
+        que é inválido em Cython ("Cannot assign to or delete this").
         """
-        # Guarda crítica: só reescreve em contexto de leitura
         if node.attr == 'name' and isinstance(node.ctx, ast.Load):
             return ast.Call(
                 func=ast.Name(id='nexus_get_filename', ctx=ast.Load()),
@@ -421,7 +438,7 @@ class VulcanForge(ast.NodeTransformer):
         self.name = x naturalmente. Só atrapalha em atributos reservados
         (cdef, include, etc.).
         """
-        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Attribute):
+        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Attribute) and (node.targets[0].attr in _CYTHON_RESERVED_IDENTIFIERS):
             attr_node = node.targets[0]
             # Atributo reservado Cython (include, cdef, etc.) → setattr
             if attr_node.attr in _CYTHON_RESERVED_IDENTIFIERS:
@@ -527,6 +544,72 @@ class VulcanForge(ast.NodeTransformer):
         # Sem isso, visit_ImportFrom/visit_Attribute/visit_Assign nunca rodam,
         # e imports relativos ficam intactos → Cython rejeita.
         tree = self.visit(tree)
+
+        # ============================================================
+        # [FIX P2] Promove imports de `if TYPE_CHECKING:` para top-level.
+        #
+        # Problema: padrão comum em projetos tipados:
+        #   if TYPE_CHECKING:
+        #       from .utils import _read_file_safe
+        #   def foo():
+        #       return _read_file_safe(...)
+        #
+        # O Cython NÃO enxerga imports dentro de if TYPE_CHECKING (é um no-op
+        # em runtime Python, mas Cython falha com "undeclared name").
+        #
+        # Solução: extrai os imports do bloco e os injeta no top-level do pyx.
+        # ============================================================
+        type_checking_imports = []
+
+        def _is_type_checking_test(test_node):
+            """Detecta `if TYPE_CHECKING:` ou `if typing.TYPE_CHECKING:`"""
+            if isinstance(test_node, ast.Name) and test_node.id == 'TYPE_CHECKING':
+                return True
+            if (isinstance(test_node, ast.Attribute) and
+                test_node.attr == 'TYPE_CHECKING'):
+                return True
+            if (isinstance(test_node, ast.BoolOp) and
+                all(_is_type_checking_test(v) for v in test_node.values)):
+                return True
+            return False
+
+        for stmt in list(tree.body):
+            if isinstance(stmt, ast.If) and _is_type_checking_test(stmt.test):
+                for inner in stmt.body:
+                    if isinstance(inner, ast.ImportFrom):
+                        # Converte para import absoluto usando env_root
+                        if inner.level and inner.level > 0 and self._env_root:
+                            try:
+                                p = Path(self.target_path).resolve()
+                                parts = list(p.parts)
+                                base_idx = None
+                                if "doxoade" in parts:
+                                    base_idx = parts.index("doxoade")
+                                if base_idx is None:
+                                    root_parts = list(Path(self._env_root).resolve().parts)
+                                    if root_parts and parts[:len(root_parts)] == root_parts:
+                                        base_idx = len(root_parts)
+                                if base_idx is not None:
+                                    pkg_hierarchy = parts[base_idx:-1]
+                                    for _ in range(inner.level - 1):
+                                        if pkg_hierarchy:
+                                            pkg_hierarchy.pop()
+                                    if pkg_hierarchy:
+                                        base_prefix = ".".join(pkg_hierarchy)
+                                        if inner.module:
+                                            inner.module = f"{base_prefix}.{inner.module}"
+                                        else:
+                                            inner.module = base_prefix
+                                        inner.level = 0
+                            except Exception:
+                                pass
+                        if not inner.level and inner.module:
+                            type_checking_imports.append(ast.unparse(inner))
+                    elif isinstance(inner, ast.Import):
+                        type_checking_imports.append(ast.unparse(inner))
+
+        # (we'll inject type_checking_imports into pyx_lines later, after header)
+
         ast.fix_missing_locations(tree)
 
         # [HEFESTO] Análise Preventiva
