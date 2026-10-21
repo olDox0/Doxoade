@@ -1818,3 +1818,92 @@ def cmd_pty_install():
         else:
             click.echo(f"\n{Fore.RED}✖ Falha ao instalar via pip (Exit Code {res.returncode}). Tente manualmente: pip install pywinpty{Fore.RESET}\n")
 
+@lite_xl_group.command("pty-probe", help="🔬 Roda o daemon PTY standalone para diagnóstico.")
+@click.option("--shell", default="cmd", help="Shell alvo (cmd, powershell, bash).")
+@click.option("--timeout", "-t", default=5.0, type=float, help="Timeout em segundos.")
+def cmd_pty_probe(shell: str, timeout: float):
+    """Executa o daemon do PTY fora do Lite XL para expor erros reais."""
+    import tempfile, subprocess, sys
+    from pathlib import Path
+    
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🔬 PTY PROBE — Diagnóstico Standalone do Daemon{Style.RESET_ALL}\n")
+    
+    # Cria diretório temporário para IPC
+    probe_dir = Path(tempfile.mkdtemp(prefix="dox_pty_probe_"))
+    click.echo(f"  {Fore.WHITE}IPC dir:{Fore.RESET} {probe_dir}")
+    click.echo(f"  {Fore.WHITE}Python :{Fore.RESET} {sys.executable}")
+    click.echo(f"  {Fore.WHITE}Shell  :{Fore.RESET} {shell}")
+    click.echo(f"  {Fore.WHITE}Timeout:{Fore.RESET} {timeout}s\n")
+    
+    # Verifica dependências
+    click.echo(f"  {Fore.CYAN}[1/3] Verificando dependências...{Fore.RESET}")
+    if sys.platform == "win32":
+        try:
+            import winpty
+            click.echo(f"    {Fore.GREEN}✔ pywinpty instalado:{Fore.RESET} {winpty.__file__}")
+        except ImportError:
+            click.echo(f"    {Fore.RED}✖ pywinpty NÃO instalado{Fore.RESET}")
+            click.echo(f"    {Fore.YELLOW}→ Execute: doxoade doxly pty-install{Fore.RESET}\n")
+            return
+    
+    # Verifica se o módulo do daemon existe
+    click.echo(f"  {Fore.CYAN}[2/3] Verificando módulo do daemon...{Fore.RESET}")
+    try:
+        from doxoade.tools.terminal_pty import pty_file_daemon
+        click.echo(f"    {Fore.GREEN}✔ Módulo encontrado:{Fore.RESET} {pty_file_daemon.__file__}")
+    except ImportError as e:
+        click.echo(f"    {Fore.RED}✖ Módulo do daemon NÃO encontrado: {e}{Fore.RESET}")
+        return
+    
+    # Roda o daemon
+    click.echo(f"  {Fore.CYAN}[3/3] Executando daemon standalone...{Fore.RESET}")
+    cmd = [
+        sys.executable, "-m", "doxoade.tools.terminal_pty.pty_file_daemon",
+        "--ipc-dir", str(probe_dir),
+        "--shell", shell,
+        "--cols", "80",
+        "--rows", "24",
+    ]
+    click.echo(f"    {Fore.LIGHTBLACK_EX}Comando: {' '.join(cmd)}{Fore.RESET}\n")
+    
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stdout, stderr = proc.communicate()
+            click.echo(f"    {Fore.YELLOW}⏱ Timeout atingido — daemon provavelmente está OK (ficou rodando).{Fore.RESET}")
+        
+        click.echo(f"\n  {Fore.WHITE}Exit code:{Fore.RESET} {proc.returncode}")
+        if stdout:
+            click.echo(f"\n  {Fore.GREEN}STDOUT:{Fore.RESET}")
+            for line in stdout.splitlines()[:30]:
+                click.echo(f"    {line}")
+        if stderr:
+            click.echo(f"\n  {Fore.RED}STDERR:{Fore.RESET}")
+            for line in stderr.splitlines()[:30]:
+                click.echo(f"    {Fore.RED}{line}{Fore.RESET}")
+        
+        # Lê o status JSON se existir
+        status_file = probe_dir / "pty_status.json"
+        if status_file.exists():
+            import json
+            click.echo(f"\n  {Fore.CYAN}pty_status.json:{Fore.RESET}")
+            data = json.loads(status_file.read_text(encoding="utf-8"))
+            click.echo(f"    {json.dumps(data, indent=2, ensure_ascii=False)}")
+        else:
+            click.echo(f"\n  {Fore.YELLOW}⚠ pty_status.json não foi gerado.{Fore.RESET}")
+            click.echo(f"    ↳ Isso indica que o daemon não chegou a escrever o status inicial.")
+        
+        click.echo(f"\n  {Fore.LIGHTBLACK_EX}Diretório de diagnóstico mantido: {probe_dir}{Fore.RESET}\n")
+    except Exception as e:
+        click.echo(f"  {Fore.RED}✖ Falha ao executar daemon: {e}{Fore.RESET}\n")
+

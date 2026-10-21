@@ -13,7 +13,7 @@ este é o novo protocolo simplificado e sucinto de desenvolveimento do doxoade. 
   0.2. Rabbit Hole: se a complexidade da API, versão e dependencia acaba trazendo um desenvolvimento demorado de features.
   0.3. Sensibilidade: Sistemas de performace podem pesar conforme as features implementadas, geralmente prog. orientada a eventos tem essa caracteristica.
   0.4. Revisitar: revisitar features para atualiza-las todo tempo por causar de outro contra tempo.
-  0.5. particularidade: sistemas podem ser solicitações naqual não podem ser identificadas facilmente, derrepende um sistema que precisa de admin e falha dando timedout é um exemplo classico no eco. windowns
+  0.5. particularidade: sistemas podem ser solicitações naqual não podem ser identificadas facilmente, derrepende um sistema que precisa de admin e falha dando timedout é um exemplo classico no eco. windowns. ou o silencio do pty que indica flag 1 ouseja tudo funcioando(veja 3.1.6.)
 1. planejamento: o planejarmento deve se basear no contexto da implementação, ouseja Sistema operacional, ferramentas usadas no contexto, como python 3.12, e objetivo e compatibilidade.
   1.0. seguir o protocolo ProDeNov obrigatoriamente. a interpretação caso não implicita deve ser feita a decisão por parte do leitor, e a viabilidade da aplicação do protocolo pode ser questionado para critica construtiva e evoulução continua.
   1.1. faça brainstoming do que é desejado e depois analise de viabilidade, manutenção e escalabilidade posteriormente

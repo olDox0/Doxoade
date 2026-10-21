@@ -421,6 +421,7 @@ Sistema de render de markdown e PDF para o litexl.
 fontes que podem ser procesadas.
 
 https://github.com/EbookFoundation/free-programming-books/blob/main/books/free-programming-books-pt_BR.md#python
+https://github.com/vinta/awesome-python/tree/master
 
 ---
 
@@ -439,3 +440,5 @@ lua
 
 
 computação e eng. sistemas
+
+https://github.com/codecrafters-io/build-your-own-x

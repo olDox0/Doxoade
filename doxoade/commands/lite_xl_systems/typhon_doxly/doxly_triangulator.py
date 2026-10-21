@@ -237,4 +237,14 @@ class DoxlyTriangulator:
             except Exception as e:
                 return False, f"Falha ao reinstalar configuração: {e}"
 
+        if fmid == "doxly.pty.handshake_fail":
+            # Tenta instalar pywinpty automaticamente
+            try:
+                from doxoade.commands.lite_xl_systems.cmd_lite_xl import cmd_pty_install
+                # (chama a função de instalação sem prompt se possível)
+                return False, "PTY precisa de intervenção manual — execute: doxoade doxly pty-install"
+            except Exception:
+                return False, "Falha no autorreparo do PTY"
+
+
         return False, f"Nenhum executor de autorreparo configurado para {fmid}."

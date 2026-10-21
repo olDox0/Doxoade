@@ -69,7 +69,7 @@ function PTYClient:_find_python()
   local user_dir = USERDIR or "."
   local home_dir = os.getenv("USERPROFILE") or os.getenv("HOME") or "."
 
-  -- 1. 🎯 PRIORIDADE ABSOLUTA: Âncora do DoxOADE (onde o pywinpty e doxoade foram instalados no setup)
+  -- 1. Prioridade ABSOLUTA: âncora do Doxoade
   local anchors = {
     home_dir .. sep .. ".doxoade" .. sep .. "python_path.txt",
     user_dir .. sep .. ".doxoade" .. sep .. "python_path.txt",
@@ -85,7 +85,7 @@ function PTYClient:_find_python()
     end
   end
 
-  -- 2. Busca o projeto 'doxoade' especificamente entre os projetos abertos
+  -- 2. Busca o projeto 'doxoade' entre os projetos abertos
   if core.project_directories then
     for _, d in ipairs(core.project_directories) do
       local p_str = tostring(type(d) == "table" and (d.path or d.name) or d)
@@ -98,14 +98,14 @@ function PTYClient:_find_python()
     end
   end
 
-  -- 3. Variável de ambiente VIRTUAL_ENV do processo pai (se ativa)
+  -- 3. VIRTUAL_ENV ativa
   local venv_env = os.getenv("VIRTUAL_ENV")
   if venv_env and venv_env ~= "" then
     local py = (venv_env .. sep .. "Scripts" .. sep .. "python.exe"):gsub("/", "\\")
     if system and system.get_file_info and system.get_file_info(py) then return py end
   end
 
-  -- 4. Instalações padrão do Python no Windows 11 / 10
+  -- 4. Instalações padrão do Python no Windows
   local local_app = os.getenv("LOCALAPPDATA")
   if local_app then
     for _, ver in ipairs({ "Python312", "Python311", "Python310" }) do
@@ -116,11 +116,31 @@ function PTYClient:_find_python()
     end
   end
 
+  -- 5. Fallback: venv local relativo ao cwd
+  local cwd = system and system.absolute_path and system.absolute_path(".") or "."
+  local is_win = PLATFORM == "Windows" or package.config:sub(1, 1) == "\\"
+  local venv_py = cwd .. sep .. "venv" .. sep .. (is_win and "Scripts\\python.exe" or "bin/python")
+  if system and system.get_file_info and system.get_file_info(venv_py) then
+    return venv_py:gsub("/", "\\")
+  end
+
   return "python"
 end
 
 function PTYClient:spawn()
-  local python_exe = self:_find_python()
+--  local python_exe = self:_find_python()
+  local python_exe = nil
+  if type(self._find_python) == "function" then
+      local ok, result = pcall(self._find_python, self)
+      if ok then python_exe = result end
+  end
+  if not python_exe then
+      python_exe = "python"  -- fallback
+  end
+
+  if core.log then
+      core.log(string.format("🐍 [PTY] Spawn usando python: %s", tostring(python_exe)))
+  end
 
   pcall(os.remove, self.file_in)
   pcall(os.remove, self.file_out)
@@ -215,13 +235,42 @@ function PTYClient:poll()
         core.redraw = true
         return true
       elseif content:find('"alive":%s*false') then
-        local err_msg = content:match('"error"%s*:%s*"([^"]+)"') or "Falha no backend PTY"
-        if err_msg:find("winpty") or err_msg:find("pywinpty") then
-          self.missing_winpty = true
+        local err_msg = content:match('"error"%s*:%s*"([^"]*)"') or "sem detalhes no status"
+        local daemon_pid = content:match('"pid"%s*:%s*(%d+)') or "?"
+
+        -- 🔧 FIX: proteção contra self sem _find_python
+        local python_exe = content:match('"python"%s*:%s*"([^"]*)"')
+        if not python_exe and type(self._find_python) == "function" then
+            local ok, result = pcall(self._find_python, self)
+            if ok then python_exe = result end
         end
-        if core.log then core.log("❌ [PTY] " .. err_msg) end
+        if not python_exe then python_exe = "?" end
+
+        local ipc_dir = self.ipc_dir or "?"
+
+        if core.log then
+            core.log(string.format("❌ [PTY] Daemon morreu no spawn (pid=%s, python=%s, ipc=%s)",
+                daemon_pid, python_exe, ipc_dir))
+            core.log(string.format("   ↳ Erro do daemon: %s", err_msg))
+        end
+
+        local capture = rawget(_G, "phanto_capture")
+        if capture then
+            capture("pty_handshake", function()
+                error(string.format("PTY alive:false → %s (python=%s)", err_msg, python_exe), 2)
+            end)
+        end
+
+        if core.log then
+            if err_msg:find("pywinpty") or err_msg:find("winpty") then
+                core.log("💡 Dica: instale 'pywinpty' com: pip install pywinpty")
+            elseif err_msg:find("no module") or err_msg:find("not found") then
+                core.log("💡 Dica: o daemon python do Doxoade pode não estar instalado. Tente: doxoade doxly pty-install")
+            end
+        end
+
         self:close()
-        return false
+        return
       end
     end
   end

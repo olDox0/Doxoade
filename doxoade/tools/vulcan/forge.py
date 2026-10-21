@@ -66,11 +66,26 @@ def _strip_pyx_source(code: str) -> str:
     return result.strip() + '\n'
 
 def assess_file_for_vulcan(file_path: str) -> tuple[bool, str, list[str]]:
-    """Auditoria de Elegibilidade Chief-Gold (v95.8)."""
     p = Path(file_path)
     if p.name in _SKIP_FILENAMES:
         return (False, 'Arquivo de entrada/namespace', [f"O arquivo {p.name} é reservado para o interpretador."])
-    
+
+    # [FIX] Respeita blacklist do projeto
+    project_root = _find_project_root(str(p.parent)) if '_find_project_root' in globals() else None
+    if project_root:
+        blacklist = Path(project_root) / '.doxoade' / 'vulcan' / 'forge_blacklist.txt'
+        if blacklist.exists():
+            try:
+                bl_entries = {
+                    line.strip().replace('\\', '/')
+                    for line in blacklist.read_text(encoding='utf-8').splitlines()
+                    if line.strip() and not line.strip().startswith('#')
+                }
+                rel_path = str(p.relative_to(project_root)).replace('\\', '/')
+                if rel_path in bl_entries:
+                    return (False, 'Blacklist do projeto', [f"Arquivo excluído via forge_blacklist.txt: {rel_path}"])
+            except Exception:
+                pass
     try:
         source = p.read_text(encoding='utf-8', errors='ignore')
         tree = ast.parse(source)
