@@ -461,7 +461,8 @@ setup(
         
     def _prepare_native_objects(self):
         """Compila os kernels para arquivos objeto (.o) uma única vez."""
-        native_dir = Path(self.env.root) / "doxoade" / "tools" / "vulcan" / "native"
+        #native_dir = Path(self.env.root) / "doxoade" / "tools" / "vulcan" / "native"
+        native_dir = Path(__file__).resolve().parent / "native"
         obj_dir = self.env.foundry / "static_objs"
         obj_dir.mkdir(exist_ok=True)
         

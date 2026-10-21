@@ -124,6 +124,17 @@ def _clean_cpython_markdown(text: str) -> str:
     return text.strip()
 
 
+def _clean_inline_code(match: "re.Match") -> str:
+    """Limpa o interior de <code>...</code>: remove <span>, tags residuais, unescape."""
+    inner = match.group(1)
+    inner = re.sub(r"<span[^>]*>(.*?)</span>", r"\1", inner, flags=re.DOTALL)
+    inner = re.sub(r"<[^>]+>", "", inner)
+    inner = html_lib.unescape(inner).strip()
+    if not inner:
+        return ""
+    return f"`{inner}`"
+
+
 class DocIndexer:
     def __init__(self, db_path: Optional[Path] = None):
         self.db_path = db_path or (Path.home() / ".doxoade" / "consult_docs_fts5.db")
@@ -307,6 +318,8 @@ class DocIndexer:
         conn = self._get_db_connection(bulk_mode=False)
         cursor = conn.cursor()
 
+        # Filtro de ranking: prioriza conteúdo didático, penaliza índices
+        # metadados e changelogs do CPython (que poluem o top-25 sem agregar).
         sql = """
             SELECT
                 path,
@@ -314,7 +327,40 @@ class DocIndexer:
                 snippet(docs_fts, 3, '\x02', '\x03', '...', 60) as snippet
             FROM docs_fts
             WHERE docs_fts MATCH ?
-            ORDER BY rank
+            ORDER BY
+                CASE
+                    -- 🔴 Prioridade MÁXIMA: livros, PEPs, algoritmos, patterns, Typeshed
+                    WHEN path LIKE 'python/peps/%'              THEN 0
+                    WHEN path LIKE 'python/basic/%'             THEN 0
+                    WHEN path LIKE 'python/algorithms/%'        THEN 0
+                    WHEN path LIKE 'python/patterns/%'          THEN 0
+                    WHEN path LIKE 'python/architecture/%'      THEN 0
+                    WHEN path LIKE 'python/automation/%'        THEN 0
+                    WHEN path LIKE 'python/typeshed/%'          THEN 1
+                    WHEN path LIKE 'python/cheatsheet/%'        THEN 1
+                    
+                    -- 🟡 Prioridade MÉDIA: CPython tutorial, library, howto
+                    WHEN path LIKE 'tutorial/%'                 THEN 2
+                    WHEN path LIKE 'library/%'                  THEN 2
+                    WHEN path LIKE 'howto/%'                    THEN 2
+                    WHEN path LIKE 'reference/%'                THEN 3
+                    WHEN path LIKE 'c-api/%'                    THEN 3
+                    
+                    -- ⚪ Prioridade BAIXA: metadados, índices, changelogs
+                    WHEN path LIKE '%genindex%'                 THEN 9
+                    WHEN path LIKE '%modindex%'                 THEN 9
+                    WHEN path LIKE '%py-modindex%'              THEN 9
+                    WHEN path LIKE '%contents.html%'            THEN 9
+                    WHEN path LIKE 'whatsnew/%'                 THEN 9
+                    WHEN path LIKE 'using/%'                    THEN 8
+                    WHEN path LIKE 'faq/%'                      THEN 7
+                    WHEN path LIKE 'about.html%'                THEN 9
+                    WHEN path LIKE 'download.html%'             THEN 9
+                    
+                    -- Fallback: CPython misc (license, bugs, glossary, etc.)
+                    ELSE 5
+                END,
+                rank
             LIMIT ?;
         """
 

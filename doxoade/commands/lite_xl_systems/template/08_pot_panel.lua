@@ -27,6 +27,24 @@ local dumppot_file = doxoade_cfg_dir .. sep .. "dumppot.txt"
 local cheat_sheet_file = doxoade_cfg_dir .. sep .. "cheat_sheet.txt"
 local log_path = user_dir .. sep .. "session_log.txt"
 
+-- ═══════════════════════════════════════════════════════════════════════
+-- VIEW (depois dos helpers)
+-- ═══════════════════════════════════════════════════════════════════════
+
+local SearchResultsView = View:extend()
+
+function SearchResultsView:new()
+  if SearchResultsView.super and SearchResultsView.super.new then
+    pcall(SearchResultsView.super.new, self)
+  end
+  self.scrollable = true
+  self.font = style.font or style.code_font
+  self.line_h = 20
+  self.header_h = 32
+  self.hovered_idx = nil
+  self.selected_idx = 0
+end
+
 -- 🛡️ INJEÇÃO DE UTILITÁRIO DE DIRETÓRIOS (Ma'at)
 -- Garante que a chamada 'ensure_dir' exista e seja recursiva no Windows/Linux.
 local function ensure_dir(target_dir)
@@ -63,11 +81,172 @@ end
 local function draw_text_safe(font, text, x, y, color)
   if not font or not text or text == "" then return end
   if type(color) ~= "table" then color = { 255, 255, 255, 255 } end
+  if not color[1] or not color[2] or not color[3] then
+    color = { 255, 255, 255, 255 }
+  end
+  if not color[4] then color[4] = 255 end
   if rencache and rencache.draw_text then
     rencache.draw_text(font, text, x, y, color)
   elseif native_renderer and native_renderer.draw_text then
     native_renderer.draw_text(font, text, x, y, color)
   end
+end
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- SNIPPET HELPERS (devem estar DEPOIS de draw_text_safe e ANTES das Views)
+-- ═══════════════════════════════════════════════════════════════════════
+
+local function parse_snippet_markers(snippet)
+    local segments = {}
+    if not snippet or snippet == "" then return segments end
+
+    local buf = {}
+    local in_hit = false
+    local i = 1
+    local len = #snippet
+
+    while i <= len do
+        local c = snippet:sub(i, i)
+        local next_c = snippet:sub(i + 1, i + 1)
+        -- Aceita bytes reais (0x02 / 0x03) E escapes Lua "\2" / "\3"
+        local is_start = (c == "\x02") or (c == "\\" and next_c == "2")
+        local is_end   = (c == "\x03") or (c == "\\" and next_c == "3")
+
+        if is_start then
+            if #buf > 0 then
+                table.insert(segments, { text = table.concat(buf), highlighted = in_hit })
+                buf = {}
+            end
+            in_hit = true
+            i = i + (c == "\\" and 2 or 1)
+        elseif is_end then
+            if #buf > 0 then
+                table.insert(segments, { text = table.concat(buf), highlighted = true })
+                buf = {}
+            end
+            in_hit = false
+            i = i + (c == "\\" and 2 or 1)
+        else
+            table.insert(buf, c)
+            i = i + 1
+        end
+    end
+    if #buf > 0 then
+        table.insert(segments, { text = table.concat(buf), highlighted = in_hit })
+    end
+    return segments
+end
+
+local function draw_rich_snippet(view, snippet, x, y, max_width)
+    local segments = parse_snippet_markers(snippet)
+    if #segments == 0 then return 0 end
+
+    local font = style.code_font or style.font
+    local line_height = font:get_height() + 2
+    local cur_x = x
+    local cur_y = y
+    local line_count = 1
+    local max_x = x + max_width
+
+    local function newline()
+        cur_x = x
+        cur_y = cur_y + line_height
+        line_count = line_count + 1
+    end
+
+    local function put_text(text, color, bg)
+        if not text or text == "" then return end
+        text = text:gsub("\\2", ""):gsub("\\3", ""):gsub("\x02", ""):gsub("\x03", "")
+        if text == "" then return end
+        if type(color) ~= "table" then color = { 220, 220, 225, 255 } end
+        if not color[1] or not color[2] or not color[3] then color = { 220, 220, 225, 255 } end
+        if not color[4] then color[4] = 255 end
+
+        local w = font:get_width(text)
+        -- Se cabe, desenha normal
+        if cur_x + w <= max_x then
+            if bg then
+                draw_rect_safe(cur_x, cur_y, w, line_height, bg)
+            end
+            draw_text_safe(font, text, cur_x, cur_y, color)
+            cur_x = cur_x + w
+            return
+        end
+
+        -- Se não cabe, quebra palavra por palavra (space-aware)
+        local remaining = text
+        while remaining ~= "" and line_count <= 3 do
+            -- Se cur_x == x (linha nova), pega o máximo que cabe
+            local space_left = max_x - cur_x
+            local fit_len = 0
+            local len = #remaining
+            for i = len, 1, -1 do
+                if font:get_width(remaining:sub(1, i)) <= space_left then
+                    fit_len = i
+                    break
+                end
+            end
+            if fit_len == 0 then
+                -- Nada cabe, nova linha
+                newline()
+                space_left = max_x - cur_x
+                for i = len, 1, -1 do
+                    if font:get_width(remaining:sub(1, i)) <= space_left then
+                        fit_len = i
+                        break
+                    end
+                end
+                if fit_len == 0 then
+                    -- Palavra maior que a linha: força corte em max_width
+                    fit_len = math.floor(max_width / (font:get_width("M")))
+                    fit_len = math.min(fit_len, #remaining)
+                end
+            end
+
+            local piece = remaining:sub(1, fit_len)
+            local w_piece = font:get_width(piece)
+            if bg then
+                draw_rect_safe(cur_x, cur_y, w_piece, line_height, bg)
+            end
+            draw_text_safe(font, piece, cur_x, cur_y, color)
+            cur_x = cur_x + w_piece
+            remaining = remaining:sub(fit_len + 1)
+
+            if remaining ~= "" then
+                newline()
+            end
+        end
+    end
+
+    for _, seg in ipairs(segments) do
+        if line_count > 3 then break end
+
+        local base_color = seg.highlighted and style.accent or style.text
+        local bg = seg.highlighted and style.background2 or nil
+
+        local pos = 1
+        while pos <= #seg.text do
+            if line_count > 3 then break end
+
+            local a, b = seg.text:find("`", pos)
+            if not a then
+                put_text(seg.text:sub(pos), base_color, bg)
+                break
+            end
+            if a > pos then
+                put_text(seg.text:sub(pos, a - 1), base_color, bg)
+            end
+            local c, d = seg.text:find("`", b + 1)
+            if not c then
+                put_text(seg.text:sub(b + 1), base_color, bg)
+                break
+            end
+            put_text(seg.text:sub(b + 1, c - 1), style.syntax or {120,220,120,255}, bg)
+            pos = d + 1
+        end
+    end
+
+    return line_count * line_height
 end
 
 -- =============================================================================
@@ -273,12 +452,17 @@ function ConsultSearchView:draw()
       draw_text_safe(self.font_title, title_str, card_x + 12, cur_y + 8, is_hovered and { 255, 255, 255, 255 } or (style.accent or { 56, 189, 248, 255 }))
 
       local path_str = "↳ " .. tostring(item.path or "")
-      draw_text_safe(self.font_sub, path_str, card_x + 14, cur_y + 28, style.dim or { 140, 140, 150, 255 })
+--      draw_text_safe(self.font_sub, path_str, card_x + 14, cur_y + 28, style.dim or { 140, 140, 150, 255 })
 
-      local snip = tostring(item.snippet or ""):gsub("[\r\n]+", " ")
-      if #snip > 110 then snip = snip:sub(1, 110) .. "..." end
-      draw_text_safe(self.font_sub, snip, card_x + 14, cur_y + 48, { 200, 200, 210, 255 })
-
+      -- Snippet com markers de busca e inline code
+      local raw_snip = tostring(item.snippet or "")
+      draw_rich_snippet(
+          self,
+          raw_snip,
+          card_x + 14,
+          cur_y + 48,
+          card_w - 28
+      )
       item.rect = { x = card_x, y = cur_y, w = card_w, h = self.card_h }
     end
     cur_y = cur_y + self.card_h + 6
@@ -344,32 +528,79 @@ function ConsultDocReaderView:new(title, doc_path, md_lines, parent_search_view)
 end
 
 local function style_line_markdown(line)
-    -- Retorna { {text=..., style=...}, ... }
+    if not line or line == "" then
+        return { { text = "", style = {220,220,225,255} } }
+    end
+
+    -- Limpa bytes de controle residuais (0x02/0x03, escapes \2/\3)
+    line = line:gsub("\x02", ""):gsub("\x03", ""):gsub("\\2", ""):gsub("\\3", "")
+
     local parts = {}
-    local pos = 1
-    -- Detecta header
-    local header = line:match("^(#+)%s+(.+)$")
-    if header then
-        table.insert(parts, { text = header, style = style.accent })
+
+    -- Header: #, ##, ###
+    local header_mark, header_text = line:match("^(#+)%s+(.+)$")
+    if header_mark then
+        local color = (#header_mark == 1) and {56,189,248,255}
+                    or (#header_mark == 2) and {34,197,94,255}
+                    or {251,191,36,255}
+        table.insert(parts, { text = header_text, style = color })
         return parts
     end
-    -- Detecta inline code
-    while true do
+
+    -- Blockquote: >
+    local quote = line:match("^>%s?(.*)$")
+    if quote then
+        table.insert(parts, { text = quote, style = style.dim or {140,140,150,255} })
+        return parts
+    end
+
+    -- Lista: -, *, +
+    local list = line:match("^([%-%*%+])%s+(.*)$")
+    if list then
+        table.insert(parts, { text = "• ", style = {200,200,210,255} })
+        line = list
+    end
+
+    -- Inline: `code`, **bold**
+    local text_color = {220,220,225,255}
+    local code_color = style.syntax or {120,220,120,255}
+    local bold_color = {255,255,255,255}
+
+    local pos = 1
+    while pos <= #line do
         local a, b = line:find("`", pos)
-        if not a then
-            table.insert(parts, { text = line:sub(pos), style = style.text })
+        local c_bold = line:find("%*%*", pos)
+        local next_special = a or c_bold or math.huge
+        if c_bold and c_bold < next_special then next_special = c_bold end
+        if a and a < next_special then next_special = a end
+
+        if next_special == math.huge then
+            table.insert(parts, { text = line:sub(pos), style = text_color })
             break
         end
-        if a > pos then
-            table.insert(parts, { text = line:sub(pos, a - 1), style = style.text })
+        if next_special > pos then
+            table.insert(parts, { text = line:sub(pos, next_special - 1), style = text_color })
         end
-        local c, d = line:find("`", b + 1)
-        if not c then
-            table.insert(parts, { text = line:sub(b + 1), style = style.text })
-            break
+
+        if next_special == a then
+            local d = line:find("`", b + 1)
+            if d then
+                table.insert(parts, { text = line:sub(b + 1, d - 1), style = code_color })
+                pos = d + 1
+            else
+                table.insert(parts, { text = line:sub(b + 1), style = text_color })
+                break
+            end
+        else
+            local d = line:find("%*%*", next_special + 2)
+            if d then
+                table.insert(parts, { text = line:sub(next_special + 2, d - 1), style = bold_color })
+                pos = d + 2
+            else
+                table.insert(parts, { text = line:sub(next_special), style = text_color })
+                break
+            end
         end
-        table.insert(parts, { text = line:sub(b + 1, c - 1), style = style.syntax })
-        pos = d + 1
     end
     return parts
 end
@@ -520,7 +751,7 @@ function ConsultDocReaderView:draw()
   local path_label = "📄 " .. self.doc_path
   draw_text_safe(font, path_label, copy_x + copy_w + 14, y + 10, style.dim)
 
-  -- 2. Renderização do Conteúdo com Tracking de Cores Blindado
+  -- 2. Renderização do Conteúdo
   core.push_clip_rect(x, y + self.header_h, w - scrollbar_w - 2, h - self.header_h)
   local cur_y = y + self.header_h + 10 - scroll_y
   local active = self:get_active_lines()
@@ -528,44 +759,50 @@ function ConsultDocReaderView:draw()
   local s_sel = self.sel_start_line and self.sel_end_line and math.min(self.sel_start_line, self.sel_end_line)
   local e_sel = self.sel_start_line and self.sel_end_line and math.max(self.sel_start_line, self.sel_end_line)
 
-  -- O tracking de in_code_block roda LINEARMENTE sobre todas as linhas para NUNCA inverter cores no scroll
   local in_code_block = false
 
   for line_idx, line in ipairs(active) do
     local text = tostring(line or "")
-    local is_fence = text:find("^```")
-
-    if is_fence then
+    
+    -- Atualiza estado do bloco de código (necessário para todas as linhas)
+    if text:find("^```") then
       in_code_block = not in_code_block
+      -- Opcional: desenhar a barra do fence se quiser
     end
 
-    -- Culling de viewport estritamente na chamada de desenho
+    -- Culling de viewport: só desenha o que está visível
     if (cur_y + self.line_h) > (y + self.header_h) and cur_y < (y + h) then
+      -- Highlight de seleção (por trás do texto)
       if s_sel and e_sel and line_idx >= s_sel and line_idx <= e_sel then
         draw_rect_safe(x + 10, cur_y, w - scrollbar_w - 20, self.line_h, { 56, 189, 248, 70 })
       end
 
-      if is_fence then
+      -- Renderização baseada no estado da linha
+      if text:find("^```") then
+        -- Fence: apenas uma linha decorativa
         draw_rect_safe(x + 14, cur_y + math.floor(self.line_h / 2), w - scrollbar_w - 28, 2, { 60, 60, 75, 255 })
+      
       elseif in_code_block then
+        -- Dentro de bloco de código
         draw_rect_safe(x + 14, cur_y, w - scrollbar_w - 28, self.line_h, { 14, 14, 18, 255 })
         draw_rect_safe(x + 14, cur_y, 2, self.line_h, self.raw_mode and { 34, 197, 94, 255 } or { 100, 100, 140, 255 })
         local code_color = text:find("^# ↳") and { 130, 140, 150, 255 } or { 230, 230, 140, 255 }
         draw_text_safe(font, text, x + 24, cur_y + 1, code_color)
-      elseif text:find("^# ") then
-        draw_rect_safe(x + 14, cur_y, w - scrollbar_w - 28, self.line_h + 4, { 30, 45, 60, 180 })
-        draw_text_safe(font, text, x + 18, cur_y + 2, { 56, 189, 248, 255 })
-      elseif text:find("^## ") then
-        draw_text_safe(font, text, x + 18, cur_y + 1, { 34, 197, 94, 255 })
-      elseif text:find("^### ") then
-        draw_text_safe(font, text, x + 20, cur_y + 1, { 251, 191, 36, 255 })
-      elseif text:find("^> ") then
-        draw_rect_safe(x + 14, cur_y, 3, self.line_h, style.accent)
-        draw_text_safe(font, text:sub(3), x + 24, cur_y + 1, style.dim)
+      
       else
-        draw_text_safe(font, text, x + 18, cur_y + 1, { 220, 220, 225, 255 })
+        -- Texto normal / markdown: usa style_line_markdown
+        local parts = style_line_markdown(text)
+        local cur_x = x + 18
+        for _, p in ipairs(parts) do
+          if p.text and p.text ~= "" then
+            draw_text_safe(font, p.text, cur_x, cur_y + 1, p.style)
+            cur_x = cur_x + font:get_width(p.text)
+          end
+        end
       end
     end
+
+    -- Atualiza Y para a próxima linha (SEMPRE, independentemente do culling)
     cur_y = cur_y + self.line_h
   end
 
@@ -824,7 +1061,7 @@ try:
     fts_query = " OR ".join([f'"{tok}"*' for tok in tokens])
     
     sql = """
-        SELECT path, title, snippet(docs_fts, 3, '\x02', '\x03', '...', 18)
+        SELECT path, title, snippet(docs_fts, 3, '\x02', '\x03', '...', 60)
         FROM docs_fts WHERE docs_fts MATCH ? ORDER BY rank LIMIT 25;
     """
     results = conn.execute(sql, (fts_query,)).fetchall()
@@ -834,15 +1071,20 @@ except Exception:
 
 def clean_lua_str(s):
     if not s: return ""
-    clean = str(s).replace("\r", "").replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
-    return re.sub(r'[\x00-\x1f\x7f-\x9f]', '', clean)
+    # Protege os markers ANTES de remover control chars
+    s = str(s).replace("\x02", "\u200B").replace("\x03", "\u200C")
+    clean = s.replace("\r", "").replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
+    # Restaura os markers como escapes Lua
+    clean = clean.replace("\u200B", "\\2").replace("\u200C", "\\3")
+    return clean
 
 lines = ["return {", f'  query = "{clean_lua_str(query)}",', f'  total = {len(results)},', '  results = {']
 for path, title, snippet in results:
+    safe_snip = clean_lua_str(snippet or title)
     lines.append('    {')
     lines.append(f'      title = "{clean_lua_str(title)}",')
     lines.append(f'      path = "{clean_lua_str(path)}",')
-    lines.append(f'      snippet = "{clean_lua_str(snippet or title)}"')
+    lines.append(f'      snippet = "{safe_snip}"')
     lines.append('    },')
 lines.extend(['  }', '}'])
 
