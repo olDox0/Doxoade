@@ -59,6 +59,7 @@ este é o novo protocolo simplificado e sucinto de desenvolveimento do doxoade. 
     3.1.3. num onjetivo complexo, vai ser preciso desenvolver sistemas complexos ou delegar sistemas complexos
     3.1.4. sistema de diagnostico é fundamental em qualquer sistema, ele deve responder sobre: onde?, o que?, quem?, quando?, quanto? porque? origem? e consequencias estas perguntas são essencias em diagnostico.
     3.1.5. tomar decisões baseada em evidencias tecnicas, dados reais e comprovação de teorias.
+    3.1.6. Anti Long Shot policy - nao deve-se dar tiro no escuro, deve-se ter sistemas de diagnostico para problemsa complexos, deve-se obter dados por meio de sistemas, ou sondas.
 4. Situações reais
   4.1. Caso o prazo não permitir o sistema estiver estavel o suficiente, pode-se não seguir o protocolo
     4.1.1. se o sistema funciona naquele contexto limitado, pode-se cosidera-lo pronto temporariamente até a proxima revisão.
