@@ -11,43 +11,110 @@ local command = require "core.command"
 local style = require "core.style"
 local keymap = require "core.keymap"
 
-local SearchResultsView = View:extend()
-
 local function parse_snippet_markers(snippet)
-    -- O FTS5 retorna markers \x02 (start) e \x03 (end) em volta dos hits
-    -- Retorna uma lista de {text=..., highlighted=bool}
     local segments = {}
     if not snippet or snippet == "" then return segments end
-    
+
     local buf = {}
     local in_hit = false
     local i = 1
     local len = #snippet
-    
+
     while i <= len do
         local c = snippet:sub(i, i)
-        if c == "\x02" then
+        local next_c = snippet:sub(i + 1, i + 1)
+        -- Aceita bytes reais (0x02 / 0x03) E escapes Lua "\2" / "\3"
+        local is_start = (c == "\x02") or (c == "\\" and next_c == "2")
+        local is_end   = (c == "\x03") or (c == "\\" and next_c == "3")
+
+        if is_start then
             if #buf > 0 then
                 table.insert(segments, { text = table.concat(buf), highlighted = in_hit })
                 buf = {}
             end
             in_hit = true
-        elseif c == "\x03" then
+            i = i + (c == "\\" and 2 or 1)
+        elseif is_end then
             if #buf > 0 then
                 table.insert(segments, { text = table.concat(buf), highlighted = true })
                 buf = {}
             end
             in_hit = false
+            i = i + (c == "\\" and 2 or 1)
         else
             table.insert(buf, c)
+            i = i + 1
         end
-        i = i + 1
     end
     if #buf > 0 then
         table.insert(segments, { text = table.concat(buf), highlighted = in_hit })
     end
     return segments
 end
+
+local function draw_rich_snippet(view, snippet, x, y, max_width)
+    local segments = parse_snippet_markers(snippet)
+    if #segments == 0 then return 0 end
+
+    local font = style.code_font or style.font
+    local line_height = font:get_height() + 2
+    local cur_x = x
+    local cur_y = y
+    local max_y = y + (line_height * 3)  -- máx 3 linhas
+    local line_count = 1
+    local char_w = font:get_width("M")
+
+    local function put_text(text, color, bg, is_code)
+        local w = font:get_width(text)
+        if bg and bg ~= nil then
+            renderer.draw_rect(cur_x, cur_y, w, line_height, bg)
+        end
+        renderer.draw_text(font, text, cur_x, cur_y, color)
+        cur_x = cur_x + w
+        if cur_x > x + max_width then
+            cur_x = x
+            cur_y = cur_y + line_height
+            line_count = line_count + 1
+            return true
+        end
+        return false
+    end
+
+    for _, seg in ipairs(segments) do
+        if line_count > 3 then break end
+
+        local base_color = seg.highlighted and style.accent or style.text
+        local bg = seg.highlighted and style.background2 or nil
+
+        -- Quebra o segmento por backticks
+        local pos = 1
+        while pos <= #seg.text do
+            local a, b = seg.text:find("`", pos)
+            if not a then
+                put_text(seg.text:sub(pos), base_color, bg)
+                break
+            end
+            if a > pos then
+                put_text(seg.text:sub(pos, a - 1), base_color, bg)
+            end
+            local c, d = seg.text:find("`", b + 1)
+            if not c then
+                put_text(seg.text:sub(b + 1), base_color, bg)
+                break
+            end
+            put_text(seg.text:sub(b + 1, c - 1), style.syntax or {120,220,120,255}, bg)
+            pos = d + 1
+        end
+    end
+
+    return line_count * line_height
+end
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- VIEW (depois dos helpers)
+-- ═══════════════════════════════════════════════════════════════════════
+
+local SearchResultsView = View:extend()
 
 function SearchResultsView:new()
   if SearchResultsView.super and SearchResultsView.super.new then
@@ -59,47 +126,6 @@ function SearchResultsView:new()
   self.header_h = 32
   self.hovered_idx = nil
   self.selected_idx = 0
-end
-
-local function draw_rich_snippet(view, snippet, x, y, width)
-    local segments = parse_snippet_markers(snippet)
-    local cur_x = x
-    local cur_y = y
-    local line_height = view:get_font():get_height()
-    
-    for _, seg in ipairs(segments) do
-        local color = seg.highlighted and style.accent or style.text
-        local bg = seg.highlighted and style.background2 or nil
-        
-        -- Quebra por backticks dentro do segmento
-        local parts = {}
-        local pos = 1
-        while true do
-            local a, b = seg.text:find("`", pos)
-            if not a then
-                table.insert(parts, { text = seg.text:sub(pos), code = false })
-                break
-            end
-            if a > pos then
-                table.insert(parts, { text = seg.text:sub(pos, a - 1), code = false })
-            end
-            local c, d = seg.text:find("`", b + 1)
-            if not c then
-                table.insert(parts, { text = seg.text:sub(b + 1), code = false })
-                break
-            end
-            table.insert(parts, { text = seg.text:sub(b + 1, c - 1), code = true })
-            pos = d + 1
-        end
-        
-        for _, p in ipairs(parts) do
-            local part_color = p.code and style.syntax or color
-            renderer.font:set_color(part_color)
-            if bg then renderer:draw_rect(x, cur_y, width, line_height, bg) end
-            renderer:draw_text(cur_x, cur_y, p.text)
-            cur_x = cur_x + renderer.font:get_width(p.text)
-        end
-    end
 end
 
 function SearchResultsView:get_name()
@@ -144,7 +170,10 @@ function SearchResultsView:draw()
 
   for i, res in ipairs(state.results) do
     local is_new_file = (res.path ~= last_file)
-    local item_h = is_new_file and (self.line_h * 2) or self.line_h
+    --local item_h = is_new_file and (self.line_h * 2) or self.line_h
+    --local item_h = is_new_file and (self.line_h * 4) or (self.line_h * 4)
+    local snippet_lines = 3  -- draw_rich_snippet retorna máximo 3
+    local item_h = is_new_file and (self.line_h * (1 + snippet_lines)) or (self.line_h * snippet_lines)
 
     if cy + item_h > y + self.header_h and cy < y + h then
       local is_hovered = (self.hovered_idx == i)
@@ -166,9 +195,15 @@ function SearchResultsView:draw()
       
       if is_selected then renderer.draw_rect(x, cy, 3, self.line_h, style.accent) end
 
-      local line_text = string.format("%4d: %s", res.line, res.text)
-      if #line_text > 120 then line_text = line_text:sub(1, 120) .. "..." end
-      renderer.draw_text(self.font, line_text, x + 24, cy + 4, style.text)
+      local num_str = string.format("%4d:", res.line)
+      renderer.draw_text(self.font, num_str, x + 10, cy + 4, style.dim or {140,140,150,255})
+      draw_rich_snippet(
+         self,
+         res.text or res.snippet or "",
+         x + 24 + self.font:get_width(num_str) + 8,
+         cy + 4,
+         w - 40
+      )
     end
     cy = cy + item_h
   end

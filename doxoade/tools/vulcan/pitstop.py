@@ -789,7 +789,7 @@ class PitstopEngine:
         forge_tasks = [{
             'file_path': c['file'],
             'foundry': str(self.env.foundry),
-            'project_root': str(self.env.root),  # ← ADD THIS
+            'project_root': str(self.env.root),  # ← ADICIONAR
         } for c in stale]
         with TPE(max_workers=n_workers) as executor:
             futures = {executor.submit(_forge_to_pyx, task): task for task in forge_tasks}
@@ -851,7 +851,7 @@ class PitstopEngine:
             'file_path': c['file'],
             'foundry': str(self.env.foundry),
             'use_soteria': self.use_soteria,
-            'project_root': str(self.env.root),  # ← ADD THIS
+            'project_root': str(self.env.root),  # ← ADICIONAR
         } for c in candidates]
         
         with TPE(max_workers=n_workers) as executor:

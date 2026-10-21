@@ -317,29 +317,21 @@ class VulcanForge(ast.NodeTransformer):
         if node.module == "__future__":
             return None
 
-        # ============================================================
         # [ALVO OMEGA v2] Conversão de Import Relativo → Absoluto
-        # Funciona para DOXOADE e para PROJETOS DE USUÁRIO (ORN etc.)
-        # ============================================================
         if node.level and node.level > 0:
             try:
                 p = Path(self.target_path).resolve()
                 parts = list(p.parts)
                 base_idx = None
 
-                # Estratégia 1: ancora em 'doxoade' (doxoade-internal)
                 if "doxoade" in parts:
                     base_idx = parts.index("doxoade")
 
-                # Estratégia 2: usa project_root do VulcanEnvironment
-                if base_idx is None:
-                    env_root = getattr(self, "_env_root", None)
-                    if env_root:
-                        root_parts = list(Path(env_root).resolve().parts)
-                        if root_parts and parts[:len(root_parts)] == root_parts:
-                            base_idx = len(root_parts)
+                if base_idx is None and self._env_root:
+                    root_parts = list(Path(self._env_root).resolve().parts)
+                    if root_parts and parts[:len(root_parts)] == root_parts:
+                        base_idx = len(root_parts)
 
-                # Estratégia 3: walk-up até encontrar __init__.py (fallback)
                 if base_idx is None:
                     cur = p.parent
                     while cur != cur.parent:
@@ -364,10 +356,6 @@ class VulcanForge(ast.NodeTransformer):
             except Exception:
                 pass
 
-        # ============================================================
-        # Fallback: relativo não convertido → stub _Stub()
-        # (só quando não conseguimos resolver o path — raro)
-        # ============================================================
         if node.level and node.level > 0:
             stubs = []
             for alias in node.names:
@@ -382,9 +370,6 @@ class VulcanForge(ast.NodeTransformer):
                 ))
             return stubs if stubs else None
 
-        # ============================================================
-        # UI Blacklist (click, rich, colorama, etc) → stub _Stub()
-        # ============================================================
         if node.module and self._is_blacklisted(node.module):
             for alias in node.names:
                 self._blacklisted_names.add(alias.asname or alias.name)
@@ -400,9 +385,6 @@ class VulcanForge(ast.NodeTransformer):
                 ))
             return stubs if stubs else None
 
-        # ============================================================
-        # Import legítimo (relativo convertido ou absoluto) → PRESERVA
-        # ============================================================
         if node.module:
             self.original_imports.append(ast.unparse(node))
         return node
@@ -416,29 +398,41 @@ class VulcanForge(ast.NodeTransformer):
 
     def visit_Attribute(self, node):
         """
-        TRANSFORMAÇÃO DE ELITE:
-        Detecta: pyd_path.name
-        Gera: nexus_get_filename(pyd_path)
+        TRANSFORMAÇÃO: pyd_path.name → nexus_get_filename(pyd_path)
+        SOMENTE quando o atributo é LIDO (Load).
+        NÃO transforma quando é ALVO de atribuição (Store/Del),
+        evitando: nexus_get_filename(self) = name (inválido).
         """
-        if node.attr == 'name':
-            # Se for um atributo .name, desviamos para o Kernel C
+        # Guarda crítica: só reescreve em contexto de leitura
+        if node.attr == 'name' and isinstance(node.ctx, ast.Load):
             return ast.Call(
                 func=ast.Name(id='nexus_get_filename', ctx=ast.Load()),
-                args=[node.value], # O objeto original (que será convertido em string)
+                args=[node.value],
                 keywords=[]
             )
         return self.generic_visit(node)
 
     def visit_Assign(self, node):
         """
-        Converte atribuição simples a atributo reservado em setattr().
-
+        Converte atribuição a atributo reservado em setattr().
         x.include = val  →  setattr(x, 'include', val)
+
+        IMPORTANTE: NÃO converte self.name = x. O backend Cython aceita
+        self.name = x naturalmente. Só atrapalha em atributos reservados
+        (cdef, include, etc.).
         """
-        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Attribute) and (node.targets[0].attr in _CYTHON_RESERVED_IDENTIFIERS):
-            self.generic_visit(node)
+        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Attribute):
             attr_node = node.targets[0]
-            return ast.Expr(value=ast.Call(func=ast.Name(id='setattr', ctx=ast.Load()), args=[attr_node.value, ast.Constant(value=attr_node.attr), node.value], keywords=[]))
+            # Atributo reservado Cython (include, cdef, etc.) → setattr
+            if attr_node.attr in _CYTHON_RESERVED_IDENTIFIERS:
+                self.generic_visit(node)
+                return ast.Expr(value=ast.Call(
+                    func=ast.Name(id='setattr', ctx=ast.Load()),
+                    args=[attr_node.value, ast.Constant(value=attr_node.attr), node.value],
+                    keywords=[]
+                ))
+            # Atributo normal (name, value, etc.) → mantém como está
+            # mas ainda visita o lado direito
         self.generic_visit(node)
         return node
 
@@ -486,10 +480,11 @@ class VulcanForge(ast.NodeTransformer):
         return ast.Assign(targets=[node.target], value=node.value, lineno=node.lineno)
 
     def _transform_funcdef(self, node):
-        """Remove type hints e decorators. NÃO renomeia (isso é do _forge_node)."""
+        """
+        Remove type hints e decorators. NÃO renomeia (isso é feito em _forge_node).
+        """
         node.returns = None
         node.decorator_list = []
-        # rename de args
         name_map: dict[str, str] = {}
         args = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
         if node.args.vararg:
@@ -526,9 +521,15 @@ class VulcanForge(ast.NodeTransformer):
         
         # [FIX] Invoca VulcanForge como NodeTransformer para transformar
         # visit_ImportFrom, visit_Import, visit_arg, etc.
-        tree = self.visit(tree)  # ← THIS IS THE MISSING CALL
+        tree = ast.parse(clean_source)
+
+        # [FIX CRÍTICO] Invoca os visit_* do VulcanForge no tree.
+        # Sem isso, visit_ImportFrom/visit_Attribute/visit_Assign nunca rodam,
+        # e imports relativos ficam intactos → Cython rejeita.
+        tree = self.visit(tree)
         ast.fix_missing_locations(tree)
-        
+
+        # [HEFESTO] Análise Preventiva
         typer = VulcanAutoTyper(self.hot_names)
         typer.visit(tree)
         meter = PurityMeter()
@@ -549,7 +550,6 @@ class VulcanForge(ast.NodeTransformer):
             "# cython: language_level=3",
             "# cython: boundscheck=False",
             "# cython: wraparound=True",
-            # [FIX] Módulos stdlib preservados por padrão (evita undeclared name)
             "import sys, os, json, struct, zlib, re, time, hashlib, base64, io, collections, functools, itertools, math",
             "import datetime",
             "",
@@ -707,7 +707,7 @@ class VulcanForge(ast.NodeTransformer):
         """Orquestrador de Tradução: Decisões de Nível 1 (Nativo) e Nível 2 (Híbrido)."""
         name = node.name if indent else f"{node.name}_vulcan_optimized"
         #hot_vars = self._identify_hot_vars(node)
-        
+
         # 1. Preparação de Argumentos
         forbidden = {'kwargs', 'args', 'self', 'cls'}
         arg_names = {a.arg for a in node.args.args}
@@ -755,12 +755,20 @@ class VulcanForge(ast.NodeTransformer):
             ])
 
         # 5. DETECÇÃO DE BUSCA ATÔMICA (Identificação antes da geração)
+        # [FIX] Só trata como busca atômica se o nome da função INDICA busca
+        # (evita falsos positivos como enforce_hard_limit que só tem fatiamento)
         is_search_loop = False
-        for child in ast.walk(node):
-            if isinstance(child, ast.Compare):
-                if isinstance(child.left, ast.Subscript):
-                    is_search_loop = True
-                    break
+        _name_lower = name.lower()
+        _looks_like_search = any(
+            kw in _name_lower for kw in
+            ('search', 'find', 'contains', 'match', 'scan', 'locate', 'index_of')
+        )
+        if _looks_like_search:
+            for child in ast.walk(node):
+                if isinstance(child, ast.Compare):
+                    if isinstance(child.left, ast.Subscript):
+                        is_search_loop = True
+                        break
 
         # 6. Geração de Código Especializado (NOGIL Atomic Search)
         if is_search_loop and len(node.args.args) >= 2:
@@ -790,6 +798,14 @@ class VulcanForge(ast.NodeTransformer):
 
         # 7. Caso Geral (Python Híbrido Otimizado)
         scanner = BodyPurityScanner()
+
+        non_trivial_body = [
+            stmt for stmt in node.body
+            if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant))
+        ]
+        if not non_trivial_body:
+            return f"{indent}def {name}({args_str}):\n{indent}    pass\n"
+
         scanner.visit(node)
         is_nogil_candidate = scanner.is_pure_c and not any(arg.arg in {"self", "cls"} for arg in node.args.args)
 
