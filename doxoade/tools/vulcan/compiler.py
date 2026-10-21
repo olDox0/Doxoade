@@ -540,22 +540,35 @@ setup(
         return lib_file
 
     def _run_gcc_direct(self, module_name: str, use_soteria: bool = True) -> bool:
-        """
-        Executa linkagem direta via GCC com suporte a Sotéria.
-        [PATCH] Janus resolve o compilador — shell=False — lista de argumentos.
-        """
         import subprocess, time
-
         t_start = time.perf_counter()
-        core_root = Path(__file__).resolve().parent
-        self.soteria_include = core_root / "diagnostic" / "soteria" / "include"
-        self.soteria_src_dir = core_root / "diagnostic" / "soteria" / "src"
-        # 1. Localização do arquivo C gerado pelo Cython
-        c_file = self.env.foundry / f"{module_name}.c"
-        if getattr(self, "use_soteria", False):
-            shadow_c = self.env.foundry / "shadow_pyx" / f"{module_name}.c"
-            if shadow_c.exists():
-                c_file = shadow_c
+
+        # [FIX] Busca .c em múltiplos locais (Cython --build-temp cria subdirs)
+        c_candidates = [
+            self.env.foundry / "shadow_pyx" / f"{module_name}.c",
+            self.env.foundry / f"{module_name}.c",
+            self.env.foundry / f"temp_{module_name}" / "Release" / f"{module_name}.c",
+            self.env.foundry / f"temp_{module_name}" / f"{module_name}.c",
+            self.env.foundry / "build" / "temp.*" / f"{module_name}.c",
+        ]
+        c_file = None
+        for cand in c_candidates:
+            if cand.exists():
+                c_file = cand
+                break
+
+        # Também procura recursivamente em foundry/temp_*/
+        if c_file is None:
+            for tmp in self.env.foundry.glob(f"temp_{module_name}*"):
+                for c in tmp.rglob(f"{module_name}.c"):
+                    c_file = c
+                    break
+                if c_file:
+                    break
+
+        if c_file is None:
+            print(f"\n{Fore.RED}✘ [LINK] .c não encontrado para {module_name}{Fore.RESET}")
+            return False
 
         sources = [str(c_file)]
 

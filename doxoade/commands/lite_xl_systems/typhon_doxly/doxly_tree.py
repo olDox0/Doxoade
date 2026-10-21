@@ -321,6 +321,30 @@ DOXLY_TREE.failure(
     auto_fixable=True,
 )
 
+DOXLY_TREE.failure(
+    "runtime",
+    id="doxly.pty.handshake_fail",
+    name="Falha de Handshake no Terminal PTY",
+    severity="high",
+    symptoms=(
+        r"\[PTY\] Daemon morreu no spawn",
+        r"\[PTY\] HANDSHAKE TIMEOUT",
+        r"PTY alive:false",
+        r"PTY handshake timeout",
+    ),
+    dev_comment=(
+        "O daemon Python do PTY (pty_file_daemon.py) falhou ao iniciar ou não respondeu "
+        "ao handshake. Causas comuns: 'pywinpty' ausente, ConPTY indisponível, "
+        "python do venv não encontrado, ou ipc_dir inacessível."
+    ),
+    mitigation=(
+        "1. Verifique o erro no log: doxoade doxly log -m test. "
+        "2. Se faltar pywinpty: doxoade doxly pty-install. "
+        "3. Rode o daemon standalone: doxoade doxly pty-probe. "
+        "4. Se o ambiente for Windows < 10 1809, use o fallback de terminal externo."
+    ),
+    auto_fixable=True,
+)
 
 # --- 5. Contratos de API & Monkey-Patches ---
 DOXLY_TREE.failure(

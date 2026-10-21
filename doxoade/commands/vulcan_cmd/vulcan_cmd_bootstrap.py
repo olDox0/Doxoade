@@ -144,9 +144,39 @@ def _write_safe_runtime(project_root: Path) -> Path:
     return vulcan_dir / 'bootstrap.py'
 
 def _iter_project_main_files(project_root: Path):
-    skip = {'.git', 'venv', '.venv', '__pycache__', 'build', 'dist', '.doxoade'}
+    # [FIX] Skip list expandida — não injeta em third-party, tests, legacy, sandbox
+    skip = {
+        '.git', 'venv', '.venv', '__pycache__', 'build', 'dist', '.doxoade',
+        # Third-party (NEVER inject)
+        'thirdparty', 'vendor', 'external', 'node_modules', 'site-packages',
+        'Lib', 'lib', 'mingw64', 'winlibs', 'w64devkit',
+        # Legacy / sandbox / tests
+        'lixao', 'old', 'recycle', 'legacy', 'sandbox', 'sandbox_codegen',
+        'tests', 'test', 'pytest_temp_dir', 'benchmarks',
+        # IDE / cache
+        '.idea', '.vscode', '.mypy_cache', '.pytest_cache',
+    }
+    
+    # Additional: skip any path containing 'site-packages' or 'python3.X' stdlib
+    def _is_skip_path(parts):
+        parts_lower = [p.lower() for p in parts]
+        for seg in parts_lower:
+            if seg in skip:
+                return True
+            if 'site-packages' in seg:
+                return True
+            if seg.startswith('python3.') or seg.startswith('python2.'):
+                return True
+        return False
+    
     for root, dirs, files in os.walk(project_root):
-        dirs[:] = [d for d in dirs if d not in skip]
+        # Prune dirs early
+        rel_parts = Path(root).relative_to(project_root).parts if Path(root) != project_root else ()
+        dirs[:] = [d for d in dirs if d.lower() not in skip and d not in skip]
+        
+        if _is_skip_path(rel_parts):
+            continue
+        
         for f in files:
             if f.endswith('.py'):
                 p = Path(root) / f
@@ -163,16 +193,75 @@ def _inject_bootstrap(main_file: Path) -> bool:
     if '@click.' in original and '[VULCAN-SKIP]' not in original:
         safety_tag = '\n# [VULCAN-SKIP] Proteção contra introspecção Click\n'
     content = original
+    
+    # Remove qualquer bootstrap existente
     while True:
         start = content.find(_BOOTSTRAP_START)
-        if start < 0: break
+        if start < 0:
+            break
         end = content.find(_BOOTSTRAP_END, start)
-        if end < 0: break
+        if end < 0:
+            break
         end += len(_BOOTSTRAP_END)
-        if end < len(content) and content[end] == '\n': end += 1
+        if end < len(content) and content[end] == '\n':
+            end += 1
         content = content[:start] + content[end:]
-    updated = _BOOTSTRAP_BLOCK + safety_tag + content
-    if updated == original: return False
+    
+    # [FIX] Encontra a posição correta para injetar
+    # `from __future__ import ...` DEVE ser a primeira instrução real.
+    # Insere o bootstrap LOGO APÓS os future imports (e após docstring do módulo).
+    lines = content.splitlines(keepends=True)
+    insert_idx = 0
+    in_docstring = False
+    docstring_delim = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        
+        # Skip empty lines and comments
+        if not stripped or stripped.startswith('#'):
+            insert_idx = i + 1
+            continue
+        
+        # Handle module docstring
+        if not in_docstring and docstring_delim is None:
+            if stripped.startswith('"""') or stripped.startswith("'''"):
+                docstring_delim = stripped[:3]
+                # Single-line docstring
+                if stripped.count(docstring_delim) >= 2 and len(stripped) > 3:
+                    insert_idx = i + 1
+                    docstring_delim = None
+                    continue
+                in_docstring = True
+                insert_idx = i + 1
+                continue
+        
+        if in_docstring:
+            if docstring_delim in stripped:
+                in_docstring = False
+                docstring_delim = None
+            insert_idx = i + 1
+            continue
+        
+        # First real statement
+        if stripped.startswith('from __future__'):
+            insert_idx = i + 1
+            continue
+        
+        # First non-future statement — stop here
+        break
+    
+    # Reconstruct content with bootstrap injected at safe position
+    before = ''.join(lines[:insert_idx])
+    after = ''.join(lines[insert_idx:])
+    
+    # Ensure `before` ends with newline
+    if before and not before.endswith('\n'):
+        before += '\n'
+    
+    updated = before + _BOOTSTRAP_BLOCK + safety_tag + after
+    
+    if updated == original:
+        return False
     main_file.write_text(updated, encoding='utf-8')
     return True
 

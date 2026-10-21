@@ -140,6 +140,10 @@ function TerminalEngine.new(opts)
   self._last_line_count = 0
   self._status_msg = "Pronto."
 
+  self._spawn_time = os.clock()
+  self._handshake_done = false
+  self._handshake_timeout = 6.0  -- segundos
+
   self:load_project_history()
   return self
 end
@@ -281,6 +285,7 @@ function TerminalEngine:start()
   self._client.on_ready = function()
     engine._status_msg = "Conectado: " .. engine:get_cwd()
     engine.is_executing = false
+    self._handshake_done = true
     core.redraw = true
   end
   self._client.on_output = function()
@@ -391,6 +396,54 @@ end
 function TerminalEngine:tick()
   if not self._client then return false end
   local changed = false
+
+  -- 🔍 Verifica timeout de handshake (só uma vez, sem spam)
+  if not self._handshake_done and self._spawn_time then
+      if (os.clock() - self._spawn_time) > self._handshake_timeout then
+          self._handshake_done = true  -- evita repetir o log
+
+          -- 🔧 FIX: usa o client (não o self), e protege contra nil
+          local py_exe = "?"
+          if self._client and type(self._client._find_python) == "function" then
+              local ok, result = pcall(self._client._find_python, self._client)
+              if ok and result then py_exe = result end
+          end
+
+          local ipc_dir = (self._client and self._client.ipc_dir) or "?"
+          if core.log then
+              core.log(string.format("⚠️ [PTY] HANDSHAKE TIMEOUT após %.1fs (python=%s, ipc=%s)",
+                  self._handshake_timeout, py_exe, ipc_dir))
+              core.log("   ↳ O daemon não respondeu. Diagnóstico: doxoade doxly log -m test")
+          end
+          local capture = rawget(_G, "phanto_capture")
+          if capture then
+              capture("pty_handshake_timeout", function()
+                  error(string.format("PTY handshake timeout (%ds) - python=%s", self._handshake_timeout, py_exe), 2)
+              end)
+          end
+      end
+  end
+
+  -- 🔧 FALLBACK: se ConPTY não estiver disponível, abre terminal externo
+  if self._handshake_done and not self._client.connected then
+      -- Lê o status do daemon
+      local status_file = (self._client.ipc_dir or "") .. PATHSEP .. "pty_status.json"
+      local f = io.open(status_file, "r")
+      if f then
+          local content = f:read("*a")
+          f:close()
+          if content:find('"fallback_suggested"%s*:%s*"terminal_external"') then
+              if core.log then
+                  core.log("🖥️  [PTY] Fallback para terminal externo (ConPTY indisponível)")
+              end
+              -- Abre Windows Terminal / cmd elevado na pasta do projeto
+              local cwd = self:get_cwd() or "."
+              local cmd = string.format('start "Doxoade Terminal" cmd.exe /k "cd /d "%s""', cwd)
+              pcall(system.exec, cmd)
+              self._handshake_done = true  -- evita repetir
+          end
+      end
+  end
 
   if not self._client._handshake_done then
     if self._client.poll_handshake then
