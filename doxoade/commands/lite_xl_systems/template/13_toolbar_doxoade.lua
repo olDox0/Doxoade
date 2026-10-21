@@ -1,180 +1,227 @@
--- doxoade/commands/lite_xl_systems/template/13_toolbar_doxoade.lua
+-- doxoade/commands/lite_xl_systems/template/13b_leap_toolbar.lua
 --[[
-  ⚡ DOXOADE STATUS BAR HUD & SOVEREIGN BADGES (V2.2 Strict-Safe)
-  - Exibe badges dinâmicos de indentação, auditoria Ma'at, atalhos rápidos e contador de seleção.
-  - Ordenação determinística de slots no rodapé (sem conflito de posições).
-  - Cores declaradas localmente para conformidade estrita (strict.lua safe).
+⚡ DOXOADE LEAP SYS KVM CONTROLLER & DISPATCHER (V3.0 Sovereign Locator)
+- Sonda autônoma com persistência de caminho para sysutils.exe (PC-A e PC-B).
+- Despacho desacoplado no Windows (sem congelar o loop gráfico do Lite XL).
+- Escrita e leitura direta do contrato ~/.doxoade/leap_state.json.
 ]]
 local core = require "core"
-local config = require "core.config"
 local style = require "core.style"
 local command = require "core.command"
+local keymap = require "core.keymap"
 local StatusView = require "core.statusview"
 
-local function register_status_item(name, alignment, get_item_fn, action_fn, position)
-  if not core.status_view or not core.status_view.add_item then return end
-  local ok = pcall(function()
-    core.status_view:add_item({
-      name = name,
-      predicate = function() return true end,
-      alignment = alignment or StatusView.Item.LEFT,
-      get_item = get_item_fn,
-      command = action_fn,
-      position = position or 3
-    })
-  end)
-  if not ok then
-    pcall(function()
-      core.status_view:add_item(
-        function() return true end,
-        name,
-        alignment or StatusView.Item.LEFT,
-        get_item_fn,
-        action_fn,
-        position or 3
-      )
-    end)
-  end
+if rawget(_G, "_DOXOADE_LEAP_TOOLBAR_LOADED") then return end
+rawset(_G, "_DOXOADE_LEAP_TOOLBAR_LOADED", true)
+
+local sep = PATHSEP or "/"
+local home = os.getenv("USERPROFILE") or os.getenv("HOME") or "."
+local state_file = home .. sep .. ".doxoade" .. sep .. "leap_state.json"
+
+local LeapHUD = {
+    active = false,
+    mode = "idle",
+    target = "bluebaby",
+    server_ip = "192.168.18.52", -- IP Wi-Fi padrão do Amaranth
+    port = 24800,
+    sysutils_bin = nil,
+    last_toggle_time = 0,
+}
+
+-- ── 0. Verificador de Existência de Arquivo ─────────────────────────────────
+local function file_exists(path)
+    if not path or path == "" then return false end
+    local info = system.get_file_info(path)
+    return info ~= nil and info.type == "file"
 end
 
-core.add_thread(function()
-    coroutine.yield(0.02)
-    pcall(function()
-        if rawget(_G, "_DOXOADE_STATUS_HUD_REGISTERED") then return end
-        rawset(_G, "_DOXOADE_STATUS_HUD_REGISTERED", true)
+-- ── 1. Leitura O(1) do Contrato de Estado ────────────────────────────────────
+local function read_leap_state()
+    local f = io.open(state_file, "r")
+    if not f then
+        LeapHUD.active = false
+        LeapHUD.mode = "idle"
+        return
+    end
+    local content = f:read("*a") or ""
+    f:close()
 
-        local DIVIDER_COLOR      = style.divider or { 76, 69, 82, 255 }
-        local ACCENT_GREEN       = style.accent or { 38, 188, 95, 255 }
-        local COLOR_TEXT_WHITE   = { 250, 250, 250, 255 }
-        local COLOR_SYNC_ON_BG   = { 25, 123, 63, 255 }
-        local COLOR_SYNC_OFF_BG  = { 45, 45, 48, 255 }
+    LeapHUD.active = content:find('"active":%s*true') ~= nil
+    LeapHUD.mode = content:match('"mode":%s*"([^"]+)"') or "idle"
+    LeapHUD.target = content:match('"target":%s*"([^"]+)"') or "bluebaby"
 
-        -- ==========================================
-        -- LADO ESQUERDO (Contexto do Documento)
-        -- ==========================================
+    local ip = content:match('"server_ip":%s*"([^"]+)"')
+    if ip and ip ~= "" then LeapHUD.server_ip = ip end
 
-        register_status_item(
-            "doxoade:selection_counter",
-            StatusView.Item.LEFT,
-            function()
-                local view = core.active_view
-                local doc = view and view.doc
-                if doc and doc.has_selection and doc:has_selection() then
-                    local l1, c1, l2, c2 = doc:get_selection(true)
-                    local line_count = math.abs(l2 - l1) + 1
-                    local text = line_count > 1 
-                        and string.format("📊 %d L ", line_count) 
-                        or string.format("📊 %d C ", math.abs(c2 - c1))
-                    return { { 56, 189, 248, 255 }, text, DIVIDER_COLOR, "| " }
-                end
-                return {}
-            end,
-            nil, 1
+    local bin = content:match('"sysutils_bin":%s*"([^"]+)"')
+    if bin and bin ~= "" then
+        bin = bin:gsub("\\\\", "\\")
+        if file_exists(bin) then LeapHUD.sysutils_bin = bin end
+    end
+end
+
+-- ── 2. Gravação do Contrato de Estado ─────────────────────────────────────────
+local function write_leap_state(active, mode, target, ip)
+    local f = io.open(state_file, "w")
+    if f then
+        local escaped_bin = (LeapHUD.sysutils_bin or ""):gsub("\\", "\\\\")
+        local payload = string.format(
+            '{\n  "active": %s,\n  "mode": "%s",\n  "target": "%s",\n  "server_ip": "%s",\n  "port": %d,\n  "sysutils_bin": "%s",\n  "updated_at": %d\n}',
+            active and "true" or "false",
+            mode or "idle",
+            target or "bluebaby",
+            ip or "192.168.18.52",
+            LeapHUD.port,
+            escaped_bin,
+            os.time()
         )
+        f:write(payload)
+        f:close()
+    end
+end
 
-        register_status_item(
-            "doxoade:indent_status",
-            StatusView.Item.LEFT,
-            function()
-                local is_on = (config.draw_indent_guides ~= false)
-                local indent_size = config.indent_size or 4
-                local text = is_on and string.format("📐 %dx%d ", indent_size, indent_size) or "📐 OFF "
-                local col = is_on and ACCENT_GREEN or { 130, 130, 130, 255 }
-                return { col, text, DIVIDER_COLOR, "| " }
-            end,
-            function()
-                config.draw_indent_guides = not config.draw_indent_guides
-                core.redraw = true
-            end, 2
-        )
+-- ── 3. Sonda Autônoma do Executável SysUtils (PC-B e PC-A) ───────────────────
+local function resolve_sysutils()
+    if LeapHUD.sysutils_bin and file_exists(LeapHUD.sysutils_bin) then
+        return LeapHUD.sysutils_bin
+    end
 
-    register_status_item(
-      "doxoade:indent_status",
-      StatusView.Item.LEFT,
-      function()
-        local is_on = (config.draw_indent_guides ~= false)
-        local doc = core.active_view and core.active_view.doc
-        local indent_size = config.indent_size or 4
-        if doc then
-          local fn = tostring(doc.filename or ""):lower()
-          if fn:find("%.lua$") then indent_size = 2 end
+    read_leap_state()
+    if LeapHUD.sysutils_bin and file_exists(LeapHUD.sysutils_bin) then
+        return LeapHUD.sysutils_bin
+    end
+
+    local userprofile = os.getenv("USERPROFILE") or ("C:\\Users\\" .. (os.getenv("USERNAME") or ""))
+    local candidates = {
+        -- PC-B (Bluebaby)
+        "C:\\Users\\Victor Alexandre\\Documents\\Sysutils_proj\\venv\\Scripts\\sysutils.exe",
+        userprofile .. "\\Documents\\Sysutils_proj\\venv\\Scripts\\sysutils.exe",
+        userprofile .. "\\Documents\\Sysutils_proj\\sysutils.exe",
+        -- PC-A (Amaranth)
+        "C:\\Users\\olDox222\\Documents\\A20251122\\DOSSIER\\Altonomo\\Projetos_E_Programas\\Projeto SysUtils\\venv\\Scripts\\sysutils.exe",
+        userprofile .. "\\Documents\\A20251122\\DOSSIER\\Altonomo\\Projetos_E_Programas\\Projeto SysUtils\\venv\\Scripts\\sysutils.exe",
+        userprofile .. "\\Documents\\SysUtils\\venv\\Scripts\\sysutils.exe",
+    }
+
+    for _, path in ipairs(candidates) do
+        if file_exists(path) then
+            LeapHUD.sysutils_bin = path
+            write_leap_state(LeapHUD.active, LeapHUD.mode, LeapHUD.target, LeapHUD.server_ip)
+            core.log("[LEAP] 🎯 SysUtils localizado e vinculado: %s", path)
+            return path
         end
-        local text = is_on and string.format("📐 %dx%d (ON) ", indent_size, indent_size) or "📐 Indent: OFF "
-        local col = is_on and ACCENT_GREEN or { 130, 130, 130, 255 }
-        return {
-          col, text,
-          DIVIDER_COLOR, "| "
-        }
-      end,
-      function()
-        config.draw_indent_guides = not config.draw_indent_guides
+    end
+
+    -- Sonda via 'where' no PATH do sistema
+    local p = io.popen("where sysutils.exe 2>nul")
+    if p then
+        local line = p:read("*l")
+        p:close()
+        if line and file_exists(line) then
+            LeapHUD.sysutils_bin = line
+            write_leap_state(LeapHUD.active, LeapHUD.mode, LeapHUD.target, LeapHUD.server_ip)
+            core.log("[LEAP] 🎯 SysUtils localizado no PATH: %s", line)
+            return line
+        end
+    end
+
+    core.error("[LEAP] ✘ 'sysutils.exe' não localizado! Verifique a pasta Sysutils_proj.")
+    return nil
+end
+
+-- ── 4. Execução Silenciosa e Desacoplada no Windows ──────────────────────────
+local function execute_async(cmd)
+    if PLATFORM == "Windows" or os.getenv("OS") == "Windows_NT" then
+        os.execute('start /b cmd /c "' .. cmd .. '" > NUL 2>&1')
+    else
+        os.execute(cmd .. ' > /dev/null 2>&1 &')
+    end
+end
+
+-- ── 5. Despachante Soberano de Toggle ─────────────────────────────────────────
+local function toggle_leap_state()
+    local now = os.clock()
+    if (now - LeapHUD.last_toggle_time) < 0.6 then return end
+    LeapHUD.last_toggle_time = now
+
+    read_leap_state()
+
+    local bin = resolve_sysutils()
+    if not bin then return end
+    local qbin = '"' .. bin .. '"'
+
+    local hostname = (os.getenv("COMPUTERNAME") or "UNKNOWN"):upper()
+    local is_amaranth = hostname:find("AMARANTH") ~= nil
+
+    if LeapHUD.active then
+        -- Parar serviço ativo
+        execute_async(qbin .. " leap stop")
+        write_leap_state(false, "idle", "", LeapHUD.server_ip)
+        LeapHUD.active = false
+        LeapHUD.mode = "idle"
+        core.log("🛑 [LEAP] Servidor KVM desativado.")
         core.redraw = true
-      end,
-      3
-    )
+        return
+    end
 
-        register_status_item(
-            "doxoade:check_status",
-            StatusView.Item.LEFT,
-            function()
-                if rawget(_G, "_DOXOADE_AUDIT_RUNNING") then
-                    return { { 234, 179, 8, 255 }, "⏳ Audit... ", DIVIDER_COLOR, "| " }
-                end
-                local summary = rawget(_G, "_DOXOADE_AUDIT_SUMMARY")
-                local text = "⚖️ "
-                local col = { 244, 114, 182, 255 }
-                if summary and type(summary) == "table" then
-                    local errors_cnt = tonumber(summary.errors) or 0
-                    local warnings_cnt = tonumber(summary.warnings) or 0
-                    if errors_cnt > 0 then
-                        text = string.format("⚖️ %dE %dW ", errors_cnt, warnings_cnt)
-                        col = { 255, 60, 60, 255 }
-                    elseif warnings_cnt > 0 then
-                        text = string.format("⚖️ %dW ", warnings_cnt)
-                        col = { 234, 179, 8, 255 }
-                    elseif rawget(_G, "_DOXOADE_AUDIT_CHECKED") then
-                        text = "⚖️ OK "
-                        col = ACCENT_GREEN
-                    end
-                end
-                return { col, text, DIVIDER_COLOR, "| " }
-            end,
-            function() command.perform("doxoade:trigger-active-check") end, 3
-        )
+    if is_amaranth then
+        -- AMARANTH -> Dispara como Host com topologia fixada à direita para o bluebaby
+        local cmd = string.format('%s leap host --client bluebaby --pos right --port 24800 --no-firewall', qbin)
+        execute_async(cmd)
+        write_leap_state(true, "host", "bluebaby", LeapHUD.server_ip)
+        LeapHUD.active = true
+        LeapHUD.mode = "host"
+        core.log("🚀 [LEAP HOST] Servidor KVM ativo em Amaranth ➔ bluebaby (Direita :24800)")
+    else
+        -- BLUEBABY -> Conecta ao Amaranth
+        local cmd = string.format('%s leap join %s --port 24800 --name bluebaby', qbin, LeapHUD.server_ip)
+        execute_async(cmd)
+        write_leap_state(true, "client", "Amaranth", LeapHUD.server_ip)
+        LeapHUD.active = true
+        LeapHUD.mode = "client"
+        core.log("🔗 [LEAP CLI] Conectando ao host Amaranth (" .. LeapHUD.server_ip .. ")")
+    end
 
-        -- ==========================================
-        -- LADO DIREITO (Sistema & Ações Globais)
-        -- ==========================================
+    core.redraw = true
+end
 
-        register_status_item(
-            "doxoade:bottom_shelf_btn",
-            StatusView.Item.RIGHT,
-            function() return { { 56, 189, 248, 255 }, "🖥️ ", DIVIDER_COLOR, "| " } end,
-            function() command.perform("doxoade:toggle-bottom-shelf") end, 1
-        )
-
-        register_status_item(
-            "doxoade:search_status",
-            StatusView.Item.RIGHT,
-            function()
-                local state = rawget(_G, "_DOXOADE_SEARCH_STATE")
-                if state and state.is_searching then
-                    return { { 251, 191, 36, 255 }, "⏳ ", DIVIDER_COLOR, "| " }
-                end
-                return { { 56, 189, 248, 255 }, "🔍 ", DIVIDER_COLOR, "| " }
-            end,
-            function() command.perform("doxoade:open-search-docs-hub") end, 2
-        )
-
-        register_status_item(
-            "doxoade:note_status",
-            StatusView.Item.RIGHT,
-            function()
-                local is_active = rawget(_G, "_DOXOADE_NOTE_SYNC_ACTIVE") ~= false
-                return { is_active and COLOR_SYNC_ON_BG or COLOR_SYNC_OFF_BG, 
-                         is_active and " 📝 " or " 📝 ", DIVIDER_COLOR, "| " }
-            end,
-            function() command.perform("doxoade:note-status-click") end, 3
-        )
+-- ── 6. Polling de Sincronia em Background ────────────────────────────────────
+if core and core.add_thread then
+    core.add_thread(function()
+        while true do
+            coroutine.yield(1.0)
+            local prev_active = LeapHUD.active
+            local prev_mode = LeapHUD.mode
+            read_leap_state()
+            if prev_active ~= LeapHUD.active or prev_mode ~= LeapHUD.mode then
+                core.redraw = true
+            end
+        end
     end)
-end)
+end
+
+-- ── 7. Registro de Comandos e Atalhos ────────────────────────────────────────
+command.add(nil, {
+    ["doxoade:leap-toggle"] = function() toggle_leap_state() end,
+    ["doxoade:toggle-leap-service"] = function() toggle_leap_state() end,
+    ["doxoade:leap-locate-sysutils"] = function()
+        LeapHUD.sysutils_bin = nil
+        local bin = resolve_sysutils()
+        if bin then
+            core.log("[LEAP] ✔ Vinculado a: %s", bin)
+        end
+    end,
+    ["doxoade:leap-stop"] = function()
+        local bin = resolve_sysutils()
+        if bin then
+            execute_async('"' .. bin .. '" leap stop')
+        end
+        write_leap_state(false, "idle", "", LeapHUD.server_ip)
+        LeapHUD.active = false
+        LeapHUD.mode = "idle"
+        core.log("🛑 [LEAP] Processos encerrados.")
+        core.redraw = true
+    end,
+})
+
+keymap.add { ["ctrl+alt+l"] = "doxoade:leap-toggle" }

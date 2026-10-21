@@ -144,57 +144,161 @@ def _write_safe_runtime(project_root: Path) -> Path:
     return vulcan_dir / 'bootstrap.py'
 
 def _iter_project_main_files(project_root: Path):
-    # [FIX] Skip list expandida — não injeta em third-party, tests, legacy, sandbox
-    skip = {
-        '.git', 'venv', '.venv', '__pycache__', 'build', 'dist', '.doxoade',
-        # Third-party (NEVER inject)
-        'thirdparty', 'vendor', 'external', 'node_modules', 'site-packages',
-        'Lib', 'lib', 'mingw64', 'winlibs', 'w64devkit',
-        # Legacy / sandbox / tests
+    """
+    Itera arquivos prováveis de entry-point do projeto.
+
+    [FIX v2] Skip list expandida — NUNCA injeta em:
+      - Código de terceiros (thirdparty, vendor, external, site-packages)
+      - Bibliotecas de sistema embarcadas (Lib, lib, mingw64, winlibs, w64devkit)
+      - Testes, benchmarks, legacy, sandbox
+      - Ambientes virtuais e caches
+    """
+    # Diretórios que NUNCA devem ser tocados
+    NEVER_TOUCH = {
+        # Meta / VCS / cache
+        '.git', '.hg', '.svn', '.idea', '.vscode',
+        '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache',
+        '.tox', '.nox', 'pytest_temp_dir',
+        # Ambientes
+        'venv', '.venv', 'env', '.env', 'virtualenv',
+        # Builds
+        'build', 'dist', '*.egg-info', 'node_modules',
+        # Doxoade internos
+        '.doxoade', '.doxoade_cache', '.dox_agent_workspace',
+        # ★ CRÍTICO — código de terceiros
+        'thirdparty', 'vendor', 'external', 'extern',
+        # ★ CRÍTICO — bibliotecas de sistema embarcadas
+        'Lib', 'lib', 'libs', 'site-packages', 'dist-packages',
+        'mingw64', 'mingw32', 'winlibs', 'w64devkit',
+        # ★ Testes / legacy / sandbox
+        'tests', 'test', 'testing', 'benchmarks',
         'lixao', 'old', 'recycle', 'legacy', 'sandbox', 'sandbox_codegen',
-        'tests', 'test', 'pytest_temp_dir', 'benchmarks',
-        # IDE / cache
-        '.idea', '.vscode', '.mypy_cache', '.pytest_cache',
+        # Docs / exemplos
+        'docs', 'doc', 'examples', 'examples_legacy',
     }
-    
-    # Additional: skip any path containing 'site-packages' or 'python3.X' stdlib
-    def _is_skip_path(parts):
-        parts_lower = [p.lower() for p in parts]
-        for seg in parts_lower:
-            if seg in skip:
-                return True
-            if 'site-packages' in seg:
-                return True
-            if seg.startswith('python3.') or seg.startswith('python2.'):
-                return True
-        return False
-    
+
+    # Extensões de path que sempre pulam (case-insensitive)
+    NEVER_TOUCH_SUBSTR = ('site-packages', 'dist-packages', 'python3.', 'python2.')
+
+    root_path = Path(project_root).resolve()
+
     for root, dirs, files in os.walk(project_root):
-        # Prune dirs early
-        rel_parts = Path(root).relative_to(project_root).parts if Path(root) != project_root else ()
-        dirs[:] = [d for d in dirs if d.lower() not in skip and d not in skip]
-        
-        if _is_skip_path(rel_parts):
+        # Prune dirs in-place (os.walk respeita)
+        dirs[:] = [
+            d for d in dirs
+            if d not in NEVER_TOUCH
+            and d.lower() not in NEVER_TOUCH
+            and not d.startswith('.')  # hidden dirs
+        ]
+
+        # Se o próprio root atual é proibido, pula tudo
+        try:
+            rel_parts = Path(root).resolve().relative_to(root_path).parts
+        except ValueError:
             continue
-        
+        if any(p in NEVER_TOUCH or p.lower() in NEVER_TOUCH for p in rel_parts):
+            continue
+        if any(any(sub in p for sub in NEVER_TOUCH_SUBSTR) for p in rel_parts):
+            continue
+
         for f in files:
-            if f.endswith('.py'):
-                p = Path(root) / f
-                try:
-                    content = p.read_text(encoding='utf-8', errors='ignore')
-                    if '@click.' in content or 'if __name__ == "__main__"' in content:
-                        yield p
-                except Exception:
+            if not f.endswith('.py'):
+                continue
+            p = Path(root) / f
+            try:
+                content = p.read_text(encoding='utf-8', errors='ignore')
+            except Exception:
+                continue
+
+            # Critério de elegibilidade: entry point real
+            if '@click.' in content or 'if __name__ == "__main__"' in content:
+                yield p
+
+def _find_insert_position(lines: list[str]) -> int:
+    """
+    Encontra a posição segura para injetar o bootstrap.
+
+    Regras da linguagem Python:
+      - `from __future__ import ...` DEVE ser a primeira instrução real
+      - Module docstring (\"\"\"...\"\"\") deve vir ANTES de future imports
+      - Comentários e linhas em branco podem vir antes de qualquer coisa
+
+    Ordem segura de inserção do bootstrap:
+      [1] comentários/linhas em branco
+      [2] module docstring (se houver)
+      [3] from __future__ imports (se houver)
+      [4] === BOOTSTRAP AQUI ===
+      [5] resto do arquivo
+
+    Retorna o índice (0-based) onde o bootstrap deve ser inserido.
+    """
+    n = len(lines)
+    idx = 0
+
+    # 1. Skip linhas em branco e comentários iniciais
+    while idx < n:
+        stripped = lines[idx].strip()
+        if not stripped or stripped.startswith('#'):
+            idx += 1
+            continue
+        break
+
+    # 2. Detecta module docstring
+    if idx < n:
+        stripped = lines[idx].strip()
+        if stripped.startswith('"""') or stripped.startswith("'''"):
+            delim = stripped[:3]
+            # Docstring de uma linha: """ ... """
+            if stripped.count(delim) >= 2 and len(stripped) > 3:
+                idx += 1
+            else:
+                # Docstring multilinha: consome até fechamento
+                idx += 1
+                while idx < n:
+                    if delim in lines[idx]:
+                        idx += 1
+                        break
+                    idx += 1
+            # Skip comentários/linhas em branco após o docstring
+            while idx < n:
+                stripped = lines[idx].strip()
+                if not stripped or stripped.startswith('#'):
+                    idx += 1
                     continue
+                break
+
+    # 3. Skip from __future__ imports (podem ser múltiplos)
+    while idx < n:
+        stripped = lines[idx].strip()
+        if stripped.startswith('from __future__'):
+            idx += 1
+            # Future import pode ser multilinha com parênteses
+            while idx < n and lines[idx].strip().endswith('\\'):
+                idx += 1
+            continue
+        break
+
+    return idx
+
 
 def _inject_bootstrap(main_file: Path) -> bool:
+    """
+    Injeta o bootstrap Vulcan respeitando `from __future__` e module docstring.
+
+    [FIX v2] Posicionamento obrigatório:
+      - Não injeta em arquivos que contenham `[VULCAN-SKIP]` (já processados)
+      - Respeita posição de `from __future__` e docstring
+      - Idempotente: rodar duas vezes não duplica o bloco
+    """
     original = main_file.read_text(encoding='utf-8', errors='replace')
+
+    # Guard: arquivo já tem skip tag? não injeta
     safety_tag = ''
     if '@click.' in original and '[VULCAN-SKIP]' not in original:
         safety_tag = '\n# [VULCAN-SKIP] Proteção contra introspecção Click\n'
+
+    # Remove bootstrap existente (idempotência)
     content = original
-    
-    # Remove qualquer bootstrap existente
     while True:
         start = content.find(_BOOTSTRAP_START)
         if start < 0:
@@ -206,60 +310,21 @@ def _inject_bootstrap(main_file: Path) -> bool:
         if end < len(content) and content[end] == '\n':
             end += 1
         content = content[:start] + content[end:]
-    
-    # [FIX] Encontra a posição correta para injetar
-    # `from __future__ import ...` DEVE ser a primeira instrução real.
-    # Insere o bootstrap LOGO APÓS os future imports (e após docstring do módulo).
+
+    # Encontra posição segura de inserção
     lines = content.splitlines(keepends=True)
-    insert_idx = 0
-    in_docstring = False
-    docstring_delim = None
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        
-        # Skip empty lines and comments
-        if not stripped or stripped.startswith('#'):
-            insert_idx = i + 1
-            continue
-        
-        # Handle module docstring
-        if not in_docstring and docstring_delim is None:
-            if stripped.startswith('"""') or stripped.startswith("'''"):
-                docstring_delim = stripped[:3]
-                # Single-line docstring
-                if stripped.count(docstring_delim) >= 2 and len(stripped) > 3:
-                    insert_idx = i + 1
-                    docstring_delim = None
-                    continue
-                in_docstring = True
-                insert_idx = i + 1
-                continue
-        
-        if in_docstring:
-            if docstring_delim in stripped:
-                in_docstring = False
-                docstring_delim = None
-            insert_idx = i + 1
-            continue
-        
-        # First real statement
-        if stripped.startswith('from __future__'):
-            insert_idx = i + 1
-            continue
-        
-        # First non-future statement — stop here
-        break
-    
-    # Reconstruct content with bootstrap injected at safe position
+    insert_idx = _find_insert_position(lines)
+
+    # Reconstrói
     before = ''.join(lines[:insert_idx])
     after = ''.join(lines[insert_idx:])
-    
-    # Ensure `before` ends with newline
+
+    # Garante newline antes do bloco
     if before and not before.endswith('\n'):
         before += '\n'
-    
+
     updated = before + _BOOTSTRAP_BLOCK + safety_tag + after
-    
+
     if updated == original:
         return False
     main_file.write_text(updated, encoding='utf-8')

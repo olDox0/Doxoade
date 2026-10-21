@@ -486,7 +486,6 @@ def process_result(result, **kwargs):
             except Exception:
                 traceback.print_exception(e)
 
-
 def main():
     """Wrapper blindado com injeção Vulcan e Auto-VENV."""
     os.environ['DOXOADE_AUTHORIZED_RUN'] = '1'
@@ -544,7 +543,6 @@ def main():
     finally:
         from doxoade.tools.db_utils import stop_persistence_worker
         stop_persistence_worker()
-
 
 if __name__ == '__main__':
     main()
