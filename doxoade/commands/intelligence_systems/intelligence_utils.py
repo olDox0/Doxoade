@@ -334,8 +334,8 @@ def minify_code(code: str, filename: str, no_comments: bool, no_spaces: bool, no
 
     result = '\n'.join(header + body)
 
-    # v6.3 — GUARD: se o input não era vazio mas o resultado é vazio,
-    # a minificação corrompeu. Retorna o input cru (fail-safe).
+    # v6.3 — GUARD: se o input era não-vazio mas o output ficou vazio,
+    # a minificação corrompeu. Retorna o input original (fail-safe).
     if code and not result.strip():
         return code
 
