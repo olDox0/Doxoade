@@ -332,7 +332,14 @@ def minify_code(code: str, filename: str, no_comments: bool, no_spaces: bool, no
     else:
         body = [l.rstrip() for l in body]
 
-    return '\n'.join(header + body)
+    result = '\n'.join(header + body)
+
+    # v6.3 — GUARD: se o input não era vazio mas o resultado é vazio,
+    # a minificação corrompeu. Retorna o input cru (fail-safe).
+    if code and not result.strip():
+        return code
+
+    return result
 
 def get_ignore_spec(root: str, extra_patterns: list = None):
     """ Carrega especificações de ignorar do intelligence.toml ou defaults. """
