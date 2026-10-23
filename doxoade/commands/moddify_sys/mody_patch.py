@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import compileall as _compileall
 from pathlib import Path
 
 from dataclasses import dataclass, field
@@ -219,45 +220,66 @@ class PatchSurgeon:
     @classmethod
     def _find_removal_anchor(
         cls, file_lines: List[str], hunk: Hunk, max_offset: int = 200
-    ) -> Tuple[Optional[int], int, str, int]:
+    ) -> Tuple[Optional[int], int, str, int, List[int]]:
         """
-        v6.2: Nova estratégia de busca.
+        v6.3: Busca baseada em remoções (`-`) SEM exigir contexto (` `) ao redor.
 
-        Em vez de exigir que TODO o `expected_old` (contexto + remoções)
-        bata, busca primeiro as linhas `-` (remoções puras). O contexto
-        serve só para desambiguar/validar ao redor.
+        Retorna uma tupla de 5 elementos (adiciona `candidates`):
+            (loc, offset, match_type, contig_len, candidates)
 
-        Isso permite aplicar hunks cujo contexto mudou por patches
-        anteriores, desde que as remoções ainda existam.
+        - `loc`: localização escolhida (ou None se NONE)
+        - `match_type`: 'EXACT' | 'EXACT_MULTI' | 'PARTIAL' | 'ADD_ONLY' | 'NONE'
+        - `candidates`: lista de locs quando há ambiguidade (para desambiguação)
+
+        Estratégia:
+        1. Busca as remoções exatas; se 1 match, retorna EXACT.
+        2. Se > 1 match, verifica qual está mais perto de `old_start`;
+           retorna EXACT com o mais próximo, mas SINALIZA `EXACT_MULTI`.
+        3. Se nenhum match exato, busca streak parcial.
+        4. Se 0 remoções (hunk puro de adição), usa `old_start` direto.
         """
         removals = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind == '-']
         total_file = len(file_lines)
         norm_file = [cls._normalize_line(l) for l in file_lines]
         target_idx = max(0, hunk.old_start - 1)
 
-        # Caso 1: hunk puramente de adição (sem remoções) — usa old_start
+        # Hunk puro de adição: usa old_start direto
         if not removals:
-            return (target_idx, target_idx - target_idx, 'ADD_ONLY', 0)
+            return (target_idx, 0, 'ADD_ONLY', 0, [target_idx])
 
-        # Caso 2: busca as remoções exatas
         removal_len = len(removals)
         if removal_len > total_file:
-            return (None, 0, 'NONE', 0)
+            return (None, 0, 'NONE', 0, [])
 
-        # Busca em janela ao redor de old_start primeiro (rápido e seguro)
-        search_start = max(0, target_idx - max_offset)
-        search_end = min(total_file - removal_len + 1, target_idx + max_offset + 1)
-        for cand in range(search_start, search_end):
-            if norm_file[cand : cand + removal_len] == removals:
-                return (cand, cand - target_idx, 'EXACT', removal_len)
-
-        # Busca global como fallback
+        # Coleta TODOS os matches exatos das remoções
+        all_matches: List[int] = []
         for cand in range(total_file - removal_len + 1):
             if norm_file[cand : cand + removal_len] == removals:
-                return (cand, cand - target_idx, 'EXACT', removal_len)
+                all_matches.append(cand)
 
-        # Caso 3: remoções parciais (algumas linhas mudaram por patch anterior)
-        # Usa o maior streak contíguo de remoções encontrado.
+        if len(all_matches) == 1:
+            loc = all_matches[0]
+            return (loc, loc - target_idx, 'EXACT', removal_len, [loc])
+
+        if len(all_matches) > 1:
+            # Desambiguação por proximidade de old_start
+            def _distance(cand: int) -> int:
+                return abs(cand - target_idx)
+            all_matches.sort(key=_distance)
+            best = all_matches[0]
+            # Se o mais próximo está a menos de max_offset, usa-o como EXACT_MULTI
+            if _distance(best) <= max_offset:
+                return (
+                    best, best - target_idx, 'EXACT_MULTI', removal_len,
+                    all_matches[:5],   # até 5 candidatos para reportar
+                )
+            # Se todos estão longe, ainda escolhe o mais próximo mas sinaliza
+            return (
+                best, best - target_idx, 'EXACT_MULTI', removal_len,
+                all_matches[:5],
+            )
+
+        # Sem match exato: tenta streak parcial
         best_len = 0
         best_loc: Optional[int] = None
         for cand in range(total_file):
@@ -275,26 +297,57 @@ class PatchSurgeon:
 
         threshold = max(2, int(removal_len * 0.5))
         if best_len >= threshold and best_loc is not None:
-            return (best_loc, best_loc - target_idx, 'PARTIAL', best_len)
+            return (best_loc, best_loc - target_idx, 'PARTIAL', best_len, [best_loc])
 
-        # Caso 4: não é remoção, é só contexto (raro — hunk de contexto puro)
-        expected_old = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind in (' ', '-')]
-        if expected_old:
-            expected_len = len(expected_old)
-            if expected_len <= total_file:
-                for cand in range(search_start, min(total_file - expected_len + 1, search_end + 1)):
-                    if norm_file[cand : cand + expected_len] == expected_old:
-                        return (cand, cand - target_idx, 'EXACT', expected_len)
-
-        return (None, 0, 'NONE', best_len if best_len > 0 else 0)
+        return (None, 0, 'NONE', best_len if best_len > 0 else 0, [])
 
     @classmethod
-    def find_hunk_location(cls, file_lines: List[str], hunk: Hunk, max_offset: int = 200) -> Tuple[Optional[int], int, str, int]:
+    def find_hunk_location(
+        cls, file_lines: List[str], hunk: Hunk, max_offset: int = 200
+    ) -> Tuple[Optional[int], int, str, int, List[int]]:
         """
-        v6.2: delega para `_find_removal_anchor`, que prioriza as linhas `-`.
-        Mantido como método público para compatibilidade.
+        v6.3: delega para `_find_removal_anchor`. Retorna tupla de 5.
         """
         return cls._find_removal_anchor(file_lines, hunk, max_offset=max_offset)
+
+    @classmethod
+    def _validate_module_compile(
+        cls, content: str, target_path: Path, dry_run: bool = True
+    ) -> Optional[str]:
+        if not target_path or target_path.suffix.lower() != ".py":
+            return None
+        import tempfile
+        import compileall
+        try:
+            # Em dry-run, copia o conteúdo para um arquivo temporário
+            if dry_run:
+                with tempfile.NamedTemporaryFile(
+                    mode='w', suffix='.py', encoding='utf-8', delete=False
+                ) as tmp:
+                    tmp.write(content)
+                    tmp_path = tmp.name
+                try:
+                    success = compileall.compile_file(
+                        tmp_path, quiet=2, force=True
+                    )
+                finally:
+                    try:
+                        Path(tmp_path).unlink()
+                    except OSError:
+                        pass
+                if not success:
+                    return "compileall: falha ao compilar (verifique sintaxe)"
+                return None
+            else:
+                # Em apply, o arquivo já foi escrito; compileall valida in-place
+                success = compileall.compile_file(
+                    str(target_path), quiet=2, force=True
+                )
+                if not success:
+                    return "compileall: falha ao compilar (verifique sintaxe)"
+                return None
+        except Exception as e:
+            return f"Erro em compileall: {e}"
 
     @classmethod
     def simulate_or_apply(
@@ -368,15 +421,33 @@ class PatchSurgeon:
                     report["hunks_applied"] += 1
                     continue
 
-            loc, offset, match_type, contig_len = cls.find_hunk_location(modified_lines, hunk)
+            loc, offset, match_type, contig_len, candidates = cls.find_hunk_location(modified_lines, hunk)
+
+            # ─── v6.3: reportar ambiguidade explicitamente ────────────────
+            if match_type == 'EXACT_MULTI' and len(candidates) > 1:
+                report["details"].append({
+                    "hunk": idx,
+                    "status": "AMBÍGUO",
+                    "reason": (
+                        f"Linha(s) de remoção aparecem em {len(candidates)} lugar(es): "
+                        f"{', '.join(f'L{c+1}' for c in candidates)}. "
+                        f"Usando o mais próximo de old_start (L{loc+1})."
+                    ),
+                    "match_type": "EXACT_MULTI",
+                    "candidates": [c + 1 for c in candidates],
+                    "loc": loc + 1,
+                })
+                # Segue com a aplicação no `loc` escolhido (não bloqueia)
 
             if match_type == 'NONE':
-                expected_old = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind in (' ', '-')]
+                removals = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind == '-']
                 added_lines = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind == '+']
                 already_there = any(al in "".join(working_lines) for al in added_lines if len(al) > 5)
 
-                threshold = max(2, int(len(expected_old) * 0.6))
-                reason_msg = f"Contexto Insuficiente: Apenas {contig_len} linhas contíguas encontradas (mínimo {threshold})."
+                reason_msg = (
+                    f"Nenhuma linha de remoção encontrada "
+                    f"(streak máximo: {contig_len}/{len(removals)})."
+                )
                 if already_there:
                     reason_msg += f" {Fore.MAGENTA}(As linhas de adição já existem no arquivo?){Fore.YELLOW}"
 
@@ -445,13 +516,18 @@ class PatchSurgeon:
 
         new_content = "".join(modified_lines)
 
-        # Validação final
+        # v6.3 — Camada 3: validação final via py_compile (equivalente a compileall)
         if patch.target_path.suffix.lower() == '.py':
             try:
                 compile(new_content, str(patch.target_path), 'exec')
             except SyntaxError as e:
                 report["syntax_ok"] = False
                 report["errors"].append(f"Violação Ma'at: SyntaxError em Python (L{e.lineno}: {e.msg})")
+            else:
+                _mod_err = cls._validate_module_compile(new_content, patch.target_path)
+                if _mod_err is not None:
+                    report["syntax_ok"] = False
+                    report["errors"].append(f"Violação Ma'at (compileall): {_mod_err}")
 
         # CheckShot (sandbox isolado) — só em dry-run
         if run_checkshot and not apply and report["hunks_failed"] == 0 and report["syntax_ok"]:
@@ -649,14 +725,25 @@ def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_ar
         )
 
         for det in res["details"]:
-            status_color = Fore.GREEN if "APLICÁVEL" in det["status"] or "IDEMPOTENTE" in det["status"] or "JÁ APLICADO" in det["status"] else Fore.RED
-            icon = "✔" if "APLICÁVEL" in det["status"] or "IDEMPOTENTE" in det["status"] or "JÁ APLICADO" in det["status"] else "✘"
+            is_ok = (
+                "APLICÁVEL" in det["status"]
+                or "IDEMPOTENTE" in det["status"]
+                or "JÁ APLICADO" in det["status"]
+                or "AMBÍGUO" in det["status"]
+            )
+            status_color = Fore.GREEN if is_ok else Fore.RED
+            if "AMBÍGUO" in det["status"]:
+                status_color = Fore.YELLOW
+            icon = "✔" if is_ok else "✘"
 
             badges = ""
             if det.get('offset', 0) != 0:
                 badges += f" {Fore.DIM}[Offset: {det['offset']:+d}]{Style.RESET_ALL}"
             if det.get('match_type') == 'PARTIAL':
                 badges += f" {Fore.YELLOW}⚠️ [Recuperado: {det['contig_len']} linhas contíguas]{Style.RESET_ALL}"
+            if det.get('match_type') == 'EXACT_MULTI':
+                cands = det.get('candidates', [])
+                badges += f" {Fore.MAGENTA}⚡ [Ambíguo: {len(cands)} matches — {', '.join(f'L{c}' for c in cands)}]{Style.RESET_ALL}"
 
             click.echo(f"   {status_color}{icon} Hunk #{det['hunk']}: {det['status']}{badges}{Style.RESET_ALL}")
 

@@ -184,12 +184,28 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
 
             if SOURCE_CHAR_LIMIT > 0:
                 data["source_minified"] = src_clean[:SOURCE_CHAR_LIMIT]
+                if len(src_clean) > SOURCE_CHAR_LIMIT:
+                    data["source_truncated_at"] = SOURCE_CHAR_LIMIT
             else:
                 data["source_minified"] = src_clean
         
     except Exception as e:
         data["error"] = str(e)
-    
+
+    # ─── v6.3: FALLBACK DE SOURCE (garante que -s nunca perca código) ────
+    # Se `source=True` foi pedido mas o analyzer especializado não populou
+    # `source_minified` (comum em C/C++ moderno, HTML/CSS exótico), injeta
+    # o conteúdo bruto lido. Isso é idempotente: se `source_minified` já
+    # estiver presente, não faz nada.
+    if source and "source_minified" not in data and "error" not in data:
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as _fb:
+                _raw = _fb.read()
+            if _raw:
+                data["source_minified"] = _raw
+        except Exception:
+            pass
+
     return data
     
 def _get_safe_backups(file_path, count=3):

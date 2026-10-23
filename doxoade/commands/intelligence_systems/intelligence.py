@@ -385,9 +385,11 @@ def _save_llm_report(report_data, output_path, console, include_source=False, no
                 lines.append('      </graph_neighbors>')
             
             src = f.get('source_minified')
+            trunc = f.get('source_truncated_at')
             if src:
-                safe_src = src.replace(']]>', ']]]]><![CDATA[>')
-                lines.append('      <source_code><![CDATA[')
+                safe_src = src.replace(']]>', ']]><![CDATA[>')
+                attr = f' truncated_at="{trunc}"' if trunc else ''
+                lines.append(f'      <source_code{attr}><![CDATA[')
                 for code_line in safe_src.splitlines():
                     lines.append(code_line)
                 lines.append('      ]]></source_code>')
@@ -503,7 +505,8 @@ def _run_analyze_coverage(scan_paths, cli_excludes, verbose, ext_excludes, level
 
     stats = {
         "raw": 0, "ignored": 0, "unsupported": 0, "target": 0,
-        "success": 0, "failed": 0, "corrupt": 0
+        "success": 0, "failed": 0, "corrupt": 0,
+        "with_source": 0,  # NOVO
     }
     failures = []
     ignored_files = []
@@ -553,7 +556,9 @@ def _run_analyze_coverage(scan_paths, cli_excludes, verbose, ext_excludes, level
             
             # CAMADA 3: Integridade de Parsing
             try:
-                res = analyze_file_chief(f_abs, root)
+                res = analyze_file_chief(f_abs, root, source=True)  # ← força source
+                if res.get("source_minified"):
+                    stats["with_source"] += 1
                 if res.get("error"):
                     stats["failed"] += 1
                     failures.append({"file": rel_path, "reason": res["error"]})
@@ -573,6 +578,7 @@ def _run_analyze_coverage(scan_paths, cli_excludes, verbose, ext_excludes, level
     table.add_column("Métrica", style="cyan")
     table.add_column("Total", justify="right", style="magenta")
     
+    table.add_row("[cyan]Com Source (-s)[/cyan]", str(stats["with_source"]))
     table.add_row("Arquivos Brutos (DNM)", str(stats["raw"]))
     table.add_row("Ignorados (Blacklist)", str(stats["ignored"]))
     table.add_row("Extensão Não Suportada", str(stats["unsupported"]))
