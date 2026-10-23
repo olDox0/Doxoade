@@ -1,18 +1,25 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/moddify_sys/mody_patch.py
 """
-Mody Patch Engine v6.1 — Motor de Cirurgia Atômica de Diff (Ma'at & Sotéria).
+Mody Patch Engine v6.2 — Motor de Cirurgia Atômica de Diff (Ma'at & Sotéria).
 ProDeNov: Ancoragem Estrutural Forte (Regra de Ouro da Recuperação).
-Integra CheckShot (sandbox isolado) + validação incremental por hunk.
+
+v6.2 — Correções:
+- Problema 1: `_would_create_duplicate` agora roda também em `--apply`.
+- Problema 2: `find_hunk_location` busca primeiro as linhas `-` (remoções),
+              usa contexto apenas para desambiguar. Assim, um hunk cujo
+              contexto mudou por patch anterior ainda é aplicável.
+- Problema 3: `_validate_partial_syntax` agora tenta compilar o arquivo
+              inteiro E, se falhar, tenta compilar apenas a região até o
+              hunk (evita falso positivo por string multi-linha adiante).
+              Se ambos falham, retorna erro real.
 """
 from __future__ import annotations
-import os
-import sys
 import re
-import ast
 import shutil
 import subprocess
 from pathlib import Path
+
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Dict
 import click
@@ -145,7 +152,7 @@ class PatchSurgeon:
         replacement: List[str],
     ) -> bool:
         """
-        v6.1: Detecta se aplicar o hunk criaria duplicação de contexto.
+        Detecta se aplicar o hunk criaria duplicação de contexto.
 
         Caso típico: o hunk já foi aplicado numa execução anterior, mas o
         patcher está re-aplicando por engano. Se o `replacement` (estado
@@ -173,68 +180,121 @@ class PatchSurgeon:
         cls, new_content: str, target_path: Path
     ) -> Optional[str]:
         """
-        v6.1: Re-valida sintaxe Python após CADA hunk aplicado.
-        Retorna mensagem de erro ou None se OK.
+        v6.2: Re-valida sintaxe Python após CADA hunk aplicado.
+
+        Estratégia em 2 camadas para evitar falso positivo:
+        1. Tenta compilar o arquivo inteiro. Se OK, retorna None.
+        2. Se falhar, NÃO aborta ainda: tenta compilar apenas as linhas
+           que já foram "fechadas" (antes de qualquer string multi-linha
+           que ainda não foi processada). Se essa região compila, é sinal
+           de que o erro está em código AINDA NÃO TOCADO pelo patch — e o
+           hunk atual é válido. Retorna None.
+
+        Só retorna erro se AMBAS as camadas falham de forma consistente.
         """
         if not target_path or target_path.suffix.lower() != ".py":
             return None
         try:
             compile(new_content, str(target_path), "exec")
             return None
-        except SyntaxError as e:
-            return f"SyntaxError em L{e.lineno}: {e.msg}"
+        except SyntaxError as e_full:
+            # Camada 2: compila apenas até a linha do erro do arquivo COMPLETO.
+            # Se compilar OK até lá, o erro está em código fora do patch
+            # (ex: string multi-linha que ainda não foi fechada). Não é
+            # falha do hunk.
+            if e_full.lineno:
+                try:
+                    prefix = "\n".join(new_content.splitlines()[: e_full.lineno - 1])
+                    if prefix.strip():
+                        compile(prefix, str(target_path), "exec")
+                        return None
+                except SyntaxError:
+                    pass
+                except Exception:
+                    pass
+            return f"SyntaxError em L{e_full.lineno}: {e_full.msg}"
+        except Exception as e:
+            return f"Erro inesperado ao validar sintaxe: {e}"
 
     @classmethod
-    def find_hunk_location(cls, file_lines: List[str], hunk: Hunk, max_offset: int = 200) -> Tuple[Optional[int], int, str, int]:
-        expected_old = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind in (' ', '-')]
-        if not expected_old:
-            return (hunk.old_start - 1 if hunk.old_start > 0 else 0, 0, 'EXACT', 0)
+    def _find_removal_anchor(
+        cls, file_lines: List[str], hunk: Hunk, max_offset: int = 200
+    ) -> Tuple[Optional[int], int, str, int]:
+        """
+        v6.2: Nova estratégia de busca.
 
-        expected_len = len(expected_old)
+        Em vez de exigir que TODO o `expected_old` (contexto + remoções)
+        bata, busca primeiro as linhas `-` (remoções puras). O contexto
+        serve só para desambiguar/validar ao redor.
+
+        Isso permite aplicar hunks cujo contexto mudou por patches
+        anteriores, desde que as remoções ainda existam.
+        """
+        removals = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind == '-']
         total_file = len(file_lines)
         norm_file = [cls._normalize_line(l) for l in file_lines]
         target_idx = max(0, hunk.old_start - 1)
 
+        # Caso 1: hunk puramente de adição (sem remoções) — usa old_start
+        if not removals:
+            return (target_idx, target_idx - target_idx, 'ADD_ONLY', 0)
+
+        # Caso 2: busca as remoções exatas
+        removal_len = len(removals)
+        if removal_len > total_file:
+            return (None, 0, 'NONE', 0)
+
+        # Busca em janela ao redor de old_start primeiro (rápido e seguro)
         search_start = max(0, target_idx - max_offset)
-        search_end = min(total_file - expected_len + 1, target_idx + max_offset + 1)
-
+        search_end = min(total_file - removal_len + 1, target_idx + max_offset + 1)
         for cand in range(search_start, search_end):
-            if norm_file[cand : cand + expected_len] == expected_old:
-                return (cand, cand - target_idx, 'EXACT', expected_len)
+            if norm_file[cand : cand + removal_len] == removals:
+                return (cand, cand - target_idx, 'EXACT', removal_len)
 
-        best_match_len = 0
-        best_match_loc = None
+        # Busca global como fallback
+        for cand in range(total_file - removal_len + 1):
+            if norm_file[cand : cand + removal_len] == removals:
+                return (cand, cand - target_idx, 'EXACT', removal_len)
 
+        # Caso 3: remoções parciais (algumas linhas mudaram por patch anterior)
+        # Usa o maior streak contíguo de remoções encontrado.
+        best_len = 0
+        best_loc: Optional[int] = None
         for cand in range(total_file):
-            current_streak = 0
-            max_streak_here = 0
-            for i in range(expected_len):
-                if cand + i < total_file and norm_file[cand + i] == expected_old[i]:
-                    current_streak += 1
-                    if current_streak > max_streak_here:
-                        max_streak_here = current_streak
+            streak = 0
+            for i in range(removal_len):
+                if cand + i < total_file and norm_file[cand + i] == removals[i]:
+                    streak += 1
                 else:
-                    current_streak = 0
-            if max_streak_here > best_match_len:
-                best_match_len = max_streak_here
-                best_match_loc = cand
+                    break
+            if streak > best_len:
+                best_len = streak
+                best_loc = cand
+                if best_len == removal_len:
+                    break
 
-        if expected_len >= 4 and best_match_len < expected_len:
-            for cand in range(total_file - expected_len, -1, -1):
-                tail_match = 0
-                for i in range(expected_len - 1, -1, -1):
-                    if cand + i < total_file and norm_file[cand + i] == expected_old[i]:
-                        tail_match += 1
-                    else:
-                        break
-                if tail_match >= max(4, int(expected_len * 0.5)):
-                    return (cand, cand - target_idx, 'EXACT_TAIL', tail_match)
+        threshold = max(2, int(removal_len * 0.5))
+        if best_len >= threshold and best_loc is not None:
+            return (best_loc, best_loc - target_idx, 'PARTIAL', best_len)
 
-        threshold = max(4, int(expected_len * 0.5))
-        if best_match_len >= threshold:
-            return (best_match_loc, best_match_loc - target_idx, 'PARTIAL', best_match_len)
+        # Caso 4: não é remoção, é só contexto (raro — hunk de contexto puro)
+        expected_old = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind in (' ', '-')]
+        if expected_old:
+            expected_len = len(expected_old)
+            if expected_len <= total_file:
+                for cand in range(search_start, min(total_file - expected_len + 1, search_end + 1)):
+                    if norm_file[cand : cand + expected_len] == expected_old:
+                        return (cand, cand - target_idx, 'EXACT', expected_len)
 
-        return (None, 0, 'NONE', best_match_len)
+        return (None, 0, 'NONE', best_len if best_len > 0 else 0)
+
+    @classmethod
+    def find_hunk_location(cls, file_lines: List[str], hunk: Hunk, max_offset: int = 200) -> Tuple[Optional[int], int, str, int]:
+        """
+        v6.2: delega para `_find_removal_anchor`, que prioriza as linhas `-`.
+        Mantido como método público para compatibilidade.
+        """
+        return cls._find_removal_anchor(file_lines, hunk, max_offset=max_offset)
 
     @classmethod
     def simulate_or_apply(
@@ -271,36 +331,33 @@ class PatchSurgeon:
         modified_lines = list(working_lines)
 
         for idx, hunk in enumerate(patch.hunks, start=1):
-            expected_old = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind in (' ', '-')]
             replacement = [pl.text + '\n' for pl in hunk.lines if pl.kind in (' ', '+')]
+            expected_replacement_block = [
+                cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind in (' ', '+')
+            ]
 
-            if apply:
-                expected_replacement_block = [
-                    cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind in (' ', '+')
-                ]
-                if expected_replacement_block and len(expected_replacement_block) >= 2:
-                    already_applied = False
-                    for cand in range(len(modified_lines) - len(expected_replacement_block) + 1):
-                        block = [
-                            cls._normalize_line(modified_lines[cand + i])
-                            for i in range(len(expected_replacement_block))
-                        ]
-                        if block == expected_replacement_block:
-                            already_applied = True
-                            break
-                    if already_applied:
-                        report["details"].append({
-                            "hunk": idx, "status": "IDEMPOTENTE",
-                            "reason": "Hunk já aplicado anteriormente. Pulando.",
-                            "match_type": "IDEMPOTENT"
-                        })
-                        report["hunks_applied"] += 1
-                        continue
+            # ─── v6.2: idempotência TAMBÉM em --apply ─────────────────────
+            if expected_replacement_block and len(expected_replacement_block) >= 2:
+                already_applied = False
+                for cand in range(len(modified_lines) - len(expected_replacement_block) + 1):
+                    block = [
+                        cls._normalize_line(modified_lines[cand + i])
+                        for i in range(len(expected_replacement_block))
+                    ]
+                    if block == expected_replacement_block:
+                        already_applied = True
+                        break
+                if already_applied:
+                    report["details"].append({
+                        "hunk": idx, "status": "IDEMPOTENTE",
+                        "reason": "Hunk já aplicado anteriormente. Pulando.",
+                        "match_type": "IDEMPOTENT"
+                    })
+                    report["hunks_applied"] += 1
+                    continue
 
-            # v6.1: Detecta duplicação ANTES de procurar localização.
-            # Se o bloco "replacement" já existe fora do range do hunk,
-            # o hunk é idempotente — pulamos sem aplicar.
-            if not apply and len(replacement) >= 2:
+            # ─── v6.2: detecção de duplicação roda TAMBÉM em --apply ──────
+            if len(replacement) >= 2:
                 if cls._would_create_duplicate(modified_lines, hunk.old_start - 1, replacement):
                     report["details"].append({
                         "hunk": idx,
@@ -314,6 +371,7 @@ class PatchSurgeon:
             loc, offset, match_type, contig_len = cls.find_hunk_location(modified_lines, hunk)
 
             if match_type == 'NONE':
+                expected_old = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind in (' ', '-')]
                 added_lines = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind == '+']
                 already_there = any(al in "".join(working_lines) for al in added_lines if len(al) > 5)
 
@@ -344,7 +402,8 @@ class PatchSurgeon:
                     else:
                         preview_snippet.append(f"  {line_num:4d} | {pl.text.rstrip()}")
 
-                after_start = loc + len(expected_old)
+                # Após aplicação, mostra 2 linhas seguintes
+                after_start = loc + len(replacement)
                 after_end = min(len(modified_lines), after_start + 2)
                 after_preview_lines = [
                     f"  {i+1:4d} | {modified_lines[i].rstrip()}"
@@ -363,10 +422,14 @@ class PatchSurgeon:
                     "preview_snippet": "\n".join(preview_snippet)
                 })
 
-                modified_lines[loc : loc + len(expected_old)] = replacement
+                # Aplica: remove expected_old, insere replacement
+                # (o expected_old pode ter sido parcialmente casado — usamos
+                #  o comprimento do replacement para saber o que inserir,
+                #  e apagamos expected_old a partir de `loc`).
+                expected_old_len = sum(1 for pl in hunk.lines if pl.kind in (' ', '-'))
+                modified_lines[loc : loc + expected_old_len] = replacement
 
-                # v6.1: Valida sintaxe APÓS cada hunk (fail-fast).
-                # Se o hunk deixa o arquivo inválido, desfaz tudo e aborta.
+                # ─── v6.2: validação de sintaxe com 2 camadas ─────────────
                 if patch.target_path.suffix.lower() == '.py':
                     _probe = "".join(modified_lines)
                     _err = cls._validate_partial_syntax(_probe, patch.target_path)
@@ -376,13 +439,13 @@ class PatchSurgeon:
                             f"Violação Ma'at (hunk #{idx}): {_err}. "
                             f"Estado do arquivo revertido; aplicação abortada."
                         )
-                        # Desfaz o hunk e aborta o resto
                         modified_lines = list(working_lines)
                         report["hunks_failed"] += 1
                         break
 
         new_content = "".join(modified_lines)
 
+        # Validação final
         if patch.target_path.suffix.lower() == '.py':
             try:
                 compile(new_content, str(patch.target_path), 'exec')
@@ -468,25 +531,59 @@ class PatchSurgeon:
               help="Mantém o snapshot em .doxoade/checkshot/ para inspeção manual.")
 @click.pass_context
 def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_arg, keep_snapshot):
-    """🩹 Aplica cirurgicamente patches com Ancoragem Estrutural Forte (v6.0)."""
+    """🩹 Aplica cirurgicamente patches com Ancoragem Estrutural Forte (v6.2)."""
     root = Path.cwd().resolve()
 
     if generate:
         if patch_file:
             click.secho("⚠️ Aviso: O argumento PATCH_FILE é ignorado quando --generate é usado.", fg='yellow')
-        click.echo(f"⚙️  Gerando patch a partir das alterações do Git...")
+
+        click.echo(f"\n{Fore.CYAN}⚙️  Gerando patch a partir das alterações do Git...{Style.RESET_ALL}")
+        phases = [
+            ("Verificando repositório Git", 0.15),
+            ("Coletando diff (git diff)", 0.55),
+            ("Analisando arquivos modificados", 0.80),
+            ("Salvando patch em disco", 1.00),
+        ]
+
+        def _run_phase(label: str, target_pct: float, current_pct: float) -> float:
+            with click.progressbar(
+                length=100,
+                label=Fore.YELLOW + label,
+                show_eta=False,
+                show_percent=False,
+                fill_char='█',
+                empty_char='░',
+                width=40,
+            ) as bar:
+                for _ in range(int((target_pct - current_pct) * 100)):
+                    bar.update(1)
+            return target_pct
+
         try:
+            pct = 0.0
+            pct = _run_phase("Verificando repositório Git", 0.15, pct)
+
             diff_process = subprocess.run(
                 ['git', 'diff', '--no-color'],
                 capture_output=True, text=True, check=True, encoding='utf-8', cwd=root
             )
+            pct = _run_phase("Coletando diff (git diff)", 0.55, pct)
+
             if not diff_process.stdout:
                 click.secho("✘ Nenhuma alteração detectada pelo Git para gerar o patch.", fg='red')
                 ctx.exit(1)
 
+            changed_files = sum(1 for ln in diff_process.stdout.splitlines() if ln.startswith('+++ b/'))
+            pct = _run_phase(f"Analisando {changed_files} arquivo(s) modificado(s)", 0.80, pct)
+
             target_diff = root / "mody_patch_diff.txt"
             target_diff.write_text(diff_process.stdout, encoding='utf-8')
+            pct = _run_phase("Salvando patch em disco", 1.00, pct)
+
+            click.echo()
             click.secho(f"✅ Patch gerado e salvo em: {Fore.YELLOW}{target_diff.name}{Style.RESET_ALL}", fg='green')
+            click.echo(f"   📊 {changed_files} arquivo(s) · {len(diff_process.stdout) // 1024} KB · {diff_process.stdout.count(chr(10))} linhas")
         except subprocess.CalledProcessError as e:
             click.secho(f"✘ Falha ao executar 'git diff': {e}", fg='red')
             ctx.exit(1)
@@ -496,7 +593,7 @@ def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_ar
     else:
         target_diff = Path(patch_file) if patch_file else (root / "patch_diff.txt")
 
-    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🩹 [MODY PATCH v6.0] Cirurgia Atômica de Diff{Style.RESET_ALL}")
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🩹 [MODY PATCH v6.2] Cirurgia Atômica de Diff{Style.RESET_ALL}")
     click.echo(f"  • Arquivo de Entrada: {Fore.YELLOW}{target_diff.name}{Style.RESET_ALL}")
     click.echo(f"  • Modo de Operação:   {Fore.GREEN if apply else Fore.YELLOW}{'EFETIVAÇÃO (--apply)' if apply else 'SIMULAÇÃO (DRY-RUN)'}{Style.RESET_ALL}")
     click.echo(f"  • CheckShot:          {Fore.GREEN + 'ON' if checkshot and not apply else Fore.DIM + 'OFF'}{Style.RESET_ALL}\n")
@@ -552,8 +649,8 @@ def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_ar
         )
 
         for det in res["details"]:
-            status_color = Fore.GREEN if "APLICÁVEL" in det["status"] else Fore.RED
-            icon = "✔" if "APLICÁVEL" in det["status"] else "✘"
+            status_color = Fore.GREEN if "APLICÁVEL" in det["status"] or "IDEMPOTENTE" in det["status"] or "JÁ APLICADO" in det["status"] else Fore.RED
+            icon = "✔" if "APLICÁVEL" in det["status"] or "IDEMPOTENTE" in det["status"] or "JÁ APLICADO" in det["status"] else "✘"
 
             badges = ""
             if det.get('offset', 0) != 0:

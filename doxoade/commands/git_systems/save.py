@@ -1,4 +1,4 @@
-# doxoade/doxoade/commands/git_ystems/save.py
+# doxoade/doxoade/commands/git_systems/save.py
 """
 Comando Save - v80.1 Gold.
 Gatekeeper Ma'at (Produção) & Anúbis (Infraestrutura).
@@ -153,17 +153,17 @@ def _abstract_and_learn_template(cursor: sqlite3.Cursor, concrete_finding: Dict[
 
 @click.command('save')
 @click.argument('message', required=False)
-@click.option('--local', '-l', is_flag=True, help='Salva e comita apenas localmente (sem push para o remoto).')
-@click.option('--archives', '-a', help='Lista arquivos de um commit.')
-@click.option('--remove-commit', '-rc', help='Apaga o último commit.')
+@click.option('--local',    '-l', is_flag=True, help='Salva e comita apenas localmente (sem push para o remoto).')
+@click.option('--archives', '-r', help='Lista arquivos de um commit.')
+@click.option('--force',    '-f', is_flag=True, help='Força o commit ignorando erros de qualidade.')
+@click.option('--smart',    '-s', is_flag=True, help='🧠 Analisa e propõe commits semânticos (DRY-RUN por padrão).')
+@click.option('--apply',    '-ap', is_flag=True, help='🛠️ Executa os commits propostos pelo --smart (sem esta flag, apenas prévia).')
+@click.option('--alfa',     '-al', is_flag=True, help='🏷️ Gera mensagem automática no padrão Alfa (Versão + Arquivos + Data).')
+@click.option('--amend',    '-am', is_flag=True, help='✏️ Edita a mensagem do último commit (git commit --amend).')
+@click.option('--remove-commit','-rc', help='Apaga o último commit.')
+@click.option('--update-base',  '-ub', default='origin/main', show_default=True, help='Base usada para gerar resumo automático de atualização.')
 @click.option('--branch', 'branch_target', help='Após salvar, faz merge local da branch atual para a branch alvo.')
 @click.option('--merge', 'merge_target', help='Alias de --branch (ex.: --merge main).')
-@click.option('--update-base', default='origin/main', show_default=True, help='Base usada para gerar resumo automático de atualização.')
-@click.option('--force', is_flag=True, help='Força o commit ignorando erros de qualidade.')
-@click.option('--smart', '-s', is_flag=True, help='🧠 Analisa e propõe commits semânticos (DRY-RUN por padrão).')
-@click.option('--apply', is_flag=True, help='🛠️ Executa os commits propostos pelo --smart (sem esta flag, apenas prévia).')
-@click.option('--alfa', is_flag=True, help='🏷️ Gera mensagem automática no padrão Alfa (Versão + Arquivos + Data).')
-@click.option('--amend', is_flag=True, help='✏️ Edita a mensagem do último commit (git commit --amend).')
 @click.pass_context
 def save(ctx, message, local, archives, remove_commit, branch_target, merge_target, update_base, force, smart, apply, alfa, amend):
     """Executa commit seguro com aprendizado automatizado."""

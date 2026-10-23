@@ -127,7 +127,7 @@ class DoxoadeLazyGroup(click.Group):
             'rewind': 'doxoade.commands.backup_systems.rewind:rewind',
             'risk': 'doxoade.commands.risk:risk',
             'run': 'doxoade.commands.run:run',
-            'save': 'doxoade.commands.git_ystems.save:save',
+            'save': 'doxoade.commands.git_systems.save:save',
             'search': 'doxoade.commands.search:search',
             'security': 'doxoade.commands.security_systems.security_cmd:security',
             'self-test': 'doxoade.commands.self_test:self_test',
