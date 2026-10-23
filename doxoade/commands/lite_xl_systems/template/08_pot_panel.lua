@@ -936,44 +936,115 @@ function ConsultSearchView:open_selected(idx)
   end
 
   local script_content = string.format([=[# -*- coding: utf-8 -*-
-import sqlite3
+import sys, traceback
 from pathlib import Path
+
+# Redireciona stderr para arquivo, para o Lua ler se falhar
+stderr_path = Path(%q) / "run_read.stderr"
+try:
+    stderr_path.parent.mkdir(parents=True, exist_ok=True)
+    _err_f = open(stderr_path, "w", encoding="utf-8")
+    sys.stderr = _err_f
+except Exception:
+    pass
+
+import sqlite3
 
 db_path = Path.home() / ".doxoade" / "consult_docs_fts5.db"
 doc_path = %q
 out_path = Path(%q)
 
-conn = sqlite3.connect(str(db_path), timeout=5.0)
-row = conn.execute("SELECT title, content FROM docs WHERE path = ? LIMIT 1;", (doc_path,)).fetchone()
-conn.close()
+try:
+    conn = sqlite3.connect(str(db_path), timeout=5.0)
+    row = conn.execute("SELECT title, content FROM docs WHERE path = ? LIMIT 1;", (doc_path,)).fetchone()
+    if not row:
+        alt_path = doc_path.replace("git/day_", "git/github/day_")
+        row = conn.execute("SELECT title, content FROM docs WHERE path = ? LIMIT 1;", (alt_path,)).fetchone()
+    if not row:
+        row = conn.execute(
+            "SELECT title, content FROM docs WHERE path LIKE ? ORDER BY length(path) LIMIT 1;",
+            (f"%%{doc_path}%%",)
+        ).fetchone()
+    conn.close()
 
-if row and row[1]:
-    title, content = row
-    md = content if content.strip().startswith("#") else f"# 📖 {title}\n\n{content}\n"
-else:
-    md = "# ⚠️ Documento não localizado no banco."
+    if row and row[1]:
+        title, content = row
+        md = content if content.strip().startswith("#") else f"# 📖 {title}\n\n{content}\n"
+    else:
+        md = f"# ⚠️ Documento não localizado no banco.\n\n**Path buscado:** `{doc_path}`\n\n"
 
-out_path.parent.mkdir(parents=True, exist_ok=True)
-out_path.write_text(md, encoding="utf-8")
-]=], target_path, out_md_py)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(md, encoding="utf-8")
+except Exception as e:
+    err_msg = f"EXCEPTION: {type(e).__name__}: {e}\n{traceback.format_exc()}"
+    try:
+        sys.stderr.write(err_msg)
+        sys.stderr.flush()
+    except Exception:
+        pass
+    # Escreve o erro no out_path também, para o Lua ver
+    try:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(f"# ⚠️ Erro no run_read.py\n\n```\n{err_msg}\n```\n", encoding="utf-8")
+    except Exception:
+        pass
+]=], doxoade_dir, target_path, out_md_py)
 
   f_run:write(script_content)
   f_run:close()
 
   local t0 = os.clock()
+  local python_used = py_exe
   local exec_cmd = string.format('"%s" "%s"', py_exe, runner_py)
-  system.exec(exec_cmd)
+
+  -- 🔍 LOG: captura o python e o comando exato
+  if core.log then
+    core.log(string.format("🔍 [CONSULT READ] Python: %s", tostring(python_used)))
+    core.log(string.format("🔍 [CONSULT READ] Runner: %s", tostring(runner_py)))
+    core.log(string.format("🔍 [CONSULT READ] Output: %s", tostring(out_md_win)))
+    core.log(string.format("🔍 [CONSULT READ] Exec: %s", exec_cmd))
+  end
+
+  -- 🔍 LOG: verifica se os arquivos existem antes de rodar
+  local py_info = system.get_file_info(python_used)
+  local runner_info = system.get_file_info(runner_py)
+  if not py_info then
+    core.log("❌ [CONSULT READ] Python NÃO EXISTE no path: " .. tostring(python_used))
+    self.is_loading_doc = false
+    return
+  end
+  if not runner_info then
+    core.log("❌ [CONSULT READ] Runner NÃO EXISTE: " .. tostring(runner_py))
+    self.is_loading_doc = false
+    return
+  end
+  core.log(string.format("🔍 [CONSULT READ] Python (%d bytes) e Runner (%d bytes) existem",
+    py_info.size or 0, runner_info.size or 0))
+
+  -- 🔍 EXEC: usa system.exec e captura o retorno
+  local ok_exec, exec_result = pcall(system.exec, exec_cmd)
+  if not ok_exec then
+    core.log("❌ [CONSULT READ] system.exec FALHOU: " .. tostring(exec_result))
+  else
+    core.log("✅ [CONSULT READ] system.exec disparado (aguardando output...)")
+  end
 
   local search_view = self
   core.add_thread(function()
     local found = false
-    for _ = 1, 100 do
+    local last_size = 0
+    for i = 1, 150 do  -- 7.5s (aumentado de 100 → 150)
       coroutine.yield(0.05)
-      -- 1. Monitora o arquivo Markdown correto
       local info = system.get_file_info(out_md_win)
       if info and (info.size or 0) > 10 then
         found = true
+        core.log(string.format("✅ [CONSULT READ] Output detectado (%d bytes) após %d iterações",
+          info.size, i))
         break
+      end
+      -- log a cada 20 iterações (1s) pra não poluir
+      if i % 20 == 0 then
+        core.log(string.format("⏳ [CONSULT READ] Aguardando output... (%d/150)", i))
       end
     end
 
@@ -981,7 +1052,17 @@ out_path.write_text(md, encoding="utf-8")
     local elapsed_ms = math.floor((os.clock() - t0) * 1000)
 
     if not found then
-      core.log(string.format("❌ [CONSULT READ] Timeout ao abrir documento (%dms).", elapsed_ms))
+      core.log(string.format("❌ [CONSULT READ] TIMEOUT após %dms. Verificando se o runner foi criado...", elapsed_ms))
+      -- Tenta ler o stderr do python (se existir)
+      local stderr_file = system.get_file_info((doxoade_dir .. p_sep .. "run_read.stderr"):gsub("/", "\\"))
+      if stderr_file then
+        local f_err = io.open((doxoade_dir .. p_sep .. "run_read.stderr"):gsub("/", "\\"), "r")
+        if f_err then
+          local err = f_err:read("*a")
+          f_err:close()
+          core.log("📋 STDERR do Python:\n" .. err)
+        end
+      end
       return
     end
 
@@ -995,7 +1076,6 @@ out_path.write_text(md, encoding="utf-8")
     end
 
     core.log(string.format("✔ [CONSULT READ] Sucesso em %dms! (%d linhas)", elapsed_ms, #md_lines))
-    -- 2. Abre o leitor Markdown dedicado
     local reader = ConsultDocReaderView(item.title, item.path, md_lines, search_view)
     open_in_right_panel(reader, string.format("📖 %s", item.title:sub(1, 25)))
   end)

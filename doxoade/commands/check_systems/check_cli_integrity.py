@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# doxoade\commands\check_systems\check_cli_integrity.py
 """
 Validador de Integridade do Mapa de Comandos (Lazy-Map Linter).
 Garante que todas as strings de rota em cli.py são importáveis e existem.

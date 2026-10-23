@@ -227,11 +227,40 @@ class TyphonDeployEngine:
 
     @classmethod
     def deploy(cls, mode: DeployMode = "production", force: bool = False, no_khonsu: bool = False) -> Dict[str, Any]:
-        """
-        Compila e instala o init.lua.
-        Se no_khonsu=True, gera init.lua em texto plano (Plain Source), sem AOT e com Khonsu desativado.
-        """
+        # 🔧 AUTO-ELEVAÇÃO: se não for Admin e for Windows, relança elevado
+        import sys, os
+        if sys.platform == "win32" and mode in ("test", "sandbox"):
+            try:
+                import ctypes
+                is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+            except Exception:
+                from doxoade.tools.error_info import formated_traceback
+                formated_traceback(e, "Deploy Elevarion Fail")
+                is_admin = False
 
+            if not is_admin and not os.environ.get("DOXOADE_ELEVATED"):
+                print(f"{Fore.YELLOW}🔐 [TYPHON] Sem privilégios de Admin. Solicitando elevação via UAC...{Fore.RESET}")
+                try:
+                    import subprocess
+                    # Reexecuta o comando com elevação
+                    python_exe = sys.executable
+                    module = "doxoade"
+                    args = sys.argv[1:]
+                    cmd_str = f'"{python_exe}" -m {module} ' + " ".join(f'"{a}"' if ' ' in a else a for a in args)
+                    # Passa DOXOADE_ELEVATED=1 para evitar loop infinito
+                    env_block = f"set DOXOADE_ELEVATED=1 && {cmd_str}"
+                    subprocess.Popen(
+                        ["powershell", "-Command", f'Start-Process cmd -ArgumentList "/k {env_block}" -Verb RunAs'],
+                        creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
+                    )
+                    print(f"{Fore.GREEN}✔ Janela elevada aberta. Deploy continua no console Admin.{Fore.RESET}")
+                    print(f"{Fore.LIGHTBLACK_EX}   Feche este console após o deploy elevar.{Fore.RESET}")
+                    return {"success": False, "error": "elevation_requested", "backup": None}
+                except Exception as e:
+                    print(f"{Fore.RED}✖ Falha na elevação: {e}{Fore.RESET}")
+                    return {"success": False, "error": str(e), "backup": None}
+
+        # ─── Resto do deploy original ───
         deploy_dir = cls._get_deploy_dir(mode)
         deploy_dir.mkdir(parents=True, exist_ok=True)
         backup_path = None

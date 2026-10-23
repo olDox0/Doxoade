@@ -1,12 +1,32 @@
 # intelligence.toml - Configuração de Blacklist do Motor Nexus
-
+# intelligence.toml - Configuração de Blacklist do Motor Nexus
+#
+# essential_files: whitelist de arquivos que NUNCA devem ser ignorados pelo
+# `doxoade intelligence`, mesmo se baterem em regras de `ignore` ou `.gitignore`.
+# Suporta wildcards no nome do arquivo (ex: "requirements*.txt", "*.dox").
+# Defaults: pyproject.toml, metalcraft.toml, intelligence.toml, Makefile,
+# CMakeLists.txt, requirements*.txt, setup.py, Dockerfile, .env.example,
+# README*, LICENSE*, *.dox
+#
+# essential_files = ["meu_arquivo_critico.xyz"]
+# intelligence.toml - Configuração de Blacklist do Motor Nexus
+#
+# essential_files: whitelist de arquivos que NUNCA devem ser ignorados pelo
+# `doxoade intelligence`, mesmo se baterem em regras de `ignore` ou `.gitignore`.
+# Suporta wildcards no nome do arquivo (ex: "requirements*.txt", "*.dox").
+# Defaults: pyproject.toml, metalcraft.toml, intelligence.toml, Makefile,
+# CMakeLists.txt, requirements*.txt, setup.py, Dockerfile, .env.example,
+# README*, LICENSE*, *.dox
+#
+# essential_files = ["meu_arquivo_critico.xyz"]
+#
 ignore = [
     # === PASTAS ===
     "*./experiments/",
     "*/.doxoade/",
     "*/__pycache__/",
     ".doxoade/",
-    ".doxoade_cache/",
+
     ".git/",
     ".pytest_cache/",
     "__pycache__/",

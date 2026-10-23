@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/moddify_sys/mody_patch.py
 """
-Mody Patch Engine v4.1 — Motor de Cirurgia Atômica de Diff (Ma'at & Sotéria).
+Mody Patch Engine v6.1 — Motor de Cirurgia Atômica de Diff (Ma'at & Sotéria).
 ProDeNov: Ancoragem Estrutural Forte (Regra de Ouro da Recuperação).
-Bloqueia aplicações baseadas em coincidências fracas (ex: 1 linha de "}") 
-exigindo blocos contíguos de contexto para recuperação parcial.
+Integra CheckShot (sandbox isolado) + validação incremental por hunk.
 """
 from __future__ import annotations
 import os
@@ -12,6 +11,7 @@ import sys
 import re
 import ast
 import shutil
+import subprocess
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Dict
@@ -30,10 +30,13 @@ try:
 except Exception:
     chronos_recorder = None
 
+
+# --- ESTRUTURAS DE DADOS ---
+
 @dataclass
 class PatchLine:
     kind: str       # ' ' (contexto), '-' (remover), '+' (adicionar)
-    text: str       # conteúdo sem o prefixo
+    text: str
 
 @dataclass
 class Hunk:
@@ -51,6 +54,9 @@ class FilePatch:
     target_path: Optional[Path] = None
     hunks: List[Hunk] = field(default_factory=list)
     parse_errors: List[str] = field(default_factory=list)
+
+
+# --- PARSER DE DIFF ---
 
 class UnifiedDiffParser:
     RE_HUNK_HEADER = re.compile(r'^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@(.*)$')
@@ -84,20 +90,26 @@ class UnifiedDiffParser:
                 current_hunk = None
                 i += 2
                 continue
-            
+
             m = cls.RE_HUNK_HEADER.match(line)
             if m and current_patch is not None:
-                current_hunk = Hunk(
-                    old_start=int(m.group(1)),
-                    old_count=int(m.group(2)) if m.group(2) else 1,
-                    new_start=int(m.group(3)),
-                    new_count=int(m.group(4)) if m.group(4) else 1,
-                    header_ctx=m.group(5).strip()
-                )
-                current_patch.hunks.append(current_hunk)
+                try:
+                    current_hunk = Hunk(
+                        old_start=int(m.group(1)),
+                        old_count=int(m.group(2)) if m.group(2) else 1,
+                        new_start=int(m.group(3)),
+                        new_count=int(m.group(4)) if m.group(4) else 1,
+                        header_ctx=m.group(5).strip()
+                    )
+                    current_patch.hunks.append(current_hunk)
+                except (ValueError, TypeError):
+                    current_patch.parse_errors.append(
+                        f"Hunk com cabecalho invalido (nao numerico): {line[:60]}"
+                    )
+                    current_hunk = None
                 i += 1
                 continue
-            
+
             if current_hunk is not None:
                 if line.startswith(('+', '-', ' ')):
                     current_hunk.lines.append(PatchLine(kind=line[0], text=line[1:]))
@@ -111,56 +123,88 @@ class UnifiedDiffParser:
             i += 1
         return patches
 
+
+# --- MOTOR DE CIRURGIA ---
+
 class PatchSurgeon:
+    # Slots de configuração injetados pelo comando mod_patch antes da cirurgia.
+    _checkshot_args: Optional[List[str]] = None
+    _checkshot_keep: bool = False
+
     @staticmethod
     def _normalize_line(line: str) -> str:
-        """
-        Normaliza a linha para comparação robusta (ProDeNov Resiliência).
-        1. Remove quebras de linha e espaços no final.
-        2. Remove comentários de linha (Python '#' e C/C++ '//') para evitar 
-           falhas de ancoragem por alucinações de LLM em comentários.
-        3. Colapsa TODOS os espaços em branco múltiplos em um único espaço.
-        
-        NOTA DE SEGURANÇA: Isso afeta APENAS a busca pelo contexto. 
-        As linhas de adição ('+') manterão seus comentários originais ao serem gravadas.
-        """
-        # 1. Limpeza básica de quebras de linha
         line = line.rstrip('\r\n').rstrip()
-        
-        # 2. Remoção de comentários de linha (para fins de matching)
-        # Remove '#' (Python) ou '//' (C/C++) e tudo que vem depois, incluindo espaços antes deles
         line = re.sub(r'\s*(?:#|//).*$', '', line)
-        
-        # 3. Colapso de espaços em branco múltiplos
         return re.sub(r'\s+', ' ', line).strip()
 
     @classmethod
+    def _would_create_duplicate(
+        cls,
+        file_lines: List[str],
+        loc: int,
+        replacement: List[str],
+    ) -> bool:
+        """
+        v6.1: Detecta se aplicar o hunk criaria duplicação de contexto.
+
+        Caso típico: o hunk já foi aplicado numa execução anterior, mas o
+        patcher está re-aplicando por engano. Se o `replacement` (estado
+        DESEJADO) já está no arquivo, o hunk é idempotente e deve ser
+        pulado — não aplicado de novo.
+        """
+        norm_repl = [cls._normalize_line(l) for l in replacement]
+        if len(norm_repl) < 2:
+            return False
+        total = len(file_lines)
+        n = len(norm_repl)
+        if n > total:
+            return False
+        for cand in range(0, total - n + 1):
+            # Pula a região onde o hunk será aplicado
+            if cand <= loc < cand + n:
+                continue
+            block = [cls._normalize_line(file_lines[cand + i]) for i in range(n)]
+            if block == norm_repl:
+                return True
+        return False
+
+    @classmethod
+    def _validate_partial_syntax(
+        cls, new_content: str, target_path: Path
+    ) -> Optional[str]:
+        """
+        v6.1: Re-valida sintaxe Python após CADA hunk aplicado.
+        Retorna mensagem de erro ou None se OK.
+        """
+        if not target_path or target_path.suffix.lower() != ".py":
+            return None
+        try:
+            compile(new_content, str(target_path), "exec")
+            return None
+        except SyntaxError as e:
+            return f"SyntaxError em L{e.lineno}: {e.msg}"
+
+    @classmethod
     def find_hunk_location(cls, file_lines: List[str], hunk: Hunk, max_offset: int = 200) -> Tuple[Optional[int], int, str, int]:
-        """
-        Retorna (indice_inicio, offset, tipo_de_match, contiguo_max).
-        tipo_de_match: 'EXACT', 'PARTIAL', ou 'NONE'
-        """
         expected_old = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind in (' ', '-')]
         if not expected_old:
             return (hunk.old_start - 1 if hunk.old_start > 0 else 0, 0, 'EXACT', 0)
-        
+
         expected_len = len(expected_old)
         total_file = len(file_lines)
         norm_file = [cls._normalize_line(l) for l in file_lines]
         target_idx = max(0, hunk.old_start - 1)
-        
-        # 1. Busca Exata (Tolerância a Offset)
+
         search_start = max(0, target_idx - max_offset)
         search_end = min(total_file - expected_len + 1, target_idx + max_offset + 1)
-        
+
         for cand in range(search_start, search_end):
             if norm_file[cand : cand + expected_len] == expected_old:
                 return (cand, cand - target_idx, 'EXACT', expected_len)
-        
-        # 2. Busca por Ancoragem Parcial (Maior Bloco Contíguo)
+
         best_match_len = 0
         best_match_loc = None
-        
+
         for cand in range(total_file):
             current_streak = 0
             max_streak_here = 0
@@ -171,23 +215,35 @@ class PatchSurgeon:
                         max_streak_here = current_streak
                 else:
                     current_streak = 0
-            
             if max_streak_here > best_match_len:
                 best_match_len = max_streak_here
                 best_match_loc = cand
-                
-        # REGRA DE OURO DA RECUPERAÇÃO (ProDeNov Segurança):
-        # Só aceitamos "PARTIAL" se o bloco contíguo for >= 60% do contexto esperado
-        # E no mínimo 2 linhas (para evitar âncoras em linhas únicas como "}" ou linhas em branco)
-        threshold = max(2, int(expected_len * 0.6))
-        
+
+        if expected_len >= 4 and best_match_len < expected_len:
+            for cand in range(total_file - expected_len, -1, -1):
+                tail_match = 0
+                for i in range(expected_len - 1, -1, -1):
+                    if cand + i < total_file and norm_file[cand + i] == expected_old[i]:
+                        tail_match += 1
+                    else:
+                        break
+                if tail_match >= max(4, int(expected_len * 0.5)):
+                    return (cand, cand - target_idx, 'EXACT_TAIL', tail_match)
+
+        threshold = max(4, int(expected_len * 0.5))
         if best_match_len >= threshold:
             return (best_match_loc, best_match_loc - target_idx, 'PARTIAL', best_match_len)
-            
+
         return (None, 0, 'NONE', best_match_len)
 
     @classmethod
-    def simulate_or_apply(cls, patch: FilePatch, apply: bool = False) -> Dict:
+    def simulate_or_apply(
+        cls,
+        patch: FilePatch,
+        apply: bool = False,
+        root: Path = None,
+        run_checkshot: bool = True,
+    ) -> Dict:
         report = {
             "target": str(patch.target_path),
             "hunks_total": len(patch.hunks),
@@ -195,13 +251,15 @@ class PatchSurgeon:
             "hunks_failed": 0,
             "errors": list(patch.parse_errors),
             "details": [],
-            "syntax_ok": True
+            "syntax_ok": True,
+            "check_analysis": "",
+            "checkshot": None,
         }
-        
+
         if not patch.target_path or not patch.target_path.exists():
             report["errors"].append(f"Arquivo alvo não encontrado: {patch.target_path}")
             return report
-            
+
         try:
             with open(patch.target_path, 'r', encoding='utf-8', errors='ignore') as f:
                 working_lines = f.readlines()
@@ -211,37 +269,72 @@ class PatchSurgeon:
 
         original_content = "".join(working_lines)
         modified_lines = list(working_lines)
-        
+
         for idx, hunk in enumerate(patch.hunks, start=1):
             expected_old = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind in (' ', '-')]
             replacement = [pl.text + '\n' for pl in hunk.lines if pl.kind in (' ', '+')]
-            
+
+            if apply:
+                expected_replacement_block = [
+                    cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind in (' ', '+')
+                ]
+                if expected_replacement_block and len(expected_replacement_block) >= 2:
+                    already_applied = False
+                    for cand in range(len(modified_lines) - len(expected_replacement_block) + 1):
+                        block = [
+                            cls._normalize_line(modified_lines[cand + i])
+                            for i in range(len(expected_replacement_block))
+                        ]
+                        if block == expected_replacement_block:
+                            already_applied = True
+                            break
+                    if already_applied:
+                        report["details"].append({
+                            "hunk": idx, "status": "IDEMPOTENTE",
+                            "reason": "Hunk já aplicado anteriormente. Pulando.",
+                            "match_type": "IDEMPOTENT"
+                        })
+                        report["hunks_applied"] += 1
+                        continue
+
+            # v6.1: Detecta duplicação ANTES de procurar localização.
+            # Se o bloco "replacement" já existe fora do range do hunk,
+            # o hunk é idempotente — pulamos sem aplicar.
+            if not apply and len(replacement) >= 2:
+                if cls._would_create_duplicate(modified_lines, hunk.old_start - 1, replacement):
+                    report["details"].append({
+                        "hunk": idx,
+                        "status": "JÁ APLICADO (idempotente)",
+                        "reason": "Bloco já presente no arquivo. Pulando para evitar duplicação.",
+                        "match_type": "IDEMPOTENT",
+                    })
+                    report["hunks_applied"] += 1
+                    continue
+
             loc, offset, match_type, contig_len = cls.find_hunk_location(modified_lines, hunk)
-            
+
             if match_type == 'NONE':
-                report["hunks_failed"] += 1
                 added_lines = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind == '+']
                 already_there = any(al in "".join(working_lines) for al in added_lines if len(al) > 5)
-                
+
                 threshold = max(2, int(len(expected_old) * 0.6))
                 reason_msg = f"Contexto Insuficiente: Apenas {contig_len} linhas contíguas encontradas (mínimo {threshold})."
                 if already_there:
                     reason_msg += f" {Fore.MAGENTA}(As linhas de adição já existem no arquivo?){Fore.YELLOW}"
-                    
+
                 report["details"].append({
-                    "hunk": idx, "status": "REJEITADO", "reason": reason_msg, 
+                    "hunk": idx, "status": "REJEITADO", "reason": reason_msg,
                     "match_type": "NONE", "loc": hunk.old_start
                 })
+                report["hunks_failed"] += 1
             else:
                 report["hunks_applied"] += 1
-                
+
                 start_preview = max(0, loc - 2)
-                end_preview = min(len(modified_lines), loc + len(expected_old) + 2)
                 preview_snippet = []
-                
                 for i in range(start_preview, loc):
                     preview_snippet.append(f"  {i+1:4d} | {modified_lines[i].rstrip()}")
-                
+
                 for i, pl in enumerate(hunk.lines):
                     line_num = loc + 1 + i
                     if pl.kind == '-':
@@ -250,9 +343,14 @@ class PatchSurgeon:
                         preview_snippet.append(f"{Fore.GREEN}+{line_num:4d} | {pl.text.rstrip()}{Fore.RESET}")
                     else:
                         preview_snippet.append(f"  {line_num:4d} | {pl.text.rstrip()}")
-                
-                for i in range(loc + len(expected_old), end_preview):
-                    preview_snippet.append(f"  {i+1:4d} | {modified_lines[i].rstrip()}")
+
+                after_start = loc + len(expected_old)
+                after_end = min(len(modified_lines), after_start + 2)
+                after_preview_lines = [
+                    f"  {i+1:4d} | {modified_lines[i].rstrip()}"
+                    for i in range(after_start, after_end)
+                ]
+                preview_snippet.extend(after_preview_lines)
 
                 status_text = "APLICÁVEL" if match_type == 'EXACT' else "APLICÁVEL (Contexto Recuperado)"
                 report["details"].append({
@@ -264,18 +362,74 @@ class PatchSurgeon:
                     "contig_len": contig_len,
                     "preview_snippet": "\n".join(preview_snippet)
                 })
-                
+
                 modified_lines[loc : loc + len(expected_old)] = replacement
 
+                # v6.1: Valida sintaxe APÓS cada hunk (fail-fast).
+                # Se o hunk deixa o arquivo inválido, desfaz tudo e aborta.
+                if patch.target_path.suffix.lower() == '.py':
+                    _probe = "".join(modified_lines)
+                    _err = cls._validate_partial_syntax(_probe, patch.target_path)
+                    if _err is not None:
+                        report["syntax_ok"] = False
+                        report["errors"].append(
+                            f"Violação Ma'at (hunk #{idx}): {_err}. "
+                            f"Estado do arquivo revertido; aplicação abortada."
+                        )
+                        # Desfaz o hunk e aborta o resto
+                        modified_lines = list(working_lines)
+                        report["hunks_failed"] += 1
+                        break
+
         new_content = "".join(modified_lines)
-        
+
         if patch.target_path.suffix.lower() == '.py':
             try:
                 compile(new_content, str(patch.target_path), 'exec')
             except SyntaxError as e:
                 report["syntax_ok"] = False
                 report["errors"].append(f"Violação Ma'at: SyntaxError em Python (L{e.lineno}: {e.msg})")
-                
+
+        # CheckShot (sandbox isolado) — só em dry-run
+        if run_checkshot and not apply and report["hunks_failed"] == 0 and report["syntax_ok"]:
+            click.echo(
+                f"   {Fore.CYAN}🔬 [CHECKSHOT] Analisando o resultado da cirurgia..."
+                f"{Style.RESET_ALL}"
+            )
+            try:
+                from doxoade.commands.check_systems.checkshot import CheckShot
+                rel_path = (
+                    patch.target_path.relative_to(root).as_posix()
+                    if patch.target_path and root and patch.target_path.is_relative_to(root)
+                    else (patch.target_path.name if patch.target_path else "unknown.py")
+                )
+                shot = CheckShot(root, keep=cls._checkshot_keep)
+                shot_result = shot.analyze(
+                    new_content,
+                    rel_path,
+                    extra_args=cls._checkshot_args,
+                )
+                report["checkshot"] = shot_result.to_dict()
+                if shot_result.error:
+                    report["check_analysis"] = (
+                        f"{Fore.RED}  ↳ CheckShot falhou: "
+                        f"{shot_result.error}{Style.RESET_ALL}"
+                    )
+                elif not shot_result.findings:
+                    report["check_analysis"] = (
+                        f"{Fore.GREEN}  ↳ ✔ Estado de Ouro: nenhum finding no "
+                        f"arquivo patcheado.{Style.RESET_ALL}"
+                    )
+                else:
+                    report["check_analysis"] = (
+                        f"{Fore.YELLOW}  ↳ {shot_result.total_findings} finding(s) "
+                        f"({shot_result.critical_count} crítico(s)){Style.RESET_ALL}"
+                    )
+            except Exception as e:
+                report["check_analysis"] = (
+                    f"{Fore.RED}  ↳ CheckShot indisponível: {e}{Style.RESET_ALL}"
+                )
+
         if apply:
             if report["hunks_failed"] > 0:
                 report["errors"].append("Cirurgia cancelada: Hunks com conflito rejeitados.")
@@ -288,95 +442,207 @@ class PatchSurgeon:
                     with open(patch.target_path, 'w', encoding='utf-8') as f:
                         f.write(new_content)
                     if chronos_recorder and hasattr(chronos_recorder, 'log_file_change'):
-                        chronos_recorder.log_file_change(str(patch.target_path), original_content, new_content, operation='PATCH')
+                        chronos_recorder.log_file_change(
+                            str(patch.target_path), original_content, new_content,
+                            operation='PATCH'
+                        )
                     report["saved"] = True
                 except Exception as e:
                     report["errors"].append(f"Falha na gravação em disco: {e}")
-                    
+
         return report
+
+
+# --- COMANDO CLI ---
 
 @click.command('patch')
 @click.argument('patch_file', required=False, type=click.Path(dir_okay=False))
 @click.option('--apply', '-a', is_flag=True, help="Efetiva as alterações em disco (sai do modo Dry-Run).")
 @click.option('--archive', is_flag=True, help="Renomeia o arquivo diff para .applied após aplicação bem-sucedida.")
+@click.option('--generate', '-g', is_flag=True, help="Gera um arquivo de patch a partir do 'git diff' atual e o utiliza.")
+@click.option('--checkshot/--no-checkshot', default=True, show_default=True,
+              help="🔬 Roda `doxoade check` em sandbox isolado (default: on no dry-run).")
+@click.option('--checkshot-arg', '-ca', multiple=True,
+              help="Args extras p/ o check (ex: -ca=-s security, -ca=-sr structural).")
+@click.option('--keep-snapshot', is_flag=True,
+              help="Mantém o snapshot em .doxoade/checkshot/ para inspeção manual.")
 @click.pass_context
-def mod_patch(ctx, patch_file, apply, archive):
-    """🩹 Aplica cirurgicamente patches com Ancoragem Estrutural Forte (v4.1)."""
+def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_arg, keep_snapshot):
+    """🩹 Aplica cirurgicamente patches com Ancoragem Estrutural Forte (v6.0)."""
     root = Path.cwd().resolve()
-    target_diff = Path(patch_file) if patch_file else (root / "patch_diff.txt")
-    
-    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🩹 [MODY PATCH v4.1] Cirurgia Atômica de Diff{Style.RESET_ALL}")
+
+    if generate:
+        if patch_file:
+            click.secho("⚠️ Aviso: O argumento PATCH_FILE é ignorado quando --generate é usado.", fg='yellow')
+        click.echo(f"⚙️  Gerando patch a partir das alterações do Git...")
+        try:
+            diff_process = subprocess.run(
+                ['git', 'diff', '--no-color'],
+                capture_output=True, text=True, check=True, encoding='utf-8', cwd=root
+            )
+            if not diff_process.stdout:
+                click.secho("✘ Nenhuma alteração detectada pelo Git para gerar o patch.", fg='red')
+                ctx.exit(1)
+
+            target_diff = root / "mody_patch_diff.txt"
+            target_diff.write_text(diff_process.stdout, encoding='utf-8')
+            click.secho(f"✅ Patch gerado e salvo em: {Fore.YELLOW}{target_diff.name}{Style.RESET_ALL}", fg='green')
+        except subprocess.CalledProcessError as e:
+            click.secho(f"✘ Falha ao executar 'git diff': {e}", fg='red')
+            ctx.exit(1)
+        except FileNotFoundError:
+            click.secho("✘ Comando 'git' não encontrado. Certifique-se de que o Git está instalado e no PATH.", fg='red')
+            ctx.exit(1)
+    else:
+        target_diff = Path(patch_file) if patch_file else (root / "patch_diff.txt")
+
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🩹 [MODY PATCH v6.0] Cirurgia Atômica de Diff{Style.RESET_ALL}")
     click.echo(f"  • Arquivo de Entrada: {Fore.YELLOW}{target_diff.name}{Style.RESET_ALL}")
-    click.echo(f"  • Modo de Operação:   {Fore.GREEN if apply else Fore.YELLOW}{'EFETIVAÇÃO (--apply)' if apply else 'SIMULAÇÃO (DRY-RUN)'}{Style.RESET_ALL}\n")
-    
+    click.echo(f"  • Modo de Operação:   {Fore.GREEN if apply else Fore.YELLOW}{'EFETIVAÇÃO (--apply)' if apply else 'SIMULAÇÃO (DRY-RUN)'}{Style.RESET_ALL}")
+    click.echo(f"  • CheckShot:          {Fore.GREEN + 'ON' if checkshot and not apply else Fore.DIM + 'OFF'}{Style.RESET_ALL}\n")
+
     if not target_diff.exists():
         click.secho(f"✘ Arquivo de patch não encontrado: {target_diff}", fg='red', bold=True)
         ctx.exit(1)
-        
+
     try:
         raw_text = target_diff.read_text(encoding='utf-8', errors='replace')
     except Exception as e:
         click.secho(f"✘ Falha ao ler patch: {e}", fg='red')
         ctx.exit(1)
-        
+
     patches = UnifiedDiffParser.parse(raw_text, root)
     if not patches:
         click.secho("✘ Nenhuma assinatura válida de diff encontrada.", fg='red')
         ctx.exit(1)
-        
+
+    from collections import OrderedDict
+    grouped = OrderedDict()
+    for p in patches:
+        key = str(p.target_path)
+        if key not in grouped:
+            grouped[key] = p
+        else:
+            grouped[key].hunks.extend(p.hunks)
+    patches = list(grouped.values())
+
+    PatchSurgeon._checkshot_args = list(checkshot_arg) if checkshot_arg else None
+    PatchSurgeon._checkshot_keep = keep_snapshot
+
     total_files = len(patches)
     successful_files = 0
     total_hunks_applied = 0
     total_hunks_failed = 0
-    
+    total_critical_shots = 0
+
     click.echo("─" * 75)
     for p in patches:
-        rel_name = p.target_path.relative_to(root) if p.target_path and p.target_path.is_relative_to(root) else p.raw_new_path
+        rel_name = (
+            p.target_path.relative_to(root)
+            if p.target_path and p.target_path.is_relative_to(root)
+            else p.raw_new_path
+        )
         click.echo(f"📄 {Fore.WHITE}{Style.BRIGHT}{rel_name}{Style.RESET_ALL}")
-        
-        res = PatchSurgeon.simulate_or_apply(p, apply=apply)
-        
+
+        res = PatchSurgeon.simulate_or_apply(
+            p,
+            apply=apply,
+            root=root,
+            run_checkshot=bool(checkshot) and not apply,
+        )
+
         for det in res["details"]:
             status_color = Fore.GREEN if "APLICÁVEL" in det["status"] else Fore.RED
             icon = "✔" if "APLICÁVEL" in det["status"] else "✘"
-            
+
             badges = ""
             if det.get('offset', 0) != 0:
                 badges += f" {Fore.DIM}[Offset: {det['offset']:+d}]{Style.RESET_ALL}"
             if det.get('match_type') == 'PARTIAL':
                 badges += f" {Fore.YELLOW}⚠️ [Recuperado: {det['contig_len']} linhas contíguas]{Style.RESET_ALL}"
-                
+
             click.echo(f"   {status_color}{icon} Hunk #{det['hunk']}: {det['status']}{badges}{Style.RESET_ALL}")
-            
+
             if "reason" in det:
                 click.echo(f"     {Fore.RED}↳ Motivo: {det['reason']}{Style.RESET_ALL}")
-                
+
             if "preview_snippet" in det and not apply:
                 click.echo(f"     {Fore.CYAN}↳ 🔍 Pré-visualização da Cirurgia:{Style.RESET_ALL}")
                 for line in det["preview_snippet"].split('\n'):
                     click.echo(f"       {line}")
-                    
+
+        if res.get("check_analysis"):
+            click.echo(f"   {Fore.CYAN}🔬 Análise do Doxoade Check:{Style.RESET_ALL}")
+            for line in res["check_analysis"].strip().split('\n'):
+                click.echo(f"     {line}")
+
+            shot = res.get("checkshot") or {}
+            shot_findings = shot.get("findings") or []
+            if shot_findings:
+                sev_color = {
+                    "CRITICAL": Fore.RED,
+                    "ERROR": Fore.RED,
+                    "WARNING": Fore.YELLOW,
+                    "INFO": Fore.CYAN,
+                }
+                for f in shot_findings[:15]:
+                    sev = str(f.get("severity", "INFO")).upper()
+                    color = sev_color.get(sev, Fore.WHITE)
+                    line_no = f.get("line", 0)
+                    cat = f.get("category", "—")
+                    msg = f.get("message", "")
+                    click.echo(
+                        f"     {color}■ [{sev:<8}] L{line_no:<4} "
+                        f"({cat}) {msg}{Style.RESET_ALL}"
+                    )
+                if len(shot_findings) > 15:
+                    click.echo(
+                        f"     {Fore.DIM}... e mais "
+                        f"{len(shot_findings) - 15} finding(s).{Style.RESET_ALL}"
+                    )
+
         if res["errors"]:
             for err in res["errors"]:
                 click.echo(f"   {Fore.RED}↳ ERRO: {err}{Style.RESET_ALL}")
-                
+
         if res["hunks_failed"] == 0 and res["syntax_ok"] and not res["errors"]:
             successful_files += 1
             if apply:
-                click.echo(f"   {Fore.GREEN}✔ Cirurgia consolidada em disco (Backup: {rel_name}.bak){Style.RESET_ALL}")
-                
+                click.echo(
+                    f"   {Fore.GREEN}✔ Cirurgia consolidada em disco "
+                    f"(Backup: {rel_name}.bak){Style.RESET_ALL}"
+                )
+
         total_hunks_applied += res["hunks_applied"]
         total_hunks_failed += res["hunks_failed"]
+        total_critical_shots += (res.get("checkshot") or {}).get("critical_count", 0)
         click.echo()
-        
+
     click.echo("─" * 75)
-    click.echo(f"📊 Resumo: {Fore.GREEN}{total_hunks_applied} hunks válidos{Style.RESET_ALL} | {Fore.RED if total_hunks_failed > 0 else Fore.DIM}{total_hunks_failed} falhas{Style.RESET_ALL}")
-    
+    click.echo(
+        f"📊 Resumo: {Fore.GREEN}{total_hunks_applied} hunks válidos{Style.RESET_ALL} | "
+        f"{Fore.RED if total_hunks_failed > 0 else Fore.DIM}{total_hunks_failed} falhas{Style.RESET_ALL}"
+    )
+
     if not apply:
         if total_hunks_failed == 0 and successful_files == total_files:
-            click.secho("\n⚖ [MA'AT] Simulação 100% aprovada. Execute com '--apply' para efetivar.", fg='green', bold=True)
+            if total_critical_shots > 0:
+                click.secho(
+                    f"\n⚠️ [MA'AT] Simulação estruturalmente OK, mas CheckShot apontou "
+                    f"{total_critical_shots} finding(s) crítico(s). Revise antes de --apply.",
+                    fg='yellow', bold=True
+                )
+            else:
+                click.secho(
+                    "\n⚖ [MA'AT] Simulação 100% aprovada. Execute com '--apply' para efetivar.",
+                    fg='green', bold=True
+                )
         else:
-            click.secho("\n⚠️ [MA'AT] A simulação detectou rejeições. O patcher bloqueou alterações inseguras.", fg='yellow', bold=True)
+            click.secho(
+                "\n⚠️ [MA'AT] A simulação detectou rejeições. "
+                "O patcher bloqueou alterações inseguras.",
+                fg='yellow', bold=True
+            )
     else:
         if successful_files == total_files and total_hunks_failed == 0:
             click.secho("\n✅ Todas as alterações foram aplicadas com sucesso e validadas!", fg='green', bold=True)

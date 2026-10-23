@@ -336,6 +336,7 @@ class DocIndexer:
                     WHEN path LIKE 'python/patterns/%'          THEN 0
                     WHEN path LIKE 'python/architecture/%'      THEN 0
                     WHEN path LIKE 'python/automation/%'        THEN 0
+                    WHEN path LIKE 'python/snippets/%'          THEN 0
                     WHEN path LIKE 'python/typeshed/%'          THEN 1
                     WHEN path LIKE 'python/cheatsheet/%'        THEN 1
                     

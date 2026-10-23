@@ -62,6 +62,31 @@ def cmd_deploy_sandbox(launch, exorcise):
 @click.option("--harvest/--no-harvest", default=True, help="Ativa o Forensic Harvester automático.")
 @click.option("--no-khonsu", is_flag=True, default=False, help="Desativa o compilador Khonsu AOT (gera init.lua em texto puro).")
 def cmd_deploy_test(launch, exorcise, harvest, no_khonsu):
+    # 🔧 AUTO-ELEVAÇÃO: garante Admin no Windows para o PTY funcionar
+    import sys, os, ctypes, subprocess
+    if sys.platform == "win32" and not os.environ.get("DOXOADE_ELEVATED"):
+        try:
+            is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+        except Exception:
+            is_admin = False
+        if not is_admin:
+            print(f"{Fore.YELLOW}🔐 [TYPHON] Sem Admin. Solicitando elevação via UAC...{Fore.RESET}")
+            try:
+                python_exe = sys.executable
+                args_str = " ".join(f'"{a}"' if ' ' in a else a for a in sys.argv[1:])
+                cmd_line = f'"{python_exe}" -m doxoade {args_str}'
+                env_prefix = "set DOXOADE_ELEVATED=1 && "
+                subprocess.Popen(
+                    ["powershell", "-Command",
+                     f'Start-Process cmd -ArgumentList \'/k {env_prefix}{cmd_line}\' -Verb RunAs'],
+                    creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
+                )
+                print(f"{Fore.GREEN}✔ Janela elevada aberta. Deploy continua no console Admin.{Fore.RESET}")
+                return
+            except Exception as e:
+                print(f"{Fore.RED}✖ Falha na elevação: {e}{Fore.RESET}")
+                return
+
     print(f"\n{Fore.YELLOW}{Style.BRIGHT}🟡 DEPLOY TEST{Style.RESET_ALL}\n")
     result = TyphonDeployEngine.deploy("test", no_khonsu=no_khonsu)
     if result["success"]:

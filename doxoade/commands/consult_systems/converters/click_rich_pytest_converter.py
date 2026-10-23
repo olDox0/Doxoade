@@ -25,7 +25,6 @@ class ClickRichPytestConverter(BaseCanonicalConverter):
     category = "python_automation"
     canonical_filename = "click_rich_pytest.jsonl"
 
-    # Cada lib tem um índice + páginas
     LIBRARIES = {
         "click": {
             "base": "https://click.palletsprojects.com/en/stable/",
@@ -58,15 +57,15 @@ class ClickRichPytestConverter(BaseCanonicalConverter):
                 ("pretty.html", "Pretty Printing"),
                 ("logging.html", "Logging Handler"),
                 ("progress.html", "Progress Display"),
-                ("table.html", "Tables"),
+                ("tables.html", "Tables"),
                 ("live.html", "Live Display"),
                 ("layout.html", "Layout"),
                 ("panel.html", "Panels"),
                 ("syntax.html", "Syntax Highlighting"),
-                ("json.html", "JSON Pretty Printing"),
-                ("highlighter.html", "Highlighter"),
+                ("protocol.html", "Protocols (rich.console)"),
+                #("highlighter.html", "Highlighter (rich.highlighter)"),
                 ("traceback.html", "Tracebacks"),
-                ("protocols.html", "Protocols (rich.console)"),
+                #("json.html", "JSON (rich.json)"),
             ],
         },
         "pytest": {
@@ -114,7 +113,6 @@ class ClickRichPytestConverter(BaseCanonicalConverter):
         total_pages = sum(len(v["pages"]) for v in self.LIBRARIES.values())
         print(f"\n[*] 📥 Baixando {total_pages} páginas de Click + Rich + Pytest...")
 
-        # Dispara todos em paralelo (3 libs × ~14 páginas)
         tasks: List[Tuple[str, Tuple[str, str]]] = []
         for lib, cfg in self.LIBRARIES.items():
             for page in cfg["pages"]:
@@ -132,6 +130,9 @@ class ClickRichPytestConverter(BaseCanonicalConverter):
                     md = indexer.html_to_markdown(
                         raw_html, title_fallback=f"{lib}: {title}"
                     )
+                    # 🔧 P1: remove menu lateral do Furo/Sphinx
+                    if lib in ("pytest", "click", "rich"):
+                        md = self._clean_navigation_boilerplate(md)
                 except Exception as e:
                     print(f"  ✖ [FALHA] Parser HTML ({lib}/{slug}): {e}")
                     continue
@@ -158,6 +159,36 @@ class ClickRichPytestConverter(BaseCanonicalConverter):
         print(f"\n[*] Concluído download de {len(records)}/{total_pages} páginas.")
         return self.save_canonical(records)
 
+    def _clean_navigation_boilerplate(self, md: str) -> str:
+        """Remove menu lateral do Furo/Sphinx (Pytest/Click/Rich)."""
+        # 1. Remove o bloco inteiro do menu (do "Menu" até "Back to top")
+        #    O Furo gera: "Menu\n\nExpand\n\nLight mode\n\n...\n\nBack to top\n"
+        md = re.sub(
+            r"(?is)\bMenu\b.*?Back to top\s*\n",
+            "",
+            md,
+        )
+
+        # 2. Remove o bloco de "About the project / Useful links" (footer do Furo)
+        md = re.sub(
+            r"(?is)About the project\s*\n.*?(?:Back to top|Copyright ©)",
+            "",
+            md,
+        )
+
+        # 3. Remove "On this page" e "Copyright ©" no final
+        md = re.sub(
+            r"(?is)\n(?:On this page|Copyright ©|Made with)[^\n]*\n.*$",
+            "",
+            md,
+        )
+
+        # 4. Remove linhas soltas que sobraram (linhas com só "* " ou vazias)
+        md = re.sub(r"^\s*\*\s*$", "", md, flags=re.MULTILINE)
+
+        # 5. Colapsa linhas vazias
+        md = re.sub(r"\n{3,}", "\n\n", md).strip()
+        return md
 
 def run_converter():
     converter = ClickRichPytestConverter()

@@ -259,7 +259,6 @@ def cmd_symbols():
 # Cada converter deve retornar um Path de arquivo .jsonl em
 # ~/.doxoade/consult/canonical/ que será ingerido pelo CanonicalDB.
 def _get_converter_registry() -> Dict[str, str]:
-    """Retorna mapa name → 'module:Class'. Import só no momento do uso."""
     return {
         "cheatsheet":     "doxoade.commands.consult_systems.cheatsheet_converter:CheatsheetConverter",
         "byte_of_python": "doxoade.commands.consult_systems.converters.byte_of_python_converter:ByteOfPythonConverter",
@@ -272,8 +271,9 @@ def _get_converter_registry() -> Dict[str, str]:
         "patterns":       "doxoade.commands.consult_systems.converters.design_patterns_converter:DesignPatternsConverter",
         "typeshed":       "doxoade.commands.consult_systems.converters.typeshed_converter:TypeshedConverter",
         "automation":     "doxoade.commands.consult_systems.converters.click_rich_pytest_converter:ClickRichPytestConverter",
+        "git":            "doxoade.commands.consult_systems.converters.git_github_converter:GitGithubConverter",
+        "30seconds":      "doxoade.commands.consult_systems.converters.thirty_seconds_converter:ThirtySecondsConverter",
     }
-
 
 def _resolve_converter(name: str):
     """Importa o converter só no momento do uso."""
