@@ -286,3 +286,294 @@ def opt_bench(ctx, target, rounds, calls, verbose, csv):
         return
     csv_path = Path(csv).resolve() if csv else None
     render_results(results, verbose=verbose, show_funcs=True, csv_out=csv_path)
+
+@click.command("headroom")
+@click.argument("target", default=".", type=click.Path(exists=True))
+@click.option("--json", "output_json", is_flag=True, help="Saída em JSON.")
+@click.option("--apply-to", type=click.Path(), help="Salva JSON neste arquivo.")
+@click.option("--min-score", default=0, type=int, help="Só mostra funções com score >= N.")
+@click.option("--methods", is_flag=True, help="Também analisa métodos de classes.")
+@click.option("--corpus", is_flag=True, help="Agrega estatísticas de todo o diretório alvo.")
+@click.option("--verbose", "-v", is_flag=True, help="Detalhamento por função.")
+@click.option("--analyze-calls", is_flag=True, help="Classifica chamadas Python em loop por tipo de refatoração.")
+def vulcan_headroom(target, output_json, apply_to, min_score, methods, corpus, verbose, analyze_calls):
+    """
+    📊 Mede HEADROOM de otimização Cython por função.
+
+    Diferente de 'vulcan inspect' (que mede pureza para nogil),
+    'headroom' mede QUANTO CYTHON GANHARIA se a função fosse
+    reescrita com tipagem explícita.
+
+    Grades:
+      ADAMANTIUM (80-100) → Reescrever vale muito a pena
+      STEEL      (40-79)  → Ganho moderado, custo médio
+      BRONZE     (15-39)  → Ganho baixo
+      SLAG       (0-14)   → Não vale a pena Cython
+    """
+    from doxoade.tools.vulcan.purity_analyzer import (
+        analyze_file, aggregate_corpus,
+    )
+
+    root = Path(target).resolve()
+
+    # [FIX] Coleta de arquivos com variável sempre definida
+    files: list[Path] = []
+
+    if root.is_file():
+        if root.suffix == ".py":
+            files = [root]
+        else:
+            click.echo(f"{Fore.YELLOW}Alvo é arquivo, não diretório: {root}{Style.RESET_ALL}")
+            return
+    elif root.is_dir():
+        skip = {".git", "venv", ".venv", "__pycache__", "build", "dist",
+                ".doxoade", "thirdparty", "node_modules", "tests", "lixao",
+                "vendor", "external", "old", "recycle"}
+        for r, dirs, fs in os.walk(str(root)):
+            dirs[:] = [d for d in dirs if d not in skip]
+            for f in fs:
+                if f.endswith(".py") and not f.startswith("__"):
+                    files.append(Path(r) / f)
+    else:
+        click.echo(f"{Fore.RED}Alvo não encontrado: {root}{Style.RESET_ALL}")
+        return
+
+    if not files:
+        click.echo(f"{Fore.YELLOW}Nenhum .py encontrado em: {root}{Style.RESET_ALL}")
+        return
+
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}  ⬡ VULCAN HEADROOM — {len(files)} arquivo(s){Style.RESET_ALL}")
+    click.echo(f"  {'─' * 70}")
+
+    # Coleta relatórios de headroom
+    reports = []
+    for f in files:
+        try:
+            r = analyze_file(str(f), include_methods=methods)
+            if r.functions:
+                reports.append(r)
+        except Exception as e:
+            if verbose:
+                click.echo(f"  {Fore.RED}✘ {f.name}: {e}{Style.RESET_ALL}")
+
+    if not reports:
+        click.echo(f"  {Fore.YELLOW}Nenhuma função analisada.{Style.RESET_ALL}")
+        return
+
+    # [FASE 2] Classificação de calls em loop
+    calls_data = None
+    if analyze_calls:
+        from doxoade.tools.vulcan.purity_analyzer import (
+            classify_calls_in_file, aggregate_call_events,
+        )
+        all_events = []
+        for f in files:
+            try:
+                all_events.extend(classify_calls_in_file(str(f)))
+            except Exception as e:
+                if verbose:
+                    click.echo(f"  {Fore.RED}✘ calls {f.name}: {e}{Style.RESET_ALL}")
+        if all_events:
+            calls_data = aggregate_call_events(all_events)
+            calls_data["raw_events"] = [e.to_dict() for e in all_events]
+
+    # Saída JSON / arquivo
+    if output_json or apply_to:
+        import json as _json
+        payload = {
+            "files": [r.to_dict() for r in reports],
+            "corpus": aggregate_corpus(reports),
+        }
+        if calls_data is not None:
+            payload["calls_analysis"] = calls_data
+        if apply_to:
+            Path(apply_to).write_text(
+                _json.dumps(payload, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            click.echo(f"  {Fore.GREEN}✔ JSON salvo em: {apply_to}{Style.RESET_ALL}")
+        else:
+            click.echo(_json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+
+    # Sumário de corpus
+    if corpus:
+        _render_corpus_summary(reports)
+        return
+
+    # Sumário de calls
+    if analyze_calls and calls_data:
+        _render_calls_summary(calls_data)
+        return
+
+    # Renderização por arquivo
+    for r in reports:
+        display_funcs = [f for f in r.functions if f.score >= min_score]
+        if not display_funcs:
+            continue
+
+        click.echo(f"\n  {Fore.CYAN}{Path(r.file).name}{Style.RESET_ALL}  "
+                   f"({len(display_funcs)}/{r.total_functions} funções, "
+                   f"avg={r.avg_score:.1f})")
+
+        for f in display_funcs:
+            c = f.color
+            rst = Style.RESET_ALL
+            click.echo(
+                f"    {c}■{rst} L{f.lineno:<4} {f.name:<38} "
+                f"{c}{f.score:>3} {f.grade:<10}{rst}"
+                f"  ({f.n_nodes:>4} nodes, depth={f.max_loop_depth})"
+            )
+            if verbose:
+                pos = []
+                neg = []
+                if f.numeric_loops:         pos.append(f"loops×{f.numeric_loops}")
+                if f.indexed_access:        pos.append(f"idx×{f.indexed_access}")
+                if f.local_arithmetic:      pos.append(f"arith×{f.local_arithmetic}")
+                if f.branchless_candidates: pos.append(f"cmov×{f.branchless_candidates}")
+                if f.native_kernels_used:   pos.append(f"nexus×{f.native_kernels_used}")
+                if f.python_calls_in_loop:  neg.append(f"py-call×{f.python_calls_in_loop}")
+                if f.dict_lookups_in_loop:  neg.append(f"dict×{f.dict_lookups_in_loop}")
+                if f.string_ops_in_loop:    neg.append(f"str×{f.string_ops_in_loop}")
+                if f.io_calls:              neg.append(f"io×{f.io_calls}")
+                if f.dynamic_attrs:         neg.append(f"dyn×{f.dynamic_attrs}")
+                if f.exceptions_in_loop:    neg.append(f"try×{f.exceptions_in_loop}")
+                if pos:
+                    click.echo(f"       {Fore.GREEN}+ {', '.join(pos)}{Style.RESET_ALL}")
+                if neg:
+                    click.echo(f"       {Fore.RED}- {', '.join(neg)}{Style.RESET_ALL}")
+                if f.args_annotated:
+                    click.echo(f"       {Fore.CYAN}✓ args anotados (confiança alta){Style.RESET_ALL}")
+
+    click.echo()
+
+
+def _render_corpus_summary(reports):
+    """Renderiza o resumo agregado de corpus."""
+    from doxoade.tools.vulcan.purity_analyzer import aggregate_corpus
+
+    agg = aggregate_corpus(reports)
+
+    click.echo(f"\n  {Fore.CYAN}{Style.BRIGHT}  ⬡ CORPUS SUMMARY — {agg['total_files']} arquivos, {agg['total_functions']} funções{Style.RESET_ALL}")
+    click.echo(f"  {'─' * 70}")
+
+    # Distribuição de grades
+    click.echo(f"\n  {Fore.WHITE}{Style.BRIGHT}Distribuição por grade:{Style.RESET_ALL}")
+    grade_colors = {
+        "ADAMANTIUM": "\x1b[35m",
+        "STEEL": "\x1b[34m",
+        "BRONZE": "\x1b[33m",
+        "SLAG": "\x1b[31m",
+    }
+    for grade in ["ADAMANTIUM", "STEEL", "BRONZE", "SLAG"]:
+        count = agg["grade_distribution"].get(grade, 0)
+        pct = (count / agg["total_functions"] * 100) if agg["total_functions"] else 0
+        bar_len = int(pct / 3)
+        bar = "█" * bar_len
+        c = grade_colors.get(grade, "")
+        click.echo(f"    {c}{grade:<12}{Style.RESET_ALL} "
+                   f"{c}{bar:<33}{Style.RESET_ALL} "
+                   f"{count:>4} ({pct:>5.1f}%)")
+
+    # Histograma de scores
+    click.echo(f"\n  {Fore.WHITE}{Style.BRIGHT}Histograma de scores:{Style.RESET_ALL}")
+    for bucket, count in agg["score_histogram"].items():
+        bar = "▆" * min(count, 60)
+        click.echo(f"    {bucket:<6}  {bar:<60}  {count}")
+
+    # Top fatores positivos
+    click.echo(f"\n  {Fore.WHITE}{Style.BRIGHT}Top fatores POSITIVOS (total no corpus):{Style.RESET_ALL}")
+    pos_sorted = sorted(agg["positive_totals"].items(), key=lambda x: x[1], reverse=True)
+    for attr, total in pos_sorted[:6]:
+        click.echo(f"    {Fore.GREEN}●{Style.RESET_ALL} {attr:<25} {total:>5}")
+
+    click.echo(f"\n  {Fore.WHITE}{Style.BRIGHT}Top fatores NEGATIVOS (total no corpus):{Style.RESET_ALL}")
+    neg_sorted = sorted(agg["negative_totals"].items(), key=lambda x: x[1], reverse=True)
+    for attr, total in neg_sorted[:6]:
+        click.echo(f"    {Fore.RED}●{Style.RESET_ALL} {attr:<25} {total:>5}")
+
+    # Padrões em ADAMANTIUM
+    high = agg["high_score_patterns"]
+    if high["count"] > 0:
+        click.echo(f"\n  {Fore.MAGENTA}{Style.BRIGHT}PADRÕES EM ADAMANTIUM ({high['count']} funções):{Style.RESET_ALL}")
+        click.echo(f"    Fatores positivos mais comuns:")
+        for attr, count in sorted(high["positive_factors"].items(), key=lambda x: x[1], reverse=True)[:5]:
+            pct = count / high["count"] * 100
+            click.echo(f"      {Fore.GREEN}→{Style.RESET_ALL} {attr:<25} {count:>3} ({pct:>5.1f}%)")
+        if high["negative_factors"]:
+            click.echo(f"    Fatores negativos toleráveis:")
+            for attr, count in sorted(high["negative_factors"].items(), key=lambda x: x[1], reverse=True)[:5]:
+                pct = count / high["count"] * 100
+                click.echo(f"      {Fore.YELLOW}→{Style.RESET_ALL} {attr:<25} {count:>3} ({pct:>5.1f}%)")
+
+    # Padrões em SLAG
+    low = agg["low_score_patterns"]
+    if low["count"] > 0:
+        click.echo(f"\n  {Fore.RED}{Style.BRIGHT}ANTIPADRÕES EM SLAG ({low['count']} funções):{Style.RESET_ALL}")
+        for attr, count in sorted(low["negative_factors"].items(), key=lambda x: x[1], reverse=True)[:5]:
+            pct = count / low["count"] * 100
+            click.echo(f"    {Fore.RED}✘{Style.RESET_ALL} {attr:<25} {count:>3} ({pct:>5.1f}%)")
+
+    click.echo()
+
+def _render_calls_summary(calls_data):
+    """Renderiza o sumário de classificação de calls em loop."""
+    click.echo(f"\n  {Fore.CYAN}{Style.BRIGHT}  ⬡ CALLS-IN-LOOP ANALYSIS — {calls_data['total_calls']} calls{Style.RESET_ALL}")
+    click.echo(f"  {'─' * 70}")
+
+    by_cat = calls_data["by_category"]
+    total = calls_data["total_calls"]
+
+    click.echo(f"\n  {Fore.WHITE}{Style.BRIGHT}Distribuição por categoria de refatoração:{Style.RESET_ALL}")
+    category_colors = {
+        "ADAMANTIUM_READY": "\x1b[35m",  # não usado, mas reservado
+        "HOIST": "\x1b[32m",    # verde — fácil
+        "SAFE": "\x1b[32m",     # verde — fácil
+        "NATIVE": "\x1b[35m",   # magenta — já é nativo
+        "BATCH": "\x1b[36m",    # ciano — médio
+        "BUFFER": "\x1b[36m",   # ciano — médio
+        "INLINE": "\x1b[33m",   # amarelo — requer análise
+        "UNKNOWN": "\x1b[33m",  # amarelo
+        "BLOCKED": "\x1b[31m",  # vermelho — não otimizável
+    }
+    order = ["HOIST", "SAFE", "BATCH", "BUFFER", "INLINE",
+             "NATIVE", "UNKNOWN", "BLOCKED"]
+    for cat in order:
+        count = by_cat.get(cat, 0)
+        if count == 0:
+            continue
+        pct = count / total * 100
+        bar = "█" * int(pct / 2)
+        c = category_colors.get(cat, "")
+        click.echo(f"    {c}{cat:<10}{Style.RESET_ALL} "
+                   f"{c}{bar:<50}{Style.RESET_ALL} "
+                   f"{count:>4} ({pct:>5.1f}%)")
+
+    # ROI: funções com mais calls refatoráveis
+    click.echo(f"\n  {Fore.WHITE}{Style.BRIGHT}TOP 15 funções por ROI de refatoração:{Style.RESET_ALL}")
+    click.echo(f"  {'─' * 70}")
+    click.echo(f"  {'FUNÇÃO':<35} {'TOTAL':>6} {'REFAT':>6} {'BLOCK':>6} {'UNKN':>6}")
+    click.echo(f"  {'─' * 35} {'─' * 6} {'─' * 6} {'─' * 6} {'─' * 6}")
+    for f in calls_data["roi_by_function"][:15]:
+        name = f["func_name"][:33]
+        click.echo(
+            f"  {Fore.CYAN}{name:<35}{Style.RESET_ALL} "
+            f"{f['total_calls']:>6} "
+            f"{Fore.GREEN}{f['refactorable']:>6}{Style.RESET_ALL} "
+            f"{Fore.RED}{f['blocked']:>6}{Style.RESET_ALL} "
+            f"{Fore.YELLOW}{f['unknown']:>6}{Style.RESET_ALL}"
+        )
+
+    # Top targets por categoria (só os mais úteis)
+    click.echo(f"\n  {Fore.WHITE}{Style.BRIGHT}Top targets por categoria:{Style.RESET_ALL}")
+    for cat in ["BLOCKED", "HOIST", "BATCH", "INLINE", "UNKNOWN"]:
+        targets = calls_data["targets_per_category"].get(cat, {})
+        if not targets:
+            continue
+        c = category_colors.get(cat, "")
+        click.echo(f"\n  {c}{cat}{Style.RESET_ALL}:")
+        for target, count in list(targets.items())[:5]:
+            click.echo(f"    {c}→{Style.RESET_ALL} {target:<30} {count:>4}x")
+
+    click.echo()
+
