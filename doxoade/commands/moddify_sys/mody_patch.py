@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/moddify_sys/mody_patch.py
 """
-Mody Patch Engine v6.5.1 — Motor de Cirurgia Atômica de Diff (Ma'at & Sotéria).
+Mody Patch Engine v6.2 — Motor de Cirurgia Atômica de Diff (Ma'at & Sotéria).
 ProDeNov: Ancoragem Estrutural Forte (Regra de Ouro da Recuperação).
 
 v6.2 — Correções:
@@ -492,6 +492,7 @@ class PatchSurgeon:
                 "hunk": 0, "status": "ARQUIVO CRIADO",
                 "reason": f"{len(new_lines)} linhas escritas",
             })
+            report["hunks_applied"] = 1   # ← ADICIONAR
             return report
 
         if not patch.target_path or not patch.target_path.exists():
@@ -880,7 +881,7 @@ def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_ar
         target_diff = Path(patch_file) if patch_file else (root / "patch_diff.txt")
 
     #click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🩹 [MODY PATCH v6.2] Cirurgia Atômica de Diff{Style.RESET_ALL}")
-    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🩹 [MODY PATCH v6.5.1] Cirurgia Atômica de Diff{Style.RESET_ALL}")
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🩹 [MODY PATCH v6.4.2] Cirurgia Atômica de Diff{Style.RESET_ALL}")
     click.echo(f"  • Arquivo de Entrada: {Fore.YELLOW}{target_diff.name}{Style.RESET_ALL}")
     click.echo(f"  • Modo de Operação:   {Fore.GREEN if apply else Fore.YELLOW}{'EFETIVAÇÃO (--apply)' if apply else 'SIMULAÇÃO (DRY-RUN)'}{Style.RESET_ALL}")
     click.echo(f"  • CheckShot:          {Fore.GREEN + 'ON' if checkshot and not apply else Fore.DIM + 'OFF'}{Style.RESET_ALL}\n")
