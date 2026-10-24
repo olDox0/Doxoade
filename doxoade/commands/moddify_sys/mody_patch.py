@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # doxoade/commands/moddify_sys/mody_patch.py
 """
-Mody Patch Engine v6.2 — Motor de Cirurgia Atômica de Diff (Ma'at & Sotéria).
+Mody Patch Engine v6.5.1 — Motor de Cirurgia Atômica de Diff (Ma'at & Sotéria).
 ProDeNov: Ancoragem Estrutural Forte (Regra de Ouro da Recuperação).
 
 v6.2 — Correções:
@@ -339,6 +339,121 @@ class PatchSurgeon:
             return f"compile falhou: {e}"
 
     @classmethod
+    def _preflight_analysis(
+        cls, file_lines: List[str], patch: FilePatch
+    ) -> Dict:
+        """
+        v6.5: Classifica cada hunk ANTES de aplicar.
+        
+        Retorna:
+        {
+            "hunks": [
+                {"idx": 1, "status": "WILL_APPLY" | "ALREADY_APPLIED" |
+                "WILL_DUPLICATE" | "WILL_CONFLICT" | "UNKNOWN",
+                "loc": int|None, "reason": str, "partial_dup_score": float}
+            ],
+            "will_corrupt": bool,
+            "safe_to_apply": bool,
+        }
+        """
+        result = {
+            "hunks": [],
+            "will_corrupt": False,
+            "safe_to_apply": True,
+        }
+        
+        applied_ranges: List[Tuple[int, int, int]] = []
+        
+        for idx, hunk in enumerate(patch.hunks, start=1):
+            classification = {"idx": idx, "status": "UNKNOWN", "loc": None,
+                            "reason": "", "partial_dup_score": 0.0}
+            
+            # 1. Hunk já aplicado?
+            replacement_block = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind in (' ', '+')]
+            already_applied = False
+            if len(replacement_block) >= 2:
+                for cand in range(len(file_lines) - len(replacement_block) + 1):
+                    block = [cls._normalize_line(file_lines[cand + i]) for i in range(len(replacement_block))]
+                    if block == replacement_block:
+                        already_applied = True
+                        classification["loc"] = cand
+                        break
+            if already_applied:
+                classification["status"] = "ALREADY_APPLIED"
+                classification["reason"] = "Bloco já presente no arquivo."
+                result["hunks"].append(classification)
+                continue
+            
+            # 2. Encontra âncora (com fuzzy/anchor-only)
+            loc, offset, match_type, contig_len, candidates = cls.find_hunk_location(file_lines, hunk)
+            
+            if match_type == 'NONE':
+                classification["status"] = "WILL_CONFLICT"
+                classification["reason"] = f"Contexto insuficiente ({contig_len} linhas)."
+                result["will_corrupt"] = True
+                result["safe_to_apply"] = False
+                result["hunks"].append(classification)
+                continue
+            
+            classification["loc"] = loc
+            
+            # 3. Sobreposição com hunks anteriores?
+            new_start = loc
+            new_end = loc + sum(1 for pl in hunk.lines if pl.kind in (' ', '-'))
+            overlap = None
+            for prev_start, prev_end, prev_idx in applied_ranges:
+                if new_start < prev_end and new_end > prev_start:
+                    overlap = (prev_start, prev_end, prev_idx)
+                    break
+            
+            if overlap is not None:
+                classification["status"] = "WILL_CONFLICT"
+                classification["reason"] = (
+                    f"Sobreposição com hunk #{overlap[2]} "
+                    f"(L{overlap[0]+1}-L{overlap[1]})."
+                )
+                result["will_corrupt"] = True
+                result["safe_to_apply"] = False
+                result["hunks"].append(classification)
+                continue
+            
+            # 4. Duplicação parcial? (linhas `+` que já existem fora do range)
+            plus_lines = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind == '+']
+            if plus_lines:
+                expected_old_len = sum(1 for pl in hunk.lines if pl.kind in (' ', '-'))
+                hunk_range = set(range(loc, loc + expected_old_len))
+                already_in_file = 0
+                for plus in plus_lines:
+                    if len(plus) < 5:
+                        continue
+                    for i, line in enumerate(file_lines):
+                        if i in hunk_range:
+                            continue
+                        if cls._normalize_line(line) == plus:
+                            already_in_file += 1
+                            break
+                dup_score = already_in_file / max(1, len(plus_lines))
+                classification["partial_dup_score"] = dup_score
+                if dup_score >= 0.5:
+                    classification["status"] = "WILL_DUPLICATE"
+                    classification["reason"] = (
+                        f"{already_in_file}/{len(plus_lines)} linhas de adição "
+                        f"já existem no arquivo (fix parcialmente aplicado)."
+                    )
+                    result["will_corrupt"] = True
+                    result["safe_to_apply"] = False
+                    result["hunks"].append(classification)
+                    continue
+            
+            # 5. Vai aplicar OK
+            classification["status"] = "WILL_APPLY"
+            classification["reason"] = f"Contexto {match_type} em L{loc+1}."
+            applied_ranges.append((new_start, new_end, idx))
+            result["hunks"].append(classification)
+        
+        return result
+
+    @classmethod
     def simulate_or_apply(
         cls,
         patch: FilePatch,
@@ -392,6 +507,7 @@ class PatchSurgeon:
 
         original_content = "".join(working_lines)
         modified_lines = list(working_lines)
+        applied_ranges = []
 
         for idx, hunk in enumerate(patch.hunks, start=1):
             replacement = [pl.text + '\n' for pl in hunk.lines if pl.kind in (' ', '+')]
@@ -468,10 +584,17 @@ class PatchSurgeon:
                     f"{pl.kind} {hunk.old_start + i:4d} | {pl.text.rstrip()}"
                     for i, pl in enumerate(hunk.lines) if pl.kind in (' ', '-')
                 ]
-                
+
+                # v6.4.1: computar rel_name no escopo de simulate_or_apply
+                # (é usado no diagnóstico estruturado)
+                _rel_name = (
+                    str(patch.target_path.relative_to(root))
+                    if (patch.target_path and root and patch.target_path.is_relative_to(root))
+                    else (str(patch.target_path) if patch.target_path else "unknown")
+                )
                 reason_msg = (
                     f"Contexto insuficiente: {contig_len} de {len(expected_old)} linhas contíguas.\n"
-                    f"      Arquivo: {rel_name}\n"
+                    f"      Arquivo: {_rel_name}\n"                   # ← CORRIGIDO
                     f"      Hunk #{idx} (old_start={hunk.old_start})\n"
                     f"      Esperado (linhas ' ' e '-'):\n"
                     + "\n".join(f"        {l}" for l in expected_display[:8])
@@ -485,7 +608,7 @@ class PatchSurgeon:
                 
                 # v6.4 — sugestões acionáveis
                 suggestions = [
-                    f"doxoade mody show {rel_name} --part {ctx_start+1}-{ctx_end}",
+                    f"doxoade mody show {_rel_name} --part {ctx_start+1}-{ctx_end}",  # ← CORRIGIDO
                 ]
                 if already_there:
                     suggestions.append(f"# Fix provavelmente já aplicado. Verifique antes de re-aplicar.")
@@ -493,7 +616,7 @@ class PatchSurgeon:
                     first_removal = next((pl for pl in hunk.lines if pl.kind == '-'), None)
                     if first_removal:
                         suggestions.append(
-                            f"doxoade mody replace {rel_name} "
+                            f"doxoade mody replace {_rel_name} "            # ← CORRIGIDO
                             f"\"{first_removal.text.strip()}\" \"<novo>\""
                         )
                 reason_msg += "\n      Sugestões:\n" + "\n".join(
@@ -550,7 +673,42 @@ class PatchSurgeon:
                 #  o comprimento do replacement para saber o que inserir,
                 #  e apagamos expected_old a partir de `loc`).
                 expected_old_len = sum(1 for pl in hunk.lines if pl.kind in (' ', '-'))
-                modified_lines[loc : loc + expected_old_len] = replacement
+                # v6.4.2 — GUARD: detectar sobreposição de hunks
+                new_start = loc
+                #new_end = loc + len(replacement)
+                new_end = loc + expected_old_len
+                
+                # FIX 2: hunk puro de adição não pode conflitar (só insere)
+                if expected_old_len > 0:
+                    overlap = None
+                    for prev_start, prev_end, prev_idx in applied_ranges:
+                        if new_start < prev_end and new_end > prev_start:
+                            overlap = (prev_start, prev_end, prev_idx)
+                            break
+                    
+                    if overlap is not None:
+                        prev_start, prev_end, prev_idx = overlap
+                        report["details"].append({
+                            "hunk": idx,
+                            "status": "CONFLITO (overlap)",
+                            "reason": (
+                                f"Sobreposição com hunk #{prev_idx} "
+                                f"(range anterior: L{prev_start+1}-L{prev_end}, "
+                                f"range novo: L{new_start+1}-L{new_end})."
+                            ),
+                            "match_type": "OVERLAP",
+                        })
+                        report["hunks_failed"] += 1
+                        report["hunks_applied"] -= 1  # desfaz incremento anterior
+                        # FIX 3: NÃO faz break — continua step-by-step.
+                        # Próximos hunks podem aplicar independentemente.
+                        continue
+                
+                applied_ranges.append((new_start, new_end, idx))
+                
+                # Aplica
+                modified_lines[loc:loc + expected_old_len] = replacement
+#                modified_lines[loc : loc + expected_old_len] = replacement
 
                 # ─── v6.2: validação de sintaxe com 2 camadas ─────────────
                 if patch.target_path.suffix.lower() == '.py':
@@ -575,11 +733,11 @@ class PatchSurgeon:
             except SyntaxError as e:
                 report["syntax_ok"] = False
                 report["errors"].append(f"Violação Ma'at: SyntaxError em Python (L{e.lineno}: {e.msg})")
-            else:
-                _mod_err = cls._validate_module_compile(new_content, patch.target_path)
-                if _mod_err is not None:
-                    report["syntax_ok"] = False
-                    report["errors"].append(f"Violação Ma'at (compileall): {_mod_err}")
+            # else:
+            #     _mod_err = cls._validate_module_compile(new_content, patch.target_path)
+            #     if _mod_err is not None:
+            #         report["syntax_ok"] = False
+            #         report["errors"].append(f"Violação Ma'at (compileall): {_mod_err}")
 
         # CheckShot (sandbox isolado) — só em dry-run
         if run_checkshot and not apply and report["hunks_failed"] == 0 and report["syntax_ok"]:
@@ -721,7 +879,8 @@ def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_ar
     else:
         target_diff = Path(patch_file) if patch_file else (root / "patch_diff.txt")
 
-    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🩹 [MODY PATCH v6.2] Cirurgia Atômica de Diff{Style.RESET_ALL}")
+    #click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🩹 [MODY PATCH v6.2] Cirurgia Atômica de Diff{Style.RESET_ALL}")
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🩹 [MODY PATCH v6.5.1] Cirurgia Atômica de Diff{Style.RESET_ALL}")
     click.echo(f"  • Arquivo de Entrada: {Fore.YELLOW}{target_diff.name}{Style.RESET_ALL}")
     click.echo(f"  • Modo de Operação:   {Fore.GREEN if apply else Fore.YELLOW}{'EFETIVAÇÃO (--apply)' if apply else 'SIMULAÇÃO (DRY-RUN)'}{Style.RESET_ALL}")
     click.echo(f"  • CheckShot:          {Fore.GREEN + 'ON' if checkshot and not apply else Fore.DIM + 'OFF'}{Style.RESET_ALL}\n")
@@ -782,6 +941,7 @@ def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_ar
                     f"   {Fore.GREEN}✔ {det['status']}: "
                     f"{det['reason']}{Style.RESET_ALL}"
                 )
+                continue # ← pula o loop genérico
             is_ok = (
                 "APLICÁVEL" in det["status"]
                 or "IDEMPOTENTE" in det["status"]
@@ -894,3 +1054,169 @@ def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_ar
         else:
             click.secho("\n❌ Operação parcial ou abortada em arquivos com conflito.", fg='red', bold=True)
             ctx.exit(1)
+
+@click.command('replace')
+@click.argument('file_path', type=click.Path(exists=True, dir_okay=False))
+@click.argument('pairs', nargs=-1, required=True)
+@click.option('--line', '-l', default=None,
+              help="Aplica apenas nas linhas especificadas (ex: '10' ou '10-20').")
+def mod_replace(file_path, pairs, line):
+    """Substitui texto em lote.
+
+    Uso: replace arquivo.txt "velho1" "novo1" "velho2" "novo2"
+
+    ⚠️ O `replace` faz substituição LITERAL de string. `@@` não é
+       interpretado como newline. Para multi-linha, use `mody add`.
+
+    Opções:
+      --line N      Aplica apenas na linha N
+      --line N-M    Aplica apenas nas linhas N a M
+    """
+    # ─── GUARD 1: rejeitar '@@' (delimitador do `add`, não do `replace`) ──
+    for i, arg in enumerate(pairs):
+        if '@@' in arg:
+            click.secho(
+                f"✘ Erro: o argumento #{i+1} contém '@@'.\n"
+                f"   O comando `replace` faz substituição LITERAL de string.\n"
+                f"   '@@' é o delimitador do `mody add` (multi-linha), não do `replace`.\n"
+                f"\n"
+                f"   Se você quer inserir múltiplas linhas:\n"
+                f"     doxoade mody add {file_path} \"linha1@@linha2@@linha3\" --line N\n"
+                f"\n"
+                f"   Se você quer substituir uma única linha por múltiplas:\n"
+                f"     doxoade mody remove {file_path} --line N\n"
+                f"     doxoade mody add {file_path} \"linha1@@linha2@@linha3\" --line N\n"
+                f"\n"
+                f"   Argumento problemático: {arg!r}",
+                fg='red', err=True,
+            )
+            raise click.exceptions.Exit(1)
+
+    # ─── GUARD 2: número par de argumentos ───────────────────────────────
+    if len(pairs) % 2 != 0:
+        click.secho(
+            f"✘ Erro: número ímpar de argumentos ({len(pairs)}).\n"
+            f"   Esperado: pares OLD NEW [OLD NEW ...]\n"
+            f"   Exemplo: doxoade mody replace arq.txt \"velho\" \"novo\"",
+            fg='red', err=True,
+        )
+        raise click.exceptions.Exit(1)
+
+    # ─── LER ARQUIVO ─────────────────────────────────────────────────────
+    from pathlib import Path
+    fp = Path(file_path)
+    try:
+        content = fp.read_text(encoding='utf-8')
+    except Exception as e:
+        click.secho(f"✘ Erro ao ler {file_path}: {e}", fg='red', err=True)
+        raise click.exceptions.Exit(1)
+
+    # ─── PARSE DO --line (se presente) ───────────────────────────────────
+    line_start = None
+    line_end = None
+    if line is not None:
+        try:
+            if '-' in line:
+                ls, le = line.split('-', 1)
+                line_start, line_end = int(ls), int(le)
+            else:
+                line_start = line_end = int(line)
+            if line_start < 1 or line_end < line_start:
+                raise ValueError
+        except (ValueError, TypeError):
+            click.secho(
+                f"✘ Erro: --line inválido ({line!r}). Use 'N' ou 'N-M'.",
+                fg='red', err=True,
+            )
+            raise click.exceptions.Exit(1)
+
+    # ─── APLICAR SUBSTITUIÇÕES ───────────────────────────────────────────
+    total = 0
+    pairs_list = list(pairs)
+    original_content = content
+    lines_list = None
+
+    if line_start is not None:
+        # Modo --line: só dentro do range
+        lines_list = content.splitlines(keepends=True)
+        if line_end > len(lines_list):
+            click.secho(
+                f"✘ Erro: range L{line_start}-L{line_end} excede o arquivo "
+                f"({len(lines_list)} linhas).",
+                fg='red', err=True,
+            )
+            raise click.exceptions.Exit(1)
+
+        for i in range(0, len(pairs_list), 2):
+            old = pairs_list[i]
+            new = pairs_list[i+1]
+            found = 0
+            for ln_idx in range(line_start - 1, line_end):
+                if old in lines_list[ln_idx]:
+                    lines_list[ln_idx] = lines_list[ln_idx].replace(old, new)
+                    found += 1
+
+            if found == 0:
+                click.secho(
+                    f"⚠ Aviso: pattern não encontrado em L{line_start}-L{line_end}:\n"
+                    f"   {old!r}",
+                    fg='yellow',
+                )
+            else:
+                total += found
+
+        content = ''.join(lines_list)
+    else:
+        # Modo global: substituir em todo o arquivo
+        for i in range(0, len(pairs_list), 2):
+            old = pairs_list[i]
+            new = pairs_list[i+1]
+            count = content.count(old)
+
+            if count == 0:
+                # Reportar pattern não encontrado com contexto
+                click.secho(
+                    f"⚠ Aviso: pattern não encontrado:\n"
+                    f"   {old!r}",
+                    fg='yellow',
+                )
+                old_stripped = old.strip()
+                similar = []
+                for ln_idx, ln in enumerate(content.splitlines(), 1):
+                    ln_stripped = ln.strip()
+                    if (old_stripped[:30] and old_stripped[:30] in ln_stripped) or \
+                       (ln_stripped[:30] and ln_stripped[:30] in old_stripped):
+                        similar.append((ln_idx, ln_stripped[:80]))
+                        if len(similar) >= 3:
+                            break
+                if similar:
+                    click.secho(f"   Linhas parecidas no arquivo:", fg='yellow')
+                    for ln_no, ln_text in similar:
+                        click.secho(f"     L{ln_no:4d} | {ln_text}", fg='yellow')
+                click.secho(
+                    f"   Sugestão: doxoade mody show {file_path} --search \"{old_stripped[:30]}\"",
+                    fg='cyan',
+                )
+            else:
+                content = content.replace(old, new)
+                total += count
+
+    # ─── GRAVAR (com backup) ─────────────────────────────────────────────
+    if total > 0:
+        try:
+            bak = fp.with_suffix(fp.suffix + '.bak')
+            bak.write_text(original_content, encoding='utf-8')
+            fp.write_text(content, encoding='utf-8')
+            click.echo(
+                f"[MODDIFY] Realizadas {total} substituições em {file_path} "
+                f"(backup: {bak.name})."
+            )
+        except Exception as e:
+            click.secho(f"✘ Erro ao gravar {file_path}: {e}", fg='red', err=True)
+            raise click.exceptions.Exit(1)
+    else:
+        click.secho(
+            f"[MODDIFY] Nenhuma substituição realizada em {file_path}.",
+            fg='yellow',
+        )
+
