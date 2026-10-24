@@ -273,6 +273,7 @@ def _get_converter_registry() -> Dict[str, str]:
         "automation":     "doxoade.commands.consult_systems.converters.click_rich_pytest_converter:ClickRichPytestConverter",
         "git":            "doxoade.commands.consult_systems.converters.git_github_converter:GitGithubConverter",
         "30seconds":      "doxoade.commands.consult_systems.converters.thirty_seconds_converter:ThirtySecondsConverter",
+        "ecosystem":      "doxoade.commands.consult_systems.converters.devdocs_bridge_converter:DevDocsBridgeConverter",
     }
 
 def _resolve_converter(name: str):

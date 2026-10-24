@@ -23,7 +23,9 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
 RE_STRIP_BLOCKS = re.compile(
-    r'<(?:script|style|nav|header|footer|svg)[^>]*>.*?</(?:script|style|nav|header|footer|svg)>',
+    r'<(?:script|style|nav|header|footer|svg|aside|'
+    r'div[^>]*class="[^"]*(?:sidebar|drawer|toc|navigation)[^"]*")'
+    r'[^>]*>.*?</(?:script|style|nav|header|footer|svg|aside|div)>',
     flags=re.DOTALL | re.IGNORECASE
 )
 RE_TAGS = re.compile(r'<[^>]+>')
@@ -334,6 +336,7 @@ class DocIndexer:
                     WHEN path LIKE 'python/basic/%'             THEN 0
                     WHEN path LIKE 'python/algorithms/%'        THEN 0
                     WHEN path LIKE 'python/patterns/%'          THEN 0
+                    WHEN path LIKE 'python/ecosystem/%'         THEN 0
                     WHEN path LIKE 'python/architecture/%'      THEN 0
                     WHEN path LIKE 'python/automation/%'        THEN 0
                     WHEN path LIKE 'python/snippets/%'          THEN 0

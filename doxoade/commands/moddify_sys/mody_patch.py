@@ -459,9 +459,10 @@ class PatchSurgeon:
             else:
                 report["hunks_applied"] += 1
 
+                # v6.3 — GUARD: preview defensivo contra IndexError
                 start_preview = max(0, loc - 2)
                 preview_snippet = []
-                for i in range(start_preview, loc):
+                for i in range(start_preview, min(loc, len(modified_lines))):
                     preview_snippet.append(f"  {i+1:4d} | {modified_lines[i].rstrip()}")
 
                 for i, pl in enumerate(hunk.lines):
@@ -473,8 +474,9 @@ class PatchSurgeon:
                     else:
                         preview_snippet.append(f"  {line_num:4d} | {pl.text.rstrip()}")
 
-                # Após aplicação, mostra 2 linhas seguintes
-                after_start = loc + len(replacement)
+                # v6.3: after_start usa `replacement` (estado PÓS-cirurgia),
+                # não `expected_old` (estado PRÉ). E guard contra IndexError.
+                after_start = min(loc + len(replacement), len(modified_lines))
                 after_end = min(len(modified_lines), after_start + 2)
                 after_preview_lines = [
                     f"  {i+1:4d} | {modified_lines[i].rstrip()}"
