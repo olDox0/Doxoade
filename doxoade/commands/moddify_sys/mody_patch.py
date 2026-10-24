@@ -60,9 +60,9 @@ class FilePatch:
     raw_old_path: str
     raw_new_path: str
     target_path: Optional[Path] = None
+    is_new_file: bool = False          # v6.4
     hunks: List[Hunk] = field(default_factory=list)
     parse_errors: List[str] = field(default_factory=list)
-
 
 # --- PARSER DE DIFF ---
 
@@ -91,9 +91,19 @@ class UnifiedDiffParser:
             if line.startswith('--- ') and i + 1 < n and lines[i + 1].startswith('+++ '):
                 old_raw = line[4:].strip()
                 new_raw = lines[i + 1][4:].strip()
+                
+                # v6.4: detectar criação (--- /dev/null)
+                is_new_file = (old_raw == '/dev/null')
+                
                 target_str = cls.clean_target_path(new_raw if new_raw != '/dev/null' else old_raw)
                 resolved = (project_root / target_str).resolve()
-                current_patch = FilePatch(raw_old_path=old_raw, raw_new_path=new_raw, target_path=resolved)
+                
+                current_patch = FilePatch(
+                    raw_old_path=old_raw,
+                    raw_new_path=new_raw,
+                    target_path=resolved,
+                    is_new_file=is_new_file,   # v6.4
+                )
                 patches.append(current_patch)
                 current_hunk = None
                 i += 2
@@ -311,43 +321,22 @@ class PatchSurgeon:
         return cls._find_removal_anchor(file_lines, hunk, max_offset=max_offset)
 
     @classmethod
-    def _validate_module_compile(
-        cls, content: str, target_path: Path, dry_run: bool = True
-    ) -> Optional[str]:
+    def _validate_module_compile(cls, content: str, target_path: Path) -> Optional[str]:
+        """v6.4: valida via py_compile (equivalente a compileall, sem escrever .pyc)."""
         if not target_path or target_path.suffix.lower() != ".py":
             return None
-        import tempfile
-        import compileall
+        import py_compile, tempfile
         try:
-            # Em dry-run, copia o conteúdo para um arquivo temporário
-            if dry_run:
-                with tempfile.NamedTemporaryFile(
-                    mode='w', suffix='.py', encoding='utf-8', delete=False
-                ) as tmp:
-                    tmp.write(content)
-                    tmp_path = tmp.name
-                try:
-                    success = compileall.compile_file(
-                        tmp_path, quiet=2, force=True
-                    )
-                finally:
-                    try:
-                        Path(tmp_path).unlink()
-                    except OSError:
-                        pass
-                if not success:
-                    return "compileall: falha ao compilar (verifique sintaxe)"
-                return None
-            else:
-                # Em apply, o arquivo já foi escrito; compileall valida in-place
-                success = compileall.compile_file(
-                    str(target_path), quiet=2, force=True
-                )
-                if not success:
-                    return "compileall: falha ao compilar (verifique sintaxe)"
-                return None
+            with tempfile.NamedTemporaryFile(suffix='.py', delete=False, mode='w', encoding='utf-8') as tf:
+                tf.write(content)
+                tf_path = tf.name
+            py_compile.compile(tf_path, doraise=True, cfile=None)
+            Path(tf_path).unlink(missing_ok=True)
+            return None
+        except py_compile.PyCompileError as e:
+            return f"PyCompileError: {e.msg}"
         except Exception as e:
-            return f"Erro em compileall: {e}"
+            return f"compile falhou: {e}"
 
     @classmethod
     def simulate_or_apply(
@@ -368,6 +357,27 @@ class PatchSurgeon:
             "check_analysis": "",
             "checkshot": None,
         }
+
+        if patch.is_new_file:
+            # v6.4: criação de arquivo
+            new_lines = []
+            for hunk in patch.hunks:
+                for pl in hunk.lines:
+                    if pl.kind in (' ', '+'):
+                        new_lines.append(pl.text + '\n')
+            new_content = ''.join(new_lines)
+            # criar diretório pai se não existir
+            if patch.target_path.parent and not patch.target_path.parent.exists():
+                patch.target_path.parent.mkdir(parents=True, exist_ok=True)
+            if apply:
+                with open(patch.target_path, 'w', encoding='utf-8') as f:
+                    f.write(new_content)
+                report["saved"] = True
+            report["details"].append({
+                "hunk": 0, "status": "ARQUIVO CRIADO",
+                "reason": f"{len(new_lines)} linhas escritas",
+            })
+            return report
 
         if not patch.target_path or not patch.target_path.exists():
             report["errors"].append(f"Arquivo alvo não encontrado: {patch.target_path}")
@@ -441,28 +451,69 @@ class PatchSurgeon:
 
             if match_type == 'NONE':
                 removals = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind == '-']
+                expected_old = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind in (' ', '-')]
                 added_lines = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind == '+']
                 already_there = any(al in "".join(working_lines) for al in added_lines if len(al) > 5)
-
+                
+                # v6.4 — diagnóstico estruturado
+                file_lines_for_ctx = working_lines
+                target_idx = max(0, hunk.old_start - 1)
+                ctx_start = max(0, target_idx - 5)
+                ctx_end = min(len(file_lines_for_ctx), target_idx + 15)
+                actual_context = [
+                    f"{i+1:4d} | {file_lines_for_ctx[i].rstrip()}"
+                    for i in range(ctx_start, ctx_end)
+                ]
+                expected_display = [
+                    f"{pl.kind} {hunk.old_start + i:4d} | {pl.text.rstrip()}"
+                    for i, pl in enumerate(hunk.lines) if pl.kind in (' ', '-')
+                ]
+                
                 reason_msg = (
-                    f"Nenhuma linha de remoção encontrada "
-                    f"(streak máximo: {contig_len}/{len(removals)})."
+                    f"Contexto insuficiente: {contig_len} de {len(expected_old)} linhas contíguas.\n"
+                    f"      Arquivo: {rel_name}\n"
+                    f"      Hunk #{idx} (old_start={hunk.old_start})\n"
+                    f"      Esperado (linhas ' ' e '-'):\n"
+                    + "\n".join(f"        {l}" for l in expected_display[:8])
+                    + f"\n      Encontrado (linhas {ctx_start+1}-{ctx_end} do arquivo):\n"
+                    + "\n".join(f"        {l}" for l in actual_context[:15])
                 )
                 if already_there:
-                    reason_msg += f" {Fore.MAGENTA}(As linhas de adição já existem no arquivo?){Fore.YELLOW}"
-
+                    reason_msg += (
+                        f"\n      ⚠ Linhas de adição já existem no arquivo (fix provavelmente aplicado)."
+                    )
+                
+                # v6.4 — sugestões acionáveis
+                suggestions = [
+                    f"doxoade mody show {rel_name} --part {ctx_start+1}-{ctx_end}",
+                ]
+                if already_there:
+                    suggestions.append(f"# Fix provavelmente já aplicado. Verifique antes de re-aplicar.")
+                else:
+                    first_removal = next((pl for pl in hunk.lines if pl.kind == '-'), None)
+                    if first_removal:
+                        suggestions.append(
+                            f"doxoade mody replace {rel_name} "
+                            f"\"{first_removal.text.strip()}\" \"<novo>\""
+                        )
+                reason_msg += "\n      Sugestões:\n" + "\n".join(
+                    f"        • {s}" for s in suggestions
+                )
+                
                 report["details"].append({
-                    "hunk": idx, "status": "REJEITADO", "reason": reason_msg,
-                    "match_type": "NONE", "loc": hunk.old_start
+                    "hunk": idx, "status": "REJEITADO",
+                    "reason": reason_msg,
+                    "match_type": "NONE", "loc": hunk.old_start,
                 })
                 report["hunks_failed"] += 1
             else:
                 report["hunks_applied"] += 1
 
-                # v6.3 — GUARD: preview defensivo contra IndexError
+                # v6.4 — Preview defensivo contra IndexError
+                _mlen = len(modified_lines)
                 start_preview = max(0, loc - 2)
                 preview_snippet = []
-                for i in range(start_preview, min(loc, len(modified_lines))):
+                for i in range(start_preview, min(loc, _mlen)):
                     preview_snippet.append(f"  {i+1:4d} | {modified_lines[i].rstrip()}")
 
                 for i, pl in enumerate(hunk.lines):
@@ -474,10 +525,9 @@ class PatchSurgeon:
                     else:
                         preview_snippet.append(f"  {line_num:4d} | {pl.text.rstrip()}")
 
-                # v6.3: after_start usa `replacement` (estado PÓS-cirurgia),
-                # não `expected_old` (estado PRÉ). E guard contra IndexError.
-                after_start = min(loc + len(replacement), len(modified_lines))
-                after_end = min(len(modified_lines), after_start + 2)
+                # v6.4: after_start usa `replacement` (pós-cirurgia) e é clampado
+                after_start = min(loc + len(replacement), _mlen)
+                after_end = min(_mlen, after_start + 2)
                 after_preview_lines = [
                     f"  {i+1:4d} | {modified_lines[i].rstrip()}"
                     for i in range(after_start, after_end)
@@ -727,6 +777,11 @@ def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_ar
         )
 
         for det in res["details"]:
+            if det["status"] == "ARQUIVO CRIADO":
+                click.echo(
+                    f"   {Fore.GREEN}✔ {det['status']}: "
+                    f"{det['reason']}{Style.RESET_ALL}"
+                )
             is_ok = (
                 "APLICÁVEL" in det["status"]
                 or "IDEMPOTENTE" in det["status"]
