@@ -148,14 +148,28 @@ def _run_dossier_scan(scan_paths, output, include_docs, include_source, compact_
                     # 👈 Passa no_docstrings
                     res = analyze_file_chief(f, root, docs=include_docs, source=include_source, no_docstrings=no_docstrings)
                     if res and isinstance(res, dict) and 'size' in res:
+                        # v6.3 — GUARD 1: fail-safe se analyze não populou source
+                        if include_source and not res.get('source_minified') and not res.get('error'):
+                            try:
+                                with open(f, 'r', encoding='utf-8', errors='ignore') as _fb:
+                                    _raw = _fb.read()
+                                if _raw:
+                                    res['source_minified'] = _raw
+                            except Exception:
+                                pass
+
                         src = res.get('source_minified')
                         if src and (no_comments or no_spaces or no_docstrings or compact_blocks):
-                            res['source_minified'] = minify_code(
+                            _minified = minify_code(
                                 src, f, no_comments, no_spaces, 
                                 no_docstrings=no_docstrings, 
                                 compact_blocks=compact_blocks,
                                 compact_imports=compact_imports
                             )
+                            # v6.3 — GUARD 2: se minify zerou, preserva original
+                            if _minified and _minified.strip():
+                                res['source_minified'] = _minified
+
                         if graph_depth > 0 and f in neighbors_map:
                             res['graph_neighbors'] = [
                                 os.path.relpath(x, root).replace('\\', '/') 

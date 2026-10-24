@@ -192,19 +192,24 @@ def analyze_file_chief(file_path: str, project_root: str, docs=False, source=Fal
     except Exception as e:
         data["error"] = str(e)
 
-    # ─── v6.3: FALLBACK DE SOURCE (garante que -s nunca perca código) ────
-    # Se `source=True` foi pedido mas o analyzer especializado não populou
-    # `source_minified` (comum em C/C++ moderno, HTML/CSS exótico), injeta
-    # o conteúdo bruto lido. Isso é idempotente: se `source_minified` já
-    # estiver presente, não faz nada.
-    if source and "source_minified" not in data and "error" not in data:
-        try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as _fb:
-                _raw = _fb.read()
-            if _raw:
-                data["source_minified"] = _raw
-        except Exception:
-            pass
+    # ─── v6.4: FALLBACK DE SOURCE (usa content já em memória) ─────────────
+    # Se source=True foi pedido mas o analyzer especializado não populou
+    # source_minified, usa o `content` já lido (sem re-abrir arquivo).
+    # Isso cobre o caso de exceção parcial no bloco `if source:`.
+    if source and "source_minified" not in data:
+        # `content` está no escopo local se o `with open` rodou
+        _content = locals().get('content')
+        if _content:
+            data["source_minified"] = _content
+        else:
+            # Fallback derradeiro: re-abre arquivo
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as _fb:
+                    _raw = _fb.read()
+                if _raw:
+                    data["source_minified"] = _raw
+            except Exception:
+                pass
 
     return data
     
