@@ -97,6 +97,7 @@ class DoxoadeLazyGroup(click.Group):
             'linux': 'doxoade.commands.linux_systems.linux_cmd:linux_group',
             'lan-git': 'doxoade.commands.lan_git.cli_lan_git:lan_git_cli',
             # lite xl sys
+            'lua': 'doxoade.commands.lua_cmd.lua_commands:lua_group',
             'doxly': 'doxoade.commands.lite_xl_systems.cmd_lite_xl:lite_xl_group',
             'lite-xl': 'doxoade.commands.lite_xl_systems.cmd_lite_xl:cmd_open',
             'log': 'doxoade.commands.utils:log',
