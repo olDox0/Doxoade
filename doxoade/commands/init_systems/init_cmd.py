@@ -1406,6 +1406,7 @@ def _inject_dna(project_path: Path, project_name: str) -> list[str]:
 
 def _forge_venv(project_path: Path, install_editable: bool = True, install_global: bool = True) -> list[str]:
     venv_path = project_path / 'venv'
+    import time
     try:
         subprocess.run([sys.executable, '-m', 'venv', str(venv_path)], check=True, capture_output=True, text=True)
         click.echo(f"   {Fore.GREEN}✔{Style.RESET_ALL} Venv isolado criado em: {Fore.CYAN}venv/{Style.RESET_ALL}")
@@ -1441,6 +1442,35 @@ def _forge_macrothon(project_path: Path, pyproject_path: Path, project_name: str
     click.echo(f"   {Fore.GREEN}✔{Style.RESET_ALL} DNA Macrothon injetado.")
     return [str(manifest_path)]
 
+def _generate_metalcraft_embark_doc(project_name: str) -> str:
+    return f'''# ⚒️ Embarcação Metalcraft — Silo `{project_name}`
+
+Documento de embarque da forja C/C++ no Silo `{project_name}`, gerado por
+`doxoade init --metalcraft`.
+
+## 1. O que foi embarcado
+
+| Caminho | Papel |
+| :--- | :--- |
+| `metalcraft.toml` | Contrato da forja (compilador, flags, targets) |
+| `src/native/main.c` | Entrypoint nativo de exemplo |
+| `bin/` | Artefatos compilados (não versionar) |
+| `.doxoade/metalcraft/` | Cache de builds + fontes instrumentados (Sotéria) |
+
+## 2. Uso
+
+```bash
+doxoade metal setup-tools   # 1. detectar/baixar toolchain
+doxoade metal build         # 2. compilar
+doxoade metal run           # 3. executar com Sotéria
+doxoade metal audit-bin     # 4. inspecionar DNA do binário
+```
+
+## 3. Integração com Lua
+
+Se o Silo embarcou `--lua`, funções C podem ser expostas via
+`lua_sys/scripts/bridge.lua`. Contrato em `metalcraft.toml` → `[targets]`.
+'''
 
 def _forge_metalcraft(project_path: Path, project_name: str) -> list[str]:
     toml_path = project_path / 'metalcraft.toml'
@@ -1448,8 +1478,15 @@ def _forge_metalcraft(project_path: Path, project_name: str) -> list[str]:
     main_c = project_path / 'src' / 'native' / 'main.c'
     main_c.parent.mkdir(parents=True, exist_ok=True)
     main_c.write_text(_generate_main_c(project_name), encoding='utf-8')
-    click.echo(f"   {Fore.GREEN}✔{Style.RESET_ALL} metalcraft.toml e main.c forjados.")
-    return [str(toml_path), str(main_c)]
+
+    # NOVO: doc central de embarque
+    docs_dir = project_path / "docs"
+    docs_dir.mkdir(exist_ok=True)
+    doc_path = docs_dir / "doxoade_metalcraft.md"
+    doc_path.write_text(_generate_metalcraft_embark_doc(project_name), encoding="utf-8")
+
+    click.echo(f"   {Fore.GREEN}✔{Style.RESET_ALL} metalcraft.toml, main.c e docs/doxoade_metalcraft.md forjados.")
+    return [str(toml_path), str(main_c), str(doc_path)]
 
 
 def _forge_architecture(project_path: Path, architecture: str) -> list[str]:
@@ -1493,6 +1530,7 @@ def _awaken_up(affected_files: list[str]) -> None:
 @click.argument('project_name', required=False)
 @click.option('--remote', help="URL para publicação automática no GitHub.")
 @click.option('--metalcraft', '-mc', is_flag=True, help="Embarca a Forja C (Metalcraft) no Silo.")
+@click.option('--lua', '-lua', is_flag=True, help="Embarca runtime Lua (lua_sys/) com docs de embarque.")
 @click.option('--macrothon', '-mt', is_flag=True, help="Prepara o Silo para orquestração Macrothon (Houses).")
 @click.option('--house', '-h', is_flag=True, help="Transforma o Silo em uma House Macrothon.")
 @click.option('--architecture', '-a', type=click.Path(exists=True), help="Blueprint de topologia.")
@@ -1516,7 +1554,8 @@ def _awaken_up(affected_files: list[str]) -> None:
 @click.pass_context
 def init(ctx, project_name, desc, deps, alias, remote, metalcraft, macrothon, house, 
          architecture, no_venv, no_git, no_global, force, up, dna_diff, dna_update,
-         port_commands, show_snippets, apply_changes, force_dry_run, cmd_prefix, setup_flag, lan_git_flag):
+         port_commands, show_snippets, apply_changes, force_dry_run, cmd_prefix,
+         setup_flag, lan_git_flag, lua):
     """🚀 Nexus Project Genesis: Forja ou aprimora Silos Soberanos."""
 
     # 1. Caso Especial: Injeção do LAN Git em Silo existente
@@ -1606,6 +1645,10 @@ def init(ctx, project_name, desc, deps, alias, remote, metalcraft, macrothon, ho
         if metalcraft:
             affected_files += _forge_metalcraft(project_path, project_name)
 
+        if lua:
+            from doxoade.commands.lua_cmd.lua_commands import forge_lua_system
+            affected_files += forge_lua_system(project_path, project_name)
+
         if architecture:
             affected_files += _forge_architecture(project_path, architecture)
 
@@ -1616,3 +1659,10 @@ def init(ctx, project_name, desc, deps, alias, remote, metalcraft, macrothon, ho
 
         click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}✅ Silo '{project_name}' forjado com sucesso!{Style.RESET_ALL}")
         click.echo(f"   🚀 Entre no Silo: {Fore.YELLOW}cd {project_name}{Style.RESET_ALL}")
+        if lua:
+            click.echo(f"   🐍 Runtime Lua: {Fore.YELLOW}python -m {project_name}.lua_sys.runner --install{Style.RESET_ALL}")
+            click.echo(f"      Docs: {Fore.CYAN}docs/doxoade_lua.md{Style.RESET_ALL}")
+        if metalcraft:
+            click.echo(f"   ⚒️  Forja C:  {Fore.YELLOW}doxoade metal build{Style.RESET_ALL}")
+            click.echo(f"      Docs: {Fore.CYAN}docs/doxoade_metalcraft.md{Style.RESET_ALL}")
+

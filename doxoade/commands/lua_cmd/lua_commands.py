@@ -631,18 +631,27 @@ def cmd_sys_init(force: bool, apply: bool):
     if not apply:
         click.echo(f"  {Fore.YELLOW}🔍 DRY-RUN (nenhuma alteração gravada){Style.RESET_ALL}")
         click.echo(f"  {Fore.WHITE}Arquivos que serão forjados:{Style.RESET_ALL}")
-        for rel in (
-            "lua_sys/lua_sys.toml",
-            "lua_sys/README.md",
-            "lua_sys/.gitignore",
-            "lua_sys/runner.py",
-            "lua_sys/scripts/init.lua",
-            "lua_sys/scripts/main.lua",
-            "docs/doxoade_lua.md",
-        ):
+        fixed = [
+            "lua_sys/lua_sys.toml", "lua_sys/README.md", "lua_sys/.gitignore",
+            "lua_sys/runner.py", "lua_sys/scripts/init.lua",
+            "lua_sys/scripts/main.lua", "docs/doxoade_lua.md",
+        ]
+        for rel in fixed:
             fp = project_path / rel
             status = f"{Fore.LIGHTBLACK_EX}(existe){Style.RESET_ALL}" if fp.exists() else f"{Fore.GREEN}(novo){Style.RESET_ALL}"
             click.echo(f"    • {rel} {status}")
+
+        # 8º condicional: pyproject.toml (só se a seção não existir)
+        pyproject = project_path / "pyproject.toml"
+        if pyproject.exists():
+            content = pyproject.read_text(encoding="utf-8")
+            if "[tool.doxoade.lua]" in content:
+                click.echo(f"    • pyproject.toml {Fore.LIGHTBLACK_EX}(seção [tool.doxoade.lua] já presente — não altera){Style.RESET_ALL}")
+            else:
+                click.echo(f"    • pyproject.toml {Fore.GREEN}(anexa [tool.doxoade.lua]){Style.RESET_ALL}")
+        else:
+            click.echo(f"    • pyproject.toml {Fore.LIGHTBLACK_EX}(ausente — não cria){Style.RESET_ALL}")
+
         click.echo(f"\n  {Fore.YELLOW}💡 Use --apply para efetivar.{Style.RESET_ALL}\n")
         return
 

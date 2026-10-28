@@ -281,23 +281,52 @@ def _view_align(text, width):
     return text + (" " * max(0, padding))
 
 
-def _find_production_source(filename: str) -> Optional[Path]:
-    if not filename or len(filename) < 3 or filename in ["N/A", "NATIVO"]: return None
-    p = Path(filename)
-    if p.exists(): return p
-    try:
-        candidates = [c for c in Path('.').rglob(p.name) if not any(x in str(c).lower() for x in ['.doxoade', 'venv', 'build', 'shadow'])]
-        return candidates[0] if candidates else None
-    except Exception as e:
-        import sys as _dox_sys, os as _dox_os
-        from traceback import print_tb as exc_trace
-        exc_obj, exc_tb = _dox_sys.exc_info()
-        f_name = _dox_os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        line_n = exc_tb.tb_lineno
-        exc_trace(exc_tb)
-        print(f"\033[1;34m[ FORENSIC ]\033[0m \033[1mFile: {f_name} | L: {line_n} | Func: _find_production_source\033[0m")
-        print(f"\033[31m  ■ Type: {type(e).__name__} | Value: {e}\033[0m")
+_FIND_SOURCE_CACHE: dict[str, Optional[Path]] = {}
 
+def _find_production_source(filename: str) -> Optional[Path]:
+    if not filename or len(filename) < 3 or filename in ["N/A", "NATIVO"]:
+        return None
+    
+    if filename in _FIND_SOURCE_CACHE:
+        return _FIND_SOURCE_CACHE[filename]
+    
+    p = Path(filename)
+    if p.exists():
+        _FIND_SOURCE_CACHE[filename] = p
+        return p
+    
+    # [FIX] Walk limitado (profundidade 4) + skip de dirs pesados
+    skip_dirs = {
+        ".doxoade", "venv", ".venv", "build", "dist",
+        "__pycache__", "shadow", "node_modules", ".git",
+        "thirdparty", "site-packages", ".pytest_cache",
+    }
+    base = Path.cwd()
+    
+    def _walk(base: Path, depth: int = 0, max_depth: int = 4):
+        if depth > max_depth:
+            return
+        try:
+            for entry in base.iterdir():
+                if entry.is_dir():
+                    if entry.name.lower() in skip_dirs:
+                        continue
+                    yield from _walk(entry, depth + 1, max_depth)
+                elif entry.name == p.name:
+                    yield entry
+        except (PermissionError, OSError, KeyboardInterrupt):
+            return
+    
+    try:
+        candidates = list(_walk(base))
+    except KeyboardInterrupt:
+        _FIND_SOURCE_CACHE[filename] = None
+        return None
+    
+    result = candidates[0] if candidates else None
+    _FIND_SOURCE_CACHE[filename] = result
+    return result
+    
 def get_code_context(filepath: str, linenum: int, context_lines: int = 2) -> Optional[str]:
     path = _find_production_source(filepath)
     if not path or linenum <= 0: return None
@@ -553,9 +582,16 @@ def _render_tactical_dossier(d: dict):
 def activate_protocol(error_text: str, exit_code: int = None, trace=None, **kwargs): # <-- ADICIONADO **kwargs
     """Protocolo Lazarus: Menu de Intervenção Imediata (Mode-Aware)."""
     from .tools.telemetry_tools.logger import chief_heartbeat
-    import sys as _sys
-    import os as _os
-    import re
+    import sys as _sys, os as _os, re
+    context_vars = kwargs.get('context', {})
+    trace_text = _read_trace(trace) or error_text or ''
+    if not error_text:
+        return
+    
+    # [FIX] KeyboardInterrupt não é crash — não ativar dossiê forense
+    if "KeyboardInterrupt" in str(error_text):
+        print(f"\n\x1b[33m[!] Interrompido pelo usuário.\x1b[0m")
+        return
 
     # 🛑 BLINDAGEM LAZARUS: Se o motor foi desligado, aborta imediatamente
     if _os.environ.get('DOXOADE_RESCUE') == '0':

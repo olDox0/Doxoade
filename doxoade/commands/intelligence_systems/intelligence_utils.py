@@ -4,13 +4,21 @@
 Support_Utils para Intelligence (PASC 1.2 / MPoT 17).
 Foco: Extração de Metadados de Documentação e Análise de Fluxo de IO.
 """
-import os
-import ast
-import re
-import sys
-import json
+import os, ast, re, sys, json
 from typing import List, Dict, Any
 from html.parser import HTMLParser
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VALID_EXTS — Fonte canônica de extensões suportadas pelo motor Nexus.
+# Consolidado aqui para eliminar divergência entre intelligence.py e
+# intelligence_engine.py (o engine já reconhecia .asm; o intelligence.py não).
+# ─────────────────────────────────────────────────────────────────────────────
+VALID_EXTS = (
+    '.py', '.c', '.cpp', '.h', '.hpp',
+    '.html', '.css', '.js', '.jsx', '.ts', '.tsx',
+    '.pyd', '.so', '.toml', '.md', '.s', '.asm',
+    '.json', '.txt', '.lua',
+)
 
 # Padrões de IO para busca via AST
 IO_KEYWORDS = {

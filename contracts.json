@@ -1,0 +1,3548 @@
+{
+  "module": "doxoade.commands.git_systems.git_search",
+  "contracts": {
+    "git_search": {
+      "module": "doxoade.commands.git_systems.git_search",
+      "line": 672,
+      "params": [
+        {
+          "name": "ctx",
+          "type": null,
+          "default": null
+        },
+        {
+          "name": "query",
+          "type": "Optional[str]",
+          "default": null
+        },
+        {
+          "name": "language",
+          "type": "Optional[str]",
+          "default": null
+        },
+        {
+          "name": "limit",
+          "type": "int",
+          "default": null
+        },
+        {
+          "name": "sort",
+          "type": "str",
+          "default": null
+        },
+        {
+          "name": "min_stars",
+          "type": "int",
+          "default": null
+        },
+        {
+          "name": "updated_after",
+          "type": "Optional[str]",
+          "default": null
+        },
+        {
+          "name": "liberal",
+          "type": "bool",
+          "default": null
+        },
+        {
+          "name": "exclude_copyleft",
+          "type": "bool",
+          "default": null
+        },
+        {
+          "name": "output_json",
+          "type": "bool",
+          "default": null
+        },
+        {
+          "name": "clone_index",
+          "type": "Optional[int]",
+          "default": null
+        },
+        {
+          "name": "open_browser",
+          "type": "bool",
+          "default": null
+        },
+        {
+          "name": "show_readme",
+          "type": "bool",
+          "default": null
+        },
+        {
+          "name": "do_install",
+          "type": "bool",
+          "default": null
+        },
+        {
+          "name": "do_login",
+          "type": "bool",
+          "default": null
+        },
+        {
+          "name": "do_setup",
+          "type": "bool",
+          "default": null
+        },
+        {
+          "name": "do_check",
+          "type": "bool",
+          "default": null
+        },
+        {
+          "name": "auto_yes",
+          "type": "bool",
+          "default": null
+        },
+        {
+          "name": "target_repo",
+          "type": "Optional[str]",
+          "default": null
+        },
+        {
+          "name": "do_tree",
+          "type": "bool",
+          "default": null
+        },
+        {
+          "name": "do_outline",
+          "type": "bool",
+          "default": null
+        },
+        {
+          "name": "file_path",
+          "type": "Optional[str]",
+          "default": null
+        },
+        {
+          "name": "path_filter",
+          "type": "Optional[str]",
+          "default": null
+        },
+        {
+          "name": "branch",
+          "type": "Optional[str]",
+          "default": null
+        },
+        {
+          "name": "no_cache",
+          "type": "bool",
+          "default": null
+        }
+      ],
+      "returns": null,
+      "raises": [],
+      "is_async": false,
+      "required_args": 25
+    }
+  },
+  "callers": {
+    "which": [
+      {
+        "caller": "_gh_installed",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 55,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_check_gh_available",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 59,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_detect_package_manager",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 311,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_do_check",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 382,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "run": [
+      {
+        "caller": "_check_gh_available",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 68,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "capture_output",
+          "text",
+          "timeout"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_run_gh_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 147,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "capture_output",
+          "text",
+          "timeout",
+          "encoding",
+          "errors"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_clone_result",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 246,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "capture_output",
+          "text",
+          "timeout"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_install_gh",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 333,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "text",
+          "timeout"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_login_gh",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 352,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "capture_output",
+          "text",
+          "timeout"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_login_gh",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 369,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "env"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_do_check",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 386,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "capture_output",
+          "text",
+          "timeout"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_do_check",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 403,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "capture_output",
+          "text",
+          "timeout"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_get_default_branch",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 425,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "capture_output",
+          "text",
+          "timeout"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_fetch_remote_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 459,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "capture_output",
+          "text",
+          "timeout"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_fetch_remote_file",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 492,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "capture_output",
+          "text",
+          "timeout"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 851,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "capture_output",
+          "text",
+          "timeout"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "join": [
+      {
+        "caller": "_build_license_filter",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 89,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_build_search_query",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 107,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_install_gh",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 327,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 561,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 561,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 803,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "strip": [
+      {
+        "caller": "_build_search_query",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 99,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_build_search_query",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 99,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_run_gh_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 156,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_shorten",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 169,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_clone_result",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 253,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_write_ref_metadata",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 273,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_do_check",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 408,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_get_default_branch",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 431,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_get_default_branch",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 432,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_fetch_remote_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 466,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_fetch_remote_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 469,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_fetch_remote_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 470,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_fetch_remote_file",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 499,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_fetch_remote_file",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 501,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_extract_python_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 520,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_extract_python_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 520,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "append": [
+      {
+        "caller": "_build_search_query",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 101,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_build_search_query",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 103,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_build_search_query",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 105,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_filter_copyleft",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 118,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_fetch_remote_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 472,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_extract_python_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 521,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 562,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "lower": [
+      {
+        "caller": "_build_search_query",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 101,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_filter_copyleft",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 115,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 193,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_detect_package_manager",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 289,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "get": [
+      {
+        "caller": "_filter_copyleft",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 114,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_filter_copyleft",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 115,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_filter_copyleft",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 115,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 187,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 188,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 189,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 190,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 191,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 191,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 192,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 200,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 209,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_write_ref_metadata",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 265,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_write_ref_metadata",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 267,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_write_ref_metadata",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 268,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_write_ref_metadata",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 269,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_write_ref_metadata",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 269,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_write_ref_metadata",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 270,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_write_ref_metadata",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 271,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 543,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 544,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 559,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 561,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 572,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 574,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 584,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 842,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 858,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 859,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 862,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 862,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 864,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 864,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "any": [
+      {
+        "caller": "_filter_copyleft",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 116,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 194,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 196,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "str": [
+      {
+        "caller": "_run_gh_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 140,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_clone_result",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 247,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_write_ref_metadata",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 261,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 706,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 729,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 777,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "extend": [
+      {
+        "caller": "_run_gh_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 145,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "loads": [
+      {
+        "caller": "_run_gh_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 158,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_fetch_remote_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 452,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_fetch_remote_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 472,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 857,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "replace": [
+      {
+        "caller": "_shorten",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 169,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_clone_result",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 239,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_cache_path",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 439,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_fetch_remote_file",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 501,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "len": [
+      {
+        "caller": "_shorten",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 170,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 552,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 558,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 568,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 594,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 606,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 620,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 756,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 756,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 813,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 815,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 816,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 827,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 828,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 873,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "echo": [
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 175,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 176,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 178,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 183,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 184,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 201,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 211,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 212,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 213,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 214,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 215,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_clone_result",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 244,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_install_gh",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 326,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_install_gh",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 327,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_install_gh",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 331,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_login_gh",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 361,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_login_gh",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 362,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_login_gh",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 363,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_login_gh",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 364,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_do_check",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 381,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_do_check",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 384,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_do_check",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 389,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_do_check",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 393,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_do_check",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 396,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_do_check",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 397,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_do_check",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 399,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_do_check",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 400,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_do_check",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 406,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_do_check",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 408,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_do_check",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 410,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_do_check",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 411,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_do_check",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 414,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_fetch_remote_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 466,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_fetch_remote_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 476,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_fetch_remote_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 479,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_fetch_remote_file",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 499,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_fetch_remote_file",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 504,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 534,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 545,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 565,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 576,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 591,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 594,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 595,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 601,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 607,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 612,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 618,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 620,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 710,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 716,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 726,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 732,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 738,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 739,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 740,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 742,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 743,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 751,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 752,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 754,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 755,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 756,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 779,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 782,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 787,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 797,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 798,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 799,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 802,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 804,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 808,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 816,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 819,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 828,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 834,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 838,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 839,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 844,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 849,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 858,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 861,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 863,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 865,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 867,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 869,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "enumerate": [
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 186,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 753,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_shorten": [
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 187,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 189,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 191,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_results_table",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 211,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "mkdir": [
+      {
+        "caller": "_ensure_references_dir",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 224,
+        "args_passed": 0,
+        "kwargs_passed": [
+          "parents",
+          "exist_ok"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_cache_path",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 441,
+        "args_passed": 0,
+        "kwargs_passed": [
+          "parents",
+          "exist_ok"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "exists": [
+      {
+        "caller": "_ensure_references_dir",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 228,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_clone_result",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 241,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_fetch_remote_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 450,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "read_text": [
+      {
+        "caller": "_ensure_references_dir",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 229,
+        "args_passed": 0,
+        "kwargs_passed": [
+          "encoding",
+          "errors"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_fetch_remote_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 452,
+        "args_passed": 0,
+        "kwargs_passed": [
+          "encoding"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "splitlines": [
+      {
+        "caller": "_ensure_references_dir",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 230,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_do_check",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 388,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_do_check",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 407,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_fetch_remote_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 469,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_extract_python_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 520,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 753,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 756,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "open": [
+      {
+        "caller": "_ensure_references_dir",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 231,
+        "args_passed": 2,
+        "kwargs_passed": [
+          "encoding"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 845,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "write": [
+      {
+        "caller": "_ensure_references_dir",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 232,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "write_text": [
+      {
+        "caller": "_ensure_references_dir",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 234,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "encoding"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_write_ref_metadata",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 277,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "encoding"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_fetch_remote_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 483,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "encoding"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_run_git_command": [
+      {
+        "caller": "_write_ref_metadata",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 259,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "capture_output",
+          "silent_fail",
+          "cwd"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "isoformat": [
+      {
+        "caller": "_write_ref_metadata",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 272,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "now": [
+      {
+        "caller": "_write_ref_metadata",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 272,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "dumps": [
+      {
+        "caller": "_write_ref_metadata",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 278,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "indent",
+          "ensure_ascii"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_fetch_remote_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 483,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "ensure_ascii"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 819,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "indent",
+          "ensure_ascii"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "system": [
+      {
+        "caller": "_detect_package_manager",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 289,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "split": [
+      {
+        "caller": "_detect_package_manager",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 312,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 557,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 571,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_gh_installed": [
+      {
+        "caller": "_install_gh",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 317,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_install_gh",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 340,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_login_gh",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 349,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_detect_package_manager": [
+      {
+        "caller": "_install_gh",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 319,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_do_check",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 394,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "confirm": [
+      {
+        "caller": "_install_gh",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 329,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_login_gh",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 359,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "copy": [
+      {
+        "caller": "_login_gh",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 365,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_cache_path": [
+      {
+        "caller": "_fetch_remote_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 449,
+        "args_passed": 3,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "isinstance": [
+      {
+        "caller": "_fetch_remote_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 453,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_extract_python_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 517,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_extract_python_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 518,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "decode": [
+      {
+        "caller": "_fetch_remote_file",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 502,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "errors"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "b64decode": [
+      {
+        "caller": "_fetch_remote_file",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 502,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "parse": [
+      {
+        "caller": "_extract_python_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 512,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "walk": [
+      {
+        "caller": "_extract_python_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 516,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "get_docstring": [
+      {
+        "caller": "_extract_python_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 519,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "rstrip": [
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 539,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 552,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 568,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 587,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "startswith": [
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 540,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 588,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "sum": [
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 543,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 544,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "lstrip": [
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 552,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 568,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "setdefault": [
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 562,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "sorted": [
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 564,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 566,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "key"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "keys": [
+      {
+        "caller": "_render_tree",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 564,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "endswith": [
+      {
+        "caller": "_render_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 584,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_fetch_remote_file": [
+      {
+        "caller": "_render_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 599,
+        "args_passed": 3,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 747,
+        "args_passed": 3,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_extract_python_outline": [
+      {
+        "caller": "_render_outline",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 603,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "Path": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 699,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "getcwd": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 699,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "exit": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 703,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 720,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 727,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 734,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 750,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 764,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 780,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 789,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 810,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 829,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 836,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_do_check": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 703,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "ExecutionLogger": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 706,
+        "args_passed": 3,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 729,
+        "args_passed": 3,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 777,
+        "args_passed": 3,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_install_gh": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 709,
+        "args_passed": 0,
+        "kwargs_passed": [
+          "auto_yes"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "add_finding": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 713,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 719,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 733,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 749,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 763,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 771,
+        "args_passed": 2,
+        "kwargs_passed": [
+          "category"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 788,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 809,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 835,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 871,
+        "args_passed": 2,
+        "kwargs_passed": [
+          "category"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_login_gh": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 715,
+        "args_passed": 0,
+        "kwargs_passed": [
+          "auto_yes"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_check_gh_available": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 730,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 785,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_get_default_branch": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 737,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_fetch_remote_tree": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 760,
+        "args_passed": 3,
+        "kwargs_passed": [
+          "use_cache"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_render_tree": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 767,
+        "args_passed": 3,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_render_outline": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 769,
+        "args_passed": 4,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "get_help": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 782,
+        "args_passed": 0,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_build_license_filter": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 791,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_build_search_query": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 792,
+        "args_passed": 0,
+        "kwargs_passed": [
+          "query",
+          "language",
+          "min_stars",
+          "updated_after",
+          "exclude_copyleft"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_run_gh_search": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 806,
+        "args_passed": 4,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_filter_copyleft": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 814,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_render_results_table": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 822,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_ensure_references_dir": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 831,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_clone_result": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 832,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "_write_ref_metadata": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 837,
+        "args_passed": 2,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "command": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 627,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "argument": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 628,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "required"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "option": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 629,
+        "args_passed": 2,
+        "kwargs_passed": [
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 630,
+        "args_passed": 2,
+        "kwargs_passed": [
+          "default",
+          "type",
+          "show_default",
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 632,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "type",
+          "default",
+          "show_default",
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 634,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "default",
+          "type",
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 635,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 636,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "default",
+          "show_default",
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 638,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "default",
+          "show_default",
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 640,
+        "args_passed": 2,
+        "kwargs_passed": [
+          "is_flag",
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 641,
+        "args_passed": 3,
+        "kwargs_passed": [
+          "type",
+          "default",
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 643,
+        "args_passed": 2,
+        "kwargs_passed": [
+          "is_flag",
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 645,
+        "args_passed": 2,
+        "kwargs_passed": [
+          "is_flag",
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 647,
+        "args_passed": 2,
+        "kwargs_passed": [
+          "is_flag",
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 649,
+        "args_passed": 2,
+        "kwargs_passed": [
+          "is_flag",
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 651,
+        "args_passed": 2,
+        "kwargs_passed": [
+          "is_flag",
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 653,
+        "args_passed": 2,
+        "kwargs_passed": [
+          "is_flag",
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 655,
+        "args_passed": 3,
+        "kwargs_passed": [
+          "is_flag",
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 657,
+        "args_passed": 2,
+        "kwargs_passed": [
+          "default",
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 659,
+        "args_passed": 2,
+        "kwargs_passed": [
+          "is_flag",
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 661,
+        "args_passed": 2,
+        "kwargs_passed": [
+          "is_flag",
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 663,
+        "args_passed": 2,
+        "kwargs_passed": [
+          "default",
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 665,
+        "args_passed": 2,
+        "kwargs_passed": [
+          "default",
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 667,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "default",
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      },
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 669,
+        "args_passed": 1,
+        "kwargs_passed": [
+          "is_flag",
+          "help"
+        ],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ],
+    "Choice": [
+      {
+        "caller": "git_search",
+        "module": "doxoade.commands.git_systems.git_search",
+        "line": 632,
+        "args_passed": 1,
+        "kwargs_passed": [],
+        "has_star_args": false,
+        "has_star_kwargs": false
+      }
+    ]
+  },
+  "violations": []
+}

@@ -90,7 +90,7 @@ este é o novo protocolo simplificado e sucinto de desenvolveimento do doxoade. 
   7.2. Registrar problemas é adequando e desejado.
   7.3. documentar no Docs/Research é o diretorio padrão doxoade.
   7.4. por questão de dinamismo é permitido registrar pesquisa no blitzplan.
-  
+
 
 ## conceitos
 
@@ -183,3 +183,23 @@ def cmd_deploy_sandbox(launch, exorcise):
         print(f"\n{Fore.RED}✖ Deploy falhou: {result['error']}{Fore.RESET}")
 
 ´´´
+
+exemplo de arquitetura simples de python
+projeto/
+  commands/
+    exemplo_sys/
+      cmd_exemplo.py
+  tools/
+    err_info.py
+    elevation.py
+    login.py
+  tests/
+    test_exemplo.py
+  docs/
+    history/
+      vol1_exemplo.md
+  setup_install.py
+  README
+  UPDATES ou CHAGELOG.md
+
+isso é um exemplo bem basico, e variavel, porque num projeto C ou lua a coisa muda e pode ter bin e outros sitemas complementares importantes.

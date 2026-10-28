@@ -76,6 +76,7 @@ class DoxoadeLazyGroup(click.Group):
             'git': 'doxoade.commands.git_systems.git_cmd:git_group',
             'git-clean': 'doxoade.commands.git_systems.git_clean:git_clean',
             'git-new': 'doxoade.commands.git_systems.git_new:git_new',
+            'git-search': 'doxoade.commands.git_systems.git_search:git_search',
             'global-health': 'doxoade.commands.global_health:global_health',
             'gui': 'doxoade.commands.gui_cmd:gui_group',
             'guicheck': 'doxoade.commands.guicheck:guicheck',

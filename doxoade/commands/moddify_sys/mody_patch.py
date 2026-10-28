@@ -460,6 +460,7 @@ class PatchSurgeon:
         apply: bool = False,
         root: Path = None,
         run_checkshot: bool = True,
+        force: bool = False,   # ← NOVO
     ) -> Dict:
         report = {
             "target": str(patch.target_path),
@@ -511,7 +512,19 @@ class PatchSurgeon:
         applied_ranges = []
 
         for idx, hunk in enumerate(patch.hunks, start=1):
-            replacement = [pl.text + '\n' for pl in hunk.lines if pl.kind in (' ', '+')]
+            # v6.6 — FIX: replacement deve conter APENAS linhas após a última
+            # remoção (contexto de fechamento) + adições. Linhas de contexto
+            # ANTES da primeira remoção já estão no arquivo e NÃO devem ser
+            # reinseridas (causariam duplicação).
+            last_minus_idx = -1
+            for _i, _pl in enumerate(hunk.lines):
+                if _pl.kind == '-':
+                    last_minus_idx = _i
+            replacement = [
+                pl.text + '\n'
+                for _i, pl in enumerate(hunk.lines)
+                if _i > last_minus_idx and pl.kind in (' ', '+')
+            ]
             expected_replacement_block = [
                 cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind in (' ', '+')
             ]
@@ -571,7 +584,40 @@ class PatchSurgeon:
                 expected_old = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind in (' ', '-')]
                 added_lines = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind == '+']
                 already_there = any(al in "".join(working_lines) for al in added_lines if len(al) > 5)
-                
+
+                # v6.5 — Destacar linhas de adição que já existem no arquivo
+                # (evidência de que o patch já foi aplicado ou o arquivo mudou)
+                suspicious_lines = []
+                if already_there:
+                    for al in added_lines:
+                        if len(al) < 5:
+                            continue
+                        for i, line in enumerate(working_lines):
+                            if cls._normalize_line(line) == al:
+                                suspicious_lines.append((i + 1, line.rstrip()))
+                                break
+
+                # v6.7 — DETECÇÃO DE DIVERGÊNCIA: linhas de remoção que
+                # "quase casam" no arquivo (ex: comentadas, com espaço extra,
+                # ou com texto adicionado). Destacar em amarelo.
+                divergence_lines = []
+                for rem in removals:
+                    if len(rem) < 5:
+                        continue
+                    for i, line in enumerate(working_lines):
+                        norm_line = cls._normalize_line(line)
+                        # Match exato: já coberto por find_hunk_location
+                        if norm_line == rem:
+                            continue
+                        # Match parcial: um contém o outro
+                        if (rem in norm_line) or (norm_line in rem):
+                            divergence_lines.append({
+                                "line": i + 1,
+                                "patch_expected": rem,
+                                "file_actual": line.rstrip(),
+                            })
+                            break
+
                 # v6.4 — diagnóstico estruturado
                 file_lines_for_ctx = working_lines
                 target_idx = max(0, hunk.old_start - 1)
@@ -606,6 +652,16 @@ class PatchSurgeon:
                     reason_msg += (
                         f"\n      ⚠ Linhas de adição já existem no arquivo (fix provavelmente aplicado)."
                     )
+
+                if suspicious_lines:
+                    reason_msg += f"\n      🔍 Linhas suspeitas (já presentes no arquivo):\n"
+                    for ln, txt in suspicious_lines[:5]:
+                        reason_msg += f"        L{ln}: {txt}\n"
+
+                if divergence_lines:
+                    reason_msg += f"\n      🔶 Linhas com divergência (patch esperava vs. arquivo tem):\n"
+                    for d in divergence_lines[:5]:
+                        reason_msg += f"        L{d['line']}: arquivo='{d['file_actual']}' | patch='{d['patch_expected']}'\n"
                 
                 # v6.4 — sugestões acionáveis
                 suggestions = [
@@ -669,24 +725,43 @@ class PatchSurgeon:
                     "preview_snippet": "\n".join(preview_snippet)
                 })
 
-                # Aplica: remove expected_old, insere replacement
-                # (o expected_old pode ter sido parcialmente casado — usamos
-                #  o comprimento do replacement para saber o que inserir,
-                #  e apagamos expected_old a partir de `loc`).
+                # Aplica: remove expected_old, insere replacement.
+                # v6.5 — FIX (C2b): se o match foi PARTIAL, o `find_hunk_location`
+                # já nos disse quantas linhas contíguas realmente casaram
+                # (`contig_len`). Usar `expected_old_len` do corpo removeria
+                # linhas a mais e desalinharia o arquivo. Usamos `contig_len`
+                # como o comprimento efetivo a remover.
                 expected_old_len = sum(1 for pl in hunk.lines if pl.kind in (' ', '-'))
+                if match_type == 'PARTIAL':
+                    effective_old_len = contig_len
+                else:
+                    effective_old_len = expected_old_len
+
+                # v6.5 — Aviso quando PARTIAL remove menos que o corpo pedia
+                if match_type == 'PARTIAL' and contig_len < expected_old_len:
+                    report["details"].append({
+                        "hunk": idx,
+                        "status": "AVISO (PARTIAL)",
+                        "warning": (
+                            f"Corpo pedia {expected_old_len} linhas, "
+                            f"mas só {contig_len} casaram. "
+                            f"Removendo {contig_len} linhas (do contig_len)."
+                        ),
+                        "match_type": "PARTIAL_WARN",
+                    })
+
                 # v6.4.2 — GUARD: detectar sobreposição de hunks
                 new_start = loc
-                #new_end = loc + len(replacement)
-                new_end = loc + expected_old_len
-                
+                new_end = loc + effective_old_len
+
                 # FIX 2: hunk puro de adição não pode conflitar (só insere)
-                if expected_old_len > 0:
+                if effective_old_len > 0:
                     overlap = None
                     for prev_start, prev_end, prev_idx in applied_ranges:
                         if new_start < prev_end and new_end > prev_start:
                             overlap = (prev_start, prev_end, prev_idx)
                             break
-                    
+
                     if overlap is not None:
                         prev_start, prev_end, prev_idx = overlap
                         report["details"].append({
@@ -704,12 +779,11 @@ class PatchSurgeon:
                         # FIX 3: NÃO faz break — continua step-by-step.
                         # Próximos hunks podem aplicar independentemente.
                         continue
-                
+
                 applied_ranges.append((new_start, new_end, idx))
-                
-                # Aplica
-                modified_lines[loc:loc + expected_old_len] = replacement
-#                modified_lines[loc : loc + expected_old_len] = replacement
+
+                # Aplica: remove `effective_old_len` linhas a partir de `loc`
+                modified_lines[loc:loc + effective_old_len] = replacement
 
                 # ─── v6.2: validação de sintaxe com 2 camadas ─────────────
                 if patch.target_path.suffix.lower() == '.py':
@@ -726,6 +800,34 @@ class PatchSurgeon:
                         break
 
         new_content = "".join(modified_lines)
+
+        # v6.7 — Comparação de sintaxe antes/depois (detecta regressões)
+        report["syntax_pre"] = None    # None = OK, str = erro
+        report["syntax_post"] = None
+        report["syntax_regression"] = False
+        report["syntax_fix"] = False
+
+        if patch.target_path.suffix.lower() == '.py':
+            # Sintaxe do arquivo ORIGINAL
+            try:
+                compile(original_content, str(patch.target_path), 'exec')
+            except SyntaxError as e:
+                report["syntax_pre"] = f"L{e.lineno}: {e.msg}"
+
+            # Sintaxe do arquivo MODIFICADO
+            try:
+                compile(new_content, str(patch.target_path), 'exec')
+            except SyntaxError as e:
+                report["syntax_post"] = f"L{e.lineno}: {e.msg}"
+
+            # Classificação
+            if report["syntax_pre"] and not report["syntax_post"]:
+                report["syntax_fix"] = True  # corrigiu
+            elif not report["syntax_pre"] and report["syntax_post"]:
+                report["syntax_regression"] = True  # piorou
+            elif report["syntax_pre"] and report["syntax_post"]:
+                # Já estava quebrado, continua quebrado
+                pass
 
         # v6.3 — Camada 3: validação final via py_compile (equivalente a compileall)
         if patch.target_path.suffix.lower() == '.py':
@@ -816,8 +918,13 @@ class PatchSurgeon:
               help="Args extras p/ o check (ex: -ca=-s security, -ca=-sr structural).")
 @click.option('--keep-snapshot', is_flag=True,
               help="Mantém o snapshot em .doxoade/checkshot/ para inspeção manual.")
+@click.option('--report-pre-broken/--no-report-pre-broken', default=True, show_default=True,
+              help="Compara sintaxe antes/depois do patch (detecta regressões).")
+@click.option('--force', is_flag=True,
+              help="Aplica mesmo se o patch introduzir novo erro de sintaxe.")
 @click.pass_context
-def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_arg, keep_snapshot):
+def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_arg,
+              keep_snapshot, report_pre_broken, force):
     """🩹 Aplica cirurgicamente patches com Ancoragem Estrutural Forte (v6.2)."""
     root = Path.cwd().resolve()
 
@@ -934,6 +1041,7 @@ def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_ar
             apply=apply,
             root=root,
             run_checkshot=bool(checkshot) and not apply,
+            force=force,   # ← NOVO
         )
 
         for det in res["details"]:
@@ -966,7 +1074,20 @@ def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_ar
             click.echo(f"   {status_color}{icon} Hunk #{det['hunk']}: {det['status']}{badges}{Style.RESET_ALL}")
 
             if "reason" in det:
-                click.echo(f"     {Fore.RED}↳ Motivo: {det['reason']}{Style.RESET_ALL}")
+                reason_text = det['reason']
+                # Destaca linhas suspeitas em amarelo dentro do reason
+                import re as _re
+                lines = reason_text.split('\n')
+                for ln in lines:
+                    if '🔍 Linhas suspeitas' in ln or '🔶 Linhas com divergência' in ln:
+                        click.echo(f"     {Fore.YELLOW}{ln}{Style.RESET_ALL}")
+                    elif ln.strip().startswith('L') and (':' in ln or '|' in ln):
+                        click.echo(f"     {Fore.YELLOW}  {ln.strip()}{Style.RESET_ALL}")
+                    else:
+                        click.echo(f"     {Fore.RED}{ln}{Style.RESET_ALL}")
+
+            if "warning" in det:
+                click.echo(f"     {Fore.YELLOW}↳ Aviso: {det['warning']}{Style.RESET_ALL}")
 
             if "preview_snippet" in det and not apply:
                 click.echo(f"     {Fore.CYAN}↳ 🔍 Pré-visualização da Cirurgia:{Style.RESET_ALL}")
@@ -1002,6 +1123,25 @@ def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_ar
                         f"     {Fore.DIM}... e mais "
                         f"{len(shot_findings) - 15} finding(s).{Style.RESET_ALL}"
                     )
+
+        # v6.7 — Sintaxe antes/depois
+        if res.get("syntax_regression"):
+            click.echo(
+                f"   {Fore.RED}🔴 REGRESSÃO: patch introduz novo erro de sintaxe "
+                f"({res['syntax_post']}).{Style.RESET_ALL}"
+            )
+        elif res.get("syntax_fix"):
+            click.echo(
+                f"   {Fore.GREEN}✅ FIX: patch corrige erro pré-existente "
+                f"(antes: {res['syntax_pre']}).{Style.RESET_ALL}"
+            )
+        elif res.get("syntax_pre") and not res.get("syntax_post"):
+            pass  # já tratado
+        elif res.get("syntax_pre") and res.get("syntax_post"):
+            click.echo(
+                f"   {Fore.YELLOW}⚠️  Arquivo já estava quebrado ({res['syntax_pre']}) "
+                f"e continua quebrado ({res['syntax_post']}).{Style.RESET_ALL}"
+            )
 
         if res["errors"]:
             for err in res["errors"]:

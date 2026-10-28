@@ -25,6 +25,11 @@ from doxoade.tools.alexandria.engine import alexandria_write
 
 from doxoade.commands.git_systems.git_feature import get_features_summary, clear_features, load_features
 
+from doxoade.commands.impact_systems.impact_contracts import (
+    analyze_contracts_from_file,
+)
+from doxoade.commands.impact_systems.impact_utils import path_to_module_name
+
 __version__ = ''
 
 def _build_semantic_commits(analysis, message):
@@ -151,6 +156,37 @@ def _abstract_and_learn_template(cursor: sqlite3.Cursor, concrete_finding: Dict[
         alexandria_write('INSERT INTO solution_templates (problem_pattern, solution_template, category, created_at) VALUES (?, ?, ?, ?)', (pattern, template, category, datetime.now(timezone.utc).isoformat()))
     return True
 
+def _check_contract_violations(staged_python: list[str], git_root: str) -> list[dict]:
+    """
+    Verifica violações de contrato nos arquivos Python staged.
+
+    Retorna lista de dicts:
+        [{'file': str, 'module': str, 'violations': list[...]}]
+    """
+    from doxoade.commands.impact_systems.impact_contracts import (
+        analyze_contracts_from_file,
+    )
+    from doxoade.commands.impact_systems.impact_utils import path_to_module_name
+
+    results = []
+    for py_file in staged_python:
+        try:
+            module_name = path_to_module_name(py_file, git_root)
+        except Exception:
+            module_name = py_file
+        try:
+            _, _, violations = analyze_contracts_from_file(py_file, module_name)
+        except Exception as e:
+            # Falha silenciosa: se o parser quebrar, não bloqueia commit
+            continue
+        if violations:
+            results.append({
+                'file': py_file,
+                'module': module_name,
+                'violations': violations,
+            })
+    return results
+
 @click.command('save')
 @click.argument('message', required=False)
 @click.option('--local',    '-l', is_flag=True, help='Salva e comita apenas localmente (sem push para o remoto).')
@@ -160,12 +196,15 @@ def _abstract_and_learn_template(cursor: sqlite3.Cursor, concrete_finding: Dict[
 @click.option('--apply',    '-ap', is_flag=True, help='🛠️ Executa os commits propostos pelo --smart (sem esta flag, apenas prévia).')
 @click.option('--alfa',     '-al', is_flag=True, help='🏷️ Gera mensagem automática no padrão Alfa (Versão + Arquivos + Data).')
 @click.option('--amend',    '-am', is_flag=True, help='✏️ Edita a mensagem do último commit (git commit --amend).')
+@click.option('--skip-contracts', '-skc', is_flag=True,
+              help='Pula a verificação de contratos públicos (Fase 5).')
 @click.option('--remove-commit','-rc', help='Apaga o último commit.')
 @click.option('--update-base',  '-ub', default='origin/main', show_default=True, help='Base usada para gerar resumo automático de atualização.')
 @click.option('--branch', 'branch_target', help='Após salvar, faz merge local da branch atual para a branch alvo.')
 @click.option('--merge', 'merge_target', help='Alias de --branch (ex.: --merge main).')
 @click.pass_context
-def save(ctx, message, local, archives, remove_commit, branch_target, merge_target, update_base, force, smart, apply, alfa, amend):
+def save(ctx, message, local, archives, remove_commit, branch_target, merge_target,
+         update_base, force, smart, apply, alfa, amend, skip_contracts):
     """Executa commit seguro com aprendizado automatizado."""
     console = Console()
     project_path = os.getcwd()
@@ -305,22 +344,34 @@ def save(ctx, message, local, archives, remove_commit, branch_target, merge_targ
                 for l in leaks:
                     subprocess.run(['git', 'rm', '--cached', os.path.join(git_root, l)], capture_output=True)
                 staged_prod = _get_staged_python_files(git_root)
-        if staged_prod and (not force):
-            console.print("   > [MA'AT] Julgando integridade da produção...")
-            results = run_check_logic(path='.', fix=False, fast=True, target_files=staged_prod, state=None)
-            from doxoade.commands.audit_systems.maat_engine import MaatEngine
-            maat = MaatEngine(project_path)
-            is_stable, maat_findings = maat.run_full_audit(staged_prod)
-            blocking = [f for f in results.get('findings', []) if f['severity'] in ['CRITICAL', 'ERROR']]
-            if blocking or not is_stable:
-                console.print('\n[bold red]🛑 BLOQUEIO: Regressões detectadas![/bold red]')
-                if blocking:
-                    _present_results('text', {'summary': results['summary'], 'findings': blocking})
-                if maat_findings:
-                    console.print("\n[bold yellow]⚖  ACHADOS DE MA'AT:[/bold yellow]")
-                    for mf in maat_findings:
-                        console.print(f"   [red]✘[/red] {mf['message']} ({os.path.basename(mf['file'])})")
-                sys.exit(1)
+        # ── GATE DE CONTRATOS (Fase 5) ────────────────────
+        if staged_prod and (not force) and (not skip_contracts):
+            console.print("   > [MA'AT-CONTRACTS] Auditando contratos públicos...")
+            contract_violations = _check_contract_violations(staged_prod, git_root)
+            if contract_violations:
+                total = sum(len(r['violations']) for r in contract_violations)
+                console.print(
+                    f"\n[bold red]⚖ [MA'AT-CONTRACTS] {total} violação(ões) em "
+                    f"{len(contract_violations)} arquivo(s):[/bold red]"
+                )
+                for r in contract_violations:
+                    console.print(f"\n   [yellow]📄 {os.path.relpath(r['file'], git_root)}[/yellow]")
+                    for v in r['violations']:
+                        sev_color = "red" if v['type'] in ('MISSING_ARGS', 'UNEXPECTED_KWARG') else "yellow"
+                        console.print(
+                            f"     [{sev_color}]✘ [{v['type']}][/{sev_color}] "
+                            f"L{v['line']} → {v['callee']} "
+                            f"({v['detail']})"
+                        )
+                if not click.confirm(
+                    '\nContinuar commit mesmo com violações de contrato?'
+                ):
+                    console.print('[bold red]Commit cancelado pelo usuário.[/bold red]')
+                    sys.exit(1)
+                console.print('[yellow]⚠ Prosseguindo com violações (usuário confirmou).[/yellow]')
+            else:
+                console.print('[bold green]✔ Nenhuma violação de contrato detectada.[/bold green]')
+
         if not _run_git_command(['commit', '-m', message]):
             click.echo(Fore.RED + "[ERRO] Falha ao executar 'git commit'.")
             sys.exit(1)

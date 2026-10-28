@@ -14,17 +14,40 @@ from doxoade.dnm import DNM
 from doxoade.rescue import activate_protocol 
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
 from doxoade.tools.filesystem import _find_project_root
-
+from doxoade.commands.intelligence_systems.intelligence_utils import VALID_EXTS
+from doxoade.commands.intelligence_systems.intelligence_audit import audit
 from doxoade.commands.intelligence_systems.intelligence_truncation import verify_dossier_integrity
 
 # PASC 10.1: Configuração para permitir flags APÓS os caminhos
 ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'], allow_interspersed_args=True)
-VALID_EXTS = (
-    '.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx',
-    '.pyd', '.so', '.toml', '.md', '.s', '.json', '.txt', '.lua' )
+# VALID_EXTS = (
+#     '.py', '.c', '.cpp', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx',
+#     '.pyd', '.so', '.toml', '.md', '.s', '.json', '.txt', '.lua' )
 
-@click.group('intelligence', invoke_without_command=True, context_settings=CONTEXT_SETTINGS)
+
+class IntelligenceGroup(click.Group):
+    """Grupo Click que resolve o conflito entre `paths` catch-all e subcomandos."""
+    def parse_args(self, ctx, args):
+        first_pos = next((a for a in args if not a.startswith('-')), None)
+        if first_pos and first_pos in self.commands:
+            original_params = self.params
+            original_interspersed = ctx.allow_interspersed_args
+            self.params = [
+                p for p in original_params
+                if not (isinstance(p, click.Argument) and p.name == 'paths')
+            ]
+            ctx.allow_interspersed_args = False
+            try:
+                result = super().parse_args(ctx, args)
+            finally:
+                self.params = original_params
+                ctx.allow_interspersed_args = original_interspersed
+            ctx.params.setdefault('paths', ())
+            return result
+        return super().parse_args(ctx, args)
+
+@click.group('intelligence', cls=IntelligenceGroup, invoke_without_command=True, context_settings=CONTEXT_SETTINGS)
 @click.option('--docs',           '-d',  is_flag=True, help="Extrai docstrings.")
 @click.option('--source',         '-s',  is_flag=True, help="Inclui código fonte.")
 @click.option('--no-comments',    '-nc', is_flag=True, help="Remove comentários.")
@@ -35,7 +58,7 @@ VALID_EXTS = (
 @click.option('--level',          '-l',  default=None, type=int, help="Profundidade máxima de diretórios a inspecionar (ex: -l 1 apenas raiz, -l 2 raiz + 1 subnível).")  # 👈 NOVA FLAG
 @click.option('--concatenate',    '-c',  is_flag=True, help="Minifica o JSON.")
 @click.option('--ai-export',      '-ai', is_flag=True, help="Gera XML para LLMs.")
-@click.option('--ia-qwen',        '-iq', is_flag=True, help="Gera XML nativo para Qwen (tool_call format).")
+#@click.option('--ia-qwen',        '-iq', is_flag=True, help="Gera XML nativo para Qwen (tool_call format).")
 @click.option('--output',         '-o',  default='chief_dossier.json', help="Saída do dossiê.")
 @click.option('--focus',          '-f',  type=click.Choice(['vulcan', 'check', 'economic']))
 @click.option('--exclude',        '-x',  multiple=True, help="Pastas ou arquivos a ignorar.")
@@ -44,9 +67,9 @@ VALID_EXTS = (
 @click.option('--verbose',        '-v',  is_flag=True, help="Modo verboso.")
 @click.option('--graph',          '-g',  is_flag=False, flag_value=1, default=0, type=int, help="Inclui arquivos relacionados (grafo de dependências). Nível de profundidade (padrão 1).")
 @click.option('--manifest',       '-m',  is_flag=True, help="🦉 [THOTH] Gera o manifesto JSON de comandos para IAs (Tool Use).")
-@click.argument('paths', nargs=-1, type=click.Path(exists=True))
+@click.argument('paths', nargs=-1, type=click.Path(exists=True), default=())
 @click.pass_context
-def intelligence(ctx, docs, source, no_comments, no_spaces, no_docstrings, level, compact_blocks, compact_imports, concatenate, ai_export, ia_qwen, output, focus, exclude, ext_exclude, analyze, verbose, manifest, paths, graph):
+def intelligence(ctx, docs, source, no_comments, no_spaces, no_docstrings, level, compact_blocks, compact_imports, concatenate, ai_export, output, focus, exclude, ext_exclude, analyze, verbose, manifest, paths, graph):
     """Módulo de Inteligência Topológica (v95.6 - Qwen Ready)."""
     _sonda_contrato = ctx.params['graph']
     if analyze:
@@ -62,15 +85,17 @@ def intelligence(ctx, docs, source, no_comments, no_spaces, no_docstrings, level
         try:
             _run_dossier_scan(
                 scan_paths, output, docs, source,
-                compact_imports, no_comments, no_spaces, no_docstrings, compact_blocks, concatenate, focus, ai_export, ia_qwen, ctx, exclude, ext_exclude, graph, level,
+                compact_imports, no_comments, no_spaces, no_docstrings, compact_blocks, concatenate, focus, ai_export, ctx, exclude, ext_exclude, graph, level,
             )
         except Exception:
             error_data = traceback.format_exc()
             activate_protocol(error_data)
             ctx.exit(1)
 
+intelligence.add_command(audit)
+
 def _run_dossier_scan(scan_paths, output, include_docs, include_source, compact_imports, no_comments, no_spaces,
-                      no_docstrings, compact_blocks, concat, focus, ai_export, ia_qwen, ctx, cli_excludes,
+                      no_docstrings, compact_blocks, concat, focus, ai_export, ctx, cli_excludes,
                       ext_excludes, graph_depth, level=None):
     from doxoade.commands.intelligence_systems.intelligence_engine import analyze_file_chief
     from doxoade.commands.intelligence_systems.intelligence_utils import minify_code, get_ignore_spec 
@@ -179,10 +204,10 @@ def _run_dossier_scan(scan_paths, output, include_docs, include_source, compact_
                 except Exception:
                     continue
 
-        _save_report(dossier_files, output, root, concat, focus, ai_export, ia_qwen, console, graph_depth, include_source, no_docstrings)
+        _save_report(dossier_files, output, root, concat, focus, ai_export, console, graph_depth, include_source, no_docstrings)
 
 
-def _save_report(files, output, root, concat, focus, ai_export, ia_qwen, console, graph_depth=0, include_source=False, no_docstrings=False):
+def _save_report(files, output, root, concat, focus, ai_export, console, graph_depth=0, include_source=False, no_docstrings=False):
     from datetime import datetime, timezone
     
     report_files = []
@@ -276,16 +301,14 @@ def _save_report(files, output, root, concat, focus, ai_export, ia_qwen, console
         "codebase_map": report_files
     }
     
-    if ia_qwen:
-        qwen_output = output.replace('.json', '') + "_qwen.xml" if output.endswith('.json') else output + "_qwen.xml"
-        _save_qwen_report(report, qwen_output, console)
-    elif ai_export:
+    if ai_export:
         ai_output = output.replace('.json', '') + "_llm.xml" if output.endswith('.json') else output + "_llm.xml"
         _save_llm_report(report, ai_output, console, include_source=include_source, no_docstrings=no_docstrings)
     else:
         with open(output, 'w', encoding='utf-8') as f:
             json.dump(report, f, indent=None if concat else 2, ensure_ascii=False)
         console.print(f"\n[bold green]✅ Dossiê NEXUS Gerado: {output}[/bold green]")
+
 
 
 def _calculate_distribution(files):
@@ -334,11 +357,13 @@ def _save_llm_report(report_data, output_path, console, include_source=False, no
             lines.append('  <god_glossary>')
             for god, desc in glossary.items():
                 safe_god = god.lower().replace('ú','u').replace('ã','a').replace('é','e').replace('í','i').replace('ó','o').replace(' ','_')
+                import re as _re
+                safe_god = _re.sub(r'[^a-z0-9_\-.]', '_', safe_god)
                 import html
                 desc_escaped = html.escape(desc)
                 lines.append(f'    <{safe_god}>{desc_escaped}</{safe_god}>')
             lines.append('  </god_glossary>')
-        
+
         lines.append('  <codebase_map>')
         for f in report_data.get("codebase_map", []):
             path = f.get('path', 'unknown')
@@ -401,7 +426,7 @@ def _save_llm_report(report_data, output_path, console, include_source=False, no
             src = f.get('source_minified')
             trunc = f.get('source_truncated_at')
             if src:
-                safe_src = src.replace(']]>', ']]><![CDATA[>')
+                safe_src = src.replace(']]>', ']]]]><![CDATA[>')
                 attr = f' truncated_at="{trunc}"' if trunc else ''
                 lines.append(f'      <source_code{attr}><![CDATA[')
                 for code_line in safe_src.splitlines():
@@ -425,78 +450,6 @@ def _save_llm_report(report_data, output_path, console, include_source=False, no
         else:
             console.print(f"[bold green]✔ [MA'AT] Dossiê gravado com integridade validada. {msg}[/bold green]")
 
-def _save_qwen_report(report_data, output_path, console):
-    """
-    Gera relatório no formato nativo de Tool Calling do Qwen.
-    VERSÃO FINAL: Remove TODOS os espaços e valida estrutura XML.
-    """
-    import json as _json
-    import html
-    
-    lines = []
-    
-    # 1. Extrair metadados
-    meta = next((v for k, v in report_data.items() if k.endswith("intelligence_report")), None)
-    if not meta:
-        console.print("[bold red]✘ Metadados do relatório não encontrados.[/bold red]")
-        return
-    
-    eco = report_data.get("economic_summary", {})
-    codebase = report_data.get("codebase_map", [])
-    
-    # 2. BLOCO DE RACIOCÍNIO PRÉVIO (sem espaços extras)
-    lines.append("<think>")
-    lines.append(f"Analisando codebase do projeto: {meta.get('target_project', 'Desconhecido')}.")
-    lines.append(f"Total de arquivos escaneados: {eco.get('total_files_scanned', 0)}.")
-    lines.append(f"Filtros aplicados: {meta.get('focus_applied', 'NONE')}.")
-    lines.append("")
-    lines.append("Distribuição de responsabilidades (God Assignment):")
-    for god, count in eco.get("god_distribution_in_report", {}).items():
-        lines.append(f"  - {god}: {count} arquivos")
-    lines.append("")
-    lines.append(f"Complexidade média: {eco.get('average_complexity_in_report', 0):.2f}")
-    lines.append(f"Total de debt tags: {eco.get('total_debt_tags_in_report', 0)}")
-    lines.append(f"Total de MPoT violations: {eco.get('total_mpot_violations_in_report', 0)}")
-    lines.append("")
-    lines.append("Estruturando o codebase_map como JSON serializado dentro de CDATA para processamento seguro.")
-    lines.append("</think>")
-    lines.append("")
-    
-    # 3. BLOCO PRINCIPAL DE TOOL CALLING (SEM ESPAÇOS NAS TAGS)
-    lines.append("<tool_call>")
-    lines.append("<function=doxoade_nexus_report>")
-    
-    # Parâmetros simples (escapados, SEM espaços, com strip())
-    target = html.escape(str(meta.get('target_project', '')).strip())
-    gen_at = html.escape(str(meta.get('generated_at', '')).strip())
-    version = html.escape(str(meta.get('version', '')).strip())
-    focus = html.escape(str(meta.get('focus_applied', '')).strip())
-    
-    lines.append(f"<parameter=target_project>{target}</parameter=target_project>")
-    lines.append(f"<parameter=generated_at>{gen_at}</parameter=generated_at>")
-    lines.append(f"<parameter=report_version>{version}</parameter=report_version>")
-    lines.append(f"<parameter=focus_applied>{focus}</parameter=focus_applied>")
-    
-    # Parâmetros complexos (JSON COMPACTO sem espaços, dentro de CDATA válido)
-    # IMPORTANTE: separators=(',', ':') remove TODOS os espaços do JSON
-    eco_json = _json.dumps(eco, ensure_ascii=False, separators=(',', ':'))
-    codebase_json = _json.dumps(codebase, ensure_ascii=False, separators=(',', ':'))
-    
-    lines.append(f"<parameter=economic_summary><![CDATA[{eco_json}]]></parameter=economic_summary>")
-    lines.append(f"<parameter=codebase_map><![CDATA[{codebase_json}]]></parameter=codebase_map>")
-    
-    lines.append("</function>")
-    lines.append("</tool_call>")
-    
-    # 4. Escrita segura (UTF-8)
-    try:
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write("\n".join(lines))
-        console.print(f"\n[bold magenta]🧠 Dossiê Qwen-Ready Gerado: {output_path}[/bold magenta]")
-        console.print(f"[dim]   Formato: tool_call nativo + <think> + CDATA seguro[/dim]")
-    except Exception as e:
-        console.print(f"[bold red]✘ Falha ao gerar XML Qwen: {e}[/bold red]")
-        
 def _run_analyze_coverage(scan_paths, cli_excludes, verbose, ext_excludes, level):
     """Auditoria de Cobertura: Blacklist, Extensões e Integridade de Parsing (Nexus Scan)."""
     from doxoade.commands.intelligence_systems.intelligence_engine import analyze_file_chief
@@ -768,3 +721,5 @@ def generate_manifest():
         click.secho(f"   📦 {cmd_count} comandos | {line_count} linhas | {len(xml_str)//1024}KB", fg="cyan")
     except OSError as e:
         raise RuntimeError(f"🚨 [ANÚBIS] Falha crítica ao gravar em '{out_path}'. Detalhes: {e}")
+
+        

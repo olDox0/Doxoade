@@ -31,6 +31,9 @@ doxoade_report.json
 graph.html
 chief_dossier_llm.xml
 .bridge_build_cache.json
+contracts.json
+impact_report.html
+*_broker_contracts.json
 
 *.old_*
 *.db
@@ -135,3 +138,6 @@ firmware/
 !data/acervo/
 !data/acervo/bricks/
 !data/acervo/bricks/*.py
+
+# Doxoade git-search references
+references/

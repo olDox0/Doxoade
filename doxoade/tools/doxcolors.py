@@ -136,6 +136,7 @@ class Fore:
 class Style:
     DIM       = AnsiCode('2')
     NORMAL    = AnsiCode('22')
+    BOLD      = AnsiCode('1')
     BRIGHT    = AnsiCode('1')
     RESET_ALL = AnsiCode('0')
     BLINK     = AnsiCode('5')

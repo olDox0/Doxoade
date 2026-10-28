@@ -55,7 +55,6 @@ def generate_setup_install_code(
     cli_command_name: str,
     runtime_packages: Optional[List[str]] = None,
 ) -> str:
-    """Gera o código-fonte Python puro para o instalador `install_setup.py` V4 Soberano."""
     pkgs = runtime_packages or [
         "click>=8.1.0",
         "colorama>=0.4.6",
@@ -63,33 +62,13 @@ def generate_setup_install_code(
     ]
     formatted_pkgs = ",\n    ".join([f'"{p}"' for p in pkgs])
     proj_title = project_name.upper()
-
-    return f'''#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-================================================================================
-⚡ NEXUS SOVEREIGN SETUP & INSTALLER V4.0 (VULCAN CORE)
-Projeto: {project_name} (CLI: {cli_command_name})
-================================================================================
-Instalador autônomo e resiliente para Windows, Linux e Termux.
-Cria o ambiente virtual, atualiza ferramentas de build e instala o sistema.
-================================================================================
-"""
-import os
-import sys
-import shutil
-import subprocess
+    return f'''
+import os, sys, shutil, subprocess
 from pathlib import Path
-
 ROOT = Path(__file__).resolve().parent
-
-# Força UTF-8 no ambiente Python para subprocessos
 os.environ["PYTHONUTF8"] = "1"
 os.environ["PYTHONIOENCODING"] = "utf-8"
-
-if os.name == 'nt':
-    os.system('')  # Ativa suporte a ANSI no Windows CMD/PowerShell
-
+if os.name == 'nt': os.system('')
 class UI:
     CYAN    = '\\033[1;36m'
     GREEN   = '\\033[1;32m'
@@ -99,102 +78,162 @@ class UI:
     BOLD    = '\\033[1m'
     DIM     = '\\033[2m'
     RESET   = '\\033[0m'
-
 def log_header(title: str):
     print(f"\\n{{UI.CYAN}}{{UI.BOLD}}{{'='*68}}")
     print(f" 🚀 {{title}}")
     print(f"{{'='*68}}{{UI.RESET}}")
-
-def log_step(step: str, desc: str):
-    print(f"\\n{{UI.MAGENTA}}[FASE {{step}}]{{UI.RESET}} {{UI.BOLD}}{{desc}}{{UI.RESET}}")
-
-def log_ok(msg: str):
-    print(f"  {{UI.GREEN}}✔{{UI.RESET}} {{msg}}")
-
-def log_warn(msg: str):
-    print(f"  {{UI.YELLOW}}⚠{{UI.RESET}} {{msg}}")
-
-def log_err(msg: str):
-    print(f"  {{UI.RED}}✘{{UI.RESET}} {{msg}}")
+def log_step(step: str, desc: str): print(f"\\n{{UI.MAGENTA}}[FASE {{step}}]{{UI.RESET}} {{UI.BOLD}}{{desc}}{{UI.RESET}}")
+def log_ok(msg: str):   print(f"  {{UI.GREEN}}✔{{UI.RESET}} {{msg}}")
+def log_warn(msg: str): print(f"  {{UI.YELLOW}}⚠{{UI.RESET}} {{msg}}")
+def log_err(msg: str):  print(f"  {{UI.RED}}✘{{UI.RESET}} {{msg}}")
 
 def get_venv_paths(root: Path):
     venv_dir = root / "venv"
     if os.name == "nt":
         scripts_dir = venv_dir / "Scripts"
-        python_exe = scripts_dir / "python.exe"
-        pip_exe = scripts_dir / "pip.exe"
+        python_exe  = scripts_dir / "python.exe"
+        pip_exe     = scripts_dir / "pip.exe"
         activate_cmd = f"call {{scripts_dir / 'activate.bat'}}"
     else:
         scripts_dir = venv_dir / "bin"
-        python_exe = scripts_dir / "python"
-        pip_exe = scripts_dir / "pip"
+        python_exe  = scripts_dir / "python"
+        pip_exe     = scripts_dir / "pip"
         activate_cmd = f"source {{scripts_dir / 'activate'}}"
-
     return {{
         "venv_dir": venv_dir,
         "scripts_dir": scripts_dir,
         "python": python_exe,
         "pip": pip_exe,
-        "activate": activate_cmd
+        "activate": activate_cmd,
     }}
 
 def safe_run(cmd, cwd=None, check=True) -> subprocess.CompletedProcess:
-    """Executor blindado contra UnicodeDecodeError no Windows."""
+    """Executa subprocesso re-emitindo stdout/stderr em caso de falha (DT-02)."""
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
-    return subprocess.run(
-        cmd,
-        cwd=cwd,
-        check=check,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=env
+    result = subprocess.run(
+        cmd, cwd=cwd, check=False,
+        capture_output=True, text=True,
+        encoding="utf-8", errors="replace", env=env,
     )
+    if check and result.returncode != 0:
+        sys.stderr.write(
+            f"\\n[SAFE_RUN] Comando falhou (exit {{result.returncode}}):\\n"
+            f"  CMD: {{' '.join(str(c) for c in cmd)}}\\n"
+            f"  --- STDOUT ---\\n{{result.stdout or '(vazio)'}}\\n"
+            f"  --- STDERR ---\\n{{result.stderr or '(vazio)'}}\\n"
+        )
+        sys.stderr.flush()
+        err = subprocess.CalledProcessError(result.returncode, cmd)
+        err.stdout = result.stdout
+        err.stderr = result.stderr
+        raise err
+    return result
+
+def generate_enter_venv_files(root: Path, paths: dict):
+    """Gera enter_venv.cmd (Windows) e enter_venv.sh (Unix) na raiz do silo."""
+    if os.name == "nt":
+        cmd_path = root / "enter_venv.cmd"
+        cmd_path.write_text(
+            "@echo off\\r\\n"
+            f'call "%~dp0venv\\\\Scripts\\\\activate.bat"\\r\\n'
+            "echo.\\r\\n"
+            "echo ✔ Venv ativado. Python: %VIRTUAL_ENV%\\\\Scripts\\\\python.exe\\r\\n"
+            "echo    Para sair: deactivate\\r\\n",
+            encoding="utf-8",
+        )
+    sh_path = root / "enter_venv.sh"
+    sh_path.write_text(
+        "#!/usr/bin/env bash\\n"
+        '# Entra no venv do silo\\n'
+        'source "$(dirname "$0")/venv/bin/activate"\\n'
+        'echo "✔ Venv ativado."\\n'
+        'echo "   Para sair: deactivate"\\n',
+        encoding="utf-8",
+    )
+    try:
+        sh_path.chmod(0o755)
+    except Exception:
+        pass
 
 def main():
-    log_header("{proj_title}: INSTALADOR SOBERANO V4.0")
+    log_header("{proj_title}: INSTALADOR SOBERANO V4.1")
     paths = get_venv_paths(ROOT)
 
-    # FASE 1: Verificação
-    log_step("1/5", "Auditoria do Interpretador Base...")
+    # ── FASE 1/6 ──
+    log_step("1/6", "Auditoria do Interpretador Base...")
     v = sys.version_info
     if v.major < 3 or (v.major == 3 and v.minor < 10):
         log_err(f"Python 3.10+ é obrigatório. Versão atual: {{v.major}}.{{v.minor}}.{{v.micro}}")
         sys.exit(1)
     log_ok(f"Python Base compatível: {{v.major}}.{{v.minor}}.{{v.micro}}")
 
-    # FASE 2: Venv
-    log_step("2/5", "Isolamento de Ambiente Virtual (venv)...")
+    # ── FASE 2/6 ──
+    log_step("2/6", "Isolamento de Ambiente Virtual (venv)...")
     if not paths["venv_dir"].exists():
         safe_run([sys.executable, "-m", "venv", str(paths["venv_dir"])])
         log_ok("Ambiente virtual forjado com sucesso.")
     else:
         log_ok("Ambiente virtual existente detectado.")
 
-    # FASE 3: Build Tools
-    log_step("3/5", "Bootstrapping de Ferramentas de Build...")
+    # ── FASE 3/6 ──
+    log_step("3/6", "Bootstrapping de Ferramentas de Build...")
     safe_run([
         str(paths["python"]), "-m", "pip", "install", "--upgrade",
         "pip", "setuptools>=68.0.0", "wheel>=0.41.0"
     ])
     log_ok("Ferramentas de build atualizadas.")
 
-    # FASE 4: Instalação
-    log_step("4/5", "Instalação do Pacote em Modo Editável...")
-    safe_run([str(paths["python"]), "-m", "pip", "install", "-e", str(ROOT)])
-    log_ok("Projeto registrado no ambiente virtual.")
+    # ── FASE 4/6 — PRÉ-CONDIÇÃO (DT-03) ──
+    log_step("4/6", "Validando Contrato de Projeto (pyproject.toml / setup.py)...")
+    has_pyproject = (ROOT / "pyproject.toml").exists()
+    has_setup_py  = (ROOT / "setup.py").exists()
+    if not has_pyproject and not has_setup_py:
+        log_err("Pré-condição NÃO atendida: pyproject.toml / setup.py ausentes.")
+        log_err(f"  Diretório: {{ROOT}}")
+        try:
+            contents = sorted(p.name for p in ROOT.iterdir() if p.name not in ("venv", "__pycache__"))
+            log_err(f"  Conteúdo atual ({{len(contents)}} itens): {{contents[:10]}}")
+        except Exception:
+            pass
+        log_err("")
+        log_err("  ── COMO CORRIGIR ──")
+        log_err(f"    Rode de fora do diretório:")
+        log_err(f"      doxoade init {{ROOT.name}} --lua --no-venv --no-git")
+        log_err(f"    Depois re-execute este instalador.")
+        sys.exit(1)
+    log_ok(f"Contrato encontrado: {{'pyproject.toml' if has_pyproject else 'setup.py'}}")
 
-    # FASE 5: Diretórios
-    log_step("5/5", "Diretórios de Dados e Persistência...")
+    # ── FASE 6/6 — DIRETÓRIOS E HOOKS ──
+    log_step("6/6", "Pós-instalação e Diretórios Essenciais...")
     (ROOT / "data").mkdir(parents=True, exist_ok=True)
     log_ok("Diretórios essenciais verificados.")
 
+    post_install = ROOT / "post_install.py"
+    if post_install.exists():
+        log_ok(f"Executando {{post_install.name}} dentro do venv...")
+        try:
+            safe_run([str(paths["python"]), str(post_install)], cwd=str(ROOT))
+            log_ok("Pós-instalação concluída.")
+        except subprocess.CalledProcessError:
+            log_warn("post_install.py falhou — instalação base OK, mas hook não concluiu.")
+    else:
+        log_ok("Sem post_install.py — pulando.")
+
+    generate_enter_venv_files(ROOT, paths)
+    log_ok("Helpers enter_venv.{{cmd,sh}} gerados na raiz.")
+
     log_header("INSTALAÇÃO CONCLUÍDA!")
-    print(f"{{UI.GREEN}}{{UI.BOLD}}Para ativar o ambiente neste terminal:{{UI.RESET}}\\n")
-    print(f"  {{UI.CYAN}}{{UI.BOLD}}{{paths['activate']}}{{UI.RESET}}\\n")
+    print(f"Próximos passos:\n")
+    print(f"  1. Entrar no venv (recomendado):")
+    print(f"     enter_venv.cmd     (Windows)")
+    print(f"     source enter_venv.sh (Unix)\n")
+    print(f"  2. Ou ativar manualmente")
+    print(f"  3. Rodar o CLI do silo:")
+    print(f"     mechatools --help\n")
+    print(f"  4. Rodar scripts Lua:")
+    print(f"     python lua_sys\\runner.py main.lua\n")
 
 if __name__ == '__main__':
     main()
