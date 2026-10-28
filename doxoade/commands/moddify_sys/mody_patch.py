@@ -140,7 +140,7 @@ class UnifiedDiffParser:
                         if not line.startswith(('diff --git', 'index ', 'similarity ', 'new file mode', 'deleted file mode')):
     #                    if not line.startswith(('diff --git', 'index ', 'similarity ')):
                             current_patch.parse_errors.append(f"Linha ignorada no diff: {line[:60]}")
-                i += 1
+            i += 1
         return patches
 
 
