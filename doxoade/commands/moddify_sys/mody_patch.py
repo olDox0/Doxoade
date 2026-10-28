@@ -136,7 +136,8 @@ class UnifiedDiffParser:
                 elif line.startswith('\\ No newline at end of file'):
                     pass
                 else:
-                    if not line.startswith(('diff --git', 'index ', 'similarity ')):
+                    if not line.startswith(('diff --git', 'index ', 'similarity ', 'new file mode', 'deleted file mode')):
+#                    if not line.startswith(('diff --git', 'index ', 'similarity ')):
                         current_patch.parse_errors.append(f"Linha ignorada no diff: {line[:60]}")
             i += 1
         return patches
@@ -520,11 +521,16 @@ class PatchSurgeon:
             for _i, _pl in enumerate(hunk.lines):
                 if _pl.kind == '-':
                     last_minus_idx = _i
-            replacement = [
-                pl.text + '\n'
-                for _i, pl in enumerate(hunk.lines)
-                if _i > last_minus_idx and pl.kind in (' ', '+')
-            ]
+            # v6.6 — FIX: replacement deve conter APENAS linhas após a última remoção.
+            # Se não há remoções (hunk puro de adição), replacement = só linhas '+'.
+            if last_minus_idx == -1:
+                replacement = [pl.text + '\n' for pl in hunk.lines if pl.kind == '+']
+            else:
+                replacement = [
+                    pl.text + '\n'
+                    for _i, pl in enumerate(hunk.lines)
+                    if _i > last_minus_idx and pl.kind in (' ', '+')
+                ]
             expected_replacement_block = [
                 cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind in (' ', '+')
             ]
@@ -844,43 +850,46 @@ class PatchSurgeon:
 
         # CheckShot (sandbox isolado) — só em dry-run
         if run_checkshot and not apply and report["hunks_failed"] == 0 and report["syntax_ok"]:
-            click.echo(
-                f"   {Fore.CYAN}🔬 [CHECKSHOT] Analisando o resultado da cirurgia..."
-                f"{Style.RESET_ALL}"
-            )
-            try:
-                from doxoade.commands.check_systems.checkshot import CheckShot
-                rel_path = (
-                    patch.target_path.relative_to(root).as_posix()
-                    if patch.target_path and root and patch.target_path.is_relative_to(root)
-                    else (patch.target_path.name if patch.target_path else "unknown.py")
+            if patch.target_path.suffix.lower() != '.py':
+                pass  # Skip checkshot para TOML, C++, etc.
+            else:
+                click.echo(
+                    f"   {Fore.CYAN}🔬 [CHECKSHOT] Analisando o resultado da cirurgia..."
+                    f"{Style.RESET_ALL}"
                 )
-                shot = CheckShot(root, keep=cls._checkshot_keep)
-                shot_result = shot.analyze(
-                    new_content,
-                    rel_path,
-                    extra_args=cls._checkshot_args,
-                )
-                report["checkshot"] = shot_result.to_dict()
-                if shot_result.error:
-                    report["check_analysis"] = (
-                        f"{Fore.RED}  ↳ CheckShot falhou: "
-                        f"{shot_result.error}{Style.RESET_ALL}"
+                try:
+                    from doxoade.commands.check_systems.checkshot import CheckShot
+                    rel_path = (
+                        patch.target_path.relative_to(root).as_posix()
+                        if patch.target_path and root and patch.target_path.is_relative_to(root)
+                        else (patch.target_path.name if patch.target_path else "unknown.py")
                     )
-                elif not shot_result.findings:
-                    report["check_analysis"] = (
-                        f"{Fore.GREEN}  ↳ ✔ Estado de Ouro: nenhum finding no "
-                        f"arquivo patcheado.{Style.RESET_ALL}"
+                    shot = CheckShot(root, keep=cls._checkshot_keep)
+                    shot_result = shot.analyze(
+                        new_content,
+                        rel_path,
+                        extra_args=cls._checkshot_args,
                     )
-                else:
+                    report["checkshot"] = shot_result.to_dict()
+                    if shot_result.error:
+                        report["check_analysis"] = (
+                            f"{Fore.RED}  ↳ CheckShot falhou: "
+                            f"{shot_result.error}{Style.RESET_ALL}"
+                        )
+                    elif not shot_result.findings:
+                        report["check_analysis"] = (
+                            f"{Fore.GREEN}  ↳ ✔ Estado de Ouro: nenhum finding no "
+                            f"arquivo patcheado.{Style.RESET_ALL}"
+                        )
+                    else:
+                        report["check_analysis"] = (
+                            f"{Fore.YELLOW}  ↳ {shot_result.total_findings} finding(s) "
+                            f"({shot_result.critical_count} crítico(s)){Style.RESET_ALL}"
+                        )
+                except Exception as e:
                     report["check_analysis"] = (
-                        f"{Fore.YELLOW}  ↳ {shot_result.total_findings} finding(s) "
-                        f"({shot_result.critical_count} crítico(s)){Style.RESET_ALL}"
+                        f"{Fore.RED}  ↳ CheckShot indisponível: {e}{Style.RESET_ALL}"
                     )
-            except Exception as e:
-                report["check_analysis"] = (
-                    f"{Fore.RED}  ↳ CheckShot indisponível: {e}{Style.RESET_ALL}"
-                )
 
         if apply:
             if report["hunks_failed"] > 0:
