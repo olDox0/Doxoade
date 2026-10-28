@@ -61,6 +61,7 @@ este é o novo protocolo simplificado e sucinto de desenvolveimento do doxoade. 
     3.1.5. tomar decisões baseada em evidencias tecnicas, dados reais e comprovação de teorias.
     3.1.6. Anti Long Shot policy - nao deve-se dar tiro no escuro, deve-se ter sistemas de diagnostico para problemsa complexos, deve-se obter dados por meio de sistemas, ou sondas.
     3.1.7. tabelamento e ratreio de problemas? listar sistemas e seus componentes, e dependencias pode ser util para tabelar rastreio de problemas, um sistema que depende de B e internet pode ter mecanismos para verificar falta de B ou internet. typhon serve para este tipo de tecnica.
+    3.1.8. numa aplicação complexa, recomenda-se fazer funções de diagnostico para identificar problemas nas operações,
 4. Situações reais
   4.1. Caso o prazo não permitir o sistema estiver estavel o suficiente, pode-se não seguir o protocolo
     4.1.1. se o sistema funciona naquele contexto limitado, pode-se cosidera-lo pronto temporariamente até a proxima revisão.

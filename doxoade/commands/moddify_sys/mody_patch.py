@@ -88,58 +88,59 @@ class UnifiedDiffParser:
         n = len(lines)
         while i < n:
             line = lines[i]
-            if line.startswith('--- ') and i + 1 < n and lines[i + 1].startswith('+++ '):
-                old_raw = line[4:].strip()
-                new_raw = lines[i + 1][4:].strip()
-                
-                # v6.4: detectar criação (--- /dev/null)
-                is_new_file = (old_raw == '/dev/null')
-                
-                target_str = cls.clean_target_path(new_raw if new_raw != '/dev/null' else old_raw)
-                resolved = (project_root / target_str).resolve()
-                
-                current_patch = FilePatch(
-                    raw_old_path=old_raw,
-                    raw_new_path=new_raw,
-                    target_path=resolved,
-                    is_new_file=is_new_file,   # v6.4
-                )
-                patches.append(current_patch)
-                current_hunk = None
-                i += 2
-                continue
-
-            m = cls.RE_HUNK_HEADER.match(line)
-            if m and current_patch is not None:
-                try:
-                    current_hunk = Hunk(
-                        old_start=int(m.group(1)),
-                        old_count=int(m.group(2)) if m.group(2) else 1,
-                        new_start=int(m.group(3)),
-                        new_count=int(m.group(4)) if m.group(4) else 1,
-                        header_ctx=m.group(5).strip()
+            if not line.startswith(('diff --git', 'index ', 'similarity ', 'new file mode', 'deleted file mode')):
+                if line.startswith('--- ') and i + 1 < n and lines[i + 1].startswith('+++ '):
+                    old_raw = line[4:].strip()
+                    new_raw = lines[i + 1][4:].strip()
+                    
+                    # v6.4: detectar criação (--- /dev/null)
+                    is_new_file = (old_raw == '/dev/null')
+                    
+                    target_str = cls.clean_target_path(new_raw if new_raw != '/dev/null' else old_raw)
+                    resolved = (project_root / target_str).resolve()
+                    
+                    current_patch = FilePatch(
+                        raw_old_path=old_raw,
+                        raw_new_path=new_raw,
+                        target_path=resolved,
+                        is_new_file=is_new_file,   # v6.4
                     )
-                    current_patch.hunks.append(current_hunk)
-                except (ValueError, TypeError):
-                    current_patch.parse_errors.append(
-                        f"Hunk com cabecalho invalido (nao numerico): {line[:60]}"
-                    )
+                    patches.append(current_patch)
                     current_hunk = None
-                i += 1
-                continue
+                    i += 2
+                    continue
 
-            if current_hunk is not None:
-                if line.startswith(('+', '-', ' ')):
-                    current_hunk.lines.append(PatchLine(kind=line[0], text=line[1:]))
-                elif line == '':
-                    current_hunk.lines.append(PatchLine(kind=' ', text=''))
-                elif line.startswith('\\ No newline at end of file'):
-                    pass
-                else:
-                    if not line.startswith(('diff --git', 'index ', 'similarity ', 'new file mode', 'deleted file mode')):
-#                    if not line.startswith(('diff --git', 'index ', 'similarity ')):
-                        current_patch.parse_errors.append(f"Linha ignorada no diff: {line[:60]}")
-            i += 1
+                m = cls.RE_HUNK_HEADER.match(line)
+                if m and current_patch is not None:
+                    try:
+                        current_hunk = Hunk(
+                            old_start=int(m.group(1)),
+                            old_count=int(m.group(2)) if m.group(2) else 1,
+                            new_start=int(m.group(3)),
+                            new_count=int(m.group(4)) if m.group(4) else 1,
+                            header_ctx=m.group(5).strip()
+                        )
+                        current_patch.hunks.append(current_hunk)
+                    except (ValueError, TypeError):
+                        current_patch.parse_errors.append(
+                            f"Hunk com cabecalho invalido (nao numerico): {line[:60]}"
+                        )
+                        current_hunk = None
+                    i += 1
+                    continue
+
+                if current_hunk is not None:
+                    if line.startswith(('+', '-', ' ')):
+                        current_hunk.lines.append(PatchLine(kind=line[0], text=line[1:]))
+                    elif line == '':
+                        current_hunk.lines.append(PatchLine(kind=' ', text=''))
+                    elif line.startswith('\\ No newline at end of file'):
+                        pass
+                    else:
+                        if not line.startswith(('diff --git', 'index ', 'similarity ', 'new file mode', 'deleted file mode')):
+    #                    if not line.startswith(('diff --git', 'index ', 'similarity ')):
+                            current_patch.parse_errors.append(f"Linha ignorada no diff: {line[:60]}")
+                i += 1
         return patches
 
 
@@ -155,6 +156,108 @@ class PatchSurgeon:
         line = line.rstrip('\r\n').rstrip()
         line = re.sub(r'\s*(?:#|//).*$', '', line)
         return re.sub(r'\s+', ' ', line).strip()
+
+    @classmethod
+    def _triangulate_addition(
+        cls, file_lines: List[str], hunk: Hunk, target_idx: int, max_offset: int = 200
+    ) -> Tuple[Optional[int], int, str, int, List[int]]:
+        """
+        v6.7 — Triangulação para hunks de adição pura.
+        
+        Estratégia em camadas (do mais forte ao mais fraco):
+        1. Match exato do contexto completo (' ' + '+') no disco.
+        2. Match exato apenas do contexto ' ' (pré e pós-âncora).
+        3. Triangulação por âncoras separadas (pré-âncora + pós-âncora).
+        4. Âncora semântica (linha única mais longa do contexto).
+        5. Fallback: old_start (com aviso).
+        """
+        norm_file = [cls._normalize_line(l) for l in file_lines]
+        total_file = len(file_lines)
+        
+        # Índices das linhas de contexto e adição
+        context_indices = [i for i, pl in enumerate(hunk.lines) if pl.kind == ' ']
+        plus_indices = [i for i, pl in enumerate(hunk.lines) if pl.kind == '+']
+        
+        if not context_indices:
+            # Sem contexto: adicionar no old_start
+            return (target_idx, 0, 'ADD_ONLY', 0, [target_idx])
+        
+        # ── Camada 1: match exato do contexto completo ───────────────
+        context_lines = [cls._normalize_line(hunk.lines[i].text) for i in context_indices]
+        all_matches = []
+        for cand in range(total_file - len(context_lines) + 1):
+            if norm_file[cand:cand + len(context_lines)] == context_lines:
+                all_matches.append(cand)
+        
+        if len(all_matches) == 1:
+            loc = all_matches[0]
+            # loc é onde o PRIMEIRO contexto aparece. Inserir após o último
+            # contexto antes da primeira adição.
+            first_plus = plus_indices[0]
+            insert_offset = sum(1 for i in context_indices if i < first_plus)
+            insert_loc = loc + insert_offset
+            return (insert_loc, insert_loc - target_idx, 'ADD_ONLY_CTX', 0, [insert_loc])
+        
+        if len(all_matches) > 1:
+            all_matches.sort(key=lambda c: abs(c - target_idx))
+            best = all_matches[0]
+            first_plus = plus_indices[0]
+            insert_offset = sum(1 for i in context_indices if i < first_plus)
+            insert_loc = best + insert_offset
+            return (insert_loc, insert_loc - target_idx, 'ADD_ONLY_CTX_MULTI', 0, all_matches[:5])
+        
+        # ── Camada 2: match da pré-âncora (contexto antes das adições) ──
+        first_plus = plus_indices[0]
+        pre_context_indices = [i for i in context_indices if i < first_plus]
+        post_context_indices = [i for i in context_indices if i > first_plus]
+        
+        if pre_context_indices:
+            pre_lines = [cls._normalize_line(hunk.lines[i].text) for i in pre_context_indices]
+            pre_matches = []
+            for cand in range(total_file - len(pre_lines) + 1):
+                if norm_file[cand:cand + len(pre_lines)] == pre_lines:
+                    pre_matches.append(cand + len(pre_lines))
+            
+            if len(pre_matches) >= 1:
+                pre_matches.sort(key=lambda c: abs(c - target_idx))
+                best = pre_matches[0]
+                return (best, best - target_idx, 'ADD_ONLY_PRE', 0, pre_matches[:5])
+        
+        # ── Camada 3: match da pós-âncora (contexto depois das adições) ─
+        if post_context_indices:
+            post_lines = [cls._normalize_line(hunk.lines[i].text) for i in post_context_indices]
+            post_matches = []
+            for cand in range(total_file - len(post_lines) + 1):
+                if norm_file[cand:cand + len(post_lines)] == post_lines:
+                    post_matches.append(cand)
+            
+            if len(post_matches) >= 1:
+                post_matches.sort(key=lambda c: abs(c - target_idx))
+                best = post_matches[0]
+                return (best, best - target_idx, 'ADD_ONLY_POST', 0, post_matches[:5])
+        
+        # ── Camada 4: âncora semântica (linha mais longa do contexto) ───
+        # Usar a linha mais longa (mais específica) como âncora
+        if context_indices:
+            longest_idx = max(context_indices, key=lambda i: len(hunk.lines[i].text.strip()))
+            anchor_text = cls._normalize_line(hunk.lines[longest_idx].text)
+            
+            anchor_matches = []
+            for i, line in enumerate(norm_file):
+                if line == anchor_text:
+                    anchor_matches.append(i)
+            
+            if len(anchor_matches) >= 1:
+                anchor_matches.sort(key=lambda c: abs(c - target_idx))
+                best = anchor_matches[0]
+                # Calcular offset: onde a adição deve ir em relação à âncora
+                offset_from_anchor = sum(1 for i in context_indices if i < longest_idx)
+                insert_loc = best + offset_from_anchor
+                insert_loc = min(insert_loc, total_file)
+                return (insert_loc, insert_loc - target_idx, 'ADD_ONLY_ANCHOR', 0, anchor_matches[:5])
+        
+        # ── Camada 5: fallback para old_start ──────────────────────────
+        return (target_idx, 0, 'ADD_ONLY_FALLBACK', 0, [target_idx])
 
     @classmethod
     def _would_create_duplicate(
@@ -256,7 +359,7 @@ class PatchSurgeon:
 
         # Hunk puro de adição: usa old_start direto
         if not removals:
-            return (target_idx, 0, 'ADD_ONLY', 0, [target_idx])
+            return cls._triangulate_addition(file_lines, hunk, target_idx, max_offset)
 
         removal_len = len(removals)
         if removal_len > total_file:
@@ -316,9 +419,7 @@ class PatchSurgeon:
     def find_hunk_location(
         cls, file_lines: List[str], hunk: Hunk, max_offset: int = 200
     ) -> Tuple[Optional[int], int, str, int, List[int]]:
-        """
-        v6.3: delega para `_find_removal_anchor`. Retorna tupla de 5.
-        """
+        """ v6.3: delega para `_find_removal_anchor`. Retorna tupla de 5. """
         return cls._find_removal_anchor(file_lines, hunk, max_offset=max_offset)
 
     @classmethod
