@@ -164,45 +164,46 @@ class PatchSurgeon:
         
         Ex: "def build(): subprocess.run([...])" → ["def build():", "    subprocess.run([...])"]
         Ex: "if x: y" → ["if x:", "    y"]
-        Ex: "for x in y: z" → ["for x in y:", "    z"]
-        
-        Retorna lista de linhas (1 se não tem ':' com corpo, 2+ se desconcatenável).
         """
         stripped = line.strip()
         if not stripped:
             return [line]
         
-        # Detectar ':' seguido de algo (não só ':' no final)
-        # Regex: pega até o ':' e o que vem depois
         m = re.match(r'^(\s*)([^:]+:)\s*(.+)$', line)
         if not m:
-            return [line]  # não tem ':' com corpo
+            return [line]
         
         indent = m.group(1)
         header = m.group(2).strip()
         body = m.group(3).strip()
         
-        # Exceções: dicionários, slices, annotations (não são blocos)
-        # - `{k: v}` (dict)
-        # - `[a:b]` (slice)
-        # - `x: int` (annotation)
-        # - `case ...:` (match/case — mas não tem corpo inline)
+        # Exceções: dicts, slices, annotations
         if (header.endswith('{') or header.endswith('[') or 
             '=' in header or 
             (':' in body and '{' in body)):
-            return [line]  # não é bloco
+            return [line]
         
-        # Headers válidos: def, class, if, elif, else, for, while, with, try, except, finally
         valid_headers = ('def ', 'class ', 'if ', 'elif ', 'else', 'for ', 'while ', 
                         'with ', 'try', 'except ', 'finally')
         if not any(header.startswith(kw) for kw in valid_headers):
             return [line]
         
-        # Desconcatenar
         return [
             f"{indent}{header}",
             f"{indent}{indent_unit}{body}",
         ]
+    
+    @classmethod
+    def _desconcatenate_context(cls, hunk: Hunk, indent_unit: str = "    ") -> List[str]:
+        """v6.8 — Desconcatena todas as linhas de contexto ' ' do hunk."""
+        result = []
+        for pl in hunk.lines:
+            if pl.kind == ' ':
+                expanded = cls._desconcatenate_line(pl.text, indent_unit)
+                result.extend(expanded)
+            else:
+                result.append(pl.text)
+        return result
     
     @classmethod
     def _desconcatenate_context(cls, hunk: Hunk, indent_unit: str = "    ") -> List[str]:
@@ -255,12 +256,33 @@ class PatchSurgeon:
             return (target_idx, 0, 'ADD_ONLY', 0, [target_idx])
         
         # ── Camada 1: match exato do contexto completo ───────────────
-        context_lines = [cls._normalize_line(l) for l in all_context_lines]
-#        context_lines = [cls._normalize_line(hunk.lines[i].text) for i in context_indices]
+        # ── Camada 1: match exato do contexto DESCONCATENADO ──────────
+        # v6.8 — O XML do relatório pode ter blocos inline (`def x(): y()`).
+        # Desconcatenar para buscar no disco (que tem o código original).
+        desconcatenated = []
+        for i in context_indices:
+            expanded = cls._desconcatenate_line(hunk.lines[i].text)
+            desconcatenated.extend([cls._normalize_line(l) for l in expanded])
+        
         all_matches = []
-        for cand in range(total_file - len(context_lines) + 1):
-            if norm_file[cand:cand + len(context_lines)] == context_lines:
+        for cand in range(total_file - len(desconcatenated) + 1):
+            if norm_file[cand:cand + len(desconcatenated)] == desconcatenated:
                 all_matches.append(cand)
+        
+        if len(all_matches) == 1:
+            loc = all_matches[0]
+            # loc = onde o contexto COMEÇA. Inserir após o ÚLTIMO contexto
+            # antes da primeira adição.
+            first_plus = plus_indices[0]
+            insert_offset = sum(1 for i in context_indices if i < first_plus)
+            # Contar linhas desconcatenadas antes da primeira adição
+            insert_offset = 0
+            for i in context_indices:
+                if i < first_plus:
+                    expanded = cls._desconcatenate_line(hunk.lines[i].text)
+                    insert_offset += len(expanded)
+            insert_loc = loc + insert_offset
+            return (insert_loc, insert_loc - target_idx, 'ADD_ONLY_CTX_DESCONC', 0, [insert_loc])
         
         if len(all_matches) == 1:
             loc = all_matches[0]
@@ -704,16 +726,24 @@ class PatchSurgeon:
             for _i, _pl in enumerate(hunk.lines):
                 if _pl.kind == '-':
                     last_minus_idx = _i
-            # v6.6 — FIX: replacement deve conter APENAS linhas após a última remoção.
-            # Se não há remoções (hunk puro de adição), replacement = só linhas '+'.
+            # v6.8 — Desconcatenar as adições também
             if last_minus_idx == -1:
-                replacement = [pl.text + '\n' for pl in hunk.lines if pl.kind == '+']
+                replacement = []
+                for pl in hunk.lines:
+                    if pl.kind == '+':
+                        expanded = cls._desconcatenate_line(pl.text)
+                        for l in expanded:
+                            replacement.append(l + '\n')
             else:
-                replacement = [
-                    pl.text + '\n'
-                    for _i, pl in enumerate(hunk.lines)
-                    if _i > last_minus_idx and pl.kind in (' ', '+')
-                ]
+                replacement = []
+                for _i, pl in enumerate(hunk.lines):
+                    if _i > last_minus_idx and pl.kind in (' ', '+'):
+                        if pl.kind == '+':
+                            expanded = cls._desconcatenate_line(pl.text)
+                            for l in expanded:
+                                replacement.append(l + '\n')
+                        else:
+                            replacement.append(pl.text + '\n')
             expected_replacement_block = [
                 cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind in (' ', '+')
             ]
