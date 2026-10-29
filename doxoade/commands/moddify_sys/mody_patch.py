@@ -158,6 +158,68 @@ class PatchSurgeon:
         return re.sub(r'\s+', ' ', line).strip()
 
     @classmethod
+    def _desconcatenate_line(cls, line: str, indent_unit: str = "    ") -> List[str]:
+        """
+        v6.8 — Desconcatena uma linha de contexto que veio do XML minificado.
+        
+        Ex: "def build(): subprocess.run([...])" → ["def build():", "    subprocess.run([...])"]
+        Ex: "if x: y" → ["if x:", "    y"]
+        Ex: "for x in y: z" → ["for x in y:", "    z"]
+        
+        Retorna lista de linhas (1 se não tem ':' com corpo, 2+ se desconcatenável).
+        """
+        stripped = line.strip()
+        if not stripped:
+            return [line]
+        
+        # Detectar ':' seguido de algo (não só ':' no final)
+        # Regex: pega até o ':' e o que vem depois
+        m = re.match(r'^(\s*)([^:]+:)\s*(.+)$', line)
+        if not m:
+            return [line]  # não tem ':' com corpo
+        
+        indent = m.group(1)
+        header = m.group(2).strip()
+        body = m.group(3).strip()
+        
+        # Exceções: dicionários, slices, annotations (não são blocos)
+        # - `{k: v}` (dict)
+        # - `[a:b]` (slice)
+        # - `x: int` (annotation)
+        # - `case ...:` (match/case — mas não tem corpo inline)
+        if (header.endswith('{') or header.endswith('[') or 
+            '=' in header or 
+            (':' in body and '{' in body)):
+            return [line]  # não é bloco
+        
+        # Headers válidos: def, class, if, elif, else, for, while, with, try, except, finally
+        valid_headers = ('def ', 'class ', 'if ', 'elif ', 'else', 'for ', 'while ', 
+                        'with ', 'try', 'except ', 'finally')
+        if not any(header.startswith(kw) for kw in valid_headers):
+            return [line]
+        
+        # Desconcatenar
+        return [
+            f"{indent}{header}",
+            f"{indent}{indent_unit}{body}",
+        ]
+    
+    @classmethod
+    def _desconcatenate_context(cls, hunk: Hunk, indent_unit: str = "    ") -> List[str]:
+        """
+        v6.8 — Desconcatena todas as linhas de contexto ' ' do hunk.
+        Retorna a lista expandida (pode ter mais linhas que o hunk original).
+        """
+        result = []
+        for pl in hunk.lines:
+            if pl.kind == ' ':
+                expanded = cls._desconcatenate_line(pl.text, indent_unit)
+                result.extend(expanded)
+            else:
+                result.append(pl.text)
+        return result
+
+    @classmethod
     def _triangulate_addition(
         cls, file_lines: List[str], hunk: Hunk, target_idx: int, max_offset: int = 200
     ) -> Tuple[Optional[int], int, str, int, List[int]]:
@@ -177,13 +239,24 @@ class PatchSurgeon:
         # Índices das linhas de contexto e adição
         context_indices = [i for i, pl in enumerate(hunk.lines) if pl.kind == ' ']
         plus_indices = [i for i, pl in enumerate(hunk.lines) if pl.kind == '+']
+
+        # Desconcatenar cada linha de contexto
+        desconcatenated_context = []
+        for i in context_indices:
+            expanded = cls._desconcatenate_line(hunk.lines[i].text)
+            desconcatenated_context.append(expanded)
+        # Flatten
+        all_context_lines = []
+        for lines in desconcatenated_context:
+            all_context_lines.extend(lines)
         
         if not context_indices:
             # Sem contexto: adicionar no old_start
             return (target_idx, 0, 'ADD_ONLY', 0, [target_idx])
         
         # ── Camada 1: match exato do contexto completo ───────────────
-        context_lines = [cls._normalize_line(hunk.lines[i].text) for i in context_indices]
+        context_lines = [cls._normalize_line(l) for l in all_context_lines]
+#        context_lines = [cls._normalize_line(hunk.lines[i].text) for i in context_indices]
         all_matches = []
         for cand in range(total_file - len(context_lines) + 1):
             if norm_file[cand:cand + len(context_lines)] == context_lines:
@@ -805,13 +878,13 @@ class PatchSurgeon:
             else:
                 report["hunks_applied"] += 1
 
-                # v6.4 — Preview defensivo contra IndexError
+                # v6.8 — Preview híbrido: contexto do disco, adições/remoções do hunk
                 _mlen = len(modified_lines)
                 start_preview = max(0, loc - 2)
                 preview_snippet = []
                 for i in range(start_preview, min(loc, _mlen)):
                     preview_snippet.append(f"  {i+1:4d} | {modified_lines[i].rstrip()}")
-
+                
                 for i, pl in enumerate(hunk.lines):
                     line_num = loc + 1 + i
                     if pl.kind == '-':
@@ -819,7 +892,11 @@ class PatchSurgeon:
                     elif pl.kind == '+':
                         preview_snippet.append(f"{Fore.GREEN}+{line_num:4d} | {pl.text.rstrip()}{Fore.RESET}")
                     else:
-                        preview_snippet.append(f"  {line_num:4d} | {pl.text.rstrip()}")
+                        # v6.8 — Contexto: pegar do DISCO, não do hunk
+                        if loc + i < _mlen:
+                            preview_snippet.append(f"  {line_num:4d} | {modified_lines[loc + i].rstrip()}")
+                        else:
+                            preview_snippet.append(f"  {line_num:4d} | {pl.text.rstrip()}")
 
                 # v6.4: after_start usa `replacement` (pós-cirurgia) e é clampado
                 after_start = min(loc + len(replacement), _mlen)
