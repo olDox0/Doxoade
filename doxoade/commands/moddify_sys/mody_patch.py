@@ -38,6 +38,7 @@ try:
 except Exception:
     chronos_recorder = None
 
+from doxoade.commands.moddify_sys import mody_triangulation
 
 # --- ESTRUTURAS DE DADOS ---
 
@@ -225,140 +226,135 @@ class PatchSurgeon:
         cls, file_lines: List[str], hunk: Hunk, target_idx: int, max_offset: int = 200
     ) -> Tuple[Optional[int], int, str, int, List[int]]:
         """
-        v6.7 — Triangulação para hunks de adição pura.
-        
-        Estratégia em camadas (do mais forte ao mais fraco):
-        1. Match exato do contexto completo (' ' + '+') no disco.
-        2. Match exato apenas do contexto ' ' (pré e pós-âncora).
-        3. Triangulação por âncoras separadas (pré-âncora + pós-âncora).
-        4. Âncora semântica (linha única mais longa do contexto).
-        5. Fallback: old_start (com aviso).
+        v6.13 — Triangulação para hunks de adição pura.
+
+        Estratégia:
+        1. Pré-âncora = cabeçalhos (linhas NÃO indentadas) antes das adições.
+        2. Pós-âncora = cabeçalhos (linhas NÃO indentadas) depois das adições.
+        3. Se AMBAS as âncoras existem, inserir ANTES da pós-âncora (limite superior).
+        4. Fallback: avançar pelo corpo da pré-âncora.
+        5. Fallback: pós-âncora sozinha.
+        6. Fallback: contexto completo desconcatenado.
+        7. Rejeitar (patch obsoleto).
         """
         norm_file = [cls._normalize_line(l) for l in file_lines]
         total_file = len(file_lines)
-        
-        # Índices das linhas de contexto e adição
+
         context_indices = [i for i, pl in enumerate(hunk.lines) if pl.kind == ' ']
         plus_indices = [i for i, pl in enumerate(hunk.lines) if pl.kind == '+']
 
-        # Desconcatenar cada linha de contexto
-        desconcatenated_context = []
-        for i in context_indices:
-            expanded = cls._desconcatenate_line(hunk.lines[i].text)
-            desconcatenated_context.append(expanded)
-        # Flatten
-        all_context_lines = []
-        for lines in desconcatenated_context:
-            all_context_lines.extend(lines)
-        
         if not context_indices:
-            # Sem contexto: adicionar no old_start
             return (target_idx, 0, 'ADD_ONLY', 0, [target_idx])
-        
-        # ── Camada 1: match exato do contexto completo ───────────────
-        # ── Camada 1: match exato do contexto DESCONCATENADO ──────────
-        # v6.8 — O XML do relatório pode ter blocos inline (`def x(): y()`).
-        # Desconcatenar para buscar no disco (que tem o código original).
-        desconcatenated = []
+
+        first_plus = plus_indices[0]
+        pre_context_indices = [i for i in context_indices if i < first_plus]
+        post_context_indices = [i for i in context_indices if i > first_plus]
+
+        # ── Coletar pré-âncora e pós-âncora (só cabeçalhos) ──────────
+        def _collect_headers(indices):
+            headers = []
+            for i in indices:
+                expanded = cls._desconcatenate_line(hunk.lines[i].text)
+                for l in expanded:
+                    norm = cls._normalize_line(l)
+                    if not norm:
+                        continue
+                    if not l.startswith('    '):
+                        headers.append(norm)
+            return headers
+
+        pre_headers = _collect_headers(pre_context_indices)
+        post_headers = _collect_headers(post_context_indices)
+
+        # ── Camada 1: pré-âncora → pós-âncora (limite superior) ──────
+        if pre_headers:
+            pre_matches = []
+            for cand in range(total_file - len(pre_headers) + 1):
+                if norm_file[cand:cand + len(pre_headers)] == pre_headers:
+                    pre_matches.append(cand)
+
+            if pre_matches:
+                pre_matches.sort(key=lambda c: abs(c - target_idx))
+                pre_loc = pre_matches[0]
+                pre_end = pre_loc + len(pre_headers)
+
+                # Tentar achar pós-âncora APÓS a pré-âncora
+                post_loc_found = None
+                if post_headers:
+                    for cand in range(pre_end, total_file - len(post_headers) + 1):
+                        if norm_file[cand:cand + len(post_headers)] == post_headers:
+                            post_loc_found = cand
+                            break
+
+                if post_loc_found is not None and post_loc_found >= pre_end:
+                    # ✅ Temos AMBAS as âncoras: inserir ANTES da pós-âncora
+                    return (
+                        post_loc_found, post_loc_found - target_idx,
+                        'ADD_ONLY_BOTH_ANCHORS', 0, [post_loc_found]
+                    )
+
+                # ── Fallback: avançar pelo corpo da pré-âncora ───────
+                best = pre_end
+                body_indent = None
+                if best < total_file:
+                    raw_line = file_lines[best]
+                    if raw_line.strip():
+                        indent_len = len(raw_line) - len(raw_line.lstrip())
+                        if indent_len > 0:
+                            body_indent = ' ' * indent_len
+
+                if body_indent:
+                    while best < total_file and file_lines[best].startswith(body_indent):
+                        best += 1
+
+                # Pular vazias no final do bloco
+                while best < total_file and not norm_file[best]:
+                    best += 1
+
+                # Se o corpo ultrapassou a pós-âncora, corrigir
+                if post_loc_found is not None and best > post_loc_found:
+                    best = post_loc_found
+
+                return (best, best - target_idx, 'ADD_ONLY_PRE_HEADER', 0, pre_matches[:5])
+
+        # ── Camada 2: pós-âncora sozinha ─────────────────────────────
+        if post_headers:
+            post_matches = []
+            for cand in range(total_file - len(post_headers) + 1):
+                if norm_file[cand:cand + len(post_headers)] == post_headers:
+                    post_matches.append(cand)
+
+            if post_matches:
+                post_matches.sort(key=lambda c: abs(c - target_idx))
+                best = post_matches[0]
+                return (best, best - target_idx, 'ADD_ONLY_POST_HEADER', 0, post_matches[:5])
+
+        # ── Camada 3: contexto completo desconcatenado (fallback) ────
+        desconcatenated_full = []
         for i in context_indices:
             expanded = cls._desconcatenate_line(hunk.lines[i].text)
-            desconcatenated.extend([cls._normalize_line(l) for l in expanded])
-        
+            desconcatenated_full.extend([cls._normalize_line(l) for l in expanded])
+
         all_matches = []
-        for cand in range(total_file - len(desconcatenated) + 1):
-            if norm_file[cand:cand + len(desconcatenated)] == desconcatenated:
+        for cand in range(total_file - len(desconcatenated_full) + 1):
+            if norm_file[cand:cand + len(desconcatenated_full)] == desconcatenated_full:
                 all_matches.append(cand)
-        
-        if len(all_matches) == 1:
-            loc = all_matches[0]
-            # loc = onde o contexto COMEÇA. Inserir após o ÚLTIMO contexto
-            # antes da primeira adição.
-            first_plus = plus_indices[0]
-            insert_offset = sum(1 for i in context_indices if i < first_plus)
-            # Contar linhas desconcatenadas antes da primeira adição
+
+        if all_matches:
+            all_matches.sort(key=lambda c: abs(c - target_idx))
+            best = all_matches[0]
             insert_offset = 0
             for i in context_indices:
                 if i < first_plus:
                     expanded = cls._desconcatenate_line(hunk.lines[i].text)
                     insert_offset += len(expanded)
-            insert_loc = loc + insert_offset
-            return (insert_loc, insert_loc - target_idx, 'ADD_ONLY_CTX_DESCONC', 0, [insert_loc])
-        
-        if len(all_matches) == 1:
-            loc = all_matches[0]
-            # loc é onde o PRIMEIRO contexto aparece. Inserir após o último
-            # contexto antes da primeira adição.
-            first_plus = plus_indices[0]
-            insert_offset = sum(1 for i in context_indices if i < first_plus)
-            insert_loc = loc + insert_offset
-            return (insert_loc, insert_loc - target_idx, 'ADD_ONLY_CTX', 0, [insert_loc])
-        
-        if len(all_matches) > 1:
-            all_matches.sort(key=lambda c: abs(c - target_idx))
-            best = all_matches[0]
-            first_plus = plus_indices[0]
-            insert_offset = sum(1 for i in context_indices if i < first_plus)
             insert_loc = best + insert_offset
-            return (insert_loc, insert_loc - target_idx, 'ADD_ONLY_CTX_MULTI', 0, all_matches[:5])
-        
-        # ── Camada 2: match da pré-âncora (contexto antes das adições) ──
-        first_plus = plus_indices[0]
-        pre_context_indices = [i for i in context_indices if i < first_plus]
-        post_context_indices = [i for i in context_indices if i > first_plus]
-        
-        if pre_context_indices:
-            pre_lines = [cls._normalize_line(hunk.lines[i].text) for i in pre_context_indices]
-            pre_matches = []
-            for cand in range(total_file - len(pre_lines) + 1):
-                if norm_file[cand:cand + len(pre_lines)] == pre_lines:
-                    pre_matches.append(cand + len(pre_lines))
-            
-            if len(pre_matches) >= 1:
-                pre_matches.sort(key=lambda c: abs(c - target_idx))
-                best = pre_matches[0]
-                return (best, best - target_idx, 'ADD_ONLY_PRE', 0, pre_matches[:5])
-        
-        # ── Camada 3: match da pós-âncora (contexto depois das adições) ─
-        if post_context_indices:
-            post_lines = [cls._normalize_line(hunk.lines[i].text) for i in post_context_indices]
-            post_matches = []
-            for cand in range(total_file - len(post_lines) + 1):
-                if norm_file[cand:cand + len(post_lines)] == post_lines:
-                    post_matches.append(cand)
-            
-            if len(post_matches) >= 1:
-                post_matches.sort(key=lambda c: abs(c - target_idx))
-                best = post_matches[0]
-                return (best, best - target_idx, 'ADD_ONLY_POST', 0, post_matches[:5])
-        
-        # ── Camada 4: âncora semântica (linha mais longa do contexto) ───
-        # Usar a linha mais longa (mais específica) como âncora
-        if context_indices:
-            longest_idx = max(context_indices, key=lambda i: len(hunk.lines[i].text.strip()))
-            anchor_text = cls._normalize_line(hunk.lines[longest_idx].text)
-            
-            anchor_matches = []
-            for i, line in enumerate(norm_file):
-                if line == anchor_text:
-                    anchor_matches.append(i)
-            
-            if len(anchor_matches) >= 1:
-                anchor_matches.sort(key=lambda c: abs(c - target_idx))
-                best = anchor_matches[0]
-                # Calcular offset: onde a adição deve ir em relação à âncora
-                offset_from_anchor = sum(1 for i in context_indices if i < longest_idx)
-                insert_loc = best + offset_from_anchor
-                insert_loc = min(insert_loc, total_file)
-                return (insert_loc, insert_loc - target_idx, 'ADD_ONLY_ANCHOR', 0, anchor_matches[:5])
-        
-        # ── Camada 5: fallback para old_start (SÓ se o arquivo for pequeno ou o hunk não tiver contexto)
-        # v6.8 — NÃO usar fallback quando o contexto é grande e não casa.
-        # Isso indica patch obsoleto; melhor rejeitar.
+            return (insert_loc, insert_loc - target_idx, 'ADD_ONLY_CTX_DESCONC', 0, all_matches[:5])
+
+        # ── Camada 4: rejeitar (patch obsoleto) ──────────────────────
         if context_indices and len(context_indices) >= 2:
-            # Contexto significativo não casou: rejeitar (patch obsoleto)
             return (None, 0, 'NONE', 0, [])
-        
-        # Fallback só para hunks sem contexto (ADD_ONLY puro)
+
         return (target_idx, 0, 'ADD_ONLY_FALLBACK', 0, [target_idx])
 
     @classmethod
@@ -459,9 +455,11 @@ class PatchSurgeon:
         norm_file = [cls._normalize_line(l) for l in file_lines]
         target_idx = max(0, hunk.old_start - 1)
 
-        # Hunk puro de adição: usa old_start direto
+        # Hunk puro de adição: delega para o módulo de triangulação
         if not removals:
-            return cls._triangulate_addition(file_lines, hunk, target_idx, max_offset)
+            return mody_triangulation.find_addition_location(
+                file_lines, hunk, target_idx, max_offset
+            )
 
         removal_len = len(removals)
         if removal_len > total_file:
@@ -626,7 +624,11 @@ class PatchSurgeon:
             # 4. Duplicação parcial? (linhas `+` que já existem fora do range)
             plus_lines = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind == '+']
             if plus_lines:
-                expected_old_len = sum(1 for pl in hunk.lines if pl.kind in (' ', '-'))
+                # v6.14 — Delegar aplicação ao método isolado
+                modified_lines, effective_old_len = cls._apply_single_hunk(
+                    modified_lines, hunk, loc, match_type, contig_len, replacement
+                )
+
                 hunk_range = set(range(loc, loc + expected_old_len))
                 already_in_file = 0
                 for plus in plus_lines:
@@ -660,6 +662,71 @@ class PatchSurgeon:
         return result
 
     @classmethod
+    def _find_post_anchor(
+        cls, file_lines: List[str], hunk: Hunk, loc: int
+    ) -> Optional[int]:
+        """v6.12 — Encontra a pós-âncora a partir do `loc`."""
+        context_indices = [i for i, pl in enumerate(hunk.lines) if pl.kind == ' ']
+        plus_indices = [i for i, pl in enumerate(hunk.lines) if pl.kind == '+']
+        if not plus_indices:
+            return None
+        first_plus = plus_indices[0]
+        post_context_indices = [i for i in context_indices if i > first_plus]
+        if not post_context_indices:
+            return None
+        post_headers = []
+        for i in post_context_indices:
+            expanded = cls._desconcatenate_line(hunk.lines[i].text)
+            for l in expanded:
+                norm = cls._normalize_line(l)
+                if not norm:
+                    continue
+                if not l.startswith('    '):
+                    post_headers.append(norm)
+        if not post_headers:
+            return None
+        norm_file = [cls._normalize_line(l) for l in file_lines]
+        total_file = len(file_lines)
+        for cand in range(loc, total_file - len(post_headers) + 1):
+            if norm_file[cand:cand + len(post_headers)] == post_headers:
+                return cand
+        return None
+
+    @classmethod
+    def _apply_single_hunk(
+        cls,
+        modified_lines: List[str],
+        hunk: Hunk,
+        loc: int,
+        match_type: str,
+        contig_len: int,
+        replacement: List[str],
+    ) -> Tuple[List[str], int]:
+        """
+        v6.14 — Aplica um único hunk ao `modified_lines`.
+        
+        Responsabilidade ÚNICA: calcular `effective_old_len` e aplicar.
+        
+        Retorna:
+        - modified_lines: lista modificada
+        - effective_old_len: quantas linhas foram removidas
+        """
+        expected_old_len = sum(1 for pl in hunk.lines if pl.kind in (' ', '-'))
+        
+        # ── Calcular effective_old_len ──────────────────────────────
+        if match_type == 'PARTIAL':
+            effective_old_len = contig_len
+        elif match_type.startswith('ADD_ONLY'):
+            effective_old_len = 0
+        else:
+            effective_old_len = expected_old_len
+        
+        # ── Aplicar ─────────────────────────────────────────────────
+        modified_lines[loc:loc + effective_old_len] = replacement
+        
+        return modified_lines, effective_old_len
+
+    @classmethod
     def simulate_or_apply(
         cls,
         patch: FilePatch,
@@ -679,6 +746,12 @@ class PatchSurgeon:
             "check_analysis": "",
             "checkshot": None,
         }
+
+        _rel_name = (
+            str(patch.target_path.relative_to(root))
+            if (patch.target_path and root and patch.target_path.is_relative_to(root))
+            else (str(patch.target_path) if patch.target_path else "unknown")
+        )
 
         if patch.is_new_file:
             # v6.4: criação de arquivo
@@ -782,6 +855,23 @@ class PatchSurgeon:
 
             loc, offset, match_type, contig_len, candidates = cls.find_hunk_location(modified_lines, hunk)
 
+            # v6.12 — Para hunks ADD_ONLY, validar se o loc não ultrapassou a pós-âncora.
+            if match_type.startswith('ADD_ONLY') and loc is not None:
+                post_loc = mody_triangulation.find_post_anchor(modified_lines, hunk, loc)
+                if post_loc is not None and loc > post_loc:
+                    report["details"].append({
+                        "hunk": idx,
+                        "status": "AVISO (ultrapassou)",
+                        "warning": (
+                            f"loc={loc+1} ultrapassou post_loc={post_loc+1}. "
+                            f"Corrigindo para L{post_loc+1}."
+                        ),
+                        "match_type": "OVERSHOOT_CORRECTED",
+                    })
+                    loc = post_loc
+                    offset = loc - (hunk.old_start - 1)
+                    match_type = 'ADD_ONLY_CORRECTED'
+
             # ─── v6.3: reportar ambiguidade explicitamente ────────────────
             if match_type == 'EXACT_MULTI' and len(candidates) > 1:
                 report["details"].append({
@@ -853,11 +943,11 @@ class PatchSurgeon:
 
                 # v6.4.1: computar rel_name no escopo de simulate_or_apply
                 # (é usado no diagnóstico estruturado)
-                _rel_name = (
-                    str(patch.target_path.relative_to(root))
-                    if (patch.target_path and root and patch.target_path.is_relative_to(root))
-                    else (str(patch.target_path) if patch.target_path else "unknown")
-                )
+                # _rel_name = (
+                #     str(patch.target_path.relative_to(root))
+                #     if (patch.target_path and root and patch.target_path.is_relative_to(root))
+                #     else (str(patch.target_path) if patch.target_path else "unknown")
+                # )
                 reason_msg = (
                     f"Contexto insuficiente: {contig_len} de {len(expected_old)} linhas contíguas.\n"
                     f"      Arquivo: {_rel_name}\n"                   # ← CORRIGIDO
@@ -915,18 +1005,33 @@ class PatchSurgeon:
                 for i in range(start_preview, min(loc, _mlen)):
                     preview_snippet.append(f"  {i+1:4d} | {modified_lines[i].rstrip()}")
                 
+                # v6.10 — Preview: line_num do DISCO para contexto, do PATCH para +/-.
+                # O primeiro '+' do hunk está na linha real `loc + 1`.
+                # Linhas de contexto ANTES do primeiro +/- mostram o line_num real do disco.
+                first_change_idx = next(
+                    (i for i, pl in enumerate(hunk.lines) if pl.kind in ('-', '+')),
+                    len(hunk.lines)
+                )
+                # v6.11 — Preview corrigido: contexto do DISCO, +/- do PATCH.
+                # O primeiro '+' está em `loc + 1`. Contexto ANTES do primeiro
+                # '+' mostra o line_num real do disco (loc + i).
+                first_change_idx = next(
+                    (i for i, pl in enumerate(hunk.lines) if pl.kind in ('-', '+')),
+                    len(hunk.lines)
+                )
                 for i, pl in enumerate(hunk.lines):
-                    line_num = loc + 1 + i
                     if pl.kind == '-':
+                        line_num = loc + 1 + i - first_change_idx
                         preview_snippet.append(f"{Fore.RED}-{line_num:4d} | {pl.text.rstrip()}{Fore.RESET}")
                     elif pl.kind == '+':
+                        line_num = loc + 1 + i - first_change_idx
                         preview_snippet.append(f"{Fore.GREEN}+{line_num:4d} | {pl.text.rstrip()}{Fore.RESET}")
                     else:
-                        # v6.8 — Contexto: pegar do DISCO, não do hunk
+                        # Contexto: mostrar o line_num REAL do disco
                         if loc + i < _mlen:
-                            preview_snippet.append(f"  {line_num:4d} | {modified_lines[loc + i].rstrip()}")
+                            preview_snippet.append(f"  {loc + i + 1:4d} | {modified_lines[loc + i].rstrip()}")
                         else:
-                            preview_snippet.append(f"  {line_num:4d} | {pl.text.rstrip()}")
+                            preview_snippet.append(f"  {loc + i + 1:4d} | {pl.text.rstrip()}")
 
                 # v6.4: after_start usa `replacement` (pós-cirurgia) e é clampado
                 after_start = min(loc + len(replacement), _mlen)
@@ -957,8 +1062,11 @@ class PatchSurgeon:
                 expected_old_len = sum(1 for pl in hunk.lines if pl.kind in (' ', '-'))
                 if match_type == 'PARTIAL':
                     effective_old_len = contig_len
+                elif match_type.startswith('ADD_ONLY'):
+                    effective_old_len = 0
                 else:
                     effective_old_len = expected_old_len
+                hunk_range = set(range(loc, loc + expected_old_len))
 
                 # v6.5 — Aviso quando PARTIAL remove menos que o corpo pedia
                 if match_type == 'PARTIAL' and contig_len < expected_old_len:
@@ -972,6 +1080,21 @@ class PatchSurgeon:
                         ),
                         "match_type": "PARTIAL_WARN",
                     })
+
+                # if match_type.startswith('ADD_ONLY'):
+                #     post_loc_real = None
+                #     if 'post_loc_found' in dir():
+                #         post_loc_real = post_loc_found
+                #     if post_loc_real is not None and loc > post_loc_real:
+                #         report["details"].append({
+                #             "hunk": idx,
+                #             "status": "AVISO (ultrapassou)",
+                #             "warning": (
+                #                 f"loc={loc+1} ultrapassou post_loc={post_loc_real+1}. "
+                #                 f"Inserção pode estar errada."
+                #             ),
+                #             "match_type": "OVERSHOOT",
+                #         })
 
                 # v6.4.2 — GUARD: detectar sobreposição de hunks
                 new_start = loc
