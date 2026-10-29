@@ -256,7 +256,14 @@ class PatchSurgeon:
                 insert_loc = min(insert_loc, total_file)
                 return (insert_loc, insert_loc - target_idx, 'ADD_ONLY_ANCHOR', 0, anchor_matches[:5])
         
-        # ── Camada 5: fallback para old_start ──────────────────────────
+        # ── Camada 5: fallback para old_start (SÓ se o arquivo for pequeno ou o hunk não tiver contexto)
+        # v6.8 — NÃO usar fallback quando o contexto é grande e não casa.
+        # Isso indica patch obsoleto; melhor rejeitar.
+        if context_indices and len(context_indices) >= 2:
+            # Contexto significativo não casou: rejeitar (patch obsoleto)
+            return (None, 0, 'NONE', 0, [])
+        
+        # Fallback só para hunks sem contexto (ADD_ONLY puro)
         return (target_idx, 0, 'ADD_ONLY_FALLBACK', 0, [target_idx])
 
     @classmethod
@@ -465,8 +472,10 @@ class PatchSurgeon:
         }
         
         applied_ranges: List[Tuple[int, int, int]] = []
-        
-        for idx, hunk in enumerate(patch.hunks, start=1):
+
+        hunks_sorted = sorted(enumerate(patch.hunks, start=1), key=lambda x: x[1].old_start, reverse=True)
+        for idx, hunk in hunks_sorted:
+#        for idx, hunk in enumerate(patch.hunks, start=1):
             classification = {"idx": idx, "status": "UNKNOWN", "loc": None,
                             "reason": "", "partial_dup_score": 0.0}
             
@@ -897,11 +906,25 @@ class PatchSurgeon:
                     _probe = "".join(modified_lines)
                     _err = cls._validate_partial_syntax(_probe, patch.target_path)
                     if _err is not None:
-                        report["syntax_ok"] = False
-                        report["errors"].append(
-                            f"Violação Ma'at (hunk #{idx}): {_err}. "
-                            f"Estado do arquivo revertido; aplicação abortada."
+                        # v6.8 — Mensagem enriquecida
+                        _ctx_start = max(0, loc - 5)
+                        _ctx_end = min(len(modified_lines), loc + 10)
+                        _ctx = [
+                            f"  {i+1:4d} | {modified_lines[i].rstrip()}"
+                            for i in range(_ctx_start, _ctx_end)
+                        ]
+                        _reason = (
+                            f"VIOLAÇÃO MA'AT (hunk #{idx}):\n"
+                            f"  Erro: {_err}\n"
+                            f"  Hunk inseriu {len(replacement)} linha(s) em L{loc+1}.\n"
+                            f"  Contexto APÓS o patch (L{_ctx_start+1}-L{_ctx_end}):\n"
+                            + "\n".join(f"    {l}" for l in _ctx)
+                            + f"\n  Sugestões:\n"
+                            f"    • doxoade mody show {_rel_name} --part {_ctx_start+1}-{_ctx_end}\n"
+                            f"    • Verifique se o patch foi gerado contra o estado atual do arquivo.\n"
                         )
+                        report["syntax_ok"] = False
+                        report["errors"].append(_reason)
                         modified_lines = list(working_lines)
                         report["hunks_failed"] += 1
                         break
