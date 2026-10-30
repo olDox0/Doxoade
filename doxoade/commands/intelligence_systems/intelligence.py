@@ -58,7 +58,8 @@ class IntelligenceGroup(click.Group):
 @click.option('--level',          '-l',  default=None, type=int, help="Profundidade máxima de diretórios a inspecionar (ex: -l 1 apenas raiz, -l 2 raiz + 1 subnível).")  # 👈 NOVA FLAG
 @click.option('--concatenate',    '-c',  is_flag=True, help="Minifica o JSON.")
 @click.option('--ai-export',      '-ai', is_flag=True, help="Gera XML para LLMs.")
-#@click.option('--ia-qwen',        '-iq', is_flag=True, help="Gera XML nativo para Qwen (tool_call format).")
+@click.option('--strict', is_flag=True,
+              help='Exit 1 para QUALQUER divergência (não só Python).')
 @click.option('--output',         '-o',  default='chief_dossier.json', help="Saída do dossiê.")
 @click.option('--focus',          '-f',  type=click.Choice(['vulcan', 'check', 'economic']))
 @click.option('--exclude',        '-x',  multiple=True, help="Pastas ou arquivos a ignorar.")
@@ -90,7 +91,8 @@ def intelligence(ctx, docs, source, no_comments, no_spaces, no_docstrings, level
         except Exception:
             error_data = traceback.format_exc()
             activate_protocol(error_data)
-            ctx.exit(1)
+            ctx.exit(_emit_exit_code(report, strict=strict))
+#            ctx.exit(1)
 
 intelligence.add_command(audit)
 
@@ -722,4 +724,25 @@ def generate_manifest():
     except OSError as e:
         raise RuntimeError(f"🚨 [ANÚBIS] Falha crítica ao gravar em '{out_path}'. Detalhes: {e}")
 
-        
+def _emit_exit_code(report: Dict, strict: bool = False) -> int:
+    """
+    v1.1 — Exit 1 se:
+    - Python divergir (sempre).
+    - C/C++ com código real divergir (classificação real_divergence=True).
+    - --strict e qualquer divergir.
+    """
+    src = report.get("source") or []
+    for d in src:
+        if d["equal"]:
+            continue
+        ext = d.get("ext", "")
+        classification = d.get("classification", {})
+        if ext == ".py":
+            return 1
+        if ext in ('.c', '.cpp', '.h', '.hpp', '.cc', '.cxx') and classification.get("real_divergence"):
+            return 1
+        if strict:
+            return 1
+    return 0
+
+

@@ -53,18 +53,101 @@ def _parse_dossier(xml_path: str) -> Dict:
         files.append({"path": path, "source_raw": source_raw})
     return {"files": files}
 
+def _classify_diff(diff_lines: List[str]) -> Dict:
+    """
+    v1.1 — Classifica as diferenças de um diff unified.
+
+    Retorna:
+    - type: 'whitespace' | 'comments' | 'code' | 'mixed' | 'unknown'
+    - real_divergence: bool (True se há código real divergente)
+    - whitespace_count, comments_count, code_count: contadores
+    """
+    whitespace = 0
+    comments = 0
+    code = 0
+
+    for line in diff_lines:
+        if not line.startswith(('+', '-')):
+            continue
+        if line.startswith(('+++', '---')):
+            continue
+
+        content = line[1:].strip()
+        if not content:
+            whitespace += 1
+            continue
+
+        # Comentários: //, /*, */, #, -- (Lua), <!-- (HTML)
+        if content.startswith(('//', '/*', '*/', '#')):
+            comments += 1
+            continue
+        if content.startswith('--'):
+            comments += 1
+            continue
+        if content.startswith('<!--'):
+            comments += 1
+            continue
+
+        # Código real
+        code += 1
+
+    if code > 0 and (whitespace > 0 or comments > 0):
+        return {
+            "type": "mixed",
+            "real_divergence": True,
+            "whitespace_count": whitespace,
+            "comments_count": comments,
+            "code_count": code,
+        }
+    if code > 0:
+        return {
+            "type": "code",
+            "real_divergence": True,
+            "whitespace_count": whitespace,
+            "comments_count": comments,
+            "code_count": code,
+        }
+    if comments > 0 and whitespace > 0:
+        return {
+            "type": "mixed",
+            "real_divergence": False,
+            "whitespace_count": whitespace,
+            "comments_count": comments,
+            "code_count": 0,
+        }
+    if comments > 0:
+        return {
+            "type": "comments",
+            "real_divergence": False,
+            "whitespace_count": whitespace,
+            "comments_count": comments,
+            "code_count": 0,
+        }
+    if whitespace > 0:
+        return {
+            "type": "whitespace",
+            "real_divergence": False,
+            "whitespace_count": whitespace,
+            "comments_count": 0,
+            "code_count": 0,
+        }
+    return {
+        "type": "unknown",
+        "real_divergence": False,
+        "whitespace_count": 0,
+        "comments_count": 0,
+        "code_count": 0,
+    }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Diff literal (unified) — igual ao `diff.py`/`mirror.py` em espírito
 # ─────────────────────────────────────────────────────────────────────────────
 def _diff_literal(xml_src: str, disk_src: str, path: str, context: int) -> Dict:
     """Unified diff entre CDATA cru do XML e conteúdo do arquivo em disco."""
-    # Normaliza: garante \n no final de cada linha
     def _norm_lines(text: str):
         if not text:
             return []
-        lines = text.splitlines()
-        return [line + "\n" for line in lines]
+        return [line + "\n" for line in text.splitlines()]
 
     xml_lines = _norm_lines(xml_src)
     disk_lines = _norm_lines(disk_src)
@@ -75,12 +158,95 @@ def _diff_literal(xml_src: str, disk_src: str, path: str, context: int) -> Dict:
         n=context,
         lineterm="",
     ))
+
+    ext = os.path.splitext(path)[1].lower()
+    classification = _classify_diff(diff_lines)
+
+    # Nota dinâmica por extensão + classificação
+    note = None
+    if ext in ('.c', '.cpp', '.h', '.hpp', '.cc', '.cxx'):
+        if classification["type"] == "whitespace":
+            note = "C/C++: diferenças apenas de espaços/linhas em branco (minificação)."
+        elif classification["type"] == "comments":
+            note = "C/C++: diferenças apenas de comentários (minificação)."
+        elif classification["type"] == "mixed" and not classification["real_divergence"]:
+            note = "C/C++: diferenças de espaços e comentários (minificação)."
+        elif classification["type"] == "mixed":
+            note = (
+                f"C/C++: ATENÇÃO — há diferenças de CÓDIGO "
+                f"({classification['code_count']} linha(s)). "
+                f"Pode ser divergência real, não só minificação."
+            )
+        elif classification["type"] == "code":
+            note = (
+                f"C/C++: ATENÇÃO — há {classification['code_count']} linha(s) "
+                f"de CÓDIGO divergente. Investigar."
+            )
+    elif ext == '.py':
+        if classification["real_divergence"]:
+            note = None  # Python divergente é esperado (exit 1)
+    elif ext in ('.md', '.toml', '.json', '.txt', '.yml', '.yaml'):
+        if not classification["real_divergence"]:
+            note = "Doc/config: diferenças de espaços/comentários (minificação)."
+    elif ext in ('.js', '.jsx', '.ts', '.tsx', '.lua'):
+        if not classification["real_divergence"]:
+            note = f"{ext[1:].upper()}: diferenças de espaços/comentários (minificação)."
+
     return {
         "equal": not diff_lines,
         "diff_text": "\n".join(line.rstrip("\n") for line in diff_lines),
         "xml_lines": len(xml_lines),
         "disk_lines": len(disk_lines),
+        "truncated": False,
+        "shown": len(diff_lines),
+        "note": note,
+        "ext": ext,
+        "classification": classification,
     }
+
+def _render_report(report: Dict, console: Console, list_all: bool) -> None:
+    src = report.get("source")
+    if src is None:
+        return
+
+    console.print(f"\n[bold cyan]📄 DIFF LITERAL (Camada C1) — "
+                  f"{len(src)} arquivo(s) comparado(s)[/bold cyan]")
+
+    divergences = [d for d in src if not d["equal"]]
+    if not divergences:
+        console.print("   [green]✔ Nenhuma divergência literal.[/green]")
+        return
+
+    # v1.1 — Veredito por extensão + classificação
+    py_div = [d for d in divergences if d.get("ext") == ".py"]
+    c_real = [d for d in divergences if d.get("ext") in ('.c', '.cpp', '.h', '.hpp', '.cc', '.cxx')
+              and d.get("classification", {}).get("real_divergence")]
+    c_minif = [d for d in divergences if d.get("ext") in ('.c', '.cpp', '.h', '.hpp', '.cc', '.cxx')
+               and not d.get("classification", {}).get("real_divergence")]
+    doc_div = [d for d in divergences if d.get("ext") in ('.md', '.toml', '.json', '.txt', '.yml', '.yaml')]
+    other_div = [d for d in divergences if d not in py_div and d not in c_real and d not in c_minif and d not in doc_div]
+
+    console.print(f"\n[bold]📊 Veredito por extensão:[/bold]")
+    if py_div:
+        console.print(f"   [red]🔴 {len(py_div)} arquivo(s) Python divergente(s)[/red]")
+    if c_real:
+        console.print(f"   [red]🔴 {len(c_real)} arquivo(s) C/C++ com CÓDIGO divergente[/red]")
+    if c_minif:
+        console.print(f"   [yellow]🟡 {len(c_minif)} arquivo(s) C/C++ divergente(s) (minificação)[/yellow]")
+    if doc_div:
+        console.print(f"   [dim]ℹ️ {len(doc_div)} arquivo(s) doc/config divergente(s) (minificação)[/dim]")
+    if other_div:
+        console.print(f"   [cyan]ℹ️ {len(other_div)} arquivo(s) outro(s) divergente(s)[/cyan]")
+
+    # Diff por arquivo (nota antes do diff)
+    for d in divergences:
+        console.print(f"\n[bold]■ {d['path']}[/bold]")
+        if d.get("note"):
+            console.print(f"   [yellow]⚠️  {d['note']}[/yellow]")
+        console.print(f"   xml={d['xml_lines']} linhas | disco={d['disk_lines']} linhas")
+        if d.get("truncated"):
+            console.print(f"   [dim](diff truncado em {d['shown']} linhas)[/dim]")
+        console.print(d["diff_text"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -98,7 +264,10 @@ def _diff_literal(xml_src: str, disk_src: str, path: str, context: int) -> Dict:
 @click.option('--filter', 'filter_mode',
               type=click.Choice(['all', 'removed', 'added']), default='all',
               help='Filtra linhas do diff: all (default), removed (só -), added (só +).')
-def audit(xml_path, file_path, context, only_diff, summary, filter_mode):
+@click.option('--filter', 'filter_mode',
+              type=click.Choice(['all', 'removed', 'added']), default='all',
+              help='Filtra linhas do diff: all (default), removed (só -), added (só +).')
+def audit(xml_path, file_path, context, only_diff, summary, filter_mode, strict):
     """Compara o CDATA do dossiê XML com o arquivo original no disco."""
     root = _find_project_root(os.getcwd())
     click.echo(Fore.CYAN + Style.BRIGHT + f'--- [AUDIT] {xml_path} vs disco ---')
