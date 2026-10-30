@@ -579,19 +579,73 @@ def _render_tactical_dossier(d: dict):
         print(f"    {Y}{remedy}{RST}")
         print(f"    {Style.DIM}" + "─" * 40 + RST)
 
-def activate_protocol(error_text: str, exit_code: int = None, trace=None, **kwargs): # <-- ADICIONADO **kwargs
-    """Protocolo Lazarus: Menu de Intervenção Imediata (Mode-Aware)."""
+def activate_protocol(error_text: str, exit_code: int = None, trace=None, **kwargs):
     from .tools.telemetry_tools.logger import chief_heartbeat
     import sys as _sys, os as _os, re
     context_vars = kwargs.get('context', {})
     trace_text = _read_trace(trace) or error_text or ''
     if not error_text:
         return
-    
-    # [FIX] KeyboardInterrupt não é crash — não ativar dossiê forense
+
+    # ═══════════════════════════════════════════════════════════════
+    # [FIX] Guardas contra falsos positivos
+    # ═══════════════════════════════════════════════════════════════
+
+    # 1. KeyboardInterrupt não é crash — não ativar dossiê forense
     if "KeyboardInterrupt" in str(error_text):
         print(f"\n\x1b[33m[!] Interrompido pelo usuário.\x1b[0m")
         return
+
+    # 2. Exit code de programa normal não é crash
+    #    (testes, validação, retorno != 0 por motivo lógico)
+    if exit_code is not None:
+        if _os.name == 'nt':
+            # Windows: exit normal é 0..0xC0000000-1
+            # Só consideramos crash se exit >= 0xC0000000
+            is_crash_exit = exit_code < 0 or exit_code >= 0xC0000000
+        else:
+            # Unix: exit normal é 0..127 (128+ = killed by signal)
+            is_crash_exit = exit_code < 0 or exit_code >= 128
+
+        # Exceção: se há evidência textual FORTE de crash mesmo com exit baixo,
+        # ainda ativamos (ex: Sotéria capturou canary violation mas processo
+        # saiu com exit 1 por outro motivo).
+        strong_crash_evidence = any(
+            marker in str(error_text)
+            for marker in [
+                "AccessViolation",
+                "Heap Corruption",
+                "Stack Smashing",
+                "SIGSEGV",
+                "TAG_MOTIVO: 0xC",
+                "TAG_MOTIVO: 0xc",
+                "TAG_MOTIVO: SIG",
+                "DOUBLE_FREE",
+                "USE_AFTER_FREE",
+                "MEMORY_CORRUPTION",
+            ]
+        )
+
+        # MEMORY_LEAK_REPORT é um caso especial:
+        # É emitido por atexit handler, frequentemente em exit normal.
+        # Só é crash se o exit code for de crash OU se é leak REAL
+        # (com TAG_LEAK_ENTRY listando alocações específicas).
+        has_leak_report_only = (
+            "MEMORY_LEAK_REPORT" in str(error_text)
+            and "TAG_LEAK_ENTRY" not in str(error_text)
+        )
+
+        if has_leak_report_only and not is_crash_exit:
+            # Leak report em exit normal — informar mas não entrar em forense
+            print(f"\n\x1b[33m[!] Recursos órfãos reportados no exit "
+                  f"(código {exit_code}). Não é crash.\x1b[0m")
+            return
+
+        if not is_crash_exit and not strong_crash_evidence:
+            # Exit normal != 0 mas sem evidência de crash — skip forense
+            print(f"\n\x1b[33m[EXIT {exit_code}] Programa encerrou com código "
+                  f"{exit_code}. Não é um crash.\x1b[0m")
+            return
 
     # 🛑 BLINDAGEM LAZARUS: Se o motor foi desligado, aborta imediatamente
     if _os.environ.get('DOXOADE_RESCUE') == '0':

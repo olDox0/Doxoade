@@ -97,14 +97,11 @@ def compile_c_family_source(script_path):
     return output_path
 
 def execute_binary(binary_path, limits=None, extra_args=None):
-    """Executa o binário nativo e aciona o Resgate se houver falha."""
     import subprocess
-# [DOX-UNUSED]     from doxoade.tools.aegis.warden import apply_resource_limits
-    from doxoade.rescue import activate_protocol 
-    from doxoade.tools.telemetry_tools.logger import chief_heartbeat # <--- GARANTA ESTE IMPORT
-    
+    from doxoade.rescue import activate_protocol
+    from doxoade.tools.telemetry_tools.logger import chief_heartbeat
+
     click.echo(f'\x1b[36m--- [RUN:C/C++] {os.path.basename(binary_path)} ---\x1b[0m')
-    
     cmd = [str(binary_path)] + (extra_args or [])
     proc = subprocess.Popen(
         cmd,
@@ -114,37 +111,84 @@ def execute_binary(binary_path, limits=None, extra_args=None):
         encoding='utf-8',
         errors='replace'
     )
-    
-    # --- [VITAL] O communicate() captura o que o C "gritou" no Sleep(100) ---
     stdout_data, stderr_data = proc.communicate()
     output = (stdout_data or "") + (stderr_data or "")
 
+    # Filtra tags do Sotéria da saída do usuário
     if stdout_data:
-        for line in stdout_data.splitlines(): # Agora funciona!
+        for line in stdout_data.splitlines():
             if not any(tag in line for tag in ["@SOTERIA_", "TAG_", "@NEXUS_"]):
                 print(line)
-            
     if stderr_data:
         for line in stderr_data.splitlines():
             if not any(tag in line for tag in ["@SOTERIA_", "TAG_", "@NEXUS_"]):
                 print(line)
 
-    # REGISTRO NO HEARTBEAT (Para vermos se passou de 757 bytes)
-    from doxoade.tools.telemetry_tools.logger import chief_heartbeat
     chief_heartbeat("PIPELINE", "BINARY_OUTPUT_CAPTURE", {
         "size": len(output),
         "exit_code": proc.returncode
     })
 
-    # Se houver indício de pânico nas tags ou erro de sistema
-    if "@SOTERIA_BEGIN@" in output or proc.returncode != 0:
-        # Se houve erro ou se o log contém falhas detectadas pela Sotéria
-        if proc.returncode != 0 or "FATAL" in output or "CORRUPTION" in output:
-            activate_protocol(output, exit_code=proc.returncode)
-    
-    if proc.returncode != 0:
-        click.echo(f"\x1b[31m[EXIT] O processo terminou com erro: {proc.returncode}\x1b[0m")
+    # ═══════════════════════════════════════════════════════════════
+    # [FIX] Distinguir CRASH NATIVO de EXIT NORMAL
+    # ═══════════════════════════════════════════════════════════════
+    # Um teste que falha (exit 1) NÃO é crash.
+    # Um crash real tem exit code de NTSTATUS (>= 0xC0000000) ou
+    # signal Unix (128+), ou evidência textual de crash.
+    # ═══════════════════════════════════════════════════════════════
+    rc = proc.returncode
 
+    # Classificação do exit code
+    if rc is None:
+        is_crash = False
+    elif os.name == 'nt':
+        # Windows: exit normal é 0..0xC0000000-1, crash é 0xC0000000+
+        is_crash = rc < 0 or rc >= 0xC0000000
+    else:
+        # Unix: exit normal é 0..127, killed-by-signal é 128+
+        is_crash = rc < 0 or rc >= 128
+
+    # Marcadores textuais de crash (mesmo que exit seja "normal")
+    crash_markers = [
+        "FATAL: ",
+        "CRASH DETECTED",
+        "AccessViolation",
+        "SegmentationFault",
+        "SIGSEGV",
+        "Heap Corruption",
+        "Stack Smashing",
+        "TAG_MOTIVO: 0xC",
+        "TAG_MOTIVO: 0xc",
+        "TAG_MOTIVO: SIG",
+    ]
+    has_crash_marker = any(m in output for m in crash_markers)
+
+    # Sotéria pode emitir begin/end mesmo em exit normal
+    # (via atexit). Só é crash se combinado com marcadores.
+    has_soteria_block = "@SOTERIA_BEGIN@" in output
+
+    # Decisão final
+    is_real_crash = is_crash or has_crash_marker
+
+    if is_real_crash:
+        # Crash nativo — aciona protocolo forense
+        activate_protocol(output, exit_code=rc)
+        return False
+
+    # Exit normal (0 ou != 0 por motivo lógico — testes, validação)
+    if rc != 0:
+        click.echo(
+            f"\n{Fore.YELLOW}[EXIT] Programa encerrou com código {rc}.{Style.RESET_ALL}"
+        )
+        click.echo(
+            f"{Style.DIM}Isso não é um crash — verifique a saída acima "
+            f"para detalhes.{Style.RESET_ALL}"
+        )
+        return False
+
+    click.echo(f"   {Fore.GREEN}✔ Execução finalizada normalmente.{Style.RESET_ALL}")
+    return True
+    
 def run_c_lang(script_path, limits: dict = None, flow: bool = False, extra_args: list = None):
     source_or_bin = Path(script_path).resolve()
     suffix = source_or_bin.suffix.lower()
