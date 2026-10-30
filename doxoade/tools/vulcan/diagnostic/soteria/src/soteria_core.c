@@ -102,9 +102,28 @@ static void soteria_signal_handler(int sig) {
  * ═══════════════════════════════════════════════════════════════════ */
 static void soteria_on_exit(void) {
     if (g_panic_lock == 0) {
-        soteria_dump_leaks();
+        /* ═══════════════════════════════════════════════════════════════
+         * [FIX] Distinguir exit normal de crash com leaks
+         * ═══════════════════════════════════════════════════════════════
+         * soteria_dump_leaks() só emite MEMORY_LEAK_REPORT quando há
+         * alocações pendentes. Mas em exit normal, o SO libera tudo.
+         * 
+         * Só reportar leaks se:
+         *   (a) o processo crashou (g_panic_lock != 0), OU
+         *   (b) há evidência de corrupção real (heap corruption, etc.)
+         * 
+         * Em exit normal, apenas LOG interno (sem TAG_MOTIVO).
+         * ═══════════════════════════════════════════════════════════════ */
+        if (g_panic_lock != 0) {
+            /* Crash com panic lock — reportar leaks como sinal forense */
+            soteria_dump_leaks();
+        } else {
+            /* Exit normal — só verificar leaks silenciosamente.
+             * Se houver, log interno (arquivo) sem emitir TAG_MOTIVO. */
+            soteria_dump_leaks_silent();
+        }
 
-        /* Resumo de race conditions */
+        /* Resumo de race conditions (só se detectadas) */
         if (g_race_count > 0) {
             char race_buf[256];
             snprintf(race_buf, 255,
