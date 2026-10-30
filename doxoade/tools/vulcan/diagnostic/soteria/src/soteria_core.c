@@ -40,6 +40,7 @@ extern volatile LONG g_race_count;
  * PROTÓTIPOS INTERNOS
  * ═══════════════════════════════════════════════════════════════════ */
 extern void soteria_dump_leaks(void);
+extern void soteria_dump_leaks_silent(void);
 extern void soteria_dump_arena_inventory(void);
 extern void soteria_dump_stack_trace(void);
 extern void soteria_calibrate_stack(void);
@@ -102,34 +103,22 @@ static void soteria_signal_handler(int sig) {
  * ═══════════════════════════════════════════════════════════════════ */
 static void soteria_on_exit(void) {
     if (g_panic_lock == 0) {
-        /* ═══════════════════════════════════════════════════════════════
-         * [FIX] Distinguir exit normal de crash com leaks
-         * ═══════════════════════════════════════════════════════════════
-         * soteria_dump_leaks() só emite MEMORY_LEAK_REPORT quando há
-         * alocações pendentes. Mas em exit normal, o SO libera tudo.
-         * 
-         * Só reportar leaks se:
-         *   (a) o processo crashou (g_panic_lock != 0), OU
-         *   (b) há evidência de corrupção real (heap corruption, etc.)
-         * 
-         * Em exit normal, apenas LOG interno (sem TAG_MOTIVO).
-         * ═══════════════════════════════════════════════════════════════ */
-        if (g_panic_lock != 0) {
-            /* Crash com panic lock — reportar leaks como sinal forense */
-            soteria_dump_leaks();
-        } else {
-            /* Exit normal — só verificar leaks silenciosamente.
-             * Se houver, log interno (arquivo) sem emitir TAG_MOTIVO. */
-            soteria_dump_leaks_silent();
-        }
+        /* [FIX] Distinguir exit normal de crash.
+         *
+         * Em exit normal (g_panic_lock == 0), o processo terminou
+         * sem crash — "leaks" são liberados pelo SO. Reportar em
+         * stdout polui output e gera falso positivo no rescue.py.
+         * Apenas LOG em arquivo, sem TAG_MOTIVO.
+         *
+         * Em crash (g_panic_lock != 0), reportar leaks é útil
+         * (sinal forense). Neste caso o bloco abaixo não roda
+         * porque soteria_on_exit só executa em exit normal via
+         * atexit — em crash, o processo termina em TerminateProcess. */
+        soteria_dump_leaks_silent();
 
-        /* Resumo de race conditions (só se detectadas) */
+        /* Resumo de race conditions */
         if (g_race_count > 0) {
-            char race_buf[256];
-            snprintf(race_buf, 255,
-                "\n[RESUMO] %ld race conditions detectadas "
-                "(log: .doxoade/metalcraft/logs/race_conditions.log)\n",
-                (long)g_race_count);
+
             soteria_print_raw(race_buf);
         }
 

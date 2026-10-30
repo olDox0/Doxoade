@@ -256,6 +256,48 @@ void soteria_dump_leaks(void) {
     _mem_unlock();
 }
 
+
+/* ═══════════════════════════════════════════════════════════════════
+ * [NOVO] soteria_dump_leaks_silent
+ * ═══════════════════════════════════════════════════════════════════
+ * Versão silenciosa de soteria_dump_leaks: NÃO emite
+ * TAG_MOTIVO: MEMORY_LEAK_REPORT em stdout.
+ *
+ * Uso: chamada em soteria_on_exit() quando o exit NÃO é crash.
+ * Em exit normal, o SO libera toda a memória do processo. "Leak" em
+ * exit normal é ruído para o usuário e falsos positivos no rescue.py.
+ *
+ * Em vez de emitir tags para o Sotéria, apenas:
+ *   1. Loga em arquivo (.doxoade/metalcraft/logs/leaks.log)
+ *   2. Retorna silenciosamente
+ *
+ * Se o arquivo de log não existir ou não puder ser aberto, é no-op.
+ */
+void soteria_dump_leaks_silent(void) {
+    _mem_lock();
+    int leaks = 0;
+    size_t total_bytes = 0;
+
+    for (int i = 0; i < g_mem_ptr; i++) {
+        if (g_mem_db[i].is_live) {
+            leaks++;
+            total_bytes += g_mem_db[i].user_size;
+        }
+    }
+    _mem_unlock();
+
+    if (leaks > 0) {
+        /* Log silencioso em arquivo — não emite TAG_MOTIVO em stdout */
+        FILE *log_file = fopen(".doxoade/metalcraft/logs/leaks.log", "a");
+        if (log_file) {
+            fprintf(log_file,
+                "[EXIT_NORMAL] %d allocations pendentes (%zu bytes) — "
+                "não é leak em exit normal, o SO libera ao terminar.\n",
+                leaks, total_bytes);
+            fclose(log_file);
+        }
+    }
+}
 /* ═══════════════════════════════════════════════════════════════════
  * ARENA INVENTORY
  * ═══════════════════════════════════════════════════════════════════ */
