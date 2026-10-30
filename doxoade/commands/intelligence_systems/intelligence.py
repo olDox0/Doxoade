@@ -10,6 +10,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from rich.console import Console
 
+from typing import Dict # List, Any
+
 from doxoade.dnm import DNM
 from doxoade.rescue import activate_protocol 
 from doxoade.tools.telemetry_tools.logger import ExecutionLogger
@@ -58,8 +60,6 @@ class IntelligenceGroup(click.Group):
 @click.option('--level',          '-l',  default=None, type=int, help="Profundidade máxima de diretórios a inspecionar (ex: -l 1 apenas raiz, -l 2 raiz + 1 subnível).")  # 👈 NOVA FLAG
 @click.option('--concatenate',    '-c',  is_flag=True, help="Minifica o JSON.")
 @click.option('--ai-export',      '-ai', is_flag=True, help="Gera XML para LLMs.")
-@click.option('--strict', is_flag=True,
-              help='Exit 1 para QUALQUER divergência (não só Python).')
 @click.option('--output',         '-o',  default='chief_dossier.json', help="Saída do dossiê.")
 @click.option('--focus',          '-f',  type=click.Choice(['vulcan', 'check', 'economic']))
 @click.option('--exclude',        '-x',  multiple=True, help="Pastas ou arquivos a ignorar.")
@@ -723,26 +723,4 @@ def generate_manifest():
         click.secho(f"   📦 {cmd_count} comandos | {line_count} linhas | {len(xml_str)//1024}KB", fg="cyan")
     except OSError as e:
         raise RuntimeError(f"🚨 [ANÚBIS] Falha crítica ao gravar em '{out_path}'. Detalhes: {e}")
-
-def _emit_exit_code(report: Dict, strict: bool = False) -> int:
-    """
-    v1.1 — Exit 1 se:
-    - Python divergir (sempre).
-    - C/C++ com código real divergir (classificação real_divergence=True).
-    - --strict e qualquer divergir.
-    """
-    src = report.get("source") or []
-    for d in src:
-        if d["equal"]:
-            continue
-        ext = d.get("ext", "")
-        classification = d.get("classification", {})
-        if ext == ".py":
-            return 1
-        if ext in ('.c', '.cpp', '.h', '.hpp', '.cc', '.cxx') and classification.get("real_divergence"):
-            return 1
-        if strict:
-            return 1
-    return 0
-
 

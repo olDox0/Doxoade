@@ -267,6 +267,8 @@ def _render_report(report: Dict, console: Console, list_all: bool) -> None:
 @click.option('--filter', 'filter_mode',
               type=click.Choice(['all', 'removed', 'added']), default='all',
               help='Filtra linhas do diff: all (default), removed (só -), added (só +).')
+@click.option('--strict', is_flag=True,
+              help='Exit 1 para QUALQUER divergência (não só Python/Código real).')
 def audit(xml_path, file_path, context, only_diff, summary, filter_mode, strict):
     """Compara o CDATA do dossiê XML com o arquivo original no disco."""
     root = _find_project_root(os.getcwd())
@@ -324,3 +326,24 @@ def audit(xml_path, file_path, context, only_diff, summary, filter_mode, strict)
     click.echo(Fore.CYAN + f'\n--- Resumo: {compared} comparados, {diverged} divergentes ---')
     if diverged > 0:
         raise SystemExit(1)
+
+def _emit_exit_code(report: Dict, strict: bool = False) -> int:
+    """
+    v1.1 — Exit 1 se:
+    - Python divergir (sempre).
+    - C/C++ com código real divergir (classificação real_divergence=True).
+    - --strict e qualquer divergir.
+    """
+    src = report.get("source") or []
+    for d in src:
+        if d["equal"]:
+            continue
+        ext = d.get("ext", "")
+        classification = d.get("classification", {})
+        if ext == ".py":
+            return 1
+        if ext in ('.c', '.cpp', '.h', '.hpp', '.cc', '.cxx') and classification.get("real_divergence"):
+            return 1
+        if strict:
+            return 1
+    return 0
