@@ -243,23 +243,18 @@ def get_build_dir(source_path: Path) -> Path:
     build_dir.mkdir(parents=True, exist_ok=True)
     return build_dir
     
-def run_c_with_flow(exe_path, limits):
-    """🌊 Nexus Flow para Binários: Rastro de chamadas de sistema."""
+def run_c_with_flow(exe_path, limits, extra_args=None):
     from doxoade.tools.aegis.warden import apply_resource_limits
     import shutil
-    
     click.echo("\x1b[34m🌊 Injetando Sonda Nexus Flow em Binário Nativo...\x1b[0m")
     apply_resource_limits(limits)
-
-    # Verifica se há strace (Linux) ou gdb (Windows) para fazer o rastro
     if shutil.which("strace"):
-        cmd = ["strace", "-e", "trace=memory,write,read,openat", str(exe_path)]
+        cmd = ["strace", "-e", "trace=memory,write,read,openat", str(exe_path)] + (extra_args or [])
         subprocess.run(cmd)
     elif shutil.which("gdb"):
-        # Modo batch do GDB para ver o rastro de execução básico no Windows
-        cmd = ["gdb", "-batch", "-ex", "run", "-ex", "bt", "--args", str(exe_path)]
+        cmd = ["gdb", "-batch", "-ex", "run", "-ex", "bt", "--args", str(exe_path)] + (extra_args or [])
         subprocess.run(cmd)
     else:
         click.echo("\x1b[33m⚠️  Ferramentas de rastro (strace/gdb) não encontradas. Execução padrão.\x1b[0m")
-        subprocess.run([str(exe_path)])
+        subprocess.run([str(exe_path)] + (extra_args or []))
 
