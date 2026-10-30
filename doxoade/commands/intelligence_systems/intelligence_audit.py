@@ -264,9 +264,6 @@ def _render_report(report: Dict, console: Console, list_all: bool) -> None:
 @click.option('--filter', 'filter_mode',
               type=click.Choice(['all', 'removed', 'added']), default='all',
               help='Filtra linhas do diff: all (default), removed (só -), added (só +).')
-@click.option('--filter', 'filter_mode',
-              type=click.Choice(['all', 'removed', 'added']), default='all',
-              help='Filtra linhas do diff: all (default), removed (só -), added (só +).')
 @click.option('--strict', is_flag=True,
               help='Exit 1 para QUALQUER divergência (não só Python/Código real).')
 def audit(xml_path, file_path, context, only_diff, summary, filter_mode, strict):
