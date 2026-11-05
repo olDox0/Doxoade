@@ -109,16 +109,16 @@ static void soteria_on_exit(void) {
          * sem crash — "leaks" são liberados pelo SO. Reportar em
          * stdout polui output e gera falso positivo no rescue.py.
          * Apenas LOG em arquivo, sem TAG_MOTIVO.
-         *
-         * Em crash (g_panic_lock != 0), reportar leaks é útil
-         * (sinal forense). Neste caso o bloco abaixo não roda
-         * porque soteria_on_exit só executa em exit normal via
-         * atexit — em crash, o processo termina em TerminateProcess. */
+         */
         soteria_dump_leaks_silent();
 
         /* Resumo de race conditions */
         if (g_race_count > 0) {
-
+            char race_buf[256];
+            snprintf(race_buf, 255,
+                "\n[RESUMO] %ld race conditions detectadas "
+                "(log: .doxoade/metalcraft/logs/race_conditions.log)\n",
+                (long)g_race_count);
             soteria_print_raw(race_buf);
         }
 

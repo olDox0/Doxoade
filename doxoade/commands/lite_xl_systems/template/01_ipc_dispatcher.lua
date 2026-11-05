@@ -54,25 +54,38 @@ end
 local function save_sovereign_session()
   if not core.root_view or not core.root_view.root_node then return end
 
-  -- 1. Coleta de Diretórios de Projeto
   local project_paths = {}
   if core.project_directories then
     for _, p in ipairs(core.project_directories) do
       local ppath = type(p) == "table" and (p.path or p.name) or p
       if ppath and type(ppath) == "string" and ppath ~= "" then
-        local abs = system.absolute_path(ppath) or ppath
-        local clean = abs:gsub("[/\\]+$", ""):gsub("\\", "/")
-        table.insert(project_paths, clean)
+        -- [FASE 14] Filtra paths inválidos (não-busca, não-canonical, não-nil)
+        local is_busca = ppath:find("^%[Busca%]") ~= nil
+        local is_canonical = ppath:match("/canonical$") ~= nil
+                  or ppath:match("/canonical%.") ~= nil
+                  or ppath:match("/canonical/") ~= nil
+                  or ppath:lower() == "canonical"
+        local is_user_dir = ppath:find("/%.config/lite%-xl") ~= nil
+        if not is_busca and not is_canonical and not is_user_dir then
+          local abs = system.absolute_path(ppath) or ppath
+          local clean = abs:gsub("[/\\]+$", ""):gsub("\\", "/")
+          table.insert(project_paths, clean)
+        end
       end
     end
   end
 
+  -- [FASE 14] Se nenhum projeto válido, tenta project_dir
   if #project_paths == 0 and core.project_dir then
-    local abs = system.absolute_path(core.project_dir) or core.project_dir
-    table.insert(project_paths, abs:gsub("[/\\]+$", ""):gsub("\\", "/"))
+    local raw = core.project_dir
+    local is_invalid = raw:find("/canonical$") ~= nil or raw:match("/%.") ~= nil
+    if not is_invalid then
+      local abs = system.absolute_path(raw) or raw
+      table.insert(project_paths, abs:gsub("[/\\]+$", ""):gsub("\\", "/"))
+    end
   end
 
-  -- 2. Coleta de Painéis e Documentos
+  -- [FASE 14] Filtrar arquivos de sessão também
   local leaves = get_doc_leaves(core.root_view.root_node)
   local active_node = core.root_view:get_active_node()
   local panels = {}
@@ -82,24 +95,29 @@ local function save_sovereign_session()
     if node == active_node then
       active_panel_idx = idx
     end
-    local panel_data = {
-      files = {},
-      active_file = nil
-    }
+    local panel_data = { files = {}, active_file = nil }
     for _, view in ipairs(node.views or {}) do
       if view and view.doc and view.doc.filename then
         local abs_fn = system.absolute_path(view.doc.filename) or view.doc.filename
-        local line, col = 1, 1
-        if view.doc.get_selection then
-          line, col = view.doc:get_selection(true)
-        end
-        table.insert(panel_data.files, {
-          filename = abs_fn:gsub("\\", "/"),
-          line = line,
-          col = col
-        })
-        if node.active_view == view then
-          panel_data.active_file = abs_fn:gsub("\\", "/")
+        local fn_lower = tostring(abs_fn):lower()
+        -- [FASE 14] Filtrar buffers virtuais e paths inválidos
+        local is_busca = fn_lower:find("%[busca%]") ~= nil
+        local is_canonical = fn_lower:match("/canonical$") ~= nil
+        local is_valid = not is_busca and not is_canonical
+
+        if is_valid then
+          local line, col = 1, 1
+          if view.doc.get_selection then
+            line, col = view.doc:get_selection(true)
+          end
+          table.insert(panel_data.files, {
+            filename = abs_fn:gsub("\\", "/"),
+            line = line,
+            col = col,
+          })
+          if node.active_view == view then
+            panel_data.active_file = abs_fn:gsub("\\", "/")
+          end
         end
       end
     end
@@ -161,9 +179,16 @@ local _session_restored = false
 local function has_cli_project_argument()
   local args = rawget(_G, "ARGS") or {}
   for _, arg in ipairs(args) do
-    if type(arg) == "string" and not arg:match("^%-%-") and not arg:match("^%-") then
-      local info = system.get_file_info(arg)
-      if info then return true end
+    if type(arg) == "string" then
+      -- [FASE 15] Ignora flags e o comando "canonical"
+      if arg:match("^%-%-") or arg:match("^%-") then
+        -- flag, ignorar
+      elseif arg:lower() == "canonical" then
+        -- [FASE 15] Comando canônico NÃO é projeto. Ignora.
+      else
+        local ok, info = pcall(system.get_file_info, arg)
+        if ok and info then return true end
+      end
     end
   end
   return false
@@ -405,16 +430,18 @@ local _BINARY_EXTS = {
     ["dat"] = true, ["db"] = true, ["sqlite"] = true, ["sqlite3"] = true,
 }
 
-local function is_binary_path(path)
+-- 🛡️ [FASE 1.5B-FIX] strict.lua exige rawset para _G
+rawset(_G, "is_binary_path", function(path)
     if not path then return true end
     local p = tostring(path):lower()
-    -- Filtra o próprio executável do Lite XL
     if p:find("lite%-xl%.exe$") or p:find("lite%-xl$") then return true end
-    -- Filtra por extensão binária
     local ext = p:match("%.([%w_]+)$")
     if ext and _BINARY_EXTS[ext] then return true end
     return false
-end
+end)
+
+-- 🛡️ [FASE 1.5] Hard Lock: processa argumentos de CLI apenas UMA VEZ por sessão
+local _cli_args_processed = false
 
 local function process_cli_arguments()
     if _cli_args_processed then return end
@@ -426,14 +453,30 @@ local function process_cli_arguments()
     local files_to_open = {}
     local dirs_to_add = {}
 
+    -- ⚠️ Normaliza o USERDIR para comparação
+    local user_dir_normalized = (USERDIR or "."):gsub("\\", "/"):lower():gsub("/+$", "")
+
     for _, arg in ipairs(args) do
         if type(arg) == "string"
            and not arg:match("^%-%-")
            and not arg:match("^%-")
-           and not is_binary_path(arg) then
+           and arg:lower() ~= "canonical"
+           and not _G.is_binary_path(arg) then
             local ok_info, info = pcall(system.get_file_info, arg)
             if ok_info and info then
-                if info.type == "file" then
+                -- ⚠️ Ignora o USERDIR como projeto
+                local arg_normalized = (system.absolute_path(arg) or arg):gsub("\\", "/"):lower():gsub("/+$", "")
+                if arg_normalized == user_dir_normalized 
+                   or arg_normalized:sub(1, #user_dir_normalized + 1) == user_dir_normalized .. "/" then
+                    if core.log then
+                      local _last_ignored = rawget(_G, "_DOXOADE_LAST_IGNORED_USERDIR")
+                      local now = os.clock()
+                      if not _last_ignored or (now - _last_ignored) > 2.0 then
+                        rawset(_G, "_DOXOADE_LAST_IGNORED_USERDIR", now)
+                        core.log("⚠️ [CLI] Ignorando USERDIR como projeto: " .. arg)
+                      end
+                    end
+                elseif info.type == "file" then
                     table.insert(files_to_open, arg)
                 elseif info.type == "dir" then
                     table.insert(dirs_to_add, arg)
@@ -538,11 +581,35 @@ local function hades_autosave_if_changed()
     end)
 end
 
+-- [FASE 13] Salva estado APENAS após boot completo
+local _boot_complete = false
+core.add_thread(function()
+  coroutine.yield(3.0)  -- Aguarda 3s para boot completo
+  _boot_complete = true
+  if core.log then
+    core.log("💾 [SESSION] Boot completo. Estado será salvo em 15s.")
+  end
+end)
+
+
 -- Save-on-Quit com guarda
+
+-- Hook de quit: só salva se boot completo
 local original_core_quit = core.quit
 core.quit = function(...)
+  if _boot_complete then
     pcall(save_sovereign_session)
-    if original_core_quit then return original_core_quit(...) end
+    if core.log then
+      core.log("💾 [SESSION] Estado salvo com sucesso.")
+    end
+  else
+    if core.log then
+      core.log("⚠️ [SESSION] Boot incompleto. Estado NÃO será salvo (evita corrupção).")
+    end
+  end
+  if original_core_quit then
+    return original_core_quit(...)
+  end
 end
 
 pcall(function()

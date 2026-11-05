@@ -89,6 +89,50 @@ class TyphonDeployEngine:
     """Motor de Deploy com isolamento de modos: PRODUCTION, SANDBOX, TEST."""
 
     @classmethod
+    def _install_assets(cls, deploy_dir: Path) -> Tuple[bool, str]:
+        """Copia assets do projeto fonte (logo, icons, etc.) para o USERDIR de deploy."""
+        try:
+            from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+            source_assets = LiteXLPaths.get_template_dir().parent / "assets"
+            if not source_assets.exists() or not source_assets.is_dir():
+                return True, "Sem assets no projeto fonte (nada a copiar)"
+            dest_doxoade = deploy_dir / ".doxoade"
+            dest_assets = dest_doxoade / "assets"
+            dest_assets.mkdir(parents=True, exist_ok=True)
+            
+            copied_files = 0
+            copied_dirs = 0
+            found_logo = None
+            
+            for item in source_assets.iterdir():
+                try:
+                    if item.is_file():
+                        shutil.copy2(item, dest_assets / item.name)
+                        copied_files += 1
+                        if item.name in ("logo.ttf", "logo.otf", "logo.png", "logo2.png"):
+                            found_logo = item.name
+                    elif item.is_dir():
+                        dest_sub = dest_assets / item.name
+                        if dest_sub.exists():
+                            shutil.rmtree(dest_sub, ignore_errors=True)
+                        shutil.copytree(item, dest_sub)
+                        copied_dirs += 1
+                except Exception as e:
+                    print(f"  {Fore.YELLOW}⚠ Falha ao copiar '{item.name}': {e}{Fore.RESET}")
+            
+            summary = f"{copied_files} arquivo(s)"
+            if copied_dirs > 0:
+                summary += f", {copied_dirs} diretório(s)"
+            if found_logo:
+                summary += f" | logo: {found_logo}"
+            else:
+                summary += " | logo: AUSENTE"
+            
+            return True, f"{summary} → {dest_assets}"
+        except Exception as e:
+            return False, f"Falha ao instalar assets: {e}"
+        
+    @classmethod
     def boot_watchdog(cls, mode: DeployMode, timeout: float = 8.0) -> bool:
         """🐺 Prova que o init bootou; senão autoriza fallback."""
         d = cls._get_deploy_dir(mode)
@@ -106,7 +150,9 @@ class TyphonDeployEngine:
     def _get_deploy_dir(cls, mode: DeployMode) -> Path:
         """Retorna o diretório alvo baseado no modo operacional."""
         if mode == "production":
-            return LiteXLEngine.get_user_dir()
+            home_anchor = Path.home() / ".doxoade" / "python_path.txt"
+            home_anchor.parent.mkdir(parents=True, exist_ok=True)
+            home_anchor.write_text(str(Path(sys.executable).resolve()), encoding="utf-8")
         elif mode == "sandbox":
             return LiteXLEngine.get_sandbox_dir()
         elif mode == "test":
@@ -226,9 +272,82 @@ class TyphonDeployEngine:
                 pass
 
     @classmethod
+    def sterilize_environment(cls, deploy_dir: Path) -> None:
+        print(f"\n{Fore.CYAN}{Style.BRIGHT}🧼 ESTERILIZANDO AMBIENTE ({deploy_dir.name})...{Style.RESET_ALL}")
+        plugins_dir = deploy_dir / "plugins"
+        plugins_disabled = deploy_dir / "plugins_DISABLED"
+        if plugins_dir.exists() and plugins_dir.is_dir():
+            try:
+                if plugins_disabled.exists():
+                    shutil.rmtree(plugins_disabled)
+                plugins_dir.rename(plugins_disabled)
+                print(f"  {Fore.YELLOW}⚠ Plugins nativos desativados (renomeados para plugins_DISABLED).{Fore.RESET}")
+            except Exception as e:
+                print(f"  {Fore.RED}✖ Falha ao desativar plugins: {e}{Fore.RESET}")
+        user_settings = deploy_dir / "user_settings.lua"
+        if user_settings.exists():
+            try:
+                disabled_settings = deploy_dir / "user_settings.lua.DISABLED"
+                if disabled_settings.exists():
+                    disabled_settings.unlink()
+                user_settings.rename(disabled_settings)
+                print(f"  {Fore.YELLOW}⚠ user_settings.lua desativado (soberano assumirá o controle).{Fore.RESET}")
+            except Exception:
+                try: user_settings.unlink()
+                except Exception: pass
+        trash_files = [
+            "error.txt", "FATAL_CRASH_DUMP.txt", "init.lua.broken", 
+            "init.lua.PROD_BACKUP", "session_log.txt.bak", "font_cache.lua"
+        ]
+        for fname in trash_files:
+            fpath = deploy_dir / fname
+            if fpath.exists():
+                try: fpath.unlink()
+                except Exception: pass
+        dox_dir = deploy_dir / ".doxoade"
+        if dox_dir.exists():
+            old_assets = dox_dir / "assets"
+            if old_assets.exists() and old_assets.is_dir():
+                try:
+                    shutil.rmtree(old_assets, ignore_errors=True)
+                except Exception:
+                    pass
+            for sub in ["api_guard", "diagnostics", "canvas_cache", "terminal_temp"]:
+                target = dox_dir / sub
+                if target.exists() and target.is_dir():
+                    try:
+                        shutil.rmtree(target)
+                        target.mkdir(parents=True, exist_ok=True)
+                    except Exception:
+                        pass
+            for pty_dir in dox_dir.glob("terminal_pty_ipc*"):
+                if pty_dir.is_dir():
+                    try: shutil.rmtree(pty_dir)
+                    except Exception: pass
+            for f in dox_dir.glob("*.ndjson*"):
+                try: f.unlink()
+                except Exception: pass
+            for f in dox_dir.glob("*.stderr"):
+                try: f.unlink()
+                except Exception: pass
+            for f in dox_dir.glob("*.tmp"):
+                try: f.unlink()
+                except Exception: pass
+        print(f"  {Fore.GREEN}✔ Ambiente esterilizado com sucesso. Caches e IPCs limpos.{Fore.RESET}\n")
+
+    @classmethod
     def deploy(cls, mode: DeployMode = "production", force: bool = False, no_khonsu: bool = False) -> Dict[str, Any]:
         # 🔧 AUTO-ELEVAÇÃO: se não for Admin e for Windows, relança elevado
         import sys, os
+        # 🛑 BYPASS DO KHONSU ATIVADO (Texto puro sem AOT)
+        if no_khonsu:
+            # 🔧 CORREÇÃO: Gerar o buffer unificado em texto puro antes de escrever
+            templates = LiteXLInitBuilder.get_template_files()
+            unified_source, _ = DoxlyKhonsuGate.assemble_unified_buffer(templates, mode=mode)
+            
+            init_dest.write_text(unified_source, encoding="utf-8")
+            installed_size = len(unified_source)
+            opt_mode = "plain_no_khonsu"
         if sys.platform == "win32" and mode in ("test", "sandbox"):
             try:
                 import ctypes
@@ -263,6 +382,17 @@ class TyphonDeployEngine:
         # ─── Resto do deploy original ───
         deploy_dir = cls._get_deploy_dir(mode)
         deploy_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 🧼 FASE DE ESTERILIZAÇÃO AUTOMÁTICA (Limpa caches, IPCs e plugins conflitantes)
+        if mode in ("production", "test"):
+            cls.sterilize_environment(deploy_dir)
+
+        # dentro de deploy(), logo após sterilize_environment
+        # ok_assets, msg_assets = cls._install_assets(deploy_dir)
+        # print(f"  {Fore.WHITE}6. Assets:{Fore.RESET} {msg_assets}")
+        # if not ok_assets and not force:
+        #     return {"success": False, "error": msg_assets, "backup": backup_path}
+            
         backup_path = None
 
         # Âncora do Interpretador Python: grava o executável do venv ativo
@@ -282,10 +412,27 @@ class TyphonDeployEngine:
                     try: target.unlink()
                     except Exception: pass
 
+        # 🔧 [FASE 1.5] Instalar assets (chamar apenas UMA vez, fora de loops)
+        # ok_assets, msg_assets = cls._install_assets(deploy_dir)
+        # print(f"  {Fore.WHITE}6. Assets:{Fore.RESET} {msg_assets}")
+        # if not ok_assets and not force:
+        #     return {"success": False, "error": msg_assets, "backup": backup_path}
+
         if mode == "production":
             ok, backup_path = cls.create_backup(mode, reason="pre-deploy")
             if not ok and not force:
                 return {"success": False, "error": "Falha ao criar backup", "backup": None}
+
+        # if gate_res["success"] and gate_res.get("bytecode"):
+        #     init_dest.write_bytes(gate_res["bytecode"])
+        #     installed_size = len(gate_res["bytecode"])
+        #     opt_mode = "bytecode"
+
+        # 🔧 [FASE 1] Instalar assets (logo, icons) no deploy_dir
+        ok_assets, msg_assets = cls._install_assets(deploy_dir)
+        print(f"  {Fore.WHITE}6. Assets:{Fore.RESET} {msg_assets}")
+        if not ok_assets and not force:
+            return {"success": False, "error": msg_assets, "backup": backup_path}
 
         try:
             py_anchor = deploy_dir / ".doxoade" / "python_path.txt"
@@ -296,29 +443,35 @@ class TyphonDeployEngine:
 
             # 🛑 BYPASS DO KHONSU ATIVADO (Texto puro sem AOT)
             if no_khonsu:
-                print(f"  {Fore.YELLOW}⚡ [PLAIN MODE] Khonsu AOT desativado. Gerando init.lua em texto puro...{Fore.RESET}")
-                raw_source = LiteXLInitBuilder.generate_sovereign_init()
-                # Injeta a desativação do Khonsu no topo do init.lua (strict-safe):
-                # 'config' NÃO é global no Lite XL; strict.lua mata leitura de global
-                # não declarada na linha 1. require local explícito = imunidade total.
-                kill_switch = (
-                    'local _dox_cfg = require "core.config"\n'
-                    "_dox_cfg.doxoade_khonsu = false\n"
-                )
-                plain_source = kill_switch + raw_source
-#                kill_switch = 'pcall(function() local c = require("core.config") c.doxoade_khonsu = false end)\n'
-#                plain_source = kill_switch + raw_source
-                init_dest.write_text(plain_source, encoding="utf-8")
-                installed_size = len(plain_source)
+                init_dest.write_text(unified_source, encoding="utf-8")
+                installed_size = len(unified_source)
                 opt_mode = "plain_no_khonsu"
             else:
                 gate_res = DoxlyKhonsuGate.compile_aot_supervisioned(target_mode=mode, verbose=True)
+                
+                # ✅ DIAGNÓSTICO DO GATE
+                print(f"  {Fore.WHITE}5. Khonsu Gate:{Fore.RESET}")
+                print(f"     • Success: {gate_res.get('success', False)}")
+                print(f"     • Bytecode: {'SIM (' + str(len(gate_res.get('bytecode', b''))) + ' bytes)' if gate_res.get('bytecode') else 'NÃO'}")
+                print(f"     • Opt Mode: {gate_res.get('opt_mode', 'N/A')}")
+                print(f"     • Erro: {gate_res.get('error', 'Nenhum')}")
+                
+                # ✅ CORREÇÃO: Aborta se AOT falhar (a menos que --force)
+                if not gate_res["success"]:
+                    if not force:
+                        print(f"\n{Fore.RED}{Style.BRIGHT}✖ COMPILAÇÃO AOT FALHOU. DEPLOY ABORTADO.{Style.RESET_ALL}")
+                        return {"success": False, "error": gate_res.get('error', 'AOT Failed'), "backup": backup_path}
+                    else:
+                        print(f"\n{Fore.YELLOW}⚠ --force ativo. Continuando com fallback plain.{Fore.RESET}")
+                        
                 if gate_res["success"] and gate_res.get("bytecode"):
                     init_dest.write_bytes(gate_res["bytecode"])
                     installed_size = len(gate_res["bytecode"])
+                    opt_mode = gate_res.get("opt_mode", "bytecode")
                 else:
-                    init_dest.write_text(gate_res["source"], encoding="utf-8")
-                    installed_size = len(gate_res["source"])
+                    init_dest.write_text(gate_res.get("source", unified_source), encoding="utf-8")
+                    installed_size = len(gate_res.get("source", unified_source))
+                    opt_mode = "plain_fallback"
                 opt_mode = gate_res.get("opt_mode", "plain")
 
             return {
@@ -334,6 +487,22 @@ class TyphonDeployEngine:
             if mode == "production" and backup_path and backup_path.exists():
                 shutil.copy2(backup_path, deploy_dir / "init.lua")
             return {"success": False, "error": str(e), "backup": backup_path}
+        finally:
+            print(f"\n{Fore.CYAN}{Style.BRIGHT}🔬 DIAGNÓSTICO DE DEPLOY — [{mode.upper()}]{Style.RESET_ALL}")
+            print(f"  {Fore.WHITE}1. Diretório de Deploy:{Fore.RESET} {deploy_dir}")
+            print(f"  {Fore.WHITE}2. Python:{Fore.RESET} {sys.executable}")
+            print(f"  {Fore.WHITE}3. Templates:{Fore.RESET} {len(LiteXLInitBuilder.get_template_files())} arquivos")
+            print(f"  {Fore.WHITE}4. Khonsu:{Fore.RESET} {'DESATIVADO' if no_khonsu else 'ATIVADO'}")
+            # 🔧 [FASE 1] linha nova
+            assets_dir = deploy_dir / ".doxoade" / "assets"
+            if assets_dir.exists():
+                assets_count = sum(1 for _ in assets_dir.rglob("*") if _.is_file())
+                print(f"  {Fore.WHITE}5. Assets:{Fore.RESET} {assets_count} arquivo(s) em .doxoade/assets/")
+            else:
+                print(f"  {Fore.WHITE}5. Assets:{Fore.RESET} {Fore.YELLOW}ausentes (fallback){Fore.RESET}")
+            print()
+
+
 
     @classmethod
     def print_status(cls, target_mode: Optional[DeployMode] = None) -> None:
@@ -486,15 +655,29 @@ class TyphonDeployEngine:
             return None
 
         deploy_dir = cls._get_deploy_dir(mode)
-
         env = os.environ.copy()
-        if mode != "production":
-            env["LITE_USERDIR"] = str(deploy_dir)
-            env["XDG_CONFIG_HOME"] = str(deploy_dir.parent)
+        env = os.environ.copy()
+        env["LITE_USERDIR"] = str(deploy_dir)
+        env["XDG_CONFIG_HOME"] = str(deploy_dir.parent)
+        env["DOXOADE_DEPLOY_MODE"] = mode
+        
+        # ⚠️ INSTRUMENTAÇÃO: Reporta o que será passado
+        print(f"\n{Fore.CYAN}{Style.BRIGHT}🔬 DIAGNÓSTICO DE LAUNCH — [{mode.upper()}]{Style.RESET_ALL}")
+        print(f"  {Fore.WHITE}1. Deploy Dir:{Fore.RESET} {deploy_dir}")
+        print(f"  {Fore.WHITE}2. --userdir será passado como:{Fore.RESET} {deploy_dir}")
+        print(f"  {Fore.WHITE}3. LITE_USERDIR antes:{Fore.RESET} {env.get('LITE_USERDIR', 'NÃO DEFINIDO')}")
+
+        # ✅ CORREÇÃO: Define LITE_USERDIR e XDG_CONFIG_HOME para TODOS os modos
+        env["LITE_USERDIR"] = str(deploy_dir)
+        env["XDG_CONFIG_HOME"] = str(deploy_dir.parent)
         env["DOXOADE_DEPLOY_MODE"] = mode
 
-        CREATE_NEW_CONSOLE = 0x00000010 if sys.platform == "win32" else 0
+        print(f"  {Fore.WHITE}4. LITE_USERDIR depois:{Fore.RESET} {env.get('LITE_USERDIR', 'NÃO DEFINIDO')}")
+        print(f"  {Fore.WHITE}5. XDG_CONFIG_HOME:{Fore.RESET} {env.get('XDG_CONFIG_HOME', 'NÃO DEFINIDO')}")
+        print(f"  {Fore.WHITE}6. DOXOADE_DEPLOY_MODE:{Fore.RESET} {env.get('DOXOADE_DEPLOY_MODE', 'NÃO DEFINIDO')}")
+        print()
 
+        CREATE_NEW_CONSOLE = 0x00000010 if sys.platform == "win32" else 0
         try:
             proc = subprocess.Popen(
                 [str(exe), "--userdir", str(deploy_dir)],
@@ -645,3 +828,23 @@ def forensic_harvester(pid: int, deploy_dir: Path):
         print(f"\n{Fore.YELLOW}🛑 [HARVESTER] Monitoramento encerrado pelo usuário.{Fore.RESET}")
 
 #TyphonDeployEngine.deploy = classmethod(_deploy_with_thumbnails)
+
+    @classmethod
+    def _acquire_mode_lock(cls, mode: DeployMode) -> bool:
+        lock_file = cls._get_deploy_dir(mode) / ".deploy.lock"
+        if lock_file.exists():
+            try:
+                pid = int(lock_file.read_text().strip())
+                if is_pid_alive(pid):
+                    print(f"{Fore.RED}✖ Deploy '{mode}' bloqueado: PID {pid} ainda rodando.{Fore.RESET}")
+                    return False
+            except Exception:
+                pass
+        lock_file.write_text(str(os.getpid()))
+        return True
+
+    @classmethod
+    def _release_mode_lock(cls, mode: DeployMode) -> None:
+        lock_file = cls._get_deploy_dir(mode) / ".deploy.lock"
+        try: lock_file.unlink()
+        except Exception: pass

@@ -333,12 +333,14 @@ pcall(function() contextmenu = require "plugins.contextmenu" end)
 local original_node_mouse_pressed = Node.on_mouse_pressed
 function Node:on_mouse_pressed(button, x, y, clicks)
   if button == "right" or button == 2 then
+    -- [FASE 3] Captura o item do TreeView ANTES do menu abrir.
+    -- Só executa se a view ativa for TreeView (defesa em profundidade).
+    -- NÃO altera o comportamento do context menu de abas do DocView.
     local idx = self:get_tab_overlapping_point(x, y)
     if idx and self.views and self.views[idx] then
       local view = self.views[idx]
       self:set_active_view(view)
       core.set_active_view(view)
-
       if contextmenu and contextmenu.show then
         local ok = pcall(contextmenu.show, contextmenu, x, y)
         if ok then return true end
@@ -346,7 +348,6 @@ function Node:on_mouse_pressed(button, x, y, clicks)
         local ok = pcall(command.perform, "context-menu:show", x, y)
         if ok then return true end
       end
-
       open_floating_menu(view, x, y)
       return true
     end
@@ -400,7 +401,7 @@ command.add("core.docview", {
 })
 
 -- =============================================================================
--- REGISTRO NO CONTEXTMENU NATIVO
+-- REGISTRO NO CONTEXTMENU NATIVO (para DocView — mantido)
 -- =============================================================================
 pcall(function()
   if contextmenu and contextmenu.register then
@@ -413,13 +414,142 @@ pcall(function()
       divider,
       { text = "Open in Explorer", command = "doxoade:tab-open-in-explorer" },
     }
-
     local function predicate()
       local v = core.active_view
       return v and v.doc and v.doc.filename ~= nil
     end
-
     contextmenu:register(predicate, items)
+  end
+end)
+
+-- =============================================================================
+-- [FASE 5] UTILITÁRIOS DO TREEVIEW (definidos ANTES de qualquer uso)
+-- =============================================================================
+
+local function _is_treeview_instance(view)
+  if not view then return false end
+  local ok_tv, TreeView = pcall(require, "plugins.treeview")
+  if not ok_tv or not TreeView then
+    ok_tv, TreeView = pcall(require, "plugins.treeview.treeview")
+  end
+  if ok_tv and TreeView and type(view.is) == "function" then
+    local ok, res = pcall(view.is, view, TreeView)
+    if ok and res then return true end
+  end
+  if type(view.get_name) == "function" then
+    local ok, name = pcall(view.get_name, view)
+    if ok and type(name) == "string" and name:lower():find("tree") then
+      return true
+    end
+  end
+  return false
+end
+
+local function _resolve_item_path(item)
+  if not item then return nil end
+  local raw = item.filename or item.abs_filename or item.path
+  if type(raw) ~= "string" or raw == "" then return nil end
+  local abs = (system.absolute_path and system.absolute_path(raw)) or raw
+  abs = abs:gsub("\\", "/")
+  local finfo = system.get_file_info and system.get_file_info(abs)
+  if finfo and finfo.type == "dir" then
+    return abs
+  elseif finfo and finfo.type == "file" then
+    local dir = abs:match("^(.*)[/\\][^/\\]+$")
+    return dir and dir:gsub("\\", "/") or nil
+  end
+  return abs
+end
+
+-- =============================================================================
+-- [FASE 5] HOOK DIRETO NO TREEVIEW (botão direito → busca contextual)
+-- =============================================================================
+-- Em vez de competir com o contextmenu nativo do TreeView, interceptamos o
+-- clique com botão direito. Se o alvo for uma pasta válida, abrimos a paleta
+-- de busca IMEDIATAMENTE (UX de 1 clique + digitar).
+-- =============================================================================
+pcall(function()
+  local ok_tv, TreeView = pcall(require, "plugins.treeview")
+  if not ok_tv or not TreeView then
+    ok_tv, TreeView = pcall(require, "plugins.treeview.treeview")
+  end
+  if not ok_tv or not TreeView or type(TreeView.on_mouse_pressed) ~= "function" then
+    return
+  end
+
+  if rawget(_G, "_DOXOADE_TREE_CTX_FASE5_HOOKED") then return end
+  rawset(_G, "_DOXOADE_TREE_CTX_FASE5_HOOKED", true)
+
+  local original_tv_pressed = TreeView.on_mouse_pressed
+  function TreeView:on_mouse_pressed(button, x, y, clicks)
+    -- Captura o item antes do original (que pode mudar hovered_item)
+    local captured_item = nil
+    if type(self.get_item_under_pos) == "function" then
+      local ok, item = pcall(self.get_item_under_pos, self, x, y)
+      if ok and item then captured_item = item end
+    end
+
+    -- Se for botão direito, abre a busca contextual ANTES do menu nativo
+    if button == "right" or button == 2 then
+      local target = captured_item or self.hovered_item or self.selected_item
+      local path = _resolve_item_path(target)
+
+      -- Sempre limpa resíduo
+      rawset(_G, "_DOXOADE_TREE_CONTEXT_TARGET", nil)
+      if path then
+        rawset(_G, "_DOXOADE_TREE_CONTEXT_TARGET", path)
+
+        -- Consome a seleção ativa (se houver) para pré-preencher a paleta
+        local default_term = ""
+        local active_doc = core.active_view and core.active_view.doc
+        if active_doc and active_doc.has_selection and active_doc:has_selection() then
+          local l1, c1, l2, c2 = active_doc:get_selection(true)
+          if l1 == l2 then
+            local ok2, txt = pcall(active_doc.get_text, active_doc, l1, c1, l2, c2)
+            if ok2 and txt then
+              txt = txt:gsub("^%s+", ""):gsub("%s+$", "")
+              if #txt > 0 and #txt <= 120 then default_term = txt end
+            end
+          end
+        end
+
+        -- Abre a paleta de busca restrita (1 clique = 1 ação)
+        if core.command_view and type(core.command_view.enter) == "function" then
+          pcall(function() core.command_view:hide() end)
+
+          local short_scope = path:match("[^/\\]+$") or path
+          core.command_view:enter(
+            string.format("🔍 Buscar em '%s'...", short_scope),
+            {
+              text = default_term,
+              -- [FASE 5] `suggest` obrigatório para renderização
+              suggest = function() return {} end,
+              submit = function(query)
+                if not query or query:match("^%s*$") then return end
+                local executor = rawget(_G, "DOXOADE_EXECUTE_GLOBAL_SEARCH")
+                if type(executor) == "function" then
+                  pcall(executor, query, path)
+                elseif core.log then
+                  pcall(core.log, "⚠ [SEARCH] execute_global_search indisponível.")
+                end
+              end,
+            }
+          )
+
+          if core.log then
+            pcall(core.log, string.format("🔍 [TREE-CTX] Busca contextual aberta em: %s", path))
+          end
+          return true  -- Consome o clique (não abre o menu nativo)
+        end
+      end
+    end
+
+    -- Fallback: comportamento padrão do TreeView (não interceptamos)
+    return original_tv_pressed(self, button, x, y, clicks)
+  end
+
+  if core.log then
+    core.log("🔍 [FASE 5] TreeView hook instalado: botão direito abre busca contextual.")
   end
 end)
 

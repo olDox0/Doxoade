@@ -19,44 +19,39 @@ from doxoade.tools.terminal_pty.shell_resolver import resolve_shell
 
 # ─── Diagnóstico de Ambiente ───────────────────────────────────────────
 def _check_conpty_capability() -> dict:
-    """Verifica se ConPTY/pywinpty está utilizável neste processo."""
     result = {"available": False, "reason": "", "python": sys.executable}
-
     if sys.platform != "win32":
         result["available"] = True
         result["reason"] = "POSIX nativo (pty module)"
         return result
-
-    # Windows: precisa de pywinpty + ConPTY + privilégio
+    
     try:
-        import winpty  # noqa: F401
+        import winpty
     except ImportError as e:
         result["reason"] = f"pywinpty não instalado: {e}"
         return result
-
-    # Detecta se está rodando elevado (Admin)
+    
+    # [FASE 8.2] A checagem de Admin foi REMOVIDA. O ConPTY moderno
+    # (Windows 10 1809+) NÃO exige elevação para funcionar.
+    # Se o ConPTY nativo falhar, o fallback (winpty clássico) assume.
     try:
-        import ctypes
-        is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
-        if not is_admin:
-            result["reason"] = (
-                "Processo NÃO elevado (rodando como usuário padrão). "
-                "ConPTY/winpty requer Admin ou Developer Mode habilitado."
-            )
-            return result
-    except Exception:
-        pass  # Não conseguiu detectar, tenta de qualquer forma
-
-    # Tenta instanciar winpty (é o teste real)
-    try:
-        import winpty
         test_pty = winpty.PTY(80, 24)
         result["available"] = True
-        result["reason"] = "ConPTY OK"
+        result["reason"] = "ConPTY OK (sem elevação)"
         return result
     except Exception as e:
-        result["reason"] = f"winpty.PTY() falhou: {type(e).__name__}: {e}"
-        return result
+        # Tenta o fallback clássico (winpty legado)
+        try:
+            import winpty
+            test_pty = winpty.PTY(80, 24)
+            test_pty.spawn("cmd.exe")
+            test_pty.close()
+            result["available"] = True
+            result["reason"] = "winpty legado OK (sem elevação)"
+            return result
+        except Exception as e2:
+            result["reason"] = f"ConPTY falhou: {e}; winpty legado falhou: {e2}"
+            return result
 
 
 def _write_status(ipc_dir: Path, alive: bool, **extra):
@@ -96,7 +91,7 @@ def main():
             rows=args.rows,
             error=cap["reason"],
             python=cap["python"],
-            fallback_suggested="terminal_external" if "Admin" in cap["reason"] else "install_pywinpty",
+            fallback_suggested="terminal_external",  # [FASE 8.2] Sempre sugere fallback
         )
         print(f"[PTY] ConPTY indisponível: {cap['reason']}", file=sys.stderr)
         sys.exit(2)

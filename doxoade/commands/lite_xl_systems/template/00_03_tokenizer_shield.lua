@@ -312,7 +312,8 @@ pcall(function()
         local t0 = os.clock()
 
         for i = self.first_invalid_line, max do
-          local state = (i > 1) and self.lines[i - 1].state
+          local state = (i > 1) and self.lines[i - 1] and self.lines[i - 1].state
+--          local state = (i > 1) and self.lines[i - 1].state
           local line = self.lines[i]
           if line and line.resume and (line.init_state ~= state or line.text ~= self.doc.lines[i]) then
             line.resume = nil

@@ -155,15 +155,63 @@ local function safe_error_message(...)
   return table.concat(args, " ")
 end
 
+-- =============================================================================
+-- 📜 HOOKS DE CAPTURA FORENSE DE ERROS (COM TRADUÇÃO DE TRACEBACK)
+-- =============================================================================
+local function safe_error_message(...)
+  local args = { ... }
+  for i = 1, select("#", ...) do args[i] = tostring(args[i]) end
+  return table.concat(args, " ")
+end
+
 local original_core_error = core.error
 function core.error(...)
   local msg = safe_error_message(...)
   local tb = debug.traceback("", 2)
+
+  -- ✅ TRADUÇÃO DO TRACEBACK (PURAMENTE LUA)
+  local translated_tb = tb
+  local source_map = rawget(_G, "_DOXOADE_SOURCE_MAP")
+  if source_map and type(source_map.resolve) == "function" then
+    local translated_lines = {}
+    for line in tb:gmatch("[^\r\n]+") do
+      local unified_line = line:match("tmp%w+%.lua:(%d+)")
+      if unified_line then
+        local line_num = tonumber(unified_line)
+        local resolved = source_map.resolve(line_num)
+        if resolved then
+          local template_name = resolved.name
+          local start_line = resolved.start_line
+          local end_line = resolved.end_line
+          local relative_line = line_num - start_line + 1
+
+          translated_lines[#translated_lines + 1] = string.format(
+            "\27[36m┌─ [%s:%d]\27[0m",
+            template_name, relative_line
+          )
+          translated_lines[#translated_lines + 1] = string.format(
+            "  \27[90m(linha %d no init.lua unificado)\27[0m",
+            line_num
+          )
+          translated_lines[#translated_lines + 1] = string.format(
+            "\27[36m└%s\27[0m",
+            string.rep("─", 60)
+          )
+        else
+          translated_lines[#translated_lines + 1] = line
+        end
+      else
+        translated_lines[#translated_lines + 1] = line
+      end
+    end
+    translated_tb = table.concat(translated_lines, "\n")
+  end
+
+  -- Usa translated_tb no lugar de tb
   local culprit = "core"
   local culprit_file = "unknown"
   local culprit_line = 0
-
-  for line in tb:gmatch("[^\r\n]+") do
+  for line in translated_tb:gmatch("[^\r\n]+") do
     if not line:match("core[/\\]init%.lua") and
        not line:match("10_forensic_engine%.lua") and
        not line:match("%[C%]:") and
@@ -185,7 +233,7 @@ function core.error(...)
       culprit = culprit,
       file = culprit_file,
       line = culprit_line,
-      trace = tb,
+      trace = translated_tb,
       time = os.date("%H:%M:%S"),
     })
   end)

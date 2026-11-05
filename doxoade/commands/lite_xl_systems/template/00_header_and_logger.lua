@@ -5,17 +5,90 @@
   - Vacinas Contratuais de Layout e Views Órfãs (Ma'at).
   - Telemetria de Comandos e HUD OSD de Boot.
 ]]
-local core = rawget(_G, "core") or (pcall(require, "core") and require("core") or nil)
---local config = rawget(_G, "config") or (pcall(require, "core.config") and require("core.config") or {})
-local system = rawget(_G, "system") or (pcall(require, "system") and require("system") or nil)
+
+-- 🛡️ DOXOADE SOVEREIGN BOOT LOCK (Impede recarregamento pelo autoreload)
+if rawget(_G, "_DOXOADE_SOVEREIGN_BOOT_LOCK") then return end
+rawset(_G, "_DOXOADE_SOVEREIGN_BOOT_LOCK", true)
+
 local RootView = require "core.rootview"
-local common = require "core.common"
-local config = require "core.config"
-local style = require "core.style"
-local command = require "core.command"
-local keymap = require "core.keymap"
-local Node = require "core.node"
+local common   = require "core.common"
+local config   = require "core.config"
+local style    = require "core.style"
+local command  = require "core.command"
+local keymap   = require "core.keymap"
+local Node     = require "core.node"
+
+-- ═══════════════════════════════════════════════════════════
+-- DECLARAÇÕES GLOBAIS DE COMPATIBILIDADE (Emergência)
+-- ═══════════════════════════════════════════════════════════
+rawset(_G, "USERDIR", USERDIR or os.getenv("LITE_USERDIR") or (os.getenv("HOME") .. "/.config/lite-xl"))
+rawset(_G, "PATHSEP", package.config:sub(1,1))
+
+-- 🛡️ VACINA MA'AT: Neutralização definitiva do autoreload tóxico
+config.plugins = config.plugins or {}
+config.plugins.autoreload = false
+
+-- Impede carregamento dinâmico futuro
+package.preload["plugins.autoreload"] = function()
+  return {
+    check_files = function() end,
+    reload_doc = function() end,
+  }
+end
+
+-- Se já estiver na memória, esvazia seus hooks
+if package.loaded["plugins.autoreload"] then
+  local ar = package.loaded["plugins.autoreload"]
+  if type(ar) == "table" then
+    ar.check_files = function() end
+    ar.reload_doc = function() end
+  end
+end
+
+-- Variáveis que templates antigos esperam como globais
+local _user_dir = USERDIR or "."
+local _sep = PATHSEP or "/"
+rawset(_G, "user_dir", _user_dir)
+rawset(_G, "sep", _sep)
+
+-- Função stub para compatibilidade com código antigo
+rawset(_G, "cleanup_empty_splits", function()
+    -- No-op: a V3.0 do split mover não precisa mais disso
+    local root = core.root_view and core.root_view.root_node
+    if not root then return end
+    local function traverse(n)
+        if not n or n.type == "leaf" then return false end
+        if n.a and n.a.type == "leaf" and not n.a.locked and #(n.a.views or {}) == 0 and n.b then
+            pcall(function() n:consume(n.b) end)
+            return true
+        end
+        if n.b and n.b.type == "leaf" and not n.b.locked and #(n.b.views or {}) == 0 and n.a then
+            pcall(function() n:consume(n.a) end)
+            return true
+        end
+        if traverse(n.a) then return true end
+        if traverse(n.b) then return true end
+        return false
+    end
+    for _ = 1, 3 do
+        if not traverse(root) then break end
+    end
+end)
+
+-- ⚠️ CRÍTICO: Desabilita autoreload ANTES de qualquer require.
+-- O autoreload.lua do Lite XL causa 400+ erros de "abs_filename nil".
+local _dox_config = require "core.config"
+if _dox_config then
+    if _dox_config.plugins then
+        _dox_config.plugins.autoreload = false
+    else
+        _dox_config.plugins = { autoreload = false }
+    end
+end
+
 local DocView = require "core.docview"
+local core = rawget(_G, "core") or (pcall(require, "core") and require("core") or nil)
+local system = rawget(_G, "system") or (pcall(require, "system") and require("system") or nil)
 
 local PHANTO_CONFIG = {
   enabled = true,
@@ -148,7 +221,9 @@ local function phanto_capture(module_name, fn, ...)
         active_file = (core and core.active_view and core.active_view.doc and core.active_view.doc.filename) or "nil",
       }
     }
-
+    
+    config.plugins.autoreload = false
+    
     _phanto_ring[_phanto_head] = entry
     _phanto_head = (_phanto_head % PHANTO_CONFIG.max_entries) + 1
     if _phanto_count < PHANTO_CONFIG.max_entries then
@@ -175,13 +250,34 @@ rawset(_G, "phanto_shadow_flush", phanto_shadow_flush)
 
 -- Corrotina sentinela: descarrega o buffer em lote sem interrupção de frames
 if core and core.add_thread then
+  -- Adicionar ao final do boot
   core.add_thread(function()
-    while true do
-      coroutine.yield(PHANTO_CONFIG.flush_interval_sec)
-      if _phanto_count > 0 then
-        phanto_shadow_flush()
-      end
-    end
+     coroutine.yield(3.0) -- Aguarda todos os plugins carregarem
+     local keymap = require "core.keymap"
+     local probe_out = user_dir .. sep .. ".doxoade" .. sep .. "api_guard" .. sep .. "keymap_probe.json"
+     
+     local f = io.open(probe_out, "w")
+     if f then
+        f:write("{\n")
+        local first = true
+        for k, v in pairs(keymap.map) do
+              if not first then f:write(",\n") end
+              first = false
+              f:write(string.format('  %q: ', k))
+              if type(v) == "table" then
+                 f:write("[")
+                 for i, cmd in ipairs(v) do
+                    f:write(string.format('%q', cmd))
+                    if i < #v then f:write(", ") end
+                 end
+                 f:write("]")
+              else
+                 f:write(string.format('%q', tostring(v)))
+              end
+        end
+        f:write("\n}\n")
+        f:close()
+     end
   end)
 end
 
@@ -497,15 +593,29 @@ function core.step()
     return original_core_step()
 end
 
--- Vacina 4: Blindagem no set_active_view
+-- No 00_header_and_logger.lua:
 local original_set_active_view = core.set_active_view
 core.set_active_view = function(view)
+  -- Se o sistema estiver em meio a uma transição de split, atrasa ou ignora ativação nula
+  if rawget(_G, "_DOXOADE_SPLIT_LOCK") and view == nil then
+    return
+  end
+  
+  -- Se a view for nula, recupera uma folha ativa válida para não quebrar keymaps
+  if view == nil then
+    local node = core.root_view and core.root_view:get_active_node()
+    if node and node.views and #node.views > 0 then
+      view = node.views[1]
+    end
+  end
+
   if view and type(view) == "table" then
-    if not view.is then view.is = function(self, class) return false end end
-    if not view.get_name then view.get_name = function(self) return "Orphan View" end end
+    if not view.is then view.is = function() return false end end
+    if not view.get_name then view.get_name = function() return "View" end end
     if not view.get_title then view.get_title = function(self) return self:get_name() end end
   end
-  if original_set_active_view then
+
+  if original_set_active_view and view ~= nil then
     return original_set_active_view(view)
   end
 end
@@ -681,8 +791,93 @@ pcall(function()
   style.syntax["symbol"]    = { 206, 105, 158 }
 end)
 
+-- No 00_header_and_logger.lua ou num módulo de UI:
+command.add(nil, {
+  ["doxoade:launch-canonical"] = function()
+    -- Chama `doxoade lite-xl canonical` via IPC (nova instância)
+    system.exec('doxoade lite-xl canonical')
+  end,
+})
+keymap.add { ["ctrl+alt+shift+r"] = "doxoade:launch-canonical" }
+
+-- ⚠️ DIAGNÓSTICO DE AMBIENTE
+append_session_log("DIAG", string.format("USERDIR=%s", tostring(USERDIR or "NIL")))
+append_session_log("DIAG", string.format("PATHSEP=%s", tostring(PATHSEP or "NIL")))
+append_session_log("DIAG", string.format("VERSION=%s", tostring(VERSION or "NIL")))
+append_session_log("DIAG", string.format("PLATFORM=%s", tostring(PLATFORM or "NIL")))
+append_session_log("DIAG", string.format("ARGS=%s", tostring(table.concat(rawget(_G, "ARGS") or {}, " "))))
+append_session_log("DIAG", string.format("LITE_USERDIR=%s", tostring(os.getenv("LITE_USERDIR") or "NIL")))
+append_session_log("DIAG", string.format("XDG_CONFIG_HOME=%s", tostring(os.getenv("XDG_CONFIG_HOME") or "NIL")))
+append_session_log("DIAG", string.format("DOXOADE_DEPLOY_MODE=%s", tostring(os.getenv("DOXOADE_DEPLOY_MODE") or "NIL")))
+append_session_log("DIAG", string.format("CWD=%s", tostring(system.getcwd and system.getcwd() or "NIL")))
+
+-- 🔬 [FASE 1.5] Sonda de keymap (remover depois)
+core.add_thread(function()
+  coroutine.yield(2.0)
+  local keymap = require "core.keymap"
+  local path = USERDIR .. PATHSEP .. ".doxoade" .. PATHSEP .. "keymap_snapshot.json"
+  local f = io.open(path, "w")
+  if f then
+    f:write("{\n")
+    local first = true
+    for k, v in pairs(keymap.map) do
+      if not first then f:write(",\n") end
+      first = false
+      f:write(string.format('  %q: ', k))
+      if type(v) == "table" then
+        f:write("[")
+        for i, cmd in ipairs(v) do
+          f:write(string.format('%q', cmd))
+          if i < #v then f:write(", ") end
+        end
+        f:write("]")
+      else
+        f:write(string.format('%q', tostring(v)))
+      end
+    end
+    f:write("\n}\n")
+    f:close()
+    if core.log then core.log("🔬 [KEYMAP PROBE] Snapshot salvo em: " .. path) end
+  end
+end)
+
+-- 🔬 [FASE 1.5] Sonda de teclado físico (temporária — remover depois)
+core.add_thread(function()
+  coroutine.yield(2.0)
+  local original_on_event = core.on_event
+  core.on_event = function(event_type, a, b, c, d)
+    -- Captura keydown (tipo 3 = SDL_KEYDOWN no Lite XL)
+    if event_type == "keypressed" or event_type == 3 then
+      local key = tostring(a or b or c or d or "?")
+      local mods = ""
+      if keymap and keymap.modkeys then
+        for mod, active in pairs(keymap.modkeys) do
+          if active then mods = mods .. mod .. "+" end
+        end
+      end
+      if core.log then
+        core.log(string.format("🔬 [KEY-RAW] event=%s key=%s mods=%s", 
+          tostring(event_type), key, mods ~= "" and mods or "none"))
+      end
+    end
+    return original_on_event(event_type, a, b, c, d)
+  end
+  if core.log then core.log("🔬 [KEY-RAW] Sonda de teclado ativa.") end
+end)
+
 append_session_log("BOOT", "=== SOVEREIGN BOOT OK ===")
 
 rawset(_G, "INDENT_GUIDE_ACTIVE", (config.draw_indent_guides ~= false))
 rawset(_G, 'arct_xpcall', arct_xpcall)
 rawset(_G, 'arct_intercept', arct_intercept)
+
+local cnt = 0
+local orig = command.perform
+command.perform = function(cmd, ...)
+  if cmd == "root:move-tab-to-opposite-panel" then
+    cnt = cnt + 1
+    if core.log then core.log("🔍 [AUTO-TRIGGER] root:move-tab-to-opposite-panel disparado #" .. cnt .. " | traceback: " .. debug.traceback("", 2)) end
+  end
+  return orig(cmd, ...)
+end
+

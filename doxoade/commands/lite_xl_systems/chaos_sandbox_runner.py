@@ -16,7 +16,6 @@ from doxoade.tools.doxcolors import Fore, Style
 from doxoade.commands.lite_xl_systems.engine_lite_xl import LiteXLEngine
 from doxoade.commands.telemetry_systems.telemetry import telemetry
 
-
 class ChaosSandboxRunner:
     """Orquestrador do ciclo de vida de um teste de caos no Sandbox."""
 
@@ -179,7 +178,7 @@ end)
         if isinstance(telemetry, dict) and "warning" not in telemetry:
             spikes = telemetry.get("frame_spikes", [])
             bottlenecks = telemetry.get("thread_bottlenecks", [])
-            print(f"\n{Fore.YELLOW}{Style.BRIGHT}🦅 TELEMETRIA (Chronos):{Fore.RESET_ALL}")
+            print(f"\n{Fore.YELLOW}{Style.BRIGHT}🦅 TELEMETRIA (Chronos):{Style.RESET_ALL}")
             print(f"  {Fore.WHITE}Frame Spikes:{Fore.RESET} {len(spikes)}")
             print(f"  {Fore.WHITE}Thread Bottlenecks:{Fore.RESET} {len(bottlenecks)}")
         else:

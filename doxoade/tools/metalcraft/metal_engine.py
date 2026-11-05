@@ -155,27 +155,17 @@ class NexusMetalEngine:
         return target or targets[0]
 
     def _resolve_compiler(self, final_sources: list[Path]) -> str:
-        """Determina o executável do compilador (gcc vs g++) respeitando TOML e Janus."""
         has_cpp = any(s.suffix.lower() in ('.cpp', '.cxx', '.cc') for s in final_sources)
         compiler_conf = self.config.get('compiler', {}) if self.config else {}
-
         engine_bin = compiler_conf.get('compiler_path') or compiler_conf.get('engine')
-        if engine_bin and os.path.exists(str(engine_bin)):
-            return str(engine_bin)
-
-        # Fallback para o Janus
+        if engine_bin and os.path.exists(str(engine_bin)): return str(engine_bin)
         try:
             from doxoade.tools.janus_systems import Janus
             info = Janus.get_info()
             if info:
-                if has_cpp and os.name == 'nt':
-                    if '-static-libstdc++' not in cmd:
-                        cmd.extend(['-static-libgcc', '-static-libstdc++'])
-                if has_cpp and info.gpp_path and os.path.exists(info.gpp_path):
-                    return info.gpp_path
+                if has_cpp and info.gpp_path and os.path.exists(info.gpp_path): return info.gpp_path
                 return info.compiler_path
-        except Exception:
-            pass
+        except Exception: pass
 
         if self.toolchain.detect():
             return self.toolchain.compiler_path

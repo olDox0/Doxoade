@@ -20,21 +20,30 @@ def cmd_status(mode):
     """Exibe status completo dos modos de deploy."""
     TyphonDeployEngine.print_status(mode)
 
-@deploy_group.command("production", help="Deploy em PRODUÇÃO (com backup e launch automático).")
+@deploy_group.command("production", help="Deploy em PRODUÇÃO (unificado com test).")
 @click.option("--force", "-f", is_flag=True, help="Força deploy mesmo com warnings.")
-@click.option("--launch/--no-launch", "-l/-nl", default=True, help="Lança o Lite XL após deploy (Padrão: True).")
-@click.option("--no-khonsu", is_flag=True, default=False, help="Desativa o compilador Khonsu AOT (gera init.lua em texto puro soberano).")
+@click.option("--launch/--no-launch", "-l/-nl", default=True, help="Lança o Lite XL após deploy.")
+@click.option("--no-khonsu", is_flag=True, default=False, help="Desativa o compilador Khonsu AOT.")
 def cmd_deploy_production(force, launch, no_khonsu):
-    """Deploy seguro em produção com backup e lançamento automático."""
-    print(f"\n{Fore.GREEN}{Style.BRIGHT}🟢 DEPLOY PRODUCTION{Style.RESET_ALL}\n")
+    print(f"\n{Fore.GREEN}{Style.BRIGHT}🟢 DEPLOY PRODUCTION (UNIFICADO){Style.RESET_ALL}\n")
+
+    # ✅ USA O MESMO PIPELINE DO TEST
     result = TyphonDeployEngine.deploy("production", force=force, no_khonsu=no_khonsu)
+
     if result["success"]:
         print(f"\n{Fore.GREEN}✔ Deploy de produção concluído com sucesso! ({result.get('opt_mode', 'standard')}){Fore.RESET}")
         if result["backup"]:
             print(f"{Fore.CYAN}💾 Backup de segurança: {result['backup'].name}{Fore.RESET}")
         if launch:
             print()
-            TyphonDeployEngine.launch("production", exorcise=True)
+            pid = TyphonDeployEngine.launch("production", exorcise=True)
+            # ✅ ATIVA O HARVESTER TAMBÉM EM PRODUÇÃO
+            if pid:
+                import threading
+                from .typhon_deploy import forensic_harvester
+                prod_dir = TyphonDeployEngine._get_deploy_dir("production")
+                thread = threading.Thread(target=forensic_harvester, args=(pid, prod_dir), daemon=True)
+                thread.start()
     else:
         print(f"\n{Fore.RED}✖ Deploy falhou: {result['error']}{Fore.RESET}")
         if result["backup"]:
@@ -56,52 +65,35 @@ def cmd_deploy_sandbox(launch, exorcise):
     else:
         print(f"\n{Fore.RED}✖ Deploy falhou: {result['error']}{Fore.RESET}")
 
-@deploy_group.command("test", help="Deploy em TEST (chaos injection + launch automático).")
-@click.option("--launch/--no-launch", "-l/-nl", default=True, help="Lança o Lite XL após deploy (Padrão: True).")
-@click.option("--exorcise/--no-exorcise", default=True, help="Mata instâncias antigas de teste.")
-@click.option("--harvest/--no-harvest", default=True, help="Ativa o Forensic Harvester automático.")
-@click.option("--no-khonsu", is_flag=True, default=False, help="Desativa o compilador Khonsu AOT (gera init.lua em texto puro).")
-def cmd_deploy_test(launch, exorcise, harvest, no_khonsu):
-    # 🔧 AUTO-ELEVAÇÃO: garante Admin no Windows para o PTY funcionar
-    import sys, os, ctypes, subprocess
-    if sys.platform == "win32" and not os.environ.get("DOXOADE_ELEVATED"):
-        try:
-            is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
-        except Exception:
-            is_admin = False
-        if not is_admin:
-            print(f"{Fore.YELLOW}🔐 [TYPHON] Sem Admin. Solicitando elevação via UAC...{Fore.RESET}")
-            try:
-                python_exe = sys.executable
-                args_str = " ".join(f'"{a}"' if ' ' in a else a for a in sys.argv[1:])
-                cmd_line = f'"{python_exe}" -m doxoade {args_str}'
-                env_prefix = "set DOXOADE_ELEVATED=1 && "
-                subprocess.Popen(
-                    ["powershell", "-Command",
-                     f'Start-Process cmd -ArgumentList \'/k {env_prefix}{cmd_line}\' -Verb RunAs'],
-                    creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
-                )
-                print(f"{Fore.GREEN}✔ Janela elevada aberta. Deploy continua no console Admin.{Fore.RESET}")
-                return
-            except Exception as e:
-                print(f"{Fore.RED}✖ Falha na elevação: {e}{Fore.RESET}")
-                return
-
-    print(f"\n{Fore.YELLOW}{Style.BRIGHT}🟡 DEPLOY TEST{Style.RESET_ALL}\n")
-    result = TyphonDeployEngine.deploy("test", no_khonsu=no_khonsu)
+@deploy_group.command("test", help="Deploy em TESTE (ambiente isolado para caos e forensics).")
+@click.option("--force", "-f", is_flag=True, help="Força deploy mesmo com warnings.")
+@click.option("--no-khonsu", is_flag=True, default=False, help="Desativa o compilador Khonsu AOT.")
+@click.option("--exorcise/--no-exorcise", default=True, help="Encerra instâncias antigas antes do deploy.")
+def cmd_deploy_test(force, no_khonsu, exorcise):
+    """Deploy em ambiente de teste isolado."""
+    print(f"\n{Fore.YELLOW}{Style.BRIGHT}🟡 DEPLOY TEST (UNIFICADO){Style.RESET_ALL}\n")
+    
+    # Usa o mesmo pipeline unificado
+    result = TyphonDeployEngine.deploy("test", force=force, no_khonsu=no_khonsu)
+    
     if result["success"]:
-        print(f"\n{Fore.GREEN}✔ Deploy de teste concluído! ({result['opt_mode']}){Fore.RESET}")
-        if launch:
-            print()
-            pid = TyphonDeployEngine.launch("test", exorcise=exorcise)
-            if harvest and pid:
-                import threading
-                from .typhon_deploy import forensic_harvester
-                test_dir = TyphonDeployEngine._get_deploy_dir("test")
-                thread = threading.Thread(target=forensic_harvester, args=(pid, test_dir), daemon=True)
-                thread.start()
+        print(f"\n{Fore.GREEN}✔ Deploy de teste concluído com sucesso! ({result.get('opt_mode', 'standard')}){Fore.RESET}")
+        if result["backup"]:
+            print(f"{Fore.CYAN}💾 Backup de segurança: {result['backup'].name}{Fore.RESET}")
+        if exorcise:
+            TyphonDeployEngine.exorcise_mode_instance("test")
+        print()
+        pid = TyphonDeployEngine.launch("test", exorcise=False)
+        if pid:
+            import threading
+            from .typhon_deploy import forensic_harvester
+            test_dir = TyphonDeployEngine._get_deploy_dir("test")
+            thread = threading.Thread(target=forensic_harvester, args=(pid, test_dir), daemon=True)
+            thread.start()
     else:
         print(f"\n{Fore.RED}✖ Deploy falhou: {result['error']}{Fore.RESET}")
+        if result["backup"]:
+            print(f"{Fore.YELLOW}🔄 Rollback automático executado.{Fore.RESET}")
 
 @deploy_group.command("backup", help="Cria backup manual do init atual.")
 @click.option("--mode", "-m", type=click.Choice(["production", "sandbox", "test"]), 
@@ -192,4 +184,5 @@ def cmd_deploy_canone(force, launch, no_khonsu):
         print(f"\n{Fore.RED}✖ Falha no deploy Cânone: {result['error']}{Fore.RESET}")
         if result["backup"]:
             print(f"{Fore.YELLOW}🔄 Rollback automático executado.{Fore.RESET}")
+
 

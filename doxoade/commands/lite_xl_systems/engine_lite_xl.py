@@ -286,9 +286,92 @@ class LiteXLEngine:
         return LiteXLDiagnostics.diagnose_init_file(init_path)
 
     @classmethod
-    def parse_keybindings(cls, init_file) -> List[Dict[str, Any]]:
-        """Delegado para LiteXLDiagnostics.parse_keybindings."""
-        return LiteXLDiagnostics.parse_keybindings(init_file)
+    def parse_keybindings(cls, init_path: Path) -> dict:
+        """
+        Parser Forense V2: Extrai todos os atalhos do init.lua.
+        Lida com comentários, tabelas de múltiplos comandos e formatações variadas.
+        """
+        import re
+        from collections import defaultdict
+        
+        content = init_path.read_text(encoding="utf-8", errors="replace")
+        
+        # 1. Higiene: Remove comentários de bloco e linha para evitar falsos positivos
+        content = re.sub(r'--\[\[.*?\]\]', '', content, flags=re.DOTALL)
+        content = re.sub(r'--[^\n]*', '', content)
+        
+        keymaps = defaultdict(list)
+        
+        # 2. Captura Padrão 1: ["ctrl+c"] = "doc:copy"
+        pattern_str = re.compile(r'\[\s*["\']([^"\']+)["\']\s*\]\s*=\s*["\']([^"\']+)["\']')
+        for match in pattern_str.finditer(content):
+            key_combo = match.group(1).strip().lower()
+            command = match.group(2).strip()
+            if command not in keymaps[key_combo]:
+                keymaps[key_combo].append(command)
+                
+        # 3. Captura Padrão 2: ["ctrl+shift+c"] = { "cmd1", "cmd2" }
+        pattern_tbl = re.compile(r'\[\s*["\']([^"\']+)["\']\s*\]\s*=\s*\{(.*?)\}', re.DOTALL)
+        for match in pattern_tbl.finditer(content):
+            key_combo = match.group(1).strip().lower()
+            tbl_content = match.group(2)
+            cmds = re.findall(r'["\']([^"\']+)["\']', tbl_content)
+            for cmd in cmds:
+                cmd = cmd.strip()
+                if cmd and cmd not in keymaps[key_combo]:
+                    keymaps[key_combo].append(cmd)
+                    
+        return dict(keymaps)
+
+    @classmethod
+    def audit_keybindings(cls, init_path: Path) -> dict:
+        """Audita paridade com Notepad++ e detecta conflitos."""
+        keymaps = cls.parse_keybindings(init_path)
+        
+        # Dicionário de atalhos NPP e seus equivalentes aceitos no ecossistema Doxoade
+        NPP_ESSENTIALS = {
+            "ctrl+c": ["doc:copy"],
+            "ctrl+v": ["doc:paste"],
+            "ctrl+x": ["doc:cut"],
+            "ctrl+z": ["doc:undo"],
+            "ctrl+y": ["doc:redo"],
+            "ctrl+s": ["doc:save"],
+            "ctrl+shift+s": ["doc:save-all"],
+            "ctrl+f": ["find-replace:find"],
+            "ctrl+h": ["find-replace:replace", "doxoade:interactive-find-replace"],
+            "ctrl+o": ["core:open-file", "doxoade:open-file"],
+            "ctrl+n": ["core:new-doc", "doxoade:new-doc"],
+            "ctrl+w": ["root:close"],
+            "ctrl+tab": ["root:switch-to-next-tab"],
+            "ctrl+shift+tab": ["root:switch-to-previous-tab"],
+            "ctrl+q": ["doc:toggle-line-comments"],
+            "ctrl+d": ["doc:duplicate-lines"],
+        }
+
+        npp_covered = []
+        npp_missing = []
+        
+        for key, expected_cmds in NPP_ESSENTIALS.items():
+            if key in keymaps:
+                # Verifica se pelo menos um dos comandos esperados está mapeado
+                if any(cmd in keymaps[key] for cmd in expected_cmds):
+                    npp_covered.append({"key": key, "cmds": keymaps[key]})
+                else:
+                    npp_missing.append({"key": key, "expected": expected_cmds[0], "actual": keymaps[key]})
+            else:
+                npp_missing.append({"key": key, "expected": expected_cmds[0], "actual": None})
+                
+        bindings_list = []
+        for k, v in sorted(keymaps.items()):
+            bindings_list.append({"raw_key": k, "command": ", ".join(v)})
+            
+        return {
+            "npp_covered": npp_covered,
+            "npp_missing": npp_missing,
+            "bindings_list": bindings_list,
+            "raw_map": keymaps,
+            "total": len(keymaps)
+        }
 
     @classmethod
     def graceful_shutdown(cls, timeout=1.5) -> bool:

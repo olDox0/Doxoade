@@ -152,3 +152,44 @@ def cmd_struct_chaos(runs: int):
     result = DoxlyStructuralFuzzer.run_full_chaos_suite(runs=runs)
     if not result["overall_healthy"]:
         sys.exit(1)
+
+@typhon_doxly_group.command("triangulate", help="Executa o censo de 3+ vias (Logs + Probes + Caos + Diff + Git) com causa raiz.")
+@click.option("--mode", "-m", type=click.Choice(["production", "sandbox", "test"]), default="production", help="Modo alvo.")
+@click.option("--repair", "-r", is_flag=True, help="Aplica autorreparo automático caso a falha seja auto-fixable.")
+@click.option("--chaos", "-c", is_flag=True, help="Verifica sensibilidade contra a suíte de caos.")
+@click.option("--watch", "-w", is_flag=True, help="Modo sentinela (monitora o log continuamente).")
+def cmd_triangulate(mode: str, repair: bool, chaos: bool, watch: bool):
+    target_dir = _resolve_target_dir(mode)
+    
+    def run_once():
+        verdict = DoxlyTriangulator.triangulate(
+            user_dir=target_dir,
+            run_probes=True,
+            check_chaos=chaos,
+            auto_fix=repair,
+        )
+        verdict.print_verdict()
+        return verdict
+
+    if not watch:
+        v = run_once()
+        if not v.is_healthy and not v.auto_repaired: sys.exit(1)
+        return
+        
+    print(f"\n{Fore.CYAN}{Style.BRIGHT}⏳ TYPHON WATCH: Monitorando logs em tempo real...{Style.RESET_ALL}")
+    print(f"{Fore.LIGHTBLACK_EX}Pressione Ctrl+C para sair.{Fore.RESET}\n")
+    last_log_size = 0
+    
+    try:
+        while True:
+            log_file = target_dir / "session_log.txt"
+            if log_file.exists():
+                curr_size = log_file.stat().st_size
+                if curr_size > last_log_size:
+                    last_log_size = curr_size
+                    os.system("cls" if os.name == "nt" else "clear")
+                    print(f"{Fore.CYAN}🔄 Atualizando Triangulação...{Fore.RESET}")
+                    run_once()
+            time.sleep(1.0)
+    except KeyboardInterrupt:
+        print(f"\n{Fore.YELLOW}🛑 Triangulador encerrado.{Fore.RESET}\n")

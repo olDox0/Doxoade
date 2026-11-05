@@ -17,14 +17,28 @@ local function normalize_dir(path)
   return p
 end
 
+-- No topo do arquivo, logo após as declarações locais
+local _last_spawn_time = {}
+local _spawn_cooldown = 2.0 -- 2 segundos de cooldown
+
 local function spawn_terminal_for_project(raw_path, force_open)
   local path = normalize_dir(raw_path)
   if not path then return end
 
+  -- 🛡️ [FASE 1.5] Anti-Cascade Throttle
+  local now = os.clock()
+  local last_time = _last_spawn_time[path:lower()] or 0
+  if (now - last_time) < _spawn_cooldown then
+    -- Ignora chamadas duplicadas em cascata (IPC Storm)
+    return
+  end
+  _last_spawn_time[path:lower()] = now
+
   local mgr = rawget(_G, "_DOXOADE_TERMINAL_SESSION_MGR")
   if mgr and mgr.get_or_create_for_project then
-    local session = mgr.get_or_create_for_project(path)
-    if force_open ~= false then
+    -- O 'pcall' garante que se a UI ainda não estiver pronta, não crasha
+    local ok, session = pcall(mgr.get_or_create_for_project, path)
+    if ok and session and force_open ~= false then
       command.perform("doxoade:terminal-launch-real")
     end
     core.redraw = true
@@ -131,10 +145,20 @@ end
 
 -- ── 5. COMANDOS & CONTEXT MENU ────────────────────────────────────────────────
 command.add(function()
-  return core.active_view and (
-    core.active_view:is(TreeView or Object) or
-    (core.active_view.hovered_item ~= nil)
-  )
+  -- Guarda de segurança: se TreeView não carregou, o predicado é falso.
+  if not TreeView then return false end
+  
+  local view = core.active_view
+  if not view then return false end
+  
+  -- Verifica se é TreeView de forma segura
+  if type(view.is) == "function" then
+    local ok, res = pcall(view.is, view, TreeView)
+    if ok and res then return true end
+  end
+  
+  -- Fallback: verifica se há um item sob o mouse (indica TreeView)
+  return view.hovered_item ~= nil
 end, {
   ["treeview:open-terminal-here"] = function()
     local tv = core.active_view

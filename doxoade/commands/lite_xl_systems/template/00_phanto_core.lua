@@ -23,6 +23,18 @@ local PHANTO_CONFIG = {
   ndjson_file = ndjson_file,
 }
 
+local _PHANTO_CLEAN_ON_BOOT = true
+if _PHANTO_CLEAN_ON_BOOT then
+  local target_path = PHANTO_CONFIG.diag_dir .. sep .. PHANTO_CONFIG.ndjson_file
+  local finfo = system and system.get_file_info and system.get_file_info(target_path)
+  if finfo and finfo.size and finfo.size > 0 then
+    -- Renomeia o arquivo antigo para .bak (não perde histórico)
+    pcall(os.remove, target_path .. ".bak")
+    pcall(os.rename, target_path, target_path .. ".bak")
+  end
+  _PHANTO_CLEAN_ON_BOOT = false
+end
+
 local _phanto_ring = {}
 local _phanto_head = 1
 local _phanto_count = 0

@@ -260,32 +260,31 @@ end
 
 function TerminalEngine:start()
   if self._running then return true end
-
   local PTYClient = rawget(_G, "_DOXOADE_PTY_CLIENT")
   if not PTYClient then
     self._status_msg = "PTYClient ausente."
+    self._fallback_mode = true
+    self._fallback_reason = "Módulo PTYClient não carregado."
     return false
   end
-
   if self._client then
     self._client:close()
     self._client = nil
   end
-
   self._client = PTYClient.new({
-    id = self.id, -- 🎯 Garante IPC exclusivo por aba
+    id = self.id,
     shell = self.shell,
     cols = self._cols,
     rows = self._rows,
     cwd = self:get_cwd(),
     debug = false,
   })
-
   local engine = self
   self._client.on_ready = function()
     engine._status_msg = "Conectado: " .. engine:get_cwd()
     engine.is_executing = false
-    self._handshake_done = true
+    engine._handshake_done = true
+    engine._fallback_mode = false
     core.redraw = true
   end
   self._client.on_output = function()
@@ -299,15 +298,17 @@ function TerminalEngine:start()
     engine._status_msg = string.format("Shell encerrou (%s)", tostring(code or 0))
     core.redraw = true
   end
-
   local ok = self._client:spawn()
   if not ok then
     self._status_msg = "Falha ao iniciar PTY."
+    self._fallback_mode = true
+    self._fallback_reason = "Spawn falhou (ConPTY indisponível)."
     return false
   end
-
   self._running = true
   self.is_executing = false
+  self._spawn_time = os.clock()
+  self._handshake_done = false
   self:_start_poller()
   return true
 end
@@ -319,6 +320,8 @@ function TerminalEngine:stop()
     self._client = nil
   end
   self.is_executing = false
+  self._fallback_mode = false          -- [FASE 10]
+  self._fallback_reason = nil          -- [FASE 10]
 end
 
 function TerminalEngine:_evaluate_prompt_state()
@@ -424,6 +427,25 @@ function TerminalEngine:tick()
       end
   end
 
+  -- [FASE 10] Após timeout do handshake, ativa modo de fallback
+  if not self._handshake_done and self._spawn_time
+     and (os.clock() - self._spawn_time) > self._handshake_timeout then
+    self._handshake_done = true
+    self._fallback_mode = true
+    self._fallback_reason = "Handshake timeout (daemon não respondeu em 6s)."
+    -- Diagnóstico detalhado (mesmo do código existente)
+    local py_exe = "?"
+    if self._client and type(self._client._find_python) == "function" then
+      local ok, result = pcall(self._client._find_python, self._client)
+      if ok and result then py_exe = result end
+    end
+    if core.log then
+      core.log(string.format("⚠️ [PTY] Handshake timeout em %.1fs → fallback ativado.", self._handshake_timeout))
+      core.log(string.format("   Python: %s", tostring(py_exe)))
+    end
+    core.redraw = true
+  end
+
   -- 🔧 FALLBACK: se ConPTY não estiver disponível, abre terminal externo
   if self._handshake_done and not self._client.connected then
       -- Lê o status do daemon
@@ -464,6 +486,23 @@ function TerminalEngine:tick()
     self:_evaluate_prompt_state()
     core.redraw = true
     return true
+  end
+
+  -- [FASE 10] Detecta alive:false no pty_status.json e ativa fallback
+  if self._client and not self._client.is_connected and not self._fallback_mode then
+    local status_path = (self._client.ipc_dir or "") .. (PATHSEP or "/") .. "pty_status.json"
+    local f_status = io.open(status_path, "r")
+    if f_status then
+      local content = f_status:read("*a") or ""
+      f_status:close()
+      if content:find('"alive":%s*false') then
+        local err_msg = content:match('"error"%s*:%s*"([^"]*)"') or "sem detalhes"
+        self._fallback_mode = true
+        self._fallback_reason = err_msg
+        self._status_msg = "PTY indisponível: " .. err_msg
+        core.redraw = true
+      end
+    end
   end
 
   return changed
@@ -1060,6 +1099,35 @@ command.add(nil, {
   end,
   ["doxoade:terminal-launch-admin-venv"] = function()
     command.perform("doxoade:terminal-launch-admin")
+  end,
+  ["doxoade:pty-install-interactive"] = function()
+    -- [FASE 10] Abre o terminal externo com pip install pywinpty
+    local term = SessionManager.get_active()
+    if not term then return end
+    
+    local proj_dir = term:get_cwd()
+    local py_exe = "python"
+    local sep = PATHSEP or "/"
+    
+    -- Detecta o venv do projeto
+    local scripts_dir = proj_dir .. sep .. "venv" .. sep .. "Scripts"
+    local py_venv = scripts_dir .. sep .. "python.exe"
+    if system.get_file_info(py_venv) then
+      py_exe = py_venv
+    elseif system.get_file_info(proj_dir .. sep .. ".venv" .. sep .. "Scripts" .. sep .. "python.exe") then
+      py_exe = proj_dir .. sep .. ".venv" .. sep .. "Scripts" .. sep .. "python.exe"
+    end
+    
+    -- Monta comando para rodar pip install em terminal externo
+    local pip_cmd = string.format('"%s" -m pip install pywinpty', py_exe)
+    local cmd = string.format(
+      'start "Doxoade PTY Install" cmd.exe /k "cd /d \\"%s\\" && %s && echo. && echo [PTY] pywinpty instalado. Reinicie o Doxly. && pause"',
+      proj_dir, pip_cmd
+    )
+    if core.log then
+      core.log("📦 [PTY] Instalando pywinpty em terminal externo: " .. pip_cmd)
+    end
+    pcall(system.exec, cmd)
   end,
 })
 

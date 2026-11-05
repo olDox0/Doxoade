@@ -176,41 +176,51 @@ class LiteXLInitBuilder:
 
     @classmethod
     def install_sovereign_config(cls, force: bool = False, backup: bool = True, **kwargs) -> Tuple[bool, str]:
-        """Instalação soberana atômica com Pre-Flight Gatekeeper e snapshot promotion."""
+        """
+        [FASE 17] Usa pipeline AOT (DoxlyKhonsuGate) igual ao deploy test.
+        """
         init_path = LiteXLPaths.get_init_lua_path()
         init_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Garante a pasta de artefatos do API Guard
         guard_dir = LiteXLPaths.get_user_dir() / ".doxoade" / "api_guard"
         guard_dir.mkdir(parents=True, exist_ok=True)
 
-        content = cls.generate_sovereign_init()
+        # [FASE 17] Valida templates ANTES
+        templates_ok, failed = cls.validate_all_templates()
+        if not templates_ok and not force:
+            return False, f"Templates com erro: {'; '.join(failed[:3])}"
 
-        # 1. Pre-Flight Estático
-        scan_errs = cls.compile_scan_lua(content)
-        if scan_errs and not force:
-            return False, f"Pre-Flight rejeitou o init gerado: {'; '.join(scan_errs)}"
+        # [FASE 17] Usa DoxlyKhonsuGate (AOT)
+        try:
+            from doxoade.commands.lite_xl_systems.typhon_doxly.doxly_khonsu_gate import DoxlyKhonsuGate
+            gate_res = DoxlyKhonsuGate.compile_aot_supervisioned(target_mode="production", verbose=True)
+            if gate_res["success"] and gate_res.get("bytecode"):
+                content = gate_res["bytecode"]
+                opt_mode = "bytecode"
+            else:
+                content = gate_res["source"].encode("utf-8")
+                opt_mode = "plain"
+                if not force:
+                    return False, f"Compilação AOT falhou: {gate_res.get('error', 'unknown')}"
+        except Exception as e:
+            if not force:
+                return False, f"Falha ao compilar AOT: {e}"
+            source = cls.generate_sovereign_init()
+            content = source.encode("utf-8")
+            opt_mode = "plain_fallback"
 
+        # Backup
+        if backup and init_path.exists():
+            from .lite_xl_snapshots import LiteXLSnapshots
+            LiteXLSnapshots.backup_workspace_state()
+
+        # Grava
         temp_init = init_path.with_suffix(f".tmp_{os.getpid()}")
         try:
-            temp_init.write_text(content, encoding="utf-8")
-
-            # 2. Pre-Flight de Compilação Real
-            compile_err = cls.true_compile_check(temp_init)
-            if compile_err and compile_err != "NO_RUNTIME" and not force:
-                temp_init.unlink(missing_ok=True)
-                return False, f"Pre-Flight de compilação rejeitou o init: {compile_err}"
-
-            if backup and init_path.exists():
-                LiteXLSnapshots.backup_workspace_state()
-
+            temp_init.write_bytes(content)
             temp_init.replace(init_path)
-
-            # 3. Promove para o snapshot estável oficial
-            if not scan_errs and (not compile_err or compile_err == "NO_RUNTIME"):
-                LiteXLSnapshots.promote_to_stable_snapshot()
-
-            return True, f"Configuração soberana instalada e validada em {init_path}"
+            from .lite_xl_snapshots import LiteXLSnapshots
+            LiteXLSnapshots.promote_to_stable_snapshot()
+            return True, f"Configuração canônica instalada ({opt_mode}) em {init_path}"
         except Exception as e:
             temp_init.unlink(missing_ok=True)
             return False, f"Falha durante a instalação: {e}"
@@ -401,17 +411,41 @@ class LiteXLInitBuilder:
                     "snippet": cls.get_code_snippet(lines, len(lines)),
                 })
 
-            # Definição estrita de status
-            status = "FAIL" if len(file_errors) > 0 else "PASS"
-            if status == "FAIL":
-                report["all_ok"] = False
-                report["errors"].extend(file_errors)
-
-            report["files"][f.name] = {
-                "status": status,
-                "lines": len(lines),
-                "errors": file_errors,
-                "findings": findings,
+        # 🔧 [FASE 1] Auditar presença de assets no projeto fonte
+        assets_dir = LiteXLPaths.get_template_dir().parent / "assets"
+        if not assets_dir.exists():
+            report["all_ok"] = False
+            report["errors"].append(
+                "Diretório 'assets/' ausente no projeto fonte (logo.png não será copiado no deploy)."
+            )
+            report["files"]["__assets__"] = {
+                "status": "FAIL",
+                "lines": 0,
+                "errors": ["Pasta assets/ ausente em commands/lite_xl_systems/"],
+                "findings": [],
+            }
+        elif not (assets_dir / "logo.png").exists():
+            report["errors"].append(
+                "logo.png ausente em assets/ (fallback para logo padrão do Lite XL)."
+            )
+            report["files"]["__assets__"] = {
+                "status": "WARN",
+                "lines": 0,
+                "errors": ["logo.png não encontrado em assets/"],
+                "findings": [],
+            }
+        else:
+            logo_size = (assets_dir / "logo.png").stat().st_size
+            report["files"]["__assets__"] = {
+                "status": "PASS",
+                "lines": 1,
+                "errors": [],
+                "findings": [{
+                    "line": 1,
+                    "msg": f"logo.png ({logo_size:,} bytes) presente.",
+                    "type": "info",
+                    "snippet": [],
+                }],
             }
 
         return report
@@ -489,3 +523,20 @@ class LiteXLInitBuilder:
                 report["total_fixes"] += len(file_diffs)
 
         return report
+
+    @classmethod
+    def validate_all_templates(cls) -> Tuple[bool, List[str]]:
+        """
+        [FASE 17] Valida todos os templates ANTES de compilar o init.lua.
+        Se um template falhar, o setup aborta (evita instalar init quebrado).
+        """
+        templates = cls.get_template_files()
+        failed = []
+        for tf in templates:
+            raw = tf.read_text(encoding="utf-8", errors="replace")
+            scan_errs = cls.compile_scan_lua(raw)
+            compile_err = cls.true_compile_check(tf)
+            if scan_errs or (compile_err and compile_err != "NO_RUNTIME"):
+                err_detail = "; ".join(scan_errs) if scan_errs else str(compile_err)
+                failed.append(f"{tf.name}: {err_detail}")
+        return (len(failed) == 0), failed

@@ -193,12 +193,12 @@ class DoxlyKhonsuGate:
         return target_path, line_no, raw_file
 
     @classmethod
-    def assemble_unified_buffer(cls, templates: List[Path]) -> Tuple[str, TemplateSourceMap]:
+    def assemble_unified_buffer(cls, templates: List[Path], mode: str = "production") -> Tuple[str, TemplateSourceMap]:
         source_map = TemplateSourceMap()
         buffer_lines: List[str] = [
             "-- =============================================================================",
             "-- DOXOADE SOVEREIGN INIT — KHONSU AOT UNIFIED RUNTIME (STAGED ZERO-FREEZE)",
-            f"-- Compilado em: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+            "-- Compilado em: (timestamp removido para compilação determinística)",
             "-- =============================================================================",
             "",
             'local core = rawget(_G, "core") or (pcall(require, "core") and require("core") or nil)',
@@ -271,6 +271,25 @@ class DoxlyKhonsuGate:
             buffer_lines.append(f"-- <<< [END TEMPLATE: {tf.name}] <<<")
             buffer_lines.append("")
 
+            # ✅ EXPÕE O SOURCE MAP COMO GLOBAL LUA (FUNCIONAL)
+            source_map_lua = "rawset(_G, '_DOXOADE_SOURCE_MAP', {\n"
+            source_map_lua += "  segments = {\n"
+            for seg in source_map.segments:
+                source_map_lua += f"    {{ name = '{seg.name}', start_line = {seg.start_line}, end_line = {seg.end_line} }},\n"
+            source_map_lua += "  },\n"
+            source_map_lua += "  resolve = function(line)\n"
+            source_map_lua += "    local segments = rawget(_G, '_DOXOADE_SOURCE_MAP').segments\n"
+            source_map_lua += "    for _, seg in ipairs(segments) do\n"
+            source_map_lua += "      if line >= seg.start_line and line <= seg.end_line then\n"
+            source_map_lua += "        return seg\n"
+            source_map_lua += "      end\n"
+            source_map_lua += "    end\n"
+            source_map_lua += "    return nil\n"
+            source_map_lua += "  end\n"
+            source_map_lua += "})\n"
+
+            buffer_lines.append(source_map_lua)
+
         map_lines = ["rawset(_G, '_DOXOADE_SOURCE_MAP', {"]
         for seg in source_map.segments:
             map_lines.append(f'  {{ name = "{seg.name}", start_line = {seg.start_line}, end_line = {seg.end_line} }},')
@@ -284,10 +303,12 @@ class DoxlyKhonsuGate:
             from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
             diag_dir = LiteXLPaths.get_user_dir() / ".doxoade" / "diagnostics"
             diag_dir.mkdir(parents=True, exist_ok=True)
-            (diag_dir / "last_preflight_aot.lua").write_text(unified_source, encoding="utf-8")
-        except Exception:
-            pass
-
+            buffer_file = diag_dir / f"last_preflight_aot_{mode}.lua"
+            buffer_file.write_text(unified_source, encoding="utf-8")
+            print(f"  {Fore.LIGHTBLACK_EX}💾 Buffer unificado salvo em: {buffer_file}{Fore.RESET}")
+        except Exception as e:
+            print(f"  {Fore.YELLOW}⚠ Falha ao salvar buffer: {e}{Fore.RESET}")
+        
         return unified_source, source_map
 
     @classmethod
@@ -324,7 +345,8 @@ class DoxlyKhonsuGate:
             templates = sorted([t for t in t_dir.glob("*.lua") if t.is_file()])
         
         # 1. Monta o buffer unificado com Source Map
-        unified_source, source_map = cls.assemble_unified_buffer(templates)
+        unified_source, source_map = cls.assemble_unified_buffer(templates, mode=target_mode)
+#        unified_source, source_map = cls.assemble_unified_buffer(templates)
         
         # 2. Validação estática rápida (scanner de balanceamento)
         from doxoade.commands.lite_xl_systems.lite_xl_init_builder import LiteXLInitBuilder
@@ -518,3 +540,65 @@ class DoxlyKhonsuGate:
     ) -> Dict[str, Any]:
         """Versão simplificada para erros do scanner estático (compile_scan_lua)."""
         return cls._resolve_compiler_error(error_msg, source_map, templates)
+
+    @classmethod
+    def translate_traceback(cls, traceback_text: str, source_map: "TemplateSourceMap") -> str:
+        """
+        Traduz um stack traceback do init.lua unificado de volta para
+        os templates originais, mostrando arquivo, linha e snippet.
+        
+        Args:
+            traceback_text: O texto do stack traceback (ex: "tmpXXX.lua:819: ...")
+            source_map: O TemplateSourceMap usado na compilação.
+        
+        Returns:
+            String formatada com o trace traduzido.
+        """
+        import re
+        
+        # Padrão: tmpXXX.lua:819: attempt to index a boolean value
+        # Ou: /path/to/tmpXXX.lua:7657: in function <...>
+        pattern = re.compile(r'tmp\w+\.lua:(\d+)')
+        
+        lines = traceback_text.splitlines()
+        translated_lines = []
+        
+        for line in lines:
+            match = pattern.search(line)
+            if match:
+                unified_line = int(match.group(1))
+                template_name, template_path, original_line = source_map.resolve(unified_line)
+                
+                if template_path and template_path.exists():
+                    # Lê o snippet do template original
+                    try:
+                        content = template_path.read_text(encoding="utf-8", errors="replace")
+                        template_lines = content.splitlines()
+                        
+                        start = max(0, original_line - 3)
+                        end = min(len(template_lines), original_line + 2)
+                        
+                        snippet = []
+                        for i in range(start, end):
+                            prefix = f"{Fore.RED} >> {Fore.RESET}" if i == original_line - 1 else "    "
+                            snippet.append(f"{prefix}{i + 1:4d} | {template_lines[i]}")
+                        
+                        translated_lines.append(
+                            f"{Fore.CYAN}┌─ [{template_name}:{original_line}]{Fore.RESET}"
+                        )
+                        for s in snippet:
+                            translated_lines.append(f"  {s}")
+                        translated_lines.append(f"{Fore.CYAN}└{'─' * 60}{Fore.RESET}")
+                        translated_lines.append("")
+                    except Exception as e:
+                        translated_lines.append(
+                            f"{Fore.YELLOW}⚠ Não foi possível ler o snippet: {e}{Fore.RESET}"
+                        )
+                else:
+                    translated_lines.append(
+                        f"{Fore.YELLOW}⚠ Linha {unified_line} não mapeada para template{Fore.RESET}"
+                    )
+            else:
+                translated_lines.append(line)
+        
+        return "\n".join(translated_lines)

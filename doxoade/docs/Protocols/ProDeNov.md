@@ -111,7 +111,7 @@ Blitz Devlopmente: Desenvolvimento baseado em preparo e construção rapida de p
 NEOVULCAN:
  * *Build*: Sistema de build C multi-sistema, faz orquestração para build em diferentes sistema. o principal é 64-86x. principal tridparty usado é o gcc/w64devkit para windows 10 e 11. RISC é usado o clang
 
-TYPHON: Sistema de diagnostico e triangulação de dados. doxoade typhon apresentou o conteito de rastreamento de problemas, posteriorment no doxly foi aprofundado o sistema para um sistema de testagem, diagnostico com profundidade para sistemas complexos.
+TYPHON: Sistema de diagnostico e triangulação de dados. doxoade typhon apresentou o conteito de rastreamento de problemas, posteriorment no doxly foi aprofundado o sistema para um sistema de testagem, diagnostico com profundidade para sistemas complexos. resumo: o typhon é basicmaente o traceback de sistemas complexos, table de erros, triangulação, logging e cadastro automatico de erros
  * *Rastreabilidade*: este é extremamente importante para ter um horizonte da profundidade de um problema.
  * *Caos*: Sistema de testagem para avaliar o diagnostico de problemas, para que respondam: onde? quando? o que? quem? porque? origem? e consequencia com isso é possivel triangular o problema para facilitar o resolução deste
  * *Diagnostico*: o diagnostico de problemas deve fornecer os dados do problema, o alastro, W5, e afins.

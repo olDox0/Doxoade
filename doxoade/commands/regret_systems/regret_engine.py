@@ -232,7 +232,17 @@ class RegretEngine:
                     )
                     findings.extend(orphan_findings)
 
-        RegretReporter.render_file_report(file_path, origin_label, findings, verbose=verbose)
+#        RegretReporter.render_file_report(file_path, origin_label, findings, verbose=verbose)
+        # [FASE 8.4] Protege a chamada de report contra crashes de renderização
+        try:
+            RegretReporter.render_file_report(file_path, origin_label, findings, verbose=verbose)
+        except Exception as e:
+            import traceback
+            # Propaga o erro com contexto (não silencia)
+            raise RuntimeError(
+                f"RegretReporter falhou para '{file_path.name}': {type(e).__name__}: {e}\n"
+                f"Traceback:\n{traceback.format_exc()}"
+            ) from e
         return findings, origin_meta
 
     @classmethod

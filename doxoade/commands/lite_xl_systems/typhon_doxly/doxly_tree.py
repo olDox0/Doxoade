@@ -166,6 +166,28 @@ DOXLY_TREE.failure(
 
 DOXLY_TREE.failure(
     "syntax",
+    id="doxly.syntax.unexpected_symbol",
+    name="Símbolo Inesperado (Erro de Sintaxe Lua)",
+    severity="critical",
+    symptoms=(
+        r"unexpected symbol near",
+        r"unexpected symbol",
+    ),
+    dev_comment=(
+        "Erro de sintaxe no template. Causa comum: `end` faltando, "
+        "`end)` desbalanceado, ou `if`/`then` mal formado."
+    ),
+    mitigation=(
+        "1. Executar `doxoade lite-xl check-templates` para localizar o template culpado. "
+        "2. Verificar balanceamento de blocos com `_clean_lua_source` e contagem de `end`. "
+        "3. Usar o snippet do `doxly_khonsu_gate.py` para inspecionar a linha exata. "
+        "4. Aplicar `--apply` para tentar auto-reparo (DRY-RUN primeiro)."
+    ),
+    auto_fixable=False,
+)
+
+DOXLY_TREE.failure(
+    "syntax",
     id="doxly.tokenizer.invalid_state",
     name="Estado de Tokenizer Inválido (Number State)",
     severity="high",
@@ -250,6 +272,49 @@ DOXLY_TREE.failure(
     auto_fixable=True,
 )
 
+DOXLY_TREE.failure(
+    "render",
+    id="doxly.render.active_view_nil",
+    name="Tentativa de Definir Active View como Nil",
+    severity="high",
+    symptoms=(
+        r"Tried to set active view to nil",
+        r"init\.lua:1087: Tried to set active view",
+    ),
+    dev_comment=(
+        "O `core.set_active_view(nil)` foi chamado, geralmente por um race "
+        "condition com o `autoreload.lua` do Lite XL. Acontece quando uma view "
+        "é fechada/removida enquanto outra view tenta tomar foco."
+    ),
+    mitigation=(
+        "1. NUNCA chamar `core.set_active_view` após manipular a árvore de views. "
+        "2. Usar `core.root_view:set_active_node(node)` que respeita o ciclo. "
+        "3. Desabilitar `config.plugins.autoreload` em produção. "
+        "4. Preferir `main_node:add_view(view)` sem mexer no foco."
+    ),
+    auto_fixable=True,
+)
+
+DOXLY_TREE.failure(
+    "render",
+    id="doxly.render.active_view_nil",
+    name="Tentativa de Definir Active View como Nil",
+    severity="high",
+    symptoms=(
+        r"Tried to set active view to nil",
+        r"init\.lua:1087: Tried to set active view",
+    ),
+    dev_comment=(
+        "O `core.set_active_view(nil)` foi chamado, geralmente por um race "
+        "condition com o `autoreload.lua` ou manipulação incorreta de nós."
+    ),
+    mitigation=(
+        "1. NUNCA chamar `core.set_active_view` após manipular a árvore de views. "
+        "2. Usar `core.root_view:set_active_node(node)`. "
+        "3. Verificar se `add_view` está recebendo uma `View` válida e não `nil`."
+    ),
+    auto_fixable=True,
+)
 
 # --- 3. Configuração & Plugins Nativos ---
 DOXLY_TREE.failure(
@@ -344,6 +409,27 @@ DOXLY_TREE.failure(
         "4. Se o ambiente for Windows < 10 1809, use o fallback de terminal externo."
     ),
     auto_fixable=True,
+)
+
+DOXLY_TREE.failure(
+    "runtime",
+    id="doxly.runtime.undefined_global",
+    name="Variável Global Indefinida (Strict Mode)",
+    severity="critical",
+    symptoms=(
+        r"cannot get undefined variable",
+        r"cannot set undefined variable",
+    ),
+    dev_comment=(
+        "O `strict.lua` do Lite XL bloqueou o acesso a uma variável global que não "
+        "foi declarada (ex: `rencache` sem `local rencache = ...`)."
+    ),
+    mitigation=(
+        "1. Adicionar `local VAR = rawget(_G, 'VAR') or require('...')` no topo do arquivo. "
+        "2. Verificar se o módulo foi injetado no AOT (KhonsuGate). "
+        "3. Checar o stacktrace para identificar o arquivo culpado."
+    ),
+    auto_fixable=False,
 )
 
 # --- 5. Contratos de API & Monkey-Patches ---

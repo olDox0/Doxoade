@@ -12,17 +12,18 @@ import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 import click
-from doxoade.tools.doxcolors import Fore, Style, Back
-from doxoade.commands.lite_xl_systems.engine_lite_xl import LiteXLEngine
-from doxoade.tools.lua_systems.profiler import ProfilerEngine
-from doxoade.commands.lite_xl_systems.chaos_sandbox_runner import ChaosSandboxRunner
-from doxoade.commands.lite_xl_systems.chaos_payload import MEGA_CHAOS_PAYLOAD
-from doxoade.tools.lua_systems.chaos_validator import ChaosValidator
-from doxoade.commands.lite_xl_systems.chaos_deep_runner import DeepChaosRunner
-from doxoade.commands.lite_xl_systems.chaos_canary_probe import run_canary_probe
-from doxoade.commands.lite_xl_systems.cmd_typhon_deploy import deploy_group
-from doxoade.commands.lite_xl_systems.typhon_doxly.cmd_typhon_doxly import typhon_doxly_group
 
+from .lite_xl_paths import LiteXLPaths
+from doxoade.commands.lite_xl_systems.chaos_canary_probe import run_canary_probe
+from doxoade.commands.lite_xl_systems.chaos_deep_runner import DeepChaosRunner
+from doxoade.commands.lite_xl_systems.chaos_payload import MEGA_CHAOS_PAYLOAD
+from doxoade.commands.lite_xl_systems.chaos_sandbox_runner import ChaosSandboxRunner
+from doxoade.commands.lite_xl_systems.cmd_typhon_deploy import deploy_group
+from doxoade.commands.lite_xl_systems.engine_lite_xl import LiteXLEngine
+from doxoade.commands.lite_xl_systems.typhon_doxly.cmd_typhon_doxly import typhon_doxly_group
+from doxoade.tools.doxcolors import Fore, Style, Back
+from doxoade.tools.lua_systems.chaos_validator import ChaosValidator
+from doxoade.tools.lua_systems.profiler import ProfilerEngine
 
 @click.group("lite-xl", help="⚡ Gestão, diagnóstico e automação do Lite XL.")
 def lite_xl_group():
@@ -208,6 +209,23 @@ def cmd_check_templates(fix, apply):
                 f"{Fore.YELLOW}💡 Dica: Execute 'doxoade lite-xl"
                 f" check-templates --fix' para simular o auto-reparo.{Fore.RESET}\n"
             )
+
+@lite_xl_group.command("resolve-line")
+@click.argument("line_no", type=int)
+@click.option("--mode", "-m", default="production")
+def cmd_resolve_line(line_no, mode):
+    from doxoade.commands.lite_xl_systems.typhon_doxly.doxly_khonsu_gate import DoxlyKhonsuGate
+    from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+    
+    t_dir = LiteXLPaths.get_template_dir()
+    templates = sorted([t for t in t_dir.glob("*.lua") if t.is_file()])
+    _, source_map = DoxlyKhonsuGate.assemble_unified_buffer(templates, mode=mode)
+    
+    tmpl, path, rel_line = source_map.resolve(line_no)
+    click.echo(f"\n🔍 Linha Unificada: {line_no}")
+    click.echo(f"📄 Template Original: {tmpl} (Linha {rel_line})")
+    if path and path.exists():
+        DoxlyKhonsuGate.render_culprit_snippet(path, rel_line, radius=3)
 
 @lite_xl_group.command("chaos-canary", help="🐤 Prova de execução do init do sandbox.")
 def cmd_chaos_canary():
@@ -578,6 +596,47 @@ def cmd_setup(force, no_backup):
             if click.confirm("O Terminal PTY do Doxly requer 'pywinpty'. Deseja instalar agora no virtualenv?", default=True):
                 subprocess.run([sys.executable, "-m", "pip", "install", "pywinpty"])
 
+    # [FASE 17] Validação estática ANTES de compilar
+    click.echo(f"\n{Fore.CYAN}🔬 Validando templates antes do setup...{Fore.RESET}")
+    from doxoade.commands.lite_xl_systems.lite_xl_init_builder import LiteXLInitBuilder
+    templates_ok, failed = LiteXLInitBuilder.validate_all_templates()
+    if not templates_ok:
+        click.echo(f"{Fore.RED}{Style.BRIGHT}✖ Templates com erro de compilação:{Style.RESET_ALL}")
+        for err in failed:
+            click.echo(f"  {Fore.RED}• {err}{Fore.RESET}")
+        click.echo(f"\n{Fore.YELLOW}💡 Corrija os templates antes de prosseguir com o setup.{Fore.RESET}")
+        if not force:
+            sys.exit(1)
+        click.echo(f"{Fore.YELLOW}⚠ --force ativo: continuando mesmo com templates quebrados.{Fore.RESET}")
+    else:
+        click.echo(f"{Fore.GREEN}✔ Todos os templates compilam.{Fore.RESET}")
+
+    if force:
+        click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🏛️ MODO CANÔNICO: DEPLOY DE PRODUÇÃO{Style.RESET_ALL}\n")
+        from doxoade.commands.lite_xl_systems.lite_xl_process import LiteXLProcess
+        # Fecha instâncias vivas
+        LiteXLProcess.graceful_shutdown()
+        time.sleep(0.3)
+        # Limpa estado de sessão
+        user_dir = LiteXLEngine.get_user_dir()
+        import shutil
+        for fname in ["session.lua", "session.json"]:
+            f = user_dir / fname
+            if f.exists():
+                try:
+                    f.unlink()
+                except Exception:
+                    pass
+        ws_dir = user_dir / "workspace"
+        if ws_dir.exists():
+            try:
+                shutil.rmtree(ws_dir)
+            except Exception:
+                pass
+        click.echo(f"  {Fore.GREEN}✔{Fore.RESET} Estado de sessão limpo")
+        click.echo(f"  {Fore.GREEN}✔{Fore.RESET} init.lua será regenerado canonicamente")
+        click.echo(f"  {Fore.LIGHTBLACK_EX}Use 'doxoade lite-xl canonical' para abrir.{Fore.RESET}\n")
+
 
     num_probes = len(LiteXLEngine.get_probe_files())
     num_templates = len(LiteXLEngine.get_template_files())
@@ -611,17 +670,55 @@ def cmd_setup(force, no_backup):
 @lite_xl_group.command("check-keys", help="Audita atalhos e detecta conformidade com Notepad++.")
 @click.option("--detailed", "-d", is_flag=True, help="Exibe lista completa de atalhos ativos.")
 def cmd_check_keys(detailed):
-    init_file = LiteXLEngine.get_init_lua_path()
+    init_file = LiteXLPaths.get_init_lua_path()
     if not init_file.exists():
-        click.echo(f"{Fore.RED}✖ Arquivo init.lua não encontrado.{Fore.RESET}")
+        click.echo(f"{Fore.RED}✖ init.lua não encontrado em {init_file}.{Fore.RESET}")
         return
 
-    audit = LiteXLEngine.audit_keybindings(init_file)
-    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}⌨  AUDITORIA FORENSE DE KEYBINDINGS{Style.RESET_ALL}")
-    click.echo(f"  {Fore.GREEN}✔ 100% de paridade com atalhos Notepad++ ({len(audit['npp_covered'])} mapeados).{Fore.RESET}\n")
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}⌨  AUDITORIA FORENSE DE KEYBINDINGS (V2){Style.RESET_ALL}")
+    click.echo(f"  {Fore.WHITE}Alvo:{Fore.RESET} {init_file}\n")
+
+    try:
+        audit = LiteXLEngine.audit_keybindings(init_file)
+    except Exception as e:
+        click.echo(f"{Fore.RED}✖ Falha no parser de atalhos: {e}{Fore.RESET}")
+        sys.exit(1)
+
+    total_binds = audit["total"]
+    covered = len(audit["npp_covered"])
+    missing = len(audit["npp_missing"])
+    conflicts = [k for k, v in audit["raw_map"].items() if len(v) > 1]
+    
+    # 1. Resumo Geral
+    click.echo(f"  {Fore.WHITE}Total de Atalhos Parseados:{Fore.RESET} {Fore.CYAN}{total_binds}{Fore.RESET}")
+    
+    if missing == 0:
+        click.echo(f"  {Fore.GREEN}✔ Paridade Notepad++:{Fore.RESET} {Fore.GREEN}100% ({covered}/{covered + missing}){Fore.RESET}")
+    else:
+        click.echo(f"  {Fore.YELLOW}⚠ Paridade Notepad++:{Fore.RESET} {Fore.YELLOW}{covered}/{covered + missing} ({missing} ausentes/divergentes){Fore.RESET}")
+        
+    # 2. Conflitos (Teclas com múltiplos comandos não intencionais)
+    if conflicts:
+        click.echo(f"\n  {Fore.RED}✖ Conflitos Detectados ({len(conflicts)}):{Fore.RESET}")
+        for c in conflicts:
+            click.echo(f"    {Fore.RED}• {c}:{Fore.RESET} {', '.join(audit['raw_map'][c])}")
+    else:
+        click.echo(f"  {Fore.GREEN}✔ Conflitos:{Fore.RESET} Zero atalhos sobrescritos acidentalmente.")
+
+    # 3. Ausentes ou Divergentes
+    if missing > 0:
+        click.echo(f"\n  {Fore.YELLOW}⚠ Atalhos Padrão NPP Ausentes ou Divergentes:{Fore.RESET}")
+        for m in audit["npp_missing"]:
+            actual_str = f" (Atual: {', '.join(m['actual'])})" if m['actual'] else ""
+            click.echo(f"    {Fore.YELLOW}• {m['key']:<20}{Fore.RESET} => Esperado: {Fore.CYAN}{m['expected']}{Fore.RESET}{actual_str}")
+
+    # 4. Lista Detalhada
     if detailed:
+        click.echo(f"\n  {Fore.CYAN}{Style.BRIGHT}📜 MAPA COMPLETO DE ATALHOS:{Style.RESET_ALL}")
         for b in audit["bindings_list"]:
-            click.echo(f"  {b['raw_key']:<22} => {b['command']}")
+            click.echo(f"    {Fore.GREEN}{b['raw_key']:<25}{Fore.RESET} => {b['command']}")
+            
+    click.echo()
 
 TERMINAL_ONLY_SUBCOMMANDS = {
     "kill", "restart", "simulate-ghost", "trace-ghost", "deploy",
@@ -644,26 +741,41 @@ def should_bypass_ipc(args_list):
             pass
     return False
 
-@lite_xl_group.command("open", help="📂 Abre arquivo/pasta no Lite XL (reutiliza instância viva via IPC).")
+@lite_xl_group.command("open", help="📂 Abre arquivo/pasta no Lite XL (modo canônico padrão).")
 @click.argument("target", required=False, default=".")
 @click.option("--new", "-n", is_flag=True, help="Força nova instância (ignora IPC).")
-def cmd_open(target: str, new: bool):
-    """Abre arquivo ou pasta no Lite XL, reutilizando instância viva via IPC se possível."""
+@click.option("--preserve-session", "-p", is_flag=True,
+              help="🏛️ Preserva sessão anterior (NÃO canônico).")
+def cmd_open(target: str, new: bool, preserve_session: bool):
     resolved, exists, is_dir = LiteXLEngine.resolve_target_path(target)
     if not resolved or not exists:
         click.echo(f"{Fore.RED}✖ Caminho não existe no disco: {target}{Fore.RESET}")
         sys.exit(1)
 
+    # [FASE 13] Modo canônico padrão: limpa estado e regenera init.lua se necessário
+    if not preserve_session:
+        from doxoade.commands.lite_xl_systems.lite_xl_process import LiteXLProcess
+        # Fecha instâncias vivas
+        LiteXLProcess.graceful_shutdown()
+        time.sleep(0.3)
+        # Força limpeza + regeneração + abertura
+        ok, msg = LiteXLProcess.launch_with_safety_guard(
+            target_path=resolved, restore_session=False
+        )
+        if ok:
+            click.echo(f"{Fore.GREEN}✔ {msg}{Fore.RESET}")
+            return
+        else:
+            click.echo(f"{Fore.YELLOW}⚠ {msg.splitlines()[0]}{Fore.RESET}")
+            click.echo(f"{Fore.GREEN}✔ IDE aberta em modo seguro.{Fore.RESET}")
+            return
 
-    #if LiteXLEngine.is_process_alive() and not new:
+    # [FASE 13] Modo preservar sessão (comportamento antigo)
     if LiteXLEngine.is_process_alive() and not should_bypass_ipc(sys.argv):
         ok, sent_path = LiteXLEngine.send_to_running_instance(resolved)
         if ok:
             click.echo(f"{Fore.GREEN}✔ Enviado para instância viva via IPC: {sent_path}{Fore.RESET}")
             return
-        else:
-            click.echo(f"{Fore.YELLOW}⚠ IPC falhou ({sent_path}), lançando nova instância...{Fore.RESET}")
-
     ok, msg = LiteXLEngine.launch_with_safety_guard(resolved, restore_session=True)
     if ok:
         click.echo(f"{Fore.GREEN}✔ Lite XL iniciado: {msg}{Fore.RESET}")
@@ -816,11 +928,21 @@ def _colorize_log_line(line: str) -> str:
 @click.option("--mode", "-m", type=click.Choice(["production", "sandbox", "test"]), default="production",
               help="Ambiente inspecionado (Padrão: production).")
 @click.option("--watch", "-w", is_flag=True, help="Modo painel vivo atualizado continuamente a cada 2s.")
-def cmd_debug(mode: str, watch: bool):
-    """Diagnóstico consolidado de processos, boot, contratos de API e anomalias."""
+@click.option("--clear", "-c", is_flag=True, help="Limpa o arquivo de anomalias do Phanto Crisis.")
+def cmd_debug(mode: str, watch: bool, clear: bool):
     from doxoade.commands.lite_xl_systems.typhon_deploy import TyphonDeployEngine
     from doxoade.commands.lite_xl_systems.lite_xl_process import LiteXLProcess
-    
+
+    if clear:
+        target_dir = TyphonDeployEngine._get_deploy_dir(mode)
+        phanto_file = target_dir / ".doxoade" / "diagnostics" / "phanto_crisis.ndjson"
+        if phanto_file.exists():
+            phanto_file.unlink()
+            click.echo(f"{Fore.GREEN}✔ Arquivo de anomalias limpo: {phanto_file}{Fore.RESET}")
+        else:
+            click.echo(f"{Fore.YELLOW}⚠ Nenhum arquivo de anomalias encontrado.{Fore.RESET}")
+        return
+
     def _render_debug_snapshot():
         target_dir = TyphonDeployEngine._get_deploy_dir(mode)
         diag_dir = target_dir / ".doxoade" / "diagnostics"
@@ -1907,3 +2029,183 @@ def cmd_pty_probe(shell: str, timeout: float):
     except Exception as e:
         click.echo(f"  {Fore.RED}✖ Falha ao executar daemon: {e}{Fore.RESET}\n")
 
+@lite_xl_group.command("canonical", help="🏛️ DEPRECATED: Use `doxoade doxly deploy production`.")
+def cmd_canonical():
+    """[FASE 17] Modo canônico descontinuado. Redireciona para deploy production."""
+    click.echo(f"\n{Fore.YELLOW}{Style.BRIGHT}⚠ MODO CANÔNICO DESCONTINUADO{Style.RESET_ALL}")
+    click.echo(f"  {Fore.WHITE}Use:{Fore.RESET} {Fore.GREEN}doxoade doxly deploy production{Fore.RESET}\n")
+    from doxoade.commands.lite_xl_systems.typhon_deploy import TyphonDeployEngine
+    result = TyphonDeployEngine.deploy("production", force=False, no_khonsu=False)
+    if result["success"]:
+        click.echo(f"{Fore.GREEN}✔ Deploy de produção concluído ({result.get('opt_mode', '?')}).{Fore.RESET}")
+        TyphonDeployEngine.launch("production", exorcise=True)
+    else:
+        click.echo(f"{Fore.RED}✖ Deploy falhou: {result.get('error', '?')}{Fore.RESET}")
+        sys.exit(1)
+
+@lite_xl_group.command("diagnose-init", help="🔬 Compara init.lua de test vs production e identifica divergências.")
+def cmd_diagnose_init():
+    from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+    import hashlib
+    import difflib
+
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🔬 DIAGNÓSTICO EMPÍRICO DE INIT.LUA{Style.RESET_ALL}\n")
+
+    user_dir = LiteXLPaths.get_user_dir()
+    test_dir = user_dir / ".doxoade" / "test_deploy"
+
+    prod_init = user_dir / "init.lua"
+    test_init = test_dir / "init.lua"
+
+    # 1. Verifica existência e tamanho
+    prod_size = prod_init.stat().st_size if prod_init.exists() else 0
+    test_size = test_init.stat().st_size if test_init.exists() else 0
+
+    click.echo(f"  {Fore.WHITE}PRODUCTION:{Fore.RESET} {prod_init}")
+    click.echo(f"    • Tamanho: {prod_size:,} bytes")
+    click.echo(f"    • Existe: {Fore.GREEN if prod_init.exists() else Fore.RED}{prod_init.exists()}{Fore.RESET}")
+
+    click.echo(f"\n  {Fore.WHITE}TEST:{Fore.RESET} {test_init}")
+    click.echo(f"    • Tamanho: {test_size:,} bytes")
+    click.echo(f"    • Existe: {Fore.GREEN if test_init.exists() else Fore.RED}{test_init.exists()}{Fore.RESET}")
+
+    if not prod_init.exists() or not test_init.exists():
+        click.echo(f"\n{Fore.RED}✖ Um dos init.lua está ausente. Não é possível comparar.{Fore.RESET}")
+        return
+
+    # 2. Compara binário (AOT vs plain)
+    prod_bytes = prod_init.read_bytes()
+    test_bytes = test_init.read_bytes()
+
+    prod_is_bytecode = prod_bytes.startswith(b"\x1bLua")
+    test_is_bytecode = test_bytes.startswith(b"\x1bLua")
+
+    click.echo(f"\n  {Fore.WHITE}Tipo de arquivo:{Fore.RESET}")
+    click.echo(f"    • PRODUCTION: {Fore.GREEN if prod_is_bytecode else Fore.YELLOW}{'AOT Bytecode' if prod_is_bytecode else 'Plain Text'}{Fore.RESET}")
+    click.echo(f"    • TEST:       {Fore.GREEN if test_is_bytecode else Fore.YELLOW}{'AOT Bytecode' if test_is_bytecode else 'Plain Text'}{Fore.RESET}")
+
+    # 3. Hash SHA256
+    prod_hash = hashlib.sha256(prod_bytes).hexdigest()[:16]
+    test_hash = hashlib.sha256(test_bytes).hexdigest()[:16]
+    click.echo(f"\n  {Fore.WHITE}SHA256 (16 chars):{Fore.RESET}")
+    click.echo(f"    • PRODUCTION: {prod_hash}")
+    click.echo(f"    • TEST:       {test_hash}")
+    click.echo(f"    • Iguais? {Fore.GREEN if prod_hash == test_hash else Fore.RED}{(prod_hash == test_hash)}{Fore.RESET}")
+
+    # 4. Se ambos plain, comparar texto
+    if not prod_is_bytecode and not test_is_bytecode:
+        click.echo(f"\n  {Fore.CYAN}Comparando texto (ambos plain)...{Fore.RESET}")
+        prod_text = prod_bytes.decode("utf-8", errors="replace")
+        test_text = test_bytes.decode("utf-8", errors="replace")
+
+        prod_lines = prod_text.splitlines()
+        test_lines = test_text.splitlines()
+
+        if prod_lines == test_lines:
+            click.echo(f"    {Fore.GREEN}✔ Ambos init.lua são idênticos!{Fore.RESET}")
+        else:
+            click.echo(f"    {Fore.YELLOW}⚠ Divergências detectadas. Diff:{Fore.RESET}")
+            diff = list(difflib.unified_diff(prod_lines, test_lines, "production", "test", lineterm=""))
+            for line in diff[:40]:
+                if line.startswith("+"):
+                    click.echo(f"    {Fore.GREEN}{line}{Fore.RESET}")
+                elif line.startswith("-"):
+                    click.echo(f"    {Fore.RED}{line}{Fore.RESET}")
+                else:
+                    click.echo(f"    {Fore.WHITE}{line}{Fore.RESET}")
+
+    # 5. Se um é bytecode e outro é plain, decompilar o bytecode
+    if prod_is_bytecode and not test_is_bytecode:
+        click.echo(f"\n  {Fore.YELLOW}⚠ PRODUCTION é bytecode, TEST é plain.{Fore.RESET}")
+        click.echo(f"    Isso significa que os dois init.lua são gerados de forma diferente.")
+    elif test_is_bytecode and not prod_is_bytecode:
+        click.echo(f"\n  {Fore.YELLOW}⚠ TEST é bytecode, PRODUCTION é plain.{Fore.RESET}")
+        click.echo(f"    {Fore.RED}PROBLEMA IDENTIFICADO:{Fore.RESET} Produção não está usando AOT!")
+
+    # 6. Verifica se contém os templates-chave
+    click.echo(f"\n  {Fore.CYAN}Verificação de templates-chave (busca no conteúdo):{Fore.RESET}")
+    prod_lower = prod_bytes.decode("utf-8", errors="replace").lower() if not prod_is_bytecode else ""
+    test_lower = test_bytes.decode("utf-8", errors="replace").lower() if not test_is_bytecode else ""
+
+    for template_key in ["05_split_mover", "doxoade:toggle-split-orientation", "doxoade:move-tab-to-opposite-panel"]:
+        in_prod = template_key.lower() in prod_lower if not prod_is_bytecode else "N/A (bytecode)"
+        in_test = template_key.lower() in test_lower if not test_is_bytecode else "N/A (bytecode)"
+        click.echo(f"    • {template_key}:")
+        click.echo(f"        PRODUCTION: {in_prod}")
+        click.echo(f"        TEST:       {in_test}")
+
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}📊 CONCLUSÃO:{Style.RESET_ALL}")
+    if prod_hash == test_hash:
+        click.echo(f"  {Fore.GREEN}✔ Os dois init.lua são idênticos. O problema está no ambiente de execução (session, user_settings).{Fore.RESET}")
+    elif prod_is_bytecode != test_is_bytecode:
+        click.echo(f"  {Fore.RED}✖ Init.lua gerados com formatos diferentes (AOT vs plain).{Fore.RESET}")
+        click.echo(f"  {Fore.YELLOW}💡 Alinhar os pipelines de geração.{Fore.RESET}")
+    else:
+        click.echo(f"  {Fore.YELLOW}⚠ Init.lua diferem no conteúdo. Verificar diff acima.{Fore.RESET}")
+
+    click.echo()
+
+@lite_xl_group.command("clear", help="🧹 Limpa caches, logs, testes e lixo do Lite XL e Doxoade.")
+@click.option("--mode", "-m", type=click.Choice(["all", "production", "test", "sandbox"]), default="all", help="Ambiente a limpar (Padrão: all).")
+@click.option("--deep", "-d", is_flag=True, help="Limpeza profunda (remove sessões, workspaces e caches Python).")
+def cmd_clear(mode, deep):
+    """Saneamento cross-platform de ambientes, caches e logs."""
+    import shutil
+    from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+    
+    user_dir = LiteXLPaths.get_user_dir()
+    sandbox_dir = LiteXLEngine.get_sandbox_dir()
+    test_dir = user_dir / ".doxoade" / "test_deploy"
+    proj_root = Path.cwd()
+    
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🧹 DOXLY CLEAR — Saneamento de Ambientes{Style.RESET_ALL}\n")
+    
+    cleared_count = 0
+    
+    def safe_rmtree(path: Path, desc: str):
+        nonlocal cleared_count
+        if path.exists():
+            try:
+                shutil.rmtree(path)
+                click.echo(f"  {Fore.GREEN}✔{Fore.RESET} {desc}: {path}")
+                cleared_count += 1
+            except Exception as e:
+                click.echo(f"  {Fore.RED}✖{Fore.RESET} Falha ao remover {path}: {e}")
+                
+    def safe_unlink(path: Path, desc: str):
+        nonlocal cleared_count
+        if path.exists():
+            try:
+                path.unlink()
+                click.echo(f"  {Fore.GREEN}✔{Fore.RESET} {desc}: {path.name}")
+                cleared_count += 1
+            except Exception:
+                pass
+
+    # 1. Limpeza de Caches Python (__pycache__ e .pyc)
+    click.echo(f"  {Fore.YELLOW}Limpando caches Python...{Fore.RESET}")
+    for pycache in proj_root.rglob("__pycache__"):
+        safe_rmtree(pycache, "pycache")
+    for pyc in proj_root.rglob("*.pyc"):
+        safe_unlink(pyc, "pyc")
+
+    # 2. Limpeza de Logs e Diagnostics
+    if mode in ("all", "production"):
+        click.echo(f"\n  {Fore.YELLOW}Limpando Production...{Fore.RESET}")
+        safe_unlink(user_dir / "session_log.txt", "session_log")
+        safe_unlink(user_dir / "error.txt", "error_txt")
+        safe_rmtree(user_dir / ".doxoade" / "diagnostics", "diagnostics")
+        safe_rmtree(user_dir / ".doxoade" / "api_guard", "api_guard")
+        if deep:
+            safe_unlink(user_dir / "session.lua", "session_lua")
+            safe_rmtree(user_dir / "ws", "workspace")
+
+    if mode in ("all", "test"):
+        click.echo(f"\n  {Fore.YELLOW}Limpando Test Deploy...{Fore.RESET}")
+        safe_rmtree(test_dir, "test_deploy")
+
+    if mode in ("all", "sandbox"):
+        click.echo(f"\n  {Fore.YELLOW}Limpando Sandbox...{Fore.RESET}")
+        safe_rmtree(sandbox_dir, "sandbox")
+
+    click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}✔ Saneamento concluído. {cleared_count} itens limpos.{Style.RESET_ALL}\n")

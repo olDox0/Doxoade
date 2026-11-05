@@ -77,6 +77,66 @@ local function get_opposite_panel()
   return nil
 end
 
+local function get_all_selections_for_diff(doc)
+  if not doc then return {} end
+
+  -- 1) API do módulo 21 (preferencial)
+  local api = rawget(_G, "DOXOADE_GET_ALL_SELECTIONS")
+  if type(api) == "function" then
+    local ok, sels = pcall(api, doc)
+    if ok and type(sels) == "table" then
+      return sels
+    end
+  end
+
+  -- 2) Fallback: seleção única nativa (comportamento antigo)
+  local sels = {}
+  if type(doc.has_selection) == "function" and doc:has_selection() then
+    local ok, l1, c1, l2, c2 = pcall(doc.get_selection, doc, true)
+    if ok and l1 and l2 then
+      table.insert(sels, { l1, c1 or 1, l2, c2 or 1 })
+    end
+  end
+  return sels
+end
+
+--- Coleta todas as linhas dos blocos dispersos e constrói dois artefatos:
+---   * `lines`: tabela contígua (1..N) com o conteúdo das linhas em ordem de bloco.
+---   * `line_map`: mapeamento `virtual_idx -> { line_idx_real, block_id }`.
+--- A `block_id` permite saber onde termina/começa um bloco (útil para
+--- realce de borda visual se desejado no futuro).
+---
+--- Deduplicação: se duas seleções sobrepõem a mesma linha, ela é contada uma
+--- única vez (a primeira que aparecer).
+---
+--- @param doc table O documento (Doc).
+--- @return table { lines = {string}, line_map = { {line_idx, block_id} } }
+local function collect_disjoint_blocks(doc)
+  if not doc or not doc.lines then
+    return { lines = {}, line_map = {} }
+  end
+
+  local sels = get_all_selections_for_diff(doc)
+  local lines = {}
+  local line_map = {}
+  local seen_lines = {}
+
+  for block_id, sel in ipairs(sels) do
+    local l1, _, l2, _ = sel[1], sel[2], sel[3], sel[4]
+    if l1 and l2 and l1 <= l2 then
+      for line_idx = l1, l2 do
+        if not seen_lines[line_idx] then
+          seen_lines[line_idx] = true
+          table.insert(lines, doc.lines[line_idx] or "")
+          table.insert(line_map, { line_idx = line_idx, block_id = block_id })
+        end
+      end
+    end
+  end
+
+  return { lines = lines, line_map = line_map }
+end
+
 -- =============================================================================
 -- 🧠 MOTOR DE SIMILARIDADE E DIFF COMPLETO (SLIDING WINDOW & MATCHING)
 -- =============================================================================
@@ -351,7 +411,16 @@ end
 local function compare_with_opposite_panel()
   local view_a = core.active_view
   local doc_a = view_a and view_a.doc
-  if not doc_a or not doc_a.has_selection or not doc_a:has_selection() then
+
+  if not doc_a then
+    if core.log then core.log("⚠ [DIFF] Nenhum documento ativo para comparar.") end
+    return
+  end
+
+  -- [FASE 2] Coleta resiliente de seleções (nativas ou via módulo 21)
+  local collected = collect_disjoint_blocks(doc_a)
+
+  if #collected.lines == 0 then
     if core.log then core.log("⚠ [DIFF] Selecione um bloco de texto no painel ativo para comparar.") end
     return
   end
@@ -361,35 +430,70 @@ local function compare_with_opposite_panel()
     if core.log then core.log("⚠ [DIFF] Nenhum painel oposto ativo encontrado para comparação.") end
     return
   end
+
   local doc_b = view_b.doc
 
-  local l1_a, _, l2_a, _ = doc_a:get_selection(true)
-  local lines_a = {}
-  for l = l1_a, l2_a do
-    table.insert(lines_a, doc_a.lines[l] or "")
+  -- [FASE 2] As linhas do painel A vêm dos blocos dispersos concatenados
+  local lines_a = collected.lines
+  local line_map_a = collected.line_map
+  local total_blocks_a = 0
+  for _, m in ipairs(line_map_a) do
+    if m.block_id > total_blocks_a then total_blocks_a = m.block_id end
   end
 
+  -- Painel B: se houver seleção, usa; senão, busca bloco similar ao A (virtual)
   local l1_b, l2_b
   local lines_b = {}
+  local line_map_b = {}
+
   if doc_b.has_selection and doc_b:has_selection() then
-    local b_l1, _, b_l2, _ = doc_b:get_selection(true)
-    l1_b, l2_b = b_l1, b_l2
-    for l = l1_b, l2_b do
-      table.insert(lines_b, doc_b.lines[l] or "")
-    end
-    if core.log then core.log("🔍 [DIFF] Comparando seleção A vs seleção B.") end
-  else
-    l1_b, l2_b = find_most_similar_block(lines_a, doc_b)
-    for l = l1_b, l2_b do
-      table.insert(lines_b, doc_b.lines[l] or "")
-    end
+    local collected_b = collect_disjoint_blocks(doc_b)
+    lines_b = collected_b.lines
+    line_map_b = collected_b.line_map
     if core.log then
-      core.log(string.format("🔍 [DIFF] Bloco similar localizado no Painel B (Linhas %d a %d | %.2fms).",
-        l1_b, l2_b, ComparatorState.telemetry.last_latency_ms))
+      core.log(string.format(
+        "🔍 [DIFF] Comparando %d bloco(s) em A (%d linhas) vs %d bloco(s) em B (%d linhas).",
+        total_blocks_a, #lines_a, #collected_b.line_map, #lines_b
+      ))
+    end -- ← fecha `if core.log`
+  end   -- ← fecha `if doc_b.has_selection`
+  -- else
+  --   -- Sem seleção em B: busca bloco mais similar usando as linhas virtuais de A
+  --   l1_b, l2_b = find_most_similar_block(lines_a, doc_b)
+  --   for l = l1_b, l2_b do
+  --     table.insert(lines_b, doc_b.lines[l] or "")
+  --     table.insert(line_map_b, { line_idx = l, block_id = 1 })
+  --   end
+  --   if core.log then
+  --     core.log(string.format(
+  --       "🔍 [DIFF] Bloco similar localizado no Painel B (Linhas %d a %d | %.2fms).",
+  --       l1_b, l2_b, ComparatorState.telemetry.last_latency_ms
+  --     ))
+  --   end
+  -- end
+
+  -- [FASE 2] O LCS trabalha sobre o índice virtual (1..N),
+  -- não sobre o line_idx real. Portanto, compute_npp_diff usa (1, 1).
+  local diff_map_a_virtual, diff_map_b_virtual = compute_npp_diff(lines_a, lines_b, 1, 1)
+
+  -- [FASE 2] Remapeia do índice virtual para o line_idx real, preenchendo o dicionário
+  local diff_map_a = {}
+  for virtual_idx, status in pairs(diff_map_a_virtual) do
+    local entry = line_map_a[virtual_idx]
+    if entry and entry.line_idx then
+      diff_map_a[entry.line_idx] = status
     end
   end
 
-  local diff_map_a, diff_map_b = compute_npp_diff(lines_a, lines_b, l1_a, l1_b)
+  local diff_map_b = {}
+  for virtual_idx, status in pairs(diff_map_b_virtual) do
+    local entry = line_map_b[virtual_idx]
+    if entry and entry.line_idx then
+      diff_map_b[entry.line_idx] = status
+    end
+  end
+
+  -- Estado global para os hooks de renderização
   ComparatorState.active = true
   ComparatorState.doc_a = doc_a
   ComparatorState.doc_b = doc_b
@@ -398,16 +502,39 @@ local function compare_with_opposite_panel()
   ComparatorState.telemetry.comparisons_count = ComparatorState.telemetry.comparisons_count + 1
 
   core.redraw = true
+
+  if core.log then
+    local matched = 0
+    local modified = 0
+    local removed = 0
+    for _, st in pairs(diff_map_a) do
+      if st == "EQUAL" then matched = matched + 1
+      elseif st == "MODIFIED" then modified = modified + 1
+      elseif st == "DELETED" then removed = removed + 1
+      end
+    end
+    core.log(string.format(
+      "✔ [DIFF] %d linhas comparadas | %d iguais | %d modificadas | %d removidas.",
+      matched + modified + removed, matched, modified, removed
+    ))
+  end
 end
 
 local function clear_diff_highlights()
+  local had_blocks = ComparatorState.active
   ComparatorState.active = false
   ComparatorState.doc_a = nil
   ComparatorState.doc_b = nil
   ComparatorState.lines_a = {}
   ComparatorState.lines_b = {}
   core.redraw = true
-  if core.log then core.log("🧹 [DIFF] Realces de comparação limpos.") end
+  if core.log then
+    if had_blocks then
+      core.log("🧹 [DIFF] Realces de comparação limpos.")
+    else
+      core.log("🧹 [DIFF] Nenhum realce ativo para limpar.")
+    end
+  end
 end
 
 -- =============================================================================

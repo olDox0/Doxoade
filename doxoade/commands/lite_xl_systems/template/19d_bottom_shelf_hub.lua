@@ -391,6 +391,72 @@ function ShelfHub:draw()
     draw_text_safe(wm_font, cur_proj, wm_x, wm_y, wm_color)
   end
 
+  -- [FASE 10] Fallback visual quando o PTY falha
+  if self.active_tab == "terminal" and term and term._fallback_mode then
+    local fb_w = math.min(w - 60, 520)
+    local fb_h = 220
+    local fb_x = x + math.floor((w - fb_w) / 2)
+    local fb_y = canvas_y + math.floor((canvas_h - fb_h) / 2)
+    
+    -- Fundo do bloco
+    local bg_dark = { 20, 20, 24, 240 }
+    local bg_border = { 234, 179, 8, 255 }  -- amarelo (aviso)
+    draw_rect_safe(fb_x - 2, fb_y - 2, fb_w + 4, fb_h + 4, { 0, 0, 0, 150 })
+    draw_rect_safe(fb_x, fb_y, fb_w, fb_h, bg_dark)
+    draw_rect_safe(fb_x, fb_y, fb_w, 3, bg_border)
+    
+    -- Ícone e título
+    draw_text_safe(font, "⚠️  TERMINAL PTY INDISPONÍVEL", fb_x + 20, fb_y + 18, bg_border)
+    
+    -- Motivo (wrap)
+    local reason = term._fallback_reason or "Erro desconhecido"
+    local reason_y = fb_y + 52
+    local reason_lines = {}
+    -- Wrap simples: divide em chunks de 60 chars
+    local remaining = reason
+    while #remaining > 0 do
+      local chunk = remaining:sub(1, 60)
+      table.insert(reason_lines, chunk)
+      remaining = remaining:sub(61)
+      if #reason_lines >= 3 then break end
+    end
+    for i, line in ipairs(reason_lines) do
+      draw_text_safe(font, line, fb_x + 20, reason_y + (i - 1) * 18, { 200, 200, 200, 255 })
+    end
+    
+    -- Botões lado a lado
+    local btn_w = 220
+    local btn_h = 44
+    local btn_y = fb_y + fb_h - 70
+    local btn_gap = 16
+    
+    -- Botão 1: Instalar pywinpty
+    local install_btn = {
+      x = fb_x + math.floor((fb_w - (btn_w * 2 + btn_gap)) / 2),
+      y = btn_y,
+      w = btn_w,
+      h = btn_h,
+    }
+    draw_rect_safe(install_btn.x, install_btn.y, btn_w, btn_h, { 34, 197, 94, 255 })
+    draw_text_safe(font, "📦  Instalar pywinpty", install_btn.x + 20, install_btn.y + 14, { 255, 255, 255, 255 })
+    
+    -- Botão 2: Terminal Externo
+    local ext_btn = {
+      x = install_btn.x + btn_w + btn_gap,
+      y = btn_y,
+      w = btn_w,
+      h = btn_h,
+    }
+    draw_rect_safe(ext_btn.x, ext_btn.y, btn_w, btn_h, { 56, 189, 248, 255 })
+    draw_text_safe(font, "🖥️  Abrir Terminal Externo", ext_btn.x + 20, ext_btn.y + 14, { 255, 255, 255, 255 })
+    
+    -- Salva estado dos botões para detectar clique
+    ShelfHub._fallback_buttons = {
+      install = install_btn,
+      external = ext_btn,
+    }
+  end
+
   if self.active_tab == "terminal" and term then
     term:update_viewport(w - 8, canvas_h + 30)
 
@@ -645,7 +711,15 @@ end
 local original_rootview_on_mouse_pressed = RootView.on_mouse_pressed
 function RootView:on_mouse_pressed(button, x, y, clicks)
   if ShelfHub.visible then
+    -- ✅ CORREÇÃO: Só intercepta clique se estiver DENTRO do card do shelf
     local r = ShelfHub.card_rect
+    if not r or x < r.x or x > r.x + r.w or y < r.y or y > r.y + r.h then
+      -- Clique fora do card: fecha o shelf e NÃO intercepta
+      ShelfHub.visible = false
+      core.redraw = true
+      return original_rootview_on_mouse_pressed(self, button, x, y, clicks)
+    end
+    
     local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
     local canvas = rawget(_G, "_DOXOADE_CANVAS_STUDIO")
     local font = (term and term:get_font()) or style.font
@@ -748,10 +822,11 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
         end
       end
     end
-
+-- ✅ CORREÇÃO: Fechamento correto da função on_mouse_pressed
     return true
   end
-  if original_rootview_on_mouse_pressed then return original_rootview_on_mouse_pressed(self, button, x, y, clicks) end
+  -- Fallback: clique fora do shelf
+  return original_rootview_on_mouse_pressed(self, button, x, y, clicks)
 end
 
 local original_rootview_on_mouse_released = RootView.on_mouse_released
@@ -805,10 +880,11 @@ end
 
 local original_rootview_on_text_input = RootView.on_text_input
 function RootView:on_text_input(text)
-  if ShelfHub.visible and ShelfHub.active_tab == "terminal" then
+  -- ✅ Só intercepta texto quando o foco está EXPLICITAMENTE no shelf
+  if ShelfHub.visible and ShelfHub.active_tab == "terminal" and shelf_is_focused() then
     if not text or text == "" or text:find("^[%z\1-\31\127]") then return true end
     local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if term then
+    if type(term) == "table" and type(term.update_suggestions) == "function" then
       local s_from = term.input_sel_from and term.input_cursor and math.min(term.input_sel_from, term.input_cursor)
       local s_to   = term.input_sel_from and term.input_cursor and math.max(term.input_sel_from, term.input_cursor)
 
@@ -834,280 +910,285 @@ function RootView:on_text_input(text)
 end
 
 -- =============================================================================
--- COMANDOS E KEYMAPS SOBERANOS
+-- COMANDOS E KEYMAPS SOBERANOS (CORRIGIDO)
 -- =============================================================================
+
+-- ✅ FUNÇÃO DE FOCO (definitiva)
+local function shelf_is_focused()
+    if not ShelfHub.visible then return false end
+    local active = core.active_view
+    if not active then return false end
+
+    -- Se a view ativa é um DocView, o foco está no editor
+    if active.doc ~= nil then return false end
+
+    -- Só retorna true se o term for uma tabela válida
+    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+    if type(term) ~= "table" then return false end
+
+    if active == term then return true end
+    if type(active.ensure_started) == "function" then return true end
+
+    return false
+end  
+
+-- ✅ Comandos globais (sempre ativos)
 command.add(nil, {
-  ["doxoade:toggle-bottom-shelf"] = function()
-    ShelfHub.visible = not ShelfHub.visible
-    if ShelfHub.visible then ShelfHub:ensure_initialized() end
-    core.redraw = true
-  end,
-  ["doxoade:bottom-shelf-toggle-maximize"] = function()
-    if ShelfHub.visible then
-      ShelfHub.is_maximized = not ShelfHub.is_maximized
-      core.redraw = true
-    end
-  end,
-  ["doxoade:bottom-shelf-toggle-layout"] = function()
-    if ShelfHub.visible then ShelfHub:toggle_layout_mode() end
-  end,
+    ["doxoade:toggle-bottom-shelf"] = function()
+        ShelfHub.visible = not ShelfHub.visible
+        if ShelfHub.visible then ShelfHub:ensure_initialized() end
+        core.redraw = true
+    end,
+    ["doxoade:bottom-shelf-toggle-maximize"] = function()
+        if ShelfHub.visible then
+            ShelfHub.is_maximized = not ShelfHub.is_maximized
+            core.redraw = true
+        end
+    end,
+    ["doxoade:bottom-shelf-toggle-layout"] = function()
+        if ShelfHub.visible then ShelfHub:toggle_layout_mode() end
+    end,
 })
 
-command.add(function() return ShelfHub.visible end, {
-  ["bottom-shelf:close"] = function() ShelfHub.visible = false; core.redraw = true; return true end,
-  ["bottom-shelf:escape"] = function() return command.perform("bottom-shelf:close") end,
-  ["bottom-shelf:interrupt"] = function()
-    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if term then term:send_interrupt() end
-    return true
-  end,
-  ["bottom-shelf:clear"] = function()
-    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if term then term:clear_screen() end
-    return true
-  end,
-
-  -- Cópia cirúrgica da seleção
-  ["bottom-shelf:copy"] = function()
-    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if ShelfHub.active_tab == "canvas" then
-      local canvas = rawget(_G, "_DOXOADE_CANVAS_STUDIO")
-      if canvas then canvas:copy_image_to_clipboard() end
+-- ✅ Comandos do Bottom Shelf (só ativos quando o foco está no shelf)
+command.add(shelf_is_focused, {
+    ["bottom-shelf:close"] = function() ShelfHub.visible = false; core.redraw = true; return true end,
+    ["bottom-shelf:escape"] = function() return command.perform("bottom-shelf:close") end,
+    ["bottom-shelf:interrupt"] = function()
+      local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+      if term then term:send_interrupt() end
       return true
-    end
-
-    if not term then return true end
-
-    -- 1. Seleção no input bar
-    local s_from = term.input_sel_from and term.input_cursor and math.min(term.input_sel_from, term.input_cursor)
-    local s_to   = term.input_sel_from and term.input_cursor and math.max(term.input_sel_from, term.input_cursor)
-
-    if term._all_selected and #term.input_text > 0 then
-      if system and system.set_clipboard then system.set_clipboard(term.input_text) end
-      core.log("📋 Comando copiado.")
+    end,
+    ["bottom-shelf:clear"] = function()
+      local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+      if term then term:clear_screen() end
       return true
-    elseif s_from and s_to and s_from < s_to then
-      local sel_str = term.input_text:sub(s_from, s_to - 1)
-      if system and system.set_clipboard then system.set_clipboard(sel_str) end
-      core.log("📋 Trecho selecionado copiado.")
-      return true
-    end
+    end,
 
-    -- 2. Seleção cirúrgica na saída do terminal
-    if term.sel_s_line and term.sel_e_line then
-      local s_l, s_c, e_l, e_c
-      if term.sel_s_line < term.sel_e_line or (term.sel_s_line == term.sel_e_line and term.sel_s_col <= term.sel_e_col) then
-        s_l, s_c, e_l, e_c = term.sel_s_line, term.sel_s_col, term.sel_e_line, term.sel_e_col
-      else
-        s_l, s_c, e_l, e_c = term.sel_e_line, term.sel_e_col, term.sel_s_line, term.sel_s_col
+    -- Cópia cirúrgica da seleção
+    ["bottom-shelf:copy"] = function()
+      local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+      if ShelfHub.active_tab == "canvas" then
+        local canvas = rawget(_G, "_DOXOADE_CANVAS_STUDIO")
+        if canvas then canvas:copy_image_to_clipboard() end
+        return true
       end
 
-      local parts = {}
-      for l = s_l, e_l do
-        local line_item = term.lines[l]
-        if line_item and line_item.segments then
-          local l_text = ""
-          for _, s in ipairs(line_item.segments) do l_text = l_text .. (s.text or "") end
-          if s_l == e_l then
-            table.insert(parts, l_text:sub(s_c, e_c))
-          elseif l == s_l then
-            table.insert(parts, l_text:sub(s_c))
-          elseif l == e_l then
-            table.insert(parts, l_text:sub(1, e_c))
-          else
-            table.insert(parts, l_text)
+      if not term then return true end
+
+      -- 1. Seleção no input bar
+      local s_from = term.input_sel_from and term.input_cursor and math.min(term.input_sel_from, term.input_cursor)
+      local s_to   = term.input_sel_from and term.input_cursor and math.max(term.input_sel_from, term.input_cursor)
+
+      if term._all_selected and #term.input_text > 0 then
+        if system and system.set_clipboard then system.set_clipboard(term.input_text) end
+        core.log("📋 Comando copiado.")
+        return true
+      elseif s_from and s_to and s_from < s_to then
+        local sel_str = term.input_text:sub(s_from, s_to - 1)
+        if system and system.set_clipboard then system.set_clipboard(sel_str) end
+        core.log("📋 Trecho selecionado copiado.")
+        return true
+      end
+
+      -- 2. Seleção cirúrgica na saída do terminal
+      if term.sel_s_line and term.sel_e_line then
+        local s_l, s_c, e_l, e_c
+        if term.sel_s_line < term.sel_e_line or (term.sel_s_line == term.sel_e_line and term.sel_s_col <= term.sel_e_col) then
+          s_l, s_c, e_l, e_c = term.sel_s_line, term.sel_s_col, term.sel_e_line, term.sel_e_col
+        else
+          s_l, s_c, e_l, e_c = term.sel_e_line, term.sel_e_col, term.sel_s_line, term.sel_s_col
+        end
+
+        local parts = {}
+        for l = s_l, e_l do
+          local line_item = term.lines[l]
+          if line_item and line_item.segments then
+            local l_text = ""
+            for _, s in ipairs(line_item.segments) do l_text = l_text .. (s.text or "") end
+            if s_l == e_l then
+              table.insert(parts, l_text:sub(s_c, e_c))
+            elseif l == s_l then
+              table.insert(parts, l_text:sub(s_c))
+            elseif l == e_l then
+              table.insert(parts, l_text:sub(1, e_c))
+            else
+              table.insert(parts, l_text)
+            end
           end
+        end
+
+        local out = table.concat(parts, "\n")
+        if out ~= "" and system and system.set_clipboard then
+          system.set_clipboard(out)
+          core.log(string.format("📋 %d caractere(s) do terminal copiados.", #out))
+          return true
         end
       end
 
-      local out = table.concat(parts, "\n")
-      if out ~= "" and system and system.set_clipboard then
-        system.set_clipboard(out)
-        core.log(string.format("📋 %d caractere(s) do terminal copiados.", #out))
+      term:copy_output()
+      return true
+    end,
+
+    ["bottom-shelf:paste"] = function()
+      if ShelfHub.active_tab == "canvas" then
+        local canvas = rawget(_G, "_DOXOADE_CANVAS_STUDIO")
+        if canvas then canvas:paste_clipboard_image() end
         return true
       end
-    end
 
-    term:copy_output()
-    return true
-  end,
+      local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+      if term then
+        local clip = system.get_clipboard and system.get_clipboard()
+        if clip and clip ~= "" then
+          clip = clip:gsub("[\r\n]+", " ")
+          local s_from = term.input_sel_from and term.input_cursor and math.min(term.input_sel_from, term.input_cursor)
+          local s_to   = term.input_sel_from and term.input_cursor and math.max(term.input_sel_from, term.input_cursor)
 
-  ["bottom-shelf:paste"] = function()
-    if ShelfHub.active_tab == "canvas" then
-      local canvas = rawget(_G, "_DOXOADE_CANVAS_STUDIO")
-      if canvas then canvas:paste_clipboard_image() end
+          if term._all_selected then
+            term.input_text = clip
+            term.input_cursor = #clip + 1
+            term._all_selected = false
+            term.input_sel_from = nil
+          elseif s_from and s_to and s_from < s_to then
+            term.input_text = term.input_text:sub(1, s_from - 1) .. clip .. term.input_text:sub(s_to)
+            term.input_cursor = s_from + #clip
+            term.input_sel_from = nil
+          else
+            local cur = term.input_cursor or (#term.input_text + 1)
+            term.input_text = term.input_text:sub(1, cur - 1) .. clip .. term.input_text:sub(cur)
+            term.input_cursor = cur + #clip
+          end
+          core.redraw = true
+        end
+      end
       return true
-    end
+    end,
 
-    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if term then
-      local clip = system.get_clipboard and system.get_clipboard()
-      if clip and clip ~= "" then
-        clip = clip:gsub("[\r\n]+", " ")
+    ["bottom-shelf:submit"] = function()
+      local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+      if term then
+        term._all_selected = false
+        term.input_sel_from = nil
+        term:execute_command(term.input_text)
+      end
+      return true
+    end,
+
+    ["bottom-shelf:history-prev"] = function()
+      local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+      if term and term.history_prev then term:history_prev() end
+      return true
+    end,
+    ["bottom-shelf:history-next"] = function()
+      local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+      if term and term.history_next then term:history_next() end
+      return true
+    end,
+    ["bottom-shelf:start-of-line"] = function()
+      local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+      if term then term.input_cursor = 1; term._all_selected = false; term.input_sel_from = nil; core.redraw = true end
+      return true
+    end,
+    ["bottom-shelf:end-of-line"] = function()
+      local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+      if term then term.input_cursor = #term.input_text + 1; term._all_selected = false; term.input_sel_from = nil; core.redraw = true end
+      return true
+    end,
+    ["bottom-shelf:word-left"] = function()
+      local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+      if term and term.move_word_left then term:move_word_left() end
+      return true
+    end,
+    ["bottom-shelf:word-right"] = function()
+      local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+      if term and term.move_word_right then term:move_word_right() end
+      return true
+    end,
+    ["bottom-shelf:backspace"] = function()
+      local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+      if term then
         local s_from = term.input_sel_from and term.input_cursor and math.min(term.input_sel_from, term.input_cursor)
         local s_to   = term.input_sel_from and term.input_cursor and math.max(term.input_sel_from, term.input_cursor)
 
         if term._all_selected then
-          term.input_text = clip
-          term.input_cursor = #clip + 1
+          term.input_text = ""
+          term.input_cursor = 1
           term._all_selected = false
           term.input_sel_from = nil
         elseif s_from and s_to and s_from < s_to then
-          term.input_text = term.input_text:sub(1, s_from - 1) .. clip .. term.input_text:sub(s_to)
-          term.input_cursor = s_from + #clip
+          term.input_text = term.input_text:sub(1, s_from - 1) .. term.input_text:sub(s_to)
+          term.input_cursor = s_from
           term.input_sel_from = nil
-        else
-          local cur = term.input_cursor or (#term.input_text + 1)
-          term.input_text = term.input_text:sub(1, cur - 1) .. clip .. term.input_text:sub(cur)
-          term.input_cursor = cur + #clip
+        elseif term.input_cursor > 1 then
+          term.input_text = term.input_text:sub(1, term.input_cursor - 2) .. term.input_text:sub(term.input_cursor)
+          term.input_cursor = term.input_cursor - 1
         end
+        term:update_suggestions()
         core.redraw = true
       end
-    end
-    return true
-  end,
+      return true
+    end,
+    ["bottom-shelf:delete"] = function()
+      local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+      if term then
+        local s_from = term.input_sel_from and term.input_cursor and math.min(term.input_sel_from, term.input_cursor)
+        local s_to   = term.input_sel_from and term.input_cursor and math.max(term.input_sel_from, term.input_cursor)
 
-  ["bottom-shelf:submit"] = function()
-    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if term then
-      term._all_selected = false
-      term.input_sel_from = nil
-      term:execute_command(term.input_text)
-    end
-    return true
-  end,
-
-  ["bottom-shelf:history-prev"] = function()
-    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if term and term.history_prev then term:history_prev() end
-    return true
-  end,
-  ["bottom-shelf:history-next"] = function()
-    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if term and term.history_next then term:history_next() end
-    return true
-  end,
-  ["bottom-shelf:start-of-line"] = function()
-    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if term then term.input_cursor = 1; term._all_selected = false; term.input_sel_from = nil; core.redraw = true end
-    return true
-  end,
-  ["bottom-shelf:end-of-line"] = function()
-    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if term then term.input_cursor = #term.input_text + 1; term._all_selected = false; term.input_sel_from = nil; core.redraw = true end
-    return true
-  end,
-  ["bottom-shelf:word-left"] = function()
-    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if term and term.move_word_left then term:move_word_left() end
-    return true
-  end,
-  ["bottom-shelf:word-right"] = function()
-    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if term and term.move_word_right then term:move_word_right() end
-    return true
-  end,
-  ["bottom-shelf:backspace"] = function()
-    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if term then
-      local s_from = term.input_sel_from and term.input_cursor and math.min(term.input_sel_from, term.input_cursor)
-      local s_to   = term.input_sel_from and term.input_cursor and math.max(term.input_sel_from, term.input_cursor)
-
-      if term._all_selected then
-        term.input_text = ""
-        term.input_cursor = 1
-        term._all_selected = false
-        term.input_sel_from = nil
-      elseif s_from and s_to and s_from < s_to then
-        term.input_text = term.input_text:sub(1, s_from - 1) .. term.input_text:sub(s_to)
-        term.input_cursor = s_from
-        term.input_sel_from = nil
-      elseif term.input_cursor > 1 then
-        term.input_text = term.input_text:sub(1, term.input_cursor - 2) .. term.input_text:sub(term.input_cursor)
-        term.input_cursor = term.input_cursor - 1
+        if term._all_selected then
+          term.input_text = ""
+          term.input_cursor = 1
+          term._all_selected = false
+          term.input_sel_from = nil
+        elseif s_from and s_to and s_from < s_to then
+          term.input_text = term.input_text:sub(1, s_from - 1) .. term.input_text:sub(s_to)
+          term.input_cursor = s_from
+          term.input_sel_from = nil
+        elseif term.input_cursor <= #term.input_text then
+          term.input_text = term.input_text:sub(1, term.input_cursor - 1) .. term.input_text:sub(term.input_cursor + 1)
+        end
+        term:update_suggestions()
+        core.redraw = true
       end
-      term:update_suggestions()
-      core.redraw = true
-    end
-    return true
-  end,
-  ["bottom-shelf:delete"] = function()
-    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if term then
-      local s_from = term.input_sel_from and term.input_cursor and math.min(term.input_sel_from, term.input_cursor)
-      local s_to   = term.input_sel_from and term.input_cursor and math.max(term.input_sel_from, term.input_cursor)
-
-      if term._all_selected then
-        term.input_text = ""
-        term.input_cursor = 1
-        term._all_selected = false
-        term.input_sel_from = nil
-      elseif s_from and s_to and s_from < s_to then
-        term.input_text = term.input_text:sub(1, s_from - 1) .. term.input_text:sub(s_to)
-        term.input_cursor = s_from
-        term.input_sel_from = nil
-      elseif term.input_cursor <= #term.input_text then
-        term.input_text = term.input_text:sub(1, term.input_cursor - 1) .. term.input_text:sub(term.input_cursor + 1)
-      end
-      term:update_suggestions()
-      core.redraw = true
-    end
-    return true
-  end,
-  ["bottom-shelf:select-all"] = function()
-    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if term then term._all_selected = true; term.input_sel_from = nil; term.input_cursor = #term.input_text + 1; core.redraw = true end
-    return true
-  end,
-  ["bottom-shelf:previous-char"] = function()
-    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if term then term.input_sel_from = nil; term._all_selected = false; term.input_cursor = math.max(1, term.input_cursor - 1); core.redraw = true end
-    return true
-  end,
-  ["bottom-shelf:next-char"] = function()
-    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if term then term.input_sel_from = nil; term._all_selected = false; term.input_cursor = math.min(#term.input_text + 1, term.input_cursor + 1); core.redraw = true end
-    return true
-  end,
-  ["bottom-shelf:tab-complete"] = function()
-    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if term then term:handle_tab_completion() end
-    return true
-  end,
-  ["bottom-shelf:page-up"] = function()
-    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if term then term:scroll_by(300) end
-    return true
-  end,
-  ["bottom-shelf:page-down"] = function()
-    local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
-    if term then term:scroll_by(-300) end
-    return true
-  end,
+      return true
+    end,
+    ["bottom-shelf:select-all"] = function()
+      local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+      if term then term._all_selected = true; term.input_sel_from = nil; term.input_cursor = #term.input_text + 1; core.redraw = true end
+      return true
+    end,
+    ["bottom-shelf:previous-char"] = function()
+      local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+      if term then term.input_sel_from = nil; term._all_selected = false; term.input_cursor = math.max(1, term.input_cursor - 1); core.redraw = true end
+      return true
+    end,
+    ["bottom-shelf:next-char"] = function()
+      local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+      if term then term.input_sel_from = nil; term._all_selected = false; term.input_cursor = math.min(#term.input_text + 1, term.input_cursor + 1); core.redraw = true end
+      return true
+    end,
+    ["bottom-shelf:tab-complete"] = function()
+      local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+      if term then term:handle_tab_completion() end
+      return true
+    end,
+    ["bottom-shelf:page-up"] = function()
+      local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+      if term then term:scroll_by(300) end
+      return true
+    end,
+    ["bottom-shelf:page-down"] = function()
+      local term = rawget(_G, "_DOXOADE_TERMINAL_ENGINE")
+      if term then term:scroll_by(-300) end
+      return true
+    end,
 })
 
+-- ✅ KEYMAP: Atalhos globais (sempre ativos)
 keymap.add {
-  ["ctrl+`"]          = "doxoade:toggle-bottom-shelf",
-  ["ctrl+j"]          = "doxoade:toggle-bottom-shelf",
-  ["alt+return"]      = "doxoade:bottom-shelf-toggle-maximize",
-  ["escape"]          = "bottom-shelf:close",
-  ["ctrl+shift+c"]    = "bottom-shelf:copy",
-  ["ctrl+c"]          = "bottom-shelf:copy",
-  ["ctrl+v"]          = "bottom-shelf:paste",
-  ["ctrl+a"]          = "bottom-shelf:select-all",
-  ["return"]          = "bottom-shelf:submit",
-  ["keypad enter"]    = "bottom-shelf:submit",
-  ["backspace"]       = "bottom-shelf:backspace",
-  ["delete"]          = "bottom-shelf:delete",
-  ["tab"]             = "bottom-shelf:tab-complete",
-  ["up"]              = "bottom-shelf:history-prev",
-  ["down"]            = "bottom-shelf:history-next",
-  ["home"]            = "bottom-shelf:start-of-line",
-  ["end"]             = "bottom-shelf:end-of-line",
-  ["left"]            = "bottom-shelf:previous-char",
-  ["right"]           = "bottom-shelf:next-char",
-  ["ctrl+left"]       = "bottom-shelf:word-left",
-  ["ctrl+right"]      = "bottom-shelf:word-right",
-  ["pageup"]          = "bottom-shelf:page-up",
-  ["pagedown"]        = "bottom-shelf:page-down",
+    ["ctrl+`"]          = "doxoade:toggle-bottom-shelf",
+    ["ctrl+j"]          = "doxoade:toggle-bottom-shelf",
+    ["alt+return"]      = "doxoade:bottom-shelf-toggle-maximize",
+--    ["escape"]          = "bottom-shelf:close",
 }
+

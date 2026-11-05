@@ -130,16 +130,21 @@ end
 local function get_all_project_roots()
   local roots = {}
   local seen = {}
+  local user_dir = (USERDIR or "."):gsub("\\", "/"):lower():gsub("/+$", "")
 
   local function add_root(p)
     if not p then return end
     local path_str = type(p) == "table" and (p.path or p.name) or tostring(p)
     if path_str and path_str ~= "" then
-      local abs = system.absolute_path(path_str) or path_str
-      local clean = abs:gsub("[/\\]+$", "")
-      if not seen[clean:lower()] then
-        seen[clean:lower()] = true
-        table.insert(roots, clean)
+      local abs = (system.absolute_path(path_str) or path_str):gsub("\\", "/"):gsub("/+$", "")
+      -- [FASE 6.1] Exclui o USERDIR (config do Lite XL) da busca
+      local lower = abs:lower()
+      if lower == user_dir or lower:sub(1, #user_dir + 1) == user_dir .. "/" then
+        return
+      end
+      if not seen[lower] then
+        seen[lower] = true
+        table.insert(roots, abs)
       end
     end
   end
@@ -158,84 +163,219 @@ local function get_all_project_roots()
 end
 
 -- =============================================================================
--- 🔍 MOTOR DE BUSCA GLOBAL ASSÍNCRONO NO PROJETO (Nativo Lua - Alta Performance)
+-- 🔍 MOTOR DE BUSCA GLOBAL (V45.0 — Hierárquico Real com Short-Circuit)
 -- =============================================================================
-local function execute_global_search(query)
+-- Estratégia em 3 fases (para cada fase, se encontrar ≥ 1 resultado, PARA):
+--   FASE 1: Arquivos abertos em memória (core.docs) — O(1) por arquivo.
+--   FASE 2: Arquivos do mesmo diretório dos abertos — scan direto.
+--   FASE 3: Raízes do projeto (fallback global) — scan recursivo.
+-- =============================================================================
+local function execute_global_search(query, scope_root)
   if not query or query:match("^%s*$") then return end
-  local start_time     = os.clock()
-  local roots          = get_all_project_roots()
-  local search_results = {}
-  local total_hits     = 0
-  local total_files    = 0
+
+  local start_time = os.clock()
+  local state = rawget(_G, "_DOXOADE_SEARCH_STATE")
+  if not state then
+    state = { is_searching=false, query="", results={}, total_hits=0, total_files=0, elapsed=0 }
+    rawset(_G, "_DOXOADE_SEARCH_STATE", state)
+  end
+
+  state.is_searching = true
+  state.query = query
+  state.results = {}
+  state.total_hits = 0
+  state.total_files = 0
+  state.elapsed = 0
+  state.current_result_idx = 1
+  core.redraw = true
+
+  -- Garante que o dock está aberto
+  -- [FASE 6.3] Abre o dock se não existir (via comando do módulo 18).
+  -- if command.map and command.map["doxoade:open-search-dock"] then
+  --   pcall(command.perform, "doxoade:open-search-dock")
+  -- end
+
+  -- [FASE 6.3] Garante que o dock está aberto, mas SEM dar foco global.
+  -- Se o dock já existe, não mexe. Se não existe, cria (sem foco).
 
   local is_case_sensitive = (query:lower() ~= query)
   local query_needle = is_case_sensitive and query or query:lower()
 
-  core.log("🔍 Buscando por: '" .. query .. "'...")
+  local function scan_file(full_path)
+    local matches = {}
+    local f = io.open(full_path, "r")
+    if not f then return matches end
+    local line_no = 1
+    for line in f:lines() do
+      local target = is_case_sensitive and line or line:lower()
+      if target:find(query_needle, 1, true) then
+        table.insert(matches, {
+          line = line_no,
+          text = line:gsub("^%s*", ""):gsub("%s*$", ""),
+        })
+      end
+      line_no = line_no + 1
+    end
+    f:close()
+    return matches
+  end
+
+  local function scan_dir_shallow(dir_path)
+    local out = {}
+    if not dir_path then return out end
+    local ok, items = pcall(system.list_dir, dir_path)
+    if not ok or not items then return out end
+    for _, item in ipairs(items) do
+      local full = dir_path .. PATHSEP .. item
+      local info = system.get_file_info(full)
+      if info and info.type == "file" and (info.size or 0) < 3000000 then
+        local ext = item:match("%.([%w_]+)$")
+        if not ext or not IGNORED_EXTS[ext:lower()] then
+          local matches = scan_file(full)
+          if #matches > 0 then
+            table.insert(out, { path = full:gsub("\\", "/"), matches = matches })
+          end
+        end
+      end
+    end
+    return out
+  end
 
   core.add_thread(function()
-    local dir_queue = {}
-    for _, r in ipairs(roots) do
-      table.insert(dir_queue, r)
+    local function finish(reason)
+      state.is_searching = false
+      state.elapsed = os.clock() - start_time
+      state.phase_name = reason
+      core.redraw = true
+
+      -- [FASE 7.1] Apenas dispara o render do painel flutuante.
+      -- NÃO cria doc [Busca], NÃO abre aba, NÃO divide tela.
+      local renderer = rawget(_G, "DOXOADE_RENDER_SEARCH_RESULTS")
+      if type(renderer) == "function" then
+        pcall(renderer)
+      end
+
+      if core.log then
+        core.log(string.format(
+          "✔ Busca concluída (%s): %d ocorrência(s) em %d arquivo(s) em %.2fs.",
+          reason or "?", state.total_hits, state.total_files, state.elapsed
+        ))
+      end
     end
 
-    local file_batch_counter = 0
+    -- =======================================================================
+    -- FASE 1: arquivos abertos em memória (instantâneo)
+    -- =======================================================================
+    if core.docs then
+      local seen_open = {}
+      for _, d in ipairs(core.docs) do
+        if d.filename and d.lines and not seen_open[d.filename:lower()] then
+          seen_open[d.filename:lower()] = true
+          local file_matches = {}
+          for line_idx, line_text in ipairs(d.lines) do
+            local target = is_case_sensitive and line_text or line_text:lower()
+            if target:find(query_needle, 1, true) then
+              table.insert(file_matches, {
+                line = line_idx,
+                text = line_text:gsub("^%s*", ""):gsub("%s*$", ""),
+              })
+            end
+          end
+          if #file_matches > 0 then
+            local abs = (system.absolute_path(d.filename) or d.filename):gsub("\\", "/")
+            table.insert(state.results, { path = abs, matches = file_matches })
+            state.total_hits = state.total_hits + #file_matches
+            state.total_files = state.total_files + 1
+          end
+        end
+      end
+    end
+
+    -- Se encontrou em abertos, PARA (short-circuit)
+    if state.total_hits > 0 then
+      finish("FASE 1: arquivos abertos")
+      return
+    end
+
+    -- FASE 2: arquivos no MESMO DIRETÓRIO dos arquivos abertos
+    local open_dirs = {}
+    local seen_dirs = {}
+    local user_dir_lower = (USERDIR or "."):gsub("\\", "/"):lower():gsub("/+$", "")
+    if core.docs then
+      for _, d in ipairs(core.docs) do
+        if d.filename then
+          local abs = (system.absolute_path(d.filename) or d.filename):gsub("\\", "/")
+          local dir = abs:match("^(.*)/[^/]+$")
+          -- [FASE 6.1] Ignora arquivos do USERDIR (config do Lite XL)
+          if dir and not seen_dirs[dir:lower()] and dir:lower():sub(1, #user_dir_lower) ~= user_dir_lower then
+            seen_dirs[dir:lower()] = true
+            table.insert(open_dirs, dir)
+          end
+        end
+      end
+    end
+
+    for _, dir in ipairs(open_dirs) do
+      coroutine.yield()  -- mantém UI fluida
+      local found = scan_dir_shallow(dir)
+      for _, item in ipairs(found) do
+        table.insert(state.results, item)
+        state.total_hits = state.total_hits + #item.matches
+        state.total_files = state.total_files + 1
+      end
+    end
+
+    if state.total_hits > 0 then
+      finish("FASE 2: mesmo diretório dos abertos")
+      return
+    end
+
+    -- =======================================================================
+    -- FASE 3: raízes do projeto (fallback recursivo)
+    -- =======================================================================
+    local roots
+    if scope_root and type(scope_root) == "string" and scope_root ~= "" then
+      local abs_scope = (system.absolute_path(scope_root) or scope_root):gsub("\\", "/"):gsub("/+$", "")
+      local finfo = system.get_file_info(abs_scope)
+      roots = (finfo and finfo.type == "dir") and { abs_scope } or get_all_project_roots()
+    else
+      roots = get_all_project_roots()
+    end
+
+    local dir_queue = {}
+    for _, r in ipairs(roots) do table.insert(dir_queue, r) end
+    local batch = 0
 
     while #dir_queue > 0 do
       local current_dir = table.remove(dir_queue, 1)
       local items = system.list_dir(current_dir) or {}
-
       for _, item in ipairs(items) do
-        local is_ignored = false
+        local skip = false
         for pat in pairs(IGNORED_DIRS) do
-          if item:match(pat) then
-            is_ignored = true
-            break
-          end
+          if item:match(pat) then skip = true break end
         end
-
-        if not is_ignored then
-          local full_path = current_dir .. PATHSEP .. item
-          local finfo = system.get_file_info(full_path)
-
-          if finfo then
-            if finfo.type == "dir" then
-              table.insert(dir_queue, full_path)
-            elseif finfo.type == "file" and (finfo.size or 0) < 3000000 then
+        if not skip then
+          local full = current_dir .. PATHSEP .. item
+          local info = system.get_file_info(full)
+          if info then
+            if info.type == "dir" then
+              table.insert(dir_queue, full)
+            elseif info.type == "file" and (info.size or 0) < 3000000 then
               local ext = item:match("%.([%w_]+)$")
               if not ext or not IGNORED_EXTS[ext:lower()] then
-                total_files = total_files + 1
-                file_batch_counter = file_batch_counter + 1
-
-                if file_batch_counter >= 15 then
-                  file_batch_counter = 0
-                  coroutine.yield()
+                batch = batch + 1
+                if batch >= 20 then
+                  batch = 0
+                  coroutine.yield()  -- UI respira
                 end
-
-                local f = io.open(full_path, "r")
-                if f then
-                  local line_no = 1
-                  local file_matches = {}
-                  for line in f:lines() do
-                    local target_line = is_case_sensitive and line or line:lower()
-                    if target_line:find(query_needle, 1, true) then
-                      table.insert(file_matches, {
-                        line = line_no,
-                        text = line:gsub("^%s*", ""):gsub("%s*$", "")
-                      })
-                      total_hits = total_hits + 1
-                    end
-                    line_no = line_no + 1
-                  end
-                  f:close()
-
-                  if #file_matches > 0 then
-                    local clean_fn = (system.absolute_path(full_path) or full_path):gsub("\\", "/")
-                    table.insert(search_results, {
-                      path = clean_fn,
-                      matches = file_matches
-                    })
-                  end
+                local matches = scan_file(full)
+                if #matches > 0 then
+                  table.insert(state.results, {
+                    path = full:gsub("\\", "/"),
+                    matches = matches,
+                  })
+                  state.total_hits = state.total_hits + #matches
+                  state.total_files = state.total_files + 1
                 end
               end
             end
@@ -244,39 +384,13 @@ local function execute_global_search(query)
       end
     end
 
-    local elapsed = (os.clock() - start_time)
-    local out = {
-      "================================================================================",
-      string.format("  🔍 RESULTADOS DA BUSCA: %q", query),
-      string.format("  Ocorrências: %d | Arquivos: %d | Varredura: %d arquivos (%.2fs)",
-                    total_hits, #search_results, total_files, elapsed),
-      "  💡 Pressione [ENTER] em qualquer linha com 'arquivo:linha' para ir direto ao código!",
-      "================================================================================\n"
-    }
-
-    if #search_results == 0 then
-      table.insert(out, string.format("  (Nenhum resultado encontrado para %q)", query))
-    else
-      for _, res in ipairs(search_results) do
-        table.insert(out, string.format("📄 %s", res.path))
-        for _, m in ipairs(res.matches) do
-          table.insert(out, string.format("   %s:%d: %s", res.path, m.line, m.text))
-        end
-        table.insert(out, "")
-      end
-    end
-
-    local result_content = table.concat(out, "\n")
-    local doc_title = string.format("[Busca] %s.pot", query:gsub('[\\/:*?"<>|]', "_"))
-    local doc = core.open_doc()
-    doc.filename = doc_title
-    doc:insert(1, 1, result_content)
-    doc:clean()
-    core.root_view:open_doc(doc)
-    core.log(string.format("✔ Busca concluída: %d ocorrência(s) em %.2fs.", total_hits, elapsed))
-    core.redraw = true
+    finish("FASE 3: projeto completo")
   end)
 end
+
+pcall(function()
+  rawset(_G, "DOXOADE_EXECUTE_GLOBAL_SEARCH", execute_global_search)
+end)
 
 -- =============================================================================
 -- REGISTRO DE COMANDOS (RESTAURADO)
@@ -801,6 +915,7 @@ keymap.add {
   ["ctrl+alt+n"] = "doxoade:create-file-interactive", ["ctrl+alt+shift+n"] = "doxoade:note-hub-menu",
   ["ctrl+alt+a"] = "doxoade:open-agenda-view", ["ctrl+alt+i"] = "doxoade:toggle-indent-guides",
   ["ctrl+alt+k"] = "doxoade:trigger-active-check", ["ctrl+alt+shift+k"] = "doxoade:diagnose-live",
+  ["ctrl+f"] = "find-replace:find",
   ["f2"] = "doxoade:next-audit-incident", ["shift+f2"] = "doxoade:prev-audit-incident",
   ["ctrl+alt+c"] = "doxoade:copy-path-menu", ["ctrl+shift+c"] = "doxoade:tab-copy-relative-path",
   ["ctrl+alt+e"] = "doxoade:tab-open-in-explorer",
