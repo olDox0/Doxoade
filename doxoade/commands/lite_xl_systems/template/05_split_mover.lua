@@ -1,552 +1,568 @@
 -- doxoade/commands/lite_xl_systems/template/05_split_mover.lua
 --[[
-  🔀 DOXOADE SPLIT MOVER (V3.0 — Correção de Sintaxe + Movimento Real)
+  🔀 DOXOADE CANONICAL SPLIT ENGINE (V13.0 — Parent-Map Deterministic Flip)
   ----------------------------------------------------------------------------
-  Comandos:
-    • Ctrl+Alt+D          → mover aba ativa para o painel oposto
-    • Ctrl+Alt+Shift+D    → mover abas à direita para o painel oposto
-    • Ctrl+L              → alternar orientação do split (H ↔ V)
-    • Ctrl+Shift+L        → inverter ordem dos painéis
-    • F6 / Ctrl+Alt+←/→   → focar painel oposto
-]]
-
---[[
-## 📌 Débito Técnico #001 — Logo Customizada
-
-**Status:** Congelado (Fase 1.5)
-
-**Diagnóstico:**
-- Lite XL 2.1.8 **não tem** `renderer.image.load` (API removida)
-- Lite XL 2.1.8 **não tem** `core.draw_logo` (função removida)
-- A WelcomeView ("Get Started") é suprimida pelo Doxoade no boot
-- O TTF gerado pelo GIMP tem 1 glifo (0x41) com 15 contours — insuficiente para logo complexa
-
-**Decisões arquiteturais possíveis para retomada:**
-1. Pipeline de tiles (8x8 glifos, cada um 64x64) + FreeType nítido
-2. Bridge Vulcan C para `renderer.image.load` (patchear o binário)
-3. Texto estilizado "DOXOADE" (fallback simples, viável)
-
-**Ponto de retomada:** Após Fase 2 (`plugin_watchdog`) estabilizar o ecossistema.
+  - Ctrl+L              ➔ Alterna orientação (Horizontal ↔ Vertical) in-place
+  - Ctrl+Shift+L        ➔ Inverte os painéis (Swap A ↔ B)
+  - Ctrl+Alt+D          ➔ Move a aba ativa entre os painéis (Ping-Pong)
+  - Ctrl+Alt+Shift+D    ➔ Move todas as abas à direita para o outro painel
+  - Ctrl+Alt+X          ➔ Fecha abas à direita no painel atual
+  - F6                  ➔ Alterna foco entre os painéis
 ]]
 
 local core = require "core"
 local command = require "core.command"
-local keymap = require "core.keymap"
 local DocView = require "core.docview"
 
--- ============================================================================
--- Utilitários
+-- ==============
+-- 1. Topologia da Árvore com Mapa de Pais (Parent-Map)
 -- ============================================================================
 
---- Lista TODOS os leaves editáveis (não locked, não TreeView).
+local function _fm(cat, act, det)
+  local F = rawget(_G, "DOXOADE_FLOW")
+  if F and F.mark then F.mark(cat, act, det) end
+end
+
+local NON_EDITOR_NAMES = {
+    "tree", "canvas", "sketch", "open editors",
+    "terminal", "shelf", "bottom shelf", "pty"
+}
+local function is_editor_leaf(node)
+  if not node or node.type ~= "leaf" or node.locked then return false end
+  for _, v in ipairs(node.views or {}) do
+    local name = (v and v.get_name and v:get_name()) or ""
+    name = type(name) == "string" and name:lower() or ""
+    for _, ex in ipairs(NON_EDITOR_NAMES) do
+      if name:find(ex, 1, true) then return false end
+    end
+  end
+  return true
+end
+
 local function get_editor_leaves()
   local root = core.root_view and core.root_view.root_node
+  if not root then return {} end
+
   local leaves = {}
   local function traverse(n)
     if not n then return end
     if n.type == "leaf" then
-      if not n.locked then
-        local is_tree = false
-        for _, v in ipairs(n.views or {}) do
-          if v and type(v.get_name) == "function" then
-            local ok, name = pcall(v.get_name, v)
-            if ok and type(name) == "string" and name:lower():find("tree") then
-              is_tree = true
-              break
-            end
-          end
-        end
-        if not is_tree then
-          table.insert(leaves, n)
-        end
+      if is_editor_leaf(n) then
+        table.insert(leaves, n)
       end
     else
-      traverse(n.a)
-      traverse(n.b)
+      if n.a then traverse(n.a) end
+      if n.b then traverse(n.b) end
     end
   end
+
   traverse(root)
   return leaves
 end
 
---- Verifica se o layout atual é retrato (mais alto que largo).
-local function is_portrait()
-  local rv = core.root_view
-  if not rv or not rv.size then return false end
-  return rv.size.y > rv.size.x
-end
-
---- Encontra o nó ativo de forma segura.
-local function get_active_node()
-  if not core.root_view then return nil end
-  local ok, node = pcall(core.root_view.get_active_node, core.root_view)
-  return ok and node or nil
-end
-
---- Reorganiza o layout após mudanças estruturais.
-local function refresh_layout()
-  local root = core.root_view and core.root_view.root_node
-  if root and type(root.update_layout) == "function" then
-    pcall(root.update_layout, root)
+--- Mapeia parent_of[filho] = pai
+local function build_parent_map(root)
+  root = root or (core.root_view and core.root_view.root_node)
+  local parent_of = {}
+  local function traverse(n)
+    if not n or n.type == "leaf" then return end
+    if n.a then
+      parent_of[n.a] = n
+      traverse(n.a)
+    end
+    if n.b then
+      parent_of[n.b] = n
+      traverse(n.b)
+    end
   end
-  if core.root_view and type(core.root_view.update) == "function" then
-    pcall(core.root_view.update, core.root_view)
+  traverse(root)
+  return parent_of
+end
+
+--- Localiza o nó divisor comum mais próximo entre os editores livres
+local function find_editor_split_parent()
+  local leaves = get_editor_leaves()
+  if #leaves < 2 then return nil end
+
+  local parent_of = build_parent_map()
+  local active = core.root_view and core.root_view:get_active_node()
+  if not active or not is_editor_leaf(active) then
+    active = leaves[1]
+  end
+
+  local other = (leaves[1] == active) and leaves[2] or leaves[1]
+
+  -- Coleta ancestrais do nó ativo
+  local ancestors = {}
+  local p = parent_of[active]
+  while p do
+    ancestors[p] = true
+    p = parent_of[p]
+  end
+
+  -- Sobe a partir do outro nó até encontrar o primeiro ancestral comum
+  p = parent_of[other]
+  while p do
+    if ancestors[p] and p.type ~= "leaf" then
+      -- Verifica se esse nó não é a divisão geral da TreeView
+      -- Um divisor de editores divide folhas que não são a TreeView
+      return p
+    end
+    p = parent_of[p]
+  end
+
+  -- Fallback: o próprio root se não for folha
+  local root = core.root_view and core.root_view.root_node
+  return (root and root.type ~= "leaf") and root or nil
+end
+
+local function safe_refresh_layout()
+  _fm("LAYOUT", "refresh_start", "")
+  local root = core.root_view and core.root_view.root_node
+  local layout_ok, layout_err = true, nil
+
+  if root and root.update_layout then
+    layout_ok, layout_err = pcall(root.update_layout, root)
+    if not layout_ok then
+      _fm("LAYOUT", "update_layout_FAILED", tostring(layout_err):sub(1, 120))
+    end
+  end
+  if core.root_view and core.root_view.update then
+    local ok2, err2 = pcall(core.root_view.update, core.root_view)
+    if not ok2 then
+      _fm("LAYOUT", "rootview_update_FAILED", tostring(err2):sub(1, 120))
+    end
   end
   core.redraw = true
+  _fm("LAYOUT", "refresh_end", layout_ok and "ok" or "FAILED")
 end
 
 -- ============================================================================
--- Comando: Ctrl+Alt+D — Mover aba ativa para painel oposto (V3.0)
+-- 2. Flip de Orientação Seguro e com Diagnóstico no Log (Ctrl+L)
 -- ============================================================================
 
-rawset(_G, "move_active_tab_to_opposite", function()
-  -- 🛡️ [FASE 1.5] Guard 1: debounce temporal
+local _last_flip_time = 0
+local function toggle_split_orientation()
+  _fm("SPLIT", "toggle_start", "")
   local now = os.clock()
-  local _last_call = rawget(_G, "_DOXOADE_LAST_MOVE_TAB_CALL") or 0
-  if (now - _last_call) < 1.0 then
+  if (now - _last_flip_time) < 0.25 then
+    _fm("SPLIT", "toggle_debounced", "")
     return
   end
-  rawset(_G, "_DOXOADE_LAST_MOVE_TAB_CALL", now)
+  _last_flip_time = now
 
-  -- 🛡️ [FASE 1.5] Guard 2: modifier consistency
-  -- Verifica se Ctrl e Alt estão fisicamente pressionados AGORA (não só na Lua)
-  if keymap and keymap.modkeys then
-    local ctrl_pressed = keymap.modkeys["ctrl"] or keymap.modkeys["control"]
-    local alt_pressed = keymap.modkeys["alt"]
-    if not ctrl_pressed or not alt_pressed then
-      if core.log then
-        core.log(string.format(
-          "🛡️ [SPLIT] Ignorando: modifiers inconsistentes (ctrl=%s alt=%s) — auto-trigger?",
-          tostring(ctrl_pressed), tostring(alt_pressed)
-        ))
-      end
-      return
-    end
+  local leaves = get_editor_leaves()
+  _fm("SPLIT", "leaves_found", "count=" .. #leaves)
+  if #leaves < 2 then
+    _fm("SPLIT", "need_two_leaves", "")
+    return
   end
 
-  -- Corpo original
-  local view = core.active_view
---  if not view or not view.doc then return end
+  local split_node = find_editor_split_parent()
+  if not split_node then
+    _fm("SPLIT", "no_parent_found", "")
+    return
+  end
+
+  -- Tipo canônico do Lite XL 2.1.8
+  local cur_type = tostring(split_node.type):lower()
+  local is_horiz = (cur_type == "hsplit" or cur_type == "horizontal")
+  local new_type = is_horiz and "vsplit" or "hsplit"
+  _fm("SPLIT", "flip_plan", cur_type .. " -> " .. new_type)
+
+  if not split_node.a or not split_node.b then
+    _fm("SPLIT", "invalid_split_no_children", "")
+    return
+  end
+
+  -- Estado anterior para rollback
+  local old_type = split_node.type
+  local old_divider = split_node.divider
+
+  -- Troca APENAS type + divider (não invalida posições!)
+  split_node.type = new_type
+  split_node.divider = 0.5
+  safe_refresh_layout()
+
+  -- Verifica pós: filhos têm posição/size VÁLIDOS (não nil)
+  local a = split_node.a
+  local b = split_node.b
+  local a_ok = a and a.position and a.position.x and a.size and a.size.x
+  local b_ok = b and b.position and b.position.x and b.size and b.size.x
+
+  if not (a_ok and b_ok) then
+    _fm("SPLIT", "POST_INVALID", "a_ok=" .. tostring(a_ok ~= nil) .. " b_ok=" .. tostring(b_ok ~= nil) .. " -- ROLLBACK")
+    split_node.type = old_type
+    split_node.divider = old_divider
+    safe_refresh_layout()
+    if core.log then
+      core.log("⚠️ [SPLIT] Flip cancelado: pós-layout inválido.")
+    end
+    return
+  end
+
+  -- Verifica geometria COERENTE (dx/dy realinhados)
+  local dx = math.abs((a.position.x or 0) - (b.position.x or 0))
+  local dy = math.abs((a.position.y or 0) - (b.position.y or 0))
+  local geometry_ok
+  if new_type == "hsplit" then
+    geometry_ok = dx > dy  -- lado a lado: x difere mais
+  else
+    geometry_ok = dy > dx  -- empilhados: y difere mais
+  end
+
+  if not geometry_ok then
+    _fm("SPLIT", "POST_INVALID",
+      "geometry_mismatch dx=" .. dx .. " dy=" .. dy .. " -- ROLLBACK")
+    split_node.type = old_type
+    split_node.divider = old_divider
+    safe_refresh_layout()
+    if core.log then
+      core.log("⚠️ [SPLIT] Flip cancelado: geometria pós-flip não bate.")
+    end
+    return
+  end
+
+  _fm("SPLIT", "post_ok",
+    "a.pos=" .. a.position.x .. "," .. a.position.y ..
+    " b.pos=" .. b.position.x .. "," .. b.position.y)
+  _fm("SPLIT", "toggle_end", "")
+end
+
+local function swap_split_panels()
+  _fm("SWAP", "start", "")
+  local split_node = find_editor_split_parent()
+  if split_node and split_node.a and split_node.b then
+    _fm("SWAP", "a_type", tostring(split_node.a and split_node.a.type))
+    _fm("SWAP", "b_type", tostring(split_node.b and split_node.b.type))
+    local tmp = split_node.a
+    split_node.a = split_node.b
+    split_node.b = tmp
+    _fm("SWAP", "swapped", "")
+    safe_refresh_layout()
+    if core.log then core.log("✔ [SPLIT] Painéis invertidos com sucesso (Swap A ↔ B).") end
+    _fm("SWAP", "end", "")
+  else
+    _fm("SWAP", "no_split", "")
+  end
+end
+
+-- ============================================================================
+-- 3. Movimentação Ping-Pong de Abas (Ctrl+Alt+D) — Comprovadamente Funcional
+-- ============================================================================
+
+local _last_move_time = 0
+local function move_active_tab_to_opposite()
+  -- ═══ Declarações locais no TOPO (evita escopo fantasma) ═══
+  local now = os.clock()
+  local view, leaves, source_leaf, target_leaf, view_idx, leaf_count
+
+  if (now - _last_move_time) < 0.25 then
+    _fm("MOVE", "debounced", "delta=" .. tostring(now - _last_move_time))
+    return
+  end
+  _last_move_time = now
+
+  view = core.active_view
   if not view or not view.doc then
-    if core.log then core.log("⚠ [SPLIT] Nenhuma aba ativa.") end
+    if core.log then core.log("⚠️ [SPLIT] Nenhuma aba ativa para transferir.") end
+    _fm("MOVE", "no_active_view", "")
     return
   end
-  
-  local leaves = get_editor_leaves()
-  local source_node = nil
-  for _, leaf in ipairs(leaves) do
-    for _, v in ipairs(leaf.views or {}) do
-      if v == view then source_node = leaf; break end
+
+  leaves = get_editor_leaves()
+  _fm("MOVE", "start", "leaves=" .. tostring(#leaves))
+  if not leaves or #leaves == 0 then
+    _fm("MOVE", "no_leaves", "")
+    return
+  end
+
+  -- ─── Localiza source_leaf ───────────────────────────────────
+  source_leaf = nil
+  local i, l, v
+  for i = 1, #leaves do
+    l = leaves[i]
+    local lviews = (l and l.views) or {}
+    for j = 1, #lviews do
+      v = lviews[j]
+      if v == view or (v and v.doc and view.doc and v.doc == view.doc) then
+        source_leaf = l
+        break
+      end
     end
-    if source_node then break end
+    if source_leaf then break end
   end
 
-  if not source_node or source_node.locked then
-    if core.log then core.log("⚠ [SPLIT] Painel ativo travado ou ausente.") end
-    return
+  if not source_leaf then
+    source_leaf = leaves[1]
+    _fm("MOVE", "fallback_source", "idx=1")
+  else
+    _fm("MOVE", "source_found", "views=" .. tostring(#((source_leaf.views) or {})))
   end
 
-  local leaves = get_editor_leaves()
-  local target_node = nil
-  for _, leaf in ipairs(leaves) do
-    if leaf ~= source_node then
-      target_node = leaf
+  -- ─── Localiza target_leaf ───────────────────────────────────
+  target_leaf = nil
+  for i = 1, #leaves do
+    if leaves[i] ~= source_leaf then
+      target_leaf = leaves[i]
       break
     end
   end
 
-  if not target_node then
-    if not source_node.split then
-      if core.log then core.log("⚠ [SPLIT] Split não disponível.") end
+  if not target_leaf then
+    local rv = core.root_view
+    local is_portrait = (rv and rv.size and rv.size.y > rv.size.x)
+    local dir = is_portrait and "down" or "right"
+    local ok_split, new_node = pcall(function()
+      return source_leaf:split(dir)
+    end)
+    if not ok_split or not new_node then
+      _fm("MOVE", "split_failed", tostring(new_node))
       return
     end
-    local dir = is_portrait() and "down" or "right"
-    target_node = source_node:split(dir)
-    if not target_node then
-      if core.log then core.log("⚠ [SPLIT] Falha ao criar split.") end
-      return
-    end
+    target_leaf = new_node
+    _fm("MOVE", "split_created", dir)
   end
 
-  local removed_idx = nil
-  for i, v in ipairs(source_node.views or {}) do
-    if v == view then removed_idx = i; break end
-  end
-
-  if not removed_idx then
-    if core.log then core.log("⚠ [SPLIT] View não encontrada no painel ativo.") end
+  if not target_leaf or target_leaf.locked then
+    _fm("MOVE", "target_locked", "")
     return
   end
 
-  table.remove(source_node.views, removed_idx)
-  if #source_node.views > 0 then
-    source_node.active_view = source_node.views[math.min(removed_idx, #source_node.views)]
-  else
-    source_node.active_view = nil
-  end
-
-  if target_node.add_view then
-    target_node:add_view(view)
-  end
-  target_node.active_view = view
-  cleanup_empty_splits()
-  refresh_layout()
-  if core.set_active_view then
-    pcall(core.set_active_view, view)
-  end
-  rawset(_G, "_DOXOADE_SPLIT_LOCK", nil)
-  core.redraw = true
-end)
-
-local function find_node_with_view(target_view)
-  local leaves = get_editor_leaves()
-  for _, leaf in ipairs(leaves) do
-    for _, v in ipairs(leaf.views or {}) do
-      if v == target_view then return leaf end
-    end
-  end
-  return nil
-end
-
-
--- ============================================================================
--- Comando: Ctrl+Alt+Shift+D — Mover abas à direita
--- ============================================================================
-
-local function cleanup_empty_splits()
-  local root = core.root_view and core.root_view.root_node
-  if not root then return false end
-
-  local function traverse(n)
-    if not n or n.type == "leaf" then return false end
-
-    if n.a and n.a.type == "leaf" and not n.a.locked and #(n.a.views or {}) == 0 and n.b then
-      n:consume(n.b)
-      return true
-    end
-
-    if n.b and n.b.type == "leaf" and not n.b.locked and #(n.b.views or {}) == 0 and n.a then
-      n:consume(n.a)
-      return true
-    end
-
-    if traverse(n.a) then return true end
-    if traverse(n.b) then return true end
-
-    return false
-  end
-
-  for _ = 1, 3 do
-    if not traverse(root) then break end
-  end
-
-  return true
-end
-
-rawset(_G, "move_following_tabs_to_opposite", function()
-  -- 🛡️ [FASE 1.5] Guard: modifier consistency
-  if keymap and keymap.modkeys then
-    local ctrl_pressed = keymap.modkeys["ctrl"] or keymap.modkeys["control"]
-    local shift_pressed = keymap.modkeys["shift"]
-    local alt_pressed = keymap.modkeys["alt"]
-    if not ctrl_pressed or not shift_pressed or not alt_pressed then
-      if core.log then
-        core.log(string.format(
-          "🛡️ [SPLIT] Ignorando move_following_tabs: modifiers inconsistentes (ctrl=%s shift=%s alt=%s)",
-          tostring(ctrl_pressed), tostring(shift_pressed), tostring(alt_pressed)
-        ))
-      end
+  -- ─── Já está no destino? ────────────────────────────────────
+  local tviews = target_leaf.views or {}
+  for i = 1, #tviews do
+    if tviews[i] == view then
+      target_leaf.active_view = view
+      core.set_active_view(view)
+      safe_refresh_layout()
+      _fm("MOVE", "already_in_target", "")
       return
     end
   end
 
-  -- Corpo direto (sem função local aninhada)
-  local source_node = get_active_node()
+  -- ─── Localiza view_idx ──────────────────────────────────────
+  view_idx = nil
+  local sviews = source_leaf.views or {}
+  for i = 1, #sviews do
+    if sviews[i] == view then
+      view_idx = i
+      break
+    end
+  end
+
+  if not view_idx then
+    _fm("MOVE", "view_not_found_in_source", "")
+    return
+  end
+
+  -- ─── Remove da origem ───────────────────────────────────────
+  table.remove(source_leaf.views, view_idx)
+  leaf_count = #source_leaf.views
+  _fm("MOVE", "removed_from_source", "remaining=" .. tostring(leaf_count))
+
+  if leaf_count > 0 then
+    local new_idx = math.min(view_idx, leaf_count)
+    source_leaf.active_view = source_leaf.views[new_idx]
+  else
+    source_leaf.active_view = nil
+    _fm("MOVE", "source_empty", "")
+    -- EmptyView fallback
+    local ok_ev, EmptyView = pcall(require, "core.emptyview")
+    if ok_ev and EmptyView then
+      local ok_new, ev = pcall(EmptyView)
+      if ok_new and ev then
+        source_leaf:add_view(ev)
+        source_leaf.active_view = ev
+        _fm("MOVE", "emptyview_added", "ok")
+      else
+        _fm("MOVE", "emptyview_failed", "")
+      end
+    end
+  end
+
+  -- ─── Adiciona ao destino ────────────────────────────────────
+  local ok_add, err_add = pcall(function()
+    target_leaf:add_view(view)
+    target_leaf.active_view = view
+  end)
+  if not ok_add then
+    _fm("MOVE", "add_view_failed", tostring(err_add))
+    return
+  end
+
+  if core.root_view and core.root_view.set_active_node then
+    pcall(core.root_view.set_active_node, core.root_view, target_leaf)
+  end
+  core.set_active_view(view)
+
+  safe_refresh_layout()
+  _fm("MOVE", "end", "target_views=" .. tostring(#target_leaf.views))
+end
+
+
+-- ─── Helper: garantir que um leaf nunca fica vazio ─────────────
+local function ensure_leaf_not_empty(leaf)
+  if not leaf or #(leaf.views or {}) > 0 then return end
+  _fm("SPLIT", "ensure_empty", "leaf")
+  local ok_ev, EmptyView = pcall(require, "core.emptyview")
+  if ok_ev and EmptyView then
+    local ok_new, ev = pcall(EmptyView)
+    if ok_new and ev then
+      leaf:add_view(ev)
+      leaf.active_view = ev
+      _fm("SPLIT", "ensure_empty", "emptyview_added")
+      return
+    end
+  end
+  if core.open_doc then
+    local ok_doc, doc = pcall(core.open_doc)
+    if ok_doc and doc then
+      local DocView = require "core.docview"
+      local v = DocView(doc)
+      leaf:add_view(v)
+      leaf.active_view = v
+      _fm("SPLIT", "ensure_empty", "blank_doc")
+    end
+  end
+end
+
+local function move_following_tabs_to_opposite()
+  _fm("MOVE_FOLLOW", "start", "")
   local view = core.active_view
-  if not source_node or not view or not source_node.views then return end
-
-  local cur_idx = source_node.get_view_idx and source_node:get_view_idx(view)
-  if not cur_idx or cur_idx >= #source_node.views then
-    if core.log then core.log("⚠ [SPLIT] Nenhuma aba à direita.") end
-    return
-  end
+  if not view then return end
 
   local leaves = get_editor_leaves()
-  local target_node = nil
-  for _, leaf in ipairs(leaves) do
-    if leaf ~= source_node then target_node = leaf; break end
+  local source_leaf = nil
+  for _, l in ipairs(leaves) do
+    for _, v in ipairs(l.views or {}) do
+      if v == view then source_leaf = l; break end
+    end
+    if source_leaf then break end
   end
 
-  if not target_node then
-    local dir = is_portrait() and "down" or "right"
-    target_node = source_node:split(dir)
-    if not target_node then return end
+  if not source_leaf or not source_leaf.views then return end
+
+  local cur_idx = nil
+  for i, v in ipairs(source_leaf.views) do
+    if v == view then cur_idx = i; break end
   end
 
-  local moved = 0
-  for i = #source_node.views, cur_idx + 1, -1 do
-    local v = table.remove(source_node.views, i)
+  if not cur_idx or cur_idx >= #source_leaf.views then return end
+
+  local target_leaf = nil
+  for _, l in ipairs(leaves) do
+    if l ~= source_leaf then target_leaf = l; break end
+  end
+
+  if not target_leaf then
+    local rv = core.root_view
+    local is_portrait = (rv and rv.size and rv.size.y > rv.size.x)
+    target_leaf = source_leaf:split(is_portrait and "down" or "right")
+    if not target_leaf or target_leaf.locked then return end
+  end
+
+  local count = 0
+  for i = #source_leaf.views, cur_idx + 1, -1 do
+    local v = table.remove(source_leaf.views, i)
     if v then
-      if target_node.add_view then target_node:add_view(v) end
-      moved = moved + 1
+      target_leaf:add_view(v)
+      count = count + 1
     end
   end
 
-  if #source_node.views > 0 then
-    source_node.active_view = source_node.views[#source_node.views]
-    if core.set_active_view then pcall(core.set_active_view, source_node.active_view) end
+  target_leaf.active_view = target_leaf.views[#target_leaf.views]
+  ensure_leaf_not_empty(source_leaf)
+  _fm("MOVE_FOLLOW", "moved", "count=" .. tostring(count))
+  safe_refresh_layout()
+  if core.log and count > 0 then
+    core.log(string.format("✔ [SPLIT] %d aba(s) transferida(s) para o outro slot.", count))
   end
+end
 
-  refresh_layout()
-  if core.log and moved > 0 then
-    core.log(string.format("✔ [SPLIT] %d aba(s) movida(s).", moved))
-  end
-end)
-
--- ============================================================================
--- Comando: Ctrl+L — Alternar orientação
--- ============================================================================
-
-rawset(_G, "toggle_split_orientation", function()
-  -- 🛡️ [FASE 1.5] Debounce
-  local now = os.clock()
-  local _last = rawget(_G, "_DOXOADE_LAST_TOGGLE_ORIENT") or 0
-  if (now - _last) < 0.3 then return end
-  rawset(_G, "_DOXOADE_LAST_TOGGLE_ORIENT", now)
+local function close_following_tabs()
+  local view = core.active_view
+  if not view then return end
 
   local leaves = get_editor_leaves()
-  local root = core.root_view and core.root_view.root_node
-
-  if #leaves <= 1 then
-    local active = get_active_node() or leaves[1] or root
-    if not active or not active.split then
-      if core.log then core.log("⚠ [SPLIT] Split indisponível no nó ativo.") end
-      return
+  local node = nil
+  for _, l in ipairs(leaves) do
+    for _, v in ipairs(l.views or {}) do
+      if v == view then node = l; break end
     end
-    local dir = is_portrait() and "down" or "right"
-    local new_node = active:split(dir)
-    if not new_node then
-      if core.log then core.log("⚠ [SPLIT] Falha ao criar split " .. dir) end
-      return
-    end
-
-    -- 🛡️ [FASE 1.5] Suporta doc real OU vazio (Get Started)
-    local current_view = core.active_view
-    if current_view and current_view.doc then
-      local dup = DocView(current_view.doc)
-      if new_node.add_view then new_node:add_view(dup) end
-      new_node.active_view = dup
-      if core.set_active_view then pcall(core.set_active_view, dup) end
-    else
-      -- Cria um doc vazio como fallback
-      if core.open_doc then
-        local empty_doc = core.open_doc()
-        local new_view = DocView(empty_doc)
-        if new_node.add_view then new_node:add_view(new_view) end
-        new_node.active_view = new_view
-        if core.set_active_view then pcall(core.set_active_view, new_view) end
-      end
-    end
-    refresh_layout()
-    if core.log then
-      core.log(string.format("✔ [SPLIT] Painel duplicado (%s).", dir))
-    end
-    return
+    if node then break end
   end
 
-  -- 2+ painéis: alterna orientação
-  local function find_parent(n, target)
-    if not n or n.type == "leaf" then return nil end
-    if n.a == target or n.b == target then return n end
-    return find_parent(n.a, target) or find_parent(n.b, target)
-  end
-  local parent = find_parent(root, leaves[1])
-  if not parent then parent = find_parent(root, leaves[2]) end
-  if not parent then
-    if core.log then core.log("⚠ [SPLIT] Pai comum não encontrado.") end
-    return
+  if not node or not node.views then return end
+
+  local cur_idx = nil
+  for i, v in ipairs(node.views) do
+    if v == view then cur_idx = i; break end
   end
 
-  local current_type = tostring(parent.type):lower()
-  if current_type:find("v") then
-    parent.type = (current_type == "vsplit") and "hsplit" or "horizontal"
-  else
-    parent.type = (current_type == "hsplit") and "vsplit" or "vertical"
-  end
-  parent.divider = 0.5
-  refresh_layout()
-  if core.log then
-    core.log(string.format("✔ [SPLIT] Orientação alterada para %s.",
-      current_type:find("v") and "Horizontal" or "Vertical"))
-  end
-end)
+  if not cur_idx or cur_idx >= #node.views then return end
 
--- ============================================================================
--- Comando: Ctrl+Shift+L — Inverter painéis
--- ============================================================================
-
-rawset(_G, "swap_split_panels", function()
-  -- 🛡️ [FASE 1.5] Guard 1: debounce temporal
-  local now = os.clock()
-  local _last_call = rawget(_G, "_DOXOADE_LAST_SWAP_PANELS") or 0
-  if (now - _last_call) < 0.5 then
-    return
+  local closed = 0
+  for i = #node.views, cur_idx + 1, -1 do
+    table.remove(node.views, i)
+    closed = closed + 1
   end
-  rawset(_G, "_DOXOADE_LAST_SWAP_PANELS", now)
+  ensure_leaf_not_empty(node)
+  _fm("CLOSE_FOLLOW", "closed", "count=" .. tostring(closed))
 
-  -- 🛡️ [FASE 1.5] Guard 2: modifier consistency
-  if keymap and keymap.modkeys then
-    local ctrl_pressed = keymap.modkeys["ctrl"] or keymap.modkeys["control"]
-    local shift_pressed = keymap.modkeys["shift"]
-    if not ctrl_pressed or not shift_pressed then
-      if core.log then
-        core.log(string.format(
-          "🛡️ [SPLIT] Ignorando swap_split_panels: modifiers inconsistentes (ctrl=%s shift=%s)",
-          tostring(ctrl_pressed), tostring(shift_pressed)
-        ))
-      end
-      return
-    end
+  safe_refresh_layout()
+  if core.log and closed > 0 then
+    core.log(string.format("🧹 %d aba(s) à direita fechada(s).", closed))
   end
+end
 
-  -- Corpo original
+local function focus_opposite_panel()
+  _fm("FOCUS_OPP", "start", "")
   local leaves = get_editor_leaves()
-  if #leaves < 2 then
-    if core.log then core.log("⚠ [SPLIT] Necessário 2+ painéis para swap_split_panels.") end
-    return
+  if #leaves < 2 then return end
+  _fm("FOCUS_OPP", "leaves", "count=" .. tostring(#leaves))
+
+  local view = core.active_view
+  local current_node = nil
+  for _, l in ipairs(leaves) do
+    for _, v in ipairs(l.views or {}) do
+      if v == view then current_node = l; break end
+    end
+    if current_node then break end
   end
 
-  local root = core.root_view and core.root_view.root_node
-  local function find_parent(n, target)
-    if not n or n.type == "leaf" then return nil end
-    if n.a == target or n.b == target then return n end
-    return find_parent(n.a, target) or find_parent(n.b, target)
-  end
-
-  local parent = find_parent(root, leaves[1])
-  if parent and parent.a and parent.b then
-    parent.a, parent.b = parent.b, parent.a
-    refresh_layout()
-    if core.log then core.log("✔ [SPLIT] Painéis invertidos.") end
-  end
-end)
-
--- ============================================================================
--- Comando: F6 — Focar painel oposto
--- ============================================================================
-
-rawset(_G, "focus_opposite_panel", function()
-  local tmp_dir = os.getenv("TEMP") or os.getenv("TMP") or "."
-  local sl_file = tmp_dir .. (PATHSEP or "/") .. "doxoade_scroll_lock.txt"
-  local f = io.open(sl_file, "r")
-  if f then
-    local content = f:read("*l") or ""
-    f:close()
-    if content == "1" then
-      -- Scroll Lock ativo → ignorar (SDL2 está alucinando teclas)
-      if core.log then
-        core.log("🛡️ [SPLIT] Ignorando comando: Scroll Lock fisicamente ativo.")
+  for _, l in ipairs(leaves) do
+    if l ~= current_node and l.active_view then
+      core.set_active_view(l.active_view)
+      _fm("FOCUS_OPP", "target", "type=" .. tostring(l.type))
+      if core.root_view and core.root_view.set_active_node then
+        core.root_view:set_active_node(l)
       end
+      core.redraw = true
       return
     end
   end
-
-  local function focus_opposite_panel()
-    local leaves = get_editor_leaves()
-    if #leaves < 2 then return end
-    local active = get_active_node()
-    for _, leaf in ipairs(leaves) do
-      if leaf ~= active and leaf.active_view then
-        if core.set_active_view then pcall(core.set_active_view, leaf.active_view) end
-        if core.root_view.set_active_node then
-          pcall(core.root_view.set_active_node, core.root_view, leaf)
-        end
-        core.redraw = true
-        return
-      end
-    end
-  end
-end)
+end
 
 -- ============================================================================
--- Registro de comandos e keymaps
+-- 4. Registro dos Comandos (Duplo Predicado)
 -- ============================================================================
 
--- 🛡️ [FASE 1.5] Desregistrar comandos antigos antes de re-registrar
-pcall(function()
-  if command.map then
-    command.map["doxoade:move-tab-to-opposite-panel"] = nil
-    command.map["doxoade:toggle-split-orientation"] = nil
-    command.map["doxoade:swap-split-panels"] = nil
-    command.map["doxoade:focus-opposite-panel"] = nil
-    command.map["doxoade:move-following-tabs-to-opposite"] = nil
-    command.map["root:move-tab-to-opposite-panel"] = nil
-    command.map["root:move-following-tabs-to-opposite-panel"] = nil
-  end
-end)
+local commands_map = {
+  ["doxoade:toggle-split-orientation"]            = toggle_split_orientation,
+  ["doxoade:swap-split-panels"]                   = swap_split_panels,
+  ["doxoade:move-tab-to-opposite-panel"]          = move_active_tab_to_opposite,
+  ["root:move-tab-to-opposite-panel"]             = move_active_tab_to_opposite,
+  ["doxoade:move-following-tabs-to-opposite"]     = move_following_tabs_to_opposite,
+  ["root:move-following-tabs-to-opposite-panel"] = move_following_tabs_to_opposite,
+  ["doxoade:close-following-tabs"]                = close_following_tabs,
+  ["root:close-following-tabs"]                   = close_following_tabs,
+  ["doxoade:focus-opposite-panel"]                = focus_opposite_panel,
+}
 
--- 🛡️ [FASE 1.5] Registrar via rawget (evita strict.lua + valida existência)
-local _cmd_move_tab     = rawget(_G, "move_active_tab_to_opposite")
-local _cmd_move_follow  = rawget(_G, "move_following_tabs_to_opposite")
-local _cmd_toggle_orient = rawget(_G, "toggle_split_orientation")
-local _cmd_swap         = rawget(_G, "swap_split_panels")
-local _cmd_focus_opp    = rawget(_G, "focus_opposite_panel")
-
-if _cmd_move_tab then
-  command.add(nil, {
-    ["doxoade:move-tab-to-opposite-panel"] = _cmd_move_tab,
-    ["root:move-tab-to-opposite-panel"]    = _cmd_move_tab,
-  })
-end
-
-if _cmd_move_follow then
-  command.add(nil, {
-    ["doxoade:move-following-tabs-to-opposite"]  = _cmd_move_follow,
-    ["root:move-following-tabs-to-opposite-panel"]= _cmd_move_follow,
-  })
-end
-
-if _cmd_toggle_orient then
-  command.add(nil, {
-    ["doxoade:toggle-split-orientation"] = _cmd_toggle_orient,
-  })
-end
-
-if _cmd_swap then
-  command.add(nil, {
-    ["doxoade:swap-split-panels"] = _cmd_swap,
-  })
-end
-
-if _cmd_focus_opp then
-  command.add(nil, {
-    ["doxoade:focus-opposite-panel"] = _cmd_focus_opp,
-  })
-end
-
--- 🛡️ [FASE 1.5] Rebind keymap com unbind explícito (evita colisão)
-pcall(function()
-  if keymap.unbind then
-    keymap.unbind("ctrl+l")
-    keymap.unbind("ctrl+shift+l")
-    keymap.unbind("ctrl+alt+d")
-    keymap.unbind("ctrl+alt+shift+d")
-    keymap.unbind("f6")
-    keymap.unbind("ctrl+alt+right")
-    keymap.unbind("ctrl+alt+left")
-  end
-end)
-
-keymap.add({
-  ["ctrl+l"]              = "doxoade:toggle-split-orientation",
-  ["ctrl+shift+l"]        = "doxoade:swap-split-panels",
-  ["ctrl+alt+d"]          = "doxoade:move-tab-to-opposite-panel",
-  ["ctrl+alt+shift+d"]    = "doxoade:move-following-tabs-to-opposite",
-  ["f6"]                  = "doxoade:focus-opposite-panel",
-  ["ctrl+alt+right"]      = "doxoade:focus-opposite-panel",
-  ["ctrl+alt+left"]       = "doxoade:focus-opposite-panel",
-}, true)
+command.add("core.docview", commands_map)
+command.add(nil, commands_map)
 
 if core.log then
-  core.log("🔀 [SPLIT] Split Mover V3.1 carregado (com validação rawget).")
+  core.log("🔀 [SPLIT] Parent-Map Deterministic Engine V13.0 ativo.")
 end

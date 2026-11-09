@@ -286,7 +286,7 @@ command.add(nil, {
 -- Atalho alternativo (Ctrl+Alt+E para evitar conflito com outros plugins)
 local keymap = require "core.keymap"
 keymap.add {
-    ["ctrl+alt+e"] = "doxoade:toggle-open-editors-dock"
+    ["alt+e"] = "doxoade:toggle-open-editors-dock"
 }
 
 core.log("🏛️ [16] Open Editors Dock Engine registrado e pronto.")

@@ -12,12 +12,12 @@ local DocView = require "core.docview"
 local keymap  = require "core.keymap"
 
 keymap.add {
-  ["ctrl+alt+d"]       = "root:move-tab-to-opposite-panel",
+--  ["ctrl+alt+d"]       = "root:move-tab-to-opposite-panel",
   ["ctrl+alt+i"]       = "doxoade:toggle-indent-guides",
-  ["ctrl+alt+shift+d"] = "root:move-following-tabs-to-opposite-panel",
+--  ["ctrl+alt+shift+d"] = "root:move-following-tabs-to-opposite-panel",
   ["ctrl+alt+shift+f"] = "doxoade:global-project-search",
   ["ctrl+alt+shift+k"] = "doxoade:diagnose-live",
-  ["ctrl+alt+x"]       = "root:close-following-tabs",
+--  ["ctrl+alt+x"]       = "root:close-following-tabs",
   ["ctrl+o"]           = "doxoade:open-file",
   ["ctrl+shift+u"]     = "doxoade:open-user-settings",
 }
@@ -903,14 +903,15 @@ command.add(nil, {
 -- =====================================================
 keymap.add {
   ["alt+d"] = "root:split-right", ["alt+shift+d"] = "root:split-down",
-  ["ctrl+alt+d"] = "root:move-tab-to-opposite-panel",
+--  ["ctrl+alt+d"] = "root:move-tab-to-opposite-panel",
   ["ctrl+w"] = "root:close",
   ["ctrl+tab"] = "root:switch-to-next-tab", ["ctrl+shift+tab"] = "root:switch-to-previous-tab",
   ["ctrl+,"] = "doxoade:open-init-lua", ["ctrl+alt+\\"] = "doxoade:open-pantheon",
   ["ctrl+alt+u"] = "doxoade:toggle-litexl-in-tree", ["ctrl+alt+p"] = "doxoade:open-pot-in-right-panel",
   --["ctrl+shift+l"] = "doxoade:open-log",
   ["ctrl+f2"] = "doxoade:open-log",
-  ["f1"] = "doxoade:show-shortcuts-cheat-sheet", ["ctrl+shift+/"] = "doxoade:show-shortcuts-cheat-sheet",
+--  ["f1"] = "doxoade:show-shortcuts-cheat-sheet",
+  ["ctrl+shift+/"] = "doxoade:show-shortcuts-cheat-sheet",
   ["ctrl+shift+n"] = "doxoade:shared-hub-menu",
   ["ctrl+alt+n"] = "doxoade:create-file-interactive", ["ctrl+alt+shift+n"] = "doxoade:note-hub-menu",
   ["ctrl+alt+a"] = "doxoade:open-agenda-view", ["ctrl+alt+i"] = "doxoade:toggle-indent-guides",

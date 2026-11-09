@@ -127,6 +127,12 @@ qemu_trace.log
 serial.log
 firmware/
 
+# rev_eng — saídas de experimento
+doxoade/tools/rev_eng/bin/
+out_*.json
+dbg_*.txt
+doxoade/tools/rev_eng/tests/fixtures/*.exe
+
 
 # ====== Exceções ======
 

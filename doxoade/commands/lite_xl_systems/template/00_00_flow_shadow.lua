@@ -19,6 +19,7 @@ for i = 1, _RING_SIZE do
   _ring[i] = { ts = 0, cat = "", act = "", ctx = "" }
 end
 
+--local flow_mark = function(...) ... end
 local function flow_mark(cat, act, ctx)
   local node = _ring[_head]
   node.ts = os.clock()

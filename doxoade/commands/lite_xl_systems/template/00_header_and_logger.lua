@@ -510,7 +510,24 @@ core.error = function(...)
             error_rate.count = 0
         end
     end
-    if original_core_error then return original_core_error(...) end
+  if original_core_error then
+      local argc = select("#", ...)
+      local first = ...
+      -- Se só 1 arg e contém %, é mensagem JÁ formatada — NÃO re-formata
+      if argc == 1 and type(first) == "string" then
+          return original_core_error("%s", first)
+      end
+      -- Se 2+ args, tenta format seguro
+      if argc >= 2 and type(first) == "string" and first:find("%%") then
+          local ok, formatted = pcall(string.format, ...)
+          if ok then
+              return original_core_error("%s", formatted)
+          end
+          -- Se format falhou (ex: %d recebeu nil), não re-formata
+          return original_core_error("%s", table.concat({...}, " "))
+      end
+      return original_core_error(...)
+  end
 end
 
 if command and command.perform then
@@ -865,7 +882,7 @@ core.add_thread(function()
   if core.log then core.log("🔬 [KEY-RAW] Sonda de teclado ativa.") end
 end)
 
-append_session_log("BOOT", "=== SOVEREIGN BOOT OK ===")
+append_session_log("BOOT", "=== SOVEREIGN BOOT OK [TESTE-FASE4-12345] ===")
 
 rawset(_G, "INDENT_GUIDE_ACTIVE", (config.draw_indent_guides ~= false))
 rawset(_G, 'arct_xpcall', arct_xpcall)

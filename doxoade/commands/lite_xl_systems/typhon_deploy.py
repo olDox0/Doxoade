@@ -6,7 +6,9 @@ Modos suportados: PRODUCTION (com auto-backup), SANDBOX (isolado), TEST (chaos &
 V2.2 — ÁRTEMIS DECOUPLED (ProDeNov 1.2.1 / Phanto-Crisis Cap. 1):
     Pré-geração síncrona de thumbnails desacoplada do hotpath do deploy.
     Geração convertida para lazy/on-demand (acionada em runtime pelos módulos 19a/19c).
-    Deploy imediato (<200ms) e livre de warnings de metadata.
+    Deploy imediato (<2
+    00m
+    s) e livre de warnings de metadata.
 """
 from __future__ import annotations
 
@@ -20,7 +22,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple, Literal
+from typing import Dict, Any, Optional, Tuple, Literal, List
 
 from doxoade.tools.doxcolors import Fore, Style
 from .engine_lite_xl import LiteXLEngine
@@ -148,16 +150,25 @@ class TyphonDeployEngine:
 
     @classmethod
     def _get_deploy_dir(cls, mode: DeployMode) -> Path:
-        """Retorna o diretório alvo baseado no modo operacional."""
         if mode == "production":
-            home_anchor = Path.home() / ".doxoade" / "python_path.txt"
-            home_anchor.parent.mkdir(parents=True, exist_ok=True)
-            home_anchor.write_text(str(Path(sys.executable).resolve()), encoding="utf-8")
+            try:
+                return LiteXLEngine.get_user_dir()
+            except Exception:
+                return Path.home() / ".config" / "lite-xl"
+        elif mode == "staging":                                    # ← NOVO
+            from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+            return LiteXLPaths.get_staging_dir()                    # ← NOVO
         elif mode == "sandbox":
-            return LiteXLEngine.get_sandbox_dir()
+            try:
+                return LiteXLEngine.get_sandbox_dir()
+            except Exception:
+                return Path.home() / ".config" / "lite-xl" / ".doxoade" / "sandbox"
         elif mode == "test":
-            test_dir = LiteXLEngine.get_user_dir() / ".doxoade" / "test_deploy"
-            test_dir.mkdir(parents=True, exist_ok=True)
+            test_dir = Path.home() / ".config" / "lite-xl" / ".doxoade" / "test_deploy"
+            try:
+                test_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
             return test_dir
         else:
             raise ValueError(f"Modo de deploy inválido: {mode}")
@@ -176,7 +187,10 @@ class TyphonDeployEngine:
 
     @classmethod
     def create_backup(cls, mode: DeployMode, reason: str = "pre-deploy") -> Tuple[bool, Optional[Path]]:
-        """Cria backup timestampado do init.lua atual antes de qualquer mutação destrutiva."""
+        # Fase 1: "production" usa o novo sistema canonical (50 rotações, dedup)
+        if mode == "production":
+            return cls.create_canonical_backup(reason=reason)
+        # Outros modos usam o sistema antigo
         try:
             deploy_dir = cls._get_deploy_dir(mode)
             init_path = deploy_dir / "init.lua"
@@ -187,31 +201,231 @@ class TyphonDeployEngine:
             backup_name = f"init.lua.{timestamp}.{reason}.bak"
             backup_path = backup_dir / backup_name
             shutil.copy2(init_path, backup_path)
-            cls._rotate_backups(backup_dir, max_backups=10)
+            cls._rotate_backups(backup_dir, max_backups=50)
             return True, backup_path
         except Exception as e:
             print(f"{Fore.RED}✖ Falha ao criar backup: {e}{Fore.RESET}")
             return False, None
 
     @classmethod
-    def _rotate_backups(cls, backup_dir: Path, max_backups: int = 10) -> None:
-        """Garante retenção de no máximo N snapshots históricos para evitar inchaço de disco."""
+    def _rotate_backups(cls, backup_dir: Path, max_backups: int = 50):
+        """Mantém apenas os 50 backups mais recentes (D3)."""
         try:
-            backups = sorted(backup_dir.glob("init.lua.*.bak"), key=lambda p: p.stat().st_mtime, reverse=True)
+            backups = sorted(backup_dir.glob("init.lua.*.bak"),
+                            key=lambda p: p.stat().st_mtime, reverse=True)
             for old_backup in backups[max_backups:]:
                 old_backup.unlink(missing_ok=True)
         except Exception:
             pass
 
     @classmethod
+    def create_canonical_backup(cls, reason: str = "manual") -> Tuple[bool, Optional[Path]]:
+        """Backup canonical com dedup por HASH (não filename) e rotação em 50."""
+        from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+        import hashlib
+        canonical_init = LiteXLPaths.get_init_lua_path()
+        if not canonical_init.exists():
+            return True, None
+        try:
+            content_hash = hashlib.sha256(canonical_init.read_bytes()).hexdigest()[:8]
+        except Exception:
+            content_hash = "unknown"
+
+        bkp_dir = LiteXLPaths.get_canonical_backups_dir()
+        existing = sorted(bkp_dir.glob("init_*.lua.bak"),
+                         key=lambda p: p.stat().st_mtime, reverse=True)
+
+        # ✅ FIX 1: dedup por HASH do conteúdo, não por parts[2] (time)
+        if existing and content_hash != "unknown":
+            try:
+                last_hash = hashlib.sha256(existing[0].read_bytes()).hexdigest()[:8]
+                if last_hash == content_hash:
+                    return True, existing[0]  # dedup OK
+            except Exception:
+                pass
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        bkp_path = bkp_dir / f"init_{timestamp}_{content_hash}_{reason}.lua.bak"
+
+        try:
+            # ✅ FIX 5: copy (não copy2) para mtime = agora
+            shutil.copy(canonical_init, bkp_path)
+            cls._rotate_canonical_backups(max_backups=50)
+            return True, bkp_path
+        except Exception as e:
+            print(f"{Fore.RED}✖ Falha no backup canonical: {e}{Fore.RESET}")
+            return False, None
+
+    @classmethod
+    def _rotate_canonical_backups(cls, max_backups: int = 50):
+        from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+        bkp_dir = LiteXLPaths.get_canonical_backups_dir()
+        backups = sorted(bkp_dir.glob("init_*.lua.bak"),
+                        key=lambda p: p.stat().st_mtime, reverse=True)
+        for old in backups[max_backups:]:
+            try: old.unlink(missing_ok=True)
+            except Exception: pass
+
+    @classmethod
+    def list_canonical_backups(cls) -> List[Path]:
+        from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+        bkp_dir = LiteXLPaths.get_canonical_backups_dir()
+        return sorted(bkp_dir.glob("init_*.lua.bak"),
+                     key=lambda p: p.stat().st_mtime, reverse=True)
+
+    @classmethod
+    def rollback_canonical(cls, target_backup: Optional[Path] = None) -> Tuple[bool, str]:
+        """Rollback reversível: backup do estado atual ANTES de restaurar."""
+        from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+        canonical_init = LiteXLPaths.get_init_lua_path()
+        backups = cls.list_canonical_backups()
+        if not backups:
+            return False, "Nenhum backup canonical disponível."
+        target = target_backup or backups[0]
+        if not target.exists():
+            return False, f"Backup não encontrado: {target}"
+        cls.create_canonical_backup(reason="pre-rollback")
+        try:
+            shutil.copy2(target, canonical_init)
+            cls.write_status_cache()   # ← HUD atualiza
+            return True, f"Rollback concluído: {target.name}"
+        except Exception as e:
+            return False, f"Falha no rollback: {e}"
+
+    @classmethod
+    def get_canonical_status(cls) -> Dict[str, Any]:
+        """Compara canonical vs staging vs test (D2: staging propaga ambos)."""
+        from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+        import hashlib
+
+        def _fingerprint(p: Path) -> Dict[str, Any]:
+            if not p.exists():
+                return {"exists": False, "size": 0, "hash": None, "is_aot": False}
+            raw = p.read_bytes()
+            return {
+                "exists": True,
+                "size": len(raw),
+                "hash": hashlib.sha256(raw).hexdigest()[:16],
+                "is_aot": raw[:4].startswith(b"\x1bLua"),
+            }
+
+        canonical = _fingerprint(LiteXLPaths.get_init_lua_path())
+        staging = _fingerprint(LiteXLPaths.get_staging_dir() / "init.lua")
+        test = _fingerprint(
+            cls._get_deploy_dir("test") / "init.lua"
+        )
+
+        promotion_pending = (
+            staging["exists"] and canonical["hash"] is not None
+            and staging["hash"] != canonical["hash"]
+        )
+        test_in_sync = (
+            staging["exists"] and test["exists"]
+            and staging["hash"] == test["hash"]
+        )
+
+        return {
+            "canonical": canonical,
+            "staging": staging,
+            "test": test,
+            "identical_canonical_staging": (
+                canonical["hash"] == staging["hash"]
+                and canonical["exists"] and staging["exists"]
+            ),
+            "promotion_pending": promotion_pending,
+            "test_in_sync_with_staging": test_in_sync,
+        }
+
+    @classmethod
+    def write_status_cache(cls) -> None:
+        """Grava snapshot de status para HUD ler (Lua não pode chamar Python)."""
+        from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+        try:
+            status = cls.get_canonical_status()
+            status["updated_at"] = time.time()
+            cache_path = LiteXLPaths.get_user_dir() / ".doxoade" / "diagnostics" / "canonical_status.json"
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(
+                json.dumps(status, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass  # silencioso — HUD é cosmético
+
+    @classmethod
+    def promote(cls, force: bool = False, allow_aot: bool = False) -> Tuple[bool, str]:
+        """
+        Promove staging → test + production (D2).
+        - Backup canonical obrigatório ANTES (rigoroso, 50 rotações)
+        - test NÃO recebe backup (playground)
+        - AOT bloqueado por default (D4)
+        """
+        from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+
+        staging_init = LiteXLPaths.get_staging_dir() / "init.lua"
+        if not staging_init.exists():
+            return False, "Staging não existe. Rode 'deploy staging' antes."
+
+        status = cls.get_canonical_status()
+
+        # D4: AOT bloqueado por default
+        if status["staging"]["is_aot"] and not allow_aot and not force:
+            return False, (
+                "Staging é AOT bytecode. D4 despriorizou AOT. "
+                "Use '--no-khonsu' no deploy staging, ou '--allow-aot' para forçar."
+            )
+
+        # Backup canonical (obrigatório)
+        ok, bkp_path = cls.create_canonical_backup(reason="pre-promote")
+        if not ok:
+            return False, "Falha no backup canonical. Promote abortado."
+
+        if ok and bkp_path:
+            # Se dedup pegou (reason original ≠ pre-promote), avisar
+            if "pre-promote" not in bkp_path.name:
+                bkp_name = f"{bkp_path.name} (dedup — init idêntico ao último backup)"
+            else:
+                bkp_name = bkp_path.name
+        else:
+            bkp_name = "(sem backup)"
+
+        # D2: propagar para test
+        test_init = cls._get_deploy_dir("test") / "init.lua"
+        test_init.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copy2(staging_init, test_init)
+        except Exception as e:
+            return False, f"Falha ao promover para test: {e}"
+
+        # D2: propagar para production
+        canonical_init = LiteXLPaths.get_init_lua_path()
+        try:
+            shutil.copy2(staging_init, canonical_init)
+        except Exception as e:
+            return False, f"Falha ao promover para production: {e}"
+
+        cls.write_status_cache()   # ← atualizar HUD imediatamente
+        bkp_name = bkp_path.name if bkp_path else "(sem backup — init não existia)"
+        return True, (
+            f"Propagado: staging → test + production\n"
+            f"  💾 Backup canonical: {bkp_name}"
+        )
+
+    @classmethod
     def list_backups(cls, mode: DeployMode) -> list[Path]:
-        """Lista todos os backups disponíveis ordenados pelo mais recente."""
+        # ✅ FIX 2: production usa o novo sistema canonical
+        if mode == "production":
+            return cls.list_canonical_backups()
         backup_dir = cls._get_backup_dir(mode)
-        return sorted(backup_dir.glob("init.lua.*.bak"), key=lambda p: p.stat().st_mtime, reverse=True)
+        return sorted(backup_dir.glob("init.lua.*.bak"),
+                     key=lambda p: p.stat().st_mtime, reverse=True)
 
     @classmethod
     def restore_backup(cls, mode: DeployMode, backup_path: Optional[Path] = None) -> Tuple[bool, str]:
-        """Restaura um snapshot de backup específico ou o mais recente."""
+        # ✅ FIX 2b: production usa rollback canonical (reversível)
+        if mode == "production":
+            return cls.rollback_canonical(backup_path)
+        # Sandbox / staging / test — lógica antiga
         try:
             deploy_dir = cls._get_deploy_dir(mode)
             init_path = deploy_dir / "init.lua"
@@ -249,6 +463,7 @@ class TyphonDeployEngine:
                 subprocess.run(["taskkill", "/F", "/IM", "lite-xl.exe"], capture_output=True)
             else:
                 subprocess.run(["pkill", "-f", "lite-xl"], capture_output=True)
+                
             time.sleep(wait_seconds)
             return True
         except Exception as e:
@@ -297,8 +512,21 @@ class TyphonDeployEngine:
                 except Exception: pass
         trash_files = [
             "error.txt", "FATAL_CRASH_DUMP.txt", "init.lua.broken", 
-            "init.lua.PROD_BACKUP", "session_log.txt.bak", "font_cache.lua"
+            "init.lua.PROD_BACKUP", "session_log.txt.bak", "font_cache.lua",
+            "user_settings.lua.bak",
         ]
+        # ✅ Só apaga a sessão se NÃO for para manter
+        if not keep_session:
+            trash_files.extend(["session.lua", "session.json", "sovereign_session.lua"])
+
+        ws_dir = deploy_dir / "workspace"
+        if ws_dir.exists() and not keep_session:
+            try:
+                shutil.rmtree(ws_dir)
+                print(f"  {Fore.YELLOW}⚠ Workspace removido (evita restauração de state poluído).{Fore.RESET}")
+            except Exception:
+                pass
+                
         for fname in trash_files:
             fpath = deploy_dir / fname
             if fpath.exists():
@@ -336,18 +564,16 @@ class TyphonDeployEngine:
         print(f"  {Fore.GREEN}✔ Ambiente esterilizado com sucesso. Caches e IPCs limpos.{Fore.RESET}\n")
 
     @classmethod
-    def deploy(cls, mode: DeployMode = "production", force: bool = False, no_khonsu: bool = False) -> Dict[str, Any]:
+    def deploy(
+        cls,
+        mode: DeployMode = "production",
+        force: bool = False,
+        no_khonsu: bool = True,                # ← D4: AOT abandonado como default
+    ) -> Dict[str, Any]:
+
         # 🔧 AUTO-ELEVAÇÃO: se não for Admin e for Windows, relança elevado
         import sys, os
         # 🛑 BYPASS DO KHONSU ATIVADO (Texto puro sem AOT)
-        if no_khonsu:
-            # 🔧 CORREÇÃO: Gerar o buffer unificado em texto puro antes de escrever
-            templates = LiteXLInitBuilder.get_template_files()
-            unified_source, _ = DoxlyKhonsuGate.assemble_unified_buffer(templates, mode=mode)
-            
-            init_dest.write_text(unified_source, encoding="utf-8")
-            installed_size = len(unified_source)
-            opt_mode = "plain_no_khonsu"
         if sys.platform == "win32" and mode in ("test", "sandbox"):
             try:
                 import ctypes
@@ -381,11 +607,28 @@ class TyphonDeployEngine:
 
         # ─── Resto do deploy original ───
         deploy_dir = cls._get_deploy_dir(mode)
-        deploy_dir.mkdir(parents=True, exist_ok=True)
+        if deploy_dir is None:
+            # 🛡️ [FASE 5] Fallback: força criação do diretório padrão
+            home = Path.home()
+            if mode == "production":
+                deploy_dir = home / ".config" / "lite-xl"
+            elif mode == "test":
+                deploy_dir = home / ".config" / "lite-xl" / ".doxoade" / "test_deploy"
+            elif mode == "sandbox":
+                deploy_dir = home / ".config" / "lite-xl" / ".doxoade" / "sandbox"
+            else:
+                return {"success": False, "error": f"Modo inválido: {mode}", "backup": None}
+        
+        try:
+            deploy_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            return {"success": False, "error": f"Falha ao criar diretório {deploy_dir}: {e}", "backup": None}
+        
         
         # 🧼 FASE DE ESTERILIZAÇÃO AUTOMÁTICA (Limpa caches, IPCs e plugins conflitantes)
         if mode in ("production", "test"):
-            cls.sterilize_environment(deploy_dir)
+            #cls.sterilize_environment(deploy_dir)
+            cls.sterilize_environment(deploy_dir, keep_session=(mode == "production"))
 
         # dentro de deploy(), logo após sterilize_environment
         # ok_assets, msg_assets = cls._install_assets(deploy_dir)
@@ -419,9 +662,12 @@ class TyphonDeployEngine:
         #     return {"success": False, "error": msg_assets, "backup": backup_path}
 
         if mode == "production":
-            ok, backup_path = cls.create_backup(mode, reason="pre-deploy")
+            # Fase 1: backup canonical obrigatório ANTES de qualquer escrita
+            ok, backup_path = cls.create_canonical_backup(reason="pre-deploy")
             if not ok and not force:
-                return {"success": False, "error": "Falha ao criar backup", "backup": None}
+                return {"success": False,
+                        "error": "Falha no backup canonical",
+                        "backup": None}
 
         # if gate_res["success"] and gate_res.get("bytecode"):
         #     init_dest.write_bytes(gate_res["bytecode"])
@@ -441,6 +687,9 @@ class TyphonDeployEngine:
 
             init_dest = deploy_dir / "init.lua"
 
+            templates = LiteXLInitBuilder.get_template_files()
+            unified_source, source_map = DoxlyKhonsuGate.assemble_unified_buffer(templates, mode=mode)
+
             # 🛑 BYPASS DO KHONSU ATIVADO (Texto puro sem AOT)
             if no_khonsu:
                 init_dest.write_text(unified_source, encoding="utf-8")
@@ -448,22 +697,19 @@ class TyphonDeployEngine:
                 opt_mode = "plain_no_khonsu"
             else:
                 gate_res = DoxlyKhonsuGate.compile_aot_supervisioned(target_mode=mode, verbose=True)
-                
-                # ✅ DIAGNÓSTICO DO GATE
                 print(f"  {Fore.WHITE}5. Khonsu Gate:{Fore.RESET}")
                 print(f"     • Success: {gate_res.get('success', False)}")
                 print(f"     • Bytecode: {'SIM (' + str(len(gate_res.get('bytecode', b''))) + ' bytes)' if gate_res.get('bytecode') else 'NÃO'}")
                 print(f"     • Opt Mode: {gate_res.get('opt_mode', 'N/A')}")
                 print(f"     • Erro: {gate_res.get('error', 'Nenhum')}")
-                
-                # ✅ CORREÇÃO: Aborta se AOT falhar (a menos que --force)
+
                 if not gate_res["success"]:
                     if not force:
                         print(f"\n{Fore.RED}{Style.BRIGHT}✖ COMPILAÇÃO AOT FALHOU. DEPLOY ABORTADO.{Style.RESET_ALL}")
                         return {"success": False, "error": gate_res.get('error', 'AOT Failed'), "backup": backup_path}
                     else:
                         print(f"\n{Fore.YELLOW}⚠ --force ativo. Continuando com fallback plain.{Fore.RESET}")
-                        
+
                 if gate_res["success"] and gate_res.get("bytecode"):
                     init_dest.write_bytes(gate_res["bytecode"])
                     installed_size = len(gate_res["bytecode"])
@@ -502,13 +748,32 @@ class TyphonDeployEngine:
                 print(f"  {Fore.WHITE}5. Assets:{Fore.RESET} {Fore.YELLOW}ausentes (fallback){Fore.RESET}")
             print()
 
+            import hashlib
+            import json
 
+            unified_source, _ = DoxlyKhonsuGate.assemble_unified_buffer(templates, mode=mode)
+            build_meta = {
+                "mode": mode,
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "aot": not no_khonsu,
+                "fingerprint": hashlib.sha256(unified_source.encode("utf-8")).hexdigest()[:16],
+                "templates_count": len(templates),
+                "templates": [t.name for t in templates],
+            }
+            diag_dir = deploy_dir / ".doxoade" / "diagnostics"
+            diag_dir.mkdir(parents=True, exist_ok=True)
+            (diag_dir / f"last_build_{mode}.json").write_text(
+                json.dumps(build_meta, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+            print()
+            # ✅ Fase 3: atualizar cache para HUD
+            cls.write_status_cache()
 
     @classmethod
-    def print_status(cls, target_mode: Optional[DeployMode] = None) -> None:
-        """Exibe o diagnóstico e integridade de todos os modos de deploy."""
-        modes: list[DeployMode] = [target_mode] if target_mode else ["production", "sandbox", "test"]
-        print(f"\n{Fore.CYAN}{Style.BRIGHT}🐉 STATUS DOS AMBIENTES DE DEPLOY TYPHON{Style.RESET_ALL}\n")
+    def print_status(cls, mode: Optional[DeployMode] = None) -> None:
+        # ✅ FIX Fase 2: staging incluído
+        modes = [mode] if mode else ["production", "staging", "sandbox", "test"]
+        print(f"\n{Fore.CYAN}{Style.BRIGHT}🐉 TYPHON DEPLOY STATUS{Style.RESET_ALL}\n")
 
         for m in modes:
             ddir = cls._get_deploy_dir(m)
@@ -640,54 +905,110 @@ class TyphonDeployEngine:
     # 🧪 LANÇAMENTO COM ISOLAMENTO
     # ═══════════════════════════════════════════════════════════
     @classmethod
-    def launch(cls, mode: DeployMode = "production", exorcise: bool = True) -> Optional[int]:
-        """Lança a instância do Lite XL de forma limpa, estável e isolada."""
+    def launch(cls, mode: DeployMode = "production", exorcise: bool = True, raw_mode: bool = False) -> Optional[int]:
+        real_deploy_dir = cls._get_deploy_dir(mode)
+        target_deploy_dir = real_deploy_dir
+
+        if mode == "production" and not raw_mode:
+            target_deploy_dir = real_deploy_dir / ".doxoade" / "canonical_live"
+            target_deploy_dir.mkdir(parents=True, exist_ok=True)
+
         if exorcise:
-            if mode == "production":
-                cls.exorcise_instances(wait_seconds=0.4)
-            else:
-                cls.exorcise_mode_instance(mode)
-            time.sleep(0.4)
+            # 1. Envia o Graceful Quit ESPECÍFICO para o diretório isolado
+            ipc_queue = target_deploy_dir / ".ipc_queue"
+            if ipc_queue.exists():
+                try:
+                    with open(ipc_queue, "a", encoding="utf-8") as f:
+                        f.write("__DOXOADE_GRACEFUL_QUIT__\n")
+                    time.sleep(2.5)  # ⬆️ Aumentado para dar tempo do Lua salvar a sessão
+                except Exception:
+                    pass
+
+            # 2. Mata APENAS o PID do processo isolado (se ainda vivo)
+            pid_file = target_deploy_dir / f".{mode}.pid"
+            if pid_file.exists():
+                try:
+                    old_pid = int(pid_file.read_text().strip())
+                    if is_pid_alive(old_pid):
+                        if sys.platform == "win32":
+                            subprocess.run(["taskkill", "/F", "/PID", str(old_pid)], capture_output=True)
+                        else:
+                            os.kill(old_pid, 9)
+                        time.sleep(0.4)
+                    pid_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
         exe = LiteXLEngine.find_executable()
         if not exe:
             print(f"{Fore.RED}✖ Executável do Lite XL não encontrado no sistema.{Fore.RESET}")
             return None
 
-        deploy_dir = cls._get_deploy_dir(mode)
+        # ✅ ISOLAMENTO DO CANONICAL + CÓPIA INICIAL DE SESSÃO
+        if mode == "production" and not raw_mode:
+            real_init = real_deploy_dir / "init.lua"
+            if real_init.exists():
+                shutil.copy2(real_init, target_deploy_dir / "init.lua")
+
+            real_doxoade = real_deploy_dir / ".doxoade"
+            iso_doxoade = target_deploy_dir / ".doxoade"
+            if real_doxoade.exists():
+                iso_doxoade.mkdir(parents=True, exist_ok=True)
+                for item in real_doxoade.iterdir():
+                    if item.name in ("canonical_live", "backups", "staging", "test_deploy", "sandbox"):
+                        continue
+                    dest = iso_doxoade / item.name
+                    if item.is_dir():
+                        shutil.copytree(item, dest, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(item, dest)
+
+            # ✅ SE O ISOLADO NÃO TIVER SESSÃO, COPIA A SESSÃO ORIGINAL (para trazer o treeview)
+            iso_session = iso_doxoade / "sovereign_session.lua"
+            real_session = real_doxoade / "sovereign_session.lua"
+            if not iso_session.exists() and real_session.exists():
+                shutil.copy2(real_session, iso_session)
+                print(f"{Fore.CYAN}  📋 Sessão original copiada para o ambiente isolado (treeview preservado).{Fore.RESET}")
+
+            # Também copia session.lua e workspace da raiz (para o Lite XL nativo)
+            for fname in ["session.lua", "session.json"]:
+                real_f = real_deploy_dir / fname
+                iso_f = target_deploy_dir / fname
+                if not iso_f.exists() and real_f.exists():
+                    shutil.copy2(real_f, iso_f)
+
+            real_ws = real_deploy_dir / "workspace"
+            iso_ws = target_deploy_dir / "workspace"
+            if not iso_ws.exists() and real_ws.exists():
+                shutil.copytree(real_ws, iso_ws, dirs_exist_ok=True)
+
         env = os.environ.copy()
-        env = os.environ.copy()
-        env["LITE_USERDIR"] = str(deploy_dir)
-        env["XDG_CONFIG_HOME"] = str(deploy_dir.parent)
-        env["DOXOADE_DEPLOY_MODE"] = mode
-        
-        # ⚠️ INSTRUMENTAÇÃO: Reporta o que será passado
-        print(f"\n{Fore.CYAN}{Style.BRIGHT}🔬 DIAGNÓSTICO DE LAUNCH — [{mode.upper()}]{Style.RESET_ALL}")
-        print(f"  {Fore.WHITE}1. Deploy Dir:{Fore.RESET} {deploy_dir}")
-        print(f"  {Fore.WHITE}2. --userdir será passado como:{Fore.RESET} {deploy_dir}")
-        print(f"  {Fore.WHITE}3. LITE_USERDIR antes:{Fore.RESET} {env.get('LITE_USERDIR', 'NÃO DEFINIDO')}")
-
-        # ✅ CORREÇÃO: Define LITE_USERDIR e XDG_CONFIG_HOME para TODOS os modos
-        env["LITE_USERDIR"] = str(deploy_dir)
-        env["XDG_CONFIG_HOME"] = str(deploy_dir.parent)
+        env["LITE_USERDIR"] = str(target_deploy_dir)
+        env["XDG_CONFIG_HOME"] = str(target_deploy_dir.parent)
         env["DOXOADE_DEPLOY_MODE"] = mode
 
-        print(f"  {Fore.WHITE}4. LITE_USERDIR depois:{Fore.RESET} {env.get('LITE_USERDIR', 'NÃO DEFINIDO')}")
-        print(f"  {Fore.WHITE}5. XDG_CONFIG_HOME:{Fore.RESET} {env.get('XDG_CONFIG_HOME', 'NÃO DEFINIDO')}")
-        print(f"  {Fore.WHITE}6. DOXOADE_DEPLOY_MODE:{Fore.RESET} {env.get('DOXOADE_DEPLOY_MODE', 'NÃO DEFINIDO')}")
-        print()
+        print(f"\n{Fore.CYAN}{Style.BRIGHT}🔬 DIAGNÓSTICO DE LAUNCH — [{mode.upper()}]{Fore.RESET}")
+        print(f"  {Fore.WHITE}1. Deploy Dir:{Fore.RESET} {target_deploy_dir}")
+        if mode == "production" and not raw_mode:
+            print(f"  {Fore.GREEN}2. ISOLAMENTO ATIVO:{Fore.RESET} Sessão protegida em canonical_live")
+        print(f"  {Fore.WHITE}3. --userdir:{Fore.RESET} {target_deploy_dir}")
+        print(f"  {Fore.WHITE}4. DOXOADE_DEPLOY_MODE:{Fore.RESET} {env.get('DOXOADE_DEPLOY_MODE', 'NÃO DEFINIDO')}\n")
 
-        CREATE_NEW_CONSOLE = 0x00000010 if sys.platform == "win32" else 0
         try:
-            proc = subprocess.Popen(
-                [str(exe), "--userdir", str(deploy_dir)],
-                env=env,
-                creationflags=CREATE_NEW_CONSOLE,
-            )
-            pid = proc.pid
-            pid_file = deploy_dir / f".{mode}.pid"
+            if sys.platform == "win32":
+                os.startfile(str(exe), arguments=f'--userdir "{target_deploy_dir}"')
+                pid = 0
+            else:
+                proc = subprocess.Popen(
+                    [str(exe), "--userdir", str(target_deploy_dir)],
+                    env=env,
+                    creationflags=0x00000010,
+                )
+                pid = proc.pid
+
+            pid_file = target_deploy_dir / f".{mode}.pid"
             pid_file.write_text(str(pid), encoding="utf-8")
-            print(f"{Fore.CYAN}🚀 Lite XL ({mode.upper()}) iniciado com sucesso (PID: {pid}){Fore.RESET}")
+            print(f"{Fore.CYAN}🚀 Lite XL ({mode.upper()}) iniciado com sucesso.{Fore.RESET}")
             return pid
         except Exception as e:
             print(f"{Fore.RED}✖ Falha ao lançar processo: {e}{Fore.RESET}")

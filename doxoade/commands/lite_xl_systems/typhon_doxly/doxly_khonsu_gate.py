@@ -290,11 +290,11 @@ class DoxlyKhonsuGate:
 
             buffer_lines.append(source_map_lua)
 
-        map_lines = ["rawset(_G, '_DOXOADE_SOURCE_MAP', {"]
-        for seg in source_map.segments:
-            map_lines.append(f'  {{ name = "{seg.name}", start_line = {seg.start_line}, end_line = {seg.end_line} }},')
-        map_lines.append("})\n")
-        buffer_lines.extend(map_lines)
+        # map_lines = ["rawset(_G, '_DOXOADE_SOURCE_MAP', {"]
+        # for seg in source_map.segments:
+        #     map_lines.append(f'  {{ name = "{seg.name}", start_line = {seg.start_line}, end_line = {seg.end_line} }},')
+        # map_lines.append("})\n")
+        # buffer_lines.extend(map_lines)
         
         unified_source = "\n".join(buffer_lines)
         

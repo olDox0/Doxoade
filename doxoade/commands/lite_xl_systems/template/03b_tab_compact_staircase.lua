@@ -87,11 +87,30 @@ end
 
 -- ── Layout: caixa = texto + PREENCHIMENTO elegante (linha fecha à direita) ──
 local function npp_layout(node)
-	local c = node._npp_cache
+  -- ✅ Guard defensivo: nós sem size/position causam crash em cache-hit
+  if not node or not node.size or not node.size.x
+     or not node.position or not node.position.x then
+    local F = rawget(_G, "DOXOADE_FLOW")
+    if F and F.mark then
+      F.mark("LAYOUT", "npp_layout_invalid_node", tostring(node and node.type))
+    end
+    return { n = 0, rects = {}, ids = {}, row_h = 20, total_h = 20 }
+  end
+  local c = node._npp_cache
 	local views = node.views
 	local n = #views
-	if c and c.views == views and c.n == n and c.w == node.size.x
-		and c.px == node.position.x and c.py == node.position.y then
+	-- if c and c.views == views and c.n == n and c.w == node.size.x
+	-- 	and c.px == node.position.x and c.py == node.position.y then
+  local _w  = node.size.x or 0
+  local _px = node.position.x or 0
+  local _py = node.position.y or 0
+  if c and c.views == views and c.n == n
+     and (c.w == _w or math.abs((c.w or 0) - _w) < 0.5)
+     and (c.px == _px or math.abs((c.px or 0) - _px) < 0.5)
+     and (c.py == _py or math.abs((c.py or 0) - _py) < 0.5) then
+--     and _close_enough(c.w, node.size.x)
+--     and _close_enough(c.px, node.position.x)
+--     and _close_enough(c.py, node.position.y) then
 		local same = true
 		for i = 1, n do
 			if c.ids[i] ~= views[i] then same = false break end

@@ -14,6 +14,13 @@ local StatusView = require "core.statusview"
 if rawget(_G, "_DOXOADE_LEAP_TOOLBAR_LOADED") then return end
 rawset(_G, "_DOXOADE_LEAP_TOOLBAR_LOADED", true)
 
+pcall(function()
+  if keymap and keymap.unbind then
+    keymap.unbind("ctrl+alt+l")
+    keymap.unbind("ctrl+alt+shift+l")
+  end
+end)
+
 local sep = PATHSEP or "/"
 local home = os.getenv("USERPROFILE") or os.getenv("HOME") or "."
 local state_file = home .. sep .. ".doxoade" .. sep .. "leap_state.json"
@@ -156,4 +163,9 @@ command.add(nil, {
     end,
 })
 
-keymap.add { ["ctrl+alt+l"] = "doxoade:leap-toggle" }
+-- keymap.add { ["ctrl+alt+l"] = "doxoade:leap-toggle" }
+
+-- 🛡️ [FASE 5.3-FIX] Ctrl+Alt+L REMOVIDO para evitar conflito com Ctrl+L (split)
+-- O leap-toggle pode ser chamado via palette: Ctrl+Shift+P → "leap-toggle"
+-- ou via comando: doxoade:leap-toggle
+

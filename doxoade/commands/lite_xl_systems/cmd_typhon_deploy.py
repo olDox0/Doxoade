@@ -5,6 +5,7 @@ Comandos CLI para o Typhon Deploy Engine v2.0.
 Separação clara entre PRODUCTION, SANDBOX e TEST modes com Launch Automático.
 """
 import click
+import os
 from pathlib import Path
 from doxoade.tools.doxcolors import Fore, Style
 from .typhon_deploy import TyphonDeployEngine
@@ -14,40 +15,101 @@ def deploy_group():
     """Grupo de comandos de deploy Typhon."""
     pass
 
-@deploy_group.command("status", help="Mostra status de todos os modos de deploy.")
-@click.option("--mode", "-m", type=click.Choice(["production", "sandbox", "test"]), help="Modo específico.")
+@deploy_group.command("status", help="Mostra status de todos os modos.")
+@click.option("--mode", "-m",
+              type=click.Choice(["production", "staging", "sandbox", "test"]))
 def cmd_status(mode):
-    """Exibe status completo dos modos de deploy."""
     TyphonDeployEngine.print_status(mode)
 
-@deploy_group.command("production", help="Deploy em PRODUÇÃO (unificado com test).")
-@click.option("--force", "-f", is_flag=True, help="Força deploy mesmo com warnings.")
-@click.option("--launch/--no-launch", "-l/-nl", default=True, help="Lança o Lite XL após deploy.")
-@click.option("--no-khonsu", is_flag=True, default=False, help="Desativa o compilador Khonsu AOT.")
-def cmd_deploy_production(force, launch, no_khonsu):
-    print(f"\n{Fore.GREEN}{Style.BRIGHT}🟢 DEPLOY PRODUCTION (UNIFICADO){Style.RESET_ALL}\n")
+@deploy_group.command("production", help="🏛️ [FASE 4] DEPRECATED: alias de 'promote' (staging → canonical).")
+@click.option("--force", "-f", is_flag=True, help="Força promote mesmo com warnings.")
+@click.option("--launch/--no-launch", "-l/-nl", default=True, help="Lança o Lite XL após promote.")
+@click.option("--allow-aot", is_flag=True, default=False,
+              help="Permite AOT no canonical (D4: bloqueado por default).")
+@click.option("--legacy-direct", is_flag=True, default=False,
+              help="⚠️ [ESCAPE] Escreve direto em canonical, ignorando staging (bypassa o pipeline).")
+def cmd_deploy_production(force, launch, allow_aot, legacy_direct):
+    # ── MODO LEGACY: escape rápido para emergências ──
+    if legacy_direct:
+        print(f"\n{Fore.RED}{Style.BRIGHT}⚠️ MODO LEGACY ATIVADO (--legacy-direct){Style.RESET_ALL}")
+        print(f"  {Fore.YELLOW}Escrevendo DIRETO em canonical, ignorando staging.{Fore.RESET}")
+        print(f"  {Fore.LIGHTBLACK_EX}Use apenas em emergências. O fluxo canônico é 'deploy staging' → 'promote'.{Fore.RESET}\n")
+        status = TyphonDeployEngine.get_canonical_status()
+        if status.get("promotion_pending") and not force:
+            print(f"  {Fore.YELLOW}⚠ Staging diverge de canonical. Confirme com --force.{Fore.RESET}")
+            return
+        result = TyphonDeployEngine.deploy("production", force=force, no_khonsu=True)
+        if result["success"]:
+            print(f"\n{Fore.GREEN}✔ Deploy legacy concluído ({result.get('opt_mode', '?')}){Fore.RESET}")
+            if result["backup"]:
+                print(f"{Fore.CYAN}💾 Backup: {result['backup'].name}{Fore.RESET}")
+            if launch:
+                TyphonDeployEngine.launch("production", exorcise=True)
+        else:
+            print(f"\n{Fore.RED}✖ Deploy falhou: {result['error']}{Fore.RESET}")
+        return
 
-    # ✅ USA O MESMO PIPELINE DO TEST
-    result = TyphonDeployEngine.deploy("production", force=force, no_khonsu=no_khonsu)
+     # ── MODO PADRÃO: rebuild staging + promote (Garante atualização) ──
+    print(f"\n{Fore.CYAN}{Style.BRIGHT}🏛️ DEPLOY PRODUCTION — Pipeline Completo{Style.RESET_ALL}")
+    print(f"{Fore.LIGHTBLACK_EX}  Passo 1: recompilar staging a partir dos templates.{Fore.RESET}")
+    print(f"{Fore.LIGHTBLACK_EX}  Passo 2: promover staging → test + production.{Fore.RESET}\n")
 
-    if result["success"]:
-        print(f"\n{Fore.GREEN}✔ Deploy de produção concluído com sucesso! ({result.get('opt_mode', 'standard')}){Fore.RESET}")
-        if result["backup"]:
-            print(f"{Fore.CYAN}💾 Backup de segurança: {result['backup'].name}{Fore.RESET}")
+    # ── PASSO 1: rebuild staging ──
+    print(f"{Fore.CYAN}  [1/2] Compilando staging...{Fore.RESET}")
+    staging_result = TyphonDeployEngine.deploy(
+        "staging", force=force, no_khonsu=True,
+    )
+    if not staging_result["success"]:
+        print(f"{Fore.RED}✖ Falha ao compilar staging: {staging_result.get('error', '?')}{Fore.RESET}")
+        print(f"{Fore.YELLOW}  Deploy de produção abortado.{Fore.RESET}\n")
+        return
+
+    print(f"{Fore.GREEN}  ✔ Staging atualizado: {staging_result['init']}{Fore.RESET}")
+    print(f"{Fore.LIGHTBLACK_EX}    Modo: {staging_result.get('opt_mode', '?')} "
+          f"| {staging_result.get('size', 0):,} bytes{Fore.RESET}\n")
+
+    # ── PASSO 2: verificar AOT e promover ──
+    status = TyphonDeployEngine.get_canonical_status()
+
+    if status["staging"]["is_aot"] and not allow_aot and not force:
+        print(f"{Fore.RED}{Style.BRIGHT}⚠ Staging é AOT bytecode{Fore.RESET}")
+        print(f"{Fore.YELLOW}  D4 despriorizou AOT. Rode 'deploy staging --no-khonsu' antes.{Fore.RESET}")
+        print(f"{Fore.CYAN}  Ou passe --allow-aot para forçar (não recomendado).{Fore.RESET}\n")
+        return
+
+    print(f"{Fore.CYAN}  [2/2] Promovendo staging → test + production...{Fore.RESET}")
+
+    if status["identical_canonical_staging"] and not force:
+        print(f"{Fore.GREEN}  ✔ Canonical e staging já são idênticos após rebuild.{Fore.RESET}")
+        print(f"{Fore.LIGHTBLACK_EX}    (nenhuma promoção necessária){Fore.RESET}\n")
         if launch:
-            print()
-            pid = TyphonDeployEngine.launch("production", exorcise=True)
-            # ✅ ATIVA O HARVESTER TAMBÉM EM PRODUÇÃO
-            if pid:
-                import threading
-                from .typhon_deploy import forensic_harvester
-                prod_dir = TyphonDeployEngine._get_deploy_dir("production")
-                thread = threading.Thread(target=forensic_harvester, args=(pid, prod_dir), daemon=True)
-                thread.start()
+            TyphonDeployEngine.launch("production", exorcise=True)
+        return
+
+    if not force:
+        delta = status["staging"]["size"] - status["canonical"]["size"]
+        print(f"  {Fore.WHITE}Canonical:{Fore.RESET} {status['canonical']['size']:,} bytes "
+              f"({'AOT' if status['canonical']['is_aot'] else 'source'})")
+        print(f"  {Fore.WHITE}Staging:  {Fore.RESET} {status['staging']['size']:,} bytes "
+              f"({'AOT' if status['staging']['is_aot'] else 'source'})  "
+              f"({delta:+d} bytes)")
+        if not click.confirm(
+            f"{Fore.YELLOW}Propagar staging → test + production?{Fore.RESET}",
+            default=False,
+        ):
+            print(f"{Fore.YELLOW}Promote cancelado.{Fore.RESET}\n")
+            return
+
+    ok, msg = TyphonDeployEngine.promote(force=force, allow_aot=allow_aot)
+    if ok:
+        print(f"\n{Fore.GREEN}{Style.BRIGHT}✔ PROMOTE CONCLUÍDO (staging → test + production){Style.RESET_ALL}")
+        for line in msg.splitlines():
+            print(f"  {Fore.WHITE}{line}{Fore.RESET}")
+        print(f"\n{Fore.LIGHTBLACK_EX}  Rollback: doxoade doxly deploy restore --list -m production{Fore.RESET}\n")
+        if launch:
+            TyphonDeployEngine.launch("production", exorcise=True)
     else:
-        print(f"\n{Fore.RED}✖ Deploy falhou: {result['error']}{Fore.RESET}")
-        if result["backup"]:
-            print(f"{Fore.YELLOW}🔄 Rollback automático executado.{Fore.RESET}")
+        print(f"\n{Fore.RED}✖ Promote falhou: {msg}{Fore.RESET}\n")
 
 @deploy_group.command("sandbox", help="Deploy em SANDBOX (isolamento total + launch automático).")
 @click.option("--launch/--no-launch", "-l/-nl", default=True, help="Lança o Lite XL após deploy (Padrão: True).")
@@ -65,17 +127,19 @@ def cmd_deploy_sandbox(launch, exorcise):
     else:
         print(f"\n{Fore.RED}✖ Deploy falhou: {result['error']}{Fore.RESET}")
 
-@deploy_group.command("test", help="Deploy em TESTE (ambiente isolado para caos e forensics).")
-@click.option("--force", "-f", is_flag=True, help="Força deploy mesmo com warnings.")
-@click.option("--no-khonsu", is_flag=True, default=False, help="Desativa o compilador Khonsu AOT.")
-@click.option("--exorcise/--no-exorcise", default=True, help="Encerra instâncias antigas antes do deploy.")
-def cmd_deploy_test(force, no_khonsu, exorcise):
-    """Deploy em ambiente de teste isolado."""
-    print(f"\n{Fore.YELLOW}{Style.BRIGHT}🟡 DEPLOY TEST (UNIFICADO){Style.RESET_ALL}\n")
-    
-    # Usa o mesmo pipeline unificado
-    result = TyphonDeployEngine.deploy("test", force=force, no_khonsu=no_khonsu)
-    
+@deploy_group.command("test", help="Deploy em TESTE (source mode por padrão).")
+@click.option("--force", "-f", is_flag=True)
+@click.option("--no-khonsu", is_flag=True, default=True,
+              help="[DEPRECATED] Source é o default.")
+@click.option("--allow-aot", is_flag=True, default=False,
+              help="Permite AOT bytecode.")
+@click.option("--exorcise/--no-exorcise", default=True)
+def cmd_deploy_test(force, no_khonsu, allow_aot, exorcise):
+    print(f"\n{Fore.YELLOW}{Style.BRIGHT}🟡 DEPLOY TEST{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}Modo: source (D4){Fore.RESET}\n")
+    effective_no_khonsu = not allow_aot
+    result = TyphonDeployEngine.deploy("test", force=force, no_khonsu=effective_no_khonsu)
+
     if result["success"]:
         print(f"\n{Fore.GREEN}✔ Deploy de teste concluído com sucesso! ({result.get('opt_mode', 'standard')}){Fore.RESET}")
         if result["backup"]:
@@ -114,32 +178,53 @@ def cmd_backup(mode, reason):
         print(f"{Fore.RED}✖ Falha ao criar backup.{Fore.RESET}")
 
 @deploy_group.command("restore", help="Restaura backup do init.lua.")
-@click.option("--mode", "-m", type=click.Choice(["production", "sandbox", "test"]), 
+@click.option("--mode", "-m",
+              type=click.Choice(["production", "staging", "sandbox", "test"]),
               default="production", help="Modo alvo.")
-@click.option("--backup", "-b", type=click.Path(exists=True), help="Backup específico.")
-@click.option("--list", "-l", "list_backups", is_flag=True, help="Lista backups disponíveis.")
+@click.option("--backup", "-b", default=None,
+              help="Nome do backup (basta o filename, sem path).")
+@click.option("--list", "-l", "list_backups", is_flag=True,
+              help="Lista backups disponíveis.")
 def cmd_restore(mode, backup, list_backups):
-    """Restaura backup ou lista backups disponíveis."""
     if list_backups:
         backups = TyphonDeployEngine.list_backups(mode)
-        print(f"\n{Fore.CYAN}{Style.BRIGHT}💾 BACKUPS DISPONÍVEIS ({mode}){Style.RESET_ALL}\n")
-        
+        print(f"\n{Fore.CYAN}{Style.BRIGHT}💾 BACKUPS DISPONÍVEIS ({mode}){Fore.RESET}\n")
         if not backups:
-            print(f"{Fore.YELLOW}Nenhum backup encontrado.{Fore.RESET}")
+            print(f"{Fore.YELLOW}Nenhum backup encontrado.{Fore.RESET}\n")
             return
-        
         for i, bkp in enumerate(backups, 1):
-            mtime = bkp.stat().st_mtime
-            size = bkp.stat().st_size
-            print(f"  {Fore.WHITE}{i}. {bkp.name}{Fore.RESET}")
-            print(f"     {Fore.LIGHTBLACK_EX}Tamanho: {size:,} bytes | Modificado: {mtime}{Fore.RESET}")
+            st = bkp.stat()
+            from datetime import datetime as _dt
+            ts = _dt.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            print(f"  {Fore.WHITE}{i:2d}. {bkp.name}{Fore.RESET}")
+            print(f"     {Fore.LIGHTBLACK_EX}{st.st_size:,} bytes | {ts}{Fore.RESET}")
+        print()
         return
-    
-    print(f"\n{Fore.CYAN}{Style.BRIGHT}🔄 RESTAURAR BACKUP ({mode}){Style.RESET_ALL}\n")
-    
-    backup_path = Path(backup) if backup else None
+
+    # ✅ FIX 6: resolver filename contra o backup dir correto
+    backup_path = None
+    if backup:
+        backup_path = Path(backup)
+        if not backup_path.exists():
+            # Procura em todos os diretórios de backup do modo
+            candidates = []
+            if mode == "production":
+                from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+                candidates.append(LiteXLPaths.get_canonical_backups_dir())
+            else:
+                candidates.append(TyphonDeployEngine._get_backup_dir(mode))
+            for cdir in candidates:
+                candidate = cdir / backup
+                if candidate.exists():
+                    backup_path = candidate
+                    break
+            if not backup_path.exists():
+                print(f"{Fore.RED}✖ Backup não encontrado: {backup}{Fore.RESET}")
+                print(f"{Fore.LIGHTBLACK_EX}  Use: doxoade doxly deploy restore --list -m {mode}{Fore.RESET}")
+                return
+
+    print(f"\n{Fore.CYAN}{Style.BRIGHT}🔄 RESTAURAR BACKUP ({mode}){Fore.RESET}\n")
     ok, msg = TyphonDeployEngine.restore_backup(mode, backup_path)
-    
     if ok:
         print(f"{Fore.GREEN}✔ {msg}{Fore.RESET}")
     else:
@@ -185,4 +270,171 @@ def cmd_deploy_canone(force, launch, no_khonsu):
         if result["backup"]:
             print(f"{Fore.YELLOW}🔄 Rollback automático executado.{Fore.RESET}")
 
+@deploy_group.command("staging", help="🎯 Deploy em STAGING (candidato isolado, sem backup).")
+@click.option("--force", "-f", is_flag=True, help="Força deploy mesmo com warnings.")
+@click.option("--no-khonsu", is_flag=True, default=True,
+              help="[DEPRECATED] Source é o default (D4).")
+@click.option("--allow-aot", is_flag=True, default=False,
+              help="Permite AOT bytecode (D4: não recomendado).")
+@click.option("--launch-test", is_flag=True,
+              help="Abre Lite XL em modo staging para validação visual.")
+def cmd_deploy_staging(force, no_khonsu, allow_aot, launch_test):
+    print(f"\n{Fore.YELLOW}{Style.BRIGHT}🎯 DEPLOY STAGING (CANDIDATO){Style.RESET_ALL}")
+    print(f"{Fore.LIGHTBLACK_EX}  ⚠ Canonical e test NÃO serão tocados.{Fore.RESET}\n")
 
+    effective_no_khonsu = not allow_aot
+    result = TyphonDeployEngine.deploy("staging", force=force, no_khonsu=effective_no_khonsu)
+
+    if not result["success"]:
+        print(f"{Fore.RED}✖ Deploy staging falhou: {result['error']}{Fore.RESET}")
+        return
+
+    print(f"{Fore.GREEN}✔ Staging pronto: {result['init']}{Fore.RESET}")
+    print(f"{Fore.CYAN}  Modo: {result.get('opt_mode', '?')}{Fore.RESET}")
+
+    status = TyphonDeployEngine.get_canonical_status()
+    if status["promotion_pending"]:
+        delta = status["staging"]["size"] - status["canonical"]["size"]
+        print(f"\n{Fore.YELLOW}💡 Canonical difere do staging ({delta:+d} bytes).{Fore.RESET}")
+        print(f"{Fore.WHITE}   Promova com: doxoade doxly deploy promote{Fore.RESET}")
+
+    if launch_test:
+        print(f"\n{Fore.CYAN}🧪 Lançando Lite XL em modo STAGING...{Fore.RESET}")
+        TyphonDeployEngine.launch("staging", exorcise=False)
+    print()
+
+@deploy_group.command("promote", help="⚡ Promove staging → test + production (D2).")
+@click.option("--force", "-f", is_flag=True, help="Sem confirmação.")
+@click.option("--allow-aot", is_flag=True,
+              help="Permite AOT no canonical (D4: bloqueado por default).")
+def cmd_promote(force, allow_aot):
+    print(f"\n{Fore.CYAN}{Style.BRIGHT}⚡ PROMOTE — Staging → test + production{Style.RESET_ALL}\n")
+
+    status = TyphonDeployEngine.get_canonical_status()
+    if not status["staging"]["exists"]:
+        print(f"{Fore.RED}✖ Staging não existe. Rode 'deploy staging' antes.{Fore.RESET}\n")
+        return
+
+    if status["identical_canonical_staging"] and not force:
+        print(f"{Fore.GREEN}✔ Canonical e staging já são idênticos.{Fore.RESET}")
+        print(f"{Fore.LIGHTBLACK_EX}  Nada a promover.{Fore.RESET}\n")
+        return
+
+    if status["staging"]["is_aot"] and not allow_aot and not force:
+        print(f"{Fore.RED}{Style.BRIGHT}⚠ Staging é AOT bytecode{Fore.RESET}")
+        print(f"{Fore.YELLOW}  D4 despriorizou AOT. Promote em AOT é PERMANENTE.{Fore.RESET}")
+        print(f"{Fore.YELLOW}  Debug ficará impossível até próximo promote source.{Fore.RESET}")
+        print(f"\n{Fore.CYAN}💡 Use --no-khonsu no deploy staging, ou --allow-aot.{Fore.RESET}\n")
+        return
+
+    print(f"  {Fore.WHITE}Canonical: {status['canonical']['size']:,} bytes "
+          f"({'AOT' if status['canonical']['is_aot'] else 'source'}){Fore.RESET}")
+    print(f"  {Fore.WHITE}Staging:   {status['staging']['size']:,} bytes "
+          f"({'AOT' if status['staging']['is_aot'] else 'source'}){Fore.RESET}")
+    print(f"  {Fore.WHITE}Test:      {status['test']['size']:,} bytes "
+          f"(será sincronizado){Fore.RESET}\n")
+
+    if not force:
+        if not click.confirm(
+            f"{Fore.YELLOW}Propagar staging para test + production?{Fore.RESET}",
+            default=False,
+        ):
+            print(f"{Fore.YELLOW}Promote cancelado.{Fore.RESET}\n")
+            return
+
+    ok, msg = TyphonDeployEngine.promote(force=force, allow_aot=allow_aot)
+    if ok:
+        print(f"\n{Fore.GREEN}{Style.BRIGHT}✔ PROMOTE CONCLUÍDO{Fore.RESET}")
+        for line in msg.splitlines():
+            print(f"  {Fore.WHITE}{line}{Fore.RESET}")
+        print(f"\n{Fore.LIGHTBLACK_EX}  Rollback: doxoade doxly deploy restore --list -m production{Fore.RESET}\n")
+    else:
+        print(f"\n{Fore.RED}✖ Promote falhou: {msg}{Fore.RESET}\n")
+
+@deploy_group.command("launch", help="🚀 Abre Lite XL num ambiente específico (sem redeploy).")
+@click.option("--mode", "-m",
+              type=click.Choice(["production", "staging", "sandbox", "test"]),
+              default="production")
+@click.option("--exorcise/--no-exorcise", default=True,
+              help="Encerra instâncias antigas antes (default: sim).")
+@click.option("--raw", is_flag=True, default=False,
+              help="⚠️ Acessa a pasta real de produção (sem isolamento de sessão).")
+def cmd_launch(mode, exorcise, raw):
+    print(f"\n{Fore.CYAN}{Style.BRIGHT}🚀 LAUNCH — {mode.upper()}{Fore.RESET}\n")
+    deploy_dir = TyphonDeployEngine._get_deploy_dir(mode)
+    init_file = deploy_dir / "init.lua"
+    if not init_file.exists():
+        print(f"{Fore.RED}✖ init.lua ausente em {deploy_dir}{Fore.RESET}")
+        print(f"{Fore.YELLOW}  Rode 'deploy {mode}' primeiro.{Fore.RESET}\n")
+        return
+    size = init_file.stat().st_size
+    print(f"  {Fore.WHITE}Diretório: {deploy_dir}{Fore.RESET}")
+    print(f"  {Fore.WHITE}init.lua:  {size:,} bytes{Fore.RESET}\n")
+    
+    pid = TyphonDeployEngine.launch(mode, exorcise=exorcise, raw_mode=raw)
+    
+    if pid is not None:
+        if pid > 0:
+            print(f"{Fore.GREEN}✔ Lite XL [{mode.upper()}] iniciado (PID: {pid}){Fore.RESET}")
+        else:
+            print(f"{Fore.GREEN}✔ Lite XL [{mode.upper()}] iniciado.{Fore.RESET}")
+        
+        actual_dir = TyphonDeployEngine._get_deploy_dir(mode)
+        if mode == "production" and not raw:
+            actual_dir = actual_dir / ".doxoade" / "canonical_live"
+            print(f"{Fore.YELLOW}  🛡️ Sessão isolada: {actual_dir}{Fore.RESET}")
+        else:
+            print(f"{Fore.LIGHTBLACK_EX}  Session isolada em: {actual_dir}{Fore.RESET}\n")
+    else:
+        print(f"{Fore.RED}✖ Falha ao iniciar Lite XL [{mode}]{Fore.RESET}\n")
+
+@deploy_group.command("menu", help="🚀 Menu interativo para lançamento de ambientes.")
+def cmd_deploy_menu():
+    from doxoade.tools.doxcolors import Fore, Style
+    import click
+    
+    while True:
+        click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}╔══════════════════════════════════════════════════╗{Style.RESET_ALL}")
+        click.echo(f"{Fore.CYAN}{Style.BRIGHT}║      🐺 DOXLY LAUNCHER — Painel de Controle      ║{Style.RESET_ALL}")
+        click.echo(f"{Fore.CYAN}{Style.BRIGHT}╚══════════════════════════════════════════════════╝{Style.RESET_ALL}\n")
+        
+        click.echo(f"  {Fore.GREEN}[1]{Fore.RESET} 🏛️  Abrir CANONICAL (Isolado, sem redeploy)")
+        click.echo(f"  {Fore.YELLOW}[2]{Fore.RESET} 🚀  Redeploy + Abrir PRODUCTION")
+        click.echo(f"  {Fore.BLUE}[3]{Fore.RESET} 🧪  Redeploy + Abrir TEST")
+        click.echo(f"  {Fore.CYAN}[4]{Fore.RESET} 🎯  Redeploy + Abrir STAGING")
+        click.echo(f"  {Fore.MAGENTA}[5]{Fore.RESET} ⚡  PROMOTE (Staging → Produção)")
+        click.echo(f"  {Fore.RED}[0]{Fore.RESET} ❌  Sair\n")
+        
+        choice = click.prompt(f"{Fore.WHITE}Opção{Fore.RESET}", type=str).strip()
+        
+        if choice == "1":
+            click.echo(f"\n{Fore.GREEN}🏛️ Abrindo Canonical (Sessão Isolada)...{Fore.RESET}")
+            ctx = click.Context(cmd_launch)
+            # ✅ CORREÇÃO: passamos raw=False explicitamente
+            ctx.invoke(cmd_launch, mode="production", exorcise=True, raw=False)
+            break
+        elif choice == "2":
+            click.echo(f"\n{Fore.YELLOW}🚀 Redeploying PRODUCTION...{Fore.RESET}")
+            ctx = click.Context(cmd_deploy_production)
+            ctx.invoke(cmd_deploy_production, force=True, launch=True, allow_aot=False, legacy_direct=True)
+            break
+        elif choice == "3":
+            click.echo(f"\n{Fore.BLUE}🧪 Redeploying TEST...{Fore.RESET}")
+            ctx = click.Context(cmd_deploy_test)
+            ctx.invoke(cmd_deploy_test, force=True, no_khonsu=True, allow_aot=False, exorcise=True)
+            break
+        elif choice == "4":
+            click.echo(f"\n{Fore.CYAN}🎯 Redeploying STAGING...{Fore.RESET}")
+            ctx = click.Context(cmd_deploy_staging)
+            ctx.invoke(cmd_deploy_staging, force=True, no_khonsu=True, allow_aot=False, launch_test=True)
+            break
+        elif choice == "5":
+            click.echo(f"\n{Fore.MAGENTA}⚡ Promovendo Staging → Produção...{Fore.RESET}")
+            ctx = click.Context(cmd_promote)
+            ctx.invoke(cmd_promote, force=True, allow_aot=False)
+            break
+        elif choice == "0":
+            click.echo(f"{Fore.RED}Saindo...{Fore.RESET}")
+            break
+        else:
+            click.echo(f"{Fore.RED}Opção inválida!{Fore.RESET}")

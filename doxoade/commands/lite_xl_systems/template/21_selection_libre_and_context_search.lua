@@ -168,14 +168,29 @@ command.add(nil, {
       "🔍 Buscar no Projeto (Alt+F)",
       default_term,
       function(query)
-        local executor = rawget(_G, "DOXOADE_EXECUTE_GLOBAL_SEARCH")
-        if type(executor) == "function" then
-          pcall(executor, query, nil)
-        else
-          command.perform("doxoade:global-project-search")
+        if not query or query:match("^%s*$") then return end
+
+        -- ✅ Defesa 1: collapse a seleção ANTES do submit (Enter keyup não acha texto pra substituir)
+        local doc = core.active_view and core.active_view.doc
+        if doc and doc.has_selection and doc:has_selection() then
+          local ok_sel, l, c = pcall(doc.get_selection, doc, true)
+          if ok_sel and l and c then
+            pcall(doc.set_selection, doc, l, c, l, c)
+          end
         end
+
+        -- ✅ Defesa 2: defer a busca 10ms (keyup do Enter já foi dispatchado)
+        core.add_thread(function()
+          coroutine.yield(0.01)
+          local executor = rawget(_G, "DOXOADE_EXECUTE_GLOBAL_SEARCH")
+          if type(executor) == "function" then
+            pcall(executor, query, nil)
+          else
+            command.perform("doxoade:global-project-search")
+          end
+        end)
       end,
-      restore_split_safely  -- ← Passado como callback de close
+      restore_split_safely
     )
   end,
 })

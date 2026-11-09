@@ -20,6 +20,7 @@ from doxoade.commands.lite_xl_systems.chaos_payload import MEGA_CHAOS_PAYLOAD
 from doxoade.commands.lite_xl_systems.chaos_sandbox_runner import ChaosSandboxRunner
 from doxoade.commands.lite_xl_systems.cmd_typhon_deploy import deploy_group
 from doxoade.commands.lite_xl_systems.engine_lite_xl import LiteXLEngine
+from doxoade.commands.lite_xl_systems.keymap_radar import KeymapRadar, QWERTY_BASE_KEYS
 from doxoade.commands.lite_xl_systems.typhon_doxly.cmd_typhon_doxly import typhon_doxly_group
 from doxoade.tools.doxcolors import Fore, Style, Back
 from doxoade.tools.lua_systems.chaos_validator import ChaosValidator
@@ -213,14 +214,46 @@ def cmd_check_templates(fix, apply):
 @lite_xl_group.command("resolve-line")
 @click.argument("line_no", type=int)
 @click.option("--mode", "-m", default="production")
-def cmd_resolve_line(line_no, mode):
+@click.option("--from-init", is_flag=True,
+              help="Usa o init.lua REAL (evita buffer stale)")
+def cmd_resolve_line(line_no, mode, from_init):
     from doxoade.commands.lite_xl_systems.typhon_doxly.doxly_khonsu_gate import DoxlyKhonsuGate
+    from doxoade.commands.lite_xl_systems.typhon_deploy import TyphonDeployEngine
     from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
-    
+    import hashlib
+
+    target_dir = TyphonDeployEngine._get_deploy_dir(mode)
+    init_file = target_dir / "init.lua"
+
+    # ⚠ Fase 3.2: detectar AOT antes de tentar resolver
+    if init_file.exists():
+        head = init_file.read_bytes()[:4]
+        if head.startswith(b"\x1bLua"):
+            click.echo(f"\n{Fore.RED}{Style.BRIGHT}✖ Init.lua é bytecode AOT{Fore.RESET}")
+            click.echo(f"  Source map NÃO funciona em bytecode.")
+            click.echo(f"  O traceback aponta para linhas do bytecode, não do source.")
+            click.echo(f"\n  {Fore.YELLOW}Para resolver:{Fore.RESET}")
+            click.echo(f"    1. doxoade doxly deploy production --force --no-khonsu")
+            click.echo(f"    2. Reproduza o crash")
+            click.echo(f"    3. doxoade doxly resolve-line {line_no}")
+            return
+
+    # ⚠ Fase 3.2: detectar buffer stale
     t_dir = LiteXLPaths.get_template_dir()
     templates = sorted([t for t in t_dir.glob("*.lua") if t.is_file()])
-    _, source_map = DoxlyKhonsuGate.assemble_unified_buffer(templates, mode=mode)
-    
+    unified_source, source_map = DoxlyKhonsuGate.assemble_unified_buffer(
+        templates, mode=mode)
+    current_hash = hashlib.sha256(unified_source.encode("utf-8")).hexdigest()[:16]
+
+    buffer_file = LiteXLPaths.get_user_dir() / ".doxoade" / "diagnostics" / \
+                  f"last_preflight_aot_{mode}.lua"
+    if buffer_file.exists():
+        cached_hash = hashlib.sha256(buffer_file.read_bytes()).hexdigest()[:16]
+        if cached_hash != current_hash:
+            click.echo(f"{Fore.YELLOW}⚠ Buffer mudou desde o último deploy.{Fore.RESET}")
+            click.echo(f"  Cache: {cached_hash}  Atual: {current_hash}")
+            click.echo(f"  Mapeamento pode estar incorreto — deploy foi regenerado?\n")
+
     tmpl, path, rel_line = source_map.resolve(line_no)
     click.echo(f"\n🔍 Linha Unificada: {line_no}")
     click.echo(f"📄 Template Original: {tmpl} (Linha {rel_line})")
@@ -282,7 +315,10 @@ def cmd_restart(target, clean):
 
     # 1. Fecha instâncias anteriores e aguarda finalização no Windows
     LiteXLEngine.graceful_shutdown()
-    time.sleep(0.5)
+    # Forçar kill do PID registrado (defesa em profundidade)
+    from doxoade.commands.lite_xl_systems.typhon_deploy import TyphonDeployEngine
+    TyphonDeployEngine.exorcise_instances(wait_seconds=0.8)
+    time.sleep(0.3)
     # 2. Regrava o init.lua no disco com Probes inclusos
     LiteXLEngine.install_sovereign_config()
     # 3. Relaunch com restauração ativa da sessão
@@ -1344,16 +1380,21 @@ def cmd_preflight():
     # 🆕 Literais Lua que NÃO são variáveis
     LUA_LITERALS = {"true", "false", "nil"}
     
+    # Ajuste no regex de detecção de declaração prévia:
     for line_no, line in enumerate(init_content.splitlines(), 1):
         match = re.search(r'rawset\(_G,\s*"[^"]+",\s*([a-zA-Z_][a-zA-Z0-9_]*)\)', line)
         if match:
             var_name = match.group(1)
-            # 🆕 Skip em literais
             if var_name in LUA_LITERALS:
                 continue
             preceding = "\n".join(init_content.splitlines()[:line_no-1])
-            if not re.search(rf'\blocal\s+{var_name}\b', preceding) and \
-               not re.search(rf'rawset\(_G,\s*"{var_name}"', preceding):
+            has_decl = (
+                re.search(rf'\blocal\s+{re.escape(var_name)}\b', preceding) or
+                re.search(rf'\blocal\s+function\s+{re.escape(var_name)}\b', preceding) or
+                re.search(rf'\bfunction\s+{re.escape(var_name)}\b', preceding) or
+                re.search(rf'rawset\(_G,\s*"{re.escape(var_name)}"', preceding)
+            )
+            if not has_decl:
                 undeclared.append((line_no, var_name))
     
     if undeclared:
@@ -1368,6 +1409,25 @@ def cmd_preflight():
     # 5. Sucesso — libera para deploy
     click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}✔ PRE-FLIGHT OK — Init.lua validado e pronto para deploy.{Style.RESET_ALL}")
     click.echo(f"  {Fore.WHITE}Execute 'doxoade lite-xl setup --force' para instalar.{Fore.RESET}\n")
+
+    # 6. Radar de keymap - evita conflitos de atalhos
+    click.echo(f"\n  {Fore.CYAN}Verificando integridade de keymaps com Radar Forense...{Fore.RESET}")
+    from doxoade.commands.lite_xl_systems.keymap_radar import KeymapRadar
+    by_key, by_cmd, registered_commands = KeymapRadar.scan_templates()
+    collisions = KeymapRadar.find_collisions(by_key, registered_commands)
+    
+    divergent_collisions = [c for c in collisions if c["type"] == "DIVERGENT_COLLISION"]
+    if divergent_collisions:
+        click.echo(f"  {Fore.RED}✖ COLISÕES DE TECLADO DETECTADAS ({len(divergent_collisions)} divergentes):{Fore.RESET}")
+        for col in divergent_collisions:
+            click.echo(f"    • Tecla {Fore.YELLOW}{col['key']}{Fore.RESET} colide em {len(col['commands'])} comandos:")
+            for e in col["entries"]:
+                click.echo(f"       ↳ {Fore.CYAN}{e['command']:<32}{Fore.RESET} [{e['template']}:{e['line']}]")
+        click.echo(f"\n  {Fore.YELLOW}💡 Execute 'doxoade doxly radar-keys -c' para ver os snippets e sugestões.{Fore.RESET}")
+        return
+    else:
+        click.echo(f"  {Fore.GREEN}✔ Zero colisões divergentes no teclado ({len(by_key)} teclas mapeadas){Fore.RESET}")
+
 
 @lite_xl_group.command("search-bridge", help="Ponte de busca de alta velocidade Vulcan/SearchState para o Lite XL.")
 @click.argument("query")
@@ -2029,19 +2089,69 @@ def cmd_pty_probe(shell: str, timeout: float):
     except Exception as e:
         click.echo(f"  {Fore.RED}✖ Falha ao executar daemon: {e}{Fore.RESET}\n")
 
-@lite_xl_group.command("canonical", help="🏛️ DEPRECATED: Use `doxoade doxly deploy production`.")
-def cmd_canonical():
-    """[FASE 17] Modo canônico descontinuado. Redireciona para deploy production."""
-    click.echo(f"\n{Fore.YELLOW}{Style.BRIGHT}⚠ MODO CANÔNICO DESCONTINUADO{Style.RESET_ALL}")
-    click.echo(f"  {Fore.WHITE}Use:{Fore.RESET} {Fore.GREEN}doxoade doxly deploy production{Fore.RESET}\n")
+@lite_xl_group.command(
+    "canonical",
+    help="🏛️ Abre o Lite XL no modo canônico puro (sem deploy, sem promote, sem --userdir).",
+)
+@click.option("--exorcise/--no-exorcise", default=True,
+              help="Encerra instâncias antigas antes (default: sim).")
+def cmd_canonical(exorcise):
+    """🏛️ CANONICAL PURO — abre ~/.config/lite-xl/ sem tocar em arquivos.
+
+    Diferença fundamental vs `doxly deploy production`:
+      • deploy production (Fase 4) = PROMOTE (copia staging → canonical)
+      • canonical                = APENAS ABRIR canonical, zero I/O
+    """
     from doxoade.commands.lite_xl_systems.typhon_deploy import TyphonDeployEngine
-    result = TyphonDeployEngine.deploy("production", force=False, no_khonsu=False)
-    if result["success"]:
-        click.echo(f"{Fore.GREEN}✔ Deploy de produção concluído ({result.get('opt_mode', '?')}).{Fore.RESET}")
-        TyphonDeployEngine.launch("production", exorcise=True)
-    else:
-        click.echo(f"{Fore.RED}✖ Deploy falhou: {result.get('error', '?')}{Fore.RESET}")
-        sys.exit(1)
+
+    user_dir = LiteXLEngine.get_user_dir()
+    init_file = LiteXLEngine.get_init_lua_path()
+
+    print(f"\n{Fore.CYAN}{Style.BRIGHT}🏛️ CANONICAL MODE — Lite XL Puro{Style.RESET_ALL}")
+    print(f"  {Fore.WHITE}Userdir :{Fore.RESET} {user_dir}")
+    print(f"  {Fore.WHITE}Init.lua:{Fore.RESET} {init_file}")
+    print(f"  {Fore.LIGHTBLACK_EX}Sem --userdir, sem promote, sem deploy.{Fore.RESET}\n")
+
+    if not init_file.exists():
+        print(f"{Fore.YELLOW}⚠ init.lua não existe em canonical.{Fore.RESET}")
+        print(f"{Fore.LIGHTBLACK_EX}  Rode 'doxoade doxly deploy production' primeiro.{Fore.RESET}\n")
+        return
+
+    if exorcise:
+        TyphonDeployEngine.exorcise_instances(wait_seconds=0.8)
+        time.sleep(0.3)
+
+    exe = LiteXLEngine.find_executable()
+    if not exe:
+        print(f"{Fore.RED}✖ Executável do Lite XL não encontrado.{Fore.RESET}\n")
+        return
+
+    # Env mínimo: só o modo (para o título "Doxly - produção - PID X").
+    # Deliberadamente NÃO setamos LITE_USERDIR nem XDG_CONFIG_HOME
+    # → o .exe resolve os paths como um duplo-clique faria.
+    env = os.environ.copy()
+    env["DOXOADE_DEPLOY_MODE"] = "production"
+
+    CREATE_NEW_CONSOLE = 0x00000010 if sys.platform == "win32" else 0
+    try:
+        proc = subprocess.Popen(
+            [str(exe)],
+            env=env,
+            creationflags=CREATE_NEW_CONSOLE,
+        )
+        pid = proc.pid
+
+        # Grava .production.pid para o HUD exibir "PID N"
+        pid_file = user_dir / ".production.pid"
+        try:
+            pid_file.write_text(str(pid), encoding="utf-8")
+        except Exception:
+            pass
+
+        print(f"{Fore.GREEN}✔ Lite XL CANÔNICO iniciado (PID: {pid}){Fore.RESET}")
+        print(f"{Fore.LIGHTBLACK_EX}  Título: Doxly - produção - PID {pid}{Fore.RESET}\n")
+    except Exception as e:
+        print(f"{Fore.RED}✖ Falha ao iniciar: {e}{Fore.RESET}\n")
 
 @lite_xl_group.command("diagnose-init", help="🔬 Compara init.lua de test vs production e identifica divergências.")
 def cmd_diagnose_init():
@@ -2209,3 +2319,174 @@ def cmd_clear(mode, deep):
         safe_rmtree(sandbox_dir, "sandbox")
 
     click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}✔ Saneamento concluído. {cleared_count} itens limpos.{Style.RESET_ALL}\n")
+
+@lite_xl_group.command("radar-keys", help="🎯 Radar Forense de Teclado: Detecta colisões, snippets da linha e sugere alternativas.")
+@click.argument("query", required=False, default="")
+@click.option("--collisions-only", "-c", is_flag=True, help="Exibe apenas teclas com conflito direto.")
+@click.option("--snippets", "-s", is_flag=True, default=True, help="Exibe os snippets do código onde a colisão ocorreu.")
+@click.option("--matrix", "-m", is_flag=True, help="Exibe a matriz completa de combinações para a tecla informada.")
+def cmd_radar_keys(query: str, collisions_only: bool, snippets: bool, matrix: bool):
+    from doxoade.commands.lite_xl_systems.keymap_radar import KeymapRadar
+
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🎯 RADAR FORENSE DE KEYMAPS & ANÁLISE DE INTERFERÊNCIA{Style.RESET_ALL}\n")
+    
+    by_key, by_cmd, registered_commands = KeymapRadar.scan_templates()
+    collisions = KeymapRadar.find_collisions(by_key, registered_commands)
+    
+    # Se pediu lista de colisões ou não passou query
+    if collisions_only or (not query and not matrix):
+        click.echo(f"  {Fore.WHITE}Total de Teclas Parseadas:{Fore.RESET} {Fore.CYAN}{len(by_key)}{Fore.RESET}")
+        click.echo(f"  {Fore.WHITE}Conflitos Detectados:{Fore.RESET} {Fore.RED if collisions else Fore.GREEN}{len(collisions)}{Fore.RESET}\n")
+        
+        if collisions:
+            click.echo(f"{Fore.RED}{Style.BRIGHT}🚨 RELATÓRIO CIRÚRGICO DE COLISÕES:{Style.RESET_ALL}\n")
+            for idx, col in enumerate(collisions, 1):
+                badge_col = Fore.RED if col["severity"] == "CRITICAL" else Fore.YELLOW
+                click.echo(f"  [{idx}] {badge_col}[{col['type']}]{Fore.RESET} Tecla: {Fore.WHITE}{Style.BRIGHT}{col['key']}{Style.RESET_ALL}")
+                click.echo(f"      {Fore.LIGHTBLACK_EX}↳ {col['message']}{Fore.RESET}")
+                
+                # Exibe sugestões livres
+                alternatives = KeymapRadar.find_free_alternatives(col["key"], by_key)
+                if alternatives:
+                    alt_preview = ", ".join(f"{Fore.GREEN}{a}{Fore.RESET}" for a in alternatives[:3])
+                    click.echo(f"      💡 {Fore.WHITE}Alternativas 100% Livres para '{col['key']}':{Fore.RESET} {alt_preview}")
+                
+                click.echo()
+                # Snippets forenses de cada arquivo culpado
+                if snippets:
+                    for e in col["entries"]:
+                        click.echo(f"      {Fore.CYAN}📍 [{e['template']}:{e['line']}]{Fore.RESET} ➔ {Fore.YELLOW}{e['command']}{Fore.RESET}")
+                        snips = KeymapRadar.get_code_snippet(e["path"], e["line"], radius=1)
+                        click.echo(f"         {Fore.LIGHTBLACK_EX}┌{'─' * 60}{Fore.RESET}")
+                        for ln, is_target, code_line in snips:
+                            prefix = f"{Fore.RED}>>{Fore.RESET}" if is_target else "  "
+                            color = Fore.YELLOW if is_target else Fore.WHITE
+                            click.echo(f"         {prefix} {color}{ln:4d} | {code_line}{Fore.RESET}")
+                        click.echo(f"         {Fore.LIGHTBLACK_EX}└{'─' * 60}{Fore.RESET}\n")
+            return
+
+    # Busca específica (ex: 'ctrl+l', 'split', 'd')
+    if query:
+        query_norm = KeymapRadar.normalize_chord(query)
+        hits_by_key = [e for k, entries in by_key.items() if query_norm in k or query.lower() in k for e in entries]
+        hits_by_cmd = [e for c, entries in by_cmd.items() if query.lower() in c.lower() for e in entries]
+        
+        all_hits = hits_by_key + hits_by_cmd
+        click.echo(f"{Fore.WHITE}🔍 Resultados da busca por '{Fore.YELLOW}{query}{Fore.WHITE}' ({len(all_hits)} ocorrências):{Fore.RESET}\n")
+        
+        for h in all_hits:
+            is_valid_cmd = h["command"] in registered_commands or "root:" in h["command"] or "doc:" in h["command"]
+            valid_badge = f"{Fore.GREEN}✔ VÁLIDO{Fore.RESET}" if is_valid_cmd else f"{Fore.RED}⚠ NÃO DECLARADO{Fore.RESET}"
+            click.echo(f"  [{Fore.GREEN}{h['normalized_key']:<22}{Fore.RESET}] ➔ {Fore.CYAN}{h['command']:<36}{Fore.RESET} {valid_badge}")
+            click.echo(f"     ↳ {Fore.LIGHTBLACK_EX}{h['template']}:{h['line']}{Fore.RESET} | {Fore.WHITE}{h['code']}{Fore.RESET}\n")
+
+    # Matriz completa de combinações QWERTY se requisitado
+    if matrix:
+        search_key = query.strip().lower() if query else "l"
+        if "+" in search_key:
+            search_key = search_key.split("+")[-1]
+            
+        radar_results = KeymapRadar.generate_matrix_radar(search_key, by_key)
+        click.echo(f"{Fore.CYAN}{Style.BRIGHT}🗺️  MATRIZ DE COMBINAÇÕES QWERTY PARA '{search_key.upper()}':{Style.RESET_ALL}\n")
+        for item in radar_results:
+            chord = item["chord"]
+            status = item["status"]
+            if status == "FREE":
+                badge = f"{Fore.LIGHTBLACK_EX}[LIVRE]     {Fore.RESET}"
+                cmd_desc = f"{Fore.LIGHTBLACK_EX}(Disponível){Fore.RESET}"
+            elif status == "BOUND":
+                badge = f"{Fore.GREEN}[OCUPADO]   {Fore.RESET}"
+                cmd_desc = f"{Fore.CYAN}{item['entries'][0]['command']}{Fore.RESET} ({item['entries'][0]['template']}:{item['entries'][0]['line']})"
+            else:
+                badge = f"{Fore.RED}[CONFLITO]  {Fore.RESET}"
+                cmd_desc = f"{Fore.RED}{len(item['entries'])} comandos disputam esta tecla!{Fore.RESET}"
+            click.echo(f"   {badge} {Style.BRIGHT}{chord:<22}{Style.RESET_ALL} ➔ {cmd_desc}")
+        click.echo()
+
+from .cmd_doxly_flow import cmd_flow
+lite_xl_group.add_command(cmd_flow)
+
+@lite_xl_group.command("shortcuts", help="🖥️ Cria apenas o atalho do Doxly Launcher no Menu Iniciar.")
+def cmd_shortcuts():
+    import sys, os, subprocess
+    from pathlib import Path
+    from doxoade.tools.doxcolors import Fore, Style
+    from doxoade.commands.lite_xl_systems.engine_lite_xl import LiteXLEngine
+
+    if sys.platform != "win32":
+        click.echo(f"{Fore.YELLOW}⚠ Disponível apenas no Windows.{Fore.RESET}\n")
+        return
+
+    exe = LiteXLEngine.find_executable()
+    if not exe:
+        click.echo(f"{Fore.RED}✖ Executável do Lite XL não encontrado.{Fore.RESET}\n")
+        return
+
+    py_exe = sys.executable
+    doxoade_exe = Path(py_exe).parent / "doxoade.exe"
+    if doxoade_exe.exists():
+        target = str(doxoade_exe)
+        args_prefix = ""
+    else:
+        target = py_exe
+        args_prefix = "-m doxoade "
+
+    programs_dir = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
+    
+    # ── CONVERSÃO DA LOGO PNG PARA ICO ──
+    assets_dir = LiteXLEngine.get_template_dir().parent / "assets"
+    png_logo = assets_dir / "logo.png"
+    ico_logo = assets_dir / "logo.ico"
+    
+    if png_logo.exists() and not ico_logo.exists():
+        try:
+            from PIL import Image
+            img = Image.open(png_logo)
+            img.save(ico_logo, format='ICO', sizes=[(256, 256), (128, 128), (64, 64), (32, 32), (16, 16)])
+            click.echo(f"  {Fore.GREEN}✔{Fore.RESET} Logo convertida para ICO: {ico_logo.name}")
+        except Exception as e:
+            click.echo(f"  {Fore.YELLOW}⚠ Falha ao converter logo: {e}{Fore.RESET}")
+
+    final_icon = str(ico_logo) if ico_logo.exists() else str(exe)
+
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🖥️  GERANDO ATALHOS WINDOWS{Style.RESET_ALL}")
+    
+    # ── ATALHO DO LAUNCHER ──
+    lnk_path = programs_dir / "Doxly - Launcher.lnk"
+    full_args = f"{args_prefix}doxly deploy menu"
+    
+    ps_script = f'''
+$WshShell = New-Object -ComObject WScript.Shell
+$sc = $WshShell.CreateShortcut("{lnk_path}")
+$sc.TargetPath = "cmd.exe"
+$sc.Arguments = '/c "{target}" {full_args} & echo. & pause'
+$sc.WorkingDirectory = "{Path.cwd()}"
+$sc.IconLocation = "{final_icon}"
+$sc.Description = "Doxly Launcher"
+$sc.Save()
+'''
+    try:
+        result = subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], capture_output=True, text=True)
+        if result.returncode == 0 and lnk_path.exists():
+            click.echo(f"  {Fore.GREEN}✔{Fore.RESET} Doxly - Launcher")
+        else:
+            click.echo(f"  {Fore.RED}✖{Fore.RESET} Falha ao criar Launcher: {result.stderr.strip()[:80]}")
+    except Exception as e:
+        click.echo(f"  {Fore.RED}✖{Fore.RESET} Erro: {e}")
+
+    # ✅ Força a atualização do cache de ícones do Windows
+    subprocess.run(["ie4uinit.exe", "-show"], capture_output=True)
+
+    click.echo(f"\n{Fore.GREEN}{Style.BRIGHT}✔ Launcher criado com sucesso!{Style.RESET_ALL}")
+    click.echo(f"  {Fore.LIGHTBLACK_EX}Se o ícone ainda não atualizou, desfixe o antigo da barra de tarefas e fixe o novo.{Fore.RESET}\n")
+
+
+@lite_xl_group.command("tray", help="🐺 Inicia o Doxly Tray Icon na Bandeja do Sistema.")
+def cmd_tray():
+    try:
+        from doxoade.commands.lite_xl_systems.doxly_tray import start_tray
+        start_tray()
+    except ImportError:
+        click.echo(f"{Fore.RED}✖ Biblioteca 'pystray' não encontrada.{Fore.RESET}")
+        click.echo(f"  Instale com: {Fore.CYAN}pip install pystray Pillow{Fore.RESET}")
+

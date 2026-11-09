@@ -237,14 +237,13 @@ local function restore_sovereign_session()
     return leaves[1] or core.root_view.root_node:get_primary_node()
   end)()
 
+  -- Em 01_ipc_dispatcher.lua (função restore_sovereign_session):
   for p_idx, panel_data in ipairs(session.panels) do
     local valid_files = {}
     for _, f_info in ipairs(panel_data.files or {}) do
       if f_info.filename and f_info.filename ~= "" then
         local fn_lower = tostring(f_info.filename):lower():gsub("\\", "/")
-        -- 🛡️ PROIBIÇÃO: Nunca reabrir o init.lua compilado ou arquivos de bytecode como abas
         local is_init_bytecode = fn_lower:match("/init%.lua$") or fn_lower:match("/init%.luac$") or fn_lower:match("%.luac$")
-        
         if not is_init_bytecode then
           local finfo = system.get_file_info(f_info.filename)
           if finfo and finfo.type == "file" then
@@ -255,6 +254,7 @@ local function restore_sovereign_session()
     end
 
     if #valid_files > 0 then
+      -- 🛡️ DECLARAÇÃO LOCAL OBRIGATÓRIA (Strict-Safe):
       local target_node = nil
       if p_idx == 1 then
         target_node = primary_node
@@ -414,7 +414,7 @@ core.add_thread(function()
     -- Auto-save de estado a cada 4 segundos
     if save_timer >= 4.0 then
       save_timer = 0
-      save_sovereign_session()
+      save_sovereign_session() -- 👈 RE-SERIALIZA E POLUI A ÁRVORE
     end
   end
 end)

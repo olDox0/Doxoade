@@ -110,6 +110,25 @@ class LiteXLPaths:
         return cls.get_init_lua_path().with_suffix(".lua.broken")
 
     @classmethod
+    def get_staging_dir(cls) -> Path:
+        """Diretório de staging (candidato isolado do canonical)."""
+        staging = cls.get_user_dir() / ".doxoade" / "staging"
+        staging.mkdir(parents=True, exist_ok=True)
+        return staging
+
+    @classmethod
+    def get_canonical_backups_dir(cls) -> Path:
+        """Diretório de backups rotativos do canonical (50 snapshots)."""
+        bkp = cls.get_user_dir() / ".doxoade" / "backups" / "canonical"
+        bkp.mkdir(parents=True, exist_ok=True)
+        return bkp
+
+    @classmethod
+    def get_canonical_fingerprint_path(cls) -> Path:
+        """Metadata do canonical atual (drift detector)."""
+        return cls.get_user_dir() / ".doxoade" / "canonical_fingerprint.json"
+
+    @classmethod
     def bootstrap_templates_if_missing(cls):
         """Garante que a pasta de templates modular exista no sistema."""
         t_dir = cls.get_template_dir()

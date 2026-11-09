@@ -96,3 +96,36 @@ output = "doxoade/tools/hermes_systems/native/hermes_bridge_soteria.pyd"
 opt = "O3"
 flags = ["-shared", "-msse4.2", "-mpopcnt", "-DSOTERIA_NO_ALLOC_HOOKS", "-lws2_32"] # <--- ADICIONE "-lws2_32"
 soteria = false
+
+# -- Targets de RE (doxreveng) ---------------------------------
+[[targets]]
+name = "doxreveng"
+sources = [
+    "doxoade/tools/rev_eng/src/main.c",
+    "doxoade/tools/rev_eng/src/file_reader.c",
+    "doxoade/tools/rev_eng/src/pe_parser.c",
+    "doxoade/tools/rev_eng/src/hex_dump.c",
+    "doxoade/tools/rev_eng/src/string_scan.c",
+    "doxoade/tools/rev_eng/src/pre_ir.c"
+]
+output = "doxoade/tools/rev_eng/bin/doxreveng.exe"
+flags = ["-Idoxoade/tools/rev_eng/include", "-DDOXREVENG_DEBUG_IMPORTS"]
+opt = "O2"
+soteria = false
+
+# -- Degrau 0: alvos de teste (gabarito) -----------------------
+[[targets]]
+name = "degrau0_O0_g"
+sources = ["doxoade/tools/rev_eng/tests/fixtures/degrau0.c"]
+output = "doxoade/tools/rev_eng/tests/fixtures/degrau0_O0_g.exe"
+flags = ["-g", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"]
+opt = "O0"
+soteria = false
+
+[[targets]]
+name = "degrau0_O2_s"
+sources = ["doxoade/tools/rev_eng/tests/fixtures/degrau0.c"]
+output = "doxoade/tools/rev_eng/tests/fixtures/degrau0_O2_s.exe"
+flags = ["-s", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"]
+opt = "O2"
+soteria = false

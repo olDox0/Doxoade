@@ -301,16 +301,22 @@ class LiteXLProcess:
         if not exe:
             return False, "Binário do Lite XL não encontrado."
 
-        cmd_args = [str(exe)]
+        #cmd_args = [str(exe)]
+        cmd_args = [str(exe), "--userdir", str(LiteXLPaths.get_user_dir())]
         if target_path:
             cmd_args.append(str(target_path))
 
         # Pre-flight check estático do init.lua
         if init_path.exists():
-            raw_init = init_path.read_text(encoding="utf-8", errors="replace")
-            scan_errs = LiteXLInitBuilder.compile_scan_lua(raw_init)
+            raw_bytes = init_path.read_bytes()
+            is_bytecode = raw_bytes.startswith(b"\x1bLua")
+            
+            scan_errs = []
+            if not is_bytecode:
+                raw_init = raw_bytes.decode("utf-8", errors="replace")
+                scan_errs = LiteXLInitBuilder.compile_scan_lua(raw_init)
+            
             compile_err = LiteXLInitBuilder.true_compile_check(init_path)
-
             if scan_errs or (compile_err and compile_err != "NO_RUNTIME"):
                 err_detail = "; ".join(scan_errs) if scan_errs else str(compile_err)
                 LiteXLSnapshots.restore_stable_snapshot()
@@ -333,14 +339,28 @@ class LiteXLProcess:
                 pass
 
         start_time = time.time()
-        proc = subprocess.Popen(cmd_args)
+        
+        # ✅ BLINDAGEM CONTRA UAC NO WINDOWS
+        if sys.platform == "win32":
+            try:
+                os.startfile(str(exe), arguments=f'--userdir "{str(LiteXLPaths.get_user_dir())}"' + (f' "{target_path}"' if target_path else ''))
+                proc = None
+            except Exception as e:
+                click.echo(f"{Fore.RED}✖ Falha ao abrir: {e}{Fore.RESET}")
+                return False, str(e)
+        else:
+            proc = subprocess.Popen(cmd_args)
 
-        # Handshake Watchdog (monitora logs e error.txt por até 3s)
         boot_confirmed = False
         has_errors = False
         error_excerpt = ""
         deadline = time.time() + 3.0
-
+        
+        if proc is None:
+            # Se usou startfile, não temos o proc para monitorar, então confiamos que abriu
+            time.sleep(2.0)
+            return True, "Lite XL inicializado via Explorer (UAC bypass)."
+            
         while time.time() < deadline:
             if proc.poll() is not None:
                 # Processo encerrou abruptamente

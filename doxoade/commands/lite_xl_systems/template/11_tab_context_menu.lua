@@ -557,7 +557,7 @@ end)
 -- KEYMAPS
 -- =============================================================================
 keymap.add {
-  ["ctrl+alt+e"]   = "doxoade:tab-copy-filename",
+--  ["ctrl+alt+e"]   = "doxoade:tab-copy-filename",
   ["ctrl+alt+c"]   = "doxoade:copy-path-menu",
   ["ctrl+shift+c"] = "doxoade:tab-copy-relative-path",
 }

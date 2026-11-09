@@ -289,38 +289,66 @@ class LiteXLEngine:
     def parse_keybindings(cls, init_path: Path) -> dict:
         """
         Parser Forense V2: Extrai todos os atalhos do init.lua.
-        Lida com comentários, tabelas de múltiplos comandos e formatações variadas.
+        Se o init.lua for binário AOT, faz fallback automático para o buffer de texto.
         """
         import re
         from collections import defaultdict
+
+        raw_bytes = init_path.read_bytes() if init_path.exists() else b""
         
-        content = init_path.read_text(encoding="utf-8", errors="replace")
-        
-        # 1. Higiene: Remove comentários de bloco e linha para evitar falsos positivos
+        # Se for bytecode binário, busca o fonte plain correspondente
+        if raw_bytes.startswith(b"\x1bLua"):
+            user_dir = cls.get_user_dir()
+            fallback_sources = [
+                user_dir / ".doxoade" / "diagnostics" / "last_preflight_aot_production.lua",
+                user_dir / ".doxoade" / "diagnostics" / "last_preflight_aot_test.lua",
+            ]
+            content = ""
+            for src in fallback_sources:
+                if src.exists():
+                    content = src.read_text(encoding="utf-8", errors="replace")
+                    break
+            if not content:
+                # Se não houver buffer salvo, gera o init soberano em memória
+                from .lite_xl_init_builder import LiteXLInitBuilder
+                content = LiteXLInitBuilder.generate_sovereign_init()
+        else:
+            content = raw_bytes.decode("utf-8", errors="replace")
+
+        # 1. Higiene: Remove comentários
         content = re.sub(r'--\[\[.*?\]\]', '', content, flags=re.DOTALL)
         content = re.sub(r'--[^\n]*', '', content)
-        
+
         keymaps = defaultdict(list)
-        
+
         # 2. Captura Padrão 1: ["ctrl+c"] = "doc:copy"
-        pattern_str = re.compile(r'\[\s*["\']([^"\']+)["\']\s*\]\s*=\s*["\']([^"\']+)["\']')
+        pattern_str = re.compile(r'\[\s*["\']([a-zA-Z0-9_+\-]+)["\']\s*\]\s*=\s*["\']([a-zA-Z0-9_\-:]+)["\']')
         for match in pattern_str.finditer(content):
             key_combo = match.group(1).strip().lower()
+            # Ignora chaves de configuração como ["fps"], ["config"], etc.
+            if ":" not in key_combo and "+" not in key_combo and not key_combo.startswith("f") and key_combo not in (
+                "tab", "escape", "return", "enter", "space", "backspace", "delete"
+            ):
+                continue
             command = match.group(2).strip()
             if command not in keymaps[key_combo]:
                 keymaps[key_combo].append(command)
-                
+
         # 3. Captura Padrão 2: ["ctrl+shift+c"] = { "cmd1", "cmd2" }
-        pattern_tbl = re.compile(r'\[\s*["\']([^"\']+)["\']\s*\]\s*=\s*\{(.*?)\}', re.DOTALL)
+        pattern_tbl = re.compile(r'\[\s*["\']([a-zA-Z0-9_+\-]+)["\']\s*\]\s*=\s*\{(.*?)\}', re.DOTALL)
         for match in pattern_tbl.finditer(content):
             key_combo = match.group(1).strip().lower()
+            if "+" not in key_combo and not key_combo.startswith("f") and key_combo not in (
+                "tab", "escape", "return", "enter", "space", "backspace", "delete"
+            ):
+                continue
             tbl_content = match.group(2)
-            cmds = re.findall(r'["\']([^"\']+)["\']', tbl_content)
+            cmds = re.findall(r'["\']([a-zA-Z0-9_\-:]+)["\']', tbl_content)
             for cmd in cmds:
                 cmd = cmd.strip()
                 if cmd and cmd not in keymaps[key_combo]:
                     keymaps[key_combo].append(cmd)
-                    
+
         return dict(keymaps)
 
     @classmethod

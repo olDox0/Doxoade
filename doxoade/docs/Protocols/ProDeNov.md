@@ -68,6 +68,9 @@ este é o novo protocolo simplificado e sucinto de desenvolveimento do doxoade. 
   4.2. Caso o dev não estejá com a capacidade de desenvolveimento com segurança no momento, não desenvolva no periodo, ou só planeje.
     4.2.1. Esta regra é por questões de segurança contra regressões.
   4.3. na demora da resolução de um problema, deve-se focar no diagnostico e na reunião de evidencias para que o plano seja feito baseado naquele esxopo, contexto, e limitações daquele sistena. o pragmatismo é em vindo nestes momentos.
+    4.3.1. investigue o obvio, sempre comece com o que você tem, caso não tenha nada, não ande no escuro, faça com que você obternha dados do sistema de forma automatica ou manual, um problema complexo deve sser resolvido baseado em contexto, se um sistema tem componente e deu problema nesles, você deve investigar os componentes e a interação deles seja ela ativa ou não. com isso pode-se descobrir divergencias com informações instruções, conflitos, versões diferentes, e até modficações necessarias e patchs.
+    4.3.2. a longo prazo não hesite em fazer facilitudes para lidar com problemas ou uso dinamico das suas ferramentas, pense na economia que isso gera a longo prazo.
+    4.3.3. sempre anote possibilidade de melhoria ou problemas seja num local obvio ou pratico.
 5. Recomendações:
   5.1. É recomendado colocar notas tecnicas sobre problemas, é importante, é necessario colocar informações sobre o problema. pode-se colocar no codigo em docstring o erro se necessario.
   5.2. Recomenda-se fortemente que lide com o tratamento de exceptions para que falhas sejam bem informadas e previstas para que o deve não fique a ver navios com relação a erros.
@@ -79,6 +82,7 @@ este é o novo protocolo simplificado e sucinto de desenvolveimento do doxoade. 
    5.6.2. discussão -> implementação -> teste -> discussão ou fix. este loop é o principal motor de desenvolviemnto ao executar o plano em partes.
    5.6.3. problemas arquiteturas precisa de replanejamento do plano, caso um sistema não funcione adequadamente deve ser discutirdo refazer de forma diferete, troca de versão, ou mudar para outro sistema.
    5.6.4. revisão é uma das partes mai fundamentais, ao final da implementação, deve ser discutido, como estava antes, o que mudou, o que ficou, e o que pode mudar, assim deve se discutido a manutentabilidade do sisitema e escalabilidade.
+   5.6.5. glossario interno para não sobrar duvidas sobre o que são os elementos, features e afins num sistema complexo.
 6. Comunicação:
  6.1. Atualiação de codigo deve seguir serto protocolo:
   6.1.1. Contexto, é preciso contextualizar o problema

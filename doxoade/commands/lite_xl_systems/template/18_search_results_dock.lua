@@ -362,12 +362,8 @@ command.add(nil, {
 keymap.add {
   ["f4"]              = "doxoade:search-next-result",
   ["shift+f4"]        = "doxoade:search-prev-result",
-  ["ctrl+alt+right"]  = "doxoade:search-next-result",
-  ["ctrl+alt+left"]   = "doxoade:search-prev-result",
   ["alt+,"]           = "doxoade:search-prev-result",
   ["alt+."]           = "doxoade:search-next-result",
-  -- [FASE 7.1] Esc fecha o painel
---  ["escape"]          = "doxoade:close-search-panel",
 }
 
 -- ============================================================================

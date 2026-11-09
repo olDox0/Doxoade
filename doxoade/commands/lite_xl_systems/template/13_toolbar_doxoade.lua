@@ -224,4 +224,3 @@ command.add(nil, {
     end,
 })
 
-keymap.add { ["ctrl+alt+l"] = "doxoade:leap-toggle" }

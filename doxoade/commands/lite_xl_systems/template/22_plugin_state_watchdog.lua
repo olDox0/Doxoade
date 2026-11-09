@@ -128,16 +128,21 @@ core.set_active_view = function(view)
 end
 
 -- ── Sensor 3: Layout Spike ────────────────────────────────────────────────
+local _boot_time = os.clock()
 local _original_update_layout = Node.update_layout
 function Node:update_layout(...)
   local t0 = os.clock()
   local res = _original_update_layout(self, ...)
   local elapsed_ms = (os.clock() - t0) * 1000
-  if elapsed_ms > 5.0 then
+  
+  -- 🛡️ [FASE 5.2] Silencia spikes nos primeiros 3s (boot init)
+  if (os.clock() - _boot_time) > 3.0 and elapsed_ms > 16.0 then
+    local tb = debug.traceback("", 2) or ""
+    local blame = tb:match("\t([^%r\n]+)") or "unknown"
     record("LAYOUT_SPIKE", "update_layout_slow", {
       elapsed_ms = string.format("%.2f", elapsed_ms),
       node_type = tostring(self.type),
-    }, "")
+    }, blame)
   end
   return res
 end
@@ -180,3 +185,71 @@ if core.log then
 end
 
 rawset(_G, "_DOXOADE_PLUGIN_AUDIT", { flush = flush_to_disk, record = record })
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 🛡️ [FASE 5.1] SENSORES AVANÇADOS (detectam destruição de views e foco roubado)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── Sensor 5: Node:consume ───────────────────────────────────────────────
+local _original_consume = Node.consume
+if _original_consume and type(_original_consume) == "function" then
+  Node.consume = function(self, other)
+    local tb = debug.traceback("", 2) or ""
+    
+    -- 🛡️ [FASE 5.2-FIX] Filtro agressivo: só registra se for plugin externo
+    local is_legit = (
+      tb:find("core[/\\]node%.lua")      -- Lite XL interno
+      or tb:find("core[/\\]rootview")     -- RootView interno
+      or tb:find("core[/\\]init")         -- init do Lite XL
+      or tb:find("05_split_mover")        -- Doxoade split mover
+      or tb:find("09_panel_manager")      -- Doxoade panel manager
+      or tb:find("18_search_results_dock") -- Doxoade search dock
+    )
+    
+    if not is_legit then
+      local blame = tb:match("\t([^%r\n]+)") or "unknown"
+      record("ILLEGAL_CONSUME", "node_consume_outside_split_mover", {
+        node_type = tostring(self.type),
+        other_type = tostring(other and other.type or "nil"),
+      }, blame)
+    end
+    
+    return _original_consume(self, other)
+  end
+end
+
+-- ── Sensor 6: RootView:set_active_node (foco roubado) ────────────────────
+-- 🛡️ [FASE 5.2-FIX] Blindagem: verifica se a função existe antes de hookar
+if RootView.set_active_node and type(RootView.set_active_node) == "function" then
+  local _original_set_active_node = RootView.set_active_node
+  RootView.set_active_node = function(self, node, ...)
+    if node ~= nil then
+      local prev = self.active_node
+      if prev and prev ~= node then
+        local tb = debug.traceback("", 2) or ""
+        local blame = tb:match("\t([^\r\n]+)") or "unknown"
+        if not (blame:find("05_split_mover") or blame:find("21_selection")) then
+          record("NODE_FOCUS_CHANGE", "active_node_changed", {
+            from_type = tostring(prev.type),
+            to_type = tostring(node.type),
+          }, blame)
+        end
+      end
+    end
+    return _original_set_active_node(self, node, ...)
+  end
+end
+
+-- ── Sensor 7: DocView:on_doc_change (mudança de doc em view existente) ───
+-- Detecta se algum plugin tenta trocar o doc de uma view (o que causou o bug do 18_search)
+local DocView = pcall(require, "core.docview") and require("core.docview") or nil
+if DocView and DocView.on_doc_change then
+  local _original_on_doc_change = DocView.on_doc_change
+  DocView.on_doc_change = function(self, ...)
+    local blame = debug.traceback("", 2):match("\t([^\r\n]+)") or "unknown"
+    record("DOC_CHANGE", "docview_on_doc_change", {
+      new_doc = tostring(self.doc and self.doc.filename or "nil"),
+    }, blame)
+    return _original_on_doc_change(self, ...)
+  end
+end

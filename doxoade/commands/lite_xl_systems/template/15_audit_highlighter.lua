@@ -550,7 +550,7 @@ keymap.add {
   ["shift+f2"]         = "doxoade:prev-audit-incident",
   ["ctrl+h"]           = "doxoade:interactive-find-replace",
   ["ctrl+alt+k"]       = "doxoade:trigger-active-check",
-  ["ctrl+alt+shift+k"] = "doxoade:check-canary-test",
+--  ["ctrl+alt+shift+k"] = "doxoade:check-canary-test",
 }
 
 core.log("=== SOVEREIGN BOOT OK ===")

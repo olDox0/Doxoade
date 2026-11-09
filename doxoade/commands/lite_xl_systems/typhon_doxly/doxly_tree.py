@@ -350,6 +350,27 @@ DOXLY_TREE.failure(
     auto_fixable=True,
 )
 
+DOXLY_TREE.failure(
+    "config",
+    id="doxly.keymap.modifier_interfered",
+    name="Interferência ou Bloqueio nos Modifiers de Keymap",
+    severity="high",
+    symptoms=(
+        r"Ignorando: modifiers inconsistentes",
+        r"Debounce: ignorada chamada",
+        r"conflito\(s\) REAIS \(doxoade→doxoade\)",
+    ),
+    dev_comment=(
+        "O comando de split ou keymap foi suprimido por uma guarda de modifier "
+        "ou colidiu com outro registro concorrente no keymap.map."
+    ),
+    mitigation=(
+        "1. Remover checagens redundantes de keymap.modkeys dentro das actions do 05_split_mover. "
+        "2. Reduzir debounce para <= 0.15s. "
+        "3. Desambiguar atalhos duplicados entre 05, 07, 18 e 100."
+    ),
+    auto_fixable=True,
+)
 
 # --- 4. Runtime, Corrotinas & Processo ---
 DOXLY_TREE.failure(
