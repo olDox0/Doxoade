@@ -48,28 +48,6 @@
 /* Índice do Import Directory no DataDirectory */
 #define DIR_IMPORT         1
 
-/* Copia até `dst_size-1` chars, NUL-terminando. */
-static void safe_strcpy(char *dst, const char *src, size_t dst_size)
-{
-    if (dst == NULL || dst_size == 0) return;
-    if (src == NULL) { dst[0] = '\0'; return; }
-    size_t n = strlen(src);
-    if (n >= dst_size) n = dst_size - 1;
-    memcpy(dst, src, n);
-    dst[n] = '\0';
-}
-
-/* Copia nome de seção (8 bytes, possivelmente sem NUL) para buf[9]. */
-static void copy_section_name(const uint8_t *raw8, char *buf9)
-{
-    int i;
-    for (i = 0; i < 8; i++) {
-        if (raw8[i] == 0) break;
-        buf9[i] = (char)raw8[i];
-    }
-    buf9[i] = '\0';
-}
-
 /* Converte RVA para offset de arquivo, consultando as seções.
  * Retorna -1 se RVA não cair em nenhuma seção. */
 static int rva_to_offset(const PreIR *ir, uint32_t rva, uint32_t *out_off)
@@ -107,6 +85,103 @@ static int read_cstr(const FileReader *fr, size_t off,
         if (c == 0) return 0;
     }
     return -1;
+}
+
+static int cmp_symbol_va(const void *a, const void *b)
+{
+    const SymbolEntry *sa = (const SymbolEntry *)a;
+    const SymbolEntry *sb = (const SymbolEntry *)b;
+    if (sa->va < sb->va) return -1;
+    if (sa->va > sb->va) return 1;
+    return 0;
+}
+
+/* Copia até `dst_size-1` chars, NUL-terminando. */
+static void safe_strcpy(char *dst, const char *src, size_t dst_size)
+{
+    if (dst == NULL || dst_size == 0) return;
+    if (src == NULL) { dst[0] = '\0'; return; }
+    size_t n = strlen(src);
+    if (n >= dst_size) n = dst_size - 1;
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+}
+
+
+static int parse_symbols(const FileReader *fr, PreIR *ir,
+                         uint32_t ptr_symtab, uint32_t num_syms,
+                         size_t strtab_off, uint32_t strtab_size,
+                         char *err_buf, size_t err_buf_size)
+{
+    ir->symbols = NULL;
+    ir->symbol_count = 0;
+    if (ptr_symtab == 0 || num_syms == 0) return 0;
+
+    uint32_t real_count = 0;
+    uint32_t i = 0;
+    while (i < num_syms) {
+        size_t off = (size_t)ptr_symtab + (size_t)i * 18;
+        uint8_t num_aux = 0;
+        if (file_reader_u8(fr, off + 17, &num_aux) != 0) break;
+        real_count++;
+        i += 1 + num_aux;
+    }
+    if (real_count == 0) return 0;
+
+    SymbolEntry *syms = (SymbolEntry *)calloc(real_count, sizeof(SymbolEntry));
+    if (syms == NULL) {
+        safe_strcpy(err_buf, "calloc symbols falhou", err_buf_size);
+        return -1;
+    }
+
+    i = 0;
+    uint32_t written = 0;
+    while (i < num_syms) {
+        size_t off = (size_t)ptr_symtab + (size_t)i * 18;
+        uint32_t name1 = 0, name2 = 0;
+        if (file_reader_u32(fr, off,     &name1) != 0) break;
+        if (file_reader_u32(fr, off + 4, &name2) != 0) break;
+
+        uint32_t value = 0;
+        uint16_t section_raw = 0;
+        uint8_t  storage_class = 0, num_aux = 0;
+        file_reader_u32(fr, off + 8,  &value);
+        file_reader_u16(fr, off + 12, &section_raw);
+        file_reader_u8 (fr, off + 16, &storage_class);
+        file_reader_u8 (fr, off + 17, &num_aux);
+        int16_t section = (int16_t)section_raw;
+
+        char namebuf[256] = "";
+        if (name1 == 0 && name2 != 0) {
+            if (strtab_size > 4 && name2 < strtab_size) {
+                read_cstr(fr, strtab_off + name2, namebuf, sizeof(namebuf));
+            }
+        } else {
+            memcpy(namebuf, &name1, 4);
+            memcpy(namebuf + 4, &name2, 4);
+            namebuf[8] = '\0';
+        }
+
+        int is_section_sym = (storage_class == 3 && value == 0 && namebuf[0] == '.');
+        if (section >= 1 && section <= (int)ir->section_count &&
+            storage_class != 0 &&
+            namebuf[0] != '\0' && !is_section_sym) {
+            const SectionEntry *s = &ir->sections[section - 1];
+            uint64_t va = ir->image_base + s->va + value;
+            char *dup = strdup(namebuf);
+            if (dup != NULL) {
+                syms[written].va = va;
+                syms[written].name = dup;
+                written++;
+            }
+        }
+        i += 1 + num_aux;
+    }
+
+    qsort(syms, written, sizeof(SymbolEntry), cmp_symbol_va);
+    ir->symbols = syms;
+    ir->symbol_count = written;
+    return 0;
 }
 
 /* Resolve nome de seção que começa com "/N" via String Table.
@@ -301,6 +376,17 @@ static int parse_imports(const FileReader *fr, PreIR *ir,
     return 0;
 }
 
+/* Copia nome de seção (8 bytes, possivelmente sem NUL) para buf[9]. */
+static void copy_section_name(const uint8_t *raw8, char *buf9)
+{
+    int i;
+    for (i = 0; i < 8; i++) {
+        if (raw8[i] == 0) break;
+        buf9[i] = (char)raw8[i];
+    }
+    buf9[i] = '\0';
+}
+
 int pe_parse(const FileReader *fr, PreIR *out,
              char *err_buf, size_t err_buf_size)
 {
@@ -380,6 +466,13 @@ int pe_parse(const FileReader *fr, PreIR *out,
 
     out->entry_va = entry_rva;
 
+    if (opt_magic == OPT_MAGIC_PE32) {
+        uint32_t ib;
+        if (file_reader_u32(fr, opt_off + 28, &ib) == 0) out->image_base = ib;
+    } else {
+        file_reader_u64(fr, opt_off + 24, &out->image_base);
+    }
+
     /* 5. String Table: começa após a Symbol Table.
      * Symbol Table começa em PointerToSymbolTable e tem
      * NumberOfSymbols entradas de 18 bytes cada. */
@@ -446,6 +539,9 @@ int pe_parse(const FileReader *fr, PreIR *out,
     }
     out->sections = secs;
     out->section_count = num_sections;
+
+    parse_symbols(fr, out, ptr_symtab, num_syms,
+                  strtab_off, strtab_size, err_buf, err_buf_size);
 
     /* 7. Imports */
     if (parse_imports(fr, out, import_rva, import_size, err_buf, err_buf_size) != 0) {

@@ -106,10 +106,21 @@ sources = [
     "doxoade/tools/rev_eng/src/pe_parser.c",
     "doxoade/tools/rev_eng/src/hex_dump.c",
     "doxoade/tools/rev_eng/src/string_scan.c",
-    "doxoade/tools/rev_eng/src/pre_ir.c"
+    "doxoade/tools/rev_eng/src/pre_ir.c",
+    "doxoade/tools/rev_eng/src/decoder.c",
+    "doxoade/tools/rev_eng/src/disasm.c",
+    "doxoade/tools/rev_eng/src/cfg.c",
+    "doxoade/tools/rev_eng/src/decoder_backend.c",
+    "doxoade/tools/rev_eng/src/doctor.c"
 ]
 output = "doxoade/tools/rev_eng/bin/doxreveng.exe"
-flags = ["-Idoxoade/tools/rev_eng/include", "-DDOXREVENG_DEBUG_IMPORTS"]
+flags = [
+    "-Idoxoade/tools/rev_eng/include",
+    "-Ithirdparty/capstone-src/install/include",
+    "-DHAVE_CAPSTONE",
+    "-Lthirdparty/capstone-src/install/lib",
+    "-lcapstone"
+]
 opt = "O2"
 soteria = false
 
