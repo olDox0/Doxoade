@@ -1,10 +1,10 @@
 -- doxoade/commands/lite_xl_systems/template/01_ipc_dispatcher.lua
 --[[
-  🪽 DOXOADE IPC DISPATCHER & SOVEREIGN SESSION MANAGER (V2.0)
-  - Persistência e Restauração Inteligente do Último Projeto Ativo.
-  - Detecção de Inicialização via Barra de Tarefas (#ARGS == 0).
-  - Fila IPC e Restauração Precisa de Splits, Abas e Cursores.
+  🪽 DOXOADE IPC DISPATCHER & SOVEREIGN SESSION MANAGER (V2.1)
+  - Persistência blindada e Restauração da Sessão (Treeview + Abas).
+  - Filtro de argumentos CLI ignora corretamente o --userdir.
 ]]
+
 local core = require "core"
 local DocView = require "core.docview"
 
@@ -18,20 +18,7 @@ local ipc_processing_file = user_dir .. sep .. ".ipc_processing"
 local session_file = doxoade_dir .. sep .. "sovereign_session.lua"
 local last_proj_file = doxoade_dir .. sep .. "last_project.txt"
 
-local function safe_restore_session(session_data)
-  for _, filepath in ipairs(session_data.open_files or {}) do
-    local ok, err = pcall(function()
-      if system.get_file_info(filepath) then  -- ← verificação antes de abrir
-        core.open_doc(filepath)
-      else
-        core.log("⚠️ [SESSION] Arquivo não encontrado, ignorando: " .. filepath)
-      end
-    end)
-    if not ok then
-      core.log("⚠️ [SESSION] Falha ao restaurar: " .. tostring(err))
-    end
-  end
-end
+local _can_save_session = false
 
 -- =============================================================================
 -- 1. AUXILIARES DE NAVEGAÇÃO DE NÓS (LEAVES)
@@ -49,142 +36,103 @@ local function get_doc_leaves(n, list)
 end
 
 -- =============================================================================
--- 2. GRAVAÇÃO DA SESSÃO SOBERANA (Projetos + Abas + Splits + Posições)
+-- 2. GRAVAÇÃO DA SESSÃO SOBERANA
 -- =============================================================================
 local function save_sovereign_session()
+  if not _can_save_session then return end
   if not core.root_view or not core.root_view.root_node then return end
 
   local project_paths = {}
+  local user_norm = (system.absolute_path(USERDIR) or USERDIR):gsub("\\", "/"):lower():gsub("/+$", "")
   if core.project_directories then
     for _, p in ipairs(core.project_directories) do
       local ppath = type(p) == "table" and (p.path or p.name) or p
       if ppath and type(ppath) == "string" and ppath ~= "" then
-        -- [FASE 14] Filtra paths inválidos (não-busca, não-canonical, não-nil)
         local is_busca = ppath:find("^%[Busca%]") ~= nil
-        local is_canonical = ppath:match("/canonical$") ~= nil
-                  or ppath:match("/canonical%.") ~= nil
-                  or ppath:match("/canonical/") ~= nil
-                  or ppath:lower() == "canonical"
-        local is_user_dir = ppath:find("/%.config/lite%-xl") ~= nil
-        if not is_busca and not is_canonical and not is_user_dir then
-          local abs = system.absolute_path(ppath) or ppath
-          local clean = abs:gsub("[/\\]+$", ""):gsub("\\", "/")
+        local abs = system.absolute_path(ppath) or ppath
+        local clean = abs:gsub("[/\\]+$", ""):gsub("\\", "/")
+        local p_norm = clean:lower()
+        local is_userdir = (p_norm == user_norm) or (p_norm:sub(1, #user_norm + 1) == user_norm .. "/")
+        if not is_busca and not is_userdir then
           table.insert(project_paths, clean)
         end
       end
     end
   end
-
-  -- [FASE 14] Se nenhum projeto válido, tenta project_dir
   if #project_paths == 0 and core.project_dir then
-    local raw = core.project_dir
-    local is_invalid = raw:find("/canonical$") ~= nil or raw:match("/%.") ~= nil
-    if not is_invalid then
-      local abs = system.absolute_path(raw) or raw
-      table.insert(project_paths, abs:gsub("[/\\]+$", ""):gsub("\\", "/"))
-    end
+    local abs = system.absolute_path(core.project_dir) or core.project_dir
+    local clean = abs:gsub("[/\\]+$", ""):gsub("\\", "/")
+    local rn = clean:lower()
+    local is_userdir = (rn == user_norm) or (rn:sub(1, #user_norm + 1) == user_norm .. "/")
+    if not is_userdir then table.insert(project_paths, clean) end
   end
 
-  -- [FASE 14] Filtrar arquivos de sessão também
   local leaves = get_doc_leaves(core.root_view.root_node)
   local active_node = core.root_view:get_active_node()
   local panels = {}
   local active_panel_idx = 1
-
   for idx, node in ipairs(leaves) do
-    if node == active_node then
-      active_panel_idx = idx
-    end
+    if node == active_node then active_panel_idx = idx end
     local panel_data = { files = {}, active_file = nil }
     for _, view in ipairs(node.views or {}) do
       if view and view.doc and view.doc.filename then
         local abs_fn = system.absolute_path(view.doc.filename) or view.doc.filename
         local fn_lower = tostring(abs_fn):lower()
-        -- [FASE 14] Filtrar buffers virtuais e paths inválidos
         local is_busca = fn_lower:find("%[busca%]") ~= nil
         local is_canonical = fn_lower:match("/canonical$") ~= nil
-        local is_valid = not is_busca and not is_canonical
-
-        if is_valid then
+        if not is_busca and not is_canonical then
           local line, col = 1, 1
-          if view.doc.get_selection then
-            line, col = view.doc:get_selection(true)
-          end
-          table.insert(panel_data.files, {
-            filename = abs_fn:gsub("\\", "/"),
-            line = line,
-            col = col,
-          })
-          if node.active_view == view then
-            panel_data.active_file = abs_fn:gsub("\\", "/")
-          end
+          if view.doc.get_selection then line, col = view.doc:get_selection(true) end
+          table.insert(panel_data.files, { filename = abs_fn:gsub("\\", "/"), line = line, col = col })
+          if node.active_view == view then panel_data.active_file = abs_fn:gsub("\\", "/") end
         end
       end
     end
-    if #panel_data.files > 0 then
-      table.insert(panels, panel_data)
-    end
+    if #panel_data.files > 0 then table.insert(panels, panel_data) end
   end
 
-  -- 3. Gravação Atômica em Arquivo
   pcall(function()
     local f = io.open(session_file, "w")
     if f then
       f:write("return {\n")
       f:write(string.format("  active_panel_idx = %d,\n", active_panel_idx))
-
-      -- Grava a lista de projetos raiz
       f:write("  projects = {\n")
-      for _, p in ipairs(project_paths) do
-        f:write(string.format("    %q,\n", p))
-      end
-      f:write("  },\n")
-
-      -- Grava os painéis e arquivos
-      f:write("  panels = {\n")
+      for _, p in ipairs(project_paths) do f:write(string.format("    %q,\n", p)) end
+      f:write("  },\n  panels = {\n")
       for _, p in ipairs(panels) do
         f:write("    {\n")
-        f:write(string.format("      active_file = %q,\n", tostring(p.active_file or "")))
-        f:write("      files = {\n")
-        for _, file_info in ipairs(p.files) do
-          f:write(string.format("        { filename = %q, line = %d, col = %d },\n",
-            file_info.filename, file_info.line, file_info.col))
+        f:write(string.format("      active_file = %q,\n      files = {\n", tostring(p.active_file or "")))
+        for _, fi in ipairs(p.files) do
+          f:write(string.format("        { filename = %q, line = %d, col = %d },\n", fi.filename, fi.line, fi.col))
         end
-        f:write("      }\n")
-        f:write("    },\n")
+        f:write("      }\n    },\n")
       end
-      f:write("  }\n")
-      f:write("}\n")
-      f:flush()
-      f:close()
+      f:write("  }\n}\n")
+      f:flush(); f:close()
     end
-
-    -- Grava o projeto principal em last_project.txt para acesso rápido
     if #project_paths > 0 then
       local lf = io.open(last_proj_file, "w")
-      if lf then
-        lf:write(project_paths[1] .. "\n")
-        lf:flush()
-        lf:close()
-      end
+      if lf then lf:write(project_paths[1] .. "\n"); lf:flush(); lf:close() end
     end
   end)
 end
 
 -- =============================================================================
--- 3. RESTAURAÇÃO DA SESSÃO E PROJETO NO BOOT (Com Deduplicação de Abas)
+-- 3. RESTAURAÇÃO DA SESSÃO
 -- =============================================================================
 local _session_restored = false
 
 local function has_cli_project_argument()
   local args = rawget(_G, "ARGS") or {}
-  for _, arg in ipairs(args) do
-    if type(arg) == "string" then
-      -- [FASE 15] Ignora flags e o comando "canonical"
-      if arg:match("^%-%-") or arg:match("^%-") then
-        -- flag, ignorar
+  local skip_next = false
+  for i, arg in ipairs(args) do
+    if i > 1 and type(arg) == "string" then   -- ARGS[1] é o executável
+      if skip_next then
+        skip_next = false
+      elseif arg == "--userdir" or arg == "-u" then
+        skip_next = true
+      elseif arg:match("^%-%-") or arg:match("^%-") then
       elseif arg:lower() == "canonical" then
-        -- [FASE 15] Comando canônico NÃO é projeto. Ignora.
       else
         local ok, info = pcall(system.get_file_info, arg)
         if ok and info then return true end
@@ -204,32 +152,28 @@ local function restore_sovereign_session()
   local ok, session = pcall(dofile, session_file)
   if not ok or type(session) ~= "table" then return end
 
-  -- 1. RESTAURAÇÃO DE PROJETO (Sem recarregar se já for o mesmo)
   if not has_cli_project_argument() and session.projects and #session.projects > 0 then
-    local primary = session.projects[1]
-    local pinfo = system.get_file_info(primary)
-    if pinfo and pinfo.type == "dir" then
-      local current_primary = core.project_directories and core.project_directories[1]
-      local current_str = type(current_primary) == "table" and (current_primary.path or current_primary.name) or current_primary
-      current_str = current_str and (system.absolute_path(current_str) or current_str):gsub("[/\\]+$", ""):gsub("\\", "/") or ""
-      
-      if current_str:lower() ~= primary:lower() then
-        if core.set_project_dir then
-          pcall(core.set_project_dir, primary)
-        end
-      end
-
-      -- Adiciona os demais projetos secundários se houver
-      for i = 2, #session.projects do
-        local subp = session.projects[i]
-        if system.get_file_info(subp) and core.add_project_directory then
-          pcall(core.add_project_directory, subp)
+    local user_norm = (system.absolute_path(USERDIR) or USERDIR):gsub("\\", "/"):lower():gsub("/+$", "")
+    for _, proj in ipairs(session.projects) do
+      local pinfo = system.get_file_info(proj)
+      if pinfo and pinfo.type == "dir" then
+        local p_norm = (system.absolute_path(proj) or proj):gsub("\\", "/"):lower():gsub("/+$", "")
+        local is_userdir = (p_norm == user_norm) or (p_norm:sub(1, #user_norm + 1) == user_norm .. "/")
+        if not is_userdir then
+          local already = false
+          for _, existing in ipairs(core.project_directories or {}) do
+            local ep = type(existing) == "table" and (existing.path or existing.name) or existing
+            local en = (system.absolute_path(ep) or ep):gsub("\\", "/"):lower():gsub("/+$", "")
+            if en == p_norm then already = true; break end
+          end
+          if not already and core.add_project_directory then
+            pcall(core.add_project_directory, proj)
+          end
         end
       end
     end
   end
 
-  -- 2. RESTAURAÇÃO DE PAINÉIS E ARQUIVOS (Deduplicação Atômica)
   if not session.panels or #session.panels == 0 then return end
 
   local primary_node = (function()
@@ -237,7 +181,6 @@ local function restore_sovereign_session()
     return leaves[1] or core.root_view.root_node:get_primary_node()
   end)()
 
-  -- Em 01_ipc_dispatcher.lua (função restore_sovereign_session):
   for p_idx, panel_data in ipairs(session.panels) do
     local valid_files = {}
     for _, f_info in ipairs(panel_data.files or {}) do
@@ -254,7 +197,6 @@ local function restore_sovereign_session()
     end
 
     if #valid_files > 0 then
-      -- 🛡️ DECLARAÇÃO LOCAL OBRIGATÓRIA (Strict-Safe):
       local target_node = nil
       if p_idx == 1 then
         target_node = primary_node
@@ -266,7 +208,6 @@ local function restore_sovereign_session()
       end
 
       if target_node then
-        -- 🛑 MAPA DE DEDUPLICAÇÃO: Mapeia todas as abas que JÁ estão abertas no painel
         local existing_map = {}
         for _, v in ipairs(target_node.views or {}) do
           if v and v.doc and v.doc.filename then
@@ -280,7 +221,6 @@ local function restore_sovereign_session()
           local clean_fn = tostring(f_info.filename):gsub("\\", "/"):lower()
           local view_to_use = existing_map[clean_fn]
 
-          -- Se a aba NÃO existe ainda no painel, abre e adiciona
           if not view_to_use then
             local doc = core.open_doc(f_info.filename)
             if doc then
@@ -315,12 +255,12 @@ local function restore_sovereign_session()
 end
 
 -- =============================================================================
--- 4. DESPACHANTE IPC (Abertura Remota sem Nova Janela)
+-- 4. DESPACHANTE IPC
 -- =============================================================================
 local function process_ipc_line(line)
   if not line or line == "" then return end
   line = line:gsub("^%s*", ""):gsub("%s*$", "")
-  line = line:gsub('^["\']', ''):gsub('["\']$', '') -- Limpa aspas envolventes
+  line = line:gsub('^["\']', ''):gsub('["\']$', '')
 
   if line == "__DOXOADE_GRACEFUL_QUIT__" then
     if core.quit then
@@ -330,7 +270,6 @@ local function process_ipc_line(line)
     return
   end
 
-  -- 🧭 DECODIFICADOR DE COORDENADAS (Suporte a "caminho:linha:coluna" ou "caminho:linha")
   local target_fn = line
   local target_line = nil
   local target_col = 1
@@ -349,7 +288,6 @@ local function process_ipc_line(line)
     end
   end
 
-  -- Se for diretório, anexa à árvore de projetos
   local info = system.get_file_info(target_fn)
   if info and info.type == "dir" then
     if core.add_project_directory then
@@ -360,7 +298,6 @@ local function process_ipc_line(line)
     return
   end
 
-  -- Abre o documento e salta para a coordenada
   local doc = core.open_doc(target_fn)
   if doc then
     core.root_view:open_doc(doc)
@@ -385,17 +322,14 @@ end
 -- 5. THREADS DE SESSÃO E MONITORAMENTO
 -- =============================================================================
 core.add_thread(function()
-  -- Restauração no boot
   coroutine.yield(0.05)
   restore_sovereign_session()
 
-  -- Loop contínuo: Processamento de IPC e Auto-Save periódico
   local save_timer = 0
   while true do
     coroutine.yield(0.25)
     save_timer = save_timer + 0.25
 
-    -- Processa fila IPC
     local info = system.get_file_info(ipc_queue_file)
     if info and (info.size or 0) > 0 then
       pcall(function()
@@ -411,17 +345,24 @@ core.add_thread(function()
       end)
     end
 
-    -- Auto-save de estado a cada 4 segundos
-    if save_timer >= 4.0 then
+    if save_timer >= 2.0 then
       save_timer = 0
-      save_sovereign_session() -- 👈 RE-SERIALIZA E POLUI A ÁRVORE
+      save_sovereign_session() 
     end
   end
 end)
 
+local orig_add_project = core.add_project_directory
+if orig_add_project then
+  core.add_project_directory = function(...)
+    local res = orig_add_project(...)
+    pcall(save_sovereign_session)
+    return res
+  end
+end
+
 -- =============================================================================
--- 📂 SINGLE INSTANCE — Processamento de Argumentos CLI (ARGS) [V2.1 Blindado]
--- Filtra o próprio executável, binários e adia processamento (Lazy Load).
+-- 📂 SINGLE INSTANCE — Processamento de Argumentos CLI (ARGS) [V2.1]
 -- =============================================================================
 local _cli_args_processed = false
 local _BINARY_EXTS = {
@@ -430,7 +371,6 @@ local _BINARY_EXTS = {
     ["dat"] = true, ["db"] = true, ["sqlite"] = true, ["sqlite3"] = true,
 }
 
--- 🛡️ [FASE 1.5B-FIX] strict.lua exige rawset para _G
 rawset(_G, "is_binary_path", function(path)
     if not path then return true end
     local p = tostring(path):lower()
@@ -439,9 +379,6 @@ rawset(_G, "is_binary_path", function(path)
     if ext and _BINARY_EXTS[ext] then return true end
     return false
 end)
-
--- 🛡️ [FASE 1.5] Hard Lock: processa argumentos de CLI apenas UMA VEZ por sessão
-local _cli_args_processed = false
 
 local function process_cli_arguments()
     if _cli_args_processed then return end
@@ -452,34 +389,31 @@ local function process_cli_arguments()
 
     local files_to_open = {}
     local dirs_to_add = {}
-
-    -- ⚠️ Normaliza o USERDIR para comparação
     local user_dir_normalized = (USERDIR or "."):gsub("\\", "/"):lower():gsub("/+$", "")
+    local skip_next = false
 
-    for _, arg in ipairs(args) do
-        if type(arg) == "string"
-           and not arg:match("^%-%-")
-           and not arg:match("^%-")
-           and arg:lower() ~= "canonical"
-           and not _G.is_binary_path(arg) then
-            local ok_info, info = pcall(system.get_file_info, arg)
-            if ok_info and info then
-                -- ⚠️ Ignora o USERDIR como projeto
-                local arg_normalized = (system.absolute_path(arg) or arg):gsub("\\", "/"):lower():gsub("/+$", "")
-                if arg_normalized == user_dir_normalized 
-                   or arg_normalized:sub(1, #user_dir_normalized + 1) == user_dir_normalized .. "/" then
-                    if core.log then
-                      local _last_ignored = rawget(_G, "_DOXOADE_LAST_IGNORED_USERDIR")
-                      local now = os.clock()
-                      if not _last_ignored or (now - _last_ignored) > 2.0 then
-                        rawset(_G, "_DOXOADE_LAST_IGNORED_USERDIR", now)
-                        core.log("⚠️ [CLI] Ignorando USERDIR como projeto: " .. arg)
-                      end
+    for i, arg in ipairs(args) do
+        -- ARGS[1] é o executável — nunca é um projeto
+        if i > 1 and type(arg) == "string" then
+            if skip_next then
+                skip_next = false
+            elseif arg == "--userdir" or arg == "-u" then
+                skip_next = true
+            elseif not arg:match("^%-%-")
+               and not arg:match("^%-")
+               and arg:lower() ~= "canonical"
+               and not _G.is_binary_path(arg) then
+                local ok_info, info = pcall(system.get_file_info, arg)
+                if ok_info and info then
+                    local arg_normalized = (system.absolute_path(arg) or arg):gsub("\\", "/"):lower():gsub("/+$", "")
+                    if arg_normalized == user_dir_normalized 
+                       or arg_normalized:sub(1, #user_dir_normalized + 1) == user_dir_normalized .. "/" then
+                        -- Ignora o USERDIR como projeto
+                    elseif info.type == "file" then
+                        table.insert(files_to_open, arg)
+                    elseif info.type == "dir" then
+                        table.insert(dirs_to_add, arg)
                     end
-                elseif info.type == "file" then
-                    table.insert(files_to_open, arg)
-                elseif info.type == "dir" then
-                    table.insert(dirs_to_add, arg)
                 end
             end
         end
@@ -488,9 +422,6 @@ local function process_cli_arguments()
     for _, dir_path in ipairs(dirs_to_add) do
         if core.add_project_directory then
             pcall(core.add_project_directory, dir_path)
-            if core.log then
-                core.log("📂 [CLI] Projeto anexado via argumento: " .. dir_path)
-            end
         end
     end
 
@@ -498,9 +429,6 @@ local function process_cli_arguments()
         local ok_open, doc = pcall(core.open_doc, file_path)
         if ok_open and doc then
             pcall(core.root_view.open_doc, core.root_view, doc)
-            if core.log then
-                core.log("📄 [CLI] Arquivo aberto via argumento: " .. file_path)
-            end
         end
     end
 
@@ -509,14 +437,13 @@ local function process_cli_arguments()
     end
 end
 
--- ⏱️ LAZY LOAD: Processa argumentos CLI SOMENTE após o boot estabilizar (1.5s)
 core.add_thread(function()
     coroutine.yield(1.5)
     pcall(process_cli_arguments)
 end)
 
 -- =============================================================================
--- 🔄 IPC QUEUE MONITOR (Lê .ipc_queue para instância viva receber novos arquivos)
+-- 🔄 IPC QUEUE MONITOR
 -- =============================================================================
 core.add_thread(function()
     while true do
@@ -536,11 +463,9 @@ core.add_thread(function()
 
             if #lines == 0 then return end
 
-            -- Limpa a fila após leitura
             local fw = io.open(ipc_file, "w")
             if fw then fw:close() end
 
-            -- Processa cada linha
             for _, line in ipairs(lines) do
                 process_ipc_line(line)
             end
@@ -559,7 +484,7 @@ local _hades_last_save_time = 0
 local function hades_autosave_if_changed()
     if _hades_save_in_progress then return end
     local now = os.clock()
-    if (now - _hades_last_save_time) < 3.0 then return end  -- Cooldown de 3s
+    if (now - _hades_last_save_time) < 3.0 then return end
 
     pcall(function()
         local sig = {}
@@ -581,31 +506,20 @@ local function hades_autosave_if_changed()
     end)
 end
 
--- [FASE 13] Salva estado APENAS após boot completo
 local _boot_complete = false
 core.add_thread(function()
-  coroutine.yield(3.0)  -- Aguarda 3s para boot completo
+  coroutine.yield(3.0)
   _boot_complete = true
+  _can_save_session = true -- 🛡️ Libera o save aqui
   if core.log then
-    core.log("💾 [SESSION] Boot completo. Estado será salvo em 15s.")
+    core.log("💾 [SESSION] Boot completo. Estado será salvo.")
   end
 end)
 
-
--- Save-on-Quit com guarda
-
--- Hook de quit: só salva se boot completo
 local original_core_quit = core.quit
 core.quit = function(...)
   if _boot_complete then
     pcall(save_sovereign_session)
-    if core.log then
-      core.log("💾 [SESSION] Estado salvo com sucesso.")
-    end
-  else
-    if core.log then
-      core.log("⚠️ [SESSION] Boot incompleto. Estado NÃO será salvo (evita corrupção).")
-    end
   end
   if original_core_quit then
     return original_core_quit(...)
@@ -622,20 +536,18 @@ pcall(function()
     end
 end)
 
--- Auto-save com intervalo maior (30s) para evitar I/O excessivo
 core.add_thread(function()
-    coroutine.yield(5.0)  -- Delay inicial maior
+    coroutine.yield(5.0)
     while true do
-        coroutine.yield(30)  -- 30s entre verificações
+        coroutine.yield(30)
         hades_autosave_if_changed()
     end
 end)
 
 if core.log then
-    core.log("💾 [HADES LOCK] Auto-save de sessão ativo (on-quit + 30s + anti-loop).")
+    core.log("💾 [HADES LOCK] Auto-save de sessão ativo.")
 end
 
--- 4. Save debounced ao abrir documentos
 pcall(function()
     local original_open_doc = core.open_doc
     core.open_doc = function(...)
@@ -649,8 +561,3 @@ pcall(function()
         return doc
     end
 end)
-
-if core.log then
-    core.log("💾 [HADES LOCK] Auto-save de sessão ativo (on-quit + 15s + debounced).")
-end
-

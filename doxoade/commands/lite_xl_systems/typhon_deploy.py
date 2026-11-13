@@ -91,6 +91,107 @@ class TyphonDeployEngine:
     """Motor de Deploy com isolamento de modos: PRODUCTION, SANDBOX, TEST."""
 
     @classmethod
+    def reset_mode(
+        cls,
+        mode: DeployMode,
+        hard: bool = False,
+        keep_backups: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        🧹 Reseta o ambiente de deploy para estado limpo.
+        - hard=True: apaga também init.lua (força redeploy do zero).
+        - keep_backups: preserva .doxoade/backups/ (rollback safety).
+        Não toca em python_path.txt (âncora do venv).
+        """
+        import tempfile
+        deploy_dir = cls._get_deploy_dir(mode)
+        report: Dict[str, Any] = {
+            "mode": mode,
+            "dir": str(deploy_dir),
+            "removed": [],
+            "kept": [],
+            "errors": [],
+        }
+
+        # 1. Matar instância viva desse modo (por PID file)
+        try:
+            cls.exorcise_mode_instance(mode)
+        except Exception as e:
+            report["errors"].append(f"exorcise: {e}")
+
+        if not deploy_dir.exists():
+            report["kept"].append("dir_not_found")
+            return report
+
+        # 2. Stash de backups se solicitado
+        backups_dir = deploy_dir / ".doxoade" / "backups"
+        backups_stash = None
+        if keep_backups and backups_dir.exists():
+            try:
+                backups_stash = Path(tempfile.mkdtemp(prefix=f"dox_bkp_{mode}_"))
+                shutil.copytree(backups_dir, backups_stash / "backups")
+                report["kept"].append("backups")
+            except Exception as e:
+                report["errors"].append(f"backup_stash: {e}")
+                backups_stash = None
+
+        # 3. Lista de alvos (preserva python_path.txt e init.lua se !hard)
+        items_to_nuke = [
+            "session.lua", "session.json", "sovereign_session.lua",
+            "user_settings.lua", "user_settings.lua.DISABLED",
+            "session_log.txt", "error.txt", "font_cache.lua",
+            "plugins_DISABLED", "workspace",
+            f".{mode}.pid", ".deploy.lock", ".ipc_queue", ".ipc_processing",
+            ".doxoade/diagnostics", ".doxoade/api_guard",
+            ".doxoade/canvas_cache", ".doxoade/terminal_temp",
+            ".doxoade/canonical_live", ".doxoade/shadow_harness",
+            ".doxoade/staging", ".doxoade/sandbox",
+        ]
+        if hard:
+            items_to_nuke.extend([
+                "init.lua", "init.lua.stable", "init.lua.broken", "init.lua.plain",
+            ])
+        else:
+            report["kept"].append("init.lua (soft reset)")
+        if not keep_backups:
+            items_to_nuke.append(".doxoade/backups")
+
+        # Globs de PTY IPCs
+        try:
+            for pty_dir in deploy_dir.glob(".doxoade/terminal_pty_ipc*"):
+                try:
+                    items_to_nuke.append(str(pty_dir.relative_to(deploy_dir)))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        for rel in items_to_nuke:
+            target = deploy_dir / rel
+            if not target.exists():
+                continue
+            try:
+                if target.is_dir():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+                report["removed"].append(rel)
+            except Exception as e:
+                report["errors"].append(f"{rel}: {e}")
+
+        # 4. Restaurar backups
+        if backups_stash and (backups_stash / "backups").exists():
+            try:
+                backups_dir.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(backups_stash / "backups", backups_dir, dirs_exist_ok=True)
+            except Exception as e:
+                report["errors"].append(f"backup_restore: {e}")
+            finally:
+                shutil.rmtree(backups_stash, ignore_errors=True)
+
+        return report
+
+    @classmethod
     def _install_assets(cls, deploy_dir: Path) -> Tuple[bool, str]:
         """Copia assets do projeto fonte (logo, icons, etc.) para o USERDIR de deploy."""
         try:
@@ -277,7 +378,8 @@ class TyphonDeployEngine:
     def rollback_canonical(cls, target_backup: Optional[Path] = None) -> Tuple[bool, str]:
         """Rollback reversível: backup do estado atual ANTES de restaurar."""
         from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
-        canonical_init = LiteXLPaths.get_init_lua_path()
+        canonical_init = LiteXLPaths.get_user_dir() / ".doxoade" / "canonical_live" / "init.lua"
+        canonical_init.parent.mkdir(parents=True, exist_ok=True)
         backups = cls.list_canonical_backups()
         if not backups:
             return False, "Nenhum backup canonical disponível."
@@ -397,13 +499,23 @@ class TyphonDeployEngine:
         except Exception as e:
             return False, f"Falha ao promover para test: {e}"
 
-        # D2: propagar para production
-        canonical_init = LiteXLPaths.get_init_lua_path()
+        # 🏛️ 1. Atualiza a raiz (fallback para quem abrir o lite-xl.exe puro)
+        canonical_root_init = LiteXLPaths.get_init_lua_path()
         try:
-            shutil.copy2(staging_init, canonical_init)
+            shutil.copy2(staging_init, canonical_root_init)
         except Exception as e:
-            return False, f"Falha ao promover para production: {e}"
-
+            return False, f"Falha ao promover para root: {e}"
+            
+        # 🏛️ 2. Atualiza o COFRE ISOLADO (Produção Real)
+        canonical_live_dir = LiteXLPaths.get_user_dir() / ".doxoade" / "canonical_live"
+        canonical_live_dir.mkdir(parents=True, exist_ok=True)
+        canonical_live_init = canonical_live_dir / "init.lua"
+        
+        try:
+            shutil.copy2(staging_init, canonical_live_init)
+        except Exception as e:
+            return False, f"Falha ao promover para canonical_live: {e}"
+            
         cls.write_status_cache()   # ← atualizar HUD imediatamente
         bkp_name = bkp_path.name if bkp_path else "(sem backup — init não existia)"
         return True, (
@@ -487,7 +599,7 @@ class TyphonDeployEngine:
                 pass
 
     @classmethod
-    def sterilize_environment(cls, deploy_dir: Path) -> None:
+    def sterilize_environment(cls, deploy_dir: Path, keep_session: bool = True) -> None:
         print(f"\n{Fore.CYAN}{Style.BRIGHT}🧼 ESTERILIZANDO AMBIENTE ({deploy_dir.name})...{Style.RESET_ALL}")
         plugins_dir = deploy_dir / "plugins"
         plugins_disabled = deploy_dir / "plugins_DISABLED"
@@ -910,8 +1022,42 @@ class TyphonDeployEngine:
         target_deploy_dir = real_deploy_dir
 
         if mode == "production" and not raw_mode:
-            target_deploy_dir = real_deploy_dir / ".doxoade" / "canonical_live"
-            target_deploy_dir.mkdir(parents=True, exist_ok=True)
+            # Garante que o init está no cofre
+            real_init = real_deploy_dir / "init.lua"
+            iso_init = target_deploy_dir / "init.lua"
+            if real_init.exists() and not iso_init.exists():
+                shutil.copy2(real_init, iso_init)
+
+            # Copia infraestrutura (.doxoade) para o cofre, EXCETO pastas de controle
+            real_doxoade = real_deploy_dir / ".doxoade"
+            iso_doxoade = target_deploy_dir / ".doxoade"
+            if real_doxoade.exists():
+                iso_doxoade.mkdir(parents=True, exist_ok=True)
+                for item in real_doxoade.iterdir():
+                    if item.name in ("canonical_live", "backups", "staging", "test_deploy", "sandbox"):
+                        continue
+                    dest = iso_doxoade / item.name
+                    if item.is_dir():
+                        shutil.copytree(item, dest, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(item, dest)
+
+            # 🏛️ PERSISTÊNCIA DE SESSÃO: Copia a sessão nativa se ainda não existir no cofre
+            # (Isso traz as abas e a treeview da última vez que o usuário usou a raiz)
+            for fname in ["session.lua", "session.json", "sovereign_session.lua"]:
+                real_f = real_deploy_dir / fname
+                iso_f = target_deploy_dir / fname
+                if not iso_f.exists() and real_f.exists():
+                    shutil.copy2(real_f, iso_f)
+                    print(f"{Fore.CYAN}  📋 {fname} importado para o Cofre.{Fore.RESET}")
+
+            # Copia o workspace (projetos abertos na treeview)
+            real_ws = real_deploy_dir / "workspace"
+            iso_ws = target_deploy_dir / "workspace"
+            if not iso_ws.exists() and real_ws.exists():
+                shutil.copytree(real_ws, iso_ws, dirs_exist_ok=True)
+                print(f"{Fore.CYAN}  📋 Workspace importado para o Cofre.{Fore.RESET}")
+
 
         if exorcise:
             # 1. Envia o Graceful Quit ESPECÍFICO para o diretório isolado

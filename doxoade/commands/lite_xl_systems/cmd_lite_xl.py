@@ -14,14 +14,15 @@ from pathlib import Path
 import click
 
 from .lite_xl_paths import LiteXLPaths
-from doxoade.commands.lite_xl_systems.chaos_canary_probe import run_canary_probe
-from doxoade.commands.lite_xl_systems.chaos_deep_runner import DeepChaosRunner
-from doxoade.commands.lite_xl_systems.chaos_payload import MEGA_CHAOS_PAYLOAD
-from doxoade.commands.lite_xl_systems.chaos_sandbox_runner import ChaosSandboxRunner
-from doxoade.commands.lite_xl_systems.cmd_typhon_deploy import deploy_group
-from doxoade.commands.lite_xl_systems.engine_lite_xl import LiteXLEngine
-from doxoade.commands.lite_xl_systems.keymap_radar import KeymapRadar, QWERTY_BASE_KEYS
-from doxoade.commands.lite_xl_systems.typhon_doxly.cmd_typhon_doxly import typhon_doxly_group
+from .chaos_canary_probe import run_canary_probe
+from .chaos_deep_runner import DeepChaosRunner
+from .chaos_payload import MEGA_CHAOS_PAYLOAD
+from .chaos_sandbox_runner import ChaosSandboxRunner
+from .cmd_typhon_deploy import deploy_group
+from .engine_lite_xl import LiteXLEngine
+from .keymap_radar import KeymapRadar, QWERTY_BASE_KEYS
+from .typhon_doxly.cmd_typhon_doxly import typhon_doxly_group
+
 from doxoade.tools.doxcolors import Fore, Style, Back
 from doxoade.tools.lua_systems.chaos_validator import ChaosValidator
 from doxoade.tools.lua_systems.profiler import ProfilerEngine
@@ -217,9 +218,9 @@ def cmd_check_templates(fix, apply):
 @click.option("--from-init", is_flag=True,
               help="Usa o init.lua REAL (evita buffer stale)")
 def cmd_resolve_line(line_no, mode, from_init):
-    from doxoade.commands.lite_xl_systems.typhon_doxly.doxly_khonsu_gate import DoxlyKhonsuGate
-    from doxoade.commands.lite_xl_systems.typhon_deploy import TyphonDeployEngine
-    from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+    from .typhon_doxly.doxly_khonsu_gate import DoxlyKhonsuGate
+    from .typhon_deploy import TyphonDeployEngine
+    from .lite_xl_paths import LiteXLPaths
     import hashlib
 
     target_dir = TyphonDeployEngine._get_deploy_dir(mode)
@@ -316,7 +317,7 @@ def cmd_restart(target, clean):
     # 1. Fecha instâncias anteriores e aguarda finalização no Windows
     LiteXLEngine.graceful_shutdown()
     # Forçar kill do PID registrado (defesa em profundidade)
-    from doxoade.commands.lite_xl_systems.typhon_deploy import TyphonDeployEngine
+    from .typhon_deploy import TyphonDeployEngine
     TyphonDeployEngine.exorcise_instances(wait_seconds=0.8)
     time.sleep(0.3)
     # 2. Regrava o init.lua no disco com Probes inclusos
@@ -487,7 +488,7 @@ def detect_khonsu_crash(error_txt: str) -> None:
     raw_line = int(m.group(2).strip())
     error_msg = m.group(3).strip()
 
-    from doxoade.commands.lite_xl_systems.typhon_doxly.doxly_khonsu_gate import DoxlyKhonsuGate
+    from .typhon_doxly.doxly_khonsu_gate import DoxlyKhonsuGate
     
     # 🧭 RESOLVER REVERSO ATIVADO
     template_path, rel_line, template_name = DoxlyKhonsuGate.resolve_unified_trace(raw_file, raw_line)
@@ -500,26 +501,75 @@ def detect_khonsu_crash(error_txt: str) -> None:
     # Renderiza o snippet com destaque
     render_snippet(template_path, rel_line, radius=3, resolved_from=f"{Path(raw_file).name}:{raw_line}")
 
+def _artifact_stamp(p: Path) -> str:
+    """🦅 Horus: mtime + idade + tamanho — prova de frescor de um artefato forense."""
+    try:
+        st = p.stat()
+        ts = datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        age = max(0.0, time.time() - st.st_mtime)
+        if age < 90:
+            age_s = f"{age:.0f}s"
+        elif age < 5400:
+            age_s = f"{age / 60:.0f}min"
+        elif age < 172800:
+            age_s = f"{age / 3600:.1f}h"
+        else:
+            age_s = f"{age / 86400:.1f}d"
+        return f"{ts} | {age_s} atrás | {st.st_size:,} bytes"
+    except OSError:
+        return "inacessível"
 
 @lite_xl_group.command("log", help="📜 Exibe e monitora logs de sessão e eventos do Sensorium.")
-@click.option("--mode", "-m", type=click.Choice(["production", "sandbox", "test"]), default="production",
+@click.option("--mode", "-m", type=click.Choice(["production", "canonical", "sandbox", "test"]), default="production",
               help="Ambiente alvo dos logs (Padrão: production).")
 @click.option("--lines", "-n", default=40, help="Quantidade de linhas recentes para exibir.")
 @click.option("--follow", "-f", is_flag=True, help="Modo streaming contínuo (tail -f).")
 @click.option("--errors", "-e", is_flag=True, help="Filtra apenas erros, avisos e incidentes.")
 @click.option("--phanto", "-p", is_flag=True, help="Exibe capturas estruturadas do Phanto Crisis (NDJSON).")
 @click.option("--clear", "-c", is_flag=True, help="Limpa os arquivos de log do ambiente selecionado.")
-def cmd_log(mode: str, lines: int, follow: bool, errors: bool, phanto: bool, clear: bool):
+@click.option("--key", "-k", is_flag=True, help="Inclui eventos de teclado [KEY-RAW] (omitidos por padrão).")
+def cmd_log(mode: str, lines: int, follow: bool, errors: bool, phanto: bool, clear: bool, key: bool):
     """Exibe os logs unificados de sessão do Lite XL e eventos forenses."""
-    from doxoade.commands.lite_xl_systems.typhon_deploy import TyphonDeployEngine
-    target_dir = TyphonDeployEngine._get_deploy_dir(mode)
+    from .typhon_deploy import TyphonDeployEngine
     
+    if mode == "canonical":
+        target_dir = LiteXLEngine.get_user_dir() / ".doxoade" / "canonical_live"
+    else:
+        target_dir = TyphonDeployEngine._get_deploy_dir(mode)
+        
     session_file = target_dir / "session_log.txt"
     error_file = target_dir / "error.txt"
     phanto_file = target_dir / ".doxoade" / "diagnostics" / "phanto_crisis.ndjson"
 
+    pid_name = ".production.pid" if mode == "canonical" else f".{mode}.pid"
     if error_file.exists():
-        click.echo(f"\n{Fore.RED}{Style.BRIGHT}🩺 CRASH DETECTADO (error.txt):{Style.RESET_ALL}")
+        click.echo(f"\n{Fore.RED}{Style.BRIGHT}🩺 CRASH DETECTADO (error.txt){Style.RESET_ALL} "
+                   f"{Fore.LIGHTBLACK_EX}[{_artifact_stamp(error_file)}]{Fore.RESET}")
+        blackbox_file = target_dir / ".doxoade" / "diagnostics" / "flow_blackbox.txt"
+        if not blackbox_file.exists():
+            blackbox_file = target_dir / "diagnostics" / "flow_blackbox.txt"
+        if blackbox_file.exists():
+            bb_text = blackbox_file.read_text(encoding="utf-8", errors="replace")
+            stale = []
+            ref = target_dir / pid_name
+            if not ref.exists():
+                ref = target_dir / "init.lua"
+            try:
+                if ref.exists() and blackbox_file.stat().st_mtime < ref.stat().st_mtime - 2:
+                    stale.append("anterior ao último launch deste ambiente")
+            except OSError:
+                pass
+            bb_norm = bb_text.replace("\\", "/").lower()
+            tgt_norm = str(target_dir).replace("\\", "/").lower()
+            root_norm = str(LiteXLEngine.get_user_dir()).replace("\\", "/").lower()
+            if tgt_norm != root_norm and (root_norm + "/init.lua") in bb_norm and (tgt_norm + "/init.lua") not in bb_norm:
+                stale.append("stack trace é do USERDIR raiz, não deste ambiente")
+            if stale:
+                click.echo(f"\n{Fore.YELLOW}{Style.BRIGHT}⚠ BLACKBOX STALE: {'; '.join(stale)}.{Style.RESET_ALL}")
+                click.echo(f"{Fore.LIGHTBLACK_EX}  Evidência de sessão anterior — não usar para diagnóstico atual.{Fore.RESET}")
+            click.echo(f"\n{Fore.MAGENTA}{Style.BRIGHT}🧭 TRAJETÓRIA DO SHADOW FLOW (Últimos Passos){Style.RESET_ALL} "
+                       f"{Fore.LIGHTBLACK_EX}[{_artifact_stamp(blackbox_file)}]{Fore.RESET}")
+            click.echo(bb_text)
 
     # 🧭 Exibição Automática da Caixa-Preta do Shadow Flow
     blackbox_file = target_dir / ".doxoade" / "diagnostics" / "flow_blackbox.txt"
@@ -573,7 +623,23 @@ def cmd_log(mode: str, lines: int, follow: bool, errors: bool, phanto: bool, cle
 
     # 3. Stream / Tail do session_log.txt
     if not session_file.exists():
-        click.echo(f"{Fore.YELLOW}⚠ session_log.txt não encontrado neste ambiente.{Fore.RESET}\n")
+        click.echo(f"{Fore.YELLOW}⚠ session_log.txt não encontrado neste ambiente.{Fore.RESET}")
+        click.echo(f"  {Fore.LIGHTBLACK_EX}Procurado em: {session_file}{Fore.RESET}")
+        probes = [
+            ("Último launch (PID)", target_dir / pid_name),
+            ("Boot telemetry", target_dir / ".doxoade" / "diagnostics" / "boot_telemetry.json"),
+            ("API runtime probe", target_dir / ".doxoade" / "api_guard" / "runtime_probe.json"),
+        ]
+        found = False
+        for label, p in probes:
+            if p.exists():
+                found = True
+                click.echo(f"  {Fore.WHITE}{label:<20}{Fore.RESET} {Fore.CYAN}{_artifact_stamp(p)}{Fore.RESET}")
+        if not found:
+            click.echo(f"  {Fore.RED}✖ Nenhum artefato de boot: o init deste USERDIR nunca executou (ou foi limpo).{Fore.RESET}")
+        else:
+            click.echo(f"  {Fore.YELLOW}⚠ Há artefatos de boot, mas o header não gravou log nesta sessão.{Fore.RESET}")
+        click.echo(f"  {Fore.YELLOW}💡 Relance com: doxoade doxly canonical  (arquiva stale + confirma boot){Fore.RESET}\n")
         return
 
     # Leitura em cauda protegida contra arquivos massivos (Zero-OOM)
@@ -585,6 +651,8 @@ def cmd_log(mode: str, lines: int, follow: bool, errors: bool, phanto: bool, cle
             # Descarta linha incompleta da quebra do seek
             f.readline()
         raw_lines = f.read().splitlines()
+    if not key:
+        raw_lines = [l for l in raw_lines if "[KEY-RAW]" not in l]
 
     if errors:
         filtered = [
@@ -595,7 +663,7 @@ def cmd_log(mode: str, lines: int, follow: bool, errors: bool, phanto: bool, cle
     else:
         display_lines = raw_lines[-lines:]
 
-    click.echo(f"{Fore.WHITE}Exibindo as últimas {len(display_lines)} linha(s):{Fore.RESET}\n")
+    click.echo(f"{Fore.WHITE}Exibindo as últimas {len(display_lines)} linha(s) {Fore.LIGHTBLACK_EX}[{_artifact_stamp(session_file)}]{Fore.RESET}:\n")
     for l in display_lines:
         click.echo(f"  {_colorize_log_line(l)}")
     click.echo()
@@ -614,6 +682,8 @@ def cmd_log(mode: str, lines: int, follow: bool, errors: bool, phanto: bool, cle
                             f.seek(last_size)
                             new_data = f.read().splitlines()
                             for nl in new_data:
+                                if not key and "[KEY-RAW]" in nl:
+                                    continue
                                 if not errors or any(w in nl for w in ["ERROR", "CRITICAL", "WARN", "💥", "⚠", "GHOST"]):
                                     click.echo(f"  {_colorize_log_line(nl)}")
                         last_size = curr_size
@@ -634,7 +704,7 @@ def cmd_setup(force, no_backup):
 
     # [FASE 17] Validação estática ANTES de compilar
     click.echo(f"\n{Fore.CYAN}🔬 Validando templates antes do setup...{Fore.RESET}")
-    from doxoade.commands.lite_xl_systems.lite_xl_init_builder import LiteXLInitBuilder
+    from .lite_xl_init_builder import LiteXLInitBuilder
     templates_ok, failed = LiteXLInitBuilder.validate_all_templates()
     if not templates_ok:
         click.echo(f"{Fore.RED}{Style.BRIGHT}✖ Templates com erro de compilação:{Style.RESET_ALL}")
@@ -649,7 +719,7 @@ def cmd_setup(force, no_backup):
 
     if force:
         click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🏛️ MODO CANÔNICO: DEPLOY DE PRODUÇÃO{Style.RESET_ALL}\n")
-        from doxoade.commands.lite_xl_systems.lite_xl_process import LiteXLProcess
+        from .lite_xl_process import LiteXLProcess
         # Fecha instâncias vivas
         LiteXLProcess.graceful_shutdown()
         time.sleep(0.3)
@@ -790,7 +860,7 @@ def cmd_open(target: str, new: bool, preserve_session: bool):
 
     # [FASE 13] Modo canônico padrão: limpa estado e regenera init.lua se necessário
     if not preserve_session:
-        from doxoade.commands.lite_xl_systems.lite_xl_process import LiteXLProcess
+        from .lite_xl_process import LiteXLProcess
         # Fecha instâncias vivas
         LiteXLProcess.graceful_shutdown()
         time.sleep(0.3)
@@ -966,8 +1036,8 @@ def _colorize_log_line(line: str) -> str:
 @click.option("--watch", "-w", is_flag=True, help="Modo painel vivo atualizado continuamente a cada 2s.")
 @click.option("--clear", "-c", is_flag=True, help="Limpa o arquivo de anomalias do Phanto Crisis.")
 def cmd_debug(mode: str, watch: bool, clear: bool):
-    from doxoade.commands.lite_xl_systems.typhon_deploy import TyphonDeployEngine
-    from doxoade.commands.lite_xl_systems.lite_xl_process import LiteXLProcess
+    from .typhon_deploy import TyphonDeployEngine
+    from .lite_xl_process import LiteXLProcess
 
     if clear:
         target_dir = TyphonDeployEngine._get_deploy_dir(mode)
@@ -1270,7 +1340,7 @@ def cmd_profile(mode, watch, boot, threads, export, up, as_json, bench, runs, ta
     """Diagnóstico empírico de CPU, RAM e prescrições do Chronos Advisor."""
     try:
         from doxoade.tools.lua_systems.profiler.profiler_engine import ProfilerEngine
-        from doxoade.commands.lite_xl_systems.engine_lite_xl import LiteXLEngine
+        from .engine_lite_xl import LiteXLEngine
 
         if watch:
             ProfilerEngine.run_watch_mode(mode=mode)
@@ -1328,7 +1398,7 @@ def cmd_profile(mode, watch, boot, threads, export, up, as_json, bench, runs, ta
 def cmd_preflight():
     """Gera o init.lua em memória e valida com compilação real + shadow audit."""
     import tempfile
-    from doxoade.commands.lite_xl_systems.engine_lite_xl import LiteXLEngine
+    from .engine_lite_xl import LiteXLEngine
     
     click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🛡️ PRE-FLIGHT GATE — Validação Pré-Deploy{Style.RESET_ALL}")
     
@@ -1412,7 +1482,7 @@ def cmd_preflight():
 
     # 6. Radar de keymap - evita conflitos de atalhos
     click.echo(f"\n  {Fore.CYAN}Verificando integridade de keymaps com Radar Forense...{Fore.RESET}")
-    from doxoade.commands.lite_xl_systems.keymap_radar import KeymapRadar
+    from .keymap_radar import KeymapRadar
     by_key, by_cmd, registered_commands = KeymapRadar.scan_templates()
     collisions = KeymapRadar.find_collisions(by_key, registered_commands)
     
@@ -1546,7 +1616,7 @@ def cmd_health_check(verbose):
 @click.option("--watch", "-w", default=0, help="Segundos para monitorar antes de fechar (0 = manual).")
 def cmd_sandbox(watch):
     """Lança o Lite XL apontando para o sandbox isolado."""
-    from doxoade.commands.lite_xl_systems.typhon import TyphonEngine
+    from .typhon import TyphonEngine
     
     sandbox_dir = TyphonEngine._get_sandbox_dir()
     exe = LiteXLEngine.find_executable()
@@ -1760,7 +1830,7 @@ def cmd_bridge_install():
 @lite_xl_group.command("trace-ghost", help="👻 Rastreia travamentos (Ghost Windows) no deploy de teste.")
 def cmd_trace_ghost():
     """Analisa o log do Ghost Tracer para detectar travamentos de frame."""
-    from doxoade.commands.lite_xl_systems.typhon_deploy import TyphonDeployEngine
+    from .typhon_deploy import TyphonDeployEngine
     test_dir = TyphonDeployEngine._get_deploy_dir("test")
     trace_log = test_dir / ".doxoade" / "diagnostics" / "ghost_trace.txt"
     
@@ -1780,14 +1850,14 @@ def cmd_trace_ghost():
 @lite_xl_group.command("simulate-ghost", help="👻 Injeta travamentos de frame propositais para testar o Ghost Tracer.")
 def cmd_simulate_ghost():
     """Executa o simulador de Ghost Window em ambiente 100% isolado."""
-    from doxoade.commands.lite_xl_systems.ghost_simulator import run_ghost_simulation
+    from .ghost_simulator import run_ghost_simulation
     run_ghost_simulation()
 
 @lite_xl_group.command("probe-process", help="🔬 Sonda automatizada de compatibilidade do binding C 'process' do Lite XL.")
 def cmd_probe_process():
     """Executa a sonda empírica automatizada de subprocessos no sandbox."""
     try:
-        from doxoade.commands.lite_xl_systems.runtime_process_probe import RuntimeProcessProbeEngine
+        from .runtime_process_probe import RuntimeProcessProbeEngine
         click.echo(f"\n{Fore.CYAN}⚡ Lançando Sonda Automatizada de Runtime...{Fore.RESET}")
         data = RuntimeProcessProbeEngine.run_probe()
         RuntimeProcessProbeEngine.render_report(data)
@@ -1800,7 +1870,7 @@ def cmd_probe_process():
 # ═══════════════════════════════════════════════════════════
 # 🐉 TYPHON — Pipeline Supervisionado de Deploy
 # ═══════════════════════════════════════════════════════════
-from doxoade.commands.lite_xl_systems.typhon import TyphonEngine
+from .typhon import TyphonEngine
 @lite_xl_group.group("typhon", help="🐉 Pipeline supervisionado de deploy com auto-rollback.")
 def typhon_group():
     """Typhon: O pai dos monstros. Deploy supervisionado com gates e rollback."""
@@ -2089,50 +2159,88 @@ def cmd_pty_probe(shell: str, timeout: float):
     except Exception as e:
         click.echo(f"  {Fore.RED}✖ Falha ao executar daemon: {e}{Fore.RESET}\n")
 
-@lite_xl_group.command(
-    "canonical",
-    help="🏛️ Abre o Lite XL no modo canônico puro (sem deploy, sem promote, sem --userdir).",
-)
-@click.option("--exorcise/--no-exorcise", default=True,
-              help="Encerra instâncias antigas antes (default: sim).")
+@lite_xl_group.command("canonical", help="🏛️ Abre o Lite XL no modo canônico isolado (Cofre).")
+@click.option("--exorcise/--no-exorcise", default=True)
 def cmd_canonical(exorcise):
-    """🏛️ CANONICAL PURO — abre ~/.config/lite-xl/ sem tocar em arquivos.
-
-    Diferença fundamental vs `doxly deploy production`:
-      • deploy production (Fase 4) = PROMOTE (copia staging → canonical)
-      • canonical                = APENAS ABRIR canonical, zero I/O
-    """
-    from doxoade.commands.lite_xl_systems.typhon_deploy import TyphonDeployEngine
+    from .typhon_deploy import TyphonDeployEngine
 
     user_dir = LiteXLEngine.get_user_dir()
-    init_file = LiteXLEngine.get_init_lua_path()
+    target_dir = user_dir / ".doxoade" / "canonical_live"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_doxoade = target_dir / ".doxoade"
+    target_doxoade.mkdir(parents=True, exist_ok=True)
+    target_init = target_dir / "init.lua"
 
-    print(f"\n{Fore.CYAN}{Style.BRIGHT}🏛️ CANONICAL MODE — Lite XL Puro{Style.RESET_ALL}")
-    print(f"  {Fore.WHITE}Userdir :{Fore.RESET} {user_dir}")
-    print(f"  {Fore.WHITE}Init.lua:{Fore.RESET} {init_file}")
-    print(f"  {Fore.LIGHTBLACK_EX}Sem --userdir, sem promote, sem deploy.{Fore.RESET}\n")
+    print(f"\n{Fore.CYAN}{Style.BRIGHT}🏛️ CANONICAL MODE — Lite XL Isolado{Style.RESET_ALL}")
+    print(f"  {Fore.WHITE}Userdir :{Fore.RESET} {target_dir}")
+    print(f"  {Fore.WHITE}Init.lua:{Fore.RESET} {target_init}")
+    print(f"  {Fore.LIGHTBLACK_EX}Sincronizando com os templates mais recentes...{Fore.RESET}")
 
-    if not init_file.exists():
-        print(f"{Fore.YELLOW}⚠ init.lua não existe em canonical.{Fore.RESET}")
-        print(f"{Fore.LIGHTBLACK_EX}  Rode 'doxoade doxly deploy production' primeiro.{Fore.RESET}\n")
+    # 1. Atualiza o init.lua do cofre SEMPRE (pega as últimas mudanças dos templates)
+    try:
+        import shutil
+        # Prefere copiar do staging (se existir), senão da raiz
+        staging_init = user_dir / ".doxoade" / "staging" / "init.lua"
+        root_init = LiteXLEngine.get_init_lua_path()
+
+        if staging_init.exists():
+            shutil.copy2(staging_init, target_init)
+            print(f"{Fore.GREEN}  ✔ init.lua atualizado a partir do staging.{Fore.RESET}")
+        elif root_init.exists():
+            shutil.copy2(root_init, target_init)
+            print(f"{Fore.GREEN}  ✔ init.lua atualizado a partir da raiz.{Fore.RESET}")
+        else:
+            print(f"{Fore.YELLOW}  ⚠ Nenhum init.lua encontrado. Rode 'deploy staging' primeiro.{Fore.RESET}")
+            return
+    except Exception as e:
+        print(f"{Fore.RED}  ✖ Falha ao atualizar init.lua: {e}{Fore.RESET}")
         return
+
+    # 2. Migra a sessão da raiz se o cofre ainda não tiver uma própria
+    target_session = target_doxoade / "sovereign_session.lua"
+    root_session = user_dir / ".doxoade" / "sovereign_session.lua"
+    if not target_session.exists() and root_session.exists():
+        try:
+            import shutil
+            shutil.copy2(root_session, target_session)
+            print(f"{Fore.CYAN}  📋 Treeview raiz importada para o Cofre.{Fore.RESET}")
+        except Exception:
+            pass
 
     if exorcise:
         TyphonDeployEngine.exorcise_instances(wait_seconds=0.8)
         time.sleep(0.3)
+
+    # 🧹 Ma'at: arquivar forensics stale — o log passa a refletir SOMENTE esta sessão
+    launch_ts = time.strftime("%Y%m%d_%H%M%S")
+    diag_dir = target_doxoade / "diagnostics"
+    diag_dir.mkdir(parents=True, exist_ok=True)
+    for src, dst in (
+        (target_dir / "error.txt", diag_dir / f"error_{launch_ts}.txt"),
+        (target_dir / "session_log.txt", target_dir / "session_log.txt.bak"),
+        (diag_dir / "flow_blackbox.txt", diag_dir / f"flow_blackbox_{launch_ts}.txt.bak"),
+    ):
+        if src.exists():
+            try:
+                if dst.exists():
+                    dst.unlink()
+                src.rename(dst)
+                print(f"{Fore.LIGHTBLACK_EX}  🗄️  Stale arquivado: {src.name} → {dst.name}{Fore.RESET}")
+            except Exception:
+                pass
 
     exe = LiteXLEngine.find_executable()
     if not exe:
         print(f"{Fore.RED}✖ Executável do Lite XL não encontrado.{Fore.RESET}\n")
         return
 
-    # Env mínimo: só o modo (para o título "Doxly - produção - PID X").
-    # Deliberadamente NÃO setamos LITE_USERDIR nem XDG_CONFIG_HOME
-    # → o .exe resolve os paths como um duplo-clique faria.
     env = os.environ.copy()
     env["DOXOADE_DEPLOY_MODE"] = "production"
+    env["LITE_USERDIR"] = str(target_dir)
+    env["XDG_CONFIG_HOME"] = str(target_dir.parent)
 
     CREATE_NEW_CONSOLE = 0x00000010 if sys.platform == "win32" else 0
+    launch_time = time.time()
     try:
         proc = subprocess.Popen(
             [str(exe)],
@@ -2140,22 +2248,41 @@ def cmd_canonical(exorcise):
             creationflags=CREATE_NEW_CONSOLE,
         )
         pid = proc.pid
-
-        # Grava .production.pid para o HUD exibir "PID N"
-        pid_file = user_dir / ".production.pid"
+        pid_file = target_dir / ".production.pid"
         try:
             pid_file.write_text(str(pid), encoding="utf-8")
         except Exception:
             pass
 
-        print(f"{Fore.GREEN}✔ Lite XL CANÔNICO iniciado (PID: {pid}){Fore.RESET}")
-        print(f"{Fore.LIGHTBLACK_EX}  Título: Doxly - produção - PID {pid}{Fore.RESET}\n")
+        print(f"\n{Fore.GREEN}✔ Lite XL CANÔNICO ISOLADO iniciado (PID: {pid}){Fore.RESET}")
+        print(f"{Fore.LIGHTBLACK_EX}  Userdir: {target_dir}{Fore.RESET}\n")
+        
+        # 🐤 Hórus: prova empírica de que o header bootou NESTE userdir
+        print(f"{Fore.LIGHTBLACK_EX}  ⏳ Aguardando session_log.txt do cofre (até 6s)...{Fore.RESET}")
+        sess = target_dir / "session_log.txt"
+        boot_ok = False
+        deadline = time.time() + 6.0
+        while time.time() < deadline:
+            try:
+                if sess.exists() and sess.stat().st_mtime >= launch_time - 1:
+                    boot_ok = True
+                    break
+            except OSError:
+                pass
+            if proc.poll() is not None:
+                break
+            time.sleep(0.3)
+        if boot_ok:
+            print(f"{Fore.GREEN}  ✔ Boot confirmado: header gravou log no cofre.{Fore.RESET}\n")
+        else:
+            print(f"{Fore.YELLOW}  ⚠ Boot não confirmado em 6s. Investigue: doxoade doxly log -m canonical{Fore.RESET}\n")
+            
     except Exception as e:
         print(f"{Fore.RED}✖ Falha ao iniciar: {e}{Fore.RESET}\n")
 
 @lite_xl_group.command("diagnose-init", help="🔬 Compara init.lua de test vs production e identifica divergências.")
 def cmd_diagnose_init():
-    from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+    from .lite_xl_paths import LiteXLPaths
     import hashlib
     import difflib
 
@@ -2261,7 +2388,7 @@ def cmd_diagnose_init():
 def cmd_clear(mode, deep):
     """Saneamento cross-platform de ambientes, caches e logs."""
     import shutil
-    from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+    from .lite_xl_paths import LiteXLPaths
     
     user_dir = LiteXLPaths.get_user_dir()
     sandbox_dir = LiteXLEngine.get_sandbox_dir()
@@ -2326,7 +2453,7 @@ def cmd_clear(mode, deep):
 @click.option("--snippets", "-s", is_flag=True, default=True, help="Exibe os snippets do código onde a colisão ocorreu.")
 @click.option("--matrix", "-m", is_flag=True, help="Exibe a matriz completa de combinações para a tecla informada.")
 def cmd_radar_keys(query: str, collisions_only: bool, snippets: bool, matrix: bool):
-    from doxoade.commands.lite_xl_systems.keymap_radar import KeymapRadar
+    from .keymap_radar import KeymapRadar
 
     click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🎯 RADAR FORENSE DE KEYMAPS & ANÁLISE DE INTERFERÊNCIA{Style.RESET_ALL}\n")
     
@@ -2411,7 +2538,7 @@ def cmd_shortcuts():
     import sys, os, subprocess
     from pathlib import Path
     from doxoade.tools.doxcolors import Fore, Style
-    from doxoade.commands.lite_xl_systems.engine_lite_xl import LiteXLEngine
+    from .engine_lite_xl import LiteXLEngine
 
     if sys.platform != "win32":
         click.echo(f"{Fore.YELLOW}⚠ Disponível apenas no Windows.{Fore.RESET}\n")
@@ -2484,9 +2611,147 @@ $sc.Save()
 @lite_xl_group.command("tray", help="🐺 Inicia o Doxly Tray Icon na Bandeja do Sistema.")
 def cmd_tray():
     try:
-        from doxoade.commands.lite_xl_systems.doxly_tray import start_tray
+        from .doxly_tray import start_tray
         start_tray()
     except ImportError:
         click.echo(f"{Fore.RED}✖ Biblioteca 'pystray' não encontrada.{Fore.RESET}")
         click.echo(f"  Instale com: {Fore.CYAN}pip install pystray Pillow{Fore.RESET}")
+
+from .cmd_doxly_flow import cmd_flow
+lite_xl_group.add_command(cmd_flow)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 🛡️ LEAP KVM — CLI VERIFY-ONLY (ProDeNov 1.2.1)
+# Templates Lua apenas LEEM estado. Estes comandos são o ÚNICO caminho
+# legítimo para escrever leap_state.json a partir do terminal.
+# ═══════════════════════════════════════════════════════════════════════
+
+def _leap_state_path() -> Path:
+    home = Path(os.environ.get("USERPROFILE") or os.environ.get("HOME") or ".")
+    return home / ".doxoade" / "leap_state.json"
+
+
+def _read_leap_state() -> dict:
+    p = _leap_state_path()
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return {}
+
+
+def _write_leap_state(active: bool, mode: str, target: str, server_ip: str, sysutils_bin: str = "") -> bool:
+    p = _leap_state_path()
+    try:
+        data = _read_leap_state()
+        data["active"] = active
+        data["mode"] = mode
+        data["target"] = target
+        data["server_ip"] = server_ip
+        data["port"] = data.get("port", 24800)
+        if sysutils_bin:
+            data["sysutils_bin"] = sysutils_bin
+        data["updated_at"] = int(time.time())
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        return True
+    except Exception as e:
+        click.echo(f"{Fore.RED}✖ Falha ao gravar leap_state: {e}{Fore.RESET}")
+        return False
+
+
+@lite_xl_group.command("leap-status", help="🛡️ Verifica estado do Leap KVM (read-only, não altera nada).")
+def cmd_leap_status():
+    p = _leap_state_path()
+    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🛡️ LEAP KVM — STATUS (verificação read-only){Style.RESET_ALL}\n")
+    if not p.exists():
+        click.echo(f"  {Fore.YELLOW}⚠ Arquivo não existe: {p}{Fore.RESET}")
+        click.echo(f"  {Fore.LIGHTBLACK_EX}Leap nunca foi ativado ou foi limpo.{Fore.RESET}\n")
+        return
+    data = _read_leap_state()
+    if not data:
+        click.echo(f"  {Fore.RED}✖ Arquivo corrompido/ilegível.{Fore.RESET}\n")
+        return
+
+    active = data.get("active", False)
+    status_str = f"{Fore.GREEN}ATIVO{Fore.RESET}" if active else f"{Fore.LIGHTBLACK_EX}INATIVO{Fore.RESET}"
+    click.echo(f"  {Fore.WHITE}Estado  :{Fore.RESET} {status_str}")
+    click.echo(f"  {Fore.WHITE}Modo    :{Fore.RESET} {data.get('mode', 'idle')}")
+    if active:
+        if data.get("target"):
+            click.echo(f"  {Fore.WHITE}Target  :{Fore.RESET} {data['target']}")
+        if data.get("server_ip"):
+            click.echo(f"  {Fore.WHITE}Server  :{Fore.RESET} {data['server_ip']}:{data.get('port', 24800)}")
+    if data.get("sysutils_bin"):
+        click.echo(f"  {Fore.WHITE}Bin     :{Fore.RESET} {data['sysutils_bin']}")
+    ts = data.get("updated_at", 0)
+    if ts:
+        try:
+            click.echo(f"  {Fore.WHITE}Updated :{Fore.RESET} {datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')}")
+        except Exception:
+            pass
+    click.echo()
+
+
+@lite_xl_group.command("leap-on", help="🛡️ Liga Leap KVM explicitamente (host ou client).")
+@click.option("--mode", "-m", type=click.Choice(["host", "client"]), default="host")
+@click.option("--target", "-t", default="bluebaby", help="Target (modo host).")
+@click.option("--server-ip", default="192.168.18.52", help="IP do servidor (modo client).")
+@click.option("--yes", "-y", is_flag=True)
+def cmd_leap_on(mode, target, server_ip, yes):
+    if not yes and not click.confirm(f"Ligar Leap KVM em modo {mode}?", default=False):
+        return
+    click.echo(f"\n{Fore.CYAN}Ligando Leap KVM ({mode})...{Fore.RESET}")
+
+    # Executa sysutils
+    try:
+        if mode == "host":
+            subprocess.run(
+                ["sysutils", "leap", "host", target, "right", "24800"],
+                capture_output=True, timeout=8, check=False,
+            )
+        else:
+            subprocess.run(
+                ["sysutils", "leap", "join", server_ip, "right", "24800"],
+                capture_output=True, timeout=8, check=False,
+            )
+    except FileNotFoundError:
+        click.echo(f"{Fore.YELLOW}⚠ 'sysutils' não encontrado no PATH. State será gravado mesmo assim.{Fore.RESET}")
+    except Exception as e:
+        click.echo(f"{Fore.YELLOW}⚠ sysutils falhou: {e}. State será gravado mesmo assim.{Fore.RESET}")
+
+    if _write_leap_state(True, mode, target if mode == "host" else "", server_ip):
+        click.echo(f"{Fore.GREEN}✔ Leap KVM ligado (mode={mode}).{Fore.RESET}\n")
+
+
+@lite_xl_group.command("leap-off", help="🛡️ Desliga Leap KVM explicitamente.")
+@click.option("--yes", "-y", is_flag=True)
+def cmd_leap_off(yes):
+    if not yes and not click.confirm("Desligar Leap KVM?", default=False):
+        return
+    click.echo(f"\n{Fore.CYAN}Desligando Leap KVM...{Fore.RESET}")
+    try:
+        subprocess.run(["sysutils", "leap", "stop"], capture_output=True, timeout=8, check=False)
+    except FileNotFoundError:
+        click.echo(f"{Fore.YELLOW}⚠ 'sysutils' não encontrado no PATH. State será gravado mesmo assim.{Fore.RESET}")
+    except Exception as e:
+        click.echo(f"{Fore.YELLOW}⚠ sysutils falhou: {e}. State será gravado mesmo assim.{Fore.RESET}")
+
+    data = _read_leap_state()
+    if _write_leap_state(False, "idle", "", data.get("server_ip", "192.168.18.52")):
+        click.echo(f"{Fore.GREEN}✔ Leap KVM desligado.{Fore.RESET}\n")
+
+# ─────────────────────────────────────────────────────────────────────
+# Alias top-level: 'doxoade doxly reset <mode>'
+# Inserido AQUI (fim do arquivo) porque 'lite_xl_group' e 'deploy_group'
+# já estão definidos. try/except garante que o import do módulo NUNCA
+# é derrubado se 'reset' estiver ausente (FIX 1/2 não aplicados).
+# ─────────────────────────────────────────────────────────────────────
+try:
+    if hasattr(deploy_group, "commands") and "reset" in deploy_group.commands:
+        lite_xl_group.add_command(deploy_group.commands["reset"])
+except Exception:
+    pass
 

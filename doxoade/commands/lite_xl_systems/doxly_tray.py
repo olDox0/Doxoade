@@ -42,7 +42,8 @@ def create_tray_icon():
 
     # Define o Menu (Clique Esquerdo/Direito)
     menu = pystray.Menu(
-        pystray.MenuItem("🏛️ Abrir Canonical", lambda: run_command(["doxly", "deploy", "launch", "-m", "production"])),
+        pystray.MenuItem("🏛️ Abrir Canonical", lambda: run_command(["doxly", "canonical"]))
+#        pystray.MenuItem("🏛️ Abrir Canonical", lambda: run_command(["doxly", "deploy", "launch", "-m", "production"])),
         pystray.MenuItem("🚀 Redeploy PRODUCTION", lambda: run_command(["doxly", "deploy", "production", "-f", "--legacy-direct"])),
         pystray.MenuItem("🧪 Redeploy TEST", lambda: run_command(["doxly", "deploy", "test", "-f"])),
         pystray.MenuItem("🎯 Redeploy STAGING", lambda: run_command(["doxly", "deploy", "staging", "-f", "--launch-test"])),

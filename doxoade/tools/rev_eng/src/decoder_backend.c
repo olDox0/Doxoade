@@ -8,7 +8,8 @@
 #include <capstone/capstone.h>
 #include <capstone/x86.h>
 
-/* Traduz um cs_insn (Capstone) para DecodedInsn (nosso formato). */
+/* Traduz cs_insn para DecodedInsn, preenchendo mnemonic/op_str
+ * (para fmt_insn) e opcode/reg/imm (para insn_control_flow). */
 static int translate_capstone(const cs_insn *ci, uint64_t offset, uint64_t va,
                               DecodedInsn *out)
 {
@@ -16,38 +17,42 @@ static int translate_capstone(const cs_insn *ci, uint64_t offset, uint64_t va,
     out->offset = offset;
     out->va = va;
     out->length = (uint8_t)ci->size;
-
-    /* Mnemônico e string de operandos — o Capstone já formata (Intel). */
     strncpy(out->mnemonic, ci->mnemonic, sizeof(out->mnemonic) - 1);
     strncpy(out->op_str, ci->op_str, sizeof(out->op_str) - 1);
 
-    /* Preencher opcode (para CF) — o Capstone não expõe o opcode bruto
-     * diretamente, mas cs_x86.encoding tem o campo. */
-    if (ci->detail && ci->id != 0) {
+    if (ci->detail) {
         const cs_x86 *x86 = &ci->detail->x86;
-        /* opcode_len/opcode: bytes do opcode em ci->bytes após os prefixos.
-         * Usamos o primeiro byte pós-prefixos como "opcode" para CF. */
-        uint8_t opcode_len = x86->opcode[0];
-        if (opcode_len > 0) {
-            out->opcode_len = 1;
+
+        /* Opcode (para insn_control_flow). */
+        if (x86->opcode[0] > 0) {
+            out->opcode_len = x86->opcode[0];
             out->opcode = x86->opcode[1];
-            if (opcode_len == 2) {
-                out->opcode_len = 2;
+            if (out->opcode_len == 2) {
                 out->opcode = ((uint16_t)0x0F << 8) | x86->opcode[2];
             }
         }
 
-        /* Imediato (para jcc/call/jmp relativo). */
+        /* ModRM (para FF /2 = call, FF /4 = jmp indireto). */
+        if (x86->encoding.modrm_offset > 0 &&
+            (int)x86->encoding.modrm_offset < ci->size) {
+            out->modrm = ci->bytes[x86->encoding.modrm_offset];
+            out->mod   = (out->modrm >> 6) & 3;
+            out->reg   = (out->modrm >> 3) & 7;
+            out->rm    = out->modrm & 7;
+            out->has_modrm = 1;
+        }
+
+        /* Captura RIP-relative memory operand (para anotação de símbolos). */
         for (int i = 0; i < x86->op_count; i++) {
-            const cs_x86_op *op = &x86->operands[i];
-            if (op->type == X86_OP_IMM) {
-                out->imm = op->imm;
-                out->imm_size = (op->size > 0) ? op->size : 4;
+            if (x86->operands[i].type == X86_OP_MEM &&
+                x86->operands[i].mem.base == X86_REG_RIP) {
+                /* RIP aponta para a próxima instrução. */
+                out->rip_target = va + ci->size + x86->operands[i].mem.disp;
+                out->has_rip_target = 1;
                 break;
             }
         }
     }
-
     return (int)out->length;
 }
 #endif /* HAVE_CAPSTONE */

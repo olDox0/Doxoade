@@ -111,7 +111,9 @@ sources = [
     "doxoade/tools/rev_eng/src/disasm.c",
     "doxoade/tools/rev_eng/src/cfg.c",
     "doxoade/tools/rev_eng/src/decoder_backend.c",
-    "doxoade/tools/rev_eng/src/doctor.c"
+    "doxoade/tools/rev_eng/src/doctor.c",
+    "doxoade/tools/rev_eng/src/functions.c",
+    "doxoade/tools/rev_eng/src/patterns.c"
 ]
 output = "doxoade/tools/rev_eng/bin/doxreveng.exe"
 flags = [

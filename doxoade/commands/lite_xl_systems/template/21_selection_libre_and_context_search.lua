@@ -26,6 +26,7 @@ local function safe_error(msg)
 end
 local function is_treeview(view)
   if not view then return false end
+  if view.doc then return false end -- 🛡️ DocView NUNCA é tree (fix do falso-positivo por nome)
   local ok_tv, TreeView = pcall(require, "plugins.treeview")
   if not ok_tv or not TreeView then
     ok_tv, TreeView = pcall(require, "plugins.treeview.treeview")
@@ -33,10 +34,6 @@ local function is_treeview(view)
   if ok_tv and TreeView and type(view.is) == "function" then
     local ok, res = pcall(view.is, view, TreeView)
     if ok and res then return true end
-  end
-  if type(view.get_name) == "function" then
-    local ok, name = pcall(view.get_name, view)
-    if ok and type(name) == "string" and name:lower():find("tree") then return true end
   end
   return false
 end
@@ -88,6 +85,7 @@ local function get_selected_term(doc)
 end
 
 -- Paleta (sem race, com on_close_fn)
+rawset(_G, "_DOXOADE_SEARCH_ORIGIN_VIEW", core.active_view)
 local function open_search_palette(prompt, default_term, submit_fn, on_close_fn)
   if not core.command_view or type(core.command_view.enter) ~= "function" then
     safe_error("⚠ [SEARCH] command_view indisponível.")
@@ -169,22 +167,28 @@ command.add(nil, {
       default_term,
       function(query)
         if not query or query:match("^%s*$") then return end
-
-        -- ✅ Defesa 1: collapse a seleção ANTES do submit (Enter keyup não acha texto pra substituir)
+        
         local doc = core.active_view and core.active_view.doc
+        local scope_root = nil
+        
+        -- 🎯 Extrai o diretório do arquivo ativo (ex: se está em X/Y/a.py, a raiz vira X/Y/)
+        if doc and doc.filename then
+          local abs_path = (system.absolute_path(doc.filename) or doc.filename):gsub("\\", "/")
+          scope_root = abs_path:match("^(.*)/") 
+        end
+
         if doc and doc.has_selection and doc:has_selection() then
           local ok_sel, l, c = pcall(doc.get_selection, doc, true)
           if ok_sel and l and c then
             pcall(doc.set_selection, doc, l, c, l, c)
           end
         end
-
-        -- ✅ Defesa 2: defer a busca 10ms (keyup do Enter já foi dispatchado)
+        
         core.add_thread(function()
           coroutine.yield(0.01)
           local executor = rawget(_G, "DOXOADE_EXECUTE_GLOBAL_SEARCH")
           if type(executor) == "function" then
-            pcall(executor, query, nil)
+            pcall(executor, query, scope_root) -- Passa X/Y/ para a busca!
           else
             command.perform("doxoade:global-project-search")
           end

@@ -125,6 +125,7 @@ class DoxoadeLazyGroup(click.Group):
 #            'regression-test': 'doxoade.commands.regression_test:regression_test',
             'release': 'doxoade.commands.git_systems.git_workflow:release',
             'rescue': 'doxoade.commands.rescue_cmd:rescue',
+            'retro-forward': 'doxoade.commands.retro_forward_cmd:retro_forward_group',
 #            'rewind': 'doxoade.commands.backup_systems:rewind',
             'rewind': 'doxoade.commands.backup_systems.rewind:rewind',
             'risk': 'doxoade.commands.risk:risk',

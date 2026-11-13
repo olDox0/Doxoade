@@ -205,3 +205,5 @@ do erro.
 "Ciclo" e decisao de contrato, nao detalhe. Sem snapshot, ordem importa;
 com snapshot, ordem nao importa. P00 e P01a nao distinguiam as duas
 semanticas. P01b forcou a escolha.
+
+---

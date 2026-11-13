@@ -1,0 +1,3201 @@
+diff --git a/doxoade/commands/consult_systems/cmd_consult.py b/doxoade/commands/consult_systems/cmd_consult.py
+index 8fb7953..9932650 100644
+--- a/doxoade/commands/consult_systems/cmd_consult.py
++++ b/doxoade/commands/consult_systems/cmd_consult.py
+@@ -132,14 +132,25 @@ def cmd_doc(ctx, term):
+         profiler.render_hud()
+ 
+ 
+-@consult_group.command("search", help="Busca unificada por palavra-chave no FTS5.")
+-@click.argument("keyword", type=str)
++@consult_group.command(
++    "search",
++    help="Busca unificada por palavra-chave no FTS5.",
++    context_settings=dict(ignore_unknown_options=True, allow_extra_args=True),
++)
++@click.argument("keyword", type=str, nargs=-1)
+ @click.option("--deep", "-d", is_flag=True, help="Compatibilidade legada (busca profunda ativada por padrão).")
+ @click.option("--md", is_flag=True, help="Emite o resultado diretamente em Markdown puro para a IDE.")
+ @click.option("--lua", is_flag=True, help="Emite o resultado em formato de tabela Lua nativa para a IDE.")
+ @click.option("--output", "-o", type=click.Path(dir_okay=False, writable=True), default=None, help="Grava a saída em arquivo UTF-8.")
+ @click.pass_context
+ def cmd_search(ctx, keyword, deep, md, lua, output):
++    # Normaliza keyword: tuple → string (Click com nargs=-1)
++    if isinstance(keyword, tuple):
++        keyword = " ".join(keyword)
++    if not keyword or not keyword.strip():
++        click.secho("❌ Nenhum termo de busca informado.", fg="red")
++        return
++
+     is_prof = ctx.obj.get("shadow_prof", False)
+     with ShadowProfiler("consult_search", enabled=is_prof) as profiler:
+         from .doc_indexer import DocIndexer
+@@ -260,20 +271,27 @@ def cmd_symbols():
+ # ~/.doxoade/consult/canonical/ que será ingerido pelo CanonicalDB.
+ def _get_converter_registry() -> Dict[str, str]:
+     return {
+-        "cheatsheet":     "doxoade.commands.consult_systems.cheatsheet_converter:CheatsheetConverter",
+-        "byte_of_python": "doxoade.commands.consult_systems.converters.byte_of_python_converter:ByteOfPythonConverter",
+-        "30days":         "doxoade.commands.consult_systems.converters.thirty_days_converter:ThirtyDaysConverter",
+-        "py4e":           "doxoade.commands.consult_systems.converters.py4e_converter:Py4eConverter",
+-        "the_algorithms": "doxoade.commands.consult_systems.converters.the_algorithms_converter:TheAlgorithmsConverter",
+-        "automate":       "doxoade.commands.consult_systems.converters.automate_boring_stuff_converter:AutomateBoringStuffConverter",
+-        "peps":           "doxoade.commands.consult_systems.converters.peps_converter:PepsConverter",
+-        "cosmic":         "doxoade.commands.consult_systems.converters.cosmic_python_converter:CosmicPythonConverter",
+-        "patterns":       "doxoade.commands.consult_systems.converters.design_patterns_converter:DesignPatternsConverter",
+-        "typeshed":       "doxoade.commands.consult_systems.converters.typeshed_converter:TypeshedConverter",
+-        "automation":     "doxoade.commands.consult_systems.converters.click_rich_pytest_converter:ClickRichPytestConverter",
+-        "git":            "doxoade.commands.consult_systems.converters.git_github_converter:GitGithubConverter",
+-        "30seconds":      "doxoade.commands.consult_systems.converters.thirty_seconds_converter:ThirtySecondsConverter",
+-        "ecosystem":      "doxoade.commands.consult_systems.converters.devdocs_bridge_converter:DevDocsBridgeConverter",
++        "cheatsheet":        "doxoade.commands.consult_systems.cheatsheet_converter:CheatsheetConverter",
++        "byte_of_python":    "doxoade.commands.consult_systems.converters.byte_of_python_converter:ByteOfPythonConverter",
++        "30days":            "doxoade.commands.consult_systems.converters.thirty_days_converter:ThirtyDaysConverter",
++        "py4e":              "doxoade.commands.consult_systems.converters.py4e_converter:Py4eConverter",
++        "the_algorithms":    "doxoade.commands.consult_systems.converters.the_algorithms_converter:TheAlgorithmsConverter",
++        "automate":          "doxoade.commands.consult_systems.converters.automate_boring_stuff_converter:AutomateBoringStuffConverter",
++        "peps":              "doxoade.commands.consult_systems.converters.peps_converter:PepsConverter",
++        "cosmic":            "doxoade.commands.consult_systems.converters.cosmic_python_converter:CosmicPythonConverter",
++        "patterns":          "doxoade.commands.consult_systems.converters.design_patterns_converter:DesignPatternsConverter",
++        "typeshed":          "doxoade.commands.consult_systems.converters.typeshed_converter:TypeshedConverter",
++        "automation":        "doxoade.commands.consult_systems.converters.click_rich_pytest_converter:ClickRichPytestConverter",
++        "git":               "doxoade.commands.consult_systems.converters.git_github_converter:GitGithubConverter",
++        "30seconds":         "doxoade.commands.consult_systems.converters.thirty_seconds_converter:ThirtySecondsConverter",
++        "ecosystem":         "doxoade.commands.consult_systems.converters.devdocs_bridge_converter:DevDocsBridgeConverter",
++        "cpython_whatsnew":  "doxoade.commands.consult_systems.converters.cpython_whatsnew_converter:CpythonWhatsnewConverter",
++        "clang_diag":        "doxoade.commands.consult_systems.converters.clang_diag_converter:ClangDiagConverter",
++        "gcc_porting":       "doxoade.commands.consult_systems.converters.gcc_porting_converter:GccPortingConverter",
++        "ruff":              "doxoade.commands.consult_systems.converters.ruff_converter:RuffConverter",
++        "mypy":              "doxoade.commands.consult_systems.converters.mypy_converter:MypyConverter",
++        "sanitizers":        "doxoade.commands.consult_systems.converters.sanitizers_converter:SanitizersConverter",
++        "gcc_manual":        "doxoade.commands.consult_systems.converters.gcc_manual_converter:GccManualConverter",
+     }
+ 
+ def _resolve_converter(name: str):
+diff --git a/doxoade/commands/consult_systems/converters/peps_converter.py b/doxoade/commands/consult_systems/converters/peps_converter.py
+index 8351dc3..030b98f 100644
+--- a/doxoade/commands/consult_systems/converters/peps_converter.py
++++ b/doxoade/commands/consult_systems/converters/peps_converter.py
+@@ -1,3 +1,4 @@
++
+ # -*- coding: utf-8 -*-
+ # doxoade/commands/consult_systems/converters/peps_converter.py
+ from __future__ import annotations
+@@ -45,7 +46,13 @@ class PepsConverter(BaseCanonicalConverter):
+         (635,  "Structural Pattern Matching: Motivation and Rationale"),
+         (636,  "Structural Pattern Matching: Tutorial"),
+         (646,  "Variadic Generics (TypeVarTuple)"),
++        (654,  "Exception Groups and except*"),
++        (657,  "Include Fine-Grained Error Locations in Tracebacks"),
+         (675,  "Arbitrary Literal String Type"),
++        (678,  "Enriching Exceptions with Notes"),
++        (691,  "JSON-based Simple API for Python Package Indexes"),
++        (3151, "Reworking the OS and IO exception hierarchy"),
++        (3155, "Qualified name for classes and functions"),
+     ]
+ 
+     def _download_pep(self, item: Tuple[int, str]) -> Tuple[int, str, Optional[str]]:
+diff --git a/doxoade/commands/consult_systems/doc_indexer.py b/doxoade/commands/consult_systems/doc_indexer.py
+index cb6b46f..e9887bd 100644
+--- a/doxoade/commands/consult_systems/doc_indexer.py
++++ b/doxoade/commands/consult_systems/doc_indexer.py
+@@ -331,37 +331,37 @@ class DocIndexer:
+             WHERE docs_fts MATCH ?
+             ORDER BY
+                 CASE
+-                    -- 🔴 Prioridade MÁXIMA: livros, PEPs, algoritmos, patterns, Typeshed
++                    -- 🔴 Prioridade MÁXIMA: documentação oficial da linguagem + correção de erros C
++                    WHEN path LIKE 'c/%'                        THEN 0    -- NOVO: tudo de C no topo
+                     WHEN path LIKE 'python/peps/%'              THEN 0
+                     WHEN path LIKE 'python/basic/%'             THEN 0
+                     WHEN path LIKE 'python/algorithms/%'        THEN 0
+                     WHEN path LIKE 'python/patterns/%'          THEN 0
+-                    WHEN path LIKE 'python/ecosystem/%'         THEN 0
+                     WHEN path LIKE 'python/architecture/%'      THEN 0
+                     WHEN path LIKE 'python/automation/%'        THEN 0
+                     WHEN path LIKE 'python/snippets/%'          THEN 0
++                    -- 🟠 ALTA: versão e deprecação da linguagem
++                    WHEN path LIKE 'whatsnew/%'                 THEN 1
++                    WHEN path LIKE 'deprecations/%'             THEN 1
+                     WHEN path LIKE 'python/typeshed/%'          THEN 1
+                     WHEN path LIKE 'python/cheatsheet/%'        THEN 1
+-                    
+-                    -- 🟡 Prioridade MÉDIA: CPython tutorial, library, howto
++                    -- 🟡 MÉDIA: CPython tutorial, library, howto, reference
+                     WHEN path LIKE 'tutorial/%'                 THEN 2
+                     WHEN path LIKE 'library/%'                  THEN 2
+                     WHEN path LIKE 'howto/%'                    THEN 2
+-                    WHEN path LIKE 'reference/%'                THEN 3
++                    WHEN path LIKE 'reference/%'                THEN 2
++                    -- 🟢 MENOR: libs externas (Blitzplan Cat 4)
++                    WHEN path LIKE 'python/ecosystem/%'         THEN 3
+                     WHEN path LIKE 'c-api/%'                    THEN 3
+-                    
+-                    -- ⚪ Prioridade BAIXA: metadados, índices, changelogs
++                    -- ⚪ BAIXA: metadados
+                     WHEN path LIKE '%genindex%'                 THEN 9
+                     WHEN path LIKE '%modindex%'                 THEN 9
+                     WHEN path LIKE '%py-modindex%'              THEN 9
+                     WHEN path LIKE '%contents.html%'            THEN 9
+-                    WHEN path LIKE 'whatsnew/%'                 THEN 9
+                     WHEN path LIKE 'using/%'                    THEN 8
+                     WHEN path LIKE 'faq/%'                      THEN 7
+                     WHEN path LIKE 'about.html%'                THEN 9
+                     WHEN path LIKE 'download.html%'             THEN 9
+-                    
+-                    -- Fallback: CPython misc (license, bugs, glossary, etc.)
+                     ELSE 5
+                 END,
+                 rank
+diff --git a/doxoade/commands/lite_xl_systems/cmd_lite_xl.py b/doxoade/commands/lite_xl_systems/cmd_lite_xl.py
+index 7e00730..e493a92 100644
+--- a/doxoade/commands/lite_xl_systems/cmd_lite_xl.py
++++ b/doxoade/commands/lite_xl_systems/cmd_lite_xl.py
+@@ -26,6 +26,8 @@ from doxoade.tools.doxcolors import Fore, Style, Back
+ from doxoade.tools.lua_systems.chaos_validator import ChaosValidator
+ from doxoade.tools.lua_systems.profiler import ProfilerEngine
+ 
++from typing import List, Dict, Any, Optional, Tuple
++
+ @click.group("lite-xl", help="⚡ Gestão, diagnóstico e automação do Lite XL.")
+ def lite_xl_group():
+     """Grupo de comandos do ecossistema Lite XL."""
+@@ -33,183 +35,186 @@ def lite_xl_group():
+ 
+ lite_xl_group.add_command(deploy_group)
+ 
+-@lite_xl_group.command(
+-    "check-templates",
+-    help=(
+-        "Audita individualmente cada arquivo de template .lua com snippets"
+-        " forenses."
+-    ),
+-)
+-@click.option(
+-    "--fix",
+-    "-f",
+-    is_flag=True,
+-    help="Simula o autorreparo de templates (DRY-RUN por padrão).",
+-)
+-@click.option(
+-    "--apply",
+-    "-a",
+-    is_flag=True,
+-    help="Aplica as correções no disco (sai do modo Dry-Run).",
+-)
++@lite_xl_group.command("check-templates", help="Audita individualmente cada arquivo de template .lua.")
++@click.option("--fix", "-f", is_flag=True, help="Simula o autorreparo de templates (DRY-RUN por padrão).")
++@click.option("--apply", "-a", is_flag=True, help="Aplica as correções no disco (sai do modo Dry-Run).")
+ def cmd_check_templates(fix, apply):
+-    is_fix_active = fix or apply
+-    is_dry_run = not apply
+-
+-    t_dir = LiteXLEngine.get_template_dir()
+-    click.echo(
+-        f"\n{Fore.CYAN}{Style.BRIGHT}🧩 AUDITORIA DE TEMPLATES MODULARES LITE"
+-        f" XL{Style.RESET_ALL}"
+-    )
+-    click.echo(f"  {Fore.WHITE}Diretório:{Fore.RESET} {t_dir}\n")
++    try:
++        is_fix_active = fix or apply
++        is_dry_run = not apply
+ 
+-    info = LiteXLEngine.lua_runtime_info()
+-    if info:
+-        lua_path, lua_version = info
+-        click.echo(f"  {Fore.GREEN}✔ Cobertura TOTAL:{Fore.RESET} Compilação real ativa ({lua_version}).")
+-    else:
++        t_dir = LiteXLEngine.get_template_dir()
+         click.echo(
+-            f"  {Fore.YELLOW}⚠ Cobertura PARCIAL:{Fore.RESET} Scanner interno + balanceamento "
+-            f"(sem runtime Lua externo).\n"
+-            f"    {Fore.LIGHTBLACK_EX}Dica: Execute 'doxoade lite-xl lua --install' para validação 100% real.{Fore.RESET}"
++            f"\n{Fore.CYAN}{Style.BRIGHT}🧩 AUDITORIA DE TEMPLATES MODULARES LITE"
++            f" XL{Style.RESET_ALL}"
+         )
+-    click.echo()
+-    
+-    # ═══════════════════════════════════════════════════════════
+-    # 1. AUTO-FIX ENGINE (COM DRY-RUN E SNIPPETS DE DIFF)
+-    # ═══════════════════════════════════════════════════════════
+-    if is_fix_active:
+-        fix_report = LiteXLEngine.fix_templates(dry_run=is_dry_run)
++        click.echo(f"  {Fore.WHITE}Diretório:{Fore.RESET} {t_dir}\n")
+ 
+-        if fix_report["total_fixes"] > 0:
+-            if is_dry_run:
+-                click.echo(
+-                    f"{Fore.YELLOW}{Style.BRIGHT}🔍 [DRY-RUN] PRÉVIA DE"
+-                    f" AUTORREPARO ({fix_report['total_fixes']} correções"
+-                    f" propostas):{Style.RESET_ALL}\n"
+-                )
+-            else:
+-                click.echo(
+-                    f"{Fore.GREEN}{Style.BRIGHT}✔ [APPLY] AUTORREPARO APLICADO"
+-                    f" COM SUCESSO ({fix_report['total_fixes']} correções"
+-                    f" gravadas):{Style.RESET_ALL}\n"
+-                )
++        info = LiteXLEngine.lua_runtime_info()
++        if info:
++            lua_path, lua_version = info
++            click.echo(f"  {Fore.GREEN}✔ Cobertura TOTAL:{Fore.RESET} Compilação real ativa ({lua_version}).")
++        else:
++            click.echo(
++                f"  {Fore.YELLOW}⚠ Cobertura PARCIAL:{Fore.RESET} Scanner interno + balanceamento "
++                f"(sem runtime Lua externo).\n"
++                f"    {Fore.LIGHTBLACK_EX}Dica: Execute 'doxoade lite-xl lua --install' para validação 100% real.{Fore.RESET}"
++            )
++        click.echo()
+ 
+-            for item in fix_report["fixed_files"]:
+-                click.echo(
+-                    f"  {Fore.CYAN}📄 {item['file']}{Fore.RESET} ({item['fixes']}"
+-                    " reparos):"
+-                )
+-                for diff in item["diffs"]:
++        # ═══════════════════════════════════════════════════════════
++        # 1. AUTO-FIX ENGINE (COM DRY-RUN E SNIPPETS DE DIFF)
++        # ═══════════════════════════════════════════════════════════
++        if is_fix_active:
++            fix_report = LiteXLEngine.fix_templates(dry_run=is_dry_run)
++
++            if fix_report["total_fixes"] > 0:
++                if is_dry_run:
+                     click.echo(
+-                        f"    {Fore.WHITE}┌─ [{item['file']}:{diff['line']}]"
+-                        f" → {diff['type']}{Fore.RESET}"
++                        f"{Fore.YELLOW}{Style.BRIGHT}🔍 [DRY-RUN] PRÉVIA DE"
++                        f" AUTORREPARO ({fix_report['total_fixes']} correções"
++                        f" propostas):{Style.RESET_ALL}\n"
++                    )
++                else:
++                    click.echo(
++                        f"{Fore.GREEN}{Style.BRIGHT}✔ [APPLY] AUTORREPARO APLICADO"
++                        f" COM SUCESSO ({fix_report['total_fixes']} correções"
++                        f" gravadas):{Style.RESET_ALL}\n"
+                     )
+-                    click.echo(f"    {Fore.RED} - {diff['old']}{Fore.RESET}")
+-                    click.echo(f"    {Fore.GREEN} + {diff['new']}{Fore.RESET}")
+-                    click.echo(f"    {Fore.WHITE}└{'─' * 60}{Fore.RESET}")
+-                click.echo()
+ 
+-            if is_dry_run:
+-                click.echo(
+-                    f"{Fore.YELLOW}💡 Nenhuma alteração foi gravada no disco."
+-                    " Execute com --apply para efetivar:{Fore.RESET}"
+-                )
++                for item in fix_report["fixed_files"]:
++                    click.echo(
++                        f"  {Fore.CYAN}📄 {item['file']}{Fore.RESET} ({item['fixes']}"
++                        " reparos):"
++                    )
++                    for diff in item["diffs"]:
++                        click.echo(
++                            f"    {Fore.WHITE}┌─ [{item['file']}:{diff['line']}]"
++                            f" → {diff['type']}{Fore.RESET}"
++                        )
++                        click.echo(f"    {Fore.RED} - {diff['old']}{Fore.RESET}")
++                        click.echo(f"    {Fore.GREEN} + {diff['new']}{Fore.RESET}")
++                        click.echo(f"    {Fore.WHITE}└{'─' * 60}{Fore.RESET}")
++                    click.echo()
++
++                if is_dry_run:
++                    click.echo(
++                        f"{Fore.YELLOW}💡 Nenhuma alteração foi gravada no disco."
++                        " Execute com --apply para efetivar:{Fore.RESET}"
++                    )
++                    click.echo(
++                        f"   {Fore.WHITE}doxoade lite-xl check-templates --fix"
++                        f" --apply{Fore.RESET}\n"
++                    )
++            elif fix:
+                 click.echo(
+-                    f"   {Fore.WHITE}doxoade lite-xl check-templates --fix"
+-                    f" --apply{Fore.RESET}\n"
++                    f"{Fore.GREEN}✔ Nenhum reparo pendente nos"
++                    f" templates.{Fore.RESET}\n"
+                 )
+-        elif fix:
+-            click.echo(
+-                f"{Fore.GREEN}✔ Nenhum reparo pendente nos"
+-                f" templates.{Fore.RESET}\n"
+-            )
+ 
+-    # ═══════════════════════════════════════════════════════════
+-    # 2. AUDITORIA E SNIPPETS FORENSES DE CÓDIGO
+-    # ═══════════════════════════════════════════════════════════
+-    report = LiteXLEngine.verify_templates()
++        # ═══════════════════════════════════════════════════════════
++        # 2. AUDITORIA E SNIPPETS FORENSES DE CÓDIGO
++        # ═══════════════════════════════════════════════════════════
++        report = LiteXLEngine.verify_templates()
+ 
+-    # 🐺 FASE 2: SHADOW RUNTIME AUDIT (Headless Mock Engine)
+-    click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🐺 AUDITORIA SEMÂNTICA SHADOW (Active Simulator){Style.RESET_ALL}")
+-    shadow_report = LiteXLEngine.run_shadow_audit()
+-    if shadow_report.get("status") == "SKIPPED":
+-        click.echo(f"  {Fore.YELLOW}⚠ Shadow Audit ignorado: {shadow_report.get('reason')}{Fore.RESET}\n")
+-    else:
+-        for fname, sdata in shadow_report.get("files", {}).items():
+-            status_tag = f"{Fore.GREEN}[SHADOW PASS]{Fore.RESET}" if sdata["status"] == "PASS" else f"{Fore.RED}[SHADOW FAIL]{Fore.RESET}"
+-            time_badge = f"{Fore.LIGHTBLACK_EX}({sdata.get('time_ms', 0):.2f}ms){Fore.RESET}"
+-            click.echo(f"  {status_tag} {Style.BRIGHT}{fname:<35}{Style.RESET_ALL} {time_badge}")
+-            if sdata.get("error"):
+-                click.echo(f"      {Fore.RED}✖ {sdata['error']}{Fore.RESET}")
+-
+-        cmd_count = shadow_report.get("commands_count", 0)
+-        cmd_passed = shadow_report.get("commands_passed", 0)
+-        cmd_crashed = shadow_report.get("commands_crashed", 0)
+-
+-        if cmd_count > 0:
+-            status_color = Fore.GREEN if cmd_crashed == 0 else Fore.RED
+-            click.echo(f"\n  {status_color}✔ Simulação Ativa de Comandos:{Fore.RESET} {cmd_passed}/{cmd_count} executaram com sucesso ({cmd_crashed} falhas).")
+-
+-        if shadow_report.get("crashed_commands"):
+-            click.echo(f"  {Fore.RED}✖ Comandos que Falharam na Execução Ativa:{Fore.RESET}")
+-            for c in shadow_report["crashed_commands"]:
+-                click.echo(f"      {Fore.RED}• [{c['command']}]: {Fore.YELLOW}{c['error']}{Fore.RESET}")
+-
+-        if shadow_report.get("prompt_crashes"):
+-            click.echo(f"  {Fore.RED}✖ Falhas em Callbacks de Prompt (Submit):{Fore.RESET}")
+-            for p in shadow_report["prompt_crashes"]:
+-                click.echo(f"      {Fore.RED}• [{p['prompt']}]: {Fore.YELLOW}{p['error']}{Fore.RESET}")
+-
+-        if shadow_report.get("orphan_keys"):
+-            click.echo(f"  {Fore.RED}⚠ Atalhos Órfãos Detectados:{Fore.RESET}")
+-            for ok in shadow_report["orphan_keys"]:
+-                click.echo(f"      {Fore.YELLOW}• {ok}{Fore.RESET}")
+-
+-    for fname, data in report["files"].items():
+-        status_badge = (
+-            f"{Fore.GREEN}[PASS]{Fore.RESET}"
+-            if data["status"] == "PASS"
+-            else f"{Fore.RED}[FAIL]{Fore.RESET}"
+-        )
+-        click.echo(
+-            f"  {status_badge} {Style.BRIGHT}{fname:<35}{Style.RESET_ALL}"
+-            f" ({data['lines']} linhas)"
+-        )
++        # 🐺 FASE 2: SHADOW RUNTIME AUDIT (Headless Mock Engine)
++        click.echo(f"\n{Fore.CYAN}{Style.BRIGHT}🐺 AUDITORIA SEMÂNTICA SHADOW (Active Simulator){Style.RESET_ALL}")
++        shadow_report = LiteXLEngine.run_shadow_audit()
++        if shadow_report.get("status") == "SKIPPED":
++            click.echo(f"  {Fore.YELLOW}⚠ Shadow Audit ignorado: {shadow_report.get('reason')}{Fore.RESET}\n")
++        else:
++            for fname, sdata in shadow_report.get("files", {}).items():
++                status_tag = f"{Fore.GREEN}[SHADOW PASS]{Fore.RESET}" if sdata["status"] == "PASS" else f"{Fore.RED}[SHADOW FAIL]{Fore.RESET}"
++                time_badge = f"{Fore.LIGHTBLACK_EX}({sdata.get('time_ms', 0):.2f}ms){Fore.RESET}"
++                click.echo(f"  {status_tag} {Style.BRIGHT}{fname:<35}{Style.RESET_ALL} {time_badge}")
++                if sdata.get("error"):
++                    click.echo(f"      {Fore.RED}✖ {sdata['error']}{Fore.RESET}")
++
++            cmd_count = shadow_report.get("commands_count", 0)
++            cmd_passed = shadow_report.get("commands_passed", 0)
++            cmd_crashed = shadow_report.get("commands_crashed", 0)
++
++            if cmd_count > 0:
++                status_color = Fore.GREEN if cmd_crashed == 0 else Fore.RED
++                click.echo(f"\n  {status_color}✔ Simulação Ativa de Comandos:{Fore.RESET} {cmd_passed}/{cmd_count} executaram com sucesso ({cmd_crashed} falhas).")
++
++            if shadow_report.get("crashed_commands"):
++                click.echo(f"  {Fore.RED}✖ Comandos que Falharam na Execução Ativa:{Fore.RESET}")
++                for c in shadow_report["crashed_commands"]:
++                    click.echo(f"      {Fore.RED}• [{c['command']}]: {Fore.YELLOW}{c['error']}{Fore.RESET}")
++
++            if shadow_report.get("prompt_crashes"):
++                click.echo(f"  {Fore.RED}✖ Falhas em Callbacks de Prompt (Submit):{Fore.RESET}")
++                for p in shadow_report["prompt_crashes"]:
++                    click.echo(f"      {Fore.RED}• [{p['prompt']}]: {Fore.YELLOW}{p['error']}{Fore.RESET}")
++
++            if shadow_report.get("orphan_keys"):
++                click.echo(f"  {Fore.RED}⚠ Atalhos Órfãos Detectados:{Fore.RESET}")
++                for ok in shadow_report["orphan_keys"]:
++                    click.echo(f"      {Fore.YELLOW}• {ok}{Fore.RESET}")
++
++        for fname, data in report["files"].items():
++            status_badge = (
++                f"{Fore.GREEN}[PASS]{Fore.RESET}"
++                if data["status"] == "PASS"
++                else f"{Fore.RED}[FAIL]{Fore.RESET}"
++            )
++            click.echo(
++                f"  {status_badge} {Style.BRIGHT}{fname:<35}{Style.RESET_ALL}"
++                f" ({data['lines']} linhas)"
++            )
+ 
+-        for err in data["errors"]:
+-            click.echo(f"      {Fore.RED}✖ {err}{Fore.RESET}")
++            for err in data["errors"]:
++                click.echo(f"      {Fore.RED}✖ {err}{Fore.RESET}")
+ 
+-        # Renderização de Snippets Visuais
+-        for finding in data.get("findings", []):
+-            if finding.get("snippet"):
+-                line_no = finding["line"]
+-                click.echo(
+-                    f"        {Fore.CYAN}┌─ [{fname}:{line_no}]{Fore.RESET}"
+-                )
+-                for ln, is_target, code_text in finding["snippet"]:
+-                    prefix = f"{Fore.RED}>>{Fore.RESET}" if is_target else "  "
++            for finding in data.get("findings", []):
++                if finding.get("snippet"):
++                    line_no = finding["line"]
+                     click.echo(
+-                        f"        {prefix} {Fore.YELLOW}{ln:4d} |{Fore.RESET}"
+-                        f" {code_text}"
++                        f"        {Fore.CYAN}┌─ [{fname}:{line_no}]{Fore.RESET}"
+                     )
+-                click.echo(f"        {Fore.CYAN}└{'─' * 50}{Fore.RESET}")
+-
+-    if report["all_ok"]:
+-        click.echo(
+-            f"\n{Fore.GREEN}{Style.BRIGHT}✔ Todos os {report['total_files']}"
+-            f" passaram na auditoria (scanner + balanceamento){Style.RESET_ALL}\n"
+-        )
+-    else:
+-        click.echo(
+-            f"\n{Fore.RED}{Style.BRIGHT}✖ Foram encontrados erros nos"
+-            f" templates acima.{Style.RESET_ALL}"
+-        )
+-        if not is_fix_active:
++                    for ln, is_target, code_text in finding["snippet"]:
++                        prefix = f"{Fore.RED}>>{Fore.RESET}" if is_target else "  "
++                        click.echo(
++                            f"        {prefix} {Fore.YELLOW}{ln:4d} |{Fore.RESET}"
++                            f" {code_text}"
++                        )
++                    click.echo(f"        {Fore.CYAN}└{'─' * 50}{Fore.RESET}")
++
++        if report["all_ok"]:
++            click.echo(
++                f"\n{Fore.GREEN}{Style.BRIGHT}✔ Todos os {report['total_files']}"
++                f" passaram na auditoria (scanner + balanceamento){Style.RESET_ALL}\n"
++            )
++        else:
+             click.echo(
+-                f"{Fore.YELLOW}💡 Dica: Execute 'doxoade lite-xl"
+-                f" check-templates --fix' para simular o auto-reparo.{Fore.RESET}\n"
++                f"\n{Fore.RED}{Style.BRIGHT}✖ Foram encontrados erros nos"
++                f" templates acima.{Style.RESET_ALL}"
+             )
++            if not is_fix_active:
++                click.echo(
++                    f"{Fore.YELLOW}💡 Dica: Execute 'doxoade lite-xl"
++                    f" check-templates --fix' para simular o auto-reparo.{Fore.RESET}\n"
++                )
++
++    except SystemExit as e:
++        # Propaga o código de saída para o shell (importante para CI/CD)
++        if e.code not in (0, None):
++            click.secho(f"\n❌ Processo encerrado com código {e.code}.", fg="red")
++        raise
++    except Exception as e:
++        click.secho(f"\n❌ Erro fatal durante a auditoria: {e}", fg="red")
++        import traceback
++        traceback.print_exc()
++    finally:
++        # Pausa o terminal apenas quando for interativo (TTY).
++        # Em pipes/CI, isatty() é False e o input() seria pulado.
++        if sys.stdin and sys.stdin.isatty():
++            click.secho("\n🛑 Fim do check-templates. Pressione [ENTER] para sair...", fg="yellow")
++            try:
++                input()
++            except (KeyboardInterrupt, EOFError):
++                pass
+ 
+ @lite_xl_group.command("resolve-line")
+ @click.argument("line_no", type=int)
+@@ -2089,67 +2094,65 @@ def cmd_pty_probe(shell: str, timeout: float):
+     except Exception as e:
+         click.echo(f"  {Fore.RED}✖ Falha ao executar daemon: {e}{Fore.RESET}\n")
+ 
+-@lite_xl_group.command(
+-    "canonical",
+-    help="🏛️ Abre o Lite XL no modo canônico puro (sem deploy, sem promote, sem --userdir).",
+-)
+-@click.option("--exorcise/--no-exorcise", default=True,
+-              help="Encerra instâncias antigas antes (default: sim).")
++@lite_xl_group.command("canonical",help="🏛️ Abre o Lite XL no modo canônico puro (núcleo isolado).",)
++@click.option("--exorcise/--no-exorcise", default=True,help="Encerra instâncias antigas antes (default: sim).")
+ def cmd_canonical(exorcise):
+-    """🏛️ CANONICAL PURO — abre ~/.config/lite-xl/ sem tocar em arquivos.
+-
+-    Diferença fundamental vs `doxly deploy production`:
+-      • deploy production (Fase 4) = PROMOTE (copia staging → canonical)
+-      • canonical                = APENAS ABRIR canonical, zero I/O
+-    """
+     from doxoade.commands.lite_xl_systems.typhon_deploy import TyphonDeployEngine
++    from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+ 
+-    user_dir = LiteXLEngine.get_user_dir()
+-    init_file = LiteXLEngine.get_init_lua_path()
++    # Garante migração (idempotente)
++    if not TyphonDeployEngine.is_canonical_isolated():
++        ok, msg = TyphonDeployEngine.migrate_canonical_to_nucleus()
++        if not ok:
++            print(f"{Fore.RED}✖ Falha na migração: {msg}{Fore.RESET}\n")
++            return
++        for line in msg.splitlines():
++            print(f"  {Fore.CYAN}{line}{Fore.RESET}")
++
++    nucleus = LiteXLPaths.get_canonical_nucleus_dir()
++    init_file = LiteXLPaths.get_canonical_init_path()
++    vanilla = LiteXLPaths.get_vanilla_litexl_dir()
+ 
+-    print(f"\n{Fore.CYAN}{Style.BRIGHT}🏛️ CANONICAL MODE — Lite XL Puro{Style.RESET_ALL}")
+-    print(f"  {Fore.WHITE}Userdir :{Fore.RESET} {user_dir}")
+-    print(f"  {Fore.WHITE}Init.lua:{Fore.RESET} {init_file}")
+-    print(f"  {Fore.LIGHTBLACK_EX}Sem --userdir, sem promote, sem deploy.{Fore.RESET}\n")
++    print(f"\n{Fore.CYAN}{Style.BRIGHT}🏛️ CANONICAL MODE — Núcleo Isolado{Style.RESET_ALL}")
++    print(f"  {Fore.WHITE}Núcleo   :{Fore.RESET} {nucleus}")
++    print(f"  {Fore.WHITE}Init.lua :{Fore.RESET} {init_file}")
++    print(f"  {Fore.WHITE}Junction :{Fore.RESET} {vanilla} → {nucleus}")
++    print(f"  {Fore.LIGHTBLACK_EX}.exe duplo-clique resolve via junction (uso normal).{Fore.RESET}\n")
+ 
+     if not init_file.exists():
+-        print(f"{Fore.YELLOW}⚠ init.lua não existe em canonical.{Fore.RESET}")
++        print(f"{Fore.YELLOW}⚠ init.lua não existe no núcleo.{Fore.RESET}")
+         print(f"{Fore.LIGHTBLACK_EX}  Rode 'doxoade doxly deploy production' primeiro.{Fore.RESET}\n")
+         return
+ 
+     if exorcise:
+-        TyphonDeployEngine.exorcise_instances(wait_seconds=0.8)
+-        time.sleep(0.3)
++        TyphonDeployEngine.exorcise_instances(wait_seconds=1.5)
++        time.sleep(0.5)
+ 
+     exe = LiteXLEngine.find_executable()
+     if not exe:
+         print(f"{Fore.RED}✖ Executável do Lite XL não encontrado.{Fore.RESET}\n")
+         return
+ 
+-    # Env mínimo: só o modo (para o título "Doxly - produção - PID X").
+-    # Deliberadamente NÃO setamos LITE_USERDIR nem XDG_CONFIG_HOME
+-    # → o .exe resolve os paths como um duplo-clique faria.
+     env = os.environ.copy()
+     env["DOXOADE_DEPLOY_MODE"] = "production"
+ 
+     CREATE_NEW_CONSOLE = 0x00000010 if sys.platform == "win32" else 0
+     try:
+         proc = subprocess.Popen(
+-            [str(exe)],
++            [str(exe), "--userdir", str(nucleus)],
+             env=env,
+             creationflags=CREATE_NEW_CONSOLE,
+         )
+         pid = proc.pid
+ 
+-        # Grava .production.pid para o HUD exibir "PID N"
+-        pid_file = user_dir / ".production.pid"
++        pid_file = nucleus / ".production.pid"
+         try:
+             pid_file.write_text(str(pid), encoding="utf-8")
+         except Exception:
+             pass
+ 
+         print(f"{Fore.GREEN}✔ Lite XL CANÔNICO iniciado (PID: {pid}){Fore.RESET}")
+-        print(f"{Fore.LIGHTBLACK_EX}  Título: Doxly - produção - PID {pid}{Fore.RESET}\n")
++        print(f"{Fore.LIGHTBLACK_EX}  Núcleo: {nucleus}{Fore.RESET}\n")
+     except Exception as e:
+         print(f"{Fore.RED}✖ Falha ao iniciar: {e}{Fore.RESET}\n")
+ 
+@@ -2490,3 +2493,69 @@ def cmd_tray():
+         click.echo(f"{Fore.RED}✖ Biblioteca 'pystray' não encontrada.{Fore.RESET}")
+         click.echo(f"  Instale com: {Fore.CYAN}pip install pystray Pillow{Fore.RESET}")
+ 
++@lite_xl_group.command("migrate-canonical", help="🏛️ Migra o núcleo para ~/.doxoade/canonical/ e cria junction.")
++@click.option("--force", "-f", is_flag=True, help="Re-executa mesmo com marker existente.")
++def cmd_migrate_canonical(force):
++    from doxoade.commands.lite_xl_systems.typhon_deploy import TyphonDeployEngine
++    print(f"\n{Fore.CYAN}{Style.BRIGHT}🏛️ MIGRAÇÃO DO NÚCLEO CANÔNICO{Style.RESET_ALL}\n")
++    ok, msg = TyphonDeployEngine.migrate_canonical_to_nucleus(force=force)
++    if ok:
++        for line in msg.splitlines():
++            print(f"  {Fore.GREEN}✔{Fore.RESET} {line}")
++        print()
++    else:
++        print(f"  {Fore.RED}✖ {msg}{Fore.RESET}\n")
++
++@lite_xl_group.command("canonical-info", help="🔍 Inspeciona paths do núcleo, junction e estado de isolamento.")
++def cmd_canonical_info():
++    from doxoade.commands.lite_xl_systems.typhon_deploy import TyphonDeployEngine
++    from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
++
++    nucleus = LiteXLPaths.get_canonical_nucleus_dir()
++    vanilla = LiteXLPaths.get_vanilla_litexl_dir()
++    init_file = LiteXLPaths.get_canonical_init_path()
++    isolated = TyphonDeployEngine.is_canonical_isolated()
++
++    print(f"\n{Fore.CYAN}{Style.BRIGHT}🏛️ CANONICAL INFO{Style.RESET_ALL}\n")
++    print(f"  {Fore.WHITE}Núcleo:{Fore.RESET}      {nucleus}")
++    print(f"  {Fore.WHITE}init.lua:{Fore.RESET}    {'✔ ' + str(init_file.stat().st_size) + ' bytes' if init_file.exists() else '✖ ausente'}")
++    print(f"  {Fore.WHITE}Vanilla:{Fore.RESET}     {vanilla}")
++
++    junction_ok = False
++    if vanilla.exists():
++        try:
++            real = Path(os.path.realpath(vanilla))
++            junction_ok = (real == Path(os.path.realpath(nucleus)))
++        except Exception:
++            pass
++
++    status = (
++        f"{Fore.GREEN}✔ ativa{Fore.RESET}" if junction_ok
++        else (f"{Fore.RED}✖ quebrada/ausente{Fore.RESET}" if vanilla.exists() else f"{Fore.YELLOW}⚠ não existe{Fore.RESET}")
++    )
++    print(f"  {Fore.WHITE}Junction:{Fore.RESET}    {status}")
++    print(f"  {Fore.WHITE}Isolado:{Fore.RESET}     {Fore.GREEN + '✔ sim' + Fore.RESET if isolated else Fore.RED + '✖ não' + Fore.RESET}")
++
++    backups = TyphonDeployEngine.list_canonical_backups()
++    print(f"  {Fore.WHITE}Backups:{Fore.RESET}     {len(backups)} em {LiteXLPaths.get_canonical_backups_root()}\n")
++
++def _diagnose_junction(vanilla: Path, nucleus: Path) -> Tuple[str, str]:
++    """Retorna (status_curto, descrição_colorida)."""
++    if not _path_exists_any(vanilla):
++        return "ausente", f"{Fore.YELLOW}⚠ não existe{Fore.RESET}"
++
++    if not _is_junction_or_symlink(vanilla):
++        return "real", f"{Fore.YELLOW}⚠ diretório real (não migrado){Fore.RESET}"
++
++    if not vanilla.exists():
++        return "quebrada", f"{Fore.RED}✖ junction quebrada (alvo inacessível){Fore.RESET}"
++
++    try:
++        real = Path(os.path.realpath(vanilla))
++        target = Path(os.path.realpath(nucleus))
++        if real == target:
++            return "ativa", f"{Fore.GREEN}✔ ativa → {nucleus}{Fore.RESET}"
++        return "divergente", f"{Fore.RED}✖ aponta para {real}{Fore.RESET} (esperado: {nucleus})"
++    except Exception as e:
++        return "erro", f"{Fore.RED}✖ {e}{Fore.RESET}"
++
+diff --git a/doxoade/commands/lite_xl_systems/cmd_typhon_deploy.py b/doxoade/commands/lite_xl_systems/cmd_typhon_deploy.py
+index f4761c8..3e2dbe5 100644
+--- a/doxoade/commands/lite_xl_systems/cmd_typhon_deploy.py
++++ b/doxoade/commands/lite_xl_systems/cmd_typhon_deploy.py
+@@ -5,7 +5,7 @@ Comandos CLI para o Typhon Deploy Engine v2.0.
+ Separação clara entre PRODUCTION, SANDBOX e TEST modes com Launch Automático.
+ """
+ import click
+-import os
++import os, sys
+ from pathlib import Path
+ from doxoade.tools.doxcolors import Fore, Style
+ from .typhon_deploy import TyphonDeployEngine
+@@ -21,95 +21,59 @@ def deploy_group():
+ def cmd_status(mode):
+     TyphonDeployEngine.print_status(mode)
+ 
+-@deploy_group.command("production", help="🏛️ [FASE 4] DEPRECATED: alias de 'promote' (staging → canonical).")
+-@click.option("--force", "-f", is_flag=True, help="Força promote mesmo com warnings.")
+-@click.option("--launch/--no-launch", "-l/-nl", default=True, help="Lança o Lite XL após promote.")
+-@click.option("--allow-aot", is_flag=True, default=False,
+-              help="Permite AOT no canonical (D4: bloqueado por default).")
+-@click.option("--legacy-direct", is_flag=True, default=False,
+-              help="⚠️ [ESCAPE] Escreve direto em canonical, ignorando staging (bypassa o pipeline).")
++@deploy_group.command("production", help="🏛️ Compila para STAGING. O PROMOTE é manual.")
++@click.option("--force", "-f", is_flag=True, help="Força deploy mesmo com warnings.")
++@click.option("--launch/--no-launch", "-l/-nl", default=False, help="Lança o Lite XL após promote.")
++@click.option("--allow-aot", is_flag=True, default=False, help="Permite AOT no canonical (D4: bloqueado por padrão).")
++@click.option("--legacy-direct", is_flag=True, default=False, help="⚠️ [ESCAPE] Escreve direto em canonical, ignorando staging.")
+ def cmd_deploy_production(force, launch, allow_aot, legacy_direct):
+-    # ── MODO LEGACY: escape rápido para emergências ──
+     if legacy_direct:
+         print(f"\n{Fore.RED}{Style.BRIGHT}⚠️ MODO LEGACY ATIVADO (--legacy-direct){Style.RESET_ALL}")
+         print(f"  {Fore.YELLOW}Escrevendo DIRETO em canonical, ignorando staging.{Fore.RESET}")
+-        print(f"  {Fore.LIGHTBLACK_EX}Use apenas em emergências. O fluxo canônico é 'deploy staging' → 'promote'.{Fore.RESET}\n")
+-        status = TyphonDeployEngine.get_canonical_status()
+-        if status.get("promotion_pending") and not force:
+-            print(f"  {Fore.YELLOW}⚠ Staging diverge de canonical. Confirme com --force.{Fore.RESET}")
+-            return
+-        result = TyphonDeployEngine.deploy("production", force=force, no_khonsu=True)
+-        if result["success"]:
+-            print(f"\n{Fore.GREEN}✔ Deploy legacy concluído ({result.get('opt_mode', '?')}){Fore.RESET}")
+-            if result["backup"]:
+-                print(f"{Fore.CYAN}💾 Backup: {result['backup'].name}{Fore.RESET}")
+-            if launch:
+-                TyphonDeployEngine.launch("production", exorcise=True)
+-        else:
+-            print(f"\n{Fore.RED}✖ Deploy falhou: {result['error']}{Fore.RESET}")
+-        return
+-
+-     # ── MODO PADRÃO: rebuild staging + promote (Garante atualização) ──
+-    print(f"\n{Fore.CYAN}{Style.BRIGHT}🏛️ DEPLOY PRODUCTION — Pipeline Completo{Style.RESET_ALL}")
+-    print(f"{Fore.LIGHTBLACK_EX}  Passo 1: recompilar staging a partir dos templates.{Fore.RESET}")
+-    print(f"{Fore.LIGHTBLACK_EX}  Passo 2: promover staging → test + production.{Fore.RESET}\n")
+-
+-    # ── PASSO 1: rebuild staging ──
+-    print(f"{Fore.CYAN}  [1/2] Compilando staging...{Fore.RESET}")
+-    staging_result = TyphonDeployEngine.deploy(
+-        "staging", force=force, no_khonsu=True,
+-    )
+-    if not staging_result["success"]:
+-        print(f"{Fore.RED}✖ Falha ao compilar staging: {staging_result.get('error', '?')}{Fore.RESET}")
+-        print(f"{Fore.YELLOW}  Deploy de produção abortado.{Fore.RESET}\n")
+-        return
+-
+-    print(f"{Fore.GREEN}  ✔ Staging atualizado: {staging_result['init']}{Fore.RESET}")
+-    print(f"{Fore.LIGHTBLACK_EX}    Modo: {staging_result.get('opt_mode', '?')} "
+-          f"| {staging_result.get('size', 0):,} bytes{Fore.RESET}\n")
+-
+-    # ── PASSO 2: verificar AOT e promover ──
+-    status = TyphonDeployEngine.get_canonical_status()
+-
+-    if status["staging"]["is_aot"] and not allow_aot and not force:
+-        print(f"{Fore.RED}{Style.BRIGHT}⚠ Staging é AOT bytecode{Fore.RESET}")
+-        print(f"{Fore.YELLOW}  D4 despriorizou AOT. Rode 'deploy staging --no-khonsu' antes.{Fore.RESET}")
+-        print(f"{Fore.CYAN}  Ou passe --allow-aot para forçar (não recomendado).{Fore.RESET}\n")
+-        return
+-
+-    print(f"{Fore.CYAN}  [2/2] Promovendo staging → test + production...{Fore.RESET}")
+-
+-    if status["identical_canonical_staging"] and not force:
+-        print(f"{Fore.GREEN}  ✔ Canonical e staging já são idênticos após rebuild.{Fore.RESET}")
+-        print(f"{Fore.LIGHTBLACK_EX}    (nenhuma promoção necessária){Fore.RESET}\n")
+-        if launch:
+-            TyphonDeployEngine.launch("production", exorcise=True)
++        
++        try:
++            result = TyphonDeployEngine.deploy("production", force=force, no_khonsu=True)
++            if result["success"]:
++                print(f"\n{Fore.GREEN}✔ Deploy legacy concluído ({result.get('opt_mode', '?')}){Fore.RESET}")
++                if result["backup"]:
++                    print(f"{Fore.CYAN}💾 Backup: {result['backup'].name}{Fore.RESET}")
++                if launch:
++                    TyphonDeployEngine.launch("production", exorcise=True)
++            elif result.get("error") != "elevation_requested":
++                print(f"\n{Fore.RED}✖ Deploy falhou: {result['error']}{Fore.RESET}")
++                if sys.stdin and sys.stdin.isatty():
++                    input(f"\n{Fore.YELLOW}Pressione [ENTER] para continuar...{Fore.RESET}")
++        except Exception as e:
++            print(f"\n{Fore.RED}{Style.BRIGHT}✖ ERRO FATAL NO DEPLOY LEGACY{Style.RESET_ALL}")
++            print(f"{Fore.RED}{e}{Fore.RESET}")
++            if sys.stdin and sys.stdin.isatty():
++                input(f"\n{Fore.YELLOW}Pressione [ENTER] para continuar...{Fore.RESET}")
+         return
+ 
+-    if not force:
+-        delta = status["staging"]["size"] - status["canonical"]["size"]
+-        print(f"  {Fore.WHITE}Canonical:{Fore.RESET} {status['canonical']['size']:,} bytes "
+-              f"({'AOT' if status['canonical']['is_aot'] else 'source'})")
+-        print(f"  {Fore.WHITE}Staging:  {Fore.RESET} {status['staging']['size']:,} bytes "
+-              f"({'AOT' if status['staging']['is_aot'] else 'source'})  "
+-              f"({delta:+d} bytes)")
+-        if not click.confirm(
+-            f"{Fore.YELLOW}Propagar staging → test + production?{Fore.RESET}",
+-            default=False,
+-        ):
+-            print(f"{Fore.YELLOW}Promote cancelado.{Fore.RESET}\n")
++    print(f"\n{Fore.CYAN}{Style.BRIGHT}🏛️ COMPILAÇÃO DE PRODUCTION (STAGING){Style.RESET_ALL}")
++    print(f"{Fore.LIGHTBLACK_EX}  Passo único: compilar templates no ambiente de STAGING.{Fore.RESET}")
++    print(f"{Fore.LIGHTBLACK_EX}  O canonical só será alterado quando você rodar 'doxly deploy promote'.{Fore.RESET}\n")
++    
++    try:
++        staging_result = TyphonDeployEngine.deploy("staging", force=force, no_khonsu=True)
++        if not staging_result["success"]:
++            print(f"{Fore.RED}✖ Falha ao compilar staging: {staging_result.get('error', '?')}{Fore.RESET}")
++            if sys.stdin and sys.stdin.isatty():
++                input(f"\n{Fore.YELLOW}Pressione [ENTER] para continuar...{Fore.RESET}")
+             return
+-
+-    ok, msg = TyphonDeployEngine.promote(force=force, allow_aot=allow_aot)
+-    if ok:
+-        print(f"\n{Fore.GREEN}{Style.BRIGHT}✔ PROMOTE CONCLUÍDO (staging → test + production){Style.RESET_ALL}")
+-        for line in msg.splitlines():
+-            print(f"  {Fore.WHITE}{line}{Fore.RESET}")
+-        print(f"\n{Fore.LIGHTBLACK_EX}  Rollback: doxoade doxly deploy restore --list -m production{Fore.RESET}\n")
+-        if launch:
+-            TyphonDeployEngine.launch("production", exorcise=True)
+-    else:
+-        print(f"\n{Fore.RED}✖ Promote falhou: {msg}{Fore.RESET}\n")
++            
++        print(f"{Fore.GREEN}  ✔ Staging atualizado: {staging_result['init']}{Fore.RESET}")
++        print(f"{Fore.LIGHTBLACK_EX}    Modo: {staging_result.get('opt_mode', '?')} | {staging_result.get('size', 0):,} bytes{Fore.RESET}\n")
++        
++        print(f"\n{Fore.CYAN}{Style.BRIGHT}💡 PRÓXIMO PASSO:{Fore.RESET}")
++        print(f"  Para validar as mudanças, rode: {Fore.YELLOW}doxoade doxly deploy staging --launch-test{Fore.RESET}")
++        print(f"  Para enviar para produção, rode: {Fore.YELLOW}doxoade doxly deploy promote{Fore.RESET}\n")
++        
++    except Exception as e:
++        print(f"\n{Fore.RED}{Style.BRIGHT}✖ ERRO FATAL NA COMPILAÇÃO DE STAGING{Style.RESET_ALL}")
++        print(f"{Fore.RED}{e}{Fore.RESET}")
++        if sys.stdin and sys.stdin.isatty():
++            input(f"\n{Fore.YELLOW}Pressione [ENTER] para continuar...{Fore.RESET}")
+ 
+ @deploy_group.command("sandbox", help="Deploy em SANDBOX (isolamento total + launch automático).")
+ @click.option("--launch/--no-launch", "-l/-nl", default=True, help="Lança o Lite XL após deploy (Padrão: True).")
+@@ -129,35 +93,56 @@ def cmd_deploy_sandbox(launch, exorcise):
+ 
+ @deploy_group.command("test", help="Deploy em TESTE (source mode por padrão).")
+ @click.option("--force", "-f", is_flag=True)
+-@click.option("--no-khonsu", is_flag=True, default=True,
+-              help="[DEPRECATED] Source é o default.")
+-@click.option("--allow-aot", is_flag=True, default=False,
+-              help="Permite AOT bytecode.")
++@click.option("--no-khonsu", is_flag=True, default=True, help="[DEPRECATED] Source é o default.")
++@click.option("--allow-aot", is_flag=True, default=False, help="Permite AOT bytecode.")
+ @click.option("--exorcise/--no-exorcise", default=True)
+ def cmd_deploy_test(force, no_khonsu, allow_aot, exorcise):
+     print(f"\n{Fore.YELLOW}{Style.BRIGHT}🟡 DEPLOY TEST{Style.RESET_ALL}")
+     print(f"  {Fore.CYAN}Modo: source (D4){Fore.RESET}\n")
+-    effective_no_khonsu = not allow_aot
+-    result = TyphonDeployEngine.deploy("test", force=force, no_khonsu=effective_no_khonsu)
+-
+-    if result["success"]:
+-        print(f"\n{Fore.GREEN}✔ Deploy de teste concluído com sucesso! ({result.get('opt_mode', 'standard')}){Fore.RESET}")
+-        if result["backup"]:
+-            print(f"{Fore.CYAN}💾 Backup de segurança: {result['backup'].name}{Fore.RESET}")
+-        if exorcise:
+-            TyphonDeployEngine.exorcise_mode_instance("test")
+-        print()
+-        pid = TyphonDeployEngine.launch("test", exorcise=False)
+-        if pid:
+-            import threading
+-            from .typhon_deploy import forensic_harvester
+-            test_dir = TyphonDeployEngine._get_deploy_dir("test")
+-            thread = threading.Thread(target=forensic_harvester, args=(pid, test_dir), daemon=True)
+-            thread.start()
+-    else:
+-        print(f"\n{Fore.RED}✖ Deploy falhou: {result['error']}{Fore.RESET}")
+-        if result["backup"]:
+-            print(f"{Fore.YELLOW}🔄 Rollback automático executado.{Fore.RESET}")
++    
++    try:
++        effective_no_khonsu = not allow_aot
++        result = TyphonDeployEngine.deploy("test", force=force, no_khonsu=effective_no_khonsu)
++        
++        if result["success"]:
++            print(f"\n{Fore.GREEN}✔ Deploy de teste concluído com sucesso! ({result.get('opt_mode', 'standard')}){Fore.RESET}")
++            if result["backup"]:
++                print(f"{Fore.CYAN}💾 Backup de segurança: {result['backup'].name}{Fore.RESET}")
++            if exorcise:
++                TyphonDeployEngine.exorcise_mode_instance("test")
++            print()
++            pid = TyphonDeployEngine.launch("test", exorcise=False)
++            if pid:
++                import threading
++                from .typhon_deploy import forensic_harvester
++                test_dir = TyphonDeployEngine._get_deploy_dir("test")
++                thread = threading.Thread(target=forensic_harvester, args=(pid, test_dir), daemon=True)
++                thread.start()
++        elif result.get("error") == "elevation_requested":
++            print(f"\n{Fore.YELLOW}⏳ Deploy iniciado em janela elevada (UAC).{Fore.RESET}")
++            print(f"{Fore.CYAN}   Acompanhe a compilação no novo terminal.{Fore.RESET}")
++        else:
++            print(f"\n{Fore.RED}✖ Deploy falhou: {result.get('error', 'Erro desconhecido')}{Fore.RESET}")
++            if result.get("backup"):
++                print(f"{Fore.YELLOW}🔄 Rollback automático executado.{Fore.RESET}")
++            
++            # 🛡️ BLINDAGEM: Pausa para o usuário ver o erro no Launcher
++            if sys.stdin and sys.stdin.isatty():
++                print(f"\n{Fore.YELLOW}Pressione [ENTER] para continuar...{Fore.RESET}")
++                try:
++                    input()
++                except Exception:
++                    pass
++
++    except Exception as e:
++        print(f"\n{Fore.RED}{Style.BRIGHT}✖ ERRO FATAL NO DEPLOY{Style.RESET_ALL}")
++        print(f"{Fore.RED}{e}{Fore.RESET}")
++        if sys.stdin and sys.stdin.isatty():
++            print(f"\n{Fore.YELLOW}Pressione [ENTER] para continuar...{Fore.RESET}")
++            try:
++                input()
++            except Exception:
++                pass
+ 
+ @deploy_group.command("backup", help="Cria backup manual do init atual.")
+ @click.option("--mode", "-m", type=click.Choice(["production", "sandbox", "test"]), 
+@@ -410,7 +395,6 @@ def cmd_deploy_menu():
+         if choice == "1":
+             click.echo(f"\n{Fore.GREEN}🏛️ Abrindo Canonical (Sessão Isolada)...{Fore.RESET}")
+             ctx = click.Context(cmd_launch)
+-            # ✅ CORREÇÃO: passamos raw=False explicitamente
+             ctx.invoke(cmd_launch, mode="production", exorcise=True, raw=False)
+             break
+         elif choice == "2":
+@@ -422,6 +406,7 @@ def cmd_deploy_menu():
+             click.echo(f"\n{Fore.BLUE}🧪 Redeploying TEST...{Fore.RESET}")
+             ctx = click.Context(cmd_deploy_test)
+             ctx.invoke(cmd_deploy_test, force=True, no_khonsu=True, allow_aot=False, exorcise=True)
++            # 🎯 FIX: Impede que o menu feche imediatamente se for UAC, dando tempo pro usuário ler
+             break
+         elif choice == "4":
+             click.echo(f"\n{Fore.CYAN}🎯 Redeploying STAGING...{Fore.RESET}")
+diff --git a/doxoade/commands/lite_xl_systems/lite_xl_diagnostics.py b/doxoade/commands/lite_xl_systems/lite_xl_diagnostics.py
+index 52bf111..2983cbb 100644
+--- a/doxoade/commands/lite_xl_systems/lite_xl_diagnostics.py
++++ b/doxoade/commands/lite_xl_systems/lite_xl_diagnostics.py
+@@ -408,6 +408,14 @@ local Node = { draw_tab_title = function() end, on_mouse_pressed = function() en
+ local RootView = { draw = function() end, on_mouse_moved = function() end, on_mouse_pressed = function() end, extend = function(self) return self end }
+ local View = { extend = function(self) return self end }
+ local StatusView = { Item = { LEFT = 1, RIGHT = 2 } }
++local CommandView = {
++  hide    = function() end,
++  submit  = function() end,
++  enter   = function() end,
++  show    = function() end,
++  text    = "",
++  visible = false,
++}
+ 
+ rawset(_G, "core", core)
+ rawset(_G, "system", system)
+@@ -431,6 +439,7 @@ package.loaded["core.doc"] = Doc
+ package.loaded["core.view"] = View
+ package.loaded["core.rootview"] = RootView
+ package.loaded["core.statusview"] = StatusView
++package.loaded["core.commandview"] = CommandView
+ 
+ -- 2. Carregamento dos Templates
+ for _, tpath in ipairs(templates) do
+diff --git a/doxoade/commands/lite_xl_systems/lite_xl_init_builder.py b/doxoade/commands/lite_xl_systems/lite_xl_init_builder.py
+index 665ad82..34615ee 100644
+--- a/doxoade/commands/lite_xl_systems/lite_xl_init_builder.py
++++ b/doxoade/commands/lite_xl_systems/lite_xl_init_builder.py
+@@ -179,7 +179,7 @@ class LiteXLInitBuilder:
+         """
+         [FASE 17] Usa pipeline AOT (DoxlyKhonsuGate) igual ao deploy test.
+         """
+-        init_path = LiteXLPaths.get_init_lua_path()
++        init_path = LiteXLPaths.get_canonical_init_path()  # 🏛️ núcleo isolado
+         init_path.parent.mkdir(parents=True, exist_ok=True)
+         guard_dir = LiteXLPaths.get_user_dir() / ".doxoade" / "api_guard"
+         guard_dir.mkdir(parents=True, exist_ok=True)
+diff --git a/doxoade/commands/lite_xl_systems/lite_xl_paths.py b/doxoade/commands/lite_xl_systems/lite_xl_paths.py
+index 8b3baa8..a8e9dca 100644
+--- a/doxoade/commands/lite_xl_systems/lite_xl_paths.py
++++ b/doxoade/commands/lite_xl_systems/lite_xl_paths.py
+@@ -178,3 +178,30 @@ class LiteXLPaths:
+             return lua, version
+         except Exception:
+             return lua, "versão desconhecida"
++
++    # ═══════════════════════════════════════════════════════════════
++    # 🏛️ NÚCLEO CANÔNICO ISOLADO (fora do alcance do .exe)
++    # ═══════════════════════════════════════════════════════════════
++    @classmethod
++    def get_canonical_nucleus_dir(cls) -> Path:
++        """Diretório raiz do núcleo canônico isolado."""
++        nucleus = Path.home() / ".doxoade" / "canonical"
++        nucleus.mkdir(parents=True, exist_ok=True)
++        return nucleus
++
++    @classmethod
++    def get_canonical_init_path(cls) -> Path:
++        """init.lua do núcleo canônico isolado."""
++        return cls.get_canonical_nucleus_dir() / "init.lua"
++
++    @classmethod
++    def get_canonical_backups_root(cls) -> Path:
++        """Backups canônicos — FORA do núcleo (irmão, sobrevive a rm -rf)."""
++        bkp = Path.home() / ".doxoade" / "backups" / "canonical"
++        bkp.mkdir(parents=True, exist_ok=True)
++        return bkp
++
++    @classmethod
++    def get_vanilla_litexl_dir(cls) -> Path:
++        """Path que o `.exe` do Lite XL resolve sozinho (fachada via junction)."""
++        return Path.home() / ".config" / "lite-xl"
+diff --git a/doxoade/commands/lite_xl_systems/template/06_tree_manager.lua b/doxoade/commands/lite_xl_systems/template/06_tree_manager.lua
+index 4aca1ea..2aefe72 100644
+--- a/doxoade/commands/lite_xl_systems/template/06_tree_manager.lua
++++ b/doxoade/commands/lite_xl_systems/template/06_tree_manager.lua
+@@ -33,23 +33,47 @@ local function ensure_parent_directories(file_path)
+   local clean = tostring(file_path):gsub("\\", "/")
+   local dir = clean:match("^(.*)/")
+   if not dir or dir == "" then return end
+-
++  
+   local current = ""
+   local drive = dir:match("^([a-zA-Z]:)")
+   if drive then
+     current = drive
+     dir = dir:sub(#drive + 1)
+   end
+-
++  
+   for part in dir:gmatch("[^/]+") do
+     current = current .. "/" .. part
+     local info = system.get_file_info(current)
+     if not info then
+-      pcall(system.mkdir, current)
++      -- Tenta criar com barra invertida nativa (Windows)
++      local native_path = current:gsub("/", PATHSEP or "\\")
++      pcall(system.mkdir, native_path)
+     end
+   end
+ end
+ 
++local function resolve_smart_file_path(input_path, base_dir)
++  if not input_path or input_path:match("^%s*$") then return nil end
++  local clean_input = input_path:gsub("\\", "/"):gsub("^%s+", ""):gsub("%s+$", "")
++  clean_input = clean_input:gsub('^["\']', ''):gsub('["\']$', '')
++  
++  -- Se for caminho absoluto
++  if clean_input:find("^[a-zA-Z]:") or clean_input:sub(1, 1) == "/" or clean_input:sub(1, 1) == "~" then
++    return normalize_path(clean_input)
++  end
++
++  base_dir = base_dir or get_real_workspace_root()
++  base_dir = base_dir:gsub("\\", "/"):gsub("/+$", "")
++  
++  -- 🎯 FIX: Remove o nome da pasta base se o usuário digitou ela de novo (ex: está em X e digita X/Y/A.txt)
++  local base_name = base_dir:match("([^/]+)$")
++  if base_name and clean_input:lower():sub(1, #base_name + 1) == base_name:lower() .. "/" then
++    clean_input = clean_input:sub(#base_name + 2)
++  end
++  
++  return base_dir .. "/" .. clean_input
++end
++
+ local function get_real_workspace_root()
+   -- 1. Procura a raiz de trabalho real (ignora test_deploy e sandbox)
+   if core.project_directories then
+@@ -295,49 +319,24 @@ end
+ 
+ local function resolve_smart_file_path(input_path)
+   if not input_path or input_path:match("^%s*$") then return nil end
+-
+-  -- 1. Normalização de barras e limpeza de aspas/espaços
+   local clean_input = input_path:gsub("\\", "/"):gsub("^%s+", ""):gsub("%s+$", "")
+   clean_input = clean_input:gsub('^["\']', ''):gsub('["\']$', '')
+-
+-  -- 2. Se já for absoluto (C:/... ou /... ou ~)
++  
+   if clean_input:find("^[a-zA-Z]:") or clean_input:sub(1, 1) == "/" or clean_input:sub(1, 1) == "~" then
+     return normalize_path(clean_input)
+   end
+ 
+   local filename = clean_input:match("([^/]+)$") or clean_input
+   local dir_part = clean_input:sub(1, #clean_input - #filename):gsub("/+$", "")
+-
++  
+   local roots = get_all_real_project_roots()
+   local primary_root = roots[1] or get_real_workspace_root()
+-
+-  -- 3. Sem subpasta no input (só o nome do arquivo): cria na raiz principal
++  
+   if dir_part == "" then
+     return primary_root .. "/" .. filename
+   end
+-
+-  -- 4. Resolve a MELHOR pasta existente entre TODOS os projetos anexados,
+-  --    por segmentos de caminho (lida com pastas filhas de mesmo nome e com
+-  --    múltiplos projetos simultâneos na TreeView).
+-  local all_dirs = get_all_directories()
+-  local needle_segs = _path_segments(dir_part)
+-  local best_dir, best_score = nil, math.huge
+-  for _, d in ipairs(all_dirs) do
+-    if d.relative ~= "" then
+-      local score = _match_score(needle_segs, _path_segments(d.relative), d.root_basename)
+-      if score and score < best_score then
+-        best_dir, best_score = d.path, score
+-      end
+-    end
+-  end
+-
+-  if best_dir then
+-    return best_dir .. "/" .. filename
+-  end
+-
+-  -- 5. Fallback: nenhuma pasta existente corresponde (estrutura totalmente
+-  --    nova) — cria a partir da raiz principal, criando as pastas
+-  --    intermediárias que faltarem.
++  
++  -- 🎯 FIX: Se for um caminho digitado com barras, ele prioriza a raiz exata em vez de tentar adivinhar
+   return primary_root .. "/" .. clean_input
+ end
+ 
+@@ -374,20 +373,60 @@ end)
+ -- =============================================================================
+ -- COMANDOS SOBERANOS DA ÁRVORE
+ -- =============================================================================
++local function get_target_tree_item()
++  local tv = core.active_view
++  if not tv then return nil end
++  local item = nil
++  if tv.hovered_item then
++    item = tv.hovered_item
++  elseif tv.selected_item then
++    item = tv.selected_item
++  elseif type(tv.get_item_under_pos) == "function" then
++    local mx, my = core.root_view.mouse.x, core.root_view.mouse.y
++    local ok, it = pcall(tv.get_item_under_pos, tv, mx, my)
++    if ok then item = it end
++  end
++  return item
++end
++
+ command.add(nil, {
++  ["doxoade:move-or-rename-interactive"] = function()
++    local item = get_target_tree_item()
++    if not item or not item.filename then
++      core.log("⚠ Selecione um arquivo ou pasta na árvore (TreeView).")
++      return
++    end
++    local target_path = item.filename
++    local root = get_real_workspace_root()
++    local rel = target_path:gsub("\\", "/"):sub(#root + 2)
++
++    core.command_view:enter("📝 Novo caminho (Relativo à raiz):", {
++      text = rel,
++      submit = function(new_path)
++        if not new_path or new_path == "" or new_path == rel then return end
++        new_path = new_path:gsub("[/\\]", PATHSEP or "\\")
++        local full_new = root .. (PATHSEP or "\\") .. new_path
++        ensure_parent_directories(full_new)
++        local ok, err = os.rename(target_path, full_new)
++        if ok then
++          core.log("✔ Movido/Renomeado para: " .. new_path)
++          core.redraw = true
++        else
++          core.error("✖ Falha ao mover: " .. tostring(err))
++        end
++      end
++    })
++  end,
++
+   ["doxoade:create-file-interactive"] = function()
+     core.command_view:enter("Criar Arquivo (Ctrl+Alt+N)", {
+       submit = function(input_path)
+         local full_path = resolve_smart_file_path(input_path)
+         if not full_path then return end
+-
++        full_path = full_path:gsub("/", PATHSEP or "\\")
+         ensure_parent_directories(full_path)
+-
+-        -- Cria o arquivo no disco se não existir
+         local f = io.open(full_path, "a")
+         if f then f:close() end
+-
+-        -- Abre o arquivo criado em uma nova aba
+         local doc = core.open_doc(full_path)
+         if doc then
+           core.root_view:open_doc(doc)
+@@ -397,46 +436,13 @@ command.add(nil, {
+           core.error("✖ Falha ao abrir o arquivo criado: " .. full_path)
+         end
+       end,
+-      suggest = function(text)
+-        -- Auto-reversão dinâmica de barras em tempo real ao colar/digitar '\'
+-        if text and text:find("\\") then
+-          local converted = text:gsub("\\", "/")
+-          pcall(function()
+-            if core.command_view and core.command_view.set_text then
+-              core.command_view:set_text(converted)
+-            end
+-          end)
+-        end
+-        return {}
+-      end
+     })
+   end,
++
+   ["doxoade:new-file-in-tree"] = function()
+     command.perform("doxoade:create-file-interactive")
+   end,
+-  ["doxoade:toggle-litexl-in-tree"] = function()
+-    if not core.project_directories then return end
+-    local clean_userdir = tostring(system.absolute_path(USERDIR) or USERDIR):gsub("\\", "/"):lower()
+-    for idx, p in ipairs(core.project_directories) do
+-      local raw_path = type(p) == "table" and (p.path or p.name) or p
+-      local ppath = tostring(raw_path or ""):gsub("\\", "/"):lower()
+-      if ppath == clean_userdir then
+-        if core.remove_project_directory then
+-          core.remove_project_directory(type(p) == "table" and (p.path or p) or p)
+-        else
+-          table.remove(core.project_directories, idx)
+-        end
+-        core.log("Lite XL Config desanexado da Árvore.")
+-        core.redraw = true
+-        return
+-      end
+-    end
+-    if core.add_project_directory then
+-      core.add_project_directory(USERDIR)
+-      core.log("Lite XL Config anexado à Árvore.")
+-      core.redraw = true
+-    end
+-  end,
++
+   ["treeview:add-project-folder"] = function()
+     core.command_view:enter("Caminho do Projeto para Adicionar", {
+       submit = function(path)
+@@ -486,9 +492,6 @@ command.add(nil, {
+   end
+ })
+ 
+--- =============================================================================
+--- 3. INTEGRAÇÃO COM O MENU DE CONTEXTO DO TREEVIEW
+--- =============================================================================
+ pcall(function()
+   local contextmenu = require "plugins.contextmenu"
+   local TreeView = require "plugins.treeview"
+@@ -496,6 +499,7 @@ pcall(function()
+     contextmenu.register(function(view)
+       return view:is(TreeView)
+     end, {
++      { text = "Mover / Renomear...", command = "doxoade:move-or-rename-interactive" },
+       { text = "New File...", command = "doxoade:create-file-interactive" },
+       { text = "Add Project Folder...", command = "treeview:add-project-folder" },
+       { text = "Remove Project Folder...", command = "treeview:remove-project-folder" },
+diff --git a/doxoade/commands/lite_xl_systems/template/08_pot_panel.lua b/doxoade/commands/lite_xl_systems/template/08_pot_panel.lua
+index f0f36e0..97895fc 100644
+--- a/doxoade/commands/lite_xl_systems/template/08_pot_panel.lua
++++ b/doxoade/commands/lite_xl_systems/template/08_pot_panel.lua
+@@ -519,12 +519,19 @@ function ConsultDocReaderView:new(title, doc_path, md_lines, parent_search_view)
+   self.hovered_back = false
+   self.hovered_raw_btn = false
+   self.hovered_copy_btn = false
++  self.hovered_wrap_btn = false    -- 👈 NOVO
++  self.wrap_enabled = true         -- 👈 NOVO (Inicia ligado)
+   self.raw_mode = false
+   self.lines_raw = self:generate_raw_lines(self.lines_formatted)
+ 
+   self.is_selecting = false
+   self.sel_start_line = nil
+   self.sel_end_line = nil
++  self.search_query = ""
++  self.search_matches = {}
++  self.search_ordered = {}
++  self.search_current = 0
++  self.search_active = false
+ end
+ 
+ local function style_line_markdown(line)
+@@ -639,6 +646,7 @@ function ConsultDocReaderView:reflow()
+   self.view_lines = view
+ end
+ 
++
+ function ConsultDocReaderView:get_scrollable_size()
+   self:reflow()
+   return (#self.view_lines + 1) * self.line_height
+@@ -679,11 +687,108 @@ function ConsultDocReaderView:get_name()
+   return "📖 " .. (self.doc_title:sub(1, 24))
+ end
+ 
++-- ────────────────────────────────────────────────────────────────
++-- FASE 3: Busca local no leitor (Ctrl+F / F3 / Shift+F3 / Escape)
++-- ────────────────────────────────────────────────────────────────
++function ConsultDocReaderView:perform_search(query)
++  self.search_query = query or ""
++  self.search_matches = {}
++  self.search_ordered = {}
++  self.search_current = 0
++  if self.search_query == "" then
++    self.search_active = false
++    core.redraw = true
++    return
++  end
++  local needle = self.search_query:lower()
++  local active = self:get_active_lines()
++  for i, line in ipairs(active) do
++    local lower = tostring(line or ""):lower()
++    local spans = {}
++    local start = 1
++    while true do
++      local s, e = lower:find(needle, start, true)
++      if not s then break end
++      table.insert(spans, { s, e })
++      table.insert(self.search_ordered, { line_idx = i, start = s, finish = e })
++      start = e + 1
++    end
++    if #spans > 0 then
++      self.search_matches[i] = spans
++    end
++  end
++  if #self.search_ordered > 0 then
++    self.search_active = true
++    self.search_current = 1
++    self:_scroll_to_match(1)
++  else
++    self.search_active = false
++  end
++  core.redraw = true
++end
++
++function ConsultDocReaderView:_scroll_to_match(idx)
++  local m = self.search_ordered[idx]
++  if not m then return end
++  local target_y = (m.line_idx - 1) * self.line_h
++  local view_h = self.size.y - self.header_h - 40
++  local new_scroll = target_y - math.floor(view_h / 2)
++  if new_scroll < 0 then new_scroll = 0 end
++  self.scroll.y = new_scroll
++end
++
++function ConsultDocReaderView:search_next()
++  if not self.search_active or #self.search_ordered == 0 then return end
++  self.search_current = (self.search_current % #self.search_ordered) + 1
++  self:_scroll_to_match(self.search_current)
++  core.redraw = true
++end
++
++function ConsultDocReaderView:search_prev()
++  if not self.search_active or #self.search_ordered == 0 then return end
++  self.search_current = self.search_current - 1
++  if self.search_current < 1 then
++    self.search_current = #self.search_ordered
++  end
++  self:_scroll_to_match(self.search_current)
++  core.redraw = true
++end
++
++function ConsultDocReaderView:clear_search()
++  self.search_query = ""
++  self.search_matches = {}
++  self.search_ordered = {}
++  self.search_current = 0
++  self.search_active = false
++  core.redraw = true
++end
++
+ function ConsultDocReaderView:get_scrollable_size()
+   local active = self:get_active_lines()
+-  return self.header_h + (#active * self.line_h) + 60
++  if not self.wrap_enabled then
++    return self.header_h + (#active * self.line_h) + 60
++  end
++  local font = style.code_font or style.font
++  local max_text_w = (self.size.x or 600) - 60
++  local total_h = 0
++  
++  for _, line in ipairs(active) do
++    local text = tostring(line or "")
++    local approx_lines = 1
++    
++    -- 🎯 INTELIGÊNCIA DE CÓDIGO: Não quebra se for bloco de código
++    local is_code = text:match("^%s%s%s%s") or text:match("^%s*>>>") or text:match("^%s*%.%.%.") or text:find("^```")
++    
++    if not is_code then
++      approx_lines = math.ceil(font:get_width(text) / max_text_w)
++      if approx_lines < 1 then approx_lines = 1 end
++    end
++    total_h = total_h + (self.line_h * approx_lines)
++  end
++  return self.header_h + total_h + 60
+ end
+ 
++
+ function ConsultDocReaderView:copy_selection_to_clipboard()
+   if not self.sel_start_line or not self.sel_end_line then
+     local active = self:get_active_lines()
+@@ -720,12 +825,12 @@ function ConsultDocReaderView:draw()
+   local scroll_y = self.scroll.y or 0
+   local scrollbar_w = style.scrollbar_size or 8
+   local font = style.code_font or style.font
+-
+-  -- 1. Barra de Ações Superior
++  
+   draw_rect_safe(x, y, w, self.header_h, style.background3 or { 30, 30, 36, 255 })
+   draw_rect_safe(x, y + self.header_h - 1, w, 1, style.divider or { 60, 60, 70, 255 })
+   draw_rect_safe(x, y, w, 2, { 34, 197, 94, 255 })
+ 
++  -- BOTÕES DO HEADER
+   local back_w = 145
+   local back_rect = { x = x + 8, y = y + 6, w = back_w, h = 26 }
+   self.back_rect = back_rect
+@@ -748,67 +853,164 @@ function ConsultDocReaderView:draw()
+   draw_rect_safe(copy_rect.x, copy_rect.y, copy_rect.w, copy_rect.h, self.hovered_copy_btn and { 50, 60, 75, 255 } or { 40, 40, 48, 255 })
+   draw_text_safe(font, "📋 Copiar", copy_rect.x + 10, copy_rect.y + 5, self.hovered_copy_btn and { 255, 255, 255, 255 } or style.dim)
+ 
++  local wrap_w = 90
++  local wrap_x = copy_x + copy_w + 8
++  local wrap_rect = { x = wrap_x, y = y + 6, w = wrap_w, h = 26 }
++  self.wrap_btn_rect = wrap_rect
++  local wrap_bg = self.wrap_enabled and { 34, 197, 94, 200 } or (self.hovered_wrap_btn and { 50, 60, 75, 255 } or { 40, 40, 48, 255 })
++  local wrap_fg = self.wrap_enabled and { 0, 0, 0, 255 } or (self.hovered_wrap_btn and { 255, 255, 255, 255 } or { 200, 200, 210, 255 })
++  draw_rect_safe(wrap_rect.x, wrap_rect.y, wrap_rect.w, wrap_rect.h, wrap_bg)
++  draw_text_safe(font, self.wrap_enabled and "↩ Wrap: ON" or "↩ Wrap: OFF", wrap_rect.x + 8, wrap_rect.y + 5, wrap_fg)
++
++  -- 🎯 BADGE DE BUSCA
++  if self.search_active then
++    local badge_txt = string.format("🔍 %s (%d/%d)", self.search_query, self.search_current or 0, #self.search_ordered)
++    local badge_w = font:get_width(badge_txt) + 20
++    local badge_x = x + w - badge_w - 8
++    local badge_y = y + 5
++    draw_rect_safe(badge_x, badge_y, badge_w, 24, { 250, 204, 21, 40 })
++    draw_rect_safe(badge_x, badge_y, 2, 24, { 250, 204, 21, 255 })
++    draw_text_safe(font, badge_txt, badge_x + 10, badge_y + 4, { 250, 204, 21, 255 })
++    -- Botão fechar busca
++    local close_x = badge_x - 26
++    draw_rect_safe(close_x, badge_y, 20, 24, self.hovered_search_close and { 220, 38, 38, 255 } or { 60, 60, 70, 255 })
++    draw_text_safe(font, "×", close_x + 6, badge_y + 2, { 255, 255, 255, 255 })
++    self.search_close_rect = { x = close_x, y = badge_y, w = 20, h = 24 }
++  else
++    self.search_close_rect = nil
++  end
++
+   local path_label = "📄 " .. self.doc_path
+-  draw_text_safe(font, path_label, copy_x + copy_w + 14, y + 10, style.dim)
++  draw_text_safe(font, path_label, wrap_x + wrap_w + 14, y + 10, style.dim)
+ 
+-  -- 2. Renderização do Conteúdo
+   core.push_clip_rect(x, y + self.header_h, w - scrollbar_w - 2, h - self.header_h)
+   local cur_y = y + self.header_h + 10 - scroll_y
+   local active = self:get_active_lines()
+-
+   local s_sel = self.sel_start_line and self.sel_end_line and math.min(self.sel_start_line, self.sel_end_line)
+   local e_sel = self.sel_start_line and self.sel_end_line and math.max(self.sel_start_line, self.sel_end_line)
+-
+   local in_code_block = false
++  local max_text_w = w - 60
+ 
+   for line_idx, line in ipairs(active) do
+     local text = tostring(line or "")
++    local is_fence = text:find("^```")
++    if is_fence then in_code_block = not in_code_block end
++    
++    local is_code_line = in_code_block or is_fence or 
++                         text:match("^%s%s%s%s") or 
++                         text:match("^%s*>>>") or 
++                         text:match("^%s*%.%.%.") or
++                         text:match("^%s*[-%*]%s")
+     
+-    -- Atualiza estado do bloco de código (necessário para todas as linhas)
+-    if text:find("^```") then
+-      in_code_block = not in_code_block
+-      -- Opcional: desenhar a barra do fence se quiser
+-    end
+-
+-    -- Culling de viewport: só desenha o que está visível
+     if (cur_y + self.line_h) > (y + self.header_h) and cur_y < (y + h) then
+-      -- Highlight de seleção (por trás do texto)
++      -- Highlights de Seleção (Mouse)
+       if s_sel and e_sel and line_idx >= s_sel and line_idx <= e_sel then
+         draw_rect_safe(x + 10, cur_y, w - scrollbar_w - 20, self.line_h, { 56, 189, 248, 70 })
+       end
+-
+-      -- Renderização baseada no estado da linha
+-      if text:find("^```") then
+-        -- Fence: apenas uma linha decorativa
+-        draw_rect_safe(x + 14, cur_y + math.floor(self.line_h / 2), w - scrollbar_w - 28, 2, { 60, 60, 75, 255 })
+       
+-      elseif in_code_block then
+-        -- Dentro de bloco de código
+-        draw_rect_safe(x + 14, cur_y, w - scrollbar_w - 28, self.line_h, { 14, 14, 18, 255 })
+-        draw_rect_safe(x + 14, cur_y, 2, self.line_h, self.raw_mode and { 34, 197, 94, 255 } or { 100, 100, 140, 255 })
+-        local code_color = text:find("^# ↳") and { 130, 140, 150, 255 } or { 230, 230, 140, 255 }
+-        draw_text_safe(font, text, x + 24, cur_y + 1, code_color)
++      -- 🎯 Highlights de Busca (Amarelo)
++      if self.search_active and self.search_matches[line_idx] then
++        for _, span in ipairs(self.search_matches[line_idx]) do
++          local prefix = text:sub(1, span[1] - 1)
++          local match = text:sub(span[1], span[2])
++          local px = x + 18 + font:get_width(prefix)
++          local pw = font:get_width(match)
++          
++          -- É o match atual? Pinta mais forte.
++          local is_current = false
++          if self.search_ordered[self.search_current] then
++            local cur = self.search_ordered[self.search_current]
++            if cur.line_idx == line_idx and cur.start == span[1] then
++              is_current = true
++            end
++          end
++          
++          local color = is_current and { 250, 204, 21, 200 } or { 250, 204, 21, 90 }
++          if not is_code_line and self.wrap_enabled then
++             -- Se tiver wrap, desenhar o fundo da palavra inteira. Como estamos renderizando por word, pulamos o X exato e desenhamos o bloco inteiro pra garantir.
++             -- Mas para precisão visual sem wrap, mantemos o X exato.
++          else
++             draw_rect_safe(px, cur_y + 1, math.max(2, pw), self.line_h - 2, color)
++          end
++        end
++      end
+       
++      if self.wrap_enabled and not is_code_line then
++        local words = {}
++        for word in text:gmatch("%S+") do table.insert(words, word) end
++        if #words == 0 then words = { text } end
++        local current_line = ""
++        for _, word in ipairs(words) do
++          local test_line = current_line == "" and word or (current_line .. " " .. word)
++          
++          -- 🎯 No wrap, checa se a palavra faz parte da busca e pinta o fundo por trás dela
++          if self.search_active and self.search_matches[line_idx] then
++            local word_lower = word:lower()
++            if word_lower:find(self.search_query:lower(), 1, true) then
++              local temp_parts = style_line_markdown(current_line)
++              local temp_w = 0
++              for _, p in ipairs(temp_parts) do if p.text then temp_w = temp_w + font:get_width(p.text) end end
++              
++              local is_cur = false
++              if self.search_ordered[self.search_current] then
++                local cur = self.search_ordered[self.search_current]
++                if cur.line_idx == line_idx and text:sub(cur.start, cur.finish):lower() == word_lower then is_cur = true end
++              end
++              local col = is_cur and { 250, 204, 21, 200 } or { 250, 204, 21, 90 }
++              draw_rect_safe(x + 18 + temp_w, cur_y, font:get_width(word), self.line_h, col)
++            end
++          end
++          
++          if font:get_width(test_line) > max_text_w and current_line ~= "" then
++            local parts = style_line_markdown(current_line)
++            local cx = x + 18
++            for _, p in ipairs(parts) do
++              if p.text then draw_text_safe(font, p.text, cx, cur_y + 1, p.style) cx = cx + font:get_width(p.text) end
++            end
++            cur_y = cur_y + self.line_h
++            current_line = word
++          else
++            current_line = test_line
++          end
++        end
++        if current_line ~= "" then
++           local parts = style_line_markdown(current_line)
++           local cx = x + 18
++           for _, p in ipairs(parts) do
++             if p.text then draw_text_safe(font, p.text, cx, cur_y + 1, p.style) cx = cx + font:get_width(p.text) end
++           end
++           cur_y = cur_y + self.line_h
++        end
+       else
+-        -- Texto normal / markdown: usa style_line_markdown
+-        local parts = style_line_markdown(text)
+-        local cur_x = x + 18
+-        for _, p in ipairs(parts) do
+-          if p.text and p.text ~= "" then
+-            draw_text_safe(font, p.text, cur_x, cur_y + 1, p.style)
+-            cur_x = cur_x + font:get_width(p.text)
++        if is_fence then
++          draw_rect_safe(x + 14, cur_y + math.floor(self.line_h / 2), w - scrollbar_w - 28, 2, { 60, 60, 75, 255 })
++        elseif in_code_block then
++          draw_rect_safe(x + 14, cur_y, w - scrollbar_w - 28, self.line_h, { 14, 14, 18, 255 })
++          draw_rect_safe(x + 14, cur_y, 2, self.line_h, self.raw_mode and { 34, 197, 94, 255 } or { 100, 100, 140, 255 })
++          local code_color = text:find("^# ↳") and { 130, 140, 150, 255 } or { 230, 230, 140, 255 }
++          draw_text_safe(font, text, x + 24, cur_y + 1, code_color)
++        else
++          local parts = style_line_markdown(text)
++          local cx = x + 18
++          for _, p in ipairs(parts) do
++            if p.text and p.text ~= "" then
++              draw_text_safe(font, p.text, cx, cur_y + 1, p.style)
++              cx = cx + font:get_width(p.text)
++            end
+           end
+         end
++        cur_y = cur_y + self.line_h
+       end
++    else
++       if self.wrap_enabled and not is_code_line then
++          local approx_lines = math.ceil(font:get_width(text) / max_text_w)
++          cur_y = cur_y + (self.line_h * math.max(1, approx_lines))
++       else
++          cur_y = cur_y + self.line_h
++       end
+     end
+-
+-    -- Atualiza Y para a próxima linha (SEMPRE, independentemente do culling)
+-    cur_y = cur_y + self.line_h
+   end
+-
+   core.pop_clip_rect()
+-
+-  -- 3. Renderiza Scrollbar Nativa
+   self:draw_scrollbar()
+ end
+ 
+@@ -817,10 +1019,14 @@ function ConsultDocReaderView:on_mouse_moved(px, py, dx, dy)
+   local prev_b = self.hovered_back
+   local prev_r = self.hovered_raw_btn
+   local prev_c = self.hovered_copy_btn
++  local prev_w = self.hovered_wrap_btn
++  local prev_x = self.hovered_search_close
+ 
+   self.hovered_back = false
+   self.hovered_raw_btn = false
+   self.hovered_copy_btn = false
++  self.hovered_wrap_btn = false
++  self.hovered_search_close = false
+ 
+   if self.back_rect and px >= self.back_rect.x and px <= (self.back_rect.x + self.back_rect.w) and
+      py >= self.back_rect.y and py <= (self.back_rect.y + self.back_rect.h) then
+@@ -836,8 +1042,17 @@ function ConsultDocReaderView:on_mouse_moved(px, py, dx, dy)
+      py >= self.copy_btn_rect.y and py <= (self.copy_btn_rect.y + self.copy_btn_rect.h) then
+     self.hovered_copy_btn = true
+   end
++  
++  if self.wrap_btn_rect and px >= self.wrap_btn_rect.x and px <= (self.wrap_btn_rect.x + self.wrap_btn_rect.w) and
++     py >= self.wrap_btn_rect.y and py <= (self.wrap_btn_rect.y + self.wrap_btn_rect.h) then
++    self.hovered_wrap_btn = true
++  end
++
++  if self.search_close_rect and px >= self.search_close_rect.x and px <= (self.search_close_rect.x + self.search_close_rect.w) and
++     py >= self.search_close_rect.y and py <= (self.search_close_rect.y + self.search_close_rect.h) then
++    self.hovered_search_close = true
++  end
+ 
+-  -- Atualiza seleção com o mouse apenas no conteúdo e fora do scrollbar
+   local scrollbar_w = (style.scrollbar_size or 8) + 6
+   if self.is_selecting and py > (self.position.y + self.header_h) and px < (self.position.x + self.size.x - scrollbar_w) then
+     local line_idx = math.floor((py - self.position.y - self.header_h + self.scroll.y) / self.line_h) + 1
+@@ -845,38 +1060,45 @@ function ConsultDocReaderView:on_mouse_moved(px, py, dx, dy)
+     core.redraw = true
+   end
+ 
+-  if prev_b ~= self.hovered_back or prev_r ~= self.hovered_raw_btn or prev_c ~= self.hovered_copy_btn then
++  if prev_b ~= self.hovered_back or prev_r ~= self.hovered_raw_btn or prev_c ~= self.hovered_copy_btn or prev_w ~= self.hovered_wrap_btn or prev_x ~= self.hovered_search_close then
+     core.redraw = true
+   end
+ end
+ 
+ function ConsultDocReaderView:on_mouse_pressed(button, px, py, clicks)
+   local scrollbar_w = (style.scrollbar_size or 8) + 6
+-  -- Se clicou na calha ou botão da scrollbar, delega para a superclasse sem ativar seleção
+   if px >= (self.position.x + self.size.x - scrollbar_w) then
+     self.is_selecting = false
+     return ConsultDocReaderView.super.on_mouse_pressed(self, button, px, py, clicks)
+   end
+-
++  
+   if button == "left" then
++    -- 🎯 Botão de Fechar a Busca (X)
++    if self.search_close_rect and px >= self.search_close_rect.x and px <= self.search_close_rect.x + self.search_close_rect.w and
++       py >= self.search_close_rect.y and py <= self.search_close_rect.y + self.search_close_rect.h then
++      self:clear_search()
++      return true
++    end
++
+     if self.hovered_back and self.parent_search_view then
+       open_in_right_panel(self.parent_search_view, "🔍 Retornado aos resultados da pesquisa.")
+       return true
+     end
+-
+     if self.hovered_raw_btn then
+       self.raw_mode = not self.raw_mode
+-      if core.log then core.log(self.raw_mode and "⚡ Modo Raw ativado (código limpo sem '>>>')." or "📖 Modo formatado restaurado.") end
+       core.redraw = true
+       return true
+     end
+-
+     if self.hovered_copy_btn then
+       self:copy_selection_to_clipboard()
+       return true
+     end
+-
+-    -- Inicia seleção de texto por clique
++    if self.wrap_btn_rect and px >= self.wrap_btn_rect.x and px <= self.wrap_btn_rect.x + self.wrap_btn_rect.w and
++       py >= self.wrap_btn_rect.y and py <= self.wrap_btn_rect.y + self.wrap_btn_rect.h then
++      self.wrap_enabled = not self.wrap_enabled
++      core.redraw = true
++      return true
++    end
+     if py > (self.position.y + self.header_h) then
+       local line_idx = math.floor((py - self.position.y - self.header_h + self.scroll.y) / self.line_h) + 1
+       self.is_selecting = true
+@@ -885,7 +1107,6 @@ function ConsultDocReaderView:on_mouse_pressed(button, px, py, clicks)
+       core.redraw = true
+     end
+   end
+-
+   return ConsultDocReaderView.super.on_mouse_pressed(self, button, px, py, clicks)
+ end
+ 
+@@ -1198,6 +1419,25 @@ out_path.write_text('\n'.join(lines), encoding="utf-8")
+ end
+ 
+ command.add(nil, {
++  ["doxoade:search-selection-in-consult"] = function()
++    local view = core.active_view
++    local doc = view and view.doc
++    if not doc then return end
++    
++    local query = nil
++    if doc.has_selection and doc:has_selection() then
++      local l1, c1, l2, c2 = doc:get_selection(true)
++      query = doc:get_text(l1, c1, l2, c2)
++    end
++    
++    if query and query ~= "" then
++      -- Limpa quebras de linha para não quebrar o FTS5
++      query = query:gsub("[\r\n]+", " "):gsub("^%s+", ""):gsub("%s+$", "")
++      execute_docs_search_interactive(query)
++    else
++      core.log("⚠ [CONSULT] Selecione um texto para buscar.")
++    end
++  end,
+   ["doxoade:open-pot-in-right-panel"] = function()
+     open_in_right_panel(dumppot_file, "📋 Dumppot aberto no painel direito.")
+   end,
+@@ -1215,7 +1455,7 @@ command.add(nil, {
+     open_in_right_panel(log_path, "📜 session_log.txt aberto no Panteão.")
+     open_in_right_panel(dumppot_file, "📋 Dumppot aberto no Panteão.")
+     open_in_right_panel(cheat_sheet_file, "📖 Cheat Sheet aberto no Panteão.")
+-    open_in_right_panel(settings_file, "⚙️ user_settings.lua aberto no Panteão.") -- ✅ CORRIGIDO
++    open_in_right_panel(settings_file, "⚙️ user_settings.lua aberto no Panteão.")
+     core.log("🏛️ Panteão Soberano invocado. 5 abas de diagnóstico abertas à direita.")
+   end,
+   ["doxoade:open-log"] = function()
+@@ -1232,7 +1472,6 @@ command.add(nil, {
+     end)
+     open_in_right_panel(settings_file, "⚙️ user_settings.lua aberto no painel direito.")
+   end,
+-
+   ["doxoade:open-search-docs-hub"] = function()
+     core.command_view:enter("🔍 Buscar Documentação Python (Ex: asyncio, json, socket):", {
+       submit = function(text)
+@@ -1304,7 +1543,51 @@ command.add(nil, {
+     else
+       command.perform("doxoade:open-search-docs-hub")
+     end
+-  end
++  end,
++})
++
++command.add(nil, {
++  ["doxoade:universal-find"] = function()
++    local v = core.active_view
++    if v and v.is and v:is(ConsultDocReaderView) then
++      core.command_view:enter("🔍 Buscar neste documento:", {
++        text = v.search_query or "",
++        submit = function(text)
++          if v and v.perform_search then
++            v:perform_search(text)
++            core.set_active_view(v)
++          end
++        end,
++      })
++    else
++      command.perform("find-replace:find")
++    end
++  end,
++
++  ["doxoade:universal-find-next"] = function()
++    local v = core.active_view
++    if v and v.is and v:is(ConsultDocReaderView) then
++      v:search_next()
++    else
++      command.perform("find-replace:repeat-find")
++    end
++  end,
++
++  ["doxoade:universal-find-prev"] = function()
++    local v = core.active_view
++    if v and v.is and v:is(ConsultDocReaderView) then
++      v:search_prev()
++    else
++      command.perform("find-replace:previous-find")
++    end
++  end,
++
++  ["doxoade:consult-search-clear"] = function()
++    local v = core.active_view
++    if v and v.is and v:is(ConsultDocReaderView) then
++      v:clear_search()
++    end
++  end,
+ })
+ 
+ command.add("core.docview", {
+@@ -1339,12 +1622,43 @@ end, {
+     if core.active_view and core.active_view.copy_selection_to_clipboard then
+       core.active_view:copy_selection_to_clipboard()
+     end
++  end,
++  ["doxoade:universal-find"] = function()
++    local v = core.active_view
++    if not v or not v.perform_search then return end -- 🛡️ BLINDAGEM CONTRA MOCK
++    core.command_view:enter("🔍 Buscar neste documento:", {
++      text = v.search_query or "",
++      submit = function(text) 
++        if v and v.perform_search then
++          v:perform_search(text) 
++          core.set_active_view(v)
++        end
++      end,
++    })
++  end,
++  ["doxoade:universal-find-next"] = function()
++    local v = core.active_view
++    if v and v.search_next then v:search_next() end
++  end,
++  ["doxoade:universal-find-prev"] = function()
++    local v = core.active_view
++    if v and v.search_prev then v:search_prev() end
++  end,
++  ["doxoade:consult-search-clear"] = function()
++    local v = core.active_view
++    if v and v.clear_search then v:clear_search() end
+   end
+ })
+ 
++-- ATALHOS GLOBAIS
+ keymap.add {
+   ["ctrl+alt+h"] = "doxoade:consult-selection-or-word",
+   ["f1"]          = "doxoade:consult-selection-or-word",
+   ["ctrl+return"] = "doxoade:follow-docs-link",
+   ["ctrl+c"]      = "doxoade:copy-reader-selection",
++  
++  ["ctrl+f"]   = "doxoade:universal-find",
++  ["f3"]       = "doxoade:universal-find-next",
++  ["shift+f3"] = "doxoade:universal-find-prev",
++  ["alt+g"]    = "doxoade:search-selection-in-consult",
+ }
+diff --git a/doxoade/commands/lite_xl_systems/template/100_keymap_manager.lua b/doxoade/commands/lite_xl_systems/template/100_keymap_manager.lua
+index bc57726..db312fe 100644
+--- a/doxoade/commands/lite_xl_systems/template/100_keymap_manager.lua
++++ b/doxoade/commands/lite_xl_systems/template/100_keymap_manager.lua
+@@ -52,10 +52,11 @@ local SOVEREIGN_KEYMAP = {
+   ["ctrl+d"]              = "doc:duplicate-lines",
+   ["ctrl+q"]              = "doc:toggle-line-comments",
+   ["ctrl+g"]              = "doc:go-to-line",
+-  ["ctrl+f"]              = "find-replace:find",
++  ["ctrl+f"]              = "doxoade:universal-find",
++--  ["ctrl+f"]              = "find-replace:find",
+   ["ctrl+h"]              = "doxoade:interactive-find-replace",
+-  ["f3"]                  = "find-replace:repeat-find",
+-  ["shift+f3"]            = "find-replace:previous-find",
++  ["f3"]                  = "doxoade:universal-find-next",
++  ["shift+f3"]            = "doxoade:universal-find-prev",
+   ["ctrl+tab"]            = "root:switch-to-next-tab",
+   ["ctrl+shift+tab"]      = "root:switch-to-previous-tab",
+ 
+@@ -98,6 +99,9 @@ local SOVEREIGN_KEYMAP = {
+   ["ctrl+alt+shift+j"]    = "doxoade:compare-selection-with-opposite-panel",
+   ["ctrl+alt+shift+-"]    = "doxoade:clear-diff-highlights",
+   ["alt+t"]               = "doxoade:toggle-toolbar-layout",
++
++  -- ── treeview ─────────────────────────────────────────────────────────
++  ["ctrl+shift+m"]        = "doxoade:move-or-rename-interactive",
+ }
+ 
+ -- 3. Injeção atômica com sobrescrita forçada
+diff --git a/doxoade/commands/lite_xl_systems/template/13_toolbar_doxoade.lua b/doxoade/commands/lite_xl_systems/template/13_toolbar_doxoade.lua
+index a14f812..c8bd35f 100644
+--- a/doxoade/commands/lite_xl_systems/template/13_toolbar_doxoade.lua
++++ b/doxoade/commands/lite_xl_systems/template/13_toolbar_doxoade.lua
+@@ -14,6 +14,7 @@ local StatusView = require "core.statusview"
+ if rawget(_G, "_DOXOADE_LEAP_TOOLBAR_LOADED") then return end
+ rawset(_G, "_DOXOADE_LEAP_TOOLBAR_LOADED", true)
+ 
++
+ local sep = PATHSEP or "/"
+ local home = os.getenv("USERPROFILE") or os.getenv("HOME") or "."
+ local state_file = home .. sep .. ".doxoade" .. sep .. "leap_state.json"
+@@ -132,7 +133,12 @@ end
+ -- ── 4. Execução Silenciosa e Desacoplada no Windows ──────────────────────────
+ local function execute_async(cmd)
+     if PLATFORM == "Windows" or os.getenv("OS") == "Windows_NT" then
+-        os.execute('start /b cmd /c "' .. cmd .. '" > NUL 2>&1')
++        -- Roda em um processo independente que não herda a árvore do Doxoade
++        local ps_cmd = string.format(
++            "powershell -WindowStyle Hidden -Command \"Start-Process cmd -ArgumentList '/c %s' -WindowStyle Hidden\"",
++            cmd
++        )
++        os.execute(ps_cmd)
+     else
+         os.execute(cmd .. ' > /dev/null 2>&1 &')
+     end
+@@ -140,6 +146,11 @@ end
+ 
+ -- ── 5. Despachante Soberano de Toggle ─────────────────────────────────────────
+ local function toggle_leap_state()
++    if not rawget(_G, "_DOXOADE_LEAP_USER_INITIATED") then
++        if core.log then core.log("🛡️ [LEAP] Toggle ignorado: ação não iniciada pelo usuário.") end
++        return
++    end
++
+     local now = os.clock()
+     if (now - LeapHUD.last_toggle_time) < 0.6 then return end
+     LeapHUD.last_toggle_time = now
+@@ -202,8 +213,16 @@ end
+ 
+ -- ── 7. Registro de Comandos e Atalhos ────────────────────────────────────────
+ command.add(nil, {
+-    ["doxoade:leap-toggle"] = function() toggle_leap_state() end,
+-    ["doxoade:toggle-leap-service"] = function() toggle_leap_state() end,
++    ["doxoade:leap-toggle"] = function() 
++        rawset(_G, "_DOXOADE_LEAP_USER_INITIATED", true)
++        toggle_leap_state() 
++        rawset(_G, "_DOXOADE_LEAP_USER_INITIATED", false) -- reseta após o uso
++    end,
++    ["doxoade:toggle-leap-service"] = function() 
++        rawset(_G, "_DOXOADE_LEAP_USER_INITIATED", true)
++        toggle_leap_state() 
++        rawset(_G, "_DOXOADE_LEAP_USER_INITIATED", false)
++    end,
+     ["doxoade:leap-locate-sysutils"] = function()
+         LeapHUD.sysutils_bin = nil
+         local bin = resolve_sysutils()
+diff --git a/doxoade/commands/lite_xl_systems/template/13d_frameless_hud.lua b/doxoade/commands/lite_xl_systems/template/13d_frameless_hud.lua
+index 3a4227e..244b2c4 100644
+--- a/doxoade/commands/lite_xl_systems/template/13d_frameless_hud.lua
++++ b/doxoade/commands/lite_xl_systems/template/13d_frameless_hud.lua
+@@ -14,35 +14,46 @@ local rencache = rawget(_G, "rencache") or (pcall(require, "core.rencache") and
+ local native_renderer = rawget(_G, "renderer") or (pcall(require, "renderer") and require("renderer") or nil)
+ 
+ -- ─── BLINDAGEM CONTRA O "ENTER FANTASMA" DO LITE XL ─────────────────────────
+-local _last_cmd_view_close = 0
++-- Estratégia dupla:
++--  (1) Guard primário em core.on_event: consome keypressed return
++--      dentro de 300ms de um CommandView:submit.
++--  (2) Guard secundário em command.perform: blinda doc:newline, doc:new-line
++--      e core:newline (variantes entre versões do Lite XL).
++-- Fechar via Escape NÃO arma o guard — só submit arma.
+ 
+-local orig_hide = CommandView.hide
+-if orig_hide then
+-  function CommandView:hide()
+-    _last_cmd_view_close = os.clock()
+-    return orig_hide(self)
+-  end
+-end
++-- ─── BLINDAGEM CONTRA O "ENTER FANTASMA" DO LITE XL ─────────────────────────
++local _suppress_until = 0
+ 
+ local orig_submit = CommandView.submit
+ if orig_submit then
+   function CommandView:submit(text)
+-    _last_cmd_view_close = os.clock()
++    _suppress_until = os.clock() + 0.15 -- Janela de apenas 150ms
+     return orig_submit(self, text)
+   end
+ end
+ 
++local orig_on_event = core.on_event
++core.on_event = function(event_type, ...)
++  if event_type == "keypressed" then
++    local key = ...
++    if (os.clock() < _suppress_until) and (key == "return" or key == "kp enter" or key == "enter") then
++      _suppress_until = 0 -- Consome apenas 1 vez
++      return true
++    end
++  end
++  return orig_on_event(event_type, ...)
++end
++
+ local orig_command_perform = command.perform
+ command.perform = function(name, ...)
+-  if name == "doc:newline" or name == "doc:new-line" then
+-    if (os.clock() - _last_cmd_view_close) < 0.2 then
+-      return -- Engole o Enter Fantasma!
++  if name == "doc:newline" or name == "doc:new-line" or name == "core:newline" then
++    if os.clock() < _suppress_until then
++      _suppress_until = 0
++      return
+     end
+   end
+   return orig_command_perform(name, ...)
+ end
+--- ────────────────────────────────────────────────────────────────────────────
+-
+ -- ─── WINDOW TITLE: Doxly - <modo> - PID <pid> ────────────────────────────
+ core.add_thread(function()
+   coroutine.yield(0.2)
+@@ -392,6 +403,7 @@ local function open_notes_action()
+ end
+ 
+ local function trigger_check_action()
++  -- 🎯 CHAMA O COMANDO DIRETAMENTE, MAS ASSEGURA QUE O LEAP CONTINUE ATIVO
+   if command.map and command.map["doxoade:trigger-active-check"] then
+     command.perform("doxoade:trigger-active-check")
+   elseif command.map and command.map["doxoade:run-check"] then
+@@ -972,9 +984,21 @@ local function get_project_root()
+ end
+ 
+ local function _run_async(cmd)
+-  local root = get_project_root()
+   local args = cmd:gsub("^doxoade%s+", "")
+-  local full_cmd = string.format('start "" /b cmd /c "cd /d \\"%s\\" && doxoade %s"', root, args)
++  local user_dir = USERDIR or "."
++  local sep = PATHSEP or "/"
++  local py_anchor = user_dir .. sep .. ".doxoade" .. sep .. "python_path.txt"
++  
++  local py_exe = "python"
++  local f = io.open(py_anchor, "r")
++  if f then
++    py_exe = f:read("*l") or "python"
++    f:close()
++    py_exe = py_exe:gsub("[\r\n]", "")
++  end
++
++  -- Usa o Python do venv diretamente, evitando depender do PATH do cmd
++  local full_cmd = string.format('start "" /b "%s" -m doxoade %s', py_exe, args)
+   local ok = pcall(system.exec, full_cmd)
+   if not ok then
+     _toast("⚠ Falha ao executar comando. Rode manualmente no terminal.", { 239, 68, 68, 255 })
+diff --git a/doxoade/commands/lite_xl_systems/template/15_audit_highlighter.lua b/doxoade/commands/lite_xl_systems/template/15_audit_highlighter.lua
+index 8b8c00d..c79cb10 100644
+--- a/doxoade/commands/lite_xl_systems/template/15_audit_highlighter.lua
++++ b/doxoade/commands/lite_xl_systems/template/15_audit_highlighter.lua
+@@ -437,42 +437,41 @@ command.add("core.docview", {
+       core.log("⚠️ [CHECK] Abra um arquivo para auditar com Ma'at.")
+       return
+     end
+-
+     local file_path = doc.filename:gsub("\\", "/")
+     local short_name = file_path:match("[^/]+$") or file_path
+-
+     local user_dir = USERDIR or "."
+     local sep = PATHSEP or "/"
+     local diag_dir = user_dir .. sep .. ".doxoade" .. sep .. "diagnostics"
+     if system and system.mkdir then pcall(system.mkdir, diag_dir) end
+-
+     local out_log = diag_dir .. sep .. "check_exec_output.txt"
+     pcall(os.remove, out_log)
+-
++    
+     local py_exe = detect_audit_python()
+-    local full_cmd = string.format('"%s" -m doxoade check "%s" -fp --no-cache > "%s" 2>&1', py_exe, file_path, out_log)
++    
++    -- 🎯 BLINDAGEM: start /b impede que o console seja fechado quando o python sair
++--    local full_cmd = string.format('cmd /c start /b "" "%s" -m doxoade check "%s" -fp', py_exe, file_path)
++    -- 🎯 BLINDAGEM DEFINITIVA: PowerShell esconde o console e não atrela ao pai
++    local full_cmd = string.format(
++      'powershell -WindowStyle Hidden -Command "Start-Process cmd -ArgumentList \'/c \\"%s\\" -m doxoade check \\"%s\\" -fp\' -WindowStyle Hidden"',
++      py_exe, file_path
++    )
+ 
+-    -- Inicia o cronômetro visual
+     rawset(_G, "_DOXOADE_AUDIT_START_TIME", os.clock())
+     rawset(_G, "_DOXOADE_AUDIT_RUNNING", true)
+     core.redraw = true
+     core.log("⏳ [MA'AT] Auditoria em andamento: " .. short_name .. "...")
+-
++    
+     core.add_thread(function()
+       local t0 = os.clock()
+       pcall(system.exec, full_cmd)
+-
+-      -- Teto generoso de até 60s com atualização dinâmica do cronômetro a cada 0.5s
+       local finished = false
+       for _ = 1, 120 do
+         coroutine.yield(0.5)
+-        core.redraw = true -- Atualiza os segundos no rodapé a cada 0.5s!
+-
++        core.redraw = true 
+         local f_chk = io.open(out_log, "r")
+         if f_chk then
+           local content = f_chk:read("*a") or ""
+           f_chk:close()
+-
+           if content:find("%[check%]") or content:find("Traceback") or content:find("CRASH") then
+             coroutine.yield(0.2)
+             if load_audit_bridge() then
+@@ -482,11 +481,9 @@ command.add("core.docview", {
+           end
+         end
+       end
+-
+       rawset(_G, "_DOXOADE_AUDIT_RUNNING", false)
+       rawset(_G, "_DOXOADE_AUDIT_START_TIME", nil)
+       local elapsed = math.floor((os.clock() - t0) * 10) / 10
+-
+       if finished then
+         local count = 0
+         for _ in pairs(AuditState.findings_by_line) do count = count + 1 end
+@@ -494,7 +491,6 @@ command.add("core.docview", {
+       else
+         core.log(string.format("⚠️ [MA'AT] Tempo limite excedido (%.1fs).", elapsed))
+       end
+-
+       core.redraw = true
+     end)
+   end,
+diff --git a/doxoade/commands/lite_xl_systems/typhon_deploy.py b/doxoade/commands/lite_xl_systems/typhon_deploy.py
+index 8a1de89..c65328f 100644
+--- a/doxoade/commands/lite_xl_systems/typhon_deploy.py
++++ b/doxoade/commands/lite_xl_systems/typhon_deploy.py
+@@ -31,6 +31,61 @@ from .typhon_doxly.doxly_khonsu_gate import DoxlyKhonsuGate
+ 
+ DeployMode = Literal["production", "sandbox", "test"]
+ 
++import ctypes
++
++# ═══════════════════════════════════════════════════════════════
++# 🏛️ ISOLAMENTO DO CANÔNICO (junction + migração)
++# ═══════════════════════════════════════════════════════════════
++_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
++_INVALID_FILE_ATTRIBUTES = 0xFFFFFFFF
++
++def _path_exists_any(p: Path) -> bool:
++    """True se o path existe, incluindo junctions/symlinks quebradas."""
++    try:
++        os.lstat(p)
++        return True
++    except (FileNotFoundError, OSError):
++        return False
++
++def _is_junction_or_symlink(p: Path) -> bool:
++    """Detecta junction (Windows) ou symlink (POSIX), incluindo quebradas."""
++    if not _path_exists_any(p):
++        return False
++    if sys.platform == "win32":
++        try:
++            attrs = ctypes.windll.kernel32.GetFileAttributesW(str(p))
++            if attrs == _INVALID_FILE_ATTRIBUTES:
++                return False
++            return bool(attrs & _FILE_ATTRIBUTE_REPARSE_POINT)
++        except Exception:
++            return p.is_symlink()
++    return p.is_symlink()
++
++def _remove_junction(p: Path) -> bool:
++    """Remove junction/symlink (NÃO recursivo — não toca no alvo)."""
++    try:
++        os.unlink(p)  # junction e symlink: unlink, nunca rmdir
++        return True
++    except Exception:
++        return False
++
++def _create_junction(link: Path, target: Path) -> Tuple[bool, str]:
++    """Cria junction (Windows) ou symlink (POSIX)."""
++    link.parent.mkdir(parents=True, exist_ok=True)
++    if sys.platform == "win32":
++        res = subprocess.run(
++            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
++            capture_output=True, text=True
++        )
++        if res.returncode != 0:
++            return False, f"mklink /J falhou: {res.stderr.strip() or res.stdout.strip()}"
++        return True, f"Junction criada: {link} → {target}"
++    else:
++        try:
++            os.symlink(target, link)
++            return True, f"Symlink criado: {link} → {target}"
++        except Exception as e:
++            return False, f"symlink falhou: {e}"
+ 
+ def is_pid_alive(pid: int) -> bool:
+     """Verifica se um PID específico ainda está em execução no SO."""
+@@ -90,6 +145,262 @@ def forensic_harvester(pid: int, deploy_dir: Path, poll_interval: float = 0.5) -
+ class TyphonDeployEngine:
+     """Motor de Deploy com isolamento de modos: PRODUCTION, SANDBOX, TEST."""
+ 
++    MIGRATION_MARKER = ".migration_done"
++
++    @classmethod
++    def exorcise_mode_instance(cls, mode: DeployMode) -> None:
++        """Encerra apenas o processo isolado do modo indicado via arquivo .pid."""
++        deploy_dir = cls._get_deploy_dir(mode)
++        pid_file = deploy_dir / f".{mode}.pid"
++        if not pid_file.exists():
++            return
++        try:
++            pid = int(pid_file.read_text().strip())
++        except Exception:
++            pid_file.unlink(missing_ok=True)
++            return
++        try:
++            if sys.platform == "win32":
++                subprocess.run(["taskkill", "/F", "/PID", str(pid)],
++                              capture_output=True)
++            else:
++                subprocess.run(["kill", "-9", str(pid)], capture_output=True)
++        except Exception:
++            pass
++        pid_file.unlink(missing_ok=True)
++
++    @classmethod
++    def is_canonical_isolated(cls) -> bool:
++        """True se a migração já foi concluída (marker presente)."""
++        from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
++        marker = LiteXLPaths.get_canonical_nucleus_dir() / cls.MIGRATION_MARKER
++        return marker.exists()
++
++    @classmethod
++    def migrate_canonical_to_nucleus(cls, force: bool = False) -> Tuple[bool, str]:
++        """Migra ~/.config/lite-xl/ → ~/.doxoade/canonical/ + junction.
++
++        Ordem atômica:
++          1. Marker + junction ok? no-op.
++          2. Exorcise Lite XL (libera handles na pasta).
++          3. Rename vanilla → vanilla.legacy-<ts>  (atômico, pequeno).
++          4. Copia legacy → núcleo  (vanilla já movida, sem lock).
++          5. Cria junction vanilla → núcleo.
++          6. Rollback em qualquer falha após (3).
++        """
++        from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
++
++        nucleus = LiteXLPaths.get_canonical_nucleus_dir()
++        vanilla = LiteXLPaths.get_vanilla_litexl_dir()
++        marker = nucleus / cls.MIGRATION_MARKER
++
++        # ── 1. Idempotência ────────────────────────────────────
++        if marker.exists() and not force:
++            if _is_junction_or_symlink(vanilla):
++                try:
++                    real_target = Path(os.path.realpath(vanilla))
++                    if real_target == Path(os.path.realpath(nucleus)):
++                        return True, "Núcleo já isolado (junction ativa)."
++                except Exception:
++                    pass
++            return cls._repair_junction(nucleus, vanilla)
++
++        # ── 2. Vanilla não existe → cria junction direto ──────
++        if not _path_exists_any(vanilla):
++            ok, msg = _create_junction(vanilla, nucleus)
++            if not ok:
++                return False, msg
++            marker.write_text(datetime.now().isoformat(), encoding="utf-8")
++            return True, f"Núcleo isolado (junction criada). {msg}"
++
++        # ── 3. Vanilla é junction (ativa ou quebrada) ─────────
++        if _is_junction_or_symlink(vanilla):
++            return cls._repair_junction(nucleus, vanilla)
++
++        # ── 3.5. Estado residual: só cache .doxoade restou?
++        #         Restaura do legacy mais recente e descarta o cache.
++        if vanilla.exists() and not _is_junction_or_symlink(vanilla):
++            leftovers = list(vanilla.iterdir())
++            if leftovers and all(p.name == ".doxoade" for p in leftovers):
++                parent = vanilla.parent
++                legacy_candidates = sorted(
++                    [p for p in parent.glob("lite-xl.legacy-*") if p.is_dir()],
++                    key=lambda p: p.stat().st_mtime, reverse=True,
++                )
++                if legacy_candidates:
++                    best = legacy_candidates[0]
++                    print(f"  {Fore.CYAN}↳ Restaurando núcleo de: {best.name}{Fore.RESET}")
++                    for item in best.iterdir():
++                        dest = nucleus / item.name
++                        if item.is_dir():
++                            shutil.copytree(item, dest, dirs_exist_ok=True)
++                        elif item.is_file():
++                            shutil.copy2(item, dest)
++
++                # Descarta o .doxoade residual (cache puro)
++                try:
++                    shutil.rmtree(vanilla / ".doxoade", ignore_errors=True)
++                    vanilla.rmdir()
++                except Exception:
++                    # Se rmdir falhar, rename (atômico, contorna handle travado)
++                    dead = vanilla.parent / "lite-xl.dead"
++                    try:
++                        if dead.exists():
++                            shutil.rmtree(dead, ignore_errors=True)
++                        vanilla.rename(dead)
++                    except Exception as e:
++                        return False, (
++                            f"Cache .doxoade residual não removível nem por rename: {e}\n"
++                            f"  Comando manual:\n"
++                            f"    powershell -Command \"Remove-Item -LiteralPath '{vanilla}' -Recurse -Force\""
++                        )
++
++                ok, msg = _create_junction(vanilla, nucleus)
++                if not ok:
++                    return False, msg
++                marker.write_text(datetime.now().isoformat(), encoding="utf-8")
++                return True, (
++                    f"Núcleo isolado (cache descartado, estado restaurado).\n"
++                    f"  🏛️ Núcleo: {nucleus}\n"
++                    f"  🔗 Junction: {vanilla} → {nucleus}"
++                )
++
++        # ── 4. Kill Lite XL (libera locks na pasta) ───────────
++        try:
++            cls.exorcise_instances(wait_seconds=1.0)
++        except Exception:
++            pass
++
++        # ── 5. Move vanilla → legacy via robocopy (retry + diagnóstico) ──
++        legacy_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
++        legacy = vanilla.parent / f"lite-xl.legacy-{legacy_ts}"
++
++        ok_move, move_err = _move_with_robocopy(vanilla, legacy, retries=8)
++        if not ok_move:
++            diag = cls._diagnose_vanilla_locks(vanilla)
++            return False, (
++                f"Não foi possível mover {vanilla}.\n"
++                f"  Detalhe: {move_err}\n\n"
++                f"  Diagnóstico automático:\n{diag}\n\n"
++                f"  Ação recomendada:\n"
++                f"    1. Feche Lite XL / Explorer / terminais abertos em ~\\.config\\\n"
++                f"    2. (Opcional) Exclua {vanilla} do scan do Windows Defender\n"
++                f"    3. Rode novamente: doxoade doxly migrate-canonical"
++            )
++
++        # A partir daqui, vanilla FOI MOVIDA para legacy.
++        # Copia legacy → núcleo (rollback em falha).
++        try:
++            for item in legacy.iterdir():
++                dest = nucleus / item.name
++                if item.is_dir():
++                    shutil.copytree(item, dest, dirs_exist_ok=True)
++                elif item.is_file():
++                    shutil.copy2(item, dest)
++        except Exception as e:
++            # Rollback: move legacy de volta para vanilla
++            try:
++                _move_with_robocopy(legacy, vanilla, retries=3)
++            except Exception:
++                pass
++            return False, f"Falha ao copiar conteúdo (rollback aplicado): {e}"
++
++        # ── 6. Cria junction (rollback em falha) ──
++        ok, msg = _create_junction(vanilla, nucleus)
++        if not ok:
++            try:
++                _move_with_robocopy(legacy, vanilla, retries=3)
++            except Exception:
++                pass
++            return False, f"Falha na junction (rollback): {msg}"
++
++        marker.write_text(datetime.now().isoformat(), encoding="utf-8")
++        return True, (
++            f"Núcleo migrado e isolado.\n"
++            f"  🏛️ Núcleo: {nucleus}\n"
++            f"  🔗 Junction: {vanilla} → {nucleus}\n"
++            f"  📦 Legacy preservado: {legacy}"
++        )
++
++        # ── 7. Cria junction (rollback em falha) ──────────────
++        ok, msg = _create_junction(vanilla, nucleus)
++        if not ok:
++            try:
++                legacy.rename(vanilla)
++            except Exception:
++                pass
++            return False, f"Falha na junction (rollback): {msg}"
++
++        marker.write_text(datetime.now().isoformat(), encoding="utf-8")
++        return True, (
++            f"Núcleo migrado e isolado.\n"
++            f"  🏛️ Núcleo: {nucleus}\n"
++            f"  🔗 Junction: {vanilla} → {nucleus}\n"
++            f"  📦 Legacy preservado: {legacy}"
++        )
++
++    @classmethod
++    def _diagnose_vanilla_locks(cls, vanilla: Path) -> str:
++        """Lista processos suspeitos que podem segurar handles em `vanilla`."""
++        if not vanilla.exists():
++            return "  (vanilla não existe — nada a diagnosticar)"
++        if sys.platform != "win32":
++            try:
++                r = subprocess.run(
++                    ["lsof", "+D", str(vanilla)],
++                    capture_output=True, text=True, timeout=10
++                )
++                if r.stdout.strip():
++                    return r.stdout[:2000]
++            except Exception:
++                pass
++            return "  (use `lsof +D " + str(vanilla) + "` manualmente)"
++
++        # Windows: enumera processos python/cmd/explorer com linhas de comando suspeitas
++        ps = (
++            "Get-CimInstance Win32_Process | "
++            "Where-Object { "
++            "  $_.Name -match 'python\\.exe|cmd\\.exe|powershell\\.exe|explorer\\.exe|lite-xl\\.exe' "
++            "} | "
++            "Select-Object ProcessId,Name,CommandLine | "
++            "ConvertTo-Csv -NoTypeInformation"
++        )
++        try:
++            r = subprocess.run(
++                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
++                capture_output=True, text=True, timeout=10
++            )
++            out = r.stdout.strip()
++            if not out:
++                return "  (nenhum processo suspeito detectado)"
++            # Filtra linhas cujo CommandLine menciona .config\lite-xl ou pty_file_daemon
++            suspicious = []
++            for line in out.splitlines()[1:]:  # pula header CSV
++                if (".config\\lite-xl" in line
++                    or ".config/lite-xl" in line
++                    or "pty_file_daemon" in line
++                    or "doxoade" in line):
++                    suspicious.append("  " + line)
++            if not suspicious:
++                return "  (nenhum processo com handle detectável — provavelmente antivírus)"
++            return "\n".join(suspicious[:10])
++        except Exception as e:
++            return f"  (diagnóstico falhou: {e})"
++
++    @classmethod
++    def _repair_junction(cls, nucleus: Path, vanilla: Path) -> Tuple[bool, str]:
++        """Remove junction quebrada e recria apontando para o núcleo."""
++        if _is_junction_or_symlink(vanilla):
++            if not _remove_junction(vanilla):
++                return False, f"Falha ao remover junction quebrada em {vanilla}"
++        ok, msg = _create_junction(vanilla, nucleus)
++        if not ok:
++            return False, msg
++        marker = nucleus / cls.MIGRATION_MARKER
++        if not marker.exists():
++            marker.write_text(datetime.now().isoformat(), encoding="utf-8")
++        return True, f"Junction reparada. {msg}"
++
+     @classmethod
+     def _install_assets(cls, deploy_dir: Path) -> Tuple[bool, str]:
+         """Copia assets do projeto fonte (logo, icons, etc.) para o USERDIR de deploy."""
+@@ -151,13 +462,18 @@ class TyphonDeployEngine:
+     @classmethod
+     def _get_deploy_dir(cls, mode: DeployMode) -> Path:
+         if mode == "production":
+-            try:
+-                return LiteXLEngine.get_user_dir()
+-            except Exception:
+-                return Path.home() / ".config" / "lite-xl"
+-        elif mode == "staging":                                    # ← NOVO
+             from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+-            return LiteXLPaths.get_staging_dir()                    # ← NOVO
++            # 🏛️ Migração lazy — no-op se já foi feita
++            if not cls.is_canonical_isolated():
++                ok, msg = cls.migrate_canonical_to_nucleus()
++                if not ok:
++                    print(f"{Fore.YELLOW}⚠ Migração canônica adiada: {msg}{Fore.RESET}")
++                    # Fallback: usa o path vanilla (comportamento antigo)
++                    return LiteXLPaths.get_vanilla_litexl_dir()
++            return LiteXLPaths.get_canonical_nucleus_dir()
++        elif mode == "staging":
++            from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
++            return LiteXLPaths.get_staging_dir()
+         elif mode == "sandbox":
+             try:
+                 return LiteXLEngine.get_sandbox_dir()
+@@ -165,23 +481,20 @@ class TyphonDeployEngine:
+                 return Path.home() / ".config" / "lite-xl" / ".doxoade" / "sandbox"
+         elif mode == "test":
+             test_dir = Path.home() / ".config" / "lite-xl" / ".doxoade" / "test_deploy"
+-            try:
+-                test_dir.mkdir(parents=True, exist_ok=True)
+-            except Exception:
+-                pass
++            test_dir.mkdir(parents=True, exist_ok=True)
+             return test_dir
+         else:
+             raise ValueError(f"Modo de deploy inválido: {mode}")
+ 
+     @classmethod
+     def _get_backup_dir(cls, mode: DeployMode) -> Path:
+-        """Retorna o diretório de backups por modo."""
+         if mode == "production":
+-            bkp_dir = LiteXLEngine.get_user_dir() / ".doxoade" / "backups" / "production"
++            from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
++            return LiteXLPaths.get_canonical_backups_root()
+         elif mode == "sandbox":
+             bkp_dir = LiteXLEngine.get_sandbox_dir() / ".backups"
+         else:
+-            bkp_dir = LiteXLEngine.get_user_dir() / ".doxoade" / "backups" / "test"
++            bkp_dir = Path.home() / ".config" / "lite-xl" / ".doxoade" / "backups" / "test"
+         bkp_dir.mkdir(parents=True, exist_ok=True)
+         return bkp_dir
+ 
+@@ -220,36 +533,29 @@ class TyphonDeployEngine:
+ 
+     @classmethod
+     def create_canonical_backup(cls, reason: str = "manual") -> Tuple[bool, Optional[Path]]:
+-        """Backup canonical com dedup por HASH (não filename) e rotação em 50."""
+         from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+         import hashlib
+-        canonical_init = LiteXLPaths.get_init_lua_path()
++        canonical_init = LiteXLPaths.get_canonical_init_path()
+         if not canonical_init.exists():
+             return True, None
+         try:
+             content_hash = hashlib.sha256(canonical_init.read_bytes()).hexdigest()[:8]
+         except Exception:
+             content_hash = "unknown"
+-
+-        bkp_dir = LiteXLPaths.get_canonical_backups_dir()
++        bkp_dir = LiteXLPaths.get_canonical_backups_root()
+         existing = sorted(bkp_dir.glob("init_*.lua.bak"),
+-                         key=lambda p: p.stat().st_mtime, reverse=True)
+-
+-        # ✅ FIX 1: dedup por HASH do conteúdo, não por parts[2] (time)
++                        key=lambda p: p.stat().st_mtime, reverse=True)
+         if existing and content_hash != "unknown":
+             try:
+                 last_hash = hashlib.sha256(existing[0].read_bytes()).hexdigest()[:8]
+                 if last_hash == content_hash:
+-                    return True, existing[0]  # dedup OK
++                    return True, existing[0]
+             except Exception:
+                 pass
+-
+         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+         bkp_path = bkp_dir / f"init_{timestamp}_{content_hash}_{reason}.lua.bak"
+-
+         try:
+-            # ✅ FIX 5: copy (não copy2) para mtime = agora
+-            shutil.copy(canonical_init, bkp_path)
++            shutil.copy2(canonical_init, bkp_path)
+             cls._rotate_canonical_backups(max_backups=50)
+             return True, bkp_path
+         except Exception as e:
+@@ -259,25 +565,26 @@ class TyphonDeployEngine:
+     @classmethod
+     def _rotate_canonical_backups(cls, max_backups: int = 50):
+         from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+-        bkp_dir = LiteXLPaths.get_canonical_backups_dir()
++        bkp_dir = LiteXLPaths.get_canonical_backups_root()
+         backups = sorted(bkp_dir.glob("init_*.lua.bak"),
+                         key=lambda p: p.stat().st_mtime, reverse=True)
+         for old in backups[max_backups:]:
+-            try: old.unlink(missing_ok=True)
+-            except Exception: pass
++            try:
++                old.unlink(missing_ok=True)
++            except Exception:
++                pass
+ 
+     @classmethod
+     def list_canonical_backups(cls) -> List[Path]:
+         from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+-        bkp_dir = LiteXLPaths.get_canonical_backups_dir()
++        bkp_dir = LiteXLPaths.get_canonical_backups_root()
+         return sorted(bkp_dir.glob("init_*.lua.bak"),
+-                     key=lambda p: p.stat().st_mtime, reverse=True)
++                    key=lambda p: p.stat().st_mtime, reverse=True)
+ 
+     @classmethod
+     def rollback_canonical(cls, target_backup: Optional[Path] = None) -> Tuple[bool, str]:
+-        """Rollback reversível: backup do estado atual ANTES de restaurar."""
+         from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+-        canonical_init = LiteXLPaths.get_init_lua_path()
++        canonical_init = LiteXLPaths.get_canonical_init_path()
+         backups = cls.list_canonical_backups()
+         if not backups:
+             return False, "Nenhum backup canonical disponível."
+@@ -287,14 +594,13 @@ class TyphonDeployEngine:
+         cls.create_canonical_backup(reason="pre-rollback")
+         try:
+             shutil.copy2(target, canonical_init)
+-            cls.write_status_cache()   # ← HUD atualiza
++            cls.write_status_cache()
+             return True, f"Rollback concluído: {target.name}"
+         except Exception as e:
+             return False, f"Falha no rollback: {e}"
+ 
+     @classmethod
+     def get_canonical_status(cls) -> Dict[str, Any]:
+-        """Compara canonical vs staging vs test (D2: staging propaga ambos)."""
+         from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+         import hashlib
+ 
+@@ -309,11 +615,9 @@ class TyphonDeployEngine:
+                 "is_aot": raw[:4].startswith(b"\x1bLua"),
+             }
+ 
+-        canonical = _fingerprint(LiteXLPaths.get_init_lua_path())
++        canonical = _fingerprint(LiteXLPaths.get_canonical_init_path())  # 🏛️ núcleo
+         staging = _fingerprint(LiteXLPaths.get_staging_dir() / "init.lua")
+-        test = _fingerprint(
+-            cls._get_deploy_dir("test") / "init.lua"
+-        )
++        test = _fingerprint(cls._get_deploy_dir("test") / "init.lua")
+ 
+         promotion_pending = (
+             staging["exists"] and canonical["hash"] is not None
+@@ -323,7 +627,6 @@ class TyphonDeployEngine:
+             staging["exists"] and test["exists"]
+             and staging["hash"] == test["hash"]
+         )
+-
+         return {
+             "canonical": canonical,
+             "staging": staging,
+@@ -334,6 +637,8 @@ class TyphonDeployEngine:
+             ),
+             "promotion_pending": promotion_pending,
+             "test_in_sync_with_staging": test_in_sync,
++            "canonical_nucleus_path": str(LiteXLPaths.get_canonical_nucleus_dir()),
++            "canonical_isolated": cls.is_canonical_isolated(),
+         }
+ 
+     @classmethod
+@@ -354,42 +659,22 @@ class TyphonDeployEngine:
+ 
+     @classmethod
+     def promote(cls, force: bool = False, allow_aot: bool = False) -> Tuple[bool, str]:
+-        """
+-        Promove staging → test + production (D2).
+-        - Backup canonical obrigatório ANTES (rigoroso, 50 rotações)
+-        - test NÃO recebe backup (playground)
+-        - AOT bloqueado por default (D4)
+-        """
+         from doxoade.commands.lite_xl_systems.lite_xl_paths import LiteXLPaths
+-
+         staging_init = LiteXLPaths.get_staging_dir() / "init.lua"
+         if not staging_init.exists():
+             return False, "Staging não existe. Rode 'deploy staging' antes."
+ 
+         status = cls.get_canonical_status()
+-
+-        # D4: AOT bloqueado por default
+         if status["staging"]["is_aot"] and not allow_aot and not force:
+             return False, (
+                 "Staging é AOT bytecode. D4 despriorizou AOT. "
+                 "Use '--no-khonsu' no deploy staging, ou '--allow-aot' para forçar."
+             )
+ 
+-        # Backup canonical (obrigatório)
+         ok, bkp_path = cls.create_canonical_backup(reason="pre-promote")
+         if not ok:
+             return False, "Falha no backup canonical. Promote abortado."
+ 
+-        if ok and bkp_path:
+-            # Se dedup pegou (reason original ≠ pre-promote), avisar
+-            if "pre-promote" not in bkp_path.name:
+-                bkp_name = f"{bkp_path.name} (dedup — init idêntico ao último backup)"
+-            else:
+-                bkp_name = bkp_path.name
+-        else:
+-            bkp_name = "(sem backup)"
+-
+-        # D2: propagar para test
+         test_init = cls._get_deploy_dir("test") / "init.lua"
+         test_init.parent.mkdir(parents=True, exist_ok=True)
+         try:
+@@ -397,18 +682,19 @@ class TyphonDeployEngine:
+         except Exception as e:
+             return False, f"Falha ao promover para test: {e}"
+ 
+-        # D2: propagar para production
+-        canonical_init = LiteXLPaths.get_init_lua_path()
++        canonical_init = LiteXLPaths.get_canonical_init_path()  # 🏛️ núcleo
++        canonical_init.parent.mkdir(parents=True, exist_ok=True)
+         try:
+             shutil.copy2(staging_init, canonical_init)
+         except Exception as e:
+             return False, f"Falha ao promover para production: {e}"
+ 
+-        cls.write_status_cache()   # ← atualizar HUD imediatamente
++        cls.write_status_cache()
+         bkp_name = bkp_path.name if bkp_path else "(sem backup — init não existia)"
+         return True, (
+             f"Propagado: staging → test + production\n"
+-            f"  💾 Backup canonical: {bkp_name}"
++            f"  💾 Backup canonical: {bkp_name}\n"
++            f"  🏛️ Núcleo: {canonical_init}"
+         )
+ 
+     @classmethod
+@@ -445,7 +731,6 @@ class TyphonDeployEngine:
+ 
+     @classmethod
+     def exorcise_instances(cls, wait_seconds: float = 1.0) -> bool:
+-        """🕊️ Fechamento gracioso com salvamento de workspace + 🔪 Hard kill de processos zumbis."""
+         try:
+             from .lite_xl_process import LiteXLProcess
+             if LiteXLProcess.is_process_alive():
+@@ -453,17 +738,20 @@ class TyphonDeployEngine:
+                     LiteXLProcess.send_to_running_instance("__DOXOADE_GRACEFUL_QUIT__")
+                 except Exception:
+                     pass
+-                deadline = time.time() + 1.5
++                # 🎯 AUMENTADO: Espera até 10 segundos para o editor salvar a sessão e fechar sozinho
++                deadline = time.time() + 10.0
+                 while time.time() < deadline:
+                     if not LiteXLProcess.is_process_alive():
+                         break
+                     time.sleep(0.1)
+-
+-            if sys.platform == "win32":
+-                subprocess.run(["taskkill", "/F", "/IM", "lite-xl.exe"], capture_output=True)
+-            else:
+-                subprocess.run(["pkill", "-f", "lite-xl"], capture_output=True)
+-                
++            
++            # Se ainda estiver vivo após 10s, aí sim força
++            if LiteXLProcess.is_process_alive():
++                if sys.platform == "win32":
++                    subprocess.run(["taskkill", "/F", "/IM", "lite-xl.exe"], capture_output=True)
++                else:
++                    subprocess.run(["pkill", "-9", "-f", "lite-xl"], capture_output=True)
++            
+             time.sleep(wait_seconds)
+             return True
+         except Exception as e:
+@@ -471,23 +759,38 @@ class TyphonDeployEngine:
+             return False
+ 
+     @classmethod
+-    def exorcise_mode_instance(cls, mode: DeployMode) -> None:
+-        """Encerra apenas o processo isolado do modo indicado via arquivo .pid."""
+-        deploy_dir = cls._get_deploy_dir(mode)
+-        pid_file = deploy_dir / f".{mode}.pid"
+-        if pid_file.exists():
+-            try:
+-                pid = int(pid_file.read_text().strip())
++    def exorcise_instances(cls, wait_seconds: float = 1.0) -> bool:
++        try:
++            from .lite_xl_process import LiteXLProcess
++            if LiteXLProcess.is_process_alive():
++                try:
++                    LiteXLProcess.send_to_running_instance("__DOXOADE_GRACEFUL_QUIT__")
++                except Exception:
++                    pass
++                deadline = time.time() + 10.0
++                while time.time() < deadline:
++                    if not LiteXLProcess.is_process_alive():
++                        break
++                    time.sleep(0.1)
++            if LiteXLProcess.is_process_alive():
+                 if sys.platform == "win32":
+-                    subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
++                    subprocess.run(["taskkill", "/F", "/IM", "lite-xl.exe"], capture_output=True)
+                 else:
+-                    subprocess.run(["kill", "-9", str(pid)], capture_output=True)
+-                pid_file.unlink(missing_ok=True)
+-            except Exception:
+-                pass
++                    subprocess.run(["pkill", "-9", "-f", "lite-xl"], capture_output=True)
++
++            # 🆕 Mata PTY daemons órfãos que seguram handles em .doxoade/terminal_pty_ipc/
++            killed = _kill_orphan_pty_daemons()
++            if killed > 0:
++                print(f"{Fore.YELLOW}🔪 {killed} PTY daemon(s) órfão(s) encerrado(s).{Fore.RESET}")
++
++            time.sleep(wait_seconds)
++            return True
++        except Exception as e:
++            print(f"{Fore.YELLOW}⚠ Exorcismo parcial: {e}{Fore.RESET}")
++            return False
+ 
+     @classmethod
+-    def sterilize_environment(cls, deploy_dir: Path) -> None:
++    def sterilize_environment(cls, deploy_dir: Path, keep_session: bool = False) -> None:
+         print(f"\n{Fore.CYAN}{Style.BRIGHT}🧼 ESTERILIZANDO AMBIENTE ({deploy_dir.name})...{Style.RESET_ALL}")
+         plugins_dir = deploy_dir / "plugins"
+         plugins_disabled = deploy_dir / "plugins_DISABLED"
+@@ -568,47 +871,38 @@ class TyphonDeployEngine:
+         cls,
+         mode: DeployMode = "production",
+         force: bool = False,
+-        no_khonsu: bool = True,                # ← D4: AOT abandonado como default
++        no_khonsu: bool = True,
+     ) -> Dict[str, Any]:
+ 
+-        # 🔧 AUTO-ELEVAÇÃO: se não for Admin e for Windows, relança elevado
+         import sys, os
+-        # 🛑 BYPASS DO KHONSU ATIVADO (Texto puro sem AOT)
++        # 🔧 AUTO-ELEVAÇÃO (UAC)
+         if sys.platform == "win32" and mode in ("test", "sandbox"):
+             try:
+                 import ctypes
+                 is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+             except Exception:
+-                from doxoade.tools.error_info import formated_traceback
+-                formated_traceback(e, "Deploy Elevarion Fail")
+                 is_admin = False
+ 
+             if not is_admin and not os.environ.get("DOXOADE_ELEVATED"):
+                 print(f"{Fore.YELLOW}🔐 [TYPHON] Sem privilégios de Admin. Solicitando elevação via UAC...{Fore.RESET}")
+                 try:
+                     import subprocess
+-                    # Reexecuta o comando com elevação
+                     python_exe = sys.executable
+-                    module = "doxoade"
+                     args = sys.argv[1:]
+-                    cmd_str = f'"{python_exe}" -m {module} ' + " ".join(f'"{a}"' if ' ' in a else a for a in args)
+-                    # Passa DOXOADE_ELEVATED=1 para evitar loop infinito
++                    cmd_str = f'"{python_exe}" -m doxoade ' + " ".join(f'"{a}"' if ' ' in a else a for a in args)
+                     env_block = f"set DOXOADE_ELEVATED=1 && {cmd_str}"
+                     subprocess.Popen(
+                         ["powershell", "-Command", f'Start-Process cmd -ArgumentList "/k {env_block}" -Verb RunAs'],
+                         creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
+                     )
+-                    print(f"{Fore.GREEN}✔ Janela elevada aberta. Deploy continua no console Admin.{Fore.RESET}")
+-                    print(f"{Fore.LIGHTBLACK_EX}   Feche este console após o deploy elevar.{Fore.RESET}")
++                    print(f"{Fore.GREEN}✔ Janela elevada aberta.{Fore.RESET}")
+                     return {"success": False, "error": "elevation_requested", "backup": None}
+                 except Exception as e:
+-                    print(f"{Fore.RED}✖ Falha na elevação: {e}{Fore.RESET}")
+                     return {"success": False, "error": str(e), "backup": None}
+ 
+-        # ─── Resto do deploy original ───
++        # ─── Início do Deploy ───
+         deploy_dir = cls._get_deploy_dir(mode)
+         if deploy_dir is None:
+-            # 🛡️ [FASE 5] Fallback: força criação do diretório padrão
+             home = Path.home()
+             if mode == "production":
+                 deploy_dir = home / ".config" / "lite-xl"
+@@ -618,107 +912,75 @@ class TyphonDeployEngine:
+                 deploy_dir = home / ".config" / "lite-xl" / ".doxoade" / "sandbox"
+             else:
+                 return {"success": False, "error": f"Modo inválido: {mode}", "backup": None}
+-        
++
+         try:
+             deploy_dir.mkdir(parents=True, exist_ok=True)
+         except Exception as e:
+-            return {"success": False, "error": f"Falha ao criar diretório {deploy_dir}: {e}", "backup": None}
+-        
+-        
+-        # 🧼 FASE DE ESTERILIZAÇÃO AUTOMÁTICA (Limpa caches, IPCs e plugins conflitantes)
+-        if mode in ("production", "test"):
+-            #cls.sterilize_environment(deploy_dir)
+-            cls.sterilize_environment(deploy_dir, keep_session=(mode == "production"))
+-
+-        # dentro de deploy(), logo após sterilize_environment
+-        # ok_assets, msg_assets = cls._install_assets(deploy_dir)
+-        # print(f"  {Fore.WHITE}6. Assets:{Fore.RESET} {msg_assets}")
+-        # if not ok_assets and not force:
+-        #     return {"success": False, "error": msg_assets, "backup": backup_path}
+-            
+-        backup_path = None
+-
+-        # Âncora do Interpretador Python: grava o executável do venv ativo
+-        # para que todos os templates Lua (consult, pty, linters) saibam exatamente quem chamar
+-        dox_dir = deploy_dir / ".doxoade"
+-        dox_dir.mkdir(parents=True, exist_ok=True)
+-        (dox_dir / "python_path.txt").write_text(str(Path(sys.executable).resolve()), encoding="utf-8")
+-        
+-        home_anchor = Path.home() / ".doxoade" / "python_path.txt"
+-        home_anchor.parent.mkdir(parents=True, exist_ok=True)
+-        home_anchor.write_text(str(Path(sys.executable).resolve()), encoding="utf-8")
+-
+-        if mode == "test":
+-            for art in ["session_log.txt", "error.txt"]:
+-                target = deploy_dir / art
+-                if target.exists():
+-                    try: target.unlink()
+-                    except Exception: pass
++            return {"success": False, "error": f"Falha ao criar diretório: {e}", "backup": None}
+ 
+-        # 🔧 [FASE 1.5] Instalar assets (chamar apenas UMA vez, fora de loops)
+-        # ok_assets, msg_assets = cls._install_assets(deploy_dir)
+-        # print(f"  {Fore.WHITE}6. Assets:{Fore.RESET} {msg_assets}")
+-        # if not ok_assets and not force:
+-        #     return {"success": False, "error": msg_assets, "backup": backup_path}
+-
+-        if mode == "production":
+-            # Fase 1: backup canonical obrigatório ANTES de qualquer escrita
+-            ok, backup_path = cls.create_canonical_backup(reason="pre-deploy")
+-            if not ok and not force:
+-                return {"success": False,
+-                        "error": "Falha no backup canonical",
+-                        "backup": None}
+-
+-        # if gate_res["success"] and gate_res.get("bytecode"):
+-        #     init_dest.write_bytes(gate_res["bytecode"])
+-        #     installed_size = len(gate_res["bytecode"])
+-        #     opt_mode = "bytecode"
+-
+-        # 🔧 [FASE 1] Instalar assets (logo, icons) no deploy_dir
+-        ok_assets, msg_assets = cls._install_assets(deploy_dir)
+-        print(f"  {Fore.WHITE}6. Assets:{Fore.RESET} {msg_assets}")
+-        if not ok_assets and not force:
+-            return {"success": False, "error": msg_assets, "backup": backup_path}
++        backup_path = None  # 🎯 FIX CRÍTICO: Definido ANTES de qualquer try/except
+ 
+         try:
+-            py_anchor = deploy_dir / ".doxoade" / "python_path.txt"
+-            py_anchor.parent.mkdir(parents=True, exist_ok=True)
+-            py_anchor.write_text(sys.executable, encoding="utf-8")
++            # 1. Esterilização (Agora está no lugar certo e não é código morto)
++            if mode in ("production", "test"):
++                cls.sterilize_environment(deploy_dir, keep_session=(mode == "production"))
+ 
+-            init_dest = deploy_dir / "init.lua"
++            # 2. Backup do Canonical (se for production)
++            if mode == "production":
++                ok, backup_path = cls.create_canonical_backup(reason="pre-deploy")
++                if not ok and not force:
++                    return {"success": False, "error": "Falha no backup canonical", "backup": None}
++
++            # 3. Âncora Python
++            dox_dir = deploy_dir / ".doxoade"
++            dox_dir.mkdir(parents=True, exist_ok=True)
++            py_path_str = str(Path(sys.executable).resolve())
++            (dox_dir / "python_path.txt").write_text(py_path_str, encoding="utf-8")
++            
++            home_anchor = Path.home() / ".doxoade" / "python_path.txt"
++            home_anchor.parent.mkdir(parents=True, exist_ok=True)
++            home_anchor.write_text(py_path_str, encoding="utf-8")
++
++            # 4. Assets
++            ok_assets, msg_assets = cls._install_assets(deploy_dir)
++            print(f"  {Fore.WHITE}6. Assets:{Fore.RESET} {msg_assets}")
++            if not ok_assets and not force:
++                return {"success": False, "error": msg_assets, "backup": backup_path}
+ 
++            # 5. Compilação (Buffer Unificado)
+             templates = LiteXLInitBuilder.get_template_files()
+             unified_source, source_map = DoxlyKhonsuGate.assemble_unified_buffer(templates, mode=mode)
++            temp_init = deploy_dir / "init.lua.tmp"
+ 
+-            # 🛑 BYPASS DO KHONSU ATIVADO (Texto puro sem AOT)
+             if no_khonsu:
+-                init_dest.write_text(unified_source, encoding="utf-8")
++                temp_init.write_text(unified_source, encoding="utf-8")
+                 installed_size = len(unified_source)
+                 opt_mode = "plain_no_khonsu"
+             else:
+                 gate_res = DoxlyKhonsuGate.compile_aot_supervisioned(target_mode=mode, verbose=True)
+-                print(f"  {Fore.WHITE}5. Khonsu Gate:{Fore.RESET}")
+-                print(f"     • Success: {gate_res.get('success', False)}")
+-                print(f"     • Bytecode: {'SIM (' + str(len(gate_res.get('bytecode', b''))) + ' bytes)' if gate_res.get('bytecode') else 'NÃO'}")
+-                print(f"     • Opt Mode: {gate_res.get('opt_mode', 'N/A')}")
+-                print(f"     • Erro: {gate_res.get('error', 'Nenhum')}")
+-
+                 if not gate_res["success"]:
+                     if not force:
+-                        print(f"\n{Fore.RED}{Style.BRIGHT}✖ COMPILAÇÃO AOT FALHOU. DEPLOY ABORTADO.{Style.RESET_ALL}")
+                         return {"success": False, "error": gate_res.get('error', 'AOT Failed'), "backup": backup_path}
++                    temp_init.write_text(gate_res.get("source", unified_source), encoding="utf-8")
++                    opt_mode = "plain_fallback"
++                else:
++                    if gate_res.get("bytecode"):
++                        temp_init.write_bytes(gate_res["bytecode"])
++                        installed_size = len(gate_res["bytecode"])
++                        opt_mode = "bytecode"
+                     else:
+-                        print(f"\n{Fore.YELLOW}⚠ --force ativo. Continuando com fallback plain.{Fore.RESET}")
++                        temp_init.write_text(gate_res.get("source", unified_source), encoding="utf-8")
++                        installed_size = len(gate_res.get("source", unified_source))
++                        opt_mode = "plain_fallback"
+ 
+-                if gate_res["success"] and gate_res.get("bytecode"):
+-                    init_dest.write_bytes(gate_res["bytecode"])
+-                    installed_size = len(gate_res["bytecode"])
+-                    opt_mode = gate_res.get("opt_mode", "bytecode")
+-                else:
+-                    init_dest.write_text(gate_res.get("source", unified_source), encoding="utf-8")
+-                    installed_size = len(gate_res.get("source", unified_source))
+-                    opt_mode = "plain_fallback"
+-                opt_mode = gate_res.get("opt_mode", "plain")
++            # 6. Promoção Atômica (Renomeia o .tmp para .lua)
++            init_dest = deploy_dir / "init.lua"
++            if force or mode == "staging":
++                temp_init.replace(init_dest)
++            else:
++                if init_dest.exists():
++                    shutil.copy2(init_dest, deploy_dir / "init.lua.bak")
++                temp_init.replace(init_dest)
+ 
+             return {
+                 "success": True,
+@@ -729,17 +991,22 @@ class TyphonDeployEngine:
+                 "opt_mode": opt_mode,
+                 "error": None,
+             }
++
+         except Exception as e:
++            # Limpa o arquivo temporário se der erro
++            tmp = deploy_dir / "init.lua.tmp"
++            if tmp.exists():
++                tmp.unlink()
++            # Se for production e tiver backup, faz o rollback
+             if mode == "production" and backup_path and backup_path.exists():
+                 shutil.copy2(backup_path, deploy_dir / "init.lua")
+             return {"success": False, "error": str(e), "backup": backup_path}
+         finally:
++            # Diagnóstico visual após a execução
+             print(f"\n{Fore.CYAN}{Style.BRIGHT}🔬 DIAGNÓSTICO DE DEPLOY — [{mode.upper()}]{Style.RESET_ALL}")
+             print(f"  {Fore.WHITE}1. Diretório de Deploy:{Fore.RESET} {deploy_dir}")
+             print(f"  {Fore.WHITE}2. Python:{Fore.RESET} {sys.executable}")
+-            print(f"  {Fore.WHITE}3. Templates:{Fore.RESET} {len(LiteXLInitBuilder.get_template_files())} arquivos")
+-            print(f"  {Fore.WHITE}4. Khonsu:{Fore.RESET} {'DESATIVADO' if no_khonsu else 'ATIVADO'}")
+-            # 🔧 [FASE 1] linha nova
++            
+             assets_dir = deploy_dir / ".doxoade" / "assets"
+             if assets_dir.exists():
+                 assets_count = sum(1 for _ in assets_dir.rglob("*") if _.is_file())
+@@ -748,25 +1015,23 @@ class TyphonDeployEngine:
+                 print(f"  {Fore.WHITE}5. Assets:{Fore.RESET} {Fore.YELLOW}ausentes (fallback){Fore.RESET}")
+             print()
+ 
+-            import hashlib
+-            import json
+-
+-            unified_source, _ = DoxlyKhonsuGate.assemble_unified_buffer(templates, mode=mode)
+-            build_meta = {
+-                "mode": mode,
+-                "timestamp": datetime.now().isoformat(timespec="seconds"),
+-                "aot": not no_khonsu,
+-                "fingerprint": hashlib.sha256(unified_source.encode("utf-8")).hexdigest()[:16],
+-                "templates_count": len(templates),
+-                "templates": [t.name for t in templates],
+-            }
+-            diag_dir = deploy_dir / ".doxoade" / "diagnostics"
+-            diag_dir.mkdir(parents=True, exist_ok=True)
+-            (diag_dir / f"last_build_{mode}.json").write_text(
+-                json.dumps(build_meta, indent=2, ensure_ascii=False), encoding="utf-8"
+-            )
+-            print()
+-            # ✅ Fase 3: atualizar cache para HUD
++            import hashlib, json
++            try:
++                unified_source, _ = DoxlyKhonsuGate.assemble_unified_buffer(templates, mode=mode)
++                build_meta = {
++                    "mode": mode,
++                    "timestamp": datetime.now().isoformat(timespec="seconds"),
++                    "aot": not no_khonsu,
++                    "fingerprint": hashlib.sha256(unified_source.encode("utf-8")).hexdigest()[:16],
++                    "templates_count": len(templates),
++                }
++                diag_dir = deploy_dir / ".doxoade" / "diagnostics"
++                diag_dir.mkdir(parents=True, exist_ok=True)
++                (diag_dir / f"last_build_{mode}.json").write_text(
++                    json.dumps(build_meta, indent=2, ensure_ascii=False), encoding="utf-8"
++                )
++            except Exception:
++                pass
+             cls.write_status_cache()
+ 
+     @classmethod
+@@ -914,13 +1179,12 @@ class TyphonDeployEngine:
+             target_deploy_dir.mkdir(parents=True, exist_ok=True)
+ 
+         if exorcise:
+-            # 1. Envia o Graceful Quit ESPECÍFICO para o diretório isolado
+             ipc_queue = target_deploy_dir / ".ipc_queue"
+             if ipc_queue.exists():
+                 try:
+                     with open(ipc_queue, "a", encoding="utf-8") as f:
+                         f.write("__DOXOADE_GRACEFUL_QUIT__\n")
+-                    time.sleep(2.5)  # ⬆️ Aumentado para dar tempo do Lua salvar a sessão
++                    time.sleep(5.0) # AUMENTADO de 2.5 para 5.0
+                 except Exception:
+                     pass
+ 
+@@ -1169,3 +1433,138 @@ def forensic_harvester(pid: int, deploy_dir: Path):
+         lock_file = cls._get_deploy_dir(mode) / ".deploy.lock"
+         try: lock_file.unlink()
+         except Exception: pass
++
++def _kill_orphan_pty_daemons() -> int:
++    """Mata python.exe orfãos do pty_file_daemon (filhos do Lite XL morto).
++
++    Retorna quantos processos foram mortos (0 se nenhum).
++    """
++    if sys.platform != "win32":
++        try:
++            r = subprocess.run(
++                ["pkill", "-f", "pty_file_daemon"],
++                capture_output=True, timeout=5
++            )
++            return 0 if r.returncode != 0 else 1
++        except Exception:
++            return 0
++
++    ps = (
++        "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" "
++        "| Where-Object { $_.CommandLine -match 'pty_file_daemon' } "
++        "| ForEach-Object { "
++        "    try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; Write-Output $_.ProcessId } "
++        "    catch {} "
++        "}"
++    )
++    try:
++        r = subprocess.run(
++            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
++            capture_output=True, text=True, timeout=15
++        )
++        killed = sum(1 for ln in r.stdout.splitlines() if ln.strip().isdigit())
++        return killed
++    except Exception:
++        return 0
++
++
++def _move_with_robocopy(src: Path, dst: Path, retries: int = 8) -> Tuple[bool, str]:
++    """Move src → dst. Windows: robocopy /MOVE (retry robusto + log).
++    POSIX: shutil.move. Retorna (ok, erro).
++    """
++    if sys.platform != "win32":
++        try:
++            shutil.move(str(src), str(dst))
++            return True, ""
++        except Exception as e:
++            return False, f"shutil.move falhou: {e}"
++
++    dst.parent.mkdir(parents=True, exist_ok=True)
++    cmd = [
++        "robocopy", str(src), str(dst),
++        "/MOVE", "/E", f"/R:{retries}", "/W:2",
++        "/NFL", "/NDL", "/NJH", "/NJS", "/NC", "/NS", "/NP",
++    ]
++    try:
++        r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
++    except subprocess.TimeoutExpired:
++        return False, "robocopy timeout (>180s) — provável lock persistente"
++
++    # Códigos: 0=ok(sem arquivos), 1=copied, 2=extra, 3=both,
++    # 4=mismatch, 5=falha ao copiar, 6=extra+falha, 7=both+falha,
++    # 8+=erro fatal (access denied, path inválido etc.)
++    if r.returncode >= 8:
++        return False, (
++            f"robocopy fatal (exit {r.returncode}): "
++            f"{(r.stdout or r.stderr).strip()[-400:]}"
++        )
++
++    # Verifica se sobrou algo
++    if src.exists():
++        leftovers = list(src.iterdir())
++        if leftovers:
++            names = ", ".join(p.name for p in leftovers[:8])
++            more = f" (+{len(leftovers)-8} mais)" if len(leftovers) > 8 else ""
++            return False, (
++                f"robocopy moveu parcialmente. {len(leftovers)} arquivo(s) "
++                f"bloqueado(s) em {src}: {names}{more}"
++            )
++        try:
++            src.rmdir()
++        except Exception:
++            pass
++
++    if not dst.exists():
++        return False, f"destino {dst} não foi criado"
++    return True, ""
++
++
++def _diagnose_vanilla_locks(vanilla: Path) -> str:
++    """Lista o que (provavelmente) segura handles em `vanilla`."""
++    if not vanilla.exists():
++        return "  (vanilla não existe)"
++
++    if sys.platform == "win32":
++        # Tenta renomear cada filho em ordem — o primeiro que falhar é o culpado
++        locked = []
++        for child in vanilla.iterdir():
++            tmp = child.with_name(f"__locktest_{child.name}")
++            try:
++                child.rename(tmp)
++                tmp.rename(child)
++            except Exception as e:
++                locked.append(f"  ✖ {child.name} — {type(e).__name__}: {e}")
++        if locked:
++            return "  Arquivos/folders bloqueados:\n" + "\n".join(locked[:10])
++
++        # Nenhum arquivo individual bloqueado → provavelmente a pasta em si
++        # (CWD de algum processo) ou antivírus
++        ps = (
++            "Get-CimInstance Win32_Process | "
++            "Where-Object { $_.Name -match 'python|cmd|powershell|explorer|lite-xl|MsMpEng' } | "
++            "Select-Object ProcessId,Name,CommandLine | Format-Table -AutoSize"
++        )
++        try:
++            r = subprocess.run(
++                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
++                capture_output=True, text=True, timeout=10
++            )
++            out = r.stdout.strip()
++            # filtra linhas com .config\lite-xl ou pty_file_daemon
++            suspicious = [ln for ln in out.splitlines()
++                          if ".config\\lite-xl" in ln or "pty_file_daemon" in ln]
++            if suspicious:
++                return "  Processos com handle suspeito:\n  " + "\n  ".join(suspicious[:10])
++            return "  (nenhum processo obviamente culpado — provável antivírus)"
++        except Exception as e:
++            return f"  (diagnóstico falhou: {e})"
++
++    else:
++        try:
++            r = subprocess.run(["lsof", "+D", str(vanilla)],
++                               capture_output=True, text=True, timeout=10)
++            if r.stdout.strip():
++                return r.stdout[:1500]
++        except Exception:
++            pass
++        return f"  (rodar `lsof +D {vanilla}` manualmente)"
+diff --git a/doxoade/docs/Protocols/ProDeNov.md b/doxoade/docs/Protocols/ProDeNov.md
+index 8e9cfb1..3f8677f 100644
+--- a/doxoade/docs/Protocols/ProDeNov.md
++++ b/doxoade/docs/Protocols/ProDeNov.md
+@@ -71,6 +71,7 @@ este é o novo protocolo simplificado e sucinto de desenvolveimento do doxoade.
+     4.3.1. investigue o obvio, sempre comece com o que você tem, caso não tenha nada, não ande no escuro, faça com que você obternha dados do sistema de forma automatica ou manual, um problema complexo deve sser resolvido baseado em contexto, se um sistema tem componente e deu problema nesles, você deve investigar os componentes e a interação deles seja ela ativa ou não. com isso pode-se descobrir divergencias com informações instruções, conflitos, versões diferentes, e até modficações necessarias e patchs.
+     4.3.2. a longo prazo não hesite em fazer facilitudes para lidar com problemas ou uso dinamico das suas ferramentas, pense na economia que isso gera a longo prazo.
+     4.3.3. sempre anote possibilidade de melhoria ou problemas seja num local obvio ou pratico.
++    4.3.4. em crash de terminal investique a camada de orquesteação de comandos, ouseja investigue o comando e relacionados ao sistema que esta com problema. normalmente sistema filho fecha o pai quando tem crash fatal em baixo nivel, isso acontece porque algo causa erro no sistema C, o python quebra por cascata, e quando quebra o terminal tambem é cascata do problema.
+ 5. Recomendações:
+   5.1. É recomendado colocar notas tecnicas sobre problemas, é importante, é necessario colocar informações sobre o problema. pode-se colocar no codigo em docstring o erro se necessario.
+   5.2. Recomenda-se fortemente que lide com o tratamento de exceptions para que falhas sejam bem informadas e previstas para que o deve não fique a ver navios com relação a erros.

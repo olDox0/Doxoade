@@ -18,7 +18,7 @@ set PASS=0
 set FAIL=0
 set FAILED_LIST=
 
-for %%p in (00:00_fizzbuzz 01:01_cycle 02:02_conflict 10:10_ast_to_facts 11:11_ast_function 20:20_unification 21:21_negation_as_failure 30a:30a_if_return_detect) do (
+for %%p in (00:00_fizzbuzz 01:01_cycle 02:02_conflict 10:10_ast_to_facts 11:11_ast_function 20:20_unification 21:21_negation_as_failure 30a:30a_if_return_detect 30b:30b_if_return_rewrite) do (
     for /f "tokens=1,2 delims=:" %%a in ("%%p") do (
         set NUM=%%a
         set FOLDER=%%b

@@ -147,6 +147,33 @@ def _extract_contract(crime):
         contract['hint'] = close[0] if close else None
     return contract
 
+def _recover_syntax_source(frames: list, crime: Optional[dict]) -> Optional[str]:
+    """Se o crime aponta para '<unknown>' (ast.parse/compile sem filename=),
+    tenta recuperar o arquivo real varrendo frames anteriores por padroes:
+    open('X.py'), Path('X.py').read_text(), compile(..., 'X.py'),
+    py_compile.compile('X.py')."""
+    if not crime:
+        return None
+    if crime.get('file') not in ('<unknown>', '<string>', '<stdin>', '<frozen>'):
+        return None
+
+    PATTERNS = (
+        r"open\(\s*['\"]([^'\"]+\.py)['\"]",
+        r"Path\(\s*['\"]([^'\"]+\.py)['\"]\s*\)\.read",
+        r"compile\([^,]+,\s*['\"]([^'\"]+\.py)['\"]",
+        r"py_compile\.compile\(\s*['\"]([^'\"]+\.py)['\"]",
+    )
+
+    for frame in reversed(frames):
+        if frame.get('file') == crime.get('file'):
+            continue
+        code = frame.get('code', '')
+        for pat in PATTERNS:
+            m = re.search(pat, code)
+            if m:
+                return m.group(1)
+    return None
+
 def _direct_report(trace, mined):
     """🏹 DIRECT MODE: mesma estética do complete, porém compacta.
     Header + Causa Raiz + Cena do Crime (snippet) + LOG BRUTO. Sem menu."""
@@ -229,6 +256,24 @@ def _mine_traceback(trace):
     
     # Elege o frame do usuário mais profundo; se não houver, cai para o último frame
     crime = user_frames[-1] if user_frames else (frames[-1] if frames else None)
+
+    # FIX: syntax-recovery — ast.parse sem filename= reporta <unknown>
+    if crime and crime.get('file') in ('<unknown>', '<string>', '<stdin>', '<frozen>'):
+        recovered = _recover_syntax_source(frames, crime)
+        if recovered:
+            p = Path(recovered)
+            if not p.is_absolute():
+                candidate = Path.cwd() / recovered
+                if candidate.exists():
+                    recovered = str(candidate)
+            crime = {**crime, 'file': recovered}
+            try:
+                with open(recovered, 'r', encoding='utf-8', errors='replace') as fh:
+                    lines = fh.readlines()
+                if 0 < crime['line'] <= len(lines):
+                    crime['code'] = lines[crime['line'] - 1].strip()
+            except Exception:
+                pass
 
     out = {
         'frames': frames,

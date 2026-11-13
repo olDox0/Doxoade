@@ -6,6 +6,8 @@
 #include "decoder_backend.h"
 #include "disasm.h"
 #include "cfg.h"
+#include "functions.h"
+#include "patterns.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -226,6 +228,112 @@ static int test_symbols(const PreIR *ir)
     return 0;
 }
 
+/* ---------- 7. Functions ---------- */
+static int test_functions(const char *path, const PreIR *ir)
+{
+    printf("[FUNCTIONS]\n");
+    if (path == NULL || ir == NULL) { report(INFO, "sem alvo, pulando"); return 0; }
+
+    const SectionEntry *text = NULL;
+    for (uint32_t i = 0; i < ir->section_count; i++)
+        if (strcmp(ir->sections[i].name, ".text") == 0) { text = &ir->sections[i]; break; }
+    if (text == NULL) { report(WARN, "sem .text, pulando"); return 0; }
+
+    FileReader fr;
+    char err[256] = {0};
+    if (file_reader_open(path, &fr, err, sizeof(err)) != 0) {
+        report(FAIL, "abrir: %s", err); g_fail++; return -1;
+    }
+    uint64_t va_base = ir->image_base + text->va - text->raw_offset;
+    InsnList insns = {0};
+    if (disasm_collect(&fr, text->raw_offset, text->raw_size, va_base,
+                       BACKEND_NATIVE, &insns, err, sizeof(err)) != 0) {
+        report(FAIL, "disasm_collect: %s", err);
+        file_reader_close(&fr); g_fail++; return -1;
+    }
+    CFG cfg = {0};
+    if (cfg_build(&insns, &cfg, err, sizeof(err)) != 0) {
+        report(FAIL, "cfg_build: %s", err);
+        free(insns.insns); file_reader_close(&fr); g_fail++; return -1;
+    }
+    FunctionList fl = {0};
+    if (functions_build(&insns, &cfg, ir, &fl, err, sizeof(err)) != 0) {
+        report(FAIL, "functions_build: %s", err);
+        cfg_free(&cfg); free(insns.insns); file_reader_close(&fr);
+        g_fail++; return -1;
+    }
+    report(PASS, "%u funções identificadas (%u chamadas externas)",
+           fl.count, fl.external_calls);
+    if (fl.count > 0) {
+        report(INFO, "primeira: 0x%llx %s (%u blocos, %u calls)",
+               (unsigned long long)fl.entries[0].start_va,
+               fl.entries[0].name,
+               fl.entries[0].block_count,
+               fl.entries[0].call_count);
+    }
+    functions_free(&fl);
+    cfg_free(&cfg);
+    free(insns.insns);
+    file_reader_close(&fr);
+    return 0;
+}
+
+/* ---------- 8. Patterns ---------- */
+static int test_patterns(const char *path, const PreIR *ir)
+{
+    printf("[PATTERNS]\n");
+    if (path == NULL || ir == NULL) { report(INFO, "sem alvo, pulando"); return 0; }
+
+    const SectionEntry *text = NULL;
+    for (uint32_t i = 0; i < ir->section_count; i++)
+        if (strcmp(ir->sections[i].name, ".text") == 0) { text = &ir->sections[i]; break; }
+    if (text == NULL) { report(WARN, "sem .text, pulando"); return 0; }
+
+    FileReader fr;
+    char err[256] = {0};
+    if (file_reader_open(path, &fr, err, sizeof(err)) != 0) {
+        report(FAIL, "abrir: %s", err); g_fail++; return -1;
+    }
+    uint64_t va_base = ir->image_base + text->va - text->raw_offset;
+    InsnList insns = {0};
+    if (disasm_collect(&fr, text->raw_offset, text->raw_size, va_base,
+                       BACKEND_NATIVE, &insns, err, sizeof(err)) != 0) {
+        report(FAIL, "disasm_collect: %s", err);
+        file_reader_close(&fr); g_fail++; return -1;
+    }
+    CFG cfg = {0};
+    if (cfg_build(&insns, &cfg, err, sizeof(err)) != 0) {
+        report(FAIL, "cfg_build: %s", err);
+        free(insns.insns); file_reader_close(&fr); g_fail++; return -1;
+    }
+    FunctionList fl = {0};
+    if (functions_build(&insns, &cfg, ir, &fl, err, sizeof(err)) != 0) {
+        report(FAIL, "functions_build: %s", err);
+        cfg_free(&cfg); free(insns.insns); file_reader_close(&fr); g_fail++; return -1;
+    }
+    if (patterns_analyze(&insns, &cfg, ir, &fl, err, sizeof(err)) != 0) {
+        report(FAIL, "patterns_analyze: %s", err);
+    } else {
+        uint32_t fp = 0, canary = 0, tail = 0, sw = 0, leaf = 0;
+        for (uint32_t i = 0; i < fl.count; i++) {
+            uint32_t f = fl.entries[i].flags;
+            if (f & FUNC_FLAG_FP) fp++;
+            if (f & FUNC_FLAG_CANARY) canary++;
+            if (f & FUNC_FLAG_TAILCALL) tail++;
+            if (f & FUNC_FLAG_SWITCH) sw++;
+            if (f & FUNC_FLAG_LEAF) leaf++;
+        }
+        report(PASS, "%u funções analisadas", fl.count);
+        report(INFO, "fp=%u canary=%u tail=%u switch=%u leaf=%u",
+               fp, canary, tail, sw, leaf);
+    }
+    functions_free(&fl);
+    cfg_free(&cfg);
+    free(insns.insns);
+    file_reader_close(&fr);
+    return 0;
+}
+
 /* ---------- doctor_run ---------- */
 int doctor_run(const char *target)
 {
@@ -246,6 +354,10 @@ int doctor_run(const char *target)
         test_cfg(target, &ir);
         printf("\n");
         test_symbols(&ir);
+        printf("\n");
+        test_functions(target, &ir);
+        printf("\n");
+        test_patterns(target, &ir);
         printf("\n");
         pre_ir_free(&ir);
     }

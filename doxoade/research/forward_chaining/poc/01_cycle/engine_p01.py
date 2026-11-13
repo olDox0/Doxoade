@@ -1,27 +1,29 @@
 # -*- coding: utf-8 -*-
 # doxoade/research/forward_chaining/poc/01_cycle/engine_p01.py
 """
-P01 - Terminacao em ciclos e falha explicita.
+P01 - Terminacao em ciclos e falha explicita, com debug estruturado.
 
-Contrato: C1 (Inferencia). Semantica de ciclo: B estrita.
+Debug:
+    py engine_p01.py --debug
+    Emite [DEBUG] em stderr. stdout/output.txt inalterados.
 
-DEFINICAO DE CICLO (contrato): um ciclo e uma rodada de match sobre
-SNAPSHOT congelado, seguida de fire. Regras do mesmo ciclo nao veem
-fatos derivados por outras regras do mesmo ciclo.
+P01a - ciclo de regras quiesce via idempotencia.
+P01b - cadeia > max_cycles levanta CycleLimitError explicito.
 
-P01a - Ciclo de regras quiesce via idempotencia.
-P01b - Cadeia > max_cycles levanta CycleLimitError explicito.
-
-Rodar: run_01.bat
+O debug mostra:
+- P01a: cycle-by-cycle (matches, candidates, idempotent, quiescence).
+- P01b: cycle-by-cycle ATE o limite, momento da falha, trace preservado.
 """
 from __future__ import annotations
 
 import dataclasses
 import logging
 import sys
+import time
 from pathlib import Path
 
 LOG_PATH = Path(__file__).parent / "logging.txt"
+DEBUG = "--debug" in sys.argv
 
 
 def setup_logging() -> logging.Logger:
@@ -36,6 +38,11 @@ def setup_logging() -> logging.Logger:
 
 
 LOG = setup_logging()
+
+
+def _dbg(*parts) -> None:
+    if DEBUG:
+        print("[DEBUG]", *parts, file=sys.stderr)
 
 
 class CycleLimitError(RuntimeError):
@@ -71,18 +78,26 @@ class Rule:
 
 
 class ForwardChainingEngine:
+    """
+    Snapshot por ciclo (semantica B estrita).
+
+    Ciclo = rodada de match sobre snapshot congelado + fire.
+    Cadeias lineares exigem N ciclos. max_cycles conta rodadas.
+    """
+
     def __init__(self, max_cycles: int = 100):
         self.max_cycles = max_cycles
         self.trace: list[dict] = []
-        self.cycles_used: int = 0
+        self.cycles_used = 0
+        self.cycle_history: list[dict] = []
+        self.rules_attempted = 0
+        self.rule_attempts: dict[str, int] = {}
+        self.limit_reached = False
 
     def run(self, initial_facts: list[Fact], rules: list[Rule]) -> list[Fact]:
         facts: list[Fact] = list(initial_facts)
         ordered_rules = sorted(rules, key=lambda r: -r.priority)
         cycles = 0
-        LOG.info("run: %d fatos, %d regras, max_cycles=%d",
-                 len(facts), len(ordered_rules), self.max_cycles)
-
         while cycles < self.max_cycles:
             cycles += 1
             snapshot: frozenset[tuple[str, str]] = frozenset(
@@ -92,21 +107,38 @@ class ForwardChainingEngine:
             new_facts: list[Fact] = []
             seen_in_cycle: set[tuple[str, str]] = set()
 
+            cycle_info = {
+                "cycle": cycles,
+                "matches": {},
+                "candidates": [],
+                "idempotent": [],
+                "quiescence": False,
+            }
+
             for rule in ordered_rules:
-                if not rule.match(snapshot):
+                self.rules_attempted += 1
+                self.rule_attempts[rule.id] = self.rule_attempts.get(rule.id, 0) + 1
+
+                matched = rule.match(snapshot)
+                cycle_info["matches"][rule.id] = matched
+                if not matched:
                     continue
+
                 new_fact = rule.conclusion_fact(cycle=cycles)
                 pair = new_fact.to_pair()
                 if pair in existing or pair in seen_in_cycle:
-                    LOG.debug("ciclo %d: %s idempotente (%s)",
-                              cycles, rule.id, pair)
+                    cycle_info["idempotent"].append((rule.id, pair))
                     continue
+
+                cycle_info["candidates"].append((rule.id, rule.priority, pair))
                 new_facts.append(new_fact)
                 seen_in_cycle.add(pair)
 
+            self.cycle_history.append(cycle_info)
+
             if not new_facts:
+                cycle_info["quiescence"] = True
                 self.cycles_used = cycles
-                LOG.info("quiescencia em %d ciclo(s)", cycles)
                 return facts
 
             for nf in new_facts:
@@ -116,15 +148,17 @@ class ForwardChainingEngine:
                     "rule_id": nf.rule_id,
                     "conclusion": nf.to_pair(),
                 })
-                LOG.debug("ciclo %d: %s -> %s",
-                          cycles, nf.rule_id, nf.to_pair())
 
+        self.limit_reached = True
         raise CycleLimitError(
             f"max_cycles={self.max_cycles} sem quiescencia "
             f"(trace tem {len(self.trace)} entrada(s))"
         )
 
 
+# ============================================================
+# P01a - ciclo de regras
+# ============================================================
 RULES_P01A: list[Rule] = [
     Rule("R1", conditions=(("x", "1"),), conclusion=("y", "1")),
     Rule("R2", conditions=(("y", "1"),), conclusion=("z", "1")),
@@ -132,9 +166,40 @@ RULES_P01A: list[Rule] = [
 ]
 
 
+def _dbg_cycle(cycle_info: dict) -> None:
+    _dbg(f"  cycle {cycle_info['cycle']}:")
+    matches_str = " ".join(
+        f"{rid}={v}" for rid, v in cycle_info["matches"].items()
+    )
+    _dbg(f"    matches: {matches_str}")
+    for rid, prio, fact in cycle_info["candidates"]:
+        _dbg(f"    candidate: {rid} prio={prio} -> {fact}")
+    for rid, fact in cycle_info["idempotent"]:
+        _dbg(f"    idempotent: {rid} -> {fact}")
+    if cycle_info["quiescence"]:
+        _dbg("    quiescence")
+
+
 def run_p01a() -> dict:
+    seed = [Fact("x", "1")]
+    if DEBUG:
+        _dbg("--- P01a: ciclo de regras ---")
+        _dbg(f"  seed_facts: {[f.to_pair() for f in seed]}")
+        _dbg(f"  rules: {[r.id for r in RULES_P01A]} "
+             f"(priorities: {[r.priority for r in RULES_P01A]})")
+
+    t0 = time.perf_counter()
     engine = ForwardChainingEngine(max_cycles=10)
-    facts = engine.run([Fact("x", "1")], RULES_P01A)
+    facts = engine.run(seed, RULES_P01A)
+    t_ms = (time.perf_counter() - t0) * 1000
+
+    if DEBUG:
+        for ci in engine.cycle_history:
+            _dbg_cycle(ci)
+        _dbg(f"  result: cycles={engine.cycles_used} trace_len={len(engine.trace)}")
+        _dbg(f"  timing: {t_ms:.3f}ms")
+        _dbg("")
+
     return {
         "terminou": True,
         "ciclos": engine.cycles_used,
@@ -143,6 +208,9 @@ def run_p01a() -> dict:
     }
 
 
+# ============================================================
+# P01b - cadeia > max_cycles
+# ============================================================
 def build_chain(n: int) -> list[Rule]:
     return [
         Rule(f"R_{i:02d}",
@@ -153,21 +221,56 @@ def build_chain(n: int) -> list[Rule]:
 
 
 def run_p01b() -> dict:
-    rules = build_chain(6)
-    engine = ForwardChainingEngine(max_cycles=3)
+    chain_len = 6
+    max_cycles = 3
+    rules = build_chain(chain_len)
+    seed = [Fact("a0", "ok")]
+
+    if DEBUG:
+        _dbg("--- P01b: cadeia > max_cycles ---")
+        _dbg(f"  seed_facts: {[f.to_pair() for f in seed]}")
+        _dbg(f"  chain_length: {chain_len} (rules: {[r.id for r in rules]})")
+        _dbg(f"  max_cycles: {max_cycles}")
+
+    t0 = time.perf_counter()
+    engine = ForwardChainingEngine(max_cycles=max_cycles)
     try:
-        engine.run([Fact("a0", "ok")], rules)
+        engine.run(seed, rules)
     except CycleLimitError as e:
+        t_ms = (time.perf_counter() - t0) * 1000
+        if DEBUG:
+            for ci in engine.cycle_history:
+                _dbg_cycle(ci)
+            _dbg(f"  max_cycles={max_cycles} reached WITHOUT quiescence")
+            _dbg(f"  CycleLimitError raised:")
+            _dbg(f"    \"{e}\"")
+            _dbg(f"  trace_at_failure (preservado):")
+            for step in engine.trace:
+                _dbg(f"    ciclo {step['cycle']}: {step['rule_id']} -> "
+                     f"{step['conclusion'][0]}={step['conclusion'][1]}")
+            _dbg(f"  timing: {t_ms:.3f}ms")
+            _dbg("")
         LOG.info("P01b: CycleLimitError como esperado: %s", e)
         return {"levantou_erro": True, "erro": str(e), "trace": engine.trace}
     LOG.error("P01b: NAO levantou CycleLimitError - engine mentiu")
     return {"levantou_erro": False, "erro": None, "trace": engine.trace}
 
 
+# ============================================================
+# main
+# ============================================================
 def main() -> int:
+    if DEBUG:
+        _dbg("=== engine_p01.py ===")
+        _dbg("mode: debug")
+        _dbg("engine_semantics: B (snapshot per cycle)")
+        _dbg(f"args: {sys.argv}")
+        _dbg("")
+
     lines: list[str] = []
     falhas: list[str] = []
 
+    # ---------- P01a ----------
     lines.append("=== P01a: ciclo de regras ===")
     a = run_p01a()
     lines.append(f"terminou: {a['terminou']}")
@@ -184,6 +287,7 @@ def main() -> int:
     if a["ciclos"] != 3:
         falhas.append(f"P01a: esperado 3 ciclos, veio {a['ciclos']}")
 
+    # ---------- P01b ----------
     lines.append("=== P01b: cadeia > max_cycles ===")
     b = run_p01b()
     lines.append(f"levantou_erro: {b['levantou_erro']}")
@@ -200,16 +304,19 @@ def main() -> int:
     if len(b["trace"]) != 3:
         falhas.append(f"P01b: esperado 3 entradas no trace, veio {len(b['trace'])}")
 
+    # ---------- veredito ----------
     if falhas:
         lines.append(f"FAIL: {len(falhas)} falha(s)")
-        for f in falhas:
-            lines.append(f"  - {f}")
+        for x in falhas:
+            lines.append(f"  - {x}")
         LOG.error("P01 FAIL: %s", falhas)
         resultado = 1
     else:
         lines.append("P01 PASS")
         LOG.info("P01 PASS")
         resultado = 0
+        if DEBUG:
+            _dbg("=== done: all checks passed ===")
 
     for line in lines:
         print(line)
@@ -222,6 +329,24 @@ def main() -> int:
     )
     return resultado
 
+class _Quiet:
+    """Context manager que suspende _dbg durante execucoes em massa."""
+    __slots__ = ("level",)
+    def __init__(self) -> None:
+        self.level = 0
+    def __enter__(self):
+        self.level += 1
+        return self
+    def __exit__(self, *exc):
+        self.level -= 1
+
+
+QUIET = _Quiet()
+
+
+def _dbg(*parts) -> None:
+    if DEBUG and QUIET.level == 0:
+        print("[DEBUG]", *parts, file=sys.stderr)
 
 if __name__ == "__main__":
     sys.exit(main())

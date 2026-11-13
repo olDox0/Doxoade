@@ -528,7 +528,7 @@ pcall(function()
                 if not query or query:match("^%s*$") then return end
                 local executor = rawget(_G, "DOXOADE_EXECUTE_GLOBAL_SEARCH")
                 if type(executor) == "function" then
-                  pcall(executor, query, path)
+                  pcall(executor, query, path, true)
                 elseif core.log then
                   pcall(core.log, "⚠ [SEARCH] execute_global_search indisponível.")
                 end

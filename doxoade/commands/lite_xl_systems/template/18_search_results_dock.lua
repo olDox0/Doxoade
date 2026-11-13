@@ -83,105 +83,64 @@ local function open_search_panel()
 
   -- 🛡️ [FASE 3.1] NÃO fecha splits. O painel flutuante desenha por cima
   -- de qualquer layout (RootView:draw já itera todos os nós).
-  -- A tentativa de "consume" do código antigo era um bug que destruía
-  -- a árvore de views do usuário.
-
   UIState.visible = true
   core.redraw = true
 end
 
 -- ============================================================================
--- Navegação (abre arquivo no painel ATUAL, mantém painel flutuante visível)
+-- Navegação (abre arquivo em NOVA ABA ou foca o existente)
 -- ============================================================================
 local function navigate_to_result(idx)
   local state = get_search_state()
   local flat = flatten_results(state.results)
   if #flat == 0 then return end
-
   if idx < 1 then idx = #flat end
   if idx > #flat then idx = 1 end
-
   state.current_result_idx = idx
   local item = flat[idx]
 
-  -- 🛡️ [FASE 4] Encontra o painel PRINCIPAL (primeiro leaf não-locked)
-  local function find_primary_leaf()
-    local root = core.root_view and core.root_view.root_node
-    if not root then return nil end
-    local function traverse(n)
-      if not n then return nil end
-      if n.type == "leaf" and not n.locked then return n end
-      return traverse(n.a) or traverse(n.b)
-    end
-    return traverse(root)
-  end
-
-  local primary_node = find_primary_leaf()
-  if not primary_node then
-    -- Fallback: sem painel, só abre
-    local ok, doc = pcall(core.open_doc, item.path)
-    if ok and doc then
-      core.root_view:open_doc(doc)
-      doc:set_selection(item.line, 1, item.line, 1)
-    end
-    UIState.visible = true
-    return
-  end
-
-  -- 🛡️ [FASE 4] Abre o doc
   local ok, doc = pcall(core.open_doc, item.path)
   if not (ok and doc) then
     if core.log then core.log("⚠ [SEARCH] Falha ao abrir: " .. tostring(item.path)) end
     return
   end
 
-  -- 🛡️ [FASE 4] Substitui a view ativa do painel principal
-  -- Método universal (funciona em Lite XL 2.0, 2.1, 2.2):
-  -- 1. Encontra índice da view ativa
-  -- 2. Remove ela
-  -- 3. Cria DocView nova no mesmo slot
-  local DocView = require "core.docview"
-  local new_view = DocView(doc)
-
-  local views = primary_node.views or {}
-  local active_view = primary_node.active_view
-  local active_idx = nil
-  for i, v in ipairs(views) do
-    if v == active_view then active_idx = i; break end
+  -- 🎯 1. Já está aberto em algum painel? Apenas foca e pula para a linha.
+  local finder = rawget(_G, "DOXOADE_FIND_VIEW_FOR_DOC")
+  if type(finder) == "function" then
+    local existing_view, existing_leaf = finder(doc)
+    if existing_view and existing_leaf then
+      existing_leaf.active_view = existing_view
+      if core.root_view and core.root_view.set_active_node then
+        pcall(core.root_view.set_active_node, core.root_view, existing_leaf)
+      end
+      if core.set_active_view then
+        pcall(core.set_active_view, existing_view)
+      end
+      pcall(doc.set_selection, doc, item.line, 1, item.line, 1)
+      core.redraw = true
+      UIState.visible = true
+      if core.log then
+        pcall(core.log, string.format("📄 [SEARCH] Focado: %s:%d", item.path:match("[^/\\]+$") or item.path, item.line))
+      end
+      return
+    end
   end
 
-  if active_idx then
-    -- Substitui no mesmo slot
-    views[active_idx] = new_view
+  -- 🎯 2. Arquivo fechado? Usa a função global para criar nova aba com segurança.
+  local opener = rawget(_G, "DOXOADE_OPEN_IN_NEW_TAB")
+  if type(opener) == "function" then
+    opener(doc)
   else
-    -- Não havia view ativa: adiciona
-    table.insert(views, new_view)
+    core.root_view:open_doc(doc) -- Fallback
   end
-
-  primary_node.active_view = new_view
-
-  -- Foca no painel principal
-  if core.root_view and core.root_view.set_active_node then
-    pcall(core.root_view.set_active_node, core.root_view, primary_node)
-  end
-  if core.set_active_view then
-    pcall(core.set_active_view, new_view)
-  end
-
-  -- Posiciona cursor (protegido)
+  
   pcall(doc.set_selection, doc, item.line, 1, item.line, 1)
-
-  -- Redesenha
   core.redraw = true
-
-  if core.log then
-    pcall(core.log, string.format("📄 [SEARCH] → %s:%d (painel principal, slot %s)",
-      item.path:match("[^/\\]+$") or item.path, item.line,
-      tostring(active_idx or "novo")))
-  end
-
-  -- Painel flutuante continua visível
   UIState.visible = true
+  if core.log then
+    pcall(core.log, string.format("📄 [SEARCH] Nova Aba: %s:%d", item.path:match("[^/\\]+$") or item.path, item.line))
+  end
 end
 
 -- ============================================================================
@@ -360,6 +319,8 @@ command.add(nil, {
 -- Keymaps
 -- ============================================================================
 keymap.add {
+  ["ctrl+."]          = "doxoade:search-next-result",
+  ["ctrl+,"]          = "doxoade:search-prev-result",
   ["f4"]              = "doxoade:search-next-result",
   ["shift+f4"]        = "doxoade:search-prev-result",
   ["alt+,"]           = "doxoade:search-prev-result",

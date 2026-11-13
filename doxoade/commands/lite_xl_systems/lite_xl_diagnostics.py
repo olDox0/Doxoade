@@ -409,6 +409,18 @@ local RootView = { draw = function() end, on_mouse_moved = function() end, on_mo
 local View = { extend = function(self) return self end }
 local StatusView = { Item = { LEFT = 1, RIGHT = 2 } }
 
+local CommandView = {
+  text = "",
+  hide = function(self) end,
+  submit = function(self, text) end,
+  enter = function(self, prompt, opts)
+    if opts and type(opts.submit) == "function" then
+      pcall(opts.submit, "shadow_test")
+    end
+  end,
+  extend = function(self) return self end,
+}
+
 rawset(_G, "core", core)
 rawset(_G, "system", system)
 rawset(_G, "USERDIR", ".")
@@ -431,6 +443,7 @@ package.loaded["core.doc"] = Doc
 package.loaded["core.view"] = View
 package.loaded["core.rootview"] = RootView
 package.loaded["core.statusview"] = StatusView
+package.loaded["core.commandview"] = CommandView
 
 -- 2. Carregamento dos Templates
 for _, tpath in ipairs(templates) do
@@ -452,6 +465,7 @@ for _, _ in pairs(core.command.map) do cmd_count = cmd_count + 1 end
 print(string.format("SHADOW_CMD_COUNT|%d", cmd_count))
 
 -- 4. 🔬 SIMULAÇÃO ATIVA DE EXECUÇÃO (Invoca cada comando registrado)
+rawset(_G, "_DOXOADE_SHADOW_MODE", true)
 local passed_cmds = 0
 local failed_cmds = 0
 for cmd_name, cmd_entry in pairs(core.command.map) do
@@ -483,6 +497,7 @@ for cmd_name, cmd_entry in pairs(core.command.map) do
   end
 end
 print(string.format("SHADOW_CMD_SIMULATION|%d|%d", passed_cmds, failed_cmds))
+rawset(_G, "_DOXOADE_SHADOW_MODE", nil)
 
 -- 5. Detecção de Atalhos Órfãos
 for key, target_cmd in pairs(core.keymap.map) do

@@ -225,14 +225,31 @@ static void fmt_operands(const DecodedInsn *insn, const FileReader *fr,
 static int fmt_insn(DecodedInsn *insn, const FileReader *fr,
                     const PreIR *ir, char *out, size_t out_size)
 {
+    /* Caminho Capstone: mnemonic + op_str já formatados. */
     if (insn->mnemonic[0] != '\0') {
         if (insn->op_str[0] != '\0')
             snprintf(out, out_size, "%s %s", insn->mnemonic, insn->op_str);
         else
             snprintf(out, out_size, "%s", insn->mnemonic);
+
+        /* Anotação de símbolos para alvo RIP-relative. */
+        if (insn->has_rip_target && ir != NULL) {
+            uint64_t sym_off = 0;
+            const char *sym = symbol_lookup(ir, insn->rip_target, &sym_off, 0);
+            if (sym) {
+                size_t len = strlen(out);
+                if (sym_off == 0)
+                    snprintf(out + len, out_size - len, " <%s>", sym);
+                else
+                    snprintf(out + len, out_size - len,
+                             " <%s+0x%llx>", sym,
+                             (unsigned long long)sym_off);
+            }
+        }
         return 0;
     }
 
+    /* Caminho nativo: tabela de opcodes. */
     char mnemo[32] = "";
     char operands[128] = "";
 
@@ -390,6 +407,36 @@ int disasm_collect(const FileReader *fr, uint64_t offset, uint64_t length,
 ControlFlowType insn_control_flow(const DecodedInsn *insn, uint64_t *target_va)
 {
     if (target_va) *target_va = 0;
+
+    /* --- Caminho Capstone: usa mnemônico, imm absoluto --- */
+    if (insn->mnemonic[0] != '\0') {
+        const char *m = insn->mnemonic;
+
+        /* ret, retf, retn */
+        if (m[0] == 'r' && m[1] == 'e' && m[2] == 't') return CF_RET;
+
+        /* call, callq — Capstone normaliza o alvo para absoluto */
+        if (m[0] == 'c' && m[1] == 'a' && m[2] == 'l' && m[3] == 'l') {
+            if (insn->imm_size > 0 && target_va) *target_va = (uint64_t)insn->imm;
+            return CF_CALL;
+        }
+
+        /* jmp — Capstone normaliza o alvo para absoluto */
+        if (m[0] == 'j' && m[1] == 'm' && m[2] == 'p') {
+            if (insn->imm_size > 0 && target_va) *target_va = (uint64_t)insn->imm;
+            return CF_JMP;
+        }
+
+        /* jcc (je, jne, jl, jg, jbe, ja, jz, jnz, ...) */
+        if (m[0] == 'j') {
+            if (insn->imm_size > 0 && target_va) *target_va = (uint64_t)insn->imm;
+            return CF_JCC;
+        }
+
+        return CF_NONE;
+    }
+
+    /* --- Caminho nativo: opcode + relativo --- */
     if (insn->opcode_len == 1) {
         uint8_t op = (uint8_t)insn->opcode;
         if (op >= 0x70 && op <= 0x7F) {
@@ -404,9 +451,7 @@ ControlFlowType insn_control_flow(const DecodedInsn *insn, uint64_t *target_va)
             if (target_va) *target_va = insn->va + insn->length + (uint64_t)insn->imm;
             return CF_CALL;
         }
-        if (op == 0xC3 || op == 0xC2 || op == 0xCB || op == 0xCA) {
-            return CF_RET;
-        }
+        if (op == 0xC3 || op == 0xC2 || op == 0xCB || op == 0xCA) return CF_RET;
         if (op == 0xFF) {
             int grp = insn->reg & 7;
             if (grp == 4) return CF_JMP;

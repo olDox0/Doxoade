@@ -37,6 +37,7 @@ POCS = [
     ("20", "20_unification", ["TripleFact", "unify"]),
     ("21", "21_negation_as_failure", ["negation_blocks", "P21a"]),
     ("30a", "30a_if_return_detect", ["if_return_guard", "P30a"]),
+    ("30b", "30b_if_return_rewrite", ["rewrite_if_return_guard", "P30b"]),
 ]
 
 

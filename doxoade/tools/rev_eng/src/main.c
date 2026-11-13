@@ -1,11 +1,13 @@
-/* main.c — dispatch de comandos do doxreveng (Fases 1–4) */
+/* main.c — dispatch de comandos do doxreveng (Fases 1–5a) */
 #include "file_reader.h"
 #include "pe_parser.h"
 #include "pre_ir.h"
 #include "decoder_backend.h"
 #include "disasm.h"
 #include "cfg.h"
+#include "functions.h"
 #include "doctor.h"
+#include "patterns.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,11 +16,12 @@
 static void print_usage(const char *prog)
 {
     fprintf(stderr,
-        "uso: %s <arquivo.exe>                             -> parse PE (JSON)\n"
+        "uso: %s <arquivo.exe>                              -> parse PE (JSON)\n"
         "     %s disasm <exe> [--off N --len M] [--backend native|capstone]\n"
         "     %s cfg <exe> [--format text|dot] [--limit N] [--backend native|capstone]\n"
+        "     %s functions <exe> [--format text|dot] [--backend native|capstone]\n"
         "     %s doctor [<exe>]                              -> self-diagnóstico\n",
-        prog, prog, prog, prog);
+        prog, prog, prog, prog, prog);
 }
 
 static DecoderBackend parse_backend(const char *s)
@@ -32,11 +35,12 @@ int main(int argc, char **argv)
 {
     if (argc < 2) { print_usage(argv[0]); return 1; }
 
-    int mode = 0;  /* 0=json, 1=disasm, 2=cfg, 3=doctor */
+    int mode = 0;  /* 0=json, 1=disasm, 2=cfg, 3=doctor, 4=functions */
     int argi = 1;
-    if (strcmp(argv[1], "disasm") == 0) { mode = 1; argi = 2; }
-    else if (strcmp(argv[1], "cfg") == 0) { mode = 2; argi = 2; }
+    if (strcmp(argv[1], "disasm") == 0)    { mode = 1; argi = 2; }
+    else if (strcmp(argv[1], "cfg") == 0)  { mode = 2; argi = 2; }
     else if (strcmp(argv[1], "doctor") == 0) { mode = 3; argi = 2; }
+    else if (strcmp(argv[1], "functions") == 0) { mode = 4; argi = 2; }
 
     if (mode == 3) {
         const char *target = (argi < argc) ? argv[argi] : NULL;
@@ -53,24 +57,27 @@ int main(int argc, char **argv)
     DecoderBackend backend = BACKEND_CAPSTONE;
 
     while (argi < argc) {
-        if (strcmp(argv[argi], "--off") == 0 && argi + 1 < argc)
+        const char *a = argv[argi];
+        if (strcmp(a, "--off") == 0 && argi + 1 < argc)
             { off = strtoull(argv[++argi], NULL, 0); has_off = 1; }
-        else if (strcmp(argv[argi], "--len") == 0 && argi + 1 < argc)
+        else if (strcmp(a, "--len") == 0 && argi + 1 < argc)
             { len = strtoull(argv[++argi], NULL, 0); has_len = 1; }
-        else if (strcmp(argv[argi], "--format") == 0 && argi + 1 < argc) {
+        else if (strcmp(a, "--format") == 0 && argi + 1 < argc) {
             argi++;
             if (strcmp(argv[argi], "dot") == 0) fmt_dot = 1;
         }
-        else if (strcmp(argv[argi], "--limit") == 0 && argi + 1 < argc)
+        else if (strcmp(a, "--limit") == 0 && argi + 1 < argc)
             { limit = (uint32_t)strtoul(argv[++argi], NULL, 0); }
-        else if (strcmp(argv[argi], "--backend") == 0 && argi + 1 < argc)
+        else if (strncmp(a, "--backend=", 10) == 0)
+            { backend = parse_backend(a + 10); }
+        else if (strcmp(a, "--backend") == 0 && argi + 1 < argc)
             { backend = parse_backend(argv[++argi]); }
         argi++;
     }
 
-    /* Pre-flight: valida que a operação pode rodar. */
-    if (mode == 1 || mode == 2) {
-        const char *op = (mode == 1) ? "disasm" : "cfg";
+    /* Pre-flight para operações que decodificam instruções. */
+    if (mode == 1 || mode == 2 || mode == 4) {
+        const char *op = (mode == 1) ? "disasm" : (mode == 2) ? "cfg" : "functions";
         if (preflight_run(path, op, backend) != 0) {
             fprintf(stderr, "doxreveng: preflight falhou, abortando.\n");
             return 1;
@@ -92,6 +99,7 @@ int main(int argc, char **argv)
     }
 
     int rc = 0;
+
     if (mode == 1) {
         if (has_off && has_len)
             rc = disasm_range(&fr, off, len, ir.image_base, backend, &ir,
@@ -101,7 +109,7 @@ int main(int argc, char **argv)
         if (rc < 0) fprintf(stderr, "doxreveng: erro: %s\n", err);
         else fprintf(stderr, "doxreveng: %d instruções desmontadas\n", rc);
     }
-    else if (mode == 2) {
+    else if (mode == 2 || mode == 4) {
         const SectionEntry *text = NULL;
         for (uint32_t i = 0; i < ir.section_count; i++)
             if (strcmp(ir.sections[i].name, ".text") == 0) { text = &ir.sections[i]; break; }
@@ -112,8 +120,8 @@ int main(int argc, char **argv)
         } else {
             uint64_t va_base = ir.image_base + text->va - text->raw_offset;
             InsnList insns = {0};
-            if (disasm_collect(&fr, text->raw_offset, text->raw_size,
-                               va_base, backend, &insns, err, sizeof(err)) != 0) {
+            if (disasm_collect(&fr, text->raw_offset, text->raw_size, va_base,
+                               backend, &insns, err, sizeof(err)) != 0) {
                 fprintf(stderr, "doxreveng: erro no disasm: %s\n", err);
                 rc = -1;
             } else {
@@ -122,16 +130,36 @@ int main(int argc, char **argv)
                     fprintf(stderr, "doxreveng: erro no CFG: %s\n", err);
                     rc = -1;
                 } else {
-                    if (limit > 0 && cfg.block_count > limit) {
-                        CFG tmp = cfg; tmp.block_count = limit;
-                        if (fmt_dot) cfg_print_dot(&tmp, &insns, stdout);
-                        else cfg_print_text(&tmp, &insns, stdout);
-                    } else if (fmt_dot) {
-                        cfg_print_dot(&cfg, &insns, stdout);
-                    } else {
-                        cfg_print_text(&cfg, &insns, stdout);
+                    /* DIAGNÓSTICO TEMPORÁRIO */
+                    if (getenv("DOXREVENG_DEBUG")) {
+                        fprintf(stderr, "[DIAG] insns.count=%u, cfg.block_count=%u\n",
+                                insns.count, cfg.block_count);
                     }
-                    fprintf(stderr, "doxreveng: %u blocos básicos\n", cfg.block_count);
+
+                    if (mode == 2) {
+                        CFG view = cfg;
+                        if (limit > 0 && cfg.block_count > limit) view.block_count = limit;
+                        if (fmt_dot) cfg_print_dot(&view, &insns, stdout);
+                        else cfg_print_text(&view, &insns, stdout);
+                        fprintf(stderr, "doxreveng: %u blocos básicos\n", cfg.block_count);
+                    } else {
+                        FunctionList fl = {0};
+                        if (functions_build(&insns, &cfg, &ir, &fl,
+                                            err, sizeof(err)) != 0) {
+                            fprintf(stderr, "doxreveng: erro em functions: %s\n", err);
+                            rc = -1;
+                        } else {
+                            /* NOVO: análise de padrões */
+                            patterns_analyze(&insns, &cfg, &ir, &fl,
+                                             err, sizeof(err));
+
+                            if (fmt_dot) functions_print_dot(&fl, stdout);
+                            else functions_print_text(&fl, stdout);
+                            fprintf(stderr, "doxreveng: %u funções, %u chamadas externas\n",
+                                    fl.count, fl.external_calls);
+                            functions_free(&fl);
+                        }
+                    }
                     cfg_free(&cfg);
                 }
                 free(insns.insns);

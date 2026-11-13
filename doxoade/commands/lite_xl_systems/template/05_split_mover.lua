@@ -30,10 +30,14 @@ local NON_EDITOR_NAMES = {
 local function is_editor_leaf(node)
   if not node or node.type ~= "leaf" or node.locked then return false end
   for _, v in ipairs(node.views or {}) do
-    local name = (v and v.get_name and v:get_name()) or ""
-    name = type(name) == "string" and name:lower() or ""
-    for _, ex in ipairs(NON_EDITOR_NAMES) do
-      if name:find(ex, 1, true) then return false end
+    -- 🛡️ FIX: nome só classifica views SEM doc (TreeView/OpenEditors/docks).
+    -- Arquivo com "tree"/"terminal"/"canvas" no nome NÃO desqualifica o painel.
+    if v and not v.doc then
+      local name = (v.get_name and v:get_name()) or ""
+      name = type(name) == "string" and name:lower() or ""
+      for _, ex in ipairs(NON_EDITOR_NAMES) do
+        if name:find(ex, 1, true) then return false end
+      end
     end
   end
   return true

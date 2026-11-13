@@ -39,8 +39,8 @@ end
 local function read_leap_state()
     local f = io.open(state_file, "r")
     if not f then
-        LeapHUD.active = false
-        LeapHUD.mode = "idle"
+        -- 🛡️ VERIFY-ONLY: não zera estado em memória se arquivo ausente/lockado.
+        -- Evita reset acidental durante check/deploy/test.
         return
     end
     local content = f:read("*a") or ""
@@ -62,6 +62,9 @@ end
 
 -- ── 2. Gravação do Contrato de Estado ─────────────────────────────────────────
 local function write_leap_state(active, mode, target, ip)
+    -- 🛡️ SHADOW MODE: nunca escreve no disco durante o Shadow Audit (check-templates).
+    -- Sem isso, doxoade:leap-stop/leap-toggle chamados pelo harness desligam o Leap.
+    if rawget(_G, "_DOXOADE_SHADOW_MODE") then return end
     local f = io.open(state_file, "w")
     if f then
         local escaped_bin = (LeapHUD.sysutils_bin or ""):gsub("\\", "\\\\")
@@ -106,7 +109,13 @@ local function resolve_sysutils()
     for _, path in ipairs(candidates) do
         if file_exists(path) then
             LeapHUD.sysutils_bin = path
-            write_leap_state(LeapHUD.active, LeapHUD.mode, LeapHUD.target, LeapHUD.server_ip)
+            -- 🛡️ VERIFY-ONLY: NÃO escreve leap_state.json aqui.
+            -- A escrita acontece apenas em toggle_leap_state() (ação explícita).
+            -- Bypass somente se config.doxoade_leap_verify_only = false.
+            local verify_only = (config and config.doxoade_leap_verify_only ~= false)
+            if not verify_only then
+                write_leap_state(LeapHUD.active, LeapHUD.mode, LeapHUD.target, LeapHUD.server_ip)
+            end
             core.log("[LEAP] 🎯 SysUtils localizado e vinculado: %s", path)
             return path
         end
@@ -201,10 +210,22 @@ if core and core.add_thread then
 end
 
 -- ── 7. Registro de Comandos e Atalhos ────────────────────────────────────────
+-- 🛡️ Handler bail-out: se Shadow Mode ativo, NÃO executa efeitos colaterais.
+-- `write_leap_state` já tem guard próprio; este é duplo cinto de segurança
+-- para evitar `system.exec` (que pode virar no-op no mock) e logs de ruído.
+local function _shadow_guard() return rawget(_G, "_DOXOADE_SHADOW_MODE") end
+
 command.add(nil, {
-    ["doxoade:leap-toggle"] = function() toggle_leap_state() end,
-    ["doxoade:toggle-leap-service"] = function() toggle_leap_state() end,
+    ["doxoade:leap-toggle"] = function()
+        if _shadow_guard() then return end
+        toggle_leap_state()
+    end,
+    ["doxoade:toggle-leap-service"] = function()
+        if _shadow_guard() then return end
+        toggle_leap_state()
+    end,
     ["doxoade:leap-locate-sysutils"] = function()
+        if _shadow_guard() then return end
         LeapHUD.sysutils_bin = nil
         local bin = resolve_sysutils()
         if bin then
@@ -212,6 +233,7 @@ command.add(nil, {
         end
     end,
     ["doxoade:leap-stop"] = function()
+        if _shadow_guard() then return end
         local bin = resolve_sysutils()
         if bin then
             execute_async('"' .. bin .. '" leap stop')

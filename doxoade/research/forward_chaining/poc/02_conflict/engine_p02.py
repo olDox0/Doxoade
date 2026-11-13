@@ -1,33 +1,29 @@
-﻿
 # -*- coding: utf-8 -*-
 # doxoade/research/forward_chaining/poc/02_conflict/engine_p02.py
 """
-P02 â€” Conflito entre regras e determinismo.
+P02 - Conflito e determinismo (C1) com debug estruturado.
 
-Contrato: C1 (InferÃªncia) extendido com resoluÃ§Ã£o de contradiÃ§Ã£o por prioridade.
+Debug:
+    py engine_p02.py --debug
+    Emite [DEBUG] em stderr. stdout/output.txt inalterados.
+    Mostra: per-sonda, cycle-by-cycle, resolucao de conflito com
+    reason explicito, timing.
 
-ExtensÃ£o sobre P01:
-- engine.collect: candidatos do ciclo (sem merge imediato)
-- engine.resolve: por key, maior prioridade vence; empate â†’ primeira em `rules`
-- engine.shadowed: fatos rejeitados nunca re-entram
-- engine.conflicts: histÃ³rico rastreÃ¡vel
-
-P02a â€” 2 regras, mesma key 'out', prioridades 10 vs 1.
-       R_high (prio=10, out=Y) vence. R_low (prio=1, out=X) sombreada.
-P02b â€” 2 regras, keys distintas, ambas disparam sem conflito.
-P02c â€” 100 runs de P02a â†’ saÃ­da idÃªntica (determinismo).
-P02d â€” Empate de prioridade â†’ ordem em `rules` decide o vencedor.
-
-Rodar: run.bat / run.ps1
+P02a - conflito (prioridade decide)
+P02b - sem conflito (chaves distintas)
+P02c - determinismo (100 runs) - debug so do run 1 + agregado
+P02d - tie-break por ordem de definicao
 """
 from __future__ import annotations
 
 import dataclasses
 import logging
 import sys
+import time
 from pathlib import Path
 
 LOG_PATH = Path(__file__).parent / "logging.txt"
+DEBUG = "--debug" in sys.argv
 
 
 def setup_logging() -> logging.Logger:
@@ -42,6 +38,26 @@ def setup_logging() -> logging.Logger:
 
 
 LOG = setup_logging()
+
+
+class _Quiet:
+    """Context manager que suspende _dbg durante execucoes em massa."""
+    __slots__ = ("level",)
+    def __init__(self) -> None:
+        self.level = 0
+    def __enter__(self):
+        self.level += 1
+        return self
+    def __exit__(self, *exc):
+        self.level -= 1
+
+
+QUIET = _Quiet()
+
+
+def _dbg(*parts) -> None:
+    if DEBUG and QUIET.level == 0:
+        print("[DEBUG]", *parts, file=sys.stderr)
 
 
 class CycleLimitError(RuntimeError):
@@ -78,15 +94,8 @@ class Rule:
 
 class ForwardChainingEngine:
     """
-    Ciclo: snapshot â†’ collect candidatos â†’ resolve conflito por key
-           â†’ merge vencedores â†’ repeat.
-
-    ResoluÃ§Ã£o de conflito (contrato P02):
-    - Agrupa candidatos por `key`.
-    - Maior prioridade vence.
-    - Empate: primeira regra em `rules` vence.
-    - Perdedores vÃ£o para `shadowed` (nunca re-entram).
-    - Cada resoluÃ§Ã£o gera entrada em `conflicts`.
+    Snapshot por ciclo + resolucao de conflito por prioridade.
+    Fato perdedor vai para `shadowed` (nunca re-entra).
     """
 
     def __init__(self, max_cycles: int = 100):
@@ -94,89 +103,99 @@ class ForwardChainingEngine:
         self.trace: list[dict] = []
         self.conflicts: list[dict] = []
         self.shadowed: set[tuple[str, str]] = set()
-        self.cycles_used: int = 0
+        self.cycles_used = 0
+        self.cycle_history: list[dict] = []
+        self.rules_attempted = 0
+        self.rule_attempts: dict[str, int] = {}
 
     def run(self, initial_facts: list[Fact], rules: list[Rule]) -> list[Fact]:
         facts: list[Fact] = list(initial_facts)
-        # Ordem de iteracao: prioridade desc, empate preserva ordem em `rules`.
-        ordered_rules = sorted(
-            enumerate(rules),
-            key=lambda pair: (-pair[1].priority, pair[0]),
+        ordered = sorted(
+            enumerate(rules), key=lambda p: (-p[1].priority, p[0])
         )
-        ordered_rules = [r for _, r in ordered_rules]
+        ordered = [r for _, r in ordered]
         cycles = 0
-        LOG.info("run: %d fatos, %d regras, max_cycles=%d",
-                 len(facts), len(ordered_rules), self.max_cycles)
-
         while cycles < self.max_cycles:
             cycles += 1
             snapshot = frozenset(f.to_pair() for f in facts)
             existing = set(snapshot)
+            cycle_info = {
+                "cycle": cycles,
+                "matches": {},
+                "candidates": [],
+                "idempotent": [],
+                "already_shadowed": [],
+                "winners": {},
+                "shadowed_this_cycle": [],
+                "quiescence": False,
+            }
 
-            # Collect candidatos
             candidates: list[tuple[Rule, Fact]] = []
-            for rule in ordered_rules:
+            for rule in ordered:
+                self.rules_attempted += 1
+                self.rule_attempts[rule.id] = self.rule_attempts.get(rule.id, 0) + 1
+
                 if not rule.match(snapshot):
+                    cycle_info["matches"][rule.id] = 0
                     continue
+                cycle_info["matches"][rule.id] = 1
+
                 new_fact = rule.conclusion_fact(cycle=cycles)
                 pair = new_fact.to_pair()
                 if pair in existing:
-                    LOG.debug("ciclo %d: %s idempotente (%s)",
-                              cycles, rule.id, pair)
+                    cycle_info["idempotent"].append((rule.id, pair))
                     continue
                 if pair in self.shadowed:
-                    LOG.debug("ciclo %d: %s sombreada (%s)",
-                              cycles, rule.id, pair)
+                    cycle_info["already_shadowed"].append((rule.id, pair))
                     continue
                 candidates.append((rule, new_fact))
+                cycle_info["candidates"].append((rule.id, rule.priority, pair))
 
             if not candidates:
+                cycle_info["quiescence"] = True
+                self.cycle_history.append(cycle_info)
                 self.cycles_used = cycles
-                LOG.info("quiescencia em %d ciclo(s)", cycles)
                 return facts
 
-            # Resolve conflitos por key
-            winners: dict[str, tuple[Rule, Fact]] = {}
+            winners: dict[str, tuple[Rule, Fact, str]] = {}
             for rule, fact in candidates:
                 k = fact.key
                 if k not in winners:
-                    winners[k] = (rule, fact)
+                    winners[k] = (rule, fact, "first_candidate")
                     continue
-                prev_rule, prev_fact = winners[k]
+                prev_rule, prev_fact, _ = winners[k]
                 if rule.priority > prev_rule.priority:
-                    self._log_conflict(
-                        cycles, k, rule, fact, prev_rule, prev_fact,
-                        reason="higher_priority",
-                    )
+                    self._log_conflict(cycles, k, rule, fact, prev_rule, prev_fact,
+                                       "higher_priority")
                     self.shadowed.add(prev_fact.to_pair())
-                    winners[k] = (rule, fact)
+                    cycle_info["shadowed_this_cycle"].append(
+                        (prev_rule.id, prev_fact.to_pair(), "outranked_by_higher_priority")
+                    )
+                    winners[k] = (rule, fact, "higher_priority")
                 else:
-                    reason = (
-                        "equal_priority_first_wins"
-                        if rule.priority == prev_rule.priority
-                        else "higher_priority"
-                    )
-                    self._log_conflict(
-                        cycles, k, prev_rule, prev_fact, rule, fact,
-                        reason=reason,
-                    )
+                    reason = ("equal_priority_first_wins"
+                              if rule.priority == prev_rule.priority
+                              else "higher_priority")
+                    self._log_conflict(cycles, k, prev_rule, prev_fact, rule, fact, reason)
                     self.shadowed.add(fact.to_pair())
+                    cycle_info["shadowed_this_cycle"].append(
+                        (rule.id, fact.to_pair(), reason)
+                    )
 
-            # Merge vencedores
-            for k, (rule, fact) in winners.items():
+            for k, (rule, fact, reason) in winners.items():
+                cycle_info["winners"][k] = (rule.id, rule.priority, fact.to_pair(), reason)
+
+            for k, (rule, fact, _) in winners.items():
                 facts.append(fact)
                 self.trace.append({
                     "cycle": cycles,
                     "rule_id": rule.id,
                     "conclusion": fact.to_pair(),
                 })
-                LOG.debug("ciclo %d: %s -> %s",
-                          cycles, rule.id, fact.to_pair())
 
-        raise CycleLimitError(
-            f"max_cycles={self.max_cycles} sem quiescencia "
-            f"(trace tem {len(self.trace)} entrada(s))"
-        )
+            self.cycle_history.append(cycle_info)
+
+        raise CycleLimitError(f"max_cycles={self.max_cycles}")
 
     def _log_conflict(self, cycle, key, winner_rule, winner_fact,
                       loser_rule, loser_fact, reason):
@@ -189,14 +208,41 @@ class ForwardChainingEngine:
             "loser_pair": loser_fact.to_pair(),
             "reason": reason,
         })
-        LOG.info("conflito ciclo %d key=%s: %s vence (%s)",
-                 cycle, key, winner_rule.id, reason)
+
+
+def _dbg_cycle_p02(cycle_info: dict) -> None:
+    _dbg(f"  cycle {cycle_info['cycle']}:")
+    m = cycle_info["matches"]
+    _dbg("    matches: " + " ".join(f"{rid}={v}" for rid, v in m.items()))
+    for rid, prio, fact in cycle_info["candidates"]:
+        _dbg(f"    candidate: {rid} prio={prio} -> {fact}")
+    for k, (rid, prio, fact, reason) in cycle_info["winners"].items():
+        _dbg(f"    winner key={k}: {rid} prio={prio} -> {fact} [{reason}]")
+    for rid, fact, reason in cycle_info["shadowed_this_cycle"]:
+        _dbg(f"    shadowed: {rid} -> {fact} [{reason}]")
+    for rid, fact in cycle_info["idempotent"]:
+        _dbg(f"    idempotent: {rid} -> {fact}")
+    for rid, fact in cycle_info["already_shadowed"]:
+        _dbg(f"    already_shadowed: {rid} -> {fact}")
+    if cycle_info["quiescence"]:
+        _dbg("    quiescence")
+
+
+def _dbg_engine(name: str, engine: ForwardChainingEngine,
+                seed: list[Fact], t_ms: float) -> None:
+    _dbg(f"--- {name} ---")
+    _dbg(f"  seed_facts: {[f.to_pair() for f in seed]}")
+    for ci in engine.cycle_history:
+        _dbg_cycle_p02(ci)
+    _dbg(f"  result: cycles={engine.cycles_used} trace_len={len(engine.trace)} "
+         f"conflicts={len(engine.conflicts)}")
+    _dbg(f"  timing: {t_ms:.3f}ms")
+    _dbg("")
 
 
 # ============================================================
-# P02a â€” conflito resolvido por prioridade
+# P02a - conflito (prioridade decide)
 # ============================================================
-
 def run_p02a() -> dict:
     rules = [
         Rule("R_high", conditions=(("trigger", "yes"),),
@@ -204,8 +250,12 @@ def run_p02a() -> dict:
         Rule("R_low", conditions=(("trigger", "yes"),),
              conclusion=("out", "X"), priority=1),
     ]
+    seed = [Fact("trigger", "yes")]
+    t0 = time.perf_counter()
     engine = ForwardChainingEngine(max_cycles=10)
-    facts = engine.run([Fact("trigger", "yes")], rules)
+    facts = engine.run(seed, rules)
+    t_ms = (time.perf_counter() - t0) * 1000
+    _dbg_engine("P02a: conflito (prioridade decide)", engine, seed, t_ms)
     return {
         "terminou": True,
         "ciclos": engine.cycles_used,
@@ -216,9 +266,8 @@ def run_p02a() -> dict:
 
 
 # ============================================================
-# P02b â€” sem conflito
+# P02b - sem conflito
 # ============================================================
-
 def run_p02b() -> dict:
     rules = [
         Rule("R_a", conditions=(("trigger", "yes"),),
@@ -226,8 +275,12 @@ def run_p02b() -> dict:
         Rule("R_b", conditions=(("trigger", "yes"),),
              conclusion=("out_b", "2"), priority=3),
     ]
+    seed = [Fact("trigger", "yes")]
+    t0 = time.perf_counter()
     engine = ForwardChainingEngine(max_cycles=10)
-    facts = engine.run([Fact("trigger", "yes")], rules)
+    facts = engine.run(seed, rules)
+    t_ms = (time.perf_counter() - t0) * 1000
+    _dbg_engine("P02b: sem conflito (chaves distintas)", engine, seed, t_ms)
     return {
         "ciclos": engine.cycles_used,
         "trace": engine.trace,
@@ -240,20 +293,40 @@ def run_p02b() -> dict:
 
 
 # ============================================================
-# P02c â€” determinismo
+# P02c - determinismo
 # ============================================================
-
 def run_p02c() -> dict:
-    results = [tuple(run_p02a()["out_values"]) for _ in range(100)]
-    return {
-        "n": len(results),
-        "unique_outputs": set(results),
-    }
+    t0 = time.perf_counter()
+    results = []
+    with QUIET:
+        for i in range(100):
+            r = run_p02a()
+            results.append(tuple(r["out_values"]))
+    t_total = (time.perf_counter() - t0) * 1000
+
+    if DEBUG:
+        _dbg("--- P02c: determinismo (100 runs de P02a) ---")
+        _dbg(f"  n: 100")
+        _dbg(f"  unique_outputs: {len(set(results))}")
+        _dbg(f"  time_total: {t_total:.3f}ms")
+        _dbg(f"  time_per_run: {t_total/100:.3f}ms")
+        _dbg("")
+
+    return {"n": len(results), "unique_outputs": set(results)}
 
 
 # ============================================================
-# P02d â€” tie-break por ordem de definicao
+# P02d - tie-break por ordem
 # ============================================================
+def _run_order(order_name: str, rules: list[Rule]) -> tuple[list[str], ForwardChainingEngine]:
+    seed = [Fact("trigger", "yes")]
+    t0 = time.perf_counter()
+    engine = ForwardChainingEngine(max_cycles=10)
+    facts = engine.run(seed, rules)
+    t_ms = (time.perf_counter() - t0) * 1000
+    _dbg_engine(f"P02d/{order_name}", engine, seed, t_ms)
+    return [f.value for f in facts if f.key == "out"], engine
+
 
 def run_p02d() -> dict:
     r_first = Rule("R_first", conditions=(("trigger", "yes"),),
@@ -261,13 +334,12 @@ def run_p02d() -> dict:
     r_second = Rule("R_second", conditions=(("trigger", "yes"),),
                     conclusion=("out", "second"), priority=5)
 
-    eng1 = ForwardChainingEngine(max_cycles=10)
-    facts1 = eng1.run([Fact("trigger", "yes")], [r_first, r_second])
-    out1 = [f.value for f in facts1 if f.key == "out"]
+    if DEBUG:
+        _dbg("--- P02d: tie-break por ordem de definicao ---")
+        _dbg(f"  rules: R_first prio=5, R_second prio=5")
 
-    eng2 = ForwardChainingEngine(max_cycles=10)
-    facts2 = eng2.run([Fact("trigger", "yes")], [r_second, r_first])
-    out2 = [f.value for f in facts2 if f.key == "out"]
+    out1, _ = _run_order("order_a=[R_first,R_second]", [r_first, r_second])
+    out2, _ = _run_order("order_b=[R_second,R_first]", [r_second, r_first])
 
     return {
         "order_a_winner": out1,
@@ -278,12 +350,17 @@ def run_p02d() -> dict:
 # ============================================================
 # main
 # ============================================================
-
 def main() -> int:
+    if DEBUG:
+        _dbg("=== engine_p02.py ===")
+        _dbg("mode: debug")
+        _dbg(f"args: {sys.argv}")
+        _dbg("")
+
     lines: list[str] = []
     falhas: list[str] = []
 
-    # ---------- P02a ----------
+    # P02a
     lines.append("=== P02a: conflito (prioridade decide) ===")
     a = run_p02a()
     lines.append(f"terminou: {a['terminou']}")
@@ -309,7 +386,7 @@ def main() -> int:
     if a["out_values"] != ["Y"]:
         falhas.append(f"P02a: esperado ['Y'], veio {a['out_values']}")
 
-    # ---------- P02b ----------
+    # P02b
     lines.append("=== P02b: sem conflito (chaves distintas) ===")
     b = run_p02b()
     lines.append(f"ciclos_usados: {b['ciclos']}")
@@ -325,7 +402,7 @@ def main() -> int:
     if b["out_pairs"] != ["out_a=1", "out_b=2"]:
         falhas.append(f"P02b: out_pairs inesperado: {b['out_pairs']}")
 
-    # ---------- P02c ----------
+    # P02c
     lines.append("=== P02c: determinismo (100 runs) ===")
     c = run_p02c()
     lines.append(f"n: {c['n']}")
@@ -333,11 +410,9 @@ def main() -> int:
     lines.append("")
 
     if c["unique_outputs"] != {("Y",)}:
-        falhas.append(
-            f"P02c: outputs nao-deterministicos: {c['unique_outputs']}"
-        )
+        falhas.append(f"P02c: nao-deterministico: {c['unique_outputs']}")
 
-    # ---------- P02d ----------
+    # P02d
     lines.append("=== P02d: tie-break por ordem de definicao ===")
     d = run_p02d()
     lines.append(f"order_a_winner: {d['order_a_winner']}")
@@ -349,7 +424,6 @@ def main() -> int:
     if d["order_b_winner"] != ["second"]:
         falhas.append(f"P02d: ordem B deveria dar 'second', veio {d['order_b_winner']}")
 
-    # ---------- veredito ----------
     if falhas:
         lines.append(f"FAIL: {len(falhas)} falha(s)")
         for f in falhas:
@@ -360,6 +434,8 @@ def main() -> int:
         lines.append("P02 PASS")
         LOG.info("P02 PASS")
         resultado = 0
+        if DEBUG:
+            _dbg("=== done: all checks passed ===")
 
     for line in lines:
         print(line)

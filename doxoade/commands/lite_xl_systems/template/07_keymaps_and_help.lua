@@ -22,6 +22,65 @@ keymap.add {
   ["ctrl+shift+u"]     = "doxoade:open-user-settings",
 }
 
+-- ═══════════════════════════════════════════════════════════════════════
+-- 🛡️ HELPER GLOBAL — Localiza view existente para um doc
+-- (evita duplicação de abas ao abrir arquivo já aberto)
+-- Consumido por: 07 (open-file), 18 (search dock), qualquer template futuro
+-- ═══════════════════════════════════════════════════════════════════════
+local function _doxoade_find_view_for_doc(doc)
+  if not doc or not core or not core.root_view or not core.root_view.root_node then
+    return nil, nil
+  end
+  local found_view, found_leaf = nil, nil
+  local function traverse(n)
+    if not n or found_view then return end
+    if n.type == "leaf" then
+      for _, v in ipairs(n.views or {}) do
+        if v and v.doc == doc then
+          found_view = v
+          found_leaf = n
+          return
+        end
+      end
+    else
+      traverse(n.a)
+      traverse(n.b)
+    end
+  end
+  traverse(core.root_view.root_node)
+  return found_view, found_leaf
+end
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- 🛡️ HELPER GLOBAL — Abre um doc em NOVA ABA sem destruir a atual
+-- ═══════════════════════════════════════════════════════════════════════
+local function _doxoade_open_in_new_tab(doc)
+  if not doc then return end
+  local active_node = core.root_view and core.root_view:get_active_node()
+  
+  -- Se o nó ativo não for um leaf válido, procura outro (fallback de segurança)
+  if not active_node or active_node.type ~= "leaf" or active_node.locked then
+    local function find_leaf(n)
+      if not n then return nil end
+      if n.type == "leaf" and not n.locked then return n end
+      return find_leaf(n.a) or find_leaf(n.b)
+    end
+    active_node = find_leaf(core.root_view.root_node)
+  end
+  
+  if active_node then
+    local DocView = require "core.docview"
+    local new_view = DocView(doc)
+    active_node:add_view(new_view)
+    if core.set_active_view then
+      pcall(core.set_active_view, new_view)
+    end
+    core.redraw = true
+  end
+end
+rawset(_G, "DOXOADE_OPEN_IN_NEW_TAB", _doxoade_open_in_new_tab)
+rawset(_G, "DOXOADE_FIND_VIEW_FOR_DOC", _doxoade_find_view_for_doc)
+
 local IGNORED_DIRS = {
   ["^%.git$"]           = true, ["^venv$"] = true, ["^%.venv$"] = true, ["^env$"] = true,
   ["^__pycache__$"]     = true, ["^build$"] = true, ["^dist$"] = true,
@@ -40,7 +99,7 @@ local IGNORED_EXTS = {
 -- =============================================================================
 -- 🔍 VULCAN BRIDGE V3 — Popula o Dock e o HUD (Sem buffer de texto)
 -- =============================================================================
-local function execute_global_search_bridge(query)
+local function execute_global_search(query, scope_root, scope_strict)
   if not query or query:match("^%s*$") then return end
 
   -- Inicializa o Modelo de Estado Global
@@ -170,7 +229,7 @@ end
 --   FASE 2: Arquivos do mesmo diretório dos abertos — scan direto.
 --   FASE 3: Raízes do projeto (fallback global) — scan recursivo.
 -- =============================================================================
-local function execute_global_search(query, scope_root)
+local function execute_global_search(query, scope_root, scope_strict)
   if not query or query:match("^%s*$") then return end
 
   local start_time = os.clock()
@@ -247,134 +306,105 @@ local function execute_global_search(query, scope_root)
       state.elapsed = os.clock() - start_time
       state.phase_name = reason
       core.redraw = true
-
-      -- [FASE 7.1] Apenas dispara o render do painel flutuante.
-      -- NÃO cria doc [Busca], NÃO abre aba, NÃO divide tela.
       local renderer = rawget(_G, "DOXOADE_RENDER_SEARCH_RESULTS")
-      if type(renderer) == "function" then
-        pcall(renderer)
+      if type(renderer) == "function" then pcall(renderer) end
+      -- 🛡️ Bug C: devolve o foco ao arquivo de origem (reabre se foi fechado)
+      local origin = rawget(_G, "_DOXOADE_SEARCH_ORIGIN_VIEW")
+      rawset(_G, "_DOXOADE_SEARCH_ORIGIN_VIEW", nil)
+      if origin and origin.doc then
+        local finder = rawget(_G, "DOXOADE_FIND_VIEW_FOR_DOC")
+        local v = finder and finder(origin.doc)
+        if v then pcall(core.set_active_view, v)
+        else local op = rawget(_G, "DOXOADE_OPEN_IN_NEW_TAB"); if op then op(origin.doc) end end
       end
-
       if core.log then
-        core.log(string.format(
-          "✔ Busca concluída (%s): %d ocorrência(s) em %d arquivo(s) em %.2fs.",
-          reason or "?", state.total_hits, state.total_files, state.elapsed
-        ))
+        core.log(string.format("✔ Busca concluída (%s): %d ocorrência(s) em %d arquivo(s) em %.2fs.",
+          reason or "?", state.total_hits, state.total_files, state.elapsed))
       end
     end
 
-    -- =======================================================================
-    -- FASE 1: arquivos abertos em memória (instantâneo)
-    -- =======================================================================
-    if core.docs then
+    local abs_scope = (scope_root and type(scope_root)=="string" and scope_root~="")
+      and (system.absolute_path(scope_root) or scope_root):gsub("\\","/"):gsub("/+$","") or nil
+    local sinfo = abs_scope and system.get_file_info(abs_scope)
+    local scope_is_dir = sinfo and sinfo.type == "dir"
+
+    -- FASE 1: arquivos abertos (pula se scope_strict=tree; filtra por pasta se Alt+F)
+    if not scope_strict and core.docs then
       local seen_open = {}
       for _, d in ipairs(core.docs) do
         if d.filename and d.lines and not seen_open[d.filename:lower()] then
-          seen_open[d.filename:lower()] = true
-          local file_matches = {}
-          for line_idx, line_text in ipairs(d.lines) do
-            local target = is_case_sensitive and line_text or line_text:lower()
-            if target:find(query_needle, 1, true) then
-              table.insert(file_matches, {
-                line = line_idx,
-                text = line_text:gsub("^%s*", ""):gsub("%s*$", ""),
-              })
+          local doc_dir = (system.absolute_path(d.filename) or d.filename):gsub("\\","/"):match("^(.*)/")
+          local in_scope = (not abs_scope) or (doc_dir and doc_dir:lower():sub(1,#abs_scope)==abs_scope:lower())
+          if in_scope then
+            seen_open[d.filename:lower()] = true
+            local fm = {}
+            for li, lt in ipairs(d.lines) do
+              local target = is_case_sensitive and lt or lt:lower()
+              if target:find(query_needle, 1, true) then
+                table.insert(fm, { line = li, text = lt:gsub("^%s*",""):gsub("%s*$","") })
+              end
+            end
+            if #fm > 0 then
+              table.insert(state.results, { path = (system.absolute_path(d.filename) or d.filename):gsub("\\","/"), matches = fm })
+              state.total_hits = state.total_hits + #fm
+              state.total_files = state.total_files + 1
             end
           end
-          if #file_matches > 0 then
-            local abs = (system.absolute_path(d.filename) or d.filename):gsub("\\", "/")
-            table.insert(state.results, { path = abs, matches = file_matches })
-            state.total_hits = state.total_hits + #file_matches
-            state.total_files = state.total_files + 1
-          end
         end
       end
+      if state.total_hits > 0 then finish("FASE 1: arquivos abertos") return end
     end
 
-    -- Se encontrou em abertos, PARA (short-circuit)
-    if state.total_hits > 0 then
-      finish("FASE 1: arquivos abertos")
-      return
-    end
-
-    -- FASE 2: arquivos no MESMO DIRETÓRIO dos arquivos abertos
-    local open_dirs = {}
-    local seen_dirs = {}
-    local user_dir_lower = (USERDIR or "."):gsub("\\", "/"):lower():gsub("/+$", "")
-    if core.docs then
+    -- FASE 2: mesmo diretório dos abertos (só sem escopo)
+    if not abs_scope and core.docs then
+      local open_dirs, seen_dirs = {}, {}
+      local ud = (USERDIR or "."):gsub("\\","/"):lower():gsub("/+$","")
       for _, d in ipairs(core.docs) do
         if d.filename then
-          local abs = (system.absolute_path(d.filename) or d.filename):gsub("\\", "/")
-          local dir = abs:match("^(.*)/[^/]+$")
-          -- [FASE 6.1] Ignora arquivos do USERDIR (config do Lite XL)
-          if dir and not seen_dirs[dir:lower()] and dir:lower():sub(1, #user_dir_lower) ~= user_dir_lower then
-            seen_dirs[dir:lower()] = true
-            table.insert(open_dirs, dir)
+          local dir = (system.absolute_path(d.filename) or d.filename):gsub("\\","/"):match("^(.*)/")
+          if dir and not seen_dirs[dir:lower()] and dir:lower():sub(1,#ud)~=ud then
+            seen_dirs[dir:lower()] = true; table.insert(open_dirs, dir)
           end
         end
       end
-    end
-
-    for _, dir in ipairs(open_dirs) do
-      coroutine.yield()  -- mantém UI fluida
-      local found = scan_dir_shallow(dir)
-      for _, item in ipairs(found) do
-        table.insert(state.results, item)
-        state.total_hits = state.total_hits + #item.matches
-        state.total_files = state.total_files + 1
+      for _, dir in ipairs(open_dirs) do
+        coroutine.yield()
+        for _, item in ipairs(scan_dir_shallow(dir)) do
+          table.insert(state.results, item)
+          state.total_hits = state.total_hits + #item.matches
+          state.total_files = state.total_files + 1
+        end
       end
+      if state.total_hits > 0 then finish("FASE 2: diretório dos abertos") return end
     end
 
-    if state.total_hits > 0 then
-      finish("FASE 2: mesmo diretório dos abertos")
-      return
-    end
-
-    -- =======================================================================
-    -- FASE 3: raízes do projeto (fallback recursivo)
-    -- =======================================================================
+    -- FASE 3: RECURSIVO na pasta alvo (tree) ou no diretório do arquivo (Alt+F) ou projeto
     local roots
-    if scope_root and type(scope_root) == "string" and scope_root ~= "" then
-      local abs_scope = (system.absolute_path(scope_root) or scope_root):gsub("\\", "/"):gsub("/+$", "")
-      local finfo = system.get_file_info(abs_scope)
-      roots = (finfo and finfo.type == "dir") and { abs_scope } or get_all_project_roots()
-    else
-      roots = get_all_project_roots()
-    end
-
+    if abs_scope and scope_is_dir then roots = { abs_scope }
+    else roots = get_all_project_roots() end
     local dir_queue = {}
     for _, r in ipairs(roots) do table.insert(dir_queue, r) end
     local batch = 0
-
     while #dir_queue > 0 do
-      local current_dir = table.remove(dir_queue, 1)
-      local items = system.list_dir(current_dir) or {}
+      local cur = table.remove(dir_queue, 1)
+      local items = system.list_dir(cur) or {}
       for _, item in ipairs(items) do
         local skip = false
-        for pat in pairs(IGNORED_DIRS) do
-          if item:match(pat) then skip = true break end
-        end
+        for pat in pairs(IGNORED_DIRS) do if item:match(pat) then skip = true break end end
         if not skip then
-          local full = current_dir .. PATHSEP .. item
+          local full = cur .. PATHSEP .. item
           local info = system.get_file_info(full)
           if info then
-            if info.type == "dir" then
-              table.insert(dir_queue, full)
+            if info.type == "dir" then table.insert(dir_queue, full)
             elseif info.type == "file" and (info.size or 0) < 3000000 then
               local ext = item:match("%.([%w_]+)$")
               if not ext or not IGNORED_EXTS[ext:lower()] then
                 batch = batch + 1
-                if batch >= 20 then
-                  batch = 0
-                  coroutine.yield()  -- UI respira
-                end
-                local matches = scan_file(full)
-                if #matches > 0 then
-                  table.insert(state.results, {
-                    path = full:gsub("\\", "/"),
-                    matches = matches,
-                  })
-                  state.total_hits = state.total_hits + #matches
+                if batch >= 20 then batch = 0 coroutine.yield() end
+                local m = scan_file(full)
+                if #m > 0 then
+                  table.insert(state.results, { path = full:gsub("\\","/"), matches = m })
+                  state.total_hits = state.total_hits + #m
                   state.total_files = state.total_files + 1
                 end
               end
@@ -383,8 +413,7 @@ local function execute_global_search(query, scope_root)
         end
       end
     end
-
-    finish("FASE 3: projeto completo")
+    finish(abs_scope and "FASE 3: diretório alvo (recursivo)" or "FASE 3: projeto completo")
   end)
 end
 
@@ -881,8 +910,28 @@ command.add(nil, {
         if abs_target then
           local doc = core.open_doc(abs_target)
           if doc then
-            core.root_view:open_doc(doc)
-            core.log(string.format("📄 Aberto: %s", abs_target:match("[^/]+$") or abs_target))
+            -- 🛡️ Reutilizar view existente se o arquivo já está aberto
+            local existing_view, existing_leaf = _doxoade_find_view_for_doc(doc)
+            if existing_view and existing_leaf then
+              existing_leaf.active_view = existing_view
+              if core.root_view and core.root_view.set_active_node then
+                pcall(core.root_view.set_active_node, core.root_view, existing_leaf)
+              end
+              if core.set_active_view then
+                pcall(core.set_active_view, existing_view)
+              end
+              core.redraw = true
+              core.log(string.format("📄 Focado (já aberto): %s", abs_target:match("[^/]+$") or abs_target))
+            else
+              -- 🎯 Abre em nova aba usando a função blindada (sem sobrepor)
+              local opener = rawget(_G, "DOXOADE_OPEN_IN_NEW_TAB")
+              if type(opener) == "function" then 
+                opener(doc) 
+              else 
+                core.root_view:open_doc(doc) 
+              end
+              core.log(string.format("📄 Aberto em nova aba: %s", abs_target:match("[^/]+$") or abs_target))
+            end
           end
         else
           core.error(string.format("Arquivo não localizado: %s", item))

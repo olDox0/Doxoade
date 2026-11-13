@@ -76,3 +76,17 @@ Esses dois ficam com `run_XX.bat` — o doctor valida **estrutura**, nao semanti
 - **Antes de rodar PoC que falhou**: rodar `_doctor.py` primeiro.
 - **Apos reorganizar pastas**: rodar `_doctor.py --fix`.
 - **`run_all.bat` chama `_doctor.py --check` como pre-flight.** Nao desabilitar.
+
+---
+
+## Sobre `accept`
+
+`accept` regenera expected.txt a partir de output.txt. Use quando:
+- Output mudou legitimamente (refactor, otimizacao, novo comportamento).
+- Primeiro run de um PoC novo (expected ainda nao existia ou tinha placeholders).
+
+NAO use quando:
+- Voce nao entendeu a divergencia.
+- O engine foi alterado e voce nao sabe por que output mudou.
+
+Antes de `accept`, sempre veja o diff. Antes de commitar, `git diff expected.txt`.

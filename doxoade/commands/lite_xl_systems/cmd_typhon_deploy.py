@@ -21,6 +21,59 @@ def deploy_group():
 def cmd_status(mode):
     TyphonDeployEngine.print_status(mode)
 
+@deploy_group.command("reset", help="🧹 Reseta ambiente de deploy (limpa estado poluído/crash).")
+@click.argument("mode_arg", required=False,
+                type=click.Choice(["production", "staging", "sandbox", "test"]))
+@click.option("--mode", "-m",
+              type=click.Choice(["production", "staging", "sandbox", "test"]),
+              default=None,
+              help="Ambiente alvo (padrão: test). Aceita argumento posicional também.")
+@click.option("--hard", is_flag=True,
+              help="Remove também init.lua (força redeploy completo).")
+@click.option("--no-backups", is_flag=True,
+              help="Não preserva .doxoade/backups/.")
+@click.option("--yes", "-y", is_flag=True, help="Sem confirmação.")
+@click.option("--all", "reset_all", is_flag=True,
+              help="Reseta todos os modos de uma vez.")
+def cmd_reset(mode_arg, mode, hard, no_backups, yes, reset_all):
+    # Resolve: argumento posicional > option --mode > default "test"
+    mode = mode_arg or mode or "test"
+
+    print(f"\n{Fore.CYAN}{Style.BRIGHT}🧹 DOXLY RESET{Style.RESET_ALL}\n")
+    modes = ["production", "staging", "sandbox", "test"] if reset_all else [mode]
+    if not yes:
+        scope = ", ".join(modes)
+        hard_txt = f" {Fore.RED}[HARD: init.lua será apagado]{Fore.RESET}" if hard else ""
+        if not click.confirm(
+            f"{Fore.YELLOW}Resetar [{scope}]?{Fore.RESET}{hard_txt}",
+            default=False,
+        ):
+            print(f"{Fore.YELLOW}Reset cancelado.{Fore.RESET}\n")
+            return
+
+    total_removed = total_errors = 0
+    for m in modes:
+        print(f"\n  {Fore.WHITE}▶ [{m.upper()}]{Fore.RESET}")
+        report = TyphonDeployEngine.reset_mode(
+            m, hard=hard, keep_backups=not no_backups,
+        )
+        if not Path(report["dir"]).exists():
+            print(f"    {Fore.LIGHTBLACK_EX}Diretório não existe.{Fore.RESET}")
+            continue
+        for r in report["removed"]:
+            print(f"    {Fore.GREEN}✔{Fore.RESET} removido: {r}")
+            total_removed += 1
+        for k in report["kept"]:
+            print(f"    {Fore.CYAN}💾{Fore.RESET} preservado: {k}")
+        for e in report["errors"]:
+            print(f"    {Fore.RED}✖{Fore.RESET} {e}")
+            total_errors += 1
+
+    print(f"\n{Fore.GREEN}{Style.BRIGHT}✔ Reset concluído.{Style.RESET_ALL} "
+          f"({total_removed} removidos, {total_errors} erro(s))\n")
+    if total_errors == 0:
+        print(f"  {Fore.LIGHTBLACK_EX}Próximo: doxoade doxly deploy {mode} --force{Fore.RESET}\n")
+
 @deploy_group.command("production", help="🏛️ [FASE 4] DEPRECATED: alias de 'promote' (staging → canonical).")
 @click.option("--force", "-f", is_flag=True, help="Força promote mesmo com warnings.")
 @click.option("--launch/--no-launch", "-l/-nl", default=True, help="Lança o Lite XL após promote.")

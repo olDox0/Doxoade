@@ -28,6 +28,15 @@ rawset(_G, "PATHSEP", package.config:sub(1,1))
 config.plugins = config.plugins or {}
 config.plugins.autoreload = false
 
+-- ─────────────────────────────────────────────────────────────────────
+-- 🛡️ LEAP KVM — MODO VERIFY-ONLY (ProDeNov 1.2.1)
+-- true  = templates NUNCA escrevem leap_state.json automaticamente
+--         (apenas leitura; toggle explícito do usuário é a ÚNICA escrita)
+-- false = comportamento legado (templates podem sincronizar estado)
+-- Default: true (protege contra resets acidentais em check/deploy/test)
+-- ─────────────────────────────────────────────────────────────────────
+config.doxoade_leap_verify_only = (config.doxoade_leap_verify_only ~= false)
+
 -- Impede carregamento dinâmico futuro
 package.preload["plugins.autoreload"] = function()
   return {
@@ -479,24 +488,32 @@ end
 
 local original_core_error = core.error
 local error_rate = { last_msg = "", last_time = 0, count = 0 }
-
 core.error = function(...)
     local msg = safe_format(...)
     local now = os.clock()
+    
+    -- 🛡️ IGNORAR FALSOS POSITIVOS DO SISTEMA
+    -- (Busca do Find/Replace e avisos do próprio Lua)
+    if msg:find("Couldn't find") or msg:find("Macro execution") then
+        if original_core_error then
+            return original_core_error(...)
+        end
+        return
+    end
+
     local incidents = rawget(_G, "_DOXOADE_RUNTIME_INCIDENTS")
     if incidents then
         incidents.errors = incidents.errors + 1
         incidents.last_error = msg
     end
-
-    -- 👻 PONTE PHANTO-CRISIS: Registra no Ring Buffer NDJSON
+    
     local capture = rawget(_G, "phanto_capture")
     if type(capture) == "function" then
         capture("core.error", function()
             error(msg, 2)
         end)
     end
-
+    
     if msg ~= error_rate.last_msg then
         error_rate.last_msg = msg
         error_rate.last_time = now
@@ -510,24 +527,22 @@ core.error = function(...)
             error_rate.count = 0
         end
     end
-  if original_core_error then
-      local argc = select("#", ...)
-      local first = ...
-      -- Se só 1 arg e contém %, é mensagem JÁ formatada — NÃO re-formata
-      if argc == 1 and type(first) == "string" then
-          return original_core_error("%s", first)
-      end
-      -- Se 2+ args, tenta format seguro
-      if argc >= 2 and type(first) == "string" and first:find("%%") then
-          local ok, formatted = pcall(string.format, ...)
-          if ok then
-              return original_core_error("%s", formatted)
-          end
-          -- Se format falhou (ex: %d recebeu nil), não re-formata
-          return original_core_error("%s", table.concat({...}, " "))
-      end
-      return original_core_error(...)
-  end
+    
+    if original_core_error then
+        local argc = select("#", ...)
+        local first = ...
+        if argc == 1 and type(first) == "string" then
+            return original_core_error("%s", first)
+        end
+        if argc >= 2 and type(first) == "string" and first:find("%%") then
+            local ok, formatted = pcall(string.format, ...)
+            if ok then
+                return original_core_error("%s", formatted)
+            end
+            return original_core_error("%s", table.concat({...}, " "))
+        end
+        return original_core_error(...)
+    end
 end
 
 if command and command.perform then

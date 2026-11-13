@@ -13,8 +13,12 @@ local CommandView = require "core.commandview"
 local rencache = rawget(_G, "rencache") or (pcall(require, "core.rencache") and require("core.rencache") or nil)
 local native_renderer = rawget(_G, "renderer") or (pcall(require, "renderer") and require("renderer") or nil)
 
--- ─── BLINDAGEM CONTRA O "ENTER FANTASMA" DO LITE XL ─────────────────────────
+-- ═══════════════════════════════════════════════════════════════
+-- 🛡️ GHOST ENTER GUARD V3 — Defesa Absoluta (ProDeNov 1.2.1)
+-- ═══════════════════════════════════════════════════════════════
 local _last_cmd_view_close = 0
+local _last_submit = 0          -- ← novo
+local GHOST_ENTER_WINDOW = 0.5
 
 local orig_hide = CommandView.hide
 if orig_hide then
@@ -28,20 +32,61 @@ local orig_submit = CommandView.submit
 if orig_submit then
   function CommandView:submit(text)
     _last_cmd_view_close = os.clock()
+    _last_submit = os.clock()     -- ← novo
     return orig_submit(self, text)
   end
 end
 
+-- ─── Camada 1: core.on_event (Bloqueia o "Enter" no nível do SDL) ───
+if core.on_event then
+  local _orig_on_event = core.on_event
+  core.on_event = function(event_type, ...)
+    if event_type == "keypressed" then
+      local args = { ... }
+      local key = tostring(args[1] or ""):lower()
+      if (key == "return" or key == "enter" or key == "kp_enter")
+         and (os.clock() - _last_cmd_view_close) < GHOST_ENTER_WINDOW then
+        return true -- Engole o Enter!
+      end
+    end
+    return _orig_on_event(event_type, ...)
+  end
+end
+
+-- ─── Camada 2: DocView:on_text_input (Bloqueia o "\n" se vazar) ───
+local DocView = require "core.docview"
+local _orig_docview_input = DocView.on_text_input
+DocView.on_text_input = function(self, text)
+  if (text == "\n" or text == "\r") and (os.clock() - _last_cmd_view_close) < GHOST_ENTER_WINDOW then
+    return true -- Consome o caractere!
+  end
+  return _orig_docview_input(self, text)
+end
+
+-- ─── Camada 3: command.perform (Bloqueia o doc:newline) ───
 local orig_command_perform = command.perform
 command.perform = function(name, ...)
   if name == "doc:newline" or name == "doc:new-line" then
-    if (os.clock() - _last_cmd_view_close) < 0.2 then
-      return -- Engole o Enter Fantasma!
+    if (os.clock() - _last_cmd_view_close) < GHOST_ENTER_WINDOW then
+      return -- Engole o comando!
     end
   end
   return orig_command_perform(name, ...)
 end
--- ────────────────────────────────────────────────────────────────────────────
+
+-- ─── Camada 4: re-arma a janela quando o arquivo ganha foco pós-submit ───
+-- O fantasma chega logo após o FOCO (não após o fechar da paleta).
+-- Cobre o caso do scan de 5s do resolve_smart_file_path.
+local _orig_set_active_view = core.set_active_view
+core.set_active_view = function(view, ...)
+  if view and view.doc and (os.clock() - _last_submit) < 15 then
+    _last_cmd_view_close = os.clock()   -- re-arma: janela passa a contar do FOCO
+  end
+  return _orig_set_active_view(view, ...)
+end
+
+-- ═══════════════════════════════════════════════════════════════
+
 
 -- ─── WINDOW TITLE: Doxly - <modo> - PID <pid> ────────────────────────────
 core.add_thread(function()

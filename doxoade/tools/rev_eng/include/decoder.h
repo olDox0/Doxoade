@@ -46,6 +46,8 @@ typedef struct {
     uint8_t  disp_size;
     int64_t  imm;
     uint8_t  imm_size;
+    uint64_t rip_target;
+    uint8_t  has_rip_target;
     OperandType op[3];
     uint8_t     num_ops;
 } DecodedInsn;

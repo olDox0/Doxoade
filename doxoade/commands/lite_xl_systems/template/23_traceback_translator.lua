@@ -126,7 +126,7 @@ core.error = function(...)
     active_command = active_cmd,
     source_map = resolved and {
       template = resolved.name,
-      original_line = resolved.line,
+      original_line = resolved.line or (line - (resolved.start_line or line) + 1),
       unified_line = line,
     } or nil,
     variables = vars,
