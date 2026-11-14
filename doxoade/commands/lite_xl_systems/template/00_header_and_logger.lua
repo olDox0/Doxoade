@@ -489,14 +489,48 @@ end
 local original_core_error = core.error
 local error_rate = { last_msg = "", last_time = 0, count = 0 }
 core.error = function(...)
-  local msg = table.concat({...}, " ")
-  -- 🛡️ mensagens nativas benignas de find: não poluem blackbox
-  if msg:find("Couldn't find") or msg:find("No find to continue") or msg:find("Macro execution") then
-    return orig_core_error(...)
-  end
-  flow_mark("ERROR", "core.error", msg:sub(1, 60))
-  save_blackbox_to_disk(msg, debug.traceback("", 2))
-  return orig_core_error(...)
+    local msg = safe_format(...)
+    local now = os.clock()
+    -- 🛡️ IGNORAR FALSOS POSITIVOS DO SISTEMA (find nativo + macro)
+    if msg:find("Couldn't find") or msg:find("Macro execution") or msg:find("No find to continue") then
+        if original_core_error then return original_core_error(...) end
+        return
+    end
+    local incidents = rawget(_G, "_DOXOADE_RUNTIME_INCIDENTS")
+    if incidents then
+        incidents.errors = incidents.errors + 1
+        incidents.last_error = msg
+    end
+    local capture = rawget(_G, "phanto_capture")
+    if type(capture) == "function" then
+        capture("core.error", function() error(msg, 2) end)
+    end
+    if msg ~= error_rate.last_msg then
+        error_rate.last_msg = msg
+        error_rate.last_time = now
+        error_rate.count = 1
+        append_session_log("ERROR", msg)
+    else
+        error_rate.count = error_rate.count + 1
+        if (now - error_rate.last_time) >= 1.0 then
+            append_session_log("ERROR", string.format("%s [repetido %dx]", msg, error_rate.count))
+            error_rate.last_time = now
+            error_rate.count = 0
+        end
+    end
+    if original_core_error then
+        local argc = select("#", ...)
+        local first = ...
+        if argc == 1 and type(first) == "string" then
+            return original_core_error("%s", first)
+        end
+        if argc >= 2 and type(first) == "string" and first:find("%%") then
+            local ok, formatted = pcall(string.format, ...)
+            if ok then return original_core_error("%s", formatted) end
+            return original_core_error("%s", table.concat({...}, " "))
+        end
+        return original_core_error(...)
+    end
 end
 
 if command and command.perform then

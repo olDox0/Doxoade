@@ -130,6 +130,9 @@ if core and core.error then
   local orig_core_error = core.error
   core.error = function(...)
     local msg = table.concat({...}, " ")
+    if msg:find("Couldn't find") or msg:find("No find to continue") or msg:find("Macro execution") then
+      return orig_core_error(...)
+    end
     flow_mark("ERROR", "core.error", msg:sub(1, 60))
     save_blackbox_to_disk(msg, debug.traceback("", 2))
     return orig_core_error(...)

@@ -164,3 +164,105 @@ diz isso com numero.
 significa "71 bugs". Significa "71 lugares onde a extracao atual nao ve
 o que o humano ve". Q06 as transforma em `covered` ou as refuta
 (`extraction_miss` virando `covered` = extraiu e classificou).
+
+---
+
+## Resultado do corpus atual
+
+| Kind | Count | % |
+|---|---|---|
+| covered | 0 | 0.0% |
+| extraction_miss | 69 | 58.5% |
+| rule_miss | 16 | 13.6% |
+| silent_quiescence | 33 | 28.0% |
+
+**1 unit tem `coverage_overlap: true`** — U0052 (`__repr__` de `_Wild`,
+`current_category=constant_return`). Q05 acertou, mas heuristica disparou
+(`self_arg` + `dunder_name`). Sem `coverage_overlap`, esse acerto seria
+invisivel atras de `kind=extraction_miss`.
+
+**`covered=0` e finding, nao bug.** Q05 so classifica funcao de 1 statement
+com Return simples (`arith`/`ident`/`const`/`unknown`). Codigo real e
+multi-statement. Nenhuma funcao do corpus se encaixa. **E o sinal mais
+valioso do X03:** Q05 nao cobre codigo real. Q06 e o fix. Apos Q06,
+esperado: `covered > 0`.
+
+**69 `extraction_miss`** e dominio das heuristicas — nao significa 69 bugs,
+significa 69 unidades onde a extracao atual e cega a algum padrao. Os 6
+`dead_local` FPs (que inflavam para 71) foram removidos por
+`_name_loaded_in_children` (ver Lição).
+
+---
+
+## Bug fixes descobertos no primeiro misses.json
+
+Manual review dos primeiros 9 `dead_local` e 19 `magic_outside_compare`
+encontrou 8 FPs. Ambos os fixes sao em `engine_x03.py`.
+
+### H10 — 66% FP rate (9 hits, 6 FP)
+
+`symtable.is_referenced()` no escopo da funcao nao conta `Load` vindo de
+comprehension, generator ou closure. `h` em `hex_to_ansi` carregado dentro
+de `(int(h[i:i+2], 16) for i in (0,2,4))` era marcado como `is_local`,
+`is_assigned`, `not is_referenced` — parecia dead. Mas `h` esta em
+`GeneratorExp`, cujo `Load` vira `is_free` no escopo filho e nao propaga.
+
+**Fix:** `_name_loaded_in_children(fn_sym, name)` percorre escopos filhos
+procurando `name` como `is_free`. Se achar, nao e dead.
+
+**Trade-off:** sintatico, nao semantico. Se `x` e carregado em closure
+nunca chamado, `x` continua contado como "usado". Sob-reportar e mais
+seguro que over-reportar para X04.
+
+### H6 — 10% FP rate (19 hits, 2 FP)
+
+`_iter_own_scope` itera siblings, nao subtree. `Constant(4)` em
+`if branch_count >= 4` estava em `Compare.comparators`, e o `continue` no
+no `Compare` nao pulava os filhos.
+
+**Fix:** `ast.NodeVisitor` com `visit_Compare = noop` (pula subarvore
+inteira) e `visit_Constant` que so marca fora de Compare.
+
+**FPs removidos:** U0065 `_is_long_body`, U0067 `extract_facts` (Q05).
+Ambos fliparam para `rule_miss` (`smell_magic_number=yes` do extractor
+Q05, que varre `Compare` corretamente).
+
+---
+
+**Primeiro misses.json mentiu em 8 unidades.** Manual review de 9
+`dead_local` e 19 `magic_outside_compare` (2 min) encontrou 6+2 FPs.
+Se X04 tivesse treinado em cima do JSON v1, induziria `dead_local` para
+`h`, `chars`, `neg` — todos falsos. Curadoria manual antes de consumo e
+barata (2 min) e evita indução corrompida.
+
+---
+
+X03 PASS: real corpus collection + fixes H10/H6 descobertos na revisao
+
+Adiciona x03_real_corpus como probe de coleta para inducao sobre Q05.
+118 units em 4 arquivos (doxcolors, retro_forward_cmd, engine_q05,
+engine_p70).
+
+Fixes descobertos na revisao manual do primeiro misses.json:
+
+- X01: RuleTable.rules_for preserva ordem de construcao (fix preventivo;
+  fixture de X01 nao exercita empate, mas Q05 tem 17 rules com empates
+  em p15/p20). X03 C6 expos 73/118 identicas antes do fix, 118/118 depois.
+  expected_x01.txt byte-identico.
+
+- X03 H10: _name_loaded_in_children detecta Loads vindos de comprehensions,
+  generators e closures (que symtable.is_referenced nao propaga). 9 hits
+  antes, 6 FPs. Trade-off: sintatico, nao semantico — so-reporta.
+
+- X03 H6: NodeVisitor pula subarvore inteira de Compare. 19 hits antes,
+  2 FPs em `if X >= 4` mal visitados. Units U0065/U0067 flipam
+  extraction_miss -> rule_miss (Q05 ve o magic via Compare).
+
+- X03: coverage_overlap: bool em units extraction_miss com Q05 acertando
+  (current_category != "unknown"). 1 unit: U0052.
+
+- X03: H6 renomeado magic_in_assign -> magic_outside_compare (nome
+  correto: fora de Compare, nao "em Assign").
+
+Baseline: covered=0, extraction_miss=69, rule_miss=16, silent=33.
+coverage_overlap=1. Determinism: 3 runs -> 1 hash.

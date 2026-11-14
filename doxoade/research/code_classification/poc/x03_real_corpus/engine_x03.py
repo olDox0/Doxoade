@@ -542,13 +542,32 @@ def _h5_recursive_call(node):
 
 
 def _h6_magic_outside_compare(node):
-    """int nao-trivial em Constant fora de Compare (Q05 so cobre Compare)."""
-    values = set()
-    for sub in _iter_own_scope(node):
-        if isinstance(sub, ast.Compare):
-            continue
-        if isinstance(sub, ast.Constant) and _is_magic_int(sub.value):
-            values.add(sub.value)
+    """int nao-trivial em Constant fora de Compare (Q05 so cobre Compare).
+
+    Usa NodeVisitor para pular a subarvore inteira de Compare, nao so
+    o no Compare. Bug do uso anterior de `_iter_own_scope`: itera
+    siblings, entao Constant dentro de Compare ainda era visitado.
+    """
+    values: set[int] = set()
+
+    class _V(ast.NodeVisitor):
+        def visit_Compare(self, n):
+            return  # skip subtree
+        def visit_FunctionDef(self, n):
+            return  # skip nested defs
+        def visit_AsyncFunctionDef(self, n):
+            return
+        def visit_ClassDef(self, n):
+            return
+        def visit_Lambda(self, n):
+            return
+        def visit_Constant(self, n):
+            if _is_magic_int(n.value):
+                values.add(n.value)
+
+    v = _V()
+    for stmt in node.body:
+        v.visit(stmt)
     return sorted(values)
 
 
@@ -631,9 +650,30 @@ def _h10_dead_local(fn_sym) -> list[str]:
             continue
         if sym.is_referenced():
             continue
+        if _name_loaded_in_children(fn_sym, name):
+            continue
         dead.append(name)
     return sorted(dead)
 
+def _name_loaded_in_children(fn_sym, name) -> bool:
+    """True se `name` e carregado (free) em algum escopo descendente.
+
+    `symtable.is_referenced()` no escopo pai nao conta Loads vindos de
+    comprehensions, generators ou closures. Esta funcao percorre os
+    escopos filhos procurando `name` como free variable — que e
+    exatamente "carregado do escopo pai".
+
+    Trade-off: sintatico, nao semantico. Um `x` carregado em closure
+    nunca chamado continua sendo contado como "usado". Sob-reportar e
+    mais seguro que over-reportar (para X04).
+    """
+    for child in fn_sym.get_children():
+        for child_sym in child.get_symbols():
+            if child_sym.get_name() == name and child_sym.is_free():
+                return True
+        if _name_loaded_in_children(child, name):
+            return True
+    return False
 
 # ============================================================
 # Classify kind
@@ -714,11 +754,12 @@ def _extract_result(eng, live) -> dict:
     }
 
 
-def _process_unit(node, file_path, module_sym, module_bindings, parents, table):
+def _process_unit(node, file_path, module_sym, module_bindings, parents,
+                  active_rules, table):
     seed = extract_facts_adapted(node)
 
     eng_flat = Engine()
-    facts_flat, _ = eng_flat.run(list(seed), RULES_Q05)
+    facts_flat, _ = eng_flat.run(list(seed), active_rules)
     live_flat = [f for f in facts_flat if f.to_tuple() not in eng_flat.retracted]
 
     eng_tab = Engine()
@@ -780,7 +821,9 @@ def _process_unit(node, file_path, module_sym, module_bindings, parents, table):
         "current_category": result["category"],
         "identity_ok": identity_ok,
     }
-
+    # NOVO: sinal duplo — heuristica disparou mas Q05 classificou.
+    if kind == "extraction_miss" and result["category"] != "unknown":
+        unit["coverage_overlap"] = True
     if kind != "covered":
         unit["detected_by"] = detected_by
         if detail:
@@ -799,7 +842,7 @@ def _process_unit(node, file_path, module_sym, module_bindings, parents, table):
 # ============================================================
 # Process one file
 # ============================================================
-def process_file(file_path, table):
+def process_file(file_path, active_rules, table):
     rel = file_path.relative_to(REPO_ROOT).as_posix()
 
     try:
@@ -829,7 +872,8 @@ def process_file(file_path, table):
             continue
         try:
             unit = _process_unit(node, file_path, module_sym,
-                                 module_bindings, parents, table)
+                                 module_bindings, parents,
+                                 active_rules, table)
             raw_units.append(unit)
         except Exception as e:
             LOG.error("erro processando %s::%s: %s",
@@ -853,6 +897,31 @@ def process_file(file_path, table):
         "units": len(raw_units),
     }
 
+def _load_induced_rules(path):
+    """Carrega induced_rules.json gerado por X04.
+
+    Schema:
+        {"rules": [
+            {"id": "R_ind_001",
+             "intersection": [["return_expr_kind", "Call"]],
+             "conclusion": ["category", "returns_call"],
+             "priority": 12}
+        ]}
+    """
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    rules = []
+    for r in data.get("rules", []):
+        conditions = tuple(
+            (Var("F"), pred, obj) for pred, obj in r["intersection"]
+        )
+        concl_pred, concl_obj = r["conclusion"]
+        rules.append(Rule(
+            id=r["id"],
+            conditions=conditions,
+            conclusion=(Var("F"), concl_pred, concl_obj),
+            priority=r.get("priority", 12),
+        ))
+    return rules
 
 # ============================================================
 # Build misses.json
@@ -869,6 +938,12 @@ def _build_misses_json(all_units, corpus_meta):
         k = u.get("kind", "process_error")
         kind_counts[k] = kind_counts.get(k, 0) + 1
 
+    coverage_overlap_count = sum(
+        1 for u in all_units
+        if u.get("kind") == "extraction_miss"
+        and u.get("current_category") != "unknown"
+    )
+
     return {
         "schema_version": "1.0",
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -881,36 +956,65 @@ def _build_misses_json(all_units, corpus_meta):
         },
         "units_analyzed": len(all_units),
         "units_by_kind": kind_counts,
+        "coverage_overlap_count": coverage_overlap_count,
         "corpus": corpus_meta,
         "units": all_units,
     }
 
+def _find_sets(obj, path="misses"):
+    """Recursivamente encontra onde existem sets na estrutura."""
+    if isinstance(obj, (set, frozenset)):
+        yield path
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            yield from _find_sets(v, f"{path}.{k}")
+    elif isinstance(obj, (list, tuple)):
+        for i, v in enumerate(obj):
+            yield from _find_sets(v, f"{path}[{i}]")
+
+
+def _json_safe(obj):
+    """Recursivamente converte para JSON-serializable.
+
+    Sets viram listas ordenadas (deterministico). Tipos desconhecidos
+    viram repr(). Uso defensivo: nao deveria haver sets, mas se houver,
+    o engine nao deve crashar. Se o diagnostico (_find_sets) disparar
+    em DEBUG, e sinal de bug upstream, nao daqui.
+    """
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+    if isinstance(obj, dict):
+        return {str(k): _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(x) for x in obj]
+    if isinstance(obj, (set, frozenset)):
+        return sorted(_json_safe(x) for x in obj)
+    return repr(obj)
 
 def _hash_misses(misses):
     clone = {k: v for k, v in misses.items() if k != "generated_at"}
-    canonical = json.dumps(clone, sort_keys=True, ensure_ascii=False,
+    canonical = json.dumps(_json_safe(clone), sort_keys=True,
+                           ensure_ascii=False,
                            separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
 
 # ============================================================
 # Pipeline (chamavel para determinismo)
 # ============================================================
-def _run_pipeline():
-    table = _build_table()
+def _run_pipeline(extra_rules=None):
+    active_rules = list(RULES_Q05) + list(extra_rules or [])
+    table = RuleTable(
+        rules=active_rules,
+        domain_index={"programming": [r.id for r in active_rules]},
+    )
     all_units = []
     corpus_meta = []
 
     for path in CORPUS:
         if not path.exists():
-            corpus_meta.append({
-                "path": path.relative_to(REPO_ROOT).as_posix()
-                    if path.is_absolute() else str(path),
-                "error": "file not found",
-                "units": 0,
-            })
+            ...
             continue
-        units, meta = process_file(path, table)
+        units, meta = process_file(path, active_rules, table)
         corpus_meta.append(meta)
         all_units.extend(units)
 
@@ -1024,8 +1128,22 @@ def _render_output(all_units, corpus_meta, misses, checks):
     for k in ("covered", "extraction_miss", "rule_miss",
               "silent_quiescence", "process_error"):
         n = misses["units_by_kind"].get(k, 0)
-        lines.append(f"  {k:<20} {n:>4}")
+        if k == "extraction_miss" and misses.get("coverage_overlap_count", 0):
+            lines.append(f"  {k:<20} {n:>4}  "
+                         f"(coverage_overlap: {misses['coverage_overlap_count']})")
+        else:
+            lines.append(f"  {k:<20} {n:>4}")
     lines.append("")
+
+    overlap_units = [u for u in all_units
+                     if u.get("kind") == "extraction_miss"
+                     and u.get("current_category") != "unknown"]
+    if overlap_units:
+        lines.append("=== coverage_overlap (Q05 acertou, extracao incompleta) ===")
+        for u in overlap_units:
+            lines.append(f"  {u['id']}  {u['unit_name']:<22} "
+                         f"current_category={u['current_category']}")
+        lines.append("")
 
     lines.append("=== heuristics distribution ===")
     hnames = ["async_def", "self_arg", "decorator", "yield_expr",
@@ -1099,12 +1217,36 @@ def main() -> int:
 
     t0 = time.perf_counter()
 
+    rules_path = None
+    for i, arg in enumerate(sys.argv):
+        if arg == "--rules" and i + 1 < len(sys.argv):
+            rules_path = sys.argv[i + 1]
+
+    extra_rules = None
+    if rules_path:
+        try:
+            extra_rules = _load_induced_rules(rules_path)
+            if DEBUG:
+                _dbg(f"  loaded {len(extra_rules)} induced rules from {rules_path}")
+        except Exception as e:
+            print(f"FATAL: failed to load --rules {rules_path}: {e}",
+                  file=sys.stderr)
+            return 2
+
     with QUIET:
-        all_units, corpus_meta, misses = _run_pipeline()
+        all_units, corpus_meta, misses = _run_pipeline(extra_rules=extra_rules)
         det_hashes = [_hash_misses(misses)]
         for _ in range(2):
-            _, _, m = _run_pipeline()
+            _, _, m = _run_pipeline(extra_rules=extra_rules)
             det_hashes.append(_hash_misses(m))
+
+    if DEBUG:
+        hits = list(_find_sets(misses))
+        if hits:
+            for hit in hits:
+                _dbg(f"  SET FOUND (bug upstream): {hit}")
+        else:
+            _dbg("  (no sets in misses - estrutura OK)")
 
     checks = _self_check(all_units, corpus_meta, misses, det_hashes)
     lines = _render_output(all_units, corpus_meta, misses, checks)
@@ -1112,30 +1254,122 @@ def main() -> int:
     for ln in lines:
         print(ln)
 
-    output_path = Path(__file__).parent / "output.txt"
-    output_path.write_text(
-        "\n".join(lines) + "\n", encoding="utf-8", newline="\n",
-    )
-
     all_pass = all(c["pass"] for c in checks)
+
+    if rules_path:
+        # Modo X04: nao toca em output.txt/misses.json.
+        out_path = Path(__file__).parent / "output_x03_with_rules.txt"
+        out_path.write_text(
+            "\n".join(lines) + "\n", encoding="utf-8", newline="\n",
+        )
+        summary_path = Path(__file__).parent / "x03_with_rules_summary.json"
+        summary_path.write_text(
+            json.dumps({
+                "units_analyzed": misses["units_analyzed"],
+                "units_by_kind": misses["units_by_kind"],
+                "coverage_overlap_count":
+                    misses.get("coverage_overlap_count", 0),
+                "rules_loaded": len(extra_rules or []),
+                "self_check_pass": all_pass,
+                "checks_failed": [
+                    c["name"] for c in checks if not c["pass"]
+                ],
+            }, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8", newline="\n",
+        )
+        t_ms = (time.perf_counter() - t0) * 1000
+        LOG.info("X03(rules) PASS=%s: %d units, %d rules, %.1fms",
+                 all_pass, misses["units_analyzed"],
+                 len(extra_rules or []), t_ms)
+        return 0 if all_pass else 1
+    else:
+        # Modo normal: escreve output.txt e (se PASS) misses.json.
+        output_path = Path(__file__).parent / "output.txt"
+        output_path.write_text(
+            "\n".join(lines) + "\n", encoding="utf-8", newline="\n",
+        )
+        if all_pass:
+            misses_path = Path(__file__).parent / "misses.json"
+            misses_path.write_text(
+                json.dumps(_json_safe(misses), indent=2,
+                           ensure_ascii=False) + "\n",
+                encoding="utf-8", newline="\n",
+            )
+            t_ms = (time.perf_counter() - t0) * 1000
+            LOG.info("X03 PASS: %d units, %d misses, %.1fms",
+                     misses["units_analyzed"],
+                     sum(misses["units_by_kind"][k] for k in
+                         ("extraction_miss", "rule_miss", "silent_quiescence")),
+                     t_ms)
+            return 0
+        else:
+            LOG.error("X03 FAIL: %d check(s)",
+                      sum(1 for c in checks if not c["pass"]))
+            return 1
 
     if all_pass:
         misses_path = Path(__file__).parent / "misses.json"
         misses_path.write_text(
-            json.dumps(misses, indent=2, ensure_ascii=False) + "\n",
+            json.dumps(_json_safe(misses), indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8", newline="\n",
         )
         t_ms = (time.perf_counter() - t0) * 1000
-        LOG.info("X03 PASS: %d units, %d misses, %.1fms",
-                 misses["units_analyzed"],
-                 sum(misses["units_by_kind"][k] for k in
-                     ("extraction_miss", "rule_miss", "silent_quiescence")),
-                 t_ms)
+        LOG.info("X03 PASS: ...")
         return 0
     else:
-        LOG.error("X03 FAIL: %d check(s)",
-                  sum(1 for c in checks if not c["pass"]))
+        LOG.error("X03 FAIL: ...")
         return 1
+
+    if rules_path:
+        # Modo X04: nao toca em output.txt/misses.json.
+        out_path = Path(__file__).parent / "output_x03_with_rules.txt"
+        out_path.write_text(
+            "\n".join(lines) + "\n", encoding="utf-8", newline="\n",
+        )
+        summary_path = Path(__file__).parent / "x03_with_rules_summary.json"
+        summary_path.write_text(
+            json.dumps({
+                "units_analyzed": misses["units_analyzed"],
+                "units_by_kind": misses["units_by_kind"],
+                "coverage_overlap_count":
+                    misses.get("coverage_overlap_count", 0),
+                "rules_loaded": len(extra_rules or []),
+                "self_check_pass": all_pass,
+                "checks_failed": [
+                    c["name"] for c in checks if not c["pass"]
+                ],
+            }, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8", newline="\n",
+        )
+        t_ms = (time.perf_counter() - t0) * 1000
+        LOG.info("X03(rules) PASS=%s: %d units, %d rules, %.1fms",
+                 all_pass, misses["units_analyzed"],
+                 len(extra_rules or []), t_ms)
+        return 0 if all_pass else 1
+    else:
+        # Modo normal: escreve output.txt e (se PASS) misses.json.
+        output_path = Path(__file__).parent / "output.txt"
+        output_path.write_text(
+            "\n".join(lines) + "\n", encoding="utf-8", newline="\n",
+        )
+        if all_pass:
+            misses_path = Path(__file__).parent / "misses.json"
+            misses_path.write_text(
+                json.dumps(_json_safe(misses), indent=2,
+                           ensure_ascii=False) + "\n",
+                encoding="utf-8", newline="\n",
+            )
+            t_ms = (time.perf_counter() - t0) * 1000
+            LOG.info("X03 PASS: %d units, %d misses, %.1fms",
+                     misses["units_analyzed"],
+                     sum(misses["units_by_kind"][k] for k in
+                         ("extraction_miss", "rule_miss", "silent_quiescence")),
+                     t_ms)
+            return 0
+        else:
+            LOG.error("X03 FAIL: %d check(s)",
+                      sum(1 for c in checks if not c["pass"]))
+            return 1
 
 
 if __name__ == "__main__":

@@ -25,7 +25,76 @@ local function normalize_path(path)
     local home = os.getenv("USERPROFILE") or os.getenv("HOME") or ""
     str = home .. str:sub(2)
   end
+  
+  -- 🛡️ BLINDAGEM WINDOWS: Evita que system.absolute_path duplique o drive (ex: C:\...\C:\...)
+  -- O Lite XL no Windows às vezes não reconhece "C:/" como absoluto e prepende o CWD.
+  -- Se já tem drive letter, apenas normalizamos as barras e retornamos.
+  if str:match("^[a-zA-Z]:") then
+    return str:gsub("/", "\\")
+  end
+  
   return system.absolute_path(str) or str
+end
+
+local function resolve_smart_file_path(input_path)
+  if not input_path or input_path:match("^%s*$") then return nil end
+  
+  -- 1. Normalização de barras e limpeza de aspas/espaços
+  local clean_input = input_path:gsub("\\", "/"):gsub("^%s+", ""):gsub("%s+$", "")
+  clean_input = clean_input:gsub('^["\']', ''):gsub('["\']$', '')
+  
+  -- 2. Se já for absoluto (C:/... ou /... ou ~)
+  if clean_input:match("^[a-zA-Z]:") or clean_input:sub(1, 1) == "/" or clean_input:sub(1, 1) == "~" then
+    return normalize_path(clean_input)
+  end
+
+  local filename = clean_input:match("([^/]+)$") or clean_input
+  local dir_part = clean_input:sub(1, #clean_input - #filename):gsub("/+$", "")
+  
+  local roots = get_all_real_project_roots()
+  local primary_root = roots[1] or get_real_workspace_root()
+
+  -- 3. Sem subpasta no input (só o nome do arquivo): cria na raiz principal
+  if dir_part == "" then
+    return primary_root .. "/" .. filename
+  end
+
+  -- ⚡ F3: nunca varre o repo na thread principal
+  local sig = table.concat(roots, "|")
+  local cache = _DIR_CACHE.dirs
+  local fresh = cache and _DIR_CACHE.sig == sig and (os.clock() - _DIR_CACHE.built_at) < 60
+  
+  if not fresh then
+    _rebuild_dir_cache_async()
+    -- Cold: resolução direta O(raízes) — sem scan, sem freeze
+    for _, root in ipairs(roots) do
+      local cand = root .. "/" .. dir_part
+      local info = system.get_file_info(cand)
+      if info and info.type == "dir" then
+        return cand .. "/" .. filename
+      end
+    end
+    return primary_root .. "/" .. clean_input
+  end
+  
+  -- Warm: fuzzy instantâneo em memória
+  local needle_segs = _path_segments(dir_part)
+  local best_dir, best_score = nil, math.huge
+  
+  for _, d in ipairs(cache) do
+    if d.relative ~= "" then
+      local score = _match_score(needle_segs, _path_segments(d.relative), d.root_basename)
+      if score and score < best_score then
+        best_dir, best_score = d.path, score
+      end
+    end
+  end
+  
+  if best_dir then
+    return best_dir .. "/" .. filename
+  end
+  
+  return primary_root .. "/" .. clean_input
 end
 
 local _created_dirs = {}
@@ -427,24 +496,29 @@ command.add(nil, {
   ["doxoade:create-file-interactive"] = function()
     core.command_view:enter("Criar Arquivo (Ctrl+Alt+N)", {
       submit = function(input_path)
-        local full_path = resolve_smart_file_path(input_path)
-        if not full_path then return end
-
-        ensure_parent_directories(full_path)
-
-        -- Cria o arquivo no disco se não existir
-        local f = io.open(full_path, "a")
-        if f then f:close() end
-
-        -- Abre o arquivo criado em uma nova aba
-        local doc = core.open_doc(full_path)
-        if doc then
-          core.root_view:open_doc(doc)
-          core.log("✔ [Ctrl+Alt+N] Arquivo criado e aberto: " .. full_path)
-          core.redraw = true
-        else
-          core.error("✖ Falha ao abrir o arquivo criado: " .. full_path)
-        end
+      local full_path = resolve_smart_file_path(input_path)
+      if not full_path then return end
+      
+      ensure_parent_directories(full_path)
+      
+      -- Cria o arquivo no disco se não existir
+      local f = io.open(full_path, "a")
+      if f then f:close() end
+      
+      -- 🛡️ KHONSU YIELD: Adia a abertura para o próximo frame.
+      -- Isso evita que o evento "Enter" vaze do CommandView para o novo DocView.
+      core.add_thread(function()
+         coroutine.yield(0.05) -- 50ms é suficiente para o SDL flush e o CommandView esconder
+         
+         local doc = core.open_doc(full_path)
+         if doc then
+            core.root_view:open_doc(doc)
+            core.log("✔ [Ctrl+Alt+N] Arquivo criado e aberto: " .. full_path)
+            core.redraw = true
+         else
+            core.error("✖ Falha ao abrir o arquivo criado: " .. full_path)
+         end
+      end)
       end,
       suggest = function(text)
         -- Auto-reversão dinâmica de barras em tempo real ao colar/digitar '\'

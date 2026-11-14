@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "generated_at": "2026-11-14T03:45:32.357205+00:00",
+  "generated_at": "2026-11-14T12:39:01.084132+00:00",
   "corpus_hash": "0dc2547d3f29c218ab8f7b3e9acce69548c56690954753eef4515088e76b86f6",
   "engine_config": {
     "extractor": "q05_adapted",
@@ -11,11 +11,12 @@
   "units_analyzed": 118,
   "units_by_kind": {
     "covered": 0,
-    "extraction_miss": 71,
-    "rule_miss": 14,
+    "extraction_miss": 69,
+    "rule_miss": 16,
     "silent_quiescence": 33,
     "process_error": 0
   },
+  "coverage_overlap_count": 1,
   "corpus": [
     {
       "path": "doxoade/tools/doxcolors.py",
@@ -562,17 +563,13 @@
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
-        "heuristic:magic_outside_compare",
-        "heuristic:dead_local"
+        "heuristic:magic_outside_compare"
       ],
       "extraction_detail": {
         "magic_values": [
           2,
           4,
           16
-        ],
-        "dead_locals": [
-          "h"
         ]
       },
       "seed_facts": [
@@ -660,18 +657,13 @@
       "identity_ok": true,
       "detected_by": [
         "heuristic:decorator",
-        "heuristic:magic_outside_compare",
-        "heuristic:dead_local"
+        "heuristic:magic_outside_compare"
       ],
       "extraction_detail": {
         "magic_values": [
           2,
           4,
           16
-        ],
-        "dead_locals": [
-          "h1",
-          "h2"
         ]
       },
       "seed_facts": [
@@ -763,14 +755,8 @@
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
-        "heuristic:decorator",
-        "heuristic:dead_local"
+        "heuristic:decorator"
       ],
-      "extraction_detail": {
-        "dead_locals": [
-          "chars"
-        ]
-      },
       "seed_facts": [
         [
           "decode_effect",
@@ -4701,6 +4687,7 @@
       "kind": "extraction_miss",
       "current_category": "constant_return",
       "identity_ok": true,
+      "coverage_overlap": true,
       "detected_by": [
         "heuristic:self_arg",
         "heuristic:dunder_name"
@@ -5334,15 +5321,11 @@
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
-        "heuristic:recursive_call",
-        "heuristic:dead_local"
+        "heuristic:recursive_call"
       ],
       "extraction_detail": {
         "recursive_sites": [
           191
-        ],
-        "dead_locals": [
-          "neg"
         ]
       },
       "seed_facts": [
@@ -5891,17 +5874,10 @@
       "lineno": 346,
       "end_lineno": 348,
       "class_context": null,
-      "kind": "extraction_miss",
+      "kind": "rule_miss",
       "current_category": "unknown",
       "identity_ok": true,
-      "detected_by": [
-        "heuristic:magic_outside_compare"
-      ],
-      "extraction_detail": {
-        "magic_values": [
-          4
-        ]
-      },
+      "detected_by": [],
       "seed_facts": [
         [
           "_is_long_body",
@@ -5983,7 +5959,7 @@
       ],
       "current_pattern": null,
       "retractions": 1,
-      "suggested_target": "Q06",
+      "suggested_target": "X04",
       "id": "U0065"
     },
     {
@@ -6076,17 +6052,10 @@
       "lineno": 359,
       "end_lineno": 394,
       "class_context": null,
-      "kind": "extraction_miss",
+      "kind": "rule_miss",
       "current_category": "unknown",
       "identity_ok": true,
-      "detected_by": [
-        "heuristic:magic_outside_compare"
-      ],
-      "extraction_detail": {
-        "magic_values": [
-          4
-        ]
-      },
+      "detected_by": [],
       "seed_facts": [
         [
           "extract_facts",
@@ -6173,7 +6142,7 @@
       ],
       "current_pattern": null,
       "retractions": 1,
-      "suggested_target": "Q06",
+      "suggested_target": "X04",
       "id": "U0067"
     },
     {
@@ -6280,15 +6249,11 @@
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
-        "heuristic:magic_outside_compare",
-        "heuristic:dead_local"
+        "heuristic:magic_outside_compare"
       ],
       "extraction_detail": {
         "magic_values": [
           1000
-        ],
-        "dead_locals": [
-          "live"
         ]
       },
       "seed_facts": [
@@ -8080,14 +8045,8 @@
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
-        "heuristic:self_arg",
-        "heuristic:dead_local"
+        "heuristic:self_arg"
       ],
-      "extraction_detail": {
-        "dead_locals": [
-          "neg"
-        ]
-      },
       "seed_facts": [
         [
           "_recurse",

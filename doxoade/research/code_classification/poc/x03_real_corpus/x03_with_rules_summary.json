@@ -1,0 +1,16 @@
+{
+  "units_analyzed": 118,
+  "units_by_kind": {
+    "covered": 48,
+    "extraction_miss": 69,
+    "rule_miss": 1,
+    "silent_quiescence": 0,
+    "process_error": 0
+  },
+  "coverage_overlap_count": 69,
+  "rules_loaded": 3,
+  "self_check_pass": false,
+  "checks_failed": [
+    "C4 all_kinds_present"
+  ]
+}
