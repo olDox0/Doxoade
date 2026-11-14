@@ -201,8 +201,8 @@ def _run_one(poc: dict, debug: bool = False) -> tuple[bool, str, str, str]:
     """Retorna (ok, msg, stdout, stderr)."""
     ok, err, stdout, stderr = _run_engine(poc, debug=debug)
     if not ok:
-        return False, f"  {err}", stdout, stderr   # <-- era: f"  engine falhou: {err}"
-    out, exp_or_err = _read_outputs(poc)
+        return False, f"  {err}", stdout, stderr    # <-- sai aqui
+    out, exp_or_err = _read_outputs(poc)             # <-- nunca chega
     if out is None:
         return False, f"  {exp_or_err}", stdout, stderr
     if out == exp_or_err:

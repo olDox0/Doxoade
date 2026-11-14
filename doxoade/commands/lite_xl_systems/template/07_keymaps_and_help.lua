@@ -99,7 +99,7 @@ local IGNORED_EXTS = {
 -- =============================================================================
 -- 🔍 VULCAN BRIDGE V3 — Popula o Dock e o HUD (Sem buffer de texto)
 -- =============================================================================
-local function execute_global_search(query, scope_root, scope_strict)
+local function _legacy_execute_global_search_UNUSED(query, scope_root, scope_strict)
   if not query or query:match("^%s*$") then return end
 
   -- Inicializa o Modelo de Estado Global
@@ -378,34 +378,35 @@ local function execute_global_search(query, scope_root, scope_strict)
       if state.total_hits > 0 then finish("FASE 2: diretório dos abertos") return end
     end
 
-    -- FASE 3: RECURSIVO na pasta alvo (tree) ou no diretório do arquivo (Alt+F) ou projeto
-    local roots
-    if abs_scope and scope_is_dir then roots = { abs_scope }
-    else roots = get_all_project_roots() end
-    local dir_queue = {}
-    for _, r in ipairs(roots) do table.insert(dir_queue, r) end
-    local batch = 0
-    while #dir_queue > 0 do
-      local cur = table.remove(dir_queue, 1)
-      local items = system.list_dir(cur) or {}
-      for _, item in ipairs(items) do
-        local skip = false
-        for pat in pairs(IGNORED_DIRS) do if item:match(pat) then skip = true break end end
-        if not skip then
-          local full = cur .. PATHSEP .. item
-          local info = system.get_file_info(full)
-          if info then
-            if info.type == "dir" then table.insert(dir_queue, full)
-            elseif info.type == "file" and (info.size or 0) < 3000000 then
-              local ext = item:match("%.([%w_]+)$")
-              if not ext or not IGNORED_EXTS[ext:lower()] then
-                batch = batch + 1
-                if batch >= 20 then batch = 0 coroutine.yield() end
-                local m = scan_file(full)
-                if #m > 0 then
-                  table.insert(state.results, { path = full:gsub("\\","/"), matches = m })
-                  state.total_hits = state.total_hits + #m
-                  state.total_files = state.total_files + 1
+    -- FASE 3/4: BFS recursivo reutilizável (F5: fallback de escopo)
+    local function scan_roots(roots)
+      local dir_queue = {}
+      for _, r in ipairs(roots) do table.insert(dir_queue, r) end
+      local batch = 0
+      while #dir_queue > 0 do
+        local cur = table.remove(dir_queue, 1)
+        local items = system.list_dir(cur) or {}
+        for _, item in ipairs(items) do
+          local skip = false
+          for pat in pairs(IGNORED_DIRS) do
+            if item:match(pat) then skip = true break end
+          end
+          if not skip then
+            local full = cur .. PATHSEP .. item
+            local info = system.get_file_info(full)
+            if info then
+              if info.type == "dir" then table.insert(dir_queue, full)
+              elseif info.type == "file" and (info.size or 0) < 3000000 then
+                local ext = item:match("%.([%w_]+)$")
+                if not ext or not IGNORED_EXTS[ext:lower()] then
+                  batch = batch + 1
+                  if batch >= 20 then batch = 0 coroutine.yield() end
+                  local m = scan_file(full)
+                  if #m > 0 then
+                    table.insert(state.results, { path = full:gsub("\\", "/"), matches = m })
+                    state.total_hits = state.total_hits + #m
+                    state.total_files = state.total_files + 1
+                  end
                 end
               end
             end
@@ -413,7 +414,21 @@ local function execute_global_search(query, scope_root, scope_strict)
         end
       end
     end
-    finish(abs_scope and "FASE 3: diretório alvo (recursivo)" or "FASE 3: projeto completo")
+
+    if abs_scope and scope_is_dir then
+      scan_roots({ abs_scope })
+      if state.total_hits > 0 or scope_strict then
+        finish("FASE 3: diretório alvo (recursivo)")
+        return
+      end
+      -- 🌐 F5: Alt+F sem hits na pasta do arquivo → varre o projeto inteiro.
+      -- (tree com scope_strict NÃO cai aqui: escopo explícito é respeitado)
+      scan_roots(get_all_project_roots())
+      finish("FASE 4: projeto completo (fallback)")
+      return
+    end
+    scan_roots(get_all_project_roots())
+    finish("FASE 3: projeto completo")
   end)
 end
 

@@ -5,6 +5,9 @@
   - Filtro de argumentos CLI ignora corretamente o --userdir.
 ]]
 
+if rawget(_G, "_DOXOADE_IPC_SESSION_LOADED") then return end
+rawset(_G, "_DOXOADE_IPC_SESSION_LOADED", true)
+
 local core = require "core"
 local DocView = require "core.docview"
 

@@ -159,6 +159,57 @@ local function get_all_directories()
   return dirs, roots
 end
 
+-- ═══ F3: CACHE ASSÍNCRONO DE DIRETÓRIOS (Zero-Freeze no Ctrl+Alt+N) ═══
+local _DIR_CACHE = { dirs = nil, building = false, built_at = 0, sig = "" }
+
+local function _rebuild_dir_cache_async()
+  if _DIR_CACHE.building then return end
+  _DIR_CACHE.building = true
+  core.add_thread(function()
+    local roots = get_all_real_project_roots()
+    local sig = table.concat(roots, "|")
+    local out, queue = {}, {}
+    for _, root in ipairs(roots) do
+      local base = (root:match("([^/]+)$") or root):lower()
+      table.insert(queue, { dir = root, rel = "", base = base, depth = 0 })
+    end
+    local batch = 0
+    while #queue > 0 do
+      local n = table.remove(queue, 1)
+      table.insert(out, { path = n.dir, relative = n.rel, root_basename = n.base })
+      if n.depth < 20 then
+        local ok, items = pcall(system.list_dir, n.dir)
+        if ok and items then
+          for _, item in ipairs(items) do
+            if not _is_ignored_dirname(item) then
+              local full = n.dir .. "/" .. item
+              local fok, finfo = pcall(system.get_file_info, full)
+              if fok and finfo and finfo.type == "dir" then
+                local rel = (n.rel == "") and item or (n.rel .. "/" .. item)
+                table.insert(queue, { dir = full, rel = rel, base = n.base, depth = n.depth + 1 })
+              end
+            end
+          end
+        end
+      end
+      batch = batch + 1
+      if batch >= 25 then batch = 0 coroutine.yield() end
+    end
+    _DIR_CACHE.dirs = out
+    _DIR_CACHE.sig = sig
+    _DIR_CACHE.built_at = os.clock()
+    _DIR_CACHE.building = false
+    if core.log then
+      core.log(string.format("⚡ [F3] Cache de diretórios aquecido: %d pastas (background).", #out))
+    end
+  end)
+end
+
+core.add_thread(function()
+  coroutine.yield(2.0)
+  _rebuild_dir_cache_async()
+end)
+
 local function _path_segments(path)
   local segments = {}
   for seg in tostring(path):gsub("\\", "/"):gmatch("[^/]+") do
@@ -295,34 +346,37 @@ end
 
 local function resolve_smart_file_path(input_path)
   if not input_path or input_path:match("^%s*$") then return nil end
-
-  -- 1. Normalização de barras e limpeza de aspas/espaços
   local clean_input = input_path:gsub("\\", "/"):gsub("^%s+", ""):gsub("%s+$", "")
   clean_input = clean_input:gsub('^["\']', ''):gsub('["\']$', '')
-
-  -- 2. Se já for absoluto (C:/... ou /... ou ~)
   if clean_input:find("^[a-zA-Z]:") or clean_input:sub(1, 1) == "/" or clean_input:sub(1, 1) == "~" then
     return normalize_path(clean_input)
   end
-
   local filename = clean_input:match("([^/]+)$") or clean_input
   local dir_part = clean_input:sub(1, #clean_input - #filename):gsub("/+$", "")
-
   local roots = get_all_real_project_roots()
   local primary_root = roots[1] or get_real_workspace_root()
-
-  -- 3. Sem subpasta no input (só o nome do arquivo): cria na raiz principal
   if dir_part == "" then
     return primary_root .. "/" .. filename
   end
-
-  -- 4. Resolve a MELHOR pasta existente entre TODOS os projetos anexados,
-  --    por segmentos de caminho (lida com pastas filhas de mesmo nome e com
-  --    múltiplos projetos simultâneos na TreeView).
-  local all_dirs = get_all_directories()
+  -- ⚡ F3: nunca varre o repo na thread principal
+  local sig = table.concat(roots, "|")
+  local cache = _DIR_CACHE.dirs
+  local fresh = cache and _DIR_CACHE.sig == sig and (os.clock() - _DIR_CACHE.built_at) < 60
+  if not fresh then
+    _rebuild_dir_cache_async()
+    for _, root in ipairs(roots) do
+      local cand = root .. "/" .. dir_part
+      local info = system.get_file_info(cand)
+      if info and info.type == "dir" then
+        return cand .. "/" .. filename
+      end
+    end
+    return primary_root .. "/" .. clean_input
+  end
+  -- Warm: fuzzy instantâneo em memória
   local needle_segs = _path_segments(dir_part)
   local best_dir, best_score = nil, math.huge
-  for _, d in ipairs(all_dirs) do
+  for _, d in ipairs(cache) do
     if d.relative ~= "" then
       local score = _match_score(needle_segs, _path_segments(d.relative), d.root_basename)
       if score and score < best_score then
@@ -330,14 +384,9 @@ local function resolve_smart_file_path(input_path)
       end
     end
   end
-
   if best_dir then
     return best_dir .. "/" .. filename
   end
-
-  -- 5. Fallback: nenhuma pasta existente corresponde (estrutura totalmente
-  --    nova) — cria a partir da raiz principal, criando as pastas
-  --    intermediárias que faltarem.
   return primary_root .. "/" .. clean_input
 end
 

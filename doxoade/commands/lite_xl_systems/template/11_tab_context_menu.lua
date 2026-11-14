@@ -428,6 +428,7 @@ end)
 
 local function _is_treeview_instance(view)
   if not view then return false end
+  if view.doc then return false end -- 🛡️ doutrina H4: DocView nunca é tree
   local ok_tv, TreeView = pcall(require, "plugins.treeview")
   if not ok_tv or not TreeView then
     ok_tv, TreeView = pcall(require, "plugins.treeview.treeview")
@@ -435,12 +436,6 @@ local function _is_treeview_instance(view)
   if ok_tv and TreeView and type(view.is) == "function" then
     local ok, res = pcall(view.is, view, TreeView)
     if ok and res then return true end
-  end
-  if type(view.get_name) == "function" then
-    local ok, name = pcall(view.get_name, view)
-    if ok and type(name) == "string" and name:lower():find("tree") then
-      return true
-    end
   end
   return false
 end

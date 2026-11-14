@@ -306,13 +306,19 @@ class RuleTable:
         self._symptom_index = symptom_index or {}
 
     def rules_for(self, domain=None, symptoms=None) -> list[Rule]:
-        ids = set()
+        """Filtra por domain/symptoms preservando ordem de construcao.
+
+        Ordem e a do dict `_rules` (== ordem em que as rules foram
+        passadas ao __init__). Filtro nao reordena — engine ordena
+        por priority via stable sort, empates preservam esta ordem.
+        """
+        ids_set = set()
         if domain and domain in self._domain_index:
-            ids.update(self._domain_index[domain])
+            ids_set.update(self._domain_index[domain])
         for s in (symptoms or []):
             if s in self._symptom_index:
-                ids.update(self._symptom_index[s])
-        return [self._rules[i] for i in ids if i in self._rules]
+                ids_set.update(self._symptom_index[s])
+        return [r for r in self._rules.values() if r.id in ids_set]
 
     def domain_rules(self, domain) -> list[Rule]:
         return [self._rules[i] for i in self._domain_index.get(domain, [])

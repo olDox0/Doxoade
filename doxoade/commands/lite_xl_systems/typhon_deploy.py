@@ -1013,6 +1013,53 @@ class TyphonDeployEngine:
         except Exception as e:
             return False, f"ÁRTEMIS falhou: {e}"
 
+    @classmethod
+    def _sync_cofre_infra(cls, real_dir: Path, target_dir: Path) -> None:
+        """Infra mínima p/ o cofre. Tolerante a locks; nunca src==dest; sem forensics stale."""
+        src_dox = real_dir / ".doxoade"
+        dst_dox = target_dir / ".doxoade"
+        dst_dox.mkdir(parents=True, exist_ok=True)
+        if not src_dox.exists():
+            return
+        SKIP_DIRS = {"canonical_live", "backups", "staging", "test_deploy",
+                     "sandbox", "api_guard", "diagnostics", "shadow_harness",
+                     "canvas_cache", "terminal_temp"}
+        skipped = 0
+        for item in src_dox.iterdir():
+            if item.name in SKIP_DIRS or item.name.startswith("terminal_pty_ipc"):
+                continue
+            try:
+                if item.is_dir():
+                    shutil.copytree(item, dst_dox / item.name, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(item, dst_dox / item.name)
+            except Exception:
+                skipped += 1
+        try:
+            st = src_dox / "diagnostics" / "canonical_status.json"
+            if st.exists():
+                (dst_dox / "diagnostics").mkdir(parents=True, exist_ok=True)
+                shutil.copy2(st, dst_dox / "diagnostics" / "canonical_status.json")
+        except Exception:
+            skipped += 1
+        for fname in ("sovereign_session.lua",):
+            s, d = src_dox / fname, dst_dox / fname
+            if s.exists() and not d.exists():
+                try: shutil.copy2(s, d)
+                except Exception: pass
+        for fname in ("session.lua", "session.json"):
+            s, d = real_dir / fname, target_dir / fname
+            if s.exists() and not d.exists():
+                try: shutil.copy2(s, d)
+                except Exception: pass
+        ws_s, ws_d = real_dir / "workspace", target_dir / "workspace"
+        if ws_s.exists() and not ws_d.exists():
+            try: shutil.copytree(ws_s, ws_d, dirs_exist_ok=True)
+            except Exception: pass
+        if skipped:
+            print(f"{Fore.YELLOW}  ⚠ {skipped} item(ns) de infra ignorado(s) (em uso/lock).{Fore.RESET}")
+
+
     # ═══════════════════════════════════════════════════════════
     # 🧪 LANÇAMENTO COM ISOLAMENTO
     # ═══════════════════════════════════════════════════════════
@@ -1020,57 +1067,25 @@ class TyphonDeployEngine:
     def launch(cls, mode: DeployMode = "production", exorcise: bool = True, raw_mode: bool = False) -> Optional[int]:
         real_deploy_dir = cls._get_deploy_dir(mode)
         target_deploy_dir = real_deploy_dir
-
         if mode == "production" and not raw_mode:
-            # Garante que o init está no cofre
-            real_init = real_deploy_dir / "init.lua"
-            iso_init = target_deploy_dir / "init.lua"
-            if real_init.exists() and not iso_init.exists():
-                shutil.copy2(real_init, iso_init)
-
-            # Copia infraestrutura (.doxoade) para o cofre, EXCETO pastas de controle
-            real_doxoade = real_deploy_dir / ".doxoade"
-            iso_doxoade = target_deploy_dir / ".doxoade"
-            if real_doxoade.exists():
-                iso_doxoade.mkdir(parents=True, exist_ok=True)
-                for item in real_doxoade.iterdir():
-                    if item.name in ("canonical_live", "backups", "staging", "test_deploy", "sandbox"):
-                        continue
-                    dest = iso_doxoade / item.name
-                    if item.is_dir():
-                        shutil.copytree(item, dest, dirs_exist_ok=True)
-                    else:
-                        shutil.copy2(item, dest)
-
-            # 🏛️ PERSISTÊNCIA DE SESSÃO: Copia a sessão nativa se ainda não existir no cofre
-            # (Isso traz as abas e a treeview da última vez que o usuário usou a raiz)
-            for fname in ["session.lua", "session.json", "sovereign_session.lua"]:
-                real_f = real_deploy_dir / fname
-                iso_f = target_deploy_dir / fname
-                if not iso_f.exists() and real_f.exists():
-                    shutil.copy2(real_f, iso_f)
-                    print(f"{Fore.CYAN}  📋 {fname} importado para o Cofre.{Fore.RESET}")
-
-            # Copia o workspace (projetos abertos na treeview)
-            real_ws = real_deploy_dir / "workspace"
-            iso_ws = target_deploy_dir / "workspace"
-            if not iso_ws.exists() and real_ws.exists():
-                shutil.copytree(real_ws, iso_ws, dirs_exist_ok=True)
-                print(f"{Fore.CYAN}  📋 Workspace importado para o Cofre.{Fore.RESET}")
-
-
-        if exorcise:
-            # 1. Envia o Graceful Quit ESPECÍFICO para o diretório isolado
-            ipc_queue = target_deploy_dir / ".ipc_queue"
-            if ipc_queue.exists():
+            target_deploy_dir = real_deploy_dir / ".doxoade" / "canonical_live"
+            target_deploy_dir.mkdir(parents=True, exist_ok=True)
+            staging_init = real_deploy_dir / ".doxoade" / "staging" / "init.lua"
+            src_init = staging_init if staging_init.exists() else (real_deploy_dir / "init.lua")
+            if src_init.exists():
                 try:
-                    with open(ipc_queue, "a", encoding="utf-8") as f:
-                        f.write("__DOXOADE_GRACEFUL_QUIT__\n")
-                    time.sleep(2.5)  # ⬆️ Aumentado para dar tempo do Lua salvar a sessão
-                except Exception:
-                    pass
-
-            # 2. Mata APENAS o PID do processo isolado (se ainda vivo)
+                    shutil.copy2(src_init, target_deploy_dir / "init.lua")
+                except Exception as e:
+                    print(f"{Fore.YELLOW}  ⚠ init do cofre não sincronizado: {e}{Fore.RESET}")
+            cls._sync_cofre_infra(real_deploy_dir, target_deploy_dir)
+        if exorcise:
+            ipc_queue = target_deploy_dir / ".ipc_queue"
+            try:
+                with open(ipc_queue, "a", encoding="utf-8") as f:
+                    f.write("__DOXOADE_GRACEFUL_QUIT__\n")
+                time.sleep(1.5)
+            except Exception:
+                pass
             pid_file = target_deploy_dir / f".{mode}.pid"
             if pid_file.exists():
                 try:
@@ -1084,76 +1099,25 @@ class TyphonDeployEngine:
                     pid_file.unlink(missing_ok=True)
                 except Exception:
                     pass
-
         exe = LiteXLEngine.find_executable()
         if not exe:
             print(f"{Fore.RED}✖ Executável do Lite XL não encontrado no sistema.{Fore.RESET}")
             return None
-
-        # ✅ ISOLAMENTO DO CANONICAL + CÓPIA INICIAL DE SESSÃO
-        if mode == "production" and not raw_mode:
-            real_init = real_deploy_dir / "init.lua"
-            if real_init.exists():
-                shutil.copy2(real_init, target_deploy_dir / "init.lua")
-
-            real_doxoade = real_deploy_dir / ".doxoade"
-            iso_doxoade = target_deploy_dir / ".doxoade"
-            if real_doxoade.exists():
-                iso_doxoade.mkdir(parents=True, exist_ok=True)
-                for item in real_doxoade.iterdir():
-                    if item.name in ("canonical_live", "backups", "staging", "test_deploy", "sandbox"):
-                        continue
-                    dest = iso_doxoade / item.name
-                    if item.is_dir():
-                        shutil.copytree(item, dest, dirs_exist_ok=True)
-                    else:
-                        shutil.copy2(item, dest)
-
-            # ✅ SE O ISOLADO NÃO TIVER SESSÃO, COPIA A SESSÃO ORIGINAL (para trazer o treeview)
-            iso_session = iso_doxoade / "sovereign_session.lua"
-            real_session = real_doxoade / "sovereign_session.lua"
-            if not iso_session.exists() and real_session.exists():
-                shutil.copy2(real_session, iso_session)
-                print(f"{Fore.CYAN}  📋 Sessão original copiada para o ambiente isolado (treeview preservado).{Fore.RESET}")
-
-            # Também copia session.lua e workspace da raiz (para o Lite XL nativo)
-            for fname in ["session.lua", "session.json"]:
-                real_f = real_deploy_dir / fname
-                iso_f = target_deploy_dir / fname
-                if not iso_f.exists() and real_f.exists():
-                    shutil.copy2(real_f, iso_f)
-
-            real_ws = real_deploy_dir / "workspace"
-            iso_ws = target_deploy_dir / "workspace"
-            if not iso_ws.exists() and real_ws.exists():
-                shutil.copytree(real_ws, iso_ws, dirs_exist_ok=True)
-
         env = os.environ.copy()
         env["LITE_USERDIR"] = str(target_deploy_dir)
         env["XDG_CONFIG_HOME"] = str(target_deploy_dir.parent)
         env["DOXOADE_DEPLOY_MODE"] = mode
-
-        print(f"\n{Fore.CYAN}{Style.BRIGHT}🔬 DIAGNÓSTICO DE LAUNCH — [{mode.upper()}]{Fore.RESET}")
+        print(f"\n{Fore.CYAN}{Style.BRIGHT}🔬 DIAGNÓSTICO DE LAUNCH — [{mode.upper()}]{Style.RESET_ALL}")
         print(f"  {Fore.WHITE}1. Deploy Dir:{Fore.RESET} {target_deploy_dir}")
         if mode == "production" and not raw_mode:
-            print(f"  {Fore.GREEN}2. ISOLAMENTO ATIVO:{Fore.RESET} Sessão protegida em canonical_live")
-        print(f"  {Fore.WHITE}3. --userdir:{Fore.RESET} {target_deploy_dir}")
-        print(f"  {Fore.WHITE}4. DOXOADE_DEPLOY_MODE:{Fore.RESET} {env.get('DOXOADE_DEPLOY_MODE', 'NÃO DEFINIDO')}\n")
-
+            print(f"  {Fore.GREEN}2. ISOLAMENTO ATIVO:{Fore.RESET} sessão protegida em canonical_live")
+        print(f"  {Fore.WHITE}3. LITE_USERDIR:{Fore.RESET} {env['LITE_USERDIR']}")
+        print(f"  {Fore.WHITE}4. DOXOADE_DEPLOY_MODE:{Fore.RESET} {mode}\n")
         try:
-            if sys.platform == "win32":
-                os.startfile(str(exe), arguments=f'--userdir "{target_deploy_dir}"')
-                pid = 0
-            else:
-                proc = subprocess.Popen(
-                    [str(exe), "--userdir", str(target_deploy_dir)],
-                    env=env,
-                    creationflags=0x00000010,
-                )
-                pid = proc.pid
-
-            pid_file = target_deploy_dir / f".{mode}.pid"
-            pid_file.write_text(str(pid), encoding="utf-8")
+            CREATE_NEW_CONSOLE = 0x00000010 if sys.platform == "win32" else 0
+            proc = subprocess.Popen([str(exe)], env=env, creationflags=CREATE_NEW_CONSOLE)
+            pid = proc.pid
+            (target_deploy_dir / f".{mode}.pid").write_text(str(pid), encoding="utf-8")
             print(f"{Fore.CYAN}🚀 Lite XL ({mode.upper()}) iniciado com sucesso.{Fore.RESET}")
             return pid
         except Exception as e:

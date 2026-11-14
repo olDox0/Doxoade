@@ -212,6 +212,17 @@ def cmd_check_templates(fix, apply):
                 f" check-templates --fix' para simular o auto-reparo.{Fore.RESET}\n"
             )
 
+    # 🛡️ GATE: Shadow FAIL reprova o comando (bloqueia a cadeia && deploy)
+    _shadow_bad = (
+        shadow_report.get("status") == "FAIL"
+        or shadow_report.get("commands_crashed", 0) > 0
+        or any(f.get("status") == "FAIL" for f in shadow_report.get("files", {}).values())
+    )
+    if _shadow_bad:
+        click.echo(f"\n{Fore.RED}{Style.BRIGHT}✖ GATE REPROVADO pelo Shadow Audit — corrija os templates antes de deployar.{Style.RESET_ALL}")
+        sys.exit(1)
+
+
 @lite_xl_group.command("resolve-line")
 @click.argument("line_no", type=int)
 @click.option("--mode", "-m", default="production")
