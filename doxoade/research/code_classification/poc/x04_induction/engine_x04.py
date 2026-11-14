@@ -1,46 +1,41 @@
 # -*- coding: utf-8 -*-
 # doxoade/research/code_classification/poc/x04_induction/engine_x04.py
 """
-X04 - Inducao por clustering sobre misses.json (v1: memorizacao controlada).
+X04 v2 - Inducao com hold-out validation.
 
-Contrato provado (se PASS):
-    - clusters emergem com jaccard >= threshold sobre facts (nao source)
-    - regras induzidas tem evidence rastreavel
-    - delta mensuravel na mesma corpus (memorizacao)
-    - X03 re-run com --rules ainda passa seus 7 checks
+Mudancas de v1:
+    1. Assinatura = seed_facts only + filtro de valores triviais
+       (no/none/unknown/other). Remove derived_facts (category=unknown,
+       has_any_smell=*, complexity=*, pattern=*, smell_*). Esses fatos
+       inflam Jaccard e produzem clusters tautologicos (cluster_001
+       de v1 = "qualquer funcao nao-dirty").
 
-Escopo (Q1): silent_quiescence + rule_miss
-    extraction_miss fica fora — e dominio de Q06 (extractor nao ve),
-    nao de X04 (rule falta).
+    2. Clustering = clique (all-pairs Jaccard >= threshold). v1 usava
+       connected components, que e transitivo (A~B + B~C nao implica
+       A~C) e absorvia via cadeia.
 
-NAO prova (v2):
-    - generalizacao (precisa hold-out)
-    - FP rate (precisa baseline humano)
-    - que as regras induzidas sao "boas" (so que cobrem exemplos)
+    3. Hold-out split 70/30 (seed=42). Induz apenas em train, mede
+       cobertura em train (memorizacao) e test (generalizacao).
 
-Decisoes Q2 (naming hibrido):
-    - interseccao com 1 fact descritivo -> nome derivado
-      (return_expr_kind=Call -> returns_call)
-    - interseccao composta ou sem descritivo -> cluster_NNN (humano renomeia)
+O que v2 prova:
+    - clusters emergem de sinal real (facts estruturais, nao derivados)
+    - regras generalizam (test coverage > 0 em unidades nao vistas)
+    - delta honesto (train e test medidos separados)
 
-Decisoes Q3 (jaccard):
-    - threshold = 0.7 (equilibrado)
-    - min_cluster_size = 3 (Q4 B: agressivo)
-    - cluster via connected components (nao k-means, nao hierarquico)
-
-Decisoes Q5 (v1 e memorizacao):
-    - hold-out fica para v2
-    - "delta > 0" prova que a regra dispara nos exemplos, nao que generaliza
+Deferido para v3:
+    - Naming dictionary (cluster_NNN -> nome semantico)
+    - Quarantine (candidate vs stable)
+    - Dice coefficient
 
 Rodar: doxoade retro-forward run x04
 """
 
 from __future__ import annotations
 
-import ast
 import hashlib
 import json
 import logging
+import random
 import subprocess
 import sys
 import time
@@ -79,20 +74,18 @@ def _dbg(*parts) -> None:
 
 
 # ============================================================
-# Config (Q1/Q2/Q3 fixas no prototipo)
+# Config v2
 # ============================================================
 CONFIG = {
     "scope": ["silent_quiescence", "rule_miss"],
     "min_cluster_size": 3,
     "jaccard_threshold": 0.7,
     "default_priority": 12,
-    "trivial_facts": [
-        ["kind", "function"],
-    ],
+    "holdout_ratio": 0.3,
+    "holdout_seed": 42,
+    "trivial_facts": [["kind", "function"]],
     "trivial_predicates": ["name", "name_prefix", "body_len", "branch_count"],
-    "descriptive_predicates": [
-        "return_expr_kind", "body_0_kind",
-    ],
+    "trivial_values": ["no", "none", "unknown", "other"],
 }
 
 
@@ -108,7 +101,22 @@ def filter_scope(units, scope) -> list[dict]:
 
 
 # ============================================================
-# Fact signatures
+# Hold-out split (v2)
+# ============================================================
+def split_holdout(units, ratio, seed) -> tuple[list[dict], list[dict]]:
+    """70/30 split deterministico via seed. Preserva IDs."""
+    rng = random.Random(seed)
+    ids = [u["id"] for u in units]
+    rng.shuffle(ids)
+    n_test = max(1, int(len(ids) * ratio))
+    test_ids = set(ids[:n_test])
+    train = [u for u in units if u["id"] not in test_ids]
+    test = [u for u in units if u["id"] in test_ids]
+    return train, test
+
+
+# ============================================================
+# Fact signatures (v2: seed-only + filtro de valores triviais)
 # ============================================================
 def _is_trivial(p, o) -> bool:
     if [p, o] in CONFIG["trivial_facts"]:
@@ -118,21 +126,34 @@ def _is_trivial(p, o) -> bool:
     return False
 
 
+def _is_trivial_value(o) -> bool:
+    return str(o) in CONFIG["trivial_values"]
+
+
 def extract_signature(unit) -> frozenset:
+    """Assinatura = seed_facts only, sem fatos triviais.
+
+    Remove:
+      - kind=function (universal)
+      - name, name_prefix, body_len, branch_count (triviais metricos)
+      - qualquer fact com valor em {no, none, unknown, other}
+      - derived_facts inteiros (category, complexity, pattern, smell_*,
+        has_any_smell) — esses sao produzidos pelo motor, nao pela
+        extracao, e inflam Jaccard com "contexto vazio".
+    """
     sig: set = set()
     for fact in unit.get("seed_facts", []):
         s, p, o = fact
-        if not _is_trivial(p, o):
-            sig.add((p, o))
-    for fact in unit.get("derived_facts", []):
-        s, p, o = fact
-        if not _is_trivial(p, o):
-            sig.add((p, o))
+        if _is_trivial(p, o):
+            continue
+        if _is_trivial_value(o):
+            continue
+        sig.add((p, o))
     return frozenset(sig)
 
 
 # ============================================================
-# Similarity + clustering
+# Similarity
 # ============================================================
 def jaccard(a, b) -> float:
     if not a and not b:
@@ -142,40 +163,58 @@ def jaccard(a, b) -> float:
     return inter / union if union else 0.0
 
 
-def cluster_units(signatures, threshold) -> list[list[int]]:
-    """Connected components via Jaccard >= threshold. Deterministico."""
+# ============================================================
+# Clustering v2: clique (all-pairs Jaccard >= threshold)
+# ============================================================
+def clique_cluster_units(signatures, threshold, min_size) -> list[list[int]]:
+    """Greedy clique extraction.
+
+    Diferente de connected components: todos os pares dentro do cluster
+    DEVEM ter Jaccard >= threshold. Isso elimina transitividade.
+
+    Determinismo: iteracao por `range(n)` e `sorted(candidates)` — sem
+    iteracao em set, sem hash de ID.
+    """
     n = len(signatures)
     if n == 0:
         return []
 
-    parent = list(range(n))
+    remaining = set(range(n))
+    clusters = []
 
-    def find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
+    while len(remaining) >= min_size:
+        adj: dict[int, set[int]] = {i: set() for i in remaining}
+        for i in remaining:
+            for j in remaining:
+                if i < j and jaccard(signatures[i], signatures[j]) >= threshold:
+                    adj[i].add(j)
+                    adj[j].add(i)
 
-    def union(x, y):
-        rx, ry = find(x), find(y)
-        if rx != ry:
-            parent[rx] = ry
+        best_clique: list[int] = []
+        for start in sorted(remaining):
+            clique = {start}
+            for c in sorted(adj[start]):
+                if c in remaining and c not in clique:
+                    if all(jaccard(signatures[c], signatures[k]) >= threshold
+                           for k in clique):
+                        clique.add(c)
+            if len(clique) > len(best_clique):
+                best_clique = sorted(clique)
 
-    for i in range(n):
-        for j in range(i + 1, n):
-            if jaccard(signatures[i], signatures[j]) >= threshold:
-                union(i, j)
+        if len(best_clique) < min_size:
+            break
 
-    groups: dict[int, list[int]] = {}
-    for i in range(n):
-        root = find(i)
-        groups.setdefault(root, []).append(i)
+        clusters.append(best_clique)
+        remaining -= set(best_clique)
 
-    return [sorted(g) for g in groups.values()]
+    for i in sorted(remaining):
+        clusters.append([i])
+
+    return clusters
 
 
 # ============================================================
-# Intersection
+# Intersection / naming
 # ============================================================
 def intersect_facts(signatures, cluster_indices) -> frozenset:
     if not cluster_indices:
@@ -186,30 +225,18 @@ def intersect_facts(signatures, cluster_indices) -> frozenset:
     return frozenset(result)
 
 
-# ============================================================
-# Naming (Q2 hibrido)
-# ============================================================
 def derive_rule_name(intersection) -> tuple[str | None, str]:
-    descriptive = [(p, o) for p, o in intersection
-                   if p in CONFIG["descriptive_predicates"]]
+    """v2: prioriza return_expr_kind. Sem isso, auto.
 
-    if len(descriptive) != 1:
-        return None, "auto"
-
-    pred, obj = descriptive[0]
-    if pred == "return_expr_kind":
-        return f"returns_{obj.lower()}", "derived"
-    if pred == "body_0_kind":
-        return f"body_starts_{obj.lower()}", "derived"
-    if pred == "complexity":
-        obj_clean = obj.replace("+", "plus")
-        return f"complexity_{obj_clean}", "derived"
+    v1 tentava body_0_kind tambem, mas body_starts_return e generico
+    demais para nome util. Melhor auto + humano renomeia via review.md.
+    """
+    for p, o in intersection:
+        if p == "return_expr_kind":
+            return f"returns_{o.lower()}", "derived"
     return None, "auto"
 
 
-# ============================================================
-# Propose rules
-# ============================================================
 def _pick_conclusion(intersection, name_hint, name_source):
     if name_source == "derived" and name_hint:
         return "category", name_hint
@@ -218,7 +245,6 @@ def _pick_conclusion(intersection, name_hint, name_source):
 
 
 def _is_useful_intersection(intersection) -> bool:
-    """Rejeita interseccao so com body_len (nao categorizavel)."""
     if not intersection:
         return False
     if all(p == "body_len" for p, _ in intersection):
@@ -281,19 +307,22 @@ def propose_rules(clusters, units, signatures) -> tuple[list[dict], list[dict]]:
 
 
 # ============================================================
-# Write induced_rules.json
+# Write / hash
 # ============================================================
 def write_induced_rules(rules, misses_ref, path) -> None:
     data = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "misses_ref": misses_ref,
         "config": {
             "scope": CONFIG["scope"],
             "min_cluster_size": CONFIG["min_cluster_size"],
             "jaccard_threshold": CONFIG["jaccard_threshold"],
+            "holdout_ratio": CONFIG["holdout_ratio"],
+            "holdout_seed": CONFIG["holdout_seed"],
             "trivial_facts": CONFIG["trivial_facts"],
             "trivial_predicates": CONFIG["trivial_predicates"],
+            "trivial_values": CONFIG["trivial_values"],
         },
         "rules": rules,
     }
@@ -321,41 +350,63 @@ def run_x03_with_rules(rules_path) -> dict:
             timeout=120, stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired as e:
-        out = e.stdout or ""
-        err = e.stderr or ""
-        return {"ok": False, "error": f"timeout: {err[:200]}",
-                "stdout": out, "stderr": err}
+        return {"ok": False, "error": f"timeout: {str(e.stderr)[:200]}",
+                "stdout": e.stdout or "", "stderr": e.stderr or ""}
 
+    summary = load_summary()
     if result.returncode != 0:
         return {
             "ok": False,
             "error": f"exit {result.returncode}",
             "stdout": result.stdout,
             "stderr": result.stderr,
+            "summary": summary,
         }
 
-    return {"ok": True, "stdout": result.stdout, "stderr": result.stderr}
+    return {"ok": True, "stdout": result.stdout,
+            "stderr": result.stderr, "summary": summary}
 
 
 def load_summary() -> dict | None:
     if not X03_SUMMARY_PATH.exists():
         return None
-    return json.loads(X03_SUMMARY_PATH.read_text(encoding="utf-8"))
+    try:
+        return json.loads(X03_SUMMARY_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
 
 
 # ============================================================
-# Delta
+# Coverage (v2: train vs test)
 # ============================================================
-def compute_delta(before: dict, after: dict | None) -> dict:
-    if after is None:
-        return {"error": "no summary from X03 re-run"}
-    delta = {}
-    for kind in ("covered", "extraction_miss", "rule_miss",
-                 "silent_quiescence", "process_error"):
-        b = before.get(kind, 0)
-        a = after.get(kind, 0)
-        delta[kind] = {"before": b, "after": a, "delta": a - b}
-    return delta
+def split_coverage(train, test, summary_after) -> dict:
+    """Le summary_after['units'], particiona cobertura por train/test."""
+    if summary_after is None or "units" not in summary_after:
+        return {
+            "train_total": len(train), "train_covered": 0,
+            "test_total": len(test), "test_covered": 0,
+            "train_covered_ids": [], "test_covered_ids": [],
+        }
+
+    after = {u["id"]: u for u in summary_after["units"]}
+    train_covered = [
+        u["id"] for u in train
+        if after.get(u["id"], {}).get("current_category") not in
+           (None, "unknown")
+    ]
+    test_covered = [
+        u["id"] for u in test
+        if after.get(u["id"], {}).get("current_category") not in
+           (None, "unknown")
+    ]
+    return {
+        "train_total": len(train),
+        "train_covered": len(train_covered),
+        "train_covered_ids": train_covered,
+        "test_total": len(test),
+        "test_covered": len(test_covered),
+        "test_covered_ids": test_covered,
+    }
 
 
 # ============================================================
@@ -368,21 +419,26 @@ def _format_intersection(intersection) -> str:
     return "{" + ", ".join(parts) + "}"
 
 
-def render_output(before_counts, diagnostics, rules, delta,
-                  x03_run, checks) -> list[str]:
+def render_output(before_counts, train, test, diagnostics, rules,
+                  coverage, x03_run, checks) -> list[str]:
     lines = []
-    lines.append("=== X04: induction over misses.json ===")
+    lines.append("=== X04 v2: induction with hold-out validation ===")
     lines.append("")
 
     lines.append("=== Config ===")
     lines.append(f"  scope:              {CONFIG['scope']}")
-    lines.append(f"  min_cluster_size:   {CONFIG['min_cluster_size']}")
+    lines.append(f"  units_in_scope:     {before_counts.get('silent_quiescence', 0) + before_counts.get('rule_miss', 0)}")
+    lines.append(f"  holdout_ratio:      {CONFIG['holdout_ratio']}")
+    lines.append(f"  holdout_seed:       {CONFIG['holdout_seed']}")
+    lines.append(f"  train_units:        {len(train)}")
+    lines.append(f"  test_units:         {len(test)}")
+    lines.append(f"  signature:          seed-only, filter trivial values")
+    lines.append(f"  clustering:         clique")
     lines.append(f"  jaccard_threshold:  {CONFIG['jaccard_threshold']}")
-    units_in_scope = sum(before_counts.get(k, 0) for k in CONFIG["scope"])
-    lines.append(f"  units_in_scope:     {units_in_scope}")
+    lines.append(f"  min_cluster_size:   {CONFIG['min_cluster_size']}")
     lines.append("")
 
-    lines.append("=== Clusters ===")
+    lines.append(f"=== Clusters (train only, {len(train)} units) ===")
     if not diagnostics:
         lines.append("  (nenhum cluster)")
     for d in diagnostics:
@@ -403,7 +459,6 @@ def render_output(before_counts, diagnostics, rules, delta,
                 f"(name_source={rule['name_source']})"
             )
             lines.append(f"    evidence: {', '.join(rule['evidence'])}")
-
     lines.append("")
 
     lines.append("=== Induced rules ===")
@@ -416,21 +471,25 @@ def render_output(before_counts, diagnostics, rules, delta,
             f"({r['cluster_size']} units, source={r['name_source']})"
         )
         lines.append(f"    intersection: {inter}")
-        lines.append(f"    evidence: {', '.join(r['evidence'])}")
     lines.append("")
 
-    lines.append("=== Delta (X03 re-run com induced rules) ===")
-    if "error" in delta:
-        lines.append(f"  ERROR: {delta['error']}")
-    else:
-        for kind in ("covered", "extraction_miss", "rule_miss",
-                     "silent_quiescence"):
-            d = delta[kind]
-            sign = "+" if d["delta"] > 0 else ""
-            lines.append(
-                f"  {kind:<20} {d['before']:>3} -> {d['after']:>3}  "
-                f"({sign}{d['delta']})"
-            )
+    lines.append("=== Coverage (X03 re-run com induced rules) ===")
+    train_pct = (coverage["train_covered"] / coverage["train_total"] * 100
+                 if coverage["train_total"] else 0)
+    test_pct = (coverage["test_covered"] / coverage["test_total"] * 100
+                if coverage["test_total"] else 0)
+    lines.append(
+        f"  TRAIN:   {coverage['train_covered']:>3} / "
+        f"{coverage['train_total']:>3} covered ({train_pct:.0f}%)  "
+        f"[memorizacao]"
+    )
+    lines.append(
+        f"  TEST:    {coverage['test_covered']:>3} / "
+        f"{coverage['test_total']:>3} covered ({test_pct:.0f}%)  "
+        f"[generalizacao]"
+    )
+    if coverage["test_covered_ids"]:
+        lines.append(f"  test_covered: {', '.join(coverage['test_covered_ids'])}")
     lines.append("")
 
     if not x03_run["ok"]:
@@ -451,7 +510,7 @@ def render_output(before_counts, diagnostics, rules, delta,
     lines.append("")
 
     if pass_count == len(checks):
-        lines.append("X04 PASS")
+        lines.append("X04 v2 PASS")
     else:
         lines.append(f"FAIL: {len(checks) - pass_count} falha(s)")
 
@@ -459,9 +518,9 @@ def render_output(before_counts, diagnostics, rules, delta,
 
 
 # ============================================================
-# Self-check
+# Self-check (v2: C7 holdout_generalizes)
 # ============================================================
-def _self_check(rules, diagnostics, delta, x03_run, det_hashes, summary_after):
+def _self_check(rules, coverage, x03_run, det_hashes, summary_after):
     checks = []
 
     c1_ok = len(rules) >= 1
@@ -487,12 +546,11 @@ def _self_check(rules, diagnostics, delta, x03_run, det_hashes, summary_after):
         "detail": f"sizes={sorted(sizes)}" if sizes else "sem regras",
     })
 
-    delta_covered = delta.get("covered", {}).get("delta", 0) if "error" not in delta else 0
-    c4_ok = delta_covered > 0
+    c4_ok = coverage["train_covered"] > 0
     checks.append({
-        "name": "C4 delta_positive",
+        "name": "C4 train_covered",
         "pass": c4_ok,
-        "detail": f"covered delta={delta_covered:+d}",
+        "detail": f"{coverage['train_covered']}/{coverage['train_total']}",
     })
 
     c5_ok = x03_run["ok"] and bool(summary_after) and summary_after.get(
@@ -512,6 +570,18 @@ def _self_check(rules, diagnostics, delta, x03_run, det_hashes, summary_after):
         "detail": f"{uniq} hash(es) em 3 runs",
     })
 
+    c7_ok = coverage["test_covered"] >= 1
+    test_pct = (coverage["test_covered"] / coverage["test_total"] * 100
+                if coverage["test_total"] else 0)
+    checks.append({
+        "name": "C7 holdout_generalizes",
+        "pass": c7_ok,
+        "detail": (f"{coverage['test_covered']}/{coverage['test_total']}"
+                   f" ({test_pct:.0f}%)"
+                   if c7_ok else
+                   f"0/{coverage['test_total']} — memorizacao confirmada"),
+    })
+
     return checks
 
 
@@ -520,16 +590,14 @@ def _self_check(rules, diagnostics, delta, x03_run, det_hashes, summary_after):
 # ============================================================
 def main() -> int:
     if DEBUG:
-        _dbg("=== engine_x04.py ===")
+        _dbg("=== engine_x04.py v2 ===")
         _dbg(f"misses path: {MISSES_PATH}")
-        _dbg(f"x03 engine:  {X03_ENGINE}")
         _dbg("")
 
     t0 = time.perf_counter()
 
     if not MISSES_PATH.exists():
-        print(f"FATAL: {MISSES_PATH} not found. Rode X03 primeiro.",
-              file=sys.stderr)
+        print(f"FATAL: {MISSES_PATH} not found.", file=sys.stderr)
         return 2
     if not X03_ENGINE.exists():
         print(f"FATAL: {X03_ENGINE} not found.", file=sys.stderr)
@@ -539,54 +607,57 @@ def main() -> int:
     before_counts = misses["units_by_kind"]
 
     scoped = filter_scope(misses["units"], CONFIG["scope"])
+    train, test = split_holdout(scoped, CONFIG["holdout_ratio"],
+                                 CONFIG["holdout_seed"])
     if DEBUG:
-        _dbg(f"  units in scope: {len(scoped)}")
+        _dbg(f"  scoped: {len(scoped)}, train: {len(train)}, "
+             f"test: {len(test)}")
 
-    signatures = [extract_signature(u) for u in scoped]
+    train_signatures = [extract_signature(u) for u in train]
     if DEBUG:
-        for u, sig in zip(scoped, signatures):
-            _dbg(f"  {u['id']} {u['unit_name']:<25} sig={sorted(sig)}")
+        for u, sig in zip(train, train_signatures):
+            _dbg(f"  TRAIN {u['id']} {u['unit_name']:<22} sig={sorted(sig)}")
+        for u in test:
+            _dbg(f"  TEST  {u['id']} {u['unit_name']:<22}")
 
-    clusters = cluster_units(signatures, CONFIG["jaccard_threshold"])
+    clusters = clique_cluster_units(
+        train_signatures,
+        CONFIG["jaccard_threshold"],
+        CONFIG["min_cluster_size"],
+    )
     if DEBUG:
-        _dbg(f"  clusters found: {len(clusters)}")
+        _dbg(f"  clusters: {len(clusters)}")
         for i, c in enumerate(clusters):
             _dbg(f"    cluster_{i:03d}: {len(c)} units")
 
-    rules, diagnostics = propose_rules(clusters, scoped, signatures)
-    if DEBUG:
-        _dbg(f"  rules proposed: {len(rules)}")
+    rules, diagnostics = propose_rules(clusters, train, train_signatures)
 
     misses_ref = {
-        "path": MISSES_PATH.relative_to(X03_DIR.parent.parent.parent.parent.parent.parent).as_posix()
-            if MISSES_PATH.is_absolute() else str(MISSES_PATH),
+        "path": "doxoade/research/code_classification/poc/x03_real_corpus/misses.json",
         "corpus_hash": misses.get("corpus_hash"),
     }
     write_induced_rules(rules, misses_ref, INDUCED_RULES_PATH)
 
     det_hashes = [hash_induced_rules(rules)]
     for _ in range(2):
-        scoped2 = filter_scope(misses["units"], CONFIG["scope"])
-        sigs2 = [extract_signature(u) for u in scoped2]
-        clusters2 = cluster_units(sigs2, CONFIG["jaccard_threshold"])
-        rules2, _ = propose_rules(clusters2, scoped2, sigs2)
-        det_hashes.append(hash_induced_rules(rules2))
+        sigs2 = [extract_signature(u) for u in train]
+        c2 = clique_cluster_units(sigs2, CONFIG["jaccard_threshold"],
+                                   CONFIG["min_cluster_size"])
+        r2, _ = propose_rules(c2, train, sigs2)
+        det_hashes.append(hash_induced_rules(r2))
 
     if rules:
         x03_run = run_x03_with_rules(INDUCED_RULES_PATH)
     else:
-        x03_run = {"ok": False, "error": "nenhuma regra induzida"}
+        x03_run = {"ok": False, "error": "nenhuma regra induzida",
+                    "summary": None}
 
-    summary_after = load_summary() if x03_run["ok"] else None
-    after_counts = summary_after["units_by_kind"] if summary_after else None
-    delta = compute_delta(before_counts, after_counts) if summary_after \
-        else {"error": "X03 nao gerou summary"}
+    summary_after = x03_run.get("summary")
+    coverage = split_coverage(train, test, summary_after)
 
-    checks = _self_check(rules, diagnostics, delta, x03_run,
-                         det_hashes, summary_after)
-
-    lines = render_output(before_counts, diagnostics, rules, delta,
-                          x03_run, checks)
+    checks = _self_check(rules, coverage, x03_run, det_hashes, summary_after)
+    lines = render_output(before_counts, train, test, diagnostics, rules,
+                          coverage, x03_run, checks)
 
     for ln in lines:
         print(ln)
@@ -599,13 +670,14 @@ def main() -> int:
     all_pass = all(c["pass"] for c in checks)
     if all_pass:
         t_ms = (time.perf_counter() - t0) * 1000
-        LOG.info("X04 PASS: %d rules, delta covered=%+d, %.1fms",
+        LOG.info("X04 v2 PASS: %d rules, train=%d/%d test=%d/%d, %.1fms",
                  len(rules),
-                 delta.get("covered", {}).get("delta", 0) if "error" not in delta else 0,
+                 coverage["train_covered"], coverage["train_total"],
+                 coverage["test_covered"], coverage["test_total"],
                  t_ms)
         return 0
     else:
-        LOG.error("X04 FAIL: %d check(s)",
+        LOG.error("X04 v2 FAIL: %d check(s)",
                   sum(1 for c in checks if not c["pass"]))
         return 1
 

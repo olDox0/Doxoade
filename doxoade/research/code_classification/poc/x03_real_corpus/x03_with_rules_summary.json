@@ -1,16 +1,606 @@
 {
   "units_analyzed": 118,
   "units_by_kind": {
-    "covered": 48,
+    "covered": 34,
     "extraction_miss": 69,
-    "rule_miss": 1,
-    "silent_quiescence": 0,
+    "rule_miss": 6,
+    "silent_quiescence": 9,
     "process_error": 0
   },
-  "coverage_overlap_count": 69,
-  "rules_loaded": 3,
-  "self_check_pass": false,
-  "checks_failed": [
-    "C4 all_kinds_present"
+  "coverage_overlap_count": 36,
+  "rules_loaded": 5,
+  "self_check_pass": true,
+  "checks_failed": [],
+  "units": [
+    {
+      "id": "U0001",
+      "kind": "silent_quiescence",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0002",
+      "kind": "silent_quiescence",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0003",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0004",
+      "kind": "silent_quiescence",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0005",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0006",
+      "kind": "covered",
+      "current_category": "returns_call"
+    },
+    {
+      "id": "U0007",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0008",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0009",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0010",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0011",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0012",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0013",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0014",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0015",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0016",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0017",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0018",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0019",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0020",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0021",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0022",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0023",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0024",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0025",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0026",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0027",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0028",
+      "kind": "silent_quiescence",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0029",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0030",
+      "kind": "rule_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0031",
+      "kind": "covered",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0032",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0033",
+      "kind": "covered",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0034",
+      "kind": "covered",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0035",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0036",
+      "kind": "covered",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0037",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0038",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0039",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0040",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0041",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0042",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0043",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0044",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0045",
+      "kind": "covered",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0046",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0047",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0048",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0049",
+      "kind": "silent_quiescence",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0050",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0051",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0052",
+      "kind": "extraction_miss",
+      "current_category": "constant_return"
+    },
+    {
+      "id": "U0053",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0054",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0055",
+      "kind": "silent_quiescence",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0056",
+      "kind": "covered",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0057",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0058",
+      "kind": "covered",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0059",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0060",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0061",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0062",
+      "kind": "covered",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0063",
+      "kind": "rule_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0064",
+      "kind": "silent_quiescence",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0065",
+      "kind": "rule_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0066",
+      "kind": "silent_quiescence",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0067",
+      "kind": "covered",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0068",
+      "kind": "rule_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0069",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0070",
+      "kind": "covered",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0071",
+      "kind": "covered",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0072",
+      "kind": "covered",
+      "current_category": "returns_call"
+    },
+    {
+      "id": "U0073",
+      "kind": "covered",
+      "current_category": "returns_call"
+    },
+    {
+      "id": "U0074",
+      "kind": "covered",
+      "current_category": "returns_call"
+    },
+    {
+      "id": "U0075",
+      "kind": "covered",
+      "current_category": "returns_call"
+    },
+    {
+      "id": "U0076",
+      "kind": "covered",
+      "current_category": "returns_call"
+    },
+    {
+      "id": "U0077",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0078",
+      "kind": "rule_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0079",
+      "kind": "covered",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0080",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0081",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0082",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0083",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0084",
+      "kind": "silent_quiescence",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0085",
+      "kind": "covered",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0086",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0087",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0088",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0089",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0090",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0091",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0092",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0093",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0094",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0095",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0096",
+      "kind": "extraction_miss",
+      "current_category": "unknown"
+    },
+    {
+      "id": "U0097",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0098",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0099",
+      "kind": "covered",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0100",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0101",
+      "kind": "covered",
+      "current_category": "returns_list"
+    },
+    {
+      "id": "U0102",
+      "kind": "covered",
+      "current_category": "returns_list"
+    },
+    {
+      "id": "U0103",
+      "kind": "covered",
+      "current_category": "returns_list"
+    },
+    {
+      "id": "U0104",
+      "kind": "covered",
+      "current_category": "returns_list"
+    },
+    {
+      "id": "U0105",
+      "kind": "covered",
+      "current_category": "returns_list"
+    },
+    {
+      "id": "U0106",
+      "kind": "covered",
+      "current_category": "returns_list"
+    },
+    {
+      "id": "U0107",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0108",
+      "kind": "covered",
+      "current_category": "returns_list"
+    },
+    {
+      "id": "U0109",
+      "kind": "covered",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0110",
+      "kind": "covered",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0111",
+      "kind": "covered",
+      "current_category": "returns_call"
+    },
+    {
+      "id": "U0112",
+      "kind": "covered",
+      "current_category": "returns_call"
+    },
+    {
+      "id": "U0113",
+      "kind": "covered",
+      "current_category": "returns_call"
+    },
+    {
+      "id": "U0114",
+      "kind": "covered",
+      "current_category": "returns_call"
+    },
+    {
+      "id": "U0115",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0116",
+      "kind": "extraction_miss",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0117",
+      "kind": "covered",
+      "current_category": "induced_body_0_kind_assign"
+    },
+    {
+      "id": "U0118",
+      "kind": "rule_miss",
+      "current_category": "unknown"
+    }
   ]
 }
