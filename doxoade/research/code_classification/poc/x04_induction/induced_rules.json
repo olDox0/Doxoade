@@ -1,6 +1,6 @@
 {
   "schema_version": "1.1",
-  "generated_at": "2026-11-14T16:04:03.624763+00:00",
+  "generated_at": "2026-11-15T02:16:56.859311+00:00",
   "misses_ref": {
     "path": "doxoade/research/code_classification/poc/x03_real_corpus/misses.json",
     "corpus_hash": "0dc2547d3f29c218ab8f7b3e9acce69548c56690954753eef4515088e76b86f6"
@@ -43,6 +43,36 @@
         ],
         [
           "return_expr_kind",
+          "Call"
+        ]
+      ],
+      "conclusion": [
+        "category",
+        "returns_call"
+      ],
+      "evidence": [
+        "U0006",
+        "U0072",
+        "U0073",
+        "U0075",
+        "U0112",
+        "U0113",
+        "U0114"
+      ],
+      "cluster_size": 7,
+      "name_source": "derived",
+      "name_hint": "returns_call",
+      "priority": 12
+    },
+    {
+      "id": "R_ind_002",
+      "intersection": [
+        [
+          "body_0_kind",
+          "Return"
+        ],
+        [
+          "return_expr_kind",
           "List"
         ]
       ],
@@ -52,20 +82,41 @@
       ],
       "evidence": [
         "U0101",
-        "U0102",
-        "U0103",
         "U0104",
         "U0105",
         "U0106",
         "U0108"
       ],
-      "cluster_size": 7,
+      "cluster_size": 5,
       "name_source": "derived",
       "name_hint": "returns_list",
       "priority": 12
     },
     {
-      "id": "R_ind_002",
+      "id": "R_ind_003",
+      "intersection": [
+        [
+          "body_0_kind",
+          "If"
+        ]
+      ],
+      "conclusion": [
+        "category",
+        "induced_body_0_kind_if"
+      ],
+      "evidence": [
+        "U0002",
+        "U0049",
+        "U0055",
+        "U0084"
+      ],
+      "cluster_size": 4,
+      "name_source": "auto",
+      "name_hint": "cluster_002",
+      "priority": 12
+    },
+    {
+      "id": "R_ind_004",
       "intersection": [
         [
           "body_0_kind",
@@ -78,71 +129,9 @@
       ],
       "evidence": [
         "U0031",
-        "U0056",
         "U0062",
-        "U0070",
         "U0085",
         "U0117"
-      ],
-      "cluster_size": 6,
-      "name_source": "auto",
-      "name_hint": "cluster_001",
-      "priority": 12
-    },
-    {
-      "id": "R_ind_003",
-      "intersection": [
-        [
-          "body_0_kind",
-          "Return"
-        ],
-        [
-          "return_expr_kind",
-          "Call"
-        ]
-      ],
-      "conclusion": [
-        "category",
-        "returns_call"
-      ],
-      "evidence": [
-        "U0072",
-        "U0075",
-        "U0076",
-        "U0111",
-        "U0113",
-        "U0114"
-      ],
-      "cluster_size": 6,
-      "name_source": "derived",
-      "name_hint": "returns_call",
-      "priority": 12
-    },
-    {
-      "id": "R_ind_004",
-      "intersection": [
-        [
-          "body_0_kind",
-          "Assign"
-        ],
-        [
-          "branch_count_ge_4",
-          "yes"
-        ],
-        [
-          "long_body",
-          "yes"
-        ]
-      ],
-      "conclusion": [
-        "category",
-        "induced_body_0_kind_assign"
-      ],
-      "evidence": [
-        "U0033",
-        "U0034",
-        "U0058",
-        "U0067"
       ],
       "cluster_size": 4,
       "name_source": "auto",
@@ -167,13 +156,39 @@
       ],
       "evidence": [
         "U0045",
-        "U0079",
+        "U0071",
         "U0099",
         "U0110"
       ],
       "cluster_size": 4,
       "name_source": "auto",
       "name_hint": "cluster_004",
+      "priority": 12
+    },
+    {
+      "id": "R_ind_006",
+      "intersection": [
+        [
+          "body_0_kind",
+          "If"
+        ],
+        [
+          "is_dunder",
+          "yes"
+        ]
+      ],
+      "conclusion": [
+        "category",
+        "induced_body_0_kind_if"
+      ],
+      "evidence": [
+        "U0003",
+        "U0005",
+        "U0051"
+      ],
+      "cluster_size": 3,
+      "name_source": "auto",
+      "name_hint": "cluster_005",
       "priority": 12
     }
   ]

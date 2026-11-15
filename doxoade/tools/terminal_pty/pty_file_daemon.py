@@ -77,6 +77,16 @@ def main():
     parser.add_argument("--cwd", default=None)
     args = parser.parse_args()
 
+    # 🛡️ GUARD CWD: normaliza e valida antes do spawn.
+    # Evita WinptyError ("nome do diretório é inválido") quando o path
+    # chega truncado por mutilação de aspas do cmd /c (paths com espaço).
+    if args.cwd:
+        args.cwd = os.path.normpath(os.path.abspath(os.path.expanduser(args.cwd)))
+        if not os.path.isdir(args.cwd):
+            print(f"[PTY] cwd inválido ({args.cwd}) — fallback para o cwd do processo.", file=sys.stderr)
+            args.cwd = None
+
+
     ipc_dir = Path(args.ipc_dir)
     ipc_dir.mkdir(parents=True, exist_ok=True)
 

@@ -1059,6 +1059,33 @@ class TyphonDeployEngine:
         if skipped:
             print(f"{Fore.YELLOW}  ⚠ {skipped} item(ns) de infra ignorado(s) (em uso/lock).{Fore.RESET}")
 
+    @classmethod
+    def _spawn_exe(cls, exe: Path, env: dict, workdir: Path):
+        """🛡️ Lança o Lite XL; se WinError 740 (exe exige elevação), usa .cmd elevado
+        com o env embutido (isolamento preservado). Retorna (pid, proc|None)."""
+        CREATE_NEW_CONSOLE = 0x00000010 if sys.platform == "win32" else 0
+        try:
+            proc = subprocess.Popen([str(exe)], env=env, creationflags=CREATE_NEW_CONSOLE)
+            return proc.pid, proc
+        except OSError as oe:
+            if sys.platform != "win32" or getattr(oe, "winerror", 0) != 740:
+                raise
+            launcher = workdir / ".doxoade" / "launch_elevated.cmd"
+            launcher.parent.mkdir(parents=True, exist_ok=True)
+            lines = ["@echo off"]
+            for k in ("LITE_USERDIR", "XDG_CONFIG_HOME", "DOXOADE_DEPLOY_MODE"):
+                if env.get(k):
+                    lines.append(f'set "{k}={env[k]}"')
+            lines.append(f'start "" "{exe}"')
+            launcher.write_text("\r\n".join(lines) + "\r\n", encoding="ascii", errors="replace")
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 f'Start-Process -FilePath "{launcher}" -Verb RunAs -WindowStyle Hidden'],
+                check=False,
+            )
+            print(f"{Fore.YELLOW}  ⚠ Exe exige elevação: lançado via UAC (PID não rastreável).{Fore.RESET}")
+            print(f"{Fore.YELLOW}     Causa provável: flag RUNASADMIN no lite-xl.exe (veja T4).{Fore.RESET}")
+            return 0, None
 
     # ═══════════════════════════════════════════════════════════
     # 🧪 LANÇAMENTO COM ISOLAMENTO
@@ -1113,11 +1140,20 @@ class TyphonDeployEngine:
             print(f"  {Fore.GREEN}2. ISOLAMENTO ATIVO:{Fore.RESET} sessão protegida em canonical_live")
         print(f"  {Fore.WHITE}3. LITE_USERDIR:{Fore.RESET} {env['LITE_USERDIR']}")
         print(f"  {Fore.WHITE}4. DOXOADE_DEPLOY_MODE:{Fore.RESET} {mode}\n")
+        # try:
+        #     CREATE_NEW_CONSOLE = 0x00000010 if sys.platform == "win32" else 0
+        #     proc = subprocess.Popen([str(exe)], env=env, creationflags=CREATE_NEW_CONSOLE)
+        #     pid = proc.pid
+        #     (target_deploy_dir / f".{mode}.pid").write_text(str(pid), encoding="utf-8")
+        #     print(f"{Fore.CYAN}🚀 Lite XL ({mode.upper()}) iniciado com sucesso.{Fore.RESET}")
+        #     return pid
+        # except Exception as e:
+        #     print(f"{Fore.RED}✖ Falha ao lançar processo: {e}{Fore.RESET}")
+        #     return None
         try:
-            CREATE_NEW_CONSOLE = 0x00000010 if sys.platform == "win32" else 0
-            proc = subprocess.Popen([str(exe)], env=env, creationflags=CREATE_NEW_CONSOLE)
-            pid = proc.pid
-            (target_deploy_dir / f".{mode}.pid").write_text(str(pid), encoding="utf-8")
+            pid, _proc = cls._spawn_exe(exe, env, target_deploy_dir)
+            if pid and pid > 0:
+                (target_deploy_dir / f".{mode}.pid").write_text(str(pid), encoding="utf-8")
             print(f"{Fore.CYAN}🚀 Lite XL ({mode.upper()}) iniciado com sucesso.{Fore.RESET}")
             return pid
         except Exception as e:

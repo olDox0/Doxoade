@@ -15,12 +15,14 @@ typedef enum {
     BACKEND_CAPSTONE = 1,
 } DecoderBackend;
 
-/* Decodifica uma instrução usando o backend escolhido.
- * `offset` = file offset; `va` = virtual address (para RIP-relative e jcc).
- * Preenche `out` (incluindo `out->va` e `out->offset`).
- * Retorna o comprimento em bytes, ou -1 em erro. */
-int decode_one_backend(DecoderBackend backend,
-                       const FileReader *fr, uint64_t offset, uint64_t va,
-                       DecodedInsn *out, char *err_buf, size_t err_buf_size);
+typedef enum {
+    DECODE_MODE_32 = 0,
+    DECODE_MODE_64 = 1,
+} DecodeMode;
 
-#endif /* DECODER_BACKEND_H */
+int decode_one_backend(DecoderBackend backend, DecodeMode mode,
+                       const FileReader *fr, uint64_t offset, uint64_t va,
+                       DecodedInsn *out,
+                       char *err_buf, size_t err_buf_size);
+
+#endif

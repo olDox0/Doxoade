@@ -16,17 +16,18 @@ typedef struct {
 } InsnList;
 
 int disasm_collect(const FileReader *fr, uint64_t offset, uint64_t length,
-                   uint64_t va_base, DecoderBackend backend,
+                   uint64_t va_base, DecoderBackend backend, DecodeMode mode,
                    InsnList *out, char *err_buf, size_t err_buf_size);
 
 ControlFlowType insn_control_flow(const DecodedInsn *insn, uint64_t *target_va);
 
 int disasm_range(const FileReader *fr, uint64_t offset, uint64_t length,
-                 uint64_t va_base, DecoderBackend backend, const PreIR *ir,
+                 uint64_t va_base, DecoderBackend backend, DecodeMode mode,
+                 const PreIR *ir,
                  FILE *out, char *err_buf, size_t err_buf_size);
 
 int disasm_text_section(const FileReader *fr, const PreIR *ir,
-                        DecoderBackend backend,
+                        DecoderBackend backend, DecodeMode mode,
                         FILE *out, char *err_buf, size_t err_buf_size);
 
 #endif

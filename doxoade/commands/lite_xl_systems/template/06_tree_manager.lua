@@ -38,11 +38,11 @@ end
 
 local function resolve_smart_file_path(input_path)
   if not input_path or input_path:match("^%s*$") then return nil end
-  
+
   -- 1. Normalização de barras e limpeza de aspas/espaços
   local clean_input = input_path:gsub("\\", "/"):gsub("^%s+", ""):gsub("%s+$", "")
   clean_input = clean_input:gsub('^["\']', ''):gsub('["\']$', '')
-  
+
   -- 2. Se já for absoluto (C:/... ou /... ou ~)
   if clean_input:match("^[a-zA-Z]:") or clean_input:sub(1, 1) == "/" or clean_input:sub(1, 1) == "~" then
     return normalize_path(clean_input)
@@ -50,7 +50,7 @@ local function resolve_smart_file_path(input_path)
 
   local filename = clean_input:match("([^/]+)$") or clean_input
   local dir_part = clean_input:sub(1, #clean_input - #filename):gsub("/+$", "")
-  
+
   local roots = get_all_real_project_roots()
   local primary_root = roots[1] or get_real_workspace_root()
 
@@ -63,7 +63,7 @@ local function resolve_smart_file_path(input_path)
   local sig = table.concat(roots, "|")
   local cache = _DIR_CACHE.dirs
   local fresh = cache and _DIR_CACHE.sig == sig and (os.clock() - _DIR_CACHE.built_at) < 60
-  
+
   if not fresh then
     _rebuild_dir_cache_async()
     -- Cold: resolução direta O(raízes) — sem scan, sem freeze
@@ -76,11 +76,11 @@ local function resolve_smart_file_path(input_path)
     end
     return primary_root .. "/" .. clean_input
   end
-  
+
   -- Warm: fuzzy instantâneo em memória
   local needle_segs = _path_segments(dir_part)
   local best_dir, best_score = nil, math.huge
-  
+
   for _, d in ipairs(cache) do
     if d.relative ~= "" then
       local score = _match_score(needle_segs, _path_segments(d.relative), d.root_basename)
@@ -89,11 +89,11 @@ local function resolve_smart_file_path(input_path)
       end
     end
   end
-  
+
   if best_dir then
     return best_dir .. "/" .. filename
   end
-  
+
   return primary_root .. "/" .. clean_input
 end
 

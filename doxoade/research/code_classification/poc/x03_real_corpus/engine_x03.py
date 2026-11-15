@@ -373,6 +373,9 @@ def extract_facts_adapted(func) -> list[Fact]:
     has_doc = ast.get_docstring(func) is not None
     body_stmts = func.body[1:] if has_doc else func.body
     branch_count = _count_branches(body_stmts)
+    # Q06a: self_arg detection
+    is_method = bool(func.args.args) and func.args.args[0].arg == "self"
+    is_dunder = (func.name.startswith("__") and func.name.endswith("__"))
     facts = [
         Fact(func.name, "kind", "function"),
         Fact(func.name, "name", func.name),
@@ -386,6 +389,8 @@ def extract_facts_adapted(func) -> list[Fact]:
              "yes" if _is_long_body(body_stmts) else "no"),
         Fact(func.name, "dead_after_return",
              "yes" if _has_dead_after_return(body_stmts) else "no"),
+        Fact(func.name, "has_self_arg", "yes" if is_method else "no"),
+        Fact(func.name, "is_dunder", "yes" if is_dunder else "no"),
     ]
     if branch_count >= 4:
         facts.append(Fact(func.name, "branch_count_ge_4", "yes"))
@@ -462,22 +467,6 @@ CLEAN_RULE = Rule("R_clean",
                (F, "smell_long_method", WILD),
                (F, "smell_dead_code", WILD)),
     conclusion=(F, "has_any_smell", "none"), priority=1)
-
-DIRTY_RULES = [
-    Rule("R_dirty_magic",
-         conditions=((F, "smell_magic_number", "yes"),),
-         conclusion=(F, "has_any_smell", "dirty"), priority=20),
-    Rule("R_dirty_long",
-         conditions=((F, "smell_long_method", "yes"),),
-         conclusion=(F, "has_any_smell", "dirty"), priority=20),
-    Rule("R_dirty_dead",
-         conditions=((F, "smell_dead_code", "yes"),),
-         conclusion=(F, "has_any_smell", "dirty"), priority=20),
-]
-
-RULES_Q05 = (CATEGORY_RULES + COMPLEXITY_RULES +
-             SMELL_RULES + [CLEAN_RULE] + DIRTY_RULES)
-
 
 def _build_table() -> RuleTable:
     return RuleTable(
@@ -685,12 +674,44 @@ _SUGGESTED_TARGET = {
     "covered": None,
 }
 
+def _heuristic_resolved(name, seed_facts):
+    """True se o extractor atual ja cobre a heuristica indicada."""
+    seed_map = {(p, o) for s, p, o in seed_facts}
+    if name == "self_arg":
+        return ("has_self_arg", "yes") in seed_map
+    if name == "dunder_name":
+        return ("is_dunder", "yes") in seed_map
+    # Q06c/Q06d futuras adicionam:
+    # magic_outside_compare -> corrigido no extractor
+    # decorator -> has_decorator=yes
+    return False
 
-def classify_kind(result, detected_by) -> str:
-    if detected_by:
+def classify_kind(result, detected_by, seed_facts) -> str:
+    """Classifica com base em heuristics RESOLVIDAS vs nao resolvidas.
+
+    Heuristica resolvida = extractor atual ja ve o padrao (self_arg,
+    is_dunder via Q06a). Heuristica nao resolvida = gap real de extracao.
+
+    kind:
+        extraction_miss   : >=1 heuristica NAO resolvida
+        covered           : categoria OU method_role derivados
+        rule_miss         : motor viu pattern/smell, sem categoria
+        silent_quiescence : nada
+    """
+    unresolved = [
+        h for h in detected_by
+        if not _heuristic_resolved(h.replace("heuristic:", ""), seed_facts)
+    ]
+    if unresolved:
         return "extraction_miss"
-    if result["category"] != "unknown":
+
+    has_new_signal = (
+        result["category"] != "unknown"
+        or result.get("method_role") is not None
+    )
+    if has_new_signal:
         return "covered"
+
     has_pattern = result["pattern"] is not None
     has_smell = result["has_any_smell"] == "dirty"
     if has_pattern or has_smell:
@@ -744,6 +765,7 @@ def _extract_result(eng, live) -> dict:
 
     return {
         "category": live_val("category"),
+        "method_role": live_val("method_role"),
         "complexity": live_val("complexity"),
         "pattern": live_val("pattern"),
         "smell_magic_number": live_val("smell_magic_number"),
@@ -809,7 +831,8 @@ def _process_unit(node, file_path, module_sym, module_bindings, parents,
             detected_by.append("heuristic:dead_local")
             detail["dead_locals"] = h10
 
-    kind = classify_kind(result, detected_by)
+    seed_tuples = [f.to_tuple() for f in seed]
+    kind = classify_kind(result, detected_by, seed_tuples)
 
     unit = {
         "file": file_path.relative_to(REPO_ROOT).as_posix(),
@@ -820,15 +843,28 @@ def _process_unit(node, file_path, module_sym, module_bindings, parents,
         "kind": kind,
         "current_category": result["category"],
         "identity_ok": identity_ok,
+        "detected_by": detected_by,
     }
-    # NOVO: sinal duplo — heuristica disparou mas Q05 classificou.
-    if kind == "extraction_miss" and result["category"] != "unknown":
-        unit["coverage_overlap"] = True
+
+    # Separar resolvidas vs nao resolvidas (rastreabilidade)
+    if detected_by:
+        resolved = [
+            h for h in detected_by
+            if _heuristic_resolved(h.replace("heuristic:", ""), seed_tuples)
+        ]
+        unresolved = [
+            h for h in detected_by
+            if not _heuristic_resolved(h.replace("heuristic:", ""), seed_tuples)
+        ]
+        if resolved:
+            unit["resolved_heuristics"] = resolved
+        if unresolved:
+            unit["unresolved_heuristics"] = unresolved
+
     if kind != "covered":
-        unit["detected_by"] = detected_by
         if detail:
             unit["extraction_detail"] = detail
-        unit["seed_facts"] = sorted([list(f.to_tuple()) for f in seed])
+        unit["seed_facts"] = sorted([list(t) for t in seed_tuples])
         unit["derived_facts"] = sorted(
             [list(f.to_tuple()) for f in live_flat if f.source == "derived"]
         )
@@ -1024,6 +1060,42 @@ def _run_pipeline(extra_rules=None):
     misses = _build_misses_json(all_units, corpus_meta)
     return all_units, corpus_meta, misses
 
+DIRTY_RULES = [
+    Rule("R_dirty_magic",
+         conditions=((F, "smell_magic_number", "yes"),),
+         conclusion=(F, "has_any_smell", "dirty"), priority=20),
+    Rule("R_dirty_long",
+         conditions=((F, "smell_long_method", "yes"),),
+         conclusion=(F, "has_any_smell", "dirty"), priority=20),
+    Rule("R_dirty_dead",
+         conditions=((F, "smell_dead_code", "yes"),),
+         conclusion=(F, "has_any_smell", "dirty"), priority=20),
+]
+
+Q06A_RULES = [
+    Rule("R_method_init",
+         conditions=((F, "has_self_arg", "yes"),
+                     (F, "is_dunder", "yes"),
+                     (F, "name", "__init__"),
+                     (F, "body_0_kind", "Assign")),
+         conclusion=(F, "method_role", "initializer"), priority=25),
+    Rule("R_method_repr",
+         conditions=((F, "has_self_arg", "yes"),
+                     (F, "is_dunder", "yes"),
+                     (F, "name", "__repr__")),
+         conclusion=(F, "method_role", "repr"), priority=25),
+    Rule("R_method_getter",
+         conditions=((F, "has_self_arg", "yes"),
+                     (F, "body_0_kind", "Return"),
+                     (F, "return_expr_kind", "Attribute")),
+         conclusion=(F, "method_role", "getter"), priority=20),
+    Rule("R_method",
+         conditions=((F, "has_self_arg", "yes"),),
+         conclusion=(F, "method_role", "method"), priority=10),
+]
+
+RULES_Q05 = (CATEGORY_RULES + COMPLEXITY_RULES + SMELL_RULES +
+             [CLEAN_RULE] + DIRTY_RULES + Q06A_RULES)
 
 # ============================================================
 # Self-check
@@ -1080,10 +1152,10 @@ def _self_check(all_units, corpus_meta, misses, determinism_hashes):
         "detail": detail,
     })
 
-    # C5: >=1 heuristica por arquivo
+    # C5: >=1 heuristica por arquivo (resolvidas contam)
     heur_per_file = {m["path"]: 0 for m in parsed}
     for u in all_units:
-        if u.get("detected_by"):
+        if u.get("detected_by") or u.get("resolved_heuristics"):
             heur_per_file[u["file"]] = heur_per_file.get(u["file"], 0) + 1
     empty_files = [f for f, c in heur_per_file.items() if c == 0]
     checks.append({
@@ -1157,6 +1229,7 @@ def _render_output(all_units, corpus_meta, misses, checks):
     hnames = ["async_def", "self_arg", "decorator", "yield_expr",
               "recursive_call", "magic_outside_compare", "dead_nested",
               "dunder_name", "undefined_name", "dead_local"]
+    lines.append("")
     hcount = {h: 0 for h in hnames}
     for u in all_units:
         for det in u.get("detected_by", []):
@@ -1166,6 +1239,26 @@ def _render_output(all_units, corpus_meta, misses, checks):
     for h in hnames:
         lines.append(f"  {h:<24} {hcount[h]:>4}")
     lines.append("")
+
+    # Q06a: method_role distribution
+    method_roles: dict[str, int] = {}
+    for u in all_units:
+        if u.get("kind") == "covered":
+            # procurar method_role no derived_facts/current_category
+            pass
+    # Ler do summary (misses nao carrega method_role por unit covered)
+    role_counts: dict[str, int] = {}
+    for u in all_units:
+        # method_role vive em derived_facts apenas em misses;
+        # para cobertura real, contamos resolved_heuristics
+        if "resolved_heuristics" in u:
+            for h in u["resolved_heuristics"]:
+                role_counts[h] = role_counts.get(h, 0) + 1
+    if role_counts:
+        lines.append("=== resolved heuristics (Q06a) ===")
+        for h in sorted(role_counts):
+            lines.append(f"  {h:<28} {role_counts[h]:>4}")
+        lines.append("")
 
     lines.append("=== per-file breakdown ===")
     per_file = {}
@@ -1265,7 +1358,6 @@ def main() -> int:
     all_pass = all(c["pass"] for c in checks)
 
     if rules_path:
-        # Modo X04: nao toca em output.txt/misses.json.
         out_path = Path(__file__).parent / "output_x03_with_rules.txt"
         out_path.write_text(
             "\n".join(lines) + "\n", encoding="utf-8", newline="\n",
@@ -1287,6 +1379,13 @@ def main() -> int:
                         "id": u["id"],
                         "kind": u["kind"],
                         "current_category": u["current_category"],
+                        "method_role": (
+                            next(
+                                (f[2] for f in u.get("derived_facts", [])
+                                 if f[1] == "method_role"),
+                                None,
+                            ) if "derived_facts" in u else None
+                        ),
                     }
                     for u in misses["units"]
                 ],
@@ -1299,7 +1398,6 @@ def main() -> int:
                  len(extra_rules or []), t_ms)
         return 0 if all_pass else 1
     else:
-        # Modo normal: escreve output.txt e (se PASS) misses.json.
         output_path = Path(__file__).parent / "output.txt"
         output_path.write_text(
             "\n".join(lines) + "\n", encoding="utf-8", newline="\n",
@@ -1322,71 +1420,6 @@ def main() -> int:
             LOG.error("X03 FAIL: %d check(s)",
                       sum(1 for c in checks if not c["pass"]))
             return 1
-
-    if all_pass:
-        misses_path = Path(__file__).parent / "misses.json"
-        misses_path.write_text(
-            json.dumps(_json_safe(misses), indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8", newline="\n",
-        )
-        t_ms = (time.perf_counter() - t0) * 1000
-        LOG.info("X03 PASS: ...")
-        return 0
-    else:
-        LOG.error("X03 FAIL: ...")
-        return 1
-
-    if rules_path:
-        # Modo X04: nao toca em output.txt/misses.json.
-        out_path = Path(__file__).parent / "output_x03_with_rules.txt"
-        out_path.write_text(
-            "\n".join(lines) + "\n", encoding="utf-8", newline="\n",
-        )
-        summary_path = Path(__file__).parent / "x03_with_rules_summary.json"
-        summary_path.write_text(
-            json.dumps({
-                "units_analyzed": misses["units_analyzed"],
-                "units_by_kind": misses["units_by_kind"],
-                "coverage_overlap_count":
-                    misses.get("coverage_overlap_count", 0),
-                "rules_loaded": len(extra_rules or []),
-                "self_check_pass": all_pass,
-                "checks_failed": [
-                    c["name"] for c in checks if not c["pass"]
-                ],
-            }, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8", newline="\n",
-        )
-        t_ms = (time.perf_counter() - t0) * 1000
-        LOG.info("X03(rules) PASS=%s: %d units, %d rules, %.1fms",
-                 all_pass, misses["units_analyzed"],
-                 len(extra_rules or []), t_ms)
-        return 0 if all_pass else 1
-    else:
-        # Modo normal: escreve output.txt e (se PASS) misses.json.
-        output_path = Path(__file__).parent / "output.txt"
-        output_path.write_text(
-            "\n".join(lines) + "\n", encoding="utf-8", newline="\n",
-        )
-        if all_pass:
-            misses_path = Path(__file__).parent / "misses.json"
-            misses_path.write_text(
-                json.dumps(_json_safe(misses), indent=2,
-                           ensure_ascii=False) + "\n",
-                encoding="utf-8", newline="\n",
-            )
-            t_ms = (time.perf_counter() - t0) * 1000
-            LOG.info("X03 PASS: %d units, %d misses, %.1fms",
-                     misses["units_analyzed"],
-                     sum(misses["units_by_kind"][k] for k in
-                         ("extraction_miss", "rule_miss", "silent_quiescence")),
-                     t_ms)
-            return 0
-        else:
-            LOG.error("X03 FAIL: %d check(s)",
-                      sum(1 for c in checks if not c["pass"]))
-            return 1
-
 
 if __name__ == "__main__":
     sys.exit(main())

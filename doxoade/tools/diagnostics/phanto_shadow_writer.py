@@ -10,6 +10,7 @@ import json
 import os
 import sys
 import time
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Any, Optional
@@ -17,11 +18,8 @@ from typing import Dict, List, Any, Optional
 try:
     from doxoade.tools.doxcolors import Fore, Style
 except ImportError:
-    class Fore:
-        RED = GREEN = YELLOW = BLUE = CYAN = WHITE = MAGENTA = RESET = LIGHTBLACK_EX = ""
-    class Style:
-        BRIGHT = DIM = NORMAL = RESET_ALL = ""
-
+    class Fore: RED = GREEN = YELLOW = BLUE = CYAN = WHITE = MAGENTA = RESET = LIGHTBLACK_EX = ""
+    class Style: BRIGHT = DIM = RESET_ALL = NORMAL = ""
 
 @dataclass
 class PhantoIncident:
@@ -33,7 +31,7 @@ class PhantoIncident:
     context: str = ""
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> PhantoIncident:
+    def from_dict(cls, data: Dict[str, Any]) -> 'PhantoIncident':
         return cls(
             ts=int(data.get("ts", 0)),
             ts_iso=str(data.get("ts_iso", "")),
@@ -43,19 +41,23 @@ class PhantoIncident:
             context=str(data.get("context", "")),
         )
 
-
 class PhantoShadowWriter:
     MAX_FILE_BYTES = 20 * 1024 * 1024  # 20 MB
 
     @classmethod
     def get_ndjson_path(cls, user_dir: Optional[Path] = None, mode: str = "production") -> Path:
-        """Resolve o caminho do arquivo NDJSON considerando o modo (production, test, sandbox)."""
+        """Resolve o caminho do arquivo NDJSON considerando o modo (production, test, sandbox, canonical)."""
         if user_dir is None:
-            from doxoade.commands.lite_xl_systems.typhon_deploy import TyphonDeployEngine
-            deploy_dir = TyphonDeployEngine._get_deploy_dir(mode)
+            if mode == "canonical":
+                # O modo canonical usa um cofre isolado dentro do user_dir de produção
+                from doxoade.commands.lite_xl_systems.engine_lite_xl import LiteXLEngine
+                deploy_dir = LiteXLEngine.get_user_dir() / ".doxoade" / "canonical_live"
+            else:
+                from doxoade.commands.lite_xl_systems.typhon_deploy import TyphonDeployEngine
+                deploy_dir = TyphonDeployEngine._get_deploy_dir(mode)
         else:
             deploy_dir = user_dir
-
+            
         diag_dir = deploy_dir / ".doxoade" / "diagnostics"
         diag_dir.mkdir(parents=True, exist_ok=True)
         return diag_dir / "phanto_crisis.ndjson"
@@ -80,7 +82,7 @@ class PhantoShadowWriter:
         path = ndjson_path or cls.get_ndjson_path()
         if not path.exists():
             return []
-
+            
         incidents: List[PhantoIncident] = []
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -144,16 +146,22 @@ class PhantoShadowWriter:
 if __name__ == "__main__":
     mode_arg = "production"
     should_clear = False
+    
+    # Suporte a argumento posicional (ex: python -m doxoade.tools.diagnostics.phanto_shadow_writer canonical)
+    if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
+        mode_arg = sys.argv[1].lower()
 
     for i, a in enumerate(sys.argv):
-        if a in ("--mode", "-m") and i + 1 < len(sys.argv):
-            mode_arg = sys.argv[i + 1].lower()
-        elif a in ("--test", "-t"):
-            mode_arg = "test"
-        elif a in ("--sandbox", "-s"):
-            mode_arg = "sandbox"
-        elif a in ("--clear", "-c"):
-            should_clear = True
+         if a in ("--mode", "-m") and i + 1 < len(sys.argv):
+             mode_arg = sys.argv[i + 1].lower()
+         elif a in ("--test", "-t"):
+             mode_arg = "test"
+         elif a in ("--sandbox", "-s"):
+             mode_arg = "sandbox"
+         elif a in ("--canonical", "-k"):
+             mode_arg = "canonical"
+         elif a in ("--clear", "-c"):
+             should_clear = True
 
     target_ndjson = PhantoShadowWriter.get_ndjson_path(mode=mode_arg)
 
@@ -168,5 +176,9 @@ if __name__ == "__main__":
             print(f"{Fore.YELLOW}ℹ Nenhum arquivo de incidentes para limpar em [{mode_arg.upper()}].{Fore.RESET}\n")
         sys.exit(0)
 
+    # 👇 LINHA QUE ESTAVA FALTANDO 👇
+    is_verbose = "--verbose" in sys.argv or "-v" in sys.argv
+    
     is_verbose = "--verbose" in sys.argv or "-v" in sys.argv
     PhantoShadowWriter.render_cli_report(mode=mode_arg, limit=30, verbose=is_verbose)
+

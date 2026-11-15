@@ -98,14 +98,17 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    DecodeMode decode_mode = (strcmp(ir.format, "PE32") == 0)
+                             ? DECODE_MODE_32 : DECODE_MODE_64;
+
     int rc = 0;
 
     if (mode == 1) {
         if (has_off && has_len)
-            rc = disasm_range(&fr, off, len, ir.image_base, backend, &ir,
+            rc = disasm_range(&fr, off, len, ir.image_base, backend, decode_mode, &ir,
                               stdout, err, sizeof(err));
         else
-            rc = disasm_text_section(&fr, &ir, backend, stdout, err, sizeof(err));
+            rc = disasm_text_section(&fr, &ir, backend, decode_mode, stdout, err, sizeof(err));
         if (rc < 0) fprintf(stderr, "doxreveng: erro: %s\n", err);
         else fprintf(stderr, "doxreveng: %d instruções desmontadas\n", rc);
     }
@@ -121,7 +124,7 @@ int main(int argc, char **argv)
             uint64_t va_base = ir.image_base + text->va - text->raw_offset;
             InsnList insns = {0};
             if (disasm_collect(&fr, text->raw_offset, text->raw_size, va_base,
-                               backend, &insns, err, sizeof(err)) != 0) {
+                               backend, decode_mode, &insns, err, sizeof(err)) != 0) {
                 fprintf(stderr, "doxreveng: erro no disasm: %s\n", err);
                 rc = -1;
             } else {

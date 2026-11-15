@@ -519,6 +519,7 @@ local function compare_with_opposite_panel()
     ))
   end
 end
+-- edição de teste 1
 
 local function clear_diff_highlights()
   local had_blocks = ComparatorState.active
@@ -536,6 +537,19 @@ local function clear_diff_highlights()
     end
   end
 end
+
+-- edição de teste 2
+local function set_virtual_compare(doc_a, lines_a_map, label)
+  ComparatorState.active = true
+  ComparatorState.doc_a = doc_a
+  ComparatorState.doc_b = nil
+  ComparatorState.lines_a = lines_a_map or {}
+  ComparatorState.lines_b = {}
+  ComparatorState.virtual_label = label or "backup"
+  core.redraw = true
+end
+rawset(_G, "DOXOADE_COMPARATOR_SET_VIRTUAL", set_virtual_compare)
+rawset(_G, "DOXOADE_COMPARATOR_CLEAR", clear_diff_highlights)
 
 -- =============================================================================
 -- 🖌️ HOOKS VISUAIS DOCVIEW (O(1) DRAW OVERLAY)

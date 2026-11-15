@@ -46,7 +46,7 @@ static int test_build(void)
         uint8_t buf[16] = {0x90};
         fake.data = buf; fake.size = 16;
         char err[64] = {0};
-        int n = decode_one_backend(BACKEND_CAPSTONE, &fake, 0, 0,
+        int n = decode_one_backend(BACKEND_CAPSTONE, DECODE_MODE_64, &fake, 0, 0,
                                    &dummy, err, sizeof(err));
         if (n > 0) report(PASS, "Backend Capstone inicializa e decodifica 'nop'");
         else { report(FAIL, "Backend Capstone não decodifica 'nop': %s", err); g_fail++; }
@@ -61,7 +61,7 @@ static int test_build(void)
         uint8_t buf[16] = {0x90};
         fake.data = buf; fake.size = 16;
         char err[64] = {0};
-        int n = decode_one_backend(BACKEND_NATIVE, &fake, 0, 0,
+        int n = decode_one_backend(BACKEND_NATIVE, DECODE_MODE_64, &fake, 0, 0,
                                    &dummy, err, sizeof(err));
         if (n > 0 && dummy.length == 1) report(PASS, "Backend nativo decodifica 'nop' (1 byte)");
         else { report(FAIL, "Backend nativo falhou"); g_fail++; }
@@ -129,18 +129,16 @@ static int test_decoder(const char *path, const PreIR *ir)
 {
     printf("[DECODER]\n");
     if (path == NULL || ir == NULL) { report(INFO, "sem alvo, pulando"); return 0; }
-
     const SectionEntry *text = NULL;
     for (uint32_t i = 0; i < ir->section_count; i++)
         if (strcmp(ir->sections[i].name, ".text") == 0) { text = &ir->sections[i]; break; }
     if (text == NULL) { report(WARN, "sem .text, pulando"); return 0; }
-
     FileReader fr;
     char err[256] = {0};
     if (file_reader_open(path, &fr, err, sizeof(err)) != 0) {
         report(FAIL, "abrir: %s", err); g_fail++; return -1;
     }
-
+    DecodeMode mode = (strcmp(ir->format, "PE32") == 0) ? DECODE_MODE_32 : DECODE_MODE_64;
     int fails = 0;
     for (int b = 0; b < 2; b++) {
         DecoderBackend backend = b ? BACKEND_CAPSTONE : BACKEND_NATIVE;
@@ -149,7 +147,7 @@ static int test_decoder(const char *path, const PreIR *ir)
         int ok = 0;
         for (int k = 0; k < 5; k++) {
             DecodedInsn insn;
-            int n = decode_one_backend(backend, &fr, off, 0, &insn, err, sizeof(err));
+            int n = decode_one_backend(backend, mode, &fr, off, 0, &insn, err, sizeof(err));
             if (n <= 0) break;
             ok++;
             off += n;
@@ -173,6 +171,8 @@ static int test_cfg(const char *path, const PreIR *ir)
         if (strcmp(ir->sections[i].name, ".text") == 0) { text = &ir->sections[i]; break; }
     if (text == NULL) { report(WARN, "sem .text, pulando"); return 0; }
 
+    DecodeMode mode = (strcmp(ir->format, "PE32") == 0) ? DECODE_MODE_32 : DECODE_MODE_64;
+
     FileReader fr;
     char err[256] = {0};
     if (file_reader_open(path, &fr, err, sizeof(err)) != 0) {
@@ -181,7 +181,7 @@ static int test_cfg(const char *path, const PreIR *ir)
     uint64_t va_base = ir->image_base + text->va - text->raw_offset;
     InsnList insns = {0};
     if (disasm_collect(&fr, text->raw_offset, text->raw_size, va_base,
-                       BACKEND_NATIVE, &insns, err, sizeof(err)) != 0) {
+                       BACKEND_NATIVE, mode, &insns, err, sizeof(err)) != 0) {
         report(FAIL, "disasm_collect: %s", err);
         file_reader_close(&fr);
         g_fail++;
@@ -399,7 +399,8 @@ int preflight_run(const char *path, const char *operation,
         FileReader fake = {0};
         fake.data = &one_byte;
         fake.size = 1;
-        int n = decode_one_backend(backend, &fake, 0, 0, &dummy, err, sizeof(err));
+        int n = decode_one_backend(backend, DECODE_MODE_64, &fake, 0, 0,
+                                   &dummy, err, sizeof(err));
         if (n <= 0) {
             fprintf(stderr, "[PREFLIGHT] backend %s indisponível: %s\n",
                     backend == BACKEND_CAPSTONE ? "capstone" : "native", err);
@@ -410,7 +411,8 @@ int preflight_run(const char *path, const char *operation,
     }
 
     /* 4. Se a operação precisa de .text, ele existe e tem tamanho? */
-    if (strcmp(operation, "disasm") == 0 || strcmp(operation, "cfg") == 0) {
+    if (strcmp(operation, "disasm") == 0 || strcmp(operation, "cfg") == 0
+        || strcmp(operation, "functions") == 0) {
         const SectionEntry *text = NULL;
         for (uint32_t i = 0; i < ir.section_count; i++)
             if (strcmp(ir.sections[i].name, ".text") == 0) { text = &ir.sections[i]; break; }
@@ -426,7 +428,6 @@ int preflight_run(const char *path, const char *operation,
             file_reader_close(&fr);
             return 1;
         }
-        /* entry point está dentro do .text? (aviso, não erro) */
         uint32_t text_end = text->va + text->virtual_size;
         if (ir.entry_va < text->va || ir.entry_va >= text_end) {
             fprintf(stderr,

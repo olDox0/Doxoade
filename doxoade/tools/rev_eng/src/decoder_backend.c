@@ -57,7 +57,23 @@ static int translate_capstone(const cs_insn *ci, uint64_t offset, uint64_t va,
 }
 #endif /* HAVE_CAPSTONE */
 
-int decode_one_backend(DecoderBackend backend,
+#ifdef HAVE_CAPSTONE
+static csh g_handle32 = 0;
+static csh g_handle64 = 0;
+
+static csh get_handle(DecodeMode mode) {
+    csh *h = (mode == DECODE_MODE_32) ? &g_handle32 : &g_handle64;
+    if (*h == 0) {
+        cs_mode m = (mode == DECODE_MODE_32) ? CS_MODE_32 : CS_MODE_64;
+        if (cs_open(CS_ARCH_X86, m, h) != CS_ERR_OK) return 0;
+        cs_option(*h, CS_OPT_DETAIL, CS_OPT_ON);
+        cs_option(*h, CS_OPT_SYNTAX, CS_OPT_SYNTAX_INTEL);
+    }
+    return *h;
+}
+#endif
+
+int decode_one_backend(DecoderBackend backend, DecodeMode mode,
                        const FileReader *fr, uint64_t offset, uint64_t va,
                        DecodedInsn *out,
                        char *err_buf, size_t err_buf_size)
@@ -67,32 +83,24 @@ int decode_one_backend(DecoderBackend backend,
         if (n > 0) out->va = va;
         return n;
     }
-
 #ifdef HAVE_CAPSTONE
     if (backend == BACKEND_CAPSTONE) {
-        static csh handle = 0;
+        csh handle = get_handle(mode);
         if (handle == 0) {
-            if (cs_open(CS_ARCH_X86, CS_MODE_64, &handle) != CS_ERR_OK) {
-                snprintf(err_buf, err_buf_size, "cs_open falhou");
-                return -1;
-            }
-            cs_option(handle, CS_OPT_DETAIL, CS_OPT_ON);
-            cs_option(handle, CS_OPT_SYNTAX, CS_OPT_SYNTAX_INTEL);
+            snprintf(err_buf, err_buf_size, "cs_open falhou (mode=%d)", mode);
+            return -1;
         }
-
         size_t max_bytes = (offset < fr->size) ? (fr->size - offset) : 0;
-        if (max_bytes > 15) max_bytes = 15;  /* tamanho máximo de uma instrução x86-64 */
+        if (max_bytes > 15) max_bytes = 15;
         if (max_bytes == 0) {
             snprintf(err_buf, err_buf_size, "offset fora do arquivo");
             return -1;
         }
-
         cs_insn *ci = cs_malloc(handle);
         if (ci == NULL) {
             snprintf(err_buf, err_buf_size, "cs_malloc falhou");
             return -1;
         }
-
         const uint8_t *code = fr->data + offset;
         size_t code_size = max_bytes;
         uint64_t address = va;
@@ -112,7 +120,6 @@ int decode_one_backend(DecoderBackend backend,
         return -1;
     }
 #endif
-
     snprintf(err_buf, err_buf_size, "backend desconhecido");
     return -1;
 }

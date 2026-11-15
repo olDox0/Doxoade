@@ -1,22 +1,22 @@
 {
   "schema_version": "1.0",
-  "generated_at": "2026-11-14T16:03:58.141292+00:00",
+  "generated_at": "2026-11-15T02:16:49.846447+00:00",
   "corpus_hash": "0dc2547d3f29c218ab8f7b3e9acce69548c56690954753eef4515088e76b86f6",
   "engine_config": {
     "extractor": "q05_adapted",
     "rules_id": "q05_flat_17",
-    "rules_count": 16,
+    "rules_count": 20,
     "max_cycles": 100
   },
   "units_analyzed": 118,
   "units_by_kind": {
-    "covered": 0,
-    "extraction_miss": 69,
+    "covered": 35,
+    "extraction_miss": 31,
     "rule_miss": 16,
-    "silent_quiescence": 33,
+    "silent_quiescence": 36,
     "process_error": 0
   },
-  "coverage_overlap_count": 1,
+  "coverage_overlap_count": 0,
   "corpus": [
     {
       "path": "doxoade/tools/doxcolors.py",
@@ -79,6 +79,16 @@
         [
           "_force_reset",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "_force_reset",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "_force_reset",
+          "is_dunder",
           "no"
         ],
         [
@@ -167,6 +177,16 @@
         ],
         [
           "_ansi_enabled",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "_ansi_enabled",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "_ansi_enabled",
           "kind",
           "function"
         ],
@@ -214,10 +234,13 @@
       "lineno": 52,
       "end_lineno": 55,
       "class_context": "AnsiCode",
-      "kind": "extraction_miss",
+      "kind": "silent_quiescence",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
+        "heuristic:dunder_name"
+      ],
+      "resolved_heuristics": [
         "heuristic:dunder_name"
       ],
       "seed_facts": [
@@ -250,6 +273,16 @@
           "__new__",
           "has_magic_number",
           "no"
+        ],
+        [
+          "__new__",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "__new__",
+          "is_dunder",
+          "yes"
         ],
         [
           "__new__",
@@ -291,7 +324,7 @@
       ],
       "current_pattern": null,
       "retractions": 0,
-      "suggested_target": "Q06",
+      "suggested_target": "X06",
       "id": "U0003"
     },
     {
@@ -333,6 +366,16 @@
         [
           "_ansi_enabled",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "_ansi_enabled",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "_ansi_enabled",
+          "is_dunder",
           "no"
         ],
         [
@@ -384,10 +427,13 @@
       "lineno": 90,
       "end_lineno": 92,
       "class_context": "AnsiCode",
-      "kind": "extraction_miss",
+      "kind": "silent_quiescence",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
+        "heuristic:dunder_name"
+      ],
+      "resolved_heuristics": [
         "heuristic:dunder_name"
       ],
       "seed_facts": [
@@ -420,6 +466,16 @@
           "__new__",
           "has_magic_number",
           "no"
+        ],
+        [
+          "__new__",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "__new__",
+          "is_dunder",
+          "yes"
         ],
         [
           "__new__",
@@ -461,7 +517,7 @@
       ],
       "current_pattern": null,
       "retractions": 0,
-      "suggested_target": "Q06",
+      "suggested_target": "X06",
       "id": "U0005"
     },
     {
@@ -503,6 +559,16 @@
         [
           "rgb",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "rgb",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "rgb",
+          "is_dunder",
           "no"
         ],
         [
@@ -565,6 +631,9 @@
       "detected_by": [
         "heuristic:magic_outside_compare"
       ],
+      "unresolved_heuristics": [
+        "heuristic:magic_outside_compare"
+      ],
       "extraction_detail": {
         "magic_values": [
           2,
@@ -601,6 +670,16 @@
         [
           "hex_to_ansi",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "hex_to_ansi",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "hex_to_ansi",
+          "is_dunder",
           "no"
         ],
         [
@@ -659,6 +738,10 @@
         "heuristic:decorator",
         "heuristic:magic_outside_compare"
       ],
+      "unresolved_heuristics": [
+        "heuristic:decorator",
+        "heuristic:magic_outside_compare"
+      ],
       "extraction_detail": {
         "magic_values": [
           2,
@@ -695,6 +778,16 @@
         [
           "gradient_text",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "gradient_text",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "gradient_text",
+          "is_dunder",
           "no"
         ],
         [
@@ -757,6 +850,9 @@
       "detected_by": [
         "heuristic:decorator"
       ],
+      "unresolved_heuristics": [
+        "heuristic:decorator"
+      ],
       "seed_facts": [
         [
           "decode_effect",
@@ -786,6 +882,16 @@
         [
           "decode_effect",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "decode_effect",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "decode_effect",
+          "is_dunder",
           "no"
         ],
         [
@@ -848,6 +954,9 @@
       "detected_by": [
         "heuristic:decorator"
       ],
+      "unresolved_heuristics": [
+        "heuristic:decorator"
+      ],
       "seed_facts": [
         [
           "pulse",
@@ -877,6 +986,16 @@
         [
           "pulse",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "pulse",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "pulse",
+          "is_dunder",
           "no"
         ],
         [
@@ -935,6 +1054,10 @@
         "heuristic:decorator",
         "heuristic:dead_local"
       ],
+      "unresolved_heuristics": [
+        "heuristic:decorator",
+        "heuristic:dead_local"
+      ],
       "extraction_detail": {
         "dead_locals": [
           "loop"
@@ -974,6 +1097,16 @@
         [
           "play_animation",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "play_animation",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "play_animation",
+          "is_dunder",
           "no"
         ],
         [
@@ -1032,6 +1165,10 @@
         "heuristic:decorator",
         "heuristic:undefined_name"
       ],
+      "unresolved_heuristics": [
+        "heuristic:decorator",
+        "heuristic:undefined_name"
+      ],
       "extraction_detail": {
         "undefined_names": [
           "rendered_text"
@@ -1066,6 +1203,16 @@
         [
           "apply_tags",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "apply_tags",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "apply_tags",
+          "is_dunder",
           "no"
         ],
         [
@@ -1123,6 +1270,9 @@
       "detected_by": [
         "heuristic:decorator"
       ],
+      "unresolved_heuristics": [
+        "heuristic:decorator"
+      ],
       "seed_facts": [
         [
           "load_animation",
@@ -1152,6 +1302,16 @@
         [
           "load_animation",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "load_animation",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "load_animation",
+          "is_dunder",
           "no"
         ],
         [
@@ -1209,6 +1369,9 @@
       "detected_by": [
         "heuristic:decorator"
       ],
+      "unresolved_heuristics": [
+        "heuristic:decorator"
+      ],
       "seed_facts": [
         [
           "loader",
@@ -1238,6 +1401,16 @@
         [
           "loader",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "loader",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "loader",
+          "is_dunder",
           "no"
         ],
         [
@@ -1289,85 +1462,17 @@
       "lineno": 268,
       "end_lineno": 270,
       "class_context": "Spinner",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg",
         "heuristic:dunder_name"
       ],
-      "seed_facts": [
-        [
-          "__init__",
-          "body_0_kind",
-          "Assign"
-        ],
-        [
-          "__init__",
-          "body_len",
-          "2"
-        ],
-        [
-          "__init__",
-          "branch_count",
-          "0"
-        ],
-        [
-          "__init__",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "__init__",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "__init__",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "__init__",
-          "kind",
-          "function"
-        ],
-        [
-          "__init__",
-          "long_body",
-          "no"
-        ],
-        [
-          "__init__",
-          "name",
-          "__init__"
-        ],
-        [
-          "__init__",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg",
+        "heuristic:dunder_name"
       ],
-      "derived_facts": [
-        [
-          "__init__",
-          "category",
-          "unknown"
-        ],
-        [
-          "__init__",
-          "complexity",
-          "1"
-        ],
-        [
-          "__init__",
-          "has_any_smell",
-          "none"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 0,
-      "suggested_target": "Q06",
       "id": "U0015"
     },
     {
@@ -1376,89 +1481,15 @@
       "lineno": 272,
       "end_lineno": 276,
       "class_context": "Spinner",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg"
       ],
-      "seed_facts": [
-        [
-          "step",
-          "body_0_kind",
-          "Assign"
-        ],
-        [
-          "step",
-          "body_len",
-          "4"
-        ],
-        [
-          "step",
-          "branch_count",
-          "0"
-        ],
-        [
-          "step",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "step",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "step",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "step",
-          "kind",
-          "function"
-        ],
-        [
-          "step",
-          "long_body",
-          "yes"
-        ],
-        [
-          "step",
-          "name",
-          "step"
-        ],
-        [
-          "step",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg"
       ],
-      "derived_facts": [
-        [
-          "step",
-          "category",
-          "unknown"
-        ],
-        [
-          "step",
-          "complexity",
-          "1"
-        ],
-        [
-          "step",
-          "has_any_smell",
-          "dirty"
-        ],
-        [
-          "step",
-          "smell_long_method",
-          "yes"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 1,
-      "suggested_target": "Q06",
       "id": "U0016"
     },
     {
@@ -1467,84 +1498,15 @@
       "lineno": 278,
       "end_lineno": 280,
       "class_context": "Spinner",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg"
       ],
-      "seed_facts": [
-        [
-          "finish",
-          "body_0_kind",
-          "Assign"
-        ],
-        [
-          "finish",
-          "body_len",
-          "2"
-        ],
-        [
-          "finish",
-          "branch_count",
-          "0"
-        ],
-        [
-          "finish",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "finish",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "finish",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "finish",
-          "kind",
-          "function"
-        ],
-        [
-          "finish",
-          "long_body",
-          "no"
-        ],
-        [
-          "finish",
-          "name",
-          "finish"
-        ],
-        [
-          "finish",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg"
       ],
-      "derived_facts": [
-        [
-          "finish",
-          "category",
-          "unknown"
-        ],
-        [
-          "finish",
-          "complexity",
-          "1"
-        ],
-        [
-          "finish",
-          "has_any_smell",
-          "none"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 0,
-      "suggested_target": "Q06",
       "id": "U0017"
     },
     {
@@ -1553,85 +1515,17 @@
       "lineno": 284,
       "end_lineno": 287,
       "class_context": "ProgressBar",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg",
         "heuristic:dunder_name"
       ],
-      "seed_facts": [
-        [
-          "__init__",
-          "body_0_kind",
-          "Assign"
-        ],
-        [
-          "__init__",
-          "body_len",
-          "3"
-        ],
-        [
-          "__init__",
-          "branch_count",
-          "0"
-        ],
-        [
-          "__init__",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "__init__",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "__init__",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "__init__",
-          "kind",
-          "function"
-        ],
-        [
-          "__init__",
-          "long_body",
-          "no"
-        ],
-        [
-          "__init__",
-          "name",
-          "__init__"
-        ],
-        [
-          "__init__",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg",
+        "heuristic:dunder_name"
       ],
-      "derived_facts": [
-        [
-          "__init__",
-          "category",
-          "unknown"
-        ],
-        [
-          "__init__",
-          "complexity",
-          "1"
-        ],
-        [
-          "__init__",
-          "has_any_smell",
-          "none"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 0,
-      "suggested_target": "Q06",
       "id": "U0018"
     },
     {
@@ -1645,6 +1539,12 @@
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg",
+        "heuristic:magic_outside_compare"
+      ],
+      "resolved_heuristics": [
+        "heuristic:self_arg"
+      ],
+      "unresolved_heuristics": [
         "heuristic:magic_outside_compare"
       ],
       "extraction_detail": {
@@ -1685,6 +1585,16 @@
         ],
         [
           "update",
+          "has_self_arg",
+          "yes"
+        ],
+        [
+          "update",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "update",
           "kind",
           "function"
         ],
@@ -1722,6 +1632,11 @@
         ],
         [
           "update",
+          "method_role",
+          "method"
+        ],
+        [
+          "update",
           "smell_long_method",
           "yes"
         ],
@@ -1749,6 +1664,13 @@
         "heuristic:self_arg",
         "heuristic:magic_outside_compare",
         "heuristic:dunder_name"
+      ],
+      "resolved_heuristics": [
+        "heuristic:self_arg",
+        "heuristic:dunder_name"
+      ],
+      "unresolved_heuristics": [
+        "heuristic:magic_outside_compare"
       ],
       "extraction_detail": {
         "magic_values": [
@@ -1793,6 +1715,16 @@
         ],
         [
           "__init__",
+          "has_self_arg",
+          "yes"
+        ],
+        [
+          "__init__",
+          "is_dunder",
+          "yes"
+        ],
+        [
+          "__init__",
           "kind",
           "function"
         ],
@@ -1830,6 +1762,11 @@
         ],
         [
           "__init__",
+          "method_role",
+          "method"
+        ],
+        [
+          "__init__",
           "smell_long_method",
           "yes"
         ]
@@ -1845,94 +1782,15 @@
       "lineno": 339,
       "end_lineno": 388,
       "class_context": "AsyncAnimation",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg"
       ],
-      "seed_facts": [
-        [
-          "_animate",
-          "body_0_kind",
-          "If"
-        ],
-        [
-          "_animate",
-          "body_len",
-          "10"
-        ],
-        [
-          "_animate",
-          "branch_count",
-          "7"
-        ],
-        [
-          "_animate",
-          "branch_count_ge_4",
-          "yes"
-        ],
-        [
-          "_animate",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "_animate",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "_animate",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "_animate",
-          "kind",
-          "function"
-        ],
-        [
-          "_animate",
-          "long_body",
-          "yes"
-        ],
-        [
-          "_animate",
-          "name",
-          "_animate"
-        ],
-        [
-          "_animate",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg"
       ],
-      "derived_facts": [
-        [
-          "_animate",
-          "category",
-          "unknown"
-        ],
-        [
-          "_animate",
-          "complexity",
-          "4+"
-        ],
-        [
-          "_animate",
-          "has_any_smell",
-          "dirty"
-        ],
-        [
-          "_animate",
-          "smell_long_method",
-          "yes"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 1,
-      "suggested_target": "Q06",
       "id": "U0021"
     },
     {
@@ -1941,89 +1799,15 @@
       "lineno": 390,
       "end_lineno": 408,
       "class_context": "AsyncAnimation",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg"
       ],
-      "seed_facts": [
-        [
-          "_cleanup_display",
-          "body_0_kind",
-          "With"
-        ],
-        [
-          "_cleanup_display",
-          "body_len",
-          "1"
-        ],
-        [
-          "_cleanup_display",
-          "branch_count",
-          "5"
-        ],
-        [
-          "_cleanup_display",
-          "branch_count_ge_4",
-          "yes"
-        ],
-        [
-          "_cleanup_display",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "_cleanup_display",
-          "has_docstring",
-          "yes"
-        ],
-        [
-          "_cleanup_display",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "_cleanup_display",
-          "kind",
-          "function"
-        ],
-        [
-          "_cleanup_display",
-          "long_body",
-          "no"
-        ],
-        [
-          "_cleanup_display",
-          "name",
-          "_cleanup_display"
-        ],
-        [
-          "_cleanup_display",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg"
       ],
-      "derived_facts": [
-        [
-          "_cleanup_display",
-          "category",
-          "unknown"
-        ],
-        [
-          "_cleanup_display",
-          "complexity",
-          "4+"
-        ],
-        [
-          "_cleanup_display",
-          "has_any_smell",
-          "none"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 0,
-      "suggested_target": "Q06",
       "id": "U0022"
     },
     {
@@ -2032,89 +1816,15 @@
       "lineno": 410,
       "end_lineno": 415,
       "class_context": "AsyncAnimation",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg"
       ],
-      "seed_facts": [
-        [
-          "start",
-          "body_0_kind",
-          "If"
-        ],
-        [
-          "start",
-          "body_len",
-          "4"
-        ],
-        [
-          "start",
-          "branch_count",
-          "1"
-        ],
-        [
-          "start",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "start",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "start",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "start",
-          "kind",
-          "function"
-        ],
-        [
-          "start",
-          "long_body",
-          "yes"
-        ],
-        [
-          "start",
-          "name",
-          "start"
-        ],
-        [
-          "start",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg"
       ],
-      "derived_facts": [
-        [
-          "start",
-          "category",
-          "unknown"
-        ],
-        [
-          "start",
-          "complexity",
-          "2"
-        ],
-        [
-          "start",
-          "has_any_smell",
-          "dirty"
-        ],
-        [
-          "start",
-          "smell_long_method",
-          "yes"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 1,
-      "suggested_target": "Q06",
       "id": "U0023"
     },
     {
@@ -2123,84 +1833,15 @@
       "lineno": 417,
       "end_lineno": 421,
       "class_context": "AsyncAnimation",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg"
       ],
-      "seed_facts": [
-        [
-          "stop",
-          "body_0_kind",
-          "If"
-        ],
-        [
-          "stop",
-          "body_len",
-          "1"
-        ],
-        [
-          "stop",
-          "branch_count",
-          "2"
-        ],
-        [
-          "stop",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "stop",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "stop",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "stop",
-          "kind",
-          "function"
-        ],
-        [
-          "stop",
-          "long_body",
-          "no"
-        ],
-        [
-          "stop",
-          "name",
-          "stop"
-        ],
-        [
-          "stop",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg"
       ],
-      "derived_facts": [
-        [
-          "stop",
-          "category",
-          "unknown"
-        ],
-        [
-          "stop",
-          "complexity",
-          "3"
-        ],
-        [
-          "stop",
-          "has_any_smell",
-          "none"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 0,
-      "suggested_target": "Q06",
       "id": "U0024"
     },
     {
@@ -2209,84 +1850,15 @@
       "lineno": 423,
       "end_lineno": 435,
       "class_context": "AsyncAnimation",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg"
       ],
-      "seed_facts": [
-        [
-          "print",
-          "body_0_kind",
-          "ImportFrom"
-        ],
-        [
-          "print",
-          "body_len",
-          "3"
-        ],
-        [
-          "print",
-          "branch_count",
-          "2"
-        ],
-        [
-          "print",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "print",
-          "has_docstring",
-          "yes"
-        ],
-        [
-          "print",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "print",
-          "kind",
-          "function"
-        ],
-        [
-          "print",
-          "long_body",
-          "no"
-        ],
-        [
-          "print",
-          "name",
-          "print"
-        ],
-        [
-          "print",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg"
       ],
-      "derived_facts": [
-        [
-          "print",
-          "category",
-          "unknown"
-        ],
-        [
-          "print",
-          "complexity",
-          "3"
-        ],
-        [
-          "print",
-          "has_any_smell",
-          "none"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 0,
-      "suggested_target": "Q06",
       "id": "U0025"
     },
     {
@@ -2295,85 +1867,17 @@
       "lineno": 437,
       "end_lineno": 439,
       "class_context": "AsyncAnimation",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg",
         "heuristic:dunder_name"
       ],
-      "seed_facts": [
-        [
-          "__enter__",
-          "body_0_kind",
-          "Expr"
-        ],
-        [
-          "__enter__",
-          "body_len",
-          "2"
-        ],
-        [
-          "__enter__",
-          "branch_count",
-          "0"
-        ],
-        [
-          "__enter__",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "__enter__",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "__enter__",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "__enter__",
-          "kind",
-          "function"
-        ],
-        [
-          "__enter__",
-          "long_body",
-          "no"
-        ],
-        [
-          "__enter__",
-          "name",
-          "__enter__"
-        ],
-        [
-          "__enter__",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg",
+        "heuristic:dunder_name"
       ],
-      "derived_facts": [
-        [
-          "__enter__",
-          "category",
-          "unknown"
-        ],
-        [
-          "__enter__",
-          "complexity",
-          "1"
-        ],
-        [
-          "__enter__",
-          "has_any_smell",
-          "none"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 0,
-      "suggested_target": "Q06",
       "id": "U0026"
     },
     {
@@ -2382,85 +1886,17 @@
       "lineno": 441,
       "end_lineno": 442,
       "class_context": "AsyncAnimation",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg",
         "heuristic:dunder_name"
       ],
-      "seed_facts": [
-        [
-          "__exit__",
-          "body_0_kind",
-          "Expr"
-        ],
-        [
-          "__exit__",
-          "body_len",
-          "1"
-        ],
-        [
-          "__exit__",
-          "branch_count",
-          "0"
-        ],
-        [
-          "__exit__",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "__exit__",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "__exit__",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "__exit__",
-          "kind",
-          "function"
-        ],
-        [
-          "__exit__",
-          "long_body",
-          "no"
-        ],
-        [
-          "__exit__",
-          "name",
-          "__exit__"
-        ],
-        [
-          "__exit__",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg",
+        "heuristic:dunder_name"
       ],
-      "derived_facts": [
-        [
-          "__exit__",
-          "category",
-          "unknown"
-        ],
-        [
-          "__exit__",
-          "complexity",
-          "1"
-        ],
-        [
-          "__exit__",
-          "has_any_smell",
-          "none"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 0,
-      "suggested_target": "Q06",
       "id": "U0027"
     },
     {
@@ -2507,6 +1943,16 @@
         [
           "safe_print",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "safe_print",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "safe_print",
+          "is_dunder",
           "no"
         ],
         [
@@ -2565,6 +2011,10 @@
         "heuristic:magic_outside_compare",
         "heuristic:dead_local"
       ],
+      "unresolved_heuristics": [
+        "heuristic:magic_outside_compare",
+        "heuristic:dead_local"
+      ],
       "extraction_detail": {
         "magic_values": [
           4,
@@ -2608,6 +2058,16 @@
         [
           "init",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "init",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "init",
+          "is_dunder",
           "no"
         ],
         [
@@ -2701,6 +2161,16 @@
         ],
         [
           "_discover_pocs",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "_discover_pocs",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "_discover_pocs",
           "kind",
           "function"
         ],
@@ -2790,6 +2260,16 @@
         ],
         [
           "_find_poc",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "_find_poc",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "_find_poc",
           "kind",
           "function"
         ],
@@ -2843,6 +2323,9 @@
       "detected_by": [
         "heuristic:magic_outside_compare"
       ],
+      "unresolved_heuristics": [
+        "heuristic:magic_outside_compare"
+      ],
       "extraction_detail": {
         "magic_values": [
           10,
@@ -2884,6 +2367,16 @@
         [
           "_run_engine",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "_run_engine",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "_run_engine",
+          "is_dunder",
           "no"
         ],
         [
@@ -2982,6 +2475,16 @@
         ],
         [
           "_read_outputs",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "_read_outputs",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "_read_outputs",
           "kind",
           "function"
         ],
@@ -3076,6 +2579,16 @@
         ],
         [
           "_format_diff",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "_format_diff",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "_format_diff",
           "kind",
           "function"
         ],
@@ -3134,6 +2647,9 @@
       "detected_by": [
         "heuristic:dead_local"
       ],
+      "unresolved_heuristics": [
+        "heuristic:dead_local"
+      ],
       "extraction_detail": {
         "dead_locals": [
           "total"
@@ -3173,6 +2689,16 @@
         [
           "_run_one",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "_run_one",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "_run_one",
+          "is_dunder",
           "no"
         ],
         [
@@ -3271,6 +2797,16 @@
         ],
         [
           "_doctor_report",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "_doctor_report",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "_doctor_report",
           "kind",
           "function"
         ],
@@ -3329,6 +2865,9 @@
       "detected_by": [
         "heuristic:decorator"
       ],
+      "unresolved_heuristics": [
+        "heuristic:decorator"
+      ],
       "seed_facts": [
         [
           "retro_forward_group",
@@ -3358,6 +2897,16 @@
         [
           "retro_forward_group",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "retro_forward_group",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "retro_forward_group",
+          "is_dunder",
           "no"
         ],
         [
@@ -3415,6 +2964,9 @@
       "detected_by": [
         "heuristic:decorator"
       ],
+      "unresolved_heuristics": [
+        "heuristic:decorator"
+      ],
       "seed_facts": [
         [
           "cmd_list",
@@ -3449,6 +3001,16 @@
         [
           "cmd_list",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "cmd_list",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "cmd_list",
+          "is_dunder",
           "no"
         ],
         [
@@ -3511,6 +3073,9 @@
       "detected_by": [
         "heuristic:decorator"
       ],
+      "unresolved_heuristics": [
+        "heuristic:decorator"
+      ],
       "seed_facts": [
         [
           "cmd_run",
@@ -3545,6 +3110,16 @@
         [
           "cmd_run",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "cmd_run",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "cmd_run",
+          "is_dunder",
           "no"
         ],
         [
@@ -3607,6 +3182,9 @@
       "detected_by": [
         "heuristic:decorator"
       ],
+      "unresolved_heuristics": [
+        "heuristic:decorator"
+      ],
       "seed_facts": [
         [
           "cmd_trace",
@@ -3636,6 +3214,16 @@
         [
           "cmd_trace",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "cmd_trace",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "cmd_trace",
+          "is_dunder",
           "no"
         ],
         [
@@ -3694,6 +3282,10 @@
         "heuristic:decorator",
         "heuristic:magic_outside_compare"
       ],
+      "unresolved_heuristics": [
+        "heuristic:decorator",
+        "heuristic:magic_outside_compare"
+      ],
       "extraction_detail": {
         "magic_values": [
           40
@@ -3733,6 +3325,16 @@
         [
           "cmd_all",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "cmd_all",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "cmd_all",
+          "is_dunder",
           "no"
         ],
         [
@@ -3795,6 +3397,9 @@
       "detected_by": [
         "heuristic:decorator"
       ],
+      "unresolved_heuristics": [
+        "heuristic:decorator"
+      ],
       "seed_facts": [
         [
           "cmd_doctor",
@@ -3829,6 +3434,16 @@
         [
           "cmd_doctor",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "cmd_doctor",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "cmd_doctor",
+          "is_dunder",
           "no"
         ],
         [
@@ -3891,6 +3506,9 @@
       "detected_by": [
         "heuristic:decorator"
       ],
+      "unresolved_heuristics": [
+        "heuristic:decorator"
+      ],
       "seed_facts": [
         [
           "cmd_accept",
@@ -3925,6 +3543,16 @@
         [
           "cmd_accept",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "cmd_accept",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "cmd_accept",
+          "is_dunder",
           "no"
         ],
         [
@@ -3987,6 +3615,9 @@
       "detected_by": [
         "heuristic:magic_outside_compare"
       ],
+      "unresolved_heuristics": [
+        "heuristic:magic_outside_compare"
+      ],
       "extraction_detail": {
         "magic_values": [
           2
@@ -4021,6 +3652,16 @@
         [
           "_parse_engine_error",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "_parse_engine_error",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "_parse_engine_error",
+          "is_dunder",
           "no"
         ],
         [
@@ -4109,6 +3750,16 @@
         ],
         [
           "setup_logging",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "setup_logging",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "setup_logging",
           "kind",
           "function"
         ],
@@ -4161,85 +3812,17 @@
       "lineno": 64,
       "end_lineno": 65,
       "class_context": "_Quiet",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg",
         "heuristic:dunder_name"
       ],
-      "seed_facts": [
-        [
-          "__init__",
-          "body_0_kind",
-          "Assign"
-        ],
-        [
-          "__init__",
-          "body_len",
-          "1"
-        ],
-        [
-          "__init__",
-          "branch_count",
-          "0"
-        ],
-        [
-          "__init__",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "__init__",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "__init__",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "__init__",
-          "kind",
-          "function"
-        ],
-        [
-          "__init__",
-          "long_body",
-          "no"
-        ],
-        [
-          "__init__",
-          "name",
-          "__init__"
-        ],
-        [
-          "__init__",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg",
+        "heuristic:dunder_name"
       ],
-      "derived_facts": [
-        [
-          "__init__",
-          "category",
-          "unknown"
-        ],
-        [
-          "__init__",
-          "complexity",
-          "1"
-        ],
-        [
-          "__init__",
-          "has_any_smell",
-          "none"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 0,
-      "suggested_target": "Q06",
       "id": "U0046"
     },
     {
@@ -4248,85 +3831,17 @@
       "lineno": 66,
       "end_lineno": 68,
       "class_context": "_Quiet",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg",
         "heuristic:dunder_name"
       ],
-      "seed_facts": [
-        [
-          "__enter__",
-          "body_0_kind",
-          "AugAssign"
-        ],
-        [
-          "__enter__",
-          "body_len",
-          "2"
-        ],
-        [
-          "__enter__",
-          "branch_count",
-          "0"
-        ],
-        [
-          "__enter__",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "__enter__",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "__enter__",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "__enter__",
-          "kind",
-          "function"
-        ],
-        [
-          "__enter__",
-          "long_body",
-          "no"
-        ],
-        [
-          "__enter__",
-          "name",
-          "__enter__"
-        ],
-        [
-          "__enter__",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg",
+        "heuristic:dunder_name"
       ],
-      "derived_facts": [
-        [
-          "__enter__",
-          "category",
-          "unknown"
-        ],
-        [
-          "__enter__",
-          "complexity",
-          "1"
-        ],
-        [
-          "__enter__",
-          "has_any_smell",
-          "none"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 0,
-      "suggested_target": "Q06",
       "id": "U0047"
     },
     {
@@ -4335,85 +3850,17 @@
       "lineno": 69,
       "end_lineno": 70,
       "class_context": "_Quiet",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg",
         "heuristic:dunder_name"
       ],
-      "seed_facts": [
-        [
-          "__exit__",
-          "body_0_kind",
-          "AugAssign"
-        ],
-        [
-          "__exit__",
-          "body_len",
-          "1"
-        ],
-        [
-          "__exit__",
-          "branch_count",
-          "0"
-        ],
-        [
-          "__exit__",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "__exit__",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "__exit__",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "__exit__",
-          "kind",
-          "function"
-        ],
-        [
-          "__exit__",
-          "long_body",
-          "no"
-        ],
-        [
-          "__exit__",
-          "name",
-          "__exit__"
-        ],
-        [
-          "__exit__",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg",
+        "heuristic:dunder_name"
       ],
-      "derived_facts": [
-        [
-          "__exit__",
-          "category",
-          "unknown"
-        ],
-        [
-          "__exit__",
-          "complexity",
-          "1"
-        ],
-        [
-          "__exit__",
-          "has_any_smell",
-          "none"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 0,
-      "suggested_target": "Q06",
       "id": "U0048"
     },
     {
@@ -4455,6 +3902,16 @@
         [
           "_dbg",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "_dbg",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "_dbg",
+          "is_dunder",
           "no"
         ],
         [
@@ -4506,90 +3963,17 @@
       "lineno": 91,
       "end_lineno": 92,
       "class_context": "Var",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg",
         "heuristic:dunder_name"
       ],
-      "seed_facts": [
-        [
-          "__repr__",
-          "body_0_kind",
-          "Return"
-        ],
-        [
-          "__repr__",
-          "body_len",
-          "1"
-        ],
-        [
-          "__repr__",
-          "branch_count",
-          "0"
-        ],
-        [
-          "__repr__",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "__repr__",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "__repr__",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "__repr__",
-          "kind",
-          "function"
-        ],
-        [
-          "__repr__",
-          "long_body",
-          "no"
-        ],
-        [
-          "__repr__",
-          "name",
-          "__repr__"
-        ],
-        [
-          "__repr__",
-          "name_prefix",
-          "other"
-        ],
-        [
-          "__repr__",
-          "return_expr_kind",
-          "JoinedStr"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg",
+        "heuristic:dunder_name"
       ],
-      "derived_facts": [
-        [
-          "__repr__",
-          "category",
-          "unknown"
-        ],
-        [
-          "__repr__",
-          "complexity",
-          "1"
-        ],
-        [
-          "__repr__",
-          "has_any_smell",
-          "none"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 0,
-      "suggested_target": "Q06",
       "id": "U0050"
     },
     {
@@ -4598,10 +3982,13 @@
       "lineno": 97,
       "end_lineno": 100,
       "class_context": "_Wild",
-      "kind": "extraction_miss",
+      "kind": "silent_quiescence",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
+        "heuristic:dunder_name"
+      ],
+      "resolved_heuristics": [
         "heuristic:dunder_name"
       ],
       "seed_facts": [
@@ -4634,6 +4021,16 @@
           "__new__",
           "has_magic_number",
           "no"
+        ],
+        [
+          "__new__",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "__new__",
+          "is_dunder",
+          "yes"
         ],
         [
           "__new__",
@@ -4675,7 +4072,7 @@
       ],
       "current_pattern": null,
       "retractions": 0,
-      "suggested_target": "Q06",
+      "suggested_target": "X06",
       "id": "U0051"
     },
     {
@@ -4684,91 +4081,17 @@
       "lineno": 101,
       "end_lineno": 102,
       "class_context": "_Wild",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "constant_return",
       "identity_ok": true,
-      "coverage_overlap": true,
       "detected_by": [
         "heuristic:self_arg",
         "heuristic:dunder_name"
       ],
-      "seed_facts": [
-        [
-          "__repr__",
-          "body_0_kind",
-          "Return"
-        ],
-        [
-          "__repr__",
-          "body_len",
-          "1"
-        ],
-        [
-          "__repr__",
-          "branch_count",
-          "0"
-        ],
-        [
-          "__repr__",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "__repr__",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "__repr__",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "__repr__",
-          "kind",
-          "function"
-        ],
-        [
-          "__repr__",
-          "long_body",
-          "no"
-        ],
-        [
-          "__repr__",
-          "name",
-          "__repr__"
-        ],
-        [
-          "__repr__",
-          "name_prefix",
-          "other"
-        ],
-        [
-          "__repr__",
-          "return_expr_kind",
-          "Constant"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg",
+        "heuristic:dunder_name"
       ],
-      "derived_facts": [
-        [
-          "__repr__",
-          "category",
-          "constant_return"
-        ],
-        [
-          "__repr__",
-          "complexity",
-          "1"
-        ],
-        [
-          "__repr__",
-          "has_any_smell",
-          "none"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 0,
-      "suggested_target": "Q06",
       "id": "U0052"
     },
     {
@@ -4777,89 +4100,15 @@
       "lineno": 120,
       "end_lineno": 121,
       "class_context": "Fact",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg"
       ],
-      "seed_facts": [
-        [
-          "to_tuple",
-          "body_0_kind",
-          "Return"
-        ],
-        [
-          "to_tuple",
-          "body_len",
-          "1"
-        ],
-        [
-          "to_tuple",
-          "branch_count",
-          "0"
-        ],
-        [
-          "to_tuple",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "to_tuple",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "to_tuple",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "to_tuple",
-          "kind",
-          "function"
-        ],
-        [
-          "to_tuple",
-          "long_body",
-          "no"
-        ],
-        [
-          "to_tuple",
-          "name",
-          "to_tuple"
-        ],
-        [
-          "to_tuple",
-          "name_prefix",
-          "other"
-        ],
-        [
-          "to_tuple",
-          "return_expr_kind",
-          "Tuple"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg"
       ],
-      "derived_facts": [
-        [
-          "to_tuple",
-          "category",
-          "unknown"
-        ],
-        [
-          "to_tuple",
-          "complexity",
-          "1"
-        ],
-        [
-          "to_tuple",
-          "has_any_smell",
-          "none"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 0,
-      "suggested_target": "Q06",
       "id": "U0053"
     },
     {
@@ -4868,89 +4117,15 @@
       "lineno": 132,
       "end_lineno": 138,
       "class_context": "Rule",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg"
       ],
-      "seed_facts": [
-        [
-          "conclusion_fact",
-          "body_0_kind",
-          "Assign"
-        ],
-        [
-          "conclusion_fact",
-          "body_len",
-          "4"
-        ],
-        [
-          "conclusion_fact",
-          "branch_count",
-          "1"
-        ],
-        [
-          "conclusion_fact",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "conclusion_fact",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "conclusion_fact",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "conclusion_fact",
-          "kind",
-          "function"
-        ],
-        [
-          "conclusion_fact",
-          "long_body",
-          "yes"
-        ],
-        [
-          "conclusion_fact",
-          "name",
-          "conclusion_fact"
-        ],
-        [
-          "conclusion_fact",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg"
       ],
-      "derived_facts": [
-        [
-          "conclusion_fact",
-          "category",
-          "unknown"
-        ],
-        [
-          "conclusion_fact",
-          "complexity",
-          "2"
-        ],
-        [
-          "conclusion_fact",
-          "has_any_smell",
-          "dirty"
-        ],
-        [
-          "conclusion_fact",
-          "smell_long_method",
-          "yes"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 1,
-      "suggested_target": "Q06",
       "id": "U0054"
     },
     {
@@ -4992,6 +4167,16 @@
         [
           "unify_term",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "unify_term",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "unify_term",
+          "is_dunder",
           "no"
         ],
         [
@@ -5080,6 +4265,16 @@
         ],
         [
           "unify",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "unify",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "unify",
           "kind",
           "function"
         ],
@@ -5133,6 +4328,9 @@
       "detected_by": [
         "heuristic:magic_outside_compare"
       ],
+      "unresolved_heuristics": [
+        "heuristic:magic_outside_compare"
+      ],
       "extraction_detail": {
         "magic_values": [
           2
@@ -5172,6 +4370,16 @@
         [
           "substitute",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "substitute",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "substitute",
+          "is_dunder",
           "no"
         ],
         [
@@ -5265,6 +4473,16 @@
         ],
         [
           "match_with_negations",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "match_with_negations",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "match_with_negations",
           "kind",
           "function"
         ],
@@ -5323,6 +4541,9 @@
       "detected_by": [
         "heuristic:recursive_call"
       ],
+      "unresolved_heuristics": [
+        "heuristic:recursive_call"
+      ],
       "extraction_detail": {
         "recursive_sites": [
           191
@@ -5362,6 +4583,16 @@
         [
           "recurse",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "recurse",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "recurse",
+          "is_dunder",
           "no"
         ],
         [
@@ -5418,90 +4649,17 @@
       "lineno": 198,
       "end_lineno": 207,
       "class_context": "Engine",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg",
         "heuristic:dunder_name"
       ],
-      "seed_facts": [
-        [
-          "__init__",
-          "body_0_kind",
-          "Assign"
-        ],
-        [
-          "__init__",
-          "body_len",
-          "9"
-        ],
-        [
-          "__init__",
-          "branch_count",
-          "0"
-        ],
-        [
-          "__init__",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "__init__",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "__init__",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "__init__",
-          "kind",
-          "function"
-        ],
-        [
-          "__init__",
-          "long_body",
-          "yes"
-        ],
-        [
-          "__init__",
-          "name",
-          "__init__"
-        ],
-        [
-          "__init__",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg",
+        "heuristic:dunder_name"
       ],
-      "derived_facts": [
-        [
-          "__init__",
-          "category",
-          "unknown"
-        ],
-        [
-          "__init__",
-          "complexity",
-          "1"
-        ],
-        [
-          "__init__",
-          "has_any_smell",
-          "dirty"
-        ],
-        [
-          "__init__",
-          "smell_long_method",
-          "yes"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 1,
-      "suggested_target": "Q06",
       "id": "U0060"
     },
     {
@@ -5515,6 +4673,12 @@
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg",
+        "heuristic:magic_outside_compare"
+      ],
+      "resolved_heuristics": [
+        "heuristic:self_arg"
+      ],
+      "unresolved_heuristics": [
         "heuristic:magic_outside_compare"
       ],
       "extraction_detail": {
@@ -5560,6 +4724,16 @@
         ],
         [
           "run",
+          "has_self_arg",
+          "yes"
+        ],
+        [
+          "run",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "run",
           "kind",
           "function"
         ],
@@ -5594,6 +4768,11 @@
           "run",
           "has_any_smell",
           "dirty"
+        ],
+        [
+          "run",
+          "method_role",
+          "method"
         ],
         [
           "run",
@@ -5645,6 +4824,16 @@
         [
           "_count_branches",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "_count_branches",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "_count_branches",
+          "is_dunder",
           "no"
         ],
         [
@@ -5729,6 +4918,16 @@
         [
           "_name_prefix",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "_name_prefix",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "_name_prefix",
+          "is_dunder",
           "no"
         ],
         [
@@ -5827,6 +5026,16 @@
         ],
         [
           "_has_magic_number",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "_has_magic_number",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "_has_magic_number",
           "kind",
           "function"
         ],
@@ -5908,6 +5117,16 @@
           "_is_long_body",
           "has_magic_number",
           "yes"
+        ],
+        [
+          "_is_long_body",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "_is_long_body",
+          "is_dunder",
+          "no"
         ],
         [
           "_is_long_body",
@@ -6005,6 +5224,16 @@
         ],
         [
           "_has_dead_after_return",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "_has_dead_after_return",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "_has_dead_after_return",
           "kind",
           "function"
         ],
@@ -6091,6 +5320,16 @@
           "extract_facts",
           "has_magic_number",
           "yes"
+        ],
+        [
+          "extract_facts",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "extract_facts",
+          "is_dunder",
+          "no"
         ],
         [
           "extract_facts",
@@ -6193,6 +5432,16 @@
         ],
         [
           "_dbg_cycle",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "_dbg_cycle",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "_dbg_cycle",
           "kind",
           "function"
         ],
@@ -6251,6 +5500,9 @@
       "detected_by": [
         "heuristic:magic_outside_compare"
       ],
+      "unresolved_heuristics": [
+        "heuristic:magic_outside_compare"
+      ],
       "extraction_detail": {
         "magic_values": [
           1000
@@ -6285,6 +5537,16 @@
         [
           "classify",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "classify",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "classify",
+          "is_dunder",
           "no"
         ],
         [
@@ -6378,6 +5640,16 @@
         ],
         [
           "live_val",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "live_val",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "live_val",
           "kind",
           "function"
         ],
@@ -6458,6 +5730,16 @@
         [
           "_classify_and_debug",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "_classify_and_debug",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "_classify_and_debug",
+          "is_dunder",
           "no"
         ],
         [
@@ -6551,6 +5833,16 @@
         ],
         [
           "run_q05a",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "run_q05a",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "run_q05a",
           "kind",
           "function"
         ],
@@ -6636,6 +5928,16 @@
         [
           "run_q05b",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "run_q05b",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "run_q05b",
+          "is_dunder",
           "no"
         ],
         [
@@ -6729,6 +6031,16 @@
         ],
         [
           "run_q05c",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "run_q05c",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "run_q05c",
           "kind",
           "function"
         ],
@@ -6814,6 +6126,16 @@
         [
           "run_q05d",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "run_q05d",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "run_q05d",
+          "is_dunder",
           "no"
         ],
         [
@@ -6907,6 +6229,16 @@
         ],
         [
           "run_q05e",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "run_q05e",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "run_q05e",
           "kind",
           "function"
         ],
@@ -6965,6 +6297,9 @@
       "detected_by": [
         "heuristic:magic_outside_compare"
       ],
+      "unresolved_heuristics": [
+        "heuristic:magic_outside_compare"
+      ],
       "extraction_detail": {
         "magic_values": [
           100,
@@ -7000,6 +6335,16 @@
         [
           "run_q05f",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "run_q05f",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "run_q05f",
+          "is_dunder",
           "no"
         ],
         [
@@ -7098,6 +6443,16 @@
         ],
         [
           "main",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "main",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "main",
           "kind",
           "function"
         ],
@@ -7187,6 +6542,16 @@
         ],
         [
           "setup_logging",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "setup_logging",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "setup_logging",
           "kind",
           "function"
         ],
@@ -7239,90 +6604,17 @@
       "lineno": 67,
       "end_lineno": 68,
       "class_context": "Var",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg",
         "heuristic:dunder_name"
       ],
-      "seed_facts": [
-        [
-          "__repr__",
-          "body_0_kind",
-          "Return"
-        ],
-        [
-          "__repr__",
-          "body_len",
-          "1"
-        ],
-        [
-          "__repr__",
-          "branch_count",
-          "0"
-        ],
-        [
-          "__repr__",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "__repr__",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "__repr__",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "__repr__",
-          "kind",
-          "function"
-        ],
-        [
-          "__repr__",
-          "long_body",
-          "no"
-        ],
-        [
-          "__repr__",
-          "name",
-          "__repr__"
-        ],
-        [
-          "__repr__",
-          "name_prefix",
-          "other"
-        ],
-        [
-          "__repr__",
-          "return_expr_kind",
-          "JoinedStr"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg",
+        "heuristic:dunder_name"
       ],
-      "derived_facts": [
-        [
-          "__repr__",
-          "category",
-          "unknown"
-        ],
-        [
-          "__repr__",
-          "complexity",
-          "1"
-        ],
-        [
-          "__repr__",
-          "has_any_smell",
-          "none"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 0,
-      "suggested_target": "Q06",
       "id": "U0080"
     },
     {
@@ -7331,89 +6623,15 @@
       "lineno": 84,
       "end_lineno": 85,
       "class_context": "Triple",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg"
       ],
-      "seed_facts": [
-        [
-          "to_tuple",
-          "body_0_kind",
-          "Return"
-        ],
-        [
-          "to_tuple",
-          "body_len",
-          "1"
-        ],
-        [
-          "to_tuple",
-          "branch_count",
-          "0"
-        ],
-        [
-          "to_tuple",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "to_tuple",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "to_tuple",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "to_tuple",
-          "kind",
-          "function"
-        ],
-        [
-          "to_tuple",
-          "long_body",
-          "no"
-        ],
-        [
-          "to_tuple",
-          "name",
-          "to_tuple"
-        ],
-        [
-          "to_tuple",
-          "name_prefix",
-          "other"
-        ],
-        [
-          "to_tuple",
-          "return_expr_kind",
-          "Tuple"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg"
       ],
-      "derived_facts": [
-        [
-          "to_tuple",
-          "category",
-          "unknown"
-        ],
-        [
-          "to_tuple",
-          "complexity",
-          "1"
-        ],
-        [
-          "to_tuple",
-          "has_any_smell",
-          "none"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 0,
-      "suggested_target": "Q06",
       "id": "U0081"
     },
     {
@@ -7422,89 +6640,15 @@
       "lineno": 87,
       "end_lineno": 88,
       "class_context": "Triple",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg"
       ],
-      "seed_facts": [
-        [
-          "render",
-          "body_0_kind",
-          "Return"
-        ],
-        [
-          "render",
-          "body_len",
-          "1"
-        ],
-        [
-          "render",
-          "branch_count",
-          "0"
-        ],
-        [
-          "render",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "render",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "render",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "render",
-          "kind",
-          "function"
-        ],
-        [
-          "render",
-          "long_body",
-          "no"
-        ],
-        [
-          "render",
-          "name",
-          "render"
-        ],
-        [
-          "render",
-          "name_prefix",
-          "other"
-        ],
-        [
-          "render",
-          "return_expr_kind",
-          "JoinedStr"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg"
       ],
-      "derived_facts": [
-        [
-          "render",
-          "category",
-          "unknown"
-        ],
-        [
-          "render",
-          "complexity",
-          "1"
-        ],
-        [
-          "render",
-          "has_any_smell",
-          "none"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 0,
-      "suggested_target": "Q06",
       "id": "U0082"
     },
     {
@@ -7513,89 +6657,15 @@
       "lineno": 98,
       "end_lineno": 103,
       "class_context": "Rule",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg"
       ],
-      "seed_facts": [
-        [
-          "conclusion_fact",
-          "body_0_kind",
-          "Assign"
-        ],
-        [
-          "conclusion_fact",
-          "body_len",
-          "4"
-        ],
-        [
-          "conclusion_fact",
-          "branch_count",
-          "1"
-        ],
-        [
-          "conclusion_fact",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "conclusion_fact",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "conclusion_fact",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "conclusion_fact",
-          "kind",
-          "function"
-        ],
-        [
-          "conclusion_fact",
-          "long_body",
-          "yes"
-        ],
-        [
-          "conclusion_fact",
-          "name",
-          "conclusion_fact"
-        ],
-        [
-          "conclusion_fact",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg"
       ],
-      "derived_facts": [
-        [
-          "conclusion_fact",
-          "category",
-          "unknown"
-        ],
-        [
-          "conclusion_fact",
-          "complexity",
-          "2"
-        ],
-        [
-          "conclusion_fact",
-          "has_any_smell",
-          "dirty"
-        ],
-        [
-          "conclusion_fact",
-          "smell_long_method",
-          "yes"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 1,
-      "suggested_target": "Q06",
       "id": "U0083"
     },
     {
@@ -7637,6 +6707,16 @@
         [
           "unify_term",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "unify_term",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "unify_term",
+          "is_dunder",
           "no"
         ],
         [
@@ -7725,6 +6805,16 @@
         ],
         [
           "unify",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "unify",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "unify",
           "kind",
           "function"
         ],
@@ -7778,6 +6868,9 @@
       "detected_by": [
         "heuristic:magic_outside_compare"
       ],
+      "unresolved_heuristics": [
+        "heuristic:magic_outside_compare"
+      ],
       "extraction_detail": {
         "magic_values": [
           2
@@ -7812,6 +6905,16 @@
         [
           "substitute",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "substitute",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "substitute",
+          "is_dunder",
           "no"
         ],
         [
@@ -7863,85 +6966,17 @@
       "lineno": 158,
       "end_lineno": 159,
       "class_context": "NaiveMatcher",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg",
         "heuristic:dunder_name"
       ],
-      "seed_facts": [
-        [
-          "__init__",
-          "body_0_kind",
-          "Assign"
-        ],
-        [
-          "__init__",
-          "body_len",
-          "1"
-        ],
-        [
-          "__init__",
-          "branch_count",
-          "0"
-        ],
-        [
-          "__init__",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "__init__",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "__init__",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "__init__",
-          "kind",
-          "function"
-        ],
-        [
-          "__init__",
-          "long_body",
-          "no"
-        ],
-        [
-          "__init__",
-          "name",
-          "__init__"
-        ],
-        [
-          "__init__",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg",
+        "heuristic:dunder_name"
       ],
-      "derived_facts": [
-        [
-          "__init__",
-          "category",
-          "unknown"
-        ],
-        [
-          "__init__",
-          "complexity",
-          "1"
-        ],
-        [
-          "__init__",
-          "has_any_smell",
-          "none"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 0,
-      "suggested_target": "Q06",
       "id": "U0087"
     },
     {
@@ -7950,89 +6985,15 @@
       "lineno": 161,
       "end_lineno": 165,
       "class_context": "NaiveMatcher",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg"
       ],
-      "seed_facts": [
-        [
-          "match",
-          "body_0_kind",
-          "Assign"
-        ],
-        [
-          "match",
-          "body_len",
-          "4"
-        ],
-        [
-          "match",
-          "branch_count",
-          "0"
-        ],
-        [
-          "match",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "match",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "match",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "match",
-          "kind",
-          "function"
-        ],
-        [
-          "match",
-          "long_body",
-          "yes"
-        ],
-        [
-          "match",
-          "name",
-          "match"
-        ],
-        [
-          "match",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg"
       ],
-      "derived_facts": [
-        [
-          "match",
-          "category",
-          "unknown"
-        ],
-        [
-          "match",
-          "complexity",
-          "1"
-        ],
-        [
-          "match",
-          "has_any_smell",
-          "dirty"
-        ],
-        [
-          "match",
-          "smell_long_method",
-          "yes"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 1,
-      "suggested_target": "Q06",
       "id": "U0088"
     },
     {
@@ -8041,94 +7002,15 @@
       "lineno": 167,
       "end_lineno": 184,
       "class_context": "NaiveMatcher",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg"
       ],
-      "seed_facts": [
-        [
-          "_recurse",
-          "body_0_kind",
-          "If"
-        ],
-        [
-          "_recurse",
-          "body_len",
-          "4"
-        ],
-        [
-          "_recurse",
-          "branch_count",
-          "5"
-        ],
-        [
-          "_recurse",
-          "branch_count_ge_4",
-          "yes"
-        ],
-        [
-          "_recurse",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "_recurse",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "_recurse",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "_recurse",
-          "kind",
-          "function"
-        ],
-        [
-          "_recurse",
-          "long_body",
-          "yes"
-        ],
-        [
-          "_recurse",
-          "name",
-          "_recurse"
-        ],
-        [
-          "_recurse",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg"
       ],
-      "derived_facts": [
-        [
-          "_recurse",
-          "category",
-          "unknown"
-        ],
-        [
-          "_recurse",
-          "complexity",
-          "4+"
-        ],
-        [
-          "_recurse",
-          "has_any_smell",
-          "dirty"
-        ],
-        [
-          "_recurse",
-          "smell_long_method",
-          "yes"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 1,
-      "suggested_target": "Q06",
       "id": "U0089"
     },
     {
@@ -8137,89 +7019,15 @@
       "lineno": 186,
       "end_lineno": 187,
       "class_context": "NaiveMatcher",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg"
       ],
-      "seed_facts": [
-        [
-          "stats",
-          "body_0_kind",
-          "Return"
-        ],
-        [
-          "stats",
-          "body_len",
-          "1"
-        ],
-        [
-          "stats",
-          "branch_count",
-          "0"
-        ],
-        [
-          "stats",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "stats",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "stats",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "stats",
-          "kind",
-          "function"
-        ],
-        [
-          "stats",
-          "long_body",
-          "no"
-        ],
-        [
-          "stats",
-          "name",
-          "stats"
-        ],
-        [
-          "stats",
-          "name_prefix",
-          "other"
-        ],
-        [
-          "stats",
-          "return_expr_kind",
-          "Dict"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg"
       ],
-      "derived_facts": [
-        [
-          "stats",
-          "category",
-          "unknown"
-        ],
-        [
-          "stats",
-          "complexity",
-          "1"
-        ],
-        [
-          "stats",
-          "has_any_smell",
-          "none"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 0,
-      "suggested_target": "Q06",
       "id": "U0090"
     },
     {
@@ -8228,85 +7036,17 @@
       "lineno": 202,
       "end_lineno": 205,
       "class_context": "IndexedMatcher",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg",
         "heuristic:dunder_name"
       ],
-      "seed_facts": [
-        [
-          "__init__",
-          "body_0_kind",
-          "Assign"
-        ],
-        [
-          "__init__",
-          "body_len",
-          "3"
-        ],
-        [
-          "__init__",
-          "branch_count",
-          "0"
-        ],
-        [
-          "__init__",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "__init__",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "__init__",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "__init__",
-          "kind",
-          "function"
-        ],
-        [
-          "__init__",
-          "long_body",
-          "no"
-        ],
-        [
-          "__init__",
-          "name",
-          "__init__"
-        ],
-        [
-          "__init__",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg",
+        "heuristic:dunder_name"
       ],
-      "derived_facts": [
-        [
-          "__init__",
-          "category",
-          "unknown"
-        ],
-        [
-          "__init__",
-          "complexity",
-          "1"
-        ],
-        [
-          "__init__",
-          "has_any_smell",
-          "none"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 0,
-      "suggested_target": "Q06",
       "id": "U0091"
     },
     {
@@ -8315,89 +7055,15 @@
       "lineno": 207,
       "end_lineno": 215,
       "class_context": "IndexedMatcher",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg"
       ],
-      "seed_facts": [
-        [
-          "_ensure_index",
-          "body_0_kind",
-          "Assign"
-        ],
-        [
-          "_ensure_index",
-          "body_len",
-          "6"
-        ],
-        [
-          "_ensure_index",
-          "branch_count",
-          "2"
-        ],
-        [
-          "_ensure_index",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "_ensure_index",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "_ensure_index",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "_ensure_index",
-          "kind",
-          "function"
-        ],
-        [
-          "_ensure_index",
-          "long_body",
-          "yes"
-        ],
-        [
-          "_ensure_index",
-          "name",
-          "_ensure_index"
-        ],
-        [
-          "_ensure_index",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg"
       ],
-      "derived_facts": [
-        [
-          "_ensure_index",
-          "category",
-          "unknown"
-        ],
-        [
-          "_ensure_index",
-          "complexity",
-          "3"
-        ],
-        [
-          "_ensure_index",
-          "has_any_smell",
-          "dirty"
-        ],
-        [
-          "_ensure_index",
-          "smell_long_method",
-          "yes"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 1,
-      "suggested_target": "Q06",
       "id": "U0092"
     },
     {
@@ -8406,84 +7072,15 @@
       "lineno": 217,
       "end_lineno": 221,
       "class_context": "IndexedMatcher",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg"
       ],
-      "seed_facts": [
-        [
-          "_candidates",
-          "body_0_kind",
-          "Assign"
-        ],
-        [
-          "_candidates",
-          "body_len",
-          "3"
-        ],
-        [
-          "_candidates",
-          "branch_count",
-          "1"
-        ],
-        [
-          "_candidates",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "_candidates",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "_candidates",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "_candidates",
-          "kind",
-          "function"
-        ],
-        [
-          "_candidates",
-          "long_body",
-          "no"
-        ],
-        [
-          "_candidates",
-          "name",
-          "_candidates"
-        ],
-        [
-          "_candidates",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg"
       ],
-      "derived_facts": [
-        [
-          "_candidates",
-          "category",
-          "unknown"
-        ],
-        [
-          "_candidates",
-          "complexity",
-          "2"
-        ],
-        [
-          "_candidates",
-          "has_any_smell",
-          "none"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 0,
-      "suggested_target": "Q06",
       "id": "U0093"
     },
     {
@@ -8492,89 +7089,15 @@
       "lineno": 223,
       "end_lineno": 228,
       "class_context": "IndexedMatcher",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg"
       ],
-      "seed_facts": [
-        [
-          "match",
-          "body_0_kind",
-          "Assign"
-        ],
-        [
-          "match",
-          "body_len",
-          "5"
-        ],
-        [
-          "match",
-          "branch_count",
-          "0"
-        ],
-        [
-          "match",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "match",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "match",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "match",
-          "kind",
-          "function"
-        ],
-        [
-          "match",
-          "long_body",
-          "yes"
-        ],
-        [
-          "match",
-          "name",
-          "match"
-        ],
-        [
-          "match",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg"
       ],
-      "derived_facts": [
-        [
-          "match",
-          "category",
-          "unknown"
-        ],
-        [
-          "match",
-          "complexity",
-          "1"
-        ],
-        [
-          "match",
-          "has_any_smell",
-          "dirty"
-        ],
-        [
-          "match",
-          "smell_long_method",
-          "yes"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 1,
-      "suggested_target": "Q06",
       "id": "U0094"
     },
     {
@@ -8583,94 +7106,15 @@
       "lineno": 230,
       "end_lineno": 249,
       "class_context": "IndexedMatcher",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg"
       ],
-      "seed_facts": [
-        [
-          "_recurse",
-          "body_0_kind",
-          "If"
-        ],
-        [
-          "_recurse",
-          "body_len",
-          "5"
-        ],
-        [
-          "_recurse",
-          "branch_count",
-          "5"
-        ],
-        [
-          "_recurse",
-          "branch_count_ge_4",
-          "yes"
-        ],
-        [
-          "_recurse",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "_recurse",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "_recurse",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "_recurse",
-          "kind",
-          "function"
-        ],
-        [
-          "_recurse",
-          "long_body",
-          "yes"
-        ],
-        [
-          "_recurse",
-          "name",
-          "_recurse"
-        ],
-        [
-          "_recurse",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg"
       ],
-      "derived_facts": [
-        [
-          "_recurse",
-          "category",
-          "unknown"
-        ],
-        [
-          "_recurse",
-          "complexity",
-          "4+"
-        ],
-        [
-          "_recurse",
-          "has_any_smell",
-          "dirty"
-        ],
-        [
-          "_recurse",
-          "smell_long_method",
-          "yes"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 1,
-      "suggested_target": "Q06",
       "id": "U0095"
     },
     {
@@ -8679,89 +7123,15 @@
       "lineno": 251,
       "end_lineno": 252,
       "class_context": "IndexedMatcher",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg"
       ],
-      "seed_facts": [
-        [
-          "stats",
-          "body_0_kind",
-          "Return"
-        ],
-        [
-          "stats",
-          "body_len",
-          "1"
-        ],
-        [
-          "stats",
-          "branch_count",
-          "0"
-        ],
-        [
-          "stats",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "stats",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "stats",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "stats",
-          "kind",
-          "function"
-        ],
-        [
-          "stats",
-          "long_body",
-          "no"
-        ],
-        [
-          "stats",
-          "name",
-          "stats"
-        ],
-        [
-          "stats",
-          "name_prefix",
-          "other"
-        ],
-        [
-          "stats",
-          "return_expr_kind",
-          "Dict"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg"
       ],
-      "derived_facts": [
-        [
-          "stats",
-          "category",
-          "unknown"
-        ],
-        [
-          "stats",
-          "complexity",
-          "1"
-        ],
-        [
-          "stats",
-          "has_any_smell",
-          "none"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 0,
-      "suggested_target": "Q06",
       "id": "U0096"
     },
     {
@@ -8770,90 +7140,17 @@
       "lineno": 259,
       "end_lineno": 263,
       "class_context": "Engine",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg",
         "heuristic:dunder_name"
       ],
-      "seed_facts": [
-        [
-          "__init__",
-          "body_0_kind",
-          "Assign"
-        ],
-        [
-          "__init__",
-          "body_len",
-          "4"
-        ],
-        [
-          "__init__",
-          "branch_count",
-          "0"
-        ],
-        [
-          "__init__",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "__init__",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "__init__",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "__init__",
-          "kind",
-          "function"
-        ],
-        [
-          "__init__",
-          "long_body",
-          "yes"
-        ],
-        [
-          "__init__",
-          "name",
-          "__init__"
-        ],
-        [
-          "__init__",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg",
+        "heuristic:dunder_name"
       ],
-      "derived_facts": [
-        [
-          "__init__",
-          "category",
-          "unknown"
-        ],
-        [
-          "__init__",
-          "complexity",
-          "1"
-        ],
-        [
-          "__init__",
-          "has_any_smell",
-          "dirty"
-        ],
-        [
-          "__init__",
-          "smell_long_method",
-          "yes"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 1,
-      "suggested_target": "Q06",
       "id": "U0097"
     },
     {
@@ -8862,94 +7159,15 @@
       "lineno": 265,
       "end_lineno": 298,
       "class_context": "Engine",
-      "kind": "extraction_miss",
+      "kind": "covered",
       "current_category": "unknown",
       "identity_ok": true,
       "detected_by": [
         "heuristic:self_arg"
       ],
-      "seed_facts": [
-        [
-          "run",
-          "body_0_kind",
-          "Assign"
-        ],
-        [
-          "run",
-          "body_len",
-          "6"
-        ],
-        [
-          "run",
-          "branch_count",
-          "8"
-        ],
-        [
-          "run",
-          "branch_count_ge_4",
-          "yes"
-        ],
-        [
-          "run",
-          "dead_after_return",
-          "no"
-        ],
-        [
-          "run",
-          "has_docstring",
-          "no"
-        ],
-        [
-          "run",
-          "has_magic_number",
-          "no"
-        ],
-        [
-          "run",
-          "kind",
-          "function"
-        ],
-        [
-          "run",
-          "long_body",
-          "yes"
-        ],
-        [
-          "run",
-          "name",
-          "run"
-        ],
-        [
-          "run",
-          "name_prefix",
-          "other"
-        ]
+      "resolved_heuristics": [
+        "heuristic:self_arg"
       ],
-      "derived_facts": [
-        [
-          "run",
-          "category",
-          "unknown"
-        ],
-        [
-          "run",
-          "complexity",
-          "4+"
-        ],
-        [
-          "run",
-          "has_any_smell",
-          "dirty"
-        ],
-        [
-          "run",
-          "smell_long_method",
-          "yes"
-        ]
-      ],
-      "current_pattern": null,
-      "retractions": 1,
-      "suggested_target": "Q06",
       "id": "U0098"
     },
     {
@@ -8991,6 +7209,16 @@
         [
           "run_scenario",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "run_scenario",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "run_scenario",
+          "is_dunder",
           "no"
         ],
         [
@@ -9053,6 +7281,9 @@
       "detected_by": [
         "heuristic:magic_outside_compare"
       ],
+      "unresolved_heuristics": [
+        "heuristic:magic_outside_compare"
+      ],
       "extraction_detail": {
         "magic_values": [
           16
@@ -9087,6 +7318,16 @@
         [
           "trace_signature",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "trace_signature",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "trace_signature",
+          "is_dunder",
           "no"
         ],
         [
@@ -9171,6 +7412,16 @@
         [
           "scenario_fizzbuzz_facts",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "scenario_fizzbuzz_facts",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "scenario_fizzbuzz_facts",
+          "is_dunder",
           "no"
         ],
         [
@@ -9264,6 +7515,16 @@
         ],
         [
           "scenario_fizzbuzz_rules",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "scenario_fizzbuzz_rules",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "scenario_fizzbuzz_rules",
           "kind",
           "function"
         ],
@@ -9349,6 +7610,16 @@
         [
           "scenario_transitive_facts",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "scenario_transitive_facts",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "scenario_transitive_facts",
+          "is_dunder",
           "no"
         ],
         [
@@ -9442,6 +7713,16 @@
         ],
         [
           "scenario_transitive_rules",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "scenario_transitive_rules",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "scenario_transitive_rules",
           "kind",
           "function"
         ],
@@ -9527,6 +7808,16 @@
         [
           "scenario_naf_facts",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "scenario_naf_facts",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "scenario_naf_facts",
+          "is_dunder",
           "no"
         ],
         [
@@ -9620,6 +7911,16 @@
         ],
         [
           "scenario_naf_rules",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "scenario_naf_rules",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "scenario_naf_rules",
           "kind",
           "function"
         ],
@@ -9678,6 +7979,9 @@
       "detected_by": [
         "heuristic:magic_outside_compare"
       ],
+      "unresolved_heuristics": [
+        "heuristic:magic_outside_compare"
+      ],
       "extraction_detail": {
         "magic_values": [
           100
@@ -9712,6 +8016,16 @@
         [
           "scenario_mixed_facts",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "scenario_mixed_facts",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "scenario_mixed_facts",
+          "is_dunder",
           "no"
         ],
         [
@@ -9796,6 +8110,16 @@
         [
           "scenario_mixed_rules",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "scenario_mixed_rules",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "scenario_mixed_rules",
+          "is_dunder",
           "no"
         ],
         [
@@ -9889,6 +8213,16 @@
         ],
         [
           "run_both",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "run_both",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "run_both",
           "kind",
           "function"
         ],
@@ -9969,6 +8303,16 @@
         [
           "run_identity_sonda",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "run_identity_sonda",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "run_identity_sonda",
+          "is_dunder",
           "no"
         ],
         [
@@ -10062,6 +8406,16 @@
         ],
         [
           "run_p70a",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "run_p70a",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "run_p70a",
           "kind",
           "function"
         ],
@@ -10147,6 +8501,16 @@
         [
           "run_p70b",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "run_p70b",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "run_p70b",
+          "is_dunder",
           "no"
         ],
         [
@@ -10240,6 +8604,16 @@
         ],
         [
           "run_p70c",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "run_p70c",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "run_p70c",
           "kind",
           "function"
         ],
@@ -10329,6 +8703,16 @@
         ],
         [
           "run_p70d",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "run_p70d",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "run_p70d",
           "kind",
           "function"
         ],
@@ -10387,6 +8771,9 @@
       "detected_by": [
         "heuristic:magic_outside_compare"
       ],
+      "unresolved_heuristics": [
+        "heuristic:magic_outside_compare"
+      ],
       "extraction_detail": {
         "magic_values": [
           2
@@ -10421,6 +8808,16 @@
         [
           "run_p70e",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "run_p70e",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "run_p70e",
+          "is_dunder",
           "no"
         ],
         [
@@ -10478,6 +8875,9 @@
       "detected_by": [
         "heuristic:magic_outside_compare"
       ],
+      "unresolved_heuristics": [
+        "heuristic:magic_outside_compare"
+      ],
       "extraction_detail": {
         "magic_values": [
           100
@@ -10512,6 +8912,16 @@
         [
           "run_p70f",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "run_p70f",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "run_p70f",
+          "is_dunder",
           "no"
         ],
         [
@@ -10605,6 +9015,16 @@
         ],
         [
           "render_stats_line",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "render_stats_line",
+          "is_dunder",
+          "no"
+        ],
+        [
+          "render_stats_line",
           "kind",
           "function"
         ],
@@ -10690,6 +9110,16 @@
         [
           "main",
           "has_magic_number",
+          "no"
+        ],
+        [
+          "main",
+          "has_self_arg",
+          "no"
+        ],
+        [
+          "main",
+          "is_dunder",
           "no"
         ],
         [

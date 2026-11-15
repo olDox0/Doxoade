@@ -351,7 +351,7 @@ static int fmt_insn(DecodedInsn *insn, const FileReader *fr,
 /* ===== disasm_collect ===== */
 
 int disasm_collect(const FileReader *fr, uint64_t offset, uint64_t length,
-                   uint64_t va_base, DecoderBackend backend,
+                   uint64_t va_base, DecoderBackend backend, DecodeMode mode,
                    InsnList *out, char *err_buf, size_t err_buf_size)
 {
     if (out == NULL) return -1;
@@ -365,8 +365,8 @@ int disasm_collect(const FileReader *fr, uint64_t offset, uint64_t length,
     uint64_t pos = offset;
     while (pos < end) {
         DecodedInsn tmp;
-        int n = decode_one_backend(backend, fr, pos, va_base + pos, &tmp,
-                                   err_buf, err_buf_size);
+        int n = decode_one_backend(backend, mode, fr, pos, va_base + pos, &tmp,
+                                err_buf, err_buf_size);
         if (n <= 0 || pos + n > end) n = 1;
         cap++;
         pos += n;
@@ -383,8 +383,8 @@ int disasm_collect(const FileReader *fr, uint64_t offset, uint64_t length,
     pos = offset;
     while (pos < end && written < cap) {
         DecodedInsn insn;
-        int n = decode_one_backend(backend, fr, pos, va_base + pos, &insn,
-                                   err_buf, err_buf_size);
+        int n = decode_one_backend(backend, mode, fr, pos, va_base + pos, &insn,
+                                  err_buf, err_buf_size);
         if (n <= 0 || pos + n > end) {
             memset(&insn, 0, sizeof(insn));
             insn.offset = pos;
@@ -468,7 +468,8 @@ ControlFlowType insn_control_flow(const DecodedInsn *insn, uint64_t *target_va)
 }
 
 int disasm_range(const FileReader *fr, uint64_t offset, uint64_t length,
-                 uint64_t va_base, DecoderBackend backend, const PreIR *ir,
+                 uint64_t va_base, DecoderBackend backend, DecodeMode mode,
+                 const PreIR *ir,
                  FILE *out, char *err_buf, size_t err_buf_size)
 {
     uint64_t end = offset + length;
@@ -478,7 +479,7 @@ int disasm_range(const FileReader *fr, uint64_t offset, uint64_t length,
 
     while (pos < end) {
         DecodedInsn insn;
-        int n = decode_one_backend(backend, fr, pos, va_base + pos, &insn,
+        int n = decode_one_backend(backend, mode, fr, pos, va_base + pos, &insn,
                                    err_buf, err_buf_size);
         if (n <= 0 || pos + n > end) {
             uint8_t b = fr->data[pos];
@@ -501,7 +502,7 @@ int disasm_range(const FileReader *fr, uint64_t offset, uint64_t length,
 }
 
 int disasm_text_section(const FileReader *fr, const PreIR *ir,
-                        DecoderBackend backend,
+                        DecoderBackend backend, DecodeMode mode,
                         FILE *out, char *err_buf, size_t err_buf_size)
 {
     for (uint32_t i = 0; i < ir->section_count; i++) {
@@ -509,7 +510,7 @@ int disasm_text_section(const FileReader *fr, const PreIR *ir,
         if (strcmp(s->name, ".text") == 0) {
             uint64_t va_base = ir->image_base + s->va - s->raw_offset;
             return disasm_range(fr, s->raw_offset, s->raw_size, va_base,
-                                backend, ir, out, err_buf, err_buf_size);
+                        backend, mode, ir, out, err_buf, err_buf_size);
         }
     }
     snprintf(err_buf, err_buf_size, "seção .text não encontrada");

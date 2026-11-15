@@ -2187,42 +2187,37 @@ def cmd_canonical(exorcise):
     print(f"  {Fore.WHITE}Init.lua:{Fore.RESET} {target_init}")
     print(f"  {Fore.LIGHTBLACK_EX}Sincronizando com os templates mais recentes...{Fore.RESET}")
 
-    # 1. Atualiza o init.lua do cofre SEMPRE (pega as últimas mudanças dos templates)
+    # 1. Sincroniza init: staging → cofre (fallback: raiz)
     try:
-        import shutil
-        # Prefere copiar do staging (se existir), senão da raiz
         staging_init = user_dir / ".doxoade" / "staging" / "init.lua"
-        root_init = LiteXLEngine.get_init_lua_path()
-
-        if staging_init.exists():
-            shutil.copy2(staging_init, target_init)
-            print(f"{Fore.GREEN}  ✔ init.lua atualizado a partir do staging.{Fore.RESET}")
-        elif root_init.exists():
-            shutil.copy2(root_init, target_init)
-            print(f"{Fore.GREEN}  ✔ init.lua atualizado a partir da raiz.{Fore.RESET}")
+        src_init = staging_init if staging_init.exists() else (user_dir / "init.lua")
+        if src_init.exists():
+            shutil.copy2(src_init, target_init)
+            print(f"  {Fore.GREEN}✔ init.lua sincronizado ({src_init.parent.name}).{Fore.RESET}")
         else:
-            print(f"{Fore.YELLOW}  ⚠ Nenhum init.lua encontrado. Rode 'deploy staging' primeiro.{Fore.RESET}")
-            return
+            print(f"  {Fore.YELLOW}⚠ Nenhum init.lua encontrado. Rode 'deploy staging' primeiro.{Fore.RESET}")
     except Exception as e:
-        print(f"{Fore.RED}  ✖ Falha ao atualizar init.lua: {e}{Fore.RESET}")
-        return
+        print(f"  {Fore.RED}✖ Falha ao sincronizar init.lua: {e}{Fore.RESET}")
 
-    # 2. Migra a sessão da raiz se o cofre ainda não tiver uma própria
+    # 2. Infra mínima do cofre
+    TyphonDeployEngine._sync_cofre_infra(user_dir, target_dir)
+
+    # 3. Migra a sessão da raiz se o cofre ainda não tiver uma própria
     target_session = target_doxoade / "sovereign_session.lua"
     root_session = user_dir / ".doxoade" / "sovereign_session.lua"
     if not target_session.exists() and root_session.exists():
         try:
-            import shutil
             shutil.copy2(root_session, target_session)
-            print(f"{Fore.CYAN}  📋 Treeview raiz importada para o Cofre.{Fore.RESET}")
+            print(f"  {Fore.CYAN}📋 Treeview raiz importada para o Cofre.{Fore.RESET}")
         except Exception:
             pass
 
+    # 4. Exorcise instâncias antigas
     if exorcise:
         TyphonDeployEngine.exorcise_instances(wait_seconds=0.8)
         time.sleep(0.3)
 
-    # 🧹 Ma'at: arquivar forensics stale — o log passa a refletir SOMENTE esta sessão
+    # 5. Arquiva stale (error.txt, session_log, blackbox)
     launch_ts = time.strftime("%Y%m%d_%H%M%S")
     diag_dir = target_doxoade / "diagnostics"
     diag_dir.mkdir(parents=True, exist_ok=True)
@@ -2236,10 +2231,11 @@ def cmd_canonical(exorcise):
                 if dst.exists():
                     dst.unlink()
                 src.rename(dst)
-                print(f"{Fore.LIGHTBLACK_EX}  🗄️  Stale arquivado: {src.name} → {dst.name}{Fore.RESET}")
+                print(f"  {Fore.LIGHTBLACK_EX}🗄️  Stale arquivado: {src.name} → {dst.name}{Fore.RESET}")
             except Exception:
                 pass
 
+    # 6. ✅ CORRIGIDO: define exe, env e launch_time ANTES do _spawn_exe
     exe = LiteXLEngine.find_executable()
     if not exe:
         print(f"{Fore.RED}✖ Executável do Lite XL não encontrado.{Fore.RESET}\n")
@@ -2249,47 +2245,46 @@ def cmd_canonical(exorcise):
     env["DOXOADE_DEPLOY_MODE"] = "production"
     env["LITE_USERDIR"] = str(target_dir)
     env["XDG_CONFIG_HOME"] = str(target_dir.parent)
-
-    CREATE_NEW_CONSOLE = 0x00000010 if sys.platform == "win32" else 0
     launch_time = time.time()
+
+    # 7. Launch único via _spawn_exe (com fallback UAC/WinError 740)
     try:
-        proc = subprocess.Popen(
-            [str(exe)],
-            env=env,
-            creationflags=CREATE_NEW_CONSOLE,
-        )
-        pid = proc.pid
-        pid_file = target_dir / ".production.pid"
+        pid, proc = TyphonDeployEngine._spawn_exe(exe, env, target_dir)
+    except Exception as e:
+        print(f"{Fore.RED}✖ Falha ao iniciar: {e}{Fore.RESET}\n")
+        return
+
+    if pid and pid > 0:
         try:
-            pid_file.write_text(str(pid), encoding="utf-8")
+            (target_dir / ".production.pid").write_text(str(pid), encoding="utf-8")
         except Exception:
             pass
 
-        print(f"\n{Fore.GREEN}✔ Lite XL CANÔNICO ISOLADO iniciado (PID: {pid}){Fore.RESET}")
-        print(f"{Fore.LIGHTBLACK_EX}  Userdir: {target_dir}{Fore.RESET}\n")
-        
-        # 🐤 Hórus: prova empírica de que o header bootou NESTE userdir
-        print(f"{Fore.LIGHTBLACK_EX}  ⏳ Aguardando session_log.txt do cofre (até 6s)...{Fore.RESET}")
-        sess = target_dir / "session_log.txt"
-        boot_ok = False
-        deadline = time.time() + 6.0
-        while time.time() < deadline:
-            try:
-                if sess.exists() and sess.stat().st_mtime >= launch_time - 1:
-                    boot_ok = True
-                    break
-            except OSError:
-                pass
-            if proc.poll() is not None:
+    print(f"\n{Fore.GREEN}✔ Lite XL CANÔNICO ISOLADO iniciado (PID: {pid}){Fore.RESET}")
+    print(f"{Fore.LIGHTBLACK_EX}  Userdir: {target_dir}{Fore.RESET}")
+    print(f"{Fore.LIGHTBLACK_EX}  ⏳ Aguardando session_log.txt do cofre (até 6s)...{Fore.RESET}")
+
+    # 8. Confirmação de boot
+    sess = target_dir / "session_log.txt"
+    boot_ok = False
+    deadline = time.time() + 6.0
+    while time.time() < deadline:
+        try:
+            if sess.exists() and sess.stat().st_mtime >= launch_time - 1:
+                boot_ok = True
                 break
-            time.sleep(0.3)
-        if boot_ok:
-            print(f"{Fore.GREEN}  ✔ Boot confirmado: header gravou log no cofre.{Fore.RESET}\n")
-        else:
-            print(f"{Fore.YELLOW}  ⚠ Boot não confirmado em 6s. Investigue: doxoade doxly log -m canonical{Fore.RESET}\n")
-            
-    except Exception as e:
-        print(f"{Fore.RED}✖ Falha ao iniciar: {e}{Fore.RESET}\n")
+        except OSError:
+            pass
+        if proc is not None and proc.poll() is not None:
+            break
+        time.sleep(0.3)
+
+    if boot_ok:
+        print(f"{Fore.GREEN}  ✔ Boot confirmado: header gravou log no cofre.{Fore.RESET}\n")
+    elif pid == 0:
+        print(f"{Fore.YELLOW}  ⚠ Launch elevado: valide o boot com: doxoade doxly log -m canonical{Fore.RESET}\n")
+    else:
+        print(f"{Fore.YELLOW}  ⚠ Boot não confirmado em 6s. Investigue: doxoade doxly log -m canonical{Fore.RESET}\n")
 
 @lite_xl_group.command("diagnose-init", help="🔬 Compara init.lua de test vs production e identifica divergências.")
 def cmd_diagnose_init():

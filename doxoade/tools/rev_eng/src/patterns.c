@@ -2,6 +2,7 @@
 #include "patterns.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 /* Retorna a primeira instrução da função. */
 static const DecodedInsn *first_insn(const InsnList *insns, const CFG *cfg,
@@ -88,7 +89,7 @@ static int detect_fp(const InsnList *insns, const CFG *cfg, const FunctionEntry 
 /* --- Detecção de canary --- */
 
 static int canary_cb(const DecodedInsn *insn) {
-    if (insn->op_str[0] && strstr(insn->op_str, "gs:0x28")) return 1;
+    if (insn->op_str[0] && strstr(insn->op_str, "gs:")) return 1;
     return 0;
 }
 
@@ -107,16 +108,18 @@ static int is_ret_mnemo(const char *m) {
 }
 
 static int detect_tailcall(const InsnList *insns, const CFG *cfg, const FunctionEntry *fe) {
-    /* Thunks (1 bloco, 1 instrução) não são tail calls — são stubs de IAT. */
     if (fe->block_count <= 1) return 0;
-    const DecodedInsn *last = last_insn(insns, cfg, fe);
-    if (last == NULL) return 0;
-    if (last->mnemonic[0] && is_jmp_mnemo(last->mnemonic)) {
-        /* jmp para fora do .text (thunk de import) — não é tail call. */
-        if (last->imm_size > 0) {
-            uint64_t target = (uint64_t)last->imm;
-            /* Se o alvo está fora da função, é tail call real. */
-            if (target < fe->start_va || target >= fe->end_va) return 1;
+    uint32_t b0 = fe->block_first;
+    uint32_t bN = b0 + fe->block_count;
+    for (uint32_t b = b0; b < bN && b < cfg->block_count; b++) {
+        uint32_t last_i = cfg->blocks[b].insn_first + cfg->blocks[b].insn_count - 1;
+        if (last_i >= insns->count) continue;
+        const DecodedInsn *last = &insns->insns[last_i];
+        if (last->mnemonic[0] && is_jmp_mnemo(last->mnemonic)) {
+            if (last->imm_size > 0) {
+                uint64_t target = (uint64_t)last->imm;
+                if (target < fe->start_va || target >= fe->end_va) return 1;
+            }
         }
     }
     return 0;
@@ -125,10 +128,12 @@ static int detect_tailcall(const InsnList *insns, const CFG *cfg, const Function
 /* --- Detecção de switch table --- */
 
 static int switch_cb(const DecodedInsn *insn) {
-    if (insn->mnemonic[0] && is_jmp_mnemo(insn->mnemonic) &&
-        insn->op_str[0]) {
-        /* Capstone: "jmp qword ptr [rax*8 + 0x140006000]" */
-        if (strstr(insn->op_str, "*8") || strstr(insn->op_str, "*4")) {
+    if (insn->mnemonic[0] && is_jmp_mnemo(insn->mnemonic)) {
+        if (getenv("DOXREVENG_DEBUG_PATTERNS")) {
+            fprintf(stderr, "[SWITCH-CHK] %s %s\n", insn->mnemonic, insn->op_str);
+        }
+        if (insn->op_str[0] &&
+            (strstr(insn->op_str, "*8") || strstr(insn->op_str, "*4"))) {
             return 1;
         }
     }

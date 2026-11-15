@@ -124,6 +124,39 @@ core.add_thread(function()
   end
 end)
 
+local function list_for(doc)
+  if not doc or not doc.filename then return {} end
+  local root = project_root_for(doc.filename)
+  if not root then return {} end
+  local bdir = root .. "/.doxoade/file_backups"
+  local key = backup_key(norm(doc.filename):sub(#root + 2))
+  local out = {}
+  for _, n in ipairs(system.list_dir(bdir) or {}) do
+    if n:sub(1, #key + 1) == key .. "." and n:match("%.bak$") then
+      local suffix = n:sub(#key + 2):gsub("%.bak$", "")
+      local stamp, seq = suffix:match("^(%d%d%d%d%d%d%d%d_%d%d%d%d%d%d)_(%d+)$")
+      if stamp then
+        local finfo = system.get_file_info(bdir .. "/" .. n)
+        out[#out + 1] = { name = n, path = bdir .. "/" .. n, stamp = stamp,
+                          seq = seq, size = finfo and finfo.size or 0 }
+      end
+    end
+  end
+  table.sort(out, function(x, y)
+    if x.stamp ~= y.stamp then return x.stamp > y.stamp end
+    return (tonumber(x.seq) or 0) > (tonumber(y.seq) or 0)
+  end)
+  return out
+end
+
+local function read_backup(path)
+  local f = io.open(path, "r")
+  if not f then return nil end
+  local c = f:read("*a")
+  f:close()
+  return c
+end
+
 -- API para F2.2 (timeline Alt+Z/Y + diff)
 rawset(_G, "DOXOADE_FILE_BACKUP", {
   snapshot = snapshot_doc,
@@ -136,6 +169,9 @@ rawset(_G, "DOXOADE_FILE_BACKUP", {
     if not root then return nil end
     return backup_key(norm(doc.filename):sub(#root + 2))
   end,
+  list_for = list_for,
+  read = read_backup,
+  restore_guard = function(doc) return snapshot_doc(doc, "pre-restore", true) end,
 })
 if core.log then
   core.log(string.format("💾 [FILE-BACKUP] Camada A ativa (save/quit/autosave %ds, rotação %d).", INTERVAL, KEEP))
