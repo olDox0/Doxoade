@@ -30,6 +30,8 @@ typedef struct {
     uint32_t insn_count;
     uint32_t succ_count;
     uint32_t *succ_idx;      /* índices dos blocos sucessores em cfg->blocks */
+    uint32_t pred_count;      /* NOVO */
+    uint32_t *pred_idx;       /* NOVO */
 } BasicBlock;
 
 typedef struct {

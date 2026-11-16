@@ -401,30 +401,14 @@ function TerminalEngine:tick()
   local changed = false
 
   -- 🔍 Verifica timeout de handshake (só uma vez, sem spam)
-  if not self._handshake_done and self._spawn_time then
-      if (os.clock() - self._spawn_time) > self._handshake_timeout then
-          self._handshake_done = true  -- evita repetir o log
-
-          -- 🔧 FIX: usa o client (não o self), e protege contra nil
-          local py_exe = "?"
-          if self._client and type(self._client._find_python) == "function" then
-              local ok, result = pcall(self._client._find_python, self._client)
-              if ok and result then py_exe = result end
-          end
-
-          local ipc_dir = (self._client and self._client.ipc_dir) or "?"
-          if core.log then
-              core.log(string.format("⚠️ [PTY] HANDSHAKE TIMEOUT após %.1fs (python=%s, ipc=%s)",
-                  self._handshake_timeout, py_exe, ipc_dir))
-              core.log("   ↳ O daemon não respondeu. Diagnóstico: doxoade doxly log -m test")
-          end
-          local capture = rawget(_G, "phanto_capture")
-          if capture then
-              capture("pty_handshake_timeout", function()
-                  error(string.format("PTY handshake timeout (%ds) - python=%s", self._handshake_timeout, py_exe), 2)
-              end)
-          end
-      end
+  if not self._handshake_done and self._spawn_time
+    and (os.clock() - self._spawn_time) > 6.0 and not self._timeout_warned then
+    self._timeout_warned = true
+    local msg = string.format("⚠ [PTY] HANDSHAKE TIMEOUT (python=%s, ipc=%s)",
+      tostring(self._python_exe or "?"), tostring(self.ipc_dir or "?"))
+    if core.log then core.log(msg) end
+    local capture = rawget(_G, "phanto_capture")
+    if capture then capture("pty_handshake", function() error(msg, 2) end) end
   end
 
   -- [FASE 10] Após timeout do handshake, ativa modo de fallback

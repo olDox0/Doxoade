@@ -159,6 +159,65 @@ class PatchSurgeon:
         return re.sub(r'\s+', ' ', line).strip()
 
     @classmethod
+    def _is_idempotent_hunk(cls, file_lines, hunk) -> Tuple[bool, str]:
+        """Retorna (é_idempotente, motivo). Cobre qualquer combinação de +/-/ctx."""
+        norm_file = [cls._normalize_line(l) for l in file_lines]
+        file_set = set(norm_file)
+
+        plus  = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind == '+']
+        minus = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind == '-']
+        has_ctx = any(pl.kind == ' ' for pl in hunk.lines)
+
+        plus_n  = [p for p in plus if p]
+        minus_n = [m for m in minus if m]
+
+        # 1) Deleção pura já efetivada
+        if minus_n and not plus and not has_ctx:
+            if all(m not in file_set for m in minus_n):
+                return True, "Deleção pura: linhas ausentes do arquivo."
+
+        # 2) Adição pura já efetivada
+        if plus_n and not minus and not has_ctx:
+            if all(p in file_set for p in plus_n):
+                return True, "Adição pura: linhas já presentes no arquivo."
+
+        # 3) Misto já efetivado (mais forte)
+        if plus_n and minus_n:
+            add_ok = all(p in file_set for p in plus_n)
+            rem_ok = all(m not in file_set for m in minus_n)
+            if add_ok and rem_ok:
+                return True, "Misto: '-' ausentes e '+' presentes."
+
+        # 4) Bloco de contexto + '+' presente em ordem
+        # v6.19 — SÓ quando há '+' (adições). Para remoção pura com contexto,
+        # `block` = só contexto (ex: 'break; } } return; }'), padrão que existe
+        # em qualquer função C — daria falso idempotente.
+        # 4) Bloco de contexto + '+' presente em ordem
+        # v6.19 — SÓ quando há '+' (adições). Para remoção pura com contexto,
+        # `block` = só contexto (ex: 'break; } } return; }') — padrão que
+        # existe em qualquer função C → falso idempotente.
+        if plus_n:
+            block = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind in (' ', '+')]
+            if len(block) >= 2:
+                n = len(block)
+                for cand in range(len(norm_file) - n + 1):
+                    if norm_file[cand:cand + n] == block:
+                        return True, "Bloco completo já presente no arquivo."
+
+        # 4b) Remoção pura com contexto: removals AUSENTES + contexto PRESENTE
+        if minus_n and not plus_n and has_ctx:
+            if all(m not in file_set for m in minus_n if m):
+                ctx_norms = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind == ' ']
+                ctx_norms = [c for c in ctx_norms if c]
+                if ctx_norms and any(c in file_set for c in ctx_norms):
+                    return True, "Remoção pura com contexto: removals ausentes."
+
+
+        # 5) ADD_ONLY com todas as adições já presentes (fuzzy, preserva #include)
+
+        return False, ""
+
+    @classmethod
     def _desconcatenate_line(cls, line: str, indent_unit: str = "    ") -> List[str]:
         """
         v6.8 — Desconcatena uma linha de contexto que veio do XML minificado.
@@ -624,11 +683,10 @@ class PatchSurgeon:
             # 4. Duplicação parcial? (linhas `+` que já existem fora do range)
             plus_lines = [cls._normalize_line(pl.text) for pl in hunk.lines if pl.kind == '+']
             if plus_lines:
-                # v6.14 — Delegar aplicação ao método isolado
-                modified_lines, effective_old_len = cls._apply_single_hunk(
-                    modified_lines, hunk, loc, match_type, contig_len, replacement
-                )
-
+                # v6.20 — Fix: `modified_lines`/`replacement`/`expected_old_len`
+                # não existem no escopo de preflight (era dead code com NameError
+                # latente). Calcula expected_old_len local.
+                expected_old_len = sum(1 for pl in hunk.lines if pl.kind in (' ', '-'))
                 hunk_range = set(range(loc, loc + expected_old_len))
                 already_in_file = 0
                 for plus in plus_lines:
@@ -733,7 +791,8 @@ class PatchSurgeon:
         apply: bool = False,
         root: Path = None,
         run_checkshot: bool = True,
-        force: bool = False,   # ← NOVO
+        force: bool = False,
+        shadow_dir: Optional[Path] = None,   # v6.21
     ) -> Dict:
         report = {
             "target": str(patch.target_path),
@@ -852,6 +911,36 @@ class PatchSurgeon:
                     })
                     report["hunks_applied"] += 1
                     continue
+
+            # Hunk puramente de remoção cujas linhas NÃO existem
+            # no arquivo → já foi aplicado (idempotente)
+            removal_norms = [
+                cls._normalize_line(pl.text)
+                for pl in hunk.lines if pl.kind == '-'
+            ]
+            has_addition = any(pl.kind == '+' for pl in hunk.lines)
+            has_context  = any(pl.kind == ' ' for pl in hunk.lines)
+            if removal_norms and not has_addition and not has_context:
+                file_norms = {cls._normalize_line(l) for l in modified_lines}
+                if not any(r in file_norms for r in removal_norms if r):
+                    report["details"].append({
+                        "hunk": idx,
+                        "status": "JÁ APLICADO (idempotente)",
+                        "reason": "Deleção pura: nenhuma das linhas "
+                                  "removidas existe mais no arquivo.",
+                        "match_type": "IDEMPOTENT_DELETION",
+                    })
+                    report["hunks_applied"] += 1
+                    continue
+
+            is_idem, why = cls._is_idempotent_hunk(modified_lines, hunk)
+            if is_idem:
+                report["details"].append({
+                    "hunk": idx, "status": "JÁ APLICADO (idempotente)",
+                    "reason": why, "match_type": "IDEMPOTENT",
+                })
+                report["hunks_applied"] += 1
+                continue
 
             loc, offset, match_type, contig_len, candidates = cls.find_hunk_location(modified_lines, hunk)
 
@@ -1156,6 +1245,17 @@ class PatchSurgeon:
                         report["syntax_ok"] = False
                         report["errors"].append(_reason)
                         modified_lines = list(working_lines)
+
+                        if match_type == 'NONE':
+                            from doxoade.commands.moddify_sys.mody_semantic import classify_rejection
+                            verdict, conf, hint = classify_rejection(hunk.lines, working_lines)
+                            report["details"].append({
+                                "hunk": idx,
+                                "semantic_verdict": verdict,       # ← NOVO
+                                "semantic_confidence": conf,       # ← NOVO
+                                "semantic_hint": hint,             # ← NOVO
+                            })
+
                         report["hunks_failed"] += 1
                         break
 
@@ -1245,23 +1345,42 @@ class PatchSurgeon:
                         f"{Fore.RED}  ↳ CheckShot indisponível: {e}{Style.RESET_ALL}"
                     )
 
+        # v6.21 — write target: real ou shadow
         if apply:
             if report["hunks_failed"] > 0:
                 report["errors"].append("Cirurgia cancelada: Hunks com conflito rejeitados.")
             elif not report["syntax_ok"]:
                 report["errors"].append("Cirurgia cancelada: Rejeitado pela auditoria de sintaxe.")
             else:
+                write_target = patch.target_path
+                is_shadow = shadow_dir is not None
+                if is_shadow:
+                    # Calcula shadow path relativo ao root
+                    try:
+                        rel = patch.target_path.relative_to(root)
+                    except (ValueError, AttributeError):
+                        rel = Path(patch.target_path.name)
+                    write_target = shadow_dir / rel
+
                 try:
-                    bak_file = patch.target_path.with_suffix(patch.target_path.suffix + '.bak')
-                    shutil.copy2(patch.target_path, bak_file)
-                    with open(patch.target_path, 'w', encoding='utf-8') as f:
+                    write_target.parent.mkdir(parents=True, exist_ok=True)
+                    if not is_shadow:
+                        # Backup só no write real
+                        bak_file = patch.target_path.with_suffix(
+                            patch.target_path.suffix + '.bak')
+                        shutil.copy2(patch.target_path, bak_file)
+                    with open(write_target, 'w', encoding='utf-8') as f:
                         f.write(new_content)
-                    if chronos_recorder and hasattr(chronos_recorder, 'log_file_change'):
-                        chronos_recorder.log_file_change(
-                            str(patch.target_path), original_content, new_content,
-                            operation='PATCH'
-                        )
-                    report["saved"] = True
+                    if not is_shadow:
+                        if chronos_recorder and hasattr(chronos_recorder, 'log_file_change'):
+                            chronos_recorder.log_file_change(
+                                str(patch.target_path), original_content, new_content,
+                                operation='PATCH'
+                            )
+                        report["saved"] = True
+                    else:
+                        report["shadow_saved"] = True
+                        report["shadow_path"] = str(write_target)
                 except Exception as e:
                     report["errors"].append(f"Falha na gravação em disco: {e}")
 
@@ -1285,11 +1404,44 @@ class PatchSurgeon:
               help="Compara sintaxe antes/depois do patch (detecta regressões).")
 @click.option('--force', is_flag=True,
               help="Aplica mesmo se o patch introduzir novo erro de sintaxe.")
+@click.option('--freestyle/--no-freestyle', default=None,
+              help="Ativa parser tolerante para formatos decorados "
+                   "('- | ', '+ | ', 'Mudanças perto da linha N'). "
+                   "Auto-detectado se omitido.")
+@click.option('--verbose', '-v', is_flag=True,
+              help="Mostra parser escolhido, confidence e match_type por hunk.")
+@click.option('--report', '-r', type=click.Path(dir_okay=False),
+              help="Grava relatório JSON estruturado (para debugging/CI).")
+@click.option('--parser', 'parser_name', default=None,
+              help="Força um parser específico: unified, decorated-pipe, "
+                   "markdown-fence, numbered-padding, loose-pairs.")
+@click.option('--shadow', is_flag=True,
+              help='Simula --apply em .doxoade/mody_patch/ (não toca nos reais).')
+@click.option('--shadow-dir', default='.doxoade/mody_patch',
+              help='Diretório do sandbox para --shadow.')
+@click.option('--code', is_flag=True,
+              help='Mostra o código original vs. o patch por hunk (console).')
 @click.pass_context
-def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_arg,
-              keep_snapshot, report_pre_broken, force):
+def mod_patch(ctx, patch_file, apply, archive, generate, checkshot,
+              checkshot_arg, keep_snapshot, report_pre_broken, force,
+              freestyle, verbose, report, parser_name, code,
+              shadow, shadow_dir):
     """🩹 Aplica cirurgicamente patches com Ancoragem Estrutural Forte (v6.2)."""
     root = Path.cwd().resolve()
+
+    # v6.21 — Shadow mode init
+    if shadow and apply:
+        click.secho("✘ --shadow e --apply são mutuamente exclusivos.", fg='red')
+        ctx.exit(1)
+    shadow_path = None
+    if shadow:
+        shadow_path = Path(shadow_dir).resolve()
+        if shadow_path.exists():
+            import shutil as _sh
+            _sh.rmtree(shadow_path)
+        shadow_path.mkdir(parents=True, exist_ok=True)
+        (shadow_path / ".gitignore").write_text("*\\n!.gitignore\\n", encoding='utf-8')
+
 
     if generate:
         if patch_file:
@@ -1366,9 +1518,53 @@ def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_ar
         click.secho(f"✘ Falha ao ler patch: {e}", fg='red')
         ctx.exit(1)
 
-    patches = UnifiedDiffParser.parse(raw_text, root)
+    from doxoade.commands.moddify_sys.mody_freestyle import (
+        FreestyleDiffParser, looks_like_freestyle,
+    )
+
+    use_freestyle = (
+        freestyle if freestyle is not None
+        else looks_like_freestyle(raw_text)
+    )
+
+    from doxoade.commands.moddify_sys.mody_parsers import detect_and_parse, _REGISTRY
+
+    patches, chosen_parser, confidence = detect_and_parse(
+        raw_text, root, force=parser_name or (
+            "unified" if freestyle is False else
+            "decorated-pipe" if freestyle is True else
+            None
+        )
+    )
+
+    if verbose:
+        click.echo(f"   🧪 Parser: {Fore.CYAN}{chosen_parser}{Style.RESET_ALL} "
+                f"(confidence {confidence:.2f})")
+
     if not patches:
-        click.secho("✘ Nenhuma assinatura válida de diff encontrada.", fg='red')
+        click.secho("✘ Nenhum formato de diff reconhecido.", fg='red')
+        click.echo(f"  {Fore.DIM}Parsers tentados: "
+                f"{', '.join(c.name for c in _REGISTRY)}{Style.RESET_ALL}")
+        click.echo(f"  {Fore.DIM}Use --report para inspecionar o texto normalizado."
+                f"{Style.RESET_ALL}")
+        ctx.exit(1)
+
+    if not patches:
+        # Fallback: tenta parser estrito (ou freestyle se ainda não tentou)
+        patches = UnifiedDiffParser.parse(raw_text, root)
+        if not patches and not use_freestyle:
+            patches = FreestyleDiffParser.parse(raw_text, root)
+
+    if not patches:
+        click.secho(
+            "✘ Nenhuma assinatura válida de diff encontrada.",
+            fg='red',
+        )
+        click.echo(
+            f"  {Fore.DIM}Dica: se o arquivo usa o formato decorado "
+            f"('- | ', '+ | ', 'Mudanças perto da linha N'), "
+            f"use '--freestyle'.{Style.RESET_ALL}"
+        )
         ctx.exit(1)
 
     from collections import OrderedDict
@@ -1391,6 +1587,8 @@ def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_ar
     total_critical_shots = 0
 
     click.echo("─" * 75)
+
+
     for p in patches:
         rel_name = (
             p.target_path.relative_to(root)
@@ -1399,12 +1597,14 @@ def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_ar
         )
         click.echo(f"📄 {Fore.WHITE}{Style.BRIGHT}{rel_name}{Style.RESET_ALL}")
 
+        _call_apply = apply or bool(shadow_path)
         res = PatchSurgeon.simulate_or_apply(
             p,
-            apply=apply,
+            apply=_call_apply,
             root=root,
-            run_checkshot=bool(checkshot) and not apply,
-            force=force,   # ← NOVO
+            run_checkshot=bool(checkshot) and not _call_apply,
+            force=force,
+            shadow_dir=shadow_path,
         )
 
         for det in res["details"]:
@@ -1444,6 +1644,8 @@ def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_ar
                 for ln in lines:
                     if '🔍 Linhas suspeitas' in ln or '🔶 Linhas com divergência' in ln:
                         click.echo(f"     {Fore.YELLOW}{ln}{Style.RESET_ALL}")
+                    elif '🧠 Semântica' in ln:
+                        click.echo(f"     {Fore.MAGENTA}{ln}{Style.RESET_ALL}")
                     elif ln.strip().startswith('L') and (':' in ln or '|' in ln):
                         click.echo(f"     {Fore.YELLOW}  {ln.strip()}{Style.RESET_ALL}")
                     else:
@@ -1456,6 +1658,34 @@ def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_ar
                 click.echo(f"     {Fore.CYAN}↳ 🔍 Pré-visualização da Cirurgia:{Style.RESET_ALL}")
                 for line in det["preview_snippet"].split('\n'):
                     click.echo(f"       {line}")
+
+        if code or report:
+            from doxoade.commands.moddify_sys.mody_code_view import CodeView
+            _file_lines = []
+            try:
+                with open(p.target_path, "r", encoding="utf-8", errors="ignore") as _f:
+                    _file_lines = _f.readlines()
+            except Exception:
+                _file_lines = []
+            for _det in res["details"]:
+                _idx = _det.get("hunk", 0) - 1
+                if not (0 <= _idx < len(p.hunks)):
+                    continue
+                _st = "APPLICABLE"
+                _s = _det.get("status", "")
+                if "IDEMPOTENT" in _s or "JÁ APLICADO" in _s:
+                    _st = "IDEMPOTENT"
+                elif "REJEITADO" in _s or "CONFLITO" in _s:
+                    _st = "REJECTED"
+                elif "AMBÍGUO" in _s:
+                    _st = "AMBIGUOUS"
+                _v = CodeView.build_hunk_view(
+                    p.target_path, _file_lines, p.hunks[_idx], _det, _st)
+                if code:
+                    click.echo(CodeView.render_console(_v))
+                if report:
+                    all_views.append(_v)
+
 
         if res.get("check_analysis"):
             click.echo(f"   {Fore.CYAN}🔬 Análise do Doxoade Check:{Style.RESET_ALL}")
@@ -1512,10 +1742,15 @@ def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_ar
 
         if res["hunks_failed"] == 0 and res["syntax_ok"] and not res["errors"]:
             successful_files += 1
-            if apply:
+            if apply and not shadow_path:
                 click.echo(
                     f"   {Fore.GREEN}✔ Cirurgia consolidada em disco "
                     f"(Backup: {rel_name}.bak){Style.RESET_ALL}"
+                )
+            if res.get("shadow_saved"):
+                click.echo(
+                    f"   {Fore.MAGENTA}✔ Shadow: {res['shadow_path']}"
+                    f"{Style.RESET_ALL}"
                 )
 
         total_hunks_applied += res["hunks_applied"]
@@ -1524,6 +1759,147 @@ def mod_patch(ctx, patch_file, apply, archive, generate, checkshot, checkshot_ar
         click.echo()
 
     click.echo("─" * 75)
+    # v6.22 — SHADOW DIFF detalhado (real vs shadow)
+    if shadow_path:
+        from difflib import unified_diff
+        import hashlib
+        import subprocess as _sp
+        import shutil as _sh_util
+        
+        def _hash_file(p):
+            h = hashlib.sha256()
+            h.update(p.read_bytes())
+            return h.hexdigest()[:16]
+        
+        def _count_lines_file(p):
+            try:
+                return len(p.read_text(encoding='utf-8', errors='ignore').splitlines())
+            except Exception:
+                return 0
+        
+        def _try_compile_shadow(path, ext):
+            if ext == '.py':
+                try:
+                    import py_compile, tempfile
+                    with tempfile.NamedTemporaryFile(suffix='.py', delete=False, mode='w', encoding='utf-8') as tf:
+                        tf.write(path.read_text(encoding='utf-8', errors='ignore'))
+                        tf_p = tf.name
+                    py_compile.compile(tf_p, doraise=True, cfile=None)
+                    Path(tf_p).unlink(missing_ok=True)
+                    return True, "py_compile OK"
+                except Exception as e:
+                    return False, "py_compile: " + str(e)[:100]
+            elif ext in ('.c', '.h', '.cpp', '.hpp', '.cc', '.cxx'):
+                try:
+                    cands = [
+                        _sh_util.which('gcc'), _sh_util.which('gcc.exe'),
+                        _sh_util.which('clang'), _sh_util.which('clang.exe'),
+                        _sh_util.which('cc'), _sh_util.which('cc.exe'),
+                    ]
+                    try:
+                        _wk = root / "thirdparty" / "w64devkit" / "bin" / "gcc.exe"
+                        if _wk.exists():
+                            cands.insert(0, str(_wk))
+                    except Exception:
+                        pass
+                    gcc = next((g for g in cands if g), None)
+                    if not gcc:
+                        return True, "compiler indisponivel (skip)"
+                    r = _sp.run(
+                        [gcc, '-fsyntax-only', str(path)],
+                        capture_output=True, text=True, timeout=20,
+                    )
+                    compiler = Path(gcc).stem
+                    if r.returncode == 0:
+                        return True, compiler + " -fsyntax-only OK"
+                    return False, compiler + ": " + (r.stderr or '')[:200]
+                except Exception as e:
+                    return True, "compile skip: " + str(e)[:80]
+            return True, "skip"
+        
+        click.echo()
+        click.echo(Fore.MAGENTA + "=" * 75 + Style.RESET_ALL)
+        click.echo(Fore.MAGENTA + "[SHADOW] DIFF v2 (real -> shadow)" + Style.RESET_ALL)
+        click.echo(Fore.DIM + "   Sandbox: " + str(shadow_path) + Style.RESET_ALL)
+        click.echo(Fore.MAGENTA + "=" * 75 + Style.RESET_ALL)
+        
+        _shadow_summary = []
+        for p in patches:
+            try:
+                _rel = p.target_path.relative_to(root)
+            except (ValueError, AttributeError):
+                _rel = Path(p.target_path.name)
+            _sf = shadow_path / _rel
+            
+            if not _sf.exists():
+                click.echo("  " + Fore.RED + "[FAIL] " + str(_rel) + Style.RESET_ALL + " -- shadow NAO escrito")
+                _shadow_summary.append((str(_rel), "BLOQUEADO", ""))
+                continue
+            
+            _real_exists = p.target_path.exists()
+            _real_size = p.target_path.stat().st_size if _real_exists else 0
+            _sh_size = _sf.stat().st_size
+            _real_hash = _hash_file(p.target_path) if _real_exists else "MISSING"
+            _sh_hash = _hash_file(_sf)
+            _real_lines = _count_lines_file(p.target_path) if _real_exists else 0
+            _sh_lines = _count_lines_file(_sf)
+            _identical = (_real_hash == _sh_hash)
+            
+            click.echo()
+            click.echo("  " + Fore.CYAN + "[FILE] " + str(_rel) + Style.RESET_ALL)
+            click.echo("     real  : hash=" + Fore.DIM + _real_hash + Style.RESET_ALL + "  size=" + str(_real_size) + "B  lines=" + str(_real_lines))
+            click.echo("     shadow: hash=" + Fore.DIM + _sh_hash + Style.RESET_ALL + "  size=" + str(_sh_size) + "B  lines=" + str(_sh_lines))
+            
+            if _identical:
+                click.echo("     " + Fore.GREEN + "[OK] IDENTICO (idempotente)" + Style.RESET_ALL)
+                _shadow_summary.append((str(_rel), "IDENTICO", ""))
+                continue
+            
+            _ok, _msg = _try_compile_shadow(_sf, p.target_path.suffix.lower())
+            _cc_color = Fore.GREEN if _ok else Fore.RED
+            _cc_icon = "[OK]" if _ok else "[FAIL]"
+            click.echo("     " + _cc_color + _cc_icon + " compile: " + _msg + Style.RESET_ALL)
+            
+            try:
+                _real_text = p.target_path.read_text(encoding='utf-8', errors='ignore') if _real_exists else ""
+                _sh_text = _sf.read_text(encoding='utf-8', errors='ignore')
+            except Exception as _e:
+                click.echo("     " + Fore.RED + "erro de leitura: " + str(_e) + Style.RESET_ALL)
+                _shadow_summary.append((str(_rel), "ERRO_LEITURA", ""))
+                continue
+            
+            _diff = list(unified_diff(
+                _real_text.splitlines(keepends=True),
+                _sh_text.splitlines(keepends=True),
+                fromfile="real/" + str(_rel), tofile="shadow/" + str(_rel), n=3,
+            ))
+            _added = sum(1 for l in _diff if l.startswith('+') and not l.startswith('+++'))
+            _removed = sum(1 for l in _diff if l.startswith('-') and not l.startswith('---'))
+            click.echo("     " + Fore.GREEN + "+" + str(_added) + Style.RESET_ALL + " " + Fore.RED + "-" + str(_removed) + Style.RESET_ALL + " linha(s)")
+            click.echo("     " + Fore.DIM + "-" * 60 + Style.RESET_ALL)
+            for _ln in _diff:
+                _ln = _ln.rstrip('\n')
+                if _ln.startswith('+++') or _ln.startswith('---') or _ln.startswith('@@'):
+                    click.echo("     " + Fore.CYAN + _ln + Style.RESET_ALL)
+                elif _ln.startswith('+'):
+                    click.echo("     " + Fore.GREEN + _ln + Style.RESET_ALL)
+                elif _ln.startswith('-'):
+                    click.echo("     " + Fore.RED + _ln + Style.RESET_ALL)
+                else:
+                    click.echo("     " + _ln)
+            
+            _status = "COMPILA" if _ok else "FALHA_COMPILE"
+            _shadow_summary.append((str(_rel), _status, ""))
+        
+        click.echo()
+        click.echo(Fore.MAGENTA + "=" * 75 + Style.RESET_ALL)
+        click.echo(Fore.MAGENTA + "[SUMMARY] SHADOW" + Style.RESET_ALL)
+        click.echo(Fore.MAGENTA + "=" * 75 + Style.RESET_ALL)
+        for _rel, _st, _ in _shadow_summary:
+            _c = {"IDENTICO": Fore.GREEN, "COMPILA": Fore.CYAN, "BLOQUEADO": Fore.RED}.get(_st, Fore.YELLOW)
+            click.echo("  " + _c + _st.ljust(15) + Style.RESET_ALL + "  " + str(_rel))
+        click.echo()
+    
     click.echo(
         f"📊 Resumo: {Fore.GREEN}{total_hunks_applied} hunks válidos{Style.RESET_ALL} | "
         f"{Fore.RED if total_hunks_failed > 0 else Fore.DIM}{total_hunks_failed} falhas{Style.RESET_ALL}"

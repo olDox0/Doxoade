@@ -20,6 +20,18 @@ static int translate_capstone(const cs_insn *ci, uint64_t offset, uint64_t va,
     strncpy(out->mnemonic, ci->mnemonic, sizeof(out->mnemonic) - 1);
     strncpy(out->op_str, ci->op_str, sizeof(out->op_str) - 1);
 
+    /* Fallback: se imediato não foi preenchido pelo Capstone,
+     * parsear op_str (formato "0x...") para extrair o alvo.
+     * Necessário porque Capstone pode não expor X86_OP_IMM para alguns
+     * CALLs, mas coloca o endereço absoluto no op_str. */
+    if (out->imm == 0 && out->imm_size == 0 && out->op_str[0] != '\0') {
+        const char *p = out->op_str;
+        if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+            out->imm = (int64_t)strtoull(p, NULL, 16);
+            out->imm_size = 4;
+        }
+    }
+
     if (ci->detail) {
         const cs_x86 *x86 = &ci->detail->x86;
 
@@ -50,6 +62,18 @@ static int translate_capstone(const cs_insn *ci, uint64_t offset, uint64_t va,
                 out->rip_target = va + ci->size + x86->operands[i].mem.disp;
                 out->has_rip_target = 1;
                 break;
+            }
+        }
+
+        /* Fallback: se imediato não foi preenchido pelo Capstone,
+         * parsear op_str (formato "0x...") para extrair o alvo.
+         * Necessário porque Capstone não expõe X86_OP_IMM para alguns
+         * CALLs, mas coloca o endereço absoluto no op_str. */
+        if (out->imm == 0 && out->imm_size == 0 && out->op_str[0] != '\0') {
+            const char *p = out->op_str;
+            if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+                out->imm = (int64_t)strtoull(p, NULL, 16);
+                out->imm_size = 4;
             }
         }
     }

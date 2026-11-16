@@ -124,7 +124,12 @@ int cfg_build(const InsnList *insns, CFG *out,
                 /* alvo: bloco cujo start_va == target */
                 if (target != 0) {
                     int ti = find_block_by_start(out, target);
-                    if (ti >= 0) succ[nsucc++] = (uint32_t)ti;
+                    if (ti >= 0) {
+                        int is_dup = 0;
+                        for (uint32_t k = 0; k < nsucc; k++)
+                            if (succ[k] == (uint32_t)ti) { is_dup = 1; break; }
+                        if (!is_dup) succ[nsucc++] = (uint32_t)ti;
+                    }
                 }
                 break;
             }
@@ -168,6 +173,33 @@ int cfg_build(const InsnList *insns, CFG *out,
         }
     }
 
+    /* Calcular predecessores (reverse edges). */
+    for (uint32_t b = 0; b < nblocks; b++) {
+        blocks[b].pred_count = 0;
+        blocks[b].pred_idx = NULL;
+    }
+    for (uint32_t b = 0; b < nblocks; b++) {
+        for (uint32_t s = 0; s < blocks[b].succ_count; s++) {
+            uint32_t t = blocks[b].succ_idx[s];
+            BasicBlock *tb = &blocks[t];
+            tb->pred_idx = (uint32_t *)realloc(
+                tb->pred_idx, (tb->pred_count + 1) * sizeof(uint32_t));
+            if (tb->pred_idx == NULL) {
+                snprintf(err_buf, err_buf_size, "realloc pred falhou");
+                for (uint32_t k = 0; k < nblocks; k++) {
+                    free(blocks[k].succ_idx);
+                    free(blocks[k].pred_idx);
+                }
+                free(blocks);
+                out->blocks = NULL;
+                out->block_count = 0;
+                free(is_leader);
+                return -1;
+            }
+            tb->pred_idx[tb->pred_count++] = b;
+        }
+    }
+
     free(is_leader);
     return 0;
 }
@@ -178,6 +210,7 @@ void cfg_free(CFG *cfg)
     if (cfg->blocks != NULL) {
         for (uint32_t i = 0; i < cfg->block_count; i++) {
             free(cfg->blocks[i].succ_idx);
+            free(cfg->blocks[i].pred_idx);
         }
         free(cfg->blocks);
         cfg->blocks = NULL;
@@ -192,10 +225,10 @@ void cfg_print_text(const CFG *cfg, const InsnList *insns, FILE *out)
             insns->count, cfg->block_count);
     for (uint32_t b = 0; b < cfg->block_count; b++) {
         const BasicBlock *blk = &cfg->blocks[b];
-        fprintf(out, "Bloco %u: 0x%llx - 0x%llx (%u instruções)\n",
+        fprintf(out, "Bloco %u: 0x%llx - 0x%llx (%u insn, %u pred, %u succ)\n",
                 b, (unsigned long long)blk->start_va,
-                (unsigned long long)blk->end_va, blk->insn_count);
-
+                (unsigned long long)blk->end_va, blk->insn_count,
+                blk->pred_count, blk->succ_count);
         /* Primeira e última instrução do bloco (para leitura rápida). */
         const DecodedInsn *first = &insns->insns[blk->insn_first];
         const DecodedInsn *last  = &insns->insns[blk->insn_first + blk->insn_count - 1];

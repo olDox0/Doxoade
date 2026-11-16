@@ -8,6 +8,7 @@
 #include "cfg.h"
 #include "functions.h"
 #include "patterns.h"
+#include "xref.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -239,6 +240,8 @@ static int test_functions(const char *path, const PreIR *ir)
         if (strcmp(ir->sections[i].name, ".text") == 0) { text = &ir->sections[i]; break; }
     if (text == NULL) { report(WARN, "sem .text, pulando"); return 0; }
 
+    DecodeMode mode = (strcmp(ir->format, "PE32") == 0) ? DECODE_MODE_32 : DECODE_MODE_64;
+
     FileReader fr;
     char err[256] = {0};
     if (file_reader_open(path, &fr, err, sizeof(err)) != 0) {
@@ -247,7 +250,7 @@ static int test_functions(const char *path, const PreIR *ir)
     uint64_t va_base = ir->image_base + text->va - text->raw_offset;
     InsnList insns = {0};
     if (disasm_collect(&fr, text->raw_offset, text->raw_size, va_base,
-                       BACKEND_NATIVE, &insns, err, sizeof(err)) != 0) {
+                       BACKEND_NATIVE, mode, &insns, err, sizeof(err)) != 0) {
         report(FAIL, "disasm_collect: %s", err);
         file_reader_close(&fr); g_fail++; return -1;
     }
@@ -289,6 +292,8 @@ static int test_patterns(const char *path, const PreIR *ir)
         if (strcmp(ir->sections[i].name, ".text") == 0) { text = &ir->sections[i]; break; }
     if (text == NULL) { report(WARN, "sem .text, pulando"); return 0; }
 
+    DecodeMode mode = (strcmp(ir->format, "PE32") == 0) ? DECODE_MODE_32 : DECODE_MODE_64;
+
     FileReader fr;
     char err[256] = {0};
     if (file_reader_open(path, &fr, err, sizeof(err)) != 0) {
@@ -297,7 +302,7 @@ static int test_patterns(const char *path, const PreIR *ir)
     uint64_t va_base = ir->image_base + text->va - text->raw_offset;
     InsnList insns = {0};
     if (disasm_collect(&fr, text->raw_offset, text->raw_size, va_base,
-                       BACKEND_NATIVE, &insns, err, sizeof(err)) != 0) {
+                       BACKEND_CAPSTONE, mode, &insns, err, sizeof(err)) != 0) {
         report(FAIL, "disasm_collect: %s", err);
         file_reader_close(&fr); g_fail++; return -1;
     }
@@ -334,6 +339,52 @@ static int test_patterns(const char *path, const PreIR *ir)
     return 0;
 }
 
+static int test_xref(const char *path, const PreIR *ir)
+{
+    printf("[XREF]\n");
+    if (path == NULL || ir == NULL) { report(INFO, "sem alvo, pulando"); return 0; }
+    const SectionEntry *text = NULL;
+    for (uint32_t i = 0; i < ir->section_count; i++)
+        if (strcmp(ir->sections[i].name, ".text") == 0) { text = &ir->sections[i]; break; }
+    if (text == NULL) { report(WARN, "sem .text, pulando"); return 0; }
+
+    DecodeMode mode = (strcmp(ir->format, "PE32") == 0) ? DECODE_MODE_32 : DECODE_MODE_64;
+    FileReader fr;
+    char err[256] = {0};
+    if (file_reader_open(path, &fr, err, sizeof(err)) != 0) {
+        report(FAIL, "abrir: %s", err); g_fail++; return -1;
+    }
+    uint64_t va_base = ir->image_base + text->va - text->raw_offset;
+    InsnList insns = {0};
+    if (disasm_collect(&fr, text->raw_offset, text->raw_size, va_base,
+                       BACKEND_CAPSTONE, mode, &insns, err, sizeof(err)) != 0) {
+        report(FAIL, "disasm_collect: %s", err);
+        file_reader_close(&fr); g_fail++; return -1;
+    }
+    CFG cfg = {0};
+    if (cfg_build(&insns, &cfg, err, sizeof(err)) == 0) {
+        FunctionList fl = {0};
+        functions_build(&insns, &cfg, ir, &fl, err, sizeof(err));
+
+        XrefList xl = {0};
+        if (xref_build(&insns, ir, &fl, &xl, err, sizeof(err)) != 0) {
+            report(FAIL, "xref_build: %s", err);
+        } else {
+            uint32_t c, j, jc, r, a;
+            xref_stats(&xl, &c, &j, &jc, &r, &a);
+            report(PASS, "%u referências", xl.count);
+            report(INFO, "calls=%u jmps=%u jccs=%u rips=%u abs=%u",
+                   c, j, jc, r, a);
+            xref_free(&xl);
+        }
+        functions_free(&fl);
+        cfg_free(&cfg);
+    }
+    free(insns.insns);
+    file_reader_close(&fr);
+    return 0;
+}
+
 /* ---------- doctor_run ---------- */
 int doctor_run(const char *target)
 {
@@ -358,6 +409,8 @@ int doctor_run(const char *target)
         test_functions(target, &ir);
         printf("\n");
         test_patterns(target, &ir);
+        printf("\n");
+        test_xref(target, &ir);
         printf("\n");
         pre_ir_free(&ir);
     }

@@ -8,6 +8,7 @@
 #include "functions.h"
 #include "doctor.h"
 #include "patterns.h"
+#include "xref.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,6 +42,7 @@ int main(int argc, char **argv)
     else if (strcmp(argv[1], "cfg") == 0)  { mode = 2; argi = 2; }
     else if (strcmp(argv[1], "doctor") == 0) { mode = 3; argi = 2; }
     else if (strcmp(argv[1], "functions") == 0) { mode = 4; argi = 2; }
+    else if (strcmp(argv[1], "xref") == 0) { mode = 5; argi = 2; }
 
     if (mode == 3) {
         const char *target = (argi < argc) ? argv[argi] : NULL;
@@ -50,6 +52,8 @@ int main(int argc, char **argv)
     if (argi >= argc) { print_usage(argv[0]); return 1; }
     const char *path = argv[argi++];
 
+    uint64_t xref_target = 0;
+    int has_xref_target = 0;
     uint64_t off = 0, len = 0;
     int has_off = 0, has_len = 0;
     int fmt_dot = 0;
@@ -72,6 +76,8 @@ int main(int argc, char **argv)
             { backend = parse_backend(a + 10); }
         else if (strcmp(a, "--backend") == 0 && argi + 1 < argc)
             { backend = parse_backend(argv[++argi]); }
+        else if (strcmp(a, "--target") == 0 && argi + 1 < argc)
+            { xref_target = strtoull(argv[++argi], NULL, 0); has_xref_target = 1; }
         argi++;
     }
 
@@ -169,6 +175,50 @@ int main(int argc, char **argv)
             }
         }
     }
+
+    else if (mode == 5) {
+        const SectionEntry *text = NULL;
+        for (uint32_t i = 0; i < ir.section_count; i++)
+            if (strcmp(ir.sections[i].name, ".text") == 0) { text = &ir.sections[i]; break; }
+        if (text == NULL) {
+            fprintf(stderr, "doxreveng: seção .text não encontrada\n");
+            rc = -1;
+        } else {
+            uint64_t va_base = ir.image_base + text->va - text->raw_offset;
+            InsnList insns = {0};
+            if (disasm_collect(&fr, text->raw_offset, text->raw_size, va_base,
+                            backend, decode_mode, &insns, err, sizeof(err)) != 0) {
+                fprintf(stderr, "doxreveng: erro no disasm: %s\n", err);
+                rc = -1;
+            } else {
+                CFG cfg = {0};
+                if (cfg_build(&insns, &cfg, err, sizeof(err)) == 0) {
+                    FunctionList fl = {0};
+                    functions_build(&insns, &cfg, &ir, &fl, err, sizeof(err));
+
+                    XrefList xl = {0};
+                    if (xref_build(&insns, &ir, &fl, &xl, err, sizeof(err)) != 0) {
+                        fprintf(stderr, "doxreveng: erro em xref: %s\n", err);
+                        rc = -1;
+                    } else {
+                        if (has_xref_target) {
+                            int n = xref_print_target(&xl, xref_target, stdout);
+                            fprintf(stderr, "doxreveng: %d referência(s) para 0x%llx\n",
+                                    n, (unsigned long long)xref_target);
+                        } else {
+                            xref_print_text(&xl, stdout);
+                            fprintf(stderr, "doxreveng: %u referências\n", xl.count);
+                        }
+                        xref_free(&xl);
+                    }
+                    functions_free(&fl);
+                    cfg_free(&cfg);
+                }
+                free(insns.insns);
+            }
+        }
+    }
+
     else {
         if (pre_ir_print_json(&ir, stdout) != 0) {
             fprintf(stderr, "doxreveng: erro ao serializar JSON\n");

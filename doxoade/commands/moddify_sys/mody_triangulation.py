@@ -27,6 +27,15 @@ if TYPE_CHECKING:
 INDENT_UNIT = "    "  # 4 espaços (PEP 8)
 BODY_INDENT_THRESHOLD = 2  # mínimo de espaços para considerar "indentado"
 
+# v1.1 — Tokens genéricos que NÃO servem como âncora (aparecem em qualquer
+# função C: `}`, `break;`, `return;` etc.). Sem esse filtro, o post_header
+# `}` casa no primeiro `}` do arquivo e o patch cai no lugar errado.
+_GENERIC_HEADERS = frozenset({
+    '}', '{', '};', ');', ')', '(', ']', '[',
+    'break;', 'break', 'continue;', 'continue',
+    'return;', 'else', 'else {', 'do {',
+    'default:', 'case',
+})
 
 # --- DESCONCATENAÇÃO ---
 
@@ -84,7 +93,8 @@ def collect_headers(hunk: "Hunk", indices: List[int], indent_unit: str = INDENT_
     """
     Coleta os cabeçalhos (linhas NÃO indentadas) de um conjunto de índices.
     
-    Usado para pré-âncora e pós-âncora.
+    Usado para pré-âncora e pós-âncora. Exclui tokens genéricos
+    ('}', '{', 'break;', 'return;', etc.) — v1.1.
     """
     headers = []
     for i in indices:
@@ -93,6 +103,8 @@ def collect_headers(hunk: "Hunk", indices: List[int], indent_unit: str = INDENT_
             norm = normalize_line(l)
             if not norm:
                 continue
+            if norm in _GENERIC_HEADERS:
+                continue  # v1.1: exclui genéricos (falso post_header)
             if not is_indented(l):
                 headers.append(norm)
     return headers
@@ -206,8 +218,8 @@ def find_addition_location(
             
             return (best, best - target_idx, 'ADD_ONLY_PRE_HEADER', 0, pre_matches[:5])
     
-    # ── Camada 2: pós-âncora sozinha ───────────────────────────────
-    if post_headers:
+    # ── Camada 2: pós-âncora sozinha (exige 2+ p/ evitar falso positivo) ──
+    if post_headers and len(post_headers) >= 2:
         post_matches = []
         for cand in range(len(file_lines) - len(post_headers) + 1):
             if normalize_file_slice(file_lines, cand, len(post_headers)) == post_headers:

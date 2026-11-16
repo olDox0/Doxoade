@@ -142,7 +142,7 @@ local function phanto_capture(module_name, fn, ...)
         local record = _last_errors[err_key]
         
         -- 🛡️ ANTI-FLOOD: Se o mesmo erro ocorreu nos últimos 3 segundos, silencia no log e conta repetições
-        if record and (now - record.time) < 3.0 then
+        if record and (now - record.time) < 10.0 then
             record.count = record.count + 1
             _inside_capture = false
             return err

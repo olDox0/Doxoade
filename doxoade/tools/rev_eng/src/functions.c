@@ -120,7 +120,8 @@ int functions_build(const InsnList *insns, const CFG *cfg, const PreIR *ir,
     /* 1b. Alvos de CALL direta */
     for (uint32_t i = 0; i < insns->count; i++) {
         uint64_t target = 0;
-        if (insn_control_flow(&insns->insns[i], &target) == CF_CALL && target != 0) {
+        ControlFlowType cf = insn_control_flow(&insns->insns[i], &target);
+        if (cf == CF_CALL && target != 0) {
             if (target >= text_start && target < text_end) {
                 if (cand_count >= cand_cap) {
                     cand_cap *= 2;

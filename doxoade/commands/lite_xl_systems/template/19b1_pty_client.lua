@@ -256,9 +256,9 @@ function PTYClient:poll()
 
         local capture = rawget(_G, "phanto_capture")
         if capture then
-            capture("pty_handshake", function()
-                error(string.format("PTY alive:false → %s (python=%s)", err_msg, python_exe), 2)
-            end)
+          capture("pty_handshake", function()
+            error("PTY alive:false → " .. err_msg, 2)
+          end)
         end
 
         if core.log then

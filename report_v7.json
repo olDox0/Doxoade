@@ -1,0 +1,754 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-11-16T02:33:43.748536",
+  "patch_file": "patch_diff.txt",
+  "parser": {
+    "name": "unified",
+    "confidence": 0.95
+  },
+  "run_summary": {
+    "total_files": 3,
+    "total_hunks": 5,
+    "applicable": 3,
+    "idempotent": 1,
+    "rejected": 0,
+    "ambiguous": 1
+  },
+  "files": [
+    {
+      "path": "C:\\Users\\olDox222\\Documents\\A20251122\\DOSSIER\\Altonomo\\Projetos_E_Programas\\Projeto OADE\\doxoade\\doxoade\\tools\\rev_eng\\src\\decoder_backend.c",
+      "hunks": [
+        {
+          "hunk_idx": 1,
+          "old_start": 1,
+          "status": "IDEMPOTENT",
+          "match_type": "IDEMPOTENT",
+          "loc": null,
+          "offset": 0,
+          "patch": {
+            "before": [
+              "#include \"decoder_backend.h\"",
+              "#include <stdio.h>",
+              "#include <string.h>"
+            ],
+            "removals": [],
+            "additions": [
+              "#include <stdlib.h>   /* strtoull */"
+            ],
+            "after": [
+              "",
+              "#ifdef HAVE_CAPSTONE",
+              "#include <capstone/capstone.h>"
+            ]
+          },
+          "file_snippet": {
+            "range": [
+              1,
+              15
+            ],
+            "lines": [
+              {
+                "num": 1,
+                "text": "/* decoder_backend.c — implementação da interface de backend */"
+              },
+              {
+                "num": 2,
+                "text": "#include \"decoder_backend.h\""
+              },
+              {
+                "num": 3,
+                "text": ""
+              },
+              {
+                "num": 4,
+                "text": "#include <stdio.h>"
+              },
+              {
+                "num": 5,
+                "text": "#include <string.h>"
+              },
+              {
+                "num": 6,
+                "text": ""
+              },
+              {
+                "num": 7,
+                "text": "#ifdef HAVE_CAPSTONE"
+              },
+              {
+                "num": 8,
+                "text": "#include <capstone/capstone.h>"
+              },
+              {
+                "num": 9,
+                "text": "#include <capstone/x86.h>"
+              },
+              {
+                "num": 10,
+                "text": ""
+              },
+              {
+                "num": 11,
+                "text": "/* Traduz cs_insn para DecodedInsn, preenchendo mnemonic/op_str"
+              },
+              {
+                "num": 12,
+                "text": " * (para fmt_insn) e opcode/reg/imm (para insn_control_flow). */"
+              },
+              {
+                "num": 13,
+                "text": "static int translate_capstone(const cs_insn *ci, uint64_t offset, uint64_t va,"
+              },
+              {
+                "num": 14,
+                "text": "                              DecodedInsn *out)"
+              },
+              {
+                "num": 15,
+                "text": "{"
+              }
+            ]
+          },
+          "rule_trace": [
+            {
+              "rule_id": "R01_IDEMPOTENCE_CHECK",
+              "phase": "idempotence",
+              "inputs": {
+                "removals_count": 0,
+                "additions_count": 1,
+                "has_context": true
+              },
+              "output": "PASS",
+              "detail": "Hunk já aplicado anteriormente. Pulando.",
+              "candidates": []
+            }
+          ],
+          "rejection_reason": "Hunk já aplicado anteriormente. Pulando.",
+          "suggestions": [],
+          "semantic_verdict": "UNKNOWN",
+          "semantic_confidence": 0.0,
+          "semantic_hint": ""
+        },
+        {
+          "hunk_idx": 2,
+          "old_start": 45,
+          "status": "APPLICABLE",
+          "match_type": "ADD_ONLY_POST_HEADER",
+          "loc": 43,
+          "offset": -2,
+          "patch": {
+            "before": [
+              "                break;",
+              "            }",
+              "        }"
+            ],
+            "removals": [],
+            "additions": [
+              "",
+              "        /* Fallback: se imediato não foi preenchido pelo Capstone,",
+              "         * parsear op_str (formato \"0x...\") para extrair o alvo.",
+              "         * Necessário porque Capstone não expõe X86_OP_IMM para alguns",
+              "         * CALLs, mas coloca o endereço absoluto no op_str. */",
+              "        if (out->imm == 0 && out->imm_size == 0 && out->op_str[0] != '\\0') {",
+              "            const char *p = out->op_str;",
+              "            if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {",
+              "                out->imm = (int64_t)strtoull(p, NULL, 16);",
+              "                out->imm_size = 4;",
+              "            }",
+              "        }"
+            ],
+            "after": [
+              "    }",
+              "    return (int)out->length;",
+              "}"
+            ]
+          },
+          "file_snippet": {
+            "range": [
+              40,
+              59
+            ],
+            "lines": [
+              {
+                "num": 40,
+                "text": "            out->reg   = (out->modrm >> 3) & 7;"
+              },
+              {
+                "num": 41,
+                "text": "            out->rm    = out->modrm & 7;"
+              },
+              {
+                "num": 42,
+                "text": "            out->has_modrm = 1;"
+              },
+              {
+                "num": 43,
+                "text": "        }"
+              },
+              {
+                "num": 44,
+                "text": ""
+              },
+              {
+                "num": 45,
+                "text": "        /* Captura RIP-relative memory operand (para anotação de símbolos). */"
+              },
+              {
+                "num": 46,
+                "text": "        for (int i = 0; i < x86->op_count; i++) {"
+              },
+              {
+                "num": 47,
+                "text": "            if (x86->operands[i].type == X86_OP_MEM &&"
+              },
+              {
+                "num": 48,
+                "text": "                x86->operands[i].mem.base == X86_REG_RIP) {"
+              },
+              {
+                "num": 49,
+                "text": "                /* RIP aponta para a próxima instrução. */"
+              },
+              {
+                "num": 50,
+                "text": "                out->rip_target = va + ci->size + x86->operands[i].mem.disp;"
+              },
+              {
+                "num": 51,
+                "text": "                out->has_rip_target = 1;"
+              },
+              {
+                "num": 52,
+                "text": "                break;"
+              },
+              {
+                "num": 53,
+                "text": "            }"
+              },
+              {
+                "num": 54,
+                "text": "        }"
+              },
+              {
+                "num": 55,
+                "text": "    }"
+              },
+              {
+                "num": 56,
+                "text": "    return (int)out->length;"
+              },
+              {
+                "num": 57,
+                "text": "}"
+              },
+              {
+                "num": 58,
+                "text": "#endif /* HAVE_CAPSTONE */"
+              },
+              {
+                "num": 59,
+                "text": ""
+              }
+            ]
+          },
+          "rule_trace": [
+            {
+              "rule_id": "R01_IDEMPOTENCE_CHECK",
+              "phase": "idempotence",
+              "inputs": {
+                "removals_count": 0,
+                "additions_count": 12,
+                "has_context": true
+              },
+              "output": "FAIL",
+              "detail": "not idempotent",
+              "candidates": []
+            },
+            {
+              "rule_id": "R06_ADD_POST_HEADER",
+              "phase": "match",
+              "inputs": {},
+              "output": "PASS",
+              "detail": "ADD_ONLY_POST_HEADER",
+              "candidates": []
+            }
+          ],
+          "rejection_reason": "",
+          "suggestions": [],
+          "semantic_verdict": "UNKNOWN",
+          "semantic_confidence": 0.0,
+          "semantic_hint": ""
+        }
+      ]
+    },
+    {
+      "path": "C:\\Users\\olDox222\\Documents\\A20251122\\DOSSIER\\Altonomo\\Projetos_E_Programas\\Projeto OADE\\doxoade\\doxoade\\tools\\rev_eng\\src\\doctor.c",
+      "hunks": [
+        {
+          "hunk_idx": 1,
+          "old_start": 340,
+          "status": "AMBIGUOUS",
+          "match_type": "EXACT_MULTI",
+          "loc": 252,
+          "offset": 0,
+          "patch": {
+            "before": [
+              "    uint64_t va_base = ir->image_base + text->va - text->raw_offset;",
+              "    InsnList insns = {0};",
+              "    if (disasm_collect(&fr, text->raw_offset, text->raw_size, va_base,"
+            ],
+            "removals": [
+              "                       BACKEND_NATIVE, mode, &insns, err, sizeof(err)) != 0) {"
+            ],
+            "additions": [
+              "                       BACKEND_CAPSTONE, mode, &insns, err, sizeof(err)) != 0) {"
+            ],
+            "after": [
+              "        report(FAIL, \"disasm_collect: %s\", err);",
+              "        file_reader_close(&fr); g_fail++; return -1;",
+              "    }"
+            ]
+          },
+          "file_snippet": {
+            "range": [
+              335,
+              354
+            ],
+            "lines": [
+              {
+                "num": 335,
+                "text": "    functions_free(&fl);"
+              },
+              {
+                "num": 336,
+                "text": "    cfg_free(&cfg);"
+              },
+              {
+                "num": 337,
+                "text": "    free(insns.insns);"
+              },
+              {
+                "num": 338,
+                "text": "    file_reader_close(&fr);"
+              },
+              {
+                "num": 339,
+                "text": "    return 0;"
+              },
+              {
+                "num": 340,
+                "text": "}"
+              },
+              {
+                "num": 341,
+                "text": ""
+              },
+              {
+                "num": 342,
+                "text": "/* ---------- doctor_run ---------- */"
+              },
+              {
+                "num": 343,
+                "text": "int doctor_run(const char *target)"
+              },
+              {
+                "num": 344,
+                "text": "{"
+              },
+              {
+                "num": 345,
+                "text": "    printf(\"=== doxreveng doctor ===\\n\\n\");"
+              },
+              {
+                "num": 346,
+                "text": "    test_build();"
+              },
+              {
+                "num": 347,
+                "text": "    printf(\"\\n\");"
+              },
+              {
+                "num": 348,
+                "text": "    test_file_reader(target);"
+              },
+              {
+                "num": 349,
+                "text": "    printf(\"\\n\");"
+              },
+              {
+                "num": 350,
+                "text": ""
+              },
+              {
+                "num": 351,
+                "text": "    PreIR ir;"
+              },
+              {
+                "num": 352,
+                "text": "    memset(&ir, 0, sizeof(ir));"
+              },
+              {
+                "num": 353,
+                "text": "    int have_ir = (test_pe_parser(target, &ir) == 0);"
+              },
+              {
+                "num": 354,
+                "text": "    printf(\"\\n\");"
+              }
+            ]
+          },
+          "rule_trace": [
+            {
+              "rule_id": "R01_IDEMPOTENCE_CHECK",
+              "phase": "idempotence",
+              "inputs": {
+                "removals_count": 1,
+                "additions_count": 1,
+                "has_context": true
+              },
+              "output": "FAIL",
+              "detail": "not idempotent",
+              "candidates": []
+            },
+            {
+              "rule_id": "R03_EXACT_REMOVAL_MULTI",
+              "phase": "match",
+              "inputs": {
+                "n_candidates": 2
+              },
+              "output": "PASS",
+              "detail": "chose nearest of old_start",
+              "candidates": [
+                252,
+                184
+              ]
+            }
+          ],
+          "rejection_reason": "Linha(s) de remoção aparecem em 2 lugar(es): L252, L184. Usando o mais próximo de old_start (L252).",
+          "suggestions": [],
+          "semantic_verdict": "UNKNOWN",
+          "semantic_confidence": 0.0,
+          "semantic_hint": ""
+        },
+        {
+          "hunk_idx": 1,
+          "old_start": 340,
+          "status": "APPLICABLE",
+          "match_type": "EXACT_MULTI",
+          "loc": 252,
+          "offset": -88,
+          "patch": {
+            "before": [
+              "    uint64_t va_base = ir->image_base + text->va - text->raw_offset;",
+              "    InsnList insns = {0};",
+              "    if (disasm_collect(&fr, text->raw_offset, text->raw_size, va_base,"
+            ],
+            "removals": [
+              "                       BACKEND_NATIVE, mode, &insns, err, sizeof(err)) != 0) {"
+            ],
+            "additions": [
+              "                       BACKEND_CAPSTONE, mode, &insns, err, sizeof(err)) != 0) {"
+            ],
+            "after": [
+              "        report(FAIL, \"disasm_collect: %s\", err);",
+              "        file_reader_close(&fr); g_fail++; return -1;",
+              "    }"
+            ]
+          },
+          "file_snippet": {
+            "range": [
+              335,
+              354
+            ],
+            "lines": [
+              {
+                "num": 335,
+                "text": "    functions_free(&fl);"
+              },
+              {
+                "num": 336,
+                "text": "    cfg_free(&cfg);"
+              },
+              {
+                "num": 337,
+                "text": "    free(insns.insns);"
+              },
+              {
+                "num": 338,
+                "text": "    file_reader_close(&fr);"
+              },
+              {
+                "num": 339,
+                "text": "    return 0;"
+              },
+              {
+                "num": 340,
+                "text": "}"
+              },
+              {
+                "num": 341,
+                "text": ""
+              },
+              {
+                "num": 342,
+                "text": "/* ---------- doctor_run ---------- */"
+              },
+              {
+                "num": 343,
+                "text": "int doctor_run(const char *target)"
+              },
+              {
+                "num": 344,
+                "text": "{"
+              },
+              {
+                "num": 345,
+                "text": "    printf(\"=== doxreveng doctor ===\\n\\n\");"
+              },
+              {
+                "num": 346,
+                "text": "    test_build();"
+              },
+              {
+                "num": 347,
+                "text": "    printf(\"\\n\");"
+              },
+              {
+                "num": 348,
+                "text": "    test_file_reader(target);"
+              },
+              {
+                "num": 349,
+                "text": "    printf(\"\\n\");"
+              },
+              {
+                "num": 350,
+                "text": ""
+              },
+              {
+                "num": 351,
+                "text": "    PreIR ir;"
+              },
+              {
+                "num": 352,
+                "text": "    memset(&ir, 0, sizeof(ir));"
+              },
+              {
+                "num": 353,
+                "text": "    int have_ir = (test_pe_parser(target, &ir) == 0);"
+              },
+              {
+                "num": 354,
+                "text": "    printf(\"\\n\");"
+              }
+            ]
+          },
+          "rule_trace": [
+            {
+              "rule_id": "R01_IDEMPOTENCE_CHECK",
+              "phase": "idempotence",
+              "inputs": {
+                "removals_count": 1,
+                "additions_count": 1,
+                "has_context": true
+              },
+              "output": "FAIL",
+              "detail": "not idempotent",
+              "candidates": []
+            },
+            {
+              "rule_id": "R03_EXACT_REMOVAL_MULTI",
+              "phase": "match",
+              "inputs": {
+                "n_candidates": 0
+              },
+              "output": "PASS",
+              "detail": "chose nearest of old_start",
+              "candidates": []
+            },
+            {
+              "rule_id": "R99_LARGE_OFFSET",
+              "phase": "validate",
+              "inputs": {
+                "offset": -88
+              },
+              "output": "WARN",
+              "detail": "large offset — verify anchor",
+              "candidates": []
+            }
+          ],
+          "rejection_reason": "",
+          "suggestions": [],
+          "semantic_verdict": "UNKNOWN",
+          "semantic_confidence": 0.0,
+          "semantic_hint": ""
+        }
+      ]
+    },
+    {
+      "path": "C:\\Users\\olDox222\\Documents\\A20251122\\DOSSIER\\Altonomo\\Projetos_E_Programas\\Projeto OADE\\doxoade\\doxoade\\tools\\rev_eng\\src\\functions.c",
+      "hunks": [
+        {
+          "hunk_idx": 1,
+          "old_start": 140,
+          "status": "APPLICABLE",
+          "match_type": "EXACT",
+          "loc": 124,
+          "offset": -16,
+          "patch": {
+            "before": [
+              "    for (uint32_t i = 0; i < insns->count; i++) {",
+              "        uint64_t target = 0;",
+              "        ControlFlowType cf = insn_control_flow(&insns->insns[i], &target);"
+            ],
+            "removals": [
+              "        if (cf == CF_CALL) {",
+              "            if (getenv(\"DOXREVENG_DEBUG_CALLS\") && insns->insns[i].mnemonic[0]) {",
+              "                fprintf(stderr, \"[CALL-DBG] %-8s %-28s tgt=0x%llx in=[%d,%d)\\n\",",
+              "                        insns->insns[i].mnemonic, insns->insns[i].op_str,",
+              "                        (unsigned long long)target,",
+              "                        (int)(target >= text_start),",
+              "                        (int)(target < text_end));",
+              "            }",
+              "            if (target != 0 && target >= text_start && target < text_end) {"
+            ],
+            "additions": [
+              "        if (cf == CF_CALL && target != 0) {",
+              "            if (target >= text_start && target < text_end) {"
+            ],
+            "after": [
+              "                if (cand_count >= cand_cap) {",
+              "                    cand_cap *= 2;",
+              "                    cands = (Candidate *)realloc(cands, cand_cap * sizeof(Candidate));"
+            ]
+          },
+          "file_snippet": {
+            "range": [
+              135,
+              154
+            ],
+            "lines": [
+              {
+                "num": 135,
+                "text": "                    cands = (Candidate *)realloc(cands, cand_cap * sizeof(Candidate));"
+              },
+              {
+                "num": 136,
+                "text": "                    if (cands == NULL) {"
+              },
+              {
+                "num": 137,
+                "text": "                        snprintf(err_buf, err_buf_size, \"realloc candidates falhou\");"
+              },
+              {
+                "num": 138,
+                "text": "                        return -1;"
+              },
+              {
+                "num": 139,
+                "text": "                    }"
+              },
+              {
+                "num": 140,
+                "text": "                }"
+              },
+              {
+                "num": 141,
+                "text": "                cands[cand_count].va = target;"
+              },
+              {
+                "num": 142,
+                "text": "                cands[cand_count].name = NULL;"
+              },
+              {
+                "num": 143,
+                "text": "                cand_count++;"
+              },
+              {
+                "num": 144,
+                "text": "            }"
+              },
+              {
+                "num": 145,
+                "text": "        }"
+              },
+              {
+                "num": 146,
+                "text": "    }"
+              },
+              {
+                "num": 147,
+                "text": ""
+              },
+              {
+                "num": 148,
+                "text": "    /* --- 2. Ordenar e deduplicar (prefere nome) --- */"
+              },
+              {
+                "num": 149,
+                "text": "    qsort(cands, cand_count, sizeof(Candidate), cmp_candidate);"
+              },
+              {
+                "num": 150,
+                "text": ""
+              },
+              {
+                "num": 151,
+                "text": "    uint32_t unique = 0;"
+              },
+              {
+                "num": 152,
+                "text": "    for (uint32_t i = 0; i < cand_count; i++) {"
+              },
+              {
+                "num": 153,
+                "text": "        if (unique > 0 && cands[i].va == cands[unique - 1].va) {"
+              },
+              {
+                "num": 154,
+                "text": "            if (cands[unique - 1].name == NULL && cands[i].name != NULL)"
+              }
+            ]
+          },
+          "rule_trace": [
+            {
+              "rule_id": "R01_IDEMPOTENCE_CHECK",
+              "phase": "idempotence",
+              "inputs": {
+                "removals_count": 9,
+                "additions_count": 2,
+                "has_context": true
+              },
+              "output": "FAIL",
+              "detail": "not idempotent",
+              "candidates": []
+            },
+            {
+              "rule_id": "R02_EXACT_REMOVAL",
+              "phase": "match",
+              "inputs": {},
+              "output": "PASS",
+              "detail": "unique block at loc=124",
+              "candidates": []
+            },
+            {
+              "rule_id": "R99_LARGE_OFFSET",
+              "phase": "validate",
+              "inputs": {
+                "offset": -16
+              },
+              "output": "WARN",
+              "detail": "large offset — verify anchor",
+              "candidates": []
+            }
+          ],
+          "rejection_reason": "",
+          "suggestions": [],
+          "semantic_verdict": "UNKNOWN",
+          "semantic_confidence": 0.0,
+          "semantic_hint": ""
+        }
+      ]
+    }
+  ]
+}

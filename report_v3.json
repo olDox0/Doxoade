@@ -1,0 +1,1401 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-11-15T22:25:14.153835",
+  "patch_file": "patch_diff.txt",
+  "parser": {
+    "name": "unified",
+    "confidence": 0.95
+  },
+  "run_summary": {
+    "total_files": 3,
+    "total_hunks": 10,
+    "applicable": 1,
+    "idempotent": 6,
+    "rejected": 3,
+    "ambiguous": 0
+  },
+  "files": [
+    {
+      "path": "C:\\Users\\olDox222\\Documents\\A20251122\\DOSSIER\\Altonomo\\Projetos_E_Programas\\Projeto OADE\\doxoade\\doxoade\\tools\\rev_eng\\src\\doctor.c",
+      "hunks": [
+        {
+          "hunk_idx": 1,
+          "old_start": 395,
+          "status": "IDEMPOTENT",
+          "match_type": "IDEMPOTENT",
+          "loc": null,
+          "offset": 0,
+          "patch": {
+            "before": [
+              "    if (operation == NULL) operation = \"parse\";",
+              ""
+            ],
+            "removals": [
+              "    int n = decode_one_backend(backend, DECODE_MODE_64, &fake, 0, 0,",
+              "                               &dummy, err, sizeof(err));",
+              ""
+            ],
+            "additions": [],
+            "after": [
+              "    /* 1. Arquivo existe e é legível? */",
+              "    FileReader fr;",
+              "    char err[256] = {0};"
+            ]
+          },
+          "file_snippet": {
+            "range": [
+              390,
+              409
+            ],
+            "lines": [
+              {
+                "num": 390,
+                "text": "    }"
+              },
+              {
+                "num": 391,
+                "text": ""
+              },
+              {
+                "num": 392,
+                "text": "    /* 2. É um PE válido? */"
+              },
+              {
+                "num": 393,
+                "text": "    PreIR ir;"
+              },
+              {
+                "num": 394,
+                "text": "    if (pe_parse(&fr, &ir, err, sizeof(err)) != 0) {"
+              },
+              {
+                "num": 395,
+                "text": "        fprintf(stderr, \"[PREFLIGHT] '%s' não é PE válido: %s\\n\", path, err);"
+              },
+              {
+                "num": 396,
+                "text": "        file_reader_close(&fr);"
+              },
+              {
+                "num": 397,
+                "text": "        return 1;"
+              },
+              {
+                "num": 398,
+                "text": "    }"
+              },
+              {
+                "num": 399,
+                "text": ""
+              },
+              {
+                "num": 400,
+                "text": "    /* 3. Backend escolhido está disponível? */"
+              },
+              {
+                "num": 401,
+                "text": "    {"
+              },
+              {
+                "num": 402,
+                "text": "        DecodedInsn dummy;"
+              },
+              {
+                "num": 403,
+                "text": "        uint8_t one_byte = 0x90;  /* nop */"
+              },
+              {
+                "num": 404,
+                "text": "        FileReader fake = {0};"
+              },
+              {
+                "num": 405,
+                "text": "        fake.data = &one_byte;"
+              },
+              {
+                "num": 406,
+                "text": "        fake.size = 1;"
+              },
+              {
+                "num": 407,
+                "text": "        int n = decode_one_backend(backend, DECODE_MODE_64, &fake, 0, 0,"
+              },
+              {
+                "num": 408,
+                "text": "                                   &dummy, err, sizeof(err));"
+              },
+              {
+                "num": 409,
+                "text": "        if (n <= 0) {"
+              }
+            ]
+          },
+          "rule_trace": [
+            {
+              "rule_id": "R01_IDEMPOTENCE_CHECK",
+              "phase": "idempotence",
+              "inputs": {
+                "removals_count": 3,
+                "additions_count": 0,
+                "has_context": true
+              },
+              "output": "PASS",
+              "detail": "Hunk já aplicado anteriormente. Pulando.",
+              "candidates": []
+            }
+          ],
+          "rejection_reason": "Hunk já aplicado anteriormente. Pulando.",
+          "suggestions": []
+        },
+        {
+          "hunk_idx": 2,
+          "old_start": 410,
+          "status": "IDEMPOTENT",
+          "match_type": "IDEMPOTENT",
+          "loc": null,
+          "offset": 0,
+          "patch": {
+            "before": [
+              "        FileReader fake = {0};",
+              "        fake.data = &one_byte;",
+              "        fake.size = 1;"
+            ],
+            "removals": [
+              "        int n = decode_one_backend(backend, &fake, 0, 0, &dummy, err, sizeof(err));"
+            ],
+            "additions": [
+              "        int n = decode_one_backend(backend, DECODE_MODE_64, &fake, 0, 0,",
+              "                                   &dummy, err, sizeof(err));"
+            ],
+            "after": [
+              "        if (n <= 0) {",
+              "            fprintf(stderr, \"[PREFLIGHT] backend %s indisponível: %s\\n\",",
+              "                    backend == BACKEND_CAPSTONE ? \"capstone\" : \"native\", err);"
+            ]
+          },
+          "file_snippet": {
+            "range": [
+              405,
+              424
+            ],
+            "lines": [
+              {
+                "num": 405,
+                "text": "        fake.data = &one_byte;"
+              },
+              {
+                "num": 406,
+                "text": "        fake.size = 1;"
+              },
+              {
+                "num": 407,
+                "text": "        int n = decode_one_backend(backend, DECODE_MODE_64, &fake, 0, 0,"
+              },
+              {
+                "num": 408,
+                "text": "                                   &dummy, err, sizeof(err));"
+              },
+              {
+                "num": 409,
+                "text": "        if (n <= 0) {"
+              },
+              {
+                "num": 410,
+                "text": "            fprintf(stderr, \"[PREFLIGHT] backend %s indisponível: %s\\n\","
+              },
+              {
+                "num": 411,
+                "text": "                    backend == BACKEND_CAPSTONE ? \"capstone\" : \"native\", err);"
+              },
+              {
+                "num": 412,
+                "text": "            pre_ir_free(&ir);"
+              },
+              {
+                "num": 413,
+                "text": "            file_reader_close(&fr);"
+              },
+              {
+                "num": 414,
+                "text": "            return 1;"
+              },
+              {
+                "num": 415,
+                "text": "        }"
+              },
+              {
+                "num": 416,
+                "text": "    }"
+              },
+              {
+                "num": 417,
+                "text": ""
+              },
+              {
+                "num": 418,
+                "text": "    /* 4. Se a operação precisa de .text, ele existe e tem tamanho? */"
+              },
+              {
+                "num": 419,
+                "text": "    if (strcmp(operation, \"disasm\") == 0 || strcmp(operation, \"cfg\") == 0"
+              },
+              {
+                "num": 420,
+                "text": "        || strcmp(operation, \"functions\") == 0) {"
+              },
+              {
+                "num": 421,
+                "text": "        const SectionEntry *text = NULL;"
+              },
+              {
+                "num": 422,
+                "text": "        for (uint32_t i = 0; i < ir.section_count; i++)"
+              },
+              {
+                "num": 423,
+                "text": "            if (strcmp(ir.sections[i].name, \".text\") == 0) { text = &ir.sections[i]; break; }"
+              },
+              {
+                "num": 424,
+                "text": "        if (text == NULL) {"
+              }
+            ]
+          },
+          "rule_trace": [
+            {
+              "rule_id": "R01_IDEMPOTENCE_CHECK",
+              "phase": "idempotence",
+              "inputs": {
+                "removals_count": 1,
+                "additions_count": 2,
+                "has_context": true
+              },
+              "output": "PASS",
+              "detail": "Hunk já aplicado anteriormente. Pulando.",
+              "candidates": []
+            }
+          ],
+          "rejection_reason": "Hunk já aplicado anteriormente. Pulando.",
+          "suggestions": []
+        }
+      ]
+    },
+    {
+      "path": "C:\\Users\\olDox222\\Documents\\A20251122\\DOSSIER\\Altonomo\\Projetos_E_Programas\\Projeto OADE\\doxoade\\doxoade\\tools\\rev_eng\\src\\patterns.c",
+      "hunks": [
+        {
+          "hunk_idx": 1,
+          "old_start": 1,
+          "status": "APPLICABLE",
+          "match_type": "ADD_ONLY_POST_HEADER",
+          "loc": 8,
+          "offset": 7,
+          "patch": {
+            "before": [
+              "#include \"patterns.h\"",
+              "#include <string.h>",
+              "#include <stdio.h>"
+            ],
+            "removals": [],
+            "additions": [
+              "#include <stdlib.h>   /* getenv */"
+            ],
+            "after": [
+              "",
+              "static const DecodedInsn *first_insn(const InsnList *insns, const CFG *cfg,",
+              "                                     const FunctionEntry *fe) {"
+            ]
+          },
+          "file_snippet": {
+            "range": [
+              1,
+              15
+            ],
+            "lines": [
+              {
+                "num": 1,
+                "text": "/* patterns.c — detecção de padrões de arquitetura x86-64 (Fase 5b) */"
+              },
+              {
+                "num": 2,
+                "text": "#include \"patterns.h\""
+              },
+              {
+                "num": 3,
+                "text": "#include <string.h>"
+              },
+              {
+                "num": 4,
+                "text": "#include <stdio.h>"
+              },
+              {
+                "num": 5,
+                "text": "#include <stdlib.h>"
+              },
+              {
+                "num": 6,
+                "text": ""
+              },
+              {
+                "num": 7,
+                "text": "/* Retorna a primeira instrução da função. */"
+              },
+              {
+                "num": 8,
+                "text": "static const DecodedInsn *first_insn(const InsnList *insns, const CFG *cfg,"
+              },
+              {
+                "num": 9,
+                "text": "                                     const FunctionEntry *fe) {"
+              },
+              {
+                "num": 10,
+                "text": "    if (cfg == NULL || fe->block_first == UINT32_MAX) return NULL;"
+              },
+              {
+                "num": 11,
+                "text": "    uint32_t idx = cfg->blocks[fe->block_first].insn_first;"
+              },
+              {
+                "num": 12,
+                "text": "    if (idx >= insns->count) return NULL;"
+              },
+              {
+                "num": 13,
+                "text": "    return &insns->insns[idx];"
+              },
+              {
+                "num": 14,
+                "text": "}"
+              },
+              {
+                "num": 15,
+                "text": ""
+              }
+            ]
+          },
+          "rule_trace": [
+            {
+              "rule_id": "R01_IDEMPOTENCE_CHECK",
+              "phase": "idempotence",
+              "inputs": {
+                "removals_count": 0,
+                "additions_count": 1,
+                "has_context": true
+              },
+              "output": "FAIL",
+              "detail": "not idempotent",
+              "candidates": []
+            },
+            {
+              "rule_id": "R06_ADD_POST_HEADER",
+              "phase": "match",
+              "inputs": {},
+              "output": "PASS",
+              "detail": "ADD_ONLY_POST_HEADER",
+              "candidates": []
+            },
+            {
+              "rule_id": "R99_SUSPICIOUS_INDENTED_ADD",
+              "phase": "validate",
+              "inputs": {
+                "loc": 9
+              },
+              "output": "WARN",
+              "detail": "insertion into indented line: 'const FunctionEntry *fe) {'",
+              "candidates": []
+            },
+            {
+              "rule_id": "R99_LARGE_OFFSET",
+              "phase": "validate",
+              "inputs": {
+                "offset": 7
+              },
+              "output": "WARN",
+              "detail": "large offset — verify anchor",
+              "candidates": []
+            }
+          ],
+          "rejection_reason": "",
+          "suggestions": []
+        },
+        {
+          "hunk_idx": 2,
+          "old_start": 100,
+          "status": "REJECTED",
+          "match_type": "NONE",
+          "loc": 100,
+          "offset": 0,
+          "patch": {
+            "before": [],
+            "removals": [
+              "    if (insn->op_str[0] && strstr(insn->op_str, \"gs:0x28\")) return 1;",
+              "    return 0;"
+            ],
+            "additions": [
+              "    if (!insn->op_str[0]) return 0;",
+              "    if (strstr(insn->op_str, \"gs:\")) return 1;  /* 64-bit */",
+              "    if (strstr(insn->op_str, \"fs:\")) return 1;  /* 32-bit */",
+              "    return 0;"
+            ],
+            "after": [
+              "}",
+              "",
+              "static int detect_canary(const InsnList *insns, const CFG *cfg, const FunctionEntry *fe) {"
+            ]
+          },
+          "file_snippet": {
+            "range": [
+              95,
+              114
+            ],
+            "lines": [
+              {
+                "num": 95,
+                "text": ""
+              },
+              {
+                "num": 96,
+                "text": "static int detect_canary(const InsnList *insns, const CFG *cfg, const FunctionEntry *fe) {"
+              },
+              {
+                "num": 97,
+                "text": "    return scan_function(insns, cfg, fe, canary_cb);"
+              },
+              {
+                "num": 98,
+                "text": "}"
+              },
+              {
+                "num": 99,
+                "text": ""
+              },
+              {
+                "num": 100,
+                "text": "/* --- Detecção de tail call --- */"
+              },
+              {
+                "num": 101,
+                "text": ""
+              },
+              {
+                "num": 102,
+                "text": "static int is_jmp_mnemo(const char *m) {"
+              },
+              {
+                "num": 103,
+                "text": "    return strncmp(m, \"jmp\", 3) == 0 && m[3] == '\\0';"
+              },
+              {
+                "num": 104,
+                "text": "}"
+              },
+              {
+                "num": 105,
+                "text": ""
+              },
+              {
+                "num": 106,
+                "text": "static int is_ret_mnemo(const char *m) {"
+              },
+              {
+                "num": 107,
+                "text": "    return strncmp(m, \"ret\", 3) == 0;"
+              },
+              {
+                "num": 108,
+                "text": "}"
+              },
+              {
+                "num": 109,
+                "text": ""
+              },
+              {
+                "num": 110,
+                "text": "static int detect_tailcall(const InsnList *insns, const CFG *cfg, const FunctionEntry *fe) {"
+              },
+              {
+                "num": 111,
+                "text": "    if (fe->block_count <= 1) return 0;"
+              },
+              {
+                "num": 112,
+                "text": "    uint32_t b0 = fe->block_first;"
+              },
+              {
+                "num": 113,
+                "text": "    uint32_t bN = b0 + fe->block_count;"
+              },
+              {
+                "num": 114,
+                "text": "    for (uint32_t b = b0; b < bN && b < cfg->block_count; b++) {"
+              }
+            ]
+          },
+          "rule_trace": [
+            {
+              "rule_id": "R01_IDEMPOTENCE_CHECK",
+              "phase": "idempotence",
+              "inputs": {
+                "removals_count": 2,
+                "additions_count": 4,
+                "has_context": true
+              },
+              "output": "FAIL",
+              "detail": "not idempotent",
+              "candidates": []
+            },
+            {
+              "rule_id": "R02_EXACT_REMOVAL",
+              "phase": "match",
+              "inputs": {},
+              "output": "FAIL",
+              "detail": "no contiguous block",
+              "candidates": []
+            },
+            {
+              "rule_id": "R03_EXACT_REMOVAL_MULTI",
+              "phase": "match",
+              "inputs": {},
+              "output": "SKIP",
+              "detail": "n/a",
+              "candidates": []
+            },
+            {
+              "rule_id": "R04_PARTIAL_STREAK",
+              "phase": "match",
+              "inputs": {},
+              "output": "FAIL",
+              "detail": "streak 0 below threshold",
+              "candidates": []
+            },
+            {
+              "rule_id": "R11_REJECT",
+              "phase": "decision",
+              "inputs": {},
+              "output": "FAIL",
+              "detail": "no strategy succeeded",
+              "candidates": []
+            }
+          ],
+          "rejection_reason": "Contexto insuficiente: 0 de 5 linhas contíguas.\n      Arquivo: doxoade\\tools\\rev_eng\\src\\patterns.c\n      Hunk #2 (old_start=100)\n      Esperado (linhas ' ' e '-'):\n        -  100 |     if (insn->op_str[0] && strstr(insn->op_str, \"gs:0x28\")) return 1;\n        -  101 |     return 0;\n           106 | }\n           107 | \n           108 | static int detect_canary(const InsnList *insns, const CFG *cfg, const FunctionEntry *fe) {\n      Encontrado (linhas 95-114 do arquivo):\n          95 | \n          96 | static int detect_canary(const InsnList *insns, const CFG *cfg, const FunctionEntry *fe) {\n          97 |     return scan_function(insns, cfg, fe, canary_cb);\n          98 | }\n          99 | \n         100 | /* --- Detecção de tail call --- */\n         101 | \n         102 | static int is_jmp_mnemo(const char *m) {\n         103 |     return strncmp(m, \"jmp\", 3) == 0 && m[3] == '\\0';\n         104 | }\n         105 | \n         106 | static int is_ret_mnemo(const char *m) {\n         107 |     return strncmp(m, \"ret\", 3) == 0;\n         108 | }\n         109 | \n      ⚠ Linhas de adição já existem no arquivo (fix provavelmente aplicado).\n      🔍 Linhas suspeitas (já presentes no arquivo):\n        L41:     return 0;\n\n      🔶 Linhas com divergência (patch esperava vs. arquivo tem):\n        L2: arquivo='#include \"patterns.h\"' | patch='if (insn->op_str[0] && strstr(insn->op_str, \"gs:0x28\")) return 1;'\n        L2: arquivo='#include \"patterns.h\"' | patch='return 0;'\n\n      Sugestões:\n        • doxoade mody show doxoade\\tools\\rev_eng\\src\\patterns.c --part 95-114\n        • # Fix provavelmente já aplicado. Verifique antes de re-aplicar.",
+          "suggestions": []
+        },
+        {
+          "hunk_idx": 3,
+          "old_start": 120,
+          "status": "IDEMPOTENT",
+          "match_type": "IDEMPOTENT",
+          "loc": null,
+          "offset": 0,
+          "patch": {
+            "before": [
+              "}",
+              "",
+              "static int detect_tailcall(const InsnList *insns, const CFG *cfg, const FunctionEntry *fe) {"
+            ],
+            "removals": [
+              "    if (fe->block_count <= 1) return 0;",
+              "    const DecodedInsn *last = last_insn(insns, cfg, fe);",
+              "    if (last == NULL) return 0;",
+              "    if (last->mnemonic[0] && is_jmp_mnemo(last->mnemonic)) {",
+              "        if (last->imm_size > 0) {",
+              "            uint64_t target = (uint64_t)last->imm;",
+              "            if (target < fe->start_va || target >= fe->end_va) return 1;"
+            ],
+            "additions": [
+              "    if (fe->block_count <= 1) return 0;",
+              "    uint32_t b0 = fe->block_first;",
+              "    uint32_t bN = b0 + fe->block_count;",
+              "    for (uint32_t b = b0; b < bN && b < cfg->block_count; b++) {",
+              "        uint32_t last_i = cfg->blocks[b].insn_first + cfg->blocks[b].insn_count - 1;",
+              "        if (last_i >= insns->count) continue;",
+              "        const DecodedInsn *last = &insns->insns[last_i];",
+              "        if (last->mnemonic[0] && is_jmp_mnemo(last->mnemonic)) {",
+              "            if (last->imm_size > 0) {",
+              "                uint64_t target = (uint64_t)last->imm;",
+              "                if (target < fe->start_va || target >= fe->end_va) return 1;",
+              "            }"
+            ],
+            "after": [
+              "        }",
+              "    }",
+              "    return 0;",
+              "}"
+            ]
+          },
+          "file_snippet": {
+            "range": [
+              115,
+              134
+            ],
+            "lines": [
+              {
+                "num": 115,
+                "text": "        uint32_t last_i = cfg->blocks[b].insn_first + cfg->blocks[b].insn_count - 1;"
+              },
+              {
+                "num": 116,
+                "text": "        if (last_i >= insns->count) continue;"
+              },
+              {
+                "num": 117,
+                "text": "        const DecodedInsn *last = &insns->insns[last_i];"
+              },
+              {
+                "num": 118,
+                "text": "        if (last->mnemonic[0] && is_jmp_mnemo(last->mnemonic)) {"
+              },
+              {
+                "num": 119,
+                "text": "            if (last->imm_size > 0) {"
+              },
+              {
+                "num": 120,
+                "text": "                uint64_t target = (uint64_t)last->imm;"
+              },
+              {
+                "num": 121,
+                "text": "                if (target < fe->start_va || target >= fe->end_va) return 1;"
+              },
+              {
+                "num": 122,
+                "text": "            }"
+              },
+              {
+                "num": 123,
+                "text": "        }"
+              },
+              {
+                "num": 124,
+                "text": "    }"
+              },
+              {
+                "num": 125,
+                "text": "    return 0;"
+              },
+              {
+                "num": 126,
+                "text": "}"
+              },
+              {
+                "num": 127,
+                "text": ""
+              },
+              {
+                "num": 128,
+                "text": "/* --- Detecção de switch table --- */"
+              },
+              {
+                "num": 129,
+                "text": ""
+              },
+              {
+                "num": 130,
+                "text": "static int switch_cb(const DecodedInsn *insn) {"
+              },
+              {
+                "num": 131,
+                "text": "    if (insn->mnemonic[0] && is_jmp_mnemo(insn->mnemonic)) {"
+              },
+              {
+                "num": 132,
+                "text": "        if (getenv(\"DOXREVENG_DEBUG_PATTERNS\")) {"
+              },
+              {
+                "num": 133,
+                "text": "            fprintf(stderr, \"[SWITCH-CHK] %s %s\\n\", insn->mnemonic, insn->op_str);"
+              },
+              {
+                "num": 134,
+                "text": "        }"
+              }
+            ]
+          },
+          "rule_trace": [
+            {
+              "rule_id": "R01_IDEMPOTENCE_CHECK",
+              "phase": "idempotence",
+              "inputs": {
+                "removals_count": 7,
+                "additions_count": 12,
+                "has_context": true
+              },
+              "output": "PASS",
+              "detail": "Hunk já aplicado anteriormente. Pulando.",
+              "candidates": []
+            }
+          ],
+          "rejection_reason": "Hunk já aplicado anteriormente. Pulando.",
+          "suggestions": []
+        },
+        {
+          "hunk_idx": 4,
+          "old_start": 155,
+          "status": "IDEMPOTENT",
+          "match_type": "IDEMPOTENT",
+          "loc": null,
+          "offset": 0,
+          "patch": {
+            "before": [],
+            "removals": [
+              "    if (insn->mnemonic[0] && is_jmp_mnemo(insn->mnemonic) &&",
+              "        insn->op_str[0]) {",
+              "        if (strstr(insn->op_str, \"*8\") || strstr(insn->op_str, \"*4\")) {"
+            ],
+            "additions": [
+              "    if (insn->mnemonic[0] && is_jmp_mnemo(insn->mnemonic)) {",
+              "        if (getenv(\"DOXREVENG_DEBUG_PATTERNS\")) {",
+              "            fprintf(stderr, \"[SWITCH-CHK] %s %s\\n\", insn->mnemonic, insn->op_str);",
+              "        }",
+              "        if (insn->op_str[0] &&",
+              "            (strstr(insn->op_str, \"*8\") || strstr(insn->op_str, \"*4\"))) {"
+            ],
+            "after": [
+              "            return 1;",
+              "        }",
+              "    }",
+              "    return 0;",
+              "}"
+            ]
+          },
+          "file_snippet": {
+            "range": [
+              150,
+              169
+            ],
+            "lines": [
+              {
+                "num": 150,
+                "text": "                     const PreIR *ir, FunctionList *fl,"
+              },
+              {
+                "num": 151,
+                "text": "                     char *err_buf, size_t err_buf_size) {"
+              },
+              {
+                "num": 152,
+                "text": "    (void)ir; (void)err_buf; (void)err_buf_size;"
+              },
+              {
+                "num": 153,
+                "text": "    for (uint32_t i = 0; i < fl->count; i++) {"
+              },
+              {
+                "num": 154,
+                "text": "        FunctionEntry *fe = &fl->entries[i];"
+              },
+              {
+                "num": 155,
+                "text": "        fe->flags = 0;"
+              },
+              {
+                "num": 156,
+                "text": "        if (detect_fp(insns, cfg, fe))       fe->flags |= FUNC_FLAG_FP;"
+              },
+              {
+                "num": 157,
+                "text": "        if (detect_canary(insns, cfg, fe))   fe->flags |= FUNC_FLAG_CANARY;"
+              },
+              {
+                "num": 158,
+                "text": "        if (detect_tailcall(insns, cfg, fe)) fe->flags |= FUNC_FLAG_TAILCALL;"
+              },
+              {
+                "num": 159,
+                "text": "        if (detect_switch(insns, cfg, fe))   fe->flags |= FUNC_FLAG_SWITCH;"
+              },
+              {
+                "num": 160,
+                "text": "        if (fe->call_count == 0)             fe->flags |= FUNC_FLAG_LEAF;"
+              },
+              {
+                "num": 161,
+                "text": "    }"
+              },
+              {
+                "num": 162,
+                "text": "    return 0;"
+              },
+              {
+                "num": 163,
+                "text": "}"
+              },
+              {
+                "num": 164,
+                "text": ""
+              },
+              {
+                "num": 165,
+                "text": "void patterns_format_flags(uint32_t flags, char *out, size_t out_size) {"
+              },
+              {
+                "num": 166,
+                "text": "    out[0] = '\\0';"
+              },
+              {
+                "num": 167,
+                "text": "    if (flags == 0) { snprintf(out, out_size, \"-\"); return; }"
+              },
+              {
+                "num": 168,
+                "text": "    size_t w = 0;"
+              },
+              {
+                "num": 169,
+                "text": "    if (flags & FUNC_FLAG_FP)        w += snprintf(out + w, out_size - w, \"fp \");"
+              }
+            ]
+          },
+          "rule_trace": [
+            {
+              "rule_id": "R01_IDEMPOTENCE_CHECK",
+              "phase": "idempotence",
+              "inputs": {
+                "removals_count": 3,
+                "additions_count": 6,
+                "has_context": true
+              },
+              "output": "PASS",
+              "detail": "Hunk já aplicado anteriormente. Pulando.",
+              "candidates": []
+            }
+          ],
+          "rejection_reason": "Hunk já aplicado anteriormente. Pulando.",
+          "suggestions": []
+        }
+      ]
+    },
+    {
+      "path": "C:\\Users\\olDox222\\Documents\\A20251122\\DOSSIER\\Altonomo\\Projetos_E_Programas\\Projeto OADE\\doxoade\\doxoade\\tools\\rev_eng\\src\\main.c",
+      "hunks": [
+        {
+          "hunk_idx": 1,
+          "old_start": 155,
+          "status": "IDEMPOTENT",
+          "match_type": "IDEMPOTENT",
+          "loc": null,
+          "offset": 0,
+          "patch": {
+            "before": [
+              "        file_reader_close(&fr);",
+              "        return 1;",
+              "    }"
+            ],
+            "removals": [],
+            "additions": [
+              "",
+              "    DecodeMode decode_mode = (strcmp(ir.format, \"PE32\") == 0)",
+              "                             ? DECODE_MODE_32 : DECODE_MODE_64;"
+            ],
+            "after": [
+              "",
+              "    int rc = 0;",
+              "    if (mode == 1) {"
+            ]
+          },
+          "file_snippet": {
+            "range": [
+              150,
+              169
+            ],
+            "lines": [
+              {
+                "num": 150,
+                "text": "                        if (functions_build(&insns, &cfg, &ir, &fl,"
+              },
+              {
+                "num": 151,
+                "text": "                                            err, sizeof(err)) != 0) {"
+              },
+              {
+                "num": 152,
+                "text": "                            fprintf(stderr, \"doxreveng: erro em functions: %s\\n\", err);"
+              },
+              {
+                "num": 153,
+                "text": "                            rc = -1;"
+              },
+              {
+                "num": 154,
+                "text": "                        } else {"
+              },
+              {
+                "num": 155,
+                "text": "                            /* NOVO: análise de padrões */"
+              },
+              {
+                "num": 156,
+                "text": "                            patterns_analyze(&insns, &cfg, &ir, &fl,"
+              },
+              {
+                "num": 157,
+                "text": "                                             err, sizeof(err));"
+              },
+              {
+                "num": 158,
+                "text": ""
+              },
+              {
+                "num": 159,
+                "text": "                            if (fmt_dot) functions_print_dot(&fl, stdout);"
+              },
+              {
+                "num": 160,
+                "text": "                            else functions_print_text(&fl, stdout);"
+              },
+              {
+                "num": 161,
+                "text": "                            fprintf(stderr, \"doxreveng: %u funções, %u chamadas externas\\n\","
+              },
+              {
+                "num": 162,
+                "text": "                                    fl.count, fl.external_calls);"
+              },
+              {
+                "num": 163,
+                "text": "                            functions_free(&fl);"
+              },
+              {
+                "num": 164,
+                "text": "                        }"
+              },
+              {
+                "num": 165,
+                "text": "                    }"
+              },
+              {
+                "num": 166,
+                "text": "                    cfg_free(&cfg);"
+              },
+              {
+                "num": 167,
+                "text": "                }"
+              },
+              {
+                "num": 168,
+                "text": "                free(insns.insns);"
+              },
+              {
+                "num": 169,
+                "text": "            }"
+              }
+            ]
+          },
+          "rule_trace": [
+            {
+              "rule_id": "R01_IDEMPOTENCE_CHECK",
+              "phase": "idempotence",
+              "inputs": {
+                "removals_count": 0,
+                "additions_count": 3,
+                "has_context": true
+              },
+              "output": "PASS",
+              "detail": "Bloco já presente no arquivo. Pulando para evitar duplicação.",
+              "candidates": []
+            }
+          ],
+          "rejection_reason": "Bloco já presente no arquivo. Pulando para evitar duplicação.",
+          "suggestions": []
+        },
+        {
+          "hunk_idx": 2,
+          "old_start": 165,
+          "status": "REJECTED",
+          "match_type": "NONE",
+          "loc": 165,
+          "offset": 0,
+          "patch": {
+            "before": [
+              "        if (has_off && has_len)",
+              "            rc = disasm_range(&fr, off, len, ir.image_base, backend, &ir,",
+              "                              stdout, err, sizeof(err));",
+              "        else"
+            ],
+            "removals": [
+              "            rc = disasm_text_section(&fr, &ir, backend, stdout, err, sizeof(err));"
+            ],
+            "additions": [
+              "            rc = disasm_text_section(&fr, &ir, backend, decode_mode,",
+              "                                     stdout, err, sizeof(err));"
+            ],
+            "after": [
+              "        if (rc < 0) fprintf(stderr, \"doxreveng: erro: %s\\n\", err);",
+              "        else fprintf(stderr, \"doxreveng: %d instruções desmontadas\\n\", rc);",
+              "    }"
+            ]
+          },
+          "file_snippet": {
+            "range": [
+              160,
+              179
+            ],
+            "lines": [
+              {
+                "num": 160,
+                "text": "                            else functions_print_text(&fl, stdout);"
+              },
+              {
+                "num": 161,
+                "text": "                            fprintf(stderr, \"doxreveng: %u funções, %u chamadas externas\\n\","
+              },
+              {
+                "num": 162,
+                "text": "                                    fl.count, fl.external_calls);"
+              },
+              {
+                "num": 163,
+                "text": "                            functions_free(&fl);"
+              },
+              {
+                "num": 164,
+                "text": "                        }"
+              },
+              {
+                "num": 165,
+                "text": "                    }"
+              },
+              {
+                "num": 166,
+                "text": "                    cfg_free(&cfg);"
+              },
+              {
+                "num": 167,
+                "text": "                }"
+              },
+              {
+                "num": 168,
+                "text": "                free(insns.insns);"
+              },
+              {
+                "num": 169,
+                "text": "            }"
+              },
+              {
+                "num": 170,
+                "text": "        }"
+              },
+              {
+                "num": 171,
+                "text": "    }"
+              },
+              {
+                "num": 172,
+                "text": "    else {"
+              },
+              {
+                "num": 173,
+                "text": "        if (pre_ir_print_json(&ir, stdout) != 0) {"
+              },
+              {
+                "num": 174,
+                "text": "            fprintf(stderr, \"doxreveng: erro ao serializar JSON\\n\");"
+              },
+              {
+                "num": 175,
+                "text": "            rc = -1;"
+              },
+              {
+                "num": 176,
+                "text": "        }"
+              },
+              {
+                "num": 177,
+                "text": "    }"
+              },
+              {
+                "num": 178,
+                "text": ""
+              },
+              {
+                "num": 179,
+                "text": "    pre_ir_free(&ir);"
+              }
+            ]
+          },
+          "rule_trace": [
+            {
+              "rule_id": "R01_IDEMPOTENCE_CHECK",
+              "phase": "idempotence",
+              "inputs": {
+                "removals_count": 1,
+                "additions_count": 2,
+                "has_context": true
+              },
+              "output": "FAIL",
+              "detail": "not idempotent",
+              "candidates": []
+            },
+            {
+              "rule_id": "R02_EXACT_REMOVAL",
+              "phase": "match",
+              "inputs": {},
+              "output": "FAIL",
+              "detail": "no contiguous block",
+              "candidates": []
+            },
+            {
+              "rule_id": "R03_EXACT_REMOVAL_MULTI",
+              "phase": "match",
+              "inputs": {},
+              "output": "SKIP",
+              "detail": "n/a",
+              "candidates": []
+            },
+            {
+              "rule_id": "R04_PARTIAL_STREAK",
+              "phase": "match",
+              "inputs": {},
+              "output": "FAIL",
+              "detail": "streak 0 below threshold",
+              "candidates": []
+            },
+            {
+              "rule_id": "R11_REJECT",
+              "phase": "decision",
+              "inputs": {},
+              "output": "FAIL",
+              "detail": "no strategy succeeded",
+              "candidates": []
+            }
+          ],
+          "rejection_reason": "Contexto insuficiente: 0 de 8 linhas contíguas.\n      Arquivo: doxoade\\tools\\rev_eng\\src\\main.c\n      Hunk #2 (old_start=165)\n      Esperado (linhas ' ' e '-'):\n           165 |         if (has_off && has_len)\n           166 |             rc = disasm_range(&fr, off, len, ir.image_base, backend, &ir,\n           167 |                               stdout, err, sizeof(err));\n           168 |         else\n        -  169 |             rc = disasm_text_section(&fr, &ir, backend, stdout, err, sizeof(err));\n           172 |         if (rc < 0) fprintf(stderr, \"doxreveng: erro: %s\\n\", err);\n           173 |         else fprintf(stderr, \"doxreveng: %d instruções desmontadas\\n\", rc);\n           174 |     }\n      Encontrado (linhas 160-179 do arquivo):\n         160 |                             else functions_print_text(&fl, stdout);\n         161 |                             fprintf(stderr, \"doxreveng: %u funções, %u chamadas externas\\n\",\n         162 |                                     fl.count, fl.external_calls);\n         163 |                             functions_free(&fl);\n         164 |                         }\n         165 |                     }\n         166 |                     cfg_free(&cfg);\n         167 |                 }\n         168 |                 free(insns.insns);\n         169 |             }\n         170 |         }\n         171 |     }\n         172 |     else {\n         173 |         if (pre_ir_print_json(&ir, stdout) != 0) {\n         174 |             fprintf(stderr, \"doxreveng: erro ao serializar JSON\\n\");\n      ⚠ Linhas de adição já existem no arquivo (fix provavelmente aplicado).\n      🔍 Linhas suspeitas (já presentes no arquivo):\n        L109:                               stdout, err, sizeof(err));\n\n      🔶 Linhas com divergência (patch esperava vs. arquivo tem):\n        L2: arquivo='#include \"file_reader.h\"' | patch='rc = disasm_text_section(&fr, &ir, backend, stdout, err, sizeof(err));'\n\n      Sugestões:\n        • doxoade mody show doxoade\\tools\\rev_eng\\src\\main.c --part 160-179\n        • # Fix provavelmente já aplicado. Verifique antes de re-aplicar.",
+          "suggestions": []
+        },
+        {
+          "hunk_idx": 3,
+          "old_start": 183,
+          "status": "IDEMPOTENT",
+          "match_type": "IDEMPOTENT",
+          "loc": null,
+          "offset": 0,
+          "patch": {
+            "before": [
+              "            uint64_t va_base = ir.image_base + text->va - text->raw_offset;",
+              "            InsnList insns = {0};",
+              "            if (disasm_collect(&fr, text->raw_offset, text->raw_size, va_base,"
+            ],
+            "removals": [
+              "                               backend, &insns, err, sizeof(err)) != 0) {"
+            ],
+            "additions": [
+              "                               backend, decode_mode, &insns, err, sizeof(err)) != 0) {"
+            ],
+            "after": [
+              "                fprintf(stderr, \"doxreveng: erro no disasm: %s\\n\", err);",
+              "                rc = -1;",
+              "            } else {"
+            ]
+          },
+          "file_snippet": {
+            "range": [
+              178,
+              182
+            ],
+            "lines": [
+              {
+                "num": 178,
+                "text": ""
+              },
+              {
+                "num": 179,
+                "text": "    pre_ir_free(&ir);"
+              },
+              {
+                "num": 180,
+                "text": "    file_reader_close(&fr);"
+              },
+              {
+                "num": 181,
+                "text": "    return rc < 0 ? 1 : 0;"
+              },
+              {
+                "num": 182,
+                "text": "}"
+              }
+            ]
+          },
+          "rule_trace": [
+            {
+              "rule_id": "R01_IDEMPOTENCE_CHECK",
+              "phase": "idempotence",
+              "inputs": {
+                "removals_count": 1,
+                "additions_count": 1,
+                "has_context": true
+              },
+              "output": "PASS",
+              "detail": "Hunk já aplicado anteriormente. Pulando.",
+              "candidates": []
+            }
+          ],
+          "rejection_reason": "Hunk já aplicado anteriormente. Pulando.",
+          "suggestions": []
+        },
+        {
+          "hunk_idx": 4,
+          "old_start": 165,
+          "status": "REJECTED",
+          "match_type": "NONE",
+          "loc": 165,
+          "offset": 0,
+          "patch": {
+            "before": [
+              "        if (has_off && has_len)"
+            ],
+            "removals": [
+              "            rc = disasm_range(&fr, off, len, ir.image_base, backend, &ir,",
+              "                              stdout, err, sizeof(err));"
+            ],
+            "additions": [
+              "            rc = disasm_range(&fr, off, len, ir.image_base, backend,",
+              "                              decode_mode, &ir, stdout, err, sizeof(err));"
+            ],
+            "after": [
+              "        else",
+              "            rc = disasm_text_section(&fr, &ir, backend, decode_mode,",
+              "                                     stdout, err, sizeof(err));"
+            ]
+          },
+          "file_snippet": {
+            "range": [
+              160,
+              179
+            ],
+            "lines": [
+              {
+                "num": 160,
+                "text": "                            else functions_print_text(&fl, stdout);"
+              },
+              {
+                "num": 161,
+                "text": "                            fprintf(stderr, \"doxreveng: %u funções, %u chamadas externas\\n\","
+              },
+              {
+                "num": 162,
+                "text": "                                    fl.count, fl.external_calls);"
+              },
+              {
+                "num": 163,
+                "text": "                            functions_free(&fl);"
+              },
+              {
+                "num": 164,
+                "text": "                        }"
+              },
+              {
+                "num": 165,
+                "text": "                    }"
+              },
+              {
+                "num": 166,
+                "text": "                    cfg_free(&cfg);"
+              },
+              {
+                "num": 167,
+                "text": "                }"
+              },
+              {
+                "num": 168,
+                "text": "                free(insns.insns);"
+              },
+              {
+                "num": 169,
+                "text": "            }"
+              },
+              {
+                "num": 170,
+                "text": "        }"
+              },
+              {
+                "num": 171,
+                "text": "    }"
+              },
+              {
+                "num": 172,
+                "text": "    else {"
+              },
+              {
+                "num": 173,
+                "text": "        if (pre_ir_print_json(&ir, stdout) != 0) {"
+              },
+              {
+                "num": 174,
+                "text": "            fprintf(stderr, \"doxreveng: erro ao serializar JSON\\n\");"
+              },
+              {
+                "num": 175,
+                "text": "            rc = -1;"
+              },
+              {
+                "num": 176,
+                "text": "        }"
+              },
+              {
+                "num": 177,
+                "text": "    }"
+              },
+              {
+                "num": 178,
+                "text": ""
+              },
+              {
+                "num": 179,
+                "text": "    pre_ir_free(&ir);"
+              }
+            ]
+          },
+          "rule_trace": [
+            {
+              "rule_id": "R01_IDEMPOTENCE_CHECK",
+              "phase": "idempotence",
+              "inputs": {
+                "removals_count": 2,
+                "additions_count": 2,
+                "has_context": true
+              },
+              "output": "FAIL",
+              "detail": "not idempotent",
+              "candidates": []
+            },
+            {
+              "rule_id": "R02_EXACT_REMOVAL",
+              "phase": "match",
+              "inputs": {},
+              "output": "FAIL",
+              "detail": "no contiguous block",
+              "candidates": []
+            },
+            {
+              "rule_id": "R03_EXACT_REMOVAL_MULTI",
+              "phase": "match",
+              "inputs": {},
+              "output": "SKIP",
+              "detail": "n/a",
+              "candidates": []
+            },
+            {
+              "rule_id": "R04_PARTIAL_STREAK",
+              "phase": "match",
+              "inputs": {},
+              "output": "FAIL",
+              "detail": "streak 0 below threshold",
+              "candidates": []
+            },
+            {
+              "rule_id": "R11_REJECT",
+              "phase": "decision",
+              "inputs": {},
+              "output": "FAIL",
+              "detail": "no strategy succeeded",
+              "candidates": []
+            }
+          ],
+          "rejection_reason": "Contexto insuficiente: 0 de 6 linhas contíguas.\n      Arquivo: doxoade\\tools\\rev_eng\\src\\main.c\n      Hunk #4 (old_start=165)\n      Esperado (linhas ' ' e '-'):\n           165 |         if (has_off && has_len)\n        -  166 |             rc = disasm_range(&fr, off, len, ir.image_base, backend, &ir,\n        -  167 |                               stdout, err, sizeof(err));\n           170 |         else\n           171 |             rc = disasm_text_section(&fr, &ir, backend, decode_mode,\n           172 |                                      stdout, err, sizeof(err));\n      Encontrado (linhas 160-179 do arquivo):\n         160 |                             else functions_print_text(&fl, stdout);\n         161 |                             fprintf(stderr, \"doxreveng: %u funções, %u chamadas externas\\n\",\n         162 |                                     fl.count, fl.external_calls);\n         163 |                             functions_free(&fl);\n         164 |                         }\n         165 |                     }\n         166 |                     cfg_free(&cfg);\n         167 |                 }\n         168 |                 free(insns.insns);\n         169 |             }\n         170 |         }\n         171 |     }\n         172 |     else {\n         173 |         if (pre_ir_print_json(&ir, stdout) != 0) {\n         174 |             fprintf(stderr, \"doxreveng: erro ao serializar JSON\\n\");\n      ⚠ Linhas de adição já existem no arquivo (fix provavelmente aplicado).\n      🔶 Linhas com divergência (patch esperava vs. arquivo tem):\n        L2: arquivo='#include \"file_reader.h\"' | patch='rc = disasm_range(&fr, off, len, ir.image_base, backend, &ir,'\n        L2: arquivo='#include \"file_reader.h\"' | patch='stdout, err, sizeof(err));'\n\n      Sugestões:\n        • doxoade mody show doxoade\\tools\\rev_eng\\src\\main.c --part 160-179\n        • # Fix provavelmente já aplicado. Verifique antes de re-aplicar.",
+          "suggestions": []
+        }
+      ]
+    }
+  ]
+}
